@@ -173,7 +173,7 @@ all_jobs = [
   materialize_graph_job,
   # SEC pipeline jobs
   sec_download_job,  # Download raw filings to S3
-  sec_process_job,  # Process quarter's filings (heavy profile: 16 vCPU, 64 GB for 10k batch)
+  sec_process_job,  # Process quarter's filings (standard profile: 2 vCPU, 8 GB)
   sec_stage_job,  # Stage to persistent DuckDB (standard profile: 2 vCPU, 8 GB)
   sec_materialize_job,  # Materialize from DuckDB to LadybugDB (standard profile)
   sec_staged_materialize_job,  # Full pipeline: stage + materialize (standard profile)

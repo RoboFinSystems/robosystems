@@ -76,11 +76,10 @@ def sec_processing_sensor(context: SensorEvaluationContext):
   3. Yield one RunRequest per quarter with pending files
   4. Dagster's run coordinator controls concurrent quarter processing
 
-  Partition Mode Selection:
-  - Current quarter: use_filing_date_partition=True (daily mode)
-    Each filing outputs to its actual filing date for incremental staging.
-  - Historical quarters: use_filing_date_partition=False (quarterly mode)
-    All filings output to quarter-end date for efficient backfill.
+  Output Structure:
+  - All filings output to quarterly partitions (filed=YYYY-QN)
+  - Single file per table per quarter with append-based merging
+  - Shared tables (Element, Label, etc.) deduplicated on identifier
 
   Deduplication:
   - No run_key used - allows retries after failures
@@ -156,11 +155,6 @@ def sec_processing_sensor(context: SensorEvaluationContext):
     f"Quarters: {sorted(quarters_with_pending)}"
   )
 
-  # Determine current quarter for partition mode selection
-  now = datetime.now(UTC)
-  current_quarter = f"{now.year}-Q{(now.month - 1) // 3 + 1}"
-  context.log.info(f"Current quarter: {current_quarter} (will use daily partitioning)")
-
   # Yield RunRequest for each quarter with pending files
   for quarter in sorted(quarters_with_pending):
     # Check for in-progress runs to prevent duplicate processing triggers
@@ -176,31 +170,16 @@ def sec_processing_sensor(context: SensorEvaluationContext):
       context.log.info(f"Skipping {quarter} - already has an active run")
       continue
 
-    # Use daily partitioning for current quarter (incremental processing)
-    # Use quarterly partitioning for historical quarters (backfill)
-    use_daily = quarter == current_quarter
-    mode = "daily" if use_daily else "quarterly"
-
-    context.log.info(f"Triggering {quarter} with {mode} partitioning")
+    context.log.info(f"Triggering {quarter} for processing")
 
     # No run_key - rely on active runs check to prevent concurrent runs.
     # This allows re-triggering after failures when pending files remain.
     yield RunRequest(
       partition_key=quarter,  # Use Dagster's partition system
-      run_config={
-        "ops": {
-          "sec_processed_filings": {
-            "config": {
-              "use_filing_date_partition": use_daily,
-            }
-          }
-        }
-      },
       tags={
         "quarter": quarter,
         "pipeline": "sec",
         "phase": "process",
-        "partition_mode": mode,
       },
     )
 
@@ -462,23 +441,9 @@ def sec_download_to_process_sensor(context: RunStatusSensorContext):
     f"Download completed for {partition_key} (batch={batch_id}), triggering processing"
   )
 
-  # Determine partition mode (daily for current quarter, quarterly for historical)
-  now = datetime.now(UTC)
-  current_quarter = f"{now.year}-Q{(now.month - 1) // 3 + 1}"
-  use_daily = partition_key == current_quarter
-
   yield RunRequest(
     run_key=f"sec-process-chain-{partition_key}-{dagster_run.run_id[:8]}",
     partition_key=partition_key,
-    run_config={
-      "ops": {
-        "sec_processed_filings": {
-          "config": {
-            "use_filing_date_partition": use_daily,
-          }
-        }
-      }
-    },
     tags={
       "pipeline": "sec",
       "phase": "process",

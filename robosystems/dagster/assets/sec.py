@@ -260,28 +260,19 @@ class SECProcessConfig(Config):
   - Each job processes at most batch_limit filings (default 15,000)
   - Job exits gracefully after batch, releasing all memory
   - Sensor re-triggers if more pending files exist
-  - This prevents memory accumulation across thousands of filings
+  - Processing is disk-buffered (not memory-intensive)
 
   Note: batch_limit set to 15,000 to handle Q2 (proxy season) which can
-  exceed 10k filings when all form types are included. The heavy job
-  profile (16 vCPU, 64 GB) handles this comfortably.
+  exceed 10k filings when all form types are included.
   """
 
   # Max filings to process per job run before exiting gracefully.
   # Set to 15,000 to handle Q2 proxy season (can exceed 10k with all forms).
-  # The heavy job profile (16 vCPU, 64 GB) is sized to handle full quarters.
   batch_limit: int = SEC_PROCESS_BATCH_LIMIT
 
   # Continue processing even if some filings fail
   # If False, job fails on first error (for debugging)
   continue_on_error: bool = True
-
-  # Partition output by actual filing date (for incremental daily processing)
-  # False (default): All filings output to quarter-end date (2024-03-31 for Q1)
-  #   - Best for backfills: large consolidated files, efficient DuckDB ingest
-  # True: Each filing outputs to its actual filing date (2024-01-15, 2024-01-16, etc.)
-  #   - Best for incremental: new filings stage to their specific dates
-  use_filing_date_partition: bool = False
 
 
 class SECStageConfig(Config):
@@ -1280,6 +1271,129 @@ def _consolidate_parquet_from_disk(
   return buffer.getvalue()
 
 
+def _merge_with_existing_s3(
+  s3_client,
+  bucket: str,
+  s3_key: str,
+  new_data: bytes,
+  table_key: str,
+) -> bytes:
+  """Download existing S3 parquet, merge with new data, return merged bytes.
+
+  For shared tables (Element, Label, etc.), deduplicates on identifier column.
+  For per-filing tables, simply concatenates (no duplicates possible).
+
+  Args:
+      s3_client: boto3 S3 client
+      bucket: S3 bucket name
+      s3_key: S3 key for the existing file (may not exist)
+      new_data: New parquet bytes to merge
+      table_key: Table key like "nodes/Entity" for dedup decisions
+
+  Returns:
+      Merged parquet bytes (or new_data if no existing file)
+  """
+  from io import BytesIO
+
+  import pyarrow as pa
+  import pyarrow.parquet as pq
+
+  # Shared node tables that need deduplication on identifier
+  SHARED_NODE_TABLES = frozenset(
+    {
+      "nodes/Element",
+      "nodes/Label",
+      "nodes/Reference",
+      "nodes/Unit",
+      "nodes/Period",
+    }
+  )
+
+  # Try to download existing file
+  existing_data: bytes | None = None
+  try:
+    response = s3_client.get_object(Bucket=bucket, Key=s3_key)
+    existing_data = response["Body"].read()
+  except s3_client.exceptions.NoSuchKey:
+    # No existing file - return new data as-is
+    return new_data
+  except Exception:
+    # Other errors - return new data as-is (will overwrite)
+    return new_data
+
+  # Read both tables
+  try:
+    existing_table = pq.read_table(BytesIO(existing_data))
+    new_table = pq.read_table(BytesIO(new_data))
+  except Exception:
+    # If we can't read existing data, just return new data
+    return new_data
+
+  # Concatenate tables
+  combined = pa.concat_tables([existing_table, new_table], promote_options="permissive")
+
+  # Deduplicate shared tables on identifier
+  if table_key in SHARED_NODE_TABLES and "identifier" in combined.column_names:
+    df = combined.to_pandas()
+    df = df.drop_duplicates(subset=["identifier"], keep="first")
+    combined = pa.Table.from_pandas(df, preserve_index=False)
+
+  # Write merged result
+  buffer = BytesIO()
+  pq.write_table(combined, buffer)
+  return buffer.getvalue()
+
+
+def _atomic_s3_upload(
+  s3_client,
+  bucket: str,
+  final_key: str,
+  data: bytes,
+) -> None:
+  """Upload data to S3 atomically using temp file + copy pattern.
+
+  Uploads to a temp key first, then copies to final location and deletes temp.
+  This ensures the final key either has complete data or doesn't exist.
+
+  Args:
+      s3_client: boto3 S3 client
+      bucket: S3 bucket name
+      final_key: Final S3 key for the file
+      data: Parquet bytes to upload
+  """
+  import uuid
+
+  # Generate unique temp key
+  temp_key = f"{final_key}.tmp.{uuid.uuid4().hex[:8]}"
+
+  try:
+    # Upload to temp location
+    s3_client.put_object(
+      Bucket=bucket,
+      Key=temp_key,
+      Body=data,
+      ContentType="application/octet-stream",
+    )
+
+    # Copy to final location (atomic operation)
+    s3_client.copy_object(
+      Bucket=bucket,
+      CopySource={"Bucket": bucket, "Key": temp_key},
+      Key=final_key,
+    )
+
+    # Delete temp file
+    s3_client.delete_object(Bucket=bucket, Key=temp_key)
+
+  except Exception:
+    # Try to clean up temp file on any error
+    try:
+      s3_client.delete_object(Bucket=bucket, Key=temp_key)
+    except Exception:
+      pass
+    raise
+
+
 @asset(
   group_name="sec_pipeline",
   description="Process batch of SEC filings with disk-buffered consolidation",
@@ -1316,13 +1430,12 @@ def sec_processed_filings(
   - Container exit between batches releases all memory naturally
   - Much safer than processing thousands of filings in one container
 
-  Output Structure (controlled by use_filing_date_partition config):
-  - Backfill mode (default, use_filing_date_partition=False):
-    s3://bucket/sec/processed/filed=2024-03-31/nodes/Entity/part-001.parquet
-    All filings in quarter → quarter-end date → large consolidated files
-  - Daily mode (use_filing_date_partition=True):
-    s3://bucket/sec/processed/filed=2024-01-15/nodes/Entity/part-001.parquet
-    Each filing → its actual filing date → consolidated per-date files
+  Output Structure (quarterly partitions with append):
+    s3://bucket/sec/processed/filed=2024-Q1/nodes/Entity.parquet
+    - Aligns Dagster partition (quarterly) with S3 partition (quarterly)
+    - Single file per table per quarter, merged on each run
+    - Shared tables (Element, Label, etc.) deduplicated on identifier
+    - Simplifies staging - single glob per quarter
 
   Returns:
       MaterializeResult with processing statistics
@@ -1342,17 +1455,11 @@ def sec_processed_filings(
   year = int(year)
   quarter = int(quarter_str)
 
-  # Determine partition mode
-  use_daily = config.use_filing_date_partition
-  partition_mode = "daily" if use_daily else "quarterly"
-
-  # For quarterly mode, use end-of-quarter date as partition
-  # For daily mode, we'll use each filing's actual filing date
-  default_partition_date = _get_quarter_end_date(year, quarter)
+  # Use quarterly partitions (e.g., "2024-Q1") - aligns Dagster partition with S3 partition
+  partition_date = partition_key  # e.g., "2024-Q1"
 
   context.log.info(
-    f"Processing SEC filings for {year}-Q{quarter} "
-    f"(partition_mode={partition_mode}, default={default_partition_date})"
+    f"Processing SEC filings for {partition_key} (quarterly partition: filed={partition_date})"
   )
 
   # Query pending SourceFiles for this quarter
@@ -1415,8 +1522,7 @@ def sec_processed_filings(
       metadata={
         "year": year,
         "quarter": quarter,
-        "partition_mode": partition_mode,
-        "default_partition_date": default_partition_date,
+        "partition_date": partition_date,
         "status": "no_pending_files",
         "filings_processed": 0,
         "filings_succeeded": 0,
@@ -1425,8 +1531,8 @@ def sec_processed_filings(
     )
 
   context.log.info(
-    f"Processing batch of {len(files_to_process)} filings for {year}-Q{quarter} "
-    f"(batch_limit={config.batch_limit}, partition_mode={partition_mode})"
+    f"Processing batch of {len(files_to_process)} filings for {partition_key} "
+    f"(batch_limit={config.batch_limit})"
   )
 
   # Create work directory for disk-buffered processing
@@ -1437,113 +1543,71 @@ def sec_processed_filings(
   succeeded = 0
   failed = 0
   failed_ids: list[str] = []
-  # Track pending filings with their filing dates for daily mode
-  pending_flush: list[dict] = []  # [{...file_info, "filing_date": "2024-01-15"}, ...]
+  pending_flush: list[dict] = []  # [{...file_info}, ...]
   total_flushed = 0
-  files_uploaded = 0
-  flush_number = 0  # Counter for part file naming
-  output_dates: set[str] = set()  # Track which dates received output
-
-  # Use run_id prefix for unique part filenames to avoid collisions from crashed runs.
-  # Format: part-{run_id[:8]}-{flush_number:03d}.parquet
-  run_id_prefix = context.run_id[:8] if context.run_id else "local"
+  tables_uploaded = 0  # Track number of table files uploaded
 
   def flush_to_s3() -> int:
-    """Consolidate disk buffer and upload to S3, mark filings as success."""
-    nonlocal files_uploaded, total_flushed, flush_number
+    """Consolidate disk buffer, merge with existing S3 data, upload, mark success.
+
+    Uses quarterly partitions with append-based merging:
+    - Downloads existing TABLE.parquet from S3 (if exists)
+    - Merges new data with existing data
+    - Deduplicates shared tables (Element, Label, etc.) on identifier
+    - Uploads merged result atomically
+    """
+    nonlocal tables_uploaded, total_flushed
 
     if not pending_flush:
       return 0
 
-    flush_number += 1
+    context.log.info(
+      f"Flushing {len(pending_flush)} filings to S3 (partition: filed={partition_date})..."
+    )
 
-    if use_daily:
-      # Daily mode: group by filing_date and upload to respective partitions
-      # Disk structure: work_dir/{filing_date}/nodes/Entity/...
-      date_dirs = [
-        d for d in work_dir.iterdir() if d.is_dir() and d.name.startswith("20")
-      ]
-      context.log.info(
-        f"Flush #{flush_number}: {len(pending_flush)} filings to {len(date_dirs)} dates..."
+    # Find all table directories in work_dir
+    # Disk structure: work_dir/nodes/Entity/...
+    table_keys = set()
+    for subdir in work_dir.rglob("*.parquet"):
+      rel_path = subdir.relative_to(work_dir)
+      if len(rel_path.parts) >= 2:
+        table_key = f"{rel_path.parts[0]}/{rel_path.parts[1]}"
+        table_keys.add(table_key)
+
+    for table_key in sorted(table_keys):
+      # Consolidate this batch's data from disk
+      new_parquet_bytes = _consolidate_parquet_from_disk(work_dir, table_key)
+      if not new_parquet_bytes:
+        continue
+
+      entity_type, table_name = table_key.split("/", 1)
+      # Single file per table per quarter: TABLE.parquet (not part files)
+      s3_key = get_processed_key(
+        DataSourceType.SEC,
+        "processed",
+        f"filed={partition_date}",
+        entity_type,
+        f"{table_name}.parquet",
       )
 
-      for date_dir in date_dirs:
-        partition_date = date_dir.name
-        output_dates.add(partition_date)
-
-        # Find table keys for this date
-        table_keys = set()
-        for pq_file in date_dir.rglob("*.parquet"):
-          rel_path = pq_file.relative_to(date_dir)
-          if len(rel_path.parts) >= 2:
-            table_key = f"{rel_path.parts[0]}/{rel_path.parts[1]}"
-            table_keys.add(table_key)
-
-        for table_key in sorted(table_keys):
-          parquet_bytes = _consolidate_parquet_from_disk(date_dir, table_key)
-          if not parquet_bytes:
-            continue
-
-          entity_type, table_name = table_key.split("/", 1)
-          part_filename = f"part-{run_id_prefix}-{flush_number:03d}.parquet"
-          s3_key = get_processed_key(
-            DataSourceType.SEC,
-            "processed",
-            f"filed={partition_date}",
-            entity_type,
-            table_name,
-            part_filename,
-          )
-
-          s3.client.put_object(
-            Bucket=processed_bucket,
-            Key=s3_key,
-            Body=parquet_bytes,
-            ContentType="application/octet-stream",
-          )
-          files_uploaded += 1
-          context.log.debug(f"Uploaded: {s3_key} ({len(parquet_bytes):,} bytes)")
-    else:
-      # Quarterly mode: all files go to default_partition_date
-      # Disk structure: work_dir/nodes/Entity/...
-      output_dates.add(default_partition_date)
-      context.log.info(
-        f"Flush #{flush_number}: {len(pending_flush)} filings to S3 "
-        f"(partition: filed={default_partition_date})..."
+      # Merge with existing S3 data (append-based accumulation)
+      merged_bytes = _merge_with_existing_s3(
+        s3_client=s3.client,
+        bucket=processed_bucket,
+        s3_key=s3_key,
+        new_data=new_parquet_bytes,
+        table_key=table_key,
       )
 
-      # Find all table directories in work_dir
-      table_keys = set()
-      for subdir in work_dir.rglob("*.parquet"):
-        rel_path = subdir.relative_to(work_dir)
-        if len(rel_path.parts) >= 2:
-          table_key = f"{rel_path.parts[0]}/{rel_path.parts[1]}"
-          table_keys.add(table_key)
-
-      for table_key in sorted(table_keys):
-        parquet_bytes = _consolidate_parquet_from_disk(work_dir, table_key)
-        if not parquet_bytes:
-          continue
-
-        entity_type, table_name = table_key.split("/", 1)
-        part_filename = f"part-{run_id_prefix}-{flush_number:03d}.parquet"
-        s3_key = get_processed_key(
-          DataSourceType.SEC,
-          "processed",
-          f"filed={default_partition_date}",
-          entity_type,
-          table_name,
-          part_filename,
-        )
-
-        s3.client.put_object(
-          Bucket=processed_bucket,
-          Key=s3_key,
-          Body=parquet_bytes,
-          ContentType="application/octet-stream",
-        )
-        files_uploaded += 1
-        context.log.debug(f"Uploaded: {s3_key} ({len(parquet_bytes):,} bytes)")
+      # Upload atomically (temp file + copy pattern)
+      _atomic_s3_upload(
+        s3_client=s3.client,
+        bucket=processed_bucket,
+        final_key=s3_key,
+        data=merged_bytes,
+      )
+      tables_uploaded += 1
+      context.log.debug(f"Uploaded: {s3_key} ({len(merged_bytes):,} bytes)")
 
     # Mark all pending filings as success (data is now safely in S3)
     with db.get_session() as session:
@@ -1555,7 +1619,7 @@ def sec_processed_filings(
     flushed_count = len(pending_flush)
     total_flushed += flushed_count
     context.log.info(
-      f"Flushed {flushed_count} filings, {files_uploaded} total parquet files uploaded"
+      f"Flushed {flushed_count} filings, {tables_uploaded} total table files uploaded"
     )
 
     # Clear disk buffer and pending list
@@ -1599,25 +1663,16 @@ def sec_processed_filings(
       filing_duration = time_module.time() - filing_start
 
       if result.success:
-        # Determine the base directory for this filing's output
-        # Daily mode: work_dir/{filing_date}/nodes/Entity/...
-        # Quarterly mode: work_dir/nodes/Entity/...
-        filing_date = result.filing_date or default_partition_date
-        if use_daily:
-          base_dir = work_dir / filing_date
-        else:
-          base_dir = work_dir
-
         # Write parquet files to disk (not memory accumulation)
+        # Disk structure: work_dir/nodes/Entity/...
         for table_key, parquet_bytes in result.tables.items():
-          table_dir = base_dir / table_key
+          table_dir = work_dir / table_key
           table_dir.mkdir(parents=True, exist_ok=True)
           parquet_path = table_dir / f"{source_file_id}.parquet"
           parquet_path.write_bytes(parquet_bytes)
 
         succeeded += 1
-        # Include filing_date for tracking
-        pending_flush.append({**file_info, "filing_date": filing_date})
+        pending_flush.append(file_info)
 
         # Log success with table counts
         table_summary = ", ".join(
@@ -1664,10 +1719,9 @@ def sec_processed_filings(
       shutil.rmtree(work_dir)
       context.log.debug(f"Cleaned up work directory: {work_dir}")
 
-  dates_summary = sorted(output_dates)
   context.log.info(
     f"Complete: {succeeded}/{len(files_to_process)} filings succeeded, "
-    f"{files_uploaded} parquet files uploaded to {len(dates_summary)} partition(s)"
+    f"{tables_uploaded} table files uploaded to partition filed={partition_date}"
   )
 
   # Check if more pending files exist (sensor will trigger another run)
@@ -1694,15 +1748,14 @@ def sec_processed_filings(
     metadata={
       "year": year,
       "quarter": quarter,
-      "partition_mode": partition_mode,
-      "output_dates": dates_summary,
+      "partition_date": partition_date,
       "status": "success" if failed == 0 else "partial",
       "filings_processed": len(files_to_process),
       "filings_succeeded": succeeded,
       "filings_failed": failed,
       "filings_flushed": total_flushed,
       "failed_source_file_ids": failed_ids[:20],  # Limit to first 20
-      "parquet_files_uploaded": files_uploaded,
+      "tables_uploaded": tables_uploaded,
       "batch_limit": config.batch_limit,
       "remaining_pending": remaining_count,
     }
@@ -2058,7 +2111,6 @@ def sec_graph_direct_copy(
     QUARTER_CHUNKABLE_TABLES,
     TAXONOMY_STRUCTURE_TABLES,
     XBRLDuckDBGraphProcessor,
-    _group_dates_by_quarter,
   )
   from robosystems.graph_api.client.factory import (
     boost_graph_memory,
@@ -2112,13 +2164,10 @@ def sec_graph_direct_copy(
       await processor._rebuild_ladybug_database(client, reset_staging=False)
       context.log.info("LadybugDB database rebuilt with SEC schema")
 
-    # Discover quarters for batched loading of large tables
-    context.log.info("Discovering filing dates for quarter-based batching...")
-    filing_dates = await processor._discover_filed_dates(year=config.year)
-    quarters_by_date = _group_dates_by_quarter(filing_dates) if filing_dates else {}
-    context.log.info(
-      f"Found {len(filing_dates)} filing dates across {len(quarters_by_date)} quarters"
-    )
+    # Discover quarterly partitions for batched loading of large tables
+    context.log.info("Discovering quarterly partitions for batching...")
+    quarterly_partitions = await processor._discover_filed_partitions(year=config.year)
+    context.log.info(f"Found {len(quarterly_partitions)} quarterly partitions")
 
     # Get table names from schema
     context.log.info("Getting table names from schema...")
@@ -2206,35 +2255,34 @@ def sec_graph_direct_copy(
     # Use the client we already have from above
     for i, (table_name, entity_type) in enumerate(ordered_tables, 1):
       is_large = table_name in QUARTER_CHUNKABLE_TABLES
-      use_batching = is_large and len(quarters_by_date) > 0
+      use_batching = is_large and len(quarterly_partitions) > 0
 
       if use_batching:
         # Quarter-by-quarter loading for large tables
         context.log.info(
           f"[{i}/{len(ordered_tables)}] Copying {table_name} by quarter "
-          f"({len(quarters_by_date)} quarters)..."
+          f"({len(quarterly_partitions)} quarters)..."
         )
 
         table_rows = 0
         table_failed = False
 
-        for q_idx, (quarter_key, dates) in enumerate(quarters_by_date.items(), 1):
-          # Build S3 patterns for this quarter's dates
-          s3_patterns = [
-            f"s3://{bucket}/{source_prefix}/filed={date}/{entity_type}/{table_name}/*.parquet"
-            for date in dates
-          ]
+        for q_idx, quarter_key in enumerate(quarterly_partitions, 1):
+          # Single file per table per quarter: TABLE.parquet
+          s3_pattern = (
+            f"s3://{bucket}/{source_prefix}/filed={quarter_key}/"
+            f"{entity_type}/{table_name}.parquet"
+          )
 
           context.log.info(
-            f"  [{quarter_key}] Quarter {q_idx}/{len(quarters_by_date)} "
-            f"({len(dates)} dates)..."
+            f"  [{quarter_key}] Quarter {q_idx}/{len(quarterly_partitions)}..."
           )
 
           try:
             copy_result = await client.copy_from_s3(
               graph_id=config.graph_id,
               table_name=table_name,
-              s3_pattern=s3_patterns,  # List of patterns for this quarter
+              s3_pattern=s3_pattern,  # Single file for this quarter
               ignore_errors=True,
               timeout=QUARTER_COPY_TIMEOUT,
               wait_for_completion=True,
@@ -2287,23 +2335,22 @@ def sec_graph_direct_copy(
           context.log.info(f"[{i}/{len(ordered_tables)}] {table_name}: done")
 
       else:
-        # Single COPY for small tables - use discovered dates (no wildcards)
-        # Build patterns for all discovered dates
-        s3_patterns = [
-          f"s3://{bucket}/{source_prefix}/filed={date}/{entity_type}/{table_name}/*.parquet"
-          for date in filing_dates
-        ]
+        # Single COPY for small tables - use quarterly pattern
+        # Glob across all quarterly partitions: filed=*-Q*/entity/TABLE.parquet
+        s3_pattern = (
+          f"s3://{bucket}/{source_prefix}/filed=*-Q*/{entity_type}/{table_name}.parquet"
+        )
 
         context.log.info(
           f"[{i}/{len(ordered_tables)}] Copying {table_name} "
-          f"({len(filing_dates)} dates)..."
+          f"({len(quarterly_partitions)} quarters)..."
         )
 
         try:
           copy_result = await client.copy_from_s3(
             graph_id=config.graph_id,
             table_name=table_name,
-            s3_pattern=s3_patterns,  # List of all date patterns
+            s3_pattern=s3_pattern,  # Glob pattern for all quarters
             ignore_errors=True,
             timeout=SINGLE_COPY_TIMEOUT,
             wait_for_completion=True,
@@ -2341,7 +2388,7 @@ def sec_graph_direct_copy(
       "tables_copied": tables_copied,
       "total_rows": total_rows,
       "failed_tables": failed_tables,
-      "quarters_used": len(quarters_by_date),
+      "quarters_used": len(quarterly_partitions),
     }
 
   result = asyncio.run(run_direct_copy())
