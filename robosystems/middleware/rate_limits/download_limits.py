@@ -6,6 +6,7 @@ Uses Valkey DB 7 (RATE_LIMITING) with daily TTL expiration.
 """
 
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
 from robosystems.config.billing.repositories import (
   RepositoryBillingConfig,
@@ -26,7 +27,7 @@ class DownloadRateLimiter:
   DEFAULT_DOWNLOADS_PER_DAY = 3
 
   @classmethod
-  def _get_redis_client(cls):
+  def _get_redis_client(cls) -> Any:
     """Get async Redis client for rate limiting database."""
     return create_async_redis_client(ValkeyDatabase.RATE_LIMITING)
 
@@ -44,8 +45,10 @@ class DownloadRateLimiter:
       limits = RepositoryBillingConfig.get_rate_limits(repo_enum, plan)
       if limits:
         return limits.get("downloads_per_day", cls.DEFAULT_DOWNLOADS_PER_DAY)
-    except (ValueError, KeyError):
-      pass
+    except (ValueError, KeyError) as e:
+      logger.warning(
+        f"Failed to get download limit for repository={repository}, plan={plan}: {e}"
+      )
     return cls.DEFAULT_DOWNLOADS_PER_DAY
 
   @classmethod
@@ -79,8 +82,9 @@ class DownloadRateLimiter:
     daily_limit = cls._get_daily_limit(repository, plan)
     reset_at = cls._get_reset_time()
 
-    redis_client = cls._get_redis_client()
+    redis_client = None
     try:
+      redis_client = cls._get_redis_client()
       key = cls._get_key(user_id, repository)
       current = await redis_client.get(key)
       used = int(current) if current else 0
@@ -94,7 +98,8 @@ class DownloadRateLimiter:
 
       return allowed, remaining, reset_at
     finally:
-      await redis_client.aclose()
+      if redis_client is not None:
+        await redis_client.aclose()
 
   @classmethod
   async def increment_download_count(
@@ -112,8 +117,9 @@ class DownloadRateLimiter:
     Returns:
         New download count for today
     """
-    redis_client = cls._get_redis_client()
+    redis_client = None
     try:
+      redis_client = cls._get_redis_client()
       key = cls._get_key(user_id, repository)
 
       # Increment and set TTL to expire at midnight UTC
@@ -131,7 +137,8 @@ class DownloadRateLimiter:
 
       return count
     finally:
-      await redis_client.aclose()
+      if redis_client is not None:
+        await redis_client.aclose()
 
   @classmethod
   async def get_download_quota(
@@ -158,8 +165,9 @@ class DownloadRateLimiter:
     daily_limit = cls._get_daily_limit(repository, plan)
     reset_at = cls._get_reset_time()
 
-    redis_client = cls._get_redis_client()
+    redis_client = None
     try:
+      redis_client = cls._get_redis_client()
       key = cls._get_key(user_id, repository)
       current = await redis_client.get(key)
       used = int(current) if current else 0
@@ -172,4 +180,5 @@ class DownloadRateLimiter:
         "resets_at": reset_at.isoformat(),
       }
     finally:
-      await redis_client.aclose()
+      if redis_client is not None:
+        await redis_client.aclose()
