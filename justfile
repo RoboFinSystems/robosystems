@@ -439,8 +439,8 @@ sec-direct-copy year="" no_rebuild="" skip_taxonomy="" env=_local_env:
 
 # --- Utilities ---
 
-# Reset SEC database and optionally S3 data
-sec-reset clear_s3="" env=_local_env:
+# Reset SEC database and S3 data (use clear_s3="" to skip S3/SourceFiles cleanup)
+sec-reset clear_s3="true" env=_local_env:
     UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.sec_pipeline reset \
         {{ if clear_s3 != "" { "--clear-s3" } else { "" } }}
 
