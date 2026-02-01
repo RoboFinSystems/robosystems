@@ -143,30 +143,15 @@ class TestGraphMCPClient:
   @pytest.mark.asyncio
   @pytest.mark.unit
   async def test_get_schema(self, mock_async_graph_client):
-    """Test schema retrieval."""
-    # Mock responses for the various schema queries
+    """Test schema retrieval (no counts for performance)."""
+    # Mock responses - schema no longer fetches counts
     query_responses = [
-      # SHOW_TABLES response
+      # SHOW_TABLES response only
       [
         {"name": "Entity", "type": "NODE"},
         {"name": "Report", "type": "NODE"},
         {"name": "HAS_REPORT", "type": "REL"},
       ],
-      # TABLE_INFO Entity response
-      [
-        {"name": "identifier", "type": "STRING"},
-        {"name": "name", "type": "STRING"},
-        {"name": "cik", "type": "STRING"},
-      ],
-      # Count query for Entity
-      [{"count": 100}],
-      # TABLE_INFO Report response
-      [
-        {"name": "identifier", "type": "STRING"},
-        {"name": "form", "type": "STRING"},
-      ],
-      # Count query for Report
-      [{"count": 50}],
     ]
 
     # Set up the GraphClient mock to return different responses for each call
@@ -184,20 +169,20 @@ class TestGraphMCPClient:
       # Check node tables
       entity_schema = next(s for s in schema if s["label"] == "Entity")
       assert entity_schema["type"] == "node"
-      # Schema no longer includes properties for performance reasons
       assert "description" in entity_schema
-      assert "count" in entity_schema
+      assert "count" not in entity_schema  # No counts for performance
 
       # Check relationship table
       rel_schema = next(s for s in schema if s["label"] == "HAS_REPORT")
       assert rel_schema["type"] == "relationship"
       assert "from_node" in rel_schema
       assert "to_node" in rel_schema
+      assert "count" not in rel_schema  # No counts for performance
 
   @pytest.mark.asyncio
   @pytest.mark.unit
   async def test_get_graph_info(self, mock_async_graph_client, mock_httpx_client):
-    """Test graph info retrieval."""
+    """Test graph info retrieval (optimized, no relationship counts)."""
     # Mock API info response
     info_response = MagicMock()
     info_response.raise_for_status = MagicMock()
@@ -207,17 +192,19 @@ class TestGraphMCPClient:
       "uptime_seconds": 3600,
     }
 
-    # Mock the queries responses
+    # Mock the queries responses - no relationship counts for performance
     query_responses = [
       # SHOW_TABLES response
       [
         {"name": "Entity", "type": "NODE"},
         {"name": "Report", "type": "NODE"},
+        {"name": "HAS_REPORT", "type": "REL"},
       ],
-      # MATCH (n) RETURN count(n) as count - total node count
-      [{"count": 150}],
-      # MATCH ()-[r]->() RETURN count(r) as count - relationship count
-      [{"count": 75}],
+      # Aggregated node counts: MATCH (n) RETURN labels(n) as label, count(*) as cnt
+      [
+        {"label": "Entity", "cnt": 100},
+        {"label": "Report", "cnt": 50},
+      ],
     ]
 
     mock_httpx_client.get.return_value = info_response
@@ -235,10 +222,13 @@ class TestGraphMCPClient:
       info = await client.get_graph_info()
 
       assert info["graph_id"] == "test"
-      assert info["total_nodes"] == 150  # Total from MATCH (n) query
+      assert info["total_nodes"] == 150  # Sum of Entity (100) + Report (50)
+      assert "total_relationships" not in info  # No longer included
+      assert "relationship_types" in info  # Just the labels, not counts
       assert info["read_only"] is True
       assert "Entity" in info["node_labels"]
       assert "Report" in info["node_labels"]
+      assert "HAS_REPORT" in info["relationship_types"]
 
   @pytest.mark.asyncio
   @pytest.mark.unit
@@ -504,32 +494,23 @@ class TestGraphMCPTools:
 
 
 class TestGraphMCPConfigurableSchema:
-  """Test configurable schema count tables."""
+  """Test configurable schema tables."""
 
   @pytest.mark.asyncio
   @pytest.mark.unit
-  async def test_schema_all_tables_counted(self, mock_async_graph_client, monkeypatch):
-    """Test that all node tables are counted for schema information."""
+  async def test_schema_all_tables_listed(self, mock_async_graph_client, monkeypatch):
+    """Test that all tables are listed in schema (no counts for performance)."""
 
-    # Mock table response
+    # Mock table response - includes nodes and relationships
     tables_response = [
       {"name": "CustomTable1", "type": "NODE"},
       {"name": "CustomTable2", "type": "NODE"},
       {"name": "OtherTable", "type": "NODE"},
-    ]
-
-    # Mock count responses for ALL tables
-    count_responses = [
-      [{"count": 100}],  # CustomTable1 count
-      [{"count": 200}],  # CustomTable2 count
-      [{"count": 50}],  # OtherTable count
+      {"name": "HAS_CUSTOM", "type": "REL"},
     ]
 
     mock_async_graph_client.query.side_effect = [
-      {"data": tables_response, "execution_time_ms": 10},  # SHOW_TABLES
-      {"data": count_responses[0], "execution_time_ms": 5},  # COUNT CustomTable1
-      {"data": count_responses[1], "execution_time_ms": 5},  # COUNT CustomTable2
-      {"data": count_responses[2], "execution_time_ms": 5},  # COUNT OtherTable
+      {"data": tables_response, "execution_time_ms": 10},  # SHOW_TABLES only
     ]
 
     with patch("robosystems.middleware.mcp.client.httpx.AsyncClient"):
@@ -538,24 +519,29 @@ class TestGraphMCPConfigurableSchema:
 
       schema = await client.get_schema()
 
-      # Verify all tables were counted
-      assert len(schema) == 3
+      # Verify all tables are listed (3 nodes + 1 relationship)
+      assert len(schema) == 4
 
-      # Check that all tables have counts
+      # Check that all node tables are present (no counts)
       custom1 = next(s for s in schema if s["label"] == "CustomTable1")
-      assert custom1["count"] == 100
+      assert custom1["type"] == "node"
+      assert "count" not in custom1
 
       custom2 = next(s for s in schema if s["label"] == "CustomTable2")
-      assert custom2["count"] == 200
+      assert custom2["type"] == "node"
 
-      # Check that OtherTable now also has a count (since all tables are counted)
       other = next(s for s in schema if s["label"] == "OtherTable")
-      assert other["count"] == 50
+      assert other["type"] == "node"
 
-      # Verify query calls
+      # Check relationship is listed
+      has_custom = next(s for s in schema if s["label"] == "HAS_CUSTOM")
+      assert has_custom["type"] == "relationship"
+      assert "from_node" in has_custom
+      assert "to_node" in has_custom
+
+      # Verify only 1 query (SHOW_TABLES)
       query_calls = list(mock_async_graph_client.query.call_args_list)
-      # Should have: 1 SHOW_TABLES + 3 COUNT queries (for all 3 tables)
-      assert len(query_calls) == 4
+      assert len(query_calls) == 1
 
 
 class TestGraphMCPFactory:
