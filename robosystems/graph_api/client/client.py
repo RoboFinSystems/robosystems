@@ -1525,12 +1525,25 @@ class GraphClient(BaseGraphClient):
           - sse_url: SSE monitoring endpoint
     """
     if wait_for_completion:
+      # Build S3 credentials for LocalStack/MinIO when endpoint is configured
+      from robosystems.config import env
+
+      s3_credentials = None
+      if env.AWS_ENDPOINT_URL:
+        # LocalStack/MinIO needs explicit credentials
+        s3_credentials = {
+          "aws_access_key_id": env.AWS_S3_ACCESS_KEY_ID or "test",
+          "aws_secret_access_key": env.AWS_S3_SECRET_ACCESS_KEY or "test",
+          "region": env.AWS_REGION,
+          "endpoint_url": env.AWS_ENDPOINT_URL,
+        }
+
       # Use the existing SSE-based monitoring method
       return await self.ingest_with_sse(
         graph_id=graph_id,
         table_name=table_name,
         s3_pattern=s3_pattern,
-        s3_credentials=None,  # Use IAM role credentials
+        s3_credentials=s3_credentials,
         ignore_errors=ignore_errors,
         timeout=timeout,
       )

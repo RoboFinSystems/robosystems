@@ -2081,6 +2081,9 @@ def sec_graph_direct_copy(
     context.log.warning(f"Could not boost memory (non-fatal): {boost_err}")
 
   async def run_direct_copy():
+    # Create processor for helper methods
+    processor = XBRLDuckDBGraphProcessor(graph_id=config.graph_id)
+
     # Ensure repository exists
     context.log.info("Ensuring SEC repository metadata exists...")
     repo_result = await ensure_shared_repository_exists(
@@ -2090,26 +2093,17 @@ def sec_graph_direct_copy(
     )
     context.log.info(f"SEC repository status: {repo_result.get('status', 'unknown')}")
 
-    # Rebuild LadybugDB if requested
+    # Get graph client (matches working pattern from materialize_from_duckdb)
+    client = await get_graph_client(graph_id=config.graph_id, operation_type="write")
+
+    # Rebuild LadybugDB if requested (use processor's method for consistency)
     if config.rebuild_graph:
       context.log.info("Rebuilding LadybugDB database with SEC schema...")
-      async with get_graph_client() as client:
-        # Delete and recreate database
-        try:
-          await client.delete_database(config.graph_id)
-          context.log.info(f"Deleted existing database: {config.graph_id}")
-        except Exception:
-          pass  # Database may not exist
-
-        await client.create_database(
-          config.graph_id,
-          schema="sec",
-        )
-        context.log.info(f"Created database with SEC schema: {config.graph_id}")
+      await processor._rebuild_ladybug_database(client, reset_staging=False)
+      context.log.info("LadybugDB database rebuilt with SEC schema")
 
     # Discover quarters for batched loading of large tables
     context.log.info("Discovering filing dates for quarter-based batching...")
-    processor = XBRLDuckDBGraphProcessor(graph_id=config.graph_id)
     filing_dates = await processor._discover_filed_dates(year=config.year)
     quarters_by_date = _group_dates_by_quarter(filing_dates) if filing_dates else {}
     context.log.info(
@@ -2121,6 +2115,31 @@ def sec_graph_direct_copy(
     tables_by_type = RoboLedgerContext.get_all_table_names_for_context(
       RoboLedgerContext.SEC_REPOSITORY
     )
+
+    # Query database for existing tables to avoid "table does not exist" errors
+    context.log.info("Querying database for existing tables...")
+    try:
+      existing_tables_result = await client.query(
+        cypher="CALL show_tables() RETURN *",
+        graph_id=config.graph_id,
+      )
+      existing_table_names = {
+        row.get("name") for row in existing_tables_result.get("data", [])
+      }
+      context.log.info(f"Database has {len(existing_table_names)} tables")
+
+      # Filter to only tables that exist in the database
+      original_count = len(tables_by_type)
+      tables_by_type = {
+        name: entity_type
+        for name, entity_type in tables_by_type.items()
+        if name in existing_table_names
+      }
+      filtered_count = original_count - len(tables_by_type)
+      if filtered_count > 0:
+        context.log.info(f"Filtered out {filtered_count} tables not in database schema")
+    except Exception as e:
+      context.log.warning(f"Could not query existing tables: {e}")
 
     # Filter taxonomy tables if requested
     if config.skip_taxonomy_relationships:
@@ -2161,132 +2180,138 @@ def sec_graph_direct_copy(
     total_rows = 0
     failed_tables = []
 
-    async with get_graph_client() as client:
-      for i, (table_name, entity_type) in enumerate(ordered_tables, 1):
-        is_large = table_name in QUARTER_CHUNKABLE_TABLES
-        use_batching = is_large and len(quarters_by_date) > 0
+    # Use the client we already have from above
+    for i, (table_name, entity_type) in enumerate(ordered_tables, 1):
+      is_large = table_name in QUARTER_CHUNKABLE_TABLES
+      use_batching = is_large and len(quarters_by_date) > 0
 
-        if use_batching:
-          # Quarter-by-quarter loading for large tables
-          context.log.info(
-            f"[{i}/{len(ordered_tables)}] Copying {table_name} by quarter "
-            f"({len(quarters_by_date)} quarters)..."
-          )
+      if use_batching:
+        # Quarter-by-quarter loading for large tables
+        context.log.info(
+          f"[{i}/{len(ordered_tables)}] Copying {table_name} by quarter "
+          f"({len(quarters_by_date)} quarters)..."
+        )
 
-          table_rows = 0
-          table_failed = False
+        table_rows = 0
+        table_failed = False
 
-          for q_idx, (quarter_key, dates) in enumerate(quarters_by_date.items(), 1):
-            # Build S3 patterns for this quarter's dates
-            s3_patterns = [
-              f"s3://{bucket}/{source_prefix}/filed={date}/{entity_type}/{table_name}/*.parquet"
-              for date in dates
-            ]
-
-            context.log.info(
-              f"  [{quarter_key}] Quarter {q_idx}/{len(quarters_by_date)} "
-              f"({len(dates)} dates)..."
-            )
-
-            try:
-              copy_result = await client.copy_from_s3(
-                graph_id=config.graph_id,
-                table_name=table_name,
-                s3_pattern=s3_patterns,  # List of patterns for this quarter
-                ignore_errors=True,
-                timeout=QUARTER_COPY_TIMEOUT,
-                wait_for_completion=True,
-              )
-
-              if copy_result.get("status") == "completed":
-                records = copy_result.get("records_loaded", 0)
-                duration = copy_result.get("duration_seconds", 0)
-                table_rows += records
-                context.log.info(
-                  f"  [{quarter_key}] {records:,} records in {duration:.1f}s"
-                )
-              elif "No files found" in copy_result.get("error", ""):
-                context.log.info(f"  [{quarter_key}] No files (skipped)")
-              else:
-                error = copy_result.get("error", "Unknown error")
-                context.log.error(f"  [{quarter_key}] FAILED: {error}")
-                table_failed = True
-                failed_tables.append(
-                  {
-                    "table": f"{table_name}/{quarter_key}",
-                    "error": error,
-                  }
-                )
-
-            except Exception as e:
-              if "No files found" in str(e):
-                context.log.info(f"  [{quarter_key}] No files (skipped)")
-              else:
-                context.log.error(f"  [{quarter_key}] FAILED: {e}")
-                table_failed = True
-                failed_tables.append(
-                  {
-                    "table": f"{table_name}/{quarter_key}",
-                    "error": str(e),
-                  }
-                )
-
-          total_rows += table_rows
-          if not table_failed:
-            tables_copied.append(table_name)
-          context.log.info(
-            f"[{i}/{len(ordered_tables)}] {table_name}: {table_rows:,} total records"
-          )
-
-        else:
-          # Single COPY for small tables
-          if config.year:
-            filed_pattern = f"filed={config.year}-*"
-          else:
-            filed_pattern = "filed=*"
-
-          s3_pattern = (
-            f"s3://{bucket}/{source_prefix}/"
-            f"{filed_pattern}/{entity_type}/{table_name}/*.parquet"
-          )
+        for q_idx, (quarter_key, dates) in enumerate(quarters_by_date.items(), 1):
+          # Build S3 patterns for this quarter's dates
+          s3_patterns = [
+            f"s3://{bucket}/{source_prefix}/filed={date}/{entity_type}/{table_name}/*.parquet"
+            for date in dates
+          ]
 
           context.log.info(
-            f"[{i}/{len(ordered_tables)}] Copying {table_name} from S3..."
+            f"  [{quarter_key}] Quarter {q_idx}/{len(quarters_by_date)} "
+            f"({len(dates)} dates)..."
           )
 
           try:
             copy_result = await client.copy_from_s3(
               graph_id=config.graph_id,
               table_name=table_name,
-              s3_pattern=s3_pattern,
+              s3_pattern=s3_patterns,  # List of patterns for this quarter
               ignore_errors=True,
-              timeout=SINGLE_COPY_TIMEOUT,
+              timeout=QUARTER_COPY_TIMEOUT,
               wait_for_completion=True,
             )
 
             if copy_result.get("status") == "completed":
               records = copy_result.get("records_loaded", 0)
               duration = copy_result.get("duration_seconds", 0)
-              total_rows += records
-              tables_copied.append(table_name)
-              context.log.info(
-                f"  [OK] {table_name}: {records:,} records in {duration:.1f}s"
-              )
+              table_rows += records
+              if records > 0:
+                context.log.info(
+                  f"  [{quarter_key}] {records:,} records in {duration:.1f}s"
+                )
+              else:
+                context.log.info(f"  [{quarter_key}] done in {duration:.1f}s")
             elif "No files found" in copy_result.get("error", ""):
-              context.log.info(f"  [OK] {table_name}: No files (skipped)")
-              tables_copied.append(table_name)  # Not a failure
+              context.log.info(f"  [{quarter_key}] No files (skipped)")
             else:
               error = copy_result.get("error", "Unknown error")
-              context.log.error(f"  [FAILED] {table_name}: {error}")
-              failed_tables.append({"table": table_name, "error": error})
+              context.log.error(f"  [{quarter_key}] FAILED: {error}")
+              table_failed = True
+              failed_tables.append(
+                {
+                  "table": f"{table_name}/{quarter_key}",
+                  "error": error,
+                }
+              )
 
           except Exception as e:
             if "No files found" in str(e):
-              context.log.info(f"  [OK] {table_name}: No files (skipped)")
-              tables_copied.append(table_name)
+              context.log.info(f"  [{quarter_key}] No files (skipped)")
             else:
-              context.log.error(f"  [FAILED] {table_name}: {e}")
-              failed_tables.append({"table": table_name, "error": str(e)})
+              context.log.error(f"  [{quarter_key}] FAILED: {e}")
+              table_failed = True
+              failed_tables.append(
+                {
+                  "table": f"{table_name}/{quarter_key}",
+                  "error": str(e),
+                }
+              )
+
+        total_rows += table_rows
+        if not table_failed:
+          tables_copied.append(table_name)
+        if table_rows > 0:
+          context.log.info(
+            f"[{i}/{len(ordered_tables)}] {table_name}: {table_rows:,} total records"
+          )
+        else:
+          context.log.info(f"[{i}/{len(ordered_tables)}] {table_name}: done")
+
+      else:
+        # Single COPY for small tables - use discovered dates (no wildcards)
+        # Build patterns for all discovered dates
+        s3_patterns = [
+          f"s3://{bucket}/{source_prefix}/filed={date}/{entity_type}/{table_name}/*.parquet"
+          for date in filing_dates
+        ]
+
+        context.log.info(
+          f"[{i}/{len(ordered_tables)}] Copying {table_name} "
+          f"({len(filing_dates)} dates)..."
+        )
+
+        try:
+          copy_result = await client.copy_from_s3(
+            graph_id=config.graph_id,
+            table_name=table_name,
+            s3_pattern=s3_patterns,  # List of all date patterns
+            ignore_errors=True,
+            timeout=SINGLE_COPY_TIMEOUT,
+            wait_for_completion=True,
+          )
+
+          if copy_result.get("status") == "completed":
+            records = copy_result.get("records_loaded", 0)
+            duration = copy_result.get("duration_seconds", 0)
+            total_rows += records
+            tables_copied.append(table_name)
+            if records > 0:
+              context.log.info(
+                f"  [OK] {table_name}: {records:,} records in {duration:.1f}s"
+              )
+            else:
+              context.log.info(f"  [OK] {table_name}: done in {duration:.1f}s")
+          elif "No files found" in copy_result.get("error", ""):
+            context.log.info(f"  [OK] {table_name}: No files (skipped)")
+            tables_copied.append(table_name)  # Not a failure
+          else:
+            error = copy_result.get("error", "Unknown error")
+            context.log.error(f"  [FAILED] {table_name}: {error}")
+            failed_tables.append({"table": table_name, "error": error})
+
+        except Exception as e:
+          if "No files found" in str(e):
+            context.log.info(f"  [OK] {table_name}: No files (skipped)")
+            tables_copied.append(table_name)
+          else:
+            context.log.error(f"  [FAILED] {table_name}: {e}")
+            failed_tables.append({"table": table_name, "error": str(e)})
 
     return {
       "status": "success" if not failed_tables else "partial",
