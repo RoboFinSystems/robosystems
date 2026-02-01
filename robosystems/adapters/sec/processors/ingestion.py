@@ -164,17 +164,17 @@ CHUNKED_STAGING_TIMEOUT = 600  # 10 minutes per quarter chunk
 DEFAULT_MATERIALIZATION_TIMEOUT = 600  # 10 minutes
 LARGE_MATERIALIZATION_TIMEOUT = 3600  # 60 minutes (for direct COPY of 200M+ row tables)
 CHUNKED_MATERIALIZATION_TIMEOUT = (
-  1800  # 30 minutes per 10M row batch - increased from 600s after timeout failures
+  2400  # 40 minutes per 20M row batch - increased for larger batch size
 )
 
 # Chunked materialization settings for large tables
 # RE-ENABLED (2026-01-31): Direct COPY of 200M+ row tables causes OOM on r7g.2xlarge
 # with 64GB RAM when LadybugDB buffer pool is boosted. Batching prevents memory
 # exhaustion by materializing in chunks with cleanup between batches.
-# 10M batches with 30min timeout balances memory (~85% peak) vs timeout risk.
-# 5M batches peaked at 80% memory but timed out at 10min; 15M risks OOM.
+# 20M batches with 30min timeout balances memory vs timeout risk.
+# 10M batches were conservative; 20M reduces batch count for large tables.
 # Tables larger than this are batched; smaller tables use single COPY.
-MATERIALIZATION_BATCH_SIZE = 10_000_000  # 10M rows per batch
+MATERIALIZATION_BATCH_SIZE = 20_000_000  # 20M rows per batch
 
 # Retry configuration for staging operations
 # On timeout or failure, retry the entire table from scratch
