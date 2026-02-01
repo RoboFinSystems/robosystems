@@ -43,6 +43,7 @@ from dagster import (
 )
 
 from robosystems.dagster.assets import (
+  sec_backup,
   sec_duckdb_incremental_staged,
   sec_duckdb_staged,
   sec_graph_direct_copy,
@@ -247,6 +248,33 @@ sec_direct_copy_job = define_asset_job(
     "ecs/memory": "8192",
     "ecs/ephemeral_storage": "50",
     # Long-running job - use on-demand to avoid Spot interruptions
+    "ecs/run_task_kwargs": {
+      "capacityProviderStrategy": [
+        {"capacityProvider": "FARGATE", "weight": 1, "base": 1},
+      ],
+    },
+  },
+)
+
+
+# ============================================================================
+# Phase 4: Backup (Downloadable .lbug for Users)
+# ============================================================================
+# Creates downloadable backups of the SEC database for users with
+# repository subscriptions. Run after materialization completes.
+
+sec_backup_job = define_asset_job(
+  name="sec_create_backup",
+  description="Create downloadable backup of SEC database for user downloads.",
+  selection=AssetSelection.assets(sec_backup),
+  tags={
+    "pipeline": "sec",
+    "phase": "backup",
+    # Standard profile: 2 vCPU, 8 GB - backup is I/O bound
+    "ecs/cpu": "2048",
+    "ecs/memory": "8192",
+    "ecs/ephemeral_storage": "50",
+    # Use on-demand to avoid Spot interruptions during backup
     "ecs/run_task_kwargs": {
       "capacityProviderStrategy": [
         {"capacityProvider": "FARGATE", "weight": 1, "base": 1},

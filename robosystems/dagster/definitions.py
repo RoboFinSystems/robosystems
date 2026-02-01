@@ -27,6 +27,8 @@ from robosystems.dagster.assets import (
   qb_accounts,
   qb_graph_data,
   qb_transactions,
+  # SEC pipeline - backup
+  sec_backup,
   # SEC pipeline - two-stage materialization
   sec_duckdb_incremental_staged,
   sec_duckdb_staged,
@@ -90,6 +92,7 @@ from robosystems.dagster.jobs.provisioning import (
   provision_repository_job,
 )
 from robosystems.dagster.jobs.sec import (
+  sec_backup_job,
   sec_direct_copy_job,
   sec_download_job,
   sec_incremental_ingest_job,
@@ -98,7 +101,6 @@ from robosystems.dagster.jobs.sec import (
   sec_stage_job,
   sec_staged_materialize_job,
 )
-from robosystems.dagster.jobs.sec_backup import sec_backup_job
 
 # Import shared repository jobs
 from robosystems.dagster.jobs.shared_repository import (
@@ -246,6 +248,7 @@ all_assets = [
   sec_duckdb_incremental_staged,  # DuckDB incremental staging (INSERT with dedup)
   sec_graph_direct_copy,  # Direct S3 → LadybugDB (bypasses DuckDB staging)
   sec_graph_materialized,  # LadybugDB materialization (retry-safe)
+  sec_backup,  # Create downloadable backup of SEC database (depends on sec_graph_materialized)
   # QuickBooks pipeline assets
   qb_accounts,
   qb_transactions,
