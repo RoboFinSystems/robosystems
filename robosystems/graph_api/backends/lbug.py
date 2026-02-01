@@ -1,3 +1,4 @@
+import asyncio
 import shutil
 import time
 from pathlib import Path
@@ -315,8 +316,9 @@ class LadybugBackend(GraphBackend):
         else f"Executing LadybugDB COPY: {query}"
       )
 
+      # Run COPY in thread pool to avoid blocking event loop (allows SSE heartbeats)
       start_time = time.time()
-      result = conn.execute(query)
+      result = await asyncio.to_thread(conn.execute, query)
       duration = time.time() - start_time
 
       records_loaded = 0
