@@ -580,7 +580,7 @@ class XBRLGraphProcessor:
       return instance_path
 
   def make_dts(self):
-    logger.info("Processing Document Type System (DTS)")
+    logger.info("Processing Discoverable Taxonomy Set (DTS)")
     if not self.arelle_cntlr:
       return
     for _, v in self.arelle_cntlr.namespaceDocs.items():

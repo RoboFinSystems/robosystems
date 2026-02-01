@@ -33,9 +33,10 @@ class TaskType(Enum):
 class BackgroundIngestRequest(BaseModel):
   """Request for background ingestion with SSE monitoring."""
 
-  s3_pattern: str = Field(
+  s3_pattern: str | list[str] = Field(
     ...,
-    description="S3 glob pattern for bulk loading (e.g., s3://bucket/path/*.parquet)",
+    description="S3 glob pattern(s) for bulk loading. Can be a single pattern "
+    "(e.g., s3://bucket/path/*.parquet) or a list of patterns for quarter-by-quarter loading.",
   )
   table_name: str = Field(..., description="Target table name")
   s3_credentials: dict | None = Field(
