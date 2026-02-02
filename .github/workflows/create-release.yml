@@ -34,9 +34,7 @@ jobs:
       - name: Checkout main branch
         uses: actions/checkout@v4
         with:
-          repository: ${{ github.repository }}
           ref: main
-          token: ${{ github.token }}
           fetch-depth: 0
 
       - name: Set up Git

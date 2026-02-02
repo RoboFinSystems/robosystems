@@ -748,7 +748,7 @@ check_github_secrets() {
     # Combine both lists for checking
     ALL_SECRETS="${REPO_SECRETS}"$'\n'"${ORG_SECRETS}"
 
-    # Check for ACTIONS_TOKEN (optional - enables release/PR automations)
+    # Check for ACTIONS_TOKEN (optional - enhances PR/release automations)
     if echo "$ALL_SECRETS" | grep -q "ACTIONS_TOKEN"; then
         if echo "$REPO_SECRETS" | grep -q "ACTIONS_TOKEN"; then
             print_success "ACTIONS_TOKEN exists (repo-level)"
@@ -756,23 +756,18 @@ check_github_secrets() {
             print_success "ACTIONS_TOKEN exists (org-level)"
         fi
     else
-        print_info "ACTIONS_TOKEN not set (optional - enables release/PR automations)"
+        print_info "ACTIONS_TOKEN not set (optional - enhances PR/release automations)"
         echo ""
-        echo "  Required for create-release.yml and create-pr.yml workflows."
+        echo "  All workflows work without it, but with limitations:"
+        echo "    - PRs created by create-pr.yml won't auto-trigger CI workflows"
+        echo "    - Self-hosted runner checks limited to repo-level (no org runners)"
         echo ""
         echo "  Why? GitHub's GITHUB_TOKEN has anti-recursion protection:"
-        echo "    - Pushes made with GITHUB_TOKEN don't trigger other workflows"
-        echo "    - PRs created with GITHUB_TOKEN don't trigger on:pull_request workflows"
-        echo "    - May be blocked by branch protection rules on main"
+        echo "    - PRs created with GITHUB_TOKEN don't trigger on:pull_request"
+        echo "    - Limited API access for checking org-level runners"
         echo ""
-        echo "  Without ACTIONS_TOKEN, these workflows will fall back to GITHUB_TOKEN"
-        echo "  but releases won't auto-trigger deploys and PRs won't trigger CI."
-        echo ""
-        echo "  To set it (create a PAT with repo scope):"
+        echo "  To enable full functionality (create a PAT with repo scope):"
         echo "    gh secret set ACTIONS_TOKEN"
-        echo ""
-        echo "  Or set at org-level (shared across repos):"
-        echo "    gh secret set ACTIONS_TOKEN --org ${GITHUB_ORG}"
         echo ""
     fi
 
