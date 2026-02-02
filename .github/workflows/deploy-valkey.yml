@@ -60,16 +60,6 @@ on:
         required: false
         type: string
         default: "true"
-      secret_rotation_enabled:
-        description: "Enable automatic rotation of Valkey auth tokens"
-        required: false
-        type: string
-        default: "true"
-      rotation_schedule_days:
-        description: "Number of days between automatic auth token rotations"
-        required: false
-        type: string
-        default: "90"
 
       # Backup Configuration
       snapshot_retention_days:
@@ -153,8 +143,6 @@ jobs:
                 ParameterKey=NodeType,ParameterValue=${{ inputs.node_type }} \
                 ParameterKey=NumCacheNodes,ParameterValue=${{ inputs.num_cache_nodes }} \
                 ParameterKey=EnableEncryption,ParameterValue=${{ inputs.encryption_enabled }} \
-                ParameterKey=EnableSecretRotation,ParameterValue=${{ inputs.secret_rotation_enabled }} \
-                ParameterKey=RotationScheduleDays,ParameterValue=${{ inputs.rotation_schedule_days }} \
                 ParameterKey=SnapshotRetentionDays,ParameterValue=${{ inputs.snapshot_retention_days }} \
                 ParameterKey=LambdaImageUri,ParameterValue=${{ inputs.lambda_image_uri }}"
 

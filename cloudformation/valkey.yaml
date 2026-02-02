@@ -66,22 +66,6 @@ Parameters:
       - "false"
     Description: Enable encryption at rest and in transit for Valkey
     ConstraintDescription: Must be true or false
-  EnableSecretRotation:
-    Type: String
-    Default: "true"
-    AllowedValues:
-      - "true"
-      - "false"
-    Description: Enable automatic rotation of Valkey auth tokens
-    ConstraintDescription: Must be true or false
-  RotationScheduleDays:
-    Type: Number
-    Default: 90
-    MinValue: 1
-    MaxValue: 365
-    Description: Number of days between automatic auth token rotations (when rotation is enabled)
-    ConstraintDescription: Must be between 1 and 365 days
-
   # Backup Configuration
   SnapshotRetentionDays:
     Type: Number
@@ -136,11 +120,8 @@ Mappings:
 Conditions:
   IsProduction: !Equals [!Ref Environment, prod]
   IsMultiNode: !Not [!Equals [!Ref NumCacheNodes, 1]]
-  EnableRotation: !Equals [!Ref EnableSecretRotation, "true"]
   EnableEncryptionCondition: !Equals [!Ref EnableEncryption, "true"]
   EnableSnapshots: !Not [!Equals [!Ref SnapshotRetentionDays, 0]]
-  RequireAuth:
-    !Or [!Condition EnableEncryptionCondition, !Condition EnableRotation]
 
 Resources:
   # ElastiCache Subnet Group
@@ -181,14 +162,12 @@ Resources:
           ToPort: 6379
           SourceSecurityGroupId: !Ref ValkeyClientSecurityGroup
           Description: Allow Valkey access from application clients
-        - !If
-          - EnableRotation
-          - IpProtocol: tcp
-            FromPort: 6379
-            ToPort: 6379
-            SourceSecurityGroupId: !Ref ValkeyLambdaSecurityGroup
-            Description: Allow Valkey access from rotation Lambda
-          - !Ref AWS::NoValue
+        # Always allow rotation Lambda access (rotation infrastructure always deployed)
+        - IpProtocol: tcp
+          FromPort: 6379
+          ToPort: 6379
+          SourceSecurityGroupId: !Ref ValkeyLambdaSecurityGroup
+          Description: Allow Valkey access from rotation Lambda
       SecurityGroupEgress: []
       Tags:
         - Key: Name
@@ -226,7 +205,6 @@ Resources:
   # Lambda Security Group (for rotation function)
   ValkeyLambdaSecurityGroup:
     Type: AWS::EC2::SecurityGroup
-    Condition: EnableRotation
     DeletionPolicy: Delete
     UpdateReplacePolicy: Retain
     Properties:
@@ -255,7 +233,6 @@ Resources:
   # Lambda to Valkey Security Group Rule (separate to avoid circular dependency)
   ValkeyLambdaToValkeyEgress:
     Type: AWS::EC2::SecurityGroupEgress
-    Condition: EnableRotation
     Properties:
       GroupId: !Ref ValkeyLambdaSecurityGroup
       IpProtocol: tcp
@@ -300,7 +277,6 @@ Resources:
   # Uses ECR image with handler specified via ImageConfig.Command
   ValkeySecretRotationLambda:
     Type: AWS::Lambda::Function
-    Condition: EnableRotation
     DeletionPolicy: Delete
     UpdateReplacePolicy: Retain
     Properties:
@@ -341,7 +317,6 @@ Resources:
   # Lambda Execution Role for Secret Rotation
   ValkeySecretRotationRole:
     Type: AWS::IAM::Role
-    Condition: EnableRotation
     DeletionPolicy: Delete
     UpdateReplacePolicy: Retain
     Properties:
@@ -416,7 +391,6 @@ Resources:
   # Lambda Permission for Secrets Manager
   ValkeySecretRotationPermission:
     Type: AWS::Lambda::Permission
-    Condition: EnableRotation
     DeletionPolicy: Delete
     UpdateReplacePolicy: Retain
     Properties:
@@ -424,15 +398,24 @@ Resources:
       Action: lambda:InvokeFunction
       Principal: secretsmanager.amazonaws.com
 
-  # NOTE: Automatic rotation schedule has been removed.
-  # Rotation is now managed via GitHub Actions workflow (secrets-rotation.yml)
-  # which orchestrates rotation + service refresh atomically.
-  # The rotation Lambda is still available for on-demand invocation.
+  # Rotation Schedule - links Lambda to secret and enables on-demand rotation
+  # Actual rotation timing is managed via GitHub Actions (secrets-rotation.yml)
+  # The AutomaticallyAfterDays is set to max (1000 days) as a fallback only
+  ValkeySecretRotationSchedule:
+    Type: AWS::SecretsManager::RotationSchedule
+    DependsOn:
+      - ValkeySecretRotationPermission
+      - ValkeyReplicationGroup
+    Properties:
+      SecretId: !Ref ValkeyAuthSecret
+      RotationLambdaARN: !GetAtt ValkeySecretRotationLambda.Arn
+      RotationRules:
+        AutomaticallyAfterDays: 1000  # Fallback only - GHA triggers monthly
+      RotateImmediatelyOnUpdate: false
 
   # CloudWatch Alarms for Rotation Monitoring
   ValkeyRotationFailureAlarm:
     Type: AWS::CloudWatch::Alarm
-    Condition: EnableRotation
     DeletionPolicy: Delete
     UpdateReplacePolicy: Delete
     Properties:
@@ -527,10 +510,8 @@ Resources:
       # Security
       AtRestEncryptionEnabled: !If [EnableEncryptionCondition, true, false]
       TransitEncryptionEnabled: !If [EnableEncryptionCondition, true, false]
-      AuthToken: !If
-        - RequireAuth
-        - !Sub "{{resolve:secretsmanager:${ValkeyAuthSecret}:SecretString:VALKEY_AUTH_TOKEN}}"
-        - !Ref AWS::NoValue
+      # Auth is always required since rotation infrastructure is always deployed
+      AuthToken: !Sub "{{resolve:secretsmanager:${ValkeyAuthSecret}:SecretString:VALKEY_AUTH_TOKEN}}"
       # Notifications
       NotificationTopicArn: !Ref ValkeyNotificationTopic
       Tags:
@@ -591,7 +572,6 @@ Outputs:
       Name: !Sub "${AWS::StackName}-${Environment}-ValkeyUrl"
 
   ValkeyUrlWithAuth:
-    Condition: RequireAuth
     Description: Full Redis URL for Valkey ElastiCache with authentication
     Value: !Sub
       - "rediss://default:${AuthToken}@${Address}:${Port}"
@@ -658,17 +638,10 @@ Outputs:
       Name: !Sub "${AWS::StackName}-${Environment}-ValkeyTransitEncryptionEnabled"
 
   ValkeyRotationLambdaArn:
-    Condition: EnableRotation
     Description: ARN of the Valkey auth token rotation Lambda function
     Value: !GetAtt ValkeySecretRotationLambda.Arn
     Export:
       Name: !Sub "${AWS::StackName}-${Environment}-ValkeyRotationLambdaArn"
 
-  # NOTE: ValkeyRotationScheduleArn output removed - rotation now managed via GitHub Actions
-
-  ValkeyRotationDaysConfigured:
-    Condition: EnableRotation
-    Description: Rotation frequency parameter (actual rotation scheduled via GitHub Actions)
-    Value: !Ref RotationScheduleDays
-    Export:
-      Name: !Sub "${AWS::StackName}-${Environment}-ValkeyRotationDays"
+  # NOTE: ValkeyRotationScheduleArn and ValkeyRotationDaysConfigured outputs removed
+  # Rotation is now managed via GitHub Actions workflow (secrets-rotation.yml)

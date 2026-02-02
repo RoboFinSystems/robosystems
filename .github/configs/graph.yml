@@ -66,8 +66,7 @@ production:
 
       # Deployment configuration
       deployment:
-        enable_var: LBUG_STANDARD_ENABLED_PROD
-        enabled_default: true
+        # Standard tier is always deployed - no enable_var needed
         always_enabled: true # LadybugDB standard tier is the foundation - always available
 
     # =========================================================================
@@ -430,8 +429,7 @@ staging:
         duckdb_max_threads: 2 # Conservative for multi-tenant (1 vCPU but allow 2 for DuckDB efficiency)
 
       deployment:
-        enable_var: LBUG_STANDARD_ENABLED_STAGING
-        enabled_default: true
+        # Standard tier is always deployed - no enable_var needed
         always_enabled: true
 
     # =========================================================================

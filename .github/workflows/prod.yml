@@ -261,8 +261,6 @@ jobs:
       valkey_version: ${{ vars.VALKEY_VERSION_PROD || '' }}
       # Security Configuration
       encryption_enabled: ${{ vars.VALKEY_ENCRYPTION_ENABLED_PROD || 'true' }}
-      secret_rotation_enabled: ${{ vars.VALKEY_SECRET_ROTATION_ENABLED_PROD || 'true' }}
-      rotation_schedule_days: ${{ vars.VALKEY_ROTATION_SCHEDULE_DAYS_PROD || '90' }}
       # Backup Configuration
       snapshot_retention_days: ${{ vars.VALKEY_SNAPSHOT_RETENTION_DAYS_PROD || '7' }}
       # Lambda Configuration (container-based)

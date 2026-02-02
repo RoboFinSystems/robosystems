@@ -1343,8 +1343,14 @@ def _merge_with_existing_s3(
   try:
     response = s3_client.get_object(Bucket=bucket, Key=s3_key)
     existing_data = response["Body"].read()
+    logger.info(
+      "Downloaded existing S3 file for merge: %s (%s bytes)",
+      s3_key,
+      f"{len(existing_data):,}",
+    )
   except s3_client.exceptions.NoSuchKey:
     # No existing file - return new data as-is
+    logger.info("No existing S3 file at %s, creating new file", s3_key)
     return new_data
   except Exception as e:
     # Other errors - return new data as-is (will overwrite)
@@ -1364,6 +1370,7 @@ def _merge_with_existing_s3(
 
   # Concatenate tables
   combined = pa.concat_tables([existing_table, new_table], promote_options="permissive")
+  pre_dedup_rows = combined.num_rows
 
   # Deduplicate shared tables on identifier
   if table_key in SHARED_NODE_TABLES and "identifier" in combined.column_names:
@@ -1374,7 +1381,18 @@ def _merge_with_existing_s3(
   # Write merged result
   buffer = BytesIO()
   pq.write_table(combined, buffer)
-  return buffer.getvalue()
+  merged_bytes = buffer.getvalue()
+
+  logger.info(
+    "Merged %s: %s existing + %s new = %s rows (%s after dedup), %s bytes",
+    table_key,
+    f"{existing_table.num_rows:,}",
+    f"{new_table.num_rows:,}",
+    f"{pre_dedup_rows:,}",
+    f"{combined.num_rows:,}",
+    f"{len(merged_bytes):,}",
+  )
+  return merged_bytes
 
 
 def _atomic_s3_upload(
@@ -1644,7 +1662,7 @@ def sec_processed_filings(
         data=merged_bytes,
       )
       tables_uploaded += 1
-      context.log.debug(f"Uploaded: {s3_key} ({len(merged_bytes):,} bytes)")
+      context.log.info(f"Uploaded: {s3_key} ({len(merged_bytes):,} bytes)")
 
     # Mark all pending filings as success (data is now safely in S3)
     with db.get_session() as session:

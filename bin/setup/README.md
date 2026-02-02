@@ -318,7 +318,6 @@ just setup-gha
 | `DATABASE_MAX_ALLOCATED_STORAGE_*` | `100` | Max storage (GB) |
 | `DATABASE_MULTI_AZ_ENABLED_*` | `false` | Multi-AZ deployment |
 | `DATABASE_POSTGRES_VERSION_*` | `16.11` | PostgreSQL version |
-| `DATABASE_SECRETS_ROTATION_DAYS` | `90` | Secret rotation period |
 
 #### Valkey (Redis) Configuration
 | Variable | Prod Default | Description |
@@ -326,16 +325,13 @@ just setup-gha
 | `VALKEY_NODE_TYPE_*` | `cache.t4g.micro` | Cache node type |
 | `VALKEY_NUM_NODES_*` | `1` | Number of nodes |
 | `VALKEY_ENCRYPTION_ENABLED_*` | `true` | Enable encryption |
-| `VALKEY_SECRET_ROTATION_ENABLED_*` | `true` | Rotate secrets |
-| `VALKEY_ROTATION_SCHEDULE_DAYS_*` | `90` | Rotation period |
 | `VALKEY_SNAPSHOT_RETENTION_DAYS_*` | `7` (prod), `0` (staging) | Snapshot retention |
 | `VALKEY_VERSION_*` | `8.1` | Valkey version |
 
 #### LadybugDB Writer Configuration
 | Variable | Prod Default | Description |
 |----------|--------------|-------------|
-| `LBUG_STANDARD_ENABLED_*` | `true` | Enable standard tier |
-| `LBUG_STANDARD_MIN_INSTANCES_*` | `1` | Min standard instances |
+| `LBUG_STANDARD_MIN_INSTANCES_*` | `1` | Min standard instances (always deployed) |
 | `LBUG_STANDARD_MAX_INSTANCES_*` | `10` | Max standard instances |
 | `LBUG_LARGE_ENABLED_*` | `false` | Enable large tier |
 | `LBUG_LARGE_MIN_INSTANCES_*` | `0` | Min large instances |
@@ -345,17 +341,10 @@ just setup-gha
 | `LBUG_XLARGE_MAX_INSTANCES_*` | `10` | Max xlarge instances |
 | `LBUG_SHARED_ENABLED_*` | `false` | Enable shared tier |
 
-#### Neo4j Configuration (optional)
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `NEO4J_COMMUNITY_LARGE_ENABLED_*` | `false` | Enable Neo4j Community |
-| `NEO4J_ENTERPRISE_XLARGE_ENABLED_*` | `false` | Enable Neo4j Enterprise |
-
 #### Graph Settings
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `GRAPH_AMI_ID_*` | Auto-detected | Amazon Linux 2023 ARM64 AMI |
-| `GRAPH_API_KEY_ROTATION_DAYS` | `90` | API key rotation period |
 | `GRAPH_UPDATE_CONTAINERS_*` | `true` | Update containers on deploy |
 
 #### Compliance & Security
