@@ -144,7 +144,7 @@ jobs:
       # Docker Hub publishing for staging: disabled (staging builds should not go to Docker Hub)
       publish_to_dockerhub: false
     secrets:
-      DOCKERHUB_USERNAME: ${{ vars.DOCKERHUB_USERNAME }}
+      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
       DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
 
   create-deployment:

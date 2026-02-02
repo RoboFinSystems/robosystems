@@ -36,14 +36,14 @@ jobs:
     runs-on: ubuntu-latest # Use GitHub-hosted runners for memory-intensive git/Claude operations
     timeout-minutes: 10
     env:
-      GH_TOKEN: ${{ secrets.ACTIONS_TOKEN || github.token }}
+      GH_TOKEN: ${{ secrets.ACTIONS_TOKEN }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
           repository: ${{ github.repository }}
           ref: ${{ github.ref }}
-          token: ${{ secrets.ACTIONS_TOKEN || github.token }}
+          token: ${{ secrets.ACTIONS_TOKEN }}
           fetch-depth: 0
 
       - name: Determine source branch

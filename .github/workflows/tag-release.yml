@@ -8,9 +8,6 @@ on:
         required: true
         type: string
     secrets:
-      ACTIONS_TOKEN:
-        description: 'GitHub token for repository operations'
-        required: false
       ANTHROPIC_API_KEY:
         description: 'API key for Claude changelog generation'
         required: true
@@ -41,7 +38,7 @@ jobs:
         with:
           repository: ${{ github.repository }}
           ref: ${{ inputs.branch_ref }}
-          token: ${{ secrets.ACTIONS_TOKEN || github.token }}
+          token: ${{ github.token }}
           fetch-depth: 0
 
       - name: Get Version from pyproject.toml
@@ -280,7 +277,7 @@ jobs:
           draft: false
           prerelease: false
         env:
-          GITHUB_TOKEN: ${{ secrets.ACTIONS_TOKEN || github.token }}
+          GITHUB_TOKEN: ${{ github.token }}
 
       - name: Create release summary
         if: steps.check-tag.outputs.tag_exists == 'false'

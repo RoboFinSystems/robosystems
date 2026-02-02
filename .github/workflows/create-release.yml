@@ -36,7 +36,7 @@ jobs:
         with:
           repository: ${{ github.repository }}
           ref: main
-          token: ${{ secrets.ACTIONS_TOKEN || github.token }}
+          token: ${{ github.token }}
           fetch-depth: 0
 
       - name: Set up Git
