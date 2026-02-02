@@ -36,6 +36,8 @@ jobs:
         with:
           ref: main
           fetch-depth: 0
+          # ACTIONS_TOKEN required to push to protected main branch
+          token: ${{ secrets.ACTIONS_TOKEN || github.token }}
 
       - name: Set up Git
         run: |
