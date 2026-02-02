@@ -10,6 +10,9 @@ Incremental Pipeline (enable all for automated daily updates):
 - Phase 4 (Copy): sec_stage_to_copy_sensor chains stage → copy (S3 → LadybugDB direct)
 - Phase 5 (Snapshot): sec_incremental_post_ingest_snapshot_sensor chains copy → snapshot
 
+Manual Operations (not in automated chain):
+- sec_entity_update_job: Update mutable Entity attributes (run manually after copy)
+
 Backfill Processing (enable for bulk/manual processing):
 - sec_processing_sensor: Discovers pending SourceFiles, triggers batch processing per quarter
 

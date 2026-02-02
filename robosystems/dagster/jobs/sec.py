@@ -46,6 +46,7 @@ from robosystems.dagster.assets import (
   sec_backup,
   sec_duckdb_incremental_staged,
   sec_duckdb_staged,
+  sec_entity_incremental_update,
   sec_graph_direct_copy,
   sec_graph_incremental_copy,
   sec_graph_materialized,
@@ -275,6 +276,43 @@ sec_incremental_copy_job = define_asset_job(
   tags={
     "pipeline": "sec",
     "mode": "incremental_copy",
+    # Minimal profile: just orchestrating Graph API calls, no local compute
+    "ecs/cpu": "256",
+    "ecs/memory": "512",
+    "ecs/ephemeral_storage": "21",
+    # On-demand to avoid interruptions (long-running orchestration)
+    "ecs/run_task_kwargs": {
+      "capacityProviderStrategy": [
+        {"capacityProvider": "FARGATE", "weight": 1, "base": 1},
+      ],
+    },
+  },
+)
+
+
+# ============================================================================
+# Phase 3d: Entity Update (Update Mutable Entity Attributes)
+# ============================================================================
+# Updates existing Entity nodes with latest attribute values.
+# Entity nodes are unique in being mutable - company names, tickers,
+# filer categories can change over time.
+#
+# The incremental COPY only INSERTs new records - it cannot update existing
+# ones due to primary key constraints. This job uses Cypher MERGE to update
+# existing Entity nodes.
+#
+# Typically 50-200 entities change per quarter. MERGE is 40x slower than COPY,
+# but acceptable for small update volumes.
+#
+# Chain: process → stage → copy → entity_update → snapshot
+
+sec_entity_update_job = define_asset_job(
+  name="sec_entity_update",
+  description="Update existing Entity nodes with latest data (handles mutable attributes).",
+  selection=AssetSelection.assets(sec_entity_incremental_update),
+  tags={
+    "pipeline": "sec",
+    "mode": "entity_update",
     # Minimal profile: just orchestrating Graph API calls, no local compute
     "ecs/cpu": "256",
     "ecs/memory": "512",
