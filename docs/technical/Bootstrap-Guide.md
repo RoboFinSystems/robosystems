@@ -94,6 +94,31 @@ Bootstrap handles everything:
 - IAM Role: `RoboSystemsGitHubActionsFrontendRole` (frontend apps)
 - ECR Repository with lifecycle policy
 
+### Optional GitHub Secrets
+
+These secrets are **not required** for deployment but enhance workflow functionality:
+
+| Secret | Purpose | Required For |
+|--------|---------|--------------|
+| `ACTIONS_TOKEN` | GitHub PAT with `repo` scope | Push to protected branches, create tags/releases, PRs that auto-trigger CI |
+| `ANTHROPIC_API_KEY` | Claude API key | AI-generated PR summaries and release notes |
+
+**ACTIONS_TOKEN enables:**
+- Push to protected `main` branch (create-release.yml)
+- Push tags and create GitHub releases (tag-release.yml)
+- PRs that auto-trigger CI workflows (create-pr.yml)
+- Org-level self-hosted runner checks (claude.yml)
+
+Without `ACTIONS_TOKEN`, workflows fall back to `github.token` which has limitations:
+- May fail on protected branches/tags
+- PRs won't trigger `on:pull_request` workflows
+- Runner checks limited to repo-level
+
+**To create ACTIONS_TOKEN:**
+1. Go to [github.com/settings/tokens](https://github.com/settings/tokens)
+2. Create a new token with `repo` scope (full control)
+3. Set it: `gh secret set ACTIONS_TOKEN`
+
 ### Application Secrets (`just setup-aws`)
 
 Creates `robosystems/prod` and `robosystems/staging` in AWS Secrets Manager with:
@@ -330,8 +355,13 @@ just setup-aws                    # Application secrets & feature flags
 just setup-gha                    # Full GitHub variable control (~120 vars)
 just setup-bedrock                # Local AI/Bedrock development
 
+# Optional secrets (enhance workflow functionality)
+gh secret set ACTIONS_TOKEN        # For protected branches, releases, PRs
+gh secret set ANTHROPIC_API_KEY    # For AI-powered release notes
+
 # Verify
 gh variable list
+gh secret list
 aws sts get-caller-identity
 ```
 
