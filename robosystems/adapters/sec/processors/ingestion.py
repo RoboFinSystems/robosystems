@@ -164,17 +164,17 @@ CHUNKED_STAGING_TIMEOUT = 600  # 10 minutes per quarter chunk
 DEFAULT_MATERIALIZATION_TIMEOUT = 600  # 10 minutes
 LARGE_MATERIALIZATION_TIMEOUT = 3600  # 60 minutes (for direct COPY of 200M+ row tables)
 CHUNKED_MATERIALIZATION_TIMEOUT = (
-  1800  # 30 minutes per 10M row batch - increased from 600s after timeout failures
+  2400  # 40 minutes per 20M row batch - increased for larger batch size
 )
 
 # Chunked materialization settings for large tables
 # RE-ENABLED (2026-01-31): Direct COPY of 200M+ row tables causes OOM on r7g.2xlarge
 # with 64GB RAM when LadybugDB buffer pool is boosted. Batching prevents memory
 # exhaustion by materializing in chunks with cleanup between batches.
-# 10M batches with 30min timeout balances memory (~85% peak) vs timeout risk.
-# 5M batches peaked at 80% memory but timed out at 10min; 15M risks OOM.
+# 20M batches with 30min timeout balances memory vs timeout risk.
+# 10M batches were conservative; 20M reduces batch count for large tables.
 # Tables larger than this are batched; smaller tables use single COPY.
-MATERIALIZATION_BATCH_SIZE = 10_000_000  # 10M rows per batch
+MATERIALIZATION_BATCH_SIZE = 20_000_000  # 20M rows per batch
 
 # Retry configuration for staging operations
 # On timeout or failure, retry the entire table from scratch
@@ -299,32 +299,6 @@ def _get_materialization_timeout(table_name: str) -> float:
   return float(DEFAULT_MATERIALIZATION_TIMEOUT)
 
 
-def _group_dates_by_quarter(dates: list[str]) -> dict[str, list[str]]:
-  """Group filing dates by quarter.
-
-  Args:
-      dates: List of filing dates in YYYY-MM-DD format
-
-  Returns:
-      Dictionary mapping quarter keys (e.g., "2024-Q1") to list of dates in that quarter.
-      Sorted by quarter key.
-  """
-  quarters: dict[str, list[str]] = {}
-  for date_str in dates:
-    try:
-      year, month, _ = date_str.split("-")
-      quarter = (int(month) - 1) // 3 + 1
-      quarter_key = f"{year}-Q{quarter}"
-      if quarter_key not in quarters:
-        quarters[quarter_key] = []
-      quarters[quarter_key].append(date_str)
-    except (ValueError, IndexError):
-      logger.warning(f"Skipping invalid date format: {date_str}")
-      continue
-  # Sort by quarter key
-  return dict(sorted(quarters.items()))
-
-
 class XBRLDuckDBGraphProcessor:
   """
   XBRL graph data processor using DuckDB-based ingestion pattern.
@@ -354,6 +328,14 @@ class XBRLDuckDBGraphProcessor:
     # New structure: sec/processed/filed=YYYY-MM-DD/nodes/TABLE/*.parquet
     # Old structure (deprecated): sec/year=YYYY/nodes/TABLE/*.parquet
     self.source_prefix = source_prefix or "sec/processed"
+
+  def _s3_url_exists(self, s3_url: str) -> bool:
+    """Check if an S3 URL (s3://bucket/key format) exists."""
+    s3_path = s3_url.replace("s3://", "")
+    bucket_end = s3_path.find("/")
+    bucket = s3_path[:bucket_end]
+    key = s3_path[bucket_end + 1 :]
+    return self.s3_client.object_exists(bucket, key)
 
   async def stage_to_duckdb(
     self,
@@ -606,14 +588,27 @@ class XBRLDuckDBGraphProcessor:
     year = year or now.year
     quarter = quarter or ((now.month - 1) // 3 + 1)
 
+    # Build list of quarters to scan (current + previous during overlap period)
+    # This catches late-indexed filings near quarter boundaries (UTC/EST timing, SEC delays)
+    quarters_to_scan: list[tuple[int, int]] = [(year, quarter)]
+
+    quarter_start_month = (quarter - 1) * 3 + 1
+    if now.month == quarter_start_month and now.day <= 5:
+      # First 5 days of new quarter: also scan previous quarter
+      if quarter == 1:
+        quarters_to_scan.append((year - 1, 4))
+      else:
+        quarters_to_scan.append((year, quarter - 1))
+
     def log_progress(msg: str) -> None:
       logger.info(msg)
       if progress_callback:
         progress_callback(msg)
 
+    quarters_str = ", ".join(f"{y}-Q{q}" for y, q in quarters_to_scan)
     logger.info(
       f"Starting incremental DuckDB staging for graph {self.graph_id} "
-      f"(year={year}, Q{quarter})"
+      f"(quarters: {quarters_str})"
     )
 
     try:
@@ -646,28 +641,42 @@ class XBRLDuckDBGraphProcessor:
           if name not in TAXONOMY_STRUCTURE_TABLES
         }
 
-      # Build quarter date pattern for glob
-      # Q1: 01-*, 02-*, 03-*  Q2: 04-*, 05-*, 06-*  etc.
-      quarter_months = {
-        1: ["01", "02", "03"],
-        2: ["04", "05", "06"],
-        3: ["07", "08", "09"],
-        4: ["10", "11", "12"],
-      }
-      months = quarter_months[quarter]
-
-      # Stage each table incrementally
+      # Stage each table incrementally using quarterly partition format
+      # New format: filed=2024-Q1 with single TABLE.parquet file
       successful_tables: list[str] = []
       table_infos: dict[str, TableInfo] = {}
       failed_tables: list[tuple[str, str]] = []
 
       total_tables = len(tables_by_type)
       for i, (table_name, entity_type) in enumerate(tables_by_type.items(), 1):
-        # Build S3 patterns for all months in the quarter
+        # Build S3 patterns for all quarters to scan (handles quarter-end overlap)
         s3_patterns = [
-          f"s3://{self.bucket}/{self.source_prefix}/filed={year}-{month}-*/{entity_type}/{table_name}/*.parquet"
-          for month in months
+          f"s3://{self.bucket}/{self.source_prefix}/filed={y}-Q{q}/{entity_type}/{table_name}.parquet"
+          for y, q in quarters_to_scan
         ]
+
+        # Filter to only existing files (important during overlap period)
+        # DuckDB fails if any file in a list doesn't exist, so we must filter first
+        if len(s3_patterns) > 1:
+          s3_patterns = [p for p in s3_patterns if self._s3_url_exists(p)]
+          if not s3_patterns:
+            log_progress(
+              f"[{i}/{total_tables}] Skipped {table_name}: no files for any quarter"
+            )
+            successful_tables.append(table_name)
+            table_infos[table_name] = TableInfo(
+              name=table_name,
+              row_count=0,
+              file_count=0,
+              staged_at=datetime.now(UTC).isoformat(),
+              skipped=True,
+            )
+            continue
+
+        # Use single pattern if only one quarter, list if multiple
+        s3_pattern: str | list[str] = (
+          s3_patterns[0] if len(s3_patterns) == 1 else s3_patterns
+        )
 
         timeout = _get_staging_timeout(table_name)
         log_progress(f"[{i}/{total_tables}] INSERT {table_name} (Q{quarter} {year})...")
@@ -677,7 +686,7 @@ class XBRLDuckDBGraphProcessor:
           response = await client.insert_into_table(
             graph_id=self.graph_id,
             table_name=table_name,
-            s3_pattern=s3_patterns,
+            s3_pattern=s3_pattern,
             timeout=timeout,
           )
 
@@ -1123,7 +1132,7 @@ class XBRLDuckDBGraphProcessor:
     table_name: str,
     entity_type: str,
     graph_client: "GraphClient",
-    quarters: dict[str, list[str]],
+    quarters: list[str],
     log_progress: Callable[[str], None],
     table_index: int,
     total_tables: int,
@@ -1145,7 +1154,7 @@ class XBRLDuckDBGraphProcessor:
         table_name: Name of the table to stage
         entity_type: "nodes" or "relationships"
         graph_client: Graph API client instance
-        quarters: Dict mapping quarter keys ("2024-Q1") to filing dates
+        quarters: List of quarter partition keys (e.g., ["2024-Q1", "2024-Q2", ...])
         log_progress: Progress logging callback
         table_index: Current table index for progress display
         total_tables: Total number of tables for progress display
@@ -1157,27 +1166,24 @@ class XBRLDuckDBGraphProcessor:
     chunk_tables: list[str] = []
     chunk_row_counts: dict[str, int] = {}
     total_duration = 0.0
-    quarter_list = list(quarters.keys())
 
     log_progress(
       f"[{table_index}/{total_tables}] Staging {table_name} by quarter "
-      f"({len(quarter_list)} quarters, chunk+merge)..."
+      f"({len(quarters)} quarters, chunk+merge)..."
     )
 
     # Phase 1: Load each quarter into a separate chunk table
-    for q_idx, quarter_key in enumerate(quarter_list):
-      actual_dates = quarters[quarter_key]
+    for q_idx, quarter_key in enumerate(quarters):
       # Chunk table name: Association_chunk_2024_Q1
       chunk_name = f"{table_name}_chunk_{quarter_key.replace('-', '_')}"
 
-      s3_patterns = [
-        f"s3://{self.bucket}/{self.source_prefix}/filed={date}/{entity_type}/{table_name}/*.parquet"
-        for date in actual_dates
-      ]
-
-      log_progress(
-        f"  [{quarter_key}] Loading chunk {q_idx + 1}/{len(quarter_list)}..."
+      # Single file per table per quarter: TABLE.parquet
+      s3_pattern = (
+        f"s3://{self.bucket}/{self.source_prefix}/filed={quarter_key}/"
+        f"{entity_type}/{table_name}.parquet"
       )
+
+      log_progress(f"  [{quarter_key}] Loading chunk {q_idx + 1}/{len(quarters)}...")
 
       # Retry logic for this chunk
       chunk_success = False
@@ -1188,7 +1194,7 @@ class XBRLDuckDBGraphProcessor:
           response = await graph_client.create_table(
             graph_id=self.graph_id,
             table_name=chunk_name,
-            s3_pattern=s3_patterns,
+            s3_pattern=s3_pattern,
             timeout=timeout,
           )
 
@@ -1459,14 +1465,13 @@ class XBRLDuckDBGraphProcessor:
     skipped_tables: list[str] = []
 
     # Build partition patterns for glob
-    # Uses filed=YYYY-MM-DD partition structure with part files
-    # Pattern: sec/processed/filed=YYYY-MM-DD/nodes/Table/*.parquet
+    # Uses quarterly partition structure: filed=YYYY-QN/nodes/TABLE.parquet
     if year:
-      # Year filter for partial backfill (matches all dates in that year)
-      filed_pattern = f"filed={year}-*"
+      # Year filter for partial backfill (matches all quarters in that year)
+      filed_pattern = f"filed={year}-Q*"
     else:
-      # All dates for full staging
-      filed_pattern = "filed=*"
+      # All quarters for full staging
+      filed_pattern = "filed=*-Q*"
 
     # Helper for progress logging (both logger and optional callback)
     def log_progress(msg: str) -> None:
@@ -1474,15 +1479,14 @@ class XBRLDuckDBGraphProcessor:
       if progress_callback:
         progress_callback(msg)
 
-    # Discover quarters for chunked staging (only if needed)
-    quarters_by_date: dict[str, list[str]] | None = None
+    # Discover quarterly partitions for chunked staging (only if needed)
+    quarterly_partitions: list[str] | None = None
     if chunk_large_tables:
-      # Discover filing dates and group by quarter
-      filing_dates = await self._discover_filed_dates(year=year)
-      if filing_dates:
-        quarters_by_date = _group_dates_by_quarter(filing_dates)
+      # Discover quarterly partitions from S3
+      quarterly_partitions = await self._discover_filed_partitions(year=year)
+      if quarterly_partitions:
         logger.info(
-          f"Quarter chunking enabled: {len(quarters_by_date)} quarters discovered"
+          f"Quarter chunking enabled: {len(quarterly_partitions)} quarters discovered"
         )
 
     total_tables = len(tables)
@@ -1492,14 +1496,14 @@ class XBRLDuckDBGraphProcessor:
 
       # Use quarter-based chunking for chunkable tables (if enabled and quarters discovered)
       # Only tables with per-filing data (no cross-quarter duplicates) can be chunked.
-      if is_chunkable and quarters_by_date and chunk_large_tables:
+      if is_chunkable and quarterly_partitions and chunk_large_tables:
         # Per-quarter retry logic is inside _stage_large_table_by_quarters
         # No outer retry needed - that would restart from Q1 and waste completed work
         success, table_info, error = await self._stage_large_table_by_quarters(
           table_name=table_name,
           entity_type=entity_type,
           graph_client=graph_client,
-          quarters=quarters_by_date,
+          quarters=quarterly_partitions,
           log_progress=log_progress,
           table_index=i,
           total_tables=total_tables,
@@ -1512,11 +1516,11 @@ class XBRLDuckDBGraphProcessor:
         continue
 
       # Standard staging for small tables (or when chunking is disabled)
-      # Build glob pattern for part file output structure:
-      # s3://bucket/sec/processed/filed=*/nodes/Entity/*.parquet
+      # Build glob pattern for quarterly structure:
+      # s3://bucket/sec/processed/filed=2024-Q*/nodes/Entity.parquet
       s3_pattern = (
         f"s3://{self.bucket}/{self.source_prefix}/"
-        f"{filed_pattern}/{entity_type}/{table_name}/*.parquet"
+        f"{filed_pattern}/{entity_type}/{table_name}.parquet"
       )
 
       # Get appropriate timeout for this table (large tables get extended timeout)
@@ -1882,19 +1886,19 @@ class XBRLDuckDBGraphProcessor:
       "tables": results,
     }
 
-  async def _discover_filed_dates(self, year: int | None = None) -> list[str]:
+  async def _discover_filed_partitions(self, year: int | None = None) -> list[str]:
     """
-    Discover all filed= partition dates from S3.
+    Discover all filed= quarterly partitions from S3.
 
     Used for quarter-based chunking of large tables.
 
     Args:
-        year: Optional year filter. If provided, only returns dates from that year.
+        year: Optional year filter. If provided, only returns quarters from that year.
 
     Returns:
-        Sorted list of filing dates (YYYY-MM-DD strings)
+        Sorted list of quarterly partition keys (e.g., ["2024-Q1", "2024-Q2", ...])
     """
-    filed_dates: list[str] = []
+    partitions: list[str] = []
     prefix = f"{self.source_prefix}/"
 
     paginator = self.s3_client.s3_client.get_paginator("list_objects_v2")
@@ -1905,13 +1909,16 @@ class XBRLDuckDBGraphProcessor:
         for prefix_info in page["CommonPrefixes"]:
           prefix_path = prefix_info["Prefix"]
           if "filed=" in prefix_path:
-            # Extract date from "sec/processed/filed=2026-01-15/"
+            # Extract partition from "sec/processed/filed=2024-Q1/"
             filed_part = prefix_path.split("filed=")[1].rstrip("/")
+            # Only accept quarterly format (YYYY-QN)
+            if "-Q" not in filed_part:
+              continue
             # Filter by year if specified
             if year and not filed_part.startswith(str(year)):
               continue
-            filed_dates.append(filed_part)
+            partitions.append(filed_part)
 
-    filed_dates.sort()
-    logger.info(f"Discovered {len(filed_dates)} filed= dates from S3")
-    return filed_dates
+    partitions.sort()
+    logger.info(f"Discovered {len(partitions)} filed= quarterly partitions from S3")
+    return partitions

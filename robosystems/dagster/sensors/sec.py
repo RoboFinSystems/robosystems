@@ -57,12 +57,12 @@ SEC_PROCESSING_SENSOR_STATUS = (
 def sec_processing_sensor(context: SensorEvaluationContext):
   """Discover quarters with pending SEC filings and trigger batch processing.
 
-  Each Dagster run processes up to 500 filings (batch_limit) then exits.
+  Each Dagster run processes up to SEC_PROCESS_BATCH_LIMIT filings then exits.
   This sensor continuously triggers new runs while pending files remain,
-  enabling natural memory release between batches.
+  enabling natural memory release between batches and crash resilience.
 
   Batch Processing Model:
-  1. Job processes up to 500 filings, exits gracefully
+  1. Job processes batch, flushes to S3 (merging with existing data), exits
   2. Sensor runs every 5 minutes, detects remaining pending files
   3. Triggers another batch if pending files exist and no active run
   4. Repeats until all files processed
@@ -76,11 +76,10 @@ def sec_processing_sensor(context: SensorEvaluationContext):
   3. Yield one RunRequest per quarter with pending files
   4. Dagster's run coordinator controls concurrent quarter processing
 
-  Partition Mode Selection:
-  - Current quarter: use_filing_date_partition=True (daily mode)
-    Each filing outputs to its actual filing date for incremental staging.
-  - Historical quarters: use_filing_date_partition=False (quarterly mode)
-    All filings output to quarter-end date for efficient backfill.
+  Output Structure:
+  - All filings output to quarterly partitions (filed=YYYY-QN)
+  - Single file per table per quarter with append-based merging
+  - Shared tables (Element, Label, etc.) deduplicated on identifier
 
   Deduplication:
   - No run_key used - allows retries after failures
@@ -156,11 +155,6 @@ def sec_processing_sensor(context: SensorEvaluationContext):
     f"Quarters: {sorted(quarters_with_pending)}"
   )
 
-  # Determine current quarter for partition mode selection
-  now = datetime.now(UTC)
-  current_quarter = f"{now.year}-Q{(now.month - 1) // 3 + 1}"
-  context.log.info(f"Current quarter: {current_quarter} (will use daily partitioning)")
-
   # Yield RunRequest for each quarter with pending files
   for quarter in sorted(quarters_with_pending):
     # Check for in-progress runs to prevent duplicate processing triggers
@@ -176,31 +170,16 @@ def sec_processing_sensor(context: SensorEvaluationContext):
       context.log.info(f"Skipping {quarter} - already has an active run")
       continue
 
-    # Use daily partitioning for current quarter (incremental processing)
-    # Use quarterly partitioning for historical quarters (backfill)
-    use_daily = quarter == current_quarter
-    mode = "daily" if use_daily else "quarterly"
-
-    context.log.info(f"Triggering {quarter} with {mode} partitioning")
+    context.log.info(f"Triggering {quarter} for processing")
 
     # No run_key - rely on active runs check to prevent concurrent runs.
     # This allows re-triggering after failures when pending files remain.
     yield RunRequest(
       partition_key=quarter,  # Use Dagster's partition system
-      run_config={
-        "ops": {
-          "sec_processed_filings": {
-            "config": {
-              "use_filing_date_partition": use_daily,
-            }
-          }
-        }
-      },
       tags={
         "quarter": quarter,
         "pipeline": "sec",
         "phase": "process",
-        "partition_mode": mode,
       },
     )
 
@@ -336,8 +315,9 @@ def _get_quarters_to_scan() -> list[str]:
   """Get quarters to scan for incremental download.
 
   Always scans current quarter. Also scans previous quarter during the first
-  few days of a new quarter to catch late-indexed filings (filings submitted
-  on the last day of a quarter may not appear in EFTS until the next day).
+  several days of a new quarter to catch late-indexed filings (filings submitted
+  near quarter-end may not appear in EFTS for 1-2 days due to SEC indexing delays
+  and UTC/EST timing differences).
 
   Returns:
       List of partition keys like ["2025-Q1"] or ["2025-Q1", "2024-Q4"]
@@ -351,9 +331,10 @@ def _get_quarters_to_scan() -> list[str]:
   # Quarter start months: Q1=Jan, Q2=Apr, Q3=Jul, Q4=Oct
   quarter_start_month = (current_quarter - 1) * 3 + 1
 
-  # Scan previous quarter for first 3 days of new quarter
-  # This catches filings submitted late on quarter-end that get indexed next day
-  if now.month == quarter_start_month and now.day <= 3:
+  # Scan previous quarter for first 5 days of new quarter
+  # This catches filings submitted late on quarter-end that get indexed later
+  # (SEC indexing delays + UTC/EST timing can push filings 1-2 days)
+  if now.month == quarter_start_month and now.day <= 5:
     if current_quarter == 1:
       quarters.append(f"{current_year - 1}-Q4")
     else:
@@ -462,23 +443,9 @@ def sec_download_to_process_sensor(context: RunStatusSensorContext):
     f"Download completed for {partition_key} (batch={batch_id}), triggering processing"
   )
 
-  # Determine partition mode (daily for current quarter, quarterly for historical)
-  now = datetime.now(UTC)
-  current_quarter = f"{now.year}-Q{(now.month - 1) // 3 + 1}"
-  use_daily = partition_key == current_quarter
-
   yield RunRequest(
     run_key=f"sec-process-chain-{partition_key}-{dagster_run.run_id[:8]}",
     partition_key=partition_key,
-    run_config={
-      "ops": {
-        "sec_processed_filings": {
-          "config": {
-            "use_filing_date_partition": use_daily,
-          }
-        }
-      }
-    },
     tags={
       "pipeline": "sec",
       "phase": "process",

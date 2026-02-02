@@ -100,6 +100,9 @@ Without this filter, revenue queries return segment breakdowns + totals mixed to
     """
     Discover fact patterns with their aspects for complex queries.
 
+    Uses optimized query patterns that sample facts FIRST before doing
+    expensive joins to avoid timeout on large databases (200M+ facts).
+
     Args:
         focus: Area to focus on (dimensional, temporal, completeness, all)
         element_filter: Optional element qname to filter to
@@ -119,8 +122,12 @@ Without this filter, revenue queries return segment breakdowns + totals mixed to
       "tips": [],
     }
 
+    # Very small sample size to ensure fast response on 200M+ fact databases
+    # Sampling happens FIRST without filtering, then analysis on sample
+    sample_size = 10000
+
     try:
-      # Check if Fact nodes exist
+      # Check if Fact nodes exist (uses index, very fast)
       count_query = "MATCH (f:Fact) RETURN count(f) as count"
       count_result = await self.client.execute_query(count_query)
 
@@ -132,32 +139,46 @@ Without this filter, revenue queries return segment breakdowns + totals mixed to
 
       result["total_facts"] = count_result[0]["count"]
 
-      # Analyze fact types (sample 500K facts to avoid full scan)
-      fact_types_query = """
+      # Analyze fact types - sample FIRST (no WHERE), then aggregate
+      # This is the fastest possible pattern: MATCH -> LIMIT -> aggregate
+      fact_types_query = f"""
             MATCH (f:Fact)
-            WITH f LIMIT 500000
+            WITH f LIMIT {sample_size}
             RETURN
                 count(CASE WHEN f.numeric_value IS NOT NULL THEN 1 END) as numeric_facts,
                 count(CASE WHEN f.fact_type = 'Nonnumeric' THEN 1 END) as text_facts,
-                count(CASE WHEN f.fact_type = 'Textblock' THEN 1 END) as textblock_facts
+                count(CASE WHEN f.fact_type = 'Textblock' THEN 1 END) as textblock_facts,
+                count(CASE WHEN f.has_dimensions = true THEN 1 END) as dimensional_facts
             """
       fact_types_result = await self.client.execute_query(fact_types_query)
       if fact_types_result:
         result["fact_types"] = fact_types_result[0]
-        result["fact_types"]["note"] = "Sampled from 500K facts"
+        result["fact_types"]["note"] = f"Sampled from {sample_size} facts"
 
-      # Element filter clause
-      element_clause = ""
-      if element_filter:
-        element_clause = f"AND e.qname = '{element_filter}'"
-
-      # Dimensional analysis (sample 500K facts to avoid full scan)
+      # Dimensional analysis - sample ANY facts, then filter for dimensions
+      # Key: NO WHERE clause before LIMIT to avoid full table scan
       if focus in ["all", "dimensional"]:
-        dim_query = f"""
-                MATCH (f:Fact)-[:FACT_HAS_ELEMENT]->(e:Element)
-                OPTIONAL MATCH (f)-[:FACT_HAS_DIMENSION]->(d:FactDimension)
-                WHERE f.numeric_value IS NOT NULL {element_clause}
-                WITH f, e, d LIMIT 500000
+        if element_filter:
+          # When filtering by element, start from Element (smaller table)
+          # Still sample first, then filter
+          dim_query = f"""
+                MATCH (e:Element {{qname: '{element_filter}'}})<-[:FACT_HAS_ELEMENT]-(f:Fact)
+                WITH f, e LIMIT {sample_size}
+                MATCH (f)-[:FACT_HAS_DIMENSION]->(d:FactDimension)
+                WHERE f.has_dimensions = true
+                RETURN e.qname as element, d.axis_uri as dim_type,
+                       d.member_uri as dim_value, count(f) as fact_count
+                ORDER BY fact_count DESC
+                LIMIT {limit}
+                """
+        else:
+          # Sample ANY facts first, then filter for dimensional ones
+          dim_query = f"""
+                MATCH (f:Fact)
+                WITH f LIMIT {sample_size}
+                WITH f WHERE f.has_dimensions = true
+                MATCH (f)-[:FACT_HAS_ELEMENT]->(e:Element)
+                MATCH (f)-[:FACT_HAS_DIMENSION]->(d:FactDimension)
                 RETURN e.qname as element, d.axis_uri as dim_type,
                        d.member_uri as dim_value, count(f) as fact_count
                 ORDER BY fact_count DESC
@@ -175,13 +196,25 @@ Without this filter, revenue queries return segment breakdowns + totals mixed to
             }
             result["dimensional_patterns"].append(pattern)
 
-      # Temporal analysis (sample 500K facts to avoid full scan)
+      # Temporal analysis - sample ANY facts first, then filter for numeric
       if focus in ["all", "temporal"]:
-        temporal_query = f"""
-                MATCH (f:Fact)-[:FACT_HAS_PERIOD]->(p:Period)
+        if element_filter:
+          temporal_query = f"""
+                MATCH (e:Element {{qname: '{element_filter}'}})<-[:FACT_HAS_ELEMENT]-(f:Fact)
+                WITH f, e LIMIT {sample_size}
+                WITH f, e WHERE f.numeric_value IS NOT NULL
+                MATCH (f)-[:FACT_HAS_PERIOD]->(p:Period)
+                RETURN p.end_date as period, e.qname as element, count(f) as fact_count
+                ORDER BY period DESC
+                LIMIT {limit}
+                """
+        else:
+          temporal_query = f"""
+                MATCH (f:Fact)
+                WITH f LIMIT {sample_size}
+                WITH f WHERE f.numeric_value IS NOT NULL
+                MATCH (f)-[:FACT_HAS_PERIOD]->(p:Period)
                 MATCH (f)-[:FACT_HAS_ELEMENT]->(e:Element)
-                WHERE f.numeric_value IS NOT NULL {element_clause}
-                WITH f, p, e LIMIT 500000
                 RETURN p.end_date as period, e.qname as element, count(f) as fact_count
                 ORDER BY period DESC
                 LIMIT {limit}
@@ -189,19 +222,25 @@ Without this filter, revenue queries return segment breakdowns + totals mixed to
         temporal_result = await self.client.execute_query(temporal_query)
         result["temporal_coverage"] = temporal_result
 
-      # Common aspect combinations (sample 500K facts to avoid full scan)
-      aspect_query = f"""
-            MATCH (f:Fact)-[:FACT_HAS_ELEMENT]->(e:Element)
-            OPTIONAL MATCH (f)-[:FACT_HAS_PERIOD]->(p:Period)
-            OPTIONAL MATCH (f)-[:FACT_HAS_DIMENSION]->(d:FactDimension)
-            OPTIONAL MATCH (f)-[:FACT_HAS_UNIT]->(u:Unit)
-            WHERE f.numeric_value IS NOT NULL {element_clause}
-            WITH f, e, p, d, u LIMIT 500000
+      # Common aspect combinations - sample first, then aggregate
+      if element_filter:
+        aspect_query = f"""
+            MATCH (e:Element {{qname: '{element_filter}'}})<-[:FACT_HAS_ELEMENT]-(f:Fact)
+            WITH f, e LIMIT {sample_size}
             RETURN e.qname as element,
-                   count(DISTINCT p) as periods,
-                   count(DISTINCT d) as dimensions,
-                   count(DISTINCT u) as units,
-                   count(f) as total_facts
+                   count(f) as total_facts,
+                   count(CASE WHEN f.has_dimensions = true THEN 1 END) as dimensional_facts,
+                   count(CASE WHEN f.has_dimensions = false THEN 1 END) as consolidated_facts
+            """
+      else:
+        aspect_query = f"""
+            MATCH (f:Fact)
+            WITH f LIMIT {sample_size}
+            MATCH (f)-[:FACT_HAS_ELEMENT]->(e:Element)
+            RETURN e.qname as element,
+                   count(f) as total_facts,
+                   count(CASE WHEN f.has_dimensions = true THEN 1 END) as dimensional_facts,
+                   count(CASE WHEN f.has_dimensions = false THEN 1 END) as consolidated_facts
             ORDER BY total_facts DESC
             LIMIT {limit}
             """
@@ -288,6 +327,7 @@ LIMIT 10""",
           "Period nodes provide time context for facts",
           "FactDimension nodes enable segment analysis",
           "Without dimensional filtering, you'll get both totals AND breakdowns mixed together",
+          f"Results based on {sample_size} fact sample for fast response",
         ]
       )
 
