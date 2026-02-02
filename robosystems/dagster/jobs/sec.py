@@ -47,6 +47,7 @@ from robosystems.dagster.assets import (
   sec_duckdb_incremental_staged,
   sec_duckdb_staged,
   sec_graph_direct_copy,
+  sec_graph_incremental_copy,
   sec_graph_materialized,
   sec_processed_filings,
   sec_quarter_partitions,
@@ -116,7 +117,7 @@ sec_process_job = define_asset_job(
 
 # Stage 1: DuckDB Staging
 # Discovers processed files from S3 and stages to persistent DuckDB.
-# Uses Standard profile (2 vCPU, 8 GB) - staging is I/O bound, not CPU intensive.
+# Actual DuckDB work happens on LadybugDB instance via Graph API.
 sec_stage_job = define_asset_job(
   name="sec_stage",
   description="Stage SEC files to persistent DuckDB (no graph ingestion).",
@@ -124,11 +125,11 @@ sec_stage_job = define_asset_job(
   tags={
     "pipeline": "sec",
     "phase": "stage",
-    # Standard profile: 2 vCPU, 8 GB, 50 GB storage - staging is mostly I/O bound
-    "ecs/cpu": "2048",
-    "ecs/memory": "8192",
-    "ecs/ephemeral_storage": "50",
-    # Long-running job (2+ hours) - use on-demand to avoid Spot interruptions
+    # Minimal profile: just orchestrating Graph API calls, no local compute
+    "ecs/cpu": "256",
+    "ecs/memory": "512",
+    "ecs/ephemeral_storage": "21",
+    # On-demand to avoid interruptions (long-running orchestration)
     "ecs/run_task_kwargs": {
       "capacityProviderStrategy": [
         {"capacityProvider": "FARGATE", "weight": 1, "base": 1},
@@ -140,7 +141,7 @@ sec_stage_job = define_asset_job(
 # Stage 2: LadybugDB Materialization
 # Materializes to LadybugDB from existing DuckDB staging.
 # Retry-safe: if this fails, just re-run it - DuckDB staging is preserved.
-# Uses Standard profile (2 vCPU, 8 GB) - materialization is network/API bound.
+# Actual materialization happens on LadybugDB instance via Graph API.
 sec_materialize_job = define_asset_job(
   name="sec_materialize",
   description="Materialize SEC graph from DuckDB staging (retry-safe).",
@@ -148,11 +149,11 @@ sec_materialize_job = define_asset_job(
   tags={
     "pipeline": "sec",
     "phase": "materialize",
-    # Standard profile: 2 vCPU, 8 GB, 50 GB storage - materialization is network/API bound
-    "ecs/cpu": "2048",
-    "ecs/memory": "8192",
-    "ecs/ephemeral_storage": "50",
-    # Long-running job - use on-demand to avoid Spot interruptions
+    # Minimal profile: just orchestrating Graph API calls, no local compute
+    "ecs/cpu": "256",
+    "ecs/memory": "512",
+    "ecs/ephemeral_storage": "21",
+    # On-demand to avoid interruptions (long-running orchestration)
     "ecs/run_task_kwargs": {
       "capacityProviderStrategy": [
         {"capacityProvider": "FARGATE", "weight": 1, "base": 1},
@@ -163,7 +164,7 @@ sec_materialize_job = define_asset_job(
 
 # Combined: Run both stages in sequence
 # Useful for full rebuilds with checkpointing between stages.
-# Uses Standard profile (2 vCPU, 8 GB) - combined stage+materialize is I/O bound.
+# Actual work happens on LadybugDB instance via Graph API.
 sec_staged_materialize_job = define_asset_job(
   name="sec_staged_materialize",
   description="Full SEC pipeline: stage to DuckDB then materialize to LadybugDB.",
@@ -171,11 +172,11 @@ sec_staged_materialize_job = define_asset_job(
   tags={
     "pipeline": "sec",
     "phase": "full",
-    # Standard profile: 2 vCPU, 8 GB, 50 GB storage - stage+materialize is I/O/network bound
-    "ecs/cpu": "2048",
-    "ecs/memory": "8192",
-    "ecs/ephemeral_storage": "50",
-    # Long-running job (2+ hours) - use on-demand to avoid Spot interruptions
+    # Minimal profile: just orchestrating Graph API calls, no local compute
+    "ecs/cpu": "256",
+    "ecs/memory": "512",
+    "ecs/ephemeral_storage": "21",
+    # On-demand to avoid interruptions (long-running orchestration)
     "ecs/run_task_kwargs": {
       "capacityProviderStrategy": [
         {"capacityProvider": "FARGATE", "weight": 1, "base": 1},
@@ -206,11 +207,11 @@ sec_incremental_ingest_job = define_asset_job(
   tags={
     "pipeline": "sec",
     "mode": "incremental",
-    # Standard profile: 2 vCPU, 8 GB, 50 GB storage - incremental staging is I/O bound
-    "ecs/cpu": "2048",
-    "ecs/memory": "8192",
-    "ecs/ephemeral_storage": "50",
-    # Long-running job - use on-demand to avoid Spot interruptions
+    # Minimal profile: just orchestrating Graph API calls, no local compute
+    "ecs/cpu": "256",
+    "ecs/memory": "512",
+    "ecs/ephemeral_storage": "21",
+    # On-demand to avoid interruptions (long-running orchestration)
     "ecs/run_task_kwargs": {
       "capacityProviderStrategy": [
         {"capacityProvider": "FARGATE", "weight": 1, "base": 1},
@@ -243,11 +244,44 @@ sec_direct_copy_job = define_asset_job(
   tags={
     "pipeline": "sec",
     "phase": "direct_copy",
-    # Standard profile: 2 vCPU, 8 GB - LadybugDB does heavy lifting
-    "ecs/cpu": "2048",
-    "ecs/memory": "8192",
-    "ecs/ephemeral_storage": "50",
-    # Long-running job - use on-demand to avoid Spot interruptions
+    # Minimal profile: just orchestrating Graph API calls, no local compute
+    "ecs/cpu": "256",
+    "ecs/memory": "512",
+    "ecs/ephemeral_storage": "21",
+    # On-demand to avoid interruptions (long-running orchestration)
+    "ecs/run_task_kwargs": {
+      "capacityProviderStrategy": [
+        {"capacityProvider": "FARGATE", "weight": 1, "base": 1},
+      ],
+    },
+  },
+)
+
+
+# ============================================================================
+# Phase 3d: Incremental S3 → LadybugDB Copy (Preferred for Daily Updates)
+# ============================================================================
+# Preferred approach for daily incremental updates because:
+# - Copies directly from S3 parquet to LadybugDB (bypasses DuckDB)
+# - Uses ignore_errors=true to skip duplicates (constraint violations)
+# - No need to diff what's new in DuckDB vs LadybugDB
+# - Simpler and faster than DuckDB incremental staging
+#
+# Only scans current quarter + previous quarter during 5-day overlap.
+# Safe to run daily - duplicates are rejected by LadybugDB constraints.
+
+sec_incremental_copy_job = define_asset_job(
+  name="sec_incremental_copy",
+  description="Incremental S3 → LadybugDB copy (preferred for daily updates).",
+  selection=AssetSelection.assets(sec_graph_incremental_copy),
+  tags={
+    "pipeline": "sec",
+    "mode": "incremental_copy",
+    # Minimal profile: just orchestrating Graph API calls, no local compute
+    "ecs/cpu": "256",
+    "ecs/memory": "512",
+    "ecs/ephemeral_storage": "21",
+    # On-demand to avoid interruptions (long-running orchestration)
     "ecs/run_task_kwargs": {
       "capacityProviderStrategy": [
         {"capacityProvider": "FARGATE", "weight": 1, "base": 1},
@@ -270,11 +304,12 @@ sec_backup_job = define_asset_job(
   tags={
     "pipeline": "sec",
     "phase": "backup",
-    # Standard profile: 2 vCPU, 8 GB - backup is I/O bound
+    # Higher profile: downloads full backup, compresses locally, uploads to S3
+    # SEC database is huge - needs memory to hold entire backup during compression
     "ecs/cpu": "2048",
     "ecs/memory": "8192",
     "ecs/ephemeral_storage": "50",
-    # Use on-demand to avoid Spot interruptions during backup
+    # On-demand to avoid interruptions during backup
     "ecs/run_task_kwargs": {
       "capacityProviderStrategy": [
         {"capacityProvider": "FARGATE", "weight": 1, "base": 1},

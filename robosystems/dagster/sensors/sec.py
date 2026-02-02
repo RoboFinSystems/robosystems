@@ -34,6 +34,7 @@ from dagster import (
 from robosystems.config import env
 from robosystems.dagster.jobs.sec import (
   sec_download_job,
+  sec_incremental_copy_job,
   sec_incremental_ingest_job,
   sec_materialize_job,
   sec_process_job,
@@ -586,16 +587,145 @@ def sec_incremental_staging_sensor(context: SensorEvaluationContext):
   )
 
 
+# ============================================================================
+# SEC Incremental Copy Sensor (Preferred for Daily Updates)
+# ============================================================================
+# This sensor triggers the preferred incremental copy approach:
+#   process → incremental copy (S3 → LadybugDB with ignore_errors)
+#
+# Unlike DuckDB staging, this bypasses DuckDB entirely and uses LadybugDB's
+# ignore_errors=true to handle duplicates via constraint violations.
+# Much faster than full DuckDB rebuild since we don't need to diff.
+#
+# Controlled by: SEC_INCREMENTAL_PIPELINE_ENABLED=true (default: stopped)
+
+
+@sensor(
+  job=sec_incremental_copy_job,
+  minimum_interval_seconds=300,  # Check every 5 minutes
+  default_status=DefaultSensorStatus.STOPPED,  # Off by default, enable in Dagster UI
+  description="Trigger incremental copy when all pending SourceFiles are processed (preferred)",
+)
+def sec_incremental_copy_sensor(context: SensorEvaluationContext):
+  """Trigger incremental S3 → LadybugDB copy when processing is complete.
+
+  This is the PREFERRED approach for daily incremental updates because:
+  - Copies directly from S3 to LadybugDB (bypasses DuckDB)
+  - Uses ignore_errors=true to skip duplicates (constraint violations)
+  - No need to diff what's new - just stuff it in, duplicates are rejected
+  - Much faster than DuckDB staging + full LadybugDB rebuild
+
+  Detects when pending count reaches 0 (all files processed), then triggers
+  incremental copy for current quarter + previous quarter during overlap.
+
+  Default: STOPPED - enable manually in Dagster UI when ready to use.
+  """
+  from datetime import timedelta
+
+  from robosystems.database import session as SessionLocal
+  from robosystems.models.iam import SourceFile
+
+  # Skip in dev - use manual job triggers for testing
+  if env.ENVIRONMENT == "dev":
+    yield SkipReason("Skipped in dev - use Dagster UI to trigger manually")
+    return
+
+  session = None
+  try:
+    session = SessionLocal()
+
+    # Check for pending files
+    pending_count = (
+      session.query(SourceFile)
+      .filter(
+        SourceFile.graph_id == "sec",
+        SourceFile.status == "pending",
+      )
+      .count()
+    )
+
+    if pending_count > 0:
+      yield SkipReason(f"{pending_count} files still pending processing")
+      return
+
+    # Check if there are recently processed files (last 24 hours)
+    cutoff = datetime.now(UTC) - timedelta(hours=24)
+
+    recent_count = (
+      session.query(SourceFile)
+      .filter(
+        SourceFile.graph_id == "sec",
+        SourceFile.status == "success",
+        SourceFile.processed_at >= cutoff,
+      )
+      .count()
+    )
+
+    if recent_count == 0:
+      yield SkipReason("No recently processed files to copy")
+      return
+
+  except Exception as e:
+    context.log.error(f"Database query failed: {e}")
+    yield SkipReason(f"Database error: {e}")
+    return
+  finally:
+    if session:
+      session.close()
+
+  # Check if incremental copy job is already running
+  active_runs = context.instance.get_runs(
+    filters=RunsFilter(
+      job_name="sec_incremental_copy",
+      statuses=[DagsterRunStatus.STARTED, DagsterRunStatus.QUEUED],
+    ),
+    limit=1,
+  )
+  if active_runs:
+    context.log.info(
+      f"Incremental copy already running (run_id={active_runs[0].run_id}), skipping"
+    )
+    return
+
+  # Create run key based on current date to prevent duplicate daily runs
+  today = datetime.now(UTC).strftime("%Y-%m-%d")
+  run_key = f"sec-incremental-copy-{today}"
+
+  context.log.info(
+    f"All processing complete ({recent_count} files in last 24h), "
+    f"triggering incremental copy"
+  )
+
+  yield RunRequest(
+    run_key=run_key,
+    run_config={
+      "ops": {
+        "sec_graph_incremental_copy": {
+          "config": {
+            "graph_id": "sec",
+            # year/quarter default to current if not specified
+          }
+        },
+      }
+    },
+    tags={
+      "pipeline": "sec",
+      "phase": "incremental_copy",
+      "mode": "incremental",
+    },
+  )
+
+
 @run_status_sensor(
   run_status=DagsterRunStatus.SUCCESS,
-  monitored_jobs=[sec_incremental_ingest_job],
+  monitored_jobs=[sec_incremental_ingest_job, sec_incremental_copy_job],
   request_job=shared_repository_snapshot_job,
   default_status=SEC_INCREMENTAL_PIPELINE_STATUS,
   minimum_interval_seconds=60,
-  description="Trigger shared repository snapshot after incremental ingest completes",
+  description="Trigger shared repository snapshot after incremental ingest/copy completes",
 )
 def sec_incremental_post_ingest_snapshot_sensor(context: RunStatusSensorContext):
-  """Trigger shared repository snapshot after incremental ingest completes.
+  """Trigger shared repository snapshot after incremental ingest or copy completes.
 
   Part of the automated incremental pipeline. After incremental staging +
   materialization succeeds, this triggers:

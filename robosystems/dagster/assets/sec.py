@@ -363,6 +363,30 @@ class SECDirectCopyConfig(Config):
   year: int | None = None  # Optional year filter (None = all years)
 
 
+class SECIncrementalCopyConfig(Config):
+  """Configuration for incremental S3 → LadybugDB copy (bypasses DuckDB staging).
+
+  This is the preferred approach for daily incremental updates:
+  1. Copies directly from S3 parquet to LadybugDB
+  2. Uses ignore_errors=true to skip duplicates (constraint violations)
+  3. Only scans current quarter + previous quarter during 5-day overlap
+
+  Benefits over DuckDB incremental staging:
+  - No need to diff what's new in DuckDB vs LadybugDB
+  - Simpler and faster for daily updates
+  - LadybugDB handles deduplication via constraints
+
+  When to use this vs sec_duckdb_incremental_staged:
+  - Use this for daily incremental updates (simpler, faster)
+  - Use DuckDB staging for backfills or when you need DuckDB queries
+  """
+
+  graph_id: str = "sec"  # Target graph ID
+  year: int | None = None  # Year to copy (default: current year)
+  quarter: int | None = None  # Quarter to copy 1-4 (default: current quarter)
+  skip_taxonomy_relationships: bool = False  # Skip taxonomy structure tables
+
+
 # ============================================================================
 # Year-Partitioned Assets (download phase)
 # ============================================================================
@@ -1953,6 +1977,82 @@ def sec_duckdb_incremental_staged(
       "quarter": config.quarter,
       "tables_staged": len(result.table_names),
       "total_rows": result.total_rows,  # Net new rows
+      "duration_ms": result.duration_ms,
+    }
+  )
+
+
+@asset(
+  group_name="sec_pipeline",
+  description="Incremental S3 → LadybugDB copy (bypasses DuckDB, uses ignore_errors)",
+  kinds={"ladybug"},
+  metadata={
+    "pipeline": "sec",
+    "stage": "incremental_copy",
+    "decoupled": True,
+  },
+)
+def sec_graph_incremental_copy(
+  context: AssetExecutionContext,
+  config: SECIncrementalCopyConfig,
+) -> MaterializeResult:
+  """Copy current quarter's files directly to LadybugDB (bypasses DuckDB staging).
+
+  This is the preferred approach for daily incremental updates:
+  1. Copies directly from S3 parquet to LadybugDB
+  2. Uses ignore_errors=true to skip duplicates (constraint violations)
+  3. Only scans current quarter + previous quarter during 5-day overlap
+
+  Benefits over DuckDB incremental staging:
+  - No need to diff what's new in DuckDB vs LadybugDB
+  - Simpler and faster for daily updates
+  - LadybugDB handles deduplication via constraints
+
+  Precondition: LadybugDB database must already exist with SEC schema.
+
+  Run with:
+    uv run dagster asset materialize -m robosystems.dagster --select sec_graph_incremental_copy
+  """
+  import asyncio
+
+  from robosystems.adapters.sec import XBRLDuckDBGraphProcessor
+
+  processor = XBRLDuckDBGraphProcessor(graph_id=config.graph_id)
+
+  async def run_incremental_copy():
+    return await processor.copy_incremental_to_ladybug(
+      year=config.year,
+      quarter=config.quarter,
+      skip_taxonomy_relationships=config.skip_taxonomy_relationships,
+      progress_callback=context.log.info,
+    )
+
+  result = asyncio.run(run_incremental_copy())
+
+  if result.status == "error":
+    context.log.error(f"Incremental copy failed: {result.error}")
+    return MaterializeResult(
+      metadata={
+        "graph_id": config.graph_id,
+        "status": "error",
+        "error": result.error or "Unknown error",
+        "duration_ms": result.duration_ms,
+      }
+    )
+
+  context.log.info(
+    f"Incremental copy complete: {len(result.table_names)} tables, "
+    f"{result.total_rows} records, {result.duration_ms / 1000:.2f}s"
+  )
+
+  return MaterializeResult(
+    metadata={
+      "graph_id": config.graph_id,
+      "status": result.status,
+      "year": config.year,
+      "quarter": config.quarter,
+      "tables_copied": len(result.table_names),
+      "total_records": result.total_rows,
       "duration_ms": result.duration_ms,
     }
   )

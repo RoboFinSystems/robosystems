@@ -8,8 +8,9 @@ Sensors monitor for conditions and trigger jobs when criteria are met:
 Incremental Pipeline (SEC_INCREMENTAL_PIPELINE_ENABLED=true):
 - sec_incremental_download_schedule: Download at 9pm EST weekdays
 - sec_download_to_process_sensor: Chain download → process
-- sec_incremental_staging_sensor: Chain process → incremental stage + materialize
-- sec_incremental_post_ingest_snapshot_sensor: Chain incremental ingest → snapshot
+- sec_incremental_staging_sensor: Chain process → incremental stage + materialize (DuckDB approach)
+- sec_incremental_copy_sensor: Chain process → incremental copy (preferred, bypasses DuckDB)
+- sec_incremental_post_ingest_snapshot_sensor: Chain incremental ingest/copy → snapshot
 """
 
 from robosystems.dagster.sensors.provisioning import (
@@ -18,6 +19,7 @@ from robosystems.dagster.sensors.provisioning import (
 )
 from robosystems.dagster.sensors.sec import (
   sec_download_to_process_sensor,
+  sec_incremental_copy_sensor,
   sec_incremental_download_schedule,
   sec_incremental_post_ingest_snapshot_sensor,
   sec_incremental_staging_sensor,
@@ -29,6 +31,7 @@ __all__ = [
   "pending_repository_sensor",
   "pending_subscription_sensor",
   "sec_download_to_process_sensor",
+  "sec_incremental_copy_sensor",
   "sec_incremental_download_schedule",
   "sec_incremental_post_ingest_snapshot_sensor",
   "sec_incremental_staging_sensor",

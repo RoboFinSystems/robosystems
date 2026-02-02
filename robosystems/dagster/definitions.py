@@ -95,6 +95,7 @@ from robosystems.dagster.jobs.sec import (
   sec_backup_job,
   sec_direct_copy_job,
   sec_download_job,
+  sec_incremental_copy_job,
   sec_incremental_ingest_job,
   sec_materialize_job,
   sec_process_job,
@@ -120,6 +121,7 @@ from robosystems.dagster.sensors import (
   pending_subscription_sensor,
   # Incremental pipeline (automated chain, disabled by default)
   sec_download_to_process_sensor,
+  sec_incremental_copy_sensor,
   sec_incremental_download_schedule,
   sec_incremental_post_ingest_snapshot_sensor,
   sec_incremental_staging_sensor,
@@ -178,6 +180,7 @@ all_jobs = [
   sec_materialize_job,  # Materialize from DuckDB to LadybugDB (standard profile)
   sec_staged_materialize_job,  # Full pipeline: stage + materialize (standard profile)
   sec_incremental_ingest_job,  # Incremental: INSERT new files + materialize
+  sec_incremental_copy_job,  # Incremental S3 → LadybugDB (preferred for daily updates)
   sec_direct_copy_job,  # Direct S3 → LadybugDB (bypasses DuckDB staging)
   sec_backup_job,  # Create downloadable backup of SEC database
   # Shared repository jobs
@@ -224,6 +227,7 @@ all_sensors = [
   # SEC incremental pipeline chain sensors (disabled by default)
   sec_download_to_process_sensor,
   sec_incremental_staging_sensor,
+  sec_incremental_copy_sensor,  # Preferred: bypasses DuckDB, uses ignore_errors
   sec_incremental_post_ingest_snapshot_sensor,
 ]
 
