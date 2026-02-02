@@ -27,7 +27,7 @@ jobs:
       # Environment setup
       ENVIRONMENT: test
       LOG_LEVEL: INFO
-      # Use fixed ports for robosystems-service
+      # Use fixed ports for robosystems
       DATABASE_URL: postgresql://postgres:postgres@localhost:5432/robosystems_test
       TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/robosystems_test
       POSTGRES_PASSWORD: postgres
@@ -277,7 +277,7 @@ jobs:
         run: |
           # Clean up local Docker Compose containers (not GitHub Actions service containers)
           echo "🧹 Post-test cleanup..."
-          docker ps -q --filter "label=com.docker.compose.project=robosystems-service" | xargs -r docker rm -f || true
+          docker ps -q --filter "label=com.docker.compose.project=robosystems" | xargs -r docker rm -f || true
 
           # Clean up graph test databases
           echo "🧹 Cleaning up graph test databases..."

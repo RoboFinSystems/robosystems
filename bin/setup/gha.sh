@@ -183,9 +183,8 @@ function setup_full_config() {
     done
     read -p "Enter GitHub Organization Name [YourGitHubOrg]: " GITHUB_ORG
     GITHUB_ORG=${GITHUB_ORG:-"YourGitHubOrg"}
-    read -p "Enter Repository Name [robosystems-service]: " REPO_NAME
-    REPO_NAME=${REPO_NAME:-"robosystems-service"}
-    REPOSITORY_NAME="${GITHUB_ORG}/${REPO_NAME}"
+    read -p "Enter Repository Name [robosystems]: " REPO_NAME
+    REPO_NAME=${REPO_NAME:-"robosystems"}
     read -p "Enter AWS Account ID: " AWS_ACCOUNT_ID
 
     # Check if alert email is already available (from bootstrap or GitHub)
@@ -210,7 +209,6 @@ function setup_full_config() {
     echo "Setting all variables..."
 
     # Core Infrastructure
-    gh variable set REPOSITORY_NAME --body "$REPOSITORY_NAME"
     gh variable set ECR_REPOSITORY --body "$ECR_REPOSITORY"
 
     # AWS Configuration (typically org-level, set at repo level for forks)
@@ -288,12 +286,9 @@ function setup_full_config() {
     fi
 
     # Dagster Run Job Configuration (EcsRunLauncher - Fargate)
-    gh variable set DAGSTER_RUN_JOB_CPU_PROD --body "1024"
-    gh variable set DAGSTER_RUN_JOB_MEMORY_PROD --body "4096"
+    # Note: CPU/Memory configured at Dagster job level, not GHA variables
     gh variable set DAGSTER_MAX_CONCURRENT_RUNS_PROD --body "20"
     if $setup_staging; then
-        gh variable set DAGSTER_RUN_JOB_CPU_STAGING --body "1024"
-        gh variable set DAGSTER_RUN_JOB_MEMORY_STAGING --body "4096"
         gh variable set DAGSTER_MAX_CONCURRENT_RUNS_STAGING --body "20"
     fi
 
@@ -320,10 +315,8 @@ function setup_full_config() {
 
     # Dagster Deployment Options
     gh variable set DAGSTER_REFRESH_ECS_PROD --body "true"
-    gh variable set RUN_MIGRATIONS_PROD --body "true"
     if $setup_staging; then
         gh variable set DAGSTER_REFRESH_ECS_STAGING --body "true"
-        gh variable set RUN_MIGRATIONS_STAGING --body "true"
     fi
 
     # Dagster Monitoring Configuration
@@ -338,7 +331,6 @@ function setup_full_config() {
     gh variable set DATABASE_ALLOCATED_STORAGE_PROD --body "20"
     gh variable set DATABASE_MAX_ALLOCATED_STORAGE_PROD --body "100"
     gh variable set DATABASE_MULTI_AZ_ENABLED_PROD --body "false"
-    gh variable set DATABASE_SECRETS_ROTATION_DAYS --body "90"
     gh variable set DATABASE_POSTGRES_VERSION_PROD --body "16.11"
     if $setup_staging; then
         gh variable set DATABASE_ENGINE_STAGING --body "postgres"
@@ -361,30 +353,32 @@ function setup_full_config() {
     gh variable set CLOUDTRAIL_LOG_RETENTION_DAYS --body "90"
     gh variable set CLOUDTRAIL_DATA_EVENTS_ENABLED --body "false"
 
+    # Secrets Rotation Configuration (monthly automatic rotation via secrets-rotation.yml)
+    # Disabled by default - enable after testing in staging
+    gh variable set SECRETS_ROTATION_ENABLED_PROD --body "false"
+    if $setup_staging; then
+        gh variable set SECRETS_ROTATION_ENABLED_STAGING --body "false"
+    fi
+
     # Valkey Configuration
     gh variable set VALKEY_NODE_TYPE_PROD --body "cache.t4g.micro"
     gh variable set VALKEY_NUM_NODES_PROD --body "1"
     gh variable set VALKEY_ENCRYPTION_ENABLED_PROD --body "true"
-    gh variable set VALKEY_SECRET_ROTATION_ENABLED_PROD --body "true"
-    gh variable set VALKEY_ROTATION_SCHEDULE_DAYS_PROD --body "90"
     gh variable set VALKEY_SNAPSHOT_RETENTION_DAYS_PROD --body "7"
     gh variable set VALKEY_VERSION_PROD --body "8.1"
     if $setup_staging; then
         gh variable set VALKEY_NODE_TYPE_STAGING --body "cache.t4g.micro"
         gh variable set VALKEY_NUM_NODES_STAGING --body "1"
         gh variable set VALKEY_ENCRYPTION_ENABLED_STAGING --body "true"
-        gh variable set VALKEY_SECRET_ROTATION_ENABLED_STAGING --body "true"
-        gh variable set VALKEY_ROTATION_SCHEDULE_DAYS_STAGING --body "90"
         gh variable set VALKEY_SNAPSHOT_RETENTION_DAYS_STAGING --body "0"
         gh variable set VALKEY_VERSION_STAGING --body "8.1"
     fi
 
     # LadybugDB Writer Configuration - Standard Tier
-    gh variable set LBUG_STANDARD_ENABLED_PROD --body "true"
+    # Note: LBUG_STANDARD_ENABLED is not needed - standard tier is always deployed (always_enabled: true in graph.yml)
     gh variable set LBUG_STANDARD_MIN_INSTANCES_PROD --body "1"
     gh variable set LBUG_STANDARD_MAX_INSTANCES_PROD --body "10"
     if $setup_staging; then
-        gh variable set LBUG_STANDARD_ENABLED_STAGING --body "true"
         gh variable set LBUG_STANDARD_MIN_INSTANCES_STAGING --body "1"
         gh variable set LBUG_STANDARD_MAX_INSTANCES_STAGING --body "5"
     fi
@@ -435,13 +429,8 @@ function setup_full_config() {
         gh variable set SHARED_REPLICAS_INSTANCE_TYPE_STAGING --body "r7g.medium"
     fi
 
-    # Neo4j Writer Configuration (optional backend)
-    gh variable set NEO4J_COMMUNITY_LARGE_ENABLED_PROD --body "false"
-    gh variable set NEO4J_ENTERPRISE_XLARGE_ENABLED_PROD --body "false"
-    if $setup_staging; then
-        gh variable set NEO4J_COMMUNITY_LARGE_ENABLED_STAGING --body "false"
-        gh variable set NEO4J_ENTERPRISE_XLARGE_ENABLED_STAGING --body "false"
-    fi
+    # Note: Neo4j variables removed - Neo4j backend is disabled by default in graph.yml
+    # If Neo4j support is needed in future, add NEO4J_*_ENABLED_* variables here
 
     # Graph AMI Configuration (updated via Graph Maintenance workflow)
     # Look up latest Amazon Linux 2023 ARM64 AMI from AWS SSM
@@ -459,7 +448,6 @@ function setup_full_config() {
     fi
 
     # Graph Settings
-    gh variable set GRAPH_API_KEY_ROTATION_DAYS --body "90"
     gh variable set GRAPH_UPDATE_CONTAINERS_PROD --body "true"
     if $setup_staging; then
         gh variable set GRAPH_UPDATE_CONTAINERS_STAGING --body "true"
@@ -549,7 +537,7 @@ function setup_full_config() {
     else
         echo "  🌐 Domain: VPC-only (bastion tunnel access)"
     fi
-    echo "  📦 Repository: $REPOSITORY_NAME"
+    echo "  📦 Repository: ${GITHUB_ORG}/${REPO_NAME}"
     echo "  🐳 ECR: $ECR_REPOSITORY"
     if $setup_staging; then
         echo "  🔧 Environments: Production + Staging"

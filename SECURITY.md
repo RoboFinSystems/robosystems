@@ -196,19 +196,20 @@ RoboSystems implements security controls at the infrastructure, application, and
 ```bash
 # Authentication
 JWT_ACCESS_TOKEN_EXPIRE_HOURS="24"
-GRAPH_API_KEY_ROTATION_DAYS="90"
 
 # Audit logging
 SECURITY_AUDIT_ENABLED="true"
 
 # Database security
-DATABASE_SECRETS_ROTATION_DAYS="90"
 VALKEY_ENCRYPTION_ENABLED_PROD="true"
-VALKEY_SECRET_ROTATION_ENABLED_PROD="true"
 
 # Infrastructure security
 WAF_ENABLED_PROD="true"
 WAF_AWS_MANAGED_RULES_ENABLED="true"
+
+# Secret rotation managed via GitHub Actions workflows (secrets-rotation.yml)
+SECRETS_ROTATION_ENABLED_PROD="false"
+SECRETS_ROTATION_ENABLED_STAGING="false"
 ```
 
 ### Validation Commands

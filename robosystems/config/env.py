@@ -613,12 +613,8 @@ class EnvConfig:
 
   # Valkey authentication (for encrypted/production environments)
   # This is fetched from AWS Secrets Manager in prod/staging environments
+  # Secret path: robosystems/{env}/valkey (defined in secrets_manager.py SECRET_MAPPINGS)
   VALKEY_AUTH_TOKEN = get_str_env("VALKEY_AUTH_TOKEN", "")
-
-  # Name of the Secrets Manager secret containing Valkey auth token
-  VALKEY_AUTH_SECRET_NAME = get_str_env(
-    "VALKEY_AUTH_SECRET_NAME", f"robosystems/{ENVIRONMENT}/valkey/auth"
-  )
 
   # Cache TTLs
   CREDIT_BALANCE_CACHE_TTL = get_int_env("CREDIT_BALANCE_CACHE_TTL", CACHE_TTL_SHORT)
@@ -827,7 +823,7 @@ class EnvConfig:
   # ==========================================================================
 
   # OpenTelemetry configuration
-  OTEL_SERVICE_NAME = get_str_env("OTEL_SERVICE_NAME", "robosystems-service")
+  OTEL_SERVICE_NAME = get_str_env("OTEL_SERVICE_NAME", "robosystems")
   OTEL_EXPORTER_OTLP_ENDPOINT = get_str_env(
     "OTEL_EXPORTER_OTLP_ENDPOINT", "http://localhost:4317"
   )

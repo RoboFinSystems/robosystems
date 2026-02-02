@@ -54,7 +54,7 @@ _instrumentation_enabled = False
 def _create_resource() -> Resource:
   """Create OpenTelemetry resource with service information."""
   try:
-    service_version = pkg_version("robosystems-service")
+    service_version = pkg_version("robosystems")
   except Exception:
     # Fallback if package version can't be determined
     service_version = "unknown"

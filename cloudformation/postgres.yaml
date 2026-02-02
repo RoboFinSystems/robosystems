@@ -218,6 +218,9 @@ Resources:
       Environment:
         Variables:
           SECRETS_MANAGER_ENDPOINT: !Sub https://secretsmanager.${AWS::Region}.amazonaws.com
+          ENVIRONMENT: !Ref Environment
+          # Companion secret to update after rotation (contains full connection details)
+          COMPANION_SECRET_NAME: !Sub robosystems/${Environment}/postgres
       Code:
         ImageUri: !Ref LambdaImageUri
       ImageConfig:
@@ -260,6 +263,13 @@ Resources:
                   - secretsmanager:PutSecretValue
                   - secretsmanager:UpdateSecretVersionStage
                 Resource: !Ref DBPasswordSecret
+              # Permission to update companion secret (robosystems/{env}/postgres)
+              # This secret contains full connection details used by applications
+              - Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                  - secretsmanager:UpdateSecret
+                Resource: !Sub "arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:robosystems/${Environment}/postgres-*"
               - Effect: Allow
                 Action:
                   - secretsmanager:GetRandomPassword
@@ -311,10 +321,19 @@ Resources:
       Action: lambda:InvokeFunction
       Principal: secretsmanager.amazonaws.com
 
-  # NOTE: Automatic rotation schedule has been removed.
-  # Rotation is now managed via GitHub Actions workflow (secrets-rotation.yml)
-  # which orchestrates rotation + service refresh atomically.
-  # The rotation Lambda is still available for on-demand invocation.
+  # Rotation Schedule - links Lambda to secret and enables on-demand rotation
+  # Actual rotation timing is managed via GitHub Actions (secrets-rotation.yml)
+  # The AutomaticallyAfterDays is set to max (1000 days) as a fallback only
+  PostgresSecretRotationSchedule:
+    Type: AWS::SecretsManager::RotationSchedule
+    DependsOn:
+      - PostgresSecretRotationPermission
+    Properties:
+      SecretId: !Ref DBPasswordSecret
+      RotationLambdaARN: !GetAtt PostgresSecretRotationLambda.Arn
+      RotationRules:
+        AutomaticallyAfterDays: 1000  # Fallback only - GHA triggers monthly
+      RotateImmediatelyOnUpdate: false
 
   # CloudWatch Alarms for Rotation Monitoring
   PostgresRotationFailureAlarm:
