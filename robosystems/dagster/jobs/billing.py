@@ -22,7 +22,12 @@ from dagster import (
 from robosystems.config import env
 from robosystems.dagster.resources import DatabaseResource
 from robosystems.logger import get_logger
-from robosystems.models.iam import GraphCredits, GraphCreditTransaction, GraphUsage
+from robosystems.models.iam import (
+  Graph,
+  GraphCredits,
+  GraphCreditTransaction,
+  GraphUsage,
+)
 from robosystems.models.iam.graph_credits import CreditTransactionType
 from robosystems.models.iam.graph_usage import UsageEventType
 from robosystems.operations.graph.credit_service import CreditService
@@ -675,8 +680,9 @@ def get_graphs_with_negative_balance(
         GraphCredits.billing_admin_id,
         GraphCredits.current_balance,
         GraphCredits.monthly_allocation,
-        GraphCredits.graph_tier,
+        Graph.graph_tier,
       )
+      .join(Graph, GraphCredits.graph_id == Graph.graph_id)
       .filter(GraphCredits.current_balance < 0)
       .all()
     )

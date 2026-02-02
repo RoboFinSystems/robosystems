@@ -16,7 +16,7 @@ from ...models.api.admin import (
   CreditPoolResponse,
   RepositoryCreditPoolResponse,
 )
-from ...models.iam import User
+from ...models.iam import Graph, User
 from ...models.iam.graph_credits import (
   CreditTransactionType,
   GraphCredits,
@@ -53,7 +53,8 @@ async def list_graph_credit_pools(
     query = session.query(GraphCredits)
 
     if tier:
-      query = query.filter(GraphCredits.graph_tier == tier)
+      query = query.join(Graph, GraphCredits.graph_id == Graph.graph_id)
+      query = query.filter(Graph.graph_tier == tier)
 
     if user_email:
       query = query.join(User, GraphCredits.user_id == User.id)
@@ -418,7 +419,8 @@ async def get_credit_analytics(
 
     graph_query = session.query(GraphCredits)
     if tier:
-      graph_query = graph_query.filter(GraphCredits.graph_tier == tier)
+      graph_query = graph_query.join(Graph, GraphCredits.graph_id == Graph.graph_id)
+      graph_query = graph_query.filter(Graph.graph_tier == tier)
     graph_pools = graph_query.all()
 
     graph_total_pools = len(graph_pools)
