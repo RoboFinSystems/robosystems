@@ -125,13 +125,18 @@ class StagingResult:
 
 @dataclass
 class MaterializeResult:
-  """Result from materialize_from_duckdb() operation.
+  """Result from materialize_from_duckdb() or copy_incremental_to_ladybug() operation.
 
   Contains statistics about the materialization (ingestion) operation.
   """
 
-  status: str  # "success", "error", "no_data"
-  total_rows_ingested: int = 0
+  status: str  # "success", "partial", "error", "no_data"
+  table_names: list[str] = field(default_factory=list)  # Successfully processed tables
+  failed_tables: list[dict[str, Any]] = field(
+    default_factory=list
+  )  # Tables with errors
+  total_rows_ingested: int = 0  # Alias for total_rows (backward compat)
+  total_rows: int = 0  # Total rows copied/ingested
   duration_ms: float = 0.0
   tables: list[dict[str, Any]] = field(default_factory=list)
   error: str | None = None
@@ -140,7 +145,10 @@ class MaterializeResult:
     """Convert to dictionary for metadata output."""
     return {
       "status": self.status,
+      "table_names": self.table_names,
+      "failed_tables": self.failed_tables,
       "total_rows_ingested": self.total_rows_ingested,
+      "total_rows": self.total_rows,
       "duration_ms": self.duration_ms,
       "tables": self.tables,
       "error": self.error,
@@ -151,21 +159,30 @@ class MaterializeResult:
 # Accepts a message string, called during staging/materialization for per-table progress
 ProgressCallback = Callable[[str], None]
 
-# Table-specific timeouts for DuckDB staging (seconds)
-# For chunked operations (quarter-by-quarter), each chunk is smaller so use shorter timeout
-# Default: 300s (5 min), Large non-chunked: 1800s (30 min), Large chunked: 600s (10 min)
-DEFAULT_STAGING_TIMEOUT = 300  # 5 minutes
-LARGE_TABLE_STAGING_TIMEOUT = 1800  # 30 minutes (for non-chunked large tables)
-CHUNKED_STAGING_TIMEOUT = 600  # 10 minutes per quarter chunk
-
-# Table-specific timeouts for LadybugDB materialization (seconds)
-# For batched operations, each batch is smaller so use shorter timeout
-# Default: 600s (10 min), Large non-chunked: 3600s (60 min), Batched: 1800s (30 min)
-DEFAULT_MATERIALIZATION_TIMEOUT = 600  # 10 minutes
-LARGE_MATERIALIZATION_TIMEOUT = 3600  # 60 minutes (for direct COPY of 200M+ row tables)
-CHUNKED_MATERIALIZATION_TIMEOUT = (
-  2400  # 40 minutes per 20M row batch - increased for larger batch size
-)
+# =============================================================================
+# Timeout Constants (seconds)
+# =============================================================================
+# These values are based on production testing with SEC data on r7g.medium/large
+# instances. Each operation type has different memory and I/O characteristics.
+#
+# DuckDB staging timeouts:
+# - INSERT INTO with S3 parquet reads, ~500K-1M rows/minute for large tables
+# - Network I/O bound (S3 → DuckDB), memory usage is bounded
+DEFAULT_STAGING_TIMEOUT = 300  # 5 min - small tables (<10M rows)
+LARGE_TABLE_STAGING_TIMEOUT = 1800  # 30 min - large tables (Fact: 200M+ rows)
+CHUNKED_STAGING_TIMEOUT = 600  # 10 min per quarter chunk - incremental staging
+#
+# LadybugDB materialization timeouts:
+# - Materialize from DuckDB to graph, ~300K-500K rows/minute
+# - CPU bound (graph construction), memory scales with batch size
+DEFAULT_MATERIALIZATION_TIMEOUT = 600  # 10 min - small/medium tables
+LARGE_MATERIALIZATION_TIMEOUT = 3600  # 60 min - direct COPY of 200M+ row tables
+CHUNKED_MATERIALIZATION_TIMEOUT = 2400  # 40 min per 20M row batch
+#
+# Incremental COPY timeouts:
+# - Direct S3 → LadybugDB COPY with ignore_errors, ~200K-400K rows/minute
+# - Memory efficient (spill_to_disk), network I/O bound
+INCREMENTAL_COPY_TIMEOUT = 600  # 10 min per table - incremental updates
 
 # Chunked materialization settings for large tables
 # RE-ENABLED (2026-01-31): Direct COPY of 200M+ row tables causes OOM on r7g.2xlarge
@@ -581,24 +598,27 @@ class XBRLDuckDBGraphProcessor:
     Returns:
         StagingResult with tables staged and row counts (net new rows)
     """
+    from robosystems.adapters.sec import (
+      get_current_quarter,
+      get_previous_quarter,
+      is_in_quarter_overlap_window,
+    )
+
     start_time = time.time()
 
     # Default to current year/quarter
     now = datetime.now(UTC)
-    year = year or now.year
-    quarter = quarter or ((now.month - 1) // 3 + 1)
+    if year is None or quarter is None:
+      year, quarter = get_current_quarter(now)
 
     # Build list of quarters to scan (current + previous during overlap period)
     # This catches late-indexed filings near quarter boundaries (UTC/EST timing, SEC delays)
     quarters_to_scan: list[tuple[int, int]] = [(year, quarter)]
 
-    quarter_start_month = (quarter - 1) * 3 + 1
-    if now.month == quarter_start_month and now.day <= 5:
-      # First 5 days of new quarter: also scan previous quarter
-      if quarter == 1:
-        quarters_to_scan.append((year - 1, 4))
-      else:
-        quarters_to_scan.append((year, quarter - 1))
+    if is_in_quarter_overlap_window(now):
+      # First N days of new quarter: also scan previous quarter
+      prev_year, prev_quarter = get_previous_quarter(year, quarter)
+      quarters_to_scan.append((prev_year, prev_quarter))
 
     def log_progress(msg: str) -> None:
       logger.info(msg)
@@ -797,24 +817,27 @@ class XBRLDuckDBGraphProcessor:
     Returns:
         MaterializeResult with tables copied and row counts
     """
+    from robosystems.adapters.sec import (
+      get_current_quarter,
+      get_previous_quarter,
+      is_in_quarter_overlap_window,
+    )
+
     start_time = time.time()
 
     # Default to current year/quarter
     now = datetime.now(UTC)
-    year = year or now.year
-    quarter = quarter or ((now.month - 1) // 3 + 1)
+    if year is None or quarter is None:
+      year, quarter = get_current_quarter(now)
 
     # Build list of quarters to scan (current + previous during overlap period)
     # This catches late-indexed filings near quarter boundaries
     quarters_to_scan: list[tuple[int, int]] = [(year, quarter)]
 
-    quarter_start_month = (quarter - 1) * 3 + 1
-    if now.month == quarter_start_month and now.day <= 5:
-      # First 5 days of new quarter: also scan previous quarter
-      if quarter == 1:
-        quarters_to_scan.append((year - 1, 4))
-      else:
-        quarters_to_scan.append((year, quarter - 1))
+    if is_in_quarter_overlap_window(now):
+      # First N days of new quarter: also scan previous quarter
+      prev_year, prev_quarter = get_previous_quarter(year, quarter)
+      quarters_to_scan.append((prev_year, prev_quarter))
 
     def log_progress(msg: str) -> None:
       logger.info(msg)
@@ -861,9 +884,6 @@ class XBRLDuckDBGraphProcessor:
       table_rows: dict[str, int] = {}
       failed_tables: list[tuple[str, str]] = []
 
-      # Timeout per table (small since only 1-2 quarters)
-      COPY_TIMEOUT = 600  # 10 minutes per table
-
       total_tables = len(ordered_tables)
       for i, (table_name, entity_type) in enumerate(ordered_tables, 1):
         # Build S3 paths for all quarters to scan
@@ -903,7 +923,7 @@ class XBRLDuckDBGraphProcessor:
             table_name=table_name,
             s3_pattern=s3_pattern,
             ignore_errors=True,  # Key: duplicates are silently skipped
-            timeout=COPY_TIMEOUT,
+            timeout=INCREMENTAL_COPY_TIMEOUT,
             wait_for_completion=True,
           )
 

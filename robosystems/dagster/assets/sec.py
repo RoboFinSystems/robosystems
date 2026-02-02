@@ -44,6 +44,7 @@ from dagster import (
   StaticPartitionsDefinition,
   asset,
 )
+from pydantic import Field
 
 from robosystems.config import env
 from robosystems.config.constants import SEC_PROCESS_BATCH_LIMIT
@@ -332,7 +333,9 @@ class SECIncrementalStageConfig(Config):
 
   graph_id: str = "sec"  # Target graph ID
   year: int | None = None  # Year to stage (default: current year)
-  quarter: int | None = None  # Quarter to stage 1-4 (default: current quarter)
+  quarter: int | None = Field(
+    default=None, ge=1, le=4
+  )  # Quarter 1-4 (default: current)
   skip_taxonomy_relationships: bool = False  # Skip taxonomy structure tables
 
 
@@ -383,7 +386,9 @@ class SECIncrementalCopyConfig(Config):
 
   graph_id: str = "sec"  # Target graph ID
   year: int | None = None  # Year to copy (default: current year)
-  quarter: int | None = None  # Quarter to copy 1-4 (default: current quarter)
+  quarter: int | None = Field(
+    default=None, ge=1, le=4
+  )  # Quarter 1-4 (default: current)
   skip_taxonomy_relationships: bool = False  # Skip taxonomy structure tables
 
 

@@ -298,25 +298,9 @@ def _get_quarters_to_scan() -> list[str]:
   Returns:
       List of partition keys like ["2025-Q1"] or ["2025-Q1", "2024-Q4"]
   """
-  now = datetime.now(UTC)
-  current_quarter = (now.month - 1) // 3 + 1
-  current_year = now.year
+  from robosystems.adapters.sec import get_quarters_to_scan
 
-  quarters = [f"{current_year}-Q{current_quarter}"]
-
-  # Quarter start months: Q1=Jan, Q2=Apr, Q3=Jul, Q4=Oct
-  quarter_start_month = (current_quarter - 1) * 3 + 1
-
-  # Scan previous quarter for first 5 days of new quarter
-  # This catches filings submitted late on quarter-end that get indexed later
-  # (SEC indexing delays + UTC/EST timing can push filings 1-2 days)
-  if now.month == quarter_start_month and now.day <= 5:
-    if current_quarter == 1:
-      quarters.append(f"{current_year - 1}-Q4")
-    else:
-      quarters.append(f"{current_year}-Q{current_quarter - 1}")
-
-  return quarters
+  return get_quarters_to_scan()
 
 
 @schedule(
