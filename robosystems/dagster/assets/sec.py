@@ -1326,9 +1326,11 @@ def _merge_with_existing_s3(
     existing_table = pq.read_table(BytesIO(existing_data))
     new_table = pq.read_table(BytesIO(new_data))
   except Exception as e:
-    # If we can't read existing data, just return new data
-    logger.warning("Failed to parse parquet for merge at %s, will overwrite: %s", s3_key, e)
-    return new_data
+    # If we can't parse new data but have valid existing data, keep existing
+    logger.warning(
+      "Failed to parse parquet for merge at %s, keeping existing: %s", s3_key, e
+    )
+    return existing_data
 
   # Concatenate tables
   combined = pa.concat_tables([existing_table, new_table], promote_options="permissive")
