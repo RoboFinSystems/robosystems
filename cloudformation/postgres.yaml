@@ -109,15 +109,6 @@ Parameters:
       - "false"
     ConstraintDescription: Must be true or false
 
-  # Secret Rotation Parameters
-  PostgresRotationDays:
-    Type: Number
-    Description: Number of days between automatic password rotations
-    Default: 90
-    MinValue: 1
-    MaxValue: 365
-    ConstraintDescription: Must be between 1 and 365 days
-
   # Monitoring & Observability Configuration
   SNSAlertEmail:
     Type: String
@@ -1030,13 +1021,8 @@ Outputs:
     Export:
       Name: !Sub ${AWS::StackName}-${Environment}-PostgresRotationLambdaArn
 
-  # NOTE: PostgresRotationScheduleArn output removed - rotation now managed via GitHub Actions
-
-  PostgresRotationDaysConfigured:
-    Description: Rotation frequency parameter (actual rotation scheduled via GitHub Actions)
-    Value: !Ref PostgresRotationDays
-    Export:
-      Name: !Sub ${AWS::StackName}-${Environment}-PostgresRotationDays
+  # NOTE: Rotation schedule/days outputs removed - rotation is managed via GitHub Actions
+  # with a 1000-day automatic fallback in the RotationSchedule resource
 
   MultiAZEnabled:
     Description: Whether Multi-AZ deployment is enabled for high availability
