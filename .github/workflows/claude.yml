@@ -11,13 +11,36 @@ on:
     types: [submitted]
 
 jobs:
+  check-runner-availability:
+    runs-on: ubuntu-latest
+    outputs:
+      runners_available: ${{ steps.check.outputs.runners_available }}
+      runner_type: ${{ steps.check.outputs.runner_type }}
+      runner_config: ${{ steps.check.outputs.runner_config }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository }}
+          ref: ${{ github.ref }}
+          token: ${{ github.token }}
+
+      - name: Check runner availability
+        id: check
+        uses: ./.github/actions/select-runner
+        with:
+          runner_labels: ${{ vars.RUNNER_LABELS || 'github-hosted' }}
+          runner_scope: ${{ vars.RUNNER_SCOPE || 'both' }}
+          github_token: ${{ secrets.ACTIONS_TOKEN }}
+
   claude:
+    needs: [check-runner-availability]
     if: |
       (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@claude')) ||
       (github.event_name == 'pull_request_review_comment' && contains(github.event.comment.body, '@claude')) ||
       (github.event_name == 'pull_request_review' && contains(github.event.review.body, '@claude')) ||
       (github.event_name == 'issues' && (contains(github.event.issue.body, '@claude') || contains(github.event.issue.title, '@claude')))
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(needs.check-runner-availability.outputs.runner_config) }}
     timeout-minutes: 15
     permissions:
       contents: read
@@ -29,7 +52,9 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          fetch-depth: 1
+          repository: ${{ github.repository }}
+          ref: ${{ github.ref }}
+          token: ${{ github.token }}
 
       - name: Run Claude Code
         id: claude
@@ -46,5 +71,5 @@ jobs:
 
           # Optional: Add claude_args to customize behavior and configuration
           # See https://github.com/anthropics/claude-code-action/blob/main/docs/usage.md
-          # or https://docs.claude.com/en/docs/claude-code/sdk#command-line for available options
-          # claude_args: '--model claude-opus-4-1-20250805 --allowed-tools Bash(gh pr:*)'
+          # or https://docs.claude.com/en/docs/claude-code/cli-reference for available options
+          # claude_args: '--allowed-tools Bash(gh pr:*)'
