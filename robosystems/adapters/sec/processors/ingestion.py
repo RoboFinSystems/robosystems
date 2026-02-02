@@ -329,6 +329,14 @@ class XBRLDuckDBGraphProcessor:
     # Old structure (deprecated): sec/year=YYYY/nodes/TABLE/*.parquet
     self.source_prefix = source_prefix or "sec/processed"
 
+  def _s3_url_exists(self, s3_url: str) -> bool:
+    """Check if an S3 URL (s3://bucket/key format) exists."""
+    s3_path = s3_url.replace("s3://", "")
+    bucket_end = s3_path.find("/")
+    bucket = s3_path[:bucket_end]
+    key = s3_path[bucket_end + 1 :]
+    return self.s3_client.object_exists(bucket, key)
+
   async def stage_to_duckdb(
     self,
     year: int | None = None,
@@ -646,6 +654,25 @@ class XBRLDuckDBGraphProcessor:
           f"s3://{self.bucket}/{self.source_prefix}/filed={y}-Q{q}/{entity_type}/{table_name}.parquet"
           for y, q in quarters_to_scan
         ]
+
+        # Filter to only existing files (important during overlap period)
+        # DuckDB fails if any file in a list doesn't exist, so we must filter first
+        if len(s3_patterns) > 1:
+          s3_patterns = [p for p in s3_patterns if self._s3_url_exists(p)]
+          if not s3_patterns:
+            log_progress(
+              f"[{i}/{total_tables}] Skipped {table_name}: no files for any quarter"
+            )
+            successful_tables.append(table_name)
+            table_infos[table_name] = TableInfo(
+              name=table_name,
+              row_count=0,
+              file_count=0,
+              staged_at=datetime.now(UTC).isoformat(),
+              skipped=True,
+            )
+            continue
+
         # Use single pattern if only one quarter, list if multiple
         s3_pattern: str | list[str] = (
           s3_patterns[0] if len(s3_patterns) == 1 else s3_patterns
