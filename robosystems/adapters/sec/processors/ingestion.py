@@ -580,14 +580,27 @@ class XBRLDuckDBGraphProcessor:
     year = year or now.year
     quarter = quarter or ((now.month - 1) // 3 + 1)
 
+    # Build list of quarters to scan (current + previous during overlap period)
+    # This catches late-indexed filings near quarter boundaries (UTC/EST timing, SEC delays)
+    quarters_to_scan: list[tuple[int, int]] = [(year, quarter)]
+
+    quarter_start_month = (quarter - 1) * 3 + 1
+    if now.month == quarter_start_month and now.day <= 5:
+      # First 5 days of new quarter: also scan previous quarter
+      if quarter == 1:
+        quarters_to_scan.append((year - 1, 4))
+      else:
+        quarters_to_scan.append((year, quarter - 1))
+
     def log_progress(msg: str) -> None:
       logger.info(msg)
       if progress_callback:
         progress_callback(msg)
 
+    quarters_str = ", ".join(f"{y}-Q{q}" for y, q in quarters_to_scan)
     logger.info(
       f"Starting incremental DuckDB staging for graph {self.graph_id} "
-      f"(year={year}, Q{quarter})"
+      f"(quarters: {quarters_str})"
     )
 
     try:
@@ -620,28 +633,23 @@ class XBRLDuckDBGraphProcessor:
           if name not in TAXONOMY_STRUCTURE_TABLES
         }
 
-      # Build quarter date pattern for glob
-      # Q1: 01-*, 02-*, 03-*  Q2: 04-*, 05-*, 06-*  etc.
-      quarter_months = {
-        1: ["01", "02", "03"],
-        2: ["04", "05", "06"],
-        3: ["07", "08", "09"],
-        4: ["10", "11", "12"],
-      }
-      months = quarter_months[quarter]
-
-      # Stage each table incrementally
+      # Stage each table incrementally using quarterly partition format
+      # New format: filed=2024-Q1 with single TABLE.parquet file
       successful_tables: list[str] = []
       table_infos: dict[str, TableInfo] = {}
       failed_tables: list[tuple[str, str]] = []
 
       total_tables = len(tables_by_type)
       for i, (table_name, entity_type) in enumerate(tables_by_type.items(), 1):
-        # Build S3 patterns for all months in the quarter
+        # Build S3 patterns for all quarters to scan (handles quarter-end overlap)
         s3_patterns = [
-          f"s3://{self.bucket}/{self.source_prefix}/filed={year}-{month}-*/{entity_type}/{table_name}/*.parquet"
-          for month in months
+          f"s3://{self.bucket}/{self.source_prefix}/filed={y}-Q{q}/{entity_type}/{table_name}.parquet"
+          for y, q in quarters_to_scan
         ]
+        # Use single pattern if only one quarter, list if multiple
+        s3_pattern: str | list[str] = (
+          s3_patterns[0] if len(s3_patterns) == 1 else s3_patterns
+        )
 
         timeout = _get_staging_timeout(table_name)
         log_progress(f"[{i}/{total_tables}] INSERT {table_name} (Q{quarter} {year})...")
@@ -651,7 +659,7 @@ class XBRLDuckDBGraphProcessor:
           response = await client.insert_into_table(
             graph_id=self.graph_id,
             table_name=table_name,
-            s3_pattern=s3_patterns,
+            s3_pattern=s3_pattern,
             timeout=timeout,
           )
 

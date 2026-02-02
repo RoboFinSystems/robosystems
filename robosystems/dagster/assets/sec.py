@@ -256,17 +256,18 @@ class SECProcessConfig(Config):
   but the job continues processing remaining filings in the batch.
 
   Memory Management:
-  - Each job processes at most batch_limit filings (default 15,000)
+  - Each job processes at most batch_limit filings (default 2,000)
   - Job exits gracefully after batch, releasing all memory
   - Sensor re-triggers if more pending files exist
   - Processing is disk-buffered (not memory-intensive)
 
-  Note: batch_limit set to 15,000 to handle Q2 (proxy season) which can
-  exceed 10k filings when all form types are included.
+  Note: Smaller batches leverage the merge strategy for crash resilience.
+  Each batch flushes to S3 (merging with existing data), so a crash loses
+  at most one batch instead of an entire quarter.
   """
 
   # Max filings to process per job run before exiting gracefully.
-  # Set to 15,000 to handle Q2 proxy season (can exceed 10k with all forms).
+  # Smaller batches provide crash resilience via incremental S3 merging.
   batch_limit: int = SEC_PROCESS_BATCH_LIMIT
 
   # Continue processing even if some filings fail

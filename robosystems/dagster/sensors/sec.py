@@ -57,12 +57,12 @@ SEC_PROCESSING_SENSOR_STATUS = (
 def sec_processing_sensor(context: SensorEvaluationContext):
   """Discover quarters with pending SEC filings and trigger batch processing.
 
-  Each Dagster run processes up to 500 filings (batch_limit) then exits.
+  Each Dagster run processes up to SEC_PROCESS_BATCH_LIMIT filings then exits.
   This sensor continuously triggers new runs while pending files remain,
-  enabling natural memory release between batches.
+  enabling natural memory release between batches and crash resilience.
 
   Batch Processing Model:
-  1. Job processes up to 500 filings, exits gracefully
+  1. Job processes batch, flushes to S3 (merging with existing data), exits
   2. Sensor runs every 5 minutes, detects remaining pending files
   3. Triggers another batch if pending files exist and no active run
   4. Repeats until all files processed
@@ -315,8 +315,9 @@ def _get_quarters_to_scan() -> list[str]:
   """Get quarters to scan for incremental download.
 
   Always scans current quarter. Also scans previous quarter during the first
-  few days of a new quarter to catch late-indexed filings (filings submitted
-  on the last day of a quarter may not appear in EFTS until the next day).
+  several days of a new quarter to catch late-indexed filings (filings submitted
+  near quarter-end may not appear in EFTS for 1-2 days due to SEC indexing delays
+  and UTC/EST timing differences).
 
   Returns:
       List of partition keys like ["2025-Q1"] or ["2025-Q1", "2024-Q4"]
@@ -330,9 +331,10 @@ def _get_quarters_to_scan() -> list[str]:
   # Quarter start months: Q1=Jan, Q2=Apr, Q3=Jul, Q4=Oct
   quarter_start_month = (current_quarter - 1) * 3 + 1
 
-  # Scan previous quarter for first 3 days of new quarter
-  # This catches filings submitted late on quarter-end that get indexed next day
-  if now.month == quarter_start_month and now.day <= 3:
+  # Scan previous quarter for first 5 days of new quarter
+  # This catches filings submitted late on quarter-end that get indexed later
+  # (SEC indexing delays + UTC/EST timing can push filings 1-2 days)
+  if now.month == quarter_start_month and now.day <= 5:
     if current_quarter == 1:
       quarters.append(f"{current_year - 1}-Q4")
     else:

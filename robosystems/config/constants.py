@@ -215,10 +215,12 @@ XBRL_GRAPH_LARGE_NODES = "Fact,Element,Label,Association,Structure,FactDimension
 SEC_RATE_LIMIT = 10  # requests per second (SEC.gov requirement)
 
 # SEC Processing Batch Limit
-# Set to 15,000 to handle Q2 (proxy season) which can exceed 10k filings.
-# EFTS queries are batched by form type to avoid 10k API limit, but combined
-# results can exceed 10k. The heavy job profile (16 vCPU, 64 GB) handles this.
-SEC_PROCESS_BATCH_LIMIT = 15000
+# Smaller batches leverage the merge strategy for crash resilience:
+# - Each batch flushes to S3, merging with existing data
+# - If job crashes, at most one batch is lost (not entire quarter)
+# - 2000 filings/batch = ~6 batches for Q2 (proxy season, ~11k filings)
+# - Sensor re-triggers until all pending files are processed
+SEC_PROCESS_BATCH_LIMIT = 2000
 
 # =============================================================================
 # FIXED BUSINESS RULES
