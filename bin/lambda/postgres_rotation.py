@@ -239,7 +239,7 @@ def set_secret(arn: str, token: str, environment: str) -> None:
 
   except Exception as e:
     error_type = type(e).__name__
-    logger.error(f"setSecret: Unable to set password: {error_type}")
+    logger.error(f"setSecret: Unable to set password: {error_type}: {e}")
     raise
   finally:
     if conn:
@@ -285,7 +285,7 @@ def test_secret(arn: str, token: str, environment: str) -> None:
 
   except Exception as e:
     error_type = type(e).__name__
-    logger.error(f"testSecret: Unable to connect with pending secret: {error_type}")
+    logger.error(f"testSecret: Unable to connect with pending secret: {error_type}: {e}")
     raise
   finally:
     if conn:
@@ -341,7 +341,7 @@ def update_companion_secret(new_password: str, environment: str) -> None:
     )
   except Exception as e:
     error_type = type(e).__name__
-    logger.error(f"Failed to update companion secret: {error_type}")
+    logger.error(f"Failed to update companion secret: {error_type}: {e}")
     # Don't raise - rotation succeeded, companion update is best-effort
     # Applications will get updated on next service refresh
 
@@ -382,4 +382,4 @@ def finish_secret(arn: str, token: str) -> None:
     update_companion_secret(new_password, environment)
   except Exception as e:
     error_type = type(e).__name__
-    logger.warning(f"Could not update companion secret: {error_type}")
+    logger.warning(f"Could not update companion secret: {error_type}: {e}")
