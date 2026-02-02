@@ -210,11 +210,7 @@ just setup-aws
   "CONNECTION_QUICKBOOKS_ENABLED": "false",
   "CONNECTION_SEC_ENABLED": "false",
 
-  // Schedule Flags (all disabled - enable as needed)
-  "BILLING_SCHEDULES_ENABLED": "true",
-  "INSTANCE_SCHEDULES_ENABLED": "true",
-  "SEC_PARALLEL_SENSOR_ENABLED": "false",
-  "SEC_INCREMENTAL_PIPELINE_ENABLED": "false",
+  // SEC pipeline flags
   "SEC_LARGE_SCALE_MODE_ENABLED": "false",
 
   // Integration Placeholders (update with real values)

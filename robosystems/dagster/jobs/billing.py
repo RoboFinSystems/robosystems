@@ -33,11 +33,11 @@ logger = get_logger(__name__)
 # Environment-based Schedule Status
 # ============================================================================
 
-# Billing schedules default to STOPPED. Enable via BILLING_SCHEDULES_ENABLED=true
-# in AWS Secrets Manager or environment variables.
+# Billing schedules require database access for credit/usage tracking.
+# RUNNING in prod/staging, STOPPED in dev.
 BILLING_SCHEDULE_STATUS = (
   DefaultScheduleStatus.RUNNING
-  if env.BILLING_SCHEDULES_ENABLED
+  if env.ENVIRONMENT != "dev"
   else DefaultScheduleStatus.STOPPED
 )
 

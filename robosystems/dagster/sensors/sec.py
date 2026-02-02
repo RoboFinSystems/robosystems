@@ -1,18 +1,23 @@
 """SEC pipeline sensors for automated incremental updates.
 
 Sensors trigger jobs based on SourceFile queue state and job completion.
+All sensors start STOPPED by default - enable in Dagster UI when ready.
 
-Architecture (SEC_INCREMENTAL_PIPELINE_ENABLED=true):
+Incremental Pipeline (enable all for automated daily updates):
 - Phase 1 (Download): sec_incremental_download_schedule triggers at 9pm EST weekdays
 - Phase 2 (Process): sec_download_to_process_sensor chains download → process
-- Phase 3 (Stage): sec_incremental_staging_sensor chains process → incremental stage + materialize
-- Phase 4 (Snapshot): sec_incremental_post_ingest_snapshot_sensor chains ingest → snapshot
+- Phase 3 (Stage): sec_incremental_staging_sensor chains process → stage (DuckDB only)
+- Phase 4 (Copy): sec_stage_to_copy_sensor chains stage → copy (S3 → LadybugDB direct)
+- Phase 5 (Snapshot): sec_incremental_post_ingest_snapshot_sensor chains copy → snapshot
 
-Manual Processing (SEC_PARALLEL_SENSOR_ENABLED=true):
+Manual Operations (not in automated chain):
+- sec_entity_update_job: Update mutable Entity attributes (run manually after copy)
+
+Backfill Processing (enable for bulk/manual processing):
 - sec_processing_sensor: Discovers pending SourceFiles, triggers batch processing per quarter
 
-Incremental staging uses INSERT INTO with dedup (only net new rows added).
-LadybugDB is fully rebuilt since it doesn't support incremental updates.
+Incremental staging uses INSERT INTO with dedup (only net new rows added to DuckDB).
+LadybugDB updates via direct S3 copy with ignore_errors=true for duplicate handling.
 """
 
 from datetime import UTC, datetime
@@ -34,24 +39,18 @@ from dagster import (
 from robosystems.config import env
 from robosystems.dagster.jobs.sec import (
   sec_download_job,
-  sec_incremental_ingest_job,
+  sec_incremental_copy_job,
+  sec_incremental_stage_job,
   sec_materialize_job,
   sec_process_job,
 )
 from robosystems.dagster.jobs.shared_repository import shared_repository_snapshot_job
 
-# Sensor status controlled by environment variable
-SEC_PROCESSING_SENSOR_STATUS = (
-  DefaultSensorStatus.RUNNING
-  if env.SEC_PARALLEL_SENSOR_ENABLED
-  else DefaultSensorStatus.STOPPED
-)
-
 
 @sensor(
   job=sec_process_job,
   minimum_interval_seconds=300,  # Check every 5 minutes
-  default_status=SEC_PROCESSING_SENSOR_STATUS,
+  default_status=DefaultSensorStatus.STOPPED,  # Enable in Dagster UI when ready
   description="Discover quarters with pending SourceFiles and trigger batch processing runs",
 )
 def sec_processing_sensor(context: SensorEvaluationContext):
@@ -188,20 +187,12 @@ def sec_processing_sensor(context: SensorEvaluationContext):
 # SEC Post-Materialization Snapshot Sensor
 # ============================================================================
 
-# Controlled by SEC_INCREMENTAL_PIPELINE_ENABLED - part of the full pipeline chain
-# download → process → stage → materialize → snapshot
-SEC_SNAPSHOT_SENSOR_STATUS = (
-  DefaultSensorStatus.RUNNING
-  if env.SEC_INCREMENTAL_PIPELINE_ENABLED
-  else DefaultSensorStatus.STOPPED
-)
-
 
 @run_status_sensor(
   run_status=DagsterRunStatus.SUCCESS,
   monitored_jobs=[sec_materialize_job],
   request_job=shared_repository_snapshot_job,
-  default_status=SEC_SNAPSHOT_SENSOR_STATUS,
+  default_status=DefaultSensorStatus.STOPPED,  # Enable in Dagster UI when ready
   minimum_interval_seconds=60,
   description="Trigger shared replica snapshot after SEC materialization completes",
 )
@@ -298,18 +289,6 @@ def sec_post_materialize_snapshot_sensor(context: RunStatusSensorContext):
 # Keep disabled during backfills; enable for production incremental updates.
 # ============================================================================
 
-SEC_INCREMENTAL_PIPELINE_STATUS = (
-  DefaultSensorStatus.RUNNING
-  if env.SEC_INCREMENTAL_PIPELINE_ENABLED
-  else DefaultSensorStatus.STOPPED
-)
-
-SEC_INCREMENTAL_SCHEDULE_STATUS = (
-  DefaultScheduleStatus.RUNNING
-  if env.SEC_INCREMENTAL_PIPELINE_ENABLED
-  else DefaultScheduleStatus.STOPPED
-)
-
 
 def _get_quarters_to_scan() -> list[str]:
   """Get quarters to scan for incremental download.
@@ -322,31 +301,15 @@ def _get_quarters_to_scan() -> list[str]:
   Returns:
       List of partition keys like ["2025-Q1"] or ["2025-Q1", "2024-Q4"]
   """
-  now = datetime.now(UTC)
-  current_quarter = (now.month - 1) // 3 + 1
-  current_year = now.year
+  from robosystems.adapters.sec import get_quarters_to_scan
 
-  quarters = [f"{current_year}-Q{current_quarter}"]
-
-  # Quarter start months: Q1=Jan, Q2=Apr, Q3=Jul, Q4=Oct
-  quarter_start_month = (current_quarter - 1) * 3 + 1
-
-  # Scan previous quarter for first 5 days of new quarter
-  # This catches filings submitted late on quarter-end that get indexed later
-  # (SEC indexing delays + UTC/EST timing can push filings 1-2 days)
-  if now.month == quarter_start_month and now.day <= 5:
-    if current_quarter == 1:
-      quarters.append(f"{current_year - 1}-Q4")
-    else:
-      quarters.append(f"{current_year}-Q{current_quarter - 1}")
-
-  return quarters
+  return get_quarters_to_scan()
 
 
 @schedule(
   job=sec_download_job,
   cron_schedule="0 21 * * 1-5",  # 9pm EST, Monday-Friday
-  default_status=SEC_INCREMENTAL_SCHEDULE_STATUS,
+  default_status=DefaultScheduleStatus.STOPPED,  # Enable in Dagster UI when ready
   execution_timezone="America/New_York",
 )
 def sec_incremental_download_schedule(context):
@@ -393,7 +356,7 @@ def sec_incremental_download_schedule(context):
   run_status=DagsterRunStatus.SUCCESS,
   monitored_jobs=[sec_download_job],
   request_job=sec_process_job,
-  default_status=SEC_INCREMENTAL_PIPELINE_STATUS,
+  default_status=DefaultSensorStatus.STOPPED,  # Enable in Dagster UI when ready
   minimum_interval_seconds=60,
   description="Chain: download success → trigger processing",
 )
@@ -457,30 +420,31 @@ def sec_download_to_process_sensor(context: RunStatusSensorContext):
 
 
 # ============================================================================
-# SEC Incremental Staging Sensors
+# SEC Incremental Staging Sensor
 # ============================================================================
-# These sensors complete the incremental pipeline chain:
-#   download → process → incremental stage → materialize → snapshot
+# This sensor triggers DuckDB staging after processing completes:
+#   download → process → stage (DuckDB) → copy (LadybugDB) → snapshot
 #
 # Controlled by: SEC_INCREMENTAL_PIPELINE_ENABLED=true
 #
-# Unlike full rebuild (CREATE TABLE from scratch), incremental staging uses
-# INSERT INTO with dedup to add only net new rows to existing DuckDB tables.
-# LadybugDB is still fully rebuilt since it doesn't support incremental updates.
+# DuckDB staging keeps the staging tables in sync for potential full rebuilds.
+# LadybugDB updates happen via direct S3 copy (next step in chain).
 
 
 @sensor(
-  job=sec_incremental_ingest_job,
+  job=sec_incremental_stage_job,
   minimum_interval_seconds=300,  # Check every 5 minutes
-  default_status=SEC_INCREMENTAL_PIPELINE_STATUS,
-  description="Trigger incremental staging when all pending SourceFiles are processed",
+  default_status=DefaultSensorStatus.STOPPED,  # Enable in Dagster UI when ready
+  description="Trigger incremental DuckDB staging when all pending SourceFiles are processed",
 )
 def sec_incremental_staging_sensor(context: SensorEvaluationContext):
-  """Trigger incremental staging when all pending SourceFiles are processed.
+  """Trigger incremental DuckDB staging when all pending SourceFiles are processed.
 
   Part of the automated incremental pipeline. Detects when pending count
   reaches 0 (all files processed), then triggers incremental staging for
-  current quarter. Deduplication handles any duplicates - no date tracking needed.
+  current quarter. Keeps DuckDB in sync for potential full rebuilds.
+
+  Next step: sec_stage_to_copy_sensor triggers LadybugDB copy after staging.
 
   Controlled by: SEC_INCREMENTAL_PIPELINE_ENABLED=true
   """
@@ -537,27 +501,27 @@ def sec_incremental_staging_sensor(context: SensorEvaluationContext):
     if session:
       session.close()
 
-  # Check if incremental job is already running
+  # Check if incremental stage job is already running
   active_runs = context.instance.get_runs(
     filters=RunsFilter(
-      job_name="sec_incremental_ingest",
+      job_name="sec_incremental_stage",
       statuses=[DagsterRunStatus.STARTED, DagsterRunStatus.QUEUED],
     ),
     limit=1,
   )
   if active_runs:
     context.log.info(
-      f"Incremental ingest already running (run_id={active_runs[0].run_id}), skipping"
+      f"Incremental stage already running (run_id={active_runs[0].run_id}), skipping"
     )
     return
 
   # Create run key based on current date to prevent duplicate daily runs
   today = datetime.now(UTC).strftime("%Y-%m-%d")
-  run_key = f"sec-incremental-{today}"
+  run_key = f"sec-incremental-stage-{today}"
 
   context.log.info(
     f"All processing complete ({recent_count} files in last 24h), "
-    f"triggering incremental staging"
+    f"triggering incremental DuckDB staging"
   )
 
   yield RunRequest(
@@ -570,17 +534,92 @@ def sec_incremental_staging_sensor(context: SensorEvaluationContext):
             # year/quarter default to current if not specified
           }
         },
-        "sec_graph_materialized": {
+      }
+    },
+    tags={
+      "pipeline": "sec",
+      "phase": "incremental_stage",
+      "mode": "incremental",
+    },
+  )
+
+
+# ============================================================================
+# SEC Stage to Copy Sensor (Chains Stage → Copy)
+# ============================================================================
+# This sensor triggers LadybugDB copy after DuckDB staging completes:
+#   stage (DuckDB) → copy (S3 → LadybugDB with ignore_errors)
+#
+# Direct S3 copy uses ignore_errors=true to handle duplicates via constraint
+# violations. Much faster than full DuckDB → LadybugDB rebuild.
+#
+# Controlled by: SEC_INCREMENTAL_PIPELINE_ENABLED=true
+
+
+@run_status_sensor(
+  run_status=DagsterRunStatus.SUCCESS,
+  monitored_jobs=[sec_incremental_stage_job],
+  request_job=sec_incremental_copy_job,
+  default_status=DefaultSensorStatus.STOPPED,  # Enable in Dagster UI when ready
+  minimum_interval_seconds=60,
+  description="Trigger incremental S3 → LadybugDB copy after DuckDB staging completes",
+)
+def sec_stage_to_copy_sensor(context: RunStatusSensorContext):
+  """Trigger incremental S3 → LadybugDB copy after DuckDB staging completes.
+
+  Part of the automated incremental pipeline chain:
+    process → stage (DuckDB) → copy (S3 → LadybugDB) → snapshot
+
+  Uses ignore_errors=true to skip duplicates via constraint violations.
+  Much faster than full DuckDB → LadybugDB rebuild.
+
+  Controlled by: SEC_INCREMENTAL_PIPELINE_ENABLED=true
+  """
+  if env.ENVIRONMENT == "dev":
+    context.log.info("Skipping chain sensor in dev environment")
+    return
+
+  dagster_run = context.dagster_run
+
+  # Only chain incremental pipeline runs
+  run_tags = dagster_run.tags or {}
+  if run_tags.get("mode") != "incremental":
+    context.log.info("Run is not incremental mode, skipping chain")
+    return
+
+  # Check if copy job is already running
+  active_runs = context.instance.get_runs(
+    filters=RunsFilter(
+      job_name="sec_incremental_copy",
+      statuses=[DagsterRunStatus.STARTED, DagsterRunStatus.QUEUED],
+    ),
+    limit=1,
+  )
+  if active_runs:
+    context.log.info(
+      f"Incremental copy already running (run_id={active_runs[0].run_id}), skipping"
+    )
+    return
+
+  context.log.info(
+    f"DuckDB staging completed (run_id={dagster_run.run_id}), triggering S3 → LadybugDB copy"
+  )
+
+  yield RunRequest(
+    run_key=f"sec-copy-chain-{dagster_run.run_id[:8]}",
+    run_config={
+      "ops": {
+        "sec_graph_incremental_copy": {
           "config": {
             "graph_id": "sec",
-            "rebuild_graph": True,  # Full LadybugDB rebuild from updated DuckDB
+            # year/quarter default to current if not specified
           }
         },
       }
     },
     tags={
       "pipeline": "sec",
-      "phase": "incremental_ingest",
+      "phase": "incremental_copy",
       "mode": "incremental",
     },
   )
@@ -588,17 +627,17 @@ def sec_incremental_staging_sensor(context: SensorEvaluationContext):
 
 @run_status_sensor(
   run_status=DagsterRunStatus.SUCCESS,
-  monitored_jobs=[sec_incremental_ingest_job],
+  monitored_jobs=[sec_incremental_copy_job],
   request_job=shared_repository_snapshot_job,
-  default_status=SEC_INCREMENTAL_PIPELINE_STATUS,
+  default_status=DefaultSensorStatus.STOPPED,  # Enable in Dagster UI when ready
   minimum_interval_seconds=60,
-  description="Trigger shared repository snapshot after incremental ingest completes",
+  description="Trigger shared repository snapshot after incremental copy completes",
 )
 def sec_incremental_post_ingest_snapshot_sensor(context: RunStatusSensorContext):
-  """Trigger shared repository snapshot after incremental ingest completes.
+  """Trigger shared repository snapshot after incremental copy completes.
 
-  Part of the automated incremental pipeline. After incremental staging +
-  materialization succeeds, this triggers:
+  Part of the automated incremental pipeline. After S3 → LadybugDB copy
+  succeeds, this triggers:
   1. Create EBS snapshot of shared master's data volume
   2. Update replica launch template with new snapshot
   3. Trigger rolling refresh of replica fleet

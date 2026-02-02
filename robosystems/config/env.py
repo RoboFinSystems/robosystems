@@ -384,22 +384,6 @@ class EnvConfig:
   # Format: http://internal-robosystems-shared-{env}.{region}.elb.amazonaws.com:8001
   SHARED_REPLICA_ALB_URL = get_str_env("SHARED_REPLICA_ALB_URL", "")
 
-  # SEC incremental pipeline: automated chain of download → process → stage → materialize → snapshot
-  # When enabled, runs every 3 hours and chains all steps automatically.
-  # Keep disabled during backfills (run steps manually), enable for production incremental updates.
-  SEC_INCREMENTAL_PIPELINE_ENABLED = get_bool_env(
-    "SEC_INCREMENTAL_PIPELINE_ENABLED",
-    bool(
-      get_secret_value("SEC_INCREMENTAL_PIPELINE_ENABLED", "false").lower() == "true"
-    ),
-  )
-
-  # SEC processing sensor: auto-triggers batch filing processing from SourceFile queue
-  SEC_PARALLEL_SENSOR_ENABLED = get_bool_env(
-    "SEC_PARALLEL_SENSOR_ENABLED",
-    bool(get_secret_value("SEC_PARALLEL_SENSOR_ENABLED", "false").lower() == "true"),
-  )
-
   # SEC large-scale mode: enables chunked staging and batched materialization
   # Disabled in dev (small data), enabled in prod (billions of rows)
   SEC_LARGE_SCALE_MODE_ENABLED = get_bool_env(
@@ -444,22 +428,6 @@ class EnvConfig:
   OTEL_ENABLED = get_bool_env(
     "OTEL_ENABLED",
     bool(get_secret_value("OTEL_ENABLED", "false").lower() == "true"),
-  )
-
-  # Dagster Schedule Feature Flags
-  # All default to false - enable in AWS Secrets Manager for production.
-  # This ensures forked repos don't accidentally run production schedules.
-
-  # Billing schedules: credit allocation, storage billing, usage collection
-  BILLING_SCHEDULES_ENABLED = get_bool_env(
-    "BILLING_SCHEDULES_ENABLED",
-    bool(get_secret_value("BILLING_SCHEDULES_ENABLED", "false").lower() == "true"),
-  )
-
-  # Instance infrastructure schedules: health checks, metrics, registry cleanup
-  INSTANCE_SCHEDULES_ENABLED = get_bool_env(
-    "INSTANCE_SCHEDULES_ENABLED",
-    bool(get_secret_value("INSTANCE_SCHEDULES_ENABLED", "false").lower() == "true"),
   )
 
   # ==========================================================================

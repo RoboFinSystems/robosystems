@@ -125,13 +125,18 @@ class StagingResult:
 
 @dataclass
 class MaterializeResult:
-  """Result from materialize_from_duckdb() operation.
+  """Result from materialize_from_duckdb() or copy_incremental_to_ladybug() operation.
 
   Contains statistics about the materialization (ingestion) operation.
   """
 
-  status: str  # "success", "error", "no_data"
-  total_rows_ingested: int = 0
+  status: str  # "success", "partial", "error", "no_data"
+  table_names: list[str] = field(default_factory=list)  # Successfully processed tables
+  failed_tables: list[dict[str, Any]] = field(
+    default_factory=list
+  )  # Tables with errors
+  total_rows_ingested: int = 0  # Alias for total_rows (backward compat)
+  total_rows: int = 0  # Total rows copied/ingested
   duration_ms: float = 0.0
   tables: list[dict[str, Any]] = field(default_factory=list)
   error: str | None = None
@@ -140,9 +145,40 @@ class MaterializeResult:
     """Convert to dictionary for metadata output."""
     return {
       "status": self.status,
+      "table_names": self.table_names,
+      "failed_tables": self.failed_tables,
       "total_rows_ingested": self.total_rows_ingested,
+      "total_rows": self.total_rows,
       "duration_ms": self.duration_ms,
       "tables": self.tables,
+      "error": self.error,
+    }
+
+
+@dataclass
+class EntityUpdateResult:
+  """Result from update_entities_from_s3() operation.
+
+  Contains statistics about Entity node updates using MERGE queries.
+  """
+
+  status: str  # "success", "partial", "error", "no_changes"
+  entities_checked: int = 0  # Total entities in latest parquet
+  entities_updated: int = 0  # Entities with actual changes
+  entities_unchanged: int = 0  # Entities with no changes (skipped)
+  entities_failed: int = 0  # Entities that failed to update
+  duration_ms: float = 0.0
+  error: str | None = None
+
+  def to_dict(self) -> dict[str, Any]:
+    """Convert to dictionary for metadata output."""
+    return {
+      "status": self.status,
+      "entities_checked": self.entities_checked,
+      "entities_updated": self.entities_updated,
+      "entities_unchanged": self.entities_unchanged,
+      "entities_failed": self.entities_failed,
+      "duration_ms": self.duration_ms,
       "error": self.error,
     }
 
@@ -151,21 +187,37 @@ class MaterializeResult:
 # Accepts a message string, called during staging/materialization for per-table progress
 ProgressCallback = Callable[[str], None]
 
-# Table-specific timeouts for DuckDB staging (seconds)
-# For chunked operations (quarter-by-quarter), each chunk is smaller so use shorter timeout
-# Default: 300s (5 min), Large non-chunked: 1800s (30 min), Large chunked: 600s (10 min)
-DEFAULT_STAGING_TIMEOUT = 300  # 5 minutes
-LARGE_TABLE_STAGING_TIMEOUT = 1800  # 30 minutes (for non-chunked large tables)
-CHUNKED_STAGING_TIMEOUT = 600  # 10 minutes per quarter chunk
-
-# Table-specific timeouts for LadybugDB materialization (seconds)
-# For batched operations, each batch is smaller so use shorter timeout
-# Default: 600s (10 min), Large non-chunked: 3600s (60 min), Batched: 1800s (30 min)
-DEFAULT_MATERIALIZATION_TIMEOUT = 600  # 10 minutes
-LARGE_MATERIALIZATION_TIMEOUT = 3600  # 60 minutes (for direct COPY of 200M+ row tables)
-CHUNKED_MATERIALIZATION_TIMEOUT = (
-  2400  # 40 minutes per 20M row batch - increased for larger batch size
-)
+# =============================================================================
+# Timeout Constants (seconds)
+# =============================================================================
+# These values are based on production testing with SEC data on r7g.medium/large
+# instances. Each operation type has different memory and I/O characteristics.
+#
+# DuckDB staging timeouts:
+# - INSERT INTO with S3 parquet reads, ~500K-1M rows/minute for large tables
+# - Network I/O bound (S3 → DuckDB), memory usage is bounded
+DEFAULT_STAGING_TIMEOUT = 300  # 5 min - small tables (<10M rows)
+LARGE_TABLE_STAGING_TIMEOUT = 1800  # 30 min - large tables (Fact: 200M+ rows)
+CHUNKED_STAGING_TIMEOUT = 600  # 10 min per quarter chunk - incremental staging
+#
+# LadybugDB materialization timeouts:
+# - Materialize from DuckDB to graph, ~300K-500K rows/minute
+# - CPU bound (graph construction), memory scales with batch size
+DEFAULT_MATERIALIZATION_TIMEOUT = 600  # 10 min - small/medium tables
+LARGE_MATERIALIZATION_TIMEOUT = 3600  # 60 min - direct COPY of 200M+ row tables
+CHUNKED_MATERIALIZATION_TIMEOUT = 2400  # 40 min per 20M row batch
+#
+# Incremental COPY timeouts:
+# - Direct S3 → LadybugDB COPY with ignore_errors, ~200K-400K rows/minute
+# - Memory efficient (spill_to_disk), network I/O bound
+INCREMENTAL_COPY_TIMEOUT = 600  # 10 min per table - incremental updates
+#
+# Entity update timeouts:
+# - MERGE queries are 40x slower than COPY (~200ms per entity)
+# - Only runs for entities with actual changes (typically 50-200 per quarter)
+# - 5 min should handle up to ~1500 entity updates (worst case)
+ENTITY_UPDATE_TIMEOUT = 300  # 5 min for batch MERGE operations
+ENTITY_UPDATE_BATCH_SIZE = 100  # Entities per MERGE query batch
 
 # Chunked materialization settings for large tables
 # RE-ENABLED (2026-01-31): Direct COPY of 200M+ row tables causes OOM on r7g.2xlarge
@@ -581,24 +633,27 @@ class XBRLDuckDBGraphProcessor:
     Returns:
         StagingResult with tables staged and row counts (net new rows)
     """
+    from robosystems.adapters.sec import (
+      get_current_quarter,
+      get_previous_quarter,
+      is_in_quarter_overlap_window,
+    )
+
     start_time = time.time()
 
     # Default to current year/quarter
     now = datetime.now(UTC)
-    year = year or now.year
-    quarter = quarter or ((now.month - 1) // 3 + 1)
+    if year is None or quarter is None:
+      year, quarter = get_current_quarter(now)
 
     # Build list of quarters to scan (current + previous during overlap period)
     # This catches late-indexed filings near quarter boundaries (UTC/EST timing, SEC delays)
     quarters_to_scan: list[tuple[int, int]] = [(year, quarter)]
 
-    quarter_start_month = (quarter - 1) * 3 + 1
-    if now.month == quarter_start_month and now.day <= 5:
-      # First 5 days of new quarter: also scan previous quarter
-      if quarter == 1:
-        quarters_to_scan.append((year - 1, 4))
-      else:
-        quarters_to_scan.append((year, quarter - 1))
+    if is_in_quarter_overlap_window(now):
+      # First N days of new quarter: also scan previous quarter
+      prev_year, prev_quarter = get_previous_quarter(year, quarter)
+      quarters_to_scan.append((prev_year, prev_quarter))
 
     def log_progress(msg: str) -> None:
       logger.info(msg)
@@ -762,6 +817,499 @@ class XBRLDuckDBGraphProcessor:
       return StagingResult(
         status="error",
         table_names=[],
+        error=str(e),
+        duration_ms=(time.time() - start_time) * 1000,
+      )
+
+  async def copy_incremental_to_ladybug(
+    self,
+    year: int | None = None,
+    quarter: int | None = None,
+    skip_taxonomy_relationships: bool = False,
+    progress_callback: ProgressCallback | None = None,
+  ) -> MaterializeResult:
+    """
+    Copy current quarter's files directly to LadybugDB (bypasses DuckDB staging).
+
+    This is the preferred approach for incremental updates because:
+    - LadybugDB's COPY with ignore_errors=true handles duplicates automatically
+    - No need to diff what's new in DuckDB vs LadybugDB
+    - Simpler and faster for daily updates
+
+    Uses the same 5-day overlap logic at quarter boundaries to catch late-indexed
+    filings. Files that don't exist are filtered out before COPY.
+
+    Safe to run daily - duplicates are rejected by LadybugDB constraints.
+
+    Precondition: LadybugDB database must already exist with SEC schema.
+
+    Args:
+        year: Year to copy (default: current year)
+        quarter: Quarter to copy 1-4 (default: current quarter)
+        skip_taxonomy_relationships: If True, skip taxonomy structure tables
+        progress_callback: Optional callback for Dagster logging
+
+    Returns:
+        MaterializeResult with tables copied and row counts
+    """
+    from robosystems.adapters.sec import (
+      get_current_quarter,
+      get_previous_quarter,
+      is_in_quarter_overlap_window,
+    )
+
+    start_time = time.time()
+
+    # Default to current year/quarter
+    now = datetime.now(UTC)
+    if year is None or quarter is None:
+      year, quarter = get_current_quarter(now)
+
+    # Build list of quarters to scan (current + previous during overlap period)
+    # This catches late-indexed filings near quarter boundaries
+    quarters_to_scan: list[tuple[int, int]] = [(year, quarter)]
+
+    if is_in_quarter_overlap_window(now):
+      # First N days of new quarter: also scan previous quarter
+      prev_year, prev_quarter = get_previous_quarter(year, quarter)
+      quarters_to_scan.append((prev_year, prev_quarter))
+
+    def log_progress(msg: str) -> None:
+      logger.info(msg)
+      if progress_callback:
+        progress_callback(msg)
+
+    quarters_str = ", ".join(f"{y}-Q{q}" for y, q in quarters_to_scan)
+    logger.info(
+      f"Starting incremental LadybugDB COPY for graph {self.graph_id} "
+      f"(quarters: {quarters_str})"
+    )
+
+    try:
+      client = await get_graph_client(graph_id=self.graph_id, operation_type="write")
+
+      # Get schema-defined tables
+      tables_by_type = RoboLedgerContext.get_all_table_names_for_context(
+        RoboLedgerContext.SEC_REPOSITORY
+      )
+
+      if skip_taxonomy_relationships:
+        tables_by_type = {
+          name: entity_type
+          for name, entity_type in tables_by_type.items()
+          if name not in TAXONOMY_STRUCTURE_TABLES
+        }
+
+      # Sort: nodes first, then relationships (uppercase names)
+      node_tables = [
+        (name, etype) for name, etype in tables_by_type.items() if not name.isupper()
+      ]
+      rel_tables = [
+        (name, etype) for name, etype in tables_by_type.items() if name.isupper()
+      ]
+      ordered_tables = node_tables + rel_tables
+
+      log_progress(
+        f"Copying {len(ordered_tables)} tables ({len(node_tables)} nodes, "
+        f"{len(rel_tables)} relationships)"
+      )
+
+      # Copy each table with ignore_errors=true for duplicate handling
+      successful_tables: list[str] = []
+      table_rows: dict[str, int] = {}
+      failed_tables: list[tuple[str, str]] = []
+
+      total_tables = len(ordered_tables)
+      for i, (table_name, entity_type) in enumerate(ordered_tables, 1):
+        # Build S3 paths for all quarters to scan
+        s3_paths = [
+          f"s3://{self.bucket}/{self.source_prefix}/filed={y}-Q{q}/{entity_type}/{table_name}.parquet"
+          for y, q in quarters_to_scan
+        ]
+
+        # Filter to only existing files (LadybugDB fails if any file doesn't exist)
+        if len(s3_paths) > 1:
+          s3_paths = [p for p in s3_paths if self._s3_url_exists(p)]
+          if not s3_paths:
+            log_progress(
+              f"[{i}/{total_tables}] Skipped {table_name}: no files for any quarter"
+            )
+            successful_tables.append(table_name)
+            table_rows[table_name] = 0
+            continue
+        else:
+          # Single path - check if it exists
+          if not self._s3_url_exists(s3_paths[0]):
+            log_progress(
+              f"[{i}/{total_tables}] Skipped {table_name}: no files for Q{quarter}"
+            )
+            successful_tables.append(table_name)
+            table_rows[table_name] = 0
+            continue
+
+        # Use single path or list depending on count
+        s3_pattern: str | list[str] = s3_paths[0] if len(s3_paths) == 1 else s3_paths
+
+        log_progress(f"[{i}/{total_tables}] COPY {table_name} (Q{quarter} {year})...")
+
+        try:
+          copy_result = await client.copy_from_s3(
+            graph_id=self.graph_id,
+            table_name=table_name,
+            s3_pattern=s3_pattern,
+            ignore_errors=True,  # Key: duplicates are silently skipped
+            timeout=INCREMENTAL_COPY_TIMEOUT,
+            wait_for_completion=True,
+          )
+
+          if copy_result.get("status") == "completed":
+            records = copy_result.get("records_loaded", 0)
+            duration = copy_result.get("duration_seconds", 0)
+            log_progress(
+              f"[{i}/{total_tables}] Copied {table_name}: "
+              f"{records:,} records in {duration:.1f}s"
+            )
+            successful_tables.append(table_name)
+            table_rows[table_name] = records
+          elif "No files found" in copy_result.get("error", ""):
+            log_progress(
+              f"[{i}/{total_tables}] Skipped {table_name}: no files for Q{quarter}"
+            )
+            successful_tables.append(table_name)
+            table_rows[table_name] = 0
+          else:
+            error = copy_result.get("error", "Unknown error")
+            log_progress(f"[{i}/{total_tables}] FAILED {table_name}: {error}")
+            failed_tables.append((table_name, error))
+
+        except Exception as e:
+          error_str = str(e)
+          if "No files found" in error_str:
+            log_progress(
+              f"[{i}/{total_tables}] Skipped {table_name}: no files for Q{quarter}"
+            )
+            successful_tables.append(table_name)
+            table_rows[table_name] = 0
+          else:
+            log_progress(f"[{i}/{total_tables}] FAILED {table_name}: {error_str}")
+            failed_tables.append((table_name, error_str))
+
+      status = "success" if len(successful_tables) == total_tables else "partial"
+      total_rows = sum(table_rows.values())
+      duration = time.time() - start_time
+
+      if failed_tables:
+        logger.warning(f"Failed tables: {failed_tables}")
+
+      logger.info(
+        f"Incremental COPY complete in {duration:.2f}s: "
+        f"{len(successful_tables)}/{total_tables} tables, {total_rows:,} records"
+      )
+
+      return MaterializeResult(
+        status=status,
+        table_names=successful_tables,
+        failed_tables=[
+          {"table": name, "error": error} for name, error in failed_tables
+        ],
+        total_rows=total_rows,
+        duration_ms=duration * 1000,
+      )
+
+    except Exception as e:
+      logger.error(f"Incremental COPY failed: {e}", exc_info=True)
+      return MaterializeResult(
+        status="error",
+        table_names=[],
+        error=str(e),
+        duration_ms=(time.time() - start_time) * 1000,
+      )
+
+  async def update_entities_from_s3(
+    self,
+    year: int | None = None,
+    quarter: int | None = None,
+    progress_callback: ProgressCallback | None = None,
+  ) -> EntityUpdateResult:
+    """
+    Update existing Entity nodes with latest data from S3 parquet files.
+
+    This solves the Entity mutability problem: unlike other XBRL nodes (facts,
+    periods, etc.) which are immutable, Entity attributes can change over time
+    (company name, ticker, exchange, filer category, etc.).
+
+    The incremental COPY operation (copy_incremental_to_ladybug) only INSERTs
+    new records - it cannot update existing ones due to primary key constraints.
+    This method uses Cypher MERGE to update existing Entity nodes.
+
+    Process:
+    1. Read latest Entity parquet from S3 (current quarter)
+    2. Query existing Entity nodes from LadybugDB
+    3. Compare and identify entities with actual changes
+    4. Execute MERGE queries in batches to update changed entities
+
+    Note: MERGE is 40x slower than COPY (~200ms vs ~5ms per record), but
+    Entity updates are typically small (50-200 per quarter).
+
+    Args:
+        year: Year to process (default: current year)
+        quarter: Quarter to process 1-4 (default: current quarter)
+        progress_callback: Optional callback for Dagster logging
+
+    Returns:
+        EntityUpdateResult with update statistics
+    """
+    import duckdb
+
+    from robosystems.adapters.sec import get_current_quarter
+
+    start_time = time.time()
+
+    # Default to current year/quarter
+    now = datetime.now(UTC)
+    if year is None or quarter is None:
+      year, quarter = get_current_quarter(now)
+
+    def log_progress(msg: str) -> None:
+      logger.info(msg)
+      if progress_callback:
+        progress_callback(msg)
+
+    log_progress(
+      f"Starting Entity update for graph {self.graph_id} (Q{quarter} {year})"
+    )
+
+    try:
+      # Step 1: Build S3 path for Entity parquet
+      entity_s3_path = (
+        f"s3://{self.bucket}/{self.source_prefix}/"
+        f"filed={year}-Q{quarter}/nodes/Entity.parquet"
+      )
+
+      # Check if Entity file exists for this quarter
+      if not self._s3_url_exists(entity_s3_path):
+        log_progress(f"No Entity file found for Q{quarter} {year}, skipping")
+        return EntityUpdateResult(
+          status="no_changes",
+          entities_checked=0,
+          duration_ms=(time.time() - start_time) * 1000,
+        )
+
+      # Step 2: Read Entity parquet from S3 using DuckDB
+      log_progress(f"Reading Entity parquet from S3: {entity_s3_path}")
+
+      # Configure DuckDB for S3 access
+      duck_conn = duckdb.connect(":memory:")
+      duck_conn.execute("INSTALL httpfs; LOAD httpfs;")
+      duck_conn.execute(f"SET s3_region='{env.AWS_REGION}';")
+
+      # Use AWS credentials for S3 access
+      if env.AWS_ENDPOINT_URL:
+        # LocalStack/development
+        duck_conn.execute(
+          f"SET s3_endpoint='{env.AWS_ENDPOINT_URL.replace('http://', '').replace('https://', '')}';"
+        )
+        duck_conn.execute("SET s3_use_ssl=false;")
+        duck_conn.execute("SET s3_url_style='path';")
+      else:
+        # Production AWS
+        duck_conn.execute(f"SET s3_access_key_id='{env.AWS_S3_ACCESS_KEY_ID}';")
+        duck_conn.execute(f"SET s3_secret_access_key='{env.AWS_S3_SECRET_ACCESS_KEY}';")
+
+      # Read Entity parquet into a DataFrame
+      latest_entities = duck_conn.execute(
+        f"SELECT * FROM read_parquet('{entity_s3_path}')"
+      ).fetchdf()
+
+      duck_conn.close()
+
+      if latest_entities.empty:
+        log_progress("Entity parquet is empty, no updates needed")
+        return EntityUpdateResult(
+          status="no_changes",
+          entities_checked=0,
+          duration_ms=(time.time() - start_time) * 1000,
+        )
+
+      entities_checked = len(latest_entities)
+      log_progress(f"Loaded {entities_checked} entities from S3")
+
+      # Step 3: Get existing Entity data from LadybugDB
+      client = await get_graph_client(graph_id=self.graph_id, operation_type="write")
+
+      # Query existing entities (only the ones we have updates for)
+      identifiers = latest_entities["identifier"].tolist()
+
+      # Batch identifiers to avoid huge IN clause
+      existing_entities: dict[str, dict] = {}
+      batch_size = 500
+      for i in range(0, len(identifiers), batch_size):
+        batch = identifiers[i : i + batch_size]
+        result = await client.query(
+          cypher="""
+            MATCH (e:Entity)
+            WHERE e.identifier IN $identifiers
+            RETURN e.identifier as identifier,
+                   e.name as name,
+                   e.legal_name as legal_name,
+                   e.ticker as ticker,
+                   e.exchange as exchange,
+                   e.category as category,
+                   e.fiscal_year_end as fiscal_year_end,
+                   e.phone as phone,
+                   e.website as website,
+                   e.status as status,
+                   e.sic as sic,
+                   e.sic_description as sic_description
+          """,
+          graph_id=self.graph_id,
+          parameters={"identifiers": batch},
+        )
+        for row in result.get("data", []):
+          existing_entities[row["identifier"]] = row
+
+      log_progress(f"Found {len(existing_entities)} existing entities in graph")
+
+      # Step 4: Compare and identify entities with changes
+      # Fields that can change over time (excludes immutable fields like cik, uri, etc.)
+      updatable_fields = [
+        "name",
+        "legal_name",
+        "ticker",
+        "exchange",
+        "category",
+        "fiscal_year_end",
+        "phone",
+        "website",
+        "status",
+        "sic",
+        "sic_description",
+      ]
+
+      entities_to_update: list[dict] = []
+      for _, row in latest_entities.iterrows():
+        identifier = row["identifier"]
+        existing = existing_entities.get(identifier)
+
+        if not existing:
+          # Entity doesn't exist in graph yet (will be handled by COPY)
+          continue
+
+        # Check if any updatable field has changed
+        has_changes = False
+        update_data = {"identifier": identifier}
+
+        for field in updatable_fields:
+          new_value = row.get(field)
+          old_value = existing.get(field)
+
+          # Normalize None/NaN comparisons
+          new_is_empty = new_value is None or (
+            isinstance(new_value, float) and str(new_value) == "nan"
+          )
+          old_is_empty = old_value is None or old_value == ""
+
+          if new_is_empty and old_is_empty:
+            continue
+
+          # Convert to string for comparison (handles type differences)
+          new_str = "" if new_is_empty else str(new_value)
+          old_str = "" if old_is_empty else str(old_value)
+
+          if new_str != old_str:
+            has_changes = True
+            update_data[field] = new_value if not new_is_empty else None
+
+        if has_changes:
+          entities_to_update.append(update_data)
+
+      entities_unchanged = len(existing_entities) - len(entities_to_update)
+      log_progress(
+        f"Found {len(entities_to_update)} entities with changes, "
+        f"{entities_unchanged} unchanged"
+      )
+
+      if not entities_to_update:
+        return EntityUpdateResult(
+          status="no_changes",
+          entities_checked=entities_checked,
+          entities_unchanged=entities_unchanged,
+          duration_ms=(time.time() - start_time) * 1000,
+        )
+
+      # Step 5: Execute MERGE queries in batches
+      entities_updated = 0
+      entities_failed = 0
+
+      for i in range(0, len(entities_to_update), ENTITY_UPDATE_BATCH_SIZE):
+        batch = entities_to_update[i : i + ENTITY_UPDATE_BATCH_SIZE]
+        batch_num = i // ENTITY_UPDATE_BATCH_SIZE + 1
+        total_batches = (
+          len(entities_to_update) + ENTITY_UPDATE_BATCH_SIZE - 1
+        ) // ENTITY_UPDATE_BATCH_SIZE
+
+        log_progress(f"[{batch_num}/{total_batches}] Updating {len(batch)} entities...")
+
+        # Build batch update Cypher
+        # Note: LadybugDB MERGE is slow but we're only updating changed entities
+        for entity_data in batch:
+          try:
+            # Build SET clause dynamically for only changed fields
+            set_clauses = []
+            params = {"identifier": entity_data["identifier"]}
+
+            for field, value in entity_data.items():
+              if field == "identifier":
+                continue
+              param_name = f"p_{field}"
+              set_clauses.append(f"e.{field} = ${param_name}")
+              params[param_name] = value
+
+            if not set_clauses:
+              continue
+
+            # Add updated_at timestamp
+            set_clauses.append("e.updated_at = $updated_at")
+            params["updated_at"] = datetime.now(UTC).isoformat()
+
+            cypher = f"""
+              MATCH (e:Entity {{identifier: $identifier}})
+              SET {", ".join(set_clauses)}
+              RETURN e.identifier
+            """
+
+            await client.query(
+              cypher=cypher,
+              graph_id=self.graph_id,
+              parameters=params,
+            )
+            entities_updated += 1
+
+          except Exception as e:
+            logger.warning(f"Failed to update entity {entity_data['identifier']}: {e}")
+            entities_failed += 1
+
+      duration = time.time() - start_time
+      status = "success" if entities_failed == 0 else "partial"
+
+      log_progress(
+        f"Entity update complete: {entities_updated} updated, "
+        f"{entities_failed} failed, {duration:.2f}s"
+      )
+
+      return EntityUpdateResult(
+        status=status,
+        entities_checked=entities_checked,
+        entities_updated=entities_updated,
+        entities_unchanged=entities_unchanged,
+        entities_failed=entities_failed,
+        duration_ms=duration * 1000,
+      )
+
+    except Exception as e:
+      logger.error(f"Entity update failed: {e}", exc_info=True)
+      return EntityUpdateResult(
+        status="error",
         error=str(e),
         duration_ms=(time.time() - start_time) * 1000,
       )

@@ -28,6 +28,8 @@ from robosystems.dagster.assets.sec import (
   # Config classes
   SECDirectCopyConfig,
   SECDownloadConfig,
+  SECEntityUpdateConfig,
+  SECIncrementalCopyConfig,
   SECIncrementalStageConfig,
   SECMaterializeConfig,
   SECProcessConfig,
@@ -35,8 +37,11 @@ from robosystems.dagster.assets.sec import (
   # Assets - two-stage materialization
   sec_duckdb_incremental_staged,
   sec_duckdb_staged,
+  # Assets - Entity update (mutable attributes)
+  sec_entity_incremental_update,
   # Assets - direct S3 → LadybugDB copy (alternative to DuckDB staging)
   sec_graph_direct_copy,
+  sec_graph_incremental_copy,
   sec_graph_materialized,
   # Assets - quarterly batch processing with consolidated output
   sec_processed_filings,
@@ -53,6 +58,8 @@ __all__ = [
   "SECBackupConfig",
   "SECDirectCopyConfig",
   "SECDownloadConfig",
+  "SECEntityUpdateConfig",
+  "SECIncrementalCopyConfig",
   "SECIncrementalStageConfig",
   "SECMaterializeConfig",
   "SECProcessConfig",
@@ -66,7 +73,9 @@ __all__ = [
   "sec_backup",
   "sec_duckdb_incremental_staged",
   "sec_duckdb_staged",
+  "sec_entity_incremental_update",
   "sec_graph_direct_copy",
+  "sec_graph_incremental_copy",
   "sec_graph_materialized",
   "sec_processed_filings",
   "sec_quarter_partitions",

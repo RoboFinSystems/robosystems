@@ -44,6 +44,7 @@ from dagster import (
   StaticPartitionsDefinition,
   asset,
 )
+from pydantic import Field
 
 from robosystems.config import env
 from robosystems.config.constants import SEC_PROCESS_BATCH_LIMIT
@@ -332,7 +333,9 @@ class SECIncrementalStageConfig(Config):
 
   graph_id: str = "sec"  # Target graph ID
   year: int | None = None  # Year to stage (default: current year)
-  quarter: int | None = None  # Quarter to stage 1-4 (default: current quarter)
+  quarter: int | None = Field(
+    default=None, ge=1, le=4
+  )  # Quarter 1-4 (default: current)
   skip_taxonomy_relationships: bool = False  # Skip taxonomy structure tables
 
 
@@ -361,6 +364,32 @@ class SECDirectCopyConfig(Config):
     str
   ] = []  # Tables to skip (e.g., ["Entity"] for type mismatch issues)
   year: int | None = None  # Optional year filter (None = all years)
+
+
+class SECIncrementalCopyConfig(Config):
+  """Configuration for incremental S3 → LadybugDB copy (bypasses DuckDB staging).
+
+  This is the preferred approach for daily incremental updates:
+  1. Copies directly from S3 parquet to LadybugDB
+  2. Uses ignore_errors=true to skip duplicates (constraint violations)
+  3. Only scans current quarter + previous quarter during 5-day overlap
+
+  Benefits over DuckDB incremental staging:
+  - No need to diff what's new in DuckDB vs LadybugDB
+  - Simpler and faster for daily updates
+  - LadybugDB handles deduplication via constraints
+
+  When to use this vs sec_duckdb_incremental_staged:
+  - Use this for daily incremental updates (simpler, faster)
+  - Use DuckDB staging for backfills or when you need DuckDB queries
+  """
+
+  graph_id: str = "sec"  # Target graph ID
+  year: int | None = None  # Year to copy (default: current year)
+  quarter: int | None = Field(
+    default=None, ge=1, le=4
+  )  # Quarter 1-4 (default: current)
+  skip_taxonomy_relationships: bool = False  # Skip taxonomy structure tables
 
 
 # ============================================================================
@@ -1953,6 +1982,185 @@ def sec_duckdb_incremental_staged(
       "quarter": config.quarter,
       "tables_staged": len(result.table_names),
       "total_rows": result.total_rows,  # Net new rows
+      "duration_ms": result.duration_ms,
+    }
+  )
+
+
+@asset(
+  group_name="sec_pipeline",
+  description="Incremental S3 → LadybugDB copy (bypasses DuckDB, uses ignore_errors)",
+  kinds={"ladybug"},
+  metadata={
+    "pipeline": "sec",
+    "stage": "incremental_copy",
+    "decoupled": True,
+  },
+)
+def sec_graph_incremental_copy(
+  context: AssetExecutionContext,
+  config: SECIncrementalCopyConfig,
+) -> MaterializeResult:
+  """Copy current quarter's files directly to LadybugDB (bypasses DuckDB staging).
+
+  This is the preferred approach for daily incremental updates:
+  1. Copies directly from S3 parquet to LadybugDB
+  2. Uses ignore_errors=true to skip duplicates (constraint violations)
+  3. Only scans current quarter + previous quarter during 5-day overlap
+
+  Benefits over DuckDB incremental staging:
+  - No need to diff what's new in DuckDB vs LadybugDB
+  - Simpler and faster for daily updates
+  - LadybugDB handles deduplication via constraints
+
+  Precondition: LadybugDB database must already exist with SEC schema.
+
+  Run with:
+    uv run dagster asset materialize -m robosystems.dagster --select sec_graph_incremental_copy
+  """
+  import asyncio
+
+  from robosystems.adapters.sec import XBRLDuckDBGraphProcessor
+
+  processor = XBRLDuckDBGraphProcessor(graph_id=config.graph_id)
+
+  async def run_incremental_copy():
+    return await processor.copy_incremental_to_ladybug(
+      year=config.year,
+      quarter=config.quarter,
+      skip_taxonomy_relationships=config.skip_taxonomy_relationships,
+      progress_callback=context.log.info,
+    )
+
+  result = asyncio.run(run_incremental_copy())
+
+  if result.status == "error":
+    context.log.error(f"Incremental copy failed: {result.error}")
+    return MaterializeResult(
+      metadata={
+        "graph_id": config.graph_id,
+        "status": "error",
+        "error": result.error or "Unknown error",
+        "duration_ms": result.duration_ms,
+      }
+    )
+
+  context.log.info(
+    f"Incremental copy complete: {len(result.table_names)} tables, "
+    f"{result.total_rows} records, {result.duration_ms / 1000:.2f}s"
+  )
+
+  return MaterializeResult(
+    metadata={
+      "graph_id": config.graph_id,
+      "status": result.status,
+      "year": config.year,
+      "quarter": config.quarter,
+      "tables_copied": len(result.table_names),
+      "total_records": result.total_rows,
+      "duration_ms": result.duration_ms,
+    }
+  )
+
+
+class SECEntityUpdateConfig(Config):
+  """Configuration for incremental Entity update asset."""
+
+  graph_id: str = "sec"
+  year: int | None = Field(default=None, description="Year (default: current year)")
+  quarter: int | None = Field(
+    default=None, ge=1, le=4, description="Quarter 1-4 (default: current)"
+  )
+
+
+@asset(
+  group_name="sec_pipeline",
+  description="Update existing Entity nodes with latest data (handles mutable Entity attributes)",
+  kinds={"ladybug"},
+  deps=["sec_graph_incremental_copy"],  # Run after incremental copy
+  metadata={
+    "pipeline": "sec",
+    "stage": "entity_update",
+    "decoupled": True,
+  },
+)
+def sec_entity_incremental_update(
+  context: AssetExecutionContext,
+  config: SECEntityUpdateConfig,
+) -> MaterializeResult:
+  """Update existing Entity nodes with latest attribute values.
+
+  This solves the Entity mutability problem: unlike other XBRL nodes (facts,
+  periods, etc.) which are immutable, Entity attributes can change over time:
+  - Company name changes
+  - Ticker/exchange changes (listing updates)
+  - Filer category changes (large accelerated filer, etc.)
+  - Fiscal year end changes
+  - Contact info updates (phone, website)
+
+  The incremental COPY operation only INSERTs new records - it cannot update
+  existing ones. This asset uses Cypher MERGE to update existing Entity nodes.
+
+  Process:
+  1. Read latest Entity parquet from S3 (current quarter)
+  2. Query existing Entity nodes from LadybugDB
+  3. Compare and identify entities with actual changes
+  4. Execute MERGE queries in batches to update changed entities
+
+  Note: Only entities with actual changes are updated (typically 50-200 per
+  quarter). MERGE is 40x slower than COPY, but this is acceptable for the
+  small number of updates.
+
+  Run with:
+    uv run dagster asset materialize -m robosystems.dagster --select sec_entity_incremental_update
+  """
+  import asyncio
+
+  from robosystems.adapters.sec import XBRLDuckDBGraphProcessor
+
+  context.log.info(
+    f"Starting Entity update for graph {config.graph_id} "
+    f"(Q{config.quarter or 'current'} {config.year or 'current'})"
+  )
+
+  processor = XBRLDuckDBGraphProcessor(graph_id=config.graph_id)
+
+  async def run_entity_update():
+    return await processor.update_entities_from_s3(
+      year=config.year,
+      quarter=config.quarter,
+      progress_callback=context.log.info,
+    )
+
+  result = asyncio.run(run_entity_update())
+
+  if result.status == "error":
+    context.log.error(f"Entity update failed: {result.error}")
+    return MaterializeResult(
+      metadata={
+        "graph_id": config.graph_id,
+        "status": "error",
+        "error": result.error or "Unknown error",
+        "duration_ms": result.duration_ms,
+      }
+    )
+
+  context.log.info(
+    f"Entity update complete: {result.entities_updated} updated, "
+    f"{result.entities_unchanged} unchanged, {result.entities_failed} failed "
+    f"({result.duration_ms / 1000:.2f}s)"
+  )
+
+  return MaterializeResult(
+    metadata={
+      "graph_id": config.graph_id,
+      "status": result.status,
+      "year": config.year,
+      "quarter": config.quarter,
+      "entities_checked": result.entities_checked,
+      "entities_updated": result.entities_updated,
+      "entities_unchanged": result.entities_unchanged,
+      "entities_failed": result.entities_failed,
       "duration_ms": result.duration_ms,
     }
   )
