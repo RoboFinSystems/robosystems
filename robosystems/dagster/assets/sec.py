@@ -53,7 +53,10 @@ from robosystems.config.storage.shared import (
   get_raw_key,
 )
 from robosystems.dagster.resources import DatabaseResource, S3Resource
+from robosystems.logger import get_logger
 from robosystems.models.iam import Graph, SourceFile
+
+logger = get_logger(__name__)
 
 # In-memory cache for SEC submissions during a single run
 _sec_submissions_cache: dict[str, dict] = {}
@@ -113,11 +116,7 @@ def _get_sec_metadata(
 
   # Fallback to SEC API if no snapshot
   if submissions is None:
-    import logging
-
-    logging.getLogger(__name__).warning(
-      f"No S3 snapshot for CIK {cik}, falling back to SEC API"
-    )
+    logger.warning("No S3 snapshot for CIK %s, falling back to SEC API", cik)
     client = SECClient(cik=cik)
     submissions = client.get_submissions()
     _sec_submissions_cache[cik] = submissions
@@ -1317,16 +1316,18 @@ def _merge_with_existing_s3(
   except s3_client.exceptions.NoSuchKey:
     # No existing file - return new data as-is
     return new_data
-  except Exception:
+  except Exception as e:
     # Other errors - return new data as-is (will overwrite)
+    logger.warning("Failed to read existing S3 file %s, will overwrite: %s", s3_key, e)
     return new_data
 
   # Read both tables
   try:
     existing_table = pq.read_table(BytesIO(existing_data))
     new_table = pq.read_table(BytesIO(new_data))
-  except Exception:
+  except Exception as e:
     # If we can't read existing data, just return new data
+    logger.warning("Failed to parse parquet for merge at %s, will overwrite: %s", s3_key, e)
     return new_data
 
   # Concatenate tables
@@ -1389,8 +1390,12 @@ def _atomic_s3_upload(
     # Try to clean up temp file on any error
     try:
       s3_client.delete_object(Bucket=bucket, Key=temp_key)
-    except Exception:
-      pass
+    except Exception as cleanup_exc:
+      logger.warning(
+        "Failed to delete temporary S3 object %s during cleanup: %s",
+        temp_key,
+        cleanup_exc,
+      )
     raise
 
 

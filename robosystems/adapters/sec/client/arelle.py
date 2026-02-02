@@ -1,4 +1,3 @@
-import logging
 import os
 import shutil
 from email.message import EmailMessage
@@ -10,8 +9,9 @@ from arelle.Version import __version__ as ARELLE_VERSION
 from arelle.WebCache import WebCache
 
 from robosystems.config import env
+from robosystems.logger import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class ArelleClient:
