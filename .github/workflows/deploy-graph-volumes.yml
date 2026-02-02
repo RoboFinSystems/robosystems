@@ -74,11 +74,6 @@ on:
         description: "SNS topic ARN for volume detachment notifications"
         value: ${{ jobs.deploy.outputs.volume_detachment_topic_arn }}
 
-    secrets:
-      ACTIONS_TOKEN:
-        description: "GitHub token for checkout (optional - falls back to github.token)"
-        required: false
-
 jobs:
   deploy:
     runs-on: ${{ fromJSON(inputs.runner_config) }}
@@ -99,7 +94,7 @@ jobs:
         with:
           repository: ${{ github.repository }}
           ref: ${{ github.ref }}
-          token: ${{ secrets.ACTIONS_TOKEN || github.token }}
+          token: ${{ github.token }}
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4

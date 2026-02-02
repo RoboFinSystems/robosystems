@@ -10,7 +10,7 @@ on:
     secrets:
       ACTIONS_TOKEN:
         description: 'GitHub token for repository operations'
-        required: true
+        required: false
       ANTHROPIC_API_KEY:
         description: 'API key for Claude changelog generation'
         required: true

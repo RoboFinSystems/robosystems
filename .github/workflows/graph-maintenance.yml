@@ -109,24 +109,13 @@ jobs:
       ami_id: ${{ steps.ami.outputs.ami_id }}
       ami_name: ${{ steps.ami.outputs.ami_name }}
       current_ami: ${{ steps.current.outputs.current_ami }}
-      var_name: ${{ steps.current.outputs.var_name }}
+      param_name: ${{ steps.current.outputs.param_name }}
       ami_changed: ${{ steps.compare.outputs.ami_changed }}
-      has_token: ${{ steps.check-token.outputs.has_token }}
       # Pass-through inputs for downstream jobs
       environment: ${{ steps.inputs.outputs.environment }}
       trigger_deploy: ${{ steps.inputs.outputs.trigger_deploy }}
       deploy_ref: ${{ steps.inputs.outputs.deploy_ref }}
     steps:
-      - name: Check ACTIONS_TOKEN availability
-        id: check-token
-        run: |
-          if [ -z "${{ secrets.ACTIONS_TOKEN }}" ]; then
-            echo "has_token=false" >> $GITHUB_OUTPUT
-            echo "::warning::ACTIONS_TOKEN not set - will show AMI info but cannot update variables"
-          else
-            echo "has_token=true" >> $GITHUB_OUTPUT
-          fi
-
       - name: Resolve inputs
         id: inputs
         run: |
@@ -152,7 +141,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          token: ${{ secrets.ACTIONS_TOKEN || github.token }}
+          token: ${{ github.token }}
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
@@ -166,23 +155,21 @@ jobs:
         with:
           architecture: arm64
 
-      - name: Get Current AMI Variable
+      - name: Get Current AMI from SSM
         id: current
-        env:
-          GH_TOKEN: ${{ secrets.ACTIONS_TOKEN }}
         run: |
           ENV="${{ steps.inputs.outputs.environment }}"
-          VAR_NAME="GRAPH_AMI_ID_$(echo $ENV | tr '[:lower:]' '[:upper:]')"
-          # gh variable requires PAT - will show "not-set" if token missing
-          if [ -z "$GH_TOKEN" ]; then
-            CURRENT_AMI="not-set"
-            echo "⚠️ Cannot read variable without ACTIONS_TOKEN"
-          else
-            CURRENT_AMI=$(gh variable get "$VAR_NAME" 2>/dev/null || echo "not-set")
-          fi
+          PARAM_NAME="/robosystems/${ENV}/graph/ami-id"
+
+          # Read current AMI from SSM Parameter Store
+          CURRENT_AMI=$(aws ssm get-parameter \
+            --name "$PARAM_NAME" \
+            --query 'Parameter.Value' \
+            --output text 2>/dev/null || echo "not-set")
+
           echo "current_ami=$CURRENT_AMI" >> $GITHUB_OUTPUT
-          echo "var_name=$VAR_NAME" >> $GITHUB_OUTPUT
-          echo "Current $VAR_NAME: $CURRENT_AMI"
+          echo "param_name=$PARAM_NAME" >> $GITHUB_OUTPUT
+          echo "Current $PARAM_NAME: $CURRENT_AMI"
 
       - name: Compare AMIs
         id: compare
@@ -197,84 +184,58 @@ jobs:
             echo "AMI is already up to date: ${{ steps.ami.outputs.ami_id }}"
           fi
 
-  ami-update-variable:
+  ami-update-ssm:
     if: |
       always() &&
       needs.ami-get-latest.result == 'success' &&
-      needs.ami-get-latest.outputs.ami_changed == 'true' &&
-      needs.ami-get-latest.outputs.has_token == 'true'
+      needs.ami-get-latest.outputs.ami_changed == 'true'
     needs: [ami-get-latest]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION || 'us-east-1' }}
 
-      - name: Update AMI Variable
-        env:
-          GH_TOKEN: ${{ secrets.ACTIONS_TOKEN }}
+      - name: Update AMI in SSM
         run: |
-          VAR_NAME="${{ needs.ami-get-latest.outputs.var_name }}"
-          echo "Updating $VAR_NAME to: ${{ needs.ami-get-latest.outputs.ami_id }}"
-          gh variable set "$VAR_NAME" --body "${{ needs.ami-get-latest.outputs.ami_id }}"
-          echo "Variable updated successfully"
+          PARAM_NAME="${{ needs.ami-get-latest.outputs.param_name }}"
+          AMI_ID="${{ needs.ami-get-latest.outputs.ami_id }}"
+          AMI_NAME="${{ needs.ami-get-latest.outputs.ami_name }}"
 
-  ami-trigger-deploy:
+          echo "Updating $PARAM_NAME to: $AMI_ID"
+          aws ssm put-parameter \
+            --name "$PARAM_NAME" \
+            --value "$AMI_ID" \
+            --type "String" \
+            --description "Graph AMI: $AMI_NAME (updated by graph-maintenance)" \
+            --overwrite
+
+          echo "✅ SSM parameter updated successfully"
+
+  # Deploy to staging when AMI updated for staging environment
+  ami-deploy-staging:
     if: |
       always() &&
-      needs.ami-update-variable.result == 'success' &&
-      needs.ami-get-latest.outputs.trigger_deploy == 'true'
-    needs: [ami-get-latest, ami-update-variable]
-    runs-on: ubuntu-latest
-    timeout-minutes: 45
-    outputs:
-      run_id: ${{ steps.trigger.outputs.run_id }}
-      deploy_ref: ${{ steps.trigger.outputs.deploy_ref }}
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      needs.ami-update-ssm.result == 'success' &&
+      needs.ami-get-latest.outputs.trigger_deploy == 'true' &&
+      needs.ami-get-latest.outputs.environment == 'staging'
+    needs: [ami-get-latest, ami-update-ssm]
+    uses: ./.github/workflows/staging.yml
+    secrets: inherit
 
-      - name: Trigger Deploy Workflow
-        id: trigger
-        env:
-          GH_TOKEN: ${{ secrets.ACTIONS_TOKEN }}
-        run: |
-          WORKFLOW="${{ needs.ami-get-latest.outputs.environment }}.yml"
-
-          # Determine deploy ref (use input or latest release tag)
-          if [ -n "${{ needs.ami-get-latest.outputs.deploy_ref }}" ]; then
-            DEPLOY_REF="${{ needs.ami-get-latest.outputs.deploy_ref }}"
-            echo "Using specified ref: $DEPLOY_REF"
-          else
-            DEPLOY_REF=$(gh release view --json tagName --jq '.tagName')
-            echo "Using latest release tag: $DEPLOY_REF"
-          fi
-
-          # Validate ref is a semver tag (vX.Y.Z) or main branch
-          if [[ "$DEPLOY_REF" != "main" && ! "$DEPLOY_REF" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "::error::Invalid deploy ref: $DEPLOY_REF"
-            echo "Must be 'main' or a semver tag (e.g., v1.2.3)"
-            exit 1
-          fi
-
-          echo "Triggering $WORKFLOW workflow from ref: $DEPLOY_REF"
-          gh workflow run "$WORKFLOW" --ref "$DEPLOY_REF"
-
-          # Wait a moment for the run to be created
-          sleep 5
-
-          # Get the run ID of the triggered workflow
-          RUN_ID=$(gh run list --workflow="$WORKFLOW" --limit 1 --json databaseId --jq '.[0].databaseId')
-          echo "run_id=$RUN_ID" >> $GITHUB_OUTPUT
-          echo "deploy_ref=$DEPLOY_REF" >> $GITHUB_OUTPUT
-          echo "Triggered run ID: $RUN_ID"
-
-      - name: Wait for Deploy to Complete
-        env:
-          GH_TOKEN: ${{ secrets.ACTIONS_TOKEN }}
-        run: |
-          echo "Waiting for deployment to complete..."
-          gh run watch ${{ steps.trigger.outputs.run_id }} --exit-status
+  # Deploy to prod when AMI updated for prod environment
+  ami-deploy-prod:
+    if: |
+      always() &&
+      needs.ami-update-ssm.result == 'success' &&
+      needs.ami-get-latest.outputs.trigger_deploy == 'true' &&
+      needs.ami-get-latest.outputs.environment == 'prod'
+    needs: [ami-get-latest, ami-update-ssm]
+    uses: ./.github/workflows/prod.yml
+    secrets: inherit
 
   # =============================================================================
   # Task: docker-cleanup
@@ -412,7 +373,7 @@ jobs:
   # Summary (runs for all tasks)
   # =============================================================================
   summary:
-    needs: [ami-get-latest, ami-update-variable, ami-trigger-deploy, docker-cleanup]
+    needs: [ami-get-latest, ami-update-ssm, ami-deploy-staging, ami-deploy-prod, docker-cleanup]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -455,42 +416,21 @@ jobs:
           echo "|-----------|--------|" >> $GITHUB_STEP_SUMMARY
           echo "| Trigger | ${{ github.event_name }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Environment | ${{ needs.ami-get-latest.outputs.environment }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Variable | \`${{ needs.ami-get-latest.outputs.var_name }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| SSM Parameter | \`${{ needs.ami-get-latest.outputs.param_name }}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| Previous AMI | \`${{ needs.ami-get-latest.outputs.current_ami }}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| Latest AMI | \`${{ needs.ami-get-latest.outputs.ami_id }}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| AMI Name | ${{ needs.ami-get-latest.outputs.ami_name }} |" >> $GITHUB_STEP_SUMMARY
           echo "| AMI Changed | ${{ needs.ami-get-latest.outputs.ami_changed }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Trigger Deploy | ${{ needs.ami-get-latest.outputs.trigger_deploy }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Deploy Ref | \`${{ needs.ami-trigger-deploy.outputs.deploy_ref || 'skipped' }}\` |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Job Results" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "| Job | Status |" >> $GITHUB_STEP_SUMMARY
           echo "|-----|--------|" >> $GITHUB_STEP_SUMMARY
           echo "| Get Latest AMI | ${{ needs.ami-get-latest.result }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Update Variable | ${{ needs.ami-update-variable.result }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Trigger Deploy | ${{ needs.ami-trigger-deploy.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Update SSM | ${{ needs.ami-update-ssm.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Deploy Staging | ${{ needs.ami-deploy-staging.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Deploy Prod | ${{ needs.ami-deploy-prod.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-
-          # Show warning if ACTIONS_TOKEN was missing
-          if [ "${{ needs.ami-get-latest.outputs.has_token }}" != "true" ]; then
-            echo "### ⚠️ ACTIONS_TOKEN Not Set" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "Variable update and deployment were skipped because ACTIONS_TOKEN is not configured." >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "To enable automatic updates, set the secret:" >> $GITHUB_STEP_SUMMARY
-            echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
-            echo "gh secret set ACTIONS_TOKEN" >> $GITHUB_STEP_SUMMARY
-            echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-            if [ "${{ needs.ami-get-latest.outputs.ami_changed }}" == "true" ]; then
-              echo "To manually update the variable:" >> $GITHUB_STEP_SUMMARY
-              echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
-              echo "gh variable set ${{ needs.ami-get-latest.outputs.var_name }} --body \"${{ needs.ami-get-latest.outputs.ami_id }}\"" >> $GITHUB_STEP_SUMMARY
-              echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
-              echo "" >> $GITHUB_STEP_SUMMARY
-            fi
-          fi
-
           echo "---" >> $GITHUB_STEP_SUMMARY
           echo "Triggered by: **${{ github.actor }}** at $(date -u +%Y-%m-%dT%H:%M:%SZ)" >> $GITHUB_STEP_SUMMARY

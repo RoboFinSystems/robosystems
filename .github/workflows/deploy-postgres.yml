@@ -72,13 +72,6 @@ on:
         type: string
         default: "false"
 
-      # Secret Rotation Configuration
-      secrets_rotation_days:
-        description: "Number of days between automatic password rotations"
-        required: false
-        type: string
-        default: "90"
-
       # Lambda Configuration
       lambda_image_uri:
         description: "ECR image URI for Lambda functions (container-based deployment)"
@@ -99,11 +92,6 @@ on:
         description: "RDS Security Group ID for database access"
         value: ${{ jobs.deploy.outputs.database_sg_id }}
 
-    secrets:
-      ACTIONS_TOKEN:
-        description: "GitHub token for checkout (optional - falls back to github.token)"
-        required: false
-
 jobs:
   deploy:
     runs-on: ${{ fromJSON(inputs.runner_config) }}
@@ -121,7 +109,7 @@ jobs:
         with:
           repository: ${{ github.repository }}
           ref: ${{ github.ref }}
-          token: ${{ secrets.ACTIONS_TOKEN || github.token }}
+          token: ${{ github.token }}
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
@@ -152,7 +140,6 @@ jobs:
                 ParameterKey=SubnetId1,ParameterValue=$(echo ${{ inputs.subnet_ids }} | cut -d ',' -f1) \
                 ParameterKey=SubnetId2,ParameterValue=$(echo ${{ inputs.subnet_ids }} | cut -d ',' -f2) \
                 ParameterKey=SNSAlertEmail,ParameterValue=${{ inputs.aws_sns_alert_email }} \
-                ParameterKey=PostgresRotationDays,ParameterValue=${{ inputs.secrets_rotation_days }} \
                 ParameterKey=LambdaImageUri,ParameterValue=${{ inputs.lambda_image_uri }}"
 
           # Add version parameter only if explicitly set (allows forks to pin versions)

@@ -91,11 +91,6 @@ on:
         description: "Security group ID for applications connecting to Valkey"
         value: ${{ jobs.deploy.outputs.valkey_sg_id }}
 
-    secrets:
-      ACTIONS_TOKEN:
-        description: "GitHub token for checkout (optional - falls back to github.token)"
-        required: false
-
 jobs:
   deploy:
     runs-on: ${{ fromJSON(inputs.runner_config) }}
@@ -114,7 +109,7 @@ jobs:
         with:
           repository: ${{ github.repository }}
           ref: ${{ github.ref }}
-          token: ${{ secrets.ACTIONS_TOKEN || github.token }}
+          token: ${{ github.token }}
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
