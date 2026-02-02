@@ -239,7 +239,7 @@ def set_secret(arn: str, token: str, environment: str) -> None:
 
   except Exception as e:
     error_type = type(e).__name__
-    logger.error(f"setSecret: Unable to set password: {error_type}")
+    logger.error(f"setSecret: Unable to set password: {error_type}: {e}")
     raise
   finally:
     if conn:
@@ -285,7 +285,7 @@ def test_secret(arn: str, token: str, environment: str) -> None:
 
   except Exception as e:
     error_type = type(e).__name__
-    logger.error(f"testSecret: Unable to connect with pending secret: {error_type}")
+    logger.error(f"testSecret: Unable to connect with pending secret: {error_type}: {e}")
     raise
   finally:
     if conn:
@@ -336,10 +336,12 @@ def update_companion_secret(new_password: str, environment: str) -> None:
     logger.info(f"Successfully updated companion secret: {companion_secret_name}")
 
   except secrets_client.exceptions.ResourceNotFoundException:
-    logger.warning(f"Companion secret {companion_secret_name} not found - skipping update")
+    logger.warning(
+      f"Companion secret {companion_secret_name} not found - skipping update"
+    )
   except Exception as e:
     error_type = type(e).__name__
-    logger.error(f"Failed to update companion secret: {error_type}")
+    logger.error(f"Failed to update companion secret: {error_type}: {e}")
     # Don't raise - rotation succeeded, companion update is best-effort
     # Applications will get updated on next service refresh
 
@@ -371,11 +373,13 @@ def finish_secret(arn: str, token: str) -> None:
   # Update the companion secret with the new password
   # This ensures applications using robosystems/{env}/postgres get the new password
   try:
-    new_secret = secrets_client.get_secret_value(SecretId=arn, VersionStage="AWSCURRENT")
+    new_secret = secrets_client.get_secret_value(
+      SecretId=arn, VersionStage="AWSCURRENT"
+    )
     new_dict = json.loads(new_secret["SecretString"])
     new_password = new_dict["password"]
     environment = os.environ.get("ENVIRONMENT", "prod")
     update_companion_secret(new_password, environment)
   except Exception as e:
     error_type = type(e).__name__
-    logger.warning(f"Could not update companion secret: {error_type}")
+    logger.warning(f"Could not update companion secret: {error_type}: {e}")

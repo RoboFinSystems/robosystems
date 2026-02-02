@@ -33,12 +33,14 @@ on:
       is_release:
         description: "Whether this is a release build"
         value: ${{ jobs.docker.outputs.is_release }}
+
     secrets:
-      ACTIONS_TOKEN:
-        description: "GitHub token for checkout (optional - falls back to github.token)"
-        required: false
       DOCKERHUB_USERNAME:
+        description: "Docker Hub username for publishing"
+        required: false
       DOCKERHUB_TOKEN:
+        description: "Docker Hub token for publishing"
+        required: false
 
 jobs:
   docker:
@@ -57,7 +59,7 @@ jobs:
         with:
           repository: ${{ github.repository }}
           ref: ${{ github.ref }}
-          token: ${{ secrets.ACTIONS_TOKEN || github.token }}
+          token: ${{ github.token }}
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
@@ -233,7 +235,7 @@ jobs:
         with:
           repository: ${{ github.repository }}
           ref: ${{ github.ref }}
-          token: ${{ secrets.ACTIONS_TOKEN || github.token }}
+          token: ${{ github.token }}
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3

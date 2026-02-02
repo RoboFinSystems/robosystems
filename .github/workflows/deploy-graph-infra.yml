@@ -42,11 +42,6 @@ on:
         description: "Email address for SNS alerts and notifications"
         required: true
         type: string
-
-    secrets:
-      ACTIONS_TOKEN:
-        description: "GitHub token for checkout (optional - falls back to github.token)"
-        required: false
     outputs:
       secret_arn:
         description: "ARN of the Graph API authentication secret"
@@ -83,7 +78,7 @@ jobs:
         with:
           repository: ${{ github.repository }}
           ref: ${{ github.ref }}
-          token: ${{ secrets.ACTIONS_TOKEN || github.token }}
+          token: ${{ github.token }}
 
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v4

@@ -155,11 +155,6 @@ on:
         required: true
         type: string
 
-    secrets:
-      ACTIONS_TOKEN:
-        description: "GitHub token for checkout (optional - falls back to github.token)"
-        required: false
-
     outputs:
       shared_replica_alb_url:
         description: "ALB endpoint URL for shared repository replicas (empty if not deployed)"
@@ -436,8 +431,7 @@ jobs:
       volume_detachment_topic_arn: ${{ inputs.volume_detachment_topic_arn }}
       volume_manager_function_arn: ${{ inputs.volume_manager_function_arn }}
       aws_sns_alert_email: ${{ inputs.aws_sns_alert_email }}
-    secrets:
-      ACTIONS_TOKEN: ${{ secrets.ACTIONS_TOKEN || github.token }}
+    secrets: inherit
 
   # Step 2b: Deploy Neo4j Writers
   deploy-graph-neo4j:
@@ -475,8 +469,7 @@ jobs:
       volume_detachment_topic_arn: ${{ inputs.volume_detachment_topic_arn }}
       volume_manager_function_arn: ${{ inputs.volume_manager_function_arn }}
       aws_sns_alert_email: ${{ inputs.aws_sns_alert_email }}
-    secrets:
-      ACTIONS_TOKEN: ${{ secrets.ACTIONS_TOKEN || github.token }}
+    secrets: inherit
 
   # Step 3: Deploy Shared Replicas (Read-Only Fleet)
   # Deploys after shared writers to ensure master exists for snapshotting
@@ -506,5 +499,4 @@ jobs:
       desired_capacity: ${{ inputs.shared_replicas_desired_capacity }}
       ecr_image_tag: ${{ inputs.ecr_image_tag }}
       aws_sns_alert_email: ${{ inputs.aws_sns_alert_email }}
-    secrets:
-      ACTIONS_TOKEN: ${{ secrets.ACTIONS_TOKEN || github.token }}
+    secrets: inherit

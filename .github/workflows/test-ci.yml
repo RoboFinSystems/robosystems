@@ -25,7 +25,7 @@ jobs:
         with:
           repository: ${{ github.repository }}
           ref: ${{ github.ref }}
-          token: ${{ secrets.ACTIONS_TOKEN || github.token }}
+          token: ${{ github.token }}
 
       - name: Select runner
         id: select
@@ -33,12 +33,11 @@ jobs:
         with:
           runner_labels: ${{ vars.RUNNER_LABELS || 'github-hosted' }}
           runner_scope: ${{ vars.RUNNER_SCOPE || 'both' }}
-          github_token: ${{ secrets.ACTIONS_TOKEN || github.token }}
+          github_token: ${{ github.token }}
 
   test:
     needs: [runner]
     uses: ./.github/workflows/test.yml
     with:
       runner_config: ${{ needs.runner.outputs.runner_config }}
-    secrets:
-      ACTIONS_TOKEN: ${{ secrets.ACTIONS_TOKEN || github.token }}
+    secrets: inherit

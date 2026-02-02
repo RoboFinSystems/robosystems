@@ -11,11 +11,6 @@ on:
         required: true
         type: string
         description: "Runner configuration JSON (from runner availability check)"
-    secrets:
-      ACTIONS_TOKEN:
-        description: "GitHub token for checkout (optional - falls back to github.token)"
-        required: false
-
 jobs:
   test:
     runs-on: ${{ fromJSON(inputs.runner_config) }}
@@ -143,7 +138,7 @@ jobs:
         with:
           repository: ${{ github.repository }}
           ref: ${{ github.ref }}
-          token: ${{ secrets.ACTIONS_TOKEN || github.token }}
+          token: ${{ github.token }}
 
       - name: Setup Python (GitHub-hosted runners only)
         if: runner.os == 'Linux' && !contains(runner.name, 'robosystems')

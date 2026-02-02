@@ -1,0 +1,88 @@
+name: "Get Graph AMI"
+description: "Gets the pinned Graph AMI from SSM, auto-initializing with latest if not set"
+
+inputs:
+  environment:
+    description: "Environment (staging or prod)"
+    required: true
+    type: string
+  architecture:
+    description: "CPU architecture (arm64 or x86_64)"
+    required: false
+    default: "arm64"
+    type: string
+
+outputs:
+  ami_id:
+    description: "Graph AMI ID to use for deployment"
+    value: ${{ steps.get-ami.outputs.ami_id }}
+  source:
+    description: "Where the AMI came from (ssm or initialized)"
+    value: ${{ steps.get-ami.outputs.source }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Get Graph AMI
+      id: get-ami
+      shell: bash
+      run: |
+        ENV="${{ inputs.environment }}"
+        ARCH="${{ inputs.architecture }}"
+        PARAM_NAME="/robosystems/${ENV}/graph/ami-id"
+
+        echo "🔍 Looking up Graph AMI for $ENV..."
+
+        # Try to get existing pinned AMI from our SSM parameter
+        AMI_ID=$(aws ssm get-parameter \
+          --name "$PARAM_NAME" \
+          --query 'Parameter.Value' \
+          --output text 2>/dev/null || echo "")
+
+        if [ -n "$AMI_ID" ] && [ "$AMI_ID" != "None" ]; then
+          echo "✅ Using pinned AMI from SSM: $AMI_ID"
+          echo "ami_id=$AMI_ID" >> $GITHUB_OUTPUT
+          echo "source=ssm" >> $GITHUB_OUTPUT
+          exit 0
+        fi
+
+        # SSM parameter doesn't exist - initialize with latest AMI
+        echo "⚠️ SSM parameter $PARAM_NAME not found, initializing..."
+
+        # Determine AWS SSM path for latest AMI based on architecture
+        case "$ARCH" in
+          "arm64")
+            AWS_SSM_PATH="/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-arm64"
+            ;;
+          "x86_64")
+            AWS_SSM_PATH="/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64"
+            ;;
+          *)
+            echo "❌ ERROR: Unsupported architecture: $ARCH"
+            exit 1
+            ;;
+        esac
+
+        # Look up the latest AMI from AWS
+        echo "📡 Looking up latest AL2023 $ARCH AMI..."
+        AMI_ID=$(aws ssm get-parameter \
+          --name "$AWS_SSM_PATH" \
+          --query "Parameter.Value" \
+          --output text)
+
+        if [ -z "$AMI_ID" ] || [ "$AMI_ID" = "None" ]; then
+          echo "❌ ERROR: Could not retrieve latest AMI from AWS"
+          exit 1
+        fi
+
+        echo "📝 Storing AMI ID in SSM: $PARAM_NAME = $AMI_ID"
+        aws ssm put-parameter \
+          --name "$PARAM_NAME" \
+          --value "$AMI_ID" \
+          --type "String" \
+          --description "Graph AMI ID for $ENV (auto-initialized)" \
+          --overwrite
+
+        echo "✅ Initialized with latest AMI: $AMI_ID"
+        echo "ami_id=$AMI_ID" >> $GITHUB_OUTPUT
+        echo "source=initialized" >> $GITHUB_OUTPUT

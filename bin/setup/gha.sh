@@ -42,33 +42,6 @@ print_warning() {
     echo -e "${YELLOW}⚠️  $1${NC}"
 }
 
-# Function to look up latest Amazon Linux 2023 ARM64 AMI from AWS SSM
-get_latest_ami() {
-    local ssm_path="/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-arm64"
-
-    # Check if AWS CLI is available and authenticated
-    if ! command -v aws >/dev/null 2>&1; then
-        echo ""
-        return 0  # Return success to avoid set -e exit, caller checks empty string
-    fi
-
-    # Try to get the AMI ID from SSM Parameter Store
-    # Use || true to prevent set -e from exiting on AWS CLI failure
-    local ami_id
-    ami_id=$(aws ssm get-parameter \
-        --name "$ssm_path" \
-        --query "Parameter.Value" \
-        --output text 2>/dev/null) || true
-
-    if [ -n "$ami_id" ] && [ "$ami_id" != "None" ]; then
-        echo "$ami_id"
-        return 0
-    fi
-
-    echo ""
-    return 0  # Return success to avoid set -e exit, caller checks empty string
-}
-
 echo "=== RoboSystems GitHub Repository Setup ==="
 echo ""
 
@@ -115,8 +88,16 @@ function check_prerequisites() {
 function show_optional_secrets() {
     echo "📋 Optional Secrets (not required for deployment):"
     echo ""
-    echo "   ACTIONS_TOKEN      - Enables cross-workflow triggers, auto-deploy on release"
+    echo "   ACTIONS_TOKEN      - GitHub Personal Access Token (PAT)"
+    echo "                        Create at: github.com/settings/tokens"
+    echo "                        Required scope: repo (full control)"
+    echo "                        Enhances PR/release automations"
+    echo ""
     echo "   ANTHROPIC_API_KEY  - Enables AI-powered PR summaries and release notes"
+    echo ""
+    echo "ACTIONS_TOKEN limitations when not set:"
+    echo "   - PRs created by create-pr.yml won't auto-trigger CI workflows"
+    echo "   - Self-hosted runner checks limited to repo-level (no org runners)"
     echo ""
     echo "To set secrets:"
     echo "   gh secret set ACTIONS_TOKEN"
@@ -432,20 +413,9 @@ function setup_full_config() {
     # Note: Neo4j variables removed - Neo4j backend is disabled by default in graph.yml
     # If Neo4j support is needed in future, add NEO4J_*_ENABLED_* variables here
 
-    # Graph AMI Configuration (updated via Graph Maintenance workflow)
-    # Look up latest Amazon Linux 2023 ARM64 AMI from AWS SSM
-    print_info "Looking up latest Amazon Linux 2023 ARM64 AMI..."
-    LATEST_AMI=$(get_latest_ami)
-    if [ -n "$LATEST_AMI" ]; then
-        print_success "Found latest AMI: $LATEST_AMI"
-        gh variable set GRAPH_AMI_ID_PROD --body "$LATEST_AMI"
-        if $setup_staging; then
-            gh variable set GRAPH_AMI_ID_STAGING --body "$LATEST_AMI"
-        fi
-    else
-        print_warning "Could not look up latest AMI from AWS SSM (requires AWS CLI auth)"
-        print_warning "Skipping GRAPH_AMI_ID_* - set manually or run graph-maintenance workflow"
-    fi
+    # Graph AMI: Auto-initialized by get-graph-ami action on first deploy
+    # Stored in SSM: /robosystems/{env}/graph/ami-id
+    # Updated via: graph-maintenance.yml workflow
 
     # Graph Settings
     gh variable set GRAPH_UPDATE_CONTAINERS_PROD --body "true"

@@ -8,9 +8,6 @@ on:
         required: true
         type: string
     secrets:
-      ACTIONS_TOKEN:
-        description: 'GitHub token for repository operations'
-        required: true
       ANTHROPIC_API_KEY:
         description: 'API key for Claude changelog generation'
         required: true
@@ -41,7 +38,7 @@ jobs:
         with:
           repository: ${{ github.repository }}
           ref: ${{ inputs.branch_ref }}
-          token: ${{ secrets.ACTIONS_TOKEN || github.token }}
+          token: ${{ github.token }}
           fetch-depth: 0
 
       - name: Get Version from pyproject.toml
@@ -103,23 +100,27 @@ jobs:
           echo "additions=$ADDITIONS" >> $GITHUB_OUTPUT
           echo "deletions=$DELETIONS" >> $GITHUB_OUTPUT
 
-          # Save multiline outputs
+          # Save multiline outputs using unique delimiters to avoid conflicts with content
+          DELIMITER_1="GHOUTPUT_$(date +%s)_COMMIT"
+          DELIMITER_2="GHOUTPUT_$(date +%s)_CHANGES"
+          DELIMITER_3="GHOUTPUT_$(date +%s)_PRREFS"
+
           {
-            echo "commit_messages<<EOF"
+            echo "commit_messages<<$DELIMITER_1"
             echo "$COMMIT_MESSAGES"
-            echo "EOF"
+            echo "$DELIMITER_1"
           } >> $GITHUB_OUTPUT
 
           {
-            echo "detailed_changes<<EOF"
+            echo "detailed_changes<<$DELIMITER_2"
             echo "$DETAILED_CHANGES"
-            echo "EOF"
+            echo "$DELIMITER_2"
           } >> $GITHUB_OUTPUT
 
           {
-            echo "pr_refs<<EOF"
+            echo "pr_refs<<$DELIMITER_3"
             echo "$PR_REFS"
-            echo "EOF"
+            echo "$DELIMITER_3"
           } >> $GITHUB_OUTPUT
 
       - name: Generate changelog with Claude
@@ -280,7 +281,7 @@ jobs:
           draft: false
           prerelease: false
         env:
-          GITHUB_TOKEN: ${{ secrets.ACTIONS_TOKEN || github.token }}
+          GITHUB_TOKEN: ${{ github.token }}
 
       - name: Create release summary
         if: steps.check-tag.outputs.tag_exists == 'false'

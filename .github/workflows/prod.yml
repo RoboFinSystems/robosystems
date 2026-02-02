@@ -12,6 +12,7 @@ concurrency:
 
 on:
   workflow_dispatch: {}
+  workflow_call: {}  # Called from create-release.yml
 
 jobs:
   runner:
@@ -26,7 +27,7 @@ jobs:
         with:
           repository: ${{ github.repository }}
           ref: ${{ github.ref }}
-          token: ${{ secrets.ACTIONS_TOKEN || github.token }}
+          token: ${{ github.token }}
 
       - name: Select runner
         id: select
@@ -34,11 +35,14 @@ jobs:
         with:
           runner_labels: ${{ vars.RUNNER_LABELS || 'github-hosted' }}
           runner_scope: ${{ vars.RUNNER_SCOPE || 'both' }}
-          github_token: ${{ secrets.ACTIONS_TOKEN || github.token }}
+          github_token: ${{ github.token }}
 
   stack-config:
     needs: [runner]
     runs-on: ${{ fromJSON(needs.runner.outputs.runner_config) }}
+    permissions:
+      id-token: write
+      contents: read
     outputs:
       vpc_stack: ${{ steps.load.outputs.vpc_stack }}
       s3_stack: ${{ steps.load.outputs.s3_stack }}
@@ -54,13 +58,26 @@ jobs:
       cloudtrail_stack: ${{ steps.load.outputs.cloudtrail_stack }}
       dagster_stack: ${{ steps.load.outputs.dagster_stack }}
       domain_name_root: ${{ steps.load.outputs.domain_name_root }}
+      graph_ami_id: ${{ steps.ami.outputs.ami_id }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
           repository: ${{ github.repository }}
           ref: ${{ github.ref }}
-          token: ${{ secrets.ACTIONS_TOKEN || github.token }}
+          token: ${{ github.token }}
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION || 'us-east-1' }}
+
+      - name: Get Graph AMI ID
+        id: ami
+        uses: ./.github/actions/get-graph-ami
+        with:
+          environment: prod
 
       - name: Install PyYAML
         run: pip install --user pyyaml
@@ -96,8 +113,7 @@ jobs:
     uses: ./.github/workflows/test.yml
     with:
       runner_config: ${{ needs.runner.outputs.runner_config }}
-    secrets:
-      ACTIONS_TOKEN: ${{ secrets.ACTIONS_TOKEN || github.token }}
+    secrets: inherit
 
   build:
     needs: [runner]
@@ -111,8 +127,7 @@ jobs:
       # Supports: refs/tags/v*.*.* (releases) and refs/heads/release/* (hotfixes)
       publish_to_dockerhub: ${{ vars.DOCKERHUB_PUBLISHING_ENABLED == 'true' && (startsWith(github.ref, 'refs/tags/v') || startsWith(github.ref, 'refs/heads/release/')) }}
     secrets:
-      ACTIONS_TOKEN: ${{ secrets.ACTIONS_TOKEN || github.token }}
-      DOCKERHUB_USERNAME: ${{ vars.DOCKERHUB_USERNAME }}
+      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
       DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
 
   create-deployment:
@@ -125,13 +140,13 @@ jobs:
         id: deployment
         uses: chrnorm/deployment-action@v2
         with:
-          token: ${{ secrets.ACTIONS_TOKEN || github.token }}
+          token: ${{ github.token }}
           environment: production
           description: "Production Deployment Created"
       - name: Update Deployment Status
         uses: chrnorm/deployment-status@v2
         with:
-          token: ${{ secrets.ACTIONS_TOKEN || github.token }}
+          token: ${{ github.token }}
           state: in_progress
           deployment-id: ${{ steps.deployment.outputs.deployment_id }}
           description: "Production Deployment In Progress"
@@ -160,8 +175,7 @@ jobs:
       cloudtrail_enabled: ${{ vars.CLOUDTRAIL_ENABLED || 'false' }}
       cloudtrail_log_retention_days: ${{ vars.CLOUDTRAIL_LOG_RETENTION_DAYS || '90' }}
       cloudtrail_data_events_enabled: ${{ vars.CLOUDTRAIL_DATA_EVENTS_ENABLED || 'false' }}
-    secrets:
-      ACTIONS_TOKEN: ${{ secrets.ACTIONS_TOKEN || github.token }}
+    secrets: inherit
 
   deploy-s3:
     needs: [runner, create-deployment, stack-config]
@@ -180,8 +194,7 @@ jobs:
       # Leave PUBLIC_DOMAIN_NAME_PROD empty for default CloudFront domain (isolated deployment)
       public_domain_name: ${{ vars.PUBLIC_DOMAIN_NAME_PROD || '' }}
       domain_name_root: ${{ vars.API_DOMAIN_NAME_ROOT || '' }}
-    secrets:
-      ACTIONS_TOKEN: ${{ secrets.ACTIONS_TOKEN || github.token }}
+    secrets: inherit
 
   package-scripts:
     needs: [runner, deploy-s3]
@@ -195,7 +208,7 @@ jobs:
         with:
           repository: ${{ github.repository }}
           ref: ${{ github.ref }}
-          token: ${{ secrets.ACTIONS_TOKEN || github.token }}
+          token: ${{ github.token }}
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
@@ -232,14 +245,11 @@ jobs:
       allocated_max_storage: ${{ vars.DATABASE_MAX_ALLOCATED_STORAGE_PROD || '100' }}
       # High Availability Configuration
       multi_az_enabled: ${{ vars.DATABASE_MULTI_AZ_ENABLED_PROD || 'false' }}
-      # Secret Rotation Configuration
-      secrets_rotation_days: ${{ vars.DATABASE_SECRETS_ROTATION_DAYS || '90' }}
       # Lambda Configuration (container-based)
       lambda_image_uri: ${{ needs.build.outputs.lambda_image }}
       # Other Configuration
       aws_sns_alert_email: ${{ vars.AWS_SNS_ALERT_EMAIL }}
-    secrets:
-      ACTIONS_TOKEN: ${{ secrets.ACTIONS_TOKEN || github.token }}
+    secrets: inherit
 
   deploy-valkey:
     needs: [runner, create-deployment, stack-config, build, deploy-vpc]
@@ -267,8 +277,7 @@ jobs:
       lambda_image_uri: ${{ needs.build.outputs.lambda_image }}
       # Other Configuration
       aws_sns_alert_email: ${{ vars.AWS_SNS_ALERT_EMAIL }}
-    secrets:
-      ACTIONS_TOKEN: ${{ secrets.ACTIONS_TOKEN || github.token }}
+    secrets: inherit
 
   deploy-prometheus:
     # Observability disabled by default - set OBSERVABILITY_ENABLED_PROD=true to enable
@@ -283,8 +292,7 @@ jobs:
       runner_config: ${{ needs.runner.outputs.runner_config }}
       # AWS Configuration
       aws_region: ${{ vars.AWS_REGION || 'us-east-1' }}
-    secrets:
-      ACTIONS_TOKEN: ${{ secrets.ACTIONS_TOKEN || github.token }}
+    secrets: inherit
 
   deploy-grafana:
     # Observability disabled by default - set OBSERVABILITY_ENABLED_PROD=true to enable
@@ -299,8 +307,7 @@ jobs:
       runner_config: ${{ needs.runner.outputs.runner_config }}
       # AWS Configuration
       aws_region: ${{ vars.AWS_REGION || 'us-east-1' }}
-    secrets:
-      ACTIONS_TOKEN: ${{ secrets.ACTIONS_TOKEN || github.token }}
+    secrets: inherit
 
   deploy-bastion:
     needs:
@@ -328,8 +335,7 @@ jobs:
       valkey_sg_id: ${{ needs.deploy-valkey.outputs.valkey_sg_id }}
       # S3 Bucket Configuration (from S3 stack outputs)
       deployment_bucket_arn: ${{ needs.deploy-s3.outputs.deployment_bucket_arn }}
-    secrets:
-      ACTIONS_TOKEN: ${{ secrets.ACTIONS_TOKEN || github.token }}
+    secrets: inherit
 
   # Graph Infrastructure - Step 1: Deploy DynamoDB, Secrets, Lambda monitoring
   deploy-graph-infra:
@@ -348,8 +354,7 @@ jobs:
       lambda_image_uri: ${{ needs.build.outputs.lambda_image }}
       # Other Configuration
       aws_sns_alert_email: ${{ vars.AWS_SNS_ALERT_EMAIL }}
-    secrets:
-      ACTIONS_TOKEN: ${{ secrets.ACTIONS_TOKEN || github.token }}
+    secrets: inherit
 
   # Graph Infrastructure - Step 2: Deploy EBS volume management
   deploy-graph-volumes:
@@ -373,8 +378,7 @@ jobs:
       graph_api_secret_arn: ${{ needs.deploy-graph-infra.outputs.secret_arn }}
       # Other Configuration
       aws_sns_alert_email: ${{ vars.AWS_SNS_ALERT_EMAIL }}
-    secrets:
-      ACTIONS_TOKEN: ${{ secrets.ACTIONS_TOKEN || github.token }}
+    secrets: inherit
 
   deploy-graph:
     needs:
@@ -382,6 +386,7 @@ jobs:
         runner,
         create-deployment,
         build,
+        stack-config,
         deploy-vpc,
         deploy-postgres,
         deploy-valkey,
@@ -403,7 +408,7 @@ jobs:
       public_subnet_ids: ${{ needs.deploy-vpc.outputs.public_subnet_ids }}
       valkey_sg_id: ${{ needs.deploy-valkey.outputs.valkey_sg_id }}
       valkey_url: ${{ needs.deploy-valkey.outputs.valkey_url }}
-      ami_id: ${{ vars.GRAPH_AMI_ID_PROD }}
+      ami_id: ${{ needs.stack-config.outputs.graph_ami_id }}
       # Container Configuration
       ecr_image_tag: latest
       # Infrastructure inputs from graph infrastructure jobs
@@ -432,8 +437,7 @@ jobs:
       shared_replicas_instance_type: ${{ vars.SHARED_REPLICAS_INSTANCE_TYPE_PROD || 'r7g.medium' }}
       # Other Configuration
       aws_sns_alert_email: ${{ vars.AWS_SNS_ALERT_EMAIL }}
-    secrets:
-      ACTIONS_TOKEN: ${{ secrets.ACTIONS_TOKEN || github.token }}
+    secrets: inherit
 
   deploy-api:
     needs:
@@ -503,8 +507,7 @@ jobs:
       # Other Configuration
       prometheus_stack_name: ${{ needs.deploy-prometheus.outputs.prometheus_stack_name || '' }}
       aws_sns_alert_email: ${{ vars.AWS_SNS_ALERT_EMAIL }}
-    secrets:
-      ACTIONS_TOKEN: ${{ secrets.ACTIONS_TOKEN || github.token }}
+    secrets: inherit
 
   deploy-dagster:
     needs:
@@ -571,8 +574,7 @@ jobs:
       public_data_bucket_arn: ${{ needs.deploy-s3.outputs.public_data_bucket_arn }}
       logs_bucket_arn: ${{ needs.deploy-s3.outputs.logs_bucket_arn }}
       public_data_cdn_url: ${{ needs.deploy-s3.outputs.public_data_cdn_url }}
-    secrets:
-      ACTIONS_TOKEN: ${{ secrets.ACTIONS_TOKEN || github.token }}
+    secrets: inherit
 
   # Unified service refresh - runs all refreshes in parallel after CloudFormation deployments
   service-refresh:
@@ -600,8 +602,7 @@ jobs:
       api_stack_name: ${{ needs.stack-config.outputs.api_stack }}
       # Dagster refresh (ECS daemon + webserver)
       dagster_refresh_enabled: ${{ vars.DAGSTER_REFRESH_ECS_PROD || 'true' }}
-    secrets:
-      ACTIONS_TOKEN: ${{ secrets.ACTIONS_TOKEN || github.token }}
+    secrets: inherit
 
   deployment-successful:
     needs:
@@ -648,7 +649,7 @@ jobs:
         with:
           repository: ${{ github.repository }}
           ref: ${{ github.ref }}
-          token: ${{ secrets.ACTIONS_TOKEN || github.token }}
+          token: ${{ github.token }}
 
       - name: Generate Deployment Summary
         env:
@@ -741,7 +742,7 @@ jobs:
       - name: Update Deployment Status
         uses: chrnorm/deployment-status@v2
         with:
-          token: ${{ secrets.ACTIONS_TOKEN || github.token }}
+          token: ${{ github.token }}
           state: success
           deployment-id: ${{ needs.create-deployment.outputs.deployment_id }}
           description: "Production Deployment Succeeded"
@@ -771,11 +772,11 @@ jobs:
         with:
           repository: ${{ github.repository }}
           ref: ${{ github.ref }}
-          token: ${{ secrets.ACTIONS_TOKEN || github.token }}
+          token: ${{ github.token }}
 
       - name: Handle Deployment Failure
         uses: ./.github/actions/handle-deployment-failure
         with:
           deployment-id: ${{ needs.create-deployment.outputs.deployment_id }}
           environment: production
-          github-token: ${{ secrets.ACTIONS_TOKEN || github.token }}
+          github-token: ${{ github.token }}

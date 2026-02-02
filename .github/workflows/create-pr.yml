@@ -36,13 +36,28 @@ jobs:
     runs-on: ubuntu-latest # Use GitHub-hosted runners for memory-intensive git/Claude operations
     timeout-minutes: 10
     env:
+      # ACTIONS_TOKEN (PAT) preferred - PRs created with github.token won't trigger CI workflows
       GH_TOKEN: ${{ secrets.ACTIONS_TOKEN || github.token }}
     steps:
+      - name: Check token configuration
+        run: |
+          if [ -z "${{ secrets.ACTIONS_TOKEN }}" ]; then
+            echo "::warning::ACTIONS_TOKEN not set - using github.token as fallback"
+            echo ""
+            echo "⚠️  PRs created with github.token have limitations:"
+            echo "   - Won't trigger on:pull_request workflows (CI won't run automatically)"
+            echo "   - May be blocked by branch protection rules"
+            echo ""
+            echo "To enable full functionality, set ACTIONS_TOKEN secret:"
+            echo "   gh secret set ACTIONS_TOKEN"
+          else
+            echo "✅ Using ACTIONS_TOKEN for full PR functionality"
+          fi
+
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          repository: ${{ github.repository }}
-          ref: ${{ github.ref }}
+          # ACTIONS_TOKEN preferred for pushing to protected branches
           token: ${{ secrets.ACTIONS_TOKEN || github.token }}
           fetch-depth: 0
 
