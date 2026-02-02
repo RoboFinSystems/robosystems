@@ -893,9 +893,7 @@ class XBRLDuckDBGraphProcessor:
             continue
 
         # Use single path or list depending on count
-        s3_pattern: str | list[str] = (
-          s3_paths[0] if len(s3_paths) == 1 else s3_paths
-        )
+        s3_pattern: str | list[str] = s3_paths[0] if len(s3_paths) == 1 else s3_paths
 
         log_progress(f"[{i}/{total_tables}] COPY {table_name} (Q{quarter} {year})...")
 

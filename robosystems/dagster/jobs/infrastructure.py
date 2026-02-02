@@ -26,10 +26,10 @@ from robosystems.models.iam import UserAPIKey
 # ============================================================================
 
 # Instance infrastructure schedules require real AWS resources (DynamoDB, EC2, CloudWatch)
-# Default to STOPPED. Enable via INSTANCE_SCHEDULES_ENABLED=true in AWS Secrets Manager.
+# RUNNING in prod/staging, STOPPED in dev (no AWS resources locally)
 INSTANCE_SCHEDULE_STATUS = (
   DefaultScheduleStatus.RUNNING
-  if env.INSTANCE_SCHEDULES_ENABLED
+  if env.ENVIRONMENT != "dev"
   else DefaultScheduleStatus.STOPPED
 )
 

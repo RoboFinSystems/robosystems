@@ -33,6 +33,7 @@ from robosystems.dagster.assets import (
   sec_duckdb_incremental_staged,
   sec_duckdb_staged,
   sec_graph_direct_copy,
+  sec_graph_incremental_copy,
   sec_graph_materialized,
   # SEC pipeline - quarterly batch processing with consolidated output
   sec_processed_filings,
@@ -96,7 +97,7 @@ from robosystems.dagster.jobs.sec import (
   sec_direct_copy_job,
   sec_download_job,
   sec_incremental_copy_job,
-  sec_incremental_ingest_job,
+  sec_incremental_stage_job,
   sec_materialize_job,
   sec_process_job,
   sec_stage_job,
@@ -121,12 +122,12 @@ from robosystems.dagster.sensors import (
   pending_subscription_sensor,
   # Incremental pipeline (automated chain, disabled by default)
   sec_download_to_process_sensor,
-  sec_incremental_copy_sensor,
   sec_incremental_download_schedule,
   sec_incremental_post_ingest_snapshot_sensor,
   sec_incremental_staging_sensor,
   sec_post_materialize_snapshot_sensor,
   sec_processing_sensor,
+  sec_stage_to_copy_sensor,
 )
 
 # ============================================================================
@@ -179,8 +180,8 @@ all_jobs = [
   sec_stage_job,  # Stage to persistent DuckDB (standard profile: 2 vCPU, 8 GB)
   sec_materialize_job,  # Materialize from DuckDB to LadybugDB (standard profile)
   sec_staged_materialize_job,  # Full pipeline: stage + materialize (standard profile)
-  sec_incremental_ingest_job,  # Incremental: INSERT new files + materialize
-  sec_incremental_copy_job,  # Incremental S3 → LadybugDB (preferred for daily updates)
+  sec_incremental_stage_job,  # Incremental: INSERT new files to DuckDB
+  sec_incremental_copy_job,  # Incremental S3 → LadybugDB (direct copy)
   sec_direct_copy_job,  # Direct S3 → LadybugDB (bypasses DuckDB staging)
   sec_backup_job,  # Create downloadable backup of SEC database
   # Shared repository jobs
@@ -226,8 +227,8 @@ all_sensors = [
   sec_post_materialize_snapshot_sensor,
   # SEC incremental pipeline chain sensors (disabled by default)
   sec_download_to_process_sensor,
-  sec_incremental_staging_sensor,
-  sec_incremental_copy_sensor,  # Preferred: bypasses DuckDB, uses ignore_errors
+  sec_incremental_staging_sensor,  # process → stage (DuckDB)
+  sec_stage_to_copy_sensor,  # stage → copy (S3 → LadybugDB)
   sec_incremental_post_ingest_snapshot_sensor,
 ]
 
@@ -251,6 +252,7 @@ all_assets = [
   sec_duckdb_staged,  # DuckDB staging (full rebuild)
   sec_duckdb_incremental_staged,  # DuckDB incremental staging (INSERT with dedup)
   sec_graph_direct_copy,  # Direct S3 → LadybugDB (bypasses DuckDB staging)
+  sec_graph_incremental_copy,  # Incremental S3 → LadybugDB (preferred for daily updates)
   sec_graph_materialized,  # LadybugDB materialization (retry-safe)
   sec_backup,  # Create downloadable backup of SEC database (depends on sec_graph_materialized)
   # QuickBooks pipeline assets

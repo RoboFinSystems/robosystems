@@ -125,8 +125,6 @@ function create_production_secret() {
         "CONNECTION_PLAID_ENABLED": "false",
 
         "SHARED_MASTER_READS_ENABLED": "true",
-        "SEC_PARALLEL_SENSOR_ENABLED": "false",
-        "SEC_INCREMENTAL_PIPELINE_ENABLED": "false",
         "SEC_LARGE_SCALE_MODE_ENABLED": "false",
 
         "ORG_GRAPHS_DEFAULT_LIMIT": "10",
@@ -137,8 +135,6 @@ function create_production_secret() {
         "RATE_LIMIT_ENABLED": "false",
         "LOAD_SHEDDING_ENABLED": "true",
         "OTEL_ENABLED": "false",
-        "BILLING_SCHEDULES_ENABLED": "true",
-        "INSTANCE_SCHEDULES_ENABLED": "true",
 
         "INTUIT_CLIENT_ID": "Intuit.ipp.application.your_client_id",
         "INTUIT_CLIENT_SECRET": "your_quickbooks_client_secret_here",
@@ -219,8 +215,6 @@ function create_staging_secret() {
         "CONNECTION_PLAID_ENABLED": "false",
 
         "SHARED_MASTER_READS_ENABLED": "true",
-        "SEC_PARALLEL_SENSOR_ENABLED": "false",
-        "SEC_INCREMENTAL_PIPELINE_ENABLED": "false",
         "SEC_LARGE_SCALE_MODE_ENABLED": "false",
 
         "ORG_GRAPHS_DEFAULT_LIMIT": "10",
@@ -231,8 +225,6 @@ function create_staging_secret() {
         "RATE_LIMIT_ENABLED": "false",
         "LOAD_SHEDDING_ENABLED": "true",
         "OTEL_ENABLED": "false",
-        "BILLING_SCHEDULES_ENABLED": "true",
-        "INSTANCE_SCHEDULES_ENABLED": "true",
 
         "INTUIT_CLIENT_ID": "Intuit.ipp.application.your_sandbox_client_id",
         "INTUIT_CLIENT_SECRET": "your_quickbooks_sandbox_client_secret_here",

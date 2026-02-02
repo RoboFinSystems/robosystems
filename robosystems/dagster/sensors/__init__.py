@@ -1,16 +1,11 @@
 """Dagster sensors and schedules for event-triggered operations.
 
-Sensors monitor for conditions and trigger jobs when criteria are met:
+Sensors monitor for conditions and trigger jobs when criteria are met.
+All sensors start STOPPED by default - enable in Dagster UI when ready.
+
 - Provisioning sensors: Watch for subscriptions needing graph/repository provisioning
 - SEC processing sensor: Watch for raw filings and trigger parallel processing
-- SEC post-materialize snapshot: Trigger replica snapshot after SEC materialization
-
-Incremental Pipeline (SEC_INCREMENTAL_PIPELINE_ENABLED=true):
-- sec_incremental_download_schedule: Download at 9pm EST weekdays
-- sec_download_to_process_sensor: Chain download → process
-- sec_incremental_staging_sensor: Chain process → incremental stage + materialize (DuckDB approach)
-- sec_incremental_copy_sensor: Chain process → incremental copy (preferred, bypasses DuckDB)
-- sec_incremental_post_ingest_snapshot_sensor: Chain incremental ingest/copy → snapshot
+- SEC incremental pipeline: Automated daily download → process → stage → copy → snapshot
 """
 
 from robosystems.dagster.sensors.provisioning import (
@@ -19,22 +14,22 @@ from robosystems.dagster.sensors.provisioning import (
 )
 from robosystems.dagster.sensors.sec import (
   sec_download_to_process_sensor,
-  sec_incremental_copy_sensor,
   sec_incremental_download_schedule,
   sec_incremental_post_ingest_snapshot_sensor,
   sec_incremental_staging_sensor,
   sec_post_materialize_snapshot_sensor,
   sec_processing_sensor,
+  sec_stage_to_copy_sensor,
 )
 
 __all__ = [
   "pending_repository_sensor",
   "pending_subscription_sensor",
   "sec_download_to_process_sensor",
-  "sec_incremental_copy_sensor",
   "sec_incremental_download_schedule",
   "sec_incremental_post_ingest_snapshot_sensor",
   "sec_incremental_staging_sensor",
   "sec_post_materialize_snapshot_sensor",
   "sec_processing_sensor",
+  "sec_stage_to_copy_sensor",
 ]

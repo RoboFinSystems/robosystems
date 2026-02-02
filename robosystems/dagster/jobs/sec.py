@@ -187,23 +187,21 @@ sec_staged_materialize_job = define_asset_job(
 
 
 # ============================================================================
-# Phase 3b: Incremental Ingest (Daily Updates)
+# Phase 3b: Incremental DuckDB Staging (Keep DuckDB in Sync)
 # ============================================================================
-# Incremental pipeline for daily SEC updates:
-# 1. sec_duckdb_incremental_staged: INSERT new quarter files with dedup
-# 2. sec_graph_materialized: Full rebuild from updated DuckDB tables
+# Incremental staging to DuckDB for daily SEC updates.
+# INSERT new quarter files with dedup - only net new rows added.
 #
-# Unlike full rebuild, incremental staging only adds net new rows.
-# Materialization still does full rebuild since LadybugDB doesn't support
-# incremental updates efficiently.
+# This keeps DuckDB ready for a full rebuild if needed, but we don't
+# run the expensive sec_graph_materialized (full rebuild) daily.
+# Instead, after staging, we run sec_incremental_copy for fast updates.
+#
+# Chain: process → stage (this) → copy → snapshot
 
-sec_incremental_ingest_job = define_asset_job(
-  name="sec_incremental_ingest",
-  description="Incremental SEC ingest: stage new dates → materialize → snapshot.",
-  selection=AssetSelection.assets(
-    sec_duckdb_incremental_staged,
-    sec_graph_materialized,
-  ),
+sec_incremental_stage_job = define_asset_job(
+  name="sec_incremental_stage",
+  description="Incremental DuckDB staging (keeps DuckDB in sync for potential rebuilds).",
+  selection=AssetSelection.assets(sec_duckdb_incremental_staged),
   tags={
     "pipeline": "sec",
     "mode": "incremental",
