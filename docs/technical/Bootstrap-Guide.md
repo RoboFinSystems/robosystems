@@ -8,6 +8,7 @@ This guide walks you through bootstrapping a fresh fork of RoboSystems.
 - [Prerequisites](#prerequisites)
 - [Fresh AWS Account Setup](#fresh-aws-account-setup)
 - [Bootstrap](#bootstrap)
+- [SSM Parameters](#ssm-parameters)
 - [Deploy](#deploy)
 - [Multi-Repository Setup](#multi-repository-setup)
 - [API Access Modes](#api-access-modes)
@@ -138,6 +139,45 @@ aws secretsmanager put-secret-value --secret-id robosystems/prod --secret-string
 ```
 
 **Fork-specific:** GitHub Actions workflows automatically pass your AWS account ID as a namespace to CloudFormation, creating unique bucket names like `robosystems-{account-id}-shared-raw-{env}`.
+
+### SSM Parameters
+
+SSM Parameter Store holds feature flags and tuning parameters (FREE tier). Created by `just setup-aws`.
+
+**Parameter hierarchy:**
+```
+/robosystems/{env}/
+  features/           # Boolean feature flags
+    RATE_LIMIT_ENABLED
+    BILLING_ENABLED
+    ...
+  tuning/             # Runtime tunables
+    cache/            # Cache TTLs (BALANCE_TTL, JWT_TTL, etc.)
+    admission/        # Main API thresholds (MEMORY_THRESHOLD, CPU_THRESHOLD, QUEUE_THRESHOLD)
+    lbug_admission/   # LadybugDB/Graph API thresholds (MEMORY_THRESHOLD, CPU_THRESHOLD)
+    queues/           # Queue config (MAX_SIZE, MAX_CONCURRENT)
+    circuits/         # Circuit breakers (THRESHOLD, TIMEOUT)
+    load_shedding/    # Load shedding (START_PRESSURE, STOP_PRESSURE)
+    mcp/              # MCP limits (MAX_RESULT_ROWS, MAX_RESULT_SIZE_MB)
+```
+
+**Managing parameters:**
+```bash
+# List all feature flags or tuning parameters
+just ssm-list prod features
+just ssm-list prod tuning
+
+# Get/set individual parameters
+just ssm-get prod features/RATE_LIMIT_ENABLED
+just ssm-set prod features/RATE_LIMIT_ENABLED false
+
+just ssm-get prod tuning/cache/BALANCE_TTL
+just ssm-set prod tuning/cache/BALANCE_TTL 600
+```
+
+**Override priority:** Environment Variable > SSM Parameter > Default Value
+
+Tuning parameters can be adjusted at runtime without redeployment. Changes take effect within the application's cache TTL (typically 5 minutes).
 
 ## Deploy
 
@@ -350,8 +390,14 @@ just deploy staging               # Staging
 # Connect
 just bastion-tunnel prod all      # All tunnels (postgres, valkey, dagster, api)
 
+# SSM Parameters
+just ssm-list prod features       # List feature flags
+just ssm-list prod tuning         # List tuning parameters
+just ssm-set prod features/BILLING_ENABLED true
+just ssm-set prod tuning/cache/BALANCE_TTL 600
+
 # Optional / Re-run individually
-just setup-aws                    # Application secrets & feature flags
+just setup-aws                    # Secrets, feature flags, tuning params
 just setup-gha                    # Full GitHub variable control (~120 vars)
 just setup-bedrock                # Local AI/Bedrock development
 
