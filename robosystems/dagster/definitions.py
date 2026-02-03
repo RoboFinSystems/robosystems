@@ -255,10 +255,10 @@ all_assets = [
   sec_duckdb_staged,  # DuckDB staging (full rebuild)
   sec_duckdb_incremental_staged,  # DuckDB incremental staging (INSERT with dedup)
   sec_graph_direct_copy,  # Direct S3 → LadybugDB (bypasses DuckDB staging)
-  sec_graph_incremental_copy,  # Incremental S3 → LadybugDB (preferred for daily updates)
-  sec_entity_incremental_update,  # Update existing Entity nodes (handles mutable attributes)
+  sec_graph_incremental_copy,  # Incremental S3 → LadybugDB (daily updates)
+  sec_entity_incremental_update,  # Update existing Entity nodes (mutable attrs)
   sec_graph_materialized,  # LadybugDB materialization (retry-safe)
-  sec_backup,  # Create downloadable backup of SEC database (depends on sec_graph_materialized)
+  sec_backup,  # Downloadable backup of SEC database
   # QuickBooks pipeline assets
   qb_accounts,
   qb_transactions,
