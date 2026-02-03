@@ -120,10 +120,10 @@ class WorkerDefaults:
   """
   Worker/thread pool defaults.
 
-  These values control parallel processing capacity.
+  These values control parallel processing for batch operations.
   """
 
-  MAX_WORKERS = 10  # Default max workers for thread pools
+  MAX_WORKERS = 10  # Parallel workers for batch operations (e.g., S3 uploads)
   MIN_WORKERS = 1  # Minimum workers
   POOL_TIMEOUT = 30  # Worker pool timeout
 
@@ -180,6 +180,7 @@ SSM_TUNING_PATHS = {
   "mcp/MAX_RESULT_ROWS": MCPDefaults.MAX_RESULT_ROWS,
   "mcp/MAX_RESULT_SIZE_MB": MCPDefaults.MAX_RESULT_SIZE_MB,
   "mcp/POOL_IDLE_TIMEOUT": MCPDefaults.POOL_IDLE_TIMEOUT,
+  "mcp/POOL_MAX_LIFETIME": MCPDefaults.POOL_MAX_LIFETIME,
   # Workers
   "workers/MAX_WORKERS": WorkerDefaults.MAX_WORKERS,
 }

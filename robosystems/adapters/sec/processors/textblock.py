@@ -2,6 +2,7 @@ import hashlib
 from datetime import datetime
 from typing import Any
 
+from robosystems.config.tuning import TuningConfig
 from robosystems.logger import logger
 
 # S3 key truncation lengths for readability
@@ -135,7 +136,7 @@ class TextBlockExternalizer:
     results = self.s3_client.batch_upload_strings(
       items=self.upload_queue,
       content_type=None,
-      max_workers=10,
+      max_workers=TuningConfig.get_max_workers(),
       max_retries=3,
     )
 

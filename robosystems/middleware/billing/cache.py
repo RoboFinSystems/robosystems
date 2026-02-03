@@ -7,8 +7,8 @@ from typing import Any, cast
 
 import redis
 
-from ...config import env
 from ...config.defaults import CacheDefaults
+from ...config.tuning import TuningConfig
 from ...config.valkey_registry import ValkeyDatabase, create_redis_client
 from ...logger import logger
 
@@ -23,19 +23,14 @@ class CreditCache:
   CREDIT_SUMMARY_PREFIX = "credit_summary:"
   OPERATION_COST_PREFIX = "op_cost:"
 
-  # Default TTLs - using centralized defaults
-  BALANCE_TTL = CacheDefaults.BALANCE_TTL  # 5 minutes for balance cache
-  SUMMARY_TTL = CacheDefaults.SUMMARY_TTL  # 10 minutes for summary cache
-  OPERATION_COST_TTL = CacheDefaults.OPERATION_COST_TTL  # 1 hour for operation costs
-
   def __init__(self):
     """Initialize Redis connection for credit caching."""
     self._redis = None
 
-    # TTL configuration
-    self.balance_ttl = env.CREDIT_BALANCE_CACHE_TTL
-    self.summary_ttl = env.CREDIT_SUMMARY_CACHE_TTL
-    self.operation_cost_ttl = env.CREDIT_OPERATION_COST_CACHE_TTL
+    # TTL configuration - using TuningConfig for runtime tunability via SSM
+    self.balance_ttl = TuningConfig.get_cache_balance_ttl()
+    self.summary_ttl = TuningConfig.get_cache_summary_ttl()
+    self.operation_cost_ttl = CacheDefaults.OPERATION_COST_TTL  # Not tunable (rarely changes)
 
   @property
   def redis(self) -> redis.Redis:

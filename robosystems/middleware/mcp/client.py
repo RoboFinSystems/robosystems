@@ -15,7 +15,7 @@ import httpx
 from httpx import HTTPError, TimeoutException
 
 from robosystems.config import env
-from robosystems.config.defaults import CacheDefaults
+from robosystems.config.tuning import TuningConfig
 from robosystems.graph_api.client import GraphClient
 from robosystems.logger import logger
 
@@ -37,7 +37,11 @@ class GraphMCPClient:
   # Class-level cached configuration
   _config_cache = None
   _config_cache_time = 0
-  _config_cache_ttl = CacheDefaults.SCHEMA_TTL  # 5 minutes
+
+  @classmethod
+  def _get_config_cache_ttl(cls) -> int:
+    """Get config cache TTL from TuningConfig (runtime tunable via SSM)."""
+    return TuningConfig.get_cache_schema_ttl()
 
   def __init__(
     self,
@@ -102,7 +106,7 @@ class GraphMCPClient:
     if (
       GraphMCPClient._config_cache is None
       or current_time - GraphMCPClient._config_cache_time
-      > GraphMCPClient._config_cache_ttl
+      > GraphMCPClient._get_config_cache_ttl()
     ):
       # Load configuration from environment
       GraphMCPClient._config_cache = {

@@ -1,53 +1,89 @@
 """
 Configuration for query queue and admission control.
 
-Routes all configuration through the centralized env.py config.
+Uses TuningConfig for runtime tunability via SSM Parameter Store.
+Falls back to defaults when SSM is not available.
 """
 
 from robosystems.config import env
+from robosystems.config.tuning import TuningConfig
 
 
 class QueryQueueConfig:
-  """Configuration for query queue system."""
+  """Configuration for query queue system with runtime tunability."""
 
-  # Queue configuration
-  MAX_QUEUE_SIZE: int = env.QUERY_QUEUE_MAX_SIZE
-  MAX_CONCURRENT_QUERIES: int = env.QUERY_QUEUE_MAX_CONCURRENT
-  MAX_QUERIES_PER_USER: int = env.QUERY_QUEUE_MAX_PER_USER
-  QUERY_TIMEOUT: int = env.QUERY_QUEUE_TIMEOUT
-
-  # Admission control thresholds
-  MEMORY_THRESHOLD: float = env.ADMISSION_MEMORY_THRESHOLD
-  CPU_THRESHOLD: float = env.ADMISSION_CPU_THRESHOLD
-  QUEUE_THRESHOLD: float = env.ADMISSION_QUEUE_THRESHOLD
-  CHECK_INTERVAL: float = env.ADMISSION_CHECK_INTERVAL
-
-  # Load shedding configuration
-  LOAD_SHEDDING_ENABLED: bool = env.LOAD_SHEDDING_ENABLED
-  SHED_START_PRESSURE: float = env.LOAD_SHED_START_PRESSURE
-  SHED_STOP_PRESSURE: float = env.LOAD_SHED_STOP_PRESSURE
-
-  # Priority configuration
+  # Priority configuration (not tunable - business logic)
   DEFAULT_PRIORITY: int = env.QUERY_DEFAULT_PRIORITY
   PRIORITY_BOOST_PREMIUM: int = env.QUERY_PRIORITY_BOOST_PREMIUM
 
+  # Check interval (not tunable - performance sensitive)
+  CHECK_INTERVAL: float = env.ADMISSION_CHECK_INTERVAL
+
+  # Load shedding enabled flag (feature flag, not tunable)
+  LOAD_SHEDDING_ENABLED: bool = env.LOAD_SHEDDING_ENABLED
+
+  @classmethod
+  def get_max_queue_size(cls) -> int:
+    """Get maximum queue size (runtime tunable via SSM)."""
+    return TuningConfig.get_queue_max_size()
+
+  @classmethod
+  def get_max_concurrent_queries(cls) -> int:
+    """Get maximum concurrent queries (runtime tunable via SSM)."""
+    return TuningConfig.get_queue_max_concurrent()
+
+  @classmethod
+  def get_max_queries_per_user(cls) -> int:
+    """Get maximum queries per user (runtime tunable via SSM)."""
+    return TuningConfig.get_queue_max_per_user()
+
+  @classmethod
+  def get_query_timeout(cls) -> int:
+    """Get query timeout in seconds (runtime tunable via SSM)."""
+    return TuningConfig.get_queue_timeout()
+
+  @classmethod
+  def get_memory_threshold(cls) -> float:
+    """Get memory threshold for admission control (runtime tunable via SSM)."""
+    return TuningConfig.get_admission_memory_threshold()
+
+  @classmethod
+  def get_cpu_threshold(cls) -> float:
+    """Get CPU threshold for admission control (runtime tunable via SSM)."""
+    return TuningConfig.get_admission_cpu_threshold()
+
+  @classmethod
+  def get_queue_threshold(cls) -> float:
+    """Get queue threshold for admission control (runtime tunable via SSM)."""
+    return TuningConfig.get_admission_queue_threshold()
+
+  @classmethod
+  def get_shed_start_pressure(cls) -> float:
+    """Get load shedding start pressure (runtime tunable via SSM)."""
+    return TuningConfig.get_load_shedding_start_pressure()
+
+  @classmethod
+  def get_shed_stop_pressure(cls) -> float:
+    """Get load shedding stop pressure (runtime tunable via SSM)."""
+    return TuningConfig.get_load_shedding_stop_pressure()
+
   @classmethod
   def get_queue_config(cls) -> dict:
-    """Get queue configuration as dict."""
+    """Get queue configuration as dict (runtime tunable values)."""
     return {
-      "max_queue_size": cls.MAX_QUEUE_SIZE,
-      "max_concurrent_queries": cls.MAX_CONCURRENT_QUERIES,
-      "max_queries_per_user": cls.MAX_QUERIES_PER_USER,
-      "query_timeout": cls.QUERY_TIMEOUT,
+      "max_queue_size": cls.get_max_queue_size(),
+      "max_concurrent_queries": cls.get_max_concurrent_queries(),
+      "max_queries_per_user": cls.get_max_queries_per_user(),
+      "query_timeout": cls.get_query_timeout(),
     }
 
   @classmethod
   def get_admission_config(cls) -> dict:
-    """Get admission control configuration as dict."""
+    """Get admission control configuration as dict (runtime tunable values)."""
     return {
-      "memory_threshold": cls.MEMORY_THRESHOLD,
-      "cpu_threshold": cls.CPU_THRESHOLD,
-      "queue_threshold": cls.QUEUE_THRESHOLD,
+      "memory_threshold": cls.get_memory_threshold(),
+      "cpu_threshold": cls.get_cpu_threshold(),
+      "queue_threshold": cls.get_queue_threshold(),
       "check_interval": cls.CHECK_INTERVAL,
       "load_shedding_enabled": cls.LOAD_SHEDDING_ENABLED,
     }
