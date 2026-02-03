@@ -19,6 +19,7 @@ from fastapi import (
 from sqlalchemy.orm import Session
 
 from ...config import env
+from ...config.constants import JWT_EXPIRY_HOURS, TOKEN_GRACE_PERIOD_MINUTES
 from ...database import get_async_db_session
 from ...logger import logger
 from ...middleware.auth.distributed_lock import get_sso_lock_manager
@@ -623,8 +624,8 @@ async def sso_complete(
     # No longer setting auth cookies - using Bearer token authentication
     # Token is returned in the response body for the frontend to store
 
-    expires_in = int(env.JWT_EXPIRY_HOURS * 3600)
-    refresh_threshold = int(env.TOKEN_GRACE_PERIOD_MINUTES * 60)
+    expires_in = int(JWT_EXPIRY_HOURS * 3600)
+    refresh_threshold = int(TOKEN_GRACE_PERIOD_MINUTES * 60)
 
     return AuthResponse(
       user={

@@ -6,6 +6,12 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import DeclarativeBase, scoped_session, sessionmaker
 
 from robosystems.config import env
+from robosystems.config.constants import (
+  DEFAULT_MAX_OVERFLOW,
+  DEFAULT_POOL_RECYCLE,
+  DEFAULT_POOL_SIZE,
+  DEFAULT_POOL_TIMEOUT,
+)
 
 
 def get_database_url():
@@ -81,10 +87,10 @@ def _session_scope():
 
 engine = create_engine(
   get_database_url(),
-  pool_size=env.DATABASE_POOL_SIZE,
-  max_overflow=env.DATABASE_MAX_OVERFLOW,
-  pool_timeout=env.DATABASE_POOL_TIMEOUT,
-  pool_recycle=env.DATABASE_POOL_RECYCLE,
+  pool_size=DEFAULT_POOL_SIZE,
+  max_overflow=DEFAULT_MAX_OVERFLOW,
+  pool_timeout=DEFAULT_POOL_TIMEOUT,
+  pool_recycle=DEFAULT_POOL_RECYCLE,
   pool_pre_ping=True,
   echo=env.DATABASE_ECHO,
 )

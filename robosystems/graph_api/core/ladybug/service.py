@@ -16,6 +16,7 @@ import psutil
 from fastapi import HTTPException, status
 
 from robosystems.config import env
+from robosystems.config.constants import ADMISSION_CHECK_INTERVAL, MAX_QUERY_LENGTH
 from robosystems.config.tuning import TuningConfig
 from robosystems.exceptions import (
   ConfigurationError,
@@ -180,9 +181,7 @@ def validate_cypher_query(cypher: str) -> None:
       )
 
   # Check query length
-  from robosystems.config import env
-
-  max_query_length = env.GRAPH_MAX_QUERY_LENGTH
+  max_query_length = MAX_QUERY_LENGTH
   if len(cypher) > max_query_length:
     raise HTTPException(
       status_code=status.HTTP_400_BAD_REQUEST,
@@ -794,7 +793,7 @@ class LadybugService:
       memory_threshold=env.LBUG_ADMISSION_MEMORY_THRESHOLD,
       cpu_threshold=env.LBUG_ADMISSION_CPU_THRESHOLD,
       queue_threshold=TuningConfig.get_admission_queue_threshold(),
-      check_interval=env.ADMISSION_CHECK_INTERVAL,
+      check_interval=ADMISSION_CHECK_INTERVAL,
     )
 
     node_config = NodeConfiguration(

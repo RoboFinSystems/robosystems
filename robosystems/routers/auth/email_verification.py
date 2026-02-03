@@ -8,7 +8,11 @@ from robosystems.middleware.sse import (
   run_and_monitor_dagster_job,
 )
 
-from ...config import env
+from ...config.constants import (
+  EMAIL_TOKEN_EXPIRY_HOURS,
+  JWT_EXPIRY_HOURS,
+  TOKEN_GRACE_PERIOD_MINUTES,
+)
 from ...database import get_async_db_session
 from ...logger import logger
 from ...middleware.auth.jwt import create_jwt_token, verify_jwt_token
@@ -132,7 +136,7 @@ async def resend_verification_email(
   token = UserToken.create_token(
     user_id=current_user.id,
     token_type="email_verification",
-    hours=env.EMAIL_TOKEN_EXPIRY_HOURS,
+    hours=EMAIL_TOKEN_EXPIRY_HOURS,
     session=session,
     ip_address=client_ip,
     user_agent=user_agent,
@@ -269,8 +273,8 @@ async def verify_email(
 
   logger.info(f"Email verified for user {user.email}")
 
-  expires_in = int(env.JWT_EXPIRY_HOURS * 3600)
-  refresh_threshold = int(env.TOKEN_GRACE_PERIOD_MINUTES * 60)
+  expires_in = int(JWT_EXPIRY_HOURS * 3600)
+  refresh_threshold = int(TOKEN_GRACE_PERIOD_MINUTES * 60)
 
   return AuthResponse(
     user={

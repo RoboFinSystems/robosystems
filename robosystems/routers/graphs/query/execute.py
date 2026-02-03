@@ -236,7 +236,7 @@ async def execute_cypher_query(
   circuit_breaker.check_circuit(graph_id, "cypher_query")
 
   # Get the graph tier for chunk size configuration
-  from robosystems.config import env
+  from robosystems.config.graph_tier import GraphTierConfig
   from robosystems.models.iam.graph import Graph
 
   graph = session.query(Graph).filter(Graph.graph_id == graph_id).first()
@@ -244,15 +244,10 @@ async def execute_cypher_query(
   # Determine chunk size based on tier (if not explicitly provided)
   if chunk_size is None:
     if graph and graph.graph_tier:
-      tier_chunk_sizes = {
-        "ladybug-standard": env.GRAPH_STANDARD_CHUNK_SIZE_OVERRIDE,
-        "ladybug-large": env.GRAPH_LARGE_CHUNK_SIZE_OVERRIDE,
-        "ladybug-xlarge": env.GRAPH_XLARGE_CHUNK_SIZE_OVERRIDE,
-      }
-      chunk_size = tier_chunk_sizes.get(graph.graph_tier.lower(), 1000)
+      chunk_size = GraphTierConfig.get_chunk_size(graph.graph_tier)
       logger.debug(f"Using tier-based chunk size for {graph.graph_tier}: {chunk_size}")
     else:
-      chunk_size = 1000
+      chunk_size = GraphTierConfig.get_chunk_size(None)  # Use default
 
   # Initialize client_info for exception handling
   client_info = {"is_interactive": False}

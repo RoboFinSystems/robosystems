@@ -19,7 +19,7 @@ class ExternalServicesConfig:
     "base_url": "https://www.sec.gov",
     "data_base_url": "https://data.sec.gov",  # For data API calls
     "user_agent": env.SEC_GOV_USER_AGENT,
-    "rate_limit": env.SEC_RATE_LIMIT,
+    "rate_limit": 10,  # requests per second (SEC.gov requirement)
     "timeout": 30,  # seconds
     "sync_timeout": 10,  # seconds for sync operations
     "filing_download_timeout": 300,  # 5 minutes for large files

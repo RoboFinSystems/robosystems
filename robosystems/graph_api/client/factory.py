@@ -26,6 +26,11 @@ import httpx
 import redis.asyncio as redis
 
 from robosystems.config import env
+from robosystems.config.constants import (
+  GRAPH_CONNECT_TIMEOUT,
+  GRAPH_INSTANCE_CACHE_TTL,
+  GRAPH_READ_TIMEOUT,
+)
 from robosystems.config.graph_tier import GraphTier
 from robosystems.config.valkey_registry import ValkeyDatabase
 from robosystems.graph_api.client import GraphClient
@@ -199,11 +204,11 @@ class GraphClientFactory:
   SHARED_REPOSITORIES = list(GraphTypeRegistry.SHARED_REPOSITORIES.keys())
 
   # Cache TTLs from constants
-  _instance_cache_ttl = env.GRAPH_INSTANCE_CACHE_TTL
+  _instance_cache_ttl = GRAPH_INSTANCE_CACHE_TTL
 
   # Timeout configurations from constants
-  _connect_timeout = env.GRAPH_CONNECT_TIMEOUT
-  _read_timeout = env.GRAPH_READ_TIMEOUT
+  _connect_timeout = GRAPH_CONNECT_TIMEOUT
+  _read_timeout = GRAPH_READ_TIMEOUT
 
   # Connection pools for reuse (HTTP/2 enabled for efficiency)
   _connection_pools: dict[str, httpx.AsyncClient] = {}

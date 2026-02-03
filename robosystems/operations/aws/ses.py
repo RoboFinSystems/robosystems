@@ -6,6 +6,10 @@ import boto3
 from botocore.exceptions import ClientError
 
 from robosystems.config import env
+from robosystems.config.constants import (
+  EMAIL_TOKEN_EXPIRY_HOURS,
+  PASSWORD_RESET_TOKEN_EXPIRY_HOURS,
+)
 from robosystems.logger import logger
 
 
@@ -326,7 +330,7 @@ The {app_name} Team""",
       "user_name": user_name,
       "app_name": app_display_names.get(app, "RoboSystems"),
       "verification_url": f"{base_url}/auth/verify-email?token={token}",
-      "expiry_hours": env.EMAIL_TOKEN_EXPIRY_HOURS,
+      "expiry_hours": EMAIL_TOKEN_EXPIRY_HOURS,
     }
 
     return await self.send_email("email_verification", user_email, template_data)
@@ -364,7 +368,7 @@ The {app_name} Team""",
       "user_name": user_name,
       "app_name": app_display_names.get(app, "RoboSystems"),
       "reset_url": f"{base_url}/auth/reset-password?token={token}",
-      "expiry_hours": env.PASSWORD_RESET_TOKEN_EXPIRY_HOURS,
+      "expiry_hours": PASSWORD_RESET_TOKEN_EXPIRY_HOURS,
     }
 
     return await self.send_email("password_reset", user_email, template_data)

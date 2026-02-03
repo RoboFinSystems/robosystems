@@ -75,73 +75,17 @@ except ImportError:
     return os.getenv(key, default)
 
 
-from .constants import (
-  ADMISSION_CHECK_INTERVAL,
-  ADMISSION_CPU_THRESHOLD_DEFAULT,
-  # Task constants
-  ADMISSION_MEMORY_THRESHOLD_DEFAULT,
-  ADMISSION_QUEUE_THRESHOLD_DEFAULT,
-  CACHE_TTL_LONG,
-  # Cache constants
-  CACHE_TTL_SHORT,
-  # Fixed business rules
-  CREDIT_ALLOCATION_DAY,
-  CREDIT_ALLOCATION_HOUR,
-  # Performance constants
-  DEFAULT_HTTP_TIMEOUT,
-  DEFAULT_MAX_CONCURRENT,
-  DEFAULT_MAX_OVERFLOW,
-  DEFAULT_POOL_RECYCLE,
-  # Database constants
-  DEFAULT_POOL_SIZE,
-  DEFAULT_POOL_TIMEOUT,
-  DEFAULT_QUERY_LIMIT,
-  DEFAULT_QUERY_TIMEOUT,
-  DEFAULT_QUEUE_SIZE,
-  # DuckDB configuration
-  DUCKDB_MAX_THREADS,
-  DUCKDB_MEMORY_LIMIT,
-  EMAIL_TOKEN_EXPIRY_HOURS,
-  GRAPH_CIRCUIT_BREAKER_THRESHOLD,
-  GRAPH_CIRCUIT_BREAKER_TIMEOUT,
-  GRAPH_CONNECT_TIMEOUT,
-  # Resiliency and circuit breaker
-  GRAPH_INSTANCE_CACHE_TTL,
-  GRAPH_LARGE_CHUNK_SIZE,
-  GRAPH_LARGE_MAX_MEMORY_MB,
-  GRAPH_LARGE_MEMORY_PER_DB_MB,
-  # Fixed technical limits
-  GRAPH_MAX_REQUEST_SIZE,
-  GRAPH_READ_TIMEOUT,
-  # Tier-specific chunk sizes
-  GRAPH_STANDARD_CHUNK_SIZE,
-  # Tier-specific memory allocations
-  GRAPH_STANDARD_MAX_MEMORY_MB,
-  GRAPH_STANDARD_MEMORY_PER_DB_MB,
-  GRAPH_XLARGE_CHUNK_SIZE,
-  GRAPH_XLARGE_MAX_MEMORY_MB,
-  GRAPH_XLARGE_MEMORY_PER_DB_MB,
-  JWT_EXPIRY_HOURS,
-  # Load shedding
-  LOAD_SHED_START_PRESSURE_DEFAULT,
-  LOAD_SHED_STOP_PRESSURE_DEFAULT,
-  MAX_DATABASES_PER_NODE,
-  MAX_QUERY_LENGTH,
-  OPENFIGI_RETRY_MAX_WAIT,
-  OPENFIGI_RETRY_MIN_WAIT,
-  PASSWORD_RESET_TOKEN_EXPIRY_HOURS,
-  QUERY_DEFAULT_PRIORITY,
-  QUERY_PRIORITY_BOOST_PREMIUM,
-  # Queue configuration
-  QUERY_QUEUE_MAX_PER_USER,
-  QUERY_QUEUE_TIMEOUT,
-  # Retry configuration
-  SEC_PIPELINE_MAX_RETRIES,
-  SEC_RATE_LIMIT,
-  # API version constants
-  STRIPE_API_VERSION,
-  TOKEN_GRACE_PERIOD_MINUTES,
-  XBRL_GRAPH_LARGE_NODES,
+# Import tunable defaults (runtime-adjustable via SSM)
+from .defaults import (
+  AdmissionDefaults,
+  CacheDefaults,
+  CircuitBreakerDefaults,
+  LimitsDefaults,
+  LoadSheddingDefaults,
+  MCPDefaults,
+  QueueDefaults,
+  SSEDefaults,
+  TimeoutDefaults,
 )
 
 # ==========================================================================
@@ -258,6 +202,48 @@ def get_tuning_float(env_key: str, ssm_path: str, default: float) -> float:
   return default
 
 
+def get_tuning_int(env_key: str, ssm_path: str, default: int) -> int:
+  """
+  Get an integer tuning parameter with layered fallback.
+
+  Priority order:
+  1. Environment variable (highest - for local dev, CI, testing)
+  2. SSM Parameter Store /tuning/ path (for AWS runtime config)
+  3. Default value (lowest - sensible defaults)
+
+  Args:
+      env_key: Environment variable name (e.g., "GRAPH_HTTP_TIMEOUT")
+      ssm_path: SSM path under tuning/ (e.g., "timeouts/GRAPH_HTTP")
+      default: Default value if not found anywhere
+
+  Returns:
+      Integer value from the highest-priority source
+  """
+  # Priority 1: Environment variable
+  env_value = os.getenv(env_key)
+  if env_value is not None:
+    try:
+      return int(env_value)
+    except (ValueError, TypeError):
+      print(f"Warning: Invalid {env_key} value, using default: {default}")
+      return default
+
+  # Priority 2: SSM Parameter Store (prod/staging only)
+  environment = os.getenv("ENVIRONMENT", "dev")
+  if environment in ["prod", "staging"]:
+    try:
+      from .parameter_store import get_parameter_manager
+
+      manager = get_parameter_manager()
+      ssm_value = manager.get_tuning_int(ssm_path, default)
+      return ssm_value
+    except Exception:
+      pass  # Fall through to default
+
+  # Priority 3: Default value
+  return default
+
+
 def get_list_env(key: str, default: str = "", separator: str = ",") -> list[str]:
   """
   Get a list environment variable (comma-separated by default).
@@ -319,7 +305,6 @@ class EnvConfig:
 
   # JWT configuration
   JWT_SECRET_KEY = get_secret_value("JWT_SECRET_KEY", "")
-  JWT_EXPIRY_HOURS = JWT_EXPIRY_HOURS  # Constant - 30 minutes
 
   # JWT Issuer and Audience - configurable for different deployments
   # Default JWT_ISSUER is derived from ROBOSYSTEMS_API_URL (strips protocol)
@@ -335,9 +320,6 @@ class EnvConfig:
   JWT_ISSUER = get_secret_value("JWT_ISSUER", _jwt_default_domain)
   JWT_AUDIENCE = get_secret_list_value("JWT_AUDIENCE", _jwt_default_domain)
 
-  # Authentication Security Settings (constants - not runtime configurable)
-  TOKEN_GRACE_PERIOD_MINUTES = TOKEN_GRACE_PERIOD_MINUTES
-
   # Authentication Rate Limiting (overrides for defaults in constants.py)
   JWT_REFRESH_RATE_LIMIT = get_int_env("JWT_REFRESH_RATE_LIMIT", 20)
   AUTH_RATE_LIMIT_LOGIN = get_int_env("AUTH_RATE_LIMIT_LOGIN", 5)
@@ -352,10 +334,6 @@ class EnvConfig:
     "EMAIL_FROM_NAME",
     get_secret_value("EMAIL_FROM_NAME", "RoboSystems"),
   )
-
-  # Token expiry configuration (constants - not runtime configurable)
-  EMAIL_TOKEN_EXPIRY_HOURS = EMAIL_TOKEN_EXPIRY_HOURS
-  PASSWORD_RESET_TOKEN_EXPIRY_HOURS = PASSWORD_RESET_TOKEN_EXPIRY_HOURS
 
   # Cloudflare Turnstile (CAPTCHA)
   TURNSTILE_SECRET_KEY = get_secret_value("TURNSTILE_SECRET_KEY", "")
@@ -447,10 +425,12 @@ class EnvConfig:
   # For application logic (checking if a graph is a shared repo), use GraphTypeRegistry.SHARED_REPOSITORIES
   SHARED_REPOSITORIES = get_list_env("SHARED_REPOSITORIES", "")
 
-  # --- Organization ---
-  # Note: ORG_GRAPHS_DEFAULT_LIMIT is now tunable via SSM /tuning/limits/
-  # This env var remains for backward compatibility and SQLAlchemy column default
-  ORG_GRAPHS_DEFAULT_LIMIT = get_int_env("ORG_GRAPHS_DEFAULT_LIMIT", 10)
+  # --- Organization --- (SSM: /tuning/limits/)
+  ORG_GRAPHS_DEFAULT_LIMIT = get_tuning_int(
+    "ORG_GRAPHS_DEFAULT_LIMIT",
+    "limits/ORG_GRAPHS_DEFAULT",
+    LimitsDefaults.ORG_GRAPHS_DEFAULT,
+  )
   ORG_MEMBER_INVITATIONS_ENABLED = get_bool_env(
     "ORG_MEMBER_INVITATIONS_ENABLED",
     get_parameter_value("ORG_MEMBER_INVITATIONS_ENABLED", "false").lower() == "true",
@@ -520,13 +500,13 @@ class EnvConfig:
   INSTANCE_ID = get_str_env("INSTANCE_ID", "")
   CLUSTER_TIER = get_str_env("CLUSTER_TIER", "")
 
-  # Graph API Timeouts and Limits
-  GRAPH_HTTP_TIMEOUT = get_int_env("GRAPH_HTTP_TIMEOUT", DEFAULT_HTTP_TIMEOUT)
-  GRAPH_QUERY_TIMEOUT = get_int_env("GRAPH_QUERY_TIMEOUT", DEFAULT_QUERY_TIMEOUT)
-  GRAPH_MAX_QUERY_LENGTH = get_int_env("GRAPH_MAX_QUERY_LENGTH", MAX_QUERY_LENGTH)
-  GRAPH_MAX_REQUEST_SIZE = get_int_env("GRAPH_MAX_REQUEST_SIZE", GRAPH_MAX_REQUEST_SIZE)
-  GRAPH_CONNECT_TIMEOUT = get_float_env("GRAPH_CONNECT_TIMEOUT", GRAPH_CONNECT_TIMEOUT)
-  GRAPH_READ_TIMEOUT = get_float_env("GRAPH_READ_TIMEOUT", GRAPH_READ_TIMEOUT)
+  # Graph API Timeouts and Limits (SSM: /tuning/timeouts/)
+  GRAPH_HTTP_TIMEOUT = get_tuning_int(
+    "GRAPH_HTTP_TIMEOUT", "timeouts/GRAPH_HTTP", TimeoutDefaults.GRAPH_HTTP
+  )
+  GRAPH_QUERY_TIMEOUT = get_tuning_int(
+    "GRAPH_QUERY_TIMEOUT", "timeouts/GRAPH_QUERY", TimeoutDefaults.GRAPH_QUERY
+  )
 
   # --- Graph Resiliency and Circuit Breaker Configuration ---
   GRAPH_CIRCUIT_BREAKERS_ENABLED = get_bool_env("GRAPH_CIRCUIT_BREAKERS_ENABLED", True)
@@ -542,49 +522,18 @@ class EnvConfig:
     "GRAPH_MATERIALIZATION_THRESHOLD_MB", 500
   )
 
-  GRAPH_INSTANCE_CACHE_TTL = get_int_env(
-    "GRAPH_INSTANCE_CACHE_TTL", GRAPH_INSTANCE_CACHE_TTL
+  GRAPH_CIRCUIT_BREAKER_THRESHOLD = get_tuning_int(
+    "GRAPH_CIRCUIT_BREAKER_THRESHOLD",
+    "circuits/THRESHOLD",
+    CircuitBreakerDefaults.FAILURE_THRESHOLD,
   )
-  GRAPH_CIRCUIT_BREAKER_THRESHOLD = get_int_env(
-    "GRAPH_CIRCUIT_BREAKER_THRESHOLD", GRAPH_CIRCUIT_BREAKER_THRESHOLD
-  )
-  GRAPH_CIRCUIT_BREAKER_TIMEOUT = get_int_env(
-    "GRAPH_CIRCUIT_BREAKER_TIMEOUT", GRAPH_CIRCUIT_BREAKER_TIMEOUT
+  GRAPH_CIRCUIT_BREAKER_TIMEOUT = get_tuning_int(
+    "GRAPH_CIRCUIT_BREAKER_TIMEOUT",
+    "circuits/TIMEOUT",
+    CircuitBreakerDefaults.TIMEOUT,
   )
   GRAPH_HEALTH_CHECK_INTERVAL_MINUTES = get_float_env(
     "GRAPH_HEALTH_CHECK_INTERVAL_MINUTES", 5.0
-  )
-
-  # --- Tier-Specific Memory and Performance Overrides ---
-  # Tier-specific memory allocations (with environment variable overrides)
-  GRAPH_STANDARD_MAX_MEMORY_MB_OVERRIDE = get_int_env(
-    "GRAPH_STANDARD_MAX_MEMORY_MB", GRAPH_STANDARD_MAX_MEMORY_MB
-  )
-  GRAPH_LARGE_MAX_MEMORY_MB_OVERRIDE = get_int_env(
-    "GRAPH_LARGE_MAX_MEMORY_MB", GRAPH_LARGE_MAX_MEMORY_MB
-  )
-  GRAPH_XLARGE_MAX_MEMORY_MB_OVERRIDE = get_int_env(
-    "GRAPH_XLARGE_MAX_MEMORY_MB", GRAPH_XLARGE_MAX_MEMORY_MB
-  )
-  GRAPH_STANDARD_MEMORY_PER_DB_MB_OVERRIDE = get_int_env(
-    "GRAPH_STANDARD_MEMORY_PER_DB_MB", GRAPH_STANDARD_MEMORY_PER_DB_MB
-  )
-  GRAPH_LARGE_MEMORY_PER_DB_MB_OVERRIDE = get_int_env(
-    "GRAPH_LARGE_MEMORY_PER_DB_MB", GRAPH_LARGE_MEMORY_PER_DB_MB
-  )
-  GRAPH_XLARGE_MEMORY_PER_DB_MB_OVERRIDE = get_int_env(
-    "GRAPH_XLARGE_MEMORY_PER_DB_MB", GRAPH_XLARGE_MEMORY_PER_DB_MB
-  )
-
-  # Tier-specific chunk sizes (with environment variable overrides)
-  GRAPH_STANDARD_CHUNK_SIZE_OVERRIDE = get_int_env(
-    "GRAPH_STANDARD_CHUNK_SIZE", GRAPH_STANDARD_CHUNK_SIZE
-  )
-  GRAPH_LARGE_CHUNK_SIZE_OVERRIDE = get_int_env(
-    "GRAPH_LARGE_CHUNK_SIZE", GRAPH_LARGE_CHUNK_SIZE
-  )
-  GRAPH_XLARGE_CHUNK_SIZE_OVERRIDE = get_int_env(
-    "GRAPH_XLARGE_CHUNK_SIZE", GRAPH_XLARGE_CHUNK_SIZE
   )
 
   # ===========================================================================
@@ -598,11 +547,6 @@ class EnvConfig:
 
   # DuckDB Staging Configuration (for data ingestion/materialization)
   DUCKDB_STAGING_PATH = get_str_env("DUCKDB_STAGING_PATH", "./data/staging")
-
-  # LadybugDB Capacity and Performance
-  LBUG_MAX_DATABASES_PER_NODE = get_int_env(
-    "LBUG_MAX_DATABASES_PER_NODE", MAX_DATABASES_PER_NODE
-  )
 
   # LadybugDB Memory Configuration (can be overridden per-tier)
   LBUG_MAX_MEMORY_MB = get_int_env("LBUG_MAX_MEMORY_MB", 2048)
@@ -623,17 +567,13 @@ class EnvConfig:
   LBUG_ADMISSION_MEMORY_THRESHOLD = get_tuning_float(
     "LBUG_ADMISSION_MEMORY_THRESHOLD",
     "lbug_admission/MEMORY_THRESHOLD",
-    ADMISSION_MEMORY_THRESHOLD_DEFAULT,
+    AdmissionDefaults.MEMORY_THRESHOLD,
   )
   LBUG_ADMISSION_CPU_THRESHOLD = get_tuning_float(
     "LBUG_ADMISSION_CPU_THRESHOLD",
     "lbug_admission/CPU_THRESHOLD",
-    ADMISSION_CPU_THRESHOLD_DEFAULT,
+    AdmissionDefaults.CPU_THRESHOLD,
   )
-
-  # DuckDB Configuration (with environment variable overrides)
-  DUCKDB_MAX_THREADS = get_int_env("DUCKDB_MAX_THREADS", DUCKDB_MAX_THREADS)
-  DUCKDB_MEMORY_LIMIT = os.getenv("DUCKDB_MEMORY_LIMIT", DUCKDB_MEMORY_LIMIT)
 
   # --- Neo4j-Specific Configuration (when GRAPH_BACKEND_TYPE=neo4j_*) ---
   NEO4J_URI = get_str_env("NEO4J_URI", "bolt://localhost:7687")
@@ -653,10 +593,8 @@ class EnvConfig:
   DATABASE_URL = get_secret_value(
     "DATABASE_URL", "postgresql://postgres:postgres@localhost:5432/robosystems"
   )
-  DATABASE_POOL_SIZE = get_int_env("DATABASE_POOL_SIZE", DEFAULT_POOL_SIZE)
-  DATABASE_MAX_OVERFLOW = get_int_env("DATABASE_MAX_OVERFLOW", DEFAULT_MAX_OVERFLOW)
-  DATABASE_POOL_TIMEOUT = get_int_env("DATABASE_POOL_TIMEOUT", DEFAULT_POOL_TIMEOUT)
-  DATABASE_POOL_RECYCLE = get_int_env("DATABASE_POOL_RECYCLE", DEFAULT_POOL_RECYCLE)
+  # Note: Pool configuration (pool_size, max_overflow, timeout, recycle) uses
+  # fixed constants from robosystems/config/constants.py - not runtime-configurable
   DATABASE_ECHO = get_bool_env("DATABASE_ECHO", False)
 
   # ==========================================================================
@@ -672,14 +610,22 @@ class EnvConfig:
   # Secret path: robosystems/{env}/valkey (defined in secrets_manager.py SECRET_MAPPINGS)
   VALKEY_AUTH_TOKEN = get_str_env("VALKEY_AUTH_TOKEN", "")
 
-  # Cache TTLs
-  CREDIT_BALANCE_CACHE_TTL = get_int_env("CREDIT_BALANCE_CACHE_TTL", CACHE_TTL_SHORT)
-  CREDIT_SUMMARY_CACHE_TTL = get_int_env("CREDIT_SUMMARY_CACHE_TTL", 600)  # 10 minutes
-  CREDIT_OPERATION_COST_CACHE_TTL = get_int_env(
-    "CREDIT_OPERATION_COST_CACHE_TTL", CACHE_TTL_LONG
+  # Cache TTLs (SSM: /tuning/cache/)
+  CREDIT_BALANCE_CACHE_TTL = get_tuning_int(
+    "CREDIT_BALANCE_CACHE_TTL", "cache/BALANCE_TTL", CacheDefaults.BALANCE_TTL
   )
-  JWT_CACHE_TTL = get_int_env("JWT_CACHE_TTL", 1800)  # 30 minutes
-  API_KEY_CACHE_TTL = get_int_env("API_KEY_CACHE_TTL", 300)  # 5 minutes
+  CREDIT_SUMMARY_CACHE_TTL = get_tuning_int(
+    "CREDIT_SUMMARY_CACHE_TTL", "cache/SUMMARY_TTL", CacheDefaults.SUMMARY_TTL
+  )
+  CREDIT_OPERATION_COST_CACHE_TTL = get_int_env(
+    "CREDIT_OPERATION_COST_CACHE_TTL", CacheDefaults.OPERATION_COST_TTL
+  )
+  JWT_CACHE_TTL = get_tuning_int(
+    "JWT_CACHE_TTL", "cache/JWT_TTL", CacheDefaults.JWT_TTL
+  )
+  API_KEY_CACHE_TTL = get_tuning_int(
+    "API_KEY_CACHE_TTL", "cache/API_KEY_TTL", CacheDefaults.API_KEY_TTL
+  )
 
   # Distributed lock TTLs
   INGESTION_LOCK_TTL = get_int_env("INGESTION_LOCK_TTL", 3600)  # 1 hour
@@ -753,92 +699,93 @@ class EnvConfig:
   SEC_GOV_USER_AGENT = get_secret_value(
     "SEC_GOV_USER_AGENT", "RoboSystems hello@robosystems.ai"
   )
-  # SEC rate limiting and retry configuration (compliance requirement)
-  SEC_RATE_LIMIT = get_int_env("SEC_RATE_LIMIT", SEC_RATE_LIMIT)
-  SEC_PIPELINE_MAX_RETRIES = get_int_env(
-    "SEC_PIPELINE_MAX_RETRIES", SEC_PIPELINE_MAX_RETRIES
-  )
   # Parallel processing concurrency (for local sec-process-parallel command)
   SEC_PARALLEL_CONCURRENCY = get_int_env("SEC_PARALLEL_CONCURRENCY", 2)
-  # Note: SEC processing constants (SEC_VALIDATE_CIK, SEC_PIPELINE_PARTIAL_TOLERANCE,
-  # SEC_PIPELINE_CLEANUP_TEMP_FILES, SEC_MAX_CONCURRENT_DOWNLOADS) are in
-  # robosystems/adapters/sec/config.py - they are not runtime-configurable
+  # Note: SEC processing constants (SEC_RATE_LIMIT, SEC_VALIDATE_CIK,
+  # SEC_PIPELINE_PARTIAL_TOLERANCE, SEC_PIPELINE_CLEANUP_TEMP_FILES,
+  # SEC_MAX_CONCURRENT_DOWNLOADS) are in robosystems/adapters/sec/config.py
+  # or robosystems/config/external_services.py - they are not runtime-configurable
 
   # OpenFIGI (financial identifiers)
   OPENFIGI_API_KEY = get_secret_value("OPENFIGI_API_KEY", "")
-  OPENFIGI_RETRY_MIN_WAIT = get_int_env(
-    "OPENFIGI_RETRY_MIN_WAIT", OPENFIGI_RETRY_MIN_WAIT
-  )
-  OPENFIGI_RETRY_MAX_WAIT = get_int_env(
-    "OPENFIGI_RETRY_MAX_WAIT", OPENFIGI_RETRY_MAX_WAIT
-  )
 
   # Stripe (payment processing)
   STRIPE_SECRET_KEY = get_secret_value("STRIPE_SECRET_KEY", "")
   STRIPE_PUBLISHABLE_KEY = get_secret_value("STRIPE_PUBLISHABLE_KEY", "")
   STRIPE_WEBHOOK_SECRET = get_secret_value("STRIPE_WEBHOOK_SECRET", "")
-  # STRIPE_API_VERSION is a constant, not a secret - imported from constants.py
-  STRIPE_API_VERSION = STRIPE_API_VERSION  # Re-export for backward compatibility
 
   # ==========================================================================
   # 9. PERFORMANCE AND SCALING
   # ==========================================================================
 
-  # Query queue configuration
-  QUERY_QUEUE_MAX_SIZE = get_int_env("QUERY_QUEUE_MAX_SIZE", DEFAULT_QUEUE_SIZE)
-  QUERY_QUEUE_MAX_CONCURRENT = get_int_env(
-    "QUERY_QUEUE_MAX_CONCURRENT", DEFAULT_MAX_CONCURRENT
+  # Query queue configuration (SSM: /tuning/queues/)
+  QUERY_QUEUE_MAX_SIZE = get_tuning_int(
+    "QUERY_QUEUE_MAX_SIZE", "queues/MAX_SIZE", QueueDefaults.MAX_SIZE
   )
-  QUERY_QUEUE_MAX_PER_USER = get_int_env(
-    "QUERY_QUEUE_MAX_PER_USER", QUERY_QUEUE_MAX_PER_USER
+  QUERY_QUEUE_MAX_CONCURRENT = get_tuning_int(
+    "QUERY_QUEUE_MAX_CONCURRENT", "queues/MAX_CONCURRENT", QueueDefaults.MAX_CONCURRENT
   )
-  QUERY_QUEUE_TIMEOUT = get_int_env("QUERY_QUEUE_TIMEOUT", QUERY_QUEUE_TIMEOUT)
-  QUERY_DEFAULT_PRIORITY = get_int_env("QUERY_DEFAULT_PRIORITY", QUERY_DEFAULT_PRIORITY)
-  QUERY_PRIORITY_BOOST_PREMIUM = get_int_env(
-    "QUERY_PRIORITY_BOOST_PREMIUM", QUERY_PRIORITY_BOOST_PREMIUM
+  QUERY_QUEUE_MAX_PER_USER = get_tuning_int(
+    "QUERY_QUEUE_MAX_PER_USER", "queues/MAX_PER_USER", QueueDefaults.MAX_PER_USER
+  )
+  QUERY_QUEUE_TIMEOUT = get_tuning_int(
+    "QUERY_QUEUE_TIMEOUT", "queues/TIMEOUT", QueueDefaults.TIMEOUT
+  )
+  # Note: QUERY_DEFAULT_PRIORITY, QUERY_PRIORITY_BOOST_PREMIUM, and ADMISSION_CHECK_INTERVAL
+  # are fixed constants in robosystems/config/constants.py - not runtime-configurable
+
+  # Admission control (SSM: /tuning/admission/)
+  ADMISSION_MEMORY_THRESHOLD = get_tuning_float(
+    "ADMISSION_MEMORY_THRESHOLD",
+    "admission/MEMORY_THRESHOLD",
+    AdmissionDefaults.MEMORY_THRESHOLD,
+  )
+  ADMISSION_CPU_THRESHOLD = get_tuning_float(
+    "ADMISSION_CPU_THRESHOLD",
+    "admission/CPU_THRESHOLD",
+    AdmissionDefaults.CPU_THRESHOLD,
+  )
+  ADMISSION_QUEUE_THRESHOLD = get_tuning_float(
+    "ADMISSION_QUEUE_THRESHOLD",
+    "admission/QUEUE_THRESHOLD",
+    AdmissionDefaults.QUEUE_THRESHOLD,
   )
 
-  # Admission control
-  ADMISSION_MEMORY_THRESHOLD = get_float_env(
-    "ADMISSION_MEMORY_THRESHOLD", ADMISSION_MEMORY_THRESHOLD_DEFAULT
+  # Load shedding (SSM: /tuning/load_shedding/)
+  LOAD_SHED_START_PRESSURE = get_tuning_float(
+    "LOAD_SHED_START_PRESSURE",
+    "load_shedding/START_PRESSURE",
+    LoadSheddingDefaults.START_PRESSURE,
   )
-  ADMISSION_CPU_THRESHOLD = get_float_env(
-    "ADMISSION_CPU_THRESHOLD", ADMISSION_CPU_THRESHOLD_DEFAULT
-  )
-  ADMISSION_QUEUE_THRESHOLD = get_float_env(
-    "ADMISSION_QUEUE_THRESHOLD", ADMISSION_QUEUE_THRESHOLD_DEFAULT
-  )
-  ADMISSION_CHECK_INTERVAL = get_float_env(
-    "ADMISSION_CHECK_INTERVAL", ADMISSION_CHECK_INTERVAL
+  LOAD_SHED_STOP_PRESSURE = get_tuning_float(
+    "LOAD_SHED_STOP_PRESSURE",
+    "load_shedding/STOP_PRESSURE",
+    LoadSheddingDefaults.STOP_PRESSURE,
   )
 
-  # Load shedding
-  LOAD_SHED_START_PRESSURE = get_float_env(
-    "LOAD_SHED_START_PRESSURE", LOAD_SHED_START_PRESSURE_DEFAULT
+  # SSE (Server-Sent Events) (SSM: /tuning/sse/)
+  MAX_SSE_CONNECTIONS_PER_USER = get_tuning_int(
+    "MAX_SSE_CONNECTIONS_PER_USER",
+    "sse/MAX_CONNECTIONS_PER_USER",
+    SSEDefaults.MAX_CONNECTIONS_PER_USER,
   )
-  LOAD_SHED_STOP_PRESSURE = get_float_env(
-    "LOAD_SHED_STOP_PRESSURE", LOAD_SHED_STOP_PRESSURE_DEFAULT
+  SSE_QUEUE_SIZE = get_tuning_int(
+    "SSE_QUEUE_SIZE", "sse/QUEUE_SIZE", SSEDefaults.QUEUE_SIZE
   )
-
-  # SSE (Server-Sent Events)
-  # Note: MAX_SSE_CONNECTIONS_PER_USER and SSE_QUEUE_SIZE are now tunable via SSM
-  # These env vars remain for backward compatibility but TuningConfig is preferred
-  MAX_SSE_CONNECTIONS_PER_USER = get_int_env("MAX_SSE_CONNECTIONS_PER_USER", 5)
-  SSE_QUEUE_SIZE = get_int_env("SSE_QUEUE_SIZE", 100)
   # SSE Rate limiting
   RATE_LIMIT_SSE_CONNECTIONS = get_int_env("RATE_LIMIT_SSE_CONNECTIONS", 10)
   RATE_LIMIT_SSE_CONNECTIONS_WINDOW = get_int_env(
     "RATE_LIMIT_SSE_CONNECTIONS_WINDOW", 60
   )
 
-  # MCP (Model Context Protocol)
+  # MCP (Model Context Protocol) (SSM: /tuning/mcp/)
   MCP_AUTO_LIMIT_ENABLED = get_bool_env("MCP_AUTO_LIMIT_ENABLED", True)
-  MCP_MAX_RESULT_ROWS = get_int_env("MCP_MAX_RESULT_ROWS", DEFAULT_QUERY_LIMIT)
-  MCP_MAX_RESULT_SIZE_MB = get_float_env("MCP_MAX_RESULT_SIZE_MB", 5.0)
-
-  # Credit allocation schedule
-  CREDIT_ALLOCATION_DAY = get_int_env("CREDIT_ALLOCATION_DAY", CREDIT_ALLOCATION_DAY)
-  CREDIT_ALLOCATION_HOUR = get_int_env("CREDIT_ALLOCATION_HOUR", CREDIT_ALLOCATION_HOUR)
+  MCP_MAX_RESULT_ROWS = get_tuning_int(
+    "MCP_MAX_RESULT_ROWS", "mcp/MAX_RESULT_ROWS", MCPDefaults.MAX_RESULT_ROWS
+  )
+  MCP_MAX_RESULT_SIZE_MB = get_tuning_float(
+    "MCP_MAX_RESULT_SIZE_MB", "mcp/MAX_RESULT_SIZE_MB", MCPDefaults.MAX_RESULT_SIZE_MB
+  )
 
   # ==========================================================================
   # 10. ARELLE RUNTIME CONFIGURATION
@@ -849,10 +796,6 @@ class EnvConfig:
 
   # Arelle cache directory (runtime path, varies by deployment)
   ARELLE_CACHE_DIR = get_str_env("ARELLE_CACHE_DIR", "")
-
-  # XBRL graph large nodes (imported from constants.py - not configurable via env)
-  # These tables contain millions of rows and consume significant memory
-  XBRL_GRAPH_LARGE_NODES = XBRL_GRAPH_LARGE_NODES
 
   # ==========================================================================
   # 11. OBSERVABILITY
@@ -953,9 +896,6 @@ class EnvConfig:
     if cls.PORT < 1 or cls.PORT > 65535:
       errors.append("PORT must be between 1 and 65535")
 
-    if cls.DATABASE_POOL_SIZE < 1:
-      errors.append("DATABASE_POOL_SIZE must be at least 1")
-
     return errors
 
   @classmethod
@@ -972,6 +912,9 @@ class EnvConfig:
     Returns:
         Dictionary with tier configuration values
     """
+    # Import constants at function level to avoid circular imports
+    from robosystems.config.constants import MAX_QUERY_LENGTH
+
     # Try to load tier-specific config if available
     try:
       from robosystems.config.graph_tier import GraphTierConfig
@@ -1003,7 +946,7 @@ class EnvConfig:
               "query_timeout", cls.GRAPH_QUERY_TIMEOUT
             ),
             "max_query_length": instance_config.get(
-              "max_query_length", cls.GRAPH_MAX_QUERY_LENGTH
+              "max_query_length", MAX_QUERY_LENGTH
             ),
             "connection_pool_size": instance_config.get("connection_pool_size", 10),
             # Database settings - prioritize environment variable in dev
@@ -1017,9 +960,7 @@ class EnvConfig:
               get_int_env("LBUG_DATABASES_PER_INSTANCE", 0)
               if cls.ENVIRONMENT == "dev"
               and get_int_env("LBUG_DATABASES_PER_INSTANCE", 0) > 0
-              else instance_config.get(
-                "databases_per_instance", cls.LBUG_MAX_DATABASES_PER_NODE
-              )
+              else instance_config.get("databases_per_instance", 10)
             ),
             # Tier-level settings from full config
             "tier": tier,
@@ -1041,11 +982,11 @@ class EnvConfig:
       # Performance settings
       "chunk_size": get_int_env("LBUG_CHUNK_SIZE", 1000),
       "query_timeout": cls.GRAPH_QUERY_TIMEOUT,
-      "max_query_length": cls.GRAPH_MAX_QUERY_LENGTH,
+      "max_query_length": MAX_QUERY_LENGTH,
       "connection_pool_size": get_int_env("LBUG_CONNECTION_POOL_SIZE", 10),
       # Database settings
       "databases_per_instance": get_int_env("LBUG_DATABASES_PER_INSTANCE", 10),
-      "max_databases": cls.LBUG_MAX_DATABASES_PER_NODE,
+      "max_databases": get_int_env("LBUG_DATABASES_PER_INSTANCE", 10),
       # Default tier settings
       "tier": "ladybug-standard",
       "storage_limit_gb": 500,
