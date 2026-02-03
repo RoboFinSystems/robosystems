@@ -289,12 +289,16 @@ class SECStageConfig(Config):
     - Enable skip_taxonomy_relationships: Set reset_staging=True AND skip_taxonomy_relationships=True.
       Without reset_staging, old taxonomy tables would remain in DuckDB.
     - Fresh start after corruption: Set reset_staging=True to delete all staging.
+    - Dev mode (skip chunking): Set chunk_staging=False for small data sets.
   """
 
   graph_id: str = "sec"  # Target graph ID
   year: int | None = None  # Optional year filter
   reset_staging: bool = False  # Delete entire DuckDB staging database first (required when changing skip_taxonomy_relationships)
   skip_taxonomy_relationships: bool = False  # Skip taxonomy structure tables (Association, Structure, ~600M rows) to reduce storage
+  chunk_staging: bool = (
+    True  # Stage large tables quarter-by-quarter to reduce memory pressure
+  )
 
 
 class SECMaterializeConfig(Config):
@@ -311,6 +315,10 @@ class SECMaterializeConfig(Config):
                    where you want to resume without losing existing graph data.
     skip_taxonomy_relationships: If True, skip materializing taxonomy structure
                                  tables (Association, Structure, TAXONOMY_HAS_*, etc.)
+    batch_materialization: If True (default), use hash-based batching for tables
+                           with more rows than materialization_batch_size.
+    materialization_batch_size: Rows per batch when batch_materialization is enabled
+                                (default: 20M rows).
   """
 
   graph_id: str = "sec"  # Target graph ID
@@ -320,6 +328,10 @@ class SECMaterializeConfig(Config):
   skip_taxonomy_relationships: bool = (
     False  # Skip taxonomy structure tables to reduce storage
   )
+  batch_materialization: bool = True  # Hash-based batching for large tables
+  materialization_batch_size: int = Field(
+    default=20_000_000, ge=1_000_000
+  )  # Rows per batch (20M default, 1M minimum)
 
 
 class SECIncrementalStageConfig(Config):
@@ -1902,6 +1914,7 @@ def sec_duckdb_staged(
       year=config.year,
       reset_staging=config.reset_staging,
       skip_taxonomy_relationships=config.skip_taxonomy_relationships,
+      chunk_large_tables=config.chunk_staging,
       progress_callback=dagster_progress,
     )
     return result
@@ -2249,6 +2262,8 @@ def sec_graph_materialized(
     result = await processor.materialize_from_duckdb(
       rebuild=config.rebuild_graph,
       skip_taxonomy_relationships=config.skip_taxonomy_relationships,
+      batch_materialization=config.batch_materialization,
+      batch_size=config.materialization_batch_size,
       progress_callback=dagster_progress,
     )
     return result
