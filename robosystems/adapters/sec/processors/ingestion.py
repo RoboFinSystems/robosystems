@@ -395,6 +395,7 @@ class XBRLDuckDBGraphProcessor:
     reset_staging: bool = False,
     skip_taxonomy_relationships: bool = False,
     use_glob: bool = True,
+    chunk_large_tables: bool = True,
     progress_callback: ProgressCallback | None = None,
   ) -> StagingResult:
     """
@@ -420,6 +421,8 @@ class XBRLDuckDBGraphProcessor:
             If False (default), preserve DuckDB for retry scenarios (tables are overwritten).
         use_glob: If True (default), use glob patterns for efficient file discovery.
             If False, use explicit file lists (legacy behavior, slower for many files).
+        chunk_large_tables: If True (default), stage large tables quarter-by-quarter
+            to reduce memory pressure. Set to False for dev environments with small data.
         progress_callback: Optional callback for progress logging (e.g., Dagster context.log.info).
             Called with message strings during per-table staging operations.
 
@@ -1320,6 +1323,8 @@ class XBRLDuckDBGraphProcessor:
     table_names: list[str] | None = None,
     rebuild: bool = False,
     skip_taxonomy_relationships: bool = False,
+    batch_materialization: bool = True,
+    batch_size: int = MATERIALIZATION_BATCH_SIZE,
     progress_callback: ProgressCallback | None = None,
   ) -> MaterializeResult:
     """
@@ -1344,6 +1349,9 @@ class XBRLDuckDBGraphProcessor:
                  DuckDB staging is preserved for retry scenarios.
         skip_taxonomy_relationships: If True, skip materializing taxonomy structure
                      tables (Association, Structure, TAXONOMY_HAS_*, etc.) to reduce storage.
+        batch_materialization: If True (default), use hash-based batching for tables
+                     with more rows than batch_size to prevent OOM.
+        batch_size: Rows per batch when batch_materialization is enabled (default: 20M).
         progress_callback: Optional callback for progress logging (e.g., Dagster context.log.info).
             Called with message strings during per-table materialization.
 
@@ -1433,7 +1441,11 @@ class XBRLDuckDBGraphProcessor:
       # Step 4: Trigger ingestion for each table
       log_progress(f"Step 4: Materializing {len(table_names)} tables to LadybugDB...")
       ingestion_results = await self._trigger_ingestion(
-        table_names, client, progress_callback=log_progress
+        table_names,
+        client,
+        batch_materialization=batch_materialization,
+        batch_size=batch_size,
+        progress_callback=log_progress,
       )
 
       duration = time.time() - start_time
@@ -1973,7 +1985,7 @@ class XBRLDuckDBGraphProcessor:
     graph_client,
     year: int | None = None,
     progress_callback: ProgressCallback | None = None,
-    chunk_large_tables: bool | None = None,
+    chunk_large_tables: bool = True,
   ) -> tuple[list[str], dict[str, TableInfo]]:
     """
     Create DuckDB staging tables using glob patterns (efficient for many files).
@@ -1996,18 +2008,12 @@ class XBRLDuckDBGraphProcessor:
         tables: Dictionary mapping table names to entity type ("nodes" or "relationships")
         graph_client: Graph API client instance
         year: Optional year filter. If provided, uses filed=YYYY-* pattern.
-        chunk_large_tables: If True, stage large tables quarter-by-quarter
-            to reduce memory pressure. Defaults to SEC_LARGE_SCALE_MODE_ENABLED env var
-            (False in dev, True in prod).
+        chunk_large_tables: If True (default), stage large tables quarter-by-quarter
+            to reduce memory pressure. Set to False for dev environments with small data.
 
     Returns:
         Tuple of (successful_table_names, table_info_dict)
     """
-    # Default to env var if not explicitly specified
-    # SEC_LARGE_SCALE_MODE_ENABLED is False in dev (small data), True in prod
-    if chunk_large_tables is None:
-      chunk_large_tables = env.SEC_LARGE_SCALE_MODE_ENABLED
-
     successful_tables: list[str] = []
     table_infos: dict[str, TableInfo] = {}
     failed_tables: list[tuple[str, str]] = []
@@ -2285,16 +2291,21 @@ class XBRLDuckDBGraphProcessor:
     self,
     table_names: list[str],
     graph_client,
+    batch_materialization: bool = True,
+    batch_size: int = MATERIALIZATION_BATCH_SIZE,
     progress_callback: ProgressCallback | None = None,
   ) -> dict[str, Any]:
     """
     Trigger ingestion for all tables into LadybugDB graph via Graph API.
 
-    For large tables (>100M rows), uses chunked materialization to avoid OOM.
+    For large tables (>batch_size rows), uses chunked materialization to avoid OOM.
 
     Args:
         table_names: List of table names to ingest
         graph_client: Graph API client instance
+        batch_materialization: If True (default), use hash-based batching for tables
+            with more rows than batch_size to prevent OOM.
+        batch_size: Rows per batch when batch_materialization is enabled (default: 20M).
         progress_callback: Optional callback for progress logging (e.g., Dagster context.log.info)
 
     Returns:
@@ -2333,11 +2344,9 @@ class XBRLDuckDBGraphProcessor:
 
         # Use hash-based batched materialization for very large tables to prevent OOM
         # Hash batching doesn't require sorted source tables (unlike LIMIT/OFFSET)
-        if env.SEC_LARGE_SCALE_MODE_ENABLED and row_count > MATERIALIZATION_BATCH_SIZE:
+        if batch_materialization and row_count > batch_size:
           # Calculate number of batches needed (round up)
-          num_batches = (
-            row_count + MATERIALIZATION_BATCH_SIZE - 1
-          ) // MATERIALIZATION_BATCH_SIZE
+          num_batches = (row_count + batch_size - 1) // batch_size
           log_progress(
             f"[{i}/{total_tables}] Materializing {table_name} in {num_batches} batches "
             f"({row_count:,} rows, hash-based)..."

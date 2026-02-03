@@ -215,7 +215,6 @@ function create_ssm_feature_flags() {
         "ORG_MEMBER_INVITATIONS_ENABLED=false"
         "OTEL_ENABLED=false"
         "RATE_LIMIT_ENABLED=false"
-        "SEC_LARGE_SCALE_MODE_ENABLED=false"
         "SECURITY_AUDIT_ENABLED=false"
         "SHARED_MASTER_READS_ENABLED=true"
         "SSE_ENABLED=true"

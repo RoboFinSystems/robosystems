@@ -442,13 +442,6 @@ class EnvConfig:
   # Format: http://internal-robosystems-shared-{env}.{region}.elb.amazonaws.com:8001
   SHARED_REPLICA_ALB_URL = get_str_env("SHARED_REPLICA_ALB_URL", "")
 
-  # SEC large-scale mode: enables chunked staging and batched materialization
-  # Disabled in dev (small data), enabled in prod (billions of rows)
-  SEC_LARGE_SCALE_MODE_ENABLED = get_bool_env(
-    "SEC_LARGE_SCALE_MODE_ENABLED",
-    get_parameter_value("SEC_LARGE_SCALE_MODE_ENABLED", "false").lower() == "true",
-  )
-
   # Shared repositories list for infrastructure/deployment (used by userdata scripts)
   # This configures which repositories should be deployed on shared writer instances
   # For application logic (checking if a graph is a shared repo), use GraphTypeRegistry.SHARED_REPOSITORIES
