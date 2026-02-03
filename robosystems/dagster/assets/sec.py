@@ -329,7 +329,9 @@ class SECMaterializeConfig(Config):
     False  # Skip taxonomy structure tables to reduce storage
   )
   batch_materialization: bool = True  # Hash-based batching for large tables
-  materialization_batch_size: int = 20_000_000  # Rows per batch (20M)
+  materialization_batch_size: int = Field(
+    default=20_000_000, ge=1_000_000
+  )  # Rows per batch (20M default, 1M minimum)
 
 
 class SECIncrementalStageConfig(Config):
