@@ -14,12 +14,15 @@ from robosystems.middleware.mcp.factory import (
 class TestCreateGraphMCPClient:
   """Test create_graph_mcp_client function."""
 
+  @patch("robosystems.middleware.mcp.factory.TuningConfig")
   @patch("robosystems.middleware.mcp.factory.env")
   @patch("robosystems.middleware.mcp.factory.GraphMCPClient")
-  async def test_create_client_with_explicit_url(self, mock_client_class, mock_env):
+  async def test_create_client_with_explicit_url(
+    self, mock_client_class, mock_env, mock_tuning
+  ):
     """Test creating client with explicit API URL."""
-    mock_env.GRAPH_HTTP_TIMEOUT = 30
-    mock_env.GRAPH_QUERY_TIMEOUT = 60
+    mock_tuning.get_graph_http_timeout.return_value = 30
+    mock_tuning.get_graph_query_timeout.return_value = 30
     mock_env.GRAPH_MAX_QUERY_LENGTH = "50000"
 
     mock_client = AsyncMock()
@@ -33,20 +36,21 @@ class TestCreateGraphMCPClient:
       api_base_url=api_url,
       graph_id="test_graph",
       timeout=30,
-      query_timeout=60,
+      query_timeout=30,
       max_query_length=50000,
     )
 
+  @patch("robosystems.middleware.mcp.factory.TuningConfig")
   @patch("robosystems.middleware.mcp.factory.env")
   @patch("robosystems.middleware.mcp.factory.GraphMCPClient")
   @patch("robosystems.graph_api.client.factory.GraphClientFactory")
   @patch("robosystems.middleware.graph.utils.MultiTenantUtils")
   async def test_create_client_with_discovery_shared_repo(
-    self, mock_utils, mock_factory, mock_client_class, mock_env
+    self, mock_utils, mock_factory, mock_client_class, mock_env, mock_tuning
   ):
     """Test creating client with URL discovery for shared repository."""
-    mock_env.GRAPH_HTTP_TIMEOUT = 30
-    mock_env.GRAPH_QUERY_TIMEOUT = 60
+    mock_tuning.get_graph_http_timeout.return_value = 30
+    mock_tuning.get_graph_query_timeout.return_value = 30
     mock_env.GRAPH_MAX_QUERY_LENGTH = "50000"
 
     # Mock shared repository detection
@@ -76,20 +80,21 @@ class TestCreateGraphMCPClient:
       api_base_url="http://discovered-url.com",
       graph_id="sec",
       timeout=30,
-      query_timeout=60,
+      query_timeout=30,
       max_query_length=50000,
     )
 
+  @patch("robosystems.middleware.mcp.factory.TuningConfig")
   @patch("robosystems.middleware.mcp.factory.env")
   @patch("robosystems.middleware.mcp.factory.GraphMCPClient")
   @patch("robosystems.graph_api.client.factory.GraphClientFactory")
   @patch("robosystems.middleware.graph.utils.MultiTenantUtils")
   async def test_create_client_with_discovery_user_graph(
-    self, mock_utils, mock_factory, mock_client_class, mock_env
+    self, mock_utils, mock_factory, mock_client_class, mock_env, mock_tuning
   ):
     """Test creating client with URL discovery for user graph."""
-    mock_env.GRAPH_HTTP_TIMEOUT = 30
-    mock_env.GRAPH_QUERY_TIMEOUT = 60
+    mock_tuning.get_graph_http_timeout.return_value = 30
+    mock_tuning.get_graph_query_timeout.return_value = 30
     mock_env.GRAPH_MAX_QUERY_LENGTH = "50000"
 
     # Mock user graph detection
@@ -120,20 +125,21 @@ class TestCreateGraphMCPClient:
       api_base_url="http://user-graph-url.com",
       graph_id="kg123abc",
       timeout=30,
-      query_timeout=60,
+      query_timeout=30,
       max_query_length=50000,
     )
 
+  @patch("robosystems.middleware.mcp.factory.TuningConfig")
   @patch("robosystems.middleware.mcp.factory.env")
   @patch("robosystems.middleware.mcp.factory.GraphMCPClient")
   @patch("robosystems.graph_api.client.factory.GraphClientFactory")
   @patch("robosystems.middleware.graph.utils.MultiTenantUtils")
   async def test_create_client_url_discovery_fallback_base_url(
-    self, mock_utils, mock_factory, mock_client_class, mock_env
+    self, mock_utils, mock_factory, mock_client_class, mock_env, mock_tuning
   ):
     """Test URL discovery with fallback to base_url attribute."""
-    mock_env.GRAPH_HTTP_TIMEOUT = 30
-    mock_env.GRAPH_QUERY_TIMEOUT = 60
+    mock_tuning.get_graph_http_timeout.return_value = 30
+    mock_tuning.get_graph_query_timeout.return_value = 30
     mock_env.GRAPH_MAX_QUERY_LENGTH = "50000"
 
     mock_utils.is_shared_repository.return_value = False
@@ -154,20 +160,21 @@ class TestCreateGraphMCPClient:
       api_base_url="http://base-url-fallback.com",
       graph_id="kg123abc",
       timeout=30,
-      query_timeout=60,
+      query_timeout=30,
       max_query_length=50000,
     )
 
+  @patch("robosystems.middleware.mcp.factory.TuningConfig")
   @patch("robosystems.middleware.mcp.factory.env")
   @patch("robosystems.middleware.mcp.factory.GraphMCPClient")
   @patch("robosystems.graph_api.client.factory.GraphClientFactory")
   @patch("robosystems.middleware.graph.utils.MultiTenantUtils")
   async def test_create_client_url_discovery_env_fallback(
-    self, mock_utils, mock_factory, mock_client_class, mock_env
+    self, mock_utils, mock_factory, mock_client_class, mock_env, mock_tuning
   ):
     """Test URL discovery with fallback to environment variable."""
-    mock_env.GRAPH_HTTP_TIMEOUT = 30
-    mock_env.GRAPH_QUERY_TIMEOUT = 60
+    mock_tuning.get_graph_http_timeout.return_value = 30
+    mock_tuning.get_graph_query_timeout.return_value = 30
     mock_env.GRAPH_MAX_QUERY_LENGTH = "50000"
     mock_env.GRAPH_API_URL = "http://env-fallback.com"
 
@@ -189,20 +196,21 @@ class TestCreateGraphMCPClient:
       api_base_url="http://env-fallback.com",
       graph_id="kg123abc",
       timeout=30,
-      query_timeout=60,
+      query_timeout=30,
       max_query_length=50000,
     )
 
+  @patch("robosystems.middleware.mcp.factory.TuningConfig")
   @patch("robosystems.middleware.mcp.factory.env")
   @patch("robosystems.middleware.mcp.factory.GraphMCPClient")
   @patch("robosystems.graph_api.client.factory.GraphClientFactory")
   @patch("robosystems.middleware.graph.utils.MultiTenantUtils")
   async def test_create_client_url_discovery_final_fallback(
-    self, mock_utils, mock_factory, mock_client_class, mock_env
+    self, mock_utils, mock_factory, mock_client_class, mock_env, mock_tuning
   ):
     """Test URL discovery with final localhost fallback."""
-    mock_env.GRAPH_HTTP_TIMEOUT = 30
-    mock_env.GRAPH_QUERY_TIMEOUT = 60
+    mock_tuning.get_graph_http_timeout.return_value = 30
+    mock_tuning.get_graph_query_timeout.return_value = 30
     mock_env.GRAPH_MAX_QUERY_LENGTH = "50000"
     mock_env.GRAPH_API_URL = None
 
@@ -224,16 +232,19 @@ class TestCreateGraphMCPClient:
       api_base_url="http://localhost:8001",
       graph_id="kg123abc",
       timeout=30,
-      query_timeout=60,
+      query_timeout=30,
       max_query_length=50000,
     )
 
+  @patch("robosystems.middleware.mcp.factory.TuningConfig")
   @patch("robosystems.middleware.mcp.factory.env")
   @patch("robosystems.middleware.mcp.factory.GraphMCPClient")
-  async def test_create_client_env_defaults(self, mock_client_class, mock_env):
+  async def test_create_client_env_defaults(
+    self, mock_client_class, mock_env, mock_tuning
+  ):
     """Test client creation with environment defaults."""
-    mock_env.GRAPH_HTTP_TIMEOUT = 45
-    mock_env.GRAPH_QUERY_TIMEOUT = 90
+    mock_tuning.get_graph_http_timeout.return_value = 45
+    mock_tuning.get_graph_query_timeout.return_value = 90
     # No GRAPH_MAX_QUERY_LENGTH attribute (testing hasattr fallback)
     delattr(mock_env, "GRAPH_MAX_QUERY_LENGTH")
 
@@ -250,12 +261,15 @@ class TestCreateGraphMCPClient:
       max_query_length=50000,  # Default fallback
     )
 
+  @patch("robosystems.middleware.mcp.factory.TuningConfig")
   @patch("robosystems.middleware.mcp.factory.env")
   @patch("robosystems.middleware.mcp.factory.GraphMCPClient")
-  async def test_create_client_default_graph_id(self, mock_client_class, mock_env):
+  async def test_create_client_default_graph_id(
+    self, mock_client_class, mock_env, mock_tuning
+  ):
     """Test client creation with default graph ID."""
-    mock_env.GRAPH_HTTP_TIMEOUT = 30
-    mock_env.GRAPH_QUERY_TIMEOUT = 60
+    mock_tuning.get_graph_http_timeout.return_value = 30
+    mock_tuning.get_graph_query_timeout.return_value = 30
     mock_env.GRAPH_MAX_QUERY_LENGTH = "50000"
 
     mock_client = AsyncMock()
@@ -268,7 +282,7 @@ class TestCreateGraphMCPClient:
       api_base_url="http://test.com",
       graph_id="sec",
       timeout=30,
-      query_timeout=60,
+      query_timeout=30,
       max_query_length=50000,
     )
 

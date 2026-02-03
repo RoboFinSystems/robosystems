@@ -28,6 +28,7 @@ class APIKeyCache:
   def get_default_ttl(cls) -> int:
     """Get default TTL from TuningConfig (runtime tunable via SSM)."""
     return TuningConfig.get_cache_api_key_ttl()
+
   CACHE_KEY_PREFIX = "apikey:"
   GRAPH_CACHE_KEY_PREFIX = "apikey_graph:"
   USER_DATA_PREFIX = "user:"
@@ -63,9 +64,10 @@ class APIKeyCache:
   def __init__(self):
     """Initialize Redis connection with security features."""
     self._redis = None
-    self.ttl = env.API_KEY_CACHE_TTL
+    # Cache TTLs are runtime tunable via SSM Parameter Store
+    self.ttl = TuningConfig.get_cache_api_key_ttl()
     # JWT cache can have longer TTL since tokens are typically 30 days
-    self.jwt_ttl = env.JWT_CACHE_TTL  # 30 minutes
+    self.jwt_ttl = TuningConfig.get_cache_jwt_ttl()  # 30 minutes
 
     # Initialize cache encryption for sensitive data (lazy-loaded)
     self._encryption_key = None

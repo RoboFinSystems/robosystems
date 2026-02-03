@@ -212,7 +212,6 @@ function create_ssm_feature_flags() {
         "DIRECT_GRAPH_PROVISIONING_ENABLED=true"
         "EMAIL_VERIFICATION_ENABLED=false"
         "LOAD_SHEDDING_ENABLED=true"
-        "ORG_GRAPHS_DEFAULT_LIMIT=10"
         "ORG_MEMBER_INVITATIONS_ENABLED=false"
         "OTEL_ENABLED=false"
         "RATE_LIMIT_ENABLED=false"
@@ -324,9 +323,21 @@ function create_ssm_tuning_parameters() {
         "mcp/MAX_RESULT_ROWS=1000"
         "mcp/MAX_RESULT_SIZE_MB=5.0"
         "mcp/POOL_IDLE_TIMEOUT=300"
+        "mcp/POOL_MAX_LIFETIME=3600"
 
         # Worker Configuration
         "workers/MAX_WORKERS=10"
+
+        # Timeout Configuration
+        "timeouts/GRAPH_HTTP=30"
+        "timeouts/GRAPH_QUERY=30"
+
+        # SSE Configuration
+        "sse/MAX_CONNECTIONS_PER_USER=5"
+        "sse/QUEUE_SIZE=100"
+
+        # Limits
+        "limits/ORG_GRAPHS_DEFAULT=10"
     )
 
     local created=0

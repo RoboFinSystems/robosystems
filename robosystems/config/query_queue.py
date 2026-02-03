@@ -86,6 +86,8 @@ class QueryQueueConfig:
       "queue_threshold": cls.get_queue_threshold(),
       "check_interval": cls.CHECK_INTERVAL,
       "load_shedding_enabled": cls.LOAD_SHEDDING_ENABLED,
+      "shed_start_pressure": cls.get_shed_start_pressure(),
+      "shed_stop_pressure": cls.get_shed_stop_pressure(),
     }
 
   @classmethod

@@ -63,7 +63,9 @@ class GraphMCPClient:
         graph_id: Graph/database identifier
     """
     self.api_base_url = api_base_url.rstrip("/")
-    self.timeout = timeout if timeout is not None else env.GRAPH_HTTP_TIMEOUT
+    self.timeout = (
+      timeout if timeout is not None else TuningConfig.get_graph_http_timeout()
+    )
     self.query_timeout = query_timeout
     self.max_query_length = max_query_length
     self.graph_id = graph_id
@@ -96,7 +98,7 @@ class GraphMCPClient:
     """Load configuration with caching to avoid repeated env var reads."""
     # For testing, don't use cache - always read fresh values
     if os.getenv("PYTEST_CURRENT_TEST"):
-      self.max_result_rows = env.MCP_MAX_RESULT_ROWS
+      self.max_result_rows = TuningConfig.get_mcp_max_result_rows()
       self.auto_limit_enabled = env.MCP_AUTO_LIMIT_ENABLED
       return
 
@@ -108,9 +110,9 @@ class GraphMCPClient:
       or current_time - GraphMCPClient._config_cache_time
       > GraphMCPClient._get_config_cache_ttl()
     ):
-      # Load configuration from environment
+      # Load configuration - max_result_rows from TuningConfig (SSM tunable)
       GraphMCPClient._config_cache = {
-        "max_result_rows": env.MCP_MAX_RESULT_ROWS,
+        "max_result_rows": TuningConfig.get_mcp_max_result_rows(),
         "auto_limit_enabled": env.MCP_AUTO_LIMIT_ENABLED,
       }
       GraphMCPClient._config_cache_time = current_time
@@ -284,7 +286,7 @@ class GraphMCPClient:
         )
 
       # Also check total result size to prevent memory issues
-      max_size_mb = env.MCP_MAX_RESULT_SIZE_MB
+      max_size_mb = TuningConfig.get_mcp_max_result_size_mb()
       result_size_mb = len(json.dumps(data)) / (1024 * 1024)
       if result_size_mb > max_size_mb:
         logger.warning(

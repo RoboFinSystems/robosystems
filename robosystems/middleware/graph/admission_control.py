@@ -62,6 +62,8 @@ class AdmissionController:
     queue_threshold: float = 0.8,
     check_interval: float = 1.0,
     load_shedding_enabled: bool = True,
+    shed_start_pressure: float = 0.8,
+    shed_stop_pressure: float = 0.6,
   ):
     """
     Initialize admission controller.
@@ -72,12 +74,16 @@ class AdmissionController:
         queue_threshold: Queue depth threshold (0-1)
         check_interval: Seconds between resource checks
         load_shedding_enabled: Enable admission control and load shedding
+        shed_start_pressure: Pressure threshold to start load shedding (0-1)
+        shed_stop_pressure: Pressure threshold to stop load shedding (0-1)
     """
     self.memory_threshold = memory_threshold
     self.cpu_threshold = cpu_threshold
     self.queue_threshold = queue_threshold
     self.check_interval = check_interval
     self.load_shedding_enabled = load_shedding_enabled
+    self.shed_start_pressure = shed_start_pressure
+    self.shed_stop_pressure = shed_stop_pressure
 
     # Cached resource data
     self._last_check = 0.0
@@ -176,10 +182,10 @@ class AdmissionController:
         )
 
     # Update load shedding state
-    if pressure_score > 0.8 and self._shed_start_time is None:
+    if pressure_score > self.shed_start_pressure and self._shed_start_time is None:
       self._shed_start_time = time.time()
       logger.warning(f"Entering load shedding mode: pressure {pressure_score:.2f}")
-    elif pressure_score < 0.6 and self._shed_start_time is not None:
+    elif pressure_score < self.shed_stop_pressure and self._shed_start_time is not None:
       duration = time.time() - self._shed_start_time
       logger.info(f"Exiting load shedding mode after {duration:.1f} seconds")
       self._shed_start_time = None
@@ -200,7 +206,7 @@ class AdmissionController:
 
     # Check general system pressure
     pressure_score = self._calculate_pressure_score(resources, 0.0)
-    if pressure_score > 0.8:
+    if pressure_score > self.shed_start_pressure:
       return AdmissionDecision.REJECT_LOAD_SHED
 
     return AdmissionDecision.ADMIT

@@ -55,9 +55,12 @@ from .defaults import (
   AdmissionDefaults,
   CacheDefaults,
   CircuitBreakerDefaults,
+  LimitsDefaults,
   LoadSheddingDefaults,
   MCPDefaults,
   QueueDefaults,
+  SSEDefaults,
+  TimeoutDefaults,
   WorkerDefaults,
 )
 
@@ -314,6 +317,45 @@ class TuningConfig:
   def get_max_workers(cls) -> int:
     """Get maximum workers for thread pools."""
     return cls.get_int("workers/MAX_WORKERS", WorkerDefaults.MAX_WORKERS)
+
+  # =========================================================================
+  # TIMEOUT ACCESSORS
+  # =========================================================================
+
+  @classmethod
+  def get_graph_http_timeout(cls) -> int:
+    """Get Graph API HTTP request timeout (seconds)."""
+    return cls.get_int("timeouts/GRAPH_HTTP", TimeoutDefaults.GRAPH_HTTP)
+
+  @classmethod
+  def get_graph_query_timeout(cls) -> int:
+    """Get Graph query execution timeout (seconds)."""
+    return cls.get_int("timeouts/GRAPH_QUERY", TimeoutDefaults.GRAPH_QUERY)
+
+  # =========================================================================
+  # SSE ACCESSORS
+  # =========================================================================
+
+  @classmethod
+  def get_sse_max_connections_per_user(cls) -> int:
+    """Get maximum SSE connections per user."""
+    return cls.get_int(
+      "sse/MAX_CONNECTIONS_PER_USER", SSEDefaults.MAX_CONNECTIONS_PER_USER
+    )
+
+  @classmethod
+  def get_sse_queue_size(cls) -> int:
+    """Get SSE event queue size per connection."""
+    return cls.get_int("sse/QUEUE_SIZE", SSEDefaults.QUEUE_SIZE)
+
+  # =========================================================================
+  # LIMITS ACCESSORS
+  # =========================================================================
+
+  @classmethod
+  def get_org_graphs_default_limit(cls) -> int:
+    """Get default maximum graphs per organization."""
+    return cls.get_int("limits/ORG_GRAPHS_DEFAULT", LimitsDefaults.ORG_GRAPHS_DEFAULT)
 
   # =========================================================================
   # UTILITY METHODS

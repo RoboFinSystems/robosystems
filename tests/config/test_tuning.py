@@ -12,6 +12,7 @@ from robosystems.config.defaults import (
   AdmissionDefaults,
   CacheDefaults,
   CircuitBreakerDefaults,
+  LimitsDefaults,
   LoadSheddingDefaults,
   MCPDefaults,
   QueueDefaults,
@@ -268,6 +269,18 @@ class TestTuningConfigMCPAccessors:
 
       result = TuningConfig.get_mcp_pool_idle_timeout()
       assert result == MCPDefaults.POOL_IDLE_TIMEOUT
+
+
+class TestTuningConfigLimitsAccessors:
+  """Test limits accessor methods."""
+
+  def test_get_org_graphs_default_limit_returns_default(self):
+    """Test that org graphs default limit returns default value."""
+    with patch("robosystems.config.tuning._get_parameter_manager") as mock_pm:
+      mock_pm.return_value = None
+
+      result = TuningConfig.get_org_graphs_default_limit()
+      assert result == LimitsDefaults.ORG_GRAPHS_DEFAULT
 
 
 class TestTuningConfigWithSSM:

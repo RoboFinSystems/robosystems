@@ -415,10 +415,9 @@ class EnvConfig:
   SHARED_REPOSITORIES = get_list_env("SHARED_REPOSITORIES", "")
 
   # --- Organization ---
-  ORG_GRAPHS_DEFAULT_LIMIT = get_int_env(
-    "ORG_GRAPHS_DEFAULT_LIMIT",
-    int(get_parameter_value("ORG_GRAPHS_DEFAULT_LIMIT", "10")),
-  )
+  # Note: ORG_GRAPHS_DEFAULT_LIMIT is now tunable via SSM /tuning/limits/
+  # This env var remains for backward compatibility and SQLAlchemy column default
+  ORG_GRAPHS_DEFAULT_LIMIT = get_int_env("ORG_GRAPHS_DEFAULT_LIMIT", 10)
   ORG_MEMBER_INVITATIONS_ENABLED = get_bool_env(
     "ORG_MEMBER_INVITATIONS_ENABLED",
     get_parameter_value("ORG_MEMBER_INVITATIONS_ENABLED", "false").lower() == "true",
@@ -787,9 +786,10 @@ class EnvConfig:
   )
 
   # SSE (Server-Sent Events)
+  # Note: MAX_SSE_CONNECTIONS_PER_USER and SSE_QUEUE_SIZE are now tunable via SSM
+  # These env vars remain for backward compatibility but TuningConfig is preferred
   MAX_SSE_CONNECTIONS_PER_USER = get_int_env("MAX_SSE_CONNECTIONS_PER_USER", 5)
   SSE_QUEUE_SIZE = get_int_env("SSE_QUEUE_SIZE", 100)
-  SSE_MAX_REDIS_FAILURES = get_int_env("SSE_MAX_REDIS_FAILURES", 3)
   # SSE Rate limiting
   RATE_LIMIT_SSE_CONNECTIONS = get_int_env("RATE_LIMIT_SSE_CONNECTIONS", 10)
   RATE_LIMIT_SSE_CONNECTIONS_WINDOW = get_int_env(

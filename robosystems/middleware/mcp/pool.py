@@ -38,10 +38,14 @@ class MCPConnectionPool:
     self.max_connections_per_graph = max_connections_per_graph
     # Use TuningConfig for runtime tunability via SSM
     self.max_idle_time = (
-      max_idle_time if max_idle_time is not None else TuningConfig.get_mcp_pool_idle_timeout()
+      max_idle_time
+      if max_idle_time is not None
+      else TuningConfig.get_mcp_pool_idle_timeout()
     )
     self.max_lifetime = (
-      max_lifetime if max_lifetime is not None else TuningConfig.get_mcp_pool_max_lifetime()
+      max_lifetime
+      if max_lifetime is not None
+      else TuningConfig.get_mcp_pool_max_lifetime()
     )
 
     # Pool storage: graph_id -> list of (client, last_used, created_at)

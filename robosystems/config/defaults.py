@@ -52,6 +52,10 @@ class TimeoutDefaults:
   CONNECTION = 10  # Connection establishment timeout
   STREAM = 300  # Streaming operations (5 minutes)
 
+  # Graph API timeouts
+  GRAPH_HTTP = 30  # Graph API HTTP request timeout
+  GRAPH_QUERY = 30  # Graph query execution timeout
+
 
 class AdmissionDefaults:
   """
@@ -152,6 +156,27 @@ class RateLimitDefaults:
   WINDOW_LONG = 300  # 5 minute window for sustained limits
 
 
+class SSEDefaults:
+  """
+  Server-Sent Events (SSE) defaults.
+
+  These values control SSE connection limits.
+  """
+
+  MAX_CONNECTIONS_PER_USER = 5  # Max concurrent SSE connections per user
+  QUEUE_SIZE = 100  # Event queue size per connection
+
+
+class LimitsDefaults:
+  """
+  Default limits for various resources.
+
+  These values control quotas and resource limits that can be adjusted at runtime.
+  """
+
+  ORG_GRAPHS_DEFAULT = 10  # Default max graphs per organization
+
+
 # SSM Parameter paths for tunables
 # These paths are used by tuning.py to fetch overrides from SSM
 SSM_TUNING_PATHS = {
@@ -183,4 +208,12 @@ SSM_TUNING_PATHS = {
   "mcp/POOL_MAX_LIFETIME": MCPDefaults.POOL_MAX_LIFETIME,
   # Workers
   "workers/MAX_WORKERS": WorkerDefaults.MAX_WORKERS,
+  # Timeouts
+  "timeouts/GRAPH_HTTP": TimeoutDefaults.GRAPH_HTTP,
+  "timeouts/GRAPH_QUERY": TimeoutDefaults.GRAPH_QUERY,
+  # SSE
+  "sse/MAX_CONNECTIONS_PER_USER": SSEDefaults.MAX_CONNECTIONS_PER_USER,
+  "sse/QUEUE_SIZE": SSEDefaults.QUEUE_SIZE,
+  # Limits
+  "limits/ORG_GRAPHS_DEFAULT": LimitsDefaults.ORG_GRAPHS_DEFAULT,
 }

@@ -30,7 +30,9 @@ class CreditCache:
     # TTL configuration - using TuningConfig for runtime tunability via SSM
     self.balance_ttl = TuningConfig.get_cache_balance_ttl()
     self.summary_ttl = TuningConfig.get_cache_summary_ttl()
-    self.operation_cost_ttl = CacheDefaults.OPERATION_COST_TTL  # Not tunable (rarely changes)
+    self.operation_cost_ttl = (
+      CacheDefaults.OPERATION_COST_TTL
+    )  # Not tunable (rarely changes)
 
   @property
   def redis(self) -> redis.Redis:

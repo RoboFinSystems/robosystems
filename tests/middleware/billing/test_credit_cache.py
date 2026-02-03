@@ -37,7 +37,7 @@ class TestCreditCache:
     mock_redis.setex.assert_called_once()
     call_args = mock_redis.setex.call_args
     assert call_args[0][0] == f"graph_credit:{graph_id}"
-    assert call_args[0][1] == cache_instance.BALANCE_TTL
+    assert call_args[0][1] == cache_instance.balance_ttl
 
     # Parse the cached data
     cached_data = json.loads(call_args[0][2])
@@ -137,7 +137,7 @@ class TestCreditCache:
     mock_redis.setex.assert_called_once()
     call_args = mock_redis.setex.call_args
     assert call_args[0][0] == f"credit_summary:{graph_id}"
-    assert call_args[0][1] == cache_instance.SUMMARY_TTL
+    assert call_args[0][1] == cache_instance.summary_ttl
 
     # Test retrieval
     mock_redis.get.return_value = json.dumps(summary)
@@ -157,7 +157,7 @@ class TestCreditCache:
     mock_redis.setex.assert_called_once()
     call_args = mock_redis.setex.call_args
     assert call_args[0][0] == f"op_cost:{operation_type}"
-    assert call_args[0][1] == cache_instance.OPERATION_COST_TTL
+    assert call_args[0][1] == cache_instance.operation_cost_ttl
     assert call_args[0][2] == "10.0"
 
     # Test retrieval

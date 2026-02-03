@@ -15,6 +15,7 @@ from fastapi import HTTPException, Request
 from sse_starlette.sse import EventSourceResponse
 
 from robosystems.config import env
+from robosystems.config.tuning import TuningConfig
 from robosystems.logger import logger
 from robosystems.middleware.sse.event_storage import (
   EventType,
@@ -40,10 +41,10 @@ class SSEConnectionManager:
     self.user_connections: dict[str, set[str]] = {}  # user_id -> set of connection_keys
     self._lock = asyncio.Lock()
 
-    # Configuration from environment
-    self.max_connections_per_user = env.MAX_SSE_CONNECTIONS_PER_USER
-    self.queue_size = env.SSE_QUEUE_SIZE
-    self.sse_enabled = env.SSE_ENABLED
+    # Configuration - runtime tunable via SSM
+    self.max_connections_per_user = TuningConfig.get_sse_max_connections_per_user()
+    self.queue_size = TuningConfig.get_sse_queue_size()
+    self.sse_enabled = env.SSE_ENABLED  # Feature flag, not tunable
 
   async def add_connection(
     self, operation_id: str, connection_id: str, user_id: str
