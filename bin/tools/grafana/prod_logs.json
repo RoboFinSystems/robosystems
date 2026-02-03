@@ -27,11 +27,401 @@
         "type": "cloudwatch",
         "uid": "${datasource}"
       },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "stepAfter",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "links": [],
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "id": 2,
+      "options": {
+        "legend": {
+          "calcs": ["mean"],
+          "displayMode": "table",
+          "placement": "right",
+          "showLegend": true,
+          "sortBy": "Mean",
+          "sortDesc": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "pluginVersion": "10.4.1",
+      "targets": [
+        {
+          "alias": "",
+          "datasource": {
+            "type": "cloudwatch",
+            "uid": "${datasource}"
+          },
+          "dimensions": {
+            "LogGroupName": "*"
+          },
+          "expression": "REMOVE_EMPTY(SEARCH('{AWS/Logs,LogGroupName} MetricName=\"IncomingLogEvents\"', 'Sum', $period))/$period",
+          "id": "",
+          "label": "",
+          "matchExact": false,
+          "metricEditorMode": 0,
+          "metricName": "IncomingLogEvents",
+          "metricQueryType": 0,
+          "namespace": "AWS/Logs",
+          "period": "$period",
+          "refId": "A",
+          "region": "$region",
+          "statistic": "Sum"
+        }
+      ],
+      "title": "Incoming log events [count/sec]",
+      "transformations": [
+        {
+          "id": "filterFieldsByName",
+          "options": {
+            "include": {
+              "names": [
+                "Time",
+                "/aws/lambda/RoboSystemsGraphVolumesProd-volume-manager",
+                "/aws/lambda/RoboSystemsGraphVolumesProd-volume-monitor",
+                "/robosystems/prod/api",
+                "/robosystems/prod/app",
+                "/robosystems/prod/dagster",
+                "/robosystems/prod/graph-api",
+                "/aws/lambda/RoboSystemsGraphVolumesProd-volume-detachment",
+                "/harbinger-finlab/prod/app",
+                "/roboinvestor/prod/app",
+                "/roboledger/prod/app",
+                "/aws/lambda/RoboSystemsPostgresProd-init-lambda"
+              ]
+            }
+          }
+        }
+      ],
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "cloudwatch",
+        "uid": "$datasource"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "stepAfter",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "links": [],
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "decbytes"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 8
+      },
+      "id": 3,
+      "options": {
+        "legend": {
+          "calcs": ["mean"],
+          "displayMode": "table",
+          "placement": "right",
+          "showLegend": true,
+          "sortBy": "Mean",
+          "sortDesc": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "pluginVersion": "10.4.1",
+      "targets": [
+        {
+          "alias": "",
+          "datasource": {
+            "uid": "$datasource"
+          },
+          "dimensions": {
+            "LogGroupName": "*"
+          },
+          "expression": "REMOVE_EMPTY(SEARCH('{AWS/Logs,LogGroupName} MetricName=\"IncomingBytes\"', 'Sum', $period))/$period",
+          "id": "",
+          "label": "",
+          "matchExact": true,
+          "metricEditorMode": 1,
+          "metricName": "IncomingLogEvents",
+          "metricQueryType": 0,
+          "namespace": "AWS/Logs",
+          "period": "$period",
+          "refId": "A",
+          "region": "$region",
+          "statistic": "Sum"
+        }
+      ],
+      "title": "Incoming bytes [bytes/sec]",
+      "transformations": [
+        {
+          "id": "filterFieldsByName",
+          "options": {
+            "include": {
+              "names": [
+                "Time",
+                "/aws/lambda/RoboSystemsGraphVolumesProd-volume-manager",
+                "/aws/lambda/RoboSystemsGraphVolumesProd-volume-monitor",
+                "/robosystems/prod/api",
+                "/robosystems/prod/app",
+                "/robosystems/prod/dagster",
+                "/robosystems/prod/graph-api",
+                "/aws/lambda/RoboSystemsGraphVolumesProd-volume-detachment",
+                "/aws/lambda/RoboSystemsPostgresProd-init-lambda",
+                "/harbinger-finlab/prod/app",
+                "/roboinvestor/prod/app",
+                "/roboledger/prod/app"
+              ]
+            }
+          }
+        }
+      ],
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "cloudwatch",
+        "uid": "$datasource"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "stepAfter",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "links": [],
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 24,
+        "x": 0,
+        "y": 16
+      },
+      "id": 4,
+      "options": {
+        "legend": {
+          "calcs": ["mean"],
+          "displayMode": "table",
+          "placement": "right",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "pluginVersion": "10.4.1",
+      "targets": [
+        {
+          "datasource": {
+            "uid": "$datasource"
+          },
+          "dimensions": {
+            "LogGroupName": "*"
+          },
+          "expression": "",
+          "label": "Delivery Errors",
+          "matchExact": true,
+          "metricEditorMode": 0,
+          "metricName": "DeliveryErrors",
+          "metricQueryType": 0,
+          "namespace": "AWS/Logs",
+          "period": "$period",
+          "refId": "A",
+          "region": "$region",
+          "statistic": "Sum"
+        },
+        {
+          "datasource": {
+            "uid": "$datasource"
+          },
+          "dimensions": {
+            "LogGroupName": "*"
+          },
+          "expression": "",
+          "hide": false,
+          "label": "Delivery Throttling",
+          "matchExact": true,
+          "metricEditorMode": 0,
+          "metricName": "DeliveryThrottling",
+          "metricQueryType": 0,
+          "namespace": "AWS/Logs",
+          "period": "$period",
+          "refId": "B",
+          "region": "$region",
+          "statistic": "Sum"
+        }
+      ],
+      "title": "Delivery errors [count]",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "cloudwatch",
+        "uid": "${datasource}"
+      },
       "gridPos": {
         "h": 23,
         "w": 24,
         "x": 0,
-        "y": 0
+        "y": 23
       },
       "id": 10,
       "options": {
@@ -62,7 +452,7 @@
               "name": "/robosystems/prod/api"
             }
           ],
-          "matchExact": false,
+          "matchExact": true,
           "metricEditorMode": 0,
           "metricName": "",
           "metricQueryType": 0,
@@ -88,7 +478,7 @@
         "h": 22,
         "w": 24,
         "x": 0,
-        "y": 23
+        "y": 46
       },
       "id": 11,
       "options": {
@@ -119,7 +509,7 @@
               "name": "/robosystems/prod/dagster"
             }
           ],
-          "matchExact": false,
+          "matchExact": true,
           "metricEditorMode": 0,
           "metricName": "",
           "metricQueryType": 0,
@@ -145,7 +535,7 @@
         "h": 22,
         "w": 24,
         "x": 0,
-        "y": 45
+        "y": 68
       },
       "id": 12,
       "options": {
@@ -176,7 +566,7 @@
               "name": "/robosystems/prod/graph-api"
             }
           ],
-          "matchExact": false,
+          "matchExact": true,
           "metricEditorMode": 0,
           "metricName": "",
           "metricQueryType": 0,
@@ -202,7 +592,7 @@
         "h": 22,
         "w": 24,
         "x": 0,
-        "y": 67
+        "y": 90
       },
       "id": 13,
       "options": {
@@ -283,7 +673,7 @@
               "name": "/aws/lambda/RoboSystemsValkeyProd-valkey-rotation"
             }
           ],
-          "matchExact": false,
+          "matchExact": true,
           "metricEditorMode": 0,
           "metricName": "",
           "metricQueryType": 0,
@@ -299,413 +689,18 @@
       ],
       "title": "Lambda Logs",
       "type": "logs"
-    },
-    {
-      "datasource": {
-        "type": "cloudwatch",
-        "uid": "${datasource}"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisBorderShow": false,
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            },
-            "insertNulls": false,
-            "lineInterpolation": "stepAfter",
-            "lineWidth": 1,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "never",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
-          },
-          "links": [],
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green"
-              },
-              {
-                "color": "red",
-                "value": 80
-              }
-            ]
-          },
-          "unit": "short"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 24,
-        "x": 0,
-        "y": 89
-      },
-      "id": 2,
-      "options": {
-        "legend": {
-          "calcs": [
-            "mean"
-          ],
-          "displayMode": "table",
-          "placement": "right",
-          "showLegend": true,
-          "sortBy": "Mean",
-          "sortDesc": true
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "none"
-        }
-      },
-      "pluginVersion": "10.4.1",
-      "targets": [
-        {
-          "alias": "",
-          "datasource": {
-            "type": "cloudwatch",
-            "uid": "${datasource}"
-          },
-          "dimensions": {
-            "LogGroupName": "*"
-          },
-          "expression": "REMOVE_EMPTY(SEARCH('{AWS/Logs,LogGroupName} MetricName=\"IncomingLogEvents\"', 'Sum', $period))/$period",
-          "id": "",
-          "label": "",
-          "matchExact": false,
-          "metricEditorMode": 0,
-          "metricName": "IncomingLogEvents",
-          "metricQueryType": 0,
-          "namespace": "AWS/Logs",
-          "period": "$period",
-          "refId": "A",
-          "region": "$region",
-          "statistic": "Sum"
-        }
-      ],
-      "title": "Incoming log events [count/sec]",
-      "transformations": [
-        {
-          "id": "filterFieldsByName",
-          "options": {
-            "include": {
-              "names": [
-                "Time",
-                "/aws/lambda/RoboSystemsGraphVolumesProd-volume-manager",
-                "/aws/lambda/RoboSystemsGraphVolumesProd-volume-monitor",
-                "/robosystems/prod/api",
-                "/robosystems/prod/app",
-                "/robosystems/prod/dagster",
-                "/robosystems/prod/graph-api",
-                "/aws/lambda/RoboSystemsGraphVolumesProd-volume-detachment",
-                "/roboinvestor/prod/app",
-                "/roboledger/prod/app",
-                "/aws/lambda/RoboSystemsPostgresProd-init-lambda"
-              ]
-            }
-          }
-        }
-      ],
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "cloudwatch",
-        "uid": "$datasource"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisBorderShow": false,
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            },
-            "insertNulls": false,
-            "lineInterpolation": "stepAfter",
-            "lineWidth": 1,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "never",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
-          },
-          "links": [],
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green"
-              },
-              {
-                "color": "red",
-                "value": 80
-              }
-            ]
-          },
-          "unit": "decbytes"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 24,
-        "x": 0,
-        "y": 97
-      },
-      "id": 3,
-      "options": {
-        "legend": {
-          "calcs": [
-            "mean"
-          ],
-          "displayMode": "table",
-          "placement": "right",
-          "showLegend": true,
-          "sortBy": "Mean",
-          "sortDesc": true
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "none"
-        }
-      },
-      "pluginVersion": "10.4.1",
-      "targets": [
-        {
-          "alias": "",
-          "datasource": {
-            "uid": "$datasource"
-          },
-          "dimensions": {
-            "LogGroupName": "*"
-          },
-          "expression": "REMOVE_EMPTY(SEARCH('{AWS/Logs,LogGroupName} MetricName=\"IncomingBytes\"', 'Sum', $period))/$period",
-          "id": "",
-          "label": "",
-          "matchExact": false,
-          "metricEditorMode": 1,
-          "metricName": "IncomingLogEvents",
-          "metricQueryType": 0,
-          "namespace": "AWS/Logs",
-          "period": "$period",
-          "refId": "A",
-          "region": "$region",
-          "statistic": "Sum"
-        }
-      ],
-      "title": "Incoming bytes [bytes/sec]",
-      "transformations": [
-        {
-          "id": "filterFieldsByName",
-          "options": {
-            "include": {
-              "names": [
-                "Time",
-                "/aws/lambda/RoboSystemsGraphVolumesProd-volume-manager",
-                "/aws/lambda/RoboSystemsGraphVolumesProd-volume-monitor",
-                "/robosystems/prod/api",
-                "/robosystems/prod/app",
-                "/robosystems/prod/dagster",
-                "/robosystems/prod/graph-api",
-                "/aws/lambda/RoboSystemsGraphVolumesProd-volume-detachment",
-                "/aws/lambda/RoboSystemsPostgresProd-init-lambda",
-                "/roboinvestor/prod/app",
-                "/roboledger/prod/app"
-              ]
-            }
-          }
-        }
-      ],
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "cloudwatch",
-        "uid": "$datasource"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisBorderShow": false,
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            },
-            "insertNulls": false,
-            "lineInterpolation": "stepAfter",
-            "lineWidth": 1,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "never",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
-          },
-          "links": [],
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green"
-              },
-              {
-                "color": "red",
-                "value": 80
-              }
-            ]
-          },
-          "unit": "short"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 7,
-        "w": 24,
-        "x": 0,
-        "y": 105
-      },
-      "id": 4,
-      "options": {
-        "legend": {
-          "calcs": [
-            "mean"
-          ],
-          "displayMode": "table",
-          "placement": "right",
-          "showLegend": true
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "none"
-        }
-      },
-      "pluginVersion": "10.4.1",
-      "targets": [
-        {
-          "datasource": {
-            "uid": "$datasource"
-          },
-          "dimensions": {
-            "LogGroupName": "*"
-          },
-          "expression": "",
-          "label": "Delivery Errors",
-          "matchExact": false,
-          "metricEditorMode": 0,
-          "metricName": "DeliveryErrors",
-          "metricQueryType": 0,
-          "namespace": "AWS/Logs",
-          "period": "$period",
-          "refId": "A",
-          "region": "$region",
-          "statistic": "Sum"
-        },
-        {
-          "datasource": {
-            "uid": "$datasource"
-          },
-          "dimensions": {
-            "LogGroupName": "*"
-          },
-          "expression": "",
-          "hide": false,
-          "label": "Delivery Throttling",
-          "matchExact": false,
-          "metricEditorMode": 0,
-          "metricName": "DeliveryThrottling",
-          "metricQueryType": 0,
-          "namespace": "AWS/Logs",
-          "period": "$period",
-          "refId": "B",
-          "region": "$region",
-          "statistic": "Sum"
-        }
-      ],
-      "title": "Delivery errors [count]",
-      "type": "timeseries"
     }
   ],
   "refresh": false,
   "schemaVersion": 39,
-  "tags": [
-    "robosystems",
-    "infrastructure",
-    "prod"
-  ],
+  "tags": ["robosystems", "infrastructure", "prod"],
   "templating": {
     "list": [
       {
         "current": {
           "selected": false,
           "text": "RoboSystems CloudWatch",
-          "value": "${DS_CLOUDWATCH}"
+          "value": "deoe41wti55a8c"
         },
         "hide": 0,
         "includeAll": false,
@@ -782,7 +777,7 @@
     ]
   },
   "time": {
-    "from": "now-30m",
+    "from": "now-7d",
     "to": "now"
   },
   "timepicker": {
@@ -802,6 +797,6 @@
   "timezone": "",
   "title": "RoboSystems Production Logs",
   "uid": null,
-  "version": 21,
+  "version": 24,
   "weekStart": ""
 }

@@ -109,7 +109,7 @@
         "overrides": []
       },
       "gridPos": {
-        "h": 8,
+        "h": 11,
         "w": 12,
         "x": 0,
         "y": 3
@@ -135,7 +135,7 @@
           },
           "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "avg by(endpoint) (rate(robosystems_api_request_duration_seconds_bucket[5m]))",
+          "expr": "avg by(endpoint) (rate(robosystems_api_request_duration_seconds_bucket{endpoint=~\"$endpoints\"}[5m]))",
           "fullMetaSearch": false,
           "hide": false,
           "includeNullMetadata": true,
@@ -178,7 +178,7 @@
         "overrides": []
       },
       "gridPos": {
-        "h": 8,
+        "h": 13,
         "w": 12,
         "x": 12,
         "y": 3
@@ -190,9 +190,7 @@
         "justifyMode": "auto",
         "orientation": "auto",
         "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
+          "calcs": ["lastNotNull"],
           "fields": "",
           "values": false
         },
@@ -209,7 +207,7 @@
           },
           "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "avg by(endpoint) (rate(robosystems_api_request_duration_seconds_bucket[5m]))",
+          "expr": "avg by(endpoint) (rate(robosystems_api_request_duration_seconds_bucket{endpoint=~\"$endpoints\"}[1h]))",
           "fullMetaSearch": false,
           "hide": false,
           "includeNullMetadata": true,
@@ -284,10 +282,10 @@
         "overrides": []
       },
       "gridPos": {
-        "h": 8,
+        "h": 11,
         "w": 12,
         "x": 0,
-        "y": 11
+        "y": 14
       },
       "id": 29,
       "options": {
@@ -311,7 +309,7 @@
           },
           "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "topk(15, sum by(endpoint) (rate(robosystems_api_requests_total[5m]))) * 60",
+          "expr": "topk(15, sum by(endpoint) (rate(robosystems_api_requests_total{endpoint=~\"$endpoints\"}[5m]))) * 5",
           "fullMetaSearch": false,
           "includeNullMetadata": true,
           "instant": false,
@@ -322,8 +320,149 @@
           "useBackend": false
         }
       ],
-      "title": "Top Endpoints by Request Volume",
+      "title": "Request Volume",
       "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "reqpm"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 12,
+        "y": 16
+      },
+      "id": 30,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": ["lastNotNull"],
+          "fields": "",
+          "values": false
+        },
+        "showPercentChange": false,
+        "textMode": "auto",
+        "wideLayout": true
+      },
+      "pluginVersion": "10.4.1",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "disableTextWrap": false,
+          "editorMode": "builder",
+          "exemplar": false,
+          "expr": "sum(rate(robosystems_api_requests_total{endpoint=~\"$endpoints\"}[5m])) * 5",
+          "format": "time_series",
+          "fullMetaSearch": false,
+          "includeNullMetadata": true,
+          "instant": false,
+          "interval": "",
+          "legendFormat": "__auto",
+          "range": true,
+          "refId": "A",
+          "useBackend": false
+        }
+      ],
+      "title": "Request Volume",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            }
+          },
+          "mappings": []
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 4,
+        "x": 20,
+        "y": 16
+      },
+      "id": null,
+      "options": {
+        "displayLabels": ["percent"],
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "pieType": "pie",
+        "reduceOptions": {
+          "calcs": ["lastNotNull"],
+          "fields": "",
+          "values": false
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "disableTextWrap": false,
+          "editorMode": "builder",
+          "expr": "sum by(status_code) (rate(robosystems_api_requests_total{endpoint=~\"$endpoints\"}[5m]))",
+          "fullMetaSearch": false,
+          "includeNullMetadata": true,
+          "instant": false,
+          "legendFormat": "{{status_code}}",
+          "range": true,
+          "refId": "A",
+          "useBackend": false
+        }
+      ],
+      "title": "Response Status",
+      "type": "piechart"
     },
     {
       "datasource": {
@@ -354,21 +493,19 @@
         "overrides": []
       },
       "gridPos": {
-        "h": 8,
-        "w": 8,
+        "h": 13,
+        "w": 12,
         "x": 12,
-        "y": 11
+        "y": 24
       },
-      "id": 30,
+      "id": 33,
       "options": {
         "colorMode": "value",
         "graphMode": "area",
         "justifyMode": "auto",
         "orientation": "auto",
         "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
+          "calcs": ["lastNotNull"],
           "fields": "",
           "values": false
         },
@@ -385,7 +522,7 @@
           },
           "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "sum(rate(robosystems_api_requests_total[5m]))",
+          "expr": "count by(event_type) (rate(robosystems_business_events_total{endpoint=~\"$endpoints\"}[5m]))",
           "fullMetaSearch": false,
           "includeNullMetadata": true,
           "instant": false,
@@ -395,76 +532,8 @@
           "useBackend": false
         }
       ],
-      "title": "Total Requests/sec",
+      "title": "Total Business Events",
       "type": "stat"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            }
-          },
-          "mappings": []
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 4,
-        "x": 20,
-        "y": 11
-      },
-      "id": 27,
-      "options": {
-        "legend": {
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "pieType": "pie",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "tooltip": {
-          "mode": "single",
-          "sort": "none"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "disableTextWrap": false,
-          "editorMode": "builder",
-          "expr": "sum by(status_code) (rate(robosystems_api_requests_total[5m]))",
-          "fullMetaSearch": false,
-          "includeNullMetadata": true,
-          "instant": false,
-          "legendFormat": "{{status_code}}",
-          "range": true,
-          "refId": "A",
-          "useBackend": false
-        }
-      ],
-      "title": "Response Status Distribution",
-      "type": "piechart"
     },
     {
       "datasource": {
@@ -527,10 +596,10 @@
         "overrides": []
       },
       "gridPos": {
-        "h": 8,
+        "h": 12,
         "w": 12,
         "x": 0,
-        "y": 19
+        "y": 25
       },
       "id": 32,
       "options": {
@@ -554,7 +623,7 @@
           },
           "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "avg by(event_type) (topk(15, rate(robosystems_business_events_total[5m])) * 60)",
+          "expr": "avg by(event_type) (topk(15, rate(robosystems_business_events_total{endpoint=~\"$endpoints\"}[5m]))) * 5",
           "fullMetaSearch": false,
           "includeNullMetadata": true,
           "instant": false,
@@ -570,78 +639,6 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "thresholds"
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "red",
-                "value": 80
-              }
-            ]
-          }
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 12,
-        "y": 19
-      },
-      "id": 33,
-      "options": {
-        "colorMode": "value",
-        "graphMode": "area",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "showPercentChange": false,
-        "textMode": "auto",
-        "wideLayout": true
-      },
-      "pluginVersion": "10.4.1",
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "disableTextWrap": false,
-          "editorMode": "builder",
-          "expr": "count by(event_type) (rate(robosystems_business_events_total[5m]))",
-          "fullMetaSearch": false,
-          "includeNullMetadata": true,
-          "instant": false,
-          "legendFormat": "__auto",
-          "range": true,
-          "refId": "A",
-          "useBackend": false
-        }
-      ],
-      "title": "Total Business Events",
-      "type": "stat"
-    },
-    {
-      "datasource": {
         "type": "text",
         "uid": "-- Mixed --"
       },
@@ -649,7 +646,7 @@
         "h": 3,
         "w": 24,
         "x": 0,
-        "y": 27
+        "y": 37
       },
       "id": 23,
       "options": {
@@ -658,7 +655,7 @@
           "showLineNumbers": false,
           "showMiniMap": false
         },
-        "content": "# ECS Clusters",
+        "content": "# Container Services",
         "mode": "markdown"
       },
       "pluginVersion": "10.4.1",
@@ -710,13 +707,13 @@
             }
           },
           "mappings": [],
+          "max": 100,
           "min": 0,
           "thresholds": {
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -732,7 +729,7 @@
         "h": 9,
         "w": 12,
         "x": 0,
-        "y": 30
+        "y": 40
       },
       "id": 5,
       "options": {
@@ -758,6 +755,7 @@
             "ServiceName": "robosystems-api-prod-service"
           },
           "expression": "",
+          "hide": false,
           "id": "",
           "label": "RoboSystems API",
           "logGroups": [],
@@ -779,18 +777,18 @@
             "uid": "${DS_CLOUDWATCH}"
           },
           "dimensions": {
-            "ClusterName": "roboledger-prod-cluster",
-            "ServiceName": "roboledger-prod-service"
+            "ServiceName": "roboledger-prod"
           },
           "expression": "",
+          "hide": false,
           "id": "",
-          "label": "RoboLedger",
+          "label": "${PROP('Dim.ServiceName')}",
           "logGroups": [],
-          "matchExact": true,
+          "matchExact": false,
           "metricEditorMode": 0,
           "metricName": "CPUUtilization",
           "metricQueryType": 0,
-          "namespace": "AWS/ECS",
+          "namespace": "AWS/AppRunner",
           "period": "300",
           "queryMode": "Metrics",
           "refId": "B",
@@ -804,22 +802,22 @@
             "uid": "${DS_CLOUDWATCH}"
           },
           "dimensions": {
-            "ClusterName": "roboinvestor-prod-cluster",
-            "ServiceName": "roboinvestor-prod-service"
+            "ServiceName": "roboinvestor-prod"
           },
           "expression": "",
+          "hide": false,
           "id": "",
-          "label": "RoboInvestor",
+          "label": "${PROP('Dim.ServiceName')}",
           "logGroups": [],
-          "matchExact": true,
+          "matchExact": false,
           "metricEditorMode": 0,
           "metricName": "CPUUtilization",
           "metricQueryType": 0,
-          "namespace": "AWS/ECS",
+          "namespace": "AWS/AppRunner",
           "period": "300",
           "queryMode": "Metrics",
           "refId": "A",
-          "region": "${aws_region}",
+          "region": "us-east-1",
           "sqlExpression": "",
           "statistic": "Average"
         },
@@ -829,18 +827,18 @@
             "uid": "${DS_CLOUDWATCH}"
           },
           "dimensions": {
-            "ClusterName": "robosystems-app-prod-cluster",
-            "ServiceName": "robosystems-app-prod-service"
+            "ServiceName": "robosystems-app-prod"
           },
           "expression": "",
+          "hide": false,
           "id": "",
-          "label": "RoboSystems App",
+          "label": "${PROP('Dim.ServiceName')}",
           "logGroups": [],
-          "matchExact": true,
+          "matchExact": false,
           "metricEditorMode": 0,
           "metricName": "CPUUtilization",
           "metricQueryType": 0,
-          "namespace": "AWS/ECS",
+          "namespace": "AWS/AppRunner",
           "period": "300",
           "queryMode": "Metrics",
           "refId": "C",
@@ -849,7 +847,57 @@
           "statistic": "Average"
         }
       ],
-      "title": "ECS CPU Utilization",
+      "title": "Container CPU Utilization",
+      "transformations": [
+        {
+          "id": "calculateField",
+          "options": {
+            "alias": "RoboSystems App",
+            "mode": "reduceRow",
+            "reduce": {
+              "include": ["robosystems-app-prod"],
+              "reducer": "last"
+            }
+          }
+        },
+        {
+          "id": "calculateField",
+          "options": {
+            "alias": "RoboLedger App",
+            "mode": "reduceRow",
+            "reduce": {
+              "include": ["roboledger-prod"],
+              "reducer": "last"
+            },
+            "replaceFields": false
+          }
+        },
+        {
+          "id": "calculateField",
+          "options": {
+            "alias": "RoboInvestor App",
+            "mode": "reduceRow",
+            "reduce": {
+              "include": ["roboinvestor-prod"],
+              "reducer": "last"
+            }
+          }
+        },
+        {
+          "id": "filterFieldsByName",
+          "options": {
+            "include": {
+              "names": [
+                "Time",
+                "RoboSystems API",
+                "RoboLedger App",
+                "RoboInvestor App",
+                "RoboSystems App"
+              ]
+            }
+          }
+        }
+      ],
       "type": "timeseries"
     },
     {
@@ -878,8 +926,11 @@
               "vis": false,
               "viz": false
             },
-            "insertNulls": false,
+            "insertNulls": 3600000,
             "lineInterpolation": "linear",
+            "lineStyle": {
+              "fill": "solid"
+            },
             "lineWidth": 1,
             "pointSize": 5,
             "scaleDistribution": {
@@ -896,13 +947,13 @@
             }
           },
           "mappings": [],
+          "max": 100,
           "min": 0,
           "thresholds": {
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -918,7 +969,7 @@
         "h": 9,
         "w": 12,
         "x": 12,
-        "y": 30
+        "y": 40
       },
       "id": 6,
       "options": {
@@ -965,18 +1016,42 @@
             "uid": "${DS_CLOUDWATCH}"
           },
           "dimensions": {
-            "ClusterName": "roboledger-prod-cluster",
-            "ServiceName": "roboledger-prod-service"
+            "ServiceName": "robosystems-app-prod"
           },
           "expression": "",
           "id": "",
-          "label": "RoboLedger",
+          "label": "${PROP('Dim.ServiceName')}",
           "logGroups": [],
-          "matchExact": true,
+          "matchExact": false,
           "metricEditorMode": 0,
           "metricName": "MemoryUtilization",
           "metricQueryType": 0,
-          "namespace": "AWS/ECS",
+          "namespace": "AWS/AppRunner",
+          "period": "300",
+          "queryMode": "Metrics",
+          "refId": "C",
+          "region": "${aws_region}",
+          "sqlExpression": "",
+          "statistic": "Average"
+        },
+        {
+          "datasource": {
+            "type": "cloudwatch",
+            "uid": "${DS_CLOUDWATCH}"
+          },
+          "dimensions": {
+            "ServiceName": "roboledger-prod"
+          },
+          "expression": "",
+          "hide": false,
+          "id": "",
+          "label": "${PROP('Dim.ServiceName')}",
+          "logGroups": [],
+          "matchExact": false,
+          "metricEditorMode": 0,
+          "metricName": "MemoryUtilization",
+          "metricQueryType": 0,
+          "namespace": "AWS/AppRunner",
           "period": "300",
           "queryMode": "Metrics",
           "refId": "B",
@@ -990,52 +1065,76 @@
             "uid": "${DS_CLOUDWATCH}"
           },
           "dimensions": {
-            "ClusterName": "roboinvestor-prod-cluster",
-            "ServiceName": "roboinvestor-prod-service"
+            "ServiceName": "roboinvestor-prod"
           },
           "expression": "",
+          "hide": false,
           "id": "",
-          "label": "RoboInvestor",
+          "label": "${PROP('Dim.ServiceName')}",
           "logGroups": [],
-          "matchExact": true,
+          "matchExact": false,
           "metricEditorMode": 0,
           "metricName": "MemoryUtilization",
           "metricQueryType": 0,
-          "namespace": "AWS/ECS",
+          "namespace": "AWS/AppRunner",
           "period": "300",
           "queryMode": "Metrics",
           "refId": "A",
           "region": "${aws_region}",
           "sqlExpression": "",
           "statistic": "Average"
-        },
-        {
-          "datasource": {
-            "type": "cloudwatch",
-            "uid": "${DS_CLOUDWATCH}"
-          },
-          "dimensions": {
-            "ClusterName": "robosystems-app-prod-cluster",
-            "ServiceName": "robosystems-app-prod-service"
-          },
-          "expression": "",
-          "id": "",
-          "label": "RoboSystems App",
-          "logGroups": [],
-          "matchExact": true,
-          "metricEditorMode": 0,
-          "metricName": "MemoryUtilization",
-          "metricQueryType": 0,
-          "namespace": "AWS/ECS",
-          "period": "300",
-          "queryMode": "Metrics",
-          "refId": "C",
-          "region": "${aws_region}",
-          "sqlExpression": "",
-          "statistic": "Average"
         }
       ],
-      "title": "ECS Memory Utilization",
+      "title": "Container Memory Utilization",
+      "transformations": [
+        {
+          "id": "calculateField",
+          "options": {
+            "alias": "RoboSystems App",
+            "mode": "reduceRow",
+            "reduce": {
+              "include": ["robosystems-app-prod"],
+              "reducer": "last"
+            }
+          }
+        },
+        {
+          "id": "calculateField",
+          "options": {
+            "alias": "RoboLedger App",
+            "mode": "reduceRow",
+            "reduce": {
+              "include": ["roboledger-prod"],
+              "reducer": "last"
+            }
+          }
+        },
+        {
+          "id": "calculateField",
+          "options": {
+            "alias": "RoboInvestor App",
+            "mode": "reduceRow",
+            "reduce": {
+              "include": ["roboinvestor-prod"],
+              "reducer": "last"
+            }
+          }
+        },
+        {
+          "id": "filterFieldsByName",
+          "options": {
+            "include": {
+              "names": [
+                "Time",
+                "RoboSystems API",
+                "RoboLedger App",
+                "RoboInvestor App",
+                "RoboSystems App"
+              ]
+            }
+          }
+        }
+      ],
       "type": "timeseries"
     },
     {
@@ -1072,7 +1171,7 @@
               "type": "linear"
             },
             "showPoints": "never",
-            "spanNulls": false,
+            "spanNulls": 3600000,
             "stacking": {
               "group": "A",
               "mode": "none"
@@ -1082,6 +1181,7 @@
             }
           },
           "mappings": [],
+          "max": 100,
           "min": 0,
           "thresholds": {
             "mode": "absolute",
@@ -1103,7 +1203,7 @@
         "h": 10,
         "w": 12,
         "x": 0,
-        "y": 39
+        "y": 49
       },
       "id": 59,
       "options": {
@@ -1208,7 +1308,10 @@
               "operator": "/",
               "right": "ECS/ContainerInsights robosystems-dagster-run-prod CpuReserved"
             },
-            "mode": "binary"
+            "mode": "binary",
+            "reduce": {
+              "reducer": "sum"
+            }
           }
         },
         {
@@ -1220,13 +1323,21 @@
               "operator": "*",
               "right": "100"
             },
-            "mode": "binary"
+            "mode": "binary",
+            "reduce": {
+              "reducer": "sum"
+            }
           }
         },
         {
           "id": "organize",
           "options": {
             "excludeByName": {
+              "1 -": true,
+              "Dagster Run CPU Utilization": false,
+              "ECS/ContainerInsights robosystems-dagster-run-light-prod CpuReserved": true,
+              "ECS/ContainerInsights robosystems-dagster-run-light-prod CpuUtilized": true,
+              "ECS/ContainerInsights robosystems-dagster-run-light-prod CpuUtilized / ECS/ContainerInsights robosystems-dagster-run-light-prod CpuReserved": true,
               "ECS/ContainerInsights robosystems-dagster-run-prod CpuReserved": true,
               "ECS/ContainerInsights robosystems-dagster-run-prod CpuUtilized": true,
               "ECS/ContainerInsights robosystems-dagster-run-prod CpuUtilized / ECS/ContainerInsights robosystems-dagster-run-prod CpuReserved": true
@@ -1236,7 +1347,8 @@
             "renameByName": {
               "AWS/ECS robosystems-dagster-daemon-prod CPUUtilization": "Daemon",
               "AWS/ECS robosystems-dagster-webserver-prod CPUUtilization": "Webserver",
-              "Dagster Run CPU Utilization": "Run"
+              "Dagster Run CPU Utilization": "Run",
+              "ECS/ContainerInsights robosystems-dagster-run-light-prod CpuUtilized / ECS/ContainerInsights robosystems-dagster-run-light-prod CpuReserved": ""
             }
           }
         }
@@ -1277,7 +1389,7 @@
               "type": "linear"
             },
             "showPoints": "never",
-            "spanNulls": false,
+            "spanNulls": 3600000,
             "stacking": {
               "group": "A",
               "mode": "none"
@@ -1287,6 +1399,7 @@
             }
           },
           "mappings": [],
+          "max": 100,
           "min": 0,
           "thresholds": {
             "mode": "absolute",
@@ -1308,7 +1421,7 @@
         "h": 10,
         "w": 12,
         "x": 12,
-        "y": 39
+        "y": 49
       },
       "id": 60,
       "options": {
@@ -1347,7 +1460,7 @@
           "refId": "A",
           "region": "default",
           "sqlExpression": "",
-          "statistic": "Average"
+          "statistic": "Maximum"
         },
         {
           "datasource": {
@@ -1373,7 +1486,7 @@
           "refId": "B",
           "region": "default",
           "sqlExpression": "",
-          "statistic": "Average"
+          "statistic": "Maximum"
         },
         {
           "datasource": {
@@ -1399,7 +1512,7 @@
           "refId": "C",
           "region": "default",
           "sqlExpression": "",
-          "statistic": "Average"
+          "statistic": "Maximum"
         }
       ],
       "title": "Dagster Memory Utilization",
@@ -1413,7 +1526,10 @@
               "operator": "/",
               "right": "ECS/ContainerInsights robosystems-dagster-run-prod MemoryReserved"
             },
-            "mode": "binary"
+            "mode": "binary",
+            "reduce": {
+              "reducer": "sum"
+            }
           }
         },
         {
@@ -1425,13 +1541,19 @@
               "operator": "*",
               "right": "100"
             },
-            "mode": "binary"
+            "mode": "binary",
+            "reduce": {
+              "reducer": "sum"
+            }
           }
         },
         {
           "id": "organize",
           "options": {
             "excludeByName": {
+              "ECS/ContainerInsights robosystems-dagster-run-light-prod MemoryReserved": true,
+              "ECS/ContainerInsights robosystems-dagster-run-light-prod MemoryUtilized": true,
+              "ECS/ContainerInsights robosystems-dagster-run-light-prod MemoryUtilized / ECS/ContainerInsights robosystems-dagster-run-light-prod MemoryReserved": true,
               "ECS/ContainerInsights robosystems-dagster-run-prod CpuReserved": true,
               "ECS/ContainerInsights robosystems-dagster-run-prod CpuUtilized": true,
               "ECS/ContainerInsights robosystems-dagster-run-prod CpuUtilized / ECS/ContainerInsights robosystems-dagster-run-prod CpuReserved": true,
@@ -1519,7 +1641,7 @@
         "h": 10,
         "w": 12,
         "x": 0,
-        "y": 49
+        "y": 59
       },
       "id": 62,
       "options": {
@@ -1629,7 +1751,7 @@
         "h": 10,
         "w": 12,
         "x": 12,
-        "y": 49
+        "y": 59
       },
       "id": 63,
       "options": {
@@ -1652,12 +1774,12 @@
           },
           "dimensions": {
             "ClusterName": "robosystems-dagster-prod-cluster",
-            "TaskDefinitionFamily": "robosystems-dagster-run-prod"
+            "TaskDefinitionFamily": "robosystems-dagster-daemon-prod"
           },
           "expression": "",
           "hide": false,
           "id": "",
-          "label": "Bytes In",
+          "label": "Daemon Bytes In",
           "logGroups": [],
           "matchExact": true,
           "metricEditorMode": 0,
@@ -1678,12 +1800,64 @@
           },
           "dimensions": {
             "ClusterName": "robosystems-dagster-prod-cluster",
+            "TaskDefinitionFamily": "robosystems-dagster-webserver-prod"
+          },
+          "expression": "",
+          "hide": false,
+          "id": "",
+          "label": "Webserver Bytes In",
+          "logGroups": [],
+          "matchExact": true,
+          "metricEditorMode": 0,
+          "metricName": "NetworkRxBytes",
+          "metricQueryType": 0,
+          "namespace": "ECS/ContainerInsights",
+          "period": "",
+          "queryMode": "Metrics",
+          "refId": "B",
+          "region": "default",
+          "sqlExpression": "",
+          "statistic": "Average"
+        },
+        {
+          "datasource": {
+            "type": "cloudwatch",
+            "uid": "${DS_CLOUDWATCH}"
+          },
+          "dimensions": {
+            "ClusterName": "robosystems-dagster-prod-cluster",
             "TaskDefinitionFamily": "robosystems-dagster-run-prod"
           },
           "expression": "",
           "hide": false,
           "id": "",
-          "label": "Bytes Out",
+          "label": "Run Bytes In",
+          "logGroups": [],
+          "matchExact": true,
+          "metricEditorMode": 0,
+          "metricName": "NetworkRxBytes",
+          "metricQueryType": 0,
+          "namespace": "ECS/ContainerInsights",
+          "period": "",
+          "queryMode": "Metrics",
+          "refId": "D",
+          "region": "default",
+          "sqlExpression": "",
+          "statistic": "Average"
+        },
+        {
+          "datasource": {
+            "type": "cloudwatch",
+            "uid": "${DS_CLOUDWATCH}"
+          },
+          "dimensions": {
+            "ClusterName": "robosystems-dagster-prod-cluster",
+            "TaskDefinitionFamily": "robosystems-dagster-daemon-prod"
+          },
+          "expression": "",
+          "hide": false,
+          "id": "",
+          "label": "Daemon Bytes Out",
           "logGroups": [],
           "matchExact": true,
           "metricEditorMode": 0,
@@ -1693,6 +1867,58 @@
           "period": "",
           "queryMode": "Metrics",
           "refId": "A",
+          "region": "default",
+          "sqlExpression": "",
+          "statistic": "Average"
+        },
+        {
+          "datasource": {
+            "type": "cloudwatch",
+            "uid": "${DS_CLOUDWATCH}"
+          },
+          "dimensions": {
+            "ClusterName": "robosystems-dagster-prod-cluster",
+            "TaskDefinitionFamily": "robosystems-dagster-webserver-prod"
+          },
+          "expression": "",
+          "hide": false,
+          "id": "",
+          "label": "Webserver Bytes Out",
+          "logGroups": [],
+          "matchExact": true,
+          "metricEditorMode": 0,
+          "metricName": "NetworkTxBytes",
+          "metricQueryType": 0,
+          "namespace": "ECS/ContainerInsights",
+          "period": "",
+          "queryMode": "Metrics",
+          "refId": "E",
+          "region": "default",
+          "sqlExpression": "",
+          "statistic": "Average"
+        },
+        {
+          "datasource": {
+            "type": "cloudwatch",
+            "uid": "${DS_CLOUDWATCH}"
+          },
+          "dimensions": {
+            "ClusterName": "robosystems-dagster-prod-cluster",
+            "TaskDefinitionFamily": "robosystems-dagster-run-prod"
+          },
+          "expression": "",
+          "hide": false,
+          "id": "",
+          "label": "Run Bytes Out",
+          "logGroups": [],
+          "matchExact": true,
+          "metricEditorMode": 0,
+          "metricName": "NetworkTxBytes",
+          "metricQueryType": 0,
+          "namespace": "ECS/ContainerInsights",
+          "period": "",
+          "queryMode": "Metrics",
+          "refId": "F",
           "region": "default",
           "sqlExpression": "",
           "statistic": "Average"
@@ -1711,7 +1937,7 @@
         "h": 3,
         "w": 24,
         "x": 0,
-        "y": 59
+        "y": 69
       },
       "id": 11,
       "options": {
@@ -1772,6 +1998,7 @@
             }
           },
           "mappings": [],
+          "max": 100,
           "min": 0,
           "thresholds": {
             "mode": "absolute",
@@ -1793,7 +2020,7 @@
         "h": 10,
         "w": 12,
         "x": 0,
-        "y": 62
+        "y": 72
       },
       "id": 12,
       "options": {
@@ -1932,6 +2159,7 @@
             }
           },
           "mappings": [],
+          "max": 100,
           "min": 0,
           "thresholds": {
             "mode": "absolute",
@@ -1953,7 +2181,7 @@
         "h": 10,
         "w": 12,
         "x": 12,
-        "y": 62
+        "y": 72
       },
       "id": 13,
       "options": {
@@ -2041,6 +2269,7 @@
             }
           },
           "mappings": [],
+          "max": 100,
           "min": 0,
           "thresholds": {
             "mode": "absolute",
@@ -2062,7 +2291,7 @@
         "h": 10,
         "w": 12,
         "x": 0,
-        "y": 72
+        "y": 82
       },
       "id": 14,
       "options": {
@@ -2150,6 +2379,7 @@
             }
           },
           "mappings": [],
+          "min": 0,
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -2170,7 +2400,7 @@
         "h": 10,
         "w": 12,
         "x": 12,
-        "y": 72
+        "y": 82
       },
       "id": 37,
       "options": {
@@ -2279,7 +2509,7 @@
         "h": 10,
         "w": 12,
         "x": 0,
-        "y": 82
+        "y": 92
       },
       "id": 38,
       "options": {
@@ -2406,7 +2636,7 @@
               }
             ]
           },
-          "unit": "bytes"
+          "unit": "decbytes"
         },
         "overrides": []
       },
@@ -2414,7 +2644,7 @@
         "h": 10,
         "w": 12,
         "x": 12,
-        "y": 82
+        "y": 92
       },
       "id": 36,
       "options": {
@@ -2597,7 +2827,7 @@
         "h": 11,
         "w": 8,
         "x": 0,
-        "y": 92
+        "y": 102
       },
       "id": 39,
       "options": {
@@ -2704,7 +2934,7 @@
         "h": 11,
         "w": 8,
         "x": 8,
-        "y": 92
+        "y": 102
       },
       "id": 51,
       "options": {
@@ -2790,6 +3020,8 @@
             }
           },
           "mappings": [],
+          "max": 100,
+          "min": 0,
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -2810,7 +3042,7 @@
         "h": 11,
         "w": 8,
         "x": 16,
-        "y": 92
+        "y": 102
       },
       "id": 53,
       "options": {
@@ -2897,6 +3129,7 @@
             }
           },
           "mappings": [],
+          "min": 0,
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -2917,7 +3150,7 @@
         "h": 11,
         "w": 8,
         "x": 0,
-        "y": 103
+        "y": 113
       },
       "id": 50,
       "options": {
@@ -3003,6 +3236,7 @@
             }
           },
           "mappings": [],
+          "min": 0,
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -3023,7 +3257,7 @@
         "h": 11,
         "w": 8,
         "x": 8,
-        "y": 103
+        "y": 113
       },
       "id": 52,
       "options": {
@@ -3129,7 +3363,7 @@
         "h": 11,
         "w": 8,
         "x": 16,
-        "y": 103
+        "y": 113
       },
       "id": 40,
       "options": {
@@ -3165,7 +3399,7 @@
           "refId": "A",
           "region": "${aws_region}",
           "sqlExpression": "",
-          "statistic": "Maximum"
+          "statistic": "Average"
         },
         {
           "datasource": {
@@ -3188,7 +3422,7 @@
           "refId": "B",
           "region": "${aws_region}",
           "sqlExpression": "",
-          "statistic": "Maximum"
+          "statistic": "Average"
         },
         {
           "datasource": {
@@ -3211,7 +3445,7 @@
           "refId": "C",
           "region": "${aws_region}",
           "sqlExpression": "",
-          "statistic": "Maximum"
+          "statistic": "Average"
         },
         {
           "datasource": {
@@ -3234,7 +3468,7 @@
           "refId": "D",
           "region": "${aws_region}",
           "sqlExpression": "",
-          "statistic": "Maximum"
+          "statistic": "Average"
         }
       ],
       "title": "Graph Volume Actions",
@@ -3249,7 +3483,7 @@
         "h": 3,
         "w": 24,
         "x": 0,
-        "y": 114
+        "y": 124
       },
       "id": 15,
       "options": {
@@ -3310,6 +3544,7 @@
             }
           },
           "mappings": [],
+          "max": 100,
           "min": 0,
           "thresholds": {
             "mode": "absolute",
@@ -3331,7 +3566,7 @@
         "h": 10,
         "w": 8,
         "x": 0,
-        "y": 117
+        "y": 127
       },
       "id": 16,
       "options": {
@@ -3440,7 +3675,7 @@
         "h": 10,
         "w": 8,
         "x": 8,
-        "y": 117
+        "y": 127
       },
       "id": 48,
       "options": {
@@ -3528,6 +3763,7 @@
             }
           },
           "mappings": [],
+          "min": 0,
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -3548,7 +3784,7 @@
         "h": 10,
         "w": 8,
         "x": 16,
-        "y": 117
+        "y": 127
       },
       "id": 49,
       "options": {
@@ -3657,7 +3893,7 @@
         "h": 10,
         "w": 8,
         "x": 0,
-        "y": 127
+        "y": 137
       },
       "id": 54,
       "options": {
@@ -3770,6 +4006,7 @@
             }
           },
           "mappings": [],
+          "min": 0,
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -3790,7 +4027,7 @@
         "h": 10,
         "w": 8,
         "x": 8,
-        "y": 127
+        "y": 137
       },
       "id": 19,
       "options": {
@@ -3878,6 +4115,7 @@
             }
           },
           "mappings": [],
+          "min": 0,
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -3898,7 +4136,7 @@
         "h": 10,
         "w": 8,
         "x": 16,
-        "y": 127
+        "y": 137
       },
       "id": 56,
       "options": {
@@ -4006,7 +4244,7 @@
         "h": 10,
         "w": 8,
         "x": 0,
-        "y": 137
+        "y": 147
       },
       "id": 55,
       "options": {
@@ -4131,7 +4369,7 @@
               }
             ]
           },
-          "unit": "short"
+          "unit": "decbytes"
         },
         "overrides": []
       },
@@ -4139,7 +4377,7 @@
         "h": 10,
         "w": 8,
         "x": 8,
-        "y": 137
+        "y": 147
       },
       "id": 57,
       "options": {
@@ -4272,7 +4510,7 @@
         "h": 10,
         "w": 8,
         "x": 16,
-        "y": 137
+        "y": 147
       },
       "id": 61,
       "options": {
@@ -4350,7 +4588,7 @@
         "h": 3,
         "w": 24,
         "x": 0,
-        "y": 147
+        "y": 157
       },
       "id": 20,
       "options": {
@@ -4411,6 +4649,7 @@
             }
           },
           "mappings": [],
+          "max": 100,
           "min": 0,
           "thresholds": {
             "mode": "absolute",
@@ -4432,7 +4671,7 @@
         "h": 9,
         "w": 8,
         "x": 0,
-        "y": 150
+        "y": 160
       },
       "id": 21,
       "options": {
@@ -4520,6 +4759,7 @@
             }
           },
           "mappings": [],
+          "max": 100,
           "min": 0,
           "thresholds": {
             "mode": "absolute",
@@ -4541,7 +4781,7 @@
         "h": 9,
         "w": 8,
         "x": 8,
-        "y": 150
+        "y": 160
       },
       "id": 42,
       "options": {
@@ -4650,7 +4890,7 @@
         "h": 9,
         "w": 8,
         "x": 16,
-        "y": 150
+        "y": 160
       },
       "id": 43,
       "options": {
@@ -4759,7 +4999,7 @@
         "h": 9,
         "w": 8,
         "x": 0,
-        "y": 159
+        "y": 169
       },
       "id": 44,
       "options": {
@@ -4868,7 +5108,7 @@
         "h": 9,
         "w": 8,
         "x": 8,
-        "y": 159
+        "y": 169
       },
       "id": 41,
       "options": {
@@ -4978,9 +5218,7 @@
               "id": "byNames",
               "options": {
                 "mode": "exclude",
-                "names": [
-                  "SwapUsage"
-                ],
+                "names": ["SwapUsage"],
                 "prefix": "All except:",
                 "readOnly": true
               }
@@ -5002,7 +5240,7 @@
         "h": 9,
         "w": 8,
         "x": 16,
-        "y": 159
+        "y": 169
       },
       "id": 46,
       "options": {
@@ -5111,7 +5349,7 @@
         "h": 9,
         "w": 8,
         "x": 0,
-        "y": 168
+        "y": 178
       },
       "id": 45,
       "options": {
@@ -5220,7 +5458,7 @@
         "h": 9,
         "w": 8,
         "x": 8,
-        "y": 168
+        "y": 178
       },
       "id": 22,
       "options": {
@@ -5355,7 +5593,7 @@
         "h": 9,
         "w": 8,
         "x": 16,
-        "y": 168
+        "y": 178
       },
       "id": 47,
       "options": {
@@ -5427,11 +5665,7 @@
   ],
   "refresh": "30s",
   "schemaVersion": 39,
-  "tags": [
-    "robosystems",
-    "infrastructure",
-    "prod"
-  ],
+  "tags": ["robosystems", "infrastructure", "prod"],
   "templating": {
     "list": [
       {
@@ -5456,6 +5690,34 @@
         "queryValue": "",
         "skipUrlSync": false,
         "type": "textbox"
+      },
+      {
+        "current": {
+          "selected": true,
+          "text": ["All"],
+          "value": ["$__all"]
+        },
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${DS_PROMETHEUS}"
+        },
+        "definition": "label_values(endpoint)",
+        "hide": 0,
+        "includeAll": true,
+        "label": "Endpoints",
+        "multi": true,
+        "name": "endpoints",
+        "options": [],
+        "query": {
+          "qryType": 1,
+          "query": "label_values(endpoint)",
+          "refId": "PrometheusVariableQueryEditor-VariableQuery"
+        },
+        "refresh": 1,
+        "regex": "",
+        "skipUrlSync": false,
+        "sort": 1,
+        "type": "query"
       }
     ]
   },
@@ -5467,6 +5729,6 @@
   "timezone": "",
   "title": "RoboSystems Production Dashboard",
   "uid": null,
-  "version": 11,
+  "version": 51,
   "weekStart": ""
 }
