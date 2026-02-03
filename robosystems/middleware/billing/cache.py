@@ -8,6 +8,7 @@ from typing import Any, cast
 import redis
 
 from ...config import env
+from ...config.defaults import CacheDefaults
 from ...config.valkey_registry import ValkeyDatabase, create_redis_client
 from ...logger import logger
 
@@ -22,10 +23,10 @@ class CreditCache:
   CREDIT_SUMMARY_PREFIX = "credit_summary:"
   OPERATION_COST_PREFIX = "op_cost:"
 
-  # Default TTLs
-  BALANCE_TTL = 300  # 5 minutes for balance cache
-  SUMMARY_TTL = 600  # 10 minutes for summary cache
-  OPERATION_COST_TTL = 3600  # 1 hour for operation costs
+  # Default TTLs - using centralized defaults
+  BALANCE_TTL = CacheDefaults.BALANCE_TTL  # 5 minutes for balance cache
+  SUMMARY_TTL = CacheDefaults.SUMMARY_TTL  # 10 minutes for summary cache
+  OPERATION_COST_TTL = CacheDefaults.OPERATION_COST_TTL  # 1 hour for operation costs
 
   def __init__(self):
     """Initialize Redis connection for credit caching."""

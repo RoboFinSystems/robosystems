@@ -130,7 +130,7 @@ class TestOrgLimitsModel:
 
     # Check that defaults were applied
     assert limits.org_id == "new_org_id"
-    assert limits.max_graphs == 100
+    assert limits.max_graphs == 10  # env.ORG_GRAPHS_DEFAULT_LIMIT
 
     # Verify database operations were called
     mock_session.add.assert_called_once()

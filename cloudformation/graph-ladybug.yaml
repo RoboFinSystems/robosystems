@@ -234,6 +234,14 @@ Resources:
                   - !Sub "arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:robosystems/${Environment}-*"
                   # Extension secrets: robosystems/prod/s3, robosystems/prod/postgres, robosystems/prod/ladybug, etc.
                   - !Sub "arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:robosystems/${Environment}/*"
+              # SSM Parameter Store permissions for feature flags
+              - Effect: Allow
+                Action:
+                  - ssm:GetParameter
+                  - ssm:GetParameters
+                  - ssm:GetParametersByPath
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/robosystems/${Environment}/features/*"
               # KMS permissions for AWS managed keys with service conditions
               - Effect: Allow
                 Action:

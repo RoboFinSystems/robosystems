@@ -9,6 +9,7 @@ import asyncio
 from contextlib import asynccontextmanager
 from datetime import datetime
 
+from robosystems.config.defaults import MCPDefaults
 from robosystems.logger import logger
 
 
@@ -23,8 +24,8 @@ class MCPConnectionPool:
   def __init__(
     self,
     max_connections_per_graph: int = 10,
-    max_idle_time: int = 300,  # 5 minutes
-    max_lifetime: int = 3600,  # 1 hour
+    max_idle_time: int = MCPDefaults.POOL_IDLE_TIMEOUT,  # 5 minutes
+    max_lifetime: int = MCPDefaults.POOL_MAX_LIFETIME,  # 1 hour
   ):
     """
     Initialize the connection pool.

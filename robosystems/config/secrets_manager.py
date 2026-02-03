@@ -14,17 +14,9 @@ Secrets are organized in AWS Secrets Manager with the following structure:
     Service URLs: ROBOSYSTEMS_URL, ROBOLEDGER_URL, ROBOINVESTOR_URL
     Email: EMAIL_FROM_ADDRESS, EMAIL_FROM_NAME
     External services: INTUIT_*, PLAID_*, SEC_GOV_USER_AGENT, OPENFIGI_API_KEY,
-      STRIPE_SECRET_KEY, STRIPE_PUBLISHABLE_KEY, STRIPE_WEBHOOK_SECRET, STRIPE_API_VERSION,
+      STRIPE_SECRET_KEY, STRIPE_PUBLISHABLE_KEY, STRIPE_WEBHOOK_SECRET,
       TURNSTILE_SECRET_KEY, TURNSTILE_SITE_KEY
-    Feature flags: USER_REGISTRATION_ENABLED, SECURITY_AUDIT_ENABLED,
-      EMAIL_VERIFICATION_ENABLED, CAPTCHA_ENABLED, CSP_TRUSTED_TYPES_ENABLED,
-      DIRECT_GRAPH_PROVISIONING_ENABLED, DIRECT_GRAPH_MATERIALIZATION_ENABLED,
-      SUBGRAPH_CREATION_ENABLED, BACKUP_CREATION_ENABLED, AGENT_POST_ENABLED,
-      CONNECTION_SEC_ENABLED, CONNECTION_QUICKBOOKS_ENABLED, CONNECTION_PLAID_ENABLED,
-      SHARED_MASTER_READS_ENABLED, ORG_MEMBER_INVITATIONS_ENABLED,
-      BILLING_ENABLED, SSE_ENABLED, RATE_LIMIT_ENABLED, LOAD_SHEDDING_ENABLED, OTEL_ENABLED
-    SEC pipeline: SEC_LARGE_SCALE_MODE_ENABLED
-    Runtime configs: ORG_GRAPHS_DEFAULT_LIMIT
+    Note: STRIPE_API_VERSION is a constant in config/constants.py (not a secret)
 
 - Extension secrets: `robosystems/{environment}/{type}`
   - `/postgres`: DATABASE_URL
@@ -32,6 +24,12 @@ Secrets are organized in AWS Secrets Manager with the following structure:
   - `/s3`: AWS_S3_ACCESS_KEY_ID, AWS_S3_SECRET_ACCESS_KEY
   - `/admin`: ADMIN_API_KEY
   - `/graph-api`: GRAPH_API_KEY, NEO4J_PASSWORD
+
+## Feature Flags (Moved to SSM Parameter Store)
+
+Feature flags have been migrated to SSM Parameter Store for cost efficiency.
+See parameter_store.py for the new implementation. Feature flags are stored at:
+  /robosystems/{environment}/features/{FLAG_NAME}
 
 ## Usage
 
@@ -262,6 +260,9 @@ def get_secrets_manager() -> SecretsManager:
 # Secret mapping configuration
 # Organization mirrors env.py sections. Tuple format: (extension_secret_type, key_name)
 # extension_secret_type=None means the key is in the base secret (robosystems/{env})
+#
+# NOTE: Feature flags have been moved to SSM Parameter Store (see parameter_store.py).
+# Only actual secrets (credentials, API keys, encryption keys) remain here.
 SECRET_MAPPINGS = {
   # --- Core: Encryption Keys ---
   "CONNECTION_CREDENTIALS_KEY": (None, "CONNECTION_CREDENTIALS_KEY"),
@@ -280,37 +281,6 @@ SECRET_MAPPINGS = {
   # --- Core: CAPTCHA ---
   "TURNSTILE_SECRET_KEY": (None, "TURNSTILE_SECRET_KEY"),
   "TURNSTILE_SITE_KEY": (None, "TURNSTILE_SITE_KEY"),
-  # --- Feature Flags: Security & Auth ---
-  "USER_REGISTRATION_ENABLED": (None, "USER_REGISTRATION_ENABLED"),
-  "SECURITY_AUDIT_ENABLED": (None, "SECURITY_AUDIT_ENABLED"),
-  "EMAIL_VERIFICATION_ENABLED": (None, "EMAIL_VERIFICATION_ENABLED"),
-  "CAPTCHA_ENABLED": (None, "CAPTCHA_ENABLED"),
-  "CSP_TRUSTED_TYPES_ENABLED": (None, "CSP_TRUSTED_TYPES_ENABLED"),
-  # --- Feature Flags: Graph Operations ---
-  "DIRECT_GRAPH_PROVISIONING_ENABLED": (None, "DIRECT_GRAPH_PROVISIONING_ENABLED"),
-  "DIRECT_GRAPH_MATERIALIZATION_ENABLED": (
-    None,
-    "DIRECT_GRAPH_MATERIALIZATION_ENABLED",
-  ),
-  "SUBGRAPH_CREATION_ENABLED": (None, "SUBGRAPH_CREATION_ENABLED"),
-  "BACKUP_CREATION_ENABLED": (None, "BACKUP_CREATION_ENABLED"),
-  "AGENT_POST_ENABLED": (None, "AGENT_POST_ENABLED"),
-  # --- Feature Flags: Connection Providers ---
-  "CONNECTION_SEC_ENABLED": (None, "CONNECTION_SEC_ENABLED"),
-  "CONNECTION_QUICKBOOKS_ENABLED": (None, "CONNECTION_QUICKBOOKS_ENABLED"),
-  "CONNECTION_PLAID_ENABLED": (None, "CONNECTION_PLAID_ENABLED"),
-  # --- Feature Flags: Shared Repository Operations ---
-  "SHARED_MASTER_READS_ENABLED": (None, "SHARED_MASTER_READS_ENABLED"),
-  "SEC_LARGE_SCALE_MODE_ENABLED": (None, "SEC_LARGE_SCALE_MODE_ENABLED"),
-  # --- Feature Flags: Organization ---
-  "ORG_GRAPHS_DEFAULT_LIMIT": (None, "ORG_GRAPHS_DEFAULT_LIMIT"),
-  "ORG_MEMBER_INVITATIONS_ENABLED": (None, "ORG_MEMBER_INVITATIONS_ENABLED"),
-  # --- Feature Flags: Platform Operations ---
-  "BILLING_ENABLED": (None, "BILLING_ENABLED"),
-  "SSE_ENABLED": (None, "SSE_ENABLED"),
-  "RATE_LIMIT_ENABLED": (None, "RATE_LIMIT_ENABLED"),
-  "LOAD_SHEDDING_ENABLED": (None, "LOAD_SHEDDING_ENABLED"),
-  "OTEL_ENABLED": (None, "OTEL_ENABLED"),
   # --- Graph Databases ---
   "GRAPH_API_KEY": ("graph-api", "GRAPH_API_KEY"),
   "NEO4J_PASSWORD": ("graph-api", "NEO4J_PASSWORD"),
@@ -338,7 +308,7 @@ SECRET_MAPPINGS = {
   "STRIPE_SECRET_KEY": (None, "STRIPE_SECRET_KEY"),
   "STRIPE_PUBLISHABLE_KEY": (None, "STRIPE_PUBLISHABLE_KEY"),
   "STRIPE_WEBHOOK_SECRET": (None, "STRIPE_WEBHOOK_SECRET"),
-  "STRIPE_API_VERSION": (None, "STRIPE_API_VERSION"),
+  # NOTE: STRIPE_API_VERSION moved to constants.py - it's a fixed API version, not a secret
 }
 
 

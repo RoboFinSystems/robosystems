@@ -57,6 +57,24 @@ except ImportError:
     return [item.strip() for item in value.split(separator) if item.strip()]
 
 
+# Import parameter store for feature flags (SSM Parameter Store)
+# Feature flags use SSM instead of Secrets Manager for cost efficiency
+try:
+  from .parameter_store import get_parameter_value
+
+  PARAMETER_STORE_AVAILABLE = True
+except ImportError:
+  # If parameter_store can't be imported, fall back to default values
+  PARAMETER_STORE_AVAILABLE = False
+
+  def get_parameter_value(key: str, default: str = "") -> str:
+    """
+    Fallback implementation when parameter_store isn't available.
+    Simply returns environment variable or default value.
+    """
+    return os.getenv(key, default)
+
+
 from .constants import (
   ADMISSION_CHECK_INTERVAL,
   ADMISSION_CPU_THRESHOLD_DEFAULT,
@@ -120,6 +138,8 @@ from .constants import (
   # Retry configuration
   SEC_PIPELINE_MAX_RETRIES,
   SEC_RATE_LIMIT,
+  # API version constants
+  STRIPE_API_VERSION,
   XBRL_EXTERNALIZATION_THRESHOLD,
   XBRL_GRAPH_LARGE_NODES,
 )
@@ -304,78 +324,76 @@ class EnvConfig:
   # ==========================================================================
   # 2. FEATURE FLAGS
   # ==========================================================================
+  # Feature flags use SSM Parameter Store instead of Secrets Manager.
+  # This provides cost savings (SSM Standard tier is FREE) and better
+  # separation between secrets (credentials) and configuration (flags).
+  #
+  # Override priority: env var > SSM Parameter Store > default value
 
   # --- Security & Auth ---
   USER_REGISTRATION_ENABLED = get_bool_env(
     "USER_REGISTRATION_ENABLED",
-    bool(get_secret_value("USER_REGISTRATION_ENABLED", "false").lower() == "true"),
+    get_parameter_value("USER_REGISTRATION_ENABLED", "false").lower() == "true",
   )
   SECURITY_AUDIT_ENABLED = get_bool_env(
     "SECURITY_AUDIT_ENABLED",
-    bool(get_secret_value("SECURITY_AUDIT_ENABLED", "true").lower() == "true"),
+    get_parameter_value("SECURITY_AUDIT_ENABLED", "false").lower() == "true",
   )
   EMAIL_VERIFICATION_ENABLED = get_bool_env(
     "EMAIL_VERIFICATION_ENABLED",
-    bool(get_secret_value("EMAIL_VERIFICATION_ENABLED", "true").lower() == "true")
-    if get_str_env("ENVIRONMENT", "dev") in ["prod", "staging"]
-    else False,
+    get_parameter_value("EMAIL_VERIFICATION_ENABLED", "false").lower() == "true",
   )
   CAPTCHA_ENABLED = get_bool_env(
     "CAPTCHA_ENABLED",
-    bool(get_secret_value("CAPTCHA_ENABLED", "true").lower() == "true")
-    if get_str_env("ENVIRONMENT", "dev") in ["prod", "staging"]
-    else False,
+    get_parameter_value("CAPTCHA_ENABLED", "false").lower() == "true",
   )
   CORS_ALLOW_CREDENTIALS = get_bool_env("CORS_ALLOW_CREDENTIALS", True)
   CSP_TRUSTED_TYPES_ENABLED = get_bool_env(
     "CSP_TRUSTED_TYPES_ENABLED",
-    bool(get_secret_value("CSP_TRUSTED_TYPES_ENABLED", "true").lower() == "true"),
+    get_parameter_value("CSP_TRUSTED_TYPES_ENABLED", "false").lower() == "true",
   )
 
   # --- Graph Operations ---
   DIRECT_GRAPH_PROVISIONING_ENABLED = get_bool_env(
     "DIRECT_GRAPH_PROVISIONING_ENABLED",
-    bool(
-      get_secret_value("DIRECT_GRAPH_PROVISIONING_ENABLED", "true").lower() == "true"
-    ),
+    get_parameter_value("DIRECT_GRAPH_PROVISIONING_ENABLED", "true").lower() == "true",
   )
   DIRECT_GRAPH_MATERIALIZATION_ENABLED = get_bool_env(
     "DIRECT_GRAPH_MATERIALIZATION_ENABLED",
-    bool(
-      get_secret_value("DIRECT_GRAPH_MATERIALIZATION_ENABLED", "true").lower() == "true"
-    ),
+    get_parameter_value("DIRECT_GRAPH_MATERIALIZATION_ENABLED", "true").lower()
+    == "true",
   )
   SUBGRAPH_CREATION_ENABLED = get_bool_env(
     "SUBGRAPH_CREATION_ENABLED",
-    bool(get_secret_value("SUBGRAPH_CREATION_ENABLED", "true").lower() == "true"),
+    get_parameter_value("SUBGRAPH_CREATION_ENABLED", "true").lower() == "true",
   )
   BACKUP_CREATION_ENABLED = get_bool_env(
     "BACKUP_CREATION_ENABLED",
-    bool(get_secret_value("BACKUP_CREATION_ENABLED", "true").lower() == "true"),
+    get_parameter_value("BACKUP_CREATION_ENABLED", "true").lower() == "true",
   )
   AGENT_POST_ENABLED = get_bool_env(
     "AGENT_POST_ENABLED",
-    bool(get_secret_value("AGENT_POST_ENABLED", "true").lower() == "true"),
+    get_parameter_value("AGENT_POST_ENABLED", "true").lower() == "true",
   )
 
   # --- Connection Providers ---
   CONNECTION_SEC_ENABLED = get_bool_env(
     "CONNECTION_SEC_ENABLED",
-    bool(get_secret_value("CONNECTION_SEC_ENABLED", "false").lower() == "true"),
+    get_parameter_value("CONNECTION_SEC_ENABLED", "false").lower() == "true",
   )
   CONNECTION_QUICKBOOKS_ENABLED = get_bool_env(
     "CONNECTION_QUICKBOOKS_ENABLED",
-    bool(get_secret_value("CONNECTION_QUICKBOOKS_ENABLED", "false").lower() == "true"),
+    get_parameter_value("CONNECTION_QUICKBOOKS_ENABLED", "false").lower() == "true",
   )
   CONNECTION_PLAID_ENABLED = get_bool_env(
     "CONNECTION_PLAID_ENABLED",
-    bool(get_secret_value("CONNECTION_PLAID_ENABLED", "false").lower() == "true"),
+    get_parameter_value("CONNECTION_PLAID_ENABLED", "false").lower() == "true",
   )
 
   # --- Shared Repository Operations ---
   SHARED_MASTER_READS_ENABLED = get_bool_env(
     "SHARED_MASTER_READS_ENABLED",
-    bool(get_secret_value("SHARED_MASTER_READS_ENABLED", "true").lower() == "true"),
+    get_parameter_value("SHARED_MASTER_READS_ENABLED", "true").lower() == "true",
   )
 
   # Shared Replica ALB URL (for read scaling)
@@ -388,7 +406,7 @@ class EnvConfig:
   # Disabled in dev (small data), enabled in prod (billions of rows)
   SEC_LARGE_SCALE_MODE_ENABLED = get_bool_env(
     "SEC_LARGE_SCALE_MODE_ENABLED",
-    bool(get_secret_value("SEC_LARGE_SCALE_MODE_ENABLED", "false").lower() == "true"),
+    get_parameter_value("SEC_LARGE_SCALE_MODE_ENABLED", "false").lower() == "true",
   )
 
   # Shared repositories list for infrastructure/deployment (used by userdata scripts)
@@ -399,35 +417,35 @@ class EnvConfig:
   # --- Organization ---
   ORG_GRAPHS_DEFAULT_LIMIT = get_int_env(
     "ORG_GRAPHS_DEFAULT_LIMIT",
-    int(get_secret_value("ORG_GRAPHS_DEFAULT_LIMIT", "100")),
+    int(get_parameter_value("ORG_GRAPHS_DEFAULT_LIMIT", "10")),
   )
   ORG_MEMBER_INVITATIONS_ENABLED = get_bool_env(
     "ORG_MEMBER_INVITATIONS_ENABLED",
-    bool(get_secret_value("ORG_MEMBER_INVITATIONS_ENABLED", "false").lower() == "true"),
+    get_parameter_value("ORG_MEMBER_INVITATIONS_ENABLED", "false").lower() == "true",
   )
 
   # --- Platform Operations ---
-  # For forked/self-hosted deployments: Set BILLING_ENABLED=false in AWS Secrets Manager
+  # For forked/self-hosted deployments: Set BILLING_ENABLED=false in SSM Parameter Store
   # This disables payment requirements since you're paying for your own infrastructure
   BILLING_ENABLED = get_bool_env(
     "BILLING_ENABLED",
-    bool(get_secret_value("BILLING_ENABLED", "true").lower() == "true"),
+    get_parameter_value("BILLING_ENABLED", "false").lower() == "true",
   )
   SSE_ENABLED = get_bool_env(
     "SSE_ENABLED",
-    bool(get_secret_value("SSE_ENABLED", "true").lower() == "true"),
+    get_parameter_value("SSE_ENABLED", "true").lower() == "true",
   )
   RATE_LIMIT_ENABLED = get_bool_env(
     "RATE_LIMIT_ENABLED",
-    bool(get_secret_value("RATE_LIMIT_ENABLED", "true").lower() == "true"),
+    get_parameter_value("RATE_LIMIT_ENABLED", "false").lower() == "true",
   )
   LOAD_SHEDDING_ENABLED = get_bool_env(
     "LOAD_SHEDDING_ENABLED",
-    bool(get_secret_value("LOAD_SHEDDING_ENABLED", "true").lower() == "true"),
+    get_parameter_value("LOAD_SHEDDING_ENABLED", "true").lower() == "true",
   )
   OTEL_ENABLED = get_bool_env(
     "OTEL_ENABLED",
-    bool(get_secret_value("OTEL_ENABLED", "false").lower() == "true"),
+    get_parameter_value("OTEL_ENABLED", "false").lower() == "true",
   )
 
   # ==========================================================================
@@ -725,7 +743,8 @@ class EnvConfig:
   STRIPE_SECRET_KEY = get_secret_value("STRIPE_SECRET_KEY", "")
   STRIPE_PUBLISHABLE_KEY = get_secret_value("STRIPE_PUBLISHABLE_KEY", "")
   STRIPE_WEBHOOK_SECRET = get_secret_value("STRIPE_WEBHOOK_SECRET", "")
-  STRIPE_API_VERSION = get_secret_value("STRIPE_API_VERSION", "2025-10-29.clover")
+  # STRIPE_API_VERSION is a constant, not a secret - imported from constants.py
+  STRIPE_API_VERSION = STRIPE_API_VERSION  # Re-export for backward compatibility
 
   # ==========================================================================
   # 9. PERFORMANCE AND SCALING

@@ -7,7 +7,7 @@ Scripts for bootstrapping and configuring RoboSystems deployments. These handle 
 | Script | Purpose | Prerequisites | Est. Time |
 |--------|---------|---------------|-----------|
 | `bootstrap.sh` | Complete first-time setup | AWS SSO, GitHub CLI | 5-10 min |
-| `aws.sh` | Create Secrets Manager secrets | AWS credentials | 1-2 min |
+| `aws.sh` | Secrets + SSM parameters | AWS credentials | 1-2 min |
 | `gha.sh` | Configure ~80 GitHub variables | GitHub CLI | 2-3 min |
 | `bedrock.sh` | Local AI development setup | AWS credentials | 1 min |
 | `localstack-init.sh` | Local AWS emulation | Docker (automatic) | N/A |
@@ -92,7 +92,7 @@ The complete bootstrap process for a fresh deployment:
 │  STEP 7: OPTIONAL CONFIGURATION (Interactive Prompts)                       │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │  Prompt: "Setup AWS Secrets Manager?" (Y/n)                                 │
-│    └─► Runs aws.sh if yes                                                   │
+│    └─► Runs aws.sh if yes (creates secrets + SSM parameters)                │
 │                                                                             │
 │  Prompt: "Setup GitHub Variables?" (y/N)                                    │
 │    └─► Runs gha.sh if yes                                                   │
@@ -143,6 +143,8 @@ just bootstrap my-fork-sso eu-west-1     # Custom profile and region
 | CloudFormation Stack | `RoboSystemsGitHubOIDC` |
 | ECR Repository | `robosystems` (or repo name) |
 | GitHub Variables | `AWS_ROLE_ARN`, `AWS_ACCOUNT_ID`, `AWS_REGION`, `AWS_SNS_ALERT_EMAIL` |
+| Secrets Manager | `robosystems/prod` (credentials) |
+| SSM Parameters | Feature flags + tuning parameters |
 
 **Environment Variables Used**:
 | Variable | Source | Description |
@@ -154,7 +156,7 @@ just bootstrap my-fork-sso eu-west-1     # Custom profile and region
 
 ### `aws.sh`
 
-**Purpose**: Create application secrets in AWS Secrets Manager.
+**Purpose**: Create secrets in AWS Secrets Manager and parameters in SSM Parameter Store.
 
 **Usage**:
 ```bash
@@ -167,76 +169,61 @@ just setup-aws
 - AWS CLI installed
 - Valid AWS credentials (via SSO or otherwise)
 
-**Safe to Re-run**: Yes. Existing secrets are NEVER overwritten.
+**Safe to Re-run**: Yes. Existing resources are NEVER overwritten.
 
-**Secrets Created**:
+**Resources Created**:
 
-| Secret Path | Description |
-|-------------|-------------|
-| `robosystems/prod` | Production environment secrets |
-| `robosystems/staging` | Staging environment secrets (optional) |
+| Resource | Path | Description |
+|----------|------|-------------|
+| Secret | `robosystems/prod` | Production credentials |
+| Secret | `robosystems/staging` | Staging credentials (optional) |
+| SSM Params | `/robosystems/{env}/features/*` | Feature flags (22 params) |
+| SSM Params | `/robosystems/{env}/tuning/*` | Tuning parameters (19 params) |
 
-**Secret Structure** (auto-generated values shown with `[generated]`):
-
+**Secrets Manager** (credentials only):
 ```json
 {
-  "JWT_SECRET_KEY": "[generated]",          // 32-byte base64
-  "JWT_ISSUER": "localhost",                // Only for internal mode
-  "JWT_AUDIENCE": "localhost",              // Only for internal mode
+  "JWT_SECRET_KEY": "[generated]",
+  "JWT_ISSUER": "localhost",
+  "JWT_AUDIENCE": "localhost",
   "CONNECTION_CREDENTIALS_KEY": "[generated]",
   "GRAPH_BACKUP_ENCRYPTION_KEY": "[generated]",
-
-  // Feature Flags (all start disabled)
-  "BILLING_ENABLED": "false",
-  "RATE_LIMIT_ENABLED": "false",
-  "CAPTCHA_ENABLED": "false",
-  "EMAIL_VERIFICATION_ENABLED": "false",
-  "SECURITY_AUDIT_ENABLED": "false",
-  "OTEL_ENABLED": "false",
-  "CSP_TRUSTED_TYPES_ENABLED": "false",
-
-  // Feature Flags (enabled by default)
-  "SSE_ENABLED": "true",
-  "USER_REGISTRATION_ENABLED": "true",
-  "AGENT_POST_ENABLED": "true",
-  "BACKUP_CREATION_ENABLED": "true",
-  "DIRECT_GRAPH_PROVISIONING_ENABLED": "true",
-  "SHARED_MASTER_READS_ENABLED": "true",
-  "SUBGRAPH_CREATION_ENABLED": "true",
-  "LOAD_SHEDDING_ENABLED": "true",
-
-  // Connection Flags (all disabled - enable as needed)
-  "CONNECTION_PLAID_ENABLED": "false",
-  "CONNECTION_QUICKBOOKS_ENABLED": "false",
-  "CONNECTION_SEC_ENABLED": "false",
-
-  // SEC pipeline flags
-  "SEC_LARGE_SCALE_MODE_ENABLED": "false",
-
-  // Integration Placeholders (update with real values)
-  "INTUIT_CLIENT_ID": "Intuit.ipp.application.your_client_id",
-  "INTUIT_CLIENT_SECRET": "your_quickbooks_client_secret_here",
-  "INTUIT_ENVIRONMENT": "production",  // or "sandbox" for staging
-  "INTUIT_REDIRECT_URI": "https://your-api-domain.example.com/auth/callback",
-  "PLAID_CLIENT_ID": "your_plaid_client_id_here",
-  "PLAID_CLIENT_SECRET": "your_plaid_client_secret_here",
-  "PLAID_ENVIRONMENT": "production",  // or "sandbox" for staging
-  "OPENFIGI_API_KEY": "your_openfigi_api_key_here",
-  "SEC_GOV_USER_AGENT": "YourCompany/1.0 (your-email@example.com)",
-  "TURNSTILE_SECRET_KEY": "your_cloudflare_turnstile_secret_key",
-  "TURNSTILE_SITE_KEY": "your_cloudflare_turnstile_site_key",
-
-  // Limits
-  "ORG_GRAPHS_DEFAULT_LIMIT": "10",
-  "ORG_MEMBER_INVITATIONS_ENABLED": "false"
+  "INTUIT_CLIENT_ID": "...",
+  "INTUIT_CLIENT_SECRET": "...",
+  "PLAID_CLIENT_ID": "...",
+  "STRIPE_SECRET_KEY": "...",
+  "SEC_GOV_USER_AGENT": "...",
+  "TURNSTILE_SECRET_KEY": "..."
 }
+```
+
+**SSM Parameter Store** (feature flags + tuning):
+```
+/robosystems/{env}/features/
+  RATE_LIMIT_ENABLED, BILLING_ENABLED, SSE_ENABLED, ...
+
+/robosystems/{env}/tuning/
+  cache/BALANCE_TTL, cache/JWT_TTL, ...
+  admission/MEMORY_THRESHOLD, admission/CPU_THRESHOLD, ...
+  queues/MAX_SIZE, queues/MAX_CONCURRENT, ...
+  circuits/THRESHOLD, circuits/TIMEOUT, ...
+  load_shedding/START_PRESSURE, load_shedding/STOP_PRESSURE, ...
+  mcp/MAX_RESULT_ROWS, mcp/MAX_RESULT_SIZE_MB, ...
+```
+
+**Managing SSM parameters**:
+```bash
+just ssm-list prod features     # List feature flags
+just ssm-list prod tuning       # List tuning parameters
+just ssm-set prod features/BILLING_ENABLED true
+just ssm-set prod tuning/cache/BALANCE_TTL 600
 ```
 
 **Environment Variables Used**:
 | Variable | Source | Description |
 |----------|--------|-------------|
 | `API_ACCESS_MODE` | Bootstrap | API access mode (internal, public, public-http) |
-| `SETUP_STAGING` | Bootstrap | Whether to create staging secret |
+| `SETUP_STAGING` | Bootstrap | Whether to create staging resources |
 
 ---
 
@@ -530,9 +517,15 @@ just bootstrap my-fork-sso
 just bootstrap my-fork-sso eu-west-1
 
 # Individual setup scripts
-just setup-aws          # AWS Secrets Manager
+just setup-aws          # Secrets + SSM parameters
 just setup-gha          # GitHub Actions variables
 just setup-bedrock      # Local Bedrock development
+
+# SSM Parameter Management
+just ssm-list prod features     # List feature flags
+just ssm-list prod tuning       # List tuning parameters
+just ssm-set prod features/BILLING_ENABLED true
+just ssm-set prod tuning/cache/BALANCE_TTL 600
 
 # Generate cryptographic keys
 just generate-key       # Single 32-byte base64 key
@@ -623,8 +616,9 @@ See the [Bootstrap Guide](https://github.com/RoboFinSystems/robosystems/wiki/Boo
 
 - **No long-term AWS credentials stored** - Uses SSO and OIDC
 - **Secrets auto-generated** - JWT keys, encryption keys created automatically
-- **Secrets never overwritten** - Re-running scripts is safe
-- **Production/staging isolation** - Separate secrets per environment
+- **Resources never overwritten** - Re-running scripts is safe
+- **Production/staging isolation** - Separate secrets and SSM params per environment
+- **SSM uses FREE tier** - Feature flags and tuning at no cost
 - **Bedrock credentials scoped** - Only Bedrock invoke permissions
 
 ---
