@@ -19,18 +19,78 @@ The configuration module:
 config/
 ├── __init__.py              # Module exports
 ├── env.py                   # Environment variable management
-├── billing.py               # Billing plans and pricing
+├── constants.py             # Fixed operational constants (never change at runtime)
+├── defaults.py              # Centralized tunable defaults
+├── tuning.py                # SSM Parameter Store tuning accessors
+├── parameter_store.py       # SSM Parameter Store client
+├── secrets_manager.py       # AWS Secrets Manager client
+├── billing/                 # Billing plans and pricing
+│   ├── core.py              # Subscription tiers and base pricing
+│   ├── ai.py                # AI/token-based pricing
+│   └── repositories.py      # Repository pricing
 ├── rate_limits.py           # Burst-focused rate limiting
 ├── credits.py               # Credit costs and allocations
 ├── agents.py                # Agent/AI configuration
+├── graph_tier.py            # Graph tier config from .github/configs/graph.yml
+├── query_queue.py           # Query queue configuration
 ├── external_services.py     # External API configurations
 ├── validation.py            # Startup validation
-├── repositories.py          # Repository configuration
+├── valkey_registry.py       # Redis database allocation
 └── storage/                 # S3 path configuration (see storage/README.md)
     ├── __init__.py          # Re-exports from shared and graph
     ├── shared.py            # Shared data sources (SEC, FRED, etc.)
     └── graph.py             # Graph database storage paths
 ```
+
+## Configuration Tiers
+
+Configuration is organized into three tiers based on how values are managed:
+
+```
+┌───────────────────┬───────────────────┬───────────────────┐
+│    CONSTANTS      │     TUNABLES      │     SECRETS       │
+│  (Never Change)   │ (Runtime Adjust)  │ (Sensitive Data)  │
+├───────────────────┼───────────────────┼───────────────────┤
+│ • Protocol limits │ • Cache TTLs      │ • DATABASE_URL    │
+│ • Business rules  │ • Queue sizes     │ • JWT_SECRET_KEY  │
+│ • Memory limits   │ • Thresholds      │ • API keys        │
+│ • API versions    │ • Timeouts        │ • Passwords       │
+├───────────────────┼───────────────────┼───────────────────┤
+│ constants.py      │ SSM /tuning/      │ Secrets Manager   │
+│                   │ + defaults.py     │                   │
+└───────────────────┴───────────────────┴───────────────────┘
+```
+
+**Override Priority:** Environment Variable > SSM Parameter Store > Default Value
+
+### SSM Parameter Store (Tunables)
+
+Runtime-adjustable parameters stored in SSM Parameter Store (FREE tier):
+
+```
+/robosystems/{env}/
+  features/                    # Boolean feature flags
+    RATE_LIMIT_ENABLED
+    BILLING_ENABLED
+    ...
+  tuning/                      # Runtime tunables
+    cache/                     # Cache TTLs (BALANCE_TTL, JWT_TTL, etc.)
+    admission/                 # Main API thresholds (MEMORY_THRESHOLD, CPU_THRESHOLD)
+    lbug_admission/            # LadybugDB thresholds (MEMORY_THRESHOLD, CPU_THRESHOLD)
+    queues/                    # Queue config (MAX_SIZE, MAX_CONCURRENT)
+    circuits/                  # Circuit breakers (THRESHOLD, TIMEOUT)
+    load_shedding/             # Load shedding (START_PRESSURE, STOP_PRESSURE)
+    mcp/                       # MCP limits (MAX_RESULT_ROWS, MAX_RESULT_SIZE_MB)
+```
+
+**Management:**
+```bash
+just ssm-list prod tuning              # List all tuning parameters
+just ssm-set prod tuning/cache/BALANCE_TTL 600
+just ssm-get prod tuning/admission/MEMORY_THRESHOLD
+```
+
+Changes take effect within the application's cache TTL (typically 5 minutes).
 
 ## Key Components
 

@@ -9,7 +9,6 @@ import pytest
 from arelle import ModelXbrl
 
 from robosystems.adapters.sec.client.arelle import ArelleClient
-from robosystems.config import env
 
 
 class TestArelleClient:
@@ -216,9 +215,7 @@ class TestArelleClient:
     mock_cache_dir.__truediv__ = mock_truediv
 
     # Patch the module constant (now imported from adapters/sec/config.py)
-    with patch(
-      "robosystems.adapters.sec.client.arelle.ARELLE_MIN_SCHEMA_COUNT", 10
-    ):
+    with patch("robosystems.adapters.sec.client.arelle.ARELLE_MIN_SCHEMA_COUNT", 10):
       client = ArelleClient.__new__(ArelleClient)
       client.cache_dir = mock_cache_dir
 

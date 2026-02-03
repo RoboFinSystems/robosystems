@@ -21,25 +21,28 @@ def test_get_queue_config_returns_expected_values():
 
 
 def test_get_admission_config_includes_load_shedding(monkeypatch):
-  """Test that get_admission_config returns values from TuningConfig methods."""
+  """Test that get_admission_config returns values from TuningConfig methods.
+
+  All threshold values are percentages (0-100) as returned by TuningConfig.
+  """
   monkeypatch.setattr(QueryQueueConfig, "CHECK_INTERVAL", 5)
   monkeypatch.setattr(QueryQueueConfig, "LOAD_SHEDDING_ENABLED", True)
 
   with (
-    patch.object(TuningConfig, "get_admission_memory_threshold", return_value=0.8),
-    patch.object(TuningConfig, "get_admission_cpu_threshold", return_value=0.75),
-    patch.object(TuningConfig, "get_admission_queue_threshold", return_value=0.9),
-    patch.object(TuningConfig, "get_load_shedding_start_pressure", return_value=0.8),
-    patch.object(TuningConfig, "get_load_shedding_stop_pressure", return_value=0.6),
+    patch.object(TuningConfig, "get_admission_memory_threshold", return_value=80.0),
+    patch.object(TuningConfig, "get_admission_cpu_threshold", return_value=75.0),
+    patch.object(TuningConfig, "get_admission_queue_threshold", return_value=90.0),
+    patch.object(TuningConfig, "get_load_shedding_start_pressure", return_value=80.0),
+    patch.object(TuningConfig, "get_load_shedding_stop_pressure", return_value=60.0),
   ):
     assert QueryQueueConfig.get_admission_config() == {
-      "memory_threshold": 0.8,
-      "cpu_threshold": 0.75,
-      "queue_threshold": 0.9,
+      "memory_threshold": 80.0,
+      "cpu_threshold": 75.0,
+      "queue_threshold": 90.0,
       "check_interval": 5,
       "load_shedding_enabled": True,
-      "shed_start_pressure": 0.8,
-      "shed_stop_pressure": 0.6,
+      "shed_start_pressure": 80.0,
+      "shed_stop_pressure": 60.0,
     }
 
 

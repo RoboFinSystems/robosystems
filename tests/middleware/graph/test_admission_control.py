@@ -489,10 +489,11 @@ class TestGetAdmissionController:
   @patch("robosystems.config.query_queue.QueryQueueConfig")
   def test_get_admission_controller_singleton(self, mock_config):
     """Test that get_admission_controller returns singleton."""
+    # All thresholds are percentages (0-100), normalized internally
     mock_config.get_admission_config.return_value = {
       "memory_threshold": 85.0,
       "cpu_threshold": 90.0,
-      "queue_threshold": 0.8,
+      "queue_threshold": 80.0,  # Percentage, normalized to 0.8 internally
       "check_interval": 1.0,
     }
 

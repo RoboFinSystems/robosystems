@@ -226,7 +226,7 @@ class TuningConfig:
 
   @classmethod
   def get_admission_queue_threshold(cls) -> float:
-    """Get queue capacity threshold for admission control (decimal 0-1)."""
+    """Get queue capacity threshold for admission control (percent 0-100)."""
     return cls.get_float("admission/QUEUE_THRESHOLD", AdmissionDefaults.QUEUE_THRESHOLD)
 
   # =========================================================================
@@ -273,14 +273,14 @@ class TuningConfig:
 
   @classmethod
   def get_load_shedding_start_pressure(cls) -> float:
-    """Get pressure threshold to start load shedding (decimal 0-1)."""
+    """Get pressure threshold to start load shedding (percent 0-100)."""
     return cls.get_float(
       "load_shedding/START_PRESSURE", LoadSheddingDefaults.START_PRESSURE
     )
 
   @classmethod
   def get_load_shedding_stop_pressure(cls) -> float:
-    """Get pressure threshold to stop load shedding (decimal 0-1)."""
+    """Get pressure threshold to stop load shedding (percent 0-100)."""
     return cls.get_float(
       "load_shedding/STOP_PRESSURE", LoadSheddingDefaults.STOP_PRESSURE
     )
