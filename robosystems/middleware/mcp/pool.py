@@ -9,7 +9,7 @@ import asyncio
 from contextlib import asynccontextmanager
 from datetime import datetime
 
-from robosystems.config.defaults import MCPDefaults
+from robosystems.config.tuning import TuningConfig
 from robosystems.logger import logger
 
 
@@ -24,20 +24,29 @@ class MCPConnectionPool:
   def __init__(
     self,
     max_connections_per_graph: int = 10,
-    max_idle_time: int = MCPDefaults.POOL_IDLE_TIMEOUT,  # 5 minutes
-    max_lifetime: int = MCPDefaults.POOL_MAX_LIFETIME,  # 1 hour
+    max_idle_time: int | None = None,
+    max_lifetime: int | None = None,
   ):
     """
     Initialize the connection pool.
 
     Args:
         max_connections_per_graph: Maximum connections per graph_id
-        max_idle_time: Maximum idle time in seconds before closing
-        max_lifetime: Maximum lifetime in seconds before recycling
+        max_idle_time: Maximum idle time in seconds before closing (default from SSM/TuningConfig)
+        max_lifetime: Maximum lifetime in seconds before recycling (default from SSM/TuningConfig)
     """
     self.max_connections_per_graph = max_connections_per_graph
-    self.max_idle_time = max_idle_time
-    self.max_lifetime = max_lifetime
+    # Use TuningConfig for runtime tunability via SSM
+    self.max_idle_time = (
+      max_idle_time
+      if max_idle_time is not None
+      else TuningConfig.get_mcp_pool_idle_timeout()
+    )
+    self.max_lifetime = (
+      max_lifetime
+      if max_lifetime is not None
+      else TuningConfig.get_mcp_pool_max_lifetime()
+    )
 
     # Pool storage: graph_id -> list of (client, last_used, created_at)
     self._pools: dict[str, list] = {}

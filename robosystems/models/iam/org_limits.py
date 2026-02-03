@@ -9,6 +9,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, relationship
 
 from ...config import env
+from ...config.tuning import TuningConfig
 from ...database import Model
 
 
@@ -47,7 +48,7 @@ class OrgLimits(Model):
     """Create default safety limits for a new organization."""
     limits = cls(
       org_id=org_id,
-      max_graphs=env.ORG_GRAPHS_DEFAULT_LIMIT,
+      max_graphs=TuningConfig.get_org_graphs_default_limit(),
     )
     session.add(limits)
     try:

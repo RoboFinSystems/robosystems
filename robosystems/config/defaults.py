@@ -52,10 +52,14 @@ class TimeoutDefaults:
   CONNECTION = 10  # Connection establishment timeout
   STREAM = 300  # Streaming operations (5 minutes)
 
+  # Graph API timeouts
+  GRAPH_HTTP = 30  # Graph API HTTP request timeout
+  GRAPH_QUERY = 30  # Graph query execution timeout
+
 
 class AdmissionDefaults:
   """
-  Admission control thresholds.
+  Admission control thresholds (all values are percentages 0-100).
 
   These thresholds determine when to start rejecting new requests
   to protect system stability.
@@ -63,7 +67,7 @@ class AdmissionDefaults:
 
   MEMORY_THRESHOLD = 85.0  # Start rejecting at 85% memory usage
   CPU_THRESHOLD = 90.0  # Start rejecting at 90% CPU usage
-  QUEUE_THRESHOLD = 0.8  # Start rejecting at 80% queue capacity
+  QUEUE_THRESHOLD = 80.0  # Start rejecting at 80% queue capacity
 
 
 class QueueDefaults:
@@ -92,14 +96,14 @@ class CircuitBreakerDefaults:
 
 class LoadSheddingDefaults:
   """
-  Load shedding thresholds (decimal values 0.0-1.0).
+  Load shedding thresholds (all values are percentages 0-100).
 
   Load shedding is a last-resort protection mechanism that randomly
   rejects requests when system pressure is too high.
   """
 
-  START_PRESSURE = 0.8  # Start shedding at 80% pressure
-  STOP_PRESSURE = 0.6  # Stop shedding when below 60% pressure
+  START_PRESSURE = 80.0  # Start shedding at 80% pressure
+  STOP_PRESSURE = 60.0  # Stop shedding when below 60% pressure
 
 
 class MCPDefaults:
@@ -120,10 +124,10 @@ class WorkerDefaults:
   """
   Worker/thread pool defaults.
 
-  These values control parallel processing capacity.
+  These values control parallel processing for batch operations.
   """
 
-  MAX_WORKERS = 10  # Default max workers for thread pools
+  MAX_WORKERS = 10  # Parallel workers for batch operations (e.g., S3 uploads)
   MIN_WORKERS = 1  # Minimum workers
   POOL_TIMEOUT = 30  # Worker pool timeout
 
@@ -150,6 +154,27 @@ class RateLimitDefaults:
 
   WINDOW_SHORT = 60  # 1 minute window for burst limits
   WINDOW_LONG = 300  # 5 minute window for sustained limits
+
+
+class SSEDefaults:
+  """
+  Server-Sent Events (SSE) defaults.
+
+  These values control SSE connection limits.
+  """
+
+  MAX_CONNECTIONS_PER_USER = 5  # Max concurrent SSE connections per user
+  QUEUE_SIZE = 100  # Event queue size per connection
+
+
+class LimitsDefaults:
+  """
+  Default limits for various resources.
+
+  These values control quotas and resource limits that can be adjusted at runtime.
+  """
+
+  ORG_GRAPHS_DEFAULT = 10  # Default max graphs per organization
 
 
 # SSM Parameter paths for tunables
@@ -180,6 +205,15 @@ SSM_TUNING_PATHS = {
   "mcp/MAX_RESULT_ROWS": MCPDefaults.MAX_RESULT_ROWS,
   "mcp/MAX_RESULT_SIZE_MB": MCPDefaults.MAX_RESULT_SIZE_MB,
   "mcp/POOL_IDLE_TIMEOUT": MCPDefaults.POOL_IDLE_TIMEOUT,
+  "mcp/POOL_MAX_LIFETIME": MCPDefaults.POOL_MAX_LIFETIME,
   # Workers
   "workers/MAX_WORKERS": WorkerDefaults.MAX_WORKERS,
+  # Timeouts
+  "timeouts/GRAPH_HTTP": TimeoutDefaults.GRAPH_HTTP,
+  "timeouts/GRAPH_QUERY": TimeoutDefaults.GRAPH_QUERY,
+  # SSE
+  "sse/MAX_CONNECTIONS_PER_USER": SSEDefaults.MAX_CONNECTIONS_PER_USER,
+  "sse/QUEUE_SIZE": SSEDefaults.QUEUE_SIZE,
+  # Limits
+  "limits/ORG_GRAPHS_DEFAULT": LimitsDefaults.ORG_GRAPHS_DEFAULT,
 }

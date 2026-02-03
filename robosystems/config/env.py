@@ -81,8 +81,6 @@ from .constants import (
   # Task constants
   ADMISSION_MEMORY_THRESHOLD_DEFAULT,
   ADMISSION_QUEUE_THRESHOLD_DEFAULT,
-  ARELLE_DOWNLOAD_TIMEOUT,
-  ARELLE_MIN_SCHEMA_COUNT,
   CACHE_TTL_LONG,
   # Cache constants
   CACHE_TTL_SHORT,
@@ -103,6 +101,7 @@ from .constants import (
   # DuckDB configuration
   DUCKDB_MAX_THREADS,
   DUCKDB_MEMORY_LIMIT,
+  EMAIL_TOKEN_EXPIRY_HOURS,
   GRAPH_CIRCUIT_BREAKER_THRESHOLD,
   GRAPH_CIRCUIT_BREAKER_TIMEOUT,
   GRAPH_CONNECT_TIMEOUT,
@@ -122,14 +121,15 @@ from .constants import (
   GRAPH_XLARGE_CHUNK_SIZE,
   GRAPH_XLARGE_MAX_MEMORY_MB,
   GRAPH_XLARGE_MEMORY_PER_DB_MB,
+  JWT_EXPIRY_HOURS,
   # Load shedding
   LOAD_SHED_START_PRESSURE_DEFAULT,
   LOAD_SHED_STOP_PRESSURE_DEFAULT,
-  MAX_CONCURRENT_DOWNLOADS,
   MAX_DATABASES_PER_NODE,
   MAX_QUERY_LENGTH,
   OPENFIGI_RETRY_MAX_WAIT,
   OPENFIGI_RETRY_MIN_WAIT,
+  PASSWORD_RESET_TOKEN_EXPIRY_HOURS,
   QUERY_DEFAULT_PRIORITY,
   QUERY_PRIORITY_BOOST_PREMIUM,
   # Queue configuration
@@ -140,7 +140,7 @@ from .constants import (
   SEC_RATE_LIMIT,
   # API version constants
   STRIPE_API_VERSION,
-  XBRL_EXTERNALIZATION_THRESHOLD,
+  TOKEN_GRACE_PERIOD_MINUTES,
   XBRL_GRAPH_LARGE_NODES,
 )
 
@@ -216,6 +216,48 @@ def get_str_env(key: str, default: str = "") -> str:
   return os.getenv(key, default)
 
 
+def get_tuning_float(env_key: str, ssm_path: str, default: float) -> float:
+  """
+  Get a float tuning parameter with layered fallback.
+
+  Priority order:
+  1. Environment variable (highest - for local dev, CI, testing)
+  2. SSM Parameter Store /tuning/ path (for AWS runtime config)
+  3. Default value (lowest - sensible defaults)
+
+  Args:
+      env_key: Environment variable name (e.g., "LBUG_ADMISSION_MEMORY_THRESHOLD")
+      ssm_path: SSM path under tuning/ (e.g., "lbug_admission/MEMORY_THRESHOLD")
+      default: Default value if not found anywhere
+
+  Returns:
+      Float value from the highest-priority source
+  """
+  # Priority 1: Environment variable
+  env_value = os.getenv(env_key)
+  if env_value is not None:
+    try:
+      return float(env_value)
+    except (ValueError, TypeError):
+      print(f"Warning: Invalid {env_key} value, using default: {default}")
+      return default
+
+  # Priority 2: SSM Parameter Store (prod/staging only)
+  environment = os.getenv("ENVIRONMENT", "dev")
+  if environment in ["prod", "staging"]:
+    try:
+      from .parameter_store import get_parameter_manager
+
+      manager = get_parameter_manager()
+      ssm_value = manager.get_tuning_float(ssm_path, default)
+      return ssm_value
+    except Exception:
+      pass  # Fall through to default
+
+  # Priority 3: Default value
+  return default
+
+
 def get_list_env(key: str, default: str = "", separator: str = ",") -> list[str]:
   """
   Get a list environment variable (comma-separated by default).
@@ -277,7 +319,7 @@ class EnvConfig:
 
   # JWT configuration
   JWT_SECRET_KEY = get_secret_value("JWT_SECRET_KEY", "")
-  JWT_EXPIRY_HOURS = get_float_env("JWT_EXPIRY_HOURS", 0.5)  # Default 30 minutes
+  JWT_EXPIRY_HOURS = JWT_EXPIRY_HOURS  # Constant - 30 minutes
 
   # JWT Issuer and Audience - configurable for different deployments
   # Default JWT_ISSUER is derived from ROBOSYSTEMS_API_URL (strips protocol)
@@ -293,8 +335,8 @@ class EnvConfig:
   JWT_ISSUER = get_secret_value("JWT_ISSUER", _jwt_default_domain)
   JWT_AUDIENCE = get_secret_list_value("JWT_AUDIENCE", _jwt_default_domain)
 
-  # Authentication Security Settings (configurable per environment)
-  TOKEN_GRACE_PERIOD_MINUTES = get_int_env("TOKEN_GRACE_PERIOD_MINUTES", 5)
+  # Authentication Security Settings (constants - not runtime configurable)
+  TOKEN_GRACE_PERIOD_MINUTES = TOKEN_GRACE_PERIOD_MINUTES
 
   # Authentication Rate Limiting (overrides for defaults in constants.py)
   JWT_REFRESH_RATE_LIMIT = get_int_env("JWT_REFRESH_RATE_LIMIT", 20)
@@ -311,11 +353,9 @@ class EnvConfig:
     get_secret_value("EMAIL_FROM_NAME", "RoboSystems"),
   )
 
-  # Token expiry configuration
-  EMAIL_TOKEN_EXPIRY_HOURS = get_int_env("EMAIL_TOKEN_EXPIRY_HOURS", 24)
-  PASSWORD_RESET_TOKEN_EXPIRY_HOURS = get_int_env(
-    "PASSWORD_RESET_TOKEN_EXPIRY_HOURS", 1
-  )
+  # Token expiry configuration (constants - not runtime configurable)
+  EMAIL_TOKEN_EXPIRY_HOURS = EMAIL_TOKEN_EXPIRY_HOURS
+  PASSWORD_RESET_TOKEN_EXPIRY_HOURS = PASSWORD_RESET_TOKEN_EXPIRY_HOURS
 
   # Cloudflare Turnstile (CAPTCHA)
   TURNSTILE_SECRET_KEY = get_secret_value("TURNSTILE_SECRET_KEY", "")
@@ -415,10 +455,9 @@ class EnvConfig:
   SHARED_REPOSITORIES = get_list_env("SHARED_REPOSITORIES", "")
 
   # --- Organization ---
-  ORG_GRAPHS_DEFAULT_LIMIT = get_int_env(
-    "ORG_GRAPHS_DEFAULT_LIMIT",
-    int(get_parameter_value("ORG_GRAPHS_DEFAULT_LIMIT", "10")),
-  )
+  # Note: ORG_GRAPHS_DEFAULT_LIMIT is now tunable via SSM /tuning/limits/
+  # This env var remains for backward compatibility and SQLAlchemy column default
+  ORG_GRAPHS_DEFAULT_LIMIT = get_int_env("ORG_GRAPHS_DEFAULT_LIMIT", 10)
   ORG_MEMBER_INVITATIONS_ENABLED = get_bool_env(
     "ORG_MEMBER_INVITATIONS_ENABLED",
     get_parameter_value("ORG_MEMBER_INVITATIONS_ENABLED", "false").lower() == "true",
@@ -586,11 +625,17 @@ class EnvConfig:
   )  # 5 minutes default
 
   # LadybugDB Admission Control
-  LBUG_ADMISSION_MEMORY_THRESHOLD = get_float_env(
-    "LBUG_ADMISSION_MEMORY_THRESHOLD", ADMISSION_MEMORY_THRESHOLD_DEFAULT
+  # These use SSM tuning parameters in prod/staging for runtime adjustability
+  # Override priority: env var > SSM /tuning/lbug_admission/ > default
+  LBUG_ADMISSION_MEMORY_THRESHOLD = get_tuning_float(
+    "LBUG_ADMISSION_MEMORY_THRESHOLD",
+    "lbug_admission/MEMORY_THRESHOLD",
+    ADMISSION_MEMORY_THRESHOLD_DEFAULT,
   )
-  LBUG_ADMISSION_CPU_THRESHOLD = get_float_env(
-    "LBUG_ADMISSION_CPU_THRESHOLD", ADMISSION_CPU_THRESHOLD_DEFAULT
+  LBUG_ADMISSION_CPU_THRESHOLD = get_tuning_float(
+    "LBUG_ADMISSION_CPU_THRESHOLD",
+    "lbug_admission/CPU_THRESHOLD",
+    ADMISSION_CPU_THRESHOLD_DEFAULT,
   )
 
   # DuckDB Configuration (with environment variable overrides)
@@ -711,24 +756,20 @@ class EnvConfig:
   PLAID_ENVIRONMENT = get_secret_value("PLAID_ENVIRONMENT", "sandbox")
 
   # SEC
+  # SEC_GOV_USER_AGENT is a secret identity for API access
   SEC_GOV_USER_AGENT = get_secret_value(
     "SEC_GOV_USER_AGENT", "RoboSystems hello@robosystems.ai"
   )
-  SEC_MAX_CONCURRENT_DOWNLOADS = get_int_env(
-    "SEC_MAX_CONCURRENT_DOWNLOADS", MAX_CONCURRENT_DOWNLOADS
-  )
-  SEC_VALIDATE_CIK = get_bool_env("SEC_VALIDATE_CIK", True)
-  SEC_PIPELINE_PARTIAL_TOLERANCE = get_bool_env("SEC_PIPELINE_PARTIAL_TOLERANCE", True)
-  SEC_PIPELINE_CLEANUP_TEMP_FILES = get_bool_env(
-    "SEC_PIPELINE_CLEANUP_TEMP_FILES", True
-  )
-  # SEC rate limiting and retry configuration
+  # SEC rate limiting and retry configuration (compliance requirement)
   SEC_RATE_LIMIT = get_int_env("SEC_RATE_LIMIT", SEC_RATE_LIMIT)
   SEC_PIPELINE_MAX_RETRIES = get_int_env(
     "SEC_PIPELINE_MAX_RETRIES", SEC_PIPELINE_MAX_RETRIES
   )
   # Parallel processing concurrency (for local sec-process-parallel command)
   SEC_PARALLEL_CONCURRENCY = get_int_env("SEC_PARALLEL_CONCURRENCY", 2)
+  # Note: SEC processing constants (SEC_VALIDATE_CIK, SEC_PIPELINE_PARTIAL_TOLERANCE,
+  # SEC_PIPELINE_CLEANUP_TEMP_FILES, SEC_MAX_CONCURRENT_DOWNLOADS) are in
+  # robosystems/adapters/sec/config.py - they are not runtime-configurable
 
   # OpenFIGI (financial identifiers)
   OPENFIGI_API_KEY = get_secret_value("OPENFIGI_API_KEY", "")
@@ -787,9 +828,10 @@ class EnvConfig:
   )
 
   # SSE (Server-Sent Events)
+  # Note: MAX_SSE_CONNECTIONS_PER_USER and SSE_QUEUE_SIZE are now tunable via SSM
+  # These env vars remain for backward compatibility but TuningConfig is preferred
   MAX_SSE_CONNECTIONS_PER_USER = get_int_env("MAX_SSE_CONNECTIONS_PER_USER", 5)
   SSE_QUEUE_SIZE = get_int_env("SSE_QUEUE_SIZE", 100)
-  SSE_MAX_REDIS_FAILURES = get_int_env("SSE_MAX_REDIS_FAILURES", 3)
   # SSE Rate limiting
   RATE_LIMIT_SSE_CONNECTIONS = get_int_env("RATE_LIMIT_SSE_CONNECTIONS", 10)
   RATE_LIMIT_SSE_CONNECTIONS_WINDOW = get_int_env(
@@ -806,32 +848,14 @@ class EnvConfig:
   CREDIT_ALLOCATION_HOUR = get_int_env("CREDIT_ALLOCATION_HOUR", CREDIT_ALLOCATION_HOUR)
 
   # ==========================================================================
-  # 10. XBRL AND ARELLE CONFIGURATION
+  # 10. ARELLE RUNTIME CONFIGURATION
   # ==========================================================================
+  # Note: Arelle and XBRL processing constants are in robosystems/adapters/sec/config.py
+  # They are not runtime-configurable - change them in that module if needed.
+  # Only ARELLE_CACHE_DIR remains here as it's a runtime path that varies by deployment.
 
-  # Arelle (XBRL processing)
-  ARELLE_LOG_FILE = get_str_env("ARELLE_LOG_FILE", "logToBuffer")
-  ARELLE_TIMEOUT = get_int_env("ARELLE_TIMEOUT", 30)
-  ARELLE_WORK_OFFLINE = get_str_env("ARELLE_WORK_OFFLINE", "false")
+  # Arelle cache directory (runtime path, varies by deployment)
   ARELLE_CACHE_DIR = get_str_env("ARELLE_CACHE_DIR", "")
-  # Arelle technical limits
-  ARELLE_MIN_SCHEMA_COUNT = get_int_env(
-    "ARELLE_MIN_SCHEMA_COUNT", ARELLE_MIN_SCHEMA_COUNT
-  )
-  ARELLE_DOWNLOAD_TIMEOUT = get_int_env(
-    "ARELLE_DOWNLOAD_TIMEOUT", ARELLE_DOWNLOAD_TIMEOUT
-  )
-
-  # XBRL processing
-  XBRL_EXTERNALIZE_LARGE_VALUES = get_bool_env("XBRL_EXTERNALIZE_LARGE_VALUES", True)
-  XBRL_SKIP_TEXTBLOCK_FACTS = get_bool_env("XBRL_SKIP_TEXTBLOCK_FACTS", False)
-  XBRL_STANDARDIZED_FILENAMES = get_bool_env("XBRL_STANDARDIZED_FILENAMES", False)
-  XBRL_TYPE_PREFIXES = get_bool_env("XBRL_TYPE_PREFIXES", False)
-  XBRL_COLUMN_STANDARDIZATION = get_bool_env("XBRL_COLUMN_STANDARDIZATION", False)
-  # XBRL technical limits
-  XBRL_EXTERNALIZATION_THRESHOLD = get_int_env(
-    "XBRL_EXTERNALIZATION_THRESHOLD", XBRL_EXTERNALIZATION_THRESHOLD
-  )
 
   # XBRL graph large nodes (imported from constants.py - not configurable via env)
   # These tables contain millions of rows and consume significant memory

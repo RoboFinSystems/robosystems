@@ -212,7 +212,6 @@ function create_ssm_feature_flags() {
         "DIRECT_GRAPH_PROVISIONING_ENABLED=true"
         "EMAIL_VERIFICATION_ENABLED=false"
         "LOAD_SHEDDING_ENABLED=true"
-        "ORG_GRAPHS_DEFAULT_LIMIT=10"
         "ORG_MEMBER_INVITATIONS_ENABLED=false"
         "OTEL_ENABLED=false"
         "RATE_LIMIT_ENABLED=false"
@@ -301,10 +300,14 @@ function create_ssm_tuning_parameters() {
         "cache/API_KEY_TTL=300"
         "cache/SCHEMA_TTL=300"
 
-        # Admission Control (thresholds)
+        # Admission Control - Main API (all percentages 0-100)
         "admission/MEMORY_THRESHOLD=85.0"
         "admission/CPU_THRESHOLD=90.0"
-        "admission/QUEUE_THRESHOLD=0.8"
+        "admission/QUEUE_THRESHOLD=80.0"
+
+        # Admission Control - Graph API / LadybugDB (percentages 0-100)
+        "lbug_admission/MEMORY_THRESHOLD=85.0"
+        "lbug_admission/CPU_THRESHOLD=90.0"
 
         # Queue Configuration
         "queues/MAX_SIZE=1000"
@@ -316,17 +319,29 @@ function create_ssm_tuning_parameters() {
         "circuits/THRESHOLD=5"
         "circuits/TIMEOUT=60"
 
-        # Load Shedding (decimal thresholds)
-        "load_shedding/START_PRESSURE=0.8"
-        "load_shedding/STOP_PRESSURE=0.6"
+        # Load Shedding (all percentages 0-100)
+        "load_shedding/START_PRESSURE=80.0"
+        "load_shedding/STOP_PRESSURE=60.0"
 
         # MCP Operation Limits
         "mcp/MAX_RESULT_ROWS=1000"
         "mcp/MAX_RESULT_SIZE_MB=5.0"
         "mcp/POOL_IDLE_TIMEOUT=300"
+        "mcp/POOL_MAX_LIFETIME=3600"
 
         # Worker Configuration
         "workers/MAX_WORKERS=10"
+
+        # Timeout Configuration
+        "timeouts/GRAPH_HTTP=30"
+        "timeouts/GRAPH_QUERY=30"
+
+        # SSE Configuration
+        "sse/MAX_CONNECTIONS_PER_USER=5"
+        "sse/QUEUE_SIZE=100"
+
+        # Limits
+        "limits/ORG_GRAPHS_DEFAULT=10"
     )
 
     local created=0

@@ -16,6 +16,7 @@ import boto3
 from botocore.exceptions import ClientError, NoCredentialsError
 
 from robosystems.config import env
+from robosystems.config.tuning import TuningConfig
 from robosystems.logger import logger
 
 
@@ -378,7 +379,7 @@ class S3Client:
     items: list[tuple[str, str, str]],  # List of (content, bucket, key) tuples
     content_type: str | None = None,
     metadata: dict[str, str] | None = None,
-    max_workers: int = 10,
+    max_workers: int | None = None,
     max_retries: int = 3,
   ) -> dict[str, bool]:
     """
@@ -388,12 +389,16 @@ class S3Client:
         items: List of tuples containing (content, bucket, key)
         content_type: MIME type for all content
         metadata: Additional metadata for all objects
-        max_workers: Maximum number of parallel uploads (default: 10)
+        max_workers: Maximum number of parallel uploads (uses SSM tunable if not specified)
         max_retries: Maximum number of retry attempts per upload (default: 3)
 
     Returns:
         Dictionary mapping S3 keys to upload success status
     """
+    # Resolve max_workers from SSM tuning if not explicitly provided
+    if max_workers is None:
+      max_workers = TuningConfig.get_max_workers()
+
     results = {}
 
     def upload_item(item: tuple[str, str, str]) -> tuple[str, bool]:

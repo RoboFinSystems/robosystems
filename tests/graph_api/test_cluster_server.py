@@ -316,59 +316,59 @@ class TestLadybugService:
 
   @patch("robosystems.graph_api.core.ladybug.service.LadybugDatabaseManager")
   @patch("robosystems.graph_api.core.ladybug.service.ThreadPoolExecutor")
-  def test_execute_query_timeout(self, mock_executor_class, mock_db_manager):
+  @patch("robosystems.graph_api.core.ladybug.service.TuningConfig")
+  def test_execute_query_timeout(
+    self, mock_tuning_config, mock_executor_class, mock_db_manager
+  ):
     """Test query execution timeout using ThreadPoolExecutor."""
     from concurrent.futures import TimeoutError as FuturesTimeoutError
 
     from fastapi import HTTPException
 
-    # Mock the env instance's GRAPH_QUERY_TIMEOUT
-    from robosystems.config import env
+    # Mock TuningConfig.get_graph_query_timeout to return 1.0
+    mock_tuning_config.get_graph_query_timeout.return_value = 1.0
 
-    with patch.object(env, "GRAPH_QUERY_TIMEOUT", 1.0):
-      # Mock database manager
-      mock_db_instance = MagicMock()
-      mock_db_instance.list_databases.return_value = ["test_db"]
-      mock_db_manager.return_value = mock_db_instance
+    # Mock database manager
+    mock_db_instance = MagicMock()
+    mock_db_instance.list_databases.return_value = ["test_db"]
+    mock_db_manager.return_value = mock_db_instance
 
-      # Create service
-      service = LadybugService(
-        base_path=self.base_path,
-        node_type=NodeType.WRITER,
-        repository_type=RepositoryType.ENTITY,
-      )
+    # Create service
+    service = LadybugService(
+      base_path=self.base_path,
+      node_type=NodeType.WRITER,
+      repository_type=RepositoryType.ENTITY,
+    )
 
-      # Mock the executor and future
-      mock_executor = MagicMock()
-      mock_future = MagicMock()
+    # Mock the executor and future
+    mock_executor = MagicMock()
+    mock_future = MagicMock()
 
-      # Configure the executor to return our mock
-      mock_executor_class.return_value.__enter__.return_value = mock_executor
-      mock_executor.submit.return_value = mock_future
+    # Configure the executor to return our mock
+    mock_executor_class.return_value.__enter__.return_value = mock_executor
+    mock_executor.submit.return_value = mock_future
 
-      # Simulate a timeout
-      mock_future.result.side_effect = FuturesTimeoutError("Query execution timed out")
+    # Simulate a timeout
+    mock_future.result.side_effect = FuturesTimeoutError("Query execution timed out")
 
-      # Create request (no timeout field needed)
-      request = QueryRequest(database="test_db", cypher="MATCH (n) RETURN n")
+    # Create request (no timeout field needed)
+    request = QueryRequest(database="test_db", cypher="MATCH (n) RETURN n")
 
-      # Execute and expect timeout exception
-      with pytest.raises(HTTPException) as exc_info:
-        service.execute_query(request)
+    # Execute and expect timeout exception
+    with pytest.raises(HTTPException) as exc_info:
+      service.execute_query(request)
 
-      # Note: Due to a bug in the exception handling, the 408 timeout error
-      # is caught and wrapped in a 500 error. This should be fixed in the future.
-      assert exc_info.value.status_code == 500  # Currently wrapped in 500
-      assert "timeout" in str(exc_info.value.detail).lower()
-      assert "408" in str(
-        exc_info.value.detail
-      )  # Original error code is in the message
+    # Note: Due to a bug in the exception handling, the 408 timeout error
+    # is caught and wrapped in a 500 error. This should be fixed in the future.
+    assert exc_info.value.status_code == 500  # Currently wrapped in 500
+    assert "timeout" in str(exc_info.value.detail).lower()
+    assert "408" in str(exc_info.value.detail)  # Original error code is in the message
 
-      # Verify that the future was cancelled
-      mock_future.cancel.assert_called_once()
+    # Verify that the future was cancelled
+    mock_future.cancel.assert_called_once()
 
-      # Verify timeout was used correctly
-      mock_future.result.assert_called_once_with(timeout=1.0)
+    # Verify timeout was used correctly
+    mock_future.result.assert_called_once_with(timeout=1.0)
 
   @patch("robosystems.graph_api.core.ladybug.service.LadybugDatabaseManager")
   def test_execute_query_large_result_set(self, mock_db_manager):

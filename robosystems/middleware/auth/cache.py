@@ -15,7 +15,7 @@ from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
 from ...config import env
-from ...config.defaults import CacheDefaults
+from ...config.tuning import TuningConfig
 from ...config.valkey_registry import ValkeyDatabase, create_redis_client
 from ...logger import logger
 from ...security import SecurityAuditLogger, SecurityEventType
@@ -24,8 +24,11 @@ from ...security import SecurityAuditLogger, SecurityEventType
 class APIKeyCache:
   """Manages API key and JWT caching in Valkey/Redis with comprehensive security validation."""
 
-  # Cache configuration - using centralized defaults
-  DEFAULT_TTL = CacheDefaults.SHORT  # 5 minutes
+  @classmethod
+  def get_default_ttl(cls) -> int:
+    """Get default TTL from TuningConfig (runtime tunable via SSM)."""
+    return TuningConfig.get_cache_api_key_ttl()
+
   CACHE_KEY_PREFIX = "apikey:"
   GRAPH_CACHE_KEY_PREFIX = "apikey_graph:"
   USER_DATA_PREFIX = "user:"
@@ -61,9 +64,10 @@ class APIKeyCache:
   def __init__(self):
     """Initialize Redis connection with security features."""
     self._redis = None
-    self.ttl = env.API_KEY_CACHE_TTL
+    # Cache TTLs are runtime tunable via SSM Parameter Store
+    self.ttl = TuningConfig.get_cache_api_key_ttl()
     # JWT cache can have longer TTL since tokens are typically 30 days
-    self.jwt_ttl = env.JWT_CACHE_TTL  # 30 minutes
+    self.jwt_ttl = TuningConfig.get_cache_jwt_ttl()  # 30 minutes
 
     # Initialize cache encryption for sensitive data (lazy-loaded)
     self._encryption_key = None
@@ -674,8 +678,8 @@ class APIKeyCache:
 
           # Update both cache entry and signature with fresh TTL
           pipe = self.redis.pipeline()
-          pipe.setex(cache_key, self.DEFAULT_TTL, encrypted_data)
-          pipe.setex(signature_key, self.DEFAULT_TTL, signature)
+          pipe.setex(cache_key, self.get_default_ttl(), encrypted_data)
+          pipe.setex(signature_key, self.get_default_ttl(), signature)
           pipe.execute()
 
           logger.debug(f"Successfully refreshed API key cache: {api_key_hash[:8]}...")

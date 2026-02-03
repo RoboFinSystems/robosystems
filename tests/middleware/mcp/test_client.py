@@ -43,7 +43,7 @@ class TestGraphMCPClient:
       client = GraphMCPClient(api_base_url="http://test:8001", graph_id="test")
       assert client.api_base_url == "http://test:8001"
       assert client.graph_id == "test"
-      assert client.timeout == 60  # Now uses env.GRAPH_HTTP_TIMEOUT default
+      assert client.timeout == 30  # Uses TuningConfig.get_graph_http_timeout() default
 
   @pytest.mark.unit
   def test_init_custom_timeout(self):
@@ -933,12 +933,8 @@ class TestGraphMCPAutoLimit:
 
   @pytest.mark.asyncio
   @pytest.mark.unit
-  async def test_size_based_truncation(self, mock_async_graph_client, monkeypatch):
+  async def test_size_based_truncation(self, mock_async_graph_client):
     """Test that results are truncated when exceeding size limit."""
-    monkeypatch.setattr(
-      "robosystems.config.env.MCP_MAX_RESULT_SIZE_MB", 0.001
-    )  # 1KB limit
-
     # Create large result set
     large_data = [
       {"id": i, "data": "x" * 10000}  # Each row is ~10KB
@@ -950,7 +946,13 @@ class TestGraphMCPAutoLimit:
       "execution_time_ms": 100,
     }
 
-    with patch("robosystems.middleware.mcp.client.httpx.AsyncClient"):
+    with (
+      patch("robosystems.middleware.mcp.client.httpx.AsyncClient"),
+      patch(
+        "robosystems.middleware.mcp.client.TuningConfig.get_mcp_max_result_size_mb",
+        return_value=0.001,  # 1KB limit
+      ),
+    ):
       client = GraphMCPClient(api_base_url="http://test:8001", graph_id="test")
       client.graph_client = mock_async_graph_client
 

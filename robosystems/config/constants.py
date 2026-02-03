@@ -64,10 +64,10 @@ MAX_PORT = 65535
 DEFAULT_API_PORT = 8000
 DEFAULT_GRAPH_API_PORT = 8001
 
-# Percentage Thresholds
+# Percentage Thresholds (all values are percentages 0-100)
 ADMISSION_MEMORY_THRESHOLD_DEFAULT = 85.0  # percent (of total instance memory)
 ADMISSION_CPU_THRESHOLD_DEFAULT = 90.0  # percent
-ADMISSION_QUEUE_THRESHOLD_DEFAULT = 0.8  # 80% as decimal
+ADMISSION_QUEUE_THRESHOLD_DEFAULT = 80.0  # percent (of queue capacity)
 
 # String Length Limits
 MAX_QUERY_LENGTH = 10000  # characters
@@ -120,6 +120,11 @@ MAX_SAMPLING_RATE = 1.0
 # JWT Token Expiration
 JWT_ACCESS_TOKEN_EXPIRE_MINUTES = 30
 JWT_REFRESH_TOKEN_EXPIRE_DAYS = 30
+JWT_EXPIRY_HOURS = 0.5  # 30 minutes - used for access token creation
+
+# Email Token Expiration
+EMAIL_TOKEN_EXPIRY_HOURS = 24  # Email verification token validity
+PASSWORD_RESET_TOKEN_EXPIRY_HOURS = 1  # Password reset token validity
 
 # Authentication Security Constants
 TOKEN_GRACE_PERIOD_MINUTES = 5  # Grace period for expired token refresh
@@ -160,9 +165,9 @@ QUERY_QUEUE_TIMEOUT = 300  # 5 minutes
 # Admission Control
 ADMISSION_CHECK_INTERVAL = 1.0  # seconds
 
-# Load Shedding Pressure Thresholds (decimal values)
-LOAD_SHED_START_PRESSURE_DEFAULT = 0.8  # 80% pressure
-LOAD_SHED_STOP_PRESSURE_DEFAULT = 0.6  # 60% pressure
+# Load Shedding Pressure Thresholds (percentages 0-100)
+LOAD_SHED_START_PRESSURE_DEFAULT = 80.0  # Start shedding at 80% pressure
+LOAD_SHED_STOP_PRESSURE_DEFAULT = 60.0  # Stop shedding below 60% pressure
 
 # Tier-Specific Instance Memory Limits (MB)
 # Tiers: ladybug-standard, ladybug-large, ladybug-xlarge

@@ -952,14 +952,14 @@ class TestLoadSheddingFeatureFlags:
       mock_config_class.LOAD_SHEDDING_ENABLED = True
       mock_config_class.MEMORY_THRESHOLD = 85.0
       mock_config_class.CPU_THRESHOLD = 90.0
-      mock_config_class.QUEUE_THRESHOLD = 0.8
+      mock_config_class.QUEUE_THRESHOLD = 80.0  # Percentage (0-100)
       mock_config_class.CHECK_INTERVAL = 1.0
 
-      # Mock the actual method
+      # Mock the actual method - all thresholds are percentages (0-100)
       mock_config_class.get_admission_config.return_value = {
         "memory_threshold": 85.0,
         "cpu_threshold": 90.0,
-        "queue_threshold": 0.8,
+        "queue_threshold": 80.0,  # Percentage, normalized to 0.8 internally
         "check_interval": 1.0,
         "load_shedding_enabled": True,
       }
@@ -972,7 +972,7 @@ class TestLoadSheddingFeatureFlags:
       mock_config_class.get_admission_config.return_value = {
         "memory_threshold": 85.0,
         "cpu_threshold": 90.0,
-        "queue_threshold": 0.8,
+        "queue_threshold": 80.0,  # Percentage, normalized to 0.8 internally
         "check_interval": 1.0,
         "load_shedding_enabled": False,
       }
@@ -988,10 +988,11 @@ class TestLoadSheddingFeatureFlags:
     )
 
     # Create controller with load shedding disabled
+    # All thresholds are percentages (0-100), normalized internally
     controller = AdmissionController(
       memory_threshold=85.0,
       cpu_threshold=90.0,
-      queue_threshold=0.8,
+      queue_threshold=80.0,  # Percentage, normalized to 0.8 internally
       check_interval=1.0,
       load_shedding_enabled=False,
     )
@@ -1015,10 +1016,11 @@ class TestLoadSheddingFeatureFlags:
     )
 
     # Create controller with load shedding enabled
+    # All thresholds are percentages (0-100), normalized internally
     controller = AdmissionController(
       memory_threshold=85.0,
       cpu_threshold=90.0,
-      queue_threshold=0.8,
+      queue_threshold=80.0,  # Percentage, normalized to 0.8 internally
       check_interval=1.0,
       load_shedding_enabled=True,
     )
@@ -1042,10 +1044,11 @@ class TestLoadSheddingFeatureFlags:
     from robosystems.middleware.graph.admission_control import get_admission_controller
 
     with patch("robosystems.config.query_queue.QueryQueueConfig") as mock_config:
+      # All threshold values are percentages (0-100), normalized internally to decimals
       mock_config.get_admission_config.return_value = {
         "memory_threshold": 75.0,
         "cpu_threshold": 80.0,
-        "queue_threshold": 0.7,
+        "queue_threshold": 70.0,  # 70% -> normalized to 0.7 internally
         "check_interval": 2.0,
         "load_shedding_enabled": False,
       }
@@ -1070,10 +1073,11 @@ class TestLoadSheddingFeatureFlags:
     # Test that the admission controller respects the configuration
     with patch("robosystems.config.query_queue.QueryQueueConfig") as mock_config:
       # Test with load shedding disabled
+      # All thresholds are percentages (0-100), normalized internally
       mock_config.get_admission_config.return_value = {
         "memory_threshold": 85.0,
         "cpu_threshold": 90.0,
-        "queue_threshold": 0.8,
+        "queue_threshold": 80.0,  # Percentage, normalized to 0.8 internally
         "check_interval": 1.0,
         "load_shedding_enabled": False,
       }

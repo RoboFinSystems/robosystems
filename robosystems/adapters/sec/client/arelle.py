@@ -8,6 +8,13 @@ from arelle import Cntlr, ModelXbrl
 from arelle.Version import __version__ as ARELLE_VERSION
 from arelle.WebCache import WebCache
 
+from robosystems.adapters.sec.config import (
+  ARELLE_DOWNLOAD_TIMEOUT,
+  ARELLE_LOG_FILE,
+  ARELLE_MIN_SCHEMA_COUNT,
+  ARELLE_TIMEOUT,
+  ARELLE_WORK_OFFLINE,
+)
 from robosystems.config import env
 from robosystems.logger import get_logger
 
@@ -131,11 +138,8 @@ class ArelleClient:
     schema_count = len(list(self.cache_dir.glob("**/*.xsd")))
     logger.debug(f"Cache health check: {schema_count} schemas found")
 
-    # Get minimum schema count from environment (default 10 for basic operation)
-    min_schema_count = (
-      env.ARELLE_MIN_SCHEMA_COUNT if hasattr(env, "ARELLE_MIN_SCHEMA_COUNT") else 10
-    )
-    return schema_count >= min_schema_count
+    # Get minimum schema count from module constants (default 10 for basic operation)
+    return schema_count >= ARELLE_MIN_SCHEMA_COUNT
 
   def _initialize_controller(self):
     """Initialize Arelle controller with proper settings."""
@@ -144,7 +148,7 @@ class ArelleClient:
     # Initialize controller
     self.cntlr = Cntlr.Cntlr(
       hasGui=False,
-      logFileName=env.ARELLE_LOG_FILE,
+      logFileName=ARELLE_LOG_FILE,
       logFileMode="w",
       uiLang=None,
       disable_persistent_config=True,
@@ -232,9 +236,9 @@ class ArelleClient:
       webcache.cacheDir = str(self.cache_dir)
       logger.debug(f"WebCache using directory: {webcache.cacheDir}")
 
-    # Set timeout configuration from environment variable
-    max_timeout = env.ARELLE_DOWNLOAD_TIMEOUT
-    timeout = min(env.ARELLE_TIMEOUT, max_timeout)
+    # Set timeout configuration from module constants
+    max_timeout = ARELLE_DOWNLOAD_TIMEOUT
+    timeout = min(ARELLE_TIMEOUT, max_timeout)
     webcache.timeout = timeout
     logger.debug(f"WebCache timeout set to {timeout}s (env: {env.ENVIRONMENT})")
 
@@ -245,7 +249,7 @@ class ArelleClient:
     webcache.httpsRedirect = True
 
     # Set offline mode if needed or if we detect rate limiting
-    work_offline = env.ARELLE_WORK_OFFLINE.lower() == "true"
+    work_offline = ARELLE_WORK_OFFLINE
 
     # Check cache health but don't force offline - we want to fetch missing schemas
     if self.cache_dir and self._check_cache_health():

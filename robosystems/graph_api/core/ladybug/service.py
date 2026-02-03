@@ -16,6 +16,7 @@ import psutil
 from fastapi import HTTPException, status
 
 from robosystems.config import env
+from robosystems.config.tuning import TuningConfig
 from robosystems.exceptions import (
   ConfigurationError,
 )
@@ -527,10 +528,8 @@ class LadybugService:
         with self.db_manager.get_connection(
           validated_graph_id, read_only=self.read_only
         ) as conn:
-          # Execute query with proper thread-based timeout
-          from robosystems.config import env
-
-          query_timeout = env.GRAPH_QUERY_TIMEOUT
+          # Execute query with proper thread-based timeout (runtime tunable via SSM)
+          query_timeout = TuningConfig.get_graph_query_timeout()
 
           # Use ThreadPoolExecutor for proper timeout handling
           # This works across all platforms and doesn't interfere with signals
@@ -785,7 +784,7 @@ class LadybugService:
     )
 
     query_config = QueryConfiguration(
-      timeout_seconds=env.GRAPH_QUERY_TIMEOUT,
+      timeout_seconds=TuningConfig.get_graph_query_timeout(),
       max_connections_per_db=env.LBUG_MAX_CONNECTIONS_PER_DB,
       connection_ttl_minutes=env.LBUG_CONNECTION_TTL_MINUTES,
       health_check_interval_minutes=env.GRAPH_HEALTH_CHECK_INTERVAL_MINUTES,
@@ -794,7 +793,7 @@ class LadybugService:
     admission_config = AdmissionControlConfig(
       memory_threshold=env.LBUG_ADMISSION_MEMORY_THRESHOLD,
       cpu_threshold=env.LBUG_ADMISSION_CPU_THRESHOLD,
-      queue_threshold=env.ADMISSION_QUEUE_THRESHOLD,
+      queue_threshold=TuningConfig.get_admission_queue_threshold(),
       check_interval=env.ADMISSION_CHECK_INTERVAL,
     )
 

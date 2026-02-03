@@ -826,6 +826,7 @@ class XBRLDuckDBGraphProcessor:
     year: int | None = None,
     quarter: int | None = None,
     skip_taxonomy_relationships: bool = False,
+    copy_timeout: int = INCREMENTAL_COPY_TIMEOUT,
     progress_callback: ProgressCallback | None = None,
   ) -> MaterializeResult:
     """
@@ -958,7 +959,7 @@ class XBRLDuckDBGraphProcessor:
             table_name=table_name,
             s3_pattern=s3_pattern,
             ignore_errors=True,  # Key: duplicates are silently skipped
-            timeout=INCREMENTAL_COPY_TIMEOUT,
+            timeout=copy_timeout,
             wait_for_completion=True,
           )
 

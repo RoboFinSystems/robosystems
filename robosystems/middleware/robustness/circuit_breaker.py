@@ -12,6 +12,7 @@ from typing import Any
 
 from fastapi import HTTPException
 
+from robosystems.config.tuning import TuningConfig
 from robosystems.logger import logger
 
 
@@ -30,28 +31,37 @@ class CircuitBreakerManager:
 
   def __init__(
     self,
-    failure_threshold: int = 5,
-    recovery_timeout: int = 60,
+    failure_threshold: int | None = None,
+    recovery_timeout: int | None = None,
     half_open_max_calls: int = 3,
   ):
     """
     Initialize circuit breaker manager.
 
     Args:
-        failure_threshold: Number of failures before opening circuit
-        recovery_timeout: Seconds before attempting recovery
+        failure_threshold: Number of failures before opening circuit (default from SSM/TuningConfig)
+        recovery_timeout: Seconds before attempting recovery (default from SSM/TuningConfig)
         half_open_max_calls: Max calls allowed in half-open state
     """
-    self.failure_threshold = failure_threshold
-    self.recovery_timeout = recovery_timeout
+    # Use TuningConfig for runtime tunability via SSM
+    self.failure_threshold = (
+      failure_threshold
+      if failure_threshold is not None
+      else TuningConfig.get_circuit_breaker_threshold()
+    )
+    self.recovery_timeout = (
+      recovery_timeout
+      if recovery_timeout is not None
+      else TuningConfig.get_circuit_breaker_timeout()
+    )
     self.half_open_max_calls = half_open_max_calls
 
     # Track circuit state per graph_id + operation key
     self.circuits: dict[str, CircuitState] = defaultdict(CircuitState)
 
     logger.debug(
-      f"Initialized CircuitBreakerManager with threshold={failure_threshold}, "
-      f"recovery_timeout={recovery_timeout}s"
+      f"Initialized CircuitBreakerManager with threshold={self.failure_threshold}, "
+      f"recovery_timeout={self.recovery_timeout}s"
     )
 
   def _get_circuit_key(self, graph_id: str, operation: str) -> str:

@@ -59,25 +59,32 @@ class AdmissionController:
     self,
     memory_threshold: float = 85.0,
     cpu_threshold: float = 90.0,
-    queue_threshold: float = 0.8,
+    queue_threshold: float = 80.0,
     check_interval: float = 1.0,
     load_shedding_enabled: bool = True,
+    shed_start_pressure: float = 80.0,
+    shed_stop_pressure: float = 60.0,
   ):
     """
     Initialize admission controller.
 
     Args:
-        memory_threshold: Max memory usage percent
-        cpu_threshold: Max CPU usage percent
-        queue_threshold: Queue depth threshold (0-1)
+        memory_threshold: Max memory usage percent (0-100)
+        cpu_threshold: Max CPU usage percent (0-100)
+        queue_threshold: Queue depth threshold percent (0-100)
         check_interval: Seconds between resource checks
         load_shedding_enabled: Enable admission control and load shedding
+        shed_start_pressure: Pressure threshold to start load shedding percent (0-100)
+        shed_stop_pressure: Pressure threshold to stop load shedding percent (0-100)
     """
     self.memory_threshold = memory_threshold
     self.cpu_threshold = cpu_threshold
-    self.queue_threshold = queue_threshold
+    # Normalize percentage inputs to decimals for internal comparisons
+    self.queue_threshold = queue_threshold / 100.0
     self.check_interval = check_interval
     self.load_shedding_enabled = load_shedding_enabled
+    self.shed_start_pressure = shed_start_pressure / 100.0
+    self.shed_stop_pressure = shed_stop_pressure / 100.0
 
     # Cached resource data
     self._last_check = 0.0
@@ -176,10 +183,10 @@ class AdmissionController:
         )
 
     # Update load shedding state
-    if pressure_score > 0.8 and self._shed_start_time is None:
+    if pressure_score > self.shed_start_pressure and self._shed_start_time is None:
       self._shed_start_time = time.time()
       logger.warning(f"Entering load shedding mode: pressure {pressure_score:.2f}")
-    elif pressure_score < 0.6 and self._shed_start_time is not None:
+    elif pressure_score < self.shed_stop_pressure and self._shed_start_time is not None:
       duration = time.time() - self._shed_start_time
       logger.info(f"Exiting load shedding mode after {duration:.1f} seconds")
       self._shed_start_time = None
@@ -200,7 +207,7 @@ class AdmissionController:
 
     # Check general system pressure
     pressure_score = self._calculate_pressure_score(resources, 0.0)
-    if pressure_score > 0.8:
+    if pressure_score > self.shed_start_pressure:
       return AdmissionDecision.REJECT_LOAD_SHED
 
     return AdmissionDecision.ADMIT
@@ -313,7 +320,7 @@ class AdmissionController:
       "thresholds": {
         "memory": self.memory_threshold,
         "cpu": self.cpu_threshold,
-        "queue": self.queue_threshold,
+        "queue": self.queue_threshold * 100,  # Convert back to percentage for display
       },
     }
 
