@@ -15,6 +15,7 @@ import httpx
 from httpx import HTTPError, TimeoutException
 
 from robosystems.config import env
+from robosystems.config.defaults import CacheDefaults
 from robosystems.graph_api.client import GraphClient
 from robosystems.logger import logger
 
@@ -36,7 +37,7 @@ class GraphMCPClient:
   # Class-level cached configuration
   _config_cache = None
   _config_cache_time = 0
-  _config_cache_ttl = 300  # 5 minutes
+  _config_cache_ttl = CacheDefaults.SCHEMA_TTL  # 5 minutes
 
   def __init__(
     self,

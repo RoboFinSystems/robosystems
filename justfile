@@ -99,13 +99,35 @@ update:
 bootstrap profile="robosystems-sso" region="us-east-1":
     @bin/setup/bootstrap.sh "{{profile}}" "{{region}}"
 
-# AWS Secrets Manager setup
+# AWS setup (Secrets Manager + SSM Parameter Store)
 setup-aws:
     @bin/setup/aws.sh
 
 # GitHub Repository setup
 setup-gha:
     @bin/setup/gha.sh
+
+# SSM Parameter Store (see wiki: Bootstrap-Guide#ssm-parameters)
+ssm-list env category:
+    @aws ssm get-parameters-by-path \
+        --path "/robosystems/{{env}}/{{category}}" \
+        --recursive \
+        --query "Parameters[*].[Name,Value]" \
+        --output table
+
+ssm-set env path value:
+    @aws ssm put-parameter \
+        --name "/robosystems/{{env}}/{{path}}" \
+        --value "{{value}}" \
+        --type String \
+        --overwrite
+    @echo "Set /robosystems/{{env}}/{{path}} = {{value}}"
+
+ssm-get env path:
+    @aws ssm get-parameter \
+        --name "/robosystems/{{env}}/{{path}}" \
+        --query "Parameter.Value" \
+        --output text
 
 # Bedrock local development setup (creates IAM user, updates .env)
 setup-bedrock:

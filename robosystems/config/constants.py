@@ -231,6 +231,18 @@ CREDIT_ALLOCATION_DAY = 1  # 1st of month
 CREDIT_ALLOCATION_HOUR = 3  # 3 AM UTC
 
 # =============================================================================
+# API VERSION CONSTANTS
+# =============================================================================
+# These are pinned API versions for external service compatibility.
+# They should only change when explicitly upgrading API versions,
+# not as part of secrets or runtime configuration.
+
+# Stripe API Version
+# Pinned to ensure consistent behavior across deployments.
+# See: https://stripe.com/docs/api/versioning
+STRIPE_API_VERSION = "2025-10-29.clover"
+
+# =============================================================================
 # STATIC STRING/URI CONSTANTS
 # =============================================================================
 

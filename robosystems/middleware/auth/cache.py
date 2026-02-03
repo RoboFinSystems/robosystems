@@ -15,6 +15,7 @@ from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
 from ...config import env
+from ...config.defaults import CacheDefaults
 from ...config.valkey_registry import ValkeyDatabase, create_redis_client
 from ...logger import logger
 from ...security import SecurityAuditLogger, SecurityEventType
@@ -23,8 +24,8 @@ from ...security import SecurityAuditLogger, SecurityEventType
 class APIKeyCache:
   """Manages API key and JWT caching in Valkey/Redis with comprehensive security validation."""
 
-  # Cache configuration
-  DEFAULT_TTL = 300  # 5 minutes
+  # Cache configuration - using centralized defaults
+  DEFAULT_TTL = CacheDefaults.SHORT  # 5 minutes
   CACHE_KEY_PREFIX = "apikey:"
   GRAPH_CACHE_KEY_PREFIX = "apikey_graph:"
   USER_DATA_PREFIX = "user:"

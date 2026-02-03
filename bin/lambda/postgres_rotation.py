@@ -285,7 +285,9 @@ def test_secret(arn: str, token: str, environment: str) -> None:
 
   except Exception as e:
     error_type = type(e).__name__
-    logger.error(f"testSecret: Unable to connect with pending secret: {error_type}: {e}")
+    logger.error(
+      f"testSecret: Unable to connect with pending secret: {error_type}: {e}"
+    )
     raise
   finally:
     if conn:
