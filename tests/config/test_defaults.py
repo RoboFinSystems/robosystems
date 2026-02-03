@@ -86,15 +86,15 @@ class TestAdmissionDefaults:
     """Verify CPU threshold is between 50% and 100%."""
     assert 50.0 <= AdmissionDefaults.CPU_THRESHOLD <= 100.0
 
-  def test_queue_threshold_is_decimal(self):
-    """Verify queue threshold is a decimal between 0 and 1."""
-    assert 0.0 < AdmissionDefaults.QUEUE_THRESHOLD < 1.0
+  def test_queue_threshold_is_percentage(self):
+    """Verify queue threshold is a percentage between 0 and 100."""
+    assert 0.0 < AdmissionDefaults.QUEUE_THRESHOLD <= 100.0
 
   def test_default_values(self):
-    """Verify specific default values."""
+    """Verify specific default values (all percentages 0-100)."""
     assert AdmissionDefaults.MEMORY_THRESHOLD == 85.0
     assert AdmissionDefaults.CPU_THRESHOLD == 90.0
-    assert AdmissionDefaults.QUEUE_THRESHOLD == 0.8
+    assert AdmissionDefaults.QUEUE_THRESHOLD == 80.0
 
 
 class TestQueueDefaults:
@@ -142,24 +142,24 @@ class TestCircuitBreakerDefaults:
 
 
 class TestLoadSheddingDefaults:
-  """Test LoadSheddingDefaults values."""
+  """Test LoadSheddingDefaults values (all percentages 0-100)."""
 
-  def test_start_pressure_is_decimal(self):
-    """Verify start pressure is a decimal between 0 and 1."""
-    assert 0.0 < LoadSheddingDefaults.START_PRESSURE < 1.0
+  def test_start_pressure_is_percentage(self):
+    """Verify start pressure is a percentage between 0 and 100."""
+    assert 0.0 < LoadSheddingDefaults.START_PRESSURE <= 100.0
 
-  def test_stop_pressure_is_decimal(self):
-    """Verify stop pressure is a decimal between 0 and 1."""
-    assert 0.0 < LoadSheddingDefaults.STOP_PRESSURE < 1.0
+  def test_stop_pressure_is_percentage(self):
+    """Verify stop pressure is a percentage between 0 and 100."""
+    assert 0.0 < LoadSheddingDefaults.STOP_PRESSURE <= 100.0
 
   def test_start_pressure_greater_than_stop(self):
     """Verify start pressure is greater than stop pressure (hysteresis)."""
     assert LoadSheddingDefaults.START_PRESSURE > LoadSheddingDefaults.STOP_PRESSURE
 
   def test_default_values(self):
-    """Verify specific default values."""
-    assert LoadSheddingDefaults.START_PRESSURE == 0.8
-    assert LoadSheddingDefaults.STOP_PRESSURE == 0.6
+    """Verify specific default values (percentages)."""
+    assert LoadSheddingDefaults.START_PRESSURE == 80.0
+    assert LoadSheddingDefaults.STOP_PRESSURE == 60.0
 
 
 class TestMCPDefaults:

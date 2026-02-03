@@ -6,6 +6,7 @@ import httpx
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
+from ...adapters.sec.config import SEC_VALIDATE_CIK
 from ...config import env
 from ...logger import logger
 from ...middleware.graph import get_graph_repository
@@ -169,7 +170,7 @@ async def create_sec_connection(
     raise HTTPException(status_code=404, detail="Entity not found")
 
   # Optionally validate CIK with SEC API
-  if env.SEC_VALIDATE_CIK:
+  if SEC_VALIDATE_CIK:
     try:
       cik_info = await validate_cik_with_sec_api(config.cik)
       if not cik_info["is_valid"]:

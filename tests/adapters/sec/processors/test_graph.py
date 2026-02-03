@@ -167,10 +167,16 @@ class TestXBRLGraphProcessorInitialization:
     self, mock_schema_ingestion_processor, mock_schema_processor, monkeypatch
   ):
     """Test initialization with feature flags enabled."""
-    # Patch the environment variables
-    monkeypatch.setattr("robosystems.config.env.XBRL_STANDARDIZED_FILENAMES", True)
-    monkeypatch.setattr("robosystems.config.env.XBRL_TYPE_PREFIXES", True)
-    monkeypatch.setattr("robosystems.config.env.XBRL_COLUMN_STANDARDIZATION", True)
+    # Patch the module constants (now imported from adapters/sec/config.py)
+    monkeypatch.setattr(
+      "robosystems.adapters.sec.processors.xbrl_graph.XBRL_STANDARDIZED_FILENAMES", True
+    )
+    monkeypatch.setattr(
+      "robosystems.adapters.sec.processors.xbrl_graph.XBRL_TYPE_PREFIXES", True
+    )
+    monkeypatch.setattr(
+      "robosystems.adapters.sec.processors.xbrl_graph.XBRL_COLUMN_STANDARDIZATION", True
+    )
     mock_schema_instance = MagicMock()
     mock_schema_instance.create_schema_compatible_dataframe.return_value = (
       pd.DataFrame()

@@ -8,6 +8,7 @@ import os
 from typing import Any
 
 from . import env
+from .constants import MAX_CONCURRENT_DOWNLOADS
 
 
 class ExternalServicesConfig:
@@ -28,7 +29,7 @@ class ExternalServicesConfig:
     "retry_delay": 1,  # seconds
     "retry_min_wait": 600,  # 10 seconds min wait for retries
     "retry_max_wait": 1000,  # 16.7 seconds max wait for retries
-    "max_concurrent_downloads": env.SEC_MAX_CONCURRENT_DOWNLOADS,
+    "max_concurrent_downloads": MAX_CONCURRENT_DOWNLOADS,
     "bulk_download_url": "https://www.sec.gov/Archives/edgar/daily-index/bulkdata/",
     "xbrl_rss_url": "https://www.sec.gov/Archives/edgar/xbrlrss.all.xml",
     "startup_delay": 30,  # seconds to wait before starting SEC tasks

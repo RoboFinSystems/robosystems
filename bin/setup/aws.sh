@@ -300,10 +300,14 @@ function create_ssm_tuning_parameters() {
         "cache/API_KEY_TTL=300"
         "cache/SCHEMA_TTL=300"
 
-        # Admission Control (thresholds)
+        # Admission Control - Main API (all percentages 0-100)
         "admission/MEMORY_THRESHOLD=85.0"
         "admission/CPU_THRESHOLD=90.0"
-        "admission/QUEUE_THRESHOLD=0.8"
+        "admission/QUEUE_THRESHOLD=80.0"
+
+        # Admission Control - Graph API / LadybugDB (percentages 0-100)
+        "lbug_admission/MEMORY_THRESHOLD=85.0"
+        "lbug_admission/CPU_THRESHOLD=90.0"
 
         # Queue Configuration
         "queues/MAX_SIZE=1000"
@@ -315,9 +319,9 @@ function create_ssm_tuning_parameters() {
         "circuits/THRESHOLD=5"
         "circuits/TIMEOUT=60"
 
-        # Load Shedding (decimal thresholds)
-        "load_shedding/START_PRESSURE=0.8"
-        "load_shedding/STOP_PRESSURE=0.6"
+        # Load Shedding (all percentages 0-100)
+        "load_shedding/START_PRESSURE=80.0"
+        "load_shedding/STOP_PRESSURE=60.0"
 
         # MCP Operation Limits
         "mcp/MAX_RESULT_ROWS=1000"

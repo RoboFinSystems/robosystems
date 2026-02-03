@@ -59,7 +59,7 @@ class TimeoutDefaults:
 
 class AdmissionDefaults:
   """
-  Admission control thresholds.
+  Admission control thresholds (all values are percentages 0-100).
 
   These thresholds determine when to start rejecting new requests
   to protect system stability.
@@ -67,7 +67,7 @@ class AdmissionDefaults:
 
   MEMORY_THRESHOLD = 85.0  # Start rejecting at 85% memory usage
   CPU_THRESHOLD = 90.0  # Start rejecting at 90% CPU usage
-  QUEUE_THRESHOLD = 0.8  # Start rejecting at 80% queue capacity
+  QUEUE_THRESHOLD = 80.0  # Start rejecting at 80% queue capacity
 
 
 class QueueDefaults:
@@ -96,14 +96,14 @@ class CircuitBreakerDefaults:
 
 class LoadSheddingDefaults:
   """
-  Load shedding thresholds (decimal values 0.0-1.0).
+  Load shedding thresholds (all values are percentages 0-100).
 
   Load shedding is a last-resort protection mechanism that randomly
   rejects requests when system pressure is too high.
   """
 
-  START_PRESSURE = 0.8  # Start shedding at 80% pressure
-  STOP_PRESSURE = 0.6  # Stop shedding when below 60% pressure
+  START_PRESSURE = 80.0  # Start shedding at 80% pressure
+  STOP_PRESSURE = 60.0  # Stop shedding when below 60% pressure
 
 
 class MCPDefaults:

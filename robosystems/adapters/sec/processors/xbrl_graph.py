@@ -8,6 +8,14 @@ from arelle import XbrlConst
 
 from robosystems.adapters.sec import SEC_BASE_URL, SECClient
 from robosystems.adapters.sec.client.arelle import ArelleClient
+from robosystems.adapters.sec.config import (
+  XBRL_COLUMN_STANDARDIZATION,
+  XBRL_EXTERNALIZATION_THRESHOLD,
+  XBRL_EXTERNALIZE_LARGE_VALUES,
+  XBRL_SKIP_TEXTBLOCK_FACTS,
+  XBRL_STANDARDIZED_FILENAMES,
+  XBRL_TYPE_PREFIXES,
+)
 from robosystems.adapters.sec.processors import (
   DataFrameManager,
   ParquetWriter,
@@ -70,7 +78,7 @@ class XBRLGraphProcessor:
 
     # Initialize TextBlockExternalizer for S3 externalization
     s3_client = None
-    if env.XBRL_EXTERNALIZE_LARGE_VALUES and env.PUBLIC_DATA_BUCKET:
+    if XBRL_EXTERNALIZE_LARGE_VALUES and env.PUBLIC_DATA_BUCKET:
       try:
         s3_client = S3Client()
       except Exception as e:
@@ -80,14 +88,14 @@ class XBRLGraphProcessor:
       s3_client=s3_client,
       bucket=env.PUBLIC_DATA_BUCKET,
       cdn_url=env.PUBLIC_DATA_CDN_URL,
-      threshold=env.XBRL_EXTERNALIZATION_THRESHOLD,
-      enabled=env.XBRL_EXTERNALIZE_LARGE_VALUES,
+      threshold=XBRL_EXTERNALIZATION_THRESHOLD,
+      enabled=XBRL_EXTERNALIZE_LARGE_VALUES,
     )
 
     # Feature flags for upstream simplification
-    self.enable_standardized_filenames = env.XBRL_STANDARDIZED_FILENAMES
-    self.enable_type_prefixes = env.XBRL_TYPE_PREFIXES
-    self.enable_column_standardization = env.XBRL_COLUMN_STANDARDIZATION
+    self.enable_standardized_filenames = XBRL_STANDARDIZED_FILENAMES
+    self.enable_type_prefixes = XBRL_TYPE_PREFIXES
+    self.enable_column_standardization = XBRL_COLUMN_STANDARDIZATION
 
     if (
       self.enable_standardized_filenames
@@ -650,7 +658,7 @@ class XBRLGraphProcessor:
 
     # Skip textblock facts entirely if configured (saves storage for historical data)
     # This takes precedence over externalization - fact is not created at all
-    if env.XBRL_SKIP_TEXTBLOCK_FACTS and xfact.concept and xfact.concept.isTextBlock:
+    if XBRL_SKIP_TEXTBLOCK_FACTS and xfact.concept and xfact.concept.isTextBlock:
       logger.debug(
         f"Skipping textblock fact (XBRL_SKIP_TEXTBLOCK_FACTS=true): {fact_uri}"
       )

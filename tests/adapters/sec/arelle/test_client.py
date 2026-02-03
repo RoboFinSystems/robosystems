@@ -215,9 +215,10 @@ class TestArelleClient:
 
     mock_cache_dir.__truediv__ = mock_truediv
 
-    # Patch env at module level
-    # The env object just needs to have ARELLE_MIN_SCHEMA_COUNT attribute
-    with patch.object(env, "ARELLE_MIN_SCHEMA_COUNT", 10):
+    # Patch the module constant (now imported from adapters/sec/config.py)
+    with patch(
+      "robosystems.adapters.sec.client.arelle.ARELLE_MIN_SCHEMA_COUNT", 10
+    ):
       client = ArelleClient.__new__(ArelleClient)
       client.cache_dir = mock_cache_dir
 
@@ -300,6 +301,9 @@ class TestArelleClient:
           # If we get an exception, verify it's handled gracefully
           raise AssertionError(f"_load_plugins raised unexpected exception: {e}")
 
+  @patch("robosystems.adapters.sec.client.arelle.ARELLE_WORK_OFFLINE", False)
+  @patch("robosystems.adapters.sec.client.arelle.ARELLE_TIMEOUT", 60)
+  @patch("robosystems.adapters.sec.client.arelle.ARELLE_DOWNLOAD_TIMEOUT", 300)
   @patch("robosystems.adapters.sec.client.arelle.env")
   def test_configure_webcache(self, mock_env, temp_dir):
     """Test webcache configuration."""
@@ -308,9 +312,6 @@ class TestArelleClient:
     mock_webcache = Mock()
     mock_cntlr.webCache = mock_webcache
 
-    mock_env.ARELLE_DOWNLOAD_TIMEOUT = 300
-    mock_env.ARELLE_TIMEOUT = 60
-    mock_env.ARELLE_WORK_OFFLINE = "false"
     mock_env.ENVIRONMENT = "test"
 
     client = ArelleClient.__new__(ArelleClient)
@@ -468,6 +469,10 @@ class TestArelleClient:
       assert client.cache_dir is not None
       assert "cache" in str(client.cache_dir)
 
+  @patch("robosystems.adapters.sec.client.arelle.ARELLE_MIN_SCHEMA_COUNT", 10)
+  @patch("robosystems.adapters.sec.client.arelle.ARELLE_WORK_OFFLINE", True)
+  @patch("robosystems.adapters.sec.client.arelle.ARELLE_TIMEOUT", 60)
+  @patch("robosystems.adapters.sec.client.arelle.ARELLE_DOWNLOAD_TIMEOUT", 300)
   @patch("robosystems.adapters.sec.client.arelle.WebCache")
   def test_webcache_offline_mode(self, mock_webcache_class, client):
     """Test webcache offline mode configuration."""
@@ -479,14 +484,8 @@ class TestArelleClient:
 
     client.cntlr = mock_cntlr
 
-    with patch("robosystems.adapters.sec.client.arelle.env") as mock_env:
-      mock_env.ARELLE_WORK_OFFLINE = "true"
-      mock_env.ARELLE_DOWNLOAD_TIMEOUT = 300
-      mock_env.ARELLE_TIMEOUT = 60
-      mock_env.ARELLE_MIN_SCHEMA_COUNT = 10
+    # Execute
+    client._configure_webcache()
 
-      # Execute
-      client._configure_webcache()
-
-      # Verify offline mode configured
-      # (specific offline configuration depends on WebCache implementation)
+    # Verify offline mode configured
+    # (specific offline configuration depends on WebCache implementation)

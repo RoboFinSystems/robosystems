@@ -364,6 +364,8 @@ class SECDirectCopyConfig(Config):
     str
   ] = []  # Tables to skip (e.g., ["Entity"] for type mismatch issues)
   year: int | None = None  # Optional year filter (None = all years)
+  quarter_copy_timeout: int = 1800  # Timeout per quarter for large tables (seconds)
+  single_table_timeout: int = 3600  # Timeout for small tables full copy (seconds)
 
 
 class SECIncrementalCopyConfig(Config):
@@ -390,6 +392,7 @@ class SECIncrementalCopyConfig(Config):
     default=None, ge=1, le=4
   )  # Quarter 1-4 (default: current)
   skip_taxonomy_relationships: bool = False  # Skip taxonomy structure tables
+  copy_timeout: int = 600  # Timeout per table copy (seconds)
 
 
 # ============================================================================
@@ -2047,6 +2050,7 @@ def sec_graph_incremental_copy(
       year=config.year,
       quarter=config.quarter,
       skip_taxonomy_relationships=config.skip_taxonomy_relationships,
+      copy_timeout=config.copy_timeout,
       progress_callback=context.log.info,
     )
 
@@ -2356,11 +2360,6 @@ def sec_graph_direct_copy(
   )
   from robosystems.schemas.extensions.roboledger import RoboLedgerContext
 
-  # Timeout for quarter-by-quarter copies (same as materialization batches)
-  QUARTER_COPY_TIMEOUT = 1800  # 30 minutes per quarter
-  # Timeout for small tables (single copy)
-  SINGLE_COPY_TIMEOUT = 3600  # 60 minutes
-
   context.log.info(f"Direct S3 → LadybugDB copy for graph: {config.graph_id}")
   if config.year:
     context.log.info(f"Year filter: {config.year}")
@@ -2518,7 +2517,7 @@ def sec_graph_direct_copy(
               table_name=table_name,
               s3_pattern=s3_pattern,  # Single file for this quarter
               ignore_errors=True,
-              timeout=QUARTER_COPY_TIMEOUT,
+              timeout=config.quarter_copy_timeout,
               wait_for_completion=True,
             )
 
@@ -2586,7 +2585,7 @@ def sec_graph_direct_copy(
             table_name=table_name,
             s3_pattern=s3_pattern,  # Glob pattern for all quarters
             ignore_errors=True,
-            timeout=SINGLE_COPY_TIMEOUT,
+            timeout=config.single_table_timeout,
             wait_for_completion=True,
           )
 

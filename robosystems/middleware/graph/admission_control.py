@@ -59,31 +59,32 @@ class AdmissionController:
     self,
     memory_threshold: float = 85.0,
     cpu_threshold: float = 90.0,
-    queue_threshold: float = 0.8,
+    queue_threshold: float = 80.0,
     check_interval: float = 1.0,
     load_shedding_enabled: bool = True,
-    shed_start_pressure: float = 0.8,
-    shed_stop_pressure: float = 0.6,
+    shed_start_pressure: float = 80.0,
+    shed_stop_pressure: float = 60.0,
   ):
     """
     Initialize admission controller.
 
     Args:
-        memory_threshold: Max memory usage percent
-        cpu_threshold: Max CPU usage percent
-        queue_threshold: Queue depth threshold (0-1)
+        memory_threshold: Max memory usage percent (0-100)
+        cpu_threshold: Max CPU usage percent (0-100)
+        queue_threshold: Queue depth threshold percent (0-100)
         check_interval: Seconds between resource checks
         load_shedding_enabled: Enable admission control and load shedding
-        shed_start_pressure: Pressure threshold to start load shedding (0-1)
-        shed_stop_pressure: Pressure threshold to stop load shedding (0-1)
+        shed_start_pressure: Pressure threshold to start load shedding percent (0-100)
+        shed_stop_pressure: Pressure threshold to stop load shedding percent (0-100)
     """
     self.memory_threshold = memory_threshold
     self.cpu_threshold = cpu_threshold
-    self.queue_threshold = queue_threshold
+    # Normalize percentage inputs to decimals for internal comparisons
+    self.queue_threshold = queue_threshold / 100.0
     self.check_interval = check_interval
     self.load_shedding_enabled = load_shedding_enabled
-    self.shed_start_pressure = shed_start_pressure
-    self.shed_stop_pressure = shed_stop_pressure
+    self.shed_start_pressure = shed_start_pressure / 100.0
+    self.shed_stop_pressure = shed_stop_pressure / 100.0
 
     # Cached resource data
     self._last_check = 0.0
@@ -319,7 +320,7 @@ class AdmissionController:
       "thresholds": {
         "memory": self.memory_threshold,
         "cpu": self.cpu_threshold,
-        "queue": self.queue_threshold,
+        "queue": self.queue_threshold * 100,  # Convert back to percentage for display
       },
     }
 

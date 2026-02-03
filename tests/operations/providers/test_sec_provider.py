@@ -304,7 +304,7 @@ class TestCreateSECConnection:
         mock_create.return_value = mock_connection_data
 
         with patch(
-          "robosystems.operations.providers.sec_provider.env.SEC_VALIDATE_CIK", False
+          "robosystems.operations.providers.sec_provider.SEC_VALIDATE_CIK", False
         ):
           connection_id = await create_sec_connection(
             entity_id="entity123",
@@ -381,7 +381,7 @@ class TestCreateSECConnection:
           mock_create.return_value = {"connection_id": "conn123"}
 
           with patch(
-            "robosystems.operations.providers.sec_provider.env.SEC_VALIDATE_CIK", True
+            "robosystems.operations.providers.sec_provider.SEC_VALIDATE_CIK", True
           ):
             # Config without entity_name to test it gets set from validation
             config_no_name = SECConnectionConfig(cik="0001234567", entity_name=None)
@@ -428,7 +428,7 @@ class TestCreateSECConnection:
           mock_create.return_value = {"connection_id": "conn123"}
 
           with patch(
-            "robosystems.operations.providers.sec_provider.env.SEC_VALIDATE_CIK", True
+            "robosystems.operations.providers.sec_provider.SEC_VALIDATE_CIK", True
           ):
             config = SECConnectionConfig(cik="9999999999", entity_name=None)
 

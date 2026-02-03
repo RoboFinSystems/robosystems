@@ -96,7 +96,7 @@ class TestAdmissionController:
     return AdmissionController(
       memory_threshold=85.0,
       cpu_threshold=90.0,
-      queue_threshold=0.8,
+      queue_threshold=80.0,  # Percentage input, normalized to 0.8 internally
       check_interval=1.0,
     )
 
@@ -121,7 +121,7 @@ class TestAdmissionController:
     """Test controller initialization."""
     assert controller.memory_threshold == 85.0
     assert controller.cpu_threshold == 90.0
-    assert controller.queue_threshold == 0.8
+    assert controller.queue_threshold == 0.8  # Normalized from 80.0% input
     assert controller.check_interval == 1.0
     assert controller._last_check == 0.0
     assert controller._cached_resources is None
@@ -428,7 +428,7 @@ class TestAdmissionController:
     assert status["load_shedding"]["active"] is False
     assert status["thresholds"]["memory"] == 85.0
     assert status["thresholds"]["cpu"] == 90.0
-    assert status["thresholds"]["queue"] == 0.8
+    assert status["thresholds"]["queue"] == 80.0  # Displayed as percentage
 
   def test_get_health_status_degraded(self, controller, mock_psutil):
     """Test getting health status for degraded system."""
@@ -513,8 +513,11 @@ class TestGetAdmissionController:
     mock_config.get_admission_config.return_value = {
       "memory_threshold": 75.0,
       "cpu_threshold": 80.0,
-      "queue_threshold": 0.7,
+      "queue_threshold": 70.0,  # Percentage input
       "check_interval": 2.0,
+      "load_shedding_enabled": True,
+      "shed_start_pressure": 80.0,  # Percentage input
+      "shed_stop_pressure": 60.0,  # Percentage input
     }
 
     # Reset global state
@@ -526,5 +529,7 @@ class TestGetAdmissionController:
 
     assert controller.memory_threshold == 75.0
     assert controller.cpu_threshold == 80.0
-    assert controller.queue_threshold == 0.7
+    assert controller.queue_threshold == 0.7  # Normalized from 70.0%
     assert controller.check_interval == 2.0
+    assert controller.shed_start_pressure == 0.8  # Normalized from 80.0%
+    assert controller.shed_stop_pressure == 0.6  # Normalized from 60.0%
