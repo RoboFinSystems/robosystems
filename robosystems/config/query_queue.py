@@ -6,6 +6,11 @@ Falls back to defaults when SSM is not available.
 """
 
 from robosystems.config import env
+from robosystems.config.constants import (
+  ADMISSION_CHECK_INTERVAL,
+  QUERY_DEFAULT_PRIORITY,
+  QUERY_PRIORITY_BOOST_PREMIUM,
+)
 from robosystems.config.tuning import TuningConfig
 
 
@@ -13,11 +18,11 @@ class QueryQueueConfig:
   """Configuration for query queue system with runtime tunability."""
 
   # Priority configuration (not tunable - business logic)
-  DEFAULT_PRIORITY: int = env.QUERY_DEFAULT_PRIORITY
-  PRIORITY_BOOST_PREMIUM: int = env.QUERY_PRIORITY_BOOST_PREMIUM
+  DEFAULT_PRIORITY: int = QUERY_DEFAULT_PRIORITY
+  PRIORITY_BOOST_PREMIUM: int = QUERY_PRIORITY_BOOST_PREMIUM
 
   # Check interval (not tunable - performance sensitive)
-  CHECK_INTERVAL: float = env.ADMISSION_CHECK_INTERVAL
+  CHECK_INTERVAL: float = ADMISSION_CHECK_INTERVAL
 
   # Load shedding enabled flag (feature flag, not tunable)
   LOAD_SHEDDING_ENABLED: bool = env.LOAD_SHEDDING_ENABLED

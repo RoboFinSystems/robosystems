@@ -189,7 +189,7 @@ def create_app() -> FastAPI:
   app.add_middleware(
     CORSMiddleware,
     allow_origins=main_cors_origins,
-    allow_credentials=env.CORS_ALLOW_CREDENTIALS,
+    allow_credentials=True,  # Always enabled for cookie-based auth
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
     allow_headers=[
       "Accept",

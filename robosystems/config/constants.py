@@ -1,73 +1,33 @@
 """
 Static constants configuration.
 
-This module contains both operational constants (timeouts, limits, etc.) and
-static URI/string constants that don't change based on environment.
+This module contains fixed values that never change at runtime.
+For tunable defaults (SSM Parameter Store), see defaults.py.
+
+Categories:
+- CONSTANTS (this file): Fixed values that never change
+- TUNABLES (defaults.py): Operational parameters adjustable via SSM
+- SECRETS (secrets_manager.py): Sensitive credentials and API keys
 """
 
 # =============================================================================
-# OPERATIONAL CONSTANTS - Merged from robosystems/constants.py
+# OPERATIONAL CONSTANTS
 # =============================================================================
 
-# Storage Pricing
+# Storage Pricing (fixed business rule)
 STORAGE_CREDITS_PER_GB_PER_DAY = 0.05
 
-# Default Timeouts (seconds)
-DEFAULT_HTTP_TIMEOUT = 30
-DEFAULT_QUERY_TIMEOUT = 30
-DEFAULT_CONNECTION_TIMEOUT = 10
-
-# Cache TTL Values (seconds)
-CACHE_TTL_SHORT = 300  # 5 minutes
-CACHE_TTL_MEDIUM = 600  # 10 minutes
-CACHE_TTL_LONG = 3600  # 1 hour
-CACHE_TTL_EXTRA_LONG = 7200  # 2 hours
-
-# Rate Limiting Constants
-RATE_LIMIT_WINDOW_SHORT = 300  # 5 minutes
-RATE_LIMIT_WINDOW_LONG = 3600  # 1 hour
-
-# Query Limits
-DEFAULT_QUERY_LIMIT = 1000
-MAX_QUERY_LIMIT = 10000
-MIN_QUERY_LIMIT = 1
-
-# Result Size Limits (MB)
-DEFAULT_MAX_RESULT_SIZE_MB = 5.0
-MIN_RESULT_SIZE_MB = 0.1
-MAX_RESULT_SIZE_MB = 50.0
-
-# Retry Configuration
-DEFAULT_MAX_RETRIES = 3
-DEFAULT_RETRY_DELAY = 60  # seconds
-MIN_RETRY_DELAY = 1
-MAX_RETRY_DELAY = 300
-
-# Database Pool Configuration
+# Database Pool Configuration (infrastructure sizing, not tunables)
 DEFAULT_POOL_SIZE = 20
 DEFAULT_MAX_OVERFLOW = 40
 DEFAULT_POOL_TIMEOUT = 30
 DEFAULT_POOL_RECYCLE = 3600  # 1 hour
-
-# Worker Configuration
-DEFAULT_WORKER_COUNT = 4
-MIN_WORKER_COUNT = 1
-MAX_WORKER_COUNT = 16
-
-# Credit Allocation
-DEFAULT_CREDIT_ALLOCATION_DAY = 1  # 1st of month
-DEFAULT_CREDIT_ALLOCATION_HOUR = 3  # 3 AM UTC
 
 # Port Configuration
 MIN_PORT = 1
 MAX_PORT = 65535
 DEFAULT_API_PORT = 8000
 DEFAULT_GRAPH_API_PORT = 8001
-
-# Percentage Thresholds (all values are percentages 0-100)
-ADMISSION_MEMORY_THRESHOLD_DEFAULT = 85.0  # percent (of total instance memory)
-ADMISSION_CPU_THRESHOLD_DEFAULT = 90.0  # percent
-ADMISSION_QUEUE_THRESHOLD_DEFAULT = 80.0  # percent (of queue capacity)
 
 # String Length Limits
 MAX_QUERY_LENGTH = 10000  # characters
@@ -93,20 +53,8 @@ FALLBACK_BYTES_PER_ROW_PARQUET = 50  # Compressed format
 FALLBACK_BYTES_PER_ROW_CSV = 200  # Text format with moderate row size
 FALLBACK_BYTES_PER_ROW_JSON = 300  # Text format with more verbose structure
 
-# Queue Sizes
-DEFAULT_QUEUE_SIZE = 1000
-MAX_QUEUE_SIZE = 10000
-MIN_QUEUE_SIZE = 10
-
-# Concurrent Operations
-DEFAULT_MAX_CONCURRENT = 50
+# Concurrent Operations (fixed limits)
 MAX_CONCURRENT_DOWNLOADS = 5
-MAX_DATABASES_PER_NODE = (
-  10  # Default for standard tier (can be overridden per tier in graph.yml)
-  # ladybug-standard: 10 databases with 2GB each (multi-tenant on 14GB instance)
-  # ladybug-large/xlarge: 1 database (dedicated instance)
-  # Future upgrade path: Increase instance size, keep same DB allocation
-)
 
 # Time Limits
 TASK_TIME_LIMIT = 7200  # 2 hours
@@ -150,60 +98,62 @@ GRAPH_MAX_REQUEST_SIZE = 10 * 1024 * 1024  # 10MB
 GRAPH_CONNECT_TIMEOUT = 5.0  # seconds
 GRAPH_READ_TIMEOUT = 30.0  # seconds
 
-# Graph API Circuit Breaker/Resiliency
+# Graph API Cache TTLs (infrastructure, not tunables)
 GRAPH_ALB_HEALTH_CACHE_TTL = 30  # seconds
 GRAPH_INSTANCE_CACHE_TTL = 60  # seconds
-GRAPH_CIRCUIT_BREAKER_THRESHOLD = 5  # failures before opening
-GRAPH_CIRCUIT_BREAKER_TIMEOUT = 60  # seconds before retry
 
-# Query Queue Defaults
-QUERY_QUEUE_MAX_PER_USER = 10
+# Query Priority (fixed business rules)
 QUERY_DEFAULT_PRIORITY = 5
 QUERY_PRIORITY_BOOST_PREMIUM = 2
-QUERY_QUEUE_TIMEOUT = 300  # 5 minutes
 
-# Admission Control
+# Admission Control Interval (fixed timing)
 ADMISSION_CHECK_INTERVAL = 1.0  # seconds
 
-# Load Shedding Pressure Thresholds (percentages 0-100)
-LOAD_SHED_START_PRESSURE_DEFAULT = 80.0  # Start shedding at 80% pressure
-LOAD_SHED_STOP_PRESSURE_DEFAULT = 60.0  # Stop shedding below 60% pressure
+# Health Check Intervals (minutes)
+GRAPH_HEALTH_CHECK_INTERVAL_MINUTES = 5.0
+LBUG_HEALTH_CHECK_INTERVAL_MINUTES = 5.0
 
-# Tier-Specific Instance Memory Limits (MB)
-# Tiers: ladybug-standard, ladybug-large, ladybug-xlarge
-GRAPH_STANDARD_MAX_MEMORY_MB = 14336  # 14GB for r7g.large
-GRAPH_LARGE_MAX_MEMORY_MB = 14336  # 14GB for r7g.large (dedicated)
-GRAPH_XLARGE_MAX_MEMORY_MB = 28672  # 28GB for r7g.xlarge (dedicated)
-
-# Tier-Specific Per-Database Memory Limits (MB)
-GRAPH_STANDARD_MEMORY_PER_DB_MB = 2048  # 2GB per database (multi-tenant)
-GRAPH_LARGE_MEMORY_PER_DB_MB = 14336  # Full instance memory (dedicated)
-GRAPH_XLARGE_MEMORY_PER_DB_MB = 28672  # Full instance memory (dedicated)
-
-# Tier-Specific Streaming Chunk Sizes
-GRAPH_STANDARD_CHUNK_SIZE = 1000  # rows
-GRAPH_LARGE_CHUNK_SIZE = 5000  # rows
-GRAPH_XLARGE_CHUNK_SIZE = 10000  # rows
+# Materialization Threshold - staged data above this size routes to Dagster
+GRAPH_MATERIALIZATION_THRESHOLD_MB = 500
 
 # =============================================================================
-# BACKEND-SPECIFIC CONFIGURATION
+# LADYBUGDB CONFIGURATION
 # =============================================================================
-# Configuration specific to individual graph database backends
 
-# DuckDB (Staging/Materialization Backend)
-DUCKDB_MAX_THREADS = 4  # Limit threads to prevent oversubscription
-DUCKDB_MEMORY_LIMIT = "2GB"  # Per-connection memory limit
+# LadybugDB Connection Management
+LBUG_MAX_CONNECTIONS_PER_DB = 10
+LBUG_CONNECTION_TTL_MINUTES = 30.0  # Connection time-to-live
+
+# Distributed Lock TTL
+INGESTION_LOCK_TTL = 3600  # 1 hour - for graph materialization locks
+
+# =============================================================================
+# NEO4J CONFIGURATION (when using Neo4j backend)
+# =============================================================================
+
+# Neo4j Connection Pool (fixed infrastructure settings)
+NEO4J_MAX_CONNECTION_POOL_SIZE = 50
+NEO4J_CONNECTION_ACQUISITION_TIMEOUT = 60  # seconds
+NEO4J_MAX_CONNECTION_LIFETIME = 3600  # seconds (1 hour)
+
+# =============================================================================
+# AWS CONFIGURATION
+# =============================================================================
+
+# S3 bucket prefix (fixed naming convention)
+AWS_S3_PREFIX = "robosystems"
+
+# =============================================================================
+# SSE RATE LIMITING
+# =============================================================================
+
+# Server-Sent Events connection limits
+RATE_LIMIT_SSE_CONNECTIONS = 10
+RATE_LIMIT_SSE_CONNECTIONS_WINDOW = 60  # seconds
 
 # =============================================================================
 # DATA PROCESSING CONFIGURATION
 # =============================================================================
-
-# SEC Pipeline Retries
-SEC_PIPELINE_MAX_RETRIES = 3
-
-# OpenFIGI API Retries
-OPENFIGI_RETRY_MIN_WAIT = 10000  # milliseconds (10 seconds)
-OPENFIGI_RETRY_MAX_WAIT = 30000  # milliseconds (30 seconds)
 
 # Arelle (XBRL Processing) Fixed Limits
 ARELLE_MIN_SCHEMA_COUNT = 10
@@ -216,9 +166,6 @@ XBRL_EXTERNALIZATION_THRESHOLD = 1024  # characters
 # These tables contain millions of rows and consume significant memory
 XBRL_GRAPH_LARGE_NODES = "Fact,Element,Label,Association,Structure,FactDimension,Report"
 
-# SEC API Rate Limiting
-SEC_RATE_LIMIT = 10  # requests per second (SEC.gov requirement)
-
 # SEC Processing Batch Limit
 # Smaller batches leverage the merge strategy for crash resilience:
 # - Each batch flushes to S3, merging with existing data
@@ -226,14 +173,6 @@ SEC_RATE_LIMIT = 10  # requests per second (SEC.gov requirement)
 # - 2000 filings/batch = ~6 batches for Q2 (proxy season, ~11k filings)
 # - Sensor re-triggers until all pending files are processed
 SEC_PROCESS_BATCH_LIMIT = 2000
-
-# =============================================================================
-# FIXED BUSINESS RULES
-# =============================================================================
-
-# Credit Allocation Schedule
-CREDIT_ALLOCATION_DAY = 1  # 1st of month
-CREDIT_ALLOCATION_HOUR = 3  # 3 AM UTC
 
 # =============================================================================
 # API VERSION CONSTANTS

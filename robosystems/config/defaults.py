@@ -186,6 +186,7 @@ SSM_TUNING_PATHS = {
   "cache/JWT_TTL": CacheDefaults.JWT_TTL,
   "cache/API_KEY_TTL": CacheDefaults.API_KEY_TTL,
   "cache/SCHEMA_TTL": CacheDefaults.SCHEMA_TTL,
+  "cache/OPERATION_COST_TTL": CacheDefaults.OPERATION_COST_TTL,
   # Admission Control
   "admission/MEMORY_THRESHOLD": AdmissionDefaults.MEMORY_THRESHOLD,
   "admission/CPU_THRESHOLD": AdmissionDefaults.CPU_THRESHOLD,

@@ -198,6 +198,8 @@ def test_get_lbug_tier_config_falls_back_on_errors(monkeypatch):
 
   def fallback_get_int_env(key, default):
     overrides = {
+      "LBUG_MAX_MEMORY_MB": 5120,
+      "LBUG_MAX_MEMORY_PER_DB_MB": 640,
       "LBUG_CHUNK_SIZE": 321,
       "LBUG_CONNECTION_POOL_SIZE": 17,
       "LBUG_DATABASES_PER_INSTANCE": 13,
@@ -205,13 +207,7 @@ def test_get_lbug_tier_config_falls_back_on_errors(monkeypatch):
     return overrides.get(key, default)
 
   monkeypatch.setattr(EnvConfig, "ENVIRONMENT", "prod", raising=False)
-  monkeypatch.setattr(EnvConfig, "LBUG_MAX_MEMORY_MB", 5120, raising=False)
-  monkeypatch.setattr(EnvConfig, "LBUG_MAX_MEMORY_PER_DB_MB", 640, raising=False)
   monkeypatch.setattr(EnvConfig, "GRAPH_QUERY_TIMEOUT", 45, raising=False)
-  monkeypatch.setattr(EnvConfig, "GRAPH_MAX_QUERY_LENGTH", 9000, raising=False)
-  monkeypatch.setattr(EnvConfig, "LBUG_MAX_DATABASES_PER_NODE", 25, raising=False)
-  monkeypatch.setattr(EnvConfig, "LBUG_STANDARD_CHUNK_SIZE", 321, raising=False)
-  monkeypatch.setattr(EnvConfig, "LBUG_MAX_CONNECTIONS_PER_DB", 17, raising=False)
   monkeypatch.setattr(env, "get_int_env", fallback_get_int_env, raising=False)
   monkeypatch.setitem(
     EnvConfig.get_lbug_tier_config.__func__.__globals__,
@@ -234,7 +230,8 @@ def test_get_lbug_tier_config_falls_back_on_errors(monkeypatch):
   assert config["chunk_size"] == 321
   assert config["connection_pool_size"] == 17
   assert config["databases_per_instance"] == 13
-  assert config["max_databases"] == 25
+  # max_databases now uses same source as databases_per_instance (consolidated config)
+  assert config["max_databases"] == 13
   assert config["tier"] == "ladybug-standard"
   assert config["storage_limit_gb"] == 500
   assert config["monthly_credits"] == 10000

@@ -16,7 +16,11 @@ from robosystems.middleware.sse import (
   run_and_monitor_dagster_job,
 )
 
-from ...config import env
+from ...config.constants import (
+  JWT_EXPIRY_HOURS,
+  PASSWORD_RESET_TOKEN_EXPIRY_HOURS,
+  TOKEN_GRACE_PERIOD_MINUTES,
+)
 from ...database import get_async_db_session
 from ...logger import logger
 from ...middleware.auth.jwt import create_jwt_token, revoke_jwt_token
@@ -92,7 +96,7 @@ async def forgot_password(
     token = UserToken.create_token(
       user_id=user.id,
       token_type="password_reset",
-      hours=env.PASSWORD_RESET_TOKEN_EXPIRY_HOURS,
+      hours=PASSWORD_RESET_TOKEN_EXPIRY_HOURS,
       session=session,
       ip_address=client_ip,
       user_agent=user_agent,
@@ -303,8 +307,8 @@ async def reset_password(
 
   logger.info(f"Password reset completed for user {user.email}")
 
-  expires_in = int(env.JWT_EXPIRY_HOURS * 3600)
-  refresh_threshold = int(env.TOKEN_GRACE_PERIOD_MINUTES * 60)
+  expires_in = int(JWT_EXPIRY_HOURS * 3600)
+  refresh_threshold = int(TOKEN_GRACE_PERIOD_MINUTES * 60)
 
   return AuthResponse(
     user={

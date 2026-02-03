@@ -298,6 +298,7 @@ function create_ssm_tuning_parameters() {
         "cache/JWT_TTL=1800"
         "cache/API_KEY_TTL=300"
         "cache/SCHEMA_TTL=300"
+        "cache/OPERATION_COST_TTL=3600"
 
         # Admission Control - Main API (all percentages 0-100)
         "admission/MEMORY_THRESHOLD=85.0"

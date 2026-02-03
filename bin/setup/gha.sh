@@ -391,13 +391,14 @@ function setup_full_config() {
     fi
 
     # LadybugDB Writer Configuration - Shared Repository (opt-in)
+    # Note: Shared master must be exactly 1 instance (single source of truth for snapshots)
     gh variable set LBUG_SHARED_ENABLED_PROD --body "false"
     gh variable set LBUG_SHARED_MIN_INSTANCES_PROD --body "1"
-    gh variable set LBUG_SHARED_MAX_INSTANCES_PROD --body "3"
+    gh variable set LBUG_SHARED_MAX_INSTANCES_PROD --body "1"
     if $setup_staging; then
         gh variable set LBUG_SHARED_ENABLED_STAGING --body "false"
         gh variable set LBUG_SHARED_MIN_INSTANCES_STAGING --body "1"
-        gh variable set LBUG_SHARED_MAX_INSTANCES_STAGING --body "2"
+        gh variable set LBUG_SHARED_MAX_INSTANCES_STAGING --body "1"
     fi
 
     # Shared Replicas Configuration - Read-Only Fleet

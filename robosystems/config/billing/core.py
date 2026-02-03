@@ -237,20 +237,14 @@ class BillingConfig:
     """
     issues = []
 
-    # Check that all tiers in CreditConfig have billing plans
-    for tier in CreditConfig.MONTHLY_ALLOCATIONS:
-      plan = cls.get_subscription_plan(tier)
-      if not plan:
-        issues.append(f"No billing plan found for tier '{tier}'")
-      elif plan["monthly_credit_allocation"] != CreditConfig.MONTHLY_ALLOCATIONS[tier]:
-        issues.append(
-          f"Credit allocation mismatch for '{tier}': "
-          f"billing={plan['monthly_credit_allocation']}, "
-          f"credits={CreditConfig.MONTHLY_ALLOCATIONS[tier]}"
-        )
-
-    # Repository configurations are now handled by UserRepository model
-    # Skip repository validation as it's moved to a different system
+    # Validate all billing plans have required fields
+    required_fields = ["name", "monthly_credit_allocation", "base_price_cents"]
+    for plan in DEFAULT_GRAPH_BILLING_PLANS:
+      for field in required_fields:
+        if field not in plan:
+          issues.append(
+            f"Billing plan '{plan.get('name', 'unknown')}' missing '{field}'"
+          )
 
     # Log validation results
     if issues:
@@ -264,9 +258,7 @@ class BillingConfig:
       "valid": len(issues) == 0,
       "issues": issues,
       "summary": {
-        "subscription_tiers": len(CreditConfig.MONTHLY_ALLOCATIONS),
         "billing_plans": len(DEFAULT_GRAPH_BILLING_PLANS),
-        "repositories": 0,  # Repository configs moved to UserRepository model
         "operation_types": len(CreditConfig.OPERATION_COSTS),
       },
     }

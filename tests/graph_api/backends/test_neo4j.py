@@ -49,15 +49,17 @@ class TestNeo4jBackendInitialization:
 
 class TestNeo4jBackendConnection:
   @pytest.mark.asyncio
+  @patch(
+    "robosystems.graph_api.backends.neo4j.NEO4J_CONNECTION_ACQUISITION_TIMEOUT", 60
+  )
+  @patch("robosystems.graph_api.backends.neo4j.NEO4J_MAX_CONNECTION_POOL_SIZE", 50)
+  @patch("robosystems.graph_api.backends.neo4j.NEO4J_MAX_CONNECTION_LIFETIME", 3600)
   @patch("robosystems.graph_api.backends.neo4j.AsyncGraphDatabase")
   @patch("robosystems.graph_api.backends.neo4j.env")
   async def test_connect_with_env_password(self, mock_env, mock_graph_db):
     mock_env.NEO4J_URI = "bolt://localhost:7687"
     mock_env.NEO4J_USERNAME = "neo4j"
     mock_env.NEO4J_PASSWORD = "password123"
-    mock_env.NEO4J_MAX_CONNECTION_LIFETIME = 3600
-    mock_env.NEO4J_MAX_CONNECTION_POOL_SIZE = 50
-    mock_env.NEO4J_CONNECTION_ACQUISITION_TIMEOUT = 60
 
     mock_driver = MagicMock()
     mock_graph_db.driver.return_value = mock_driver
@@ -70,6 +72,11 @@ class TestNeo4jBackendConnection:
     mock_graph_db.driver.assert_called_once()
 
   @pytest.mark.asyncio
+  @patch(
+    "robosystems.graph_api.backends.neo4j.NEO4J_CONNECTION_ACQUISITION_TIMEOUT", 60
+  )
+  @patch("robosystems.graph_api.backends.neo4j.NEO4J_MAX_CONNECTION_POOL_SIZE", 50)
+  @patch("robosystems.graph_api.backends.neo4j.NEO4J_MAX_CONNECTION_LIFETIME", 3600)
   @patch("robosystems.graph_api.backends.neo4j.boto3")
   @patch("robosystems.graph_api.backends.neo4j.AsyncGraphDatabase")
   @patch("robosystems.graph_api.backends.neo4j.env")
@@ -81,9 +88,6 @@ class TestNeo4jBackendConnection:
     mock_env.NEO4J_PASSWORD = ""
     mock_env.AWS_REGION = "us-east-1"
     mock_env.ENVIRONMENT = "prod"
-    mock_env.NEO4J_MAX_CONNECTION_LIFETIME = 3600
-    mock_env.NEO4J_MAX_CONNECTION_POOL_SIZE = 50
-    mock_env.NEO4J_CONNECTION_ACQUISITION_TIMEOUT = 60
 
     mock_secrets_client = MagicMock()
     mock_boto3.client.return_value = mock_secrets_client

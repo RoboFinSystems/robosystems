@@ -232,6 +232,76 @@ Resources:
         - !Ref ReplicaInstanceRole
 
   # ========================================
+  # DATA LIFECYCLE MANAGER (DLM) - Snapshot Retention
+  # ========================================
+  # Creates daily backup snapshots of shared master volume and manages retention.
+  # Targets volumes tagged with NodeType=shared_master and DLMManaged=true
+  # (tags set by graph_volume_manager.py Lambda)
+  #
+  # NOTE: This DLM policy creates its OWN snapshots separate from Dagster.
+  # - DLM snapshots: Daily scheduled backups, auto-retained for 30 days
+  # - Dagster snapshots: Event-driven (after SEC materialization), used for replicas
+  # Both coexist safely with different tags (DLM adds dlm:managed=true tag)
+
+  DLMLifecycleRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub robosystems-shared-dlm-${Environment}-role
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: dlm.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        # AWS managed policy for DLM snapshot operations
+        - !Sub arn:${AWS::Partition}:iam::aws:policy/service-role/AWSDataLifecycleManagerServiceRole
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+
+  SharedSnapshotLifecyclePolicy:
+    Type: AWS::DLM::LifecyclePolicy
+    Properties:
+      Description: !Sub Daily backup snapshots for shared repository (${Environment})
+      State: ENABLED
+      ExecutionRoleArn: !GetAtt DLMLifecycleRole.Arn
+      PolicyDetails:
+        ResourceTypes:
+          - VOLUME
+        TargetTags:
+          # Match shared master data volumes (tags set by graph_volume_manager.py)
+          - Key: NodeType
+            Value: shared_master
+          - Key: DLMManaged
+            Value: "true"
+        Schedules:
+          - Name: DailyBackup
+            CreateRule:
+              # Daily snapshot at 3 AM UTC (low traffic period)
+              Interval: 24
+              IntervalUnit: HOURS
+              Times:
+                - "03:00"
+            RetainRule:
+              # Keep 30 daily snapshots (30-day retention)
+              Count: 30
+            TagsToAdd:
+              - Key: CreatedBy
+                Value: DLM
+              - Key: Purpose
+                Value: DailyBackup
+            CopyTags: true
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: !Ref ServiceTag
+        - Key: Purpose
+          Value: SharedSnapshotRetention
+
+  # ========================================
   # LOG GROUP
   # ========================================
   ReplicaLogGroup:

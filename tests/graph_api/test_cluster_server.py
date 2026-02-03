@@ -54,10 +54,10 @@ class TestSecurityValidation:
     """Test query length validation."""
     from fastapi import HTTPException
 
-    from robosystems.config import env
+    from robosystems.config.constants import MAX_QUERY_LENGTH
 
     # Create a query that exceeds the configured limit
-    max_length = env.GRAPH_MAX_QUERY_LENGTH
+    max_length = MAX_QUERY_LENGTH
     long_query = "MATCH (n) RETURN n" + "x" * (max_length + 1)
 
     with pytest.raises(HTTPException) as exc_info:

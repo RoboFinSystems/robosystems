@@ -10,6 +10,7 @@ from typing import Any
 
 from ...config import env
 from ...config.billing import BillingConfig
+from ...config.constants import STRIPE_API_VERSION
 from ...config.valkey_registry import ValkeyDatabase, create_redis_client
 from ...logger import get_logger
 
@@ -144,7 +145,7 @@ class StripePaymentProvider(PaymentProvider):
     import stripe
 
     stripe.api_key = env.STRIPE_SECRET_KEY
-    stripe.api_version = env.STRIPE_API_VERSION
+    stripe.api_version = STRIPE_API_VERSION
     self.stripe = stripe
     self._redis_client = None
     logger.info("Initialized Stripe payment provider")

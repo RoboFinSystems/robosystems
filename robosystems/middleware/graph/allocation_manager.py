@@ -134,34 +134,27 @@ class LadybugAllocationManager:
     # Tier-based configuration for backend selection and database allocation
     # Note: Backend-specific settings (LadybugDB buffer pools, Neo4j JVM heap) are
     # configured in their respective userdata scripts, not here.
+    # Memory and chunk size settings are loaded from graph.yml via GraphTierConfig.
     self.tier_configs = {
       GraphTier.LADYBUG_STANDARD: {
         "backend": "ladybug",
         "backend_type": "ladybug",
         "databases_per_instance": self.max_databases_per_instance,  # Multi-tenant (10 per instance)
-        "lbug_max_memory_mb": env.GRAPH_STANDARD_MAX_MEMORY_MB_OVERRIDE,
-        "lbug_chunk_size": env.GRAPH_STANDARD_CHUNK_SIZE_OVERRIDE,
       },
       GraphTier.LADYBUG_LARGE: {
         "backend": "ladybug",
         "backend_type": "ladybug",
         "databases_per_instance": 1,  # Dedicated instance (parent + subgraphs)
-        "lbug_max_memory_mb": env.GRAPH_STANDARD_MAX_MEMORY_MB_OVERRIDE,  # Same as standard (r7g.large)
-        "lbug_chunk_size": env.GRAPH_STANDARD_CHUNK_SIZE_OVERRIDE,
       },
       GraphTier.LADYBUG_XLARGE: {
         "backend": "ladybug",
         "backend_type": "ladybug",
         "databases_per_instance": 1,  # Large dedicated instance (parent + subgraphs)
-        "lbug_max_memory_mb": env.GRAPH_STANDARD_MAX_MEMORY_MB_OVERRIDE,  # r7g.xlarge has more memory
-        "lbug_chunk_size": env.GRAPH_STANDARD_CHUNK_SIZE_OVERRIDE,
       },
       GraphTier.LADYBUG_SHARED: {
         "backend": "ladybug",
         "backend_type": "ladybug",
         "databases_per_instance": 1,  # One repository per instance
-        "lbug_max_memory_mb": env.GRAPH_STANDARD_MAX_MEMORY_MB_OVERRIDE,
-        "lbug_chunk_size": env.GRAPH_STANDARD_CHUNK_SIZE_OVERRIDE,
       },
       GraphTier.NEO4J_COMMUNITY_LARGE: {
         "backend": "neo4j",
@@ -226,7 +219,8 @@ class LadybugAllocationManager:
     """
     Get configuration for a specific tier.
 
-    Returns memory limits and chunk sizes optimized for each tier.
+    Returns backend type and database allocation settings.
+    For memory/chunk size settings, use GraphTierConfig from config/graph_tier.py.
     """
     return self.tier_configs.get(tier, self.tier_configs[GraphTier.LADYBUG_STANDARD])
 

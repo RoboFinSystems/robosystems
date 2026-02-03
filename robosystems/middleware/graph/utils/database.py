@@ -135,10 +135,21 @@ def get_max_databases_per_node() -> int:
   """
   Get the maximum number of databases per graph node.
 
+  Uses tier-specific configuration from graph.yml via GraphTierConfig.
+
   Returns:
-      int: Maximum databases per node
+      int: Maximum databases per node (defaults to 10 for standard tier)
   """
-  return env.LBUG_MAX_DATABASES_PER_NODE
+  try:
+    from robosystems.config.graph_tier import GraphTierConfig
+
+    tier = env.CLUSTER_TIER
+    if tier:
+      instance_config = GraphTierConfig.get_instance_config(tier)
+      return instance_config.get("databases_per_instance", 10)
+  except Exception:
+    pass  # Fall back to default
+  return 10
 
 
 async def ensure_database_with_schema(

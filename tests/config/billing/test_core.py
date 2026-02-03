@@ -58,13 +58,11 @@ def test_get_operation_cost_uses_credit_config(monkeypatch):
   assert BillingConfig.get_operation_cost("unknown") == Decimal("0")
 
 
-def test_validate_configuration_reports_missing_plan(monkeypatch):
-  monkeypatch.setattr(
-    CreditConfig,
-    "MONTHLY_ALLOCATIONS",
-    {"ladybug-standard": 500, "custom-tier": 50},
-  )
-  monkeypatch.setattr(CreditConfig, "OPERATION_COSTS", {"agent_call": Decimal("1")})
+def test_validate_configuration_reports_missing_required_fields(monkeypatch):
+  """Test that validation catches missing required fields in billing plans."""
+  # Create a plan missing the 'base_price_cents' field
+  bad_plans = [{"name": "test-tier", "monthly_credit_allocation": 1000}]
+  monkeypatch.setattr(core, "DEFAULT_GRAPH_BILLING_PLANS", bad_plans)
   warnings: list[str] = []
   monkeypatch.setattr(
     core.logger,
@@ -75,17 +73,12 @@ def test_validate_configuration_reports_missing_plan(monkeypatch):
   result = BillingConfig.validate_configuration()
 
   assert not result["valid"]
-  assert any("custom-tier" in issue for issue in result["issues"])
+  assert any("base_price_cents" in issue for issue in result["issues"])
   assert any("validation found" in message for message in warnings)
 
 
-def test_validate_configuration_passes_when_allocations_match(monkeypatch):
-  monkeypatch.setattr(CreditConfig, "MONTHLY_ALLOCATIONS", {"ladybug-standard": 8000})
-  monkeypatch.setattr(
-    CreditConfig,
-    "OPERATION_COSTS",
-    {"agent_call": Decimal("1"), "mcp_call": Decimal("0")},
-  )
+def test_validate_configuration_passes_with_valid_plans(monkeypatch):
+  """Test that validation passes when all plans have required fields."""
   infos: list[str] = []
   monkeypatch.setattr(
     core.logger,
@@ -96,7 +89,7 @@ def test_validate_configuration_passes_when_allocations_match(monkeypatch):
   result = BillingConfig.validate_configuration()
 
   assert result["valid"]
-  assert result["summary"]["subscription_tiers"] == 1
+  assert result["summary"]["billing_plans"] == len(DEFAULT_GRAPH_BILLING_PLANS)
   assert any("validation passed" in message for message in infos)
 
 

@@ -11,7 +11,7 @@ from fastapi import (
 )
 from sqlalchemy.orm import Session
 
-from ...config import env
+from ...config.constants import JWT_EXPIRY_HOURS, TOKEN_GRACE_PERIOD_MINUTES
 from ...database import get_async_db_session
 from ...logger import logger
 from ...middleware.auth.cache import api_key_cache
@@ -179,7 +179,7 @@ async def refresh_session(
         if exp:
           exp_time = datetime.fromtimestamp(exp, tz=UTC)
           grace_period = timedelta(
-            minutes=env.TOKEN_GRACE_PERIOD_MINUTES
+            minutes=TOKEN_GRACE_PERIOD_MINUTES
           )  # Reduced grace period for security
           time_since_expiry = datetime.now(UTC) - exp_time
 
@@ -275,10 +275,8 @@ async def refresh_session(
     )
 
     # Calculate token expiry and refresh threshold
-    expires_in = int(env.JWT_EXPIRY_HOURS * 3600)  # Convert hours to seconds
-    refresh_threshold = (
-      env.TOKEN_GRACE_PERIOD_MINUTES * 60
-    )  # Convert minutes to seconds
+    expires_in = int(JWT_EXPIRY_HOURS * 3600)  # Convert hours to seconds
+    refresh_threshold = TOKEN_GRACE_PERIOD_MINUTES * 60  # Convert minutes to seconds
 
     # Return new token for Bearer authentication
     return AuthResponse(

@@ -8,7 +8,7 @@ from fastapi import Request, status
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 
-from robosystems.config import env
+from robosystems.config.constants import GRAPH_MAX_REQUEST_SIZE, MAX_QUERY_LENGTH
 from robosystems.logger import logger
 
 
@@ -28,10 +28,9 @@ class RequestSizeLimitMiddleware(BaseHTTPMiddleware):
   ):
     super().__init__(app)
     # Default limits (in bytes)
-    self.max_body_size = max_body_size or env.GRAPH_MAX_REQUEST_SIZE
+    self.max_body_size = max_body_size or GRAPH_MAX_REQUEST_SIZE
     self.max_query_size = (
-      max_query_size
-      or env.GRAPH_MAX_QUERY_LENGTH * 10  # Convert characters to approximate bytes
+      max_query_size or MAX_QUERY_LENGTH * 10  # Convert characters to approximate bytes
     )  # Allow for multi-byte characters
     self.max_schema_size = max_schema_size or 1 * 1024 * 1024  # 1MB for schema DDL
 

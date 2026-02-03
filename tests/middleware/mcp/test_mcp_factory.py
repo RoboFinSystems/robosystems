@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 
+from robosystems.config.constants import MAX_QUERY_LENGTH
 from robosystems.middleware.mcp.factory import (
   acquire_graph_mcp_client,
   create_graph_mcp_client,
@@ -37,7 +38,7 @@ class TestCreateGraphMCPClient:
       graph_id="test_graph",
       timeout=30,
       query_timeout=30,
-      max_query_length=50000,
+      max_query_length=MAX_QUERY_LENGTH,
     )
 
   @patch("robosystems.middleware.mcp.factory.TuningConfig")
@@ -81,7 +82,7 @@ class TestCreateGraphMCPClient:
       graph_id="sec",
       timeout=30,
       query_timeout=30,
-      max_query_length=50000,
+      max_query_length=MAX_QUERY_LENGTH,
     )
 
   @patch("robosystems.middleware.mcp.factory.TuningConfig")
@@ -126,7 +127,7 @@ class TestCreateGraphMCPClient:
       graph_id="kg123abc",
       timeout=30,
       query_timeout=30,
-      max_query_length=50000,
+      max_query_length=MAX_QUERY_LENGTH,
     )
 
   @patch("robosystems.middleware.mcp.factory.TuningConfig")
@@ -161,7 +162,7 @@ class TestCreateGraphMCPClient:
       graph_id="kg123abc",
       timeout=30,
       query_timeout=30,
-      max_query_length=50000,
+      max_query_length=MAX_QUERY_LENGTH,
     )
 
   @patch("robosystems.middleware.mcp.factory.TuningConfig")
@@ -197,7 +198,7 @@ class TestCreateGraphMCPClient:
       graph_id="kg123abc",
       timeout=30,
       query_timeout=30,
-      max_query_length=50000,
+      max_query_length=MAX_QUERY_LENGTH,
     )
 
   @patch("robosystems.middleware.mcp.factory.TuningConfig")
@@ -233,20 +234,18 @@ class TestCreateGraphMCPClient:
       graph_id="kg123abc",
       timeout=30,
       query_timeout=30,
-      max_query_length=50000,
+      max_query_length=MAX_QUERY_LENGTH,
     )
 
   @patch("robosystems.middleware.mcp.factory.TuningConfig")
   @patch("robosystems.middleware.mcp.factory.env")
   @patch("robosystems.middleware.mcp.factory.GraphMCPClient")
-  async def test_create_client_env_defaults(
+  async def test_create_client_uses_constant_max_query_length(
     self, mock_client_class, mock_env, mock_tuning
   ):
-    """Test client creation with environment defaults."""
+    """Test client creation uses MAX_QUERY_LENGTH constant."""
     mock_tuning.get_graph_http_timeout.return_value = 45
     mock_tuning.get_graph_query_timeout.return_value = 90
-    # No GRAPH_MAX_QUERY_LENGTH attribute (testing hasattr fallback)
-    delattr(mock_env, "GRAPH_MAX_QUERY_LENGTH")
 
     mock_client = AsyncMock()
     mock_client_class.return_value = mock_client
@@ -258,7 +257,7 @@ class TestCreateGraphMCPClient:
       graph_id="test",
       timeout=45,
       query_timeout=90,
-      max_query_length=50000,  # Default fallback
+      max_query_length=MAX_QUERY_LENGTH,  # From constants
     )
 
   @patch("robosystems.middleware.mcp.factory.TuningConfig")
@@ -283,7 +282,7 @@ class TestCreateGraphMCPClient:
       graph_id="sec",
       timeout=30,
       query_timeout=30,
-      max_query_length=50000,
+      max_query_length=MAX_QUERY_LENGTH,
     )
 
   @patch("robosystems.middleware.mcp.factory.logger")

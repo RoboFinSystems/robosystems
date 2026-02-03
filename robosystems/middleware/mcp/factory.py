@@ -8,6 +8,7 @@ with proper configuration and environment discovery.
 from contextlib import asynccontextmanager
 
 from robosystems.config import env
+from robosystems.config.constants import MAX_QUERY_LENGTH
 from robosystems.config.tuning import TuningConfig
 from robosystems.logger import logger
 
@@ -69,9 +70,7 @@ async def create_graph_mcp_client(
   # Configure timeouts - runtime tunable via SSM
   timeout = TuningConfig.get_graph_http_timeout()
   query_timeout = TuningConfig.get_graph_query_timeout()
-  max_query_length = int(
-    env.GRAPH_MAX_QUERY_LENGTH if hasattr(env, "GRAPH_MAX_QUERY_LENGTH") else 50000
-  )  # 50KB queries max
+  max_query_length = MAX_QUERY_LENGTH
 
   return GraphMCPClient(
     api_base_url=api_base_url,

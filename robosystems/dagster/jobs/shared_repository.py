@@ -5,6 +5,9 @@ These jobs handle EBS snapshot and replica management:
 - Update replica ASG launch template with new snapshot
 - Trigger rolling instance refresh of replica fleet
 
+Snapshot retention is handled by AWS Data Lifecycle Manager (DLM),
+not by Dagster jobs. See CloudFormation for DLM policy configuration.
+
 These jobs are typically triggered after SEC materialization completes,
 or can be run manually for ad-hoc snapshot/refresh operations.
 """
@@ -13,6 +16,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 import boto3
+import httpx
 from dagster import (
   Config,
   OpExecutionContext,
@@ -39,22 +43,24 @@ class ReplicaConfig(Config):
   """Configuration for replica operations."""
 
   min_healthy_percentage: int = 50
-  instance_warmup_seconds: int = 300
+  # Increased from 300s to 600s - large datasets need more warmup time
+  # for memory mapping, index loading, and initial query caching
+  instance_warmup_seconds: int = 600
 
 
 # ============================================================================
-# Snapshot Operations
+# Health Check Operations
 # ============================================================================
 
 
 @op
-def get_shared_master_volume(
+def verify_shared_master_health(
   context: OpExecutionContext, config: SnapshotConfig
-) -> str:
-  """Discover shared master's data volume from DynamoDB instance registry.
+) -> dict[str, Any]:
+  """Verify shared master is healthy before snapshotting.
 
-  Queries the instance registry for the healthy shared_master instance
-  and returns its data volume ID.
+  Performs both DynamoDB registry check and actual HTTP health check
+  to ensure the instance is truly healthy and serving requests.
   """
   dynamodb = boto3.client("dynamodb", region_name=env.AWS_REGION)
 
@@ -82,11 +88,81 @@ def get_shared_master_volume(
   # Get first healthy shared master
   master = items[0]
   instance_id = master["instance_id"]["S"]
-  context.log.info(f"Found shared master instance: {instance_id}")
+  private_ip = master.get("private_ip", {}).get("S")
 
-  # Get volume ID from instance or registry
-  if "volume_id" in master:
-    volume_id = master["volume_id"]["S"]
+  if not private_ip:
+    raise Exception(
+      f"Shared master {instance_id} has no private_ip in registry. "
+      "Instance may not be fully initialized."
+    )
+
+  context.log.info(f"Found shared master: {instance_id} at {private_ip}")
+
+  # Perform actual HTTP health check
+  health_url = f"http://{private_ip}:8001/health"
+  context.log.info(f"Performing health check: {health_url}")
+
+  try:
+    with httpx.Client(timeout=30.0) as client:
+      response = client.get(health_url)
+      response.raise_for_status()
+      health_data = response.json()
+
+      context.log.info(f"Health check passed: {health_data}")
+
+      return {
+        "instance_id": instance_id,
+        "private_ip": private_ip,
+        "health_status": "healthy",
+        "health_response": health_data,
+      }
+
+  except httpx.TimeoutException:
+    raise Exception(
+      f"Health check timed out for shared master {instance_id} at {health_url}. "
+      "Instance may be overloaded or unresponsive."
+    )
+  except httpx.HTTPStatusError as e:
+    raise Exception(
+      f"Health check failed for shared master {instance_id}: {e.response.status_code}. "
+      f"Response: {e.response.text[:500]}"
+    )
+  except Exception as e:
+    raise Exception(
+      f"Health check failed for shared master {instance_id} at {health_url}: {e}"
+    )
+
+
+# ============================================================================
+# Snapshot Operations
+# ============================================================================
+
+
+@op
+def get_shared_master_volume(
+  context: OpExecutionContext,
+  health_check: dict[str, Any],
+  config: SnapshotConfig,
+) -> str:
+  """Get the data volume ID from the verified healthy shared master.
+
+  Uses the instance_id from the health check to find the attached data volume.
+  """
+  instance_id = health_check["instance_id"]
+  context.log.info(f"Getting data volume for instance: {instance_id}")
+
+  # Check DynamoDB for cached volume_id first
+  dynamodb = boto3.client("dynamodb", region_name=env.AWS_REGION)
+  table_name = env.INSTANCE_REGISTRY_TABLE
+
+  response = dynamodb.get_item(
+    TableName=table_name,
+    Key={"instance_id": {"S": instance_id}},
+  )
+
+  item = response.get("Item", {})
+  if "volume_id" in item:
+    volume_id = item["volume_id"]["S"]
     context.log.info(f"Found volume ID from registry: {volume_id}")
     return volume_id
 
@@ -119,6 +195,8 @@ def create_snapshot(
 
   Creates a snapshot with appropriate tags for tracking and
   optionally waits for completion.
+
+  Tags are used by AWS DLM for lifecycle management (retention policy).
   """
   ec2 = boto3.client("ec2", region_name=env.AWS_REGION)
 
@@ -187,12 +265,32 @@ def update_replica_launch_template(
   context.log.info(f"Updating launch template: {lt_name}")
 
   # Get current launch template version
-  response = ec2.describe_launch_template_versions(
-    LaunchTemplateName=lt_name, Versions=["$Latest"]
-  )
+  try:
+    response = ec2.describe_launch_template_versions(
+      LaunchTemplateName=lt_name, Versions=["$Latest"]
+    )
+  except ec2.exceptions.ClientError as e:
+    if "InvalidLaunchTemplateName.NotFoundException" in str(e):
+      context.log.warning(
+        f"Launch template {lt_name} not found - replicas not deployed yet. "
+        "Skipping launch template update."
+      )
+      return {
+        "status": "skipped",
+        "reason": "launch_template_not_found",
+        "launch_template_name": lt_name,
+        "snapshot_id": snapshot_id,
+      }
+    raise
 
   if not response["LaunchTemplateVersions"]:
-    raise Exception(f"Launch template {lt_name} not found")
+    context.log.warning(f"Launch template {lt_name} has no versions - skipping update")
+    return {
+      "status": "skipped",
+      "reason": "no_versions",
+      "launch_template_name": lt_name,
+      "snapshot_id": snapshot_id,
+    }
 
   current = response["LaunchTemplateVersions"][0]
   lt_id = current["LaunchTemplateId"]
@@ -232,6 +330,7 @@ def update_replica_launch_template(
   context.log.info(f"Set version {new_version} as default")
 
   return {
+    "status": "updated",
     "launch_template_id": lt_id,
     "launch_template_name": lt_name,
     "previous_version": current_version,
@@ -248,11 +347,23 @@ def refresh_replica_instances(
 
   Starts an instance refresh that gradually replaces instances
   with new ones using the updated launch template.
+
+  Checks for existing in-progress refresh and skips if one is active.
   """
+  # Skip if launch template update was skipped
+  if lt_update.get("status") == "skipped":
+    context.log.info(
+      f"Skipping instance refresh: {lt_update.get('reason', 'unknown reason')}"
+    )
+    return {
+      "status": "skipped",
+      "reason": lt_update.get("reason"),
+    }
+
   autoscaling = boto3.client("autoscaling", region_name=env.AWS_REGION)
 
   asg_name = f"robosystems-shared-replicas-{env.ENVIRONMENT}-asg"
-  context.log.info(f"Starting instance refresh for ASG: {asg_name}")
+  context.log.info(f"Checking ASG: {asg_name}")
 
   # Check if ASG exists and has instances
   response = autoscaling.describe_auto_scaling_groups(AutoScalingGroupNames=[asg_name])
@@ -276,6 +387,34 @@ def refresh_replica_instances(
       "asg_name": asg_name,
       "desired_capacity": 0,
     }
+
+  # Check for existing in-progress instance refresh
+  context.log.info("Checking for existing instance refresh...")
+  refresh_response = autoscaling.describe_instance_refreshes(
+    AutoScalingGroupName=asg_name,
+    MaxRecords=1,
+  )
+
+  existing_refreshes = refresh_response.get("InstanceRefreshes", [])
+  if existing_refreshes:
+    latest_refresh = existing_refreshes[0]
+    refresh_status = latest_refresh["Status"]
+
+    # Active statuses that block new refresh
+    if refresh_status in ("Pending", "InProgress", "Cancelling"):
+      existing_id = latest_refresh["InstanceRefreshId"]
+      context.log.warning(
+        f"Instance refresh already in progress: {existing_id} "
+        f"(status: {refresh_status}). Skipping to avoid conflict."
+      )
+      return {
+        "status": "skipped",
+        "reason": "refresh_already_in_progress",
+        "existing_refresh_id": existing_id,
+        "existing_refresh_status": refresh_status,
+        "asg_name": asg_name,
+        "desired_capacity": desired_capacity,
+      }
 
   context.log.info(f"ASG has {desired_capacity} instances - starting refresh")
 
@@ -324,14 +463,16 @@ def shared_repository_snapshot_job():
   """Create snapshot of shared master and update replicas.
 
   Full pipeline:
-  1. Discover shared master's data volume from DynamoDB
-  2. Create EBS snapshot of the volume
-  3. Update replica ASG launch template with new snapshot
-  4. Trigger rolling instance refresh
+  1. Verify shared master is healthy (HTTP health check)
+  2. Discover shared master's data volume from DynamoDB
+  3. Create EBS snapshot of the volume
+  4. Update replica ASG launch template with new snapshot
+  5. Trigger rolling instance refresh (skips if refresh already in progress)
 
   This job is typically run after SEC materialization completes.
   """
-  volume_id = get_shared_master_volume()
+  health_check = verify_shared_master_health()
+  volume_id = get_shared_master_volume(health_check)
   snapshot_id = create_snapshot(volume_id)
   lt_update = update_replica_launch_template(snapshot_id)
   refresh_replica_instances(lt_update)
@@ -355,9 +496,11 @@ def shared_repository_snapshot_only_job():
   Useful for:
   - Creating a backup snapshot
   - Testing snapshot creation
+  - Initial snapshot before replicas are deployed
   - Manual control over when replicas are updated
   """
-  volume_id = get_shared_master_volume()
+  health_check = verify_shared_master_health()
+  volume_id = get_shared_master_volume(health_check)
   create_snapshot(volume_id)
 
 
@@ -365,6 +508,7 @@ def shared_repository_snapshot_only_job():
 def get_current_launch_template_info(context: OpExecutionContext) -> dict[str, Any]:
   """Get current launch template info for refresh-only operations."""
   return {
+    "status": "current",
     "launch_template_name": f"robosystems-shared-replicas-{env.ENVIRONMENT}",
     "new_version": "current",
   }

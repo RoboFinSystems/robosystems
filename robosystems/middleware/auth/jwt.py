@@ -13,7 +13,7 @@ import redis
 from fastapi import HTTPException, status
 
 from ...config import env
-from ...config.constants import JWT_REVOCATION_GRACE_SECONDS
+from ...config.constants import JWT_EXPIRY_HOURS, JWT_REVOCATION_GRACE_SECONDS
 from ...config.logging import get_logger
 from ...config.valkey_registry import (
   ValkeyDatabase,
@@ -197,7 +197,7 @@ def create_jwt_token(
   payload = {
     "user_id": user_id,
     "jti": jti,  # JWT ID for revocation tracking
-    "exp": datetime.now(UTC) + timedelta(hours=env.JWT_EXPIRY_HOURS),
+    "exp": datetime.now(UTC) + timedelta(hours=JWT_EXPIRY_HOURS),
     "iat": datetime.now(UTC),
     "iss": env.JWT_ISSUER,
     "aud": env.JWT_AUDIENCE,
