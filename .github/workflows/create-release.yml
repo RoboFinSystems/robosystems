@@ -36,6 +36,8 @@ jobs:
         with:
           ref: main
           fetch-depth: 0
+          # ACTIONS_TOKEN required to push to protected main branch
+          token: ${{ secrets.ACTIONS_TOKEN || github.token }}
 
       - name: Set up Git
         run: |
@@ -152,6 +154,11 @@ jobs:
   deploy-staging:
     needs: [create-branch, create-tag]
     if: ${{ inputs.deploy_target == 'staging' || inputs.deploy_target == 'all' }}
+    permissions:
+      contents: read
+      deployments: write
+      id-token: write
+      security-events: write
     uses: ./.github/workflows/staging.yml
     secrets: inherit
 
@@ -162,6 +169,11 @@ jobs:
       always() &&
       (inputs.deploy_target == 'prod' || inputs.deploy_target == 'all') &&
       (needs.deploy-staging.result == 'success' || needs.deploy-staging.result == 'skipped')
+    permissions:
+      contents: read
+      deployments: write
+      id-token: write
+      security-events: write
     uses: ./.github/workflows/prod.yml
     secrets: inherit
 
