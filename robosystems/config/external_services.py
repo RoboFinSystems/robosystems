@@ -116,7 +116,7 @@ class ExternalServicesConfig:
     base_url = config.get("base_url", "")
 
     # Handle sandbox/production environments
-    if service == "quickbooks" and env.QUICKBOOKS_SANDBOX:
+    if service == "quickbooks" and env.INTUIT_ENVIRONMENT == "sandbox":
       base_url = config.get("sandbox_url", base_url)
 
     return f"{base_url.rstrip('/')}/{path.lstrip('/')}"

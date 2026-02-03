@@ -20,27 +20,33 @@ class TestMultiTenantUtils:
 
   def test_get_max_databases_default(self):
     """Test that max databases uses the configured default."""
-    # The test environment sets LBUG_MAX_DATABASES_PER_NODE=50 in pytest.ini
-    # So we expect 50, not the constants.py default of 10
-    assert MultiTenantUtils.get_max_databases_per_node() == 50
+    # get_max_databases_per_node() uses GraphTierConfig to get tier-specific value
+    # With no CLUSTER_TIER set, returns the default of 10
+    assert MultiTenantUtils.get_max_databases_per_node() == 10
 
-  def test_get_max_databases_custom(self):
-    """Test custom max databases value."""
+  def test_get_max_databases_custom_tier(self):
+    """Test custom max databases value from tier config."""
+    # When CLUSTER_TIER is set, it uses GraphTierConfig to get the tier's databases_per_instance
     with patch(
-      "robosystems.middleware.graph.utils.database.env.LBUG_MAX_DATABASES_PER_NODE",
-      500,
+      "robosystems.middleware.graph.utils.database.env.CLUSTER_TIER", "ladybug-large"
     ):
-      assert MultiTenantUtils.get_max_databases_per_node() == 500
+      with patch(
+        "robosystems.config.graph_tier.GraphTierConfig.get_instance_config",
+        return_value={"databases_per_instance": 25},
+      ):
+        assert MultiTenantUtils.get_max_databases_per_node() == 25
 
-  def test_get_max_databases_invalid_value(self):
-    """Test that the value comes from config (environment handling is in env.py)."""
-    # Since env.py handles the environment variable parsing and validation,
-    # we don't need to test invalid values here - just that the config value is used
+  def test_get_max_databases_fallback_on_error(self):
+    """Test that on config errors, the default is returned."""
+    # If GraphTierConfig fails, should fall back to default of 10
     with patch(
-      "robosystems.middleware.graph.utils.database.env.LBUG_MAX_DATABASES_PER_NODE",
-      100,
+      "robosystems.middleware.graph.utils.database.env.CLUSTER_TIER", "invalid-tier"
     ):
-      assert MultiTenantUtils.get_max_databases_per_node() == 100
+      with patch(
+        "robosystems.config.graph_tier.GraphTierConfig.get_instance_config",
+        side_effect=Exception("Config error"),
+      ):
+        assert MultiTenantUtils.get_max_databases_per_node() == 10
 
   def test_validate_graph_id_valid(self):
     """Test validation of valid graph IDs."""

@@ -16,7 +16,7 @@ class TestCreditConfig:
     """
     # Fixed-cost operations
     assert CreditConfig.OPERATION_COSTS["storage_per_gb_day"] == Decimal("1")
-    assert CreditConfig.OPERATION_COSTS["connection_sync"] == Decimal("20")
+    assert CreditConfig.OPERATION_COSTS["connection_sync"] == Decimal("0")
 
     # All other operations should be free (0 credits)
     free_operations = [
@@ -56,20 +56,21 @@ class TestCreditConfig:
   def test_monthly_allocations_structure(self):
     """Test that monthly allocations have the correct structure."""
     # Test that allocations exist for expected tiers
-    standard_allocation = CreditConfig.get_monthly_allocation("standard")
-    enterprise_allocation = CreditConfig.get_monthly_allocation("enterprise")
-    premium_allocation = CreditConfig.get_monthly_allocation("premium")
+    standard_allocation = CreditConfig.get_monthly_allocation("ladybug-standard")
+    large_allocation = CreditConfig.get_monthly_allocation("ladybug-large")
+    xlarge_allocation = CreditConfig.get_monthly_allocation("ladybug-xlarge")
 
-    # All should be integers >= 0
+    # All should be integers > 0
     assert isinstance(standard_allocation, int)
-    assert isinstance(enterprise_allocation, int)
-    assert isinstance(premium_allocation, int)
-    assert standard_allocation >= 0
-    assert enterprise_allocation >= 0
-    assert premium_allocation >= 0
+    assert isinstance(large_allocation, int)
+    assert isinstance(xlarge_allocation, int)
+    assert standard_allocation > 0
+    assert large_allocation > 0
+    assert xlarge_allocation > 0
 
-    # Higher tiers should typically have higher allocations
-    # Note: This is a business logic test, not a strict requirement
+    # Higher tiers should have higher allocations
+    assert large_allocation > standard_allocation
+    assert xlarge_allocation > large_allocation
 
   def test_get_operation_cost_known_operations(self):
     """Test getting costs for known operations.
@@ -78,7 +79,7 @@ class TestCreditConfig:
     """
     # Fixed-cost operations
     assert CreditConfig.get_operation_cost("storage_per_gb_day") == Decimal("1")
-    assert CreditConfig.get_operation_cost("connection_sync") == Decimal("20")
+    assert CreditConfig.get_operation_cost("connection_sync") == Decimal("0")
 
     # Free operations should return 0
     assert CreditConfig.get_operation_cost("query") == Decimal("0")
@@ -170,14 +171,12 @@ class TestCreditConfig:
     """Test that operations are correctly categorized.
 
     Note: AI operations use token-based pricing via AIBillingConfig.TOKEN_PRICING,
-    not fixed costs in OPERATION_COSTS.
+    not fixed costs in OPERATION_COSTS. Only storage overage has a fixed cost.
     """
-    # Storage and connection operations (configurable costs)
-    configurable_ops = ["storage_per_gb_day", "connection_sync"]
-    for op in configurable_ops:
-      assert CreditConfig.get_operation_cost(op) > Decimal("0")
+    # Storage overage is the only fixed-cost operation
+    assert CreditConfig.get_operation_cost("storage_per_gb_day") == Decimal("1")
 
-    # Free operations (should have zero costs)
+    # All other operations are free (included in subscription)
     free_operations = [
       "query",
       "backup",
@@ -187,6 +186,7 @@ class TestCreditConfig:
       "schema_query",
       "analytics",
       "data_transfer_in",
+      "connection_sync",
     ]
     for op in free_operations:
       assert CreditConfig.get_operation_cost(op) == Decimal("0")
@@ -231,12 +231,12 @@ class TestCreditConfig:
 
   def test_monthly_allocations_structure_detailed(self):
     """Test that monthly allocations have the expected structure."""
-    required_tiers = ["standard", "enterprise", "premium"]
+    required_tiers = ["ladybug-standard", "ladybug-large", "ladybug-xlarge"]
 
     for tier in required_tiers:
       allocation = CreditConfig.get_monthly_allocation(tier)
       assert isinstance(allocation, int)
-      assert allocation >= 0
+      assert allocation > 0  # All valid tiers should have positive allocations
 
   def test_alert_level_progression(self):
     """Test that alert levels progress correctly as balance decreases."""
@@ -265,7 +265,7 @@ class TestCreditConfig:
 
     # Methods should work when called on the class
     cost = CreditConfig.get_operation_cost("storage_per_gb_day")
-    allocation = CreditConfig.get_monthly_allocation("standard")
+    allocation = CreditConfig.get_monthly_allocation("ladybug-standard")
     alert = CreditConfig.should_alert(100, 1000)
 
     assert isinstance(cost, Decimal)
@@ -281,7 +281,7 @@ class TestCreditConfig:
     assert CreditConfig.get_operation_cost("storage_per_gb_day") == Decimal("1")
 
     # Connection sync should be 20 credits
-    assert CreditConfig.get_operation_cost("connection_sync") == Decimal("20")
+    assert CreditConfig.get_operation_cost("connection_sync") == Decimal("0")
 
   def test_tier_dependency_handling(self):
     """Test handling of tier configuration dependency."""

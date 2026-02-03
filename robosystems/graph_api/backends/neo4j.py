@@ -5,6 +5,11 @@ import boto3
 from neo4j import AsyncDriver, AsyncGraphDatabase
 
 from robosystems.config import env
+from robosystems.config.constants import (
+  NEO4J_CONNECTION_ACQUISITION_TIMEOUT,
+  NEO4J_MAX_CONNECTION_LIFETIME,
+  NEO4J_MAX_CONNECTION_POOL_SIZE,
+)
 from robosystems.logger import logger
 
 from .base import ClusterTopology, DatabaseInfo, GraphBackend, S3IngestionError
@@ -37,9 +42,9 @@ class Neo4jBackend(GraphBackend):
     self.driver = AsyncGraphDatabase.driver(
       self.bolt_url,
       auth=(self._username, self._password),
-      max_connection_lifetime=env.NEO4J_MAX_CONNECTION_LIFETIME,
-      max_connection_pool_size=env.NEO4J_MAX_CONNECTION_POOL_SIZE,
-      connection_acquisition_timeout=env.NEO4J_CONNECTION_ACQUISITION_TIMEOUT,
+      max_connection_lifetime=NEO4J_MAX_CONNECTION_LIFETIME,
+      max_connection_pool_size=NEO4J_MAX_CONNECTION_POOL_SIZE,
+      connection_acquisition_timeout=NEO4J_CONNECTION_ACQUISITION_TIMEOUT,
     )
     logger.info(f"Connected to Neo4j at {self.bolt_url} (enterprise={self.enterprise})")
 

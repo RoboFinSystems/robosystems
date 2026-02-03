@@ -109,6 +109,48 @@ QUERY_PRIORITY_BOOST_PREMIUM = 2
 # Admission Control Interval (fixed timing)
 ADMISSION_CHECK_INTERVAL = 1.0  # seconds
 
+# Health Check Intervals (minutes)
+GRAPH_HEALTH_CHECK_INTERVAL_MINUTES = 5.0
+LBUG_HEALTH_CHECK_INTERVAL_MINUTES = 5.0
+
+# Materialization Threshold - staged data above this size routes to Dagster
+GRAPH_MATERIALIZATION_THRESHOLD_MB = 500
+
+# =============================================================================
+# LADYBUGDB CONFIGURATION
+# =============================================================================
+
+# LadybugDB Connection Management
+LBUG_MAX_CONNECTIONS_PER_DB = 10
+LBUG_CONNECTION_TTL_MINUTES = 30.0  # Connection time-to-live
+
+# Distributed Lock TTL
+INGESTION_LOCK_TTL = 3600  # 1 hour - for graph materialization locks
+
+# =============================================================================
+# NEO4J CONFIGURATION (when using Neo4j backend)
+# =============================================================================
+
+# Neo4j Connection Pool (fixed infrastructure settings)
+NEO4J_MAX_CONNECTION_POOL_SIZE = 50
+NEO4J_CONNECTION_ACQUISITION_TIMEOUT = 60  # seconds
+NEO4J_MAX_CONNECTION_LIFETIME = 3600  # seconds (1 hour)
+
+# =============================================================================
+# AWS CONFIGURATION
+# =============================================================================
+
+# S3 bucket prefix (fixed naming convention)
+AWS_S3_PREFIX = "robosystems"
+
+# =============================================================================
+# SSE RATE LIMITING
+# =============================================================================
+
+# Server-Sent Events connection limits
+RATE_LIMIT_SSE_CONNECTIONS = 10
+RATE_LIMIT_SSE_CONNECTIONS_WINDOW = 60  # seconds
+
 # =============================================================================
 # DATA PROCESSING CONFIGURATION
 # =============================================================================

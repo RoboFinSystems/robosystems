@@ -8,14 +8,6 @@ CREDIT VALUE ANCHOR:
 ====================
 1 credit = 1 GB/day of storage overage = ~$0.00333 (1/3 of a cent)
 
-This anchors credits to a tangible resource (storage) with a small margin:
-- EBS cost: $0.08/GB/month
-- Our price: $0.10/GB/month (30 credits x $0.00333)
-- Storage margin: ~25%
-
-AI operations are priced relative to this anchor with a 3.33x markup:
-- AI margin: ~70%
-
 CREDIT MODEL:
 =============
 Credits are consumed by AI operations using token-based pricing.
@@ -56,8 +48,8 @@ class CreditConfig:
     # Storage overage (per GB per day) - THE CREDIT ANCHOR
     # 1 credit = 1 GB/day = ~$0.00333 → 30 credits/GB/month = ~$0.10/GB/month
     "storage_per_gb_day": Decimal("1"),  # 1 credit per GB per day (~$0.10/GB/month)
-    # Connection sync operations (potential future credit consumption)
-    "connection_sync": Decimal("20"),  # Sync external data (may incur costs)
+    # Connection sync operations - included (not an AI operation)
+    "connection_sync": Decimal("0"),  # Sync external data - included
     # All other operations are included in subscription (no credit consumption)
     "mcp_call": Decimal("0"),  # MCP protocol calls - included
     "mcp_tool_call": Decimal("0"),  # MCP tool calls - included
@@ -81,17 +73,6 @@ class CreditConfig:
     "connection_delete": Decimal("0"),  # Remove connection - included
     "database_query": Decimal("0"),  # Database queries - included
     "database_write": Decimal("0"),  # Write operations - included
-  }
-
-  # Monthly AI credit allocations by subscription tier
-  # NOTE: Single source of truth is in billing/core.py (DEFAULT_GRAPH_BILLING_PLANS)
-  # These values must match - validated by BillingConfig.validate_configuration()
-  # Credit anchor: 1 credit = 1 GB/day storage = ~$0.00333
-  # ~38 credits per typical agent call
-  MONTHLY_ALLOCATIONS = {
-    "ladybug-standard": 8000,  # ~200 agent calls/month
-    "ladybug-large": 32000,  # ~800 agent calls/month
-    "ladybug-xlarge": 100000,  # ~2,600 agent calls/month
   }
 
   # Credit balance thresholds for alerts
@@ -119,8 +100,16 @@ class CreditConfig:
 
   @classmethod
   def get_monthly_allocation(cls, tier: str) -> int:
-    """Get monthly credit allocation for a subscription tier."""
-    return cls.MONTHLY_ALLOCATIONS.get(tier, 0)
+    """
+    Get monthly credit allocation for a subscription tier.
+
+    Delegates to billing/core.py which is the single source of truth
+    for tier configuration.
+    """
+    # Late import to avoid circular dependency (core.py imports CreditConfig)
+    from robosystems.config.billing.core import get_tier_credit_allocation
+
+    return get_tier_credit_allocation(tier)
 
   @classmethod
   def should_alert(cls, balance: int, allocation: int) -> str:

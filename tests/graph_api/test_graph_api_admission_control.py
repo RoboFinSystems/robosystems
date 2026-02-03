@@ -133,8 +133,11 @@ def test_get_admission_controller_uses_env_configuration(monkeypatch):
   monkeypatch.setattr(
     "robosystems.config.env.LBUG_ADMISSION_CPU_THRESHOLD", 88.0, raising=False
   )
+  # Patch the constant at its source module before the function imports it
   monkeypatch.setattr(
-    "robosystems.config.env.LBUG_MAX_CONNECTIONS_PER_DB", 5, raising=False
+    "robosystems.config.constants.LBUG_MAX_CONNECTIONS_PER_DB",
+    5,
+    raising=False,
   )
 
   controller_one = get_admission_controller()

@@ -6,6 +6,13 @@ import jwt
 from fastapi import HTTPException, Request, status
 
 from ...config import env
+from ...config.constants import (
+  AUTH_RATE_LIMIT_LOGIN_DEFAULT,
+  AUTH_RATE_LIMIT_REGISTER_DEFAULT,
+  JWT_REFRESH_RATE_LIMIT_DEFAULT,
+  RATE_LIMIT_SSE_CONNECTIONS,
+  RATE_LIMIT_SSE_CONNECTIONS_WINDOW,
+)
 from ...security import SecurityAuditLogger, SecurityEventType
 from .cache import rate_limit_cache
 from .subscription_rate_limits import (
@@ -148,13 +155,13 @@ def auth_rate_limit_dependency(request: Request):
   client_ip = request.client.host if request.client else "unknown"
   identifier = f"auth_ip:{client_ip}"
 
-  # Get endpoint-specific limits
+  # Get endpoint-specific limits (security constants)
   path = request.url.path
   if "/login" in path:
-    limit = env.AUTH_RATE_LIMIT_LOGIN
+    limit = AUTH_RATE_LIMIT_LOGIN_DEFAULT
     window = get_int_env("RATE_LIMIT_LOGIN_WINDOW", "300")  # 5 minutes
   elif "/register" in path:
-    limit = env.AUTH_RATE_LIMIT_REGISTER
+    limit = AUTH_RATE_LIMIT_REGISTER_DEFAULT
     window = get_int_env("RATE_LIMIT_REGISTER_WINDOW", "3600")  # 1 hour
   else:
     # Default auth endpoint limits
@@ -375,8 +382,8 @@ def public_api_rate_limit_dependency(request: Request):
 
 def jwt_refresh_rate_limit_dependency(request: Request):
   """Very strict rate limiting for JWT refresh operations."""
-  # More restrictive than general sensitive auth limits
-  limit = env.JWT_REFRESH_RATE_LIMIT
+  # More restrictive than general sensitive auth limits (security constant)
+  limit = JWT_REFRESH_RATE_LIMIT_DEFAULT
   return create_custom_rate_limit_dependency(limit, 60, "jwt_refresh")(request)
 
 
@@ -502,9 +509,9 @@ def sse_connection_rate_limit_dependency(request: Request):
   if rate_limit:
     limit, window = rate_limit
   else:
-    # Fallback to environment variables if not configured
-    limit = get_int_env("RATE_LIMIT_SSE_CONNECTIONS", "10")
-    window = get_int_env("RATE_LIMIT_SSE_CONNECTIONS_WINDOW", "60")
+    # Fallback to constants if not configured in subscription rate limits
+    limit = RATE_LIMIT_SSE_CONNECTIONS
+    window = RATE_LIMIT_SSE_CONNECTIONS_WINDOW
 
   identifier = get_user_identifier(request)
 

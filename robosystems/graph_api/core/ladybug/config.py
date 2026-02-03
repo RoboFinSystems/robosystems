@@ -83,8 +83,9 @@ def get_database_memory_config() -> int:
     return memory_per_db_mb
 
   # Fall back to total memory for single-database instances (shared/dedicated)
+  # Default of 2048 is sensible for local dev when tier config is not available
   max_memory_mb = tier_config.get(
-    "lbug_max_memory_mb", tier_config.get("max_memory_mb", env.LBUG_MAX_MEMORY_MB)
+    "lbug_max_memory_mb", tier_config.get("max_memory_mb", 2048)
   )
   logger.info(
     f"Using total memory allocation: {max_memory_mb} MB (tier: {tier_config.get('tier', 'default')})"

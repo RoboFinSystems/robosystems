@@ -21,7 +21,7 @@ def test_get_api_key_reads_directly_from_environment(monkeypatch):
 
 
 def test_get_endpoint_switches_to_quickbooks_sandbox(monkeypatch):
-  monkeypatch.setattr(env, "QUICKBOOKS_SANDBOX", True)
+  monkeypatch.setattr(env, "INTUIT_ENVIRONMENT", "sandbox")
 
   endpoint = ExternalServicesConfig.get_endpoint("quickbooks", "/v3/company")
 
@@ -31,7 +31,7 @@ def test_get_endpoint_switches_to_quickbooks_sandbox(monkeypatch):
 
 
 def test_get_endpoint_uses_production_url_when_not_sandbox(monkeypatch):
-  monkeypatch.setattr(env, "QUICKBOOKS_SANDBOX", False)
+  monkeypatch.setattr(env, "INTUIT_ENVIRONMENT", "production")
 
   endpoint = ExternalServicesConfig.get_endpoint("quickbooks", "v3/company")
 

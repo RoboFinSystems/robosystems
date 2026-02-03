@@ -16,7 +16,13 @@ import psutil
 from fastapi import HTTPException, status
 
 from robosystems.config import env
-from robosystems.config.constants import ADMISSION_CHECK_INTERVAL, MAX_QUERY_LENGTH
+from robosystems.config.constants import (
+  ADMISSION_CHECK_INTERVAL,
+  GRAPH_HEALTH_CHECK_INTERVAL_MINUTES,
+  LBUG_CONNECTION_TTL_MINUTES,
+  LBUG_MAX_CONNECTIONS_PER_DB,
+  MAX_QUERY_LENGTH,
+)
 from robosystems.config.tuning import TuningConfig
 from robosystems.exceptions import (
   ConfigurationError,
@@ -776,17 +782,19 @@ class LadybugService:
     uptime = self.get_uptime()
 
     # Build comprehensive configuration
+    # Memory settings come from tier config (graph.yml)
+    tier_config = env.get_lbug_tier_config()
     memory_config = MemoryConfiguration(
-      instance_max_mb=env.LBUG_MAX_MEMORY_MB,
-      per_database_max_mb=env.LBUG_MAX_MEMORY_PER_DB_MB,
+      instance_max_mb=tier_config.get("max_memory_mb", 2048),
+      per_database_max_mb=tier_config.get("memory_per_db_mb", 0),
       admission_threshold_percent=env.LBUG_ADMISSION_MEMORY_THRESHOLD,
     )
 
     query_config = QueryConfiguration(
       timeout_seconds=TuningConfig.get_graph_query_timeout(),
-      max_connections_per_db=env.LBUG_MAX_CONNECTIONS_PER_DB,
-      connection_ttl_minutes=env.LBUG_CONNECTION_TTL_MINUTES,
-      health_check_interval_minutes=env.GRAPH_HEALTH_CHECK_INTERVAL_MINUTES,
+      max_connections_per_db=LBUG_MAX_CONNECTIONS_PER_DB,
+      connection_ttl_minutes=LBUG_CONNECTION_TTL_MINUTES,
+      health_check_interval_minutes=GRAPH_HEALTH_CHECK_INTERVAL_MINUTES,
     )
 
     admission_config = AdmissionControlConfig(

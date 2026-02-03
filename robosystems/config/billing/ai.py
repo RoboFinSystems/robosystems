@@ -8,14 +8,6 @@ CREDIT VALUE ANCHOR:
 ====================
 1 credit = 1 GB/day of storage overage = ~$0.00333 (1/3 of a cent)
 
-This anchors credits to a tangible resource (storage) with a small margin:
-- EBS cost: $0.08/GB/month
-- Our price: $0.10/GB/month (30 credits x $0.00333)
-- Storage margin: ~25%
-
-AI operations are priced relative to this anchor with a 3.33x markup:
-- AI margin: ~70%
-
 BILLING PHILOSOPHY:
 ===================
 Credits are ONLY consumed for operations that incur external API costs.
@@ -42,7 +34,6 @@ class AIBillingConfig:
   MINIMUM_CHARGE = Decimal("1")
 
   # Token-based pricing (for dynamic cost calculation)
-  # 3.33x markup over API costs for SaaS margins
   #
   # Credit value anchor: 1 credit = $0.00333 (1 GB/day storage = 1 credit)
   #

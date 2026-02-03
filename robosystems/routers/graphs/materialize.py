@@ -397,7 +397,7 @@ async def materialize_graph(
   Rebuilds entire graph from current DuckDB state, treating graph database as a
   materialized view of the mutable DuckDB data lake.
   """
-  from robosystems.config import env
+  from robosystems.config.constants import INGESTION_LOCK_TTL
   from robosystems.config.valkey_registry import ValkeyDatabase, create_redis_client
   from robosystems.middleware.auth.distributed_lock import DistributedLock
   from robosystems.middleware.sse.event_storage import get_event_storage
@@ -426,7 +426,7 @@ async def materialize_graph(
   try:
     redis_client = create_redis_client(ValkeyDatabase.DISTRIBUTED_LOCKS)
     lock = DistributedLock(
-      redis_client, f"graph_materialize:{graph_id}", ttl_seconds=env.INGESTION_LOCK_TTL
+      redis_client, f"graph_materialize:{graph_id}", ttl_seconds=INGESTION_LOCK_TTL
     )
     lock_result = lock.acquire(blocking=False)
     if not lock_result.acquired:
@@ -544,6 +544,7 @@ def _should_use_direct_materialization(db: Session, graph_id: str) -> bool:
   from sqlalchemy import func
 
   from robosystems.config import env
+  from robosystems.config.constants import GRAPH_MATERIALIZATION_THRESHOLD_MB
   from robosystems.models.iam import GraphFile, GraphTable
 
   if not env.DIRECT_GRAPH_MATERIALIZATION_ENABLED:
@@ -561,7 +562,7 @@ def _should_use_direct_materialization(db: Session, graph_id: str) -> bool:
   )
 
   total_mb = (result or 0) / (1024 * 1024)
-  threshold_mb = env.GRAPH_MATERIALIZATION_THRESHOLD_MB
+  threshold_mb = GRAPH_MATERIALIZATION_THRESHOLD_MB
 
   if total_mb > threshold_mb:
     logger.info(

@@ -320,11 +320,6 @@ class EnvConfig:
   JWT_ISSUER = get_secret_value("JWT_ISSUER", _jwt_default_domain)
   JWT_AUDIENCE = get_secret_list_value("JWT_AUDIENCE", _jwt_default_domain)
 
-  # Authentication Rate Limiting (overrides for defaults in constants.py)
-  JWT_REFRESH_RATE_LIMIT = get_int_env("JWT_REFRESH_RATE_LIMIT", 20)
-  AUTH_RATE_LIMIT_LOGIN = get_int_env("AUTH_RATE_LIMIT_LOGIN", 5)
-  AUTH_RATE_LIMIT_REGISTER = get_int_env("AUTH_RATE_LIMIT_REGISTER", 3)
-
   # Email service configuration
   EMAIL_FROM_ADDRESS = get_str_env(
     "EMAIL_FROM_ADDRESS",
@@ -365,7 +360,6 @@ class EnvConfig:
     "CAPTCHA_ENABLED",
     get_parameter_value("CAPTCHA_ENABLED", "false").lower() == "true",
   )
-  CORS_ALLOW_CREDENTIALS = get_bool_env("CORS_ALLOW_CREDENTIALS", True)
   CSP_TRUSTED_TYPES_ENABLED = get_bool_env(
     "CSP_TRUSTED_TYPES_ENABLED",
     get_parameter_value("CSP_TRUSTED_TYPES_ENABLED", "false").lower() == "true",
@@ -508,19 +502,11 @@ class EnvConfig:
     "GRAPH_QUERY_TIMEOUT", "timeouts/GRAPH_QUERY", TimeoutDefaults.GRAPH_QUERY
   )
 
-  # --- Graph Resiliency and Circuit Breaker Configuration ---
+  # --- Graph Resiliency (configurable in dev, always enabled in prod/staging) ---
   GRAPH_CIRCUIT_BREAKERS_ENABLED = get_bool_env("GRAPH_CIRCUIT_BREAKERS_ENABLED", True)
   GRAPH_REDIS_CACHE_ENABLED = get_bool_env("GRAPH_REDIS_CACHE_ENABLED", True)
   GRAPH_RETRY_LOGIC_ENABLED = get_bool_env("GRAPH_RETRY_LOGIC_ENABLED", True)
   GRAPH_HEALTH_CHECKS_ENABLED = get_bool_env("GRAPH_HEALTH_CHECKS_ENABLED", True)
-
-  # Maximum staged data size (MB) for direct materialization.
-  # Graphs with staged data above this threshold automatically route to
-  # Dagster even when DIRECT_GRAPH_MATERIALIZATION_ENABLED=true.
-  # This prevents long-running materializations from tying up API workers.
-  GRAPH_MATERIALIZATION_THRESHOLD_MB = get_int_env(
-    "GRAPH_MATERIALIZATION_THRESHOLD_MB", 500
-  )
 
   GRAPH_CIRCUIT_BREAKER_THRESHOLD = get_tuning_int(
     "GRAPH_CIRCUIT_BREAKER_THRESHOLD",
@@ -531,9 +517,6 @@ class EnvConfig:
     "GRAPH_CIRCUIT_BREAKER_TIMEOUT",
     "circuits/TIMEOUT",
     CircuitBreakerDefaults.TIMEOUT,
-  )
-  GRAPH_HEALTH_CHECK_INTERVAL_MINUTES = get_float_env(
-    "GRAPH_HEALTH_CHECK_INTERVAL_MINUTES", 5.0
   )
 
   # ===========================================================================
@@ -547,19 +530,6 @@ class EnvConfig:
 
   # DuckDB Staging Configuration (for data ingestion/materialization)
   DUCKDB_STAGING_PATH = get_str_env("DUCKDB_STAGING_PATH", "./data/staging")
-
-  # LadybugDB Memory Configuration (can be overridden per-tier)
-  LBUG_MAX_MEMORY_MB = get_int_env("LBUG_MAX_MEMORY_MB", 2048)
-  LBUG_MAX_MEMORY_PER_DB_MB = get_int_env("LBUG_MAX_MEMORY_PER_DB_MB", 0)
-
-  # LadybugDB Connection Management
-  LBUG_MAX_CONNECTIONS_PER_DB = get_int_env("LBUG_MAX_CONNECTIONS_PER_DB", 10)
-  LBUG_CONNECTION_TTL_MINUTES = get_float_env(
-    "LBUG_CONNECTION_TTL_MINUTES", 30.0
-  )  # 30 minutes default
-  LBUG_HEALTH_CHECK_INTERVAL_MINUTES = get_float_env(
-    "LBUG_HEALTH_CHECK_INTERVAL_MINUTES", 5.0
-  )  # 5 minutes default
 
   # LadybugDB Admission Control
   # These use SSM tuning parameters in prod/staging for runtime adjustability
@@ -579,12 +549,6 @@ class EnvConfig:
   NEO4J_URI = get_str_env("NEO4J_URI", "bolt://localhost:7687")
   NEO4J_USERNAME = get_str_env("NEO4J_USERNAME", "neo4j")
   NEO4J_PASSWORD = get_secret_value("NEO4J_PASSWORD", "")
-  NEO4J_ENTERPRISE = get_bool_env("NEO4J_ENTERPRISE", False)
-  NEO4J_MAX_CONNECTION_POOL_SIZE = get_int_env("NEO4J_MAX_CONNECTION_POOL_SIZE", 50)
-  NEO4J_CONNECTION_ACQUISITION_TIMEOUT = get_int_env(
-    "NEO4J_CONNECTION_ACQUISITION_TIMEOUT", 60
-  )
-  NEO4J_MAX_CONNECTION_LIFETIME = get_int_env("NEO4J_MAX_CONNECTION_LIFETIME", 3600)
 
   # ==========================================================================
   # 4. DATABASE CONFIGURATION - POSTGRESQL
@@ -593,8 +557,6 @@ class EnvConfig:
   DATABASE_URL = get_secret_value(
     "DATABASE_URL", "postgresql://postgres:postgres@localhost:5432/robosystems"
   )
-  # Note: Pool configuration (pool_size, max_overflow, timeout, recycle) uses
-  # fixed constants from robosystems/config/constants.py - not runtime-configurable
   DATABASE_ECHO = get_bool_env("DATABASE_ECHO", False)
 
   # ==========================================================================
@@ -617,8 +579,10 @@ class EnvConfig:
   CREDIT_SUMMARY_CACHE_TTL = get_tuning_int(
     "CREDIT_SUMMARY_CACHE_TTL", "cache/SUMMARY_TTL", CacheDefaults.SUMMARY_TTL
   )
-  CREDIT_OPERATION_COST_CACHE_TTL = get_int_env(
-    "CREDIT_OPERATION_COST_CACHE_TTL", CacheDefaults.OPERATION_COST_TTL
+  CREDIT_OPERATION_COST_CACHE_TTL = get_tuning_int(
+    "CREDIT_OPERATION_COST_CACHE_TTL",
+    "cache/OPERATION_COST_TTL",
+    CacheDefaults.OPERATION_COST_TTL,
   )
   JWT_CACHE_TTL = get_tuning_int(
     "JWT_CACHE_TTL", "cache/JWT_TTL", CacheDefaults.JWT_TTL
@@ -626,9 +590,6 @@ class EnvConfig:
   API_KEY_CACHE_TTL = get_tuning_int(
     "API_KEY_CACHE_TTL", "cache/API_KEY_TTL", CacheDefaults.API_KEY_TTL
   )
-
-  # Distributed lock TTLs
-  INGESTION_LOCK_TTL = get_int_env("INGESTION_LOCK_TTL", 3600)  # 1 hour
 
   # ==========================================================================
   # 6. DAGSTER CONFIGURATION
@@ -653,9 +614,6 @@ class EnvConfig:
   AWS_BEDROCK_REGION = get_str_env("AWS_BEDROCK_REGION", "us-east-1")
   AWS_BEDROCK_ACCESS_KEY_ID = get_str_env("AWS_BEDROCK_ACCESS_KEY_ID", "")
   AWS_BEDROCK_SECRET_ACCESS_KEY = get_str_env("AWS_BEDROCK_SECRET_ACCESS_KEY", "")
-
-  # S3 configuration
-  AWS_S3_PREFIX = get_str_env("AWS_S3_PREFIX", "robosystems")
 
   # S3-specific credentials
   # Use secrets manager for prod/staging, environment variables for local dev
@@ -688,7 +646,7 @@ class EnvConfig:
     "INTUIT_REDIRECT_URI", "http://localhost:8000/auth/callback"
   )
   INTUIT_ENVIRONMENT = get_secret_value("INTUIT_ENVIRONMENT", "sandbox")
-  QUICKBOOKS_SANDBOX = get_bool_env("QUICKBOOKS_SANDBOX", True)
+
   # Plaid
   PLAID_CLIENT_ID = get_secret_value("PLAID_CLIENT_ID", "")
   PLAID_CLIENT_SECRET = get_secret_value("PLAID_CLIENT_SECRET", "")
@@ -701,10 +659,6 @@ class EnvConfig:
   )
   # Parallel processing concurrency (for local sec-process-parallel command)
   SEC_PARALLEL_CONCURRENCY = get_int_env("SEC_PARALLEL_CONCURRENCY", 2)
-  # Note: SEC processing constants (SEC_RATE_LIMIT, SEC_VALIDATE_CIK,
-  # SEC_PIPELINE_PARTIAL_TOLERANCE, SEC_PIPELINE_CLEANUP_TEMP_FILES,
-  # SEC_MAX_CONCURRENT_DOWNLOADS) are in robosystems/adapters/sec/config.py
-  # or robosystems/config/external_services.py - they are not runtime-configurable
 
   # OpenFIGI (financial identifiers)
   OPENFIGI_API_KEY = get_secret_value("OPENFIGI_API_KEY", "")
@@ -731,8 +685,6 @@ class EnvConfig:
   QUERY_QUEUE_TIMEOUT = get_tuning_int(
     "QUERY_QUEUE_TIMEOUT", "queues/TIMEOUT", QueueDefaults.TIMEOUT
   )
-  # Note: QUERY_DEFAULT_PRIORITY, QUERY_PRIORITY_BOOST_PREMIUM, and ADMISSION_CHECK_INTERVAL
-  # are fixed constants in robosystems/config/constants.py - not runtime-configurable
 
   # Admission control (SSM: /tuning/admission/)
   ADMISSION_MEMORY_THRESHOLD = get_tuning_float(
@@ -772,11 +724,6 @@ class EnvConfig:
   SSE_QUEUE_SIZE = get_tuning_int(
     "SSE_QUEUE_SIZE", "sse/QUEUE_SIZE", SSEDefaults.QUEUE_SIZE
   )
-  # SSE Rate limiting
-  RATE_LIMIT_SSE_CONNECTIONS = get_int_env("RATE_LIMIT_SSE_CONNECTIONS", 10)
-  RATE_LIMIT_SSE_CONNECTIONS_WINDOW = get_int_env(
-    "RATE_LIMIT_SSE_CONNECTIONS_WINDOW", 60
-  )
 
   # MCP (Model Context Protocol) (SSM: /tuning/mcp/)
   MCP_AUTO_LIMIT_ENABLED = get_bool_env("MCP_AUTO_LIMIT_ENABLED", True)
@@ -790,9 +737,6 @@ class EnvConfig:
   # ==========================================================================
   # 10. ARELLE RUNTIME CONFIGURATION
   # ==========================================================================
-  # Note: Arelle and XBRL processing constants are in robosystems/adapters/sec/config.py
-  # They are not runtime-configurable - change them in that module if needed.
-  # Only ARELLE_CACHE_DIR remains here as it's a runtime path that varies by deployment.
 
   # Arelle cache directory (runtime path, varies by deployment)
   ARELLE_CACHE_DIR = get_str_env("ARELLE_CACHE_DIR", "")
@@ -933,13 +877,9 @@ class EnvConfig:
 
           # Override with values from config file if present
           return {
-            # Memory settings
-            "max_memory_mb": instance_config.get(
-              "max_memory_mb", cls.LBUG_MAX_MEMORY_MB
-            ),
-            "memory_per_db_mb": instance_config.get(
-              "memory_per_db_mb", cls.LBUG_MAX_MEMORY_PER_DB_MB
-            ),
+            # Memory settings (from graph.yml tier config)
+            "max_memory_mb": instance_config.get("max_memory_mb", 2048),
+            "memory_per_db_mb": instance_config.get("memory_per_db_mb", 0),
             # Performance settings
             "chunk_size": instance_config.get("chunk_size", 1000),
             "query_timeout": instance_config.get(
@@ -974,11 +914,11 @@ class EnvConfig:
     except Exception:
       pass  # Any other error loading config
 
-    # Fall back to environment variables
+    # Fall back to sensible defaults (used when CLUSTER_TIER is not set)
     return {
-      # Memory settings
-      "max_memory_mb": cls.LBUG_MAX_MEMORY_MB,
-      "memory_per_db_mb": cls.LBUG_MAX_MEMORY_PER_DB_MB,
+      # Memory settings (defaults for local dev)
+      "max_memory_mb": get_int_env("LBUG_MAX_MEMORY_MB", 2048),
+      "memory_per_db_mb": get_int_env("LBUG_MAX_MEMORY_PER_DB_MB", 0),
       # Performance settings
       "chunk_size": get_int_env("LBUG_CHUNK_SIZE", 1000),
       "query_timeout": cls.GRAPH_QUERY_TIMEOUT,

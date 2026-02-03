@@ -169,12 +169,13 @@ def get_admission_controller() -> LadybugAdmissionController:
   global _admission_controller
   if _admission_controller is None:
     from robosystems.config import env
+    from robosystems.config.constants import LBUG_MAX_CONNECTIONS_PER_DB
 
     # Use centralized config (which handles env vars and defaults properly)
     _admission_controller = LadybugAdmissionController(
       memory_threshold=env.LBUG_ADMISSION_MEMORY_THRESHOLD,
       cpu_threshold=env.LBUG_ADMISSION_CPU_THRESHOLD,
-      max_connections_per_db=env.LBUG_MAX_CONNECTIONS_PER_DB,
+      max_connections_per_db=LBUG_MAX_CONNECTIONS_PER_DB,
     )
 
   return _admission_controller
