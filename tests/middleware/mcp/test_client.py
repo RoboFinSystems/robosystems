@@ -507,6 +507,47 @@ class TestGraphMCPTools:
 
     assert result["error"] == "missing_elements"
 
+  @pytest.mark.asyncio
+  @pytest.mark.unit
+  async def test_workspace_tool_disabled_returns_error(
+    self, mock_graph_client, monkeypatch
+  ):
+    """Test that workspace tools return proper error when disabled."""
+    # Disable workspace tools for this test
+    monkeypatch.setattr("robosystems.config.env.MCP_WORKSPACE_ENABLED", False)
+
+    mock_graph_client.graph_id = "kg1234567890abcdef"
+    tools = GraphMCPTools(mock_graph_client)
+
+    # Calling workspace tool when disabled should return error message
+    result = await tools.call_tool(
+      "create-workspace", {"name": "test"}, return_raw=False
+    )
+
+    assert "not available" in result
+    assert "MCP_WORKSPACE_ENABLED" in result
+
+  @pytest.mark.asyncio
+  @pytest.mark.unit
+  async def test_fact_grid_tool_disabled_returns_error(
+    self, mock_graph_client, monkeypatch
+  ):
+    """Test that fact grid tool returns proper error when disabled."""
+    # Disable fact grid tool for this test
+    monkeypatch.setattr("robosystems.config.env.FACT_GRID_ENABLED", False)
+
+    mock_graph_client.graph_id = "kg1234567890abcdef"
+    tools = GraphMCPTools(mock_graph_client)
+
+    result = await tools.call_tool(
+      "build-fact-grid",
+      {"elements": ["test"], "periods": ["2025-01-01"]},
+      return_raw=False,
+    )
+
+    assert "not available" in result
+    assert "FACT_GRID_ENABLED" in result
+
 
 class TestGraphMCPConfigurableSchema:
   """Test configurable schema tables."""
