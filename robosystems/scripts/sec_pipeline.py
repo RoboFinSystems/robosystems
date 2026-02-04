@@ -220,11 +220,9 @@ class SECPipeline:
     if job_type == "stage":
       # sec_stage job - stages to persistent DuckDB only (Stage 1)
       # Note: staging doesn't touch LadybugDB - rebuild is handled by materialize
-      # chunk_staging=False for local dev (small data, no memory pressure)
       stage_config: dict[str, Any] = {
         "graph_id": graph_id,
         "reset_staging": reset_staging,
-        "chunk_staging": False,  # Disable quarter-by-quarter chunking for local dev
       }
       if year:
         stage_config["year"] = int(year)
