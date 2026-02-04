@@ -560,6 +560,7 @@ class XBRLDuckDBGraphProcessor:
           client,
           year=year,
           progress_callback=log_progress,
+          chunk_large_tables=chunk_large_tables,
         )
       else:
         log_progress(
@@ -1848,23 +1849,40 @@ class XBRLDuckDBGraphProcessor:
       f"  [MERGE] Merging {len(chunk_tables)} chunks ({total_chunk_rows:,} rows) with dedupe..."
     )
 
-    # Build merge SQL - same pattern as full ingest uses
-    # Dedupe columns depend on table type: nodes use 'identifier', relationships use 'src, dst'
+    # Build merge SQL using GROUP BY + FIRST() instead of ROW_NUMBER window function
+    # This uses hash aggregation which has proper spill-to-disk support via DuckDB's
+    # external aggregation, unlike window function partitioning which can OOM on large datasets.
+    # See: https://duckdb.org/2024/03/29/external-aggregation
     if entity_type == "nodes":
-      dedupe_columns = "identifier"
+      dedupe_columns = ["identifier"]
     else:
       # Relationships - columns are already renamed to src/dst by create_table
-      dedupe_columns = "src, dst"
+      dedupe_columns = ["src", "dst"]
+
+    # Get column names from the first chunk table to build the aggregation query
+    schema_response = await graph_client.query_table(
+      graph_id=self.graph_id,
+      sql=f'DESCRIBE "{chunk_tables[0]}"',
+      timeout=60.0,
+    )
+    all_columns = [row[0] for row in schema_response.get("rows", [])]
+
+    # Build SELECT clause: dedupe columns as-is, FIRST() for all other columns
+    # FIRST() is an aggregate that returns an arbitrary value from the group,
+    # which is exactly what we need for deduplication (keep one row per key)
+    other_columns = [c for c in all_columns if c not in dedupe_columns]
+    select_parts = [f'"{c}"' for c in dedupe_columns] + [
+      f'FIRST("{c}") AS "{c}"' for c in other_columns
+    ]
+    select_clause = ", ".join(select_parts)
+    group_by_clause = ", ".join(f'"{c}"' for c in dedupe_columns)
 
     union_parts = " UNION ALL ".join(f'SELECT * FROM "{t}"' for t in chunk_tables)
     merge_sql = f"""
       CREATE OR REPLACE TABLE "{table_name}" AS
-      SELECT * EXCLUDE (rn)
-      FROM (
-        SELECT *, ROW_NUMBER() OVER (PARTITION BY {dedupe_columns} ORDER BY {dedupe_columns}) AS rn
-        FROM ({union_parts})
-      )
-      WHERE rn = 1
+      SELECT {select_clause}
+      FROM ({union_parts})
+      GROUP BY {group_by_clause}
     """
 
     # Retry logic for merge
