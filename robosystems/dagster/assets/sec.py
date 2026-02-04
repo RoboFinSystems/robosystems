@@ -1921,6 +1921,15 @@ def sec_duckdb_staged(
 
   result = asyncio.run(run_staging())
 
+  # Release DuckDB memory after staging (closes connections, frees buffers)
+  try:
+    from robosystems.graph_api.client.factory import release_graph_memory
+
+    release_result = asyncio.run(release_graph_memory(config.graph_id, target="duckdb"))
+    context.log.info(f"Memory release: {release_result.get('message', 'done')}")
+  except Exception as release_err:
+    context.log.warning(f"Could not release memory (non-fatal): {release_err}")
+
   if result.status == "error":
     context.log.error(f"Staging failed: {result.error}")
     return MaterializeResult(
@@ -2285,16 +2294,16 @@ def sec_graph_materialized(
     f"{result.duration_ms / 1000:.2f}s"
   )
 
-  # Restore memory to defaults after materialization
-  # This releases the temporarily boosted DuckDB and LadybugDB memory
+  # Release memory after materialization (closes connections, frees buffers to OS)
+  # This is more aggressive than restore - it actually releases the memory
   try:
-    from robosystems.graph_api.client.factory import restore_graph_memory
+    from robosystems.graph_api.client.factory import release_graph_memory
 
-    restore_result = asyncio.run(restore_graph_memory(config.graph_id))
-    context.log.info(f"Memory restored: {restore_result.get('message', 'done')}")
-  except Exception as restore_err:
-    # Don't fail the job if restore fails - materialization succeeded
-    context.log.warning(f"Could not restore memory (non-fatal): {restore_err}")
+    release_result = asyncio.run(release_graph_memory(config.graph_id, target="both"))
+    context.log.info(f"Memory release: {release_result.get('message', 'done')}")
+  except Exception as release_err:
+    # Don't fail the job if release fails - materialization succeeded
+    context.log.warning(f"Could not release memory (non-fatal): {release_err}")
 
   return MaterializeResult(
     metadata={
@@ -2368,7 +2377,7 @@ def sec_graph_direct_copy(
   from robosystems.graph_api.client.factory import (
     boost_graph_memory,
     get_graph_client,
-    restore_graph_memory,
+    release_graph_memory,
   )
   from robosystems.operations.graph.shared_repository_service import (
     ensure_shared_repository_exists,
@@ -2643,12 +2652,12 @@ def sec_graph_direct_copy(
 
   duration_ms = (time.time() - start_time) * 1000
 
-  # Restore memory to defaults
+  # Release memory after direct copy (closes connections, frees buffers to OS)
   try:
-    restore_result = asyncio.run(restore_graph_memory(config.graph_id))
-    context.log.info(f"Memory restored: {restore_result.get('message', 'done')}")
-  except Exception as restore_err:
-    context.log.warning(f"Could not restore memory (non-fatal): {restore_err}")
+    release_result = asyncio.run(release_graph_memory(config.graph_id, target="ladybug"))
+    context.log.info(f"Memory release: {release_result.get('message', 'done')}")
+  except Exception as release_err:
+    context.log.warning(f"Could not release memory (non-fatal): {release_err}")
 
   context.log.info(
     f"Direct copy complete: {len(result['tables_copied'])} tables, "

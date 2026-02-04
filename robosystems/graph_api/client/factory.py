@@ -1057,13 +1057,7 @@ async def boost_graph_memory(graph_id: str, target: str = "both") -> dict[str, A
   client = await get_graph_client(graph_id, operation_type="write")
 
   try:
-    response = await client.client.post(
-      f"/databases/{graph_id}/memory/boost",
-      json={"target": target},
-      timeout=30.0,
-    )
-    response.raise_for_status()
-    result = response.json()
+    result = await client.boost_memory(graph_id, target=target)
     logger.info(f"Memory boost for {graph_id}: {result.get('message', 'done')}")
     return result
   except Exception as e:
@@ -1080,10 +1074,10 @@ async def boost_graph_memory(graph_id: str, target: str = "both") -> dict[str, A
 
 async def restore_graph_memory(graph_id: str) -> dict[str, Any]:
   """
-  Restore memory to defaults after staging/materialization operations.
+  Restore memory limits to defaults after staging/materialization operations.
 
-  This should be called after a batch of staging or materialization operations
-  completes to release the temporarily boosted memory allocation.
+  This only reconfigures memory limits - connections stay open and buffers
+  remain allocated. Use release_graph_memory() to actually free memory.
 
   Args:
       graph_id: Graph database identifier
@@ -1099,12 +1093,7 @@ async def restore_graph_memory(graph_id: str) -> dict[str, Any]:
   client = await get_graph_client(graph_id, operation_type="write")
 
   try:
-    response = await client.client.post(
-      f"/databases/{graph_id}/memory/restore",
-      timeout=30.0,
-    )
-    response.raise_for_status()
-    result = response.json()
+    result = await client.restore_memory(graph_id)
     logger.info(f"Memory restore for {graph_id}: {result.get('message', 'done')}")
     return result
   except Exception as e:
@@ -1115,4 +1104,50 @@ async def restore_graph_memory(graph_id: str) -> dict[str, Any]:
       "duckdb_restored": False,
       "ladybug_restored": False,
       "message": f"Restore failed: {e}",
+    }
+
+
+async def release_graph_memory(
+  graph_id: str, target: str = "both", aggressive: bool = True
+) -> dict[str, Any]:
+  """
+  Release memory by closing connections and freeing buffers.
+
+  Unlike restore_graph_memory (which only reconfigures limits), this function
+  actually closes connections to force the database engines to release their
+  buffer memory back to the OS.
+
+  Call this after staging or materialization operations complete.
+
+  Args:
+      graph_id: Graph database identifier
+      target: Which system to release - "duckdb", "ladybug", or "both"
+      aggressive: For LadybugDB - run GC and malloc_trim for maximum release
+
+  Returns:
+      Dictionary with release status and statistics
+
+  Example:
+      # After staging completes
+      await release_graph_memory("sec", target="duckdb")
+
+      # After materialization completes
+      await release_graph_memory("sec", target="both", aggressive=True)
+  """
+  client = await get_graph_client(graph_id, operation_type="write")
+
+  try:
+    result = await client.release_memory(graph_id, target=target, aggressive=aggressive)
+    logger.info(f"Memory release for {graph_id}: {result.get('message', 'done')}")
+    return result
+  except Exception as e:
+    logger.warning(f"Failed to release memory for {graph_id}: {e}")
+    # Don't raise - this is cleanup, shouldn't fail the main operation
+    return {
+      "graph_id": graph_id,
+      "target": target,
+      "duckdb_connections_closed": 0,
+      "duckdb_released": False,
+      "ladybug_released": False,
+      "message": f"Release failed: {e}",
     }
