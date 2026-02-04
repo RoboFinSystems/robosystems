@@ -263,9 +263,12 @@ class TestGraphMCPTools:
     tools = GraphMCPTools(mock_graph_client)
     definitions = tools.get_tool_definitions_as_dict()
 
-    # Should have all tools: base tools (5-6) + workspace tools (4) + data tools (1) = 10-11
-    # Element discovery is conditional based on graph type/schema
-    assert len(definitions) >= 10
+    # Base tools (5): example queries, cypher, schema, properties, structure
+    # + workspace tools (4) if MCP_WORKSPACE_ENABLED=true
+    # + data tools (1) if FACT_GRID_ENABLED=true
+    # + element/facts tools (2) if graph type is SEC
+    # With default feature flags (workspace=false, fact_grid=false), expect 5 base tools
+    assert len(definitions) >= 5
     assert len(definitions) <= 11
 
     # Check example queries tool
@@ -389,9 +392,12 @@ class TestGraphMCPTools:
 
   @pytest.mark.asyncio
   @pytest.mark.unit
-  async def test_call_workspace_tools(self, mock_graph_client):
+  async def test_call_workspace_tools(self, mock_graph_client, monkeypatch):
     """Test routing calls to workspace tools."""
     from datetime import datetime
+
+    # Enable workspace tools for this test
+    monkeypatch.setattr("robosystems.config.env.MCP_WORKSPACE_ENABLED", True)
 
     mock_graph_client.graph_id = "kg1234567890abcdef"
     mock_graph_client.user = MagicMock()
@@ -433,8 +439,11 @@ class TestGraphMCPTools:
 
   @pytest.mark.asyncio
   @pytest.mark.unit
-  async def test_call_data_operation_tools(self, mock_graph_client):
+  async def test_call_data_operation_tools(self, mock_graph_client, monkeypatch):
     """Test routing calls to data operation tools."""
+    # Enable fact grid tool for this test
+    monkeypatch.setattr("robosystems.config.env.FACT_GRID_ENABLED", True)
+
     mock_graph_client.graph_id = "kg1234567890abcdef"
 
     tools = GraphMCPTools(mock_graph_client)
@@ -467,8 +476,11 @@ class TestGraphMCPTools:
 
   @pytest.mark.asyncio
   @pytest.mark.unit
-  async def test_workspace_tool_error_handling(self, mock_graph_client):
+  async def test_workspace_tool_error_handling(self, mock_graph_client, monkeypatch):
     """Test error handling for workspace tools."""
+    # Enable workspace tools for this test
+    monkeypatch.setattr("robosystems.config.env.MCP_WORKSPACE_ENABLED", True)
+
     mock_graph_client.graph_id = "kg1234567890abcdef"
     mock_graph_client.user = MagicMock()
 
@@ -482,8 +494,11 @@ class TestGraphMCPTools:
 
   @pytest.mark.asyncio
   @pytest.mark.unit
-  async def test_data_tool_error_handling(self, mock_graph_client):
+  async def test_data_tool_error_handling(self, mock_graph_client, monkeypatch):
     """Test error handling for data operation tools."""
+    # Enable fact grid tool for this test
+    monkeypatch.setattr("robosystems.config.env.FACT_GRID_ENABLED", True)
+
     mock_graph_client.graph_id = "kg1234567890abcdef"
 
     tools = GraphMCPTools(mock_graph_client)
