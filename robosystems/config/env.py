@@ -343,11 +343,35 @@ class EnvConfig:
   #
   # Override priority: env var > SSM Parameter Store > default value
 
-  # --- Security & Auth ---
+  # --- Platform Operations ---
   USER_REGISTRATION_ENABLED = get_bool_env(
     "USER_REGISTRATION_ENABLED",
     get_parameter_value("USER_REGISTRATION_ENABLED", "false").lower() == "true",
   )
+  # For forked/self-hosted deployments: Set BILLING_ENABLED=false in SSM Parameter Store
+  # This disables payment requirements since you're paying for your own infrastructure
+  BILLING_ENABLED = get_bool_env(
+    "BILLING_ENABLED",
+    get_parameter_value("BILLING_ENABLED", "false").lower() == "true",
+  )
+  SSE_ENABLED = get_bool_env(
+    "SSE_ENABLED",
+    get_parameter_value("SSE_ENABLED", "true").lower() == "true",
+  )
+  RATE_LIMIT_ENABLED = get_bool_env(
+    "RATE_LIMIT_ENABLED",
+    get_parameter_value("RATE_LIMIT_ENABLED", "false").lower() == "true",
+  )
+  LOAD_SHEDDING_ENABLED = get_bool_env(
+    "LOAD_SHEDDING_ENABLED",
+    get_parameter_value("LOAD_SHEDDING_ENABLED", "true").lower() == "true",
+  )
+  OTEL_ENABLED = get_bool_env(
+    "OTEL_ENABLED",
+    get_parameter_value("OTEL_ENABLED", "false").lower() == "true",
+  )
+
+  # --- Security & Authentication ---
   SECURITY_AUDIT_ENABLED = get_bool_env(
     "SECURITY_AUDIT_ENABLED",
     get_parameter_value("SECURITY_AUDIT_ENABLED", "false").lower() == "true",
@@ -363,6 +387,18 @@ class EnvConfig:
   CSP_TRUSTED_TYPES_ENABLED = get_bool_env(
     "CSP_TRUSTED_TYPES_ENABLED",
     get_parameter_value("CSP_TRUSTED_TYPES_ENABLED", "false").lower() == "true",
+  )
+
+  # --- Organization ---
+  ORG_MEMBER_INVITATIONS_ENABLED = get_bool_env(
+    "ORG_MEMBER_INVITATIONS_ENABLED",
+    get_parameter_value("ORG_MEMBER_INVITATIONS_ENABLED", "false").lower() == "true",
+  )
+  # Organization limits (SSM: /tuning/limits/)
+  ORG_GRAPHS_DEFAULT_LIMIT = get_tuning_int(
+    "ORG_GRAPHS_DEFAULT_LIMIT",
+    "limits/ORG_GRAPHS_DEFAULT",
+    LimitsDefaults.ORG_GRAPHS_DEFAULT,
   )
 
   # --- Graph Operations ---
@@ -387,8 +423,42 @@ class EnvConfig:
     "AGENT_POST_ENABLED",
     get_parameter_value("AGENT_POST_ENABLED", "true").lower() == "true",
   )
+  FACT_GRID_ENABLED = get_bool_env(
+    "FACT_GRID_ENABLED",
+    get_parameter_value("FACT_GRID_ENABLED", "false").lower() == "true",
+  )
+  MCP_AUTO_LIMIT_ENABLED = get_bool_env(
+    "MCP_AUTO_LIMIT_ENABLED",
+    get_parameter_value("MCP_AUTO_LIMIT_ENABLED", "true").lower() == "true",
+  )
+  MCP_WORKSPACE_ENABLED = get_bool_env(
+    "MCP_WORKSPACE_ENABLED",
+    get_parameter_value("MCP_WORKSPACE_ENABLED", "false").lower() == "true",
+  )
+
+  # --- Shared Repository Operations ---
+  SHARED_MASTER_READS_ENABLED = get_bool_env(
+    "SHARED_MASTER_READS_ENABLED",
+    get_parameter_value("SHARED_MASTER_READS_ENABLED", "true").lower() == "true",
+  )
+  # Shared Replica ALB URL (for read scaling)
+  # When set, reads to shared repositories will route to the replica ALB
+  # instead of the shared master. This allows horizontal scaling of reads.
+  # Format: http://internal-robosystems-shared-{env}.{region}.elb.amazonaws.com:8001
+  SHARED_REPLICA_ALB_URL = get_str_env("SHARED_REPLICA_ALB_URL", "")
+  # Shared repositories list for infrastructure/deployment (used by userdata scripts)
+  # This configures which repositories should be deployed on shared writer instances
+  # For application logic (checking if a graph is a shared repo), use GraphTypeRegistry.SHARED_REPOSITORIES
+  SHARED_REPOSITORIES = get_list_env("SHARED_REPOSITORIES", "")
 
   # --- Connection Providers ---
+  # CONNECTIONS_ENABLED controls whether the /connections router is included
+  # Individual provider flags below require CONNECTIONS_ENABLED=true to function
+  CONNECTIONS_ENABLED = get_bool_env(
+    "CONNECTIONS_ENABLED",
+    get_parameter_value("CONNECTIONS_ENABLED", "false").lower() == "true",
+  )
+  # Individual provider flags (require CONNECTIONS_ENABLED=true)
   CONNECTION_SEC_ENABLED = get_bool_env(
     "CONNECTION_SEC_ENABLED",
     get_parameter_value("CONNECTION_SEC_ENABLED", "false").lower() == "true",
@@ -400,58 +470,6 @@ class EnvConfig:
   CONNECTION_PLAID_ENABLED = get_bool_env(
     "CONNECTION_PLAID_ENABLED",
     get_parameter_value("CONNECTION_PLAID_ENABLED", "false").lower() == "true",
-  )
-
-  # --- Shared Repository Operations ---
-  SHARED_MASTER_READS_ENABLED = get_bool_env(
-    "SHARED_MASTER_READS_ENABLED",
-    get_parameter_value("SHARED_MASTER_READS_ENABLED", "true").lower() == "true",
-  )
-
-  # Shared Replica ALB URL (for read scaling)
-  # When set, reads to shared repositories will route to the replica ALB
-  # instead of the shared master. This allows horizontal scaling of reads.
-  # Format: http://internal-robosystems-shared-{env}.{region}.elb.amazonaws.com:8001
-  SHARED_REPLICA_ALB_URL = get_str_env("SHARED_REPLICA_ALB_URL", "")
-
-  # Shared repositories list for infrastructure/deployment (used by userdata scripts)
-  # This configures which repositories should be deployed on shared writer instances
-  # For application logic (checking if a graph is a shared repo), use GraphTypeRegistry.SHARED_REPOSITORIES
-  SHARED_REPOSITORIES = get_list_env("SHARED_REPOSITORIES", "")
-
-  # --- Organization --- (SSM: /tuning/limits/)
-  ORG_GRAPHS_DEFAULT_LIMIT = get_tuning_int(
-    "ORG_GRAPHS_DEFAULT_LIMIT",
-    "limits/ORG_GRAPHS_DEFAULT",
-    LimitsDefaults.ORG_GRAPHS_DEFAULT,
-  )
-  ORG_MEMBER_INVITATIONS_ENABLED = get_bool_env(
-    "ORG_MEMBER_INVITATIONS_ENABLED",
-    get_parameter_value("ORG_MEMBER_INVITATIONS_ENABLED", "false").lower() == "true",
-  )
-
-  # --- Platform Operations ---
-  # For forked/self-hosted deployments: Set BILLING_ENABLED=false in SSM Parameter Store
-  # This disables payment requirements since you're paying for your own infrastructure
-  BILLING_ENABLED = get_bool_env(
-    "BILLING_ENABLED",
-    get_parameter_value("BILLING_ENABLED", "false").lower() == "true",
-  )
-  SSE_ENABLED = get_bool_env(
-    "SSE_ENABLED",
-    get_parameter_value("SSE_ENABLED", "true").lower() == "true",
-  )
-  RATE_LIMIT_ENABLED = get_bool_env(
-    "RATE_LIMIT_ENABLED",
-    get_parameter_value("RATE_LIMIT_ENABLED", "false").lower() == "true",
-  )
-  LOAD_SHEDDING_ENABLED = get_bool_env(
-    "LOAD_SHEDDING_ENABLED",
-    get_parameter_value("LOAD_SHEDDING_ENABLED", "true").lower() == "true",
-  )
-  OTEL_ENABLED = get_bool_env(
-    "OTEL_ENABLED",
-    get_parameter_value("OTEL_ENABLED", "false").lower() == "true",
   )
 
   # ==========================================================================
@@ -726,7 +744,6 @@ class EnvConfig:
   )
 
   # MCP (Model Context Protocol) (SSM: /tuning/mcp/)
-  MCP_AUTO_LIMIT_ENABLED = get_bool_env("MCP_AUTO_LIMIT_ENABLED", True)
   MCP_MAX_RESULT_ROWS = get_tuning_int(
     "MCP_MAX_RESULT_ROWS", "mcp/MAX_RESULT_ROWS", MCPDefaults.MAX_RESULT_ROWS
   )

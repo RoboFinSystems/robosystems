@@ -6,6 +6,8 @@ including creation, listing, selection, backup, usage analytics, and other
 graph-level administrative functions.
 """
 
+from robosystems.config import env
+
 from .backups import router as backups_router
 from .connections import router as connections_router
 from .credits import router as credits_router
@@ -21,7 +23,6 @@ from .subgraphs import router as subgraphs_router
 from .subscriptions import router as subscriptions_router
 from .tables import router as tables_router
 from .usage import router as usage_router
-from .views import router as views_router
 
 __all__ = [
   "backups_router",
@@ -39,5 +40,10 @@ __all__ = [
   "subscriptions_router",
   "tables_router",
   "usage_router",
-  "views_router",
 ]
+
+# Conditionally export views_router based on feature flag
+if env.FACT_GRID_ENABLED:
+  from .views import router as views_router  # noqa: F401
+
+  __all__.append("views_router")
