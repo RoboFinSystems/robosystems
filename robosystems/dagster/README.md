@@ -15,13 +15,27 @@ dagster/
 │   └── graph.py           # LadybugDB graph resource
 ├── jobs/                  # Job definitions
 │   ├── billing.py         # Credit allocation, storage billing
-│   └── infrastructure.py  # Auth cleanup, health checks
+│   ├── infrastructure.py  # Auth cleanup, health checks, instance monitoring
+│   ├── graph.py           # Graph operations (create, backup, restore)
+│   ├── provisioning.py    # Repository and graph provisioning
+│   ├── sec.py             # SEC EDGAR pipeline jobs
+│   ├── shared_repository.py  # Shared repository snapshots
+│   └── notifications.py   # Email notification jobs
 ├── sensors/               # Event-driven triggers
-│   └── provisioning.py    # Subscription provisioning sensor
+│   ├── provisioning.py    # Subscription/repository provisioning sensors
+│   └── sec.py             # SEC pipeline sensors and schedules
 └── assets/                # Data pipeline assets
     ├── __init__.py        # Asset exports
     ├── graphs.py          # User graph operation assets
     └── sec/               # SEC EDGAR pipeline assets
+        ├── README.md      # SEC pipeline documentation
+        ├── configs.py     # Configuration classes
+        ├── download.py    # sec_raw_filings asset
+        ├── process.py     # sec_processed_filings asset
+        ├── stage.py       # DuckDB staging assets
+        ├── materialize.py # LadybugDB materialization assets
+        ├── entity_update.py  # Entity incremental update asset
+        └── backup.py      # SEC backup asset
 ```
 
 ## Quick Start
@@ -59,10 +73,85 @@ uv run dagster job execute -m robosystems.dagster -j daily_storage_billing_job \
 
 ### Infrastructure Jobs
 
-| Job                       | Schedule        | Description                 |
-| ------------------------- | --------------- | --------------------------- |
-| `hourly_auth_cleanup_job` | Every hour      | Clean up expired API keys   |
-| `weekly_health_check_job` | Mondays at 3 AM | Credit system health checks |
+| Job                              | Schedule        | Description                       |
+| -------------------------------- | --------------- | --------------------------------- |
+| `hourly_auth_cleanup_job`        | Every hour      | Clean up expired API keys         |
+| `weekly_health_check_job`        | Mondays at 3 AM | Credit system health checks       |
+| `instance_health_check_job`      | Every 5 min     | LadybugDB instance health checks  |
+| `instance_metrics_collection_job`| Every 5 min     | Collect instance metrics          |
+| `instance_registry_cleanup_job`  | Every hour      | Clean stale registry entries      |
+| `volume_registry_cleanup_job`    | Every hour      | Clean orphaned volume entries     |
+| `full_instance_maintenance_job`  | Daily at 3 AM   | Full instance maintenance cycle   |
+
+### SEC Pipeline Jobs
+
+| Job                          | Purpose                                      |
+| ---------------------------- | -------------------------------------------- |
+| `sec_download_job`           | Download raw XBRL filings to S3              |
+| `sec_process_job`            | Process filings to consolidated parquet      |
+| `sec_stage_job`              | Stage parquet to persistent DuckDB           |
+| `sec_materialize_job`        | Materialize from DuckDB to LadybugDB         |
+| `sec_staged_materialize_job` | Full pipeline: stage + materialize           |
+| `sec_direct_copy_job`        | Direct S3 → LadybugDB (bypasses DuckDB)      |
+| `sec_incremental_copy_job`   | Incremental S3 → LadybugDB (daily updates)   |
+| `sec_incremental_stage_job`  | Incremental DuckDB staging                   |
+| `sec_entity_update_job`      | Update mutable Entity attributes             |
+| `sec_backup_job`             | Create downloadable SEC database backup      |
+
+See [`assets/sec/README.md`](assets/sec/README.md) for detailed SEC pipeline documentation.
+
+### Graph Operations Jobs
+
+| Job                    | Purpose                              |
+| ---------------------- | ------------------------------------ |
+| `create_graph_job`     | Create new user graph                |
+| `create_entity_graph_job` | Create entity-scoped graph        |
+| `create_subgraph_job`  | Create subgraph workspace            |
+| `backup_graph_job`     | Backup graph to S3                   |
+| `restore_graph_job`    | Restore graph from backup            |
+| `stage_file_job`       | Stage file to graph staging tables   |
+| `materialize_file_job` | Materialize staged file to graph     |
+| `materialize_graph_job`| Materialize entire graph             |
+
+### Provisioning Jobs
+
+| Job                        | Purpose                              |
+| -------------------------- | ------------------------------------ |
+| `provision_graph_job`      | Provision graph for subscription     |
+| `provision_repository_job` | Provision shared repository access   |
+
+### Shared Repository Jobs
+
+| Job                                   | Purpose                                    |
+| ------------------------------------- | ------------------------------------------ |
+| `shared_repository_snapshot_job`      | Snapshot + update template + refresh replicas |
+| `shared_repository_snapshot_only_job` | Snapshot only (no replica refresh)         |
+| `shared_repository_refresh_replicas_job` | Refresh replicas from existing snapshot |
+
+## Sensors
+
+Sensors watch for conditions and trigger jobs:
+
+### Provisioning Sensors
+
+| Sensor                       | Triggers                  | Purpose                              |
+| ---------------------------- | ------------------------- | ------------------------------------ |
+| `pending_subscription_sensor`| `provision_graph_job`     | Provisions graphs for new subscriptions |
+| `pending_repository_sensor`  | `provision_repository_job`| Provisions shared repository access  |
+
+### SEC Pipeline Sensors
+
+| Sensor/Schedule                           | Triggers                       | Purpose                              |
+| ----------------------------------------- | ------------------------------ | ------------------------------------ |
+| `sec_processing_sensor`                   | `sec_process_job`              | Discovers pending files, triggers batch processing |
+| `sec_post_materialize_snapshot_sensor`    | `shared_repository_snapshot_job` | Creates snapshot after materialization |
+| `sec_incremental_download_schedule`       | `sec_download_job`             | 9pm EST weekdays                     |
+| `sec_download_to_process_sensor`          | `sec_process_job`              | Chains download → process            |
+| `sec_incremental_staging_sensor`          | `sec_incremental_stage_job`    | Chains process → stage               |
+| `sec_stage_to_copy_sensor`                | `sec_incremental_copy_job`     | Chains stage → copy                  |
+| `sec_incremental_post_ingest_snapshot_sensor` | `shared_repository_snapshot_job` | Chains copy → snapshot           |
+
+All sensors start **STOPPED** by default. Enable in Dagster UI when ready for automated processing.
 
 ## Resources
 
@@ -80,12 +169,6 @@ def my_op(context, db: DatabaseResource, s3: S3Resource):
     s3.upload_file(file_obj, "path/to/file.parquet")
 ```
 
-## Sensors
-
-Sensors watch for conditions and trigger jobs:
-
-- **`pending_subscription_sensor`**: Watches for subscriptions in "provisioning" status and triggers graph creation
-
 ## Custom Data Sources (Fork-Friendly)
 
 When forking RoboSystems, add custom data pipelines in the `custom_*` namespace:
@@ -100,3 +183,4 @@ The `custom_*` namespace ensures upstream updates never conflict with your addit
 
 - [Dagster Documentation](https://docs.dagster.io/) - Official Dagster docs
 - [Adapters README](../adapters/README.md) - External service integrations
+- [SEC Pipeline README](assets/sec/README.md) - SEC EDGAR pipeline details

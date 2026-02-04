@@ -44,7 +44,11 @@ class SECMetadataLoader:
       s3_key = get_raw_key(DataSourceType.SEC, "submissions", f"{cik}.json")
       response = s3_client.get_object(Bucket=bucket, Key=s3_key)
       return json.loads(response["Body"].read().decode("utf-8"))
-    except Exception:
+    except s3_client.exceptions.NoSuchKey:
+      # Expected when snapshot doesn't exist yet
+      return None
+    except Exception as e:
+      logger.debug("Failed to load submissions from S3 for CIK %s: %s", cik, e)
       return None
 
   def get_metadata(

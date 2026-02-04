@@ -450,7 +450,7 @@ def sec_raw_filings(
     completed = 0
 
     for coro in asyncio.as_completed(tasks):
-      await coro
+      _ = await coro
       completed += 1
       if completed % 100 == 0:
         stats = monitor.get_stats()
