@@ -53,23 +53,33 @@ API JSON → S3 Raw → dbt transforms → S3 Processed → DuckDB Staging → L
 
 ```
 robosystems/adapters/
-├── sec/
-│   ├── client/                 # EDGAR API + EFTS client
-│   └── processors/             # Arelle XBRL processing (no dbt)
-├── quickbooks/
+├── sec/                        # SEC EDGAR adapter (active)
+│   ├── client/                 # EDGAR API, EFTS, Arelle, Downloader
+│   ├── metadata.py             # SECMetadataLoader with caching
+│   └── processors/             # XBRL processing
+│       ├── constants.py        # Shared constants (SHARED_NODE_TABLES)
+│       ├── xbrl_graph.py       # XBRLGraphProcessor
+│       ├── processing.py       # Single filing processing
+│       ├── consolidation.py    # Parquet consolidation
+│       └── ingestion/          # DuckDB/LadybugDB ingestion
+├── quickbooks/                 # QuickBooks adapter (stubbed)
 │   ├── client/                 # QB OAuth client
-│   ├── processors/             # Transaction processing
-│   └── transforms/             # dbt models
-└── plaid/
+│   └── processors/             # Transaction processing (stubbed)
+└── plaid/                      # Plaid adapter (stubbed)
     ├── client/                 # Plaid API client
-    ├── processors/             # Transaction processing
-    └── transforms/             # dbt models
+    └── processors/             # Transaction sync (stubbed)
 
 robosystems/dagster/
 ├── assets/
-│   ├── sec.py                  # SEC pipeline assets
-│   ├── quickbooks.py           # QB pipeline assets
-│   └── plaid.py                # Plaid pipeline assets
+│   ├── graphs.py               # User graph operation assets
+│   └── sec/                    # SEC pipeline assets (modular)
+│       ├── configs.py          # Configuration classes
+│       ├── download.py         # sec_raw_filings
+│       ├── process.py          # sec_processed_filings
+│       ├── stage.py            # DuckDB staging assets
+│       ├── materialize.py      # LadybugDB materialization
+│       ├── entity_update.py    # Entity incremental update
+│       └── backup.py           # SEC backup asset
 ├── jobs/                       # 30+ job definitions
 ├── sensors/                    # Event-driven triggers
 └── resources/                  # Database, S3, Graph resources

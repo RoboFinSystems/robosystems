@@ -621,7 +621,7 @@ just sec-load NVDA 2025
 
 ## Resources
 
-- **Dagster Pipeline**: See `/robosystems/dagster/assets/sec.py` for pipeline implementation
+- **Dagster Pipeline**: See `/robosystems/dagster/assets/sec/` for pipeline implementation
 - **SEC Adapters**: See `/robosystems/adapters/sec/` for SEC client and processors
 - **Health Check**: `just sec-health v` for diagnostic information
 - **G.V()**: [https://gdotv.com/](https://gdotv.com/) - Recommended graph visualization tool for Ladybug

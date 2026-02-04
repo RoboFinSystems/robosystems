@@ -101,10 +101,15 @@ Dagster is the **sole orchestration system** for all scheduled tasks, event-driv
 ```
 dagster/
 ├── assets/           # Software-Defined Assets (data pipelines)
-│   ├── sec.py        # SEC XBRL pipeline
-│   ├── quickbooks.py # QuickBooks pipeline
-│   ├── plaid.py      # Plaid banking pipeline
-│   └── staged_files.py # Direct staging observable source
+│   ├── graphs.py     # User graph operation assets
+│   └── sec/          # SEC XBRL pipeline (modular)
+│       ├── configs.py     # Configuration classes
+│       ├── download.py    # sec_raw_filings asset
+│       ├── process.py     # sec_processed_filings asset
+│       ├── stage.py       # DuckDB staging assets
+│       ├── materialize.py # LadybugDB materialization assets
+│       ├── entity_update.py  # Entity incremental update
+│       └── backup.py      # SEC backup asset
 ├── jobs/             # Job definitions (all system tasks)
 │   ├── billing.py    # Credit allocation, storage billing
 │   ├── infrastructure.py  # Auth cleanup, health checks, instance monitoring
@@ -126,7 +131,7 @@ dagster/
 | **Billing** | Credit allocation, storage billing, usage collection |
 | **Infrastructure** | Auth cleanup, health checks, instance monitoring |
 | **Graph Operations** | Database creation, backup/restore, materialization |
-| **Data Pipelines** | SEC, QuickBooks, Plaid Software-Defined Assets |
+| **Data Pipelines** | SEC XBRL pipeline (download, process, stage, materialize) |
 | **Event Triggers** | Subscription provisioning, repository sync, SEC processing |
 
 **Key Features:**
@@ -307,25 +312,31 @@ External service integrations following a consistent client/processor pattern:
 **Architecture:**
 ```
 adapters/
-├── sec/                    # SEC EDGAR adapter
+├── sec/                    # SEC EDGAR adapter (active)
 │   ├── client/
 │   │   ├── edgar.py        # SECClient - API client
-│   │   └── arelle.py       # ArelleClient - XBRL parsing
+│   │   ├── arelle.py       # ArelleClient - XBRL parsing
+│   │   ├── downloader.py   # Bulk file downloads
+│   │   └── efts.py         # EFTS filing discovery
+│   ├── metadata.py         # SECMetadataLoader
 │   └── processors/
+│       ├── constants.py    # Shared constants (SHARED_NODE_TABLES)
 │       ├── xbrl_graph.py   # XBRLGraphProcessor
-│       ├── ingestion.py    # XBRLDuckDBGraphProcessor
-│       ├── parquet.py      # Parquet file processing
-│       └── schema.py       # Schema generation
-├── quickbooks/             # QuickBooks adapter
-│   ├── client/
-│   │   └── api.py          # QBClient - OAuth client
-│   └── processors/
-│       └── transactions.py # Transaction processing
-└── plaid/                  # Plaid banking adapter
-    ├── client/
-    │   └── api.py          # PlaidClient
-    └── processors/
-        └── transactions.py # PlaidTransactionsProcessor
+│       ├── processing.py   # Single filing processing
+│       ├── consolidation.py # Parquet consolidation
+│       ├── parquet.py      # Parquet file output
+│       ├── schema.py       # Schema adapter
+│       └── ingestion/      # DuckDB/LadybugDB ingestion
+│           ├── staging.py      # DuckDBStager
+│           ├── materializer.py # LadybugMaterializer
+│           ├── direct_copy.py  # LadybugDirectCopier
+│           └── processor.py    # XBRLDuckDBGraphProcessor
+├── quickbooks/             # QuickBooks adapter (stubbed)
+│   ├── client/api.py       # QBClient - OAuth client
+│   └── processors/         # Transaction processing (stubbed)
+└── plaid/                  # Plaid adapter (stubbed)
+    ├── client/api.py       # PlaidClient
+    └── processors/         # Transaction sync (stubbed)
 ```
 
 **Adapter Pattern:**
