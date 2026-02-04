@@ -667,6 +667,96 @@ class GraphClient(BaseGraphClient):
     response = await self._request("DELETE", f"/databases/{graph_id}", params=params)
     return response.json()
 
+  # =========================================================================
+  # Memory Management
+  # =========================================================================
+
+  async def boost_memory(self, graph_id: str, target: str = "both") -> dict[str, Any]:
+    """
+    Boost memory for staging (DuckDB) or materialization (LadybugDB) operations.
+
+    Call this before starting a batch of staging or materialization operations.
+    The boost will remain active until restore_memory or release_memory is called.
+
+    Args:
+        graph_id: Graph database identifier
+        target: Which system to boost - "duckdb", "ladybug", or "both"
+
+    Returns:
+        Dictionary with boost status (duckdb_boosted, ladybug_boosted, message)
+    """
+    response = await self._request(
+      "POST",
+      f"/databases/{graph_id}/memory/boost",
+      json_data={"target": target},
+      timeout=30.0,
+    )
+    return response.json()
+
+  async def restore_memory(self, graph_id: str) -> dict[str, Any]:
+    """
+    Restore memory limits to defaults after staging/materialization operations.
+
+    This only reconfigures memory limits - connections stay open and buffers
+    remain allocated. Use release_memory() to actually free memory.
+
+    Args:
+        graph_id: Graph database identifier
+
+    Returns:
+        Dictionary with restore status (duckdb_restored, ladybug_restored, message)
+    """
+    response = await self._request(
+      "POST",
+      f"/databases/{graph_id}/memory/restore",
+      timeout=30.0,
+    )
+    return response.json()
+
+  async def release_memory(
+    self, graph_id: str, target: str = "both", aggressive: bool = True
+  ) -> dict[str, Any]:
+    """
+    Release memory by closing connections and freeing buffers to the OS.
+
+    Unlike restore_memory (which only reconfigures limits), this actually
+    closes connections to force the database engines to release their
+    buffer memory back to the operating system.
+
+    Call this after staging or materialization operations complete.
+
+    Args:
+        graph_id: Graph database identifier
+        target: Which system to release - "duckdb", "ladybug", or "both"
+        aggressive: For LadybugDB - run GC and malloc_trim for maximum release
+
+    Returns:
+        Dictionary with release status and statistics
+    """
+    response = await self._request(
+      "POST",
+      f"/databases/{graph_id}/memory/release",
+      json_data={"target": target, "aggressive": aggressive},
+      timeout=60.0,  # Longer timeout for aggressive cleanup
+    )
+    return response.json()
+
+  async def memory_status(self, graph_id: str) -> dict[str, Any]:
+    """
+    Check if memory is currently boosted for a graph.
+
+    Args:
+        graph_id: Graph database identifier
+
+    Returns:
+        Dictionary with boost status (duckdb_boosted, ladybug_boosted)
+    """
+    response = await self._request(
+      "GET",
+      f"/databases/{graph_id}/memory/status",
+    )
+    return response.json()
+
   async def ingest(
     self,
     graph_id: str,

@@ -3,12 +3,22 @@
 These endpoints allow external orchestrators (like Dagster) to manage memory
 allocation for staging and materialization operations.
 
+Endpoints:
+- /boost: Increase memory limits before heavy operations
+- /restore: Reset memory limits to defaults (config only)
+- /release: Close connections and free buffers to OS
+- /status: Check current boost status
+
 Usage pattern:
 1. Before staging: POST /databases/{graph_id}/memory/boost {"target": "duckdb"}
 2. Run all staging table creations
-3. Before materialization: POST /databases/{graph_id}/memory/boost {"target": "ladybug"}
-4. Run all materialization
-5. After completion: POST /databases/{graph_id}/memory/restore
+3. After staging: POST /databases/{graph_id}/memory/release {"target": "duckdb"}
+4. Before materialization: POST /databases/{graph_id}/memory/boost {"target": "ladybug"}
+5. Run all materialization
+6. After completion: POST /databases/{graph_id}/memory/release {"target": "both"}
+
+Note: /restore only reconfigures memory limits. To actually free memory back to
+the OS, use /release which closes connections and releases buffers.
 """
 
 from enum import Enum
@@ -22,6 +32,8 @@ from robosystems.graph_api.core.memory_manager import (
   ensure_ladybug_memory_boosted,
   is_duckdb_memory_boosted,
   is_ladybug_memory_boosted,
+  release_duckdb_memory,
+  release_ladybug_memory,
   restore_duckdb_memory,
   restore_ladybug_memory,
 )
@@ -71,6 +83,24 @@ class MemoryStatusResponse(BaseModel):
   graph_id: str
   duckdb_boosted: bool
   ladybug_boosted: bool
+
+
+class MemoryReleaseRequest(BaseModel):
+  """Request to release memory for a specific target."""
+
+  target: Literal["duckdb", "ladybug", "both"] = "both"
+  aggressive: bool = True  # For LadybugDB: run GC and malloc_trim
+
+
+class MemoryReleaseResponse(BaseModel):
+  """Response from memory release operation."""
+
+  graph_id: str
+  target: str
+  duckdb_connections_closed: int
+  duckdb_released: bool
+  ladybug_released: bool
+  message: str
 
 
 @router.post("/boost", response_model=MemoryBoostResponse)
@@ -189,6 +219,74 @@ async def restore_memory(
     graph_id=graph_id,
     duckdb_restored=duckdb_restored,
     ladybug_restored=ladybug_restored,
+    message=message,
+  )
+
+
+@router.post("/release", response_model=MemoryReleaseResponse)
+async def release_memory(
+  graph_id: str = Path(..., description="Graph database identifier"),
+  request: MemoryReleaseRequest = Body(default=MemoryReleaseRequest()),
+) -> MemoryReleaseResponse:
+  """
+  Release memory by closing connections and freeing buffers.
+
+  Unlike /restore (which only reconfigures memory limits), this endpoint
+  actually closes connections to force the database engines to release
+  their buffer memory back to the OS.
+
+  Call this after staging or materialization operations complete to
+  free memory that would otherwise remain allocated until connection timeout.
+
+  Args:
+      graph_id: Graph database identifier
+      request: Specifies which system to release (duckdb, ladybug, or both)
+               and whether to use aggressive cleanup for LadybugDB
+
+  Returns:
+      MemoryReleaseResponse with release statistics
+  """
+  logger.info(f"Releasing {request.target} memory for graph {graph_id}")
+
+  duckdb_connections_closed = 0
+  duckdb_released = False
+  ladybug_released = False
+
+  if request.target in ("duckdb", "both"):
+    result = release_duckdb_memory(graph_id)
+    duckdb_connections_closed = result.get("connections_closed", 0)
+    duckdb_released = result.get("success", False)
+    if duckdb_released:
+      logger.info(
+        f"DuckDB memory released: {duckdb_connections_closed} connections closed"
+      )
+
+  if request.target in ("ladybug", "both"):
+    result = release_ladybug_memory(graph_id, aggressive=request.aggressive)
+    ladybug_released = result.get("success", False)
+    if ladybug_released:
+      logger.info(f"LadybugDB memory released (aggressive={request.aggressive})")
+
+  # Build message
+  parts = []
+  if duckdb_released:
+    parts.append(f"DuckDB ({duckdb_connections_closed} connections)")
+  if ladybug_released:
+    parts.append(f"LadybugDB (aggressive={request.aggressive})")
+
+  if parts:
+    message = f"Memory released for: {', '.join(parts)}"
+  else:
+    message = "No memory released (connections may not exist)"
+
+  logger.info(f"Memory release complete for {graph_id}: {message}")
+
+  return MemoryReleaseResponse(
+    graph_id=graph_id,
+    target=request.target,
+    duckdb_connections_closed=duckdb_connections_closed,
+    duckdb_released=duckdb_released,
+    ladybug_released=ladybug_released,
     message=message,
   )
 

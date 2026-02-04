@@ -373,3 +373,77 @@ def restore_ladybug_memory(graph_id: str) -> bool:
 def is_ladybug_memory_boosted(graph_id: str) -> bool:
   """Check if LadybugDB memory is currently boosted for a graph."""
   return graph_id in _active_ladybug_boosts
+
+
+def release_duckdb_memory(graph_id: str) -> dict[str, int | bool]:
+  """
+  Release DuckDB memory by closing all connections for a graph.
+
+  Unlike restore_duckdb_memory (which only reconfigures limits), this function
+  actually closes connections to force DuckDB to release its buffer memory
+  back to the OS.
+
+  Call this after staging operations complete to free memory.
+
+  Args:
+      graph_id: The graph whose connections should be closed
+
+  Returns:
+      Dict with connections_closed count and success status
+  """
+  from robosystems.graph_api.core.duckdb.pool import get_duckdb_pool
+
+  try:
+    pool = get_duckdb_pool()
+
+    # Get connection count before closing
+    connections_before = 0
+    if graph_id in pool._pools:
+      connections_before = len(pool._pools[graph_id])
+
+    # Close all connections - this releases DuckDB's buffer memory
+    pool.close_database_connections(graph_id)
+
+    logger.info(
+      f"Released DuckDB memory for {graph_id}: closed {connections_before} connections"
+    )
+
+    return {
+      "connections_closed": connections_before,
+      "success": True,
+    }
+  except Exception as e:
+    logger.warning(f"Failed to release DuckDB memory for {graph_id}: {e}")
+    return {
+      "connections_closed": 0,
+      "success": False,
+      "error": str(e),
+    }
+
+
+def release_ladybug_memory(graph_id: str, aggressive: bool = True) -> dict[str, bool]:
+  """
+  Release LadybugDB memory by forcing database cleanup.
+
+  This closes connections and optionally performs aggressive cleanup
+  (GC, malloc_trim) to return memory to the OS.
+
+  Args:
+      graph_id: The graph whose memory should be released
+      aggressive: If True, run GC and malloc_trim for maximum memory release
+
+  Returns:
+      Dict with success status
+  """
+  from robosystems.graph_api.core.ladybug.pool import get_connection_pool
+
+  try:
+    pool = get_connection_pool()
+    pool.force_database_cleanup(graph_id, aggressive=aggressive)
+
+    logger.info(f"Released LadybugDB memory for {graph_id} (aggressive={aggressive})")
+
+    return {"success": True, "aggressive": aggressive}
+  except Exception as e:
+    logger.warning(f"Failed to release LadybugDB memory for {graph_id}: {e}")
+    return {"success": False, "error": str(e)}
