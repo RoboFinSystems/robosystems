@@ -4,6 +4,8 @@ API v1 routers.
 
 from fastapi import APIRouter
 
+from robosystems.config import env
+
 from .admin import (
   credits_router as admin_credits_router,
 )
@@ -47,7 +49,6 @@ from .graphs import (
   subgraphs_router,
   tables_router,
   usage_router,
-  views_router,
 )
 from .graphs import (
   main_router as graph_router,
@@ -56,7 +57,6 @@ from .graphs import (
   subscriptions_router as graph_subscriptions_router,
 )
 from .graphs.agent import router as agent_router  # Agent module with modular structure
-from .graphs.connections import router as connections_router
 from .graphs.mcp import router as mcp_router
 from .offering import offering_router
 from .operations import router as operations_router
@@ -70,7 +70,11 @@ from .user import router as user_router
 router = APIRouter(prefix="/v1/graphs/{graph_id}", tags=[])
 
 # Include routers for graph-scoped endpoints
-router.include_router(connections_router, prefix="/connections")
+# Conditionally include connections router based on feature flag
+if env.CONNECTIONS_ENABLED:
+  from .graphs.connections import router as connections_router
+
+  router.include_router(connections_router, prefix="/connections")
 router.include_router(agent_router)  # No prefix - handled in the agent module itself
 router.include_router(mcp_router, prefix="/mcp")
 router.include_router(backups_router, prefix="/backups")
@@ -88,7 +92,13 @@ router.include_router(
 router.include_router(
   tables_router
 )  # No prefix - handles all /tables and /files paths internally
-router.include_router(views_router)  # No prefix - handles /views internally
+
+# Conditionally include views router based on feature flag
+if env.FACT_GRID_ENABLED:
+  from .graphs import views_router
+
+  router.include_router(views_router)  # No prefix - handles /views internally
+
 router.include_router(materialize_router)  # No prefix - handles /materialize endpoint
 router.include_router(files_router)  # No prefix - handles /files endpoint
 

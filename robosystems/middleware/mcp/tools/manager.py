@@ -8,6 +8,7 @@ functionality for interacting with graph databases.
 import json
 from typing import Any
 
+from robosystems.config import env
 from robosystems.logger import logger
 from robosystems.middleware.mcp.query_validator import GraphQueryValidator
 
@@ -18,7 +19,6 @@ from ..exceptions import (
   GraphValidationError,
 )
 from .cypher_tool import CypherTool
-from .data_tools import BuildFactGridTool
 from .elements_tool import ElementsTool
 from .example_queries_tool import ExampleQueriesTool
 from .facts_tool import FactsTool
@@ -57,11 +57,23 @@ class GraphMCPTools:
     self.structure_tool = StructureTool(graph_client)
     self.elements_tool = ElementsTool(graph_client)
     self.facts_tool = FactsTool(graph_client)
-    self.create_workspace_tool = CreateWorkspaceTool(graph_client)
-    self.delete_workspace_tool = DeleteWorkspaceTool(graph_client)
-    self.list_workspaces_tool = ListWorkspacesTool(graph_client)
-    self.switch_workspace_tool = SwitchWorkspaceTool(graph_client)
-    self.build_fact_grid_tool = BuildFactGridTool(graph_client)
+    # Conditionally initialize workspace tools based on feature flag
+    self.create_workspace_tool = None
+    self.delete_workspace_tool = None
+    self.list_workspaces_tool = None
+    self.switch_workspace_tool = None
+    if env.MCP_WORKSPACE_ENABLED:
+      self.create_workspace_tool = CreateWorkspaceTool(graph_client)
+      self.delete_workspace_tool = DeleteWorkspaceTool(graph_client)
+      self.list_workspaces_tool = ListWorkspacesTool(graph_client)
+      self.switch_workspace_tool = SwitchWorkspaceTool(graph_client)
+
+    # Conditionally initialize fact grid tool based on feature flag
+    self.build_fact_grid_tool = None
+    if env.FACT_GRID_ENABLED:
+      from .data_tools import BuildFactGridTool
+
+      self.build_fact_grid_tool = BuildFactGridTool(graph_client)
 
     # Cache statistics (inherited from schema tool)
     self._cache_hits = 0
@@ -90,8 +102,10 @@ class GraphMCPTools:
     Get workspace management tool definitions from actual tool implementations.
 
     Returns:
-        List of workspace tool definitions
+        List of workspace tool definitions (empty if MCP_WORKSPACE_ENABLED is false)
     """
+    if self.create_workspace_tool is None:
+      return []
     return [
       self.create_workspace_tool.get_tool_definition(),
       self.switch_workspace_tool.get_tool_definition(),
@@ -104,11 +118,12 @@ class GraphMCPTools:
     Get data operation tool definitions from actual tool implementations.
 
     Returns:
-        List of data tool definitions
+        List of data tool definitions (empty if FACT_GRID_ENABLED is false)
     """
-    return [
-      self.build_fact_grid_tool.get_tool_definition(),
-    ]
+    tools = []
+    if self.build_fact_grid_tool is not None:
+      tools.append(self.build_fact_grid_tool.get_tool_definition())
+    return tools
 
   def get_tool_definitions_as_dict(self) -> list[dict[str, Any]]:
     """
@@ -207,24 +222,49 @@ class GraphMCPTools:
 
       # Workspace management tools
       elif name == "create-workspace":
+        if self.create_workspace_tool is None:
+          raise ValueError(
+            "create-workspace tool is not available. "
+            "Set MCP_WORKSPACE_ENABLED=true to enable this feature."
+          )
         result = await self.create_workspace_tool.execute(arguments)
         return result if return_raw else json.dumps(result, indent=2)
 
       elif name == "delete-workspace":
+        if self.delete_workspace_tool is None:
+          raise ValueError(
+            "delete-workspace tool is not available. "
+            "Set MCP_WORKSPACE_ENABLED=true to enable this feature."
+          )
         result = await self.delete_workspace_tool.execute(arguments)
         return result if return_raw else json.dumps(result, indent=2)
 
       elif name == "list-workspaces":
+        if self.list_workspaces_tool is None:
+          raise ValueError(
+            "list-workspaces tool is not available. "
+            "Set MCP_WORKSPACE_ENABLED=true to enable this feature."
+          )
         result = await self.list_workspaces_tool.execute(arguments)
         return result if return_raw else json.dumps(result, indent=2)
 
       elif name == "switch-workspace":
         # This is client-side only - should be intercepted by client
+        if self.switch_workspace_tool is None:
+          raise ValueError(
+            "switch-workspace tool is not available. "
+            "Set MCP_WORKSPACE_ENABLED=true to enable this feature."
+          )
         result = await self.switch_workspace_tool.execute(arguments)
         return result if return_raw else json.dumps(result, indent=2)
 
       # Data operation tools
       elif name == "build-fact-grid":
+        if self.build_fact_grid_tool is None:
+          raise ValueError(
+            "build-fact-grid tool is not available. "
+            "Set FACT_GRID_ENABLED=true to enable this feature."
+          )
         result = await self.build_fact_grid_tool.execute(arguments)
         return result if return_raw else json.dumps(result, indent=2)
 
