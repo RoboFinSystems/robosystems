@@ -6,8 +6,9 @@ from pathlib import Path
 import pandas as pd
 from arelle import XbrlConst
 
-from robosystems.adapters.sec import SEC_BASE_URL, SECClient
+# Import from specific modules to avoid circular imports
 from robosystems.adapters.sec.client.arelle import ArelleClient
+from robosystems.adapters.sec.client.edgar import SEC_BASE_URL, SECClient
 from robosystems.adapters.sec.config import (
   XBRL_COLUMN_STANDARDIZATION,
   XBRL_EXTERNALIZATION_THRESHOLD,
@@ -16,10 +17,8 @@ from robosystems.adapters.sec.config import (
   XBRL_STANDARDIZED_FILENAMES,
   XBRL_TYPE_PREFIXES,
 )
-from robosystems.adapters.sec.processors import (
-  DataFrameManager,
-  ParquetWriter,
-  TextBlockExternalizer,
+from robosystems.adapters.sec.processors.dataframe import DataFrameManager
+from robosystems.adapters.sec.processors.ids import (
   create_dimension_id,
   create_element_id,
   create_entity_id,
@@ -34,10 +33,12 @@ from robosystems.adapters.sec.processors import (
   create_unit_id,
   safe_concat,
 )
+from robosystems.adapters.sec.processors.parquet import ParquetWriter
 from robosystems.adapters.sec.processors.schema import (
   XBRLSchemaAdapter,
   XBRLSchemaConfigGenerator,
 )
+from robosystems.adapters.sec.processors.textblock import TextBlockExternalizer
 from robosystems.config import env
 from robosystems.logger import logger
 from robosystems.operations.aws.s3 import S3Client

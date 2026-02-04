@@ -18,8 +18,10 @@ dagster/
 │   └── infrastructure.py  # Auth cleanup, health checks
 ├── sensors/               # Event-driven triggers
 │   └── provisioning.py    # Subscription provisioning sensor
-└── assets/                # Data pipeline assets (Phase 2-4)
-    └── __init__.py        # SEC, QuickBooks, Plaid assets
+└── assets/                # Data pipeline assets
+    ├── __init__.py        # Asset exports
+    ├── graphs.py          # User graph operation assets
+    └── sec/               # SEC EDGAR pipeline assets
 ```
 
 ## Quick Start

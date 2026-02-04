@@ -3,8 +3,6 @@
 Assets represent data artifacts that are produced and consumed:
 - User graph assets (creation, staging, materialization)
 - SEC pipeline assets (extraction, processing, materialization)
-- QuickBooks pipeline assets (sync, transform, materialize)
-- Plaid pipeline assets (sync, transform, materialize)
 """
 
 from robosystems.dagster.assets.graphs import (
@@ -14,18 +12,9 @@ from robosystems.dagster.assets.graphs import (
   user_repository_provisioning_source,
   user_subgraph_creation_source,
 )
-from robosystems.dagster.assets.plaid import (
-  plaid_accounts,
-  plaid_graph_data,
-  plaid_transactions,
-)
-from robosystems.dagster.assets.quickbooks import (
-  qb_accounts,
-  qb_graph_data,
-  qb_transactions,
-)
 from robosystems.dagster.assets.sec import (
   # Config classes
+  SECBackupConfig,
   SECDirectCopyConfig,
   SECDownloadConfig,
   SECEntityUpdateConfig,
@@ -34,6 +23,8 @@ from robosystems.dagster.assets.sec import (
   SECMaterializeConfig,
   SECProcessConfig,
   SECStageConfig,
+  # Assets - backup
+  sec_backup,
   # Assets - two-stage materialization
   sec_duckdb_incremental_staged,
   sec_duckdb_staged,
@@ -49,10 +40,6 @@ from robosystems.dagster.assets.sec import (
   sec_quarter_partitions,
   sec_raw_filings,
 )
-from robosystems.dagster.assets.sec_backup import (
-  SECBackupConfig,
-  sec_backup,
-)
 
 __all__ = [
   "SECBackupConfig",
@@ -64,12 +51,6 @@ __all__ = [
   "SECMaterializeConfig",
   "SECProcessConfig",
   "SECStageConfig",
-  "plaid_accounts",
-  "plaid_graph_data",
-  "plaid_transactions",
-  "qb_accounts",
-  "qb_graph_data",
-  "qb_transactions",
   "sec_backup",
   "sec_duckdb_incremental_staged",
   "sec_duckdb_staged",

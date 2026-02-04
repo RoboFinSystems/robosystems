@@ -5,7 +5,7 @@ This module defines all Dagster components:
 - Jobs: Billing, infrastructure, provisioning, SEC pipeline jobs
 - Schedules: Cron-based job triggers
 - Sensors: Event-driven job triggers
-- Assets: Data pipeline assets for SEC, QuickBooks, Plaid
+- Assets: Data pipeline assets for SEC
 
 Usage:
     # Local development
@@ -19,14 +19,6 @@ from dagster import Definitions
 
 # Import assets
 from robosystems.dagster.assets import (
-  # Plaid pipeline
-  plaid_accounts,
-  plaid_graph_data,
-  plaid_transactions,
-  # QuickBooks pipeline
-  qb_accounts,
-  qb_graph_data,
-  qb_transactions,
   # SEC pipeline - backup
   sec_backup,
   # SEC pipeline - two-stage materialization
@@ -259,14 +251,6 @@ all_assets = [
   sec_entity_incremental_update,  # Update existing Entity nodes (mutable attrs)
   sec_graph_materialized,  # LadybugDB materialization (retry-safe)
   sec_backup,  # Downloadable backup of SEC database
-  # QuickBooks pipeline assets
-  qb_accounts,
-  qb_transactions,
-  qb_graph_data,
-  # Plaid pipeline assets
-  plaid_accounts,
-  plaid_transactions,
-  plaid_graph_data,
 ]
 
 # ============================================================================
