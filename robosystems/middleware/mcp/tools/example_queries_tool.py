@@ -33,7 +33,23 @@ List of example queries with explanations, tailored to the actual schema present
 - See real working queries for this specific graph
 - Learn property names and relationships
 - Understand query patterns that work
-- Copy and modify examples for your needs""",
+- Copy and modify examples for your needs
+
+**⚠️ QUERY PATTERN NOTE:**
+When joining multiple relationships from the same node, use comma-separated patterns
+in a SINGLE MATCH clause (not multiple MATCH clauses):
+- ✅ GOOD: `MATCH (f:Fact)-[:R1]->(a), (f)-[:R2]->(b)`
+- ❌ BAD: `MATCH (f:Fact)-[:R1]->(a) MATCH (f)-[:R2]->(b)` (may timeout)
+
+**📅 PERIOD.period_type VALUES:**
+Period nodes use calendar-based classification (NOT XBRL duration/instant):
+- `instant` - Point-in-time (balance sheet dates)
+- `quarterly` - ~3 months duration
+- `semi_annual` - ~6 months duration
+- `nine_months` - ~9 months duration
+- `annual` - ~12 months duration
+- `other` - Non-standard durations
+Note: Element.period_type uses XBRL semantics (instant/duration) - different property!""",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -113,22 +129,17 @@ List of example queries with explanations, tailored to the actual schema present
             {
               "category": "financial",
               "description": "⭐ CONSOLIDATED Revenue (use has_dimensions=false!)",
-              "query": """MATCH (f:Fact)-[:FACT_HAS_ELEMENT]->(e:Element)
-MATCH (f)-[:FACT_HAS_PERIOD]->(p:Period)
-WHERE e.qname = 'us-gaap:Revenues'
-  AND f.has_dimensions = false
-  AND f.numeric_value IS NOT NULL
+              "query": """MATCH (f:Fact {has_dimensions: false})-[:FACT_HAS_ELEMENT]->(e:Element {qname: 'us-gaap:Revenues'}), (f)-[:FACT_HAS_PERIOD]->(p:Period)
+WHERE f.numeric_value IS NOT NULL
 RETURN p.end_date, p.period_type, f.numeric_value as revenue
 ORDER BY p.end_date DESC LIMIT 10""",
-              "explanation": "⚠️ CRITICAL: has_dimensions=false filters out segment breakdowns to get TOTALS only",
+              "explanation": "⚠️ CRITICAL: has_dimensions=false filters out segment breakdowns. Use comma-separated patterns in single MATCH for performance.",
             },
             {
               "category": "financial",
               "description": "Revenue BY Segment (dimensional breakdown)",
-              "query": """MATCH (f:Fact)-[:FACT_HAS_ELEMENT]->(e:Element)
-MATCH (f)-[:FACT_HAS_DIMENSION]->(d:FactDimension)
+              "query": """MATCH (f:Fact {has_dimensions: true})-[:FACT_HAS_ELEMENT]->(e:Element), (f)-[:FACT_HAS_DIMENSION]->(d:FactDimension)
 WHERE e.qname = 'us-gaap:Revenues'
-  AND f.has_dimensions = true
   AND f.numeric_value IS NOT NULL
 RETURN d.axis_uri, d.member_uri, f.numeric_value
 LIMIT 10""",
@@ -136,13 +147,13 @@ LIMIT 10""",
             },
             {
               "category": "financial",
-              "description": "Get facts for a specific period",
-              "query": """MATCH (f:Fact)-[:FACT_HAS_PERIOD]->(p:Period)
+              "description": "Get facts for a specific period (annual only)",
+              "query": """MATCH (f:Fact {has_dimensions: false})-[:FACT_HAS_PERIOD]->(p:Period)
 WHERE p.end_date >= '2024-01-01'
-  AND f.has_dimensions = false
-RETURN f.identifier, f.numeric_value, p.end_date
+  AND p.period_type = 'annual'
+RETURN f.identifier, f.numeric_value, p.end_date, p.period_type
 LIMIT 10""",
-              "explanation": "Facts are linked to Period nodes for time analysis",
+              "explanation": "Period.period_type values: instant, quarterly, semi_annual, nine_months, annual, other",
             },
             {
               "category": "financial",

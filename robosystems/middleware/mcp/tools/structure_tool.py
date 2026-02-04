@@ -112,6 +112,25 @@ class StructureTool(BaseTool):
           "Without this filter, you'll get duplicate values for the same metric.\n"
         )
 
+        # Add query pattern guidance
+        description += "\n**⚠️ QUERY PATTERN NOTE:**\n"
+        description += "When joining multiple relationships from the same node, use comma-separated patterns in a SINGLE MATCH:\n"
+        description += "- ✅ GOOD: `MATCH (f:Fact)-[:R1]->(a), (f)-[:R2]->(b)`\n"
+        description += (
+          "- ❌ BAD: `MATCH (f:Fact)-[:R1]->(a) MATCH (f)-[:R2]->(b)` (may timeout)\n"
+        )
+
+        # Add period_type documentation
+        description += "\n**📅 PERIOD.period_type VALUES:**\n"
+        description += "Period nodes use calendar-based classification (NOT XBRL duration/instant):\n"
+        description += "- `instant` - Point-in-time (balance sheet dates)\n"
+        description += "- `quarterly` - ~3 months duration\n"
+        description += "- `semi_annual` - ~6 months duration\n"
+        description += "- `nine_months` - ~9 months duration\n"
+        description += "- `annual` - ~12 months duration\n"
+        description += "- `other` - Non-standard durations (majority of periods)\n"
+        description += "Note: Element.period_type uses XBRL semantics (instant/duration) - different property!\n"
+
         return description
 
       else:
