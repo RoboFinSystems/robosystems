@@ -7,6 +7,7 @@ from typing import Any
 from robosystems.logger import logger
 
 from .base_tool import BaseTool
+from .constants import PERIOD_TYPE_GUIDANCE, QUERY_PATTERN_GUIDANCE
 
 
 class ExampleQueriesTool(BaseTool):
@@ -35,21 +36,10 @@ List of example queries with explanations, tailored to the actual schema present
 - Understand query patterns that work
 - Copy and modify examples for your needs
 
-**⚠️ QUERY PATTERN NOTE:**
-When joining multiple relationships from the same node, use comma-separated patterns
-in a SINGLE MATCH clause (not multiple MATCH clauses):
-- ✅ GOOD: `MATCH (f:Fact)-[:R1]->(a), (f)-[:R2]->(b)`
-- ❌ BAD: `MATCH (f:Fact)-[:R1]->(a) MATCH (f)-[:R2]->(b)` (may timeout)
-
-**📅 PERIOD.period_type VALUES:**
-Period nodes use calendar-based classification (NOT XBRL duration/instant):
-- `instant` - Point-in-time (balance sheet dates)
-- `quarterly` - ~3 months duration
-- `semi_annual` - ~6 months duration
-- `nine_months` - ~9 months duration
-- `annual` - ~12 months duration
-- `other` - Non-standard durations
-Note: Element.period_type uses XBRL semantics (instant/duration) - different property!""",
+"""
+      + QUERY_PATTERN_GUIDANCE
+      + "\n\n"
+      + PERIOD_TYPE_GUIDANCE,
       "inputSchema": {
         "type": "object",
         "properties": {
