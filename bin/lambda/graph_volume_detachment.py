@@ -105,7 +105,7 @@ def handler(event, context):
               "commands": [
                 "# Unmount LadybugDB data volume",
                 "sync",  # Flush any pending writes
-                "umount /mnt/lbug-data || true",
+                "umount /mnt/ladybug-data || true",
                 "umount /data || true",  # Legacy mount point
               ]
             },

@@ -550,7 +550,7 @@ Resources:
     Type: AWS::CloudWatch::Alarm
     Properties:
       AlarmName: !Sub "robosystems-graph-volumes-${Environment}-disk-usage-warning"
-      AlarmDescription: Disk usage exceeded 70% on any graph database instance at /mnt/lbug-data
+      AlarmDescription: Disk usage exceeded 70% on any graph database instance at /mnt/ladybug-data
       Metrics:
         - Id: m1
           ReturnData: false
@@ -560,7 +560,7 @@ Resources:
               Namespace: !Sub "RoboSystems/Graph/${Environment}"
               Dimensions:
                 - Name: path
-                  Value: /mnt/lbug-data
+                  Value: /mnt/ladybug-data
             Stat: Maximum
             Period: 300
         - Id: max_across_all
@@ -575,7 +575,7 @@ Resources:
     Type: AWS::CloudWatch::Alarm
     Properties:
       AlarmName: !Sub "robosystems-graph-volumes-${Environment}-disk-usage-critical"
-      AlarmDescription: CRITICAL - Disk usage exceeded 85% on any graph database instance at /mnt/lbug-data
+      AlarmDescription: CRITICAL - Disk usage exceeded 85% on any graph database instance at /mnt/ladybug-data
       Metrics:
         - Id: m1
           ReturnData: false
@@ -585,7 +585,7 @@ Resources:
               Namespace: !Sub "RoboSystems/Graph/${Environment}"
               Dimensions:
                 - Name: path
-                  Value: /mnt/lbug-data
+                  Value: /mnt/ladybug-data
             Stat: Maximum
             Period: 300
         - Id: max_across_all
@@ -603,7 +603,7 @@ Resources:
     Type: AWS::CloudWatch::Alarm
     Properties:
       AlarmName: !Sub "robosystems-graph-volumes-${Environment}-disk-usage-emergency"
-      AlarmDescription: EMERGENCY - Disk usage exceeded 95% on any graph database instance at /mnt/lbug-data - Database operations at risk!
+      AlarmDescription: EMERGENCY - Disk usage exceeded 95% on any graph database instance at /mnt/ladybug-data - Database operations at risk!
       Metrics:
         - Id: m1
           ReturnData: false
@@ -613,7 +613,7 @@ Resources:
               Namespace: !Sub "RoboSystems/Graph/${Environment}"
               Dimensions:
                 - Name: path
-                  Value: /mnt/lbug-data
+                  Value: /mnt/ladybug-data
             Stat: Maximum
             Period: 60
         - Id: max_across_all
@@ -643,7 +643,7 @@ Resources:
               Namespace: !Sub "RoboSystems/Graph/${Environment}"
               Dimensions:
                 - Name: path
-                  Value: /mnt/lbug-data
+                  Value: /mnt/ladybug-data
             Period: 1800 # 30 minutes
             Stat: Average
       EvaluationPeriods: 1

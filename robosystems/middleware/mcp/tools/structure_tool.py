@@ -7,6 +7,7 @@ from typing import Any
 from robosystems.logger import logger
 
 from .base_tool import BaseTool
+from .constants import PERIOD_TYPE_GUIDANCE, QUERY_PATTERN_GUIDANCE
 
 
 class StructureTool(BaseTool):
@@ -111,6 +112,12 @@ class StructureTool(BaseTool):
         description += (
           "Without this filter, you'll get duplicate values for the same metric.\n"
         )
+
+        # Add query pattern guidance
+        description += "\n" + QUERY_PATTERN_GUIDANCE + "\n"
+
+        # Add period_type documentation
+        description += "\n" + PERIOD_TYPE_GUIDANCE + "\n"
 
         return description
 

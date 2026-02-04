@@ -7,6 +7,11 @@ from typing import Any
 from robosystems.logger import logger
 
 from .base_tool import BaseTool
+from .constants import (
+  DIMENSIONAL_FACTS_WARNING,
+  PERIOD_TYPE_GUIDANCE,
+  QUERY_PATTERN_GUIDANCE,
+)
 
 
 class FactsTool(BaseTool):
@@ -52,12 +57,12 @@ class FactsTool(BaseTool):
 - Identify dimensional reporting patterns
 - Understand fact completeness by period
 
-**⚠️ CRITICAL - Dimensional Facts:**
-~40% of facts have dimensional breakdowns (segments, geography, products).
-To get CONSOLIDATED TOTALS only (avoiding duplicates), always filter:
-- `WHERE f.has_dimensions = false` (recommended - uses indexed property)
-- `WHERE NOT (f)-[:FACT_HAS_DIMENSION]->()` (alternative pattern)
-Without this filter, revenue queries return segment breakdowns + totals mixed together!""",
+"""
+      + DIMENSIONAL_FACTS_WARNING
+      + "\n\n"
+      + QUERY_PATTERN_GUIDANCE
+      + "\n\n"
+      + PERIOD_TYPE_GUIDANCE,
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -247,38 +252,33 @@ Without this filter, revenue queries return segment breakdowns + totals mixed to
       aspect_result = await self.client.execute_query(aspect_query)
       result["common_aspects"] = aspect_result
 
-      # Sample queries
+      # Sample queries - use comma-separated patterns in single MATCH for performance
       result["sample_queries"].extend(
         [
           {
             "name": "⭐ CONSOLIDATED Revenue (Recommended)",
-            "query": """MATCH (f:Fact)-[:FACT_HAS_ELEMENT]->(e:Element)
-MATCH (f)-[:FACT_HAS_PERIOD]->(p:Period)
-WHERE e.qname = 'us-gaap:Revenues'
-  AND f.has_dimensions = false
-  AND f.numeric_value IS NOT NULL
+            "query": """MATCH (f:Fact {has_dimensions: false})-[:FACT_HAS_ELEMENT]->(e:Element {qname: 'us-gaap:Revenues'}), (f)-[:FACT_HAS_PERIOD]->(p:Period)
+WHERE f.numeric_value IS NOT NULL
+  AND p.period_type = 'annual'
 RETURN p.end_date, p.period_type, f.numeric_value as revenue
 ORDER BY p.end_date DESC LIMIT 10""",
-            "explanation": "Total revenue WITHOUT segment breakdowns - use has_dimensions=false!",
+            "explanation": "Total revenue WITHOUT segment breakdowns. Uses single MATCH with comma-separated patterns for performance. period_type: instant/quarterly/semi_annual/nine_months/annual/other",
           },
           {
             "name": "Revenue BY Segment (Dimensional)",
-            "query": """MATCH (f:Fact)-[:FACT_HAS_ELEMENT]->(e:Element)
-MATCH (f)-[:FACT_HAS_DIMENSION]->(d:FactDimension)
+            "query": """MATCH (f:Fact {has_dimensions: true})-[:FACT_HAS_ELEMENT]->(e:Element), (f)-[:FACT_HAS_DIMENSION]->(d:FactDimension)
 WHERE e.qname CONTAINS 'Revenue'
-  AND f.has_dimensions = true
   AND f.numeric_value IS NOT NULL
 RETURN d.axis_uri, d.member_uri, sum(f.numeric_value) as total
 ORDER BY total DESC LIMIT 10""",
-            "explanation": "Revenue by segment - use has_dimensions=true for breakdowns",
+            "explanation": "Revenue by segment - use has_dimensions=true for breakdowns. Uses comma-separated patterns.",
           },
           {
-            "name": "Multi-Dimension Warning Query",
-            "query": """MATCH (f:Fact)-[:FACT_HAS_DIMENSION]->(d1:FactDimension)
-MATCH (f)-[:FACT_HAS_DIMENSION]->(d2:FactDimension)
+            "name": "Multi-Dimension Query",
+            "query": """MATCH (f:Fact)-[:FACT_HAS_DIMENSION]->(d1:FactDimension), (f)-[:FACT_HAS_DIMENSION]->(d2:FactDimension)
 WHERE d1 <> d2
 RETURN count(f) as multi_dimensional_facts""",
-            "explanation": "⚠️ Complex: Facts with multiple dimensions",
+            "explanation": "Facts with multiple dimensions. Uses comma-separated patterns in single MATCH.",
           },
         ]
       )
@@ -288,32 +288,29 @@ RETURN count(f) as multi_dimensional_facts""",
           [
             {
               "name": "⭐ Consolidated Totals (Recommended)",
-              "query": f"""MATCH (f:Fact)-[:FACT_HAS_ELEMENT]->(e:Element)
-WHERE e.qname = '{element_filter}'
-  AND f.numeric_value IS NOT NULL
-  AND f.has_dimensions = false
+              "query": f"""MATCH (f:Fact {{has_dimensions: false}})-[:FACT_HAS_ELEMENT]->(e:Element {{qname: '{element_filter}'}})
+WHERE f.numeric_value IS NOT NULL
 RETURN sum(f.numeric_value) as total, count(f) as fact_count""",
               "explanation": "Total for element WITHOUT segment breakdowns - use has_dimensions=false!",
             },
             {
-              "name": "Time Series for Element",
-              "query": f"""MATCH (f:Fact)-[:FACT_HAS_ELEMENT]->(e:Element)
-MATCH (f)-[:FACT_HAS_PERIOD]->(p:Period)
-WHERE e.qname = '{element_filter}' AND f.numeric_value IS NOT NULL
+              "name": "Time Series for Element (Annual)",
+              "query": f"""MATCH (f:Fact {{has_dimensions: false}})-[:FACT_HAS_ELEMENT]->(e:Element {{qname: '{element_filter}'}}), (f)-[:FACT_HAS_PERIOD]->(p:Period)
+WHERE f.numeric_value IS NOT NULL AND p.period_type = 'annual'
 RETURN p.end_date as period, sum(f.numeric_value) as value
 ORDER BY p.end_date""",
-              "explanation": "Time series data for specific element",
+              "explanation": "Time series with comma-separated patterns. period_type: instant/quarterly/semi_annual/nine_months/annual/other",
             },
             {
               "name": "All Aspects for a Fact",
-              "query": f"""MATCH (f:Fact)-[:FACT_HAS_ELEMENT]->(e:Element)
+              "query": f"""MATCH (f:Fact)-[:FACT_HAS_ELEMENT]->(e:Element {{qname: '{element_filter}'}})
 OPTIONAL MATCH (f)-[:FACT_HAS_PERIOD]->(p:Period)
 OPTIONAL MATCH (f)-[:FACT_HAS_DIMENSION]->(d:FactDimension)
 OPTIONAL MATCH (f)-[:FACT_HAS_UNIT]->(u:Unit)
-WHERE e.qname = '{element_filter}' AND f.numeric_value IS NOT NULL
-RETURN f.numeric_value, p.end_date, d.axis_uri, d.member_uri, u.value
+WHERE f.numeric_value IS NOT NULL
+RETURN f.numeric_value, p.end_date, p.period_type, d.axis_uri, d.member_uri, u.value
 LIMIT 10""",
-              "explanation": "Complete fact context with all aspects",
+              "explanation": "Complete fact context. Note: OPTIONAL MATCH is safe for optional relationships.",
             },
           ]
         )
@@ -322,6 +319,9 @@ LIMIT 10""",
       result["tips"].extend(
         [
           "⚠️ ALWAYS use has_dimensions=false for consolidated totals (avoids segment duplicates)",
+          "⚠️ Use comma-separated patterns in single MATCH (not multiple MATCH clauses) for performance",
+          "📅 Period.period_type values: instant, quarterly, semi_annual, nine_months, annual, other",
+          "📅 Element.period_type is different - uses XBRL semantics (instant/duration)",
           "Start with single elements before complex dimensional queries",
           "Use IS NOT NULL filters for numeric analysis",
           "Period nodes provide time context for facts",

@@ -18,6 +18,8 @@ from typing import Any
 
 from robosystems.config import env
 
+logger = logging.getLogger(__name__)
+
 # OpenTelemetry imports - conditional based on OTEL_ENABLED
 
 
@@ -318,7 +320,7 @@ class LadybugMetricsCollector:
     import psutil
 
     # Get disk usage for the data volume
-    data_path = "/mnt/lbug-data"
+    data_path = "/mnt/ladybug-data"
     if os.path.exists(data_path):
       disk_usage = psutil.disk_usage(data_path)
       disk_metrics = {
@@ -329,7 +331,12 @@ class LadybugMetricsCollector:
         "mount_point": data_path,
       }
     else:
-      # Fallback to base path if /mnt/lbug-data doesn't exist
+      # Fallback to base path if /mnt/ladybug-data doesn't exist
+      logger.warning(
+        "Data volume mount point /mnt/ladybug-data not found, using fallback path %s - "
+        "this may indicate a misconfiguration",
+        self.base_path,
+      )
       disk_usage = psutil.disk_usage(str(self.base_path))
       disk_metrics = {
         "total_gb": disk_usage.total / (1024**3),
