@@ -380,7 +380,7 @@ class DuckDBStager:
 
         # Filter to only existing files
         if len(s3_patterns) > 1:
-          s3_patterns = [p for p in s3_patterns if s3_url_exists(self.s3_client,p)]
+          s3_patterns = [p for p in s3_patterns if s3_url_exists(self.s3_client, p)]
           if not s3_patterns:
             log_progress(
               f"[{i}/{total_tables}] Skipped {table_name}: no files for any quarter"

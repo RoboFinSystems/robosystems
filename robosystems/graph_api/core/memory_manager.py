@@ -441,9 +441,7 @@ def release_ladybug_memory(graph_id: str, aggressive: bool = True) -> dict[str, 
     pool = get_connection_pool()
     pool.force_database_cleanup(graph_id, aggressive=aggressive)
 
-    logger.info(
-      f"Released LadybugDB memory for {graph_id} (aggressive={aggressive})"
-    )
+    logger.info(f"Released LadybugDB memory for {graph_id} (aggressive={aggressive})")
 
     return {"success": True, "aggressive": aggressive}
   except Exception as e:

@@ -257,7 +257,9 @@ async def release_memory(
     duckdb_connections_closed = result.get("connections_closed", 0)
     duckdb_released = result.get("success", False)
     if duckdb_released:
-      logger.info(f"DuckDB memory released: {duckdb_connections_closed} connections closed")
+      logger.info(
+        f"DuckDB memory released: {duckdb_connections_closed} connections closed"
+      )
 
   if request.target in ("ladybug", "both"):
     result = release_ladybug_memory(graph_id, aggressive=request.aggressive)

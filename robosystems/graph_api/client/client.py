@@ -671,9 +671,7 @@ class GraphClient(BaseGraphClient):
   # Memory Management
   # =========================================================================
 
-  async def boost_memory(
-    self, graph_id: str, target: str = "both"
-  ) -> dict[str, Any]:
+  async def boost_memory(self, graph_id: str, target: str = "both") -> dict[str, Any]:
     """
     Boost memory for staging (DuckDB) or materialization (LadybugDB) operations.
 

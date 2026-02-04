@@ -304,7 +304,7 @@ class LadybugMaterializer:
 
         # Filter to only existing files
         if len(s3_paths) > 1:
-          s3_paths = [p for p in s3_paths if s3_url_exists(self.s3_client,p)]
+          s3_paths = [p for p in s3_paths if s3_url_exists(self.s3_client, p)]
           if not s3_paths:
             log_progress(
               f"[{i}/{total_tables}] Skipped {table_name}: no files for any quarter"
@@ -314,7 +314,7 @@ class LadybugMaterializer:
             continue
         else:
           # Single path - check if it exists
-          if not s3_url_exists(self.s3_client,s3_paths[0]):
+          if not s3_url_exists(self.s3_client, s3_paths[0]):
             log_progress(
               f"[{i}/{total_tables}] Skipped {table_name}: no files for Q{quarter}"
             )
@@ -456,7 +456,7 @@ class LadybugMaterializer:
         f"filed={year}-Q{quarter}/nodes/Entity.parquet"
       )
 
-      if not s3_url_exists(self.s3_client,entity_s3_path):
+      if not s3_url_exists(self.s3_client, entity_s3_path):
         log_progress(f"No Entity file found for Q{quarter} {year}, skipping")
         return EntityUpdateResult(
           status="no_changes",

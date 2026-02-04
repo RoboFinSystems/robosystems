@@ -2654,7 +2654,9 @@ def sec_graph_direct_copy(
 
   # Release memory after direct copy (closes connections, frees buffers to OS)
   try:
-    release_result = asyncio.run(release_graph_memory(config.graph_id, target="ladybug"))
+    release_result = asyncio.run(
+      release_graph_memory(config.graph_id, target="ladybug")
+    )
     context.log.info(f"Memory release: {release_result.get('message', 'done')}")
   except Exception as release_err:
     context.log.warning(f"Could not release memory (non-fatal): {release_err}")
