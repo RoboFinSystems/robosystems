@@ -88,20 +88,25 @@ class DuckDBTableManager:
     has_identifier: bool,
     has_from_to: bool,
     use_list: bool,
+    column_names: list[str] | None = None,
   ) -> str:
     """
-    Build CREATE TABLE SQL statement with deduplication logic.
+    Build CREATE TABLE SQL with deduplication using GROUP BY + FIRST().
+
+    Uses hash aggregation instead of window functions for deduplication.
+    This approach has better memory efficiency and proper spill-to-disk support
+    via DuckDB's external aggregation, unlike ROW_NUMBER which can OOM on large datasets.
+    See: https://duckdb.org/2024/03/29/external-aggregation
 
     NOTE: Deduplication is required here because LadybugDB's ignore_errors=true
     only works for COPY FROM files, NOT for COPY FROM attached DuckDB tables.
-
-    Uses DuckDB-compatible window functions for deduplication.
 
     Args:
         quoted_table: Quoted table name (e.g., '"table_name"')
         has_identifier: Whether table has 'identifier' column (node table)
         has_from_to: Whether table has 'from' and 'to' columns (relationship table)
         use_list: Whether using list (placeholder) or pattern (parameter binding)
+        column_names: List of column names from schema probe (required for dedup)
 
     Returns:
         SQL statement with proper deduplication
@@ -109,38 +114,43 @@ class DuckDBTableManager:
     # Use placeholder for list (will be replaced) or ? for parameter binding
     read_pattern = "__FILES_PLACEHOLDER__" if use_list else "?"
 
-    if has_identifier:
-      # Node table: deduplicate on identifier using window function
-      # union_by_name=true handles schema variations between files (different filings may have different columns)
-      # NOTE: No final ORDER BY - materialization uses hash-based batching which doesn't require sorted data
+    if has_identifier and column_names:
+      # Node table: deduplicate on identifier using GROUP BY + FIRST()
+      # FIRST() is an aggregate that returns an arbitrary value from the group
+      # union_by_name=true handles schema variations between files
+      dedupe_cols = ["identifier"]
+      other_cols = [c for c in column_names if c not in dedupe_cols]
+      select_parts = [f'"{c}"' for c in dedupe_cols] + [
+        f'FIRST("{c}") AS "{c}"' for c in other_cols
+      ]
+      select_clause = ", ".join(select_parts)
+      group_by_clause = ", ".join(f'"{c}"' for c in dedupe_cols)
+
       return f"""
         CREATE OR REPLACE TABLE {quoted_table} AS
-        SELECT * EXCLUDE (rn)
-        FROM (
-          SELECT *, ROW_NUMBER() OVER (PARTITION BY identifier ORDER BY identifier) AS rn
-          FROM read_parquet({read_pattern}, union_by_name=true, hive_partitioning=false)
-        )
-        WHERE rn = 1
+        SELECT {select_clause}
+        FROM read_parquet({read_pattern}, union_by_name=true, hive_partitioning=false)
+        GROUP BY {group_by_clause}
       """
-    elif has_from_to:
+    elif has_from_to and column_names:
       # Relationship table: deduplicate on (from, to) and rename to src/dst
       # IMPORTANT: LadybugDB expects columns in order: src, dst, then properties
-      # union_by_name=true handles schema variations between files
-      # NOTE: No final ORDER BY - materialization uses hash-based batching which doesn't require sorted data
+      dedupe_cols = ["from", "to"]
+      other_cols = [c for c in column_names if c not in dedupe_cols]
+      # Build select: src, dst first, then FIRST() for other columns
+      select_parts = ['"from" AS src', '"to" AS dst'] + [
+        f'FIRST("{c}") AS "{c}"' for c in other_cols
+      ]
+      select_clause = ", ".join(select_parts)
+
       return f"""
         CREATE OR REPLACE TABLE {quoted_table} AS
-        SELECT
-          "from" as src,
-          "to" as dst,
-          * EXCLUDE ("from", "to", rn)
-        FROM (
-          SELECT *, ROW_NUMBER() OVER (PARTITION BY "from", "to" ORDER BY "from", "to") AS rn
-          FROM read_parquet({read_pattern}, union_by_name=true, hive_partitioning=false)
-        )
-        WHERE rn = 1
+        SELECT {select_clause}
+        FROM read_parquet({read_pattern}, union_by_name=true, hive_partitioning=false)
+        GROUP BY "from", "to"
       """
     else:
-      # Unknown table type: just read without deduplication
+      # Unknown table type or no column names: just read without deduplication
       # union_by_name=true handles schema variations between files
       return f"""
         CREATE OR REPLACE TABLE {quoted_table} AS
@@ -155,6 +165,7 @@ class DuckDBTableManager:
     has_from_to: bool,
     s3_files: list[str],
     file_id_map: dict[str, str],
+    column_names: list[str] | None = None,
   ) -> str:
     """
     Build CREATE TABLE SQL with file_id column injection (v2 incremental ingestion).
@@ -162,12 +173,16 @@ class DuckDBTableManager:
     Uses UNION ALL to combine files, injecting file_id for each source file.
     This enables per-file deletion and provenance tracking.
 
+    Uses GROUP BY + FIRST() for deduplication instead of ROW_NUMBER for better
+    memory efficiency and spill-to-disk support.
+
     Args:
         quoted_table: Quoted table name
         has_identifier: Whether table has 'identifier' column
         has_from_to: Whether table has 'from'/'to' columns
         s3_files: List of S3 file paths
         file_id_map: Map of s3_key -> file_id
+        column_names: List of column names from schema probe (required for dedup)
 
     Returns:
         SQL with UNION ALL and file_id injection
@@ -209,27 +224,42 @@ class DuckDBTableManager:
     # Combine with UNION ALL
     union_query = "\n UNION ALL\n".join(selects)
 
-    # Wrap in deduplication if needed
-    # NOTE: No final ORDER BY - materialization uses hash-based batching which doesn't require sorted data
-    if has_identifier:
+    # Wrap in deduplication using GROUP BY + FIRST() for better memory efficiency
+    if has_identifier and column_names:
+      # Node table: dedupe on identifier, keep first file_id
+      dedupe_cols = ["identifier"]
+      other_cols = [c for c in column_names if c not in dedupe_cols]
+      # Include file_id in the aggregation
+      select_parts = (
+        [f'"{c}"' for c in dedupe_cols]
+        + [f'FIRST("{c}") AS "{c}"' for c in other_cols]
+        + ["FIRST(file_id) AS file_id"]
+      )
+      select_clause = ", ".join(select_parts)
+      group_by_clause = ", ".join(f'"{c}"' for c in dedupe_cols)
+
       return f"""
         CREATE OR REPLACE TABLE {quoted_table} AS
-        SELECT * EXCLUDE (rn)
-        FROM (
-          SELECT *, ROW_NUMBER() OVER (PARTITION BY identifier ORDER BY identifier) AS rn
-          FROM ({union_query})
-        )
-        WHERE rn = 1
+        SELECT {select_clause}
+        FROM ({union_query})
+        GROUP BY {group_by_clause}
       """
-    elif has_from_to:
+    elif has_from_to and column_names:
+      # Relationship table: dedupe on src/dst (already renamed in union_query)
+      # Note: column_names has original names (from, to), but union_query renamed them
+      other_cols = [c for c in column_names if c not in ["from", "to"]]
+      select_parts = (
+        ["src", "dst"]
+        + [f'FIRST("{c}") AS "{c}"' for c in other_cols]
+        + ["FIRST(file_id) AS file_id"]
+      )
+      select_clause = ", ".join(select_parts)
+
       return f"""
         CREATE OR REPLACE TABLE {quoted_table} AS
-        SELECT * EXCLUDE (rn)
-        FROM (
-          SELECT *, ROW_NUMBER() OVER (PARTITION BY src, dst ORDER BY src, dst) AS rn
-          FROM ({union_query})
-        )
-        WHERE rn = 1
+        SELECT {select_clause}
+        FROM ({union_query})
+        GROUP BY src, dst
       """
     else:
       # No deduplication for unknown tables
@@ -303,12 +333,13 @@ class DuckDBTableManager:
             has_from_to,
             request.s3_pattern,
             request.file_id_map,
+            column_names,
           )
           conn.execute(sql)
         else:
           # Legacy path: without file_id tracking
           sql = self._build_table_sql(
-            quoted_table, has_identifier, has_from_to, is_list
+            quoted_table, has_identifier, has_from_to, is_list, column_names
           )
 
           if is_list:
@@ -364,11 +395,11 @@ class DuckDBTableManager:
     Insert data into an existing table from S3 files with incremental deduplication.
 
     This method merges new data with existing data and deduplicates using
-    ROW_NUMBER() OVER (PARTITION BY ...) - the same pattern as create_table().
+    GROUP BY + FIRST() for better memory efficiency and spill-to-disk support.
 
     Deduplication Strategy:
     1. UNION ALL existing table with new parquet data
-    2. Deduplicate on identifier (nodes) or from/to (relationships)
+    2. Deduplicate on identifier (nodes) or from/to (relationships) using GROUP BY
     3. Replace original table with deduplicated result
 
     This is more memory-efficient than post-staging deduplication because
@@ -432,52 +463,66 @@ class DuckDBTableManager:
           parquet_read = f"read_parquet('{request.s3_pattern}', union_by_name=true, hive_partitioning=false)"
 
         # Build merge + dedupe SQL based on table type
+        # Uses GROUP BY + FIRST() for better memory efficiency and spill support
         if has_identifier:
           # Node table: deduplicate on identifier
+          dedupe_cols = ["identifier"]
+          other_cols = [c for c in column_names if c not in dedupe_cols]
+          select_parts = [f'"{c}"' for c in dedupe_cols] + [
+            f'FIRST("{c}") AS "{c}"' for c in other_cols
+          ]
+          select_clause = ", ".join(select_parts)
+          group_by_clause = ", ".join(f'"{c}"' for c in dedupe_cols)
+
           sql = f"""
             CREATE OR REPLACE TABLE {temp_table} AS
-            SELECT * EXCLUDE (rn)
+            SELECT {select_clause}
             FROM (
-              SELECT *, ROW_NUMBER() OVER (PARTITION BY identifier ORDER BY identifier) AS rn
-              FROM (
-                SELECT * FROM {quoted_table}
-                UNION ALL
-                SELECT * FROM {parquet_read}
-              )
+              SELECT * FROM {quoted_table}
+              UNION ALL
+              SELECT * FROM {parquet_read}
             )
-            WHERE rn = 1
+            GROUP BY {group_by_clause}
           """
         elif has_from_to:
           # Relationship table: deduplicate on src/dst (or from/to)
           # Check if already renamed to src/dst or still from/to
           if "src" in column_names:
+            dedupe_cols = ["src", "dst"]
+            other_cols = [c for c in column_names if c not in dedupe_cols]
+            select_parts = [f'"{c}"' for c in dedupe_cols] + [
+              f'FIRST("{c}") AS "{c}"' for c in other_cols
+            ]
+            select_clause = ", ".join(select_parts)
+
             sql = f"""
               CREATE OR REPLACE TABLE {temp_table} AS
-              SELECT * EXCLUDE (rn)
+              SELECT {select_clause}
               FROM (
-                SELECT *, ROW_NUMBER() OVER (PARTITION BY src, dst ORDER BY src, dst) AS rn
-                FROM (
-                  SELECT * FROM {quoted_table}
-                  UNION ALL
-                  SELECT "from" as src, "to" as dst, * EXCLUDE ("from", "to")
-                  FROM {parquet_read}
-                )
+                SELECT * FROM {quoted_table}
+                UNION ALL
+                SELECT "from" as src, "to" as dst, * EXCLUDE ("from", "to")
+                FROM {parquet_read}
               )
-              WHERE rn = 1
+              GROUP BY src, dst
             """
           else:
+            dedupe_cols = ["from", "to"]
+            other_cols = [c for c in column_names if c not in dedupe_cols]
+            select_parts = [f'"{c}"' for c in dedupe_cols] + [
+              f'FIRST("{c}") AS "{c}"' for c in other_cols
+            ]
+            select_clause = ", ".join(select_parts)
+
             sql = f"""
               CREATE OR REPLACE TABLE {temp_table} AS
-              SELECT * EXCLUDE (rn)
+              SELECT {select_clause}
               FROM (
-                SELECT *, ROW_NUMBER() OVER (PARTITION BY "from", "to" ORDER BY "from", "to") AS rn
-                FROM (
-                  SELECT * FROM {quoted_table}
-                  UNION ALL
-                  SELECT * FROM {parquet_read}
-                )
+                SELECT * FROM {quoted_table}
+                UNION ALL
+                SELECT * FROM {parquet_read}
               )
-              WHERE rn = 1
+              GROUP BY "from", "to"
             """
         else:
           # Unknown table type: just append without deduplication
