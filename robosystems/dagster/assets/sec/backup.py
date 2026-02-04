@@ -1,4 +1,4 @@
-"""SEC repository backup asset.
+"""SEC Backup Asset.
 
 This asset creates downloadable .lbug backups of the SEC database for users
 with repository subscriptions. It runs after SEC materialization and creates
@@ -16,23 +16,13 @@ from datetime import UTC, datetime, timedelta
 
 from dagster import (
   AssetExecutionContext,
-  Config,
   MaterializeResult,
   asset,
 )
 
 from robosystems.dagster.resources import DatabaseResource, S3Resource
 
-
-class SECBackupConfig(Config):
-  """Configuration for SEC backup generation."""
-
-  graph_id: str = "sec"
-  retention_days: int = 14
-  compression: bool = True
-  encryption: bool = False  # Unencrypted for downloads
-  backup_type: str = "full"
-  backup_format: str = "full_dump"
+from .configs import SECBackupConfig
 
 
 @asset(

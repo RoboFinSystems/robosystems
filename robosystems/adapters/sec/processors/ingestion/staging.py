@@ -8,7 +8,7 @@ materialized to LadybugDB using the materialization module.
 Key features:
 - Schema-driven: Table names come from RoboLedgerContext
 - Glob patterns: Efficient file discovery via DuckDB (not S3 ListObjects)
-- Quarter chunking: Large tables are staged quarter-by-quarter to manage memory
+- Spill-to-disk: DuckDB external aggregation handles large tables efficiently
 - Retry logic: Automatic retries with backoff for transient failures
 
 Classes:
@@ -31,9 +31,7 @@ from robosystems.operations.aws.s3 import S3Client
 from robosystems.schemas.extensions.roboledger import RoboLedgerContext
 
 from .models import (
-  CHUNKED_STAGING_TIMEOUT,
   LARGE_STAGING_TABLES,
-  QUARTER_CHUNKABLE_TABLES,
   STAGING_MAX_RETRIES,
   STAGING_RETRY_BACKOFF_BASE,
   TAXONOMY_STRUCTURE_TABLES,
@@ -79,7 +77,6 @@ class DuckDBStager:
     reset_staging: bool = False,
     skip_taxonomy_relationships: bool = False,
     use_glob: bool = True,
-    chunk_large_tables: bool = True,
     progress_callback: ProgressCallback | None = None,
   ) -> StagingResult:
     """
@@ -96,12 +93,16 @@ class DuckDBStager:
     - Always recreates DuckDB tables from all S3 parquet files (CREATE TABLE)
     - No incremental mode - pipeline always rebuilds from scratch
 
+    Memory Management:
+    - Uses DuckDB's external aggregation with spill-to-disk for large tables
+    - GROUP BY + FIRST() deduplication is more memory-efficient than ROW_NUMBER
+    - No chunking needed - single-pass staging handles 500M+ row tables
+
     Args:
         year: Optional year filter. If provided, only files from that year.
         reset_staging: If True, delete entire DuckDB staging database first.
         skip_taxonomy_relationships: If True, skip taxonomy structure tables.
         use_glob: If True (default), use glob patterns for efficient discovery.
-        chunk_large_tables: If True (default), stage large tables quarter-by-quarter.
         progress_callback: Optional callback for progress logging.
 
     Returns:
@@ -232,7 +233,6 @@ class DuckDBStager:
           client,
           year=year,
           progress_callback=log_progress,
-          chunk_large_tables=chunk_large_tables,
         )
       else:
         log_progress(
@@ -579,42 +579,6 @@ class DuckDBStager:
 
     return tables_info
 
-  async def _discover_filed_partitions(self, year: int | None = None) -> list[str]:
-    """
-    Discover all filed= quarterly partitions from S3.
-
-    Used for quarter-based chunking of large tables.
-
-    Args:
-        year: Optional year filter. If provided, only returns quarters from that year.
-
-    Returns:
-        Sorted list of quarterly partition keys (e.g., ["2024-Q1", "2024-Q2", ...])
-    """
-    partitions: list[str] = []
-    prefix = f"{self.source_prefix}/"
-
-    paginator = self.s3_client.s3_client.get_paginator("list_objects_v2")
-    pages = paginator.paginate(Bucket=self.bucket, Prefix=prefix, Delimiter="/")
-
-    for page in pages:
-      if "CommonPrefixes" in page:
-        for prefix_info in page["CommonPrefixes"]:
-          prefix_path = prefix_info["Prefix"]
-          if "filed=" in prefix_path:
-            filed_part = prefix_path.split("filed=")[1].rstrip("/")
-            # Only accept quarterly format (YYYY-QN)
-            if "-Q" not in filed_part:
-              continue
-            # Filter by year if specified
-            if year and not filed_part.startswith(str(year)):
-              continue
-            partitions.append(filed_part)
-
-    partitions.sort()
-    logger.info(f"Discovered {len(partitions)} filed= quarterly partitions from S3")
-    return partitions
-
   async def _stage_table_with_retry(
     self,
     table_name: str,
@@ -673,300 +637,24 @@ class DuckDBStager:
 
     return False, None, f"Failed after {STAGING_MAX_RETRIES} attempts: {last_error}"
 
-  async def _stage_large_table_by_quarters(
-    self,
-    table_name: str,
-    entity_type: str,
-    graph_client: "GraphClient",
-    quarters: list[str],
-    log_progress: ProgressCallback,
-    table_index: int,
-    total_tables: int,
-  ) -> tuple[bool, TableInfo | None, str | None]:
-    """
-    Stage a large table using parallel chunk loading + final merge pattern.
-
-    For tables like Fact (100M+ rows), this approach:
-    1. Loads each quarter into a separate chunk table
-    2. Merges all chunks with deduplication into the final table
-    3. Cleans up chunk tables
-
-    Args:
-        table_name: Name of the table to stage
-        entity_type: "nodes" or "relationships"
-        graph_client: Graph API client instance
-        quarters: List of quarter partition keys (e.g., ["2024-Q1", ...])
-        log_progress: Progress logging callback
-        table_index: Current table index for progress display
-        total_tables: Total number of tables for progress display
-
-    Returns:
-        Tuple of (success, TableInfo or None, error message or None)
-    """
-    timeout = CHUNKED_STAGING_TIMEOUT
-    chunk_tables: list[str] = []
-    chunk_row_counts: dict[str, int] = {}
-    total_duration = 0.0
-
-    log_progress(
-      f"[{table_index}/{total_tables}] Staging {table_name} by quarter "
-      f"({len(quarters)} quarters, chunk+merge)..."
-    )
-
-    # Phase 1: Load each quarter into a separate chunk table
-    for q_idx, quarter_key in enumerate(quarters):
-      chunk_name = f"{table_name}_chunk_{quarter_key.replace('-', '_')}"
-      s3_pattern = (
-        f"s3://{self.bucket}/{self.source_prefix}/filed={quarter_key}/"
-        f"{entity_type}/{table_name}.parquet"
-      )
-
-      log_progress(f"  [{quarter_key}] Loading chunk {q_idx + 1}/{len(quarters)}...")
-
-      chunk_success = False
-      last_error = None
-
-      for attempt in range(STAGING_MAX_RETRIES):
-        try:
-          response = await graph_client.create_table(
-            graph_id=self.graph_id,
-            table_name=chunk_name,
-            s3_pattern=s3_pattern,
-            timeout=timeout,
-          )
-
-          if response.get("status") == "failed":
-            error = response.get("error", "Unknown error")
-            if "No files found" in error:
-              log_progress(f"  [{quarter_key}] No files (skipped)")
-              chunk_success = True
-              break
-            last_error = error
-            raise RuntimeError(error)
-
-          result = response.get("result", {})
-          row_count = result.get("row_count", 0)
-          duration = response.get("duration_seconds", result.get("duration_seconds", 0))
-          total_duration += duration
-
-          log_progress(
-            f"  [{quarter_key}] Loaded {row_count:,} rows in {duration:.1f}s"
-          )
-
-          chunk_tables.append(chunk_name)
-          chunk_row_counts[chunk_name] = row_count
-          chunk_success = True
-          break
-
-        except Exception as e:
-          error_str = str(e).strip() if str(e).strip() and str(e).strip() != "." else ""
-          if not error_str:
-            error_str = f"{type(e).__name__} (no message)"
-          else:
-            error_str = f"{type(e).__name__}: {error_str}"
-
-          if "No files found" in error_str:
-            log_progress(f"  [{quarter_key}] No files (skipped)")
-            chunk_success = True
-            break
-
-          last_error = error_str
-          if attempt < STAGING_MAX_RETRIES - 1:
-            backoff = STAGING_RETRY_BACKOFF_BASE * (attempt + 1)
-            log_progress(
-              f"  [{quarter_key}] Attempt {attempt + 1}/{STAGING_MAX_RETRIES} failed: {error_str[:100]}. "
-              f"Retrying in {backoff}s..."
-            )
-
-            # Get fresh client before retry
-            try:
-              graph_client = await get_graph_client(
-                graph_id=self.graph_id, operation_type="write"
-              )
-              logger.debug(
-                f"Obtained fresh graph client for retry attempt {attempt + 2}"
-              )
-            except Exception as client_err:
-              logger.warning(f"Could not refresh graph client: {client_err}")
-
-            await asyncio.sleep(backoff)
-          else:
-            log_progress(
-              f"  [{quarter_key}] Failed after {STAGING_MAX_RETRIES} attempts: {error_str[:200]}"
-            )
-
-      if not chunk_success:
-        await self._cleanup_chunk_tables(graph_client, chunk_tables, log_progress)
-        return False, None, f"Failed to load chunk {quarter_key}: {last_error}"
-
-    # Phase 2: Merge all chunks with deduplication
-    if not chunk_tables:
-      log_progress("  [MERGE] No chunks to merge (all quarters empty)")
-      return (
-        True,
-        TableInfo(
-          name=table_name,
-          row_count=0,
-          file_count=0,
-          staged_at=datetime.now(UTC).isoformat(),
-        ),
-        None,
-      )
-
-    total_chunk_rows = sum(chunk_row_counts.values())
-    log_progress(
-      f"  [MERGE] Merging {len(chunk_tables)} chunks ({total_chunk_rows:,} rows) with dedupe..."
-    )
-
-    # Build merge SQL using GROUP BY + FIRST()
-    if entity_type == "nodes":
-      dedupe_columns = ["identifier"]
-    else:
-      dedupe_columns = ["src", "dst"]
-
-    schema_response = await graph_client.query_table(
-      graph_id=self.graph_id,
-      sql=f'DESCRIBE "{chunk_tables[0]}"',
-      timeout=60.0,
-    )
-    all_columns = [row[0] for row in schema_response.get("rows", [])]
-
-    other_columns = [c for c in all_columns if c not in dedupe_columns]
-    select_parts = [f'"{c}"' for c in dedupe_columns] + [
-      f'FIRST("{c}") AS "{c}"' for c in other_columns
-    ]
-    select_clause = ", ".join(select_parts)
-    group_by_clause = ", ".join(f'"{c}"' for c in dedupe_columns)
-
-    union_parts = " UNION ALL ".join(f'SELECT * FROM "{t}"' for t in chunk_tables)
-    merge_sql = f"""
-            CREATE OR REPLACE TABLE "{table_name}" AS
-            SELECT {select_clause}
-            FROM ({union_parts})
-            GROUP BY {group_by_clause}
-        """
-
-    merge_success = False
-    last_merge_error = None
-    final_row_count = 0
-    merge_timeout = float(CHUNKED_STAGING_TIMEOUT)
-
-    try:
-      for attempt in range(STAGING_MAX_RETRIES):
-        try:
-          merge_start = asyncio.get_event_loop().time()
-          await graph_client.query_table(
-            graph_id=self.graph_id,
-            sql=merge_sql,
-            timeout=merge_timeout,
-          )
-          merge_duration = asyncio.get_event_loop().time() - merge_start
-          total_duration += merge_duration
-
-          count_response = await graph_client.query_table(
-            graph_id=self.graph_id,
-            sql=f'SELECT COUNT(*) as cnt FROM "{table_name}"',
-            timeout=60.0,
-          )
-          if count_response.get("rows") and count_response["rows"][0]:
-            final_row_count = count_response["rows"][0][0]
-
-          log_progress(
-            f"  [MERGE] Created {table_name}: {final_row_count:,} rows in {merge_duration:.1f}s"
-          )
-          merge_success = True
-          break
-
-        except Exception as e:
-          error_str = str(e).strip() if str(e).strip() and str(e).strip() != "." else ""
-          if not error_str:
-            last_merge_error = f"{type(e).__name__} (no message)"
-          else:
-            last_merge_error = f"{type(e).__name__}: {error_str}"
-
-          if attempt < STAGING_MAX_RETRIES - 1:
-            backoff = STAGING_RETRY_BACKOFF_BASE * (attempt + 1)
-            log_progress(
-              f"  [MERGE] Attempt {attempt + 1}/{STAGING_MAX_RETRIES} failed: {last_merge_error[:100]}. "
-              f"Retrying in {backoff}s..."
-            )
-
-            try:
-              graph_client = await get_graph_client(
-                graph_id=self.graph_id, operation_type="write"
-              )
-              logger.debug(
-                f"Obtained fresh graph client for merge retry attempt {attempt + 2}"
-              )
-            except Exception as client_err:
-              logger.warning(f"Could not refresh graph client for merge: {client_err}")
-
-            await asyncio.sleep(backoff)
-          else:
-            log_progress(
-              f"  [MERGE] Failed after {STAGING_MAX_RETRIES} attempts: {last_merge_error[:200]}"
-            )
-    finally:
-      # Phase 3: Cleanup chunk tables
-      await self._cleanup_chunk_tables(graph_client, chunk_tables, log_progress)
-
-    if not merge_success:
-      return False, None, f"Failed to merge chunks: {last_merge_error}"
-
-    log_progress(
-      f"[{table_index}/{total_tables}] Staged {table_name}: "
-      f"{final_row_count:,} rows in {total_duration:.1f}s (chunk+merge)"
-    )
-
-    return (
-      True,
-      TableInfo(
-        name=table_name,
-        row_count=final_row_count,
-        file_count=0,
-        staged_at=datetime.now(UTC).isoformat(),
-      ),
-      None,
-    )
-
-  async def _cleanup_chunk_tables(
-    self,
-    graph_client: "GraphClient",
-    chunk_tables: list[str],
-    log_progress: ProgressCallback,
-  ) -> None:
-    """Delete chunk tables after merge (best effort)."""
-    if not chunk_tables:
-      return
-
-    log_progress(f"  [CLEANUP] Deleting {len(chunk_tables)} chunk tables...")
-    deleted = 0
-    for chunk_name in chunk_tables:
-      try:
-        await graph_client.delete_table(self.graph_id, chunk_name)
-        deleted += 1
-      except Exception as e:
-        logger.warning(f"Could not delete chunk table {chunk_name}: {e}")
-
-    log_progress(f"  [CLEANUP] Deleted {deleted}/{len(chunk_tables)} chunk tables")
-
   async def _create_tables_with_glob(
     self,
     tables: dict[str, str],
     graph_client: "GraphClient",
     year: int | None = None,
     progress_callback: ProgressCallback | None = None,
-    chunk_large_tables: bool = True,
   ) -> tuple[list[str], dict[str, TableInfo]]:
     """
     Create DuckDB staging tables using glob patterns.
+
+    Uses single-pass staging for all tables, relying on DuckDB's external
+    aggregation with spill-to-disk for memory management of large tables.
 
     Args:
         tables: Dictionary mapping table names to entity type
         graph_client: Graph API client instance
         year: Optional year filter
         progress_callback: Optional progress callback
-        chunk_large_tables: If True, stage large tables quarter-by-quarter
 
     Returns:
         Tuple of (successful_table_names, table_info_dict)
@@ -984,39 +672,11 @@ class DuckDBStager:
 
     log_progress = make_progress_logger(progress_callback)
 
-    # Discover quarterly partitions for chunked staging
-    quarterly_partitions: list[str] | None = None
-    if chunk_large_tables:
-      quarterly_partitions = await self._discover_filed_partitions(year=year)
-      if quarterly_partitions:
-        logger.info(
-          f"Quarter chunking enabled: {len(quarterly_partitions)} quarters discovered"
-        )
-
     total_tables = len(tables)
     for i, (table_name, entity_type) in enumerate(tables.items(), 1):
       is_large = table_name in LARGE_STAGING_TABLES
-      is_chunkable = table_name in QUARTER_CHUNKABLE_TABLES
 
-      # Use quarter-based chunking for chunkable tables
-      if is_chunkable and quarterly_partitions and chunk_large_tables:
-        success, table_info, error = await self._stage_large_table_by_quarters(
-          table_name=table_name,
-          entity_type=entity_type,
-          graph_client=graph_client,
-          quarters=quarterly_partitions,
-          log_progress=log_progress,
-          table_index=i,
-          total_tables=total_tables,
-        )
-        if success and table_info:
-          successful_tables.append(table_name)
-          table_infos[table_name] = table_info
-        else:
-          failed_tables.append((table_name, error or "Unknown error"))
-        continue
-
-      # Standard staging for small tables
+      # Standard staging for all tables (spill-to-disk handles large tables)
       s3_pattern = (
         f"s3://{self.bucket}/{self.source_prefix}/"
         f"{filed_pattern}/{entity_type}/{table_name}.parquet"

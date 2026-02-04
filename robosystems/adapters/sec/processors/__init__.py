@@ -14,6 +14,14 @@ Main Components:
 - ids: UUID generation and naming utilities
 """
 
+from .consolidation import (
+  atomic_s3_upload,
+  consolidate_parquet_from_disk,
+  consolidate_parquet_tables_by_date,
+  get_quarter_end_date,
+  merge_with_existing_s3,
+)
+from .constants import QUARTER_END_DAYS, SHARED_NODE_TABLES
 from .dataframe import DataFrameManager
 from .ids import (
   # Naming utilities
@@ -43,6 +51,7 @@ from .ingestion import (
   XBRLDuckDBGraphProcessor,
 )
 from .parquet import ParquetWriter
+from .processing import ProcessedFilingResult, process_single_filing_to_memory
 from .schema import (
   IngestTableInfo,
   SchemaIngestConfig,
@@ -55,6 +64,9 @@ from .textblock import TextBlockExternalizer
 from .xbrl_graph import XBRL_GRAPH_PROCESSOR_VERSION, XBRLGraphProcessor
 
 __all__ = [
+  # Constants
+  "QUARTER_END_DAYS",
+  "SHARED_NODE_TABLES",
   "XBRL_GRAPH_PROCESSOR_VERSION",
   # DataFrame management
   "DataFrameManager",
@@ -65,6 +77,8 @@ __all__ = [
   "MaterializeResult",
   # Parquet file output
   "ParquetWriter",
+  # Filing processing
+  "ProcessedFilingResult",
   "SchemaIngestConfig",
   "StagingResult",
   "TableInfo",
@@ -77,8 +91,12 @@ __all__ = [
   # Schema utilities
   "XBRLSchemaAdapter",
   "XBRLSchemaConfigGenerator",
+  # Consolidation functions
+  "atomic_s3_upload",
   # Naming utilities
   "camel_to_snake",
+  "consolidate_parquet_from_disk",
+  "consolidate_parquet_tables_by_date",
   "convert_schema_name_to_filename",
   "create_custom_ingestion_processor",
   "create_dimension_id",
@@ -95,6 +113,9 @@ __all__ = [
   "create_structure_id",
   "create_taxonomy_id",
   "create_unit_id",
+  "get_quarter_end_date",
   "make_plural",
+  "merge_with_existing_s3",
+  "process_single_filing_to_memory",
   "safe_concat",
 ]

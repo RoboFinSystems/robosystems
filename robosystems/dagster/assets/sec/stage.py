@@ -1,0 +1,199 @@
+"""SEC DuckDB Staging Assets.
+
+This module contains the DuckDB staging assets:
+- sec_duckdb_staged: Full rebuild staging
+- sec_duckdb_incremental_staged: Incremental staging for current quarter
+"""
+
+from dagster import AssetExecutionContext, MaterializeResult, asset
+
+from robosystems.config import env
+
+from .configs import SECIncrementalStageConfig, SECStageConfig
+
+
+@asset(
+  group_name="sec_pipeline",
+  description="Stage SEC processed files to persistent DuckDB (full or incremental)",
+  kinds={"duckdb"},
+  metadata={
+    "pipeline": "sec",
+    "stage": "staging",
+    "decoupled": True,
+  },
+)
+def sec_duckdb_staged(
+  context: AssetExecutionContext,
+  config: SECStageConfig,
+) -> MaterializeResult:
+  """Stage SEC processed files to persistent DuckDB (full rebuild).
+
+  Creates DuckDB tables from scratch using all S3 parquet files.
+  Persists to disk so materialization can run independently.
+
+  Options:
+  - reset_staging: Delete existing DuckDB file before staging (fresh start)
+  - year: Optional year filter for partial staging
+
+  Run with:
+    uv run dagster asset materialize -m robosystems.dagster --select sec_duckdb_staged
+
+  Returns:
+      MaterializeResult with staging statistics
+  """
+  import asyncio
+
+  from robosystems.adapters.sec import XBRLDuckDBGraphProcessor
+  from robosystems.operations.graph.shared_repository_service import (
+    ensure_shared_repository_exists,
+  )
+
+  context.log.info(f"Staging SEC data to DuckDB for graph: {config.graph_id}")
+  if config.year:
+    context.log.info(f"Year filter: {config.year}")
+  if config.reset_staging:
+    context.log.info("Reset staging enabled - will delete DuckDB file first")
+
+  # Boost DuckDB memory before staging (only applies to ladybug-shared tier)
+  try:
+    from robosystems.graph_api.client.factory import boost_graph_memory
+
+    boost_result = asyncio.run(boost_graph_memory(config.graph_id, target="duckdb"))
+    context.log.info(f"Memory boost: {boost_result.get('message', 'done')}")
+  except Exception as boost_err:
+    context.log.warning(f"Could not boost memory (non-fatal): {boost_err}")
+
+  processor = XBRLDuckDBGraphProcessor(graph_id=config.graph_id)
+
+  # Progress callback for Dagster logging (visible in Dagster UI)
+  def dagster_progress(msg: str) -> None:
+    context.log.info(msg)
+
+  async def run_staging():
+    # Ensure repository exists
+    context.log.info("Ensuring SEC repository metadata exists...")
+    repo_result = await ensure_shared_repository_exists(
+      repository_name=config.graph_id,
+      created_by="system",
+      instance_id="local-dev" if env.ENVIRONMENT == "dev" else "ladybug-shared-prod",
+    )
+    context.log.info(f"SEC repository status: {repo_result.get('status', 'unknown')}")
+
+    # Run full staging from all S3 parquet files
+    result = await processor.stage_to_duckdb(
+      year=config.year,
+      reset_staging=config.reset_staging,
+      skip_taxonomy_relationships=config.skip_taxonomy_relationships,
+      progress_callback=dagster_progress,
+    )
+    return result
+
+  result = asyncio.run(run_staging())
+
+  # Release DuckDB memory after staging (closes connections, frees buffers)
+  try:
+    from robosystems.graph_api.client.factory import release_graph_memory
+
+    release_result = asyncio.run(release_graph_memory(config.graph_id, target="duckdb"))
+    context.log.info(f"Memory release: {release_result.get('message', 'done')}")
+  except Exception as release_err:
+    context.log.warning(f"Could not release memory (non-fatal): {release_err}")
+
+  if result.status == "error":
+    context.log.error(f"Staging failed: {result.error}")
+    return MaterializeResult(
+      metadata={
+        "graph_id": config.graph_id,
+        "status": "error",
+        "error": result.error,
+        "duration_ms": result.duration_ms,
+      }
+    )
+
+  context.log.info(
+    f"Staging complete: {len(result.table_names)} tables, "
+    f"{result.total_files} files, {result.duration_ms / 1000:.2f}s"
+  )
+
+  return MaterializeResult(
+    metadata={
+      "graph_id": config.graph_id,
+      "status": result.status,
+      "tables_staged": len(result.table_names),
+      "table_names": result.table_names,
+      "total_files": result.total_files,
+      "total_rows": result.total_rows,
+      "duckdb_path": result.duckdb_path,
+      "duration_ms": result.duration_ms,
+    }
+  )
+
+
+@asset(
+  group_name="sec_pipeline",
+  description="Incrementally stage current quarter's filings to DuckDB",
+  kinds={"duckdb"},
+  metadata={
+    "pipeline": "sec",
+    "stage": "incremental_staging",
+    "decoupled": True,
+  },
+)
+def sec_duckdb_incremental_staged(
+  context: AssetExecutionContext,
+  config: SECIncrementalStageConfig,
+) -> MaterializeResult:
+  """INSERT current quarter's files into existing DuckDB tables.
+
+  Points at entire quarter's parquet files and uses INSERT INTO with
+  UNION ALL + ROW_NUMBER deduplication. Safe to run daily - only net
+  new rows are added, duplicates are automatically filtered out.
+
+  Precondition: Initial full staging must have been done (tables exist).
+
+  Run with:
+    uv run dagster asset materialize -m robosystems.dagster --select sec_duckdb_incremental_staged
+  """
+  import asyncio
+
+  from robosystems.adapters.sec import XBRLDuckDBGraphProcessor
+
+  processor = XBRLDuckDBGraphProcessor(graph_id=config.graph_id)
+
+  async def run_incremental():
+    return await processor.stage_incremental_to_duckdb(
+      year=config.year,
+      quarter=config.quarter,
+      skip_taxonomy_relationships=config.skip_taxonomy_relationships,
+      progress_callback=context.log.info,
+    )
+
+  result = asyncio.run(run_incremental())
+
+  if result.status == "error":
+    context.log.error(f"Incremental staging failed: {result.error}")
+    return MaterializeResult(
+      metadata={
+        "graph_id": config.graph_id,
+        "status": "error",
+        "error": result.error or "Unknown error",
+        "duration_ms": result.duration_ms,
+      }
+    )
+
+  context.log.info(
+    f"Incremental staging complete: {len(result.table_names)} tables, "
+    f"{result.total_rows} rows, {result.duration_ms / 1000:.2f}s"
+  )
+
+  return MaterializeResult(
+    metadata={
+      "graph_id": config.graph_id,
+      "status": result.status,
+      "year": config.year,
+      "quarter": config.quarter,
+      "tables_staged": len(result.table_names),
+      "total_rows": result.total_rows,  # Net new rows
+      "duration_ms": result.duration_ms,
+    }
+  )

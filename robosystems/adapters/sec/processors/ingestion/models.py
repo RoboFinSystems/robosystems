@@ -165,7 +165,6 @@ ProgressCallback = Callable[[str], None]
 # - Network I/O bound (S3 → DuckDB), memory usage is bounded
 DEFAULT_STAGING_TIMEOUT = 300  # 5 min - small tables (<10M rows)
 LARGE_TABLE_STAGING_TIMEOUT = 1800  # 30 min - large tables (Fact: 200M+ rows)
-CHUNKED_STAGING_TIMEOUT = 600  # 10 min per quarter chunk - incremental staging
 #
 # LadybugDB materialization timeouts:
 # - Materialize from DuckDB to graph, ~300K-500K rows/minute
@@ -235,50 +234,6 @@ LARGE_STAGING_TABLES = frozenset(
     "ASSOCIATION_HAS_TO_ELEMENT",  # ~206M rows - Association -> Element
   }
 )
-
-# Tables safe to chunk by quarter (unique per filing, no cross-quarter duplicates)
-# These tables have data that is specific to individual filings, so loading
-# quarter-by-quarter won't create duplicates.
-#
-# Chunking threshold: Only chunk tables >100M rows. Full staging works reliably
-# up to ~106M rows (TAXONOMY_HAS_LABEL completes in 90s). Smaller tables have
-# unnecessary overhead from 17 sequential CREATE/INSERT operations.
-#
-# Note: FactSet/REPORT_HAS_FACT_SET excluded - only 1 per report, small tables.
-QUARTER_CHUNKABLE_TABLES = frozenset(
-  {
-    # Fact node (~105M rows) - the core high-volume table
-    "Fact",
-    # Fact relationships (~94-105M rows each, 1:1 with Fact)
-    "REPORT_HAS_FACT",
-    "FACT_HAS_ELEMENT",
-    "FACT_HAS_ENTITY",
-    "FACT_HAS_PERIOD",
-    "FACT_HAS_UNIT",
-    "FACT_HAS_DIMENSION",
-    "FACT_SET_CONTAINS_FACT",
-    "FACT_DIMENSION_MEMBER_ELEMENT",  # ~70M rows - borderline but safer to chunk
-    "FACT_REPORTS_ELEMENT",  # Legacy name for FACT_HAS_ELEMENT
-    # Association tables (~200-206M rows) - largest tables, benefit most from chunking
-    "Association",
-    "STRUCTURE_HAS_ASSOCIATION",
-    "ASSOCIATION_HAS_FROM_ELEMENT",
-    "ASSOCIATION_HAS_TO_ELEMENT",
-  }
-)
-
-# Tables removed from chunking (full staging is faster for these sizes):
-# - Structure (7M) - well under 100M threshold
-# - FactDimension (8M) - well under 100M threshold
-# - STRUCTURE_HAS_TAXONOMY (7M) - well under 100M threshold
-# - FACT_DIMENSION_AXIS_ELEMENT (8M) - well under 100M threshold
-
-# Tables NOT safe to chunk (shared reference data across filings)
-# These tables have data shared across many filings. Chunking would create
-# duplicates because the same Element/Label appears in multiple quarters.
-# Must be loaded in a single pass with deduplication.
-# - Element, Label: Shared XBRL taxonomy elements (same us-gaap:Revenue across filings)
-# - ELEMENT_HAS_LABEL, TAXONOMY_HAS_LABEL: Shared element-label mappings
 
 # Taxonomy structure tables that can be skipped for instance-only mode
 # These encode XBRL taxonomy hierarchy (calculation/presentation/definition linkbases)

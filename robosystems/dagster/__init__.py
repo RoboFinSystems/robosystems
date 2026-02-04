@@ -3,8 +3,7 @@
 This module provides Dagster-based data orchestration for:
 - Billing and infrastructure scheduled tasks
 - SEC EDGAR data pipeline
-- QuickBooks data sync
-- Plaid banking integration
+- User graph operations
 
 The Dagster setup replaces background tasks for all orchestration needs, providing:
 - Better observability through the Dagster UI
