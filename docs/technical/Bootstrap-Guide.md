@@ -12,7 +12,7 @@ This guide walks you through bootstrapping a fresh fork of RoboSystems.
 - [Deploy](#deploy)
 - [Multi-Repository Setup](#multi-repository-setup)
 - [API Access Modes](#api-access-modes)
-- [Frontend App Access Modes](#frontend-app-access-modes)
+- [Frontend App Deployment](#frontend-app-deployment)
 - [Troubleshooting](#troubleshooting)
 - [Quick Reference](#quick-reference)
 
@@ -87,7 +87,7 @@ Bootstrap handles everything:
 2. Sets GitHub variables (`AWS_ROLE_ARN`, `AWS_ACCOUNT_ID`, `AWS_REGION`)
 3. Creates ECR repository for Docker images
 4. Creates `.envrc` for automatic profile/region selection
-5. Runs `setup-aws` to create application secrets (see below)
+5. Prompts to run `setup-aws` (application secrets) and `setup-gha` (deployment variables)
 
 **What gets created in AWS:**
 - OIDC Identity Provider for GitHub Actions
@@ -104,21 +104,10 @@ These secrets are **not required** for deployment but enhance workflow functiona
 | `ACTIONS_TOKEN` | GitHub PAT with `repo` scope | Push to protected branches, create tags/releases, PRs that auto-trigger CI |
 | `ANTHROPIC_API_KEY` | Claude API key | AI-generated PR summaries and release notes |
 
-**ACTIONS_TOKEN enables:**
-- Push to protected `main` branch (create-release.yml)
-- Push tags and create GitHub releases (tag-release.yml)
-- PRs that auto-trigger CI workflows (create-pr.yml)
-- Org-level self-hosted runner checks (claude.yml)
-
-Without `ACTIONS_TOKEN`, workflows fall back to `github.token` which has limitations:
-- May fail on protected branches/tags
-- PRs won't trigger `on:pull_request` workflows
-- Runner checks limited to repo-level
-
-**To create ACTIONS_TOKEN:**
-1. Go to [github.com/settings/tokens](https://github.com/settings/tokens)
-2. Create a new token with `repo` scope (full control)
-3. Set it: `gh secret set ACTIONS_TOKEN`
+**ACTIONS_TOKEN details:**
+- Enables pushing to protected `main` branch, creating tags/releases, and PRs that auto-trigger CI workflows
+- Without it, workflows fall back to `github.token` which may fail on protected branches and won't trigger `on:pull_request` workflows
+- To create: [github.com/settings/tokens](https://github.com/settings/tokens) → new token with `repo` scope → `gh secret set ACTIONS_TOKEN`
 
 ### GitHub Variables (`just setup-gha`)
 
@@ -135,19 +124,14 @@ While bootstrap sets the core OIDC variables (`AWS_ROLE_ARN`, `AWS_ACCOUNT_ID`, 
 | Infrastructure | `VPC_ENDPOINT_MODE`, `MAX_AVAILABILITY_ZONES` | VPC and networking |
 
 **When to run:**
-- After bootstrap, if you need custom infrastructure sizing
-- When adding staging environment
-- When enabling production features (WAF, Multi-AZ, etc.)
+- During bootstrap (prompted) - the recommended path since you opt-in to each step
+- Standalone via `just setup-gha` if you skipped during bootstrap
 
-**Note:** Workflows have sensible defaults. Skip `setup-gha` for basic deployments.
-
-```bash
-just setup-gha    # Interactive prompts for domain, environment, etc.
-```
+**Note:** Workflows have sensible defaults. You can skip this during bootstrap for basic deployments and run it later when you need custom infrastructure sizing, staging environment, or production features (WAF, Multi-AZ, etc.).
 
 ### Application Secrets (`just setup-aws`)
 
-Creates `robosystems/prod` and `robosystems/staging` in AWS Secrets Manager with:
+Prompted during bootstrap (or run standalone later). Creates `robosystems/prod` and `robosystems/staging` in AWS Secrets Manager with:
 
 - **Auto-generated keys**: JWT signing, connection encryption, backup encryption
 - **Feature flags**: billing, rate limiting, registration, SSE, etc.
@@ -307,79 +291,31 @@ just deploy prod
 
 **Note:** Switching between internal and internet-facing modes will replace the ALB (causes brief downtime).
 
-## Frontend App Access Modes
+## Frontend App Deployment
 
-Frontend apps (robosystems-app, roboledger-app, roboinvestor-app) support the same three access modes, configured via `APP_ACCESS_MODE_PROD` / `APP_ACCESS_MODE_STAGING`:
+Frontend apps (robosystems-app, roboledger-app, roboinvestor-app) are 99% client-side Next.js applications deployed on **AWS App Runner behind CloudFront**.
 
-| Mode | CloudFront | ALB Scheme | TLS | Domain Required | Use Case |
-|------|------------|------------|-----|-----------------|----------|
-| `internal` | No | Internal | No | No | Development via bastion tunnel |
-| `public-http` | Yes (AWS DNS) | Internet-facing | Yes* | No | Testing without custom domain |
-| `public` | Yes | Internet-facing | Yes | Yes | Production with custom domain |
+**Note:** Unlike the API, frontend apps don't have an `internal` mode - App Runner is always internet-facing. Use the API's internal mode if you need VPC-only access for microservice/extension use cases.
 
-*CloudFront provides HTTPS on its default domain (`d123.cloudfront.net`)
+### Bootstrap
 
-### Internal Mode
-
-No CloudFront or custom domain. Access via bastion tunnel:
+From the frontend app repository:
 
 ```bash
-just bastion-tunnel prod app
-# App at http://localhost:3000
+npm run setup:bootstrap    # Sets AWS_ROLE_ARN, prompts for gha-setup
 ```
 
-The ALB is internal (not internet-accessible) and you connect through SSM port forwarding. Static assets are served directly from ECS (no S3/CloudFront).
+This checks for the OIDC infrastructure (deployed by the main robosystems repo) and configures GitHub variables.
 
-### Public HTTP Mode
-
-CloudFront with AWS-provided domain. Useful for testing or when you don't have a domain:
-
-```bash
-gh variable set APP_ACCESS_MODE_PROD --body "public-http"
-just deploy prod
-```
-
-After deployment, access via the CloudFront domain (shown in CloudFormation outputs, e.g., `d123abc.cloudfront.net`).
-
-**Benefits over internal mode:**
-- Public access without custom domain
-- HTTPS via CloudFront's default certificate
-- CDN caching for static assets
-
-**Limitations:**
-- No custom domain - uses CloudFront's auto-generated domain
-- Some OAuth providers may require a custom domain for callbacks
-
-### Public Mode (Custom Domain)
-
-Full production setup with custom domain and HTTPS:
+### Custom Domain Setup
 
 1. Domain must be hosted in Route53
-2. Configure variables:
+2. Configure variables via `npm run setup:gha` or manually:
    ```bash
-   gh variable set APP_ACCESS_MODE_PROD --body "public"
    gh variable set DOMAIN_NAME_ROOT --body "yourdomain.com"
-   gh variable set DOMAIN_NAME_PROD --body "app.yourdomain.com"
+   gh variable set DOMAIN_NAME_PROD --body "yourdomain.com"
    ```
 3. Deploy - ACM certificates and DNS records created automatically
-
-### Switching Modes
-
-You can switch modes at any time:
-
-```bash
-# Switch from internal to public-http
-gh variable set APP_ACCESS_MODE_PROD --body "public-http"
-just deploy prod
-
-# Switch to full public with domain
-gh variable set APP_ACCESS_MODE_PROD --body "public"
-gh variable set DOMAIN_NAME_ROOT --body "yourdomain.com"
-gh variable set DOMAIN_NAME_PROD --body "app.yourdomain.com"
-just deploy prod
-```
-
-**Note:** Switching between internal and internet-facing modes will replace the ALB (causes brief downtime). Switching to/from internal mode also adds/removes CloudFront (may take 10-15 minutes to propagate).
 
 ## Troubleshooting
 
