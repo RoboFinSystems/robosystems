@@ -409,8 +409,8 @@ jobs:
       valkey_sg_id: ${{ needs.deploy-valkey.outputs.valkey_sg_id }}
       valkey_url: ${{ needs.deploy-valkey.outputs.valkey_url }}
       ami_id: ${{ needs.stack-config.outputs.graph_ami_id }}
-      # Container Configuration
-      ecr_image_tag: latest
+      # Container Configuration - use prod tag for EC2/ASG (container refresh handles updates)
+      ecr_image_tag: prod
       # Infrastructure inputs from graph infrastructure jobs
       secret_arn: ${{ needs.deploy-graph-infra.outputs.secret_arn }}
       volume_registry_table: ${{ needs.deploy-graph-infra.outputs.volume_registry_table }}
@@ -470,7 +470,7 @@ jobs:
       public_subnet_ids: ${{ needs.deploy-vpc.outputs.public_subnet_ids }}
       # Container & Application Configuration
       ecr_repository_url: ${{ needs.build.outputs.ecr_repository_url }}
-      ecr_image_tag: latest
+      ecr_image_tag: ${{ needs.build.outputs.version_tag }}
       # ECS & Compute Configuration
       desired_count: ${{ vars.API_MIN_CAPACITY_PROD || '1' }}
       cpu: "512"
@@ -540,7 +540,7 @@ jobs:
       subnet_ids: ${{ needs.deploy-vpc.outputs.private_subnet_ids }}
       # Container & Application Configuration
       ecr_repository_url: ${{ needs.build.outputs.ecr_repository_url }}
-      ecr_image_tag: latest
+      ecr_image_tag: ${{ needs.build.outputs.version_tag }}
       # Fargate Configuration
       daemon_cpu: ${{ vars.DAGSTER_DAEMON_CPU_PROD || '1024' }}
       daemon_memory: ${{ vars.DAGSTER_DAEMON_MEMORY_PROD || '2048' }}
@@ -576,7 +576,7 @@ jobs:
       public_data_cdn_url: ${{ needs.deploy-s3.outputs.public_data_cdn_url }}
     secrets: inherit
 
-  # Unified service refresh - runs all refreshes in parallel after CloudFormation deployments
+  # Service refresh - currently only graph containers (ECS services auto-deploy via version tags)
   service-refresh:
     needs:
       [
@@ -584,10 +584,8 @@ jobs:
         create-deployment,
         stack-config,
         deploy-graph,
-        deploy-api,
-        deploy-dagster,
       ]
-    if: ${{ !cancelled() && !contains(needs.*.result, 'cancelled') && !contains(needs.*.result, 'failure') }}
+    if: ${{ !cancelled() && needs.deploy-graph.result == 'success' }}
     uses: ./.github/workflows/service-refresh.yml
     with:
       environment: ${{ vars.ENVIRONMENT_PROD || 'prod' }}
@@ -597,11 +595,10 @@ jobs:
       graph_refresh_enabled: ${{ vars.GRAPH_UPDATE_CONTAINERS_PROD || 'true' }}
       graph_node_types: "writer"
       graph_health_check_timeout: "30"
-      # API refresh (ECS service)
-      api_refresh_enabled: ${{ vars.API_ASG_REFRESH_PROD || 'true' }}
+      # API/Dagster refresh disabled - ECS auto-deploys via version tags in task definitions
+      api_refresh_enabled: "false"
       api_stack_name: ${{ needs.stack-config.outputs.api_stack }}
-      # Dagster refresh (ECS daemon + webserver)
-      dagster_refresh_enabled: ${{ vars.DAGSTER_REFRESH_ECS_PROD || 'true' }}
+      dagster_refresh_enabled: "false"
     secrets: inherit
 
   deployment-successful:
