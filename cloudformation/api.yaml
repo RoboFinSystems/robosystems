@@ -206,12 +206,6 @@ Parameters:
     Type: String
     Description: ARN of user data bucket (from S3 stack output)
 
-  # Shared Replicas Configuration (optional - for horizontal read scaling)
-  SharedReplicaAlbUrl:
-    Type: String
-    Description: ALB endpoint URL for shared repository replicas (e.g., http://alb-dns:8001). Leave empty if replicas not deployed.
-    Default: ""
-
 Conditions:
   HasObservabilityStack: !Not [!Equals [!Ref PrometheusStackName, ""]]
   IsProduction: !Equals [!Ref Environment, "prod"]
@@ -685,16 +679,9 @@ Resources:
                 - HasDomain
                 - !Sub "https://${DomainName}"
                 - !Sub "http://${ApiALB.DNSName}"
-            # Shared Replicas Configuration (for horizontal read scaling of public repositories)
-            - Name: SHARED_REPLICA_ALB_URL
-              Value: !Ref SharedReplicaAlbUrl
-            # JWT Configuration: Handled by application via secrets_manager.py
-            # Defaults: JWT_ISSUER=api.robosystems.ai, JWT_AUDIENCE=robosystems.ai,roboledger.ai,roboinvestor.ai
-            # Override via AWS Secrets Manager (robosystems/{env}) for forks/custom deployments
-            # Email Configuration
             - Name: EMAIL_FROM_ADDRESS
               Value: !Ref EmailFromAddress
-            # Dagster Configuration (for reporting AssetMaterializations from direct staging)
+            # Dagster Configuration
             - Name: DAGSTER_HOME
               Value: /app/dagster_home
             - Name: DAGSTER_POSTGRES_HOST
@@ -707,14 +694,11 @@ Resources:
               Value: !Sub "{{resolve:secretsmanager:robosystems/${Environment}/postgres:SecretString:password}}"
             - Name: DAGSTER_POSTGRES_DB
               Value: dagster
-            # Dagster GraphQL endpoint (for job submission via Service Discovery)
             - Name: DAGSTER_HOST
               Value: !Sub webserver.dagster.${Environment}.robosystems.local
             - Name: DAGSTER_PORT
               Value: "3000"
-          # Secrets are fetched directly by the application using secrets_manager.py
-          # The container has IAM permissions to access robosystems/{env}/* secrets
-        # ADOT Collector Sidecar (only if observability stack is configured)
+        # ADOT Collector Sidecar
         - !If
           - HasObservabilityStack
           - Name: adot-collector

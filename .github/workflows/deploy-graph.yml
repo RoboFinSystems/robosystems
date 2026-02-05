@@ -155,11 +155,6 @@ on:
         required: true
         type: string
 
-    outputs:
-      shared_replica_alb_url:
-        description: "ALB endpoint URL for shared repository replicas (empty if not deployed)"
-        value: ${{ jobs.deploy-shared-replicas.outputs.alb_endpoint }}
-
 jobs:
   # Step 0: Resolve AMI (lookup latest if not provided)
   resolve-ami:

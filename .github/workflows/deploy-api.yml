@@ -148,13 +148,6 @@ on:
         required: true
         type: string
 
-      # Shared Replicas Configuration (optional - for horizontal read scaling)
-      shared_replica_alb_url:
-        description: "ALB endpoint URL for shared repository replicas. Leave empty if replicas not deployed."
-        required: false
-        type: string
-        default: ""
-
       # Other Configuration
       prometheus_stack_name:
         description: "Name of the Prometheus CloudFormation stack for this environment"
@@ -302,8 +295,7 @@ jobs:
                 ParameterKey=EmailFromAddress,ParameterValue=\"${{ inputs.aws_sns_alert_email }}\" \
                 ParameterKey=SharedProcessedBucketArn,ParameterValue=\"${{ inputs.shared_processed_bucket_arn }}\" \
                 ParameterKey=DeploymentBucketArn,ParameterValue=\"${{ inputs.deployment_bucket_arn }}\" \
-                ParameterKey=UserDataBucketArn,ParameterValue=\"${{ inputs.user_data_bucket_arn }}\" \
-                ParameterKey=SharedReplicaAlbUrl,ParameterValue=\"${{ inputs.shared_replica_alb_url }}\""
+                ParameterKey=UserDataBucketArn,ParameterValue=\"${{ inputs.user_data_bucket_arn }}\""
 
           # Deploy or update the stack
           if [ "$STACK_ACTION" = "create-stack" ]; then

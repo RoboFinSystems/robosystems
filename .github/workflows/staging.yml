@@ -464,7 +464,6 @@ jobs:
         stack-config,
         build,
         deploy-vpc,
-        deploy-graph,
         deploy-valkey,
         deploy-postgres,
         deploy-s3,
@@ -519,8 +518,6 @@ jobs:
       shared_processed_bucket_arn: ${{ needs.deploy-s3.outputs.shared_processed_bucket_arn }}
       deployment_bucket_arn: ${{ needs.deploy-s3.outputs.deployment_bucket_arn }}
       user_data_bucket_arn: ${{ needs.deploy-s3.outputs.user_data_bucket_arn }}
-      # Shared Replicas Configuration (from deploy-graph outputs)
-      shared_replica_alb_url: ${{ needs.deploy-graph.outputs.shared_replica_alb_url || '' }}
       # Other Configuration
       prometheus_stack_name: ${{ needs.deploy-prometheus.outputs.prometheus_stack_name || '' }}
       aws_sns_alert_email: ${{ vars.AWS_SNS_ALERT_EMAIL }}
@@ -534,14 +531,12 @@ jobs:
         stack-config,
         build,
         deploy-vpc,
-        deploy-graph,
         deploy-valkey,
         deploy-postgres,
         deploy-s3,
         deploy-grafana,
         deploy-prometheus,
         deploy-bastion,
-        # deploy-api removed - deploy-dagster.yml looks up API SG ID directly
       ]
     if: ${{ !cancelled() && !contains(needs.*.result, 'cancelled') && !contains(needs.*.result, 'failure') }}
     uses: ./.github/workflows/deploy-dagster.yml
