@@ -541,7 +541,7 @@ jobs:
         deploy-grafana,
         deploy-prometheus,
         deploy-bastion,
-        deploy-api,
+        # deploy-api removed - deploy-dagster.yml looks up API SG ID directly
       ]
     if: ${{ !cancelled() && !contains(needs.*.result, 'cancelled') && !contains(needs.*.result, 'failure') }}
     uses: ./.github/workflows/deploy-dagster.yml
@@ -579,8 +579,7 @@ jobs:
       database_sg_id: ${{ needs.deploy-postgres.outputs.database_sg_id }}
       # Bastion Access (for internal UI access)
       bastion_sg_id: ${{ needs.deploy-bastion.outputs.bastion_sg_id }}
-      # API Access (for Dagster job submission)
-      api_sg_id: ${{ needs.deploy-api.outputs.api_sg_id }}
+      # api_sg_id: looked up automatically by deploy-dagster.yml from API stack
       # Monitoring Configuration
       container_insights_enabled: ${{ vars.DAGSTER_CONTAINER_INSIGHTS_STAGING || 'disabled' }}
       # S3 Bucket Configuration (from S3 stack outputs)

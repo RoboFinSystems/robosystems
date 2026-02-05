@@ -131,13 +131,6 @@ on:
         type: string
         default: ""
 
-      # API Access (for Dagster job submission)
-      api_sg_id:
-        description: "Security group ID for API service to submit Dagster jobs (optional)"
-        required: false
-        type: string
-        default: ""
-
       # Monitoring Configuration
       container_insights_enabled:
         description: "Enable Container Insights for ECS cluster (enabled/disabled)"
@@ -198,6 +191,52 @@ jobs:
           role-to-assume: ${{ vars.AWS_ROLE_ARN }}
           aws-region: ${{ inputs.aws_region }}
 
+      - name: Resolve API Security Group ID
+        id: resolve-api-sg
+        run: |
+          echo "🔍 Looking up API Security Group ID..."
+
+          # Determine names based on environment
+          ENV="${{ inputs.environment }}"
+          if [ "$ENV" == "prod" ]; then
+            API_STACK_NAME="RoboSystemsAPIProd"
+            SG_NAME="sg-robosystems-api-prod"
+          else
+            API_STACK_NAME="RoboSystemsAPIStaging"
+            SG_NAME="sg-robosystems-api-staging"
+          fi
+
+          # Retry loop - wait up to 3 minutes for SG to be created
+          # Uses direct EC2 query (works during stack creation, not just after completion)
+          MAX_ATTEMPTS=18  # 18 attempts * 10 seconds = 3 minutes
+          ATTEMPT=1
+
+          while [ $ATTEMPT -le $MAX_ATTEMPTS ]; do
+            echo "Attempt $ATTEMPT/$MAX_ATTEMPTS: Checking for Security Group..."
+
+            # Query EC2 directly by tags - works as soon as SG is created
+            API_SG_ID=$(aws ec2 describe-security-groups \
+              --filters \
+                "Name=tag:aws:cloudformation:stack-name,Values=$API_STACK_NAME" \
+                "Name=tag:Name,Values=$SG_NAME" \
+              --query "SecurityGroups[0].GroupId" \
+              --output text 2>/dev/null || echo "")
+
+            if [ -n "$API_SG_ID" ] && [ "$API_SG_ID" != "None" ]; then
+              echo "✅ Found API Security Group ID: $API_SG_ID"
+              echo "api_sg_id=$API_SG_ID" >> $GITHUB_OUTPUT
+              exit 0
+            fi
+
+            echo "Security Group not found yet - waiting 10 seconds..."
+            sleep 10
+            ATTEMPT=$((ATTEMPT + 1))
+          done
+
+          echo "❌ Timed out waiting for API Security Group after 3 minutes"
+          echo "Expected SG with Name tag: $SG_NAME in stack: $API_STACK_NAME"
+          exit 1
+
       - name: Deploy Dagster CloudFormation Stack
         id: deploy-stack
         run: |
@@ -233,7 +272,7 @@ jobs:
                 ParameterKey=ValkeyClientSecurityGroupId,ParameterValue=${{ inputs.valkey_sg_id }} \
                 ParameterKey=DatabaseSecurityGroupId,ParameterValue=${{ inputs.database_sg_id }} \
                 ParameterKey=BastionSecurityGroupId,ParameterValue=${{ inputs.bastion_sg_id }} \
-                ParameterKey=ApiSecurityGroupId,ParameterValue=${{ inputs.api_sg_id }} \
+                ParameterKey=ApiSecurityGroupId,ParameterValue=${{ steps.resolve-api-sg.outputs.api_sg_id }} \
                 ParameterKey=ContainerInsightsEnabled,ParameterValue=${{ inputs.container_insights_enabled }} \
                 ParameterKey=SharedRawBucketArn,ParameterValue=\"${{ inputs.shared_raw_bucket_arn }}\" \
                 ParameterKey=SharedProcessedBucketArn,ParameterValue=\"${{ inputs.shared_processed_bucket_arn }}\" \

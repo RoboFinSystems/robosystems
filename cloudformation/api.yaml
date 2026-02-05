@@ -831,7 +831,7 @@ Resources:
       # Service Discovery registration for internal access (bypasses ALB)
       ServiceRegistries:
         - RegistryArn: !GetAtt ApiServiceDiscovery.Arn
-      HealthCheckGracePeriodSeconds: 60
+      HealthCheckGracePeriodSeconds: 45
       EnableExecuteCommand: true
       PropagateTags: SERVICE
       DeploymentConfiguration:
@@ -839,7 +839,7 @@ Resources:
           Enable: true
           Rollback: true
         MaximumPercent: 200
-        MinimumHealthyPercent: 100
+        MinimumHealthyPercent: 50
       Tags:
         - Key: Environment
           Value: !Ref Environment
@@ -930,9 +930,9 @@ Resources:
       HealthCheckProtocol: HTTP
       HealthCheckPort: !Ref ContainerPort
       HealthCheckTimeoutSeconds: 5
-      HealthCheckIntervalSeconds: 30
+      HealthCheckIntervalSeconds: 10
       HealthyThresholdCount: 2
-      UnhealthyThresholdCount: 5
+      UnhealthyThresholdCount: 3
       Matcher:
         HttpCode: 200-399
       Tags:

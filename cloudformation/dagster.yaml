@@ -884,7 +884,7 @@ Resources:
           Enable: true
           Rollback: true
         MaximumPercent: 200
-        MinimumHealthyPercent: 100
+        MinimumHealthyPercent: 50
       Tags:
         - Key: Environment
           Value: !Ref Environment
