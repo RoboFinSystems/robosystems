@@ -262,6 +262,61 @@ def get_list_env(key: str, default: str = "", separator: str = ",") -> list[str]
   return [item.strip() for item in value.split(separator) if item.strip()]
 
 
+# Cache for CloudFormation lookups (avoid repeated API calls)
+_cloudformation_cache: dict[str, str | None] = {}
+
+
+def _get_shared_replica_alb_url_from_cloudformation() -> str:
+  """
+  Auto-discover shared replica ALB URL from CloudFormation.
+
+  Looks up the RoboSystemsGraphSharedReplicas{Prod|Staging} stack
+  and returns the ALBEndpoint output value.
+
+  Returns:
+      ALB endpoint URL (e.g., http://internal-...:8001) or empty string if not found
+  """
+  cache_key = "shared_replica_alb_url"
+  if cache_key in _cloudformation_cache:
+    return _cloudformation_cache[cache_key] or ""
+
+  try:
+    import boto3
+
+    environment = os.getenv("ENVIRONMENT", "dev")
+    if environment not in ["prod", "staging"]:
+      _cloudformation_cache[cache_key] = None
+      return ""
+
+    # Stack name follows pattern: RoboSystemsGraphSharedReplicas{Prod|Staging}
+    env_suffix = "Prod" if environment == "prod" else "Staging"
+    stack_name = f"RoboSystemsGraphSharedReplicas{env_suffix}"
+
+    region = os.getenv("AWS_REGION", "us-east-1")
+    cf_client = boto3.client("cloudformation", region_name=region)
+    response = cf_client.describe_stacks(StackName=stack_name)
+
+    if "Stacks" in response and len(response["Stacks"]) > 0:
+      stack = response["Stacks"][0]
+      if "Outputs" in stack:
+        for output in stack["Outputs"]:
+          if output.get("OutputKey") == "ALBEndpoint":
+            url = output.get("OutputValue", "")
+            _cloudformation_cache[cache_key] = url
+            return url
+
+    _cloudformation_cache[cache_key] = None
+    return ""
+
+  except ImportError:
+    _cloudformation_cache[cache_key] = None
+    return ""
+  except Exception as e:
+    print(f"Warning: Failed to lookup shared replica ALB URL from CloudFormation: {e}")
+    _cloudformation_cache[cache_key] = None
+    return ""
+
+
 # ==========================================================================
 # MAIN CONFIGURATION CLASS
 # ==========================================================================
@@ -444,8 +499,12 @@ class EnvConfig:
   # Shared Replica ALB URL (for read scaling)
   # When set, reads to shared repositories will route to the replica ALB
   # instead of the shared master. This allows horizontal scaling of reads.
+  # Auto-discovered from CloudFormation if not explicitly set via env var
   # Format: http://internal-robosystems-shared-{env}.{region}.elb.amazonaws.com:8001
-  SHARED_REPLICA_ALB_URL = get_str_env("SHARED_REPLICA_ALB_URL", "")
+  SHARED_REPLICA_ALB_URL = (
+    get_str_env("SHARED_REPLICA_ALB_URL", "")
+    or _get_shared_replica_alb_url_from_cloudformation()
+  )
   # Shared repositories list for infrastructure/deployment (used by userdata scripts)
   # This configures which repositories should be deployed on shared writer instances
   # For application logic (checking if a graph is a shared repo), use GraphTypeRegistry.SHARED_REPOSITORIES

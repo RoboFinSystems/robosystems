@@ -12,7 +12,6 @@ on:
         description: "Environment to deploy to (prod or staging)"
         required: true
         type: string
-
       # GHA Runner Configuration
       runner_config:
         description: "GitHub Actions runner configuration (JSON array)"
@@ -195,30 +194,16 @@ jobs:
         id: resolve-api-sg
         run: |
           echo "🔍 Looking up API Security Group ID..."
+          SG_NAME="sg-robosystems-api-${{ inputs.environment }}"
 
-          # Determine names based on environment
-          ENV="${{ inputs.environment }}"
-          if [ "$ENV" == "prod" ]; then
-            API_STACK_NAME="RoboSystemsAPIProd"
-            SG_NAME="sg-robosystems-api-prod"
-          else
-            API_STACK_NAME="RoboSystemsAPIStaging"
-            SG_NAME="sg-robosystems-api-staging"
-          fi
-
-          # Retry loop - wait up to 3 minutes for SG to be created
-          # Uses direct EC2 query (works during stack creation, not just after completion)
-          MAX_ATTEMPTS=18  # 18 attempts * 10 seconds = 3 minutes
+          MAX_ATTEMPTS=18
           ATTEMPT=1
 
           while [ $ATTEMPT -le $MAX_ATTEMPTS ]; do
             echo "Attempt $ATTEMPT/$MAX_ATTEMPTS: Checking for Security Group..."
 
-            # Query EC2 directly by tags - works as soon as SG is created
             API_SG_ID=$(aws ec2 describe-security-groups \
-              --filters \
-                "Name=tag:aws:cloudformation:stack-name,Values=$API_STACK_NAME" \
-                "Name=tag:Name,Values=$SG_NAME" \
+              --filters "Name=tag:Name,Values=$SG_NAME" \
               --query "SecurityGroups[0].GroupId" \
               --output text 2>/dev/null || echo "")
 
@@ -234,7 +219,6 @@ jobs:
           done
 
           echo "❌ Timed out waiting for API Security Group after 3 minutes"
-          echo "Expected SG with Name tag: $SG_NAME in stack: $API_STACK_NAME"
           exit 1
 
       - name: Deploy Dagster CloudFormation Stack
