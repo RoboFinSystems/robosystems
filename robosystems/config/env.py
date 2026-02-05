@@ -309,11 +309,10 @@ def _get_shared_replica_alb_url_from_cloudformation() -> str:
     return ""
 
   except ImportError:
-    # boto3 not available (local dev without AWS SDK)
     _cloudformation_cache[cache_key] = None
     return ""
-  except Exception:
-    # Any other error - fail silently and return empty string
+  except Exception as e:
+    print(f"Warning: Failed to lookup shared replica ALB URL from CloudFormation: {e}")
     _cloudformation_cache[cache_key] = None
     return ""
 
