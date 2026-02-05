@@ -120,6 +120,31 @@ Without `ACTIONS_TOKEN`, workflows fall back to `github.token` which has limitat
 2. Create a new token with `repo` scope (full control)
 3. Set it: `gh secret set ACTIONS_TOKEN`
 
+### GitHub Variables (`just setup-gha`)
+
+While bootstrap sets the core OIDC variables (`AWS_ROLE_ARN`, `AWS_ACCOUNT_ID`, `AWS_REGION`), the `setup-gha` script provides full control over ~80 deployment variables:
+
+| Category | Examples | Purpose |
+|----------|----------|---------|
+| API | `API_MIN_CAPACITY_*`, `API_ACCESS_MODE_*` | Scaling, domain, Spot/On-Demand mix |
+| Database | `DATABASE_INSTANCE_SIZE_*`, `DATABASE_POSTGRES_VERSION_*` | RDS sizing and configuration |
+| Dagster | `DAGSTER_DAEMON_CPU_*`, `DAGSTER_MAX_CONCURRENT_RUNS_*` | Orchestration resources |
+| LadybugDB | `LBUG_*_ENABLED_*`, `LBUG_*_MIN_INSTANCES_*` | Graph database tier configuration |
+| Valkey | `VALKEY_NODE_TYPE_*`, `VALKEY_ENCRYPTION_ENABLED_*` | Cache configuration |
+| Security | `WAF_ENABLED_*`, `VPC_FLOW_LOGS_ENABLED` | WAF, audit logging |
+| Infrastructure | `VPC_ENDPOINT_MODE`, `MAX_AVAILABILITY_ZONES` | VPC and networking |
+
+**When to run:**
+- After bootstrap, if you need custom infrastructure sizing
+- When adding staging environment
+- When enabling production features (WAF, Multi-AZ, etc.)
+
+**Note:** Workflows have sensible defaults. Skip `setup-gha` for basic deployments.
+
+```bash
+just setup-gha    # Interactive prompts for domain, environment, etc.
+```
+
 ### Application Secrets (`just setup-aws`)
 
 Creates `robosystems/prod` and `robosystems/staging` in AWS Secrets Manager with:
@@ -398,7 +423,7 @@ just ssm-set prod tuning/cache/BALANCE_TTL 600
 
 # Optional / Re-run individually
 just setup-aws                    # Secrets, feature flags, tuning params
-just setup-gha                    # Full GitHub variable control (~120 vars)
+just setup-gha                    # Full GitHub variable control (~80 vars)
 just setup-bedrock                # Local AI/Bedrock development
 
 # Optional secrets (enhance workflow functionality)
