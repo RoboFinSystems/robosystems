@@ -131,11 +131,15 @@ While bootstrap sets the core OIDC variables (`AWS_ROLE_ARN`, `AWS_ACCOUNT_ID`, 
 
 ### Application Secrets (`just setup-aws`)
 
-Prompted during bootstrap (or run standalone later). Creates `robosystems/prod` and `robosystems/staging` in AWS Secrets Manager with:
+Prompted during bootstrap (or run standalone later). Creates:
 
-- **Auto-generated keys**: JWT signing, connection encryption, backup encryption
-- **Feature flags**: billing, rate limiting, registration, SSE, etc.
-- **Integration placeholders**: QuickBooks, Plaid, SEC, Turnstile (configure later)
+**Secrets Manager** (`robosystems/prod`, `robosystems/staging`):
+- Auto-generated encryption keys (JWT, connection credentials, backup)
+- Integration placeholders: QuickBooks, Plaid, Stripe, Turnstile (configure later)
+
+**SSM Parameter Store**:
+- Feature flags (`/robosystems/{env}/features/*`)
+- Tuning parameters (`/robosystems/{env}/tuning/*`)
 
 Safe to re-run - existing secrets are never overwritten. To customize later:
 
@@ -151,7 +155,7 @@ aws secretsmanager put-secret-value --secret-id robosystems/prod --secret-string
 
 ### SSM Parameters
 
-SSM Parameter Store holds feature flags and tuning parameters (FREE tier). Created by `just setup-aws`.
+SSM Parameter Store holds feature flags and tuning parameters. Created by `just setup-aws`.
 
 **Parameter hierarchy:**
 ```
