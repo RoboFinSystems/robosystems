@@ -161,6 +161,9 @@ jobs:
           # Build tags - git-sha is always the primary tag
           TAGS="-t ${ECR_URL}:${IMAGE_TAG}"
 
+          # Add environment tag for graph container refresh (EC2 instances pull :prod/:staging via SSM)
+          TAGS="$TAGS -t ${ECR_URL}:${{ inputs.environment }}"
+
           # Add version tag as metadata for ECR
           if [[ -n "$VERSION_TAG" ]]; then
             TAGS="$TAGS -t ${ECR_URL}:${VERSION_TAG}"
@@ -202,14 +205,14 @@ jobs:
             $TAGS \
             -f Dockerfile .
 
-      - name: Add version tags to existing image
-        if: steps.resolve.outputs.needs_build == 'false' && steps.resolve.outputs.version_tag != ''
+      - name: Add tags to existing image
+        if: steps.resolve.outputs.needs_build == 'false'
         env:
           ECR_REPOSITORY: ${{ inputs.ecr_repository }}
           IMAGE_TAG: ${{ steps.resolve.outputs.image_tag }}
           VERSION_TAG: ${{ steps.resolve.outputs.version_tag }}
         run: |
-          echo "🏷️ Adding version tag ${VERSION_TAG} to existing image ${IMAGE_TAG}"
+          echo "🏷️ Adding tags to existing image ${IMAGE_TAG}"
 
           # Get the manifest of the existing image
           MANIFEST=$(aws ecr batch-get-image \
@@ -218,11 +221,19 @@ jobs:
             --query 'images[0].imageManifest' \
             --output text)
 
-          # Add version tag
+          # Add environment tag for graph container refresh (EC2 instances pull :prod/:staging via SSM)
           aws ecr put-image \
             --repository-name "$ECR_REPOSITORY" \
-            --image-tag "$VERSION_TAG" \
-            --image-manifest "$MANIFEST" 2>/dev/null || echo "Tag ${VERSION_TAG} may already exist"
+            --image-tag "${{ inputs.environment }}" \
+            --image-manifest "$MANIFEST" 2>/dev/null || echo "Tag ${{ inputs.environment }} may already exist"
+
+          # Add version tag if this is a release
+          if [[ -n "$VERSION_TAG" ]]; then
+            aws ecr put-image \
+              --repository-name "$ECR_REPOSITORY" \
+              --image-tag "$VERSION_TAG" \
+              --image-manifest "$MANIFEST" 2>/dev/null || echo "Tag ${VERSION_TAG} may already exist"
+          fi
 
           # Add latest tag for prod
           if [[ "${{ inputs.environment }}" == "prod" ]]; then
