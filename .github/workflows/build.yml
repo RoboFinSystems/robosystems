@@ -122,8 +122,12 @@ jobs:
           fi
 
           # Check if image already exists in ECR
+          # Always build for Docker Hub releases (need multi-arch + attestations)
           ECR_URL="${ECR_REGISTRY}/${ECR_REPOSITORY}"
-          if aws ecr describe-images --repository-name "$ECR_REPOSITORY" --image-ids imageTag="$IMAGE_TAG" &>/dev/null; then
+          if [[ "${{ inputs.publish_to_dockerhub }}" == "true" ]] && [[ "$IS_RELEASE" == "true" ]]; then
+            echo "🚀 Docker Hub release - will build regardless of ECR state"
+            echo "needs_build=true" >> $GITHUB_OUTPUT
+          elif aws ecr describe-images --repository-name "$ECR_REPOSITORY" --image-ids imageTag="$IMAGE_TAG" &>/dev/null; then
             echo "✅ Image exists: ${IMAGE_TAG} - will skip build"
             echo "needs_build=false" >> $GITHUB_OUTPUT
           else
