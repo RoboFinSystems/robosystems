@@ -152,10 +152,9 @@ class EnvValidator:
   @staticmethod
   def _validate_numeric_ranges(env_config, errors: list[str]) -> None:
     """Validate numeric configuration values are within reasonable ranges."""
-    validations = [
-      ("JWT_ACCESS_TOKEN_EXPIRE_MINUTES", 1, 1440, "JWT access token expiry"),
-      ("RATE_LIMIT_API_KEY", 100, 1000000, "API key rate limit"),
-      ("LBUG_MAX_DATABASES_PER_NODE", 1, 1000, "Max databases per node"),
+    validations: list[tuple[str, int, int, str]] = [
+      # Add numeric validations here as needed
+      # Format: ("VAR_NAME", min_value, max_value, "description")
     ]
 
     for var_name, min_val, max_val, description in validations:
@@ -274,7 +273,6 @@ class EnvValidator:
       },
       "ladybug": {
         "access_pattern": env_config.LBUG_ACCESS_PATTERN,
-        "max_databases": env_config.LBUG_MAX_DATABASES_PER_NODE,
         "api_key_configured": bool(env_config.GRAPH_API_KEY),
       },
       "security": {
