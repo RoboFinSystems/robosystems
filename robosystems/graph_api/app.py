@@ -89,10 +89,6 @@ def create_app() -> FastAPI:
       "(databases persist with graph lifecycle)"
     )
 
-    # Note: EBS volume pre-warming is handled in userdata/ladybug-replica.sh
-    # The `dd` command reads all blocks from the snapshot, populating the page cache
-    # before the container starts. This is more reliable than application-level pre-warming.
-
     yield  # Application runs here
 
     # Shutdown

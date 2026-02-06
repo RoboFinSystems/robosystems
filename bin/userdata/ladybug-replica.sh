@@ -153,13 +153,12 @@ fi
 # This causes slow/hanging database opens. Pre-read all database files to force
 # AWS to fetch all blocks before the container starts.
 echo "Pre-warming EBS volume from snapshot (this may take several minutes)..."
-for db_file in /mnt/ladybug-data/databases/*.lbug; do
-  if [ -f "$db_file" ]; then
-    FILE_SIZE=$(stat -c%s "$db_file" 2>/dev/null || stat -f%z "$db_file")
-    FILE_SIZE_GB=$((FILE_SIZE / 1024 / 1024 / 1024))
-    echo "  Pre-warming: $(basename $db_file) (${FILE_SIZE_GB}GB)"
-    dd if="$db_file" of=/dev/null bs=1M 2>&1 | tail -1
-  fi
+# Find all .lbug files recursively (they may be nested in subdirectories)
+find /mnt/ladybug-data/databases -name "*.lbug" -type f | while read db_file; do
+  FILE_SIZE=$(stat -c%s "$db_file" 2>/dev/null || stat -f%z "$db_file")
+  FILE_SIZE_GB=$((FILE_SIZE / 1024 / 1024 / 1024))
+  echo "  Pre-warming: $db_file (${FILE_SIZE_GB}GB)"
+  dd if="$db_file" of=/dev/null bs=1M status=progress 2>&1 | tail -3
 done
 echo "✅ EBS volume pre-warming complete"
 
