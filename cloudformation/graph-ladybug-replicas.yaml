@@ -205,7 +205,7 @@ Resources:
                 Resource:
                   - !Sub "${DeploymentBucketArn}/*"
                   - !Ref DeploymentBucketArn
-              # DynamoDB for instance registration (read-only replicas still register)
+              # DynamoDB for instance and graph registration
               - Effect: Allow
                 Action:
                   - dynamodb:PutItem
@@ -214,14 +214,29 @@ Resources:
                   - dynamodb:GetItem
                 Resource:
                   - !Sub arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/robosystems-graph-${Environment}-instance-registry
-              # CloudWatch Logs
+                  - !Sub arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/robosystems-graph-${Environment}-graph-registry
+              # SSM Parameter Store - read feature flags
               - Effect: Allow
                 Action:
-                  - logs:CreateLogGroup
+                  - ssm:GetParameter
+                  - ssm:GetParameters
+                  - ssm:GetParametersByPath
+                Resource:
+                  - !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/robosystems/${Environment}/features/*
+              # Secrets Manager - read application secrets
+              - Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                Resource:
+                  - !Sub arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:robosystems/${Environment}/*
+              # CloudWatch Logs - unified graph-api log group
+              - Effect: Allow
+                Action:
                   - logs:CreateLogStream
                   - logs:PutLogEvents
+                  - logs:DescribeLogStreams
                 Resource:
-                  - !Sub arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/robosystems/${Environment}/graph-replicas:*
+                  - !Sub arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/robosystems/${Environment}/graph-api:*
       Tags:
         - Key: Environment
           Value: !Ref Environment
@@ -376,85 +391,51 @@ Resources:
         UserData:
           Fn::Base64: !Sub |
             #!/bin/bash
+            # Bootstrap script - downloads and executes the full replica userdata from S3
+            # This keeps the CloudFormation template minimal and allows easy script updates
             set -e
 
-            # Log to CloudWatch
-            exec > >(tee /var/log/user-data.log|logger -t user-data -s 2>/dev/console) 2>&1
-            echo "Starting shared replica userdata..."
+            # Log to file and console
+            exec > >(tee /var/log/user-data-bootstrap.log) 2>&1
+            echo "Starting shared replica bootstrap at $(date)..."
 
-            # Wait for data volume
-            echo "Waiting for data volume..."
-            while [ ! -e /dev/xvdf ]; do sleep 1; done
+            # Extract bucket name from ARN (arn:aws:s3:::bucket-name -> bucket-name)
+            DEPLOYMENT_BUCKET_ARN="${DeploymentBucketArn}"
+            DEPLOYMENT_BUCKET=$(echo "$DEPLOYMENT_BUCKET_ARN" | sed 's|arn:aws:s3:::||')
 
-            # Mount data volume (already has filesystem from snapshot)
-            echo "Mounting data volume..."
-            mkdir -p /data
-            mount /dev/xvdf /data
-            echo "/dev/xvdf /data xfs defaults,nofail 0 2" >> /etc/fstab
+            # Export environment variables for the main script
+            export ENVIRONMENT="${Environment}"
+            export AWS_REGION="${AWS::Region}"
+            export AWS_ACCOUNT_ID="${AWS::AccountId}"
+            export ECR_URI="${ECRRepositoryUrl}"
+            export ECR_IMAGE_TAG="${ECRImageTag}"
+            export AWS_STACK_NAME="${AWS::StackName}"
+            export DEPLOYMENT_BUCKET="$DEPLOYMENT_BUCKET"
+            export SHARED_REPOSITORIES="sec"
+            export CLUSTER_TIER="ladybug-shared"
+            export CFN_STACK_NAME="${AWS::StackName}"
+            export CFN_RESOURCE="ReplicaAutoScalingGroup"
 
-            # Set permissions
-            chown -R 1000:1000 /data
+            echo "Configuration:"
+            echo "  Environment: $ENVIRONMENT"
+            echo "  Deployment Bucket: $DEPLOYMENT_BUCKET"
+            echo "  ECR Image: $ECR_URI:$ECR_IMAGE_TAG"
 
-            # Install Docker
-            echo "Installing Docker..."
-            yum install -y docker
-            systemctl enable docker
-            systemctl start docker
+            # Download the main replica userdata script from S3
+            echo "Downloading replica userdata script from S3..."
+            aws s3 cp "s3://$DEPLOYMENT_BUCKET/userdata/ladybug-replica.sh" /tmp/ladybug-replica.sh --region ${AWS::Region}
+            chmod +x /tmp/ladybug-replica.sh
 
-            # ECR Login
-            echo "Logging into ECR..."
-            aws ecr get-login-password --region ${AWS::Region} | docker login --username AWS --password-stdin ${ECRRepositoryUrl}
+            # Execute the main script
+            echo "Executing replica userdata script..."
+            /tmp/ladybug-replica.sh
+            SCRIPT_EXIT_CODE=$?
 
-            # Pull image
-            echo "Pulling image..."
-            docker pull ${ECRRepositoryUrl}:${ECRImageTag}
+            # Signal CloudFormation with the result
+            echo "Signaling CloudFormation (exit code: $SCRIPT_EXIT_CODE)..."
+            /opt/aws/bin/cfn-signal -e $SCRIPT_EXIT_CODE --stack ${AWS::StackName} --resource ReplicaAutoScalingGroup --region ${AWS::Region}
 
-            # Start container in READ-ONLY mode
-            echo "Starting Graph API container (read-only replica)..."
-            docker run -d \
-              --name graph-api \
-              --restart always \
-              -p 8001:8001 \
-              -v /data:/data \
-              -e ENVIRONMENT=${Environment} \
-              -e DOCKER_PROFILE=graph-api \
-              -e LBUG_DATABASE_PATH=/data/lbug-dbs \
-              -e LBUG_NODE_TYPE=shared_replica \
-              -e LBUG_READ_ONLY=true \
-              -e AWS_REGION=${AWS::Region} \
-              ${ECRRepositoryUrl}:${ECRImageTag} \
-              /app/bin/entrypoint.sh
-
-            # Wait for container to be healthy
-            echo "Waiting for container health..."
-            for i in {1..30}; do
-              if curl -sf http://localhost:8001/health > /dev/null 2>&1; then
-                echo "Container is healthy!"
-                break
-              fi
-              sleep 5
-            done
-
-            # Register instance in DynamoDB (as shared_replica)
-            INSTANCE_ID=$(curl -s http://169.254.169.254/latest/meta-data/instance-id)
-            PRIVATE_IP=$(curl -s http://169.254.169.254/latest/meta-data/local-ipv4)
-
-            aws dynamodb put-item \
-              --region ${AWS::Region} \
-              --table-name robosystems-graph-${Environment}-instance-registry \
-              --item '{
-                "instance_id": {"S": "'$INSTANCE_ID'"},
-                "private_ip": {"S": "'$PRIVATE_IP'"},
-                "node_type": {"S": "shared_replica"},
-                "status": {"S": "healthy"},
-                "registered_at": {"S": "'$(date -u +%Y-%m-%dT%H:%M:%SZ)'"},
-                "environment": {"S": "${Environment}"}
-              }'
-
-            echo "Shared replica startup complete!"
-
-            # Signal CloudFormation
-            /opt/aws/bin/cfn-signal -e $? --stack ${AWS::StackName} --resource ReplicaAutoScalingGroup --region ${AWS::Region}
+            echo "Bootstrap complete at $(date)"
 
   # ========================================
   # AUTO SCALING GROUP

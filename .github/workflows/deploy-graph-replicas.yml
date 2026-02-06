@@ -158,10 +158,10 @@ jobs:
             --query 'Stacks[0].Outputs[?OutputKey==`GraphApiRepositoryUrl`].OutputValue' \
             --output text 2>/dev/null || echo "")
 
-          # Fallback: construct from account ID
+          # Fallback: construct from account ID (monolith repo, not separate graph-api repo)
           if [ -z "$ECR_URL" ] || [ "$ECR_URL" = "None" ]; then
             ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
-            ECR_URL="${ACCOUNT_ID}.dkr.ecr.${{ inputs.aws_region }}.amazonaws.com/robosystems-graph-api"
+            ECR_URL="${ACCOUNT_ID}.dkr.ecr.${{ inputs.aws_region }}.amazonaws.com/robosystems"
           fi
 
           echo "ecr_url=$ECR_URL" >> $GITHUB_OUTPUT
@@ -216,6 +216,33 @@ jobs:
           echo "   The job will tag the snapshot with GraphId=sec and Environment=${{ inputs.environment }}"
           echo "   so it can be auto-discovered on future deployments."
           exit 1
+
+      - name: Upload Userdata Scripts to S3
+        run: |
+          set -e  # Fail on any error
+
+          # Extract bucket name from ARN
+          DEPLOYMENT_BUCKET_ARN="${{ steps.s3_config.outputs.deployment_bucket_arn }}"
+          DEPLOYMENT_BUCKET=$(echo "$DEPLOYMENT_BUCKET_ARN" | sed 's|arn:aws:s3:::||')
+
+          echo "📤 Uploading userdata scripts to s3://$DEPLOYMENT_BUCKET/userdata/"
+
+          # Upload replica-specific userdata script
+          aws s3 cp bin/userdata/ladybug-replica.sh \
+            "s3://$DEPLOYMENT_BUCKET/userdata/ladybug-replica.sh" \
+            --region ${{ inputs.aws_region }}
+          echo "  ✅ ladybug-replica.sh"
+
+          # Upload shared common scripts (used by both writers and replicas)
+          for script in bin/userdata/common/*.sh; do
+            SCRIPT_NAME=$(basename "$script")
+            aws s3 cp "$script" \
+              "s3://$DEPLOYMENT_BUCKET/userdata/common/$SCRIPT_NAME" \
+              --region ${{ inputs.aws_region }}
+            echo "  ✅ common/$SCRIPT_NAME"
+          done
+
+          echo "📦 All userdata scripts uploaded successfully"
 
       - name: Deploy Shared Replicas CloudFormation Stack
         id: deploy-stack
