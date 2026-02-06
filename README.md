@@ -12,7 +12,7 @@ RoboSystems is an enterprise-grade financial knowledge graph platform that trans
 ## Core Features
 
 - **LadybugDB Graph Database**: Purpose-built embedded graph database with columnar storage optimized for financial analytics
-- **Multi-Tenant Architecture**: Multiple isolated graph databases per customer with tiered scaling and memory allocations
+- **Multi-Tenant Architecture**: Tiered graph infrastructure from shared multi-tenant to dedicated instances
 - **Subgraphs (Workspaces)**: Create isolated environments for development, testing, and team collaboration within a parent graph
 - **AI Agent Interface**: Natural language financial analysis with text-to-Cypher via Model Context Protocol (MCP)
 - **Entity & Generic Graphs**: Curated schemas for RoboLedger/RoboInvestor, plus custom schema support
@@ -143,13 +143,12 @@ RoboSystems is built on a modern, scalable architecture with:
 - Agent Interface for text-to-Cypher natural language queries
 - Dagster for data pipeline orchestration and background jobs
 
-**LadybugDB Graph Database:**
+**LadybugDB Graph Database:** ([configuration](/.github/configs/graph.yml))
 
 - Embedded columnar graph database purpose-built for financial analytics
 - Native DuckDB integration for high-performance staging and ingestion
-- Multi-tenant isolation with dedicated databases per entity
-- Subgraph support for development workspaces and team collaboration
-- Tiered infrastructure: Standard (multi-tenant), Large (dedicated r7g.large, 10 subgraphs), XLarge (dedicated r7g.xlarge, 25 subgraphs)
+- Tiered infrastructure with configurable memory, rate limits, and subgraph allocations
+- Shared tier hosts public repositories (SEC, industry, economic) with read replicas
 
 **Data Layer:**
 
