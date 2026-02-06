@@ -129,7 +129,6 @@ class EnvValidator:
       )
 
     # Validate value ranges and formats
-    EnvValidator._validate_numeric_ranges(env_config, errors)
     EnvValidator._validate_urls(env_config, errors)
     EnvValidator._validate_paths(env_config, warnings)
 
@@ -148,23 +147,6 @@ class EnvValidator:
       )
 
     logger.info("Configuration validation passed")
-
-  @staticmethod
-  def _validate_numeric_ranges(env_config, errors: list[str]) -> None:
-    """Validate numeric configuration values are within reasonable ranges."""
-    validations = [
-      ("JWT_ACCESS_TOKEN_EXPIRE_MINUTES", 1, 1440, "JWT access token expiry"),
-      ("RATE_LIMIT_API_KEY", 100, 1000000, "API key rate limit"),
-      ("LBUG_MAX_DATABASES_PER_NODE", 1, 1000, "Max databases per node"),
-    ]
-
-    for var_name, min_val, max_val, description in validations:
-      value = getattr(env_config, var_name, None)
-      if value is not None:
-        if not (min_val <= value <= max_val):
-          errors.append(
-            f"{var_name}: {description} must be between {min_val} and {max_val}, got {value}"
-          )
 
   @staticmethod
   def _validate_urls(env_config, errors: list[str]) -> None:
@@ -274,7 +256,6 @@ class EnvValidator:
       },
       "ladybug": {
         "access_pattern": env_config.LBUG_ACCESS_PATTERN,
-        "max_databases": env_config.LBUG_MAX_DATABASES_PER_NODE,
         "api_key_configured": bool(env_config.GRAPH_API_KEY),
       },
       "security": {
