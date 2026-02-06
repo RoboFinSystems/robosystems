@@ -360,10 +360,10 @@ production:
 
       # Instance configuration
       instance:
-        type: r7g.medium  # Smaller than master - read-only workloads
-        min: 2            # Minimum for HA
+        type: m7g.large  # General purpose ARM64 - cost-effective for read-only
+        min: 1            # Single replica to start
         max: 10           # Scale for read traffic
-        desired: 2        # Start with 2
+        desired: 1        # Start with 1
 
       # Scaling configuration
       scaling:
@@ -650,7 +650,7 @@ staging:
 
       # Instance configuration (smaller for staging)
       instance:
-        type: r7g.medium
+        type: m7g.large  # General purpose ARM64 - cost-effective for read-only
         min: 1            # Single replica for staging
         max: 3
         desired: 1

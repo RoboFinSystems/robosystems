@@ -32,9 +32,11 @@ Parameters:
     Description: Amazon Linux 2023 ARM64 AMI ID
   InstanceType:
     Type: String
-    Default: r7g.medium
+    Default: m7g.large
     Description: EC2 instance type for replicas (smaller than writers)
     AllowedValues:
+      - m7g.large
+      - m7g.xlarge
       - r7g.medium
       - r7g.large
       - r7g.xlarge
