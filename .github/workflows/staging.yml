@@ -486,7 +486,7 @@ jobs:
       public_subnet_ids: ${{ needs.deploy-vpc.outputs.public_subnet_ids }}
       # Container & Application Configuration
       ecr_repository_url: ${{ needs.build.outputs.ecr_repository_url }}
-      ecr_image_tag: ${{ needs.build.outputs.version_tag }}
+      ecr_image_tag: ${{ needs.build.outputs.image_tag }}
       # ECS & Compute Configuration
       desired_count: ${{ vars.API_MIN_CAPACITY_STAGING || '1' }}
       cpu: "512"
@@ -552,7 +552,7 @@ jobs:
       subnet_ids: ${{ needs.deploy-vpc.outputs.private_subnet_ids }}
       # Container & Application Configuration
       ecr_repository_url: ${{ needs.build.outputs.ecr_repository_url }}
-      ecr_image_tag: ${{ needs.build.outputs.version_tag }}
+      ecr_image_tag: ${{ needs.build.outputs.image_tag }}
       # Fargate Configuration
       daemon_cpu: ${{ vars.DAGSTER_DAEMON_CPU_STAGING || '1024' }}
       daemon_memory: ${{ vars.DAGSTER_DAEMON_MEMORY_STAGING || '2048' }}
@@ -673,7 +673,7 @@ jobs:
           | Component | Details |
           |-----------|---------|
           | Environment | staging |
-          | Version | \`${{ needs.build.outputs.version_tag }}\` |
+          | Image Tag | \`${{ needs.build.outputs.image_tag }}\` |
           | Image | \`${{ needs.build.outputs.image }}\` |
           | Commit | \`${{ github.sha }}\` |
           | Ref | \`${{ github.ref_name }}\` |
