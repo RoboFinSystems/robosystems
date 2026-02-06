@@ -116,8 +116,13 @@ elif [ "${NODE_TYPE}" = "shared_master" ] || [ "${NODE_TYPE}" = "shared_replica"
     --region ${AWS_REGION}
 
   # Register shared repositories in graph registry if applicable
-  if [ -n "${SHARED_REPOSITORIES}" ]; then
-    echo "Registering shared repositories in graph registry..."
+  # IMPORTANT: Only shared_master registers in graph-registry to avoid overwrites.
+  # Replicas are behind an ALB and don't need individual graph-registry entries.
+  # Routing for shared repos uses:
+  #   - Writes: instance-registry lookup for node_type=shared_master
+  #   - Reads: SHARED_REPLICA_ALB_URL (auto-discovered from CloudFormation)
+  if [ -n "${SHARED_REPOSITORIES}" ] && [ "${NODE_TYPE}" = "shared_master" ]; then
+    echo "Registering shared repositories in graph registry (master only)..."
     # Convert comma-separated list to space-separated for iteration
     REPOS_LIST=$(echo "${SHARED_REPOSITORIES}" | tr ',' ' ')
     for repo in $REPOS_LIST; do
@@ -138,6 +143,8 @@ elif [ "${NODE_TYPE}" = "shared_master" ] || [ "${NODE_TYPE}" = "shared_replica"
           --region ${AWS_REGION} || echo "WARNING: Failed to register shared repository $repo"
       fi
     done
+  elif [ -n "${SHARED_REPOSITORIES}" ] && [ "${NODE_TYPE}" = "shared_replica" ]; then
+    echo "Skipping graph-registry for replica (routing uses ALB, not individual instance IPs)"
   fi
 fi
 
