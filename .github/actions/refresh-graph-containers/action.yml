@@ -9,7 +9,7 @@ inputs:
     description: 'EC2 Instance ID to update'
     required: true
   node-type:
-    description: 'Node type (writer, shared-writer)'
+    description: 'Node type (writer, shared-writer, shared-replica)'
     required: true
   backend:
     description: 'Graph backend (ladybug, neo4j)'
@@ -47,10 +47,10 @@ runs:
           exit 1
         fi
 
-        VALID_NODE_TYPES="writer|shared-writer"
+        VALID_NODE_TYPES="writer|shared-writer|shared-replica"
         if [[ ! "${{ inputs.node-type }}" =~ ^($VALID_NODE_TYPES)$ ]]; then
           echo "❌ Invalid node-type: ${{ inputs.node-type }}"
-          echo "Must be one of: writer, shared-writer"
+          echo "Must be one of: writer, shared-writer, shared-replica"
           exit 1
         fi
 
@@ -73,7 +73,7 @@ runs:
         # Backend-agnostic container naming
         # Container name represents the service (graph-api), not the backend implementation
         # Backend is tracked via inputs.backend for metadata/logging only
-        if [ "${{ inputs.node-type }}" == "shared-writer" ]; then
+        if [ "${{ inputs.node-type }}" == "shared-writer" ] || [ "${{ inputs.node-type }}" == "shared-replica" ]; then
           CONTAINER_NAME="graph-api-shared"
         else
           CONTAINER_NAME="graph-api"

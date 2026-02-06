@@ -444,7 +444,9 @@ Resources:
       TargetGroupARNs:
         - !Ref ReplicaTargetGroup
       HealthCheckType: ELB
-      HealthCheckGracePeriod: 300
+      # Grace period must exceed EBS pre-warming time (~6 min for 84GB at 250MB/s)
+      # plus userdata setup (~2-3 min). Set to 10 min for safety.
+      HealthCheckGracePeriod: 600
       Tags:
         - Key: Name
           Value: !Sub robosystems-shared-replica-${Environment}

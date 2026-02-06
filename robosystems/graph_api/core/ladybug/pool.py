@@ -252,11 +252,23 @@ class LadybugConnectionPool:
         # Note: LadybugDB Python API uses buffer_pool_size in bytes
         buffer_pool_size = buffer_pool_mb * 1024 * 1024
 
-        # CRITICAL FIX: Always create Database objects with read_only=False
-        # to allow both read and write operations. The read_only flag should
-        # only affect individual connections, not the shared Database object.
-        # This prevents the bug where the first read-only request permanently
-        # locks the database in read-only mode.
+        # Check if this is a replica instance - replicas MUST open read-only
+        # to avoid WAL recovery and lock contention from snapshot-based volumes
+        import os
+
+        lbug_role = os.getenv("LBUG_ROLE", "master")
+        is_replica = lbug_role == "replica"
+
+        if is_replica:
+          logger.info(
+            f"Opening database '{database_name}' in READ-ONLY mode (LBUG_ROLE=replica)"
+          )
+          db_read_only = True
+        else:
+          # Masters open read_write to allow both read and write operations.
+          # This prevents the bug where the first read-only request permanently
+          # locks the database in read-only mode.
+          db_read_only = False
 
         # For SEC database, use explicit checkpoint threshold for large tables
         # SEC has huge tables (Fact, Association) that can exhaust memory
@@ -269,7 +281,7 @@ class LadybugConnectionPool:
         # Create database with all optimizations
         self._databases[database_name] = lbug.Database(
           str(db_path),
-          read_only=False,
+          read_only=db_read_only,
           buffer_pool_size=buffer_pool_size,
           compression=True,  # Safe: enabled by default in LadybugDB
           max_num_threads=0,  # Use all available threads (LadybugDB decides)
@@ -277,7 +289,7 @@ class LadybugConnectionPool:
           checkpoint_threshold=checkpoint_threshold,  # Adaptive based on database
         )
         logger.info(
-          f"Database '{database_name}' created - buffer pool: {buffer_pool_mb} MB, "
+          f"Database '{database_name}' created - read_only: {db_read_only}, buffer pool: {buffer_pool_mb} MB, "
           f"compression: enabled, auto_checkpoint: enabled, threshold: {checkpoint_threshold // (1024 * 1024)}MB"
         )
 

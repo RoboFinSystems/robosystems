@@ -146,6 +146,23 @@ else
   mkdir -p /mnt/ladybug-data/{databases,logs,staging}
 fi
 
+# ==================================================================================
+# EBS VOLUME PRE-WARMING (Hydrate from S3 snapshot)
+# ==================================================================================
+# EBS snapshots use lazy loading - blocks are fetched from S3 on first access.
+# This causes slow/hanging database opens. Pre-read all database files to force
+# AWS to fetch all blocks before the container starts.
+echo "Pre-warming EBS volume from snapshot (this may take several minutes)..."
+for db_file in /mnt/ladybug-data/databases/*.lbug; do
+  if [ -f "$db_file" ]; then
+    FILE_SIZE=$(stat -c%s "$db_file" 2>/dev/null || stat -f%z "$db_file")
+    FILE_SIZE_GB=$((FILE_SIZE / 1024 / 1024 / 1024))
+    echo "  Pre-warming: $(basename $db_file) (${FILE_SIZE_GB}GB)"
+    dd if="$db_file" of=/dev/null bs=1M 2>&1 | tail -1
+  fi
+done
+echo "✅ EBS volume pre-warming complete"
+
 # Ensure proper ownership for container
 chown -R 1000:1000 /mnt/ladybug-data
 chmod -R 755 /mnt/ladybug-data
