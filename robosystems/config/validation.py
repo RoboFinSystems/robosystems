@@ -129,7 +129,6 @@ class EnvValidator:
       )
 
     # Validate value ranges and formats
-    EnvValidator._validate_numeric_ranges(env_config, errors)
     EnvValidator._validate_urls(env_config, errors)
     EnvValidator._validate_paths(env_config, warnings)
 
@@ -148,22 +147,6 @@ class EnvValidator:
       )
 
     logger.info("Configuration validation passed")
-
-  @staticmethod
-  def _validate_numeric_ranges(env_config, errors: list[str]) -> None:
-    """Validate numeric configuration values are within reasonable ranges."""
-    validations: list[tuple[str, int, int, str]] = [
-      # Add numeric validations here as needed
-      # Format: ("VAR_NAME", min_value, max_value, "description")
-    ]
-
-    for var_name, min_val, max_val, description in validations:
-      value = getattr(env_config, var_name, None)
-      if value is not None:
-        if not (min_val <= value <= max_val):
-          errors.append(
-            f"{var_name}: {description} must be between {min_val} and {max_val}, got {value}"
-          )
 
   @staticmethod
   def _validate_urls(env_config, errors: list[str]) -> None:

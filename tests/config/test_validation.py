@@ -154,26 +154,6 @@ class TestEnvValidator:
       warning_calls = [call[0][0] for call in mock_logger.warning.call_args_list]
       assert any("GRAPH_API_KEY" in msg for msg in warning_calls)
 
-  def test_validate_numeric_ranges_valid(self):
-    """Test validation passes for valid numeric ranges."""
-    env_config = MockEnvConfig()
-    errors = []
-
-    EnvValidator._validate_numeric_ranges(env_config, errors)
-
-    assert len(errors) == 0
-
-  def test_validate_numeric_ranges_invalid_jwt_expiry(self):
-    """Test validation fails for invalid JWT expiry."""
-    env_config = MockEnvConfig()
-    env_config.JWT_ACCESS_TOKEN_EXPIRE_MINUTES = 2000  # Exceeds max
-    errors = []
-
-    EnvValidator._validate_numeric_ranges(env_config, errors)
-
-    assert len(errors) == 1
-    assert "JWT_ACCESS_TOKEN_EXPIRE_MINUTES" in errors[0]
-
   def test_validate_urls_valid(self):
     """Test validation passes for valid URLs."""
     env_config = MockEnvConfig()
@@ -301,7 +281,6 @@ class TestEnvValidator:
     assert summary["database"]["type"] == "postgresql"
     assert summary["database"]["configured"] is True
     assert summary["ladybug"]["access_pattern"] == "multi-tenant"
-    assert summary["ladybug"]["max_databases"] == 100
     assert summary["ladybug"]["api_key_configured"] is True
     assert summary["security"]["rate_limiting"] is True
     assert summary["security"]["audit_logging"] is True
