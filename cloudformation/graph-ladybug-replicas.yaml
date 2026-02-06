@@ -266,7 +266,7 @@ Resources:
   SharedSnapshotLifecyclePolicy:
     Type: AWS::DLM::LifecyclePolicy
     Properties:
-      Description: !Sub Daily backup snapshots for shared repository (${Environment})
+      Description: !Sub Daily backup snapshots for shared repository - ${Environment}
       State: ENABLED
       ExecutionRoleArn: !GetAtt DLMLifecycleRole.Arn
       PolicyDetails:
