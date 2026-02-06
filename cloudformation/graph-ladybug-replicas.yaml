@@ -319,19 +319,9 @@ Resources:
           Value: SharedSnapshotRetention
 
   # ========================================
-  # LOG GROUP
-  # ========================================
-  ReplicaLogGroup:
-    Type: AWS::Logs::LogGroup
-    Properties:
-      LogGroupName: !Sub /robosystems/${Environment}/graph-replicas
-      RetentionInDays: 14
-      Tags:
-        - Key: Environment
-          Value: !Ref Environment
-
-  # ========================================
   # LAUNCH TEMPLATE
+  # Note: Replicas use the unified log group /robosystems/${Environment}/graph-api
+  # created by graph-infra stack (same as writers and shared master)
   # ========================================
   ReplicaLaunchTemplate:
     Type: AWS::EC2::LaunchTemplate
