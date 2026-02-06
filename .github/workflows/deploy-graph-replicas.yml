@@ -346,7 +346,7 @@ jobs:
           echo "  Launch Template: $LT_NAME"
 
       - name: Verify Replica Health
-        if: inputs.min_instances != '0'
+        if: inputs.desired_capacity != '0' && inputs.desired_capacity != 0
         run: |
           echo "🏥 Checking replica health..."
 
@@ -359,14 +359,14 @@ jobs:
               --query 'AutoScalingGroups[0].Instances[?LifecycleState==`InService`] | length(@)' \
               --output text)
 
-            DESIRED=${{ inputs.min_instances }}
+            DESIRED=${{ inputs.desired_capacity }}
 
             if [ "$HEALTHY" -ge "$DESIRED" ]; then
-              echo "✅ $HEALTHY/$DESIRED replicas healthy"
+              echo "✅ $HEALTHY/$DESIRED replicas InService"
               break
             fi
 
-            echo "⏳ Waiting for replicas... ($HEALTHY/$DESIRED healthy)"
+            echo "⏳ Waiting for replicas... ($HEALTHY/$DESIRED InService)"
             sleep 10
           done
 
