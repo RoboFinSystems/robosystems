@@ -13,6 +13,14 @@ set -e
 : ${CLOUDWATCH_NAMESPACE:?"CLOUDWATCH_NAMESPACE must be set"}
 : ${DATA_DIR:?"DATA_DIR must be set"}
 
+# Determine setup log path (writer or replica)
+# NODE_TYPE is set by the userdata script (e.g., shared_replica, standard, large)
+if [[ "${NODE_TYPE:-}" == *"replica"* ]]; then
+  SETUP_LOG_PATH="/var/log/${DATABASE_TYPE}-replica-setup.log"
+else
+  SETUP_LOG_PATH="/var/log/${DATABASE_TYPE}-writer-setup.log"
+fi
+
 # Extract environment from namespace for log group (e.g., RoboSystems/Graph/prod -> prod)
 ENVIRONMENT="${CLOUDWATCH_NAMESPACE##*/}"
 
@@ -23,6 +31,7 @@ echo "=== Configuring CloudWatch Agent for ${DATABASE_TYPE} ==="
 echo "Namespace: ${CLOUDWATCH_NAMESPACE}"
 echo "Log group: ${UNIFIED_LOG_GROUP}"
 echo "Data directory: ${DATA_DIR}"
+echo "Setup log: ${SETUP_LOG_PATH}"
 
 # Verify CloudWatch agent installation
 if [ ! -d "/opt/aws/amazon-cloudwatch-agent" ]; then
@@ -119,7 +128,7 @@ cat > /opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json << EOF
             "retention_in_days": 30
           },
           {
-            "file_path": "/var/log/${DATABASE_TYPE}-writer-setup.log",
+            "file_path": "${SETUP_LOG_PATH}",
             "log_group_name": "${UNIFIED_LOG_GROUP}",
             "log_stream_name": "{instance_id}/setup",
             "retention_in_days": 30
