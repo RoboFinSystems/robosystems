@@ -157,7 +157,7 @@ def get_plan_details(plan: RepositoryPlan, repo_id: str | None = None) -> dict |
   return None
 
 
-def get_rate_limits(repo_id: str, plan: RepositoryPlan) -> dict | None:
+def get_rate_limits(repo_id: str, plan: RepositoryPlan) -> dict[str, int] | None:
   """Get rate limits for a repository and plan combination."""
   manifest = get_manifest(repo_id)
   if not manifest or not manifest.rate_limits:
@@ -252,7 +252,7 @@ def get_all_repository_pricing() -> dict:
 
   # Build plans dict keyed by RepositoryPlan enum
   plans: dict[RepositoryPlan, dict] = {}
-  for plan_enum in RepositoryPlan:
+  for plan_enum in list(RepositoryPlan):
     details = get_plan_details(plan_enum)
     if details:
       plans[plan_enum] = details

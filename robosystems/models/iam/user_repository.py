@@ -39,10 +39,11 @@ logger = logging.getLogger(__name__)
 
 
 class RepositoryType(str, Enum):
-  """Repository types matching DB enum values.
+  """Known shared repository identifiers.
 
-  Values match the shared repository registry IDs. When adding a new shared
-  repository, add its ID here and run a migration to extend the DB enum.
+  Convenience enum for type-safe references in code. The DB column is a plain
+  String so new shared repositories can be added via manifests without a
+  migration. Values here match the shared repository registry IDs.
   """
 
   SEC = "sec"
@@ -86,8 +87,8 @@ class UserRepository(Model):
   # User reference
   user_id = Column(String, ForeignKey("users.id"), nullable=False)
 
-  # Repository identification
-  repository_type = Column(SQLEnum(RepositoryType), nullable=False)
+  # Repository identification (plain String — new repos added via manifests, no migration needed)
+  repository_type = Column(String, nullable=False)
   # NOTE: repository_name contains the graph_id (e.g., "sec") not the display name.
   # This is the unique identifier/slug for the repository, stored in graphs.graph_id.
   repository_name = Column(
@@ -479,7 +480,7 @@ class UserRepository(Model):
         "cluster_region": self.graph.graph_cluster_region,
         "instance_tier": graph_tier,
         "repository_name": self.repository_name,
-        "repository_type": self.repository_type.value,
+        "repository_type": self.repository_type,
       }
 
     return {
@@ -487,7 +488,7 @@ class UserRepository(Model):
       "cluster_region": None,
       "instance_tier": GraphTier.LADYBUG_SHARED,
       "repository_name": self.repository_name,
-      "repository_type": self.repository_type.value,
+      "repository_type": self.repository_type,
     }
 
   def get_repository_plan_config(self) -> dict[str, Any]:
@@ -534,7 +535,7 @@ class UserRepository(Model):
     return {
       "id": self.id,
       "user_id": self.user_id,
-      "repository_type": self.repository_type.value,
+      "repository_type": self.repository_type,
       "repository_name": self.repository_name,
       "access_level": self.access_level.value,
       "repository_plan": self.repository_plan.value,

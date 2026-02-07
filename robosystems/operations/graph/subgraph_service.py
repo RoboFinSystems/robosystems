@@ -46,7 +46,6 @@ class SubgraphService:
   def __init__(self):
     """Initialize the subgraph service."""
     self.allocation_manager = LadybugAllocationManager(environment=env.ENVIRONMENT)
-    pass  # shared repository checks use the registry directly
 
   async def create_subgraph_database(
     self,

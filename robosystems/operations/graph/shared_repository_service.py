@@ -189,18 +189,14 @@ class SharedRepositoryService:
         "manifest_id": manifest.id,
       }
 
-    except ValueError as e:
-      logger.error(f"Invalid repository configuration: {e}")
-      raise
-    except ConnectionError as e:
-      logger.error(f"Failed to connect to graph instance: {e}")
-      raise
-    except TimeoutError as e:
-      logger.error(f"Repository creation timed out: {e}")
-      raise
     except Exception as e:
+      context = {
+        ValueError: "invalid configuration",
+        ConnectionError: "connection failed",
+        TimeoutError: "timed out",
+      }.get(type(e), "unexpected error")
       logger.error(
-        f"Unexpected error creating shared repository {repository_name}: {e}",
+        f"Failed creating shared repository {repository_name} ({context}): {e}",
         exc_info=True,
       )
       raise

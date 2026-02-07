@@ -247,7 +247,7 @@ async def list_repository_credit_pools(
         RepositoryCreditPoolResponse(
           user_repository_id=pool.user_repository_id,
           user_id=pool.user_repository.user_id,
-          repository_type=pool.user_repository.repository_type.value,
+          repository_type=pool.user_repository.repository_type,
           repository_plan=pool.user_repository.repository_plan.value,
           current_balance=float(pool.current_balance),
           monthly_allocation=float(pool.monthly_allocation),
@@ -311,7 +311,7 @@ async def get_repository_credit_pool(request: Request, user_repository_id: str):
     return RepositoryCreditPoolResponse(
       user_repository_id=pool.user_repository_id,
       user_id=pool.user_repository.user_id,
-      repository_type=pool.user_repository.repository_type.value,
+      repository_type=pool.user_repository.repository_type,
       repository_plan=pool.user_repository.repository_plan.value,
       current_balance=float(pool.current_balance),
       monthly_allocation=float(pool.monthly_allocation),
@@ -387,7 +387,7 @@ async def add_bonus_credits_to_repository(
     return RepositoryCreditPoolResponse(
       user_repository_id=pool.user_repository_id,
       user_id=pool.user_repository.user_id,
-      repository_type=pool.user_repository.repository_type.value,
+      repository_type=pool.user_repository.repository_type,
       repository_plan=pool.user_repository.repository_plan.value,
       current_balance=float(pool.current_balance),
       monthly_allocation=float(pool.monthly_allocation),
@@ -500,7 +500,7 @@ async def get_credit_analytics(
 
     repo_by_type = {}
     for pool in repo_pools:
-      repo_type_str = pool.user_repository.repository_type.value
+      repo_type_str = pool.user_repository.repository_type
       if repo_type_str not in repo_by_type:
         repo_by_type[repo_type_str] = {
           "pool_count": 0,
@@ -616,7 +616,7 @@ async def check_credit_health(request: Request):
           {
             "user_repository_id": pool.user_repository_id,
             "user_id": pool.user_repository.user_id,
-            "repository_type": pool.user_repository.repository_type.value,
+            "repository_type": pool.user_repository.repository_type,
             "balance": balance,
           }
         )
@@ -626,7 +626,7 @@ async def check_credit_health(request: Request):
           {
             "user_repository_id": pool.user_repository_id,
             "user_id": pool.user_repository.user_id,
-            "repository_type": pool.user_repository.repository_type.value,
+            "repository_type": pool.user_repository.repository_type,
             "balance": balance,
           }
         )
@@ -635,7 +635,7 @@ async def check_credit_health(request: Request):
           {
             "user_repository_id": pool.user_repository_id,
             "user_id": pool.user_repository.user_id,
-            "repository_type": pool.user_repository.repository_type.value,
+            "repository_type": pool.user_repository.repository_type,
             "balance": balance,
             "allocation": allocation,
           }

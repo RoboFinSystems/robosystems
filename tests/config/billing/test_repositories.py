@@ -3,6 +3,7 @@ import pytest
 from robosystems.config.shared_repositories import (
   RepositoryPlan,
   get_all_repository_pricing,
+  get_credit_costs,
   get_plan_details,
   get_rate_limits,
   is_endpoint_allowed,
@@ -50,6 +51,42 @@ def test_get_rate_limits_returns_none_for_unknown_repo():
 )
 def test_is_endpoint_allowed_matches_blocklists(endpoint, expected):
   assert is_endpoint_allowed(endpoint) is expected
+
+
+def test_get_plan_details_with_explicit_repo_id():
+  details = get_plan_details(RepositoryPlan.STARTER, repo_id="sec")
+
+  assert details is not None
+  assert details["price_cents"] == 2900
+  assert details["name"] == "Starter"
+
+
+def test_get_plan_details_with_unknown_repo_id():
+  assert get_plan_details(RepositoryPlan.STARTER, repo_id="nonexistent") is None
+
+
+def test_get_rate_limits_values_are_integers():
+  limits = get_rate_limits("sec", RepositoryPlan.STARTER)
+
+  assert limits is not None
+  assert all(isinstance(v, int) for v in limits.values())
+
+
+def test_is_endpoint_allowed_with_repo_id():
+  assert is_endpoint_allowed("query", repo_id="sec") is True
+  assert is_endpoint_allowed("backup", repo_id="sec") is False
+
+
+def test_get_credit_costs_returns_sec_costs():
+  costs = get_credit_costs("sec")
+
+  assert costs is not None
+  assert costs["query"] == 0
+  assert costs["ai_tokens"] is None  # dynamic pricing
+
+
+def test_get_credit_costs_returns_none_for_unknown():
+  assert get_credit_costs("nonexistent") is None
 
 
 def test_get_all_repository_pricing_contains_repos():

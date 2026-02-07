@@ -791,7 +791,7 @@ class CreditService:
         "credits_consumed": float(base_cost),
         "remaining_balance": float(shared_credits.current_balance),
         "cached": False,
-        "addon_type": shared_credits.user_repository.repository_type.value,
+        "addon_type": shared_credits.user_repository.repository_type,
         "addon_tier": shared_credits.user_repository.repository_plan.value,
       }
     else:
@@ -801,7 +801,7 @@ class CreditService:
         "credits_consumed": 0,
         "required_credits": float(base_cost),
         "available_credits": float(shared_credits.current_balance),
-        "addon_type": shared_credits.user_repository.repository_type.value,
+        "addon_type": shared_credits.user_repository.repository_type,
         "addon_tier": shared_credits.user_repository.repository_plan.value,
       }
 
@@ -812,10 +812,10 @@ class CreditService:
     summaries = {}
     for access_record in access_records:
       if access_record.user_credits:
-        repo_type = access_record.repository_type.value
+        repo_type = access_record.repository_type
         summaries[repo_type] = {
           "access_id": access_record.id,
-          "repository_type": access_record.repository_type.value,
+          "repository_type": access_record.repository_type,
           "subscription_tier": access_record.repository_plan.value,
           "access_level": access_record.access_level.value,
           "credits": access_record.user_credits.get_summary(),
@@ -848,7 +848,7 @@ class CreditService:
       return {
         "has_access": False,
         "error": "Subscription is not active",
-        "addon_type": shared_credits.user_repository.repository_type.value,
+        "addon_type": shared_credits.user_repository.repository_type,
         "addon_tier": shared_credits.user_repository.repository_plan.value,
       }
 
@@ -864,7 +864,7 @@ class CreditService:
           "has_sufficient_credits": True,
           "required_credits": 0.0,
           "available_credits": float(shared_credits.current_balance),
-          "addon_type": shared_credits.user_repository.repository_type.value,
+          "addon_type": shared_credits.user_repository.repository_type,
           "addon_tier": shared_credits.user_repository.repository_plan.value,
           "operation_included": True,
         }
@@ -876,7 +876,7 @@ class CreditService:
       "has_sufficient_credits": has_sufficient,
       "required_credits": float(required_credits),
       "available_credits": float(shared_credits.current_balance),
-      "addon_type": shared_credits.user_repository.repository_type.value,
+      "addon_type": shared_credits.user_repository.repository_type,
       "addon_tier": shared_credits.user_repository.repository_plan.value,
     }
 
