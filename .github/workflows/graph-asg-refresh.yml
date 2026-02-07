@@ -20,8 +20,6 @@ on:
           - ladybug-large
           - ladybug-xlarge
           - ladybug-shared
-          - neo4j-community-large
-          - neo4j-enterprise-xlarge
       instance_warmup:
         description: "Seconds to wait for instance warmup"
         required: false

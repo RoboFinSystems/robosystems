@@ -246,8 +246,8 @@ class CreateGraphRequest(BaseModel):
   )
   instance_tier: str = Field(
     "ladybug-standard",
-    description="Instance tier: ladybug-standard, ladybug-large, ladybug-xlarge, neo4j-community-large, neo4j-enterprise-xlarge",
-    pattern="^(ladybug-standard|ladybug-large|ladybug-xlarge|neo4j-community-large|neo4j-enterprise-xlarge)$",
+    description="Instance tier: ladybug-standard, ladybug-large, ladybug-xlarge",
+    pattern="^(ladybug-standard|ladybug-large|ladybug-xlarge)$",
   )
   custom_schema: CustomSchemaDefinition | None = Field(
     None,

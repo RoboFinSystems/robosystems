@@ -538,7 +538,7 @@ class EnvConfig:
   # --- Backend Selection ---
   GRAPH_BACKEND_TYPE = get_str_env(
     "GRAPH_BACKEND_TYPE", "ladybug"
-  )  # Options: ladybug, neo4j_community, neo4j_enterprise
+  )  # Options: ladybug (neo4j_community and neo4j_enterprise available but not deployed)
 
   # ===========================================================================
   # GRAPH API CONFIGURATION (Backend-Agnostic)

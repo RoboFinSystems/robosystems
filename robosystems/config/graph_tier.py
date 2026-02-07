@@ -27,8 +27,6 @@ class GraphTier(str, Enum):
   LADYBUG_LARGE = "ladybug-large"
   LADYBUG_XLARGE = "ladybug-xlarge"
   LADYBUG_SHARED = "ladybug-shared"
-  NEO4J_COMMUNITY_LARGE = "neo4j-community-large"
-  NEO4J_ENTERPRISE_XLARGE = "neo4j-enterprise-xlarge"
 
 
 class GraphTierConfig:
@@ -81,7 +79,7 @@ class GraphTierConfig:
     """Get configuration for a specific tier.
 
     Args:
-        tier: The tier name (ladybug-standard, ladybug-large, ladybug-xlarge, ladybug-shared, neo4j-community-large, neo4j-enterprise-xlarge)
+        tier: The tier name (ladybug-standard, ladybug-large, ladybug-xlarge, ladybug-shared)
         environment: Environment (defaults to current env)
 
     Returns:
@@ -563,8 +561,6 @@ class GraphTierConfig:
         "ladybug-large": "LadybugDB Large",
         "ladybug-xlarge": "LadybugDB XLarge",
         "ladybug-shared": "Shared Repository",
-        "neo4j-community-large": "Neo4j Community",
-        "neo4j-enterprise-xlarge": "Neo4j Enterprise",
       }
       tier_info["display_name"] = display_names.get(tier_name, writer.get("name"))
 

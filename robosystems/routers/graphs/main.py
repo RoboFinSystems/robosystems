@@ -800,11 +800,9 @@ Each tier includes:
 - Availability status
 
 **Available Tiers:**
-- **ladybug-standard**: Multi-tenant entry-level tier
+- **ladybug-standard**: Dedicated entry-level tier
 - **ladybug-large**: Dedicated professional tier with subgraph support
 - **ladybug-xlarge**: Enterprise tier with maximum resources
-- **neo4j-community-large**: Neo4j Community Edition (optional, if enabled)
-- **neo4j-enterprise-xlarge**: Neo4j Enterprise Edition (optional, if enabled)
 
 **Use Cases:**
 - Display tier options in graph creation UI
@@ -826,30 +824,29 @@ Tier listing is included - no credit consumption required.""",
                 "tier": "ladybug-standard",
                 "name": "ladybug-standard",
                 "display_name": "LadybugDB Standard",
-                "description": "Multi-tenant LadybugDB tier for cost-efficient entry",
+                "description": "Dedicated m7g.large instance for entry-level workloads",
                 "backend": "ladybug",
                 "enabled": True,
-                "max_subgraphs": 0,
-                "storage_limit_gb": 500,
-                "monthly_credits": 10000,
+                "max_subgraphs": 3,
+                "monthly_credits": 8000,
                 "api_rate_multiplier": 1.0,
-                "monthly_price": 49.99,
+                "monthly_price": 100.0,
                 "features": [
-                  "10,000 AI credits per month",
-                  "500GB storage limit",
-                  "Single database only",
-                  "14GB RAM",
-                  "30-day backup retention",
+                  "5M node limit",
+                  "8,000 AI credits per month",
+                  "Up to 3 subgraphs",
+                  "Dedicated large instance",
+                  "6GB RAM",
+                  "7-day backup retention",
                 ],
                 "instance": {
-                  "type": "r7g.large",
-                  "memory_mb": 14336,
-                  "databases_per_instance": 10,
+                  "type": "m7g.large",
+                  "memory_mb": 6144,
+                  "databases_per_instance": 1,
                 },
                 "limits": {
-                  "storage_gb": 500,
-                  "monthly_credits": 10000,
-                  "max_subgraphs": 0,
+                  "monthly_credits": 8000,
+                  "max_subgraphs": 3,
                   "copy_operations": {
                     "max_file_size_gb": 1.0,
                     "timeout_seconds": 300,
@@ -896,8 +893,6 @@ async def get_available_graph_tiers(
     # Filter out internal-only and not-yet-available tiers
     excluded_tiers = [
       "ladybug-shared",
-      "neo4j-community-large",
-      "neo4j-enterprise-xlarge",
     ]
     tiers = [tier for tier in tiers if tier.get("tier") not in excluded_tiers]
 
@@ -920,11 +915,9 @@ async def get_available_graph_tiers(
         else:
           # Default pricing if not found (matching current billing config)
           default_prices = {
-            "ladybug-standard": 50.0,
+            "ladybug-standard": 100.0,
             "ladybug-large": 300.0,
             "ladybug-xlarge": 700.0,
-            "neo4j-community-large": 299.99,
-            "neo4j-enterprise-xlarge": 999.99,
           }
           tier["monthly_price"] = default_prices.get(tier_key)
 

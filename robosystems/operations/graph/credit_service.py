@@ -575,8 +575,6 @@ class CreditService:
         GraphTier.LADYBUG_STANDARD,
         GraphTier.LADYBUG_LARGE,
         GraphTier.LADYBUG_XLARGE,
-        GraphTier.NEO4J_COMMUNITY_LARGE,
-        GraphTier.NEO4J_ENTERPRISE_XLARGE,
       ],
     }
 
@@ -657,8 +655,6 @@ class CreditService:
         GraphTier.LADYBUG_STANDARD,
         GraphTier.LADYBUG_LARGE,
         GraphTier.LADYBUG_XLARGE,
-        GraphTier.NEO4J_COMMUNITY_LARGE,
-        GraphTier.NEO4J_ENTERPRISE_XLARGE,
       ],
     }
 

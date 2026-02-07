@@ -193,9 +193,9 @@ class Graph(Model):
   def can_have_subgraphs(self) -> bool:
     """Check if this graph tier supports subgraphs."""
     return str(self.graph_tier) in [
+      GraphTier.LADYBUG_STANDARD.value,
       GraphTier.LADYBUG_LARGE.value,
       GraphTier.LADYBUG_XLARGE.value,
-      GraphTier.NEO4J_ENTERPRISE_XLARGE.value,
     ]
 
   def has_specific_extension(self, extension: str) -> bool:
