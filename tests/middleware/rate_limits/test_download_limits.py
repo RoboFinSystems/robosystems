@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from robosystems.config.billing.repositories import RepositoryPlan
+from robosystems.config.shared_repositories import RepositoryPlan
 from robosystems.middleware.rate_limits.download_limits import DownloadRateLimiter
 
 

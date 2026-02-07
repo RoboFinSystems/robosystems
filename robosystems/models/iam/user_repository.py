@@ -29,22 +29,27 @@ from sqlalchemy import (
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, relationship
 
-from ...config.billing.repositories import (
-  RepositoryBillingConfig,
-  SharedRepository,
-)
-from ...config.billing.repositories import (
-  RepositoryPlan as BillingRepositoryPlan,
-)
 from ...config.graph_tier import GraphTier
+from ...config.shared_repositories import RepositoryPlan as BillingRepositoryPlan
+from ...config.shared_repositories import get_plan_details as _get_plan_details
 from ...database import Model
 from ...utils.ulid import generate_prefixed_ulid
 
 logger = logging.getLogger(__name__)
 
 
-# Backwards compatibility aliases
-RepositoryType = SharedRepository
+class RepositoryType(str, Enum):
+  """Repository types matching DB enum values.
+
+  Values match the shared repository registry IDs. When adding a new shared
+  repository, add its ID here and run a migration to extend the DB enum.
+  """
+
+  SEC = "sec"
+  INDUSTRY = "industry"
+  ECONOMIC = "economic"
+
+
 RepositoryPlan = BillingRepositoryPlan
 
 
@@ -489,7 +494,7 @@ class UserRepository(Model):
     """
     Get repository plan configuration for this repository type and plan.
 
-    Pulls from centralized billing configuration in config/billing/repositories.py
+    Pulls from the shared repository registry in config/shared_repositories.py
     which is the single source of truth for pricing, credits, and access levels.
 
     Returns:
@@ -502,9 +507,7 @@ class UserRepository(Model):
 
         Empty dict if plan is not configured.
     """
-    plan_details = RepositoryBillingConfig.get_plan_details(
-      cast(RepositoryPlan, self.repository_plan)
-    )
+    plan_details = _get_plan_details(cast(RepositoryPlan, self.repository_plan))
     if not plan_details:
       return {}
 
@@ -521,50 +524,6 @@ class UserRepository(Model):
       "price_cents": plan_details.get("price_cents", 0),
       "access_level": access_level,
     }
-
-  @classmethod
-  def get_all_repository_configs(cls) -> dict[str, dict[str, Any]]:
-    """
-    Get all repository configurations including enabled status.
-
-    Delegates to centralized billing config which is the single source of truth.
-    Converts access_level strings to RepositoryAccessLevel enums for backwards
-    compatibility.
-
-    Returns:
-        Dict mapping repository types to configs with enabled status and plan details
-    """
-    configs = RepositoryBillingConfig.get_all_repository_configs()
-
-    result = {}
-    for repo_type, repo_config in configs.items():
-      result[repo_type] = {
-        "enabled": repo_config.get("enabled", False),
-        "coming_soon": repo_config.get("coming_soon", False),
-        "plans": {},
-      }
-
-      for plan_type, plan_details in repo_config.get("plans", {}).items():
-        access_level_str = plan_details.get("access_level", "READ")
-        try:
-          access_level = RepositoryAccessLevel(access_level_str.lower())
-        except (ValueError, AttributeError):
-          access_level = RepositoryAccessLevel.READ
-
-        result[repo_type]["plans"][plan_type] = {
-          "name": plan_details.get("name", ""),
-          "monthly_credits": plan_details.get("monthly_credits", 0),
-          "price_monthly": plan_details.get("price_monthly", 0.0),
-          "price_cents": plan_details.get("price_cents", 0),
-          "access_level": access_level,
-        }
-
-    return result
-
-  @classmethod
-  def is_repository_enabled(cls, repository_type: RepositoryType) -> bool:
-    """Check if a repository type is enabled for subscriptions."""
-    return RepositoryBillingConfig.is_repository_enabled(repository_type)
 
   def to_dict(self) -> dict[str, Any]:
     """Convert to dictionary for API responses."""

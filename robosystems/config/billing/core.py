@@ -171,23 +171,6 @@ class BillingConfig:
     return CreditConfig.get_operation_cost(operation_type)
 
   @classmethod
-  def get_repository_pricing(cls, repository_id: str) -> dict[str, Any] | None:
-    """
-    Get complete pricing information for a shared repository.
-
-    NOTE: Repository pricing is now handled by UserRepository model.
-    This method is deprecated but kept for API compatibility.
-
-    Args:
-        repository_id: Repository identifier (e.g., 'sec', 'industry')
-
-    Returns:
-        None (repository pricing moved to UserRepository model)
-    """
-    # Repository pricing is now handled by UserRepository model
-    return None
-
-  @classmethod
   def get_repository_plan(
     cls, repository_id: str, plan_name: str
   ) -> dict[str, Any] | None:
@@ -201,7 +184,7 @@ class BillingConfig:
     Returns:
         Dict with plan details including price_cents, monthly_credits, features
     """
-    from .repositories import RepositoryBillingConfig, RepositoryPlan
+    from robosystems.config.shared_repositories import RepositoryPlan, get_plan_details
 
     # Extract the plan tier from the plan name (e.g., 'sec-starter' -> 'starter')
     plan_tier = plan_name.split("-")[-1] if "-" in plan_name else plan_name
@@ -213,8 +196,8 @@ class BillingConfig:
       logger.warning(f"Invalid repository plan: {plan_name}")
       return None
 
-    # Get plan details
-    plan_details = RepositoryBillingConfig.get_plan_details(repo_plan)
+    # Get plan details (pass repo_id for per-repo plan lookup)
+    plan_details = get_plan_details(repo_plan, repo_id=repository_id)
     if not plan_details:
       return None
 

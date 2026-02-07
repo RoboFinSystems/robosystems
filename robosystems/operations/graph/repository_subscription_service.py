@@ -7,8 +7,26 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from ...config import env
-from ...models.iam.user_repository import (
+from ...config.shared_repositories import (
   RepositoryPlan,
+)
+from ...config.shared_repositories import (
+  get_available_repositories as _get_available_manifests,
+)
+from ...config.shared_repositories import (
+  get_manifest as _get_manifest,
+)
+from ...config.shared_repositories import (
+  get_plan_details as _get_plan_details,
+)
+from ...config.shared_repositories import (
+  get_repository_metadata as _get_repository_metadata,
+)
+from ...config.shared_repositories import (
+  is_repository_enabled as _is_repository_enabled,
+)
+from ...models.iam.user_repository import (
+  RepositoryAccessLevel,
   RepositoryType,
   UserRepository,
 )
@@ -22,26 +40,19 @@ ENVIRONMENT = env.ENVIRONMENT
 
 def get_available_repositories() -> list[RepositoryType]:
   """Get list of available repository types based on enabled status."""
-  all_configs = UserRepository.get_all_repository_configs()
-  return [
-    RepositoryType(repo_type)
-    for repo_type, config in all_configs.items()
-    if config.get("enabled", False)
-  ]
+  return [RepositoryType(m.id) for m in _get_available_manifests()]
 
 
 def get_available_plans_for_repository(
   repository_type: RepositoryType,
 ) -> list[RepositoryPlan]:
   """Get available plans for a specific repository type."""
-  if not UserRepository.is_repository_enabled(repository_type):
+  if not _is_repository_enabled(repository_type.value):
     return []
-
-  repo_config = UserRepository.get_all_repository_configs().get(repository_type)
-  if not repo_config or "plans" not in repo_config:
+  manifest = _get_manifest(repository_type.value)
+  if not manifest or not manifest.plans:
     return []
-
-  return list(repo_config["plans"].keys())
+  return [RepositoryPlan(k) for k in manifest.plans]
 
 
 class RepositorySubscriptionService:
@@ -67,7 +78,6 @@ class RepositorySubscriptionService:
     Raises:
         ValueError: If repository type is invalid or not configured
     """
-    from ...config.billing.repositories import RepositoryBillingConfig
     from ...models.iam.graph import Graph
 
     graph_id = repository_type.value
@@ -77,7 +87,7 @@ class RepositorySubscriptionService:
       logger.debug(f"Repository graph '{graph_id}' already exists")
       return
 
-    config = RepositoryBillingConfig.get_repository_metadata(repository_type)
+    config = _get_repository_metadata(repository_type.value)
     if not config:
       raise ValueError(
         f"No configuration found for repository type {repository_type.value}"
@@ -135,7 +145,7 @@ class RepositorySubscriptionService:
         UserRepository instance
     """
     # Check if repository is enabled
-    if not UserRepository.is_repository_enabled(repository_type):
+    if not _is_repository_enabled(repository_type.value):
       raise ValueError(
         f"Repository type {repository_type.value} is not available for subscription"
       )
@@ -147,11 +157,10 @@ class RepositorySubscriptionService:
         f"Plan {repository_plan.value} not available for repository {repository_type.value}"
       )
 
-    # Get repository configuration
-    repo_config = UserRepository.get_all_repository_configs().get(repository_type)
-    if not repo_config or "plans" not in repo_config:
+    # Get plan configuration from registry
+    plan_details = _get_plan_details(repository_plan, repo_id=repository_type.value)
+    if not plan_details:
       raise ValueError(f"Repository {repository_type.value} configuration not found")
-    plan_config = repo_config["plans"][repository_plan]
 
     # Check if subscription already exists
     existing = UserRepository.get_by_user_and_repository(
@@ -164,8 +173,13 @@ class RepositorySubscriptionService:
       )
       return existing
 
-    # Calculate pricing
-    monthly_price_cents = int(plan_config["price_monthly"] * 100)
+    # Resolve access level from plan
+    monthly_price_cents = int(plan_details["price_monthly"] * 100)
+    access_level_str = plan_details.get("access_level", "READ")
+    try:
+      access_level = RepositoryAccessLevel(access_level_str.lower())
+    except (ValueError, AttributeError):
+      access_level = RepositoryAccessLevel.READ
 
     # Create the subscription
     try:
@@ -173,15 +187,15 @@ class RepositorySubscriptionService:
         user_id=user_id,
         repository_type=repository_type,
         repository_name=repository_type.value,
-        access_level=plan_config["access_level"],
+        access_level=access_level,
         repository_plan=repository_plan,
         session=self.session,
         monthly_price_cents=monthly_price_cents,
-        monthly_credits=plan_config["monthly_credits"],
+        monthly_credits=plan_details["monthly_credits"],
         metadata={
           "subscribed_at": datetime.now(UTC).isoformat(),
           "subscription_method": "api",
-          "plan_features": plan_config.get("features", []),
+          "plan_features": plan_details.get("features", []),
         },
       )
 
@@ -222,7 +236,7 @@ class RepositorySubscriptionService:
       raise ValueError(f"No subscription found for repository {repository_type.value}")
 
     # Check if repository is still enabled
-    if not UserRepository.is_repository_enabled(repository_type):
+    if not _is_repository_enabled(repository_type.value):
       raise ValueError(f"Repository {repository_type.value} is no longer available")
 
     # Check if new plan is available
@@ -232,12 +246,11 @@ class RepositorySubscriptionService:
         f"Plan {new_plan.value} not available for repository {repository_type.value}"
       )
 
-    # Get new plan configuration
-    repo_config = UserRepository.get_all_repository_configs().get(repository_type)
-    if not repo_config or "plans" not in repo_config:
+    # Get new plan pricing from registry
+    plan_details = _get_plan_details(new_plan, repo_id=repository_type.value)
+    if not plan_details:
       raise ValueError(f"Repository {repository_type.value} configuration not found")
-    plan_config = repo_config["plans"][new_plan]
-    new_price_cents = int(plan_config["price_monthly"] * 100)
+    new_price_cents = int(plan_details["price_monthly"] * 100)
 
     try:
       # Upgrade the plan
@@ -376,17 +389,13 @@ class RepositorySubscriptionService:
         ValueError: If repository or plan configuration is invalid
         SQLAlchemyError: If database operation fails
     """
-    repo_config = UserRepository.get_all_repository_configs().get(repository_type)
-    if not repo_config or "plans" not in repo_config:
-      raise ValueError(f"Repository {repository_type.value} configuration not found")
-
-    plan_config = repo_config["plans"].get(repository_plan)
-    if not plan_config:
+    plan_details = _get_plan_details(repository_plan, repo_id=repository_type.value)
+    if not plan_details:
       raise ValueError(
         f"Plan {repository_plan.value} not available for repository {repository_type.value}"
       )
 
-    monthly_credits = plan_config["monthly_credits"]
+    monthly_credits = plan_details["monthly_credits"]
 
     access_record = UserRepository.get_by_user_and_repository(
       user_id=user_id, repository_name=repository_type.value, session=self.session
@@ -467,10 +476,7 @@ class RepositorySubscriptionService:
     if repository_plan is None:
       repository_plan = RepositoryPlan.STARTER
 
-    from ...config.billing.repositories import RepositoryBillingConfig
-    from ...models.iam.user_repository import RepositoryAccessLevel
-
-    plan_config = RepositoryBillingConfig.get_plan_details(repository_plan)
+    plan_config = _get_plan_details(repository_plan)
     if not plan_config:
       raise ValueError(
         f"Plan {repository_plan.value} not available for repository {repository_type.value}"

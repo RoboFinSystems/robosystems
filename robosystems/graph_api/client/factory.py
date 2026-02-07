@@ -32,11 +32,11 @@ from robosystems.config.constants import (
   GRAPH_READ_TIMEOUT,
 )
 from robosystems.config.graph_tier import GraphTier
+from robosystems.config.shared_repositories import is_shared_repository
 from robosystems.config.valkey_registry import ValkeyDatabase
 from robosystems.graph_api.client import GraphClient
 from robosystems.logger import logger
 from robosystems.middleware.graph.allocation_manager import LadybugAllocationManager
-from robosystems.middleware.graph.types import GraphTypeRegistry
 from robosystems.middleware.graph.utils import parse_subgraph_id
 
 
@@ -200,9 +200,6 @@ class GraphClientFactory:
   - Shared repository replica ALB (primary reads)
   """
 
-  # Shared repositories from the graph type registry
-  SHARED_REPOSITORIES = list(GraphTypeRegistry.SHARED_REPOSITORIES.keys())
-
   # Cache TTLs from constants
   _instance_cache_ttl = GRAPH_INSTANCE_CACHE_TTL
 
@@ -330,7 +327,7 @@ class GraphClientFactory:
 
     try:
       # Determine routing based on graph_id
-      if graph_id.lower() in GraphClientFactory.SHARED_REPOSITORIES:
+      if is_shared_repository(graph_id.lower()):
         # Route to shared repository infrastructure
         return await cls._create_shared_repository_client(graph_id, operation_type)
       else:

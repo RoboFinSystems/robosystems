@@ -188,24 +188,3 @@ async def get_main_repository(
       status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
       detail="Failed to access main database",
     )
-
-
-async def get_sec_repository() -> Repository:
-  """
-  Get a repository for the shared SEC database.
-
-  Returns:
-      Configured Repository instance for SEC data
-  """
-  try:
-    repository = await get_graph_repository("sec", operation_type="read")
-
-    logger.debug("Created SEC graph repository")
-    return repository
-
-  except Exception as e:
-    logger.error(f"Error creating SEC repository: {e}")
-    raise HTTPException(
-      status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-      detail="Failed to access SEC database",
-    )

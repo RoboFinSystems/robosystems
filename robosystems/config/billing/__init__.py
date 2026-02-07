@@ -18,7 +18,6 @@ from .core import (
   get_included_storage,
   get_tier_credit_allocation,
 )
-from .repositories import RepositoryBillingConfig, SharedRepository
 
 __all__ = [
   "DEFAULT_GRAPH_BILLING_PLANS",
@@ -26,8 +25,6 @@ __all__ = [
   "TIER_CREDIT_ALLOCATIONS",
   "AIBillingConfig",
   "BillingConfig",
-  "RepositoryBillingConfig",
-  "SharedRepository",
   "StorageBillingConfig",
   "get_included_storage",
   "get_tier_credit_allocation",

@@ -8,10 +8,11 @@ Uses Valkey DB 7 (RATE_LIMITING) with daily TTL expiration.
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from robosystems.config.billing.repositories import (
-  RepositoryBillingConfig,
+from robosystems.config.shared_repositories import (
   RepositoryPlan,
-  SharedRepository,
+)
+from robosystems.config.shared_repositories import (
+  get_rate_limits as _get_rate_limits,
 )
 from robosystems.config.valkey_registry import (
   ValkeyDatabase,
@@ -41,8 +42,7 @@ class DownloadRateLimiter:
   def _get_daily_limit(cls, repository: str, plan: RepositoryPlan) -> int:
     """Get the daily download limit for a repository and plan."""
     try:
-      repo_enum = SharedRepository(repository)
-      limits = RepositoryBillingConfig.get_rate_limits(repo_enum, plan)
+      limits = _get_rate_limits(repository, plan)
       if limits:
         return limits.get("downloads_per_day", cls.DEFAULT_DOWNLOADS_PER_DAY)
     except (ValueError, KeyError) as e:

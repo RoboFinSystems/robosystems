@@ -78,12 +78,13 @@ def get_repository_database_name(repository_id: str) -> str:
   Raises:
       ValueError: If repository_id is not a known shared repository
   """
-  from ..types import GraphTypeRegistry
+  from robosystems.config.shared_repositories import is_shared_repository
 
-  if repository_id not in GraphTypeRegistry.SHARED_REPOSITORIES:
+  if not is_shared_repository(repository_id):
     raise ValueError(f"Unknown shared repository: {repository_id}")
 
-  return GraphTypeRegistry.SHARED_REPOSITORIES[repository_id]
+  # For shared repositories, the database name is the repository ID itself
+  return repository_id
 
 
 def list_shared_repositories() -> list[str]:

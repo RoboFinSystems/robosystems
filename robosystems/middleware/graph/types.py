@@ -63,19 +63,6 @@ class UserGraphType(str, Enum):
   CUSTOM = "custom"  # Custom schema graphs
 
 
-class SharedRepositoryType(str, Enum):
-  """Types of shared repository graphs."""
-
-  SEC = "sec"  # SEC public entity filings
-  INDUSTRY = "industry"  # Industry benchmarking data
-  ECONOMIC = "economic"  # Economic indicators
-  REGULATORY = "regulatory"  # International regulatory filings
-  MARKET = "market"  # Market data and securities
-  ESG = "esg"  # Environmental, Social, Governance data
-  STOCK = "stock"  # Stock price history and market data
-  REFERENCE = "reference"  # General reference data
-
-
 class AccessPattern(str, Enum):
   """Graph database access patterns (authorization level)."""
 
@@ -178,17 +165,12 @@ class GraphIdentity(BaseModel):
 class GraphTypeRegistry:
   """Registry for graph type mappings and validation."""
 
-  # Shared repository mappings (static, well-known)
-  SHARED_REPOSITORIES: dict[str, SharedRepositoryType] = {
-    "sec": SharedRepositoryType.SEC,
-    "industry": SharedRepositoryType.INDUSTRY,
-    "economic": SharedRepositoryType.ECONOMIC,
-    "regulatory": SharedRepositoryType.REGULATORY,
-    "market": SharedRepositoryType.MARKET,
-    "esg": SharedRepositoryType.ESG,
-    "stock": SharedRepositoryType.STOCK,
-    "reference": SharedRepositoryType.REFERENCE,
-  }
+  @classmethod
+  def _get_shared_repo_ids(cls) -> list[str]:
+    """Get shared repository IDs from the registry."""
+    from ...config.shared_repositories import get_all_repository_ids
+
+    return get_all_repository_ids()
 
   @classmethod
   def get_graph_id_pattern(cls) -> str:
@@ -196,7 +178,7 @@ class GraphTypeRegistry:
     Build graph ID validation pattern for API endpoints.
 
     Format: kg + 16+ hex characters (lowercase hex from ULID generation)
-    Special cases: Shared repository names from SHARED_REPOSITORIES
+    Special cases: Shared repository names from registry
     Current generation:
       - Generic graphs: kg + 16 chars (ULID) = 16 chars after prefix
       - Entity graphs: kg + 14 chars (ULID) + 4 chars (entity hash) = 18 chars after prefix
@@ -204,7 +186,7 @@ class GraphTypeRegistry:
     Returns:
         Regex pattern string for validating graph IDs
     """
-    repo_names = "|".join(cls.SHARED_REPOSITORIES.keys())
+    repo_names = "|".join(cls._get_shared_repo_ids())
     return f"^(kg[a-f0-9]{{16,}}|{repo_names})$"
 
   # Patterns for identifying graph types
@@ -288,11 +270,13 @@ class GraphTypeRegistry:
 
     # Fallback: pattern-based detection (for cases without session)
     # Check if it's a known shared repository
-    if graph_id in cls.SHARED_REPOSITORIES:
+    from ...config.shared_repositories import is_shared_repository as _is_shared_repo
+
+    if _is_shared_repo(graph_id):
       return GraphIdentity(
         graph_id=graph_id,
         category=GraphCategory.SHARED,
-        graph_type=cls.SHARED_REPOSITORIES[graph_id].value,
+        graph_type=graph_id,
         graph_tier=GraphTier.LADYBUG_SHARED,
         access_pattern=AccessPattern.READ_ONLY,
       )
@@ -320,7 +304,7 @@ class GraphTypeRegistry:
   def is_valid_graph_id(cls, graph_id: str, category: GraphCategory) -> bool:
     """Validate graph ID based on category."""
     if category == GraphCategory.SHARED:
-      return graph_id in cls.SHARED_REPOSITORIES
+      return graph_id in cls._get_shared_repo_ids()
     elif category == GraphCategory.USER:
       # User graphs must follow naming conventions
       return bool(re.match(r"^[a-zA-Z0-9_-]+$", graph_id)) and len(graph_id) <= 64
@@ -330,20 +314,39 @@ class GraphTypeRegistry:
   @classmethod
   def list_shared_repositories(cls) -> list[str]:
     """Get list of all available shared repositories."""
-    return list(cls.SHARED_REPOSITORIES.keys())
+    return cls._get_shared_repo_ids()
 
 
-# Convenience constants for API endpoint validation
-# Parent graphs and shared repositories only (for subgraph management and DynamoDB registry)
-GRAPH_ID_PATTERN = GraphTypeRegistry.get_graph_id_pattern()
+def _build_graph_id_pattern() -> str:
+  """Build graph ID pattern from registry (called lazily on first access)."""
+  return GraphTypeRegistry.get_graph_id_pattern()
 
-# Parent graphs, subgraphs, and shared repositories (for general graph-scoped endpoints)
-# Accepts: kg[hex]{16,} OR kg[hex]{16,}_[alphanumeric]{1,20} OR shared repo names
-GRAPH_OR_SUBGRAPH_ID_PATTERN = (
-  r"^(kg[a-f0-9]{16,}(?:_[a-zA-Z0-9]{1,20})?|"
-  + "|".join(GraphTypeRegistry.SHARED_REPOSITORIES.keys())
-  + r")$"
-)
+
+def _build_graph_or_subgraph_id_pattern() -> str:
+  """Build graph-or-subgraph ID pattern from registry (called lazily on first access)."""
+  repo_names = "|".join(GraphTypeRegistry._get_shared_repo_ids())
+  return r"^(kg[a-f0-9]{16,}(?:_[a-zA-Z0-9]{1,20})?|" + repo_names + r")$"
+
+
+# Lazy pattern cache — patterns are computed on first access to avoid circular
+# imports (the registry triggers adapter imports that circle back here).
+_lazy_patterns: dict[str, str] = {}
+
+
+def __getattr__(name: str) -> str:
+  """PEP 562 module-level __getattr__ for lazy pattern computation."""
+  if name == "GRAPH_ID_PATTERN":
+    if "GRAPH_ID_PATTERN" not in _lazy_patterns:
+      _lazy_patterns["GRAPH_ID_PATTERN"] = _build_graph_id_pattern()
+    return _lazy_patterns["GRAPH_ID_PATTERN"]
+  if name == "GRAPH_OR_SUBGRAPH_ID_PATTERN":
+    if "GRAPH_OR_SUBGRAPH_ID_PATTERN" not in _lazy_patterns:
+      _lazy_patterns["GRAPH_OR_SUBGRAPH_ID_PATTERN"] = (
+        _build_graph_or_subgraph_id_pattern()
+      )
+    return _lazy_patterns["GRAPH_OR_SUBGRAPH_ID_PATTERN"]
+  raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
 
 # Subgraph name pattern (for subgraph creation/management endpoints)
 # Just the name part (e.g., "dev", "staging", "prod1"), not the full ID
@@ -375,7 +378,7 @@ def is_subgraph_id(graph_id: str) -> bool:
       >>> is_subgraph_id("_")
       False
   """
-  if not graph_id or graph_id in GraphTypeRegistry.SHARED_REPOSITORIES:
+  if not graph_id or graph_id in GraphTypeRegistry._get_shared_repo_ids():
     return False
   if "_" not in graph_id:
     return False
