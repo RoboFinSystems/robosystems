@@ -29,22 +29,28 @@ from sqlalchemy import (
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, relationship
 
-from ...config.billing.repositories import (
-  RepositoryBillingConfig,
-  SharedRepository,
-)
-from ...config.billing.repositories import (
-  RepositoryPlan as BillingRepositoryPlan,
-)
 from ...config.graph_tier import GraphTier
+from ...config.shared_repositories import RepositoryPlan as BillingRepositoryPlan
+from ...config.shared_repositories import get_plan_details as _get_plan_details
 from ...database import Model
 from ...utils.ulid import generate_prefixed_ulid
 
 logger = logging.getLogger(__name__)
 
 
-# Backwards compatibility aliases
-RepositoryType = SharedRepository
+class RepositoryType(str, Enum):
+  """Known shared repository identifiers.
+
+  Convenience enum for type-safe references in code. The DB column is a plain
+  String so new shared repositories can be added via manifests without a
+  migration. Values here match the shared repository registry IDs.
+  """
+
+  SEC = "sec"
+  INDUSTRY = "industry"
+  ECONOMIC = "economic"
+
+
 RepositoryPlan = BillingRepositoryPlan
 
 
@@ -81,8 +87,8 @@ class UserRepository(Model):
   # User reference
   user_id = Column(String, ForeignKey("users.id"), nullable=False)
 
-  # Repository identification
-  repository_type = Column(SQLEnum(RepositoryType), nullable=False)
+  # Repository identification (plain String — new repos added via manifests, no migration needed)
+  repository_type = Column(String, nullable=False)
   # NOTE: repository_name contains the graph_id (e.g., "sec") not the display name.
   # This is the unique identifier/slug for the repository, stored in graphs.graph_id.
   repository_name = Column(
@@ -474,7 +480,7 @@ class UserRepository(Model):
         "cluster_region": self.graph.graph_cluster_region,
         "instance_tier": graph_tier,
         "repository_name": self.repository_name,
-        "repository_type": self.repository_type.value,
+        "repository_type": self.repository_type,
       }
 
     return {
@@ -482,14 +488,14 @@ class UserRepository(Model):
       "cluster_region": None,
       "instance_tier": GraphTier.LADYBUG_SHARED,
       "repository_name": self.repository_name,
-      "repository_type": self.repository_type.value,
+      "repository_type": self.repository_type,
     }
 
   def get_repository_plan_config(self) -> dict[str, Any]:
     """
     Get repository plan configuration for this repository type and plan.
 
-    Pulls from centralized billing configuration in config/billing/repositories.py
+    Pulls from the shared repository registry in config/shared_repositories.py
     which is the single source of truth for pricing, credits, and access levels.
 
     Returns:
@@ -502,9 +508,7 @@ class UserRepository(Model):
 
         Empty dict if plan is not configured.
     """
-    plan_details = RepositoryBillingConfig.get_plan_details(
-      cast(RepositoryPlan, self.repository_plan)
-    )
+    plan_details = _get_plan_details(cast(RepositoryPlan, self.repository_plan))
     if not plan_details:
       return {}
 
@@ -522,50 +526,6 @@ class UserRepository(Model):
       "access_level": access_level,
     }
 
-  @classmethod
-  def get_all_repository_configs(cls) -> dict[str, dict[str, Any]]:
-    """
-    Get all repository configurations including enabled status.
-
-    Delegates to centralized billing config which is the single source of truth.
-    Converts access_level strings to RepositoryAccessLevel enums for backwards
-    compatibility.
-
-    Returns:
-        Dict mapping repository types to configs with enabled status and plan details
-    """
-    configs = RepositoryBillingConfig.get_all_repository_configs()
-
-    result = {}
-    for repo_type, repo_config in configs.items():
-      result[repo_type] = {
-        "enabled": repo_config.get("enabled", False),
-        "coming_soon": repo_config.get("coming_soon", False),
-        "plans": {},
-      }
-
-      for plan_type, plan_details in repo_config.get("plans", {}).items():
-        access_level_str = plan_details.get("access_level", "READ")
-        try:
-          access_level = RepositoryAccessLevel(access_level_str.lower())
-        except (ValueError, AttributeError):
-          access_level = RepositoryAccessLevel.READ
-
-        result[repo_type]["plans"][plan_type] = {
-          "name": plan_details.get("name", ""),
-          "monthly_credits": plan_details.get("monthly_credits", 0),
-          "price_monthly": plan_details.get("price_monthly", 0.0),
-          "price_cents": plan_details.get("price_cents", 0),
-          "access_level": access_level,
-        }
-
-    return result
-
-  @classmethod
-  def is_repository_enabled(cls, repository_type: RepositoryType) -> bool:
-    """Check if a repository type is enabled for subscriptions."""
-    return RepositoryBillingConfig.is_repository_enabled(repository_type)
-
   def to_dict(self) -> dict[str, Any]:
     """Convert to dictionary for API responses."""
     import json
@@ -575,7 +535,7 @@ class UserRepository(Model):
     return {
       "id": self.id,
       "user_id": self.user_id,
-      "repository_type": self.repository_type.value,
+      "repository_type": self.repository_type,
       "repository_name": self.repository_name,
       "access_level": self.access_level.value,
       "repository_plan": self.repository_plan.value,

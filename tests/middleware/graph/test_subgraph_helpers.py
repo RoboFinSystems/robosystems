@@ -2,9 +2,9 @@ import re
 
 import pytest
 
+from robosystems.config.shared_repositories import get_all_repository_ids
 from robosystems.middleware.graph.types import (
   SUBGRAPH_NAME_PATTERN,
-  GraphTypeRegistry,
   construct_subgraph_id,
   is_subgraph_id,
   parse_graph_id,
@@ -49,7 +49,7 @@ class TestIsSubgraphId:
 
   @pytest.mark.unit
   def test_shared_repositories_not_subgraphs(self):
-    for repo in GraphTypeRegistry.SHARED_REPOSITORIES:
+    for repo in get_all_repository_ids():
       assert is_subgraph_id(repo) is False, (
         f"Shared repository {repo} should not be treated as subgraph"
       )
@@ -116,7 +116,7 @@ class TestParseGraphId:
 
   @pytest.mark.unit
   def test_parse_shared_repositories(self):
-    for repo in GraphTypeRegistry.SHARED_REPOSITORIES:
+    for repo in get_all_repository_ids():
       parent_id, subgraph_name = parse_graph_id(repo)
       assert parent_id == repo
       assert subgraph_name is None
@@ -396,7 +396,7 @@ class TestHelperFunctionIntegration:
 
   @pytest.mark.unit
   def test_shared_repos_consistent_across_helpers(self):
-    for repo in GraphTypeRegistry.SHARED_REPOSITORIES:
+    for repo in get_all_repository_ids():
       assert not is_subgraph_id(repo)
 
       parent_id, subgraph_name = parse_graph_id(repo)

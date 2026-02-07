@@ -3,6 +3,7 @@ from decimal import Decimal
 import pytest
 from sqlalchemy.orm import Session
 
+from robosystems.config.shared_repositories import get_all_repository_ids
 from robosystems.middleware.graph.types import (
   construct_subgraph_id,
   is_subgraph_id,
@@ -19,7 +20,7 @@ class TestSubgraphEdgeCases:
   @pytest.mark.unit
   def test_shared_repositories_not_treated_as_subgraphs(self):
     """Shared repositories should never be treated as subgraph IDs"""
-    shared_repos = ["sec", "industry", "economic"]
+    shared_repos = get_all_repository_ids()
 
     for repo in shared_repos:
       assert is_subgraph_id(repo) is False

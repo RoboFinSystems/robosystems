@@ -13,7 +13,6 @@ from fastapi import HTTPException, status
 from robosystems.middleware.graph.dependencies.repositories import (
   get_graph_repository_dependency,
   get_main_repository,
-  get_sec_repository,
   get_shared_repository,
   get_user_graph_repository,
 )
@@ -398,31 +397,3 @@ class TestGetMainRepository:
 
     assert exc_info.value.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
     assert "Failed to access main database" in str(exc_info.value.detail)
-
-
-class TestGetSecRepository:
-  """Test get_sec_repository function."""
-
-  @pytest.mark.asyncio
-  @patch("robosystems.middleware.graph.dependencies.repositories.get_graph_repository")
-  async def test_sec_repository_success(self, mock_get_repo):
-    """Test successful SEC repository creation."""
-    mock_repository = Mock()
-    mock_get_repo.return_value = mock_repository
-
-    result = await get_sec_repository()
-
-    assert result == mock_repository
-    mock_get_repo.assert_called_once_with("sec", operation_type="read")
-
-  @pytest.mark.asyncio
-  @patch("robosystems.middleware.graph.dependencies.repositories.get_graph_repository")
-  async def test_sec_repository_error(self, mock_get_repo):
-    """Test SEC repository creation error handling."""
-    mock_get_repo.side_effect = RuntimeError("Connection failed")
-
-    with pytest.raises(HTTPException) as exc_info:
-      await get_sec_repository()
-
-    assert exc_info.value.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
-    assert "Failed to access SEC database" in str(exc_info.value.detail)

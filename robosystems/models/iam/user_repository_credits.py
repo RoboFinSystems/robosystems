@@ -27,7 +27,7 @@ from sqlalchemy.orm import Session, relationship
 
 from ...database import Base
 from ...utils.ulid import generate_prefixed_ulid
-from .user_repository import RepositoryPlan, RepositoryType
+from .user_repository import RepositoryPlan
 
 logger = logging.getLogger(__name__)
 
@@ -128,7 +128,7 @@ class UserRepositoryCredits(Base):
   def create_for_access(
     cls,
     access_id: str,
-    repository_type: "RepositoryType",
+    repository_type: str,
     repository_plan: "RepositoryPlan",
     monthly_allocation: int,
     session: Session,
@@ -169,7 +169,7 @@ class UserRepositoryCredits(Base):
         credit_pool_id=cast(str, credits.id),
         transaction_type=UserRepositoryCreditTransactionType.ALLOCATION,
         amount=cast(Decimal, credits.monthly_allocation),
-        description=f"Initial allocation for {repository_type.value} {repository_plan.value}",
+        description=f"Initial allocation for {repository_type} {repository_plan}",
         session=session,
       )
 
@@ -256,7 +256,7 @@ class UserRepositoryCredits(Base):
       balance_after=float(self.current_balance),
       metadata={
         "repository": repository_name,
-        "repository_type": self.user_repository.repository_type.value,
+        "repository_type": self.user_repository.repository_type,
         "operation": operation_type,
         "credit_pool_id": self.id,
       },
@@ -466,7 +466,7 @@ class UserRepositoryCredits(Base):
         description=f"RESERVED: {operation_type} operation",
         metadata={
           "operation_type": operation_type,
-          "repository_type": self.user_repository.repository_type.value,
+          "repository_type": self.user_repository.repository_type,
           "reservation_id": reservation_id,
           "reservation_status": "reserved",
           "expires_at": expires_at.isoformat(),
@@ -718,26 +718,13 @@ class UserRepositoryCredits(Base):
     session: Session,
   ) -> Optional["UserRepositoryCredits"]:
     """Get repository credits for a specific repository type."""
-
-    # Map repository types to repository types
-    repo_to_type = {
-      "sec": RepositoryType.SEC,
-      "industry": RepositoryType.INDUSTRY,
-      "economic": RepositoryType.ECONOMIC,
-    }
-
-    repo_type = repo_to_type.get(repository_type)
-    if not repo_type:
-      return None
-
-    # Find user's access record for this type
     from .user_repository import UserRepository
 
     access_record = (
       session.query(UserRepository)
       .filter(
         UserRepository.user_id == user_id,
-        UserRepository.repository_type == repo_type,
+        UserRepository.repository_type == repository_type,
         UserRepository.is_active,
       )
       .first()

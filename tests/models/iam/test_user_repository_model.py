@@ -680,21 +680,24 @@ class TestUserRepository:
     assert config["access_level"] == "read"
 
   def test_is_repository_enabled(self):
-    """Test checking if repository type is enabled."""
-    assert UserRepository.is_repository_enabled(RepositoryType.SEC) is True
-    assert UserRepository.is_repository_enabled(RepositoryType.INDUSTRY) is False
-    assert UserRepository.is_repository_enabled(RepositoryType.ECONOMIC) is False
+    """Test checking if repository type is enabled via registry."""
+    from robosystems.config.shared_repositories import is_repository_enabled
+
+    assert is_repository_enabled("sec") is True
+    assert is_repository_enabled("industry") is False
+    assert is_repository_enabled("economic") is False
 
   def test_get_all_repository_configs(self):
-    """Test getting all repository configurations."""
-    configs = UserRepository.get_all_repository_configs()
+    """Test getting all repository configurations via registry."""
+    from robosystems.config.shared_repositories import get_all_repository_configs
 
-    assert RepositoryType.SEC in configs
-    assert configs[RepositoryType.SEC]["enabled"] is True
+    configs = get_all_repository_configs()
 
-    assert RepositoryType.INDUSTRY in configs
-    assert configs[RepositoryType.INDUSTRY]["enabled"] is False
-    assert configs[RepositoryType.INDUSTRY]["coming_soon"] is True
+    assert "sec" in configs
+    assert configs["sec"]["enabled"] is True
+
+    # Only registered repositories appear (industry/economic are future adapters)
+    assert "industry" not in configs
 
   def test_to_dict(self):
     """Test conversion to dictionary."""

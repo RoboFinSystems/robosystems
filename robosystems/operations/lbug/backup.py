@@ -24,6 +24,7 @@ import boto3
 from botocore.exceptions import ClientError
 
 from ...config import env
+from ...config.shared_repositories import is_shared_repository
 from ...config.storage import graph
 from ...logger import logger
 from ...middleware.graph.allocation_manager import LadybugAllocationManager
@@ -270,14 +271,8 @@ class LadybugGraphBackupService:
       # Get databases from allocation manager
       databases = await self.allocation_manager.get_instance_databases(self.instance_id)
 
-      # Filter out shared repositories (keep customer databases)
-      # Customer databases don't have specific prefixes like 'sec', 'industry', etc.
-      shared_prefixes = ["sec", "industry", "economic", "stock"]
-      customer_databases = [
-        db
-        for db in databases
-        if not any(db.startswith(prefix) for prefix in shared_prefixes)
-      ]
+      # Filter out shared repositories (keep customer databases only)
+      customer_databases = [db for db in databases if not is_shared_repository(db)]
 
       return customer_databases
 

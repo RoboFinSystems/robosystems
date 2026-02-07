@@ -18,6 +18,12 @@ from sqlalchemy.orm import Session
 from ...config import BillingConfig
 from ...config.credits import CreditConfig
 from ...config.graph_tier import GraphTier
+from ...config.shared_repositories import (
+  get_credit_costs as _get_credit_costs,
+)
+from ...config.shared_repositories import (
+  is_shared_repository as _is_shared_repository,
+)
 from ...middleware.graph.types import parse_graph_id
 from ...models.iam import (
   GraphCredits,
@@ -25,7 +31,7 @@ from ...models.iam import (
   GraphUser,
 )
 from ...models.iam.graph_credits import CreditTransactionType
-from ...models.iam.user_repository import RepositoryType, UserRepository
+from ...models.iam.user_repository import UserRepository
 from ...models.iam.user_repository_credits import UserRepositoryCredits
 
 logger = logging.getLogger(__name__)
@@ -112,9 +118,7 @@ class CreditService:
 
   def _is_shared_repository(self, graph_id: str) -> bool:
     """Check if the graph_id represents a shared repository."""
-    # Check if graph_id matches any known repository type
-    known_repositories = ["sec", "industry", "economic", "market", "esg", "regulatory"]
-    return graph_id.lower() in known_repositories
+    return _is_shared_repository(graph_id)
 
   def consume_credits(
     self,
@@ -767,7 +771,7 @@ class CreditService:
     # Get operation cost - use passed base_cost if provided (e.g., for AI tokens)
     # Otherwise use predefined costs or default
     if base_cost is None:
-      repo_costs = SHARED_REPO_CREDIT_COSTS.get(repository_name, {})
+      repo_costs = _get_credit_costs(repository_name) or {}
       base_cost = repo_costs.get(operation_type, Decimal("1.0"))
 
     # Consume credits
@@ -787,7 +791,7 @@ class CreditService:
         "credits_consumed": float(base_cost),
         "remaining_balance": float(shared_credits.current_balance),
         "cached": False,
-        "addon_type": shared_credits.user_repository.repository_type.value,
+        "addon_type": shared_credits.user_repository.repository_type,
         "addon_tier": shared_credits.user_repository.repository_plan.value,
       }
     else:
@@ -797,7 +801,7 @@ class CreditService:
         "credits_consumed": 0,
         "required_credits": float(base_cost),
         "available_credits": float(shared_credits.current_balance),
-        "addon_type": shared_credits.user_repository.repository_type.value,
+        "addon_type": shared_credits.user_repository.repository_type,
         "addon_tier": shared_credits.user_repository.repository_plan.value,
       }
 
@@ -808,10 +812,10 @@ class CreditService:
     summaries = {}
     for access_record in access_records:
       if access_record.user_credits:
-        repo_type = access_record.repository_type.value
+        repo_type = access_record.repository_type
         summaries[repo_type] = {
           "access_id": access_record.id,
-          "repository_type": access_record.repository_type.value,
+          "repository_type": access_record.repository_type,
           "subscription_tier": access_record.repository_plan.value,
           "access_level": access_record.access_level.value,
           "credits": access_record.user_credits.get_summary(),
@@ -844,14 +848,14 @@ class CreditService:
       return {
         "has_access": False,
         "error": "Subscription is not active",
-        "addon_type": shared_credits.user_repository.repository_type.value,
+        "addon_type": shared_credits.user_repository.repository_type,
         "addon_tier": shared_credits.user_repository.repository_plan.value,
       }
 
     # Get operation cost - use passed required_credits if provided (e.g., for AI tokens)
     # Otherwise use predefined costs or default
     if required_credits is None:
-      repo_costs = SHARED_REPO_CREDIT_COSTS.get(repository_name, {})
+      repo_costs = _get_credit_costs(repository_name) or {}
       required_credits = repo_costs.get(operation_type, Decimal("1.0"))
       # If operation is included (0.0), no credit check needed
       if required_credits == Decimal("0.0"):
@@ -860,7 +864,7 @@ class CreditService:
           "has_sufficient_credits": True,
           "required_credits": 0.0,
           "available_credits": float(shared_credits.current_balance),
-          "addon_type": shared_credits.user_repository.repository_type.value,
+          "addon_type": shared_credits.user_repository.repository_type,
           "addon_tier": shared_credits.user_repository.repository_plan.value,
           "operation_included": True,
         }
@@ -872,27 +876,9 @@ class CreditService:
       "has_sufficient_credits": has_sufficient,
       "required_credits": float(required_credits),
       "available_credits": float(shared_credits.current_balance),
-      "addon_type": shared_credits.user_repository.repository_type.value,
+      "addon_type": shared_credits.user_repository.repository_type,
       "addon_tier": shared_credits.user_repository.repository_plan.value,
     }
-
-  def _addon_type_to_repo_name(self, addon_type: str) -> str:
-    """Convert add-on type to repository name."""
-    mapping = {
-      RepositoryType.SEC.value: "sec",
-      RepositoryType.INDUSTRY.value: "industry",
-      RepositoryType.ECONOMIC.value: "economic",
-    }
-    return mapping.get(addon_type, addon_type)
-
-  def _repo_name_to_addon_type(self, repo_name: str) -> RepositoryType | None:
-    """Convert repository name to repository type."""
-    mapping = {
-      "sec": RepositoryType.SEC,
-      "industry": RepositoryType.INDUSTRY,
-      "economic": RepositoryType.ECONOMIC,
-    }
-    return mapping.get(repo_name)
 
   def check_storage_limit(
     self, graph_id: str, current_storage_gb: Decimal | None = None
@@ -1322,34 +1308,3 @@ def get_operation_cost(operation_type: str) -> Decimal:
     logger.warning(f"Failed to cache operation cost: {e}")
 
   return cost
-
-
-# Shared repository credit costs (usually higher than graph operations)
-SHARED_REPO_CREDIT_COSTS = {
-  "sec": {
-    "query": Decimal("0.0"),  # Included - SEC data query (rate-limited only)
-    "mcp": Decimal("0.0"),  # Included - MCP query (rate-limited only)
-    "entity_lookup": Decimal(
-      "0.0"
-    ),  # Included - Basic entity lookup (rate-limited only)
-    "filing_fetch": Decimal("0.0"),  # Included - Fetch filing data (rate-limited only)
-    "analytics": Decimal("0.0"),  # Included - Complex analytics (rate-limited only)
-    "ai_tokens": None,  # Dynamic - calculated based on actual token usage
-    "bulk_export": Decimal("50.0"),  # Bulk data export
-  },
-  "industry": {
-    "query": Decimal("3.0"),  # Industry benchmark query
-    "comparison": Decimal("10.0"),  # Multi-entity comparison
-    "analytics": Decimal("25.0"),  # Industry analytics
-  },
-  "economic": {
-    "query": Decimal("1.0"),  # Economic indicator query
-    "time_series": Decimal("5.0"),  # Time series data
-    "analytics": Decimal("15.0"),  # Economic analytics
-  },
-  "market": {
-    "quote": Decimal("0.5"),  # Single stock quote
-    "history": Decimal("5.0"),  # Price history
-    "analytics": Decimal("10.0"),  # Market analytics
-  },
-}

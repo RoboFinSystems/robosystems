@@ -259,7 +259,7 @@ async def get_graphs(
           isSelected=False,
           createdAt=user_repo.created_at.isoformat(),
           isRepository=True,
-          repositoryType=user_repo.repository_type.value,
+          repositoryType=user_repo.repository_type,
           schemaExtensions=user_repo.graph.schema_extensions if user_repo.graph else [],
           isSubgraph=False,  # Repositories are never subgraphs
           parentGraphId=None,

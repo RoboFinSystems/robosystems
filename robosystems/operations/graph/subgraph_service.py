@@ -21,11 +21,11 @@ if TYPE_CHECKING:
   from ...models.iam import Graph, User
 
 from ...config import env
+from ...config.shared_repositories import is_shared_repository
 from ...exceptions import GraphAllocationError
 from ...graph_api.client.factory import get_graph_client_for_instance
 from ...logger import logger
 from ...middleware.graph.allocation_manager import LadybugAllocationManager
-from ...middleware.graph.types import GraphTypeRegistry
 from ...middleware.graph.utils import (
   construct_subgraph_id,
   parse_subgraph_id,
@@ -46,7 +46,6 @@ class SubgraphService:
   def __init__(self):
     """Initialize the subgraph service."""
     self.allocation_manager = LadybugAllocationManager(environment=env.ENVIRONMENT)
-    self.shared_repositories = list(GraphTypeRegistry.SHARED_REPOSITORIES.keys())
 
   async def create_subgraph_database(
     self,
@@ -82,7 +81,7 @@ class SubgraphService:
     if not validate_parent_graph_id(parent_graph_id):
       raise ValueError(f"Invalid parent graph ID: {parent_graph_id}")
 
-    if parent_graph_id.lower() in self.shared_repositories:
+    if is_shared_repository(parent_graph_id.lower()):
       raise ValueError(
         f"Shared repository '{parent_graph_id}' cannot have subgraphs. "
         "Subgraphs are only available for user-owned Enterprise/Premium graphs."

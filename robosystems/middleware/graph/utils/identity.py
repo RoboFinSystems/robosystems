@@ -122,31 +122,23 @@ def is_user_graph(graph_id: str) -> bool:
   return identity.is_user_graph
 
 
-def get_repository_type_from_graph_id(graph_id: str):
+def get_repository_type_from_graph_id(graph_id: str) -> str:
   """
-  Get the RepositoryType enum value from a graph_id.
+  Validate that graph_id is a known shared repository and return it.
 
   Args:
       graph_id: Graph identifier
 
   Returns:
-      RepositoryType: The repository type enum value
+      str: The repository ID (same as graph_id for shared repos)
 
   Raises:
       ValueError: If graph_id is not a known repository
   """
-  from robosystems.models.iam import RepositoryType
-
-  repository_mapping = {
-    "sec": RepositoryType.SEC,
-    "industry": RepositoryType.INDUSTRY,
-    "economic": RepositoryType.ECONOMIC,
-  }
-
-  if graph_id not in repository_mapping:
+  if not is_shared_repository(graph_id):
     raise ValueError(f"Unknown repository graph_id: {graph_id}")
 
-  return repository_mapping[graph_id]
+  return graph_id
 
 
 def validate_repository_access(
@@ -262,13 +254,15 @@ def get_migration_status() -> dict[str, Any]:
   Returns:
       Dict: Migration status information
   """
+  from robosystems.config.shared_repositories import get_all_repository_ids
+
   from .database import get_max_databases_per_node
 
   return {
     "access_pattern": get_access_pattern().value,
     "max_databases_per_node": get_max_databases_per_node(),
     "shared_repositories": {
-      "sec_engine": "ladybug",
+      repo_id: {"engine": "ladybug"} for repo_id in get_all_repository_ids()
     },
     "environment": env.ENVIRONMENT,
   }

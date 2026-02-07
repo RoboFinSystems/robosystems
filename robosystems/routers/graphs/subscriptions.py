@@ -14,9 +14,10 @@ from fastapi import APIRouter, Depends, HTTPException, Path, status
 from sqlalchemy.orm import Session
 
 from ...config import BillingConfig, env
+from ...config.shared_repositories import is_shared_repository as _is_shared_repo
 from ...database import get_db_session
 from ...middleware.auth.dependencies import get_current_user
-from ...middleware.graph.types import GRAPH_OR_SUBGRAPH_ID_PATTERN, GraphTypeRegistry
+from ...middleware.graph.types import GRAPH_OR_SUBGRAPH_ID_PATTERN
 from ...middleware.rate_limits import subscription_aware_rate_limit_dependency
 from ...models.api.billing.subscription import (
   CreateRepositorySubscriptionRequest,
@@ -37,7 +38,7 @@ router = APIRouter(
 
 def is_shared_repository(graph_id: str) -> bool:
   """Check if a graph_id refers to a shared repository."""
-  return graph_id in GraphTypeRegistry.SHARED_REPOSITORIES
+  return _is_shared_repo(graph_id)
 
 
 def subscription_to_response(

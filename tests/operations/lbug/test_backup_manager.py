@@ -76,10 +76,10 @@ class TestBackupManager:
         MultiTenantUtils.validate_graph_id(graph_id)
         print(f"✓ Invalid graph ID rejected: {graph_id}")
 
-    # Test shared repository detection
+    # Test shared repository detection (only registered repos return True)
     assert MultiTenantUtils.is_shared_repository("sec") is True
-    assert MultiTenantUtils.is_shared_repository("economic") is True
-    assert MultiTenantUtils.is_shared_repository("industry") is True
+    assert MultiTenantUtils.is_shared_repository("economic") is False
+    assert MultiTenantUtils.is_shared_repository("industry") is False
     assert MultiTenantUtils.is_shared_repository("kg1a2b3c") is False
 
   @pytest.mark.asyncio

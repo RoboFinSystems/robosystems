@@ -9,87 +9,24 @@ Provides comprehensive information about all subscription offerings:
 """
 
 import logging
-from typing import Any
 
 from fastapi import APIRouter, Depends
 
 from ..config import BillingConfig, env
-from ..config.billing import RepositoryBillingConfig
+from ..config.shared_repositories import (
+  RepositoryPlan,
+)
+from ..config.shared_repositories import (
+  get_all_manifests as _get_all_manifests,
+)
+from ..config.shared_repositories import (
+  get_rate_limits as _get_rate_limits,
+)
 from ..middleware.rate_limits import public_api_rate_limit_dependency
 from ..models.api import ServiceOfferingsResponse
 from ..models.api.common import ErrorCode, ErrorResponse, create_error_response
-from ..models.iam.user_repository import UserRepository
 
 logger = logging.getLogger(__name__)
-
-
-class OfferingFeatureGenerator:
-  """Generate feature lists for different repository types and plan levels."""
-
-  @staticmethod
-  def get_features_for_repository(
-    repo_type: str, plan_type: str, plan_config: dict[str, Any]
-  ) -> list[str]:
-    """Get marketing-friendly features for a specific repository and plan.
-
-    Args:
-      repo_type: Repository type (e.g., 'sec', 'industry', 'economic')
-      plan_type: Plan type (e.g., 'basic', 'advanced', 'unlimited')
-      plan_config: Plan configuration containing monthly_credits, price_monthly, etc.
-
-    Returns:
-      List of feature strings
-    """
-    # Get repository-specific features
-    if repo_type == "sec":
-      return OfferingFeatureGenerator._get_sec_features(plan_type, plan_config)
-    elif repo_type == "industry":
-      return OfferingFeatureGenerator._get_industry_features(plan_type, plan_config)
-    elif repo_type == "economic":
-      return OfferingFeatureGenerator._get_economic_features(plan_type, plan_config)
-    else:
-      return OfferingFeatureGenerator._get_default_features(plan_config)
-
-  @staticmethod
-  def _get_sec_features(plan_type: str, plan_config: dict[str, Any]) -> list[str]:
-    """Get features for SEC repository plans.
-
-    Note: This is a fallback. Primary features come from REPOSITORY_PLANS in config.
-    """
-    base_features = [
-      "Full SEC data (all companies, all history)",
-      "API access",
-      "MCP tools for Claude Desktop",
-    ]
-
-    if plan_type == "starter":
-      return [*base_features, "Standard rate limits"]
-    elif plan_type == "advanced":
-      return [*base_features, "5x higher rate limits", "Production-ready throughput"]
-    else:
-      return base_features
-
-  @staticmethod
-  def _get_industry_features(_plan_type: str, plan_config: dict[str, Any]) -> list[str]:
-    """Get features for industry repository plans (placeholder for future implementation)."""
-    # Currently uses default features, but can be customized in the future
-    return OfferingFeatureGenerator._get_default_features(plan_config)
-
-  @staticmethod
-  def _get_economic_features(_plan_type: str, plan_config: dict[str, Any]) -> list[str]:
-    """Get features for economic repository plans (placeholder for future implementation)."""
-    # Currently uses default features, but can be customized in the future
-    return OfferingFeatureGenerator._get_default_features(plan_config)
-
-  @staticmethod
-  def _get_default_features(plan_config: dict[str, Any]) -> list[str]:
-    """Get default features for any repository."""
-    return [
-      "Full data access",
-      "API access",
-      "MCP tools for Claude Desktop",
-      "Query via Cypher",
-    ]
 
 
 # Public offering router - comprehensive service menu
@@ -262,76 +199,45 @@ async def get_service_offerings(
     # Sort graph tiers by price
     graph_tiers.sort(key=lambda x: x["monthly_price_per_graph"])
 
-    # Get repository subscription information from both sources
-    all_repo_configs = UserRepository.get_all_repository_configs()
-
+    # Get repository subscription information directly from manifests
     repositories = []
-    for repo_type, repo_config in all_repo_configs.items():
-      # Convert repository plans
+    for repo_id, manifest in _get_all_manifests().items():
       plans = []
-      for plan_type, plan_config in repo_config.get("plans", {}).items():
-        # Get rate limits from RepositoryBillingConfig if available
-        from ..config.billing.repositories import RepositoryPlan, SharedRepository
+      if manifest.plans:
+        for plan_key, plan_details in manifest.plans.items():
+          try:
+            plan_enum = RepositoryPlan(plan_key)
+          except ValueError:
+            continue
+          rate_limits = _get_rate_limits(repo_id, plan_enum)
 
-        try:
-          repo_enum = SharedRepository(repo_type.value)
-          plan_enum = RepositoryPlan(plan_type.value)
-          rate_limits = RepositoryBillingConfig.get_rate_limits(repo_enum, plan_enum)
-        except (ValueError, KeyError):
-          rate_limits = None
-
-        # Get plan details from RepositoryBillingConfig
-        try:
-          plan_enum = RepositoryPlan(plan_type.value)
-          plan_details = RepositoryBillingConfig.get_plan_details(plan_enum)
-        except (ValueError, KeyError):
-          plan_details = None
-
-        # Use the feature generator or get from plan_details
-        if plan_details and "features" in plan_details:
-          features = plan_details["features"]
-        else:
-          features = OfferingFeatureGenerator.get_features_for_repository(
-            repo_type.value, plan_type.value, plan_config
-          )
-
-        plan_info = {
-          "plan": plan_type.value,
-          "name": plan_config["name"],
-          "monthly_price": plan_config["price_monthly"],
-          "monthly_credits": plan_config["monthly_credits"],
-          "access_level": plan_config["access_level"].value,
-          "features": features,
-        }
-
-        # Add rate limits if available
-        if rate_limits:
-          plan_info["rate_limits"] = {
-            "queries_per_hour": rate_limits.get("queries_per_hour"),
-            "mcp_queries_per_hour": rate_limits.get("mcp_queries_per_hour"),
-            "agent_calls_per_hour": rate_limits.get("agent_calls_per_hour"),
+          plan_info = {
+            "plan": plan_key,
+            "name": plan_details.get("name", plan_key.title()),
+            "monthly_price": plan_details.get("price_monthly", 0),
+            "monthly_credits": plan_details.get("monthly_credits", 0),
+            "access_level": plan_details.get("access_level", "READ").lower(),
+            "features": plan_details.get("features", []),
           }
 
-        plans.append(plan_info)
+          if rate_limits:
+            plan_info["rate_limits"] = {
+              "queries_per_hour": rate_limits.get("queries_per_hour"),
+              "mcp_queries_per_hour": rate_limits.get("mcp_queries_per_hour"),
+              "agent_calls_per_hour": rate_limits.get("agent_calls_per_hour"),
+            }
+
+          plans.append(plan_info)
 
       # Sort plans by price
       plans.sort(key=lambda x: x["monthly_price"])
 
-      # Repository descriptions
-      descriptions = {
-        "sec": "SEC public company filings and financial data",
-        "industry": "Industry benchmarking and comparative analysis data",
-        "economic": "Economic indicators and macroeconomic metrics",
-      }
-
       repo_info = {
-        "type": repo_type.value,
-        "name": f"{repo_type.value.upper()} Data",
-        "description": descriptions.get(
-          repo_type.value, f"{repo_type.value.title()} data repository"
-        ),
-        "enabled": repo_config.get("enabled", False),
-        "coming_soon": repo_config.get("coming_soon", False),
+        "type": repo_id,
+        "name": manifest.name,
+        "description": manifest.description,
+        "enabled": manifest.status == "available",
+        "coming_soon": manifest.status == "coming_soon",
         "plans": plans,
       }
       repositories.append(repo_info)

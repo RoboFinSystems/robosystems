@@ -19,7 +19,6 @@ from .helpers import (
 from .repositories import (
   get_graph_repository_dependency,
   get_main_repository,
-  get_sec_repository,
   get_shared_repository,
   get_user_graph_repository,
 )
@@ -31,7 +30,6 @@ __all__ = [
   "get_graph_repository_dependency",
   "get_graph_repository_with_auth",
   "get_main_repository",
-  "get_sec_repository",
   "get_shared_repository",
   "get_universal_repository_with_auth",
   "get_user_graph_repository",

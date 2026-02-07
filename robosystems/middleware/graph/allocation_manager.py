@@ -25,7 +25,6 @@ from botocore.exceptions import ClientError
 from robosystems.config import env
 from robosystems.logger import logger
 from robosystems.middleware.graph.types import (
-  GRAPH_ID_PATTERN,
   GraphTier,
   GraphTypeRegistry,
   is_subgraph_id,
@@ -38,9 +37,21 @@ from .utils import MultiTenantUtils, parse_subgraph_id
 VALID_ENTITY_ID_PATTERN = re.compile(
   r"^[a-zA-Z0-9_-]{1,128}$"
 )  # Entity IDs: alphanumeric, underscore, dash (max 128 chars)
-VALID_GRAPH_ID_REGEX = re.compile(
-  GRAPH_ID_PATTERN
-)  # Graph IDs: canonical pattern from constants (compiled regex)
+
+# Graph ID regex is lazy to avoid circular imports at module load time
+_VALID_GRAPH_ID_REGEX: re.Pattern[str] | None = None
+
+
+def _get_valid_graph_id_regex() -> re.Pattern[str]:
+  """Get compiled graph ID regex, building it lazily on first call."""
+  global _VALID_GRAPH_ID_REGEX
+  if _VALID_GRAPH_ID_REGEX is None:
+    from robosystems.middleware.graph.types import GRAPH_ID_PATTERN
+
+    _VALID_GRAPH_ID_REGEX = re.compile(GRAPH_ID_PATTERN)
+  return _VALID_GRAPH_ID_REGEX
+
+
 VALID_INSTANCE_ID_PATTERN = re.compile(r"^i-[0-9a-f]{8,17}$")  # AWS instance ID format
 
 
@@ -269,7 +280,7 @@ class LadybugAllocationManager:
 
       graph_id = f"kg{uuid.uuid4().hex[:16]}"
 
-    if not VALID_GRAPH_ID_REGEX.match(graph_id):
+    if not _get_valid_graph_id_regex().match(graph_id):
       # Check if this looks like a subgraph ID - provide helpful error
       if is_subgraph_id(graph_id):
         parent_id = graph_id.split("_")[0]

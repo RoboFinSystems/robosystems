@@ -19,9 +19,11 @@ def is_shared_repository(graph_id: str | None) -> bool:
   Returns:
       bool: True if this is a shared repository
   """
-  from ..types import GraphTypeRegistry
+  from robosystems.config.shared_repositories import (
+    is_shared_repository as _registry_check,
+  )
 
-  return graph_id in GraphTypeRegistry.SHARED_REPOSITORIES
+  return _registry_check(graph_id)
 
 
 def validate_graph_id(graph_id: str) -> str:
@@ -66,7 +68,7 @@ def validate_graph_id(graph_id: str) -> str:
   if graph_id.startswith("_") or graph_id.endswith("_"):
     raise ValueError("graph_id cannot start or end with underscore")
 
-  reserved_names = {"system", "ladybug", "default", "sec"}
+  reserved_names = {"system", "ladybug", "default"}
   if graph_id.lower() in reserved_names:
     raise ValueError(f"graph_id '{graph_id}' is a reserved name")
 
@@ -93,39 +95,3 @@ def validate_database_creation(graph_id: str) -> str:
 
   logger.info(f"Validated database creation for graph_id: {validated_graph_id}")
   return validated_graph_id
-
-
-def is_sec_database(graph_id: str) -> bool:
-  """
-  Check if the given graph_id refers to the shared SEC database.
-
-  Args:
-      graph_id: Graph identifier to check
-
-  Returns:
-      bool: True if this is the SEC database
-  """
-  return graph_id == "sec"
-
-
-def get_sec_database_name() -> str:
-  """
-  Get the SEC database name.
-
-  Returns:
-      str: Always returns 'sec' for the shared public data repository
-  """
-  return "sec"
-
-
-def validate_sec_access(graph_id: str) -> bool:
-  """
-  Validate that the requested graph_id is appropriate for SEC access.
-
-  Args:
-      graph_id: Graph identifier being requested
-
-  Returns:
-      bool: True if SEC access is valid for this graph_id
-  """
-  return is_sec_database(graph_id)

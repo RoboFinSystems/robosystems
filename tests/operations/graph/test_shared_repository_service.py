@@ -2,7 +2,8 @@
 Tests for SharedRepositoryService.
 
 Tests the shared repository service that manages shared graph repositories
-like SEC, industry, and economic data accessible across multiple users.
+like SEC. These repositories contain public data and are accessible
+across multiple users via subscriptions.
 """
 
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -81,7 +82,7 @@ class TestSharedRepositoryService:
           assert result["created_by"] == "user123"
           assert "created_at" in result
           assert "database_info" in result
-          assert result["config"]["name"] == "SEC EDGAR Filings"
+          assert result["manifest_id"] == "sec"
 
           mock_factory.assert_called_once_with(graph_id="sec", operation_type="write")
           mock_lbug_client.close.assert_called_once()
@@ -94,33 +95,6 @@ class TestSharedRepositoryService:
 
     assert "Invalid repository name" in str(exc_info.value)
     assert "Must be one of" in str(exc_info.value)
-
-  @pytest.mark.asyncio
-  async def test_create_shared_repository_all_types(
-    self, service, mock_lbug_client, mock_db_session
-  ):
-    """Test creation of all valid repository types."""
-    valid_repos = ["sec", "industry", "economic"]
-
-    for repo_name in valid_repos:
-      with patch(
-        "robosystems.graph_api.client.factory.GraphClientFactory.create_client"
-      ) as mock_factory:
-        mock_factory.return_value = mock_lbug_client
-
-        with patch("robosystems.database.get_db_session") as mock_db:
-          mock_db.return_value = iter([mock_db_session])
-
-          with patch("robosystems.models.iam.graph.Graph") as mock_graph_cls:
-            mock_graph = MagicMock()
-            mock_graph.graph_id = repo_name
-            mock_graph_cls.find_or_create_repository.return_value = mock_graph
-
-            result = await service.create_shared_repository(repo_name)
-
-            assert result["repository_name"] == repo_name
-            assert result["graph_id"] == repo_name
-            assert result["status"] == "created"
 
 
 class TestEnsureSharedRepositoryExists:
@@ -187,14 +161,14 @@ class TestEnsureSharedRepositoryExists:
       ) as mock_create:
         mock_create.return_value = {
           "status": "created",
-          "repository_name": "economic",
-          "graph_id": "economic",
+          "repository_name": "sec",
+          "graph_id": "sec",
         }
 
-        result = await ensure_shared_repository_exists("economic")
+        result = await ensure_shared_repository_exists("sec")
 
         assert result["status"] == "created"
-        assert result["repository_name"] == "economic"
+        assert result["repository_name"] == "sec"
 
         mock_create.assert_called_once()
         mock_client.close.assert_called_once()
@@ -217,10 +191,10 @@ class TestEnsureSharedRepositoryExists:
       ) as mock_create:
         mock_create.return_value = {
           "status": "created",
-          "repository_name": "industry",
+          "repository_name": "sec",
         }
 
-        result = await ensure_shared_repository_exists("industry")
+        result = await ensure_shared_repository_exists("sec")
 
         assert result["status"] == "created"
         mock_create.assert_called_once()

@@ -46,12 +46,9 @@ from .subgraph import (
   validate_subgraph_name,
 )
 from .validation import (
-  get_sec_database_name,
-  is_sec_database,
   is_shared_repository,
   validate_database_creation,
   validate_graph_id,
-  validate_sec_access,
 )
 
 # Backward compatibility alias
@@ -61,15 +58,10 @@ AccessPattern = ConnectionPattern
 class MultiTenantUtils:
   """Utility class for multi-tenant database operations."""
 
-  SHARED_REPOSITORIES = GraphTypeRegistry.SHARED_REPOSITORIES
-
   # Validation methods
   is_multitenant_mode = staticmethod(is_multitenant_mode)
   validate_graph_id = staticmethod(validate_graph_id)
   validate_database_creation = staticmethod(validate_database_creation)
-  is_sec_database = staticmethod(is_sec_database)
-  get_sec_database_name = staticmethod(get_sec_database_name)
-  validate_sec_access = staticmethod(validate_sec_access)
   is_shared_repository = staticmethod(is_shared_repository)
 
   # Database methods
@@ -135,11 +127,9 @@ __all__ = [
   "get_migration_status",
   "get_repository_database_name",
   "get_repository_type_from_graph_id",
-  "get_sec_database_name",
   # Database functions
   "is_multitenant_mode",
   "is_parent_graph",
-  "is_sec_database",
   "is_shared_repository",
   "is_subgraph",
   "is_user_graph",
@@ -154,6 +144,5 @@ __all__ = [
   "validate_graph_id",
   "validate_parent_graph_id",
   "validate_repository_access",
-  "validate_sec_access",
   "validate_subgraph_name",
 ]

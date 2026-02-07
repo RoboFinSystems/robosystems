@@ -160,17 +160,18 @@ ENABLE_CREDITS=true
 
 All configuration is centralized and config-as-code:
 
-| Module               | Purpose                                        |
-| -------------------- | ---------------------------------------------- |
-| `env.py`             | Environment variables with validation          |
-| `billing/`           | Subscription plans and pricing (core, ai, repositories) |
-| `graph_tier.py`      | Graph tier config from `.github/configs/graph.yml` |
-| `rate_limits.py`     | Burst-focused rate limiting (1-minute windows) |
-| `credits.py`         | AI operation credit costs                      |
-| `agents.py`          | Claude model configuration (Bedrock)           |
-| `validation.py`      | Startup configuration checks                   |
-| `valkey_registry.py` | Redis database allocation                      |
-| `storage/`           | S3 path helpers (shared data, graph storage)   |
+| Module                  | Purpose                                        |
+| ----------------------- | ---------------------------------------------- |
+| `env.py`                | Environment variables with validation          |
+| `shared_repositories.py`| Shared repository registry, plans, and rate limits |
+| `billing/`              | Subscription plans and pricing (core, ai, storage) |
+| `graph_tier.py`         | Graph tier config from `.github/configs/graph.yml` |
+| `rate_limits.py`        | Burst-focused rate limiting (1-minute windows) |
+| `credits.py`            | AI operation credit costs                      |
+| `agents.py`             | Claude model configuration (Bedrock)           |
+| `validation.py`         | Startup configuration checks                   |
+| `valkey_registry.py`    | Redis database allocation                      |
+| `storage/`              | S3 path helpers (shared data, graph storage)   |
 
 ### Subscription Tiers
 

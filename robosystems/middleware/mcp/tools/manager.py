@@ -85,16 +85,16 @@ class GraphMCPTools:
     """
     Check if we should include the element discovery tool.
 
-    Returns true if:
-    1. This is the SEC database (always has elements)
-    2. OR if Element nodes exist in the current graph
+    Returns true if the manifest declares has_element_discovery=True.
     """
-    if self.client.graph_id == "sec":
+    from robosystems.config.shared_repositories import get_manifest
+
+    manifest = get_manifest(self.client.graph_id)
+    if manifest and manifest.has_element_discovery:
       return True
 
-    # For other graphs, we'd need to check if Element nodes exist
+    # For non-shared graphs, we'd need to check if Element nodes exist
     # but that requires a query which we want to avoid in __init__
-    # So we'll include it by default and let the tool handle the check
     return False
 
   def _get_workspace_tool_definitions(self) -> list[dict[str, Any]]:

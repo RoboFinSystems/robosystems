@@ -14,9 +14,17 @@ from enum import Enum
 
 import redis.asyncio as redis
 
-from robosystems.config import RepositoryBillingConfig, SharedRepository
-from robosystems.config.billing.repositories import RepositoryPlan
 from robosystems.config.rate_limits import EndpointCategory, RateLimitConfig
+from robosystems.config.shared_repositories import (
+  RepositoryPlan,
+  is_shared_repository,
+)
+from robosystems.config.shared_repositories import (
+  get_rate_limits as _get_rate_limits,
+)
+from robosystems.config.shared_repositories import (
+  is_endpoint_allowed as _is_endpoint_allowed,
+)
 
 
 class AllowedSharedEndpoints(str, Enum):
@@ -46,33 +54,19 @@ class SharedRepositoryRateLimits:
   """
   Rate limits specific to shared repositories by subscription tier.
 
-  Uses RepositoryBillingConfig as the single source of truth for rate limits.
+  Uses the shared repository registry as the accessor for rate limits from manifests.
   NO FREE TIER - all access requires a paid subscription.
   """
 
   @classmethod
-  def get_repository_limits(cls) -> dict:
-    """Get rate limits from the centralized billing config."""
-    return RepositoryBillingConfig.RATE_LIMITS
-
-  @classmethod
   def get_limits(cls, repository: str, plan: RepositoryPlan) -> dict:
     """Get rate limits for a repository and plan."""
-    # Convert string repository to SharedRepository enum if needed
-    if isinstance(repository, str):
-      try:
-        repository = SharedRepository(repository)
-      except ValueError:
-        return {}  # Unknown repository
-
-    # Get limits from centralized config
-    return RepositoryBillingConfig.get_rate_limits(repository, plan) or {}
+    return _get_rate_limits(repository, plan) or {}
 
   @classmethod
   def is_endpoint_allowed(cls, repository: str, endpoint: str) -> bool:
     """Check if an endpoint is allowed for a shared repository."""
-    # Use centralized config for endpoint validation
-    return RepositoryBillingConfig.is_endpoint_allowed(endpoint)
+    return _is_endpoint_allowed(endpoint)
 
 
 class DualLayerRateLimiter:
@@ -110,7 +104,7 @@ class DualLayerRateLimiter:
     """
 
     # Check if this is a shared repository
-    if self._is_shared_repository(graph_id):
+    if is_shared_repository(graph_id):
       # First check if the endpoint is even allowed
       if not SharedRepositoryRateLimits.is_endpoint_allowed(graph_id, endpoint):
         return {
@@ -141,7 +135,7 @@ class DualLayerRateLimiter:
 
     # Layer 2: Check repository-specific limits (if applicable)
     repo_check = None
-    if self._is_shared_repository(graph_id) and repository_plan:
+    if is_shared_repository(graph_id) and repository_plan:
       repo_check = await self._check_repository_limit(
         user_id, graph_id, operation, repository_plan
       )
@@ -156,7 +150,7 @@ class DualLayerRateLimiter:
     return {
       "allowed": True,
       "burst": burst_check,
-      "repo": repo_check if self._is_shared_repository(graph_id) else None,
+      "repo": repo_check if is_shared_repository(graph_id) else None,
     }
 
   async def _check_burst_limit(self, user_id: str, operation: str, tier: str) -> dict:
@@ -273,10 +267,6 @@ class DualLayerRateLimiter:
         checks.append({"window": "day", "limit": limit, "current": count})
 
     return {"allowed": True, "checks": checks}
-
-  def _is_shared_repository(self, graph_id: str) -> bool:
-    """Check if this is a shared repository."""
-    return graph_id in [repo.value for repo in SharedRepository]
 
   def _operation_to_category(self, operation: str) -> EndpointCategory:
     """Map operation to endpoint category for burst limits."""

@@ -14,7 +14,7 @@ from fastapi import (
 )
 from sqlalchemy.orm import Session
 
-from robosystems.config.billing.repositories import RepositoryPlan
+from robosystems.config.shared_repositories import RepositoryPlan
 from robosystems.database import get_db_session
 from robosystems.logger import logger
 from robosystems.middleware.auth.dependencies import get_current_user_with_graph

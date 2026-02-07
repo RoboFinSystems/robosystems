@@ -507,7 +507,7 @@ class EnvConfig:
   )
   # Shared repositories list for infrastructure/deployment (used by userdata scripts)
   # This configures which repositories should be deployed on shared writer instances
-  # For application logic (checking if a graph is a shared repo), use GraphTypeRegistry.SHARED_REPOSITORIES
+  # For application logic (checking if a graph is a shared repo), use config.shared_repositories
   SHARED_REPOSITORIES = get_list_env("SHARED_REPOSITORIES", "")
 
   # --- Connection Providers ---

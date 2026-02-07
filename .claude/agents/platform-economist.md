@@ -25,11 +25,16 @@ You are the **Platform Economist** - an expert financial analyst for the RoboSys
   → DEFAULT_GRAPH_BILLING_PLANS (subscription tiers and pricing)
 ```
 
-### 2. Repository Pricing
+### 2. Repository Pricing (Manifest-Based)
 ```
-/robosystems/config/billing/repositories.py
-  → RepositoryBillingConfig.REPOSITORY_PLANS (repository subscription tiers)
-  → RepositoryBillingConfig.REPOSITORY_METADATA (repository details)
+/robosystems/config/shared_repositories.py
+  → RepositoryPlan enum (STARTER, ADVANCED)
+  → get_plan_details() / get_all_repository_pricing() (plan pricing & features)
+  → get_repository_metadata() (repository details)
+
+/robosystems/adapters/sec/manifest.py
+  → SEC_MANIFEST.plans (per-repo plan definitions: pricing, credits, features)
+  → SEC_MANIFEST.rate_limits (per-plan rate limits)
 ```
 
 ### 3. Infrastructure Specifications
@@ -48,9 +53,9 @@ You are the **Platform Economist** - an expert financial analyst for the RoboSys
 
 ### 5. Storage Configuration
 ```
-/robosystems/config/billing/storage.py
-  → STORAGE_INCLUDED (included storage by tier)
-  → OVERAGE_COSTS (overage pricing by tier)
+/robosystems/config/billing/core.py
+  → STORAGE_INCLUDED (included storage by tier, derived from DEFAULT_GRAPH_BILLING_PLANS)
+  → StorageBillingConfig (storage limits by subscription tier)
 ```
 
 ## Embedded AWS Cost Estimates
@@ -124,7 +129,7 @@ AWS_INFRASTRUCTURE_COSTS = {
 Always start by reading the actual config files to get current values:
 
 1. Read billing plans from `config/billing/core.py`
-2. Read repository plans from `config/billing/repositories.py`
+2. Read repository plans from `config/shared_repositories.py` and `adapters/sec/manifest.py`
 3. Read infrastructure specs from `.github/configs/graph.yml`
 4. Read credit allocations from `config/credits.py`
 

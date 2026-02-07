@@ -892,11 +892,11 @@ async def _check_shared_repository_limits(
       HTTPException: If access is denied or rate limits are exceeded
   """
   from robosystems.config import env
-  from robosystems.config.billing.repositories import SharedRepository
+  from robosystems.config.shared_repositories import is_shared_repository
   from robosystems.models.iam.user_repository import UserRepository
 
   # Only apply to shared repositories
-  if graph_id not in [repo.value for repo in SharedRepository]:
+  if not is_shared_repository(graph_id):
     return
 
   # ALWAYS check access (authorization) - this is not gated by rate limiting
