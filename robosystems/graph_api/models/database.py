@@ -53,6 +53,13 @@ class SchemaInstallResponse(BaseModel):
   statements_executed: int = Field(0, description="Number of DDL statements executed")
 
 
+class S3Destination(BaseModel):
+  """Target S3 location for on-instance backup upload."""
+
+  bucket: str = Field(..., description="S3 bucket name")
+  key: str = Field(..., description="S3 object key")
+
+
 class BackupRequest(BaseModel):
   """Request model for database backup."""
 
@@ -69,6 +76,19 @@ class BackupRequest(BaseModel):
   )
   encryption: bool = Field(
     default=False, description="Enable encryption for secure storage"
+  )
+  backup_type: str = Field(
+    default="standard",
+    description="Backup type: 'standard' (ZIP to S3), 'replica' (raw .lbug to S3), 'shared_repository' (tar.gz to S3)",
+    pattern="^(standard|replica|shared_repository)$",
+  )
+  s3_destination: S3Destination | None = Field(
+    default=None,
+    description="Target S3 location for on-instance upload (required for replica/shared_repository types)",
+  )
+  checkpoint: bool = Field(
+    default=True,
+    description="Run CHECKPOINT to flush WAL before backup",
   )
 
 

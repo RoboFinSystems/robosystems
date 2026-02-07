@@ -342,12 +342,12 @@ sec_backup_job = define_asset_job(
   tags={
     "pipeline": "sec",
     "phase": "backup",
-    # Higher profile: downloads full backup, compresses locally, uploads to S3
-    # SEC database is huge - needs memory to hold entire backup during compression
-    "ecs/cpu": "2048",
-    "ecs/memory": "8192",
-    "ecs/ephemeral_storage": "50",
-    # On-demand to avoid interruptions during backup
+    # Minimal profile: just orchestrating Graph API calls, no local compute
+    # Backup runs entirely on-instance (CHECKPOINT + tar.gz + S3 upload)
+    "ecs/cpu": "256",
+    "ecs/memory": "512",
+    "ecs/ephemeral_storage": "21",
+    # On-demand to avoid interruptions during backup monitoring
     "ecs/run_task_kwargs": {
       "capacityProviderStrategy": [
         {"capacityProvider": "FARGATE", "weight": 1, "base": 1},

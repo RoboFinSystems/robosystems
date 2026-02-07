@@ -1067,6 +1067,9 @@ class GraphClient(BaseGraphClient):
     backup_format: str = "full_dump",
     compression: bool = True,
     encryption: bool = False,
+    backup_type: str = "standard",
+    s3_destination: dict[str, str] | None = None,
+    checkpoint: bool = True,
   ) -> dict[str, Any]:
     """
     Create a backup of a database.
@@ -1076,6 +1079,9 @@ class GraphClient(BaseGraphClient):
         backup_format: Backup format (only 'full_dump' supported)
         compression: Enable compression
         encryption: Enable encryption
+        backup_type: "standard", "replica", or "shared_repository"
+        s3_destination: Target S3 location (required for replica/shared_repository)
+        checkpoint: Run CHECKPOINT before backup
 
     Returns:
         Task information including task_id and monitor_url
@@ -1084,7 +1090,11 @@ class GraphClient(BaseGraphClient):
       "backup_format": backup_format,
       "compression": compression,
       "encryption": encryption,
+      "backup_type": backup_type,
+      "checkpoint": checkpoint,
     }
+    if s3_destination:
+      payload["s3_destination"] = s3_destination
 
     response = await self.client.post(
       f"/databases/{graph_id}/backup",
@@ -1101,6 +1111,9 @@ class GraphClient(BaseGraphClient):
     compression: bool = True,
     encryption: bool = False,
     timeout: int = 3600,  # 1 hour default
+    backup_type: str = "standard",
+    s3_destination: dict[str, str] | None = None,
+    checkpoint: bool = True,
   ) -> dict[str, Any]:
     """
     Create a backup and monitor via SSE.
@@ -1111,6 +1124,9 @@ class GraphClient(BaseGraphClient):
         compression: Enable compression
         encryption: Enable encryption
         timeout: Maximum time to wait for completion (seconds)
+        backup_type: "standard", "replica", or "shared_repository"
+        s3_destination: Target S3 location (required for replica/shared_repository)
+        checkpoint: Run CHECKPOINT before backup
 
     Returns:
         Dict with backup results:
@@ -1128,6 +1144,9 @@ class GraphClient(BaseGraphClient):
         backup_format=backup_format,
         compression=compression,
         encryption=encryption,
+        backup_type=backup_type,
+        s3_destination=s3_destination,
+        checkpoint=checkpoint,
       )
 
       task_id = start_response["task_id"]
