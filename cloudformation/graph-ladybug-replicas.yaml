@@ -366,7 +366,7 @@ Resources:
             export CFN_STACK_NAME="${AWS::StackName}"
             export CFN_RESOURCE="ReplicaAutoScalingGroup"
             export LBUG_S3_ATTACH_URI="${SharedDatabaseS3Uri}"
-            export CloudWatchNamespace="RoboSystems/Graph/${Environment}"
+            export CLOUDWATCH_NAMESPACE="RoboSystems/Graph/${Environment}"
 
             echo "Configuration:"
             echo "  Environment: $ENVIRONMENT"
