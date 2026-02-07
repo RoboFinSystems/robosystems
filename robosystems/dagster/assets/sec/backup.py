@@ -24,6 +24,7 @@ from dagster import (
   asset,
 )
 
+from robosystems.config.constants import TASK_TIME_LIMIT
 from robosystems.dagster.resources import DatabaseResource, S3Resource
 
 from .configs import SECBackupConfig
@@ -129,7 +130,7 @@ def sec_backup(
         s3_destination={"bucket": bucket, "key": s3_key},
         compression=True,
         checkpoint=True,
-        timeout=7200,  # 2 hours for large databases
+        timeout=TASK_TIME_LIMIT,
       )
     )
   finally:

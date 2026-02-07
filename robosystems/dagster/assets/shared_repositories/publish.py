@@ -25,6 +25,7 @@ from dagster import (
 )
 
 from robosystems.config import env
+from robosystems.config.constants import TASK_TIME_LIMIT
 
 
 class SharedRepositoryPublishConfig(Config):
@@ -100,7 +101,7 @@ def shared_repository_s3_published(
         s3_destination={"bucket": bucket, "key": s3_key},
         compression=False,
         checkpoint=True,
-        timeout=7200,  # 2 hours for large databases
+        timeout=TASK_TIME_LIMIT,
       )
     )
   finally:

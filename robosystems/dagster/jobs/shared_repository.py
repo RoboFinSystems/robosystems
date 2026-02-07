@@ -27,6 +27,7 @@ from dagster import (
 )
 
 from robosystems.config import env
+from robosystems.config.constants import TASK_TIME_LIMIT
 
 # ============================================================================
 # Configuration
@@ -98,7 +99,7 @@ def upload_database_to_s3(
         s3_destination={"bucket": bucket, "key": s3_key},
         compression=False,
         checkpoint=True,
-        timeout=7200,  # 2 hours for large databases
+        timeout=TASK_TIME_LIMIT,
       )
     )
   finally:
