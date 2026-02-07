@@ -56,9 +56,14 @@ def create_app() -> FastAPI:
     # Startup
     logger.info("Graph API starting up")
 
-    # S3 ATTACH warmup for replicas (runs in background)
+    # S3 ATTACH warmup for replicas (runs in background thread)
     async def warmup_s3_attach():
-      """Warm up S3 ATTACH database in background."""
+      """Warm up S3 ATTACH database in background thread.
+
+      The S3 ATTACH operation downloads ~85GB and can take 10-15 minutes.
+      We run this in a thread pool to avoid blocking the event loop,
+      allowing the health endpoint to respond with 503 during warmup.
+      """
       from robosystems.graph_api.routers.health import (
         is_s3_attach_mode,
         mark_s3_attach_ready,
@@ -70,7 +75,8 @@ def create_app() -> FastAPI:
       s3_uri = os.getenv("LBUG_S3_ATTACH_URI", "")
       logger.info(f"S3 ATTACH warmup starting for: {s3_uri}")
 
-      try:
+      def _do_warmup():
+        """Blocking warmup work - runs in thread pool."""
         # Get the shared repositories to warm up (default: sec)
         shared_repos = os.getenv("SHARED_REPOSITORIES", "sec").split(",")
 
@@ -86,7 +92,7 @@ def create_app() -> FastAPI:
 
           pool = get_connection_pool()
 
-          # This will create the S3 ATTACH connection
+          # This will create the S3 ATTACH connection (downloads from S3)
           with pool.get_connection(repo, read_only=True) as conn:
             # Run a warmup query to cache some data
             logger.info(f"Running warmup query for {repo}...")
@@ -99,6 +105,11 @@ def create_app() -> FastAPI:
             finally:
               result.close()
             logger.info(f"Warmup query complete for {repo}")
+
+      try:
+        # Run blocking S3 ATTACH in thread pool to avoid blocking event loop
+        # This allows health endpoint to respond with 503 during warmup
+        await asyncio.to_thread(_do_warmup)
 
         # Mark as ready - health check will now return 200
         mark_s3_attach_ready()

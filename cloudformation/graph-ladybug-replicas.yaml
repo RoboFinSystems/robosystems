@@ -249,8 +249,21 @@ Resources:
               - Effect: Allow
                 Action:
                   - secretsmanager:GetSecretValue
+                  - secretsmanager:DescribeSecret
                 Resource:
+                  - !Sub arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:robosystems/${Environment}-*
                   - !Sub arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:robosystems/${Environment}/*
+              # KMS permissions for AWS managed keys (secrets decryption)
+              - Effect: Allow
+                Action:
+                  - kms:Decrypt
+                  - kms:DescribeKey
+                Resource:
+                  - !Sub arn:${AWS::Partition}:kms:${AWS::Region}:${AWS::AccountId}:alias/aws/secretsmanager
+                Condition:
+                  StringEquals:
+                    "kms:ViaService":
+                      - !Sub secretsmanager.${AWS::Region}.amazonaws.com
               # CloudWatch Logs - unified graph-api log group
               - Effect: Allow
                 Action:
@@ -353,6 +366,7 @@ Resources:
             export CFN_STACK_NAME="${AWS::StackName}"
             export CFN_RESOURCE="ReplicaAutoScalingGroup"
             export LBUG_S3_ATTACH_URI="${SharedDatabaseS3Uri}"
+            export CloudWatchNamespace="RoboSystems/Graph/${Environment}"
 
             echo "Configuration:"
             echo "  Environment: $ENVIRONMENT"
@@ -393,10 +407,10 @@ Resources:
         - !Ref ReplicaTargetGroup
       HealthCheckType: ELB
       # Grace period for S3 ATTACH mode - must exceed warmup time
-      # S3 ATTACH warmup can take ~10 min for large databases (httpfs caching)
-      # Set to 15 min to provide buffer. During this time, health can return 503
-      # (blocking ALB traffic) without ASG marking instance unhealthy.
-      HealthCheckGracePeriod: 900
+      # S3 ATTACH downloads ~85GB database which takes ~25-30 min
+      # Set to 35 min (2100s) to provide buffer. During this time, health can
+      # return 503 (blocking ALB traffic) without ASG marking instance unhealthy.
+      HealthCheckGracePeriod: 2100
       Tags:
         - Key: Name
           Value: !Sub robosystems-shared-replica-${Environment}
@@ -410,12 +424,14 @@ Resources:
     CreationPolicy:
       ResourceSignal:
         Count: !If [HasMinInstances, !Ref MinInstances, 0]
-        Timeout: PT15M
+        # S3 ATTACH downloads ~85GB database which takes ~25-30 min
+        Timeout: PT35M
     UpdatePolicy:
       AutoScalingRollingUpdate:
         MinInstancesInService: !If [HasMinInstances, 1, 0]
         MaxBatchSize: 1
-        PauseTime: PT5M
+        # Rolling updates also need time for S3 ATTACH warmup
+        PauseTime: PT35M
         WaitOnResourceSignals: !If [HasMinInstances, true, false]
 
   # CPU-based Auto Scaling
