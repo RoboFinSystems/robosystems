@@ -27,8 +27,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Session, relationship
 
-from ...config.billing.core import StorageBillingConfig
-from ...config.graph_tier import GraphTier
+from ...config.graph_tier import GraphTier, GraphTierConfig
 from ...database import Base
 from ...utils.ulid import generate_prefixed_ulid
 
@@ -154,8 +153,9 @@ class GraphCredits(Base):
     # In simplified model, no multipliers are used
     # All tiers have 1.0 multiplier
 
-    # Get storage limit from billing configuration
-    storage_limit_gb = StorageBillingConfig.STORAGE_INCLUDED.get(graph_tier.value, 100)
+    # Get storage safety cap from backup limits (storage included in tier, not billed)
+    backup_limits = GraphTierConfig.get_backup_limits(graph_tier.value)
+    storage_limit_gb = backup_limits.get("max_backup_size_gb", 10)
 
     credits = cls(
       id=generate_prefixed_ulid("crd"),

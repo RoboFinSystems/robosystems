@@ -56,11 +56,25 @@ class CreditLimits(BaseModel):
 
   monthly_ai_credits: int = Field(..., description="Monthly AI credits allocation")
   current_balance: int = Field(..., description="Current credit balance")
-  storage_billing_enabled: bool = Field(
-    ..., description="Whether storage billing is enabled"
+
+
+class ContentLimits(BaseModel):
+  """Graph content limits (nodes, relationships, rows)."""
+
+  max_nodes: int = Field(..., description="Maximum nodes allowed")
+  current_nodes: int | None = Field(None, description="Current node count")
+  max_relationships: int = Field(..., description="Maximum relationships allowed")
+  current_relationships: int | None = Field(
+    None, description="Current relationship count"
   )
-  storage_rate_per_gb_per_day: int = Field(
-    ..., description="Storage billing rate per GB per day"
+  max_rows_per_copy: int = Field(
+    ..., description="Maximum rows per copy/materialization operation"
+  )
+  max_single_table_rows: int = Field(..., description="Maximum rows per staging table")
+  chunk_size_rows: int = Field(..., description="Rows per materialization chunk")
+  approaching_limits: list[str] = Field(
+    default_factory=list,
+    description="List of limits being approached (>80%)",
   )
 
 
@@ -80,21 +94,21 @@ class GraphLimitsResponse(BaseModel):
             "is_shared_repository": False,
             "storage": {
               "current_usage_gb": 2.45,
-              "max_storage_gb": 500,
+              "max_storage_gb": 10,
               "approaching_limit": False,
             },
             "queries": {
-              "max_timeout_seconds": 60,
+              "max_timeout_seconds": 30,
               "chunk_size": 1000,
               "max_rows_per_query": 10000,
               "concurrent_queries": 1,
             },
             "copy_operations": {
               "max_file_size_gb": 1.0,
-              "timeout_seconds": 300,
+              "timeout_seconds": 900,
               "concurrent_operations": 1,
               "max_files_per_operation": 100,
-              "daily_copy_operations": 10,
+              "daily_copy_operations": 25,
               "supported_formats": ["parquet", "csv", "json", "delta", "iceberg"],
             },
             "backups": {
@@ -108,16 +122,24 @@ class GraphLimitsResponse(BaseModel):
               "burst_capacity": 10,
             },
             "credits": {
-              "monthly_ai_credits": 10000,
+              "monthly_ai_credits": 8000,
               "current_balance": 7500,
-              "storage_billing_enabled": True,
-              "storage_rate_per_gb_per_day": 10,
+            },
+            "content": {
+              "max_nodes": 5000000,
+              "current_nodes": 150000,
+              "max_relationships": 10000000,
+              "current_relationships": 400000,
+              "max_rows_per_copy": 2000000,
+              "max_single_table_rows": 5000000,
+              "chunk_size_rows": 1000000,
+              "approaching_limits": [],
             },
           },
         },
         {
           "summary": "Shared repository limits (SEC)",
-          "description": "Operational limits for SEC shared repository (read-only, no credits)",
+          "description": "Operational limits for SEC shared repository (read-only, no credits or content limits)",
           "value": {
             "graph_id": "sec",
             "subscription_tier": "ladybug-standard",
@@ -125,7 +147,7 @@ class GraphLimitsResponse(BaseModel):
             "is_shared_repository": True,
             "storage": {
               "current_usage_gb": 125.3,
-              "max_storage_gb": 1000,
+              "max_storage_gb": 100,
               "approaching_limit": False,
             },
             "queries": {
@@ -154,51 +176,6 @@ class GraphLimitsResponse(BaseModel):
             },
           },
         },
-        {
-          "summary": "Enterprise tier limits",
-          "description": "Operational limits for ladybug-large tier with enhanced capabilities",
-          "value": {
-            "graph_id": "kg9f8e7d6c5",
-            "subscription_tier": "ladybug-large",
-            "graph_tier": "ladybug-large",
-            "is_shared_repository": False,
-            "storage": {
-              "current_usage_gb": 450.8,
-              "max_storage_gb": 2000,
-              "approaching_limit": False,
-            },
-            "queries": {
-              "max_timeout_seconds": 300,
-              "chunk_size": 5000,
-              "max_rows_per_query": 10000,
-              "concurrent_queries": 1,
-            },
-            "copy_operations": {
-              "max_file_size_gb": 10.0,
-              "timeout_seconds": 900,
-              "concurrent_operations": 5,
-              "max_files_per_operation": 500,
-              "daily_copy_operations": 100,
-              "supported_formats": ["parquet", "csv", "json", "delta", "iceberg"],
-            },
-            "backups": {
-              "max_backup_size_gb": 100,
-              "backup_retention_days": 90,
-              "max_backups_per_day": 10,
-            },
-            "rate_limits": {
-              "requests_per_minute": 300,
-              "requests_per_hour": 5000,
-              "burst_capacity": 50,
-            },
-            "credits": {
-              "monthly_ai_credits": 50000,
-              "current_balance": 42300,
-              "storage_billing_enabled": True,
-              "storage_rate_per_gb_per_day": 10,
-            },
-          },
-        },
       ]
     }
   )
@@ -218,4 +195,7 @@ class GraphLimitsResponse(BaseModel):
   rate_limits: RateLimits = Field(..., description="API rate limits")
   credits: CreditLimits | None = Field(
     None, description="AI credit limits (if applicable)"
+  )
+  content: ContentLimits | None = Field(
+    None, description="Graph content limits (if applicable)"
   )

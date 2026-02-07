@@ -8,24 +8,24 @@
 # - Supports "MotherDuck for Graphs" pattern: DuckDB staging → LadybugDB materialization
 #
 # TIER PHILOSOPHY:
-# - Standard: Multi-tenant, single database, cost-efficient entry
-# - Professional: Dedicated instance, subgraphs for organization, team collaboration
-# - Enterprise: Large dedicated instance, unlimited subgraphs, advanced scale
+# - Standard: Dedicated m7g.large, single database + 3 subgraphs, cost-efficient entry
+# - Large: Dedicated r7g.large, subgraphs for organization, team collaboration
+# - XLarge: Dedicated r7g.xlarge, maximum subgraphs, advanced scale
 # - Shared: Public data repositories (SEC, industry, economic) - separate infrastructure
 
 production:
   writers:
     # =========================================================================
-    # LADYBUGDB STANDARD TIER - Multi-tenant
+    # LADYBUGDB STANDARD TIER - Dedicated m7g.large
     # =========================================================================
     - name: ladybug-standard
-      description: Multi-tenant LadybugDB tier for cost-efficient entry (scalable instance size)
+      description: Dedicated m7g.large LadybugDB tier for cost-efficient entry with subgraph support
       backend: ladybug
       stack_suffix: LadybugStandard
       tier: ladybug-standard
 
       # Subgraph configuration
-      max_subgraphs: 0 # Single database only, no subgraph support
+      max_subgraphs: 3 # Up to 3 subgraphs (1 parent + 3 children = 4 databases total)
 
       # Resource limits
       api_rate_multiplier: 1.0 # Base rate limits (1x)
@@ -33,10 +33,10 @@ production:
       # Copy operation limits
       copy_operations:
         max_file_size_gb: 1.0 # Maximum file size per copy operation
-        timeout_seconds: 300 # 5 minute timeout for copy operations
+        timeout_seconds: 900 # 15 minute timeout for dedicated instance
         concurrent_operations: 1 # One copy operation at a time
         max_files_per_operation: 100 # Maximum files per batch copy
-        daily_copy_operations: 10 # Daily copy operation limit
+        daily_copy_operations: 25 # Daily copy operation limit
 
       # Backup limits
       backup_limits:
@@ -44,14 +44,29 @@ production:
         backup_retention_days: 7 # Backup retention period
         max_backups_per_day: 2 # Daily backup limit
 
+      # Graph content limits (enforced at materialization time)
+      graph_limits:
+        max_nodes: 5000000           # 5M nodes
+        max_relationships: 10000000  # 10M relationships
+        max_rows_per_copy: 2000000   # 2M rows per copy operation
+        max_single_table_rows: 5000000 # 5M rows per staging table
+        chunk_size_rows: 1000000     # 1M rows per materialization chunk
+        warn_at_percentage: 80       # Warn when approaching limits
+
+      # Memory boost configuration
+      memory:
+        baseline_mb: 2048    # Default LadybugDB memory (m7g.large = 8GB)
+        max_boost_mb: 6144   # Max boost during materialization
+        auto_reset: true     # Reset to baseline after operation
+
       # Instance configuration
       instance:
-        type: r7g.large # 16GB RAM, 2 vCPUs, ARM64
-        databases_per_instance: 10 # Multi-tenant: 10 customer databases per instance
+        type: m7g.large # 8GB RAM, 2 vCPUs, ARM64 - dedicated per customer
+        databases_per_instance: 1 # Dedicated: one customer per instance
 
         # Memory configuration
-        max_memory_mb: 14336 # 14GB available (16GB - 2GB OS overhead)
-        memory_per_db_mb: 2048 # 2GB per database (intentional oversubscription for cost efficiency)
+        max_memory_mb: 6144 # 6GB available (8GB - 2GB OS overhead)
+        memory_per_db_mb: 2048 # 2GB per database
 
         # LadybugDB-specific performance settings
         chunk_size: 1000 # Batch operation chunk size
@@ -61,8 +76,8 @@ production:
         connection_pool_size: 10 # Max concurrent connections per database
 
         # DuckDB staging configuration
-        duckdb_memory_limit: "2GB" # Conservative for multi-tenant (shared instance resources)
-        duckdb_max_threads: 2 # Conservative for multi-tenant (2 vCPU shared)
+        duckdb_memory_limit: "2GB" # Conservative for standard tier
+        duckdb_max_threads: 2 # m7g.large = 2 vCPU
 
       # Deployment configuration
       deployment:
@@ -97,6 +112,21 @@ production:
         max_backup_size_gb: 50 # Larger backup capacity for professional workloads
         backup_retention_days: 30 # Extended retention for team collaboration
         max_backups_per_day: 10 # More frequent backups for active development
+
+      # Graph content limits (enforced at materialization time)
+      graph_limits:
+        max_nodes: 50000000          # 50M nodes
+        max_relationships: 100000000 # 100M relationships
+        max_rows_per_copy: 10000000  # 10M rows per copy operation
+        max_single_table_rows: 25000000 # 25M rows per staging table
+        chunk_size_rows: 2000000     # 2M rows per materialization chunk
+        warn_at_percentage: 80       # Warn when approaching limits
+
+      # Memory boost configuration
+      memory:
+        baseline_mb: 4096    # Default LadybugDB memory (r7g.large = 16GB)
+        max_boost_mb: 12288  # Max boost during materialization
+        auto_reset: true     # Reset to baseline after operation
 
       # Instance configuration
       instance:
@@ -153,6 +183,21 @@ production:
         max_backup_size_gb: 100 # Maximum backup capacity for enterprise
         backup_retention_days: 90 # Extended retention for compliance
         max_backups_per_day: -1 # Unlimited backups for enterprise (no daily limit)
+
+      # Graph content limits (enforced at materialization time)
+      graph_limits:
+        max_nodes: 200000000         # 200M nodes
+        max_relationships: 500000000 # 500M relationships
+        max_rows_per_copy: 50000000  # 50M rows per copy operation
+        max_single_table_rows: 100000000 # 100M rows per staging table
+        chunk_size_rows: 5000000     # 5M rows per materialization chunk
+        warn_at_percentage: 80       # Warn when approaching limits
+
+      # Memory boost configuration
+      memory:
+        baseline_mb: 8192    # Default LadybugDB memory (r7g.xlarge = 32GB)
+        max_boost_mb: 28672  # Max boost during materialization
+        auto_reset: true     # Reset to baseline after operation
 
       # Instance configuration
       instance:
@@ -367,24 +412,24 @@ production:
 staging:
   writers:
     # =========================================================================
-    # LADYBUGDB STANDARD TIER - Staging (reduced resources)
+    # LADYBUGDB STANDARD TIER - Staging (dedicated, reduced resources)
     # =========================================================================
     - name: ladybug-standard
-      description: Multi-tenant LadybugDB tier for staging (reduced resources)
+      description: Dedicated m7g.medium LadybugDB tier for staging (reduced resources)
       backend: ladybug
       stack_suffix: LadybugStandard
       tier: ladybug-standard
 
-      max_subgraphs: 0
+      max_subgraphs: 3
       api_rate_multiplier: 1.0
 
       # Copy operation limits
       copy_operations:
         max_file_size_gb: 1.0
-        timeout_seconds: 300
+        timeout_seconds: 900
         concurrent_operations: 1
         max_files_per_operation: 100
-        daily_copy_operations: 10
+        daily_copy_operations: 25
 
       # Backup limits
       backup_limits:
@@ -392,18 +437,33 @@ staging:
         backup_retention_days: 7
         max_backups_per_day: 2
 
+      # Graph content limits (same as production)
+      graph_limits:
+        max_nodes: 5000000
+        max_relationships: 10000000
+        max_rows_per_copy: 2000000
+        max_single_table_rows: 5000000
+        chunk_size_rows: 1000000
+        warn_at_percentage: 80
+
+      # Memory boost configuration
+      memory:
+        baseline_mb: 2048
+        max_boost_mb: 6144
+        auto_reset: true
+
       instance:
-        type: r7g.medium # 8GB RAM - smaller for staging
-        databases_per_instance: 10
-        max_memory_mb: 7168 # 7GB available (8GB - 1GB OS)
-        memory_per_db_mb: 716 # ~700MB per database
+        type: m7g.medium # 4GB RAM - smaller for staging
+        databases_per_instance: 1 # Dedicated
+        max_memory_mb: 3072 # 3GB available (4GB - 1GB OS)
+        memory_per_db_mb: 2048 # 2GB per database
         chunk_size: 750
         query_timeout: 30
         max_query_length: 10000
         ingestion_batch_size: 750
         connection_pool_size: 10
-        duckdb_memory_limit: "1GB" # Conservative for staging multi-tenant
-        duckdb_max_threads: 2 # Conservative for multi-tenant (1 vCPU but allow 2 for DuckDB efficiency)
+        duckdb_memory_limit: "1GB" # Conservative for staging
+        duckdb_max_threads: 2
 
       deployment:
         # Standard tier is always deployed - no enable_var needed
@@ -432,6 +492,21 @@ staging:
         max_backup_size_gb: 50
         backup_retention_days: 14
         max_backups_per_day: 5
+
+      # Graph content limits (same as production)
+      graph_limits:
+        max_nodes: 50000000
+        max_relationships: 100000000
+        max_rows_per_copy: 10000000
+        max_single_table_rows: 25000000
+        chunk_size_rows: 2000000
+        warn_at_percentage: 80
+
+      # Memory boost configuration
+      memory:
+        baseline_mb: 4096
+        max_boost_mb: 12288
+        auto_reset: true
 
       instance:
         type: r7g.medium # Smaller for staging
@@ -473,6 +548,21 @@ staging:
         max_backup_size_gb: 100
         backup_retention_days: 30
         max_backups_per_day: 10
+
+      # Graph content limits (same as production)
+      graph_limits:
+        max_nodes: 200000000
+        max_relationships: 500000000
+        max_rows_per_copy: 50000000
+        max_single_table_rows: 100000000
+        chunk_size_rows: 5000000
+        warn_at_percentage: 80
+
+      # Memory boost configuration
+      memory:
+        baseline_mb: 8192
+        max_boost_mb: 28672
+        auto_reset: true
 
       instance:
         type: r7g.large # Use r7g.large instead of xlarge for staging cost savings
@@ -642,26 +732,41 @@ development:
       stack_suffix: LadybugDev
       tier: ladybug-standard
 
-      max_subgraphs: 2
+      max_subgraphs: 3
       api_rate_multiplier: 1.0
 
       copy_operations:
         max_file_size_gb: 1.0
-        timeout_seconds: 300
+        timeout_seconds: 900
         concurrent_operations: 1
         max_files_per_operation: 100
-        daily_copy_operations: 10
+        daily_copy_operations: 25
 
       backup_limits:
         max_backup_size_gb: 10
         backup_retention_days: 7
         max_backups_per_day: 2
 
+      # Graph content limits (same as production)
+      graph_limits:
+        max_nodes: 5000000
+        max_relationships: 10000000
+        max_rows_per_copy: 2000000
+        max_single_table_rows: 5000000
+        chunk_size_rows: 1000000
+        warn_at_percentage: 80
+
+      # Memory boost configuration
+      memory:
+        baseline_mb: 2048
+        max_boost_mb: 6144
+        auto_reset: true
+
       instance:
-        type: r7g.medium
-        databases_per_instance: 10
-        max_memory_mb: 7168
-        memory_per_db_mb: 716
+        type: m7g.large
+        databases_per_instance: 1 # Dedicated
+        max_memory_mb: 6144
+        memory_per_db_mb: 2048
         chunk_size: 750
         query_timeout: 30
         max_query_length: 10000

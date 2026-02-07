@@ -21,7 +21,6 @@ from .billing import (
   DEFAULT_GRAPH_BILLING_PLANS,
   AIBillingConfig,
   BillingConfig,
-  StorageBillingConfig,
 )
 from .constants import PrefixConstants, URIConstants, XBRLConstants
 from .credits import CreditConfig
@@ -57,7 +56,6 @@ __all__ = [
   # Rate limit exports
   "RateLimitConfig",
   "RateLimitPeriod",
-  "StorageBillingConfig",
   # Constants exports
   "URIConstants",
   "XBRLConstants",

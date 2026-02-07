@@ -362,9 +362,7 @@ class TestCreditService:
     except Exception:
       pass  # Cache might not be available in test environment
 
-    # Fixed-cost operations (storage is 1 credit/GB/day)
-    assert get_operation_cost("storage_daily") == Decimal("1")
-
+    # All database operations are free (storage billing removed)
     # MCP calls and other operations are included (0 credits)
     assert get_operation_cost("mcp_call") == Decimal("0")
     assert get_operation_cost("mcp_tool_call") == Decimal("0")

@@ -29,6 +29,17 @@ production:
         max_backup_size_gb: 20
         backup_retention_days: 14
         max_backups_per_day: 4
+      graph_limits:
+        max_nodes: 5000000
+        max_relationships: 10000000
+        max_rows_per_copy: 2000000
+        max_single_table_rows: 5000000
+        chunk_size_rows: 1000000
+        warn_at_percentage: 80
+      memory:
+        baseline_mb: 2048
+        max_boost_mb: 6144
+        auto_reset: true
       instance:
         memory_per_db_mb: 512
         max_memory_mb: 4096
@@ -36,6 +47,17 @@ production:
         query_timeout: 120
     - tier: ladybug-large
       monthly_credits: 5000
+      graph_limits:
+        max_nodes: 50000000
+        max_relationships: 100000000
+        max_rows_per_copy: 10000000
+        max_single_table_rows: 25000000
+        chunk_size_rows: 2000000
+        warn_at_percentage: 80
+      memory:
+        baseline_mb: 4096
+        max_boost_mb: 12288
+        auto_reset: true
       instance:
         memory_per_db_mb: 2048
 staging:
@@ -155,3 +177,59 @@ def test_environment_default_switches_to_staging(monkeypatch, mock_graph_config)
   staging_config = GraphTierConfig.get_tier_config("ladybug-standard")
   assert staging_config["monthly_credits"] == 900
   assert GraphTierConfig.get_query_timeout("ladybug-standard") == 90
+
+
+def test_get_graph_limits_returns_configured_values(mock_graph_config):
+  limits = GraphTierConfig.get_graph_limits("ladybug-standard")
+  assert limits["max_nodes"] == 5_000_000
+  assert limits["max_relationships"] == 10_000_000
+  assert limits["max_rows_per_copy"] == 2_000_000
+  assert limits["max_single_table_rows"] == 5_000_000
+  assert limits["chunk_size_rows"] == 1_000_000
+  assert limits["warn_at_percentage"] == 80
+
+
+def test_get_graph_limits_returns_large_tier_values(mock_graph_config):
+  limits = GraphTierConfig.get_graph_limits("ladybug-large")
+  assert limits["max_nodes"] == 50_000_000
+  assert limits["max_relationships"] == 100_000_000
+  assert limits["max_rows_per_copy"] == 10_000_000
+  assert limits["chunk_size_rows"] == 2_000_000
+
+
+def test_get_graph_limits_falls_back_to_defaults(mock_graph_config):
+  limits = GraphTierConfig.get_graph_limits("unknown-tier")
+  assert limits["max_nodes"] == 5_000_000
+  assert limits["max_relationships"] == 10_000_000
+  assert limits["max_rows_per_copy"] == 2_000_000
+  assert limits["chunk_size_rows"] == 1_000_000
+
+
+def test_get_memory_config_returns_configured_values(mock_graph_config):
+  memory = GraphTierConfig.get_memory_config("ladybug-standard")
+  assert memory["baseline_mb"] == 2048
+  assert memory["max_boost_mb"] == 6144
+  assert memory["auto_reset"] is True
+
+
+def test_get_memory_config_large_tier(mock_graph_config):
+  memory = GraphTierConfig.get_memory_config("ladybug-large")
+  assert memory["baseline_mb"] == 4096
+  assert memory["max_boost_mb"] == 12288
+
+
+def test_get_memory_config_falls_back_to_defaults(mock_graph_config):
+  memory = GraphTierConfig.get_memory_config("unknown-tier")
+  assert memory["baseline_mb"] == 2048
+  assert memory["max_boost_mb"] == 6144
+  assert memory["auto_reset"] is True
+
+
+def test_get_storage_cap_gb_from_backup_limits(mock_graph_config):
+  cap = GraphTierConfig.get_storage_cap_gb("ladybug-standard")
+  assert cap == 20  # From backup_limits.max_backup_size_gb
+
+
+def test_get_storage_cap_gb_falls_back_to_default(mock_graph_config):
+  cap = GraphTierConfig.get_storage_cap_gb("unknown-tier")
+  assert cap == 10  # Default

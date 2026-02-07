@@ -12,13 +12,11 @@ class TestCreditConfig:
     """Test that operation costs are defined correctly.
 
     Note: AI operations (agent_call) use token-based pricing via AIBillingConfig,
-    not fixed costs in OPERATION_COSTS.
+    not fixed costs in OPERATION_COSTS. All database operations are free.
     """
-    # Fixed-cost operations
-    assert CreditConfig.OPERATION_COSTS["storage_per_gb_day"] == Decimal("1")
     assert CreditConfig.OPERATION_COSTS["connection_sync"] == Decimal("0")
 
-    # All other operations should be free (0 credits)
+    # All operations should be free (0 credits) — AI uses token pricing
     free_operations = [
       "mcp_call",
       "mcp_tool_call",
@@ -76,9 +74,8 @@ class TestCreditConfig:
     """Test getting costs for known operations.
 
     Note: AI operations use token-based pricing via AIBillingConfig.TOKEN_PRICING.
+    All database operations are free (storage billing removed).
     """
-    # Fixed-cost operations
-    assert CreditConfig.get_operation_cost("storage_per_gb_day") == Decimal("1")
     assert CreditConfig.get_operation_cost("connection_sync") == Decimal("0")
 
     # Free operations should return 0
@@ -158,25 +155,22 @@ class TestCreditConfig:
 
   def test_decimal_precision_in_costs(self):
     """Test that costs maintain decimal precision."""
-    cost = CreditConfig.get_operation_cost("storage_per_gb_day")
+    cost = CreditConfig.get_operation_cost("connection_sync")
     assert isinstance(cost, Decimal)
-    assert cost == Decimal("1")
+    assert cost == Decimal("0")
 
     # Test arithmetic operations maintain precision
     double_cost = cost * 2
     assert isinstance(double_cost, Decimal)
-    assert double_cost == Decimal("2")
+    assert double_cost == Decimal("0")
 
   def test_ai_vs_free_operation_categorization(self):
     """Test that operations are correctly categorized.
 
     Note: AI operations use token-based pricing via AIBillingConfig.TOKEN_PRICING,
-    not fixed costs in OPERATION_COSTS. Only storage overage has a fixed cost.
+    not fixed costs in OPERATION_COSTS. All database operations are free.
     """
-    # Storage overage is the only fixed-cost operation
-    assert CreditConfig.get_operation_cost("storage_per_gb_day") == Decimal("1")
-
-    # All other operations are free (included in subscription)
+    # All operations are free (included in subscription)
     free_operations = [
       "query",
       "backup",
@@ -197,8 +191,6 @@ class TestCreditConfig:
     Note: AI operations use token-based pricing via AIBillingConfig.TOKEN_PRICING.
     """
     required_operations = [
-      # Storage operations
-      "storage_per_gb_day",
       # Connection operations
       "connection_sync",
       # Free operations
@@ -264,7 +256,7 @@ class TestCreditConfig:
     assert callable(CreditConfig.should_alert)
 
     # Methods should work when called on the class
-    cost = CreditConfig.get_operation_cost("storage_per_gb_day")
+    cost = CreditConfig.get_operation_cost("connection_sync")
     allocation = CreditConfig.get_monthly_allocation("ladybug-standard")
     alert = CreditConfig.should_alert(100, 1000)
 
@@ -276,11 +268,9 @@ class TestCreditConfig:
     """Test that operation costs are consistent with documentation.
 
     Note: AI operations use token-based pricing via AIBillingConfig.TOKEN_PRICING.
+    All database operations are free (storage billing removed).
     """
-    # Storage should be 1 credit per GB per day
-    assert CreditConfig.get_operation_cost("storage_per_gb_day") == Decimal("1")
-
-    # Connection sync should be 20 credits
+    # Connection sync should be free
     assert CreditConfig.get_operation_cost("connection_sync") == Decimal("0")
 
   def test_tier_dependency_handling(self):
@@ -288,8 +278,8 @@ class TestCreditConfig:
     # Test that the module can handle various edge cases gracefully
 
     # Should still be able to get operation costs
-    cost = CreditConfig.get_operation_cost("storage_per_gb_day")
-    assert cost == Decimal("1")
+    cost = CreditConfig.get_operation_cost("connection_sync")
+    assert cost == Decimal("0")
 
     # Alert functionality should work with manual allocations
     alert = CreditConfig.should_alert(100, 1000)
