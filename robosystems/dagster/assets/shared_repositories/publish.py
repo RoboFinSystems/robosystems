@@ -1,17 +1,17 @@
-"""SEC S3 Publish Asset.
+"""Shared Repository S3 Publish Asset.
 
-This asset publishes the SEC database to S3 for replica cluster consumption.
-Replicas use LadybugDB S3 ATTACH to connect directly to the published database
-via the httpfs extension.
+This asset publishes a shared repository database to S3 for replica cluster
+consumption. Replicas use LadybugDB S3 ATTACH to connect directly to the
+published database via the httpfs extension.
 
 The asset:
 1. Uses Graph Client Factory to call the backup endpoint on the shared master
 2. The Graph API runs CHECKPOINT and uploads raw .lbug to S3 on-instance
 
-Replica fleet refresh is handled by the separate sec_replicas_refreshed asset.
+Replica fleet refresh is handled by the separate shared_replicas_refreshed asset.
 
-This is distinct from sec_backup which creates compressed, downloadable backups
-for users. This asset creates the source-of-truth for the replica cluster.
+This is distinct from user backup which creates compressed, downloadable backups
+for subscribers. This asset creates the source-of-truth for the replica cluster.
 """
 
 import asyncio
@@ -27,28 +27,26 @@ from dagster import (
 from robosystems.config import env
 
 
-class SECS3PublishConfig(Config):
+class SharedRepositoryPublishConfig(Config):
   """Configuration for S3 publish operations."""
 
   graph_id: str = "sec"
 
 
 @asset(
-  group_name="sec_pipeline",
-  description="Publish SEC database to S3 for replica cluster (S3 ATTACH source)",
+  group_name="shared_repositories",
+  description="Publish shared repository database to S3 for replica cluster (S3 ATTACH source)",
   kinds={"s3", "ladybug"},
-  deps=["sec_graph_materialized"],
   metadata={
-    "pipeline": "sec",
     "stage": "publish",
     "replica_source": True,
   },
 )
-def sec_s3_published(
+def shared_repository_s3_published(
   context: AssetExecutionContext,
-  config: SECS3PublishConfig,
+  config: SharedRepositoryPublishConfig,
 ) -> MaterializeResult:
-  """Publish SEC database to S3 for replica consumption via ATTACH.
+  """Publish shared repository database to S3 for replica consumption via ATTACH.
 
   Uses Graph Client Factory to call the backup endpoint on the shared master.
   The backup runs entirely on-instance (CHECKPOINT + S3 multipart upload),
@@ -90,6 +88,7 @@ def sec_s3_published(
 
   # Use Graph Client Factory (handles auth, routing, circuit breakers)
   loop = asyncio.new_event_loop()
+  client = None
   try:
     client = loop.run_until_complete(get_graph_client_for_sec_ingestion())
 
@@ -105,6 +104,8 @@ def sec_s3_published(
       )
     )
   finally:
+    if client:
+      loop.run_until_complete(client.close())
     loop.close()
 
   if result.get("status") != "completed":

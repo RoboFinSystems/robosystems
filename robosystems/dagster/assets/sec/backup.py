@@ -117,6 +117,7 @@ def sec_backup(
   bucket = s3_adapter.bucket_name or f"robosystems-{account_id}-user-{env.ENVIRONMENT}"
 
   loop = asyncio.new_event_loop()
+  client = None
   try:
     client = loop.run_until_complete(get_graph_client_for_sec_ingestion())
 
@@ -132,6 +133,8 @@ def sec_backup(
       )
     )
   finally:
+    if client:
+      loop.run_until_complete(client.close())
     loop.close()
 
   if result.get("status") != "completed":

@@ -1,8 +1,12 @@
-"""SEC Replica Fleet Refresh Asset.
+"""Shared Replica Fleet Refresh Asset.
 
 This asset triggers and monitors the rolling refresh of the shared replica fleet
 after a new database has been published to S3. Replicas use S3 ATTACH to connect
 to the published database, so a refresh cycles instances to pick up the new version.
+
+The replica fleet is a single shared ASG that serves all shared repositories
+(SEC, industry, economic, etc.). Refreshing it cycles all instances regardless
+of which repository was published.
 
 At scale (100+ replicas), this can take hours. The asset monitors progress and
 logs each stage of the refresh for visibility.
@@ -21,7 +25,7 @@ from dagster import (
 from robosystems.config import env
 
 
-class SECReplicaRefreshConfig(Config):
+class SharedReplicaRefreshConfig(Config):
   """Configuration for replica fleet refresh."""
 
   # Minimum percentage of healthy instances during refresh
@@ -44,23 +48,21 @@ class SECReplicaRefreshConfig(Config):
 
 
 @asset(
-  group_name="sec_pipeline",
+  group_name="shared_repositories",
   description="Refresh shared replica fleet to pick up new S3 database",
   kinds={"aws", "autoscaling"},
-  deps=["sec_s3_published"],
   metadata={
-    "pipeline": "sec",
     "stage": "replica_refresh",
   },
 )
-def sec_replicas_refreshed(
+def shared_replicas_refreshed(
   context: AssetExecutionContext,
-  config: SECReplicaRefreshConfig,
+  config: SharedReplicaRefreshConfig,
 ) -> MaterializeResult:
   """Trigger and monitor rolling refresh of shared replica fleet.
 
-  After the SEC database is published to S3, replicas need to be cycled
-  to pick up the new version via S3 ATTACH. This asset:
+  After a shared repository database is published to S3, replicas need to be
+  cycled to pick up the new version via S3 ATTACH. This asset:
 
   1. Checks for existing in-progress refresh
   2. Starts a new rolling instance refresh

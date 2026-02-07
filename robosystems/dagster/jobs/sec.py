@@ -53,8 +53,8 @@ from robosystems.dagster.assets import (
   sec_processed_filings,
   sec_quarter_partitions,
   sec_raw_filings,
-  sec_replicas_refreshed,
-  sec_s3_published,
+  shared_replicas_refreshed,
+  shared_repository_s3_published,
 )
 
 # ============================================================================
@@ -367,7 +367,7 @@ sec_backup_job = define_asset_job(
 sec_s3_publish_job = define_asset_job(
   name="sec_s3_publish",
   description="Publish SEC database to S3 for replica cluster (S3 ATTACH source).",
-  selection=AssetSelection.assets(sec_s3_published),
+  selection=AssetSelection.assets(shared_repository_s3_published),
   tags={
     "pipeline": "sec",
     "phase": "publish",
@@ -396,7 +396,7 @@ sec_s3_publish_job = define_asset_job(
 sec_replica_refresh_job = define_asset_job(
   name="sec_replica_refresh",
   description="Rolling refresh of replica fleet to pick up new S3 database.",
-  selection=AssetSelection.assets(sec_replicas_refreshed),
+  selection=AssetSelection.assets(shared_replicas_refreshed),
   tags={
     "pipeline": "sec",
     "phase": "replica_refresh",

@@ -31,9 +31,9 @@ from robosystems.dagster.assets import (
   # SEC pipeline - quarterly batch processing with consolidated output
   sec_processed_filings,
   sec_raw_filings,
-  # SEC pipeline - S3 publish for replica cluster
-  sec_replicas_refreshed,
-  sec_s3_published,
+  # Shared repository infrastructure (S3 publish + replica refresh)
+  shared_replicas_refreshed,
+  shared_repository_s3_published,
   # User graph operations (external assets for API direct execution)
   user_graph_creation_source,
   user_graph_file_staging_source,
@@ -257,8 +257,8 @@ all_assets = [
   sec_graph_incremental_copy,  # Incremental S3 → LadybugDB (daily updates)
   sec_entity_incremental_update,  # Update existing Entity nodes (mutable attrs)
   sec_graph_materialized,  # LadybugDB materialization (retry-safe)
-  sec_s3_published,  # S3 publish for replica cluster (S3 ATTACH source)
-  sec_replicas_refreshed,  # Rolling refresh of replica fleet
+  shared_repository_s3_published,  # S3 publish for replica cluster (S3 ATTACH source)
+  shared_replicas_refreshed,  # Rolling refresh of replica fleet
   sec_backup,  # Downloadable backup of SEC database
 ]
 

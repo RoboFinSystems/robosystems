@@ -86,6 +86,7 @@ def upload_database_to_s3(
 
   # Use Graph Client Factory (handles auth, routing, circuit breakers)
   loop = asyncio.new_event_loop()
+  client = None
   try:
     client = loop.run_until_complete(get_graph_client_for_sec_ingestion())
 
@@ -101,6 +102,8 @@ def upload_database_to_s3(
       )
     )
   finally:
+    if client:
+      loop.run_until_complete(client.close())
     loop.close()
 
   if result.get("status") != "completed":

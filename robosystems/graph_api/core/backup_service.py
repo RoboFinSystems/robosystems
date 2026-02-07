@@ -140,6 +140,7 @@ class OnInstanceBackupService:
 
     except Exception as e:
       logger.error(f"[Task {task_id}] Backup failed: {e}")
+      await self.task_manager.fail_task(task_id, str(e))
       raise
 
   def _checkpoint(self, graph_id: str) -> None:
