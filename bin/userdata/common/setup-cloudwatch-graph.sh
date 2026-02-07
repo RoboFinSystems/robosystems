@@ -115,9 +115,11 @@ cat > /opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json << EOF
         "metrics_collection_interval": 60
       }
     },
+    "aggregation_dimensions": [["AutoScalingGroupName"]],
     "append_dimensions": {
       "InstanceId": "\${aws:InstanceId}",
-      "InstanceType": "\${aws:InstanceType}"
+      "InstanceType": "\${aws:InstanceType}",
+      "AutoScalingGroupName": "\${aws:AutoScalingGroupName}"
     }
   },
   "logs": {

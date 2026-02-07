@@ -4,7 +4,7 @@ permissions:
   contents: read
   deployments: write
   id-token: write
-  security-events: write  # Required for Trivy SARIF upload in test workflow
+  security-events: write # Required for Trivy SARIF upload in test workflow
 
 concurrency:
   group: robosystems-deploy
@@ -12,7 +12,7 @@ concurrency:
 
 on:
   workflow_dispatch: {}
-  workflow_call: {}  # Called from create-release.yml
+  workflow_call: {} # Called from create-release.yml
 
 jobs:
   # Guard: Verify staging environment is enabled
@@ -448,11 +448,14 @@ jobs:
       lbug_shared_max_instances: ${{ vars.LBUG_SHARED_MAX_INSTANCES_STAGING }}
       # Shared Replicas Configuration
       shared_replicas_enabled: ${{ vars.SHARED_REPLICAS_ENABLED_STAGING || 'false' }}
-      shared_replicas_min_instances: ${{ vars.SHARED_REPLICAS_MIN_INSTANCES_STAGING || '2' }}
-      shared_replicas_max_instances: ${{ vars.SHARED_REPLICAS_MAX_INSTANCES_STAGING || '10' }}
-      shared_replicas_desired_capacity: ${{ vars.SHARED_REPLICAS_DESIRED_CAPACITY_STAGING || '2' }}
-      shared_replicas_instance_type: ${{ vars.SHARED_REPLICAS_INSTANCE_TYPE_STAGING || 'r7g.medium' }}
+      shared_replicas_min_instances: ${{ vars.SHARED_REPLICAS_MIN_INSTANCES_STAGING || '1' }}
+      shared_replicas_max_instances: ${{ vars.SHARED_REPLICAS_MAX_INSTANCES_STAGING || '3' }}
+      shared_replicas_desired_capacity: ${{ vars.SHARED_REPLICAS_DESIRED_CAPACITY_STAGING || '1' }}
       shared_replicas_root_volume_size: ${{ vars.SHARED_REPLICAS_ROOT_VOLUME_SIZE_STAGING || '100' }}
+      shared_repositories: ${{ vars.SHARED_REPOSITORIES_STAGING || 'sec' }}
+      shared_replicas_cpu_target: ${{ vars.SHARED_REPLICAS_CPU_TARGET_STAGING || '70' }}
+      shared_replicas_memory_target: ${{ vars.SHARED_REPLICAS_MEMORY_TARGET_STAGING || '80' }}
+      shared_replicas_instance_warmup: ${{ vars.SHARED_REPLICAS_INSTANCE_WARMUP_STAGING || '1200' }}
       # Other Configuration
       aws_sns_alert_email: ${{ vars.AWS_SNS_ALERT_EMAIL }}
     secrets: inherit
@@ -490,16 +493,16 @@ jobs:
       ecr_image_tag: ${{ needs.build.outputs.image_tag }}
       # ECS & Compute Configuration
       desired_count: ${{ vars.API_MIN_CAPACITY_STAGING || '1' }}
-      cpu: "512"
-      memory: "1024"
+      cpu: ${{ vars.API_CPU_STAGING || '512' }}
+      memory: ${{ vars.API_MEMORY_STAGING || '1024' }}
       fargate_weight: ${{ vars.API_FARGATE_WEIGHT_STAGING || '10' }}
       fargate_spot_weight: ${{ vars.API_FARGATE_SPOT_WEIGHT_STAGING || '90' }}
       fargate_base: ${{ vars.API_FARGATE_BASE_STAGING || '0' }}
       # Auto-scaling Configuration
       min_capacity: ${{ vars.API_MIN_CAPACITY_STAGING || '1' }}
       max_capacity: ${{ vars.API_MAX_CAPACITY_STAGING || '2' }}
-      cpu_target_value: "70"
-      memory_target_value: "80"
+      cpu_target_value: ${{ vars.API_CPU_TARGET_STAGING || '70' }}
+      memory_target_value: ${{ vars.API_MEMORY_TARGET_STAGING || '80' }}
       # Access Mode & Domain Configuration
       # API_ACCESS_MODE_STAGING: 'public' (HTTPS with domain), 'public-http' (HTTP via ALB), 'internal' (bastion tunnel)
       api_access_mode: ${{ vars.API_ACCESS_MODE_STAGING || 'internal' }}
@@ -575,7 +578,6 @@ jobs:
       database_sg_id: ${{ needs.deploy-postgres.outputs.database_sg_id }}
       # Bastion Access (for internal UI access)
       bastion_sg_id: ${{ needs.deploy-bastion.outputs.bastion_sg_id }}
-      # api_sg_id: looked up automatically by deploy-dagster.yml from API stack
       # Monitoring Configuration
       container_insights_enabled: ${{ vars.DAGSTER_CONTAINER_INSIGHTS_STAGING || 'disabled' }}
       # S3 Bucket Configuration (from S3 stack outputs)
@@ -590,13 +592,7 @@ jobs:
 
   # Service refresh - currently only graph containers (ECS services auto-deploy via version tags)
   service-refresh:
-    needs:
-      [
-        runner,
-        create-deployment,
-        stack-config,
-        deploy-graph,
-      ]
+    needs: [runner, create-deployment, stack-config, deploy-graph]
     if: ${{ !cancelled() && needs.deploy-graph.result == 'success' }}
     uses: ./.github/workflows/service-refresh.yml
     with:
@@ -789,4 +785,3 @@ jobs:
           deployment-id: ${{ needs.create-deployment.outputs.deployment_id }}
           environment: staging
           github-token: ${{ github.token }}
-

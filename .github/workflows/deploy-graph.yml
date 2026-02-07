@@ -136,16 +136,31 @@ on:
         type: string
         description: Shared replicas desired capacity
         default: "2"
-      shared_replicas_instance_type:
-        required: false
-        type: string
-        description: Shared replicas instance type
-        default: "r7g.medium"
       shared_replicas_root_volume_size:
         required: false
         type: string
         description: Shared replicas root volume size in GB (must fit OS + httpfs cache)
         default: "100"
+      shared_repositories:
+        required: false
+        type: string
+        description: Comma-separated shared repository names to ATTACH (e.g., sec,sec_historical)
+        default: "sec"
+      shared_replicas_cpu_target:
+        required: false
+        type: string
+        description: Target CPU utilization percentage for replica auto scaling
+        default: "70"
+      shared_replicas_memory_target:
+        required: false
+        type: string
+        description: Target memory utilization percentage for replica auto scaling
+        default: "80"
+      shared_replicas_instance_warmup:
+        required: false
+        type: string
+        description: Seconds to ignore new replica metrics during initialization
+        default: "1200"
 
       # AMI Configuration
       ami_id:
@@ -218,6 +233,7 @@ jobs:
     outputs:
       lbug_matrix: ${{ steps.set-matrix.outputs.lbug_matrix }}
       neo4j_matrix: ${{ steps.set-matrix.outputs.neo4j_matrix }}
+      replica_instance_type: ${{ steps.set-matrix.outputs.replica_instance_type }}
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -343,7 +359,6 @@ jobs:
                 tier: .tier,
                 min_instances: ($min | tonumber),
                 max_instances: ($max | tonumber),
-                shared_repositories: .shared_repositories,
                 instance_type: .instance.type,
                 databases_per_instance: .instance.databases_per_instance,
                 max_memory_mb: .instance.max_memory_mb,
@@ -392,6 +407,12 @@ jobs:
           echo "  - $NEO4J_COUNT Neo4j writers"
           echo "  - $TOTAL_COUNT Total graph database writers"
 
+          # Extract shared replica config from graph.yml
+          REPLICA_INSTANCE_TYPE=$(yq eval ".${ENV_KEY}.replicas[0].instance.type // \"m7g.large\"" .github/configs/graph.yml)
+          echo "replica_instance_type=${REPLICA_INSTANCE_TYPE}" >> $GITHUB_OUTPUT
+
+          echo "  - Shared replica instance type: ${REPLICA_INSTANCE_TYPE}"
+
   # Step 2a: Deploy Graph Writers (LadybugDB Backend)
   deploy-graph-ladybug:
     needs: [prepare-writer-matrix, resolve-ami]
@@ -419,7 +440,7 @@ jobs:
       max_instances: "${{ matrix.max_instances }}"
       # Graph Writer Configuration
       writer_tier: ${{ matrix.tier }}
-      shared_repositories: ${{ matrix.shared_repositories }}
+      shared_repositories: ${{ inputs.shared_repositories }}
       # Instance Configuration
       instance_type: ${{ matrix.instance_type }}
       ami_id: ${{ needs.resolve-ami.outputs.ami_id }}
@@ -472,15 +493,11 @@ jobs:
     secrets: inherit
 
   # Step 3: Deploy Shared Replicas (Read-Only Fleet)
-  # Deploys after shared writers to ensure master exists for snapshotting
+  # Replicas read from S3 via httpfs - independent of writer deployment
+  # S3 database must exist (published by Dagster job), but that's not a deploy-time dependency
   deploy-shared-replicas:
-    needs: [deploy-graph-ladybug, resolve-ami, prepare-writer-matrix]
-    # Only deploy if:
-    # 1. Shared replicas are explicitly enabled, AND
-    # 2. LadybugDB writers were deployed (to ensure shared master exists)
-    if: |
-      inputs.shared_replicas_enabled == 'true' &&
-      fromJson(needs.prepare-writer-matrix.outputs.lbug_matrix).include[0] != null
+    needs: [resolve-ami, prepare-writer-matrix]
+    if: inputs.shared_replicas_enabled == 'true'
     permissions:
       id-token: write
       contents: read
@@ -493,11 +510,15 @@ jobs:
       vpc_id: ${{ inputs.vpc_id }}
       subnet_ids: ${{ inputs.subnet_ids }}
       ami_id: ${{ needs.resolve-ami.outputs.ami_id }}
-      instance_type: ${{ inputs.shared_replicas_instance_type }}
+      instance_type: ${{ needs.prepare-writer-matrix.outputs.replica_instance_type }}
       root_volume_size: ${{ inputs.shared_replicas_root_volume_size }}
       min_instances: ${{ inputs.shared_replicas_min_instances }}
       max_instances: ${{ inputs.shared_replicas_max_instances }}
       desired_capacity: ${{ inputs.shared_replicas_desired_capacity }}
+      shared_repositories: ${{ inputs.shared_repositories }}
+      cpu_target_value: ${{ inputs.shared_replicas_cpu_target }}
+      memory_target_value: ${{ inputs.shared_replicas_memory_target }}
+      instance_warmup: ${{ inputs.shared_replicas_instance_warmup }}
       ecr_image_tag: ${{ inputs.ecr_image_tag }}
       aws_sns_alert_email: ${{ inputs.aws_sns_alert_email }}
     secrets: inherit

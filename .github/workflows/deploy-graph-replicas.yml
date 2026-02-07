@@ -71,6 +71,23 @@ on:
         type: string
         default: "2"
 
+      # Auto-scaling Targets
+      cpu_target_value:
+        description: "Target CPU utilization percentage for auto scaling"
+        required: false
+        type: string
+        default: "70"
+      memory_target_value:
+        description: "Target memory utilization percentage for auto scaling"
+        required: false
+        type: string
+        default: "80"
+      instance_warmup:
+        description: "Seconds to ignore new instance metrics during initialization (S3 download time)"
+        required: false
+        type: string
+        default: "1200"
+
       # Docker Configuration
       ecr_image_tag:
         description: "Docker image tag for Graph API"
@@ -271,6 +288,9 @@ jobs:
             ParameterKey=MinInstances,ParameterValue=${{ inputs.min_instances }} \
             ParameterKey=MaxInstances,ParameterValue=${{ inputs.max_instances }} \
             ParameterKey=DesiredCapacity,ParameterValue=${{ inputs.desired_capacity }} \
+            ParameterKey=CPUTargetValue,ParameterValue=${{ inputs.cpu_target_value }} \
+            ParameterKey=MemoryTargetValue,ParameterValue=${{ inputs.memory_target_value }} \
+            ParameterKey=InstanceWarmup,ParameterValue=${{ inputs.instance_warmup }} \
             ParameterKey=DeploymentBucketArn,ParameterValue=${{ steps.s3_config.outputs.deployment_bucket_arn }} \
             ParameterKey=ECRRepositoryUrl,ParameterValue=${{ steps.ecr_config.outputs.ecr_url }} \
             ParameterKey=ECRImageTag,ParameterValue=${{ inputs.ecr_image_tag }} \

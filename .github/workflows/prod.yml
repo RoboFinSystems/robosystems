@@ -4,7 +4,7 @@ permissions:
   contents: read
   deployments: write
   id-token: write
-  security-events: write  # Required for Trivy SARIF upload in test workflow
+  security-events: write # Required for Trivy SARIF upload in test workflow
 
 concurrency:
   group: robosystems-deploy
@@ -12,7 +12,7 @@ concurrency:
 
 on:
   workflow_dispatch: {}
-  workflow_call: {}  # Called from create-release.yml
+  workflow_call: {} # Called from create-release.yml
 
 jobs:
   runner:
@@ -431,11 +431,14 @@ jobs:
       lbug_shared_max_instances: ${{ vars.LBUG_SHARED_MAX_INSTANCES_PROD }}
       # Shared Replicas Configuration
       shared_replicas_enabled: ${{ vars.SHARED_REPLICAS_ENABLED_PROD }}
-      shared_replicas_min_instances: ${{ vars.SHARED_REPLICAS_MIN_INSTANCES_PROD || '2' }}
-      shared_replicas_max_instances: ${{ vars.SHARED_REPLICAS_MAX_INSTANCES_PROD || '10' }}
-      shared_replicas_desired_capacity: ${{ vars.SHARED_REPLICAS_DESIRED_CAPACITY_PROD || '2' }}
-      shared_replicas_instance_type: ${{ vars.SHARED_REPLICAS_INSTANCE_TYPE_PROD || 'r7g.medium' }}
+      shared_replicas_min_instances: ${{ vars.SHARED_REPLICAS_MIN_INSTANCES_PROD || '1' }}
+      shared_replicas_max_instances: ${{ vars.SHARED_REPLICAS_MAX_INSTANCES_PROD || '3' }}
+      shared_replicas_desired_capacity: ${{ vars.SHARED_REPLICAS_DESIRED_CAPACITY_PROD || '1' }}
       shared_replicas_root_volume_size: ${{ vars.SHARED_REPLICAS_ROOT_VOLUME_SIZE_PROD || '100' }}
+      shared_repositories: ${{ vars.SHARED_REPOSITORIES_PROD || 'sec' }}
+      shared_replicas_cpu_target: ${{ vars.SHARED_REPLICAS_CPU_TARGET_PROD || '70' }}
+      shared_replicas_memory_target: ${{ vars.SHARED_REPLICAS_MEMORY_TARGET_PROD || '80' }}
+      shared_replicas_instance_warmup: ${{ vars.SHARED_REPLICAS_INSTANCE_WARMUP_PROD || '1200' }}
       # Other Configuration
       aws_sns_alert_email: ${{ vars.AWS_SNS_ALERT_EMAIL }}
     secrets: inherit
@@ -473,16 +476,16 @@ jobs:
       ecr_image_tag: ${{ needs.build.outputs.image_tag }}
       # ECS & Compute Configuration
       desired_count: ${{ vars.API_MIN_CAPACITY_PROD || '1' }}
-      cpu: "512"
-      memory: "1024"
+      cpu: ${{ vars.API_CPU_PROD || '512' }}
+      memory: ${{ vars.API_MEMORY_PROD || '1024' }}
       fargate_weight: ${{ vars.API_FARGATE_WEIGHT_PROD || '10' }}
       fargate_spot_weight: ${{ vars.API_FARGATE_SPOT_WEIGHT_PROD || '90' }}
       fargate_base: ${{ vars.API_FARGATE_BASE_PROD || '0' }}
       # Auto-scaling Configuration
       min_capacity: ${{ vars.API_MIN_CAPACITY_PROD || '1' }}
       max_capacity: ${{ vars.API_MAX_CAPACITY_PROD || '2' }}
-      cpu_target_value: "70"
-      memory_target_value: "80"
+      cpu_target_value: ${{ vars.API_CPU_TARGET_PROD || '70' }}
+      memory_target_value: ${{ vars.API_MEMORY_TARGET_PROD || '80' }}
       # Access Mode & Domain Configuration
       # API_ACCESS_MODE_PROD: 'public' (HTTPS with domain), 'public-http' (HTTP via ALB), 'internal' (bastion tunnel)
       api_access_mode: ${{ vars.API_ACCESS_MODE_PROD || 'internal' }}
@@ -558,8 +561,6 @@ jobs:
       database_sg_id: ${{ needs.deploy-postgres.outputs.database_sg_id }}
       # Bastion Access (for internal UI access)
       bastion_sg_id: ${{ needs.deploy-bastion.outputs.bastion_sg_id }}
-      # API Access (for Dagster job submission)
-      # api_sg_id: looked up automatically by deploy-dagster.yml from API stack
       # Monitoring Configuration
       container_insights_enabled: ${{ vars.DAGSTER_CONTAINER_INSIGHTS_PROD || 'disabled' }}
       # S3 Bucket Configuration (from S3 stack outputs)
@@ -574,13 +575,7 @@ jobs:
 
   # Service refresh - currently only graph containers (ECS services auto-deploy via version tags)
   service-refresh:
-    needs:
-      [
-        runner,
-        create-deployment,
-        stack-config,
-        deploy-graph,
-      ]
+    needs: [runner, create-deployment, stack-config, deploy-graph]
     if: ${{ !cancelled() && needs.deploy-graph.result == 'success' }}
     uses: ./.github/workflows/service-refresh.yml
     with:
