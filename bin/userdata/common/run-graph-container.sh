@@ -85,13 +85,20 @@ fi
 # Build database-specific environment variables
 case "${DATABASE_TYPE}" in
     ladybug)
+        # Build S3 ATTACH environment variable only if URI is set
+        S3_ATTACH_ENV=""
+        if [ -n "${LBUG_S3_ATTACH_URI:-}" ]; then
+            S3_ATTACH_ENV="-e LBUG_S3_ATTACH_URI=${LBUG_S3_ATTACH_URI}"
+        fi
+
         EXTRA_ENV_VARS="-e LBUG_NODE_TYPE=${NODE_TYPE} \
             -e REPOSITORY_TYPE=${REPOSITORY_TYPE:-shared} \
             -e SHARED_REPOSITORIES=${SHARED_REPOSITORIES:-} \
             -e LBUG_DATABASE_PATH=${DATA_MOUNT_TARGET}/lbug-dbs \
             -e LBUG_PORT=${CONTAINER_PORT} \
             -e LBUG_ROLE=$(if [ "${NODE_TYPE}" = "shared_replica" ]; then echo "replica"; else echo "master"; fi) \
-            -e LBUG_ACCESS_PATTERN=api_writer"
+            -e LBUG_ACCESS_PATTERN=api_writer \
+            ${S3_ATTACH_ENV}"
         HEALTH_CMD="timeout 10 curl -f http://localhost:${CONTAINER_PORT}/health || exit 1"
         ;;
     neo4j)

@@ -435,6 +435,7 @@ jobs:
       shared_replicas_max_instances: ${{ vars.SHARED_REPLICAS_MAX_INSTANCES_PROD || '10' }}
       shared_replicas_desired_capacity: ${{ vars.SHARED_REPLICAS_DESIRED_CAPACITY_PROD || '2' }}
       shared_replicas_instance_type: ${{ vars.SHARED_REPLICAS_INSTANCE_TYPE_PROD || 'r7g.medium' }}
+      shared_replicas_root_volume_size: ${{ vars.SHARED_REPLICAS_ROOT_VOLUME_SIZE_PROD || '100' }}
       # Other Configuration
       aws_sns_alert_email: ${{ vars.AWS_SNS_ALERT_EMAIL }}
     secrets: inherit
@@ -587,6 +588,7 @@ jobs:
       runner_config: ${{ needs.runner.outputs.runner_config }}
       aws_region: ${{ vars.AWS_REGION || 'us-east-1' }}
       # Graph refresh (EC2 containers via SSM)
+      # Note: shared replicas disabled until EBS snapshot pre-warming is validated
       graph_refresh_enabled: ${{ vars.GRAPH_UPDATE_CONTAINERS_PROD || 'true' }}
       graph_node_types: "writer"
       graph_health_check_timeout: "30"

@@ -51,8 +51,67 @@ def create_app() -> FastAPI:
   @asynccontextmanager
   async def lifespan(app: FastAPI):
     """Manage application lifespan events."""
+    import asyncio
+
     # Startup
     logger.info("Graph API starting up")
+
+    # S3 ATTACH warmup for replicas (runs in background)
+    async def warmup_s3_attach():
+      """Warm up S3 ATTACH database in background."""
+      from robosystems.graph_api.routers.health import (
+        is_s3_attach_mode,
+        mark_s3_attach_ready,
+      )
+
+      if not is_s3_attach_mode():
+        return
+
+      s3_uri = os.getenv("LBUG_S3_ATTACH_URI", "")
+      logger.info(f"S3 ATTACH warmup starting for: {s3_uri}")
+
+      try:
+        # Get the shared repositories to warm up (default: sec)
+        shared_repos = os.getenv("SHARED_REPOSITORIES", "sec").split(",")
+
+        for repo in shared_repos:
+          repo = repo.strip()
+          if not repo:
+            continue
+
+          logger.info(f"Warming up S3 ATTACH database: {repo}")
+
+          # Get connection from pool - this triggers the ATTACH
+          from robosystems.graph_api.core.ladybug.pool import get_connection_pool
+
+          pool = get_connection_pool()
+
+          # This will create the S3 ATTACH connection
+          with pool.get_connection(repo, read_only=True) as conn:
+            # Run a warmup query to cache some data
+            logger.info(f"Running warmup query for {repo}...")
+            result = conn.execute(
+              f"USE {repo}; MATCH (n) RETURN count(n) as cnt LIMIT 1"
+            )
+            # Consume and close the result
+            try:
+              result.fetchall()
+            finally:
+              result.close()
+            logger.info(f"Warmup query complete for {repo}")
+
+        # Mark as ready - health check will now return 200
+        mark_s3_attach_ready()
+        logger.info("S3 ATTACH warmup complete - replica ready for traffic")
+
+      except Exception as e:
+        logger.error(f"S3 ATTACH warmup failed: {e}")
+        # Don't mark as ready - health check will keep returning 503
+        # The instance will eventually be terminated and replaced
+
+    # Start warmup in background (don't block app startup)
+    if os.getenv("LBUG_S3_ATTACH_URI") and os.getenv("LBUG_ROLE") == "replica":
+      asyncio.create_task(warmup_s3_attach())
 
     # Clear stale extension cache from persistent volume
     # LadybugDB caches extensions in {home_directory}/.lbug/extension/

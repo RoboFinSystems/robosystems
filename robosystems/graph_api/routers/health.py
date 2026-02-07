@@ -3,7 +3,14 @@ Simple health check endpoint for load balancers and monitoring.
 
 This module provides a minimal health check endpoint that returns
 quickly for infrastructure health monitoring.
+
+For S3 ATTACH replicas, the health check returns 503 until the database
+is fully loaded and ready to serve queries. This prevents ALB from routing
+traffic to instances still warming up (which can take ~10 minutes).
 """
+
+import os
+import threading
 
 from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
@@ -13,6 +20,24 @@ from robosystems.graph_api.core.ladybug import get_ladybug_service
 from robosystems.logger import logger
 
 router = APIRouter(tags=["Cluster Health"])
+
+# Track S3 ATTACH warmup status (thread-safe for multi-worker setups)
+# This is set to True after the first successful query to the attached database
+_s3_attach_ready = False
+_s3_attach_lock = threading.Lock()
+
+
+def mark_s3_attach_ready():
+  """Mark the S3 ATTACH database as ready to serve queries."""
+  global _s3_attach_ready
+  with _s3_attach_lock:
+    _s3_attach_ready = True
+  logger.info("S3 ATTACH database marked as ready - health check will now return 200")
+
+
+def is_s3_attach_mode() -> bool:
+  """Check if running in S3 ATTACH replica mode."""
+  return bool(os.getenv("LBUG_S3_ATTACH_URI")) and os.getenv("LBUG_ROLE") == "replica"
 
 
 def _get_service_for_health():
@@ -36,12 +61,26 @@ async def health_check(
   Returns 200 OK if the service is running and can respond to requests.
   This is a lightweight check that doesn't perform deep validation.
 
+  For S3 ATTACH replicas, returns 503 until the database is fully loaded.
+  This prevents ALB from routing traffic during the ~10 min warmup period.
+
   Used by:
   - AWS Application Load Balancer health checks
   - Auto Scaling Group health checks
   - EC2 instance health monitoring
   - Kubernetes liveness probes
   """
+  # S3 ATTACH mode: return 503 until database is ready
+  if is_s3_attach_mode() and not _s3_attach_ready:
+    logger.debug("S3 ATTACH warmup in progress - returning 503")
+    return JSONResponse(
+      status_code=503,
+      content={
+        "status": "warming",
+        "message": "S3 ATTACH database warming up - not ready for traffic",
+      },
+    )
+
   try:
     # Basic check that service is accessible
     uptime = service.get_uptime()

@@ -1,8 +1,8 @@
 name: Deploy Graph Shared Replicas
 
 # Deploys read-only replica fleet for shared repositories (SEC, industry, economic)
-# Replicas boot from EBS snapshots of the shared master's data volume
-# Snapshot ID is updated via Dagster's shared_repository_snapshot job
+# Replicas use S3 ATTACH to connect to S3-hosted database files via httpfs
+# Database is synced to S3 by Dagster's shared_repository_s3_sync job
 
 on:
   workflow_call:
@@ -77,6 +77,18 @@ on:
         required: false
         type: string
         default: "latest"
+
+      # Shared Repository Configuration
+      shared_repository_name:
+        description: "Name of shared repository to deploy (sec, industry, economic)"
+        required: false
+        type: string
+        default: "sec"
+      root_volume_size:
+        description: "Root volume size in GB (must fit OS + httpfs cache for full DB)"
+        required: false
+        type: string
+        default: "100"
 
       # Notification Configuration
       aws_sns_alert_email:
@@ -167,55 +179,38 @@ jobs:
           echo "ecr_url=$ECR_URL" >> $GITHUB_OUTPUT
           echo "🐳 ECR Repository: $ECR_URL"
 
-      - name: Resolve Snapshot ID
-        id: snapshot
+      - name: Validate S3 Database Exists
+        id: s3_database
         run: |
-          # Look up latest completed snapshot by tags
-          # Dagster jobs tag snapshots with GraphId=sec, Environment, AllRepositories=true
-          echo "🔍 Looking up latest snapshot by tags..."
-          LATEST_SNAPSHOT=$(aws ec2 describe-snapshots \
-            --filters \
-              "Name=tag:GraphId,Values=sec" \
-              "Name=tag:Environment,Values=${{ inputs.environment }}" \
-              "Name=status,Values=completed" \
-            --query 'Snapshots | sort_by(@, &StartTime) | [-1].SnapshotId' \
-            --output text 2>/dev/null || echo "")
+          # Build S3 URI for shared database
+          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          REPO_NAME="${{ inputs.shared_repository_name }}"
+          S3_URI="s3://robosystems-${ACCOUNT_ID}-user-${{ inputs.environment }}/shared-repos/${REPO_NAME}.lbug"
 
-          if [ -n "$LATEST_SNAPSHOT" ] && [ "$LATEST_SNAPSHOT" != "None" ] && [ "$LATEST_SNAPSHOT" != "null" ]; then
-            # Get snapshot details for logging
-            SNAPSHOT_TIME=$(aws ec2 describe-snapshots \
-              --snapshot-ids "$LATEST_SNAPSHOT" \
-              --query 'Snapshots[0].StartTime' \
-              --output text 2>/dev/null || echo "unknown")
-            echo "📸 Found latest snapshot: $LATEST_SNAPSHOT (created: $SNAPSHOT_TIME)"
-            echo "snapshot_id=$LATEST_SNAPSHOT" >> $GITHUB_OUTPUT
-            echo "source=aws_lookup" >> $GITHUB_OUTPUT
-            exit 0
+          echo "🔍 Checking for shared database at: $S3_URI"
+
+          # Check if the database file exists in S3
+          if aws s3 ls "$S3_URI" >/dev/null 2>&1; then
+            # Get file size for logging (use awk for portable floating point math)
+            FILE_SIZE=$(aws s3 ls "$S3_URI" | awk '{print $3}')
+            FILE_SIZE_GB=$(awk "BEGIN {printf \"%.2f\", $FILE_SIZE / 1024 / 1024 / 1024}")
+            LAST_MODIFIED=$(aws s3 ls "$S3_URI" | awk '{print $1, $2}')
+
+            echo "✅ Found shared database: $S3_URI"
+            echo "   Size: ${FILE_SIZE_GB}GB"
+            echo "   Last modified: $LAST_MODIFIED"
+
+            echo "s3_uri=$S3_URI" >> $GITHUB_OUTPUT
+          else
+            echo "❌ Shared database not found at: $S3_URI"
+            echo ""
+            echo "   Run Dagster shared_repository_s3_sync_job to upload the database."
+            echo "   The job will:"
+            echo "   1. Execute CHECKPOINT on the shared master"
+            echo "   2. Upload sec.lbug to S3"
+            echo "   3. Update the manifest file for replicas"
+            exit 1
           fi
-
-          # Priority 3: Get snapshot from existing launch template (if stack exists)
-          echo "🔍 No tagged snapshot found, checking existing launch template..."
-          LT_NAME="robosystems-shared-replicas-${{ inputs.environment }}"
-          EXISTING_SNAPSHOT=$(aws ec2 describe-launch-template-versions \
-            --launch-template-name "$LT_NAME" \
-            --versions '$Latest' \
-            --query 'LaunchTemplateVersions[0].LaunchTemplateData.BlockDeviceMappings[?DeviceName==`/dev/xvdf`].Ebs.SnapshotId' \
-            --output text 2>/dev/null || echo "")
-
-          if [ -n "$EXISTING_SNAPSHOT" ] && [ "$EXISTING_SNAPSHOT" != "None" ]; then
-            echo "📸 Using existing launch template snapshot: $EXISTING_SNAPSHOT"
-            echo "snapshot_id=$EXISTING_SNAPSHOT" >> $GITHUB_OUTPUT
-            echo "source=launch_template" >> $GITHUB_OUTPUT
-            exit 0
-          fi
-
-          # No snapshot found anywhere
-          echo "❌ No snapshot found."
-          echo ""
-          echo "   Run Dagster shared_repository_snapshot_only_job to create one."
-          echo "   The job will tag the snapshot with GraphId=sec and Environment=${{ inputs.environment }}"
-          echo "   so it can be auto-discovered on future deployments."
-          exit 1
 
       - name: Upload Userdata Scripts to S3
         run: |
@@ -265,7 +260,8 @@ jobs:
             ParameterKey=SubnetIds,ParameterValue=\"${{ inputs.subnet_ids }}\" \
             ParameterKey=AmiId,ParameterValue=${{ inputs.ami_id }} \
             ParameterKey=InstanceType,ParameterValue=${{ inputs.instance_type }} \
-            ParameterKey=SnapshotId,ParameterValue=${{ steps.snapshot.outputs.snapshot_id }} \
+            ParameterKey=SharedDatabaseS3Uri,ParameterValue=${{ steps.s3_database.outputs.s3_uri }} \
+            ParameterKey=RootVolumeSize,ParameterValue=${{ inputs.root_volume_size }} \
             ParameterKey=MinInstances,ParameterValue=${{ inputs.min_instances }} \
             ParameterKey=MaxInstances,ParameterValue=${{ inputs.max_instances }} \
             ParameterKey=DesiredCapacity,ParameterValue=${{ inputs.desired_capacity }} \
@@ -346,7 +342,7 @@ jobs:
           echo "  Launch Template: $LT_NAME"
 
       - name: Verify Replica Health
-        if: inputs.min_instances != '0'
+        if: inputs.desired_capacity != '0' && inputs.desired_capacity != 0
         run: |
           echo "🏥 Checking replica health..."
 
@@ -359,14 +355,14 @@ jobs:
               --query 'AutoScalingGroups[0].Instances[?LifecycleState==`InService`] | length(@)' \
               --output text)
 
-            DESIRED=${{ inputs.min_instances }}
+            DESIRED=${{ inputs.desired_capacity }}
 
             if [ "$HEALTHY" -ge "$DESIRED" ]; then
-              echo "✅ $HEALTHY/$DESIRED replicas healthy"
+              echo "✅ $HEALTHY/$DESIRED replicas InService"
               break
             fi
 
-            echo "⏳ Waiting for replicas... ($HEALTHY/$DESIRED healthy)"
+            echo "⏳ Waiting for replicas... ($HEALTHY/$DESIRED InService)"
             sleep 10
           done
 

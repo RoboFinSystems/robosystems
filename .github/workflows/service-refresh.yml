@@ -33,6 +33,7 @@ on:
           - writer
           - all
           - shared
+          - shared-replicas
         default: "writer"
   workflow_call:
     inputs:
@@ -57,7 +58,7 @@ on:
         type: string
         default: "true"
       graph_node_types:
-        description: "Graph node types to refresh (writer, all, shared)"
+        description: "Graph node types to refresh (writer, all, shared, shared-replicas)"
         required: false
         type: string
         default: "writer"
@@ -204,6 +205,31 @@ jobs:
               fi
 
               INSTANCE_OBJ="{\"instance_id\":\"$INSTANCE\",\"node_type\":\"$NODE_TYPE\",\"backend\":\"neo4j\"}"
+              if [ "$INSTANCES_JSON" == "[]" ]; then
+                INSTANCES_JSON="[$INSTANCE_OBJ]"
+              else
+                INSTANCES_JSON="${INSTANCES_JSON%]},${INSTANCE_OBJ}]"
+              fi
+            done
+          fi
+
+          # Collect shared replicas (only if all or shared-replicas is selected)
+          if [ "$NODE_TYPES" == "all" ] || [ "$NODE_TYPES" == "shared-replicas" ]; then
+            echo "📦 Collecting shared replica instances..."
+
+            # Get shared replica instances by NodeType tag
+            SHARED_REPLICAS=$(aws ec2 describe-instances \
+              --filters \
+                "Name=tag:Environment,Values=${{ inputs.environment }}" \
+                "Name=tag:NodeType,Values=shared_replica" \
+                "Name=instance-state-name,Values=running" \
+              --query "Reservations[].Instances[].InstanceId" \
+              --output text \
+              --region "${{ github.event_name == 'workflow_dispatch' && (vars.AWS_REGION || 'us-east-1') || inputs.aws_region }}" 2>/dev/null || echo "")
+
+            for INSTANCE in $SHARED_REPLICAS; do
+              echo "  Found shared replica: $INSTANCE"
+              INSTANCE_OBJ="{\"instance_id\":\"$INSTANCE\",\"node_type\":\"shared-replica\",\"backend\":\"ladybug\"}"
               if [ "$INSTANCES_JSON" == "[]" ]; then
                 INSTANCES_JSON="[$INSTANCE_OBJ]"
               else

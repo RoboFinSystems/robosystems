@@ -13,6 +13,7 @@ Key features:
 - Graceful connection cleanup on shutdown
 """
 
+import os
 import threading
 import weakref
 from contextlib import contextmanager
@@ -235,6 +236,21 @@ class LadybugConnectionPool:
         self._remove_oldest_connection(database_name)
 
     try:
+      # Check for S3 ATTACH mode (replicas reading from S3-hosted database)
+      s3_attach_uri = os.getenv("LBUG_S3_ATTACH_URI")
+      lbug_role = os.getenv("LBUG_ROLE", "master")
+
+      if s3_attach_uri and lbug_role == "replica":
+        # Validate S3 URI format before attempting ATTACH
+        if not s3_attach_uri.startswith("s3://") or not s3_attach_uri.endswith(".lbug"):
+          raise ValueError(
+            f"Invalid LBUG_S3_ATTACH_URI format: {s3_attach_uri} "
+            "(must be s3://bucket/path/*.lbug)"
+          )
+        # S3 ATTACH mode: connect to S3-hosted database via httpfs
+        return self._create_s3_attached_connection(database_name, s3_attach_uri)
+
+      # Normal mode: open local database file
       # Construct database path safely (LadybugDB uses .lbug files)
       db_path = self.base_path / f"{database_name}.lbug"
 
@@ -252,11 +268,21 @@ class LadybugConnectionPool:
         # Note: LadybugDB Python API uses buffer_pool_size in bytes
         buffer_pool_size = buffer_pool_mb * 1024 * 1024
 
-        # CRITICAL FIX: Always create Database objects with read_only=False
-        # to allow both read and write operations. The read_only flag should
-        # only affect individual connections, not the shared Database object.
-        # This prevents the bug where the first read-only request permanently
-        # locks the database in read-only mode.
+        # Check if this is a replica instance - replicas MUST open read-only
+        # to avoid WAL recovery and lock contention from snapshot-based volumes
+        lbug_role = os.getenv("LBUG_ROLE", "master")
+        is_replica = lbug_role == "replica"
+
+        if is_replica:
+          logger.info(
+            f"Opening database '{database_name}' in READ-ONLY mode (LBUG_ROLE=replica)"
+          )
+          db_read_only = True
+        else:
+          # Masters open read_write to allow both read and write operations.
+          # This prevents the bug where the first read-only request permanently
+          # locks the database in read-only mode.
+          db_read_only = False
 
         # For SEC database, use explicit checkpoint threshold for large tables
         # SEC has huge tables (Fact, Association) that can exhaust memory
@@ -269,7 +295,7 @@ class LadybugConnectionPool:
         # Create database with all optimizations
         self._databases[database_name] = lbug.Database(
           str(db_path),
-          read_only=False,
+          read_only=db_read_only,
           buffer_pool_size=buffer_pool_size,
           compression=True,  # Safe: enabled by default in LadybugDB
           max_num_threads=0,  # Use all available threads (LadybugDB decides)
@@ -277,7 +303,7 @@ class LadybugConnectionPool:
           checkpoint_threshold=checkpoint_threshold,  # Adaptive based on database
         )
         logger.info(
-          f"Database '{database_name}' created - buffer pool: {buffer_pool_mb} MB, "
+          f"Database '{database_name}' created - read_only: {db_read_only}, buffer pool: {buffer_pool_mb} MB, "
           f"compression: enabled, auto_checkpoint: enabled, threshold: {checkpoint_threshold // (1024 * 1024)}MB"
         )
 
@@ -371,6 +397,233 @@ class LadybugConnectionPool:
     except Exception as e:
       logger.error(f"Failed to create connection for {database_name}: {e}")
       raise
+
+  def _create_s3_attached_connection(
+    self, database_name: str, s3_uri: str
+  ) -> ConnectionInfo:
+    """
+    Create a connection that ATTACHes to an S3-hosted database.
+
+    This is used by replicas to read from S3-hosted .lbug files using
+    LadybugDB's httpfs extension. The database is accessed directly from S3
+    with local HTTP caching for performance.
+
+    S3 ATTACH connections are always read-only.
+
+    Args:
+        database_name: Name of the database (used as alias for ATTACH)
+        s3_uri: Full S3 URI to the .lbug file (e.g., s3://bucket/path/sec.lbug)
+
+    Returns:
+        ConnectionInfo with the attached connection
+    """
+
+    logger.info(f"Creating S3 ATTACH connection for {database_name} from {s3_uri}")
+
+    # Get memory configuration
+    from .config import get_database_memory_config
+
+    buffer_pool_mb = get_database_memory_config()
+    buffer_pool_size = buffer_pool_mb * 1024 * 1024
+
+    # Create an in-memory database that will ATTACH to the S3 database
+    # We use an in-memory database as the "host" for the ATTACH
+    db = lbug.Database(
+      ":memory:",
+      buffer_pool_size=buffer_pool_size,
+    )
+
+    conn = lbug.Connection(db)
+
+    try:
+      # Install and load httpfs extension for S3 access
+      logger.info("Loading httpfs extension for S3 ATTACH...")
+      try:
+        conn.execute("INSTALL httpfs")
+      except Exception as e:
+        if "already installed" not in str(e).lower():
+          raise
+      try:
+        conn.execute("LOAD httpfs")
+      except Exception as e:
+        if "already loaded" not in str(e).lower():
+          raise
+
+      # Configure S3 credentials from EC2 IMDS
+      self._configure_s3_credentials(conn)
+
+      # Enable HTTP caching for performance
+      # This caches downloaded data locally to avoid repeated S3 fetches
+      try:
+        conn.execute("CALL HTTP_CACHE_FILE = TRUE")
+        logger.info("Enabled HTTP file caching for S3 ATTACH")
+      except Exception as cache_err:
+        logger.warning(f"Could not enable HTTP caching (non-critical): {cache_err}")
+
+      # ATTACH to the S3-hosted database with retry logic for transient failures
+      # The database will be accessible via the alias (database_name)
+      logger.info(f"ATTACHing to S3 database: {s3_uri} AS {database_name}")
+      attach_query = f"ATTACH '{s3_uri}' AS {database_name} (dbtype lbug, read_only)"
+
+      import time
+
+      max_retries = 3
+      for attempt in range(max_retries):
+        try:
+          conn.execute(attach_query)
+          break
+        except Exception as attach_err:
+          if attempt == max_retries - 1:
+            raise  # Re-raise on final attempt
+          wait_time = 5 * (attempt + 1)  # Exponential backoff: 5s, 10s, 15s
+          logger.warning(
+            f"S3 ATTACH attempt {attempt + 1}/{max_retries} failed: {attach_err}. "
+            f"Retrying in {wait_time}s..."
+          )
+          time.sleep(wait_time)
+
+      # Verify the attach worked by running a simple query
+      logger.info("Verifying S3 ATTACH connection...")
+      result = conn.execute(f"USE {database_name}; RETURN 1 as test")
+      if isinstance(result, list):
+        for r in result:
+          r.close()
+      else:
+        result.close()
+
+      logger.info(f"✅ S3 ATTACH connection established for {database_name}")
+
+      # Create connection info
+      now = datetime.now(UTC)
+      connection_info = ConnectionInfo(
+        connection=conn,
+        database=db,
+        created_at=now,
+        last_used=now,
+        use_count=1,
+        is_healthy=True,
+        read_only=True,  # S3 ATTACH is always read-only
+      )
+
+      # Store in pool
+      if database_name not in self._pools:
+        self._pools[database_name] = {}
+
+      # Store database reference (even though it's in-memory, we need to track it)
+      self._databases[database_name] = db
+
+      conn_id = f"{database_name}_s3_{len(self._pools[database_name])}"
+      self._pools[database_name][conn_id] = connection_info
+
+      self._stats["connections_created"] += 1
+      logger.info(
+        f"Created S3 ATTACH connection for {database_name} (total: {len(self._pools[database_name])})"
+      )
+
+      return connection_info
+
+    except Exception as e:
+      # Clean up on failure - log but don't mask the primary exception
+      try:
+        conn.close()
+      except Exception as close_err:
+        logger.debug(f"Failed to close connection during cleanup: {close_err}")
+      try:
+        db.close()
+      except Exception as close_err:
+        logger.debug(f"Failed to close database during cleanup: {close_err}")
+      logger.error(f"Failed to create S3 ATTACH connection for {database_name}: {e}")
+      raise
+
+  def _configure_s3_credentials(self, conn: lbug.Connection) -> None:
+    """
+    Configure S3 credentials for httpfs extension.
+
+    Uses EC2 Instance Metadata Service (IMDS) in production to get
+    temporary credentials from the instance's IAM role.
+    """
+    from robosystems.config import env
+
+    region = (
+      env.AWS_DEFAULT_REGION or env.AWS_REGION or os.getenv("AWS_REGION", "us-east-1")
+    )
+    is_production = env.ENVIRONMENT in ("prod", "staging")
+    credentials_loaded = False
+
+    if is_production:
+      # Production/Staging: Fetch from EC2 Instance Metadata Service (IMDS)
+      try:
+        import requests
+
+        # IMDSv2: Get token first
+        token_response = requests.put(
+          "http://169.254.169.254/latest/api/token",
+          headers={"X-aws-ec2-metadata-token-ttl-seconds": "21600"},
+          timeout=2,
+        )
+        token = token_response.text
+
+        # Get IAM role name
+        role_response = requests.get(
+          "http://169.254.169.254/latest/meta-data/iam/security-credentials/",
+          headers={"X-aws-ec2-metadata-token": token},
+          timeout=2,
+        )
+        role_name = role_response.text.strip()
+
+        # Get credentials for the role
+        creds_response = requests.get(
+          f"http://169.254.169.254/latest/meta-data/iam/security-credentials/{role_name}",
+          headers={"X-aws-ec2-metadata-token": token},
+          timeout=2,
+        )
+        creds = creds_response.json()
+
+        access_key = creds["AccessKeyId"].replace("'", "''")
+        secret_key = creds["SecretAccessKey"].replace("'", "''")
+        session_token = creds.get("Token", "").replace("'", "''")
+
+        conn.execute(f"CALL s3_access_key_id = '{access_key}'")
+        conn.execute(f"CALL s3_secret_access_key = '{secret_key}'")
+        if session_token:
+          # Session tokens are REQUIRED for EC2 IMDS temporary credentials
+          # Failure here means httpfs doesn't support session tokens, which breaks S3 auth
+          try:
+            conn.execute(f"CALL s3_session_token = '{session_token}'")
+          except Exception as token_err:
+            logger.error(
+              f"Failed to set s3_session_token (REQUIRED for IMDS credentials): {token_err}"
+            )
+            raise RuntimeError(
+              "S3 ATTACH requires session token support for EC2 IMDS credentials. "
+              "Ensure LadybugDB/httpfs version supports s3_session_token."
+            ) from token_err
+
+        credentials_loaded = True
+        logger.info(f"Loaded S3 credentials from EC2 IMDS (role: {role_name})")
+
+      except Exception as imds_err:
+        logger.warning(f"Failed to fetch credentials from EC2 IMDS: {imds_err}")
+
+    # Dev environment OR fallback if IMDS failed: use explicit credentials
+    if not credentials_loaded:
+      if env.AWS_S3_ACCESS_KEY_ID and env.AWS_S3_SECRET_ACCESS_KEY:
+        escaped_key = env.AWS_S3_ACCESS_KEY_ID.replace("'", "''")
+        escaped_secret = env.AWS_S3_SECRET_ACCESS_KEY.replace("'", "''")
+        conn.execute(f"CALL s3_access_key_id = '{escaped_key}'")
+        conn.execute(f"CALL s3_secret_access_key = '{escaped_secret}'")
+        credentials_loaded = True
+        logger.info("Configured S3 credentials from environment variables")
+
+    if not credentials_loaded:
+      logger.warning(
+        "No S3 credentials available for ATTACH. In prod/staging, ensure EC2 has IAM role. "
+        "In dev, set AWS_S3_ACCESS_KEY_ID/AWS_S3_SECRET_ACCESS_KEY."
+      )
+
+    # Always set region for S3 access
+    conn.execute(f"CALL s3_region = '{region}'")
+    logger.debug(f"Set S3 region to: {region}")
 
   def _is_connection_valid(self, connection_info: ConnectionInfo) -> bool:
     """Check if a connection is still valid."""
