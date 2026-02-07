@@ -247,6 +247,22 @@ function setup_full_config() {
         gh variable set API_ASG_REFRESH_STAGING --body "true"
     fi
 
+    # API Fargate Task Sizing
+    gh variable set API_CPU_PROD --body "512"
+    gh variable set API_MEMORY_PROD --body "1024"
+    if $setup_staging; then
+        gh variable set API_CPU_STAGING --body "512"
+        gh variable set API_MEMORY_STAGING --body "1024"
+    fi
+
+    # API Auto-scaling Targets
+    gh variable set API_CPU_TARGET_PROD --body "70"
+    gh variable set API_MEMORY_TARGET_PROD --body "80"
+    if $setup_staging; then
+        gh variable set API_CPU_TARGET_STAGING --body "70"
+        gh variable set API_MEMORY_TARGET_STAGING --body "80"
+    fi
+
     # API Capacity Provider Configuration (Spot vs On-Demand)
     # API can handle Spot interruptions via ALB health checks and auto-scaling
     gh variable set API_FARGATE_WEIGHT_PROD --body "10"
@@ -405,18 +421,22 @@ function setup_full_config() {
     # Replicas use S3 ATTACH to connect to shared database hosted in S3
     # Run Dagster shared_repository_s3_upload_only_job to upload database, then enable replicas
     gh variable set SHARED_REPLICAS_ENABLED_PROD --body "false"
-    gh variable set SHARED_REPLICAS_MIN_INSTANCES_PROD --body "2"
-    gh variable set SHARED_REPLICAS_MAX_INSTANCES_PROD --body "10"
-    gh variable set SHARED_REPLICAS_DESIRED_CAPACITY_PROD --body "2"
-    gh variable set SHARED_REPLICAS_INSTANCE_TYPE_PROD --body "r7g.medium"
+    gh variable set SHARED_REPLICAS_MIN_INSTANCES_PROD --body "1"
+    gh variable set SHARED_REPLICAS_MAX_INSTANCES_PROD --body "3"
+    gh variable set SHARED_REPLICAS_DESIRED_CAPACITY_PROD --body "1"
     gh variable set SHARED_REPLICAS_ROOT_VOLUME_SIZE_PROD --body "100"
+    gh variable set SHARED_REPLICAS_CPU_TARGET_PROD --body "70"
+    gh variable set SHARED_REPLICAS_MEMORY_TARGET_PROD --body "80"
+    gh variable set SHARED_REPOSITORIES_PROD --body "sec"
     if $setup_staging; then
         gh variable set SHARED_REPLICAS_ENABLED_STAGING --body "false"
         gh variable set SHARED_REPLICAS_MIN_INSTANCES_STAGING --body "1"
         gh variable set SHARED_REPLICAS_MAX_INSTANCES_STAGING --body "3"
         gh variable set SHARED_REPLICAS_DESIRED_CAPACITY_STAGING --body "1"
-        gh variable set SHARED_REPLICAS_INSTANCE_TYPE_STAGING --body "r7g.medium"
         gh variable set SHARED_REPLICAS_ROOT_VOLUME_SIZE_STAGING --body "50"
+        gh variable set SHARED_REPLICAS_CPU_TARGET_STAGING --body "70"
+        gh variable set SHARED_REPLICAS_MEMORY_TARGET_STAGING --body "80"
+        gh variable set SHARED_REPOSITORIES_STAGING --body "sec"
     fi
 
     # Note: Neo4j variables removed - Neo4j backend is disabled by default in graph.yml

@@ -94,6 +94,20 @@ Parameters:
     Description: Docker image tag
     Default: latest
 
+  # Auto-scaling Targets
+  CPUTargetValue:
+    Type: Number
+    Default: 70
+    MinValue: 1
+    MaxValue: 100
+    Description: Target CPU utilization percentage for auto scaling
+  MemoryTargetValue:
+    Type: Number
+    Default: 80
+    MinValue: 1
+    MaxValue: 100
+    Description: Target memory utilization percentage for auto scaling
+
   # Monitoring
   SNSAlertEmail:
     Type: String
@@ -417,6 +431,10 @@ Resources:
       # Set to 35 min (2100s) to provide buffer. During this time, health can
       # return 503 (blocking ALB traffic) without ASG marking instance unhealthy.
       HealthCheckGracePeriod: 2100
+      # Replicas take ~20 min to initialize (S3 ATTACH download).
+      # DefaultInstanceWarmup tells target tracking scaling to ignore new instance
+      # metrics during warmup, preventing premature scale-out/in decisions.
+      DefaultInstanceWarmup: 1200
       Tags:
         - Key: Name
           Value: !Sub robosystems-shared-replica-${Environment}
@@ -449,7 +467,24 @@ Resources:
       TargetTrackingConfiguration:
         PredefinedMetricSpecification:
           PredefinedMetricType: ASGAverageCPUUtilization
-        TargetValue: 70
+        TargetValue: !Ref CPUTargetValue
+        DisableScaleIn: false
+
+  # Memory-based Auto Scaling (uses CloudWatch agent mem_used_percent metric)
+  ReplicaMemoryScalingPolicy:
+    Type: AWS::AutoScaling::ScalingPolicy
+    Properties:
+      AutoScalingGroupName: !Ref ReplicaAutoScalingGroup
+      PolicyType: TargetTrackingScaling
+      TargetTrackingConfiguration:
+        CustomizedMetricSpecification:
+          MetricName: mem_used_percent
+          Namespace: !Sub "RoboSystems/Graph/${Environment}"
+          Statistic: Average
+          Dimensions:
+            - Name: AutoScalingGroupName
+              Value: !Ref ReplicaAutoScalingGroup
+        TargetValue: !Ref MemoryTargetValue
         DisableScaleIn: false
 
   # ========================================
