@@ -7,14 +7,11 @@ via the httpfs extension.
 The asset:
 1. Uses Graph Client Factory to call the backup endpoint on the shared master
 2. The Graph API runs CHECKPOINT and uploads raw .lbug to S3 on-instance
-3. Optionally triggers replica fleet refresh
+
+Replica fleet refresh is handled by the separate sec_replicas_refreshed asset.
 
 This is distinct from sec_backup which creates compressed, downloadable backups
 for users. This asset creates the source-of-truth for the replica cluster.
-
-NOTE: Previous implementation used raw httpx (no auth - caused 401 errors) and
-SSM for S3 upload. Now uses Graph Client Factory which handles auth, routing,
-and circuit breakers automatically.
 """
 
 import asyncio
@@ -34,11 +31,6 @@ class SECS3PublishConfig(Config):
   """Configuration for S3 publish operations."""
 
   graph_id: str = "sec"
-  # Replica refresh is now a separate asset (sec_replicas_refreshed)
-  # Set to True only for backwards compatibility or one-off runs
-  refresh_replicas: bool = False
-  min_healthy_percentage: int = 50
-  instance_warmup_seconds: int = 900
 
 
 @asset(
@@ -130,74 +122,6 @@ def sec_s3_published(
     f"(size: {file_size / (1024**3):.2f}GB, modified: {last_modified})"
   )
 
-  # Optionally trigger replica refresh
-  refresh_result = {"status": "skipped", "reason": "disabled"}
-
-  if config.refresh_replicas:
-    context.log.info("Triggering replica fleet refresh...")
-
-    autoscaling = boto3.client("autoscaling", region_name=env.AWS_REGION)
-    asg_name = f"robosystems-shared-replicas-{env.ENVIRONMENT}-asg"
-
-    try:
-      asg_response = autoscaling.describe_auto_scaling_groups(
-        AutoScalingGroupNames=[asg_name]
-      )
-
-      if not asg_response["AutoScalingGroups"]:
-        context.log.warning(f"ASG {asg_name} not found - skipping refresh")
-        refresh_result = {"status": "skipped", "reason": "asg_not_found"}
-      else:
-        asg = asg_response["AutoScalingGroups"][0]
-        desired_capacity = asg["DesiredCapacity"]
-
-        if desired_capacity == 0:
-          context.log.info("No replica instances to refresh (ASG at 0 capacity)")
-          refresh_result = {"status": "skipped", "reason": "no_instances"}
-        else:
-          # Check for existing in-progress refresh
-          refresh_check = autoscaling.describe_instance_refreshes(
-            AutoScalingGroupName=asg_name,
-            MaxRecords=1,
-          )
-
-          existing = refresh_check.get("InstanceRefreshes", [])
-          if existing and existing[0]["Status"] in (
-            "Pending",
-            "InProgress",
-            "Cancelling",
-          ):
-            context.log.warning(
-              f"Refresh already in progress: {existing[0]['InstanceRefreshId']}"
-            )
-            refresh_result = {
-              "status": "skipped",
-              "reason": "refresh_in_progress",
-              "existing_refresh_id": existing[0]["InstanceRefreshId"],
-            }
-          else:
-            refresh_response = autoscaling.start_instance_refresh(
-              AutoScalingGroupName=asg_name,
-              Strategy="Rolling",
-              Preferences={
-                "MinHealthyPercentage": config.min_healthy_percentage,
-                "InstanceWarmup": config.instance_warmup_seconds,
-              },
-            )
-
-            refresh_id = refresh_response["InstanceRefreshId"]
-            context.log.info(f"Started instance refresh: {refresh_id}")
-            refresh_result = {
-              "status": "started",
-              "refresh_id": refresh_id,
-              "asg_name": asg_name,
-              "desired_capacity": desired_capacity,
-            }
-
-    except Exception as e:
-      context.log.warning(f"Failed to trigger replica refresh: {e}")
-      refresh_result = {"status": "error", "error": str(e)}
-
   return MaterializeResult(
     metadata={
       "s3_uri": s3_uri,
@@ -208,6 +132,5 @@ def sec_s3_published(
       "last_modified": last_modified.isoformat(),
       "graph_id": graph_id,
       "published_at": datetime.now(UTC).isoformat(),
-      "replica_refresh": refresh_result,
     }
   )
