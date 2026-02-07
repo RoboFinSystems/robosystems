@@ -245,8 +245,8 @@ async def get_graph_limits(
         await graph_client.close()
         current_nodes = db_info.get("node_count")
         current_rels = db_info.get("relationship_count")
-      except Exception:
-        pass
+      except Exception as e:
+        logger.debug(f"Could not fetch graph content counts for {graph_id}: {e}")
 
       # Determine warnings
       approaching = []
