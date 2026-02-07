@@ -427,6 +427,7 @@ function setup_full_config() {
     gh variable set SHARED_REPLICAS_ROOT_VOLUME_SIZE_PROD --body "100"
     gh variable set SHARED_REPLICAS_CPU_TARGET_PROD --body "70"
     gh variable set SHARED_REPLICAS_MEMORY_TARGET_PROD --body "80"
+    gh variable set SHARED_REPLICAS_INSTANCE_WARMUP_PROD --body "1200"
     gh variable set SHARED_REPOSITORIES_PROD --body "sec"
     if $setup_staging; then
         gh variable set SHARED_REPLICAS_ENABLED_STAGING --body "false"
@@ -436,6 +437,7 @@ function setup_full_config() {
         gh variable set SHARED_REPLICAS_ROOT_VOLUME_SIZE_STAGING --body "50"
         gh variable set SHARED_REPLICAS_CPU_TARGET_STAGING --body "70"
         gh variable set SHARED_REPLICAS_MEMORY_TARGET_STAGING --body "80"
+        gh variable set SHARED_REPLICAS_INSTANCE_WARMUP_STAGING --body "1200"
         gh variable set SHARED_REPOSITORIES_STAGING --body "sec"
     fi
 

@@ -107,6 +107,12 @@ Parameters:
     MinValue: 1
     MaxValue: 100
     Description: Target memory utilization percentage for auto scaling
+  InstanceWarmup:
+    Type: Number
+    Default: 1200
+    MinValue: 0
+    MaxValue: 3600
+    Description: Seconds to ignore new instance metrics during initialization (S3 download time)
 
   # Monitoring
   SNSAlertEmail:
@@ -434,7 +440,7 @@ Resources:
       # Replicas take ~20 min to initialize (S3 ATTACH download).
       # DefaultInstanceWarmup tells target tracking scaling to ignore new instance
       # metrics during warmup, preventing premature scale-out/in decisions.
-      DefaultInstanceWarmup: 1200
+      DefaultInstanceWarmup: !Ref InstanceWarmup
       Tags:
         - Key: Name
           Value: !Sub robosystems-shared-replica-${Environment}

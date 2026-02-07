@@ -82,6 +82,11 @@ on:
         required: false
         type: string
         default: "80"
+      instance_warmup:
+        description: "Seconds to ignore new instance metrics during initialization (S3 download time)"
+        required: false
+        type: string
+        default: "1200"
 
       # Docker Configuration
       ecr_image_tag:
@@ -285,6 +290,7 @@ jobs:
             ParameterKey=DesiredCapacity,ParameterValue=${{ inputs.desired_capacity }} \
             ParameterKey=CPUTargetValue,ParameterValue=${{ inputs.cpu_target_value }} \
             ParameterKey=MemoryTargetValue,ParameterValue=${{ inputs.memory_target_value }} \
+            ParameterKey=InstanceWarmup,ParameterValue=${{ inputs.instance_warmup }} \
             ParameterKey=DeploymentBucketArn,ParameterValue=${{ steps.s3_config.outputs.deployment_bucket_arn }} \
             ParameterKey=ECRRepositoryUrl,ParameterValue=${{ steps.ecr_config.outputs.ecr_url }} \
             ParameterKey=ECRImageTag,ParameterValue=${{ inputs.ecr_image_tag }} \

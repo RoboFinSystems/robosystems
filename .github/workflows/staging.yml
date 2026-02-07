@@ -455,6 +455,7 @@ jobs:
       shared_repositories: ${{ vars.SHARED_REPOSITORIES_STAGING || 'sec' }}
       shared_replicas_cpu_target: ${{ vars.SHARED_REPLICAS_CPU_TARGET_STAGING || '70' }}
       shared_replicas_memory_target: ${{ vars.SHARED_REPLICAS_MEMORY_TARGET_STAGING || '80' }}
+      shared_replicas_instance_warmup: ${{ vars.SHARED_REPLICAS_INSTANCE_WARMUP_STAGING || '1200' }}
       # Other Configuration
       aws_sns_alert_email: ${{ vars.AWS_SNS_ALERT_EMAIL }}
     secrets: inherit
