@@ -1,18 +1,16 @@
 """Dagster jobs for shared repository management.
 
-These jobs handle EBS snapshot and replica management:
-- Create EBS snapshots of shared master's data volume
-- Update replica ASG launch template with new snapshot
+These jobs handle S3-based replica data distribution:
+- Upload shared master's database to S3 for replicas
 - Trigger rolling instance refresh of replica fleet
 
-Snapshot retention is handled by AWS Data Lifecycle Manager (DLM),
-not by Dagster jobs. See CloudFormation for DLM policy configuration.
+Replicas use LadybugDB S3 ATTACH to connect directly to S3-hosted
+.lbug files using the httpfs extension.
 
 These jobs are typically triggered after SEC materialization completes,
-or can be run manually for ad-hoc snapshot/refresh operations.
+or can be run manually for ad-hoc sync/refresh operations.
 """
 
-from datetime import UTC, datetime
 from typing import Any
 
 import boto3
@@ -31,12 +29,11 @@ from robosystems.config import env
 # ============================================================================
 
 
-class SnapshotConfig(Config):
-  """Configuration for snapshot operations."""
+class S3SyncConfig(Config):
+  """Configuration for S3 sync operations."""
 
   graph_id: str = "sec"
-  wait_for_completion: bool = True
-  description_prefix: str = "Shared repository"
+  s3_prefix: str = "shared-repos"
 
 
 class ReplicaConfig(Config):
@@ -55,7 +52,7 @@ class ReplicaConfig(Config):
 
 @op
 def verify_shared_master_health(
-  context: OpExecutionContext, config: SnapshotConfig
+  context: OpExecutionContext, config: S3SyncConfig
 ) -> dict[str, Any]:
   """Verify shared master is healthy before snapshotting.
 
@@ -134,230 +131,231 @@ def verify_shared_master_health(
 
 
 # ============================================================================
-# Snapshot Operations
+# S3 Sync Operations
 # ============================================================================
 
 
 @op
-def get_shared_master_volume(
+def checkpoint_shared_database(
   context: OpExecutionContext,
   health_check: dict[str, Any],
-  config: SnapshotConfig,
-) -> str:
-  """Get the data volume ID from the verified healthy shared master.
+  config: S3SyncConfig,
+) -> dict[str, Any]:
+  """Execute CHECKPOINT on the shared master to flush WAL.
 
-  Uses the instance_id from the health check to find the attached data volume.
+  This ensures the database file is consistent before uploading to S3.
+  Replicas will read this file via S3 ATTACH.
   """
-  instance_id = health_check["instance_id"]
-  context.log.info(f"Getting data volume for instance: {instance_id}")
+  private_ip = health_check["private_ip"]
+  graph_id = config.graph_id
 
-  # Check DynamoDB for cached volume_id first
-  dynamodb = boto3.client("dynamodb", region_name=env.AWS_REGION)
-  table_name = env.INSTANCE_REGISTRY_TABLE
+  context.log.info(f"Executing CHECKPOINT on shared master {private_ip} for {graph_id}")
 
-  response = dynamodb.get_item(
-    TableName=table_name,
-    Key={"instance_id": {"S": instance_id}},
-  )
+  # Execute CHECKPOINT via Graph API
+  checkpoint_url = f"http://{private_ip}:8001/databases/{graph_id}/query"
 
-  item = response.get("Item", {})
-  if "volume_id" in item:
-    volume_id = item["volume_id"]["S"]
-    context.log.info(f"Found volume ID from registry: {volume_id}")
-    return volume_id
+  try:
+    with httpx.Client(timeout=120.0) as client:
+      response = client.post(
+        checkpoint_url,
+        json={"query": "CHECKPOINT"},
+      )
+      response.raise_for_status()
+      result = response.json()
 
-  # Fall back to querying EC2 for attached volumes
-  ec2 = boto3.client("ec2", region_name=env.AWS_REGION)
-  response = ec2.describe_instances(InstanceIds=[instance_id])
+      context.log.info(f"CHECKPOINT completed: {result}")
 
-  if not response["Reservations"]:
-    raise Exception(f"Instance {instance_id} not found in EC2")
+      return {
+        "graph_id": graph_id,
+        "private_ip": private_ip,
+        "checkpoint_status": "success",
+      }
 
-  instance = response["Reservations"][0]["Instances"][0]
-
-  # Find data volume (typically /dev/xvdf)
-  for bdm in instance.get("BlockDeviceMappings", []):
-    if bdm["DeviceName"] in ("/dev/xvdf", "/dev/sdf"):
-      volume_id = bdm["Ebs"]["VolumeId"]
-      context.log.info(f"Found data volume from EC2: {volume_id}")
-      return volume_id
-
-  raise Exception(
-    f"No data volume found for instance {instance_id}. Expected /dev/xvdf or /dev/sdf."
-  )
+  except httpx.TimeoutException:
+    raise Exception(
+      f"CHECKPOINT timed out for {graph_id} on {private_ip}. "
+      "Database may be under heavy load."
+    )
+  except httpx.HTTPStatusError as e:
+    raise Exception(
+      f"CHECKPOINT failed for {graph_id}: {e.response.status_code}. "
+      f"Response: {e.response.text[:500]}"
+    )
 
 
 @op
-def create_snapshot(
-  context: OpExecutionContext, volume_id: str, config: SnapshotConfig
-) -> str:
-  """Create EBS snapshot of shared master's data volume.
+def upload_database_to_s3(
+  context: OpExecutionContext,
+  checkpoint_result: dict[str, Any],
+  config: S3SyncConfig,
+) -> dict[str, Any]:
+  """Upload shared database to S3 for replicas.
 
-  Creates a snapshot with appropriate tags for tracking and
-  optionally waits for completion.
-
-  Tags are used by AWS DLM for lifecycle management (retention policy).
+  Uses SSM to run an upload command on the shared master instance.
+  The database file is uploaded directly to S3 where replicas can
+  ATTACH to it via httpfs.
   """
-  ec2 = boto3.client("ec2", region_name=env.AWS_REGION)
 
-  timestamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
-  description = (
-    f"{config.description_prefix} {config.graph_id} - Dagster run {context.run_id[:8]}"
+  graph_id = config.graph_id
+  s3_prefix = config.s3_prefix
+
+  # Get AWS account ID for bucket name
+  sts = boto3.client("sts", region_name=env.AWS_REGION)
+  account_id = sts.get_caller_identity()["Account"]
+
+  # Build S3 path
+  bucket = f"robosystems-{account_id}-user-{env.ENVIRONMENT}"
+  s3_key = f"{s3_prefix}/{graph_id}.lbug"
+  s3_uri = f"s3://{bucket}/{s3_key}"
+
+  context.log.info(f"Uploading database to: {s3_uri}")
+
+  # Get shared master instance ID from DynamoDB
+  dynamodb = boto3.client("dynamodb", region_name=env.AWS_REGION)
+  table_name = env.INSTANCE_REGISTRY_TABLE
+
+  response = dynamodb.scan(
+    TableName=table_name,
+    FilterExpression="node_type = :nt AND #status = :s",
+    ExpressionAttributeNames={"#status": "status"},
+    ExpressionAttributeValues={
+      ":nt": {"S": "shared_master"},
+      ":s": {"S": "healthy"},
+    },
   )
 
-  context.log.info(f"Creating snapshot of volume {volume_id}")
+  items = response.get("Items", [])
+  if not items:
+    raise Exception("No healthy shared_master found for S3 upload")
 
-  response = ec2.create_snapshot(
-    VolumeId=volume_id,
-    Description=description,
-    TagSpecifications=[
-      {
-        "ResourceType": "snapshot",
-        "Tags": [
-          {
-            "Key": "Name",
-            "Value": f"robosystems-shared-{config.graph_id}-{timestamp}",
-          },
-          {"Key": "Environment", "Value": env.ENVIRONMENT},
-          {"Key": "AllRepositories", "Value": "true"},
-          {"Key": "DagsterRunId", "Value": context.run_id},
-          {"Key": "GraphId", "Value": config.graph_id},
-          {"Key": "CreatedBy", "Value": "Dagster"},
-          {"Key": "Service", "Value": "RoboSystems"},
-          {"Key": "Component", "Value": "SharedRepository"},
-        ],
-      }
-    ],
+  instance_id = items[0]["instance_id"]["S"]
+  context.log.info(f"Using shared master instance: {instance_id}")
+
+  # Use SSM to run the upload command on the shared master
+  ssm = boto3.client("ssm", region_name=env.AWS_REGION)
+
+  # Build the upload command
+  # The database is at /mnt/ladybug-data/databases/lbug-dbs/{graph_id}.lbug
+  upload_command = f"""
+#!/bin/bash
+set -e
+
+DB_PATH="/mnt/ladybug-data/databases/lbug-dbs/{graph_id}.lbug"
+S3_URI="{s3_uri}"
+
+echo "Uploading database to S3..."
+echo "  Source: $DB_PATH"
+echo "  Destination: $S3_URI"
+
+# Verify database exists
+if [ ! -e "$DB_PATH" ]; then
+  echo "ERROR: Database not found at $DB_PATH"
+  exit 1
+fi
+
+# Get size for logging
+DB_SIZE=$(du -sh "$DB_PATH" | cut -f1)
+echo "  Size: $DB_SIZE"
+
+# Upload to S3
+aws s3 cp "$DB_PATH" "$S3_URI" --region {env.AWS_REGION}
+
+echo "✅ Upload complete"
+"""
+
+  # Send SSM command
+  context.log.info(f"Sending SSM command to instance {instance_id}")
+
+  command_response = ssm.send_command(
+    InstanceIds=[instance_id],
+    DocumentName="AWS-RunShellScript",
+    Parameters={"commands": [upload_command]},
+    TimeoutSeconds=3600,  # 1 hour timeout for large uploads
+    Comment=f"Upload {graph_id} database to S3 - Dagster run {context.run_id[:8]}",
   )
 
-  snapshot_id = response["SnapshotId"]
-  context.log.info(f"Created snapshot: {snapshot_id}")
+  command_id = command_response["Command"]["CommandId"]
+  context.log.info(f"SSM command started: {command_id}")
 
-  if config.wait_for_completion:
-    context.log.info(
-      "Waiting for snapshot completion (this may take several minutes)..."
-    )
-    waiter = ec2.get_waiter("snapshot_completed")
+  # Wait for command to complete
+  waiter = ssm.get_waiter("command_executed")
+  try:
     waiter.wait(
-      SnapshotIds=[snapshot_id],
+      CommandId=command_id,
+      InstanceId=instance_id,
       WaiterConfig={
         "Delay": 30,  # Check every 30 seconds
         "MaxAttempts": 120,  # Wait up to 60 minutes
       },
     )
-    context.log.info(f"Snapshot {snapshot_id} completed successfully")
-
-  return snapshot_id
-
-
-@op
-def update_replica_launch_template(
-  context: OpExecutionContext, snapshot_id: str
-) -> dict[str, Any]:
-  """Update replica ASG launch template with new snapshot ID.
-
-  Creates a new launch template version with the updated snapshot
-  and sets it as the default.
-  """
-  ec2 = boto3.client("ec2", region_name=env.AWS_REGION)
-
-  lt_name = f"robosystems-shared-replicas-{env.ENVIRONMENT}"
-  context.log.info(f"Updating launch template: {lt_name}")
-
-  # Get current launch template version
-  try:
-    response = ec2.describe_launch_template_versions(
-      LaunchTemplateName=lt_name, Versions=["$Latest"]
-    )
-  except ec2.exceptions.ClientError as e:
-    if "InvalidLaunchTemplateName.NotFoundException" in str(e):
-      context.log.warning(
-        f"Launch template {lt_name} not found - replicas not deployed yet. "
-        "Skipping launch template update."
+  except Exception as e:
+    # Get command output for debugging
+    try:
+      output = ssm.get_command_invocation(
+        CommandId=command_id,
+        InstanceId=instance_id,
       )
-      return {
-        "status": "skipped",
-        "reason": "launch_template_not_found",
-        "launch_template_name": lt_name,
-        "snapshot_id": snapshot_id,
-      }
-    raise
+      stderr = output.get("StandardErrorContent", "")
+      context.log.error(f"SSM command failed. stderr: {stderr}")
+    except Exception:
+      pass
+    raise Exception(f"S3 upload command failed: {e}")
 
-  if not response["LaunchTemplateVersions"]:
-    context.log.warning(f"Launch template {lt_name} has no versions - skipping update")
-    return {
-      "status": "skipped",
-      "reason": "no_versions",
-      "launch_template_name": lt_name,
-      "snapshot_id": snapshot_id,
-    }
-
-  current = response["LaunchTemplateVersions"][0]
-  lt_id = current["LaunchTemplateId"]
-  current_version = current["VersionNumber"]
-  lt_data = current["LaunchTemplateData"]
-
-  context.log.info(f"Current launch template version: {current_version}")
-
-  # Update snapshot ID in block device mappings
-  updated = False
-  for bdm in lt_data.get("BlockDeviceMappings", []):
-    if bdm["DeviceName"] in ("/dev/xvdf", "/dev/sdf"):
-      old_snapshot = bdm.get("Ebs", {}).get("SnapshotId", "none")
-      bdm["Ebs"]["SnapshotId"] = snapshot_id
-      # Remove VolumeSize if present - size comes from snapshot
-      bdm["Ebs"].pop("VolumeSize", None)
-      updated = True
-      context.log.info(f"Updated snapshot: {old_snapshot} -> {snapshot_id}")
-      break
-
-  if not updated:
-    raise Exception("No data volume found in launch template block device mappings")
-
-  # Create new launch template version
-  new_version_response = ec2.create_launch_template_version(
-    LaunchTemplateId=lt_id,
-    SourceVersion=str(current_version),
-    LaunchTemplateData=lt_data,
-    VersionDescription=f"Snapshot {snapshot_id} - Dagster",
+  # Get command output
+  output = ssm.get_command_invocation(
+    CommandId=command_id,
+    InstanceId=instance_id,
   )
 
-  new_version = new_version_response["LaunchTemplateVersion"]["VersionNumber"]
-  context.log.info(f"Created new launch template version: {new_version}")
+  stdout = output.get("StandardOutputContent", "")
+  context.log.info(f"SSM command output:\n{stdout}")
 
-  # Set as default version
-  ec2.modify_launch_template(LaunchTemplateId=lt_id, DefaultVersion=str(new_version))
-  context.log.info(f"Set version {new_version} as default")
+  # Verify upload by checking S3
+  s3 = boto3.client("s3", region_name=env.AWS_REGION)
+  try:
+    head = s3.head_object(Bucket=bucket, Key=s3_key)
+    file_size = head["ContentLength"]
+    last_modified = head["LastModified"]
 
-  return {
-    "status": "updated",
-    "launch_template_id": lt_id,
-    "launch_template_name": lt_name,
-    "previous_version": current_version,
-    "new_version": new_version,
-    "snapshot_id": snapshot_id,
-  }
+    context.log.info(
+      f"✅ Database uploaded to S3: {s3_uri} "
+      f"(size: {file_size / (1024**3):.2f}GB, modified: {last_modified})"
+    )
+
+    return {
+      "status": "success",
+      "s3_uri": s3_uri,
+      "s3_bucket": bucket,
+      "s3_key": s3_key,
+      "file_size_bytes": file_size,
+      "file_size_gb": round(file_size / (1024**3), 2),
+      "last_modified": last_modified.isoformat(),
+      "graph_id": graph_id,
+    }
+
+  except Exception as e:
+    raise Exception(f"Failed to verify S3 upload: {e}")
 
 
 @op
 def refresh_replica_instances(
-  context: OpExecutionContext, lt_update: dict[str, Any], config: ReplicaConfig
+  context: OpExecutionContext, s3_upload: dict[str, Any], config: ReplicaConfig
 ) -> dict[str, Any]:
   """Trigger rolling refresh of replica ASG.
 
   Starts an instance refresh that gradually replaces instances
-  with new ones using the updated launch template.
+  so they pick up the new S3 database via ATTACH.
 
   Checks for existing in-progress refresh and skips if one is active.
   """
-  # Skip if launch template update was skipped
-  if lt_update.get("status") == "skipped":
+  # Skip if S3 upload failed
+  if s3_upload.get("status") != "success":
     context.log.info(
-      f"Skipping instance refresh: {lt_update.get('reason', 'unknown reason')}"
+      f"Skipping instance refresh: S3 upload status was {s3_upload.get('status')}"
     )
     return {
       "status": "skipped",
-      "reason": lt_update.get("reason"),
+      "reason": "s3_upload_not_successful",
     }
 
   autoscaling = boto3.client("autoscaling", region_name=env.AWS_REGION)
@@ -438,7 +436,7 @@ def refresh_replica_instances(
     "desired_capacity": desired_capacity,
     "min_healthy_percentage": config.min_healthy_percentage,
     "instance_warmup_seconds": config.instance_warmup_seconds,
-    "launch_template_version": lt_update.get("new_version"),
+    "s3_uri": s3_upload.get("s3_uri"),
   }
 
 
@@ -459,23 +457,24 @@ def refresh_replica_instances(
     },
   }
 )
-def shared_repository_snapshot_job():
-  """Create snapshot of shared master and update replicas.
+def shared_repository_s3_sync_job():
+  """Upload shared database to S3 and refresh replicas.
 
   Full pipeline:
   1. Verify shared master is healthy (HTTP health check)
-  2. Discover shared master's data volume from DynamoDB
-  3. Create EBS snapshot of the volume
-  4. Update replica ASG launch template with new snapshot
-  5. Trigger rolling instance refresh (skips if refresh already in progress)
+  2. Execute CHECKPOINT to flush WAL
+  3. Upload database file to S3 via SSM
+  4. Trigger rolling instance refresh (skips if refresh already in progress)
+
+  Replicas use S3 ATTACH to connect directly to the S3-hosted database
+  via LadybugDB's httpfs extension.
 
   This job is typically run after SEC materialization completes.
   """
   health_check = verify_shared_master_health()
-  volume_id = get_shared_master_volume(health_check)
-  snapshot_id = create_snapshot(volume_id)
-  lt_update = update_replica_launch_template(snapshot_id)
-  refresh_replica_instances(lt_update)
+  checkpoint_result = checkpoint_shared_database(health_check)
+  s3_upload = upload_database_to_s3(checkpoint_result)
+  refresh_replica_instances(s3_upload)
 
 
 @job(
@@ -490,27 +489,36 @@ def shared_repository_snapshot_job():
     },
   }
 )
-def shared_repository_snapshot_only_job():
-  """Create snapshot without updating replicas.
+def shared_repository_s3_upload_only_job():
+  """Upload database to S3 without refreshing replicas.
 
   Useful for:
-  - Creating a backup snapshot
-  - Testing snapshot creation
-  - Initial snapshot before replicas are deployed
-  - Manual control over when replicas are updated
+  - Initial S3 upload before replicas are deployed
+  - Manual control over when replicas are refreshed
+  - Testing S3 upload without affecting replicas
   """
   health_check = verify_shared_master_health()
-  volume_id = get_shared_master_volume(health_check)
-  create_snapshot(volume_id)
+  checkpoint_result = checkpoint_shared_database(health_check)
+  upload_database_to_s3(checkpoint_result)
 
 
 @op
-def get_current_launch_template_info(context: OpExecutionContext) -> dict[str, Any]:
-  """Get current launch template info for refresh-only operations."""
+def get_current_s3_database_info(context: OpExecutionContext) -> dict[str, Any]:
+  """Get current S3 database info for refresh-only operations."""
+  import boto3
+
+  sts = boto3.client("sts", region_name=env.AWS_REGION)
+  account_id = sts.get_caller_identity()["Account"]
+
+  bucket = f"robosystems-{account_id}-user-{env.ENVIRONMENT}"
+  s3_key = "shared-repos/sec.lbug"
+  s3_uri = f"s3://{bucket}/{s3_key}"
+
   return {
-    "status": "current",
-    "launch_template_name": f"robosystems-shared-replicas-{env.ENVIRONMENT}",
-    "new_version": "current",
+    "status": "success",
+    "s3_uri": s3_uri,
+    "s3_bucket": bucket,
+    "s3_key": s3_key,
   }
 
 
@@ -527,15 +535,15 @@ def get_current_launch_template_info(context: OpExecutionContext) -> dict[str, A
   }
 )
 def shared_repository_refresh_replicas_job():
-  """Refresh replicas with current launch template.
+  """Refresh replicas with current S3 database.
 
   Useful for:
-  - Forcing a refresh without creating a new snapshot
+  - Forcing a refresh without uploading a new database
   - Recovering from failed refresh
-  - Rolling out non-snapshot changes (e.g., new AMI)
+  - Rolling out non-database changes (e.g., new AMI, code updates)
 
-  Note: This uses the existing launch template - run snapshot_job
-  first if you need to update the snapshot.
+  Note: This uses the existing S3 database - run s3_sync_job
+  first if you need to upload a new database version.
   """
-  lt_info = get_current_launch_template_info()
-  refresh_replica_instances(lt_info)
+  s3_info = get_current_s3_database_info()
+  refresh_replica_instances(s3_info)

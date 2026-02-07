@@ -1,6 +1,6 @@
 #!/bin/bash
 # LadybugDB Shared Replica Instance UserData Script
-# Replicas boot from EBS snapshots of the shared master and serve read-only queries
+# Replicas use S3 ATTACH to connect to S3-hosted database files via httpfs
 # This script uses the same shared components as writers for consistency
 
 set -e
@@ -91,80 +91,25 @@ aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS 
 }
 
 # ==================================================================================
-# STORAGE SETUP (Replica-specific: volume from snapshot, already formatted)
+# STORAGE SETUP (S3 ATTACH mode: no local data volume needed)
 # ==================================================================================
-echo "Setting up storage from snapshot..."
+echo "Setting up S3 ATTACH mode (no local data volume)..."
 
-# Wait for data volume to be attached
-echo "Waiting for data volume..."
-DATA_DEVICE=""
-COUNTER=0
-MAX_WAIT=120
-
-while [ -z "$DATA_DEVICE" ] && [ $COUNTER -lt $MAX_WAIT ]; do
-  if [ -e /dev/nvme1n1 ]; then
-    DATA_DEVICE="/dev/nvme1n1"
-  elif [ -e /dev/xvdf ]; then
-    DATA_DEVICE="/dev/xvdf"
-  else
-    sleep 1
-    COUNTER=$((COUNTER + 1))
-    if [ $((COUNTER % 10)) -eq 0 ]; then
-      echo "Still waiting for volume... ($COUNTER seconds)"
-    fi
-  fi
-done
-
-if [ -z "$DATA_DEVICE" ]; then
-  echo "ERROR: Data volume not found after ${MAX_WAIT} seconds"
+# Validate S3 ATTACH URI is set
+if [ -z "${LBUG_S3_ATTACH_URI:-}" ]; then
+  echo "ERROR: LBUG_S3_ATTACH_URI must be set for S3 ATTACH mode"
   exit 1
 fi
 
-echo "Found data volume at: $DATA_DEVICE"
+echo "S3 ATTACH URI: ${LBUG_S3_ATTACH_URI}"
 
-# Create mount point
-mkdir -p /mnt/ladybug-data
-
-# Mount the volume (DO NOT FORMAT - data comes from snapshot)
-if ! mount | grep -q "/mnt/ladybug-data"; then
-  echo "Mounting data volume (pre-formatted from snapshot)..."
-  mount $DATA_DEVICE /mnt/ladybug-data || {
-    echo "ERROR: Failed to mount data volume. Checking filesystem..."
-    blkid $DATA_DEVICE
-    exit 1
-  }
-fi
-
-echo "$DATA_DEVICE /mnt/ladybug-data xfs defaults,nofail 0 2" >> /etc/fstab
-
-# Verify data exists
-if [ -d "/mnt/ladybug-data/databases" ]; then
-  echo "✅ Database directory found from snapshot"
-  ls -la /mnt/ladybug-data/databases/
-else
-  echo "WARNING: No databases directory found - snapshot may be empty"
-  mkdir -p /mnt/ladybug-data/{databases,logs,staging}
-fi
-
-# ==================================================================================
-# EBS VOLUME PRE-WARMING (Hydrate from S3 snapshot)
-# ==================================================================================
-# EBS snapshots use lazy loading - blocks are fetched from S3 on first access.
-# This causes slow/hanging database opens. Pre-read all database files to force
-# AWS to fetch all blocks before the container starts.
-echo "Pre-warming EBS volume from snapshot (this may take several minutes)..."
-# Find all .lbug files recursively (they may be nested in subdirectories)
-find /mnt/ladybug-data/databases -name "*.lbug" -type f | while read db_file; do
-  FILE_SIZE=$(stat -c%s "$db_file" 2>/dev/null || stat -f%z "$db_file")
-  FILE_SIZE_GB=$((FILE_SIZE / 1024 / 1024 / 1024))
-  echo "  Pre-warming: $db_file (${FILE_SIZE_GB}GB)"
-  dd if="$db_file" of=/dev/null bs=1M status=progress 2>&1 | tail -3
-done
-echo "✅ EBS volume pre-warming complete"
-
-# Ensure proper ownership for container
+# Create directories for logs and cache only (no database storage needed)
+# Database will be loaded via httpfs directly from S3
+mkdir -p /mnt/ladybug-data/{logs,cache,databases}
 chown -R 1000:1000 /mnt/ladybug-data
 chmod -R 755 /mnt/ladybug-data
+
+echo "✅ S3 ATTACH mode configured - database will be loaded from S3 via httpfs"
 
 # ==================================================================================
 # DOWNLOAD SHARED SCRIPTS
@@ -261,6 +206,7 @@ export LOGS_MOUNT_TARGET="/app/logs"
 export DOCKER_PROFILE="ladybug-shared-writer"
 export REPOSITORY_TYPE="${REPOSITORY_TYPE}"
 export SHARED_REPOSITORIES="${SHARED_REPOSITORIES}"
+export LBUG_S3_ATTACH_URI="${LBUG_S3_ATTACH_URI}"
 
 # Persist variables to /etc/environment for health checks and restarts
 echo "DATABASE_TYPE=ladybug" >> /etc/environment
@@ -277,6 +223,7 @@ echo "AWS_REGION=${AWS_REGION}" >> /etc/environment
 echo "CLUSTER_TIER=${CLUSTER_TIER}" >> /etc/environment
 echo "REPOSITORY_TYPE=${REPOSITORY_TYPE}" >> /etc/environment
 echo "SHARED_REPOSITORIES=${SHARED_REPOSITORIES}" >> /etc/environment
+echo "LBUG_S3_ATTACH_URI=${LBUG_S3_ATTACH_URI}" >> /etc/environment
 
 # Run shared container runner
 /usr/local/bin/run-graph-container.sh
