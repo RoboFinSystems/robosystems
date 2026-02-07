@@ -53,7 +53,9 @@ API JSON → S3 Raw → dbt transforms → S3 Processed → DuckDB Staging → L
 
 ```
 robosystems/adapters/
+├── base.py                     # SharedRepositoryManifest dataclass
 ├── sec/                        # SEC EDGAR adapter (active)
+│   ├── manifest.py             # SEC_MANIFEST (plans, rates, endpoints, credits)
 │   ├── client/                 # EDGAR API, EFTS, Arelle, Downloader
 │   ├── metadata.py             # SECMetadataLoader with caching
 │   └── processors/             # XBRL processing
@@ -145,11 +147,24 @@ Dagster runs on ECS Fargate (orchestration only). Heavy compute happens on the s
 
 ---
 
+## Adding a Shared Repository
+
+Shared repositories (like SEC) are defined by adapter manifests. Each manifest declares everything about a repo: identity, data source, schema, rate limits, plans/pricing, endpoint access, and credit costs.
+
+**To add a new shared repository:**
+
+1. Create `adapters/{name}/manifest.py` with a `SharedRepositoryManifest` (see `adapters/sec/manifest.py` as a template)
+2. Add one import + `_register()` call to `config/shared_repositories.py` → `_load_manifests()`
+
+No billing config files, no DB migrations, no hardcoded lists to update.
+
+**Registry** (`config/shared_repositories.py`): Lazy-loads manifests on first access. Provides the query API used by billing, middleware, and operations — `get_manifest()`, `get_plan_details()`, `get_rate_limits()`, `is_shared_repository()`, etc.
+
+See [PR #308](https://github.com/RoboFinSystems/robosystems/pull/308) and [RFC #191](https://github.com/RoboFinSystems/robosystems/issues/191) for the broader extensible adapter design.
+
 ## Adding Custom Adapters
 
-> **Coming Soon**: We're designing a formal `SourceAdapter` protocol to standardize how custom data sources integrate with RoboSystems. See [RFC #191](https://github.com/RoboFinSystems/robosystems/issues/191) for the proposed design.
-
-Currently, custom adapters can be added by following the existing adapter structure in `robosystems/adapters/`. The `custom_*/` namespace is reserved for fork additions that won't conflict with upstream updates.
+The `custom_*/` namespace is reserved for fork additions that won't conflict with upstream updates. See [RFC #191](https://github.com/RoboFinSystems/robosystems/issues/191) for the full `SourceAdapter` protocol design.
 
 ---
 

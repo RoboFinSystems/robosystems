@@ -285,7 +285,8 @@ Subgraphs provide isolated database environments within a parent graph, availabl
 
 For current tier specifications including instance types, memory allocation, subgraph limits, and pricing, see:
 - **[Graph Configuration](https://github.com/RoboFinSystems/robosystems/blob/main/.github/configs/graph.yml)** - Infrastructure specifications
-- **[Billing Configuration](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/config/billing/)** - Subscription plans, AI costs, and pricing
+- **[Billing Configuration](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/config/billing/)** - Subscription plans, AI costs, and storage pricing
+- **[Shared Repository Registry](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/config/shared_repositories.py)** - Repository plans, rate limits, and credit costs (defined in adapter manifests)
 
 ## Data Processing Layer
 
@@ -312,7 +313,9 @@ External service integrations following a consistent client/processor pattern:
 **Architecture:**
 ```
 adapters/
+├── base.py                 # SharedRepositoryManifest dataclass
 ├── sec/                    # SEC EDGAR adapter (active)
+│   ├── manifest.py         # SEC_MANIFEST (plans, rates, endpoints, credits)
 │   ├── client/
 │   │   ├── edgar.py        # SECClient - API client
 │   │   ├── arelle.py       # ArelleClient - XBRL parsing
@@ -341,9 +344,12 @@ adapters/
 
 **Adapter Pattern:**
 Each adapter consists of:
-1. **Client** - API connection, authentication, rate limiting
-2. **Processors** - Data transformation to graph-ready format
-3. **Models** (optional) - Service-specific data models
+1. **Manifest** - `SharedRepositoryManifest` declaring identity, plans, rate limits, endpoints, and credit costs (shared repos only)
+2. **Client** - API connection, authentication, rate limiting
+3. **Processors** - Data transformation to graph-ready format
+4. **Models** (optional) - Service-specific data models
+
+The manifest registry (`config/shared_repositories.py`) lazy-loads all manifests and provides the query API used by billing, middleware, and operations. Adding a new shared repository requires only a manifest file and one line in the registry.
 
 **SEC Adapter Details:**
 - **SECClient**: SEC EDGAR API with rate limiting and retry logic
