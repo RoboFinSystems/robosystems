@@ -78,6 +78,18 @@ on:
         type: string
         default: "latest"
 
+      # Shared Repository Configuration
+      shared_repository_name:
+        description: "Name of shared repository to deploy (sec, industry, economic)"
+        required: false
+        type: string
+        default: "sec"
+      root_volume_size:
+        description: "Root volume size in GB (must fit OS + httpfs cache for full DB)"
+        required: false
+        type: string
+        default: "100"
+
       # Notification Configuration
       aws_sns_alert_email:
         description: "Email address for SNS alerts and notifications"
@@ -172,7 +184,8 @@ jobs:
         run: |
           # Build S3 URI for shared database
           ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
-          S3_URI="s3://robosystems-${ACCOUNT_ID}-user-${{ inputs.environment }}/shared-repos/sec.lbug"
+          REPO_NAME="${{ inputs.shared_repository_name }}"
+          S3_URI="s3://robosystems-${ACCOUNT_ID}-user-${{ inputs.environment }}/shared-repos/${REPO_NAME}.lbug"
 
           echo "🔍 Checking for shared database at: $S3_URI"
 
@@ -248,6 +261,7 @@ jobs:
             ParameterKey=AmiId,ParameterValue=${{ inputs.ami_id }} \
             ParameterKey=InstanceType,ParameterValue=${{ inputs.instance_type }} \
             ParameterKey=SharedDatabaseS3Uri,ParameterValue=${{ steps.s3_database.outputs.s3_uri }} \
+            ParameterKey=RootVolumeSize,ParameterValue=${{ inputs.root_volume_size }} \
             ParameterKey=MinInstances,ParameterValue=${{ inputs.min_instances }} \
             ParameterKey=MaxInstances,ParameterValue=${{ inputs.max_instances }} \
             ParameterKey=DesiredCapacity,ParameterValue=${{ inputs.desired_capacity }} \

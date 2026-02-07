@@ -101,8 +101,8 @@ from robosystems.dagster.jobs.sec import (
 # Import shared repository jobs
 from robosystems.dagster.jobs.shared_repository import (
   shared_repository_refresh_replicas_job,
-  shared_repository_snapshot_job,
-  shared_repository_snapshot_only_job,
+  shared_repository_s3_sync_job,
+  shared_repository_s3_upload_only_job,
 )
 from robosystems.dagster.resources import (
   DatabaseResource,
@@ -179,10 +179,10 @@ all_jobs = [
   sec_entity_update_job,  # Update existing Entity nodes (mutable attributes)
   sec_direct_copy_job,  # Direct S3 → LadybugDB (bypasses DuckDB staging)
   sec_backup_job,  # Create downloadable backup of SEC database
-  # Shared repository jobs
-  shared_repository_snapshot_job,  # Full: snapshot + update template + refresh replicas
-  shared_repository_snapshot_only_job,  # Snapshot only (no replica refresh)
-  shared_repository_refresh_replicas_job,  # Refresh replicas with existing snapshot
+  # Shared repository jobs (S3 ATTACH mode)
+  shared_repository_s3_sync_job,  # Full: checkpoint + S3 upload + refresh replicas
+  shared_repository_s3_upload_only_job,  # S3 upload only (no replica refresh)
+  shared_repository_refresh_replicas_job,  # Refresh replicas with existing S3 database
   # Notification jobs
   send_email_job,
 ]

@@ -409,12 +409,14 @@ function setup_full_config() {
     gh variable set SHARED_REPLICAS_MAX_INSTANCES_PROD --body "10"
     gh variable set SHARED_REPLICAS_DESIRED_CAPACITY_PROD --body "2"
     gh variable set SHARED_REPLICAS_INSTANCE_TYPE_PROD --body "r7g.medium"
+    gh variable set SHARED_REPLICAS_ROOT_VOLUME_SIZE_PROD --body "100"
     if $setup_staging; then
         gh variable set SHARED_REPLICAS_ENABLED_STAGING --body "false"
         gh variable set SHARED_REPLICAS_MIN_INSTANCES_STAGING --body "1"
         gh variable set SHARED_REPLICAS_MAX_INSTANCES_STAGING --body "3"
         gh variable set SHARED_REPLICAS_DESIRED_CAPACITY_STAGING --body "1"
         gh variable set SHARED_REPLICAS_INSTANCE_TYPE_STAGING --body "r7g.medium"
+        gh variable set SHARED_REPLICAS_ROOT_VOLUME_SIZE_STAGING --body "50"
     fi
 
     # Note: Neo4j variables removed - Neo4j backend is disabled by default in graph.yml

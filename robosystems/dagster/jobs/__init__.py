@@ -40,8 +40,8 @@ from robosystems.dagster.jobs.sec import (
 )
 from robosystems.dagster.jobs.shared_repository import (
   shared_repository_refresh_replicas_job,
-  shared_repository_snapshot_job,
-  shared_repository_snapshot_only_job,
+  shared_repository_s3_sync_job,
+  shared_repository_s3_upload_only_job,
 )
 
 __all__ = [
@@ -65,7 +65,7 @@ __all__ = [
   "sec_staged_materialize_job",
   "send_email_job",
   "shared_repository_refresh_replicas_job",
-  "shared_repository_snapshot_job",
-  "shared_repository_snapshot_only_job",
+  "shared_repository_s3_sync_job",
+  "shared_repository_s3_upload_only_job",
   "weekly_health_check_job",
 ]

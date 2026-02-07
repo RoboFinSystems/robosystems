@@ -10,6 +10,7 @@ traffic to instances still warming up (which can take ~10 minutes).
 """
 
 import os
+import threading
 
 from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
@@ -20,15 +21,17 @@ from robosystems.logger import logger
 
 router = APIRouter(tags=["Cluster Health"])
 
-# Track S3 ATTACH warmup status
+# Track S3 ATTACH warmup status (thread-safe for multi-worker setups)
 # This is set to True after the first successful query to the attached database
 _s3_attach_ready = False
+_s3_attach_lock = threading.Lock()
 
 
 def mark_s3_attach_ready():
   """Mark the S3 ATTACH database as ready to serve queries."""
   global _s3_attach_ready
-  _s3_attach_ready = True
+  with _s3_attach_lock:
+    _s3_attach_ready = True
   logger.info("S3 ATTACH database marked as ready - health check will now return 200")
 
 

@@ -241,6 +241,12 @@ class LadybugConnectionPool:
       lbug_role = os.getenv("LBUG_ROLE", "master")
 
       if s3_attach_uri and lbug_role == "replica":
+        # Validate S3 URI format before attempting ATTACH
+        if not s3_attach_uri.startswith("s3://") or not s3_attach_uri.endswith(".lbug"):
+          raise ValueError(
+            f"Invalid LBUG_S3_ATTACH_URI format: {s3_attach_uri} "
+            "(must be s3://bucket/path/*.lbug)"
+          )
         # S3 ATTACH mode: connect to S3-hosted database via httpfs
         return self._create_s3_attached_connection(database_name, s3_attach_uri)
 
@@ -454,11 +460,27 @@ class LadybugConnectionPool:
       except Exception as cache_err:
         logger.warning(f"Could not enable HTTP caching (non-critical): {cache_err}")
 
-      # ATTACH to the S3-hosted database
+      # ATTACH to the S3-hosted database with retry logic for transient failures
       # The database will be accessible via the alias (database_name)
       logger.info(f"ATTACHing to S3 database: {s3_uri} AS {database_name}")
       attach_query = f"ATTACH '{s3_uri}' AS {database_name} (dbtype lbug, read_only)"
-      conn.execute(attach_query)
+
+      import time
+
+      max_retries = 3
+      for attempt in range(max_retries):
+        try:
+          conn.execute(attach_query)
+          break
+        except Exception as attach_err:
+          if attempt == max_retries - 1:
+            raise  # Re-raise on final attempt
+          wait_time = 5 * (attempt + 1)  # Exponential backoff: 5s, 10s, 15s
+          logger.warning(
+            f"S3 ATTACH attempt {attempt + 1}/{max_retries} failed: {attach_err}. "
+            f"Retrying in {wait_time}s..."
+          )
+          time.sleep(wait_time)
 
       # Verify the attach worked by running a simple query
       logger.info("Verifying S3 ATTACH connection...")
@@ -501,15 +523,15 @@ class LadybugConnectionPool:
       return connection_info
 
     except Exception as e:
-      # Clean up on failure
+      # Clean up on failure - log but don't mask the primary exception
       try:
         conn.close()
-      except Exception:
-        pass
+      except Exception as close_err:
+        logger.debug(f"Failed to close connection during cleanup: {close_err}")
       try:
         db.close()
-      except Exception:
-        pass
+      except Exception as close_err:
+        logger.debug(f"Failed to close database during cleanup: {close_err}")
       logger.error(f"Failed to create S3 ATTACH connection for {database_name}: {e}")
       raise
 
@@ -564,12 +586,18 @@ class LadybugConnectionPool:
         conn.execute(f"CALL s3_access_key_id = '{access_key}'")
         conn.execute(f"CALL s3_secret_access_key = '{secret_key}'")
         if session_token:
+          # Session tokens are REQUIRED for EC2 IMDS temporary credentials
+          # Failure here means httpfs doesn't support session tokens, which breaks S3 auth
           try:
             conn.execute(f"CALL s3_session_token = '{session_token}'")
           except Exception as token_err:
-            logger.warning(
-              f"Could not set s3_session_token (may not be supported): {token_err}"
+            logger.error(
+              f"Failed to set s3_session_token (REQUIRED for IMDS credentials): {token_err}"
             )
+            raise RuntimeError(
+              "S3 ATTACH requires session token support for EC2 IMDS credentials. "
+              "Ensure LadybugDB/httpfs version supports s3_session_token."
+            ) from token_err
 
         credentials_loaded = True
         logger.info(f"Loaded S3 credentials from EC2 IMDS (role: {role_name})")

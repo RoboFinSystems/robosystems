@@ -141,6 +141,11 @@ on:
         type: string
         description: Shared replicas instance type
         default: "r7g.medium"
+      shared_replicas_root_volume_size:
+        required: false
+        type: string
+        description: Shared replicas root volume size in GB (must fit OS + httpfs cache)
+        default: "100"
 
       # AMI Configuration
       ami_id:
@@ -489,6 +494,7 @@ jobs:
       subnet_ids: ${{ inputs.subnet_ids }}
       ami_id: ${{ needs.resolve-ami.outputs.ami_id }}
       instance_type: ${{ inputs.shared_replicas_instance_type }}
+      root_volume_size: ${{ inputs.shared_replicas_root_volume_size }}
       min_instances: ${{ inputs.shared_replicas_min_instances }}
       max_instances: ${{ inputs.shared_replicas_max_instances }}
       desired_capacity: ${{ inputs.shared_replicas_desired_capacity }}

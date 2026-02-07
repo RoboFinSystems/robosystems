@@ -44,7 +44,7 @@ from robosystems.dagster.jobs.sec import (
   sec_materialize_job,
   sec_process_job,
 )
-from robosystems.dagster.jobs.shared_repository import shared_repository_snapshot_job
+from robosystems.dagster.jobs.shared_repository import shared_repository_s3_sync_job
 
 
 @sensor(
@@ -191,7 +191,7 @@ def sec_processing_sensor(context: SensorEvaluationContext):
 @run_status_sensor(
   run_status=DagsterRunStatus.SUCCESS,
   monitored_jobs=[sec_materialize_job],
-  request_job=shared_repository_snapshot_job,
+  request_job=shared_repository_s3_sync_job,
   default_status=DefaultSensorStatus.STOPPED,  # Enable in Dagster UI when ready
   minimum_interval_seconds=60,
   description="Trigger shared replica snapshot after SEC materialization completes",
@@ -200,7 +200,7 @@ def sec_post_materialize_snapshot_sensor(context: RunStatusSensorContext):
   """Trigger shared repository snapshot after SEC materialization succeeds.
 
   This sensor watches for successful completion of sec_materialize_job
-  and triggers shared_repository_snapshot_job to:
+  and triggers shared_repository_s3_sync_job to:
   1. Create EBS snapshot of shared master's data volume
   2. Update replica launch template with new snapshot
   3. Trigger rolling refresh of replica fleet
@@ -236,7 +236,7 @@ def sec_post_materialize_snapshot_sensor(context: RunStatusSensorContext):
   # Check if a snapshot job is already running to prevent concurrent executions
   active_runs = context.instance.get_runs(
     filters=RunsFilter(
-      job_name="shared_repository_snapshot_job",
+      job_name="shared_repository_s3_sync_job",
       statuses=[DagsterRunStatus.STARTED, DagsterRunStatus.QUEUED],
     ),
     limit=1,
@@ -628,7 +628,7 @@ def sec_stage_to_copy_sensor(context: RunStatusSensorContext):
 @run_status_sensor(
   run_status=DagsterRunStatus.SUCCESS,
   monitored_jobs=[sec_incremental_copy_job],
-  request_job=shared_repository_snapshot_job,
+  request_job=shared_repository_s3_sync_job,
   default_status=DefaultSensorStatus.STOPPED,  # Enable in Dagster UI when ready
   minimum_interval_seconds=60,
   description="Trigger shared repository snapshot after incremental copy completes",
@@ -655,7 +655,7 @@ def sec_incremental_post_ingest_snapshot_sensor(context: RunStatusSensorContext)
   # Check if a snapshot job is already running
   active_runs = context.instance.get_runs(
     filters=RunsFilter(
-      job_name="shared_repository_snapshot_job",
+      job_name="shared_repository_s3_sync_job",
       statuses=[DagsterRunStatus.STARTED, DagsterRunStatus.QUEUED],
     ),
     limit=1,

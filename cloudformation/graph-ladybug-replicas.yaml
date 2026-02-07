@@ -47,6 +47,12 @@ Parameters:
     Description: S3 URI of shared database for ATTACH (e.g., s3://bucket/shared-repos/sec.lbug)
     AllowedPattern: "^(s3://[a-z0-9][a-z0-9.-]*/.+\\.lbug)?$"
     ConstraintDescription: Must be a valid S3 URI ending in .lbug (e.g., s3://bucket/path/database.lbug) or empty
+  RootVolumeSize:
+    Type: Number
+    Default: 100
+    MinValue: 50
+    MaxValue: 500
+    Description: Root volume size in GB (must accommodate OS ~10GB + httpfs cache up to full DB size)
 
   # Auto-scaling Configuration
   MinInstances:
@@ -282,10 +288,11 @@ Resources:
           - !Ref ReplicaSecurityGroup
         # Root volume only - no EBS data volume needed for S3 ATTACH mode
         # S3 ATTACH uses httpfs to read database directly from S3 with local caching
+        # Size must accommodate OS (~10GB) + httpfs cache (up to full DB size)
         BlockDeviceMappings:
           - DeviceName: /dev/xvda
             Ebs:
-              VolumeSize: 50
+              VolumeSize: !Ref RootVolumeSize
               VolumeType: gp3
               Iops: 3000
               Throughput: 250

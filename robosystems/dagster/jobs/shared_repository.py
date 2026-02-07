@@ -40,9 +40,9 @@ class ReplicaConfig(Config):
   """Configuration for replica operations."""
 
   min_healthy_percentage: int = 50
-  # Increased from 300s to 600s - large datasets need more warmup time
-  # for memory mapping, index loading, and initial query caching
-  instance_warmup_seconds: int = 600
+  # Set to 900s to match CloudFormation HealthCheckGracePeriod (15 min)
+  # Large S3 ATTACH databases need significant warmup time for httpfs caching
+  instance_warmup_seconds: int = 900
 
 
 # ============================================================================
@@ -297,8 +297,10 @@ echo "✅ Upload complete"
       )
       stderr = output.get("StandardErrorContent", "")
       context.log.error(f"SSM command failed. stderr: {stderr}")
-    except Exception:
-      pass
+    except Exception as fetch_err:
+      context.log.warning(
+        f"Failed to fetch SSM command output for debugging: {fetch_err}"
+      )
     raise Exception(f"S3 upload command failed: {e}")
 
   # Get command output
