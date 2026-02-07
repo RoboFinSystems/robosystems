@@ -97,13 +97,13 @@ aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS 
 # ==================================================================================
 echo "Setting up S3 ATTACH mode (no local data volume)..."
 
-# Validate S3 ATTACH URI is set
-if [ -z "${LBUG_S3_ATTACH_URI:-}" ]; then
-  echo "ERROR: LBUG_S3_ATTACH_URI must be set for S3 ATTACH mode"
+# Validate S3 ATTACH prefix is set
+if [ -z "${LBUG_S3_ATTACH_PREFIX:-}" ]; then
+  echo "ERROR: LBUG_S3_ATTACH_PREFIX must be set for S3 ATTACH mode"
   exit 1
 fi
 
-echo "S3 ATTACH URI: ${LBUG_S3_ATTACH_URI}"
+echo "S3 ATTACH Prefix: ${LBUG_S3_ATTACH_PREFIX}"
 
 # Create directories for logs and cache only (no database storage needed)
 # Database will be loaded via httpfs directly from S3
@@ -111,7 +111,7 @@ mkdir -p /mnt/ladybug-data/{logs,cache,databases}
 chown -R 1000:1000 /mnt/ladybug-data
 chmod -R 755 /mnt/ladybug-data
 
-echo "✅ S3 ATTACH mode configured - database will be loaded from S3 via httpfs"
+echo "✅ S3 ATTACH mode configured - databases will be loaded from S3 via httpfs"
 
 # ==================================================================================
 # DOWNLOAD SHARED SCRIPTS
@@ -208,7 +208,7 @@ export LOGS_MOUNT_TARGET="/app/logs"
 export DOCKER_PROFILE="ladybug-shared-writer"
 export REPOSITORY_TYPE="${REPOSITORY_TYPE}"
 export SHARED_REPOSITORIES="${SHARED_REPOSITORIES}"
-export LBUG_S3_ATTACH_URI="${LBUG_S3_ATTACH_URI}"
+export LBUG_S3_ATTACH_PREFIX="${LBUG_S3_ATTACH_PREFIX}"
 
 # Persist variables to /etc/environment for health checks and restarts
 echo "DATABASE_TYPE=ladybug" >> /etc/environment
@@ -225,7 +225,7 @@ echo "AWS_REGION=${AWS_REGION}" >> /etc/environment
 echo "CLUSTER_TIER=${CLUSTER_TIER}" >> /etc/environment
 echo "REPOSITORY_TYPE=${REPOSITORY_TYPE}" >> /etc/environment
 echo "SHARED_REPOSITORIES=${SHARED_REPOSITORIES}" >> /etc/environment
-echo "LBUG_S3_ATTACH_URI=${LBUG_S3_ATTACH_URI}" >> /etc/environment
+echo "LBUG_S3_ATTACH_PREFIX=${LBUG_S3_ATTACH_PREFIX}" >> /etc/environment
 
 # Run shared container runner
 /usr/local/bin/run-graph-container.sh

@@ -37,7 +37,9 @@ def mark_s3_attach_ready():
 
 def is_s3_attach_mode() -> bool:
   """Check if running in S3 ATTACH replica mode."""
-  return bool(os.getenv("LBUG_S3_ATTACH_URI")) and os.getenv("LBUG_ROLE") == "replica"
+  return (
+    bool(os.getenv("LBUG_S3_ATTACH_PREFIX")) and os.getenv("LBUG_ROLE") == "replica"
+  )
 
 
 def is_warming_up() -> bool:

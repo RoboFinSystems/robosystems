@@ -72,45 +72,65 @@ def create_app() -> FastAPI:
       if not is_s3_attach_mode():
         return
 
-      s3_uri = os.getenv("LBUG_S3_ATTACH_URI", "")
-      logger.info(f"S3 ATTACH warmup starting for: {s3_uri}")
+      s3_prefix = os.getenv("LBUG_S3_ATTACH_PREFIX", "")
+      logger.info(f"S3 ATTACH warmup starting with prefix: {s3_prefix}")
+
+      def _warmup_single_repo(repo: str):
+        """ATTACH and warm up a single shared repository."""
+        from robosystems.graph_api.core.ladybug.pool import get_connection_pool
+
+        logger.info(f"Warming up S3 ATTACH database: {repo}")
+        pool = get_connection_pool()
+
+        # This will create the S3 ATTACH connection (downloads from S3)
+        with pool.get_connection(repo, read_only=True) as conn:
+          logger.info(f"Running warmup query for {repo}...")
+          result = conn.execute(f"USE {repo}; MATCH (n) RETURN count(n) as cnt LIMIT 1")
+          if isinstance(result, list):
+            for r in result:
+              if hasattr(r, "fetchall"):
+                r.fetchall()
+              if hasattr(r, "close"):
+                r.close()
+          else:
+            result.fetchall()
+            result.close()
+          logger.info(f"Warmup query complete for {repo}")
 
       def _do_warmup():
-        """Blocking warmup work - runs in thread pool."""
-        # Get the shared repositories to warm up (default: sec)
-        shared_repos = os.getenv("SHARED_REPOSITORIES", "sec").split(",")
+        """Blocking warmup work - runs in thread pool.
 
-        for repo in shared_repos:
-          repo = repo.strip()
-          if not repo:
-            continue
+        ATTACHes all shared repositories in parallel since each creates
+        an independent in-memory database. The bottleneck is S3 download
+        time, so parallel execution reduces total warmup significantly.
+        """
+        from concurrent.futures import ThreadPoolExecutor, as_completed
 
-          logger.info(f"Warming up S3 ATTACH database: {repo}")
+        shared_repos = [
+          r.strip()
+          for r in os.getenv("SHARED_REPOSITORIES", "sec").split(",")
+          if r.strip()
+        ]
 
-          # Get connection from pool - this triggers the ATTACH
-          from robosystems.graph_api.core.ladybug.pool import get_connection_pool
+        if len(shared_repos) == 1:
+          # Single repo: no need for thread pool overhead
+          _warmup_single_repo(shared_repos[0])
+          return
 
-          pool = get_connection_pool()
-
-          # This will create the S3 ATTACH connection (downloads from S3)
-          with pool.get_connection(repo, read_only=True) as conn:
-            # Run a warmup query to cache some data
-            logger.info(f"Running warmup query for {repo}...")
-            # Use single statement - connection is already scoped to the database
-            result = conn.execute(
-              f"USE {repo}; MATCH (n) RETURN count(n) as cnt LIMIT 1"
-            )
-            # Handle both single result and list of results (multi-statement)
-            if isinstance(result, list):
-              for r in result:
-                if hasattr(r, "fetchall"):
-                  r.fetchall()
-                if hasattr(r, "close"):
-                  r.close()
-            else:
-              result.fetchall()
-              result.close()
-            logger.info(f"Warmup query complete for {repo}")
+        logger.info(
+          f"Warming up {len(shared_repos)} repositories in parallel: {shared_repos}"
+        )
+        with ThreadPoolExecutor(max_workers=len(shared_repos)) as executor:
+          futures = {
+            executor.submit(_warmup_single_repo, repo): repo for repo in shared_repos
+          }
+          for future in as_completed(futures):
+            repo = futures[future]
+            try:
+              future.result()
+            except Exception as e:
+              logger.error(f"Warmup failed for {repo}: {e}")
+              raise
 
       try:
         # Run blocking S3 ATTACH in thread pool to avoid blocking event loop
@@ -127,7 +147,7 @@ def create_app() -> FastAPI:
         # The instance will eventually be terminated and replaced
 
     # Start warmup in background (don't block app startup)
-    if os.getenv("LBUG_S3_ATTACH_URI") and os.getenv("LBUG_ROLE") == "replica":
+    if os.getenv("LBUG_S3_ATTACH_PREFIX") and os.getenv("LBUG_ROLE") == "replica":
       asyncio.create_task(warmup_s3_attach())
 
     # Clear stale extension cache from persistent volume

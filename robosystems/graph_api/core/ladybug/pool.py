@@ -237,18 +237,21 @@ class LadybugConnectionPool:
 
     try:
       # Check for S3 ATTACH mode (replicas reading from S3-hosted database)
-      s3_attach_uri = os.getenv("LBUG_S3_ATTACH_URI")
+      s3_attach_prefix = os.getenv("LBUG_S3_ATTACH_PREFIX")
       lbug_role = os.getenv("LBUG_ROLE", "master")
 
-      if s3_attach_uri and lbug_role == "replica":
-        # Validate S3 URI format before attempting ATTACH
-        if not s3_attach_uri.startswith("s3://") or not s3_attach_uri.endswith(".lbug"):
-          raise ValueError(
-            f"Invalid LBUG_S3_ATTACH_URI format: {s3_attach_uri} "
-            "(must be s3://bucket/path/*.lbug)"
-          )
-        # S3 ATTACH mode: connect to S3-hosted database via httpfs
-        return self._create_s3_attached_connection(database_name, s3_attach_uri)
+      if s3_attach_prefix and lbug_role == "replica":
+        # Only ATTACH databases listed in SHARED_REPOSITORIES
+        shared_repos = [
+          r.strip()
+          for r in os.getenv("SHARED_REPOSITORIES", "").split(",")
+          if r.strip()
+        ]
+        if database_name in shared_repos:
+          # Construct per-database S3 URI from prefix
+          s3_uri = f"{s3_attach_prefix.rstrip('/')}/{database_name}.lbug"
+          # S3 ATTACH mode: connect to S3-hosted database via httpfs
+          return self._create_s3_attached_connection(database_name, s3_uri)
 
       # Normal mode: open local database file
       # Construct database path safely (LadybugDB uses .lbug files)

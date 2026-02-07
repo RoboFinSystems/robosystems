@@ -79,8 +79,8 @@ on:
         default: "latest"
 
       # Shared Repository Configuration
-      shared_repository_name:
-        description: "Name of shared repository to deploy (sec, industry, economic)"
+      shared_repositories:
+        description: "Comma-separated shared repository names to ATTACH (e.g., sec,sec_historical)"
         required: false
         type: string
         default: "sec"
@@ -179,38 +179,43 @@ jobs:
           echo "ecr_url=$ECR_URL" >> $GITHUB_OUTPUT
           echo "🐳 ECR Repository: $ECR_URL"
 
-      - name: Validate S3 Database Exists
+      - name: Validate S3 Databases Exist
         id: s3_database
         run: |
-          # Build S3 URI for shared database
+          # Build S3 prefix and validate each repository's .lbug file
           ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
-          REPO_NAME="${{ inputs.shared_repository_name }}"
-          S3_URI="s3://robosystems-${ACCOUNT_ID}-user-${{ inputs.environment }}/shared-repos/${REPO_NAME}.lbug"
+          S3_PREFIX="s3://robosystems-${ACCOUNT_ID}-user-${{ inputs.environment }}/shared-repos"
+          REPOS="${{ inputs.shared_repositories }}"
 
-          echo "🔍 Checking for shared database at: $S3_URI"
+          echo "🔍 Validating shared databases under prefix: $S3_PREFIX"
+          echo "   Repositories: $REPOS"
 
-          # Check if the database file exists in S3
-          if aws s3 ls "$S3_URI" >/dev/null 2>&1; then
-            # Get file size for logging (use awk for portable floating point math)
-            FILE_SIZE=$(aws s3 ls "$S3_URI" | awk '{print $3}')
-            FILE_SIZE_GB=$(awk "BEGIN {printf \"%.2f\", $FILE_SIZE / 1024 / 1024 / 1024}")
-            LAST_MODIFIED=$(aws s3 ls "$S3_URI" | awk '{print $1, $2}')
+          # Validate each repository's .lbug file exists
+          ALL_FOUND=true
+          IFS=',' read -ra REPO_ARRAY <<< "$REPOS"
+          for REPO_NAME in "${REPO_ARRAY[@]}"; do
+            REPO_NAME=$(echo "$REPO_NAME" | xargs)  # trim whitespace
+            S3_URI="${S3_PREFIX}/${REPO_NAME}.lbug"
 
-            echo "✅ Found shared database: $S3_URI"
-            echo "   Size: ${FILE_SIZE_GB}GB"
-            echo "   Last modified: $LAST_MODIFIED"
+            if aws s3 ls "$S3_URI" >/dev/null 2>&1; then
+              FILE_SIZE=$(aws s3 ls "$S3_URI" | awk '{print $3}')
+              FILE_SIZE_GB=$(awk "BEGIN {printf \"%.2f\", $FILE_SIZE / 1024 / 1024 / 1024}")
+              LAST_MODIFIED=$(aws s3 ls "$S3_URI" | awk '{print $1, $2}')
+              echo "✅ Found ${REPO_NAME}: ${FILE_SIZE_GB}GB (modified: $LAST_MODIFIED)"
+            else
+              echo "❌ Not found: $S3_URI"
+              ALL_FOUND=false
+            fi
+          done
 
-            echo "s3_uri=$S3_URI" >> $GITHUB_OUTPUT
-          else
-            echo "❌ Shared database not found at: $S3_URI"
+          if [ "$ALL_FOUND" != "true" ]; then
             echo ""
-            echo "   Run Dagster shared_repository_s3_sync_job to upload the database."
-            echo "   The job will:"
-            echo "   1. Execute CHECKPOINT on the shared master"
-            echo "   2. Upload sec.lbug to S3"
-            echo "   3. Update the manifest file for replicas"
+            echo "   Run Dagster shared_repository_s3_sync_job to upload missing databases."
             exit 1
           fi
+
+          echo "s3_prefix=$S3_PREFIX" >> $GITHUB_OUTPUT
+          echo "shared_repositories=$REPOS" >> $GITHUB_OUTPUT
 
       - name: Upload Userdata Scripts to S3
         run: |
@@ -260,7 +265,8 @@ jobs:
             ParameterKey=SubnetIds,ParameterValue=\"${{ inputs.subnet_ids }}\" \
             ParameterKey=AmiId,ParameterValue=${{ inputs.ami_id }} \
             ParameterKey=InstanceType,ParameterValue=${{ inputs.instance_type }} \
-            ParameterKey=SharedDatabaseS3Uri,ParameterValue=${{ steps.s3_database.outputs.s3_uri }} \
+            ParameterKey=SharedDatabaseS3Prefix,ParameterValue=${{ steps.s3_database.outputs.s3_prefix }} \
+            ParameterKey=SharedRepositories,ParameterValue=${{ steps.s3_database.outputs.shared_repositories }} \
             ParameterKey=RootVolumeSize,ParameterValue=${{ inputs.root_volume_size }} \
             ParameterKey=MinInstances,ParameterValue=${{ inputs.min_instances }} \
             ParameterKey=MaxInstances,ParameterValue=${{ inputs.max_instances }} \

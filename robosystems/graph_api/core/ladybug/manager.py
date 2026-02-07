@@ -416,10 +416,14 @@ class LadybugDatabaseManager:
         # S3 ATTACH database: no local file, info from pool/S3
         import os
 
-        s3_uri = os.getenv("LBUG_S3_ATTACH_URI", "")
+        s3_prefix = os.getenv("LBUG_S3_ATTACH_PREFIX", "").rstrip("/")
         size_bytes = 0  # Size is on S3, not local
         created_at = datetime.now(UTC).isoformat()  # Unknown, use current time
-        database_path = s3_uri if s3_uri else f"s3://attached/{graph_id}.lbug"
+        database_path = (
+          f"{s3_prefix}/{graph_id}.lbug"
+          if s3_prefix
+          else f"s3://attached/{graph_id}.lbug"
+        )
 
       # Check if database is healthy
       is_healthy = self._check_database_health(graph_id)
