@@ -5,10 +5,14 @@ with repository subscriptions. It runs after SEC materialization and creates
 unencrypted, compressed backups that can be downloaded.
 
 The asset:
-1. Creates a BackupJob with encryption=False, allow_export=True
-2. Uses BackupManager to create the backup
-3. Stores in S3 with 14-day retention
-4. Creates GraphBackup record with graph_id="sec"
+1. Creates a GraphBackup record in PostgreSQL
+2. Uses Graph Client Factory to call the backup endpoint on the shared master
+3. The Graph API creates a tar.gz backup and uploads to S3 on-instance
+4. Updates the GraphBackup record with results
+
+NOTE: Previous implementation used BackupManager which downloaded the entire
+85GB database over HTTP, held it in memory, then re-uploaded to S3.
+Now uses on-instance backup via Graph API (CHECKPOINT + tar.gz + S3 upload).
 """
 
 import asyncio
@@ -20,6 +24,7 @@ from dagster import (
   asset,
 )
 
+from robosystems.config.constants import TASK_TIME_LIMIT
 from robosystems.dagster.resources import DatabaseResource, S3Resource
 
 from .configs import SECBackupConfig
@@ -43,27 +48,17 @@ def sec_backup(
 ) -> MaterializeResult:
   """Create a downloadable backup of the SEC database.
 
-  This asset generates a .lbug backup file that users with SEC repository
-  subscriptions can download. The backup is:
-  - Unencrypted (allow_export=True)
-  - Compressed
-  - Stored with 14-day retention
-
-  This asset depends on sec_graph_materialized, so it will run after
-  materialization completes. It can also be triggered manually.
+  Uses Graph Client Factory to call the backup endpoint on the shared master.
+  The backup runs entirely on-instance (CHECKPOINT + tar.gz + S3 upload),
+  so this Dagster task only orchestrates and monitors via SSE.
 
   Returns:
       MaterializeResult with backup statistics
   """
+  from robosystems.config import env
   from robosystems.middleware.graph.utils import MultiTenantUtils
   from robosystems.models.iam import GraphBackup
   from robosystems.operations.aws.s3 import S3BackupAdapter
-  from robosystems.operations.lbug.backup_manager import (
-    BackupFormat,
-    BackupJob,
-    BackupType,
-    create_backup_manager,
-  )
 
   context.log.info(
     f"Creating downloadable backup for SEC repository: {config.graph_id}"
@@ -78,19 +73,12 @@ def sec_backup(
   # Generate S3 key with timestamp
   timestamp = datetime.now(UTC)
   timestamp_str = timestamp.strftime("%Y%m%d_%H%M%S")
-
-  extension = ".lbug.zip"
-  if config.compression:
-    extension += ".gz"
-
-  s3_key = (
-    f"shared-repository-backups/{config.graph_id}/backup-{timestamp_str}{extension}"
-  )
+  s3_key = f"shared-repository-backups/{config.graph_id}/backup-{timestamp_str}.tar.gz"
 
   # Create backup record in database
-  with db.get_session() as session:
-    s3_adapter = S3BackupAdapter(enable_compression=config.compression)
+  s3_adapter = S3BackupAdapter(enable_compression=config.compression)
 
+  with db.get_session() as session:
     backup_record = GraphBackup.create(
       graph_id=config.graph_id,
       database_name=database_name,
@@ -109,64 +97,98 @@ def sec_backup(
 
   context.log.info(f"Created backup record {backup_id}, starting backup...")
 
-  # Create the actual backup using BackupManager
-  backup_manager = create_backup_manager()
+  # Skip actual backup in dev environment
+  if env.ENVIRONMENT == "dev":
+    context.log.info("Skipping backup in dev environment")
+    return MaterializeResult(
+      metadata={
+        "backup_id": backup_id,
+        "status": "skipped",
+        "reason": "dev_environment",
+      }
+    )
 
-  backup_job = BackupJob(
-    graph_id=config.graph_id,
-    backup_type=BackupType(config.backup_type),
-    backup_format=BackupFormat(config.backup_format),
-    retention_days=config.retention_days,
-    compression=config.compression,
-    encryption=config.encryption,
-    allow_export=True,  # Enable downloads
-  )
+  # Use Graph Client Factory to trigger on-instance backup
+  import boto3
 
-  # Run async backup in sync context
+  from robosystems.graph_api.client.factory import get_graph_client_for_sec_ingestion
+
+  sts = boto3.client("sts", region_name=env.AWS_REGION)
+  account_id = sts.get_caller_identity()["Account"]
+  bucket = s3_adapter.bucket_name or f"robosystems-{account_id}-user-{env.ENVIRONMENT}"
+
   loop = asyncio.new_event_loop()
+  client = None
   try:
-    backup_info = loop.run_until_complete(backup_manager.create_backup(backup_job))
+    client = loop.run_until_complete(get_graph_client_for_sec_ingestion())
+
+    context.log.info("Calling backup endpoint on shared master...")
+    result = loop.run_until_complete(
+      client.backup_with_sse(
+        graph_id=config.graph_id,
+        backup_type="shared_repository",
+        s3_destination={"bucket": bucket, "key": s3_key},
+        compression=True,
+        checkpoint=True,
+        timeout=TASK_TIME_LIMIT,
+      )
+    )
   finally:
+    if client:
+      loop.run_until_complete(client.close())
     loop.close()
+
+  if result.get("status") != "completed":
+    error = result.get("error", "Unknown error")
+    # Mark backup record as failed
+    with db.get_session() as session:
+      backup_record = GraphBackup.get_by_id(backup_id, session)
+      if backup_record:
+        backup_record.fail_backup(session, error_message=error)
+    raise RuntimeError(f"SEC backup failed: {error}")
+
+  # Extract result metadata from completed task
+  task_result = result.get("result", {})
+  original_size = task_result.get("original_size_bytes", 0)
+  compressed_size = task_result.get("compressed_size_bytes", 0)
+  compression_ratio = task_result.get("compression_ratio", 0)
+  checksum = task_result.get("checksum", "")
+  duration = task_result.get("duration_seconds", 0)
 
   # Update backup record with results
   with db.get_session() as session:
     backup_record = GraphBackup.get_by_id(backup_id, session)
     if backup_record:
-      backup_record.s3_key = backup_info.s3_key
+      backup_record.s3_key = task_result.get("s3_key", s3_key)
       backup_record.complete_backup(
         session=session,
-        original_size=backup_info.original_size,
-        compressed_size=backup_info.compressed_size,
-        encrypted_size=backup_info.compressed_size,
-        checksum=backup_info.checksum,
-        node_count=backup_info.node_count,
-        relationship_count=backup_info.relationship_count,
-        backup_duration=backup_info.backup_duration_seconds,
+        original_size=original_size,
+        compressed_size=compressed_size,
+        encrypted_size=compressed_size,
+        checksum=checksum,
+        node_count=0,
+        relationship_count=0,
+        backup_duration=duration,
         metadata={
-          "backup_format": backup_info.backup_format,
-          "compression_ratio": backup_info.compression_ratio,
-          "is_encrypted": backup_info.is_encrypted,
-          "encryption_method": backup_info.encryption_method,
+          "backup_format": "tar.gz",
+          "compression_ratio": compression_ratio,
+          "is_encrypted": False,
           "created_by": "sec_backup_asset",
           "dagster_run_id": context.run_id,
         },
       )
 
   context.log.info(
-    f"SEC backup completed: {backup_info.compressed_size} bytes, "
-    f"ratio: {backup_info.compression_ratio:.2f}"
+    f"SEC backup completed: {compressed_size} bytes, ratio: {compression_ratio:.2f}"
   )
 
   return MaterializeResult(
     metadata={
       "backup_id": backup_id,
       "graph_id": config.graph_id,
-      "s3_key": backup_info.s3_key,
-      "size_bytes": backup_info.compressed_size,
-      "compression_ratio": backup_info.compression_ratio,
-      "node_count": backup_info.node_count,
-      "relationship_count": backup_info.relationship_count,
+      "s3_key": task_result.get("s3_key", s3_key),
+      "size_bytes": compressed_size,
+      "compression_ratio": compression_ratio,
       "created_at": timestamp.isoformat(),
       "expires_at": (timestamp + timedelta(days=config.retention_days)).isoformat(),
     }

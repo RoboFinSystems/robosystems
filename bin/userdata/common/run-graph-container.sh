@@ -85,10 +85,10 @@ fi
 # Build database-specific environment variables
 case "${DATABASE_TYPE}" in
     ladybug)
-        # Build S3 ATTACH environment variable only if URI is set
+        # Build S3 ATTACH environment variable only if prefix is set
         S3_ATTACH_ENV=""
-        if [ -n "${LBUG_S3_ATTACH_URI:-}" ]; then
-            S3_ATTACH_ENV="-e LBUG_S3_ATTACH_URI=${LBUG_S3_ATTACH_URI}"
+        if [ -n "${LBUG_S3_ATTACH_PREFIX:-}" ]; then
+            S3_ATTACH_ENV="-e LBUG_S3_ATTACH_PREFIX=${LBUG_S3_ATTACH_PREFIX}"
         fi
 
         EXTRA_ENV_VARS="-e LBUG_NODE_TYPE=${NODE_TYPE} \

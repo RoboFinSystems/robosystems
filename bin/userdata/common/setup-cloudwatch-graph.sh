@@ -21,8 +21,11 @@ else
   SETUP_LOG_PATH="/var/log/${DATABASE_TYPE}-writer-setup.log"
 fi
 
-# Extract environment from namespace for log group (e.g., RoboSystems/Graph/prod -> prod)
-ENVIRONMENT="${CLOUDWATCH_NAMESPACE##*/}"
+# Use ENVIRONMENT if already set, otherwise extract from namespace
+# (e.g., RoboSystems/Graph/prod -> prod)
+if [ -z "${ENVIRONMENT:-}" ]; then
+  ENVIRONMENT="${CLOUDWATCH_NAMESPACE##*/}"
+fi
 
 # Use unified log group from CloudFormation
 UNIFIED_LOG_GROUP="/robosystems/${ENVIRONMENT}/graph-api"

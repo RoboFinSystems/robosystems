@@ -42,11 +42,17 @@ Parameters:
       - r7g.xlarge
 
   # S3 Database Configuration (Updated by Dagster job)
-  SharedDatabaseS3Uri:
+  SharedDatabaseS3Prefix:
     Type: String
-    Description: S3 URI of shared database for ATTACH (e.g., s3://bucket/shared-repos/sec.lbug)
-    AllowedPattern: "^(s3://[a-z0-9][a-z0-9.-]*/.+\\.lbug)?$"
-    ConstraintDescription: Must be a valid S3 URI ending in .lbug (e.g., s3://bucket/path/database.lbug) or empty
+    Description: S3 prefix for shared repository databases (e.g., s3://bucket/shared-repos)
+    AllowedPattern: "^(s3://[a-z0-9][a-z0-9.-]*/.+)?$"
+    ConstraintDescription: Must be a valid S3 prefix (e.g., s3://bucket/shared-repos) or empty
+  SharedRepositories:
+    Type: String
+    Default: sec
+    Description: Comma-separated shared repository names to ATTACH (e.g., sec,sec_historical)
+    AllowedPattern: "^[a-z0-9_]+(,[a-z0-9_]+)*$"
+    ConstraintDescription: Comma-separated list of lowercase alphanumeric names with underscores
   RootVolumeSize:
     Type: Number
     Default: 100
@@ -103,12 +109,12 @@ Parameters:
     Default: SharedReplica
 
 Rules:
-  # Validate that S3 database URI is provided when deploying instances
-  ValidateS3DatabaseUri:
+  # Validate that S3 database prefix is provided when deploying instances
+  ValidateS3DatabasePrefix:
     RuleCondition: !Not [!Equals [!Ref DesiredCapacity, "0"]]
     Assertions:
-      - Assert: !Not [!Equals [!Ref SharedDatabaseS3Uri, ""]]
-        AssertDescription: SharedDatabaseS3Uri must be provided when DesiredCapacity > 0. Run Dagster shared_repository_s3_sync_job first.
+      - Assert: !Not [!Equals [!Ref SharedDatabaseS3Prefix, ""]]
+        AssertDescription: SharedDatabaseS3Prefix must be provided when DesiredCapacity > 0. Run Dagster shared_repository_s3_sync_job first.
 
 Conditions:
   HasMinInstances: !Not [!Equals [!Ref MinInstances, 0]]
@@ -361,11 +367,11 @@ Resources:
             export ECR_IMAGE_TAG="${ECRImageTag}"
             export AWS_STACK_NAME="${AWS::StackName}"
             export DEPLOYMENT_BUCKET="$DEPLOYMENT_BUCKET"
-            export SHARED_REPOSITORIES="sec"
+            export SHARED_REPOSITORIES="${SharedRepositories}"
             export CLUSTER_TIER="ladybug-shared"
             export CFN_STACK_NAME="${AWS::StackName}"
             export CFN_RESOURCE="ReplicaAutoScalingGroup"
-            export LBUG_S3_ATTACH_URI="${SharedDatabaseS3Uri}"
+            export LBUG_S3_ATTACH_PREFIX="${SharedDatabaseS3Prefix}"
             export CLOUDWATCH_NAMESPACE="RoboSystems/Graph/${Environment}"
 
             echo "Configuration:"

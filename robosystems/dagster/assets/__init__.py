@@ -3,6 +3,7 @@
 Assets represent data artifacts that are produced and consumed:
 - User graph assets (creation, staging, materialization)
 - SEC pipeline assets (extraction, processing, materialization)
+- Shared repository assets (S3 publish, replica refresh)
 """
 
 from robosystems.dagster.assets.graphs import (
@@ -40,6 +41,12 @@ from robosystems.dagster.assets.sec import (
   sec_quarter_partitions,
   sec_raw_filings,
 )
+from robosystems.dagster.assets.shared_repositories import (
+  SharedReplicaRefreshConfig,
+  SharedRepositoryPublishConfig,
+  shared_replicas_refreshed,
+  shared_repository_s3_published,
+)
 
 __all__ = [
   "SECBackupConfig",
@@ -51,6 +58,8 @@ __all__ = [
   "SECMaterializeConfig",
   "SECProcessConfig",
   "SECStageConfig",
+  "SharedReplicaRefreshConfig",
+  "SharedRepositoryPublishConfig",
   "sec_backup",
   "sec_duckdb_incremental_staged",
   "sec_duckdb_staged",
@@ -61,6 +70,8 @@ __all__ = [
   "sec_processed_filings",
   "sec_quarter_partitions",
   "sec_raw_filings",
+  "shared_replicas_refreshed",
+  "shared_repository_s3_published",
   "user_graph_creation_source",
   "user_graph_file_staging_source",
   "user_graph_materialized_source",

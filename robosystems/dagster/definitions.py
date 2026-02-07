@@ -31,6 +31,9 @@ from robosystems.dagster.assets import (
   # SEC pipeline - quarterly batch processing with consolidated output
   sec_processed_filings,
   sec_raw_filings,
+  # Shared repository infrastructure (S3 publish + replica refresh)
+  shared_replicas_refreshed,
+  shared_repository_s3_published,
   # User graph operations (external assets for API direct execution)
   user_graph_creation_source,
   user_graph_file_staging_source,
@@ -94,6 +97,8 @@ from robosystems.dagster.jobs.sec import (
   sec_incremental_stage_job,
   sec_materialize_job,
   sec_process_job,
+  sec_replica_refresh_job,
+  sec_s3_publish_job,
   sec_stage_job,
   sec_staged_materialize_job,
 )
@@ -117,9 +122,9 @@ from robosystems.dagster.sensors import (
   # Incremental pipeline (automated chain, disabled by default)
   sec_download_to_process_sensor,
   sec_incremental_download_schedule,
-  sec_incremental_post_ingest_snapshot_sensor,
+  sec_incremental_post_ingest_s3_sync_sensor,
   sec_incremental_staging_sensor,
-  sec_post_materialize_snapshot_sensor,
+  sec_post_materialize_s3_sync_sensor,
   sec_processing_sensor,
   sec_stage_to_copy_sensor,
 )
@@ -179,6 +184,8 @@ all_jobs = [
   sec_entity_update_job,  # Update existing Entity nodes (mutable attributes)
   sec_direct_copy_job,  # Direct S3 → LadybugDB (bypasses DuckDB staging)
   sec_backup_job,  # Create downloadable backup of SEC database
+  sec_s3_publish_job,  # Publish raw .lbug to S3 for replica cluster
+  sec_replica_refresh_job,  # Rolling refresh of replica fleet
   # Shared repository jobs (S3 ATTACH mode)
   shared_repository_s3_sync_job,  # Full: checkpoint + S3 upload + refresh replicas
   shared_repository_s3_upload_only_job,  # S3 upload only (no replica refresh)
@@ -219,12 +226,12 @@ all_sensors = [
   pending_repository_sensor,
   # SEC legacy/manual sensors
   sec_processing_sensor,
-  sec_post_materialize_snapshot_sensor,
+  sec_post_materialize_s3_sync_sensor,
   # SEC incremental pipeline chain sensors (disabled by default)
   sec_download_to_process_sensor,
   sec_incremental_staging_sensor,  # process → stage (DuckDB)
   sec_stage_to_copy_sensor,  # stage → copy (S3 → LadybugDB)
-  sec_incremental_post_ingest_snapshot_sensor,  # copy → snapshot
+  sec_incremental_post_ingest_s3_sync_sensor,  # copy → S3 sync
 ]
 
 # ============================================================================
@@ -250,6 +257,8 @@ all_assets = [
   sec_graph_incremental_copy,  # Incremental S3 → LadybugDB (daily updates)
   sec_entity_incremental_update,  # Update existing Entity nodes (mutable attrs)
   sec_graph_materialized,  # LadybugDB materialization (retry-safe)
+  shared_repository_s3_published,  # S3 publish for replica cluster (S3 ATTACH source)
+  shared_replicas_refreshed,  # Rolling refresh of replica fleet
   sec_backup,  # Downloadable backup of SEC database
 ]
 

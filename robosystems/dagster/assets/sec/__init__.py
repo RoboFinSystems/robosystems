@@ -20,8 +20,11 @@ Pipeline stages (run independently via separate jobs):
    - sec_graph_incremental_copy - Direct S3 → LadybugDB copy for current quarter
    - sec_entity_incremental_update - Update mutable Entity attributes
 
-5. BACKUP:
-   - sec_backup - Create downloadable backups for users
+5. BACKUP (subscriber downloads):
+   - sec_backup - Create compressed downloadable backups for users
+
+Publish and replica refresh assets live in shared_repositories/ since they are
+infrastructure operations shared across all repository types.
 """
 
 from robosystems.dagster.assets.sec.backup import sec_backup
