@@ -912,6 +912,20 @@ class LadybugConnectionPool:
         return len(self._pools[database_name]) > 0
       return False
 
+  def list_databases(self) -> list[str]:
+    """
+    List all databases known to the pool.
+
+    This includes both local databases and S3 ATTACH databases.
+    Used by the manager to include pool-managed databases (like S3 ATTACH)
+    in its database listing.
+
+    Returns:
+        List of database names managed by this pool
+    """
+    with self._global_lock:
+      return list(self._databases.keys())
+
   def recreate_database(self, database_name: str) -> None:
     """
     Close and remove a database so it will be recreated with current settings.

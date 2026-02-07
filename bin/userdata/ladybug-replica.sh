@@ -34,7 +34,9 @@ REPOSITORY_TYPE="shared"
 
 # Optional variables with defaults
 LBUG_PORT="${LBUG_PORT:-8001}"
-CLOUDWATCH_NAMESPACE="${CloudWatchNamespace:-RoboSystems/Graph}"
+# CLOUDWATCH_NAMESPACE is exported from CloudFormation as CLOUDWATCH_NAMESPACE
+# Fallback to constructing from ENVIRONMENT if not set
+CLOUDWATCH_NAMESPACE="${CLOUDWATCH_NAMESPACE:-RoboSystems/Graph/${ENVIRONMENT}}"
 
 echo "=== Replica Configuration ==="
 echo "Environment: ${ENVIRONMENT}"

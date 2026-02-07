@@ -87,6 +87,26 @@ except Exception:
   __version__ = "1.0.0"
 
 
+def _raise_database_not_found(graph_id: str) -> None:
+  """Raise 503 during S3 ATTACH warmup, otherwise 404."""
+  from robosystems.graph_api.routers.health import is_warming_up
+
+  if is_warming_up():
+    raise HTTPException(
+      status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+      detail={
+        "error": "Database warming up",
+        "reason": "S3 ATTACH database is still loading",
+        "status": "warming",
+        "retry_after": 30,
+      },
+    )
+  raise HTTPException(
+    status_code=status.HTTP_404_NOT_FOUND,
+    detail=f"Database '{graph_id}' not found",
+  )
+
+
 def _extract_column_aliases_from_cypher(cypher_query: str) -> list[str]:
   """
   Extract column aliases from RETURN clause in Cypher query.
@@ -293,10 +313,7 @@ class LadybugService:
 
         # Check database exists
         if validated_graph_id not in self.db_manager.list_databases():
-          raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Database '{validated_graph_id}' not found",
-          )
+          _raise_database_not_found(validated_graph_id)
 
         # Translate Neo4j-style queries to LadybugDB equivalents
         translated_cypher = translate_neo4j_to_lbug(request.cypher)
@@ -510,12 +527,7 @@ class LadybugService:
 
         # Check if database exists
         if validated_graph_id not in self.db_manager.list_databases():
-          span.set_attribute("error", True)
-          span.set_attribute("error.type", "DatabaseNotFound")
-          raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Database '{validated_graph_id}' not found",
-          )
+          _raise_database_not_found(validated_graph_id)
 
         # Translate Neo4j-style queries to LadybugDB equivalents
         translated_cypher = translate_neo4j_to_lbug(request.cypher)

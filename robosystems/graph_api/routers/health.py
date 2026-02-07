@@ -40,6 +40,15 @@ def is_s3_attach_mode() -> bool:
   return bool(os.getenv("LBUG_S3_ATTACH_URI")) and os.getenv("LBUG_ROLE") == "replica"
 
 
+def is_warming_up() -> bool:
+  """Check if the replica is still warming up (S3 ATTACH in progress).
+
+  Returns True if we're in S3 ATTACH mode and the database hasn't finished loading.
+  Use this to return 503 instead of 404 when databases aren't found during warmup.
+  """
+  return is_s3_attach_mode() and not _s3_attach_ready
+
+
 def _get_service_for_health():
   """Get the appropriate service based on backend configuration."""
   backend_type = env.GRAPH_BACKEND_TYPE

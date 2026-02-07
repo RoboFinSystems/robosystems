@@ -96,13 +96,19 @@ def create_app() -> FastAPI:
           with pool.get_connection(repo, read_only=True) as conn:
             # Run a warmup query to cache some data
             logger.info(f"Running warmup query for {repo}...")
+            # Use single statement - connection is already scoped to the database
             result = conn.execute(
               f"USE {repo}; MATCH (n) RETURN count(n) as cnt LIMIT 1"
             )
-            # Consume and close the result
-            try:
+            # Handle both single result and list of results (multi-statement)
+            if isinstance(result, list):
+              for r in result:
+                if hasattr(r, "fetchall"):
+                  r.fetchall()
+                if hasattr(r, "close"):
+                  r.close()
+            else:
               result.fetchall()
-            finally:
               result.close()
             logger.info(f"Warmup query complete for {repo}")
 

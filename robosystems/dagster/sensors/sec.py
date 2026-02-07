@@ -8,7 +8,7 @@ Incremental Pipeline (enable all for automated daily updates):
 - Phase 2 (Process): sec_download_to_process_sensor chains download → process
 - Phase 3 (Stage): sec_incremental_staging_sensor chains process → stage (DuckDB only)
 - Phase 4 (Copy): sec_stage_to_copy_sensor chains stage → copy (S3 → LadybugDB direct)
-- Phase 5 (Snapshot): sec_incremental_post_ingest_snapshot_sensor chains copy → snapshot
+- Phase 5 (S3 Sync): sec_incremental_post_ingest_s3_sync_sensor chains copy → S3 sync
 
 Manual Operations (not in automated chain):
 - sec_entity_update_job: Update mutable Entity attributes (run manually after copy)
@@ -184,7 +184,7 @@ def sec_processing_sensor(context: SensorEvaluationContext):
 
 
 # ============================================================================
-# SEC Post-Materialization Snapshot Sensor
+# SEC Post-Materialization S3 Sync Sensor
 # ============================================================================
 
 
@@ -194,16 +194,18 @@ def sec_processing_sensor(context: SensorEvaluationContext):
   request_job=shared_repository_s3_sync_job,
   default_status=DefaultSensorStatus.STOPPED,  # Enable in Dagster UI when ready
   minimum_interval_seconds=60,
-  description="Trigger shared replica snapshot after SEC materialization completes",
+  description="Trigger shared replica S3 sync after SEC materialization completes",
 )
-def sec_post_materialize_snapshot_sensor(context: RunStatusSensorContext):
-  """Trigger shared repository snapshot after SEC materialization succeeds.
+def sec_post_materialize_s3_sync_sensor(context: RunStatusSensorContext):
+  """Trigger shared repository S3 sync after SEC materialization succeeds.
 
   This sensor watches for successful completion of sec_materialize_job
   and triggers shared_repository_s3_sync_job to:
-  1. Create EBS snapshot of shared master's data volume
-  2. Update replica launch template with new snapshot
-  3. Trigger rolling refresh of replica fleet
+  1. Upload database to S3 for replica access via ATTACH
+  2. Trigger rolling refresh of replica fleet
+
+  Replicas use LadybugDB S3 ATTACH to connect directly to the S3-hosted
+  database via the httpfs extension.
 
   This ensures replicas are updated with the latest SEC data after each
   nightly materialization run.
@@ -213,7 +215,7 @@ def sec_post_materialize_snapshot_sensor(context: RunStatusSensorContext):
   Note: Only triggers for jobs on the "sec" graph_id (shared repository).
   """
   if env.ENVIRONMENT == "dev":
-    context.log.info("Skipping snapshot sensor in dev environment")
+    context.log.info("Skipping S3 sync sensor in dev environment")
     return
 
   # Get the run that triggered this sensor
@@ -230,10 +232,10 @@ def sec_post_materialize_snapshot_sensor(context: RunStatusSensorContext):
 
   # Only trigger for SEC shared repository materialization
   if graph_id != "sec":
-    context.log.info(f"Skipping snapshot - graph_id '{graph_id}' is not 'sec'")
+    context.log.info(f"Skipping S3 sync - graph_id '{graph_id}' is not 'sec'")
     return
 
-  # Check if a snapshot job is already running to prevent concurrent executions
+  # Check if a sync job is already running to prevent concurrent executions
   active_runs = context.instance.get_runs(
     filters=RunsFilter(
       job_name="shared_repository_s3_sync_job",
@@ -243,18 +245,18 @@ def sec_post_materialize_snapshot_sensor(context: RunStatusSensorContext):
   )
   if active_runs:
     context.log.info(
-      f"Snapshot job already running (run_id={active_runs[0].run_id}), skipping"
+      f"S3 sync job already running (run_id={active_runs[0].run_id}), skipping"
     )
     return
 
   context.log.info(
     f"SEC materialization completed (run_id={dagster_run.run_id}). "
-    "Triggering shared repository snapshot."
+    "Triggering shared repository S3 sync."
   )
 
   # Create unique run key to prevent duplicate triggers
   today = datetime.now(UTC).strftime("%Y-%m-%d")
-  run_key = f"sec-post-materialize-snapshot-{today}-{dagster_run.run_id[:8]}"
+  run_key = f"sec-post-materialize-s3-sync-{today}-{dagster_run.run_id[:8]}"
 
   yield RunRequest(
     run_key=run_key,
@@ -283,7 +285,7 @@ def sec_post_materialize_snapshot_sensor(context: RunStatusSensorContext):
 # ============================================================================
 # When SEC_INCREMENTAL_PIPELINE_ENABLED=true, this enables a fully automated
 # pipeline that runs every 3 hours:
-#   download → process → stage → materialize → snapshot
+#   download → process → stage → materialize → S3 sync
 #
 # Each step is chained via run_status_sensor, only proceeding on success.
 # Keep disabled during backfills; enable for production incremental updates.
@@ -318,7 +320,7 @@ def sec_incremental_download_schedule(context):
   Part of the automated incremental pipeline. Downloads new filings for
   current quarter (and previous quarter at quarter boundaries).
 
-  Chain: download → process → stage → materialize → snapshot
+  Chain: download → process → stage → materialize → S3 sync
 
   Enable via: SEC_INCREMENTAL_PIPELINE_ENABLED=true
   """
@@ -423,7 +425,7 @@ def sec_download_to_process_sensor(context: RunStatusSensorContext):
 # SEC Incremental Staging Sensor
 # ============================================================================
 # This sensor triggers DuckDB staging after processing completes:
-#   download → process → stage (DuckDB) → copy (LadybugDB) → snapshot
+#   download → process → stage (DuckDB) → copy (LadybugDB) → S3 sync
 #
 # Controlled by: SEC_INCREMENTAL_PIPELINE_ENABLED=true
 #
@@ -568,7 +570,7 @@ def sec_stage_to_copy_sensor(context: RunStatusSensorContext):
   """Trigger incremental S3 → LadybugDB copy after DuckDB staging completes.
 
   Part of the automated incremental pipeline chain:
-    process → stage (DuckDB) → copy (S3 → LadybugDB) → snapshot
+    process → stage (DuckDB) → copy (S3 → LadybugDB) → S3 sync
 
   Uses ignore_errors=true to skip duplicates via constraint violations.
   Much faster than full DuckDB → LadybugDB rebuild.
@@ -631,28 +633,30 @@ def sec_stage_to_copy_sensor(context: RunStatusSensorContext):
   request_job=shared_repository_s3_sync_job,
   default_status=DefaultSensorStatus.STOPPED,  # Enable in Dagster UI when ready
   minimum_interval_seconds=60,
-  description="Trigger shared repository snapshot after incremental copy completes",
+  description="Trigger shared repository S3 sync after incremental copy completes",
 )
-def sec_incremental_post_ingest_snapshot_sensor(context: RunStatusSensorContext):
-  """Trigger shared repository snapshot after incremental copy completes.
+def sec_incremental_post_ingest_s3_sync_sensor(context: RunStatusSensorContext):
+  """Trigger shared repository S3 sync after incremental copy completes.
 
   Part of the automated incremental pipeline. After S3 → LadybugDB copy
   succeeds, this triggers:
-  1. Create EBS snapshot of shared master's data volume
-  2. Update replica launch template with new snapshot
-  3. Trigger rolling refresh of replica fleet
+  1. Upload database to S3 for replica access via ATTACH
+  2. Trigger rolling refresh of replica fleet
+
+  Replicas use LadybugDB S3 ATTACH to connect directly to the S3-hosted
+  database via the httpfs extension.
 
   This ensures replicas serve the latest SEC data after daily updates.
 
   Controlled by: SEC_INCREMENTAL_PIPELINE_ENABLED=true
   """
   if env.ENVIRONMENT == "dev":
-    context.log.info("Skipping snapshot sensor in dev environment")
+    context.log.info("Skipping S3 sync sensor in dev environment")
     return
 
   dagster_run = context.dagster_run
 
-  # Check if a snapshot job is already running
+  # Check if a sync job is already running
   active_runs = context.instance.get_runs(
     filters=RunsFilter(
       job_name="shared_repository_s3_sync_job",
@@ -662,17 +666,17 @@ def sec_incremental_post_ingest_snapshot_sensor(context: RunStatusSensorContext)
   )
   if active_runs:
     context.log.info(
-      f"Snapshot job already running (run_id={active_runs[0].run_id}), skipping"
+      f"S3 sync job already running (run_id={active_runs[0].run_id}), skipping"
     )
     return
 
   context.log.info(
     f"Incremental ingest completed (run_id={dagster_run.run_id}), "
-    "triggering snapshot + replica refresh"
+    "triggering S3 sync + replica refresh"
   )
 
   yield RunRequest(
-    run_key=f"snapshot-after-{dagster_run.run_id[:8]}",
+    run_key=f"s3-sync-after-{dagster_run.run_id[:8]}",
     run_config={
       "ops": {
         "get_shared_master_volume": {

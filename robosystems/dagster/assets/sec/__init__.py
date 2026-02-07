@@ -20,8 +20,12 @@ Pipeline stages (run independently via separate jobs):
    - sec_graph_incremental_copy - Direct S3 → LadybugDB copy for current quarter
    - sec_entity_incremental_update - Update mutable Entity attributes
 
-5. BACKUP:
-   - sec_backup - Create downloadable backups for users
+5. PUBLISH (replica distribution):
+   - sec_s3_published - Publish raw .lbug to S3 for replica cluster S3 ATTACH
+   - sec_replicas_refreshed - Rolling refresh of replica fleet to pick up new database
+
+6. BACKUP (subscriber downloads):
+   - sec_backup - Create compressed downloadable backups for users
 """
 
 from robosystems.dagster.assets.sec.backup import sec_backup
@@ -48,6 +52,11 @@ from robosystems.dagster.assets.sec.materialize import (
   sec_graph_materialized,
 )
 from robosystems.dagster.assets.sec.process import sec_processed_filings
+from robosystems.dagster.assets.sec.publish import SECS3PublishConfig, sec_s3_published
+from robosystems.dagster.assets.sec.replicas import (
+  SECReplicaRefreshConfig,
+  sec_replicas_refreshed,
+)
 from robosystems.dagster.assets.sec.stage import (
   sec_duckdb_incremental_staged,
   sec_duckdb_staged,
@@ -67,6 +76,8 @@ __all__ = [
   "SECIncrementalStageConfig",
   "SECMaterializeConfig",
   "SECProcessConfig",
+  "SECReplicaRefreshConfig",
+  "SECS3PublishConfig",
   "SECStageConfig",
   # Assets
   "sec_backup",
@@ -79,4 +90,6 @@ __all__ = [
   "sec_processed_filings",
   "sec_quarter_partitions",
   "sec_raw_filings",
+  "sec_replicas_refreshed",
+  "sec_s3_published",
 ]

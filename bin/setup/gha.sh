@@ -402,8 +402,8 @@ function setup_full_config() {
     fi
 
     # Shared Replicas Configuration - Read-Only Fleet
-    # Workflow auto-discovers snapshots by tags (GraphId=sec, Environment=prod/staging)
-    # Just run Dagster shared_repository_snapshot_only_job once, then enable replicas
+    # Replicas use S3 ATTACH to connect to shared database hosted in S3
+    # Run Dagster shared_repository_s3_upload_only_job to upload database, then enable replicas
     gh variable set SHARED_REPLICAS_ENABLED_PROD --body "false"
     gh variable set SHARED_REPLICAS_MIN_INSTANCES_PROD --body "2"
     gh variable set SHARED_REPLICAS_MAX_INSTANCES_PROD --body "10"

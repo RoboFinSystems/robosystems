@@ -22,6 +22,8 @@ from robosystems.dagster.assets.sec import (
   SECIncrementalStageConfig,
   SECMaterializeConfig,
   SECProcessConfig,
+  SECReplicaRefreshConfig,
+  SECS3PublishConfig,
   SECStageConfig,
   # Assets - backup
   sec_backup,
@@ -39,6 +41,9 @@ from robosystems.dagster.assets.sec import (
   # Partitions (quarterly to stay under EFTS 10k limit)
   sec_quarter_partitions,
   sec_raw_filings,
+  # Assets - S3 publish and replica refresh
+  sec_replicas_refreshed,
+  sec_s3_published,
 )
 
 __all__ = [
@@ -50,6 +55,8 @@ __all__ = [
   "SECIncrementalStageConfig",
   "SECMaterializeConfig",
   "SECProcessConfig",
+  "SECReplicaRefreshConfig",
+  "SECS3PublishConfig",
   "SECStageConfig",
   "sec_backup",
   "sec_duckdb_incremental_staged",
@@ -61,6 +68,8 @@ __all__ = [
   "sec_processed_filings",
   "sec_quarter_partitions",
   "sec_raw_filings",
+  "sec_replicas_refreshed",
+  "sec_s3_published",
   "user_graph_creation_source",
   "user_graph_file_staging_source",
   "user_graph_materialized_source",

@@ -54,7 +54,7 @@ class ReplicaConfig(Config):
 def verify_shared_master_health(
   context: OpExecutionContext, config: S3SyncConfig
 ) -> dict[str, Any]:
-  """Verify shared master is healthy before snapshotting.
+  """Verify shared master is healthy before S3 sync.
 
   Performs both DynamoDB registry check and actual HTTP health check
   to ensure the instance is truly healthy and serving requests.

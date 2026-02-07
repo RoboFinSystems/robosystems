@@ -992,7 +992,7 @@ async def get_graph_client_for_sec_ingestion() -> GraphClient:
 
   CRITICAL: SEC ingestion MUST always go to the shared master instance.
   This bypasses normal routing logic to ensure data is loaded to the
-  correct instance that will be snapshotted for replicas.
+  correct instance that will be synced to S3 for replicas.
 
   Returns:
       GraphClient configured for shared master

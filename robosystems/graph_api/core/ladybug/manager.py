@@ -343,16 +343,26 @@ class LadybugDatabaseManager:
     """
     List all databases on this node.
 
+    This includes:
+    - Local databases (.lbug files on disk)
+    - S3 ATTACH databases (managed by connection pool, no local files)
+
     Returns:
         List of database names
     """
-    databases = []
+    databases = set()
 
     try:
+      # Local databases (.lbug files on disk)
       for item in self.base_path.iterdir():
         if item.is_file() and item.name.endswith(".lbug"):
           db_name = item.name[:-5]  # Remove .lbug extension
-          databases.append(db_name)
+          databases.add(db_name)
+
+      # Pool-managed databases (includes S3 ATTACH databases)
+      # These may not have local files - they're attached from S3
+      pool_databases = self.connection_pool.list_databases()
+      databases.update(pool_databases)
 
       return sorted(databases)
 
@@ -377,6 +387,9 @@ class LadybugDatabaseManager:
     """
     Get detailed information about a specific database.
 
+    Supports both local databases (.lbug files) and S3 ATTACH databases
+    (no local file, managed by connection pool).
+
     Args:
         graph_id: Graph database identifier to inspect
 
@@ -384,19 +397,29 @@ class LadybugDatabaseManager:
         Database information
     """
     db_path = self.base_path / f"{graph_id}.lbug"
+    is_local = db_path.exists()
+    is_pool_managed = graph_id in self.connection_pool.list_databases()
 
-    if not db_path.exists():
+    if not is_local and not is_pool_managed:
       raise HTTPException(
         status_code=status.HTTP_404_NOT_FOUND,
         detail=f"Database {graph_id} not found",
       )
 
     try:
-      # Calculate database size (single file in LadybugDB)
-      size_bytes = db_path.stat().st_size if db_path.is_file() else 0
+      if is_local:
+        # Local database: get info from file system
+        size_bytes = db_path.stat().st_size if db_path.is_file() else 0
+        created_at = datetime.fromtimestamp(db_path.stat().st_ctime).isoformat()
+        database_path = str(db_path)
+      else:
+        # S3 ATTACH database: no local file, info from pool/S3
+        import os
 
-      # Get creation time
-      created_at = datetime.fromtimestamp(db_path.stat().st_ctime).isoformat()
+        s3_uri = os.getenv("LBUG_S3_ATTACH_URI", "")
+        size_bytes = 0  # Size is on S3, not local
+        created_at = datetime.now(UTC).isoformat()  # Unknown, use current time
+        database_path = s3_uri if s3_uri else f"s3://attached/{graph_id}.lbug"
 
       # Check if database is healthy
       is_healthy = self._check_database_health(graph_id)
@@ -408,10 +431,10 @@ class LadybugDatabaseManager:
 
       return DatabaseInfo(
         graph_id=graph_id,
-        database_path=str(db_path),
+        database_path=database_path,
         created_at=created_at,
         size_bytes=size_bytes,
-        read_only=self.read_only,
+        read_only=self.read_only or not is_local,  # S3 ATTACH is always read-only
         is_healthy=is_healthy,
         last_accessed=last_accessed,
       )
@@ -817,6 +840,9 @@ class LadybugDatabaseManager:
     """
     Check if a database is healthy using connection pool.
 
+    Supports both local databases (.lbug files) and S3 ATTACH databases
+    (no local file, managed by connection pool).
+
     Args:
         graph_id: Graph database identifier to check
 
@@ -826,15 +852,22 @@ class LadybugDatabaseManager:
     try:
       db_path = self.base_path / f"{graph_id}.lbug"
 
-      # Basic file system check
-      if not db_path.exists():
+      # Check if database exists (either as local file or in pool)
+      is_local = db_path.exists()
+      is_pool_managed = graph_id in self.connection_pool.list_databases()
+
+      if not is_local and not is_pool_managed:
         return False
 
       # Try to get a connection from the pool and execute a simple query
       try:
         with self.connection_pool.get_connection(graph_id, read_only=True) as conn:
           # Execute a lightweight test query
-          result = conn.execute("RETURN 1 AS health_check")
+          # For S3 ATTACH databases, need to USE the database first
+          if is_pool_managed and not is_local:
+            result = conn.execute(f"USE {graph_id}; RETURN 1 AS health_check")
+          else:
+            result = conn.execute("RETURN 1 AS health_check")
           # Consume the result to ensure query completed
           # Handle both single QueryResult and list[QueryResult] cases
           if isinstance(result, list):

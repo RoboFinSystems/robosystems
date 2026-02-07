@@ -233,6 +233,18 @@ async def get_schema(
 
   # Check if database exists
   if validated_graph_id not in ladybug_service.db_manager.list_databases():
+    from robosystems.graph_api.routers.health import is_warming_up
+
+    if is_warming_up():
+      raise HTTPException(
+        status_code=http_status.HTTP_503_SERVICE_UNAVAILABLE,
+        detail={
+          "error": "Database warming up",
+          "reason": "S3 ATTACH database is still loading",
+          "status": "warming",
+          "retry_after": 30,
+        },
+      )
     raise HTTPException(
       status_code=http_status.HTTP_404_NOT_FOUND,
       detail=f"Database '{validated_graph_id}' not found",

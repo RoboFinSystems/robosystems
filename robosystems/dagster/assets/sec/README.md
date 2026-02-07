@@ -126,7 +126,7 @@ Automated triggers defined in [`dagster/sensors/sec.py`](../../sensors/sec.py):
 | Sensor | Triggers | Purpose |
 |--------|----------|---------|
 | `sec_processing_sensor` | `sec_process_job` | Discovers pending SourceFiles, triggers batch processing per quarter |
-| `sec_post_materialize_snapshot_sensor` | `shared_repository_snapshot_job` | Creates snapshot after materialization |
+| `sec_post_materialize_s3_sync_sensor` | `shared_repository_s3_sync_job` | Syncs to S3 after materialization |
 
 ### Incremental Pipeline (enable all for automated daily updates)
 
@@ -136,7 +136,7 @@ Automated triggers defined in [`dagster/sensors/sec.py`](../../sensors/sec.py):
 | `sec_download_to_process_sensor` | `sec_process_job` | Chains download → process |
 | `sec_incremental_staging_sensor` | `sec_incremental_stage_job` | Chains process → stage |
 | `sec_stage_to_copy_sensor` | `sec_incremental_copy_job` | Chains stage → copy |
-| `sec_incremental_post_ingest_snapshot_sensor` | `shared_repository_snapshot_job` | Chains copy → snapshot |
+| `sec_incremental_post_ingest_s3_sync_sensor` | `shared_repository_s3_sync_job` | Chains copy → S3 sync |
 
 All sensors start **STOPPED** by default. Enable in Dagster UI when ready for automated processing.
 

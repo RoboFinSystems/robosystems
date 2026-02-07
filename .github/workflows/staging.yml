@@ -604,7 +604,6 @@ jobs:
       runner_config: ${{ needs.runner.outputs.runner_config }}
       aws_region: ${{ vars.AWS_REGION || 'us-east-1' }}
       # Graph refresh (EC2 containers via SSM)
-      # Note: shared replicas disabled until EBS snapshot pre-warming is validated
       graph_refresh_enabled: ${{ vars.GRAPH_UPDATE_CONTAINERS_STAGING || 'true' }}
       graph_node_types: "writer"
       graph_health_check_timeout: "30"

@@ -53,6 +53,8 @@ from robosystems.dagster.assets import (
   sec_processed_filings,
   sec_quarter_partitions,
   sec_raw_filings,
+  sec_replicas_refreshed,
+  sec_s3_published,
 )
 
 # ============================================================================
@@ -197,7 +199,7 @@ sec_staged_materialize_job = define_asset_job(
 # run the expensive sec_graph_materialized (full rebuild) daily.
 # Instead, after staging, we run sec_incremental_copy for fast updates.
 #
-# Chain: process → stage (this) → copy → snapshot
+# Chain: process → stage (this) → copy → S3 sync
 
 sec_incremental_stage_job = define_asset_job(
   name="sec_incremental_stage",
@@ -304,7 +306,7 @@ sec_incremental_copy_job = define_asset_job(
 # Typically 50-200 entities change per quarter. MERGE is 40x slower than COPY,
 # but acceptable for small update volumes.
 #
-# Chain: process → stage → copy → entity_update → snapshot
+# Chain: process → stage → copy → entity_update → S3 sync
 
 sec_entity_update_job = define_asset_job(
   name="sec_entity_update",
@@ -346,6 +348,63 @@ sec_backup_job = define_asset_job(
     "ecs/memory": "8192",
     "ecs/ephemeral_storage": "50",
     # On-demand to avoid interruptions during backup
+    "ecs/run_task_kwargs": {
+      "capacityProviderStrategy": [
+        {"capacityProvider": "FARGATE", "weight": 1, "base": 1},
+      ],
+    },
+  },
+)
+
+
+# ============================================================================
+# Phase 5: Publish (S3 for Replica Cluster)
+# ============================================================================
+# Publishes the raw .lbug database to S3 for replica cluster consumption.
+# Replicas use LadybugDB S3 ATTACH to connect directly to the published database.
+# This is distinct from sec_backup which creates compressed, downloadable backups.
+
+sec_s3_publish_job = define_asset_job(
+  name="sec_s3_publish",
+  description="Publish SEC database to S3 for replica cluster (S3 ATTACH source).",
+  selection=AssetSelection.assets(sec_s3_published),
+  tags={
+    "pipeline": "sec",
+    "phase": "publish",
+    # Minimal profile: runs CHECKPOINT via HTTP, then SSM for S3 upload
+    # Actual upload happens on the shared master instance via SSM
+    "ecs/cpu": "256",
+    "ecs/memory": "512",
+    "ecs/ephemeral_storage": "21",
+    # On-demand to avoid interruptions during publish
+    "ecs/run_task_kwargs": {
+      "capacityProviderStrategy": [
+        {"capacityProvider": "FARGATE", "weight": 1, "base": 1},
+      ],
+    },
+  },
+)
+
+
+# ============================================================================
+# Phase 5b: Replica Fleet Refresh (After S3 Publish)
+# ============================================================================
+# Triggers rolling refresh of replica fleet to pick up new S3 database.
+# Monitors progress as each instance is replaced.
+# At scale (100+ replicas), this can take hours.
+
+sec_replica_refresh_job = define_asset_job(
+  name="sec_replica_refresh",
+  description="Rolling refresh of replica fleet to pick up new S3 database.",
+  selection=AssetSelection.assets(sec_replicas_refreshed),
+  tags={
+    "pipeline": "sec",
+    "phase": "replica_refresh",
+    # Minimal profile: just monitoring ASG refresh via boto3
+    "ecs/cpu": "256",
+    "ecs/memory": "512",
+    "ecs/ephemeral_storage": "21",
+    # On-demand to avoid interruptions during long-running refresh monitoring
     "ecs/run_task_kwargs": {
       "capacityProviderStrategy": [
         {"capacityProvider": "FARGATE", "weight": 1, "base": 1},
