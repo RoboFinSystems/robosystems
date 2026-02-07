@@ -16,7 +16,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from robosystems.config.graph_tier import GraphTierConfig
-from robosystems.models.iam import GraphFile
+from robosystems.models.iam import GraphFile, GraphTable
 
 logger = logging.getLogger(__name__)
 
@@ -199,15 +199,16 @@ class IngestionLimitChecker:
     """
     results = (
       db.query(
-        GraphFile.table_name,
+        GraphTable.table_name,
         func.sum(GraphFile.duckdb_row_count).label("total_rows"),
       )
+      .join(GraphTable, GraphFile.table_id == GraphTable.id)
       .filter(
         GraphFile.graph_id == graph_id,
-        GraphFile.deleted_at.is_(None),
+        GraphFile.upload_status != "failed",
         GraphFile.duckdb_row_count.isnot(None),
       )
-      .group_by(GraphFile.table_name)
+      .group_by(GraphTable.table_name)
       .all()
     )
 

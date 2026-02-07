@@ -643,9 +643,13 @@ class EntityGraphService:
         commit=False,
       )
 
-      # Step 5: Update table file count
-      entity_table.file_count = (entity_table.file_count or 0) + 1
-      self.session.commit()
+      # Step 5: Update table stats (row_count, file_count, total_size_bytes)
+      entity_table.update_stats(
+        session=self.session,
+        file_count=(entity_table.file_count or 0) + 1,
+        row_count=(entity_table.row_count or 0) + 1,
+        total_size_bytes=(entity_table.total_size_bytes or 0) + len(parquet_bytes),
+      )
 
       logger.info(f"Created GraphFile record {graph_file.id}")
 
@@ -656,6 +660,9 @@ class EntityGraphService:
       await graph_client.create_table(
         graph_id=graph_id, table_name="Entity", s3_pattern=s3_pattern
       )
+
+      # Mark file as staged in DuckDB
+      graph_file.mark_duckdb_staged(session=self.session, row_count=1)
 
       logger.info("Materializing Entity table to LadybugDB graph database")
       ingest_response = await graph_client.materialize_table(
@@ -668,6 +675,9 @@ class EntityGraphService:
       logger.info(
         f"Entity node created via controlled materialization: {rows_ingested} rows"
       )
+
+      # Mark file as fully ingested
+      graph_file.mark_graph_ingested(session=self.session)
 
       # Step 7: Return EntityResponse
       return EntityResponse(
