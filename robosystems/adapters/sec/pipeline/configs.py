@@ -159,7 +159,7 @@ class SECStageConfig(Config):
 
 
 class SECHistoricalStageConfig(Config):
-  """Configuration for SEC historical DuckDB staging (2009-2023).
+  """Configuration for SEC historical DuckDB staging.
 
   Stages historical SEC data to a separate DuckDB database for the
   sec_historical subgraph. Year range defaults are visible and overridable.

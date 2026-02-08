@@ -42,11 +42,6 @@ from dagster import (
   define_asset_job,
 )
 
-from robosystems.dagster.assets.shared_repositories import (
-  shared_replicas_refreshed,
-  shared_repository_s3_published,
-)
-
 from .backup import sec_backup
 from .configs import sec_quarter_partitions
 from .download import sec_raw_filings
@@ -73,7 +68,7 @@ from .stage import (
 # Use with sec_processing_sensor to trigger parallel processing.
 sec_download_job = define_asset_job(
   name="sec_download",
-  description="Download SEC XBRL filings to S3 via EFTS (quarterly partitions).",
+  description="Download SEC XBRL filings from EFTS to S3.",
   selection=AssetSelection.assets(
     sec_raw_filings,
   ),
@@ -92,7 +87,7 @@ sec_download_job = define_asset_job(
 # EFTS returns max 10k filings per quarterly partition, but batch_limit caps per run.
 sec_process_job = define_asset_job(
   name="sec_process",
-  description="Process an entire quarter's SEC filings with disk-buffered output.",
+  description="Process SEC filings into parquet files.",
   selection=AssetSelection.assets(
     sec_processed_filings,
   ),
@@ -128,7 +123,7 @@ sec_process_job = define_asset_job(
 # Actual DuckDB work happens on LadybugDB instance via Graph API.
 sec_stage_job = define_asset_job(
   name="sec_stage",
-  description="Stage SEC files to persistent DuckDB (no graph ingestion).",
+  description="Stage SEC parquet files to DuckDB (full rebuild).",
   selection=AssetSelection.assets(sec_duckdb_staged),
   tags={
     "pipeline": "sec",
@@ -152,7 +147,7 @@ sec_stage_job = define_asset_job(
 # Actual materialization happens on LadybugDB instance via Graph API.
 sec_materialize_job = define_asset_job(
   name="sec_materialize",
-  description="Materialize SEC graph from DuckDB staging (retry-safe).",
+  description="Materialize SEC graph from DuckDB to LadybugDB.",
   selection=AssetSelection.assets(sec_graph_materialized),
   tags={
     "pipeline": "sec",
@@ -175,7 +170,7 @@ sec_materialize_job = define_asset_job(
 # Actual work happens on LadybugDB instance via Graph API.
 sec_staged_materialize_job = define_asset_job(
   name="sec_staged_materialize",
-  description="Full SEC pipeline: stage to DuckDB then materialize to LadybugDB.",
+  description="Stage and materialize SEC graph (DuckDB + LadybugDB).",
   selection=AssetSelection.assets(sec_duckdb_staged, sec_graph_materialized),
   tags={
     "pipeline": "sec",
@@ -207,7 +202,7 @@ sec_staged_materialize_job = define_asset_job(
 
 sec_incremental_stage_job = define_asset_job(
   name="sec_incremental_stage",
-  description="Incremental DuckDB staging (keeps DuckDB in sync for potential rebuilds).",
+  description="Stage current quarter to SEC DuckDB (incremental).",
   selection=AssetSelection.assets(sec_duckdb_incremental_staged),
   tags={
     "pipeline": "sec",
@@ -234,7 +229,7 @@ sec_incremental_stage_job = define_asset_job(
 
 sec_historical_stage_job = define_asset_job(
   name="sec_historical_stage",
-  description="Stage SEC historical data (2009-2023) to DuckDB.",
+  description="Stage SEC historical parquet files to DuckDB (full rebuild).",
   selection=AssetSelection.assets(sec_historical_duckdb_staged),
   tags={
     "pipeline": "sec",
@@ -252,7 +247,7 @@ sec_historical_stage_job = define_asset_job(
 
 sec_historical_materialize_job = define_asset_job(
   name="sec_historical_materialize",
-  description="Materialize sec_historical graph from DuckDB staging.",
+  description="Materialize SEC historical graph from DuckDB to LadybugDB.",
   selection=AssetSelection.assets(sec_historical_materialized),
   tags={
     "pipeline": "sec",
@@ -270,7 +265,7 @@ sec_historical_materialize_job = define_asset_job(
 
 sec_historical_staged_materialize_job = define_asset_job(
   name="sec_historical_staged_materialize",
-  description="Full sec_historical pipeline: stage to DuckDB then materialize to LadybugDB.",
+  description="Stage and materialize SEC historical graph (DuckDB + LadybugDB).",
   selection=AssetSelection.assets(
     sec_historical_duckdb_staged, sec_historical_materialized
   ),
@@ -307,7 +302,7 @@ sec_historical_staged_materialize_job = define_asset_job(
 
 sec_entity_update_job = define_asset_job(
   name="sec_entity_update",
-  description="Update existing Entity nodes with latest data (handles mutable attributes).",
+  description="Update mutable Entity attributes via Cypher MERGE.",
   selection=AssetSelection.assets(sec_entity_incremental_update),
   tags={
     "pipeline": "sec",
@@ -334,7 +329,7 @@ sec_entity_update_job = define_asset_job(
 
 sec_backup_job = define_asset_job(
   name="sec_create_backup",
-  description="Create downloadable backup of SEC database for user downloads.",
+  description="Create downloadable SEC database backup.",
   selection=AssetSelection.assets(sec_backup),
   tags={
     "pipeline": "sec",
@@ -345,63 +340,6 @@ sec_backup_job = define_asset_job(
     "ecs/memory": "512",
     "ecs/ephemeral_storage": "21",
     # On-demand to avoid interruptions during backup monitoring
-    "ecs/run_task_kwargs": {
-      "capacityProviderStrategy": [
-        {"capacityProvider": "FARGATE", "weight": 1, "base": 1},
-      ],
-    },
-  },
-)
-
-
-# ============================================================================
-# Phase 5: Publish (S3 for Replica Cluster)
-# ============================================================================
-# Publishes the raw .lbug database to S3 for replica cluster consumption.
-# Replicas use LadybugDB S3 ATTACH to connect directly to the published database.
-# This is distinct from sec_backup which creates compressed, downloadable backups.
-
-sec_s3_publish_job = define_asset_job(
-  name="sec_s3_publish",
-  description="Publish SEC database to S3 for replica cluster (S3 ATTACH source).",
-  selection=AssetSelection.assets(shared_repository_s3_published),
-  tags={
-    "pipeline": "sec",
-    "phase": "publish",
-    # Minimal profile: runs CHECKPOINT via HTTP, then SSM for S3 upload
-    # Actual upload happens on the shared master instance via SSM
-    "ecs/cpu": "256",
-    "ecs/memory": "512",
-    "ecs/ephemeral_storage": "21",
-    # On-demand to avoid interruptions during publish
-    "ecs/run_task_kwargs": {
-      "capacityProviderStrategy": [
-        {"capacityProvider": "FARGATE", "weight": 1, "base": 1},
-      ],
-    },
-  },
-)
-
-
-# ============================================================================
-# Phase 5b: Replica Fleet Refresh (After S3 Publish)
-# ============================================================================
-# Triggers rolling refresh of replica fleet to pick up new S3 database.
-# Monitors progress as each instance is replaced.
-# At scale (100+ replicas), this can take hours.
-
-sec_replica_refresh_job = define_asset_job(
-  name="sec_replica_refresh",
-  description="Rolling refresh of replica fleet to pick up new S3 database.",
-  selection=AssetSelection.assets(shared_replicas_refreshed),
-  tags={
-    "pipeline": "sec",
-    "phase": "replica_refresh",
-    # Minimal profile: just monitoring ASG refresh via boto3
-    "ecs/cpu": "256",
-    "ecs/memory": "512",
-    "ecs/ephemeral_storage": "21",
-    # On-demand to avoid interruptions during long-running refresh monitoring
     "ecs/run_task_kwargs": {
       "capacityProviderStrategy": [
         {"capacityProvider": "FARGATE", "weight": 1, "base": 1},

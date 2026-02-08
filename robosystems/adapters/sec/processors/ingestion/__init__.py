@@ -7,7 +7,6 @@ with persistent storage for independent retry of staging and materialization.
 Architecture:
 - **Stage 1 (DuckDBStager)**: Schema-driven table creation via glob patterns
 - **Stage 2 (LadybugMaterializer)**: Schema-driven materialization to LadybugDB
-- **Alternative (LadybugDirectCopier)**: Direct S3 → LadybugDB copy (bypasses DuckDB)
 
 Key benefits of decoupled stages:
 - If LadybugDB materialization fails, don't lose 2+ hours of DuckDB staging work
@@ -18,14 +17,12 @@ Modules:
     models: Result dataclasses and configuration constants
     staging: DuckDB staging operations (DuckDBStager)
     materialization: LadybugDB materialization operations (LadybugMaterializer)
-    direct_copy: Direct S3 → LadybugDB copy operations (LadybugDirectCopier)
 
 Classes:
     XBRLDuckDBGraphProcessor: Unified processor combining staging and materialization
                               (for backward compatibility with existing callers)
     DuckDBStager: Handles DuckDB staging operations only
     LadybugMaterializer: Handles LadybugDB materialization only
-    LadybugDirectCopier: Handles direct S3 → LadybugDB copy (alternative workflow)
 
 Usage:
     # New recommended usage - separate concerns
@@ -37,12 +34,6 @@ Usage:
     materializer = LadybugMaterializer(graph_id="sec")
     materialize_result = await materializer.materialize_from_duckdb()
 
-    # Alternative: Direct S3 → LadybugDB copy (bypasses DuckDB staging)
-    from robosystems.adapters.sec.processors.ingestion import LadybugDirectCopier
-
-    copier = LadybugDirectCopier(graph_id="sec")
-    copy_result = await copier.copy_all_tables(client)
-
     # Backward compatible usage - unified interface
     from robosystems.adapters.sec.processors.ingestion import XBRLDuckDBGraphProcessor
 
@@ -51,11 +42,6 @@ Usage:
     materialize_result = await processor.materialize_from_duckdb()
 """
 
-from .direct_copy import (
-  LARGE_TABLES_FOR_BATCHING,
-  DirectCopyResult,
-  LadybugDirectCopier,
-)
 from .materialization import LadybugMaterializer
 from .models import (
   # Constants (for callers who need to reference them)
@@ -138,18 +124,14 @@ __all__ = [
   "LARGE_MATERIALIZATION_TIMEOUT",
   # Constants (commonly referenced)
   "LARGE_STAGING_TABLES",
-  "LARGE_TABLES_FOR_BATCHING",
   "LARGE_TABLE_STAGING_TIMEOUT",
   "MATERIALIZATION_BATCH_SIZE",
   "STAGING_MAX_RETRIES",
   "STAGING_RETRY_BACKOFF_BASE",
   "TAXONOMY_STRUCTURE_TABLES",
-  # Result models
-  "DirectCopyResult",
   # Main processor classes
   "DuckDBStager",  # Stage 1: DuckDB staging
   "EntityUpdateResult",
-  "LadybugDirectCopier",  # Alternative: Direct S3 → LadybugDB copy
   "LadybugMaterializer",  # Stage 2: LadybugDB materialization
   "MaterializeResult",
   # Callback type

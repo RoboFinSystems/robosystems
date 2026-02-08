@@ -15,12 +15,13 @@ from .configs import SECHistoricalStageConfig, SECIncrementalStageConfig, SECSta
 
 @asset(
   group_name="sec_pipeline",
-  description="Stage SEC processed files to persistent DuckDB (full or incremental)",
+  description="Stage SEC parquet files to DuckDB (full rebuild)",
   kinds={"duckdb"},
   metadata={
     "pipeline": "sec",
-    "stage": "staging",
-    "decoupled": True,
+    "graph_id": "sec",
+    "stage": "stage",
+    "mode": "full",
   },
 )
 def sec_duckdb_staged(
@@ -137,22 +138,23 @@ def sec_duckdb_staged(
 
 @asset(
   group_name="sec_pipeline",
-  description="Stage SEC historical data (2009-2023) to persistent DuckDB",
+  description="Stage SEC historical parquet files to DuckDB (full rebuild)",
   kinds={"duckdb"},
   metadata={
     "pipeline": "sec",
-    "stage": "historical_staging",
-    "decoupled": True,
+    "graph_id": "sec_historical",
+    "stage": "stage",
+    "mode": "full",
   },
 )
 def sec_historical_duckdb_staged(
   context: AssetExecutionContext,
   config: SECHistoricalStageConfig,
 ) -> MaterializeResult:
-  """Stage SEC historical data (2009-2023) to a separate DuckDB database.
+  """Stage SEC historical data to a separate DuckDB database.
 
-  Creates a DuckDB staging database for the sec_historical subgraph,
-  containing annual reports (10-K, 20-F, 40-F) from 2009-2023.
+  Creates a DuckDB staging database for the sec_historical subgraph.
+  Year range is controlled by config (start_year/end_year).
 
   Uses the same processed S3 parquet files as the primary sec graph,
   but filtered to the historical year range. The sec_historical subgraph
@@ -261,12 +263,13 @@ def sec_historical_duckdb_staged(
 
 @asset(
   group_name="sec_pipeline",
-  description="Incrementally stage current quarter's filings to DuckDB",
+  description="Stage current quarter to SEC DuckDB (incremental)",
   kinds={"duckdb"},
   metadata={
     "pipeline": "sec",
-    "stage": "incremental_staging",
-    "decoupled": True,
+    "graph_id": "sec",
+    "stage": "stage",
+    "mode": "incremental",
   },
 )
 def sec_duckdb_incremental_staged(

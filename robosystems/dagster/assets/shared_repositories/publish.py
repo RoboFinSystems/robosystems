@@ -73,10 +73,16 @@ def shared_repository_s3_published(
 
   from robosystems.graph_api.client.factory import get_graph_client_for_sec_ingestion
   from robosystems.middleware.graph.utils import MultiTenantUtils
+  from robosystems.middleware.graph.utils.subgraph import parse_subgraph_id
 
-  # Validate graph_id is a shared repository
-  if not MultiTenantUtils.is_shared_repository(graph_id):
-    raise ValueError(f"{graph_id} is not a shared repository")
+  # Validate graph_id is a shared repository or subgraph of one
+  is_shared = MultiTenantUtils.is_shared_repository(graph_id)
+  if not is_shared:
+    subgraph_info = parse_subgraph_id(graph_id)
+    if not subgraph_info or not MultiTenantUtils.is_shared_repository(
+      subgraph_info.parent_graph_id
+    ):
+      raise ValueError(f"{graph_id} is not a shared repository or subgraph of one")
 
   # Build S3 destination
   sts = boto3.client("sts", region_name=env.AWS_REGION)

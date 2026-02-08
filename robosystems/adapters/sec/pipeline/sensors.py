@@ -263,11 +263,9 @@ def sec_post_materialize_s3_sync_sensor(context: RunStatusSensorContext):
     run_key=run_key,
     run_config={
       "ops": {
-        "get_shared_master_volume": {
+        "upload_database_to_s3": {
           "config": {
             "graph_id": "sec",
-            "wait_for_completion": True,
-            "description_prefix": "SEC post-materialize",
           }
         },
         "refresh_replica_instances": {

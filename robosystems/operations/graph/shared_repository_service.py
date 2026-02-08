@@ -219,7 +219,7 @@ async def ensure_shared_subgraph_exists(
   """
   Ensure a shared repository subgraph exists, creating it if necessary.
 
-  This is used by data pipelines (e.g., sec_historical_direct_copy) to
+  This is used by data pipelines (e.g., sec_historical materialization) to
   ensure a platform-managed subgraph exists before loading data. It mirrors
   the pattern of ensure_shared_repository_exists() but creates a subgraph
   that appears in MCP workspace listings.

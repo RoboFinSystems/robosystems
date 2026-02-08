@@ -14,13 +14,14 @@ from .configs import SECMaterializeConfig
 
 @asset(
   group_name="sec_pipeline",
-  description="Materialize LadybugDB graph from staged DuckDB (Stage 2)",
+  description="Materialize SEC graph from DuckDB to LadybugDB",
   kinds={"ladybug"},
-  deps=["sec_duckdb_staged"],  # Explicit dependency on staging
+  deps=["sec_duckdb_staged"],
   metadata={
     "pipeline": "sec",
-    "stage": "materialization",
-    "decoupled": True,
+    "graph_id": "sec",
+    "stage": "materialize",
+    "mode": "full",
   },
 )
 def sec_graph_materialized(
@@ -121,13 +122,14 @@ def sec_graph_materialized(
 
 @asset(
   group_name="sec_pipeline",
-  description="Materialize sec_historical graph from staged DuckDB",
+  description="Materialize SEC historical graph from DuckDB to LadybugDB",
   kinds={"ladybug"},
   deps=["sec_historical_duckdb_staged"],
   metadata={
     "pipeline": "sec",
-    "stage": "historical_materialization",
-    "decoupled": True,
+    "graph_id": "sec_historical",
+    "stage": "materialize",
+    "mode": "full",
   },
 )
 def sec_historical_materialized(

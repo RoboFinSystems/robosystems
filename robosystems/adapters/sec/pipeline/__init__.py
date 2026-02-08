@@ -18,7 +18,7 @@ Pipeline stages (run independently via separate jobs):
    - sec_materialize job: sec_graph_materialized - Materialize from DuckDB to LadybugDB
 
 3b. HISTORICAL MATERIALIZE (two-stage pipeline for sec_historical):
-   - sec_historical_stage job: sec_historical_duckdb_staged - Stage 2009-2023 to DuckDB
+   - sec_historical_stage job: sec_historical_duckdb_staged - Stage historical data to DuckDB
    - sec_historical_materialize job: sec_historical_materialized - Materialize to LadybugDB
 
 4. INCREMENTAL (nightly updates, sec graph only):
@@ -74,8 +74,6 @@ from robosystems.adapters.sec.pipeline.jobs import (
   sec_incremental_stage_job,
   sec_materialize_job,
   sec_process_job,
-  sec_replica_refresh_job,
-  sec_s3_publish_job,
   sec_stage_job,
   sec_staged_materialize_job,
 )
@@ -129,8 +127,6 @@ def get_dagster_components():
       sec_incremental_stage_job,
       sec_entity_update_job,
       sec_backup_job,
-      sec_s3_publish_job,
-      sec_replica_refresh_job,
     ],
     "sensors": [
       sec_processing_sensor,
@@ -185,8 +181,6 @@ __all__ = [
   "sec_processing_sensor",
   "sec_quarter_partitions",
   "sec_raw_filings",
-  "sec_replica_refresh_job",
-  "sec_s3_publish_job",
   "sec_stage_job",
   "sec_stage_to_materialize_sensor",
   "sec_staged_materialize_job",

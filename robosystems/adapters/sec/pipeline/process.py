@@ -31,12 +31,14 @@ from .configs import SECProcessConfig, sec_quarter_partitions
 
 @asset(
   group_name="sec_pipeline",
-  description="Process batch of SEC filings with disk-buffered consolidation",
+  description="Process SEC filings into parquet files",
   kinds={"transform"},
   partitions_def=sec_quarter_partitions,
   metadata={
     "pipeline": "sec",
-    "stage": "processing",
+    "graph_id": "sec",
+    "stage": "process",
+    "mode": "full",
   },
   # Run all partitions sequentially in a single run to prevent memory exhaustion
   backfill_policy=BackfillPolicy.single_run(),

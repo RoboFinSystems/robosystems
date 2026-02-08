@@ -11,13 +11,14 @@ from .configs import SECEntityUpdateConfig
 
 @asset(
   group_name="sec_pipeline",
-  description="Update existing Entity nodes with latest data (handles mutable Entity attributes)",
+  description="Update mutable Entity attributes via Cypher MERGE",
   kinds={"ladybug"},
   deps=["sec_graph_materialized"],  # Run after graph materialization
   metadata={
     "pipeline": "sec",
+    "graph_id": "sec",
     "stage": "entity_update",
-    "decoupled": True,
+    "mode": "incremental",
   },
 )
 def sec_entity_incremental_update(
