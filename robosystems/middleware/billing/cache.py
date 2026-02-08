@@ -40,7 +40,7 @@ class CreditCache:
     if self._redis is None:
       try:
         # Use the new connection factory with proper ElastiCache support
-        self._redis = create_redis_client(ValkeyDatabase.CREDITS_CACHE)
+        self._redis = create_redis_client(ValkeyDatabase.CREDITS)
         # Test connection
         self._redis.ping()
         logger.info("Connected to Valkey/Redis for credit caching")

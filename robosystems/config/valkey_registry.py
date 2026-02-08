@@ -28,27 +28,21 @@ class ValkeyDatabase(IntEnum):
   isolation and prevent key collisions.
 
   Current allocation:
-  - 0-1: Reserved for future use
-  - 2-9: Application services (auth, SSE, locks, pipelines, credits, rate limiting, lbug, billing)
+  - 0-7: Application services
+  - 8-15: Available for future use
   """
 
   # =========================================================================
-  # RESERVED DATABASES (0-1) - Available for future use
+  # APPLICATION DATABASES (0-7)
   # =========================================================================
-  RESERVED_0 = 0  # Reserved - available for future use
-  RESERVED_1 = 1  # Reserved - available for future use
-
-  # =========================================================================
-  # APPLICATION DATABASES (2-9)
-  # =========================================================================
-  AUTH_CACHE = 2  # Authentication tokens, sessions, API keys
-  SSE_EVENTS = 3  # Server-Sent Events pub/sub and queue
-  DISTRIBUTED_LOCKS = 4  # Distributed locks for coordination
-  PIPELINE_TRACKING = 5  # SEC/data pipeline progress tracking
-  CREDITS_CACHE = 6  # Credit balance and transaction caching
-  RATE_LIMITING = 7  # Rate limiting counters and windows
-  LBUG_CACHE = 8  # LadybugDB client factory caching (URLs, health, locations)
-  BILLING_CACHE = 9  # Billing provider price mappings and checkout state
+  AUTH = 0  # JWT tokens, API key cache, sessions
+  RATE_LIMITS = 1  # Burst protection, download limits
+  CREDITS = 2  # Credit balance cache
+  BILLING = 3  # Stripe prices, checkout state
+  SSE = 4  # Real-time event pub/sub
+  LOCKS = 5  # Distributed locks (SSO, materialize)
+  GRAPH_ROUTING = 6  # Graph client factory (URLs, health)
+  TASK_STATE = 7  # Async task tracking (ingestion, copy)
 
   @classmethod
   def get_next_available(cls) -> int:
@@ -56,7 +50,7 @@ class ValkeyDatabase(IntEnum):
     Get the next available database number.
 
     Returns:
-        The next available database number (8-15)
+        The next available database number
 
     Raises:
         ValueError: If no database slots are available
@@ -230,7 +224,7 @@ class ValkeyURLBuilder:
   @staticmethod
   def build_url(
     base_url: str | None = None,
-    database: ValkeyDatabase = ValkeyDatabase.AUTH_CACHE,
+    database: ValkeyDatabase = ValkeyDatabase.AUTH,
     use_valkey_prefix: bool = False,
     auth_token: str | None = None,
     use_tls: bool | None = None,
@@ -248,23 +242,23 @@ class ValkeyURLBuilder:
         include_ssl_params: If True, add SSL parameters to URL for rediss:// connections
 
     Returns:
-        Complete URL with database number (e.g., "redis://localhost:6379/2")
+        Complete URL with database number (e.g., "redis://localhost:6379/0")
 
     Examples:
         >>> # Auto-discover base URL (recommended for prod/staging)
-        >>> ValkeyURLBuilder.build_url(database=ValkeyDatabase.AUTH_CACHE)
-        'redis://valkey.us-east-1.cache.amazonaws.com:6379/2'
+        >>> ValkeyURLBuilder.build_url(database=ValkeyDatabase.AUTH)
+        'redis://valkey.us-east-1.cache.amazonaws.com:6379/0'
 
         >>> # With authentication (production)
         >>> ValkeyURLBuilder.build_url(
-        ...     database=ValkeyDatabase.AUTH_CACHE,
+        ...     database=ValkeyDatabase.AUTH,
         ...     auth_token="secret_token_here"
         ... )
-        'rediss://default:secret_token_here@valkey.us-east-1.cache.amazonaws.com:6379/2?ssl_cert_reqs=CERT_NONE'
+        'rediss://default:secret_token_here@valkey.us-east-1.cache.amazonaws.com:6379/0?ssl_cert_reqs=CERT_NONE'
 
         >>> # Explicit base URL (for testing or dev)
-        >>> ValkeyURLBuilder.build_url("redis://localhost:6379", ValkeyDatabase.AUTH_CACHE)
-        'redis://localhost:6379/2'
+        >>> ValkeyURLBuilder.build_url("redis://localhost:6379", ValkeyDatabase.AUTH)
+        'redis://localhost:6379/0'
     """
     # If no base URL provided, auto-discover it
     if base_url is None:
@@ -335,7 +329,7 @@ class ValkeyURLBuilder:
 
   @staticmethod
   def build_authenticated_url(
-    database: ValkeyDatabase = ValkeyDatabase.AUTH_CACHE,
+    database: ValkeyDatabase = ValkeyDatabase.AUTH,
     base_url: str | None = None,
     include_ssl_params: bool = True,
   ) -> str:
@@ -358,12 +352,12 @@ class ValkeyURLBuilder:
 
     Examples:
         >>> # Production (with auth)
-        >>> ValkeyURLBuilder.build_authenticated_url(ValkeyDatabase.AUTH_CACHE)
-        'rediss://default:secret_token@valkey.us-east-1.cache.amazonaws.com:6379/2?ssl_cert_reqs=CERT_NONE'
+        >>> ValkeyURLBuilder.build_authenticated_url(ValkeyDatabase.AUTH)
+        'rediss://default:secret_token@valkey.us-east-1.cache.amazonaws.com:6379/0?ssl_cert_reqs=CERT_NONE'
 
         >>> # Development (no auth)
-        >>> ValkeyURLBuilder.build_authenticated_url(ValkeyDatabase.AUTH_CACHE)
-        'redis://localhost:6379/2'
+        >>> ValkeyURLBuilder.build_authenticated_url(ValkeyDatabase.AUTH)
+        'redis://localhost:6379/0'
     """
     auth_token = ValkeyURLBuilder.get_auth_token()
     return ValkeyURLBuilder.build_url(
@@ -414,16 +408,14 @@ def get_database_purpose(database: ValkeyDatabase) -> str:
       Description of the database's purpose
   """
   descriptions = {
-    ValkeyDatabase.RESERVED_0: "Reserved - available for future use",
-    ValkeyDatabase.RESERVED_1: "Reserved - available for future use",
-    ValkeyDatabase.AUTH_CACHE: "Authentication tokens, sessions, and API key cache",
-    ValkeyDatabase.SSE_EVENTS: "Server-Sent Events for real-time updates",
-    ValkeyDatabase.DISTRIBUTED_LOCKS: "Distributed locks for multi-instance coordination",
-    ValkeyDatabase.PIPELINE_TRACKING: "SEC data pipeline progress and status tracking",
-    ValkeyDatabase.CREDITS_CACHE: "Credit balance and transaction caching",
-    ValkeyDatabase.RATE_LIMITING: "API rate limiting counters and time windows",
-    ValkeyDatabase.LBUG_CACHE: "LadybugDB client factory caching for URLs, health, and instance locations",
-    ValkeyDatabase.BILLING_CACHE: "Billing provider price mappings and checkout state cache",
+    ValkeyDatabase.AUTH: "JWT tokens, API key cache, and sessions",
+    ValkeyDatabase.RATE_LIMITS: "Burst protection and download rate limits",
+    ValkeyDatabase.CREDITS: "Credit balance cache (re-fetches from PostgreSQL)",
+    ValkeyDatabase.BILLING: "Stripe prices and checkout state (re-fetches from Stripe)",
+    ValkeyDatabase.SSE: "Real-time event pub/sub for SSE streams",
+    ValkeyDatabase.LOCKS: "Distributed locks for SSO and materialize coordination",
+    ValkeyDatabase.GRAPH_ROUTING: "Graph client factory routing (URLs, health, discovery)",
+    ValkeyDatabase.TASK_STATE: "Async task tracking for ingestion, copy, and materialize",
   }
 
   return descriptions.get(
@@ -453,17 +445,17 @@ import redis.asyncio as redis
 
 # RECOMMENDED: Use factory methods that handle SSL correctly
 # For async operations:
-redis_client = create_async_redis_client(ValkeyDatabase.AUTH_CACHE, decode_responses=True)
+redis_client = create_async_redis_client(ValkeyDatabase.AUTH, decode_responses=True)
 
 # MANUAL: Build URL with explicit auth token
 auth_token = ValkeyURLBuilder.get_auth_token()  # Gets from Secrets Manager in prod
 manual_url = ValkeyURLBuilder.build_url(
-    database=ValkeyDatabase.AUTH_CACHE,
+    database=ValkeyDatabase.AUTH,
     auth_token=auth_token
 )
 
 # LEGACY: Build URL without authentication (development only)
-legacy_url = ValkeyURLBuilder.build_url(database=ValkeyDatabase.AUTH_CACHE)
+legacy_url = ValkeyURLBuilder.build_url(database=ValkeyDatabase.AUTH)
 """)
 
 
@@ -532,7 +524,7 @@ def create_redis_client(
 
   Example:
       >>> from robosystems.config.valkey_registry import ValkeyDatabase, create_redis_client
-      >>> client = create_redis_client(ValkeyDatabase.AUTH_CACHE)
+      >>> client = create_redis_client(ValkeyDatabase.AUTH)
       >>> client.set("key", "value")
   """
   import redis
@@ -570,7 +562,7 @@ def create_async_redis_client(
 
   Example:
       >>> from robosystems.config.valkey_registry import ValkeyDatabase, create_async_redis_client
-      >>> client = create_async_redis_client(ValkeyDatabase.AUTH_CACHE)
+      >>> client = create_async_redis_client(ValkeyDatabase.AUTH)
       >>> await client.set("key", "value")
   """
   import redis.asyncio as redis_async

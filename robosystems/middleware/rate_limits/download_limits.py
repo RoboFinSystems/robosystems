@@ -27,7 +27,7 @@ class DownloadRateLimiter:
   @classmethod
   def _get_redis_client(cls) -> Any:
     """Get async Redis client for rate limiting database."""
-    return create_async_redis_client(ValkeyDatabase.RATE_LIMITING)
+    return create_async_redis_client(ValkeyDatabase.RATE_LIMITS)
 
   @classmethod
   def _get_key(cls, user_id: str, repository: str) -> str:

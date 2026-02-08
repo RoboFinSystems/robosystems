@@ -922,7 +922,7 @@ async def _check_shared_repository_limits(
   from robosystems.middleware.rate_limits import DualLayerRateLimiter
 
   # Get Redis client for rate limiting with proper ElastiCache support
-  redis_client = create_async_redis_client(ValkeyDatabase.RATE_LIMITING)
+  redis_client = create_async_redis_client(ValkeyDatabase.RATE_LIMITS)
 
   try:
     limiter = DualLayerRateLimiter(redis_client)

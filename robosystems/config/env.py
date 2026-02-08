@@ -1133,8 +1133,8 @@ class EnvConfig:
 
     Example:
         >>> from robosystems.config.valkey_registry import ValkeyDatabase
-        >>> env.get_valkey_url(ValkeyDatabase.AUTH_CACHE)
-        'redis://localhost:6379/2'
+        >>> env.get_valkey_url(ValkeyDatabase.AUTH)
+        'redis://localhost:6379/0'
     """
     if database is None:
       return cls.VALKEY_URL

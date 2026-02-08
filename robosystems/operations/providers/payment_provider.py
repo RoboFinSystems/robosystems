@@ -155,7 +155,7 @@ class StripePaymentProvider(PaymentProvider):
     """Lazy-load Redis client for billing cache."""
     if self._redis_client is None:
       self._redis_client = create_redis_client(
-        ValkeyDatabase.BILLING_CACHE, decode_responses=True
+        ValkeyDatabase.BILLING, decode_responses=True
       )
     return self._redis_client
 

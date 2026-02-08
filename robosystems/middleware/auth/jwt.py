@@ -42,12 +42,12 @@ class JWTConfig:
 
 def get_redis_client():
   """Get synchronous Redis client for token tracking with proper ElastiCache support."""
-  return create_redis_client(ValkeyDatabase.AUTH_CACHE)
+  return create_redis_client(ValkeyDatabase.AUTH)
 
 
 async def get_async_redis_client():
   """Get async Redis client for token tracking with proper ElastiCache support."""
-  return create_async_redis_client(ValkeyDatabase.AUTH_CACHE)
+  return create_async_redis_client(ValkeyDatabase.AUTH)
 
 
 def is_jwt_token_revoked(token: str) -> bool:

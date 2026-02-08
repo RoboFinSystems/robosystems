@@ -29,7 +29,7 @@ class TestAsyncSyncClientUsage:
       mock_client.ping.return_value = True  # Sync return
       mock_from_url.return_value = mock_client
 
-      client = create_redis_client(ValkeyDatabase.AUTH_CACHE)
+      client = create_redis_client(ValkeyDatabase.AUTH)
 
       # Should be able to call sync methods without await
       result = client.ping()
@@ -46,7 +46,7 @@ class TestAsyncSyncClientUsage:
       mock_client.ping.return_value = True  # Will be wrapped in coroutine by AsyncMock
       mock_from_url.return_value = mock_client
 
-      client = create_async_redis_client(ValkeyDatabase.RATE_LIMITING)
+      client = create_async_redis_client(ValkeyDatabase.RATE_LIMITS)
 
       # The client itself is not a coroutine
       assert not asyncio.iscoroutine(client)
@@ -65,7 +65,7 @@ class TestAsyncSyncClientUsage:
       mock_client.keys.return_value = ["key1", "key2"]
       mock_from_url.return_value = mock_client
 
-      client = create_async_redis_client(ValkeyDatabase.LBUG_CACHE)
+      client = create_async_redis_client(ValkeyDatabase.GRAPH_ROUTING)
 
       # All these operations should be awaitable
       get_result = await client.get("test_key")
@@ -85,7 +85,7 @@ class TestAsyncSyncClientUsage:
       mock_client.set.return_value = True
       mock_from_url.return_value = mock_client
 
-      client = create_redis_client(ValkeyDatabase.PIPELINE_TRACKING)
+      client = create_redis_client(ValkeyDatabase.BILLING)
 
       # These should NOT be coroutines
       get_result = client.get("test_key")
@@ -104,7 +104,7 @@ class TestAsyncSyncClientUsage:
       # Sync client
       with patch("redis.Redis.from_url") as mock_sync:
         mock_sync.return_value = MagicMock()
-        create_redis_client(ValkeyDatabase.AUTH_CACHE)
+        create_redis_client(ValkeyDatabase.AUTH)
 
         # Should be called with correct parameters
         assert mock_sync.called
@@ -121,7 +121,7 @@ class TestAsyncSyncClientUsage:
       # Async client
       with patch("redis.asyncio.from_url") as mock_async:
         mock_async.return_value = AsyncMock()
-        create_async_redis_client(ValkeyDatabase.RATE_LIMITING)
+        create_async_redis_client(ValkeyDatabase.RATE_LIMITS)
 
         # Should be called with correct parameters
         assert mock_async.called

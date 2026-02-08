@@ -281,8 +281,8 @@ def test_get_valkey_url_with_enum(monkeypatch):
     staticmethod(lambda base_url, database, **_: f"{base_url}-{database.name}"),
   )
 
-  result = EnvConfig.get_valkey_url(ValkeyDatabase.AUTH_CACHE)
-  assert result == "redis://base-AUTH_CACHE"
+  result = EnvConfig.get_valkey_url(ValkeyDatabase.AUTH)
+  assert result == "redis://base-AUTH"
 
 
 def test_get_valkey_url_with_integer(monkeypatch):

@@ -53,7 +53,7 @@ class CacheValidator:
     """Get async Redis connection, creating if needed."""
     if self._async_redis is None:
       # Use the new connection factory with proper ElastiCache support
-      self._async_redis = create_async_redis_client(ValkeyDatabase.AUTH_CACHE)
+      self._async_redis = create_async_redis_client(ValkeyDatabase.AUTH)
       # Test connection
       await self._async_redis.ping()
     return self._async_redis

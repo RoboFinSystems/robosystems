@@ -194,10 +194,10 @@ All configuration is centralized and config-as-code:
 from robosystems.config.valkey_registry import ValkeyDatabase, ValkeyURLBuilder
 
 # Always use the registry, never hardcode database numbers
-redis_url = ValkeyURLBuilder.build_url(env.VALKEY_URL, ValkeyDatabase.AUTH_CACHE)
+redis_url = ValkeyURLBuilder.build_url(env.VALKEY_URL, ValkeyDatabase.AUTH)
 ```
 
-Database numbers: 0-1=Reserved, 2=Auth, 3=SSE, 4=Locks, 5=Pipeline, 6=Credits, 7=Rate limiting, 8=LadybugDB, 9=Billing
+Database numbers: 0=Auth, 1=Rate limits, 2=Credits, 3=Billing, 4=SSE, 5=Locks, 6=Graph routing, 7=Task state, 8-15=Available
 
 ## Testing
 

@@ -1551,6 +1551,138 @@ def migrations_current(client):
 
 
 @cli.group()
+def cache():
+  """Valkey cache operations."""
+  pass
+
+
+@cache.command("info")
+@click.argument("database", required=False)
+@click.pass_obj
+def cache_info(client, database):
+  """Show cache database info. Optionally specify a database name."""
+  if database:
+    data = client._make_request("GET", f"/admin/v1/cache/info/{database}")
+
+    console.print()
+    console.print(f"[bold cyan]CACHE DATABASE: {data['name'].upper()}[/bold cyan]")
+    console.print("=" * 60)
+    console.print(f"\n  DB Number: {data['db_number']}")
+    console.print(f"  Key Count: {data['key_count']:,}")
+    console.print(f"  Purpose: {data['purpose']}")
+
+    if data.get("sample_keys"):
+      console.print(f"\n[bold]Sample Keys ({len(data['sample_keys'])}):[/bold]")
+      for key in data["sample_keys"]:
+        console.print(f"  {key}")
+  else:
+    data = client._make_request("GET", "/admin/v1/cache/info")
+
+    table = Table(title="Valkey Databases", show_header=True, header_style="bold cyan")
+    table.add_column("DB #", justify="right")
+    table.add_column("Name", overflow="fold")
+    table.add_column("Keys", justify="right")
+    table.add_column("Purpose", overflow="fold")
+
+    for db in data["databases"]:
+      table.add_row(
+        str(db["db_number"]),
+        db["name"],
+        f"{db['key_count']:,}" if db["key_count"] >= 0 else "N/A",
+        db["purpose"],
+      )
+
+    console.print()
+    console.print(table)
+    console.print(f"\n[bold]Total Keys:[/bold] {data['total_keys']:,}")
+
+
+@cache.command("flush")
+@click.argument("database")
+@click.option("--yes", "-y", is_flag=True, help="Skip confirmation")
+@click.pass_obj
+def cache_flush(client, database, yes):
+  """Flush a cache database. Use 'all' to flush everything."""
+  if database == "all":
+    if not yes:
+      click.confirm("This will flush ALL Valkey databases. Continue?", abort=True)
+
+    data = client._make_request("POST", "/admin/v1/cache/flush-all")
+
+    table = Table(title="Flush Results", show_header=True, header_style="bold cyan")
+    table.add_column("Name", overflow="fold")
+    table.add_column("Keys Flushed", justify="right")
+    table.add_column("Status", overflow="fold")
+
+    for db in data["databases"]:
+      status = "OK" if db["flushed"] else "FAILED"
+      table.add_row(
+        db["name"],
+        f"{db['keys_before']:,}" if db["keys_before"] >= 0 else "N/A",
+        status,
+      )
+
+    console.print()
+    console.print(table)
+    console.print(f"\n[bold]Total Keys Flushed:[/bold] {data['total_keys_flushed']:,}")
+  else:
+    if not yes:
+      click.confirm(f"Flush all keys from '{database}'?", abort=True)
+
+    data = client._make_request("POST", f"/admin/v1/cache/flush/{database}")
+    console.print(
+      f"\nFlushed [bold]{data['name']}[/bold] (DB {data['db_number']}): "
+      f"{data['keys_before']:,} keys removed"
+    )
+
+
+@cache.command("keys")
+@click.argument("database")
+@click.option("--pattern", "-p", default="*", help="Key pattern to match")
+@click.option("--count", "-c", default=100, help="Maximum keys to return")
+@click.pass_obj
+def cache_keys(client, database, pattern, count):
+  """List keys in a cache database."""
+  params = {"pattern": pattern, "count": count}
+  data = client._make_request("GET", f"/admin/v1/cache/keys/{database}", params=params)
+
+  console.print()
+  console.print(
+    f"[bold cyan]Keys in {data['name']} (pattern: {data['pattern']})[/bold cyan]"
+  )
+
+  if data["keys"]:
+    for key in data["keys"]:
+      console.print(f"  {key}")
+    console.print(f"\n[bold]Count:[/bold] {data['count']:,}")
+  else:
+    console.print("  [yellow]No keys found.[/yellow]")
+
+
+@cache.command("delete-keys")
+@click.argument("database")
+@click.option("--pattern", "-p", required=True, help="Key pattern to delete")
+@click.option("--yes", "-y", is_flag=True, help="Skip confirmation")
+@click.pass_obj
+def cache_delete_keys(client, database, pattern, yes):
+  """Delete keys matching a pattern from a cache database."""
+  if pattern == "*":
+    console.print("[red]Wildcard '*' is not allowed. Use 'flush' instead.[/red]")
+    raise SystemExit(1)
+
+  if not yes:
+    click.confirm(f"Delete keys matching '{pattern}' from '{database}'?", abort=True)
+
+  data = client._make_request(
+    "DELETE", f"/admin/v1/cache/keys/{database}", params={"pattern": pattern}
+  )
+  console.print(
+    f"\nDeleted {data['keys_deleted']:,} keys from [bold]{data['name']}[/bold] "
+    f"(pattern: {data['pattern']})"
+  )
+
+
+@cli.group()
 def sec():
   """SEC database operations."""
   pass

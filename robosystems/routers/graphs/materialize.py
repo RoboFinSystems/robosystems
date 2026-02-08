@@ -471,7 +471,7 @@ async def materialize_graph(
 
   # Acquire distributed lock to prevent concurrent materialization
   try:
-    redis_client = create_redis_client(ValkeyDatabase.DISTRIBUTED_LOCKS)
+    redis_client = create_redis_client(ValkeyDatabase.LOCKS)
     lock = DistributedLock(
       redis_client, f"graph_materialize:{graph_id}", ttl_seconds=INGESTION_LOCK_TTL
     )
