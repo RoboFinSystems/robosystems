@@ -89,9 +89,9 @@ class QBClient:
     accounts = self.get_accounts()
     accounts_df = pd.DataFrame(accounts)
     accounts_df["AccountType"] = accounts_df.apply(
-      lambda x: f"Other {x.Classification}"
-      if x.AccountType == "NaN"
-      else x.AccountType,
+      lambda x: (
+        f"Other {x.Classification}" if x.AccountType == "NaN" else x.AccountType
+      ),
       axis=1,
     )
     for i, r in accounts_df.iterrows():

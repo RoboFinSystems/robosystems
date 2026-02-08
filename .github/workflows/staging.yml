@@ -521,7 +521,7 @@ jobs:
       # WAF Configuration (environment-specific, skipped for internal-only deployments)
       waf_enabled: ${{ vars.WAF_ENABLED_STAGING || 'false' }}
       waf_stack_name: ${{ needs.stack-config.outputs.waf_stack }}
-      waf_rate_limit_per_ip: ${{ vars.WAF_RATE_LIMIT_PER_IP || '10000' }}
+      waf_rate_limit_per_ip: ${{ vars.WAF_RATE_LIMIT_PER_IP || '3000' }}
       waf_enable_geo_blocking: ${{ vars.WAF_GEO_BLOCKING_ENABLED || 'false' }}
       waf_enable_aws_managed_rules: ${{ vars.WAF_AWS_MANAGED_RULES_ENABLED || 'true' }}
       # S3 Bucket Configuration (from S3 stack outputs)

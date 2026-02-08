@@ -271,8 +271,8 @@ class TestEntityGraphService:
     entity_data = {"name": "Test Company"}
 
     # Simulate cancellation during database creation
-    mock_lbug_client.create_database.side_effect = (
-      lambda *args, **kwargs: setattr(
+    mock_lbug_client.create_database.side_effect = lambda *args, **kwargs: (
+      setattr(
         cancelled, "__class__", type("cancelled", (), {"__bool__": lambda self: True})()
       )
       or None

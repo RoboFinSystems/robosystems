@@ -65,7 +65,7 @@ WAF protects web applications from common exploits.
 - `WAF_ENABLED_PROD`: Enable/disable WAF protection ("true"/"false", default: "true")
 - `WAF_GEO_BLOCKING_ENABLED`: Enable geographic restrictions ("true"/"false", default: "false")
 - `WAF_AWS_MANAGED_RULES_ENABLED`: Enable AWS managed rule sets ("true"/"false", default: "true")
-- `WAF_RATE_LIMIT_PER_IP`: Rate limit per IP (requests per 5 minutes, default: 10000)
+- `WAF_RATE_LIMIT_PER_IP`: Rate limit per IP (requests per 5 minutes, default: 3000)
 
 ### 4. Enhanced Monitoring
 

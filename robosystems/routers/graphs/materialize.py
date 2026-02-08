@@ -86,6 +86,10 @@ class MaterializeRequest(BaseModel):
     default=True,
     description="Continue ingestion on row errors",
   )
+  dry_run: bool = Field(
+    default=False,
+    description="Validate limits without executing materialization. Returns usage, limits, and warnings.",
+  )
 
   class Config:
     extra = "forbid"
@@ -98,6 +102,10 @@ class MaterializeResponse(BaseModel):
   graph_id: str = Field(..., description="Graph database identifier")
   operation_id: str = Field(..., description="SSE operation ID for progress tracking")
   message: str = Field(..., description="Human-readable status message")
+  limit_check: dict | None = Field(
+    default=None,
+    description="Limit check results (only present for dry_run requests)",
+  )
 
   class Config:
     json_schema_extra = {
@@ -334,6 +342,10 @@ the configured TTL (default: 1 hour) to prevent deadlocks from failed materializ
 Full graph materialization can take minutes for large datasets. Consider running
 during off-peak hours for production systems.
 
+**Dry Run:**
+Set `dry_run=true` to validate limits without executing. Returns current usage, tier limits,
+and any warnings or errors. No lock is acquired, no SSE operation is created.
+
 **Credits:**
 Materialization is included - no credit consumption""",
   responses={
@@ -424,6 +436,37 @@ async def materialize_graph(
     raise HTTPException(
       status_code=status.HTTP_404_NOT_FOUND,
       detail=f"Graph {graph_id} not found",
+    )
+
+  # Dry run: validate limits and return without executing
+  if request.dry_run:
+    from robosystems.middleware.graph.ingestion_limits import IngestionLimitChecker
+
+    graph_tier = graph.graph_tier if graph.graph_tier else "ladybug-standard"
+    limit_check = await IngestionLimitChecker.check_materialization_limits(
+      db=db,
+      graph_id=graph_id,
+      tier=graph_tier,
+    )
+
+    api_logger.info(
+      "Materialization dry run completed",
+      extra={
+        "component": "materialize_api",
+        "action": "dry_run_checked",
+        "user_id": str(current_user.id),
+        "graph_id": graph_id,
+        "allowed": limit_check["allowed"],
+        "tier": graph_tier,
+      },
+    )
+
+    return MaterializeResponse(
+      status="dry_run",
+      graph_id=graph_id,
+      operation_id="dry_run",
+      message="Dry run completed - no materialization executed",
+      limit_check=limit_check,
     )
 
   # Acquire distributed lock to prevent concurrent materialization
@@ -655,110 +698,3 @@ async def _run_dagster_materialization(
   finally:
     if lock is not None:
       lock.release()
-
-
-@router.post(
-  "/materialize/preflight",
-  operation_id="materializePreflightCheck",
-  summary="Preflight Check for Materialization",
-  description="""Check if materialization would succeed without executing it.
-
-Validates that the pending data (staged files) would not exceed the graph's tier limits
-for nodes, relationships, and rows. Returns current usage, limits, and any warnings.
-
-**Use Cases:**
-- Validate before starting a long-running materialization
-- Show users their current usage vs limits in the UI
-- Pre-check before triggering materialization programmatically
-
-**Credits:**
-Preflight check is included - no credit consumption""",
-  responses={
-    200: {
-      "description": "Preflight check completed",
-      "content": {
-        "application/json": {
-          "example": {
-            "allowed": True,
-            "errors": [],
-            "warnings": ["Approaching node limit: 4,200,000 / 5,000,000 (84%)"],
-            "current_usage": {
-              "current_nodes": 4000000,
-              "current_relationships": 2000000,
-              "pending_node_rows": 200000,
-              "pending_relationship_rows": 50000,
-              "total_pending_rows": 250000,
-            },
-            "limits": {
-              "max_nodes": 5000000,
-              "max_relationships": 10000000,
-              "max_rows_per_copy": 2000000,
-              "max_single_table_rows": 5000000,
-              "chunk_size_rows": 1000000,
-            },
-            "tier": "ladybug-standard",
-          }
-        }
-      },
-    },
-    403: {
-      "description": "Access denied - shared repositories or insufficient permissions",
-      "model": ErrorResponse,
-    },
-    404: {
-      "description": "Graph not found",
-      "model": ErrorResponse,
-    },
-  },
-)
-@endpoint_metrics_decorator(
-  "/v1/graphs/{graph_id}/materialize/preflight",
-  business_event_type="materialization_preflight_checked",
-)
-async def materialize_preflight(
-  graph_id: str = Path(
-    ...,
-    description="Graph database identifier",
-    pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN,
-  ),
-  current_user: User = Depends(get_current_user_with_graph),
-  _rate_limit=Depends(subscription_aware_rate_limit_dependency),
-  db: Session = Depends(get_db_session),
-) -> dict:
-  """Check if materialization would succeed without executing it."""
-  from robosystems.middleware.graph.ingestion_limits import IngestionLimitChecker
-
-  # Check for shared repository access
-  if is_shared_repository(graph_id.lower()):
-    raise HTTPException(
-      status_code=status.HTTP_403_FORBIDDEN,
-      detail=SHARED_REPO_WRITE_ERROR_MESSAGE,
-    )
-
-  graph = Graph.get_by_id(graph_id, db)
-  if not graph:
-    raise HTTPException(
-      status_code=status.HTTP_404_NOT_FOUND,
-      detail=f"Graph {graph_id} not found",
-    )
-
-  graph_tier = graph.graph_tier if graph.graph_tier else "ladybug-standard"
-  limit_check = await IngestionLimitChecker.check_materialization_limits(
-    db=db,
-    graph_id=graph_id,
-    tier=graph_tier,
-  )
-
-  api_logger.info(
-    "Materialization preflight check completed",
-    extra={
-      "component": "materialize_api",
-      "action": "preflight_checked",
-      "user_id": str(current_user.id),
-      "graph_id": graph_id,
-      "allowed": limit_check["allowed"],
-      "tier": graph_tier,
-    },
-  )
-
-  return limit_check

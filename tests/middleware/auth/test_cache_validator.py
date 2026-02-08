@@ -605,11 +605,13 @@ class TestCacheValidator:
     mock_async_redis = self._setup_async_redis_mock(
       validator,
       keys_return=["apikey:hash123"],
-      get_side_effect=lambda key: b"encrypted_data"
-      if key == "apikey:hash123"
-      else b"signature_data"
-      if key == "cache_sig:hash123"
-      else None,
+      get_side_effect=lambda key: (
+        b"encrypted_data"
+        if key == "apikey:hash123"
+        else b"signature_data"
+        if key == "cache_sig:hash123"
+        else None
+      ),
     )
 
     # Mock stale cache data (25 hours old, max age is 24 hours)

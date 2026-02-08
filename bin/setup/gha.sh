@@ -469,7 +469,7 @@ function setup_full_config() {
 
     # WAF Configuration (environment-specific) - disabled by default to save ~$5+/month
     gh variable set WAF_ENABLED_PROD --body "false"
-    gh variable set WAF_RATE_LIMIT_PER_IP --body "10000"
+    gh variable set WAF_RATE_LIMIT_PER_IP --body "3000"
     gh variable set WAF_GEO_BLOCKING_ENABLED --body "false"
     gh variable set WAF_AWS_MANAGED_RULES_ENABLED --body "true"
     if $setup_staging; then

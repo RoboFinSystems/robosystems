@@ -21,7 +21,7 @@ Parameters:
   RateLimitPerIP:
     Type: Number
     Description: Maximum requests per 5-minute window per IP
-    Default: 10000
+    Default: 3000
     MinValue: 100
     MaxValue: 20000
 
