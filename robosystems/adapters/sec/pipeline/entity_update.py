@@ -13,7 +13,7 @@ from .configs import SECEntityUpdateConfig
   group_name="sec_pipeline",
   description="Update existing Entity nodes with latest data (handles mutable Entity attributes)",
   kinds={"ladybug"},
-  deps=["sec_graph_incremental_copy"],  # Run after incremental copy
+  deps=["sec_graph_materialized"],  # Run after graph materialization
   metadata={
     "pipeline": "sec",
     "stage": "entity_update",

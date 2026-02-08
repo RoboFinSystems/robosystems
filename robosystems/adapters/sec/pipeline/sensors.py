@@ -3,21 +3,22 @@
 Sensors trigger jobs based on SourceFile queue state and job completion.
 All sensors start STOPPED by default - enable in Dagster UI when ready.
 
-Incremental Pipeline (enable all for automated daily updates):
+Nightly Pipeline (enable all for automated daily updates):
 - Phase 1 (Download): sec_incremental_download_schedule triggers at 9pm EST weekdays
 - Phase 2 (Process): sec_download_to_process_sensor chains download → process
-- Phase 3 (Stage): sec_incremental_staging_sensor chains process → stage (DuckDB only)
-- Phase 4 (Copy): sec_stage_to_copy_sensor chains stage → copy (S3 → LadybugDB direct)
-- Phase 5 (S3 Sync): sec_incremental_post_ingest_s3_sync_sensor chains copy → S3 sync
+- Phase 3 (Stage): sec_incremental_staging_sensor chains process → stage (DuckDB INSERT)
+- Phase 4 (Materialize): sec_stage_to_materialize_sensor chains stage → full graph rebuild
+- Phase 5 (S3 Sync): sec_post_materialize_s3_sync_sensor chains materialize → S3 sync
 
 Manual Operations (not in automated chain):
-- sec_entity_update_job: Update mutable Entity attributes (run manually after copy)
+- sec_entity_update_job: Update mutable Entity attributes (run manually after materialize)
 
 Backfill Processing (enable for bulk/manual processing):
 - sec_processing_sensor: Discovers pending SourceFiles, triggers batch processing per quarter
 
-Incremental staging uses INSERT INTO with dedup (only net new rows added to DuckDB).
-LadybugDB updates via direct S3 copy with ignore_errors=true for duplicate handling.
+Nightly flow: New data is added to existing DuckDB tables (INSERT with dedup),
+then the LadybugDB graph is fully rebuilt from DuckDB. The sec graph (2024+ only)
+is small enough for nightly rebuilds (~75GB vs ~300GB monolith).
 """
 
 from datetime import UTC, datetime
@@ -41,7 +42,6 @@ from robosystems.dagster.jobs.shared_repository import shared_repository_s3_sync
 
 from .jobs import (
   sec_download_job,
-  sec_incremental_copy_job,
   sec_incremental_stage_job,
   sec_materialize_job,
   sec_process_job,
@@ -447,7 +447,7 @@ def sec_incremental_staging_sensor(context: SensorEvaluationContext):
   reaches 0 (all files processed), then triggers incremental staging for
   current quarter. Keeps DuckDB in sync for potential full rebuilds.
 
-  Next step: sec_stage_to_copy_sensor triggers LadybugDB copy after staging.
+  Next step: sec_stage_to_materialize_sensor triggers full LadybugDB rebuild after staging.
 
   Controlled by: SEC_INCREMENTAL_PIPELINE_ENABLED=true
   """
@@ -548,35 +548,33 @@ def sec_incremental_staging_sensor(context: SensorEvaluationContext):
 
 
 # ============================================================================
-# SEC Stage to Copy Sensor (Chains Stage → Copy)
+# SEC Stage to Materialize Sensor (Chains Stage → Full Graph Rebuild)
 # ============================================================================
-# This sensor triggers LadybugDB copy after DuckDB staging completes:
-#   stage (DuckDB) → copy (S3 → LadybugDB with ignore_errors)
+# After DuckDB incremental staging adds new rows, triggers a full LadybugDB
+# rebuild from DuckDB. The sec graph (2024+ only) is small enough for nightly
+# rebuilds, and this ensures the graph is always consistent with DuckDB.
 #
-# Direct S3 copy uses ignore_errors=true to handle duplicates via constraint
-# violations. Much faster than full DuckDB → LadybugDB rebuild.
-#
-# Controlled by: SEC_INCREMENTAL_PIPELINE_ENABLED=true
+# Chain: stage (DuckDB INSERT) → materialize (full rebuild) → S3 sync
+# S3 sync is handled by sec_post_materialize_s3_sync_sensor (already exists).
 
 
 @run_status_sensor(
   run_status=DagsterRunStatus.SUCCESS,
   monitored_jobs=[sec_incremental_stage_job],
-  request_job=sec_incremental_copy_job,
+  request_job=sec_materialize_job,
   default_status=DefaultSensorStatus.STOPPED,  # Enable in Dagster UI when ready
   minimum_interval_seconds=60,
-  description="Trigger incremental S3 → LadybugDB copy after DuckDB staging completes",
+  description="Trigger full graph rebuild after incremental DuckDB staging completes",
 )
-def sec_stage_to_copy_sensor(context: RunStatusSensorContext):
-  """Trigger incremental S3 → LadybugDB copy after DuckDB staging completes.
+def sec_stage_to_materialize_sensor(context: RunStatusSensorContext):
+  """Trigger full LadybugDB rebuild after incremental DuckDB staging completes.
 
-  Part of the automated incremental pipeline chain:
-    process → stage (DuckDB) → copy (S3 → LadybugDB) → S3 sync
+  Part of the nightly pipeline chain:
+    process → stage (DuckDB INSERT) → materialize (full rebuild) → S3 sync
 
-  Uses ignore_errors=true to skip duplicates via constraint violations.
-  Much faster than full DuckDB → LadybugDB rebuild.
-
-  Controlled by: SEC_INCREMENTAL_PIPELINE_ENABLED=true
+  After new data is added to DuckDB, the LadybugDB graph is fully rebuilt.
+  The sec graph (2024+ only, ~75GB) is small enough for nightly rebuilds.
+  S3 sync is handled by the existing sec_post_materialize_s3_sync_sensor.
   """
   if env.ENVIRONMENT == "dev":
     context.log.info("Skipping chain sensor in dev environment")
@@ -590,109 +588,40 @@ def sec_stage_to_copy_sensor(context: RunStatusSensorContext):
     context.log.info("Run is not incremental mode, skipping chain")
     return
 
-  # Check if copy job is already running
+  # Check if materialize job is already running
   active_runs = context.instance.get_runs(
     filters=RunsFilter(
-      job_name="sec_incremental_copy",
+      job_name="sec_materialize",
       statuses=[DagsterRunStatus.STARTED, DagsterRunStatus.QUEUED],
     ),
     limit=1,
   )
   if active_runs:
     context.log.info(
-      f"Incremental copy already running (run_id={active_runs[0].run_id}), skipping"
+      f"Materialize job already running (run_id={active_runs[0].run_id}), skipping"
     )
     return
 
   context.log.info(
-    f"DuckDB staging completed (run_id={dagster_run.run_id}), triggering S3 → LadybugDB copy"
+    f"DuckDB staging completed (run_id={dagster_run.run_id}), "
+    "triggering full LadybugDB rebuild from DuckDB"
   )
 
   yield RunRequest(
-    run_key=f"sec-copy-chain-{dagster_run.run_id[:8]}",
+    run_key=f"sec-materialize-chain-{dagster_run.run_id[:8]}",
     run_config={
       "ops": {
-        "sec_graph_incremental_copy": {
+        "sec_graph_materialized": {
           "config": {
             "graph_id": "sec",
-            # year/quarter default to current if not specified
+            "rebuild_graph": True,
           }
         },
       }
     },
     tags={
       "pipeline": "sec",
-      "phase": "incremental_copy",
+      "phase": "materialize",
       "mode": "incremental",
-    },
-  )
-
-
-@run_status_sensor(
-  run_status=DagsterRunStatus.SUCCESS,
-  monitored_jobs=[sec_incremental_copy_job],
-  request_job=shared_repository_s3_sync_job,
-  default_status=DefaultSensorStatus.STOPPED,  # Enable in Dagster UI when ready
-  minimum_interval_seconds=60,
-  description="Trigger shared repository S3 sync after incremental copy completes",
-)
-def sec_incremental_post_ingest_s3_sync_sensor(context: RunStatusSensorContext):
-  """Trigger shared repository S3 sync after incremental copy completes.
-
-  Part of the automated incremental pipeline. After S3 → LadybugDB copy
-  succeeds, this triggers:
-  1. Upload database to S3 for replica access via ATTACH
-  2. Trigger rolling refresh of replica fleet
-
-  Replicas use LadybugDB S3 ATTACH to connect directly to the S3-hosted
-  database via the httpfs extension.
-
-  This ensures replicas serve the latest SEC data after daily updates.
-
-  Controlled by: SEC_INCREMENTAL_PIPELINE_ENABLED=true
-  """
-  if env.ENVIRONMENT == "dev":
-    context.log.info("Skipping S3 sync sensor in dev environment")
-    return
-
-  dagster_run = context.dagster_run
-
-  # Check if a sync job is already running
-  active_runs = context.instance.get_runs(
-    filters=RunsFilter(
-      job_name="shared_repository_s3_sync_job",
-      statuses=[DagsterRunStatus.STARTED, DagsterRunStatus.QUEUED],
-    ),
-    limit=1,
-  )
-  if active_runs:
-    context.log.info(
-      f"S3 sync job already running (run_id={active_runs[0].run_id}), skipping"
-    )
-    return
-
-  context.log.info(
-    f"Incremental ingest completed (run_id={dagster_run.run_id}), "
-    "triggering S3 sync + replica refresh"
-  )
-
-  yield RunRequest(
-    run_key=f"s3-sync-after-{dagster_run.run_id[:8]}",
-    run_config={
-      "ops": {
-        "get_shared_master_volume": {
-          "config": {
-            "graph_id": "sec",
-            "wait_for_completion": True,
-            "description_prefix": "SEC incremental ingest",
-          }
-        },
-        "refresh_replica_instances": {
-          "config": {
-            "min_healthy_percentage": 50,
-            "instance_warmup_seconds": 300,
-          }
-        },
-      }
     },
   )

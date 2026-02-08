@@ -74,6 +74,8 @@ class DuckDBStager:
   async def stage_to_duckdb(
     self,
     year: int | None = None,
+    start_year: int | None = None,
+    end_year: int | None = None,
     reset_staging: bool = False,
     skip_taxonomy_relationships: bool = False,
     use_glob: bool = True,
@@ -99,7 +101,9 @@ class DuckDBStager:
     - No chunking needed - single-pass staging handles 500M+ row tables
 
     Args:
-        year: Optional year filter. If provided, only files from that year.
+        year: Optional single year filter. If provided, only files from that year.
+        start_year: Optional start of year range (inclusive). Used with end_year.
+        end_year: Optional end of year range (inclusive). Used with start_year.
         reset_staging: If True, delete entire DuckDB staging database first.
         skip_taxonomy_relationships: If True, skip taxonomy structure tables.
         use_glob: If True (default), use glob patterns for efficient discovery.
@@ -112,7 +116,12 @@ class DuckDBStager:
     log_progress = make_progress_logger(progress_callback)
 
     # Determine date filter for logging
-    date_filter = f"{year}-*" if year else "all"
+    if year:
+      date_filter = f"{year}-*"
+    elif start_year or end_year:
+      date_filter = f"{start_year or '?'}-{end_year or '?'}"
+    else:
+      date_filter = "all"
     logger.info(
       f"Starting DuckDB staging for graph {self.graph_id} "
       f"(filed={date_filter}, reset_staging={reset_staging})"
@@ -232,6 +241,8 @@ class DuckDBStager:
           tables_by_type,
           client,
           year=year,
+          start_year=start_year,
+          end_year=end_year,
           progress_callback=log_progress,
         )
       else:
@@ -642,6 +653,8 @@ class DuckDBStager:
     tables: dict[str, str],
     graph_client: "GraphClient",
     year: int | None = None,
+    start_year: int | None = None,
+    end_year: int | None = None,
     progress_callback: ProgressCallback | None = None,
   ) -> tuple[list[str], dict[str, TableInfo]]:
     """
@@ -653,7 +666,9 @@ class DuckDBStager:
     Args:
         tables: Dictionary mapping table names to entity type
         graph_client: Graph API client instance
-        year: Optional year filter
+        year: Optional single year filter
+        start_year: Optional start of year range (inclusive)
+        end_year: Optional end of year range (inclusive)
         progress_callback: Optional progress callback
 
     Returns:
@@ -664,11 +679,21 @@ class DuckDBStager:
     failed_tables: list[tuple[str, str]] = []
     skipped_tables: list[str] = []
 
-    # Build partition pattern
+    from datetime import UTC, datetime
+
+    # Build partition pattern(s)
+    # year_range_patterns is set when we need a list of per-year globs
+    year_range_patterns: bool = False
+    filed_pattern: str = "filed=*-Q*"
+    range_start: int = 2009
+    range_end: int = datetime.now(UTC).year
     if year:
       filed_pattern = f"filed={year}-Q*"
-    else:
-      filed_pattern = "filed=*-Q*"
+    elif start_year is not None or end_year is not None:
+      # Year range: generate per-year patterns (passed as list to DuckDB)
+      range_start = start_year or 2009
+      range_end = end_year or datetime.now(UTC).year
+      year_range_patterns = True
 
     log_progress = make_progress_logger(progress_callback)
 
@@ -676,11 +701,18 @@ class DuckDBStager:
     for i, (table_name, entity_type) in enumerate(tables.items(), 1):
       is_large = table_name in LARGE_STAGING_TABLES
 
-      # Standard staging for all tables (spill-to-disk handles large tables)
-      s3_pattern = (
-        f"s3://{self.bucket}/{self.source_prefix}/"
-        f"{filed_pattern}/{entity_type}/{table_name}.parquet"
-      )
+      # Build s3_pattern: single glob string or list of per-year globs
+      if year_range_patterns:
+        s3_pattern: str | list[str] = [
+          f"s3://{self.bucket}/{self.source_prefix}/"
+          f"filed={y}-Q*/{entity_type}/{table_name}.parquet"
+          for y in range(range_start, range_end + 1)
+        ]
+      else:
+        s3_pattern = (
+          f"s3://{self.bucket}/{self.source_prefix}/"
+          f"{filed_pattern}/{entity_type}/{table_name}.parquet"
+        )
 
       timeout = get_staging_timeout(table_name)
       size_hint = " (large table)" if is_large else ""

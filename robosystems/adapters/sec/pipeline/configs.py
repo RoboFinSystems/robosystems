@@ -22,6 +22,10 @@ SEC_START_YEAR = 2009
 SEC_HISTORICAL_END_YEAR = 2023  # sec_historical: 2009-2023
 SEC_PRIMARY_START_YEAR = 2024  # sec (primary): 2024+
 
+# Form types for historical graph (annual reports only)
+# sec_historical includes 10-K and foreign equivalents (20-F, 40-F)
+SEC_HISTORICAL_FORM_TYPES = ["10-K", "20-F", "40-F"]
+
 # Form type batches for EFTS queries to avoid 10k result limit
 # Q2 (proxy season) can exceed 10k when all forms are included
 # Batch 1: Core financial statements
@@ -115,6 +119,11 @@ class SECProcessConfig(Config):
   # If False, job fails on first error (for debugging)
   continue_on_error: bool = True
 
+  # Form types to include (None = all types, no filtering).
+  # Filings with non-matching form types are marked "skipped" in SourceFile.
+  # Example: ["10-K", "20-F", "40-F"] for annual reports only.
+  form_types: list[str] | None = None
+
 
 # =============================================================================
 # Staging Configuration
@@ -129,6 +138,11 @@ class SECStageConfig(Config):
   Note: This step only stages data to DuckDB. LadybugDB rebuild is handled
   by the materialize step (sec_graph_materialized) via SECMaterializeConfig.rebuild_graph.
 
+  Year filtering:
+    - year: Single year filter (e.g., 2024)
+    - start_year/end_year: Year range filter (e.g., 2009-2023 for historical)
+    - None for all: Stages all available years
+
   Common scenarios:
     - Normal re-run: Use defaults (reset_staging=False). Tables are overwritten.
     - Enable skip_taxonomy_relationships: Set reset_staging=True AND skip_taxonomy_relationships=True.
@@ -137,7 +151,23 @@ class SECStageConfig(Config):
   """
 
   graph_id: str = "sec"  # Target graph ID
-  year: int | None = None  # Optional year filter
+  year: int | None = None  # Optional single year filter
+  start_year: int | None = None  # Optional start of year range (inclusive)
+  end_year: int | None = None  # Optional end of year range (inclusive)
+  reset_staging: bool = False  # Delete entire DuckDB staging database first
+  skip_taxonomy_relationships: bool = False  # Skip taxonomy structure tables
+
+
+class SECHistoricalStageConfig(Config):
+  """Configuration for SEC historical DuckDB staging (2009-2023).
+
+  Stages historical SEC data to a separate DuckDB database for the
+  sec_historical subgraph. Year range defaults are visible and overridable.
+  """
+
+  graph_id: str = "sec_historical"  # Target graph ID
+  start_year: int = SEC_START_YEAR  # Start of year range (default: 2009)
+  end_year: int = SEC_HISTORICAL_END_YEAR  # End of year range (default: 2023)
   reset_staging: bool = False  # Delete entire DuckDB staging database first
   skip_taxonomy_relationships: bool = False  # Skip taxonomy structure tables
 
@@ -191,62 +221,6 @@ class SECMaterializeConfig(Config):
   materialization_batch_size: int = Field(
     default=20_000_000, ge=1_000_000
   )  # Rows per batch
-
-
-class SECDirectCopyConfig(Config):
-  """Configuration for direct S3 → LadybugDB copy (bypasses DuckDB staging).
-
-  This approach:
-  1. Reads parquet files directly from S3 using LadybugDB's httpfs extension
-  2. Uses spill_to_disk=true for memory-efficient loading of large tables
-  3. Handles duplicates via ignore_errors=true (constraint violations skipped)
-
-  Benefits over DuckDB staging:
-  - No memory pressure from DuckDB merge/dedupe operations
-  - Proven to work at scale (200M+ rows)
-  - Simpler pipeline with fewer moving parts
-
-  Trade-offs:
-  - Relies on LadybugDB constraints for deduplication (not pre-deduped)
-  - May load some duplicate rows that get rejected at insert time
-  """
-
-  graph_id: str = "sec"  # Target graph ID
-  rebuild_graph: bool = True  # Rebuild LadybugDB before copy
-  skip_taxonomy_relationships: bool = False  # Skip taxonomy structure tables
-  skip_tables: list[str] = []  # Tables to skip
-  year: int | None = None  # Optional single year filter (None = all years)
-  start_year: int | None = None  # Start of year range (inclusive)
-  end_year: int | None = None  # End of year range (inclusive)
-  quarter_copy_timeout: int = 1800  # Timeout per quarter (seconds)
-  single_table_timeout: int = 3600  # Timeout for small tables (seconds)
-
-
-class SECIncrementalCopyConfig(Config):
-  """Configuration for incremental S3 → LadybugDB copy (bypasses DuckDB staging).
-
-  This is the preferred approach for daily incremental updates:
-  1. Copies directly from S3 parquet to LadybugDB
-  2. Uses ignore_errors=true to skip duplicates (constraint violations)
-  3. Only scans current quarter + previous quarter during 5-day overlap
-
-  Benefits over DuckDB incremental staging:
-  - No need to diff what's new in DuckDB vs LadybugDB
-  - Simpler and faster for daily updates
-  - LadybugDB handles deduplication via constraints
-
-  When to use this vs sec_duckdb_incremental_staged:
-  - Use this for daily incremental updates (simpler, faster)
-  - Use DuckDB staging for backfills or when you need DuckDB queries
-  """
-
-  graph_id: str = "sec"  # Target graph ID
-  year: int | None = None  # Year to copy (default: current year)
-  quarter: int | None = Field(
-    default=None, ge=1, le=4
-  )  # Quarter 1-4 (default: current)
-  skip_taxonomy_relationships: bool = False  # Skip taxonomy structure tables
-  copy_timeout: int = 600  # Timeout per table copy (seconds)
 
 
 # =============================================================================

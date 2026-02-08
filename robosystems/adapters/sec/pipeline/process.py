@@ -163,6 +163,9 @@ def sec_processed_filings(
       }
     )
 
+  if config.form_types:
+    context.log.info(f"Form type filter active: {config.form_types}")
+
   context.log.info(
     f"Processing batch of {len(files_to_process)} filings for {partition_key} "
     f"(batch_limit={config.batch_limit})"
@@ -178,6 +181,7 @@ def sec_processed_filings(
   # Track processing state
   succeeded = 0
   failed = 0
+  skipped = 0
   failed_ids: list[str] = []
   pending_flush: list[dict] = []  # [{...file_info}, ...]
   total_flushed = 0
@@ -295,9 +299,25 @@ def sec_processed_filings(
         s3_client=s3.client,
         raw_bucket=raw_bucket,
         metadata_loader=metadata_loader,
+        allowed_form_types=config.form_types,
       )
 
       filing_duration = time_module.time() - filing_start
+
+      # Handle skipped filings (form type filter)
+      if result.skipped_reason:
+        with db.get_session() as session:
+          sf = SourceFile.get_by_storage_key(storage_key, session)
+          if sf:
+            sf.status = "skipped"
+            sf.error_message = result.skipped_reason
+            session.commit()
+        skipped += 1
+        context.log.debug(
+          f"[{i + 1}/{len(files_to_process)}] Skipped: {file_partition_key} "
+          f"({result.skipped_reason})"
+        )
+        continue
 
       if result.success:
         # Write parquet files to disk (not memory accumulation)
@@ -342,7 +362,7 @@ def sec_processed_filings(
       if (i + 1) % 100 == 0:
         context.log.info(
           f"Progress: {i + 1}/{len(files_to_process)} processed, "
-          f"{succeeded} succeeded, {failed} failed"
+          f"{succeeded} succeeded, {failed} failed, {skipped} skipped"
         )
 
     # Flush all processed filings to S3 at end of batch
@@ -358,6 +378,7 @@ def sec_processed_filings(
 
   context.log.info(
     f"Complete: {succeeded}/{len(files_to_process)} filings succeeded, "
+    f"{skipped} skipped, {failed} failed, "
     f"{tables_uploaded} table files uploaded to partition filed={partition_date}"
   )
 
@@ -390,10 +411,12 @@ def sec_processed_filings(
       "filings_processed": len(files_to_process),
       "filings_succeeded": succeeded,
       "filings_failed": failed,
+      "filings_skipped": skipped,
       "filings_flushed": total_flushed,
       "failed_source_file_ids": failed_ids[:20],  # Limit to first 20
       "tables_uploaded": tables_uploaded,
       "batch_limit": config.batch_limit,
+      "form_types_filter": config.form_types,
       "remaining_pending": remaining_count,
     }
   )

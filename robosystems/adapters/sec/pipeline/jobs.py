@@ -52,13 +52,15 @@ from .configs import sec_quarter_partitions
 from .download import sec_raw_filings
 from .entity_update import sec_entity_incremental_update
 from .materialize import (
-  sec_graph_direct_copy,
-  sec_graph_incremental_copy,
   sec_graph_materialized,
-  sec_historical_direct_copy,
+  sec_historical_materialized,
 )
 from .process import sec_processed_filings
-from .stage import sec_duckdb_incremental_staged, sec_duckdb_staged
+from .stage import (
+  sec_duckdb_incremental_staged,
+  sec_duckdb_staged,
+  sec_historical_duckdb_staged,
+)
 
 # ============================================================================
 # SEC Pipeline Jobs
@@ -195,14 +197,13 @@ sec_staged_materialize_job = define_asset_job(
 # ============================================================================
 # Phase 3b: Incremental DuckDB Staging (Keep DuckDB in Sync)
 # ============================================================================
-# Incremental staging to DuckDB for daily SEC updates.
+# Incremental staging to DuckDB for nightly SEC updates.
 # INSERT new quarter files with dedup - only net new rows added.
 #
-# This keeps DuckDB ready for a full rebuild if needed, but we don't
-# run the expensive sec_graph_materialized (full rebuild) daily.
-# Instead, after staging, we run sec_incremental_copy for fast updates.
+# After staging, sec_stage_to_materialize_sensor triggers a full
+# LadybugDB rebuild from DuckDB (feasible because sec graph is 2024+ only).
 #
-# Chain: process → stage (this) → copy → S3 sync
+# Chain: process → stage (this) → materialize → entity update → S3 sync
 
 sec_incremental_stage_job = define_asset_job(
   name="sec_incremental_stage",
@@ -226,33 +227,21 @@ sec_incremental_stage_job = define_asset_job(
 
 
 # ============================================================================
-# Phase 3c: Direct S3 → LadybugDB Copy (Bypasses DuckDB Staging)
+# Phase 3c: Historical DuckDB Stage + Materialize (for sec_historical)
 # ============================================================================
-# Alternative to DuckDB staging for large-scale loads where DuckDB
-# merge operations would exceed memory limits.
-#
-# Benefits:
-# - No memory pressure from DuckDB merge/dedupe operations
-# - Proven to work at scale (200M+ rows)
-# - Uses LadybugDB's httpfs extension with spill_to_disk=true
-# - Simpler pipeline with fewer moving parts
-#
-# Trade-offs:
-# - Relies on LadybugDB constraints for deduplication (not pre-deduped)
-# - Must rebuild graph to avoid duplicates (rebuild_graph=true recommended)
+# Two-stage pipeline for sec_historical: DuckDB staging then LadybugDB materialization.
+# Uses the same decoupled pattern as the primary sec graph.
 
-sec_direct_copy_job = define_asset_job(
-  name="sec_direct_copy",
-  description="Direct S3 → LadybugDB copy (bypasses DuckDB staging).",
-  selection=AssetSelection.assets(sec_graph_direct_copy),
+sec_historical_stage_job = define_asset_job(
+  name="sec_historical_stage",
+  description="Stage SEC historical data (2009-2023) to DuckDB.",
+  selection=AssetSelection.assets(sec_historical_duckdb_staged),
   tags={
     "pipeline": "sec",
-    "phase": "direct_copy",
-    # Minimal profile: just orchestrating Graph API calls, no local compute
+    "phase": "historical_stage",
     "ecs/cpu": "256",
     "ecs/memory": "512",
     "ecs/ephemeral_storage": "21",
-    # On-demand to avoid interruptions (long-running orchestration)
     "ecs/run_task_kwargs": {
       "capacityProviderStrategy": [
         {"capacityProvider": "FARGATE", "weight": 1, "base": 1},
@@ -261,26 +250,16 @@ sec_direct_copy_job = define_asset_job(
   },
 )
 
-
-# ============================================================================
-# Phase 3c-hist: Historical Direct Copy (Load-Once for sec_historical)
-# ============================================================================
-# Loads historical SEC data (2009-2023) into the sec_historical subgraph.
-# This is a load-once operation; the historical graph is static after initial load.
-# Uses the same direct S3 → LadybugDB copy pipeline with year range filtering.
-
-sec_historical_direct_copy_job = define_asset_job(
-  name="sec_historical_copy",
-  description="Direct S3 → LadybugDB copy for sec_historical (2009-2023, load-once).",
-  selection=AssetSelection.assets(sec_historical_direct_copy),
+sec_historical_materialize_job = define_asset_job(
+  name="sec_historical_materialize",
+  description="Materialize sec_historical graph from DuckDB staging.",
+  selection=AssetSelection.assets(sec_historical_materialized),
   tags={
     "pipeline": "sec",
-    "phase": "historical_direct_copy",
-    # Minimal profile: just orchestrating Graph API calls, no local compute
+    "phase": "historical_materialize",
     "ecs/cpu": "256",
     "ecs/memory": "512",
     "ecs/ephemeral_storage": "21",
-    # On-demand to avoid interruptions (long-running orchestration)
     "ecs/run_task_kwargs": {
       "capacityProviderStrategy": [
         {"capacityProvider": "FARGATE", "weight": 1, "base": 1},
@@ -289,31 +268,18 @@ sec_historical_direct_copy_job = define_asset_job(
   },
 )
 
-
-# ============================================================================
-# Phase 3d: Incremental S3 → LadybugDB Copy (Preferred for Daily Updates)
-# ============================================================================
-# Preferred approach for daily incremental updates because:
-# - Copies directly from S3 parquet to LadybugDB (bypasses DuckDB)
-# - Uses ignore_errors=true to skip duplicates (constraint violations)
-# - No need to diff what's new in DuckDB vs LadybugDB
-# - Simpler and faster than DuckDB incremental staging
-#
-# Only scans current quarter + previous quarter during 5-day overlap.
-# Safe to run daily - duplicates are rejected by LadybugDB constraints.
-
-sec_incremental_copy_job = define_asset_job(
-  name="sec_incremental_copy",
-  description="Incremental S3 → LadybugDB copy (preferred for daily updates).",
-  selection=AssetSelection.assets(sec_graph_incremental_copy),
+sec_historical_staged_materialize_job = define_asset_job(
+  name="sec_historical_staged_materialize",
+  description="Full sec_historical pipeline: stage to DuckDB then materialize to LadybugDB.",
+  selection=AssetSelection.assets(
+    sec_historical_duckdb_staged, sec_historical_materialized
+  ),
   tags={
     "pipeline": "sec",
-    "mode": "incremental_copy",
-    # Minimal profile: just orchestrating Graph API calls, no local compute
+    "phase": "historical_full",
     "ecs/cpu": "256",
     "ecs/memory": "512",
     "ecs/ephemeral_storage": "21",
-    # On-demand to avoid interruptions (long-running orchestration)
     "ecs/run_task_kwargs": {
       "capacityProviderStrategy": [
         {"capacityProvider": "FARGATE", "weight": 1, "base": 1},
@@ -330,14 +296,14 @@ sec_incremental_copy_job = define_asset_job(
 # Entity nodes are unique in being mutable - company names, tickers,
 # filer categories can change over time.
 #
-# The incremental COPY only INSERTs new records - it cannot update existing
-# ones due to primary key constraints. This job uses Cypher MERGE to update
-# existing Entity nodes.
+# Materialization rebuilds the graph from DuckDB but cannot update existing
+# Entity nodes with changed attributes. This job uses Cypher MERGE to update
+# existing Entity nodes with latest values.
 #
 # Typically 50-200 entities change per quarter. MERGE is 40x slower than COPY,
 # but acceptable for small update volumes.
 #
-# Chain: process → stage → copy → entity_update → S3 sync
+# Chain: process → stage → materialize → entity_update → S3 sync
 
 sec_entity_update_job = define_asset_job(
   name="sec_entity_update",

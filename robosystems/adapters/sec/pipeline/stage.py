@@ -1,7 +1,8 @@
 """SEC DuckDB Staging Assets.
 
 This module contains the DuckDB staging assets:
-- sec_duckdb_staged: Full rebuild staging
+- sec_duckdb_staged: Full rebuild staging for sec (primary) graph
+- sec_historical_duckdb_staged: Full rebuild staging for sec_historical graph
 - sec_duckdb_incremental_staged: Incremental staging for current quarter
 """
 
@@ -9,7 +10,7 @@ from dagster import AssetExecutionContext, MaterializeResult, asset
 
 from robosystems.config import env
 
-from .configs import SECIncrementalStageConfig, SECStageConfig
+from .configs import SECHistoricalStageConfig, SECIncrementalStageConfig, SECStageConfig
 
 
 @asset(
@@ -33,7 +34,8 @@ def sec_duckdb_staged(
 
   Options:
   - reset_staging: Delete existing DuckDB file before staging (fresh start)
-  - year: Optional year filter for partial staging
+  - year: Optional single year filter for partial staging
+  - start_year/end_year: Optional year range filter
 
   Run with:
     uv run dagster asset materialize -m robosystems.dagster --select sec_duckdb_staged
@@ -51,6 +53,8 @@ def sec_duckdb_staged(
   context.log.info(f"Staging SEC data to DuckDB for graph: {config.graph_id}")
   if config.year:
     context.log.info(f"Year filter: {config.year}")
+  if config.start_year or config.end_year:
+    context.log.info(f"Year range: {config.start_year}-{config.end_year}")
   if config.reset_staging:
     context.log.info("Reset staging enabled - will delete DuckDB file first")
 
@@ -82,6 +86,8 @@ def sec_duckdb_staged(
     # Run full staging from all S3 parquet files
     result = await processor.stage_to_duckdb(
       year=config.year,
+      start_year=config.start_year,
+      end_year=config.end_year,
       reset_staging=config.reset_staging,
       skip_taxonomy_relationships=config.skip_taxonomy_relationships,
       progress_callback=dagster_progress,
@@ -118,6 +124,130 @@ def sec_duckdb_staged(
   return MaterializeResult(
     metadata={
       "graph_id": config.graph_id,
+      "status": result.status,
+      "tables_staged": len(result.table_names),
+      "table_names": result.table_names,
+      "total_files": result.total_files,
+      "total_rows": result.total_rows,
+      "duckdb_path": result.duckdb_path,
+      "duration_ms": result.duration_ms,
+    }
+  )
+
+
+@asset(
+  group_name="sec_pipeline",
+  description="Stage SEC historical data (2009-2023) to persistent DuckDB",
+  kinds={"duckdb"},
+  metadata={
+    "pipeline": "sec",
+    "stage": "historical_staging",
+    "decoupled": True,
+  },
+)
+def sec_historical_duckdb_staged(
+  context: AssetExecutionContext,
+  config: SECHistoricalStageConfig,
+) -> MaterializeResult:
+  """Stage SEC historical data (2009-2023) to a separate DuckDB database.
+
+  Creates a DuckDB staging database for the sec_historical subgraph,
+  containing annual reports (10-K, 20-F, 40-F) from 2009-2023.
+
+  Uses the same processed S3 parquet files as the primary sec graph,
+  but filtered to the historical year range. The sec_historical subgraph
+  is automatically created if it doesn't exist.
+
+  Run with:
+    uv run dagster asset materialize -m robosystems.dagster --select sec_historical_duckdb_staged
+
+  Returns:
+      MaterializeResult with staging statistics
+  """
+  import asyncio
+
+  from robosystems.adapters.sec import XBRLDuckDBGraphProcessor
+  from robosystems.operations.graph.shared_repository_service import (
+    ensure_shared_subgraph_exists,
+  )
+
+  graph_id = config.graph_id
+  start_year = config.start_year
+  end_year = config.end_year
+
+  context.log.info(
+    f"Staging SEC historical data to DuckDB: {graph_id} ({start_year}-{end_year})"
+  )
+  if config.reset_staging:
+    context.log.info("Reset staging enabled - will delete DuckDB file first")
+
+  # Boost DuckDB memory before staging (only applies to ladybug-shared tier)
+  try:
+    from robosystems.graph_api.client.factory import boost_graph_memory
+
+    boost_result = asyncio.run(boost_graph_memory(graph_id, target="duckdb"))
+    context.log.info(f"Memory boost: {boost_result.get('message', 'done')}")
+  except Exception as boost_err:
+    context.log.warning(f"Could not boost memory (non-fatal): {boost_err}")
+
+  processor = XBRLDuckDBGraphProcessor(graph_id=graph_id)
+
+  def dagster_progress(msg: str) -> None:
+    context.log.info(msg)
+
+  async def run_staging():
+    # Ensure the sec_historical subgraph exists (LadybugDB + PostgreSQL)
+    subgraph_result = await ensure_shared_subgraph_exists(
+      parent_repository_name="sec",
+      subgraph_name="historical",
+      description="SEC Historical Filings (2009-2023)",
+      created_by="system",
+      instance_id="local-dev" if env.ENVIRONMENT == "dev" else "ladybug-shared-prod",
+    )
+    context.log.info(f"Subgraph status: {subgraph_result.get('status')}")
+
+    # Run staging with year range filter
+    result = await processor.stage_to_duckdb(
+      start_year=start_year,
+      end_year=end_year,
+      reset_staging=config.reset_staging,
+      skip_taxonomy_relationships=config.skip_taxonomy_relationships,
+      progress_callback=dagster_progress,
+    )
+    return result
+
+  result = asyncio.run(run_staging())
+
+  # Release DuckDB memory after staging
+  try:
+    from robosystems.graph_api.client.factory import release_graph_memory
+
+    release_result = asyncio.run(release_graph_memory(graph_id, target="duckdb"))
+    context.log.info(f"Memory release: {release_result.get('message', 'done')}")
+  except Exception as release_err:
+    context.log.warning(f"Could not release memory (non-fatal): {release_err}")
+
+  if result.status == "error":
+    context.log.error(f"Staging failed: {result.error}")
+    return MaterializeResult(
+      metadata={
+        "graph_id": graph_id,
+        "status": "error",
+        "error": result.error,
+        "duration_ms": result.duration_ms,
+      }
+    )
+
+  context.log.info(
+    f"Historical staging complete: {len(result.table_names)} tables, "
+    f"{result.total_files} files, {result.duration_ms / 1000:.2f}s"
+  )
+
+  return MaterializeResult(
+    metadata={
+      "graph_id": graph_id,
+      "start_year": start_year,
+      "end_year": end_year,
       "status": result.status,
       "tables_staged": len(result.table_names),
       "table_names": result.table_names,
