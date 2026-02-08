@@ -9,13 +9,13 @@ from unittest.mock import MagicMock, patch
 
 from dagster import RunRequest, SkipReason, build_sensor_context
 
-from robosystems.dagster.sensors.sec import sec_processing_sensor
+from robosystems.adapters.sec.pipeline.sensors import sec_processing_sensor
 
 
 class TestSecProcessingSensor:
   """Tests for sec_processing_sensor (quarterly batch model)."""
 
-  @patch("robosystems.dagster.sensors.sec.env")
+  @patch("robosystems.adapters.sec.pipeline.sensors.env")
   def test_skips_in_dev_environment(self, mock_env):
     """Test sensor skips in dev environment."""
     mock_env.ENVIRONMENT = "dev"
@@ -28,7 +28,7 @@ class TestSecProcessingSensor:
     assert "Skipped in dev" in str(result[0])
 
   @patch("robosystems.database.session")
-  @patch("robosystems.dagster.sensors.sec.env")
+  @patch("robosystems.adapters.sec.pipeline.sensors.env")
   def test_skips_when_no_pending_files(self, mock_env, mock_session_factory):
     """Test sensor skips when no pending files exist."""
     mock_env.ENVIRONMENT = "prod"
@@ -50,7 +50,7 @@ class TestSecProcessingSensor:
     assert "No quarters with pending files" in str(result[0])
 
   @patch("robosystems.database.session")
-  @patch("robosystems.dagster.sensors.sec.env")
+  @patch("robosystems.adapters.sec.pipeline.sensors.env")
   def test_yields_run_request_per_quarter(self, mock_env, mock_session_factory):
     """Test sensor yields one RunRequest per quarter with pending files."""
     from dagster import DagsterInstance
@@ -95,7 +95,7 @@ class TestSecProcessingSensor:
     assert quarters_found == {"2024-Q1", "2024-Q2", "2024-Q3"}
 
   @patch("robosystems.database.session")
-  @patch("robosystems.dagster.sensors.sec.env")
+  @patch("robosystems.adapters.sec.pipeline.sensors.env")
   def test_shows_error_count_when_no_pending(self, mock_env, mock_session_factory):
     """Test sensor shows error count when no pending files but errors exist."""
     mock_env.ENVIRONMENT = "prod"
@@ -117,7 +117,7 @@ class TestSecProcessingSensor:
     assert "10 files in error state" in str(result[0])
 
   @patch("robosystems.database.session")
-  @patch("robosystems.dagster.sensors.sec.env")
+  @patch("robosystems.adapters.sec.pipeline.sensors.env")
   def test_handles_database_error(self, mock_env, mock_session_factory):
     """Test sensor handles database errors gracefully."""
     mock_env.ENVIRONMENT = "prod"
@@ -133,7 +133,7 @@ class TestSecProcessingSensor:
     assert "Database error" in str(result[0])
 
   @patch("robosystems.database.session")
-  @patch("robosystems.dagster.sensors.sec.env")
+  @patch("robosystems.adapters.sec.pipeline.sensors.env")
   def test_handles_malformed_partition_keys(self, mock_env, mock_session_factory):
     """Test sensor handles malformed partition keys gracefully."""
     from dagster import DagsterInstance
@@ -169,7 +169,7 @@ class TestSecProcessingSensor:
     assert quarters == {"2024-Q1", "2024-Q2"}
 
   @patch("robosystems.database.session")
-  @patch("robosystems.dagster.sensors.sec.env")
+  @patch("robosystems.adapters.sec.pipeline.sensors.env")
   def test_deduplicates_quarters(self, mock_env, mock_session_factory):
     """Test sensor deduplicates multiple files from the same quarter."""
     from dagster import DagsterInstance

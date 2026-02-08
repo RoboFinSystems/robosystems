@@ -14,6 +14,7 @@ Main Components:
 - ids: UUID generation and naming utilities
 """
 
+from .metadata import SECMetadataLoader
 from .consolidation import (
   atomic_s3_upload,
   consolidate_parquet_from_disk,
@@ -79,6 +80,8 @@ __all__ = [
   "ParquetWriter",
   # Filing processing
   "ProcessedFilingResult",
+  # Metadata loading
+  "SECMetadataLoader",
   "SchemaIngestConfig",
   "StagingResult",
   "TableInfo",

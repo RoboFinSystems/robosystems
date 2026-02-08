@@ -42,20 +42,22 @@ from dagster import (
   define_asset_job,
 )
 
-from robosystems.dagster.assets import (
-  sec_backup,
-  sec_duckdb_incremental_staged,
-  sec_duckdb_staged,
-  sec_entity_incremental_update,
-  sec_graph_direct_copy,
-  sec_graph_incremental_copy,
-  sec_graph_materialized,
-  sec_processed_filings,
-  sec_quarter_partitions,
-  sec_raw_filings,
+from robosystems.dagster.assets.shared_repositories import (
   shared_replicas_refreshed,
   shared_repository_s3_published,
 )
+
+from .backup import sec_backup
+from .configs import sec_quarter_partitions
+from .download import sec_raw_filings
+from .entity_update import sec_entity_incremental_update
+from .materialize import (
+  sec_graph_direct_copy,
+  sec_graph_incremental_copy,
+  sec_graph_materialized,
+)
+from .process import sec_processed_filings
+from .stage import sec_duckdb_incremental_staged, sec_duckdb_staged
 
 # ============================================================================
 # SEC Pipeline Jobs

@@ -9,30 +9,43 @@ sec/
 ├── README.md                    # This file
 ├── __init__.py                  # Adapter exports
 ├── config.py                    # XBRL processing configuration
-├── metadata.py                  # SECMetadataLoader for filer/report metadata
+├── manifest.py                  # Shared repository manifest
 ├── client/                      # API clients
 │   ├── edgar.py                 # SECClient - EDGAR API
 │   ├── arelle.py                # ArelleClient - XBRL processing
 │   ├── downloader.py            # SECDownloader - bulk file downloads
 │   └── efts.py                  # EFTS API for filing discovery
-└── processors/                  # Data transformation
-    ├── __init__.py              # Processor exports
-    ├── constants.py             # Shared constants (SHARED_NODE_TABLES, etc.)
-    ├── xbrl_graph.py            # XBRLGraphProcessor - filing to parquet
-    ├── processing.py            # Single filing processing helpers
-    ├── consolidation.py         # Parquet consolidation and S3 merge
-    ├── schema.py                # Schema adapter and config generator
-    ├── dataframe.py             # DataFrame management
-    ├── parquet.py               # Parquet file output
-    ├── textblock.py             # S3 externalization for large text
-    ├── ids.py                   # ID generation and naming utilities
-    └── ingestion/               # DuckDB/LadybugDB ingestion
-        ├── __init__.py          # Ingestion exports
-        ├── models.py            # Result models and constants
-        ├── staging.py           # DuckDBStager - S3 to DuckDB
-        ├── materializer.py      # LadybugMaterializer - DuckDB to graph
-        ├── direct_copy.py       # LadybugDirectCopier - S3 to graph
-        └── processor.py         # XBRLDuckDBGraphProcessor (unified)
+├── processors/                  # Data transformation
+│   ├── __init__.py              # Processor exports
+│   ├── metadata.py              # SECMetadataLoader for filer/report metadata
+│   ├── constants.py             # Shared constants (SHARED_NODE_TABLES, etc.)
+│   ├── xbrl_graph.py            # XBRLGraphProcessor - filing to parquet
+│   ├── processing.py            # Single filing processing helpers
+│   ├── consolidation.py         # Parquet consolidation and S3 merge
+│   ├── schema.py                # Schema adapter and config generator
+│   ├── dataframe.py             # DataFrame management
+│   ├── parquet.py               # Parquet file output
+│   ├── textblock.py             # S3 externalization for large text
+│   ├── ids.py                   # ID generation and naming utilities
+│   └── ingestion/               # DuckDB/LadybugDB ingestion
+│       ├── __init__.py          # Ingestion exports
+│       ├── models.py            # Result models and constants
+│       ├── staging.py           # DuckDBStager - S3 to DuckDB
+│       ├── materializer.py      # LadybugMaterializer - DuckDB to graph
+│       ├── direct_copy.py       # LadybugDirectCopier - S3 to graph
+│       └── processor.py         # XBRLDuckDBGraphProcessor (unified)
+└── pipeline/                    # Dagster orchestration
+    ├── __init__.py              # get_dagster_components() discovery
+    ├── README.md                # Pipeline documentation
+    ├── configs.py               # Run configurations
+    ├── download.py              # sec_raw_filings asset
+    ├── process.py               # sec_processed_filings asset
+    ├── stage.py                 # DuckDB staging assets
+    ├── materialize.py           # LadybugDB materialization assets
+    ├── entity_update.py         # Entity incremental update asset
+    ├── backup.py                # Backup asset
+    ├── jobs.py                  # 12 SEC job definitions
+    └── sensors.py               # 6 sensors + 1 schedule
 ```
 
 ## Key Components
@@ -93,7 +106,7 @@ processor.process()  # Outputs parquet files
 
 ### Batch Ingestion (via Dagster)
 
-The adapter is primarily used through Dagster assets. See [dagster/assets/sec/](../../dagster/assets/sec/README.md) for pipeline documentation.
+The adapter is primarily used through Dagster assets. See [pipeline/](pipeline/README.md) for pipeline documentation.
 
 ```bash
 # Load filings for a company
@@ -132,5 +145,5 @@ Key configuration in `config.py`:
 
 ## Related Documentation
 
-- [Dagster SEC Assets](../../dagster/assets/sec/README.md) - Pipeline orchestration
+- [SEC Pipeline](pipeline/README.md) - Dagster pipeline orchestration
 - [Schemas](../../schemas/README.md) - Graph schema definitions

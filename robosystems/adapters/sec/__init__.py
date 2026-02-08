@@ -4,8 +4,8 @@ from datetime import UTC, datetime
 
 from robosystems.adapters.sec.client import SEC_BASE_URL, SECClient, enable_test_mode
 from robosystems.adapters.sec.client.arelle import ArelleClient
-from robosystems.adapters.sec.metadata import SECMetadataLoader
 from robosystems.adapters.sec.processors import (
+  SECMetadataLoader,
   XBRL_GRAPH_PROCESSOR_VERSION,
   IngestTableInfo,
   MaterializeResult,
