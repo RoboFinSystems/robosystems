@@ -14,8 +14,8 @@ from dagster import (
 )
 from sqlalchemy import and_
 
-from robosystems.adapters.sec import SECMetadataLoader
 from robosystems.adapters.sec.processors import (
+  SECMetadataLoader,
   atomic_s3_upload,
   consolidate_parquet_from_disk,
   merge_with_existing_s3,

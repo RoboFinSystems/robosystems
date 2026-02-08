@@ -37,14 +37,15 @@ from dagster import (
 )
 
 from robosystems.config import env
-from robosystems.dagster.jobs.sec import (
+from robosystems.dagster.jobs.shared_repository import shared_repository_s3_sync_job
+
+from .jobs import (
   sec_download_job,
   sec_incremental_copy_job,
   sec_incremental_stage_job,
   sec_materialize_job,
   sec_process_job,
 )
-from robosystems.dagster.jobs.shared_repository import shared_repository_s3_sync_job
 
 
 @sensor(
@@ -324,7 +325,7 @@ def sec_incremental_download_schedule(context):
 
   Enable via: SEC_INCREMENTAL_PIPELINE_ENABLED=true
   """
-  from robosystems.dagster.assets import SECDownloadConfig
+  from robosystems.adapters.sec.pipeline.configs import SECDownloadConfig
 
   quarters = _get_quarters_to_scan()
   context.log.info(f"Incremental download for quarters: {quarters}")

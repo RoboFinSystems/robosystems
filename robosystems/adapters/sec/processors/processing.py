@@ -14,7 +14,7 @@ from io import BytesIO
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-  from robosystems.adapters.sec.metadata import SECMetadataLoader
+  from robosystems.adapters.sec.processors.metadata import SECMetadataLoader
 
 # Import from specific modules to avoid circular imports
 from robosystems.adapters.sec.client.edgar import SEC_BASE_URL

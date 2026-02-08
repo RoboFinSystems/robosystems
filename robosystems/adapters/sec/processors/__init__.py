@@ -50,6 +50,7 @@ from .ingestion import (
   TableInfo,
   XBRLDuckDBGraphProcessor,
 )
+from .metadata import SECMetadataLoader
 from .parquet import ParquetWriter
 from .processing import ProcessedFilingResult, process_single_filing_to_memory
 from .schema import (
@@ -79,6 +80,8 @@ __all__ = [
   "ParquetWriter",
   # Filing processing
   "ProcessedFilingResult",
+  # Metadata loading
+  "SECMetadataLoader",
   "SchemaIngestConfig",
   "StagingResult",
   "TableInfo",

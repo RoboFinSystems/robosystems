@@ -1,41 +1,37 @@
 # Dagster Orchestration
 
-This directory contains the Dagster-based orchestration system for all scheduled and event-driven tasks.
+This directory contains platform-level Dagster orchestration: billing, infrastructure, provisioning, graph operations, and shared repository management. Adapter-specific pipelines (assets, jobs, sensors, schedules) live inside their adapter packages and expose a `get_dagster_components()` function. `definitions.py` collects adapter pipelines alongside platform components.
 
 ## Directory Structure
 
 ```
 dagster/
 ├── README.md              # This file
-├── __init__.py            # Module exports
-├── definitions.py         # Main Dagster entry point
+├── __init__.py            # Lazy module exports (PEP 562)
+├── definitions.py         # Collector: platform + adapter pipelines
 ├── resources/             # Shared infrastructure resources
 │   ├── database.py        # PostgreSQL resource
 │   ├── storage.py         # S3 resource
 │   └── graph.py           # LadybugDB graph resource
-├── jobs/                  # Job definitions
-│   ├── billing.py         # Credit allocation, storage billing
+├── jobs/                  # Platform job definitions
+│   ├── billing.py         # Credit allocation, usage reports
 │   ├── infrastructure.py  # Auth cleanup, health checks, instance monitoring
 │   ├── graph.py           # Graph operations (create, backup, restore)
 │   ├── provisioning.py    # Repository and graph provisioning
-│   ├── sec.py             # SEC EDGAR pipeline jobs
-│   ├── shared_repository.py  # Shared repository S3 sync
+│   ├── shared_repository.py  # Shared repository S3 sync + replicas
 │   └── notifications.py   # Email notification jobs
-├── sensors/               # Event-driven triggers
-│   ├── provisioning.py    # Subscription/repository provisioning sensors
-│   └── sec.py             # SEC pipeline sensors and schedules
-└── assets/                # Data pipeline assets
+├── sensors/               # Platform sensors
+│   └── provisioning.py    # Subscription/repository provisioning sensors
+└── assets/                # Platform assets
     ├── __init__.py        # Asset exports
     ├── graphs.py          # User graph operation assets
-    └── sec/               # SEC EDGAR pipeline assets
-        ├── README.md      # SEC pipeline documentation
-        ├── configs.py     # Configuration classes
-        ├── download.py    # sec_raw_filings asset
-        ├── process.py     # sec_processed_filings asset
-        ├── stage.py       # DuckDB staging assets
-        ├── materialize.py # LadybugDB materialization assets
-        ├── entity_update.py  # Entity incremental update asset
-        └── backup.py      # SEC backup asset
+    └── shared_repositories/  # S3 publish + replica refresh (all shared repos)
+```
+
+Adapter pipelines live in their own packages:
+```
+adapters/sec/pipeline/     # SEC EDGAR pipeline (12 jobs, 9 assets, 6 sensors, 1 schedule)
+adapters/custom_*/pipeline/ # Fork-friendly custom adapter pipelines
 ```
 
 ## Quick Start
@@ -55,9 +51,9 @@ uv run dagster dev -m robosystems.dagster
 # Run a specific job
 uv run dagster job execute -m robosystems.dagster -j monthly_credit_allocation_job
 
-# Run with config
-uv run dagster job execute -m robosystems.dagster -j daily_storage_billing_job \
-  -c '{"ops": {"bill_storage_credits": {"config": {"target_date": "2025-12-15"}}}}'
+# Run SEC download with config
+uv run dagster job execute -m robosystems.dagster -j sec_download_job \
+  -c '{"ops": {"sec_raw_filings": {"config": {"ticker": "NVDA", "year": 2025}}}}'
 ```
 
 ## Jobs Overview
@@ -67,8 +63,6 @@ uv run dagster job execute -m robosystems.dagster -j daily_storage_billing_job \
 | Job                             | Schedule               | Description                                   |
 | ------------------------------- | ---------------------- | --------------------------------------------- |
 | `monthly_credit_allocation_job` | 1st of month, midnight | Process overages and allocate monthly credits |
-| `daily_storage_billing_job`     | Daily at 2 AM          | Bill storage usage credits                    |
-| `hourly_usage_collection_job`   | Every hour at :05      | Collect storage snapshots                     |
 | `monthly_usage_report_job`      | 2nd of month, 6 AM     | Generate usage reports                        |
 
 ### Infrastructure Jobs
@@ -83,22 +77,11 @@ uv run dagster job execute -m robosystems.dagster -j daily_storage_billing_job \
 | `volume_registry_cleanup_job`    | Every hour      | Clean orphaned volume entries     |
 | `full_instance_maintenance_job`  | Daily at 3 AM   | Full instance maintenance cycle   |
 
-### SEC Pipeline Jobs
+### Adapter Pipeline Jobs
 
-| Job                          | Purpose                                      |
-| ---------------------------- | -------------------------------------------- |
-| `sec_download_job`           | Download raw XBRL filings to S3              |
-| `sec_process_job`            | Process filings to consolidated parquet      |
-| `sec_stage_job`              | Stage parquet to persistent DuckDB           |
-| `sec_materialize_job`        | Materialize from DuckDB to LadybugDB         |
-| `sec_staged_materialize_job` | Full pipeline: stage + materialize           |
-| `sec_direct_copy_job`        | Direct S3 → LadybugDB (bypasses DuckDB)      |
-| `sec_incremental_copy_job`   | Incremental S3 → LadybugDB (daily updates)   |
-| `sec_incremental_stage_job`  | Incremental DuckDB staging                   |
-| `sec_entity_update_job`      | Update mutable Entity attributes             |
-| `sec_backup_job`             | Create downloadable SEC database backup      |
+Adapter-specific jobs live in their adapter packages. See each adapter's pipeline README for details:
 
-See [`assets/sec/README.md`](assets/sec/README.md) for detailed SEC pipeline documentation.
+- **SEC**: [`adapters/sec/pipeline/README.md`](../adapters/sec/pipeline/README.md) — 12 jobs (download, process, stage, materialize, incremental, backup)
 
 ### Graph Operations Jobs
 
@@ -139,17 +122,11 @@ Sensors watch for conditions and trigger jobs:
 | `pending_subscription_sensor`| `provision_graph_job`     | Provisions graphs for new subscriptions |
 | `pending_repository_sensor`  | `provision_repository_job`| Provisions shared repository access  |
 
-### SEC Pipeline Sensors
+### Adapter Pipeline Sensors
 
-| Sensor/Schedule                           | Triggers                       | Purpose                              |
-| ----------------------------------------- | ------------------------------ | ------------------------------------ |
-| `sec_processing_sensor`                   | `sec_process_job`              | Discovers pending files, triggers batch processing |
-| `sec_post_materialize_s3_sync_sensor`     | `shared_repository_s3_sync_job`  | Syncs to S3 after materialization      |
-| `sec_incremental_download_schedule`       | `sec_download_job`             | 9pm EST weekdays                     |
-| `sec_download_to_process_sensor`          | `sec_process_job`              | Chains download → process            |
-| `sec_incremental_staging_sensor`          | `sec_incremental_stage_job`    | Chains process → stage               |
-| `sec_stage_to_copy_sensor`                | `sec_incremental_copy_job`     | Chains stage → copy                  |
-| `sec_incremental_post_ingest_s3_sync_sensor`  | `shared_repository_s3_sync_job`  | Chains copy → S3 sync            |
+Adapter-specific sensors and schedules live in their adapter packages:
+
+- **SEC**: 6 sensors + 1 schedule — see [`adapters/sec/pipeline/README.md`](../adapters/sec/pipeline/README.md)
 
 All sensors start **STOPPED** by default. Enable in Dagster UI when ready for automated processing.
 
@@ -169,18 +146,26 @@ def my_op(context, db: DatabaseResource, s3: S3Resource):
     s3.upload_file(file_obj, "path/to/file.parquet")
 ```
 
-## Custom Data Sources (Fork-Friendly)
+## Adding Adapter Pipelines
 
-When forking RoboSystems, add custom data pipelines in the `custom_*` namespace:
+`definitions.py` collects adapter pipelines via the `get_dagster_components()` discovery pattern:
 
-1. Create adapter: `adapters/custom_myservice/` (client + processors)
-2. Create assets: `dagster/assets/custom_myservice.py`
-3. Register in `definitions.py`
+```python
+# dagster/definitions.py
+from robosystems.adapters.sec.pipeline import get_dagster_components as sec_pipeline
 
-The `custom_*` namespace ensures upstream updates never conflict with your additions. See [Adapters README](../adapters/README.md#fork-friendly-custom-adapters) for details.
+sec = sec_pipeline()
+all_assets = [*platform_assets, *sec["assets"]]
+all_jobs = [*platform_jobs, *sec["jobs"]]
+
+# === FORK: Add your adapter pipelines here ===
+# from robosystems.adapters.custom_erp.pipeline import get_dagster_components as erp_pipeline
+```
+
+Each adapter's `pipeline/__init__.py` returns `{"assets": [...], "jobs": [...], "sensors": [...], "schedules": [...]}`. See [Adapters README](../adapters/README.md#adding-new-adapters) for the full pattern.
 
 ## Related Documentation
 
 - [Dagster Documentation](https://docs.dagster.io/) - Official Dagster docs
-- [Adapters README](../adapters/README.md) - External service integrations
-- [SEC Pipeline README](assets/sec/README.md) - SEC EDGAR pipeline details
+- [Adapters README](../adapters/README.md) - Adapter architecture and extensibility
+- [SEC Pipeline README](../adapters/sec/pipeline/README.md) - SEC EDGAR pipeline details

@@ -4,8 +4,10 @@ Jobs define the execution units that can be scheduled or triggered:
 - Billing jobs: Credit allocation, storage billing, usage collection
 - Infrastructure jobs: Auth cleanup, health checks
 - Provisioning jobs: Graph and repository provisioning
-- SEC jobs: XBRL pipeline processing (download, process, materialize)
 - Shared Repository jobs: S3 sync for replicas, replica management
+
+SEC pipeline jobs have moved to robosystems.adapters.sec.pipeline.jobs
+and are collected via get_dagster_components() in definitions.py.
 """
 
 from robosystems.dagster.jobs.billing import (
@@ -26,20 +28,6 @@ from robosystems.dagster.jobs.provisioning import (
   provision_graph_job,
   provision_repository_job,
 )
-from robosystems.dagster.jobs.sec import (
-  sec_backup_job,
-  sec_direct_copy_job,
-  sec_download_job,
-  sec_entity_update_job,
-  sec_incremental_copy_job,
-  sec_incremental_stage_job,
-  sec_materialize_job,
-  sec_process_job,
-  sec_replica_refresh_job,
-  sec_s3_publish_job,
-  sec_stage_job,
-  sec_staged_materialize_job,
-)
 from robosystems.dagster.jobs.shared_repository import (
   shared_repository_refresh_replicas_job,
   shared_repository_s3_sync_job,
@@ -55,18 +43,6 @@ __all__ = [
   "process_stripe_webhook_job",
   "provision_graph_job",
   "provision_repository_job",
-  "sec_backup_job",
-  "sec_direct_copy_job",
-  "sec_download_job",
-  "sec_entity_update_job",
-  "sec_incremental_copy_job",
-  "sec_incremental_stage_job",
-  "sec_materialize_job",
-  "sec_process_job",
-  "sec_replica_refresh_job",
-  "sec_s3_publish_job",
-  "sec_stage_job",
-  "sec_staged_materialize_job",
   "send_email_job",
   "shared_repository_refresh_replicas_job",
   "shared_repository_s3_sync_job",
