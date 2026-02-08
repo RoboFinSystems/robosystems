@@ -40,6 +40,8 @@ Usage:
 from robosystems.adapters.sec.pipeline.backup import sec_backup
 from robosystems.adapters.sec.pipeline.configs import (
   SEC_FORM_TYPE_BATCHES,
+  SEC_HISTORICAL_END_YEAR,
+  SEC_PRIMARY_START_YEAR,
   SEC_QUARTERS,
   SEC_START_YEAR,
   SECBackupConfig,
@@ -62,6 +64,7 @@ from robosystems.adapters.sec.pipeline.jobs import (
   sec_direct_copy_job,
   sec_download_job,
   sec_entity_update_job,
+  sec_historical_direct_copy_job,
   sec_incremental_copy_job,
   sec_incremental_stage_job,
   sec_materialize_job,
@@ -75,6 +78,7 @@ from robosystems.adapters.sec.pipeline.materialize import (
   sec_graph_direct_copy,
   sec_graph_incremental_copy,
   sec_graph_materialized,
+  sec_historical_direct_copy,
 )
 from robosystems.adapters.sec.pipeline.process import sec_processed_filings
 from robosystems.adapters.sec.pipeline.sensors import (
@@ -108,6 +112,7 @@ def get_dagster_components():
       sec_graph_incremental_copy,
       sec_entity_incremental_update,
       sec_graph_materialized,
+      sec_historical_direct_copy,
       sec_backup,
     ],
     "jobs": [
@@ -120,6 +125,7 @@ def get_dagster_components():
       sec_incremental_copy_job,
       sec_entity_update_job,
       sec_direct_copy_job,
+      sec_historical_direct_copy_job,
       sec_backup_job,
       sec_s3_publish_job,
       sec_replica_refresh_job,
@@ -140,6 +146,8 @@ def get_dagster_components():
 
 __all__ = [
   "SEC_FORM_TYPE_BATCHES",
+  "SEC_HISTORICAL_END_YEAR",
+  "SEC_PRIMARY_START_YEAR",
   "SEC_QUARTERS",
   "SEC_START_YEAR",
   "SECBackupConfig",
@@ -164,6 +172,8 @@ __all__ = [
   "sec_graph_direct_copy",
   "sec_graph_incremental_copy",
   "sec_graph_materialized",
+  "sec_historical_direct_copy",
+  "sec_historical_direct_copy_job",
   "sec_incremental_copy_job",
   "sec_incremental_download_schedule",
   "sec_incremental_post_ingest_s3_sync_sensor",

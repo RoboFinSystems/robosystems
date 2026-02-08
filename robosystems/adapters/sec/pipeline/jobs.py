@@ -55,6 +55,7 @@ from .materialize import (
   sec_graph_direct_copy,
   sec_graph_incremental_copy,
   sec_graph_materialized,
+  sec_historical_direct_copy,
 )
 from .process import sec_processed_filings
 from .stage import sec_duckdb_incremental_staged, sec_duckdb_staged
@@ -247,6 +248,34 @@ sec_direct_copy_job = define_asset_job(
   tags={
     "pipeline": "sec",
     "phase": "direct_copy",
+    # Minimal profile: just orchestrating Graph API calls, no local compute
+    "ecs/cpu": "256",
+    "ecs/memory": "512",
+    "ecs/ephemeral_storage": "21",
+    # On-demand to avoid interruptions (long-running orchestration)
+    "ecs/run_task_kwargs": {
+      "capacityProviderStrategy": [
+        {"capacityProvider": "FARGATE", "weight": 1, "base": 1},
+      ],
+    },
+  },
+)
+
+
+# ============================================================================
+# Phase 3c-hist: Historical Direct Copy (Load-Once for sec_historical)
+# ============================================================================
+# Loads historical SEC data (2009-2023) into the sec_historical subgraph.
+# This is a load-once operation; the historical graph is static after initial load.
+# Uses the same direct S3 → LadybugDB copy pipeline with year range filtering.
+
+sec_historical_direct_copy_job = define_asset_job(
+  name="sec_historical_copy",
+  description="Direct S3 → LadybugDB copy for sec_historical (2009-2023, load-once).",
+  selection=AssetSelection.assets(sec_historical_direct_copy),
+  tags={
+    "pipeline": "sec",
+    "phase": "historical_direct_copy",
     # Minimal profile: just orchestrating Graph API calls, no local compute
     "ecs/cpu": "256",
     "ecs/memory": "512",

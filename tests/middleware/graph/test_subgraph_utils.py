@@ -66,17 +66,15 @@ class TestSubgraphValidation:
 
   def test_validate_parent_graph_id(self):
     """Test parent graph ID validation."""
-    # Valid parent IDs (only user graphs can be parents)
+    # Valid parent IDs - user graphs
     assert validate_parent_graph_id("kg5f2e5e0da65d45d69645") is True
     assert validate_parent_graph_id("kg1234567890abcdef") is True  # 16 chars
     assert (
       validate_parent_graph_id("kg1234567890abcdef1234567890abcdef") is True
     )  # Longer
 
-    # Invalid parent IDs - shared repositories CANNOT be parents
-    assert validate_parent_graph_id("sec") is False  # Shared repository
-    assert validate_parent_graph_id("industry") is False  # Shared repository
-    assert validate_parent_graph_id("economic") is False  # Shared repository
+    # Valid parent IDs - shared repositories can be parents (platform-managed subgraphs)
+    assert validate_parent_graph_id("sec") is True  # Shared repository
 
     # Invalid parent IDs - other reasons
     assert (
@@ -149,6 +147,7 @@ class TestGraphHierarchy:
     """Test subgraph detection."""
     assert is_subgraph("kg5f2e5e0da65d45d69645_dev") is True
     assert is_subgraph("kg5f2e5e0da65d45d69645_staging") is True
+    assert is_subgraph("sec_historical") is True  # Shared repo subgraph
     assert is_subgraph("kg5f2e5e0da65d45d69645") is False
     assert is_subgraph("sec") is False
 
@@ -156,12 +155,48 @@ class TestGraphHierarchy:
     """Test parent graph detection."""
     assert is_parent_graph("kg5f2e5e0da65d45d69645") is True
     assert is_parent_graph("kg1234567890abcdef") is True
-    # Shared repositories cannot be parents
-    assert is_parent_graph("sec") is False
-    assert is_parent_graph("industry") is False
+    # Shared repositories CAN be parents (platform-managed subgraphs)
+    assert is_parent_graph("sec") is True
     # Subgraphs cannot be parents
     assert is_parent_graph("kg5f2e5e0da65d45d69645_dev") is False
+    assert is_parent_graph("sec_historical") is False  # Is a subgraph
     assert is_parent_graph("invalid") is False
+
+
+class TestSharedRepoSubgraphs:
+  """Test shared repository subgraph support."""
+
+  def test_parse_shared_repo_subgraph(self):
+    """Test parsing a shared repo subgraph ID."""
+    result = parse_subgraph_id("sec_historical")
+
+    assert result is not None
+    assert isinstance(result, SubgraphInfo)
+    assert result.parent_graph_id == "sec"
+    assert result.subgraph_name == "historical"
+    assert result.graph_id == "sec_historical"
+    assert result.database_name == "sec_historical"
+
+  def test_construct_shared_repo_subgraph(self):
+    """Test constructing a shared repo subgraph ID."""
+    result = construct_subgraph_id("sec", "historical")
+    assert result == "sec_historical"
+
+  def test_split_shared_repo_subgraph(self):
+    """Test splitting a shared repo subgraph ID."""
+    parent, subgraph = split_graph_hierarchy("sec_historical")
+    assert parent == "sec"
+    assert subgraph == "historical"
+
+  def test_shared_repo_plain_is_not_subgraph(self):
+    """Test that a plain shared repo ID is not detected as a subgraph."""
+    assert parse_subgraph_id("sec") is None
+    assert is_subgraph("sec") is False
+
+  def test_non_shared_repo_with_underscore_is_not_subgraph(self):
+    """Test that an underscore in a non-shared ID doesn't match."""
+    assert parse_subgraph_id("invalid_dev") is None
+    assert is_subgraph("invalid_dev") is False
 
 
 class TestUniqueNameGeneration:

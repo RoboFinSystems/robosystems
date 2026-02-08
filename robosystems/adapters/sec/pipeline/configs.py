@@ -18,6 +18,10 @@ from robosystems.config.constants import SEC_PROCESS_BATCH_LIMIT
 # Start year for SEC data loading (XBRL filings began 2009)
 SEC_START_YEAR = 2009
 
+# Tiered graph boundaries
+SEC_HISTORICAL_END_YEAR = 2023  # sec_historical: 2009-2023
+SEC_PRIMARY_START_YEAR = 2024  # sec (primary): 2024+
+
 # Form type batches for EFTS queries to avoid 10k result limit
 # Q2 (proxy season) can exceed 10k when all forms are included
 # Batch 1: Core financial statements
@@ -211,7 +215,9 @@ class SECDirectCopyConfig(Config):
   rebuild_graph: bool = True  # Rebuild LadybugDB before copy
   skip_taxonomy_relationships: bool = False  # Skip taxonomy structure tables
   skip_tables: list[str] = []  # Tables to skip
-  year: int | None = None  # Optional year filter (None = all years)
+  year: int | None = None  # Optional single year filter (None = all years)
+  start_year: int | None = None  # Start of year range (inclusive)
+  end_year: int | None = None  # End of year range (inclusive)
   quarter_copy_timeout: int = 1800  # Timeout per quarter (seconds)
   single_table_timeout: int = 3600  # Timeout for small tables (seconds)
 

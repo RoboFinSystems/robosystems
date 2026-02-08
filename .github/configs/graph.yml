@@ -235,7 +235,7 @@ production:
       tier: ladybug-shared
 
       # Repository configuration
-      max_subgraphs: null # N/A - repositories don't use subgraphs
+      max_subgraphs: 10 # Platform-managed subgraphs only (e.g., sec_historical)
 
       # Resource limits
       api_rate_multiplier: null # Separate rate limiting for public access
@@ -489,7 +489,7 @@ staging:
       stack_suffix: LadybugShared
       tier: ladybug-shared
 
-      max_subgraphs: null
+      max_subgraphs: 10 # Platform-managed subgraphs only
       api_rate_multiplier: null
 
       copy_operations:

@@ -104,14 +104,21 @@ class LadybugDirectCopier:
     self.bucket = env.SHARED_PROCESSED_BUCKET
     self.source_prefix = source_prefix or "sec/processed"
 
-  async def discover_quarterly_partitions(self, year: int | None = None) -> list[str]:
+  async def discover_quarterly_partitions(
+    self,
+    year: int | None = None,
+    start_year: int | None = None,
+    end_year: int | None = None,
+  ) -> list[str]:
     """
     Discover all filed= quarterly partitions from S3.
 
     Used for quarter-by-quarter batching of large tables during direct copy.
 
     Args:
-        year: Optional year filter. If provided, only returns quarters from that year.
+        year: Optional single year filter. If provided, only returns quarters from that year.
+        start_year: Optional start of year range (inclusive).
+        end_year: Optional end of year range (inclusive).
 
     Returns:
         Sorted list of quarterly partition keys (e.g., ["2024-Q1", "2024-Q2", ...])
@@ -131,9 +138,16 @@ class LadybugDirectCopier:
             # Only accept quarterly format (YYYY-QN)
             if "-Q" not in filed_part:
               continue
-            # Filter by year if specified
+            # Filter by single year if specified
             if year and not filed_part.startswith(str(year)):
               continue
+            # Filter by year range if specified
+            if start_year or end_year:
+              partition_year = int(filed_part.split("-")[0])
+              if start_year and partition_year < start_year:
+                continue
+              if end_year and partition_year > end_year:
+                continue
             partitions.append(filed_part)
 
     partitions.sort()
@@ -404,6 +418,8 @@ class LadybugDirectCopier:
     self,
     client: "GraphClient",
     year: int | None = None,
+    start_year: int | None = None,
+    end_year: int | None = None,
     skip_taxonomy_relationships: bool = False,
     skip_tables: list[str] | None = None,
     existing_table_names: set[str] | None = None,
@@ -415,7 +431,9 @@ class LadybugDirectCopier:
 
     Args:
         client: Graph API client
-        year: Optional year filter
+        year: Optional single year filter
+        start_year: Optional start of year range (inclusive)
+        end_year: Optional end of year range (inclusive)
         skip_taxonomy_relationships: If True, skip taxonomy structure tables
         skip_tables: Optional list of table names to skip
         existing_table_names: Optional set of tables that exist in the database
@@ -439,7 +457,9 @@ class LadybugDirectCopier:
     log_progress(f"Copying {len(ordered_tables)} tables from S3 to LadybugDB...")
 
     # Discover quarterly partitions for batching
-    quarterly_partitions = await self.discover_quarterly_partitions(year=year)
+    quarterly_partitions = await self.discover_quarterly_partitions(
+      year=year, start_year=start_year, end_year=end_year
+    )
     log_progress(f"Found {len(quarterly_partitions)} quarterly partitions")
 
     # Copy each table

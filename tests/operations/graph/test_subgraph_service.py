@@ -234,14 +234,14 @@ class TestSubgraphService:
 
   @pytest.mark.asyncio
   async def test_create_subgraph_shared_repository_parent(self, service):
-    """Test that shared repositories cannot have subgraphs."""
+    """Test that shared repos require platform_managed=True for subgraphs."""
+    # Without platform_managed, shared repos are blocked
     with pytest.raises(ValueError) as exc_info:
       await service.create_subgraph_database(
         parent_graph_id="sec", subgraph_name="test"
       )
 
-    # Shared repositories fail validation as invalid parent IDs
-    assert "Invalid parent graph ID" in str(exc_info.value)
+    assert "platform-managed" in str(exc_info.value)
 
   @pytest.mark.asyncio
   async def test_create_subgraph_invalid_name(self, service):
