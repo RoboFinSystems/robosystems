@@ -72,7 +72,7 @@ The FastAPI backend provides a RESTful API with:
 Model Context Protocol server for AI integration:
 
 - **MCP Endpoints**: FastAPI router exposing MCP-compliant tool endpoints
-- **Specialized Tools**: Cypher queries, schema introspection, fact grids, workspace management
+- **Specialized Tools**: Cypher queries, schema introspection, fact grids, workspace management, and memory graph operations (write Cypher, add node/relationship tables)
 - **Streaming Support**: SSE for memory-efficient large result processing
 - **Query Validation**: Complexity scoring and timeout enforcement
 
@@ -240,27 +240,33 @@ The platform offers multiple tiers with different isolation levels and capabilit
 
 | Tier | Display Name | Isolation | Subgraphs | Description |
 |------|--------------|-----------|-----------|-------------|
-| `ladybug-standard` | LadybugDB Standard | Multi-tenant | 0 | Cost-optimized entry tier, single database |
-| `ladybug-large` | LadybugDB Large | Dedicated r7g.large | 10 max | Dedicated instance for team collaboration |
-| `ladybug-xlarge` | LadybugDB XLarge | Dedicated r7g.xlarge | 25 max | Maximum performance and scale |
+| `ladybug-standard` | LadybugDB Standard | Dedicated m7g.large (8 GB) | 3 max | Dedicated instance, cost-efficient entry tier |
+| `ladybug-large` | LadybugDB Large | Dedicated r7g.large (16 GB) | 10 max | Enhanced performance for growing teams |
+| `ladybug-xlarge` | LadybugDB XLarge | Dedicated r7g.xlarge (32 GB) | 25 max | Maximum performance and scale |
 | `ladybug-shared` | — | Platform | — | Public repositories (SEC, industry, economic) |
 
 *Note: Neo4j backend tiers exist in the codebase but are experimental and disabled by default.*
 
 ### Subgraphs (Workspaces)
 
-Subgraphs provide isolated database environments within a parent graph, available on Large and XLarge tiers:
+Subgraphs provide isolated database environments within a parent graph, available on all tiers:
 
 **Use Cases:**
-- **AI Memory Layer**: Create graphs for storing and querying AI generated memories 
-- **Development**: Test schema changes or new data pipelines without affecting production
+- **AI Memory**: Persistent agent memory with built-in Concept/Observation/Session schema that compounds across sessions
+- **Data Workspaces**: Fork parent data, build mappings or transformations, then publish back
+- **Development & Testing**: Experiment with schema changes or pipelines without affecting production
 - **Team Collaboration**: Give teams isolated workspaces that share the parent's infrastructure
-- **Staging**: Validate data before promoting to the main graph
+
+**Subgraph Types:**
+- **Static** (default): Empty subgraph inheriting the parent's base schema
+- **Memory**: Pre-built schema with Concept, Observation, and Session nodes plus relationship types — no base schema (Entity/Period), optimized for AI agent memory
 
 **How Subgraphs Work:**
 - Created on the same EC2 instance as the parent graph (no additional infrastructure cost)
 - Share the parent's credit pool and subscription limits
-- Inherit schema from parent, with optional extensions or custom schemas
+- Static subgraphs inherit base schema from parent; memory subgraphs use the memory extension schema
+- Optional `fork_parent` copies all parent data into the subgraph at creation
+- Schema can be dynamically extended via MCP tools (add node tables, relationship tables)
 - Fully isolated data - queries cannot cross subgraph boundaries
 
 **Naming & Identification:**
@@ -271,7 +277,7 @@ Subgraphs provide isolated database environments within a parent graph, availabl
 **Limits by Tier:**
 | Tier | Max Subgraphs | Total Databases |
 |------|---------------|-----------------|
-| Standard | 0 | 1 (parent only) |
+| Standard | 3 | 4 (1 parent + 3 subgraphs) |
 | Large | 10 | 11 (1 parent + 10 subgraphs) |
 | XLarge | 25 | 26 (1 parent + 25 subgraphs) |
 
