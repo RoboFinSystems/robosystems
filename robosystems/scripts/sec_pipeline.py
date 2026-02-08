@@ -56,6 +56,7 @@ import sys
 import tempfile
 import time
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -66,6 +67,9 @@ from robosystems.config.storage.shared import (
   get_raw_key,
 )
 from robosystems.logger import logger
+
+# Primary graph starts at 2024 (source of truth: adapters/sec/pipeline/configs.py)
+SEC_PRIMARY_START_YEAR = 2024
 
 # Top companies by market cap (as of 2024)
 # Used when --count is specified without --tickers
@@ -90,7 +94,8 @@ TOP_COMPANIES_BY_MARKET_CAP = [
 ]
 
 DEFAULT_COMPANY_COUNT = 5
-ALL_YEARS = [2019, 2020, 2021, 2022, 2023, 2024, 2025]
+_current_year = datetime.now(UTC).year
+ALL_YEARS = list(range(SEC_PRIMARY_START_YEAR, _current_year + 1))
 
 
 def year_to_quarters(year: int | str) -> list[str]:

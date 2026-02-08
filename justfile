@@ -397,7 +397,7 @@ duckdb-query-i graph_id env=_local_env:
 # --- Full Pipeline (convenience) ---
 
 # Full pipeline: download → process → materialize (top N companies by market cap)
-sec-pipeline count="10" year="2025":
+sec-pipeline count="10" year="":
     @just sec-download {{count}} {{year}}
     @just sec-process
     @just sec-materialize
