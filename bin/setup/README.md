@@ -368,7 +368,7 @@ just setup-gha
 | Variable                        | Default | Description               |
 | ------------------------------- | ------- | ------------------------- |
 | `WAF_ENABLED_*`                 | `true`  | Enable WAF                |
-| `WAF_RATE_LIMIT_PER_IP`         | `10000` | Requests per 5 min per IP |
+| `WAF_RATE_LIMIT_PER_IP`         | `3000`  | Requests per 5 min per IP |
 | `WAF_GEO_BLOCKING_ENABLED`      | `false` | Block non-US/CA traffic   |
 | `WAF_AWS_MANAGED_RULES_ENABLED` | `true`  | Use AWS managed rules     |
 

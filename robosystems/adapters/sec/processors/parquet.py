@@ -334,9 +334,9 @@ class ParquetWriter:
         if col in df.columns:
           if col in ["ein", "tax_id"]:
             df[col] = df[col].apply(
-              lambda x: str(int(x)).zfill(9)
-              if pd.notna(x) and str(x).strip() != ""
-              else None
+              lambda x: (
+                str(int(x)).zfill(9) if pd.notna(x) and str(x).strip() != "" else None
+              )
             )
           _convert_to_string_dtype(df, col)
 
@@ -412,9 +412,9 @@ class ParquetWriter:
         # Convert to explicit string dtype to avoid parquet type inference issues
         if col == "tax_id":
           df[col] = df[col].apply(
-            lambda x: str(int(x)).zfill(9)
-            if pd.notna(x) and str(x).strip() != ""
-            else None
+            lambda x: (
+              str(int(x)).zfill(9) if pd.notna(x) and str(x).strip() != "" else None
+            )
           )
         # Use pyarrow-backed string type for proper Parquet handling
         _convert_to_string_dtype(df, col)

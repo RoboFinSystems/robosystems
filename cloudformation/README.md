@@ -545,7 +545,7 @@ The graph database system uses a modular architecture with separate templates fo
 |-----------|---------|-------------|
 | `Environment` | `prod` | Environment name |
 | `ApiAlbArn` | `` | API ALB ARN to protect |
-| `RateLimitPerIP` | `10000` | Requests per 5 min per IP |
+| `RateLimitPerIP` | `3000` | Requests per 5 min per IP |
 | `EnableGeoBlocking` | `false` | Block non-US/CA traffic |
 | `EnableAwsManagedRules` | `true` | Use AWS managed rules |
 | `AllowedIPs` | `0.0.0.0/32` | IPs to allowlist |

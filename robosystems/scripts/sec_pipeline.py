@@ -223,6 +223,8 @@ class SECPipeline:
       stage_config: dict[str, Any] = {
         "graph_id": graph_id,
         "reset_staging": reset_staging,
+        "start_year": None,
+        "end_year": None,
       }
       if year:
         stage_config["year"] = int(year)

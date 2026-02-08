@@ -74,8 +74,9 @@ class SECClient:
   @conditional_sec_retry(
     stop_max_attempt_number=2,  # Only retry once
     wait_fixed=45000,  # Wait 45 seconds if rate limited
-    retry_on_exception=lambda e: isinstance(e, (requests.HTTPError, ValueError))
-    and "rate limited" in str(e),
+    retry_on_exception=lambda e: (
+      isinstance(e, (requests.HTTPError, ValueError)) and "rate limited" in str(e)
+    ),
   )
   def get_companies(self):
     logger.debug("Fetching companies from SEC")
@@ -115,8 +116,9 @@ class SECClient:
   @conditional_sec_retry(
     stop_max_attempt_number=2,  # Only retry once after initial attempt
     wait_fixed=60000,  # Wait 60 seconds between attempts when rate limited
-    retry_on_exception=lambda e: isinstance(e, requests.HTTPError)
-    and "rate limited" in str(e),
+    retry_on_exception=lambda e: (
+      isinstance(e, requests.HTTPError) and "rate limited" in str(e)
+    ),
   )
   def get_submissions(self, file=None):
     if self.cik is None:
@@ -327,8 +329,9 @@ class SECClient:
   @conditional_sec_retry(
     stop_max_attempt_number=2,  # Only retry once
     wait_fixed=75000,  # Wait 75 seconds if rate limited (longer for downloads)
-    retry_on_exception=lambda e: isinstance(e, requests.HTTPError)
-    and "rate limited" in str(e),
+    retry_on_exception=lambda e: (
+      isinstance(e, requests.HTTPError) and "rate limited" in str(e)
+    ),
   )
   def download_xbrlzip(self, xbrlzip_url):
     logger.debug(f"Downloading XBRL ZIP from: {xbrlzip_url}")

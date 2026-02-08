@@ -340,8 +340,8 @@ class TestSchemaDrivenIngestion:
     # Setup mock adapter
     mock_adapter = MagicMock()
     # Mock is_relationship_file to return True for EMPLOYS.parquet
-    mock_adapter.is_relationship_file.side_effect = (
-      lambda path: "EMPLOYS.parquet" in path
+    mock_adapter.is_relationship_file.side_effect = lambda path: (
+      "EMPLOYS.parquet" in path
     )
     mock_get_adapter.return_value = mock_adapter
 

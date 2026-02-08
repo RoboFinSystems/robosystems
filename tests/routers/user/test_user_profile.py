@@ -347,8 +347,8 @@ class TestUserGraphs:
 
     # Mock the authentication dependency
     app.dependency_overrides[get_current_user] = lambda: mock_user_with_graphs
-    app.dependency_overrides[get_current_user_with_graph] = (
-      lambda: mock_user_with_graphs
+    app.dependency_overrides[get_current_user_with_graph] = lambda: (
+      mock_user_with_graphs
     )
 
     # Disable rate limiting during tests
