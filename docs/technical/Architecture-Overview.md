@@ -476,13 +476,14 @@ This enables `git pull upstream main` without merge conflicts on your custom ada
 
 **Purpose**: Caching and coordination
 
-- Authentication tokens and sessions
-- Server-sent events pub/sub
-- Distributed locks
-- Pipeline tracking
-- Credit balance caching
-- Rate limiting counters
-- Graph client caching
+- Authentication tokens and sessions (DB 0)
+- Rate limiting counters (DB 1)
+- Credit balance caching (DB 2)
+- Billing and pricing cache (DB 3)
+- Server-sent events pub/sub (DB 4)
+- Distributed locks (DB 5)
+- Graph client routing cache (DB 6)
+- Async task state tracking (DB 7)
 
 Database allocations are managed in [valkey_registry.py](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/config/valkey_registry.py).
 
