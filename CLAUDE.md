@@ -378,6 +378,14 @@ just admin dev stats                    # System stats
 just admin dev customers list           # List customers
 just admin dev subscriptions list       # List subscriptions
 just admin dev credits grant USER AMT   # Grant bonus credits
+
+# Cache Management
+just admin dev cache info               # View all cache databases
+just admin dev cache info auth          # View specific database
+just admin dev cache keys auth --pattern "apikey:*"  # List matching keys
+just admin dev cache delete-keys auth --pattern "old:*"  # Delete matching keys
+just admin dev cache flush auth         # Flush single database
+just admin dev cache flush all -y       # Flush all databases (skip confirmation)
 ```
 
 ## Secret Management

@@ -56,8 +56,10 @@ async def cache_info(request: Request):
   for db in ValkeyDatabase:
     try:
       client = create_redis_client(db)
-      key_count = client.dbsize()
-      client.close()
+      try:
+        key_count = client.dbsize()
+      finally:
+        client.close()
     except Exception:
       key_count = -1
 
@@ -87,9 +89,11 @@ async def cache_database_info(request: Request, database: str):
 
   try:
     client = create_redis_client(db)
-    key_count = client.dbsize()
-    sample_keys = [str(k) for k in client.scan_iter(match="*", count=20)][:20]
-    client.close()
+    try:
+      key_count = client.dbsize()
+      sample_keys = [str(k) for k in client.scan_iter(match="*", count=20)][:20]
+    finally:
+      client.close()
   except Exception as e:
     raise HTTPException(
       status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -121,9 +125,11 @@ async def cache_flush(request: Request, database: str):
 
   try:
     client = create_redis_client(db)
-    keys_before = client.dbsize()
-    client.flushdb()
-    client.close()
+    try:
+      keys_before = client.dbsize()
+      client.flushdb()
+    finally:
+      client.close()
   except Exception as e:
     raise HTTPException(
       status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -156,9 +162,11 @@ async def cache_flush_all(request: Request):
   for db in ValkeyDatabase:
     try:
       client = create_redis_client(db)
-      keys_before = client.dbsize()
-      client.flushdb()
-      client.close()
+      try:
+        keys_before = client.dbsize()
+        client.flushdb()
+      finally:
+        client.close()
       total_keys_flushed += keys_before
       results.append(
         CacheFlushResponse(
@@ -201,8 +209,10 @@ async def cache_keys(
 
   try:
     client = create_redis_client(db)
-    keys = [str(k) for k in client.scan_iter(match=pattern, count=count)][:count]
-    client.close()
+    try:
+      keys = [str(k) for k in client.scan_iter(match=pattern, count=count)][:count]
+    finally:
+      client.close()
   except Exception as e:
     raise HTTPException(
       status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -249,11 +259,13 @@ async def cache_delete_keys(
 
   try:
     client = create_redis_client(db)
-    keys_to_delete = list(client.scan_iter(match=pattern, count=1000))
-    deleted = 0
-    if keys_to_delete:
-      deleted = client.delete(*keys_to_delete)
-    client.close()
+    try:
+      keys_to_delete = list(client.scan_iter(match=pattern, count=1000))
+      deleted = 0
+      if keys_to_delete:
+        deleted = client.delete(*keys_to_delete)
+    finally:
+      client.close()
   except Exception as e:
     raise HTTPException(
       status_code=status.HTTP_503_SERVICE_UNAVAILABLE,

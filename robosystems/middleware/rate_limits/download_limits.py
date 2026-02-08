@@ -2,7 +2,7 @@
 Download rate limiting for shared repository backup downloads.
 
 This module implements daily download limits for shared repository backups.
-Uses Valkey DB 7 (RATE_LIMITING) with daily TTL expiration.
+Uses Valkey DB 1 (RATE_LIMITS) with daily TTL expiration.
 """
 
 from datetime import UTC, datetime, timedelta
