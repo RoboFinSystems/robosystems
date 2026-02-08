@@ -517,9 +517,7 @@ def get_sso_lock_manager() -> SSOTokenLockManager | None:
     from robosystems.config.valkey_registry import ValkeyDatabase, create_redis_client
 
     # Use factory method to handle SSL params correctly
-    redis_client = create_redis_client(
-      ValkeyDatabase.DISTRIBUTED_LOCKS, decode_responses=True
-    )
+    redis_client = create_redis_client(ValkeyDatabase.LOCKS, decode_responses=True)
 
     # Test connection
     redis_client.ping()

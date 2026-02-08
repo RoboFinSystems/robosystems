@@ -491,7 +491,7 @@ class TestGetSSOLockManager:
     from robosystems.config.valkey_registry import ValkeyDatabase
 
     mock_create_redis_client.assert_called_once_with(
-      ValkeyDatabase.DISTRIBUTED_LOCKS, decode_responses=True
+      ValkeyDatabase.LOCKS, decode_responses=True
     )
 
   @patch("robosystems.middleware.auth.distributed_lock.logger")

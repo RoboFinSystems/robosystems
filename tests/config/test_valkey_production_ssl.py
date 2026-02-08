@@ -29,7 +29,7 @@ class TestProductionSSLHandling:
     ):
       # Without SSL params (for redis-py clients)
       url_without_ssl = ValkeyURLBuilder.build_authenticated_url(
-        ValkeyDatabase.AUTH_CACHE, include_ssl_params=False
+        ValkeyDatabase.AUTH, include_ssl_params=False
       )
       assert "ssl_cert_reqs=CERT_NONE" not in url_without_ssl
       assert url_without_ssl.startswith("rediss://")
@@ -42,7 +42,7 @@ class TestProductionSSLHandling:
     ):
       # With SSL params
       url_with_ssl = ValkeyURLBuilder.build_authenticated_url(
-        ValkeyDatabase.AUTH_CACHE, include_ssl_params=True
+        ValkeyDatabase.AUTH, include_ssl_params=True
       )
       assert "ssl_cert_reqs=CERT_NONE" in url_with_ssl
       assert url_with_ssl.startswith("rediss://")
@@ -58,7 +58,7 @@ class TestProductionSSLHandling:
       mock_client = MagicMock()
       mock_from_url.return_value = mock_client
 
-      create_redis_client(ValkeyDatabase.AUTH_CACHE)
+      create_redis_client(ValkeyDatabase.AUTH)
 
       # Check the URL passed to Redis.from_url
       call_args = mock_from_url.call_args
@@ -83,7 +83,7 @@ class TestProductionSSLHandling:
       mock_client = MagicMock()
       mock_from_url.return_value = mock_client
 
-      create_async_redis_client(ValkeyDatabase.RATE_LIMITING)
+      create_async_redis_client(ValkeyDatabase.RATE_LIMITS)
 
       # Check the URL passed to redis_async.from_url
       call_args = mock_from_url.call_args
@@ -115,24 +115,24 @@ class TestProductionSSLHandling:
       assert "ssl_cert_reqs" not in params
       assert "ssl_check_hostname" not in params
 
-  def test_reserved_urls_include_ssl_params(self):
-    """Test that reserved database URLs include SSL params in production."""
+  def test_other_database_urls_include_ssl_params(self):
+    """Test that other database URLs include SSL params in production."""
     with patch.dict(
       os.environ, {"ENVIRONMENT": "prod", "VALKEY_AUTH_TOKEN": "test_token"}
     ):
-      # Reserved 0 URL should include SSL params
-      reserved0_url = ValkeyURLBuilder.build_authenticated_url(
-        ValkeyDatabase.RESERVED_0,
+      # SSE URL should include SSL params
+      sse_url = ValkeyURLBuilder.build_authenticated_url(
+        ValkeyDatabase.SSE,
         include_ssl_params=True,
       )
-      assert "ssl_cert_reqs=CERT_NONE" in reserved0_url
+      assert "ssl_cert_reqs=CERT_NONE" in sse_url
 
-      # Reserved 1 URL should include SSL params
-      reserved1_url = ValkeyURLBuilder.build_authenticated_url(
-        ValkeyDatabase.RESERVED_1,
+      # LOCKS URL should include SSL params
+      locks_url = ValkeyURLBuilder.build_authenticated_url(
+        ValkeyDatabase.LOCKS,
         include_ssl_params=True,
       )
-      assert "ssl_cert_reqs=CERT_NONE" in reserved1_url
+      assert "ssl_cert_reqs=CERT_NONE" in locks_url
 
   def test_production_staging_difference(self):
     """Test that both prod and staging handle SSL params correctly."""
@@ -143,13 +143,13 @@ class TestProductionSSLHandling:
         # Factory methods should NOT include SSL params in URL
         with patch("redis.Redis.from_url") as mock_sync:
           mock_sync.return_value = MagicMock()
-          create_redis_client(ValkeyDatabase.AUTH_CACHE)
+          create_redis_client(ValkeyDatabase.AUTH)
           url = mock_sync.call_args[0][0]
           assert "ssl_cert_reqs=CERT_NONE" not in url
 
         # URLs with include_ssl_params=True should include them
         auth_url = ValkeyURLBuilder.build_authenticated_url(
-          ValkeyDatabase.AUTH_CACHE, include_ssl_params=True
+          ValkeyDatabase.AUTH, include_ssl_params=True
         )
         assert "ssl_cert_reqs=CERT_NONE" in auth_url
 
@@ -161,7 +161,7 @@ class TestProductionSSLHandling:
       os.environ, {"ENVIRONMENT": "prod", "VALKEY_AUTH_TOKEN": special_token}
     ):
       url = ValkeyURLBuilder.build_authenticated_url(
-        ValkeyDatabase.AUTH_CACHE, include_ssl_params=False
+        ValkeyDatabase.AUTH, include_ssl_params=False
       )
 
       # Token should be URL-encoded

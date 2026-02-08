@@ -1551,62 +1551,135 @@ def migrations_current(client):
 
 
 @cli.group()
-def sec():
-  """SEC database operations."""
+def cache():
+  """Valkey cache operations."""
   pass
 
 
-@sec.command("load")
-@click.option("--ticker", required=True, help="Stock ticker symbol")
-@click.option("--year", help="Year to load (optional)")
+@cache.command("info")
+@click.argument("database", required=False)
 @click.pass_obj
-def sec_load(client, ticker, year):
-  """Load SEC data for a company (local dev only)."""
-  if client.environment != "dev":
-    console.print(
-      "[yellow]SEC operations in staging/prod are managed by Dagster.[/yellow]"
-    )
-    console.print(
-      f"Use the Dagster UI: ./bin/tools/tunnels.sh {client.environment} dagster"
-    )
-    console.print(
-      "Then open http://127.0.0.1:3003 and trigger the SEC pipeline manually."
-    )
-    return
-  console.print(f"[blue]Loading SEC data locally for {ticker}...[/blue]")
-  year_arg = f" {year}" if year else ""
-  command = f"just sec-load {ticker}{year_arg}"
-  result = subprocess.run(command, shell=True, capture_output=True, text=True)
-  console.print(result.stdout)
-  if result.returncode != 0:
-    console.print(f"[red]Error:[/red] {result.stderr}")
-    raise click.ClickException("SEC load failed")
+def cache_info(client, database):
+  """Show cache database info. Optionally specify a database name."""
+  if database:
+    data = client._make_request("GET", f"/admin/v1/cache/info/{database}")
+
+    console.print()
+    console.print(f"[bold cyan]CACHE DATABASE: {data['name'].upper()}[/bold cyan]")
+    console.print("=" * 60)
+    console.print(f"\n  DB Number: {data['db_number']}")
+    console.print(f"  Key Count: {data['key_count']:,}")
+    console.print(f"  Purpose: {data['purpose']}")
+
+    if data.get("sample_keys"):
+      console.print(f"\n[bold]Sample Keys ({len(data['sample_keys'])}):[/bold]")
+      for key in data["sample_keys"]:
+        console.print(f"  {key}")
+  else:
+    data = client._make_request("GET", "/admin/v1/cache/info")
+
+    table = Table(title="Valkey Databases", show_header=True, header_style="bold cyan")
+    table.add_column("DB #", justify="right")
+    table.add_column("Name", overflow="fold")
+    table.add_column("Keys", justify="right")
+    table.add_column("Purpose", overflow="fold")
+
+    for db in data["databases"]:
+      table.add_row(
+        str(db["db_number"]),
+        db["name"],
+        f"{db['key_count']:,}" if db["key_count"] >= 0 else "N/A",
+        db["purpose"],
+      )
+
+    console.print()
+    console.print(table)
+    console.print(f"\n[bold]Total Keys:[/bold] {data['total_keys']:,}")
 
 
-@sec.command("health")
+@cache.command("flush")
+@click.argument("database")
+@click.option("--yes", "-y", is_flag=True, help="Skip confirmation")
 @click.pass_obj
-def sec_health(client):
-  """Check SEC database health (local dev only)."""
-  if client.environment != "dev":
+def cache_flush(client, database, yes):
+  """Flush a cache database. Use 'all' to flush everything."""
+  if database == "all":
+    if not yes:
+      click.confirm("This will flush ALL Valkey databases. Continue?", abort=True)
+
+    data = client._make_request("POST", "/admin/v1/cache/flush-all")
+
+    table = Table(title="Flush Results", show_header=True, header_style="bold cyan")
+    table.add_column("Name", overflow="fold")
+    table.add_column("Keys Flushed", justify="right")
+    table.add_column("Status", overflow="fold")
+
+    for db in data["databases"]:
+      status = "OK" if db["flushed"] else "FAILED"
+      table.add_row(
+        db["name"],
+        f"{db['keys_before']:,}" if db["keys_before"] >= 0 else "N/A",
+        status,
+      )
+
+    console.print()
+    console.print(table)
+    console.print(f"\n[bold]Total Keys Flushed:[/bold] {data['total_keys_flushed']:,}")
+  else:
+    if not yes:
+      click.confirm(f"Flush all keys from '{database}'?", abort=True)
+
+    data = client._make_request("POST", f"/admin/v1/cache/flush/{database}")
     console.print(
-      "[yellow]SEC operations in staging/prod are managed by Dagster.[/yellow]"
+      f"\nFlushed [bold]{data['name']}[/bold] (DB {data['db_number']}): "
+      f"{data['keys_before']:,} keys removed"
     )
-    console.print(
-      f"Use the Dagster UI: ./bin/tools/tunnels.sh {client.environment} dagster"
-    )
-    console.print("Then open http://127.0.0.1:3003 to view pipeline status and health.")
-    return
-  command = "just sec-health"
-  result = subprocess.run(command, shell=True, capture_output=True, text=True)
-  console.print(result.stdout)
-  if result.returncode != 0:
-    console.print(f"[red]Error:[/red] {result.stderr}")
-    raise click.ClickException("SEC health check failed")
 
 
-# SEC orchestration commands removed - pipeline migrated to Dagster
-# For production: Use Dagster UI at dagster.robosystems.app
-# For local dev: just sec-load TICKER YEAR
+@cache.command("keys")
+@click.argument("database")
+@click.option("--pattern", "-p", default="*", help="Key pattern to match")
+@click.option("--count", "-c", default=100, help="Maximum keys to return")
+@click.pass_obj
+def cache_keys(client, database, pattern, count):
+  """List keys in a cache database."""
+  params = {"pattern": pattern, "count": count}
+  data = client._make_request("GET", f"/admin/v1/cache/keys/{database}", params=params)
+
+  console.print()
+  console.print(
+    f"[bold cyan]Keys in {data['name']} (pattern: {data['pattern']})[/bold cyan]"
+  )
+
+  if data["keys"]:
+    for key in data["keys"]:
+      console.print(f"  {key}")
+    console.print(f"\n[bold]Count:[/bold] {data['count']:,}")
+  else:
+    console.print("  [yellow]No keys found.[/yellow]")
+
+
+@cache.command("delete-keys")
+@click.argument("database")
+@click.option("--pattern", "-p", required=True, help="Key pattern to delete")
+@click.option("--yes", "-y", is_flag=True, help="Skip confirmation")
+@click.pass_obj
+def cache_delete_keys(client, database, pattern, yes):
+  """Delete keys matching a pattern from a cache database."""
+  if pattern == "*":
+    console.print("[red]Wildcard '*' is not allowed. Use 'flush' instead.[/red]")
+    raise SystemExit(1)
+
+  if not yes:
+    click.confirm(f"Delete keys matching '{pattern}' from '{database}'?", abort=True)
+
+  data = client._make_request(
+    "DELETE", f"/admin/v1/cache/keys/{database}", params={"pattern": pattern}
+  )
+  console.print(
+    f"\nDeleted {data['keys_deleted']:,} keys from [bold]{data['name']}[/bold] "
+    f"(pattern: {data['pattern']})"
+  )
 
 
 if __name__ == "__main__":

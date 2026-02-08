@@ -69,7 +69,7 @@ class IngestionTaskManager:
       from robosystems.config.valkey_registry import create_async_redis_client
 
       self._redis_client = create_async_redis_client(
-        ValkeyDatabase.LBUG_CACHE, decode_responses=True
+        ValkeyDatabase.TASK_STATE, decode_responses=True
       )
     return self._redis_client
 

@@ -313,7 +313,7 @@ class TestSSEEventStorage:
     # Verify it was called with the correct database
     from robosystems.config.valkey_registry import ValkeyDatabase
 
-    mock_create_client.assert_called_once_with(ValkeyDatabase.SSE_EVENTS)
+    mock_create_client.assert_called_once_with(ValkeyDatabase.SSE)
 
   @patch("robosystems.config.valkey_registry.create_redis_client")
   def test_get_sync_redis(self, mock_create_client):
@@ -329,7 +329,7 @@ class TestSSEEventStorage:
     # Verify it was called with the correct database
     from robosystems.config.valkey_registry import ValkeyDatabase
 
-    mock_create_client.assert_called_once_with(ValkeyDatabase.SSE_EVENTS)
+    mock_create_client.assert_called_once_with(ValkeyDatabase.SSE)
 
   async def test_create_operation(self):
     """Test creating a new operation."""

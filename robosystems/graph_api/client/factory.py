@@ -259,7 +259,7 @@ class GraphClientFactory:
           keepalive_options[socket.TCP_KEEPCNT] = 6
 
       client = create_async_redis_client(
-        ValkeyDatabase.LBUG_CACHE,
+        ValkeyDatabase.GRAPH_ROUTING,
         decode_responses=True,
         max_connections=10,
         socket_keepalive=True,

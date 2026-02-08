@@ -7,6 +7,9 @@ from fastapi import APIRouter
 from robosystems.config import env
 
 from .admin import (
+  cache_router as admin_cache_router,
+)
+from .admin import (
   credits_router as admin_credits_router,
 )
 from .admin import (
@@ -135,6 +138,7 @@ billing_router_v1.include_router(checkout_router)
 
 # Admin routes that don't require a graph_id
 admin_router_v1 = APIRouter(prefix="")
+admin_router_v1.include_router(admin_cache_router)
 admin_router_v1.include_router(admin_subscription_router)
 admin_router_v1.include_router(admin_invoice_router)
 admin_router_v1.include_router(admin_webhooks_router)

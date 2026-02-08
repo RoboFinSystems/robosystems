@@ -86,7 +86,7 @@ class APIKeyCache:
     if self._redis is None:
       try:
         # Use the new connection factory with proper ElastiCache support
-        self._redis = create_redis_client(ValkeyDatabase.AUTH_CACHE)
+        self._redis = create_redis_client(ValkeyDatabase.AUTH)
         # Test connection
         self._redis.ping()
         logger.info("Connected to Valkey/Redis for API key caching")

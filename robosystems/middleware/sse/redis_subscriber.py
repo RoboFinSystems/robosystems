@@ -41,7 +41,7 @@ class RedisEventSubscriber:
     logger.info("Starting Redis SSE event subscriber")
 
     # Create Redis client for pub/sub with proper ElastiCache support
-    self.redis_client = create_async_redis_client(ValkeyDatabase.SSE_EVENTS)
+    self.redis_client = create_async_redis_client(ValkeyDatabase.SSE)
     self.pubsub = self.redis_client.pubsub()
 
     self._running = True

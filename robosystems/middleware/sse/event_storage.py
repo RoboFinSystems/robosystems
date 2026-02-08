@@ -160,7 +160,7 @@ class SSEEventStorage:
     )
 
     # Use SSE events database from registry with proper ElastiCache support
-    client = create_async_redis_client(ValkeyDatabase.SSE_EVENTS)
+    client = create_async_redis_client(ValkeyDatabase.SSE)
     # Test connection
     await client.ping()
     return client
@@ -171,7 +171,7 @@ class SSEEventStorage:
       from robosystems.config.valkey_registry import ValkeyDatabase, create_redis_client
 
       # Use SSE events database from registry with proper ElastiCache support
-      self._sync_redis = create_redis_client(ValkeyDatabase.SSE_EVENTS)
+      self._sync_redis = create_redis_client(ValkeyDatabase.SSE)
       # Test connection
       self._sync_redis.ping()
     return self._sync_redis

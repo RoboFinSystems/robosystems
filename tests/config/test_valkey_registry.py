@@ -16,60 +16,54 @@ class TestValkeyDatabase:
 
   def test_database_values(self):
     """Test that database numbers are assigned correctly."""
-    assert ValkeyDatabase.RESERVED_0 == 0
-    assert ValkeyDatabase.RESERVED_1 == 1
-    assert ValkeyDatabase.AUTH_CACHE == 2
-    assert ValkeyDatabase.SSE_EVENTS == 3
-    assert ValkeyDatabase.DISTRIBUTED_LOCKS == 4
-    assert ValkeyDatabase.PIPELINE_TRACKING == 5
-    assert ValkeyDatabase.CREDITS_CACHE == 6
-    assert ValkeyDatabase.RATE_LIMITING == 7
-    assert ValkeyDatabase.LBUG_CACHE == 8
-    assert ValkeyDatabase.BILLING_CACHE == 9
+    assert ValkeyDatabase.AUTH == 0
+    assert ValkeyDatabase.RATE_LIMITS == 1
+    assert ValkeyDatabase.CREDITS == 2
+    assert ValkeyDatabase.BILLING == 3
+    assert ValkeyDatabase.SSE == 4
+    assert ValkeyDatabase.LOCKS == 5
+    assert ValkeyDatabase.GRAPH_ROUTING == 6
+    assert ValkeyDatabase.TASK_STATE == 7
 
   def test_get_next_available(self):
     """Test getting the next available database number."""
-    # Currently databases 0-9 are used, so next should be 10
+    # Currently databases 0-7 are used, so next should be 8
     next_db = ValkeyDatabase.get_next_available()
-    assert next_db == 10
+    assert next_db == 8
 
   def test_get_next_available_validates_range(self):
     """Test that get_next_available respects the 0-15 range."""
-    # The current implementation uses databases 0-9, so 10 should be next
     next_db = ValkeyDatabase.get_next_available()
     assert next_db >= 0
     assert next_db <= 15
-    # Since we have 10 databases defined (0-9), next should be 10
-    assert next_db == 10
+    # Since we have 8 databases defined (0-7), next should be 8
+    assert next_db == 8
 
   def test_get_next_available_algorithm(self):
     """Test the algorithm by mocking the enum iteration."""
-    # We can't easily mock enum internals, but we can test the logic
-    # by creating a test set of used values
     with patch.object(ValkeyDatabase, "get_next_available") as mock_method:
-      # Simulate the algorithm with a known set
-      used_values = {0, 1, 2, 3, 4, 5, 6, 7, 8}  # Current allocations
+      used_values = {0, 1, 2, 3, 4, 5, 6, 7}  # Current allocations
       for i in range(16):
         if i not in used_values:
           mock_method.return_value = i
           break
 
       result = ValkeyDatabase.get_next_available()
-      assert result == 9  # First available after 0-8
+      assert result == 8  # First available after 0-7
 
   def test_get_url(self):
     """Test convenience method for getting database URL."""
     base_url = "redis://localhost:6379"
-    result = ValkeyDatabase.get_url(ValkeyDatabase.AUTH_CACHE, base_url)
-    assert result == "redis://localhost:6379/2"
+    result = ValkeyDatabase.get_url(ValkeyDatabase.AUTH, base_url)
+    assert result == "redis://localhost:6379/0"
 
   def test_enum_iteration(self):
     """Test that we can iterate over database enum."""
     databases = list(ValkeyDatabase)
-    assert len(databases) == 10  # Currently 10 databases allocated (0-9)
-    assert ValkeyDatabase.RESERVED_0 in databases
-    assert ValkeyDatabase.LBUG_CACHE in databases
-    assert ValkeyDatabase.BILLING_CACHE in databases
+    assert len(databases) == 8  # Currently 8 databases allocated (0-7)
+    assert ValkeyDatabase.AUTH in databases
+    assert ValkeyDatabase.GRAPH_ROUTING in databases
+    assert ValkeyDatabase.TASK_STATE in databases
 
 
 class TestValkeyURLBuilder:
@@ -165,54 +159,48 @@ class TestValkeyURLBuilder:
 
   def test_build_url_basic(self):
     """Test building URL with explicit base URL."""
-    url = ValkeyURLBuilder.build_url(
-      "redis://localhost:6379", ValkeyDatabase.AUTH_CACHE
-    )
-    assert url == "redis://localhost:6379/2"
+    url = ValkeyURLBuilder.build_url("redis://localhost:6379", ValkeyDatabase.AUTH)
+    assert url == "redis://localhost:6379/0"
 
   def test_build_url_removes_trailing_slash(self):
     """Test that trailing slash is removed from base URL."""
-    url = ValkeyURLBuilder.build_url(
-      "redis://localhost:6379/", ValkeyDatabase.SSE_EVENTS
-    )
-    assert url == "redis://localhost:6379/3"
+    url = ValkeyURLBuilder.build_url("redis://localhost:6379/", ValkeyDatabase.SSE)
+    assert url == "redis://localhost:6379/4"
 
   def test_build_url_replaces_existing_database(self):
     """Test that existing database number is replaced."""
-    url = ValkeyURLBuilder.build_url(
-      "redis://localhost:6379/5", ValkeyDatabase.CREDITS_CACHE
-    )
-    assert url == "redis://localhost:6379/6"
+    url = ValkeyURLBuilder.build_url("redis://localhost:6379/5", ValkeyDatabase.CREDITS)
+    assert url == "redis://localhost:6379/2"
 
   def test_build_url_adds_protocol(self):
     """Test that protocol is added if missing."""
-    url = ValkeyURLBuilder.build_url("localhost:6379", ValkeyDatabase.RATE_LIMITING)
-    assert url == "redis://localhost:6379/7"
+    url = ValkeyURLBuilder.build_url("localhost:6379", ValkeyDatabase.RATE_LIMITS)
+    assert url == "redis://localhost:6379/1"
 
   def test_build_url_with_valkey_prefix(self):
     """Test using valkey:// prefix."""
     url = ValkeyURLBuilder.build_url(
-      "localhost:6379", ValkeyDatabase.LBUG_CACHE, use_valkey_prefix=True
+      "localhost:6379", ValkeyDatabase.GRAPH_ROUTING, use_valkey_prefix=True
     )
-    assert url == "valkey://localhost:6379/8"
+    assert url == "valkey://localhost:6379/6"
 
   def test_build_url_replaces_redis_with_valkey(self):
     """Test replacing redis:// with valkey:// when requested."""
     url = ValkeyURLBuilder.build_url(
-      "redis://localhost:6379", ValkeyDatabase.DISTRIBUTED_LOCKS, use_valkey_prefix=True
+      "redis://localhost:6379", ValkeyDatabase.LOCKS, use_valkey_prefix=True
     )
-    assert url == "valkey://localhost:6379/4"
+    assert url == "valkey://localhost:6379/5"
 
   @patch.dict(os.environ, {"VALKEY_URL": "redis://auto-discovered:6379"})
   def test_build_url_auto_discover(self):
     """Test auto-discovering base URL when not provided."""
-    url = ValkeyURLBuilder.build_url(None, ValkeyDatabase.PIPELINE_TRACKING)
-    assert url == "redis://auto-discovered:6379/5"
+    url = ValkeyURLBuilder.build_url(None, ValkeyDatabase.TASK_STATE)
+    assert url == "redis://auto-discovered:6379/7"
 
   def test_build_url_default_database(self):
-    """Test that default database is AUTH_CACHE."""
+    """Test that default database is AUTH."""
     url = ValkeyURLBuilder.build_url("redis://localhost:6379")
-    assert url == "redis://localhost:6379/2"
+    assert url == "redis://localhost:6379/0"
 
   def test_parse_url_basic(self):
     """Test parsing a basic Redis URL."""
@@ -250,14 +238,11 @@ class TestDatabasePurpose:
 
   def test_get_database_purpose_known(self):
     """Test getting purpose for known databases."""
-    purpose = get_database_purpose(ValkeyDatabase.RESERVED_0)
-    assert "Reserved" in purpose
+    purpose = get_database_purpose(ValkeyDatabase.AUTH)
+    assert "JWT" in purpose or "token" in purpose
 
-    purpose = get_database_purpose(ValkeyDatabase.AUTH_CACHE)
-    assert "Authentication" in purpose
-
-    purpose = get_database_purpose(ValkeyDatabase.LBUG_CACHE)
-    assert "LadybugDB client factory" in purpose
+    purpose = get_database_purpose(ValkeyDatabase.GRAPH_ROUTING)
+    assert "Graph" in purpose or "routing" in purpose
 
   def test_get_database_purpose_all_defined(self):
     """Test that all databases have purposes defined."""
@@ -272,9 +257,8 @@ class TestDatabasePurpose:
 
     captured = capsys.readouterr()
     assert "VALKEY/REDIS DATABASE REGISTRY" in captured.out
-    assert "RESERVED_0" in captured.out
-    assert "AUTH_CACHE" in captured.out
-    assert "LBUG_CACHE" in captured.out
+    assert "AUTH" in captured.out
+    assert "GRAPH_ROUTING" in captured.out
     assert "USAGE EXAMPLE" in captured.out
     assert "ValkeyURLBuilder.build_url" in captured.out
 
@@ -294,23 +278,23 @@ class TestIntegration:
   @patch.dict(os.environ, {"ENVIRONMENT": "dev", "VALKEY_URL": "redis://test:6379"})
   def test_full_workflow(self):
     """Test a complete workflow of building and parsing URLs."""
-    # Build URL for auth cache
-    auth_url = ValkeyURLBuilder.build_url(database=ValkeyDatabase.AUTH_CACHE)
-    assert auth_url == "redis://test:6379/2"
+    # Build URL for auth
+    auth_url = ValkeyURLBuilder.build_url(database=ValkeyDatabase.AUTH)
+    assert auth_url == "redis://test:6379/0"
 
     # Parse it back
     base, db = ValkeyURLBuilder.parse_url(auth_url)
     assert base == "redis://test:6379"
-    assert db == 2
+    assert db == 0
 
     # Build another URL with the parsed base
-    sse_url = ValkeyURLBuilder.build_url(base, ValkeyDatabase.SSE_EVENTS)
-    assert sse_url == "redis://test:6379/3"
+    sse_url = ValkeyURLBuilder.build_url(base, ValkeyDatabase.SSE)
+    assert sse_url == "redis://test:6379/4"
 
   def test_enum_convenience_method(self):
     """Test the enum's convenience get_url method."""
-    url = ValkeyDatabase.get_url(ValkeyDatabase.RATE_LIMITING, "redis://myserver:6379")
-    assert url == "redis://myserver:6379/7"
+    url = ValkeyDatabase.get_url(ValkeyDatabase.RATE_LIMITS, "redis://myserver:6379")
+    assert url == "redis://myserver:6379/1"
 
   @patch(
     "robosystems.config.valkey_registry.ValkeyURLBuilder._get_valkey_url_from_cloudformation"
@@ -327,14 +311,14 @@ class TestIntegration:
 
       # Build URLs for different services
       urls = {
-        "reserved": ValkeyURLBuilder.build_url(database=ValkeyDatabase.RESERVED_0),
-        "auth": ValkeyURLBuilder.build_url(database=ValkeyDatabase.AUTH_CACHE),
-        "sse": ValkeyURLBuilder.build_url(database=ValkeyDatabase.SSE_EVENTS),
+        "auth": ValkeyURLBuilder.build_url(database=ValkeyDatabase.AUTH),
+        "rate_limits": ValkeyURLBuilder.build_url(database=ValkeyDatabase.RATE_LIMITS),
+        "sse": ValkeyURLBuilder.build_url(database=ValkeyDatabase.SSE),
       }
 
-      assert urls["reserved"] == "redis://prod.cluster.cache.amazonaws.com:6379/0"
-      assert urls["auth"] == "redis://prod.cluster.cache.amazonaws.com:6379/2"
-      assert urls["sse"] == "redis://prod.cluster.cache.amazonaws.com:6379/3"
+      assert urls["auth"] == "redis://prod.cluster.cache.amazonaws.com:6379/0"
+      assert urls["rate_limits"] == "redis://prod.cluster.cache.amazonaws.com:6379/1"
+      assert urls["sse"] == "redis://prod.cluster.cache.amazonaws.com:6379/4"
 
       # CloudFormation should only be called once due to caching
       assert mock_cf.call_count == 1

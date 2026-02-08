@@ -2,7 +2,7 @@
 Download rate limiting for shared repository backup downloads.
 
 This module implements daily download limits for shared repository backups.
-Uses Valkey DB 7 (RATE_LIMITING) with daily TTL expiration.
+Uses Valkey DB 1 (RATE_LIMITS) with daily TTL expiration.
 """
 
 from datetime import UTC, datetime, timedelta
@@ -27,7 +27,7 @@ class DownloadRateLimiter:
   @classmethod
   def _get_redis_client(cls) -> Any:
     """Get async Redis client for rate limiting database."""
-    return create_async_redis_client(ValkeyDatabase.RATE_LIMITING)
+    return create_async_redis_client(ValkeyDatabase.RATE_LIMITS)
 
   @classmethod
   def _get_key(cls, user_id: str, repository: str) -> str:

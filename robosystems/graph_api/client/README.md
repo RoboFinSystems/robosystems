@@ -253,7 +253,6 @@ LBUG_CLIENT_TIMEOUT=30                       # Request timeout (seconds)
 LBUG_CLIENT_MAX_RETRIES=3                    # Maximum retry attempts
 LBUG_CIRCUIT_BREAKER_THRESHOLD=5             # Failures before opening
 LBUG_CIRCUIT_BREAKER_TIMEOUT=60              # Seconds before reset
-LBUG_CACHE_TTL=300                           # Cache TTL (seconds)
 ```
 
 ### DynamoDB Configuration

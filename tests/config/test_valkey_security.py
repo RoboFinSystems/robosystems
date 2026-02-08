@@ -23,9 +23,9 @@ class TestValkeyURLBuilder:
   def test_build_url_basic(self):
     """Test basic URL building without authentication."""
     url = ValkeyURLBuilder.build_url(
-      base_url="redis://localhost:6379", database=ValkeyDatabase.AUTH_CACHE
+      base_url="redis://localhost:6379", database=ValkeyDatabase.AUTH
     )
-    assert url == "redis://localhost:6379/2"
+    assert url == "redis://localhost:6379/0"
 
   def test_build_url_with_auth_token(self):
     """Test URL building with authentication token in dev/test environment."""
@@ -33,20 +33,20 @@ class TestValkeyURLBuilder:
     with patch.dict(os.environ, {"ENVIRONMENT": "test"}):
       url = ValkeyURLBuilder.build_url(
         base_url="redis://localhost:6379",
-        database=ValkeyDatabase.AUTH_CACHE,
+        database=ValkeyDatabase.AUTH,
         auth_token="test_token_123",
       )
-      assert url == "redis://default:test_token_123@localhost:6379/2"
+      assert url == "redis://default:test_token_123@localhost:6379/0"
 
   def test_build_url_with_auth_token_no_tls(self):
     """Test URL building with auth token but explicit no TLS."""
     url = ValkeyURLBuilder.build_url(
       base_url="redis://localhost:6379",
-      database=ValkeyDatabase.AUTH_CACHE,
+      database=ValkeyDatabase.AUTH,
       auth_token="test_token_123",
       use_tls=False,
     )
-    assert url == "redis://default:test_token_123@localhost:6379/2"
+    assert url == "redis://default:test_token_123@localhost:6379/0"
 
   def test_build_url_with_auth_token_prod(self):
     """Test URL building with authentication token in production environment."""
@@ -54,12 +54,12 @@ class TestValkeyURLBuilder:
     with patch.dict(os.environ, {"ENVIRONMENT": "prod"}):
       url = ValkeyURLBuilder.build_url(
         base_url="redis://localhost:6379",
-        database=ValkeyDatabase.AUTH_CACHE,
+        database=ValkeyDatabase.AUTH,
         auth_token="test_token_123",
       )
       assert (
         url
-        == "rediss://default:test_token_123@localhost:6379/2?ssl_cert_reqs=CERT_NONE"
+        == "rediss://default:test_token_123@localhost:6379/0?ssl_cert_reqs=CERT_NONE"
       )
 
   def test_build_url_with_auth_token_staging(self):
@@ -68,12 +68,12 @@ class TestValkeyURLBuilder:
     with patch.dict(os.environ, {"ENVIRONMENT": "staging"}):
       url = ValkeyURLBuilder.build_url(
         base_url="redis://localhost:6379",
-        database=ValkeyDatabase.AUTH_CACHE,
+        database=ValkeyDatabase.AUTH,
         auth_token="test_token_123",
       )
       assert (
         url
-        == "rediss://default:test_token_123@localhost:6379/2?ssl_cert_reqs=CERT_NONE"
+        == "rediss://default:test_token_123@localhost:6379/0?ssl_cert_reqs=CERT_NONE"
       )
 
   def test_build_url_with_existing_auth_in_url(self):
@@ -82,26 +82,26 @@ class TestValkeyURLBuilder:
     with patch.dict(os.environ, {"ENVIRONMENT": "test"}):
       url = ValkeyURLBuilder.build_url(
         base_url="redis://old_user:old_pass@localhost:6379",
-        database=ValkeyDatabase.AUTH_CACHE,
+        database=ValkeyDatabase.AUTH,
         auth_token="new_token",
       )
-      assert url == "redis://default:new_token@localhost:6379/2"
+      assert url == "redis://default:new_token@localhost:6379/0"
 
   def test_build_url_with_database_in_base_url(self):
     """Test URL building when base URL already contains database number."""
     url = ValkeyURLBuilder.build_url(
-      base_url="redis://localhost:6379/5", database=ValkeyDatabase.AUTH_CACHE
+      base_url="redis://localhost:6379/5", database=ValkeyDatabase.AUTH
     )
-    assert url == "redis://localhost:6379/2"
+    assert url == "redis://localhost:6379/0"
 
   def test_build_url_valkey_prefix(self):
     """Test URL building with valkey:// prefix."""
     url = ValkeyURLBuilder.build_url(
       base_url="redis://localhost:6379",
-      database=ValkeyDatabase.AUTH_CACHE,
+      database=ValkeyDatabase.AUTH,
       use_valkey_prefix=True,
     )
-    assert url == "valkey://localhost:6379/2"
+    assert url == "valkey://localhost:6379/0"
 
   def test_build_url_no_protocol(self):
     """Test URL building when base URL has no protocol."""
@@ -109,10 +109,10 @@ class TestValkeyURLBuilder:
     with patch.dict(os.environ, {"ENVIRONMENT": "test"}):
       url = ValkeyURLBuilder.build_url(
         base_url="localhost:6379",
-        database=ValkeyDatabase.AUTH_CACHE,
+        database=ValkeyDatabase.AUTH,
         auth_token="test_token",
       )
-      assert url == "redis://default:test_token@localhost:6379/2"
+      assert url == "redis://default:test_token@localhost:6379/0"
 
   def test_build_authenticated_url_with_token(self):
     """Test auto-authenticated URL building when token is available."""
@@ -120,17 +120,17 @@ class TestValkeyURLBuilder:
     with patch.dict(os.environ, {"ENVIRONMENT": "test"}):
       with patch.object(ValkeyURLBuilder, "get_auth_token", return_value="auto_token"):
         url = ValkeyURLBuilder.build_authenticated_url(
-          database=ValkeyDatabase.AUTH_CACHE, base_url="redis://localhost:6379"
+          database=ValkeyDatabase.AUTH, base_url="redis://localhost:6379"
         )
-        assert url == "redis://default:auto_token@localhost:6379/2"
+        assert url == "redis://default:auto_token@localhost:6379/0"
 
   def test_build_authenticated_url_no_token(self):
     """Test auto-authenticated URL building when no token is available."""
     with patch.object(ValkeyURLBuilder, "get_auth_token", return_value=None):
       url = ValkeyURLBuilder.build_authenticated_url(
-        database=ValkeyDatabase.AUTH_CACHE, base_url="redis://localhost:6379"
+        database=ValkeyDatabase.AUTH, base_url="redis://localhost:6379"
       )
-      assert url == "redis://localhost:6379/2"
+      assert url == "redis://localhost:6379/0"
 
   def test_parse_url_with_auth(self):
     """Test URL parsing with authentication."""
@@ -263,8 +263,8 @@ class TestValkeyDatabaseRegistry:
 
   def test_get_url_convenience_method(self):
     """Test the convenience get_url method."""
-    url = ValkeyDatabase.get_url(ValkeyDatabase.AUTH_CACHE, "redis://test:6379")
-    assert url == "redis://test:6379/2"
+    url = ValkeyDatabase.get_url(ValkeyDatabase.AUTH, "redis://test:6379")
+    assert url == "redis://test:6379/0"
 
 
 if __name__ == "__main__":

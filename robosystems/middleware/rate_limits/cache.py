@@ -28,7 +28,7 @@ class RateLimitCache:
     if self._redis is None:
       try:
         # Use the new connection factory with proper ElastiCache support
-        self._redis = create_redis_client(ValkeyDatabase.RATE_LIMITING)
+        self._redis = create_redis_client(ValkeyDatabase.RATE_LIMITS)
         # Test connection
         self._redis.ping()
         logger.info("Connected to Valkey/Redis for rate limiting")

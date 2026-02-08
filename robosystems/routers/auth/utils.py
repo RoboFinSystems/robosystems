@@ -26,7 +26,7 @@ class Config:
   @staticmethod
   def get_valkey_url() -> str:
     # Use auth cache database from registry with authentication in prod/staging
-    return ValkeyURLBuilder.build_authenticated_url(ValkeyDatabase.AUTH_CACHE)
+    return ValkeyURLBuilder.build_authenticated_url(ValkeyDatabase.AUTH)
 
   @staticmethod
   def get_jwt_secret() -> str:

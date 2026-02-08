@@ -194,10 +194,10 @@ All configuration is centralized and config-as-code:
 from robosystems.config.valkey_registry import ValkeyDatabase, ValkeyURLBuilder
 
 # Always use the registry, never hardcode database numbers
-redis_url = ValkeyURLBuilder.build_url(env.VALKEY_URL, ValkeyDatabase.AUTH_CACHE)
+redis_url = ValkeyURLBuilder.build_url(env.VALKEY_URL, ValkeyDatabase.AUTH)
 ```
 
-Database numbers: 0-1=Reserved, 2=Auth, 3=SSE, 4=Locks, 5=Pipeline, 6=Credits, 7=Rate limiting, 8=LadybugDB, 9=Billing
+Database numbers: 0=Auth, 1=Rate limits, 2=Credits, 3=Billing, 4=SSE, 5=Locks, 6=Graph routing, 7=Task state, 8-15=Available
 
 ## Testing
 
@@ -378,6 +378,14 @@ just admin dev stats                    # System stats
 just admin dev customers list           # List customers
 just admin dev subscriptions list       # List subscriptions
 just admin dev credits grant USER AMT   # Grant bonus credits
+
+# Cache Management
+just admin dev cache info               # View all cache databases
+just admin dev cache info auth          # View specific database
+just admin dev cache keys auth --pattern "apikey:*"  # List matching keys
+just admin dev cache delete-keys auth --pattern "old:*"  # Delete matching keys
+just admin dev cache flush auth         # Flush single database
+just admin dev cache flush all -y       # Flush all databases (skip confirmation)
 ```
 
 ## Secret Management
