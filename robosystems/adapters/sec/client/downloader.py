@@ -16,17 +16,16 @@ from typing import TYPE_CHECKING
 
 import aiohttp
 
-from robosystems.config import ExternalServicesConfig, env
+from robosystems.config import env
 from robosystems.logger import logger
 
+from ..config import SEC_CONFIG
 from .rate_limiter import AsyncRateLimiter, RateMonitor
 
 if TYPE_CHECKING:
   from robosystems.operations.aws.s3 import S3Client
 
   from .efts import EFTSHit
-
-SEC_CONFIG = ExternalServicesConfig.SEC_CONFIG
 SEC_BASE_URL = SEC_CONFIG["base_url"]
 SEC_HEADERS = SEC_CONFIG["headers"]
 

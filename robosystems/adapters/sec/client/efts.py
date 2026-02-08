@@ -18,12 +18,11 @@ from urllib.parse import urlencode
 
 import aiohttp
 
-from robosystems.config import ExternalServicesConfig
 from robosystems.logger import logger
 
+from ..config import SEC_CONFIG
 from .rate_limiter import AsyncRateLimiter, RateMonitor
 
-SEC_CONFIG = ExternalServicesConfig.SEC_CONFIG
 SEC_HEADERS = SEC_CONFIG["headers"]
 
 EFTS_BASE_URL = "https://efts.sec.gov/LATEST/search-index"

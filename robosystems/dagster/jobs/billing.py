@@ -217,6 +217,7 @@ async def _handle_checkout_completed(
 
     if stripe_subscription_id:
       subscription.stripe_subscription_id = stripe_subscription_id
+      subscription.provider_subscription_id = stripe_subscription_id
 
     subscription.status = "provisioning"
     subscription.provider_customer_id = customer_id

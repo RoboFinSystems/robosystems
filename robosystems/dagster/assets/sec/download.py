@@ -90,9 +90,8 @@ def sec_raw_filings(
       AsyncRateLimiter,
       RateMonitor,
     )
-    from robosystems.config import ExternalServicesConfig
+    from robosystems.adapters.sec.config import SEC_CONFIG
 
-    SEC_CONFIG = ExternalServicesConfig.SEC_CONFIG
     SEC_BASE_URL = SEC_CONFIG["base_url"]
     SEC_HEADERS = SEC_CONFIG["headers"]
 

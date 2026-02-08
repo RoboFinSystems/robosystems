@@ -5,6 +5,35 @@ These are processing-specific constants for the SEC/XBRL pipeline.
 They are not runtime-configurable - change them here if needed.
 """
 
+from robosystems.config import env
+from robosystems.config.constants import MAX_CONCURRENT_DOWNLOADS
+
+# =============================================================================
+# SEC EDGAR API CONFIGURATION
+# =============================================================================
+# Configuration for SEC EDGAR API access and rate limiting
+
+SEC_CONFIG = {
+  "base_url": "https://www.sec.gov",
+  "data_base_url": "https://data.sec.gov",
+  "user_agent": env.SEC_GOV_USER_AGENT,
+  "rate_limit": 10,  # requests per second (SEC.gov requirement)
+  "timeout": 30,
+  "sync_timeout": 10,
+  "filing_download_timeout": 300,  # 5 minutes for large files
+  "filing_metadata_timeout": 60,
+  "xbrl_download_timeout": 30,
+  "retry_attempts": 3,
+  "retry_delay": 1,
+  "retry_min_wait": 600,
+  "retry_max_wait": 1000,
+  "max_concurrent_downloads": MAX_CONCURRENT_DOWNLOADS,
+  "bulk_download_url": "https://www.sec.gov/Archives/edgar/daily-index/bulkdata/",
+  "xbrl_rss_url": "https://www.sec.gov/Archives/edgar/xbrlrss.all.xml",
+  "startup_delay": 30,
+  "headers": {"User-Agent": env.SEC_GOV_USER_AGENT},
+}
+
 # =============================================================================
 # ARELLE CONFIGURATION
 # =============================================================================
