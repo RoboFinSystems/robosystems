@@ -40,6 +40,7 @@ from dagster import (
 from robosystems.config import env
 from robosystems.dagster.jobs.shared_repository import shared_repository_s3_sync_job
 
+from .configs import SEC_HISTORICAL_FORM_TYPES, SEC_PRIMARY_START_YEAR
 from .jobs import (
   sec_download_job,
   sec_incremental_stage_job,
@@ -170,12 +171,29 @@ def sec_processing_sensor(context: SensorEvaluationContext):
       context.log.info(f"Skipping {quarter} - already has an active run")
       continue
 
-    context.log.info(f"Triggering {quarter} for processing")
+    # Apply annual-only form type filter for pre-2024 partitions
+    # Historical data excludes 10-Q to reduce graph size (~75% fewer filings)
+    partition_year = int(quarter.split("-")[0])
+    run_config: dict = {}
+    if partition_year < SEC_PRIMARY_START_YEAR:
+      run_config = {
+        "ops": {
+          "sec_processed_filings": {
+            "config": {"form_types": SEC_HISTORICAL_FORM_TYPES},
+          }
+        }
+      }
+      context.log.info(
+        f"Triggering {quarter} for processing (annual-only: {SEC_HISTORICAL_FORM_TYPES})"
+      )
+    else:
+      context.log.info(f"Triggering {quarter} for processing")
 
     # No run_key - rely on active runs check to prevent concurrent runs.
     # This allows re-triggering after failures when pending files remain.
     yield RunRequest(
       partition_key=quarter,  # Use Dagster's partition system
+      run_config=run_config,
       tags={
         "quarter": quarter,
         "pipeline": "sec",
