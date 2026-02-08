@@ -22,6 +22,7 @@ from .cypher_tool import CypherTool
 from .elements_tool import ElementsTool
 from .example_queries_tool import ExampleQueriesTool
 from .facts_tool import FactsTool
+from .memory import AddNodeTableTool, AddRelationshipTableTool, WriteCypherTool
 from .properties_tool import PropertiesTool
 from .schema_tool import SchemaTool
 from .structure_tool import StructureTool
@@ -68,6 +69,15 @@ class GraphMCPTools:
       self.list_workspaces_tool = ListWorkspacesTool(graph_client)
       self.switch_workspace_tool = SwitchWorkspaceTool(graph_client)
 
+    # Conditionally initialize memory tools based on feature flag
+    self.write_cypher_tool = None
+    self.add_node_table_tool = None
+    self.add_relationship_table_tool = None
+    if env.MCP_MEMORY_ENABLED:
+      self.write_cypher_tool = WriteCypherTool(graph_client)
+      self.add_node_table_tool = AddNodeTableTool(graph_client)
+      self.add_relationship_table_tool = AddRelationshipTableTool(graph_client)
+
     # Conditionally initialize fact grid tool based on feature flag
     self.build_fact_grid_tool = None
     if env.FACT_GRID_ENABLED:
@@ -113,6 +123,21 @@ class GraphMCPTools:
       self.list_workspaces_tool.get_tool_definition(),
     ]
 
+  def _get_memory_tool_definitions(self) -> list[dict[str, Any]]:
+    """
+    Get memory management tool definitions.
+
+    Returns:
+        List of memory tool definitions (empty if MCP_MEMORY_ENABLED is false)
+    """
+    if self.write_cypher_tool is None:
+      return []
+    return [
+      self.write_cypher_tool.get_tool_definition(),
+      self.add_node_table_tool.get_tool_definition(),
+      self.add_relationship_table_tool.get_tool_definition(),
+    ]
+
   def _get_data_tool_definitions(self) -> list[dict[str, Any]]:
     """
     Get data operation tool definitions from actual tool implementations.
@@ -152,6 +177,9 @@ class GraphMCPTools:
     # Add workspace management tools
     # Note: switch-workspace is client-side only, others execute server-side
     tools.extend(self._get_workspace_tool_definitions())
+
+    # Add memory tools (subgraph-only write operations)
+    tools.extend(self._get_memory_tool_definitions())
 
     # Add data operation tools
     tools.extend(self._get_data_tool_definitions())
@@ -256,6 +284,34 @@ class GraphMCPTools:
             "Set MCP_WORKSPACE_ENABLED=true to enable this feature."
           )
         result = await self.switch_workspace_tool.execute(arguments)
+        return result if return_raw else json.dumps(result, indent=2)
+
+      # Memory tools (subgraph-only)
+      elif name == "write-graph-cypher":
+        if self.write_cypher_tool is None:
+          raise ValueError(
+            "write-graph-cypher tool is not available. "
+            "Set MCP_MEMORY_ENABLED=true to enable this feature."
+          )
+        result = await self.write_cypher_tool.execute(arguments)
+        return result if return_raw else json.dumps(result, indent=2)
+
+      elif name == "add-node-table":
+        if self.add_node_table_tool is None:
+          raise ValueError(
+            "add-node-table tool is not available. "
+            "Set MCP_MEMORY_ENABLED=true to enable this feature."
+          )
+        result = await self.add_node_table_tool.execute(arguments)
+        return result if return_raw else json.dumps(result, indent=2)
+
+      elif name == "add-relationship-table":
+        if self.add_relationship_table_tool is None:
+          raise ValueError(
+            "add-relationship-table tool is not available. "
+            "Set MCP_MEMORY_ENABLED=true to enable this feature."
+          )
+        result = await self.add_relationship_table_tool.execute(arguments)
         return result if return_raw else json.dumps(result, indent=2)
 
       # Data operation tools

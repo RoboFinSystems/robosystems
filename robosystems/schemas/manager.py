@@ -26,6 +26,7 @@ class SchemaType(Enum):
   ROBOREPORT = "roboreport"
   ROBOHRM = "robohrm"
   ROBOEPM = "roboepm"
+  MEMORY = "memory"
 
 
 @dataclass
@@ -67,13 +68,14 @@ class SchemaManager:
     description: str,
     version: str = "1.0.0",
     extensions: list[str] | None = None,
+    include_base: bool = True,
   ) -> SchemaConfiguration:
     """Create a schema configuration."""
     return SchemaConfiguration(
       name=name,
       description=description,
       version=version,
-      base_schema="base",
+      base_schema="base" if include_base else "",
       extensions=extensions or [],
     )
 
@@ -101,15 +103,18 @@ class SchemaManager:
       name=config.name, description=config.description, version=config.version
     )
 
-    # Load base schema
-    base_module = self._load_schema_module(config.base_schema)
-    if hasattr(base_module, "BASE_NODES"):
-      schema.nodes.extend(base_module.BASE_NODES)
-      logger.debug(f"Loaded {len(base_module.BASE_NODES)} base nodes")
+    # Load base schema (skip if base_schema is empty, e.g. for memory-only subgraphs)
+    if config.base_schema:
+      base_module = self._load_schema_module(config.base_schema)
+      if hasattr(base_module, "BASE_NODES"):
+        schema.nodes.extend(base_module.BASE_NODES)
+        logger.debug(f"Loaded {len(base_module.BASE_NODES)} base nodes")
 
-    if hasattr(base_module, "BASE_RELATIONSHIPS"):
-      schema.relationships.extend(base_module.BASE_RELATIONSHIPS)
-      logger.debug(f"Loaded {len(base_module.BASE_RELATIONSHIPS)} base relationships")
+      if hasattr(base_module, "BASE_RELATIONSHIPS"):
+        schema.relationships.extend(base_module.BASE_RELATIONSHIPS)
+        logger.debug(f"Loaded {len(base_module.BASE_RELATIONSHIPS)} base relationships")
+    else:
+      logger.debug("Skipping base schema (extension-only mode)")
 
     # Load extensions
     for extension_name in config.extensions:

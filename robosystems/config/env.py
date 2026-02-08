@@ -488,7 +488,11 @@ class EnvConfig:
   )
   MCP_WORKSPACE_ENABLED = get_bool_env(
     "MCP_WORKSPACE_ENABLED",
-    get_parameter_value("MCP_WORKSPACE_ENABLED", "false").lower() == "true",
+    get_parameter_value("MCP_WORKSPACE_ENABLED", "true").lower() == "true",
+  )
+  MCP_MEMORY_ENABLED = get_bool_env(
+    "MCP_MEMORY_ENABLED",
+    get_parameter_value("MCP_MEMORY_ENABLED", "true").lower() == "true",
   )
 
   # --- Shared Repository Operations ---
