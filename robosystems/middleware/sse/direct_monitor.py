@@ -864,13 +864,18 @@ async def run_user_repository_provisioning(
         },
       )
 
-      # Generate invoice
-      if customer:
+      # Generate invoice (only for non-Stripe subscriptions;
+      # Stripe-managed subscriptions handle invoicing via webhooks)
+      if customer and not subscription.stripe_subscription_id:
         generate_subscription_invoice(
           subscription=subscription,
           customer=customer,
           description=f"{repository_name.upper()} Repository Subscription - {subscription.plan_name}",
           session=db,
+        )
+      elif subscription.stripe_subscription_id:
+        logger.info(
+          f"Stripe will create invoice for repository subscription {subscription.id}"
         )
 
       duration_ms = (time.time() - start_time) * 1000

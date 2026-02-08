@@ -184,7 +184,7 @@ SEC_PROCESS_BATCH_LIMIT = 2000
 # Stripe API Version
 # Pinned to ensure consistent behavior across deployments.
 # See: https://stripe.com/docs/api/versioning
-STRIPE_API_VERSION = "2025-10-29.clover"
+STRIPE_API_VERSION = "2026-01-28.clover"
 
 # =============================================================================
 # STATIC STRING/URI CONSTANTS

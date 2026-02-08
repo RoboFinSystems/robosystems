@@ -25,7 +25,6 @@ from .billing import (
 from .constants import PrefixConstants, URIConstants, XBRLConstants
 from .credits import CreditConfig
 from .env import EnvConfig, env
-from .external_services import ExternalServicesConfig
 from .query_queue import QueryQueueConfig
 from .rate_limits import EndpointCategory, RateLimitConfig, RateLimitPeriod
 from .validation import EnvValidator
@@ -47,8 +46,6 @@ __all__ = [
   # Validation exports
   "EnvValidator",
   "ExecutionProfile",
-  # External services exports
-  "ExternalServicesConfig",
   "ModelConfig",
   "PrefixConstants",
   # Query configuration exports
