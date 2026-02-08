@@ -14,7 +14,6 @@ Main Components:
 - ids: UUID generation and naming utilities
 """
 
-from .metadata import SECMetadataLoader
 from .consolidation import (
   atomic_s3_upload,
   consolidate_parquet_from_disk,
@@ -51,6 +50,7 @@ from .ingestion import (
   TableInfo,
   XBRLDuckDBGraphProcessor,
 )
+from .metadata import SECMetadataLoader
 from .parquet import ParquetWriter
 from .processing import ProcessedFilingResult, process_single_filing_to_memory
 from .schema import (
