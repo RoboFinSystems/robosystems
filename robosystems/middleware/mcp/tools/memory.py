@@ -253,12 +253,12 @@ class AddNodeTableTool(BaseTool):
           "message": f"Property type '{ptype}' is not valid. Use one of: {', '.join(sorted(VALID_PROPERTY_TYPES))}",
         }
 
-    # Build DDL
-    prop_parts = [f"{p['name']} {p['type']}" for p in properties]
+    # Build DDL with backtick-quoted identifiers for defense-in-depth
+    prop_parts = [f"`{p['name']}` {p['type']}" for p in properties]
     pk_names = [p["name"] for p in properties if p.get("is_primary_key")]
-    prop_parts.append(f"PRIMARY KEY({', '.join(pk_names)})")
+    prop_parts.append(f"PRIMARY KEY({', '.join(f'`{n}`' for n in pk_names)})")
     props_str = ", ".join(prop_parts)
-    ddl = f"CREATE NODE TABLE IF NOT EXISTS {table_name}({props_str})"
+    ddl = f"CREATE NODE TABLE IF NOT EXISTS `{table_name}`({props_str})"
 
     try:
       result = await self.client.graph_client.install_schema(
@@ -284,8 +284,11 @@ class AddNodeTableTool(BaseTool):
           "message": result.get("message", "Schema installation failed"),
         }
     except Exception as e:
-      logger.error(f"Failed to create node table {table_name}: {e}")
-      raise GraphAPIError(f"Failed to create node table: {e}")
+      logger.error(
+        f"Failed to create node table {table_name}: {e}",
+        extra={"table_name": table_name, "ddl": ddl, "error_type": type(e).__name__},
+      )
+      raise GraphAPIError(f"Failed to create node table '{table_name}': {e}")
 
 
 class AddRelationshipTableTool(BaseTool):
@@ -389,12 +392,12 @@ class AddRelationshipTableTool(BaseTool):
           "message": f"Property type '{ptype}' is not valid. Use one of: {', '.join(sorted(VALID_PROPERTY_TYPES))}",
         }
 
-    # Build DDL
+    # Build DDL with backtick-quoted identifiers for defense-in-depth
     props_str = ""
     if properties:
-      prop_parts = [f"{p['name']} {p['type']}" for p in properties]
+      prop_parts = [f"`{p['name']}` {p['type']}" for p in properties]
       props_str = ", " + ", ".join(prop_parts)
-    ddl = f"CREATE REL TABLE IF NOT EXISTS {table_name}(FROM {from_node} TO {to_node}{props_str})"
+    ddl = f"CREATE REL TABLE IF NOT EXISTS `{table_name}`(FROM `{from_node}` TO `{to_node}`{props_str})"
 
     try:
       result = await self.client.graph_client.install_schema(
@@ -421,5 +424,8 @@ class AddRelationshipTableTool(BaseTool):
           "message": result.get("message", "Schema installation failed"),
         }
     except Exception as e:
-      logger.error(f"Failed to create relationship table {table_name}: {e}")
-      raise GraphAPIError(f"Failed to create relationship table: {e}")
+      logger.error(
+        f"Failed to create relationship table {table_name}: {e}",
+        extra={"table_name": table_name, "ddl": ddl, "error_type": type(e).__name__},
+      )
+      raise GraphAPIError(f"Failed to create relationship table '{table_name}': {e}")

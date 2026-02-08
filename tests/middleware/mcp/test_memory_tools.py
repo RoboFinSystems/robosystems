@@ -198,8 +198,8 @@ class TestAddNodeTableTool:
     mock_subgraph_client.graph_client.install_schema.assert_called_once()
     call_args = mock_subgraph_client.graph_client.install_schema.call_args
     ddl = call_args.kwargs["custom_ddl"]
-    assert "CREATE NODE TABLE IF NOT EXISTS CompanyProfile" in ddl
-    assert "PRIMARY KEY(identifier)" in ddl
+    assert "CREATE NODE TABLE IF NOT EXISTS `CompanyProfile`" in ddl
+    assert "PRIMARY KEY(`identifier`)" in ddl
 
   @pytest.mark.asyncio
   @pytest.mark.unit
@@ -290,9 +290,9 @@ class TestAddRelationshipTableTool:
     assert result["table_name"] == "FINDING_SUPPORTS"
     call_args = mock_subgraph_client.graph_client.install_schema.call_args
     ddl = call_args.kwargs["custom_ddl"]
-    assert "CREATE REL TABLE IF NOT EXISTS FINDING_SUPPORTS" in ddl
-    assert "FROM ResearchFinding TO Concept" in ddl
-    assert "strength DOUBLE" in ddl
+    assert "CREATE REL TABLE IF NOT EXISTS `FINDING_SUPPORTS`" in ddl
+    assert "FROM `ResearchFinding` TO `Concept`" in ddl
+    assert "`strength` DOUBLE" in ddl
 
   @pytest.mark.asyncio
   @pytest.mark.unit
@@ -308,7 +308,7 @@ class TestAddRelationshipTableTool:
     assert result["success"] is True
     call_args = mock_subgraph_client.graph_client.install_schema.call_args
     ddl = call_args.kwargs["custom_ddl"]
-    assert "FROM Concept TO Concept)" in ddl
+    assert "FROM `Concept` TO `Concept`)" in ddl
 
   @pytest.mark.asyncio
   @pytest.mark.unit

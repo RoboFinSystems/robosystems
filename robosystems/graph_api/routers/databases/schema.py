@@ -25,14 +25,14 @@ router = APIRouter(prefix="/databases", tags=["Graph Schema"])
 
 # DDL Statement validation patterns
 ALLOWED_DDL_PATTERNS = {
-  # Node table creation (with optional IF NOT EXISTS)
-  r"^\s*CREATE\s+NODE\s+TABLE\s+(IF\s+NOT\s+EXISTS\s+)?\w+\s*\(",
-  # Relationship table creation (with optional IF NOT EXISTS)
-  r"^\s*CREATE\s+REL\s+TABLE\s+(IF\s+NOT\s+EXISTS\s+)?\w+\s*\(",
+  # Node table creation (with optional IF NOT EXISTS, optional backtick-quoted identifier)
+  r"^\s*CREATE\s+NODE\s+TABLE\s+(IF\s+NOT\s+EXISTS\s+)?`?\w+`?\s*\(",
+  # Relationship table creation (with optional IF NOT EXISTS, optional backtick-quoted identifier)
+  r"^\s*CREATE\s+REL\s+TABLE\s+(IF\s+NOT\s+EXISTS\s+)?`?\w+`?\s*\(",
   # Index creation
-  r"^\s*CREATE\s+INDEX\s+\w+\s+ON\s+\w+",
+  r"^\s*CREATE\s+INDEX\s+`?\w+`?\s+ON\s+`?\w+`?",
   # Comments
-  r"^\s*COMMENT\s+ON\s+(TABLE|COLUMN)\s+\w+",
+  r"^\s*COMMENT\s+ON\s+(TABLE|COLUMN)\s+`?\w+`?",
 }
 
 # Dangerous DDL patterns to explicitly block
