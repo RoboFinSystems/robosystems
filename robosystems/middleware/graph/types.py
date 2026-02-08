@@ -323,9 +323,18 @@ def _build_graph_id_pattern() -> str:
 
 
 def _build_graph_or_subgraph_id_pattern() -> str:
-  """Build graph-or-subgraph ID pattern from registry (called lazily on first access)."""
-  repo_names = "|".join(GraphTypeRegistry._get_shared_repo_ids())
-  return r"^(kg[a-f0-9]{16,}(?:_[a-zA-Z0-9]{1,20})?|" + repo_names + r")$"
+  """Build graph-or-subgraph ID pattern from registry (called lazily on first access).
+
+  Supports:
+  - User graphs: kg[hex]{16,}
+  - User subgraphs: kg[hex]{16,}_[alnum]{1,20}
+  - Shared repos: sec, industry, etc.
+  - Shared repo subgraphs: sec_historical, etc.
+  """
+  repo_names = GraphTypeRegistry._get_shared_repo_ids()
+  # Build pattern for shared repos with optional subgraph suffix
+  repo_patterns = "|".join(rf"{name}(?:_[a-zA-Z0-9]{{1,20}})?" for name in repo_names)
+  return r"^(kg[a-f0-9]{16,}(?:_[a-zA-Z0-9]{1,20})?|" + repo_patterns + r")$"
 
 
 # Lazy pattern cache — patterns are computed on first access to avoid circular
@@ -357,8 +366,8 @@ def is_subgraph_id(graph_id: str) -> bool:
   """
   Check if graph_id is a subgraph ID.
 
-  Subgraph IDs must match the pattern: kg[a-f0-9]{16,}_[a-zA-Z0-9]{1,20}
-  where the parent part follows the standard graph ID format.
+  Subgraph IDs have a parent_subgraph format where the parent is either
+  a user graph (kg[hex]{16,}) or a shared repository ID.
 
   Args:
       graph_id: The graph identifier to check
@@ -369,11 +378,11 @@ def is_subgraph_id(graph_id: str) -> bool:
   Examples:
       >>> is_subgraph_id("kg0123456789abcdef_dev")
       True
+      >>> is_subgraph_id("sec_historical")
+      True
       >>> is_subgraph_id("kg0123456789abcdef")
       False
       >>> is_subgraph_id("sec")
-      False
-      >>> is_subgraph_id("tenant1_entity")
       False
       >>> is_subgraph_id("_")
       False
@@ -386,19 +395,24 @@ def is_subgraph_id(graph_id: str) -> bool:
   parent_part = parts[0]
   subgraph_part = parts[1] if len(parts) > 1 else ""
 
-  # Parent must match the kg[hex]{16,} pattern
-  if not parent_part.startswith("kg") or len(parent_part) < 18:
-    return False
-
-  # Validate parent is all lowercase hex after "kg"
-  hex_part = parent_part[2:]
-  if not all(c in "0123456789abcdef" for c in hex_part):
-    return False
-
   # Subgraph name must be non-empty and match pattern
   if not subgraph_part or len(subgraph_part) > 20:
     return False
-  return all(c.isalnum() for c in subgraph_part)
+  if not all(c.isalnum() for c in subgraph_part):
+    return False
+
+  # Parent must match the kg[hex]{16,} pattern OR be a shared repo
+  if parent_part.startswith("kg") and len(parent_part) >= 18:
+    # Validate parent is all lowercase hex after "kg"
+    hex_part = parent_part[2:]
+    if all(c in "0123456789abcdef" for c in hex_part):
+      return True
+
+  # Check if parent is a shared repository
+  if parent_part in GraphTypeRegistry._get_shared_repo_ids():
+    return True
+
+  return False
 
 
 def parse_graph_id(graph_id: str) -> tuple[str, str | None]:
@@ -421,6 +435,8 @@ def parse_graph_id(graph_id: str) -> tuple[str, str | None]:
       ("kg0123456789abcdef", None)
       >>> parse_graph_id("sec")
       ("sec", None)
+      >>> parse_graph_id("sec_historical")
+      ("sec", "historical")
   """
   if is_subgraph_id(graph_id):
     parts = graph_id.split("_", 1)

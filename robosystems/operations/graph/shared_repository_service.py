@@ -209,6 +209,202 @@ class SharedRepositoryService:
           logger.warning(f"Error closing lbug client: {e}")
 
 
+async def ensure_shared_subgraph_exists(
+  parent_repository_name: str,
+  subgraph_name: str,
+  description: str | None = None,
+  created_by: str | None = None,
+  instance_id: str = "ladybug-shared-prod",
+) -> dict[str, Any]:
+  """
+  Ensure a shared repository subgraph exists, creating it if necessary.
+
+  This is used by data pipelines (e.g., sec_historical materialization) to
+  ensure a platform-managed subgraph exists before loading data. It mirrors
+  the pattern of ensure_shared_repository_exists() but creates a subgraph
+  that appears in MCP workspace listings.
+
+  Steps:
+  1. Ensure parent shared repository exists
+  2. Check if subgraph PostgreSQL record exists
+  3. Check if LadybugDB database exists on instance
+  4. Create both if missing (idempotent)
+
+  Args:
+      parent_repository_name: Parent shared repo (e.g., "sec")
+      subgraph_name: Subgraph name (e.g., "historical")
+      description: Human-readable description for the subgraph
+      created_by: User ID who initiated creation
+      instance_id: Instance identifier (default: ladybug-shared-prod)
+
+  Returns:
+      Dictionary with subgraph status
+  """
+  from ...config.shared_repositories import get_manifest, is_shared_repository
+  from ...middleware.graph.utils import construct_subgraph_id
+
+  if not is_shared_repository(parent_repository_name):
+    raise ValueError(
+      f"'{parent_repository_name}' is not a registered shared repository."
+    )
+
+  subgraph_id = construct_subgraph_id(parent_repository_name, subgraph_name)
+
+  # Step 1: Ensure parent shared repository exists
+  parent_result = await ensure_shared_repository_exists(
+    repository_name=parent_repository_name,
+    created_by=created_by,
+    instance_id=instance_id,
+  )
+  logger.info(
+    f"Parent repository '{parent_repository_name}' status: {parent_result.get('status')}"
+  )
+
+  # Step 2: Check if PostgreSQL record exists
+  postgres_exists = False
+  try:
+    from ...database import get_db_session
+    from ...models.iam.graph import Graph
+
+    db_gen = get_db_session()
+    db = next(db_gen)
+    try:
+      graph = db.query(Graph).filter(Graph.graph_id == subgraph_id).first()
+      postgres_exists = graph is not None
+    finally:
+      try:
+        next(db_gen)
+      except StopIteration:
+        pass
+  except Exception as e:
+    logger.warning(f"Could not check PostgreSQL for subgraph {subgraph_id}: {e}")
+
+  # Step 3: Check if LadybugDB database exists
+  ladybug_exists = False
+  try:
+    from ...graph_api.client.factory import GraphClientFactory
+
+    client = await GraphClientFactory.create_client(
+      graph_id=subgraph_id, operation_type="read"
+    )
+    try:
+      db_info = await client.get_database_info(subgraph_id)
+      ladybug_exists = db_info.get("is_healthy", False)
+    finally:
+      await client.close()
+  except (ConnectionError, TimeoutError) as e:
+    logger.warning(f"Could not connect to check subgraph {subgraph_id}: {e}")
+  except Exception as e:
+    logger.info(f"Subgraph {subgraph_id} not found in LadybugDB: {e}")
+
+  # If both exist, we're done
+  if postgres_exists and ladybug_exists:
+    logger.info(f"Subgraph {subgraph_id} fully exists (LadybugDB + PostgreSQL)")
+    return {
+      "status": "exists",
+      "graph_id": subgraph_id,
+      "parent_graph_id": parent_repository_name,
+      "subgraph_name": subgraph_name,
+    }
+
+  logger.info(
+    f"Subgraph {subgraph_id} needs setup "
+    f"(postgres={postgres_exists}, ladybug={ladybug_exists})"
+  )
+
+  manifest = get_manifest(parent_repository_name)
+
+  # Step 4a: Create LadybugDB database if needed
+  if not ladybug_exists:
+    from .subgraph_service import SubgraphService
+
+    service = SubgraphService()
+    db_result = await service.create_subgraph_database(
+      parent_graph_id=parent_repository_name,
+      subgraph_name=subgraph_name,
+      schema_extensions=list(manifest.schema_extensions) if manifest else [],
+      platform_managed=True,
+    )
+    logger.info(
+      f"LadybugDB database created for {subgraph_id}: {db_result.get('status')}"
+    )
+
+  # Step 4b: Create PostgreSQL record if needed
+  if not postgres_exists:
+    from datetime import UTC, datetime
+
+    from ...database import get_db_session
+    from ...models.iam.graph import Graph
+
+    db_gen = get_db_session()
+    db = next(db_gen)
+    try:
+      # Get parent graph record for inheriting properties
+      parent_graph = (
+        db.query(Graph).filter(Graph.graph_id == parent_repository_name).first()
+      )
+      if not parent_graph:
+        raise ValueError(
+          f"Parent graph '{parent_repository_name}' not found in PostgreSQL. "
+          "Run ensure_shared_repository_exists() first."
+        )
+
+      # Determine next subgraph index
+      existing_subgraphs = (
+        db.query(Graph)
+        .filter(Graph.parent_graph_id == parent_repository_name)
+        .order_by(Graph.subgraph_index.desc())
+        .all()
+      )
+      next_index = (
+        (existing_subgraphs[0].subgraph_index + 1) if existing_subgraphs else 1
+      )
+
+      now = datetime.now(UTC)
+      subgraph = Graph(
+        graph_id=subgraph_id,
+        org_id=None,  # Shared repo subgraphs are system-wide
+        graph_name=description or f"{parent_graph.graph_name} ({subgraph_name})",
+        graph_type=parent_graph.graph_type,
+        base_schema=parent_graph.base_schema,
+        schema_extensions=parent_graph.schema_extensions or [],
+        graph_instance_id=parent_graph.graph_instance_id,
+        graph_cluster_region=parent_graph.graph_cluster_region,
+        graph_tier=parent_graph.graph_tier,
+        parent_graph_id=parent_repository_name,
+        subgraph_index=next_index,
+        subgraph_name=subgraph_name,
+        is_subgraph=True,
+        subgraph_metadata={
+          "subgraph_type": "static",
+          "platform_managed": True,
+        },
+        is_repository=False,
+        created_at=now,
+        updated_at=now,
+      )
+      db.add(subgraph)
+      db.commit()
+
+      logger.info(
+        f"Created PostgreSQL record for subgraph {subgraph_id} "
+        f"(index {next_index}, parent {parent_repository_name})"
+      )
+    finally:
+      try:
+        next(db_gen)
+      except StopIteration:
+        pass
+
+  return {
+    "status": "created",
+    "graph_id": subgraph_id,
+    "parent_graph_id": parent_repository_name,
+    "subgraph_name": subgraph_name,
+    "created_by": created_by or "system",
+  }
+
+
 async def ensure_shared_repository_exists(
   repository_name: str,
   created_by: str | None = None,

@@ -45,10 +45,6 @@ Usage:
     just sec-stage                 # Stage 1: Stage to DuckDB only
     just sec-materialize-graph     # Stage 2: Materialize to LadybugDB (retry-safe)
 
-    # Alternative: Direct S3 → LadybugDB (bypasses DuckDB staging):
-    just sec-direct-copy           # Copy all data, rebuild graph (default)
-    just sec-direct-copy sec 2024  # Copy 2024 only, rebuild graph
-
     # Reset database
     just sec-reset
 """
@@ -60,6 +56,7 @@ import sys
 import tempfile
 import time
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -70,6 +67,9 @@ from robosystems.config.storage.shared import (
   get_raw_key,
 )
 from robosystems.logger import logger
+
+# Primary graph starts at 2024 (source of truth: adapters/sec/pipeline/configs.py)
+SEC_PRIMARY_START_YEAR = 2024
 
 # Top companies by market cap (as of 2024)
 # Used when --count is specified without --tickers
@@ -94,7 +94,8 @@ TOP_COMPANIES_BY_MARKET_CAP = [
 ]
 
 DEFAULT_COMPANY_COUNT = 5
-ALL_YEARS = [2019, 2020, 2021, 2022, 2023, 2024, 2025]
+_current_year = datetime.now(UTC).year
+ALL_YEARS = list(range(SEC_PRIMARY_START_YEAR, _current_year + 1))
 
 
 def year_to_quarters(year: int | str) -> list[str]:
@@ -211,11 +212,10 @@ class SECPipeline:
     """Create YAML config for Dagster job.
 
     Args:
-        job_type: "download_only", "stage", "materialize_duckdb", or "direct_copy"
+        job_type: "download_only", "stage", or "materialize_duckdb"
         graph_id: Graph ID for staging/materialization jobs
         reset_staging: Whether to delete DuckDB file before staging (fresh start)
-        rebuild_graph: Whether to rebuild LadybugDB (materialize/direct_copy jobs)
-        skip_taxonomy: Whether to skip taxonomy relationship tables (direct_copy only)
+        rebuild_graph: Whether to rebuild LadybugDB (materialize jobs)
     """
     if job_type == "stage":
       # sec_stage job - stages to persistent DuckDB only (Stage 1)
@@ -243,20 +243,6 @@ class SECPipeline:
               "batch_materialization": False,  # Disable hash-based batching for local dev
             }
           },
-        }
-      }
-    elif job_type == "direct_copy":
-      # sec_direct_copy job - direct S3 → LadybugDB (bypasses DuckDB staging)
-      direct_copy_config: dict[str, Any] = {
-        "graph_id": graph_id,
-        "rebuild_graph": rebuild_graph,
-        "skip_taxonomy_relationships": skip_taxonomy,
-      }
-      if year:
-        direct_copy_config["year"] = int(year)
-      config = {
-        "ops": {
-          "sec_graph_direct_copy": {"config": direct_copy_config},
         }
       }
     else:
@@ -1127,82 +1113,6 @@ def cmd_materialize_graph(args):
   return 0 if result.success else 1
 
 
-def cmd_direct_copy(args):
-  """Direct S3 → LadybugDB copy (bypasses DuckDB staging).
-
-  This command uses the sec_direct_copy job to load parquet files directly
-  from S3 into LadybugDB, bypassing DuckDB staging entirely.
-
-  Benefits over DuckDB staging:
-  - No memory pressure from DuckDB merge/dedupe operations
-  - Proven to work at scale (200M+ rows)
-  - Uses LadybugDB's httpfs extension with spill_to_disk=true
-
-  Note: Rebuild is enabled by default. Use --no-rebuild to append instead.
-  """
-  logger.info("=" * 60)
-  logger.info("SEC Direct S3 → LadybugDB Copy (Bypasses DuckDB)")
-  logger.info("=" * 60)
-  logger.info("Loading parquet files directly from S3 into LadybugDB")
-  if args.rebuild_graph:
-    logger.info("Rebuild enabled (default) - will delete and recreate LadybugDB")
-  else:
-    logger.info("[WARNING] Append mode (--no-rebuild) - duplicates may occur")
-  if args.year:
-    logger.info(f"Year filter: {args.year}")
-  if args.skip_taxonomy:
-    logger.info("Skipping taxonomy relationship tables")
-  logger.info("=" * 60)
-
-  # Create minimal pipeline for direct copy
-  pipeline = SECPipeline(
-    tickers=[],
-    years=[],
-    skip_download=True,
-    skip_processing=True,
-    skip_reset=True,
-    verbose=args.verbose,
-    materialize_timeout=args.timeout,
-  )
-
-  # Run direct copy job
-  config_path = pipeline._create_job_config(
-    tickers=[],
-    year=args.year,
-    job_type="direct_copy",
-    graph_id=args.graph_id,
-    rebuild_graph=args.rebuild_graph,
-    skip_taxonomy=args.skip_taxonomy,
-  )
-
-  result = pipeline.run_stage(
-    job_name="sec_direct_copy",
-    config_path=config_path,
-    timeout=args.timeout,
-  )
-
-  if result.success:
-    logger.info(f"Direct copy complete ({result.duration_seconds:.1f}s)")
-  else:
-    logger.error(f"Direct copy failed: {result.error}")
-
-  if args.json:
-    print(
-      json.dumps(
-        {
-          "status": "success" if result.success else "failure",
-          "duration_seconds": result.duration_seconds,
-          "error": result.error,
-          "graph_id": args.graph_id,
-          "method": "direct_copy",
-        },
-        indent=2,
-      )
-    )
-
-  return 0 if result.success else 1
-
-
 def cmd_process(args):
   """Process pending filings via SourceFile queue (quarterly batch processing).
 
@@ -1432,40 +1342,6 @@ def main():
   )
   process_parser.add_argument("--json", action="store_true", help="JSON output")
 
-  # Direct copy command - Alternative to DuckDB staging (bypasses DuckDB entirely)
-  direct_copy_parser = subparsers.add_parser(
-    "direct-copy",
-    help="Direct S3 → LadybugDB copy (bypasses DuckDB staging)",
-  )
-  direct_copy_parser.add_argument(
-    "--graph-id", type=str, default="sec", help="Graph ID (default: sec)"
-  )
-  direct_copy_parser.add_argument(
-    "--year", type=str, help="Optional year filter (e.g., 2024)"
-  )
-  direct_copy_parser.add_argument(
-    "--no-rebuild",
-    action="store_false",
-    dest="rebuild_graph",
-    default=True,
-    help="Skip rebuild and append to existing LadybugDB (not recommended - may cause duplicates)",
-  )
-  direct_copy_parser.add_argument(
-    "--skip-taxonomy",
-    action="store_true",
-    help="Skip taxonomy relationship tables (Association, Structure, etc.)",
-  )
-  direct_copy_parser.add_argument(
-    "--timeout",
-    type=int,
-    default=DEFAULT_MATERIALIZE_TIMEOUT,
-    help=f"Timeout in seconds (default: {DEFAULT_MATERIALIZE_TIMEOUT})",
-  )
-  direct_copy_parser.add_argument(
-    "-v", "--verbose", action="store_true", help="Verbose output"
-  )
-  direct_copy_parser.add_argument("--json", action="store_true", help="JSON output")
-
   args = parser.parse_args()
 
   if args.command == "run":
@@ -1480,8 +1356,6 @@ def main():
     sys.exit(cmd_materialize_graph(args))
   elif args.command == "process":
     sys.exit(cmd_process(args))
-  elif args.command == "direct-copy":
-    sys.exit(cmd_direct_copy(args))
   else:
     parser.print_help()
     sys.exit(0)

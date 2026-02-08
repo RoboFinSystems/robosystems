@@ -17,8 +17,13 @@ Pipeline stages (run independently via separate jobs):
    - sec_stage job: sec_duckdb_staged - Stage processed files to persistent DuckDB
    - sec_materialize job: sec_graph_materialized - Materialize from DuckDB to LadybugDB
 
-4. INCREMENTAL (daily updates):
-   - sec_graph_incremental_copy - Direct S3 -> LadybugDB copy for current quarter
+3b. HISTORICAL MATERIALIZE (two-stage pipeline for sec_historical):
+   - sec_historical_stage job: sec_historical_duckdb_staged - Stage historical data to DuckDB
+   - sec_historical_materialize job: sec_historical_materialized - Materialize to LadybugDB
+
+4. INCREMENTAL (nightly updates, sec graph only):
+   - sec_duckdb_incremental_staged - Stage current quarter to DuckDB (INSERT with dedup)
+   - sec_graph_materialized - Full LadybugDB rebuild from DuckDB
    - sec_entity_incremental_update - Update mutable Entity attributes
 
 5. BACKUP (subscriber downloads):
@@ -40,13 +45,15 @@ Usage:
 from robosystems.adapters.sec.pipeline.backup import sec_backup
 from robosystems.adapters.sec.pipeline.configs import (
   SEC_FORM_TYPE_BATCHES,
+  SEC_HISTORICAL_END_YEAR,
+  SEC_HISTORICAL_FORM_TYPES,
+  SEC_PRIMARY_START_YEAR,
   SEC_QUARTERS,
   SEC_START_YEAR,
   SECBackupConfig,
-  SECDirectCopyConfig,
   SECDownloadConfig,
   SECEntityUpdateConfig,
-  SECIncrementalCopyConfig,
+  SECHistoricalStageConfig,
   SECIncrementalStageConfig,
   SECMaterializeConfig,
   SECProcessConfig,
@@ -59,36 +66,34 @@ from robosystems.adapters.sec.pipeline.entity_update import (
 )
 from robosystems.adapters.sec.pipeline.jobs import (
   sec_backup_job,
-  sec_direct_copy_job,
   sec_download_job,
   sec_entity_update_job,
-  sec_incremental_copy_job,
+  sec_historical_materialize_job,
+  sec_historical_stage_job,
+  sec_historical_staged_materialize_job,
   sec_incremental_stage_job,
   sec_materialize_job,
   sec_process_job,
-  sec_replica_refresh_job,
-  sec_s3_publish_job,
   sec_stage_job,
   sec_staged_materialize_job,
 )
 from robosystems.adapters.sec.pipeline.materialize import (
-  sec_graph_direct_copy,
-  sec_graph_incremental_copy,
   sec_graph_materialized,
+  sec_historical_materialized,
 )
 from robosystems.adapters.sec.pipeline.process import sec_processed_filings
 from robosystems.adapters.sec.pipeline.sensors import (
   sec_download_to_process_sensor,
   sec_incremental_download_schedule,
-  sec_incremental_post_ingest_s3_sync_sensor,
   sec_incremental_staging_sensor,
   sec_post_materialize_s3_sync_sensor,
   sec_processing_sensor,
-  sec_stage_to_copy_sensor,
+  sec_stage_to_materialize_sensor,
 )
 from robosystems.adapters.sec.pipeline.stage import (
   sec_duckdb_incremental_staged,
   sec_duckdb_staged,
+  sec_historical_duckdb_staged,
 )
 
 
@@ -103,11 +108,11 @@ def get_dagster_components():
       sec_raw_filings,
       sec_processed_filings,
       sec_duckdb_staged,
+      sec_historical_duckdb_staged,
       sec_duckdb_incremental_staged,
-      sec_graph_direct_copy,
-      sec_graph_incremental_copy,
       sec_entity_incremental_update,
       sec_graph_materialized,
+      sec_historical_materialized,
       sec_backup,
     ],
     "jobs": [
@@ -116,21 +121,19 @@ def get_dagster_components():
       sec_stage_job,
       sec_materialize_job,
       sec_staged_materialize_job,
+      sec_historical_stage_job,
+      sec_historical_materialize_job,
+      sec_historical_staged_materialize_job,
       sec_incremental_stage_job,
-      sec_incremental_copy_job,
       sec_entity_update_job,
-      sec_direct_copy_job,
       sec_backup_job,
-      sec_s3_publish_job,
-      sec_replica_refresh_job,
     ],
     "sensors": [
       sec_processing_sensor,
       sec_post_materialize_s3_sync_sensor,
       sec_download_to_process_sensor,
       sec_incremental_staging_sensor,
-      sec_stage_to_copy_sensor,
-      sec_incremental_post_ingest_s3_sync_sensor,
+      sec_stage_to_materialize_sensor,
     ],
     "schedules": [
       sec_incremental_download_schedule,
@@ -140,13 +143,15 @@ def get_dagster_components():
 
 __all__ = [
   "SEC_FORM_TYPE_BATCHES",
+  "SEC_HISTORICAL_END_YEAR",
+  "SEC_HISTORICAL_FORM_TYPES",
+  "SEC_PRIMARY_START_YEAR",
   "SEC_QUARTERS",
   "SEC_START_YEAR",
   "SECBackupConfig",
-  "SECDirectCopyConfig",
   "SECDownloadConfig",
   "SECEntityUpdateConfig",
-  "SECIncrementalCopyConfig",
+  "SECHistoricalStageConfig",
   "SECIncrementalStageConfig",
   "SECMaterializeConfig",
   "SECProcessConfig",
@@ -154,19 +159,19 @@ __all__ = [
   "get_dagster_components",
   "sec_backup",
   "sec_backup_job",
-  "sec_direct_copy_job",
   "sec_download_job",
   "sec_download_to_process_sensor",
   "sec_duckdb_incremental_staged",
   "sec_duckdb_staged",
   "sec_entity_incremental_update",
   "sec_entity_update_job",
-  "sec_graph_direct_copy",
-  "sec_graph_incremental_copy",
   "sec_graph_materialized",
-  "sec_incremental_copy_job",
+  "sec_historical_duckdb_staged",
+  "sec_historical_materialize_job",
+  "sec_historical_materialized",
+  "sec_historical_stage_job",
+  "sec_historical_staged_materialize_job",
   "sec_incremental_download_schedule",
-  "sec_incremental_post_ingest_s3_sync_sensor",
   "sec_incremental_stage_job",
   "sec_incremental_staging_sensor",
   "sec_materialize_job",
@@ -176,9 +181,7 @@ __all__ = [
   "sec_processing_sensor",
   "sec_quarter_partitions",
   "sec_raw_filings",
-  "sec_replica_refresh_job",
-  "sec_s3_publish_job",
   "sec_stage_job",
-  "sec_stage_to_copy_sensor",
+  "sec_stage_to_materialize_sensor",
   "sec_staged_materialize_job",
 ]

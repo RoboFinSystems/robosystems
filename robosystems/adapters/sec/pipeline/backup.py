@@ -32,12 +32,14 @@ from .configs import SECBackupConfig
 
 @asset(
   group_name="sec_pipeline",
-  description="Create downloadable backup of SEC database for user downloads",
+  description="Create downloadable SEC database backup",
   kinds={"backup"},
   deps=["sec_graph_materialized"],
   metadata={
     "pipeline": "sec",
+    "graph_id": "sec",
     "stage": "backup",
+    "mode": "full",
   },
 )
 def sec_backup(

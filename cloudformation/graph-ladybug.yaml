@@ -80,8 +80,8 @@ Parameters:
     Type: String
     Default: ""
     Description: Comma-separated list of shared repositories to host (e.g., sec,industry,economic). Only used when WriterTier is ladybug-shared
-    AllowedPattern: "^$|^[a-z]+(,[a-z]+)*$"
-    ConstraintDescription: Must be a comma-separated list of repository names (sec, industry, economic, regulatory, market, esg)
+    AllowedPattern: "^$|^[a-z0-9_]+(,[a-z0-9_]+)*$"
+    ConstraintDescription: Must be a comma-separated list of repository names (sec, sec_historical, industry, economic)
 
   # Tier Configuration Parameters (passed from graph.yml via workflow)
   InstanceType:

@@ -393,12 +393,11 @@ duckdb-query-i graph_id env=_local_env:
 #   just sec-process all=1                    # Process all pending files
 #   just sec-process reset_errors=1           # Retry failed files
 #   just sec-pipeline 50 2024
-#   just sec-direct-copy 2024                  # Direct S3 → LadybugDB (bypasses DuckDB)
 
 # --- Full Pipeline (convenience) ---
 
 # Full pipeline: download → process → materialize (top N companies by market cap)
-sec-pipeline count="10" year="2025":
+sec-pipeline count="10" year="":
     @just sec-download {{count}} {{year}}
     @just sec-process
     @just sec-materialize
@@ -445,19 +444,6 @@ sec-stage year="" env=_local_env:
 sec-materialize-graph env=_local_env:
     UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.sec_pipeline materialize-graph \
         --graph-id sec
-
-# Direct S3 → LadybugDB copy (bypasses DuckDB staging)
-# Alternative when DuckDB staging hits memory limits on large tables
-# Rebuild is ON by default - use no_rebuild=1 to append instead
-# Usage: just sec-direct-copy [year]
-#   just sec-direct-copy           # Copy all years, rebuild graph (default)
-#   just sec-direct-copy 2024      # Copy 2024 only, rebuild graph
-sec-direct-copy year="" no_rebuild="" skip_taxonomy="" env=_local_env:
-    UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.sec_pipeline direct-copy \
-        --graph-id sec \
-        {{ if year != "" { "--year " + year } else { "" } }} \
-        {{ if no_rebuild != "" { "--no-rebuild" } else { "" } }} \
-        {{ if skip_taxonomy != "" { "--skip-taxonomy" } else { "" } }}
 
 # --- Utilities ---
 

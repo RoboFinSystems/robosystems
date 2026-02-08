@@ -321,9 +321,15 @@ class GraphClientFactory:
       if is_shared_repository(graph_id.lower()):
         # Route to shared repository infrastructure
         return await cls._create_shared_repository_client(graph_id, operation_type)
-      else:
-        # Route to user graph writers
-        return await cls._create_user_graph_client(graph_id, environment, tier)
+
+      # Check for shared repo subgraphs (e.g., sec_historical)
+      subgraph_info = parse_subgraph_id(graph_id)
+      if subgraph_info and is_shared_repository(subgraph_info.parent_graph_id.lower()):
+        # Route shared repo subgraphs to shared infrastructure
+        return await cls._create_shared_repository_client(graph_id, operation_type)
+
+      # Route to user graph writers
+      return await cls._create_user_graph_client(graph_id, environment, tier)
     except ServiceUnavailableError as e:
       # Enhance error with routing context
       raise ServiceUnavailableError(

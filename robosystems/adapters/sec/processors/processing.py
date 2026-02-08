@@ -31,6 +31,7 @@ class ProcessedFilingResult:
   tables: dict[str, bytes]  # table_key -> parquet bytes (e.g., "nodes/Entity")
   filing_date: str | None = None  # YYYY-MM-DD from SEC metadata
   error: str | None = None
+  skipped_reason: str | None = None  # Set when filing is filtered out (e.g., form type)
 
 
 def process_single_filing_to_memory(
@@ -40,6 +41,7 @@ def process_single_filing_to_memory(
   s3_client,
   raw_bucket: str,
   metadata_loader: "SECMetadataLoader",
+  allowed_form_types: list[str] | None = None,
 ) -> ProcessedFilingResult:
   """Process a single filing and return parquet data in memory.
 
@@ -56,6 +58,9 @@ def process_single_filing_to_memory(
       s3_client: boto3 S3 client
       raw_bucket: S3 bucket for raw files
       metadata_loader: SECMetadataLoader instance for fetching SEC metadata
+      allowed_form_types: If set, only process filings with these form types.
+          Filings with non-matching types return success with empty tables
+          and skipped_reason set.
 
   Returns:
       ProcessedFilingResult with parquet data or error
@@ -143,6 +148,18 @@ def process_single_filing_to_memory(
       )
       if not sec_report.get("primaryDocument"):
         sec_report["primaryDocument"] = xbrl_files[0]
+
+      # Check form type filter before heavy XBRL processing
+      if allowed_form_types:
+        form_type = sec_report.get("form", "")
+        if form_type not in allowed_form_types:
+          return ProcessedFilingResult(
+            success=True,
+            source_file_id=source_file_id,
+            partition_key=partition_key,
+            tables={},
+            skipped_reason=f"form_type={form_type}",
+          )
 
       # Process with XBRLGraphProcessor
       processor = XBRLGraphProcessor(

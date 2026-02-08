@@ -25,12 +25,14 @@ from .configs import (
 
 @asset(
   group_name="sec_pipeline",
-  description="Download SEC XBRL filings for a specific quarter using EFTS discovery",
+  description="Download SEC XBRL filings from EFTS to S3",
   kinds={"download"},
   partitions_def=sec_quarter_partitions,
   metadata={
     "pipeline": "sec",
-    "stage": "extraction",
+    "graph_id": "sec",
+    "stage": "download",
+    "mode": "full",
   },
   # Run all partitions sequentially in a single run to prevent SEC rate limiting
   backfill_policy=BackfillPolicy.single_run(),

@@ -42,22 +42,20 @@ from dagster import (
   define_asset_job,
 )
 
-from robosystems.dagster.assets.shared_repositories import (
-  shared_replicas_refreshed,
-  shared_repository_s3_published,
-)
-
 from .backup import sec_backup
 from .configs import sec_quarter_partitions
 from .download import sec_raw_filings
 from .entity_update import sec_entity_incremental_update
 from .materialize import (
-  sec_graph_direct_copy,
-  sec_graph_incremental_copy,
   sec_graph_materialized,
+  sec_historical_materialized,
 )
 from .process import sec_processed_filings
-from .stage import sec_duckdb_incremental_staged, sec_duckdb_staged
+from .stage import (
+  sec_duckdb_incremental_staged,
+  sec_duckdb_staged,
+  sec_historical_duckdb_staged,
+)
 
 # ============================================================================
 # SEC Pipeline Jobs
@@ -70,7 +68,7 @@ from .stage import sec_duckdb_incremental_staged, sec_duckdb_staged
 # Use with sec_processing_sensor to trigger parallel processing.
 sec_download_job = define_asset_job(
   name="sec_download",
-  description="Download SEC XBRL filings to S3 via EFTS (quarterly partitions).",
+  description="Download SEC XBRL filings from EFTS to S3.",
   selection=AssetSelection.assets(
     sec_raw_filings,
   ),
@@ -89,7 +87,7 @@ sec_download_job = define_asset_job(
 # EFTS returns max 10k filings per quarterly partition, but batch_limit caps per run.
 sec_process_job = define_asset_job(
   name="sec_process",
-  description="Process an entire quarter's SEC filings with disk-buffered output.",
+  description="Process SEC filings into parquet files.",
   selection=AssetSelection.assets(
     sec_processed_filings,
   ),
@@ -125,7 +123,7 @@ sec_process_job = define_asset_job(
 # Actual DuckDB work happens on LadybugDB instance via Graph API.
 sec_stage_job = define_asset_job(
   name="sec_stage",
-  description="Stage SEC files to persistent DuckDB (no graph ingestion).",
+  description="Stage SEC parquet files to DuckDB (full rebuild).",
   selection=AssetSelection.assets(sec_duckdb_staged),
   tags={
     "pipeline": "sec",
@@ -149,7 +147,7 @@ sec_stage_job = define_asset_job(
 # Actual materialization happens on LadybugDB instance via Graph API.
 sec_materialize_job = define_asset_job(
   name="sec_materialize",
-  description="Materialize SEC graph from DuckDB staging (retry-safe).",
+  description="Materialize SEC graph from DuckDB to LadybugDB.",
   selection=AssetSelection.assets(sec_graph_materialized),
   tags={
     "pipeline": "sec",
@@ -172,7 +170,7 @@ sec_materialize_job = define_asset_job(
 # Actual work happens on LadybugDB instance via Graph API.
 sec_staged_materialize_job = define_asset_job(
   name="sec_staged_materialize",
-  description="Full SEC pipeline: stage to DuckDB then materialize to LadybugDB.",
+  description="Stage and materialize SEC graph (DuckDB + LadybugDB).",
   selection=AssetSelection.assets(sec_duckdb_staged, sec_graph_materialized),
   tags={
     "pipeline": "sec",
@@ -194,18 +192,17 @@ sec_staged_materialize_job = define_asset_job(
 # ============================================================================
 # Phase 3b: Incremental DuckDB Staging (Keep DuckDB in Sync)
 # ============================================================================
-# Incremental staging to DuckDB for daily SEC updates.
+# Incremental staging to DuckDB for nightly SEC updates.
 # INSERT new quarter files with dedup - only net new rows added.
 #
-# This keeps DuckDB ready for a full rebuild if needed, but we don't
-# run the expensive sec_graph_materialized (full rebuild) daily.
-# Instead, after staging, we run sec_incremental_copy for fast updates.
+# After staging, sec_stage_to_materialize_sensor triggers a full
+# LadybugDB rebuild from DuckDB (feasible because sec graph is 2024+ only).
 #
-# Chain: process → stage (this) → copy → S3 sync
+# Chain: process → stage (this) → materialize → entity update → S3 sync
 
 sec_incremental_stage_job = define_asset_job(
   name="sec_incremental_stage",
-  description="Incremental DuckDB staging (keeps DuckDB in sync for potential rebuilds).",
+  description="Stage current quarter to SEC DuckDB (incremental).",
   selection=AssetSelection.assets(sec_duckdb_incremental_staged),
   tags={
     "pipeline": "sec",
@@ -225,33 +222,21 @@ sec_incremental_stage_job = define_asset_job(
 
 
 # ============================================================================
-# Phase 3c: Direct S3 → LadybugDB Copy (Bypasses DuckDB Staging)
+# Phase 3c: Historical DuckDB Stage + Materialize (for sec_historical)
 # ============================================================================
-# Alternative to DuckDB staging for large-scale loads where DuckDB
-# merge operations would exceed memory limits.
-#
-# Benefits:
-# - No memory pressure from DuckDB merge/dedupe operations
-# - Proven to work at scale (200M+ rows)
-# - Uses LadybugDB's httpfs extension with spill_to_disk=true
-# - Simpler pipeline with fewer moving parts
-#
-# Trade-offs:
-# - Relies on LadybugDB constraints for deduplication (not pre-deduped)
-# - Must rebuild graph to avoid duplicates (rebuild_graph=true recommended)
+# Two-stage pipeline for sec_historical: DuckDB staging then LadybugDB materialization.
+# Uses the same decoupled pattern as the primary sec graph.
 
-sec_direct_copy_job = define_asset_job(
-  name="sec_direct_copy",
-  description="Direct S3 → LadybugDB copy (bypasses DuckDB staging).",
-  selection=AssetSelection.assets(sec_graph_direct_copy),
+sec_historical_stage_job = define_asset_job(
+  name="sec_historical_stage",
+  description="Stage SEC historical parquet files to DuckDB (full rebuild).",
+  selection=AssetSelection.assets(sec_historical_duckdb_staged),
   tags={
     "pipeline": "sec",
-    "phase": "direct_copy",
-    # Minimal profile: just orchestrating Graph API calls, no local compute
+    "phase": "historical_stage",
     "ecs/cpu": "256",
     "ecs/memory": "512",
     "ecs/ephemeral_storage": "21",
-    # On-demand to avoid interruptions (long-running orchestration)
     "ecs/run_task_kwargs": {
       "capacityProviderStrategy": [
         {"capacityProvider": "FARGATE", "weight": 1, "base": 1},
@@ -260,31 +245,36 @@ sec_direct_copy_job = define_asset_job(
   },
 )
 
-
-# ============================================================================
-# Phase 3d: Incremental S3 → LadybugDB Copy (Preferred for Daily Updates)
-# ============================================================================
-# Preferred approach for daily incremental updates because:
-# - Copies directly from S3 parquet to LadybugDB (bypasses DuckDB)
-# - Uses ignore_errors=true to skip duplicates (constraint violations)
-# - No need to diff what's new in DuckDB vs LadybugDB
-# - Simpler and faster than DuckDB incremental staging
-#
-# Only scans current quarter + previous quarter during 5-day overlap.
-# Safe to run daily - duplicates are rejected by LadybugDB constraints.
-
-sec_incremental_copy_job = define_asset_job(
-  name="sec_incremental_copy",
-  description="Incremental S3 → LadybugDB copy (preferred for daily updates).",
-  selection=AssetSelection.assets(sec_graph_incremental_copy),
+sec_historical_materialize_job = define_asset_job(
+  name="sec_historical_materialize",
+  description="Materialize SEC historical graph from DuckDB to LadybugDB.",
+  selection=AssetSelection.assets(sec_historical_materialized),
   tags={
     "pipeline": "sec",
-    "mode": "incremental_copy",
-    # Minimal profile: just orchestrating Graph API calls, no local compute
+    "phase": "historical_materialize",
     "ecs/cpu": "256",
     "ecs/memory": "512",
     "ecs/ephemeral_storage": "21",
-    # On-demand to avoid interruptions (long-running orchestration)
+    "ecs/run_task_kwargs": {
+      "capacityProviderStrategy": [
+        {"capacityProvider": "FARGATE", "weight": 1, "base": 1},
+      ],
+    },
+  },
+)
+
+sec_historical_staged_materialize_job = define_asset_job(
+  name="sec_historical_staged_materialize",
+  description="Stage and materialize SEC historical graph (DuckDB + LadybugDB).",
+  selection=AssetSelection.assets(
+    sec_historical_duckdb_staged, sec_historical_materialized
+  ),
+  tags={
+    "pipeline": "sec",
+    "phase": "historical_full",
+    "ecs/cpu": "256",
+    "ecs/memory": "512",
+    "ecs/ephemeral_storage": "21",
     "ecs/run_task_kwargs": {
       "capacityProviderStrategy": [
         {"capacityProvider": "FARGATE", "weight": 1, "base": 1},
@@ -301,18 +291,18 @@ sec_incremental_copy_job = define_asset_job(
 # Entity nodes are unique in being mutable - company names, tickers,
 # filer categories can change over time.
 #
-# The incremental COPY only INSERTs new records - it cannot update existing
-# ones due to primary key constraints. This job uses Cypher MERGE to update
-# existing Entity nodes.
+# Materialization rebuilds the graph from DuckDB but cannot update existing
+# Entity nodes with changed attributes. This job uses Cypher MERGE to update
+# existing Entity nodes with latest values.
 #
 # Typically 50-200 entities change per quarter. MERGE is 40x slower than COPY,
 # but acceptable for small update volumes.
 #
-# Chain: process → stage → copy → entity_update → S3 sync
+# Chain: process → stage → materialize → entity_update → S3 sync
 
 sec_entity_update_job = define_asset_job(
   name="sec_entity_update",
-  description="Update existing Entity nodes with latest data (handles mutable attributes).",
+  description="Update mutable Entity attributes via Cypher MERGE.",
   selection=AssetSelection.assets(sec_entity_incremental_update),
   tags={
     "pipeline": "sec",
@@ -339,7 +329,7 @@ sec_entity_update_job = define_asset_job(
 
 sec_backup_job = define_asset_job(
   name="sec_create_backup",
-  description="Create downloadable backup of SEC database for user downloads.",
+  description="Create downloadable SEC database backup.",
   selection=AssetSelection.assets(sec_backup),
   tags={
     "pipeline": "sec",
@@ -350,63 +340,6 @@ sec_backup_job = define_asset_job(
     "ecs/memory": "512",
     "ecs/ephemeral_storage": "21",
     # On-demand to avoid interruptions during backup monitoring
-    "ecs/run_task_kwargs": {
-      "capacityProviderStrategy": [
-        {"capacityProvider": "FARGATE", "weight": 1, "base": 1},
-      ],
-    },
-  },
-)
-
-
-# ============================================================================
-# Phase 5: Publish (S3 for Replica Cluster)
-# ============================================================================
-# Publishes the raw .lbug database to S3 for replica cluster consumption.
-# Replicas use LadybugDB S3 ATTACH to connect directly to the published database.
-# This is distinct from sec_backup which creates compressed, downloadable backups.
-
-sec_s3_publish_job = define_asset_job(
-  name="sec_s3_publish",
-  description="Publish SEC database to S3 for replica cluster (S3 ATTACH source).",
-  selection=AssetSelection.assets(shared_repository_s3_published),
-  tags={
-    "pipeline": "sec",
-    "phase": "publish",
-    # Minimal profile: runs CHECKPOINT via HTTP, then SSM for S3 upload
-    # Actual upload happens on the shared master instance via SSM
-    "ecs/cpu": "256",
-    "ecs/memory": "512",
-    "ecs/ephemeral_storage": "21",
-    # On-demand to avoid interruptions during publish
-    "ecs/run_task_kwargs": {
-      "capacityProviderStrategy": [
-        {"capacityProvider": "FARGATE", "weight": 1, "base": 1},
-      ],
-    },
-  },
-)
-
-
-# ============================================================================
-# Phase 5b: Replica Fleet Refresh (After S3 Publish)
-# ============================================================================
-# Triggers rolling refresh of replica fleet to pick up new S3 database.
-# Monitors progress as each instance is replaced.
-# At scale (100+ replicas), this can take hours.
-
-sec_replica_refresh_job = define_asset_job(
-  name="sec_replica_refresh",
-  description="Rolling refresh of replica fleet to pick up new S3 database.",
-  selection=AssetSelection.assets(shared_replicas_refreshed),
-  tags={
-    "pipeline": "sec",
-    "phase": "replica_refresh",
-    # Minimal profile: just monitoring ASG refresh via boto3
-    "ecs/cpu": "256",
-    "ecs/memory": "512",
-    "ecs/ephemeral_storage": "21",
-    # On-demand to avoid interruptions during long-running refresh monitoring
     "ecs/run_task_kwargs": {
       "capacityProviderStrategy": [
         {"capacityProvider": "FARGATE", "weight": 1, "base": 1},

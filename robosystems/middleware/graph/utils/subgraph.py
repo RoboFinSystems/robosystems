@@ -35,7 +35,7 @@ class SubgraphInfo(NamedTuple):
 # Regex patterns for subgraph parsing
 # NOTE: SUBGRAPH_NAME_PATTERN is imported from types.py for consistency
 
-# Only user graphs (kg prefix) can be parents - shared repositories CANNOT have subgraphs
+# User graphs (kg prefix) can be parents; shared repos can also be parents (platform-managed only)
 PARENT_GRAPH_PATTERN = re.compile(r"^kg[a-f0-9]{16,}$")
 
 # Subgraph name validation (compiled from imported pattern for efficiency)
@@ -46,12 +46,20 @@ SUBGRAPH_NAME_PATTERN = re.compile(SUBGRAPH_NAME_PATTERN_STR)
 FULL_SUBGRAPH_PATTERN = re.compile(r"^(kg[a-f0-9]{16,})_([a-zA-Z0-9]{1,20})$")
 
 
+def _is_shared_repo(graph_id: str) -> bool:
+  """Check if a graph ID is a shared repository (lazy import to avoid circular imports)."""
+  from robosystems.config.shared_repositories import is_shared_repository
+
+  return is_shared_repository(graph_id)
+
+
 def parse_subgraph_id(graph_id: str) -> SubgraphInfo | None:
   """Parse a graph ID to determine if it's a subgraph.
 
   Uses underscore notation for subgraphs:
   - Parent graph: kg5f2e5e0da65d45d69645
   - Subgraph: kg5f2e5e0da65d45d69645_dev
+  - Shared repo subgraph: sec_historical
 
   Args:
       graph_id: The graph identifier to parse
@@ -59,6 +67,7 @@ def parse_subgraph_id(graph_id: str) -> SubgraphInfo | None:
   Returns:
       SubgraphInfo if this is a subgraph, None otherwise
   """
+  # Try kg-prefix pattern first
   match = FULL_SUBGRAPH_PATTERN.match(graph_id)
   if match:
     parent_id = match.group(1)
@@ -70,6 +79,22 @@ def parse_subgraph_id(graph_id: str) -> SubgraphInfo | None:
       subgraph_name=subgraph_name,
       database_name=graph_id,  # Database name is same as graph_id with underscore
     )
+
+  # Fallback: check if this is a shared repo subgraph (e.g., "sec_historical")
+  if "_" in graph_id:
+    parts = graph_id.split("_", 1)
+    parent_part = parts[0]
+    subgraph_part = parts[1] if len(parts) > 1 else ""
+
+    if parent_part and subgraph_part and _is_shared_repo(parent_part):
+      # Validate the subgraph name portion
+      if SUBGRAPH_NAME_PATTERN.match(subgraph_part):
+        return SubgraphInfo(
+          graph_id=graph_id,
+          parent_graph_id=parent_part,
+          subgraph_name=subgraph_part,
+          database_name=graph_id,
+        )
 
   return None
 
@@ -94,6 +119,8 @@ def validate_subgraph_name(name: str) -> bool:
 def validate_parent_graph_id(graph_id: str) -> bool:
   """Validate that a graph ID can be a parent (not a subgraph).
 
+  Accepts both user graph IDs (kg prefix) and shared repository IDs.
+
   Args:
       graph_id: The graph ID to validate
 
@@ -104,8 +131,11 @@ def validate_parent_graph_id(graph_id: str) -> bool:
   if parse_subgraph_id(graph_id):
     return False
 
-  # Check it matches valid parent patterns
-  return bool(PARENT_GRAPH_PATTERN.match(graph_id))
+  # Check it matches valid parent patterns (user graphs or shared repos)
+  if PARENT_GRAPH_PATTERN.match(graph_id):
+    return True
+
+  return _is_shared_repo(graph_id)
 
 
 def construct_subgraph_id(parent_graph_id: str, subgraph_name: str) -> str:

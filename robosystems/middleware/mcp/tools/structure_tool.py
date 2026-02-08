@@ -60,8 +60,8 @@ class StructureTool(BaseTool):
         Human-readable description of the graph
     """
     try:
-      # Special handling for SEC database
-      if self.client.graph_id == "sec":
+      # Special handling for SEC databases (primary and historical)
+      if self.client.graph_id in ("sec", "sec_historical"):
         # Get schema information
         schema = await self.client.get_schema()
 
@@ -71,7 +71,18 @@ class StructureTool(BaseTool):
           if item["type"] == "node" and item.get("count", 0) > 0:
             entity_counts[item["label"]] = item["count"]
 
-        description = "This is the SEC shared repository containing public company financial data:\n\n"
+        is_historical = self.client.graph_id == "sec_historical"
+
+        if is_historical:
+          description = (
+            "This is the SEC historical repository containing public company financial data "
+            "from 2009-2023:\n\n"
+          )
+        else:
+          description = (
+            "This is the SEC shared repository containing public company financial data "
+            "(2024+):\n\n"
+          )
 
         # Add specific counts
         if "Entity" in entity_counts:
@@ -86,6 +97,18 @@ class StructureTool(BaseTool):
           )
         if "Element" in entity_counts:
           description += f"- {entity_counts['Element']:,} financial concepts/metrics\n"
+
+        # Add sibling workspace reference
+        if is_historical:
+          description += (
+            "\n**Note:** This is the historical archive (2009-2023). "
+            "For current data (2024+), switch to the `sec` workspace.\n"
+          )
+        else:
+          description += (
+            "\n**Note:** For historical data (2009-2023), switch to the "
+            "`sec_historical` workspace via `switch-workspace`.\n"
+          )
 
         # Add capabilities
         description += "\n**Analysis Capabilities:**\n"

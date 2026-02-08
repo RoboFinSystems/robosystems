@@ -52,6 +52,7 @@ class SubgraphService:
     parent_graph_id: str,
     subgraph_name: str,
     schema_extensions: list[str] | None = None,
+    platform_managed: bool = False,
   ) -> dict[str, Any]:
     """
     Create a new subgraph database on the parent's instance.
@@ -59,10 +60,15 @@ class SubgraphService:
     This method creates a new database on the same instance as the parent graph,
     allowing Enterprise/Premium customers to maximize their dedicated infrastructure.
 
+    For shared repositories, subgraphs can only be created with platform_managed=True
+    (used by Dagster jobs and platform scripts). The user-facing API does not pass
+    this flag, keeping shared repo subgraphs platform-only.
+
     Args:
-        parent_graph_id: Parent graph identifier (must be Enterprise/Premium)
+        parent_graph_id: Parent graph identifier
         subgraph_name: Alphanumeric name for the subgraph (1-20 chars)
         schema_extensions: Optional schema extensions to apply
+        platform_managed: If True, allow creation on shared repositories
 
     Returns:
         Dictionary with creation status and details including:
@@ -81,10 +87,10 @@ class SubgraphService:
     if not validate_parent_graph_id(parent_graph_id):
       raise ValueError(f"Invalid parent graph ID: {parent_graph_id}")
 
-    if is_shared_repository(parent_graph_id.lower()):
+    if is_shared_repository(parent_graph_id.lower()) and not platform_managed:
       raise ValueError(
-        f"Shared repository '{parent_graph_id}' cannot have subgraphs. "
-        "Subgraphs are only available for user-owned Enterprise/Premium graphs."
+        f"Shared repository '{parent_graph_id}' requires platform-managed subgraph creation. "
+        "User-created subgraphs are only available for user-owned graphs."
       )
 
     if not validate_subgraph_name(subgraph_name):
@@ -175,8 +181,30 @@ class SubgraphService:
         logger.info(
           f"Using local graph instance: {parent_location.instance_id} at {parent_location.private_ip}"
         )
+      elif is_shared_repository(parent_graph_id.lower()):
+        # For shared repos in production, use shared master discovery
+        from ...graph_api.client.factory import GraphClientFactory
+
+        master_url = await GraphClientFactory._get_shared_master_url()
+        # Extract IP from URL (http://10.0.1.123:8001 -> 10.0.1.123)
+        master_ip = master_url.replace("http://", "").split(":")[0]
+
+        from dataclasses import dataclass
+
+        @dataclass
+        class SharedMasterLocation:
+          instance_id: str
+          private_ip: str
+
+        parent_location = SharedMasterLocation(
+          instance_id="shared-master",
+          private_ip=master_ip,
+        )
+        logger.info(
+          f"Using shared master for subgraph creation: {parent_location.private_ip}"
+        )
       else:
-        # For production graphs, use the allocation manager to find in DynamoDB
+        # For production user graphs, use the allocation manager to find in DynamoDB
         parent_location = await self.allocation_manager.find_database_location(
           parent_graph_id
         )
@@ -254,6 +282,7 @@ class SubgraphService:
     metadata: dict | None = None,
     fork_parent: bool = False,
     fork_options: dict[str, Any] | None = None,
+    platform_managed: bool = False,
   ) -> dict[str, Any]:
     """
     Create a subgraph including both the database and PostgreSQL metadata.
@@ -274,6 +303,7 @@ class SubgraphService:
         metadata: Optional metadata dict
         fork_parent: If True, copy data from parent graph (creates a "fork")
         fork_options: Options for forking (tables, filters, etc.)
+        platform_managed: If True, allow creation on shared repositories
 
     Returns:
         Dictionary with created subgraph details
@@ -295,6 +325,7 @@ class SubgraphService:
         parent_graph_id=parent_graph.graph_id,
         subgraph_name=name,
         schema_extensions=parent_graph.schema_extensions or [],
+        platform_managed=platform_managed,
       )
       logger.info(f"LadybugDB database created: {db_creation_result}")
     except Exception as e:
