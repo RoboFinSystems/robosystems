@@ -10,7 +10,6 @@ from sqlalchemy.exc import SQLAlchemyError
 from robosystems.models.iam import User, UserRepository
 from robosystems.models.iam.user_repository import (
   RepositoryAccessLevel,
-  RepositoryPlan,
   RepositoryType,
   safe_bool,
   safe_str,
@@ -96,10 +95,19 @@ class TestUserRepository:
     assert RepositoryAccessLevel.WRITE.value == "write"
     assert RepositoryAccessLevel.ADMIN.value == "admin"
 
-  def test_repository_plan_enum(self):
-    """Test RepositoryPlan enum values."""
-    assert RepositoryPlan.STARTER.value == "starter"
-    assert RepositoryPlan.ADVANCED.value == "advanced"
+  def test_repository_plan_is_string_column(self):
+    """Test repository_plan is a plain string column (not an enum)."""
+    # Plans are defined in adapter manifests, not constrained by a DB enum.
+    # The default is "starter".
+    repo = UserRepository(
+      user_id=self.user.id,
+      repository_type=RepositoryType.SEC,
+      repository_name="sec",
+      access_level=RepositoryAccessLevel.READ,
+    )
+    self.session.add(repo)
+    self.session.commit()
+    assert repo.repository_plan == "starter"
 
   def test_create_user_repository(self):
     """Test creating a UserRepository instance."""
@@ -108,14 +116,14 @@ class TestUserRepository:
       repository_type=RepositoryType.SEC,
       repository_name="sec",
       access_level=RepositoryAccessLevel.READ,
-      repository_plan=RepositoryPlan.STARTER,
+      repository_plan="starter",
     )
 
     assert repo.user_id == self.user.id
     assert repo.repository_type == RepositoryType.SEC
     assert repo.repository_name == "sec"
     assert repo.access_level == RepositoryAccessLevel.READ
-    assert repo.repository_plan == RepositoryPlan.STARTER
+    assert repo.repository_plan == "starter"
     assert repo.is_active is None  # Not set until session add
 
     self.session.add(repo)
@@ -134,7 +142,7 @@ class TestUserRepository:
       repository_type=RepositoryType.SEC,
       repository_name="sec",
       access_level=RepositoryAccessLevel.READ,
-      repository_plan=RepositoryPlan.STARTER,
+      repository_plan="starter",
       session=self.session,
       granted_by=self.admin.id,
       monthly_price_cents=2999,
@@ -147,7 +155,7 @@ class TestUserRepository:
     assert access.repository_type == RepositoryType.SEC
     assert access.repository_name == "sec"
     assert access.access_level == RepositoryAccessLevel.READ
-    assert access.repository_plan == RepositoryPlan.STARTER
+    assert access.repository_plan == "starter"
     assert access.granted_by == self.admin.id
     assert access.granted_at is not None
     assert access.is_active is True
@@ -168,7 +176,7 @@ class TestUserRepository:
       repository_type=RepositoryType.SEC,
       repository_name="sec",
       access_level=RepositoryAccessLevel.READ,
-      repository_plan=RepositoryPlan.STARTER,
+      repository_plan="starter",
       session=self.session,
     )
 
@@ -180,7 +188,7 @@ class TestUserRepository:
       repository_type=RepositoryType.SEC,
       repository_name="sec",
       access_level=RepositoryAccessLevel.WRITE,
-      repository_plan=RepositoryPlan.ADVANCED,
+      repository_plan="advanced",
       session=self.session,
       granted_by=self.admin.id,
       monthly_price_cents=9999,
@@ -190,7 +198,7 @@ class TestUserRepository:
     # Should be the same record, updated
     assert updated.id == initial_id
     assert updated.access_level == RepositoryAccessLevel.WRITE
-    assert updated.repository_plan == RepositoryPlan.ADVANCED
+    assert updated.repository_plan == "advanced"
     assert updated.monthly_price_cents == 9999
     assert updated.monthly_credit_allocation == 25000
 
@@ -203,7 +211,7 @@ class TestUserRepository:
       repository_type=RepositoryType.SEC,
       repository_name="sec_temp",
       access_level=RepositoryAccessLevel.READ,
-      repository_plan=RepositoryPlan.STARTER,
+      repository_plan="starter",
       session=self.session,
       expires_at=expires,
     )
@@ -219,7 +227,7 @@ class TestUserRepository:
           repository_type=RepositoryType.SEC,
           repository_name="sec_error",
           access_level=RepositoryAccessLevel.READ,
-          repository_plan=RepositoryPlan.STARTER,
+          repository_plan="starter",
           session=self.session,
         )
 
@@ -230,7 +238,7 @@ class TestUserRepository:
       repository_type=RepositoryType.SEC,
       repository_name="sec",
       access_level=RepositoryAccessLevel.READ,
-      repository_plan=RepositoryPlan.STARTER,
+      repository_plan="starter",
       session=self.session,
     )
 
@@ -255,7 +263,7 @@ class TestUserRepository:
       repository_type=RepositoryType.SEC,
       repository_name="sec",
       access_level=RepositoryAccessLevel.READ,
-      repository_plan=RepositoryPlan.STARTER,
+      repository_plan="starter",
       session=self.session,
     )
 
@@ -274,7 +282,7 @@ class TestUserRepository:
       repository_type=RepositoryType.SEC,
       repository_name="sec_expired",
       access_level=RepositoryAccessLevel.READ,
-      repository_plan=RepositoryPlan.STARTER,
+      repository_plan="starter",
       session=self.session,
       expires_at=past,
     )
@@ -291,7 +299,7 @@ class TestUserRepository:
       repository_type=RepositoryType.SEC,
       repository_name="sec_none",
       access_level=RepositoryAccessLevel.NONE,
-      repository_plan=RepositoryPlan.STARTER,
+      repository_plan="starter",
       session=self.session,
     )
 
@@ -307,7 +315,7 @@ class TestUserRepository:
       repository_type=RepositoryType.SEC,
       repository_name="sec",
       access_level=RepositoryAccessLevel.WRITE,
-      repository_plan=RepositoryPlan.ADVANCED,
+      repository_plan="advanced",
       session=self.session,
     )
 
@@ -326,7 +334,7 @@ class TestUserRepository:
       repository_type=RepositoryType.SEC,
       repository_name="sec",
       access_level=RepositoryAccessLevel.READ,
-      repository_plan=RepositoryPlan.STARTER,
+      repository_plan="starter",
       session=self.session,
     )
 
@@ -335,7 +343,7 @@ class TestUserRepository:
       repository_type=RepositoryType.INDUSTRY,
       repository_name="industry_tech",
       access_level=RepositoryAccessLevel.WRITE,
-      repository_plan=RepositoryPlan.ADVANCED,
+      repository_plan="advanced",
       session=self.session,
     )
 
@@ -353,7 +361,7 @@ class TestUserRepository:
       repository_type=RepositoryType.SEC,
       repository_name="sec_active",
       access_level=RepositoryAccessLevel.READ,
-      repository_plan=RepositoryPlan.STARTER,
+      repository_plan="starter",
       session=self.session,
     )
 
@@ -362,7 +370,7 @@ class TestUserRepository:
       repository_type=RepositoryType.SEC,
       repository_name="sec_inactive",
       access_level=RepositoryAccessLevel.READ,
-      repository_plan=RepositoryPlan.STARTER,
+      repository_plan="starter",
       session=self.session,
     )
 
@@ -403,7 +411,7 @@ class TestUserRepository:
       repository_type=RepositoryType.SEC,
       repository_name="sec",
       access_level=RepositoryAccessLevel.READ,
-      repository_plan=RepositoryPlan.STARTER,
+      repository_plan="starter",
       session=self.session,
     )
 
@@ -412,7 +420,7 @@ class TestUserRepository:
       repository_type=RepositoryType.SEC,
       repository_name="sec",
       access_level=RepositoryAccessLevel.ADMIN,
-      repository_plan=RepositoryPlan.ADVANCED,
+      repository_plan="advanced",
       session=self.session,
     )
 
@@ -442,7 +450,7 @@ class TestUserRepository:
       repository_type=RepositoryType.SEC,
       repository_name="sec1",
       access_level=RepositoryAccessLevel.READ,
-      repository_plan=RepositoryPlan.STARTER,
+      repository_plan="starter",
       session=self.session,
     )
 
@@ -451,7 +459,7 @@ class TestUserRepository:
       repository_type=RepositoryType.SEC,
       repository_name="sec2",
       access_level=RepositoryAccessLevel.READ,
-      repository_plan=RepositoryPlan.STARTER,
+      repository_plan="starter",
       session=self.session,
     )
 
@@ -460,7 +468,7 @@ class TestUserRepository:
       repository_type=RepositoryType.INDUSTRY,
       repository_name="industry1",
       access_level=RepositoryAccessLevel.READ,
-      repository_plan=RepositoryPlan.STARTER,
+      repository_plan="starter",
       session=self.session,
     )
 
@@ -479,7 +487,7 @@ class TestUserRepository:
       repository_type=RepositoryType.SEC,
       repository_name="sec",
       access_level=RepositoryAccessLevel.READ,
-      repository_plan=RepositoryPlan.STARTER,
+      repository_plan="starter",
       session=self.session,
     )
 
@@ -498,7 +506,7 @@ class TestUserRepository:
       repository_type=RepositoryType.SEC,
       repository_name="sec",
       access_level=RepositoryAccessLevel.READ,
-      repository_plan=RepositoryPlan.STARTER,
+      repository_plan="starter",
       session=self.session,
       monthly_price_cents=2999,
       monthly_credits=5000,
@@ -506,13 +514,13 @@ class TestUserRepository:
 
     with patch("robosystems.models.iam.user_repository.logger") as mock_logger:
       access.upgrade_tier(
-        new_plan=RepositoryPlan.ADVANCED,
+        new_plan="advanced",
         session=self.session,
         new_price_cents=9999,
         new_credits=25000,
       )
 
-    assert access.repository_plan == RepositoryPlan.ADVANCED
+    assert access.repository_plan == "advanced"
     assert access.monthly_price_cents == 9999
     assert access.monthly_credit_allocation == 25000
     mock_logger.info.assert_called_once()
@@ -669,13 +677,13 @@ class TestUserRepository:
       user_id=self.user.id,
       repository_type=RepositoryType.SEC,
       repository_name="sec",
-      repository_plan=RepositoryPlan.STARTER,
+      repository_plan="starter",
     )
 
     config = access.get_repository_plan_config()
 
     assert config["name"] == "Starter"
-    assert config["monthly_credits"] == 0  # AI credits coming soon
+    assert config["monthly_credits"] == 5000
     assert config["price_monthly"] == 29.0
     assert config["access_level"] == "read"
 
@@ -706,7 +714,7 @@ class TestUserRepository:
       repository_type=RepositoryType.SEC,
       repository_name="sec",
       access_level=RepositoryAccessLevel.READ,
-      repository_plan=RepositoryPlan.STARTER,
+      repository_plan="starter",
       session=self.session,
       monthly_price_cents=2999,
       monthly_credits=5000,
@@ -735,14 +743,14 @@ class TestUserRepository:
       repository_type=RepositoryType.SEC,
       repository_name="sec",
       access_level=RepositoryAccessLevel.WRITE,
-      repository_plan=RepositoryPlan.ADVANCED,
+      repository_plan="advanced",
     )
 
     repr_str = repr(access)
     assert f"<UserRepository(user={self.user.id}" in repr_str
     assert "repo=sec" in repr_str
     assert "level=RepositoryAccessLevel.WRITE" in repr_str
-    assert "plan=RepositoryPlan.ADVANCED" in repr_str
+    assert "plan=advanced" in repr_str
 
   def test_unique_constraint(self):
     """Test unique constraint on user/repository combination."""
@@ -752,7 +760,7 @@ class TestUserRepository:
       repository_type=RepositoryType.SEC,
       repository_name="sec_unique",
       access_level=RepositoryAccessLevel.READ,
-      repository_plan=RepositoryPlan.STARTER,
+      repository_plan="starter",
       session=self.session,
     )
 
@@ -762,7 +770,7 @@ class TestUserRepository:
       repository_type=RepositoryType.SEC,
       repository_name="sec_unique",
       access_level=RepositoryAccessLevel.WRITE,
-      repository_plan=RepositoryPlan.ADVANCED,
+      repository_plan="advanced",
       session=self.session,
     )
 

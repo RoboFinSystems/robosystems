@@ -19,7 +19,6 @@ from robosystems.middleware.graph.utils import MultiTenantUtils
 from robosystems.models.iam import User
 from robosystems.models.iam.user_repository import (
   RepositoryAccessLevel,
-  RepositoryPlan,
   RepositoryType,
   UserRepository,
 )
@@ -48,7 +47,7 @@ class TestCreditRaceConditions:
       repository_type=RepositoryType.SEC,
       repository_name="sec",
       access_level=RepositoryAccessLevel.READ,
-      repository_plan=RepositoryPlan.STARTER,
+      repository_plan="starter",
       session=db_session,
       monthly_credits=100,
     )
@@ -106,7 +105,7 @@ class TestCreditRaceConditions:
       repository_type=RepositoryType.SEC,
       repository_name="sec_overflow",
       access_level=RepositoryAccessLevel.READ,
-      repository_plan=RepositoryPlan.ADVANCED,
+      repository_plan="advanced",
       session=db_session,
       monthly_credits=999999,  # Near max
     )
@@ -267,7 +266,7 @@ class TestSecurityAuditLogging:
       repository_type=RepositoryType.SEC,
       repository_name="sec",
       access_level=RepositoryAccessLevel.READ,
-      repository_plan=RepositoryPlan.STARTER,
+      repository_plan="starter",
       session=db_session,
       monthly_credits=100,
     )

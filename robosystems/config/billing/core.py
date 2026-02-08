@@ -156,20 +156,13 @@ class BillingConfig:
     Returns:
         Dict with plan details including price_cents, monthly_credits, features
     """
-    from robosystems.config.shared_repositories import RepositoryPlan, get_plan_details
+    from robosystems.config.shared_repositories import get_plan_details
 
     # Extract the plan tier from the plan name (e.g., 'sec-starter' -> 'starter')
     plan_tier = plan_name.split("-")[-1] if "-" in plan_name else plan_name
 
-    # Validate the plan tier
-    try:
-      repo_plan = RepositoryPlan(plan_tier)
-    except ValueError:
-      logger.warning(f"Invalid repository plan: {plan_name}")
-      return None
-
     # Get plan details (pass repo_id for per-repo plan lookup)
-    plan_details = get_plan_details(repo_plan, repo_id=repository_id)
+    plan_details = get_plan_details(plan_tier, repo_id=repository_id)
     if not plan_details:
       return None
 

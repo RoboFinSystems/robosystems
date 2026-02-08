@@ -9,9 +9,6 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from robosystems.config.shared_repositories import (
-  RepositoryPlan,
-)
-from robosystems.config.shared_repositories import (
   get_rate_limits as _get_rate_limits,
 )
 from robosystems.config.valkey_registry import (
@@ -39,7 +36,7 @@ class DownloadRateLimiter:
     return f"download_limit:{repository}:{user_id}:{today}"
 
   @classmethod
-  def _get_daily_limit(cls, repository: str, plan: RepositoryPlan) -> int:
+  def _get_daily_limit(cls, repository: str, plan: str) -> int:
     """Get the daily download limit for a repository and plan."""
     try:
       limits = _get_rate_limits(repository, plan)
@@ -63,7 +60,7 @@ class DownloadRateLimiter:
     cls,
     user_id: str,
     repository: str,
-    plan: RepositoryPlan,
+    plan: str,
   ) -> tuple[bool, int, datetime]:
     """
     Check if user has remaining downloads for the day.
@@ -145,7 +142,7 @@ class DownloadRateLimiter:
     cls,
     user_id: str,
     repository: str,
-    plan: RepositoryPlan,
+    plan: str,
   ) -> dict:
     """
     Get the full download quota information for a user.

@@ -761,7 +761,7 @@ async def run_user_repository_provisioning(
     BillingEventType,
     BillingSubscription,
   )
-  from robosystems.models.iam import RepositoryPlan, RepositoryType
+  from robosystems.models.iam import RepositoryType
   from robosystems.operations.graph.repository_subscription_service import (
     RepositorySubscriptionService,
   )
@@ -807,7 +807,7 @@ async def run_user_repository_provisioning(
       # Validate repository type and plan
       try:
         repository_type = RepositoryType(repository_name)
-        repository_plan = RepositoryPlan(plan_tier)
+        repository_plan = plan_tier
       except ValueError as e:
         raise ValueError(
           f"Invalid repository type '{repository_name}' or plan '{plan_tier}': {e}"

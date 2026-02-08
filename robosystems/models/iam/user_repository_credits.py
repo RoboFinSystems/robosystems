@@ -27,7 +27,6 @@ from sqlalchemy.orm import Session, relationship
 
 from ...database import Base
 from ...utils.ulid import generate_prefixed_ulid
-from .user_repository import RepositoryPlan
 
 logger = logging.getLogger(__name__)
 
@@ -129,18 +128,12 @@ class UserRepositoryCredits(Base):
     cls,
     access_id: str,
     repository_type: str,
-    repository_plan: "RepositoryPlan",
+    repository_plan: str,
     monthly_allocation: int,
     session: Session,
   ) -> "UserRepositoryCredits":
     """Create credit pool for a new access record."""
     from datetime import timedelta
-
-    from .user_repository import RepositoryPlan
-
-    # Convert string values to enums if needed
-    if isinstance(repository_plan, str):
-      repository_plan = RepositoryPlan(repository_plan)
 
     # No rollover for repository credits - same as user graph credits
     allows_rollover = False

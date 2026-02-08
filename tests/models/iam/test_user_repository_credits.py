@@ -11,7 +11,6 @@ from sqlalchemy.exc import SQLAlchemyError
 from robosystems.models.iam import User, UserRepository, UserRepositoryCredits
 from robosystems.models.iam.user_repository import (
   RepositoryAccessLevel,
-  RepositoryPlan,
   RepositoryType,
 )
 from robosystems.models.iam.user_repository_credits import (
@@ -59,7 +58,7 @@ class TestUserRepositoryCredits:
       repository_type=RepositoryType.SEC,
       repository_name="sec",
       access_level=RepositoryAccessLevel.READ,
-      repository_plan=RepositoryPlan.STARTER,
+      repository_plan="starter",
       is_active=True,
       monthly_credit_allocation=5000,
     )
@@ -132,7 +131,7 @@ class TestUserRepositoryCredits:
       repository_type=RepositoryType.INDUSTRY,
       repository_name="industry_tech",
       access_level=RepositoryAccessLevel.READ,
-      repository_plan=RepositoryPlan.ADVANCED,
+      repository_plan="advanced",
       is_active=True,
     )
     self.session.add(repo_access2)
@@ -141,7 +140,7 @@ class TestUserRepositoryCredits:
     credits = UserRepositoryCredits.create_for_access(
       access_id=repo_access2.id,
       repository_type=RepositoryType.INDUSTRY,
-      repository_plan=RepositoryPlan.ADVANCED,
+      repository_plan="advanced",
       monthly_allocation=10000,
       session=self.session,
     )
@@ -183,7 +182,7 @@ class TestUserRepositoryCredits:
       repository_type=RepositoryType.SEC,
       repository_name="sec2",
       access_level=RepositoryAccessLevel.READ,
-      repository_plan=RepositoryPlan.STARTER,
+      repository_plan="starter",
     )
     self.session.add(repo_access2)
     self.session.commit()
@@ -193,7 +192,7 @@ class TestUserRepositoryCredits:
         UserRepositoryCredits.create_for_access(
           access_id=repo_access2.id,
           repository_type=RepositoryType.SEC,
-          repository_plan=RepositoryPlan.STARTER,
+          repository_plan="starter",
           monthly_allocation=5000,
           session=self.session,
         )
@@ -566,7 +565,7 @@ class TestUserRepositoryCreditTransaction:
       repository_type=RepositoryType.SEC,
       repository_name="sec",
       access_level=RepositoryAccessLevel.READ,
-      repository_plan=RepositoryPlan.STARTER,
+      repository_plan="starter",
       is_active=True,
     )
     self.session.add(self.repo_access)

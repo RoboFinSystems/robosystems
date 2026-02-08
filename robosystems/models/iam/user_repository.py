@@ -30,7 +30,6 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, relationship
 
 from ...config.graph_tier import GraphTier
-from ...config.shared_repositories import RepositoryPlan as BillingRepositoryPlan
 from ...config.shared_repositories import get_plan_details as _get_plan_details
 from ...database import Model
 from ...utils.ulid import generate_prefixed_ulid
@@ -49,9 +48,6 @@ class RepositoryType(str, Enum):
   SEC = "sec"
   INDUSTRY = "industry"
   ECONOMIC = "economic"
-
-
-RepositoryPlan = BillingRepositoryPlan
 
 
 # Type-safe helpers for SQLAlchemy model attributes
@@ -100,10 +96,8 @@ class UserRepository(Model):
     SQLEnum(RepositoryAccessLevel), nullable=False, default=RepositoryAccessLevel.NONE
   )
 
-  # Repository plan management
-  repository_plan = Column(
-    SQLEnum(RepositoryPlan), nullable=False, default=RepositoryPlan.STARTER
-  )
+  # Repository plan management (plain String — plans defined in adapter manifests)
+  repository_plan = Column(String, nullable=False, default="starter")
 
   # Status and lifecycle
   is_active = Column(Boolean, nullable=False, default=True)
@@ -185,7 +179,7 @@ class UserRepository(Model):
     repository_type: RepositoryType,
     repository_name: str,
     access_level: RepositoryAccessLevel,
-    repository_plan: RepositoryPlan,
+    repository_plan: str,
     session: Session,
     granted_by: str | None = None,
     monthly_price_cents: int = 0,
@@ -381,7 +375,7 @@ class UserRepository(Model):
 
   def upgrade_tier(
     self,
-    new_plan: RepositoryPlan,
+    new_plan: str,
     session: Session,
     new_price_cents: int | None = None,
     new_credits: int | None = None,
@@ -508,7 +502,7 @@ class UserRepository(Model):
 
         Empty dict if plan is not configured.
     """
-    plan_details = _get_plan_details(cast(RepositoryPlan, self.repository_plan))
+    plan_details = _get_plan_details(self.repository_plan)
     if not plan_details:
       return {}
 
@@ -538,7 +532,7 @@ class UserRepository(Model):
       "repository_type": self.repository_type,
       "repository_name": self.repository_name,
       "access_level": self.access_level.value,
-      "repository_plan": self.repository_plan.value,
+      "repository_plan": self.repository_plan,
       "is_active": safe_bool(self.is_active),
       "activated_at": self.activated_at.isoformat(),
       "expires_at": self.expires_at.isoformat() if self.expires_at else None,

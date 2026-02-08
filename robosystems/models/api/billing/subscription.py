@@ -7,7 +7,7 @@ repository subscriptions, credit allocation, tier management, and user subscript
 from pydantic import BaseModel, Field
 
 # Import enums from the IAM models
-from ...iam.user_repository import RepositoryPlan, RepositoryType
+from ...iam.user_repository import RepositoryType
 
 
 class RepositoryPlanInfo(BaseModel):
@@ -75,9 +75,7 @@ class SubscriptionRequest(BaseModel):
   repository_type: RepositoryType = Field(
     ..., description="Type of repository to subscribe to"
   )
-  repository_plan: RepositoryPlan = Field(
-    RepositoryPlan.STARTER, description="Repository plan"
-  )
+  repository_plan: str = Field("starter", description="Repository plan")
 
 
 class SubscriptionResponse(BaseModel):
@@ -92,7 +90,7 @@ class SubscriptionResponse(BaseModel):
 class TierUpgradeRequest(BaseModel):
   """Request to upgrade subscription tier."""
 
-  new_plan: RepositoryPlan = Field(..., description="New repository plan")
+  new_plan: str = Field(..., description="New repository plan")
 
 
 class CreditSummary(BaseModel):

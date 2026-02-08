@@ -50,15 +50,15 @@ SEC_MANIFEST = SharedRepositoryManifest(
       "price_cents": 2900,
       "price_monthly": 29.0,
       "price_display": "$29/month",
-      "monthly_credits": 0,
+      "monthly_credits": 5000,  # ~130 agent calls/month
       "access_level": "READ",
       "description": "Full SEC data access for individuals",
       "features": [
+        "5,000 AI agent credits per month",
         "Full SEC data (all companies, all history)",
+        "Unlimited MCP tool access",
         "API access",
-        "MCP tools for Claude Desktop",
         "Standard rate limits",
-        "AI credits (coming soon)",
       ],
     },
     "advanced": {
@@ -66,10 +66,11 @@ SEC_MANIFEST = SharedRepositoryManifest(
       "price_cents": 9900,
       "price_monthly": 99.0,
       "price_display": "$99/month",
-      "monthly_credits": 0,
+      "monthly_credits": 17000,  # ~450 agent calls/month
       "access_level": "READ",
       "description": "Higher throughput for production workloads",
       "features": [
+        "17,000 AI agent credits per month",
         "Everything in Starter",
         "5x higher rate limits",
         "Production-ready throughput",

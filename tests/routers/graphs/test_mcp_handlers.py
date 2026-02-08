@@ -274,7 +274,6 @@ class TestMCPAccessValidation:
     from robosystems.models.iam.graph import Graph
     from robosystems.models.iam.user_repository import (
       RepositoryAccessLevel,
-      RepositoryPlan,
       RepositoryType,
       UserRepository,
     )
@@ -300,7 +299,7 @@ class TestMCPAccessValidation:
       repository_type=RepositoryType.SEC,
       repository_name="sec",
       access_level=RepositoryAccessLevel.READ,
-      repository_plan=RepositoryPlan.STARTER,
+      repository_plan="starter",
       is_active=True,
     )
     db_session.add(access_record)

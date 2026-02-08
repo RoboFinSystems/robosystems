@@ -14,9 +14,6 @@ from fastapi import APIRouter, Depends
 
 from ..config import BillingConfig, env
 from ..config.shared_repositories import (
-  RepositoryPlan,
-)
-from ..config.shared_repositories import (
   get_all_manifests as _get_all_manifests,
 )
 from ..config.shared_repositories import (
@@ -202,11 +199,7 @@ async def get_service_offerings(
       plans = []
       if manifest.plans:
         for plan_key, plan_details in manifest.plans.items():
-          try:
-            plan_enum = RepositoryPlan(plan_key)
-          except ValueError:
-            continue
-          rate_limits = _get_rate_limits(repo_id, plan_enum)
+          rate_limits = _get_rate_limits(repo_id, plan_key)
 
           plan_info = {
             "plan": plan_key,
