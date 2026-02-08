@@ -426,6 +426,7 @@ jobs:
       shared_repositories: ${{ inputs.shared_repositories }}
       # Instance Configuration
       instance_type: ${{ matrix.instance_type }}
+      databases_per_instance: "${{ matrix.databases_per_instance }}"
       ami_id: ${{ needs.resolve-ami.outputs.ami_id }}
       # Valkey Configuration
       valkey_sg_id: ${{ inputs.valkey_sg_id }}

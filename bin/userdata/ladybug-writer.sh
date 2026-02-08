@@ -343,6 +343,7 @@ export AWS_REGION="${REGION}"
 export AWS_STACK_NAME="${AWS_STACK_NAME}"
 export REPOSITORY_TYPE="${REPOSITORY_TYPE:-}"
 export SHARED_REPOSITORIES="${SHARED_REPOSITORIES:-}"
+export MAX_DATABASES="${MAX_DATABASES:-1}"
 
 # Run shared registration script
 /usr/local/bin/register-graph-instance.sh

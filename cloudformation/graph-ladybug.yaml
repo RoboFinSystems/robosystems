@@ -88,6 +88,12 @@ Parameters:
     Type: String
     Description: EC2 instance type for this tier
     AllowedPattern: ^[a-z][0-9][a-z]\.(micro|small|medium|large|xlarge|2xlarge|4xlarge)$
+  DatabasesPerInstance:
+    Type: Number
+    Default: 1
+    MinValue: 1
+    MaxValue: 100
+    Description: Maximum number of databases per instance (from graph.yml databases_per_instance)
 
   # Docker Configuration
   ECRImageTag:
@@ -454,12 +460,13 @@ Resources:
                 --item "{
                   \"instance_id\": {\"S\": \"$INSTANCE_ID\"},
                   \"cluster_tier\": {\"S\": \"${WriterTier}\"},
+                  \"tier\": {\"S\": \"${WriterTier}\"},
                   \"private_ip\": {\"S\": \"$PRIVATE_IP\"},
                   \"stack_name\": {\"S\": \"${AWS::StackName}\"},
                   \"node_type\": {\"S\": \"writer\"},
                   \"status\": {\"S\": \"initializing\"},
                   \"database_count\": {\"N\": \"0\"},
-                  \"max_databases\": {\"N\": \"10\"},
+                  \"max_databases\": {\"N\": \"${DatabasesPerInstance}\"},
                   \"created_at\": {\"S\": \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"},
                   \"repository_types\": {\"S\": \"${SharedRepositories}\"}
                 }" \
@@ -471,12 +478,13 @@ Resources:
                 --item "{
                   \"instance_id\": {\"S\": \"$INSTANCE_ID\"},
                   \"cluster_tier\": {\"S\": \"${WriterTier}\"},
+                  \"tier\": {\"S\": \"${WriterTier}\"},
                   \"private_ip\": {\"S\": \"$PRIVATE_IP\"},
                   \"stack_name\": {\"S\": \"${AWS::StackName}\"},
                   \"node_type\": {\"S\": \"writer\"},
                   \"status\": {\"S\": \"initializing\"},
                   \"database_count\": {\"N\": \"0\"},
-                  \"max_databases\": {\"N\": \"10\"},
+                  \"max_databases\": {\"N\": \"${DatabasesPerInstance}\"},
                   \"created_at\": {\"S\": \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}
                 }" \
                 --region ${AWS::Region}
@@ -533,6 +541,7 @@ Resources:
             export INSTANCE_TYPE=$(curl -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/latest/meta-data/instance-type)
             export LBUG_PORT="8001"
             export WRITER_TIER="${WriterTier}"
+            export MAX_DATABASES="${DatabasesPerInstance}"
             export AWS_ACCOUNT_ID="${AWS::AccountId}"
             export AWS_STACK_NAME="${AWS::StackName}"
             export ECR_URI="${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/robosystems"
