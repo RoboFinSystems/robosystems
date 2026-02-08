@@ -1,7 +1,6 @@
 import pytest
 
 from robosystems.config.shared_repositories import (
-  RepositoryPlan,
   get_all_repository_pricing,
   get_credit_costs,
   get_plan_details,
@@ -11,11 +10,11 @@ from robosystems.config.shared_repositories import (
 
 
 def test_get_plan_details_returns_plan_metadata():
-  details = get_plan_details(RepositoryPlan.ADVANCED)
+  details = get_plan_details("advanced")
 
   assert details is not None
   assert details["price_cents"] == 9900
-  assert "Everything in Starter" in details["features"][0]
+  assert "Everything in Starter" in details["features"][1]
 
 
 def test_get_plan_details_returns_none_for_unknown():
@@ -25,8 +24,8 @@ def test_get_plan_details_returns_none_for_unknown():
 @pytest.mark.parametrize(
   "repository,plan,expected_key",
   [
-    ("sec", RepositoryPlan.STARTER, "queries_per_hour"),
-    ("sec", RepositoryPlan.ADVANCED, "agent_calls_per_day"),
+    ("sec", "starter", "queries_per_hour"),
+    ("sec", "advanced", "agent_calls_per_day"),
   ],
 )
 def test_get_rate_limits_returns_config(repository, plan, expected_key):
@@ -37,7 +36,7 @@ def test_get_rate_limits_returns_config(repository, plan, expected_key):
 
 
 def test_get_rate_limits_returns_none_for_unknown_repo():
-  assert get_rate_limits("nonexistent", RepositoryPlan.STARTER) is None
+  assert get_rate_limits("nonexistent", "starter") is None
 
 
 @pytest.mark.parametrize(
@@ -54,7 +53,7 @@ def test_is_endpoint_allowed_matches_blocklists(endpoint, expected):
 
 
 def test_get_plan_details_with_explicit_repo_id():
-  details = get_plan_details(RepositoryPlan.STARTER, repo_id="sec")
+  details = get_plan_details("starter", repo_id="sec")
 
   assert details is not None
   assert details["price_cents"] == 2900
@@ -62,11 +61,11 @@ def test_get_plan_details_with_explicit_repo_id():
 
 
 def test_get_plan_details_with_unknown_repo_id():
-  assert get_plan_details(RepositoryPlan.STARTER, repo_id="nonexistent") is None
+  assert get_plan_details("starter", repo_id="nonexistent") is None
 
 
 def test_get_rate_limits_values_are_integers():
-  limits = get_rate_limits("sec", RepositoryPlan.STARTER)
+  limits = get_rate_limits("sec", "starter")
 
   assert limits is not None
   assert all(isinstance(v, int) for v in limits.values())
@@ -92,6 +91,6 @@ def test_get_credit_costs_returns_none_for_unknown():
 def test_get_all_repository_pricing_contains_repos():
   pricing = get_all_repository_pricing()
 
-  assert pricing["plans"][RepositoryPlan.STARTER]["price_display"] == "$29/month"
+  assert pricing["plans"]["starter"]["price_display"] == "$29/month"
   assert pricing["repositories"]["sec"]["status"] == "available"
   assert pricing["billing_model"].startswith("No credit consumption")

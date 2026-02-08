@@ -16,14 +16,13 @@ import redis.asyncio as redis
 
 from robosystems.config.rate_limits import EndpointCategory, RateLimitConfig
 from robosystems.config.shared_repositories import (
-  RepositoryPlan,
-  is_shared_repository,
-)
-from robosystems.config.shared_repositories import (
   get_rate_limits as _get_rate_limits,
 )
 from robosystems.config.shared_repositories import (
   is_endpoint_allowed as _is_endpoint_allowed,
+)
+from robosystems.config.shared_repositories import (
+  is_shared_repository,
 )
 
 
@@ -59,7 +58,7 @@ class SharedRepositoryRateLimits:
   """
 
   @classmethod
-  def get_limits(cls, repository: str, plan: RepositoryPlan) -> dict:
+  def get_limits(cls, repository: str, plan: str) -> dict:
     """Get rate limits for a repository and plan."""
     return _get_rate_limits(repository, plan) or {}
 
@@ -86,7 +85,7 @@ class DualLayerRateLimiter:
     operation: str,
     endpoint: str,
     user_tier: str,
-    repository_plan: RepositoryPlan | None = None,
+    repository_plan: str | None = None,
   ) -> dict:
     """
     Check both burst and repository-specific limits.
@@ -144,7 +143,7 @@ class DualLayerRateLimiter:
           "allowed": False,
           "reason": "repository_limit",
           "detail": repo_check,
-          "message": f"Repository {operation} limit exceeded for {repository_plan.value} plan",
+          "message": f"Repository {operation} limit exceeded for {repository_plan} plan",
         }
 
     return {
@@ -187,7 +186,7 @@ class DualLayerRateLimiter:
     }
 
   async def _check_repository_limit(
-    self, user_id: str, repository: str, operation: str, plan: RepositoryPlan
+    self, user_id: str, repository: str, operation: str, plan: str
   ) -> dict:
     """Check repository-specific volume limits."""
     limits = SharedRepositoryRateLimits.get_limits(repository, plan)
@@ -277,9 +276,7 @@ class DualLayerRateLimiter:
     }
     return mapping.get(operation, EndpointCategory.GRAPH_READ)
 
-  async def get_usage_stats(
-    self, user_id: str, repository: str, plan: RepositoryPlan
-  ) -> dict:
+  async def get_usage_stats(self, user_id: str, repository: str, plan: str) -> dict:
     """Get current usage statistics for a user."""
     limits = SharedRepositoryRateLimits.get_limits(repository, plan)
     if not limits:
@@ -306,4 +303,4 @@ class DualLayerRateLimiter:
 
       stats[operation] = operation_stats
 
-    return {"usage": stats, "limits": limits, "plan": plan.value}
+    return {"usage": stats, "limits": limits, "plan": plan}

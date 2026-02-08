@@ -17,7 +17,6 @@ from fastapi import (
 from sqlalchemy.orm import Session
 
 from robosystems.config import env
-from robosystems.config.shared_repositories import RepositoryPlan
 from robosystems.database import get_async_db_session
 from robosystems.logger import logger
 from robosystems.middleware.auth.dependencies import get_current_user_with_graph
@@ -170,7 +169,7 @@ async def list_backups(
         str(current_user.id), graph_id, db
       )
       if user_repo:
-        plan = RepositoryPlan(user_repo.repository_plan)
+        plan = user_repo.repository_plan
         quota_info = await DownloadRateLimiter.get_download_quota(
           user_id=str(current_user.id),
           repository=graph_id,

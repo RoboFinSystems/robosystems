@@ -14,7 +14,6 @@ from fastapi import (
 )
 from sqlalchemy.orm import Session
 
-from robosystems.config.shared_repositories import RepositoryPlan
 from robosystems.database import get_db_session
 from robosystems.logger import logger
 from robosystems.middleware.auth.dependencies import get_current_user_with_graph
@@ -104,7 +103,7 @@ async def get_backup_download_url(
         )
 
       # Check daily download limit
-      plan = RepositoryPlan(user_repo.repository_plan)
+      plan = user_repo.repository_plan
       allowed, remaining, resets_at = await DownloadRateLimiter.check_download_limit(
         user_id=str(current_user.id),
         repository=graph_id,

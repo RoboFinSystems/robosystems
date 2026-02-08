@@ -47,7 +47,7 @@ class SharedRepositoryManifest:
   graph_tier: str = "ladybug-shared"
   graph_instance_id: str = "ladybug-shared-prod"
 
-  # Rate limits per plan (keys match RepositoryPlan enum values)
+  # Rate limits per plan (keys are plan name strings, e.g. "starter", "advanced")
   # None = use default limits
   rate_limits: dict[str, dict[str, int]] | None = None
 

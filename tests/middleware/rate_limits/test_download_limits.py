@@ -5,7 +5,6 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from robosystems.config.shared_repositories import RepositoryPlan
 from robosystems.middleware.rate_limits.download_limits import DownloadRateLimiter
 
 
@@ -32,17 +31,17 @@ class TestDownloadRateLimiter:
 
   def test_get_daily_limit_starter_plan(self):
     """Test daily limit for STARTER plan."""
-    limit = DownloadRateLimiter._get_daily_limit("sec", RepositoryPlan.STARTER)
+    limit = DownloadRateLimiter._get_daily_limit("sec", "starter")
     assert limit == 3  # Starter gets 3 downloads/day
 
   def test_get_daily_limit_advanced_plan(self):
     """Test daily limit for ADVANCED plan."""
-    limit = DownloadRateLimiter._get_daily_limit("sec", RepositoryPlan.ADVANCED)
+    limit = DownloadRateLimiter._get_daily_limit("sec", "advanced")
     assert limit == 5  # Advanced gets 5 downloads/day
 
   def test_get_daily_limit_unknown_repository(self):
     """Test daily limit falls back to default for unknown repository."""
-    limit = DownloadRateLimiter._get_daily_limit("unknown_repo", RepositoryPlan.STARTER)
+    limit = DownloadRateLimiter._get_daily_limit("unknown_repo", "starter")
     assert limit == DownloadRateLimiter.DEFAULT_DOWNLOADS_PER_DAY
 
   def test_get_reset_time_is_tomorrow_midnight_utc(self):
@@ -69,7 +68,7 @@ class TestDownloadRateLimiter:
       allowed, remaining, reset_at = await DownloadRateLimiter.check_download_limit(
         user_id="user123",
         repository="sec",
-        plan=RepositoryPlan.STARTER,  # Limit is 3
+        plan="starter",  # Limit is 3
       )
 
     assert allowed is True
@@ -88,7 +87,7 @@ class TestDownloadRateLimiter:
       allowed, remaining, reset_at = await DownloadRateLimiter.check_download_limit(
         user_id="user123",
         repository="sec",
-        plan=RepositoryPlan.STARTER,  # Limit is 3
+        plan="starter",  # Limit is 3
       )
 
     assert allowed is False
@@ -106,7 +105,7 @@ class TestDownloadRateLimiter:
       allowed, remaining, reset_at = await DownloadRateLimiter.check_download_limit(
         user_id="user123",
         repository="sec",
-        plan=RepositoryPlan.STARTER,  # Limit is 3
+        plan="starter",  # Limit is 3
       )
 
     assert allowed is False
@@ -124,7 +123,7 @@ class TestDownloadRateLimiter:
       allowed, remaining, reset_at = await DownloadRateLimiter.check_download_limit(
         user_id="user123",
         repository="sec",
-        plan=RepositoryPlan.STARTER,  # Limit is 3
+        plan="starter",  # Limit is 3
       )
 
     assert allowed is True
@@ -178,7 +177,7 @@ class TestDownloadRateLimiter:
       quota = await DownloadRateLimiter.get_download_quota(
         user_id="user123",
         repository="sec",
-        plan=RepositoryPlan.STARTER,  # Limit is 3
+        plan="starter",  # Limit is 3
       )
 
     assert quota["limit_per_day"] == 3
@@ -198,7 +197,7 @@ class TestDownloadRateLimiter:
       quota = await DownloadRateLimiter.get_download_quota(
         user_id="user123",
         repository="sec",
-        plan=RepositoryPlan.ADVANCED,  # Limit is 5
+        plan="advanced",  # Limit is 5
       )
 
     assert quota["limit_per_day"] == 5
@@ -217,7 +216,7 @@ class TestDownloadRateLimiter:
       await DownloadRateLimiter.check_download_limit(
         user_id="user123",
         repository="sec",
-        plan=RepositoryPlan.STARTER,
+        plan="starter",
       )
 
     mock_redis.aclose.assert_called_once()
@@ -250,7 +249,7 @@ class TestDownloadRateLimiter:
       await DownloadRateLimiter.get_download_quota(
         user_id="user123",
         repository="sec",
-        plan=RepositoryPlan.STARTER,
+        plan="starter",
       )
 
     mock_redis.aclose.assert_called_once()
@@ -282,7 +281,7 @@ class TestDownloadRateLimiterIntegration:
     ):
       # First download - should be allowed
       allowed, remaining, _ = await DownloadRateLimiter.check_download_limit(
-        "user1", "sec", RepositoryPlan.STARTER
+        "user1", "sec", "starter"
       )
       assert allowed is True
       assert remaining == 3
@@ -291,7 +290,7 @@ class TestDownloadRateLimiterIntegration:
 
       # Second download
       allowed, remaining, _ = await DownloadRateLimiter.check_download_limit(
-        "user1", "sec", RepositoryPlan.STARTER
+        "user1", "sec", "starter"
       )
       assert allowed is True
       assert remaining == 2
@@ -300,7 +299,7 @@ class TestDownloadRateLimiterIntegration:
 
       # Third download (last allowed)
       allowed, remaining, _ = await DownloadRateLimiter.check_download_limit(
-        "user1", "sec", RepositoryPlan.STARTER
+        "user1", "sec", "starter"
       )
       assert allowed is True
       assert remaining == 1
@@ -309,7 +308,7 @@ class TestDownloadRateLimiterIntegration:
 
       # Fourth download - should be blocked
       allowed, remaining, _ = await DownloadRateLimiter.check_download_limit(
-        "user1", "sec", RepositoryPlan.STARTER
+        "user1", "sec", "starter"
       )
       assert allowed is False
       assert remaining == 0
@@ -335,14 +334,14 @@ class TestDownloadRateLimiterIntegration:
     ):
       # User1 has used 2 downloads
       allowed1, remaining1, _ = await DownloadRateLimiter.check_download_limit(
-        "user1", "sec", RepositoryPlan.STARTER
+        "user1", "sec", "starter"
       )
       assert allowed1 is True
       assert remaining1 == 1
 
       # User2 has fresh limit
       allowed2, remaining2, _ = await DownloadRateLimiter.check_download_limit(
-        "user2", "sec", RepositoryPlan.STARTER
+        "user2", "sec", "starter"
       )
       assert allowed2 is True
       assert remaining2 == 3
@@ -368,12 +367,12 @@ class TestDownloadRateLimiterIntegration:
     ):
       # SEC has 2 downloads used
       allowed1, remaining1, _ = await DownloadRateLimiter.check_download_limit(
-        "user1", "sec", RepositoryPlan.STARTER
+        "user1", "sec", "starter"
       )
       assert remaining1 == 1
 
       # Economic has fresh limit
       allowed2, remaining2, _ = await DownloadRateLimiter.check_download_limit(
-        "user1", "economic", RepositoryPlan.STARTER
+        "user1", "economic", "starter"
       )
       assert remaining2 == 3

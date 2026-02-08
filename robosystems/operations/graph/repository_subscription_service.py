@@ -8,9 +8,6 @@ from sqlalchemy.orm import Session
 
 from ...config import env
 from ...config.shared_repositories import (
-  RepositoryPlan,
-)
-from ...config.shared_repositories import (
   get_available_repositories as _get_available_manifests,
 )
 from ...config.shared_repositories import (
@@ -45,14 +42,14 @@ def get_available_repositories() -> list[RepositoryType]:
 
 def get_available_plans_for_repository(
   repository_type: RepositoryType,
-) -> list[RepositoryPlan]:
+) -> list[str]:
   """Get available plans for a specific repository type."""
   if not _is_repository_enabled(repository_type.value):
     return []
   manifest = _get_manifest(repository_type.value)
   if not manifest or not manifest.plans:
     return []
-  return [RepositoryPlan(k) for k in manifest.plans]
+  return list(manifest.plans.keys())
 
 
 class RepositorySubscriptionService:
@@ -131,7 +128,7 @@ class RepositorySubscriptionService:
     self,
     user_id: str,
     repository_type: RepositoryType,
-    repository_plan: RepositoryPlan = RepositoryPlan.STARTER,
+    repository_plan: str = "starter",
   ) -> UserRepository:
     """
     Create a subscription for a shared repository.
@@ -154,7 +151,7 @@ class RepositorySubscriptionService:
     available_plans = get_available_plans_for_repository(repository_type)
     if repository_plan not in available_plans:
       raise ValueError(
-        f"Plan {repository_plan.value} not available for repository {repository_type.value}"
+        f"Plan {repository_plan} not available for repository {repository_type.value}"
       )
 
     # Get plan configuration from registry
@@ -201,7 +198,7 @@ class RepositorySubscriptionService:
 
       logger.info(
         f"Created repository subscription for user {user_id}, "
-        f"repository {repository_type.value}, plan {repository_plan.value}"
+        f"repository {repository_type.value}, plan {repository_plan}"
       )
       return access_record
 
@@ -214,7 +211,7 @@ class RepositorySubscriptionService:
     self,
     user_id: str,
     repository_type: RepositoryType,
-    new_plan: RepositoryPlan,
+    new_plan: str,
   ) -> UserRepository:
     """
     Upgrade a repository subscription to a higher plan.
@@ -243,7 +240,7 @@ class RepositorySubscriptionService:
     available_plans = get_available_plans_for_repository(repository_type)
     if new_plan not in available_plans:
       raise ValueError(
-        f"Plan {new_plan.value} not available for repository {repository_type.value}"
+        f"Plan {new_plan} not available for repository {repository_type.value}"
       )
 
     # Get new plan pricing from registry
@@ -260,7 +257,7 @@ class RepositorySubscriptionService:
 
       logger.info(
         f"Upgraded repository subscription for user {user_id}, "
-        f"repository {repository_type.value} to plan {new_plan.value}"
+        f"repository {repository_type.value} to plan {new_plan}"
       )
       return access_record
 
@@ -367,7 +364,7 @@ class RepositorySubscriptionService:
   def allocate_credits(
     self,
     repository_type: RepositoryType,
-    repository_plan: RepositoryPlan,
+    repository_plan: str,
     user_id: str,
   ) -> int:
     """
@@ -392,7 +389,7 @@ class RepositorySubscriptionService:
     plan_details = _get_plan_details(repository_plan, repo_id=repository_type.value)
     if not plan_details:
       raise ValueError(
-        f"Plan {repository_plan.value} not available for repository {repository_type.value}"
+        f"Plan {repository_plan} not available for repository {repository_type.value}"
       )
 
     monthly_credits = plan_details["monthly_credits"]
@@ -423,7 +420,7 @@ class RepositorySubscriptionService:
 
     logger.info(
       f"Allocated {monthly_credits} credits for user {user_id}, "
-      f"repository {repository_type.value}, plan {repository_plan.value}"
+      f"repository {repository_type.value}, plan {repository_plan}"
     )
 
     return monthly_credits
@@ -432,7 +429,7 @@ class RepositorySubscriptionService:
     self,
     repository_type: RepositoryType,
     user_id: str,
-    repository_plan: RepositoryPlan | None = None,
+    repository_plan: str | None = None,
   ) -> bool:
     """
     Grant repository access to a user.
@@ -474,12 +471,12 @@ class RepositorySubscriptionService:
       return True
 
     if repository_plan is None:
-      repository_plan = RepositoryPlan.STARTER
+      repository_plan = "starter"
 
     plan_config = _get_plan_details(repository_plan)
     if not plan_config:
       raise ValueError(
-        f"Plan {repository_plan.value} not available for repository {repository_type.value}"
+        f"Plan {repository_plan} not available for repository {repository_type.value}"
       )
 
     access_level_str = plan_config.get("access_level", "READ")
@@ -505,7 +502,7 @@ class RepositorySubscriptionService:
 
     logger.info(
       f"Granted access for user {user_id}, repository {repository_type.value}, "
-      f"plan {repository_plan.value}"
+      f"plan {repository_plan}"
     )
 
     return True

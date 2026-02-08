@@ -378,7 +378,6 @@ class TestMCPAccessControl:
     from robosystems.models.iam import Graph
     from robosystems.models.iam.user_repository import (
       RepositoryAccessLevel,
-      RepositoryPlan,
       RepositoryType,
       UserRepository,
     )
@@ -399,7 +398,7 @@ class TestMCPAccessControl:
       repository_type=RepositoryType.SEC,
       repository_name="sec",
       access_level=RepositoryAccessLevel.READ,
-      repository_plan=RepositoryPlan.STARTER,
+      repository_plan="starter",
       is_active=True,
     )
     db_session.add(access)

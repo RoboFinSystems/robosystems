@@ -4,13 +4,13 @@ Shared Repository Registry.
 Single source of truth for all shared repository definitions. Manifests are
 declared by adapters and collected here on first access.
 
-This module also owns the RepositoryPlan enum and all billing/rate-limit
-accessor functions for shared repositories. Plans, pricing, features, and
-endpoint access are declared per-repo in adapter manifests.
+This module owns all billing/rate-limit accessor functions for shared
+repositories. Plans, pricing, features, and endpoint access are declared
+per-repo in adapter manifests. Plans are plain strings — the manifest is the
+single source of truth.
 
 Usage:
     from robosystems.config.shared_repositories import (
-        RepositoryPlan,
         is_shared_repository,
         get_manifest,
         get_all_repository_ids,
@@ -29,7 +29,6 @@ Adding a new shared repository:
 
 from __future__ import annotations
 
-from enum import Enum
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -37,18 +36,6 @@ if TYPE_CHECKING:
 
 _manifests: dict[str, Any] = {}
 _loaded = False
-
-
-# ---------------------------------------------------------------------------
-# RepositoryPlan enum
-# ---------------------------------------------------------------------------
-
-
-class RepositoryPlan(str, Enum):
-  """Repository access plans (subscription required)."""
-
-  STARTER = "starter"  # Basic access
-  ADVANCED = "advanced"  # Professional access (displayed as "Pro", 5x rate limits)
 
 
 # ---------------------------------------------------------------------------
@@ -127,11 +114,11 @@ def get_all_manifests() -> dict[str, SharedRepositoryManifest]:
 # ---------------------------------------------------------------------------
 
 
-def get_plan_details(plan: RepositoryPlan, repo_id: str | None = None) -> dict | None:
+def get_plan_details(plan: str, repo_id: str | None = None) -> dict | None:
   """Get details for a repository plan.
 
   Args:
-      plan: The plan to look up.
+      plan: The plan key to look up (e.g. "starter", "advanced").
       repo_id: Optional repository ID. If None, searches all repos for the plan.
 
   Returns:
@@ -139,30 +126,28 @@ def get_plan_details(plan: RepositoryPlan, repo_id: str | None = None) -> dict |
   """
   _ensure_loaded()
 
-  try:
-    plan_value = plan.value
-  except AttributeError:
+  if not isinstance(plan, str) or not plan:
     return None
 
   if repo_id is not None:
     manifest = _manifests.get(repo_id)
     if not manifest or not manifest.plans:
       return None
-    return manifest.plans.get(plan_value)
+    return manifest.plans.get(plan)
 
   # No repo_id: search all manifests for the plan
   for manifest in _manifests.values():
-    if manifest.plans and plan_value in manifest.plans:
-      return manifest.plans[plan_value]
+    if manifest.plans and plan in manifest.plans:
+      return manifest.plans[plan]
   return None
 
 
-def get_rate_limits(repo_id: str, plan: RepositoryPlan) -> dict[str, int] | None:
+def get_rate_limits(repo_id: str, plan: str) -> dict[str, int] | None:
   """Get rate limits for a repository and plan combination."""
   manifest = get_manifest(repo_id)
   if not manifest or not manifest.rate_limits:
     return None
-  return manifest.rate_limits.get(plan.value)
+  return manifest.rate_limits.get(plan)
 
 
 def get_credit_costs(repo_id: str) -> dict | None:
@@ -250,12 +235,13 @@ def get_all_repository_pricing() -> dict:
   """Get complete pricing information for all repository plans."""
   _ensure_loaded()
 
-  # Build plans dict keyed by RepositoryPlan enum
-  plans: dict[RepositoryPlan, dict] = {}
-  for plan_enum in list(RepositoryPlan):
-    details = get_plan_details(plan_enum)
-    if details:
-      plans[plan_enum] = details
+  # Build plans dict keyed by plan string from manifests
+  plans: dict[str, dict] = {}
+  for manifest in _manifests.values():
+    if manifest.plans:
+      for plan_key, plan_details in manifest.plans.items():
+        if plan_key not in plans:
+          plans[plan_key] = plan_details
 
   repositories = {}
   for manifest in _manifests.values():

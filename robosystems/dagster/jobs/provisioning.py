@@ -21,7 +21,7 @@ from dagster import (
 
 from robosystems.dagster.resources import DatabaseResource
 from robosystems.models.billing import BillingSubscription
-from robosystems.models.iam import RepositoryPlan, RepositoryType
+from robosystems.models.iam import RepositoryType
 
 
 class ProvisionGraphConfig(Config):
@@ -296,11 +296,10 @@ def grant_repository_access(
 
   try:
     repository_type = RepositoryType(repository_name)
-    repository_plan = RepositoryPlan(plan_tier)
   except ValueError as e:
-    raise Exception(
-      f"Invalid repository type '{repository_name}' or plan '{plan_tier}': {e}"
-    )
+    raise Exception(f"Invalid repository type '{repository_name}': {e}")
+
+  repository_plan = plan_tier
 
   with db.get_session() as session:
     repo_service = RepositorySubscriptionService(session)

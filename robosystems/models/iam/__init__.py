@@ -23,7 +23,6 @@ from .user_repository import (
   RepositoryAccessLevel as UserRepositoryAccessLevel,
 )
 from .user_repository import (
-  RepositoryPlan,
   RepositoryType,
   UserRepository,
 )
@@ -53,7 +52,6 @@ __all__ = [
   "OrgRole",
   "OrgType",
   "OrgUser",
-  "RepositoryPlan",
   "RepositoryType",
   "SourceFile",
   "UsageEventType",

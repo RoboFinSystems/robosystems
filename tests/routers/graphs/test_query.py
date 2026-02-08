@@ -326,7 +326,6 @@ async def test_cypher_query_sec_repository_with_access(
   from robosystems.models.iam import Graph
   from robosystems.models.iam.user_repository import (
     RepositoryAccessLevel,
-    RepositoryPlan,
     RepositoryType,
     UserRepository,
   )
@@ -347,7 +346,7 @@ async def test_cypher_query_sec_repository_with_access(
     repository_type=RepositoryType.SEC,
     repository_name="sec",
     access_level=RepositoryAccessLevel.READ,
-    repository_plan=RepositoryPlan.STARTER,
+    repository_plan="starter",
     is_active=True,
   )
   db_session.add(access_record)
