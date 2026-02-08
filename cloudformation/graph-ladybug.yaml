@@ -732,25 +732,6 @@ Resources:
       AlarmActions:
         - !Ref GraphWriterAlertTopic
 
-  HighCapacityUtilizationAlarm:
-    Type: AWS::CloudWatch::Alarm
-    Properties:
-      AlarmName: !Sub "robosystems-ladybug-${WriterTier}-${Environment}-high-capacity-utilization"
-      AlarmDescription: "Alert when capacity utilization exceeds 80%"
-      MetricName: CapacityUtilization
-      Namespace: !Sub "RoboSystems/Graph/${Environment}"
-      Statistic: Average
-      Period: 300
-      EvaluationPeriods: 2
-      Threshold: 80
-      ComparisonOperator: GreaterThanThreshold
-      Dimensions:
-        - Name: Environment
-          Value: !Ref Environment
-      TreatMissingData: notBreaching
-      AlarmActions:
-        - !Ref GraphWriterAlertTopic
-
 Outputs:
   WriterAutoScalingGroupName:
     Description: Name of the writer Auto Scaling Group

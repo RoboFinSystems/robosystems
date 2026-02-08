@@ -153,18 +153,11 @@ jobs:
       - name: Configure ASG parameters
         id: asg_config
         run: |
-          echo "🎯 Configuring ASG for tier: ${{ inputs.writer_tier }} in environment: ${{ inputs.environment }}"
-
-          # Use direct inputs for ASG configuration
+          echo "Configuring ASG for tier: ${{ inputs.writer_tier }} in environment: ${{ inputs.environment }}"
           MIN_INSTANCES="${{ inputs.min_instances }}"
           MAX_INSTANCES="${{ inputs.max_instances }}"
-
           echo "min_instances=$MIN_INSTANCES" >> $GITHUB_OUTPUT
           echo "max_instances=$MAX_INSTANCES" >> $GITHUB_OUTPUT
-
-          echo "📊 ASG Configuration for ${{ inputs.writer_tier }} tier:"
-          echo "  Min: $MIN_INSTANCES"
-          echo "  Max: $MAX_INSTANCES"
 
       - name: Select Availability Zone for Persistent Volumes
         id: az_selection

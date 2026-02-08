@@ -11,7 +11,13 @@ concurrency:
   cancel-in-progress: false
 
 on:
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      graph_container_refresh:
+        description: "Refresh graph containers via SSM after deploy"
+        required: false
+        type: boolean
+        default: true
   workflow_call: {} # Called from create-release.yml
 
 jobs:
@@ -583,7 +589,7 @@ jobs:
       runner_config: ${{ needs.runner.outputs.runner_config }}
       aws_region: ${{ vars.AWS_REGION || 'us-east-1' }}
       # Graph refresh (EC2 containers via SSM)
-      graph_refresh_enabled: ${{ vars.GRAPH_UPDATE_CONTAINERS_PROD || 'true' }}
+      graph_refresh_enabled: ${{ inputs.graph_container_refresh != false }}
       graph_node_types: "writer"
       graph_health_check_timeout: "30"
       # API/Dagster refresh disabled - ECS auto-deploys via version tags in task definitions

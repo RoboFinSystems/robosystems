@@ -448,11 +448,8 @@ function setup_full_config() {
     # Stored in SSM: /robosystems/{env}/graph/ami-id
     # Updated via: graph-maintenance.yml workflow
 
-    # Graph Settings
-    gh variable set GRAPH_UPDATE_CONTAINERS_PROD --body "true"
-    if $setup_staging; then
-        gh variable set GRAPH_UPDATE_CONTAINERS_STAGING --body "true"
-    fi
+    # Graph container refresh is now controlled via workflow_dispatch input
+    # (graph_container_refresh parameter, defaults to true)
 
     # GitHub Actions Runner Configuration
     # Default: "github-hosted" uses GitHub-hosted runners (ubuntu-latest)

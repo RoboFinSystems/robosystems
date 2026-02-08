@@ -4,14 +4,14 @@ Scripts for bootstrapping and configuring RoboSystems deployments. These handle 
 
 ## Quick Reference
 
-| Script | Purpose | Prerequisites | Est. Time |
-|--------|---------|---------------|-----------|
-| `bootstrap.sh` | Complete first-time setup | AWS SSO, GitHub CLI | 5-10 min |
-| `aws.sh` | Secrets + SSM parameters | AWS credentials | 1-2 min |
-| `gha.sh` | Configure ~80 GitHub variables | GitHub CLI | 2-3 min |
-| `bedrock.sh` | Local AI development setup | AWS credentials | 1 min |
-| `localstack-init.sh` | Local AWS emulation | Docker (automatic) | N/A |
-| `postgres-init.sh` | PostgreSQL databases | Docker (automatic) | N/A |
+| Script               | Purpose                        | Prerequisites       | Est. Time |
+| -------------------- | ------------------------------ | ------------------- | --------- |
+| `bootstrap.sh`       | Complete first-time setup      | AWS SSO, GitHub CLI | 5-10 min  |
+| `aws.sh`             | Secrets + SSM parameters       | AWS credentials     | 1-2 min   |
+| `gha.sh`             | Configure ~80 GitHub variables | GitHub CLI          | 2-3 min   |
+| `bedrock.sh`         | Local AI development setup     | AWS credentials     | 1 min     |
+| `localstack-init.sh` | Local AWS emulation            | Docker (automatic)  | N/A       |
+| `postgres-init.sh`   | PostgreSQL databases           | Docker (automatic)  | N/A       |
 
 ## Bootstrap Flow
 
@@ -112,6 +112,7 @@ The complete bootstrap process for a fresh deployment:
 **Purpose**: Complete first-time setup for a fresh deployment. This is the main entry point.
 
 **Usage**:
+
 ```bash
 # Using justfile (recommended)
 just bootstrap                           # Default: robosystems-sso profile, us-east-1
@@ -129,6 +130,7 @@ just bootstrap my-fork-sso eu-west-1     # Custom profile and region
 | `region` | `us-east-1` | AWS region |
 
 **Prerequisites**:
+
 - AWS CLI v2 installed
 - AWS IAM Identity Center (SSO) enabled with admin access
 - GitHub CLI installed and authenticated (`gh auth login`)
@@ -136,15 +138,15 @@ just bootstrap my-fork-sso eu-west-1     # Custom profile and region
 
 **What It Creates**:
 
-| Resource | Description |
-|----------|-------------|
-| `.envrc` | Local direnv config with AWS_PROFILE and AWS_REGION |
-| `~/.aws/config` | SSO profile (if not exists) |
-| CloudFormation Stack | `RoboSystemsGitHubOIDC` |
-| ECR Repository | `robosystems` (or repo name) |
-| GitHub Variables | `AWS_ROLE_ARN`, `AWS_ACCOUNT_ID`, `AWS_REGION`, `AWS_SNS_ALERT_EMAIL` |
-| Secrets Manager | `robosystems/prod` (credentials) |
-| SSM Parameters | Feature flags + tuning parameters |
+| Resource             | Description                                                           |
+| -------------------- | --------------------------------------------------------------------- |
+| `.envrc`             | Local direnv config with AWS_PROFILE and AWS_REGION                   |
+| `~/.aws/config`      | SSO profile (if not exists)                                           |
+| CloudFormation Stack | `RoboSystemsGitHubOIDC`                                               |
+| ECR Repository       | `robosystems` (or repo name)                                          |
+| GitHub Variables     | `AWS_ROLE_ARN`, `AWS_ACCOUNT_ID`, `AWS_REGION`, `AWS_SNS_ALERT_EMAIL` |
+| Secrets Manager      | `robosystems/prod` (credentials)                                      |
+| SSM Parameters       | Feature flags + tuning parameters                                     |
 
 **Environment Variables Used**:
 | Variable | Source | Description |
@@ -159,6 +161,7 @@ just bootstrap my-fork-sso eu-west-1     # Custom profile and region
 **Purpose**: Create secrets in AWS Secrets Manager and parameters in SSM Parameter Store.
 
 **Usage**:
+
 ```bash
 just setup-aws
 # or
@@ -166,6 +169,7 @@ just setup-aws
 ```
 
 **Prerequisites**:
+
 - AWS CLI installed
 - Valid AWS credentials (via SSO or otherwise)
 
@@ -173,14 +177,15 @@ just setup-aws
 
 **Resources Created**:
 
-| Resource | Path | Description |
-|----------|------|-------------|
-| Secret | `robosystems/prod` | Production credentials |
-| Secret | `robosystems/staging` | Staging credentials (optional) |
-| SSM Params | `/robosystems/{env}/features/*` | Feature flags (22 params) |
-| SSM Params | `/robosystems/{env}/tuning/*` | Tuning parameters (19 params) |
+| Resource   | Path                            | Description                    |
+| ---------- | ------------------------------- | ------------------------------ |
+| Secret     | `robosystems/prod`              | Production credentials         |
+| Secret     | `robosystems/staging`           | Staging credentials (optional) |
+| SSM Params | `/robosystems/{env}/features/*` | Feature flags (22 params)      |
+| SSM Params | `/robosystems/{env}/tuning/*`   | Tuning parameters (19 params)  |
 
 **Secrets Manager** (credentials only):
+
 ```json
 {
   "JWT_SECRET_KEY": "[generated]",
@@ -198,6 +203,7 @@ just setup-aws
 ```
 
 **SSM Parameter Store** (feature flags + tuning):
+
 ```
 /robosystems/{env}/features/
   RATE_LIMIT_ENABLED, BILLING_ENABLED, SSE_ENABLED, ...
@@ -213,6 +219,7 @@ just setup-aws
 ```
 
 **Managing SSM parameters**:
+
 ```bash
 just ssm-list prod features     # List feature flags
 just ssm-list prod tuning       # List tuning parameters
@@ -233,6 +240,7 @@ just ssm-set prod tuning/cache/BALANCE_TTL 600
 **Purpose**: Configure all GitHub Actions variables for explicit infrastructure control.
 
 **Usage**:
+
 ```bash
 just setup-gha
 # or
@@ -240,12 +248,14 @@ just setup-gha
 ```
 
 **Prerequisites**:
+
 - GitHub CLI installed and authenticated
 - In a git repository
 
 **Optional**: Basic deployments work without this. All workflows have sensible defaults.
 
 **Interactive Prompts**:
+
 1. Environment choice (Production only vs Production + Staging)
 2. Root domain (optional - leave empty for VPC-only deployment)
 3. GitHub organization name
@@ -258,114 +268,125 @@ just setup-gha
 **Variables Set** (~80 total):
 
 #### Core Configuration
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `REPOSITORY_NAME` | User input | Full repo path (org/repo) |
-| `ECR_REPOSITORY` | `robosystems` | ECR repository name |
-| `AWS_ACCOUNT_ID` | User input | AWS account ID |
-| `AWS_REGION` | `us-east-1` | AWS region |
-| `ENVIRONMENT_PROD` | `prod` | Production environment name |
-| `ENVIRONMENT_STAGING` | `staging` | Staging environment name (if enabled) |
+
+| Variable              | Default       | Description                           |
+| --------------------- | ------------- | ------------------------------------- |
+| `REPOSITORY_NAME`     | User input    | Full repo path (org/repo)             |
+| `ECR_REPOSITORY`      | `robosystems` | ECR repository name                   |
+| `AWS_ACCOUNT_ID`      | User input    | AWS account ID                        |
+| `AWS_REGION`          | `us-east-1`   | AWS region                            |
+| `ENVIRONMENT_PROD`    | `prod`        | Production environment name           |
+| `ENVIRONMENT_STAGING` | `staging`     | Staging environment name (if enabled) |
 
 #### Domain Configuration (optional - skip for VPC-only)
-| Variable | Example | Description |
-|----------|---------|-------------|
-| `API_DOMAIN_NAME_ROOT` | `robosystems.ai` | Root domain |
-| `API_DOMAIN_NAME_PROD` | `api.robosystems.ai` | Production API subdomain |
-| `API_DOMAIN_NAME_STAGING` | `staging.api.robosystems.ai` | Staging API subdomain |
-| `ROBOSYSTEMS_API_URL_PROD` | `https://api.robosystems.ai` | Production API URL |
-| `ROBOSYSTEMS_APP_URL_PROD` | `https://robosystems.ai` | Production app URL |
+
+| Variable                   | Example                      | Description              |
+| -------------------------- | ---------------------------- | ------------------------ |
+| `API_DOMAIN_NAME_ROOT`     | `robosystems.ai`             | Root domain              |
+| `API_DOMAIN_NAME_PROD`     | `api.robosystems.ai`         | Production API subdomain |
+| `API_DOMAIN_NAME_STAGING`  | `staging.api.robosystems.ai` | Staging API subdomain    |
+| `ROBOSYSTEMS_API_URL_PROD` | `https://api.robosystems.ai` | Production API URL       |
+| `ROBOSYSTEMS_APP_URL_PROD` | `https://robosystems.ai`     | Production app URL       |
 
 #### API Scaling
-| Variable | Prod Default | Staging Default |
-|----------|--------------|-----------------|
-| `API_MIN_CAPACITY_*` | `1` | `1` |
-| `API_MAX_CAPACITY_*` | `10` | `2` |
-| `API_ASG_REFRESH_*` | `true` | `true` |
+
+| Variable             | Prod Default | Staging Default |
+| -------------------- | ------------ | --------------- |
+| `API_MIN_CAPACITY_*` | `1`          | `1`             |
+| `API_MAX_CAPACITY_*` | `10`         | `2`             |
+| `API_ASG_REFRESH_*`  | `true`       | `true`          |
 
 #### Dagster Configuration
-| Variable | Prod Default | Description |
-|----------|--------------|-------------|
-| `DAGSTER_DAEMON_CPU_*` | `1024` | Daemon CPU units |
-| `DAGSTER_DAEMON_MEMORY_*` | `2048` | Daemon memory (MB) |
-| `DAGSTER_WEBSERVER_CPU_*` | `512` | Webserver CPU units |
-| `DAGSTER_WEBSERVER_MEMORY_*` | `1024` | Webserver memory (MB) |
-| `DAGSTER_RUN_JOB_CPU_*` | `1024` | Run job CPU units |
-| `DAGSTER_RUN_JOB_MEMORY_*` | `4096` | Run job memory (MB) |
-| `DAGSTER_MAX_CONCURRENT_RUNS_*` | `20` | Max concurrent runs |
-| `DAGSTER_REFRESH_ECS_*` | `true` | Refresh ECS on deploy |
-| `DAGSTER_CONTAINER_INSIGHTS_*` | `disabled` | Container insights |
-| `RUN_MIGRATIONS_*` | `true` | Run DB migrations |
+
+| Variable                        | Prod Default | Description           |
+| ------------------------------- | ------------ | --------------------- |
+| `DAGSTER_DAEMON_CPU_*`          | `1024`       | Daemon CPU units      |
+| `DAGSTER_DAEMON_MEMORY_*`       | `2048`       | Daemon memory (MB)    |
+| `DAGSTER_WEBSERVER_CPU_*`       | `512`        | Webserver CPU units   |
+| `DAGSTER_WEBSERVER_MEMORY_*`    | `1024`       | Webserver memory (MB) |
+| `DAGSTER_RUN_JOB_CPU_*`         | `1024`       | Run job CPU units     |
+| `DAGSTER_RUN_JOB_MEMORY_*`      | `4096`       | Run job memory (MB)   |
+| `DAGSTER_MAX_CONCURRENT_RUNS_*` | `20`         | Max concurrent runs   |
+| `DAGSTER_REFRESH_ECS_*`         | `true`       | Refresh ECS on deploy |
+| `DAGSTER_CONTAINER_INSIGHTS_*`  | `disabled`   | Container insights    |
+| `RUN_MIGRATIONS_*`              | `true`       | Run DB migrations     |
 
 #### Database Configuration
-| Variable | Prod Default | Description |
-|----------|--------------|-------------|
-| `DATABASE_ENGINE_*` | `postgres` | Database engine |
-| `DATABASE_INSTANCE_SIZE_*` | `db.t4g.small` | RDS instance type |
-| `DATABASE_ALLOCATED_STORAGE_*` | `20` | Initial storage (GB) |
-| `DATABASE_MAX_ALLOCATED_STORAGE_*` | `100` | Max storage (GB) |
-| `DATABASE_MULTI_AZ_ENABLED_*` | `false` | Multi-AZ deployment |
-| `DATABASE_POSTGRES_VERSION_*` | `16.11` | PostgreSQL version |
+
+| Variable                           | Prod Default   | Description          |
+| ---------------------------------- | -------------- | -------------------- |
+| `DATABASE_ENGINE_*`                | `postgres`     | Database engine      |
+| `DATABASE_INSTANCE_SIZE_*`         | `db.t4g.small` | RDS instance type    |
+| `DATABASE_ALLOCATED_STORAGE_*`     | `20`           | Initial storage (GB) |
+| `DATABASE_MAX_ALLOCATED_STORAGE_*` | `100`          | Max storage (GB)     |
+| `DATABASE_MULTI_AZ_ENABLED_*`      | `false`        | Multi-AZ deployment  |
+| `DATABASE_POSTGRES_VERSION_*`      | `16.11`        | PostgreSQL version   |
 
 #### Valkey (Redis) Configuration
-| Variable | Prod Default | Description |
-|----------|--------------|-------------|
-| `VALKEY_NODE_TYPE_*` | `cache.t4g.micro` | Cache node type |
-| `VALKEY_NUM_NODES_*` | `1` | Number of nodes |
-| `VALKEY_ENCRYPTION_ENABLED_*` | `true` | Enable encryption |
+
+| Variable                           | Prod Default              | Description        |
+| ---------------------------------- | ------------------------- | ------------------ |
+| `VALKEY_NODE_TYPE_*`               | `cache.t4g.micro`         | Cache node type    |
+| `VALKEY_NUM_NODES_*`               | `1`                       | Number of nodes    |
+| `VALKEY_ENCRYPTION_ENABLED_*`      | `true`                    | Enable encryption  |
 | `VALKEY_SNAPSHOT_RETENTION_DAYS_*` | `7` (prod), `0` (staging) | Snapshot retention |
-| `VALKEY_VERSION_*` | `8.1` | Valkey version |
+| `VALKEY_VERSION_*`                 | `8.1`                     | Valkey version     |
 
 #### LadybugDB Writer Configuration
-| Variable | Prod Default | Description |
-|----------|--------------|-------------|
-| `LBUG_STANDARD_MIN_INSTANCES_*` | `1` | Min standard instances (always deployed) |
-| `LBUG_STANDARD_MAX_INSTANCES_*` | `10` | Max standard instances |
-| `LBUG_LARGE_ENABLED_*` | `false` | Enable large tier |
-| `LBUG_LARGE_MIN_INSTANCES_*` | `0` | Min large instances |
-| `LBUG_LARGE_MAX_INSTANCES_*` | `20` | Max large instances |
-| `LBUG_XLARGE_ENABLED_*` | `false` | Enable xlarge tier |
-| `LBUG_XLARGE_MIN_INSTANCES_*` | `0` | Min xlarge instances |
-| `LBUG_XLARGE_MAX_INSTANCES_*` | `10` | Max xlarge instances |
-| `LBUG_SHARED_ENABLED_*` | `false` | Enable shared tier |
+
+| Variable                        | Prod Default | Description                              |
+| ------------------------------- | ------------ | ---------------------------------------- |
+| `LBUG_STANDARD_MIN_INSTANCES_*` | `1`          | Min standard instances (always deployed) |
+| `LBUG_STANDARD_MAX_INSTANCES_*` | `10`         | Max standard instances                   |
+| `LBUG_LARGE_ENABLED_*`          | `false`      | Enable large tier                        |
+| `LBUG_LARGE_MIN_INSTANCES_*`    | `0`          | Min large instances                      |
+| `LBUG_LARGE_MAX_INSTANCES_*`    | `20`         | Max large instances                      |
+| `LBUG_XLARGE_ENABLED_*`         | `false`      | Enable xlarge tier                       |
+| `LBUG_XLARGE_MIN_INSTANCES_*`   | `0`          | Min xlarge instances                     |
+| `LBUG_XLARGE_MAX_INSTANCES_*`   | `10`         | Max xlarge instances                     |
+| `LBUG_SHARED_ENABLED_*`         | `false`      | Enable shared tier                       |
 
 #### Graph Settings
-| Variable | Default | Description |
-|----------|---------|-------------|
+
+| Variable         | Default       | Description                 |
+| ---------------- | ------------- | --------------------------- |
 | `GRAPH_AMI_ID_*` | Auto-detected | Amazon Linux 2023 ARM64 AMI |
-| `GRAPH_UPDATE_CONTAINERS_*` | `true` | Update containers on deploy |
 
 #### Compliance & Security
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `VPC_FLOW_LOGS_ENABLED` | `true` | Enable VPC flow logs |
-| `VPC_FLOW_LOGS_RETENTION_DAYS` | `90` | Flow log retention |
-| `VPC_FLOW_LOGS_TRAFFIC_TYPE` | `REJECT` | Traffic type to log |
-| `CLOUDTRAIL_ENABLED` | `true` | Enable CloudTrail |
-| `CLOUDTRAIL_LOG_RETENTION_DAYS` | `90` | CloudTrail retention |
-| `CLOUDTRAIL_DATA_EVENTS_ENABLED` | `false` | Log S3 data events |
+
+| Variable                         | Default  | Description          |
+| -------------------------------- | -------- | -------------------- |
+| `VPC_FLOW_LOGS_ENABLED`          | `true`   | Enable VPC flow logs |
+| `VPC_FLOW_LOGS_RETENTION_DAYS`   | `90`     | Flow log retention   |
+| `VPC_FLOW_LOGS_TRAFFIC_TYPE`     | `REJECT` | Traffic type to log  |
+| `CLOUDTRAIL_ENABLED`             | `true`   | Enable CloudTrail    |
+| `CLOUDTRAIL_LOG_RETENTION_DAYS`  | `90`     | CloudTrail retention |
+| `CLOUDTRAIL_DATA_EVENTS_ENABLED` | `false`  | Log S3 data events   |
 
 #### WAF Configuration
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `WAF_ENABLED_*` | `true` | Enable WAF |
-| `WAF_RATE_LIMIT_PER_IP` | `10000` | Requests per 5 min per IP |
-| `WAF_GEO_BLOCKING_ENABLED` | `false` | Block non-US/CA traffic |
-| `WAF_AWS_MANAGED_RULES_ENABLED` | `true` | Use AWS managed rules |
+
+| Variable                        | Default | Description               |
+| ------------------------------- | ------- | ------------------------- |
+| `WAF_ENABLED_*`                 | `true`  | Enable WAF                |
+| `WAF_RATE_LIMIT_PER_IP`         | `10000` | Requests per 5 min per IP |
+| `WAF_GEO_BLOCKING_ENABLED`      | `false` | Block non-US/CA traffic   |
+| `WAF_AWS_MANAGED_RULES_ENABLED` | `true`  | Use AWS managed rules     |
 
 #### Runner Configuration
-| Variable | Default | Description |
-|----------|---------|-------------|
+
+| Variable        | Default         | Description                    |
+| --------------- | --------------- | ------------------------------ |
 | `RUNNER_LABELS` | `github-hosted` | Runner labels (or self-hosted) |
-| `RUNNER_SCOPE` | `both` | Where to check for runners |
+| `RUNNER_SCOPE`  | `both`          | Where to check for runners     |
 
 #### Other
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `AWS_SNS_ALERT_EMAIL` | User input | CloudWatch alert email |
-| `MAX_AVAILABILITY_ZONES` | `5` | Max AZs to use |
-| `OBSERVABILITY_ENABLED_*` | `true` | Enable observability |
-| `DOCKERHUB_PUBLISHING_ENABLED` | `false` | Publish to Docker Hub |
+
+| Variable                       | Default    | Description            |
+| ------------------------------ | ---------- | ---------------------- |
+| `AWS_SNS_ALERT_EMAIL`          | User input | CloudWatch alert email |
+| `MAX_AVAILABILITY_ZONES`       | `5`        | Max AZs to use         |
+| `OBSERVABILITY_ENABLED_*`      | `true`     | Enable observability   |
+| `DOCKERHUB_PUBLISHING_ENABLED` | `false`    | Publish to Docker Hub  |
 
 ---
 
@@ -374,6 +395,7 @@ just setup-gha
 **Purpose**: Enable local Docker development with AWS Bedrock AI.
 
 **Usage**:
+
 ```bash
 just setup-bedrock
 # or
@@ -381,18 +403,20 @@ just setup-bedrock
 ```
 
 **Prerequisites**:
+
 - Bootstrap completed (`just bootstrap`)
 - SSO session active (`aws sso login --profile robosystems-sso`)
 
 **What It Creates**:
 
-| Resource | Name | Description |
-|----------|------|-------------|
-| IAM User | `RoboSystemsBedrockDev` | Development user for local Bedrock access |
-| IAM Policy | `RoboSystemsBedrockAccess` | Permissions to invoke Claude models |
-| Access Key | (generated) | Credentials for local Docker |
+| Resource   | Name                       | Description                               |
+| ---------- | -------------------------- | ----------------------------------------- |
+| IAM User   | `RoboSystemsBedrockDev`    | Development user for local Bedrock access |
+| IAM Policy | `RoboSystemsBedrockAccess` | Permissions to invoke Claude models       |
+| Access Key | (generated)                | Credentials for local Docker              |
 
 **Policy Permissions**:
+
 ```json
 {
   "Statement": [
@@ -407,10 +431,7 @@ just setup-bedrock
       ]
     },
     {
-      "Action": [
-        "bedrock:GetFoundationModel",
-        "bedrock:ListFoundationModels"
-      ],
+      "Action": ["bedrock:GetFoundationModel", "bedrock:ListFoundationModels"],
       "Resource": "*"
     }
   ]
@@ -418,6 +439,7 @@ just setup-bedrock
 ```
 
 **Updates to `.env`**:
+
 ```bash
 AWS_BEDROCK_ACCESS_KEY_ID=AKIA...
 AWS_BEDROCK_SECRET_ACCESS_KEY=...
@@ -435,22 +457,23 @@ AWS_BEDROCK_SECRET_ACCESS_KEY=...
 
 **S3 Buckets Created**:
 
-| Bucket Name | Purpose |
-|-------------|---------|
-| `robosystems-shared-raw` | External source downloads (SEC, FRED, BLS) |
-| `robosystems-shared-processed` | Parquet files for graph ingestion |
-| `robosystems-user` | User uploads, staging tables, exports |
-| `robosystems-public-data` | Public data with CORS enabled |
-| `robosystems-local` | Local test bucket for pytest |
+| Bucket Name                    | Purpose                                    |
+| ------------------------------ | ------------------------------------------ |
+| `robosystems-shared-raw`       | External source downloads (SEC, FRED, BLS) |
+| `robosystems-shared-processed` | Parquet files for graph ingestion          |
+| `robosystems-user`             | User uploads, staging tables, exports      |
+| `robosystems-public-data`      | Public data with CORS enabled              |
+| `robosystems-local`            | Local test bucket for pytest               |
 
 **DynamoDB Tables Created**:
 
-| Table Name | Partition Key | Description |
-|------------|---------------|-------------|
-| `robosystems-graph-dev-graph-registry` | `graph_id` | Graph database metadata |
+| Table Name                                | Partition Key | Description                     |
+| ----------------------------------------- | ------------- | ------------------------------- |
+| `robosystems-graph-dev-graph-registry`    | `graph_id`    | Graph database metadata         |
 | `robosystems-graph-dev-instance-registry` | `instance_id` | EC2/container instance tracking |
 
 **Graph Registry GSIs**:
+
 - `entity-index` - Query by entity_id
 - `instance-index` - Query by instance_id
 - `region-status-index` - Query by region + status
@@ -458,12 +481,14 @@ AWS_BEDROCK_SECRET_ACCESS_KEY=...
 - `replication-status-index` - Query by replication status
 
 **Instance Registry GSIs**:
+
 - `region-cluster-index` - Query by region + cluster_type
 - `cluster-capacity-index` - Query by cluster_group + capacity
 - `health-region-index` - Query by status + region
 
 **Local Instance Registration**:
 Registers a local LadybugDB writer instance:
+
 ```json
 {
   "instance_id": "local-lbug-writer",
@@ -485,11 +510,11 @@ Registers a local LadybugDB writer instance:
 
 **Databases Created**:
 
-| Database | Purpose |
-|----------|---------|
-| `robosystems` | Main application database (IAM, billing, metadata) |
-| `robosystems_test` | Test database for pytest |
-| `dagster` | Dagster metadata database |
+| Database           | Purpose                                            |
+| ------------------ | -------------------------------------------------- |
+| `robosystems`      | Main application database (IAM, billing, metadata) |
+| `robosystems_test` | Test database for pytest                           |
+| `dagster`          | Dagster metadata database                          |
 
 ---
 
@@ -497,11 +522,11 @@ Registers a local LadybugDB writer instance:
 
 Bootstrap creates/updates these files:
 
-| File | Purpose | Git Ignored |
-|------|---------|-------------|
-| `.envrc` | Direnv config (AWS_PROFILE, AWS_REGION) | No |
-| `.env` | Docker Compose environment (container hostnames) | Yes |
-| `.env.local` | Local development (localhost URLs) | Yes |
+| File         | Purpose                                          | Git Ignored |
+| ------------ | ------------------------------------------------ | ----------- |
+| `.envrc`     | Direnv config (AWS_PROFILE, AWS_REGION)          | No          |
+| `.env`       | Docker Compose environment (container hostnames) | Yes         |
+| `.env.local` | Local development (localhost URLs)               | Yes         |
 
 ---
 
@@ -545,19 +570,19 @@ aws secretsmanager list-secrets  # AWS secrets
 
 ### SSO Login Issues
 
-| Issue | Solution |
-|-------|----------|
-| "Profile not found" | Run `just bootstrap` to create profile |
-| "Token expired" | Run `aws sso login --profile robosystems-sso` |
-| "Access denied" | Verify SSO permissions in IAM Identity Center |
+| Issue               | Solution                                      |
+| ------------------- | --------------------------------------------- |
+| "Profile not found" | Run `just bootstrap` to create profile        |
+| "Token expired"     | Run `aws sso login --profile robosystems-sso` |
+| "Access denied"     | Verify SSO permissions in IAM Identity Center |
 
 ### GitHub CLI Issues
 
-| Issue | Solution |
-|-------|----------|
-| "Not authenticated" | Run `gh auth login` |
-| "Repository not found" | Ensure you're in the correct git repository |
-| "Permission denied" | Check GitHub token scopes (need `repo` and `admin:org`) |
+| Issue                  | Solution                                                |
+| ---------------------- | ------------------------------------------------------- |
+| "Not authenticated"    | Run `gh auth login`                                     |
+| "Repository not found" | Ensure you're in the correct git repository             |
+| "Permission denied"    | Check GitHub token scopes (need `repo` and `admin:org`) |
 
 ### Secret Conflicts
 
@@ -594,6 +619,7 @@ gh variable set VARIABLE_NAME --body "new_value"
 When forking to a different AWS account:
 
 1. **Run bootstrap with your profile**:
+
    ```bash
    just bootstrap my-fork-sso
    ```
