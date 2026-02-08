@@ -169,16 +169,16 @@ class TestGraphModel:
 
   def test_can_have_subgraphs_property(self):
     """Test can_have_subgraphs property for different tiers."""
-    # Standard tier cannot have subgraphs
+    # Standard tier can have subgraphs (dedicated, max 3)
     standard_graph = Graph(
       graph_id="kg1",
       graph_name="Standard",
       graph_type="entity",
       graph_tier=GraphTier.LADYBUG_STANDARD.value,
     )
-    assert standard_graph.can_have_subgraphs is False
+    assert standard_graph.can_have_subgraphs is True
 
-    # Enterprise tier can have subgraphs
+    # Large tier can have subgraphs
     enterprise_graph = Graph(
       graph_id="kg2",
       graph_name="Enterprise",

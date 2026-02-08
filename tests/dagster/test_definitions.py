@@ -29,7 +29,6 @@ class TestDefinitionsLoad:
     job_names = [job.name for job in all_jobs]
     expected_jobs = [
       "monthly_credit_allocation_job",
-      "daily_storage_billing_job",
       "hourly_auth_cleanup_job",
       "provision_graph_job",
       "create_graph_job",
@@ -53,7 +52,6 @@ class TestDefinitionsLoad:
     schedule_names = [s.name for s in all_schedules]
     expected_schedules = [
       "monthly_credit_allocation_job_schedule",
-      "daily_storage_billing_job_schedule",
       "hourly_auth_cleanup_job_schedule",
     ]
     for expected in expected_schedules:

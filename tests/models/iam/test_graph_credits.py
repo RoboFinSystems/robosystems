@@ -114,10 +114,6 @@ class TestGraphCredits:
     result = GraphCredits.get_by_graph_id("non_existent", self.session)
     assert result is None
 
-  @patch(
-    "robosystems.models.iam.graph_credits.StorageBillingConfig.STORAGE_INCLUDED",
-    {"ladybug-large": 500},
-  )
   def test_create_for_graph(self):
     """Test creating credits for a new graph."""
     # Create another graph with unique ID
@@ -144,7 +140,8 @@ class TestGraphCredits:
     assert credits.graph_id == graph2.graph_id
     assert credits.monthly_allocation == Decimal("5000")
     assert credits.current_balance == Decimal("5000")
-    assert credits.storage_limit_gb == Decimal("500")
+    # Storage limit now comes from GraphTierConfig backup limits (safety cap)
+    assert credits.storage_limit_gb > 0
     assert credits.last_allocation_date is not None
 
     # Check that initial allocation transaction was created

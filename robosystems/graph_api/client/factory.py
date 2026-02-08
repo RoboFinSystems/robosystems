@@ -1,15 +1,12 @@
 """
-Graph Client Factory - Intelligent routing for all graph database backends.
+Graph Client Factory - Intelligent routing for graph database backends.
 
 This module provides a factory for creating GraphClient instances that properly
-route to the correct graph database instance (LadybugDB or Neo4j) based on the graph ID,
+route to the correct graph database instance based on the graph ID,
 operation type, and tier.
 
 Routing targets:
-1. User Graph Writers - Tier-based routing (Standard/Enterprise/Premium)
-   - Standard: LadybugDB backend
-   - Enterprise: Neo4j Community backend
-   - Premium: Neo4j Enterprise backend
+1. User Graph Writers - LadybugDB instances (Standard/Large/XLarge tiers)
 2. Shared Repository Master - Primary source of truth for shared data (writes + fallback reads)
 3. Shared Repository Replica ALB - Read-only replicas for high-volume reads
 """
@@ -192,10 +189,7 @@ class GraphClientFactory:
   Factory for creating properly routed graph database clients.
 
   Handles intelligent routing to different backends:
-  - User graph writers (tier-based routing to LadybugDB or Neo4j)
-    - Standard tier: LadybugDB
-    - Enterprise tier: Neo4j Community
-    - Premium tier: Neo4j Enterprise
+  - User graph writers (LadybugDB instances for Standard/Large/XLarge tiers)
   - Shared repository master (writes + fallback reads)
   - Shared repository replica ALB (primary reads)
   """
@@ -298,16 +292,13 @@ class GraphClientFactory:
     """
     Create a graph database client with intelligent routing.
 
-    Routes to the appropriate backend based on tier:
-    - Standard tier: LadybugDB
-    - Enterprise tier: Neo4j Community
-    - Premium tier: Neo4j Enterprise
+    Routes to the appropriate LadybugDB instance based on tier.
 
     Args:
         graph_id: Graph database identifier
         operation_type: "read" or "write"
         environment: Environment (defaults to env.ENVIRONMENT)
-        tier: Instance tier for user graphs (Standard/Enterprise/Premium)
+        tier: Instance tier for user graphs (Standard/Large/XLarge)
 
     Returns:
         Configured GraphClient instance (works with all backends via Graph API)
@@ -373,34 +364,10 @@ class GraphClientFactory:
       # 2. graph.yml tier config (fallback for consistency with AWS)
       # 3. Default to ladybug
 
-      backend = "ladybug"  # Default
-
-      # Check env var first (highest priority in dev)
-      if env.GRAPH_SHARED_REPOSITORY_BACKEND:
-        backend = env.GRAPH_SHARED_REPOSITORY_BACKEND
-        logger.info(f"Using backend from GRAPH_SHARED_REPOSITORY_BACKEND: {backend}")
-      else:
-        # Fall back to tier config (for consistency with AWS environments)
-        from robosystems.config.graph_tier import GraphTierConfig
-
-        tier_config = GraphTierConfig.get_tier_config("ladybug-shared", "staging")
-        if tier_config.get("backend"):
-          backend = tier_config.get("backend")
-          logger.info(f"Using backend from graph.yml tier config: {backend}")
-        else:
-          logger.info(f"Using default backend: {backend}")
-
-      # Route to appropriate local instance based on backend
-      if backend == "neo4j":
-        api_url = "http://graph-api-neo4j:8002"  # Neo4j instance
-        logger.info(
-          f"Dev environment: Routing {graph_id} {operation_type} to Neo4j at {api_url}"
-        )
-      else:
-        api_url = env.GRAPH_API_URL or "http://localhost:8001"  # LadybugDB instance
-        logger.info(
-          f"Dev environment: Routing {graph_id} {operation_type} to LadybugDB at {api_url}"
-        )
+      api_url = env.GRAPH_API_URL or "http://localhost:8001"
+      logger.info(
+        f"Dev environment: Routing {graph_id} {operation_type} to LadybugDB at {api_url}"
+      )
 
       api_key = env.GRAPH_API_KEY
       target = RouteTarget.SHARED_MASTER  # Treat as master in dev
@@ -651,11 +618,7 @@ class GraphClientFactory:
     Create client for user graph with tier-based routing.
 
     - Dev: Routes to single local graph instance
-    - Prod/Staging: Uses allocation manager to find the appropriate instance
-      based on the graph's tier:
-      - Standard: LadybugDB backend
-      - Enterprise: Neo4j Community backend
-      - Premium: Neo4j Enterprise backend
+    - Prod/Staging: Uses allocation manager to find the appropriate LadybugDB instance
     - Subgraphs: Routes to parent's instance but uses subgraph database
     """
 
@@ -902,13 +865,13 @@ async def get_graph_client(
   Convenience function to get a properly routed graph database client.
 
   This is the preferred method for getting a graph client in async contexts.
-  Routes to appropriate backend (LadybugDB or Neo4j) based on tier.
+  Routes to appropriate LadybugDB instance based on tier.
 
   Args:
       graph_id: Graph database identifier
       operation_type: "read" or "write"
       environment: Environment (defaults to env.ENVIRONMENT)
-      tier: Instance tier for user graphs (Standard/Enterprise/Premium)
+      tier: Instance tier for user graphs (Standard/Large/XLarge)
 
   Returns:
       Configured GraphClient instance (works with all backends via Graph API)
@@ -932,13 +895,13 @@ def get_graph_client_sync(
   Convenience function to get a properly routed graph database client (sync version).
 
   This is the preferred method for getting a graph client in sync contexts.
-  Routes to appropriate backend (LadybugDB or Neo4j) based on tier.
+  Routes to appropriate LadybugDB instance based on tier.
 
   Args:
       graph_id: Graph database identifier
       operation_type: "read" or "write"
       environment: Environment (defaults to env.ENVIRONMENT)
-      tier: Instance tier for user graphs (Standard/Enterprise/Premium)
+      tier: Instance tier for user graphs (Standard/Large/XLarge)
 
   Returns:
       Configured GraphClient instance (works with all backends via Graph API)
@@ -960,7 +923,6 @@ async def get_graph_client_for_instance(
 
   This bypasses all routing and connects directly to a specific instance.
   Used for allocation operations where we need to target a specific instance.
-  Works with both LadybugDB and Neo4j backends via Graph API.
 
   Args:
       instance_ip: Private IP address of the graph database instance

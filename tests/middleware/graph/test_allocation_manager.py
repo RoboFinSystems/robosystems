@@ -114,52 +114,11 @@ class TestMultiBackendSupport:
           GraphTier.LADYBUG_STANDARD: {
             "backend": "ladybug",
             "backend_type": "ladybug",
-            "databases_per_instance": 10,
-          },
-          GraphTier.NEO4J_COMMUNITY_LARGE: {
-            "backend": "neo4j",
-            "backend_type": "neo4j",
-            "neo4j_edition": "community",
-            "databases_per_instance": 1,
-          },
-          GraphTier.NEO4J_ENTERPRISE_XLARGE: {
-            "backend": "neo4j",
-            "backend_type": "neo4j",
-            "neo4j_edition": "enterprise",
             "databases_per_instance": 1,
           },
         }
 
         return manager
-
-  @pytest.mark.parametrize(
-    "tier,expected_backend,expected_backend_type,expected_edition,expected_capacity",
-    [
-      (GraphTier.LADYBUG_STANDARD, "ladybug", "ladybug", None, 10),
-      (GraphTier.NEO4J_COMMUNITY_LARGE, "neo4j", "neo4j", "community", 1),
-      (GraphTier.NEO4J_ENTERPRISE_XLARGE, "neo4j", "neo4j", "enterprise", 1),
-    ],
-  )
-  def test_tier_backend_configuration(
-    self,
-    allocation_manager,
-    tier,
-    expected_backend,
-    expected_backend_type,
-    expected_edition,
-    expected_capacity,
-  ):
-    """Test that each tier has correct backend configuration."""
-    config = allocation_manager.tier_configs[tier]
-
-    assert config["backend"] == expected_backend
-    assert config["backend_type"] == expected_backend_type
-    assert config["databases_per_instance"] == expected_capacity
-
-    if expected_edition:
-      assert config.get("neo4j_edition") == expected_edition
-    else:
-      assert "neo4j_edition" not in config
 
   def test_lbug_backend_standard_tier(self, allocation_manager):
     """Test LadybugDB backend is used for Standard tier."""
@@ -167,43 +126,8 @@ class TestMultiBackendSupport:
 
     assert config["backend"] == "ladybug"
     assert config["backend_type"] == "ladybug"
-    assert config["databases_per_instance"] == 10
+    assert config["databases_per_instance"] == 1
     assert "neo4j_edition" not in config
-
-  def test_neo4j_community_enterprise_tier(self, allocation_manager):
-    """Test Neo4j Community backend is used for Enterprise tier."""
-    config = allocation_manager.tier_configs[GraphTier.NEO4J_COMMUNITY_LARGE]
-
-    assert config["backend"] == "neo4j"
-    assert config["backend_type"] == "neo4j"
-    assert config["neo4j_edition"] == "community"
-    assert config["databases_per_instance"] == 1
-
-  def test_neo4j_enterprise_premium_tier(self, allocation_manager):
-    """Test Neo4j Enterprise backend is used for Premium tier."""
-    config = allocation_manager.tier_configs[GraphTier.NEO4J_ENTERPRISE_XLARGE]
-
-    assert config["backend"] == "neo4j"
-    assert config["backend_type"] == "neo4j"
-    assert config["neo4j_edition"] == "enterprise"
-    assert config["databases_per_instance"] == 1
-
-  @pytest.mark.parametrize(
-    "tier,expected_isolation",
-    [
-      (GraphTier.LADYBUG_STANDARD, False),  # Shared resources
-      (GraphTier.NEO4J_COMMUNITY_LARGE, True),  # Isolated resources
-      (GraphTier.NEO4J_ENTERPRISE_XLARGE, True),  # Isolated resources
-    ],
-  )
-  def test_tier_resource_isolation(self, allocation_manager, tier, expected_isolation):
-    """Test resource isolation for each tier."""
-    config = allocation_manager.tier_configs[tier]
-
-    # Standard tier: 10 databases per instance (shared)
-    # Enterprise/Premium: 1 database per instance (isolated)
-    is_isolated = config["databases_per_instance"] == 1
-    assert is_isolated == expected_isolation
 
   def test_all_tiers_have_backend_type(self, allocation_manager):
     """Test that all tiers have backend_type attribute for DynamoDB."""

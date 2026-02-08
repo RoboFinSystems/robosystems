@@ -60,7 +60,6 @@ from fastapi import (
 from sqlalchemy.orm import Session
 
 from robosystems.config import env
-from robosystems.config.billing.core import StorageBillingConfig
 from robosystems.config.constants import (
   FALLBACK_BYTES_PER_ROW_CSV,
   FALLBACK_BYTES_PER_ROW_JSON,
@@ -69,6 +68,7 @@ from robosystems.config.constants import (
   PRESIGNED_URL_EXPIRY_SECONDS,
   SMALL_FILE_STAGING_THRESHOLD_MB,
 )
+from robosystems.config.graph_tier import GraphTierConfig
 from robosystems.config.shared_repositories import is_shared_repository
 from robosystems.database import get_db_session
 from robosystems.logger import api_logger, logger
@@ -612,9 +612,8 @@ async def update_file(
 
     graph = Graph.get_by_id(graph_id, db)
     if graph:
-      storage_limit_gb = StorageBillingConfig.STORAGE_INCLUDED.get(
-        str(graph.graph_tier), 100
-      )
+      backup_limits = GraphTierConfig.get_backup_limits(str(graph.graph_tier))
+      storage_limit_gb = backup_limits.get("max_backup_size_gb", 10)
       storage_limit_bytes = storage_limit_gb * 1024 * 1024 * 1024
 
       all_tables = GraphTable.get_all_for_graph(graph_id, db)

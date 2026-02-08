@@ -575,8 +575,6 @@ class CreditService:
         GraphTier.LADYBUG_STANDARD,
         GraphTier.LADYBUG_LARGE,
         GraphTier.LADYBUG_XLARGE,
-        GraphTier.NEO4J_COMMUNITY_LARGE,
-        GraphTier.NEO4J_ENTERPRISE_XLARGE,
       ],
     }
 
@@ -594,8 +592,7 @@ class CreditService:
         if plan_config
         else 0,
         "priority_support": plan_config["priority_support"] if plan_config else False,
-        "storage_billing": "Variable based on usage - charged daily at 0.05 credits per GB",
-        "credit_based_storage": True,
+        "storage_included": True,
       },
     }
 
@@ -658,8 +655,6 @@ class CreditService:
         GraphTier.LADYBUG_STANDARD,
         GraphTier.LADYBUG_LARGE,
         GraphTier.LADYBUG_XLARGE,
-        GraphTier.NEO4J_COMMUNITY_LARGE,
-        GraphTier.NEO4J_ENTERPRISE_XLARGE,
       ],
     }
 
@@ -1145,131 +1140,10 @@ class CreditService:
       user_id=user_id,
     )
 
-  def consume_storage_credits(
-    self,
-    graph_id: str,
-    storage_gb: Decimal,
-    metadata: dict[str, Any] | None = None,
-  ) -> dict[str, Any]:
-    """
-    Consume credits for daily storage overage.
-
-    Only charges for storage ABOVE the included limit in the subscription.
-    Storage charges can result in negative balances - users cannot "turn off" storage.
-
-    Args:
-        graph_id: Graph identifier
-        storage_gb: Average storage usage in GB for the day
-        metadata: Optional metadata for the transaction
-
-    Returns:
-        Dict with consumption results
-    """
-    # Get credit record from database
-    credits = GraphCredits.get_by_graph_id(graph_id, self.session)
-    if not credits:
-      return {
-        "success": False,
-        "error": "No credit pool found for graph",
-        "credits_consumed": 0,
-      }
-
-    # Get subscription plan to find included storage
-    graph_tier = (
-      credits.graph_tier
-      if hasattr(credits.graph_tier, "value")
-      else str(credits.graph_tier)
-    )
-    plan_config = BillingConfig.get_subscription_plan(graph_tier)
-
-    if not plan_config:
-      logger.warning(
-        f"No billing plan found for tier {graph_tier}, treating all storage as overage"
-      )
-      included_gb = Decimal("0")
-    else:
-      included_gb = Decimal(str(plan_config.get("included_gb", 0)))
-
-    # Calculate overage (only charge for storage above included limit)
-    overage_gb = max(Decimal("0"), storage_gb - included_gb)
-
-    # If no overage, no charges
-    if overage_gb <= 0:
-      return {
-        "success": True,
-        "credits_consumed": 0,
-        "overage_gb": 0,
-        "included_gb": float(included_gb),
-        "total_storage_gb": float(storage_gb),
-        "remaining_balance": float(credits.current_balance),
-        "went_negative": False,
-        "storage_charge": True,
-        "message": "Storage within included limit - no charges applied",
-      }
-
-    # Calculate overage cost using centralized config
-    credits_per_gb_day = get_operation_cost("storage_daily")
-    overage_cost = credits_per_gb_day * overage_gb
-
-    # Storage charges are always applied, even if it results in negative balance
-    old_balance = credits.current_balance
-    credits.current_balance -= overage_cost
-    credits.updated_at = datetime.now(UTC)
-
-    # Record transaction
-    transaction_metadata = {
-      "total_storage_gb": str(storage_gb),
-      "included_gb": str(included_gb),
-      "overage_gb": str(overage_gb),
-      "overage_cost": str(overage_cost),
-      "credits_per_gb_day": str(credits_per_gb_day),
-      "old_balance": str(old_balance),
-      "new_balance": str(credits.current_balance),
-      "allows_negative": True,
-      "graph_tier": graph_tier,
-    }
-    if metadata:
-      transaction_metadata.update(metadata)
-
-    GraphCreditTransaction.create_transaction(
-      graph_credits_id=credits.id,
-      transaction_type=CreditTransactionType.CONSUMPTION,
-      amount=-overage_cost,
-      description=f"Daily storage overage: {overage_gb} GB (total: {storage_gb} GB, included: {included_gb} GB)",
-      metadata=transaction_metadata,
-      session=self.session,
-    )
-
-    self.session.commit()
-
-    # Update cache with new balance
-    try:
-      from ...middleware.billing.cache import credit_cache
-
-      credit_cache.update_cached_balance_after_consumption(graph_id, overage_cost)
-    except Exception as e:
-      logger.warning(f"Failed to update credit cache after storage consumption: {e}")
-
-    # Determine if balance went negative
-    went_negative = old_balance >= 0 and credits.current_balance < 0
-
-    return {
-      "success": True,
-      "credits_consumed": float(overage_cost),
-      "overage_gb": float(overage_gb),
-      "included_gb": float(included_gb),
-      "total_storage_gb": float(storage_gb),
-      "credits_per_gb_day": float(credits_per_gb_day),
-      "remaining_balance": float(credits.current_balance),
-      "went_negative": went_negative,
-      "old_balance": float(old_balance),
-      "storage_charge": True,
-    }
-
 
 # Map operation costs to use centralized configuration
 # Note: AI operations (agent_call) use token-based pricing via consume_ai_tokens()
-# Note: Storage overage is billed via credits at storage_per_gb_day rate
+# Note: Storage is included in each tier (no metering/overage)
 CREDIT_COSTS = {
   "api_call": CreditConfig.OPERATION_COSTS["api_call"],
   "query": CreditConfig.OPERATION_COSTS["query"],
@@ -1279,7 +1153,6 @@ CREDIT_COSTS = {
   "backup": CreditConfig.OPERATION_COSTS["backup"],
   "analytics": CreditConfig.OPERATION_COSTS["analytics"],
   "sync": CreditConfig.OPERATION_COSTS["sync"],
-  "storage_daily": CreditConfig.OPERATION_COSTS["storage_per_gb_day"],
 }
 
 

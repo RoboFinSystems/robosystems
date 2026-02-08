@@ -1075,6 +1075,9 @@ def materialize_graph_tables(
   import time
 
   from robosystems.models.iam import Graph, GraphFile, GraphSchema, GraphTable
+  from robosystems.operations.lbug.chunked_materialization import (
+    materialize_table_chunked,
+  )
 
   start_time = time.time()
   graph_id = config.graph_id
@@ -1250,9 +1253,11 @@ def materialize_graph_tables(
           context.log.info(f"[{progress}%] Materializing table {table_name}")
 
           mat_result = loop.run_until_complete(
-            client.materialize_table(
+            materialize_table_chunked(
+              client=client,
               graph_id=graph_id,
               table_name=table_name,
+              tier=graph_record.graph_tier or "ladybug-standard",
               ignore_errors=config.ignore_errors,
               file_ids=None,
             )

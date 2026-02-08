@@ -25,9 +25,8 @@ class GraphSubscriptionTier(BaseModel):
   monthly_credits_per_graph: int = Field(
     ..., description="Monthly AI credits per graph"
   )
-  storage_included_gb: int = Field(..., description="Storage included in GB")
-  storage_overage_per_gb: float = Field(
-    ..., description="Overage cost per GB per month"
+  storage_included: bool = Field(
+    True, description="Whether storage is included in the tier"
   )
   infrastructure: str = Field(..., description="Infrastructure description")
   features: list[str] = Field(..., description="List of features")
@@ -43,13 +42,11 @@ class GraphSubscriptionTier(BaseModel):
 
 
 class StorageInfo(BaseModel):
-  """Storage pricing information."""
+  """Storage information."""
 
-  included_per_tier: dict[str, int] = Field(
-    ..., description="Storage included per tier in GB"
-  )
-  overage_pricing: dict[str, float] = Field(
-    ..., description="Overage pricing per GB per tier"
+  description: str = Field(
+    "Storage included in tier",
+    description="Storage billing description",
   )
 
 

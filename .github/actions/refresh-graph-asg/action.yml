@@ -42,10 +42,10 @@ runs:
           exit 1
         fi
 
-        VALID_TIERS="ladybug-standard|ladybug-large|ladybug-xlarge|ladybug-shared|neo4j-community-large|neo4j-enterprise-xlarge"
+        VALID_TIERS="ladybug-standard|ladybug-large|ladybug-xlarge|ladybug-shared"
         if [[ -n "${{ inputs.tier }}" && ! "${{ inputs.tier }}" =~ ^($VALID_TIERS)$ ]]; then
           echo "::error::Invalid tier: ${{ inputs.tier }}"
-          echo "Must be one of: ladybug-standard, ladybug-large, ladybug-xlarge, ladybug-shared, neo4j-community-large, neo4j-enterprise-xlarge"
+          echo "Must be one of: ladybug-standard, ladybug-large, ladybug-xlarge, ladybug-shared"
           exit 1
         fi
 
@@ -81,8 +81,6 @@ runs:
           ["ladybug-large"]="LadybugLarge"
           ["ladybug-xlarge"]="LadybugXlarge"
           ["ladybug-shared"]="LadybugShared"
-          ["neo4j-community-large"]="Neo4jCommunityLarge"
-          ["neo4j-enterprise-xlarge"]="Neo4jEnterpriseXlarge"
         )
 
         # Shared tiers have rebuildable data (no database allocation check needed)

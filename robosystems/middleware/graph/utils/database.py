@@ -139,7 +139,7 @@ def get_max_databases_per_node() -> int:
   Uses tier-specific configuration from graph.yml via GraphTierConfig.
 
   Returns:
-      int: Maximum databases per node (defaults to 10 for standard tier)
+      int: Maximum databases per node (from graph.yml, defaults to 10 if not configured)
   """
   try:
     from robosystems.config.graph_tier import GraphTierConfig

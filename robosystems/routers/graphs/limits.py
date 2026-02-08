@@ -25,6 +25,7 @@ from robosystems.middleware.robustness import (
 )
 from robosystems.models.api.graphs.limits import (
   BackupLimits,
+  ContentLimits,
   CopyOperationLimits,
   CreditLimits,
   GraphLimitsResponse,
@@ -77,6 +78,7 @@ Returns all operational limits that apply to this graph including:
 - **Backup Limits**: Frequency, retention, size limits
 - **Rate Limits**: Requests per minute/hour based on tier
 - **Credit Limits**: AI operation credits (if applicable)
+- **Content Limits**: Node, relationship, and row limits (if applicable)
 
 This unified endpoint provides all limits in one place for easier client integration.
 
@@ -124,7 +126,6 @@ async def get_graph_limits(
     await get_universal_repository(graph_id, "read")
 
     # Import needed functions
-    from robosystems.config.billing.core import StorageBillingConfig
     from robosystems.config.graph_tier import (
       GraphTierConfig,
       get_tier_backup_limits,
@@ -151,8 +152,11 @@ async def get_graph_limits(
     else:
       graph_tier = "ladybug-standard"
 
-    # Get storage information (based on graph tier from billing config)
-    max_storage_gb = StorageBillingConfig.STORAGE_INCLUDED.get(graph_tier, 100)
+    is_shared = MultiTenantUtils.is_shared_repository(graph_id)
+
+    # Get storage information (safety cap from backup limits)
+    backup_limits_config = get_tier_backup_limits(graph_tier)
+    max_storage_gb = backup_limits_config.get("max_backup_size_gb", 10)
     storage_limits = {}
     try:
       graph_client = await _get_graph_client(graph_id)
@@ -184,8 +188,8 @@ async def get_graph_limits(
       "max_timeout_seconds": GraphTierConfig.get_query_timeout(graph_tier),
       "chunk_size": GraphTierConfig.get_chunk_size(graph_tier),
       # These are application-level limits not in YAML config
-      "max_rows_per_query": 10000,  # TODO: Add to graph.yml if needed
-      "concurrent_queries": 1,  # TODO: Add to graph.yml if needed
+      "max_rows_per_query": 10000,
+      "concurrent_queries": 1,
     }
 
     # Get backup limits from tier configuration (based on graph tier)
@@ -212,7 +216,7 @@ async def get_graph_limits(
 
     # Get credit limits if applicable
     credit_limits = {}
-    if not MultiTenantUtils.is_shared_repository(graph_id):
+    if not is_shared:
       try:
         graph_credits = (
           session.query(GraphCredits).filter(GraphCredits.graph_id == graph_id).first()
@@ -221,20 +225,64 @@ async def get_graph_limits(
           credit_limits = {
             "monthly_ai_credits": graph_credits.monthly_credit_limit,
             "current_balance": graph_credits.current_balance,
-            "storage_billing_enabled": graph_credits.storage_billing_enabled,
-            "storage_rate_per_gb_per_day": 10
-            if graph_credits.storage_billing_enabled
-            else 0,
           }
       except Exception:
         pass
+
+    # Get content limits for non-shared graphs
+    content_limits = None
+    if not is_shared:
+      graph_limits_config = GraphTierConfig.get_graph_limits(graph_tier)
+
+      # Try to get current counts from Graph API
+      current_nodes = None
+      current_rels = None
+      try:
+        graph_client = await _get_graph_client(graph_id)
+        db_info = await asyncio.wait_for(
+          graph_client.get_database_info(graph_id), timeout=10
+        )
+        await graph_client.close()
+        current_nodes = db_info.get("node_count")
+        current_rels = db_info.get("relationship_count")
+      except Exception as e:
+        logger.debug(f"Could not fetch graph content counts for {graph_id}: {e}")
+
+      # Determine warnings
+      approaching = []
+      warn_pct = graph_limits_config.get("warn_at_percentage", 80) / 100
+      if (
+        current_nodes is not None
+        and current_nodes > graph_limits_config["max_nodes"] * warn_pct
+      ):
+        approaching.append(
+          f"nodes ({current_nodes:,} / {graph_limits_config['max_nodes']:,})"
+        )
+      if (
+        current_rels is not None
+        and current_rels > graph_limits_config["max_relationships"] * warn_pct
+      ):
+        approaching.append(
+          f"relationships ({current_rels:,} / {graph_limits_config['max_relationships']:,})"
+        )
+
+      content_limits = ContentLimits(
+        max_nodes=graph_limits_config["max_nodes"],
+        current_nodes=current_nodes,
+        max_relationships=graph_limits_config["max_relationships"],
+        current_relationships=current_rels,
+        max_rows_per_copy=graph_limits_config["max_rows_per_copy"],
+        max_single_table_rows=graph_limits_config["max_single_table_rows"],
+        chunk_size_rows=graph_limits_config["chunk_size_rows"],
+        approaching_limits=approaching,
+      )
 
     # Build comprehensive response using typed models
     response = GraphLimitsResponse(
       graph_id=graph_id,
       subscription_tier=user_tier,
       graph_tier=graph_tier,
-      is_shared_repository=MultiTenantUtils.is_shared_repository(graph_id),
+      is_shared_repository=is_shared,
       storage=StorageLimits(**storage_limits),
       queries=QueryLimits(**query_limits),
       copy_operations=CopyOperationLimits(
@@ -248,6 +296,7 @@ async def get_graph_limits(
       backups=BackupLimits(**backup_limits),
       rate_limits=RateLimits(**rate_limits),
       credits=CreditLimits(**credit_limits) if credit_limits else None,
+      content=content_limits,
     )
 
     # Record success

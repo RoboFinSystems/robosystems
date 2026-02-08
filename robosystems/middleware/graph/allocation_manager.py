@@ -150,7 +150,7 @@ class LadybugAllocationManager:
       GraphTier.LADYBUG_STANDARD: {
         "backend": "ladybug",
         "backend_type": "ladybug",
-        "databases_per_instance": self.max_databases_per_instance,  # Multi-tenant (10 per instance)
+        "databases_per_instance": self.max_databases_per_instance,  # Dedicated (1 per instance)
       },
       GraphTier.LADYBUG_LARGE: {
         "backend": "ladybug",
@@ -166,18 +166,6 @@ class LadybugAllocationManager:
         "backend": "ladybug",
         "backend_type": "ladybug",
         "databases_per_instance": 1,  # One repository per instance
-      },
-      GraphTier.NEO4J_COMMUNITY_LARGE: {
-        "backend": "neo4j",
-        "backend_type": "neo4j",
-        "neo4j_edition": "community",
-        "databases_per_instance": 1,  # Dedicated instance (no subgraphs - restricted to 1 DB)
-      },
-      GraphTier.NEO4J_ENTERPRISE_XLARGE: {
-        "backend": "neo4j",
-        "backend_type": "neo4j",
-        "neo4j_edition": "enterprise",
-        "databases_per_instance": 1,  # Dedicated instance (parent + subgraphs)
       },
     }
     # ASG name will be determined dynamically from instance data
@@ -989,8 +977,6 @@ class LadybugAllocationManager:
           "ladybug-large",
           "ladybug-xlarge",
           "ladybug-shared",
-          "neo4j-community-large",
-          "neo4j-enterprise-xlarge",
         ]
         if target_tier not in supported_tiers:
           logger.error(
@@ -1135,8 +1121,6 @@ class LadybugAllocationManager:
         "ladybug-large": "RoboSystemsGraphWritersLadybugLargeProd",
         "ladybug-xlarge": "RoboSystemsGraphWritersLadybugXlargeProd",
         "ladybug-shared": "RoboSystemsGraphWritersLadybugSharedProd",
-        "neo4j-community-large": "RoboSystemsGraphWritersNeo4jCommunityLargeProd",
-        "neo4j-enterprise-xlarge": "RoboSystemsGraphWritersNeo4jEnterpriseXlargeProd",
       }
     elif self.environment == "staging":
       tier_map = {
@@ -1144,8 +1128,6 @@ class LadybugAllocationManager:
         "ladybug-large": "RoboSystemsGraphWritersLadybugLargeStaging",
         "ladybug-xlarge": "RoboSystemsGraphWritersLadybugXlargeStaging",
         "ladybug-shared": "RoboSystemsGraphWritersLadybugSharedStaging",
-        "neo4j-community-large": "RoboSystemsGraphWritersNeo4jCommunityLargeStaging",
-        "neo4j-enterprise-xlarge": "RoboSystemsGraphWritersNeo4jEnterpriseXlargeStaging",
       }
     else:
       # Development or other environments

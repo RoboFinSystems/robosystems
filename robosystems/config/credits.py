@@ -4,15 +4,11 @@ Credit system configuration - operation costs and alerts.
 This module defines credit costs for operations and alert thresholds.
 Tier credit allocations are defined in billing/core.py (single source of truth).
 
-CREDIT VALUE ANCHOR:
-====================
-1 credit = 1 GB/day of storage overage = ~$0.00333 (1/3 of a cent)
-
 CREDIT MODEL:
 =============
 Credits are consumed by AI operations using token-based pricing.
 All database operations are included with the subscription.
-Storage overage is billed via credits at 1 credit/GB/day.
+Storage is included in each tier (no metering/overage).
 
 AI CREDITS (Token-Based Pricing):
 ---------------------------------
@@ -43,11 +39,8 @@ class CreditConfig:
 
   # Credit cost per operation type (in credits)
   # AI operations use TOKEN-BASED pricing (see AIBillingConfig.TOKEN_PRICING)
-  # Storage overage uses CREDIT-BASED billing at a flat rate
+  # Storage is included in each tier (no metering/overage)
   OPERATION_COSTS = {
-    # Storage overage (per GB per day) - THE CREDIT ANCHOR
-    # 1 credit = 1 GB/day = ~$0.00333 → 30 credits/GB/month = ~$0.10/GB/month
-    "storage_per_gb_day": Decimal("1"),  # 1 credit per GB per day (~$0.10/GB/month)
     # Connection sync operations - included (not an AI operation)
     "connection_sync": Decimal("0"),  # Sync external data - included
     # All other operations are included in subscription (no credit consumption)

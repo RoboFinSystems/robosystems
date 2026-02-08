@@ -19,23 +19,23 @@ logger = logging.getLogger(__name__)
 # All tier-related settings are defined here in one place.
 # NOTE: Stripe prices are auto-created from this config on first checkout
 #
-# CREDIT VALUE ANCHOR: 1 credit = 1 GB/day of storage = ~$0.00333
-#
 # Credit allocations with token-based pricing (~38 credits per agent call):
 # - 8,000 credits = ~200 agent calls/month (~7/day)
 # - 32,000 credits = ~800 agent calls/month (~27/day)
 # - 100,000 credits = ~2,600 agent calls/month (~87/day)
 # NOTE: MCP tool access is unlimited - credits only apply to in-house AI agents
+#
+# Storage is included in the tier (no metering/overage). Graph content limits
+# (nodes, relationships, rows) naturally cap storage usage per tier.
 DEFAULT_GRAPH_BILLING_PLANS: list[dict[str, Any]] = [
   {
     "name": "ladybug-standard",
     "display_name": "LadybugDB Standard",
-    "description": "Multi-tenant LadybugDB infrastructure - perfect for most applications",
-    "base_price_cents": 5000,  # $50/month
+    "description": "Dedicated m7g.large LadybugDB infrastructure with subgraph support",
+    "base_price_cents": 10000,  # $100/month
     "monthly_credit_allocation": 8000,  # ~200 agent calls/month
-    "included_gb": 10,  # 10 GB storage included (overage via credits)
     "max_queries_per_hour": 10000,
-    "infrastructure": "Multi-tenant (shared r7g.large/xlarge)",
+    "infrastructure": "Dedicated m7g.large (2 vCPU, 8 GB RAM)",
     "backup_retention_days": 7,
     "priority_support": True,
   },
@@ -45,7 +45,6 @@ DEFAULT_GRAPH_BILLING_PLANS: list[dict[str, Any]] = [
     "description": "Dedicated r7g.large instance - enhanced performance with subgraph support",
     "base_price_cents": 30000,  # $300/month
     "monthly_credit_allocation": 32000,  # ~800 agent calls/month
-    "included_gb": 50,  # 50 GB storage included (overage via credits)
     "max_queries_per_hour": 50000,
     "infrastructure": "Dedicated r7g.large (2 vCPU, 16 GB RAM)",
     "backup_retention_days": 30,
@@ -57,7 +56,6 @@ DEFAULT_GRAPH_BILLING_PLANS: list[dict[str, Any]] = [
     "description": "Dedicated r7g.xlarge instance - maximum performance and scale",
     "base_price_cents": 70000,  # $700/month
     "monthly_credit_allocation": 100000,  # ~2,600 agent calls/month
-    "included_gb": 100,  # 100 GB storage included (overage via credits)
     "max_queries_per_hour": None,  # Unlimited
     "infrastructure": "Dedicated r7g.xlarge (4 vCPU, 32 GB RAM)",
     "backup_retention_days": 90,
@@ -80,32 +78,6 @@ TIER_CREDIT_ALLOCATIONS = {
   plan["name"]: plan["monthly_credit_allocation"]
   for plan in DEFAULT_GRAPH_BILLING_PLANS
 }
-
-
-# Helper to get included storage by tier name
-def get_included_storage(tier: str) -> int:
-  """Get included storage in GB for a tier from the billing plans."""
-  for plan in DEFAULT_GRAPH_BILLING_PLANS:
-    if plan["name"] == tier:
-      return plan.get("included_gb", 100)
-  return 100  # Default for unknown tiers
-
-
-# Build STORAGE_INCLUDED from plans for backward compatibility
-STORAGE_INCLUDED = {
-  plan["name"]: plan["included_gb"] for plan in DEFAULT_GRAPH_BILLING_PLANS
-}
-
-
-class StorageBillingConfig:
-  """Storage limits by subscription tier (derived from billing plans)."""
-
-  STORAGE_INCLUDED = STORAGE_INCLUDED
-
-  @classmethod
-  def get_included_storage(cls, tier: str) -> int:
-    """Get included storage in GB for a tier."""
-    return get_included_storage(tier)
 
 
 class BillingConfig:
@@ -276,12 +248,4 @@ class BillingConfig:
         "connection_create",
         "database_query",
       ],
-      "storage_pricing": {
-        "included_per_tier": {
-          "ladybug-standard": 10,  # GB
-          "ladybug-large": 50,  # GB
-          "ladybug-xlarge": 100,  # GB
-        },
-        "overage_credits_per_gb_per_day": 1,  # 1 credit/GB/day for storage overage
-      },
     }

@@ -27,8 +27,6 @@ class GraphTier(str, Enum):
   LADYBUG_LARGE = "ladybug-large"
   LADYBUG_XLARGE = "ladybug-xlarge"
   LADYBUG_SHARED = "ladybug-shared"
-  NEO4J_COMMUNITY_LARGE = "neo4j-community-large"
-  NEO4J_ENTERPRISE_XLARGE = "neo4j-enterprise-xlarge"
 
 
 class GraphTierConfig:
@@ -81,7 +79,7 @@ class GraphTierConfig:
     """Get configuration for a specific tier.
 
     Args:
-        tier: The tier name (ladybug-standard, ladybug-large, ladybug-xlarge, ladybug-shared, neo4j-community-large, neo4j-enterprise-xlarge)
+        tier: The tier name (ladybug-standard, ladybug-large, ladybug-xlarge, ladybug-shared)
         environment: Environment (defaults to current env)
 
     Returns:
@@ -330,6 +328,68 @@ class GraphTierConfig:
     return tier_config.get("backup_limits", default_limits)
 
   @classmethod
+  def get_graph_limits(
+    cls, tier: str, environment: str | None = None
+  ) -> dict[str, int]:
+    """Get graph content limits (nodes, relationships, rows) for a tier.
+
+    Args:
+        tier: The tier name (ladybug-standard, ladybug-large, ladybug-xlarge)
+        environment: Environment (defaults to current env)
+
+    Returns:
+        Graph limits dictionary with max_nodes, max_relationships, etc.
+    """
+    tier_config = cls.get_tier_config(tier, environment)
+    defaults = {
+      "max_nodes": 5_000_000,
+      "max_relationships": 10_000_000,
+      "max_rows_per_copy": 2_000_000,
+      "max_single_table_rows": 5_000_000,
+      "chunk_size_rows": 1_000_000,
+      "warn_at_percentage": 80,
+    }
+    return tier_config.get("graph_limits", defaults)
+
+  @classmethod
+  def get_memory_config(
+    cls, tier: str, environment: str | None = None
+  ) -> dict[str, Any]:
+    """Get memory boost configuration for a tier.
+
+    Args:
+        tier: The tier name (ladybug-standard, ladybug-large, ladybug-xlarge)
+        environment: Environment (defaults to current env)
+
+    Returns:
+        Memory config dictionary with baseline_mb, max_boost_mb, auto_reset
+    """
+    tier_config = cls.get_tier_config(tier, environment)
+    defaults: dict[str, Any] = {
+      "baseline_mb": 2048,
+      "max_boost_mb": 6144,
+      "auto_reset": True,
+    }
+    return tier_config.get("memory", defaults)
+
+  @classmethod
+  def get_storage_cap_gb(cls, tier: str, environment: str | None = None) -> float:
+    """Get storage safety cap in GB (from backup limits, not billed).
+
+    Storage is included in each tier. This cap is a safety valve derived
+    from the backup size limit in graph.yml.
+
+    Args:
+        tier: The tier name
+        environment: Environment (defaults to current env)
+
+    Returns:
+        Storage cap in GB
+    """
+    backup_limits = cls.get_backup_limits(tier, environment)
+    return backup_limits.get("max_backup_size_gb", 10)
+
+  @classmethod
   def _generate_tier_features(cls, tier_config: dict[str, Any]) -> list[str]:
     """Generate human-readable features list for a tier.
 
@@ -341,13 +401,14 @@ class GraphTierConfig:
     """
     features = []
 
-    # Add storage limit
-    storage_gb = tier_config.get("storage_limit_gb")
-    if storage_gb is not None and storage_gb > 0:
-      if storage_gb >= 1000:
-        features.append(f"{storage_gb / 1000:.0f}TB storage limit")
+    # Add content limits
+    graph_limits = tier_config.get("graph_limits", {})
+    max_nodes = graph_limits.get("max_nodes")
+    if max_nodes is not None and max_nodes > 0:
+      if max_nodes >= 1_000_000:
+        features.append(f"{max_nodes // 1_000_000}M node limit")
       else:
-        features.append(f"{storage_gb}GB storage limit")
+        features.append(f"{max_nodes:,} node limit")
 
     # Add AI credits allocation
     monthly_credits = tier_config.get("monthly_credits")
@@ -465,7 +526,6 @@ class GraphTierConfig:
       tier_name = writer.get("tier")
       billing_plan = BillingConfig.get_subscription_plan(tier_name)
 
-      storage_limit_gb = billing_plan.get("included_gb") if billing_plan else 0
       monthly_credits = (
         billing_plan.get("monthly_credit_allocation") if billing_plan else 0
       )
@@ -477,7 +537,6 @@ class GraphTierConfig:
         "backend": writer.get("backend"),
         "enabled": is_enabled,
         "max_subgraphs": writer.get("max_subgraphs"),
-        "storage_limit_gb": storage_limit_gb,
         "monthly_credits": monthly_credits,
         "api_rate_multiplier": writer.get("api_rate_multiplier", 1.0),
         "features": cls._generate_tier_features(writer),
@@ -488,11 +547,11 @@ class GraphTierConfig:
           "is_multitenant": is_multitenant,
         },
         "limits": {
-          "storage_gb": storage_limit_gb,
           "monthly_credits": monthly_credits,
           "max_subgraphs": writer.get("max_subgraphs"),
           "copy_operations": writer.get("copy_operations", {}),
           "backup": writer.get("backup_limits", {}),
+          "graph_limits": writer.get("graph_limits", {}),
         },
       }
 
@@ -502,8 +561,6 @@ class GraphTierConfig:
         "ladybug-large": "LadybugDB Large",
         "ladybug-xlarge": "LadybugDB XLarge",
         "ladybug-shared": "Shared Repository",
-        "neo4j-community-large": "Neo4j Community",
-        "neo4j-enterprise-xlarge": "Neo4j Enterprise",
       }
       tier_info["display_name"] = display_names.get(tier_name, writer.get("name"))
 

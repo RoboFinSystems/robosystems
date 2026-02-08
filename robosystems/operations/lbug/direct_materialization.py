@@ -56,6 +56,8 @@ async def materialize_graph_directly(
   from robosystems.middleware.sse.operation_manager import get_operation_manager
   from robosystems.models.iam import Graph, GraphFile, GraphSchema, GraphTable
 
+  from .chunked_materialization import materialize_table_chunked
+
   start_time = time.time()
   manager = get_operation_manager()
 
@@ -255,9 +257,11 @@ async def materialize_graph_directly(
               progress,
             )
 
-          mat_result = await client.materialize_table(
+          mat_result = await materialize_table_chunked(
+            client=client,
             graph_id=graph_id,
             table_name=table_name,
+            tier=graph_record.graph_tier or "ladybug-standard",
             ignore_errors=ignore_errors,
             file_ids=None,
           )

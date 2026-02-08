@@ -370,6 +370,10 @@ Materialization is included - no credit consumption""",
       "description": "Conflict - another materialization is already in progress for this graph",
       "model": ErrorResponse,
     },
+    413: {
+      "description": "Graph content limit exceeded - data too large for current tier",
+      "model": ErrorResponse,
+    },
     500: {"description": "Internal server error"},
   },
 )
@@ -444,6 +448,33 @@ async def materialize_graph(
   # Everything after lock acquisition must release the lock on failure,
   # since the background task (which normally releases it) won't be dispatched.
   try:
+    # Check graph content limits before proceeding
+    graph_tier = graph.graph_tier if graph.graph_tier else "ladybug-standard"
+    from robosystems.middleware.graph.ingestion_limits import IngestionLimitChecker
+
+    limit_check = await IngestionLimitChecker.check_materialization_limits(
+      db=db,
+      graph_id=graph_id,
+      tier=graph_tier,
+    )
+
+    if not limit_check["allowed"]:
+      raise HTTPException(
+        status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+        detail={
+          "error": "Graph content limit exceeded",
+          "errors": limit_check["errors"],
+          "warnings": limit_check["warnings"],
+          "current_usage": limit_check["current_usage"],
+          "limits": limit_check["limits"],
+          "tier": graph_tier,
+          "upgrade_suggestion": "Consider upgrading to a higher tier for larger data volumes",
+        },
+      )
+
+    if limit_check["warnings"]:
+      logger.info(f"Materialization warnings for {graph_id}: {limit_check['warnings']}")
+
     # Create SSE operation for progress tracking
     operation_id = str(uuid.uuid4())
     event_storage = get_event_storage()
@@ -624,3 +655,110 @@ async def _run_dagster_materialization(
   finally:
     if lock is not None:
       lock.release()
+
+
+@router.post(
+  "/materialize/preflight",
+  operation_id="materializePreflightCheck",
+  summary="Preflight Check for Materialization",
+  description="""Check if materialization would succeed without executing it.
+
+Validates that the pending data (staged files) would not exceed the graph's tier limits
+for nodes, relationships, and rows. Returns current usage, limits, and any warnings.
+
+**Use Cases:**
+- Validate before starting a long-running materialization
+- Show users their current usage vs limits in the UI
+- Pre-check before triggering materialization programmatically
+
+**Credits:**
+Preflight check is included - no credit consumption""",
+  responses={
+    200: {
+      "description": "Preflight check completed",
+      "content": {
+        "application/json": {
+          "example": {
+            "allowed": True,
+            "errors": [],
+            "warnings": ["Approaching node limit: 4,200,000 / 5,000,000 (84%)"],
+            "current_usage": {
+              "current_nodes": 4000000,
+              "current_relationships": 2000000,
+              "pending_node_rows": 200000,
+              "pending_relationship_rows": 50000,
+              "total_pending_rows": 250000,
+            },
+            "limits": {
+              "max_nodes": 5000000,
+              "max_relationships": 10000000,
+              "max_rows_per_copy": 2000000,
+              "max_single_table_rows": 5000000,
+              "chunk_size_rows": 1000000,
+            },
+            "tier": "ladybug-standard",
+          }
+        }
+      },
+    },
+    403: {
+      "description": "Access denied - shared repositories or insufficient permissions",
+      "model": ErrorResponse,
+    },
+    404: {
+      "description": "Graph not found",
+      "model": ErrorResponse,
+    },
+  },
+)
+@endpoint_metrics_decorator(
+  "/v1/graphs/{graph_id}/materialize/preflight",
+  business_event_type="materialization_preflight_checked",
+)
+async def materialize_preflight(
+  graph_id: str = Path(
+    ...,
+    description="Graph database identifier",
+    pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN,
+  ),
+  current_user: User = Depends(get_current_user_with_graph),
+  _rate_limit=Depends(subscription_aware_rate_limit_dependency),
+  db: Session = Depends(get_db_session),
+) -> dict:
+  """Check if materialization would succeed without executing it."""
+  from robosystems.middleware.graph.ingestion_limits import IngestionLimitChecker
+
+  # Check for shared repository access
+  if is_shared_repository(graph_id.lower()):
+    raise HTTPException(
+      status_code=status.HTTP_403_FORBIDDEN,
+      detail=SHARED_REPO_WRITE_ERROR_MESSAGE,
+    )
+
+  graph = Graph.get_by_id(graph_id, db)
+  if not graph:
+    raise HTTPException(
+      status_code=status.HTTP_404_NOT_FOUND,
+      detail=f"Graph {graph_id} not found",
+    )
+
+  graph_tier = graph.graph_tier if graph.graph_tier else "ladybug-standard"
+  limit_check = await IngestionLimitChecker.check_materialization_limits(
+    db=db,
+    graph_id=graph_id,
+    tier=graph_tier,
+  )
+
+  api_logger.info(
+    "Materialization preflight check completed",
+    extra={
+      "component": "materialize_api",
+      "action": "preflight_checked",
+      "user_id": str(current_user.id),
+      "graph_id": graph_id,
+      "allowed": limit_check["allowed"],
+      "tier": graph_tier,
+    },
+  )
+
+  return limit_check

@@ -151,7 +151,7 @@ class DatabaseCreateRequest(BaseModel):
   tenant_tier: str = Field(
     default="ladybug-standard",
     description="Tenant tier affecting resource allocation",
-    pattern=r"^(free|ladybug-standard|ladybug-large|ladybug-xlarge|ladybug-shared|neo4j-community-large|neo4j-enterprise-xlarge)$",
+    pattern=r"^(free|ladybug-standard|ladybug-large|ladybug-xlarge|ladybug-shared)$",
   )
 
 

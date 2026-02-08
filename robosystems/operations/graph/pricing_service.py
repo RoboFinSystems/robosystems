@@ -3,7 +3,6 @@ Graph database pricing service.
 
 Calculates monthly bills for individual graph databases based on:
 - Fixed monthly price per database
-- Storage overage charges
 """
 
 import logging
@@ -62,6 +61,7 @@ class GraphPricingService:
     Calculate monthly bill for a specific graph database.
 
     Uses the graph's subscription plan for pricing.
+    Storage is included in the tier (no overage charges).
     """
     # Get the billing plan
     plan = self.get_subscription_plan(user_id, graph_id)
@@ -81,7 +81,7 @@ class GraphPricingService:
     )
 
     if not usage_records:
-      # No usage data - return zero bill
+      # No usage data - return base subscription cost
       return {
         "graph_id": graph_id,
         "billing_period": {"year": year, "month": month},
@@ -95,13 +95,10 @@ class GraphPricingService:
           "max_size_gb": 0,
           "total_queries": 0,
           "measurement_count": 0,
-          "included_gb": plan["included_gb"],
-          "overage_gb": 0,
         },
         "charges": {
-          "base_monthly": 0,
-          "storage_overage": 0,
-          "total": 0,
+          "base_monthly": float(Decimal(plan["base_price_cents"]) / 100),
+          "total": float(Decimal(plan["base_price_cents"]) / 100),
         },
         "generated_at": datetime.now(UTC).isoformat(),
       }
@@ -109,8 +106,10 @@ class GraphPricingService:
     # Calculate usage metrics
     usage_metrics = self._calculate_usage_metrics(usage_records)
 
-    # Calculate charges
-    charges = self._calculate_charges(plan, usage_metrics["avg_size_gb"])
+    # Base subscription price
+    base_price = (Decimal(plan["base_price_cents"]) / 100).quantize(
+      Decimal("0.01"), rounding=ROUND_HALF_UP
+    )
 
     return {
       "graph_id": graph_id,
@@ -119,15 +118,10 @@ class GraphPricingService:
         "name": plan["name"],
         "display_name": plan["display_name"],
       },
-      "usage": {
-        **usage_metrics,
-        "included_gb": plan["included_gb"],
-        "overage_gb": charges["overage_gb"],
-      },
+      "usage": usage_metrics,
       "charges": {
-        "base_monthly": charges["base_monthly"],
-        "storage_overage": charges["storage_overage"],
-        "total": charges["total"],
+        "base_monthly": float(base_price),
+        "total": float(base_price),
       },
       "generated_at": datetime.now(UTC).isoformat(),
     }
@@ -145,31 +139,4 @@ class GraphPricingService:
       "max_size_gb": float(max_size_gb),
       "total_queries": total_queries,
       "measurement_count": len(usage_records),
-    }
-
-  def _calculate_charges(self, plan: dict, avg_size_gb: float) -> dict:
-    """Calculate charges based on plan and usage.
-
-    NOTE: Storage overage is now credit-based (1 credit/GB/day) rather than dollar-based.
-    This method only returns the base subscription cost. Storage overage is tracked
-    separately via the credit system in CreditService.charge_storage_overage().
-    """
-    # Convert cents to dollars
-    base_price = Decimal(plan["base_price_cents"]) / 100
-
-    # Calculate overage GB for informational purposes only
-    # Actual billing is handled via credits (1 credit/GB/day)
-    avg_gb = Decimal(str(avg_size_gb))
-    included_gb = Decimal(str(plan["included_gb"]))
-    overage_gb = max(avg_gb - included_gb, Decimal("0"))
-
-    # Round to 2 decimal places
-    base_price = base_price.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-
-    return {
-      "base_monthly": float(base_price),
-      "storage_overage": 0.0,  # Now handled via credit system
-      "total": float(base_price),  # Base only; overage via credits
-      "overage_gb": float(overage_gb),
-      "overage_billing": "credit-based",  # 1 credit/GB/day
     }

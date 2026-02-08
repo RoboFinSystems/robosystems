@@ -142,21 +142,10 @@ async def get_service_offerings(
       # Find the corresponding tier config for technical specs
       tier_config = next((t for t in tier_configs if t.get("tier") == tier_name), None)
 
-      # Get storage information
-      storage_included = (
-        graph_pricing.get("storage_pricing", {})
-        .get("included_per_tier", {})
-        .get(tier_name, 100)
-      )
-      storage_overage_credits = graph_pricing.get("storage_pricing", {}).get(
-        "overage_credits_per_gb_per_day", 1
-      )
-
       # Build features list
       features = [
         f"{plan_data.get('monthly_credit_allocation', 0):,} AI credits per graph",
-        f"{storage_included:,} GB storage included",
-        f"{storage_overage_credits} credit/GB/day storage overage",
+        "Storage included in tier",
         plan_data.get("infrastructure", "Managed infrastructure"),
         f"{plan_data.get('backup_retention_days', 0)}-day backup retention",
         "Priority support"
@@ -168,9 +157,18 @@ async def get_service_offerings(
       if tier_config and tier_config.get("max_subgraphs", 0) > 0:
         features.append(f"Up to {tier_config.get('max_subgraphs')} subgraphs")
 
-      # Storage overage: 1 credit/GB/day = 30 credits/GB/month = ~$0.10/GB/month
-      # (1 credit = $0.00333, so 30 credits = $0.10)
-      storage_overage_per_gb_month = storage_overage_credits * 30 * 0.00333
+      # Add content limits if available
+      if tier_config:
+        graph_limits = tier_config.get("limits", {}).get("graph_limits", {})
+        if not graph_limits:
+          # Try from the writer config directly
+          from ..config.graph_tier import GraphTierConfig
+
+          graph_limits = GraphTierConfig.get_graph_limits(tier_name)
+        if graph_limits:
+          max_nodes = graph_limits.get("max_nodes", 0)
+          if max_nodes >= 1_000_000:
+            features.append(f"{max_nodes // 1_000_000}M node limit")
 
       tier_info = {
         "name": tier_name,
@@ -178,8 +176,7 @@ async def get_service_offerings(
         "description": plan_data.get("description", ""),
         "monthly_price_per_graph": plan_data.get("base_price_cents", 0) / 100.0,
         "monthly_credits_per_graph": plan_data.get("monthly_credit_allocation", 0),
-        "storage_included_gb": storage_included,
-        "storage_overage_per_gb": round(storage_overage_per_gb_month, 2),
+        "storage_included": True,
         "infrastructure": plan_data.get("infrastructure", "Managed"),
         "features": features,
         "backup_retention_days": plan_data.get("backup_retention_days", 0),
@@ -267,24 +264,15 @@ async def get_service_offerings(
         "pricing_model": "per_graph",
         "tiers": graph_tiers,
         "storage": {
-          "included_per_tier": graph_pricing.get("storage_pricing", {}).get(
-            "included_per_tier", {}
-          ),
-          # Overage pricing in $/GB/month (1 credit/GB/day * 30 days * $0.00333/credit = ~$0.10/GB/month)
-          "overage_pricing": {
-            tier: round(30 * 0.00333, 2)  # $0.10/GB/month for all tiers
-            for tier in graph_pricing.get("storage_pricing", {}).get(
-              "included_per_tier", {}
-            )
-          },
+          "description": "Storage included in tier - no separate metering or overage",
         },
         "notes": [
           "Each graph database has its own subscription and monthly cost",
           "Organizations can create multiple graphs with different infrastructure tiers",
           "Credits are allocated per graph, not shared across the organization",
           "Higher tiers provide dedicated infrastructure with better performance",
-          "Storage is included in each graph's subscription price",
-          "Storage overage is billed at 1 credit per GB per day",
+          "Storage is included in each tier (capped by graph content limits)",
+          "Graph content limits (nodes, relationships, rows) vary by tier",
         ],
       },
       repository_subscriptions={
@@ -311,7 +299,6 @@ async def get_service_offerings(
           "All database operations are included (queries, imports, backups, exports, etc.)",
           "Token-based pricing applies for actual AI API usage",
           "Credits do not roll over between billing periods",
-          "1 credit = 1 GB/day of storage = ~$0.00333 USD",
         ],
       },
       summary={

@@ -26,10 +26,8 @@ from robosystems.models.iam import (
   Graph,
   GraphCredits,
   GraphCreditTransaction,
-  GraphUsage,
 )
 from robosystems.models.iam.graph_credits import CreditTransactionType
-from robosystems.models.iam.graph_usage import UsageEventType
 from robosystems.operations.graph.credit_service import CreditService
 
 logger = get_logger(__name__)
@@ -828,185 +826,6 @@ def monthly_credit_allocation_job():
 
 
 @op
-def get_graphs_with_storage_usage(
-  context: OpExecutionContext, db: DatabaseResource
-) -> list[dict[str, Any]]:
-  """Get all graphs that have storage usage records for yesterday."""
-  from sqlalchemy import func
-
-  billing_date = (datetime.now(UTC) - timedelta(days=1)).date()
-  context.log.info(f"Getting storage usage for date: {billing_date}")
-
-  with db.get_session() as session:
-    results = (
-      session.query(
-        GraphUsage.graph_id,
-        GraphUsage.user_id,
-        GraphUsage.graph_tier,
-        func.count(GraphUsage.id).label("measurement_count"),
-        func.avg(GraphUsage.storage_gb).label("avg_storage_gb"),
-      )
-      .filter(
-        GraphUsage.event_type == UsageEventType.STORAGE_SNAPSHOT.value,
-        GraphUsage.billing_year == billing_date.year,
-        GraphUsage.billing_month == billing_date.month,
-        GraphUsage.billing_day == billing_date.day,
-      )
-      .group_by(
-        GraphUsage.graph_id,
-        GraphUsage.user_id,
-        GraphUsage.graph_tier,
-      )
-      .all()
-    )
-
-    graphs = [
-      {
-        "graph_id": r.graph_id,
-        "user_id": r.user_id,
-        "graph_tier": r.graph_tier,
-        "measurement_count": r.measurement_count,
-        "avg_storage_gb": float(r.avg_storage_gb) if r.avg_storage_gb else 0,
-        "billing_date": billing_date.isoformat(),
-      }
-      for r in results
-    ]
-
-    context.log.info(f"Found {len(graphs)} graphs with storage usage")
-    return graphs
-
-
-@op
-def bill_storage_credits(
-  context: OpExecutionContext,
-  db: DatabaseResource,
-  graphs_with_usage: list[dict[str, Any]],
-) -> dict[str, Any]:
-  """Consume storage credits for all graphs."""
-  total_processed = 0
-  total_credits = Decimal("0")
-  negative_balances = 0
-  errors = 0
-
-  with db.get_session() as session:
-    credit_service = CreditService(session)
-
-    for graph_info in graphs_with_usage:
-      try:
-        if graph_info["avg_storage_gb"] == 0:
-          continue
-
-        result = credit_service.consume_storage_credits(
-          graph_id=graph_info["graph_id"],
-          storage_gb=Decimal(str(graph_info["avg_storage_gb"])),
-          metadata={
-            "billing_date": graph_info["billing_date"],
-            "user_id": graph_info["user_id"],
-            "graph_tier": graph_info["graph_tier"],
-            "source": "dagster_daily_billing",
-          },
-        )
-
-        if result["success"]:
-          total_processed += 1
-          total_credits += Decimal(str(result["credits_consumed"]))
-
-          if result.get("went_negative"):
-            negative_balances += 1
-
-      except Exception as e:
-        errors += 1
-        context.log.error(f"Error billing storage for {graph_info['graph_id']}: {e}")
-
-  context.log.info(
-    f"Storage billing complete: {total_processed} graphs, "
-    f"{float(total_credits)} credits consumed, {negative_balances} negative"
-  )
-
-  return {
-    "graphs_processed": total_processed,
-    "total_credits_consumed": float(total_credits),
-    "negative_balances": negative_balances,
-    "errors": errors,
-    "timestamp": datetime.now(UTC).isoformat(),
-  }
-
-
-@job(tags={"dagster/priority": "1"})
-def daily_storage_billing_job():
-  """Daily storage billing job."""
-  graphs = get_graphs_with_storage_usage()
-  bill_storage_credits(graphs)
-
-
-@op
-def collect_graph_usage(
-  context: OpExecutionContext, db: DatabaseResource
-) -> dict[str, Any]:
-  """Collect storage usage snapshots for all active graphs."""
-  from robosystems.models.iam import Graph
-  from robosystems.operations.graph.storage_service import StorageCalculator
-
-  collected = 0
-  errors = 0
-
-  with db.get_session() as session:
-    # Get all active graphs with user_id and tier info
-    # Join with Graph table since graph_tier is a property that reads from Graph
-    active_graphs = (
-      session.query(
-        GraphCredits.graph_id,
-        GraphCredits.user_id,
-        Graph.graph_tier,
-      )
-      .join(Graph, GraphCredits.graph_id == Graph.graph_id)
-      .all()
-    )
-
-    storage_calculator = StorageCalculator(session)
-
-    for graph_id, user_id, graph_tier in active_graphs:
-      try:
-        # Calculate storage using StorageCalculator
-        storage_data = storage_calculator.calculate_graph_storage(graph_id, user_id)
-
-        # Record storage usage snapshot
-        GraphUsage.record_storage_usage(
-          user_id=user_id,
-          graph_id=graph_id,
-          graph_tier=graph_tier,
-          storage_bytes=storage_data.get("total_bytes", 0),
-          session=session,
-          files_storage_gb=float(storage_data.get("files_gb", 0)),
-          tables_storage_gb=float(storage_data.get("tables_gb", 0)),
-          graphs_storage_gb=float(storage_data.get("graphs_gb", 0)),
-          subgraphs_storage_gb=float(storage_data.get("subgraphs_gb", 0)),
-          auto_commit=False,  # Commit at end
-        )
-        collected += 1
-      except Exception as e:
-        errors += 1
-        context.log.warning(f"Failed to collect usage for {graph_id}: {e}")
-
-    # Commit all at once
-    session.commit()
-
-  context.log.info(f"Collected usage for {collected} graphs, {errors} errors")
-
-  return {
-    "graphs_collected": collected,
-    "errors": errors,
-    "timestamp": datetime.now(UTC).isoformat(),
-  }
-
-
-@job(tags={"dagster/priority": "1", "dagster/max_retries": 3})
-def hourly_usage_collection_job():
-  """Hourly usage collection job."""
-  collect_graph_usage()
-
-
-@op
 def generate_usage_report(
   context: OpExecutionContext, db: DatabaseResource
 ) -> dict[str, Any]:
@@ -1099,18 +918,6 @@ def monthly_usage_report_job():
 monthly_credit_allocation_schedule = ScheduleDefinition(
   job=monthly_credit_allocation_job,
   cron_schedule="0 0 1 * *",  # 1st of month at midnight UTC
-  default_status=BILLING_SCHEDULE_STATUS,
-)
-
-daily_storage_billing_schedule = ScheduleDefinition(
-  job=daily_storage_billing_job,
-  cron_schedule="0 2 * * *",  # Daily at 2 AM UTC
-  default_status=BILLING_SCHEDULE_STATUS,
-)
-
-hourly_usage_collection_schedule = ScheduleDefinition(
-  job=hourly_usage_collection_job,
-  cron_schedule="5 * * * *",  # 5 minutes past every hour
   default_status=BILLING_SCHEDULE_STATUS,
 )
 

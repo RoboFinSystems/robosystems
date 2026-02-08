@@ -6,8 +6,6 @@ using the enhanced client factory for all routing decisions.
 
 Supported backends:
 - LadybugDB: Embedded graph database (ladybug-standard, ladybug-large, ladybug-xlarge tiers)
-- Neo4j Community: Client-server architecture (neo4j-community-large tier)
-- Neo4j Enterprise: Full enterprise features (neo4j-enterprise-xlarge tier)
 
 Key features:
 - Backend-agnostic routing based on tier and allocation

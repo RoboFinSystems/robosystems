@@ -75,11 +75,6 @@ The API supports multiple infrastructure tiers optimized for different workload 
 - **ladybug-xlarge**: High-performance dedicated instances (r7g.xlarge, 25 subgraphs)
 - **ladybug-shared**: Dedicated infrastructure for shared repositories (SEC, industry, economic)
 
-**Neo4j Tiers** (optional, disabled by default):
-
-- **neo4j-community-large**: Neo4j Community Edition on dedicated r7g.large (single database only)
-- **neo4j-enterprise-xlarge**: Neo4j Enterprise Edition on dedicated r7g.xlarge ((25 databases))
-
 Each tier provides different performance characteristics, resource allocations, and feature sets. Configuration details are managed centrally and may vary by environment.
 
 ## Authentication

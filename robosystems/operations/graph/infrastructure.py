@@ -48,12 +48,10 @@ STALE_VOLUME_DAYS = 30
 
 # Tier capacity mapping (matches .github/configs/graph.yml)
 TIER_CAPACITY_MAP = {
-  "ladybug-standard": 10,
+  "ladybug-standard": 1,
   "ladybug-large": 1,
   "ladybug-xlarge": 1,
   "ladybug-shared": 10,
-  "neo4j-community-large": 1,
-  "neo4j-enterprise-xlarge": 1,
 }
 
 # EC2 instance ID pattern

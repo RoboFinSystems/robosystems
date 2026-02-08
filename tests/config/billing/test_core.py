@@ -12,7 +12,6 @@ from robosystems.config.credits import CreditConfig
 def test_get_subscription_plan_returns_plan_with_credit_allocation():
   """Test that subscription plans include monthly_credit_allocation.
 
-  Credit anchor: 1 credit = 1 GB/day storage = ~$0.00333
   ~38 credits per typical agent call → 8,000 credits ≈ 200 agent calls/month
   """
   plan = BillingConfig.get_subscription_plan("ladybug-standard")
@@ -20,7 +19,7 @@ def test_get_subscription_plan_returns_plan_with_credit_allocation():
   assert plan is not None
   assert plan["name"] == "ladybug-standard"
   assert plan["monthly_credit_allocation"] == 8000  # ~200 agent calls/month
-  assert plan["included_gb"] == 10
+  assert plan["base_price_cents"] == 10000  # $100/month
 
 
 def test_get_subscription_plan_returns_none_for_unknown_tier():
@@ -94,10 +93,7 @@ def test_validate_configuration_passes_with_valid_plans(monkeypatch):
 
 
 def test_get_all_pricing_info_returns_expected_structure():
-  """Test get_all_pricing_info returns correct structure.
-
-  Credit anchor: 1 credit = 1 GB/day storage = ~$0.00333
-  """
+  """Test get_all_pricing_info returns correct structure."""
   pricing = BillingConfig.get_all_pricing_info()
 
   assert set(pricing["subscription_tiers"]) == {
@@ -111,4 +107,3 @@ def test_get_all_pricing_info_returns_expected_structure():
   # AI operations use token-based pricing now, no fixed costs
   assert pricing["ai_operation_costs"] == {}
   assert "query" in pricing["no_credit_operations"]
-  assert pricing["storage_pricing"]["included_per_tier"]["ladybug-standard"] == 10
