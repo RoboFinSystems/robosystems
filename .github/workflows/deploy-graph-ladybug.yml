@@ -76,6 +76,11 @@ on:
         description: "EC2 instance type for this tier"
         required: true
         type: string
+      databases_per_instance:
+        description: "Maximum databases per instance (from graph.yml)"
+        required: false
+        type: string
+        default: "1"
 
       # Other Configuration
       ecr_image_tag:
@@ -276,6 +281,7 @@ jobs:
                 ParameterKey=MinInstances,ParameterValue=${{ inputs.min_instances }} \
                 ParameterKey=MaxInstances,ParameterValue=${{ inputs.max_instances }} \
                 ParameterKey=InstanceType,ParameterValue=${{ inputs.instance_type }} \
+                ParameterKey=DatabasesPerInstance,ParameterValue=${{ inputs.databases_per_instance }} \
                 ParameterKey=ECRImageTag,ParameterValue=${{ inputs.ecr_image_tag }} \
                 ParameterKey=VolumeDetachmentTopicArn,ParameterValue=\"${{ inputs.volume_detachment_topic_arn }}\" \
                 ParameterKey=VolumeManagerFunctionArn,ParameterValue=\"${{ inputs.volume_manager_function_arn }}\" \

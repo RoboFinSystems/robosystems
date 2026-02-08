@@ -20,6 +20,7 @@ set -e
 # Optional variables with defaults
 REGISTRY_TABLE="${REGISTRY_TABLE:-robosystems-graph-${ENVIRONMENT}-instance-registry}"
 GRAPH_REGISTRY_TABLE="${GRAPH_REGISTRY_TABLE:-robosystems-graph-${ENVIRONMENT}-graph-registry}"
+MAX_DATABASES="${MAX_DATABASES:-1}"
 
 # Get VPC ID
 VPC_ID=$(curl -s http://169.254.169.254/latest/meta-data/network/interfaces/macs/$(curl -s http://169.254.169.254/latest/meta-data/mac)/vpc-id)
@@ -40,7 +41,7 @@ echo "Cluster tier: ${CLUSTER_TIER}"
 TIMESTAMP=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 
 if [ "${NODE_TYPE}" = "writer" ]; then
-  # User database writer registration (standard/enterprise/premium)
+  # User database writer registration
   echo "Registering user writer instance..."
   aws dynamodb put-item \
     --table-name "$REGISTRY_TABLE" \
@@ -55,6 +56,8 @@ if [ "${NODE_TYPE}" = "writer" ]; then
       \"created_at\": {\"S\": \"${TIMESTAMP}\"},
       \"last_health_check\": {\"S\": \"${TIMESTAMP}\"},
       \"database_count\": {\"N\": \"0\"},
+      \"max_databases\": {\"N\": \"${MAX_DATABASES}\"},
+      \"tier\": {\"S\": \"${CLUSTER_TIER}\"},
       \"region\": {\"S\": \"${AWS_REGION}\"},
       \"cluster_tier\": {\"S\": \"${CLUSTER_TIER}\"},
       \"cluster_group\": {\"S\": \"${AWS_REGION}-writers-${ASG_NAME}\"},
@@ -98,6 +101,7 @@ elif [ "${NODE_TYPE}" = "shared_master" ] || [ "${NODE_TYPE}" = "shared_replica"
       \"last_health_check\": {\"S\": \"${TIMESTAMP}\"},
       \"database_count\": {\"N\": \"${REPO_COUNT}\"},
       \"max_databases\": {\"N\": \"${REPO_COUNT}\"},
+      \"tier\": {\"S\": \"${CLUSTER_TIER}\"},
       \"region\": {\"S\": \"${AWS_REGION}\"},
       \"cluster_tier\": {\"S\": \"${CLUSTER_TIER}\"},
       \"cluster_group\": {\"S\": \"${AWS_REGION}-shared-writers\"},
