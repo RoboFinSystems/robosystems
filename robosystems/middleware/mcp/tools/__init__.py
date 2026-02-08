@@ -18,6 +18,7 @@ from .elements_tool import ElementsTool
 from .example_queries_tool import ExampleQueriesTool
 from .facts_tool import FactsTool
 from .manager import GraphMCPTools
+from .memory import AddNodeTableTool, AddRelationshipTableTool, WriteCypherTool
 from .properties_tool import PropertiesTool
 from .schema_tool import SchemaTool
 from .structure_tool import StructureTool
@@ -29,6 +30,8 @@ from .workspace import (
 )
 
 __all__ = [
+  "AddNodeTableTool",
+  "AddRelationshipTableTool",
   "BaseTool",
   "BuildFactGridTool",
   "CreateWorkspaceTool",
@@ -47,4 +50,5 @@ __all__ = [
   "SchemaTool",
   "StructureTool",
   "SwitchWorkspaceTool",
+  "WriteCypherTool",
 ]

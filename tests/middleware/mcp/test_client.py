@@ -265,11 +265,12 @@ class TestGraphMCPTools:
 
     # Base tools (5): example queries, cypher, schema, properties, structure
     # + workspace tools (4) if MCP_WORKSPACE_ENABLED=true
+    # + memory tools (3) if MCP_MEMORY_ENABLED=true
     # + data tools (1) if FACT_GRID_ENABLED=true
     # + element/facts tools (2) if graph type is SEC
-    # With default feature flags (workspace=false, fact_grid=false), expect 5 base tools
+    # Max possible: 5 + 4 + 3 + 1 + 2 = 15
     assert len(definitions) >= 5
-    assert len(definitions) <= 11
+    assert len(definitions) <= 15
 
     # Check example queries tool
     example_tool = next(t for t in definitions if t["name"] == "get-example-queries")

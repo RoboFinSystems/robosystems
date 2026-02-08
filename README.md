@@ -12,8 +12,8 @@ RoboSystems is an enterprise-grade financial knowledge graph platform that trans
 ## Core Features
 
 - **LadybugDB Graph Database**: Purpose-built embedded graph database with columnar storage optimized for financial analytics
-- **Multi-Tenant Architecture**: Tiered graph infrastructure from shared multi-tenant to dedicated instances
-- **Subgraphs (Workspaces)**: Create isolated environments for development, testing, and team collaboration within a parent graph
+- **Dedicated Infrastructure**: Tiered graph infrastructure with dedicated instances and configurable memory allocation
+- **Subgraphs (Workspaces)**: AI memory graphs, data workspaces with fork & publish, and isolated environments for development and team collaboration
 - **AI Agent Interface**: Natural language financial analysis with text-to-Cypher via Model Context Protocol (MCP)
 - **Entity & Generic Graphs**: Curated schemas for RoboLedger/RoboInvestor, plus custom schema support
 - **Shared Repositories**: SEC XBRL filings knowledge graph for context mining and benchmarking
@@ -33,7 +33,6 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 
 # Install just (command runner)
 uv tool install rust-just
-uv tool update-shell  # Adds ~/.local/bin to PATH (restart terminal after)
 
 # Start robosystems backend api
 just start
@@ -172,7 +171,7 @@ RoboSystems is built on a modern, scalable architecture with:
 
 - **Financial Analysis**: Natural language queries across entity and benchmark data
 - **Cross-Database Queries**: Compare entity data against SEC public data
-- **Tools**: Rich toolkit for graph queries, schema introspection, fact discovery, and cross-database financial analysis
+- **Tools**: Rich toolkit for graph queries, schema introspection, fact discovery, AI memory operations, workspace management, and cross-database financial analysis
 - **Handler Pool**: Managed MCP handler instances with resource limits
 
 ### Agent System
@@ -184,11 +183,10 @@ RoboSystems is built on a modern, scalable architecture with:
 
 ### Credit System
 
-- **Credit Value Anchor**: 1 credit = 1 GB/day of storage
-- **Flexible Usage**: Use credits for AI operations OR storage overage—your choice
-- **AI Operations**: Token-based billing for Anthropic Claude API calls via AWS Bedrock
-- **Storage Overage**: Additional storage beyond tier allocation billed at 1 credit/GB/day
-- **Sustainable Operations**: Credit-based model enables transparent cost tracking and predictable billing aligned with actual usage
+- **AI Operations Only**: Credits are consumed exclusively by AI agent calls (Anthropic Claude via AWS Bedrock)
+- **Token-Based Billing**: ~38 credits per agent call, billed on actual token usage
+- **Storage Included**: All database operations, queries, imports, exports, and storage are included in tier pricing
+- **MCP Tool Access**: Unlimited — no credits consumed for external MCP tool calls
 
 ## Client Libraries
 

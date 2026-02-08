@@ -52,6 +52,7 @@ class SubgraphService:
     parent_graph_id: str,
     subgraph_name: str,
     schema_extensions: list[str] | None = None,
+    include_base: bool = True,
     platform_managed: bool = False,
   ) -> dict[str, Any]:
     """
@@ -249,8 +250,12 @@ class SubgraphService:
       )
 
       # Install schema with extensions using the same pattern as entity graph creation
-      logger.info(f"Installing schema with extensions: {schema_extensions}")
-      ddl = await self._generate_schema_ddl(schema_extensions or [])
+      logger.info(
+        f"Installing schema with extensions: {schema_extensions} (include_base={include_base})"
+      )
+      ddl = await self._generate_schema_ddl(
+        schema_extensions or [], include_base=include_base
+      )
 
       result = await client.install_schema(graph_id=database_name, custom_ddl=ddl)
       logger.info(f"Schema installation completed: {result}")
@@ -320,11 +325,22 @@ class SubgraphService:
     )
 
     try:
+      # Build schema extensions list
+      include_base = True
+      if subgraph_type == "memory":
+        # Memory subgraphs get only the memory extension (no base Entity/Period/etc.)
+        extensions = ["memory"]
+        include_base = False
+        logger.info("Using memory-only schema (no base schema) for memory subgraph")
+      else:
+        extensions = list(parent_graph.schema_extensions or [])
+
       # Directly await the async database creation method
       db_creation_result = await self.create_subgraph_database(
         parent_graph_id=parent_graph.graph_id,
         subgraph_name=name,
-        schema_extensions=parent_graph.schema_extensions or [],
+        schema_extensions=extensions,
+        include_base=include_base,
         platform_managed=platform_managed,
       )
       logger.info(f"LadybugDB database created: {db_creation_result}")
@@ -449,6 +465,7 @@ class SubgraphService:
     self,
     subgraph_id: str,
     force: bool = False,
+    create_backup: bool = False,
   ) -> dict[str, Any]:
     """
     Delete a subgraph database from the parent's instance.
@@ -456,6 +473,7 @@ class SubgraphService:
     Args:
         subgraph_id: Full subgraph identifier to delete
         force: Force deletion even if database contains data
+        create_backup: Create a backup before deletion (not yet implemented)
 
     Returns:
         Dictionary with deletion status including:
@@ -676,7 +694,9 @@ class SubgraphService:
 
   # Private helper methods
 
-  async def _generate_schema_ddl(self, extensions: list[str]) -> str:
+  async def _generate_schema_ddl(
+    self, extensions: list[str], include_base: bool = True
+  ) -> str:
     """
     Generate DDL from schema extensions using SchemaManager.
 
@@ -685,6 +705,8 @@ class SubgraphService:
 
     Args:
         extensions: List of extension names (e.g., ['roboledger'])
+        include_base: If True, include the base schema (Entity, Period, etc.).
+                      Set to False for extension-only subgraphs like memory.
 
     Returns:
         str: Generated DDL statements
@@ -696,6 +718,7 @@ class SubgraphService:
       name="SubgraphSchema",
       description="Subgraph schema with extensions",
       extensions=extensions,
+      include_base=include_base,
     )
 
     schema = manager.load_and_compile_schema(config)

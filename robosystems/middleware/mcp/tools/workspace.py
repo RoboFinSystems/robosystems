@@ -39,6 +39,12 @@ class CreateWorkspaceTool:
             "description": "If true, copies all data from the parent graph to the workspace. If false, creates an empty workspace.",
             "default": False,
           },
+          "subgraph_type": {
+            "type": "string",
+            "description": "Type of workspace. Use 'memory' for AI memory subgraphs (auto-includes memory schema with Concept, Observation, Session nodes).",
+            "enum": ["static", "memory"],
+            "default": "static",
+          },
         },
         "required": ["name"],
       },
@@ -57,6 +63,7 @@ class CreateWorkspaceTool:
     name = arguments.get("name")
     description = arguments.get("description", f"MCP workspace: {name}")
     fork_parent = arguments.get("fork_parent", False)
+    subgraph_type = arguments.get("subgraph_type", "static")
 
     # Validate name (alphanumeric only, 1-20 chars)
     if not name or not name.isalnum() or len(name) < 1 or len(name) > 20:
@@ -98,7 +105,7 @@ class CreateWorkspaceTool:
           user=user,
           name=name,
           description=description,
-          subgraph_type="static",
+          subgraph_type=subgraph_type,
           metadata={},
           fork_parent=fork_parent,
           fork_options=None,
