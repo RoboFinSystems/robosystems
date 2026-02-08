@@ -33,7 +33,6 @@ config/
 ├── agents.py                # Agent/AI configuration
 ├── graph_tier.py            # Graph tier config from .github/configs/graph.yml
 ├── query_queue.py           # Query queue configuration
-├── external_services.py     # External API configurations
 ├── validation.py            # Startup validation
 ├── valkey_registry.py       # Redis database allocation
 └── storage/                 # S3 path configuration (see storage/README.md)
@@ -84,6 +83,7 @@ Runtime-adjustable parameters stored in SSM Parameter Store (FREE tier):
 ```
 
 **Management:**
+
 ```bash
 just ssm-list prod tuning              # List all tuning parameters
 just ssm-set prod tuning/cache/BALANCE_TTL 600
