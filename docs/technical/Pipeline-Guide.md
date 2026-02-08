@@ -51,19 +51,31 @@ API JSON → S3 Raw → dbt transforms → S3 Processed → DuckDB Staging → L
 
 ## Adapter Structure
 
+Each adapter is self-contained: client, processors, and pipeline (Dagster orchestration) all live together. `dagster/definitions.py` collects adapter pipelines via the `get_dagster_components()` discovery pattern.
+
 ```
 robosystems/adapters/
 ├── base.py                     # SharedRepositoryManifest dataclass
-├── sec/                        # SEC EDGAR adapter (active)
+├── sec/                        # SEC EDGAR adapter (self-contained)
 │   ├── manifest.py             # SEC_MANIFEST (plans, rates, endpoints, credits)
 │   ├── client/                 # EDGAR API, EFTS, Arelle, Downloader
-│   ├── metadata.py             # SECMetadataLoader with caching
-│   └── processors/             # XBRL processing
-│       ├── constants.py        # Shared constants (SHARED_NODE_TABLES)
-│       ├── xbrl_graph.py       # XBRLGraphProcessor
-│       ├── processing.py       # Single filing processing
-│       ├── consolidation.py    # Parquet consolidation
-│       └── ingestion/          # DuckDB/LadybugDB ingestion
+│   ├── processors/             # XBRL processing, metadata, ingestion
+│   │   ├── metadata.py         # SECMetadataLoader with caching
+│   │   ├── xbrl_graph.py       # XBRLGraphProcessor
+│   │   ├── processing.py       # Single filing processing
+│   │   ├── consolidation.py    # Parquet consolidation
+│   │   └── ingestion/          # DuckDB/LadybugDB ingestion
+│   └── pipeline/               # Dagster orchestration
+│       ├── __init__.py         # get_dagster_components() discovery
+│       ├── configs.py          # Run configurations
+│       ├── download.py         # sec_raw_filings asset
+│       ├── process.py          # sec_processed_filings asset
+│       ├── stage.py            # DuckDB staging assets
+│       ├── materialize.py      # LadybugDB materialization
+│       ├── entity_update.py    # Entity incremental update
+│       ├── backup.py           # SEC backup asset
+│       ├── jobs.py             # 12 SEC job definitions
+│       └── sensors.py          # 6 sensors + 1 schedule
 ├── quickbooks/                 # QuickBooks adapter (stubbed)
 │   ├── client/                 # QB OAuth client
 │   └── processors/             # Transaction processing (stubbed)
@@ -71,20 +83,15 @@ robosystems/adapters/
     ├── client/                 # Plaid API client
     └── processors/             # Transaction sync (stubbed)
 
-robosystems/dagster/
+robosystems/dagster/            # Platform orchestration (collector)
+├── definitions.py              # Collects platform + adapter pipelines
+├── resources/                  # Shared Dagster resources (DB, S3, Graph)
 ├── assets/
 │   ├── graphs.py               # User graph operation assets
-│   └── sec/                    # SEC pipeline assets (modular)
-│       ├── configs.py          # Configuration classes
-│       ├── download.py         # sec_raw_filings
-│       ├── process.py          # sec_processed_filings
-│       ├── stage.py            # DuckDB staging assets
-│       ├── materialize.py      # LadybugDB materialization
-│       ├── entity_update.py    # Entity incremental update
-│       └── backup.py           # SEC backup asset
-├── jobs/                       # 30+ job definitions
-├── sensors/                    # Event-driven triggers
-└── resources/                  # Database, S3, Graph resources
+│   └── shared_repositories/    # S3 publish + replica refresh
+├── jobs/                       # Platform jobs (billing, infrastructure, graph, provisioning)
+└── sensors/
+    └── provisioning.py         # Subscription/repository provisioning
 ```
 
 ---
@@ -164,7 +171,13 @@ See [PR #308](https://github.com/RoboFinSystems/robosystems/pull/308) and [RFC #
 
 ## Adding Custom Adapters
 
-The `custom_*/` namespace is reserved for fork additions that won't conflict with upstream updates. See [RFC #191](https://github.com/RoboFinSystems/robosystems/issues/191) for the full `SourceAdapter` protocol design.
+The `custom_*/` namespace is reserved for fork additions that won't conflict with upstream updates:
+
+1. Create `adapters/custom_myservice/` with `client/`, `processors/`, and `pipeline/`
+2. Implement `pipeline/__init__.py` with `get_dagster_components()` returning `{"assets": [...], "jobs": [...], "sensors": [...], "schedules": [...]}`
+3. Import and collect in `dagster/definitions.py` (see the `# === FORK` comment)
+
+See [Adapters README](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/adapters/README.md#fork-friendly-custom-adapters) for details and [RFC #191](https://github.com/RoboFinSystems/robosystems/issues/191) for the broader extensible adapter design.
 
 ---
 
@@ -293,5 +306,6 @@ Some functions must stay as Lambda (event-driven, not orchestration):
 ## Reference
 
 - Dagster README: `/robosystems/dagster/README.md`
+- SEC Pipeline README: `/robosystems/adapters/sec/pipeline/README.md`
 - Adapter READMEs: `/robosystems/adapters/*/README.md`
 - CloudFormation: `/cloudformation/dagster.yaml`, `/cloudformation/graph-ladybug-replicas.yaml`

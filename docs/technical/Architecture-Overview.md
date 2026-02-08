@@ -98,30 +98,22 @@ AI agent execution system for natural language graph interactions:
 Dagster is the **sole orchestration system** for all scheduled tasks, event-driven triggers, and data pipelines. There is no separate task queue - everything runs through Dagster.
 
 **Architecture:**
+
+`dagster/` handles platform orchestration (billing, infrastructure, provisioning, graph ops). Adapter-specific pipelines live inside their adapter packages and expose a `get_dagster_components()` function. `definitions.py` collects everything.
+
 ```
 dagster/
-├── assets/           # Software-Defined Assets (data pipelines)
-│   ├── graphs.py     # User graph operation assets
-│   └── sec/          # SEC XBRL pipeline (modular)
-│       ├── configs.py     # Configuration classes
-│       ├── download.py    # sec_raw_filings asset
-│       ├── process.py     # sec_processed_filings asset
-│       ├── stage.py       # DuckDB staging assets
-│       ├── materialize.py # LadybugDB materialization assets
-│       ├── entity_update.py  # Entity incremental update
-│       └── backup.py      # SEC backup asset
-├── jobs/             # Job definitions (all system tasks)
-│   ├── billing.py    # Credit allocation, storage billing
-│   ├── infrastructure.py  # Auth cleanup, health checks, instance monitoring
-│   ├── graph.py      # Graph operations (create, backup, restore)
-│   ├── provisioning.py    # Subscription provisioning
-│   ├── sec.py        # SEC jobs and schedules
-│   └── shared_repository.py # Shared repository operations
-├── sensors/          # Event-driven triggers
-│   ├── provisioning.py    # Watch for pending subscriptions
-│   └── sec.py        # SEC processing sensor
-├── resources/        # Dagster resources (DB, S3, Graph)
-└── definitions.py    # Dagster definitions registry
+├── definitions.py         # Collector: platform + adapter pipelines
+├── resources/             # Shared Dagster resources (DB, S3, Graph)
+├── assets/
+│   ├── graphs.py          # User graph operation assets
+│   └── shared_repositories/  # S3 publish + replica refresh (all shared repos)
+├── jobs/                  # Platform jobs (billing, infrastructure, graph, provisioning)
+└── sensors/
+    └── provisioning.py    # Watch for pending subscriptions
+
+adapters/sec/pipeline/     # SEC pipeline (9 assets, 12 jobs, 6 sensors, 1 schedule)
+adapters/custom_*/pipeline/ # Fork-friendly custom adapter pipelines
 ```
 
 **What Dagster Handles:**
@@ -131,8 +123,8 @@ dagster/
 | **Billing** | Credit allocation, storage billing, usage collection |
 | **Infrastructure** | Auth cleanup, health checks, instance monitoring |
 | **Graph Operations** | Database creation, backup/restore, materialization |
-| **Data Pipelines** | SEC XBRL pipeline (download, process, stage, materialize) |
-| **Event Triggers** | Subscription provisioning, repository sync, SEC processing |
+| **Data Pipelines** | Adapter pipelines (SEC XBRL: download, process, stage, materialize) |
+| **Event Triggers** | Subscription provisioning, repository sync, adapter sensors |
 
 **Key Features:**
 - **Single System**: All orchestration in one place - no separate task queues
@@ -314,26 +306,24 @@ External service integrations following a consistent client/processor pattern:
 ```
 adapters/
 ├── base.py                 # SharedRepositoryManifest dataclass
-├── sec/                    # SEC EDGAR adapter (active)
+├── sec/                    # SEC EDGAR adapter (active, self-contained)
 │   ├── manifest.py         # SEC_MANIFEST (plans, rates, endpoints, credits)
-│   ├── client/
-│   │   ├── edgar.py        # SECClient - API client
-│   │   ├── arelle.py       # ArelleClient - XBRL parsing
-│   │   ├── downloader.py   # Bulk file downloads
-│   │   └── efts.py         # EFTS filing discovery
-│   ├── metadata.py         # SECMetadataLoader
-│   └── processors/
-│       ├── constants.py    # Shared constants (SHARED_NODE_TABLES)
-│       ├── xbrl_graph.py   # XBRLGraphProcessor
-│       ├── processing.py   # Single filing processing
-│       ├── consolidation.py # Parquet consolidation
-│       ├── parquet.py      # Parquet file output
-│       ├── schema.py       # Schema adapter
-│       └── ingestion/      # DuckDB/LadybugDB ingestion
-│           ├── staging.py      # DuckDBStager
-│           ├── materializer.py # LadybugMaterializer
-│           ├── direct_copy.py  # LadybugDirectCopier
-│           └── processor.py    # XBRLDuckDBGraphProcessor
+│   ├── client/             # EDGAR API, EFTS, Arelle, Downloader
+│   ├── processors/         # XBRL processing, ingestion, metadata
+│   │   ├── metadata.py     # SECMetadataLoader
+│   │   ├── xbrl_graph.py   # XBRLGraphProcessor
+│   │   ├── processing.py   # Single filing processing
+│   │   ├── consolidation.py # Parquet consolidation
+│   │   └── ingestion/      # DuckDB/LadybugDB ingestion
+│   └── pipeline/           # Dagster orchestration (self-contained)
+│       ├── __init__.py     # get_dagster_components() discovery
+│       ├── configs.py      # Run configurations
+│       ├── download.py     # sec_raw_filings asset
+│       ├── process.py      # sec_processed_filings asset
+│       ├── stage.py        # DuckDB staging assets
+│       ├── materialize.py  # LadybugDB materialization assets
+│       ├── jobs.py         # 12 SEC job definitions
+│       └── sensors.py      # 6 sensors + 1 schedule
 ├── quickbooks/             # QuickBooks adapter (stubbed)
 │   ├── client/api.py       # QBClient - OAuth client
 │   └── processors/         # Transaction processing (stubbed)
@@ -343,13 +333,14 @@ adapters/
 ```
 
 **Adapter Pattern:**
-Each adapter consists of:
+Each adapter is self-contained with:
 1. **Manifest** - `SharedRepositoryManifest` declaring identity, plans, rate limits, endpoints, and credit costs (shared repos only)
 2. **Client** - API connection, authentication, rate limiting
 3. **Processors** - Data transformation to graph-ready format
-4. **Models** (optional) - Service-specific data models
+4. **Pipeline** - Dagster orchestration (assets, jobs, sensors, schedules) with `get_dagster_components()` discovery
+5. **Models** (optional) - Service-specific data models
 
-The manifest registry (`config/shared_repositories.py`) lazy-loads all manifests and provides the query API used by billing, middleware, and operations. Adding a new shared repository requires only a manifest file and one line in the registry.
+The manifest registry (`config/shared_repositories.py`) lazy-loads all manifests and provides the query API used by billing, middleware, and operations. Adding a new shared repository requires only a manifest file and one line in the registry. `dagster/definitions.py` collects adapter pipelines via `get_dagster_components()`.
 
 **SEC Adapter Details:**
 - **SECClient**: SEC EDGAR API with rate limiting and retry logic
@@ -816,7 +807,7 @@ See individual app repositories for specific deployment workflows.
 - **[Custom Graph Schema](Custom-Graph-Schema)** - Design and build custom graph databases
 
 **Codebase Documentation:**
-- **[Dagster Pipelines](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/dagster/README.md)** - Pipeline orchestration and assets
+- **[Dagster Orchestration](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/dagster/README.md)** - Platform orchestration and adapter pipeline collection
 - **[Adapters](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/adapters/README.md)** - External service integrations
 - **[Graph API](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/graph_api/README.md)** - Graph database abstraction layer
 - **[Operations](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/operations/README.md)** - Business workflow orchestration
