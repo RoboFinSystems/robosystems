@@ -1198,9 +1198,6 @@ class LadybugAllocationManager:
         },
       ]
 
-      # Also publish the capacity utilization metric that alarms use
-      await self._publish_capacity_metric(utilization_percent)
-
       # Publish to environment-specific Graph namespace
       namespace = f"RoboSystems/Graph/{self.environment}"
       self.cloudwatch.put_metric_data(Namespace=namespace, MetricData=metric_data)
@@ -1236,29 +1233,6 @@ class LadybugAllocationManager:
       )
     except Exception as e:
       logger.error(f"Failed to publish failure metric: {e}")
-
-  async def _publish_capacity_metric(self, utilization_percent: float):
-    """Publish capacity utilization metric to CloudWatch (only in prod/staging)."""
-    # Skip metrics in dev/test environments
-    if self.environment in ["dev", "test"]:
-      return
-
-    try:
-      # Use environment-specific namespace instead of Environment dimension
-      namespace = f"RoboSystems/Graph/{self.environment}"
-      metric_data = [
-        {
-          "MetricName": "CapacityUtilization",
-          "Value": utilization_percent,
-          "Unit": "Percent",
-          "Dimensions": [
-            {"Name": "NodeType", "Value": "writer"},
-          ],
-        }
-      ]
-      self.cloudwatch.put_metric_data(Namespace=namespace, MetricData=metric_data)
-    except Exception as e:
-      logger.error(f"Failed to publish capacity metric: {e}")
 
   async def _update_volume_registry_add_database(
     self, instance_id: str, graph_id: str

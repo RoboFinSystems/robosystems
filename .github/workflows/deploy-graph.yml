@@ -342,14 +342,9 @@ jobs:
               MIN_INSTANCES="${!MIN_VAR_NAME:-1}"
               MAX_INSTANCES="${!MAX_VAR_NAME:-1}"
 
-              echo "  📊 Scaling for ${WRITER_NAME}: min=$MIN_INSTANCES, max=$MAX_INSTANCES"
-              if [ -z "${!MIN_VAR_NAME}" ] || [ -z "${!MAX_VAR_NAME}" ]; then
-                echo "     (using defaults - override with $MIN_VAR_NAME / $MAX_VAR_NAME)"
-              fi
+              echo "  Scaling for ${WRITER_NAME}: min=$MIN_INSTANCES, max=$MAX_INSTANCES"
 
               # Build the matrix entry from writer config with nested instance specs
-              # Include backend field for routing to correct workflow (ladybug vs neo4j)
-              # Override scaling with GitHub variables if present
               MATRIX_ENTRY=$(echo "$writer" | jq --arg min "$MIN_INSTANCES" --arg max "$MAX_INSTANCES" '{
                 name: .name,
                 backend: .backend,
