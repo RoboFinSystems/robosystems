@@ -151,8 +151,10 @@ class SECStageConfig(Config):
 
   graph_id: str = "sec"  # Target graph ID
   year: int | None = None  # Optional single year filter
-  start_year: int = SEC_PRIMARY_START_YEAR  # Start of year range (default: 2024)
-  end_year: int | None = None  # No upper bound (stages through current year)
+  start_year: int | None = (
+    SEC_PRIMARY_START_YEAR  # Default 2024; None = all years (wildcard)
+  )
+  end_year: int | None = None  # Optional end of year range (None = through current)
   reset_staging: bool = False  # Delete entire DuckDB staging database first
   skip_taxonomy_relationships: bool = False  # Skip taxonomy structure tables
 
