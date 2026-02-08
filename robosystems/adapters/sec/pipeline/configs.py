@@ -131,17 +131,16 @@ class SECProcessConfig(Config):
 
 
 class SECStageConfig(Config):
-  """Configuration for DuckDB staging (full rebuild).
+  """Configuration for DuckDB staging (full rebuild) for the primary sec graph.
 
-  Creates DuckDB tables from scratch using all S3 parquet files.
+  Creates DuckDB tables from scratch using S3 parquet files from 2024 onwards.
 
   Note: This step only stages data to DuckDB. LadybugDB rebuild is handled
   by the materialize step (sec_graph_materialized) via SECMaterializeConfig.rebuild_graph.
 
   Year filtering:
     - year: Single year filter (e.g., 2024)
-    - start_year/end_year: Year range filter (e.g., 2009-2023 for historical)
-    - None for all: Stages all available years
+    - start_year: Defaults to SEC_PRIMARY_START_YEAR (2024). Override for broader range.
 
   Common scenarios:
     - Normal re-run: Use defaults (reset_staging=False). Tables are overwritten.
@@ -152,8 +151,8 @@ class SECStageConfig(Config):
 
   graph_id: str = "sec"  # Target graph ID
   year: int | None = None  # Optional single year filter
-  start_year: int | None = None  # Optional start of year range (inclusive)
-  end_year: int | None = None  # Optional end of year range (inclusive)
+  start_year: int = SEC_PRIMARY_START_YEAR  # Start of year range (default: 2024)
+  end_year: int | None = None  # No upper bound (stages through current year)
   reset_staging: bool = False  # Delete entire DuckDB staging database first
   skip_taxonomy_relationships: bool = False  # Skip taxonomy structure tables
 
