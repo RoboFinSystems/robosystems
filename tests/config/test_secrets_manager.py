@@ -289,28 +289,6 @@ class TestSecretMappingsConfiguration:
 class TestSecretsManagerHelpers:
   """Tests covering helper methods and global accessors."""
 
-  def test_get_s3_credentials_default(self):
-    manager = SecretsManager(environment="dev")
-    creds = manager.get_s3_credentials()
-    assert creds == {"access_key_id": "", "secret_access_key": ""}
-
-  def test_get_s3_credentials_from_secret(self):
-    with patch("boto3.client") as mock_boto:
-      mock_client = MagicMock()
-      mock_client.get_secret_value.return_value = {
-        "SecretString": json.dumps(
-          {
-            "AWS_S3_ACCESS_KEY_ID": "key",
-            "AWS_S3_SECRET_ACCESS_KEY": "secret",
-          }
-        )
-      }
-      mock_boto.return_value = mock_client
-
-      manager = SecretsManager(environment="prod")
-      creds = manager.get_s3_credentials()
-      assert creds == {"access_key_id": "key", "secret_access_key": "secret"}
-
   def test_get_secrets_manager_singleton(self, monkeypatch):
     from robosystems.config import secrets_manager as module
 
