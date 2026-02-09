@@ -56,14 +56,19 @@ ensure_database_exists() {
         return 0
     fi
 
+    local sslmode="require"
+    if [[ "${ENVIRONMENT:-}" == "dev" ]]; then
+        sslmode="disable"
+    fi
+
     echo "Ensuring database '$db_name' exists..."
     if PGPASSWORD="$password" psql \
-        "host=$host port=$port user=$user dbname=postgres sslmode=require" \
+        "host=$host port=$port user=$user dbname=postgres sslmode=$sslmode" \
         -tc "SELECT 1 FROM pg_database WHERE datname = '$db_name'" | grep -q 1; then
         echo "✓ Database '$db_name' already exists"
     else
         PGPASSWORD="$password" psql \
-            "host=$host port=$port user=$user dbname=postgres sslmode=require" \
+            "host=$host port=$port user=$user dbname=postgres sslmode=$sslmode" \
             -c "CREATE DATABASE $db_name" && echo "✓ Database '$db_name' created" || {
             echo "✗ Failed to create database '$db_name'"
             return 1
