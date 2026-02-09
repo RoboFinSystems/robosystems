@@ -21,7 +21,6 @@ Secrets are organized in AWS Secrets Manager with the following structure:
 - Extension secrets: `robosystems/{environment}/{type}`
   - `/postgres`: POSTGRES_USER, POSTGRES_PASSWORD
   - `/valkey`: VALKEY_AUTH_TOKEN
-  - `/s3`: AWS_S3_ACCESS_KEY_ID, AWS_S3_SECRET_ACCESS_KEY
   - `/admin`: ADMIN_API_KEY
   - `/graph-api`: GRAPH_API_KEY, NEO4J_PASSWORD
 
@@ -192,25 +191,6 @@ class SecretsManager:
 
     secrets = self.get_secret("admin")
     return secrets.get("ADMIN_API_KEY", "")
-
-  def get_s3_credentials(self) -> dict[str, str]:
-    """
-    Get S3 access credentials from secrets.
-
-    Returns:
-        Dictionary with access key ID and secret access key.
-    """
-    if self.environment not in ["prod", "staging"]:
-      return {
-        "access_key_id": "",
-        "secret_access_key": "",
-      }
-
-    secrets = self.get_secret("s3")
-    return {
-      "access_key_id": secrets.get("AWS_S3_ACCESS_KEY_ID", ""),
-      "secret_access_key": secrets.get("AWS_S3_SECRET_ACCESS_KEY", ""),
-    }
 
   def refresh(self, secret_type: str | None = None):
     """
