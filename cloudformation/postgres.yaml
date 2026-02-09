@@ -170,11 +170,11 @@ Resources:
     DeletionPolicy: Delete
     UpdateReplacePolicy: Retain
     Properties:
-      Name: !Sub robosystems/${Environment}/postgres/password
+      Name: !Sub robosystems/${Environment}/postgres
       Description: Database password for RoboSystems with automatic rotation
       GenerateSecretString:
-        SecretStringTemplate: '{"username": "postgres"}'
-        GenerateStringKey: password
+        SecretStringTemplate: '{"POSTGRES_USER": "postgres"}'
+        GenerateStringKey: POSTGRES_PASSWORD
         PasswordLength: 32
         ExcludePunctuation: true
       Tags:
@@ -210,8 +210,6 @@ Resources:
         Variables:
           SECRETS_MANAGER_ENDPOINT: !Sub https://secretsmanager.${AWS::Region}.amazonaws.com
           ENVIRONMENT: !Ref Environment
-          # Companion secret to update after rotation (contains full connection details)
-          COMPANION_SECRET_NAME: !Sub robosystems/${Environment}/postgres
       Code:
         ImageUri: !Ref LambdaImageUri
       ImageConfig:
@@ -254,13 +252,6 @@ Resources:
                   - secretsmanager:PutSecretValue
                   - secretsmanager:UpdateSecretVersionStage
                 Resource: !Ref DBPasswordSecret
-              # Permission to update companion secret (robosystems/{env}/postgres)
-              # This secret contains full connection details used by applications
-              - Effect: Allow
-                Action:
-                  - secretsmanager:GetSecretValue
-                  - secretsmanager:UpdateSecret
-                Resource: !Sub "arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:robosystems/${Environment}/postgres-*"
               - Effect: Allow
                 Action:
                   - secretsmanager:GetRandomPassword
@@ -323,7 +314,7 @@ Resources:
       SecretId: !Ref DBPasswordSecret
       RotationLambdaARN: !GetAtt PostgresSecretRotationLambda.Arn
       RotationRules:
-        AutomaticallyAfterDays: 1000  # Fallback only - GHA triggers monthly
+        AutomaticallyAfterDays: 1000 # Fallback only - GHA triggers monthly
       RotateImmediatelyOnUpdate: false
 
   # CloudWatch Alarms for Rotation Monitoring
@@ -417,7 +408,8 @@ Resources:
     UpdateReplacePolicy: Retain
     Properties:
       Description: !Sub Parameter group for ${DBInstanceName}-${Environment} database
-      Family: !FindInMap [PostgresVersionToFamily, !Ref PostgresEngineVersion, RDS]
+      Family:
+        !FindInMap [PostgresVersionToFamily, !Ref PostgresEngineVersion, RDS]
       Parameters:
         rds.force_ssl: "1"
       Tags:
@@ -440,7 +432,8 @@ Resources:
     UpdateReplacePolicy: Retain
     Properties:
       Description: !Sub Parameter group for ${DBInstanceName}-${Environment} Aurora database
-      Family: !FindInMap [PostgresVersionToFamily, !Ref PostgresEngineVersion, Aurora]
+      Family:
+        !FindInMap [PostgresVersionToFamily, !Ref PostgresEngineVersion, Aurora]
       Parameters:
         rds.force_ssl: "1"
       Tags:
@@ -463,7 +456,8 @@ Resources:
     UpdateReplacePolicy: Retain
     Properties:
       Description: !Sub Cluster parameter group for ${DBInstanceName}-${Environment} Aurora cluster
-      Family: !FindInMap [PostgresVersionToFamily, !Ref PostgresEngineVersion, Aurora]
+      Family:
+        !FindInMap [PostgresVersionToFamily, !Ref PostgresEngineVersion, Aurora]
       Parameters:
         rds.force_ssl: "1"
       Tags:
@@ -538,7 +532,7 @@ Resources:
       EngineVersion: !Ref PostgresEngineVersion
       EngineMode: provisioned
       MasterUsername: !Ref DBUsername
-      MasterUserPassword: !Sub "{{resolve:secretsmanager:${DBPasswordSecret}:SecretString:password}}"
+      MasterUserPassword: !Sub "{{resolve:secretsmanager:${DBPasswordSecret}:SecretString:POSTGRES_PASSWORD}}"
       DBSubnetGroupName: !Ref RDSDBSubnetGroup
       VpcSecurityGroupIds:
         - !GetAtt RDSSecurityGroup.GroupId
@@ -598,7 +592,7 @@ Resources:
       MaxAllocatedStorage: !Ref DBMaxAllocatedStorage
       StorageType: gp3
       MasterUsername: !Ref DBUsername
-      MasterUserPassword: !Sub "{{resolve:secretsmanager:${DBPasswordSecret}:SecretString:password}}"
+      MasterUserPassword: !Sub "{{resolve:secretsmanager:${DBPasswordSecret}:SecretString:POSTGRES_PASSWORD}}"
       DBSubnetGroupName: !Ref RDSDBSubnetGroup
       VPCSecurityGroups:
         - !GetAtt RDSSecurityGroup.GroupId
@@ -611,7 +605,6 @@ Resources:
       AllowMajorVersionUpgrade: true
       StorageEncrypted: true
       CopyTagsToSnapshot: true
-      DBInstanceIdentifier: !Sub ${DBInstanceName}-${Environment}
       DBParameterGroupName: !Ref RDSDBParameterGroup
       Tags:
         - Key: Name
@@ -709,204 +702,6 @@ Resources:
       Tags:
         - Key: Name
           Value: !Sub ${AWS::StackName}-aurora-cpu-high-alarm
-        - Key: Environment
-          Value: !Ref Environment
-        - Key: Service
-          Value: !Ref ServiceTag
-        - Key: Component
-          Value: !Ref ComponentTag
-        - Key: CreatedBy
-          Value: CloudFormation
-
-  # CloudWatch event rule for RDS state changes
-  RDSStateChangeRule:
-    Type: AWS::Events::Rule
-    DeletionPolicy: Delete
-    UpdateReplacePolicy: Retain
-    Properties:
-      Name: !Sub ${AWS::StackName}-rds-state-change
-      Description: Trigger Lambda when RDS instance becomes available
-      EventPattern:
-        source:
-          - aws.rds
-        detail-type:
-          - RDS DB Instance Event
-        detail:
-          EventCategories:
-            - availability
-          Message:
-            - prefix: DB instance restarted
-            - prefix: DB instance started
-            - prefix: DB instance available
-          SourceIdentifier: !If
-            - IsAurora
-            - - !Sub ${DBInstanceName}-${Environment}
-            - - !Sub ${DBInstanceName}-${Environment}
-      State: ENABLED
-      Targets:
-        - Arn: !GetAtt PostgresInitLambda.Arn
-          Id: PostgresInitLambdaTarget
-
-  # Lambda permission for CloudWatch Events
-  PostgresInitLambdaPermission:
-    Type: AWS::Lambda::Permission
-    DeletionPolicy: Delete
-    UpdateReplacePolicy: Retain
-    Properties:
-      FunctionName: !GetAtt PostgresInitLambda.Arn
-      Action: lambda:InvokeFunction
-      Principal: events.amazonaws.com
-      SourceArn: !GetAtt RDSStateChangeRule.Arn
-
-  # Security group for Lambda functions that need RDS access
-  LambdaSecurityGroup:
-    Type: AWS::EC2::SecurityGroup
-    DeletionPolicy: Delete
-    UpdateReplacePolicy: Retain
-    Properties:
-      GroupName: !Sub ${AWS::StackName}-lambda-sg
-      GroupDescription: Security group for Lambda functions accessing RDS
-      VpcId: !Ref VpcId
-      Tags:
-        - Key: Name
-          Value: !Sub ${AWS::StackName}-lambda-sg
-        - Key: Environment
-          Value: !Ref Environment
-        - Key: Service
-          Value: !Ref ServiceTag
-        - Key: Component
-          Value: !Ref ComponentTag
-
-  # Allow Lambda to access RDS
-  LambdaToRDSIngress:
-    Type: AWS::EC2::SecurityGroupIngress
-    Properties:
-      GroupId: !Ref RDSSecurityGroup
-      IpProtocol: tcp
-      FromPort: 5432
-      ToPort: 5432
-      SourceSecurityGroupId: !Ref LambdaSecurityGroup
-      Description: Allow Lambda functions to access PostgreSQL
-
-  # Lambda function for PostgreSQL initialization (secrets + database creation)
-  PostgresInitLambda:
-    Type: AWS::Lambda::Function
-    DeletionPolicy: Delete
-    UpdateReplacePolicy: Retain
-    Properties:
-      FunctionName: !Sub ${AWS::StackName}-init-lambda
-      Description: "Initializes PostgreSQL: updates secrets and creates additional databases - container-based deployment"
-      PackageType: Image
-      Architectures:
-        - arm64
-      Role: !GetAtt PostgresInitLambdaRole.Arn
-      Timeout: 300
-      # VPC configuration for RDS access (database creation)
-      VpcConfig:
-        SecurityGroupIds:
-          - !Ref LambdaSecurityGroup
-        SubnetIds:
-          - !Ref SubnetId1
-          - !Ref SubnetId2
-      Environment:
-        Variables:
-          ENVIRONMENT: !Ref Environment
-          DATABASE_ENGINE: !Ref DatabaseEngine
-          POSTGRES_USERNAME: !Ref DBUsername
-          POSTGRES_PASSWORD: !Sub "{{resolve:secretsmanager:${DBPasswordSecret}:SecretString:password}}"
-          POSTGRES_DB_INSTANCE: !Sub ${DBInstanceName}-${Environment}
-          POSTGRES_DB_NAME: !Ref DBName
-          # Comma-separated list of additional databases to create
-          ADDITIONAL_DATABASES: "dagster"
-      Code:
-        ImageUri: !Ref LambdaImageUri
-      ImageConfig:
-        Command:
-          - postgres_init.lambda_handler
-      Tags:
-        - Key: Name
-          Value: !Sub ${AWS::StackName}-postgres-init-lambda
-        - Key: Environment
-          Value: !Ref Environment
-        - Key: Service
-          Value: !Ref ServiceTag
-        - Key: Component
-          Value: !Ref ComponentTag
-        - Key: CreatedBy
-          Value: CloudFormation
-  PostgresInitLambdaRole:
-    Type: AWS::IAM::Role
-    DeletionPolicy: Delete
-    UpdateReplacePolicy: Retain
-    Properties:
-      AssumeRolePolicyDocument:
-        Version: "2012-10-17"
-        Statement:
-          - Effect: Allow
-            Principal:
-              Service: lambda.amazonaws.com
-            Action: sts:AssumeRole
-      ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
-        # Required for VPC access (ENI creation)
-        - arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole
-      Policies:
-        - PolicyName: RDSAccess
-          PolicyDocument:
-            Version: "2012-10-17"
-            Statement:
-              - Effect: Allow
-                Action:
-                  - rds:DescribeDBInstances
-                Resource: "*"
-        - PolicyName: SecretsManagerAccess
-          PolicyDocument:
-            Version: "2012-10-17"
-            Statement:
-              - Effect: Allow
-                Action:
-                  - secretsmanager:GetSecretValue
-                Resource:
-                  - !Ref DBPasswordSecret
-              - Effect: Allow
-                Action:
-                  - secretsmanager:GetSecretValue
-                  - secretsmanager:CreateSecret
-                  - secretsmanager:UpdateSecret
-                  - secretsmanager:DescribeSecret
-                  - secretsmanager:TagResource
-                Resource:
-                  - !Sub arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:robosystems/${Environment}
-                  - !Sub arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:robosystems/${Environment}/*
-              # KMS permissions for Lambda secret operations
-              - Effect: Allow
-                Action:
-                  - kms:Decrypt
-                  - kms:DescribeKey
-                  - kms:GenerateDataKey
-                Resource:
-                  - !Sub "arn:${AWS::Partition}:kms:${AWS::Region}:${AWS::AccountId}:alias/aws/secretsmanager"
-                Condition:
-                  StringEquals:
-                    "kms:ViaService":
-                      - !Sub "secretsmanager.${AWS::Region}.amazonaws.com"
-        # ECR permissions for container-based Lambda
-        - PolicyName: ECRAccess
-          PolicyDocument:
-            Version: "2012-10-17"
-            Statement:
-              - Effect: Allow
-                Action:
-                  - ecr:GetAuthorizationToken
-                Resource: "*"
-              - Effect: Allow
-                Action:
-                  - ecr:BatchGetImage
-                  - ecr:GetDownloadUrlForLayer
-                Resource: !Sub "arn:${AWS::Partition}:ecr:${AWS::Region}:${AWS::AccountId}:repository/robosystems"
-      Tags:
-        - Key: Name
-          Value: !Sub ${AWS::StackName}-postgres-init-lambda-role
         - Key: Environment
           Value: !Ref Environment
         - Key: Service

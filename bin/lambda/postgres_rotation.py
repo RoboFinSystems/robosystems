@@ -39,7 +39,7 @@ def get_database_connection_info(secret_arn: str, environment: str) -> dict[str,
       Dictionary with host, port, and database name
   """
   # Parse the secret name from ARN to determine the database
-  # Format: arn:aws:secretsmanager:region:account:secret:robosystems/env/postgres/password-xxxxx
+  # Format: arn:aws:secretsmanager:region:account:secret:robosystems/env/postgres-xxxxx
   secret_name = secret_arn.split(":")[-1].rsplit("-", 1)[0]
   env_from_secret = secret_name.split("/")[1]
 
@@ -161,19 +161,7 @@ def create_secret(arn: str, token: str) -> None:
 
   # Generate new password
   new_password = create_new_password()
-  current_dict["password"] = new_password
-
-  # Also update DATABASE_URL if it exists
-  if "DATABASE_URL" in current_dict:
-    # Parse and update the DATABASE_URL
-    url_parts = current_dict["DATABASE_URL"].split("@")
-    if len(url_parts) == 2:
-      # Extract username from the URL
-      proto_user = url_parts[0].split("://")
-      if len(proto_user) == 2:
-        username = proto_user[1].split(":")[0]
-        new_url = f"{proto_user[0]}://{username}:{new_password}@{url_parts[1]}"
-        current_dict["DATABASE_URL"] = new_url
+  current_dict["POSTGRES_PASSWORD"] = new_password
 
   # Put the secret
   secrets_client.put_secret_value(
@@ -215,8 +203,8 @@ def set_secret(arn: str, token: str, environment: str) -> None:
       host=db_info["host"],
       port=db_info["port"],
       database=db_info["database"],
-      user=current_dict.get("username", "postgres"),
-      password=current_dict["password"],
+      user=current_dict.get("POSTGRES_USER", "postgres"),
+      password=current_dict["POSTGRES_PASSWORD"],
       sslmode="require",
       connect_timeout=30,
     )
@@ -224,8 +212,8 @@ def set_secret(arn: str, token: str, environment: str) -> None:
 
     with conn.cursor() as cursor:
       # Use quote_ident equivalent for username and password
-      username = pending_dict.get("username", "postgres")
-      new_password = pending_dict["password"]
+      username = pending_dict.get("POSTGRES_USER", "postgres")
+      new_password = pending_dict["POSTGRES_PASSWORD"]
 
       # PostgreSQL requires special handling for password changes
       cursor.execute(
@@ -268,8 +256,8 @@ def test_secret(arn: str, token: str, environment: str) -> None:
       host=db_info["host"],
       port=db_info["port"],
       database=db_info["database"],
-      user=pending_dict.get("username", "postgres"),
-      password=pending_dict["password"],
+      user=pending_dict.get("POSTGRES_USER", "postgres"),
+      password=pending_dict["POSTGRES_PASSWORD"],
       sslmode="require",
       connect_timeout=30,
     )
@@ -294,65 +282,11 @@ def test_secret(arn: str, token: str, environment: str) -> None:
       conn.close()
 
 
-def update_companion_secret(new_password: str, environment: str) -> None:
-  """
-  Update the companion secret with the new password.
-
-  The companion secret (robosystems/{env}/postgres) contains full connection
-  details used by applications. It must be updated after password rotation
-  to keep applications working.
-  """
-  companion_secret_name = os.environ.get(
-    "COMPANION_SECRET_NAME", f"robosystems/{environment}/postgres"
-  )
-
-  try:
-    # Get the current companion secret
-    response = secrets_client.get_secret_value(SecretId=companion_secret_name)
-    companion_data = json.loads(response["SecretString"])
-
-    # Update password fields
-    companion_data["password"] = new_password
-    companion_data["POSTGRES_PASSWORD"] = new_password
-
-    # Update DATABASE_URL if it exists
-    if "DATABASE_URL" in companion_data:
-      # Parse and rebuild the DATABASE_URL with new password
-      url = companion_data["DATABASE_URL"]
-      # Format: postgresql://user:password@host:port/dbname
-      if "://" in url and "@" in url:
-        proto_user = url.split("://")[0]
-        username = companion_data.get("username", "postgres")
-        host = companion_data.get("host", "")
-        port = companion_data.get("port", "5432")
-        database = companion_data.get("database", "robosystems")
-        companion_data["DATABASE_URL"] = (
-          f"{proto_user}://{username}:{new_password}@{host}:{port}/{database}"
-        )
-
-    # Update the companion secret
-    secrets_client.update_secret(
-      SecretId=companion_secret_name,
-      SecretString=json.dumps(companion_data),
-    )
-    logger.info(f"Successfully updated companion secret: {companion_secret_name}")
-
-  except secrets_client.exceptions.ResourceNotFoundException:
-    logger.warning(
-      f"Companion secret {companion_secret_name} not found - skipping update"
-    )
-  except Exception as e:
-    error_type = type(e).__name__
-    logger.error(f"Failed to update companion secret: {error_type}: {e}")
-    # Don't raise - rotation succeeded, companion update is best-effort
-    # Applications will get updated on next service refresh
-
-
 def finish_secret(arn: str, token: str) -> None:
   """
   Finish the rotation by updating version stages.
 
-  This step promotes the pending secret to current and updates the companion secret.
+  This step promotes the pending secret to current.
   """
   metadata = secrets_client.describe_secret(SecretId=arn)
   current_version = None
@@ -371,17 +305,3 @@ def finish_secret(arn: str, token: str) -> None:
   logger.info(
     f"finishSecret: Successfully set AWSCURRENT stage to version {token} for secret {arn}"
   )
-
-  # Update the companion secret with the new password
-  # This ensures applications using robosystems/{env}/postgres get the new password
-  try:
-    new_secret = secrets_client.get_secret_value(
-      SecretId=arn, VersionStage="AWSCURRENT"
-    )
-    new_dict = json.loads(new_secret["SecretString"])
-    new_password = new_dict["password"]
-    environment = os.environ.get("ENVIRONMENT", "prod")
-    update_companion_secret(new_password, environment)
-  except Exception as e:
-    error_type = type(e).__name__
-    logger.warning(f"Could not update companion secret: {error_type}: {e}")

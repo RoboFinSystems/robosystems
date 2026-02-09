@@ -148,6 +148,17 @@ on:
         required: true
         type: string
 
+      # Database Configuration (from Postgres stack outputs)
+      database_endpoint:
+        description: "PostgreSQL database endpoint hostname"
+        required: true
+        type: string
+      database_port:
+        description: "PostgreSQL database port"
+        required: false
+        type: string
+        default: "5432"
+
       # Other Configuration
       prometheus_stack_name:
         description: "Name of the Prometheus CloudFormation stack for this environment"
@@ -295,7 +306,9 @@ jobs:
                 ParameterKey=EmailFromAddress,ParameterValue=\"${{ inputs.aws_sns_alert_email }}\" \
                 ParameterKey=SharedProcessedBucketArn,ParameterValue=\"${{ inputs.shared_processed_bucket_arn }}\" \
                 ParameterKey=DeploymentBucketArn,ParameterValue=\"${{ inputs.deployment_bucket_arn }}\" \
-                ParameterKey=UserDataBucketArn,ParameterValue=\"${{ inputs.user_data_bucket_arn }}\""
+                ParameterKey=UserDataBucketArn,ParameterValue=\"${{ inputs.user_data_bucket_arn }}\" \
+                ParameterKey=DatabaseEndpoint,ParameterValue=${{ inputs.database_endpoint }} \
+                ParameterKey=DatabasePort,ParameterValue=${{ inputs.database_port }}"
 
           # Deploy or update the stack
           if [ "$STACK_ACTION" = "create-stack" ]; then

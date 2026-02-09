@@ -35,6 +35,16 @@ on:
         required: true
         type: string
         description: Valkey ElastiCache endpoint URL (e.g., redis://endpoint:6379)
+      # Database Configuration
+      database_endpoint:
+        required: true
+        type: string
+        description: PostgreSQL database endpoint hostname
+      database_port:
+        required: false
+        type: string
+        description: PostgreSQL database port
+        default: "5432"
       # Container Configuration
       ecr_image_tag:
         required: true
@@ -426,6 +436,9 @@ jobs:
       # Valkey Configuration
       valkey_sg_id: ${{ inputs.valkey_sg_id }}
       valkey_url: ${{ inputs.valkey_url }}
+      # Database Configuration
+      database_endpoint: ${{ inputs.database_endpoint }}
+      database_port: ${{ inputs.database_port }}
       # Other Configuration
       ecr_image_tag: ${{ inputs.ecr_image_tag }}
       volume_detachment_topic_arn: ${{ inputs.volume_detachment_topic_arn }}
@@ -461,5 +474,11 @@ jobs:
       memory_target_value: ${{ inputs.shared_replicas_memory_target }}
       instance_warmup: ${{ inputs.shared_replicas_instance_warmup }}
       ecr_image_tag: ${{ inputs.ecr_image_tag }}
+      # Cache Configuration
+      valkey_sg_id: ${{ inputs.valkey_sg_id }}
+      valkey_url: ${{ inputs.valkey_url }}
+      # Database Configuration
+      database_endpoint: ${{ inputs.database_endpoint }}
+      database_port: ${{ inputs.database_port }}
       aws_sns_alert_email: ${{ inputs.aws_sns_alert_email }}
     secrets: inherit

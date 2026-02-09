@@ -637,7 +637,7 @@ class EnvConfig:
   # 4. DATABASE CONFIGURATION - POSTGRESQL
   # ==========================================================================
 
-  DATABASE_URL = get_secret_value(
+  DATABASE_URL = get_str_env(
     "DATABASE_URL", "postgresql://postgres:postgres@localhost:5432/robosystems"
   )
   DATABASE_ECHO = get_bool_env("DATABASE_ECHO", False)

@@ -305,9 +305,9 @@ DB_SECRET=\$(aws secretsmanager get-secret-value \
   --query SecretString \
   --output text)
 
-DB_PASSWORD=\$(echo "\$DB_SECRET" | jq -r '.POSTGRES_PASSWORD // .password')
-DB_NAME=\$(echo "\$DB_SECRET" | jq -r '.POSTGRES_DB // .database // "robosystems"')
-DB_USER=\$(echo "\$DB_SECRET" | jq -r '.POSTGRES_USER // .username // "postgres"')
+DB_PASSWORD=\$(echo "\$DB_SECRET" | jq -r '.POSTGRES_PASSWORD')
+DB_USER=\$(echo "\$DB_SECRET" | jq -r '.POSTGRES_USER')
+DB_NAME="robosystems"
 
 # Run migrations in container with timeout
 print_info "Running migrations in Docker container..."

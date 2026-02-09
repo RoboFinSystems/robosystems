@@ -42,6 +42,13 @@ Parameters:
   ValkeyUrl:
     Type: String
     Description: Valkey/Redis URL for cache connections (e.g., redis://endpoint:6379)
+  DatabaseEndpoint:
+    Type: String
+    Description: PostgreSQL database endpoint hostname
+  DatabasePort:
+    Type: String
+    Description: PostgreSQL database port
+    Default: "5432"
 
   # Instance Configuration
   AmiId:
@@ -535,6 +542,7 @@ Resources:
             # Export required environment variables for the setup script
             export ENVIRONMENT="${Environment}"
             export VALKEY_URL="${ValkeyUrl}"
+            export DATABASE_URL="postgresql://postgres:{{resolve:secretsmanager:robosystems/${Environment}/postgres:SecretString:POSTGRES_PASSWORD}}@${DatabaseEndpoint}:${DatabasePort}/robosystems?sslmode=require"
             export DEPLOYMENT_BUCKET="$DEPLOYMENT_BUCKET"
             # Export SHARED_REPOSITORIES for shared repository deployments
             [ "${WriterTier}" = "ladybug-shared" ] && [ -n "${SharedRepositories}" ] && export SHARED_REPOSITORIES="${SharedRepositories}"

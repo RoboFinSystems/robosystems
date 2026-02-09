@@ -117,7 +117,16 @@ on:
         required: true
         type: string
 
-      # Database Configuration
+      # Database Configuration (from Postgres stack outputs)
+      database_endpoint:
+        description: "PostgreSQL database endpoint hostname"
+        required: true
+        type: string
+      database_port:
+        description: "PostgreSQL database port"
+        required: false
+        type: string
+        default: "5432"
       database_sg_id:
         description: "Security group ID for PostgreSQL access"
         required: true
@@ -254,6 +263,8 @@ jobs:
                 ParameterKey=WebserverFargateBase,ParameterValue=${{ inputs.webserver_fargate_base }} \
                 ParameterKey=ValkeyUrl,ParameterValue=${{ inputs.valkey_url }} \
                 ParameterKey=ValkeyClientSecurityGroupId,ParameterValue=${{ inputs.valkey_sg_id }} \
+                ParameterKey=DatabaseEndpoint,ParameterValue=${{ inputs.database_endpoint }} \
+                ParameterKey=DatabasePort,ParameterValue=${{ inputs.database_port }} \
                 ParameterKey=DatabaseSecurityGroupId,ParameterValue=${{ inputs.database_sg_id }} \
                 ParameterKey=BastionSecurityGroupId,ParameterValue=${{ inputs.bastion_sg_id }} \
                 ParameterKey=ApiSecurityGroupId,ParameterValue=${{ steps.resolve-api-sg.outputs.api_sg_id }} \

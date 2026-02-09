@@ -4693,7 +4693,7 @@
             "uid": "${DS_CLOUDWATCH}"
           },
           "dimensions": {
-            "CacheClusterId": "robosystems-prod-valkey-001"
+            "CacheClusterId": "${valkey_cluster_id}"
           },
           "expression": "",
           "id": "",
@@ -4803,7 +4803,7 @@
             "uid": "${DS_CLOUDWATCH}"
           },
           "dimensions": {
-            "CacheClusterId": "robosystems-prod-valkey-001"
+            "CacheClusterId": "${valkey_cluster_id}"
           },
           "expression": "",
           "id": "",
@@ -4912,7 +4912,7 @@
             "uid": "${DS_CLOUDWATCH}"
           },
           "dimensions": {
-            "CacheClusterId": "robosystems-prod-valkey-001"
+            "CacheClusterId": "${valkey_cluster_id}"
           },
           "expression": "",
           "id": "",
@@ -5021,7 +5021,7 @@
             "uid": "${DS_CLOUDWATCH}"
           },
           "dimensions": {
-            "CacheClusterId": "robosystems-prod-valkey-001"
+            "CacheClusterId": "${valkey_cluster_id}"
           },
           "expression": "",
           "id": "",
@@ -5130,7 +5130,7 @@
             "uid": "${DS_CLOUDWATCH}"
           },
           "dimensions": {
-            "CacheClusterId": "robosystems-prod-valkey-001"
+            "CacheClusterId": "${valkey_cluster_id}"
           },
           "expression": "",
           "id": "",
@@ -5262,7 +5262,7 @@
             "uid": "${DS_CLOUDWATCH}"
           },
           "dimensions": {
-            "CacheClusterId": "robosystems-prod-valkey-001"
+            "CacheClusterId": "${valkey_cluster_id}"
           },
           "expression": "",
           "id": "",
@@ -5371,7 +5371,7 @@
             "uid": "${DS_CLOUDWATCH}"
           },
           "dimensions": {
-            "CacheClusterId": "robosystems-prod-valkey-001"
+            "CacheClusterId": "${valkey_cluster_id}"
           },
           "expression": "",
           "id": "",
@@ -5480,7 +5480,7 @@
             "uid": "${DS_CLOUDWATCH}"
           },
           "dimensions": {
-            "CacheClusterId": "robosystems-prod-valkey-001"
+            "CacheClusterId": "${valkey_cluster_id}"
           },
           "expression": "",
           "hide": false,
@@ -5505,7 +5505,7 @@
             "uid": "${DS_CLOUDWATCH}"
           },
           "dimensions": {
-            "CacheClusterId": "robosystems-prod-valkey-001"
+            "CacheClusterId": "${valkey_cluster_id}"
           },
           "expression": "",
           "hide": false,
@@ -5615,7 +5615,7 @@
             "uid": "${DS_CLOUDWATCH}"
           },
           "dimensions": {
-            "CacheClusterId": "robosystems-prod-valkey-001"
+            "CacheClusterId": "${valkey_cluster_id}"
           },
           "expression": "",
           "id": "",
@@ -5639,7 +5639,7 @@
             "uid": "${DS_CLOUDWATCH}"
           },
           "dimensions": {
-            "CacheClusterId": "robosystems-prod-valkey-001"
+            "CacheClusterId": "${valkey_cluster_id}"
           },
           "expression": "",
           "hide": false,
@@ -5687,6 +5687,29 @@
           }
         ],
         "query": "us-east-1",
+        "queryValue": "",
+        "skipUrlSync": false,
+        "type": "textbox"
+      },
+      {
+        "current": {
+          "selected": false,
+          "text": "robosystems-prod-valkey-001",
+          "value": "robosystems-prod-valkey-001"
+        },
+        "hide": 0,
+        "includeAll": false,
+        "label": "Valkey Cluster ID",
+        "multi": false,
+        "name": "valkey_cluster_id",
+        "options": [
+          {
+            "selected": true,
+            "text": "robosystems-prod-valkey-001",
+            "value": "robosystems-prod-valkey-001"
+          }
+        ],
+        "query": "robosystems-prod-valkey-001",
         "queryValue": "",
         "skipUrlSync": false,
         "type": "textbox"

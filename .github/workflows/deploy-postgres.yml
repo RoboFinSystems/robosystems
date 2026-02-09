@@ -91,6 +91,12 @@ on:
       database_sg_id:
         description: "RDS Security Group ID for database access"
         value: ${{ jobs.deploy.outputs.database_sg_id }}
+      database_endpoint:
+        description: "PostgreSQL database endpoint hostname"
+        value: ${{ jobs.deploy.outputs.database_endpoint }}
+      database_port:
+        description: "PostgreSQL database port"
+        value: ${{ jobs.deploy.outputs.database_port }}
 
 jobs:
   deploy:
@@ -102,6 +108,8 @@ jobs:
     outputs:
       postgres_secret_arn: ${{ steps.stack-outputs.outputs.postgres_secret_arn }}
       database_sg_id: ${{ steps.stack-outputs.outputs.database_sg_id }}
+      database_endpoint: ${{ steps.stack-outputs.outputs.database_endpoint }}
+      database_port: ${{ steps.stack-outputs.outputs.database_port }}
 
     steps:
       - name: Checkout
@@ -261,6 +269,33 @@ jobs:
             echo "RDS Security Group ID: $DATABASE_SG_ID"
           else
             echo "Warning: Could not retrieve RDS Security Group ID"
+          fi
+
+          # Get the Database Endpoint from CloudFormation outputs
+          DATABASE_ENDPOINT=$(aws cloudformation describe-stacks \
+            --stack-name ${{ inputs.stack_name }} \
+            --query "Stacks[0].Outputs[?OutputKey=='DatabaseEndpoint'].OutputValue" \
+            --output text 2>/dev/null || echo "")
+
+          if [ -n "$DATABASE_ENDPOINT" ] && [ "$DATABASE_ENDPOINT" != "None" ]; then
+            echo "database_endpoint=$DATABASE_ENDPOINT" >> $GITHUB_OUTPUT
+            echo "Database Endpoint: $DATABASE_ENDPOINT"
+          else
+            echo "Warning: Could not retrieve Database Endpoint"
+          fi
+
+          # Get the Database Port from CloudFormation outputs
+          DATABASE_PORT=$(aws cloudformation describe-stacks \
+            --stack-name ${{ inputs.stack_name }} \
+            --query "Stacks[0].Outputs[?OutputKey=='DatabasePort'].OutputValue" \
+            --output text 2>/dev/null || echo "")
+
+          if [ -n "$DATABASE_PORT" ] && [ "$DATABASE_PORT" != "None" ]; then
+            echo "database_port=$DATABASE_PORT" >> $GITHUB_OUTPUT
+            echo "Database Port: $DATABASE_PORT"
+          else
+            echo "database_port=5432" >> $GITHUB_OUTPUT
+            echo "Database Port defaulting to 5432"
           fi
 
       - name: Update Deployment Status

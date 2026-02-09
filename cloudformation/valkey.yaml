@@ -296,7 +296,7 @@ Resources:
       Environment:
         Variables:
           SECRETS_MANAGER_ENDPOINT: !Sub https://secretsmanager.${AWS::Region}.${AWS::URLSuffix}
-          VALKEY_REPLICATION_GROUP_ID: !Sub "robosystems-${Environment}-valkey"
+          VALKEY_REPLICATION_GROUP_ID: !Ref ValkeyReplicationGroup
       Tags:
         - Key: Name
           Value: !Sub ${AWS::StackName}-valkey-rotation-lambda
@@ -410,7 +410,7 @@ Resources:
       SecretId: !Ref ValkeyAuthSecret
       RotationLambdaARN: !GetAtt ValkeySecretRotationLambda.Arn
       RotationRules:
-        AutomaticallyAfterDays: 1000  # Fallback only - GHA triggers monthly
+        AutomaticallyAfterDays: 1000 # Fallback only - GHA triggers monthly
       RotateImmediatelyOnUpdate: false
 
   # CloudWatch Alarms for Rotation Monitoring
@@ -452,7 +452,8 @@ Resources:
     DeletionPolicy: Delete
     UpdateReplacePolicy: Retain
     Properties:
-      CacheParameterGroupFamily: !FindInMap [ValkeyVersionToFamily, !Ref ValkeyEngineVersion, Family]
+      CacheParameterGroupFamily:
+        !FindInMap [ValkeyVersionToFamily, !Ref ValkeyEngineVersion, Family]
       Description: Parameter group for RoboSystems Valkey ElastiCache
       Properties:
         # Memory management for application caches
@@ -484,7 +485,6 @@ Resources:
     DeletionPolicy: !If [IsProduction, Snapshot, Delete]
     UpdateReplacePolicy: !If [IsProduction, Snapshot, Delete]
     Properties:
-      ReplicationGroupId: !Sub "robosystems-${Environment}-valkey"
       ReplicationGroupDescription: !Sub "RoboSystems Valkey ElastiCache - ${Environment}"
       # Node Configuration
       CacheNodeType: !Ref NodeType

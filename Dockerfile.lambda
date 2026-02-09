@@ -26,7 +26,6 @@ COPY bin/lambda/graph_api_rotation.py ./
 COPY bin/lambda/graph_volume_detachment.py ./
 COPY bin/lambda/graph_volume_manager.py ./
 COPY bin/lambda/graph_volume_monitor.py ./
-COPY bin/lambda/postgres_init.py ./
 COPY bin/lambda/postgres_rotation.py ./
 COPY bin/lambda/valkey_rotation.py ./
 

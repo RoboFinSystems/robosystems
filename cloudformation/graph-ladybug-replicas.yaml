@@ -114,6 +114,23 @@ Parameters:
     MaxValue: 3600
     Description: Seconds to ignore new instance metrics during initialization (S3 download time)
 
+  # Cache Configuration
+  ValkeyClientSecurityGroupId:
+    Type: AWS::EC2::SecurityGroup::Id
+    Description: Security Group ID for Valkey/Redis client access
+  ValkeyUrl:
+    Type: String
+    Description: Valkey/Redis URL for cache connections (e.g., redis://endpoint:6379)
+
+  # Database Configuration
+  DatabaseEndpoint:
+    Type: String
+    Description: PostgreSQL database endpoint hostname
+  DatabasePort:
+    Type: String
+    Description: PostgreSQL database port
+    Default: "5432"
+
   # Monitoring
   SNSAlertEmail:
     Type: String
@@ -325,6 +342,7 @@ Resources:
           Arn: !GetAtt ReplicaInstanceProfile.Arn
         SecurityGroupIds:
           - !Ref ReplicaSecurityGroup
+          - !Ref ValkeyClientSecurityGroupId
         # Root volume only - no EBS data volume needed for S3 ATTACH mode
         # S3 ATTACH uses httpfs to read database directly from S3 with local caching
         # Size must accommodate OS (~10GB) + httpfs cache (up to full DB size)
@@ -389,6 +407,8 @@ Resources:
             export DEPLOYMENT_BUCKET="$DEPLOYMENT_BUCKET"
             export SHARED_REPOSITORIES="${SharedRepositories}"
             export CLUSTER_TIER="ladybug-shared"
+            export VALKEY_URL="${ValkeyUrl}"
+            export DATABASE_URL="postgresql://postgres:{{resolve:secretsmanager:robosystems/${Environment}/postgres:SecretString:POSTGRES_PASSWORD}}@${DatabaseEndpoint}:${DatabasePort}/robosystems?sslmode=require"
             export CFN_STACK_NAME="${AWS::StackName}"
             export CFN_RESOURCE="ReplicaAutoScalingGroup"
             export LBUG_S3_ATTACH_PREFIX="${SharedDatabaseS3Prefix}"
