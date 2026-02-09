@@ -143,7 +143,6 @@
                 "/robosystems/staging/graph-api",
                 "/aws/lambda/RoboSystemsGraphVolumesStaging-volume-detachment",
                 "/aws/lambda/RoboSystemsGraphVolumesStaging-volume-manager",
-                "/aws/lambda/RoboSystemsPostgresStaging-init-lambda",
                 "/robosystems/staging/app"
               ]
             }
@@ -272,7 +271,6 @@
                 "/robosystems/staging/graph-api",
                 "/aws/lambda/RoboSystemsGraphVolumesStaging-volume-manager",
                 "/aws/lambda/RoboSystemsGraphVolumesStaging-volume-detachment",
-                "/aws/lambda/RoboSystemsPostgresStaging-init-lambda",
                 "/robosystems/staging/app"
               ]
             }
@@ -643,11 +641,6 @@
             },
             {
               "accountId": "821526227241",
-              "arn": "arn:aws:logs:us-east-1:821526227241:log-group:/aws/lambda/RoboSystemsPostgresIAMStaging-init-lambda:*",
-              "name": "/aws/lambda/RoboSystemsPostgresIAMStaging-init-lambda"
-            },
-            {
-              "accountId": "821526227241",
               "arn": "arn:aws:logs:us-east-1:821526227241:log-group:/aws/lambda/RoboSystemsPostgresIAMStaging-postgres-rotation:*",
               "name": "/aws/lambda/RoboSystemsPostgresIAMStaging-postgres-rotation"
             },
@@ -655,11 +648,6 @@
               "accountId": "821526227241",
               "arn": "arn:aws:logs:us-east-1:821526227241:log-group:/aws/lambda/RoboSystemsPostgresIAMStaging-secrets-update-lambda:*",
               "name": "/aws/lambda/RoboSystemsPostgresIAMStaging-secrets-update-lambda"
-            },
-            {
-              "accountId": "821526227241",
-              "arn": "arn:aws:logs:us-east-1:821526227241:log-group:/aws/lambda/RoboSystemsPostgresStaging-init-lambda:*",
-              "name": "/aws/lambda/RoboSystemsPostgresStaging-init-lambda"
             },
             {
               "accountId": "821526227241",

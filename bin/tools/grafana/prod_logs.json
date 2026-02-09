@@ -144,10 +144,8 @@
                 "/robosystems/prod/dagster",
                 "/robosystems/prod/graph-api",
                 "/aws/lambda/RoboSystemsGraphVolumesProd-volume-detachment",
-                "/harbinger-finlab/prod/app",
                 "/roboinvestor/prod/app",
-                "/roboledger/prod/app",
-                "/aws/lambda/RoboSystemsPostgresProd-init-lambda"
+                "/roboledger/prod/app"
               ]
             }
           }
@@ -276,8 +274,6 @@
                 "/robosystems/prod/dagster",
                 "/robosystems/prod/graph-api",
                 "/aws/lambda/RoboSystemsGraphVolumesProd-volume-detachment",
-                "/aws/lambda/RoboSystemsPostgresProd-init-lambda",
-                "/harbinger-finlab/prod/app",
                 "/roboinvestor/prod/app",
                 "/roboledger/prod/app"
               ]
@@ -656,11 +652,6 @@
               "accountId": "821526227241",
               "arn": "arn:aws:logs:us-east-1:821526227241:log-group:/aws/lambda/RoboSystemsPostgresIAMProd-secrets-update-lambda:*",
               "name": "/aws/lambda/RoboSystemsPostgresIAMProd-secrets-update-lambda"
-            },
-            {
-              "accountId": "821526227241",
-              "arn": "arn:aws:logs:us-east-1:821526227241:log-group:/aws/lambda/RoboSystemsPostgresProd-init-lambda:*",
-              "name": "/aws/lambda/RoboSystemsPostgresProd-init-lambda"
             },
             {
               "accountId": "821526227241",
