@@ -596,6 +596,9 @@ Resources:
               Value: dagster-daemon
             - Name: DAGSTER_HOME
               Value: /app/dagster_home
+            # Database Configuration (constructed from direct params + secret)
+            - Name: DATABASE_URL
+              Value: !Sub "postgresql://postgres:{{resolve:secretsmanager:robosystems/${Environment}/postgres:SecretString:POSTGRES_PASSWORD}}@${DatabaseEndpoint}:${DatabasePort}/robosystems?sslmode=require"
             - Name: DAGSTER_POSTGRES_HOST
               Value: !Ref DatabaseEndpoint
             - Name: DAGSTER_POSTGRES_PORT
@@ -688,6 +691,9 @@ Resources:
               Value: /app/dagster_home
             - Name: DAGSTER_PORT
               Value: "3000"
+            # Database Configuration (constructed from direct params + secret)
+            - Name: DATABASE_URL
+              Value: !Sub "postgresql://postgres:{{resolve:secretsmanager:robosystems/${Environment}/postgres:SecretString:POSTGRES_PASSWORD}}@${DatabaseEndpoint}:${DatabasePort}/robosystems?sslmode=require"
             - Name: DAGSTER_POSTGRES_HOST
               Value: !Ref DatabaseEndpoint
             - Name: DAGSTER_POSTGRES_PORT
@@ -786,6 +792,9 @@ Resources:
           Environment:
             - Name: ENVIRONMENT
               Value: !Ref Environment
+            # Database Configuration (constructed from direct params + secret)
+            - Name: DATABASE_URL
+              Value: !Sub "postgresql://postgres:{{resolve:secretsmanager:robosystems/${Environment}/postgres:SecretString:POSTGRES_PASSWORD}}@${DatabaseEndpoint}:${DatabasePort}/robosystems?sslmode=require"
             - Name: DAGSTER_HOME
               Value: /app/dagster_home
             - Name: DAGSTER_POSTGRES_HOST
