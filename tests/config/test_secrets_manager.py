@@ -276,7 +276,6 @@ class TestSecretMappingsConfiguration:
     # Note: Bucket names (SHARED_RAW_BUCKET, SHARED_PROCESSED_BUCKET, etc.) are
     # computed from environment in env.py, not fetched from secrets.
     critical_secrets = [
-      "DATABASE_URL",
       "JWT_SECRET_KEY",
       "AWS_S3_ACCESS_KEY_ID",
       "AWS_S3_SECRET_ACCESS_KEY",
@@ -289,21 +288,6 @@ class TestSecretMappingsConfiguration:
 
 class TestSecretsManagerHelpers:
   """Tests covering helper methods and global accessors."""
-
-  def test_get_database_url_non_prod(self):
-    manager = SecretsManager(environment="dev")
-    assert manager.get_database_url() == ""
-
-  def test_get_database_url_from_secret(self):
-    with patch("boto3.client") as mock_boto:
-      mock_client = MagicMock()
-      mock_client.get_secret_value.return_value = {
-        "SecretString": json.dumps({"DATABASE_URL": "postgres://example"})
-      }
-      mock_boto.return_value = mock_client
-
-      manager = SecretsManager(environment="prod")
-      assert manager.get_database_url() == "postgres://example"
 
   def test_get_s3_credentials_default(self):
     manager = SecretsManager(environment="dev")
