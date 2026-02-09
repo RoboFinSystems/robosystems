@@ -441,10 +441,6 @@ class EnvConfig:
     "CAPTCHA_ENABLED",
     get_parameter_value("CAPTCHA_ENABLED", "false").lower() == "true",
   )
-  CSP_TRUSTED_TYPES_ENABLED = get_bool_env(
-    "CSP_TRUSTED_TYPES_ENABLED",
-    get_parameter_value("CSP_TRUSTED_TYPES_ENABLED", "false").lower() == "true",
-  )
 
   # --- Organization ---
   ORG_MEMBER_INVITATIONS_ENABLED = get_bool_env(

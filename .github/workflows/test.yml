@@ -70,7 +70,6 @@ jobs:
       SSE_ENABLED: "true"
       OTEL_ENABLED: "false"
       LOAD_SHEDDING_ENABLED: "true"
-      CSP_TRUSTED_TYPES_ENABLED: "false"
       MCP_AUTO_LIMIT_ENABLED: "true"
       MCP_WORKSPACE_ENABLED: "true"
       FACT_GRID_ENABLED: "true"
