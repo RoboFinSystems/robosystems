@@ -40,6 +40,8 @@ permissions:
   id-token: write
   contents: read
   actions: write
+  deployments: write
+  security-events: write
 
 concurrency:
   # Use environment for manual runs, cron schedule for scheduled runs (distinguishes staging vs prod)
