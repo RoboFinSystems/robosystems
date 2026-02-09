@@ -41,6 +41,16 @@ on:
         description: "Valkey ElastiCache endpoint URL (e.g., redis://endpoint:6379)"
         required: true
         type: string
+      # Database Configuration
+      database_endpoint:
+        description: "PostgreSQL database endpoint hostname"
+        required: true
+        type: string
+      database_port:
+        description: "PostgreSQL database port"
+        required: false
+        type: string
+        default: "5432"
 
       # Instance Configuration
       ami_id:
@@ -269,6 +279,8 @@ jobs:
                 ParameterKey=SubnetIds,ParameterValue=\"$SUBNET_PARAM\" \
                 ParameterKey=ValkeyClientSecurityGroupId,ParameterValue=${{ inputs.valkey_sg_id }} \
                 ParameterKey=ValkeyUrl,ParameterValue=${{ inputs.valkey_url }} \
+                ParameterKey=DatabaseEndpoint,ParameterValue=${{ inputs.database_endpoint }} \
+                ParameterKey=DatabasePort,ParameterValue=${{ inputs.database_port }} \
                 ParameterKey=AmiId,ParameterValue=${{ inputs.ami_id }} \
                 ParameterKey=WriterTier,ParameterValue=${{ inputs.writer_tier }} \
                 ParameterKey=MinInstances,ParameterValue=${{ inputs.min_instances }} \

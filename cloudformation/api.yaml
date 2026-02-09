@@ -195,6 +195,15 @@ Parameters:
     Default: API
     Description: Component tag for resource identification and billing
 
+  # PostgreSQL Configuration (from Postgres stack outputs)
+  DatabaseEndpoint:
+    Type: String
+    Description: "PostgreSQL database endpoint hostname"
+  DatabasePort:
+    Type: String
+    Description: "PostgreSQL database port"
+    Default: "5432"
+
   # S3 Bucket Configuration (from S3 stack outputs)
   SharedProcessedBucketArn:
     Type: String
@@ -681,17 +690,20 @@ Resources:
                 - !Sub "http://${ApiALB.DNSName}"
             - Name: EMAIL_FROM_ADDRESS
               Value: !Ref EmailFromAddress
+            # Database Configuration (constructed from direct params + secret)
+            - Name: DATABASE_URL
+              Value: !Sub "postgresql://postgres:{{resolve:secretsmanager:robosystems/${Environment}/postgres:SecretString:POSTGRES_PASSWORD}}@${DatabaseEndpoint}:${DatabasePort}/robosystems?sslmode=require"
             # Dagster Configuration
             - Name: DAGSTER_HOME
               Value: /app/dagster_home
             - Name: DAGSTER_POSTGRES_HOST
-              Value: !Sub "{{resolve:secretsmanager:robosystems/${Environment}/postgres:SecretString:host}}"
+              Value: !Ref DatabaseEndpoint
             - Name: DAGSTER_POSTGRES_PORT
-              Value: "5432"
+              Value: !Ref DatabasePort
             - Name: DAGSTER_POSTGRES_USER
-              Value: !Sub "{{resolve:secretsmanager:robosystems/${Environment}/postgres:SecretString:username}}"
+              Value: "postgres"
             - Name: DAGSTER_POSTGRES_PASSWORD
-              Value: !Sub "{{resolve:secretsmanager:robosystems/${Environment}/postgres:SecretString:password}}"
+              Value: !Sub "{{resolve:secretsmanager:robosystems/${Environment}/postgres:SecretString:POSTGRES_PASSWORD}}"
             - Name: DAGSTER_POSTGRES_DB
               Value: dagster
             - Name: DAGSTER_HOST

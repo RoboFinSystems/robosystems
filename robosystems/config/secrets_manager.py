@@ -19,7 +19,7 @@ Secrets are organized in AWS Secrets Manager with the following structure:
     Note: STRIPE_API_VERSION is a constant in config/constants.py (not a secret)
 
 - Extension secrets: `robosystems/{environment}/{type}`
-  - `/postgres`: DATABASE_URL
+  - `/postgres`: POSTGRES_USER, POSTGRES_PASSWORD
   - `/valkey`: VALKEY_AUTH_TOKEN
   - `/s3`: AWS_S3_ACCESS_KEY_ID, AWS_S3_SECRET_ACCESS_KEY
   - `/admin`: ADMIN_API_KEY
@@ -179,19 +179,6 @@ class SecretsManager:
         raise
       return {}
 
-  def get_database_url(self) -> str:
-    """
-    Get the database URL from secrets.
-
-    Returns:
-        PostgreSQL connection string.
-    """
-    if self.environment not in ["prod", "staging"]:
-      return ""  # Local dev uses DATABASE_URL env var
-
-    secrets = self.get_secret("postgres")
-    return secrets.get("DATABASE_URL", "")
-
   def get_admin_key(self) -> str:
     """
     Get the admin API key from secrets.
@@ -285,7 +272,7 @@ SECRET_MAPPINGS = {
   "GRAPH_API_KEY": ("graph-api", "GRAPH_API_KEY"),
   "NEO4J_PASSWORD": ("graph-api", "NEO4J_PASSWORD"),
   # --- PostgreSQL ---
-  "DATABASE_URL": ("postgres", "DATABASE_URL"),
+  # DATABASE_URL is now set via ECS task definition env var (constructed from CF params + secret resolve)
   # --- Valkey/Redis ---
   "VALKEY_AUTH_TOKEN": ("valkey", "VALKEY_AUTH_TOKEN"),
   # --- AWS: S3 Credentials ---

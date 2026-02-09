@@ -431,6 +431,8 @@ jobs:
       public_subnet_ids: ${{ needs.deploy-vpc.outputs.public_subnet_ids }}
       valkey_sg_id: ${{ needs.deploy-valkey.outputs.valkey_sg_id }}
       valkey_url: ${{ needs.deploy-valkey.outputs.valkey_url }}
+      database_endpoint: ${{ needs.deploy-postgres.outputs.database_endpoint }}
+      database_port: ${{ needs.deploy-postgres.outputs.database_port }}
       ami_id: ${{ needs.stack-config.outputs.graph_ami_id }}
       # Container Configuration - use staging tag for EC2/ASG (container refresh handles updates)
       ecr_image_tag: staging
@@ -514,6 +516,9 @@ jobs:
       api_access_mode: ${{ vars.API_ACCESS_MODE_STAGING || 'internal' }}
       domain_name: ${{ vars.API_DOMAIN_NAME_STAGING || '' }}
       domain_name_root: ${{ needs.stack-config.outputs.domain_name_root }}
+      # Database Configuration (from Postgres stack outputs)
+      database_endpoint: ${{ needs.deploy-postgres.outputs.database_endpoint }}
+      database_port: ${{ needs.deploy-postgres.outputs.database_port }}
       # Cache Configuration
       valkey_url: ${{ needs.deploy-valkey.outputs.valkey_url }}
       valkey_sg_id: ${{ needs.deploy-valkey.outputs.valkey_sg_id }}
@@ -577,10 +582,13 @@ jobs:
       webserver_fargate_spot_weight: ${{ vars.DAGSTER_WEBSERVER_FARGATE_SPOT_WEIGHT_STAGING || '80' }}
       daemon_fargate_base: ${{ vars.DAGSTER_DAEMON_FARGATE_BASE_STAGING || '0' }}
       webserver_fargate_base: ${{ vars.DAGSTER_WEBSERVER_FARGATE_BASE_STAGING || '0' }}
+      # Database Configuration (from Postgres stack outputs)
+      database_endpoint: ${{ needs.deploy-postgres.outputs.database_endpoint }}
+      database_port: ${{ needs.deploy-postgres.outputs.database_port }}
       # Cache Configuration
       valkey_url: ${{ needs.deploy-valkey.outputs.valkey_url }}
       valkey_sg_id: ${{ needs.deploy-valkey.outputs.valkey_sg_id }}
-      # Database Configuration
+      # Database Security Group
       database_sg_id: ${{ needs.deploy-postgres.outputs.database_sg_id }}
       # Bastion Access (for internal UI access)
       bastion_sg_id: ${{ needs.deploy-bastion.outputs.bastion_sg_id }}

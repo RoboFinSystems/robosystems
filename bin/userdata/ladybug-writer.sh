@@ -398,6 +398,8 @@ echo "AWS_REGION=${REGION}" >> /etc/environment
 echo "CLUSTER_TIER=${CLUSTER_TIER}" >> /etc/environment
 echo "REPOSITORY_TYPE=${REPOSITORY_TYPE:-shared}" >> /etc/environment
 echo "SHARED_REPOSITORIES=${SHARED_REPOSITORIES:-}" >> /etc/environment
+echo "DATABASE_URL=${DATABASE_URL:-}" >> /etc/environment
+echo "VALKEY_URL=${VALKEY_URL:-}" >> /etc/environment
 
 # Run shared container runner
 /usr/local/bin/run-graph-container.sh

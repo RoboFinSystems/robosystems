@@ -107,6 +107,27 @@ on:
         type: string
         default: "100"
 
+      # Cache Configuration
+      valkey_sg_id:
+        description: "Security Group ID for Valkey/Redis client access"
+        required: true
+        type: string
+      valkey_url:
+        description: "Valkey ElastiCache endpoint URL (e.g., redis://endpoint:6379)"
+        required: true
+        type: string
+
+      # Database Configuration
+      database_endpoint:
+        description: "PostgreSQL database endpoint hostname"
+        required: true
+        type: string
+      database_port:
+        description: "PostgreSQL database port"
+        required: false
+        type: string
+        default: "5432"
+
       # Notification Configuration
       aws_sns_alert_email:
         description: "Email address for SNS alerts and notifications"
@@ -294,6 +315,10 @@ jobs:
             ParameterKey=DeploymentBucketArn,ParameterValue=${{ steps.s3_config.outputs.deployment_bucket_arn }} \
             ParameterKey=ECRRepositoryUrl,ParameterValue=${{ steps.ecr_config.outputs.ecr_url }} \
             ParameterKey=ECRImageTag,ParameterValue=${{ inputs.ecr_image_tag }} \
+            ParameterKey=ValkeyClientSecurityGroupId,ParameterValue=${{ inputs.valkey_sg_id }} \
+            ParameterKey=ValkeyUrl,ParameterValue=${{ inputs.valkey_url }} \
+            ParameterKey=DatabaseEndpoint,ParameterValue=${{ inputs.database_endpoint }} \
+            ParameterKey=DatabasePort,ParameterValue=${{ inputs.database_port }} \
             ParameterKey=SNSAlertEmail,ParameterValue=${{ inputs.aws_sns_alert_email }} \
             ParameterKey=ServiceTag,ParameterValue=RoboSystems \
             ParameterKey=ComponentTag,ParameterValue=SharedReplica"

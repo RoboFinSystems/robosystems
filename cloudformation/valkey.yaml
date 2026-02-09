@@ -296,7 +296,7 @@ Resources:
       Environment:
         Variables:
           SECRETS_MANAGER_ENDPOINT: !Sub https://secretsmanager.${AWS::Region}.${AWS::URLSuffix}
-          VALKEY_REPLICATION_GROUP_ID: !Sub "robosystems-${Environment}-valkey"
+          VALKEY_REPLICATION_GROUP_ID: !Ref ValkeyReplicationGroup
       Tags:
         - Key: Name
           Value: !Sub ${AWS::StackName}-valkey-rotation-lambda
