@@ -542,7 +542,8 @@ Resources:
             # Export required environment variables for the setup script
             export ENVIRONMENT="${Environment}"
             export VALKEY_URL="${ValkeyUrl}"
-            export DATABASE_URL="postgresql://postgres:{{resolve:secretsmanager:robosystems/${Environment}/postgres:SecretString:POSTGRES_PASSWORD}}@${DatabaseEndpoint}:${DatabasePort}/robosystems?sslmode=require"
+            export DATABASE_ENDPOINT="${DatabaseEndpoint}"
+            export DATABASE_PORT="${DatabasePort}"
             export DEPLOYMENT_BUCKET="$DEPLOYMENT_BUCKET"
             # Export SHARED_REPOSITORIES for shared repository deployments
             [ "${WriterTier}" = "ladybug-shared" ] && [ -n "${SharedRepositories}" ] && export SHARED_REPOSITORIES="${SharedRepositories}"

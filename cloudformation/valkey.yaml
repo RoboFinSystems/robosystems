@@ -485,6 +485,7 @@ Resources:
     DeletionPolicy: !If [IsProduction, Snapshot, Delete]
     UpdateReplacePolicy: !If [IsProduction, Snapshot, Delete]
     Properties:
+      ReplicationGroupId: !Sub "robosystems-${Environment}-valkey"
       ReplicationGroupDescription: !Sub "RoboSystems Valkey ElastiCache - ${Environment}"
       # Node Configuration
       CacheNodeType: !Ref NodeType

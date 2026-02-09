@@ -252,7 +252,9 @@ SECRET_MAPPINGS = {
   "GRAPH_API_KEY": ("graph-api", "GRAPH_API_KEY"),
   "NEO4J_PASSWORD": ("graph-api", "NEO4J_PASSWORD"),
   # --- PostgreSQL ---
-  # DATABASE_URL is now set via ECS task definition env var (constructed from CF params + secret resolve)
+  # ECS: DATABASE_URL set via task definition env var (CF params + secret resolve)
+  # EC2: DATABASE_URL constructed at runtime from DATABASE_ENDPOINT + POSTGRES_PASSWORD (fetched here)
+  "POSTGRES_PASSWORD": ("postgres", "POSTGRES_PASSWORD"),
   # --- Valkey/Redis ---
   "VALKEY_AUTH_TOKEN": ("valkey", "VALKEY_AUTH_TOKEN"),
   # --- AWS: S3 Credentials ---

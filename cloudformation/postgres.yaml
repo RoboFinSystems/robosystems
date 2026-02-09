@@ -605,6 +605,7 @@ Resources:
       AllowMajorVersionUpgrade: true
       StorageEncrypted: true
       CopyTagsToSnapshot: true
+      DBInstanceIdentifier: !Sub ${DBInstanceName}-${Environment}
       DBParameterGroupName: !Ref RDSDBParameterGroup
       Tags:
         - Key: Name

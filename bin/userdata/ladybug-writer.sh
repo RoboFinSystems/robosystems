@@ -398,7 +398,8 @@ echo "AWS_REGION=${REGION}" >> /etc/environment
 echo "CLUSTER_TIER=${CLUSTER_TIER}" >> /etc/environment
 echo "REPOSITORY_TYPE=${REPOSITORY_TYPE:-shared}" >> /etc/environment
 echo "SHARED_REPOSITORIES=${SHARED_REPOSITORIES:-}" >> /etc/environment
-echo "DATABASE_URL=${DATABASE_URL:-}" >> /etc/environment
+echo "DATABASE_ENDPOINT=${DATABASE_ENDPOINT:-}" >> /etc/environment
+echo "DATABASE_PORT=${DATABASE_PORT:-5432}" >> /etc/environment
 echo "VALKEY_URL=${VALKEY_URL:-}" >> /etc/environment
 
 # Run shared container runner
