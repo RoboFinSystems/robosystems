@@ -43,6 +43,34 @@ validate_env_vars() {
 # Validate environment variables
 validate_env_vars
 
+# Ensure a PostgreSQL database exists, creating it if needed
+ensure_database_exists() {
+    local db_name="${1:?database name required}"
+    local host="${DAGSTER_POSTGRES_HOST:-}"
+    local port="${DAGSTER_POSTGRES_PORT:-5432}"
+    local user="${DAGSTER_POSTGRES_USER:-postgres}"
+    local password="${DAGSTER_POSTGRES_PASSWORD:-}"
+
+    if [[ -z "$host" || -z "$password" ]]; then
+        echo "Skipping database check for '$db_name' - missing connection details"
+        return 0
+    fi
+
+    echo "Ensuring database '$db_name' exists..."
+    if PGPASSWORD="$password" psql \
+        "host=$host port=$port user=$user dbname=postgres sslmode=require" \
+        -tc "SELECT 1 FROM pg_database WHERE datname = '$db_name'" | grep -q 1; then
+        echo "✓ Database '$db_name' already exists"
+    else
+        PGPASSWORD="$password" psql \
+            "host=$host port=$port user=$user dbname=postgres sslmode=require" \
+            -c "CREATE DATABASE $db_name" && echo "✓ Database '$db_name' created" || {
+            echo "✗ Failed to create database '$db_name'"
+            return 1
+        }
+    fi
+}
+
 # Database initialization function
 run_db_init() {
     echo "Running database initialization..."
@@ -107,6 +135,7 @@ case $DOCKER_PROFILE in
     # Daemon is singleton (DesiredCount: 1) so safe for migrations
     # This mirrors the previous beat scheduler behavior
     if [[ "${RUN_MIGRATIONS:-}" == "true" ]]; then
+      ensure_database_exists "${DAGSTER_POSTGRES_DB:-dagster}" || echo "Dagster database check failed, but continuing..."
       run_db_init || echo "Database initialization failed, but continuing..."
     fi
 
