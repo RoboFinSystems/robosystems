@@ -260,7 +260,7 @@ class TestLadybugAllocationManager:
     assert self.manager.max_databases_per_instance == 50
     # The default ASG name is constructed based on the environment
     assert (
-      self.manager.default_asg_name == "RoboSystemsGraphWritersStandardTest-writers-asg"
+      self.manager.default_asg_name == "robosystems-ladybug-standard-writers-test-asg"
     )
 
 

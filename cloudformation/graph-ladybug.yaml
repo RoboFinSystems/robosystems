@@ -593,7 +593,7 @@ Resources:
     DeletionPolicy: Delete
     UpdateReplacePolicy: Retain
     Properties:
-      AutoScalingGroupName: !Sub "${AWS::StackName}-writers-asg"
+      AutoScalingGroupName: !Sub "robosystems-${WriterTier}-writers-${Environment}-asg"
       MinSize: !Ref MinInstances
       MaxSize: !Ref MaxInstances
       # DesiredCapacity intentionally omitted - managed by application

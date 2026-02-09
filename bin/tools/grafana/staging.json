@@ -2053,7 +2053,7 @@
             "uid": "${DS_CLOUDWATCH}"
           },
           "dimensions": {
-            "AutoScalingGroupName": "RoboSystemsGraphLadybugStandardStaging-writers-asg"
+            "AutoScalingGroupName": "robosystems-ladybug-standard-writers-staging-asg"
           },
           "expression": "",
           "hide": false,
@@ -2078,7 +2078,7 @@
             "uid": "${DS_CLOUDWATCH}"
           },
           "dimensions": {
-            "AutoScalingGroupName": "RoboSystemsGraphLadybugSharedStaging-writers-asg"
+            "AutoScalingGroupName": "robosystems-ladybug-shared-writers-staging-asg"
           },
           "expression": "",
           "hide": false,
@@ -2652,7 +2652,7 @@
             "uid": "${DS_CLOUDWATCH}"
           },
           "dimensions": {
-            "AutoScalingGroupName": "RoboSystemsGraphLadybugStandardProd-writers-asg"
+            "AutoScalingGroupName": "robosystems-ladybug-standard-writers-staging-asg"
           },
           "expression": "",
           "id": "",
@@ -2676,7 +2676,7 @@
             "uid": "${DS_CLOUDWATCH}"
           },
           "dimensions": {
-            "AutoScalingGroupName": "RoboSystemsGraphLadybugStandardProd-writers-asg"
+            "AutoScalingGroupName": "robosystems-ladybug-standard-writers-staging-asg"
           },
           "expression": "",
           "hide": false,
@@ -2701,7 +2701,7 @@
             "uid": "${DS_CLOUDWATCH}"
           },
           "dimensions": {
-            "AutoScalingGroupName": "RoboSystemsGraphLadybugSharedProd-writers-asg"
+            "AutoScalingGroupName": "robosystems-ladybug-shared-writers-staging-asg"
           },
           "expression": "",
           "hide": false,
@@ -2726,7 +2726,7 @@
             "uid": "${DS_CLOUDWATCH}"
           },
           "dimensions": {
-            "AutoScalingGroupName": "RoboSystemsGraphLadybugSharedProd-writers-asg"
+            "AutoScalingGroupName": "robosystems-ladybug-shared-writers-staging-asg"
           },
           "expression": "",
           "hide": false,
