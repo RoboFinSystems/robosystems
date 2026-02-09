@@ -637,8 +637,17 @@ class EnvConfig:
   # 4. DATABASE CONFIGURATION - POSTGRESQL
   # ==========================================================================
 
-  DATABASE_URL = get_str_env(
-    "DATABASE_URL", "postgresql://postgres:postgres@localhost:5432/robosystems"
+  DATABASE_ENDPOINT = get_str_env("DATABASE_ENDPOINT", "")
+  DATABASE_PORT = get_str_env("DATABASE_PORT", "5432")
+
+  # DATABASE_URL resolution order:
+  # 1. DATABASE_URL env var (local dev, ECS with CF resolve)
+  # 2. Constructed from DATABASE_ENDPOINT + POSTGRES_PASSWORD from Secrets Manager (EC2 graph instances)
+  # 3. Local dev default
+  DATABASE_URL = get_str_env("DATABASE_URL", "") or (
+    f"postgresql://postgres:{get_secret_value('POSTGRES_PASSWORD', 'postgres')}@{get_str_env('DATABASE_ENDPOINT', '')}:{get_str_env('DATABASE_PORT', '5432')}/robosystems?sslmode=require"
+    if get_str_env("DATABASE_ENDPOINT", "")
+    else "postgresql://postgres:postgres@localhost:5432/robosystems"
   )
   DATABASE_ECHO = get_bool_env("DATABASE_ECHO", False)
 
