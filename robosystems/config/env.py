@@ -311,8 +311,10 @@ def _get_shared_replica_alb_url_from_cloudformation() -> str:
   except ImportError:
     _cloudformation_cache[cache_key] = None
     return ""
-  except Exception as e:
-    print(f"Warning: Failed to lookup shared replica ALB URL from CloudFormation: {e}")
+  except Exception:
+    print(
+      "Shared replica ALB: not configured (stack RoboSystemsGraphSharedReplicas not deployed)"
+    )
     _cloudformation_cache[cache_key] = None
     return ""
 

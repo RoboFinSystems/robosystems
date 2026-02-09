@@ -315,36 +315,19 @@ class LadybugMetricsCollector:
     Returns:
         Dictionary with system metrics
     """
-    import os
 
     import psutil
 
-    # Get disk usage for the data volume
-    data_path = "/mnt/ladybug-data"
-    if os.path.exists(data_path):
-      disk_usage = psutil.disk_usage(data_path)
-      disk_metrics = {
-        "total_gb": disk_usage.total / (1024**3),
-        "used_gb": disk_usage.used / (1024**3),
-        "free_gb": disk_usage.free / (1024**3),
-        "usage_percent": disk_usage.percent,
-        "mount_point": data_path,
-      }
-    else:
-      # Fallback to base path if /mnt/ladybug-data doesn't exist
-      logger.warning(
-        "Data volume mount point /mnt/ladybug-data not found, using fallback path %s - "
-        "this may indicate a misconfiguration",
-        self.base_path,
-      )
-      disk_usage = psutil.disk_usage(str(self.base_path))
-      disk_metrics = {
-        "total_gb": disk_usage.total / (1024**3),
-        "used_gb": disk_usage.used / (1024**3),
-        "free_gb": disk_usage.free / (1024**3),
-        "usage_percent": disk_usage.percent,
-        "mount_point": str(self.base_path),
-      }
+    # Get disk usage for the data volume using the configured base path
+    data_path = str(self.base_path)
+    disk_usage = psutil.disk_usage(data_path)
+    disk_metrics = {
+      "total_gb": disk_usage.total / (1024**3),
+      "used_gb": disk_usage.used / (1024**3),
+      "free_gb": disk_usage.free / (1024**3),
+      "usage_percent": disk_usage.percent,
+      "mount_point": data_path,
+    }
 
     # Get memory usage
     memory = psutil.virtual_memory()
