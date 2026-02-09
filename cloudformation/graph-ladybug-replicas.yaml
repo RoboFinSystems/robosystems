@@ -519,7 +519,7 @@ Resources:
   ReplicaALB:
     Type: AWS::ElasticLoadBalancingV2::LoadBalancer
     Properties:
-      Name: !Sub robosystems-shared-replicas-${Environment}-alb
+      Name: !Sub robosystems-shr-rep-${Environment}-alb
       Type: application
       Scheme: internal
       Subnets: !Ref SubnetIds
@@ -534,7 +534,7 @@ Resources:
   ReplicaTargetGroup:
     Type: AWS::ElasticLoadBalancingV2::TargetGroup
     Properties:
-      Name: !Sub robosystems-shared-replicas-${Environment}-tg
+      Name: !Sub robosystems-shr-rep-${Environment}-tg
       VpcId: !Ref VpcId
       Port: 8001
       Protocol: HTTP
