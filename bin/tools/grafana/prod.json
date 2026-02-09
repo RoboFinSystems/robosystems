@@ -2067,7 +2067,7 @@
             "uid": "${DS_CLOUDWATCH}"
           },
           "dimensions": {
-            "AutoScalingGroupName": "RoboSystemsGraphLadybugStandardProd-writers-asg"
+            "AutoScalingGroupName": "robosystems-ladybug-standard-writers-prod-asg"
           },
           "expression": "",
           "hide": false,
@@ -2092,7 +2092,7 @@
             "uid": "${DS_CLOUDWATCH}"
           },
           "dimensions": {
-            "AutoScalingGroupName": "RoboSystemsGraphLadybugSharedProd-writers-asg"
+            "AutoScalingGroupName": "robosystems-ladybug-shared-writers-prod-asg"
           },
           "expression": "",
           "hide": false,
@@ -2666,7 +2666,7 @@
             "uid": "${DS_CLOUDWATCH}"
           },
           "dimensions": {
-            "AutoScalingGroupName": "RoboSystemsGraphLadybugStandardProd-writers-asg"
+            "AutoScalingGroupName": "robosystems-ladybug-standard-writers-prod-asg"
           },
           "expression": "",
           "id": "",
@@ -2690,7 +2690,7 @@
             "uid": "${DS_CLOUDWATCH}"
           },
           "dimensions": {
-            "AutoScalingGroupName": "RoboSystemsGraphLadybugStandardProd-writers-asg"
+            "AutoScalingGroupName": "robosystems-ladybug-standard-writers-prod-asg"
           },
           "expression": "",
           "hide": false,
@@ -2715,7 +2715,7 @@
             "uid": "${DS_CLOUDWATCH}"
           },
           "dimensions": {
-            "AutoScalingGroupName": "RoboSystemsGraphLadybugSharedProd-writers-asg"
+            "AutoScalingGroupName": "robosystems-ladybug-shared-writers-prod-asg"
           },
           "expression": "",
           "hide": false,
@@ -2740,7 +2740,7 @@
             "uid": "${DS_CLOUDWATCH}"
           },
           "dimensions": {
-            "AutoScalingGroupName": "RoboSystemsGraphLadybugSharedProd-writers-asg"
+            "AutoScalingGroupName": "robosystems-ladybug-shared-writers-prod-asg"
           },
           "expression": "",
           "hide": false,

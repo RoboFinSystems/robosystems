@@ -174,13 +174,12 @@ class LadybugAllocationManager:
     if asg_name:
       self.default_asg_name = asg_name
     else:
-      # Construct a realistic ASG name based on environment
+      # Construct ASG name based on environment (kebab-case convention)
       # Validate environment to prevent injection
       if not re.match(r"^[a-z]+$", environment.lower()):
         raise ValueError(f"Invalid environment name: {environment}")
-      env_capitalized = environment.capitalize()
       self.default_asg_name = (
-        f"RoboSystemsGraphWritersStandard{env_capitalized}-writers-asg"
+        f"robosystems-ladybug-standard-writers-{environment.lower()}-asg"
       )
 
     # Get DynamoDB resource with proper endpoint
@@ -1071,17 +1070,11 @@ class LadybugAllocationManager:
       # Update timestamp
       self._scale_up_timestamps[target_tier] = now
 
-      # Construct ASG name based on environment and tier
-      stack_name = self._get_stack_name_for_tier(target_tier)
-      if stack_name:
-        asg_name = f"{stack_name}-writers-asg"
+      # Construct ASG name from tier and environment (kebab-case convention)
+      if self.environment in ["prod", "staging"]:
+        asg_name = f"robosystems-{target_tier}-writers-{self.environment}-asg"
       else:
-        # Development environment or unknown tier
-        if self.environment not in ["prod", "staging"]:
-          asg_name = self.default_asg_name
-        else:
-          logger.error(f"Unknown tier {target_tier} for environment {self.environment}")
-          return
+        asg_name = self.default_asg_name
 
       logger.info(f"Attempting to scale up ASG {asg_name} for tier {target_tier}")
 
@@ -1115,25 +1108,21 @@ class LadybugAllocationManager:
 
   def _get_stack_name_for_tier(self, tier: str) -> str | None:
     """Get the CloudFormation stack name for a given tier and environment."""
-    if self.environment == "prod":
-      tier_map = {
-        "ladybug-standard": "RoboSystemsGraphWritersLadybugStandardProd",
-        "ladybug-large": "RoboSystemsGraphWritersLadybugLargeProd",
-        "ladybug-xlarge": "RoboSystemsGraphWritersLadybugXlargeProd",
-        "ladybug-shared": "RoboSystemsGraphWritersLadybugSharedProd",
-      }
-    elif self.environment == "staging":
-      tier_map = {
-        "ladybug-standard": "RoboSystemsGraphWritersLadybugStandardStaging",
-        "ladybug-large": "RoboSystemsGraphWritersLadybugLargeStaging",
-        "ladybug-xlarge": "RoboSystemsGraphWritersLadybugXlargeStaging",
-        "ladybug-shared": "RoboSystemsGraphWritersLadybugSharedStaging",
-      }
-    else:
-      # Development or other environments
+    if self.environment not in ["prod", "staging"]:
       return None
 
-    return tier_map.get(tier)
+    env_suffix = self.environment.capitalize()
+    # Stack names match deploy-graph.yml: RoboSystemsGraph{StackSuffix}{Env}
+    suffix_map = {
+      "ladybug-standard": "LadybugStandard",
+      "ladybug-large": "LadybugLarge",
+      "ladybug-xlarge": "LadybugXlarge",
+      "ladybug-shared": "LadybugShared",
+    }
+    suffix = suffix_map.get(tier)
+    if not suffix:
+      return None
+    return f"RoboSystemsGraph{suffix}{env_suffix}"
 
   async def _get_asg_name_for_instance(self, instance_id: str) -> str | None:
     """Get the ASG name for a specific instance from DynamoDB registry."""
@@ -1146,19 +1135,12 @@ class LadybugAllocationManager:
 
       item = response["Item"]
 
-      # First try to use the stack_name if available
-      stack_name = item.get("stack_name")
-      if stack_name:
-        # CloudFormation stack name format: {stack_name}-writers-asg
-        return f"{stack_name}-writers-asg"
-
-      # Fallback: construct from tier and environment
+      # Construct ASG name from tier and environment (kebab-case convention)
       cluster_tier = item.get("cluster_tier", "ladybug-standard")
-      stack_name = self._get_stack_name_for_tier(cluster_tier)
-      if stack_name:
-        return f"{stack_name}-writers-asg"
+      if self.environment in ["prod", "staging"]:
+        return f"robosystems-{cluster_tier}-writers-{self.environment}-asg"
 
-      # Last resort fallback
+      # Fallback for development/test environments
       return self.default_asg_name
 
     except ClientError as e:
