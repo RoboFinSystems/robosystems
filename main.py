@@ -248,8 +248,6 @@ def create_app() -> FastAPI:
         "form-action 'self'",
       ]
 
-      # Skip trusted types for docs - Swagger UI doesn't support them
-      # Trusted types are still enforced for API endpoints for security
     else:
       # Strict CSP for API endpoints
       csp_directives = [
@@ -262,10 +260,6 @@ def create_app() -> FastAPI:
         "base-uri 'self'",
         "form-action 'self'",
       ]
-
-      # Conditionally add trusted types based on feature flag
-      if env.CSP_TRUSTED_TYPES_ENABLED:
-        csp_directives.append("require-trusted-types-for 'script'")
 
     response.headers["Content-Security-Policy"] = "; ".join(csp_directives)
 

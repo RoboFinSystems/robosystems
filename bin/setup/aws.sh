@@ -208,7 +208,6 @@ function create_ssm_feature_flags() {
         "CONNECTION_PLAID_ENABLED=false"
         "CONNECTION_QUICKBOOKS_ENABLED=false"
         "CONNECTION_SEC_ENABLED=false"
-        "CSP_TRUSTED_TYPES_ENABLED=false"
         "DIRECT_GRAPH_MATERIALIZATION_ENABLED=true"
         "DIRECT_GRAPH_PROVISIONING_ENABLED=true"
         "EMAIL_VERIFICATION_ENABLED=false"
