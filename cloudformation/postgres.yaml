@@ -609,6 +609,7 @@ Resources:
       PreferredMaintenanceWindow: sun:04:30-sun:05:30
       AutoMinorVersionUpgrade: false
       AllowMajorVersionUpgrade: true
+      StorageEncrypted: true
       CopyTagsToSnapshot: true
       DBInstanceIdentifier: !Sub ${DBInstanceName}-${Environment}
       DBParameterGroupName: !Ref RDSDBParameterGroup
