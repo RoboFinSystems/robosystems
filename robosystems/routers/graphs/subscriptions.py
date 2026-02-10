@@ -41,6 +41,19 @@ def is_shared_repository(graph_id: str) -> bool:
   return _is_shared_repo(graph_id)
 
 
+def _get_plan_display_name(plan_name: str, resource_type: str, resource_id: str) -> str:
+  """Resolve a plan's internal name to its human-readable display name."""
+  if resource_type == "graph":
+    plan = BillingConfig.get_subscription_plan(plan_name)
+    if plan:
+      return plan.get("display_name", plan_name)
+  elif resource_type == "repository":
+    plan = BillingConfig.get_repository_plan(resource_id, plan_name)
+    if plan:
+      return plan.get("display_name", plan_name)
+  return plan_name
+
+
 def subscription_to_response(
   subscription: BillingSubscription,
 ) -> GraphSubscriptionResponse:
@@ -50,6 +63,9 @@ def subscription_to_response(
     resource_type=subscription.resource_type,
     resource_id=subscription.resource_id,
     plan_name=subscription.plan_name,
+    plan_display_name=_get_plan_display_name(
+      subscription.plan_name, subscription.resource_type, subscription.resource_id
+    ),
     billing_interval=subscription.billing_interval,
     status=subscription.status,
     base_price_cents=subscription.base_price_cents,
