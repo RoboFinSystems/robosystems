@@ -150,16 +150,16 @@ async def run_graph_creation(
 
     graph_id = result.get("graph_id")
 
-    # Create billing subscription for the graph
+    # Create billing subscription — failure here means a graph exists without
+    # a billing record, so we log at error level for operational visibility.
     try:
       from robosystems.config.graph_tier import GraphTier
-      from robosystems.database import get_db_session
+      from robosystems.database import session
       from robosystems.operations.graph.subscription_service import (
         GraphSubscriptionService,
       )
 
-      db_gen = get_db_session()
-      db = next(db_gen)
+      db = session()
       try:
         subscription_service = GraphSubscriptionService(db)
         subscription_service.create_graph_subscription(
@@ -169,16 +169,15 @@ async def run_graph_creation(
           tier=GraphTier(tier),
         )
         logger.info(f"Created billing subscription for graph {graph_id}")
+      except Exception as sub_error:
+        logger.error(
+          f"Failed to create billing subscription for graph {graph_id}: {sub_error}",
+          exc_info=True,
+        )
       finally:
-        try:
-          next(db_gen)
-        except StopIteration:
-          pass
-    except Exception as sub_error:
-      logger.error(
-        f"Failed to create billing subscription for graph {graph_id}: {sub_error}",
-        exc_info=True,
-      )
+        session.remove()
+    except ImportError:
+      logger.error("Failed to import subscription dependencies")
 
     duration_ms = (time.time() - start_time) * 1000
 
