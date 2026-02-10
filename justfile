@@ -323,6 +323,10 @@ demo-sec ticker="NVDA" year="2025" skip_queries="false":
 demo-sec-subscribe plan="sec-starter":
     uv run examples/sec_demo/main.py --subscribe-only --plan {{plan}}
 
+# Run SEC demo preset queries
+demo-sec-query all="false":
+    uv run examples/sec_demo/query_examples.py {{ if all == "true" { "--all" } else { "" } }}
+
 # Run accounting demo end-to-end (flags: new-user,new-graph,skip-queries)
 demo-accounting flags="new-graph" real_s3="false" base_url="http://localhost:8000":
     uv run examples/accounting_demo/main.py \
