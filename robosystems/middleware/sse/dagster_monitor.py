@@ -434,6 +434,7 @@ def build_graph_job_config(
     "stage_file_job": ["stage_file_in_duckdb", "materialize_file_to_graph"],
     "materialize_file_job": ["materialize_staged_file"],
     "materialize_graph_job": ["materialize_graph_tables"],
+    "wait_and_create_graph_job": ["wait_for_capacity_and_create_graph"],
   }
 
   op_names = job_to_ops.get(job_name)

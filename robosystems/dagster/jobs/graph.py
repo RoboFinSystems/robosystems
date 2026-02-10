@@ -3,10 +3,12 @@
 These jobs handle:
 - Backup and restore
 - DuckDB staging and graph materialization
+- Wait-for-capacity graph creation (when ASG scale-up is needed)
 
-Graph creation (generic, entity, subgraph) is handled directly via
-middleware/sse/direct_monitor.py and reports AssetMaterializations
-to Dagster for observability.
+Graph creation (generic, entity, subgraph) is normally handled directly via
+middleware/sse/direct_monitor.py. When capacity is unavailable and ASG scale-up
+is triggered, the wait_and_create_graph_job polls for the new instance and
+completes graph creation once capacity appears.
 """
 
 from datetime import UTC, datetime, timedelta
@@ -55,9 +57,75 @@ def _emit_graph_result_to_sse(
     context.log.warning(f"Failed to update SSE operation metadata: {e}")
 
 
+def _emit_progress_sync(operation_id: str, message: str, percent: float) -> None:
+  """Emit SSE progress event from sync Dagster op context."""
+  try:
+    from robosystems.middleware.sse.event_storage import EventType, SSEEventStorage
+
+    storage = SSEEventStorage()
+    storage.store_event_sync(
+      operation_id,
+      EventType.OPERATION_PROGRESS,
+      {"message": message, "progress_percent": percent},
+    )
+  except Exception as e:
+    from robosystems.logger import logger
+
+    logger.warning(f"Failed to emit SSE progress: {e}")
+
+
+def _emit_failure_sync(operation_id: str, error: str) -> None:
+  """Emit SSE failure event from sync Dagster op context."""
+  try:
+    from robosystems.middleware.sse.event_storage import EventType, SSEEventStorage
+
+    storage = SSEEventStorage()
+    storage.store_event_sync(
+      operation_id,
+      EventType.OPERATION_ERROR,
+      {"message": f"Operation failed: {error}", "error": error},
+    )
+  except Exception as e:
+    from robosystems.logger import logger
+
+    logger.warning(f"Failed to emit SSE failure: {e}")
+
+
+def _emit_completion_sync(operation_id: str, result: dict[str, Any]) -> None:
+  """Emit SSE completion event from sync Dagster op context."""
+  try:
+    from robosystems.middleware.sse.event_storage import EventType, SSEEventStorage
+
+    storage = SSEEventStorage()
+    storage.store_event_sync(
+      operation_id,
+      EventType.OPERATION_COMPLETED,
+      {"message": "Operation completed successfully", "result": result},
+    )
+  except Exception as e:
+    from robosystems.logger import logger
+
+    logger.warning(f"Failed to emit SSE completion: {e}")
+
+
 # ============================================================================
 # Configuration Classes
 # ============================================================================
+
+
+class WaitAndCreateGraphConfig(Config):
+  """Configuration for wait-for-capacity graph creation."""
+
+  operation_id: str
+  user_id: str
+  graph_name: str
+  tier: str = "ladybug-standard"
+  schema_extensions: str = ""  # comma-separated
+  description: str = ""
+  tags: str = ""  # comma-separated
+  custom_schema_json: str = ""  # JSON string or empty
+  poll_interval_seconds: int = 30
+  max_wait_seconds: int = 600  # 10 minutes
 
 
 class BackupGraphConfig(Config):
@@ -389,6 +457,242 @@ def restore_backup(
 def restore_graph_job():
   """Restore a graph database from backup."""
   restore_backup()
+
+
+# ============================================================================
+# Wait-for-Capacity Graph Creation
+# When allocate_database() finds no capacity but triggers ASG scale-up,
+# this job polls for the new instance then creates the graph.
+# ============================================================================
+
+
+async def _wait_and_create(
+  context: OpExecutionContext,
+  config: WaitAndCreateGraphConfig,
+) -> dict[str, Any]:
+  """
+  Async core logic for wait-for-capacity graph creation.
+
+  Runs a unified poll loop: each iteration checks for capacity, then
+  attempts graph creation. If creation fails (e.g. another job won the
+  race for the last slot), it loops back and keeps polling. This handles
+  the thundering-herd scenario where multiple jobs compete for capacity.
+
+  The entire function is wrapped in a top-level try/except so that any
+  unhandled error emits an SSE failure event — the user is never left
+  with a dangling operation.
+  """
+  import asyncio
+  import json
+  import time
+
+  from robosystems.config import env
+  from robosystems.config.graph_tier import GraphTier
+  from robosystems.database import session
+  from robosystems.middleware.graph.allocation_manager import LadybugAllocationManager
+  from robosystems.operations.graph.generic_graph_service import GenericGraphService
+  from robosystems.operations.graph.subscription_service import GraphSubscriptionService
+
+  operation_id = config.operation_id
+
+  try:
+    tier = GraphTier(config.tier)
+
+    # Parse config fields
+    schema_extensions = [
+      s.strip() for s in config.schema_extensions.split(",") if s.strip()
+    ]
+    tags = [t.strip() for t in config.tags.split(",") if t.strip()]
+    custom_schema = (
+      json.loads(config.custom_schema_json) if config.custom_schema_json else None
+    )
+
+    _emit_progress_sync(
+      operation_id,
+      "Provisioning new infrastructure... this may take 3-5 minutes",
+      5,
+    )
+    context.log.info(
+      f"Polling for {config.tier} capacity (max {config.max_wait_seconds}s)"
+    )
+
+    manager = LadybugAllocationManager(environment=env.ENVIRONMENT)
+    start_time = time.time()
+    poll_count = 0
+    create_attempts = 0
+
+    # Unified loop: poll for capacity, attempt creation, retry on race loss
+    while True:
+      elapsed = time.time() - start_time
+      if elapsed > config.max_wait_seconds:
+        error_msg = (
+          f"Timed out waiting for {config.tier} capacity after "
+          f"{int(elapsed)}s ({poll_count} polls, "
+          f"{create_attempts} create attempts)"
+        )
+        context.log.error(error_msg)
+        _emit_failure_sync(operation_id, error_msg)
+        raise Failure(description=error_msg)
+
+      # Check for capacity
+      instance = await manager._find_best_instance(tier)
+      poll_count += 1
+
+      if not instance:
+        # No capacity yet — emit progress and sleep
+        minutes = int(elapsed) // 60
+        seconds = int(elapsed) % 60
+        if config.max_wait_seconds > 0:
+          progress_pct = min(5 + (elapsed / config.max_wait_seconds) * 45, 50)
+        else:
+          progress_pct = 50
+        _emit_progress_sync(
+          operation_id,
+          f"Waiting for infrastructure... {minutes}:{seconds:02d} elapsed",
+          progress_pct,
+        )
+        context.log.info(
+          f"Poll {poll_count}: No capacity yet ({minutes}:{seconds:02d} elapsed)"
+        )
+        await asyncio.sleep(config.poll_interval_seconds)
+        continue
+
+      # Capacity found — attempt graph creation
+      context.log.info(
+        f"Capacity found on instance {instance.instance_id} after "
+        f"{int(elapsed)}s ({poll_count} polls)"
+      )
+      _emit_progress_sync(operation_id, "Infrastructure ready, creating graph...", 55)
+
+      def progress_callback(message: str, percent: float):
+        """Map service 0-100% to overall 55-95%."""
+        overall_pct = 55 + (percent / 100) * 40
+        _emit_progress_sync(operation_id, message, overall_pct)
+
+      try:
+        create_attempts += 1
+        service = GenericGraphService()
+        result = await service.create_graph(
+          graph_id=None,
+          schema_extensions=schema_extensions,
+          metadata={
+            "name": config.graph_name,
+            "description": config.description,
+            "tags": tags,
+          },
+          tier=config.tier,
+          initial_data=None,
+          user_id=config.user_id,
+          custom_schema=custom_schema,
+          progress_callback=progress_callback,
+        )
+      except Exception as create_error:
+        # Creation failed (likely lost race for capacity) — loop back
+        context.log.warning(
+          f"Create attempt {create_attempts} failed: {create_error}. "
+          "Returning to capacity poll."
+        )
+        _emit_progress_sync(
+          operation_id,
+          "Slot taken by another request, waiting for more capacity...",
+          10,
+        )
+        await asyncio.sleep(config.poll_interval_seconds)
+        continue
+
+      # Creation succeeded — finalize
+      graph_id = result.get("graph_id")
+      context.log.info(f"Graph created: {graph_id}")
+
+      # Create billing subscription — failure here means a graph exists without
+      # a billing record, so we log at error level for operational visibility.
+      db = session()
+      try:
+        subscription_service = GraphSubscriptionService(db)
+        subscription_service.create_graph_subscription(
+          user_id=config.user_id,
+          graph_id=graph_id,
+          plan_name=config.tier,
+          tier=tier,
+        )
+        context.log.info(f"Created billing subscription for graph {graph_id}")
+      except Exception as sub_error:
+        context.log.error(
+          f"Failed to create billing subscription for graph {graph_id}: {sub_error}"
+        )
+      finally:
+        session.remove()
+
+      # Emit result to SSE
+      _emit_graph_result_to_sse(context, operation_id, result)
+      _emit_completion_sync(operation_id, result)
+
+      # Report AssetMaterialization
+      total_elapsed = time.time() - start_time
+      context.log_event(
+        AssetMaterialization(
+          asset_key=AssetKey("user_graph_creation"),
+          description=f"Wait-for-capacity creation of graph {graph_id}",
+          metadata={
+            "graph_id": MetadataValue.text(graph_id or ""),
+            "graph_name": MetadataValue.text(config.graph_name),
+            "user_id": MetadataValue.text(config.user_id),
+            "tier": MetadataValue.text(config.tier),
+            "provisioning_method": MetadataValue.text("wait_for_capacity"),
+            "wait_time_seconds": MetadataValue.float(total_elapsed),
+            "poll_count": MetadataValue.int(poll_count),
+            "create_attempts": MetadataValue.int(create_attempts),
+          },
+        )
+      )
+
+      return result
+
+  except Failure:
+    # Timeout — already emitted SSE failure, re-raise for Dagster
+    raise
+  except Exception as e:
+    # Unexpected error — emit SSE failure so user isn't left dangling
+    error_msg = f"Graph creation failed unexpectedly: {e}"
+    context.log.error(error_msg)
+    _emit_failure_sync(operation_id, error_msg)
+    raise Failure(description=error_msg) from e
+
+
+@op
+def wait_for_capacity_and_create_graph(
+  context: OpExecutionContext,
+  config: WaitAndCreateGraphConfig,
+) -> dict[str, Any]:
+  """
+  Wait for instance capacity then create graph.
+
+  Used when allocate_database() triggers ASG scale-up but no instance
+  is immediately available. Polls _find_best_instance() until capacity
+  appears, then creates the graph and emits SSE progress throughout.
+  """
+  import asyncio
+
+  loop = asyncio.new_event_loop()
+  try:
+    return loop.run_until_complete(_wait_and_create(context, config))
+  finally:
+    loop.close()
+
+
+@job(
+  tags={
+    "dagster/priority": "2",
+    "ecs/run_task_kwargs": {
+      "capacityProviderStrategy": [
+        {"capacityProvider": "FARGATE", "weight": 1, "base": 1},
+      ],
+    },
+  }
+)
+def wait_and_create_graph_job():
+  """Wait for instance capacity then create a graph database."""
+  wait_for_capacity_and_create_graph()
 
 
 # ============================================================================

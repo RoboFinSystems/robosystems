@@ -29,6 +29,8 @@ from robosystems.models.api import (
   AvailableExtension,
   AvailableExtensionsResponse,
   AvailableGraphTiersResponse,
+  GraphCapacityResponse,
+  TierCapacity,
 )
 from robosystems.models.api.common import (
   ErrorCode,
@@ -874,6 +876,128 @@ async def get_available_graph_tiers(
       status.HTTP_500_INTERNAL_SERVER_ERROR,
       ErrorCode.INTERNAL_ERROR,
       f"Failed to retrieve tier configurations: {e!s}",
+    )
+
+
+@router.get(
+  "/capacity",
+  response_model=GraphCapacityResponse,
+  summary="Get Graph Tier Capacity",
+  description="""Check current infrastructure capacity for each graph database tier.
+
+Returns a status per tier indicating whether instances are immediately available,
+can be provisioned on demand, or are at capacity.
+
+**Status Values:**
+- `ready` — An instance slot is available; graph creation will succeed immediately
+- `scalable` — No slots right now, but a new instance can be provisioned (3-5 min)
+- `at_capacity` — Tier is full and cannot auto-scale; contact support
+
+**Use Cases:**
+- Pre-flight check before entering the graph creation wizard
+- Show availability badges on tier selection cards
+- Gate tier selection and show contact form for at-capacity tiers
+
+**Caching:**
+Results are cached for 60 seconds to avoid excessive infrastructure queries.
+
+**Note:**
+No credit consumption required. Does not expose instance counts or IPs.""",
+  operation_id="getGraphCapacity",
+  responses={
+    200: {
+      "description": "Capacity status retrieved successfully",
+      "content": {
+        "application/json": {
+          "example": {
+            "tiers": [
+              {
+                "tier": "ladybug-standard",
+                "display_name": "LadybugDB Standard",
+                "status": "ready",
+                "message": "Available",
+              },
+              {
+                "tier": "ladybug-large",
+                "display_name": "LadybugDB Large",
+                "status": "scalable",
+                "message": "Available — provisioning takes 3-5 minutes",
+              },
+              {
+                "tier": "ladybug-xlarge",
+                "display_name": "LadybugDB XLarge",
+                "status": "at_capacity",
+                "message": "Currently at capacity — contact us for access",
+              },
+            ]
+          }
+        }
+      },
+    },
+    500: {"description": "Failed to check capacity"},
+  },
+)
+async def get_graph_capacity(
+  current_user: User = Depends(get_current_user),
+  _rate_limit: None = Depends(general_api_rate_limit_dependency),
+) -> GraphCapacityResponse:
+  """
+  Check infrastructure capacity for each customer-facing tier.
+
+  Returns a status and human-readable message per tier so the frontend
+  can gate tier selection and show availability badges.
+  """
+  try:
+    from robosystems.config import env as app_env
+    from robosystems.config.billing.core import DEFAULT_GRAPH_BILLING_PLANS
+    from robosystems.middleware.graph.allocation_manager import (
+      LadybugAllocationManager,
+    )
+    from robosystems.middleware.graph.types import GraphTier
+
+    tier_map = {
+      "ladybug-standard": GraphTier.LADYBUG_STANDARD,
+      "ladybug-large": GraphTier.LADYBUG_LARGE,
+      "ladybug-xlarge": GraphTier.LADYBUG_XLARGE,
+    }
+
+    display_names = {
+      plan["name"]: plan["display_name"] for plan in DEFAULT_GRAPH_BILLING_PLANS
+    }
+
+    status_messages = {
+      "ready": "Available",
+      "scalable": "Available — provisioning takes 3-5 minutes",
+      "at_capacity": "Currently at capacity — contact us for access",
+    }
+
+    manager = LadybugAllocationManager(environment=app_env.ENVIRONMENT)
+
+    tiers: list[TierCapacity] = []
+    for tier_name, tier_enum in tier_map.items():
+      try:
+        capacity_status = await manager.check_tier_capacity(tier_enum)
+      except Exception as e:
+        logger.warning(f"Failed to check capacity for {tier_name}: {e}")
+        capacity_status = "at_capacity"
+
+      tiers.append(
+        TierCapacity(
+          tier=tier_name,
+          display_name=display_names.get(tier_name, tier_name),
+          status=capacity_status,
+          message=status_messages.get(capacity_status, "Unknown"),
+        )
+      )
+
+    return GraphCapacityResponse(tiers=tiers)
+
+  except Exception as e:
+    logger.error(f"Failed to check graph capacity: {e}")
+    _raise_http_exception(
+      status.HTTP_500_INTERNAL_SERVER_ERROR,
+      ErrorCode.INTERNAL_ERROR,
+      f"Failed to check capacity: {e!s}",
     )
 
 

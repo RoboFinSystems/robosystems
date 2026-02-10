@@ -900,3 +900,105 @@ class TestTierMapping:
                 )
 
                 assert response.status_code == 202
+
+
+@pytest.mark.asyncio
+class TestGraphCapacityEndpoint:
+  """Test GET /v1/graphs/capacity endpoint."""
+
+  async def test_capacity_all_ready(self, async_client: AsyncClient):
+    """Test capacity endpoint when all tiers have available slots."""
+    with patch(
+      "robosystems.middleware.graph.allocation_manager.LadybugAllocationManager"
+    ) as MockManager:
+      mock_instance = MockManager.return_value
+      mock_instance.check_tier_capacity = AsyncMock(return_value="ready")
+
+      response = await async_client.get("/v1/graphs/capacity")
+
+      assert response.status_code == 200
+      data = response.json()
+      assert "tiers" in data
+      assert len(data["tiers"]) == 3
+
+      for tier in data["tiers"]:
+        assert tier["status"] == "ready"
+        assert tier["message"] == "Available"
+        assert "tier" in tier
+        assert "display_name" in tier
+
+      tier_names = [t["tier"] for t in data["tiers"]]
+      assert "ladybug-standard" in tier_names
+      assert "ladybug-large" in tier_names
+      assert "ladybug-xlarge" in tier_names
+
+  async def test_capacity_mixed_statuses(self, async_client: AsyncClient):
+    """Test capacity endpoint with different statuses per tier."""
+
+    async def mock_check(tier):
+      from robosystems.middleware.graph.types import GraphTier
+
+      if tier == GraphTier.LADYBUG_STANDARD:
+        return "at_capacity"
+      elif tier == GraphTier.LADYBUG_LARGE:
+        return "scalable"
+      else:
+        return "ready"
+
+    with patch(
+      "robosystems.middleware.graph.allocation_manager.LadybugAllocationManager"
+    ) as MockManager:
+      mock_instance = MockManager.return_value
+      mock_instance.check_tier_capacity = AsyncMock(side_effect=mock_check)
+
+      response = await async_client.get("/v1/graphs/capacity")
+
+      assert response.status_code == 200
+      data = response.json()
+
+      status_map = {t["tier"]: t for t in data["tiers"]}
+
+      assert status_map["ladybug-standard"]["status"] == "at_capacity"
+      assert (
+        status_map["ladybug-standard"]["message"]
+        == "Currently at capacity — contact us for access"
+      )
+
+      assert status_map["ladybug-large"]["status"] == "scalable"
+      assert (
+        status_map["ladybug-large"]["message"]
+        == "Available — provisioning takes 3-5 minutes"
+      )
+
+      assert status_map["ladybug-xlarge"]["status"] == "ready"
+      assert status_map["ladybug-xlarge"]["message"] == "Available"
+
+  async def test_capacity_tier_check_failure_defaults_to_at_capacity(
+    self, async_client: AsyncClient
+  ):
+    """Test that a failing tier check defaults to at_capacity."""
+
+    async def mock_check(tier):
+      from robosystems.middleware.graph.types import GraphTier
+
+      if tier == GraphTier.LADYBUG_STANDARD:
+        raise Exception("DynamoDB error")
+      return "ready"
+
+    with patch(
+      "robosystems.middleware.graph.allocation_manager.LadybugAllocationManager"
+    ) as MockManager:
+      mock_instance = MockManager.return_value
+      mock_instance.check_tier_capacity = AsyncMock(side_effect=mock_check)
+
+      response = await async_client.get("/v1/graphs/capacity")
+
+      assert response.status_code == 200
+      data = response.json()
+      status_map = {t["tier"]: t for t in data["tiers"]}
+
+      # Failed tier defaults to at_capacity
+      assert status_map["ladybug-standard"]["status"] == "at_capacity"
+      # Others succeed
+      assert status_map["ladybug-large"]["status"] == "ready"
+      assert status_map["ladybug-xlarge"]["status"] == "ready"

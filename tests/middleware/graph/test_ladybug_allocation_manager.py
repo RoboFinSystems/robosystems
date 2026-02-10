@@ -120,7 +120,7 @@ class TestLadybugAllocationManager:
       "Items": []  # No instances with capacity available
     }
 
-    with pytest.raises(Exception, match="tier capacity available"):
+    with pytest.raises(Exception, match="capacity currently available"):
       await self.manager.allocate_database("test-entity-123")
 
     # Should not create any database records
@@ -136,7 +136,7 @@ class TestLadybugAllocationManager:
     # Mock no instances
     self.mock_instance_table.scan.return_value = {"Items": []}
 
-    with pytest.raises(Exception, match="tier capacity available"):
+    with pytest.raises(Exception, match="capacity currently available"):
       await self.manager.allocate_database("test-entity-123")
 
     self.mock_graph_table.put_item.assert_not_called()
@@ -388,7 +388,7 @@ class TestLadybugAllocationManagerSubgraphs:
     }
 
     # Allocation will fail due to no capacity
-    with pytest.raises(Exception, match="tier capacity available"):
+    with pytest.raises(Exception, match="capacity currently available"):
       await self.manager.allocate_database(subgraph_id)
 
   def test_parse_subgraph_integration(self):

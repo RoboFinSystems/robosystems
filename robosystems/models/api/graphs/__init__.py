@@ -118,11 +118,13 @@ from .tables import (
 )
 from .tier import (
   AvailableGraphTiersResponse,
+  GraphCapacityResponse,
   GraphTierBackup,
   GraphTierCopyOperations,
   GraphTierInfo,
   GraphTierInstance,
   GraphTierLimits,
+  TierCapacity,
 )
 
 __all__ = [
@@ -178,6 +180,7 @@ __all__ = [
   "FileUploadResponse",
   "FileUploadStatus",
   "GetFileInfoResponse",
+  "GraphCapacityResponse",
   "GraphLimitsResponse",
   "GraphMetadata",
   "GraphMetricsResponse",
@@ -225,5 +228,6 @@ __all__ = [
   "TableListResponse",
   "TableQueryRequest",
   "TableQueryResponse",
+  "TierCapacity",
   "translate_neo4j_to_lbug",
 ]

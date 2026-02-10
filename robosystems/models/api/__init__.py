@@ -97,6 +97,7 @@ from .graphs import (
   CypherQueryRequest,
   CypherQueryResponse,
   ExchangeTokenRequest,
+  GraphCapacityResponse,
   GraphMetadata,
   GraphMetricsResponse,
   GraphTierBackup,
@@ -117,6 +118,7 @@ from .graphs import (
   QuickBooksConnectionConfig,
   SECConnectionConfig,
   SyncConnectionRequest,
+  TierCapacity,
 )
 from .oauth import (
   OAuthCallbackRequest,
@@ -200,10 +202,11 @@ __all__ = [
   "ErrorResponse",
   "ExchangeTokenRequest",
   "ForgotPasswordRequest",
+  # Offering models
+  "GraphCapacityResponse",
   "GraphInfo",
   "GraphMetadata",
   "GraphMetricsResponse",
-  # Offering models
   "GraphSubscriptionTier",
   "GraphSubscriptions",
   "GraphTierBackup",
@@ -262,6 +265,7 @@ __all__ = [
   "SubscriptionResponse",
   "SuccessResponse",
   "SyncConnectionRequest",
+  "TierCapacity",
   "TierUpgradeRequest",
   "TokenPricing",
   "TransactionSummaryResponse",
