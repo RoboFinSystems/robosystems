@@ -193,13 +193,11 @@ def main():
     print("❌ No API key found in credentials")
     sys.exit(1)
 
-  # Get user_id
+  # User ID is optional (API key is sufficient for authentication)
   user_id = credentials.get("user_id") or credentials.get("user", {}).get("id")
-  if not user_id:
-    print("❌ No user_id found in credentials")
-    sys.exit(1)
-
-  print(f"User ID: {user_id}\n")
+  if user_id:
+    print(f"User ID: {user_id}")
+  print()
 
   # Step 1: Load SEC data (skip if subscribe-only)
   if args.subscribe_only:
