@@ -71,3 +71,22 @@ class AvailableGraphTiersResponse(BaseModel):
   """Response containing available graph tiers."""
 
   tiers: list[GraphTierInfo] = Field(..., description="List of available tiers")
+
+
+class TierCapacity(BaseModel):
+  """Capacity status for a single tier."""
+
+  tier: str = Field(..., description="Tier identifier (e.g. ladybug-standard)")
+  display_name: str = Field(..., description="Human-readable tier name")
+  status: str = Field(
+    ..., description="Capacity status: ready, scalable, or at_capacity"
+  )
+  message: str = Field(
+    ..., description="Human-readable status message for frontend display"
+  )
+
+
+class GraphCapacityResponse(BaseModel):
+  """Response containing capacity status for all customer-facing tiers."""
+
+  tiers: list[TierCapacity] = Field(..., description="Capacity status per tier")

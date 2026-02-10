@@ -33,6 +33,13 @@ from robosystems.security import SecurityAuditLogger, SecurityEventType
 
 from .utils import MultiTenantUtils, parse_subgraph_id
 
+
+class CapacityScalingTriggered(Exception):
+  """ASG scale-up was triggered; caller should poll for capacity."""
+
+  pass
+
+
 # Valid identifier patterns for security with length limits
 VALID_ENTITY_ID_PATTERN = re.compile(
   r"^[a-zA-Z0-9_-]{1,128}$"
@@ -358,13 +365,21 @@ class LadybugAllocationManager:
           )
         else:
           # Standard tier - attempt auto-scaling
-          await self._trigger_scale_up(instance_tier)
+          scaled = await self._trigger_scale_up(instance_tier)
           # Publish allocation failure metric
           await self._publish_failure_metric("no_capacity", entity_id, None)
-          raise Exception(
-            f"No {instance_tier} tier capacity available. Our system is automatically scaling up to meet demand. "
-            "Please retry in 3-5 minutes. If this persists, contact support."
-          )
+          tier_name = instance_tier.value if instance_tier else "ladybug-standard"
+          if scaled:
+            raise CapacityScalingTriggered(
+              f"No {tier_name} capacity currently available. "
+              "A new instance is being provisioned and should be ready in 3-5 minutes. "
+              "Please retry shortly."
+            )
+          else:
+            raise Exception(
+              f"No {tier_name} capacity currently available. "
+              "Please contact support or try again later."
+            )
 
       # Atomic allocation using DynamoDB conditional writes
       now = datetime.now(UTC)
@@ -957,6 +972,50 @@ class LadybugAllocationManager:
       logger.error(f"Error getting allocation metrics: {e}")
       return {"error": str(e), "timestamp": datetime.now(UTC).isoformat()}
 
+  async def check_tier_capacity(self, tier: GraphTier) -> str:
+    """
+    Check capacity status for a tier.
+
+    Returns 'ready', 'scalable', or 'at_capacity'.
+
+    - ready: Open slot on a healthy instance
+    - scalable: No slots but ASG has headroom to add instances
+    - at_capacity: No slots and ASG is at max
+    """
+    instance = await self._find_best_instance(tier)
+    if instance:
+      return "ready"
+
+    has_headroom = await self._asg_has_headroom(tier)
+    if has_headroom:
+      return "scalable"
+
+    return "at_capacity"
+
+  async def _asg_has_headroom(self, tier: GraphTier) -> bool:
+    """Check whether the ASG for a tier has room to add instances."""
+    try:
+      target_tier = tier.value
+
+      if self.environment in ["prod", "staging"]:
+        asg_name = f"robosystems-{target_tier}-writers-{self.environment}-asg"
+      else:
+        asg_name = self.default_asg_name
+
+      response = self.autoscaling.describe_auto_scaling_groups(
+        AutoScalingGroupNames=[asg_name]
+      )
+
+      if not response["AutoScalingGroups"]:
+        return False
+
+      asg = response["AutoScalingGroups"][0]
+      return asg["DesiredCapacity"] < asg["MaxSize"]
+
+    except ClientError as e:
+      logger.error(f"Error checking ASG headroom for {tier.value}: {e}")
+      return False
+
   async def _find_best_instance(
     self,
     instance_tier: GraphTier | None = None,
@@ -1051,8 +1110,14 @@ class LadybugAllocationManager:
       logger.error(f"Error finding best instance: {e}")
       return None
 
-  async def _trigger_scale_up(self, instance_tier: GraphTier | None = None):
-    """Trigger auto scaling group to add an instance for the specified tier."""
+  async def _trigger_scale_up(self, instance_tier: GraphTier | None = None) -> bool:
+    """
+    Trigger auto scaling group to add an instance for the specified tier.
+
+    Returns:
+        True if desired capacity was successfully incremented.
+        False if already at max, ASG not found, rate-limited, or error.
+    """
     try:
       # Determine ASG name based on tier
       target_tier = instance_tier.value if instance_tier else "ladybug-standard"
@@ -1065,7 +1130,7 @@ class LadybugAllocationManager:
           f"Skipping scale-up for tier {target_tier} - last triggered "
           f"{(now - last_trigger).total_seconds():.0f} seconds ago"
         )
-        return
+        return False
 
       # Update timestamp
       self._scale_up_timestamps[target_tier] = now
@@ -1084,7 +1149,7 @@ class LadybugAllocationManager:
 
       if not response["AutoScalingGroups"]:
         logger.error(f"Auto Scaling Group {asg_name} not found")
-        return
+        return False
 
       asg = response["AutoScalingGroups"][0]
       current_capacity = asg["DesiredCapacity"]
@@ -1100,11 +1165,14 @@ class LadybugAllocationManager:
         logger.info(
           f"Triggered scale up for {asg_name}: {current_capacity} -> {new_capacity}"
         )
+        return True
       else:
         logger.warning(f"Already at maximum capacity: {max_size} for {asg_name}")
+        return False
 
     except ClientError as e:
       logger.error(f"Error triggering scale up: {e}")
+      return False
 
   def _get_stack_name_for_tier(self, tier: str) -> str | None:
     """Get the CloudFormation stack name for a given tier and environment."""

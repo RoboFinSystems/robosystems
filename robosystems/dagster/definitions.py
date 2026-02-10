@@ -45,6 +45,7 @@ from robosystems.dagster.jobs.graph import (
   materialize_graph_job,
   restore_graph_job,
   stage_file_job,
+  wait_and_create_graph_job,
 )
 from robosystems.dagster.jobs.infrastructure import (
   full_instance_maintenance_job,
@@ -136,6 +137,7 @@ all_jobs = [
   stage_file_job,
   materialize_file_job,
   materialize_graph_job,
+  wait_and_create_graph_job,
   # Platform: Shared repository
   shared_repository_s3_sync_job,
   shared_repository_s3_upload_only_job,

@@ -43,6 +43,7 @@ import time
 from typing import Any
 
 from robosystems.logger import logger
+from robosystems.middleware.graph.allocation_manager import CapacityScalingTriggered
 from robosystems.middleware.sse.operation_manager import get_operation_manager
 
 # Timeout for Dagster materialization reporting (seconds)
@@ -208,12 +209,94 @@ async def run_graph_creation(
     )
     return result
 
+  except CapacityScalingTriggered:
+    # ASG scale-up was triggered — hand off to Dagster to wait for capacity
+    logger.info(f"Capacity scaling triggered — handing off to Dagster: {operation_id}")
+    await _submit_wait_and_create_job(
+      operation_id=operation_id,
+      user_id=user_id,
+      graph_name=graph_name,
+      tier=tier,
+      schema_extensions=schema_extensions,
+      description=description,
+      tags=tags,
+      custom_schema=custom_schema,
+    )
+    return {"operation_id": operation_id, "status": "provisioning"}
+
   except Exception as e:
     logger.error(f"Graph creation failed: {e}")
     await manager.fail_operation(
       operation_id,
       error=str(e),
       error_details={"error_type": type(e).__name__},
+    )
+    raise
+
+
+async def _submit_wait_and_create_job(
+  operation_id: str,
+  user_id: str,
+  graph_name: str,
+  tier: str,
+  schema_extensions: list[str],
+  description: str | None = None,
+  tags: list[str] | None = None,
+  custom_schema: dict[str, Any] | None = None,
+) -> None:
+  """
+  Submit a Dagster job to wait for capacity and create the graph.
+
+  Emits an immediate SSE progress event so the user sees feedback,
+  then submits the wait_and_create_graph_job to Dagster.
+  """
+  import json
+
+  from robosystems.middleware.sse.dagster_monitor import (
+    DagsterRunMonitor,
+    build_graph_job_config,
+  )
+
+  manager = get_operation_manager()
+
+  # Emit immediate SSE progress so the user sees something right away
+  await manager.emit_progress(
+    operation_id,
+    "No available capacity — provisioning new infrastructure...",
+    5,
+  )
+
+  # Build Dagster run config
+  run_config = build_graph_job_config(
+    "wait_and_create_graph_job",
+    operation_id=operation_id,
+    user_id=user_id,
+    graph_name=graph_name,
+    tier=tier,
+    schema_extensions=",".join(schema_extensions) if schema_extensions else "",
+    description=description or "",
+    tags=",".join(tags) if tags else "",
+    custom_schema_json=json.dumps(custom_schema) if custom_schema else "",
+  )
+
+  # Submit to Dagster
+  try:
+    monitor = DagsterRunMonitor()
+    run_id = monitor.submit_job(
+      "wait_and_create_graph_job",
+      run_config=run_config,
+      tags={"operation_id": operation_id, "user_id": user_id},
+    )
+    logger.info(
+      f"Submitted wait_and_create_graph_job: run_id={run_id}, "
+      f"operation_id={operation_id}"
+    )
+  except Exception as submit_error:
+    logger.error(f"Failed to submit wait_and_create_graph_job: {submit_error}")
+    await manager.fail_operation(
+      operation_id,
+      error=f"Failed to start capacity provisioning: {submit_error}",
+      error_details={"error_type": type(submit_error).__name__},
     )
     raise
 
