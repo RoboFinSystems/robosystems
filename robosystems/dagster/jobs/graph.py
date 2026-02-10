@@ -488,7 +488,7 @@ async def _wait_and_create(
 
   from robosystems.config import env
   from robosystems.config.graph_tier import GraphTier
-  from robosystems.database import get_db_session
+  from robosystems.database import session
   from robosystems.middleware.graph.allocation_manager import LadybugAllocationManager
   from robosystems.operations.graph.generic_graph_service import GenericGraphService
   from robosystems.operations.graph.subscription_service import GraphSubscriptionService
@@ -604,26 +604,24 @@ async def _wait_and_create(
       graph_id = result.get("graph_id")
       context.log.info(f"Graph created: {graph_id}")
 
-      # Create billing subscription
+      # Create billing subscription — failure here means a graph exists without
+      # a billing record, so we log at error level for operational visibility.
+      db = session()
       try:
-        db_gen = get_db_session()
-        db = next(db_gen)
-        try:
-          subscription_service = GraphSubscriptionService(db)
-          subscription_service.create_graph_subscription(
-            user_id=config.user_id,
-            graph_id=graph_id,
-            plan_name=config.tier,
-            tier=tier,
-          )
-          context.log.info(f"Created billing subscription for graph {graph_id}")
-        finally:
-          try:
-            next(db_gen)
-          except StopIteration:
-            pass
+        subscription_service = GraphSubscriptionService(db)
+        subscription_service.create_graph_subscription(
+          user_id=config.user_id,
+          graph_id=graph_id,
+          plan_name=config.tier,
+          tier=tier,
+        )
+        context.log.info(f"Created billing subscription for graph {graph_id}")
       except Exception as sub_error:
-        context.log.warning(f"Failed to create billing subscription: {sub_error}")
+        context.log.error(
+          f"Failed to create billing subscription for graph {graph_id}: {sub_error}"
+        )
+      finally:
+        session.remove()
 
       # Emit result to SSE
       _emit_graph_result_to_sse(context, operation_id, result)

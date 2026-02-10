@@ -142,9 +142,9 @@ class TestWaitAndCreate:
               mock_service.create_graph.return_value = mock_result
               MockService.return_value = mock_service
 
-              with patch("robosystems.database.get_db_session") as mock_get_db:
-                mock_db = MagicMock()
-                mock_get_db.return_value = iter([mock_db])
+              with patch("robosystems.database.session") as mock_session:
+                mock_session.return_value = MagicMock()
+                mock_session.remove = MagicMock()
 
                 with patch(
                   "robosystems.operations.graph.subscription_service.GraphSubscriptionService"
@@ -201,9 +201,9 @@ class TestWaitAndCreate:
               mock_service.create_graph.return_value = mock_result
               MockService.return_value = mock_service
 
-              with patch("robosystems.database.get_db_session") as mock_get_db:
-                mock_db = MagicMock()
-                mock_get_db.return_value = iter([mock_db])
+              with patch("robosystems.database.session") as mock_session:
+                mock_session.return_value = MagicMock()
+                mock_session.remove = MagicMock()
 
                 with patch(
                   "robosystems.operations.graph.subscription_service.GraphSubscriptionService"
@@ -259,8 +259,9 @@ class TestWaitAndCreate:
               ]
               MockService.return_value = mock_service
 
-              with patch("robosystems.database.get_db_session") as mock_get_db:
-                mock_get_db.return_value = iter([MagicMock()])
+              with patch("robosystems.database.session") as mock_session:
+                mock_session.return_value = MagicMock()
+                mock_session.remove = MagicMock()
 
                 with patch(
                   "robosystems.operations.graph.subscription_service.GraphSubscriptionService"
