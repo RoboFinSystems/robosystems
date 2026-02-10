@@ -766,7 +766,7 @@ async def run_graph_provisioning(
         error_details={"error_type": type(e).__name__},
       )
 
-    # Mark subscription as failed
+    # Mark subscription as failed and cancel Stripe subscription
     try:
       db_gen = get_db_session()
       db = next(db_gen)
@@ -784,6 +784,22 @@ async def run_graph_provisioning(
             subscription.subscription_metadata = metadata
           else:
             subscription.subscription_metadata = {"error": str(e)}
+
+          # Cancel Stripe subscription so the customer isn't charged
+          if subscription.stripe_subscription_id:
+            try:
+              from robosystems.operations.providers.payment_provider import (
+                get_payment_provider,
+              )
+
+              provider = get_payment_provider("stripe")
+              provider.cancel_subscription(subscription.stripe_subscription_id)
+            except Exception as cancel_error:
+              logger.error(
+                f"Failed to cancel Stripe subscription "
+                f"{subscription.stripe_subscription_id}: {cancel_error}"
+              )
+
           try:
             db.commit()
           except Exception as commit_error:
@@ -1010,7 +1026,7 @@ async def run_user_repository_provisioning(
         error_details={"error_type": type(e).__name__},
       )
 
-    # Mark subscription as failed
+    # Mark subscription as failed and cancel Stripe subscription
     try:
       db_gen = get_db_session()
       db = next(db_gen)
@@ -1028,6 +1044,22 @@ async def run_user_repository_provisioning(
             subscription.subscription_metadata = metadata
           else:
             subscription.subscription_metadata = {"error": str(e)}
+
+          # Cancel Stripe subscription so the customer isn't charged
+          if subscription.stripe_subscription_id:
+            try:
+              from robosystems.operations.providers.payment_provider import (
+                get_payment_provider,
+              )
+
+              provider = get_payment_provider("stripe")
+              provider.cancel_subscription(subscription.stripe_subscription_id)
+            except Exception as cancel_error:
+              logger.error(
+                f"Failed to cancel Stripe subscription "
+                f"{subscription.stripe_subscription_id}: {cancel_error}"
+              )
+
           try:
             db.commit()
           except Exception as commit_error:

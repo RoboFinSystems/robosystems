@@ -218,6 +218,17 @@ class TestStripeSubscriptionOperations:
     call_args = stripe_provider.stripe.Subscription.create.call_args
     assert call_args[1]["metadata"] == metadata
 
+  def test_cancel_subscription_success(self, stripe_provider):
+    """Test successful subscription cancellation."""
+    stripe_provider.cancel_subscription("sub_test123")
+    stripe_provider.stripe.Subscription.cancel.assert_called_once_with("sub_test123")
+
+  def test_cancel_subscription_raises_on_error(self, stripe_provider):
+    """Test that cancellation errors propagate."""
+    stripe_provider.stripe.Subscription.cancel.side_effect = Exception("Not found")
+    with pytest.raises(Exception, match="Not found"):
+      stripe_provider.cancel_subscription("sub_nonexistent")
+
 
 class TestStripeWebhookVerification:
   """Tests for Stripe webhook signature verification."""

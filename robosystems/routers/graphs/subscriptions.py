@@ -390,6 +390,18 @@ async def create_repository_subscription(
       failed_sub = db.query(BillingSubscription).filter_by(id=subscription_id).first()
       if failed_sub:
         failed_sub.status = "failed"
+        # Cancel Stripe subscription so the customer isn't charged
+        if failed_sub.stripe_subscription_id:
+          try:
+            from ...operations.providers.payment_provider import get_payment_provider
+
+            provider = get_payment_provider("stripe")
+            provider.cancel_subscription(failed_sub.stripe_subscription_id)
+          except Exception as cancel_error:
+            logger.error(
+              f"Failed to cancel Stripe subscription {failed_sub.stripe_subscription_id}: "
+              f"{cancel_error}"
+            )
         db.commit()
       raise HTTPException(
         status_code=500,

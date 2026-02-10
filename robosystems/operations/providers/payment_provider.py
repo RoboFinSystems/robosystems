@@ -124,6 +124,15 @@ class PaymentProvider(ABC):
     pass
 
   @abstractmethod
+  def cancel_subscription(self, subscription_id: str) -> None:
+    """Cancel a subscription immediately.
+
+    Args:
+        subscription_id: Provider subscription ID to cancel
+    """
+    pass
+
+  @abstractmethod
   def create_portal_session(self, customer_id: str, return_url: str) -> str:
     """Create a customer portal session for managing payment methods.
 
@@ -509,6 +518,21 @@ class StripePaymentProvider(PaymentProvider):
       raise
     except Exception as e:
       logger.error(f"Failed to get upcoming invoice: {e}", exc_info=True)
+      raise
+
+  def cancel_subscription(self, subscription_id: str) -> None:
+    """Cancel a Stripe subscription immediately."""
+    try:
+      self.stripe.Subscription.cancel(subscription_id)
+      logger.info(
+        f"Canceled Stripe subscription {subscription_id}",
+        extra={"subscription_id": subscription_id},
+      )
+    except Exception as e:
+      logger.error(
+        f"Failed to cancel Stripe subscription {subscription_id}: {e}",
+        exc_info=True,
+      )
       raise
 
   def create_portal_session(self, customer_id: str, return_url: str) -> str:
