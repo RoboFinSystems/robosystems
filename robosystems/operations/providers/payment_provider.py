@@ -254,7 +254,12 @@ class StripePaymentProvider(PaymentProvider):
       logger.error(f"Invalid webhook signature: {e}")
       raise ValueError("Invalid webhook signature") from e
 
-  def get_or_create_price(self, plan_name: str, resource_type: str = "graph") -> str:
+  def get_or_create_price(
+    self,
+    plan_name: str,
+    resource_type: str = "graph",
+    repository_id: str | None = None,
+  ) -> str:
     """Get or create Stripe price for a plan, with caching and auto-creation.
 
     This method implements the auto-create pattern:
@@ -267,15 +272,25 @@ class StripePaymentProvider(PaymentProvider):
     Args:
         plan_name: Internal plan name (e.g., "ladybug-standard", "sec-starter")
         resource_type: "graph" or "repository"
+        repository_id: Required when resource_type is "repository" (e.g., "sec")
 
     Returns:
         Stripe price ID
 
     Raises:
-        ValueError: Plan not found in billing config
+        ValueError: Plan not found in billing config, or repository_id missing
     """
-    cache_key = f"stripe_price:{env.ENVIRONMENT}:{resource_type}:{plan_name}"
-    lock_key = f"stripe_price_lock:{env.ENVIRONMENT}:{resource_type}:{plan_name}"
+    if resource_type == "repository" and not repository_id:
+      raise ValueError("repository_id is required when resource_type is 'repository'")
+
+    # Include repository_id in cache/lock keys for repository plans to avoid collisions
+    key_suffix = (
+      f"{resource_type}:{repository_id}:{plan_name}"
+      if repository_id
+      else f"{resource_type}:{plan_name}"
+    )
+    cache_key = f"stripe_price:{env.ENVIRONMENT}:{key_suffix}"
+    lock_key = f"stripe_price_lock:{env.ENVIRONMENT}:{key_suffix}"
 
     cached_price_id = self.redis_client.get(cache_key)
     if cached_price_id:
@@ -299,7 +314,7 @@ class StripePaymentProvider(PaymentProvider):
       if resource_type == "graph":
         plan_config = BillingConfig.get_subscription_plan(plan_name)
       else:
-        plan_config = BillingConfig.get_repository_plan(resource_type, plan_name)
+        plan_config = BillingConfig.get_repository_plan(repository_id, plan_name)
 
       if not plan_config:
         raise ValueError(f"Plan '{plan_name}' not found in billing config")
@@ -432,7 +447,7 @@ class StripePaymentProvider(PaymentProvider):
             else None,
             "invoice_pdf": inv.invoice_pdf,
             "hosted_invoice_url": inv.hosted_invoice_url,
-            "subscription": inv.subscription,
+            "subscription": getattr(inv, "subscription", None),
             "lines": [
               {
                 "description": line.description,
@@ -461,7 +476,8 @@ class StripePaymentProvider(PaymentProvider):
   def get_upcoming_invoice(self, customer_id: str) -> dict[str, Any] | None:
     """Get the upcoming invoice for a Stripe customer."""
     try:
-      invoice = self.stripe.Invoice.upcoming(customer=customer_id)
+      # v2026 API: Invoice.upcoming() replaced by Invoice.create_preview()
+      invoice = self.stripe.Invoice.create_preview(customer=customer_id)
 
       if not invoice:
         return None
@@ -471,7 +487,7 @@ class StripePaymentProvider(PaymentProvider):
         "currency": invoice.currency,
         "period_start": invoice.period_start,
         "period_end": invoice.period_end,
-        "subscription": invoice.subscription,
+        "subscription": getattr(invoice, "subscription", None),
         "lines": [
           {
             "description": line.description,
@@ -484,10 +500,11 @@ class StripePaymentProvider(PaymentProvider):
         ],
       }
 
+    except self.stripe.error.InvalidRequestError as e:
+      # create_preview requires subscription/schedule params when none exist
+      logger.debug(f"No upcoming invoice for customer {customer_id}: {e}")
+      return None
     except self.stripe.error.StripeError as e:
-      if e.code == "invoice_upcoming_none":
-        logger.debug(f"No upcoming invoice for customer {customer_id}")
-        return None
       logger.error(f"Failed to get upcoming invoice: {e}", exc_info=True)
       raise
     except Exception as e:

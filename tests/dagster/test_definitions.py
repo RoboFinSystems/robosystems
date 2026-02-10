@@ -30,8 +30,6 @@ class TestDefinitionsLoad:
     expected_jobs = [
       "monthly_credit_allocation_job",
       "hourly_auth_cleanup_job",
-      "provision_graph_job",
-      "create_graph_job",
       "backup_graph_job",
       "sec_download",
       "sec_process",
@@ -64,15 +62,6 @@ class TestDefinitionsLoad:
 
     assert len(all_sensors) > 0
     assert defs.sensors is not None
-
-    # Verify key sensors are present
-    sensor_names = [s.name for s in all_sensors]
-    expected_sensors = [
-      "pending_subscription_sensor",
-      "pending_repository_sensor",
-    ]
-    for expected in expected_sensors:
-      assert expected in sensor_names, f"Missing sensor: {expected}"
 
   @pytest.mark.unit
   def test_all_assets_registered(self):

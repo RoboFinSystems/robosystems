@@ -76,8 +76,7 @@ No authentication required - this is public service information.""",
                   "infrastructure": "Multi-tenant (shared r7g.large/xlarge)",
                   "features": [
                     "8,000 AI credits per graph",
-                    "10 GB storage included",
-                    "1 credit/GB/day storage overage",
+                    "5M node limit",
                     "7-day backup retention",
                   ],
                 }
@@ -142,7 +141,6 @@ async def get_service_offerings(
       # Build features list
       features = [
         f"{plan_data.get('monthly_credit_allocation', 0):,} AI credits per graph",
-        "Storage included in tier",
         plan_data.get("infrastructure", "Managed infrastructure"),
         f"{plan_data.get('backup_retention_days', 0)}-day backup retention",
         "Priority support"
@@ -173,7 +171,6 @@ async def get_service_offerings(
         "description": plan_data.get("description", ""),
         "monthly_price_per_graph": plan_data.get("base_price_cents", 0) / 100.0,
         "monthly_credits_per_graph": plan_data.get("monthly_credit_allocation", 0),
-        "storage_included": True,
         "infrastructure": plan_data.get("infrastructure", "Managed"),
         "features": features,
         "backup_retention_days": plan_data.get("backup_retention_days", 0),
@@ -256,15 +253,11 @@ async def get_service_offerings(
         "description": "Per-graph infrastructure subscriptions - each graph has its own subscription",
         "pricing_model": "per_graph",
         "tiers": graph_tiers,
-        "storage": {
-          "description": "Storage included in tier - no separate metering or overage",
-        },
         "notes": [
           "Each graph database has its own subscription and monthly cost",
           "Organizations can create multiple graphs with different infrastructure tiers",
           "Credits are allocated per graph, not shared across the organization",
           "Higher tiers provide dedicated infrastructure with better performance",
-          "Storage is included in each tier (capped by graph content limits)",
           "Graph content limits (nodes, relationships, rows) vary by tier",
         ],
       },

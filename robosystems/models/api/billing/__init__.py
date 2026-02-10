@@ -21,7 +21,6 @@ from .offering import (
   RepositorySubscriptions,
   ServiceOfferingsResponse,
   ServiceOfferingSummary,
-  StorageInfo,
   TokenPricing,
 )
 from .subscription import (
@@ -70,7 +69,6 @@ __all__ = [
   "RepositorySubscriptions",
   "ServiceOfferingSummary",
   "ServiceOfferingsResponse",
-  "StorageInfo",
   "StorageLimitResponse",
   "SubscriptionInfo",
   "SubscriptionRequest",

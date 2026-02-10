@@ -27,7 +27,6 @@ class GraphTierBackup(BaseModel):
 class GraphTierLimits(BaseModel):
   """Resource limits for a tier."""
 
-  storage_gb: int = Field(..., description="Storage limit in GB")
   monthly_credits: int = Field(..., description="Monthly credit allocation")
   max_subgraphs: int | None = Field(
     ..., description="Maximum subgraphs (null for unlimited)"
@@ -60,7 +59,6 @@ class GraphTierInfo(BaseModel):
   backend: str = Field(..., description="Database backend (ladybug or neo4j)")
   enabled: bool = Field(..., description="Whether tier is available")
   max_subgraphs: int | None = Field(..., description="Maximum subgraphs allowed")
-  storage_limit_gb: int = Field(..., description="Storage limit in GB")
   monthly_credits: int = Field(..., description="Monthly AI credits")
   api_rate_multiplier: float = Field(..., description="API rate limit multiplier")
   monthly_price: float | None = Field(default=None, description="Monthly price in USD")

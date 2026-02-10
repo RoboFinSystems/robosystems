@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 from ...database import get_db_session
 from ...logger import get_logger
 from ...middleware.auth.dependencies import get_current_user
-from ...middleware.rate_limits import general_api_rate_limit_dependency
+from ...middleware.rate_limits import billing_rate_limit_dependency
 from ...models.api.billing.customer import (
   BillingCustomer,
   PaymentMethod,
@@ -38,7 +38,7 @@ async def get_customer(
   org_id: str,
   current_user: User = Depends(get_current_user),
   db: Session = Depends(get_db_session),
-  _rate_limit: None = Depends(general_api_rate_limit_dependency),
+  _rate_limit: None = Depends(billing_rate_limit_dependency),
 ):
   """Get billing customer information for an organization."""
   try:
@@ -122,7 +122,7 @@ async def create_portal_session(
   org_id: str,
   current_user: User = Depends(get_current_user),
   db: Session = Depends(get_db_session),
-  _rate_limit: None = Depends(general_api_rate_limit_dependency),
+  _rate_limit: None = Depends(billing_rate_limit_dependency),
 ):
   """Create Stripe Customer Portal session for payment management."""
   try:
@@ -144,13 +144,16 @@ async def create_portal_session(
 
     customer = BillingCustomerModel.get_or_create(org_id, db)
 
-    if not customer.stripe_customer_id:
-      raise HTTPException(
-        status_code=400,
-        detail="No Stripe customer found. Please complete checkout first to add a payment method.",
-      )
-
     provider = get_payment_provider("stripe")
+
+    if not customer.stripe_customer_id:
+      stripe_customer_id = provider.create_customer(current_user.id, current_user.email)
+      customer.stripe_customer_id = stripe_customer_id
+      db.commit()
+      logger.info(
+        f"Created Stripe customer for org {org_id} during portal session",
+        extra={"org_id": org_id, "user_id": current_user.id},
+      )
     return_url = f"{env.ROBOSYSTEMS_URL}/billing"
     portal_url = provider.create_portal_session(customer.stripe_customer_id, return_url)
 

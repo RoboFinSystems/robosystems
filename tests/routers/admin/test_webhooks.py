@@ -1,6 +1,6 @@
 """Comprehensive tests for Stripe webhook handlers.
 
-The webhook endpoint queues events for Dagster processing.
+The webhook endpoint validates events and processes them directly via background tasks.
 Handler logic is tested in tests/dagster/jobs/test_billing.py.
 """
 
@@ -16,7 +16,7 @@ from main import app
 class TestStripeWebhookEndpoint:
   """Tests for Stripe webhook endpoint.
 
-  The endpoint validates webhooks and queues them for Dagster processing.
+  The endpoint validates webhooks and processes them directly as background tasks.
   """
 
   @pytest.fixture
@@ -58,13 +58,12 @@ class TestStripeWebhookEndpoint:
     assert response.status_code == 400
     assert "Invalid webhook signature" in response.json()["detail"]
 
-  @patch("robosystems.routers.admin.webhooks.run_and_monitor_dagster_job")
   @patch("robosystems.routers.admin.webhooks.BillingAuditLog")
   @patch("robosystems.routers.admin.webhooks.get_payment_provider")
-  def test_webhook_queues_dagster_job(
-    self, mock_get_provider, mock_audit_log, mock_dagster_job, client, mock_db_session
+  def test_webhook_accepted_for_processing(
+    self, mock_get_provider, mock_audit_log, client, mock_db_session
   ):
-    """Test that valid webhook events are queued for Dagster processing."""
+    """Test that valid webhook events are accepted for direct processing."""
     mock_provider = Mock()
     mock_event = {
       "id": "evt_test123",
@@ -84,7 +83,7 @@ class TestStripeWebhookEndpoint:
     assert response.status_code == 200
     assert response.json() == {
       "status": "success",
-      "message": "Webhook queued for processing",
+      "message": "Webhook accepted for processing",
     }
     # Verify idempotency check was called with correct event_id and source
     mock_audit_log.is_webhook_processed.assert_called_once()
@@ -92,11 +91,10 @@ class TestStripeWebhookEndpoint:
     assert call_args[0] == "evt_test123"
     assert call_args[1] == "stripe"
 
-  @patch("robosystems.routers.admin.webhooks.run_and_monitor_dagster_job")
   @patch("robosystems.routers.admin.webhooks.BillingAuditLog")
   @patch("robosystems.routers.admin.webhooks.get_payment_provider")
   def test_webhook_idempotency_check(
-    self, mock_get_provider, mock_audit_log, mock_dagster_job, client, mock_db_session
+    self, mock_get_provider, mock_audit_log, client, mock_db_session
   ):
     """Test that already-processed webhooks are skipped."""
     mock_provider = Mock()
@@ -121,13 +119,12 @@ class TestStripeWebhookEndpoint:
       "message": "Event already processed",
     }
 
-  @patch("robosystems.routers.admin.webhooks.run_and_monitor_dagster_job")
   @patch("robosystems.routers.admin.webhooks.BillingAuditLog")
   @patch("robosystems.routers.admin.webhooks.get_payment_provider")
-  def test_webhook_payment_succeeded_queued(
-    self, mock_get_provider, mock_audit_log, mock_dagster_job, client, mock_db_session
+  def test_webhook_payment_succeeded_accepted(
+    self, mock_get_provider, mock_audit_log, client, mock_db_session
   ):
-    """Test that invoice.payment_succeeded events are queued."""
+    """Test that invoice.payment_succeeded events are accepted."""
     mock_provider = Mock()
     mock_event = {
       "id": "evt_test456",
@@ -145,15 +142,14 @@ class TestStripeWebhookEndpoint:
     )
 
     assert response.status_code == 200
-    assert "queued" in response.json()["message"]
+    assert "accepted" in response.json()["message"].lower()
 
-  @patch("robosystems.routers.admin.webhooks.run_and_monitor_dagster_job")
   @patch("robosystems.routers.admin.webhooks.BillingAuditLog")
   @patch("robosystems.routers.admin.webhooks.get_payment_provider")
-  def test_webhook_payment_failed_queued(
-    self, mock_get_provider, mock_audit_log, mock_dagster_job, client, mock_db_session
+  def test_webhook_payment_failed_accepted(
+    self, mock_get_provider, mock_audit_log, client, mock_db_session
   ):
-    """Test that invoice.payment_failed events are queued."""
+    """Test that invoice.payment_failed events are accepted."""
     mock_provider = Mock()
     mock_event = {
       "id": "evt_test789",
@@ -171,15 +167,14 @@ class TestStripeWebhookEndpoint:
     )
 
     assert response.status_code == 200
-    assert "queued" in response.json()["message"]
+    assert "accepted" in response.json()["message"].lower()
 
-  @patch("robosystems.routers.admin.webhooks.run_and_monitor_dagster_job")
   @patch("robosystems.routers.admin.webhooks.BillingAuditLog")
   @patch("robosystems.routers.admin.webhooks.get_payment_provider")
-  def test_webhook_subscription_updated_queued(
-    self, mock_get_provider, mock_audit_log, mock_dagster_job, client, mock_db_session
+  def test_webhook_subscription_updated_accepted(
+    self, mock_get_provider, mock_audit_log, client, mock_db_session
   ):
-    """Test that customer.subscription.updated events are queued."""
+    """Test that customer.subscription.updated events are accepted."""
     mock_provider = Mock()
     mock_event = {
       "id": "evt_sub_update",
@@ -197,15 +192,14 @@ class TestStripeWebhookEndpoint:
     )
 
     assert response.status_code == 200
-    assert "queued" in response.json()["message"]
+    assert "accepted" in response.json()["message"].lower()
 
-  @patch("robosystems.routers.admin.webhooks.run_and_monitor_dagster_job")
   @patch("robosystems.routers.admin.webhooks.BillingAuditLog")
   @patch("robosystems.routers.admin.webhooks.get_payment_provider")
-  def test_webhook_subscription_deleted_queued(
-    self, mock_get_provider, mock_audit_log, mock_dagster_job, client, mock_db_session
+  def test_webhook_subscription_deleted_accepted(
+    self, mock_get_provider, mock_audit_log, client, mock_db_session
   ):
-    """Test that customer.subscription.deleted events are queued."""
+    """Test that customer.subscription.deleted events are accepted."""
     mock_provider = Mock()
     mock_event = {
       "id": "evt_sub_delete",
@@ -223,15 +217,14 @@ class TestStripeWebhookEndpoint:
     )
 
     assert response.status_code == 200
-    assert "queued" in response.json()["message"]
+    assert "accepted" in response.json()["message"].lower()
 
-  @patch("robosystems.routers.admin.webhooks.run_and_monitor_dagster_job")
   @patch("robosystems.routers.admin.webhooks.BillingAuditLog")
   @patch("robosystems.routers.admin.webhooks.get_payment_provider")
-  def test_webhook_unhandled_event_type_still_queued(
-    self, mock_get_provider, mock_audit_log, mock_dagster_job, client, mock_db_session
+  def test_webhook_unhandled_event_type_still_accepted(
+    self, mock_get_provider, mock_audit_log, client, mock_db_session
   ):
-    """Test that unknown event types are still queued (Dagster handles filtering)."""
+    """Test that unknown event types are still accepted (handler logs and marks processed)."""
     mock_provider = Mock()
     mock_event = {
       "id": "evt_unknown",
@@ -249,56 +242,4 @@ class TestStripeWebhookEndpoint:
     )
 
     assert response.status_code == 200
-    assert "queued" in response.json()["message"]
-
-
-class TestBuildStripeWebhookJobConfig:
-  """Tests for build_stripe_webhook_job_config function."""
-
-  def test_build_config_basic(self):
-    """Test basic job config building."""
-    from robosystems.dagster.jobs.billing import build_stripe_webhook_job_config
-
-    config = build_stripe_webhook_job_config(
-      event_id="evt_123",
-      event_type="checkout.session.completed",
-      event_data={"id": "cs_test"},
-    )
-
-    assert "ops" in config
-    assert "process_stripe_webhook_event" in config["ops"]
-    op_config = config["ops"]["process_stripe_webhook_event"]["config"]
-    assert op_config["event_id"] == "evt_123"
-    assert op_config["event_type"] == "checkout.session.completed"
-    assert op_config["event_data"] == {"id": "cs_test"}
-
-  def test_build_config_with_operation_id(self):
-    """Test job config with operation_id for SSE tracking."""
-    from robosystems.dagster.jobs.billing import build_stripe_webhook_job_config
-
-    config = build_stripe_webhook_job_config(
-      event_id="evt_456",
-      event_type="invoice.payment_succeeded",
-      event_data={"id": "in_test"},
-      operation_id="op_tracking_123",
-    )
-
-    op_config = config["ops"]["process_stripe_webhook_event"]["config"]
-    assert op_config["operation_id"] == "op_tracking_123"
-
-  def test_build_config_no_operation_id(self):
-    """Test job config without operation_id."""
-    from robosystems.dagster.jobs.billing import build_stripe_webhook_job_config
-
-    config = build_stripe_webhook_job_config(
-      event_id="evt_789",
-      event_type="invoice.payment_failed",
-      event_data={"id": "in_fail"},
-    )
-
-    op_config = config["ops"]["process_stripe_webhook_event"]["config"]
-    assert "operation_id" not in op_config
-
-
-# NOTE: Stripe webhook event handler tests have been moved to tests/dagster/jobs/test_billing.py
-# The handlers are now part of the Dagster job and tested there with proper Dagster test utilities.
+    assert "accepted" in response.json()["message"].lower()

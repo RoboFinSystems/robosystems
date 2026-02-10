@@ -217,6 +217,13 @@ async def _handle_checkout_completed(
 
     if stripe_subscription_id:
       subscription.stripe_subscription_id = stripe_subscription_id
+      # Preserve checkout session ID in metadata before overwriting
+      # Must create a new dict — SQLAlchemy won't detect in-place JSONB mutation
+      if subscription.provider_subscription_id:
+        subscription.subscription_metadata = {
+          **(subscription.subscription_metadata or {}),
+          "checkout_session_id": subscription.provider_subscription_id,
+        }
       subscription.provider_subscription_id = stripe_subscription_id
 
     subscription.status = "provisioning"
@@ -385,11 +392,20 @@ async def _handle_payment_failed(
 async def _handle_subscription_updated(
   subscription_data: dict, db_session: Any, context: OpExecutionContext
 ) -> None:
-  """Handle customer.subscription.updated event."""
+  """Handle customer.subscription.updated event.
+
+  Handles three key scenarios:
+  1. Portal cancellation: cancel_at_period_end=true → cancel locally (access until period end)
+  2. Portal reactivation: cancel_at_period_end=false on a canceled sub → reactivate
+  3. Status transitions: past_due, unpaid, etc.
+  """
+  from datetime import UTC, datetime
+
   from robosystems.models.billing import BillingSubscription
 
   subscription_id = subscription_data.get("id")
   status = subscription_data.get("status")
+  cancel_at_period_end = subscription_data.get("cancel_at_period_end", False)
 
   subscription = BillingSubscription.get_by_provider_subscription_id(
     subscription_id, db_session
@@ -399,6 +415,41 @@ async def _handle_subscription_updated(
     context.log.warning(f"Subscription not found for update: {subscription_id}")
     return
 
+  # Sync billing period dates from Stripe
+  period_start = subscription_data.get("current_period_start")
+  period_end = subscription_data.get("current_period_end")
+  if period_start:
+    subscription.current_period_start = datetime.fromtimestamp(period_start, tz=UTC)
+  if period_end:
+    subscription.current_period_end = datetime.fromtimestamp(period_end, tz=UTC)
+
+  # --- Portal cancellation (cancel_at_period_end) ---
+  # Mirrors the UI cancel: mark canceled, keep access until period end
+  if cancel_at_period_end and subscription.status != "canceled":
+    subscription.cancel(db_session, immediate=False)
+    context.log.info(
+      f"Subscription {subscription.id} canceled via Stripe portal "
+      f"(ends at period end: {subscription.ends_at})"
+    )
+    return
+
+  # --- Portal reactivation (user removed pending cancellation) ---
+  if (
+    not cancel_at_period_end
+    and subscription.status == "canceled"
+    and subscription.ends_at
+    and subscription.ends_at > datetime.now(UTC)
+    and status == "active"
+  ):
+    subscription.status = "active"
+    subscription.canceled_at = None
+    subscription.ends_at = None
+    subscription.updated_at = datetime.now(UTC)
+    db_session.commit()
+    context.log.info(f"Subscription {subscription.id} reactivated via Stripe portal")
+    return
+
+  # --- Other status transitions ---
   status_mapping = {
     "active": "active",
     "past_due": "past_due",
@@ -413,18 +464,32 @@ async def _handle_subscription_updated(
 
   if new_status != subscription.status:
     old_status = subscription.status
-    subscription.status = new_status
-    db_session.commit()
+    if new_status == "canceled":
+      # Use cancel() to properly set canceled_at and ends_at
+      subscription.cancel(db_session, immediate=True)
+    else:
+      subscription.status = new_status
+      subscription.updated_at = datetime.now(UTC)
+      db_session.commit()
 
     context.log.info(
       f"Subscription {subscription.id} status: {old_status} -> {new_status}"
     )
+  else:
+    # Commit period date sync even if status unchanged
+    db_session.commit()
 
 
 async def _handle_subscription_deleted(
   subscription_data: dict, db_session: Any, context: OpExecutionContext
 ) -> None:
-  """Handle customer.subscription.deleted event."""
+  """Handle customer.subscription.deleted event.
+
+  Fired when the Stripe subscription is fully terminated (e.g., period ended
+  after a cancel_at_period_end cancellation, or immediate deletion).
+  """
+  from datetime import UTC, datetime
+
   from robosystems.models.billing import BillingSubscription
 
   subscription_id = subscription_data.get("id")
@@ -437,9 +502,52 @@ async def _handle_subscription_deleted(
     context.log.warning(f"Subscription not found for deletion: {subscription_id}")
     return
 
-  subscription.cancel(db_session, immediate=True)
+  if subscription.status == "canceled":
+    # Already canceled (via portal updated handler or UI cancel button).
+    # Just ensure access terminates now; preserve original canceled_at timestamp.
+    now = datetime.now(UTC)
+    subscription.ends_at = now
+    subscription.updated_at = now
+    db_session.commit()
+    context.log.info(
+      f"Subscription {subscription.id} fully terminated "
+      f"(was canceled at {subscription.canceled_at})"
+    )
+  else:
+    # Direct/unexpected deletion — cancel immediately
+    subscription.cancel(db_session, immediate=True)
+    context.log.info(f"Subscription {subscription.id} canceled via Stripe deletion")
 
-  context.log.info(f"Subscription canceled via Stripe: {subscription.id}")
+
+async def _handle_setup_intent_succeeded(
+  setup_intent_data: dict, db_session: Any, context: OpExecutionContext
+) -> None:
+  """Handle setup_intent.succeeded event.
+
+  Fired when a customer adds a payment method via the Stripe portal.
+  Updates has_payment_method on the BillingCustomer so direct subscription
+  creation knows they can be charged.
+  """
+  from robosystems.models.billing import BillingCustomer
+
+  customer_id = setup_intent_data.get("customer")
+  if not customer_id:
+    context.log.info("Setup intent succeeded but no customer ID")
+    return
+
+  customer = BillingCustomer.get_by_stripe_customer_id(customer_id, db_session)
+  if not customer:
+    context.log.warning(f"Customer not found for setup intent: {customer_id}")
+    return
+
+  if not customer.has_payment_method:
+    customer.has_payment_method = True
+    db_session.commit()
+    context.log.info(
+      f"Marked customer {customer.org_id} as having payment method via portal"
+    )
+  else:
+    context.log.info(f"Customer {customer.org_id} already has payment method on file")
 
 
 async def _trigger_resource_provisioning(
@@ -447,12 +555,9 @@ async def _trigger_resource_provisioning(
 ) -> None:
   """Trigger resource provisioning after payment confirmation.
 
-  When DIRECT_GRAPH_PROVISIONING_ENABLED is true, this function directly
-  provisions the resource, eliminating the sensor polling delay and second
-  ECS cold start. Otherwise, it sets status to 'provisioning' for sensors
-  to pick up.
+  Directly provisions the resource, eliminating sensor polling delay and
+  ECS cold start.
   """
-  from robosystems.config import env
   from robosystems.models.iam import OrgRole, OrgUser
 
   resource_config = subscription.subscription_metadata.get("resource_config", {})
@@ -478,110 +583,70 @@ async def _trigger_resource_provisioning(
 
   context.log.info(f"Triggering provisioning for {resource_type}")
 
-  # Check if direct provisioning is enabled
-  if env.DIRECT_GRAPH_PROVISIONING_ENABLED:
-    # Direct provisioning - eliminates sensor delay and second cold start
-    from robosystems.middleware.sse.direct_monitor import (
-      run_graph_provisioning,
-      run_user_repository_provisioning,
+  from robosystems.middleware.sse.direct_monitor import (
+    run_graph_provisioning,
+    run_user_repository_provisioning,
+  )
+
+  if resource_type == "graph":
+    if not subscription.subscription_metadata:
+      subscription.subscription_metadata = {}
+    subscription.subscription_metadata.update(resource_config)
+    subscription.status = "provisioning"
+    db_session.commit()
+
+    tier = subscription.plan_name
+
+    context.log.info(f"Provisioning graph for subscription {subscription.id}")
+
+    try:
+      result = await run_graph_provisioning(
+        operation_id=None,  # No SSE tracking for webhook-triggered provisioning
+        subscription_id=str(subscription.id),
+        user_id=str(user_id),
+        tier=tier,
+      )
+      context.log.info(
+        f"Graph provisioning completed: graph_id={result.get('graph_id')}"
+      )
+    except Exception as e:
+      context.log.error(f"Graph provisioning failed: {e}")
+      raise
+
+  elif resource_type == "repository":
+    repository_name = resource_config.get("repository_name")
+
+    if not subscription.subscription_metadata:
+      subscription.subscription_metadata = {}
+    subscription.subscription_metadata["repository_name"] = repository_name
+    subscription.status = "provisioning"
+    db_session.commit()
+
+    context.log.info(
+      f"Provisioning repository {repository_name} for subscription {subscription.id}"
     )
 
-    if resource_type == "graph":
-      # Update metadata before provisioning
-      if not subscription.subscription_metadata:
-        subscription.subscription_metadata = {}
-      subscription.subscription_metadata.update(resource_config)
-      subscription.status = "provisioning"
-      db_session.commit()
-
-      # Extract tier from plan name (e.g., "ladybug-standard" -> "ladybug-standard")
-      tier = subscription.plan_name
-
-      context.log.info(f"Direct provisioning graph for subscription {subscription.id}")
-
-      try:
-        result = await run_graph_provisioning(
-          operation_id=None,  # No SSE tracking for webhook-triggered provisioning
-          subscription_id=str(subscription.id),
-          user_id=str(user_id),
-          tier=tier,
-        )
-        context.log.info(
-          f"Direct graph provisioning completed: graph_id={result.get('graph_id')}"
-        )
-      except Exception as e:
-        context.log.error(f"Direct graph provisioning failed: {e}")
-        # Error handling already done in run_graph_provisioning
-        raise
-
-    elif resource_type == "repository":
-      repository_name = resource_config.get("repository_name")
-
-      if not subscription.subscription_metadata:
-        subscription.subscription_metadata = {}
-      subscription.subscription_metadata["repository_name"] = repository_name
-      subscription.status = "provisioning"
-      db_session.commit()
-
+    try:
+      result = await run_user_repository_provisioning(
+        operation_id=None,
+        subscription_id=str(subscription.id),
+        user_id=str(user_id),
+        repository_name=repository_name,
+      )
       context.log.info(
-        f"Direct provisioning repository {repository_name} for subscription {subscription.id}"
+        f"Repository provisioning completed: {result.get('repository_name')}"
       )
-
-      try:
-        result = await run_user_repository_provisioning(
-          operation_id=None,
-          subscription_id=str(subscription.id),
-          user_id=str(user_id),
-          repository_name=repository_name,
-        )
-        context.log.info(
-          f"Direct repository provisioning completed: {result.get('repository_name')}"
-        )
-      except Exception as e:
-        context.log.error(f"Direct repository provisioning failed: {e}")
-        raise
-
-    else:
-      context.log.error(f"Unknown resource type: {resource_type}")
-      subscription.status = "failed"
-      subscription.subscription_metadata["error"] = (
-        f"Unknown resource type: {resource_type}"
-      )
-      db_session.commit()
+    except Exception as e:
+      context.log.error(f"Repository provisioning failed: {e}")
+      raise
 
   else:
-    # Legacy behavior: set status to provisioning and let sensors handle it
-    if resource_type == "graph":
-      if not subscription.subscription_metadata:
-        subscription.subscription_metadata = {}
-      subscription.subscription_metadata.update(resource_config)
-      subscription.status = "provisioning"
-      db_session.commit()
-
-      context.log.info(
-        f"Subscription {subscription.id} set to provisioning (sensor mode)"
-      )
-
-    elif resource_type == "repository":
-      repository_name = resource_config.get("repository_name")
-
-      if not subscription.subscription_metadata:
-        subscription.subscription_metadata = {}
-      subscription.subscription_metadata["repository_name"] = repository_name
-      subscription.status = "provisioning"
-      db_session.commit()
-
-      context.log.info(
-        f"Repository subscription {subscription.id} set to provisioning (sensor mode)"
-      )
-
-    else:
-      context.log.error(f"Unknown resource type: {resource_type}")
-      subscription.status = "failed"
-      subscription.subscription_metadata["error"] = (
-        f"Unknown resource type: {resource_type}"
-      )
-      db_session.commit()
+    context.log.error(f"Unknown resource type: {resource_type}")
+    subscription.status = "failed"
+    subscription.subscription_metadata["error"] = (
+      f"Unknown resource type: {resource_type}"
+    )
+    db_session.commit()
 
 
 def _emit_webhook_result_to_sse(

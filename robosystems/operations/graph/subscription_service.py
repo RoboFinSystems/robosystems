@@ -252,6 +252,11 @@ class GraphSubscriptionService:
           },
           exc_info=True,
         )
+        subscription.status = "failed"
+        self.session.commit()
+        raise ValueError(
+          "Failed to create payment subscription. Please verify your payment method."
+        ) from e
 
     subscription.activate(self.session)
 

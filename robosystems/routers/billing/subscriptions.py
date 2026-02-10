@@ -6,14 +6,35 @@ from sqlalchemy.orm import Session
 from ...database import get_db_session
 from ...logger import get_logger
 from ...middleware.auth.dependencies import get_current_user
-from ...middleware.rate_limits import general_api_rate_limit_dependency
+from ...middleware.rate_limits import billing_rate_limit_dependency
 from ...models.api.billing.subscription import GraphSubscriptionResponse
 from ...models.billing import BillingSubscription
 from ...models.iam import User
+from ...operations.providers.payment_provider import get_payment_provider
 
 logger = get_logger(__name__)
 
 router = APIRouter(prefix="/billing/subscriptions", tags=["Billing"])
+
+
+def _get_plan_display_name(plan_name: str, resource_type: str, resource_id: str) -> str:
+  """Resolve a plan's internal name to its human-readable display name.
+
+  For graphs: "ladybug-standard" -> "LadybugDB Standard"
+  For repos:  "sec-advanced"     -> "SEC EDGAR Filings - Pro"
+  """
+  from ...config.billing import BillingConfig
+
+  if resource_type == "graph":
+    plan = BillingConfig.get_subscription_plan(plan_name)
+    if plan:
+      return plan.get("display_name", plan_name)
+  elif resource_type == "repository":
+    plan = BillingConfig.get_repository_plan(resource_id, plan_name)
+    if plan:
+      return plan.get("display_name", plan_name)
+
+  return plan_name
 
 
 @router.get(
@@ -32,7 +53,7 @@ async def list_subscriptions(
   org_id: str,
   current_user: User = Depends(get_current_user),
   db: Session = Depends(get_db_session),
-  _rate_limit: None = Depends(general_api_rate_limit_dependency),
+  _rate_limit: None = Depends(billing_rate_limit_dependency),
 ):
   """List all subscriptions for the organization."""
   try:
@@ -61,6 +82,9 @@ async def list_subscriptions(
           resource_type=sub.resource_type,
           resource_id=sub.resource_id or "",
           plan_name=sub.plan_name,
+          plan_display_name=_get_plan_display_name(
+            sub.plan_name, sub.resource_type, sub.resource_id or ""
+          ),
           billing_interval=sub.billing_interval,
           status=sub.status,
           base_price_cents=sub.base_price_cents,
@@ -106,7 +130,7 @@ async def get_subscription(
   subscription_id: str,
   current_user: User = Depends(get_current_user),
   db: Session = Depends(get_db_session),
-  _rate_limit: None = Depends(general_api_rate_limit_dependency),
+  _rate_limit: None = Depends(billing_rate_limit_dependency),
 ):
   """Get subscription details for organization."""
   try:
@@ -137,6 +161,11 @@ async def get_subscription(
       resource_type=subscription.resource_type,
       resource_id=subscription.resource_id or "",
       plan_name=subscription.plan_name,
+      plan_display_name=_get_plan_display_name(
+        subscription.plan_name,
+        subscription.resource_type,
+        subscription.resource_id or "",
+      ),
       billing_interval=subscription.billing_interval,
       status=subscription.status,
       base_price_cents=subscription.base_price_cents,
@@ -184,7 +213,7 @@ async def cancel_subscription(
   subscription_id: str,
   current_user: User = Depends(get_current_user),
   db: Session = Depends(get_db_session),
-  _rate_limit: None = Depends(general_api_rate_limit_dependency),
+  _rate_limit: None = Depends(billing_rate_limit_dependency),
 ):
   """Cancel an organization subscription."""
   try:
@@ -219,6 +248,22 @@ async def cancel_subscription(
     if subscription.status in ["canceled", "canceling"]:
       raise HTTPException(status_code=400, detail="Subscription is already canceled")
 
+    # Cancel in Stripe if there's a linked Stripe subscription
+    if subscription.stripe_subscription_id:
+      try:
+        provider = get_payment_provider("stripe")
+        provider.stripe.Subscription.cancel(subscription.stripe_subscription_id)
+        logger.info(
+          f"Canceled Stripe subscription {subscription.stripe_subscription_id}",
+          extra={"subscription_id": subscription_id},
+        )
+      except Exception as e:
+        logger.error(
+          f"Failed to cancel Stripe subscription: {e}",
+          extra={"subscription_id": subscription_id},
+          exc_info=True,
+        )
+
     subscription.cancel(db, immediate=False)
 
     logger.info(
@@ -235,6 +280,11 @@ async def cancel_subscription(
       resource_type=subscription.resource_type,
       resource_id=subscription.resource_id or "",
       plan_name=subscription.plan_name,
+      plan_display_name=_get_plan_display_name(
+        subscription.plan_name,
+        subscription.resource_type,
+        subscription.resource_id or "",
+      ),
       billing_interval=subscription.billing_interval,
       status=subscription.status,
       base_price_cents=subscription.base_price_cents,

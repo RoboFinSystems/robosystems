@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from ...database import get_db_session
 from ...logger import get_logger
 from ...middleware.auth.dependencies import get_current_user
-from ...middleware.rate_limits import general_api_rate_limit_dependency
+from ...middleware.rate_limits import billing_rate_limit_dependency
 from ...models.api.billing.invoice import (
   Invoice,
   InvoiceLineItem,
@@ -42,7 +42,7 @@ async def list_invoices(
   limit: int = Query(10, ge=1, le=100, description="Number of invoices to return"),
   current_user: User = Depends(get_current_user),
   db: Session = Depends(get_db_session),
-  _rate_limit: None = Depends(general_api_rate_limit_dependency),
+  _rate_limit: None = Depends(billing_rate_limit_dependency),
 ):
   """List invoices for the organization."""
   try:
@@ -181,7 +181,7 @@ async def get_upcoming_invoice(
   org_id: str,
   current_user: User = Depends(get_current_user),
   db: Session = Depends(get_db_session),
-  _rate_limit: None = Depends(general_api_rate_limit_dependency),
+  _rate_limit: None = Depends(billing_rate_limit_dependency),
 ):
   """Get upcoming invoice preview for organization."""
   try:

@@ -147,6 +147,38 @@ async def run_graph_creation(
       progress_callback=progress,
     )
 
+    graph_id = result.get("graph_id")
+
+    # Create billing subscription for the graph
+    try:
+      from robosystems.config.graph_tier import GraphTier
+      from robosystems.database import get_db_session
+      from robosystems.operations.graph.subscription_service import (
+        GraphSubscriptionService,
+      )
+
+      db_gen = get_db_session()
+      db = next(db_gen)
+      try:
+        subscription_service = GraphSubscriptionService(db)
+        subscription_service.create_graph_subscription(
+          user_id=user_id,
+          graph_id=graph_id,
+          plan_name=tier,
+          tier=GraphTier(tier),
+        )
+        logger.info(f"Created billing subscription for graph {graph_id}")
+      finally:
+        try:
+          next(db_gen)
+        except StopIteration:
+          pass
+    except Exception as sub_error:
+      logger.error(
+        f"Failed to create billing subscription for graph {graph_id}: {sub_error}",
+        exc_info=True,
+      )
+
     duration_ms = (time.time() - start_time) * 1000
 
     # Emit completion with result
@@ -258,6 +290,29 @@ async def run_entity_graph_creation(
         tier=tier,
         progress_callback=progress,
       )
+
+      graph_id = result.get("graph_id")
+
+      # Create billing subscription for the entity graph
+      try:
+        from robosystems.config.graph_tier import GraphTier
+        from robosystems.operations.graph.subscription_service import (
+          GraphSubscriptionService,
+        )
+
+        subscription_service = GraphSubscriptionService(db)
+        subscription_service.create_graph_subscription(
+          user_id=user_id,
+          graph_id=graph_id,
+          plan_name=tier,
+          tier=GraphTier(tier),
+        )
+        logger.info(f"Created billing subscription for entity graph {graph_id}")
+      except Exception as sub_error:
+        logger.error(
+          f"Failed to create billing subscription for entity graph {graph_id}: {sub_error}",
+          exc_info=True,
+        )
 
       duration_ms = (time.time() - start_time) * 1000
 
@@ -523,7 +578,12 @@ async def run_graph_provisioning(
       Provisioning result with graph_id and status
   """
   from robosystems.database import get_db_session
-  from robosystems.models.billing import BillingCustomer, BillingSubscription
+  from robosystems.models.billing import (
+    BillingAuditLog,
+    BillingCustomer,
+    BillingEventType,
+    BillingSubscription,
+  )
   from robosystems.operations.graph.entity_graph_service import EntityGraphService
   from robosystems.operations.graph.generic_graph_service import GenericGraphService
   from robosystems.operations.graph.subscription_service import (
@@ -624,6 +684,21 @@ async def run_graph_provisioning(
 
       subscription.resource_id = graph_id
       subscription.activate(db)
+
+      # Log activation audit event
+      BillingAuditLog.log_event(
+        session=db,
+        event_type=BillingEventType.SUBSCRIPTION_ACTIVATED,
+        org_id=subscription.org_id,
+        subscription_id=subscription.id,
+        description=f"Activated subscription for graph {graph_id}",
+        actor_type="system",
+        event_data={
+          "current_period_start": subscription.current_period_start.isoformat(),
+          "current_period_end": subscription.current_period_end.isoformat(),
+          "provisioning_method": "checkout",
+        },
+      )
 
       # Generate invoice for manual billing (non-Stripe) subscriptions
       if not subscription.stripe_subscription_id:

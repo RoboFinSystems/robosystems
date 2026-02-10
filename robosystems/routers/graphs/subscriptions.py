@@ -293,6 +293,64 @@ async def create_repository_subscription(
       },
     )
 
+    # Create Stripe subscription if billing is enabled and customer has payment method
+    if (
+      env.BILLING_ENABLED
+      and customer.has_payment_method
+      and customer.stripe_customer_id
+    ):
+      try:
+        from ...operations.providers.payment_provider import get_payment_provider
+
+        provider = get_payment_provider("stripe")
+        stripe_price_id = provider.get_or_create_price(
+          plan_name=request.plan_name,
+          resource_type="repository",
+          repository_id=graph_id,
+        )
+
+        stripe_subscription_id = provider.create_subscription(
+          customer_id=customer.stripe_customer_id,
+          price_id=stripe_price_id,
+          metadata={
+            "subscription_id": str(subscription.id),
+            "user_id": current_user.id,
+            "resource_type": "repository",
+            "resource_id": graph_id,
+          },
+        )
+
+        subscription.stripe_subscription_id = stripe_subscription_id
+        subscription.provider_subscription_id = stripe_subscription_id
+        subscription.provider_customer_id = customer.stripe_customer_id
+        subscription.payment_provider = "stripe"
+
+        logger.info(
+          f"Created Stripe subscription for repository {graph_id}",
+          extra={
+            "user_id": current_user.id,
+            "subscription_id": subscription.id,
+            "stripe_subscription_id": stripe_subscription_id,
+          },
+        )
+
+      except Exception as e:
+        logger.error(
+          f"Failed to create Stripe subscription for repository {graph_id}: {e}",
+          extra={
+            "user_id": current_user.id,
+            "subscription_id": subscription.id,
+            "plan_name": request.plan_name,
+          },
+          exc_info=True,
+        )
+        subscription.status = "failed"
+        db.commit()
+        raise HTTPException(
+          status_code=402,
+          detail="Failed to create payment subscription. Please verify your payment method.",
+        )
+
     # Store IDs before commit detaches the objects
     subscription_id = subscription.id
     user_id = current_user.id

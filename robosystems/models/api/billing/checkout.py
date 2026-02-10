@@ -42,7 +42,7 @@ class CheckoutStatusResponse(BaseModel):
 
   status: str = Field(
     ...,
-    description="Checkout status: 'pending_payment', 'provisioning', 'completed', 'failed'",
+    description="Checkout status: 'pending_payment', 'provisioning', 'active', 'failed', 'canceled'",
   )
   subscription_id: str = Field(..., description="Internal subscription ID")
   resource_id: str | None = Field(

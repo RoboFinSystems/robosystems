@@ -37,12 +37,10 @@ from robosystems.dagster.jobs.billing import (
   monthly_credit_allocation_schedule,
   monthly_usage_report_job,
   monthly_usage_report_schedule,
+  process_stripe_webhook_job,
 )
 from robosystems.dagster.jobs.graph import (
   backup_graph_job,
-  create_entity_graph_job,
-  create_graph_job,
-  create_subgraph_job,
   materialize_file_job,
   materialize_graph_job,
   restore_graph_job,
@@ -67,10 +65,6 @@ from robosystems.dagster.jobs.infrastructure import (
 from robosystems.dagster.jobs.notifications import (
   send_email_job,
 )
-from robosystems.dagster.jobs.provisioning import (
-  provision_graph_job,
-  provision_repository_job,
-)
 from robosystems.dagster.jobs.shared_repository import (
   shared_repository_refresh_replicas_job,
   shared_repository_s3_sync_job,
@@ -80,10 +74,6 @@ from robosystems.dagster.resources import (
   DatabaseResource,
   GraphResource,
   S3Resource,
-)
-from robosystems.dagster.sensors.provisioning import (
-  pending_repository_sensor,
-  pending_subscription_sensor,
 )
 
 # === FORK: Add your adapter pipelines here ===
@@ -131,6 +121,7 @@ all_jobs = [
   # Platform: Billing
   monthly_credit_allocation_job,
   monthly_usage_report_job,
+  process_stripe_webhook_job,
   # Platform: Infrastructure
   hourly_auth_cleanup_job,
   weekly_health_check_job,
@@ -139,13 +130,7 @@ all_jobs = [
   instance_registry_cleanup_job,
   volume_registry_cleanup_job,
   full_instance_maintenance_job,
-  # Platform: Provisioning
-  provision_graph_job,
-  provision_repository_job,
   # Platform: Graph operations
-  create_graph_job,
-  create_entity_graph_job,
-  create_subgraph_job,
   backup_graph_job,
   restore_graph_job,
   stage_file_job,
@@ -178,9 +163,6 @@ all_schedules = [
 ]
 
 all_sensors = [
-  # Platform: Provisioning
-  pending_subscription_sensor,
-  pending_repository_sensor,
   # Adapter: SEC pipeline
   *sec["sensors"],
 ]

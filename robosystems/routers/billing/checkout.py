@@ -7,7 +7,7 @@ from ...config import BillingConfig, env
 from ...database import get_db_session
 from ...logger import get_logger
 from ...middleware.auth.dependencies import get_current_user
-from ...middleware.rate_limits import general_api_rate_limit_dependency
+from ...middleware.rate_limits import billing_rate_limit_dependency
 from ...models.api.billing.checkout import (
   CheckoutResponse,
   CheckoutStatusResponse,
@@ -50,7 +50,7 @@ async def create_checkout_session(
   request: CreateCheckoutRequest,
   current_user: User = Depends(get_current_user),
   db: Session = Depends(get_db_session),
-  _rate_limit: None = Depends(general_api_rate_limit_dependency),
+  _rate_limit: None = Depends(billing_rate_limit_dependency),
 ):
   """Create Stripe checkout session for payment collection."""
   if not env.BILLING_ENABLED:
@@ -101,6 +101,7 @@ async def create_checkout_session(
 
     # Validate plan exists
     plan_config = None
+    repo_name = None
     if request.resource_type == "graph":
       plan_config = BillingConfig.get_subscription_plan(request.plan_name)
     elif request.resource_type == "repository":
@@ -118,6 +119,25 @@ async def create_checkout_session(
     base_price_cents = plan_config.get(
       "base_price_cents", plan_config.get("price_cents", 0)
     )
+
+    # Clean up orphaned pending_payment subscriptions for this org
+    stale_pending = (
+      db.query(BillingSubscription)
+      .filter(
+        BillingSubscription.org_id == org_id,
+        BillingSubscription.status == "pending_payment",
+        BillingSubscription.resource_type == request.resource_type,
+      )
+      .all()
+    )
+    for stale_sub in stale_pending:
+      stale_sub.status = "canceled"
+      logger.info(
+        f"Canceled orphaned pending_payment subscription {stale_sub.id}",
+        extra={"subscription_id": stale_sub.id, "org_id": org_id},
+      )
+    if stale_pending:
+      db.commit()
 
     # Create subscription in PENDING_PAYMENT status
     subscription = BillingSubscription.create_subscription(
@@ -151,7 +171,9 @@ async def create_checkout_session(
     provider = get_payment_provider("stripe")
     try:
       stripe_price_id = provider.get_or_create_price(
-        plan_name=request.plan_name, resource_type=request.resource_type
+        plan_name=request.plan_name,
+        resource_type=request.resource_type,
+        repository_id=repo_name if request.resource_type == "repository" else None,
       )
     except ValueError as e:
       logger.error(f"Failed to get Stripe price: {e}")
@@ -213,10 +235,11 @@ to determine when the resource is ready.
 **Status Values:**
 - `pending_payment`: Waiting for payment to complete
 - `provisioning`: Payment confirmed, resource being created
-- `completed`: Resource is ready (resource_id will be set)
+- `active`: Resource is ready (resource_id will be set)
 - `failed`: Something went wrong (error field will be set)
+- `canceled`: Payment was canceled
 
-**When status is 'completed':**
+**When status is 'active':**
 - For graphs: `resource_id` will be the graph_id, and `operation_id` can be used to monitor SSE progress
 - For repositories: `resource_id` will be the repository name and access is immediately available""",
   operation_id="getCheckoutStatus",
@@ -225,13 +248,26 @@ async def get_checkout_status(
   session_id: str,
   current_user: User = Depends(get_current_user),
   db: Session = Depends(get_db_session),
-  _rate_limit: None = Depends(general_api_rate_limit_dependency),
+  _rate_limit: None = Depends(billing_rate_limit_dependency),
 ):
   """Get status of a checkout session."""
   try:
     from ...models.iam import OrgUser
 
     subscription = BillingSubscription.get_by_provider_subscription_id(session_id, db)
+
+    # Fallback: after webhook processing, provider_subscription_id is updated
+    # from the checkout session ID to the Stripe subscription ID, so look up
+    # by the preserved checkout_session_id in metadata.
+    if not subscription:
+      subscription = (
+        db.query(BillingSubscription)
+        .filter(
+          BillingSubscription.subscription_metadata["checkout_session_id"].astext
+          == session_id
+        )
+        .first()
+      )
 
     if not subscription:
       raise HTTPException(status_code=404, detail="Checkout session not found")

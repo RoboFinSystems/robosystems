@@ -35,6 +35,7 @@ class EndpointCategory(str, Enum):
   TASKS = "tasks"
   STATUS = "status"
   SSE = "sse"  # Server-Sent Events connections
+  BILLING = "billing"  # Checkout and payment flows — never block paying customers
 
   # Graph-scoped endpoints
   GRAPH_READ = "graph_read"
@@ -96,6 +97,7 @@ class RateLimitConfig:
         5,
         RateLimitPeriod.MINUTE,
       ),  # Limited SSE connections for free
+      EndpointCategory.BILLING: (60, RateLimitPeriod.MINUTE),  # Never block payments
       # Graph-scoped endpoints - burst protection only
       EndpointCategory.GRAPH_READ: (100, RateLimitPeriod.MINUTE),
       EndpointCategory.GRAPH_WRITE: (20, RateLimitPeriod.MINUTE),
@@ -122,6 +124,7 @@ class RateLimitConfig:
         10,
         RateLimitPeriod.MINUTE,
       ),  # Standard SSE connection rate
+      EndpointCategory.BILLING: (60, RateLimitPeriod.MINUTE),  # Never block payments
       # Graph-scoped endpoints - HIGH BURST LIMITS
       EndpointCategory.GRAPH_READ: (500, RateLimitPeriod.MINUTE),  # 30k/hour possible
       EndpointCategory.GRAPH_WRITE: (100, RateLimitPeriod.MINUTE),  # 6k/hour possible
@@ -153,6 +156,7 @@ class RateLimitConfig:
         30,
         RateLimitPeriod.MINUTE,
       ),  # More SSE connections for large tier
+      EndpointCategory.BILLING: (60, RateLimitPeriod.MINUTE),  # Never block payments
       # Graph-scoped endpoints - VERY HIGH BURST LIMITS
       EndpointCategory.GRAPH_READ: (2000, RateLimitPeriod.MINUTE),  # 120k/hour possible
       EndpointCategory.GRAPH_WRITE: (500, RateLimitPeriod.MINUTE),  # 30k/hour possible
@@ -185,6 +189,7 @@ class RateLimitConfig:
         100,
         RateLimitPeriod.MINUTE,
       ),  # Generous SSE connections for xlarge tier
+      EndpointCategory.BILLING: (60, RateLimitPeriod.MINUTE),  # Never block payments
       # Graph-scoped endpoints - EXTREME BURST LIMITS
       EndpointCategory.GRAPH_READ: (
         10000,
@@ -302,6 +307,8 @@ class RateLimitConfig:
     # Non-graph scoped endpoints - check these first
     if path.startswith("auth/"):
       return EndpointCategory.AUTH
+    elif path.startswith("billing/"):
+      return EndpointCategory.BILLING
     elif path.startswith("user/"):
       return EndpointCategory.USER_MANAGEMENT
     elif path.startswith("tasks/"):

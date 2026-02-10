@@ -180,6 +180,9 @@ class GraphSubscriptionResponse(BaseModel):
   resource_type: str = Field(..., description="Resource type (graph or repository)")
   resource_id: str = Field(..., description="Resource identifier")
   plan_name: str = Field(..., description="Current plan name")
+  plan_display_name: str = Field(
+    ..., description="Human-readable plan name for UI display"
+  )
   billing_interval: str = Field(..., description="Billing interval")
   status: str = Field(..., description="Subscription status")
   base_price_cents: int = Field(..., description="Base price in cents")

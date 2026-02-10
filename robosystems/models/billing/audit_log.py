@@ -266,15 +266,44 @@ class BillingAuditLog(Base):
     Returns:
         The created audit log entry
     """
+    # Extract entity references from event data for audit traceability.
+    # Different Stripe events put references in different places.
+    metadata = event_data.get("metadata", {})
+    subscription_id = metadata.get("subscription_id")
+    actor_user_id = metadata.get("user_id")
+
+    stored_event_data = {
+      "provider": provider,
+      "event_id": event_id,
+      "webhook_type": event_type,
+      "data": event_data,
+    }
+
+    # Many webhook events (invoice.created, invoice.paid) have no metadata
+    # with entity references. log_event() requires at least one FK reference,
+    # but actor_user_id is a FK to users — we can't fake it. Create directly.
+    if not any([subscription_id, actor_user_id]):
+      audit_log = cls(
+        event_type=BillingEventType.WEBHOOK_RECEIVED.value,
+        description=f"{provider} webhook: {event_type}",
+        actor_type=f"{provider}_webhook",
+        event_data=stored_event_data,
+      )
+      session.add(audit_log)
+      session.commit()
+
+      logger.info(
+        f"Billing audit log: {BillingEventType.WEBHOOK_RECEIVED.value}",
+        extra={"event_type": BillingEventType.WEBHOOK_RECEIVED.value},
+      )
+      return audit_log
+
     return cls.log_event(
       session=session,
       event_type=BillingEventType.WEBHOOK_RECEIVED,
       description=f"{provider} webhook: {event_type}",
       actor_type=f"{provider}_webhook",
-      event_data={
-        "provider": provider,
-        "event_id": event_id,
-        "webhook_type": event_type,
-        "data": event_data,
-      },
+      subscription_id=subscription_id,
+      actor_user_id=actor_user_id,
+      event_data=stored_event_data,
     )

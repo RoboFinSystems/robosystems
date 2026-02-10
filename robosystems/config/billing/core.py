@@ -32,7 +32,7 @@ DEFAULT_GRAPH_BILLING_PLANS: list[dict[str, Any]] = [
     "name": "ladybug-standard",
     "display_name": "LadybugDB Standard",
     "description": "Dedicated m7g.large LadybugDB infrastructure with subgraph support",
-    "base_price_cents": 10000,  # $100/month
+    "base_price_cents": 9900,  # $99/month
     "monthly_credit_allocation": 8000,  # ~200 agent calls/month
     "max_queries_per_hour": 10000,
     "infrastructure": "Dedicated m7g.large (2 vCPU, 8 GB RAM)",
@@ -43,7 +43,7 @@ DEFAULT_GRAPH_BILLING_PLANS: list[dict[str, Any]] = [
     "name": "ladybug-large",
     "display_name": "LadybugDB Large",
     "description": "Dedicated r7g.large instance - enhanced performance with subgraph support",
-    "base_price_cents": 30000,  # $300/month
+    "base_price_cents": 29900,  # $299/month
     "monthly_credit_allocation": 32000,  # ~800 agent calls/month
     "max_queries_per_hour": 50000,
     "infrastructure": "Dedicated r7g.large (2 vCPU, 16 GB RAM)",
@@ -54,7 +54,7 @@ DEFAULT_GRAPH_BILLING_PLANS: list[dict[str, Any]] = [
     "name": "ladybug-xlarge",
     "display_name": "LadybugDB XLarge",
     "description": "Dedicated r7g.xlarge instance - maximum performance and scale",
-    "base_price_cents": 70000,  # $700/month
+    "base_price_cents": 69900,  # $699/month
     "monthly_credit_allocation": 100000,  # ~2,600 agent calls/month
     "max_queries_per_hour": None,  # Unlimited
     "infrastructure": "Dedicated r7g.xlarge (4 vCPU, 32 GB RAM)",
@@ -156,7 +156,7 @@ class BillingConfig:
     Returns:
         Dict with plan details including price_cents, monthly_credits, features
     """
-    from robosystems.config.shared_repositories import get_plan_details
+    from robosystems.config.shared_repositories import get_manifest, get_plan_details
 
     # Extract the plan tier from the plan name (e.g., 'sec-starter' -> 'starter')
     plan_tier = plan_name.split("-")[-1] if "-" in plan_name else plan_name
@@ -166,9 +166,17 @@ class BillingConfig:
     if not plan_details:
       return None
 
+    # Build display_name from repository name + plan name
+    # e.g., "SEC EDGAR Filings - Pro" instead of raw "advanced"
+    manifest = get_manifest(repository_id)
+    repo_display = manifest.name if manifest else repository_id.upper()
+    plan_display = plan_details.get("name", plan_tier.title())
+    display_name = f"{repo_display} - {plan_display}"
+
     # Return in a consistent format with subscription plans
     return {
       "name": plan_name,
+      "display_name": display_name,
       "price_cents": plan_details["price_cents"],
       "monthly_credits": plan_details["monthly_credits"],
       "features": plan_details["features"],

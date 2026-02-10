@@ -446,7 +446,7 @@ class TestStripeInvoiceOperations:
     mock_invoice.period_end = 1234599999
     mock_invoice.subscription = "sub_123"
     mock_invoice.lines = mock_lines
-    stripe_provider.stripe.Invoice.upcoming.return_value = mock_invoice
+    stripe_provider.stripe.Invoice.create_preview.return_value = mock_invoice
 
     result = stripe_provider.get_upcoming_invoice("cus_123")
 
@@ -455,20 +455,26 @@ class TestStripeInvoiceOperations:
     assert result["subscription"] == "sub_123"
     assert len(result["lines"]) == 1
     assert result["lines"][0]["description"] == "Standard Plan - Monthly"
-    stripe_provider.stripe.Invoice.upcoming.assert_called_once_with(customer="cus_123")
+    stripe_provider.stripe.Invoice.create_preview.assert_called_once_with(
+      customer="cus_123"
+    )
 
   def test_get_upcoming_invoice_none(self, stripe_provider):
     """Test getting upcoming invoice when none exists."""
 
-    class MockStripeError(Exception):
+    class MockInvalidRequestError(Exception):
       def __init__(self, message):
         super().__init__(message)
         self.code = "invoice_upcoming_none"
 
+    class MockStripeError(Exception):
+      pass
+
     stripe_provider.stripe.error = Mock()
+    stripe_provider.stripe.error.InvalidRequestError = MockInvalidRequestError
     stripe_provider.stripe.error.StripeError = MockStripeError
 
-    stripe_provider.stripe.Invoice.upcoming.side_effect = MockStripeError(
+    stripe_provider.stripe.Invoice.create_preview.side_effect = MockInvalidRequestError(
       "No upcoming invoice"
     )
 
