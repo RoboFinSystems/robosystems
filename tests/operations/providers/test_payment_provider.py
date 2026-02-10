@@ -39,7 +39,6 @@ class TestStripeCustomerOperations:
         provider = StripePaymentProvider()
         provider.stripe = Mock()
         provider.stripe.Customer = Mock()
-        provider._redis_client = None
         return provider
 
   def test_create_customer_success(self, stripe_provider):
@@ -89,7 +88,6 @@ class TestStripeCheckoutSessions:
       with patch.object(StripePaymentProvider, "__init__", lambda self: None):
         provider = StripePaymentProvider()
         provider.stripe = Mock()
-        provider._redis_client = None
         provider.stripe.checkout = Mock()
         provider.stripe.checkout.Session = Mock()
         return provider
@@ -166,7 +164,6 @@ class TestStripeSubscriptionOperations:
       with patch.object(StripePaymentProvider, "__init__", lambda self: None):
         provider = StripePaymentProvider()
         provider.stripe = Mock()
-        provider._redis_client = None
         provider.stripe.Subscription = Mock()
         return provider
 
@@ -245,7 +242,6 @@ class TestStripeWebhookVerification:
       with patch.object(StripePaymentProvider, "__init__", lambda self: None):
         provider = StripePaymentProvider()
         provider.stripe = Mock()
-        provider._redis_client = None
         provider.stripe.Webhook = Mock()
         provider.stripe.error = Mock()
         provider.stripe.error.SignatureVerificationError = SignatureVerificationError
@@ -305,7 +301,6 @@ class TestStripePaymentMethods:
       with patch.object(StripePaymentProvider, "__init__", lambda self: None):
         provider = StripePaymentProvider()
         provider.stripe = Mock()
-        provider._redis_client = None
         provider.stripe.PaymentMethod = Mock()
         provider.stripe.Customer = Mock()
         return provider
@@ -363,7 +358,6 @@ class TestStripeInvoiceOperations:
       with patch.object(StripePaymentProvider, "__init__", lambda self: None):
         provider = StripePaymentProvider()
         provider.stripe = Mock()
-        provider._redis_client = None
         provider.stripe.Invoice = Mock()
         return provider
 
@@ -495,19 +489,18 @@ class TestStripeInvoiceOperations:
 
 
 class TestStripeCaching:
-  """Tests for Redis caching of Stripe data."""
+  """Tests for in-memory caching of Stripe data."""
 
   @pytest.fixture
   def stripe_provider(self):
-    """Create Stripe provider with mocked Redis."""
+    """Create Stripe provider with mocked Stripe."""
     with patch("robosystems.operations.providers.payment_provider.env"):
       with patch.object(StripePaymentProvider, "__init__", lambda self: None):
         provider = StripePaymentProvider()
         provider.stripe = Mock()
-        provider._redis_client = Mock()
         return provider
 
-  def test_redis_client_used_for_caching(self, stripe_provider):
-    """Test that Redis client is available for caching."""
-    assert stripe_provider._redis_client is not None
-    assert hasattr(stripe_provider, "redis_client")
+  def test_price_cache_is_available(self, stripe_provider):
+    """Test that in-memory price cache is available."""
+    assert hasattr(StripePaymentProvider, "_price_cache")
+    assert hasattr(StripePaymentProvider, "_price_lock")

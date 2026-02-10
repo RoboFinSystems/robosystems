@@ -85,7 +85,7 @@ class TestAsyncSyncClientUsage:
       mock_client.set.return_value = True
       mock_from_url.return_value = mock_client
 
-      client = create_redis_client(ValkeyDatabase.BILLING)
+      client = create_redis_client(ValkeyDatabase.AUTH)
 
       # These should NOT be coroutines
       get_result = client.get("test_key")

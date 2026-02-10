@@ -28,21 +28,18 @@ class ValkeyDatabase(IntEnum):
   isolation and prevent key collisions.
 
   Current allocation:
-  - 0-7: Application services
-  - 8-15: Available for future use
+  - 0-4: Application services
+  - 5-15: Available for future use
   """
 
   # =========================================================================
-  # APPLICATION DATABASES (0-7)
+  # APPLICATION DATABASES (0-4, ordered by system criticality)
   # =========================================================================
   AUTH = 0  # JWT tokens, API key cache, sessions
   RATE_LIMITS = 1  # Burst protection, download limits
-  CREDITS = 2  # Credit balance cache
-  BILLING = 3  # Stripe prices, checkout state
-  SSE = 4  # Real-time event pub/sub
-  LOCKS = 5  # Distributed locks (SSO, materialize)
-  GRAPH_ROUTING = 6  # Graph client factory (URLs, health)
-  TASK_STATE = 7  # Async task tracking (ingestion, copy)
+  GRAPH_ROUTING = 2  # Graph client factory (URLs, health)
+  SSE = 3  # Real-time event pub/sub and task state tracking
+  LOCKS = 4  # Distributed locks (SSO, materialize)
 
   @classmethod
   def get_next_available(cls) -> int:
@@ -410,12 +407,9 @@ def get_database_purpose(database: ValkeyDatabase) -> str:
   descriptions = {
     ValkeyDatabase.AUTH: "JWT tokens, API key cache, and sessions",
     ValkeyDatabase.RATE_LIMITS: "Burst protection and download rate limits",
-    ValkeyDatabase.CREDITS: "Credit balance cache (re-fetches from PostgreSQL)",
-    ValkeyDatabase.BILLING: "Stripe prices and checkout state (re-fetches from Stripe)",
-    ValkeyDatabase.SSE: "Real-time event pub/sub for SSE streams",
+    ValkeyDatabase.SSE: "Real-time event pub/sub for SSE streams and task state tracking",
     ValkeyDatabase.LOCKS: "Distributed locks for SSO and materialize coordination",
     ValkeyDatabase.GRAPH_ROUTING: "Graph client factory routing (URLs, health, discovery)",
-    ValkeyDatabase.TASK_STATE: "Async task tracking for ingestion, copy, and materialize",
   }
 
   return descriptions.get(

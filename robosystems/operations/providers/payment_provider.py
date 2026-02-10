@@ -4,6 +4,7 @@ This module provides an abstract interface for payment providers, making it easy
 to support multiple processors without changing business logic.
 """
 
+import threading
 import time
 from abc import ABC, abstractmethod
 from typing import Any
@@ -11,7 +12,6 @@ from typing import Any
 from ...config import env
 from ...config.billing import BillingConfig
 from ...config.constants import STRIPE_API_VERSION
-from ...config.valkey_registry import ValkeyDatabase, create_redis_client
 from ...logger import get_logger
 
 logger = get_logger(__name__)
@@ -149,6 +149,10 @@ class PaymentProvider(ABC):
 class StripePaymentProvider(PaymentProvider):
   """Stripe implementation of payment provider."""
 
+  # In-memory price cache: key -> (price_id, expires_at)
+  _price_cache: dict[str, tuple[str, float]] = {}
+  _price_lock = threading.Lock()
+
   def __init__(self):
     """Initialize Stripe with API key from environment."""
     import stripe
@@ -156,17 +160,7 @@ class StripePaymentProvider(PaymentProvider):
     stripe.api_key = env.STRIPE_SECRET_KEY
     stripe.api_version = STRIPE_API_VERSION
     self.stripe = stripe
-    self._redis_client = None
     logger.info("Initialized Stripe payment provider")
-
-  @property
-  def redis_client(self):
-    """Lazy-load Redis client for billing cache."""
-    if self._redis_client is None:
-      self._redis_client = create_redis_client(
-        ValkeyDatabase.BILLING, decode_responses=True
-      )
-    return self._redis_client
 
   def create_customer(self, user_id: str, email: str) -> str:
     """Create Stripe customer."""
@@ -272,11 +266,11 @@ class StripePaymentProvider(PaymentProvider):
     """Get or create Stripe price for a plan, with caching and auto-creation.
 
     This method implements the auto-create pattern:
-    1. Check Redis cache for existing price ID
+    1. Check in-memory cache for existing price ID
     2. If not cached, search Stripe for existing product
     3. If not in Stripe, create from billing config
     4. Cache the result with 24-hour TTL
-    5. Use distributed locks to prevent race conditions
+    5. Use threading lock to prevent race conditions
 
     Args:
         plan_name: Internal plan name (e.g., "ladybug-standard", "sec-starter")
@@ -292,33 +286,26 @@ class StripePaymentProvider(PaymentProvider):
     if resource_type == "repository" and not repository_id:
       raise ValueError("repository_id is required when resource_type is 'repository'")
 
-    # Include repository_id in cache/lock keys for repository plans to avoid collisions
+    # Include repository_id in cache key for repository plans to avoid collisions
     key_suffix = (
       f"{resource_type}:{repository_id}:{plan_name}"
       if repository_id
       else f"{resource_type}:{plan_name}"
     )
     cache_key = f"stripe_price:{env.ENVIRONMENT}:{key_suffix}"
-    lock_key = f"stripe_price_lock:{env.ENVIRONMENT}:{key_suffix}"
 
-    cached_price_id = self.redis_client.get(cache_key)
-    if cached_price_id:
-      logger.debug(f"Using cached Stripe price ID for {plan_name}: {cached_price_id}")
-      return cached_price_id
+    # Fast path: check cache without lock
+    entry = self._price_cache.get(cache_key)
+    if entry and entry[1] > time.time():
+      logger.debug(f"Using cached Stripe price ID for {plan_name}: {entry[0]}")
+      return entry[0]
 
-    lock_acquired = False
-    try:
-      lock_acquired = self.redis_client.set(lock_key, "1", nx=True, ex=30)
-
-      if not lock_acquired:
-        for _ in range(10):
-          time.sleep(0.5)
-          cached_price_id = self.redis_client.get(cache_key)
-          if cached_price_id:
-            logger.debug(f"Found price ID after waiting: {cached_price_id}")
-            return cached_price_id
-
-        logger.warning(f"Failed to acquire lock for {plan_name}, proceeding anyway")
+    with self._price_lock:
+      # Double-check after acquiring lock
+      entry = self._price_cache.get(cache_key)
+      if entry and entry[1] > time.time():
+        logger.debug(f"Found price ID after lock acquire: {entry[0]}")
+        return entry[0]
 
       if resource_type == "graph":
         plan_config = BillingConfig.get_subscription_plan(plan_name)
@@ -395,13 +382,9 @@ class StripePaymentProvider(PaymentProvider):
           },
         )
 
-      self.redis_client.setex(cache_key, 86400, price_id)
+      self._price_cache[cache_key] = (price_id, time.time() + 86400)
 
       return price_id
-
-    finally:
-      if lock_acquired:
-        self.redis_client.delete(lock_key)
 
   def list_payment_methods(self, customer_id: str) -> list[dict[str, Any]]:
     """List payment methods for a Stripe customer."""
