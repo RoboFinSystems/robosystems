@@ -501,100 +501,41 @@ async def create_graph(
 
       operation_id = response["operation_id"]
 
-      # Check if direct execution is enabled (faster, no Dagster cold start)
-      from robosystems.config import env
+      from robosystems.middleware.sse.direct_monitor import (
+        run_entity_graph_creation,
+        run_graph_creation,
+      )
 
-      if env.DIRECT_GRAPH_PROVISIONING_ENABLED:
-        # Direct execution - bypasses Dagster for 60s -> 3s latency improvement
-        from robosystems.middleware.sse.direct_monitor import (
-          run_entity_graph_creation,
-          run_graph_creation,
-        )
-
-        if request.initial_entity:
-          background_tasks.add_task(
-            run_entity_graph_creation,
-            operation_id=operation_id,
-            user_id=str(current_user.id),
-            entity_name=operation_data["entity_data"]["name"],
-            tier=request.instance_tier,
-            schema_extensions=request.metadata.schema_extensions,
-            entity_identifier=operation_data["entity_data"].get("identifier"),
-            entity_identifier_type=operation_data["entity_data"].get("identifier_type"),
-            description=request.metadata.description,
-            tags=request.tags or [],
-            create_entity=request.create_entity,
-          )
-          logger.info(
-            f"Created SSE operation {operation_id} with direct entity graph execution"
-          )
-        else:
-          background_tasks.add_task(
-            run_graph_creation,
-            operation_id=operation_id,
-            user_id=str(current_user.id),
-            graph_name=request.metadata.graph_name,
-            tier=request.instance_tier,
-            schema_extensions=request.metadata.schema_extensions,
-            description=request.metadata.description,
-            tags=request.tags or [],
-            custom_schema=request.custom_schema.model_dump()
-            if request.custom_schema
-            else None,
-          )
-          logger.info(
-            f"Created SSE operation {operation_id} with direct graph execution"
-          )
-      else:
-        # Dagster execution - slower but useful for debugging
-        from robosystems.middleware.sse import (
-          build_graph_job_config,
-          run_and_monitor_dagster_job,
-        )
-
-        if request.initial_entity:
-          job_name = "create_entity_graph_job"
-          run_config = build_graph_job_config(
-            job_name,
-            user_id=str(current_user.id),
-            entity_name=operation_data["entity_data"]["name"],
-            entity_identifier=operation_data["entity_data"].get("identifier"),
-            entity_identifier_type=operation_data["entity_data"].get("identifier_type"),
-            tier=request.instance_tier,
-            graph_name=request.metadata.graph_name,
-            description=request.metadata.description,
-            schema_extensions=request.metadata.schema_extensions,
-            tags=request.tags or [],
-            create_entity=request.create_entity,
-            skip_billing=False,
-            operation_id=operation_id,
-          )
-        else:
-          job_name = "create_graph_job"
-          run_config = build_graph_job_config(
-            job_name,
-            user_id=str(current_user.id),
-            tier=request.instance_tier,
-            graph_name=request.metadata.graph_name,
-            description=request.metadata.description,
-            schema_extensions=request.metadata.schema_extensions,
-            tags=request.tags or [],
-            skip_billing=False,
-            operation_id=operation_id,
-            custom_schema=request.custom_schema.model_dump()
-            if request.custom_schema
-            else None,
-          )
-
+      if request.initial_entity:
         background_tasks.add_task(
-          run_and_monitor_dagster_job,
-          job_name=job_name,
+          run_entity_graph_creation,
           operation_id=operation_id,
-          run_config=run_config,
+          user_id=str(current_user.id),
+          entity_name=operation_data["entity_data"]["name"],
+          tier=request.instance_tier,
+          schema_extensions=request.metadata.schema_extensions,
+          entity_identifier=operation_data["entity_data"].get("identifier"),
+          entity_identifier_type=operation_data["entity_data"].get("identifier_type"),
+          description=request.metadata.description,
+          tags=request.tags or [],
+          create_entity=request.create_entity,
         )
-        logger.info(
-          f"Created SSE operation {operation_id} and queued Dagster job {job_name}"
+        logger.info(f"Created SSE operation {operation_id} for entity graph execution")
+      else:
+        background_tasks.add_task(
+          run_graph_creation,
+          operation_id=operation_id,
+          user_id=str(current_user.id),
+          graph_name=request.metadata.graph_name,
+          tier=request.instance_tier,
+          schema_extensions=request.metadata.schema_extensions,
+          description=request.metadata.description,
+          tags=request.tags or [],
+          custom_schema=request.custom_schema.model_dump()
+          if request.custom_schema
+          else None,
         )
+        logger.info(f"Created SSE operation {operation_id} for graph execution")
       logger.info("=== END GRAPH CREATION REQUEST (SSE) ===")
 
       return response
@@ -842,7 +783,7 @@ Tier listing is included - no credit consumption required.""",
                 "instance": {
                   "type": "m7g.large",
                   "memory_mb": 6144,
-                  "databases_per_instance": 1,
+                  "is_multitenant": False,
                 },
                 "limits": {
                   "monthly_credits": 8000,

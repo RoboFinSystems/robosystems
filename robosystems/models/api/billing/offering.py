@@ -25,9 +25,6 @@ class GraphSubscriptionTier(BaseModel):
   monthly_credits_per_graph: int = Field(
     ..., description="Monthly AI credits per graph"
   )
-  storage_included: bool = Field(
-    True, description="Whether storage is included in the tier"
-  )
   infrastructure: str = Field(..., description="Infrastructure description")
   features: list[str] = Field(..., description="List of features")
   backup_retention_days: int = Field(..., description="Backup retention in days")
@@ -39,15 +36,6 @@ class GraphSubscriptionTier(BaseModel):
   api_rate_multiplier: float = Field(..., description="API rate multiplier")
   backend: str = Field(..., description="Database backend (ladybug or neo4j)")
   instance_type: str | None = Field(None, description="Instance type")
-
-
-class StorageInfo(BaseModel):
-  """Storage information."""
-
-  description: str = Field(
-    "Storage included in tier",
-    description="Storage billing description",
-  )
 
 
 class GraphSubscriptions(BaseModel):
@@ -65,7 +53,6 @@ class GraphSubscriptions(BaseModel):
   tiers: list[GraphSubscriptionTier] = Field(
     ..., description="Available infrastructure tiers"
   )
-  storage: StorageInfo = Field(..., description="Storage information")
   notes: list[str] = Field(..., description="Important notes")
 
 

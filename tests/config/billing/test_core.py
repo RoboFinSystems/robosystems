@@ -19,7 +19,7 @@ def test_get_subscription_plan_returns_plan_with_credit_allocation():
   assert plan is not None
   assert plan["name"] == "ladybug-standard"
   assert plan["monthly_credit_allocation"] == 8000  # ~200 agent calls/month
-  assert plan["base_price_cents"] == 10000  # $100/month
+  assert plan["base_price_cents"] == 9900  # $99/month
 
 
 def test_get_subscription_plan_returns_none_for_unknown_tier():

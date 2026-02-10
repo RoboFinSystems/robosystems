@@ -26,7 +26,10 @@ class TestCreateCheckoutSession:
 
   @pytest.fixture
   def mock_db(self):
-    return Mock()
+    db = Mock()
+    # Default: no stale pending_payment subscriptions to clean up
+    db.query.return_value.filter.return_value.all.return_value = []
+    return db
 
   @pytest.fixture
   def checkout_request(self):
@@ -407,6 +410,8 @@ class TestGetCheckoutStatus:
   async def test_get_checkout_status_not_found(self, mock_get_sub, mock_user, mock_db):
     """Test checkout status when session not found."""
     mock_get_sub.return_value = None
+    # Also mock the fallback metadata query returning None
+    mock_db.query.return_value.filter.return_value.first.return_value = None
 
     with pytest.raises(HTTPException) as exc:
       await get_checkout_status("cs_invalid", mock_user, mock_db, None)

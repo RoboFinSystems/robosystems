@@ -543,7 +543,6 @@ class GraphTierConfig:
         "instance": {
           "type": instance_config.get("type"),
           "memory_mb": graph_memory_mb,
-          "databases_per_instance": instance_config.get("databases_per_instance", 1),
           "is_multitenant": is_multitenant,
         },
         "limits": {

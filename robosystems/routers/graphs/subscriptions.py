@@ -41,6 +41,19 @@ def is_shared_repository(graph_id: str) -> bool:
   return _is_shared_repo(graph_id)
 
 
+def _get_plan_display_name(plan_name: str, resource_type: str, resource_id: str) -> str:
+  """Resolve a plan's internal name to its human-readable display name."""
+  if resource_type == "graph":
+    plan = BillingConfig.get_subscription_plan(plan_name)
+    if plan:
+      return plan.get("display_name", plan_name)
+  elif resource_type == "repository":
+    plan = BillingConfig.get_repository_plan(resource_id, plan_name)
+    if plan:
+      return plan.get("display_name", plan_name)
+  return plan_name
+
+
 def subscription_to_response(
   subscription: BillingSubscription,
 ) -> GraphSubscriptionResponse:
@@ -50,6 +63,9 @@ def subscription_to_response(
     resource_type=subscription.resource_type,
     resource_id=subscription.resource_id,
     plan_name=subscription.plan_name,
+    plan_display_name=_get_plan_display_name(
+      subscription.plan_name, subscription.resource_type, subscription.resource_id
+    ),
     billing_interval=subscription.billing_interval,
     status=subscription.status,
     base_price_cents=subscription.base_price_cents,
@@ -293,6 +309,64 @@ async def create_repository_subscription(
       },
     )
 
+    # Create Stripe subscription if billing is enabled and customer has payment method
+    if (
+      env.BILLING_ENABLED
+      and customer.has_payment_method
+      and customer.stripe_customer_id
+    ):
+      try:
+        from ...operations.providers.payment_provider import get_payment_provider
+
+        provider = get_payment_provider("stripe")
+        stripe_price_id = provider.get_or_create_price(
+          plan_name=request.plan_name,
+          resource_type="repository",
+          repository_id=graph_id,
+        )
+
+        stripe_subscription_id = provider.create_subscription(
+          customer_id=customer.stripe_customer_id,
+          price_id=stripe_price_id,
+          metadata={
+            "subscription_id": str(subscription.id),
+            "user_id": current_user.id,
+            "resource_type": "repository",
+            "resource_id": graph_id,
+          },
+        )
+
+        subscription.stripe_subscription_id = stripe_subscription_id
+        subscription.provider_subscription_id = stripe_subscription_id
+        subscription.provider_customer_id = customer.stripe_customer_id
+        subscription.payment_provider = "stripe"
+
+        logger.info(
+          f"Created Stripe subscription for repository {graph_id}",
+          extra={
+            "user_id": current_user.id,
+            "subscription_id": subscription.id,
+            "stripe_subscription_id": stripe_subscription_id,
+          },
+        )
+
+      except Exception as e:
+        logger.error(
+          f"Failed to create Stripe subscription for repository {graph_id}: {e}",
+          extra={
+            "user_id": current_user.id,
+            "subscription_id": subscription.id,
+            "plan_name": request.plan_name,
+          },
+          exc_info=True,
+        )
+        subscription.status = "failed"
+        db.commit()
+        raise HTTPException(
+          status_code=402,
+          detail="Failed to create payment subscription. Please verify your payment method.",
+        )
+
     # Store IDs before commit detaches the objects
     subscription_id = subscription.id
     user_id = current_user.id
@@ -332,6 +406,18 @@ async def create_repository_subscription(
       failed_sub = db.query(BillingSubscription).filter_by(id=subscription_id).first()
       if failed_sub:
         failed_sub.status = "failed"
+        # Cancel Stripe subscription so the customer isn't charged
+        if failed_sub.stripe_subscription_id:
+          try:
+            from ...operations.providers.payment_provider import get_payment_provider
+
+            provider = get_payment_provider("stripe")
+            provider.cancel_subscription(failed_sub.stripe_subscription_id)
+          except Exception as cancel_error:
+            logger.error(
+              f"Failed to cancel Stripe subscription {failed_sub.stripe_subscription_id}: "
+              f"{cancel_error}"
+            )
         db.commit()
       raise HTTPException(
         status_code=500,

@@ -90,62 +90,6 @@ update:
     uv sync --all-extras --dev
 
 
-## Bootstrap ##
-
-# Bootstrap AWS OIDC federation for GitHub Actions
-# Usage: just bootstrap [profile] [region]
-#   profile: AWS SSO profile name (default: robosystems-sso)
-#   region:  AWS region (default: us-east-1)
-bootstrap profile="robosystems-sso" region="us-east-1":
-    @bin/setup/bootstrap.sh "{{profile}}" "{{region}}"
-
-# AWS setup (Secrets Manager + SSM Parameter Store)
-setup-aws:
-    @bin/setup/aws.sh
-
-# GitHub Repository setup
-setup-gha:
-    @bin/setup/gha.sh
-
-# SSM Parameter Store (see wiki: Bootstrap-Guide#ssm-parameters)
-ssm-list env category:
-    @aws ssm get-parameters-by-path \
-        --path "/robosystems/{{env}}/{{category}}" \
-        --recursive \
-        --query "Parameters[*].[Name,Value]" \
-        --output table
-
-ssm-set env path value:
-    @aws ssm put-parameter \
-        --name "/robosystems/{{env}}/{{path}}" \
-        --value "{{value}}" \
-        --type String \
-        --overwrite
-    @echo "Set /robosystems/{{env}}/{{path}} = {{value}}"
-
-ssm-get env path:
-    @aws ssm get-parameter \
-        --name "/robosystems/{{env}}/{{path}}" \
-        --query "Parameter.Value" \
-        --output text
-
-# Bedrock local development setup (creates IAM user, updates .env)
-setup-bedrock:
-    @bin/setup/bedrock.sh
-
-# Generate secure random key for secrets
-generate-key:
-    @echo "Generated secure 32-byte base64 key:"
-    @openssl rand -base64 32
-
-# Generate multiple secure keys for all secrets
-generate-keys:
-    @echo "CONNECTION_CREDENTIALS_KEY=$(openssl rand -base64 32)"
-    @echo "GRAPH_BACKUP_ENCRYPTION_KEY=$(openssl rand -base64 32)"
-    @echo "JWT_SECRET_KEY=$(openssl rand -base64 32)"
-    @echo "ADMIN_API_KEY=$(openssl rand -base64 32)"
-
-
 ## Testing ##
 
 # Run all tests (excludes slow tests)
@@ -226,6 +170,93 @@ deploy environment="prod" ref="":
 # Bastion tunnel (uses AWS SSM - no SSH keys required)
 bastion-tunnel environment service="all":
     @bin/tools/tunnels.sh {{environment}} {{service}}
+
+
+## Bootstrap ##
+
+# Bootstrap AWS OIDC federation for GitHub Actions
+# Usage: just bootstrap [profile] [region]
+#   profile: AWS SSO profile name (default: robosystems-sso)
+#   region:  AWS region (default: us-east-1)
+bootstrap profile="robosystems-sso" region="us-east-1":
+    @bin/setup/bootstrap.sh "{{profile}}" "{{region}}"
+
+# AWS setup (Secrets Manager + SSM Parameter Store)
+setup-aws:
+    @bin/setup/aws.sh
+
+# GitHub Repository setup
+setup-gha:
+    @bin/setup/gha.sh
+
+# Bedrock local development setup (creates IAM user, updates .env)
+setup-bedrock:
+    @bin/setup/bedrock.sh
+# Generate a secure random key for a single secret
+generate-key:
+    @echo "Generated secure 32-byte base64 key:"
+    @openssl rand -base64 32
+
+# Generate secure random keys for all secrets
+generate-keys:
+    @echo "CONNECTION_CREDENTIALS_KEY=$(openssl rand -base64 32)"
+    @echo "GRAPH_BACKUP_ENCRYPTION_KEY=$(openssl rand -base64 32)"
+    @echo "JWT_SECRET_KEY=$(openssl rand -base64 32)"
+    @echo "ADMIN_API_KEY=$(openssl rand -base64 32)"
+
+
+## AWS SSM Parameter Store ##
+
+# List SSM parameters by category (features, tuning)
+ssm-list env category:
+    @aws ssm get-parameters-by-path \
+        --path "/robosystems/{{env}}/{{category}}" \
+        --recursive \
+        --query "Parameters[*].[Name,Value]" \
+        --output table
+
+# Get a single SSM parameter
+ssm-get env path:
+    @aws ssm get-parameter \
+        --name "/robosystems/{{env}}/{{path}}" \
+        --query "Parameter.Value" \
+        --output text
+
+# Set a single SSM parameter
+ssm-set env path value:
+    @aws ssm put-parameter \
+        --name "/robosystems/{{env}}/{{path}}" \
+        --value "{{value}}" \
+        --type String \
+        --overwrite
+    @echo "Set /robosystems/{{env}}/{{path}} = {{value}}"
+
+# Delete a single SSM parameter
+ssm-delete env path:
+    @aws ssm delete-parameter \
+        --name "/robosystems/{{env}}/{{path}}"
+    @echo "Deleted /robosystems/{{env}}/{{path}}"
+
+
+## GitHub Actions Variables ##
+
+# List all GitHub repository variables (optionally filter by pattern)
+gha-list filter="":
+    @gh variable list {{ if filter != "" { "| grep -i " + filter } else { "" } }}
+
+# Get a single GitHub variable value
+gha-get name:
+    @gh variable get {{name}}
+
+# Set a single GitHub variable
+gha-set name value:
+    @gh variable set {{name}} --body "{{value}}"
+    @echo "Set {{name}} = {{value}}"
+
+# Delete a single GitHub variable
+gha-delete name:
+    @gh variable delete {{name}} --yes
+    @echo "Deleted {{name}}"
 
 
 ## Admin CLI ##
@@ -366,25 +397,6 @@ duckdb-query graph_id query format="table" env=_local_env:
         --query "{{query}}" \
         --format {{format}}
 
-# Interactive query modes - launch REPL for each database type
-graph-query-i graph_id url="http://localhost:8001" env=_local_env:
-    UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.graph_query \
-        --url {{url}} \
-        --graph-id {{graph_id}}
-
-tables-query-i graph_id url="http://localhost:8001" env=_local_env:
-    UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.tables_query \
-        --url {{url}} \
-        --graph-id {{graph_id}}
-
-lbug-query-i graph_id env=_local_env:
-    UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.lbug_query \
-        --db-path ./data/lbug-dbs/{{graph_id}}.lbug
-
-duckdb-query-i graph_id env=_local_env:
-    UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.duckdb_query \
-        --db-path ./data/staging/{{graph_id}}.duckdb
-
 
 ## SEC Pipeline ##
 # Examples:
@@ -462,7 +474,7 @@ sec-health verbose="" json="" api_url="http://localhost:8001" env=_local_env:
 
 ## Misc ##
 
-# Forward Stripe webhook events to local API (requires: brew install stripe/stripe-cli/stripe)
+# Forward Stripe webhook events to local API
 stripe-webhook url="http://localhost:8000":
     stripe listen --forward-to {{url}}/admin/v1/webhooks/stripe
 

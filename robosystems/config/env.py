@@ -455,10 +455,6 @@ class EnvConfig:
   )
 
   # --- Graph Operations ---
-  DIRECT_GRAPH_PROVISIONING_ENABLED = get_bool_env(
-    "DIRECT_GRAPH_PROVISIONING_ENABLED",
-    get_parameter_value("DIRECT_GRAPH_PROVISIONING_ENABLED", "true").lower() == "true",
-  )
   DIRECT_GRAPH_MATERIALIZATION_ENABLED = get_bool_env(
     "DIRECT_GRAPH_MATERIALIZATION_ENABLED",
     get_parameter_value("DIRECT_GRAPH_MATERIALIZATION_ENABLED", "true").lower()

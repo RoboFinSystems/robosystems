@@ -3,9 +3,8 @@
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 
-from ...database import get_db_session
+from ...database import SessionFactory, get_db_session
 from ...logger import get_logger
-from ...middleware.sse import run_and_monitor_dagster_job
 from ...models.billing import BillingAuditLog
 from ...operations.providers.payment_provider import get_payment_provider
 from ...security.audit_logger import SecurityAuditLogger, SecurityEventType
@@ -13,6 +12,93 @@ from ...security.audit_logger import SecurityAuditLogger, SecurityEventType
 logger = get_logger(__name__)
 
 router = APIRouter(prefix="/admin/v1/webhooks", tags=["admin"])
+
+
+class _WebhookLogContext:
+  """Lightweight stand-in for Dagster's OpExecutionContext.
+
+  The billing handler functions use context.log.info/warning/error.
+  This routes those calls to our standard logger.
+  """
+
+  def __init__(self) -> None:
+    self.log = logger
+
+
+async def _process_webhook_event(
+  event_id: str,
+  event_type: str,
+  event_data: dict,
+) -> None:
+  """Process a Stripe webhook event directly (no Dagster).
+
+  Creates its own database session since this runs as a background task
+  after the request session has been closed.
+  """
+  from robosystems.dagster.jobs.billing import (
+    _handle_checkout_completed,
+    _handle_invoice_created,
+    _handle_payment_failed,
+    _handle_payment_succeeded,
+    _handle_setup_intent_succeeded,
+    _handle_subscription_deleted,
+    _handle_subscription_updated,
+  )
+
+  ctx = _WebhookLogContext()
+  db = SessionFactory()
+
+  try:
+    if event_type == "checkout.session.completed":
+      await _handle_checkout_completed(event_data, db, ctx)
+
+    elif event_type == "invoice.created":
+      await _handle_invoice_created(event_data, db, ctx)
+
+    elif event_type in ("invoice.payment_succeeded", "invoice.paid"):
+      await _handle_payment_succeeded(event_data, db, ctx)
+
+    elif event_type == "invoice.payment_failed":
+      await _handle_payment_failed(event_data, db, ctx)
+
+    elif event_type == "setup_intent.succeeded":
+      await _handle_setup_intent_succeeded(event_data, db, ctx)
+
+    elif event_type == "customer.subscription.updated":
+      await _handle_subscription_updated(event_data, db, ctx)
+
+    elif event_type == "customer.subscription.deleted":
+      await _handle_subscription_deleted(event_data, db, ctx)
+
+    else:
+      logger.info(
+        f"Unhandled webhook event type: {event_type}",
+        extra={"event_id": event_id, "event_type": event_type},
+      )
+      # Still mark as processed to avoid reprocessing
+      BillingAuditLog.mark_webhook_processed(
+        event_id, "stripe", event_type, event_data, db
+      )
+      return
+
+    # Mark as processed after successful handling
+    BillingAuditLog.mark_webhook_processed(
+      event_id, "stripe", event_type, event_data, db
+    )
+
+    logger.info(
+      f"Webhook processed: {event_type}",
+      extra={"event_id": event_id, "event_type": event_type},
+    )
+
+  except Exception as e:
+    logger.error(
+      f"Failed to process webhook {event_type}: {e}",
+      exc_info=True,
+      extra={"event_id": event_id, "event_type": event_type},
+    )
+  finally:
+    db.close()
 
 
 @router.post(
@@ -26,6 +112,7 @@ This endpoint receives and processes webhook events from Stripe including:
 - invoice.created - Sync Stripe invoice to database
 - invoice.payment_succeeded - Payment successful, mark invoice paid
 - invoice.payment_failed - Payment failed, mark subscription
+- setup_intent.succeeded - Payment method added via customer portal
 - customer.subscription.updated - Subscription changes from Stripe
 - customer.subscription.deleted - Subscription canceled in Stripe
 
@@ -33,12 +120,11 @@ This endpoint receives and processes webhook events from Stripe including:
 Stripe webhooks cannot provide admin API keys. Instead, security is enforced
 through Stripe's webhook signature verification (verify_webhook).
 
-**Processing**: Webhooks are queued for processing via Dagster, providing:
-- Retry logic with exponential backoff
-- Full observability in Dagster UI
-- Audit trail of all webhook processing
+**Processing**: Webhooks are processed directly as background tasks for low
+latency. Heavy operations (graph provisioning) are handled by the direct
+provisioning system which manages its own async execution.
 
-Webhooks are verified using Stripe signature before being queued.""",
+Webhooks are verified using Stripe signature before processing.""",
   operation_id="handleStripeWebhook",
 )
 async def handle_stripe_webhook(
@@ -46,7 +132,7 @@ async def handle_stripe_webhook(
   background_tasks: BackgroundTasks,
   db: Session = Depends(get_db_session),
 ):
-  """Handle Stripe webhook events via Dagster."""
+  """Handle Stripe webhook events."""
   try:
     payload = await request.body()
     signature = request.headers.get("stripe-signature")
@@ -96,7 +182,7 @@ async def handle_stripe_webhook(
     event_data = event.get("data", {}).get("object", {})
     event_id = event.get("id")
 
-    # Check idempotency before queuing
+    # Check idempotency
     if BillingAuditLog.is_webhook_processed(event_id, "stripe", db):
       logger.info(
         f"Webhook event already processed: {event_id}",
@@ -105,54 +191,22 @@ async def handle_stripe_webhook(
       return {"status": "success", "message": "Event already processed"}
 
     logger.info(
-      f"Queueing Stripe webhook for Dagster processing: {event_type}",
-      extra={
-        "event_type": event_type,
-        "event_id": event_id,
-      },
+      f"Processing Stripe webhook: {event_type}",
+      extra={"event_type": event_type, "event_id": event_id},
     )
 
-    # Build Dagster job config
-    from robosystems.dagster.jobs.billing import build_stripe_webhook_job_config
-
-    run_config = build_stripe_webhook_job_config(
+    # Process directly as a background task with its own DB session
+    background_tasks.add_task(
+      _process_webhook_event,
       event_id=event_id,
       event_type=event_type,
       event_data=event_data,
     )
 
-    # Queue Dagster job for async processing
-    background_tasks.add_task(
-      run_and_monitor_dagster_job,
-      job_name="process_stripe_webhook_job",
-      operation_id=None,  # No SSE tracking needed for webhooks
-      run_config=run_config,
-    )
-
-    logger.info(
-      f"Queued Stripe webhook for processing: {event_id}",
-      extra={"event_id": event_id, "event_type": event_type},
-    )
-
-    return {"status": "success", "message": "Webhook queued for processing"}
+    return {"status": "success", "message": "Webhook accepted for processing"}
 
   except HTTPException:
     raise
   except Exception as e:
-    logger.error(f"Failed to queue webhook: {e}", exc_info=True)
+    logger.error(f"Failed to handle webhook: {e}", exc_info=True)
     raise HTTPException(status_code=500, detail="Failed to process webhook")
-
-
-# NOTE: All webhook event handling is now done in Dagster (robosystems.dagster.jobs.billing)
-# The process_stripe_webhook_job handles:
-# - checkout.session.completed
-# - invoice.created
-# - invoice.payment_succeeded
-# - invoice.payment_failed
-# - customer.subscription.updated
-# - customer.subscription.deleted
-#
-# This provides:
-# - Retry logic with exponential backoff (3 retries)
-# - Full observability in Dagster UI
-# - Audit trail of all webhook processing

@@ -372,6 +372,45 @@ def general_api_rate_limit_dependency(request: Request):
   return create_custom_rate_limit_dependency(limit, 60, "general_api")(request)
 
 
+def billing_rate_limit_dependency(request: Request):
+  """
+  Generous rate limiting for billing/checkout endpoints.
+
+  Payment flows should never be rate-limited during normal use.
+  All user types (JWT, API key, IP) get the same generous limit
+  because checkout redirects from Stripe may not carry auth cookies.
+  """
+  limit = get_int_env(
+    "RATE_LIMIT_BILLING", "60"
+  )  # 60/minute (checkout polls at ~20/min)
+  identifier = get_user_identifier(request)
+  cache_key = f"{identifier}:billing"
+
+  # No penalty for IP-based users — they may be mid-checkout redirect
+  window = 60
+
+  allowed, remaining = rate_limit_cache.check_rate_limit(cache_key, limit, window)
+
+  if not allowed:
+    current_time = getattr(request.state, "current_time", None) or int(time.time())
+    reset_time = int(current_time + window)
+
+    raise HTTPException(
+      status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+      detail="Rate limit exceeded for billing operations",
+      headers={
+        "Retry-After": str(window),
+        "X-RateLimit-Limit": str(limit),
+        "X-RateLimit-Remaining": "0",
+        "X-RateLimit-Reset": str(reset_time),
+        "X-RateLimit-Type": "billing",
+      },
+    )
+
+  request.state.billing_rate_limit_remaining = remaining
+  request.state.billing_rate_limit_limit = limit
+
+
 def public_api_rate_limit_dependency(request: Request):
   """Rate limiting for public API endpoints (no auth required)."""
   # More generous for anonymous users since these endpoints are meant to be public
