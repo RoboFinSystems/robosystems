@@ -356,8 +356,6 @@ class StripePaymentProvider(PaymentProvider):
           logger.info(f"Created new Stripe price for existing product: {price_id}")
       else:
         product_name = plan_config.get("display_name", plan_config.get("name"))
-        if env.ENVIRONMENT != "prod":
-          product_name = f"{product_name} ({env.ENVIRONMENT})"
 
         logger.info(f"Creating new Stripe product for {plan_name}")
         product = self.stripe.Product.create(
