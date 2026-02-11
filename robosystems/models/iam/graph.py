@@ -8,10 +8,18 @@ Graph Ownership:
 - Each graph is owned by an organization (org_id)
 - The organization is responsible for billing
 - Only users within the organization can be granted access
+
+Graph Lifecycle:
+- queued: Waiting for infrastructure capacity (creation queue)
+- provisioning: Infrastructure being set up (one at a time per tier)
+- active: Fully operational
+- suspended: Subscription ended, access blocked
+- deprovisioned: Infrastructure torn down (future)
 """
 
 from collections.abc import Sequence
 from datetime import UTC, datetime
+from enum import Enum
 from typing import Any, Optional
 
 from sqlalchemy import (
@@ -33,6 +41,16 @@ from ...config.graph_tier import GraphTier
 from ...database import Model
 
 
+class GraphStatus(str, Enum):
+  """Graph lifecycle status states."""
+
+  QUEUED = "queued"
+  PROVISIONING = "provisioning"
+  ACTIVE = "active"
+  SUSPENDED = "suspended"
+  DEPROVISIONED = "deprovisioned"
+
+
 class Graph(Model):
   """Graph model for managing graph database metadata."""
 
@@ -48,6 +66,8 @@ class Graph(Model):
     Index("idx_graphs_is_repository", "is_repository"),
     Index("idx_graphs_repository_type", "repository_type"),
     Index("idx_graphs_stale", "graph_stale"),
+    Index("idx_graphs_status", "status"),
+    Index("idx_graphs_status_tier_created", "status", "graph_tier", "created_at"),
     CheckConstraint(
       "graph_type IN ('generic', 'entity', 'repository')", name="check_graph_type"
     ),
@@ -155,6 +175,14 @@ class Graph(Model):
   # Additional metadata that might be useful
   graph_metadata = Column(JSONB, nullable=True)  # Flexible field for future use
 
+  # Lifecycle status
+  status = Column(
+    String, nullable=False, default=GraphStatus.ACTIVE.value
+  )  # queued, provisioning, active, suspended, deprovisioned
+
+  # Soft-delete support (future: deprovisioned graphs)
+  deleted_at = Column(DateTime, nullable=True)
+
   # Relationships
   org = relationship("Org", back_populates="graphs")
   graph_users = relationship(
@@ -222,6 +250,7 @@ class Graph(Model):
     subgraph_name: str | None = None,
     is_subgraph: bool = False,
     subgraph_metadata: dict[str, Any] | None = None,
+    status: GraphStatus = GraphStatus.ACTIVE,
     commit: bool = True,
   ) -> "Graph":
     """Create a new graph metadata entry."""
@@ -262,6 +291,7 @@ class Graph(Model):
       subgraph_name=subgraph_name,
       is_subgraph=is_subgraph,
       subgraph_metadata=subgraph_metadata,
+      status=status.value if isinstance(status, GraphStatus) else status,
     )
 
     session.add(graph)
@@ -274,10 +304,142 @@ class Graph(Model):
         raise
     return graph
 
+  @property
+  def is_active(self) -> bool:
+    """Check if graph is in active status."""
+    return self.status == GraphStatus.ACTIVE.value
+
+  @property
+  def is_queued(self) -> bool:
+    """Check if graph is queued for provisioning."""
+    return self.status == GraphStatus.QUEUED.value
+
+  @property
+  def is_operational(self) -> bool:
+    """Check if graph is in an operational state (active or provisioning)."""
+    return self.status in (GraphStatus.ACTIVE.value, GraphStatus.PROVISIONING.value)
+
   @classmethod
-  def get_by_id(cls, graph_id: str, session: Session) -> Optional["Graph"]:
-    """Get a graph by its ID."""
-    return session.query(cls).filter(cls.graph_id == graph_id).first()
+  def get_by_id(
+    cls, graph_id: str, session: Session, include_deprovisioned: bool = False
+  ) -> Optional["Graph"]:
+    """Get a graph by its ID.
+
+    Args:
+        graph_id: Graph ID
+        session: Database session
+        include_deprovisioned: If True, include deprovisioned graphs (default: False)
+
+    Returns:
+        Graph if found and not deprovisioned (unless include_deprovisioned=True)
+    """
+    query = session.query(cls).filter(cls.graph_id == graph_id)
+    if not include_deprovisioned:
+      query = query.filter(cls.status != GraphStatus.DEPROVISIONED.value)
+    return query.first()
+
+  @classmethod
+  def get_active_by_id(cls, graph_id: str, session: Session) -> Optional["Graph"]:
+    """Get a graph only if it is in active status."""
+    return (
+      session.query(cls)
+      .filter(cls.graph_id == graph_id, cls.status == GraphStatus.ACTIVE.value)
+      .first()
+    )
+
+  @classmethod
+  def get_oldest_queued_by_tier(cls, tier: str, session: Session) -> Optional["Graph"]:
+    """Get the oldest queued graph for a given tier (FIFO)."""
+    return (
+      session.query(cls)
+      .filter(cls.status == GraphStatus.QUEUED.value, cls.graph_tier == tier)
+      .order_by(cls.created_at.asc())
+      .first()
+    )
+
+  @classmethod
+  def has_provisioning_for_tier(cls, tier: str, session: Session) -> bool:
+    """Check if there's already a graph being provisioned for this tier."""
+    return (
+      session.query(cls)
+      .filter(cls.status == GraphStatus.PROVISIONING.value, cls.graph_tier == tier)
+      .first()
+    ) is not None
+
+  _VALID_TRANSITIONS: dict[str, list[str]] = {
+    "queued": ["provisioning", "deprovisioned"],
+    "provisioning": ["active", "queued"],
+    "active": ["suspended", "deprovisioned"],
+    "suspended": ["active", "deprovisioned"],
+    "deprovisioned": [],
+  }
+
+  def transition_status(self, new_status: GraphStatus, session: Session) -> None:
+    """Transition graph to a new lifecycle status."""
+    current = self.status or GraphStatus.ACTIVE.value
+    allowed = self._VALID_TRANSITIONS.get(current, [])
+    if new_status.value not in allowed:
+      raise ValueError(
+        f"Invalid status transition: {current} -> {new_status.value} "
+        f"(allowed: {allowed})"
+      )
+    self.status = new_status.value
+    self.updated_at = datetime.now(UTC)
+    try:
+      session.commit()
+      session.refresh(self)
+    except SQLAlchemyError:
+      session.rollback()
+      raise
+
+  @classmethod
+  def create_queued(
+    cls,
+    graph_id: str,
+    org_id: str | None,
+    graph_name: str,
+    graph_type: str,
+    user_id: str,
+    session: Session,
+    graph_tier: GraphTier = GraphTier.LADYBUG_STANDARD,
+    schema_extensions: list[str] | None = None,
+    graph_metadata: dict[str, Any] | None = None,
+  ) -> "Graph":
+    """Create a graph row with status='queued' and its GraphUser in one transaction.
+
+    Used when capacity is unavailable and the graph enters the creation queue.
+    """
+    from .graph_user import GraphUser
+
+    graph = cls(
+      graph_id=graph_id,
+      org_id=org_id,
+      graph_name=graph_name,
+      graph_type=graph_type,
+      schema_extensions=schema_extensions or [],
+      graph_tier=graph_tier.value if isinstance(graph_tier, GraphTier) else graph_tier,
+      graph_metadata=graph_metadata,
+      status=GraphStatus.QUEUED.value,
+      graph_instance_id="pending",
+    )
+    session.add(graph)
+
+    user_graph = GraphUser(
+      user_id=user_id,
+      graph_id=graph_id,
+      role="admin",
+      is_selected=True,
+    )
+    session.add(user_graph)
+
+    try:
+      session.commit()
+      session.refresh(graph)
+    except SQLAlchemyError:
+      session.rollback()
+      raise
+
+    return graph
 
   @classmethod
   def get_by_extension(cls, extension: str, session: Session) -> Sequence["Graph"]:

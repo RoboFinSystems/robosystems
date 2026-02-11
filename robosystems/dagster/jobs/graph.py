@@ -119,6 +119,7 @@ class WaitAndCreateGraphConfig(Config):
   operation_id: str
   user_id: str
   graph_name: str
+  graph_id: str = ""  # Pre-existing graph_id from creation queue
   tier: str = "ladybug-standard"
   schema_extensions: str = ""  # comma-separated
   description: str = ""
@@ -466,6 +467,25 @@ def restore_graph_job():
 # ============================================================================
 
 
+def _recover_graph_to_queued(graph_id: str, session_factory, context) -> None:
+  """Transition a provisioning graph back to queued for retry."""
+  if not graph_id:
+    return
+  try:
+    from robosystems.models.iam.graph import Graph, GraphStatus
+
+    db = session_factory()
+    try:
+      graph = Graph.get_by_id(graph_id, db)
+      if graph and graph.status == GraphStatus.PROVISIONING.value:
+        graph.transition_status(GraphStatus.QUEUED, db)
+        context.log.info(f"Transitioned graph {graph_id} back to queued for retry")
+    finally:
+      session_factory.remove()
+  except Exception as recovery_error:
+    context.log.warning(f"Failed to recover graph status: {recovery_error}")
+
+
 async def _wait_and_create(
   context: OpExecutionContext,
   config: WaitAndCreateGraphConfig,
@@ -573,7 +593,7 @@ async def _wait_and_create(
         create_attempts += 1
         service = GenericGraphService()
         result = await service.create_graph(
-          graph_id=None,
+          graph_id=config.graph_id or None,
           schema_extensions=schema_extensions,
           metadata={
             "name": config.graph_name,
@@ -649,13 +669,15 @@ async def _wait_and_create(
       return result
 
   except Failure:
-    # Timeout — already emitted SSE failure, re-raise for Dagster
+    # Timeout or failure — transition graph back to queued for retry
+    _recover_graph_to_queued(config.graph_id, session, context)
     raise
   except Exception as e:
     # Unexpected error — emit SSE failure so user isn't left dangling
     error_msg = f"Graph creation failed unexpectedly: {e}"
     context.log.error(error_msg)
     _emit_failure_sync(operation_id, error_msg)
+    _recover_graph_to_queued(config.graph_id, session, context)
     raise Failure(description=error_msg) from e
 
 

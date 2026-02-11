@@ -218,6 +218,11 @@ async def get_graphs(
 
     # Add user graphs
     for user_graph in user_graphs:
+      # Skip deprovisioned graphs
+      graph_status = user_graph.graph.status or "active"
+      if graph_status == "deprovisioned":
+        continue
+
       if user_graph.is_selected:
         selected_graph_id = user_graph.graph_id
 
@@ -240,6 +245,7 @@ async def get_graphs(
           isSubgraph=user_graph.graph.is_subgraph or False,
           parentGraphId=user_graph.graph.parent_graph_id,
           graphType=user_graph.graph.graph_type,
+          status=graph_status,
         )
       )
 

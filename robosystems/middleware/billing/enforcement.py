@@ -1,12 +1,15 @@
 """Subscription enforcement middleware for graph operations."""
 
+from datetime import UTC, datetime
+
+from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
 from ...config import env
 from ...config.graph_tier import GraphTier
 from ...logger import get_logger
 from ...models.billing import BillingCustomer, BillingSubscription, SubscriptionStatus
-from ...models.iam import OrgUser
+from ...models.iam import Graph, GraphStatus, OrgUser
 
 logger = get_logger(__name__)
 
@@ -101,3 +104,90 @@ def check_graph_subscription_active(
     return (False, error_message)
 
   return (True, None)
+
+
+def require_graph_access(
+  graph_id: str, session: Session, require_write: bool = False
+) -> Graph:
+  """Validate graph is accessible for the requested operation type.
+
+  Checks two layers:
+  1. Graph status (queued/provisioning -> 409, suspended -> 403, deprovisioned -> 404)
+  2. Subscription status (grace period: reads OK, writes blocked)
+
+  Args:
+      graph_id: The graph ID to check
+      session: Database session
+      require_write: Whether a write operation is being attempted
+
+  Returns:
+      The Graph if access is allowed.
+
+  Raises:
+      HTTPException: If access is denied.
+  """
+  graph = Graph.get_by_id(graph_id, session, include_deprovisioned=True)
+
+  if not graph:
+    raise HTTPException(
+      status_code=status.HTTP_404_NOT_FOUND,
+      detail="Graph not found.",
+    )
+
+  # Layer 1: Graph lifecycle status
+  graph_status = graph.status or GraphStatus.ACTIVE.value
+
+  if graph_status == GraphStatus.DEPROVISIONED.value:
+    raise HTTPException(
+      status_code=status.HTTP_404_NOT_FOUND,
+      detail="Graph not found.",
+    )
+
+  if graph_status in (GraphStatus.QUEUED.value, GraphStatus.PROVISIONING.value):
+    raise HTTPException(
+      status_code=status.HTTP_409_CONFLICT,
+      detail="Graph is being provisioned. Please wait.",
+    )
+
+  if graph_status == GraphStatus.SUSPENDED.value:
+    raise HTTPException(
+      status_code=status.HTTP_403_FORBIDDEN,
+      detail="Subscription has ended. Resubscribe to access this graph.",
+    )
+
+  # Layer 2: Subscription check (only when billing is enabled)
+  if not env.BILLING_ENABLED:
+    return graph
+
+  # Skip subscription check for shared repositories
+  if graph.is_repository:
+    return graph
+
+  subscription = BillingSubscription.get_by_resource(
+    resource_type="graph", resource_id=graph_id, session=session
+  )
+
+  if not subscription:
+    logger.warning(f"No subscription found for graph {graph_id}")
+    return graph
+
+  if subscription.status == "canceled":
+    now = datetime.now(UTC)
+    ends_at = subscription.ends_at
+
+    if ends_at and ends_at > now:
+      # Grace period: reads OK, writes blocked
+      if require_write:
+        raise HTTPException(
+          status_code=status.HTTP_403_FORBIDDEN,
+          detail="Subscription canceled. Write operations disabled until subscription ends.",
+        )
+      return graph
+
+    # Past grace period
+    raise HTTPException(
+      status_code=status.HTTP_403_FORBIDDEN,
+      detail="Subscription has ended. Resubscribe to access this graph.",
+    )
+
+  return graph

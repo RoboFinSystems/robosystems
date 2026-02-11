@@ -61,14 +61,15 @@ class GenericGraphService:
     """
     logger.info(f"Starting graph creation for user {user_id}")
 
-    # Generate time-ordered graph ID using ULID for optimal database performance
-    # ULID provides sequential IDs that prevent B-tree fragmentation at scale
-    from ...utils.ulid import generate_ulid_hex
+    # Use pre-existing graph_id (from creation queue) or generate a new one
+    if graph_id:
+      logger.info(f"Using pre-existing graph ID: {graph_id}")
+    else:
+      from ...utils.ulid import generate_ulid_hex
 
-    unique_id = generate_ulid_hex(16)
-    graph_id = f"kg{unique_id}"
-
-    logger.info(f"Creating graph with ID: {graph_id}")
+      unique_id = generate_ulid_hex(16)
+      graph_id = f"kg{unique_id}"
+      logger.info(f"Generated new graph ID: {graph_id}")
 
     # Step 1: Validate org resource limits
     if progress_callback:
@@ -283,45 +284,78 @@ class GenericGraphService:
       db_gen = get_db_session()
       db = next(db_gen)
       try:
-        # First, create Graph entry to store metadata
-        from ...models.iam.graph import Graph
+        # Create or update Graph entry to store metadata
+        from ...models.iam.graph import Graph, GraphStatus
 
-        graph = Graph.create(
-          graph_id=graph_id,
-          graph_name=metadata.get("name", graph_id),
-          graph_type="generic",  # This is a generic graph, not a entity graph
-          org_id=org_id,
-          session=db,
-          base_schema=None
-          if custom_schema
-          else "base",  # Only set base_schema if using extensions
-          schema_extensions=schema_extensions if not custom_schema else [],
-          graph_instance_id=cluster_info.instance_id,
-          graph_cluster_region=None,  # Could be populated from cluster info if available
-          graph_metadata={
-            "created_by": user_id,
-            "description": metadata.get("description", ""),
-            "type": metadata.get("type", "generic"),
-            "tags": metadata.get("tags", []),
-            "custom_schema_name": custom_schema.get("name") if custom_schema else None,
-            "custom_schema_version": custom_schema.get("version")
-            if custom_schema
-            else None,
-            "access_level": metadata.get("access_level", "private"),
-          },
-          commit=False,
-        )
+        existing_graph = Graph.get_by_id(graph_id, db, include_deprovisioned=True)
 
-        logger.info(f"Graph metadata created: {graph}")
+        if existing_graph and existing_graph.status in (
+          GraphStatus.QUEUED.value,
+          GraphStatus.PROVISIONING.value,
+        ):
+          # Update existing queued/provisioning row (from creation queue)
+          existing_graph.graph_instance_id = cluster_info.instance_id
+          existing_graph.base_schema = None if custom_schema else "base"
+          existing_graph.schema_extensions = (
+            schema_extensions if not custom_schema else []
+          )
+          existing_metadata = {**(existing_graph.graph_metadata or {})}
+          existing_metadata.update(
+            {
+              "description": metadata.get("description", ""),
+              "type": metadata.get("type", "generic"),
+              "tags": metadata.get("tags", []),
+              "custom_schema_name": custom_schema.get("name")
+              if custom_schema
+              else None,
+              "custom_schema_version": custom_schema.get("version")
+              if custom_schema
+              else None,
+              "access_level": metadata.get("access_level", "private"),
+            }
+          )
+          existing_graph.graph_metadata = existing_metadata
+          existing_graph.transition_status(GraphStatus.ACTIVE, db)
+          graph = existing_graph
+          logger.info(f"Updated queued graph to active: {graph}")
+        else:
+          # Create new Graph entry
+          graph = Graph.create(
+            graph_id=graph_id,
+            graph_name=metadata.get("name", graph_id),
+            graph_type="generic",
+            org_id=org_id,
+            session=db,
+            base_schema=None if custom_schema else "base",
+            schema_extensions=schema_extensions if not custom_schema else [],
+            graph_instance_id=cluster_info.instance_id,
+            graph_cluster_region=None,
+            graph_metadata={
+              "created_by": user_id,
+              "description": metadata.get("description", ""),
+              "type": metadata.get("type", "generic"),
+              "tags": metadata.get("tags", []),
+              "custom_schema_name": custom_schema.get("name")
+              if custom_schema
+              else None,
+              "custom_schema_version": custom_schema.get("version")
+              if custom_schema
+              else None,
+              "access_level": metadata.get("access_level", "private"),
+            },
+            commit=False,
+          )
 
-        # Then create GraphUser relationship
-        user_graph = GraphUser(
-          user_id=user_id,
-          graph_id=graph_id,
-          role="admin",  # Owner gets admin role
-          is_selected=True,  # Set as selected graph for the user
-        )
-        db.add(user_graph)
+          logger.info(f"Graph metadata created: {graph}")
+
+          # Create GraphUser relationship (only for new graphs)
+          user_graph = GraphUser(
+            user_id=user_id,
+            graph_id=graph_id,
+            role="admin",
+            is_selected=True,
+          )
+          db.add(user_graph)
 
         # Ensure pending Graph insert is flushed before creating schema records
         db.flush()

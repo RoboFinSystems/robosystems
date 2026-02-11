@@ -26,6 +26,7 @@ from ...config.shared_repositories import (
 )
 from ...middleware.graph.types import parse_graph_id
 from ...models.iam import (
+  Graph,
   GraphCredits,
   GraphCreditTransaction,
   GraphUser,
@@ -682,6 +683,11 @@ class CreditService:
     total_credits = Decimal("0")
 
     for credits in due_allocations:
+      # Skip non-active graphs (suspended, canceled, etc.)
+      graph = Graph.get_by_id(credits.graph_id, self.session)
+      if not graph or not graph.is_active:
+        continue
+
       if credits.allocate_monthly_credits(self.session):
         allocated_count += 1
         total_credits += credits.monthly_allocation

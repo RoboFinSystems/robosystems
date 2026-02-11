@@ -445,6 +445,20 @@ async def _handle_subscription_updated(
     subscription.canceled_at = None
     subscription.ends_at = None
     subscription.updated_at = datetime.now(UTC)
+
+    # Restore graph if it was suspended
+    if subscription.resource_type == "graph" and subscription.resource_id:
+      from robosystems.models.iam.graph import Graph, GraphStatus
+
+      graph = Graph.get_by_id(
+        subscription.resource_id, db_session, include_deprovisioned=True
+      )
+      if graph and graph.status == GraphStatus.SUSPENDED.value:
+        graph.transition_status(GraphStatus.ACTIVE, db_session)
+        context.log.info(
+          f"Restored graph {subscription.resource_id} from suspended to active"
+        )
+
     db_session.commit()
     context.log.info(f"Subscription {subscription.id} reactivated via Stripe portal")
     return

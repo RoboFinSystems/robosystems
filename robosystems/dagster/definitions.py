@@ -47,6 +47,9 @@ from robosystems.dagster.jobs.graph import (
   stage_file_job,
   wait_and_create_graph_job,
 )
+from robosystems.dagster.jobs.graph_lifecycle import (
+  suspend_expired_graphs_job,
+)
 from robosystems.dagster.jobs.infrastructure import (
   full_instance_maintenance_job,
   full_instance_maintenance_schedule,
@@ -75,6 +78,12 @@ from robosystems.dagster.resources import (
   DatabaseResource,
   GraphResource,
   S3Resource,
+)
+from robosystems.dagster.sensors.graph_lifecycle import (
+  expired_graph_subscription_sensor,
+)
+from robosystems.dagster.sensors.graph_queue import (
+  graph_creation_queue_sensor,
 )
 
 # === FORK: Add your adapter pipelines here ===
@@ -138,6 +147,8 @@ all_jobs = [
   materialize_file_job,
   materialize_graph_job,
   wait_and_create_graph_job,
+  # Platform: Graph lifecycle
+  suspend_expired_graphs_job,
   # Platform: Shared repository
   shared_repository_s3_sync_job,
   shared_repository_s3_upload_only_job,
@@ -165,6 +176,9 @@ all_schedules = [
 ]
 
 all_sensors = [
+  # Platform: Graph lifecycle
+  graph_creation_queue_sensor,
+  expired_graph_subscription_sensor,
   # Adapter: SEC pipeline
   *sec["sensors"],
 ]

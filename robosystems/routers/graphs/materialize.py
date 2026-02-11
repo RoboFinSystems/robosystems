@@ -416,7 +416,12 @@ async def materialize_graph(
   from robosystems.config.constants import INGESTION_LOCK_TTL
   from robosystems.config.valkey_registry import ValkeyDatabase, create_redis_client
   from robosystems.middleware.auth.distributed_lock import DistributedLock
+
+  # Enforce graph lifecycle and subscription status (write operation)
+  from robosystems.middleware.billing.enforcement import require_graph_access
   from robosystems.middleware.sse.event_storage import get_event_storage
+
+  require_graph_access(graph_id, db, require_write=True)
 
   circuit_breaker.check_circuit(graph_id, "graph_materialization")
 
