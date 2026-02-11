@@ -959,3 +959,497 @@ class TestSSMExecutor:
       assert stderr == ""
       assert exit_code == 0
       assert mock_run.call_count == 5
+
+
+# ---------------------------------------------------------------------------
+# Instances Commands
+# ---------------------------------------------------------------------------
+def _make_instance(
+  instance_id="i-0abc123",
+  tier="ladybug-standard",
+  status="healthy",
+  database_count=2,
+  max_databases=10,
+  instance_type="r7g.large",
+  az="us-east-1a",
+):
+  """Helper to build a DynamoDB instance-registry item."""
+  from decimal import Decimal
+
+  return {
+    "instance_id": instance_id,
+    "cluster_tier": tier,
+    "tier": tier,
+    "status": status,
+    "database_count": Decimal(database_count),
+    "max_databases": Decimal(max_databases),
+    "instance_type": instance_type,
+    "availability_zone": az,
+    "private_ip": "10.0.1.100",
+    "node_type": "writer",
+    "backend_type": "ladybug",
+    "last_health_check": "2026-02-11T10:00:00Z",
+    "launch_time": "2026-02-10T08:00:00Z",
+    "stack_name": "RoboSystemsGraphStaging",
+    "created_at": "2026-02-10T08:00:00Z",
+  }
+
+
+def _make_graph(
+  graph_id="kg1234567890abcdef", instance_id="i-0abc123", status="active"
+):
+  return {
+    "graph_id": graph_id,
+    "instance_id": instance_id,
+    "status": status,
+    "created_at": "2026-02-10T09:00:00Z",
+    "last_accessed": "2026-02-11T09:00:00Z",
+  }
+
+
+def _make_asg(
+  desired=2,
+  min_size=1,
+  max_size=4,
+  name="robosystems-ladybug-standard-writers-staging-asg",
+):
+  return {
+    "AutoScalingGroupName": name,
+    "DesiredCapacity": desired,
+    "MinSize": min_size,
+    "MaxSize": max_size,
+  }
+
+
+@pytest.fixture
+def mock_boto3_session():
+  """Mock boto3.Session to avoid real AWS calls."""
+  with patch(
+    "robosystems.admin.cli.InstancesHelper.__init__", return_value=None
+  ) as mock_init:
+    yield mock_init
+
+
+class TestInstancesCommands:
+  def test_list_requires_non_dev(self, runner):
+    result = runner.invoke(cli, ["-e", "dev", "instances", "list"])
+    assert result.exit_code != 0
+    assert "staging or prod" in result.output
+
+  def test_list_shows_instances(self, runner):
+    instances = [
+      _make_instance("i-001", "ladybug-standard", database_count=3),
+      _make_instance("i-002", "ladybug-standard", database_count=0),
+      _make_instance("i-003", "ladybug-large", database_count=1),
+    ]
+    asgs = {
+      "ladybug-standard": _make_asg(desired=2, min_size=1, max_size=4),
+      "ladybug-large": _make_asg(
+        desired=1,
+        min_size=0,
+        max_size=2,
+        name="robosystems-ladybug-large-writers-staging-asg",
+      ),
+      "ladybug-xlarge": None,
+      "ladybug-shared": None,
+      "shared-replicas": None,
+    }
+
+    with patch("robosystems.admin.cli.InstancesHelper") as MockHelper:
+      helper = MagicMock()
+      helper.get_all_instances.return_value = instances
+      helper.get_all_asg_info.return_value = asgs
+      MockHelper.return_value = helper
+
+      result = runner.invoke(cli, ["-e", "staging", "instances", "list"])
+      assert result.exit_code == 0
+      assert "i-001" in result.output
+      assert "i-002" in result.output
+      assert "i-003" in result.output
+      assert "Total instances:" in result.output
+
+  def test_info_shows_instance_details(self, runner):
+    inst = _make_instance("i-0abc123", "ladybug-standard", database_count=2)
+    graphs = [
+      _make_graph("kg1111111111111111", "i-0abc123"),
+      _make_graph("kg2222222222222222", "i-0abc123"),
+    ]
+    asg = _make_asg()
+
+    with patch("robosystems.admin.cli.InstancesHelper") as MockHelper:
+      helper = MagicMock()
+      helper.get_instance.return_value = inst
+      helper.get_graphs_for_instance.return_value = graphs
+      helper.get_asg_info.return_value = asg
+      MockHelper.return_value = helper
+
+      result = runner.invoke(cli, ["-e", "staging", "instances", "info", "i-0abc123"])
+      assert result.exit_code == 0
+      assert "i-0abc123" in result.output
+      assert "ladybug-standard" in result.output
+      assert "kg1111111111111111" in result.output
+      assert "kg2222222222222222" in result.output
+
+  def test_info_instance_not_found(self, runner):
+    with patch("robosystems.admin.cli.InstancesHelper") as MockHelper:
+      helper = MagicMock()
+      helper.get_instance.return_value = None
+      MockHelper.return_value = helper
+
+      result = runner.invoke(
+        cli, ["-e", "staging", "instances", "info", "i-nonexistent"]
+      )
+      assert result.exit_code != 0
+      assert "not found" in result.output
+
+  def test_scale_basic(self, runner):
+    asg = _make_asg(desired=1, min_size=1, max_size=4)
+    instances = [
+      _make_instance("i-001", "ladybug-standard", database_count=1),
+    ]
+
+    with patch("robosystems.admin.cli.InstancesHelper") as MockHelper:
+      helper = MagicMock()
+      helper.get_asg_info.return_value = asg
+      helper.get_all_instances.return_value = instances
+      helper._asg_name.return_value = "robosystems-ladybug-standard-writers-staging-asg"
+      MockHelper.return_value = helper
+
+      result = runner.invoke(
+        cli,
+        ["-e", "staging", "instances", "scale", "ladybug-standard", "2", "--force"],
+      )
+      assert result.exit_code == 0
+      helper.scale_asg.assert_called_once_with(
+        "ladybug-standard", 2, min_size=None, max_size=None
+      )
+
+  def test_scale_with_min_max(self, runner):
+    asg = _make_asg(desired=1, min_size=1, max_size=4)
+    instances = [
+      _make_instance("i-001", "ladybug-standard", database_count=1),
+    ]
+
+    with patch("robosystems.admin.cli.InstancesHelper") as MockHelper:
+      helper = MagicMock()
+      helper.get_asg_info.return_value = asg
+      helper.get_all_instances.return_value = instances
+      helper._asg_name.return_value = "robosystems-ladybug-standard-writers-staging-asg"
+      helper._gha_var_name.side_effect = lambda tier, param: (
+        f"LBUG_STANDARD_{param}_INSTANCES_STAGING"
+      )
+      helper.sync_gha_variable.return_value = True
+      MockHelper.return_value = helper
+
+      result = runner.invoke(
+        cli,
+        [
+          "-e",
+          "staging",
+          "instances",
+          "scale",
+          "ladybug-standard",
+          "3",
+          "--min",
+          "2",
+          "--max",
+          "6",
+          "--force",
+        ],
+      )
+      assert result.exit_code == 0
+      helper.scale_asg.assert_called_once_with(
+        "ladybug-standard", 3, min_size=2, max_size=6
+      )
+      assert helper.sync_gha_variable.call_count == 2
+
+  def test_scale_rejects_desired_above_max(self, runner):
+    asg = _make_asg(desired=2, min_size=1, max_size=4)
+
+    with patch("robosystems.admin.cli.InstancesHelper") as MockHelper:
+      helper = MagicMock()
+      helper.get_asg_info.return_value = asg
+      helper._asg_name.return_value = "robosystems-ladybug-standard-writers-staging-asg"
+      MockHelper.return_value = helper
+
+      result = runner.invoke(
+        cli,
+        ["-e", "staging", "instances", "scale", "ladybug-standard", "10", "--force"],
+      )
+      assert result.exit_code != 0
+      assert "exceeds max size" in result.output
+
+  def test_scale_rejects_killing_active_graphs(self, runner):
+    asg = _make_asg(desired=3, min_size=0, max_size=4)
+    instances = [
+      _make_instance("i-001", "ladybug-standard", database_count=2),
+      _make_instance("i-002", "ladybug-standard", database_count=1),
+      _make_instance("i-003", "ladybug-standard", database_count=0),
+    ]
+
+    with patch("robosystems.admin.cli.InstancesHelper") as MockHelper:
+      helper = MagicMock()
+      helper.get_asg_info.return_value = asg
+      helper.get_all_instances.return_value = instances
+      helper._asg_name.return_value = "robosystems-ladybug-standard-writers-staging-asg"
+      MockHelper.return_value = helper
+
+      result = runner.invoke(
+        cli,
+        ["-e", "staging", "instances", "scale", "ladybug-standard", "1", "--force"],
+      )
+      assert result.exit_code != 0
+      assert "active graphs" in result.output
+
+  def test_scale_rejects_killing_active_shared_replicas(self, runner):
+    """shared-replicas instances have cluster_tier=ladybug-shared + node_type=shared_replica."""
+    asg = _make_asg(
+      desired=2, min_size=0, max_size=5, name="robosystems-shared-replicas-staging-asg"
+    )
+    instances = [
+      {
+        **_make_instance("i-011", "ladybug-shared", database_count=1),
+        "node_type": "shared_replica",
+      },
+      {
+        **_make_instance("i-012", "ladybug-shared", database_count=1),
+        "node_type": "shared_replica",
+      },
+    ]
+
+    with patch("robosystems.admin.cli.InstancesHelper") as MockHelper:
+      helper = MagicMock()
+      helper.get_asg_info.return_value = asg
+      helper.get_all_instances.return_value = instances
+      helper._asg_name.return_value = "robosystems-shared-replicas-staging-asg"
+      MockHelper.return_value = helper
+
+      result = runner.invoke(
+        cli,
+        ["-e", "staging", "instances", "scale", "shared-replicas", "1", "--force"],
+      )
+      assert result.exit_code != 0
+      assert "active graphs" in result.output
+
+  def test_scale_invalid_tier(self, runner):
+    result = runner.invoke(
+      cli,
+      ["-e", "staging", "instances", "scale", "invalid-tier", "2", "--force"],
+    )
+    assert result.exit_code != 0
+
+  def test_cleanup_no_empty_instances(self, runner):
+    instances = [
+      _make_instance("i-001", "ladybug-standard", database_count=3),
+    ]
+    graphs = [
+      _make_graph("kg1111111111111111", "i-001"),
+    ]
+
+    with patch("robosystems.admin.cli.InstancesHelper") as MockHelper:
+      helper = MagicMock()
+      helper.get_all_instances.return_value = instances
+      helper.get_all_graphs.return_value = graphs
+      MockHelper.return_value = helper
+
+      result = runner.invoke(cli, ["-e", "staging", "instances", "cleanup"])
+      assert result.exit_code == 0
+      assert "No empty instances found" in result.output
+
+  def test_cleanup_terminates_empty_with_force(self, runner):
+    instances = [
+      _make_instance("i-001", "ladybug-standard", database_count=3),
+      _make_instance("i-002", "ladybug-standard", database_count=0),
+    ]
+    graphs = [
+      _make_graph("kg1111111111111111", "i-001"),
+    ]
+    asgs = {
+      "ladybug-standard": _make_asg(desired=2, min_size=1, max_size=4),
+      "ladybug-large": None,
+      "ladybug-xlarge": None,
+      "ladybug-shared": None,
+      "shared-replicas": None,
+    }
+
+    with patch("robosystems.admin.cli.InstancesHelper") as MockHelper:
+      helper = MagicMock()
+      helper.get_all_instances.return_value = instances
+      helper.get_all_graphs.return_value = graphs
+      helper.get_all_asg_info.return_value = asgs
+      MockHelper.return_value = helper
+
+      result = runner.invoke(cli, ["-e", "staging", "instances", "cleanup", "--force"])
+      assert result.exit_code == 0
+      helper.terminate_instance.assert_called_once_with("i-002")
+      assert "Terminated i-002" in result.output
+
+  def test_cleanup_requires_non_dev(self, runner):
+    result = runner.invoke(cli, ["-e", "dev", "instances", "cleanup"])
+    assert result.exit_code != 0
+    assert "staging or prod" in result.output
+
+  def test_list_groups_replicas_separately(self, runner):
+    """Shared replicas (node_type=shared_replica) appear under shared-replicas, not ladybug-shared."""
+    instances = [
+      # shared writer
+      {
+        **_make_instance("i-010", "ladybug-shared", database_count=1),
+        "node_type": "shared_master",
+      },
+      # shared replica
+      {
+        **_make_instance("i-011", "ladybug-shared", database_count=1),
+        "node_type": "shared_replica",
+      },
+    ]
+    asgs = {
+      "ladybug-standard": None,
+      "ladybug-large": None,
+      "ladybug-xlarge": None,
+      "ladybug-shared": _make_asg(
+        desired=1,
+        min_size=1,
+        max_size=1,
+        name="robosystems-ladybug-shared-writers-staging-asg",
+      ),
+      "shared-replicas": _make_asg(
+        desired=1,
+        min_size=1,
+        max_size=3,
+        name="robosystems-shared-replicas-staging-asg",
+      ),
+    }
+
+    with patch("robosystems.admin.cli.InstancesHelper") as MockHelper:
+      helper = MagicMock()
+      helper.get_all_instances.return_value = instances
+      helper.get_all_asg_info.return_value = asgs
+      MockHelper.return_value = helper
+
+      result = runner.invoke(cli, ["-e", "staging", "instances", "list"])
+      assert result.exit_code == 0
+      # Both should appear in the output
+      assert "i-010" in result.output
+      assert "i-011" in result.output
+      # The shared-replicas group header should appear
+      assert "shared-replicas" in result.output
+
+  def test_scale_shared_replicas(self, runner):
+    asg = _make_asg(
+      desired=1, min_size=1, max_size=5, name="robosystems-shared-replicas-staging-asg"
+    )
+    # Replicas register as ladybug-shared / shared_replica
+    instances = [
+      {
+        **_make_instance("i-011", "ladybug-shared", database_count=1),
+        "node_type": "shared_replica",
+      },
+    ]
+
+    with patch("robosystems.admin.cli.InstancesHelper") as MockHelper:
+      helper = MagicMock()
+      helper.get_asg_info.return_value = asg
+      helper.get_all_instances.return_value = instances
+      helper._asg_name.return_value = "robosystems-shared-replicas-staging-asg"
+      helper._gha_var_name.side_effect = lambda group, param: (
+        f"SHARED_REPLICAS_{param}_INSTANCES_STAGING"
+      )
+      helper.sync_gha_variable.return_value = True
+      MockHelper.return_value = helper
+
+      result = runner.invoke(
+        cli,
+        [
+          "-e",
+          "staging",
+          "instances",
+          "scale",
+          "shared-replicas",
+          "3",
+          "--max",
+          "5",
+          "--force",
+        ],
+      )
+      assert result.exit_code == 0
+      helper.scale_asg.assert_called_once_with(
+        "shared-replicas", 3, min_size=None, max_size=5
+      )
+      helper.sync_gha_variable.assert_called_once()
+
+
+class TestInstancesHelper:
+  def test_asg_name_writers(self):
+    from robosystems.admin.cli import InstancesHelper
+
+    with patch.object(InstancesHelper, "__init__", return_value=None):
+      helper = InstancesHelper.__new__(InstancesHelper)
+      helper.environment = "staging"
+      assert (
+        helper._asg_name("ladybug-standard")
+        == "robosystems-ladybug-standard-writers-staging-asg"
+      )
+      assert (
+        helper._asg_name("ladybug-large")
+        == "robosystems-ladybug-large-writers-staging-asg"
+      )
+
+  def test_asg_name_shared_replicas(self):
+    from robosystems.admin.cli import InstancesHelper
+
+    with patch.object(InstancesHelper, "__init__", return_value=None):
+      helper = InstancesHelper.__new__(InstancesHelper)
+      helper.environment = "prod"
+      assert (
+        helper._asg_name("shared-replicas") == "robosystems-shared-replicas-prod-asg"
+      )
+
+  def test_gha_var_name_writers(self):
+    from robosystems.admin.cli import InstancesHelper
+
+    with patch.object(InstancesHelper, "__init__", return_value=None):
+      helper = InstancesHelper.__new__(InstancesHelper)
+      helper.environment = "prod"
+      assert (
+        helper._gha_var_name("ladybug-standard", "MIN")
+        == "LBUG_STANDARD_MIN_INSTANCES_PROD"
+      )
+      assert (
+        helper._gha_var_name("ladybug-xlarge", "MAX")
+        == "LBUG_XLARGE_MAX_INSTANCES_PROD"
+      )
+      assert (
+        helper._gha_var_name("ladybug-shared", "MIN")
+        == "LBUG_SHARED_MIN_INSTANCES_PROD"
+      )
+
+  def test_gha_var_name_shared_replicas(self):
+    from robosystems.admin.cli import InstancesHelper
+
+    with patch.object(InstancesHelper, "__init__", return_value=None):
+      helper = InstancesHelper.__new__(InstancesHelper)
+      helper.environment = "prod"
+      assert (
+        helper._gha_var_name("shared-replicas", "MIN")
+        == "SHARED_REPLICAS_MIN_INSTANCES_PROD"
+      )
+      assert (
+        helper._gha_var_name("shared-replicas", "MAX")
+        == "SHARED_REPLICAS_MAX_INSTANCES_PROD"
+      )
+
+  def test_gha_var_name_staging(self):
+    from robosystems.admin.cli import InstancesHelper
+
+    with patch.object(InstancesHelper, "__init__", return_value=None):
+      helper = InstancesHelper.__new__(InstancesHelper)
+      helper.environment = "staging"
+      assert (
+        helper._gha_var_name("ladybug-large", "MAX")
+        == "LBUG_LARGE_MAX_INSTANCES_STAGING"
+      )
+      assert (
+        helper._gha_var_name("shared-replicas", "MIN")
+        == "SHARED_REPLICAS_MIN_INSTANCES_STAGING"
+      )

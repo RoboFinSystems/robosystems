@@ -72,18 +72,18 @@ Complete accounting system with chart of accounts, transactions, and financial s
 # Run with new graph (default)
 just demo-accounting
 
-# Run with existing graph reuse
-just demo-accounting "reuse-graph"
+# Create new user and graph
+just demo-accounting new-user,new-graph
 
-# Specify custom API URL
-just demo-accounting "new-graph" "http://api.robosystems.ai"
+# Skip verification queries
+just demo-accounting skip-queries
 ```
 
 **What It Creates:**
 - 1 Entity (Acme Consulting LLC - fictional consulting company)
 - 20 Accounts (complete chart of accounts)
-- ~30 Transactions (6 months of business activity)
-- ~60 Line Items (double-entry journal entries)
+- ~180 Transactions (6 months of business activity)
+- ~360 Line Items (double-entry journal entries)
 
 **Example Data:**
 - Monthly rent payments ($3,000)
@@ -117,11 +117,11 @@ Demonstrates custom schema creation with people, companies, and projects.
 # Run with new graph (default)
 just demo-custom-graph
 
-# Run with existing graph reuse
-just demo-custom-graph "reuse-graph"
+# Create new user and graph
+just demo-custom-graph new-user,new-graph
 
-# Specify custom API URL
-just demo-custom-graph "new-graph" "http://api.robosystems.ai"
+# Skip verification queries
+just demo-custom-graph skip-queries
 ```
 
 **What It Creates:**
@@ -129,8 +129,8 @@ just demo-custom-graph "new-graph" "http://api.robosystems.ai"
 - 10 Company nodes (name, industry, location, size)
 - 15 Project nodes (name, description, status, budget)
 - PERSON_WORKS_FOR_COMPANY relationships (employment)
-- PERSON_COLLABORATES_WITH_PERSON relationships (partnerships)
-- PERSON_PARTICIPATES_IN_PROJECT relationships (project teams)
+- PERSON_WORKS_ON_PROJECT relationships (project teams)
+- COMPANY_SPONSORS_PROJECT relationships (sponsorship)
 
 **What It Does:**
 1. Sets up user credentials (or reuses existing)
@@ -144,6 +144,40 @@ just demo-custom-graph "new-graph" "http://api.robosystems.ai"
 **Documentation:** See [README.md](custom_graph_demo/README.md) for step-by-step guide
 
 **Customization:** Edit `schema.json` to define your own node types and relationships
+
+### 4. Element Mapping Demo - CoA to US-GAAP Aggregation
+
+Demonstrates mapping a Chart of Accounts to US-GAAP taxonomy elements using subgraphs and views.
+
+**Features:**
+- Chart of Accounts to US-GAAP element mapping
+- Subgraph workspace creation
+- View generation with aggregation
+- Materialized report saving
+
+**Usage:**
+```bash
+# Run with new graph (default)
+just demo-element-mapping
+
+# Create new user and graph
+just demo-element-mapping new-user,new-graph
+
+# Skip verification queries
+just demo-element-mapping skip-queries
+```
+
+**What It Does:**
+1. Sets up user credentials (or reuses existing)
+2. Creates graph with accounting schema
+3. Generates accounting data with element mappings
+4. Uploads and ingests via staging tables
+5. Creates subgraph workspace with CoA to US-GAAP mappings
+6. Tests view generation and saves materialized reports
+
+**Location:** `/examples/element_mapping_demo/`
+
+**Documentation:** See [README.md](element_mapping_demo/README.md) for detailed guide
 
 ## Credential Management
 
@@ -167,24 +201,26 @@ just demo-user --force
 
 ## Demo Flags
 
-Most demos accept flags to control behavior:
+Most demos accept comma-separated flags to control behavior. Default behavior reuses existing credentials and graph.
 
 **Available Flags:**
-- `new-graph` - Create a new graph (default)
-- `reuse-graph` - Reuse existing graph from config
-- `new-user` - Create a new user
-- `reuse-user` - Reuse existing user from config
+- `new-user` - Create a new user (implies `new-graph`)
+- `new-graph` - Create a new graph
+- `skip-queries` - Skip verification queries after ingestion
 
 **Examples:**
 ```bash
-# Create new graph, reuse existing user
-just demo-accounting "new-graph,reuse-user"
-
-# Reuse both graph and user
-just demo-custom-graph "reuse-graph,reuse-user"
-
-# Create new graph (default behavior)
+# Default: reuse existing user and graph, regenerate data
 just demo-accounting
+
+# Create new graph for existing user
+just demo-accounting new-graph
+
+# Create new user and graph
+just demo-accounting new-user,new-graph
+
+# Skip queries
+just demo-custom-graph skip-queries
 ```
 
 ## Running Individual Steps
@@ -244,8 +280,8 @@ Example Query Results:
 ```
 
 **Common Issues:**
-- "User already exists" - Use `reuse-user` flag or run with `--force`
-- "Graph already exists" - Use `reuse-graph` flag
+- "User already exists" - Default behavior reuses existing user, or use `new-user` flag
+- "Graph already exists" - Default behavior reuses existing graph, or use `new-graph` flag
 - "API connection failed" - Ensure RoboSystems is running (`just start`)
 - "Permission denied" - Check credentials in config.json
 
@@ -282,4 +318,4 @@ After running the demos:
 For issues or questions:
 - [GitHub Issues](https://github.com/RoboFinSystems/robosystems/issues)
 - [Discussions](https://github.com/RoboFinSystems/robosystems/discussions)
-- Check logs: `just logs robosystems-api` or `just logs robosystems-worker`
+- Check logs: `just logs api` or `just logs worker`
