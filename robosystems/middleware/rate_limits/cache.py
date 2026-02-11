@@ -11,7 +11,7 @@ from ...logger import logger
 
 
 class RateLimitCache:
-  """Manages rate limiting using Valkey/Redis DB 7."""
+  """Manages rate limiting using Valkey/Redis DB 1."""
 
   # Rate limiting configuration
   RATE_LIMIT_PREFIX = "rate_limit:"

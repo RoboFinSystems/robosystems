@@ -1,20 +1,19 @@
-"""Credit system caching using Valkey/Redis."""
+"""Credit system caching using in-memory TTL cache."""
 
+import fnmatch
 import json
-from datetime import UTC, datetime
+import threading
+import time
 from decimal import Decimal
 from typing import Any, cast
 
-import redis
-
 from ...config.defaults import CacheDefaults
 from ...config.tuning import TuningConfig
-from ...config.valkey_registry import ValkeyDatabase, create_redis_client
 from ...logger import logger
 
 
 class CreditCache:
-  """Manages credit balance and transaction caching in Valkey/Redis."""
+  """Manages credit balance and transaction caching in-memory with TTL."""
 
   # Cache configuration
   CACHE_KEY_PREFIX = "credits:"
@@ -24,8 +23,10 @@ class CreditCache:
   OPERATION_COST_PREFIX = "op_cost:"
 
   def __init__(self):
-    """Initialize Redis connection for credit caching."""
-    self._redis = None
+    """Initialize in-memory cache for credit caching."""
+    # Internal store: key -> (json_value, expires_at)
+    self._store: dict[str, tuple[str, float]] = {}
+    self._lock = threading.Lock()
 
     # TTL configuration - using TuningConfig for runtime tunability via SSM
     self.balance_ttl = TuningConfig.get_cache_balance_ttl()
@@ -34,20 +35,55 @@ class CreditCache:
       CacheDefaults.OPERATION_COST_TTL
     )  # Not tunable (rarely changes)
 
-  @property
-  def redis(self) -> redis.Redis:
-    """Get Redis connection, creating if needed."""
-    if self._redis is None:
-      try:
-        # Use the new connection factory with proper ElastiCache support
-        self._redis = create_redis_client(ValkeyDatabase.CREDITS)
-        # Test connection
-        self._redis.ping()
-        logger.info("Connected to Valkey/Redis for credit caching")
-      except Exception as e:
-        logger.error(f"Failed to connect to Valkey/Redis for credit caching: {e}")
-        raise
-    return self._redis
+  def _get(self, key: str) -> str | None:
+    """Get a value from cache, returning None if expired or missing."""
+    with self._lock:
+      entry = self._store.get(key)
+      if entry is None:
+        return None
+      value, expires_at = entry
+      if time.time() > expires_at:
+        del self._store[key]
+        return None
+      return value
+
+  def _setex(self, key: str, ttl: int, value: str) -> None:
+    """Set a value with TTL (seconds)."""
+    with self._lock:
+      self._store[key] = (value, time.time() + ttl)
+
+  def _delete(self, *keys: str) -> int:
+    """Delete keys, returning count of keys actually removed."""
+    deleted = 0
+    with self._lock:
+      for key in keys:
+        if key in self._store:
+          del self._store[key]
+          deleted += 1
+    return deleted
+
+  def _keys(self, pattern: str) -> list[str]:
+    """Return keys matching a glob pattern."""
+    now = time.time()
+    with self._lock:
+      return [
+        k
+        for k, (_, expires_at) in self._store.items()
+        if expires_at > now and fnmatch.fnmatch(k, pattern)
+      ]
+
+  def _ttl(self, key: str) -> int:
+    """Return remaining TTL in seconds, or -2 if key doesn't exist."""
+    with self._lock:
+      entry = self._store.get(key)
+      if entry is None:
+        return -2
+      _, expires_at = entry
+      remaining = int(expires_at - time.time())
+      if remaining <= 0:
+        del self._store[key]
+        return -2
+      return remaining
 
   def _get_graph_credit_key(self, graph_id: str) -> str:
     """Get cache key for graph credit balance."""
@@ -78,13 +114,15 @@ class CreditCache:
     """
     try:
       cache_key = self._get_graph_credit_key(graph_id)
+      from datetime import UTC, datetime
+
       cache_data = {
         "balance": str(balance),
         "graph_tier": graph_tier,
         "cached_at": datetime.now(UTC).isoformat(),
       }
 
-      self.redis.setex(cache_key, self.balance_ttl, json.dumps(cache_data))
+      self._setex(cache_key, self.balance_ttl, json.dumps(cache_data))
       logger.debug(f"Cached graph credit balance for {graph_id}: {balance}")
 
     except Exception as e:
@@ -101,7 +139,7 @@ class CreditCache:
     """
     try:
       cache_key = self._get_graph_credit_key(graph_id)
-      cached_data = self.redis.get(cache_key)
+      cached_data = self._get(cache_key)
 
       if cached_data:
         data = json.loads(str(cached_data))
@@ -128,7 +166,7 @@ class CreditCache:
     """
     try:
       cache_key = self._get_graph_credit_key(graph_id)
-      cached_data = self.redis.get(cache_key)
+      cached_data = self._get(cache_key)
 
       if cached_data:
         data = json.loads(str(cached_data))
@@ -136,13 +174,15 @@ class CreditCache:
         new_balance = current_balance - credits_consumed
 
         # Update the cache with new balance
+        from datetime import UTC, datetime
+
         data["balance"] = str(new_balance)
         data["updated_at"] = datetime.now(UTC).isoformat()
 
         # Get remaining TTL and preserve it
-        ttl = cast(int, self.redis.ttl(cache_key))
+        ttl = cast(int, self._ttl(cache_key))
         if ttl > 0:
-          self.redis.setex(cache_key, ttl, json.dumps(data))
+          self._setex(cache_key, ttl, json.dumps(data))
           logger.debug(f"Updated cached balance for {graph_id}: {new_balance}")
 
     except Exception as e:
@@ -164,7 +204,7 @@ class CreditCache:
         if key in summary_copy:
           summary_copy[key] = str(summary_copy[key])
 
-      self.redis.setex(cache_key, self.summary_ttl, json.dumps(summary_copy))
+      self._setex(cache_key, self.summary_ttl, json.dumps(summary_copy))
       logger.debug(f"Cached credit summary for graph {graph_id}")
 
     except Exception as e:
@@ -174,7 +214,7 @@ class CreditCache:
     """Get cached credit summary for a graph."""
     try:
       cache_key = self._get_credit_summary_key(graph_id)
-      cached_data = self.redis.get(cache_key)
+      cached_data = self._get(cache_key)
 
       if cached_data:
         summary = json.loads(str(cached_data))
@@ -201,7 +241,7 @@ class CreditCache:
     """Cache operation cost for quick lookup."""
     try:
       cache_key = self._get_operation_cost_key(operation_type)
-      self.redis.setex(cache_key, self.operation_cost_ttl, str(cost))
+      self._setex(cache_key, self.operation_cost_ttl, str(cost))
       logger.debug(f"Cached operation cost for {operation_type}: {cost}")
 
     except Exception as e:
@@ -211,7 +251,7 @@ class CreditCache:
     """Get cached operation cost."""
     try:
       cache_key = self._get_operation_cost_key(operation_type)
-      cached_cost = self.redis.get(cache_key)
+      cached_cost = self._get(cache_key)
 
       if cached_cost:
         logger.debug(f"Operation cost cache hit for {operation_type}")
@@ -228,11 +268,11 @@ class CreditCache:
     """Invalidate cached credit balance for a graph."""
     try:
       cache_key = self._get_graph_credit_key(graph_id)
-      deleted = cast(int, self.redis.delete(cache_key))
+      deleted = self._delete(cache_key)
 
       # Also invalidate summary since it contains balance
       summary_key = self._get_credit_summary_key(graph_id)
-      deleted += cast(int, self.redis.delete(summary_key))
+      deleted += self._delete(summary_key)
 
       if deleted:
         logger.info(f"Invalidated credit cache for graph {graph_id}")
@@ -244,16 +284,14 @@ class CreditCache:
     """Invalidate all cached graph credit data (for monthly allocation)."""
     try:
       # Delete all graph credit balance keys
-      balance_pattern = f"{self.GRAPH_CREDIT_PREFIX}*"
-      balance_keys = cast(list, self.redis.keys(balance_pattern)) or []
+      balance_keys = self._keys(f"{self.GRAPH_CREDIT_PREFIX}*")
 
       # Delete all credit summary keys
-      summary_pattern = f"{self.CREDIT_SUMMARY_PREFIX}*"
-      summary_keys = cast(list, self.redis.keys(summary_pattern)) or []
+      summary_keys = self._keys(f"{self.CREDIT_SUMMARY_PREFIX}*")
 
       all_keys = balance_keys + summary_keys
       if all_keys:
-        deleted = self.redis.delete(*all_keys)
+        deleted = self._delete(*all_keys)
         logger.info(f"Invalidated {deleted} credit cache entries")
 
     except Exception as e:
@@ -272,19 +310,11 @@ class CreditCache:
   def get_cache_stats(self) -> dict[str, Any]:
     """Get credit cache statistics."""
     try:
-      info = self.redis.info()
-
       # Count different types of cached entries
-      graph_balance_keys = (
-        cast(list, self.redis.keys(f"{self.GRAPH_CREDIT_PREFIX}*")) or []
-      )
-      shared_balance_keys = (
-        cast(list, self.redis.keys(f"{self.SHARED_CREDIT_PREFIX}*")) or []
-      )
-      summary_keys = cast(list, self.redis.keys(f"{self.CREDIT_SUMMARY_PREFIX}*")) or []
-      operation_cost_keys = (
-        cast(list, self.redis.keys(f"{self.OPERATION_COST_PREFIX}*")) or []
-      )
+      graph_balance_keys = self._keys(f"{self.GRAPH_CREDIT_PREFIX}*")
+      shared_balance_keys = self._keys(f"{self.SHARED_CREDIT_PREFIX}*")
+      summary_keys = self._keys(f"{self.CREDIT_SUMMARY_PREFIX}*")
+      operation_cost_keys = self._keys(f"{self.OPERATION_COST_PREFIX}*")
       graph_balance_count = len(graph_balance_keys)
       shared_balance_count = len(shared_balance_keys)
       summary_count = len(summary_keys)
@@ -292,12 +322,7 @@ class CreditCache:
 
       return {
         "connected": True,
-        "redis_info": {
-          "used_memory_human": cast(dict, info or {}).get("used_memory_human"),
-          "connected_clients": cast(dict, info or {}).get("connected_clients"),
-          "keyspace_hits": cast(dict, info or {}).get("keyspace_hits"),
-          "keyspace_misses": cast(dict, info or {}).get("keyspace_misses"),
-        },
+        "cache_type": "in-memory",
         "cache_counts": {
           "graph_balances": graph_balance_count,
           "shared_balances": shared_balance_count,

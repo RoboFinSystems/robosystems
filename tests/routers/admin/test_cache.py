@@ -269,12 +269,9 @@ class TestResolveDatabase:
     expected = {
       "auth": ValkeyDatabase.AUTH,
       "rate-limits": ValkeyDatabase.RATE_LIMITS,
-      "credits": ValkeyDatabase.CREDITS,
-      "billing": ValkeyDatabase.BILLING,
       "sse": ValkeyDatabase.SSE,
       "locks": ValkeyDatabase.LOCKS,
       "graph-routing": ValkeyDatabase.GRAPH_ROUTING,
-      "task-state": ValkeyDatabase.TASK_STATE,
     }
 
     for name, expected_db in expected.items():

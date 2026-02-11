@@ -482,23 +482,14 @@ class TestCreditService:
 class TestCreditCaching:
   """Test cases for credit caching functionality."""
 
-  @pytest.fixture
-  def mock_redis(self):
-    """Create a mock Redis client."""
-    mock_redis = MagicMock()
-    return mock_redis
-
-  def test_cache_balance_and_retrieve(self, mock_redis):
+  def test_cache_balance_and_retrieve(self):
     """Test caching and retrieving credit balance."""
     from robosystems.middleware.billing.cache import CreditCache
 
     cache = CreditCache()
-    cache._redis = mock_redis
 
-    # Mock Redis get to return cached data
-    mock_redis.get.return_value = (
-      '{"balance": "1000.0", "multiplier": "2.0", "graph_tier": "enterprise"}'
-    )
+    # Cache a balance
+    cache.cache_graph_credit_balance("graph123", Decimal("1000.0"), "enterprise")
 
     # Retrieve cached balance
     result = cache.get_cached_graph_credit_balance("graph123")
@@ -509,44 +500,42 @@ class TestCreditCaching:
     assert balance == Decimal("1000.0")
     assert tier == "enterprise"
 
-    # Verify Redis was called correctly
-    mock_redis.get.assert_called_once_with("graph_credit:graph123")
-
-  def test_cache_invalidation(self, mock_redis):
+  def test_cache_invalidation(self):
     """Test cache invalidation."""
     from robosystems.middleware.billing.cache import CreditCache
 
     cache = CreditCache()
-    cache._redis = mock_redis
+
+    # Cache balance and summary
+    cache.cache_graph_credit_balance("graph123", Decimal("500.0"), "standard")
+    cache.cache_credit_summary("graph123", {"current_balance": 500.0})
+
+    # Verify both exist
+    assert cache.get_cached_graph_credit_balance("graph123") is not None
+    assert cache.get_cached_credit_summary("graph123") is not None
 
     # Invalidate cache
     cache.invalidate_graph_credit_balance("graph123")
 
-    # Verify Redis delete was called
-    # The method deletes both the credit balance and summary
-    assert mock_redis.delete.call_count == 2
-    delete_calls = mock_redis.delete.call_args_list
-    assert delete_calls[0][0][0] == "graph_credit:graph123"
-    assert delete_calls[1][0][0] == "credit_summary:graph123"
+    # Both should be gone
+    assert cache.get_cached_graph_credit_balance("graph123") is None
+    assert cache.get_cached_credit_summary("graph123") is None
 
-  def test_optimistic_balance_update(self, mock_redis):
+  def test_optimistic_balance_update(self):
     """Test optimistic balance update after consumption."""
     from robosystems.middleware.billing.cache import CreditCache
 
     cache = CreditCache()
-    cache._redis = mock_redis
 
-    # Mock existing cached balance
-    mock_redis.get.return_value = (
-      '{"balance": "1000.0", "multiplier": "1.0", "graph_tier": "standard"}'
-    )
-    mock_redis.ttl.return_value = 300  # Mock TTL
+    # Cache initial balance
+    cache.cache_graph_credit_balance("graph123", Decimal("1000.0"), "standard")
 
     # Update balance after consumption
     cache.update_cached_balance_after_consumption("graph123", Decimal("50.0"))
 
     # Verify balance was updated
-    mock_redis.setex.assert_called_once()
-    call_args = mock_redis.setex.call_args
-    assert call_args[0][0] == "graph_credit:graph123"
-    assert '"balance": "950.0"' in call_args[0][2]
+    result = cache.get_cached_graph_credit_balance("graph123")
+    assert result is not None
+    balance, tier = result
+    assert balance == Decimal("950.0")
+    assert tier == "standard"

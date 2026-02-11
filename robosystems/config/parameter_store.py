@@ -75,6 +75,11 @@ def _get_ssm_client():
   """Get or create the SSM client (lazy initialization)."""
   global _ssm_client
   if _ssm_client is None:
+    # Only initialize boto3 SSM client in AWS environments to avoid
+    # triggering credential resolution (SSO token refresh) in dev/test
+    environment = os.getenv("ENVIRONMENT", "dev")
+    if environment not in ("prod", "staging"):
+      return None
     try:
       import boto3
 

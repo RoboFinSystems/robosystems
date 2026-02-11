@@ -1,6 +1,7 @@
-"""Tests for credit caching functionality."""
+"""Tests for credit caching functionality (in-memory backend)."""
 
 import json
+import time
 from decimal import Decimal
 from unittest.mock import MagicMock, patch
 
@@ -13,18 +14,11 @@ class TestCreditCache:
   """Test cases for CreditCache class."""
 
   @pytest.fixture
-  def mock_redis(self):
-    """Create a mock Redis client."""
-    return MagicMock()
+  def cache_instance(self):
+    """Create a fresh CreditCache instance."""
+    return CreditCache()
 
-  @pytest.fixture
-  def cache_instance(self, mock_redis):
-    """Create a CreditCache instance with mocked Redis."""
-    cache = CreditCache()
-    cache._redis = mock_redis  # Use the private attribute that the property uses
-    return cache
-
-  def test_cache_and_retrieve_graph_credit_balance(self, cache_instance, mock_redis):
+  def test_cache_and_retrieve_graph_credit_balance(self, cache_instance):
     """Test caching and retrieving graph credit balance."""
     graph_id = "graph123"
     balance = Decimal("1000.0")
@@ -33,19 +27,7 @@ class TestCreditCache:
     # Cache the balance
     cache_instance.cache_graph_credit_balance(graph_id, balance, tier)
 
-    # Verify Redis setex was called correctly
-    mock_redis.setex.assert_called_once()
-    call_args = mock_redis.setex.call_args
-    assert call_args[0][0] == f"graph_credit:{graph_id}"
-    assert call_args[0][1] == cache_instance.balance_ttl
-
-    # Parse the cached data
-    cached_data = json.loads(call_args[0][2])
-    assert cached_data["balance"] == "1000.0"
-    assert cached_data["graph_tier"] == "ladybug-large"
-
-    # Test retrieval
-    mock_redis.get.return_value = json.dumps(cached_data)
+    # Retrieve it
     result = cache_instance.get_cached_graph_credit_balance(graph_id)
 
     assert result is not None
@@ -53,71 +35,70 @@ class TestCreditCache:
     assert retrieved_balance == balance
     assert retrieved_tier == tier
 
-  def test_get_cached_balance_cache_miss(self, cache_instance, mock_redis):
+  def test_get_cached_balance_cache_miss(self, cache_instance):
     """Test retrieving balance when cache misses."""
-    mock_redis.get.return_value = None
-
     result = cache_instance.get_cached_graph_credit_balance("graph123")
     assert result is None
 
-  def test_get_cached_balance_invalid_json(self, cache_instance, mock_redis):
-    """Test retrieving balance with invalid JSON in cache."""
-    mock_redis.get.return_value = "invalid json"
+  def test_get_cached_balance_expired(self, cache_instance):
+    """Test retrieving balance after TTL expiry."""
+    graph_id = "graph123"
+    cache_key = cache_instance._get_graph_credit_key(graph_id)
 
-    result = cache_instance.get_cached_graph_credit_balance("graph123")
+    # Set with very short TTL (already expired)
+    cache_instance._store[cache_key] = (
+      json.dumps({"balance": "100.0", "graph_tier": "standard", "cached_at": "now"}),
+      time.time() - 1,  # already expired
+    )
+
+    result = cache_instance.get_cached_graph_credit_balance(graph_id)
     assert result is None
 
-  def test_update_cached_balance_after_consumption(self, cache_instance, mock_redis):
+  def test_update_cached_balance_after_consumption(self, cache_instance):
     """Test optimistic balance update after credit consumption."""
     graph_id = "graph123"
     initial_balance = Decimal("1000.0")
     consumed = Decimal("50.0")
 
-    # Mock existing cached balance
-    cached_data = {
-      "balance": str(initial_balance),
-      "multiplier": "1.0",
-      "graph_tier": "standard",
-    }
-    mock_redis.get.return_value = json.dumps(cached_data)
-    mock_redis.ttl.return_value = 300  # Mock TTL
+    # Cache initial balance
+    cache_instance.cache_graph_credit_balance(graph_id, initial_balance, "standard")
 
     # Update balance
     cache_instance.update_cached_balance_after_consumption(graph_id, consumed)
 
-    # Verify new balance was cached
-    mock_redis.setex.assert_called_once()
-    call_args = mock_redis.setex.call_args
-    assert call_args[0][0] == f"graph_credit:{graph_id}"
-
-    # Parse updated data
-    updated_data = json.loads(call_args[0][2])
+    # Verify new balance
+    result = cache_instance.get_cached_graph_credit_balance(graph_id)
+    assert result is not None
     expected_balance = initial_balance - consumed
-    assert Decimal(updated_data["balance"]) == expected_balance
+    assert result[0] == expected_balance
 
-  def test_update_cached_balance_no_existing_cache(self, cache_instance, mock_redis):
-    """Test update when no existing cache exists."""
-    mock_redis.get.return_value = None
-
-    # Should not update if no existing cache
+  def test_update_cached_balance_no_existing_cache(self, cache_instance):
+    """Test update when no existing cache exists (no-op)."""
     cache_instance.update_cached_balance_after_consumption("graph123", Decimal("10.0"))
+    # Should not raise, just silently do nothing
+    result = cache_instance.get_cached_graph_credit_balance("graph123")
+    assert result is None
 
-    # Verify setex was not called
-    mock_redis.setex.assert_not_called()
-
-  def test_invalidate_graph_credit_balance(self, cache_instance, mock_redis):
+  def test_invalidate_graph_credit_balance(self, cache_instance):
     """Test cache invalidation."""
     graph_id = "graph123"
 
+    # Cache balance and summary
+    cache_instance.cache_graph_credit_balance(graph_id, Decimal("500.0"), "standard")
+    cache_instance.cache_credit_summary(graph_id, {"current_balance": 500.0})
+
+    # Verify both exist
+    assert cache_instance.get_cached_graph_credit_balance(graph_id) is not None
+    assert cache_instance.get_cached_credit_summary(graph_id) is not None
+
+    # Invalidate
     cache_instance.invalidate_graph_credit_balance(graph_id)
 
-    # The method deletes both the credit balance and summary
-    assert mock_redis.delete.call_count == 2
-    delete_calls = mock_redis.delete.call_args_list
-    assert delete_calls[0][0][0] == f"graph_credit:{graph_id}"
-    assert delete_calls[1][0][0] == f"credit_summary:{graph_id}"
+    # Both should be gone
+    assert cache_instance.get_cached_graph_credit_balance(graph_id) is None
+    assert cache_instance.get_cached_credit_summary(graph_id) is None
 
-  def test_cache_and_retrieve_credit_summary(self, cache_instance, mock_redis):
+  def test_cache_and_retrieve_credit_summary(self, cache_instance):
     """Test caching and retrieving credit summary."""
     graph_id = "graph123"
     summary = {
@@ -133,19 +114,13 @@ class TestCreditCache:
     # Cache summary
     cache_instance.cache_credit_summary(graph_id, summary)
 
-    # Verify Redis setex was called
-    mock_redis.setex.assert_called_once()
-    call_args = mock_redis.setex.call_args
-    assert call_args[0][0] == f"credit_summary:{graph_id}"
-    assert call_args[0][1] == cache_instance.summary_ttl
-
-    # Test retrieval
-    mock_redis.get.return_value = json.dumps(summary)
+    # Retrieve it
     result = cache_instance.get_cached_credit_summary(graph_id)
+    assert result is not None
+    assert result["graph_id"] == graph_id
+    assert result["current_balance"] == 5000.0
 
-    assert result == summary
-
-  def test_cache_and_retrieve_operation_cost(self, cache_instance, mock_redis):
+  def test_cache_and_retrieve_operation_cost(self, cache_instance):
     """Test caching and retrieving operation costs."""
     operation_type = "mcp_call"
     cost = Decimal("10.0")
@@ -153,20 +128,11 @@ class TestCreditCache:
     # Cache cost
     cache_instance.cache_operation_cost(operation_type, cost)
 
-    # Verify Redis setex was called
-    mock_redis.setex.assert_called_once()
-    call_args = mock_redis.setex.call_args
-    assert call_args[0][0] == f"op_cost:{operation_type}"
-    assert call_args[0][1] == cache_instance.operation_cost_ttl
-    assert call_args[0][2] == "10.0"
-
-    # Test retrieval
-    mock_redis.get.return_value = "10.0"
+    # Retrieve it
     result = cache_instance.get_cached_operation_cost(operation_type)
-
     assert result == cost
 
-  def test_warmup_operation_costs(self, cache_instance, mock_redis):
+  def test_warmup_operation_costs(self, cache_instance):
     """Test warming up operation cost cache."""
     costs = {
       "query": Decimal("1.0"),
@@ -177,66 +143,104 @@ class TestCreditCache:
     cache_instance.warmup_operation_costs(costs)
 
     # Verify all costs were cached
-    assert mock_redis.setex.call_count == len(costs)
+    for op_type, expected_cost in costs.items():
+      result = cache_instance.get_cached_operation_cost(op_type)
+      assert result == expected_cost
 
-    # Check each call
-    for call, (op_type, cost) in zip(
-      mock_redis.setex.call_args_list, costs.items(), strict=False
-    ):
-      assert call[0][0] == f"op_cost:{op_type}"
-      assert call[0][2] == str(cost)
-
-  def test_get_cache_stats(self, cache_instance, mock_redis):
+  def test_get_cache_stats(self, cache_instance):
     """Test getting cache statistics."""
-    # Mock Redis info
-    mock_redis.info.return_value = {
-      "used_memory_human": "1.5M",
-      "connected_clients": 5,
-      "total_commands_processed": 1000,
-    }
-
-    # Mock key counts
-    mock_redis.keys.side_effect = [
-      ["graph_credit:1", "graph_credit:2", "graph_credit:3"],  # graph balance keys
-      ["shared_credit:1", "shared_credit:2"],  # shared balance keys
-      ["credit_summary:1", "credit_summary:2"],  # summary keys
-      ["op_cost:1", "op_cost:2", "op_cost:3", "op_cost:4"],  # operation cost keys
-    ]
+    # Populate some entries
+    cache_instance.cache_graph_credit_balance("g1", Decimal("100"), "standard")
+    cache_instance.cache_graph_credit_balance("g2", Decimal("200"), "standard")
+    cache_instance.cache_graph_credit_balance("g3", Decimal("300"), "standard")
+    cache_instance.cache_credit_summary("g1", {"current_balance": 100.0})
+    cache_instance.cache_credit_summary("g2", {"current_balance": 200.0})
+    cache_instance.cache_operation_cost("query", Decimal("1.0"))
+    cache_instance.cache_operation_cost("mcp_call", Decimal("10.0"))
+    cache_instance.cache_operation_cost("agent_call", Decimal("5.0"))
+    cache_instance.cache_operation_cost("embedding", Decimal("2.0"))
 
     stats = cache_instance.get_cache_stats()
 
     assert stats["connected"] is True
-    assert stats["redis_info"]["used_memory_human"] == "1.5M"
+    assert stats["cache_type"] == "in-memory"
     assert stats["cache_counts"]["graph_balances"] == 3
-    assert stats["cache_counts"]["shared_balances"] == 2
     assert stats["cache_counts"]["summaries"] == 2
     assert stats["cache_counts"]["operation_costs"] == 4
 
-  def test_get_cache_stats_no_connection(self, cache_instance, mock_redis):
-    """Test cache stats when Redis is not connected."""
-    # Simulate connection error
-    mock_redis.info.side_effect = Exception("Connection failed")
+  def test_invalidate_all_graph_credits(self, cache_instance):
+    """Test invalidating all graph credit caches."""
+    # Cache several balances and summaries
+    for i in range(5):
+      cache_instance.cache_graph_credit_balance(
+        f"graph{i}", Decimal(str(i * 100)), "standard"
+      )
+      cache_instance.cache_credit_summary(
+        f"graph{i}", {"current_balance": float(i * 100)}
+      )
 
-    stats = cache_instance.get_cache_stats()
+    # Also cache an operation cost (should NOT be invalidated)
+    cache_instance.cache_operation_cost("query", Decimal("1.0"))
 
-    assert stats["connected"] is False
-    assert "error" in stats
-    assert "Connection failed" in stats["error"]
+    # Invalidate all graph credits
+    cache_instance.invalidate_all_graph_credits()
 
-  def test_redis_error_handling(self, cache_instance, mock_redis):
-    """Test handling of Redis errors."""
-    # Mock Redis error
-    mock_redis.get.side_effect = Exception("Redis connection error")
+    # All graph credits and summaries should be gone
+    for i in range(5):
+      assert cache_instance.get_cached_graph_credit_balance(f"graph{i}") is None
+      assert cache_instance.get_cached_credit_summary(f"graph{i}") is None
 
-    # Should return None on error
-    result = cache_instance.get_cached_graph_credit_balance("graph123")
-    assert result is None
+    # Operation cost should still be there
+    assert cache_instance.get_cached_operation_cost("query") == Decimal("1.0")
 
-    # Test with setex error
-    mock_redis.setex.side_effect = Exception("Redis write error")
+  def test_ttl_expiry(self, cache_instance):
+    """Test that entries expire based on TTL."""
+    cache_key = "test_key"
+    # Set with 1-second TTL
+    cache_instance._setex(cache_key, 1, "test_value")
 
-    # Should not raise exception
-    cache_instance.cache_graph_credit_balance("graph123", Decimal("100.0"), "standard")
+    # Should exist immediately
+    assert cache_instance._get(cache_key) == "test_value"
+
+    # Wait for expiry
+    time.sleep(1.1)
+
+    # Should be gone
+    assert cache_instance._get(cache_key) is None
+
+  def test_thread_safety(self, cache_instance):
+    """Test that concurrent access doesn't corrupt data."""
+    import threading
+
+    errors = []
+
+    def writer(thread_id):
+      try:
+        for i in range(100):
+          cache_instance.cache_graph_credit_balance(
+            f"graph_{thread_id}_{i}", Decimal(str(i)), "standard"
+          )
+      except Exception as e:
+        errors.append(e)
+
+    def reader(thread_id):
+      try:
+        for i in range(100):
+          cache_instance.get_cached_graph_credit_balance(f"graph_{thread_id}_{i}")
+      except Exception as e:
+        errors.append(e)
+
+    threads = []
+    for t_id in range(4):
+      threads.append(threading.Thread(target=writer, args=(t_id,)))
+      threads.append(threading.Thread(target=reader, args=(t_id,)))
+
+    for t in threads:
+      t.start()
+    for t in threads:
+      t.join()
+
+    assert errors == [], f"Thread safety errors: {errors}"
 
 
 class TestCreditCacheSingleton:
@@ -247,8 +251,7 @@ class TestCreditCacheSingleton:
     assert isinstance(credit_cache, CreditCache)
 
   def test_singleton_initialization(self):
-    """Test that singleton initializes Redis connection."""
-    # Re-import to trigger initialization
+    """Test that singleton initializes correctly."""
     from robosystems.middleware.billing.cache import CreditCache
 
     new_cache = CreditCache()
@@ -276,25 +279,13 @@ class TestCreditCacheIntegration:
 
   def test_cache_performance_improvement(self):
     """Test that cache provides performance improvement."""
-    import time
-
-    mock_redis = MagicMock()
-
     cache = CreditCache()
-    cache._redis = mock_redis
 
-    # Simulate cache miss (slower)
-    mock_redis.get.return_value = None
-    start = time.time()
+    # Simulate cache miss (no data)
     result = cache.get_cached_operation_cost("query")
-    _ = time.time() - start  # Cache miss time
+    assert result is None
 
-    # Simulate cache hit (faster)
-    mock_redis.get.return_value = "1.0"
-    start = time.time()
+    # Simulate cache hit (data present)
+    cache.cache_operation_cost("query", Decimal("1.0"))
     result = cache.get_cached_operation_cost("query")
-    _ = time.time() - start  # Cache hit time
-
-    # Cache hit should be faster (in real scenario)
-    # Here we just verify the different code paths
     assert result == Decimal("1.0")
