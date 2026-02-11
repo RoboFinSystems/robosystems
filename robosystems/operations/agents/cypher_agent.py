@@ -357,10 +357,9 @@ Please explain these results in a clear, natural way.""",
           "remaining_balance": 0,
         }
 
-      self._last_credit_consumption["credits_consumed"] = (
-        int(self._last_credit_consumption.get("credits_consumed", 0) or 0)
-        + int(credit_result.get("credits_consumed", 0) or 0)
-      )
+      self._last_credit_consumption["credits_consumed"] = int(
+        self._last_credit_consumption.get("credits_consumed", 0) or 0
+      ) + int(credit_result.get("credits_consumed", 0) or 0)
 
       # Keep the latest remaining balance, if provided.
       if "remaining_balance" in credit_result:

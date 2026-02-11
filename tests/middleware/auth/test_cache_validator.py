@@ -589,7 +589,9 @@ class TestCacheValidator:
     self._setup_async_redis_mock(
       validator,
       keys_return=["apikey:hash123"],
-      get_side_effect=lambda key: b"encrypted_data" if key == "apikey:hash123" else None,
+      get_side_effect=lambda key: (
+        b"encrypted_data" if key == "apikey:hash123" else None
+      ),
     )
 
     result = await validator._validate_cache_freshness()

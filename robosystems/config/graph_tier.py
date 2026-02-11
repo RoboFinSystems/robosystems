@@ -120,7 +120,10 @@ class GraphTierConfig:
           replica_instance = replica.get("instance", {})
           if replica_instance:
             merged = dict(writer_config)
-            merged["instance"] = {**writer_config.get("instance", {}), **replica_instance}
+            merged["instance"] = {
+              **writer_config.get("instance", {}),
+              **replica_instance,
+            }
             return merged
           break
 

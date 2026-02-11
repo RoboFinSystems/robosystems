@@ -38,7 +38,9 @@ class ConnectionInfo:
   use_count: int
   is_healthy: bool
   read_only: bool = False  # Track if connection was opened read-only
-  s3_attached: bool = False  # S3 ATTACH connections bypass TTL (read-only, expensive to recreate)
+  s3_attached: bool = (
+    False  # S3 ATTACH connections bypass TTL (read-only, expensive to recreate)
+  )
 
 
 class LadybugConnectionPool:
