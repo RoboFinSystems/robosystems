@@ -214,6 +214,51 @@ class TestRunGraphCreation:
           assert result["operation_id"] == "op123"
 
   @pytest.mark.asyncio
+  async def test_capacity_scaling_fails_when_queue_disabled(self):
+    """Test that CapacityScalingTriggered fails immediately when queue is disabled."""
+    provisioning_error = CapacityScalingTriggered(
+      "No ladybug-standard capacity currently available."
+    )
+
+    with patch(
+      "robosystems.middleware.sse.direct_monitor.get_operation_manager"
+    ) as mock_get_manager:
+      mock_manager = AsyncMock()
+      mock_get_manager.return_value = mock_manager
+
+      with patch(
+        "robosystems.operations.graph.generic_graph_service.GenericGraphService"
+      ) as mock_service_class:
+        mock_service = AsyncMock()
+        mock_service.create_graph.side_effect = provisioning_error
+        mock_service_class.return_value = mock_service
+
+        with patch.object(
+          type(env_config),
+          "GRAPH_PROVISION_QUEUE_ENABLED",
+          False,
+        ):
+          result = await run_graph_creation(
+            operation_id="op123",
+            user_id="user456",
+            graph_name="Test Graph",
+            tier="ladybug-standard",
+            schema_extensions=[],
+          )
+
+          # Should have failed the operation
+          mock_manager.fail_operation.assert_called_once()
+          call_args = mock_manager.fail_operation.call_args
+          assert call_args.args[0] == "op123"
+          assert "No capacity" in call_args.kwargs.get(
+            "error", call_args.args[1] if len(call_args.args) > 1 else ""
+          )
+
+          # Should return failed status
+          assert result["status"] == "failed"
+          assert result["operation_id"] == "op123"
+
+  @pytest.mark.asyncio
   async def test_non_provisioning_error_still_fails(self):
     """Test that non-provisioning errors still fail normally."""
     with patch(
@@ -294,6 +339,54 @@ class TestRunEntityGraphCreation:
             assert result == mock_result
             mock_manager.complete_operation.assert_called_once()
             mock_report.assert_called_once()
+
+  @pytest.mark.asyncio
+  async def test_entity_capacity_scaling_fails_when_queue_disabled(self):
+    """Test that CapacityScalingTriggered fails immediately when queue is disabled."""
+    provisioning_error = CapacityScalingTriggered(
+      "No ladybug-standard capacity currently available."
+    )
+
+    with patch(
+      "robosystems.middleware.sse.direct_monitor.get_operation_manager"
+    ) as mock_get_manager:
+      mock_manager = AsyncMock()
+      mock_get_manager.return_value = mock_manager
+
+      with patch("robosystems.database.get_db_session") as mock_get_db:
+        mock_db = MagicMock()
+        mock_get_db.return_value = iter([mock_db])
+
+        with patch(
+          "robosystems.operations.graph.entity_graph_service.EntityGraphService"
+        ) as mock_service_class:
+          mock_service = AsyncMock()
+          mock_service.create_entity_with_new_graph.side_effect = provisioning_error
+          mock_service_class.return_value = mock_service
+
+          with patch.object(
+            type(env_config),
+            "GRAPH_PROVISION_QUEUE_ENABLED",
+            False,
+          ):
+            result = await run_entity_graph_creation(
+              operation_id="op123",
+              user_id="user456",
+              entity_name="Acme Corp",
+              tier="ladybug-standard",
+            )
+
+            # Should have failed the operation
+            mock_manager.fail_operation.assert_called_once()
+            call_args = mock_manager.fail_operation.call_args
+            assert call_args.args[0] == "op123"
+            assert "No capacity" in call_args.kwargs.get(
+              "error", call_args.args[1] if len(call_args.args) > 1 else ""
+            )
+
+            # Should return failed status
+            assert result["status"] == "failed"
+            assert result["operation_id"] == "op123"
 
   @pytest.mark.asyncio
   async def test_entity_creation_failure(self):
