@@ -54,7 +54,7 @@ just demo-accounting
 **Subsequent runs**: Reuses credentials and graph (~30 seconds).
 
 **Command syntax**: `just demo-accounting [flags] [base_url]`
-- Flags are comma-separated: `new-user,new-graph,regenerate-data,skip-queries`
+- Flags are comma-separated: `new-user,new-graph,skip-queries`
 - Base URL defaults to `http://localhost:8000`
 
 ### Quick Start Options
@@ -66,14 +66,11 @@ just demo-accounting new-user,new-graph
 # Create new graph (keep existing user)
 just demo-accounting new-graph
 
-# Regenerate data files
-just demo-accounting regenerate-data
-
 # Skip verification queries
 just demo-accounting skip-queries
 
 # Combine multiple flags
-just demo-accounting new-user,new-graph,regenerate-data
+just demo-accounting new-user,new-graph,skip-queries
 ```
 
 ## Step-by-Step Walkthrough
@@ -85,7 +82,7 @@ The `just demo-accounting` command runs all 5 steps automatically. This section 
 **What happens automatically:**
 - Creates new user in PostgreSQL database
 - Generates API key for authentication
-- Stores credentials locally in `examples/accounting_demo/credentials/config.json`
+- Stores credentials locally in `examples/credentials/config.json`
 
 **Control via flags:**
 ```bash
@@ -131,10 +128,7 @@ uv run examples/accounting_demo/02_create_graph.py --reuse  # Reuse existing
 - Equity Accounts (common stock, retained earnings)
 - Double-Entry Validation (every transaction balances)
 
-**Control via flags:**
-```bash
-just demo-accounting regenerate-data  # Force regenerate
-```
+**Note:** Data is automatically regenerated on every run.
 
 **Manual execution (if needed):**
 ```bash
@@ -478,11 +472,11 @@ You can access the demo accounting graph through any MCP-compatible AI tool (Cla
 
 **Setup MCP Client:**
 
-1. Run `just demo-accounting` to create credentials automatically (your API key is saved to `examples/accounting_demo/credentials/config.json`)
+1. Run `just demo-accounting` to create credentials automatically (your API key is saved to `examples/credentials/config.json`)
 
 2. Get your API key and graph ID from the credentials file:
 ```bash
-cat examples/accounting_demo/credentials/config.json | grep -E "api_key|graph_id"
+cat examples/credentials/config.json | grep -E "api_key|graph_id"
 ```
 
 3. Add to your MCP tool config. For Claude Desktop:
@@ -570,7 +564,7 @@ Reset and recreate everything:
 
 ```bash
 # Delete local credentials and data files
-rm -rf examples/accounting_demo/credentials/
+rm -rf examples/credentials/config.json
 rm -rf examples/accounting_demo/data/
 
 # Run with new user and graph
@@ -579,15 +573,15 @@ just demo-accounting new-user,new-graph
 
 ### Reuse Existing Setup
 
-Regenerate data and reload into existing graph:
+Data is automatically regenerated on every run. Simply re-run the demo:
 
 ```bash
-just demo-accounting regenerate-data
+just demo-accounting
 ```
 
 ### Custom Financial Queries
 
-After running the demo, use the `just graph-query` command for ad-hoc analysis. Get your graph_id from `examples/accounting_demo/credentials/config.json`:
+After running the demo, use the `just graph-query` command for ad-hoc analysis. Get your graph_id from `examples/credentials/config.json`:
 
 ```bash
 # Find all expenses over $1,000
@@ -736,7 +730,7 @@ RETURN t.description, e.name, f.value, r.name
 
 ### QuickBooks Integration
 
-Similar patterns power the QuickBooks integration (`/robosystems/processors/qb_transactions.py`):
+Similar patterns power the QuickBooks integration (`/robosystems/operations/providers/quickbooks_provider.py`):
 
 - Transactions → QuickBooks Invoices/Bills
 - LineItems → Journal Entry Lines
@@ -773,10 +767,10 @@ just demo-accounting new-graph
 
 ### Demo Fails: Data Issues
 
-**Solution:** Regenerate data:
+**Solution:** Re-run the demo (data is regenerated automatically):
 
 ```bash
-just demo-accounting regenerate-data
+just demo-accounting
 ```
 
 ### Connection Error
@@ -801,7 +795,7 @@ just install
 **Solution:** Re-run the demo to reload data:
 
 ```bash
-just demo-accounting regenerate-data
+just demo-accounting
 ```
 
 ## Next Steps
@@ -816,11 +810,10 @@ just demo-accounting regenerate-data
 ## Resources
 
 - **Demo Code**: `/examples/accounting_demo/` in the repository
-- **QUICKSTART.md**: Detailed quickstart in the demo directory
 - **G.V() Graph IDE**: [https://gdotv.com/](https://gdotv.com/) - Visualize your accounting graph
 - **Cypher Docs**: [Cypher Manual](https://neo4j.com/docs/cypher-manual/current/introduction/)
 - **RoboSystems API**: http://localhost:8000/docs (when running locally)
-- **Integration Docs**: `/robosystems/processors/` for QuickBooks and XBRL processors
+- **Integration Docs**: `/robosystems/operations/providers/` for QuickBooks and XBRL providers
 
 ## Support
 

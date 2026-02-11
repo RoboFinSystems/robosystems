@@ -526,7 +526,7 @@ s3://robosystems-user-{env}/
 - **Lambda**: Infrastructure management (instance monitoring, secret rotation, volume lifecycle)
 
 **Database & Cache**:
-- **RDS (Aurora) PostgreSQL**: Primary database (auto-scaling storage)
+- **RDS PostgreSQL**: Primary database (auto-scaling storage, optional Aurora upgrade)
 - **ElastiCache**: Valkey/Redis cache
 - **DynamoDB**: Service registries (on-demand pricing)
 

@@ -816,7 +816,7 @@ just demo-custom-graph new-user
 
 ```bash
 # Check for JSON syntax errors
-python -m json.tool examples/custom_graph_demo/schema.json
+uv run python -m json.tool examples/custom_graph_demo/schema.json
 ```
 
 ### Connection Error
@@ -849,7 +849,6 @@ just install
 
 - **Demo Code**: `/examples/custom_graph_demo/` in the repository
 - **Schema Template**: `examples/custom_graph_demo/schema.json`
-- **QUICKSTART.md**: Detailed quickstart in the demo directory
 - **G.V() Graph IDE**: [https://gdotv.com/](https://gdotv.com/)
 - **Cypher Docs**: [Cypher Manual](https://neo4j.com/docs/cypher-manual/current/introduction/)
 - **RoboSystems API**: http://localhost:8000/docs
