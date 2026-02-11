@@ -46,11 +46,16 @@ def _get_graph_status(graph: Graph) -> str:
       graph: The graph model instance
 
   Returns:
-      Status string (e.g., "active", "syncing", "error")
+      Status string (e.g., "active", "syncing", "error", "queued", "suspended")
   """
+  if graph.status and graph.status != "active":
+    return graph.status
+
+  # For active repositories, show sync status if available
   if graph.is_repository and graph.sync_status:
     return graph.sync_status
-  return "active"
+
+  return graph.status or "active"
 
 
 @router.get("", response_model=list[GraphResponse])
@@ -73,13 +78,31 @@ async def list_graphs(
       query = query.filter(Graph.graph_tier == tier)
 
     if backend:
-      query = query.filter(Graph.backend == backend)
+      # Graph doesn't have a backend column — derive matching tiers from config
+      matching_tiers = [
+        tier_name
+        for tier_name in [
+          "ladybug-standard",
+          "ladybug-large",
+          "ladybug-xlarge",
+          "ladybug-shared",
+        ]
+        if GraphTierConfig.get_tier_config(tier_name).get("backend", "ladybug")
+        == backend
+      ]
+      if matching_tiers:
+        query = query.filter(Graph.graph_tier.in_(matching_tiers))
+      else:
+        query = query.filter(Graph.graph_tier == "__none__")
 
     if status_filter:
       query = query.filter(Graph.status == status_filter)
 
     if user_email:
-      query = query.join(User, Graph.user_id == User.id)
+      from ...models.iam import OrgUser
+
+      query = query.join(OrgUser, Graph.org_id == OrgUser.org_id)
+      query = query.join(User, OrgUser.user_id == User.id)
       query = query.filter(User.email.ilike(f"%{user_email}%"))
 
     total = query.count()

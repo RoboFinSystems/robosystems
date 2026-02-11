@@ -123,6 +123,11 @@ class GraphInfo(BaseModel):
     description="Type of graph: generic, entity, or repository",
     examples=["entity", "generic", "repository"],
   )
+  status: str = Field(
+    default="active",
+    description="Graph lifecycle status: queued, provisioning, active, suspended",
+    examples=["active", "queued", "provisioning"],
+  )
 
   class Config:
     json_schema_extra = {
@@ -139,6 +144,7 @@ class GraphInfo(BaseModel):
           "isSubgraph": False,
           "parentGraphId": None,
           "graphType": "entity",
+          "status": "active",
         },
         {
           "graphId": "kg9z8y7x6w5_dev",
@@ -152,6 +158,7 @@ class GraphInfo(BaseModel):
           "isSubgraph": True,
           "parentGraphId": "kg9z8y7x6w5",
           "graphType": "entity",
+          "status": "active",
         },
         {
           "graphId": "sec",
@@ -165,6 +172,7 @@ class GraphInfo(BaseModel):
           "isSubgraph": False,
           "parentGraphId": None,
           "graphType": "repository",
+          "status": "active",
         },
       ]
     }

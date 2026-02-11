@@ -112,6 +112,11 @@ async def test_get_upload_url_rejects_extension(monkeypatch):
     ),
   )
 
+  monkeypatch.setattr(
+    "robosystems.middleware.billing.enforcement.require_graph_access",
+    lambda *args, **kwargs: None,
+  )
+
   request = FileUploadRequest(
     file_name="data.csv",
     content_type="application/x-parquet",
@@ -139,6 +144,11 @@ async def test_get_upload_url_success(monkeypatch):
     files_upload,
     "get_universal_repository",
     fake_repo,
+  )
+
+  monkeypatch.setattr(
+    "robosystems.middleware.billing.enforcement.require_graph_access",
+    lambda *args, **kwargs: None,
   )
 
   table_record = SimpleNamespace(id="table-1")

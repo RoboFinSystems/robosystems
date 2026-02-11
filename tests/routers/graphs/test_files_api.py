@@ -10,6 +10,11 @@ from robosystems.routers.graphs.files import main as files_router
 
 @pytest.mark.asyncio
 async def test_list_files_all_in_graph(monkeypatch):
+  monkeypatch.setattr(
+    "robosystems.middleware.billing.enforcement.require_graph_access",
+    lambda *args, **kwargs: None,
+  )
+
   async def fake_repo(*args, **kwargs):
     return SimpleNamespace()
 
@@ -72,6 +77,11 @@ async def test_list_files_all_in_graph(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_list_files_filtered_by_table(monkeypatch):
+  monkeypatch.setattr(
+    "robosystems.middleware.billing.enforcement.require_graph_access",
+    lambda *args, **kwargs: None,
+  )
+
   async def fake_repo(*args, **kwargs):
     return SimpleNamespace()
 
@@ -231,6 +241,11 @@ async def test_get_file_not_found(monkeypatch):
 async def test_create_file_upload_generates_presigned_url(monkeypatch):
   from robosystems.routers.graphs.files import upload as upload_router
 
+  monkeypatch.setattr(
+    "robosystems.middleware.billing.enforcement.require_graph_access",
+    lambda *args, **kwargs: None,
+  )
+
   async def fake_repo(*args, **kwargs):
     return SimpleNamespace()
 
@@ -282,6 +297,11 @@ async def test_create_file_upload_generates_presigned_url(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_create_file_upload_requires_table_name(monkeypatch):
+  monkeypatch.setattr(
+    "robosystems.middleware.billing.enforcement.require_graph_access",
+    lambda *args, **kwargs: None,
+  )
+
   from robosystems.routers.graphs.files import upload as upload_router
 
   request = FileUploadRequest(

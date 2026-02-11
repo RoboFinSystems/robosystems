@@ -49,6 +49,11 @@ def verify_parent_graph_access(
   Raises:
       HTTPException: If access denied or graph not found
   """
+  # Enforce graph lifecycle and subscription status (write: creating a subgraph)
+  from robosystems.middleware.billing.enforcement import require_graph_access
+
+  require_graph_access(graph_id, session, require_write=True)
+
   # Block shared repositories from having subgraphs
   if is_shared_repository(graph_id.lower()):
     raise HTTPException(

@@ -232,6 +232,11 @@ async def execute_cypher_query(
   """
   start_time = datetime.now(UTC)
 
+  # Enforce graph lifecycle and subscription status (reads allowed)
+  from robosystems.middleware.billing.enforcement import require_graph_access
+
+  require_graph_access(graph_id, session, require_write=False)
+
   # Check circuit breaker
   circuit_breaker.check_circuit(graph_id, "cypher_query")
 

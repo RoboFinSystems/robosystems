@@ -178,6 +178,11 @@ async def create_file_upload(
   """
   start_time = datetime.now(UTC)
 
+  # Enforce graph lifecycle and subscription status (write operation)
+  from robosystems.middleware.billing.enforcement import require_graph_access
+
+  require_graph_access(graph_id, db, require_write=True)
+
   table_name = getattr(request, "table_name", None)
   if not table_name:
     raise HTTPException(

@@ -155,6 +155,11 @@ async def list_files(
   """
   start_time = datetime.now(UTC)
 
+  # Enforce graph lifecycle and subscription status (read operation)
+  from robosystems.middleware.billing.enforcement import require_graph_access
+
+  require_graph_access(graph_id, db, require_write=False)
+
   try:
     repository = await get_universal_repository(graph_id, "read")
 
@@ -573,6 +578,11 @@ async def delete_file(
   deletion across S3, DuckDB, and graph layers.
   """
   start_time = datetime.now(UTC)
+
+  # Enforce graph lifecycle and subscription status (write operation)
+  from robosystems.middleware.billing.enforcement import require_graph_access
+
+  require_graph_access(graph_id, db, require_write=True)
 
   if is_shared_repository(graph_id.lower()):
     logger.warning(

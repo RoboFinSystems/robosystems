@@ -1,7 +1,7 @@
 """Identity and Access Management (IAM) models package."""
 
 from .connection_credentials import ConnectionCredentials
-from .graph import Graph
+from .graph import Graph, GraphStatus
 from .graph_backup import BackupStatus, BackupType, GraphBackup
 from .graph_credits import (
   CreditTransactionType,
@@ -44,6 +44,7 @@ __all__ = [
   "GraphCredits",
   "GraphFile",
   "GraphSchema",
+  "GraphStatus",
   "GraphTable",
   "GraphUsage",
   "GraphUser",

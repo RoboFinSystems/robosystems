@@ -170,6 +170,11 @@ class TestSchemaManagementIntegration:
         "robosystems.middleware.billing.enforcement.check_can_provision_graph",
         return_value=(True, None),
       ),
+      patch(
+        "robosystems.operations.graph.generic_graph_service.GenericGraphService.create_graph",
+        new_callable=AsyncMock,
+        return_value={"graph_id": VALID_TEST_GRAPH_ID, "status": "created"},
+      ),
     ):
       # Mock org limits to allow graph creation
       mock_limits = MagicMock()

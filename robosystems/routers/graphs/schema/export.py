@@ -136,6 +136,11 @@ async def export_graph_schema(
   This endpoint retrieves the schema definition from a graph and exports it
   in the requested format (JSON, YAML, or Cypher DDL).
   """
+  # Enforce graph lifecycle and subscription status (read operation)
+  from robosystems.middleware.billing.enforcement import require_graph_access
+
+  require_graph_access(graph_id, db, require_write=False)
+
   try:
     # Get declared schema from PostgreSQL GraphSchema table
     from robosystems.models.iam import Graph, GraphSchema

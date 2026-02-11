@@ -276,6 +276,7 @@ class TestUserGraphs:
     mock_graph1.schema_extensions = []
     mock_graph1.is_subgraph = False
     mock_graph1.parent_graph_id = None
+    mock_graph1.status = "active"
 
     mock_graph2 = Mock()
     mock_graph2.graph_name = "Test Graph 2"
@@ -284,6 +285,7 @@ class TestUserGraphs:
     mock_graph2.schema_extensions = []
     mock_graph2.is_subgraph = False
     mock_graph2.parent_graph_id = None
+    mock_graph2.status = "active"
 
     mock_graph3 = Mock()
     mock_graph3.graph_name = "Test Graph 3"
@@ -292,6 +294,7 @@ class TestUserGraphs:
     mock_graph3.schema_extensions = []
     mock_graph3.is_subgraph = False
     mock_graph3.parent_graph_id = None
+    mock_graph3.status = "active"
 
     mock_graphs = [
       Mock(

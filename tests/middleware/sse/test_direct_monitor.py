@@ -11,7 +11,6 @@ from robosystems.middleware.sse.direct_monitor import (
   ProgressEmitter,
   _report_graph_materialization_async,
   _report_graph_materialization_sync,
-  _submit_wait_and_create_job,
   run_entity_graph_creation,
   run_graph_creation,
   run_graph_provisioning,
@@ -148,8 +147,8 @@ class TestRunGraphCreation:
         )
 
   @pytest.mark.asyncio
-  async def test_provisioning_handoff_to_dagster(self):
-    """Test that CapacityScalingTriggered hands off to Dagster instead of failing."""
+  async def test_provisioning_handoff_to_queue(self):
+    """Test that CapacityScalingTriggered creates a queued graph instead of failing."""
     provisioning_error = CapacityScalingTriggered(
       "No ladybug-standard capacity currently available. "
       "A new instance is being provisioned and should be ready in 3-5 minutes. "
@@ -169,10 +168,24 @@ class TestRunGraphCreation:
         mock_service.create_graph.side_effect = provisioning_error
         mock_service_class.return_value = mock_service
 
-        with patch(
-          "robosystems.middleware.sse.direct_monitor._submit_wait_and_create_job",
-          new_callable=AsyncMock,
-        ) as mock_submit:
+        with (
+          patch(
+            "robosystems.utils.ulid.generate_ulid_hex",
+            return_value="1234567890abcdef",
+          ),
+          patch("robosystems.database.session") as mock_session_factory,
+          patch("robosystems.models.iam.graph.Graph") as mock_graph_cls,
+          patch("robosystems.models.iam.org_user.OrgUser"),
+        ):
+          mock_db = MagicMock()
+          mock_session_factory.return_value = mock_db
+
+          mock_org_user = MagicMock()
+          mock_org_user.org_id = "org123"
+          mock_db.query.return_value.filter.return_value.first.return_value = (
+            mock_org_user
+          )
+
           result = await run_graph_creation(
             operation_id="op123",
             user_id="user456",
@@ -186,20 +199,12 @@ class TestRunGraphCreation:
           # Should NOT have failed the operation
           mock_manager.fail_operation.assert_not_called()
 
-          # Should have submitted the Dagster job
-          mock_submit.assert_called_once_with(
-            operation_id="op123",
-            user_id="user456",
-            graph_name="Test Graph",
-            tier="ladybug-standard",
-            schema_extensions=["roboledger"],
-            description="Test description",
-            tags=["test"],
-            custom_schema=None,
-          )
+          # Should have created a queued graph
+          mock_graph_cls.create_queued.assert_called_once()
 
-          # Should return provisioning status
-          assert result["status"] == "provisioning"
+          # Should return queued status with graph_id
+          assert result["status"] == "queued"
+          assert result["graph_id"] == "kg1234567890abcdef"
           assert result["operation_id"] == "op123"
 
   @pytest.mark.asyncio
@@ -226,73 +231,6 @@ class TestRunGraphCreation:
             operation_id="op123",
             user_id="user456",
             graph_name="Test Graph",
-            tier="ladybug-standard",
-            schema_extensions=[],
-          )
-
-        mock_manager.fail_operation.assert_called_once()
-
-
-class TestSubmitWaitAndCreateJob:
-  """Test _submit_wait_and_create_job helper."""
-
-  @pytest.mark.asyncio
-  async def test_submits_dagster_job_with_correct_config(self):
-    """Test that Dagster job is submitted with correct run config."""
-    with patch(
-      "robosystems.middleware.sse.direct_monitor.get_operation_manager"
-    ) as mock_get_manager:
-      mock_manager = AsyncMock()
-      mock_get_manager.return_value = mock_manager
-
-      with patch(
-        "robosystems.middleware.sse.dagster_monitor.DagsterRunMonitor"
-      ) as MockMonitor:
-        mock_monitor = MagicMock()
-        mock_monitor.submit_job.return_value = "run-abc-123"
-        MockMonitor.return_value = mock_monitor
-
-        await _submit_wait_and_create_job(
-          operation_id="op123",
-          user_id="user456",
-          graph_name="Test Graph",
-          tier="ladybug-standard",
-          schema_extensions=["roboledger"],
-          description="Test desc",
-          tags=["tag1", "tag2"],
-          custom_schema=None,
-        )
-
-        # Verify SSE progress was emitted
-        mock_manager.emit_progress.assert_called_once()
-
-        # Verify Dagster job was submitted
-        mock_monitor.submit_job.assert_called_once()
-        call_args = mock_monitor.submit_job.call_args
-        assert call_args.args[0] == "wait_and_create_graph_job"
-        assert call_args.kwargs["tags"]["operation_id"] == "op123"
-
-  @pytest.mark.asyncio
-  async def test_submit_failure_emits_sse_error(self):
-    """Test that Dagster submission failure emits SSE error."""
-    with patch(
-      "robosystems.middleware.sse.direct_monitor.get_operation_manager"
-    ) as mock_get_manager:
-      mock_manager = AsyncMock()
-      mock_get_manager.return_value = mock_manager
-
-      with patch(
-        "robosystems.middleware.sse.dagster_monitor.DagsterRunMonitor"
-      ) as MockMonitor:
-        mock_monitor = MagicMock()
-        mock_monitor.submit_job.side_effect = Exception("Dagster unreachable")
-        MockMonitor.return_value = mock_monitor
-
-        with pytest.raises(Exception, match="Dagster unreachable"):
-          await _submit_wait_and_create_job(
-            operation_id="op123",
-            user_id="user456",
-            graph_name="Test",
             tier="ladybug-standard",
             schema_extensions=[],
           )

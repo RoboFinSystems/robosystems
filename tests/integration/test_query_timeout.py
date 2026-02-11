@@ -49,45 +49,44 @@ class TestQueryTimeout:
       assert future.cancelled() or future.running()
 
   @patch("robosystems.graph_api.core.ladybug.service.LadybugDatabaseManager")
-  def test_query_timeout_with_slow_query(self, mock_db_manager):
+  @patch(
+    "robosystems.graph_api.core.ladybug.service.TuningConfig.get_graph_query_timeout",
+    return_value=0.5,
+  )
+  def test_query_timeout_with_slow_query(self, mock_timeout, mock_db_manager):
     """Test actual query timeout with simulated slow query."""
-    from robosystems.config import env
+    # Mock database manager
+    mock_db_instance = MagicMock()
+    mock_db_instance.list_databases.return_value = ["test_db"]
+    mock_db_manager.return_value = mock_db_instance
 
-    # Mock the timeout to 0.5 seconds
-    with patch.object(env, "GRAPH_QUERY_TIMEOUT", 0.5):
-      # Mock database manager
-      mock_db_instance = MagicMock()
-      mock_db_instance.list_databases.return_value = ["test_db"]
-      mock_db_manager.return_value = mock_db_instance
+    # Create a mock connection that simulates a slow query
+    mock_conn = MagicMock()
 
-      # Create a mock connection that simulates a slow query
-      mock_conn = MagicMock()
+    def slow_execute(*args, **kwargs):
+      """Simulate a slow query execution."""
+      time.sleep(3)  # Query takes 3 seconds
+      return MagicMock()
 
-      def slow_execute(*args, **kwargs):
-        """Simulate a slow query execution."""
-        time.sleep(3)  # Query takes 3 seconds
-        return MagicMock()
+    mock_conn.execute = slow_execute
+    mock_db_instance.get_connection.return_value.__enter__.return_value = mock_conn
 
-      mock_conn.execute = slow_execute
-      mock_db_instance.get_connection.return_value.__enter__.return_value = mock_conn
+    # Create service
+    service = LadybugService(
+      base_path=self.temp_dir,
+      node_type=NodeType.WRITER,
+      repository_type=RepositoryType.ENTITY,
+    )
 
-      # Create service
-      service = LadybugService(
-        base_path=self.temp_dir,
-        node_type=NodeType.WRITER,
-        repository_type=RepositoryType.ENTITY,
-      )
+    # Create request (timeout is configured via TuningConfig)
+    request = QueryRequest(database="test_db", cypher="MATCH (n) RETURN n")
 
-      # Create request (timeout is configured via environment)
-      request = QueryRequest(database="test_db", cypher="MATCH (n) RETURN n")
+    # Execute and expect timeout — the 408 gets wrapped in 500 by outer exception handler
+    with pytest.raises(HTTPException) as exc_info:
+      service.execute_query(request)
 
-      # Execute and expect timeout
-      with pytest.raises(HTTPException) as exc_info:
-        service.execute_query(request)
-
-      # Note: Currently wraps 408 in 500 due to exception handling bug
-      assert exc_info.value.status_code == 500
-      assert "timeout" in str(exc_info.value.detail).lower()
+    assert exc_info.value.status_code == 500
+    assert "timeout" in str(exc_info.value.detail).lower()
 
   def test_successful_query_within_timeout(self):
     """Test that fast queries complete successfully within timeout."""
