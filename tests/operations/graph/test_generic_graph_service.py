@@ -163,12 +163,12 @@ class TestGenericGraphService:
                       # Verify database creation
                       mock_lbug_client.create_database.assert_called_once()
 
-                      # Verify schema installation
-                      mock_lbug_client.install_schema.assert_called_once_with(
-                        graph_id=result["graph_id"],
-                        base_schema="base",
-                        extensions=["roboledger", "robofo"],
-                      )
+                      # Verify schema installation used custom_ddl path
+                      mock_lbug_client.install_schema.assert_called_once()
+                      schema_call = mock_lbug_client.install_schema.call_args
+                      assert schema_call.kwargs["graph_id"] == result["graph_id"]
+                      assert "custom_ddl" in schema_call.kwargs
+                      assert schema_call.kwargs["custom_ddl"] is not None
 
                       # Verify GraphSchema was persisted
                       mock_schema_class.create.assert_called_once()

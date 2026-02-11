@@ -8,13 +8,12 @@ from ...logger import get_logger
 from ...middleware.auth.dependencies import get_current_user
 from ...middleware.rate_limits import general_api_rate_limit_dependency
 from ...models.api.orgs import (
-  CreateOrgRequest,
   OrgDetailResponse,
   OrgListResponse,
   OrgResponse,
   UpdateOrgRequest,
 )
-from ...models.iam import Graph, Org, OrgRole, OrgUser, User
+from ...models.iam import Graph, OrgRole, OrgUser, User
 
 logger = get_logger(__name__)
 
@@ -68,62 +67,6 @@ async def list_user_orgs(
     raise HTTPException(
       status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
       detail="Failed to list organizations",
-    )
-
-
-@router.post(
-  "/orgs",
-  response_model=OrgDetailResponse,
-  status_code=status.HTTP_201_CREATED,
-  summary="Create Organization",
-  description="Create a new organization. The creating user becomes the owner.",
-  operation_id="createOrg",
-)
-async def create_org(
-  request: CreateOrgRequest,
-  current_user: User = Depends(get_current_user),
-  db: Session = Depends(get_db_session),
-  _rate_limit: None = Depends(general_api_rate_limit_dependency),
-) -> OrgDetailResponse:
-  """Create a new organization."""
-  try:
-    # Create the organization
-    org = Org.create(
-      name=request.name,
-      org_type=request.org_type,
-      session=db,
-      auto_commit=False,
-    )
-
-    # Add the creator as owner
-    OrgUser.create(
-      org_id=org.id,
-      user_id=current_user.id,
-      role=OrgRole.OWNER,
-      session=db,
-      auto_commit=False,
-    )
-
-    # Create org limits with defaults
-    from ...models.iam import OrgLimits
-
-    OrgLimits.create_default_limits(
-      org_id=org.id,
-      session=db,
-    )
-
-    db.commit()
-    db.refresh(org)
-
-    # Get the created org with details
-    return await get_org(org.id, current_user, db)
-
-  except Exception as e:
-    db.rollback()
-    logger.error(f"Error creating organization: {e!s}")
-    raise HTTPException(
-      status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-      detail="Failed to create organization",
     )
 
 

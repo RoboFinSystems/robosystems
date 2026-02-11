@@ -610,18 +610,25 @@ async def _wait_and_create(
           progress_callback=progress_callback,
         )
       except Exception as create_error:
-        # Creation failed (likely lost race for capacity) — loop back
-        context.log.warning(
-          f"Create attempt {create_attempts} failed: {create_error}. "
-          "Returning to capacity poll."
-        )
-        _emit_progress_sync(
-          operation_id,
-          "Slot taken by another request, waiting for more capacity...",
-          10,
-        )
-        await asyncio.sleep(config.poll_interval_seconds)
-        continue
+        error_msg = str(create_error).lower()
+        is_capacity_error = "capacity" in error_msg or "maximum database" in error_msg
+
+        if is_capacity_error:
+          # Lost race for capacity slot — retry
+          context.log.warning(
+            f"Create attempt {create_attempts} failed (capacity race): "
+            f"{create_error}. Returning to capacity poll."
+          )
+          _emit_progress_sync(
+            operation_id,
+            "Slot taken by another request, waiting for more capacity...",
+            10,
+          )
+          await asyncio.sleep(config.poll_interval_seconds)
+          continue
+
+        # Non-transient error (schema, validation, etc.) — fail immediately
+        raise RuntimeError(f"Graph creation failed: {create_error}") from create_error
 
       # Creation succeeded — finalize
       graph_id = result.get("graph_id")

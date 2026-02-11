@@ -19,6 +19,7 @@ from .credits import (
 from .graphs import (
   GraphAnalyticsResponse,
   GraphBackupResponse,
+  GraphDeprovisionResponse,
   GraphInfrastructureResponse,
   GraphResponse,
   GraphStorageResponse,
@@ -52,6 +53,7 @@ __all__ = [
   "CreditPoolResponse",
   "GraphAnalyticsResponse",
   "GraphBackupResponse",
+  "GraphDeprovisionResponse",
   "GraphInfrastructureResponse",
   "GraphResponse",
   "GraphStorageResponse",

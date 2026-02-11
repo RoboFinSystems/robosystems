@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from robosystems.config import env as env_config
 from robosystems.middleware.graph.allocation_manager import CapacityScalingTriggered
 from robosystems.middleware.sse.direct_monitor import (
   DAGSTER_REPORT_TIMEOUT,
@@ -176,6 +177,11 @@ class TestRunGraphCreation:
           patch("robosystems.database.session") as mock_session_factory,
           patch("robosystems.models.iam.graph.Graph") as mock_graph_cls,
           patch("robosystems.models.iam.org_user.OrgUser"),
+          patch.object(
+            type(env_config),
+            "GRAPH_PROVISION_QUEUE_ENABLED",
+            True,
+          ),
         ):
           mock_db = MagicMock()
           mock_session_factory.return_value = mock_db

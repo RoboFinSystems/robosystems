@@ -1168,6 +1168,26 @@ def get_graph(client, graph_id):
     click.echo(f"  Subgraph Limit: {graph['subgraph_limit']}")
 
 
+@graphs.command("deprovision")
+@click.argument("graph_id")
+@click.option("--force", is_flag=True, help="Skip confirmation prompt")
+@click.pass_obj
+def deprovision_graph(client, graph_id, force):
+  """Deprovision a graph: delete its database and mark as deprovisioned."""
+  if not force:
+    click.confirm(
+      f"This will deprovision graph {graph_id} and delete its database. Continue?",
+      abort=True,
+    )
+
+  result = client._make_request("POST", f"/admin/v1/graphs/{graph_id}/deprovision")
+
+  click.echo(f"\n{result['message']}")
+  click.echo(f"  Previous Status: {result['previous_status']}")
+  click.echo(f"  Current Status: {result['status']}")
+  click.echo(f"  Database Deleted: {'Yes' if result['database_deleted'] else 'No'}")
+
+
 @graphs.command("analytics")
 @click.option("--tier", help="Filter by tier")
 @click.pass_obj

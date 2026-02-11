@@ -368,7 +368,7 @@ class Graph(Model):
 
   _VALID_TRANSITIONS: dict[str, list[str]] = {
     "queued": ["provisioning", "deprovisioned"],
-    "provisioning": ["active", "queued"],
+    "provisioning": ["active", "queued", "deprovisioned"],
     "active": ["suspended", "deprovisioned"],
     "suspended": ["active", "deprovisioned"],
     "deprovisioned": [],

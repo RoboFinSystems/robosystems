@@ -228,9 +228,8 @@ class GenericGraphService:
         graph_client = await get_graph_client_for_instance(cluster_info.private_ip)
 
         try:
-          # Use the new install_schema method
           result = await graph_client.install_schema(
-            graph_id=graph_id, base_schema="base", extensions=schema_extensions
+            graph_id=graph_id, custom_ddl=extensions_ddl
           )
           logger.info("Schema installation completed successfully")
           logger.info(f"Result: {result}")

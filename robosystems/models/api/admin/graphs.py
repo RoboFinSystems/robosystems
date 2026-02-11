@@ -62,6 +62,16 @@ class GraphInfrastructureResponse(BaseModel):
   health_status: str
 
 
+class GraphDeprovisionResponse(BaseModel):
+  """Response from admin graph deprovision."""
+
+  graph_id: str
+  previous_status: str
+  status: str = "deprovisioned"
+  database_deleted: bool
+  message: str
+
+
 class GraphAnalyticsResponse(BaseModel):
   """Response with cross-graph analytics."""
 
