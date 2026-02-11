@@ -38,6 +38,7 @@ class ConnectionInfo:
   use_count: int
   is_healthy: bool
   read_only: bool = False  # Track if connection was opened read-only
+  s3_attached: bool = False  # S3 ATTACH connections bypass TTL (read-only, expensive to recreate)
 
 
 class LadybugConnectionPool:
@@ -506,6 +507,7 @@ class LadybugConnectionPool:
         use_count=1,
         is_healthy=True,
         read_only=True,  # S3 ATTACH is always read-only
+        s3_attached=True,  # Bypass TTL - expensive to recreate, read-only
       )
 
       # Store in pool
@@ -630,9 +632,12 @@ class LadybugConnectionPool:
 
   def _is_connection_valid(self, connection_info: ConnectionInfo) -> bool:
     """Check if a connection is still valid."""
-    # Check TTL
-    if datetime.now(UTC) - connection_info.created_at > self.connection_ttl:
-      return False
+    # S3 ATTACH connections bypass TTL - they are read-only remote mounts
+    # that are expensive to recreate (~11 min ATTACH + full buffer pool reallocation).
+    # Cycling them via TTL causes OOM on memory-constrained replicas.
+    if not connection_info.s3_attached:
+      if datetime.now(UTC) - connection_info.created_at > self.connection_ttl:
+        return False
 
     # Check health status
     return connection_info.is_healthy
