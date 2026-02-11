@@ -33,7 +33,7 @@ QUEUE_TIERS = [
   job=wait_and_create_graph_job,
   minimum_interval_seconds=30,
   default_status=DefaultSensorStatus.RUNNING,
-  description="Processes the graph creation queue (FIFO, one at a time per tier)",
+  description="Processes the graph creation queue (FIFO, one at a time per tier). Controlled by GRAPH_PROVISION_QUEUE_ENABLED feature flag.",
 )
 def graph_creation_queue_sensor(context: SensorEvaluationContext):
   """Process the graph creation queue.
@@ -44,6 +44,11 @@ def graph_creation_queue_sensor(context: SensorEvaluationContext):
   3. Transition to status=provisioning
   4. Yield RunRequest with graph_id + creation params
   """
+  from robosystems.config import env
+
+  if not env.GRAPH_PROVISION_QUEUE_ENABLED:
+    return
+
   from robosystems.database import session as db_session_factory
   from robosystems.models.iam.graph import Graph, GraphStatus
 

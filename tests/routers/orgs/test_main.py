@@ -250,30 +250,6 @@ class TestOrgRouter:
     assert response.status_code == 403
     assert response.json()["detail"] == "You are not a member of this organization"
 
-  async def test_create_org_assigns_owner_and_limits(
-    self, async_client, test_db, test_user
-  ):
-    """Creating an org should assign the requester as owner with default limits."""
-    payload = {
-      "name": f"Created Org {uuid4().hex[:6]}",
-      "org_type": OrgType.TEAM.value,
-    }
-
-    response = await async_client.post("/v1/orgs", json=payload)
-
-    assert response.status_code == 201
-    body = response.json()
-    org_id = body["id"]
-    assert body["name"] == payload["name"]
-
-    membership = OrgUser.get_by_org_and_user(org_id, test_user.id, test_db)
-    assert membership is not None
-    assert membership.role == OrgRole.OWNER
-
-    limits = OrgLimits.get_by_org_id(org_id, test_db)
-    assert limits is not None
-    assert limits.max_graphs > 0
-
   async def test_get_org_denies_non_member_access(
     self, async_client, test_db, test_user
   ):

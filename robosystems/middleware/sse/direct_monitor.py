@@ -209,6 +209,22 @@ async def run_graph_creation(
     return result
 
   except CapacityScalingTriggered:
+    from robosystems.config import env as app_env
+
+    if not app_env.GRAPH_PROVISION_QUEUE_ENABLED:
+      # Queue disabled — fail immediately
+      logger.info(f"No capacity available and provision queue disabled: {operation_id}")
+      await manager.fail_operation(
+        operation_id,
+        error="No capacity currently available. Please try again later.",
+        error_details={"error_type": "CapacityUnavailable"},
+      )
+      return {
+        "operation_id": operation_id,
+        "status": "failed",
+        "error": "No capacity currently available. Please try again later.",
+      }
+
     # ASG scale-up was triggered — queue the graph for the creation queue sensor
     logger.info(
       f"Capacity scaling triggered — queuing graph for creation: {operation_id}"
@@ -416,6 +432,22 @@ async def run_entity_graph_creation(
         pass
 
   except CapacityScalingTriggered:
+    from robosystems.config import env as app_env
+
+    if not app_env.GRAPH_PROVISION_QUEUE_ENABLED:
+      # Queue disabled — fail immediately
+      logger.info(f"No capacity available and provision queue disabled: {operation_id}")
+      await manager.fail_operation(
+        operation_id,
+        error="No capacity currently available. Please try again later.",
+        error_details={"error_type": "CapacityUnavailable"},
+      )
+      return {
+        "operation_id": operation_id,
+        "status": "failed",
+        "error": "No capacity currently available. Please try again later.",
+      }
+
     # ASG scale-up was triggered — queue the graph for the creation queue sensor
     logger.info(
       f"Capacity scaling triggered — queuing entity graph for creation: {operation_id}"

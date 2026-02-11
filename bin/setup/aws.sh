@@ -209,6 +209,7 @@ function create_ssm_feature_flags() {
         "CONNECTION_QUICKBOOKS_ENABLED=false"
         "CONNECTION_SEC_ENABLED=false"
         "DIRECT_GRAPH_MATERIALIZATION_ENABLED=true"
+        "GRAPH_PROVISION_QUEUE_ENABLED=false"
         "EMAIL_VERIFICATION_ENABLED=false"
         "FACT_GRID_ENABLED=false"
         "LOAD_SHEDDING_ENABLED=true"

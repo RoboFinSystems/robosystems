@@ -978,6 +978,7 @@ async def get_graph_capacity(
     }
 
     manager = LadybugAllocationManager(environment=app_env.ENVIRONMENT)
+    queue_enabled = app_env.GRAPH_PROVISION_QUEUE_ENABLED
 
     tiers: list[TierCapacity] = []
     for tier_name, tier_enum in tier_map.items():
@@ -985,6 +986,10 @@ async def get_graph_capacity(
         capacity_status = await manager.check_tier_capacity(tier_enum)
       except Exception as e:
         logger.warning(f"Failed to check capacity for {tier_name}: {e}")
+        capacity_status = "at_capacity"
+
+      # When provision queue is disabled, scalable means unavailable
+      if not queue_enabled and capacity_status == "scalable":
         capacity_status = "at_capacity"
 
       tiers.append(

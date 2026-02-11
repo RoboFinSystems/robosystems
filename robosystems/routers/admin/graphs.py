@@ -12,11 +12,13 @@ from ...middleware.auth.admin import require_admin
 from ...models.api.admin import (
   GraphAnalyticsResponse,
   GraphBackupResponse,
+  GraphDeprovisionResponse,
   GraphInfrastructureResponse,
   GraphResponse,
   GraphStorageResponse,
 )
 from ...models.iam import Graph, User
+from ...models.iam.graph import GraphStatus
 from ...models.iam.graph_backup import GraphBackup
 from ...models.iam.graph_credits import GraphCredits
 from ...models.iam.graph_usage import GraphUsage, UsageEventType
@@ -225,6 +227,99 @@ async def get_graph(request: Request, graph_id: str):
       subgraph_limit=tier_config.get("max_subgraphs"),
       created_at=graph.created_at,
       updated_at=graph.updated_at,
+    )
+  finally:
+    session.close()
+
+
+@router.post("/{graph_id}/deprovision", response_model=GraphDeprovisionResponse)
+@require_admin(permissions=["graphs:write"])
+async def deprovision_graph(request: Request, graph_id: str):
+  """Deprovision a graph: delete its database and mark as deprovisioned.
+
+  Used to clean up graphs stuck in non-terminal states (e.g., provisioning).
+  The database deletion is best-effort — the DB may not exist if provisioning
+  failed early.
+  """
+  session = next(get_db_session())
+  try:
+    graph = session.query(Graph).filter(Graph.graph_id == graph_id).first()
+
+    if not graph:
+      raise HTTPException(
+        status_code=status.HTTP_404_NOT_FOUND,
+        detail=f"Graph {graph_id} not found",
+      )
+
+    if graph.status == GraphStatus.DEPROVISIONED.value:
+      raise HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail=f"Graph {graph_id} is already deprovisioned",
+      )
+
+    previous_status = graph.status or "active"
+
+    # Best-effort: delete the database from the Graph API
+    database_deleted = False
+    try:
+      from ...graph_api.client.factory import get_graph_client
+
+      graph_client = await get_graph_client(graph_id=graph_id, operation_type="write")
+      try:
+        await graph_client.delete_database(graph_id)
+        database_deleted = True
+        logger.info(
+          f"Deleted database for graph {graph_id}",
+          extra={"admin_key_id": request.state.admin_key_id},
+        )
+      finally:
+        await graph_client.close()
+    except Exception as e:
+      logger.warning(
+        f"Best-effort database deletion failed for {graph_id}: {e}",
+        extra={"admin_key_id": request.state.admin_key_id},
+      )
+
+    # Best-effort: deallocate from DynamoDB routing registry (frees instance capacity)
+    try:
+      from ...config import env as app_env
+      from ...middleware.graph.allocation_manager import LadybugAllocationManager
+
+      allocation_manager = LadybugAllocationManager(environment=app_env.ENVIRONMENT)
+      await allocation_manager.deallocate_database(graph_id)
+      logger.info(
+        f"Deallocated routing entry for graph {graph_id}",
+        extra={"admin_key_id": request.state.admin_key_id},
+      )
+    except Exception as e:
+      logger.warning(
+        f"Best-effort routing deallocation failed for {graph_id}: {e}",
+        extra={"admin_key_id": request.state.admin_key_id},
+      )
+
+    # Transition status to deprovisioned
+    graph.transition_status(GraphStatus.DEPROVISIONED, session)
+
+    logger.info(
+      f"Admin deprovisioned graph {graph_id}",
+      extra={
+        "admin_key_id": request.state.admin_key_id,
+        "graph_id": graph_id,
+        "previous_status": previous_status,
+        "database_deleted": database_deleted,
+      },
+    )
+
+    return GraphDeprovisionResponse(
+      graph_id=graph_id,
+      previous_status=previous_status,
+      database_deleted=database_deleted,
+      message=f"Graph {graph_id} deprovisioned successfully"
+      + (
+        " (database deleted)"
+        if database_deleted
+        else " (database not found or already removed)"
+      ),
     )
   finally:
     session.close()
