@@ -309,6 +309,11 @@ Resources:
                 Action:
                   - cloudformation:DescribeStacks
                 Resource: "*"
+              # Auto Scaling permissions for capacity checks
+              - Effect: Allow
+                Action:
+                  - autoscaling:DescribeAutoScalingGroups
+                Resource: "*"
               - Effect: Allow
                 Action:
                   - ssm:GetParametersByPath
