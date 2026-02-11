@@ -235,7 +235,10 @@ class MCPHandler:
 
     except Exception as e:
       logger.error(f"Tool call failed for {name} on {self.backend_type}: {e}")
-      return {"type": "text", "text": "Error: operation failed. Please try again or contact support."}
+      return {
+        "type": "text",
+        "text": "Error: operation failed. Please try again or contact support.",
+      }
 
   async def execute_query_streaming(
     self, query: str, parameters: dict[str, Any] | None = None, chunk_size: int = 1000
@@ -289,7 +292,11 @@ class MCPHandler:
         }
       except Exception as e:
         logger.error(f"Error in streaming fallback: {e}", exc_info=True)
-        yield {"data": [], "columns": [], "error": "Query execution failed. Please try again."}
+        yield {
+          "data": [],
+          "columns": [],
+          "error": "Query execution failed. Please try again.",
+        }
 
   async def _get_graph_info(self) -> dict[str, Any]:
     """Get basic graph statistics."""
@@ -325,7 +332,10 @@ class MCPHandler:
       return {"type": "text", "text": json.dumps(info, indent=2)}
     except Exception as e:
       logger.error(f"Error getting graph info: {e}")
-      return {"type": "text", "text": "Error getting graph info: service temporarily unavailable."}
+      return {
+        "type": "text",
+        "text": "Error getting graph info: service temporarily unavailable.",
+      }
 
   async def _get_graph_description(self) -> dict[str, Any]:
     """Get natural language description of graph structure."""
@@ -368,7 +378,10 @@ class MCPHandler:
       return {"type": "text", "text": description}
     except Exception as e:
       logger.error(f"Error getting graph description: {e}")
-      return {"type": "text", "text": "Error getting graph description: service temporarily unavailable."}
+      return {
+        "type": "text",
+        "text": "Error getting graph description: service temporarily unavailable.",
+      }
 
   async def close(self):
     """Close the MCP tools and database connections."""

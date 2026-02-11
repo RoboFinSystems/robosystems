@@ -13,12 +13,16 @@ set -e
 : ${CLOUDWATCH_NAMESPACE:?"CLOUDWATCH_NAMESPACE must be set"}
 : ${DATA_DIR:?"DATA_DIR must be set"}
 
-# Determine setup log path (writer or replica)
+# Determine setup log path and disk monitoring path (writer or replica)
 # NODE_TYPE is set by the userdata script (e.g., shared_replica, standard, large)
 if [[ "${NODE_TYPE:-}" == *"replica"* ]]; then
   SETUP_LOG_PATH="/var/log/${DATABASE_TYPE}-replica-setup.log"
+  # Replicas use S3 ATTACH (no EBS data volume), so monitor root filesystem
+  DISK_MONITOR_PATH="/"
 else
   SETUP_LOG_PATH="/var/log/${DATABASE_TYPE}-writer-setup.log"
+  # Writers have an EBS volume mounted at DATA_DIR
+  DISK_MONITOR_PATH="${DATA_DIR}"
 fi
 
 # Use ENVIRONMENT if already set, otherwise extract from namespace
@@ -87,7 +91,7 @@ cat > /opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json << EOF
         ],
         "metrics_collection_interval": 60,
         "resources": [
-          "${DATA_DIR}"
+          "${DISK_MONITOR_PATH}"
         ]
       },
       "diskio": {

@@ -1353,7 +1353,9 @@ class TestInstancesCommands:
       helper.get_all_instances.return_value = instances
       helper._asg_name.return_value = "robosystems-shared-replicas-staging-asg"
       helper._gha_var_name.side_effect = lambda group, param: (
-        f"SHARED_REPLICAS_{param}_INSTANCES_STAGING"
+        "SHARED_REPLICAS_DESIRED_CAPACITY_STAGING"
+        if param == "DESIRED"
+        else f"SHARED_REPLICAS_{param}_INSTANCES_STAGING"
       )
       helper.sync_gha_variable.return_value = True
       MockHelper.return_value = helper
@@ -1376,7 +1378,10 @@ class TestInstancesCommands:
       helper.scale_asg.assert_called_once_with(
         "shared-replicas", 3, min_size=None, max_size=5
       )
-      helper.sync_gha_variable.assert_called_once()
+      # shared-replicas syncs desired capacity + max = 2 calls
+      assert helper.sync_gha_variable.call_count == 2
+      helper.sync_gha_variable.assert_any_call("shared-replicas", "DESIRED", 3)
+      helper.sync_gha_variable.assert_any_call("shared-replicas", "MAX", 5)
 
 
 class TestInstancesHelper:
@@ -1437,6 +1442,10 @@ class TestInstancesHelper:
       assert (
         helper._gha_var_name("shared-replicas", "MAX")
         == "SHARED_REPLICAS_MAX_INSTANCES_PROD"
+      )
+      assert (
+        helper._gha_var_name("shared-replicas", "DESIRED")
+        == "SHARED_REPLICAS_DESIRED_CAPACITY_PROD"
       )
 
   def test_gha_var_name_staging(self):
