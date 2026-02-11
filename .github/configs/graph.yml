@@ -302,8 +302,12 @@ production:
       depends_on: ladybug-shared # Only deploy after shared master exists
 
       # Instance type (scaling/enabled via GHA variables: SHARED_REPLICAS_*_PROD)
+      # Memory overrides for replica hardware (m7g.large = 8GB RAM)
+      # These override the writer's 10GB settings which exceed container capacity
       instance:
-        type: m7g.large # General purpose ARM64 - cost-effective for read-only
+        type: m7g.large # General purpose ARM64 - cost-effective for read-only (8GB RAM)
+        max_memory_mb: 5120 # 5GB available (8GB - 2GB OS - 1GB app overhead)
+        memory_per_db_mb: 4096 # 4GB per database for S3 ATTACH read queries
 
 # =============================================================================
 # STAGING ENVIRONMENT
@@ -531,8 +535,11 @@ staging:
       depends_on: ladybug-shared
 
       # Instance type (scaling/enabled via GHA variables: SHARED_REPLICAS_*_STAGING)
+      # Memory overrides for replica hardware (m7g.large = 8GB RAM)
       instance:
-        type: m7g.large # General purpose ARM64 - cost-effective for read-only
+        type: m7g.large # General purpose ARM64 - cost-effective for read-only (8GB RAM)
+        max_memory_mb: 5120 # 5GB available (8GB - 2GB OS - 1GB app overhead)
+        memory_per_db_mb: 4096 # 4GB per database for S3 ATTACH read queries
 
 # =============================================================================
 # DEVELOPMENT ENVIRONMENT

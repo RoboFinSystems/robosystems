@@ -55,6 +55,9 @@ class CypherAgent(BaseAgent):
     """Initialize Cypher agent."""
     super().__init__(graph_id, user, db_session)
     self.ai_client = AIClient()
+    # Tracks the most recent (and cumulative within a request) credit consumption.
+    # Optional because non-AI paths (or failures) may never consume credits.
+    self._last_credit_consumption: dict[str, Any] | None = None
 
   async def analyze(
     self,
@@ -347,10 +350,22 @@ Please explain these results in a clear, natural way.""",
       "Result formatting",
     )
 
-    if credit_result and hasattr(self, "_last_credit_consumption"):
-      self._last_credit_consumption["credits_consumed"] += credit_result.get(
-        "credits_consumed", 0
-      )
+    if credit_result:
+      if self._last_credit_consumption is None:
+        self._last_credit_consumption = {
+          "credits_consumed": 0,
+          "remaining_balance": 0,
+        }
+
+      self._last_credit_consumption["credits_consumed"] = int(
+        self._last_credit_consumption.get("credits_consumed", 0) or 0
+      ) + int(credit_result.get("credits_consumed", 0) or 0)
+
+      # Keep the latest remaining balance, if provided.
+      if "remaining_balance" in credit_result:
+        self._last_credit_consumption["remaining_balance"] = credit_result.get(
+          "remaining_balance", self._last_credit_consumption.get("remaining_balance", 0)
+        )
 
     formatted = (
       f"{response.content}\n\n**Generated Cypher:**\n```cypher\n{cypher_query}\n```"

@@ -579,16 +579,20 @@ class TestCacheValidator:
   @pytest.mark.asyncio
   async def test_validate_cache_freshness_success(self, validator, mock_api_key_cache):
     """Test successful cache freshness validation."""
-    mock_redis = mock_api_key_cache.redis
-    mock_redis.keys = AsyncMock(return_value=["apikey:hash123"])
-    mock_redis.get = AsyncMock(return_value=b"encrypted_data")
-
     # Mock fresh cache data
     fresh_time = datetime.now(UTC) - timedelta(hours=1)  # 1 hour old
     mock_api_key_cache._decrypt_cache_data.return_value = {
       "user_data": {"user_id": "test_user"},
       "cached_at": fresh_time.isoformat(),
     }
+
+    self._setup_async_redis_mock(
+      validator,
+      keys_return=["apikey:hash123"],
+      get_side_effect=lambda key: (
+        b"encrypted_data" if key == "apikey:hash123" else None
+      ),
+    )
 
     result = await validator._validate_cache_freshness()
 

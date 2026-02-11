@@ -78,6 +78,11 @@ class GraphTierConfig:
   def get_tier_config(cls, tier: str, environment: str | None = None) -> dict[str, Any]:
     """Get configuration for a specific tier.
 
+    For replicas (LBUG_NODE_TYPE=shared_replica), this merges the writer's
+    tier config with any instance overrides from the matching replica config.
+    This allows replicas to inherit the writer's settings but override
+    instance-specific values like memory limits for their smaller hardware.
+
     Args:
         tier: The tier name (ladybug-standard, ladybug-large, ladybug-xlarge, ladybug-shared)
         environment: Environment (defaults to current env)
@@ -98,11 +103,31 @@ class GraphTierConfig:
     env_config = config.get(environment, {})
     writers = env_config.get("writers", [])
 
+    writer_config = {}
     for writer in writers:
       if writer.get("tier") == tier:
-        return writer
+        writer_config = writer
+        break
 
-    return {}
+    if not writer_config:
+      return {}
+
+    # For replicas, merge instance overrides from the replica config
+    if env.LBUG_NODE_TYPE == "shared_replica":
+      replicas = env_config.get("replicas", [])
+      for replica in replicas:
+        if replica.get("depends_on") == tier:
+          replica_instance = replica.get("instance", {})
+          if replica_instance:
+            merged = dict(writer_config)
+            merged["instance"] = {
+              **writer_config.get("instance", {}),
+              **replica_instance,
+            }
+            return merged
+          break
+
+    return writer_config
 
   @classmethod
   def get_max_subgraphs(cls, tier: str, environment: str | None = None) -> int | None:
