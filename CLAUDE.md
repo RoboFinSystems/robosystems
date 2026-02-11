@@ -197,7 +197,7 @@ from robosystems.config.valkey_registry import ValkeyDatabase, ValkeyURLBuilder
 redis_url = ValkeyURLBuilder.build_url(env.VALKEY_URL, ValkeyDatabase.AUTH)
 ```
 
-Database numbers: 0=Auth, 1=Rate limits, 2=Credits, 3=Billing, 4=SSE, 5=Locks, 6=Graph routing, 7=Task state, 8-15=Available
+Database numbers: 0=Auth, 1=Rate limits, 2=Graph routing, 3=SSE, 4=Locks, 5-15=Available
 
 ## Testing
 

@@ -17,7 +17,7 @@ The credits middleware:
 ```
 credits/
 ├── __init__.py              # Module exports
-└── cache.py                 # Redis/Valkey-based caching
+└── cache.py                 # In-memory TTL-based caching
 ```
 
 ## Business Model
@@ -44,7 +44,7 @@ XLarge:   100,000 credits/month (~2,600 AI agent calls)
 
 ### 1. Credit Cache (`cache.py`)
 
-High-performance caching layer using Redis/Valkey.
+High-performance in-memory caching layer with TTL-based expiration.
 
 **Features:**
 
@@ -137,9 +137,6 @@ Environment variables:
 CREDIT_BALANCE_CACHE_TTL=300         # Balance cache TTL (seconds)
 CREDIT_SUMMARY_CACHE_TTL=600         # Summary cache TTL
 CREDIT_OPERATION_COST_CACHE_TTL=3600 # Operation cost cache TTL
-
-# Redis/Valkey Configuration
-VALKEY_URL=redis://localhost:6379    # Redis connection URL
 
 # Credit Thresholds
 CREDIT_LOW_BALANCE_THRESHOLD=0.2     # Alert at 20% remaining
@@ -288,7 +285,6 @@ Configure alerts for:
 
 3. **Cache misses**
 
-   - Verify Redis connectivity
    - Check TTL configuration
    - Monitor invalidation patterns
 
