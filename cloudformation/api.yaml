@@ -309,6 +309,16 @@ Resources:
                 Action:
                   - cloudformation:DescribeStacks
                 Resource: "*"
+              # Auto Scaling permissions for capacity checks and scale-up triggers
+              - Effect: Allow
+                Action:
+                  - autoscaling:DescribeAutoScalingGroups
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - autoscaling:SetDesiredCapacity
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:autoscaling:${AWS::Region}:${AWS::AccountId}:autoScalingGroup:*:autoScalingGroupName/robosystems-*-${Environment}-asg"
               - Effect: Allow
                 Action:
                   - ssm:GetParametersByPath
