@@ -95,7 +95,7 @@ update:
 # Run all tests (excludes slow tests)
 test-all:
     @just test
-    @just lint fix
+    -@just lint fix
     @just lint
     @just format
     @just typecheck
@@ -120,8 +120,9 @@ test-integration:
 test-cov:
     uv run pytest --cov=robosystems tests/ --ignore=tests/integration
 
-# Run code quality checks
+# Run code quality checks (auto-fix first, then verify)
 test-code:
+    -@just lint fix
     @just lint
     @just format
     @just typecheck

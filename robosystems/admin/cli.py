@@ -1749,6 +1749,8 @@ class InstancesHelper:
   def _gha_var_name(self, group: str, param: str) -> str:
     env_upper = self.environment.upper()
     if group == "shared-replicas":
+      if param == "DESIRED":
+        return f"SHARED_REPLICAS_DESIRED_CAPACITY_{env_upper}"
       return f"SHARED_REPLICAS_{param}_INSTANCES_{env_upper}"
     prefix = TIER_TO_GHA_PREFIX[group]
     return f"LBUG_{prefix}_{param}_INSTANCES_{env_upper}"
@@ -2133,10 +2135,15 @@ def instances_scale(client, tier, desired, min_size, max_size, force):
   helper.scale_asg(tier, desired, min_size=min_size, max_size=max_size)
   console.print("[green]ASG updated[/green]")
 
-  # Sync GHA variables
+  # Sync GHA variables so next deploy doesn't drift
   gha_results = []
 
-  # Always sync max (desired maps to max in GHA convention)
+  # Shared-replicas has a DESIRED_CAPACITY variable that must stay in sync
+  if tier == "shared-replicas":
+    ok = helper.sync_gha_variable(tier, "DESIRED", desired)
+    var = helper._gha_var_name(tier, "DESIRED")
+    gha_results.append((var, desired, ok))
+
   if max_size is not None:
     ok = helper.sync_gha_variable(tier, "MAX", max_size)
     var = helper._gha_var_name(tier, "MAX")
