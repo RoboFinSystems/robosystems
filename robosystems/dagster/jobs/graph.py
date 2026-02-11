@@ -467,8 +467,11 @@ def restore_graph_job():
 # ============================================================================
 
 
-def _recover_graph_to_queued(graph_id: str, session_factory, context) -> None:
-  """Transition a provisioning graph back to queued for retry."""
+def _fail_graph_provisioning(graph_id: str, session_factory, context) -> None:
+  """Mark a provisioning graph as deprovisioned after a timeout or error.
+
+  No retry — the user is notified via SSE and can try again themselves.
+  """
   if not graph_id:
     return
   try:
@@ -478,12 +481,12 @@ def _recover_graph_to_queued(graph_id: str, session_factory, context) -> None:
     try:
       graph = Graph.get_by_id(graph_id, db)
       if graph and graph.status == GraphStatus.PROVISIONING.value:
-        graph.transition_status(GraphStatus.QUEUED, db)
-        context.log.info(f"Transitioned graph {graph_id} back to queued for retry")
+        graph.transition_status(GraphStatus.DEPROVISIONED, db)
+        context.log.info(f"Marked graph {graph_id} as deprovisioned after failure")
     finally:
       session_factory.remove()
   except Exception as recovery_error:
-    context.log.warning(f"Failed to recover graph status: {recovery_error}")
+    context.log.warning(f"Failed to update graph status: {recovery_error}")
 
 
 async def _wait_and_create(
@@ -669,15 +672,15 @@ async def _wait_and_create(
       return result
 
   except Failure:
-    # Timeout or failure — transition graph back to queued for retry
-    _recover_graph_to_queued(config.graph_id, session, context)
+    # Timeout or failure — mark deprovisioned, no retry
+    _fail_graph_provisioning(config.graph_id, session, context)
     raise
   except Exception as e:
     # Unexpected error — emit SSE failure so user isn't left dangling
     error_msg = f"Graph creation failed unexpectedly: {e}"
     context.log.error(error_msg)
     _emit_failure_sync(operation_id, error_msg)
-    _recover_graph_to_queued(config.graph_id, session, context)
+    _fail_graph_provisioning(config.graph_id, session, context)
     raise Failure(description=error_msg) from e
 
 
