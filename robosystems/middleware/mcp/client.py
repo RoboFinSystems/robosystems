@@ -431,7 +431,8 @@ class GraphMCPClient:
 
     except Exception as e:
       logger.error(f"Failed to get schema: {e}")
-      raise GraphAPIError(f"Schema retrieval failed: {e}")
+      sanitized = self._sanitize_error_message(e, "schema retrieval")
+      raise GraphAPIError(sanitized)
 
   def _get_common_properties(self, node_name: str) -> list[str]:
     """Get commonly used properties for node types."""
@@ -666,7 +667,8 @@ class GraphMCPClient:
 
     except Exception as e:
       logger.error(f"Failed to get graph info: {e}")
-      raise GraphAPIError(f"Graph info retrieval failed: {e}")
+      sanitized = self._sanitize_error_message(e, "graph info retrieval")
+      raise GraphAPIError(sanitized)
 
   def _sanitize_error_message(
     self, error: Exception, context: str = "operation"

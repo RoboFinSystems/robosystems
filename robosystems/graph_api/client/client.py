@@ -457,18 +457,20 @@ class GraphClient(BaseGraphClient):
 
     except TimeoutError:
       elapsed = time.time() - start_time
-      logger.error(
+      logger.warning(
         f"SSE monitoring hard timeout after {elapsed:.0f}s for {table_name} "
-        f"(task {task_id}) - server may be stuck"
+        f"(task {task_id}), falling back to status poll"
       )
-      return {
-        "status": "failed",
-        "task_id": task_id,
-        "error": f"Hard timeout after {elapsed:.0f} seconds - server not responding",
-      }
+      return await self._poll_task_status_fallback(
+        task_id, table_name, timeout, start_time
+      )
     except Exception as e:
-      logger.error(f"SSE monitoring error: {e}")
-      return {"status": "failed", "task_id": task_id, "error": str(e)}
+      logger.warning(
+        f"SSE monitoring error for task {task_id}: {e}, falling back to status poll"
+      )
+      return await self._poll_task_status_fallback(
+        task_id, table_name, timeout, start_time
+      )
 
   async def _sse_event_loop(
     self,
@@ -581,25 +583,91 @@ class GraphClient(BaseGraphClient):
 
             # Check for stale connection (no heartbeat for 2 minutes)
             if current_time - last_heartbeat > 120:
-              logger.error(
-                f"No heartbeat received for 2 minutes, connection stale for task {task_id}"
+              logger.warning(
+                f"No heartbeat received for 2 minutes for task {task_id}, "
+                f"falling back to status poll"
               )
-              return {
-                "status": "failed",
-                "task_id": task_id,
-                "error": "SSE connection stale - no heartbeat for 2 minutes",
-              }
+              return await self._poll_task_status_fallback(
+                task_id, table_name, timeout, start_time
+              )
 
       # If we exit the loop without a completion event
-      return {
-        "status": "failed",
-        "task_id": task_id,
-        "error": "SSE stream ended unexpectedly",
-      }
+      logger.warning(
+        f"SSE stream ended unexpectedly for task {task_id}, falling back to status poll"
+      )
+      return await self._poll_task_status_fallback(
+        task_id, table_name, timeout, start_time
+      )
 
     except TimeoutError:
       logger.error(f"SSE connection timeout for task {task_id}")
       return {"status": "failed", "task_id": task_id, "error": "SSE connection timeout"}
+
+  async def _poll_task_status_fallback(
+    self,
+    task_id: str,
+    table_name: str,
+    timeout: int,
+    start_time: float,
+  ) -> dict[str, Any]:
+    """
+    Fallback when SSE stream goes stale: poll task status directly via HTTP GET.
+
+    This handles cases where the SSE stream is starved (e.g., outbound network
+    saturated by a large S3 upload) but the task itself is still running fine.
+    """
+    poll_interval = 5
+    max_polls = 60  # 5 minutes of polling at 5s intervals
+
+    for i in range(max_polls):
+      # Check overall timeout
+      if time.time() - start_time > timeout:
+        logger.error(f"Task {task_id} timed out after {timeout}s during status polling")
+        return {
+          "status": "failed",
+          "task_id": task_id,
+          "error": f"Timeout after {timeout} seconds",
+        }
+
+      try:
+        task = await self.get_task_status(task_id)
+        status = task.get("status")
+
+        if status == "completed":
+          result = task.get("result", {})
+          logger.info(
+            f"[OK] Task {task_id} completed (detected via status poll after SSE stale)"
+          )
+          return {
+            "status": "completed",
+            "task_id": task_id,
+            "result": result,
+            "duration_seconds": time.time() - start_time,
+          }
+
+        if status == "failed":
+          error = task.get("error", "Unknown error")
+          logger.error(f"[FAILED] Task {task_id} failed: {error}")
+          return {"status": "failed", "task_id": task_id, "error": error}
+
+        # Still running — keep polling
+        if i == 0:
+          logger.info(
+            f"Task {task_id} still running (status={status}), "
+            f"polling every {poll_interval}s..."
+          )
+
+      except Exception as e:
+        logger.warning(f"Status poll failed for task {task_id}: {e}")
+
+      await asyncio.sleep(poll_interval)
+
+    # Exhausted polls
+    return {
+      "status": "failed",
+      "task_id": task_id,
+      "error": f"Task still running after {max_polls * poll_interval}s of status polling",
+    }
 
   async def list_databases(self) -> dict[str, Any]:
     """List all databases."""

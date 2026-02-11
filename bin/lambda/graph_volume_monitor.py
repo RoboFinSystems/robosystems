@@ -224,11 +224,14 @@ def check_and_expand_volume(instance: dict, expand_immediately: bool = False) ->
     # Get the actual EBS volume ID and size from EC2
     volume_id, ebs_size_gb = get_data_volume_info(instance["instance_id"])
 
-    # Check if filesystem needs to be grown (EBS larger than filesystem)
+    # Check if filesystem needs to be grown (EBS significantly larger than filesystem)
     # This can happen if a previous expansion succeeded but filesystem growth failed
-    if ebs_size_gb and ebs_size_gb > current_size:
+    # Use a tolerance of 2GB to account for XFS metadata overhead (XFS reserves ~1-2%
+    # for internal metadata/journal, so df reports less than the actual device size)
+    ebs_fs_diff = (ebs_size_gb - current_size) if ebs_size_gb else 0
+    if ebs_size_gb and ebs_fs_diff > 2:
       logger.warning(
-        f"EBS volume ({ebs_size_gb}GB) larger than filesystem ({current_size}GB) - "
+        f"EBS volume ({ebs_size_gb}GB) significantly larger than filesystem ({current_size}GB) - "
         "filesystem growth may have failed previously, triggering growth now"
       )
       grow_result = trigger_filesystem_growth(instance)
@@ -236,7 +239,9 @@ def check_and_expand_volume(instance: dict, expand_immediately: bool = False) ->
       result["filesystem_grown"] = grow_result.get("success", False)
       result["reason"] = f"EBS ({ebs_size_gb}GB) > filesystem ({current_size}GB)"
       result["ebs_size_gb"] = ebs_size_gb
-      return result
+      # Use the EBS size as the current size for expansion check since
+      # filesystem growth should now match the EBS volume
+      current_size = ebs_size_gb
 
     # Determine if expansion is needed
     threshold = 0.7 if expand_immediately else EXPANSION_THRESHOLD
