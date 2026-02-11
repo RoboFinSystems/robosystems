@@ -415,6 +415,74 @@ async def run_entity_graph_creation(
       except StopIteration:
         pass
 
+  except CapacityScalingTriggered:
+    # ASG scale-up was triggered — queue the graph for the creation queue sensor
+    logger.info(
+      f"Capacity scaling triggered — queuing entity graph for creation: {operation_id}"
+    )
+
+    from robosystems.config.graph_tier import GraphTier
+    from robosystems.database import session as db_session_factory
+    from robosystems.models.iam.graph import Graph
+    from robosystems.models.iam.org_user import OrgUser
+    from robosystems.utils.ulid import generate_ulid_hex
+
+    # Pre-generate graph_id
+    unique_id = generate_ulid_hex(16)
+    graph_id = f"kg{unique_id}"
+
+    # Get user's org
+    db = db_session_factory()
+    try:
+      org_user = db.query(OrgUser).filter(OrgUser.user_id == user_id).first()
+      org_id = org_user.org_id if org_user else None
+
+      # Create queued graph row + GraphUser in one transaction
+      Graph.create_queued(
+        graph_id=graph_id,
+        org_id=org_id,
+        graph_name=entity_name,
+        graph_type="entity",
+        user_id=user_id,
+        session=db,
+        graph_tier=GraphTier(tier),
+        schema_extensions=schema_extensions,
+        graph_metadata={
+          "created_by": user_id,
+          "operation_id": operation_id,
+          "entity_name": entity_name,
+          "entity_identifier": entity_identifier,
+          "entity_identifier_type": entity_identifier_type,
+          "description": description or "",
+          "tags": tags or [],
+          "create_entity": create_entity,
+        },
+      )
+      logger.info(f"Created queued entity graph {graph_id} for user {user_id}")
+    except Exception as queue_error:
+      logger.error(f"Failed to create queued entity graph: {queue_error}")
+      await manager.fail_operation(
+        operation_id,
+        error=f"Failed to queue entity graph for creation: {queue_error}",
+        error_details={"error_type": type(queue_error).__name__},
+      )
+      raise
+    finally:
+      db_session_factory.remove()
+
+    # Emit SSE progress
+    await manager.emit_progress(
+      operation_id,
+      "Queued for provisioning — new infrastructure being started...",
+      5,
+    )
+
+    return {
+      "graph_id": graph_id,
+      "operation_id": operation_id,
+      "status": "queued",
+    }
+
   except Exception as e:
     logger.error(f"Entity graph creation failed: {e}")
     await manager.fail_operation(
