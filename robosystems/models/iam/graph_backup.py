@@ -7,6 +7,7 @@ from typing import Any, Optional
 
 from sqlalchemy import (
   JSON,
+  BigInteger,
   Boolean,
   Column,
   DateTime,
@@ -65,9 +66,9 @@ class GraphBackup(Model):
   s3_metadata_key = Column(String, nullable=True)  # S3 metadata object key
 
   # Size and compression metrics
-  original_size_bytes = Column(Integer, nullable=False, default=0)
-  compressed_size_bytes = Column(Integer, nullable=False, default=0)
-  encrypted_size_bytes = Column(Integer, nullable=False, default=0)
+  original_size_bytes = Column(BigInteger, nullable=False, default=0)
+  compressed_size_bytes = Column(BigInteger, nullable=False, default=0)
+  encrypted_size_bytes = Column(BigInteger, nullable=False, default=0)
   compression_ratio = Column(Float, nullable=False, default=0.0)
 
   # Database statistics at backup time

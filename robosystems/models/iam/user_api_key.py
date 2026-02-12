@@ -34,11 +34,11 @@ class UserAPIKey(Model):
   description = Column(Text, nullable=True)  # Optional description
   last_used_at = Column(DateTime, nullable=True)
   expires_at = Column(DateTime, nullable=True)  # Optional expiration date
-  created_at = Column(DateTime, default=datetime.now(UTC), nullable=False)
+  created_at = Column(DateTime, default=lambda: datetime.now(UTC), nullable=False)
   updated_at = Column(
     DateTime,
-    default=datetime.now(UTC),
-    onupdate=datetime.now(UTC),
+    default=lambda: datetime.now(UTC),
+    onupdate=lambda: datetime.now(UTC),
     nullable=False,
   )
 
