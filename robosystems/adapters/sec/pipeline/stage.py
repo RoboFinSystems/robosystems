@@ -291,6 +291,15 @@ def sec_duckdb_incremental_staged(
 
   from robosystems.adapters.sec import XBRLDuckDBGraphProcessor
 
+  # Boost DuckDB memory before staging (only applies to ladybug-shared tier)
+  try:
+    from robosystems.graph_api.client.factory import boost_graph_memory
+
+    boost_result = asyncio.run(boost_graph_memory(config.graph_id, target="duckdb"))
+    context.log.info(f"Memory boost: {boost_result.get('message', 'done')}")
+  except Exception as boost_err:
+    context.log.warning(f"Could not boost memory (non-fatal): {boost_err}")
+
   processor = XBRLDuckDBGraphProcessor(graph_id=config.graph_id)
 
   async def run_incremental():
@@ -303,6 +312,15 @@ def sec_duckdb_incremental_staged(
 
   result = asyncio.run(run_incremental())
 
+  # Release DuckDB memory after staging (closes connections, frees buffers)
+  try:
+    from robosystems.graph_api.client.factory import release_graph_memory
+
+    release_result = asyncio.run(release_graph_memory(config.graph_id, target="duckdb"))
+    context.log.info(f"Memory release: {release_result.get('message', 'done')}")
+  except Exception as release_err:
+    context.log.warning(f"Could not release memory (non-fatal): {release_err}")
+
   if result.status == "error":
     context.log.error(f"Incremental staging failed: {result.error}")
     return MaterializeResult(
@@ -310,6 +328,22 @@ def sec_duckdb_incremental_staged(
         "graph_id": config.graph_id,
         "status": "error",
         "error": result.error or "Unknown error",
+        "duration_ms": result.duration_ms,
+      }
+    )
+
+  if result.status == "partial":
+    context.log.error(
+      f"Incremental staging partially failed: "
+      f"{len(result.table_names)} tables succeeded but some failed. "
+      f"Downstream materialization should not proceed with incomplete data."
+    )
+    return MaterializeResult(
+      metadata={
+        "graph_id": config.graph_id,
+        "status": "error",
+        "error": "Partial staging failure - not all tables were updated",
+        "tables_staged": len(result.table_names),
         "duration_ms": result.duration_ms,
       }
     )

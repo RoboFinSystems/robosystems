@@ -433,8 +433,6 @@ class LadybugMaterializer:
     Returns:
         EntityUpdateResult with update statistics
     """
-    import duckdb
-
     from robosystems.adapters.sec import get_current_quarter
 
     start_time = time.time()
@@ -464,30 +462,19 @@ class LadybugMaterializer:
           duration_ms=(time.time() - start_time) * 1000,
         )
 
-      # Step 2: Read Entity parquet from S3 using DuckDB
+      # Step 2: Read Entity parquet from S3 using boto3 + pyarrow
+      # Uses IAM role credentials automatically (works in ECS, SSO, etc.)
       log_progress(f"Reading Entity parquet from S3: {entity_s3_path}")
 
-      duck_conn = duckdb.connect(":memory:")
-      duck_conn.execute("INSTALL httpfs; LOAD httpfs;")
-      duck_conn.execute(f"SET s3_region='{env.AWS_REGION}';")
+      import io
 
-      if env.AWS_ENDPOINT_URL:
-        # LocalStack/development
-        duck_conn.execute(
-          f"SET s3_endpoint='{env.AWS_ENDPOINT_URL.replace('http://', '').replace('https://', '')}';"
-        )
-        duck_conn.execute("SET s3_use_ssl=false;")
-        duck_conn.execute("SET s3_url_style='path';")
-      else:
-        # Production AWS
-        duck_conn.execute(f"SET s3_access_key_id='{env.AWS_S3_ACCESS_KEY_ID}';")
-        duck_conn.execute(f"SET s3_secret_access_key='{env.AWS_S3_SECRET_ACCESS_KEY}';")
+      import pyarrow.parquet as pq
 
-      latest_entities = duck_conn.execute(
-        f"SELECT * FROM read_parquet('{entity_s3_path}')"
-      ).fetchdf()
-
-      duck_conn.close()
+      s3_key = f"{self.source_prefix}/filed={year}-Q{quarter}/nodes/Entity.parquet"
+      response = self.s3_client.s3_client.get_object(Bucket=self.bucket, Key=s3_key)
+      parquet_bytes = response["Body"].read()
+      table = pq.read_table(io.BytesIO(parquet_bytes))
+      latest_entities = table.to_pandas()
 
       if latest_entities.empty:
         log_progress("Entity parquet is empty, no updates needed")

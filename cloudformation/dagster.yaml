@@ -454,9 +454,18 @@ Resources:
               - Effect: Allow
                 Action:
                   - autoscaling:DescribeAutoScalingGroups
+                  - autoscaling:DescribeInstanceRefreshes
+                Resource: "*"
+              - Effect: Allow
+                Action:
                   - autoscaling:UpdateAutoScalingGroup
                   - autoscaling:StartInstanceRefresh
-                  - autoscaling:DescribeInstanceRefreshes
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:autoscaling:${AWS::Region}:${AWS::AccountId}:autoScalingGroup:*:autoScalingGroupName/robosystems-*-${Environment}-asg"
+              # CloudFormation for shared replica ALB discovery
+              - Effect: Allow
+                Action:
+                  - cloudformation:DescribeStacks
                 Resource: "*"
               # ECS for run launcher
               - Effect: Allow
