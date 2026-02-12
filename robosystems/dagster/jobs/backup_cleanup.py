@@ -56,6 +56,11 @@ def cleanup_tracked_backups(
 
     for backup in expired_backups:
       try:
+        # Mark record as expired FIRST — if S3 deletion fails afterward,
+        # the record is already expired and the S3 lifecycle rule (90 days)
+        # will clean up the orphaned object as a safety net.
+        backup.expire_backup(session)
+
         # Delete S3 backup object
         try:
           s3.client.delete_object(Bucket=backup.s3_bucket, Key=backup.s3_key)
@@ -71,8 +76,6 @@ def cleanup_tracked_backups(
               f"Failed to delete metadata {backup.s3_metadata_key}: {e}"
             )
 
-        # Mark record as expired
-        backup.expire_backup(session)
         expired_count += 1
 
       except Exception as e:
@@ -109,6 +112,7 @@ def cleanup_shared_repo_backups(context: OpExecutionContext) -> dict[str, Any]:
 
   total_deleted = 0
   results: dict[str, int] = {}
+  errors: dict[str, str] = {}
 
   service = create_shared_repository_backup_service()
 
@@ -121,13 +125,14 @@ def cleanup_shared_repo_backups(context: OpExecutionContext) -> dict[str, Any]:
         context.log.info(f"Deleted {deleted} old backups for repo {repo_id}")
     except Exception as e:
       context.log.error(f"Failed to clean up backups for repo {repo_id}: {e}")
-      results[repo_id] = -1
+      errors[repo_id] = str(e)
 
   context.log.info(f"Shared repo backup cleanup: {total_deleted} total deleted")
 
   return {
     "total_deleted": total_deleted,
     "per_repo": results,
+    "errors": errors,
     "timestamp": datetime.now(UTC).isoformat(),
   }
 

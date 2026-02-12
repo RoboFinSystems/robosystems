@@ -311,7 +311,12 @@ def _evict_idle_subgraph_databases(pool, target_graph_id: str) -> list[str]:
       continue
     try:
       pool.close_database_connections(db_name)
-      evicted.append(db_name)
+      if not pool.has_active_connections(db_name):
+        evicted.append(db_name)
+      else:
+        logger.warning(
+          f"Database {db_name} still has connections after eviction attempt"
+        )
     except Exception as e:
       logger.warning(f"Failed to evict idle database {db_name}: {e}")
   return evicted

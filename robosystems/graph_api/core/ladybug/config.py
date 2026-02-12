@@ -54,16 +54,15 @@ def set_ladybug_memory_override(
       logger.info(f"LadybugDB memory override for '{graph_id}' cleared")
     return old_value
   else:
-    # No graph_id: clear all overrides (used for full restore)
-    old_value = next(iter(_memory_overrides.values()), None)
-    if memory_mb is None:
-      _memory_overrides.clear()
-      logger.info("LadybugDB memory overrides cleared (all)")
-    else:
-      logger.warning(
-        "set_ladybug_memory_override called with memory_mb but no graph_id — "
+    if memory_mb is not None:
+      raise ValueError(
+        "graph_id is required when setting a memory override — "
         "pass graph_id to scope the override to a specific database"
       )
+    # No graph_id + None memory_mb: clear all overrides
+    old_value = next(iter(_memory_overrides.values()), None)
+    _memory_overrides.clear()
+    logger.info("LadybugDB memory overrides cleared (all)")
     return old_value
 
 

@@ -163,6 +163,7 @@ class UserRepository(Model):
     Index("idx_user_shared_repo_expires", "expires_at", "is_active"),
     Index("idx_user_shared_repo_billing", "next_billing_at", "is_active"),
     Index("idx_user_shared_repo_plan", "repository_plan", "is_active"),
+    Index("idx_user_shared_repo_name_active", "repository_name", "is_active"),
   )
 
   def __repr__(self):
