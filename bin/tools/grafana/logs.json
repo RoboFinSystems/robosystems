@@ -84,7 +84,7 @@
         "overrides": []
       },
       "gridPos": {
-        "h": 8,
+        "h": 12,
         "w": 24,
         "x": 0,
         "y": 0
@@ -118,7 +118,7 @@
           "expression": "REMOVE_EMPTY(SEARCH('{AWS/Logs,LogGroupName} MetricName=\"IncomingLogEvents\"', 'Sum', $period))/$period",
           "id": "",
           "label": "",
-          "matchExact": true,
+          "matchExact": false,
           "metricEditorMode": 0,
           "metricName": "IncomingLogEvents",
           "metricQueryType": 0,
@@ -130,25 +130,6 @@
         }
       ],
       "title": "Incoming log events [count/sec]",
-      "transformations": [
-        {
-          "id": "filterFieldsByName",
-          "options": {
-            "include": {
-              "names": [
-                "Time",
-                "/aws/lambda/RoboSystemsGraphVolumesStaging-volume-monitor",
-                "/robosystems/staging/api",
-                "/robosystems/staging/dagster",
-                "/robosystems/staging/graph-api",
-                "/aws/lambda/RoboSystemsGraphVolumesStaging-volume-detachment",
-                "/aws/lambda/RoboSystemsGraphVolumesStaging-volume-manager",
-                "/robosystems/staging/app"
-              ]
-            }
-          }
-        }
-      ],
       "type": "timeseries"
     },
     {
@@ -213,10 +194,10 @@
         "overrides": []
       },
       "gridPos": {
-        "h": 8,
+        "h": 14,
         "w": 24,
         "x": 0,
-        "y": 8
+        "y": 12
       },
       "id": 3,
       "options": {
@@ -258,25 +239,6 @@
         }
       ],
       "title": "Incoming bytes [bytes/sec]",
-      "transformations": [
-        {
-          "id": "filterFieldsByName",
-          "options": {
-            "include": {
-              "names": [
-                "Time",
-                "/aws/lambda/RoboSystemsGraphVolumesStaging-volume-monitor",
-                "/robosystems/staging/api",
-                "/robosystems/staging/dagster",
-                "/robosystems/staging/graph-api",
-                "/aws/lambda/RoboSystemsGraphVolumesStaging-volume-manager",
-                "/aws/lambda/RoboSystemsGraphVolumesStaging-volume-detachment",
-                "/robosystems/staging/app"
-              ]
-            }
-          }
-        }
-      ],
       "type": "timeseries"
     },
     {
@@ -341,10 +303,10 @@
         "overrides": []
       },
       "gridPos": {
-        "h": 7,
+        "h": 4,
         "w": 24,
         "x": 0,
-        "y": 16
+        "y": 26
       },
       "id": 4,
       "options": {
@@ -370,7 +332,7 @@
           },
           "expression": "",
           "label": "Delivery Errors",
-          "matchExact": true,
+          "matchExact": false,
           "metricEditorMode": 0,
           "metricName": "DeliveryErrors",
           "metricQueryType": 0,
@@ -390,7 +352,7 @@
           "expression": "",
           "hide": false,
           "label": "Delivery Throttling",
-          "matchExact": true,
+          "matchExact": false,
           "metricEditorMode": 0,
           "metricName": "DeliveryThrottling",
           "metricQueryType": 0,
@@ -413,7 +375,7 @@
         "h": 23,
         "w": 24,
         "x": 0,
-        "y": 23
+        "y": 30
       },
       "id": 10,
       "options": {
@@ -434,14 +396,13 @@
             "uid": "${datasource}"
           },
           "dimensions": {},
-          "expression": "fields @timestamp, @message |\n filter strcontains(@logStream, \"/api\") |\n filter not strcontains(@message, \"opentelemetry.exporter.otlp.proto.http.trace_exporter\" |\n sort @timestamp desc |\n limit 100",
+          "expression": "fields @timestamp, @message |\n filter strcontains(@logStream, \"/api\") |\n filter not strcontains(@message, \"opentelemetry.exporter.otlp.proto.http.trace_exporter\") |\n sort @timestamp desc |\n limit 100",
           "id": "",
           "label": "",
           "logGroups": [
             {
-              "accountId": "821526227241",
-              "arn": "arn:aws:logs:us-east-1:821526227241:log-group:/robosystems/staging/api:*",
-              "name": "/robosystems/staging/api"
+              "arn": "$api_log_group",
+              "name": "$api_log_group"
             }
           ],
           "matchExact": true,
@@ -470,7 +431,7 @@
         "h": 22,
         "w": 24,
         "x": 0,
-        "y": 46
+        "y": 53
       },
       "id": 11,
       "options": {
@@ -496,9 +457,8 @@
           "label": "",
           "logGroups": [
             {
-              "accountId": "821526227241",
-              "arn": "arn:aws:logs:us-east-1:821526227241:log-group:/robosystems/staging/dagster:*",
-              "name": "/robosystems/staging/dagster"
+              "arn": "$dagster_log_group",
+              "name": "$dagster_log_group"
             }
           ],
           "matchExact": true,
@@ -527,7 +487,7 @@
         "h": 22,
         "w": 24,
         "x": 0,
-        "y": 68
+        "y": 75
       },
       "id": 12,
       "options": {
@@ -553,9 +513,8 @@
           "label": "",
           "logGroups": [
             {
-              "accountId": "821526227241",
-              "arn": "arn:aws:logs:us-east-1:821526227241:log-group:/robosystems/staging/graph-api:*",
-              "name": "/robosystems/staging/graph-api"
+              "arn": "$graph_api_log_group",
+              "name": "$graph_api_log_group"
             }
           ],
           "matchExact": true,
@@ -574,133 +533,39 @@
       ],
       "title": "Graph API Logs",
       "type": "logs"
-    },
-    {
-      "datasource": {
-        "type": "cloudwatch",
-        "uid": "${datasource}"
-      },
-      "gridPos": {
-        "h": 22,
-        "w": 24,
-        "x": 0,
-        "y": 90
-      },
-      "id": 13,
-      "options": {
-        "dedupStrategy": "none",
-        "enableLogDetails": true,
-        "prettifyLogMessage": false,
-        "showCommonLabels": false,
-        "showLabels": false,
-        "showTime": true,
-        "sortOrder": "Descending",
-        "wrapLogMessage": false
-      },
-      "pluginVersion": "10.4.1",
-      "targets": [
-        {
-          "datasource": {
-            "type": "cloudwatch",
-            "uid": "${datasource}"
-          },
-          "dimensions": {},
-          "expression": "fields @timestamp, @message |\n sort @timestamp desc |\n limit 100",
-          "id": "",
-          "label": "",
-          "logGroups": [
-            {
-              "accountId": "821526227241",
-              "arn": "arn:aws:logs:us-east-1:821526227241:log-group:/aws/lambda/RoboSystemsGraphInfraStaging-api-key-generator:*",
-              "name": "/aws/lambda/RoboSystemsGraphInfraStaging-api-key-generator"
-            },
-            {
-              "accountId": "821526227241",
-              "arn": "arn:aws:logs:us-east-1:821526227241:log-group:/aws/lambda/RoboSystemsGraphInfraStaging-instance-monitor:*",
-              "name": "/aws/lambda/RoboSystemsGraphInfraStaging-instance-monitor"
-            },
-            {
-              "accountId": "821526227241",
-              "arn": "arn:aws:logs:us-east-1:821526227241:log-group:/aws/lambda/RoboSystemsGraphVolumesStaging-snapshot-selector:*",
-              "name": "/aws/lambda/RoboSystemsGraphVolumesStaging-snapshot-selector"
-            },
-            {
-              "accountId": "821526227241",
-              "arn": "arn:aws:logs:us-east-1:821526227241:log-group:/aws/lambda/RoboSystemsGraphVolumesStaging-volume-detachment:*",
-              "name": "/aws/lambda/RoboSystemsGraphVolumesStaging-volume-detachment"
-            },
-            {
-              "accountId": "821526227241",
-              "arn": "arn:aws:logs:us-east-1:821526227241:log-group:/aws/lambda/RoboSystemsGraphVolumesStaging-volume-manager:*",
-              "name": "/aws/lambda/RoboSystemsGraphVolumesStaging-volume-manager"
-            },
-            {
-              "accountId": "821526227241",
-              "arn": "arn:aws:logs:us-east-1:821526227241:log-group:/aws/lambda/RoboSystemsGraphVolumesStaging-volume-monitor:*",
-              "name": "/aws/lambda/RoboSystemsGraphVolumesStaging-volume-monitor"
-            },
-            {
-              "accountId": "821526227241",
-              "arn": "arn:aws:logs:us-east-1:821526227241:log-group:/aws/lambda/RoboSystemsPostgresIAMStaging-postgres-rotation:*",
-              "name": "/aws/lambda/RoboSystemsPostgresIAMStaging-postgres-rotation"
-            },
-            {
-              "accountId": "821526227241",
-              "arn": "arn:aws:logs:us-east-1:821526227241:log-group:/aws/lambda/RoboSystemsPostgresIAMStaging-secrets-update-lambda:*",
-              "name": "/aws/lambda/RoboSystemsPostgresIAMStaging-secrets-update-lambda"
-            },
-            {
-              "accountId": "821526227241",
-              "arn": "arn:aws:logs:us-east-1:821526227241:log-group:/aws/lambda/RoboSystemsPostgresStaging-postgres-rotation:*",
-              "name": "/aws/lambda/RoboSystemsPostgresStaging-postgres-rotation"
-            },
-            {
-              "accountId": "821526227241",
-              "arn": "arn:aws:logs:us-east-1:821526227241:log-group:/aws/lambda/RoboSystemsValkeyStaging-valkey-rotation:*",
-              "name": "/aws/lambda/RoboSystemsValkeyStaging-valkey-rotation"
-            }
-          ],
-          "matchExact": true,
-          "metricEditorMode": 0,
-          "metricName": "",
-          "metricQueryType": 0,
-          "namespace": "",
-          "period": "",
-          "queryMode": "Logs",
-          "refId": "A",
-          "region": "$region",
-          "sqlExpression": "",
-          "statistic": "Average",
-          "statsGroups": []
-        }
-      ],
-      "title": "Lambda Logs",
-      "type": "logs"
     }
   ],
   "refresh": false,
   "schemaVersion": 39,
-  "tags": ["robosystems", "infrastructure", "staging"],
+  "tags": ["robosystems", "infrastructure", "logs"],
   "templating": {
     "list": [
       {
         "current": {
           "selected": false,
-          "text": "RoboSystems CloudWatch",
-          "value": "deoe41wti55a8c"
+          "text": "prod",
+          "value": "prod"
         },
         "hide": 0,
         "includeAll": false,
-        "label": "Data source",
         "multi": false,
-        "name": "datasource",
-        "options": [],
-        "query": "cloudwatch",
+        "name": "env",
+        "options": [
+          {
+            "selected": true,
+            "text": "prod",
+            "value": "prod"
+          },
+          {
+            "selected": false,
+            "text": "staging",
+            "value": "staging"
+          }
+        ],
+        "query": "prod,staging",
         "queryValue": "",
-        "refresh": 1,
-        "regex": "",
         "skipUrlSync": false,
-        "type": "datasource"
+        "type": "custom"
       },
       {
         "current": {
@@ -732,6 +597,25 @@
       {
         "current": {
           "selected": false,
+          "text": "${cloudwatch}",
+          "value": "${cloudwatch}"
+        },
+        "hide": 0,
+        "includeAll": false,
+        "label": "Data source",
+        "multi": false,
+        "name": "datasource",
+        "options": [],
+        "query": "cloudwatch",
+        "queryValue": "",
+        "refresh": 1,
+        "regex": "",
+        "skipUrlSync": false,
+        "type": "datasource"
+      },
+      {
+        "current": {
+          "selected": false,
           "text": "300",
           "value": "300"
         },
@@ -758,8 +642,81 @@
           }
         ],
         "query": "60,300,3600",
+        "queryValue": "",
         "skipUrlSync": false,
         "type": "custom"
+      },
+      {
+        "current": {},
+        "datasource": {
+          "type": "cloudwatch",
+          "uid": "$datasource"
+        },
+        "definition": "",
+        "hide": 2,
+        "includeAll": false,
+        "multi": false,
+        "name": "api_log_group",
+        "options": [],
+        "query": {
+          "logGroupPrefix": "/robosystems/${env}/api",
+          "queryType": "logGroups",
+          "refId": "CloudWatchVariableQueryEditor-VariableQuery",
+          "region": "$region"
+        },
+        "refresh": 1,
+        "regex": "",
+        "skipUrlSync": false,
+        "sort": 0,
+        "type": "query"
+      },
+      {
+        "current": {},
+        "datasource": {
+          "type": "cloudwatch",
+          "uid": "$datasource"
+        },
+        "definition": "",
+        "hide": 2,
+        "includeAll": false,
+        "multi": false,
+        "name": "dagster_log_group",
+        "options": [],
+        "query": {
+          "logGroupPrefix": "/robosystems/${env}/dagster",
+          "queryType": "logGroups",
+          "refId": "CloudWatchVariableQueryEditor-VariableQuery",
+          "region": "$region"
+        },
+        "refresh": 1,
+        "regex": "",
+        "skipUrlSync": false,
+        "sort": 0,
+        "type": "query"
+      },
+      {
+        "current": {},
+        "datasource": {
+          "type": "cloudwatch",
+          "uid": "$datasource"
+        },
+        "definition": "",
+        "hide": 2,
+        "includeAll": false,
+        "multi": false,
+        "name": "graph_api_log_group",
+        "options": [],
+        "query": {
+          "logGroupPrefix": "/robosystems/${env}/graph-api",
+          "queryType": "logGroups",
+          "refId": "CloudWatchVariableQueryEditor-VariableQuery",
+          "region": "$region"
+        },
+        "refresh": 1,
+        "regex": "",
+        "skipUrlSync": false,
+        "sort": 0,
+        "type": "query"
       }
     ]
   },
@@ -782,8 +739,8 @@
     ]
   },
   "timezone": "",
-  "title": "RoboSystems Staging Logs",
+  "title": "RoboSystems Logs",
   "uid": null,
-  "version": 11,
+  "version": 1,
   "weekStart": ""
 }

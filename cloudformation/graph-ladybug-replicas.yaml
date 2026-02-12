@@ -288,6 +288,7 @@ Resources:
                   - ssm:GetParametersByPath
                 Resource:
                   - !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/robosystems/${Environment}/features/*
+                  - !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/robosystems/${Environment}/tuning/*
               # Secrets Manager - read application secrets
               - Effect: Allow
                 Action:
@@ -307,6 +308,11 @@ Resources:
                   StringEquals:
                     "kms:ViaService":
                       - !Sub secretsmanager.${AWS::Region}.amazonaws.com
+              # CloudFormation for shared replica ALB discovery
+              - Effect: Allow
+                Action:
+                  - cloudformation:DescribeStacks
+                Resource: "*"
               # CloudWatch Logs - unified graph-api log group
               - Effect: Allow
                 Action:

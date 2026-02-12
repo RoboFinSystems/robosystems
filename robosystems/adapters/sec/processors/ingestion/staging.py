@@ -414,62 +414,81 @@ class DuckDBStager:
         timeout = get_staging_timeout(table_name)
         log_progress(f"[{i}/{total_tables}] INSERT {table_name} (Q{quarter} {year})...")
 
-        try:
-          response = await client.insert_into_table(
-            graph_id=self.graph_id,
-            table_name=table_name,
-            s3_pattern=s3_pattern,
-            timeout=timeout,
-          )
+        async def incremental_insert_fn() -> tuple[bool, TableInfo | None, str | None]:
+          try:
+            response = await client.insert_into_table(
+              graph_id=self.graph_id,
+              table_name=table_name,
+              s3_pattern=s3_pattern,
+              timeout=timeout,
+            )
 
-          if response.get("status") == "failed":
-            error = response.get("error", "Unknown error")
-            if "No files found" in error:
-              log_progress(
-                f"[{i}/{total_tables}] Skipped {table_name}: no files for Q{quarter}"
-              )
-              successful_tables.append(table_name)
-              table_infos[table_name] = TableInfo(
+            if response.get("status") == "failed":
+              error = response.get("error", "Unknown error")
+              if "No files found" in error:
+                return (
+                  True,
+                  TableInfo(
+                    name=table_name,
+                    row_count=0,
+                    file_count=0,
+                    staged_at=datetime.now(UTC).isoformat(),
+                    skipped=True,
+                  ),
+                  None,
+                )
+              return False, None, error
+
+            result_data = response.get("result", {})
+            row_count = result_data.get("row_count", 0)
+            duration = response.get("duration_seconds", 0)
+
+            log_progress(
+              f"[{i}/{total_tables}] Inserted {table_name}: "
+              f"{row_count:,} net new rows in {duration:.1f}s"
+            )
+
+            return (
+              True,
+              TableInfo(
                 name=table_name,
-                row_count=0,
+                row_count=row_count,
                 file_count=0,
                 staged_at=datetime.now(UTC).isoformat(),
-                skipped=True,
-              )
-              continue
-            failed_tables.append((table_name, error))
-            continue
-
-          result = response.get("result", {})
-          row_count = result.get("row_count", 0)
-          duration = response.get("duration_seconds", 0)
-
-          log_progress(
-            f"[{i}/{total_tables}] Inserted {table_name}: "
-            f"{row_count:,} net new rows in {duration:.1f}s"
-          )
-
-          successful_tables.append(table_name)
-          table_infos[table_name] = TableInfo(
-            name=table_name,
-            row_count=row_count,
-            file_count=0,
-            staged_at=datetime.now(UTC).isoformat(),
-          )
-
-        except Exception as e:
-          error_str = str(e)
-          if "No files found" in error_str:
-            successful_tables.append(table_name)
-            table_infos[table_name] = TableInfo(
-              name=table_name,
-              row_count=0,
-              file_count=0,
-              staged_at=datetime.now(UTC).isoformat(),
-              skipped=True,
+              ),
+              None,
             )
-          else:
-            failed_tables.append((table_name, error_str))
+
+          except Exception as e:
+            error_str = str(e)
+            if "No files found" in error_str:
+              return (
+                True,
+                TableInfo(
+                  name=table_name,
+                  row_count=0,
+                  file_count=0,
+                  staged_at=datetime.now(UTC).isoformat(),
+                  skipped=True,
+                ),
+                None,
+              )
+            return False, None, error_str
+
+        success, table_info, error = await self._stage_table_with_retry(
+          table_name=table_name,
+          stage_fn=incremental_insert_fn,
+          graph_client=client,
+          log_progress=log_progress,
+          table_index=i,
+          total_tables=total_tables,
+        )
+
+        if success and table_info:
+          successful_tables.append(table_name)
+          table_infos[table_name] = table_info
+        else:
+          failed_tables.append((table_name, error or "Unknown error"))
 
       status = "success" if len(successful_tables) == total_tables else "partial"
       total_rows = sum(info.row_count for info in table_infos.values())

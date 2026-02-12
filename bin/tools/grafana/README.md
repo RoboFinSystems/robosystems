@@ -6,24 +6,23 @@ Portable Grafana dashboard exports with templated datasource UIDs for easy impor
 
 | File | Description |
 |------|-------------|
-| `prod.json` | Production environment monitoring (metrics) |
-| `staging.json` | Staging environment monitoring (metrics) |
-| `prod_logs.json` | Production CloudWatch logs |
-| `staging_logs.json` | Staging CloudWatch logs |
+| `ops.json` | Platform observability (API, ECS, RDS, Valkey, Prometheus metrics) |
+| `logs.json` | CloudWatch logs (API, Dagster, Graph API) |
 | `cur.json` | AWS Cost and Usage Report dashboard |
 
 ## Template Variables
 
-These dashboards use Grafana's `${DS_*}` variable syntax for datasources:
+Dashboards use Grafana template variables for datasources and environment selection:
 
-| Variable | Type | Description |
-|----------|------|-------------|
-| `${DS_PROMETHEUS}` | Prometheus | Amazon Managed Prometheus |
-| `${DS_CLOUDWATCH}` | CloudWatch | AWS CloudWatch metrics |
-| `${DS_ATHENA}` | Athena | AWS Athena (CUR dashboard only) |
-| `${datasource}` | CloudWatch | Dashboard variable (logs dashboards) |
+| Variable | Type | Used In | Description |
+|----------|------|---------|-------------|
+| `${prometheus}` | Prometheus | ops | Amazon Managed Prometheus |
+| `${cloudwatch}` | CloudWatch | ops | AWS CloudWatch metrics |
+| `${datasource}` | CloudWatch | logs | CloudWatch datasource |
+| `${athena}` | Athena | cur | AWS Athena for CUR data |
+| `${env}` | Custom | ops, logs | Environment selector (`prod`, `staging`) |
 
-When importing, Grafana will prompt you to map these to your actual datasources.
+When importing, Grafana will prompt you to map datasources to your actual instances.
 
 ## Usage
 
@@ -65,8 +64,3 @@ When exporting updated dashboards from Grafana:
 
 1. Open dashboard > Settings (gear icon) > JSON Model
 2. Copy JSON and save to this directory
-3. Replace hardcoded datasource UIDs with template variables:
-   - Prometheus UID → `${DS_PROMETHEUS}`
-   - CloudWatch UID → `${DS_CLOUDWATCH}`
-   - Athena UID → `${DS_ATHENA}`
-4. Set root `id` and `uid` to `null`

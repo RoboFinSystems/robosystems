@@ -309,6 +309,14 @@ Resources:
                 Action:
                   - cloudformation:DescribeStacks
                 Resource: "*"
+              # CloudWatch metrics for allocation monitoring
+              - Effect: Allow
+                Action:
+                  - cloudwatch:PutMetricData
+                Resource: "*"
+                Condition:
+                  StringEquals:
+                    "cloudwatch:namespace": !Sub "RoboSystems/Graph/${Environment}"
               # Auto Scaling permissions for capacity checks and scale-up triggers
               - Effect: Allow
                 Action:
