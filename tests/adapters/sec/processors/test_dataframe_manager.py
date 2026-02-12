@@ -41,11 +41,9 @@ class TestConvertSchemaNameToDataFrameAttr:
   def test_node_multiple_words(self):
     manager = DataFrameManager(MagicMock(), MagicMock())
 
-    result = manager._convert_schema_name_to_dataframe_attr(
-      "FactDimension", is_node=True
-    )
+    result = manager._convert_schema_name_to_dataframe_attr("Dimension", is_node=True)
 
-    assert result == "fact_dimensions_df"
+    assert result == "dimensions_df"
 
   def test_relationship_fact_has_dimension(self):
     manager = DataFrameManager(MagicMock(), MagicMock())
@@ -275,12 +273,12 @@ class TestCreateDynamicDataFrameMapping:
     schema_adapter.schema_builder = schema_builder
 
     manager = DataFrameManager(schema_adapter, MagicMock())
-    manager.dataframes["fact_dimension_axis_element_rel_df"] = pd.DataFrame()
+    manager.dataframes["dimension_has_axis_element_rel_df"] = pd.DataFrame()
     manager.dataframes["fact_set_contains_facts_df"] = pd.DataFrame()
 
     result = manager.create_dynamic_dataframe_mapping()
 
-    assert "FACT_DIMENSION_AXIS_ELEMENT" in result
+    assert "DIMENSION_HAS_AXIS_ELEMENT" in result
     assert "FACT_SET_CONTAINS_FACT" in result
 
   def test_create_mapping_no_schema(self):

@@ -488,7 +488,7 @@ class GraphMCPClient:
       "Report": "SEC filings (10-K annual, 10-Q quarterly reports)",
       "Fact": "XBRL data points. Use has_dimensions=false for consolidated totals (excludes segment breakdowns)",
       "Structure": "XBRL presentation and calculation structures",
-      "FactDimension": "Dimensional qualifiers for facts (segments, breakdowns)",
+      "Dimension": "Dimensional qualifiers for financial data (segments, departments, geography, projects)",
       "Association": "XBRL calculation relationships between elements",
       "FactSet": "Logical groupings of related facts",
       # RoboLedger extension nodes - Transaction section (entity graphs only)
@@ -517,14 +517,16 @@ class GraphMCPClient:
       "FACT_HAS_UNIT": "Links facts to their measurement units (USD, shares, etc.)",
       "STRUCTURE_HAS_TAXONOMY": "Links presentation structure to taxonomy",
       "FACT_HAS_DIMENSION": "Links facts to dimensional qualifiers",
-      "FACT_DIMENSION_AXIS_ELEMENT": "Defines dimensional axes for facts",
-      "FACT_DIMENSION_MEMBER_ELEMENT": "Defines dimensional members for facts",
+      "DIMENSION_HAS_AXIS_ELEMENT": "Links dimensions to their axis element definitions",
+      "DIMENSION_HAS_MEMBER_ELEMENT": "Links dimensions to their member element values",
       "FACT_SET_CONTAINS_FACT": "Groups related facts together",
       "REPORT_HAS_FACT_SET": "Groups related facts within a report",
       "REPORT_USES_TAXONOMY": "Links reports to their XBRL taxonomy definitions",
       "STRUCTURE_HAS_ASSOCIATION": "Links structure to calculation relationships",
       "ASSOCIATION_HAS_FROM_ELEMENT": "Source element in calculation relationship",
       "ASSOCIATION_HAS_TO_ELEMENT": "Target element in calculation relationship",
+      # RoboLedger extension relationships - Transaction section (entity graphs only)
+      "LINE_ITEM_HAS_DIMENSION": "Links line items to dimensional qualifiers (department, class, etc.)",
       # RoboLedger extension relationships - Transaction section (entity graphs only)
       "ENTITY_HAS_TRANSACTION": "Links entities to their financial transactions",
       "TRANSACTION_HAS_LINE_ITEM": "Links transactions to their line items",
@@ -552,9 +554,9 @@ class GraphMCPClient:
       "FACT_HAS_PERIOD": ("Fact", "Period"),
       "FACT_HAS_UNIT": ("Fact", "Unit"),
       "STRUCTURE_HAS_TAXONOMY": ("Structure", "Taxonomy"),
-      "FACT_HAS_DIMENSION": ("Fact", "FactDimension"),
-      "FACT_DIMENSION_AXIS_ELEMENT": ("FactDimension", "Element"),
-      "FACT_DIMENSION_MEMBER_ELEMENT": ("FactDimension", "Element"),
+      "FACT_HAS_DIMENSION": ("Fact", "Dimension"),
+      "DIMENSION_HAS_AXIS_ELEMENT": ("Dimension", "Element"),
+      "DIMENSION_HAS_MEMBER_ELEMENT": ("Dimension", "Element"),
       "FACT_SET_CONTAINS_FACT": ("FactSet", "Fact"),
       "REPORT_HAS_FACT_SET": ("Report", "FactSet"),
       "REPORT_USES_TAXONOMY": ("Report", "Taxonomy"),
@@ -565,6 +567,7 @@ class GraphMCPClient:
       "ENTITY_HAS_TRANSACTION": ("Entity", "Transaction"),
       "TRANSACTION_HAS_LINE_ITEM": ("Transaction", "LineItem"),
       "LINE_ITEM_RELATES_TO_ELEMENT": ("LineItem", "Element"),
+      "LINE_ITEM_HAS_DIMENSION": ("LineItem", "Dimension"),
     }
 
     # Check if we have a known mapping

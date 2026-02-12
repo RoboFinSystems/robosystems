@@ -93,7 +93,7 @@ The base schema (`base.py`) provides foundational nodes and relationships that a
 
 #### Reporting Section (SEC/XBRL)
 
-- **Nodes**: Report, Fact, Structure, FactDimension, Association, FactSet
+- **Nodes**: Report, Fact, Structure, Association, FactSet
 - **Use Cases**: SEC repositories, financial statements, XBRL processing
 - **Key Features**: Dimensional analysis, fact aggregation, taxonomy navigation
 
@@ -101,7 +101,7 @@ The base schema (`base.py`) provides foundational nodes and relationships that a
 
 - **Nodes**: Transaction, LineItem
 - **Use Cases**: Entity accounting, journal entries, trial balances
-- **Key Features**: Transaction tracking, line item details
+- **Key Features**: Transaction tracking, line item details, dimensional tagging (department, class, location)
 - **Note**: Chart of accounts is represented via Structure/Association/Element pattern (from Reporting Section)
 
 #### Context-Aware Loading

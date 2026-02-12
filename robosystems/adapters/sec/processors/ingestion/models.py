@@ -211,7 +211,7 @@ LARGE_STAGING_TABLES = frozenset(
     "Fact",  # ~1B rows (hundreds of facts per filing)
     "Label",  # ~6M rows (multiple labels per element)
     "Element",  # ~10M rows (all XBRL elements across taxonomies)
-    "FactDimension",  # ~76M rows - Dimensional breakdowns of facts
+    "Dimension",  # ~76M rows - Dimensional breakdowns of facts
     "Association",  # ~206M rows - XBRL associations
     "Structure",  # ~7M rows - Presentation/calculation structures
     # Large relationship tables (fact-related)
@@ -220,11 +220,11 @@ LARGE_STAGING_TABLES = frozenset(
     "FACT_HAS_ENTITY",  # Fact -> Entity
     "FACT_HAS_PERIOD",  # Fact -> Period
     "FACT_HAS_UNIT",  # Fact -> Unit
-    "FACT_HAS_DIMENSION",  # Fact -> FactDimension
+    "FACT_HAS_DIMENSION",  # Fact -> Dimension
     "FACT_REPORTS_ELEMENT",  # Legacy name for FACT_HAS_ELEMENT
     "FACT_SET_CONTAINS_FACT",  # ~105M rows - FactSet -> Fact (1:1 with Fact)
-    "FACT_DIMENSION_MEMBER_ELEMENT",  # ~70M rows - FactDimension -> Element
-    "FACT_DIMENSION_AXIS_ELEMENT",  # FactDimension -> Element (axis)
+    "DIMENSION_HAS_MEMBER_ELEMENT",  # ~70M rows - Dimension -> Element
+    "DIMENSION_HAS_AXIS_ELEMENT",  # Dimension -> Element (axis)
     # Large relationship tables (shared reference)
     "ELEMENT_HAS_LABEL",  # ~34M rows - Element to Label
     "TAXONOMY_HAS_LABEL",  # ~106M rows - Taxonomy to Label

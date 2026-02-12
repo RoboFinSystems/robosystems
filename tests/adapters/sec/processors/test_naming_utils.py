@@ -16,7 +16,7 @@ class TestCamelToSnake:
     assert camel_to_snake("Entity") == "entity"
 
   def test_multiple_words(self):
-    assert camel_to_snake("FactDimension") == "fact_dimension"
+    assert camel_to_snake("LineItem") == "line_item"
 
   def test_abbreviation(self):
     assert camel_to_snake("HTTPSConnection") == "https_connection"
@@ -71,7 +71,7 @@ class TestConvertSchemaNameToFilename:
     assert convert_schema_name_to_filename("Entity") == "Entity.parquet"
 
   def test_pascal_case(self):
-    assert convert_schema_name_to_filename("FactDimension") == "FactDimension.parquet"
+    assert convert_schema_name_to_filename("Dimension") == "Dimension.parquet"
 
   def test_uppercase_with_underscores(self):
     assert (

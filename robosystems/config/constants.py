@@ -164,7 +164,7 @@ XBRL_EXTERNALIZATION_THRESHOLD = 1024  # characters
 
 # XBRL graph large nodes that require aggressive memory cleanup after LadybugDB ingestion
 # These tables contain millions of rows and consume significant memory
-XBRL_GRAPH_LARGE_NODES = "Fact,Element,Label,Association,Structure,FactDimension,Report"
+XBRL_GRAPH_LARGE_NODES = "Fact,Element,Label,Association,Structure,Dimension,Report"
 
 # SEC Processing Batch Limit
 # Smaller batches leverage the merge strategy for crash resilience:

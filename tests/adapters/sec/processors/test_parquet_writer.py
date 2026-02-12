@@ -553,7 +553,7 @@ class TestWriteAllDataFrames:
     processor.reports_df = pd.DataFrame({"identifier": ["2"], "name": ["Report"]})
     processor.facts_df = pd.DataFrame()
     processor.units_df = pd.DataFrame()
-    processor.fact_dimensions_df = pd.DataFrame()
+    processor.dimensions_df = pd.DataFrame()
     processor.elements_df = pd.DataFrame()
     processor.labels_df = pd.DataFrame()
     processor.references_df = pd.DataFrame()
@@ -582,8 +582,8 @@ class TestWriteAllDataFrames:
     processor.structure_associations_df = pd.DataFrame()
     processor.association_from_elements_df = pd.DataFrame()
     processor.association_to_elements_df = pd.DataFrame()
-    processor.fact_dimension_axis_element_rel_df = pd.DataFrame()
-    processor.fact_dimension_member_element_rel_df = pd.DataFrame()
+    processor.dimension_has_axis_element_rel_df = pd.DataFrame()
+    processor.dimension_has_member_element_rel_df = pd.DataFrame()
 
     mapping = {}
 

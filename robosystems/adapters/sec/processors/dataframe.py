@@ -109,8 +109,8 @@ class DataFrameManager:
 
       additional_relationship_dfs = {
         "fact_has_dimension_rel_df": "Relationship: fact -> dimension",
-        "fact_dimension_axis_element_rel_df": "Relationship: dimension -> axis element",
-        "fact_dimension_member_element_rel_df": "Relationship: dimension -> member element",
+        "dimension_has_axis_element_rel_df": "Relationship: dimension -> axis element",
+        "dimension_has_member_element_rel_df": "Relationship: dimension -> member element",
         "fact_set_contains_facts_df": "Relationship: fact set -> facts",
       }
 
@@ -119,10 +119,10 @@ class DataFrameManager:
           try:
             if df_name == "fact_has_dimension_rel_df":
               schema_name = "FACT_HAS_DIMENSION"
-            elif df_name == "fact_dimension_axis_element_rel_df":
-              schema_name = "FACT_DIMENSION_AXIS_ELEMENT"
-            elif df_name == "fact_dimension_member_element_rel_df":
-              schema_name = "FACT_DIMENSION_MEMBER_ELEMENT"
+            elif df_name == "dimension_has_axis_element_rel_df":
+              schema_name = "DIMENSION_HAS_AXIS_ELEMENT"
+            elif df_name == "dimension_has_member_element_rel_df":
+              schema_name = "DIMENSION_HAS_MEMBER_ELEMENT"
             elif df_name == "fact_set_contains_facts_df":
               schema_name = "FACT_SET_CONTAINS_FACT"
             else:
@@ -214,8 +214,8 @@ class DataFrameManager:
             )
 
       additional_mappings = {
-        "FACT_DIMENSION_AXIS_ELEMENT": "fact_dimension_axis_element_rel_df",
-        "FACT_DIMENSION_MEMBER_ELEMENT": "fact_dimension_member_element_rel_df",
+        "DIMENSION_HAS_AXIS_ELEMENT": "dimension_has_axis_element_rel_df",
+        "DIMENSION_HAS_MEMBER_ELEMENT": "dimension_has_member_element_rel_df",
         "FACT_SET_CONTAINS_FACT": "fact_set_contains_facts_df",
       }
 

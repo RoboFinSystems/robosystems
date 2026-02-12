@@ -149,6 +149,31 @@ BASE_NODES = [
       Property(name="description", type="STRING"),
     ],
   ),
+  Node(
+    name="Dimension",
+    description="Dimensional qualifier for financial data. Represents axis-member pairs "
+    "for segmentation (e.g., business segment, geography, department, project). "
+    "Used by both XBRL facts and accounting line items.",
+    properties=[
+      Property(name="identifier", type="STRING", is_primary_key=True),
+      # Generic properties (all dimensions)
+      Property(
+        name="axis", type="STRING"
+      ),  # Human-readable axis name (e.g., "Segment", "Department")
+      Property(
+        name="member", type="STRING"
+      ),  # Human-readable member value (e.g., "North America", "Engineering")
+      Property(
+        name="dimension_type", type="STRING"
+      ),  # xbrl_explicit, xbrl_typed, class, department, location, project, custom
+      # XBRL-specific properties (null for non-XBRL dimensions)
+      Property(name="axis_uri", type="STRING"),
+      Property(name="member_uri", type="STRING"),
+      Property(name="type", type="STRING"),  # XBRL context type (segment/scenario)
+      Property(name="is_explicit", type="BOOLEAN"),
+      Property(name="is_typed", type="BOOLEAN"),
+    ],
+  ),
 ]
 
 # Base Relationships - Common Foundation
@@ -227,5 +252,20 @@ BASE_RELATIONSHIPS = [
     properties=[
       Property(name="reference_context", type="STRING"),
     ],
+  ),
+  # Dimension → Element relationships (axis and member definitions)
+  Relationship(
+    name="DIMENSION_HAS_AXIS_ELEMENT",
+    from_node="Dimension",
+    to_node="Element",
+    description="Dimension axis element reference (defines what is being sliced)",
+    properties=[],
+  ),
+  Relationship(
+    name="DIMENSION_HAS_MEMBER_ELEMENT",
+    from_node="Dimension",
+    to_node="Element",
+    description="Dimension member element reference (defines the specific slice value)",
+    properties=[],
   ),
 ]

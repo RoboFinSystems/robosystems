@@ -50,9 +50,9 @@ async def query_facts_with_aspects(
     MATCH (f)-[:FACT_HAS_PERIOD]->(p:Period)
     MATCH (f)-[:FACT_HAS_UNIT]->(u:Unit)
     MATCH (f)-[:FACT_HAS_ENTITY]->(ent:Entity)
-    OPTIONAL MATCH (f)-[:FACT_HAS_DIMENSION]->(fd:FactDimension)
-                  -[:FACT_DIMENSION_AXIS_ELEMENT]->(axis:Element)
-    OPTIONAL MATCH (fd)-[:FACT_DIMENSION_MEMBER_ELEMENT]->(member:Element)
+    OPTIONAL MATCH (f)-[:FACT_HAS_DIMENSION]->(d:Dimension)
+                  -[:DIMENSION_HAS_AXIS_ELEMENT]->(axis:Element)
+    OPTIONAL MATCH (d)-[:DIMENSION_HAS_MEMBER_ELEMENT]->(member:Element)
     """
 
   where_clauses = []
@@ -76,7 +76,7 @@ async def query_facts_with_aspects(
     params["entity_id"] = entity_id
 
   if requested_dimensions is None or len(requested_dimensions) == 0:
-    where_clauses.append("fd IS NULL")
+    where_clauses.append("d IS NULL")
   else:
     where_clauses.append("axis.name IN $requested_dimensions")
     params["requested_dimensions"] = requested_dimensions

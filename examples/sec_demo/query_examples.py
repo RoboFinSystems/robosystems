@@ -109,11 +109,11 @@ LIMIT 30
   "fact_dimensions": {
     "description": "Explore dimensional qualifiers on facts",
     "query": """
-MATCH (f:Fact)-[:FACT_HAS_DIMENSION]->(fd:FactDimension)
+MATCH (f:Fact)-[:FACT_HAS_DIMENSION]->(d:Dimension)
 RETURN
-    fd.axis_uri AS axis,
-    fd.member_uri AS member,
-    fd.type AS dimension_type,
+    d.axis AS axis,
+    d.member AS member,
+    d.dimension_type AS dimension_type,
     count(f) AS fact_count
 ORDER BY fact_count DESC
 LIMIT 20
@@ -192,15 +192,15 @@ LIMIT 30
     "description": "Facts with dimensional qualifiers showing complete context",
     "query": """
 MATCH (r:Report)-[:REPORT_HAS_FACT]->(f:Fact)-[:FACT_HAS_ELEMENT]->(e:Element)
-MATCH (f)-[:FACT_HAS_DIMENSION]->(fd:FactDimension)
+MATCH (f)-[:FACT_HAS_DIMENSION]->(d:Dimension)
 OPTIONAL MATCH (f)-[:FACT_HAS_PERIOD]->(p:Period)
 RETURN
     r.report_date AS report_date,
     e.name AS element,
     f.numeric_value AS value,
     p.calendar_year AS calendar_year,
-    fd.axis_uri AS dimension_axis,
-    fd.member_uri AS dimension_member
+    d.axis AS dimension_axis,
+    d.member AS dimension_member
 ORDER BY r.report_date DESC, e.name
 LIMIT 20
         """,

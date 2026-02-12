@@ -25,5 +25,10 @@ DIMENSIONAL_FACTS_WARNING = """**⚠️ CRITICAL - Dimensional Facts:**
 ~40% of facts have dimensional breakdowns (segments, geography, products).
 To get CONSOLIDATED TOTALS only (avoiding duplicates), always filter:
 - `WHERE f.has_dimensions = false` (recommended - uses indexed property)
-- `WHERE NOT (f)-[:FACT_HAS_DIMENSION]->()` (alternative pattern)
-Without this filter, revenue queries return segment breakdowns + totals mixed together!"""
+- `WHERE NOT (f)-[:FACT_HAS_DIMENSION]->()`  (alternative pattern)
+Without this filter, revenue queries return segment breakdowns + totals mixed together!
+
+**Dimension Node:** The `Dimension` node represents axis-member pairs for segmentation.
+- XBRL dimensions have `axis_uri`, `member_uri`, `is_explicit`, `is_typed` properties
+- Generic dimensions use `axis`, `member`, `dimension_type` properties
+- Relationships: `DIMENSION_HAS_AXIS_ELEMENT` and `DIMENSION_HAS_MEMBER_ELEMENT` link to Element nodes"""
