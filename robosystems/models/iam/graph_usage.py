@@ -17,6 +17,7 @@ from enum import Enum
 from typing import Any
 
 from sqlalchemy import (
+  BigInteger,
   Boolean,
   Column,
   DateTime,
@@ -90,7 +91,7 @@ class GraphUsage(Model):
   region = Column(String, nullable=True)  # AWS region
 
   # Storage metrics (for storage overage billing)
-  storage_bytes = Column(Float, nullable=True)  # Total storage size in bytes
+  storage_bytes = Column(BigInteger, nullable=True)  # Total storage size in bytes
   storage_gb = Column(Float, nullable=True)  # Total storage in GB
   storage_delta_gb = Column(
     Float, nullable=True

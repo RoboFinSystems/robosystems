@@ -4,6 +4,7 @@ from datetime import UTC, datetime
 from typing import Optional
 
 from sqlalchemy import (
+  BigInteger,
   Column,
   DateTime,
   ForeignKey,
@@ -47,7 +48,7 @@ class GraphFile(Base):
   s3_key = Column(String, nullable=False)
   file_format = Column(String, nullable=False)
 
-  file_size_bytes = Column(Integer, nullable=False)
+  file_size_bytes = Column(BigInteger, nullable=False)
   row_count = Column(Integer, nullable=True)
 
   upload_status = Column(String, nullable=False, default="pending")

@@ -3,6 +3,7 @@ from datetime import UTC, datetime
 from typing import Any, Optional
 
 from sqlalchemy import (
+  BigInteger,
   Column,
   DateTime,
   ForeignKey,
@@ -42,7 +43,7 @@ class GraphTable(Base):
 
   row_count = Column(Integer, default=0)
   file_count = Column(Integer, default=0)
-  total_size_bytes = Column(Integer, default=0)
+  total_size_bytes = Column(BigInteger, default=0)
 
   created_at = Column(
     DateTime(timezone=True),

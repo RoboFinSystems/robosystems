@@ -14,6 +14,7 @@ from datetime import UTC, datetime
 from typing import Optional
 
 from sqlalchemy import (
+  BigInteger,
   Column,
   DateTime,
   ForeignKey,
@@ -59,7 +60,7 @@ class SourceFile(Base):
 
   # File metadata
   file_type = Column(String, nullable=False)  # xbrl_filing, stock_price, etc.
-  file_size_bytes = Column(Integer, nullable=True)
+  file_size_bytes = Column(BigInteger, nullable=True)
 
   # Source identification (flexible for different source types)
   source_id = Column(String, nullable=True)  # accession_number, ticker, etc.
