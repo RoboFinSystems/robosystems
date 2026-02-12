@@ -268,7 +268,7 @@ class LadybugConnectionPool:
         # Get memory configuration from shared helper (single source of truth)
         from .config import get_database_memory_config
 
-        buffer_pool_mb = get_database_memory_config()
+        buffer_pool_mb = get_database_memory_config(database_name)
 
         # Create database with buffer pool size configuration
         # Note: LadybugDB Python API uses buffer_pool_size in bytes
@@ -429,7 +429,7 @@ class LadybugConnectionPool:
     # Get memory configuration
     from .config import get_database_memory_config
 
-    buffer_pool_mb = get_database_memory_config()
+    buffer_pool_mb = get_database_memory_config(database_name)
     buffer_pool_size = buffer_pool_mb * 1024 * 1024
 
     # Create an in-memory database that will ATTACH to the S3 database
@@ -950,14 +950,14 @@ class LadybugConnectionPool:
     Example:
         from robosystems.graph_api.core.ladybug.config import set_ladybug_memory_override
 
-        # Boost memory for materialization
-        old_limit = set_ladybug_memory_override(50000)  # 50GB
+        # Boost memory for materialization (scoped to specific database)
+        old_limit = set_ladybug_memory_override(50000, graph_id="sec")
         pool.recreate_database("sec")  # Close existing, will recreate with 50GB
 
         # ... perform materialization ...
 
         # Restore default memory
-        set_ladybug_memory_override(old_limit)
+        set_ladybug_memory_override(old_limit, graph_id="sec")
         pool.recreate_database("sec")  # Recreate with restored limit
     """
     logger.info(f"Recreating database {database_name} to apply new memory settings")

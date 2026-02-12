@@ -168,7 +168,7 @@ class LadybugDatabaseManager:
       # Get memory configuration from shared helper (single source of truth)
       from .config import get_database_memory_config
 
-      max_memory_mb = get_database_memory_config()
+      max_memory_mb = get_database_memory_config(request.graph_id)
       buffer_pool_size = max_memory_mb * 1024 * 1024
 
       # For SEC database, use explicit checkpoint threshold for large tables

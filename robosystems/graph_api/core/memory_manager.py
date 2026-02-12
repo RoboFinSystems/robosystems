@@ -124,10 +124,23 @@ def boost_ladybug_memory(graph_id: str) -> Generator[int | None]:
     boost_mb = GraphTierConfig.get_ladybug_memory_boost_mb(tier)
 
   if boost_mb:
+    # Free memory before boosting (safe: only reachable on shared tier today,
+    # which has no concurrent API traffic — see ensure_ladybug_memory_boosted)
+    try:
+      release_duckdb_memory(graph_id)
+    except Exception as e:
+      logger.warning(f"Could not release DuckDB memory before boost: {e}")
+
+    try:
+      pool = get_connection_pool()
+      _evict_idle_subgraph_databases(pool, graph_id)
+    except Exception as e:
+      logger.warning(f"Could not evict idle databases before boost: {e}")
+
     logger.info(
       f"Boosting LadybugDB memory to {boost_mb}MB for materializing {graph_id}"
     )
-    old_override = set_ladybug_memory_override(boost_mb)
+    old_override = set_ladybug_memory_override(boost_mb, graph_id=graph_id)
 
     # Recreate database with new buffer pool size
     try:
@@ -142,7 +155,7 @@ def boost_ladybug_memory(graph_id: str) -> Generator[int | None]:
       logger.info(
         f"Restoring LadybugDB memory to default after materializing {graph_id}"
       )
-      set_ladybug_memory_override(old_override)
+      set_ladybug_memory_override(old_override, graph_id=graph_id)
 
       # Recreate database with restored memory
       try:
@@ -271,6 +284,39 @@ def is_duckdb_memory_boosted(graph_id: str) -> bool:
   return graph_id in _active_duckdb_boosts
 
 
+def _evict_idle_subgraph_databases(pool, target_graph_id: str) -> list[str]:
+  """
+  Evict idle subgraph databases to free their buffer pool memory.
+
+  Subgraphs are identified by containing an underscore (e.g., sec_historical).
+  The target graph and any graph with active connections are skipped.
+
+  Args:
+      pool: The LadybugDB connection pool
+      target_graph_id: The graph being boosted (will not be evicted)
+
+  Returns:
+      List of database names that were evicted
+  """
+  evicted = []
+  for db_name in pool.list_databases():
+    # Skip the target graph — it will be recreated with the boost
+    if db_name == target_graph_id:
+      continue
+    # Only evict subgraphs (contain underscore: parent_subgraph)
+    if "_" not in db_name:
+      continue
+    # Skip databases with active connections (someone is querying)
+    if pool.has_active_connections(db_name):
+      continue
+    try:
+      pool.close_database_connections(db_name)
+      evicted.append(db_name)
+    except Exception as e:
+      logger.warning(f"Failed to evict idle database {db_name}: {e}")
+  return evicted
+
+
 def ensure_ladybug_memory_boosted(graph_id: str) -> int | None:
   """
   Ensure LadybugDB memory is boosted for a graph, only boosting if not already active.
@@ -307,16 +353,52 @@ def ensure_ladybug_memory_boosted(graph_id: str) -> int | None:
   if not boost_mb:
     return None
 
-  # Check if override is already set (e.g., from another graph's boost)
-  current_override = get_ladybug_memory_override()
+  # Check if override is already set for this specific graph
+  current_override = get_ladybug_memory_override(graph_id)
   if current_override:
-    logger.debug(f"LadybugDB memory override already active: {current_override}MB")
+    logger.debug(
+      f"LadybugDB memory override already active for {graph_id}: {current_override}MB"
+    )
     _active_ladybug_boosts.add(graph_id)
     return None
 
-  # Apply boost
+  # NOTE: The operations below (DuckDB release, subgraph eviction) are currently
+  # only reachable on the shared tier (the only tier with ladybug_memory_boost_mb
+  # configured). The shared master has no API traffic during Dagster builds, so
+  # closing connections and evicting databases is safe.
+  #
+  # If boost configs are added to customer tiers (standard/large/xlarge) in the
+  # future, these operations need API-aware guards because those instances serve
+  # live query traffic concurrently with ingestion/materialization.
+
+  # Release DuckDB connections for this graph — staging is complete by the time
+  # materialization starts, so these connections are idle but still hold buffer memory.
+  try:
+    result = release_duckdb_memory(graph_id)
+    if result.get("connections_closed", 0) > 0:
+      logger.info(
+        f"Released DuckDB memory before LadybugDB boost: "
+        f"{result['connections_closed']} connections closed"
+      )
+  except Exception as e:
+    logger.warning(f"Could not release DuckDB memory before boost: {e}")
+
+  # Evict idle subgraph databases to reclaim their buffer pool memory.
+  # Only subgraphs are evicted — the target graph will be recreated with
+  # the boost, and there's only one primary graph per instance.
+  try:
+    pool = get_connection_pool()
+    evicted = _evict_idle_subgraph_databases(pool, graph_id)
+    if evicted:
+      logger.info(
+        f"Evicted {len(evicted)} idle subgraph databases before boost: {evicted}"
+      )
+  except Exception as e:
+    logger.warning(f"Could not evict idle databases before boost: {e}")
+
+  # Apply boost (scoped to this specific database)
   logger.info(f"Boosting LadybugDB memory to {boost_mb}MB for {graph_id}")
-  set_ladybug_memory_override(boost_mb)
+  set_ladybug_memory_override(boost_mb, graph_id=graph_id)
   _active_ladybug_boosts.add(graph_id)
 
   # Recreate database with new buffer pool size
@@ -350,23 +432,17 @@ def restore_ladybug_memory(graph_id: str) -> bool:
 
   _active_ladybug_boosts.discard(graph_id)
 
-  # Only clear override if no other graphs are using boost
-  if not _active_ladybug_boosts:
-    logger.info(f"Restoring LadybugDB memory to default after {graph_id}")
-    set_ladybug_memory_override(None)
+  # Clear override for this specific graph (per-database scoping)
+  logger.info(f"Restoring LadybugDB memory to default after {graph_id}")
+  set_ladybug_memory_override(None, graph_id=graph_id)
 
-    # Recreate database with default memory
-    try:
-      pool = get_connection_pool()
-      pool.recreate_database(graph_id)
-      return True
-    except Exception as e:
-      logger.warning(f"Could not restore LadybugDB memory config: {e}")
-      return False
-  else:
-    logger.debug(
-      f"Other graphs still using boost: {_active_ladybug_boosts}, not restoring"
-    )
+  # Recreate database with default memory
+  try:
+    pool = get_connection_pool()
+    pool.recreate_database(graph_id)
+    return True
+  except Exception as e:
+    logger.warning(f"Could not restore LadybugDB memory config: {e}")
     return False
 
 
