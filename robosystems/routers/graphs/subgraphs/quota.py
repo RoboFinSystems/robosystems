@@ -41,10 +41,10 @@ router = APIRouter()
 - Total size usage across all subgraphs
 
 **Tier Limits:**
-- Standard: 0 subgraphs (not supported)
-- Enterprise: Configurable limit (default: 10 subgraphs)
-- Premium: Unlimited subgraphs
-- Limits are defined in deployment configuration
+- Standard: Up to 3 subgraphs (dedicated m7g.large instance)
+- Large: Up to 10 subgraphs (dedicated r7g.large instance)
+- XLarge: Up to 25 subgraphs (dedicated r7g.xlarge instance)
+- Limits are defined in graph.yml deployment configuration
 
 **Size Tracking:**
 Provides aggregate size metrics when available.

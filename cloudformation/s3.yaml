@@ -172,6 +172,21 @@ Resources:
             Status: Enabled
             Prefix: exports/
             ExpirationInDays: 30
+          # Graph backups expire after 90 days (max tier retention)
+          - Id: ExpireGraphBackups
+            Status: Enabled
+            Prefix: graph-backups/
+            ExpirationInDays: 90
+          # Instance-level database backups expire after 90 days
+          - Id: ExpireInstanceBackups
+            Status: Enabled
+            Prefix: graph-databases/
+            ExpirationInDays: 90
+          # Shared replica data backups expire after 90 days
+          - Id: ExpireSharedReplicaBackups
+            Status: Enabled
+            Prefix: shared-replica-data/
+            ExpirationInDays: 90
           # Everything else transitions to IA after 30 days
           - Id: TransitionToIA
             Status: Enabled

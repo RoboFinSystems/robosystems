@@ -32,6 +32,10 @@ from robosystems.dagster.assets.shared_repositories import (
   shared_replicas_refreshed,
   shared_repository_s3_published,
 )
+from robosystems.dagster.jobs.backup_cleanup import (
+  daily_backup_cleanup_job,
+  daily_backup_cleanup_schedule,
+)
 from robosystems.dagster.jobs.billing import (
   monthly_credit_allocation_job,
   monthly_credit_allocation_schedule,
@@ -133,6 +137,7 @@ all_jobs = [
   monthly_usage_report_job,
   process_stripe_webhook_job,
   # Platform: Infrastructure
+  daily_backup_cleanup_job,
   hourly_auth_cleanup_job,
   weekly_health_check_job,
   instance_health_check_job,
@@ -164,6 +169,7 @@ all_schedules = [
   monthly_credit_allocation_schedule,
   monthly_usage_report_schedule,
   # Platform: Infrastructure
+  daily_backup_cleanup_schedule,
   hourly_auth_cleanup_schedule,
   weekly_health_check_schedule,
   instance_health_check_schedule,

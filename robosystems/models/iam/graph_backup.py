@@ -207,11 +207,15 @@ class GraphBackup(Model):
 
   @classmethod
   def get_expired_backups(cls, session: Session) -> Sequence["GraphBackup"]:
-    """Get all expired backups."""
+    """Get backups past their expiry that haven't been marked EXPIRED yet."""
     current_time = datetime.now(UTC)
     return (
       session.query(cls)
-      .filter(cls.expires_at.isnot(None), cls.expires_at < current_time)
+      .filter(
+        cls.expires_at.isnot(None),
+        cls.expires_at < current_time,
+        cls.status != BackupStatus.EXPIRED.value,
+      )
       .all()
     )
 

@@ -336,6 +336,16 @@ async def create_backup(
         detail="Backup creation is currently disabled. Please contact support if you need assistance.",
       )
 
+    # Cap retention_days to the tier maximum
+    from robosystems.config.graph_tier import GraphTierConfig
+    from robosystems.models.iam import Graph
+
+    graph_record = Graph.get_by_id(graph_id, db)
+    if graph_record and graph_record.graph_tier:
+      backup_limits = GraphTierConfig.get_backup_limits(graph_record.graph_tier)
+      tier_max_retention = backup_limits.get("backup_retention_days", 90)
+      request.retention_days = min(request.retention_days, tier_max_retention)
+
     # Log operation for security audit
     client_ip = fastapi_request.client.host if fastapi_request.client else "unknown"
     user_agent = fastapi_request.headers.get("user-agent", "unknown")
