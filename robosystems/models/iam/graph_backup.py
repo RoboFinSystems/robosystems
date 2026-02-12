@@ -96,7 +96,7 @@ class GraphBackup(Model):
   # Timestamps
   started_at = Column(DateTime, nullable=True)
   completed_at = Column(DateTime, nullable=True)
-  expires_at = Column(DateTime, nullable=True)  # For retention management
+  expires_at = Column(DateTime, nullable=True, index=True)  # For retention management
   created_at = Column(DateTime, default=lambda: datetime.now(UTC), nullable=False)
   updated_at = Column(
     DateTime,
@@ -207,11 +207,15 @@ class GraphBackup(Model):
 
   @classmethod
   def get_expired_backups(cls, session: Session) -> Sequence["GraphBackup"]:
-    """Get all expired backups."""
+    """Get backups past their expiry that haven't been marked EXPIRED yet."""
     current_time = datetime.now(UTC)
     return (
       session.query(cls)
-      .filter(cls.expires_at.isnot(None), cls.expires_at < current_time)
+      .filter(
+        cls.expires_at.isnot(None),
+        cls.expires_at < current_time,
+        cls.status != BackupStatus.EXPIRED.value,
+      )
       .all()
     )
 

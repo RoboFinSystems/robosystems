@@ -136,7 +136,7 @@ class BackupGraphConfig(Config):
   user_id: str | None = None
   backup_type: str = "full"
   backup_format: str = "full_dump"
-  retention_days: int = 90
+  retention_days: int = 30
   compression: bool = True
   encryption: bool = True
 

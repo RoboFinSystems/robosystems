@@ -30,6 +30,7 @@ class TestDefinitionsLoad:
     expected_jobs = [
       "monthly_credit_allocation_job",
       "hourly_auth_cleanup_job",
+      "daily_backup_cleanup_job",
       "backup_graph_job",
       "wait_and_create_graph_job",
       "sec_download",

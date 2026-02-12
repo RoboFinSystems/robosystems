@@ -330,6 +330,40 @@ class TestGraphBackupModel:
     assert len(expired) == 1
     assert expired[0].graph_id == "kg_past"
 
+  def test_get_expired_backups_excludes_already_expired(self, db_session):
+    """Test that get_expired_backups excludes records already marked EXPIRED."""
+    past_expiry = datetime.now(UTC) - timedelta(days=1)
+
+    # Create a backup that is past expiry but NOT yet marked expired
+    GraphBackup.create(
+      graph_id="kg_pending_expire",
+      database_name="db1",
+      backup_type=BackupType.FULL.value,
+      s3_bucket="bucket",
+      s3_key="pending.tar.gz",
+      session=db_session,
+      expires_at=past_expiry,
+      status=BackupStatus.COMPLETED.value,
+    )
+
+    # Create a backup that is past expiry AND already marked EXPIRED
+    GraphBackup.create(
+      graph_id="kg_already_expired",
+      database_name="db2",
+      backup_type=BackupType.FULL.value,
+      s3_bucket="bucket",
+      s3_key="already_expired.tar.gz",
+      session=db_session,
+      expires_at=past_expiry,
+      status=BackupStatus.EXPIRED.value,
+    )
+
+    expired = GraphBackup.get_expired_backups(db_session)
+
+    expired_graph_ids = [b.graph_id for b in expired]
+    assert "kg_pending_expire" in expired_graph_ids
+    assert "kg_already_expired" not in expired_graph_ids
+
   def test_get_backup_stats(self, db_session):
     """Test getting backup statistics for a graph."""
     graph_id = "kg_stats"
