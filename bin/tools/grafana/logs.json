@@ -396,7 +396,7 @@
             "uid": "${datasource}"
           },
           "dimensions": {},
-          "expression": "fields @timestamp, @message |\n filter strcontains(@logStream, \"/api\") |\n filter not strcontains(@message, \"opentelemetry.exporter.otlp.proto.http.trace_exporter\" |\n sort @timestamp desc |\n limit 100",
+          "expression": "fields @timestamp, @message |\n filter strcontains(@logStream, \"/api\") |\n filter not strcontains(@message, \"opentelemetry.exporter.otlp.proto.http.trace_exporter\") |\n sort @timestamp desc |\n limit 100",
           "id": "",
           "label": "",
           "logGroups": [
@@ -647,11 +647,7 @@
         "type": "custom"
       },
       {
-        "current": {
-          "selected": false,
-          "text": "/robosystems/prod/api",
-          "value": "arn:aws:logs:us-east-1:${aws_account}:log-group:/robosystems/prod/api:*"
-        },
+        "current": {},
         "datasource": {
           "type": "cloudwatch",
           "uid": "$datasource"
@@ -675,11 +671,7 @@
         "type": "query"
       },
       {
-        "current": {
-          "selected": false,
-          "text": "/robosystems/prod/dagster",
-          "value": "arn:aws:logs:us-east-1:${aws_account}:log-group:/robosystems/prod/dagster:*"
-        },
+        "current": {},
         "datasource": {
           "type": "cloudwatch",
           "uid": "$datasource"
@@ -703,11 +695,7 @@
         "type": "query"
       },
       {
-        "current": {
-          "selected": false,
-          "text": "/robosystems/prod/graph-api",
-          "value": "arn:aws:logs:us-east-1:${aws_account}:log-group:/robosystems/prod/graph-api:*"
-        },
+        "current": {},
         "datasource": {
           "type": "cloudwatch",
           "uid": "$datasource"

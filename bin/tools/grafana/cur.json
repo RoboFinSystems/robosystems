@@ -1261,7 +1261,7 @@
             "resultReuseMaxAgeInMinutes": 60
           },
           "format": 1,
-          "rawSQL": "select distinct resource_tags_user_component\nfrom robosystemscostandusage\nwhere year = '2026' and month = '2'",
+          "rawSQL": "select distinct resource_tags_user_component\nfrom robosystemscostandusage",
           "table": "robosystemscostandusage"
         },
         "refresh": 1,
