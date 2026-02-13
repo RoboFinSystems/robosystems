@@ -101,7 +101,7 @@ async def list_invoices(
             )
             for line in inv.line_items
           ],
-          subscription_id=None,
+          subscription_id=inv.line_items[0].subscription_id if inv.line_items else None,
         )
       )
 

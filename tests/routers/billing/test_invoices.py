@@ -58,6 +58,7 @@ class TestListInvoices:
       line.quantity = 1
       line.period_start = datetime(2026, 1, 1, tzinfo=UTC)
       line.period_end = datetime(2026, 2, 1, tzinfo=UTC)
+      line.subscription_id = "bsub_123"
       inv.line_items = [line]
     else:
       inv.line_items = line_items
