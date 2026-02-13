@@ -131,6 +131,18 @@ def process_stripe_webhook_event(
         loop.run_until_complete(_handle_payment_failed(event_data, session, context))
         result["action"] = "payment_failure_recorded"
 
+      elif config.event_type == "invoice.updated":
+        loop.run_until_complete(_handle_invoice_updated(event_data, session, context))
+        result["action"] = "invoice_updated"
+
+      elif config.event_type == "invoice.voided":
+        loop.run_until_complete(_handle_invoice_voided(event_data, session, context))
+        result["action"] = "invoice_voided"
+
+      elif config.event_type == "charge.refunded":
+        loop.run_until_complete(_handle_charge_refunded(event_data, session, context))
+        result["action"] = "refund_processed"
+
       elif config.event_type == "customer.subscription.updated":
         loop.run_until_complete(
           _handle_subscription_updated(event_data, session, context)
@@ -243,15 +255,23 @@ async def _handle_checkout_completed(
 async def _handle_invoice_created(
   invoice_data: dict, db_session: Any, context: OpExecutionContext
 ) -> None:
-  """Handle invoice.created event from Stripe."""
-  from robosystems.models.billing import BillingInvoice, BillingSubscription
+  """Handle invoice.created event from Stripe.
 
-  stripe_invoice_id = invoice_data.get("id")
+  Creates a BillingInvoice from Stripe data, using Stripe's invoice number
+  and syncing all line items from the Stripe invoice.
+  """
+  from robosystems.models.billing import (
+    BillingInvoice,
+    BillingInvoiceLineItem,
+    BillingSubscription,
+  )
+
+  stripe_invoice_id: str = invoice_data.get("id", "")
   subscription_id = invoice_data.get("subscription")
-  amount_cents = invoice_data.get("amount_due")
   period_start = invoice_data.get("period_start")
   period_end = invoice_data.get("period_end")
   due_date = invoice_data.get("due_date")
+  status = invoice_data.get("status", "draft")
 
   if not subscription_id:
     context.log.info("Invoice created but no subscription ID")
@@ -275,33 +295,57 @@ async def _handle_invoice_created(
     context.log.info(f"Invoice already synced from Stripe: {stripe_invoice_id}")
     return
 
-  invoice = BillingInvoice.create_invoice(
+  # Use Stripe's invoice number; fall back for drafts which may not have one yet
+  stripe_number = invoice_data.get("number")
+  invoice_number = stripe_number or f"STRIPE-{stripe_invoice_id[-8:]}"
+
+  now = datetime.now(UTC)
+  invoice = BillingInvoice(
     org_id=subscription.org_id,
+    invoice_number=invoice_number,
     period_start=datetime.fromtimestamp(period_start, tz=UTC),
     period_end=datetime.fromtimestamp(period_end, tz=UTC),
-    payment_terms="immediate",
-    session=db_session,
+    subtotal_cents=invoice_data.get("subtotal", 0),
+    tax_cents=invoice_data.get("tax", 0) or 0,
+    total_cents=invoice_data.get("total", 0),
+    status=status,
+    stripe_invoice_id=stripe_invoice_id,
+    invoice_pdf=invoice_data.get("invoice_pdf"),
+    hosted_invoice_url=invoice_data.get("hosted_invoice_url"),
+    currency=invoice_data.get("currency", "usd"),
+    due_date=datetime.fromtimestamp(due_date, tz=UTC) if due_date else None,
+    created_at=now,
   )
 
-  invoice.stripe_invoice_id = stripe_invoice_id
-  invoice.status = "open"
+  db_session.add(invoice)
+  db_session.flush()
 
-  if due_date:
-    invoice.due_date = datetime.fromtimestamp(due_date, tz=UTC)
+  # Sync line items from Stripe
+  lines = invoice_data.get("lines", {}).get("data", [])
+  for line in lines:
+    line_period = line.get("period", {})
+    line_item = BillingInvoiceLineItem(
+      invoice_id=invoice.id,
+      subscription_id=subscription.id,
+      resource_type=subscription.resource_type,
+      resource_id=subscription.resource_id,
+      description=line.get("description") or subscription.plan_name,
+      quantity=line.get("quantity", 1),
+      unit_price_cents=line.get("unit_amount_excluding_tax") or line.get("amount", 0),
+      amount_cents=line.get("amount", 0),
+      period_start=datetime.fromtimestamp(
+        line_period.get("start", period_start), tz=UTC
+      ),
+      period_end=datetime.fromtimestamp(line_period.get("end", period_end), tz=UTC),
+    )
+    db_session.add(line_item)
 
-  invoice.add_line_item(
-    subscription_id=subscription.id,
-    resource_type=subscription.resource_type,
-    resource_id=subscription.resource_id,
-    description=f"Stripe Invoice - {subscription.plan_name}",
-    amount_cents=amount_cents,
-    session=db_session,
-  )
-
-  invoice.finalize(db_session)
   db_session.commit()
 
-  context.log.info(f"Synced Stripe invoice {stripe_invoice_id} to database")
+  context.log.info(
+    f"Synced Stripe invoice {stripe_invoice_id} ({invoice_number}) "
+    f"with {len(lines)} line items"
+  )
 
 
 async def _handle_payment_succeeded(
@@ -347,9 +391,19 @@ async def _handle_payment_succeeded(
     invoice.paid_at = datetime.now(UTC)
     invoice.payment_method = "stripe"
     invoice.payment_reference = stripe_invoice_id
+    # Update fields that may not have been available at invoice.created time
+    invoice.invoice_pdf = invoice_data.get("invoice_pdf") or invoice.invoice_pdf
+    invoice.hosted_invoice_url = (
+      invoice_data.get("hosted_invoice_url") or invoice.hosted_invoice_url
+    )
     db_session.commit()
 
     context.log.info(f"Marked invoice {invoice.invoice_number} as paid")
+  else:
+    context.log.warning(
+      f"Invoice not found for payment_succeeded: {stripe_invoice_id} "
+      "(invoice.created webhook may have been missed)"
+    )
 
   if subscription.status in ["pending_payment", "provisioning"]:
     await _trigger_resource_provisioning(subscription, db_session, context)
@@ -387,6 +441,141 @@ async def _handle_payment_failed(
     db_session.commit()
 
   context.log.warning(f"Payment failed for subscription {subscription.id}")
+
+
+async def _handle_invoice_updated(
+  invoice_data: dict, db_session: Any, context: OpExecutionContext
+) -> None:
+  """Handle invoice.updated event from Stripe.
+
+  Updates mutable fields on an existing invoice: status, PDF URL, hosted URL.
+  If the invoice transitioned to paid, sets paid_at and payment_method.
+  """
+  from robosystems.models.billing import BillingInvoice
+
+  stripe_invoice_id = invoice_data.get("id")
+
+  invoice = (
+    db_session.query(BillingInvoice)
+    .filter(BillingInvoice.stripe_invoice_id == stripe_invoice_id)
+    .first()
+  )
+
+  if not invoice:
+    context.log.info(f"Invoice not found for update: {stripe_invoice_id}")
+    return
+
+  new_status = invoice_data.get("status", invoice.status)
+  old_status = invoice.status
+
+  invoice.status = new_status
+  invoice.invoice_pdf = invoice_data.get("invoice_pdf") or invoice.invoice_pdf
+  invoice.hosted_invoice_url = (
+    invoice_data.get("hosted_invoice_url") or invoice.hosted_invoice_url
+  )
+
+  # Update invoice number if Stripe assigned one (draft -> open transition)
+  stripe_number = invoice_data.get("number")
+  if stripe_number and invoice.invoice_number.startswith("STRIPE-"):
+    invoice.invoice_number = stripe_number
+
+  if new_status == "paid" and old_status != "paid":
+    invoice.paid_at = datetime.now(UTC)
+    invoice.payment_method = "stripe"
+
+  db_session.commit()
+  context.log.info(
+    f"Updated invoice {invoice.invoice_number}: {old_status} -> {new_status}"
+  )
+
+
+async def _handle_invoice_voided(
+  invoice_data: dict, db_session: Any, context: OpExecutionContext
+) -> None:
+  """Handle invoice.voided event from Stripe."""
+  from robosystems.models.billing import BillingInvoice
+
+  stripe_invoice_id = invoice_data.get("id")
+
+  invoice = (
+    db_session.query(BillingInvoice)
+    .filter(BillingInvoice.stripe_invoice_id == stripe_invoice_id)
+    .first()
+  )
+
+  if not invoice:
+    context.log.info(f"Invoice not found for void: {stripe_invoice_id}")
+    return
+
+  invoice.status = "void"
+  db_session.commit()
+  context.log.info(f"Voided invoice {invoice.invoice_number}")
+
+
+async def _handle_charge_refunded(
+  charge_data: dict, db_session: Any, context: OpExecutionContext
+) -> None:
+  """Handle charge.refunded event from Stripe.
+
+  Adds a negative line item to the invoice for the refunded amount,
+  which naturally reduces the invoice total via _recalculate_totals.
+  """
+  from robosystems.models.billing import (
+    BillingAuditLog,
+    BillingEventType,
+    BillingInvoice,
+    BillingInvoiceLineItem,
+  )
+
+  stripe_invoice_id = charge_data.get("invoice")
+  stripe_charge_id = charge_data.get("id")
+  amount_refunded = charge_data.get("amount_refunded", 0)
+
+  if not stripe_invoice_id:
+    context.log.info(f"Charge {stripe_charge_id} refunded but no invoice associated")
+    return
+
+  invoice = (
+    db_session.query(BillingInvoice)
+    .filter(BillingInvoice.stripe_invoice_id == stripe_invoice_id)
+    .first()
+  )
+
+  if not invoice:
+    context.log.warning(f"Invoice not found for refunded charge: {stripe_invoice_id}")
+    return
+
+  # Add refund as a negative line item
+  refund_item = BillingInvoiceLineItem(
+    invoice_id=invoice.id,
+    resource_type="refund",
+    resource_id=stripe_charge_id,
+    description=f"Refund - {stripe_charge_id}",
+    quantity=1,
+    unit_price_cents=-amount_refunded,
+    amount_cents=-amount_refunded,
+    period_start=invoice.period_start,
+    period_end=invoice.period_end,
+  )
+  db_session.add(refund_item)
+  invoice._recalculate_totals(db_session)
+
+  BillingAuditLog.log_event(
+    session=db_session,
+    event_type=BillingEventType.REFUND_PROCESSED,
+    description=f"Refund of {amount_refunded} cents on charge {stripe_charge_id}",
+    invoice_id=invoice.id,
+    org_id=invoice.org_id,
+    event_data={
+      "stripe_charge_id": stripe_charge_id,
+      "stripe_invoice_id": stripe_invoice_id,
+      "amount_refunded_cents": amount_refunded,
+    },
+  )
+
+  context.log.info(
+    f"Processed refund of {amount_refunded} cents on invoice {invoice.invoice_number}"
+  )
 
 
 async def _handle_subscription_updated(
