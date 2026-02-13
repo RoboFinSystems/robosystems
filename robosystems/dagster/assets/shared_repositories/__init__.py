@@ -1,30 +1,29 @@
 """Shared Repository Dagster Assets.
 
-This package contains assets for shared repository infrastructure operations:
+This package contains:
 
-1. PUBLISH (replica distribution):
-   - shared_repository_s3_published - Publish raw .lbug to S3 for replica cluster S3 ATTACH
-   - shared_replicas_refreshed - Rolling refresh of replica fleet to pick up new database
+1. PUBLISH HELPER (shared logic):
+   - publish_to_s3() - Core S3 publish logic called by per-repository assets
 
-These assets are repository-agnostic. The graph_id parameter in config determines
-which repository to operate on. The replica fleet is a single shared ASG that
-serves all shared repositories.
+2. REPLICA REFRESH (shared infrastructure):
+   - shared_replicas_refreshed - Rolling refresh of replica fleet after any repo publishes
+
+Per-repository publish assets live inside their adapter packages
+(e.g., adapters/sec/pipeline/s3_publish.py) and declare deps on their
+own materialization asset. This creates clean lineage:
+
+  sec_graph_materialized -> sec_s3_published -> shared_replicas_refreshed
+  (future) industry_graph_materialized -> industry_s3_published -> shared_replicas_refreshed
 """
 
-from robosystems.dagster.assets.shared_repositories.publish import (
-  SharedRepositoryPublishConfig,
-  shared_repository_s3_published,
-)
+from robosystems.dagster.assets.shared_repositories.publish import publish_to_s3
 from robosystems.dagster.assets.shared_repositories.replicas import (
   SharedReplicaRefreshConfig,
   shared_replicas_refreshed,
 )
 
 __all__ = [
-  # Config classes
   "SharedReplicaRefreshConfig",
-  "SharedRepositoryPublishConfig",
-  # Assets
+  "publish_to_s3",
   "shared_replicas_refreshed",
-  "shared_repository_s3_published",
 ]

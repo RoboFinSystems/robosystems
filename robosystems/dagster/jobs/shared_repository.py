@@ -1,21 +1,16 @@
-"""Dagster jobs for shared repository management.
+"""Dagster jobs for shared repository replica management.
 
-These jobs handle S3-based replica data distribution:
-- Upload shared master's database to S3 for replicas
-- Trigger rolling instance refresh of replica fleet
+Provides a standalone job for refreshing the replica fleet without
+publishing a new database. Useful for:
+- Forcing a refresh after a failed previous refresh
+- Rolling out non-database changes (e.g., new AMI, code updates)
 
-Replicas use LadybugDB S3 ATTACH to connect directly to S3-hosted
-.lbug files using the httpfs extension.
+The publish + refresh pipeline is handled by asset lineage:
+  sec_graph_materialized -> sec_s3_published -> shared_replicas_refreshed
 
-These jobs are typically triggered after SEC materialization completes,
-or can be run manually for ad-hoc sync/refresh operations.
-
-NOTE: Previous implementation used raw httpx (no auth) and SSM for S3 upload.
-Now uses Graph Client Factory which handles auth, routing, and circuit breakers.
-The backup runs entirely on-instance via the Graph API backup endpoint.
+This file only contains the standalone refresh job for ad-hoc operations.
 """
 
-import asyncio
 from typing import Any
 
 import boto3
@@ -27,18 +22,6 @@ from dagster import (
 )
 
 from robosystems.config import env
-from robosystems.config.constants import TASK_TIME_LIMIT
-
-# ============================================================================
-# Configuration
-# ============================================================================
-
-
-class S3SyncConfig(Config):
-  """Configuration for S3 sync operations."""
-
-  graph_id: str = "sec"
-  s3_prefix: str = "shared-repos"
 
 
 class ReplicaConfig(Config):
@@ -50,93 +33,9 @@ class ReplicaConfig(Config):
   instance_warmup_seconds: int = 900
 
 
-# ============================================================================
-# S3 Sync Operations (via Graph Client Factory)
-# ============================================================================
-
-
-@op
-def upload_database_to_s3(
-  context: OpExecutionContext,
-  config: S3SyncConfig,
-) -> dict[str, Any]:
-  """Upload shared database to S3 for replicas via Graph API.
-
-  Uses Graph Client Factory to call the backup endpoint on the shared master.
-  The Graph API handles:
-  1. CHECKPOINT to flush WAL
-  2. Raw .lbug multipart upload to S3
-
-  This replaces the previous SSM-based approach which bypassed Graph API auth.
-  """
-  from robosystems.graph_api.client.factory import get_graph_client_for_sec_ingestion
-
-  graph_id = config.graph_id
-  s3_prefix = config.s3_prefix
-
-  # Get AWS account ID for bucket name
-  sts = boto3.client("sts", region_name=env.AWS_REGION)
-  account_id = sts.get_caller_identity()["Account"]
-
-  # Build S3 path
-  bucket = f"robosystems-{account_id}-user-{env.ENVIRONMENT}"
-  s3_key = f"{s3_prefix}/{graph_id}.lbug"
-  s3_uri = f"s3://{bucket}/{s3_key}"
-
-  context.log.info(f"Uploading database to: {s3_uri}")
-
-  # Use Graph Client Factory (handles auth, routing, circuit breakers)
-  loop = asyncio.new_event_loop()
-  client = None
-  try:
-    client = loop.run_until_complete(get_graph_client_for_sec_ingestion())
-
-    context.log.info("Calling backup endpoint on shared master...")
-    result = loop.run_until_complete(
-      client.backup_with_sse(
-        graph_id=graph_id,
-        backup_type="replica",
-        s3_destination={"bucket": bucket, "key": s3_key},
-        compression=False,
-        checkpoint=True,
-        timeout=TASK_TIME_LIMIT,
-      )
-    )
-  finally:
-    if client:
-      loop.run_until_complete(client.close())
-    loop.close()
-
-  if result.get("status") != "completed":
-    error = result.get("error", "Unknown error")
-    raise RuntimeError(f"S3 upload failed: {error}")
-
-  # Verify upload by checking S3
-  s3 = boto3.client("s3", region_name=env.AWS_REGION)
-  head = s3.head_object(Bucket=bucket, Key=s3_key)
-  file_size = head["ContentLength"]
-  last_modified = head["LastModified"]
-
-  context.log.info(
-    f"Database uploaded to S3: {s3_uri} "
-    f"(size: {file_size / (1024**3):.2f}GB, modified: {last_modified})"
-  )
-
-  return {
-    "status": "success",
-    "s3_uri": s3_uri,
-    "s3_bucket": bucket,
-    "s3_key": s3_key,
-    "file_size_bytes": file_size,
-    "file_size_gb": round(file_size / (1024**3), 2),
-    "last_modified": last_modified.isoformat(),
-    "graph_id": graph_id,
-  }
-
-
 @op
 def refresh_replica_instances(
-  context: OpExecutionContext, s3_upload: dict[str, Any], config: ReplicaConfig
+  context: OpExecutionContext, config: ReplicaConfig
 ) -> dict[str, Any]:
   """Trigger rolling refresh of replica ASG.
 
@@ -145,16 +44,6 @@ def refresh_replica_instances(
 
   Checks for existing in-progress refresh and skips if one is active.
   """
-  # Skip if S3 upload failed
-  if s3_upload.get("status") != "success":
-    context.log.info(
-      f"Skipping instance refresh: S3 upload status was {s3_upload.get('status')}"
-    )
-    return {
-      "status": "skipped",
-      "reason": "s3_upload_not_successful",
-    }
-
   autoscaling = boto3.client("autoscaling", region_name=env.AWS_REGION)
 
   asg_name = f"robosystems-shared-replicas-{env.ENVIRONMENT}-asg"
@@ -233,83 +122,6 @@ def refresh_replica_instances(
     "desired_capacity": desired_capacity,
     "min_healthy_percentage": config.min_healthy_percentage,
     "instance_warmup_seconds": config.instance_warmup_seconds,
-    "s3_uri": s3_upload.get("s3_uri"),
-  }
-
-
-# ============================================================================
-# Jobs
-# ============================================================================
-
-
-@job(
-  tags={
-    "dagster/priority": "-1",
-    "dagster/max_retries": 3,
-    # Critical infrastructure - use on-demand to avoid Spot interruptions
-    "ecs/run_task_kwargs": {
-      "capacityProviderStrategy": [
-        {"capacityProvider": "FARGATE", "weight": 1, "base": 1},
-      ],
-    },
-  }
-)
-def shared_repository_s3_sync_job():
-  """Upload shared database to S3 and refresh replicas.
-
-  Pipeline:
-  1. CHECKPOINT + upload database to S3 via Graph API backup endpoint
-  2. Trigger rolling instance refresh (skips if refresh already in progress)
-
-  Replicas use S3 ATTACH to connect directly to the S3-hosted database
-  via LadybugDB's httpfs extension.
-
-  This job is typically run after SEC materialization completes.
-  """
-  s3_upload = upload_database_to_s3()
-  refresh_replica_instances(s3_upload)
-
-
-@job(
-  tags={
-    "dagster/priority": "-1",
-    "dagster/max_retries": 3,
-    # Critical infrastructure - use on-demand to avoid Spot interruptions
-    "ecs/run_task_kwargs": {
-      "capacityProviderStrategy": [
-        {"capacityProvider": "FARGATE", "weight": 1, "base": 1},
-      ],
-    },
-  }
-)
-def shared_repository_s3_upload_only_job():
-  """Upload database to S3 without refreshing replicas.
-
-  Useful for:
-  - Initial S3 upload before replicas are deployed
-  - Manual control over when replicas are refreshed
-  - Testing S3 upload without affecting replicas
-  """
-  upload_database_to_s3()
-
-
-@op
-def get_current_s3_database_info(context: OpExecutionContext) -> dict[str, Any]:
-  """Get current S3 database info for refresh-only operations."""
-  import boto3
-
-  sts = boto3.client("sts", region_name=env.AWS_REGION)
-  account_id = sts.get_caller_identity()["Account"]
-
-  bucket = f"robosystems-{account_id}-user-{env.ENVIRONMENT}"
-  s3_key = "shared-repos/sec.lbug"
-  s3_uri = f"s3://{bucket}/{s3_key}"
-
-  return {
-    "status": "success",
-    "s3_uri": s3_uri,
-    "s3_bucket": bucket,
-    "s3_key": s3_key,
   }
 
 
@@ -329,12 +141,11 @@ def shared_repository_refresh_replicas_job():
   """Refresh replicas with current S3 database.
 
   Useful for:
-  - Forcing a refresh without uploading a new database
+  - Forcing a refresh without publishing a new database
   - Recovering from failed refresh
   - Rolling out non-database changes (e.g., new AMI, code updates)
 
-  Note: This uses the existing S3 database - run s3_sync_job
-  first if you need to upload a new database version.
+  The normal publish + refresh flow is handled by asset lineage:
+    sec_graph_materialized -> sec_s3_published -> shared_replicas_refreshed
   """
-  s3_info = get_current_s3_database_info()
-  refresh_replica_instances(s3_info)
+  refresh_replica_instances()

@@ -248,7 +248,7 @@ jobs:
 
           if [ "$ALL_FOUND" != "true" ]; then
             echo ""
-            echo "   Run Dagster shared_repository_s3_sync_job to upload missing databases."
+            echo "   Materialize the sec_s3_published asset in Dagster to upload missing databases."
             exit 1
           fi
 

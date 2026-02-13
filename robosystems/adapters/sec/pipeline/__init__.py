@@ -26,11 +26,13 @@ Pipeline stages (run independently via separate jobs):
    - sec_graph_materialized - Full LadybugDB rebuild from DuckDB
    - sec_entity_incremental_update - Update mutable Entity attributes
 
-5. BACKUP (subscriber downloads):
+5. BACKUP & PUBLISH (post-materialization):
    - sec_backup - Create compressed downloadable backups for users
+   - sec_s3_published - Publish raw .lbug to S3 for replica cluster
 
-Publish and replica refresh assets live in dagster/assets/shared_repositories/
-since they are infrastructure operations shared across all repository types.
+Post-materialization lineage (asset deps, not sensors):
+  sec_graph_materialized -> sec_backup
+  sec_graph_materialized -> sec_s3_published -> shared_replicas_refreshed
 
 Usage:
     from robosystems.adapters.sec.pipeline import get_dagster_components
@@ -82,11 +84,11 @@ from robosystems.adapters.sec.pipeline.materialize import (
   sec_historical_materialized,
 )
 from robosystems.adapters.sec.pipeline.process import sec_processed_filings
+from robosystems.adapters.sec.pipeline.s3_publish import sec_s3_published
 from robosystems.adapters.sec.pipeline.sensors import (
   sec_download_to_process_sensor,
   sec_incremental_download_schedule,
   sec_incremental_staging_sensor,
-  sec_post_materialize_s3_sync_sensor,
   sec_processing_sensor,
   sec_stage_to_materialize_sensor,
 )
@@ -114,6 +116,7 @@ def get_dagster_components():
       sec_graph_materialized,
       sec_historical_materialized,
       sec_backup,
+      sec_s3_published,
     ],
     "jobs": [
       sec_download_job,
@@ -130,7 +133,6 @@ def get_dagster_components():
     ],
     "sensors": [
       sec_processing_sensor,
-      sec_post_materialize_s3_sync_sensor,
       sec_download_to_process_sensor,
       sec_incremental_staging_sensor,
       sec_stage_to_materialize_sensor,
@@ -175,12 +177,12 @@ __all__ = [
   "sec_incremental_stage_job",
   "sec_incremental_staging_sensor",
   "sec_materialize_job",
-  "sec_post_materialize_s3_sync_sensor",
   "sec_process_job",
   "sec_processed_filings",
   "sec_processing_sensor",
   "sec_quarter_partitions",
   "sec_raw_filings",
+  "sec_s3_published",
   "sec_stage_job",
   "sec_stage_to_materialize_sensor",
   "sec_staged_materialize_job",

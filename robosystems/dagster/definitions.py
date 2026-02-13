@@ -30,7 +30,6 @@ from robosystems.dagster.assets.graphs import (
 )
 from robosystems.dagster.assets.shared_repositories import (
   shared_replicas_refreshed,
-  shared_repository_s3_published,
 )
 from robosystems.dagster.jobs.backup_cleanup import (
   daily_backup_cleanup_job,
@@ -75,8 +74,6 @@ from robosystems.dagster.jobs.notifications import (
 )
 from robosystems.dagster.jobs.shared_repository import (
   shared_repository_refresh_replicas_job,
-  shared_repository_s3_sync_job,
-  shared_repository_s3_upload_only_job,
 )
 from robosystems.dagster.resources import (
   DatabaseResource,
@@ -125,9 +122,8 @@ all_assets = [
   user_subgraph_creation_source,
   user_repository_provisioning_source,
   # Platform: Shared repository infrastructure
-  shared_repository_s3_published,
   shared_replicas_refreshed,
-  # Adapter: SEC pipeline
+  # Adapter: SEC pipeline (includes sec_s3_published)
   *sec["assets"],
 ]
 
@@ -154,9 +150,7 @@ all_jobs = [
   wait_and_create_graph_job,
   # Platform: Graph lifecycle
   suspend_expired_graphs_job,
-  # Platform: Shared repository
-  shared_repository_s3_sync_job,
-  shared_repository_s3_upload_only_job,
+  # Platform: Shared repository (standalone refresh only)
   shared_repository_refresh_replicas_job,
   # Platform: Notifications
   send_email_job,
