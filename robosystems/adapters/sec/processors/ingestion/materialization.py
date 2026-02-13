@@ -707,18 +707,17 @@ class LadybugMaterializer:
         else:
           raise
 
-      # Resolve schema: self → parent → manifest extensions
+      # Resolve schema: self → parent → contextual loader
+      subgraph_info = parse_subgraph_id(self.graph_id)
       schema = GraphSchema.get_active_schema(self.graph_id, db)
 
-      if not schema:
-        subgraph_info = parse_subgraph_id(self.graph_id)
-        if subgraph_info:
-          schema = GraphSchema.get_active_schema(subgraph_info.parent_graph_id, db)
-          if schema:
-            logger.info(
-              f"Using parent schema from {subgraph_info.parent_graph_id} "
-              f"for subgraph {self.graph_id}"
-            )
+      if not schema and subgraph_info:
+        schema = GraphSchema.get_active_schema(subgraph_info.parent_graph_id, db)
+        if schema:
+          logger.info(
+            f"Using parent schema from {subgraph_info.parent_graph_id} "
+            f"for subgraph {self.graph_id}"
+          )
 
       schema_type = "shared"
       schema_ddl = schema.schema_ddl if schema else None
@@ -728,8 +727,6 @@ class LadybugMaterializer:
         from robosystems.schemas.loader import get_contextual_schema_loader
         from robosystems.schemas.models import Schema
 
-        # Resolve the repository name (parent for subgraphs, self otherwise)
-        subgraph_info = parse_subgraph_id(self.graph_id)
         repo_name = subgraph_info.parent_graph_id if subgraph_info else self.graph_id
 
         loader = get_contextual_schema_loader("repository", repo_name)
@@ -745,20 +742,21 @@ class LadybugMaterializer:
         schema_ddl = compiled.to_cypher()
         schema_type = "shared"
         logger.info(
-          f"Loaded contextual schema for {self.graph_id} "
+          f"No DB schema found - loaded contextual schema for {self.graph_id} "
           f"({len(loader.nodes)} nodes, {len(loader.relationships)} relationships)"
         )
 
+      resolved_schema_type = (
+        schema.schema_type if schema and schema.schema_type else schema_type
+      )
       create_db_kwargs: dict[str, Any] = {
         "graph_id": self.graph_id,
-        "schema_type": schema_type if not schema else schema.schema_type,
+        "schema_type": resolved_schema_type,
         "custom_schema_ddl": schema_ddl,
         "is_subgraph": is_subgraph(self.graph_id),
       }
 
-      if (schema and schema.schema_type == "shared") or (
-        not schema and schema_type == "shared"
-      ):
+      if resolved_schema_type == "shared":
         create_db_kwargs["repository_name"] = self.graph_id
 
       await client.create_database(**create_db_kwargs)
