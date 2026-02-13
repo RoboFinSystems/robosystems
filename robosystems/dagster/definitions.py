@@ -40,7 +40,6 @@ from robosystems.dagster.jobs.billing import (
   monthly_credit_allocation_schedule,
   monthly_usage_report_job,
   monthly_usage_report_schedule,
-  process_stripe_webhook_job,
 )
 from robosystems.dagster.jobs.graph import (
   backup_graph_job,
@@ -133,7 +132,6 @@ all_jobs = [
   # Platform: Billing
   monthly_credit_allocation_job,
   monthly_usage_report_job,
-  process_stripe_webhook_job,
   # Platform: Infrastructure
   daily_backup_cleanup_job,
   hourly_auth_cleanup_job,
