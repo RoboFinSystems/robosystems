@@ -707,63 +707,58 @@ class LadybugMaterializer:
         else:
           raise
 
-      # Resolve schema: self → parent → contextual loader
+      # For shared repos, always use the contextual schema loader (codebase source of truth).
+      # Stored GraphSchema records can become stale when the schema evolves.
+      from robosystems.schemas.loader import get_contextual_schema_loader
+      from robosystems.schemas.models import Schema
+
       subgraph_info = parse_subgraph_id(self.graph_id)
-      schema = GraphSchema.get_active_schema(self.graph_id, db)
+      repo_name = subgraph_info.parent_graph_id if subgraph_info else self.graph_id
 
-      if not schema and subgraph_info:
-        schema = GraphSchema.get_active_schema(subgraph_info.parent_graph_id, db)
-        if schema:
-          logger.info(
-            f"Using parent schema from {subgraph_info.parent_graph_id} "
-            f"for subgraph {self.graph_id}"
-          )
+      loader = get_contextual_schema_loader("repository", repo_name)
+      if not loader.nodes:
+        raise ValueError(f"No schema found for graph {self.graph_id}")
 
-      schema_type = "shared"
-      schema_ddl = schema.schema_ddl if schema else None
-
-      if not schema_ddl:
-        # Fall back to contextual schema loader (same path as main SEC graph creation)
-        from robosystems.schemas.loader import get_contextual_schema_loader
-        from robosystems.schemas.models import Schema
-
-        repo_name = subgraph_info.parent_graph_id if subgraph_info else self.graph_id
-
-        loader = get_contextual_schema_loader("repository", repo_name)
-        if not loader.nodes:
-          raise ValueError(f"No schema found for graph {self.graph_id}")
-
-        compiled = Schema(
-          name=f"{repo_name.upper()} Repository Schema",
-          description=f"Contextual schema for {repo_name} repository",
-          nodes=list(loader.nodes.values()),
-          relationships=list(loader.relationships.values()),
-        )
-        schema_ddl = compiled.to_cypher()
-        schema_type = "shared"
-        logger.info(
-          f"No DB schema found - loaded contextual schema for {self.graph_id} "
-          f"({len(loader.nodes)} nodes, {len(loader.relationships)} relationships)"
-        )
-
-      resolved_schema_type = (
-        schema.schema_type if schema and schema.schema_type else schema_type
+      compiled = Schema(
+        name=f"{repo_name.upper()} Repository Schema",
+        description=f"Contextual schema for {repo_name} repository",
+        nodes=list(loader.nodes.values()),
+        relationships=list(loader.relationships.values()),
       )
+      schema_ddl = compiled.to_cypher()
+      schema_type = "shared"
+      logger.info(
+        f"Rebuild: loaded schema from codebase for {self.graph_id} "
+        f"({len(loader.nodes)} nodes, {len(loader.relationships)} relationships)"
+      )
+
+      # Update the stored GraphSchema record so it stays in sync
+      existing_schema = GraphSchema.get_active_schema(self.graph_id, db)
+      if existing_schema:
+        existing_schema.schema_ddl = schema_ddl
+        db.commit()
+        logger.info(f"Updated stored GraphSchema for {self.graph_id}")
+      else:
+        GraphSchema.create(
+          graph_id=self.graph_id,
+          schema_type=schema_type,
+          schema_ddl=schema_ddl,
+          session=db,
+        )
+        logger.info(f"Created new GraphSchema record for {self.graph_id}")
 
       # Create database (without schema DDL — subgraphs skip schema application)
       create_db_kwargs: dict[str, Any] = {
         "graph_id": self.graph_id,
-        "schema_type": resolved_schema_type,
+        "schema_type": schema_type,
         "is_subgraph": is_subgraph(self.graph_id),
       }
 
-      if resolved_schema_type == "shared":
+      if schema_type == "shared":
         create_db_kwargs["repository_name"] = self.graph_id
 
       await client.create_database(**create_db_kwargs)
-      logger.info(
-        f"Recreated LadybugDB database with schema type: {resolved_schema_type}"
-      )
+      logger.info(f"Recreated LadybugDB database with schema type: {schema_type}")
 
       # Install schema separately (create_database skips schema for subgraphs)
       result = await client.install_schema(

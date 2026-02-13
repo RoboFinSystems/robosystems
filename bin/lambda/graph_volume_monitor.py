@@ -12,7 +12,7 @@ import json
 import logging
 import os
 import time
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import boto3
@@ -204,11 +204,20 @@ def check_and_expand_volume(instance: dict, expand_immediately: bool = False) ->
   }
 
   try:
-    # Get volume metrics from instance
+    # Get volume metrics from instance (Graph API), with CloudWatch fallback
     metrics = get_volume_metrics_from_instance(instance)
 
     if not metrics:
-      result["error"] = "Failed to get volume metrics"
+      logger.warning(
+        f"Graph API unavailable for {instance['instance_id']}, "
+        "falling back to CloudWatch metrics"
+      )
+      metrics = get_volume_metrics_from_cloudwatch(instance)
+
+    if not metrics:
+      result["error"] = (
+        "Failed to get volume metrics from both Graph API and CloudWatch"
+      )
       return result
 
     # Check data volume usage
@@ -537,6 +546,95 @@ def get_volume_metrics_from_instance(instance: dict) -> dict | None:
 
   except Exception as e:
     logger.error(f"Failed to get metrics from {instance['instance_id']}: {e}")
+    return None
+
+
+def get_volume_metrics_from_cloudwatch(instance: dict) -> dict | None:
+  """Fallback: get disk metrics from CloudWatch when Graph API is unavailable.
+
+  The CloudWatch agent on each instance publishes DISK_USED_PERCENT and disk_total
+  to the RoboSystems/Graph/{env} namespace. These metrics are available even when
+  the Graph API is unresponsive under heavy ingestion load.
+  """
+
+  instance_id = instance["instance_id"]
+
+  try:
+    namespace = f"RoboSystems/Graph/{ENVIRONMENT}"
+
+    # Discover the exact dimension set for this instance's disk metric.
+    # CloudWatch requires exact dimension matching, and the agent publishes
+    # with 6 dimensions (path, InstanceId, ASG, InstanceType, device, fstype).
+    response = cloudwatch.list_metrics(
+      Namespace=namespace,
+      MetricName="DISK_USED_PERCENT",
+      Dimensions=[
+        {"Name": "InstanceId", "Value": instance_id},
+        {"Name": "path", "Value": "/mnt/ladybug-data"},
+      ],
+    )
+
+    if not response["Metrics"]:
+      logger.warning(f"No CloudWatch disk metrics found for {instance_id}")
+      return None
+
+    dimensions = response["Metrics"][0]["Dimensions"]
+
+    # Query the latest DISK_USED_PERCENT datapoint (last 10 minutes)
+    end_time = datetime.now(UTC)
+    start_time = end_time - timedelta(minutes=10)
+
+    stats = cloudwatch.get_metric_statistics(
+      Namespace=namespace,
+      MetricName="DISK_USED_PERCENT",
+      Dimensions=dimensions,
+      StartTime=start_time,
+      EndTime=end_time,
+      Period=60,
+      Statistics=["Average"],
+    )
+
+    if not stats["Datapoints"]:
+      logger.warning(f"No recent DISK_USED_PERCENT datapoints for {instance_id}")
+      return None
+
+    latest = max(stats["Datapoints"], key=lambda x: x["Timestamp"])
+    usage_percent = latest["Average"] / 100.0  # Convert percentage to decimal
+
+    # Get filesystem size from disk_total metric (bytes)
+    volume_size_gb = None
+    total_stats = cloudwatch.get_metric_statistics(
+      Namespace=namespace,
+      MetricName="disk_total",
+      Dimensions=dimensions,
+      StartTime=start_time,
+      EndTime=end_time,
+      Period=60,
+      Statistics=["Average"],
+    )
+
+    if total_stats["Datapoints"]:
+      latest_total = max(total_stats["Datapoints"], key=lambda x: x["Timestamp"])
+      volume_size_gb = int(latest_total["Average"] / (1024**3))  # Bytes to GB
+
+    logger.info(
+      f"CloudWatch fallback for {instance_id}: "
+      f"usage={usage_percent:.1%}, size={volume_size_gb}GB, "
+      f"timestamp={latest['Timestamp'].isoformat()}"
+    )
+
+    return {
+      "volumes": {
+        "data_volume": {
+          "usage_percent": usage_percent,
+          "volume_size_gb": volume_size_gb or 50,  # Fallback to 50GB default
+        }
+      },
+      "source": "cloudwatch_fallback",
+    }
+
+  except Exception as e:
+    logger.error(f"CloudWatch fallback failed for {instance_id}: {e}")
     return None
 
 
