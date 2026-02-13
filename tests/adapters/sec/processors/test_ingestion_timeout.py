@@ -42,7 +42,7 @@ class TestStagingTimeoutConfiguration:
       "Fact",
       "Label",
       "Element",
-      "FactDimension",
+      "Dimension",
       "Association",
       "Structure",
       # Large relationship tables (fact-related)
@@ -54,8 +54,8 @@ class TestStagingTimeoutConfiguration:
       "FACT_HAS_DIMENSION",
       "FACT_REPORTS_ELEMENT",
       "FACT_SET_CONTAINS_FACT",
-      "FACT_DIMENSION_MEMBER_ELEMENT",
-      "FACT_DIMENSION_AXIS_ELEMENT",
+      "DIMENSION_HAS_MEMBER_ELEMENT",
+      "DIMENSION_HAS_AXIS_ELEMENT",
       # Large relationship tables (shared reference)
       "ELEMENT_HAS_LABEL",
       "TAXONOMY_HAS_LABEL",
@@ -81,7 +81,7 @@ class TestGetStagingTimeout:
       "Fact",
       "Label",
       "Element",
-      "FactDimension",
+      "Dimension",
       "Association",
       "Structure",
       # Large relationship tables (fact-related)
@@ -93,8 +93,8 @@ class TestGetStagingTimeout:
       "FACT_HAS_DIMENSION",
       "FACT_REPORTS_ELEMENT",
       "FACT_SET_CONTAINS_FACT",
-      "FACT_DIMENSION_MEMBER_ELEMENT",
-      "FACT_DIMENSION_AXIS_ELEMENT",
+      "DIMENSION_HAS_MEMBER_ELEMENT",
+      "DIMENSION_HAS_AXIS_ELEMENT",
       # Large relationship tables (shared reference)
       "ELEMENT_HAS_LABEL",
       "TAXONOMY_HAS_LABEL",

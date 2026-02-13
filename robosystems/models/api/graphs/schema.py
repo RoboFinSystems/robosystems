@@ -508,7 +508,7 @@ class SchemaInfoResponse(BaseModel):
                 "Element",
                 "Period",
                 "Unit",
-                "FactDimension",
+                "Dimension",
                 "Taxonomy",
                 "Structure",
                 "Association",

@@ -909,16 +909,16 @@ class XBRLGraphProcessor:
 
         # Check if fact dimension already exists
         if (
-          hasattr(self, "fact_dimensions_df")
-          and not self.fact_dimensions_df.empty
-          and "axis_uri" in self.fact_dimensions_df.columns
-          and "member_uri" in self.fact_dimensions_df.columns
-          and "type" in self.fact_dimensions_df.columns
+          hasattr(self, "dimensions_df")
+          and not self.dimensions_df.empty
+          and "axis_uri" in self.dimensions_df.columns
+          and "member_uri" in self.dimensions_df.columns
+          and "type" in self.dimensions_df.columns
         ):
-          existing_fact_dim = self.fact_dimensions_df[
-            (self.fact_dimensions_df["axis_uri"] == axis_uri)
-            & (self.fact_dimensions_df["member_uri"] == member_uri)
-            & (self.fact_dimensions_df["type"] == axis_type)
+          existing_fact_dim = self.dimensions_df[
+            (self.dimensions_df["axis_uri"] == axis_uri)
+            & (self.dimensions_df["member_uri"] == member_uri)
+            & (self.dimensions_df["type"] == axis_type)
           ]
         else:
           existing_fact_dim = pd.DataFrame()  # Empty dataframe
@@ -926,6 +926,9 @@ class XBRLGraphProcessor:
         if existing_fact_dim.empty:
           fact_dim_data = {
             "identifier": fact_dim_identifier,
+            "axis": dim.localName,
+            "member": mem.member.name,
+            "dimension_type": "xbrl_explicit",
             "axis_uri": axis_uri,
             "member_uri": member_uri,
             "type": axis_type,
@@ -933,13 +936,11 @@ class XBRLGraphProcessor:
             "is_typed": False,
           }
           new_fact_dim_df = pd.DataFrame([fact_dim_data])
-          if hasattr(self, "fact_dimensions_df") and not self.fact_dimensions_df.empty:
-            self.fact_dimensions_df = self.safe_concat(
-              self.fact_dimensions_df, new_fact_dim_df
-            )
+          if hasattr(self, "dimensions_df") and not self.dimensions_df.empty:
+            self.dimensions_df = self.safe_concat(self.dimensions_df, new_fact_dim_df)
           else:
-            self.fact_dimensions_df = new_fact_dim_df
-          logger.debug(f"Created new fact dimension: {member_uri}")
+            self.dimensions_df = new_fact_dim_df
+          logger.debug(f"Created new dimension: {member_uri}")
 
           # Create axis element if needed
           axis_element_data = self.make_element(mem.dimension)
@@ -955,14 +956,14 @@ class XBRLGraphProcessor:
             }
             new_fact_dim_elem_df = pd.DataFrame([fact_dim_axis_rel])
             if (
-              hasattr(self, "fact_dimension_axis_element_rel_df")
-              and not self.fact_dimension_axis_element_rel_df.empty
+              hasattr(self, "dimension_has_axis_element_rel_df")
+              and not self.dimension_has_axis_element_rel_df.empty
             ):
-              self.fact_dimension_axis_element_rel_df = self.safe_concat(
-                self.fact_dimension_axis_element_rel_df, new_fact_dim_elem_df
+              self.dimension_has_axis_element_rel_df = self.safe_concat(
+                self.dimension_has_axis_element_rel_df, new_fact_dim_elem_df
               )
             else:
-              self.fact_dimension_axis_element_rel_df = new_fact_dim_elem_df
+              self.dimension_has_axis_element_rel_df = new_fact_dim_elem_df
 
           # Create fact dimension to member element relationship
           if member_element_data:
@@ -972,14 +973,14 @@ class XBRLGraphProcessor:
             }
             new_fact_dim_elem_df = pd.DataFrame([fact_dim_member_rel])
             if (
-              hasattr(self, "fact_dimension_member_element_rel_df")
-              and not self.fact_dimension_member_element_rel_df.empty
+              hasattr(self, "dimension_has_member_element_rel_df")
+              and not self.dimension_has_member_element_rel_df.empty
             ):
-              self.fact_dimension_member_element_rel_df = self.safe_concat(
-                self.fact_dimension_member_element_rel_df, new_fact_dim_elem_df
+              self.dimension_has_member_element_rel_df = self.safe_concat(
+                self.dimension_has_member_element_rel_df, new_fact_dim_elem_df
               )
             else:
-              self.fact_dimension_member_element_rel_df = new_fact_dim_elem_df
+              self.dimension_has_member_element_rel_df = new_fact_dim_elem_df
         else:
           fact_dim_identifier = existing_fact_dim.iloc[0]["identifier"]
 
@@ -993,16 +994,16 @@ class XBRLGraphProcessor:
 
         # Check if fact dimension already exists
         if (
-          hasattr(self, "fact_dimensions_df")
-          and not self.fact_dimensions_df.empty
-          and "axis_uri" in self.fact_dimensions_df.columns
-          and "member_uri" in self.fact_dimensions_df.columns
-          and "type" in self.fact_dimensions_df.columns
+          hasattr(self, "dimensions_df")
+          and not self.dimensions_df.empty
+          and "axis_uri" in self.dimensions_df.columns
+          and "member_uri" in self.dimensions_df.columns
+          and "type" in self.dimensions_df.columns
         ):
-          existing_fact_dim = self.fact_dimensions_df[
-            (self.fact_dimensions_df["axis_uri"] == axis_uri)
-            & (self.fact_dimensions_df["member_uri"] == typed_member)
-            & (self.fact_dimensions_df["type"] == axis_type)
+          existing_fact_dim = self.dimensions_df[
+            (self.dimensions_df["axis_uri"] == axis_uri)
+            & (self.dimensions_df["member_uri"] == typed_member)
+            & (self.dimensions_df["type"] == axis_type)
           ]
         else:
           existing_fact_dim = pd.DataFrame()  # Empty dataframe
@@ -1010,6 +1011,9 @@ class XBRLGraphProcessor:
         if existing_fact_dim.empty:
           fact_dim_data = {
             "identifier": fact_dim_identifier,
+            "axis": dim.localName,
+            "member": typed_member,
+            "dimension_type": "xbrl_typed",
             "axis_uri": axis_uri,
             "member_uri": typed_member,
             "type": axis_type,
@@ -1017,13 +1021,11 @@ class XBRLGraphProcessor:
             "is_typed": True,
           }
           new_fact_dim_df = pd.DataFrame([fact_dim_data])
-          if hasattr(self, "fact_dimensions_df") and not self.fact_dimensions_df.empty:
-            self.fact_dimensions_df = self.safe_concat(
-              self.fact_dimensions_df, new_fact_dim_df
-            )
+          if hasattr(self, "dimensions_df") and not self.dimensions_df.empty:
+            self.dimensions_df = self.safe_concat(self.dimensions_df, new_fact_dim_df)
           else:
-            self.fact_dimensions_df = new_fact_dim_df
-          logger.debug(f"Created new typed fact dimension: {typed_member}")
+            self.dimensions_df = new_fact_dim_df
+          logger.debug(f"Created new typed dimension: {typed_member}")
 
           # Create axis element if needed
           axis_element_data = self.make_element(mem.dimension)
@@ -1036,14 +1038,14 @@ class XBRLGraphProcessor:
             }
             new_fact_dim_elem_df = pd.DataFrame([fact_dim_axis_rel])
             if (
-              hasattr(self, "fact_dimension_axis_element_rel_df")
-              and not self.fact_dimension_axis_element_rel_df.empty
+              hasattr(self, "dimension_has_axis_element_rel_df")
+              and not self.dimension_has_axis_element_rel_df.empty
             ):
-              self.fact_dimension_axis_element_rel_df = self.safe_concat(
-                self.fact_dimension_axis_element_rel_df, new_fact_dim_elem_df
+              self.dimension_has_axis_element_rel_df = self.safe_concat(
+                self.dimension_has_axis_element_rel_df, new_fact_dim_elem_df
               )
             else:
-              self.fact_dimension_axis_element_rel_df = new_fact_dim_elem_df
+              self.dimension_has_axis_element_rel_df = new_fact_dim_elem_df
         else:
           fact_dim_identifier = existing_fact_dim.iloc[0]["identifier"]
 

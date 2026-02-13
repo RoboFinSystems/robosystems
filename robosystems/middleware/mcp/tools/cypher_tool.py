@@ -36,7 +36,7 @@ Query the graph using Cypher syntax. The database uses either RoboSystems' finan
    MATCH (f:Fact)-[:FACT_HAS_PERIOD]->(p:Period)
 
 4. **Dimensional Analysis (Segments):**
-   MATCH (f:Fact)-[:FACT_HAS_DIMENSION]->(d:FactDimension)
+   MATCH (f:Fact)-[:FACT_HAS_DIMENSION]->(d:Dimension)
 
 5. **Units and Context:**
    MATCH (f:Fact)-[:FACT_HAS_UNIT]->(u:Unit)

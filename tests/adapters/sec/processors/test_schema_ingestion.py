@@ -228,7 +228,7 @@ class TestXBRLSchemaConfigGenerator:
     assert processor._pascal_to_snake("Entity") == "entity"
     assert processor._pascal_to_snake("ReportFact") == "report_fact"
     assert (
-      processor._pascal_to_snake("FactDimensionElement") == "fact_dimension_element"
+      processor._pascal_to_snake("DimensionAxisElement") == "dimension_axis_element"
     )
     assert processor._pascal_to_snake("XMLData") == "xml_data"
     assert processor._pascal_to_snake("HTMLParser") == "html_parser"

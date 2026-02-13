@@ -352,7 +352,6 @@ async def start_background_copy(
     "table_name": request.table_name,
     "graph_id": graph_id,
     "started_at": datetime.now(UTC).isoformat(),
-    "is_large_table": request.table_name.lower() in ["fact", "factdimension", "report"],
   }
   await redis_client.setex(ingestion_key, 3600, json.dumps(ingestion_data))
   logger.info(

@@ -128,7 +128,7 @@ ORDER BY p.end_date DESC LIMIT 10""",
             {
               "category": "financial",
               "description": "Revenue BY Segment (dimensional breakdown)",
-              "query": """MATCH (f:Fact {has_dimensions: true})-[:FACT_HAS_ELEMENT]->(e:Element), (f)-[:FACT_HAS_DIMENSION]->(d:FactDimension)
+              "query": """MATCH (f:Fact {has_dimensions: true})-[:FACT_HAS_ELEMENT]->(e:Element), (f)-[:FACT_HAS_DIMENSION]->(d:Dimension)
 WHERE e.qname = 'us-gaap:Revenues'
   AND f.numeric_value IS NOT NULL
 RETURN d.axis_uri, d.member_uri, f.numeric_value

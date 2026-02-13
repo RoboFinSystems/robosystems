@@ -80,7 +80,7 @@ def create_factset_id(factset_uri: str) -> str:
 
 
 def create_dimension_id(dimension_uri: str) -> str:
-  """Create a FactDimension identifier."""
+  """Create a Dimension identifier."""
   return generate_deterministic_uuid(dimension_uri, namespace="dimension")
 
 
@@ -100,7 +100,7 @@ def camel_to_snake(name: str) -> str:
 
   Examples:
     EntityReport -> entity_report
-    FactDimension -> fact_dimension
+    LineItem -> line_item
     HTTPSConnection -> https_connection
   """
   # Insert underscore before uppercase letters (except first)
@@ -132,7 +132,7 @@ def convert_schema_name_to_filename(schema_name: str) -> str:
 
   Uses exact schema names for file naming - no conversion to snake_case.
   This ensures directories and files match exact table names like Entity,
-  FactDimension, etc.
+  Dimension, etc.
 
   Args:
     schema_name: Schema name like "Entity", "FACT_HAS_DIMENSION"

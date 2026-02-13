@@ -106,18 +106,6 @@ REPORTING_NODES = [
     ],
   ),
   Node(
-    name="FactDimension",
-    description="Dimensional information for facts",
-    properties=[
-      Property(name="identifier", type="STRING", is_primary_key=True),
-      Property(name="axis_uri", type="STRING"),
-      Property(name="member_uri", type="STRING"),
-      Property(name="type", type="STRING"),
-      Property(name="is_explicit", type="BOOLEAN"),
-      Property(name="is_typed", type="BOOLEAN"),
-    ],
-  ),
-  Node(
     name="Association",
     description="Associations between elements in taxonomies",
     properties=[
@@ -201,26 +189,12 @@ REPORTING_RELATIONSHIPS = [
       Property(name="taxonomy_context", type="STRING"),
     ],
   ),
-  # Additional dimension relationships for XBRL fact processing
+  # Fact → Dimension relationship (XBRL dimensional qualifiers)
   Relationship(
     name="FACT_HAS_DIMENSION",
     from_node="Fact",
-    to_node="FactDimension",
-    description="Fact has dimensional qualifiers",
-    properties=[],
-  ),
-  Relationship(
-    name="FACT_DIMENSION_AXIS_ELEMENT",
-    from_node="FactDimension",
-    to_node="Element",
-    description="Dimension axis element reference",
-    properties=[],
-  ),
-  Relationship(
-    name="FACT_DIMENSION_MEMBER_ELEMENT",
-    from_node="FactDimension",
-    to_node="Element",
-    description="Dimension member element reference",
+    to_node="Dimension",
+    description="Fact has dimensional qualifiers (segments, geography, products)",
     properties=[],
   ),
   Relationship(
@@ -312,6 +286,12 @@ TRANSACTION_NODES = [
       Property(name="description", type="STRING"),
       Property(name="debit_amount", type="DOUBLE"),
       Property(name="credit_amount", type="DOUBLE"),
+      Property(
+        name="has_dimensions", type="BOOLEAN"
+      ),  # True if line item has dimensional breakdowns
+      Property(
+        name="dimension_count", type="INT64"
+      ),  # Number of dimensional qualifiers (0=no dimensions)
       Property(name="updated_at", type="STRING"),
     ],
   ),
@@ -344,6 +324,14 @@ TRANSACTION_RELATIONSHIPS = [
     properties=[
       Property(name="mapping_context", type="STRING"),
     ],
+  ),
+  # LineItem → Dimension relationship (department, class, location, project, etc.)
+  Relationship(
+    name="LINE_ITEM_HAS_DIMENSION",
+    from_node="LineItem",
+    to_node="Dimension",
+    description="Line item has dimensional qualifiers (department, class, location, project)",
+    properties=[],
   ),
 ]
 

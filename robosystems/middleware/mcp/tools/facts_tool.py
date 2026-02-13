@@ -43,7 +43,7 @@ class FactsTool(BaseTool):
 - **Element**: The metric being measured (Revenue, Assets, etc.)
 - **Period**: Time context (instant date or duration)
 - **Entity**: Company or subsidiary reporting the fact
-- **FactDimension**: Segment/breakdown (by product, geography, etc.)
+- **Dimension**: Segment/breakdown (by product, geography, department, etc.)
 - **Unit**: How it's measured (USD, shares, pure number)
 
 **FACT TYPES:**
@@ -169,7 +169,7 @@ class FactsTool(BaseTool):
           dim_query = f"""
                 MATCH (e:Element {{qname: '{element_filter}'}})<-[:FACT_HAS_ELEMENT]-(f:Fact)
                 WITH f, e LIMIT {sample_size}
-                MATCH (f)-[:FACT_HAS_DIMENSION]->(d:FactDimension)
+                MATCH (f)-[:FACT_HAS_DIMENSION]->(d:Dimension)
                 WHERE f.has_dimensions = true
                 RETURN e.qname as element, d.axis_uri as dim_type,
                        d.member_uri as dim_value, count(f) as fact_count
@@ -183,7 +183,7 @@ class FactsTool(BaseTool):
                 WITH f LIMIT {sample_size}
                 WITH f WHERE f.has_dimensions = true
                 MATCH (f)-[:FACT_HAS_ELEMENT]->(e:Element)
-                MATCH (f)-[:FACT_HAS_DIMENSION]->(d:FactDimension)
+                MATCH (f)-[:FACT_HAS_DIMENSION]->(d:Dimension)
                 RETURN e.qname as element, d.axis_uri as dim_type,
                        d.member_uri as dim_value, count(f) as fact_count
                 ORDER BY fact_count DESC
@@ -266,7 +266,7 @@ ORDER BY p.end_date DESC LIMIT 10""",
           },
           {
             "name": "Revenue BY Segment (Dimensional)",
-            "query": """MATCH (f:Fact {has_dimensions: true})-[:FACT_HAS_ELEMENT]->(e:Element), (f)-[:FACT_HAS_DIMENSION]->(d:FactDimension)
+            "query": """MATCH (f:Fact {has_dimensions: true})-[:FACT_HAS_ELEMENT]->(e:Element), (f)-[:FACT_HAS_DIMENSION]->(d:Dimension)
 WHERE e.qname CONTAINS 'Revenue'
   AND f.numeric_value IS NOT NULL
 RETURN d.axis_uri, d.member_uri, sum(f.numeric_value) as total
@@ -275,7 +275,7 @@ ORDER BY total DESC LIMIT 10""",
           },
           {
             "name": "Multi-Dimension Query",
-            "query": """MATCH (f:Fact)-[:FACT_HAS_DIMENSION]->(d1:FactDimension), (f)-[:FACT_HAS_DIMENSION]->(d2:FactDimension)
+            "query": """MATCH (f:Fact)-[:FACT_HAS_DIMENSION]->(d1:Dimension), (f)-[:FACT_HAS_DIMENSION]->(d2:Dimension)
 WHERE d1 <> d2
 RETURN count(f) as multi_dimensional_facts""",
             "explanation": "Facts with multiple dimensions. Uses comma-separated patterns in single MATCH.",
@@ -305,7 +305,7 @@ ORDER BY p.end_date""",
               "name": "All Aspects for a Fact",
               "query": f"""MATCH (f:Fact)-[:FACT_HAS_ELEMENT]->(e:Element {{qname: '{element_filter}'}})
 OPTIONAL MATCH (f)-[:FACT_HAS_PERIOD]->(p:Period)
-OPTIONAL MATCH (f)-[:FACT_HAS_DIMENSION]->(d:FactDimension)
+OPTIONAL MATCH (f)-[:FACT_HAS_DIMENSION]->(d:Dimension)
 OPTIONAL MATCH (f)-[:FACT_HAS_UNIT]->(u:Unit)
 WHERE f.numeric_value IS NOT NULL
 RETURN f.numeric_value, p.end_date, p.period_type, d.axis_uri, d.member_uri, u.value
@@ -325,7 +325,7 @@ LIMIT 10""",
           "Start with single elements before complex dimensional queries",
           "Use IS NOT NULL filters for numeric analysis",
           "Period nodes provide time context for facts",
-          "FactDimension nodes enable segment analysis",
+          "Dimension nodes enable segment analysis",
           "Without dimensional filtering, you'll get both totals AND breakdowns mixed together",
           f"Results based on {sample_size} fact sample for fast response",
         ]

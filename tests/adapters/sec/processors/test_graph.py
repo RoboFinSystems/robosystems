@@ -849,8 +849,8 @@ class TestDataFrameHelpers:
       == "fact_sets_df"
     )
     assert (
-      processor.df_manager._convert_schema_name_to_dataframe_attr("FactDimension", True)
-      == "fact_dimensions_df"
+      processor.df_manager._convert_schema_name_to_dataframe_attr("Dimension", True)
+      == "dimensions_df"
     )
 
     # Test relationship conversions
@@ -878,7 +878,7 @@ class TestDataFrameHelpers:
     """Test PascalCase to snake_case conversion."""
     assert camel_to_snake("Entity") == "entity"
     assert camel_to_snake("FactSet") == "fact_set"
-    assert camel_to_snake("FactDimension") == "fact_dimension"
+    assert camel_to_snake("LineItem") == "line_item"
     assert camel_to_snake("TaxonomyLabel") == "taxonomy_label"
 
   def test_make_plural(self):

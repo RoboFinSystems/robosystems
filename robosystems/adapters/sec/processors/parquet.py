@@ -202,10 +202,7 @@ class ParquetWriter:
 
       base_name = base_filename.replace(".parquet", "")
 
-      if base_name == "fact_has_dimension":
-        table_name = "FactDimensionsRel"
-      else:
-        table_name = base_name.replace("_", " ").title().replace(" ", "")
+      table_name = base_name.replace("_", " ").title().replace(" ", "")
 
       if self.schema_adapter:
         logger.info(
@@ -493,7 +490,8 @@ class ParquetWriter:
       "structure_associations",
       "association_from_elements",
       "association_to_elements",
-      "fact_dimension_elements",
+      "dimension_has_axis_element",
+      "dimension_has_member_element",
     ]
     return base_name in relationship_patterns
 
@@ -508,7 +506,7 @@ class ParquetWriter:
     self.write_dataframe(processor.reports_df, "nodes/Report.parquet")
     self.write_dataframe(processor.facts_df, "nodes/Fact.parquet")
     self.write_dataframe(processor.units_df, "nodes/Unit.parquet")
-    self.write_dataframe(processor.fact_dimensions_df, "nodes/FactDimension.parquet")
+    self.write_dataframe(processor.dimensions_df, "nodes/Dimension.parquet")
     self.write_dataframe(processor.elements_df, "nodes/Element.parquet")
     self.write_dataframe(processor.labels_df, "nodes/Label.parquet")
     self.write_dataframe(processor.references_df, "nodes/Reference.parquet")
@@ -583,10 +581,10 @@ class ParquetWriter:
       "relationships/ASSOCIATION_HAS_TO_ELEMENT.parquet",
     )
     self.write_dataframe(
-      processor.fact_dimension_axis_element_rel_df,
-      "relationships/FACT_DIMENSION_AXIS_ELEMENT.parquet",
+      processor.dimension_has_axis_element_rel_df,
+      "relationships/DIMENSION_HAS_AXIS_ELEMENT.parquet",
     )
     self.write_dataframe(
-      processor.fact_dimension_member_element_rel_df,
-      "relationships/FACT_DIMENSION_MEMBER_ELEMENT.parquet",
+      processor.dimension_has_member_element_rel_df,
+      "relationships/DIMENSION_HAS_MEMBER_ELEMENT.parquet",
     )
