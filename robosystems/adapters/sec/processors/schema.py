@@ -81,7 +81,6 @@ class XBRLSchemaAdapter:
     "ReportTaxonomies": "REPORT_USES_TAXONOMY",
     "FactUnits": "FACT_HAS_UNIT",
     "FactDimensions": "FACT_HAS_DIMENSION",
-    "FactDimensionsRel": "FACT_HAS_DIMENSION",
     "FactEntities": "FACT_HAS_ENTITY",
     "FactElements": "FACT_HAS_ELEMENT",
     "FactPeriods": "FACT_HAS_PERIOD",
@@ -94,7 +93,8 @@ class XBRLSchemaAdapter:
     "StructureAssociations": "STRUCTURE_HAS_ASSOCIATION",
     "AssociationFromElements": "ASSOCIATION_HAS_FROM_ELEMENT",
     "AssociationToElements": "ASSOCIATION_HAS_TO_ELEMENT",
-    "FactDimensionElements": "FACT_DIMENSION_REFERENCES_ELEMENT",
+    "DimensionHasAxisElement": "DIMENSION_HAS_AXIS_ELEMENT",
+    "DimensionHasMemberElement": "DIMENSION_HAS_MEMBER_ELEMENT",
   }
 
   def __init__(self, schema_config: dict[str, Any]):

@@ -525,7 +525,7 @@ class TestWriteDataFrame:
 
       df_manager.ensure_schema_completeness.assert_called_once()
       call_args = df_manager.ensure_schema_completeness.call_args[0]
-      assert call_args[1] == "FactDimensionsRel"
+      assert call_args[1] == "FactHasDimension"
 
 
 class TestWriteAllDataFrames:

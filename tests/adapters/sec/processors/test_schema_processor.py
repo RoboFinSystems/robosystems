@@ -545,7 +545,8 @@ class TestXBRLTableMapping:
       "StructureAssociations": "STRUCTURE_HAS_ASSOCIATION",
       "AssociationFromElements": "ASSOCIATION_HAS_FROM_ELEMENT",
       "AssociationToElements": "ASSOCIATION_HAS_TO_ELEMENT",
-      "FactDimensionElements": "FACT_DIMENSION_REFERENCES_ELEMENT",
+      "DimensionHasAxisElement": "DIMENSION_HAS_AXIS_ELEMENT",
+      "DimensionHasMemberElement": "DIMENSION_HAS_MEMBER_ELEMENT",
     }
 
     for xbrl_name, schema_name in expected_mappings.items():

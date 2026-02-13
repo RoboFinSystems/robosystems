@@ -202,10 +202,7 @@ class ParquetWriter:
 
       base_name = base_filename.replace(".parquet", "")
 
-      if base_name == "fact_has_dimension":
-        table_name = "FactDimensionsRel"
-      else:
-        table_name = base_name.replace("_", " ").title().replace(" ", "")
+      table_name = base_name.replace("_", " ").title().replace(" ", "")
 
       if self.schema_adapter:
         logger.info(
@@ -493,7 +490,8 @@ class ParquetWriter:
       "structure_associations",
       "association_from_elements",
       "association_to_elements",
-      "fact_dimension_elements",
+      "dimension_has_axis_element",
+      "dimension_has_member_element",
     ]
     return base_name in relationship_patterns
 
