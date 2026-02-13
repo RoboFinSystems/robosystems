@@ -1,7 +1,6 @@
 """Dagster billing jobs.
 
-These jobs handle credit allocation, storage billing, usage collection,
-and Stripe webhook processing.
+These jobs handle credit allocation and usage reporting.
 """
 
 from datetime import UTC, datetime, timedelta
@@ -9,11 +8,8 @@ from decimal import Decimal
 from typing import Any
 
 from dagster import (
-  Backoff,
-  Config,
   DefaultScheduleStatus,
   OpExecutionContext,
-  RetryPolicy,
   ScheduleDefinition,
   job,
   op,
@@ -21,7 +17,6 @@ from dagster import (
 
 from robosystems.config import env
 from robosystems.dagster.resources import DatabaseResource
-from robosystems.logger import get_logger
 from robosystems.models.iam import (
   Graph,
   GraphCredits,
@@ -29,8 +24,6 @@ from robosystems.models.iam import (
 )
 from robosystems.models.iam.graph_credits import CreditTransactionType
 from robosystems.operations.graph.credit_service import CreditService
-
-logger = get_logger(__name__)
 
 # ============================================================================
 # Environment-based Schedule Status
@@ -48,136 +41,6 @@ BILLING_SCHEDULE_STATUS = (
 # ============================================================================
 # Stripe Webhook Processing Job
 # ============================================================================
-
-
-class StripeWebhookConfig(Config):
-  """Configuration for processing a Stripe webhook event."""
-
-  event_id: str
-  event_type: str
-  event_data: dict
-  operation_id: str | None = None
-
-
-@op(
-  retry_policy=RetryPolicy(
-    max_retries=3,
-    delay=10,
-    backoff=Backoff.EXPONENTIAL,
-  ),
-  tags={"kind": "webhook", "category": "billing"},
-)
-def process_stripe_webhook_event(
-  context: OpExecutionContext,
-  db: DatabaseResource,
-  config: StripeWebhookConfig,
-) -> dict[str, Any]:
-  """
-  Process a Stripe webhook event with retry logic.
-
-  Handles:
-  - checkout.session.completed: Payment collected, trigger provisioning
-  - invoice.created: Sync invoice to database
-  - invoice.payment_succeeded: Mark invoice paid
-  - invoice.payment_failed: Handle payment failure
-  - customer.subscription.updated: Sync subscription status
-  - customer.subscription.deleted: Cancel subscription
-
-  Returns processing result for observability.
-  """
-  import asyncio
-
-  context.log.info(
-    f"Processing Stripe webhook: {config.event_type} (event_id: {config.event_id})"
-  )
-
-  with db.get_session() as session:
-    # Check idempotency - may have been processed by another worker
-    from robosystems.models.billing import BillingAuditLog
-
-    if BillingAuditLog.is_webhook_processed(config.event_id, "stripe", session):
-      context.log.info(f"Webhook {config.event_id} already processed, skipping")
-      return {
-        "event_id": config.event_id,
-        "event_type": config.event_type,
-        "status": "skipped",
-        "reason": "already_processed",
-      }
-
-    # Process based on event type
-    event_data = config.event_data
-    result: dict[str, Any] = {
-      "event_id": config.event_id,
-      "event_type": config.event_type,
-    }
-
-    loop = asyncio.new_event_loop()
-    try:
-      if config.event_type == "checkout.session.completed":
-        loop.run_until_complete(
-          _handle_checkout_completed(event_data, session, context)
-        )
-        result["action"] = "checkout_processed"
-
-      elif config.event_type == "invoice.created":
-        loop.run_until_complete(_handle_invoice_created(event_data, session, context))
-        result["action"] = "invoice_synced"
-
-      elif config.event_type == "invoice.payment_succeeded":
-        loop.run_until_complete(_handle_payment_succeeded(event_data, session, context))
-        result["action"] = "payment_recorded"
-
-      elif config.event_type == "invoice.payment_failed":
-        loop.run_until_complete(_handle_payment_failed(event_data, session, context))
-        result["action"] = "payment_failure_recorded"
-
-      elif config.event_type == "invoice.updated":
-        loop.run_until_complete(_handle_invoice_updated(event_data, session, context))
-        result["action"] = "invoice_updated"
-
-      elif config.event_type == "invoice.voided":
-        loop.run_until_complete(_handle_invoice_voided(event_data, session, context))
-        result["action"] = "invoice_voided"
-
-      elif config.event_type == "charge.refunded":
-        loop.run_until_complete(_handle_charge_refunded(event_data, session, context))
-        result["action"] = "refund_processed"
-
-      elif config.event_type == "customer.subscription.updated":
-        loop.run_until_complete(
-          _handle_subscription_updated(event_data, session, context)
-        )
-        result["action"] = "subscription_updated"
-
-      elif config.event_type == "customer.subscription.deleted":
-        loop.run_until_complete(
-          _handle_subscription_deleted(event_data, session, context)
-        )
-        result["action"] = "subscription_canceled"
-
-      else:
-        context.log.info(f"Unhandled webhook event type: {config.event_type}")
-        result["action"] = "ignored"
-        result["reason"] = "unhandled_event_type"
-
-    finally:
-      loop.close()
-
-    # Mark webhook as processed
-    BillingAuditLog.mark_webhook_processed(
-      config.event_id, "stripe", config.event_type, event_data, session
-    )
-
-    result["status"] = "completed"
-    result["processed_at"] = datetime.now(UTC).isoformat()
-
-    context.log.info(f"Webhook processing completed: {result}")
-
-    # Emit SSE result if operation_id provided
-    if config.operation_id:
-      _emit_webhook_result_to_sse(context, config.operation_id, result)
-
-    return result
 
 
 async def _handle_checkout_completed(
@@ -850,83 +713,6 @@ async def _trigger_resource_provisioning(
       f"Unknown resource type: {resource_type}"
     )
     db_session.commit()
-
-
-def _emit_webhook_result_to_sse(
-  context: OpExecutionContext,
-  operation_id: str,
-  result: dict,
-) -> None:
-  """Update SSE operation metadata with the webhook result."""
-  try:
-    from robosystems.middleware.sse.event_storage import SSEEventStorage
-
-    storage = SSEEventStorage()
-    storage.update_operation_result_sync(operation_id, result)
-    context.log.info(f"Updated SSE metadata for operation {operation_id}")
-  except Exception as e:
-    context.log.warning(f"Failed to update SSE operation metadata: {e}")
-
-
-@job(
-  tags={
-    "dagster/priority": "1",
-    "dagster/max_retries": 3,
-    "dagster/max_runtime": 300,  # 5 minute max
-    "category": "billing",
-  },
-)
-def process_stripe_webhook_job():
-  """
-  Job for processing Stripe webhook events.
-
-  This job provides:
-  - Retry logic with exponential backoff (3 retries)
-  - Full observability in Dagster UI
-  - Idempotency checking
-  - Audit trail of all webhook processing
-  """
-  process_stripe_webhook_event()
-
-
-def build_stripe_webhook_job_config(
-  event_id: str,
-  event_type: str,
-  event_data: dict,
-  operation_id: str | None = None,
-) -> dict:
-  """
-  Build run_config for process_stripe_webhook_job.
-
-  Args:
-    event_id: Stripe event ID
-    event_type: Stripe event type (e.g., "checkout.session.completed")
-    event_data: Event data object from Stripe
-    operation_id: Optional SSE operation ID for progress tracking
-
-  Returns:
-    run_config dictionary for Dagster
-  """
-  config: dict[str, Any] = {
-    "event_id": event_id,
-    "event_type": event_type,
-    "event_data": event_data,
-  }
-
-  if operation_id:
-    config["operation_id"] = operation_id
-
-  run_config: dict = {
-    "ops": {
-      "process_stripe_webhook_event": {"config": config},
-    },
-  }
-
-  # In local development, use in_process executor
-  if env.ENVIRONMENT == "dev":
-    run_config["execution"] = {"config": {"in_process": {}}}
-
-  return run_config
 
 
 # ============================================================================

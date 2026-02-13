@@ -48,37 +48,6 @@ class TestBillingJobConfiguration:
     assert "0 0 1 * *" in monthly_credit_allocation_schedule.cron_schedule
 
 
-class TestStripeWebhookJob:
-  """Tests for Stripe webhook processing job."""
-
-  @pytest.mark.unit
-  def test_process_stripe_webhook_job_graph(self):
-    """Test Stripe webhook job graph is valid."""
-    from robosystems.dagster.jobs.billing import process_stripe_webhook_job
-
-    job_def = process_stripe_webhook_job
-
-    assert job_def.name == "process_stripe_webhook_job"
-    assert len(job_def.all_node_defs) >= 1
-
-  @pytest.mark.unit
-  def test_build_stripe_webhook_job_config(self):
-    """Test Stripe webhook job config builder."""
-    from robosystems.dagster.jobs.billing import build_stripe_webhook_job_config
-
-    config = build_stripe_webhook_job_config(
-      event_type="customer.subscription.created",
-      event_id="evt_123",
-      event_data={"subscription": {"id": "sub_123"}},
-    )
-
-    assert "ops" in config
-    assert "process_stripe_webhook_event" in config["ops"]
-    op_config = config["ops"]["process_stripe_webhook_event"]["config"]
-    assert op_config["event_type"] == "customer.subscription.created"
-    assert op_config["event_id"] == "evt_123"
-
-
 class TestCreditAllocationLogic:
   """Tests for credit allocation business logic."""
 

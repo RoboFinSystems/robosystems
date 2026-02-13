@@ -299,7 +299,6 @@ async def ensure_shared_subgraph_exists(
 
   # Ensure schema record exists (may be missing if subgraph was created
   # before schema propagation was added, or if a previous run failed)
-  schema_exists = False
   if postgres_exists:
     try:
       from ...database import get_db_session
@@ -308,8 +307,7 @@ async def ensure_shared_subgraph_exists(
       db_gen = get_db_session()
       db = next(db_gen)
       try:
-        schema_exists = GraphSchema.get_active_schema(subgraph_id, db) is not None
-        if not schema_exists:
+        if not GraphSchema.get_active_schema(subgraph_id, db):
           parent_schema = GraphSchema.get_active_schema(parent_repository_name, db)
           if parent_schema:
             GraphSchema.create(
@@ -318,9 +316,9 @@ async def ensure_shared_subgraph_exists(
               schema_ddl=parent_schema.schema_ddl,
               schema_json=parent_schema.schema_json,
               session=db,
-              commit=True,
+              commit=False,
             )
-            schema_exists = True
+            db.commit()
             logger.info(f"Backfilled schema DDL for existing subgraph {subgraph_id}")
       finally:
         try:
