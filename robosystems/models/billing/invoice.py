@@ -51,6 +51,10 @@ class BillingInvoice(Base):
 
   stripe_invoice_id = Column(String, unique=True, nullable=True)
 
+  invoice_pdf = Column(String, nullable=True)
+  hosted_invoice_url = Column(String, nullable=True)
+  currency = Column(String, default="usd", nullable=False)
+
   sent_at = Column(DateTime, nullable=True)
   due_date = Column(DateTime, nullable=True)
   paid_at = Column(DateTime, nullable=True)
