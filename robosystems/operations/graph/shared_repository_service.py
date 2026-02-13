@@ -297,6 +297,39 @@ async def ensure_shared_subgraph_exists(
   except Exception as e:
     logger.info(f"Subgraph {subgraph_id} not found in LadybugDB: {e}")
 
+  # Ensure schema record exists (may be missing if subgraph was created
+  # before schema propagation was added, or if a previous run failed)
+  schema_exists = False
+  if postgres_exists:
+    try:
+      from ...database import get_db_session
+      from ...models.iam import GraphSchema
+
+      db_gen = get_db_session()
+      db = next(db_gen)
+      try:
+        schema_exists = GraphSchema.get_active_schema(subgraph_id, db) is not None
+        if not schema_exists:
+          parent_schema = GraphSchema.get_active_schema(parent_repository_name, db)
+          if parent_schema:
+            GraphSchema.create(
+              graph_id=subgraph_id,
+              schema_type=parent_schema.schema_type,
+              schema_ddl=parent_schema.schema_ddl,
+              schema_json=parent_schema.schema_json,
+              session=db,
+              commit=True,
+            )
+            schema_exists = True
+            logger.info(f"Backfilled schema DDL for existing subgraph {subgraph_id}")
+      finally:
+        try:
+          next(db_gen)
+        except StopIteration:
+          pass
+    except Exception as e:
+      logger.warning(f"Could not check/create schema for {subgraph_id}: {e}")
+
   # If both exist, we're done
   if postgres_exists and ladybug_exists:
     logger.info(f"Subgraph {subgraph_id} fully exists (LadybugDB + PostgreSQL)")
@@ -384,6 +417,30 @@ async def ensure_shared_subgraph_exists(
         updated_at=now,
       )
       db.add(subgraph)
+      db.flush()
+
+      # Create GraphSchema record for subgraph (inheriting from parent)
+      from ...models.iam import GraphSchema
+
+      existing_schema = GraphSchema.get_active_schema(subgraph_id, db)
+      if not existing_schema:
+        parent_schema = GraphSchema.get_active_schema(parent_repository_name, db)
+        if parent_schema:
+          GraphSchema.create(
+            graph_id=subgraph_id,
+            schema_type=parent_schema.schema_type,
+            schema_ddl=parent_schema.schema_ddl,
+            schema_json=parent_schema.schema_json,
+            session=db,
+            commit=False,
+          )
+          logger.info(f"Persisted schema DDL for subgraph {subgraph_id}")
+        else:
+          logger.warning(
+            f"No parent schema found for {parent_repository_name}, "
+            f"subgraph {subgraph_id} will not have a schema record"
+          )
+
       db.commit()
 
       logger.info(
