@@ -186,6 +186,7 @@ class StripePaymentProvider(PaymentProvider):
       metadata=metadata,
       payment_method_types=["card"],
       billing_address_collection="auto",
+      allow_promotion_codes=True,
     )
 
     logger.info(

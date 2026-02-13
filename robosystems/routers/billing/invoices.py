@@ -63,98 +63,52 @@ async def list_invoices(
         detail="Only owners and admins can view invoices",
       )
 
-    customer = BillingCustomer.get_or_create(org_id, db)
+    db_invoices = (
+      db.query(BillingInvoice)
+      .filter(BillingInvoice.org_id == org_id)
+      .order_by(BillingInvoice.created_at.desc())
+      .limit(limit + 1)
+      .all()
+    )
 
-    if not customer.stripe_customer_id:
-      local_invoices = BillingInvoice.get_by_org_id(org_id, db)
-      invoices = []
-      for inv in local_invoices[:limit]:
-        invoices.append(
-          Invoice(
-            id=inv.id,
-            number=inv.invoice_number,
-            status=inv.status,
-            amount_due=inv.total_cents,
-            amount_paid=inv.total_cents if inv.status == "paid" else 0,
-            currency="usd",
-            created=inv.created_at.isoformat(),
-            due_date=inv.due_date.isoformat() if inv.due_date else None,
-            paid_at=inv.paid_at.isoformat() if inv.paid_at else None,
-            invoice_pdf=None,
-            hosted_invoice_url=None,
-            line_items=[
-              InvoiceLineItem(
-                description=line.description,
-                amount=line.amount_cents,
-                quantity=line.quantity,
-                period_start=line.period_start.isoformat()
-                if line.period_start
-                else None,
-                period_end=line.period_end.isoformat() if line.period_end else None,
-              )
-              for line in inv.line_items
-            ],
-            subscription_id=None,
-          )
-        )
-      return InvoicesResponse(
-        invoices=invoices,
-        total_count=len(local_invoices),
-        has_more=len(local_invoices) > limit,
-      )
-
-    provider = get_payment_provider("stripe")
-    result = provider.list_invoices(customer.stripe_customer_id, limit=limit)
+    has_more = len(db_invoices) > limit
+    db_invoices = db_invoices[:limit]
 
     invoices = []
-    for inv in result["invoices"]:
+    for inv in db_invoices:
       invoices.append(
         Invoice(
-          id=inv["id"],
-          number=inv["number"],
-          status=inv["status"],
-          amount_due=inv["amount_due"],
-          amount_paid=inv["amount_paid"],
-          currency=inv["currency"],
-          created=datetime.fromtimestamp(inv["created"]).isoformat(),
-          due_date=(
-            datetime.fromtimestamp(inv["due_date"]).isoformat()
-            if inv["due_date"]
-            else None
-          ),
-          paid_at=(
-            datetime.fromtimestamp(inv["paid_at"]).isoformat()
-            if inv["paid_at"]
-            else None
-          ),
-          invoice_pdf=inv["invoice_pdf"],
-          hosted_invoice_url=inv["hosted_invoice_url"],
+          id=inv.id,
+          number=inv.invoice_number,
+          status=inv.status,
+          amount_due=inv.total_cents,
+          amount_paid=inv.total_cents if inv.status == "paid" else 0,
+          currency=inv.currency or "usd",
+          created=inv.created_at.isoformat(),
+          due_date=inv.due_date.isoformat() if inv.due_date else None,
+          paid_at=inv.paid_at.isoformat() if inv.paid_at else None,
+          invoice_pdf=inv.invoice_pdf,
+          hosted_invoice_url=inv.hosted_invoice_url,
           line_items=[
             InvoiceLineItem(
-              description=line["description"],
-              amount=line["amount"],
-              quantity=line["quantity"],
+              description=line.description,
+              amount=line.amount_cents,
+              quantity=line.quantity,
               period_start=(
-                datetime.fromtimestamp(line["period_start"]).isoformat()
-                if line["period_start"]
-                else None
+                line.period_start.isoformat() if line.period_start else None
               ),
-              period_end=(
-                datetime.fromtimestamp(line["period_end"]).isoformat()
-                if line["period_end"]
-                else None
-              ),
+              period_end=line.period_end.isoformat() if line.period_end else None,
             )
-            for line in inv["lines"]
+            for line in inv.line_items
           ],
-          subscription_id=inv["subscription"],
+          subscription_id=inv.line_items[0].subscription_id if inv.line_items else None,
         )
       )
 
     return InvoicesResponse(
       invoices=invoices,
       total_count=len(invoices),
-      has_more=result["has_more"],
+      has_more=has_more,
     )
 
   except HTTPException:

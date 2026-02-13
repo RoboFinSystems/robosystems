@@ -1,5 +1,6 @@
 """Tests for billing invoices endpoints."""
 
+from datetime import UTC, datetime
 from unittest.mock import Mock, patch
 
 import pytest
@@ -26,25 +27,61 @@ class TestListInvoices:
   def mock_db(self):
     return Mock()
 
+  def _make_invoice(
+    self,
+    id="binv_1",
+    invoice_number="INV-2026-01-0001",
+    status="paid",
+    total_cents=2999,
+    currency="usd",
+    invoice_pdf="https://invoice.stripe.com/pdf/1",
+    hosted_invoice_url="https://invoice.stripe.com/i/1",
+    line_items=None,
+  ):
+    """Helper to create a mock BillingInvoice."""
+    inv = Mock()
+    inv.id = id
+    inv.invoice_number = invoice_number
+    inv.status = status
+    inv.total_cents = total_cents
+    inv.currency = currency
+    inv.created_at = datetime(2026, 1, 1, tzinfo=UTC)
+    inv.due_date = datetime(2026, 1, 31, tzinfo=UTC)
+    inv.paid_at = datetime(2026, 1, 5, tzinfo=UTC) if status == "paid" else None
+    inv.invoice_pdf = invoice_pdf
+    inv.hosted_invoice_url = hosted_invoice_url
+
+    if line_items is None:
+      line = Mock()
+      line.description = "LadybugDB Large - Monthly"
+      line.amount_cents = 2999
+      line.quantity = 1
+      line.period_start = datetime(2026, 1, 1, tzinfo=UTC)
+      line.period_end = datetime(2026, 2, 1, tzinfo=UTC)
+      line.subscription_id = "bsub_123"
+      inv.line_items = [line]
+    else:
+      inv.line_items = line_items
+
+    return inv
+
   @pytest.mark.asyncio
   @patch("robosystems.models.iam.OrgUser.get_by_org_and_user")
-  @patch("robosystems.routers.billing.invoices.BillingCustomer.get_or_create")
-  @patch("robosystems.routers.billing.invoices.BillingInvoice.get_by_org_id")
-  async def test_list_invoices_no_stripe_customer(
-    self, mock_get_invoices, mock_get_customer, mock_get_org_user, mock_user, mock_db
-  ):
-    """Test listing invoices when no Stripe customer exists."""
+  async def test_list_invoices_empty(self, mock_get_org_user, mock_user, mock_db):
+    """Test listing invoices when none exist."""
     from robosystems.models.iam import OrgRole
 
     mock_org_user = Mock()
     mock_org_user.role = OrgRole.OWNER
     mock_get_org_user.return_value = mock_org_user
 
-    mock_customer = Mock(spec=BillingCustomer)
-    mock_customer.stripe_customer_id = None
-    mock_get_customer.return_value = mock_customer
-
-    mock_get_invoices.return_value = []
+    # Mock the SQLAlchemy query chain
+    mock_query = Mock()
+    mock_query.filter.return_value = mock_query
+    mock_query.order_by.return_value = mock_query
+    mock_query.limit.return_value = mock_query
+    mock_query.all.return_value = []
+    mock_db.query.return_value = mock_query
 
     result = await list_invoices("org_123", 10, mock_user, mock_db, None)
 
@@ -54,120 +91,77 @@ class TestListInvoices:
 
   @pytest.mark.asyncio
   @patch("robosystems.models.iam.OrgUser.get_by_org_and_user")
-  @patch("robosystems.routers.billing.invoices.BillingCustomer.get_or_create")
-  @patch("robosystems.routers.billing.invoices.get_payment_provider")
-  async def test_list_invoices_success(
-    self, mock_get_provider, mock_get_customer, mock_get_org_user, mock_user, mock_db
-  ):
-    """Test successful invoice listing."""
+  async def test_list_invoices_success(self, mock_get_org_user, mock_user, mock_db):
+    """Test successful invoice listing from database."""
     from robosystems.models.iam import OrgRole
 
     mock_org_user = Mock()
     mock_org_user.role = OrgRole.OWNER
     mock_get_org_user.return_value = mock_org_user
 
-    mock_customer = Mock(spec=BillingCustomer)
-    mock_customer.stripe_customer_id = "cus_123"
-    mock_get_customer.return_value = mock_customer
+    inv1 = self._make_invoice(id="binv_1", status="paid", total_cents=2999)
+    inv2 = self._make_invoice(
+      id="binv_2",
+      invoice_number="INV-2026-02-0001",
+      status="open",
+      total_cents=4999,
+      invoice_pdf=None,
+      hosted_invoice_url=None,
+    )
 
-    mock_provider = Mock()
-    mock_provider.list_invoices.return_value = {
-      "invoices": [
-        {
-          "id": "in_1",
-          "number": "INV-001",
-          "status": "paid",
-          "amount_due": 2999,
-          "amount_paid": 2999,
-          "currency": "usd",
-          "created": 1704067200,
-          "due_date": 1706745600,
-          "paid_at": 1704153600,
-          "invoice_pdf": "https://invoice.stripe.com/i/acct_1/test_1",
-          "hosted_invoice_url": "https://invoice.stripe.com/i/acct_1/test_1/pdf",
-          "lines": [
-            {
-              "description": "Standard Plan - Monthly",
-              "amount": 2999,
-              "quantity": 1,
-              "period_start": 1704067200,
-              "period_end": 1706745600,
-            }
-          ],
-          "subscription": "sub_123",
-        },
-        {
-          "id": "in_2",
-          "number": "INV-002",
-          "status": "open",
-          "amount_due": 4999,
-          "amount_paid": 0,
-          "currency": "usd",
-          "created": 1706745600,
-          "due_date": None,
-          "paid_at": None,
-          "invoice_pdf": None,
-          "hosted_invoice_url": None,
-          "lines": [],
-          "subscription": "sub_123",
-        },
-      ],
-      "has_more": True,
-    }
-    mock_get_provider.return_value = mock_provider
+    mock_query = Mock()
+    mock_query.filter.return_value = mock_query
+    mock_query.order_by.return_value = mock_query
+    mock_query.limit.return_value = mock_query
+    mock_query.all.return_value = [inv1, inv2]
+    mock_db.query.return_value = mock_query
 
     result = await list_invoices("org_123", 10, mock_user, mock_db, None)
 
     assert len(result.invoices) == 2
     assert result.total_count == 2
-    assert result.has_more is True
+    assert result.has_more is False
 
-    assert result.invoices[0].id == "in_1"
-    assert result.invoices[0].number == "INV-001"
+    assert result.invoices[0].id == "binv_1"
     assert result.invoices[0].status == "paid"
     assert result.invoices[0].amount_due == 2999
     assert result.invoices[0].amount_paid == 2999
     assert len(result.invoices[0].line_items) == 1
-    assert result.invoices[0].line_items[0].description == "Standard Plan - Monthly"
+    assert result.invoices[0].line_items[0].description == "LadybugDB Large - Monthly"
 
-    assert result.invoices[1].id == "in_2"
+    assert result.invoices[1].id == "binv_2"
     assert result.invoices[1].status == "open"
-    assert result.invoices[1].paid_at is None
-
-    mock_provider.list_invoices.assert_called_once_with("cus_123", limit=10)
+    assert result.invoices[1].amount_paid == 0
 
   @pytest.mark.asyncio
   @patch("robosystems.models.iam.OrgUser.get_by_org_and_user")
-  @patch("robosystems.routers.billing.invoices.BillingCustomer.get_or_create")
-  @patch("robosystems.routers.billing.invoices.get_payment_provider")
-  async def test_list_invoices_with_limit(
-    self, mock_get_provider, mock_get_customer, mock_get_org_user, mock_user, mock_db
-  ):
-    """Test invoice listing respects limit parameter."""
+  async def test_list_invoices_has_more(self, mock_get_org_user, mock_user, mock_db):
+    """Test has_more flag when more invoices exist than limit."""
     from robosystems.models.iam import OrgRole
 
     mock_org_user = Mock()
     mock_org_user.role = OrgRole.OWNER
     mock_get_org_user.return_value = mock_org_user
 
-    mock_customer = Mock(spec=BillingCustomer)
-    mock_customer.stripe_customer_id = "cus_123"
-    mock_get_customer.return_value = mock_customer
+    # Return limit+1 invoices to trigger has_more
+    invoices = [self._make_invoice(id=f"binv_{i}") for i in range(3)]
 
-    mock_provider = Mock()
-    mock_provider.list_invoices.return_value = {"invoices": [], "has_more": False}
-    mock_get_provider.return_value = mock_provider
+    mock_query = Mock()
+    mock_query.filter.return_value = mock_query
+    mock_query.order_by.return_value = mock_query
+    mock_query.limit.return_value = mock_query
+    mock_query.all.return_value = invoices
+    mock_db.query.return_value = mock_query
 
-    await list_invoices("org_123", 25, mock_user, mock_db, None)
+    result = await list_invoices("org_123", 2, mock_user, mock_db, None)
 
-    mock_provider.list_invoices.assert_called_once_with("cus_123", limit=25)
+    assert len(result.invoices) == 2
+    assert result.has_more is True
 
   @pytest.mark.asyncio
   @patch("robosystems.models.iam.OrgUser.get_by_org_and_user")
-  @patch("robosystems.routers.billing.invoices.BillingCustomer.get_or_create")
-  @patch("robosystems.routers.billing.invoices.get_payment_provider")
   async def test_list_invoices_error_handling(
-    self, mock_get_provider, mock_get_customer, mock_get_org_user, mock_user, mock_db
+    self, mock_get_org_user, mock_user, mock_db
   ):
     """Test error handling in invoice listing."""
     from robosystems.models.iam import OrgRole
@@ -176,13 +170,7 @@ class TestListInvoices:
     mock_org_user.role = OrgRole.OWNER
     mock_get_org_user.return_value = mock_org_user
 
-    mock_customer = Mock(spec=BillingCustomer)
-    mock_customer.stripe_customer_id = "cus_123"
-    mock_get_customer.return_value = mock_customer
-
-    mock_provider = Mock()
-    mock_provider.list_invoices.side_effect = Exception("Stripe API error")
-    mock_get_provider.return_value = mock_provider
+    mock_db.query.side_effect = Exception("Database error")
 
     with pytest.raises(HTTPException) as exc:
       await list_invoices("org_123", 10, mock_user, mock_db, None)

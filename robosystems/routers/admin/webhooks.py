@@ -36,8 +36,11 @@ async def _process_webhook_event(
   after the request session has been closed.
   """
   from robosystems.dagster.jobs.billing import (
+    _handle_charge_refunded,
     _handle_checkout_completed,
     _handle_invoice_created,
+    _handle_invoice_updated,
+    _handle_invoice_voided,
     _handle_payment_failed,
     _handle_payment_succeeded,
     _handle_setup_intent_succeeded,
@@ -60,6 +63,15 @@ async def _process_webhook_event(
 
     elif event_type == "invoice.payment_failed":
       await _handle_payment_failed(event_data, db, ctx)
+
+    elif event_type == "invoice.updated":
+      await _handle_invoice_updated(event_data, db, ctx)
+
+    elif event_type == "invoice.voided":
+      await _handle_invoice_voided(event_data, db, ctx)
+
+    elif event_type == "charge.refunded":
+      await _handle_charge_refunded(event_data, db, ctx)
 
     elif event_type == "setup_intent.succeeded":
       await _handle_setup_intent_succeeded(event_data, db, ctx)
@@ -108,13 +120,16 @@ async def _process_webhook_event(
   description="""Handle Stripe webhook events.
 
 This endpoint receives and processes webhook events from Stripe including:
+- charge.refunded - Refund processed, add negative line item to invoice
 - checkout.session.completed - Payment method collected, trigger provisioning
-- invoice.created - Sync Stripe invoice to database
-- invoice.payment_succeeded - Payment successful, mark invoice paid
-- invoice.payment_failed - Payment failed, mark subscription
-- setup_intent.succeeded - Payment method added via customer portal
-- customer.subscription.updated - Subscription changes from Stripe
 - customer.subscription.deleted - Subscription canceled in Stripe
+- customer.subscription.updated - Subscription changes from Stripe
+- invoice.created - Sync Stripe invoice to database
+- invoice.paid / invoice.payment_succeeded - Payment successful, mark invoice paid
+- invoice.payment_failed - Payment failed, mark subscription
+- invoice.updated - Invoice fields changed, sync to database
+- invoice.voided - Invoice voided in Stripe
+- setup_intent.succeeded - Payment method added via customer portal
 
 **SECURITY**: This endpoint does NOT use @require_admin authentication because
 Stripe webhooks cannot provide admin API keys. Instead, security is enforced
