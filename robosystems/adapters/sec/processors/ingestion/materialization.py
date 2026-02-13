@@ -749,10 +749,11 @@ class LadybugMaterializer:
       resolved_schema_type = (
         schema.schema_type if schema and schema.schema_type else schema_type
       )
+
+      # Create database (without schema DDL — subgraphs skip schema application)
       create_db_kwargs: dict[str, Any] = {
         "graph_id": self.graph_id,
         "schema_type": resolved_schema_type,
-        "custom_schema_ddl": schema_ddl,
         "is_subgraph": is_subgraph(self.graph_id),
       }
 
@@ -761,9 +762,14 @@ class LadybugMaterializer:
 
       await client.create_database(**create_db_kwargs)
       logger.info(
-        f"Recreated LadybugDB database with schema type: "
-        f"{create_db_kwargs['schema_type']}"
+        f"Recreated LadybugDB database with schema type: {resolved_schema_type}"
       )
+
+      # Install schema separately (create_database skips schema for subgraphs)
+      result = await client.install_schema(
+        graph_id=self.graph_id, custom_ddl=schema_ddl
+      )
+      logger.info(f"Schema installed: {result}")
     finally:
       db.close()
 
