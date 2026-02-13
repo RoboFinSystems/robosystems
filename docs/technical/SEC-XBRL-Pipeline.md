@@ -106,7 +106,7 @@ In interactive mode, you can:
 - `recent_reports` - Most recent SEC filings
 - `report_types` - Report form type counts
 - `financial_facts` - Sample financial facts
-- `fact_dimensions` - Dimensional qualifiers on facts
+- `dimensions` - Dimensional qualifiers on facts
 - `fact_periods` - Facts by time periods
 - `elements` - Most commonly used XBRL elements
 - `report_structure` - Fact counts per report
@@ -268,7 +268,7 @@ just tables-query sec "SELECT f.value, f.numeric_value, p.instant_date, u.measur
 - `Element` - us-gaap metric definitions
 - `Period` - Date/duration contexts
 - `Unit` - Measurement units (USD, shares, etc.)
-- `FactDimension` - Segments and breakdowns
+- `Dimension` - Segments and breakdowns
 
 ### Option 4: Python API (For Applications)
 
@@ -437,7 +437,7 @@ The SEC graph database has the following structure:
 - **Element** - Metric definitions (us-gaap tags)
 - **Period** - Time contexts (dates, durations)
 - **Unit** - Measurement units (USD, shares)
-- **FactDimension** - Segments (geographic, product lines)
+- **Dimension** - Segments (geographic, product lines)
 
 **Relationship Types:**
 
