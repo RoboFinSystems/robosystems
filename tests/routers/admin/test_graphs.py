@@ -103,7 +103,7 @@ class TestDeprovisionGraph:
       mock_alloc_cls.return_value = mock_alloc
 
       response = client.post(
-        f"/admin/v1/graphs/{test_graph.graph_id}/deprovision",
+        f"/admin/v1/graphs/{test_graph.graph_id}/deprovision?skip_backup=true",
         headers={"Authorization": "Bearer test-admin-key"},
       )
 
@@ -113,6 +113,8 @@ class TestDeprovisionGraph:
       assert data["previous_status"] == "active"
       assert data["database_deleted"] is True
       assert data["status"] == "deprovisioned"
+      assert data["records_cleaned"] is True
+      assert data["backup_created"] is False
 
       # Verify graph status was updated in DB
       db_session.refresh(test_graph)
@@ -121,7 +123,7 @@ class TestDeprovisionGraph:
   def test_deprovision_graph_not_found(self, client, mock_admin_auth):
     """Test 404 for nonexistent graph_id."""
     response = client.post(
-      "/admin/v1/graphs/kg_nonexistent/deprovision",
+      "/admin/v1/graphs/kg_nonexistent/deprovision?skip_backup=true",
       headers={"Authorization": "Bearer test-admin-key"},
     )
 
@@ -136,12 +138,28 @@ class TestDeprovisionGraph:
     test_graph.transition_status(GraphStatus.DEPROVISIONED, db_session)
 
     response = client.post(
-      f"/admin/v1/graphs/{test_graph.graph_id}/deprovision",
+      f"/admin/v1/graphs/{test_graph.graph_id}/deprovision?skip_backup=true",
       headers={"Authorization": "Bearer test-admin-key"},
     )
 
     assert response.status_code == 409
     assert "already deprovisioned" in response.json()["detail"].lower()
+
+  def test_deprovision_rejects_shared_repository(
+    self, client, db_session, test_graph, mock_admin_auth
+  ):
+    """Test 403 when trying to deprovision a shared repository."""
+    test_graph.is_repository = True
+    test_graph.repository_type = "sec"
+    db_session.commit()
+
+    response = client.post(
+      f"/admin/v1/graphs/{test_graph.graph_id}/deprovision?skip_backup=true",
+      headers={"Authorization": "Bearer test-admin-key"},
+    )
+
+    assert response.status_code == 403
+    assert "shared repository" in response.json()["detail"].lower()
 
   def test_deprovision_database_deletion_fails_gracefully(
     self, client, db_session, test_graph, mock_admin_auth
@@ -164,7 +182,7 @@ class TestDeprovisionGraph:
       mock_alloc_cls.return_value = mock_alloc
 
       response = client.post(
-        f"/admin/v1/graphs/{test_graph.graph_id}/deprovision",
+        f"/admin/v1/graphs/{test_graph.graph_id}/deprovision?skip_backup=true",
         headers={"Authorization": "Bearer test-admin-key"},
       )
 
@@ -172,7 +190,37 @@ class TestDeprovisionGraph:
       data = response.json()
       assert data["database_deleted"] is False
       assert data["status"] == "deprovisioned"
+      assert data["warnings"] is not None
+      assert any("Database deletion failed" in w for w in data["warnings"])
       assert "not found or already removed" in data["message"]
 
       db_session.refresh(test_graph)
       assert test_graph.status == GraphStatus.DEPROVISIONED.value
+
+  def test_deprovision_with_skip_backup(
+    self, client, db_session, test_graph, mock_admin_auth
+  ):
+    """Test that skip_backup=true skips backup creation."""
+    with (
+      patch(
+        "robosystems.graph_api.client.factory.get_graph_client",
+        new_callable=AsyncMock,
+      ) as mock_get_client,
+      patch(
+        "robosystems.middleware.graph.allocation_manager.LadybugAllocationManager"
+      ) as mock_alloc_cls,
+    ):
+      mock_client = AsyncMock()
+      mock_get_client.return_value = mock_client
+
+      mock_alloc = AsyncMock()
+      mock_alloc_cls.return_value = mock_alloc
+
+      response = client.post(
+        f"/admin/v1/graphs/{test_graph.graph_id}/deprovision?skip_backup=true",
+        headers={"Authorization": "Bearer test-admin-key"},
+      )
+
+      assert response.status_code == 200
+      data = response.json()
+      assert data["backup_created"] is False

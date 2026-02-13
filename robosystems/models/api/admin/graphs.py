@@ -69,7 +69,11 @@ class GraphDeprovisionResponse(BaseModel):
   previous_status: str
   status: str = "deprovisioned"
   database_deleted: bool
+  backup_created: bool = False
+  subgraphs_deleted: int = 0
+  records_cleaned: bool = False
   message: str
+  warnings: list[str] | None = None
 
 
 class GraphAnalyticsResponse(BaseModel):

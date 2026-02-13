@@ -51,6 +51,7 @@ from robosystems.dagster.jobs.graph import (
   wait_and_create_graph_job,
 )
 from robosystems.dagster.jobs.graph_lifecycle import (
+  deprovision_suspended_graphs_job,
   suspend_expired_graphs_job,
 )
 from robosystems.dagster.jobs.infrastructure import (
@@ -82,6 +83,7 @@ from robosystems.dagster.resources import (
 )
 from robosystems.dagster.sensors.graph_lifecycle import (
   expired_graph_subscription_sensor,
+  suspended_graph_deprovisioning_sensor,
 )
 from robosystems.dagster.sensors.graph_queue import (
   graph_creation_queue_sensor,
@@ -150,6 +152,7 @@ all_jobs = [
   wait_and_create_graph_job,
   # Platform: Graph lifecycle
   suspend_expired_graphs_job,
+  deprovision_suspended_graphs_job,
   # Platform: Shared repository (standalone refresh only)
   shared_repository_refresh_replicas_job,
   # Platform: Notifications
@@ -179,6 +182,7 @@ all_sensors = [
   # Platform: Graph lifecycle
   graph_creation_queue_sensor,
   expired_graph_subscription_sensor,
+  suspended_graph_deprovisioning_sensor,
   # Adapter: SEC pipeline
   *sec["sensors"],
 ]
