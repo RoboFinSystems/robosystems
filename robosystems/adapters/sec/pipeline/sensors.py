@@ -8,7 +8,9 @@ Nightly Pipeline (enable all for automated daily updates):
 - Phase 2 (Process): sec_download_to_process_sensor chains download → process
 - Phase 3 (Stage): sec_incremental_staging_sensor chains process → stage (DuckDB INSERT)
 - Phase 4 (Materialize): sec_stage_to_materialize_sensor chains stage → full graph rebuild
-- Phase 5 (S3 Sync): sec_post_materialize_s3_sync_sensor chains materialize → S3 sync
+
+Post-materialization S3 publish and replica refresh are handled by asset lineage:
+  sec_graph_materialized -> sec_s3_published -> shared_replicas_refreshed
 
 Manual Operations (not in automated chain):
 - sec_entity_update_job: Update mutable Entity attributes (run manually after materialize)
@@ -38,7 +40,6 @@ from dagster import (
 )
 
 from robosystems.config import env
-from robosystems.dagster.jobs.shared_repository import shared_repository_s3_sync_job
 
 from .configs import SEC_HISTORICAL_FORM_TYPES, SEC_PRIMARY_START_YEAR
 from .jobs import (
@@ -200,101 +201,6 @@ def sec_processing_sensor(context: SensorEvaluationContext):
         "phase": "process",
       },
     )
-
-
-# ============================================================================
-# SEC Post-Materialization S3 Sync Sensor
-# ============================================================================
-
-
-@run_status_sensor(
-  run_status=DagsterRunStatus.SUCCESS,
-  monitored_jobs=[sec_materialize_job],
-  request_job=shared_repository_s3_sync_job,
-  default_status=DefaultSensorStatus.STOPPED,  # Enable in Dagster UI when ready
-  minimum_interval_seconds=60,
-  description="Trigger shared replica S3 sync after SEC materialization completes",
-)
-def sec_post_materialize_s3_sync_sensor(context: RunStatusSensorContext):
-  """Trigger shared repository S3 sync after SEC materialization succeeds.
-
-  This sensor watches for successful completion of sec_materialize_job
-  and triggers shared_repository_s3_sync_job to:
-  1. Upload database to S3 for replica access via ATTACH
-  2. Trigger rolling refresh of replica fleet
-
-  Replicas use LadybugDB S3 ATTACH to connect directly to the S3-hosted
-  database via the httpfs extension.
-
-  This ensures replicas are updated with the latest SEC data after each
-  nightly materialization run.
-
-  Controlled by: SEC_INCREMENTAL_PIPELINE_ENABLED=true (part of full pipeline)
-
-  Note: Only triggers for jobs on the "sec" graph_id (shared repository).
-  """
-  if env.ENVIRONMENT == "dev":
-    context.log.info("Skipping S3 sync sensor in dev environment")
-    return
-
-  # Get the run that triggered this sensor
-  dagster_run = context.dagster_run
-  run_config = dagster_run.run_config or {}
-
-  # Extract graph_id from run config to verify it's the SEC shared repository
-  try:
-    ops_config = run_config.get("ops", {})
-    materialize_config = ops_config.get("sec_graph_materialized", {}).get("config", {})
-    graph_id = materialize_config.get("graph_id", "sec")
-  except (KeyError, TypeError, AttributeError):
-    graph_id = "sec"  # Default to sec if not found
-
-  # Only trigger for SEC shared repository materialization
-  if graph_id != "sec":
-    context.log.info(f"Skipping S3 sync - graph_id '{graph_id}' is not 'sec'")
-    return
-
-  # Check if a sync job is already running to prevent concurrent executions
-  active_runs = context.instance.get_runs(
-    filters=RunsFilter(
-      job_name="shared_repository_s3_sync_job",
-      statuses=[DagsterRunStatus.STARTED, DagsterRunStatus.QUEUED],
-    ),
-    limit=1,
-  )
-  if active_runs:
-    context.log.info(
-      f"S3 sync job already running (run_id={active_runs[0].run_id}), skipping"
-    )
-    return
-
-  context.log.info(
-    f"SEC materialization completed (run_id={dagster_run.run_id}). "
-    "Triggering shared repository S3 sync."
-  )
-
-  # Create unique run key to prevent duplicate triggers
-  today = datetime.now(UTC).strftime("%Y-%m-%d")
-  run_key = f"sec-post-materialize-s3-sync-{today}-{dagster_run.run_id[:8]}"
-
-  yield RunRequest(
-    run_key=run_key,
-    run_config={
-      "ops": {
-        "upload_database_to_s3": {
-          "config": {
-            "graph_id": "sec",
-          }
-        },
-        "refresh_replica_instances": {
-          "config": {
-            "min_healthy_percentage": 50,
-            "instance_warmup_seconds": 300,
-          }
-        },
-      }
-    },
-  )
 
 
 # ============================================================================

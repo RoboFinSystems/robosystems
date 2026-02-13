@@ -419,7 +419,7 @@ function setup_full_config() {
 
     # Shared Replicas Configuration - Read-Only Fleet
     # Replicas use S3 ATTACH to connect to shared database hosted in S3
-    # Run Dagster shared_repository_s3_upload_only_job to upload database, then enable replicas
+    # Materialize sec_s3_published asset in Dagster to upload database, then enable replicas
     gh variable set SHARED_REPLICAS_ENABLED_PROD --body "false"
     gh variable set SHARED_REPLICAS_MIN_INSTANCES_PROD --body "1"
     gh variable set SHARED_REPLICAS_MAX_INSTANCES_PROD --body "3"

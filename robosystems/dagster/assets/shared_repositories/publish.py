@@ -1,62 +1,41 @@
-"""Shared Repository S3 Publish Asset.
+"""Shared Repository S3 Publish Helpers.
 
-This asset publishes a shared repository database to S3 for replica cluster
-consumption. Replicas use LadybugDB S3 ATTACH to connect directly to the
-published database via the httpfs extension.
+Provides the core publish-to-S3 logic that per-repository assets call.
+Each shared repository (SEC, future industry/economic) defines a thin
+asset with deps on its own materialization, then delegates to publish_to_s3().
 
-The asset:
-1. Uses Graph Client Factory to call the backup endpoint on the shared master
-2. The Graph API runs CHECKPOINT and uploads raw .lbug to S3 on-instance
-
-Replica fleet refresh is handled by the separate shared_replicas_refreshed asset.
-
-This is distinct from user backup which creates compressed, downloadable backups
-for subscribers. This asset creates the source-of-truth for the replica cluster.
+Replicas use LadybugDB S3 ATTACH to connect directly to the published
+database via the httpfs extension. This is distinct from user backup
+which creates compressed, downloadable backups for subscribers.
 """
 
 import asyncio
 from datetime import UTC, datetime
+from typing import Any
 
-from dagster import (
-  AssetExecutionContext,
-  Config,
-  MaterializeResult,
-  asset,
-)
+from dagster import AssetExecutionContext, MaterializeResult
 
 from robosystems.config import env
 from robosystems.config.constants import TASK_TIME_LIMIT
 
 
-class SharedRepositoryPublishConfig(Config):
-  """Configuration for S3 publish operations."""
-
-  graph_id: str = "sec"
-
-
-@asset(
-  group_name="shared_repositories",
-  description="Publish shared repository database to S3 for replica cluster (S3 ATTACH source)",
-  kinds={"s3", "ladybug"},
-  metadata={
-    "stage": "publish",
-    "replica_source": True,
-  },
-)
-def shared_repository_s3_published(
+def publish_to_s3(
   context: AssetExecutionContext,
-  config: SharedRepositoryPublishConfig,
+  graph_id: str,
 ) -> MaterializeResult:
-  """Publish shared repository database to S3 for replica consumption via ATTACH.
+  """Publish a shared repository database to S3 for replica consumption.
 
   Uses Graph Client Factory to call the backup endpoint on the shared master.
   The backup runs entirely on-instance (CHECKPOINT + S3 multipart upload),
-  so this Dagster task only orchestrates and monitors via SSE.
+  so this only orchestrates and monitors via SSE.
+
+  Args:
+      context: Dagster asset execution context
+      graph_id: Shared repository graph ID (e.g., "sec", "industry")
 
   Returns:
       MaterializeResult with S3 URI and upload statistics
   """
-  graph_id = config.graph_id
   context.log.info(f"Publishing {graph_id} database to S3 for replica cluster")
 
   # Skip in dev environment
@@ -66,12 +45,12 @@ def shared_repository_s3_published(
       metadata={
         "status": "skipped",
         "reason": "dev_environment",
+        "graph_id": graph_id,
       }
     )
 
   import boto3
 
-  from robosystems.graph_api.client.factory import get_graph_client_for_sec_ingestion
   from robosystems.middleware.graph.utils import MultiTenantUtils
   from robosystems.middleware.graph.utils.subgraph import parse_subgraph_id
 
@@ -85,39 +64,19 @@ def shared_repository_s3_published(
       raise ValueError(f"{graph_id} is not a shared repository or subgraph of one")
 
   # Build S3 destination
-  sts = boto3.client("sts", region_name=env.AWS_REGION)
-  account_id = sts.get_caller_identity()["Account"]
-  bucket = f"robosystems-{account_id}-user-{env.ENVIRONMENT}"
-  s3_key = f"shared-repos/{graph_id}.lbug"
-  s3_uri = f"s3://{bucket}/{s3_key}"
+  s3_info = _build_s3_destination(graph_id)
+  bucket = s3_info["bucket"]
+  s3_key = s3_info["s3_key"]
+  s3_uri = s3_info["s3_uri"]
 
   context.log.info(f"Target: {s3_uri}")
 
   # Use Graph Client Factory (handles auth, routing, circuit breakers)
-  loop = asyncio.new_event_loop()
-  client = None
-  try:
-    client = loop.run_until_complete(get_graph_client_for_sec_ingestion())
-
-    context.log.info("Calling backup endpoint on shared master...")
-    result = loop.run_until_complete(
-      client.backup_with_sse(
-        graph_id=graph_id,
-        backup_type="replica",
-        s3_destination={"bucket": bucket, "key": s3_key},
-        compression=False,
-        checkpoint=True,
-        timeout=TASK_TIME_LIMIT,
-      )
-    )
-  finally:
-    if client:
-      loop.run_until_complete(client.close())
-    loop.close()
+  result = _run_backup(graph_id, bucket, s3_key)
 
   if result.get("status") != "completed":
     error = result.get("error", "Unknown error")
-    raise RuntimeError(f"S3 publish failed: {error}")
+    raise RuntimeError(f"S3 publish failed for {graph_id}: {error}")
 
   # Verify upload
   s3 = boto3.client("s3", region_name=env.AWS_REGION)
@@ -142,3 +101,36 @@ def shared_repository_s3_published(
       "published_at": datetime.now(UTC).isoformat(),
     }
   )
+
+
+def _build_s3_destination(graph_id: str) -> dict[str, str]:
+  """Build S3 bucket/key/uri for a shared repository."""
+  import boto3
+
+  sts = boto3.client("sts", region_name=env.AWS_REGION)
+  account_id = sts.get_caller_identity()["Account"]
+  bucket = f"robosystems-{account_id}-user-{env.ENVIRONMENT}"
+  s3_key = f"shared-repos/{graph_id}.lbug"
+  s3_uri = f"s3://{bucket}/{s3_key}"
+  return {"bucket": bucket, "s3_key": s3_key, "s3_uri": s3_uri}
+
+
+def _run_backup(graph_id: str, bucket: str, s3_key: str) -> dict[str, Any]:
+  """Run the backup via Graph Client Factory."""
+  from robosystems.graph_api.client.factory import get_graph_client_for_sec_ingestion
+
+  async def _execute():
+    client = await get_graph_client_for_sec_ingestion()
+    try:
+      return await client.backup_with_sse(
+        graph_id=graph_id,
+        backup_type="replica",
+        s3_destination={"bucket": bucket, "key": s3_key},
+        compression=False,
+        checkpoint=True,
+        timeout=TASK_TIME_LIMIT,
+      )
+    finally:
+      await client.close()
+
+  return asyncio.run(_execute())
