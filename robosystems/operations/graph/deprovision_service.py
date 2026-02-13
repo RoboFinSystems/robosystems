@@ -216,6 +216,9 @@ class GraphDeprovisionService:
         result.errors.append(error_msg)
         logger.warning(error_msg)
 
+      # Clean subgraph PG records (schemas, files) before marking deprovisioned
+      self._clean_pg_records(subgraph.graph_id, session, result)
+
       # Mark subgraph as deprovisioned regardless of DB deletion outcome
       try:
         subgraph.deleted_at = datetime.now(UTC)

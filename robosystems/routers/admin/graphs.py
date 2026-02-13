@@ -256,6 +256,7 @@ async def deprovision_graph(
       create_backup=not skip_backup,
       skip_backup_check=skip_backup,
     )
+    session.commit()
 
     if result.status == "not_found":
       raise HTTPException(
