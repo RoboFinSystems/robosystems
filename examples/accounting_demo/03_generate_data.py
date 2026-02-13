@@ -11,6 +11,7 @@ NODE FILES:
 - Element.parquet (chart of accounts)
 - Transaction.parquet (financial transactions)
 - LineItem.parquet (journal entry lines)
+- Dimension.parquet (dimensional qualifiers: department, project, location)
 - Report.parquet (monthly financial reports)
 - Fact.parquet (aggregated financial metrics)
 - Period.parquet (time periods)
@@ -20,6 +21,7 @@ RELATIONSHIP FILES:
 - ENTITY_HAS_TRANSACTION.parquet
 - TRANSACTION_HAS_LINE_ITEM.parquet
 - LINE_ITEM_RELATES_TO_ELEMENT.parquet
+- LINE_ITEM_HAS_DIMENSION.parquet
 - ENTITY_HAS_REPORT.parquet
 - REPORT_HAS_FACT.parquet
 - FACT_HAS_ELEMENT.parquet
@@ -218,6 +220,84 @@ class AccountingDataGenerator:
     self._write_parquet(df, output_file, "Element")
     return df
 
+  def generate_dimensions(self):
+    """Generate dimensional qualifiers (department, project, location)."""
+    print("\n📐 Generating Dimensions...")
+
+    # Departments
+    departments = ["Engineering", "Sales", "Marketing", "Operations", "Executive"]
+    # Projects
+    projects = ["Alpha Platform", "Beta Migration", "Client Onboarding", "Internal Ops"]
+    # Locations
+    locations = ["San Francisco", "New York", "Remote"]
+
+    dimensions = []
+    self._dimension_lookup = {}
+
+    for dept in departments:
+      dim_id = f"dim_dept_{dept.lower().replace(' ', '_')}"
+      dimensions.append(
+        {
+          "identifier": dim_id,
+          "axis": "Department",
+          "member": dept,
+          "dimension_type": "department",
+          "axis_uri": None,
+          "member_uri": None,
+          "type": None,
+          "is_explicit": None,
+          "is_typed": None,
+        }
+      )
+      self._dimension_lookup[("department", dept)] = dim_id
+
+    for proj in projects:
+      dim_id = f"dim_proj_{proj.lower().replace(' ', '_')}"
+      dimensions.append(
+        {
+          "identifier": dim_id,
+          "axis": "Project",
+          "member": proj,
+          "dimension_type": "project",
+          "axis_uri": None,
+          "member_uri": None,
+          "type": None,
+          "is_explicit": None,
+          "is_typed": None,
+        }
+      )
+      self._dimension_lookup[("project", proj)] = dim_id
+
+    for loc in locations:
+      dim_id = f"dim_loc_{loc.lower().replace(' ', '_')}"
+      dimensions.append(
+        {
+          "identifier": dim_id,
+          "axis": "Location",
+          "member": loc,
+          "dimension_type": "location",
+          "axis_uri": None,
+          "member_uri": None,
+          "type": None,
+          "is_explicit": None,
+          "is_typed": None,
+        }
+      )
+      self._dimension_lookup[("location", loc)] = dim_id
+
+    # Store lists for assignment during transaction generation
+    self._departments = departments
+    self._projects = projects
+    self._locations = locations
+
+    df = pd.DataFrame(dimensions)
+    # Convert boolean columns to nullable boolean
+    df["is_explicit"] = df["is_explicit"].astype("boolean")
+    df["is_typed"] = df["is_typed"].astype("boolean")
+    output_file = self.nodes_dir / "Dimension.parquet"
+    self._write_parquet(df, output_file, "Dimension")
+    return df
+
   def generate_transactions(self):
     """Generate transactions and line items."""
     print(f"\n💰 Generating {self.num_months} months of transactions...")
@@ -244,6 +324,12 @@ class AccountingDataGenerator:
     for month in range(self.num_months):
       month_start = start_date + timedelta(days=30 * month)
 
+      # Dimension assignment rules by transaction type
+      # Rent → Operations department, office location
+      # Revenue → Sales department, random project, random location
+      # Salary → random department, random location
+      # Other expenses → contextual department
+
       tx_date = month_start + timedelta(days=1)
       transactions.append(
         self._create_transaction(
@@ -261,6 +347,7 @@ class AccountingDataGenerator:
             "transaction_id": f"TX{tx_id:04d}",
             "account_name": "Expenses:Rent",
             "account_element": f"element_{account_lookup['Expenses:Rent']}",
+            "dimensions": [("department", "Operations"), ("location", "San Francisco")],
           },
           {
             **self._create_line_item(
@@ -269,6 +356,7 @@ class AccountingDataGenerator:
             "transaction_id": f"TX{tx_id:04d}",
             "account_name": "Assets:Cash",
             "account_element": f"element_{account_lookup['Assets:Cash']}",
+            "dimensions": [],
           },
         ]
       )
@@ -278,6 +366,8 @@ class AccountingDataGenerator:
       for week in range(4):
         tx_date = month_start + timedelta(days=7 * week + 5)
         revenue_amount = round(random.uniform(3000, 8000), 2)
+        project = random.choice(self._projects)
+        location = random.choice(self._locations)
 
         transactions.append(
           self._create_transaction(
@@ -297,6 +387,7 @@ class AccountingDataGenerator:
               "transaction_id": f"TX{tx_id:04d}",
               "account_name": "Assets:Cash",
               "account_element": f"element_{account_lookup['Assets:Cash']}",
+              "dimensions": [],
             },
             {
               **self._create_line_item(
@@ -305,6 +396,11 @@ class AccountingDataGenerator:
               "transaction_id": f"TX{tx_id:04d}",
               "account_name": "Revenue:ConsultingRevenue",
               "account_element": f"element_{account_lookup['Revenue:ConsultingRevenue']}",
+              "dimensions": [
+                ("department", "Sales"),
+                ("project", project),
+                ("location", location),
+              ],
             },
           ]
         )
@@ -313,6 +409,8 @@ class AccountingDataGenerator:
 
       tx_date = month_start + timedelta(days=15)
       salary_amount = round(random.uniform(8000, 12000), 2)
+      salary_dept = random.choice(self._departments)
+      salary_location = random.choice(self._locations)
       transactions.append(
         self._create_transaction(
           f"TX{tx_id:04d}",
@@ -331,6 +429,10 @@ class AccountingDataGenerator:
             "transaction_id": f"TX{tx_id:04d}",
             "account_name": "Expenses:Salaries",
             "account_element": f"element_{account_lookup['Expenses:Salaries']}",
+            "dimensions": [
+              ("department", salary_dept),
+              ("location", salary_location),
+            ],
           },
           {
             **self._create_line_item(
@@ -339,19 +441,21 @@ class AccountingDataGenerator:
             "transaction_id": f"TX{tx_id:04d}",
             "account_name": "Assets:Cash",
             "account_element": f"element_{account_lookup['Assets:Cash']}",
+            "dimensions": [],
           },
         ]
       )
       li_id += 2
       tx_id += 1
 
+      # Map expense types to likely departments
       expense_types = [
-        ("Expenses:Utilities", "Utility payment", 200, 500),
-        ("Expenses:OfficeSupplies", "Office supplies purchase", 100, 400),
-        ("Expenses:Marketing", "Marketing campaign", 300, 1000),
+        ("Expenses:Utilities", "Utility payment", 200, 500, "Operations"),
+        ("Expenses:OfficeSupplies", "Office supplies purchase", 100, 400, "Operations"),
+        ("Expenses:Marketing", "Marketing campaign", 300, 1000, "Marketing"),
       ]
 
-      for expense_account, desc, min_amt, max_amt in expense_types:
+      for expense_account, desc, min_amt, max_amt, dept in expense_types:
         tx_date = month_start + timedelta(days=random.randint(10, 25))
         amount = round(random.uniform(min_amt, max_amt), 2)
 
@@ -367,6 +471,7 @@ class AccountingDataGenerator:
               "transaction_id": f"TX{tx_id:04d}",
               "account_name": expense_account,
               "account_element": f"element_{account_lookup[expense_account]}",
+              "dimensions": [("department", dept)],
             },
             {
               **self._create_line_item(
@@ -375,6 +480,7 @@ class AccountingDataGenerator:
               "transaction_id": f"TX{tx_id:04d}",
               "account_name": "Assets:Cash",
               "account_element": f"element_{account_lookup['Assets:Cash']}",
+              "dimensions": [],
             },
           ]
         )
@@ -389,7 +495,7 @@ class AccountingDataGenerator:
 
     li_output = self.nodes_dir / "LineItem.parquet"
     li_df_clean = li_df.drop(
-      columns=["transaction_id", "account_name", "account_element"]
+      columns=["transaction_id", "account_name", "account_element", "dimensions"]
     )
     self._write_parquet(li_df_clean, li_output, "LineItem")
 
@@ -618,6 +724,23 @@ class AccountingDataGenerator:
     li_element_path = self.relationships_dir / "LINE_ITEM_RELATES_TO_ELEMENT.parquet"
     self._write_parquet(li_element_df, li_element_path, "LINE_ITEM_RELATES_TO_ELEMENT")
 
+    # LineItem → Dimension relationships
+    li_dim_rels = []
+    for _, row in li_df.iterrows():
+      for dim_key in row.get("dimensions", []):
+        dim_id = self._dimension_lookup.get(dim_key)
+        if dim_id:
+          li_dim_rels.append(
+            {
+              "from": row["identifier"],
+              "to": dim_id,
+            }
+          )
+    if li_dim_rels:
+      li_dim_df = pd.DataFrame(li_dim_rels)
+      li_dim_path = self.relationships_dir / "LINE_ITEM_HAS_DIMENSION.parquet"
+      self._write_parquet(li_dim_df, li_dim_path, "LINE_ITEM_HAS_DIMENSION")
+
     if reports_df is not None and facts_df is not None:
       entity_report_rels = []
       for _, row in reports_df.iterrows():
@@ -716,6 +839,7 @@ class AccountingDataGenerator:
 
     self.generate_entity()
     self.generate_chart_of_accounts()
+    self.generate_dimensions()
     tx_df, li_df = self.generate_transactions()
     reports_df, facts_df, periods_df, units_df = self.generate_reports_and_facts(
       tx_df, li_df
@@ -728,6 +852,9 @@ class AccountingDataGenerator:
     print(f"\nData files saved to: {self.data_dir}")
     print(f"  - {len(tx_df)} transactions")
     print(f"  - {len(li_df)} line items")
+    print(
+      f"  - {len(self._dimension_lookup)} dimensions (departments, projects, locations)"
+    )
     print(f"  - {len(reports_df)} monthly reports")
     print(f"  - {len(facts_df)} aggregated facts")
     print("\n💡 Next step: uv run 04_upload_ingest.py")
@@ -738,6 +865,7 @@ class AccountingDataGenerator:
     node_files = [
       "Entity.parquet",
       "Element.parquet",
+      "Dimension.parquet",
       "Transaction.parquet",
       "LineItem.parquet",
       "Report.parquet",
@@ -749,6 +877,7 @@ class AccountingDataGenerator:
       "ENTITY_HAS_TRANSACTION.parquet",
       "TRANSACTION_HAS_LINE_ITEM.parquet",
       "LINE_ITEM_RELATES_TO_ELEMENT.parquet",
+      "LINE_ITEM_HAS_DIMENSION.parquet",
       "ENTITY_HAS_REPORT.parquet",
       "REPORT_HAS_FACT.parquet",
       "FACT_HAS_ELEMENT.parquet",
@@ -784,7 +913,9 @@ def main():
   args = parser.parse_args()
 
   try:
-    generator = AccountingDataGenerator(num_months=args.months, company_name=args.company)
+    generator = AccountingDataGenerator(
+      num_months=args.months, company_name=args.company
+    )
     generator.generate_all(regenerate=args.regenerate)
   except Exception as e:
     print(f"\n❌ Error: {e}")
