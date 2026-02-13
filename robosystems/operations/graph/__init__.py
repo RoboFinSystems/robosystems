@@ -11,6 +11,7 @@ This module contains high-level graph database business logic including:
 """
 
 from .credit_service import CreditService
+from .deprovision_service import DeprovisionResult, GraphDeprovisionService
 from .entity_graph_service import EntityGraphService, EntityGraphServiceSync
 from .generic_graph_service import GenericGraphService, GenericGraphServiceSync
 from .infrastructure import (
@@ -27,10 +28,12 @@ from .subscription_service import GraphSubscriptionService
 __all__ = [
   "CleanupResult",
   "CreditService",
+  "DeprovisionResult",
   "EntityGraphService",
   "EntityGraphServiceSync",
   "GenericGraphService",
   "GenericGraphServiceSync",
+  "GraphDeprovisionService",
   "GraphMetricsService",
   "GraphPricingService",
   "GraphSubscriptionService",

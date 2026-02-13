@@ -1172,21 +1172,36 @@ def get_graph(client, graph_id):
 @graphs.command("deprovision")
 @click.argument("graph_id")
 @click.option("--force", is_flag=True, help="Skip confirmation prompt")
+@click.option("--skip-backup", is_flag=True, help="Skip creating a final backup")
 @click.pass_obj
-def deprovision_graph(client, graph_id, force):
-  """Deprovision a graph: delete its database and mark as deprovisioned."""
+def deprovision_graph(client, graph_id, force, skip_backup):
+  """Deprovision a graph: tear down infrastructure and mark as deprovisioned."""
   if not force:
     click.confirm(
       f"This will deprovision graph {graph_id} and delete its database. Continue?",
       abort=True,
     )
 
-  result = client._make_request("POST", f"/admin/v1/graphs/{graph_id}/deprovision")
+  params = {}
+  if skip_backup:
+    params["skip_backup"] = "true"
+
+  result = client._make_request(
+    "POST", f"/admin/v1/graphs/{graph_id}/deprovision", params=params
+  )
 
   click.echo(f"\n{result['message']}")
   click.echo(f"  Previous Status: {result['previous_status']}")
   click.echo(f"  Current Status: {result['status']}")
   click.echo(f"  Database Deleted: {'Yes' if result['database_deleted'] else 'No'}")
+  click.echo(f"  Backup Created: {'Yes' if result.get('backup_created') else 'No'}")
+  if result.get("subgraphs_deleted", 0) > 0:
+    click.echo(f"  Subgraphs Deleted: {result['subgraphs_deleted']}")
+  click.echo(f"  Records Cleaned: {'Yes' if result.get('records_cleaned') else 'No'}")
+  if result.get("warnings"):
+    click.echo("\n  Warnings:")
+    for warning in result["warnings"]:
+      click.echo(f"    - {warning}")
 
 
 @graphs.command("analytics")
