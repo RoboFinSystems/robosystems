@@ -158,10 +158,13 @@ def validate_repository_access(
   Returns:
       bool: True if user has appropriate access
   """
-  if not is_shared_repository(graph_id):
-    return False
+  from robosystems.config.shared_repositories import (
+    is_shared_repository_or_subgraph,
+    resolve_shared_repository_parent,
+  )
 
-  from robosystems.config.shared_repositories import resolve_shared_repository_parent
+  if not is_shared_repository_or_subgraph(graph_id):
+    return False
   from robosystems.database import session
   from robosystems.models.iam import (
     UserRepository,
