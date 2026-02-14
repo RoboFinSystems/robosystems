@@ -428,7 +428,7 @@ jobs:
       max_instances: "${{ matrix.max_instances }}"
       # Graph Writer Configuration
       writer_tier: ${{ matrix.tier }}
-      shared_repositories: ${{ inputs.shared_repositories }}
+      shared_repositories: ${{ matrix.tier == 'ladybug-shared' && inputs.shared_repositories || '' }}
       # Instance Configuration
       instance_type: ${{ matrix.instance_type }}
       databases_per_instance: "${{ matrix.databases_per_instance }}"

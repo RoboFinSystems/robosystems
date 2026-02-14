@@ -170,7 +170,6 @@ deploy environment="prod" ref="":
 
 # Bastion tunnel (uses AWS SSM - no SSH keys required)
 bastion-tunnel environment service="all":
-    @just stop
     @bin/tools/tunnels.sh {{environment}} {{service}}
 
 

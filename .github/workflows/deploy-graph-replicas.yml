@@ -304,7 +304,7 @@ jobs:
             ParameterKey=AmiId,ParameterValue=${{ inputs.ami_id }} \
             ParameterKey=InstanceType,ParameterValue=${{ inputs.instance_type }} \
             ParameterKey=SharedDatabaseS3Prefix,ParameterValue=${{ steps.s3_database.outputs.s3_prefix }} \
-            ParameterKey=SharedRepositories,ParameterValue=${{ steps.s3_database.outputs.shared_repositories }} \
+            ParameterKey=SharedRepositories,ParameterValue=\"${{ steps.s3_database.outputs.shared_repositories }}\" \
             ParameterKey=RootVolumeSize,ParameterValue=${{ inputs.root_volume_size }} \
             ParameterKey=MinInstances,ParameterValue=${{ inputs.min_instances }} \
             ParameterKey=MaxInstances,ParameterValue=${{ inputs.max_instances }} \

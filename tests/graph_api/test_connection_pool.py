@@ -632,6 +632,250 @@ class TestLadybugConnectionPool:
     mock_conns[0].close.assert_called_once()
     # Database is not closed - it's shared across connections
 
+  @patch(
+    "robosystems.graph_api.core.ladybug.pool.LadybugConnectionPool._configure_s3_credentials"
+  )
+  @patch("real_ladybug.Connection")
+  @patch("real_ladybug.Database")
+  def test_initialize_shared_s3_database(
+    self, mock_db_class, mock_conn_class, mock_s3_creds
+  ):
+    """Test shared S3 database initialization creates single DB for all repos."""
+    mock_db = MagicMock()
+    mock_conn = MagicMock()
+    mock_db_class.return_value = mock_db
+    mock_conn_class.return_value = mock_conn
+    mock_result = MagicMock()
+    mock_conn.execute.return_value = mock_result
+
+    pool = LadybugConnectionPool(base_path=self.base_path)
+
+    from robosystems.config import env as env_cls
+
+    with patch.object(
+      env_cls, "get_lbug_tier_config", return_value={"max_memory_mb": 5120}
+    ):
+      attached = pool.initialize_shared_s3_database(
+        ["sec", "sec_historical"], "s3://bucket/path"
+      )
+
+    # Both repos should be attached
+    assert attached == ["sec", "sec_historical"]
+    assert pool._shared_s3_repos == {"sec", "sec_historical"}
+
+    # Single Database created
+    mock_db_class.assert_called_once_with(
+      ":memory:", buffer_pool_size=5120 * 1024 * 1024
+    )
+
+    # Both repos map to the same shared Database
+    assert pool._databases["sec"] is mock_db
+    assert pool._databases["sec_historical"] is mock_db
+    assert pool._shared_s3_database is mock_db
+
+    # Verify ATTACH queries were executed for both repos
+    execute_calls = [str(call) for call in mock_conn.execute.call_args_list]
+    attach_calls = [c for c in execute_calls if "ATTACH" in c]
+    assert len(attach_calls) == 2
+
+  @patch(
+    "robosystems.graph_api.core.ladybug.pool.LadybugConnectionPool._configure_s3_credentials"
+  )
+  @patch("real_ladybug.Connection")
+  @patch("real_ladybug.Database")
+  def test_shared_s3_connection_creation(
+    self, mock_db_class, mock_conn_class, mock_s3_creds
+  ):
+    """Test creating connections from the shared S3 database sets USE and S3 creds."""
+    mock_db = MagicMock()
+    mock_conn = MagicMock()
+    mock_db_class.return_value = mock_db
+    mock_conn_class.return_value = mock_conn
+    mock_result = MagicMock()
+    mock_conn.execute.return_value = mock_result
+
+    pool = LadybugConnectionPool(base_path=self.base_path)
+
+    # Set up shared S3 state manually
+    pool._shared_s3_database = mock_db
+    pool._shared_s3_repos = {"sec", "sec_historical"}
+    pool._databases["sec"] = mock_db
+    pool._databases["sec_historical"] = mock_db
+
+    # Create connection for "sec"
+    conn_info = pool._create_s3_connection_from_shared_db("sec")
+
+    # Connection created from shared Database
+    mock_conn_class.assert_called_with(mock_db)
+
+    # S3 credentials configured
+    mock_s3_creds.assert_called()
+
+    # USE set to "sec"
+    use_calls = [
+      c
+      for c in mock_conn.execute.call_args_list
+      if "USE sec" in str(c) and "sec_historical" not in str(c)
+    ]
+    assert len(use_calls) == 1
+
+    # Connection info is correct
+    assert conn_info.s3_attached is True
+    assert conn_info.read_only is True
+    assert conn_info.database is mock_db
+    assert conn_info.is_healthy is True
+
+  @patch(
+    "robosystems.graph_api.core.ladybug.pool.LadybugConnectionPool._configure_s3_credentials"
+  )
+  @patch("real_ladybug.Connection")
+  @patch("real_ladybug.Database")
+  def test_close_database_connections_preserves_shared_db(
+    self, mock_db_class, mock_conn_class, mock_s3_creds
+  ):
+    """Test closing one S3 repo's connections doesn't close the shared Database."""
+    mock_db = MagicMock()
+    mock_conn = MagicMock()
+    mock_db_class.return_value = mock_db
+    mock_conn_class.return_value = mock_conn
+    mock_result = MagicMock()
+    mock_conn.execute.return_value = mock_result
+
+    pool = LadybugConnectionPool(base_path=self.base_path)
+
+    # Set up shared S3 state and create connections for both repos
+    pool._shared_s3_database = mock_db
+    pool._shared_s3_repos = {"sec", "sec_historical"}
+    pool._databases["sec"] = mock_db
+    pool._databases["sec_historical"] = mock_db
+    pool._create_s3_connection_from_shared_db("sec")
+    pool._create_s3_connection_from_shared_db("sec_historical")
+
+    # Close sec's connections
+    pool.close_database_connections("sec")
+
+    # Shared Database should NOT have been closed
+    mock_db.close.assert_not_called()
+
+    # sec_historical should still work
+    assert "sec_historical" in pool._pools
+    assert pool._databases.get("sec_historical") is mock_db
+
+  @patch(
+    "robosystems.graph_api.core.ladybug.pool.LadybugConnectionPool._configure_s3_credentials"
+  )
+  @patch("real_ladybug.Connection")
+  @patch("real_ladybug.Database")
+  def test_cleanup_all_connections_closes_shared_db_once(
+    self, mock_db_class, mock_conn_class, mock_s3_creds
+  ):
+    """Test _cleanup_all_connections closes the shared DB exactly once."""
+    mock_shared_db = MagicMock()
+    mock_conn = MagicMock()
+    mock_db_class.return_value = mock_shared_db
+    mock_conn_class.return_value = mock_conn
+    mock_result = MagicMock()
+    mock_conn.execute.return_value = mock_result
+
+    pool = LadybugConnectionPool(base_path=self.base_path)
+
+    # Set up shared S3 state with both repos mapping to same DB
+    pool._shared_s3_database = mock_shared_db
+    pool._shared_s3_repos = {"sec", "sec_historical"}
+    pool._databases["sec"] = mock_shared_db
+    pool._databases["sec_historical"] = mock_shared_db
+    pool._create_s3_connection_from_shared_db("sec")
+    pool._create_s3_connection_from_shared_db("sec_historical")
+
+    # Cleanup all
+    pool._cleanup_all_connections()
+
+    # Shared Database closed exactly once (not twice)
+    assert mock_shared_db.close.call_count == 1
+
+    # Shared S3 state cleared
+    assert pool._shared_s3_database is None
+    assert len(pool._shared_s3_repos) == 0
+
+  @patch(
+    "robosystems.graph_api.core.ladybug.pool.LadybugConnectionPool._configure_s3_credentials"
+  )
+  @patch("real_ladybug.Connection")
+  @patch("real_ladybug.Database")
+  def test_invalidate_connection_preserves_shared_db(
+    self, mock_db_class, mock_conn_class, mock_s3_creds
+  ):
+    """Test invalidating an S3 repo's connections doesn't close the shared Database."""
+    mock_db = MagicMock()
+    mock_conn = MagicMock()
+    mock_db_class.return_value = mock_db
+    mock_conn_class.return_value = mock_conn
+    mock_result = MagicMock()
+    mock_conn.execute.return_value = mock_result
+
+    pool = LadybugConnectionPool(base_path=self.base_path)
+
+    # Set up shared S3 state
+    pool._shared_s3_database = mock_db
+    pool._shared_s3_repos = {"sec", "sec_historical"}
+    pool._databases["sec"] = mock_db
+    pool._databases["sec_historical"] = mock_db
+    pool._create_s3_connection_from_shared_db("sec")
+    pool._create_s3_connection_from_shared_db("sec_historical")
+
+    # Invalidate sec
+    pool.invalidate_connection("sec")
+
+    # Shared Database should NOT have been closed
+    mock_db.close.assert_not_called()
+
+    # sec_historical connections should be unaffected
+    assert "sec_historical" in pool._pools
+    assert pool._databases["sec_historical"] is mock_db
+
+  @patch(
+    "robosystems.graph_api.core.ladybug.pool.LadybugConnectionPool._configure_s3_credentials"
+  )
+  @patch("real_ladybug.Connection")
+  @patch("real_ladybug.Database")
+  def test_partial_attach_failure(self, mock_db_class, mock_conn_class, mock_s3_creds):
+    """Test that partial ATTACH failure still returns successfully attached repos."""
+    mock_db = MagicMock()
+    mock_conn = MagicMock()
+    mock_db_class.return_value = mock_db
+    mock_conn_class.return_value = mock_conn
+
+    # First ATTACH (sec) succeeds, second (sec_historical) fails all retries
+    def execute_side_effect(query, *args, **kwargs):
+      if "ATTACH" in query and "sec_historical" in query:
+        raise RuntimeError("S3 download timeout")
+      return MagicMock()
+
+    mock_conn.execute.side_effect = execute_side_effect
+
+    pool = LadybugConnectionPool(base_path=self.base_path)
+
+    from robosystems.config import env as env_cls
+
+    with (
+      patch.object(
+        env_cls, "get_lbug_tier_config", return_value={"max_memory_mb": 5120}
+      ),
+      patch("time.sleep"),
+    ):
+      attached = pool.initialize_shared_s3_database(
+        ["sec", "sec_historical"], "s3://bucket/path"
+      )
+
+    # Only sec should be attached
+    assert attached == ["sec"]
+    assert "sec" in pool._shared_s3_repos
+    assert "sec_historical" not in pool._shared_s3_repos
+
+    # sec should still be usable via the shared DB
+    assert pool._databases["sec"] is mock_db
+    assert pool._shared_s3_database is mock_db
+
 
 class TestConnectionPoolGlobals:
   """Test global connection pool functions."""
