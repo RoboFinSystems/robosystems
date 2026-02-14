@@ -14,6 +14,29 @@ Categories:
 """
 
 
+class DatabaseDefaults:
+  """
+  Database connection pool defaults.
+
+  These values control SQLAlchemy connection pooling to PostgreSQL (RDS).
+  Tune based on instance size and number of ECS tasks:
+  - pool_size + max_overflow = max connections per task
+  - Total connections = (pool_size + max_overflow) x number_of_tasks
+  - Must stay under RDS max_connections for the instance type
+
+  RDS max_connections by instance (PostgreSQL):
+  - db.t4g.micro:  ~112
+  - db.t4g.small:  ~225
+  - db.t4g.medium: ~450
+  - db.t4g.large:  ~900
+  """
+
+  POOL_SIZE = 5  # Baseline connections held open per task
+  MAX_OVERFLOW = 10  # Additional connections above pool_size (burst)
+  POOL_TIMEOUT = 30  # Seconds to wait for a connection from the pool
+  POOL_RECYCLE = 3600  # Recycle connections after 1 hour (handles RDS drops)
+
+
 class CacheDefaults:
   """
   Cache TTL defaults (seconds).
@@ -217,4 +240,9 @@ SSM_TUNING_PATHS = {
   "sse/QUEUE_SIZE": SSEDefaults.QUEUE_SIZE,
   # Limits
   "limits/ORG_GRAPHS_DEFAULT": LimitsDefaults.ORG_GRAPHS_DEFAULT,
+  # Database Pool
+  "database/POOL_SIZE": DatabaseDefaults.POOL_SIZE,
+  "database/MAX_OVERFLOW": DatabaseDefaults.MAX_OVERFLOW,
+  "database/POOL_TIMEOUT": DatabaseDefaults.POOL_TIMEOUT,
+  "database/POOL_RECYCLE": DatabaseDefaults.POOL_RECYCLE,
 }

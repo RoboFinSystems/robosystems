@@ -58,14 +58,14 @@ def create_app() -> FastAPI:
 
     # S3 ATTACH warmup for replicas (runs in background thread)
     async def warmup_s3_attach():
-      """Warm up S3 ATTACH databases via shared buffer pool.
+      """Warm up S3 ATTACH databases with per-repo Database objects.
 
-      Phase 1: Serial ATTACHes — creates one shared in-memory Database and
-      ATTACHes all repos to it. Serial because ATTACH is I/O-bound (S3 download)
-      and sharing one Database means they must be sequential.
+      Phase 1: Create per-repo databases — each repo gets its own in-memory
+      Database with one S3 ATTACH. Kuzu only supports one ATTACHed Kuzu database
+      per Database object, so repos cannot share a single Database.
 
-      Phase 2: Parallel warmup queries — each repo gets a connection from the
-      shared Database and runs a warmup query to populate the buffer pool cache.
+      Phase 2: Parallel warmup queries — each repo gets a connection and runs
+      a warmup query to populate the buffer pool cache.
 
       Runs in a thread pool to avoid blocking the event loop, allowing the
       health endpoint to respond with 503 during warmup.
@@ -95,14 +95,12 @@ def create_app() -> FastAPI:
 
         pool = get_connection_pool()
 
-        # Phase 1: Serial ATTACHes via shared buffer pool
-        logger.info(
-          f"Phase 1: ATTACHing {len(shared_repos)} repos to shared buffer pool..."
-        )
-        attached = pool.initialize_shared_s3_database(shared_repos, s3_prefix)
+        # Phase 1: Per-repo S3 databases (each repo gets its own Database + ATTACH)
+        logger.info(f"Phase 1: Creating {len(shared_repos)} S3 databases...")
+        attached = pool.initialize_s3_databases(shared_repos, s3_prefix)
         if len(attached) < len(shared_repos):
           failed = set(shared_repos) - set(attached)
-          raise RuntimeError(f"Failed to ATTACH repos to shared buffer pool: {failed}")
+          raise RuntimeError(f"Failed to initialize S3 databases: {failed}")
 
         # Phase 2: Parallel warmup queries
         logger.info(f"Phase 2: Running warmup queries for {len(attached)} repos...")
