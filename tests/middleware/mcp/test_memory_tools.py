@@ -54,8 +54,25 @@ class TestValidateSubgraphContext:
     assert result["error"] == "subgraph_required"
 
   @pytest.mark.unit
-  def test_shared_repo_subgraph_passes(self):
-    assert _validate_subgraph_context("sec_historical") is None
+  def test_shared_repo_parent_blocked(self):
+    """Shared repo parent (e.g., 'sec') is not a subgraph, so blocked."""
+    result = _validate_subgraph_context("sec")
+    assert result is not None
+    assert result["error"] == "subgraph_required"
+
+  @pytest.mark.unit
+  def test_shared_repo_subgraph_blocked(self):
+    """Shared repo subgraph (e.g., 'sec_historical') is read-only."""
+    result = _validate_subgraph_context("sec_historical")
+    assert result is not None
+    assert result["error"] == "read_only"
+
+  @pytest.mark.unit
+  def test_shared_repo_another_subgraph_blocked(self):
+    """Another shared repo subgraph name is also read-only."""
+    result = _validate_subgraph_context("sec_archive2024")
+    assert result is not None
+    assert result["error"] == "read_only"
 
 
 class TestValidateWriteQuery:
@@ -335,3 +352,57 @@ class TestAddRelationshipTableTool:
       }
     )
     assert result["error"] == "invalid_from_node"
+
+
+@pytest.fixture
+def mock_shared_subgraph_client():
+  """Mock client pointing to a shared repository subgraph (read-only)."""
+  client = MagicMock()
+  client.graph_id = "sec_historical"
+  client.execute_query = AsyncMock(return_value=[])
+  client.graph_client = MagicMock()
+  client.graph_client.install_schema = AsyncMock(
+    return_value={"success": True, "message": "Schema installed", "statements_executed": 1}
+  )
+  return client
+
+
+class TestSharedRepoWriteProtection:
+  """All write tools must block writes on shared repository subgraphs."""
+
+  @pytest.mark.asyncio
+  @pytest.mark.unit
+  async def test_write_cypher_blocked_on_shared_subgraph(self, mock_shared_subgraph_client):
+    tool = WriteCypherTool(mock_shared_subgraph_client)
+    result = await tool.execute(
+      {"query": "CREATE (n:Entity {identifier: 'test', name: 'Test'})"}
+    )
+    assert result["error"] == "read_only"
+    mock_shared_subgraph_client.execute_query.assert_not_called()
+
+  @pytest.mark.asyncio
+  @pytest.mark.unit
+  async def test_add_node_table_blocked_on_shared_subgraph(self, mock_shared_subgraph_client):
+    tool = AddNodeTableTool(mock_shared_subgraph_client)
+    result = await tool.execute(
+      {
+        "table_name": "TestNode",
+        "properties": [
+          {"name": "identifier", "type": "STRING", "is_primary_key": True}
+        ],
+      }
+    )
+    assert result["error"] == "read_only"
+    mock_shared_subgraph_client.graph_client.install_schema.assert_not_called()
+
+  @pytest.mark.asyncio
+  @pytest.mark.unit
+  async def test_add_relationship_table_blocked_on_shared_subgraph(
+    self, mock_shared_subgraph_client
+  ):
+    tool = AddRelationshipTableTool(mock_shared_subgraph_client)
+    result = await tool.execute(
+      {"table_name": "TEST_REL", "from_node": "Entity", "to_node": "Entity"}
+    )
+    assert result["error"] == "read_only"
+    mock_shared_subgraph_client.graph_client.install_schema.assert_not_called()

@@ -14,6 +14,18 @@ from robosystems.middleware.graph.utils import is_subgraph
 from ..exceptions import GraphAPIError
 from .base_tool import BaseTool
 
+# Lazy import to avoid circular imports with adapter chain
+_is_shared_repository_or_subgraph = None
+
+
+def _get_is_shared_repository_or_subgraph():
+  global _is_shared_repository_or_subgraph
+  if _is_shared_repository_or_subgraph is None:
+    from robosystems.config.shared_repositories import is_shared_repository_or_subgraph
+
+    _is_shared_repository_or_subgraph = is_shared_repository_or_subgraph
+  return _is_shared_repository_or_subgraph
+
 # Write operations allowed in Cypher
 ALLOWED_WRITE_KEYWORDS = {"CREATE", "MERGE", "SET", "DELETE", "DETACH DELETE", "REMOVE"}
 
@@ -42,7 +54,12 @@ PROPERTY_NAME_PATTERN = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
 
 
 def _validate_subgraph_context(graph_id: str) -> dict[str, Any] | None:
-  """Validate the active graph is a subgraph. Returns error dict if not."""
+  """Validate the active graph is a writable subgraph. Returns error dict if not.
+
+  Blocks writes on:
+  - Parent graphs (must use a subgraph)
+  - Shared repository graphs and their subgraphs (always read-only)
+  """
   if not is_subgraph(graph_id):
     return {
       "error": "subgraph_required",
@@ -50,6 +67,15 @@ def _validate_subgraph_context(graph_id: str) -> dict[str, Any] | None:
       "Use create-workspace to create a memory subgraph first, "
       "then switch-workspace to activate it.",
     }
+
+  # Shared repository subgraphs are always read-only
+  if _get_is_shared_repository_or_subgraph()(graph_id):
+    return {
+      "error": "read_only",
+      "message": "Shared repository graphs are read-only. "
+      "Write operations are not allowed on shared repositories or their subgraphs.",
+    }
+
   return None
 
 
