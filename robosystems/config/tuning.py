@@ -40,6 +40,7 @@ Parameters are stored at: /robosystems/{env}/tuning/{category}/{key}
 Categories:
 - cache/       - Cache TTL values
 - admission/   - Admission control thresholds
+- database/    - Connection pool sizing
 - queues/      - Queue configuration
 - circuits/    - Circuit breaker settings
 - load_shedding/ - Load shedding thresholds
@@ -55,6 +56,7 @@ from .defaults import (
   AdmissionDefaults,
   CacheDefaults,
   CircuitBreakerDefaults,
+  DatabaseDefaults,
   LimitsDefaults,
   LoadSheddingDefaults,
   MCPDefaults,
@@ -347,6 +349,30 @@ class TuningConfig:
   def get_sse_queue_size(cls) -> int:
     """Get SSE event queue size per connection."""
     return cls.get_int("sse/QUEUE_SIZE", SSEDefaults.QUEUE_SIZE)
+
+  # =========================================================================
+  # DATABASE POOL ACCESSORS
+  # =========================================================================
+
+  @classmethod
+  def get_database_pool_size(cls) -> int:
+    """Get SQLAlchemy connection pool size (baseline connections per task)."""
+    return cls.get_int("database/POOL_SIZE", DatabaseDefaults.POOL_SIZE)
+
+  @classmethod
+  def get_database_max_overflow(cls) -> int:
+    """Get SQLAlchemy max overflow (burst connections above pool_size)."""
+    return cls.get_int("database/MAX_OVERFLOW", DatabaseDefaults.MAX_OVERFLOW)
+
+  @classmethod
+  def get_database_pool_timeout(cls) -> int:
+    """Get seconds to wait for a connection from the pool."""
+    return cls.get_int("database/POOL_TIMEOUT", DatabaseDefaults.POOL_TIMEOUT)
+
+  @classmethod
+  def get_database_pool_recycle(cls) -> int:
+    """Get connection recycle time in seconds (handles RDS connection drops)."""
+    return cls.get_int("database/POOL_RECYCLE", DatabaseDefaults.POOL_RECYCLE)
 
   # =========================================================================
   # LIMITS ACCESSORS

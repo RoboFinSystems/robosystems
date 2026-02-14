@@ -281,6 +281,7 @@ function update_ssm_feature_flag() {
 # Categories:
 #   cache/       - Cache TTL values
 #   admission/   - Admission control thresholds
+#   database/    - Connection pool sizing
 #   queues/      - Queue configuration
 #   circuits/    - Circuit breaker settings
 #   load_shedding/ - Load shedding thresholds
@@ -346,6 +347,12 @@ function create_ssm_tuning_parameters() {
 
         # Limits
         "limits/ORG_GRAPHS_DEFAULT=10"
+
+        # Database Connection Pool
+        "database/POOL_SIZE=5"
+        "database/MAX_OVERFLOW=10"
+        "database/POOL_TIMEOUT=30"
+        "database/POOL_RECYCLE=3600"
     )
 
     local created=0

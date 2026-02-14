@@ -88,9 +88,10 @@ class LadybugConnectionPool:
     # This is critical for transaction visibility in LadybugDB
     self._databases: dict[str, lbug.Database] = {}
 
-    # Shared S3 buffer pool: one Database for all S3 ATTACH repos on replicas
-    # This allows LadybugDB to dynamically manage memory across repos
-    self._shared_s3_database: lbug.Database | None = None
+    # Per-repo S3 databases: each repo gets its own Database with one ATTACH
+    # Kuzu only supports one ATTACHed Kuzu database at a time, so we can't
+    # share a single Database across multiple repos
+    self._s3_databases: dict[str, lbug.Database] = {}
     self._shared_s3_repos: set[str] = set()
     self._shared_s3_lock = threading.RLock()
 
@@ -114,15 +115,13 @@ class LadybugConnectionPool:
       f"Initialized LadybugDB connection pool: {max_connections_per_db} max per DB, {connection_ttl_minutes}min TTL"
     )
 
-  def initialize_shared_s3_database(
-    self, repos: list[str], s3_prefix: str
-  ) -> list[str]:
+  def initialize_s3_databases(self, repos: list[str], s3_prefix: str) -> list[str]:
     """
-    Create a single shared in-memory Database and ATTACH all S3 repos to it.
+    Create a per-repo in-memory Database and ATTACH each S3 repo to its own DB.
 
-    This creates ONE buffer pool (sized to max_memory_mb) shared across all
-    S3 ATTACH repos. LadybugDB dynamically manages memory based on actual
-    query patterns rather than static per-database allocations.
+    Kuzu only supports one ATTACHed Kuzu database at a time per Database object,
+    so each repo gets its own Database with its own buffer pool. Memory is split
+    evenly across repos.
 
     Only used for shared replicas (LBUG_ROLE=replica + LBUG_S3_ATTACH_PREFIX).
 
@@ -133,107 +132,132 @@ class LadybugConnectionPool:
     Returns:
         List of successfully ATTACHed repository names
     """
-    import time
-
     from robosystems.config import env
 
     with self._shared_s3_lock:
-      # Get full instance memory budget (not per-db)
+      # Split instance memory budget evenly across repos
       tier_config = env.get_lbug_tier_config()
-      max_memory_mb = tier_config.get("max_memory_mb", 5120)
-      buffer_pool_size = max_memory_mb * 1024 * 1024
+      total_memory_mb = tier_config.get("max_memory_mb", 5120)
+      per_repo_memory_mb = total_memory_mb // len(repos)
 
       logger.info(
-        f"Creating shared S3 buffer pool: {max_memory_mb} MB for {len(repos)} repos"
+        f"Creating {len(repos)} S3 databases: {per_repo_memory_mb} MB each "
+        f"({total_memory_mb} MB total)"
       )
 
-      # Create single in-memory database with full instance memory budget
-      self._shared_s3_database = lbug.Database(
-        ":memory:",
-        buffer_pool_size=buffer_pool_size,
-      )
-
-      # Create temp connection for setup (INSTALL/LOAD/ATTACH persist on Database)
-      setup_conn = lbug.Connection(self._shared_s3_database)
-
-      try:
-        # Install and load httpfs extension
-        logger.info("Loading httpfs extension for shared S3 database...")
+      attached: list[str] = []
+      for repo in repos:
         try:
-          setup_conn.execute("INSTALL httpfs")
+          db = self._initialize_single_s3_repo(repo, s3_prefix, per_repo_memory_mb)
+          self._s3_databases[repo] = db
+          self._databases[repo] = db
+          self._shared_s3_repos.add(repo)
+          attached.append(repo)
         except Exception as e:
-          if "already installed" not in str(e).lower():
-            raise
-        try:
-          setup_conn.execute("LOAD httpfs")
-        except Exception as e:
-          if "already loaded" not in str(e).lower():
-            raise
-
-        # Configure S3 credentials on setup connection
-        self._configure_s3_credentials(setup_conn)
-
-        # Enable HTTP caching for performance
-        try:
-          setup_conn.execute("CALL HTTP_CACHE_FILE = TRUE")
-          logger.info("Enabled HTTP file caching for shared S3 database")
-        except Exception as cache_err:
-          logger.warning(f"Could not enable HTTP caching (non-critical): {cache_err}")
-
-        # Serially ATTACH each repo with retry logic
-        attached: list[str] = []
-        for repo in repos:
-          s3_uri = f"{s3_prefix.rstrip('/')}/{repo}.lbug"
-          attach_query = f"ATTACH '{s3_uri}' AS {repo} (dbtype lbug, read_only)"
-          logger.info(f"ATTACHing {repo} from {s3_uri}...")
-
-          max_retries = 3
-          success = False
-          for attempt in range(max_retries):
-            try:
-              setup_conn.execute(attach_query)
-              success = True
-              break
-            except Exception as attach_err:
-              if attempt == max_retries - 1:
-                logger.error(
-                  f"Failed to ATTACH {repo} after {max_retries} attempts: {attach_err}"
-                )
-              else:
-                wait_time = 5 * (attempt + 1)
-                logger.warning(
-                  f"S3 ATTACH attempt {attempt + 1}/{max_retries} for {repo} failed: "
-                  f"{attach_err}. Retrying in {wait_time}s..."
-                )
-                time.sleep(wait_time)
-
-          if success:
-            self._shared_s3_repos.add(repo)
-            self._databases[repo] = self._shared_s3_database
-            attached.append(repo)
-            logger.info(f"Successfully ATTACHed {repo}")
-          else:
-            logger.error(f"Skipping {repo} — ATTACH failed after all retries")
-
-      finally:
-        # Close setup connection — ATTACH catalogs + httpfs persist on Database
-        try:
-          setup_conn.close()
-        except Exception as e:
-          logger.debug(f"Error closing setup connection: {e}")
+          logger.error(f"Failed to initialize S3 database for {repo}: {e}")
 
       logger.info(
-        f"Shared S3 database initialized: {len(attached)}/{len(repos)} repos attached, "
-        f"buffer pool: {max_memory_mb} MB"
+        f"S3 databases initialized: {len(attached)}/{len(repos)} repos attached, "
+        f"{per_repo_memory_mb} MB per repo"
       )
       return attached
 
-  def _create_s3_connection_from_shared_db(self, database_name: str) -> ConnectionInfo:
+  def _initialize_single_s3_repo(
+    self, repo: str, s3_prefix: str, memory_mb: int
+  ) -> lbug.Database:
     """
-    Create a connection from the shared S3 database for a specific repo.
+    Create an in-memory Database and ATTACH a single S3 repo to it.
 
-    Each connection gets its own S3 credentials and USE prefix so queries
-    target the correct attached catalog.
+    Args:
+        repo: Repository name (e.g., "sec")
+        s3_prefix: S3 prefix for .lbug files
+        memory_mb: Buffer pool size in MB for this repo
+
+    Returns:
+        The initialized lbug.Database with the repo ATTACHed
+    """
+    import time
+
+    buffer_pool_size = memory_mb * 1024 * 1024
+    logger.info(f"Creating S3 database for {repo}: {memory_mb} MB buffer pool")
+
+    db = lbug.Database(":memory:", buffer_pool_size=buffer_pool_size)
+    setup_conn = lbug.Connection(db)
+
+    try:
+      # Install and load httpfs extension
+      logger.info(f"Loading httpfs extension for {repo}...")
+      try:
+        setup_conn.execute("INSTALL httpfs")
+      except Exception as e:
+        if "already installed" not in str(e).lower():
+          raise
+      try:
+        setup_conn.execute("LOAD httpfs")
+      except Exception as e:
+        if "already loaded" not in str(e).lower():
+          raise
+
+      # Configure S3 credentials on setup connection
+      self._configure_s3_credentials(setup_conn)
+
+      # Enable HTTP caching for performance
+      try:
+        setup_conn.execute("CALL HTTP_CACHE_FILE = TRUE")
+        logger.info(f"Enabled HTTP file caching for {repo}")
+      except Exception as cache_err:
+        logger.warning(
+          f"Could not enable HTTP caching for {repo} (non-critical): {cache_err}"
+        )
+
+      # ATTACH the S3 repo with retry logic
+      s3_uri = f"{s3_prefix.rstrip('/')}/{repo}.lbug"
+      attach_query = f"ATTACH '{s3_uri}' AS {repo} (dbtype lbug, read_only)"
+      logger.info(f"ATTACHing {repo} from {s3_uri}...")
+
+      max_retries = 3
+      for attempt in range(max_retries):
+        try:
+          setup_conn.execute(attach_query)
+          logger.info(f"Successfully ATTACHed {repo}")
+          return db
+        except Exception as attach_err:
+          if attempt == max_retries - 1:
+            logger.error(
+              f"Failed to ATTACH {repo} after {max_retries} attempts: {attach_err}"
+            )
+            raise
+          wait_time = 5 * (attempt + 1)
+          logger.warning(
+            f"S3 ATTACH attempt {attempt + 1}/{max_retries} for {repo} failed: "
+            f"{attach_err}. Retrying in {wait_time}s..."
+          )
+          time.sleep(wait_time)
+
+    except Exception:
+      # Clean up on failure
+      try:
+        setup_conn.close()
+      except Exception:
+        pass
+      try:
+        db.close()
+      except Exception:
+        pass
+      raise
+    finally:
+      # Close setup connection — ATTACH + httpfs persist on Database
+      try:
+        setup_conn.close()
+      except Exception as e:
+        logger.debug(f"Error closing setup connection for {repo}: {e}")
+
+  def _create_s3_connection(self, database_name: str) -> ConnectionInfo:
+    """
+    Create a connection to a repo's dedicated S3 database.
+
+    Each repo has its own Database object with one ATTACHed Kuzu database,
+    so no USE statement is needed — the ATTACHed repo becomes the active context.
 
     Args:
         database_name: Name of the ATTACHed repository (e.g., "sec")
@@ -241,14 +265,12 @@ class LadybugConnectionPool:
     Returns:
         ConnectionInfo with the connection configured for this repo
     """
-    conn = lbug.Connection(self._shared_s3_database)
+    repo_db = self._s3_databases[database_name]
+    conn = lbug.Connection(repo_db)
 
     try:
       # S3 credentials are connection-scoped — must set on each new connection
       self._configure_s3_credentials(conn)
-
-      # Set active catalog so queries target this repo
-      conn.execute(f"USE {database_name}")
 
       # Apply standard connection configuration
       try:
@@ -274,7 +296,7 @@ class LadybugConnectionPool:
       now = datetime.now(UTC)
       connection_info = ConnectionInfo(
         connection=conn,
-        database=self._shared_s3_database,
+        database=repo_db,
         created_at=now,
         last_used=now,
         use_count=1,
@@ -292,7 +314,7 @@ class LadybugConnectionPool:
 
       self._stats["connections_created"] += 1
       logger.info(
-        f"Created shared S3 connection for {database_name} "
+        f"Created S3 connection for {database_name} "
         f"(total: {len(self._pools[database_name])})"
       )
 
@@ -303,7 +325,7 @@ class LadybugConnectionPool:
         conn.close()
       except Exception as close_err:
         logger.debug(f"Failed to close connection during cleanup: {close_err}")
-      logger.error(f"Failed to create shared S3 connection for {database_name}: {e}")
+      logger.error(f"Failed to create S3 connection for {database_name}: {e}")
       raise
 
   @contextmanager
@@ -383,9 +405,9 @@ class LadybugConnectionPool:
 
         # Remove the shared Database object to force recreation
         # This ensures the next connection sees all committed data
-        # Skip for shared S3 repos — the shared DB is shared across repos
+        # Skip for S3 repos — they are read-only and expensive to recreate
         if database_name in self._databases:
-          if self._databases[database_name] is not self._shared_s3_database:
+          if database_name not in self._shared_s3_repos:
             try:
               self._databases[database_name].close()
             except Exception as e:
@@ -394,7 +416,7 @@ class LadybugConnectionPool:
             logger.info(f"Removed shared Database object for {database_name}")
           else:
             logger.info(
-              f"Skipping Database.close() for {database_name} (shared S3 buffer pool)"
+              f"Skipping Database.close() for {database_name} (S3 ATTACH database)"
             )
 
         logger.info(f"Invalidated all connections for database: {database_name}")
@@ -443,9 +465,9 @@ class LadybugConnectionPool:
         self._remove_oldest_connection(database_name)
 
     try:
-      # Check if this repo was ATTACHed to the shared S3 buffer pool
+      # Check if this repo has a dedicated S3 database
       if database_name in self._shared_s3_repos:
-        return self._create_s3_connection_from_shared_db(database_name)
+        return self._create_s3_connection(database_name)
 
       # Normal mode: open local database file
       # Construct database path safely (LadybugDB uses .lbug files)
@@ -829,8 +851,8 @@ class LadybugConnectionPool:
           closed_db_ids.add(db_id)
         del self._databases[db_name]
 
-      # Clear shared S3 state
-      self._shared_s3_database = None
+      # Clear S3 state
+      self._s3_databases.clear()
       self._shared_s3_repos.clear()
 
       self._pools.clear()
@@ -865,11 +887,11 @@ class LadybugConnectionPool:
 
       # Remove the Database object to force buffer pool release
       # This will cause it to be recreated with fresh memory on next access
-      # Skip for shared S3 repos — the shared DB is used by other repos
+      # Skip for S3 repos — they are read-only and expensive to recreate
       if database_name in self._databases:
-        if self._databases[database_name] is self._shared_s3_database:
+        if database_name in self._shared_s3_repos:
           logger.info(
-            f"Skipping Database cleanup for {database_name} (shared S3 buffer pool)"
+            f"Skipping Database cleanup for {database_name} (S3 ATTACH database)"
           )
           return
 
@@ -976,9 +998,9 @@ class LadybugConnectionPool:
           self._close_connection(database_name, conn_id)
 
         # Close and remove the Database object
-        # Skip Database.close() for shared S3 repos — the shared DB is used by other repos
+        # Skip Database.close() for S3 repos — they are read-only and expensive to recreate
         if database_name in self._databases:
-          if self._databases[database_name] is not self._shared_s3_database:
+          if database_name not in self._shared_s3_repos:
             try:
               self._databases[database_name].close()
             except Exception as e:
@@ -986,7 +1008,7 @@ class LadybugConnectionPool:
             del self._databases[database_name]
           else:
             logger.info(
-              f"Skipping Database.close() for {database_name} (shared S3 buffer pool)"
+              f"Skipping Database.close() for {database_name} (S3 ATTACH database)"
             )
 
         logger.info(f"Closed all connections for database {database_name}")

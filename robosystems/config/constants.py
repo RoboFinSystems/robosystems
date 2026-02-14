@@ -17,12 +17,6 @@ Categories:
 # Storage Pricing (fixed business rule)
 STORAGE_CREDITS_PER_GB_PER_DAY = 0.05
 
-# Database Pool Configuration (infrastructure sizing, not tunables)
-DEFAULT_POOL_SIZE = 20
-DEFAULT_MAX_OVERFLOW = 40
-DEFAULT_POOL_TIMEOUT = 30
-DEFAULT_POOL_RECYCLE = 3600  # 1 hour
-
 # Port Configuration
 MIN_PORT = 1
 MAX_PORT = 65535
