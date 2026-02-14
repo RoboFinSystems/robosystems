@@ -33,6 +33,13 @@
       "problemMatcher": []
     },
     {
+      "label": "RoboSystems Teardown",
+      "type": "shell",
+      "command": "just",
+      "args": ["teardown", "${input:profileDocker}"],
+      "problemMatcher": []
+    },
+    {
       "label": "RoboSystems Restart",
       "type": "shell",
       "command": "just",

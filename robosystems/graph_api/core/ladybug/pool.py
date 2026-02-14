@@ -259,8 +259,10 @@ class LadybugConnectionPool:
     """
     Create a connection to a repo's dedicated S3 database.
 
-    Each repo has its own Database object with one ATTACHed Kuzu database,
-    so no USE statement is needed — the ATTACHed repo becomes the active context.
+    Each repo has its own Database object with one ATTACHed Kuzu database.
+    The ATTACH creates a named catalog (e.g., ``ATTACH ... AS sec``), so
+    we must ``USE {database_name}`` to set the active catalog before queries
+    can resolve table names.
 
     Args:
         database_name: Name of the ATTACHed repository (e.g., "sec")
@@ -275,6 +277,10 @@ class LadybugConnectionPool:
       # S3 credentials are connection-scoped — must set on each new connection
       self._configure_s3_credentials(conn)
 
+      # Set the active catalog to the ATTACHed database so queries can
+      # resolve table names (Entity, Fact, etc.) without qualification.
+      conn.execute(f"USE {database_name};")
+
       # Apply standard connection configuration
       try:
         conn.execute("CALL progress_bar=false;")
@@ -287,7 +293,7 @@ class LadybugConnectionPool:
           f"Could not apply connection settings (non-critical): {config_err}"
         )
 
-      # Verify connection works
+      # Verify connection works with table access
       result = conn.execute("RETURN 1 as test")
       if isinstance(result, list):
         for r in result:
