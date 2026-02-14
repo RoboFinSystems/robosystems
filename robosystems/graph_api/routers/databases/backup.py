@@ -6,7 +6,7 @@ LadybugDB databases.
 
 Supports three backup types:
 - standard: Existing BackupManager flow (ZIP, optional encrypt, S3 upload)
-- replica: Raw .lbug upload to S3 via OnInstanceBackupService (for S3 ATTACH)
+- replica: Raw .lbug upload to S3 via OnInstanceBackupService (for replica fleet download)
 - shared_repository: Compressed tar.gz to S3 via OnInstanceBackupService
 """
 
@@ -129,7 +129,7 @@ async def create_backup(
 
   Backup types:
   - **standard**: Full dump ZIP, optionally encrypted, uploaded to S3
-  - **replica**: Raw .lbug uploaded to S3 (for S3 ATTACH replicas)
+  - **replica**: Raw .lbug uploaded to S3 (downloaded by replica fleet at startup)
   - **shared_repository**: Compressed tar.gz uploaded to S3 (for subscriber downloads)
 
   For replica/shared_repository types, s3_destination is required.

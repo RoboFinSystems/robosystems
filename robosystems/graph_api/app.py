@@ -56,98 +56,36 @@ def create_app() -> FastAPI:
     # Startup
     logger.info("Graph API starting up")
 
-    # S3 ATTACH warmup for replicas (runs in background thread)
-    async def warmup_s3_attach():
-      """Warm up S3 ATTACH databases with per-repo Database objects.
+    # Replica warmup: open local databases and warm buffer pool before serving traffic
+    if os.getenv("LBUG_ROLE") == "replica":
 
-      Phase 1: Create per-repo databases — each repo gets its own in-memory
-      Database with one S3 ATTACH. Kuzu only supports one ATTACHed Kuzu database
-      per Database object, so repos cannot share a single Database.
+      async def warmup_local_databases():
+        """Warm up local databases by opening them and running a simple query."""
+        from robosystems.graph_api.routers.health import mark_replica_ready
 
-      Phase 2: Parallel warmup queries — each repo gets a connection and runs
-      a warmup query to populate the buffer pool cache.
+        def _do_warmup():
+          from robosystems.graph_api.core.ladybug import get_ladybug_service
 
-      Runs in a thread pool to avoid blocking the event loop, allowing the
-      health endpoint to respond with 503 during warmup.
-      """
-      from robosystems.graph_api.routers.health import (
-        is_s3_attach_mode,
-        mark_s3_attach_ready,
-      )
+          service = get_ladybug_service()
+          databases = service.db_manager.list_databases()
+          logger.info(f"Warming up {len(databases)} local databases...")
+          for db_name in databases:
+            try:
+              with service.db_manager.get_connection(db_name, read_only=True) as conn:
+                conn.execute("MATCH (n) RETURN count(n) LIMIT 1")
+              logger.info(f"Warmed up database: {db_name}")
+            except Exception as e:
+              logger.error(f"Warmup failed for {db_name}: {e}")
+              raise
 
-      if not is_s3_attach_mode():
-        return
+        try:
+          await asyncio.to_thread(_do_warmup)
+          mark_replica_ready()
+          logger.info("Replica warmup complete - ready for traffic")
+        except Exception as e:
+          logger.error(f"Replica warmup failed: {e}")
 
-      s3_prefix = os.getenv("LBUG_S3_ATTACH_PREFIX", "")
-      logger.info(f"S3 ATTACH warmup starting with prefix: {s3_prefix}")
-
-      def _do_warmup():
-        """Blocking warmup work - runs in thread pool."""
-        from concurrent.futures import ThreadPoolExecutor, as_completed
-
-        from robosystems.graph_api.core.ladybug.pool import get_connection_pool
-
-        shared_repos = [
-          r.strip()
-          for r in os.getenv("SHARED_REPOSITORIES", "sec").split(",")
-          if r.strip()
-        ]
-
-        pool = get_connection_pool()
-
-        # Phase 1: Per-repo S3 databases (each repo gets its own Database + ATTACH)
-        logger.info(f"Phase 1: Creating {len(shared_repos)} S3 databases...")
-        attached = pool.initialize_s3_databases(shared_repos, s3_prefix)
-        if len(attached) < len(shared_repos):
-          failed = set(shared_repos) - set(attached)
-          raise RuntimeError(f"Failed to initialize S3 databases: {failed}")
-
-        # Phase 2: Parallel warmup queries
-        logger.info(f"Phase 2: Running warmup queries for {len(attached)} repos...")
-
-        def _warmup_single_repo(repo: str):
-          with pool.get_connection(repo, read_only=True) as conn:
-            logger.info(f"Running warmup query for {repo}...")
-            result = conn.execute("MATCH (n) RETURN count(n) as cnt LIMIT 1")
-            # Handle both single QueryResult and list[QueryResult] return types
-            if isinstance(result, list):
-              for r in result:
-                r.close()
-            else:
-              result.close()
-            logger.info(f"Warmup query complete for {repo}")
-
-        if len(attached) == 1:
-          _warmup_single_repo(attached[0])
-        else:
-          with ThreadPoolExecutor(max_workers=len(attached)) as executor:
-            futures = {
-              executor.submit(_warmup_single_repo, repo): repo for repo in attached
-            }
-            for future in as_completed(futures):
-              repo = futures[future]
-              try:
-                future.result()
-              except Exception as e:
-                logger.error(f"Warmup query failed for {repo}: {e}")
-                raise
-
-      try:
-        # Run blocking warmup in thread pool to avoid blocking event loop
-        await asyncio.to_thread(_do_warmup)
-
-        # Mark as ready - health check will now return 200
-        mark_s3_attach_ready()
-        logger.info("S3 ATTACH warmup complete - replica ready for traffic")
-
-      except Exception as e:
-        logger.error(f"S3 ATTACH warmup failed: {e}")
-        # Don't mark as ready - health check will keep returning 503
-        # The instance will eventually be terminated and replaced
-
-    # Start warmup in background (don't block app startup)
-    if os.getenv("LBUG_S3_ATTACH_PREFIX") and os.getenv("LBUG_ROLE") == "replica":
-      asyncio.create_task(warmup_s3_attach())
+      asyncio.create_task(warmup_local_databases())
 
     # Clear stale extension cache from persistent volume
     # LadybugDB caches extensions in {home_directory}/.lbug/extension/

@@ -7,7 +7,7 @@ All heavy work (CHECKPOINT, compression, upload) happens on-instance,
 avoiding the need to transfer large databases over HTTP.
 
 Supports three backup types:
-- replica: Raw .lbug upload to S3 (for S3 ATTACH replicas)
+- replica: Raw .lbug upload to S3 (downloaded by replica fleet at startup)
 - shared_repository: Compressed tar.gz to S3 (for subscriber downloads)
 - standard: ZIP + optional encrypt to S3 (existing user backup flow)
 """
@@ -173,7 +173,7 @@ class OnInstanceBackupService:
     task_id: str,
     db_size: int,
   ) -> dict[str, Any]:
-    """Raw .lbug upload to S3 (no compression) for S3 ATTACH replicas."""
+    """Raw .lbug upload to S3 (no compression) for replica fleet download."""
     logger.info(f"[Task {task_id}] Uploading raw .lbug to s3://{bucket}/{key}")
 
     s3_client = self._get_s3_client()

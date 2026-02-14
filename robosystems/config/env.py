@@ -967,6 +967,7 @@ class EnvConfig:
             # Memory settings (from graph.yml tier config)
             "max_memory_mb": instance_config.get("max_memory_mb", 2048),
             "memory_per_db_mb": instance_config.get("memory_per_db_mb", 0),
+            "memory_per_subgraph_mb": instance_config.get("memory_per_subgraph_mb", 0),
             # Performance settings
             "chunk_size": instance_config.get("chunk_size", 1000),
             "query_timeout": instance_config.get(
@@ -1006,6 +1007,7 @@ class EnvConfig:
       # Memory settings (defaults for local dev)
       "max_memory_mb": get_int_env("LBUG_MAX_MEMORY_MB", 2048),
       "memory_per_db_mb": get_int_env("LBUG_MAX_MEMORY_PER_DB_MB", 0),
+      "memory_per_subgraph_mb": 0,
       # Performance settings
       "chunk_size": get_int_env("LBUG_CHUNK_SIZE", 1000),
       "query_timeout": cls.GRAPH_QUERY_TIMEOUT,

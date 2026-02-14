@@ -4,9 +4,9 @@ Simple health check endpoint for load balancers and monitoring.
 This module provides a minimal health check endpoint that returns
 quickly for infrastructure health monitoring.
 
-For S3 ATTACH replicas, the health check returns 503 until the database
-is fully loaded and ready to serve queries. This prevents ALB from routing
-traffic to instances still warming up (which can take ~10 minutes).
+For shared replicas, the health check returns 503 until databases
+are fully warmed up and ready to serve queries. This prevents ALB
+from routing traffic to instances still warming up.
 """
 
 import os
@@ -21,34 +21,26 @@ from robosystems.logger import logger
 
 router = APIRouter(tags=["Cluster Health"])
 
-# Track S3 ATTACH warmup status (thread-safe for multi-worker setups)
-# This is set to True after the first successful query to the attached database
-_s3_attach_ready = False
-_s3_attach_lock = threading.Lock()
+# Track replica warmup status (thread-safe for multi-worker setups)
+_replica_ready = False
+_replica_lock = threading.Lock()
 
 
-def mark_s3_attach_ready():
-  """Mark the S3 ATTACH database as ready to serve queries."""
-  global _s3_attach_ready
-  with _s3_attach_lock:
-    _s3_attach_ready = True
-  logger.info("S3 ATTACH database marked as ready - health check will now return 200")
-
-
-def is_s3_attach_mode() -> bool:
-  """Check if running in S3 ATTACH replica mode."""
-  return (
-    bool(os.getenv("LBUG_S3_ATTACH_PREFIX")) and os.getenv("LBUG_ROLE") == "replica"
-  )
+def mark_replica_ready():
+  """Mark the replica as ready to serve queries."""
+  global _replica_ready
+  with _replica_lock:
+    _replica_ready = True
+  logger.info("Replica marked as ready - health check will now return 200")
 
 
 def is_warming_up() -> bool:
-  """Check if the replica is still warming up (S3 ATTACH in progress).
+  """Check if the replica is still warming up.
 
-  Returns True if we're in S3 ATTACH mode and the database hasn't finished loading.
+  Returns True if we're a replica and databases haven't finished loading.
   Use this to return 503 instead of 404 when databases aren't found during warmup.
   """
-  return is_s3_attach_mode() and not _s3_attach_ready
+  return os.getenv("LBUG_ROLE") == "replica" and not _replica_ready
 
 
 def _get_service_for_health():
@@ -72,8 +64,8 @@ async def health_check(
   Returns 200 OK if the service is running and can respond to requests.
   This is a lightweight check that doesn't perform deep validation.
 
-  For S3 ATTACH replicas, returns 503 until the database is fully loaded.
-  This prevents ALB from routing traffic during the ~10 min warmup period.
+  For shared replicas, returns 503 until databases are fully warmed up.
+  This prevents ALB from routing traffic during the warmup period.
 
   Used by:
   - AWS Application Load Balancer health checks
@@ -81,14 +73,14 @@ async def health_check(
   - EC2 instance health monitoring
   - Kubernetes liveness probes
   """
-  # S3 ATTACH mode: return 503 until database is ready
-  if is_s3_attach_mode() and not _s3_attach_ready:
-    logger.debug("S3 ATTACH warmup in progress - returning 503")
+  # Replica mode: return 503 until databases are ready
+  if os.getenv("LBUG_ROLE") == "replica" and not _replica_ready:
+    logger.debug("Replica warmup in progress - returning 503")
     return JSONResponse(
       status_code=503,
       content={
         "status": "warming",
-        "message": "S3 ATTACH database warming up - not ready for traffic",
+        "message": "Replica warming up - not ready for traffic",
       },
     )
 

@@ -307,8 +307,8 @@ production:
       instance:
         type: m7g.large # General purpose ARM64 - cost-effective for read-only (8GB RAM)
         max_memory_mb: 5120 # 5GB available (8GB - 2GB OS - 1GB app overhead)
-        # No memory_per_db_mb: all S3 repos share a single buffer pool
-        # sized to max_memory_mb. LadybugDB manages memory dynamically.
+        memory_per_db_mb: 3584 # 3.5GB for parent databases (sec)
+        memory_per_subgraph_mb: 2048 # 2GB for subgraphs (sec_historical) - oversubscribed
 
 # =============================================================================
 # STAGING ENVIRONMENT
@@ -540,8 +540,8 @@ staging:
       instance:
         type: m7g.large # General purpose ARM64 - cost-effective for read-only (8GB RAM)
         max_memory_mb: 5120 # 5GB available (8GB - 2GB OS - 1GB app overhead)
-        # No memory_per_db_mb: all S3 repos share a single buffer pool
-        # sized to max_memory_mb. LadybugDB manages memory dynamically.
+        memory_per_db_mb: 3584 # 3.5GB for parent databases (sec)
+        memory_per_subgraph_mb: 2048 # 2GB for subgraphs (sec_historical) - oversubscribed
 
 # =============================================================================
 # DEVELOPMENT ENVIRONMENT

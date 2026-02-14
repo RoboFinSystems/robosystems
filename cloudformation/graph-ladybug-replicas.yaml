@@ -1,5 +1,6 @@
 Description: RoboSystems Shared Repository Replicas (LadybugDB) - Read-Only Fleet with ALB
-# Replicas use LadybugDB S3 ATTACH to connect to S3-hosted database files
+# Replicas download .lbug database files from S3 to local disk during startup,
+# then serve them as local read-only databases using the standard connection pool.
 # Database is synced to S3 by Dagster's shared_repository_s3_sync job
 
 Parameters:
@@ -50,15 +51,15 @@ Parameters:
   SharedRepositories:
     Type: String
     Default: sec
-    Description: Comma-separated shared repository names to ATTACH (e.g., sec,sec_historical)
+    Description: Comma-separated shared repository names to download from S3 (e.g., sec,sec_historical)
     AllowedPattern: "^[a-z0-9_]+(,[a-z0-9_]+)*$"
     ConstraintDescription: Comma-separated list of lowercase alphanumeric names with underscores
   RootVolumeSize:
     Type: Number
-    Default: 100
+    Default: 150
     MinValue: 50
     MaxValue: 500
-    Description: Root volume size in GB (must accommodate OS ~10GB + httpfs cache up to full DB size)
+    Description: Root volume size in GB (must accommodate OS ~10GB + downloaded database files)
 
   # Auto-scaling Configuration
   MinInstances:
@@ -109,10 +110,10 @@ Parameters:
     Description: Target memory utilization percentage for auto scaling
   InstanceWarmup:
     Type: Number
-    Default: 1200
+    Default: 2400
     MinValue: 0
     MaxValue: 3600
-    Description: Seconds to ignore new instance metrics during initialization (S3 download time)
+    Description: Seconds to ignore new instance metrics during initialization (download + warmup time)
 
   # Cache Configuration
   ValkeyClientSecurityGroupId:
@@ -262,7 +263,7 @@ Resources:
                 Resource:
                   - !Sub "${DeploymentBucketArn}/*"
                   - !Ref DeploymentBucketArn
-              # S3 read access for shared database ATTACH (httpfs extension)
+              # S3 read access for shared database download
               - Effect: Allow
                 Action:
                   - s3:GetObject
@@ -349,9 +350,8 @@ Resources:
         SecurityGroupIds:
           - !Ref ReplicaSecurityGroup
           - !Ref ValkeyClientSecurityGroupId
-        # Root volume only - no EBS data volume needed for S3 ATTACH mode
-        # S3 ATTACH uses httpfs to read database directly from S3 with local caching
-        # Size must accommodate OS (~10GB) + httpfs cache (up to full DB size)
+        # Root volume only - databases are downloaded from S3 to local disk during startup
+        # Size must accommodate OS (~10GB) + downloaded database files
         BlockDeviceMappings:
           - DeviceName: /dev/xvda
             Ebs:
@@ -459,12 +459,11 @@ Resources:
       TargetGroupARNs:
         - !Ref ReplicaTargetGroup
       HealthCheckType: ELB
-      # Grace period for S3 ATTACH mode - must exceed warmup time
-      # S3 ATTACH downloads ~85GB database which takes ~25-30 min
-      # Set to 35 min (2100s) to provide buffer. During this time, health can
-      # return 503 (blocking ALB traffic) without ASG marking instance unhealthy.
-      HealthCheckGracePeriod: 2100
-      # Replicas take ~20 min to initialize (S3 ATTACH download).
+      # Grace period: S3 download (~20-30 min for large databases) + container start (~2 min) + warmup (~1 min)
+      # Set to 40 min (2400s) to provide buffer. During this time, no HTTP endpoint
+      # exists (download happens before container starts), so ALB health checks fail
+      # but ASG won't mark the instance unhealthy until the grace period expires.
+      HealthCheckGracePeriod: 2400
       # DefaultInstanceWarmup tells target tracking scaling to ignore new instance
       # metrics during warmup, preventing premature scale-out/in decisions.
       DefaultInstanceWarmup: !Ref InstanceWarmup
@@ -481,14 +480,14 @@ Resources:
     CreationPolicy:
       ResourceSignal:
         Count: !If [HasMinInstances, !Ref MinInstances, 0]
-        # S3 ATTACH downloads ~85GB database which takes ~25-30 min
-        Timeout: PT35M
+        # S3 download (~20-30 min) + system setup (~2 min) + container warmup (~1 min)
+        Timeout: PT45M
     UpdatePolicy:
       AutoScalingRollingUpdate:
         MinInstancesInService: !If [HasMinInstances, 1, 0]
         MaxBatchSize: 1
-        # Rolling updates also need time for S3 ATTACH warmup
-        PauseTime: PT35M
+        # Rolling updates also need time for download + warmup
+        PauseTime: PT45M
         WaitOnResourceSignals: !If [HasMinInstances, true, false]
 
   # CPU-based Auto Scaling

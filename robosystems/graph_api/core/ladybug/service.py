@@ -88,7 +88,7 @@ except Exception:
 
 
 def _raise_database_not_found(graph_id: str) -> None:
-  """Raise 503 during S3 ATTACH warmup, otherwise 404."""
+  """Raise 503 during replica warmup, otherwise 404."""
   from robosystems.graph_api.routers.health import is_warming_up
 
   if is_warming_up():
@@ -96,7 +96,7 @@ def _raise_database_not_found(graph_id: str) -> None:
       status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
       detail={
         "error": "Database warming up",
-        "reason": "S3 ATTACH database is still loading",
+        "reason": "Replica database is still loading",
         "status": "warming",
         "retry_after": 30,
       },

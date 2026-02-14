@@ -1,6 +1,7 @@
 #!/bin/bash
 # LadybugDB Shared Replica Instance UserData Script
-# Replicas use S3 ATTACH to connect to S3-hosted database files via httpfs
+# Replicas download .lbug database files from S3 to local disk during startup,
+# then serve them as local read-only databases using the standard connection pool.
 # This script uses the same shared components as writers for consistency
 
 set -e
@@ -85,6 +86,26 @@ EOF
 
 systemctl restart docker
 
+# ==================================================================================
+# CLOUDWATCH SETUP (Early - before database download for visibility)
+# ==================================================================================
+echo "Setting up CloudWatch agent before database download..."
+aws s3 cp s3://${DEPLOYMENT_BUCKET}/userdata/common/setup-cloudwatch-graph.sh \
+    /usr/local/bin/setup-cloudwatch-graph.sh || {
+  echo "ERROR: Could not download CloudWatch setup script from S3"
+  exit 1
+}
+chmod +x /usr/local/bin/setup-cloudwatch-graph.sh
+
+export DATABASE_TYPE="ladybug"
+export NODE_TYPE="${LBUG_NODE_TYPE}"
+export ENVIRONMENT="${ENVIRONMENT}"
+export CLOUDWATCH_NAMESPACE="${CLOUDWATCH_NAMESPACE}"
+export DATA_DIR="/mnt/ladybug-data"
+
+/usr/local/bin/setup-cloudwatch-graph.sh
+echo "CloudWatch agent started - logs now visible in /setup log group"
+
 # Login to ECR
 echo "Logging into ECR..."
 aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${ECR_URI} || {
@@ -93,38 +114,40 @@ aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS 
 }
 
 # ==================================================================================
-# STORAGE SETUP (S3 ATTACH mode: no local data volume needed)
+# STORAGE SETUP (Download shared databases from S3)
 # ==================================================================================
-echo "Setting up S3 ATTACH mode (no local data volume)..."
+echo "Downloading shared databases from S3..."
 
-# Validate S3 ATTACH prefix is set
-if [ -z "${LBUG_S3_ATTACH_PREFIX:-}" ]; then
-  echo "ERROR: LBUG_S3_ATTACH_PREFIX must be set for S3 ATTACH mode"
-  exit 1
-fi
+SHARED_DATABASE_S3_PREFIX="${LBUG_S3_ATTACH_PREFIX:?"LBUG_S3_ATTACH_PREFIX must be set"}"
 
-echo "S3 ATTACH Prefix: ${LBUG_S3_ATTACH_PREFIX}"
+mkdir -p /mnt/ladybug-data/{logs,cache,databases/lbug-dbs}
 
-# Create directories for logs and cache only (no database storage needed)
-# Database will be loaded via httpfs directly from S3
-mkdir -p /mnt/ladybug-data/{logs,cache,databases}
+IFS=',' read -ra REPOS <<< "${SHARED_REPOSITORIES}"
+for REPO in "${REPOS[@]}"; do
+  REPO=$(echo "$REPO" | tr -d ' ')
+  S3_URI="${SHARED_DATABASE_S3_PREFIX%/}/${REPO}.lbug"
+  LOCAL_PATH="/mnt/ladybug-data/databases/lbug-dbs/${REPO}.lbug"
+  echo "Downloading ${REPO}: ${S3_URI} -> ${LOCAL_PATH}"
+  START_TIME=$(date +%s)
+  aws s3 cp "${S3_URI}" "${LOCAL_PATH}" --region "${AWS_REGION}" --only-show-errors || {
+    echo "ERROR: Failed to download ${REPO} from ${S3_URI}"
+    exit 1
+  }
+  ELAPSED=$(( $(date +%s) - START_TIME ))
+  FILE_SIZE_MB=$(( $(stat -c%s "${LOCAL_PATH}" 2>/dev/null || stat -f%z "${LOCAL_PATH}") / 1048576 ))
+  echo "Downloaded ${REPO}: ${FILE_SIZE_MB}MB in ${ELAPSED}s"
+done
+
 chown -R 1000:1000 /mnt/ladybug-data
 chmod -R 755 /mnt/ladybug-data
-
-echo "✅ S3 ATTACH mode configured - databases will be loaded from S3 via httpfs"
+echo "All shared databases downloaded to /mnt/ladybug-data/databases/lbug-dbs/"
 
 # ==================================================================================
 # DOWNLOAD SHARED SCRIPTS
 # ==================================================================================
 echo "Downloading shared infrastructure scripts from S3..."
 
-# Download common graph scripts
-aws s3 cp s3://${DEPLOYMENT_BUCKET}/userdata/common/setup-cloudwatch-graph.sh \
-    /usr/local/bin/setup-cloudwatch-graph.sh || {
-  echo "ERROR: Could not download CloudWatch setup script from S3"
-  exit 1
-}
-
+# Download remaining common scripts (CloudWatch already downloaded above)
 aws s3 cp s3://${DEPLOYMENT_BUCKET}/userdata/common/register-graph-instance.sh \
     /usr/local/bin/register-graph-instance.sh || {
   echo "ERROR: Could not download instance registration script from S3"
@@ -144,21 +167,9 @@ aws s3 cp s3://${DEPLOYMENT_BUCKET}/userdata/common/graph-health-check.sh \
 }
 
 # Make scripts executable
-chmod +x /usr/local/bin/setup-cloudwatch-graph.sh
 chmod +x /usr/local/bin/register-graph-instance.sh
 chmod +x /usr/local/bin/run-graph-container.sh
 chmod +x /usr/local/bin/graph-health-check.sh
-
-# ==================================================================================
-# CLOUDWATCH SETUP (Using Shared Script)
-# ==================================================================================
-export DATABASE_TYPE="ladybug"
-export NODE_TYPE="${LBUG_NODE_TYPE}"
-export ENVIRONMENT="${ENVIRONMENT}"
-export CLOUDWATCH_NAMESPACE="${CLOUDWATCH_NAMESPACE}"
-export DATA_DIR="/mnt/ladybug-data"
-
-/usr/local/bin/setup-cloudwatch-graph.sh
 
 # ==================================================================================
 # INSTANCE REGISTRATION (Using Shared Script)
@@ -208,7 +219,6 @@ export LOGS_MOUNT_TARGET="/app/logs"
 export DOCKER_PROFILE="ladybug-shared-writer"
 export REPOSITORY_TYPE="${REPOSITORY_TYPE}"
 export SHARED_REPOSITORIES="${SHARED_REPOSITORIES}"
-export LBUG_S3_ATTACH_PREFIX="${LBUG_S3_ATTACH_PREFIX}"
 
 # Persist variables to /etc/environment for health checks and restarts
 echo "DATABASE_TYPE=ladybug" >> /etc/environment
@@ -225,7 +235,6 @@ echo "AWS_REGION=${AWS_REGION}" >> /etc/environment
 echo "CLUSTER_TIER=${CLUSTER_TIER}" >> /etc/environment
 echo "REPOSITORY_TYPE=${REPOSITORY_TYPE}" >> /etc/environment
 echo "SHARED_REPOSITORIES=${SHARED_REPOSITORIES}" >> /etc/environment
-echo "LBUG_S3_ATTACH_PREFIX=${LBUG_S3_ATTACH_PREFIX}" >> /etc/environment
 echo "DATABASE_ENDPOINT=${DATABASE_ENDPOINT:-}" >> /etc/environment
 echo "DATABASE_PORT=${DATABASE_PORT:-5432}" >> /etc/environment
 echo "VALKEY_URL=${VALKEY_URL:-}" >> /etc/environment
