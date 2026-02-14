@@ -86,7 +86,12 @@ on:
         description: "Seconds to ignore new instance metrics during initialization (S3 download time)"
         required: false
         type: string
-        default: "1200"
+        default: "900"
+      health_check_grace_period:
+        description: "Seconds before ASG checks ALB health on new instances (must cover download + startup)"
+        required: false
+        type: string
+        default: "900"
 
       # Docker Configuration
       ecr_image_tag:
@@ -102,10 +107,10 @@ on:
         type: string
         default: "sec"
       root_volume_size:
-        description: "Root volume size in GB (must fit OS + httpfs cache for full DB)"
+        description: "Root volume size in GB (must fit OS + downloaded shared databases)"
         required: false
         type: string
-        default: "100"
+        default: "150"
 
       # Cache Configuration
       valkey_sg_id:
@@ -312,6 +317,7 @@ jobs:
             ParameterKey=CPUTargetValue,ParameterValue=${{ inputs.cpu_target_value }} \
             ParameterKey=MemoryTargetValue,ParameterValue=${{ inputs.memory_target_value }} \
             ParameterKey=InstanceWarmup,ParameterValue=${{ inputs.instance_warmup }} \
+            ParameterKey=HealthCheckGracePeriod,ParameterValue=${{ inputs.health_check_grace_period }} \
             ParameterKey=DeploymentBucketArn,ParameterValue=${{ steps.s3_config.outputs.deployment_bucket_arn }} \
             ParameterKey=ECRRepositoryUrl,ParameterValue=${{ steps.ecr_config.outputs.ecr_url }} \
             ParameterKey=ECRImageTag,ParameterValue=${{ inputs.ecr_image_tag }} \

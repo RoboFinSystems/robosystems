@@ -170,7 +170,12 @@ on:
         required: false
         type: string
         description: Seconds to ignore new replica metrics during initialization
-        default: "1200"
+        default: "900"
+      shared_replicas_health_check_grace_period:
+        required: false
+        type: string
+        description: Seconds before ASG checks ALB health on new replica instances
+        default: "900"
 
       # AMI Configuration
       ami_id:
@@ -473,6 +478,7 @@ jobs:
       cpu_target_value: ${{ inputs.shared_replicas_cpu_target }}
       memory_target_value: ${{ inputs.shared_replicas_memory_target }}
       instance_warmup: ${{ inputs.shared_replicas_instance_warmup }}
+      health_check_grace_period: ${{ inputs.shared_replicas_health_check_grace_period }}
       ecr_image_tag: ${{ inputs.ecr_image_tag }}
       # Cache Configuration
       valkey_sg_id: ${{ inputs.valkey_sg_id }}

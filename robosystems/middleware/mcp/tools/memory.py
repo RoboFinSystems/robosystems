@@ -26,6 +26,7 @@ def _get_is_shared_repository_or_subgraph():
     _is_shared_repository_or_subgraph = is_shared_repository_or_subgraph
   return _is_shared_repository_or_subgraph
 
+
 # Write operations allowed in Cypher
 ALLOWED_WRITE_KEYWORDS = {"CREATE", "MERGE", "SET", "DELETE", "DETACH DELETE", "REMOVE"}
 
