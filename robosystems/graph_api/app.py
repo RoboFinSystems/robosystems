@@ -111,14 +111,11 @@ def create_app() -> FastAPI:
           with pool.get_connection(repo, read_only=True) as conn:
             logger.info(f"Running warmup query for {repo}...")
             result = conn.execute("MATCH (n) RETURN count(n) as cnt LIMIT 1")
+            # Handle both single QueryResult and list[QueryResult] return types
             if isinstance(result, list):
               for r in result:
-                if hasattr(r, "fetchall"):
-                  r.fetchall()
-                if hasattr(r, "close"):
-                  r.close()
+                r.close()
             else:
-              result.fetchall()
               result.close()
             logger.info(f"Warmup query complete for {repo}")
 
