@@ -147,8 +147,11 @@ def validate_repository_access(
   """
   Validate that a user has access to a shared repository.
 
+  For subgraphs (e.g., "sec_historical"), access is checked against the
+  parent repository ("sec") since subgraphs inherit parent permissions.
+
   Args:
-      graph_id: Repository identifier
+      graph_id: Repository identifier or subgraph thereof
       user_id: User ID to check
       operation_type: Type of operation (read, write, admin)
 
@@ -158,6 +161,7 @@ def validate_repository_access(
   if not is_shared_repository(graph_id):
     return False
 
+  from robosystems.config.shared_repositories import resolve_shared_repository_parent
   from robosystems.database import session
   from robosystems.models.iam import (
     UserRepository,
@@ -168,7 +172,9 @@ def validate_repository_access(
 
   from .database import get_repository_database_name
 
-  repository_name = get_repository_database_name(graph_id)
+  # Resolve subgraph to parent for permission check
+  parent_repo_id = resolve_shared_repository_parent(graph_id)
+  repository_name = get_repository_database_name(parent_repo_id)
   access_level = UserRepository.get_user_access_level(
     user_id, repository_name, session()
   )

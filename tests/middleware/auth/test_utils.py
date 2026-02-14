@@ -101,10 +101,13 @@ class TestValidateAPIKeyWithGraph:
   @patch("robosystems.middleware.auth.utils.api_key_cache")
   @patch("robosystems.middleware.auth.utils.UserAPIKey")
   @patch("robosystems.middleware.auth.utils.GraphUser")
-  @patch("robosystems.middleware.graph.utils.MultiTenantUtils")
+  @patch(
+    "robosystems.config.shared_repositories.is_shared_repository_or_subgraph",
+    return_value=False,
+  )
   @patch("robosystems.middleware.auth.utils.SecurityAuditLogger")
   def test_validate_api_key_with_graph_standard_db(
-    self, mock_audit, mock_utils, mock_user_graph, mock_api_key_class, mock_cache
+    self, mock_audit, mock_is_shared, mock_user_graph, mock_api_key_class, mock_cache
   ):
     """Test API key validation with standard database access."""
     api_key = "test_api_key"
@@ -113,9 +116,6 @@ class TestValidateAPIKeyWithGraph:
     # Setup cache miss
     mock_cache.get_cached_api_key_validation.return_value = None
     mock_cache.get_cached_graph_access.return_value = None
-
-    # Setup multi-tenant check
-    mock_utils.is_shared_repository.return_value = False
 
     # Setup user and API key
     mock_user = Mock(spec=User)
@@ -138,16 +138,22 @@ class TestValidateAPIKeyWithGraph:
 
     # Assertions
     assert result == mock_user
-    mock_utils.is_shared_repository.assert_called_once_with(graph_id)
+    mock_is_shared.assert_called_once_with(graph_id)
     mock_user_graph.user_has_access.assert_called_once()
     mock_key_record.update_last_used.assert_called_once()
 
   @patch("robosystems.middleware.auth.utils.api_key_cache")
   @patch("robosystems.middleware.auth.utils.UserAPIKey")
-  @patch("robosystems.middleware.graph.utils.MultiTenantUtils")
+  @patch(
+    "robosystems.middleware.graph.utils.MultiTenantUtils.validate_repository_access"
+  )
+  @patch(
+    "robosystems.config.shared_repositories.is_shared_repository_or_subgraph",
+    return_value=True,
+  )
   @patch("robosystems.middleware.auth.utils.SecurityAuditLogger")
   def test_validate_api_key_with_graph_shared_repository(
-    self, mock_audit, mock_utils, mock_api_key_class, mock_cache
+    self, mock_audit, mock_is_shared, mock_validate_repo, mock_api_key_class, mock_cache
   ):
     """Test API key validation with shared repository access."""
     api_key = "test_api_key"
@@ -157,9 +163,8 @@ class TestValidateAPIKeyWithGraph:
     mock_cache.get_cached_api_key_validation.return_value = None
     mock_cache.get_cached_graph_access.return_value = None
 
-    # Setup multi-tenant check
-    mock_utils.is_shared_repository.return_value = True
-    mock_utils.validate_repository_access.return_value = True
+    # Setup repository access validation
+    mock_validate_repo.return_value = True
 
     # Setup user and API key
     mock_user = Mock(spec=User)
@@ -181,10 +186,8 @@ class TestValidateAPIKeyWithGraph:
 
     # Assertions
     assert result == mock_user
-    mock_utils.is_shared_repository.assert_called_once_with(graph_id)
-    mock_utils.validate_repository_access.assert_called_once_with(
-      graph_id, "user123", "read"
-    )
+    mock_is_shared.assert_called_once_with(graph_id)
+    mock_validate_repo.assert_called_once_with(graph_id, "user123", "read")
 
   def test_validate_api_key_with_graph_empty_params(self):
     """Test validation with empty parameters."""

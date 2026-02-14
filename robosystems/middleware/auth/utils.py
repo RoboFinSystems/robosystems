@@ -186,12 +186,15 @@ def validate_api_key_with_graph(
     return None
 
   # Check if the user has access to the specified graph
-  # Special handling for SEC database
   from ..graph.utils import MultiTenantUtils
 
   has_access = False  # Initialize variable
-  if MultiTenantUtils.is_shared_repository(graph_id):
-    # Use generic repository access validation
+
+  # Check shared repositories (including subgraphs like "sec_historical")
+  from robosystems.config.shared_repositories import is_shared_repository_or_subgraph
+
+  if is_shared_repository_or_subgraph(graph_id):
+    # Use generic repository access validation (resolves subgraph to parent)
     has_access = MultiTenantUtils.validate_repository_access(
       graph_id,
       key_record.user_id,

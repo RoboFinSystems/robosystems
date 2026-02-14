@@ -11,7 +11,11 @@ from robosystems.logger import logger
 
 def is_shared_repository(graph_id: str | None) -> bool:
   """
-  Check if the given graph_id refers to a shared repository.
+  Check if the given graph_id refers to a registered shared repository.
+
+  Note: This checks exact parent repository IDs only (e.g., "sec").
+  For checking subgraphs too (e.g., "sec_historical"), use
+  ``is_shared_repository_or_subgraph`` from the config registry.
 
   Args:
       graph_id: Graph identifier to check
