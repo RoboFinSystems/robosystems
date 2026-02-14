@@ -234,16 +234,19 @@ class LadybugConnectionPool:
           )
           time.sleep(wait_time)
 
+      # Unreachable — last attempt raises on failure, but satisfies type checker
+      raise RuntimeError(f"S3 ATTACH failed for {repo} after {max_retries} retries")
+
     except Exception:
-      # Clean up on failure
+      # Clean up on failure — close both connection and database
       try:
         setup_conn.close()
-      except Exception:
-        pass
+      except Exception as e:
+        logger.debug(f"Error closing setup connection during cleanup for {repo}: {e}")
       try:
         db.close()
-      except Exception:
-        pass
+      except Exception as e:
+        logger.debug(f"Error closing database during cleanup for {repo}: {e}")
       raise
     finally:
       # Close setup connection — ATTACH + httpfs persist on Database
