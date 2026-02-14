@@ -85,6 +85,49 @@ def is_shared_repository(repo_id: str | None) -> bool:
   return repo_id in _manifests
 
 
+def is_shared_repository_or_subgraph(graph_id: str | None) -> bool:
+  """Check if a graph ID is a shared repository OR a subgraph of one.
+
+  Examples:
+      is_shared_repository_or_subgraph("sec") -> True
+      is_shared_repository_or_subgraph("sec_historical") -> True
+      is_shared_repository_or_subgraph("kg123") -> False
+  """
+  if graph_id is None:
+    return False
+  if is_shared_repository(graph_id):
+    return True
+  # Check if it's a subgraph of a shared repo (e.g., "sec_historical")
+  if "_" in graph_id:
+    parent = graph_id.split("_", 1)[0]
+    return is_shared_repository(parent)
+  return False
+
+
+def resolve_shared_repository_parent(graph_id: str) -> str:
+  """Resolve a graph ID to its shared repository parent.
+
+  If graph_id is already a parent repo, returns it unchanged.
+  If it's a subgraph (e.g., "sec_historical"), returns the parent ("sec").
+
+  Args:
+      graph_id: Graph identifier that is a shared repo or subgraph of one.
+
+  Returns:
+      The parent shared repository ID.
+
+  Raises:
+      ValueError: If graph_id is not a shared repository or subgraph of one.
+  """
+  if is_shared_repository(graph_id):
+    return graph_id
+  if "_" in graph_id:
+    parent = graph_id.split("_", 1)[0]
+    if is_shared_repository(parent):
+      return parent
+  raise ValueError(f"Not a shared repository or subgraph: {graph_id}")
+
+
 def get_manifest(repo_id: str) -> SharedRepositoryManifest | None:
   """Get the manifest for a shared repository, or None if not found."""
   _ensure_loaded()

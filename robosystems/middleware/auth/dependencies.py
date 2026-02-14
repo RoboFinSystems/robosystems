@@ -318,12 +318,16 @@ async def get_current_user_with_graph(
 
         if has_access is None:
           # Cache miss - check database and cache result
+          # Check shared repositories (including subgraphs like "sec_historical")
+          from robosystems.config.shared_repositories import (
+            is_shared_repository_or_subgraph,
+          )
+
           from ...models.iam import GraphUser
           from ..graph.utils import MultiTenantUtils
 
-          # Check if this is a shared repository or user graph
-          if MultiTenantUtils.is_shared_repository(graph_id):
-            # Use generic repository access validation for shared repositories
+          if is_shared_repository_or_subgraph(graph_id):
+            # Use generic repository access validation (resolves subgraph to parent)
             has_access = MultiTenantUtils.validate_repository_access(
               graph_id,
               user_id,

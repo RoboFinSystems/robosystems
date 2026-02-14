@@ -13,7 +13,6 @@ from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
 from robosystems.logger import logger
-from robosystems.middleware.graph.utils import MultiTenantUtils
 
 # Import Graph MCP components
 from robosystems.middleware.mcp import (
@@ -51,8 +50,11 @@ async def validate_mcp_access(
   Raises:
       HTTPException: If access denied
   """
-  if MultiTenantUtils.is_shared_repository(graph_id):
-    # Shared repository - validate repository access
+  # Check shared repositories (including subgraphs like "sec_historical")
+  from robosystems.config.shared_repositories import is_shared_repository_or_subgraph
+
+  if is_shared_repository_or_subgraph(graph_id):
+    # Shared repository - validate repository access (resolves subgraph to parent)
     from robosystems.middleware.auth.utils import validate_repository_access
 
     if not validate_repository_access(current_user, graph_id, operation_type):
@@ -131,8 +133,10 @@ class MCPHandler:
     assert self.mcp_tools is not None, "MCP tools not initialized"
     tools = self.mcp_tools.get_tool_definitions_as_dict()
 
-    # Determine if this is a shared repository or user graph
-    is_shared_repo = MultiTenantUtils.is_shared_repository(self.graph_id)
+    # Determine if this is a shared repository (or subgraph of one)
+    from robosystems.config.shared_repositories import is_shared_repository_or_subgraph
+
+    is_shared_repo = is_shared_repository_or_subgraph(self.graph_id)
     backend_name = "Graph Database"
 
     # Add graph-specific context to descriptions
