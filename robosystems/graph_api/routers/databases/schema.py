@@ -240,7 +240,7 @@ async def get_schema(
         status_code=http_status.HTTP_503_SERVICE_UNAVAILABLE,
         detail={
           "error": "Database warming up",
-          "reason": "S3 ATTACH database is still loading",
+          "reason": "Replica database is still loading",
           "status": "warming",
           "retry_after": 30,
         },

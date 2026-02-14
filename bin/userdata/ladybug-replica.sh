@@ -1,6 +1,7 @@
 #!/bin/bash
 # LadybugDB Shared Replica Instance UserData Script
-# Replicas use S3 ATTACH to connect to S3-hosted database files via httpfs
+# Replicas download .lbug database files from S3 to local disk during startup,
+# then serve them as local read-only databases using the standard connection pool.
 # This script uses the same shared components as writers for consistency
 
 set -e
@@ -93,25 +94,33 @@ aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS 
 }
 
 # ==================================================================================
-# STORAGE SETUP (S3 ATTACH mode: no local data volume needed)
+# STORAGE SETUP (Download shared databases from S3)
 # ==================================================================================
-echo "Setting up S3 ATTACH mode (no local data volume)..."
+echo "Downloading shared databases from S3..."
 
-# Validate S3 ATTACH prefix is set
-if [ -z "${LBUG_S3_ATTACH_PREFIX:-}" ]; then
-  echo "ERROR: LBUG_S3_ATTACH_PREFIX must be set for S3 ATTACH mode"
-  exit 1
-fi
+SHARED_DATABASE_S3_PREFIX="${LBUG_S3_ATTACH_PREFIX:?"LBUG_S3_ATTACH_PREFIX must be set"}"
 
-echo "S3 ATTACH Prefix: ${LBUG_S3_ATTACH_PREFIX}"
-
-# Create directories for logs and cache only (no database storage needed)
-# Database will be loaded via httpfs directly from S3
 mkdir -p /mnt/ladybug-data/{logs,cache,databases}
+
+IFS=',' read -ra REPOS <<< "${SHARED_REPOSITORIES}"
+for REPO in "${REPOS[@]}"; do
+  REPO=$(echo "$REPO" | tr -d ' ')
+  S3_URI="${SHARED_DATABASE_S3_PREFIX%/}/${REPO}.lbug"
+  LOCAL_PATH="/mnt/ladybug-data/databases/${REPO}.lbug"
+  echo "Downloading ${REPO}: ${S3_URI} -> ${LOCAL_PATH}"
+  START_TIME=$(date +%s)
+  aws s3 cp "${S3_URI}" "${LOCAL_PATH}" --region "${AWS_REGION}" --only-show-errors || {
+    echo "ERROR: Failed to download ${REPO} from ${S3_URI}"
+    exit 1
+  }
+  ELAPSED=$(( $(date +%s) - START_TIME ))
+  FILE_SIZE_MB=$(( $(stat -c%s "${LOCAL_PATH}" 2>/dev/null || stat -f%z "${LOCAL_PATH}") / 1048576 ))
+  echo "Downloaded ${REPO}: ${FILE_SIZE_MB}MB in ${ELAPSED}s"
+done
+
 chown -R 1000:1000 /mnt/ladybug-data
 chmod -R 755 /mnt/ladybug-data
-
-echo "✅ S3 ATTACH mode configured - databases will be loaded from S3 via httpfs"
+echo "All shared databases downloaded to /mnt/ladybug-data/databases/"
 
 # ==================================================================================
 # DOWNLOAD SHARED SCRIPTS
@@ -208,7 +217,6 @@ export LOGS_MOUNT_TARGET="/app/logs"
 export DOCKER_PROFILE="ladybug-shared-writer"
 export REPOSITORY_TYPE="${REPOSITORY_TYPE}"
 export SHARED_REPOSITORIES="${SHARED_REPOSITORIES}"
-export LBUG_S3_ATTACH_PREFIX="${LBUG_S3_ATTACH_PREFIX}"
 
 # Persist variables to /etc/environment for health checks and restarts
 echo "DATABASE_TYPE=ladybug" >> /etc/environment
@@ -225,7 +233,6 @@ echo "AWS_REGION=${AWS_REGION}" >> /etc/environment
 echo "CLUSTER_TIER=${CLUSTER_TIER}" >> /etc/environment
 echo "REPOSITORY_TYPE=${REPOSITORY_TYPE}" >> /etc/environment
 echo "SHARED_REPOSITORIES=${SHARED_REPOSITORIES}" >> /etc/environment
-echo "LBUG_S3_ATTACH_PREFIX=${LBUG_S3_ATTACH_PREFIX}" >> /etc/environment
 echo "DATABASE_ENDPOINT=${DATABASE_ENDPOINT:-}" >> /etc/environment
 echo "DATABASE_PORT=${DATABASE_PORT:-5432}" >> /etc/environment
 echo "VALKEY_URL=${VALKEY_URL:-}" >> /etc/environment

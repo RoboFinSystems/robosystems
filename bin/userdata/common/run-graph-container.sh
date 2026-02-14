@@ -85,23 +85,13 @@ fi
 # Build database-specific environment variables
 case "${DATABASE_TYPE}" in
     ladybug)
-        # Build S3 ATTACH environment variable only if prefix is set
-        S3_ATTACH_ENV=""
-        if [ -n "${LBUG_S3_ATTACH_PREFIX:-}" ]; then
-            S3_ATTACH_ENV="-e LBUG_S3_ATTACH_PREFIX=${LBUG_S3_ATTACH_PREFIX}"
-        fi
-
         EXTRA_ENV_VARS="-e LBUG_NODE_TYPE=${NODE_TYPE} \
             -e REPOSITORY_TYPE=${REPOSITORY_TYPE:-shared} \
             -e SHARED_REPOSITORIES=${SHARED_REPOSITORIES:-} \
             -e LBUG_DATABASE_PATH=${DATA_MOUNT_TARGET}/lbug-dbs \
             -e LBUG_PORT=${CONTAINER_PORT} \
             -e LBUG_ROLE=$(if [ "${NODE_TYPE}" = "shared_replica" ]; then echo "replica"; else echo "master"; fi) \
-            -e LBUG_ACCESS_PATTERN=api_writer \
-            ${S3_ATTACH_ENV}"
-        # Docker health check: container is "healthy" if it responds at all (even 503 during warmup)
-        # This allows S3 ATTACH replicas to remain healthy while downloading the database
-        # ALB/ELB health checks will still get 503 and not route traffic until ready
+            -e LBUG_ACCESS_PATTERN=api_writer"
         HEALTH_CMD="timeout 10 curl -s -o /dev/null http://localhost:${CONTAINER_PORT}/health || exit 1"
         ;;
     neo4j)
@@ -189,26 +179,10 @@ HEALTH_CHECK_PASSED=false
 HEALTH_CHECK_ATTEMPTS=12
 HEALTH_CHECK_INTERVAL=5
 for i in $(seq 1 $HEALTH_CHECK_ATTEMPTS); do
-  # For replicas with S3 ATTACH, accept 503 (warming) as success
-  # The container is running and responsive, just not fully loaded yet
-  if [ "${NODE_TYPE}" = "shared_replica" ]; then
-    HTTP_CODE=$(curl -s -o /dev/null -w '%{http_code}' http://localhost:${CONTAINER_PORT}/health 2>/dev/null || echo "000")
-    if [ "${HTTP_CODE}" = "200" ] || [ "${HTTP_CODE}" = "503" ]; then
-      if [ "${HTTP_CODE}" = "503" ]; then
-        echo "${DATABASE_TYPE} container is responding (warming up S3 ATTACH database)"
-      else
-        echo "${DATABASE_TYPE} container is healthy on port ${CONTAINER_PORT}"
-      fi
-      HEALTH_CHECK_PASSED=true
-      break
-    fi
-  else
-    # Non-replica: require 200 OK
-    if curl -f http://localhost:${CONTAINER_PORT}/health >/dev/null 2>&1; then
-      echo "${DATABASE_TYPE} container is healthy on port ${CONTAINER_PORT}"
-      HEALTH_CHECK_PASSED=true
-      break
-    fi
+  if curl -f http://localhost:${CONTAINER_PORT}/health >/dev/null 2>&1; then
+    echo "${DATABASE_TYPE} container is healthy on port ${CONTAINER_PORT}"
+    HEALTH_CHECK_PASSED=true
+    break
   fi
   echo "Waiting for ${DATABASE_TYPE} container to start on port ${CONTAINER_PORT}... ($i/$HEALTH_CHECK_ATTEMPTS)"
   # Check if container is still running

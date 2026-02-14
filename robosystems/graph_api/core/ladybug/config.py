@@ -88,9 +88,14 @@ def get_database_memory_config(database_name: str | None = None) -> int:
 
   Priority order:
   1. Per-database override (only for the specific database being boosted)
-  2. Per-database memory limit (memory_per_db_mb) - for tier-based allocation
-  3. Total memory allocation (lbug_max_memory_mb or max_memory_mb) - for dedicated instances
-  4. Environment variable fallback (LBUG_MAX_MEMORY_MB)
+  2. Subgraph memory limit (memory_per_subgraph_mb) - if database is a subgraph
+  3. Per-database memory limit (memory_per_db_mb) - for parent databases
+  4. Total memory allocation (lbug_max_memory_mb or max_memory_mb) - for dedicated instances
+  5. Environment variable fallback (LBUG_MAX_MEMORY_MB)
+
+  Subgraphs are identified by containing an underscore (e.g., sec_historical,
+  kg123_dev). They receive a smaller buffer pool than parent databases, and
+  are intentionally oversubscribed since they are rarely all active simultaneously.
 
   Args:
       database_name: Database name to check for per-database override.
@@ -109,10 +114,20 @@ def get_database_memory_config(database_name: str | None = None) -> int:
     return override
 
   tier_config = env.get_lbug_tier_config()
+
+  # Check if this is a subgraph (contains underscore: sec_historical, kg123_dev)
+  is_subgraph = database_name is not None and "_" in database_name
+  if is_subgraph:
+    memory_per_subgraph_mb = tier_config.get("memory_per_subgraph_mb", 0)
+    if memory_per_subgraph_mb > 0:
+      logger.info(
+        f"Using subgraph memory limit: {memory_per_subgraph_mb} MB (for '{database_name}')"
+      )
+      return memory_per_subgraph_mb
+
   memory_per_db_mb = tier_config.get("memory_per_db_mb", 0)
 
   if memory_per_db_mb > 0:
-    # Use per-database limit (for standard tier with oversubscription)
     logger.info(f"Using per-database memory limit: {memory_per_db_mb} MB")
     return memory_per_db_mb
 
