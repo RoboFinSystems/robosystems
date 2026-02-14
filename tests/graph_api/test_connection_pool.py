@@ -675,7 +675,7 @@ class TestLadybugConnectionPool:
   @patch("real_ladybug.Connection")
   @patch("real_ladybug.Database")
   def test_s3_connection_creation(self, mock_db_class, mock_conn_class, mock_s3_creds):
-    """Test creating connections from per-repo S3 databases sets S3 creds (no USE needed)."""
+    """Test creating connections from per-repo S3 databases sets S3 creds and USE catalog."""
     mock_db = MagicMock()
     mock_conn = MagicMock()
     mock_db_class.return_value = mock_db
@@ -699,9 +699,8 @@ class TestLadybugConnectionPool:
     # S3 credentials configured
     mock_s3_creds.assert_called()
 
-    # No USE statement needed (each repo has its own Database)
-    use_calls = [c for c in mock_conn.execute.call_args_list if "USE" in str(c)]
-    assert len(use_calls) == 0
+    # USE statement sets the active catalog to the ATTACHed database
+    mock_conn.execute.assert_any_call("USE sec;")
 
     # Connection info is correct
     assert conn_info.s3_attached is True

@@ -29,8 +29,12 @@ start profile="robosystems" build="":
     docker compose -f compose.yaml --env-file {{_env}} --profile {{profile}} up \
         {{ if build != "" { "--build" } else { "" } }} --detach
 
-# Stop service
+# Stop containers without removing them (restart with `just start`)
 stop profile="robosystems":
+    docker compose -f compose.yaml --profile {{profile}} stop
+
+# Tear down and remove containers entirely
+teardown profile="robosystems":
     docker compose -f compose.yaml --profile {{profile}} down
 
 # Rebuild containers (rebuilds images and force recreates - for package/env changes)
@@ -507,7 +511,7 @@ clean-data:
     rm -f ./examples/credentials/config.json
 
 reset-local:
-    @just stop
+    @just teardown
     @just clean-data
     @just rebuild
 
