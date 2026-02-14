@@ -86,6 +86,26 @@ EOF
 
 systemctl restart docker
 
+# ==================================================================================
+# CLOUDWATCH SETUP (Early - before database download for visibility)
+# ==================================================================================
+echo "Setting up CloudWatch agent before database download..."
+aws s3 cp s3://${DEPLOYMENT_BUCKET}/userdata/common/setup-cloudwatch-graph.sh \
+    /usr/local/bin/setup-cloudwatch-graph.sh || {
+  echo "ERROR: Could not download CloudWatch setup script from S3"
+  exit 1
+}
+chmod +x /usr/local/bin/setup-cloudwatch-graph.sh
+
+export DATABASE_TYPE="ladybug"
+export NODE_TYPE="${LBUG_NODE_TYPE}"
+export ENVIRONMENT="${ENVIRONMENT}"
+export CLOUDWATCH_NAMESPACE="${CLOUDWATCH_NAMESPACE}"
+export DATA_DIR="/mnt/ladybug-data"
+
+/usr/local/bin/setup-cloudwatch-graph.sh
+echo "CloudWatch agent started - logs now visible in /setup log group"
+
 # Login to ECR
 echo "Logging into ECR..."
 aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${ECR_URI} || {
@@ -100,13 +120,13 @@ echo "Downloading shared databases from S3..."
 
 SHARED_DATABASE_S3_PREFIX="${LBUG_S3_ATTACH_PREFIX:?"LBUG_S3_ATTACH_PREFIX must be set"}"
 
-mkdir -p /mnt/ladybug-data/{logs,cache,databases}
+mkdir -p /mnt/ladybug-data/{logs,cache,databases/lbug-dbs}
 
 IFS=',' read -ra REPOS <<< "${SHARED_REPOSITORIES}"
 for REPO in "${REPOS[@]}"; do
   REPO=$(echo "$REPO" | tr -d ' ')
   S3_URI="${SHARED_DATABASE_S3_PREFIX%/}/${REPO}.lbug"
-  LOCAL_PATH="/mnt/ladybug-data/databases/${REPO}.lbug"
+  LOCAL_PATH="/mnt/ladybug-data/databases/lbug-dbs/${REPO}.lbug"
   echo "Downloading ${REPO}: ${S3_URI} -> ${LOCAL_PATH}"
   START_TIME=$(date +%s)
   aws s3 cp "${S3_URI}" "${LOCAL_PATH}" --region "${AWS_REGION}" --only-show-errors || {
@@ -120,20 +140,14 @@ done
 
 chown -R 1000:1000 /mnt/ladybug-data
 chmod -R 755 /mnt/ladybug-data
-echo "All shared databases downloaded to /mnt/ladybug-data/databases/"
+echo "All shared databases downloaded to /mnt/ladybug-data/databases/lbug-dbs/"
 
 # ==================================================================================
 # DOWNLOAD SHARED SCRIPTS
 # ==================================================================================
 echo "Downloading shared infrastructure scripts from S3..."
 
-# Download common graph scripts
-aws s3 cp s3://${DEPLOYMENT_BUCKET}/userdata/common/setup-cloudwatch-graph.sh \
-    /usr/local/bin/setup-cloudwatch-graph.sh || {
-  echo "ERROR: Could not download CloudWatch setup script from S3"
-  exit 1
-}
-
+# Download remaining common scripts (CloudWatch already downloaded above)
 aws s3 cp s3://${DEPLOYMENT_BUCKET}/userdata/common/register-graph-instance.sh \
     /usr/local/bin/register-graph-instance.sh || {
   echo "ERROR: Could not download instance registration script from S3"
@@ -153,21 +167,9 @@ aws s3 cp s3://${DEPLOYMENT_BUCKET}/userdata/common/graph-health-check.sh \
 }
 
 # Make scripts executable
-chmod +x /usr/local/bin/setup-cloudwatch-graph.sh
 chmod +x /usr/local/bin/register-graph-instance.sh
 chmod +x /usr/local/bin/run-graph-container.sh
 chmod +x /usr/local/bin/graph-health-check.sh
-
-# ==================================================================================
-# CLOUDWATCH SETUP (Using Shared Script)
-# ==================================================================================
-export DATABASE_TYPE="ladybug"
-export NODE_TYPE="${LBUG_NODE_TYPE}"
-export ENVIRONMENT="${ENVIRONMENT}"
-export CLOUDWATCH_NAMESPACE="${CLOUDWATCH_NAMESPACE}"
-export DATA_DIR="/mnt/ladybug-data"
-
-/usr/local/bin/setup-cloudwatch-graph.sh
 
 # ==================================================================================
 # INSTANCE REGISTRATION (Using Shared Script)
