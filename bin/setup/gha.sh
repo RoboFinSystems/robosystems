@@ -418,26 +418,28 @@ function setup_full_config() {
     fi
 
     # Shared Replicas Configuration - Read-Only Fleet
-    # Replicas use S3 ATTACH to connect to shared database hosted in S3
+    # Replicas download shared databases from S3 at startup, then serve queries locally
     # Materialize sec_s3_published asset in Dagster to upload database, then enable replicas
     gh variable set SHARED_REPLICAS_ENABLED_PROD --body "false"
     gh variable set SHARED_REPLICAS_MIN_INSTANCES_PROD --body "1"
     gh variable set SHARED_REPLICAS_MAX_INSTANCES_PROD --body "3"
     gh variable set SHARED_REPLICAS_DESIRED_CAPACITY_PROD --body "1"
-    gh variable set SHARED_REPLICAS_ROOT_VOLUME_SIZE_PROD --body "100"
+    gh variable set SHARED_REPLICAS_ROOT_VOLUME_SIZE_PROD --body "150"
     gh variable set SHARED_REPLICAS_CPU_TARGET_PROD --body "70"
     gh variable set SHARED_REPLICAS_MEMORY_TARGET_PROD --body "80"
-    gh variable set SHARED_REPLICAS_INSTANCE_WARMUP_PROD --body "1200"
+    gh variable set SHARED_REPLICAS_INSTANCE_WARMUP_PROD --body "900"
+    gh variable set SHARED_REPLICAS_HEALTH_CHECK_GRACE_PERIOD_PROD --body "900"
     gh variable set SHARED_REPOSITORIES_PROD --body "sec"
     if $setup_staging; then
         gh variable set SHARED_REPLICAS_ENABLED_STAGING --body "false"
         gh variable set SHARED_REPLICAS_MIN_INSTANCES_STAGING --body "1"
         gh variable set SHARED_REPLICAS_MAX_INSTANCES_STAGING --body "3"
         gh variable set SHARED_REPLICAS_DESIRED_CAPACITY_STAGING --body "1"
-        gh variable set SHARED_REPLICAS_ROOT_VOLUME_SIZE_STAGING --body "50"
+        gh variable set SHARED_REPLICAS_ROOT_VOLUME_SIZE_STAGING --body "150"
         gh variable set SHARED_REPLICAS_CPU_TARGET_STAGING --body "70"
         gh variable set SHARED_REPLICAS_MEMORY_TARGET_STAGING --body "80"
-        gh variable set SHARED_REPLICAS_INSTANCE_WARMUP_STAGING --body "1200"
+        gh variable set SHARED_REPLICAS_INSTANCE_WARMUP_STAGING --body "900"
+        gh variable set SHARED_REPLICAS_HEALTH_CHECK_GRACE_PERIOD_STAGING --body "900"
         gh variable set SHARED_REPOSITORIES_STAGING --body "sec"
     fi
 

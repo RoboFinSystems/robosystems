@@ -446,7 +446,8 @@ jobs:
       shared_repositories: ${{ vars.SHARED_REPOSITORIES_PROD || 'sec' }}
       shared_replicas_cpu_target: ${{ vars.SHARED_REPLICAS_CPU_TARGET_PROD || '70' }}
       shared_replicas_memory_target: ${{ vars.SHARED_REPLICAS_MEMORY_TARGET_PROD || '80' }}
-      shared_replicas_instance_warmup: ${{ vars.SHARED_REPLICAS_INSTANCE_WARMUP_PROD || '1200' }}
+      shared_replicas_instance_warmup: ${{ vars.SHARED_REPLICAS_INSTANCE_WARMUP_PROD || '900' }}
+      shared_replicas_health_check_grace_period: ${{ vars.SHARED_REPLICAS_HEALTH_CHECK_GRACE_PERIOD_PROD || '900' }}
       # Other Configuration
       aws_sns_alert_email: ${{ vars.AWS_SNS_ALERT_EMAIL }}
     secrets: inherit

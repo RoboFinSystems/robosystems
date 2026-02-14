@@ -388,6 +388,35 @@ just admin dev cache flush auth         # Flush single database
 just admin dev cache flush all -y       # Flush all databases (skip confirmation)
 ```
 
+## GitHub Actions Variables
+
+Manage CI/CD configuration variables (non-sensitive, stored in GitHub):
+
+```bash
+just gha-list                          # List all variables
+just gha-list SHARED_REPLICAS          # Filter by pattern (case-insensitive)
+just gha-list _PROD                    # List all prod variables
+just gha-get SHARED_REPLICAS_INSTANCE_WARMUP_PROD  # Get single variable
+just gha-set SHARED_REPLICAS_INSTANCE_WARMUP_PROD 900  # Set variable
+just gha-delete SOME_OLD_VARIABLE      # Delete variable
+```
+
+Variables follow the naming convention `COMPONENT_SETTING_ENVIRONMENT` (e.g., `SHARED_REPLICAS_INSTANCE_WARMUP_PROD`). Run `just setup-gha` to initialize all variables with defaults.
+
+## SSM Parameters
+
+Manage AWS Systems Manager parameters for runtime feature flags and tuning:
+
+```bash
+just ssm-list prod features            # List feature flags
+just ssm-list prod tuning              # List tuning parameters
+just ssm-get prod features/mcp-memory  # Get single parameter
+just ssm-set prod features/mcp-memory true   # Set parameter
+just ssm-delete prod features/old-flag       # Delete parameter
+```
+
+Parameters are stored at `/robosystems/{env}/{category}/{name}` in SSM Parameter Store. Unlike GitHub variables (which require redeployment), SSM parameters take effect immediately at runtime.
+
 ## Secret Management
 
 - **AWS Secrets Manager Base**: `robosystems/{staging|prod}`

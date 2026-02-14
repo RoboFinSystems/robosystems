@@ -362,7 +362,11 @@ def mock_shared_subgraph_client():
   client.execute_query = AsyncMock(return_value=[])
   client.graph_client = MagicMock()
   client.graph_client.install_schema = AsyncMock(
-    return_value={"success": True, "message": "Schema installed", "statements_executed": 1}
+    return_value={
+      "success": True,
+      "message": "Schema installed",
+      "statements_executed": 1,
+    }
   )
   return client
 
@@ -372,7 +376,9 @@ class TestSharedRepoWriteProtection:
 
   @pytest.mark.asyncio
   @pytest.mark.unit
-  async def test_write_cypher_blocked_on_shared_subgraph(self, mock_shared_subgraph_client):
+  async def test_write_cypher_blocked_on_shared_subgraph(
+    self, mock_shared_subgraph_client
+  ):
     tool = WriteCypherTool(mock_shared_subgraph_client)
     result = await tool.execute(
       {"query": "CREATE (n:Entity {identifier: 'test', name: 'Test'})"}
@@ -382,7 +388,9 @@ class TestSharedRepoWriteProtection:
 
   @pytest.mark.asyncio
   @pytest.mark.unit
-  async def test_add_node_table_blocked_on_shared_subgraph(self, mock_shared_subgraph_client):
+  async def test_add_node_table_blocked_on_shared_subgraph(
+    self, mock_shared_subgraph_client
+  ):
     tool = AddNodeTableTool(mock_shared_subgraph_client)
     result = await tool.execute(
       {

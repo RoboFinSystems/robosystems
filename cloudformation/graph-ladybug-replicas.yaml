@@ -110,10 +110,16 @@ Parameters:
     Description: Target memory utilization percentage for auto scaling
   InstanceWarmup:
     Type: Number
-    Default: 2400
+    Default: 900
     MinValue: 0
     MaxValue: 3600
     Description: Seconds to ignore new instance metrics during initialization (download + warmup time)
+  HealthCheckGracePeriod:
+    Type: Number
+    Default: 900
+    MinValue: 60
+    MaxValue: 3600
+    Description: Seconds before ASG starts checking ALB health on new instances (must cover S3 download + container start)
 
   # Cache Configuration
   ValkeyClientSecurityGroupId:
@@ -459,11 +465,10 @@ Resources:
       TargetGroupARNs:
         - !Ref ReplicaTargetGroup
       HealthCheckType: ELB
-      # Grace period: S3 download (~20-30 min for large databases) + container start (~2 min) + warmup (~1 min)
-      # Set to 40 min (2400s) to provide buffer. During this time, no HTTP endpoint
-      # exists (download happens before container starts), so ALB health checks fail
-      # but ASG won't mark the instance unhealthy until the grace period expires.
-      HealthCheckGracePeriod: 2400
+      # Grace period covers S3 download + container start + warmup. During this time,
+      # no HTTP endpoint exists so ALB health checks fail, but ASG won't mark the
+      # instance unhealthy until the grace period expires.
+      HealthCheckGracePeriod: !Ref HealthCheckGracePeriod
       # DefaultInstanceWarmup tells target tracking scaling to ignore new instance
       # metrics during warmup, preventing premature scale-out/in decisions.
       DefaultInstanceWarmup: !Ref InstanceWarmup
@@ -480,14 +485,14 @@ Resources:
     CreationPolicy:
       ResourceSignal:
         Count: !If [HasMinInstances, !Ref MinInstances, 0]
-        # S3 download (~20-30 min) + system setup (~2 min) + container warmup (~1 min)
-        Timeout: PT45M
+        # S3 download (~7 min) + system setup (~2 min) + container warmup (~1 min)
+        Timeout: PT20M
     UpdatePolicy:
       AutoScalingRollingUpdate:
         MinInstancesInService: !If [HasMinInstances, 1, 0]
         MaxBatchSize: 1
         # Rolling updates also need time for download + warmup
-        PauseTime: PT45M
+        PauseTime: PT20M
         WaitOnResourceSignals: !If [HasMinInstances, true, false]
 
   # CPU-based Auto Scaling
