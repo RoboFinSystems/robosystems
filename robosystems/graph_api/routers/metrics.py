@@ -6,6 +6,8 @@ about the cluster node, including system resources, database statistics,
 query performance, and ingestion queue status.
 """
 
+import asyncio
+import logging
 from typing import Any
 
 from fastapi import APIRouter, Depends
@@ -13,7 +15,14 @@ from fastapi import APIRouter, Depends
 from robosystems.graph_api.core.admission_control import get_admission_controller
 from robosystems.graph_api.core.ladybug import get_ladybug_service
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter(tags=["Cluster Metrics"])
+
+# Timeout for database metrics collection (seconds). Under heavy ingestion I/O,
+# _get_database_sizes() can block for 10+ seconds doing recursive file walks.
+# When this timeout is exceeded, cached/stale data is returned instead.
+_DATABASE_METRICS_TIMEOUT = 3.0
 
 
 @router.get("/metrics")
@@ -37,9 +46,24 @@ async def get_metrics(
   """
   metrics_collector = ladybug_service.metrics_collector
 
-  # Collect all metrics
-  system_metrics = metrics_collector.collect_system_metrics()
-  database_metrics = metrics_collector.collect_database_metrics()
+  # System metrics use psutil syscalls (fast, ~100ms even under load)
+  system_metrics = await asyncio.to_thread(metrics_collector.collect_system_metrics)
+
+  # Database metrics require recursive file walks that can block under heavy I/O.
+  # Run in a thread with a timeout so the endpoint always responds quickly.
+  try:
+    database_metrics = await asyncio.wait_for(
+      asyncio.to_thread(metrics_collector.collect_database_metrics),
+      timeout=_DATABASE_METRICS_TIMEOUT,
+    )
+  except TimeoutError:
+    logger.warning(
+      "Database metrics collection timed out (%.1fs), returning cached data",
+      _DATABASE_METRICS_TIMEOUT,
+    )
+    # Return cached sizes (stale but available) rather than blocking
+    database_metrics = metrics_collector.collect_database_metrics_cached()
+
   query_metrics = metrics_collector.get_query_metrics()
   ingestion_metrics = await metrics_collector.collect_ingestion_metrics()
 

@@ -58,11 +58,17 @@ def create_app() -> FastAPI:
 
     # S3 ATTACH warmup for replicas (runs in background thread)
     async def warmup_s3_attach():
-      """Warm up S3 ATTACH database in background thread.
+      """Warm up S3 ATTACH databases via shared buffer pool.
 
-      The S3 ATTACH operation downloads ~85GB and can take 10-15 minutes.
-      We run this in a thread pool to avoid blocking the event loop,
-      allowing the health endpoint to respond with 503 during warmup.
+      Phase 1: Serial ATTACHes — creates one shared in-memory Database and
+      ATTACHes all repos to it. Serial because ATTACH is I/O-bound (S3 download)
+      and sharing one Database means they must be sequential.
+
+      Phase 2: Parallel warmup queries — each repo gets a connection from the
+      shared Database and runs a warmup query to populate the buffer pool cache.
+
+      Runs in a thread pool to avoid blocking the event loop, allowing the
+      health endpoint to respond with 503 during warmup.
       """
       from robosystems.graph_api.routers.health import (
         is_s3_attach_mode,
@@ -75,36 +81,11 @@ def create_app() -> FastAPI:
       s3_prefix = os.getenv("LBUG_S3_ATTACH_PREFIX", "")
       logger.info(f"S3 ATTACH warmup starting with prefix: {s3_prefix}")
 
-      def _warmup_single_repo(repo: str):
-        """ATTACH and warm up a single shared repository."""
-        from robosystems.graph_api.core.ladybug.pool import get_connection_pool
-
-        logger.info(f"Warming up S3 ATTACH database: {repo}")
-        pool = get_connection_pool()
-
-        # This will create the S3 ATTACH connection (downloads from S3)
-        with pool.get_connection(repo, read_only=True) as conn:
-          logger.info(f"Running warmup query for {repo}...")
-          result = conn.execute(f"USE {repo}; MATCH (n) RETURN count(n) as cnt LIMIT 1")
-          if isinstance(result, list):
-            for r in result:
-              if hasattr(r, "fetchall"):
-                r.fetchall()
-              if hasattr(r, "close"):
-                r.close()
-          else:
-            result.fetchall()
-            result.close()
-          logger.info(f"Warmup query complete for {repo}")
-
       def _do_warmup():
-        """Blocking warmup work - runs in thread pool.
-
-        ATTACHes all shared repositories in parallel since each creates
-        an independent in-memory database. The bottleneck is S3 download
-        time, so parallel execution reduces total warmup significantly.
-        """
+        """Blocking warmup work - runs in thread pool."""
         from concurrent.futures import ThreadPoolExecutor, as_completed
+
+        from robosystems.graph_api.core.ladybug.pool import get_connection_pool
 
         shared_repos = [
           r.strip()
@@ -112,29 +93,52 @@ def create_app() -> FastAPI:
           if r.strip()
         ]
 
-        if len(shared_repos) == 1:
-          # Single repo: no need for thread pool overhead
-          _warmup_single_repo(shared_repos[0])
-          return
+        pool = get_connection_pool()
 
+        # Phase 1: Serial ATTACHes via shared buffer pool
         logger.info(
-          f"Warming up {len(shared_repos)} repositories in parallel: {shared_repos}"
+          f"Phase 1: ATTACHing {len(shared_repos)} repos to shared buffer pool..."
         )
-        with ThreadPoolExecutor(max_workers=len(shared_repos)) as executor:
-          futures = {
-            executor.submit(_warmup_single_repo, repo): repo for repo in shared_repos
-          }
-          for future in as_completed(futures):
-            repo = futures[future]
-            try:
-              future.result()
-            except Exception as e:
-              logger.error(f"Warmup failed for {repo}: {e}")
-              raise
+        attached = pool.initialize_shared_s3_database(shared_repos, s3_prefix)
+        if len(attached) < len(shared_repos):
+          failed = set(shared_repos) - set(attached)
+          raise RuntimeError(f"Failed to ATTACH repos to shared buffer pool: {failed}")
+
+        # Phase 2: Parallel warmup queries
+        logger.info(f"Phase 2: Running warmup queries for {len(attached)} repos...")
+
+        def _warmup_single_repo(repo: str):
+          with pool.get_connection(repo, read_only=True) as conn:
+            logger.info(f"Running warmup query for {repo}...")
+            result = conn.execute("MATCH (n) RETURN count(n) as cnt LIMIT 1")
+            if isinstance(result, list):
+              for r in result:
+                if hasattr(r, "fetchall"):
+                  r.fetchall()
+                if hasattr(r, "close"):
+                  r.close()
+            else:
+              result.fetchall()
+              result.close()
+            logger.info(f"Warmup query complete for {repo}")
+
+        if len(attached) == 1:
+          _warmup_single_repo(attached[0])
+        else:
+          with ThreadPoolExecutor(max_workers=len(attached)) as executor:
+            futures = {
+              executor.submit(_warmup_single_repo, repo): repo for repo in attached
+            }
+            for future in as_completed(futures):
+              repo = futures[future]
+              try:
+                future.result()
+              except Exception as e:
+                logger.error(f"Warmup query failed for {repo}: {e}")
+                raise
 
       try:
-        # Run blocking S3 ATTACH in thread pool to avoid blocking event loop
-        # This allows health endpoint to respond with 503 during warmup
+        # Run blocking warmup in thread pool to avoid blocking event loop
         await asyncio.to_thread(_do_warmup)
 
         # Mark as ready - health check will now return 200

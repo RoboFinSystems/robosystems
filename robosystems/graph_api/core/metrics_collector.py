@@ -384,6 +384,30 @@ class LadybugMetricsCollector:
       },
     }
 
+  def collect_database_metrics_cached(self) -> dict[str, Any]:
+    """
+    Return database metrics from cache only, without triggering a refresh.
+
+    Used as a fallback when the full collection times out under heavy I/O.
+    """
+    database_sizes = self._size_cache
+
+    total_size = sum(database_sizes.values())
+
+    return {
+      "count": len(database_sizes),
+      "total_size_gb": total_size / (1024**3),
+      "cached": True,
+      "databases": {
+        db_name: {
+          "size_bytes": size_bytes,
+          "size_gb": size_bytes / (1024**3),
+          "query_count": self._query_counts.get(db_name, 0),
+        }
+        for db_name, size_bytes in database_sizes.items()
+      },
+    }
+
   def get_query_metrics(self) -> dict[str, Any]:
     """
     Get query execution metrics.

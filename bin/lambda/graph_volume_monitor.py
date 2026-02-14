@@ -204,8 +204,11 @@ def check_and_expand_volume(instance: dict, expand_immediately: bool = False) ->
   }
 
   try:
-    # Get volume metrics from instance (Graph API), with CloudWatch fallback
+    # Get volume metrics from instance (Graph API), with CloudWatch fallback.
+    # The Graph API is the primary source but becomes unresponsive under heavy
+    # ingestion I/O. CloudWatch agent metrics are always available as a fallback.
     metrics = get_volume_metrics_from_instance(instance)
+    metrics_source = "graph_api"
 
     if not metrics:
       logger.warning(
@@ -213,6 +216,7 @@ def check_and_expand_volume(instance: dict, expand_immediately: bool = False) ->
         "falling back to CloudWatch metrics"
       )
       metrics = get_volume_metrics_from_cloudwatch(instance)
+      metrics_source = "cloudwatch"
 
     if not metrics:
       result["error"] = (
@@ -259,10 +263,11 @@ def check_and_expand_volume(instance: dict, expand_immediately: bool = False) ->
     ebs_info = (
       f", EBS={ebs_size_gb}GB" if ebs_size_gb and ebs_size_gb != current_size else ""
     )
+    source_info = f" [via {metrics_source}]" if metrics_source != "graph_api" else ""
     logger.info(
       f"Instance {instance['instance_id']}: "
       f"Usage={usage_percent:.1%}, Size={current_size}GB{ebs_info}, "
-      f"Volume={volume_id}, Threshold={threshold:.0%}"
+      f"Volume={volume_id}, Threshold={threshold:.0%}{source_info}"
     )
 
     # Add metrics to result for visibility
@@ -504,7 +509,13 @@ def get_data_volume_info(instance_id: str) -> tuple[str | None, int | None]:
 
 
 def get_volume_metrics_from_instance(instance: dict) -> dict | None:
-  """Query Graph API for volume metrics"""
+  """Query Graph API for volume metrics.
+
+  Uses a short timeout with minimal retries so we fail fast and fall through
+  to the CloudWatch fallback. Under heavy ingestion I/O, the Graph API can
+  become unresponsive for minutes - we don't want to waste 30s on retries
+  when CloudWatch has the same data.
+  """
 
   try:
     # Use the /metrics endpoint
@@ -519,8 +530,8 @@ def get_volume_metrics_from_instance(instance: dict) -> dict | None:
       "GET",
       url,
       headers=headers,
-      timeout=10.0,
-      retries=urllib3.Retry(total=2, backoff_factor=0.3),
+      timeout=5.0,
+      retries=urllib3.Retry(total=1, backoff_factor=0.5),
     )
 
     if response.status == 200:
