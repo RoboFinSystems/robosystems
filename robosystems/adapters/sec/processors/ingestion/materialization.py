@@ -14,6 +14,7 @@ Classes:
     LadybugMaterializer: Handles all LadybugDB materialization operations
 """
 
+import math
 import time
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
@@ -41,6 +42,37 @@ from .models import (
   make_progress_logger,
   s3_url_exists,
 )
+
+
+def _is_empty_value(value: Any) -> bool:
+  """Check if a value is empty/missing, handling pandas and numpy types."""
+  if value is None:
+    return True
+  if isinstance(value, str):
+    return value.strip() == ""
+  try:
+    import pandas as pd
+
+    if pd.isna(value):
+      return True
+  except (TypeError, ValueError):
+    pass
+  return False
+
+
+def _to_native(value: Any) -> Any:
+  """Convert pandas/numpy value to a JSON-serializable Python native type."""
+  if _is_empty_value(value):
+    return None
+  if hasattr(value, "item"):
+    return value.item()
+  if isinstance(value, str):
+    return value.strip()
+  if isinstance(value, float) and math.isfinite(value):
+    return value
+  if isinstance(value, (int, bool)):
+    return value
+  return str(value).strip()
 
 
 class LadybugMaterializer:
@@ -554,9 +586,7 @@ class LadybugMaterializer:
           new_value = row.get(field)
           old_value = existing.get(field)
 
-          new_is_empty = new_value is None or (
-            isinstance(new_value, float) and str(new_value) == "nan"
-          )
+          new_is_empty = _is_empty_value(new_value)
           old_is_empty = old_value is None or old_value == ""
 
           if new_is_empty and old_is_empty:
@@ -567,7 +597,7 @@ class LadybugMaterializer:
 
           if new_str != old_str:
             has_changes = True
-            update_data[field] = new_value if not new_is_empty else None
+            update_data[field] = _to_native(new_value) if not new_is_empty else None
 
         if has_changes:
           entities_to_update.append(update_data)
