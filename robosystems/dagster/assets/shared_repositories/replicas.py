@@ -28,9 +28,15 @@ from robosystems.config import env
 class SharedReplicaRefreshConfig(Config):
   """Configuration for replica fleet refresh."""
 
-  # Minimum percentage of healthy instances during refresh
-  # Higher = slower but safer, Lower = faster but riskier
-  min_healthy_percentage: int = 50
+  # Minimum percentage of healthy instances during refresh.
+  # 100 = never terminate an old instance until its replacement is healthy.
+  # This prevents downtime even with a single-instance fleet.
+  min_healthy_percentage: int = 100
+
+  # Maximum percentage of healthy instances allowed during refresh.
+  # 200 = allow temporarily doubling the fleet so new instances launch
+  # alongside old ones before any termination occurs.
+  max_healthy_percentage: int = 200
 
   # Seconds to wait for new instance to become healthy
   # S3 ATTACH download + warmup takes ~10-15 min for 85GB database
@@ -173,7 +179,8 @@ def shared_replicas_refreshed(
     # =========================================================================
     context.log.info(
       f"Starting rolling instance refresh with {config.min_healthy_percentage}% "
-      f"minimum healthy, {config.instance_warmup_seconds}s warmup"
+      f"min healthy, {config.max_healthy_percentage}% max healthy, "
+      f"{config.instance_warmup_seconds}s warmup"
     )
 
     try:
@@ -182,6 +189,7 @@ def shared_replicas_refreshed(
         Strategy="Rolling",
         Preferences={
           "MinHealthyPercentage": config.min_healthy_percentage,
+          "MaxHealthyPercentage": config.max_healthy_percentage,
           "InstanceWarmup": config.instance_warmup_seconds,
         },
       )
