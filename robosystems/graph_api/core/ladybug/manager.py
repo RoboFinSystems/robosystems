@@ -136,7 +136,9 @@ class LadybugDatabaseManager:
       )
 
     # Check capacity (bypass for subgraphs on Enterprise/Premium instances)
-    current_count = len(self.list_databases())
+    # Only count primary databases, not subgraphs (which contain '_' in their name)
+    all_databases = self.list_databases()
+    current_count = len([db for db in all_databases if "_" not in db])
     if not request.is_subgraph and current_count >= self.max_databases:
       raise HTTPException(
         status_code=status.HTTP_507_INSUFFICIENT_STORAGE,

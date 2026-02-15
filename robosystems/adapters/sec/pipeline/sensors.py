@@ -262,10 +262,12 @@ def sec_incremental_download_schedule(context):
       partition_key=partition_key,
       run_config={
         "ops": {
-          "sec_raw_filings": SECDownloadConfig(
-            skip_existing=True,
-            form_types=["10-K", "10-Q", "20-F", "40-F", "DEF 14A", "S-1"],
-          ),
+          "sec_raw_filings": {
+            "config": SECDownloadConfig(
+              skip_existing=True,
+              form_types=["10-K", "10-Q", "20-F", "40-F", "DEF 14A", "S-1"],
+            ).model_dump(),
+          },
         }
       },
       tags={

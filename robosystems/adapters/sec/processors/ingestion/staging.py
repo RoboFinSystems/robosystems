@@ -362,7 +362,10 @@ class DuckDBStager:
           duration_ms=(time.time() - start_time) * 1000,
         )
 
-      log_progress(f"Found {len(existing_tables)} existing tables in DuckDB")
+      existing_table_names = {
+        t.get("table_name", t) if isinstance(t, dict) else t for t in existing_tables
+      }
+      log_progress(f"Found {len(existing_table_names)} existing tables in DuckDB")
 
       # Get schema-defined tables
       tables_by_type = RoboLedgerContext.get_all_table_names_for_context(
@@ -383,6 +386,21 @@ class DuckDBStager:
 
       total_tables = len(tables_by_type)
       for i, (table_name, entity_type) in enumerate(tables_by_type.items(), 1):
+        # Skip tables that don't exist in DuckDB - no data for them
+        if table_name not in existing_table_names:
+          log_progress(
+            f"[{i}/{total_tables}] Skipped {table_name}: not in DuckDB (no data)"
+          )
+          successful_tables.append(table_name)
+          table_infos[table_name] = TableInfo(
+            name=table_name,
+            row_count=0,
+            file_count=0,
+            staged_at=datetime.now(UTC).isoformat(),
+            skipped=True,
+          )
+          continue
+
         # Build S3 patterns for all quarters to scan
         s3_patterns = [
           f"s3://{self.bucket}/{self.source_prefix}/filed={y}-Q{q}/{entity_type}/{table_name}.parquet"
