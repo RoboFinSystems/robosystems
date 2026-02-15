@@ -209,6 +209,7 @@ def shared_replicas_refreshed(
         "asg_name": asg_name,
         "desired_capacity": desired_capacity,
         "min_healthy_percentage": config.min_healthy_percentage,
+        "max_healthy_percentage": config.max_healthy_percentage,
         "instance_warmup_seconds": config.instance_warmup_seconds,
         "wait_for_completion": False,
       }
