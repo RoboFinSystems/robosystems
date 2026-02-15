@@ -27,7 +27,10 @@ from robosystems.config import env
 class ReplicaConfig(Config):
   """Configuration for replica operations."""
 
-  min_healthy_percentage: int = 50
+  # 100 = never terminate old instance until replacement is healthy
+  min_healthy_percentage: int = 100
+  # 200 = allow temporarily doubling fleet during refresh
+  max_healthy_percentage: int = 200
   # Set to 900s to match CloudFormation HealthCheckGracePeriod (15 min)
   # Large S3 ATTACH databases need significant warmup time for httpfs caching
   instance_warmup_seconds: int = 900
@@ -108,6 +111,7 @@ def refresh_replica_instances(
     Strategy="Rolling",
     Preferences={
       "MinHealthyPercentage": config.min_healthy_percentage,
+      "MaxHealthyPercentage": config.max_healthy_percentage,
       "InstanceWarmup": config.instance_warmup_seconds,
     },
   )
@@ -121,6 +125,7 @@ def refresh_replica_instances(
     "asg_name": asg_name,
     "desired_capacity": desired_capacity,
     "min_healthy_percentage": config.min_healthy_percentage,
+    "max_healthy_percentage": config.max_healthy_percentage,
     "instance_warmup_seconds": config.instance_warmup_seconds,
   }
 
