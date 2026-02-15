@@ -245,7 +245,7 @@ Resources:
                   GeoMatchStatement:
                     CountryCodes:
                       - US
-                      - CA  # Allow Canada as well
+                      - CA # Allow Canada as well
             Action:
               Block:
                 CustomResponse:
@@ -268,18 +268,18 @@ Resources:
               ManagedRuleGroupStatement:
                 VendorName: AWS
                 Name: AWSManagedRulesCommonRuleSet
-                ExcludedRules:  # Exclude rules that cause false positives with browser traffic
-                  - Name: NoUserAgent_HEADER  # Browsers always send User-Agent, but some tools don't
-                  - Name: UserAgent_BadBots_HEADER  # Can block legitimate browser user agents
-                  - Name: SizeRestrictions_BODY  # Already handled by our custom rule
-                  - Name: SizeRestrictions_QUERYSTRING  # Can block legitimate queries
-                  - Name: GenericRFI_BODY  # Can cause false positives with JSON payloads
-                  - Name: GenericRFI_QUERYARGUMENTS  # Can block legitimate query parameters
-                  - Name: GenericRFI_URIPATH  # Can block legitimate API paths
-                  - Name: RestrictedExtensions_URIPATH  # Can block legitimate API endpoints
-                  - Name: RestrictedExtensions_QUERYARGUMENTS  # Can block legitimate query params
-                  - Name: EC2MetaDataSSRF_BODY  # Can block legitimate requests with URLs
-                  - Name: EC2MetaDataSSRF_QUERYARGUMENTS  # Can block legitimate URL parameters
+                ExcludedRules: # Exclude rules that cause false positives with browser traffic
+                  - Name: NoUserAgent_HEADER # Browsers always send User-Agent, but some tools don't
+                  - Name: UserAgent_BadBots_HEADER # Can block legitimate browser user agents
+                  - Name: SizeRestrictions_BODY # Already handled by our custom rule
+                  - Name: SizeRestrictions_QUERYSTRING # Can block legitimate queries
+                  - Name: GenericRFI_BODY # Can cause false positives with JSON payloads
+                  - Name: GenericRFI_QUERYARGUMENTS # Can block legitimate query parameters
+                  - Name: GenericRFI_URIPATH # Can block legitimate API paths
+                  - Name: RestrictedExtensions_URIPATH # Can block legitimate API endpoints
+                  - Name: RestrictedExtensions_QUERYARGUMENTS # Can block legitimate query params
+                  - Name: EC2MetaDataSSRF_BODY # Can block legitimate requests with URLs
+                  - Name: EC2MetaDataSSRF_QUERYARGUMENTS # Can block legitimate URL parameters
             VisibilityConfig:
               SampledRequestsEnabled: true
               CloudWatchMetricsEnabled: true
@@ -326,68 +326,6 @@ Resources:
       ResourceArn: !Ref ApiAlbArn
       WebACLArn: !GetAtt WebACL.Arn
 
-  # CloudWatch Dashboard for WAF metrics
-  WAFDashboard:
-    Type: AWS::CloudWatch::Dashboard
-    Properties:
-      DashboardName: !Sub ${ServiceTag}-${Environment}-waf
-      DashboardBody: !Sub |
-        {
-          "widgets": [
-            {
-              "type": "metric",
-              "properties": {
-                "metrics": [
-                  [ "AWS/WAFV2", "AllowedRequests", { "stat": "Sum", "label": "Allowed" } ],
-                  [ ".", "BlockedRequests", { "stat": "Sum", "label": "Blocked" } ],
-                  [ ".", "CountedRequests", { "stat": "Sum", "label": "Counted" } ]
-                ],
-                "period": 300,
-                "stat": "Sum",
-                "region": "${AWS::Region}",
-                "title": "WAF Request Summary",
-                "yAxis": {
-                  "left": {
-                    "min": 0
-                  }
-                }
-              }
-            },
-            {
-              "type": "metric",
-              "properties": {
-                "metrics": [
-                  [ "AWS/WAFV2", "BlockedRequests", { "stat": "Sum" } ]
-                ],
-                "period": 60,
-                "stat": "Sum",
-                "region": "${AWS::Region}",
-                "title": "Blocked Requests (1 minute)",
-                "yAxis": {
-                  "left": {
-                    "min": 0
-                  }
-                }
-              }
-            }
-          ]
-        }
-
-  # CloudWatch Alarm for high block rate
-  HighBlockRateAlarm:
-    Type: AWS::CloudWatch::Alarm
-    Properties:
-      AlarmName: !Sub ${ServiceTag}-${Environment}-waf-high-block-rate
-      AlarmDescription: Alert when WAF blocks more than 100 requests per minute
-      MetricName: BlockedRequests
-      Namespace: AWS/WAFV2
-      Statistic: Sum
-      Period: 60
-      EvaluationPeriods: 2
-      Threshold: 100
-      ComparisonOperator: GreaterThanThreshold
-      TreatMissingData: notBreaching
-
 Outputs:
   WebACLId:
     Description: ID of the Web ACL
@@ -400,10 +338,6 @@ Outputs:
     Value: !GetAtt WebACL.Arn
     Export:
       Name: !Sub ${AWS::StackName}-WebACLArn
-
-  DashboardURL:
-    Description: CloudWatch Dashboard URL
-    Value: !Sub https://console.aws.amazon.com/cloudwatch/home?region=${AWS::Region}#dashboards:name=${ServiceTag}-${Environment}-waf
 
   AllowedIPSetArn:
     Description: ARN of the allowed IP set (for adding trusted IPs)
