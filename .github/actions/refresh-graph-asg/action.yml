@@ -100,6 +100,14 @@ runs:
         fi
 
         for TIER in $TIERS_TO_PROCESS; do
+          # Skip shared replicas - use Dagster shared_repository_refresh_replicas_job
+          # which has zero-downtime settings (MinHealthy=100%, MaxHealthy=200%)
+          if [ "$TIER" == "ladybug-shared" ]; then
+            echo "----------------------------------------"
+            echo "Skipping: $TIER (use Dagster job for zero-downtime refresh)"
+            continue
+          fi
+
           STACK_SUFFIX="${TIER_STACKS[$TIER]}"
           STACK_NAME="RoboSystemsGraph${STACK_SUFFIX}${ENV_SUFFIX}"
 
