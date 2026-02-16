@@ -27,12 +27,8 @@ RoboSystems is an enterprise-grade financial knowledge graph platform that trans
 ### Docker Development Environment
 
 ```bash
-# Install uv (Python package and version manager)
-curl -LsSf https://astral.sh/uv/install.sh | sh
-# Or on macOS with Homebrew: brew install uv
-
-# Install just (command runner)
-uv tool install rust-just
+# Install uv and just
+brew install uv just
 
 # Start robosystems backend api
 just start
@@ -121,7 +117,7 @@ just logs-grep api "pipeline" 500    # Search API logs
 #### Required Tools
 
 - `uv` for Python package and version management
-- `rust-just` for project command runner (installed via uv)
+- `just` for project command runner
 
 #### Deployment Requirements
 

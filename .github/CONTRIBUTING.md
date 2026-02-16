@@ -114,20 +114,15 @@ Look for issues labeled `good first issue` or `help wanted`. These are great sta
 
 - Docker and Docker Compose
 - `uv` for Python package and version management
-- `rust-just` command runner (installed via uv)
+- `just` command runner
 
 ### Local Development Environment
 
 1. **Install development tools**:
 
    ```bash
-   # Install uv (Python package and version manager)
-   curl -LsSf https://astral.sh/uv/install.sh | sh
-   # Or on macOS with Homebrew: brew install uv
-
-   # Install just (command runner)
-   uv tool install rust-just
-   uv tool update-shell  # Adds ~/.local/bin to PATH (restart terminal after)
+   # Install uv and just
+   brew install uv just
    ```
 
 2. **Set up Python environment**:

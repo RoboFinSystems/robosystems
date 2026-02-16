@@ -7,7 +7,7 @@
       "command": "bash",
       "args": [
         "-c",
-        "if ! command -v uv >/dev/null 2>&1; then if command -v brew >/dev/null 2>&1; then brew install uv; else curl -LsSf https://astral.sh/uv/install.sh | sh; fi; fi && uv tool install rust-just && uv tool update-shell"
+        "if command -v brew >/dev/null 2>&1; then brew install uv just; else echo 'Install Homebrew first: https://brew.sh' && exit 1; fi"
       ],
       "problemMatcher": []
     },
