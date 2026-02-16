@@ -382,6 +382,8 @@ Resources:
               - Effect: Allow
                 Action:
                   - cloudwatch:PutMetricData
+                  - cloudwatch:ListMetrics
+                  - cloudwatch:GetMetricStatistics
                 Resource: "*"
               - Effect: Allow
                 Action:
