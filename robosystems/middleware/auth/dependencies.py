@@ -85,13 +85,9 @@ def _db_get_user_by_id(user_id: str) -> User | None:
     user = User.get_by_id(user_id, sess)
     if not user:
       return None
-    # Return a detached copy so the session can be closed immediately.
-    detached = User()
-    detached.id = user.id
-    detached.name = user.name
-    detached.email = user.email
-    detached.is_active = user.is_active
-    return detached
+    # Detach from session so the pool connection is returned immediately.
+    sess.expunge(user)
+    return user
   finally:
     sess.close()
 

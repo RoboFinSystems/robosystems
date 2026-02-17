@@ -11,6 +11,7 @@ from ...security import SecurityAuditLogger
 from .cache import api_key_cache
 
 # Format: "rfs" prefix + 64 hex characters = 67 chars total
+# Lowercase only — secrets.token_hex() always produces lowercase hex
 _API_KEY_FORMAT_RE = re.compile(r"^rfs[0-9a-f]{64}$")
 
 
@@ -98,13 +99,16 @@ def validate_api_key(api_key: str, db_session: Session | None = None) -> User | 
         logger.warning(f"Unexpected error caching negative API key result: {e}")
       return None
 
+    # Grab user reference while session is active (triggers lazy load once)
+    user = key_record.user
+
     # Cache positive result with encrypted storage
     try:
       user_data = {
-        "id": key_record.user.id,
-        "name": key_record.user.name,
-        "email": key_record.user.email,
-        "is_active": key_record.user.is_active,
+        "id": user.id,
+        "name": user.name,
+        "email": user.email,
+        "is_active": user.is_active,
       }
       _safe_cache_call(
         "cache_api_key_validation", cache_key, user_data, is_active=key_record.is_active
@@ -115,20 +119,14 @@ def validate_api_key(api_key: str, db_session: Session | None = None) -> User | 
       logger.warning(f"Unexpected error caching API key validation result: {e}")
 
     # Log successful API key validation
-    SecurityAuditLogger.log_auth_success(
-      user_id=str(key_record.user.id), auth_method="api_key"
-    )
+    SecurityAuditLogger.log_auth_success(user_id=str(user.id), auth_method="api_key")
 
-    # Return a detached User (same as cache-hit path) so no session
-    # reference keeps a pool connection alive after this function returns.
-    user = User()
-    user.id = key_record.user.id
-    user.name = key_record.user.name
-    user.email = key_record.user.email
-    user.is_active = key_record.user.is_active
+    # Detach from session so the pool connection is returned immediately.
+    sess.expunge(user)
     return user
   finally:
     if _owns_session:
+      sess.rollback()
       sess.close()
 
 
@@ -220,6 +218,9 @@ def validate_api_key_with_graph(
         logger.warning(f"Unexpected error caching negative API key result: {e}")
       return None
 
+    # Grab user reference while session is active (triggers lazy load once)
+    user = key_record.user
+
     # Check if the user has access to the specified graph
     from ..graph.utils import MultiTenantUtils
 
@@ -241,10 +242,10 @@ def validate_api_key_with_graph(
       # Cache the API key validation (positive) but graph access (negative)
       try:
         user_data = {
-          "id": key_record.user.id,
-          "name": key_record.user.name,
-          "email": key_record.user.email,
-          "is_active": key_record.user.is_active,
+          "id": user.id,
+          "name": user.name,
+          "email": user.email,
+          "is_active": user.is_active,
         }
         _safe_cache_call(
           "cache_api_key_validation",
@@ -263,10 +264,10 @@ def validate_api_key_with_graph(
     # Cache both positive results
     try:
       user_data = {
-        "id": key_record.user.id,
-        "name": key_record.user.name,
-        "email": key_record.user.email,
-        "is_active": key_record.user.is_active,
+        "id": user.id,
+        "name": user.name,
+        "email": user.email,
+        "is_active": user.is_active,
       }
       _safe_cache_call(
         "cache_api_key_validation",
@@ -279,20 +280,14 @@ def validate_api_key_with_graph(
       logger.error(f"Failed to cache API key + graph validation result: {e}")
 
     # Log successful API key with graph validation
-    SecurityAuditLogger.log_auth_success(
-      user_id=str(key_record.user.id), auth_method="api_key"
-    )
+    SecurityAuditLogger.log_auth_success(user_id=str(user.id), auth_method="api_key")
 
-    # Return a detached User (same as cache-hit path) so no session
-    # reference keeps a pool connection alive after this function returns.
-    user = User()
-    user.id = key_record.user.id
-    user.name = key_record.user.name
-    user.email = key_record.user.email
-    user.is_active = key_record.user.is_active
+    # Detach from session so the pool connection is returned immediately.
+    sess.expunge(user)
     return user
   finally:
     if _owns_session:
+      sess.rollback()
       sess.close()
 
 

@@ -211,12 +211,13 @@ class TestJWTTokenVerification:
     assert result == "user123"
     mock_cache.get_cached_jwt_validation.assert_called_once_with(token)
 
+  @patch("robosystems.database.SessionFactory")
   @patch("robosystems.middleware.auth.jwt.is_jwt_token_revoked")
   @patch("robosystems.middleware.auth.dependencies.api_key_cache")
   @patch("robosystems.middleware.auth.jwt.jwt.decode")
   @patch("robosystems.middleware.auth.dependencies.User")
   def test_verify_jwt_token_valid_decode_and_cache(
-    self, mock_user_class, mock_jwt_decode, mock_cache, mock_is_revoked
+    self, mock_user_class, mock_jwt_decode, mock_cache, mock_is_revoked, mock_sf
   ):
     """Test JWT verification with valid token decode and caching."""
     token = "valid.jwt.token"
@@ -321,11 +322,12 @@ class TestJWTTokenVerification:
     assert result is None
 
   @patch("robosystems.middleware.auth.jwt.is_jwt_token_revoked")
+  @patch("robosystems.database.SessionFactory")
   @patch("robosystems.middleware.auth.dependencies.api_key_cache")
   @patch("robosystems.middleware.auth.jwt.jwt.decode")
   @patch("robosystems.middleware.auth.dependencies.User")
   def test_verify_jwt_token_inactive_user(
-    self, mock_user_class, mock_jwt_decode, mock_cache, mock_is_revoked
+    self, mock_user_class, mock_jwt_decode, mock_cache, mock_is_revoked, mock_sf
   ):
     """Test JWT verification fails for inactive users."""
     token = "valid.jwt.token"
@@ -344,12 +346,13 @@ class TestJWTTokenVerification:
 
     assert result is None
 
+  @patch("robosystems.database.SessionFactory")
   @patch("robosystems.middleware.auth.jwt.is_jwt_token_revoked")
   @patch("robosystems.middleware.auth.dependencies.api_key_cache")
   @patch("robosystems.middleware.auth.jwt.jwt.decode")
   @patch("robosystems.middleware.auth.dependencies.User")
   def test_verify_jwt_token_no_user_found(
-    self, mock_user_class, mock_jwt_decode, mock_cache, mock_is_revoked
+    self, mock_user_class, mock_jwt_decode, mock_cache, mock_is_revoked, mock_sf
   ):
     """Test JWT verification handles missing user."""
     token = "valid.jwt.token"
@@ -765,12 +768,13 @@ class TestGetCurrentUserWithGraph:
       mock_cache.cache_jwt_graph_access.assert_called_once()
 
   @pytest.mark.asyncio
+  @patch("robosystems.database.SessionFactory")
   @patch("robosystems.middleware.auth.dependencies.verify_jwt_token")
   @patch("robosystems.middleware.auth.dependencies.api_key_cache")
   @patch("robosystems.middleware.auth.dependencies.User")
   @patch("robosystems.middleware.auth.dependencies.SecurityAuditLogger")
   async def test_get_current_user_with_graph_access_denied(
-    self, mock_audit_logger, mock_user_class, mock_cache, mock_verify_jwt
+    self, mock_audit_logger, mock_user_class, mock_cache, mock_verify_jwt, mock_sf
   ):
     """Test graph access validation fails when access is denied."""
     auth_token = "valid.jwt.token"

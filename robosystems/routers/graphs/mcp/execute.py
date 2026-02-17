@@ -335,11 +335,20 @@ async def call_mcp_tool(
     from robosystems.database import SessionFactory
 
     access_type = "write" if is_write_query else "read"
-    _db = SessionFactory()
+    repo_access = None
+    sess = SessionFactory()
     try:
-      await validate_mcp_access(graph_id, current_user, _db, access_type)
+      await validate_mcp_access(graph_id, current_user, sess, access_type)
+
+      # Look up shared-repo subscription while session is still open
+      if MultiTenantUtils.is_shared_repository(graph_id):
+        from robosystems.models.iam.user_repository import UserRepository
+
+        repo_access = UserRepository.get_by_user_and_repository(
+          current_user.id, graph_id, sess
+        )
     finally:
-      _db.close()
+      sess.close()
 
     # Apply dual-layer rate limiting for shared repositories
     if MultiTenantUtils.is_shared_repository(graph_id):
@@ -348,16 +357,6 @@ async def call_mcp_tool(
         create_async_redis_client,
       )
       from robosystems.middleware.rate_limits import DualLayerRateLimiter
-      from robosystems.models.iam.user_repository import UserRepository
-
-      # Get user's repository access plan (short-lived session)
-      _db2 = SessionFactory()
-      try:
-        repo_access = UserRepository.get_by_user_and_repository(
-          current_user.id, graph_id, _db2
-        )
-      finally:
-        _db2.close()
 
       if not repo_access:
         raise HTTPException(
