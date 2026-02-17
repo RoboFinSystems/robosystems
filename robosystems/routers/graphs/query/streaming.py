@@ -217,7 +217,7 @@ async def stream_ndjson_response(
       yield json.dumps(error_chunk) + "\n"
 
       # Record failure metrics
-      circuit_breaker.record_failure(graph_id, "cypher_query")
+      circuit_breaker.record_failure(graph_id, "cypher_query", error=e)
       logger.error(f"NDJSON streaming failed: {e}")
 
   return StreamingResponse(
@@ -437,7 +437,7 @@ async def stream_sse_response(
           }
         ),
       }
-      circuit_breaker.record_failure(graph_id, "cypher_query")
+      circuit_breaker.record_failure(graph_id, "cypher_query", error=e)
       logger.error(f"SSE streaming failed: {e}")
 
   return EventSourceResponse(
