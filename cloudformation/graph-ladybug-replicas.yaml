@@ -108,6 +108,12 @@ Parameters:
     MinValue: 1
     MaxValue: 100
     Description: Target memory utilization percentage for auto scaling
+  ResponseTimeTargetValue:
+    Type: Number
+    Default: 5
+    MinValue: 1
+    MaxValue: 30
+    Description: Target ALB response time in seconds for auto scaling
   InstanceWarmup:
     Type: Number
     Default: 900
@@ -522,6 +528,25 @@ Resources:
             - Name: AutoScalingGroupName
               Value: !Ref ReplicaAutoScalingGroup
         TargetValue: !Ref MemoryTargetValue
+        DisableScaleIn: false
+
+  # Response time-based Auto Scaling (triggers scale-out when queries slow down)
+  ReplicaResponseTimeScalingPolicy:
+    Type: AWS::AutoScaling::ScalingPolicy
+    Properties:
+      AutoScalingGroupName: !Ref ReplicaAutoScalingGroup
+      PolicyType: TargetTrackingScaling
+      TargetTrackingConfiguration:
+        CustomizedMetricSpecification:
+          MetricName: TargetResponseTime
+          Namespace: AWS/ApplicationELB
+          Statistic: Average
+          Dimensions:
+            - Name: LoadBalancer
+              Value: !GetAtt ReplicaALB.LoadBalancerFullName
+            - Name: TargetGroup
+              Value: !GetAtt ReplicaTargetGroup.TargetGroupFullName
+        TargetValue: !Ref ResponseTimeTargetValue
         DisableScaleIn: false
 
   # ========================================

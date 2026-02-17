@@ -109,25 +109,31 @@ def create_app() -> FastAPI:
           logger.warning(f"Failed to clear extension cache at {cache_path}: {e}")
 
     # Initialize DuckDB connection pool for staging tables
-    from robosystems.graph_api.core.duckdb import initialize_duckdb_pool
+    # Skip on replicas - they are read-only and never use staging tables
+    duckdb_pool = None
+    if os.getenv("LBUG_ROLE") != "replica":
+      from robosystems.graph_api.core.duckdb import initialize_duckdb_pool
 
-    duckdb_base_path = Path(env.DUCKDB_STAGING_PATH)
-    duckdb_pool = initialize_duckdb_pool(
-      base_path=str(duckdb_base_path),
-      max_connections_per_db=3,
-      connection_ttl_minutes=30,
-    )
-    logger.info(
-      f"Initialized DuckDB connection pool at {duckdb_base_path} "
-      "(databases persist with graph lifecycle)"
-    )
+      duckdb_base_path = Path(env.DUCKDB_STAGING_PATH)
+      duckdb_pool = initialize_duckdb_pool(
+        base_path=str(duckdb_base_path),
+        max_connections_per_db=3,
+        connection_ttl_minutes=30,
+      )
+      logger.info(
+        f"Initialized DuckDB connection pool at {duckdb_base_path} "
+        "(databases persist with graph lifecycle)"
+      )
+    else:
+      logger.info("Skipping DuckDB initialization (replica mode)")
 
     yield  # Application runs here
 
     # Shutdown
     logger.info("Graph API shutting down")
-    duckdb_pool.close_all_connections()
-    logger.info("Closed all DuckDB connections")
+    if duckdb_pool is not None:
+      duckdb_pool.close_all_connections()
+      logger.info("Closed all DuckDB connections")
 
   # Load description from markdown file
   base_dir = Path(__file__).parent.parent.parent  # Go up to project root

@@ -12,6 +12,7 @@ from robosystems.logger import logger
 from robosystems.middleware.graph.query_queue import get_query_queue
 from robosystems.middleware.graph.router import GraphRouter
 from robosystems.middleware.graph.utils import MultiTenantUtils
+from robosystems.middleware.robustness import CircuitBreakerManager
 
 
 def _get_query_operation_type(graph_id: str) -> str:
@@ -37,6 +38,7 @@ def setup_query_executor():
   application startup.
   """
   queue_manager = get_query_queue()
+  circuit_breaker = CircuitBreakerManager()
 
   async def executor(
     cypher: str, parameters: dict[str, Any] | None, graph_id: str
@@ -56,7 +58,7 @@ def setup_query_executor():
       # Get the appropriate repository
       graph_router = GraphRouter()
       operation_type = _get_query_operation_type(graph_id)
-      repository = graph_router.get_repository(graph_id, operation_type)
+      repository = await graph_router.get_repository(graph_id, operation_type)
 
       # Execute query with proper async handling
       if hasattr(repository, "execute_query") and asyncio.iscoroutinefunction(
@@ -74,6 +76,9 @@ def setup_query_executor():
       # Extract column names from first row
       columns = list(data[0].keys()) if data else []
 
+      # Record success so circuit breaker can close after recovery
+      circuit_breaker.record_success(graph_id, "cypher_query")
+
       # Return structured result
       return {
         "data": data,
@@ -83,6 +88,9 @@ def setup_query_executor():
       }
 
     except Exception as e:
+      # Record failure so circuit breaker can open under sustained errors
+      circuit_breaker.record_failure(graph_id, "cypher_query")
+
       logger.error(
         f"Query executor error for graph {graph_id}: {e}",
         extra={

@@ -166,6 +166,11 @@ on:
         type: string
         description: Target memory utilization percentage for replica auto scaling
         default: "80"
+      shared_replicas_response_time_target:
+        required: false
+        type: string
+        description: Target ALB response time in seconds for replica auto scaling
+        default: "5"
       shared_replicas_instance_warmup:
         required: false
         type: string
@@ -477,6 +482,7 @@ jobs:
       shared_repositories: ${{ inputs.shared_repositories }}
       cpu_target_value: ${{ inputs.shared_replicas_cpu_target }}
       memory_target_value: ${{ inputs.shared_replicas_memory_target }}
+      response_time_target_value: ${{ inputs.shared_replicas_response_time_target }}
       instance_warmup: ${{ inputs.shared_replicas_instance_warmup }}
       health_check_grace_period: ${{ inputs.shared_replicas_health_check_grace_period }}
       ecr_image_tag: ${{ inputs.ecr_image_tag }}
