@@ -10,7 +10,6 @@ Security Note:
 from fastapi import Header, HTTPException, Query, Request, Security, status
 from fastapi.security import APIKeyHeader
 
-from ...database import session
 from ...logger import logger
 from ...models.iam import User
 from ...security import SecurityAuditLogger, SecurityEventType
@@ -71,6 +70,44 @@ def _create_user_from_cache(user_data: dict) -> User | None:
     return None
 
 
+def _db_get_user_by_id(user_id: str) -> User | None:
+  """Look up a user by ID using a short-lived session.
+
+  Returns a detached User object so no pool connection is held after
+  this function returns.  The scoped ``session`` proxy would keep the
+  connection checked out until the DatabaseSessionMiddleware cleanup at
+  end-of-request — disastrous for long-running endpoints (MCP, SSE).
+  """
+  from ...database import SessionFactory
+
+  sess = SessionFactory()
+  try:
+    user = User.get_by_id(user_id, sess)
+    if not user:
+      return None
+    # Detach from session so the pool connection is returned immediately.
+    sess.expunge(user)
+    return user
+  finally:
+    sess.close()
+
+
+def _db_check_graph_access(user_id: str, graph_id: str) -> bool:
+  """Check graph access using a short-lived session.
+
+  Same rationale as ``_db_get_user_by_id`` — avoid holding a pool
+  connection for the entire request duration.
+  """
+  from ...database import SessionFactory
+  from ...models.iam import GraphUser
+
+  sess = SessionFactory()
+  try:
+    return GraphUser.user_has_access(user_id, graph_id, sess)
+  finally:
+    sess.close()
+
+
 # Define API key header
 API_KEY_HEADER = APIKeyHeader(name="X-API-Key", auto_error=False)
 
@@ -91,7 +128,7 @@ def verify_jwt_token(token: str) -> str | None:
 
   if user_id:
     # Get user data and cache it
-    user = User.get_by_id(user_id, session())
+    user = _db_get_user_by_id(user_id)
     if user and bool(user.is_active):
       user_data = {
         "id": user.id,
@@ -140,7 +177,7 @@ async def get_optional_user(
         # If validation failed, fall through to database query
       else:
         # Fallback to database query
-        user = User.get_by_id(user_id, session())
+        user = _db_get_user_by_id(user_id)
         if user and bool(user.is_active):
           return user
 
@@ -200,7 +237,7 @@ async def get_current_user(
         # If validation failed, fall through to database query
       else:
         # Fallback to database query
-        user = User.get_by_id(user_id, session())
+        user = _db_get_user_by_id(user_id)
         if user and bool(user.is_active):
           SecurityAuditLogger.log_auth_success(
             user_id=str(user_id),
@@ -307,10 +344,10 @@ async def get_current_user_with_graph(
         user = _create_user_from_cache(user_data)
         if not user:
           # Validation failed - fallback to database query
-          user = User.get_by_id(user_id, session())
+          user = _db_get_user_by_id(user_id)
       else:
         # Fallback to database query
-        user = User.get_by_id(user_id, session())
+        user = _db_get_user_by_id(user_id)
 
       if user and bool(user.is_active):
         # Check if user has access to the graph (try cache first)
@@ -323,7 +360,6 @@ async def get_current_user_with_graph(
             is_shared_repository_or_subgraph,
           )
 
-          from ...models.iam import GraphUser
           from ..graph.utils import MultiTenantUtils
 
           if is_shared_repository_or_subgraph(graph_id):
@@ -335,7 +371,7 @@ async def get_current_user_with_graph(
             )
           else:
             # Use GraphUser access validation for personal user graphs
-            has_access = GraphUser.user_has_access(user_id, graph_id, session())
+            has_access = _db_check_graph_access(user_id, graph_id)
 
           api_key_cache.cache_jwt_graph_access(str(user_id), graph_id, has_access)
 
@@ -537,7 +573,7 @@ async def get_current_user_sse(
         # If validation failed, fall through to database query
       else:
         # Fallback to database query
-        user = User.get_by_id(user_id, session())
+        user = _db_get_user_by_id(user_id)
         if user and bool(user.is_active):
           SecurityAuditLogger.log_auth_success(
             user_id=str(user_id),

@@ -7,6 +7,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from robosystems.middleware.auth.cache import APIKeyCache
+from robosystems.middleware.auth.utils import _is_valid_api_key_format
 
 # Mark entire test module as slow due to encryption operations
 pytestmark = pytest.mark.slow
@@ -323,3 +324,74 @@ class TestRedisConnectionFailures:
         else call_args[0][1].get("details", {})
       )
       assert "encryption" in str(details).lower()
+
+
+class TestAPIKeyFormatValidation:
+  """Test API key format validation before cache/DB work."""
+
+  def test_valid_format_accepted(self):
+    """Valid rfs + 64 hex chars should pass."""
+    key = "rfs" + "a" * 64
+    assert _is_valid_api_key_format(key) is True
+
+  def test_valid_format_mixed_hex(self):
+    """Valid key with mixed hex digits should pass."""
+    key = "rfs" + "0123456789abcdef" * 4
+    assert _is_valid_api_key_format(key) is True
+
+  def test_wrong_prefix_rejected(self):
+    """Key with wrong prefix should be rejected."""
+    key = "xyz" + "a" * 64
+    assert _is_valid_api_key_format(key) is False
+
+  def test_too_short_rejected(self):
+    """Key that's too short should be rejected."""
+    key = "rfs" + "a" * 32
+    assert _is_valid_api_key_format(key) is False
+
+  def test_too_long_rejected(self):
+    """Key that's too long should be rejected."""
+    key = "rfs" + "a" * 65
+    assert _is_valid_api_key_format(key) is False
+
+  def test_non_hex_chars_rejected(self):
+    """Key with non-hex characters should be rejected."""
+    key = "rfs" + "g" * 64
+    assert _is_valid_api_key_format(key) is False
+
+  def test_uppercase_hex_rejected(self):
+    """Key with uppercase hex should be rejected (token_hex returns lowercase)."""
+    key = "rfs" + "A" * 64
+    assert _is_valid_api_key_format(key) is False
+
+  def test_empty_string_rejected(self):
+    """Empty string should be rejected."""
+    assert _is_valid_api_key_format("") is False
+
+  def test_garbage_string_rejected(self):
+    """Random garbage should be rejected."""
+    assert _is_valid_api_key_format("totally-not-a-key") is False
+
+  @patch("robosystems.middleware.auth.utils._safe_cache_call")
+  @patch("robosystems.middleware.auth.utils.UserAPIKey")
+  def test_malformed_key_skips_cache_and_db(self, mock_api_key, mock_cache_call):
+    """Malformed keys should return None without touching cache or DB."""
+    from robosystems.middleware.auth.utils import validate_api_key
+
+    result = validate_api_key("rfs_fake_key")
+    assert result is None
+    mock_cache_call.assert_not_called()
+    mock_api_key.get_by_key.assert_not_called()
+
+  @patch("robosystems.middleware.auth.utils._safe_cache_call")
+  @patch("robosystems.middleware.auth.utils.UserAPIKey")
+  def test_malformed_key_skips_cache_and_db_with_graph(
+    self, mock_api_key, mock_cache_call
+  ):
+    """Malformed keys should return None in graph validation too."""
+    from robosystems.middleware.auth.utils import validate_api_key_with_graph
+
+    result = validate_api_key_with_graph("not-valid", "kg123")
+    assert result is None
+    mock_cache_call.assert_not_called()
+    mock_api_key.get_by_key.assert_not_called()

@@ -211,12 +211,13 @@ class TestJWTTokenVerification:
     assert result == "user123"
     mock_cache.get_cached_jwt_validation.assert_called_once_with(token)
 
+  @patch("robosystems.database.SessionFactory")
   @patch("robosystems.middleware.auth.jwt.is_jwt_token_revoked")
   @patch("robosystems.middleware.auth.dependencies.api_key_cache")
   @patch("robosystems.middleware.auth.jwt.jwt.decode")
   @patch("robosystems.middleware.auth.dependencies.User")
   def test_verify_jwt_token_valid_decode_and_cache(
-    self, mock_user_class, mock_jwt_decode, mock_cache, mock_is_revoked
+    self, mock_user_class, mock_jwt_decode, mock_cache, mock_is_revoked, mock_sf
   ):
     """Test JWT verification with valid token decode and caching."""
     token = "valid.jwt.token"
@@ -321,11 +322,12 @@ class TestJWTTokenVerification:
     assert result is None
 
   @patch("robosystems.middleware.auth.jwt.is_jwt_token_revoked")
+  @patch("robosystems.database.SessionFactory")
   @patch("robosystems.middleware.auth.dependencies.api_key_cache")
   @patch("robosystems.middleware.auth.jwt.jwt.decode")
   @patch("robosystems.middleware.auth.dependencies.User")
   def test_verify_jwt_token_inactive_user(
-    self, mock_user_class, mock_jwt_decode, mock_cache, mock_is_revoked
+    self, mock_user_class, mock_jwt_decode, mock_cache, mock_is_revoked, mock_sf
   ):
     """Test JWT verification fails for inactive users."""
     token = "valid.jwt.token"
@@ -344,12 +346,13 @@ class TestJWTTokenVerification:
 
     assert result is None
 
+  @patch("robosystems.database.SessionFactory")
   @patch("robosystems.middleware.auth.jwt.is_jwt_token_revoked")
   @patch("robosystems.middleware.auth.dependencies.api_key_cache")
   @patch("robosystems.middleware.auth.jwt.jwt.decode")
   @patch("robosystems.middleware.auth.dependencies.User")
   def test_verify_jwt_token_no_user_found(
-    self, mock_user_class, mock_jwt_decode, mock_cache, mock_is_revoked
+    self, mock_user_class, mock_jwt_decode, mock_cache, mock_is_revoked, mock_sf
   ):
     """Test JWT verification handles missing user."""
     token = "valid.jwt.token"
@@ -397,20 +400,27 @@ class TestGetOptionalUser:
     mock_create_user.assert_called_once_with(cached_data["user_data"])
 
   @pytest.mark.asyncio
+  @patch("robosystems.database.SessionFactory")
   @patch("robosystems.middleware.auth.dependencies.verify_jwt_token")
   @patch("robosystems.middleware.auth.dependencies.api_key_cache")
   @patch("robosystems.middleware.auth.dependencies.User")
   async def test_get_optional_user_jwt_token_database_fallback(
-    self, mock_user_class, mock_cache, mock_verify_jwt
+    self, mock_user_class, mock_cache, mock_verify_jwt, mock_session_factory
   ):
     """Test optional user authentication with JWT token database fallback."""
     auth_token = "valid.jwt.token"
     user_id = "user123"
 
+    mock_sess = Mock()
+    mock_session_factory.return_value = mock_sess
+
     mock_verify_jwt.return_value = user_id
     mock_cache.get_cached_jwt_validation.return_value = None  # No cache
 
     mock_user = Mock(spec=User)
+    mock_user.id = user_id
+    mock_user.name = "Test User"
+    mock_user.email = "test@example.com"
     mock_user.is_active = True
     mock_user_class.get_by_id.return_value = mock_user
 
@@ -420,8 +430,11 @@ class TestGetOptionalUser:
 
     result = await get_optional_user(request=mock_request, api_key=None)
 
-    assert result == mock_user
+    # _db_get_user_by_id returns a detached User, so check attributes
+    assert result is not None
+    assert result.id == user_id
     mock_user_class.get_by_id.assert_called_once()
+    mock_sess.close.assert_called_once()
 
   @pytest.mark.asyncio
   @patch("robosystems.middleware.auth.dependencies.verify_jwt_token")
@@ -518,21 +531,27 @@ class TestGetCurrentUser:
     mock_audit_logger.log_auth_success.assert_called_once()
 
   @pytest.mark.asyncio
+  @patch("robosystems.database.SessionFactory")
   @patch("robosystems.middleware.auth.dependencies.verify_jwt_token")
   @patch("robosystems.middleware.auth.dependencies.api_key_cache")
   @patch("robosystems.middleware.auth.dependencies.User")
   @patch("robosystems.middleware.auth.dependencies.SecurityAuditLogger")
   async def test_get_current_user_jwt_authorization_header(
-    self, mock_audit_logger, mock_user_class, mock_cache, mock_verify_jwt
+    self, mock_audit_logger, mock_user_class, mock_cache, mock_verify_jwt, mock_sf
   ):
     """Test current user authentication with JWT from Authorization header."""
     authorization = "Bearer valid.jwt.token"
     user_id = "user123"
 
+    mock_sf.return_value = Mock()
+
     mock_verify_jwt.return_value = user_id
     mock_cache.get_cached_jwt_validation.return_value = None
 
     mock_user = Mock(spec=User)
+    mock_user.id = user_id
+    mock_user.name = "Test"
+    mock_user.email = "test@test.com"
     mock_user.is_active = True
     mock_user_class.get_by_id.return_value = mock_user
 
@@ -541,7 +560,8 @@ class TestGetCurrentUser:
 
     result = await get_current_user(self.mock_request, api_key=None)
 
-    assert result == mock_user
+    assert result is not None
+    assert result.id == user_id
     mock_verify_jwt.assert_called_once_with("valid.jwt.token")
     mock_audit_logger.log_auth_success.assert_called_once()
 
@@ -621,21 +641,27 @@ class TestGetCurrentUser:
     mock_audit_logger.log_auth_failure.assert_called_once()
 
   @pytest.mark.asyncio
+  @patch("robosystems.database.SessionFactory")
   @patch("robosystems.middleware.auth.dependencies.verify_jwt_token")
   @patch("robosystems.middleware.auth.dependencies.api_key_cache")
   @patch("robosystems.middleware.auth.dependencies.User")
   @patch("robosystems.middleware.auth.dependencies.SecurityAuditLogger")
   async def test_get_current_user_jwt_query_param_success(
-    self, mock_audit_logger, mock_user_class, mock_cache, mock_verify_jwt
+    self, mock_audit_logger, mock_user_class, mock_cache, mock_verify_jwt, mock_sf
   ):
     """Test current user authentication with JWT from query parameter (for SSE)."""
     token_value = "valid.jwt.token"
     user_id = "user123"
 
+    mock_sf.return_value = Mock()
+
     mock_verify_jwt.return_value = user_id
     mock_cache.get_cached_jwt_validation.return_value = None
 
     mock_user = Mock(spec=User)
+    mock_user.id = user_id
+    mock_user.name = "Test"
+    mock_user.email = "test@test.com"
     mock_user.is_active = True
     mock_user_class.get_by_id.return_value = mock_user
 
@@ -643,7 +669,8 @@ class TestGetCurrentUser:
       self.mock_request, api_key=None, authorization=None, token=token_value
     )
 
-    assert result == mock_user
+    assert result is not None
+    assert result.id == user_id
     mock_verify_jwt.assert_called_once_with(token_value)
     mock_audit_logger.log_auth_success.assert_called_once()
 
@@ -696,29 +723,36 @@ class TestGetCurrentUserWithGraph:
     mock_audit_logger.log_auth_success.assert_called_once()
 
   @pytest.mark.asyncio
+  @patch("robosystems.database.SessionFactory")
   @patch("robosystems.middleware.auth.dependencies.verify_jwt_token")
   @patch("robosystems.middleware.auth.dependencies.api_key_cache")
   @patch("robosystems.middleware.auth.dependencies.User")
   @patch("robosystems.middleware.auth.dependencies.SecurityAuditLogger")
   async def test_get_current_user_with_graph_database_fallback(
-    self, mock_audit_logger, mock_user_class, mock_cache, mock_verify_jwt
+    self, mock_audit_logger, mock_user_class, mock_cache, mock_verify_jwt, mock_sf
   ):
     """Test graph access validation with database fallback."""
     auth_token = "valid.jwt.token"
     user_id = "user123"
+
+    mock_sf.return_value = Mock()
 
     mock_verify_jwt.return_value = user_id
     mock_cache.get_cached_jwt_validation.return_value = None  # No JWT cache
     mock_cache.get_cached_jwt_graph_access.return_value = None  # No graph cache
 
     mock_user = Mock(spec=User)
+    mock_user.id = user_id
+    mock_user.name = "Test"
+    mock_user.email = "test@test.com"
     mock_user.is_active = True
     mock_user_class.get_by_id.return_value = mock_user
 
     # Set authorization header on request
     self.mock_request.headers = {"authorization": f"Bearer {auth_token}"}
 
-    # Mock GraphUser access check
+    # Mock GraphUser access check (patched at the models level since
+    # _db_check_graph_access imports it internally)
     with patch("robosystems.models.iam.GraphUser") as mock_user_graph:
       mock_user_graph.user_has_access.return_value = True
 
@@ -728,17 +762,19 @@ class TestGetCurrentUserWithGraph:
         api_key=None,
       )
 
-      assert result == mock_user
+      assert result is not None
+      assert result.id == user_id
       mock_user_graph.user_has_access.assert_called_once()
       mock_cache.cache_jwt_graph_access.assert_called_once()
 
   @pytest.mark.asyncio
+  @patch("robosystems.database.SessionFactory")
   @patch("robosystems.middleware.auth.dependencies.verify_jwt_token")
   @patch("robosystems.middleware.auth.dependencies.api_key_cache")
   @patch("robosystems.middleware.auth.dependencies.User")
   @patch("robosystems.middleware.auth.dependencies.SecurityAuditLogger")
   async def test_get_current_user_with_graph_access_denied(
-    self, mock_audit_logger, mock_user_class, mock_cache, mock_verify_jwt
+    self, mock_audit_logger, mock_user_class, mock_cache, mock_verify_jwt, mock_sf
   ):
     """Test graph access validation fails when access is denied."""
     auth_token = "valid.jwt.token"
@@ -815,23 +851,29 @@ class TestGetCurrentUserWithGraph:
     mock_audit_logger.log_security_event.assert_called_once()
 
   @pytest.mark.asyncio
+  @patch("robosystems.database.SessionFactory")
   @patch("robosystems.middleware.auth.dependencies.verify_jwt_token")
   @patch("robosystems.middleware.auth.dependencies.api_key_cache")
   @patch("robosystems.middleware.auth.dependencies.User")
   @patch("robosystems.middleware.auth.dependencies.SecurityAuditLogger")
   async def test_get_current_user_with_shared_repository_jwt_success(
-    self, mock_audit_logger, mock_user_class, mock_cache, mock_verify_jwt
+    self, mock_audit_logger, mock_user_class, mock_cache, mock_verify_jwt, mock_sf
   ):
     """Test JWT user can access shared repositories (e.g., 'sec')."""
     auth_token = "valid.jwt.token"
     user_id = "user123"
     shared_repo_id = "sec"
 
+    mock_sf.return_value = Mock()
+
     mock_verify_jwt.return_value = user_id
     mock_cache.get_cached_jwt_validation.return_value = None
     mock_cache.get_cached_jwt_graph_access.return_value = None
 
     mock_user = Mock(spec=User)
+    mock_user.id = user_id
+    mock_user.name = "Test User"
+    mock_user.email = "test@example.com"
     mock_user.is_active = True
     mock_user_class.get_by_id.return_value = mock_user
 
@@ -855,7 +897,7 @@ class TestGetCurrentUserWithGraph:
         api_key=None,
       )
 
-      assert result == mock_user
+      assert result.id == user_id
       mock_is_shared.assert_called_once_with(shared_repo_id)
       mock_validate_repo.assert_called_once_with(shared_repo_id, user_id, "read")
       mock_cache.cache_jwt_graph_access.assert_called_once_with(
@@ -1118,12 +1160,15 @@ class TestPerformanceAndCaching:
       mock_create_user.assert_called_once()
 
   @pytest.mark.asyncio
+  @patch("robosystems.database.SessionFactory")
   @patch("robosystems.middleware.auth.dependencies.verify_jwt_token")
-  async def test_multiple_auth_method_precedence(self, mock_verify_jwt):
+  async def test_multiple_auth_method_precedence(self, mock_verify_jwt, mock_sf):
     """Test that JWT token takes precedence over API key."""
     auth_token = "valid.jwt.token"
     api_key = "valid-api-key"
     user_id = "user123"
+
+    mock_sf.return_value = Mock()
 
     # Create mock request
     mock_request = Mock()
@@ -1136,6 +1181,9 @@ class TestPerformanceAndCaching:
 
       with patch("robosystems.middleware.auth.dependencies.User") as mock_user_class:
         mock_user = Mock(spec=User)
+        mock_user.id = user_id
+        mock_user.name = "Test User"
+        mock_user.email = "test@example.com"
         mock_user.is_active = True
         mock_user_class.get_by_id.return_value = mock_user
 
@@ -1144,6 +1192,6 @@ class TestPerformanceAndCaching:
         ) as mock_validate_api_key:
           result = await get_optional_user(request=mock_request, api_key=api_key)
 
-          assert result == mock_user
+          assert result.id == user_id
           # API key validation should not be called
           mock_validate_api_key.assert_not_called()

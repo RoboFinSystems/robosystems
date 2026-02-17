@@ -115,11 +115,15 @@ def client(test_db):
   app.dependency_overrides[get_db_session] = override_get_db
   app.dependency_overrides[get_async_db_session] = override_get_async_db
 
-  # Override the database session to use test database across all modules
+  # Override the database session to use test database across all modules.
+  # Auth code (dependencies.py, utils.py, identity.py) uses SessionFactory()
+  # instead of the scoped session, so we patch SessionFactory to return
+  # test_db too.  The scoped session patch remains for any other code that
+  # still uses it (e.g. SSE monitor, connection service).
+  mock_session_factory = Mock(return_value=test_db)
   with (
     patch("robosystems.database.session", test_db),
-    patch("robosystems.middleware.auth.dependencies.session", test_db),
-    patch("robosystems.middleware.auth.utils.session", test_db),
+    patch("robosystems.database.SessionFactory", mock_session_factory),
   ):
     client = TestClient(app)
     yield client
