@@ -43,24 +43,22 @@ class TestGraphAccessControlDependency:
     self, mock_request, test_user, sample_graph
   ):
     """Test that users with valid graph access are authenticated."""
-    # Create user-graph relationship
-    GraphUser.create(
-      user_id=test_user.id,
-      graph_id=sample_graph.graph_id,
-      role="member",
-      session=session,
-    )
-
     mock_request.client.host = "127.0.0.1"
     mock_request.headers = {"authorization": "Bearer valid_token"}
     mock_request.url.path = f"/v1/graphs/{sample_graph.graph_id}/info"
 
     with (
       patch("robosystems.middleware.auth.dependencies.verify_jwt_token") as mock_verify,
-      patch("robosystems.middleware.auth.dependencies.User.get_by_id") as mock_get_user,
+      patch(
+        "robosystems.middleware.auth.dependencies._db_get_user_by_id"
+      ) as mock_get_user,
+      patch(
+        "robosystems.middleware.auth.dependencies._db_check_graph_access"
+      ) as mock_access,
     ):
       mock_verify.return_value = test_user.id
       mock_get_user.return_value = test_user
+      mock_access.return_value = True
 
       # Should succeed - user has access
       user = await get_current_user_with_graph(
@@ -78,10 +76,16 @@ class TestGraphAccessControlDependency:
 
     with (
       patch("robosystems.middleware.auth.dependencies.verify_jwt_token") as mock_verify,
-      patch("robosystems.middleware.auth.dependencies.User.get_by_id") as mock_get_user,
+      patch(
+        "robosystems.middleware.auth.dependencies._db_get_user_by_id"
+      ) as mock_get_user,
+      patch(
+        "robosystems.middleware.auth.dependencies._db_check_graph_access"
+      ) as mock_access,
     ):
       mock_verify.return_value = test_user.id
       mock_get_user.return_value = test_user
+      mock_access.return_value = False
 
       # Should raise 403 - user lacks access
       with pytest.raises(Exception) as exc_info:
