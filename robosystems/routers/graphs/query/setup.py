@@ -89,7 +89,7 @@ def setup_query_executor():
 
     except Exception as e:
       # Record failure so circuit breaker can open under sustained errors
-      circuit_breaker.record_failure(graph_id, "cypher_query")
+      circuit_breaker.record_failure(graph_id, "cypher_query", error=e)
 
       logger.error(
         f"Query executor error for graph {graph_id}: {e}",

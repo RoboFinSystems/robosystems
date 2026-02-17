@@ -841,7 +841,7 @@ async def execute_cypher_query(
     raise
 
   except Exception as e:
-    circuit_breaker.record_failure(graph_id, "cypher_query")
+    circuit_breaker.record_failure(graph_id, "cypher_query", error=e)
 
     # Record business event for unexpected errors
     metrics_instance = get_endpoint_metrics()

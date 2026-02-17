@@ -13,6 +13,7 @@ from typing import Any
 from fastapi import HTTPException
 
 from robosystems.config.tuning import TuningConfig
+from robosystems.graph_api.client.exceptions import GraphClientError
 from robosystems.logger import logger
 
 
@@ -137,8 +138,23 @@ class CircuitBreakerManager:
     # Update metrics
     self._update_metrics(graph_id, operation, circuit)
 
-  def record_failure(self, graph_id: str, operation: str) -> None:
-    """Record failed operation and potentially open circuit."""
+  def record_failure(
+    self, graph_id: str, operation: str, error: Exception | None = None
+  ) -> None:
+    """
+    Record failed operation and potentially open circuit.
+
+    Only infrastructure errors (timeouts, server errors, connection failures)
+    count toward the circuit breaker threshold. Client errors like bad Cypher
+    syntax are the caller's fault and should not trip the breaker.
+    """
+    # Skip client errors — bad queries shouldn't trip the breaker
+    if error is not None and isinstance(error, GraphClientError):
+      logger.debug(
+        f"Circuit {graph_id}:{operation} ignoring client error: {type(error).__name__}"
+      )
+      return
+
     circuit_key = self._get_circuit_key(graph_id, operation)
     circuit = self.circuits[circuit_key]
 
