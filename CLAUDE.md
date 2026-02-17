@@ -348,12 +348,14 @@ just valkey-clear-queue QUEUE # Clear queue
 
 ## AWS Infrastructure
 
-| Component   | Service           | Instance                |
-| ----------- | ----------------- | ----------------------- |
-| API/Workers | ECS Fargate ARM64 | 1-2 tasks, 99% Spot     |
-| PostgreSQL  | RDS               | db.t4g.micro            |
-| LadybugDB   | EC2 ARM64         | r7g.medium/large/xlarge |
-| Cache       | ElastiCache       | cache.t4g.micro         |
+| Component   | Service           | Notes                          |
+| ----------- | ----------------- | ------------------------------ |
+| API/Workers | ECS Fargate ARM64 | Auto-scaling, Spot-preferred   |
+| PostgreSQL  | RDS               | Burstable T4g instance         |
+| LadybugDB   | EC2 ARM64         | R7g instances (tier-dependent) |
+| Cache       | ElastiCache       | Valkey-compatible              |
+
+Instance sizes and capacity are managed via GitHub Actions variables (`just gha-list`) and vary between staging and production.
 
 ## Key READMEs
 

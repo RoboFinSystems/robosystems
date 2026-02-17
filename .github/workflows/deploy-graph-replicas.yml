@@ -82,6 +82,11 @@ on:
         required: false
         type: string
         default: "80"
+      response_time_target_value:
+        description: "Target ALB response time in seconds for auto scaling"
+        required: false
+        type: string
+        default: "5"
       instance_warmup:
         description: "Seconds to ignore new instance metrics during initialization (S3 download time)"
         required: false
@@ -316,6 +321,7 @@ jobs:
             ParameterKey=DesiredCapacity,ParameterValue=${{ inputs.desired_capacity }} \
             ParameterKey=CPUTargetValue,ParameterValue=${{ inputs.cpu_target_value }} \
             ParameterKey=MemoryTargetValue,ParameterValue=${{ inputs.memory_target_value }} \
+            ParameterKey=ResponseTimeTargetValue,ParameterValue=${{ inputs.response_time_target_value }} \
             ParameterKey=InstanceWarmup,ParameterValue=${{ inputs.instance_warmup }} \
             ParameterKey=HealthCheckGracePeriod,ParameterValue=${{ inputs.health_check_grace_period }} \
             ParameterKey=DeploymentBucketArn,ParameterValue=${{ steps.s3_config.outputs.deployment_bucket_arn }} \

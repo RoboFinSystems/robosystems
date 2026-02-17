@@ -156,14 +156,9 @@ def validate_api_key_with_graph(
       user.email = user_data.get("email")
       user.is_active = user_data.get("is_active", True)
 
-      # Update last_used_at in background (don't block on this)
-      try:
-        sess = db_session or session
-        key_record = UserAPIKey.get_by_hash(api_key_hash, sess)
-        if key_record:
-          key_record.update_last_used(sess)
-      except Exception as e:
-        logger.error(f"Failed to update last_used_at for cached API key: {e}")
+      # last_used_at is updated on cache miss (line ~226 below).
+      # Skipping it on cache hits avoids DB pool contention under load —
+      # the cache TTL ensures it refreshes every few minutes anyway.
 
       return user
 

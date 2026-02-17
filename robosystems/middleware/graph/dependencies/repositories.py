@@ -8,6 +8,7 @@ from fastapi import Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
 from robosystems.database import get_db_session
+from robosystems.graph_api.client.exceptions import GraphClientError
 from robosystems.graph_api.core.ladybug import Repository
 from robosystems.logger import logger
 from robosystems.middleware.auth.dependencies import get_current_user
@@ -59,6 +60,11 @@ async def get_graph_repository_dependency(
 
   except HTTPException:
     raise
+  except GraphClientError as e:
+    raise HTTPException(
+      status_code=e.status_code or status.HTTP_400_BAD_REQUEST,
+      detail=str(e),
+    )
   except Exception as e:
     logger.exception(f"Error creating repository for graph {graph_id}: {e}")
     raise HTTPException(
