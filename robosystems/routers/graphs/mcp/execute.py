@@ -24,11 +24,9 @@ from fastapi import (
 )
 from fastapi import status as http_status
 from fastapi.responses import JSONResponse, StreamingResponse
-from sqlalchemy.orm import Session
 from sse_starlette.sse import EventSourceResponse
 
 from robosystems.config.query_queue import QueryQueueConfig
-from robosystems.database import get_db_session
 from robosystems.logger import api_logger, logger
 from robosystems.middleware.auth.dependencies import get_current_user_with_graph
 from robosystems.middleware.graph import get_graph_repository
@@ -254,7 +252,6 @@ async def call_mcp_tool(
     description="Enable test mode for debugging",
   ),
   current_user: User = Depends(get_current_user_with_graph),
-  db: Session = Depends(get_db_session),
   _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
 ) -> MCPToolResult | JSONResponse | StreamingResponse | EventSourceResponse:
   """
@@ -330,9 +327,19 @@ async def call_mcp_tool(
           detail=f"Write operations not allowed on shared repository '{graph_id}'",
         )
 
-    # Validate access
+    # Validate access using a short-lived session.  The MCP endpoint's
+    # tool execution can take minutes; using a scoped session or FastAPI
+    # db dependency would hold a pool connection for the entire duration.
+    # A plain SessionFactory() session is closed immediately after the
+    # DB work, returning the connection to the pool before tool execution.
+    from robosystems.database import SessionFactory
+
     access_type = "write" if is_write_query else "read"
-    await validate_mcp_access(graph_id, current_user, db, access_type)
+    _db = SessionFactory()
+    try:
+      await validate_mcp_access(graph_id, current_user, _db, access_type)
+    finally:
+      _db.close()
 
     # Apply dual-layer rate limiting for shared repositories
     if MultiTenantUtils.is_shared_repository(graph_id):
@@ -343,10 +350,14 @@ async def call_mcp_tool(
       from robosystems.middleware.rate_limits import DualLayerRateLimiter
       from robosystems.models.iam.user_repository import UserRepository
 
-      # Get user's repository access plan
-      repo_access = UserRepository.get_by_user_and_repository(
-        current_user.id, graph_id, db
-      )
+      # Get user's repository access plan (short-lived session)
+      _db2 = SessionFactory()
+      try:
+        repo_access = UserRepository.get_by_user_and_repository(
+          current_user.id, graph_id, _db2
+        )
+      finally:
+        _db2.close()
 
       if not repo_access:
         raise HTTPException(

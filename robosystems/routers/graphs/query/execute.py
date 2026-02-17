@@ -637,8 +637,13 @@ async def execute_cypher_query(
           user_id=current_user.id,
         )
 
-        # Timeout - provide helpful error for testing
-        if client_info["is_interactive"]:
+        # Shared repositories have their own scaling (ALB + ASG) —
+        # queuing just delays the inevitable, so return a timeout error.
+        # User graphs benefit from the queue since they have limited
+        # connections (max 3) and no read replicas.
+        is_shared = MultiTenantUtils.is_shared_repository(graph_id)
+
+        if client_info["is_interactive"] or is_shared:
           elapsed = (datetime.now(UTC) - start_time).total_seconds()
 
           return JSONResponse(
@@ -662,7 +667,7 @@ async def execute_cypher_query(
             },
           )
         else:
-          # Fall through to queue
+          # User graph - fall through to queue for fair connection sharing
           logger.info("Direct execution timed out, falling back to queue")
 
     # TRADITIONAL_QUEUE or fallback

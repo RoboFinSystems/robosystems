@@ -165,7 +165,7 @@ def validate_repository_access(
 
   if not is_shared_repository_or_subgraph(graph_id):
     return False
-  from robosystems.database import session
+  from robosystems.database import SessionFactory
   from robosystems.models.iam import (
     UserRepository,
   )
@@ -178,9 +178,17 @@ def validate_repository_access(
   # Resolve subgraph to parent for permission check
   parent_repo_id = resolve_shared_repository_parent(graph_id)
   repository_name = get_repository_database_name(parent_repo_id)
-  access_level = UserRepository.get_user_access_level(
-    user_id, repository_name, session()
-  )
+
+  # Use a short-lived session instead of the scoped session proxy.
+  # The scoped session is tied to the request lifecycle via
+  # DatabaseSessionMiddleware, which holds connections until the entire
+  # request completes.  For MCP endpoints that run for minutes, this
+  # exhausts the connection pool.
+  _sess = SessionFactory()
+  try:
+    access_level = UserRepository.get_user_access_level(user_id, repository_name, _sess)
+  finally:
+    _sess.close()
 
   has_access = False
   if operation_type == "read":

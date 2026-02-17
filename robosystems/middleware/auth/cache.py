@@ -646,9 +646,10 @@ class APIKeyCache:
         self.redis.delete(cache_key, signature_key)
         return None
 
-      # Validate user data integrity
+      # Validate user data integrity (skip for negative cache entries which have empty user_data)
+      is_active = cache_data.get("is_active", True)
       user_data = cache_data.get("user_data", {})
-      if not self._validate_user_data_integrity(user_data):
+      if is_active and not self._validate_user_data_integrity(user_data):
         logger.error(f"Cached user data failed integrity check: {api_key_hash[:8]}...")
         # Clean up invalid cache entry
         self.redis.delete(cache_key, signature_key)
