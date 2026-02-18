@@ -31,7 +31,7 @@ def get_backend() -> LadybugBackend | Neo4jBackend:
       except ImportError:
         raise ImportError(
           "Neo4j backend requires the 'neo4j' package. "
-          "Install it with: uv pip install robosystems[neo4j]"
+          "Install it with: uv sync --extra neo4j"
         ) from None
 
       enterprise = backend_type == "neo4j_enterprise"
