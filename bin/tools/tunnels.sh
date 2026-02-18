@@ -110,7 +110,7 @@ print_usage() {
     echo "======================================================================${NC}"
     echo "  postgres      - PostgreSQL tunnel (localhost:5432)"
     echo "  valkey        - Valkey ElastiCache tunnel (localhost:6379)"
-    echo "  dagster       - Dagster webserver tunnel (localhost:3003)"
+    echo "  dagster       - Dagster webserver tunnel (localhost:8002)"
     echo "  api           - API ALB tunnel (localhost:8000)"
     echo "  api-internal  - API direct tunnel (localhost:8000, bypasses ALB)"
     echo "  all           - All service tunnels (runs in background)"
@@ -412,12 +412,12 @@ setup_dagster_tunnel() {
 
     echo ""
     echo -e "${YELLOW}Access Dagster UI:${NC}"
-    echo "Open http://127.0.0.1:3003 in your browser"
+    echo "Open http://127.0.0.1:8002 in your browser"
     echo ""
     echo -e "${YELLOW}Press Ctrl+C to stop the tunnel${NC}"
     echo ""
 
-    start_ssm_tunnel "$DAGSTER_ENDPOINT" "3000" "3003" "Dagster"
+    start_ssm_tunnel "$DAGSTER_ENDPOINT" "3000" "8002" "Dagster"
 }
 
 setup_api_tunnel() {
@@ -506,7 +506,7 @@ setup_all_tunnels() {
     fi
 
     if [[ -n "$DAGSTER_ENDPOINT" && "$DAGSTER_ENDPOINT" != "NOT_FOUND" ]]; then
-        start_ssm_tunnel_background "$DAGSTER_ENDPOINT" "3000" "3003" "Dagster"
+        start_ssm_tunnel_background "$DAGSTER_ENDPOINT" "3000" "8002" "Dagster"
         ((tunnel_count++))
         sleep 1
     fi
@@ -546,7 +546,7 @@ setup_all_tunnels() {
     fi
 
     if [[ -n "$DAGSTER_ENDPOINT" && "$DAGSTER_ENDPOINT" != "NOT_FOUND" ]]; then
-        echo "Dagster:    Open http://127.0.0.1:3003 in your browser"
+        echo "Dagster:    Open http://127.0.0.1:8002 in your browser"
     fi
 
     if [[ "$API_ACCESS_MODE" == "internal" ]]; then

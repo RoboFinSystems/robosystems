@@ -89,7 +89,7 @@ services:
     env_file:
       - .env
     ports:
-      - "3003:3003"
+      - "8002:8002"
     volumes:
       - ./robosystems:/app/robosystems
       - ./dagster_home:/app/dagster_home
@@ -250,17 +250,17 @@ services:
     environment:
       - DOCKER_PROFILE=neo4j-writer
       - GRAPH_BACKEND_TYPE=neo4j_community
-      - GRAPH_API_PORT=8002
+      - GRAPH_API_PORT=8003
       - CLUSTER_TIER=enterprise
     env_file:
       - .env
     ports:
-      - "8002:8002"
+      - "8003:8003"
     volumes:
       - ./robosystems:/app/robosystems
       - ./data/staging:/app/data/staging
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8002/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:8003/health"]
       interval: 30s
       timeout: 10s
       retries: 3

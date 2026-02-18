@@ -51,7 +51,7 @@ This initializes the `.env` file and starts the complete RoboSystems stack with:
 | ---------- | --------------------- |
 | Main API   | http://localhost:8000 |
 | Graph API  | http://localhost:8001 |
-| Dagster UI | http://localhost:3003 |
+| Dagster UI | http://localhost:8002 |
 
 With `just start all` (frontend apps):
 

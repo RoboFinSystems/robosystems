@@ -734,7 +734,7 @@ jobs:
           | Service | Local Port |
           |---------|------------|
           | API | http://localhost:8000 |
-          | Dagster UI | http://localhost:3003 |
+          | Dagster UI | http://localhost:8002 |
           | PostgreSQL | localhost:5432 |
           | Valkey | localhost:6379 |
 
