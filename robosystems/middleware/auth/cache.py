@@ -15,6 +15,7 @@ from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
 from ...config import env
+from ...config.defaults import CacheDefaults
 from ...config.tuning import TuningConfig
 from ...config.valkey_registry import ValkeyDatabase, create_redis_client
 from ...logger import logger
@@ -33,7 +34,7 @@ class APIKeyCache:
   GRAPH_CACHE_KEY_PREFIX = "apikey_graph:"
   USER_DATA_PREFIX = "user:"
   AUDIT_LOG_RATE_LIMIT_PREFIX = "audit_rate_limit:"
-  AUDIT_LOG_RATE_LIMIT_TTL = 300  # 5 minutes - only log once per user per 5 minutes
+  AUDIT_LOG_RATE_LIMIT_TTL = CacheDefaults.SHORT  # only log once per user per 5 minutes
   JWT_CACHE_KEY_PREFIX = "jwt:"
   JWT_GRAPH_CACHE_KEY_PREFIX = "jwt_graph:"
   JWT_BLACKLIST_PREFIX = "jwt_blacklist:"
@@ -47,7 +48,7 @@ class APIKeyCache:
   CACHE_VERSION = "v2.0"  # Version for cache format compatibility
 
   # Security thresholds
-  MAX_CACHE_AGE_SECONDS = 1800  # 30 minutes max age regardless of TTL
+  MAX_CACHE_AGE_SECONDS = CacheDefaults.JWT_TTL  # max age regardless of TTL
   CACHE_REFRESH_THRESHOLD = 1200  # 20 minutes - refresh cache if older than this
   VALIDATION_FAILURE_THRESHOLD = 5  # Max validation failures before security alert
 
@@ -58,7 +59,7 @@ class APIKeyCache:
 
   # Signature optimization configuration
   SIGNATURE_CACHE_PREFIX = "sig_cache:"
-  SIGNATURE_CACHE_TTL = 300  # 5 minutes - cache computed signatures
+  SIGNATURE_CACHE_TTL = CacheDefaults.SHORT  # cache computed signatures
   MAX_SIGNATURE_CACHE_SIZE = 1000  # Limit in-memory signature cache size
 
   def __init__(self):

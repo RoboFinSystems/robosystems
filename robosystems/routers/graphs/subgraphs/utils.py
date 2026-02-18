@@ -52,7 +52,7 @@ def verify_parent_graph_access(
   # Enforce graph lifecycle and subscription status (write: creating a subgraph)
   from robosystems.middleware.billing.enforcement import require_graph_access
 
-  require_graph_access(graph_id, session, require_write=True)
+  parent_graph = require_graph_access(graph_id, session, require_write=True)
 
   # Block shared repositories from having subgraphs
   if is_shared_repository(graph_id.lower()):
@@ -60,14 +60,6 @@ def verify_parent_graph_access(
       status_code=status.HTTP_403_FORBIDDEN,
       detail="Shared repositories cannot have subgraphs. "
       "Subgraphs are only available for user-owned Enterprise and Premium graphs.",
-    )
-
-  # Verify parent graph exists
-  parent_graph = Graph.get_by_id(graph_id, session)
-  if not parent_graph:
-    raise HTTPException(
-      status_code=status.HTTP_404_NOT_FOUND,
-      detail=f"Parent graph {graph_id} not found",
     )
 
   # Get GraphUser for role checking

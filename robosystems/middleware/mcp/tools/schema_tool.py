@@ -6,6 +6,7 @@ import time
 from threading import RLock
 from typing import Any
 
+from robosystems.config.defaults import CacheDefaults
 from robosystems.logger import logger
 
 from .base_tool import BaseTool
@@ -21,7 +22,7 @@ class SchemaTool(BaseTool):
     # Schema caching for performance
     self._schema_cache = None
     self._schema_cache_time = None
-    self._schema_cache_ttl = 300  # 5 minutes
+    self._schema_cache_ttl = CacheDefaults.SHORT
     self._cache_lock = RLock()
 
     # Cache statistics

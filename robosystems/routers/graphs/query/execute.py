@@ -235,18 +235,14 @@ async def execute_cypher_query(
   # Enforce graph lifecycle and subscription status (reads allowed)
   from robosystems.middleware.billing.enforcement import require_graph_access
 
-  require_graph_access(graph_id, session, require_write=False)
+  graph = require_graph_access(graph_id, session, require_write=False)
 
   # Check circuit breaker
   circuit_breaker.check_circuit(graph_id, "cypher_query")
 
-  # Get the graph tier for chunk size configuration
-  from robosystems.config.graph_tier import GraphTierConfig
-  from robosystems.models.iam.graph import Graph
-
-  graph = session.query(Graph).filter(Graph.graph_id == graph_id).first()
-
   # Determine chunk size based on tier (if not explicitly provided)
+  from robosystems.config.graph_tier import GraphTierConfig
+
   if chunk_size is None:
     if graph and graph.graph_tier:
       chunk_size = GraphTierConfig.get_chunk_size(graph.graph_tier)
