@@ -32,6 +32,9 @@ Pipeline stages (run independently via separate jobs):
    - sec_duckdb_s3_published - Publish raw .duckdb to S3 for local dev / analytics
    - sec_historical_duckdb_s3_published - Publish historical .duckdb to S3
 
+6. ANALYTICS (DuckDB-based):
+   - sec_analytics_computed - Run analytics on DuckDB staging, output parquet
+
 Post-materialization lineage (asset deps, not sensors):
   sec_graph_materialized -> sec_backup
   sec_graph_materialized -> sec_s3_published -> shared_replicas_refreshed
@@ -46,6 +49,10 @@ Usage:
     # components["schedules"] - list of Dagster schedules
 """
 
+from robosystems.adapters.sec.pipeline.analytics import (
+  SECAnalyticsConfig,
+  sec_analytics_computed,
+)
 from robosystems.adapters.sec.pipeline.backup import sec_backup
 from robosystems.adapters.sec.pipeline.configs import (
   SEC_FORM_TYPE_BATCHES,
@@ -73,6 +80,7 @@ from robosystems.adapters.sec.pipeline.entity_update import (
   sec_entity_incremental_update,
 )
 from robosystems.adapters.sec.pipeline.jobs import (
+  sec_analytics_job,
   sec_backup_job,
   sec_download_job,
   sec_duckdb_s3_publish_job,
@@ -127,6 +135,7 @@ def get_dagster_components():
       sec_s3_published,
       sec_duckdb_s3_published,
       sec_historical_duckdb_s3_published,
+      sec_analytics_computed,
     ],
     "jobs": [
       sec_download_job,
@@ -142,6 +151,7 @@ def get_dagster_components():
       sec_backup_job,
       sec_duckdb_s3_publish_job,
       sec_historical_duckdb_s3_publish_job,
+      sec_analytics_job,
     ],
     "sensors": [
       sec_processing_sensor,
@@ -162,6 +172,7 @@ __all__ = [
   "SEC_PRIMARY_START_YEAR",
   "SEC_QUARTERS",
   "SEC_START_YEAR",
+  "SECAnalyticsConfig",
   "SECBackupConfig",
   "SECDownloadConfig",
   "SECEntityUpdateConfig",
@@ -171,6 +182,8 @@ __all__ = [
   "SECProcessConfig",
   "SECStageConfig",
   "get_dagster_components",
+  "sec_analytics_computed",
+  "sec_analytics_job",
   "sec_backup",
   "sec_backup_job",
   "sec_download_job",

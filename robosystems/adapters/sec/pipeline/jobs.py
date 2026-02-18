@@ -42,6 +42,7 @@ from dagster import (
   define_asset_job,
 )
 
+from .analytics import sec_analytics_computed
 from .backup import sec_backup
 from .configs import sec_quarter_partitions
 from .download import sec_raw_filings
@@ -391,6 +392,33 @@ sec_historical_duckdb_s3_publish_job = define_asset_job(
     "ecs/memory": "512",
     "ecs/ephemeral_storage": "21",
     # On-demand to avoid interruptions during large uploads
+    "ecs/run_task_kwargs": {
+      "capacityProviderStrategy": [
+        {"capacityProvider": "FARGATE", "weight": 1, "base": 1},
+      ],
+    },
+  },
+)
+
+
+# ============================================================================
+# Phase 6: Analytics (DuckDB-based analytics on staging data)
+# ============================================================================
+# Runs analytics queries on the DuckDB staging file and outputs parquet.
+# Compute-heavy: opens the full DuckDB file locally for query processing.
+
+sec_analytics_job = define_asset_job(
+  name="sec_analytics",
+  description="Run analytics on published SEC DuckDB.",
+  selection=AssetSelection.assets(sec_analytics_computed),
+  tags={
+    "pipeline": "sec",
+    "phase": "analytics",
+    # Compute-heavy: local DuckDB processing
+    "ecs/cpu": "4096",
+    "ecs/memory": "16384",
+    "ecs/ephemeral_storage": "100",
+    # On-demand for predictable performance
     "ecs/run_task_kwargs": {
       "capacityProviderStrategy": [
         {"capacityProvider": "FARGATE", "weight": 1, "base": 1},
