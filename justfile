@@ -354,6 +354,11 @@ demo-element-mapping flags="new-graph" real_s3="false" base_url="http://localhos
         {{ if real_s3 == "true" { "--real-s3" } else { "" } }}
 
 
+# Run SEC graph analytics demo (statement classification + element normalization)
+demo-analytics graph_id="sec" stage="both":
+    uv run examples/analytics_demo/main.py {{graph_id}} --stage {{stage}}
+
+
 ## Graph API ##
 
 # Graph API - health check
