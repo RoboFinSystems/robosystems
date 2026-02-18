@@ -182,6 +182,11 @@ Resources:
             Status: Enabled
             Prefix: graph-databases/
             ExpirationInDays: 90
+          # Shared repository subscriber backups expire after 90 days
+          - Id: ExpireSharedRepoBackups
+            Status: Enabled
+            Prefix: shared-repositories/backups/
+            ExpirationInDays: 90
           # Everything else transitions to IA after 30 days
           - Id: TransitionToIA
             Status: Enabled
