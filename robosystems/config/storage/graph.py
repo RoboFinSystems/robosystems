@@ -27,6 +27,14 @@ All graph storage uses the USER_DATA_BUCKET with organized prefixes:
         {graph_id}/
           {graph_id}_{timestamp}.tar.gz
 
+    shared-repositories/             # Shared repository data
+      databases/                     # Published database snapshots (replica fleet boot)
+        {graph_id}.lbug
+        {graph_id}.duckdb
+      backups/                       # Compressed backups (subscriber downloads)
+        {graph_id}/
+          backup-{timestamp}.tar.gz
+
 The graph_id is the primary construct that scopes all storage operations,
 ensuring multi-tenant isolation and consistent organization.
 """
@@ -42,6 +50,8 @@ class GraphStorageType(Enum):
   USER_STAGING = "user-staging"  # Pre-ingestion file uploads
   BACKUPS = "graph-backups"  # Application-level backups
   DATABASES = "graph-databases"  # Instance-level database backups
+  SHARED_REPO_DATABASES = "shared-repositories/databases"  # Published snapshots
+  SHARED_REPO_BACKUPS = "shared-repositories/backups"  # Subscriber backups
 
 
 @dataclass
@@ -69,6 +79,16 @@ GRAPH_STORAGE: dict[GraphStorageType, GraphStorageConfig] = {
     storage_type=GraphStorageType.DATABASES,
     prefix="graph-databases/",
     description="Instance-level database backups from writer nodes",
+  ),
+  GraphStorageType.SHARED_REPO_DATABASES: GraphStorageConfig(
+    storage_type=GraphStorageType.SHARED_REPO_DATABASES,
+    prefix="shared-repositories/databases/",
+    description="Published shared repository database snapshots for replica fleet",
+  ),
+  GraphStorageType.SHARED_REPO_BACKUPS: GraphStorageConfig(
+    storage_type=GraphStorageType.SHARED_REPO_BACKUPS,
+    prefix="shared-repositories/backups/",
+    description="Compressed shared repository backups for subscriber downloads",
   ),
 }
 
@@ -272,6 +292,85 @@ def get_instance_backup_prefix(
   if graph_id:
     prefix += f"{graph_id}/"
 
+  return prefix
+
+
+# =============================================================================
+# Shared Repository Helpers
+# =============================================================================
+
+
+def get_shared_repo_database_key(graph_id: str, extension: str = ".lbug") -> str:
+  """Build S3 key for a published shared repository database snapshot.
+
+  Args:
+      graph_id: Graph database identifier (e.g., "sec")
+      extension: File extension (".lbug" or ".duckdb")
+
+  Returns:
+      S3 key string (without bucket name)
+
+  Example:
+      >>> get_shared_repo_database_key("sec")
+      'shared-repositories/databases/sec.lbug'
+      >>> get_shared_repo_database_key("sec", ".duckdb")
+      'shared-repositories/databases/sec.duckdb'
+  """
+  config = GRAPH_STORAGE[GraphStorageType.SHARED_REPO_DATABASES]
+  return f"{config.prefix}{graph_id}{extension}"
+
+
+def get_shared_repo_database_prefix() -> str:
+  """Get S3 prefix for shared repository database snapshots.
+
+  Returns:
+      S3 prefix for listing
+
+  Example:
+      >>> get_shared_repo_database_prefix()
+      'shared-repositories/databases/'
+  """
+  return GRAPH_STORAGE[GraphStorageType.SHARED_REPO_DATABASES].prefix
+
+
+def get_shared_repo_backup_key(graph_id: str, timestamp: datetime) -> str:
+  """Build S3 key for a shared repository backup (subscriber download).
+
+  Args:
+      graph_id: Graph database identifier (e.g., "sec")
+      timestamp: Backup timestamp
+
+  Returns:
+      S3 key string (without bucket name)
+
+  Example:
+      >>> from datetime import datetime, UTC
+      >>> ts = datetime(2024, 1, 15, 12, 30, 45, tzinfo=UTC)
+      >>> get_shared_repo_backup_key("sec", ts)
+      'shared-repositories/backups/sec/backup-20240115_123045.tar.gz'
+  """
+  config = GRAPH_STORAGE[GraphStorageType.SHARED_REPO_BACKUPS]
+  timestamp_str = timestamp.strftime("%Y%m%d_%H%M%S")
+  return f"{config.prefix}{graph_id}/backup-{timestamp_str}.tar.gz"
+
+
+def get_shared_repo_backup_prefix(graph_id: str | None = None) -> str:
+  """Build S3 prefix for listing shared repository backups.
+
+  Args:
+      graph_id: Optional graph filter
+
+  Returns:
+      S3 prefix for listing
+
+  Example:
+      >>> get_shared_repo_backup_prefix("sec")
+      'shared-repositories/backups/sec/'
+  """
+  config = GRAPH_STORAGE[GraphStorageType.SHARED_REPO_BACKUPS]
+  prefix = config.prefix
+  if graph_id:
+    prefix += f"{graph_id}/"
   return prefix
 
 

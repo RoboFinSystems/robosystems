@@ -11,9 +11,6 @@ This module contains low-level graph database operations including:
 from .backup import LadybugGraphBackupService, create_graph_backup_service
 from .schema_setup import LadybugSchemaManager, ensure_schema
 
-# Note: streaming_backup.py is stashed for future use - will be integrated
-# with existing backup methods to support large shared repository backups
-
 __all__ = [
   "LadybugGraphBackupService",
   "LadybugSchemaManager",
