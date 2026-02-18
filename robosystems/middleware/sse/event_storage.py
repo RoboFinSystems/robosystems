@@ -15,6 +15,7 @@ from typing import Any, cast
 import redis.asyncio as redis_async
 from redis import Redis
 
+from robosystems.config.defaults import CacheDefaults
 from robosystems.logger import logger
 
 
@@ -124,14 +125,16 @@ class SSEEventStorage:
   """
 
   def __init__(
-    self, redis_client: redis_async.Redis | None = None, default_ttl: int = 3600
+    self,
+    redis_client: redis_async.Redis | None = None,
+    default_ttl: int = CacheDefaults.LONG,
   ):
     """
     Initialize event storage.
 
     Args:
         redis_client: Async Redis client instance (uses default if None)
-        default_ttl: Default TTL for events in seconds (1 hour default)
+        default_ttl: Default TTL for events in seconds
     """
     self._redis_client = redis_client
     self._async_redis = None

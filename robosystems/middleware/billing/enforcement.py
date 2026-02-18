@@ -8,6 +8,7 @@ from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
 from ...config import env
+from ...config.defaults import CacheDefaults
 from ...config.graph_tier import GraphTier
 from ...logger import get_logger
 from ...models.billing import BillingCustomer, BillingSubscription, SubscriptionStatus
@@ -19,7 +20,6 @@ logger = get_logger(__name__)
 # subscription_result is one of: "active", "no_subscription", "canceled_grace", "canceled_expired"
 _subscription_cache: dict[str, tuple[str, float]] = {}
 _subscription_lock = threading.Lock()
-_SUBSCRIPTION_CACHE_TTL = 60  # seconds
 
 
 def _get_cached_subscription(graph_id: str) -> str | None:
@@ -34,7 +34,7 @@ def _get_cached_subscription(graph_id: str) -> str | None:
 
 def _cache_subscription(graph_id: str, result: str) -> None:
   with _subscription_lock:
-    _subscription_cache[graph_id] = (result, time.time() + _SUBSCRIPTION_CACHE_TTL)
+    _subscription_cache[graph_id] = (result, time.time() + CacheDefaults.SHORT)
 
 
 def invalidate_subscription_cache(graph_id: str) -> None:
