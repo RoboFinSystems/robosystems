@@ -6,9 +6,10 @@ uploading results to S3 via multipart upload with progress tracking.
 All heavy work (CHECKPOINT, compression, upload) happens on-instance,
 avoiding the need to transfer large databases over HTTP.
 
-Supports three backup types:
+Supports four backup types:
 - replica: Raw .lbug upload to S3 (downloaded by replica fleet at startup)
 - shared_repository: Compressed tar.gz to S3 (for subscriber downloads)
+- duckdb_staging: Raw .duckdb upload to S3 (for local dev / analytics)
 - standard: ZIP + optional encrypt to S3 (existing user backup flow)
 """
 
@@ -50,9 +51,11 @@ class OnInstanceBackupService:
     self,
     db_manager,
     task_manager: GenericTaskManager,
+    duckdb_pool=None,
   ):
     self.db_manager = db_manager
     self.task_manager = task_manager
+    self.duckdb_pool = duckdb_pool
 
   async def execute_backup(
     self,
@@ -92,16 +95,23 @@ class OnInstanceBackupService:
       )
 
       # Step 1: CHECKPOINT if requested
+      is_duckdb = backup_type == "duckdb_staging"
       if checkpoint:
         logger.info(f"[Task {task_id}] Running CHECKPOINT on {graph_id}")
         await self.task_manager.update_task(
           task_id, progress_percent=5, metadata={"stage": "checkpoint"}
         )
-        self._checkpoint(graph_id)
+        if is_duckdb:
+          self._duckdb_checkpoint(graph_id)
+        else:
+          self._checkpoint(graph_id)
         logger.info(f"[Task {task_id}] CHECKPOINT completed")
 
       # Step 2: Resolve database path
-      db_path = self._resolve_db_path(graph_id)
+      if is_duckdb:
+        db_path = self._resolve_duckdb_path(graph_id)
+      else:
+        db_path = self._resolve_db_path(graph_id)
       if not db_path.exists():
         raise FileNotFoundError(f"Database not found: {db_path}")
 
@@ -119,6 +129,9 @@ class OnInstanceBackupService:
       key = s3_destination["key"]
 
       if backup_type == "replica":
+        result = self._upload_replica(db_path, bucket, key, task_id, db_size)
+      elif backup_type == "duckdb_staging":
+        # Reuse raw upload (same as replica — no compression needed)
         result = self._upload_replica(db_path, bucket, key, task_id, db_size)
       elif backup_type == "shared_repository":
         result = self._upload_shared_repository(
@@ -144,8 +157,15 @@ class OnInstanceBackupService:
       raise
 
   def _checkpoint(self, graph_id: str) -> None:
-    """CHECKPOINT via connection pool (no HTTP roundtrip)."""
+    """CHECKPOINT via LadybugDB connection pool (no HTTP roundtrip)."""
     with self.db_manager.get_connection(graph_id, read_only=False) as conn:
+      conn.execute("CHECKPOINT")
+
+  def _duckdb_checkpoint(self, graph_id: str) -> None:
+    """CHECKPOINT via DuckDB connection pool."""
+    if self.duckdb_pool is None:
+      raise RuntimeError("DuckDB pool not provided for duckdb_staging backup")
+    with self.duckdb_pool.get_connection(graph_id) as conn:
       conn.execute("CHECKPOINT")
 
   def _resolve_db_path(self, graph_id: str) -> Path:
@@ -153,6 +173,12 @@ class OnInstanceBackupService:
     from robosystems.operations.lbug.path_utils import get_lbug_database_path
 
     return get_lbug_database_path(graph_id)
+
+  def _resolve_duckdb_path(self, graph_id: str) -> Path:
+    """Get local .duckdb path for a staging database."""
+    from robosystems.config.storage.shared import get_staging_duckdb_path
+
+    return Path(get_staging_duckdb_path(graph_id))
 
   def _get_s3_client(self):
     """Create S3 client using instance credentials."""

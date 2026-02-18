@@ -45,6 +45,10 @@ from dagster import (
 from .backup import sec_backup
 from .configs import sec_quarter_partitions
 from .download import sec_raw_filings
+from .duckdb_s3_publish import (
+  sec_duckdb_s3_published,
+  sec_historical_duckdb_s3_published,
+)
 from .entity_update import sec_entity_incremental_update
 from .materialize import (
   sec_graph_materialized,
@@ -340,6 +344,53 @@ sec_backup_job = define_asset_job(
     "ecs/memory": "512",
     "ecs/ephemeral_storage": "21",
     # On-demand to avoid interruptions during backup monitoring
+    "ecs/run_task_kwargs": {
+      "capacityProviderStrategy": [
+        {"capacityProvider": "FARGATE", "weight": 1, "base": 1},
+      ],
+    },
+  },
+)
+
+
+# ============================================================================
+# Phase 5: DuckDB S3 Publish (Raw .duckdb for Local Dev / Analytics)
+# ============================================================================
+# Publishes DuckDB staging databases to S3 as raw .duckdb files.
+# Useful for local development and analytics without running LadybugDB.
+
+sec_duckdb_s3_publish_job = define_asset_job(
+  name="sec_duckdb_s3_publish",
+  description="Publish SEC DuckDB staging to S3 (raw .duckdb).",
+  selection=AssetSelection.assets(sec_duckdb_s3_published),
+  tags={
+    "pipeline": "sec",
+    "phase": "duckdb_s3_publish",
+    # Minimal profile: just orchestrating Graph API calls, no local compute
+    "ecs/cpu": "256",
+    "ecs/memory": "512",
+    "ecs/ephemeral_storage": "21",
+    # On-demand to avoid interruptions during large uploads
+    "ecs/run_task_kwargs": {
+      "capacityProviderStrategy": [
+        {"capacityProvider": "FARGATE", "weight": 1, "base": 1},
+      ],
+    },
+  },
+)
+
+sec_historical_duckdb_s3_publish_job = define_asset_job(
+  name="sec_historical_duckdb_s3_publish",
+  description="Publish SEC historical DuckDB staging to S3 (raw .duckdb).",
+  selection=AssetSelection.assets(sec_historical_duckdb_s3_published),
+  tags={
+    "pipeline": "sec",
+    "phase": "duckdb_s3_publish",
+    # Minimal profile: just orchestrating Graph API calls, no local compute
+    "ecs/cpu": "256",
+    "ecs/memory": "512",
+    "ecs/ephemeral_storage": "21",
+    # On-demand to avoid interruptions during large uploads
     "ecs/run_task_kwargs": {
       "capacityProviderStrategy": [
         {"capacityProvider": "FARGATE", "weight": 1, "base": 1},
