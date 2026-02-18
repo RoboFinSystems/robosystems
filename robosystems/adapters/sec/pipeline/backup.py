@@ -25,6 +25,7 @@ from dagster import (
 )
 
 from robosystems.config.constants import TASK_TIME_LIMIT
+from robosystems.config.storage.graph import get_shared_repo_backup_key
 from robosystems.dagster.resources import DatabaseResource, S3Resource
 
 from .configs import SECBackupConfig
@@ -74,8 +75,7 @@ def sec_backup(
 
   # Generate S3 key with timestamp
   timestamp = datetime.now(UTC)
-  timestamp_str = timestamp.strftime("%Y%m%d_%H%M%S")
-  s3_key = f"shared-repository-backups/{config.graph_id}/backup-{timestamp_str}.tar.gz"
+  s3_key = get_shared_repo_backup_key(config.graph_id, timestamp)
 
   # Create backup record in database
   s3_adapter = S3BackupAdapter(enable_compression=config.compression)
