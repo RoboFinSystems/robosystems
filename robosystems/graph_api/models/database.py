@@ -79,8 +79,8 @@ class BackupRequest(BaseModel):
   )
   backup_type: str = Field(
     default="standard",
-    description="Backup type: 'standard' (ZIP to S3), 'replica' (raw .lbug to S3), 'shared_repository' (tar.gz to S3)",
-    pattern="^(standard|replica|shared_repository)$",
+    description="Backup type: 'standard' (ZIP to S3), 'replica' (raw .lbug to S3), 'shared_repository' (tar.gz to S3), 'duckdb_staging' (raw .duckdb to S3)",
+    pattern="^(standard|replica|shared_repository|duckdb_staging)$",
   )
   s3_destination: S3Destination | None = Field(
     default=None,

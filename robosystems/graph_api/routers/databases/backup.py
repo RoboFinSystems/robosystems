@@ -4,10 +4,11 @@ Database backup and restore endpoints for Graph API.
 This module provides endpoints for creating backups and restoring
 LadybugDB databases.
 
-Supports three backup types:
+Supports four backup types:
 - standard: Existing BackupManager flow (ZIP, optional encrypt, S3 upload)
 - replica: Raw .lbug upload to S3 via OnInstanceBackupService (for replica fleet download)
 - shared_repository: Compressed tar.gz to S3 via OnInstanceBackupService
+- duckdb_staging: Raw .duckdb upload to S3 via OnInstanceBackupService
 """
 
 from datetime import UTC, datetime
@@ -39,22 +40,27 @@ async def perform_backup(
   s3_destination: dict | None = None,
   checkpoint: bool = True,
   db_manager=None,
+  duckdb_pool=None,
 ) -> None:
   """
   Perform the actual backup in the background.
   Updates task status for monitoring.
 
-  Routes to OnInstanceBackupService for replica/shared_repository types,
+  Routes to OnInstanceBackupService for replica/shared_repository/duckdb_staging types,
   or to BackupManager for standard backups.
   """
   try:
-    if backup_type in ("replica", "shared_repository") and s3_destination:
+    if (
+      backup_type in ("replica", "shared_repository", "duckdb_staging")
+      and s3_destination
+    ):
       # On-instance backup: CHECKPOINT + direct S3 upload
       from robosystems.graph_api.core.backup_service import OnInstanceBackupService
 
       service = OnInstanceBackupService(
         db_manager=db_manager,
         task_manager=backup_task_manager,
+        duckdb_pool=duckdb_pool,
       )
 
       result = await service.execute_backup(
@@ -140,16 +146,28 @@ async def create_backup(
       detail="Backup operations not allowed on read-only nodes",
     )
 
-  # Validate database exists
-  if graph_id not in ladybug_service.db_manager.list_databases():
-    raise HTTPException(
-      status_code=http_status.HTTP_404_NOT_FOUND,
-      detail=f"Database {graph_id} not found",
-    )
+  # Validate database exists (DuckDB staging uses its own file, not LadybugDB)
+  if request.backup_type == "duckdb_staging":
+    from pathlib import Path
+
+    from robosystems.config.storage.shared import get_staging_duckdb_path
+
+    duckdb_path = Path(get_staging_duckdb_path(graph_id))
+    if not duckdb_path.exists():
+      raise HTTPException(
+        status_code=http_status.HTTP_404_NOT_FOUND,
+        detail=f"DuckDB staging database not found: {graph_id}",
+      )
+  else:
+    if graph_id not in ladybug_service.db_manager.list_databases():
+      raise HTTPException(
+        status_code=http_status.HTTP_404_NOT_FOUND,
+        detail=f"Database {graph_id} not found",
+      )
 
   # Validate s3_destination for non-standard backup types
   if (
-    request.backup_type in ("replica", "shared_repository")
+    request.backup_type in ("replica", "shared_repository", "duckdb_staging")
     and not request.s3_destination
   ):
     raise HTTPException(
@@ -177,6 +195,13 @@ async def create_backup(
       "key": request.s3_destination.key,
     }
 
+  # Get DuckDB pool for duckdb_staging backups
+  duckdb_pool = None
+  if request.backup_type == "duckdb_staging":
+    from robosystems.graph_api.core.duckdb import get_duckdb_pool
+
+    duckdb_pool = get_duckdb_pool()
+
   # Add backup task to FastAPI background tasks
   background_tasks.add_task(
     perform_backup,
@@ -189,6 +214,7 @@ async def create_backup(
     s3_destination=s3_dest_dict,
     checkpoint=request.checkpoint,
     db_manager=ladybug_service.db_manager,
+    duckdb_pool=duckdb_pool,
   )
 
   logger.info(
