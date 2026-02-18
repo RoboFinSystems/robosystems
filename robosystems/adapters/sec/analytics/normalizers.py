@@ -156,12 +156,17 @@ class ElementNormalizer:
     self,
     element_graph: ElementGraph,
     top_k: int = 20,
+    min_score: float = 0.3,
   ) -> list[tuple[str, str, float]]:
     """Use Jaccard index to find potentially missed equivalences.
+
+    Only considers non-adjacent node pairs that share at least one
+    neighbor, avoiding the O(n^2) full pairwise scan.
 
     Args:
         element_graph: The co-occurrence graph.
         top_k: Number of top predictions to return.
+        min_score: Minimum Jaccard score threshold.
 
     Returns:
         List of (element1, element2, score) tuples.
@@ -170,34 +175,38 @@ class ElementNormalizer:
     if graph.numberOfNodes() < 2:
       return []
 
-    # Get all non-adjacent node pairs with high Jaccard similarity
-    predictions: list[tuple[str, str, float]] = []
-
+    # Pre-compute neighbor sets
+    neighbor_sets: dict[int, set[int]] = {}
     for u in graph.iterNodes():
-      neighbors_u = set(graph.iterNeighbors(u))
-      if not neighbors_u:
-        continue
+      neighbors = set(graph.iterNeighbors(u))
+      if neighbors:
+        neighbor_sets[u] = neighbors
 
-      for v in graph.iterNodes():
-        if v <= u or graph.hasEdge(u, v):
-          continue
+    # Only check pairs sharing at least one neighbor (2-hop candidates)
+    # For each node, collect its neighbors' neighbors as candidates
+    candidates: set[tuple[int, int]] = set()
+    for u, neighbors_u in neighbor_sets.items():
+      for w in neighbors_u:
+        for v in graph.iterNeighbors(w):
+          if v > u and not graph.hasEdge(u, v) and v in neighbor_sets:
+            candidates.add((u, v))
 
-        neighbors_v = set(graph.iterNeighbors(v))
-        if not neighbors_v:
-          continue
-
-        intersection = len(neighbors_u & neighbors_v)
-        union = len(neighbors_u | neighbors_v)
-        if union > 0:
-          score = intersection / union
-          if score > 0.3:
-            predictions.append(
-              (
-                element_graph.get_qname(u),
-                element_graph.get_qname(v),
-                score,
-              )
+    predictions: list[tuple[str, str, float]] = []
+    for u, v in candidates:
+      neighbors_u = neighbor_sets[u]
+      neighbors_v = neighbor_sets[v]
+      intersection = len(neighbors_u & neighbors_v)
+      union = len(neighbors_u | neighbors_v)
+      if union > 0:
+        score = intersection / union
+        if score > min_score:
+          predictions.append(
+            (
+              element_graph.get_qname(u),
+              element_graph.get_qname(v),
+              score,
             )
+          )
 
     predictions.sort(key=lambda x: x[2], reverse=True)
     return predictions[:top_k]
