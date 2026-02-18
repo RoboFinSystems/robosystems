@@ -478,6 +478,8 @@ Resources:
       # DefaultInstanceWarmup tells target tracking scaling to ignore new instance
       # metrics during warmup, preventing premature scale-out/in decisions.
       DefaultInstanceWarmup: !Ref InstanceWarmup
+      MetricsCollection:
+        - Granularity: "1Minute"
       Tags:
         - Key: Name
           Value: !Sub robosystems-shared-replica-${Environment}
@@ -547,7 +549,12 @@ Resources:
             - Name: TargetGroup
               Value: !GetAtt ReplicaTargetGroup.TargetGroupFullName
         TargetValue: !Ref ResponseTimeTargetValue
-        DisableScaleIn: false
+        # DisableScaleIn prevents this policy from blocking scale-in during zero-traffic
+        # periods. With no requests, TargetResponseTime has no datapoints, causing the
+        # auto-created alarms to enter INSUFFICIENT_DATA — which blocks scale-in from
+        # ALL other policies (CPU, memory). This policy still triggers scale-out on
+        # high latency; scale-in decisions are left to CPU and memory policies.
+        DisableScaleIn: true
 
   # ========================================
   # APPLICATION LOAD BALANCER
