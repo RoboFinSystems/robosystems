@@ -10,7 +10,7 @@ Nightly Pipeline (enable all for automated daily updates):
 - Phase 4 (Materialize): sec_stage_to_materialize_sensor chains stage → full graph rebuild
 
 Post-materialization S3 publish and replica refresh are handled by asset lineage:
-  sec_graph_materialized -> sec_s3_published -> shared_replicas_refreshed
+  sec_graph_materialized -> sec_lbug_s3_published -> shared_replicas_refreshed
 
 Manual Operations (not in automated chain):
 - sec_entity_update_job: Update mutable Entity attributes (run manually after materialize)

@@ -419,7 +419,7 @@ function setup_full_config() {
 
     # Shared Replicas Configuration - Read-Only Fleet
     # Replicas download shared databases from S3 at startup, then serve queries locally
-    # Materialize sec_s3_published asset in Dagster to upload database, then enable replicas
+    # Materialize sec_lbug_s3_published asset in Dagster to upload database, then enable replicas
     gh variable set SHARED_REPLICAS_ENABLED_PROD --body "false"
     gh variable set SHARED_REPLICAS_MIN_INSTANCES_PROD --body "1"
     gh variable set SHARED_REPLICAS_MAX_INSTANCES_PROD --body "3"

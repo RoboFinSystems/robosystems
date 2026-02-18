@@ -12,7 +12,7 @@ Per-repository publish assets live inside their adapter packages
 (e.g., adapters/sec/pipeline/s3_publish.py) and declare deps on their
 own materialization asset. This creates clean lineage:
 
-  sec_graph_materialized -> sec_s3_published -> shared_replicas_refreshed
+  sec_graph_materialized -> sec_lbug_s3_published -> shared_replicas_refreshed
   (future) industry_graph_materialized -> industry_s3_published -> shared_replicas_refreshed
 """
 

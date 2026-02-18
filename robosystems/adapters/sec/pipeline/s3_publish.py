@@ -8,7 +8,7 @@ Each shared repository (SEC, future industry/economic) defines its own
 publish asset with deps on its own materialization asset.
 
 The lineage chain:
-  sec_graph_materialized -> sec_s3_published -> shared_replicas_refreshed
+  sec_graph_materialized -> sec_lbug_s3_published -> shared_replicas_refreshed
 
 This complements sec_backup which creates compressed, downloadable backups
 for users. This asset creates the raw .lbug source-of-truth for the
@@ -17,22 +17,11 @@ replica fleet via S3 ATTACH.
 
 from dagster import (
   AssetExecutionContext,
-  Config,
   MaterializeResult,
   asset,
 )
 
 from robosystems.dagster.assets.shared_repositories.publish import publish_to_s3
-
-
-class SECPublishConfig(Config):
-  """Configuration for SEC S3 publish.
-
-  By default publishes the primary "sec" graph. Override graph_id to
-  "sec_historical" when rebuilding the historical graph.
-  """
-
-  graph_id: str = "sec"
 
 
 @asset(
@@ -46,9 +35,8 @@ class SECPublishConfig(Config):
     "replica_source": True,
   },
 )
-def sec_s3_published(
+def sec_lbug_s3_published(
   context: AssetExecutionContext,
-  config: SECPublishConfig,
 ) -> MaterializeResult:
   """Publish SEC database to S3 for replica consumption via ATTACH.
 
@@ -57,9 +45,29 @@ def sec_s3_published(
   - CHECKPOINT + S3 multipart upload on-instance
   - Upload verification
 
-  Configure graph_id to "sec_historical" to publish the historical graph.
+  Returns:
+      MaterializeResult with S3 URI and upload statistics
+  """
+  return publish_to_s3(context, graph_id="sec")
+
+
+@asset(
+  group_name="sec_pipeline",
+  description="Publish SEC historical database to S3 for replica cluster (S3 ATTACH source)",
+  kinds={"s3", "ladybug"},
+  deps=["sec_historical_materialized"],
+  metadata={
+    "pipeline": "sec",
+    "stage": "s3_publish",
+    "replica_source": True,
+  },
+)
+def sec_historical_lbug_s3_published(
+  context: AssetExecutionContext,
+) -> MaterializeResult:
+  """Publish SEC historical database to S3 for replica consumption via ATTACH.
 
   Returns:
       MaterializeResult with S3 URI and upload statistics
   """
-  return publish_to_s3(context, graph_id=config.graph_id)
+  return publish_to_s3(context, graph_id="sec_historical")

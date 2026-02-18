@@ -14,7 +14,7 @@ SEC pipeline jobs have moved to robosystems.adapters.sec.pipeline.jobs
 and are collected via get_dagster_components() in definitions.py.
 
 Shared repository S3 publish and replica refresh are handled by asset lineage:
-  sec_graph_materialized -> sec_s3_published -> shared_replicas_refreshed
+  sec_graph_materialized -> sec_lbug_s3_published -> shared_replicas_refreshed
 """
 
 from robosystems.dagster.jobs.backup_cleanup import (

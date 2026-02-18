@@ -108,7 +108,7 @@ def publish_duckdb_to_s3(
   context: AssetExecutionContext,
   graph_id: str,
 ) -> MaterializeResult:
-  """Publish a DuckDB staging database to S3 for local dev / analytics.
+  """Publish a DuckDB staging database to S3.
 
   Uses Graph Client Factory to call the backup endpoint on the shared master.
   The backup runs entirely on-instance (DuckDB CHECKPOINT + S3 multipart upload),
