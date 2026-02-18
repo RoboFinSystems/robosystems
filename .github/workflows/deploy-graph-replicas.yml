@@ -290,7 +290,7 @@ jobs:
 
           if [ "$ALL_FOUND" != "true" ]; then
             echo ""
-            echo "   Materialize the sec_s3_published asset in Dagster to upload missing databases."
+            echo "   Materialize the sec_lbug_s3_published asset in Dagster to upload missing databases."
             exit 1
           fi
 

@@ -124,7 +124,7 @@ all_assets = [
   user_repository_provisioning_source,
   # Platform: Shared repository infrastructure
   shared_replicas_refreshed,
-  # Adapter: SEC pipeline (includes sec_s3_published)
+  # Adapter: SEC pipeline (includes sec_lbug_s3_published)
   *sec["assets"],
 ]
 

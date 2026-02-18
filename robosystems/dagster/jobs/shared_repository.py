@@ -6,7 +6,7 @@ publishing a new database. Useful for:
 - Rolling out non-database changes (e.g., new AMI, code updates)
 
 The publish + refresh pipeline is handled by asset lineage:
-  sec_graph_materialized -> sec_s3_published -> shared_replicas_refreshed
+  sec_graph_materialized -> sec_lbug_s3_published -> shared_replicas_refreshed
 
 This file only contains the standalone refresh job for ad-hoc operations.
 """
@@ -151,6 +151,6 @@ def shared_repository_refresh_replicas_job():
   - Rolling out non-database changes (e.g., new AMI, code updates)
 
   The normal publish + refresh flow is handled by asset lineage:
-    sec_graph_materialized -> sec_s3_published -> shared_replicas_refreshed
+    sec_graph_materialized -> sec_lbug_s3_published -> shared_replicas_refreshed
   """
   refresh_replica_instances()

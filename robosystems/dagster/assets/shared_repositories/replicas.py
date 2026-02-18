@@ -57,7 +57,7 @@ class SharedReplicaRefreshConfig(Config):
   group_name="shared_repositories",
   description="Refresh shared replica fleet to pick up new S3 database",
   kinds={"aws", "autoscaling"},
-  deps=["sec_s3_published"],  # Add future repos here: "industry_s3_published", etc.
+  deps=["sec_lbug_s3_published", "sec_historical_lbug_s3_published"],
   metadata={
     "stage": "replica_refresh",
   },
