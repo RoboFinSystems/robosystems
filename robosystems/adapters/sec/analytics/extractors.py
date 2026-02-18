@@ -50,15 +50,19 @@ class ArcExtractor:
 
   Args:
       db_path: Path to the DuckDB database file.
+      memory_limit: DuckDB memory limit (default "4GB"). Lower for large databases.
   """
 
-  def __init__(self, db_path: str | Path) -> None:
+  def __init__(self, db_path: str | Path, memory_limit: str = "4GB") -> None:
     self._db_path = Path(db_path)
+    self._memory_limit = memory_limit
     if not self._db_path.exists():
       raise FileNotFoundError(f"Database not found: {self._db_path}")
 
   def _connect(self) -> duckdb.DuckDBPyConnection:
-    return duckdb.connect(str(self._db_path), read_only=True)
+    conn = duckdb.connect(str(self._db_path), read_only=True)
+    conn.execute(f"SET memory_limit = '{self._memory_limit}'")
+    return conn
 
   def extract_calculation_arcs(self) -> list[CalcArc]:
     """Extract calculation arcs (summation-item relationships).

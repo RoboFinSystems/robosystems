@@ -215,6 +215,11 @@ def main() -> None:
     default="both",
     help="Which stage to run: 1=classification, 2=normalization, both (default: both)",
   )
+  parser.add_argument(
+    "--memory",
+    default="4GB",
+    help="DuckDB memory limit (default: 4GB). Lower if your machine freezes.",
+  )
   args = parser.parse_args()
 
   db_path = STAGING_DIR / f"{args.graph_id}.duckdb"
@@ -223,10 +228,12 @@ def main() -> None:
     console.print("[dim]Load SEC data first: just sec-load NVDA 2025[/dim]")
     sys.exit(1)
 
+  db_size_gb = db_path.stat().st_size / (1024**3)
   console.rule("[bold green]SEC Graph Analytics Demo")
-  console.print(f"  Database: {db_path}")
+  console.print(f"  Database: {db_path} ({db_size_gb:.1f} GB)")
+  console.print(f"  Memory limit: {args.memory}")
 
-  extractor = ArcExtractor(db_path)
+  extractor = ArcExtractor(db_path, memory_limit=args.memory)
 
   if args.stage in ("1", "both"):
     run_classification(extractor)
