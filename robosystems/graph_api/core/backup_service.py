@@ -14,7 +14,6 @@ Supports four backup types:
 """
 
 import hashlib
-import json
 import tarfile
 import tempfile
 from datetime import UTC, datetime
@@ -23,7 +22,6 @@ from typing import Any
 
 import boto3
 from boto3.s3.transfer import TransferConfig
-from botocore.exceptions import ClientError
 
 from robosystems.config import env
 from robosystems.graph_api.core.task_manager import GenericTaskManager
@@ -33,9 +31,6 @@ from robosystems.logger import logger
 S3_MULTIPART_CHUNKSIZE = 100 * 1024 * 1024  # 100 MB
 S3_MULTIPART_THRESHOLD = 100 * 1024 * 1024  # 100 MB
 S3_MAX_CONCURRENCY = 4
-
-# Shared repository manifest prefix
-SHARED_REPLICA_PREFIX = "shared-replica-data"
 
 
 class OnInstanceBackupService:
@@ -318,31 +313,6 @@ class OnInstanceBackupService:
           "StorageClass": "STANDARD",
         },
       )
-
-      # Write latest.json manifest
-      manifest_key = f"{SHARED_REPLICA_PREFIX}/{graph_id}/latest.json"
-      manifest = {
-        "repo_name": graph_id,
-        "s3_bucket": bucket,
-        "s3_key": key,
-        "timestamp": datetime.now(UTC).isoformat(),
-        "checksum": checksum,
-        "original_size_bytes": db_size,
-        "compressed_size_bytes": compressed_size,
-        "compression_ratio": round(compression_ratio, 3),
-        "environment": env.ENVIRONMENT,
-      }
-
-      try:
-        s3_client.put_object(
-          Bucket=bucket,
-          Key=manifest_key,
-          Body=json.dumps(manifest, indent=2),
-          ContentType="application/json",
-        )
-        logger.info(f"[Task {task_id}] Updated manifest: s3://{bucket}/{manifest_key}")
-      except ClientError as e:
-        logger.warning(f"[Task {task_id}] Failed to update manifest: {e}")
 
     return {
       "status": "success",

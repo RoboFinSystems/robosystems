@@ -17,6 +17,7 @@ from dagster import AssetExecutionContext, MaterializeResult
 
 from robosystems.config import env
 from robosystems.config.constants import TASK_TIME_LIMIT
+from robosystems.config.storage.graph import get_shared_repo_database_key
 
 
 def publish_to_s3(
@@ -188,7 +189,7 @@ def _build_duckdb_s3_destination(graph_id: str) -> dict[str, str]:
   sts = boto3.client("sts", region_name=env.AWS_REGION)
   account_id = sts.get_caller_identity()["Account"]
   bucket = f"robosystems-{account_id}-user-{env.ENVIRONMENT}"
-  s3_key = f"shared-repos/{graph_id}.duckdb"
+  s3_key = get_shared_repo_database_key(graph_id, ".duckdb")
   s3_uri = f"s3://{bucket}/{s3_key}"
   return {"bucket": bucket, "s3_key": s3_key, "s3_uri": s3_uri}
 
@@ -221,7 +222,7 @@ def _build_s3_destination(graph_id: str) -> dict[str, str]:
   sts = boto3.client("sts", region_name=env.AWS_REGION)
   account_id = sts.get_caller_identity()["Account"]
   bucket = f"robosystems-{account_id}-user-{env.ENVIRONMENT}"
-  s3_key = f"shared-repos/{graph_id}.lbug"
+  s3_key = get_shared_repo_database_key(graph_id, ".lbug")
   s3_uri = f"s3://{bucket}/{s3_key}"
   return {"bucket": bucket, "s3_key": s3_key, "s3_uri": s3_uri}
 

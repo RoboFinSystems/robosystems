@@ -2,8 +2,7 @@
 
 Daily job to enforce backup retention policies:
 - Op 1: Clean up tracked backups (GraphBackup records past their expires_at)
-- Op 2: Clean up shared repository streaming backups (keep_count=3)
-- Op 3: Clean up instance-level daemon backups older than 90 days
+- Op 2: Clean up instance-level daemon backups older than 90 days
 
 S3 lifecycle rules (cloudformation/s3.yaml) provide a 90-day safety net.
 This job handles tier-specific shorter retention via the GraphBackup model.
@@ -96,48 +95,6 @@ def cleanup_tracked_backups(
 
 
 @op
-def cleanup_shared_repo_backups(context: OpExecutionContext) -> dict[str, Any]:
-  """Clean up old shared repository streaming backups.
-
-  These are the tar.gz backups under shared-replica-data/ used for replica boot.
-  The backup service creates its own S3 client, so no resource injection needed.
-  """
-  from robosystems.config.shared_repositories import get_all_repository_ids
-  from robosystems.operations.lbug.streaming_backup import (
-    create_shared_repository_backup_service,
-  )
-
-  repo_ids = get_all_repository_ids()
-  context.log.info(f"Cleaning up streaming backups for repos: {repo_ids}")
-
-  total_deleted = 0
-  results: dict[str, int] = {}
-  errors: dict[str, str] = {}
-
-  service = create_shared_repository_backup_service()
-
-  for repo_id in repo_ids:
-    try:
-      deleted = service.cleanup_old_backups(repo_id, keep_count=3)
-      results[repo_id] = deleted
-      total_deleted += deleted
-      if deleted > 0:
-        context.log.info(f"Deleted {deleted} old backups for repo {repo_id}")
-    except Exception as e:
-      context.log.error(f"Failed to clean up backups for repo {repo_id}: {e}")
-      errors[repo_id] = str(e)
-
-  context.log.info(f"Shared repo backup cleanup: {total_deleted} total deleted")
-
-  return {
-    "total_deleted": total_deleted,
-    "per_repo": results,
-    "errors": errors,
-    "timestamp": datetime.now(UTC).isoformat(),
-  }
-
-
-@op
 def cleanup_instance_backups(
   context: OpExecutionContext,
   s3: S3Resource,
@@ -202,7 +159,6 @@ def cleanup_instance_backups(
 def daily_backup_cleanup_job():
   """Daily cleanup of expired backups across all storage layers."""
   cleanup_tracked_backups()
-  cleanup_shared_repo_backups()
   cleanup_instance_backups()
 
 

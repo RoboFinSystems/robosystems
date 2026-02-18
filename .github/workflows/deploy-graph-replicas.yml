@@ -264,7 +264,7 @@ jobs:
         run: |
           # Build S3 prefix and validate each repository's .lbug file
           ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
-          S3_PREFIX="s3://robosystems-${ACCOUNT_ID}-user-${{ inputs.environment }}/shared-repos"
+          S3_PREFIX="s3://robosystems-${ACCOUNT_ID}-user-${{ inputs.environment }}/shared-repositories/databases"
           REPOS="${{ inputs.shared_repositories }}"
 
           echo "🔍 Validating shared databases under prefix: $S3_PREFIX"

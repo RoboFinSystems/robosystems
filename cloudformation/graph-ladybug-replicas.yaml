@@ -45,9 +45,9 @@ Parameters:
   # S3 Database Configuration (Updated by Dagster job)
   SharedDatabaseS3Prefix:
     Type: String
-    Description: S3 prefix for shared repository databases (e.g., s3://bucket/shared-repos)
+    Description: S3 prefix for shared repository databases (e.g., s3://bucket/shared-repositories/databases)
     AllowedPattern: "^(s3://[a-z0-9][a-z0-9.-]*/.+)?$"
-    ConstraintDescription: Must be a valid S3 prefix (e.g., s3://bucket/shared-repos) or empty
+    ConstraintDescription: Must be a valid S3 prefix (e.g., s3://bucket/shared-repositories/databases) or empty
   SharedRepositories:
     Type: String
     Default: sec
