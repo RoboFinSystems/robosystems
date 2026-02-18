@@ -73,7 +73,7 @@ services:
         reservations:
           memory: 1g
           cpus: "1"
-    profiles: ["graph-api", "graph-dbs", "robosystems", "all"]
+    profiles: ["graph-api", "lbug", "robosystems", "all"]
 
   # Dagster Webserver - Orchestration UI
   dagster-webserver:
@@ -250,17 +250,17 @@ services:
     environment:
       - DOCKER_PROFILE=neo4j-writer
       - GRAPH_BACKEND_TYPE=neo4j_community
-      - GRAPH_API_PORT=8003
+      - GRAPH_API_PORT=8001
       - CLUSTER_TIER=enterprise
     env_file:
       - .env
     ports:
-      - "8003:8003"
+      - "8001:8001"
     volumes:
       - ./robosystems:/app/robosystems
       - ./data/staging:/app/data/staging
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8003/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -277,7 +277,7 @@ services:
         reservations:
           memory: 768m
           cpus: "0.5"
-    profiles: ["neo4j", "graph-dbs"]
+    profiles: ["neo4j"]
 
   # Neo4j Database - Graph Database Backend
   neo4j-db:
@@ -321,7 +321,7 @@ services:
         reservations:
           memory: 2g
           cpus: "1"
-    profiles: ["neo4j", "graph-dbs"]
+    profiles: ["neo4j"]
 
   # OpenTelemetry Collector - Metrics and Tracing
   otel-collector:
