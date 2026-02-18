@@ -103,6 +103,33 @@ on:
         type: string
         default: "900"
 
+      # Spot Instance Configuration
+      spot_enabled:
+        description: "Enable Spot instances for cost savings (master switch)"
+        required: false
+        type: string
+        default: "false"
+      spot_base:
+        description: "Minimum number of on-demand instances (never Spot)"
+        required: false
+        type: string
+        default: "0"
+      spot_weight:
+        description: "Percentage of instances above base that are Spot (0 = all on-demand, 90 = 90% Spot)"
+        required: false
+        type: string
+        default: "0"
+      spot_strategy:
+        description: "Spot instance allocation strategy"
+        required: false
+        type: string
+        default: "price-capacity-optimized"
+      spot_rebalance:
+        description: "Proactive replacement of Spot instances at elevated risk of interruption"
+        required: false
+        type: string
+        default: "true"
+
       # Docker Configuration
       ecr_image_tag:
         description: "Docker image tag for Graph API"
@@ -311,6 +338,9 @@ jobs:
             echo "is_new_stack=false" >> $GITHUB_OUTPUT
           fi
 
+          # Convert Spot weight (% Spot) to on-demand percentage (ASG API uses on-demand %)
+          SPOT_ON_DEMAND_PCT=$((100 - ${{ inputs.spot_weight }}))
+
           # Build parameters
           STACK_PARAMS="ParameterKey=Environment,ParameterValue=${{ inputs.environment }} \
             ParameterKey=VpcId,ParameterValue=${{ inputs.vpc_id }} \
@@ -337,6 +367,11 @@ jobs:
             ParameterKey=ValkeyUrl,ParameterValue=${{ inputs.valkey_url }} \
             ParameterKey=DatabaseEndpoint,ParameterValue=${{ inputs.database_endpoint }} \
             ParameterKey=DatabasePort,ParameterValue=${{ inputs.database_port }} \
+            ParameterKey=SpotEnabled,ParameterValue=${{ inputs.spot_enabled }} \
+            ParameterKey=SpotOnDemandBaseCapacity,ParameterValue=${{ inputs.spot_base }} \
+            ParameterKey=SpotOnDemandPercentageAboveBase,ParameterValue=${SPOT_ON_DEMAND_PCT} \
+            ParameterKey=SpotAllocationStrategy,ParameterValue=${{ inputs.spot_strategy }} \
+            ParameterKey=SpotCapacityRebalance,ParameterValue=${{ inputs.spot_rebalance }} \
             ParameterKey=SNSAlertEmail,ParameterValue=${{ inputs.aws_sns_alert_email }} \
             ParameterKey=ServiceTag,ParameterValue=RoboSystems \
             ParameterKey=ComponentTag,ParameterValue=SharedReplica"

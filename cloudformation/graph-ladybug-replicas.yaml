@@ -134,6 +134,42 @@ Parameters:
     MaxValue: 3600
     Description: Seconds before ASG starts checking ALB health on new instances (must cover S3 download + container start)
 
+  # Spot Instance Configuration
+  SpotEnabled:
+    Type: String
+    Default: "false"
+    AllowedValues:
+      - "true"
+      - "false"
+    Description: Enable Spot instances for cost savings (master switch — forces 100% on-demand when false)
+  SpotOnDemandBaseCapacity:
+    Type: Number
+    Default: 0
+    MinValue: 0
+    MaxValue: 50
+    Description: Minimum number of on-demand instances (never Spot, guaranteed capacity)
+  SpotOnDemandPercentageAboveBase:
+    Type: Number
+    Default: 100
+    MinValue: 0
+    MaxValue: 100
+    Description: Percentage of instances above base capacity that are on-demand (0 = all Spot above base)
+  SpotAllocationStrategy:
+    Type: String
+    Default: price-capacity-optimized
+    AllowedValues:
+      - price-capacity-optimized
+      - capacity-optimized
+      - lowest-price
+    Description: Spot instance allocation strategy
+  SpotCapacityRebalance:
+    Type: String
+    Default: "true"
+    AllowedValues:
+      - "true"
+      - "false"
+    Description: Proactive replacement of Spot instances at elevated risk of interruption
+
   # Cache Configuration
   ValkeyClientSecurityGroupId:
     Type: AWS::EC2::SecurityGroup::Id
@@ -176,6 +212,10 @@ Rules:
 Conditions:
   HasMinInstances: !Not [!Equals [!Ref MinInstances, 0]]
   HasResponseTimeScaling: !Equals [!Ref EnableResponseTimeScaling, "true"]
+  IsSpotEnabled: !Equals [!Ref SpotEnabled, "true"]
+  IsSpotCapacityRebalance: !And
+    - !Condition IsSpotEnabled
+    - !Equals [!Ref SpotCapacityRebalance, "true"]
 
 Resources:
   # ========================================
@@ -473,9 +513,16 @@ Resources:
       MaxSize: !Ref MaxInstances
       DesiredCapacity: !Ref DesiredCapacity
       VPCZoneIdentifier: !Ref SubnetIds
-      LaunchTemplate:
-        LaunchTemplateId: !Ref ReplicaLaunchTemplate
-        Version: !GetAtt ReplicaLaunchTemplate.LatestVersionNumber
+      MixedInstancesPolicy:
+        LaunchTemplate:
+          LaunchTemplateSpecification:
+            LaunchTemplateId: !Ref ReplicaLaunchTemplate
+            Version: !GetAtt ReplicaLaunchTemplate.LatestVersionNumber
+        InstancesDistribution:
+          OnDemandBaseCapacity: !If [IsSpotEnabled, !Ref SpotOnDemandBaseCapacity, 0]
+          OnDemandPercentageAboveBaseCapacity: !If [IsSpotEnabled, !Ref SpotOnDemandPercentageAboveBase, 100]
+          SpotAllocationStrategy: !If [IsSpotEnabled, !Ref SpotAllocationStrategy, !Ref "AWS::NoValue"]
+      CapacityRebalance: !If [IsSpotCapacityRebalance, true, !Ref "AWS::NoValue"]
       TargetGroupARNs:
         - !Ref ReplicaTargetGroup
       HealthCheckType: ELB

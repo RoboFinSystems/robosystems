@@ -467,6 +467,12 @@ jobs:
       shared_replicas_response_time_target: ${{ vars.SHARED_REPLICAS_RESPONSE_TIME_TARGET_STAGING || '5' }}
       shared_replicas_instance_warmup: ${{ vars.SHARED_REPLICAS_INSTANCE_WARMUP_STAGING || '900' }}
       shared_replicas_health_check_grace_period: ${{ vars.SHARED_REPLICAS_HEALTH_CHECK_GRACE_PERIOD_STAGING || '900' }}
+      # Shared Replicas Spot Configuration
+      shared_replicas_spot_enabled: ${{ vars.SHARED_REPLICAS_SPOT_ENABLED_STAGING || 'false' }}
+      shared_replicas_spot_base: ${{ vars.SHARED_REPLICAS_SPOT_BASE_STAGING || '0' }}
+      shared_replicas_spot_weight: ${{ vars.SHARED_REPLICAS_SPOT_WEIGHT_STAGING || '0' }}
+      shared_replicas_spot_strategy: ${{ vars.SHARED_REPLICAS_SPOT_STRATEGY_STAGING || 'price-capacity-optimized' }}
+      shared_replicas_spot_rebalance: ${{ vars.SHARED_REPLICAS_SPOT_REBALANCE_STAGING || 'true' }}
       # Other Configuration
       aws_sns_alert_email: ${{ vars.AWS_SNS_ALERT_EMAIL }}
     secrets: inherit
