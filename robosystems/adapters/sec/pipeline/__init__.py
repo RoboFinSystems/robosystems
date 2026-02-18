@@ -29,6 +29,8 @@ Pipeline stages (run independently via separate jobs):
 5. BACKUP & PUBLISH (post-materialization):
    - sec_backup - Create compressed downloadable backups for users
    - sec_s3_published - Publish raw .lbug to S3 for replica cluster
+   - sec_duckdb_s3_published - Publish raw .duckdb to S3 for local dev / analytics
+   - sec_historical_duckdb_s3_published - Publish historical .duckdb to S3
 
 Post-materialization lineage (asset deps, not sensors):
   sec_graph_materialized -> sec_backup
@@ -63,13 +65,19 @@ from robosystems.adapters.sec.pipeline.configs import (
   sec_quarter_partitions,
 )
 from robosystems.adapters.sec.pipeline.download import sec_raw_filings
+from robosystems.adapters.sec.pipeline.duckdb_s3_publish import (
+  sec_duckdb_s3_published,
+  sec_historical_duckdb_s3_published,
+)
 from robosystems.adapters.sec.pipeline.entity_update import (
   sec_entity_incremental_update,
 )
 from robosystems.adapters.sec.pipeline.jobs import (
   sec_backup_job,
   sec_download_job,
+  sec_duckdb_s3_publish_job,
   sec_entity_update_job,
+  sec_historical_duckdb_s3_publish_job,
   sec_historical_materialize_job,
   sec_historical_stage_job,
   sec_historical_staged_materialize_job,
@@ -117,6 +125,8 @@ def get_dagster_components():
       sec_historical_materialized,
       sec_backup,
       sec_s3_published,
+      sec_duckdb_s3_published,
+      sec_historical_duckdb_s3_published,
     ],
     "jobs": [
       sec_download_job,
@@ -130,6 +140,8 @@ def get_dagster_components():
       sec_incremental_stage_job,
       sec_entity_update_job,
       sec_backup_job,
+      sec_duckdb_s3_publish_job,
+      sec_historical_duckdb_s3_publish_job,
     ],
     "sensors": [
       sec_processing_sensor,
@@ -164,10 +176,14 @@ __all__ = [
   "sec_download_job",
   "sec_download_to_process_sensor",
   "sec_duckdb_incremental_staged",
+  "sec_duckdb_s3_publish_job",
+  "sec_duckdb_s3_published",
   "sec_duckdb_staged",
   "sec_entity_incremental_update",
   "sec_entity_update_job",
   "sec_graph_materialized",
+  "sec_historical_duckdb_s3_publish_job",
+  "sec_historical_duckdb_s3_published",
   "sec_historical_duckdb_staged",
   "sec_historical_materialize_job",
   "sec_historical_materialized",
