@@ -1,6 +1,7 @@
 import pytest
 
-from robosystems.graph_api.backends import LadybugBackend, Neo4jBackend, get_backend
+from robosystems.graph_api.backends import LadybugBackend, get_backend
+from robosystems.graph_api.backends.neo4j import Neo4jBackend
 
 
 def test_backend_factory_lbug(monkeypatch, tmp_path):
@@ -53,6 +54,25 @@ def test_backend_factory_neo4j_enterprise(monkeypatch):
 
   assert isinstance(backend, Neo4jBackend)
   assert backend.enterprise is True
+
+
+def test_backend_factory_neo4j_missing_package(monkeypatch):
+  """Verify clear error when neo4j package is not installed."""
+  import builtins
+
+  real_import = builtins.__import__
+
+  def mock_import(name, *args, **kwargs):
+    if name == "neo4j":
+      raise ImportError("No module named 'neo4j'")
+    return real_import(name, *args, **kwargs)
+
+  monkeypatch.setattr("robosystems.config.env.GRAPH_BACKEND_TYPE", "neo4j_community")
+  monkeypatch.setattr("robosystems.graph_api.backends._backend_instance", None)
+  monkeypatch.setattr(builtins, "__import__", mock_import)
+
+  with pytest.raises(ImportError, match="Install it with"):
+    get_backend()
 
 
 def test_backend_factory_invalid_type(monkeypatch):
