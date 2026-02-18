@@ -28,6 +28,12 @@ class SECDuckDBPublishConfig(Config):
   graph_id: str = "sec"
 
 
+class SECHistoricalDuckDBPublishConfig(Config):
+  """Configuration for SEC historical DuckDB S3 publish."""
+
+  graph_id: str = "sec_historical"
+
+
 @asset(
   group_name="sec_pipeline",
   description="Publish SEC DuckDB staging to S3 (raw .duckdb for local dev / analytics)",
@@ -67,11 +73,11 @@ def sec_duckdb_s3_published(
 )
 def sec_historical_duckdb_s3_published(
   context: AssetExecutionContext,
-  config: SECDuckDBPublishConfig,
+  config: SECHistoricalDuckDBPublishConfig,
 ) -> MaterializeResult:
   """Publish SEC historical DuckDB staging database to S3.
 
   Returns:
       MaterializeResult with S3 URI and upload statistics
   """
-  return publish_duckdb_to_s3(context, graph_id="sec_historical")
+  return publish_duckdb_to_s3(context, graph_id=config.graph_id)

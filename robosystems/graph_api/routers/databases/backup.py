@@ -137,8 +137,9 @@ async def create_backup(
   - **standard**: Full dump ZIP, optionally encrypted, uploaded to S3
   - **replica**: Raw .lbug uploaded to S3 (downloaded by replica fleet at startup)
   - **shared_repository**: Compressed tar.gz uploaded to S3 (for subscriber downloads)
+  - **duckdb_staging**: Raw .duckdb uploaded to S3 (for local dev / analytics)
 
-  For replica/shared_repository types, s3_destination is required.
+  For replica/shared_repository/duckdb_staging types, s3_destination is required.
   """
   if ladybug_service.read_only:
     raise HTTPException(
@@ -148,9 +149,17 @@ async def create_backup(
 
   # Validate database exists (DuckDB staging uses its own file, not LadybugDB)
   if request.backup_type == "duckdb_staging":
+    import re
     from pathlib import Path
 
     from robosystems.config.storage.shared import get_staging_duckdb_path
+
+    # Validate graph_id to prevent path traversal
+    if not re.match(r"^[a-zA-Z0-9_]+$", graph_id):
+      raise HTTPException(
+        status_code=http_status.HTTP_400_BAD_REQUEST,
+        detail="Invalid graph_id: must be alphanumeric with underscores only",
+      )
 
     duckdb_path = Path(get_staging_duckdb_path(graph_id))
     if not duckdb_path.exists():
