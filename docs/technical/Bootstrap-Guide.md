@@ -204,7 +204,7 @@ Initial deployment creates all infrastructure (VPC, databases, ECS services). Su
 ```bash
 just bastion-tunnel prod all    # Connect to all services
 # API at http://localhost:8000
-# Dagster at http://localhost:3003
+# Dagster at http://localhost:8002
 ```
 
 ## Multi-Repository Setup

@@ -130,7 +130,7 @@ adapters/custom_*/pipeline/ # Fork-friendly custom adapter pipelines
 - **Single System**: All orchestration in one place - no separate task queues
 - **Asset Dependencies**: Declarative data lineage with automatic orchestration
 - **Year Partitioning**: Process historical data by year
-- **Observability**: Built-in UI at `localhost:3003` for monitoring
+- **Observability**: Built-in UI at `localhost:8002` for monitoring
 - **Scheduling**: Cron-based schedules for billing, cleanup, and pipelines
 - **Sensors**: Event-driven job triggers (e.g., new subscription → provision graph)
 - **Local Development**: `just sec-load NVDA 2025` triggers pipeline via Docker CLI
