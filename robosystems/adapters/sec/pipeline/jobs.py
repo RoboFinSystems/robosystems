@@ -355,9 +355,11 @@ sec_backup_job = define_asset_job(
 
 
 # ============================================================================
-# Phase 5: DuckDB S3 Publish (Raw .duckdb)
+# Phase 5: S3 Publish (DuckDB + Historical LadybugDB)
 # ============================================================================
-# Publishes DuckDB staging databases to S3 as raw .duckdb files.
+# Primary LadybugDB publish (sec_lbug_s3_published) has no job here - it's
+# triggered by asset lineage from sec_graph_materialized.
+# This section covers: DuckDB publishes + historical LadybugDB (ad-hoc).
 
 sec_duckdb_s3_publish_job = define_asset_job(
   name="sec_duckdb_s3_publish",
@@ -400,11 +402,7 @@ sec_historical_duckdb_s3_publish_job = define_asset_job(
 )
 
 
-# ============================================================================
-# Phase 5b: S3 Publish - Historical LadybugDB (.lbug for Replica Cluster)
-# ============================================================================
-# Publishes the sec_historical LadybugDB database to S3 for replica cluster.
-# Run ad-hoc after historical graph rebuild.
+# Historical LadybugDB publish - run ad-hoc after historical graph rebuild.
 
 sec_historical_lbug_s3_publish_job = define_asset_job(
   name="sec_historical_lbug_s3_publish",

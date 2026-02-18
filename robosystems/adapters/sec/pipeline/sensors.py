@@ -11,6 +11,7 @@ Nightly Pipeline (enable all for automated daily updates):
 
 Post-materialization S3 publish and replica refresh are handled by asset lineage:
   sec_graph_materialized -> sec_lbug_s3_published -> shared_replicas_refreshed
+  sec_historical_materialized -> sec_historical_lbug_s3_published -> shared_replicas_refreshed
 
 Manual Operations (not in automated chain):
 - sec_entity_update_job: Update mutable Entity attributes (run manually after materialize)
