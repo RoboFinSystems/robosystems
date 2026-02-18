@@ -421,7 +421,7 @@ async def materialize_graph(
   from robosystems.middleware.billing.enforcement import require_graph_access
   from robosystems.middleware.sse.event_storage import get_event_storage
 
-  require_graph_access(graph_id, db, require_write=True)
+  graph = require_graph_access(graph_id, db, require_write=True)
 
   circuit_breaker.check_circuit(graph_id, "graph_materialization")
 
@@ -433,14 +433,6 @@ async def materialize_graph(
     raise HTTPException(
       status_code=status.HTTP_403_FORBIDDEN,
       detail=SHARED_REPO_WRITE_ERROR_MESSAGE,
-    )
-
-  # Verify graph exists
-  graph = Graph.get_by_id(graph_id, db)
-  if not graph:
-    raise HTTPException(
-      status_code=status.HTTP_404_NOT_FOUND,
-      detail=f"Graph {graph_id} not found",
     )
 
   # Dry run: validate limits and return without executing

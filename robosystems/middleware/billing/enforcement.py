@@ -1,5 +1,7 @@
 """Subscription enforcement middleware for graph operations."""
 
+import threading
+import time
 from datetime import UTC, datetime
 
 from fastapi import HTTPException, status
@@ -12,6 +14,33 @@ from ...models.billing import BillingCustomer, BillingSubscription, Subscription
 from ...models.iam import Graph, GraphStatus, OrgUser
 
 logger = get_logger(__name__)
+
+# In-memory cache: graph_id -> (subscription_result, expires_at)
+# subscription_result is one of: "active", "no_subscription", "canceled_grace", "canceled_expired"
+_subscription_cache: dict[str, tuple[str, float]] = {}
+_subscription_lock = threading.Lock()
+_SUBSCRIPTION_CACHE_TTL = 60  # seconds
+
+
+def _get_cached_subscription(graph_id: str) -> str | None:
+  with _subscription_lock:
+    entry = _subscription_cache.get(graph_id)
+    if entry and entry[1] > time.time():
+      return entry[0]
+    if entry:
+      del _subscription_cache[graph_id]
+    return None
+
+
+def _cache_subscription(graph_id: str, result: str) -> None:
+  with _subscription_lock:
+    _subscription_cache[graph_id] = (result, time.time() + _SUBSCRIPTION_CACHE_TTL)
+
+
+def invalidate_subscription_cache(graph_id: str) -> None:
+  """Call when subscription changes (cancel, reactivate, etc.)."""
+  with _subscription_lock:
+    _subscription_cache.pop(graph_id, None)
 
 
 def check_can_provision_graph(
@@ -163,12 +192,33 @@ def require_graph_access(
   if graph.is_repository:
     return graph
 
+  # Check in-memory subscription cache first
+  cached = _get_cached_subscription(graph_id)
+  if cached == "active":
+    return graph
+  elif cached == "canceled_grace":
+    if require_write:
+      raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="Subscription canceled. Write operations disabled until subscription ends.",
+      )
+    return graph
+  elif cached == "canceled_expired":
+    raise HTTPException(
+      status_code=status.HTTP_403_FORBIDDEN,
+      detail="Subscription has ended. Resubscribe to access this graph.",
+    )
+  elif cached == "no_subscription":
+    return graph
+
+  # Cache miss — query DB
   subscription = BillingSubscription.get_by_resource(
     resource_type="graph", resource_id=graph_id, session=session
   )
 
   if not subscription:
     logger.warning(f"No subscription found for graph {graph_id}")
+    _cache_subscription(graph_id, "no_subscription")
     return graph
 
   if subscription.status == "canceled":
@@ -177,6 +227,7 @@ def require_graph_access(
 
     if ends_at and ends_at > now:
       # Grace period: reads OK, writes blocked
+      _cache_subscription(graph_id, "canceled_grace")
       if require_write:
         raise HTTPException(
           status_code=status.HTTP_403_FORBIDDEN,
@@ -185,9 +236,11 @@ def require_graph_access(
       return graph
 
     # Past grace period
+    _cache_subscription(graph_id, "canceled_expired")
     raise HTTPException(
       status_code=status.HTTP_403_FORBIDDEN,
       detail="Subscription has ended. Resubscribe to access this graph.",
     )
 
+  _cache_subscription(graph_id, "active")
   return graph
