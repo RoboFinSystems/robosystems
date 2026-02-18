@@ -463,6 +463,7 @@ jobs:
       shared_repositories: ${{ vars.SHARED_REPOSITORIES_STAGING || 'sec' }}
       shared_replicas_cpu_target: ${{ vars.SHARED_REPLICAS_CPU_TARGET_STAGING || '70' }}
       shared_replicas_memory_target: ${{ vars.SHARED_REPLICAS_MEMORY_TARGET_STAGING || '80' }}
+      shared_replicas_enable_response_time_scaling: ${{ vars.SHARED_REPLICAS_ENABLE_RESPONSE_TIME_SCALING_STAGING || 'false' }}
       shared_replicas_response_time_target: ${{ vars.SHARED_REPLICAS_RESPONSE_TIME_TARGET_STAGING || '5' }}
       shared_replicas_instance_warmup: ${{ vars.SHARED_REPLICAS_INSTANCE_WARMUP_STAGING || '900' }}
       shared_replicas_health_check_grace_period: ${{ vars.SHARED_REPLICAS_HEALTH_CHECK_GRACE_PERIOD_STAGING || '900' }}

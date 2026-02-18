@@ -82,6 +82,11 @@ on:
         required: false
         type: string
         default: "80"
+      enable_response_time_scaling:
+        description: "Enable response time-based auto scaling (disable during zero-traffic to prevent INSUFFICIENT_DATA blocking scale-in)"
+        required: false
+        type: string
+        default: "false"
       response_time_target_value:
         description: "Target ALB response time in seconds for auto scaling"
         required: false
@@ -321,6 +326,7 @@ jobs:
             ParameterKey=DesiredCapacity,ParameterValue=${{ inputs.desired_capacity }} \
             ParameterKey=CPUTargetValue,ParameterValue=${{ inputs.cpu_target_value }} \
             ParameterKey=MemoryTargetValue,ParameterValue=${{ inputs.memory_target_value }} \
+            ParameterKey=EnableResponseTimeScaling,ParameterValue=${{ inputs.enable_response_time_scaling }} \
             ParameterKey=ResponseTimeTargetValue,ParameterValue=${{ inputs.response_time_target_value }} \
             ParameterKey=InstanceWarmup,ParameterValue=${{ inputs.instance_warmup }} \
             ParameterKey=HealthCheckGracePeriod,ParameterValue=${{ inputs.health_check_grace_period }} \

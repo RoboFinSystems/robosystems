@@ -166,6 +166,11 @@ on:
         type: string
         description: Target memory utilization percentage for replica auto scaling
         default: "80"
+      shared_replicas_enable_response_time_scaling:
+        required: false
+        type: string
+        description: Enable response time-based auto scaling for replicas (disable during zero-traffic to prevent INSUFFICIENT_DATA blocking scale-in)
+        default: "false"
       shared_replicas_response_time_target:
         required: false
         type: string
@@ -482,6 +487,7 @@ jobs:
       shared_repositories: ${{ inputs.shared_repositories }}
       cpu_target_value: ${{ inputs.shared_replicas_cpu_target }}
       memory_target_value: ${{ inputs.shared_replicas_memory_target }}
+      enable_response_time_scaling: ${{ inputs.shared_replicas_enable_response_time_scaling }}
       response_time_target_value: ${{ inputs.shared_replicas_response_time_target }}
       instance_warmup: ${{ inputs.shared_replicas_instance_warmup }}
       health_check_grace_period: ${{ inputs.shared_replicas_health_check_grace_period }}
