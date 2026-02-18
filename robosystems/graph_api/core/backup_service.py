@@ -128,11 +128,10 @@ class OnInstanceBackupService:
       bucket = s3_destination["bucket"]
       key = s3_destination["key"]
 
-      if backup_type == "replica":
-        result = self._upload_replica(db_path, bucket, key, task_id, db_size)
-      elif backup_type == "duckdb_staging":
-        # Reuse raw upload (same as replica — no compression needed)
-        result = self._upload_replica(db_path, bucket, key, task_id, db_size)
+      if backup_type in ("replica", "duckdb_staging"):
+        result = self._upload_replica(
+          db_path, bucket, key, task_id, db_size, backup_type=backup_type
+        )
       elif backup_type == "shared_repository":
         result = self._upload_shared_repository(
           db_path, bucket, key, task_id, graph_id, db_size
@@ -198,9 +197,13 @@ class OnInstanceBackupService:
     key: str,
     task_id: str,
     db_size: int,
+    backup_type: str = "replica",
   ) -> dict[str, Any]:
-    """Raw .lbug upload to S3 (no compression) for replica fleet download."""
-    logger.info(f"[Task {task_id}] Uploading raw .lbug to s3://{bucket}/{key}")
+    """Raw database upload to S3 (no compression).
+
+    Used for both .lbug replica uploads and .duckdb staging uploads.
+    """
+    logger.info(f"[Task {task_id}] Uploading {db_path.name} to s3://{bucket}/{key}")
 
     s3_client = self._get_s3_client()
     transfer_config = TransferConfig(
@@ -230,7 +233,7 @@ class OnInstanceBackupService:
       Callback=progress_callback,
       ExtraArgs={
         "Metadata": {
-          "backup_type": "replica",
+          "backup_type": backup_type,
           "created_at": datetime.now(UTC).isoformat(),
           "original_size": str(db_size),
         },

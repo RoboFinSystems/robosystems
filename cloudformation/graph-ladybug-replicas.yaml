@@ -108,6 +108,13 @@ Parameters:
     MinValue: 1
     MaxValue: 100
     Description: Target memory utilization percentage for auto scaling
+  EnableResponseTimeScaling:
+    Type: String
+    Default: "false"
+    AllowedValues:
+      - "true"
+      - "false"
+    Description: Enable response time-based auto scaling (disable during zero-traffic periods to prevent INSUFFICIENT_DATA from blocking scale-in)
   ResponseTimeTargetValue:
     Type: Number
     Default: 5
@@ -168,6 +175,7 @@ Rules:
 
 Conditions:
   HasMinInstances: !Not [!Equals [!Ref MinInstances, 0]]
+  HasResponseTimeScaling: !Equals [!Ref EnableResponseTimeScaling, "true"]
 
 Resources:
   # ========================================
@@ -533,8 +541,13 @@ Resources:
         DisableScaleIn: false
 
   # Response time-based Auto Scaling (triggers scale-out when queries slow down)
+  # Disabled by default — TargetResponseTime has no datapoints during zero-traffic
+  # periods, causing auto-created alarms to enter INSUFFICIENT_DATA which blocks
+  # scale-in from ALL other policies. Enable via EnableResponseTimeScaling when
+  # the fleet has sustained traffic.
   ReplicaResponseTimeScalingPolicy:
     Type: AWS::AutoScaling::ScalingPolicy
+    Condition: HasResponseTimeScaling
     Properties:
       AutoScalingGroupName: !Ref ReplicaAutoScalingGroup
       PolicyType: TargetTrackingScaling
