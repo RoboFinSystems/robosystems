@@ -87,43 +87,54 @@ def _renew_subscriptions(
         skipped_count += 1
         continue
 
-      # Rotate the billing period
-      old_period_end = subscription.current_period_end
-      subscription.renew_period(session)
+      if not subscription.current_period_end:
+        log.warning(f"Subscription {sub_id} has no period end, skipping")
+        skipped_count += 1
+        continue
 
-      # Generate the renewal invoice
-      invoice = generate_subscription_invoice(
-        subscription=subscription,
-        customer=customer,
-        description=f"{subscription.plan_name} subscription renewal",
-        session=session,
-      )
+      # Use a savepoint so period rotation + invoice + audit are atomic.
+      # If any step fails, the savepoint rolls back and the subscription
+      # reappears on the next sensor tick.
+      savepoint = session.begin_nested()
+      try:
+        old_period_end = subscription.current_period_end
+        subscription.renew_period(session)
 
-      # Log the renewal audit event
-      BillingAuditLog.log_event(
-        session=session,
-        event_type=BillingEventType.SUBSCRIPTION_RENEWED,
-        org_id=subscription.org_id,
-        subscription_id=subscription.id,
-        invoice_id=invoice.id,
-        description=f"Subscription {subscription.id} renewed: period {old_period_end} -> {subscription.current_period_end}",
-        actor_type="dagster",
-        event_data={
-          "old_period_end": old_period_end.isoformat() if old_period_end else None,
-          "new_period_start": subscription.current_period_start.isoformat(),
-          "new_period_end": subscription.current_period_end.isoformat(),
-          "invoice_id": invoice.id,
-          "plan_name": subscription.plan_name,
-          "amount_cents": subscription.base_price_cents,
-        },
-      )
+        invoice = generate_subscription_invoice(
+          subscription=subscription,
+          customer=customer,
+          description=f"{subscription.plan_name} subscription renewal",
+          session=session,
+        )
 
-      renewed_count += 1
-      log.info(
-        f"Renewed subscription {sub_id}: "
-        f"period {subscription.current_period_start} -> {subscription.current_period_end}, "
-        f"invoice {invoice.id}"
-      )
+        BillingAuditLog.log_event(
+          session=session,
+          event_type=BillingEventType.SUBSCRIPTION_RENEWED,
+          org_id=subscription.org_id,
+          subscription_id=subscription.id,
+          invoice_id=invoice.id,
+          description=f"Subscription {subscription.id} renewed: period {old_period_end} -> {subscription.current_period_end}",
+          actor_type="dagster",
+          event_data={
+            "old_period_end": old_period_end.isoformat() if old_period_end else None,
+            "new_period_start": subscription.current_period_start.isoformat(),
+            "new_period_end": subscription.current_period_end.isoformat(),
+            "invoice_id": invoice.id,
+            "plan_name": subscription.plan_name,
+            "amount_cents": subscription.base_price_cents,
+          },
+        )
+
+        savepoint.commit()
+        renewed_count += 1
+        log.info(
+          f"Renewed subscription {sub_id}: "
+          f"period {subscription.current_period_start} -> {subscription.current_period_end}, "
+          f"invoice {invoice.id}"
+        )
+      except Exception:
+        savepoint.rollback()
+        raise
 
     except Exception as e:
       error_msg = f"Failed to renew subscription {sub_id}: {e}"

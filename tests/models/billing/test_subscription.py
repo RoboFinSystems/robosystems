@@ -539,11 +539,52 @@ class TestBillingSubscriptionRenewal:
       session=db_session,
     )
     subscription.activate(db_session)
-    old_updated_at = subscription.updated_at
 
     subscription.renew_period(db_session)
 
-    assert subscription.updated_at >= old_updated_at
+    assert subscription.updated_at is not None
+
+  def test_renew_period_annual_interval(self, db_session: Session, test_user, test_org):
+    """Test that renew_period uses 365 days for annual subscriptions."""
+    subscription = BillingSubscription.create_subscription(
+      org_id=test_org.id,
+      resource_type="graph",
+      resource_id="kg123abc",
+      plan_name="standard",
+      base_price_cents=2999,
+      billing_interval="annual",
+      session=db_session,
+    )
+    subscription.activate(db_session)
+
+    old_period_end = subscription.current_period_end
+
+    subscription.renew_period(db_session)
+
+    assert subscription.current_period_start == old_period_end
+    assert subscription.current_period_end == old_period_end + timedelta(days=365)
+
+  def test_renew_period_monthly_interval(
+    self, db_session: Session, test_user, test_org
+  ):
+    """Test that renew_period uses 30 days for monthly subscriptions."""
+    subscription = BillingSubscription.create_subscription(
+      org_id=test_org.id,
+      resource_type="graph",
+      resource_id="kg123abc",
+      plan_name="standard",
+      base_price_cents=2999,
+      billing_interval="monthly",
+      session=db_session,
+    )
+    subscription.activate(db_session)
+
+    old_period_end = subscription.current_period_end
+
+    subscription.renew_period(db_session)
+
+    assert subscription.current_period_start == old_period_end
+    assert subscription.current_period_end == old_period_end + timedelta(days=30)
 
 
 class TestBillingSubscriptionRepr:

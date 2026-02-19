@@ -136,6 +136,10 @@ class TestRenewSubscriptions:
         "robosystems.operations.graph.subscription_service.generate_subscription_invoice",
         return_value=mock_invoice,
       ),
+      patch(
+        "robosystems.models.billing.audit_log.BillingAuditLog.log_event",
+        return_value=MagicMock(),
+      ) as mock_audit_log,
     ):
       result = _renew_subscriptions(["bsub_test1"], mock_session, log)
 
@@ -143,6 +147,8 @@ class TestRenewSubscriptions:
     assert result["skipped_count"] == 0
     assert result["errors"] == []
     mock_sub.renew_period.assert_called_once_with(mock_session)
+    mock_audit_log.assert_called_once()
+    assert mock_audit_log.call_args.kwargs["event_type"].value == "subscription_renewed"
 
   def test_skips_not_found_subscription(self):
     """Skips subscription that no longer exists."""
@@ -225,6 +231,26 @@ class TestRenewSubscriptions:
 
     assert result["renewed_count"] == 0
     assert result["skipped_count"] == 1
+
+  def test_skips_null_period_end(self):
+    """Skips subscription with null current_period_end."""
+    mock_session = MagicMock()
+    mock_sub = self._make_mock_subscription()
+    mock_sub.current_period_end = None
+    mock_customer = self._make_mock_customer()
+
+    mock_session.query.return_value.filter.return_value.first.return_value = mock_sub
+    log = logging.getLogger("test")
+
+    with patch(
+      "robosystems.models.billing.customer.BillingCustomer.get_by_org_id",
+      return_value=mock_customer,
+    ):
+      result = _renew_subscriptions(["bsub_test1"], mock_session, log)
+
+    assert result["renewed_count"] == 0
+    assert result["skipped_count"] == 1
+    mock_sub.renew_period.assert_not_called()
 
   def test_handles_exception_gracefully(self):
     """Records errors instead of crashing on individual subscription failure."""

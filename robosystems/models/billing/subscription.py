@@ -316,19 +316,27 @@ class BillingSubscription(Base):
 
     logger.info(f"Updated Stripe subscription for {self.id}")
 
+  def _get_period_delta(self) -> timedelta:
+    """Get the timedelta for one billing period based on billing_interval."""
+    if self.billing_interval == BillingInterval.ANNUAL.value:
+      return timedelta(days=365)
+    # Monthly is the default for both "monthly" and "usage_based"
+    return timedelta(days=30)
+
   def renew_period(self, session: Session) -> None:
     """Advance to the next billing period.
 
     Shifts current_period_start to the old current_period_end and extends
-    current_period_end by 30 days. Used by the invoice billing renewal job.
+    current_period_end by the billing interval duration. Used by the invoice
+    billing renewal job.
     """
     now = datetime.now(UTC)
+    delta = self._get_period_delta()
     self.current_period_start = self.current_period_end
-    self.current_period_end = self.current_period_end + timedelta(days=30)
+    self.current_period_end = self.current_period_end + delta
     self.updated_at = now
 
-    session.commit()
-    session.refresh(self)
+    session.flush()
 
     logger.info(f"Renewed subscription {self.id} period to {self.current_period_end}")
 
