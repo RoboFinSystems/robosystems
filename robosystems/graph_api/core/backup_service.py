@@ -263,7 +263,14 @@ class OnInstanceBackupService:
 
     s3_client = self._get_s3_client()
 
-    with tempfile.TemporaryDirectory() as temp_dir:
+    # Use EBS-backed directory instead of /tmp (which is tmpfs/RAM-backed
+    # and too small for compressing multi-GB database files).
+    # LBUG_DATABASE_PATH is /app/data/lbug-dbs (inside container), mounted
+    # from the EBS volume. Parent (/app/data) has the full EBS capacity.
+    ebs_temp_dir = Path(env.LBUG_DATABASE_PATH).parent / "backup-tmp"
+    ebs_temp_dir.mkdir(parents=True, exist_ok=True)
+
+    with tempfile.TemporaryDirectory(dir=ebs_temp_dir) as temp_dir:
       temp_path = Path(temp_dir)
       backup_file = temp_path / f"{graph_id}.tar.gz"
 
