@@ -195,7 +195,7 @@ just demo-user --name "Your Name" --email your@email.com
 just demo-user --force
 ```
 
-**Credentials Location:** `/examples/credentials/config.json`
+**Credentials Location:** `.local/config.json`
 
 **Shared Across Demos:** All demos use the same credentials file, so you only need to run this once.
 

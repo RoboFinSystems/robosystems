@@ -10,7 +10,7 @@ Usage:
     uv run 01_setup_credentials.py --name "John Doe"  # Specify user name
     uv run 01_setup_credentials.py --email custom@example.com
 
-After running, credentials are saved to credentials/config.json
+After running, credentials are saved to .local/config.json
 """
 
 import argparse
@@ -27,8 +27,7 @@ from examples.credentials.utils import (
 )
 
 
-CREDENTIALS_DIR = Path(__file__).resolve().parents[1] / "credentials"
-DEFAULT_CREDENTIALS_FILE = CREDENTIALS_DIR / "config.json"
+DEFAULT_CREDENTIALS_FILE = Path(__file__).resolve().parents[2] / ".local" / "config.json"
 
 
 def main():
@@ -60,7 +59,7 @@ def main():
   parser.add_argument(
     "--credentials-file",
     default=str(DEFAULT_CREDENTIALS_FILE),
-    help="Path to the credentials file to use (default: credentials/config.json)",
+    help="Path to the credentials file to use (default: .local/config.json)",
   )
 
   args = parser.parse_args()

@@ -46,7 +46,7 @@ from examples.credentials.utils import get_graph_id
 DATA_DIR = Path(__file__).parent / "data"
 NODES_DIR = DATA_DIR / "nodes"
 RELATIONSHIPS_DIR = DATA_DIR / "relationships"
-DEFAULT_CREDENTIALS_FILE = Path(__file__).resolve().parents[1] / "credentials" / "config.json"
+DEFAULT_CREDENTIALS_FILE = Path(__file__).resolve().parents[2] / ".local" / "config.json"
 DEMO_NAME = "custom_graph_demo"
 
 # Reasonable defaults for the demo
@@ -402,7 +402,7 @@ def parse_args() -> argparse.Namespace:
   parser.add_argument(
     "--credentials-file",
     default=str(DEFAULT_CREDENTIALS_FILE),
-    help="Path to credentials file (default: credentials/config.json)",
+    help="Path to credentials file (default: .local/config.json)",
   )
   return parser.parse_args()
 

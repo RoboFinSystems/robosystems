@@ -33,7 +33,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from examples.credentials.utils import get_graph_id
 
-CREDENTIALS_FILE = Path(__file__).resolve().parents[1] / "credentials" / "config.json"
+CREDENTIALS_FILE = Path(__file__).resolve().parents[2] / ".local" / "config.json"
 DEMO_NAME = "accounting_demo"
 
 

@@ -42,7 +42,7 @@ from examples.credentials.utils import (
 )
 
 DEMO_DIR = Path(__file__).parent
-CREDENTIALS_FILE = Path(__file__).resolve().parents[1] / "credentials" / "config.json"
+CREDENTIALS_FILE = Path(__file__).resolve().parents[2] / ".local" / "config.json"
 
 
 def run_just_command(command: str):

@@ -2,7 +2,7 @@
 """
 Create or reuse demo user credentials for local development.
 
-This script manages the shared examples/credentials/config.json file used by
+This script manages the shared .local/config.json file used by
 all demo scripts. It creates a new user or reuses existing credentials.
 
 Usage:
@@ -19,7 +19,7 @@ from pathlib import Path
 from robosystems_client.client import AuthenticatedClient
 from utils import ensure_user_credentials, grant_repository_access, CredentialContext
 
-CREDENTIALS_FILE = Path(__file__).parent / "config.json"
+CREDENTIALS_FILE = Path(__file__).resolve().parents[2] / ".local" / "config.json"
 
 
 def main():
