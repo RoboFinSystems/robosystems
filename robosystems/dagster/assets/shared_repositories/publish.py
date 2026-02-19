@@ -20,6 +20,20 @@ from robosystems.config.constants import TASK_TIME_LIMIT
 from robosystems.config.storage.graph import get_shared_repo_database_key
 
 
+def _validate_shared_graph_id(graph_id: str) -> None:
+  """Raise ValueError if graph_id is not a shared repository or subgraph of one."""
+  from robosystems.middleware.graph.utils import MultiTenantUtils
+  from robosystems.middleware.graph.utils.subgraph import parse_subgraph_id
+
+  if MultiTenantUtils.is_shared_repository(graph_id):
+    return
+  subgraph_info = parse_subgraph_id(graph_id)
+  if not subgraph_info or not MultiTenantUtils.is_shared_repository(
+    subgraph_info.parent_graph_id
+  ):
+    raise ValueError(f"{graph_id} is not a shared repository or subgraph of one")
+
+
 def publish_to_s3(
   context: AssetExecutionContext,
   graph_id: str,
@@ -52,17 +66,7 @@ def publish_to_s3(
 
   import boto3
 
-  from robosystems.middleware.graph.utils import MultiTenantUtils
-  from robosystems.middleware.graph.utils.subgraph import parse_subgraph_id
-
-  # Validate graph_id is a shared repository or subgraph of one
-  is_shared = MultiTenantUtils.is_shared_repository(graph_id)
-  if not is_shared:
-    subgraph_info = parse_subgraph_id(graph_id)
-    if not subgraph_info or not MultiTenantUtils.is_shared_repository(
-      subgraph_info.parent_graph_id
-    ):
-      raise ValueError(f"{graph_id} is not a shared repository or subgraph of one")
+  _validate_shared_graph_id(graph_id)
 
   # Build S3 destination
   s3_info = _build_s3_destination(graph_id)
@@ -136,17 +140,7 @@ def publish_duckdb_to_s3(
 
   import boto3
 
-  from robosystems.middleware.graph.utils import MultiTenantUtils
-  from robosystems.middleware.graph.utils.subgraph import parse_subgraph_id
-
-  # Validate graph_id is a shared repository or subgraph of one
-  is_shared = MultiTenantUtils.is_shared_repository(graph_id)
-  if not is_shared:
-    subgraph_info = parse_subgraph_id(graph_id)
-    if not subgraph_info or not MultiTenantUtils.is_shared_repository(
-      subgraph_info.parent_graph_id
-    ):
-      raise ValueError(f"{graph_id} is not a shared repository or subgraph of one")
+  _validate_shared_graph_id(graph_id)
 
   # Build S3 destination (uses .duckdb extension instead of .lbug)
   s3_info = _build_duckdb_s3_destination(graph_id)
