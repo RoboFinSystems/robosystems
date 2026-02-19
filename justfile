@@ -508,7 +508,7 @@ clean-data:
     rm -rf ./data/localstack
     rm -rf ./data/postgres
     rm -rf ./data/valkey
-    rm -f ./examples/credentials/config.json
+    rm -rf ./.local/config.json
 
 reset-local:
     @just teardown

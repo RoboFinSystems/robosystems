@@ -35,9 +35,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from examples.credentials.utils import get_graph_id
 
-DEFAULT_CREDENTIALS_FILE = (
-  Path(__file__).resolve().parents[1] / "credentials" / "config.json"
-)
+DEFAULT_CREDENTIALS_FILE = Path(__file__).resolve().parents[2] / ".local" / "config.json"
 DEMO_NAME = "sec"
 
 
@@ -393,7 +391,7 @@ def parse_args() -> argparse.Namespace:
   parser.add_argument(
     "--credentials-file",
     default=str(DEFAULT_CREDENTIALS_FILE),
-    help="Path to credentials file (default: credentials/config.json)",
+    help="Path to credentials file (default: .local/config.json)",
   )
   return parser.parse_args()
 

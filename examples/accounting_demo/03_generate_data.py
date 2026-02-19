@@ -57,7 +57,7 @@ from examples.credentials.utils import get_graph_id
 DATA_DIR = Path(__file__).parent / "data"
 NODES_DIR = DATA_DIR / "nodes"
 RELATIONSHIPS_DIR = DATA_DIR / "relationships"
-CREDENTIALS_FILE = Path(__file__).resolve().parents[1] / "credentials" / "config.json"
+CREDENTIALS_FILE = Path(__file__).resolve().parents[2] / ".local" / "config.json"
 DEMO_NAME = "accounting_demo"
 
 

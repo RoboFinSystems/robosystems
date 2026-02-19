@@ -34,9 +34,7 @@ if str(PROJECT_ROOT) not in sys.path:
 from examples.credentials.utils import get_graph_id
 
 DEMO_DIR = Path(__file__).parent
-DEFAULT_CREDENTIALS_FILE = (
-  Path(__file__).resolve().parents[1] / "credentials" / "config.json"
-)
+DEFAULT_CREDENTIALS_FILE = Path(__file__).resolve().parents[2] / ".local" / "config.json"
 DATA_DIR = DEMO_DIR / "data"
 NODES_DIR = DATA_DIR / "nodes"
 RELATIONSHIPS_DIR = DATA_DIR / "relationships"
@@ -246,7 +244,7 @@ def main() -> None:
   parser.add_argument(
     "--credentials-file",
     default=str(DEFAULT_CREDENTIALS_FILE),
-    help="Path to credentials file (default: credentials/config.json)",
+    help="Path to credentials file (default: .local/config.json)",
   )
   parser.add_argument(
     "--real-s3",
