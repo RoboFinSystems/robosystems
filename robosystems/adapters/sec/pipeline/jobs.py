@@ -56,6 +56,7 @@ from .materialize import (
   sec_historical_materialized,
 )
 from .process import sec_processed_filings
+from .s3_publish import sec_historical_lbug_s3_published
 from .stage import (
   sec_duckdb_incremental_staged,
   sec_duckdb_staged,
@@ -355,10 +356,11 @@ sec_backup_job = define_asset_job(
 
 
 # ============================================================================
-# Phase 5: DuckDB S3 Publish (Raw .duckdb for Local Dev / Analytics)
+# Phase 5: S3 Publish (DuckDB + Historical LadybugDB)
 # ============================================================================
-# Publishes DuckDB staging databases to S3 as raw .duckdb files.
-# Useful for local development and analytics without running LadybugDB.
+# Primary LadybugDB publish (sec_lbug_s3_published) has no job here - it's
+# triggered by asset lineage from sec_graph_materialized.
+# This section covers: DuckDB publishes + historical LadybugDB (ad-hoc).
 
 sec_duckdb_s3_publish_job = define_asset_job(
   name="sec_duckdb_s3_publish",
@@ -387,6 +389,29 @@ sec_historical_duckdb_s3_publish_job = define_asset_job(
   tags={
     "pipeline": "sec",
     "phase": "duckdb_s3_publish",
+    # Minimal profile: just orchestrating Graph API calls, no local compute
+    "ecs/cpu": "256",
+    "ecs/memory": "512",
+    "ecs/ephemeral_storage": "21",
+    # On-demand to avoid interruptions during large uploads
+    "ecs/run_task_kwargs": {
+      "capacityProviderStrategy": [
+        {"capacityProvider": "FARGATE", "weight": 1, "base": 1},
+      ],
+    },
+  },
+)
+
+
+# Historical LadybugDB publish - run ad-hoc after historical graph rebuild.
+
+sec_historical_lbug_s3_publish_job = define_asset_job(
+  name="sec_historical_lbug_s3_publish",
+  description="Publish SEC historical database to S3 for replica cluster.",
+  selection=AssetSelection.assets(sec_historical_lbug_s3_published),
+  tags={
+    "pipeline": "sec",
+    "phase": "s3_publish",
     # Minimal profile: just orchestrating Graph API calls, no local compute
     "ecs/cpu": "256",
     "ecs/memory": "512",

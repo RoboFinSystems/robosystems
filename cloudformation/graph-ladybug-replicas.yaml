@@ -207,7 +207,7 @@ Rules:
     RuleCondition: !Not [!Equals [!Ref DesiredCapacity, "0"]]
     Assertions:
       - Assert: !Not [!Equals [!Ref SharedDatabaseS3Prefix, ""]]
-        AssertDescription: SharedDatabaseS3Prefix must be provided when DesiredCapacity > 0. Materialize sec_s3_published asset in Dagster first.
+        AssertDescription: SharedDatabaseS3Prefix must be provided when DesiredCapacity > 0. Materialize sec_lbug_s3_published asset in Dagster first.
 
 Conditions:
   HasMinInstances: !Not [!Equals [!Ref MinInstances, 0]]

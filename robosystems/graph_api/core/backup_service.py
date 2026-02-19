@@ -185,6 +185,22 @@ class OnInstanceBackupService:
       kwargs["aws_secret_access_key"] = s3_config.get("aws_secret_access_key")
     return boto3.client("s3", **kwargs)
 
+  @staticmethod
+  def _cleanup_stale_temp_dirs(parent_dir: Path, max_age_hours: int = 24) -> None:
+    """Remove temp directories older than max_age_hours from a previous crash."""
+    import shutil
+    import time
+
+    cutoff = time.time() - (max_age_hours * 3600)
+    for entry in parent_dir.iterdir():
+      if entry.is_dir():
+        try:
+          if entry.stat().st_mtime < cutoff:
+            logger.info(f"Removing stale backup temp dir: {entry}")
+            shutil.rmtree(entry)
+        except OSError:
+          pass
+
   def _upload_replica(
     self,
     db_path: Path,
@@ -263,7 +279,18 @@ class OnInstanceBackupService:
 
     s3_client = self._get_s3_client()
 
-    with tempfile.TemporaryDirectory() as temp_dir:
+    # Use EBS-backed directory instead of /tmp (which is tmpfs/RAM-backed
+    # and too small for compressing multi-GB database files).
+    # LBUG_DATABASE_PATH is /app/data/lbug-dbs (inside container), mounted
+    # from the EBS volume. Parent (/app/data) has the full EBS capacity.
+    ebs_temp_dir = Path(env.LBUG_DATABASE_PATH).parent / "backup-tmp"
+    ebs_temp_dir.mkdir(parents=True, exist_ok=True)
+
+    # Clean up stale temp dirs from crashed backups (TemporaryDirectory
+    # auto-cleans on normal exit but not on process kill/OOM)
+    self._cleanup_stale_temp_dirs(ebs_temp_dir, max_age_hours=24)
+
+    with tempfile.TemporaryDirectory(dir=ebs_temp_dir) as temp_dir:
       temp_path = Path(temp_dir)
       backup_file = temp_path / f"{graph_id}.tar.gz"
 
