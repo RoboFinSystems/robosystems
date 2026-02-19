@@ -69,6 +69,9 @@ from robosystems.dagster.jobs.infrastructure import (
   weekly_health_check_job,
   weekly_health_check_schedule,
 )
+from robosystems.dagster.jobs.invoice_billing import (
+  invoice_subscription_renewal_job,
+)
 from robosystems.dagster.jobs.notifications import (
   send_email_job,
 )
@@ -86,6 +89,9 @@ from robosystems.dagster.sensors.graph_lifecycle import (
 )
 from robosystems.dagster.sensors.graph_queue import (
   graph_creation_queue_sensor,
+)
+from robosystems.dagster.sensors.invoice_billing import (
+  invoice_subscription_renewal_sensor,
 )
 
 # === FORK: Add your adapter pipelines here ===
@@ -132,6 +138,7 @@ all_jobs = [
   # Platform: Billing
   monthly_credit_allocation_job,
   monthly_usage_report_job,
+  invoice_subscription_renewal_job,
   # Platform: Infrastructure
   daily_backup_cleanup_job,
   hourly_auth_cleanup_job,
@@ -177,6 +184,8 @@ all_schedules = [
 ]
 
 all_sensors = [
+  # Platform: Billing
+  invoice_subscription_renewal_sensor,
   # Platform: Graph lifecycle
   graph_creation_queue_sensor,
   expired_graph_subscription_sensor,
