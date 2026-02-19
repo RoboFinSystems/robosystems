@@ -64,10 +64,10 @@ class BackupResponse(BaseModel):
 class DownloadQuota(BaseModel):
   """Download quota information for shared repository backups."""
 
-  limit_per_day: int = Field(..., description="Maximum downloads allowed per day")
-  used_today: int = Field(..., description="Number of downloads used today")
-  remaining: int = Field(..., description="Downloads remaining today")
-  resets_at: datetime = Field(..., description="When the daily limit resets (UTC)")
+  limit_per_month: int = Field(..., description="Maximum downloads allowed per month")
+  used_this_month: int = Field(..., description="Number of downloads used this month")
+  remaining: int = Field(..., description="Downloads remaining this month")
+  resets_at: datetime = Field(..., description="When the monthly limit resets (UTC)")
 
 
 class BackupListResponse(BaseModel):

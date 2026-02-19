@@ -29,7 +29,7 @@ SEC_MANIFEST = SharedRepositoryManifest(
       "agent_calls_per_minute": 2,
       "agent_calls_per_hour": 20,
       "agent_calls_per_day": 200,
-      "downloads_per_day": 3,
+      "downloads_per_month": 0,
     },
     "advanced": {
       "queries_per_minute": 50,
@@ -41,7 +41,7 @@ SEC_MANIFEST = SharedRepositoryManifest(
       "agent_calls_per_minute": 10,
       "agent_calls_per_hour": 100,
       "agent_calls_per_day": 1000,
-      "downloads_per_day": 5,
+      "downloads_per_month": 1,
     },
   },
   plans={

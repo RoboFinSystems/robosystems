@@ -176,8 +176,8 @@ async def list_backups(
           plan=plan,
         )
         download_quota = DownloadQuota(
-          limit_per_day=quota_info["limit_per_day"],
-          used_today=quota_info["used_today"],
+          limit_per_month=quota_info["limit_per_month"],
+          used_this_month=quota_info["used_this_month"],
           remaining=quota_info["remaining"],
           resets_at=quota_info["resets_at"],
         )

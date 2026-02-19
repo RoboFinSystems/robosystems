@@ -102,8 +102,17 @@ async def get_backup_download_url(
           detail="Repository subscription required for backup downloads",
         )
 
-      # Check daily download limit
+      # Check monthly download limit
       plan = user_repo.repository_plan
+      monthly_limit = DownloadRateLimiter._get_monthly_limit(graph_id, plan)
+
+      # Limit of 0 means downloads are not available on this plan
+      if monthly_limit == 0:
+        raise HTTPException(
+          status_code=status.HTTP_403_FORBIDDEN,
+          detail="Backup downloads are not available on your current plan. Please upgrade to Pro.",
+        )
+
       allowed, remaining, resets_at = await DownloadRateLimiter.check_download_limit(
         user_id=str(current_user.id),
         repository=graph_id,
@@ -113,11 +122,9 @@ async def get_backup_download_url(
       if not allowed:
         raise HTTPException(
           status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-          detail=f"Daily download limit exceeded. Limit resets at {resets_at.isoformat()}.",
+          detail=f"Monthly download limit exceeded. Limit resets at {resets_at.isoformat()}.",
           headers={
-            "X-RateLimit-Limit": str(
-              DownloadRateLimiter._get_daily_limit(graph_id, plan)
-            ),
+            "X-RateLimit-Limit": str(monthly_limit),
             "X-RateLimit-Remaining": "0",
             "X-RateLimit-Reset": resets_at.isoformat(),
           },
