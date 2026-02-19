@@ -27,6 +27,7 @@ class BillingEventType(str, Enum):
   SUBSCRIPTION_RESUMED = "subscription_resumed"
   SUBSCRIPTION_CANCELED = "subscription_canceled"
   SUBSCRIPTION_EXPIRED = "subscription_expired"
+  SUBSCRIPTION_RENEWED = "subscription_renewed"
 
   PLAN_UPGRADED = "plan_upgraded"
   PLAN_DOWNGRADED = "plan_downgraded"

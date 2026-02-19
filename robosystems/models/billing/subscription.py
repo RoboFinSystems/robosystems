@@ -316,6 +316,22 @@ class BillingSubscription(Base):
 
     logger.info(f"Updated Stripe subscription for {self.id}")
 
+  def renew_period(self, session: Session) -> None:
+    """Advance to the next billing period.
+
+    Shifts current_period_start to the old current_period_end and extends
+    current_period_end by 30 days. Used by the invoice billing renewal job.
+    """
+    now = datetime.now(UTC)
+    self.current_period_start = self.current_period_end
+    self.current_period_end = self.current_period_end + timedelta(days=30)
+    self.updated_at = now
+
+    session.commit()
+    session.refresh(self)
+
+    logger.info(f"Renewed subscription {self.id} period to {self.current_period_end}")
+
   def is_active(self) -> bool:
     """Check if subscription is currently active."""
     return self.status == SubscriptionStatus.ACTIVE.value
