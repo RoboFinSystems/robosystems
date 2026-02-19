@@ -24,9 +24,7 @@ from pathlib import Path
 
 
 DEMO_DIR = Path(__file__).parent
-DEFAULT_CREDENTIALS_FILE = (
-  Path(__file__).resolve().parents[1] / "credentials" / "config.json"
-)
+DEFAULT_CREDENTIALS_FILE = Path(__file__).resolve().parents[2] / ".local" / "config.json"
 
 
 def run_script(script_name: str, args: list[str] | None = None):

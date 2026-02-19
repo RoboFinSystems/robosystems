@@ -10,7 +10,7 @@ Usage:
     uv run 02_create_graph.py --name "Acme Consulting"
     uv run 02_create_graph.py --reuse                   # Reuse existing graph
 
-After running, graph_id is saved to credentials/config.json
+After running, graph_id is saved to .local/config.json
 """
 
 import argparse
@@ -32,8 +32,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from examples.credentials.utils import get_graph_id, save_graph_id
 
-CREDENTIALS_DIR = Path(__file__).resolve().parents[1] / "credentials"
-DEFAULT_CREDENTIALS_FILE = CREDENTIALS_DIR / "config.json"
+DEFAULT_CREDENTIALS_FILE = Path(__file__).resolve().parents[2] / ".local" / "config.json"
 DEMO_NAME = "accounting_demo"
 
 
@@ -150,7 +149,7 @@ def main():
   parser.add_argument(
     "--credentials-file",
     default=str(DEFAULT_CREDENTIALS_FILE),
-    help="Path to credentials file (default: credentials/config.json)",
+    help="Path to credentials file (default: .local/config.json)",
   )
 
   args = parser.parse_args()

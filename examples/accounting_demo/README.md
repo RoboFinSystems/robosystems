@@ -50,7 +50,7 @@ cd examples/accounting_demo
 uv run 01_setup_credentials.py --name "Your Name" --email your@email.com
 ```
 
-**Output**: User created, API key generated, credentials saved to `examples/credentials/config.json`
+**Output**: User created, API key generated, credentials saved to `.local/config.json`
 
 ### Step 2-5: Run All Remaining Steps
 
@@ -267,7 +267,7 @@ just demo-accounting "new-graph"
 ## Tips
 
 - The `just demo-accounting` command handles all setup automatically
-- Credentials are saved in `examples/credentials/config.json` and reused across all demos
+- Credentials are saved in `.local/config.json` and reused across all demos
 - Generated data files are saved in `examples/accounting_demo/data/` for inspection
 - Use `just graph-query <graph_id> "<cypher>"` for ad-hoc queries
 - Check `just logs robosystems-api` if you encounter issues

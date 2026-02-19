@@ -139,6 +139,6 @@ robosystems/adapters/sec/arelle/EDGAR/
 # Arelle schema cache - downloaded during build
 robosystems/adapters/sec/arelle/cache/
 
-# Example credentials (local development)
-examples/credentials/config.json
+# Local credentials (local development)
+.local/config.json
 examples/data/
