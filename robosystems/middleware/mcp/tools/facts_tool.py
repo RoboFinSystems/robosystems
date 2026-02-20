@@ -259,10 +259,10 @@ class FactsTool(BaseTool):
             "name": "⭐ CONSOLIDATED Revenue (Recommended)",
             "query": """MATCH (f:Fact {has_dimensions: false})-[:FACT_HAS_ELEMENT]->(e:Element {qname: 'us-gaap:Revenues'}), (f)-[:FACT_HAS_PERIOD]->(p:Period)
 WHERE f.numeric_value IS NOT NULL
-  AND p.period_type = 'annual'
-RETURN p.end_date, p.period_type, f.numeric_value as revenue
+  AND p.duration_type = 'annual'
+RETURN p.end_date, p.duration_type, f.numeric_value as revenue
 ORDER BY p.end_date DESC LIMIT 10""",
-            "explanation": "Total revenue WITHOUT segment breakdowns. Uses single MATCH with comma-separated patterns for performance. period_type: instant/quarterly/semi_annual/nine_months/annual/other",
+            "explanation": "Total revenue WITHOUT segment breakdowns. Uses single MATCH with comma-separated patterns for performance. Filter by duration_type: quarterly/semi_annual/nine_months/annual/other",
           },
           {
             "name": "Revenue BY Segment (Dimensional)",
@@ -296,10 +296,10 @@ RETURN sum(f.numeric_value) as total, count(f) as fact_count""",
             {
               "name": "Time Series for Element (Annual)",
               "query": f"""MATCH (f:Fact {{has_dimensions: false}})-[:FACT_HAS_ELEMENT]->(e:Element {{qname: '{element_filter}'}}), (f)-[:FACT_HAS_PERIOD]->(p:Period)
-WHERE f.numeric_value IS NOT NULL AND p.period_type = 'annual'
+WHERE f.numeric_value IS NOT NULL AND p.duration_type = 'annual'
 RETURN p.end_date as period, sum(f.numeric_value) as value
 ORDER BY p.end_date""",
-              "explanation": "Time series with comma-separated patterns. period_type: instant/quarterly/semi_annual/nine_months/annual/other",
+              "explanation": "Time series with comma-separated patterns. Filter by duration_type: quarterly/semi_annual/nine_months/annual/other",
             },
             {
               "name": "All Aspects for a Fact",
@@ -308,7 +308,7 @@ OPTIONAL MATCH (f)-[:FACT_HAS_PERIOD]->(p:Period)
 OPTIONAL MATCH (f)-[:FACT_HAS_DIMENSION]->(d:Dimension)
 OPTIONAL MATCH (f)-[:FACT_HAS_UNIT]->(u:Unit)
 WHERE f.numeric_value IS NOT NULL
-RETURN f.numeric_value, p.end_date, p.period_type, d.axis_uri, d.member_uri, u.value
+RETURN f.numeric_value, p.end_date, p.period_type, p.duration_type, d.axis_uri, d.member_uri, u.value
 LIMIT 10""",
               "explanation": "Complete fact context. Note: OPTIONAL MATCH is safe for optional relationships.",
             },
@@ -320,7 +320,8 @@ LIMIT 10""",
         [
           "⚠️ ALWAYS use has_dimensions=false for consolidated totals (avoids segment duplicates)",
           "⚠️ Use comma-separated patterns in single MATCH (not multiple MATCH clauses) for performance",
-          "📅 Period.period_type values: instant, quarterly, semi_annual, nine_months, annual, other",
+          "📅 Period.period_type values: instant, duration, forever",
+          "📅 Period.duration_type values (when period_type='duration'): quarterly, semi_annual, nine_months, annual, other",
           "📅 Element.period_type is different - uses XBRL semantics (instant/duration)",
           "Start with single elements before complex dimensional queries",
           "Use IS NOT NULL filters for numeric analysis",

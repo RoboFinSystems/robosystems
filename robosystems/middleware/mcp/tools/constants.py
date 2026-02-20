@@ -11,14 +11,23 @@ in a SINGLE MATCH clause (not multiple MATCH clauses):
 
 # Period type documentation shared across multiple tools
 PERIOD_TYPE_GUIDANCE = """**📅 PERIOD.period_type VALUES:**
-Period nodes use calendar-based classification (NOT XBRL duration/instant):
+Period nodes classify time context into three types:
 - `instant` - Point-in-time (balance sheet dates)
+- `duration` - A date range (income statement periods) — use `duration_type` for subtype
+- `forever` - Unbounded period (rare)
+
+**📅 PERIOD.duration_type VALUES** (only when period_type = 'duration'):
 - `quarterly` - ~3 months duration
 - `semi_annual` - ~6 months duration
 - `nine_months` - ~9 months duration
 - `annual` - ~12 months duration
 - `other` - Non-standard durations
 Note: Element.period_type uses XBRL semantics (instant/duration) - different property!"""
+
+# Numeric value documentation
+NUMERIC_VALUE_GUIDANCE = """**🔢 NUMERIC VALUE:**
+`Fact.numeric_value` stores the actual reported value (no scaling applied).
+The `decimals` attribute indicates precision/rounding, not a multiplier."""
 
 # Dimensional facts warning for facts-related tools
 DIMENSIONAL_FACTS_WARNING = """**⚠️ CRITICAL - Dimensional Facts:**

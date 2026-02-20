@@ -672,17 +672,13 @@ class XBRLGraphProcessor:
       # Return early to avoid creating duplicate relationships
       return
 
-    # Compute numeric value for easier analysis (Claude Opus recommendation)
+    # Compute numeric value for easier analysis
+    # Store the actual reported value (no decimals scaling) — Arelle already provides
+    # the real number. The `decimals` attribute indicates precision, not a multiplier.
     numeric_value = None
     if xfact.unit is not None and xfact.value is not None:
       try:
-        # Convert string value to float and apply decimal scaling
-        raw_value = float(str(xfact.value))
-        if xfact.decimals is not None:
-          # XBRL decimals are powers of 10 (e.g., -6 means divide by 1,000,000)
-          numeric_value = raw_value * (10 ** int(xfact.decimals))
-        else:
-          numeric_value = raw_value
+        numeric_value = float(str(xfact.value))
       except (ValueError, TypeError):
         # If conversion fails, leave numeric_value as None
         pass
@@ -1245,6 +1241,7 @@ class XBRLGraphProcessor:
           "calendar_quarter": calendar_quarter,
           "days_in_period": 0,  # 0 for instant (point-in-time)
           "period_type": "instant",
+          "duration_type": None,  # Not applicable for instant periods
           "calendar_period_key": instant_date,  # For instants, just the date
         }
         new_period_df = pd.DataFrame([period_data])
@@ -1277,22 +1274,22 @@ class XBRLGraphProcessor:
         calendar_year = end_dt.year
         days_in_period = (end_dt - start_dt).days + 1
 
-        # Determine period type based on duration
+        # Determine duration subtype based on day count
         is_quarterly = 80 <= days_in_period <= 100  # ~3 months
         is_semi_annual = 170 <= days_in_period <= 190  # ~6 months (YTD)
         is_nine_months = 260 <= days_in_period <= 280  # ~9 months (YTD)
         is_annual = 350 <= days_in_period <= 380  # ~1 year
 
         if is_quarterly:
-          period_type = "quarterly"
+          duration_type = "quarterly"
         elif is_semi_annual:
-          period_type = "semi_annual"
+          duration_type = "semi_annual"
         elif is_nine_months:
-          period_type = "nine_months"
+          duration_type = "nine_months"
         elif is_annual:
-          period_type = "annual"
+          duration_type = "annual"
         else:
-          period_type = "other"
+          duration_type = "other"
 
         # Determine calendar quarter based on end date and period type
         # Note: This is calendar quarter, NOT entity fiscal quarter
@@ -1333,7 +1330,8 @@ class XBRLGraphProcessor:
           "calendar_year": calendar_year,
           "calendar_quarter": calendar_quarter,
           "days_in_period": days_in_period,
-          "period_type": period_type,
+          "period_type": "duration",
+          "duration_type": duration_type,
           "calendar_period_key": calendar_period_key,
         }
         new_period_df = pd.DataFrame([period_data])
@@ -1361,6 +1359,7 @@ class XBRLGraphProcessor:
           "calendar_quarter": None,
           "days_in_period": None,
           "period_type": "forever",
+          "duration_type": None,  # Not applicable for forever periods
           "calendar_period_key": "forever",
         }
         new_period_df = pd.DataFrame([period_data])
@@ -1387,7 +1386,8 @@ class XBRLGraphProcessor:
           "calendar_year": None,
           "calendar_quarter": None,
           "days_in_period": None,
-          "period_type": "unknown",
+          "period_type": "duration",
+          "duration_type": "other",
           "calendar_period_key": "unknown",
         }
         new_period_df = pd.DataFrame([period_data])

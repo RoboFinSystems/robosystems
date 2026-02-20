@@ -121,7 +121,7 @@ List of example queries with explanations, tailored to the actual schema present
               "description": "⭐ CONSOLIDATED Revenue (use has_dimensions=false!)",
               "query": """MATCH (f:Fact {has_dimensions: false})-[:FACT_HAS_ELEMENT]->(e:Element {qname: 'us-gaap:Revenues'}), (f)-[:FACT_HAS_PERIOD]->(p:Period)
 WHERE f.numeric_value IS NOT NULL
-RETURN p.end_date, p.period_type, f.numeric_value as revenue
+RETURN p.end_date, p.duration_type, f.numeric_value as revenue
 ORDER BY p.end_date DESC LIMIT 10""",
               "explanation": "⚠️ CRITICAL: has_dimensions=false filters out segment breakdowns. Use comma-separated patterns in single MATCH for performance.",
             },
@@ -140,10 +140,10 @@ LIMIT 10""",
               "description": "Get facts for a specific period (annual only)",
               "query": """MATCH (f:Fact {has_dimensions: false})-[:FACT_HAS_PERIOD]->(p:Period)
 WHERE p.end_date >= '2024-01-01'
-  AND p.period_type = 'annual'
-RETURN f.identifier, f.numeric_value, p.end_date, p.period_type
+  AND p.duration_type = 'annual'
+RETURN f.identifier, f.numeric_value, p.end_date, p.duration_type
 LIMIT 10""",
-              "explanation": "Period.period_type values: instant, quarterly, semi_annual, nine_months, annual, other",
+              "explanation": "Period.period_type: instant/duration/forever. Period.duration_type: quarterly/semi_annual/nine_months/annual/other",
             },
             {
               "category": "financial",
