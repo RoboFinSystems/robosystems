@@ -270,15 +270,19 @@ async def materialize_table(
         f"Materialized {rows_ingested} rows from {table_name} in {execution_time_ms / 1000:.1f}s"
       )
 
-      # Checkpoint and release LadybugDB memory after each table
+      # Checkpoint, build vector indexes, and release LadybugDB memory
       # This prevents memory accumulation during multi-table materialization
       try:
-        # Checkpoint to flush data to disk
         with ladybug_service.db_manager.connection_pool.get_connection(
           graph_id
         ) as conn:
+          # Checkpoint to flush data to disk
           conn.execute("CHECKPOINT")
           logger.debug(f"Checkpointed LadybugDB after {table_name} materialization")
+
+          # Build HNSW vector index for tables with embedding columns
+          # Must happen AFTER data is loaded (indexes on empty tables are empty)
+          ladybug_service.db_manager.create_vector_index(conn, table_name)
 
         # Release buffer pool memory - data is safe on disk now
         ladybug_service.db_manager.connection_pool.force_database_cleanup(

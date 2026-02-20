@@ -13,6 +13,7 @@ from robosystems.adapters.sec.config import (
   XBRL_COLUMN_STANDARDIZATION,
   XBRL_EXTERNALIZATION_THRESHOLD,
   XBRL_EXTERNALIZE_LARGE_VALUES,
+  XBRL_SEMANTIC_ENRICHMENT,
   XBRL_SKIP_TEXTBLOCK_FACTS,
   XBRL_STANDARDIZED_FILENAMES,
   XBRL_TYPE_PREFIXES,
@@ -97,6 +98,10 @@ class XBRLGraphProcessor:
     self.enable_standardized_filenames = XBRL_STANDARDIZED_FILENAMES
     self.enable_type_prefixes = XBRL_TYPE_PREFIXES
     self.enable_column_standardization = XBRL_COLUMN_STANDARDIZATION
+
+    # Semantic enrichment (lazy enricher — model loaded on first use)
+    self.enable_semantic_enrichment = XBRL_SEMANTIC_ENRICHMENT
+    self._enricher = None
 
     if (
       self.enable_standardized_filenames
@@ -221,6 +226,10 @@ class XBRLGraphProcessor:
       logger.info("Processing facts")
       self.make_facts()
 
+      if self.enable_semantic_enrichment:
+        logger.info("Computing semantic enrichments")
+        self.enrich_dataframes()
+
       logger.info("Outputting parquet files")
       self.output_parquet_files()
       logger.info("XBRL processing completed successfully")
@@ -257,6 +266,176 @@ class XBRLGraphProcessor:
   def output_parquet_files(self):
     """Output all DataFrames to parquet files organized in nodes/ and relationships/ subdirectories."""
     self.parquet_writer.write_all_dataframes(self.schema_to_dataframe_mapping, self)
+
+  def enrich_dataframes(self):
+    """Batch enrichment of Element, Label, and Structure DataFrames with embeddings and canonical concepts."""
+    from robosystems.adapters.sec.enrichment import (
+      SemanticEnricher,
+      camel_case_to_words,
+      classify_structure_heuristic,
+      compose_element_text,
+      compose_structure_text,
+      parse_structure_definition,
+    )
+
+    if self._enricher is None:
+      self._enricher = SemanticEnricher()
+
+    enricher = self._enricher
+
+    # ----- Elements --------------------------------------------------------
+    if hasattr(self, "elements_df") and not self.elements_df.empty:
+      logger.info(f"Enriching {len(self.elements_df)} elements")
+
+      # Column order must match schema: canonical_concept, canonical_confidence, embedding
+      # LadybugDB COPY FROM uses positional matching, not column names
+      for col in ("canonical_concept", "canonical_confidence", "embedding"):
+        if col not in self.elements_df.columns:
+          self.elements_df[col] = None
+
+      # Parse names and compose texts
+      texts = []
+      for _, row in self.elements_df.iterrows():
+        parsed_name = camel_case_to_words(row.get("name", "") or "")
+        text = compose_element_text(
+          parsed_name,
+          {
+            "balance": row.get("balance"),
+            "period_type": row.get("period_type"),
+            "classification": row.get("classification"),
+          },
+        )
+        texts.append(text)
+
+      # Batch embed
+      embeddings = enricher.embed_batch(texts)
+
+      # Match canonical for each element
+      canonical_concepts = []
+      canonical_confidences = []
+      for i, row in self.elements_df.iterrows():
+        concept_id, confidence = enricher.match_canonical(
+          embeddings[len(canonical_concepts)],
+          {
+            "qname": row.get("qname", ""),
+            "period_type": row.get("period_type", ""),
+            "balance": row.get("balance", ""),
+          },
+        )
+        canonical_concepts.append(concept_id)
+        canonical_confidences.append(confidence if concept_id else None)
+
+      self.elements_df["embedding"] = embeddings
+      self.elements_df["canonical_concept"] = canonical_concepts
+      self.elements_df["canonical_confidence"] = canonical_confidences
+
+      matched = sum(1 for c in canonical_concepts if c is not None)
+      logger.info(
+        f"Element enrichment complete: {matched}/{len(self.elements_df)} matched to canonical concepts"
+      )
+
+    # ----- Labels ----------------------------------------------------------
+    if hasattr(self, "labels_df") and not self.labels_df.empty:
+      # Only embed English labels
+      en_mask = self.labels_df["language"].fillna("").str.startswith("en")
+      en_labels = self.labels_df[en_mask]
+      logger.info(
+        f"Enriching {len(en_labels)} English labels (of {len(self.labels_df)} total)"
+      )
+
+      if "embedding" not in self.labels_df.columns:
+        self.labels_df["embedding"] = None
+
+      if not en_labels.empty:
+        label_texts = en_labels["value"].fillna("").tolist()
+        label_embeddings = enricher.embed_batch(label_texts)
+
+        # Write embeddings only for English labels — use pd.Series with matching index
+        # to avoid pandas interpreting list-of-lists as a 2D array
+        self.labels_df.loc[en_mask, "embedding"] = pd.Series(
+          label_embeddings, index=self.labels_df.index[en_mask]
+        )
+
+      logger.info("Label enrichment complete")
+
+    # ----- Structures ------------------------------------------------------
+    if hasattr(self, "structures_df") and not self.structures_df.empty:
+      logger.info(f"Enriching {len(self.structures_df)} structures")
+
+      # Column order must match schema: canonical_type, canonical_confidence, embedding
+      # LadybugDB COPY FROM uses positional matching, not column names
+      for col in ("canonical_type", "canonical_confidence", "embedding"):
+        if col not in self.structures_df.columns:
+          self.structures_df[col] = None
+
+      # Re-parse definitions to fix potentially empty names
+      texts = []
+      parsed_names = []
+      for _, row in self.structures_df.iterrows():
+        _, _, parsed_name = parse_structure_definition(row.get("definition", ""))
+        parsed_names.append(parsed_name)
+        text = compose_structure_text(parsed_name, row.get("definition", ""))
+        texts.append(text)
+
+      # Fix names that were empty from the old parser
+      for idx, name in enumerate(parsed_names):
+        if name and not self.structures_df.iloc[idx].get("name"):
+          self.structures_df.iloc[idx, self.structures_df.columns.get_loc("name")] = (
+            name
+          )
+
+      # Batch embed
+      non_empty_mask = [bool(t.strip()) for t in texts]
+      non_empty_texts = [t for t, m in zip(texts, non_empty_mask, strict=True) if m]
+
+      if non_empty_texts:
+        struct_embeddings = enricher.embed_batch(non_empty_texts)
+        emb_iter = iter(struct_embeddings)
+        all_embeddings = []
+        for m in non_empty_mask:
+          if m:
+            all_embeddings.append(next(emb_iter))
+          else:
+            all_embeddings.append(None)
+      else:
+        all_embeddings = [None] * len(texts)
+
+      # Classify structures (heuristic first, then embedding fallback)
+      # Only Statement types are classified; Disclosures are skipped entirely
+      canonical_types = []
+      canonical_confidences = []
+      for idx, row in self.structures_df.iterrows():
+        name = parsed_names[len(canonical_types)]
+        definition = row.get("definition", "")
+        structure_type = row.get("type")
+        heuristic_type, heuristic_conf = classify_structure_heuristic(
+          name, definition, structure_type=structure_type
+        )
+        if heuristic_type:
+          canonical_types.append(heuristic_type)
+          canonical_confidences.append(heuristic_conf)
+        elif structure_type != "Statement":
+          # Skip embedding fallback for non-Statement types (Disclosures, etc.)
+          canonical_types.append(None)
+          canonical_confidences.append(None)
+        elif all_embeddings[len(canonical_types)] is not None:
+          emb_type, emb_conf = enricher.match_structure_canonical(
+            all_embeddings[len(canonical_types)]
+          )
+          canonical_types.append(emb_type)
+          canonical_confidences.append(emb_conf if emb_type else None)
+        else:
+          canonical_types.append(None)
+          canonical_confidences.append(None)
+
+      self.structures_df["embedding"] = all_embeddings
+      self.structures_df["canonical_type"] = canonical_types
+      self.structures_df["canonical_confidence"] = canonical_confidences
+
+      classified = sum(1 for c in canonical_types if c is not None)
+      logger.info(
+        f"Structure enrichment complete: {classified}/{len(self.structures_df)} classified"
+      )
 
   def make_entity(self):
     """Create the main entity (formerly entity) for this graph."""
@@ -1500,19 +1679,11 @@ class XBRLGraphProcessor:
         definition = (
           role.definition if hasattr(role, "definition") and role.definition else ""
         )
-        def_split = definition.split("-") if definition else []
-        if self.sec_report is not None and len(def_split) >= 2:
-          network_number = def_split[0].strip()
-          network_type = def_split[1].strip()
-          network_name = (
-            definition.split(def_split[1] + "-")[1].strip()
-            if definition and def_split[1] + "-" in definition
-            else None
-          )
-        else:
-          network_number = None
-          network_type = None
-          network_name = None
+        from robosystems.adapters.sec.enrichment import parse_structure_definition
+
+        network_number, network_type, network_name = parse_structure_definition(
+          definition
+        )
 
         structure_data = {
           "identifier": structure_id,  # Put identifier first since it's the primary key

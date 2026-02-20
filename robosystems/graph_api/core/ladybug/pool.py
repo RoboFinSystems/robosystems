@@ -292,6 +292,21 @@ class LadybugConnectionPool:
           f"compression: enabled, auto_checkpoint: enabled, threshold: {checkpoint_threshold // (1024 * 1024)}MB"
         )
 
+        # Load vector extension for HNSW indexes and QUERY_VECTOR_INDEX
+        # Must happen once per Database object (persists across connections)
+        # Pre-installed in Docker image; INSTALL is fallback for local dev
+        try:
+          init_conn = lbug.Connection(self._databases[database_name])
+          try:
+            init_conn.execute("LOAD EXTENSION vector")
+          except Exception:
+            init_conn.execute("INSTALL vector")
+            init_conn.execute("LOAD EXTENSION vector")
+          del init_conn
+          logger.info(f"Vector extension loaded for {database_name}")
+        except Exception as vec_err:
+          logger.debug(f"Vector extension not available for {database_name}: {vec_err}")
+
       db = self._databases[database_name]
 
       # Create connection from shared Database object

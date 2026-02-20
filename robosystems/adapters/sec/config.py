@@ -73,6 +73,9 @@ XBRL_STANDARDIZED_FILENAMES = False
 XBRL_TYPE_PREFIXES = False
 XBRL_COLUMN_STANDARDIZATION = False
 
+# Semantic enrichment: embedding-based canonical concept matching
+XBRL_SEMANTIC_ENRICHMENT = True
+
 # =============================================================================
 # SEC PIPELINE CONFIGURATION
 # =============================================================================

@@ -136,6 +136,23 @@ RUN python robosystems/scripts/arelle_cache_manager.py extract && \
     python robosystems/scripts/arelle_cache_manager.py fetch-edgar
 RUN uv sync --frozen --no-dev
 
+# Pre-cache fastembed model (BAAI/bge-small-en-v1.5) for XBRL semantic enrichment
+# Downloads ~130MB model weights at build time so containers start without network dependency
+ENV FASTEMBED_CACHE_PATH=/app/fastembed_cache
+RUN .venv/bin/python -c "from fastembed import TextEmbedding; TextEmbedding('BAAI/bge-small-en-v1.5')"
+
+# Pre-install LadybugDB vector extension at build time
+# Uses the Python package to download the version-matched extension binary
+# This avoids ABI incompatibility from the extension repo's pre-built binaries
+RUN .venv/bin/python -c "\
+import real_ladybug as lbug, os; \
+db = lbug.Database('/tmp/vec_install.lbug'); \
+conn = lbug.Connection(db); \
+conn.execute('INSTALL vector'); \
+del conn; del db; \
+os.remove('/tmp/vec_install.lbug')" && \
+    echo "Vector extension installed at build time"
+
 # Stage 2: Runtime
 # Using Python 3.13 slim (Debian Trixie/13) for GLIBC 2.38+ required by LadybugDB extensions
 FROM python:3.13-slim
@@ -151,7 +168,8 @@ ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PATH="/build/.venv/bin:$PATH" \
     ARELLE_CACHE_DIR="/app/robosystems/adapters/sec/arelle/cache" \
-    DAGSTER_HOME="/app/dagster_home"
+    DAGSTER_HOME="/app/dagster_home" \
+    FASTEMBED_CACHE_PATH="/app/fastembed_cache"
 
 # Install runtime dependencies and uv
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -208,6 +226,10 @@ RUN mkdir -p /home/appuser/.lbug/extension/${LADYBUG_INTERNAL_VERSION}/linux_${T
 # Give appuser write access to /app for log files
 RUN chown -R appuser:appuser /app
 
+# Copy pre-cached fastembed model from builder (avoids runtime download from Hugging Face)
+COPY --from=builder --chown=appuser:appuser \
+    /app/fastembed_cache /app/fastembed_cache
+
 # Copy LadybugDB extensions to user home directory
 # LadybugDB expects extensions at ~/.lbug/extension/{VERSION}/{PLATFORM}/{EXTENSION_NAME}/
 COPY --from=builder --chown=appuser:appuser \
@@ -217,6 +239,12 @@ COPY --from=builder --chown=appuser:appuser \
 COPY --from=builder --chown=appuser:appuser \
     /ladybug-extension/${LADYBUG_INTERNAL_VERSION}/linux_${TARGETARCH}/duckdb \
     /home/appuser/.lbug/extension/${LADYBUG_INTERNAL_VERSION}/linux_${TARGETARCH}/duckdb
+
+# Vector extension is installed at build time via real_ladybug (INSTALL vector)
+# This ensures ABI compatibility with the Python package version
+COPY --from=builder --chown=appuser:appuser \
+    /root/.lbug/extension/${LADYBUG_INTERNAL_VERSION}/linux_${TARGETARCH}/vector \
+    /home/appuser/.lbug/extension/${LADYBUG_INTERNAL_VERSION}/linux_${TARGETARCH}/vector
 
 # Copy libduckdb.so to the common extension directory where LadybugDB looks for it
 # This is required by the DuckDB extension to actually load DuckDB functionality
