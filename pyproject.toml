@@ -61,6 +61,8 @@ dependencies = [
     # Data Processing & Analytics
     "arelle-release~=2.38.1",
     "icebug>=12.0,<13.0",
+    "fastembed>=0.4.0,<1.0",
+    "numpy>=1.26.0,<3.0",
     "pandas>=2.3.0,<3.0",
     "pyarrow>=20.0.0",
 

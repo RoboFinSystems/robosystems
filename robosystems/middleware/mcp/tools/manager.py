@@ -78,6 +78,16 @@ class GraphMCPTools:
       self.add_node_table_tool = AddNodeTableTool(graph_client)
       self.add_relationship_table_tool = AddRelationshipTableTool(graph_client)
 
+    # Conditionally initialize semantic enrichment tools
+    self.resolve_element_tool = None
+    self.resolve_structure_tool = None
+    if self._should_include_semantic_tools():
+      from .resolve_element_tool import ResolveElementTool
+      from .resolve_structure_tool import ResolveStructureTool
+
+      self.resolve_element_tool = ResolveElementTool(graph_client)
+      self.resolve_structure_tool = ResolveStructureTool(graph_client)
+
     # Conditionally initialize fact grid tool based on feature flag
     self.build_fact_grid_tool = None
     if env.FACT_GRID_ENABLED:
@@ -90,6 +100,35 @@ class GraphMCPTools:
     self._cache_misses = 0
 
     logger.info("Initialized Graph MCP tools with query validator enabled")
+
+  def _should_include_semantic_tools(self) -> bool:
+    """Check if semantic enrichment tools should be included.
+
+    Returns true if the manifest declares has_semantic_enrichment=True.
+    """
+    try:
+      from robosystems.config.shared_repositories import get_manifest
+
+      manifest = get_manifest(self.client.graph_id)
+      if manifest and manifest.has_semantic_enrichment:
+        return True
+    except Exception as exc:
+      graph_id = getattr(self.client, "graph_id", "unknown")
+      logger.debug(f"Semantic enrichment check failed for {graph_id}: {exc}")
+    return False
+
+  def _get_semantic_tool_definitions(self) -> list[dict[str, Any]]:
+    """Get semantic enrichment tool definitions.
+
+    Returns:
+        List of tool definitions (empty if semantic enrichment not enabled)
+    """
+    if self.resolve_element_tool is None:
+      return []
+    return [
+      self.resolve_element_tool.get_tool_definition(),
+      self.resolve_structure_tool.get_tool_definition(),
+    ]
 
   def _should_include_element_discovery(self) -> bool:
     """
@@ -174,6 +213,9 @@ class GraphMCPTools:
         ]
       )
 
+    # Add semantic enrichment tools (resolve-element, resolve-structure)
+    tools.extend(self._get_semantic_tool_definitions())
+
     # Add workspace management tools
     # Note: switch-workspace is client-side only, others execute server-side
     tools.extend(self._get_workspace_tool_definitions())
@@ -246,6 +288,25 @@ class GraphMCPTools:
 
       elif name == "discover-facts":
         result = await self.facts_tool.execute(arguments)
+        return result if return_raw else json.dumps(result, indent=2)
+
+      # Semantic enrichment tools
+      elif name == "resolve-element":
+        if self.resolve_element_tool is None:
+          raise ValueError(
+            "resolve-element tool is not available. "
+            "This graph does not have semantic enrichment enabled."
+          )
+        result = await self.resolve_element_tool.execute(arguments)
+        return result if return_raw else json.dumps(result, indent=2)
+
+      elif name == "resolve-structure":
+        if self.resolve_structure_tool is None:
+          raise ValueError(
+            "resolve-structure tool is not available. "
+            "This graph does not have semantic enrichment enabled."
+          )
+        result = await self.resolve_structure_tool.execute(arguments)
         return result if return_raw else json.dumps(result, indent=2)
 
       # Workspace management tools

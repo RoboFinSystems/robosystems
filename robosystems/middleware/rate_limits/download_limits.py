@@ -1,11 +1,11 @@
 """
 Download rate limiting for shared repository backup downloads.
 
-This module implements daily download limits for shared repository backups.
-Uses Valkey DB 1 (RATE_LIMITS) with daily TTL expiration.
+This module implements monthly download limits for shared repository backups.
+Uses Valkey DB 1 (RATE_LIMITS) with monthly TTL expiration.
 """
 
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from typing import Any
 
 from robosystems.config.shared_repositories import (
@@ -22,7 +22,7 @@ class DownloadRateLimiter:
   """Rate limiter for shared repository backup downloads."""
 
   # Default limit if not configured
-  DEFAULT_DOWNLOADS_PER_DAY = 3
+  DEFAULT_DOWNLOADS_PER_MONTH = 1
 
   @classmethod
   def _get_redis_client(cls) -> Any:
@@ -32,28 +32,31 @@ class DownloadRateLimiter:
   @classmethod
   def _get_key(cls, user_id: str, repository: str) -> str:
     """Build the Redis key for download tracking."""
-    today = datetime.now(UTC).strftime("%Y%m%d")
-    return f"download_limit:{repository}:{user_id}:{today}"
+    month = datetime.now(UTC).strftime("%Y%m")
+    return f"download_limit:{repository}:{user_id}:{month}"
 
   @classmethod
-  def _get_daily_limit(cls, repository: str, plan: str) -> int:
-    """Get the daily download limit for a repository and plan."""
+  def _get_monthly_limit(cls, repository: str, plan: str) -> int:
+    """Get the monthly download limit for a repository and plan."""
     try:
       limits = _get_rate_limits(repository, plan)
       if limits:
-        return limits.get("downloads_per_day", cls.DEFAULT_DOWNLOADS_PER_DAY)
+        return limits.get("downloads_per_month", cls.DEFAULT_DOWNLOADS_PER_MONTH)
     except (ValueError, KeyError) as e:
       logger.warning(
         f"Failed to get download limit for repository={repository}, plan={plan}: {e}"
       )
-    return cls.DEFAULT_DOWNLOADS_PER_DAY
+    return cls.DEFAULT_DOWNLOADS_PER_MONTH
 
   @classmethod
   def _get_reset_time(cls) -> datetime:
-    """Get the time when the daily limit resets (midnight UTC)."""
+    """Get the time when the monthly limit resets (first of next month, midnight UTC)."""
     now = datetime.now(UTC)
-    tomorrow = now.date() + timedelta(days=1)
-    return datetime.combine(tomorrow, datetime.min.time(), tzinfo=UTC)
+    if now.month == 12:
+      next_month = datetime(now.year + 1, 1, 1, tzinfo=UTC)
+    else:
+      next_month = datetime(now.year, now.month + 1, 1, tzinfo=UTC)
+    return next_month
 
   @classmethod
   async def check_download_limit(
@@ -63,7 +66,7 @@ class DownloadRateLimiter:
     plan: str,
   ) -> tuple[bool, int, datetime]:
     """
-    Check if user has remaining downloads for the day.
+    Check if user has remaining downloads for the month.
 
     Args:
         user_id: User ID
@@ -73,10 +76,10 @@ class DownloadRateLimiter:
     Returns:
         Tuple of (allowed, remaining, resets_at)
         - allowed: True if download is permitted
-        - remaining: Number of downloads remaining today
-        - resets_at: When the limit resets (midnight UTC)
+        - remaining: Number of downloads remaining this month
+        - resets_at: When the limit resets (first of next month, UTC)
     """
-    daily_limit = cls._get_daily_limit(repository, plan)
+    monthly_limit = cls._get_monthly_limit(repository, plan)
     reset_at = cls._get_reset_time()
 
     redis_client = None
@@ -85,12 +88,12 @@ class DownloadRateLimiter:
       key = cls._get_key(user_id, repository)
       current = await redis_client.get(key)
       used = int(current) if current else 0
-      remaining = max(0, daily_limit - used)
-      allowed = used < daily_limit
+      remaining = max(0, monthly_limit - used)
+      allowed = used < monthly_limit
 
       logger.debug(
         f"Download limit check for user {user_id} on {repository}: "
-        f"used={used}, limit={daily_limit}, remaining={remaining}"
+        f"used={used}, limit={monthly_limit}, remaining={remaining}"
       )
 
       return allowed, remaining, reset_at
@@ -112,17 +115,17 @@ class DownloadRateLimiter:
         repository: Repository ID (e.g., "sec")
 
     Returns:
-        New download count for today
+        New download count for this month
     """
     redis_client = None
     try:
       redis_client = cls._get_redis_client()
       key = cls._get_key(user_id, repository)
 
-      # Increment and set TTL to expire at midnight UTC
+      # Increment and set TTL to expire at start of next month
       count = await redis_client.incr(key)
 
-      # Set expiry to end of day if this is the first increment
+      # Set expiry to end of month if this is the first increment
       if count == 1:
         reset_at = cls._get_reset_time()
         ttl_seconds = int((reset_at - datetime.now(UTC)).total_seconds())
@@ -154,12 +157,12 @@ class DownloadRateLimiter:
 
     Returns:
         Dict with quota information:
-        - limit_per_day: Daily download limit
-        - used_today: Downloads used today
-        - remaining: Downloads remaining today
+        - limit_per_month: Monthly download limit
+        - used_this_month: Downloads used this month
+        - remaining: Downloads remaining this month
         - resets_at: ISO timestamp when limit resets
     """
-    daily_limit = cls._get_daily_limit(repository, plan)
+    monthly_limit = cls._get_monthly_limit(repository, plan)
     reset_at = cls._get_reset_time()
 
     redis_client = None
@@ -168,11 +171,11 @@ class DownloadRateLimiter:
       key = cls._get_key(user_id, repository)
       current = await redis_client.get(key)
       used = int(current) if current else 0
-      remaining = max(0, daily_limit - used)
+      remaining = max(0, monthly_limit - used)
 
       return {
-        "limit_per_day": daily_limit,
-        "used_today": used,
+        "limit_per_month": monthly_limit,
+        "used_this_month": used,
         "remaining": remaining,
         "resets_at": reset_at.isoformat(),
       }

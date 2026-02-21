@@ -338,7 +338,7 @@ class TestBackupEndpoints:
 
     # Verify DownloadQuota model structure
     quota_fields = DownloadQuota.model_fields
-    assert "limit_per_day" in quota_fields
-    assert "used_today" in quota_fields
+    assert "limit_per_month" in quota_fields
+    assert "used_this_month" in quota_fields
     assert "remaining" in quota_fields
     assert "resets_at" in quota_fields

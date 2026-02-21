@@ -116,6 +116,7 @@ def processor(temp_dir, mock_schema_config):
           "start_date",
           "end_date",
           "period_type",
+          "duration_type",
           "calendar_year",
           "calendar_quarter",
           "days_in_period",
@@ -175,7 +176,7 @@ class TestMakeFact:
   """Test fact processing logic."""
 
   def test_make_fact_numeric_with_decimals(self, processor):
-    """Test processing numeric fact with decimal scaling."""
+    """Test processing numeric fact stores actual value (no decimals scaling)."""
     with (
       patch.object(processor, "make_units"),
       patch.object(processor, "make_period"),
@@ -185,7 +186,7 @@ class TestMakeFact:
       xfact = MagicMock()
       xfact.md5sum.value = "abc123"
       xfact.value = "1000000"
-      xfact.decimals = "-6"  # Millions
+      xfact.decimals = "-6"  # Precision indicator, not a multiplier
       xfact.unit = MagicMock()
       xfact.context = MagicMock()
 
@@ -195,7 +196,7 @@ class TestMakeFact:
       fact = processor.facts_df.iloc[0]
 
       assert fact["value"] == "1000000"
-      assert fact["numeric_value"] == 1.0  # 1000000 * 10^-6 = 1.0
+      assert fact["numeric_value"] == 1000000.0  # Actual reported value, no scaling
       assert fact["fact_type"] == "Numeric"
       assert fact["decimals"] == "-6"
 
@@ -511,6 +512,7 @@ class TestMakePeriod:
     assert period["end_date"] == "2023-12-30"
     assert period["start_date"] is None
     assert period["period_type"] == "instant"
+    assert period["duration_type"] is None
     assert period["calendar_year"] == 2023
     assert period["calendar_quarter"] == "Q4"
     assert period["days_in_period"] == 0
@@ -553,7 +555,8 @@ class TestMakePeriod:
 
     assert period["start_date"] == "2023-07-01"
     assert period["end_date"] == "2023-09-30"
-    assert period["period_type"] == "quarterly"
+    assert period["period_type"] == "duration"
+    assert period["duration_type"] == "quarterly"
     assert period["calendar_quarter"] == "Q3"
     assert period["days_in_period"] == 92
     assert period["calendar_period_key"] == "2023Q3"
@@ -576,7 +579,8 @@ class TestMakePeriod:
     assert len(processor.periods_df) == 1
     period = processor.periods_df.iloc[0]
 
-    assert period["period_type"] == "annual"
+    assert period["period_type"] == "duration"
+    assert period["duration_type"] == "annual"
     assert period["calendar_year"] == 2023
     assert period["calendar_quarter"] == "FY"
     assert period["days_in_period"] == 365  # 2024-01-01 - 2023-01-01 = 365 days
@@ -600,7 +604,8 @@ class TestMakePeriod:
     assert len(processor.periods_df) == 1
     period = processor.periods_df.iloc[0]
 
-    assert period["period_type"] == "nine_months"
+    assert period["period_type"] == "duration"
+    assert period["duration_type"] == "nine_months"
     assert period["days_in_period"] == 273
     assert period["calendar_period_key"] == "2023M9"
 

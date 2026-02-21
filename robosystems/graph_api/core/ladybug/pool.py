@@ -292,6 +292,21 @@ class LadybugConnectionPool:
           f"compression: enabled, auto_checkpoint: enabled, threshold: {checkpoint_threshold // (1024 * 1024)}MB"
         )
 
+        # Load vector extension for HNSW indexes and QUERY_VECTOR_INDEX
+        # Must happen once per Database object (persists across connections)
+        # Pre-installed in Docker image; INSTALL is fallback for local dev
+        try:
+          init_conn = lbug.Connection(self._databases[database_name])
+          try:
+            init_conn.execute("LOAD EXTENSION vector")
+          except Exception:
+            init_conn.execute("INSTALL vector")
+            init_conn.execute("LOAD EXTENSION vector")
+          del init_conn
+          logger.info(f"Vector extension loaded for {database_name}")
+        except Exception as vec_err:
+          logger.debug(f"Vector extension not available for {database_name}: {vec_err}")
+
       db = self._databases[database_name]
 
       # Create connection from shared Database object
@@ -533,7 +548,7 @@ class LadybugConnectionPool:
         aggressive: If True, use more aggressive memory cleanup techniques
     """
     with self._global_lock:
-      logger.info(
+      logger.debug(
         f"Forcing cleanup for database: {database_name} (aggressive={aggressive})"
       )
 
@@ -545,7 +560,7 @@ class LadybugConnectionPool:
 
         # Clear the pool for this database
         del self._pools[database_name]
-        logger.info(f"Closed all connections for database: {database_name}")
+        logger.debug(f"Closed all connections for database: {database_name}")
 
       # Remove the Database object to force buffer pool release
       # This will cause it to be recreated with fresh memory on next access
@@ -572,7 +587,7 @@ class LadybugConnectionPool:
 
         # Remove the database object from cache
         del self._databases[database_name]
-        logger.info(f"Removed cached Database object for: {database_name}")
+        logger.debug(f"Removed cached Database object for: {database_name}")
 
         if aggressive:
           # Aggressive memory cleanup for large operations
@@ -594,7 +609,7 @@ class LadybugConnectionPool:
               libc = ctypes.CDLL("libc.so.6")
               # malloc_trim returns 1 on success, 0 on failure
               if libc.malloc_trim(0) == 1:
-                logger.info("Successfully trimmed memory back to OS")
+                logger.debug("Successfully trimmed memory back to OS")
             except Exception as e:
               logger.debug(f"Could not trim memory (not Linux?): {e}")
 
@@ -604,7 +619,7 @@ class LadybugConnectionPool:
 
             process = psutil.Process()
             mem_info = process.memory_info()
-            logger.info(
+            logger.debug(
               f"Memory after cleanup - RSS: {mem_info.rss / (1024 * 1024):.1f}MB, "
               f"VMS: {mem_info.vms / (1024 * 1024):.1f}MB"
             )
@@ -615,7 +630,9 @@ class LadybugConnectionPool:
           import gc
 
           gc.collect()
-          logger.info(f"Triggered garbage collection after cleanup of: {database_name}")
+          logger.debug(
+            f"Triggered garbage collection after cleanup of: {database_name}"
+          )
 
   def get_stats(self) -> dict[str, Any]:
     """Get connection pool statistics."""
@@ -660,7 +677,7 @@ class LadybugConnectionPool:
             logger.warning(f"Error closing database {database_name}: {e}")
           del self._databases[database_name]
 
-        logger.info(f"Closed all connections for database {database_name}")
+        logger.debug(f"Closed all connections for database {database_name}")
 
   def has_active_connections(self, database_name: str) -> bool:
     """Check if there are any active connections for a database."""

@@ -198,6 +198,18 @@ class LadybugDatabaseManager:
         f"compression: enabled, auto_checkpoint: enabled, threshold: {checkpoint_threshold // (1024 * 1024)}MB"
       )
 
+      # Load vector extension for FLOAT[N] columns and HNSW indexes
+      # Pre-installed in Docker image; INSTALL is fallback for local dev
+      try:
+        try:
+          conn.execute("LOAD EXTENSION vector")
+        except Exception:
+          conn.execute("INSTALL vector")
+          conn.execute("LOAD EXTENSION vector")
+        logger.info("Vector extension loaded successfully")
+      except Exception as vec_err:
+        logger.warning(f"Could not load vector extension: {vec_err}")
+
       # Apply schema based on type (subgraphs inherit schema from parent via fork operation)
       if request.is_subgraph:
         logger.info(
@@ -209,6 +221,9 @@ class LadybugDatabaseManager:
         schema_applied = self._apply_schema(
           conn, request.schema_type, request.repository_name, request.custom_schema_ddl
         )
+
+      # Vector indexes are created post-materialization (not here on empty tables).
+      # See materialize_table endpoint which calls create_vector_index() after COPY.
 
       # Close temporary connections (pool will manage connections going forward)
       conn.close()
@@ -662,7 +677,47 @@ class LadybugDatabaseManager:
       "BLOB": "BLOB",
     }
 
-    return type_mapping.get(schema_type.upper(), "STRING")
+    mapped = type_mapping.get(schema_type.upper())
+    if mapped:
+      return mapped
+    # Pass through parameterized types like FLOAT[384]
+    if "[" in schema_type:
+      return schema_type
+    return "STRING"
+
+  def create_vector_index(
+    self, conn: lbug.Connection, table_name: str, column: str = "embedding"
+  ) -> bool:
+    """Create HNSW vector index on a table's embedding column after materialization.
+
+    Uses LadybugDB's vector extension CALL syntax (not DuckDB's CREATE HNSW INDEX).
+    Must be called AFTER data is loaded — indexes on empty tables are empty.
+
+    Works for any table with an embedding column (SEC Element/Label/Structure,
+    custom schema Product, etc.). Tables without the column fail silently.
+
+    Returns True if index was created or already exists.
+    """
+    index_name = f"{table_name.lower()}_vec_index"
+
+    try:
+      try:
+        conn.execute("LOAD EXTENSION vector")
+      except Exception:
+        conn.execute("INSTALL vector")
+        conn.execute("LOAD EXTENSION vector")
+      conn.execute(
+        f"CALL CREATE_VECTOR_INDEX('{table_name}', '{index_name}', '{column}')"
+      )
+      logger.info(f"Created vector index {index_name} on {table_name}.{column}")
+      return True
+    except Exception as e:
+      if "already exists" in str(e).lower():
+        logger.debug(f"Vector index {index_name} already exists on {table_name}")
+        return True
+      # Tables without embedding column, empty tables, etc. — expected for most tables
+      logger.debug(f"No vector index created for {table_name}: {e}")
+      return False
 
   def _apply_custom_schema(self, conn: lbug.Connection, custom_ddl: str | None) -> bool:
     """Apply custom schema DDL to database."""

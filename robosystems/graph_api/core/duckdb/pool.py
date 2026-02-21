@@ -620,7 +620,7 @@ class DuckDBConnectionPool:
         for conn_id in list(pool.keys()):
           self._close_connection(graph_id, conn_id)
 
-        logger.info(f"Closed all DuckDB connections for {graph_id}")
+        logger.debug(f"Closed all DuckDB connections for {graph_id}")
 
   def interrupt_connections(self, graph_id: str) -> int:
     """
