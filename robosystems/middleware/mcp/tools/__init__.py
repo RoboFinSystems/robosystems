@@ -16,7 +16,6 @@ from .data_tools import (
 )
 from .elements_tool import ElementsTool
 from .example_queries_tool import ExampleQueriesTool
-from .facts_tool import FactsTool
 from .manager import GraphMCPTools
 from .memory import AddNodeTableTool, AddRelationshipTableTool, WriteCypherTool
 from .properties_tool import PropertiesTool
@@ -39,7 +38,6 @@ __all__ = [
   "DeleteWorkspaceTool",
   "ElementsTool",
   "ExampleQueriesTool",
-  "FactsTool",
   "GraphMCPTools",
   "IngestFileTool",
   "ListWorkspacesTool",
