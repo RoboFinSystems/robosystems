@@ -23,8 +23,3 @@ Period nodes classify time context into three types:
 - `annual` - ~12 months duration
 - `other` - Non-standard durations
 Note: Element.period_type uses XBRL semantics (instant/duration) - different property!"""
-
-# Numeric value documentation
-NUMERIC_VALUE_GUIDANCE = """**🔢 NUMERIC VALUE:**
-`Fact.numeric_value` stores the actual reported value (no scaling applied).
-The `decimals` attribute indicates precision/rounding, not a multiplier."""
