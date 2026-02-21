@@ -16,10 +16,11 @@ from .data_tools import (
 )
 from .elements_tool import ElementsTool
 from .example_queries_tool import ExampleQueriesTool
-from .facts_tool import FactsTool
 from .manager import GraphMCPTools
 from .memory import AddNodeTableTool, AddRelationshipTableTool, WriteCypherTool
 from .properties_tool import PropertiesTool
+from .resolve_element_tool import ResolveElementTool
+from .resolve_structure_tool import ResolveStructureTool
 from .schema_tool import SchemaTool
 from .structure_tool import StructureTool
 from .workspace import (
@@ -39,7 +40,6 @@ __all__ = [
   "DeleteWorkspaceTool",
   "ElementsTool",
   "ExampleQueriesTool",
-  "FactsTool",
   "GraphMCPTools",
   "IngestFileTool",
   "ListWorkspacesTool",
@@ -47,6 +47,8 @@ __all__ = [
   "MaterializeGraphTool",
   "PropertiesTool",
   "QueryStagingTool",
+  "ResolveElementTool",
+  "ResolveStructureTool",
   "SchemaTool",
   "StructureTool",
   "SwitchWorkspaceTool",
