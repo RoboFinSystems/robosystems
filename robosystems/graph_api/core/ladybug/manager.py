@@ -685,22 +685,20 @@ class LadybugDatabaseManager:
       return schema_type
     return "STRING"
 
-  def create_vector_index(self, conn: lbug.Connection, table_name: str) -> bool:
+  def create_vector_index(
+    self, conn: lbug.Connection, table_name: str, column: str = "embedding"
+  ) -> bool:
     """Create HNSW vector index on a table's embedding column after materialization.
 
     Uses LadybugDB's vector extension CALL syntax (not DuckDB's CREATE HNSW INDEX).
     Must be called AFTER data is loaded — indexes on empty tables are empty.
 
+    Works for any table with an embedding column (SEC Element/Label/Structure,
+    custom schema Product, etc.). Tables without the column fail silently.
+
     Returns True if index was created or already exists.
     """
-    index_map = {
-      "Element": "element_vec_index",
-      "Label": "label_vec_index",
-      "Structure": "structure_vec_index",
-    }
-    index_name = index_map.get(table_name)
-    if not index_name:
-      return False
+    index_name = f"{table_name.lower()}_vec_index"
 
     try:
       try:
@@ -709,15 +707,16 @@ class LadybugDatabaseManager:
         conn.execute("INSTALL vector")
         conn.execute("LOAD EXTENSION vector")
       conn.execute(
-        f"CALL CREATE_VECTOR_INDEX('{table_name}', '{index_name}', 'embedding')"
+        f"CALL CREATE_VECTOR_INDEX('{table_name}', '{index_name}', '{column}')"
       )
-      logger.info(f"Created vector index {index_name} on {table_name}.embedding")
+      logger.info(f"Created vector index {index_name} on {table_name}.{column}")
       return True
     except Exception as e:
       if "already exists" in str(e).lower():
         logger.debug(f"Vector index {index_name} already exists on {table_name}")
         return True
-      logger.warning(f"Could not create vector index {index_name}: {e}")
+      # Tables without embedding column, empty tables, etc. — expected for most tables
+      logger.debug(f"No vector index created for {table_name}: {e}")
       return False
 
   def _apply_custom_schema(self, conn: lbug.Connection, custom_ddl: str | None) -> bool:

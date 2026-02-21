@@ -823,7 +823,20 @@ class AccountingDataGenerator:
 
   def _write_parquet(self, df, output_file, table_name):
     """Write DataFrame to Parquet file."""
-    table = pa.Table.from_pandas(df)
+    # Override type inference for columns that are all-None but need specific
+    # array types. Without this, PyArrow infers null type → DuckDB reads as
+    # INT32 → LadybugDB can't cast INT32 to FLOAT[384].
+    schema = pa.Schema.from_pandas(df)
+    overrides = []
+    for i, field in enumerate(schema):
+      if field.name == "embedding" and field.type == pa.null():
+        overrides.append(i)
+    if overrides:
+      fields = list(schema)
+      for i in overrides:
+        fields[i] = pa.field(fields[i].name, pa.list_(pa.float32(), 384))
+      schema = pa.schema(fields)
+    table = pa.Table.from_pandas(df, schema=schema)
     pq.write_table(table, output_file)
     file_size = output_file.stat().st_size
     print(f"✅ {table_name}: {len(df)} rows, {file_size:,} bytes → {output_file.name}")
