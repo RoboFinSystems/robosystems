@@ -13,6 +13,91 @@ from robosystems.graph_api.models.tables import (
 )
 from robosystems.logger import logger
 
+# Type mapping from LadybugDB types to DuckDB-compatible cast types
+_LBUG_TO_DUCK_TYPE = {
+  "STRING": "VARCHAR",
+  "INT64": "BIGINT",
+  "INT32": "INT",
+  "DOUBLE": "DOUBLE",
+  "BOOL": "BOOLEAN",
+  "DATE": "DATE",
+  "TIMESTAMP": "TIMESTAMP",
+}
+
+
+def _lbug_type_to_duck(lbug_type: str) -> str:
+  """Map a LadybugDB column type to a DuckDB-compatible type for casting."""
+  mapped = _LBUG_TO_DUCK_TYPE.get(lbug_type.upper())
+  if mapped:
+    return mapped
+  # Pass through parameterized types like FLOAT[384] — DuckDB supports them natively
+  if "[" in lbug_type:
+    return lbug_type
+  return "VARCHAR"
+
+
+def _get_target_columns(
+  ladybug_service, graph_id: str, table_name: str
+) -> list[tuple[str, str]] | None:
+  """Get column names and types from the LadybugDB target table.
+
+  Returns list of (name, lbug_type) tuples, or None if unavailable.
+  """
+  try:
+    with ladybug_service.db_manager.connection_pool.get_connection(graph_id) as conn:
+      result = conn.execute(f"CALL TABLE_INFO('{table_name}') RETURN *")
+      rows = result.get_as_list() if hasattr(result, "get_as_list") else list(result)
+      columns = []
+      for row in rows:
+        # TABLE_INFO returns: [index, name, type, default, isPrimaryKey]
+        if isinstance(row, (list, tuple)) and len(row) >= 3:
+          columns.append((row[1], row[2]))
+        elif isinstance(row, dict):
+          values = next(iter(row.values())) if len(row) == 1 else row
+          if isinstance(values, (list, tuple)) and len(values) >= 3:
+            columns.append((values[1], values[2]))
+      return columns if columns else None
+  except Exception as exc:
+    logger.debug(f"Could not get target columns for {table_name}: {exc}")
+    return None
+
+
+def _build_reconciled_select(
+  target_columns: list[tuple[str, str]],
+  source_column_names: list[str],
+  source_table: str,
+  exclude_file_id: bool,
+) -> str:
+  """Build a SELECT expression that reconciles source columns to target schema.
+
+  Adds missing columns as NULL with correct type. Casts existing columns
+  to the target type (handles DuckDB inferring NULL columns as INT32).
+
+  For relationship tables, `from` and `to` are implicit in LadybugDB's
+  TABLE_INFO but must be included in the DuckDB source. They are passed
+  through first if present.
+  """
+  parts = []
+  source_set = set(source_column_names)
+  target_name_set = {c[0] for c in target_columns}
+
+  # Pass through relationship key columns first — TABLE_INFO omits them for
+  # rel tables but COPY requires them. DuckDB uses src/dst (from/to are reserved).
+  for implicit_col in ("from", "to", "src", "dst"):
+    if implicit_col in source_set and implicit_col not in target_name_set:
+      parts.append(f'"{implicit_col}"')
+
+  for col_name, lbug_type in target_columns:
+    if col_name == "file_id" and exclude_file_id:
+      continue
+    duck_type = _lbug_type_to_duck(lbug_type)
+    if col_name in source_set:
+      parts.append(f"TRY_CAST({col_name} AS {duck_type}) AS {col_name}")
+    else:
+      parts.append(f"NULL::{duck_type} AS {col_name}")
+  return ", ".join(parts)
+
+
 # Constants for checkpoint retry logic
 CHECKPOINT_MAX_RETRIES = 3
 CHECKPOINT_RETRY_DELAY_SECONDS = 1
@@ -34,7 +119,7 @@ def checkpoint_with_retry(conn, graph_id: str, context: str = "DuckDB") -> None:
   for attempt in range(CHECKPOINT_MAX_RETRIES):
     try:
       conn.execute("CHECKPOINT")
-      logger.info(f"[OK] {context} checkpointed successfully for {graph_id}")
+      logger.debug(f"[OK] {context} checkpointed successfully for {graph_id}")
       return
     except Exception as e:
       if attempt == CHECKPOINT_MAX_RETRIES - 1:
@@ -78,13 +163,19 @@ async def materialize_table(
 
     # CRITICAL: Checkpoint DuckDB to flush WAL to main database BEFORE LadybugDB attaches
     # LadybugDB's DuckDB extension creates a new session that won't see uncommitted WAL data
-    logger.info(
+    logger.debug(
       f"Checkpointing DuckDB database before LadybugDB materialization: {duck_path}"
     )
     from robosystems.graph_api.core.duckdb import get_duckdb_pool
 
     duckdb_pool = get_duckdb_pool()
     temp_table_name = f"{table_name}_temp_materialization"
+
+    # Get target table schema from LadybugDB for column reconciliation
+    # This handles schema evolution: parquet files missing new columns or
+    # having mistyped NULL columns (e.g., DuckDB infers all-NULL as INT32
+    # but target expects FLOAT[384])
+    target_columns = _get_target_columns(ladybug_service, graph_id, table_name)
 
     # Check if table exists, create temp copy without file_id
     try:
@@ -121,13 +212,24 @@ async def materialize_table(
         column_names = [col[0] for col in columns_result]
         has_file_id = "file_id" in column_names
 
-        # Optimization: Skip temp table when not needed (no file_id, no batching, no file filter)
-        # This enables direct COPY from source table, avoiding expensive temp table creation
+        # Check if column reconciliation is needed (missing or extra columns)
+        # Exclude from/to (implicit in rel tables) and file_id from comparison
+        needs_reconciliation = False
+        _ignore_cols = {"file_id", "from", "to", "src", "dst"}
+        if target_columns:
+          target_names = {c[0] for c in target_columns} - _ignore_cols
+          source_names = set(column_names) - _ignore_cols
+          needs_reconciliation = target_names != source_names
+
+        # Optimization: Skip temp table when not needed (no file_id, no batching, no filter, no reconciliation)
         has_hash_batching = (
           request.num_batches is not None and request.batch_num is not None
         )
         can_skip_temp_table = (
-          not has_file_id and not has_hash_batching and not request.file_ids
+          not has_file_id
+          and not has_hash_batching
+          and not request.file_ids
+          and not needs_reconciliation
         )
 
         if can_skip_temp_table:
@@ -135,19 +237,15 @@ async def materialize_table(
           logger.info(f"Using direct COPY for {table_name} (no temp table needed)")
           temp_table_created = False
         else:
-          # Build WHERE/LIMIT clause for batched materialization
+          # Build WHERE clause for batched materialization
           batch_clause = ""
 
           if has_hash_batching:
-            # Hash-based batching: deterministic partitioning without sorting
-            # Each row goes to exactly one batch based on hash(key) % num_batches
-            # This is O(n) per batch vs O(n log n) for ORDER BY + LIMIT/OFFSET
             assert request.batch_num is not None and request.num_batches is not None
 
             if "identifier" in column_names:
               hash_col = "identifier"
             elif "src" in column_names and "dst" in column_names:
-              # For relationships, hash on concatenated src+dst
               hash_col = "src || '|' || dst"
             else:
               hash_col = column_names[0] if column_names else "rowid"
@@ -157,42 +255,54 @@ async def materialize_table(
               f"Using hash-based batching for {table_name}: batch {request.batch_num + 1}/{request.num_batches}"
             )
 
-          # Create physical copy of table without file_id column (if it exists)
-          if request.file_ids:
+          # Build file filter clause
+          file_filter = ""
+          if request.file_ids and has_file_id:
             file_ids_str = ", ".join([f"'{fid}'" for fid in request.file_ids])
-            if has_file_id:
-              duck_conn.execute(
-                f"CREATE TABLE {temp_table_name} AS "
-                f"SELECT * EXCLUDE (file_id) FROM {table_name} "
-                f"WHERE file_id IN ({file_ids_str}){batch_clause}"
-              )
-            else:
-              duck_conn.execute(
-                f"CREATE TABLE {temp_table_name} AS SELECT * FROM {table_name}{batch_clause}"
-              )
+            file_filter = f"file_id IN ({file_ids_str})"
+
+          # Build WHERE clause combining file filter and batch clause
+          where = ""
+          if file_filter and batch_clause:
+            where = f" WHERE {file_filter} AND ({batch_clause.replace(' WHERE ', '')})"
+          elif file_filter:
+            where = f" WHERE {file_filter}"
+          elif batch_clause:
+            where = batch_clause
+
+          # Build SELECT expression: reconciled columns or SELECT *
+          if needs_reconciliation and target_columns:
+            select_expr = _build_reconciled_select(
+              target_columns, column_names, table_name, exclude_file_id=has_file_id
+            )
+            logger.debug(
+              f"Reconciling columns for {table_name} "
+              f"(source: {len(column_names)}, target: {len(target_columns)})"
+            )
+          elif has_file_id:
+            select_expr = "* EXCLUDE (file_id)"
+          else:
+            select_expr = "*"
+
+          duck_conn.execute(
+            f"CREATE TABLE {temp_table_name} AS "
+            f"SELECT {select_expr} FROM {table_name}{where}"
+          )
+
+          if request.file_ids:
             logger.info(
               f"Created temp DuckDB table {temp_table_name} with {len(request.file_ids)} file(s)"
             )
+          elif has_hash_batching:
+            assert request.batch_num is not None and request.num_batches is not None
+            logger.info(
+              f"Created temp DuckDB table {temp_table_name} for hash-based materialization "
+              f"(batch {request.batch_num + 1}/{request.num_batches})"
+            )
           else:
-            if has_file_id:
-              duck_conn.execute(
-                f"CREATE TABLE {temp_table_name} AS "
-                f"SELECT * EXCLUDE (file_id) FROM {table_name}{batch_clause}"
-              )
-            else:
-              duck_conn.execute(
-                f"CREATE TABLE {temp_table_name} AS SELECT * FROM {table_name}{batch_clause}"
-              )
-            if has_hash_batching:
-              assert request.batch_num is not None and request.num_batches is not None
-              logger.info(
-                f"Created temp DuckDB table {temp_table_name} for hash-based materialization "
-                f"(batch {request.batch_num + 1}/{request.num_batches})"
-              )
-            else:
-              logger.info(
-                f"Created temp DuckDB table {temp_table_name} for full materialization"
-              )
+            logger.debug(
+              f"Created temp DuckDB table {temp_table_name} for full materialization"
+            )
           temp_table_created = True
 
     except Exception as err:
@@ -206,7 +316,7 @@ async def materialize_table(
         try:
           conn.execute("INSTALL duckdb")
           conn.execute("LOAD duckdb")
-          logger.info("Loaded DuckDB extension")
+          logger.debug("Loaded DuckDB extension")
         except Exception as e:
           if "already loaded" not in str(e).lower():
             logger.warning(f"Failed to load DuckDB extension: {e}")
@@ -220,20 +330,17 @@ async def materialize_table(
 
         # Attach DuckDB database
         conn.execute(f"ATTACH '{duck_path}' AS duck (DBTYPE duckdb)")
-        logger.info(f"Attached DuckDB database: {duck_path}")
+        logger.debug(f"Attached DuckDB database: {duck_path}")
 
         # Determine source table for COPY (temp table or direct source)
         source_table = table_name if not temp_table_created else temp_table_name
 
         if request.file_ids:
           logger.info(
-            f"Executing selective materialization from DuckDB to graph: {table_name} "
-            f"({len(request.file_ids)} file(s))"
+            f"COPY {table_name} → {graph_id} ({len(request.file_ids)} file(s))"
           )
         else:
-          logger.info(
-            f"Executing full materialization from DuckDB to graph: {table_name}"
-          )
+          logger.info(f"COPY {table_name} → {graph_id}")
 
         if request.ignore_errors:
           copy_query = (
@@ -247,7 +354,7 @@ async def materialize_table(
         # can take 2-3 minutes with millions of rows
         try:
           conn.execute("CALL timeout=3600000")  # 60 minutes
-          logger.info(f"Executing: {copy_query}")
+          logger.debug(f"Executing: {copy_query}")
           result = conn.execute(copy_query)
         finally:
           # Always reset timeout to default after COPY
@@ -270,21 +377,25 @@ async def materialize_table(
         f"Materialized {rows_ingested} rows from {table_name} in {execution_time_ms / 1000:.1f}s"
       )
 
-      # Checkpoint and release LadybugDB memory after each table
+      # Checkpoint, build vector indexes, and release LadybugDB memory
       # This prevents memory accumulation during multi-table materialization
       try:
-        # Checkpoint to flush data to disk
         with ladybug_service.db_manager.connection_pool.get_connection(
           graph_id
         ) as conn:
+          # Checkpoint to flush data to disk
           conn.execute("CHECKPOINT")
           logger.debug(f"Checkpointed LadybugDB after {table_name} materialization")
+
+          # Build HNSW vector index for tables with embedding columns
+          # Must happen AFTER data is loaded (indexes on empty tables are empty)
+          ladybug_service.db_manager.create_vector_index(conn, table_name)
 
         # Release buffer pool memory - data is safe on disk now
         ladybug_service.db_manager.connection_pool.force_database_cleanup(
           graph_id, aggressive=True
         )
-        logger.info(f"Released LadybugDB memory after {table_name} materialization")
+        logger.debug(f"Released LadybugDB memory after {table_name} materialization")
       except Exception as cleanup_err:
         # Log but don't fail - materialization succeeded
         logger.warning(f"Could not release LadybugDB memory: {cleanup_err}")
@@ -311,7 +422,7 @@ async def materialize_table(
         try:
           with duckdb_pool.get_connection(graph_id) as duck_conn:
             duck_conn.execute(f"DROP TABLE IF EXISTS {temp_table_name}")
-            logger.info(f"Cleaned up temp DuckDB table: {temp_table_name}")
+            logger.debug(f"Cleaned up temp DuckDB table: {temp_table_name}")
         except Exception as drop_err:
           logger.warning(f"Failed to drop temp table {temp_table_name}: {drop_err}")
 
@@ -459,7 +570,7 @@ async def fork_from_parent_duckdb(
         try:
           conn.execute("INSTALL duckdb")
           conn.execute("LOAD duckdb")
-          logger.info("Loaded DuckDB extension")
+          logger.debug("Loaded DuckDB extension")
         except Exception as e:
           if "already loaded" not in str(e).lower():
             logger.warning(f"Failed to load DuckDB extension: {e}")

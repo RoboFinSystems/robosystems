@@ -18,6 +18,7 @@ SEC_MANIFEST = SharedRepositoryManifest(
   sync_frequency="daily",
   schema_extensions=("roboledger",),
   has_element_discovery=True,
+  has_semantic_enrichment=True,
   rate_limits={
     "starter": {
       "queries_per_minute": 10,

@@ -248,9 +248,10 @@ class CustomSchemaParser:
     if "type" not in prop_def:
       raise ValueError(f"Property '{prop_def['name']}' must have a 'type' field")
 
-    # Validate type
+    # Validate type — extract base type for parameterized types like FLOAT[384]
     prop_type = prop_def["type"].upper()
-    if prop_type not in self.VALID_TYPES:
+    base_type = prop_type.split("[")[0] if "[" in prop_type else prop_type
+    if base_type not in self.VALID_TYPES:
       raise ValueError(
         f"Invalid type '{prop_type}' for property '{prop_def['name']}'. Valid types: {self.VALID_TYPES}"
       )

@@ -1,0 +1,127 @@
+"""
+Cash flow statement and per-share canonical concepts.
+"""
+
+from .concepts import CanonicalConcept
+
+CASH_FLOW_CONCEPTS = (
+  CanonicalConcept(
+    id="operating_cash_flow",
+    display_name="Operating Cash Flow",
+    category="cash_flow",
+    description="Net cash from operating activities",
+    aliases=("cash from operations", "cfo"),
+    expected_elements=("us-gaap:NetCashProvidedByUsedInOperatingActivities",),
+    period_type="duration",
+    balance="debit",
+  ),
+  CanonicalConcept(
+    id="capital_expenditures",
+    display_name="Capital Expenditures",
+    category="cash_flow",
+    description="Cash spent on property, plant and equipment purchases",
+    aliases=("capex", "purchases of property and equipment"),
+    expected_elements=(
+      "us-gaap:PaymentsToAcquirePropertyPlantAndEquipment",
+      "us-gaap:PaymentsToAcquireProductiveAssets",
+    ),
+    period_type="duration",
+    balance="credit",
+  ),
+  CanonicalConcept(
+    id="free_cash_flow",
+    display_name="Free Cash Flow",
+    category="cash_flow",
+    description="Operating cash flow minus capital expenditures",
+    aliases=("fcf",),
+    expected_elements=(),  # Typically calculated, not a single XBRL element
+    period_type="duration",
+    balance="debit",
+  ),
+  CanonicalConcept(
+    id="investing_cash_flow",
+    display_name="Investing Cash Flow",
+    category="cash_flow",
+    description="Net cash from investing activities",
+    aliases=("cash from investing",),
+    expected_elements=("us-gaap:NetCashProvidedByUsedInInvestingActivities",),
+    period_type="duration",
+    balance="debit",
+  ),
+  CanonicalConcept(
+    id="financing_cash_flow",
+    display_name="Financing Cash Flow",
+    category="cash_flow",
+    description="Net cash from financing activities",
+    aliases=("cash from financing",),
+    expected_elements=("us-gaap:NetCashProvidedByUsedInFinancingActivities",),
+    period_type="duration",
+    balance="debit",
+  ),
+  CanonicalConcept(
+    id="dividends_paid",
+    display_name="Dividends Paid",
+    category="cash_flow",
+    description="Total dividends paid to stockholders",
+    aliases=("dividend payments",),
+    expected_elements=(
+      "us-gaap:PaymentsOfDividends",
+      "us-gaap:PaymentsOfDividendsCommonStock",
+    ),
+    period_type="duration",
+    balance="credit",
+  ),
+  CanonicalConcept(
+    id="share_repurchases",
+    display_name="Share Repurchases",
+    category="cash_flow",
+    description="Cash spent on repurchasing company stock",
+    aliases=("stock buybacks", "treasury stock purchases"),
+    expected_elements=(
+      "us-gaap:PaymentsForRepurchaseOfCommonStock",
+      "us-gaap:PaymentsForRepurchaseOfEquity",
+    ),
+    period_type="duration",
+    balance="credit",
+  ),
+  CanonicalConcept(
+    id="shares_outstanding",
+    display_name="Shares Outstanding",
+    category="per_share",
+    description="Total shares of common stock outstanding",
+    aliases=("common shares outstanding", "weighted average shares"),
+    expected_elements=(
+      "us-gaap:CommonStockSharesOutstanding",
+      "us-gaap:WeightedAverageNumberOfShareOutstandingBasicAndDiluted",
+      "us-gaap:WeightedAverageNumberOfSharesOutstandingBasic",
+    ),
+    period_type="instant",
+    balance=None,
+    is_monetary=False,
+  ),
+  CanonicalConcept(
+    id="dividends_per_share",
+    display_name="Dividends Per Share",
+    category="per_share",
+    description="Dividends declared per share of common stock",
+    aliases=("dps",),
+    expected_elements=(
+      "us-gaap:CommonStockDividendsPerShareDeclared",
+      "us-gaap:CommonStockDividendsPerShareCashPaid",
+    ),
+    period_type="duration",
+    balance=None,
+    is_monetary=False,
+  ),
+  CanonicalConcept(
+    id="book_value_per_share",
+    display_name="Book Value Per Share",
+    category="per_share",
+    description="Book value per share of common stock",
+    aliases=("bvps",),
+    expected_elements=("us-gaap:BookValuePerShareDiluted",),
+    period_type="instant",
+    balance=None,
+    is_monetary=False,
+  ),
+)

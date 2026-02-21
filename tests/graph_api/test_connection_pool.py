@@ -126,20 +126,26 @@ class TestLadybugConnectionPool:
     # the bug where first read-only request locks the database in read-only mode
     assert call_args[1]["read_only"] is False
     assert "buffer_pool_size" in call_args[1]
-    mock_conn_class.assert_called_once_with(mock_db)
+    # Connection is called twice: once for vector extension init, once for actual connection
+    assert mock_conn_class.call_count == 2
+    for call_args in mock_conn_class.call_args_list:
+      assert call_args[0][0] == mock_db
 
     # Verify configuration calls and health check were performed
     # The connection pool now applies configuration settings before health check
     execute_calls = mock_conn.execute.call_args_list
 
-    # Should have multiple configuration calls plus health check
-    assert len(execute_calls) >= 6, (
-      f"Expected at least 6 execute calls, got {len(execute_calls)}"
+    # Should have vector extension call + health check + configuration calls
+    assert len(execute_calls) >= 7, (
+      f"Expected at least 7 execute calls, got {len(execute_calls)}"
     )
 
-    # Verify health check was the first call (before config)
-    health_check_call = execute_calls[0]
-    assert health_check_call[0][0] == "RETURN 1 as test"
+    # Verify vector extension init call comes first (from init connection)
+    # With mocks, LOAD EXTENSION succeeds immediately (no INSTALL fallback)
+    assert execute_calls[0][0][0] == "LOAD EXTENSION vector"
+
+    # Verify health check follows (on the actual connection)
+    assert execute_calls[1][0][0] == "RETURN 1 as test"
 
     # Verify configuration calls were made (order may vary, so check they exist)
     call_args = [call[0][0] for call in execute_calls]
@@ -488,12 +494,13 @@ class TestLadybugConnectionPool:
   def test_close_database_connections(self, mock_conn_class, mock_db_class):
     """Test closing all connections for a specific database."""
     # Mock LadybugDB classes
-    mock_dbs = [MagicMock() for _ in range(3)]
-    mock_conns = [MagicMock() for _ in range(3)]
+    mock_dbs = [MagicMock() for _ in range(2)]
+    # 2 connections per database: 1 for vector extension init + 1 for actual connection
+    mock_conns = [MagicMock() for _ in range(4)]
     mock_db_class.side_effect = mock_dbs
     mock_conn_class.side_effect = mock_conns
 
-    # Mock successful health checks
+    # Mock successful health checks for all connections
     for mock_conn in mock_conns:
       mock_result = MagicMock()
       mock_conn.execute.return_value = mock_result
@@ -509,8 +516,8 @@ class TestLadybugConnectionPool:
     # Close connections for db1 only
     pool.close_database_connections("db1")
 
-    # Verify only db1 connections were closed
-    mock_conns[0].close.assert_called_once()
+    # Verify only db1 actual connection was closed (mock_conns[1], not init conn [0])
+    mock_conns[1].close.assert_called_once()
     mock_dbs[0].close.assert_called_once()
 
     # Verify db2 connections remain
@@ -523,7 +530,8 @@ class TestLadybugConnectionPool:
     """Test closing all connections in the pool."""
     # Mock LadybugDB classes
     mock_dbs = [MagicMock() for _ in range(2)]
-    mock_conns = [MagicMock() for _ in range(2)]
+    # 2 databases x (1 init conn + 1 actual conn) = 4 connections
+    mock_conns = [MagicMock() for _ in range(4)]
     mock_db_class.side_effect = mock_dbs
     mock_conn_class.side_effect = mock_conns
 
@@ -543,9 +551,9 @@ class TestLadybugConnectionPool:
     # Close all connections
     pool.close_all_connections()
 
-    # Verify all connections were closed
-    for mock_conn in mock_conns:
-      mock_conn.close.assert_called_once()
+    # Verify actual connections were closed (indices 1, 3 — not init conns 0, 2)
+    mock_conns[1].close.assert_called_once()
+    mock_conns[3].close.assert_called_once()
     for mock_db in mock_dbs:
       mock_db.close.assert_called_once()
 
@@ -597,8 +605,9 @@ class TestLadybugConnectionPool:
   def test_lru_connection_selection(self, mock_conn_class, mock_db_class):
     """Test least recently used connection selection."""
     # Mock LadybugDB classes
-    mock_dbs = [MagicMock() for _ in range(3)]
-    mock_conns = [MagicMock() for _ in range(3)]
+    mock_dbs = [MagicMock() for _ in range(1)]
+    # 1 init conn + 3 actual connections = 4 total
+    mock_conns = [MagicMock() for _ in range(4)]
     mock_db_class.side_effect = mock_dbs
     mock_conn_class.side_effect = mock_conns
 
@@ -613,6 +622,7 @@ class TestLadybugConnectionPool:
     )
 
     # Directly create connections to test LRU eviction
+    # mock_conns[0] is the init conn (vector extension), [1],[2],[3] are actual
     pool._create_new_connection("test_db", read_only=True)
     time.sleep(0.01)  # Small delay to ensure different timestamps
 
@@ -622,14 +632,14 @@ class TestLadybugConnectionPool:
     # Verify we have 2 connections at the limit
     assert len(pool._pools["test_db"]) == 2
 
-    # Creating a third connection should evict the oldest (first one)
+    # Creating a third connection should evict the oldest (first actual one)
     pool._create_new_connection("test_db", read_only=True)
 
     # Should still be at the limit
     assert len(pool._pools["test_db"]) <= pool.max_connections_per_db
 
-    # The oldest connection should have been closed
-    mock_conns[0].close.assert_called_once()
+    # The oldest actual connection (mock_conns[1]) should have been closed
+    mock_conns[1].close.assert_called_once()
     # Database is not closed - it's shared across connections
 
 

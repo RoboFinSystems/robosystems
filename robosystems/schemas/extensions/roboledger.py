@@ -103,6 +103,9 @@ REPORTING_NODES = [
       Property(name="number", type="STRING"),
       Property(name="type", type="STRING"),
       Property(name="name", type="STRING"),
+      Property(name="canonical_type", type="STRING"),
+      Property(name="canonical_confidence", type="DOUBLE"),
+      Property(name="embedding", type="FLOAT[384]"),
     ],
   ),
   Node(

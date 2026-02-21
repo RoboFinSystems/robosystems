@@ -72,9 +72,10 @@ BASE_NODES = [
       Property(
         name="days_in_period", type="INT32"
       ),  # Actual duration in days (0 for instant)
+      Property(name="period_type", type="STRING"),  # instant, duration, forever
       Property(
-        name="period_type", type="STRING"
-      ),  # instant, quarterly, semi_annual, nine_months, annual, forever, other
+        name="duration_type", type="STRING"
+      ),  # quarterly, semi_annual, nine_months, annual, other (NULL for instant/forever)
       Property(
         name="calendar_period_key", type="STRING"
       ),  # Normalized calendar key for cross-company matching (e.g., "2024", "2024Q4", "2024-12-31")
@@ -116,6 +117,9 @@ BASE_NODES = [
       Property(name="substitution_group", type="STRING"),
       Property(name="item_type", type="STRING"),
       Property(name="classification", type="STRING"),  # indexed
+      Property(name="canonical_concept", type="STRING"),
+      Property(name="canonical_confidence", type="DOUBLE"),
+      Property(name="embedding", type="FLOAT[384]"),
     ],
   ),
   Node(
@@ -126,6 +130,7 @@ BASE_NODES = [
       Property(name="value", type="STRING"),
       Property(name="type", type="STRING"),
       Property(name="language", type="STRING"),
+      Property(name="embedding", type="FLOAT[384]"),
     ],
   ),
   Node(

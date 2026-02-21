@@ -39,6 +39,7 @@ class SharedRepositoryManifest:
 
   # MCP Capabilities
   has_element_discovery: bool = False
+  has_semantic_enrichment: bool = False
 
   # Status
   status: str = "available"  # available, coming_soon
