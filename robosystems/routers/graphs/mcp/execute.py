@@ -351,7 +351,8 @@ async def call_mcp_tool(
       sess.close()
 
     # Apply dual-layer rate limiting for shared repositories
-    if MultiTenantUtils.is_shared_repository(graph_id):
+    # Rate limiting is optional - skip if disabled (dev environments)
+    if MultiTenantUtils.is_shared_repository(graph_id) and env.RATE_LIMIT_ENABLED:
       from robosystems.config.valkey_registry import (
         ValkeyDatabase,
         create_async_redis_client,

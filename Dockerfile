@@ -26,39 +26,38 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Copy LadybugDB extensions from official extension repository
 # Extensions pulled from ghcr.io/ladybugdb/extension-repo:latest
 ARG TARGETARCH=arm64
-# Extension version configuration:
-# - LADYBUG_EXT_REPO_VERSION: Which version folder to pull from ghcr.io/ladybugdb/extension-repo
-#   Use "dev" to get latest compatible extensions from vdev folder
-# - LADYBUG_INTERNAL_VERSION: Where LadybugDB actually looks for extensions at runtime
-#   This is LadybugDB's internal LBUG_EXTENSION_VERSION (currently 0.12.0 for all packages)
-# Note: The extension repo may rebuild all version folders together, so version folders
-# in the repo may not be ABI-compatible with their matching Python package versions.
-# Using vdev extensions with latest Python package provides best compatibility.
-ARG LADYBUG_EXT_REPO_VERSION=dev
-ARG LADYBUG_INTERNAL_VERSION=0.13.0
+# Extension version: pinned to match the real_ladybug Python package for ABI compatibility.
+# This version is used for both the repo source path and the runtime install path.
+ARG LADYBUG_EXT_VERSION=0.13.0
 
 # Create extension directories using internal version (where LadybugDB looks)
-RUN mkdir -p /ladybug-extension/${LADYBUG_INTERNAL_VERSION}/linux_${TARGETARCH}/httpfs \
-             /ladybug-extension/${LADYBUG_INTERNAL_VERSION}/linux_${TARGETARCH}/duckdb
+RUN mkdir -p /ladybug-extension/${LADYBUG_EXT_VERSION}/linux_${TARGETARCH}/httpfs \
+             /ladybug-extension/${LADYBUG_EXT_VERSION}/linux_${TARGETARCH}/duckdb \
+             /ladybug-extension/${LADYBUG_EXT_VERSION}/linux_${TARGETARCH}/vector
 
 # Copy httpfs extension from extension repository (source: repo version, dest: internal version)
 COPY --from=extensions \
-    /usr/share/nginx/html/v${LADYBUG_EXT_REPO_VERSION}/linux_${TARGETARCH}/httpfs/libhttpfs.lbug_extension \
-    /ladybug-extension/${LADYBUG_INTERNAL_VERSION}/linux_${TARGETARCH}/httpfs/libhttpfs.lbug_extension
+    /usr/share/nginx/html/v${LADYBUG_EXT_VERSION}/linux_${TARGETARCH}/httpfs/libhttpfs.lbug_extension \
+    /ladybug-extension/${LADYBUG_EXT_VERSION}/linux_${TARGETARCH}/httpfs/libhttpfs.lbug_extension
 
 # Copy duckdb extension (required for DuckDB → LadybugDB direct ingestion)
 # DuckDB extension requires 3 files: main extension + installer + loader
 COPY --from=extensions \
-    /usr/share/nginx/html/v${LADYBUG_EXT_REPO_VERSION}/linux_${TARGETARCH}/duckdb/libduckdb.lbug_extension \
-    /ladybug-extension/${LADYBUG_INTERNAL_VERSION}/linux_${TARGETARCH}/duckdb/libduckdb.lbug_extension
+    /usr/share/nginx/html/v${LADYBUG_EXT_VERSION}/linux_${TARGETARCH}/duckdb/libduckdb.lbug_extension \
+    /ladybug-extension/${LADYBUG_EXT_VERSION}/linux_${TARGETARCH}/duckdb/libduckdb.lbug_extension
 
 COPY --from=extensions \
-    /usr/share/nginx/html/v${LADYBUG_EXT_REPO_VERSION}/linux_${TARGETARCH}/duckdb/libduckdb_installer.lbug_extension \
-    /ladybug-extension/${LADYBUG_INTERNAL_VERSION}/linux_${TARGETARCH}/duckdb/libduckdb_installer.lbug_extension
+    /usr/share/nginx/html/v${LADYBUG_EXT_VERSION}/linux_${TARGETARCH}/duckdb/libduckdb_installer.lbug_extension \
+    /ladybug-extension/${LADYBUG_EXT_VERSION}/linux_${TARGETARCH}/duckdb/libduckdb_installer.lbug_extension
 
 COPY --from=extensions \
-    /usr/share/nginx/html/v${LADYBUG_EXT_REPO_VERSION}/linux_${TARGETARCH}/duckdb/libduckdb_loader.lbug_extension \
-    /ladybug-extension/${LADYBUG_INTERNAL_VERSION}/linux_${TARGETARCH}/duckdb/libduckdb_loader.lbug_extension
+    /usr/share/nginx/html/v${LADYBUG_EXT_VERSION}/linux_${TARGETARCH}/duckdb/libduckdb_loader.lbug_extension \
+    /ladybug-extension/${LADYBUG_EXT_VERSION}/linux_${TARGETARCH}/duckdb/libduckdb_loader.lbug_extension
+
+# Copy vector extension (required for HNSW indexes and QUERY_VECTOR_INDEX)
+COPY --from=extensions \
+    /usr/share/nginx/html/v${LADYBUG_EXT_VERSION}/linux_${TARGETARCH}/vector/libvector.lbug_extension \
+    /ladybug-extension/${LADYBUG_EXT_VERSION}/linux_${TARGETARCH}/vector/libvector.lbug_extension
 
 # Download DuckDB shared library from official release (required by LadybugDB DuckDB extension)
 # DuckDB v1.4.2 changed architecture naming: arm64/amd64 (not aarch64)
@@ -81,7 +80,7 @@ RUN DUCKDB_VERSION=1.4.2 && \
 # Basic integrity check: verify files exist, are non-empty, and are valid ELF binaries
 RUN echo "Verifying LadybugDB extension integrity..." && \
     EXTENSIONS_FOUND=0 && \
-    for ext in /ladybug-extension/${LADYBUG_INTERNAL_VERSION}/linux_${TARGETARCH}/*/*.lbug_extension; do \
+    for ext in /ladybug-extension/${LADYBUG_EXT_VERSION}/linux_${TARGETARCH}/*/*.lbug_extension; do \
         if [ ! -f "$ext" ]; then \
             echo "ERROR: Extension file not found: $ext" && exit 1; \
         fi; \
@@ -94,8 +93,8 @@ RUN echo "Verifying LadybugDB extension integrity..." && \
         echo "✓ Valid extension: $(basename $ext)"; \
         EXTENSIONS_FOUND=$((EXTENSIONS_FOUND + 1)); \
     done && \
-    if [ "$EXTENSIONS_FOUND" -lt 4 ]; then \
-        echo "ERROR: Expected 4 extension files, found $EXTENSIONS_FOUND" && exit 1; \
+    if [ "$EXTENSIONS_FOUND" -lt 5 ]; then \
+        echo "ERROR: Expected 5 extension files, found $EXTENSIONS_FOUND" && exit 1; \
     fi && \
     echo "Extension integrity verification complete ($EXTENSIONS_FOUND extensions validated)"
 
@@ -141,27 +140,14 @@ RUN uv sync --frozen --no-dev
 ENV FASTEMBED_CACHE_PATH=/app/fastembed_cache
 RUN .venv/bin/python -c "from fastembed import TextEmbedding; TextEmbedding('BAAI/bge-small-en-v1.5')"
 
-# Pre-install LadybugDB vector extension at build time
-# Uses the Python package to download the version-matched extension binary
-# This avoids ABI incompatibility from the extension repo's pre-built binaries
-RUN .venv/bin/python -c "\
-import real_ladybug as lbug, os; \
-db = lbug.Database('/tmp/vec_install.lbug'); \
-conn = lbug.Connection(db); \
-conn.execute('INSTALL vector'); \
-del conn; del db; \
-os.remove('/tmp/vec_install.lbug')" && \
-    echo "Vector extension installed at build time"
-
 # Stage 2: Runtime
 # Using Python 3.13 slim (Debian Trixie/13) for GLIBC 2.38+ required by LadybugDB extensions
 FROM python:3.13-slim
 
 # Accept architecture argument in runtime stage
 ARG TARGETARCH=arm64
-# Internal extension version - where LadybugDB actually looks for extensions
-# Must match the builder stage's LADYBUG_INTERNAL_VERSION
-ARG LADYBUG_INTERNAL_VERSION=0.13.0
+# Must match builder stage — used for extension install paths
+ARG LADYBUG_EXT_VERSION=0.13.0
 
 # Set environment variables
 ENV PYTHONUNBUFFERED=1 \
@@ -222,7 +208,7 @@ RUN mkdir -p /app/data && chown -R appuser:appuser /app/data
 # Create extension directory in appuser's home (where LadybugDB looks for extensions)
 # Extensions are stored at ~/.lbug/extension/{VERSION}/{PLATFORM}/{EXTENSION_NAME}/
 # This is in the container filesystem, NOT persistent volume, so extensions refresh with each deploy
-RUN mkdir -p /home/appuser/.lbug/extension/${LADYBUG_INTERNAL_VERSION}/linux_${TARGETARCH} && chown -R appuser:appuser /home/appuser/.lbug
+RUN mkdir -p /home/appuser/.lbug/extension/${LADYBUG_EXT_VERSION}/linux_${TARGETARCH} && chown -R appuser:appuser /home/appuser/.lbug
 # Give appuser write access to /app for log files
 RUN chown -R appuser:appuser /app
 
@@ -233,25 +219,23 @@ COPY --from=builder --chown=appuser:appuser \
 # Copy LadybugDB extensions to user home directory
 # LadybugDB expects extensions at ~/.lbug/extension/{VERSION}/{PLATFORM}/{EXTENSION_NAME}/
 COPY --from=builder --chown=appuser:appuser \
-    /ladybug-extension/${LADYBUG_INTERNAL_VERSION}/linux_${TARGETARCH}/httpfs \
-    /home/appuser/.lbug/extension/${LADYBUG_INTERNAL_VERSION}/linux_${TARGETARCH}/httpfs
+    /ladybug-extension/${LADYBUG_EXT_VERSION}/linux_${TARGETARCH}/httpfs \
+    /home/appuser/.lbug/extension/${LADYBUG_EXT_VERSION}/linux_${TARGETARCH}/httpfs
 
 COPY --from=builder --chown=appuser:appuser \
-    /ladybug-extension/${LADYBUG_INTERNAL_VERSION}/linux_${TARGETARCH}/duckdb \
-    /home/appuser/.lbug/extension/${LADYBUG_INTERNAL_VERSION}/linux_${TARGETARCH}/duckdb
+    /ladybug-extension/${LADYBUG_EXT_VERSION}/linux_${TARGETARCH}/duckdb \
+    /home/appuser/.lbug/extension/${LADYBUG_EXT_VERSION}/linux_${TARGETARCH}/duckdb
 
-# Vector extension is installed at build time via real_ladybug (INSTALL vector)
-# This ensures ABI compatibility with the Python package version
 COPY --from=builder --chown=appuser:appuser \
-    /root/.lbug/extension/${LADYBUG_INTERNAL_VERSION}/linux_${TARGETARCH}/vector \
-    /home/appuser/.lbug/extension/${LADYBUG_INTERNAL_VERSION}/linux_${TARGETARCH}/vector
+    /ladybug-extension/${LADYBUG_EXT_VERSION}/linux_${TARGETARCH}/vector \
+    /home/appuser/.lbug/extension/${LADYBUG_EXT_VERSION}/linux_${TARGETARCH}/vector
 
 # Copy libduckdb.so to the common extension directory where LadybugDB looks for it
 # This is required by the DuckDB extension to actually load DuckDB functionality
-RUN mkdir -p /home/appuser/.lbug/extension/${LADYBUG_INTERNAL_VERSION}/linux_${TARGETARCH}/common
+RUN mkdir -p /home/appuser/.lbug/extension/${LADYBUG_EXT_VERSION}/linux_${TARGETARCH}/common
 COPY --from=builder --chown=appuser:appuser \
     /usr/local/lib/libduckdb.so \
-    /home/appuser/.lbug/extension/${LADYBUG_INTERNAL_VERSION}/linux_${TARGETARCH}/common/libduckdb.so
+    /home/appuser/.lbug/extension/${LADYBUG_EXT_VERSION}/linux_${TARGETARCH}/common/libduckdb.so
 
 # Switch to non-root user
 USER appuser
