@@ -1576,7 +1576,7 @@ class XBRLGraphProcessor:
     # Create fact-period relationship
     if period_uri:
       # Get the period identifier (global/idempotent)
-      if "period_data" in locals() and period_data:
+      if period_data:
         period_identifier = period_data["identifier"]
       else:
         # For existing periods - use global identifier

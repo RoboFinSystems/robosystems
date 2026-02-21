@@ -183,7 +183,7 @@ Use the returned query_hint directly in read-graph-cypher for immediate results.
         # Label query — uses primary key index + CSR traversal
         try:
           label_query = (
-            f"MATCH (e:Element)<-[:ELEMENT_HAS_LABEL]-(l:Label) "
+            f"MATCH (e:Element)-[:ELEMENT_HAS_LABEL]->(l:Label) "
             f"WHERE e.identifier IN [{ids_str}] "
             f'AND l.type = "http://www.xbrl.org/2003/role/label" '
             f"RETURN e.identifier AS id, l.value AS label"

@@ -112,8 +112,10 @@ class GraphMCPTools:
       manifest = get_manifest(self.client.graph_id)
       if manifest and manifest.has_semantic_enrichment:
         return True
-    except (AttributeError, Exception):
-      pass
+    except Exception as exc:
+      logger.debug(
+        f"Semantic enrichment check failed for {self.client.graph_id}: {exc}"
+      )
     return False
 
   def _get_semantic_tool_definitions(self) -> list[dict[str, Any]]:
