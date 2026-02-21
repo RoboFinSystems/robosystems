@@ -44,8 +44,9 @@ For QuickBooks/custom data:
 - robo:CustomerLifetimeValue
 - custom:MonthlyRecurringRevenue
 
-**TIP:**
-Use the discovered qnames in your Fact queries to get actual values.""",
+**TIP:** For finding a specific financial concept (like "revenue" or "net income"),
+use `resolve-element` instead — it maps concepts directly to the correct element qname
+for a company. Use this tool when you need to browse all available elements.""",
       "inputSchema": {
         "type": "object",
         "properties": {

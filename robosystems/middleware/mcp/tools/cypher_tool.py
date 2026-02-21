@@ -52,25 +52,39 @@ Query the graph using Cypher syntax. The database uses either RoboSystems' finan
 - No write operations (CREATE, SET, DELETE, etc.)
 - Query complexity is automatically monitored
 
+**NUMERIC VALUES:**
+`f.numeric_value` is the actual reported value in base units (USD, shares, ratios).
+No scaling or transformation needed. The `decimals` field is precision metadata only.
+
+**PERIOD FILTERING:**
+- Annual income/cash flow: `p.period_type = 'duration' AND p.duration_type = 'annual'`
+- Quarterly: `p.period_type = 'duration' AND p.duration_type = 'quarterly'`
+- Balance sheet (latest): `p.period_type = 'instant'` with `ORDER BY p.end_date DESC`
+
 **EXAMPLES:**
 ```cypher
-// Get company revenue facts
-MATCH (e:Entity)-[:HAS_REPORT]->(r:Report)-[:REPORTED_IN]->(f:Fact)-[:FACT_HAS_ELEMENT]->(el:Element)
-WHERE el.name CONTAINS 'Revenue' AND f.numeric_value IS NOT NULL
-RETURN e.name, f.numeric_value, f.currency_code
-LIMIT 10
+// Get company revenue (actual values, no scaling needed)
+MATCH (f:Fact {has_dimensions: false})-[:FACT_HAS_ELEMENT]->(el:Element {qname: 'us-gaap:Revenues'}),
+      (f)-[:FACT_HAS_PERIOD]->(p:Period),
+      (f)-[:FACT_HAS_ENTITY]->(e:Entity {ticker: 'NVDA'})
+WHERE f.numeric_value IS NOT NULL AND p.duration_type = 'annual'
+RETURN p.end_date, f.numeric_value
+ORDER BY p.end_date DESC LIMIT 10
 
 // Find facts by time period
 MATCH (f:Fact)-[:FACT_HAS_PERIOD]->(p:Period)
-WHERE p.end_date >= '2023-01-01'
+WHERE p.end_date >= '2024-01-01' AND p.period_type = 'duration'
 RETURN count(f) as facts_count
 
 // Explore available metrics
 MATCH (el:Element)
-RETURN el.name, count(*) as usage_count
+RETURN el.name, el.qname, count(*) as usage_count
 ORDER BY usage_count DESC
 LIMIT 20
-```""",
+```
+
+**TIP:** Use `resolve-element` first to find the correct element qname for a company,
+then use this tool with the resolved qname.""",
       "inputSchema": {
         "type": "object",
         "properties": {

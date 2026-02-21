@@ -230,17 +230,6 @@ async def call_mcp_tool(
           "arguments": {},
         },
       },
-      "discover_facts": {
-        "summary": "Discover Facts",
-        "description": "Discover common facts and patterns in the graph",
-        "value": {
-          "name": "discover-facts",
-          "arguments": {
-            "entity_type": "Company",
-            "limit": 20,
-          },
-        },
-      },
     },
   ),
   format: str | None = QueryParam(

@@ -21,7 +21,6 @@ from ..exceptions import (
 from .cypher_tool import CypherTool
 from .elements_tool import ElementsTool
 from .example_queries_tool import ExampleQueriesTool
-from .facts_tool import FactsTool
 from .memory import AddNodeTableTool, AddRelationshipTableTool, WriteCypherTool
 from .properties_tool import PropertiesTool
 from .schema_tool import SchemaTool
@@ -57,7 +56,6 @@ class GraphMCPTools:
     self.properties_tool = PropertiesTool(graph_client)
     self.structure_tool = StructureTool(graph_client)
     self.elements_tool = ElementsTool(graph_client)
-    self.facts_tool = FactsTool(graph_client)
     # Conditionally initialize workspace tools based on feature flag
     self.create_workspace_tool = None
     self.delete_workspace_tool = None
@@ -204,17 +202,12 @@ class GraphMCPTools:
       self.structure_tool.get_tool_definition(),
     ]
 
-    # Conditionally include element and facts tools for financial graphs
-    if self._should_include_element_discovery():
-      tools.extend(
-        [
-          self.elements_tool.get_tool_definition(),
-          self.facts_tool.get_tool_definition(),
-        ]
-      )
-
-    # Add semantic enrichment tools (resolve-element, resolve-structure)
+    # Add semantic enrichment tools first (preferred path for concept resolution)
     tools.extend(self._get_semantic_tool_definitions())
+
+    # Conditionally include element discovery tool for financial graphs
+    if self._should_include_element_discovery():
+      tools.append(self.elements_tool.get_tool_definition())
 
     # Add workspace management tools
     # Note: switch-workspace is client-side only, others execute server-side
@@ -284,10 +277,6 @@ class GraphMCPTools:
 
       elif name == "discover-common-elements":
         result = await self.elements_tool.execute(arguments)
-        return result if return_raw else json.dumps(result, indent=2)
-
-      elif name == "discover-facts":
-        result = await self.facts_tool.execute(arguments)
         return result if return_raw else json.dumps(result, indent=2)
 
       # Semantic enrichment tools

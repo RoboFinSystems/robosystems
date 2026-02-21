@@ -32,7 +32,8 @@ mcp/
     ├── schema_tool.py      # Schema introspection
     ├── structure_tool.py   # Graph structure exploration
     ├── elements_tool.py    # Element/taxonomy queries
-    ├── facts_tool.py       # Financial fact queries
+    ├── resolve_element_tool.py  # Concept → XBRL element resolution
+    ├── resolve_structure_tool.py # Statement type → structure resolution
     ├── properties_tool.py  # Property discovery
     ├── example_queries_tool.py # Query examples and templates
     ├── workspace.py        # Workspace/subgraph management
@@ -147,18 +148,32 @@ structure = await tool.get_structure({
 })
 ```
 
-#### Facts Tool (`facts_tool.py`)
+#### Resolve Element Tool (`resolve_element_tool.py`)
 
-Query financial facts from SEC XBRL data.
+Map natural-language financial concepts to XBRL element qnames.
 
 ```python
-from robosystems.middleware.mcp.tools import FactsTool
+from robosystems.middleware.mcp.tools import ResolveElementTool
 
-tool = FactsTool(client)
-facts = await tool.query({
-    "entity": "AAPL",
-    "element": "Assets",
-    "period": "2023"
+tool = ResolveElementTool(client)
+result = await tool.execute({
+    "concept": "revenue",
+    "ticker": "NVDA"
+})
+# Returns matching qnames, confidence scores, and a ready-to-use query hint
+```
+
+#### Resolve Structure Tool (`resolve_structure_tool.py`)
+
+Find financial statement structures by type (income statement, balance sheet, etc.).
+
+```python
+from robosystems.middleware.mcp.tools import ResolveStructureTool
+
+tool = ResolveStructureTool(client)
+result = await tool.execute({
+    "statement_type": "income_statement",
+    "ticker": "NVDA"
 })
 ```
 
