@@ -143,6 +143,81 @@ class TestBackupDownloadEndpoint:
     new_callable=AsyncMock,
   )
   @patch(
+    "robosystems.routers.graphs.backups.download.DownloadRateLimiter._get_monthly_limit"
+  )
+  @patch(
+    "robosystems.routers.graphs.backups.download.UserRepository.get_by_user_and_repository"
+  )
+  @patch(
+    "robosystems.routers.graphs.backups.download.MultiTenantUtils.is_shared_repository"
+  )
+  @patch("robosystems.models.iam.GraphUser.get_by_user_id")
+  def test_download_returns_403_for_starter_plan(
+    self,
+    mock_get_by_user_id,
+    mock_is_shared,
+    mock_get_user_repo,
+    mock_get_monthly_limit,
+    mock_check_limit,
+    mock_increment,
+    mock_get_backup_manager,
+    client,
+    mock_auth_user,
+  ):
+    """Test that starter plan users get 403 (downloads not available)."""
+    from robosystems.database import get_db_session
+    from robosystems.middleware.auth.dependencies import get_current_user_with_graph
+
+    mock_session = MagicMock()
+    app.dependency_overrides[get_current_user_with_graph] = lambda: mock_auth_user
+    app.dependency_overrides[get_db_session] = lambda: mock_session
+
+    try:
+      mock_is_shared.return_value = True
+
+      mock_user_graph = MagicMock()
+      mock_user_graph.graph_id = "sec"
+      mock_user_graph.role = "viewer"
+      mock_get_by_user_id.return_value = [mock_user_graph]
+
+      mock_user_repo = MagicMock()
+      mock_user_repo.repository_plan = "starter"
+      mock_get_user_repo.return_value = mock_user_repo
+
+      # Starter plan has 0 downloads
+      mock_get_monthly_limit.return_value = 0
+
+      mock_auth_user.id = "test-user-123"
+
+      response = client.get("/v1/graphs/sec/backups/backup123/download")
+
+      assert response.status_code == 403, (
+        f"Expected 403, got {response.status_code}: {response.text}"
+      )
+      assert "not available" in response.json()["detail"].lower()
+
+      # Should NOT have checked rate limit or incremented
+      mock_check_limit.assert_not_called()
+      mock_increment.assert_not_called()
+    finally:
+      if get_current_user_with_graph in app.dependency_overrides:
+        del app.dependency_overrides[get_current_user_with_graph]
+      if get_db_session in app.dependency_overrides:
+        del app.dependency_overrides[get_db_session]
+
+  @patch("robosystems.routers.graphs.backups.download.get_backup_manager")
+  @patch(
+    "robosystems.routers.graphs.backups.download.DownloadRateLimiter.increment_download_count",
+    new_callable=AsyncMock,
+  )
+  @patch(
+    "robosystems.routers.graphs.backups.download.DownloadRateLimiter.check_download_limit",
+    new_callable=AsyncMock,
+  )
+  @patch(
+    "robosystems.routers.graphs.backups.download.DownloadRateLimiter._get_monthly_limit"
+  )
+  @patch(
     "robosystems.routers.graphs.backups.download.UserRepository.get_by_user_and_repository"
   )
   @patch(
@@ -154,6 +229,7 @@ class TestBackupDownloadEndpoint:
     mock_get_by_user_id,
     mock_is_shared,
     mock_get_user_repo,
+    mock_get_monthly_limit,
     mock_check_limit,
     mock_increment,
     mock_get_backup_manager,
@@ -169,19 +245,19 @@ class TestBackupDownloadEndpoint:
     app.dependency_overrides[get_db_session] = lambda: mock_session
 
     try:
-      # This IS a shared repository
       mock_is_shared.return_value = True
 
-      # User has graph access
       mock_user_graph = MagicMock()
       mock_user_graph.graph_id = "sec"
       mock_user_graph.role = "viewer"
       mock_get_by_user_id.return_value = [mock_user_graph]
 
-      # User has repository subscription
       mock_user_repo = MagicMock()
-      mock_user_repo.repository_plan = "starter"
+      mock_user_repo.repository_plan = "advanced"
       mock_get_user_repo.return_value = mock_user_repo
+
+      # Advanced plan has downloads available
+      mock_get_monthly_limit.return_value = 1
 
       # Rate limit exceeded
       reset_time = datetime.now(UTC) + timedelta(hours=5)
@@ -213,6 +289,9 @@ class TestBackupDownloadEndpoint:
     new_callable=AsyncMock,
   )
   @patch(
+    "robosystems.routers.graphs.backups.download.DownloadRateLimiter._get_monthly_limit"
+  )
+  @patch(
     "robosystems.routers.graphs.backups.download.UserRepository.get_by_user_and_repository"
   )
   @patch(
@@ -224,6 +303,7 @@ class TestBackupDownloadEndpoint:
     mock_get_by_user_id,
     mock_is_shared,
     mock_get_user_repo,
+    mock_get_monthly_limit,
     mock_check_limit,
     mock_increment,
     mock_get_backup_manager,
@@ -239,23 +319,23 @@ class TestBackupDownloadEndpoint:
     app.dependency_overrides[get_db_session] = lambda: mock_session
 
     try:
-      # This IS a shared repository
       mock_is_shared.return_value = True
 
-      # User has graph access
       mock_user_graph = MagicMock()
       mock_user_graph.graph_id = "sec"
       mock_user_graph.role = "viewer"
       mock_get_by_user_id.return_value = [mock_user_graph]
 
-      # User has repository subscription
       mock_user_repo = MagicMock()
-      mock_user_repo.repository_plan = "starter"
+      mock_user_repo.repository_plan = "advanced"
       mock_get_user_repo.return_value = mock_user_repo
+
+      # Advanced plan has downloads available
+      mock_get_monthly_limit.return_value = 1
 
       # Rate limit NOT exceeded
       reset_time = datetime.now(UTC) + timedelta(hours=5)
-      mock_check_limit.return_value = (True, 2, reset_time)
+      mock_check_limit.return_value = (True, 4, reset_time)
 
       # Mock backup manager to return a download URL
       mock_backup_mgr = MagicMock()
