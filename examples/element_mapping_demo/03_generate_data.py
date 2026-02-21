@@ -203,6 +203,9 @@ class AccountingDataGenerator:
           "substitution_group": None,
           "item_type": "monetaryItemType",
           "classification": account_type.lower(),
+          "canonical_concept": None,
+          "canonical_confidence": None,
+          "embedding": None,
         }
       )
 
@@ -451,7 +454,8 @@ class AccountingDataGenerator:
           "calendar_year": month_start.year,
           "calendar_quarter": calendar_quarter,
           "days_in_period": 30,
-          "period_type": "monthly",
+          "period_type": "duration",
+          "duration_type": "other",
           "calendar_period_key": f"{month_start.year}{calendar_quarter}",
         }
       )

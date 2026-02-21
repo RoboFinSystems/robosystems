@@ -34,7 +34,7 @@ def checkpoint_with_retry(conn, graph_id: str, context: str = "DuckDB") -> None:
   for attempt in range(CHECKPOINT_MAX_RETRIES):
     try:
       conn.execute("CHECKPOINT")
-      logger.info(f"[OK] {context} checkpointed successfully for {graph_id}")
+      logger.debug(f"[OK] {context} checkpointed successfully for {graph_id}")
       return
     except Exception as e:
       if attempt == CHECKPOINT_MAX_RETRIES - 1:
@@ -78,7 +78,7 @@ async def materialize_table(
 
     # CRITICAL: Checkpoint DuckDB to flush WAL to main database BEFORE LadybugDB attaches
     # LadybugDB's DuckDB extension creates a new session that won't see uncommitted WAL data
-    logger.info(
+    logger.debug(
       f"Checkpointing DuckDB database before LadybugDB materialization: {duck_path}"
     )
     from robosystems.graph_api.core.duckdb import get_duckdb_pool
@@ -190,7 +190,7 @@ async def materialize_table(
                 f"(batch {request.batch_num + 1}/{request.num_batches})"
               )
             else:
-              logger.info(
+              logger.debug(
                 f"Created temp DuckDB table {temp_table_name} for full materialization"
               )
           temp_table_created = True
@@ -206,7 +206,7 @@ async def materialize_table(
         try:
           conn.execute("INSTALL duckdb")
           conn.execute("LOAD duckdb")
-          logger.info("Loaded DuckDB extension")
+          logger.debug("Loaded DuckDB extension")
         except Exception as e:
           if "already loaded" not in str(e).lower():
             logger.warning(f"Failed to load DuckDB extension: {e}")
@@ -220,20 +220,17 @@ async def materialize_table(
 
         # Attach DuckDB database
         conn.execute(f"ATTACH '{duck_path}' AS duck (DBTYPE duckdb)")
-        logger.info(f"Attached DuckDB database: {duck_path}")
+        logger.debug(f"Attached DuckDB database: {duck_path}")
 
         # Determine source table for COPY (temp table or direct source)
         source_table = table_name if not temp_table_created else temp_table_name
 
         if request.file_ids:
           logger.info(
-            f"Executing selective materialization from DuckDB to graph: {table_name} "
-            f"({len(request.file_ids)} file(s))"
+            f"COPY {table_name} → {graph_id} ({len(request.file_ids)} file(s))"
           )
         else:
-          logger.info(
-            f"Executing full materialization from DuckDB to graph: {table_name}"
-          )
+          logger.info(f"COPY {table_name} → {graph_id}")
 
         if request.ignore_errors:
           copy_query = (
@@ -247,7 +244,7 @@ async def materialize_table(
         # can take 2-3 minutes with millions of rows
         try:
           conn.execute("CALL timeout=3600000")  # 60 minutes
-          logger.info(f"Executing: {copy_query}")
+          logger.debug(f"Executing: {copy_query}")
           result = conn.execute(copy_query)
         finally:
           # Always reset timeout to default after COPY
@@ -288,7 +285,7 @@ async def materialize_table(
         ladybug_service.db_manager.connection_pool.force_database_cleanup(
           graph_id, aggressive=True
         )
-        logger.info(f"Released LadybugDB memory after {table_name} materialization")
+        logger.debug(f"Released LadybugDB memory after {table_name} materialization")
       except Exception as cleanup_err:
         # Log but don't fail - materialization succeeded
         logger.warning(f"Could not release LadybugDB memory: {cleanup_err}")
@@ -315,7 +312,7 @@ async def materialize_table(
         try:
           with duckdb_pool.get_connection(graph_id) as duck_conn:
             duck_conn.execute(f"DROP TABLE IF EXISTS {temp_table_name}")
-            logger.info(f"Cleaned up temp DuckDB table: {temp_table_name}")
+            logger.debug(f"Cleaned up temp DuckDB table: {temp_table_name}")
         except Exception as drop_err:
           logger.warning(f"Failed to drop temp table {temp_table_name}: {drop_err}")
 
@@ -463,7 +460,7 @@ async def fork_from_parent_duckdb(
         try:
           conn.execute("INSTALL duckdb")
           conn.execute("LOAD duckdb")
-          logger.info("Loaded DuckDB extension")
+          logger.debug("Loaded DuckDB extension")
         except Exception as e:
           if "already loaded" not in str(e).lower():
             logger.warning(f"Failed to load DuckDB extension: {e}")
