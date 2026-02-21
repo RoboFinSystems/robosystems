@@ -102,6 +102,12 @@ class DuckDBAnalyticsContext:
       raise RuntimeError("DuckDBAnalyticsContext is not open. Use as context manager.")
     return self._conn
 
+  @property
+  def db_path(self) -> Path:
+    if self._db_path is None:
+      raise RuntimeError("DuckDBAnalyticsContext is not open. Use as context manager.")
+    return self._db_path
+
   def query(self, sql: str) -> duckdb.DuckDBPyRelation:
     """Execute a SQL query and return a DuckDB relation."""
     return self.conn.sql(sql)
@@ -219,5 +225,7 @@ class DuckDBAnalyticsContext:
       Config=transfer_config,
     )
     logger.info(
-      "Downloaded DuckDB: %s (%.2f GB)", dest_path, dest_path.stat().st_size / (1024**3)
+      "Downloaded DuckDB: %s (%.2f GB)",
+      dest_path,
+      dest_path.stat().st_size / (1024**3),
     )

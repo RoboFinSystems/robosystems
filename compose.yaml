@@ -58,6 +58,7 @@ services:
       - ./robosystems:/app/robosystems
       - ./data/lbug-dbs:/app/data/lbug-dbs
       - ./data/staging:/app/data/staging
+      - ./data/artifacts:/app/data/artifacts
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
       interval: 30s

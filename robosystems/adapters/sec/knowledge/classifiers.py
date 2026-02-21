@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING
 import networkit as nk
 
 if TYPE_CHECKING:
-  from robosystems.adapters.sec.analytics.graphs import ElementGraph
+  from robosystems.adapters.sec.knowledge.graphs import ElementGraph
 
 
 class StatementType(str, Enum):

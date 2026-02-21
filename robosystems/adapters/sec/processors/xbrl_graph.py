@@ -400,6 +400,54 @@ class XBRLGraphProcessor:
       else:
         all_embeddings = [None] * len(texts)
 
+      # Pre-compute structure → element qnames mapping for graph refinement
+      from robosystems.adapters.sec.config import XBRL_GRAPH_REFINEMENT
+
+      structure_element_map: dict[str, list[str]] = {}
+      structure_def_hashes: dict[str, str] = {}
+      if XBRL_GRAPH_REFINEMENT and (
+        hasattr(self, "structure_associations_df")
+        and not self.structure_associations_df.empty
+        and hasattr(self, "association_to_elements_df")
+        and not self.association_to_elements_df.empty
+        and hasattr(self, "elements_df")
+        and not self.elements_df.empty
+      ):
+        import hashlib
+
+        # Build association_id → element_qname mapping
+        assoc_to_qname: dict[str, str] = {}
+        elem_id_to_qname: dict[str, str] = {}
+        for _, erow in self.elements_df.iterrows():
+          eid = erow.get("identifier")
+          eq = erow.get("qname")
+          if eid and eq:
+            elem_id_to_qname[eid] = eq
+
+        for _, arow in self.association_to_elements_df.iterrows():
+          assoc_id = arow.get("from")
+          elem_id = arow.get("to")
+          if assoc_id and elem_id and elem_id in elem_id_to_qname:
+            assoc_to_qname[assoc_id] = elem_id_to_qname[elem_id]
+
+        # Build structure_id → [element_qnames]
+        for _, srow in self.structure_associations_df.iterrows():
+          struct_id = srow.get("from")
+          assoc_id = srow.get("to")
+          if struct_id and assoc_id and assoc_id in assoc_to_qname:
+            structure_element_map.setdefault(struct_id, []).append(
+              assoc_to_qname[assoc_id]
+            )
+
+        # Pre-compute definition hashes for consensus lookup
+        for _, row in self.structures_df.iterrows():
+          struct_id = row.get("identifier")
+          definition = row.get("definition", "") or ""
+          if struct_id:
+            structure_def_hashes[struct_id] = hashlib.md5(
+              definition.encode()
+            ).hexdigest()
+
       # Classify structures (heuristic first, then embedding fallback)
       # Only Statement types are classified; Disclosures are skipped entirely
       canonical_types = []
@@ -427,6 +475,26 @@ class XBRLGraphProcessor:
         else:
           canonical_types.append(None)
           canonical_confidences.append(None)
+
+      # Apply graph-based structure refinement
+      from robosystems.adapters.sec.config import XBRL_GRAPH_REFINEMENT
+
+      if XBRL_GRAPH_REFINEMENT:
+        for i, row in enumerate(self.structures_df.itertuples()):
+          ct = canonical_types[i]
+          cc = canonical_confidences[i]
+          if cc is None:
+            continue
+          struct_id = row.identifier if hasattr(row, "identifier") else None
+          if struct_id is None:
+            continue
+          elements = structure_element_map.get(struct_id, [])
+          def_hash = structure_def_hashes.get(struct_id, "")
+          refined_type, refined_conf = enricher.refine_structure_confidence(
+            ct, cc, elements, def_hash
+          )
+          canonical_types[i] = refined_type
+          canonical_confidences[i] = refined_conf
 
       self.structures_df["embedding"] = all_embeddings
       self.structures_df["canonical_type"] = canonical_types

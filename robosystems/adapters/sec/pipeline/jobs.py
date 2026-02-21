@@ -42,7 +42,7 @@ from dagster import (
   define_asset_job,
 )
 
-from .analytics import sec_analytics_computed
+from .artifact import sec_knowledge_artifacts
 from .backup import sec_backup
 from .configs import sec_quarter_partitions
 from .download import sec_raw_filings
@@ -427,23 +427,22 @@ sec_historical_lbug_s3_publish_job = define_asset_job(
 
 
 # ============================================================================
-# Phase 6: Analytics (DuckDB-based analytics on staging data)
+# Phase 6: Artifact Generation (Knowledge artifacts for enrichment refinement)
 # ============================================================================
-# Runs analytics queries on the DuckDB staging file and outputs parquet.
-# Compute-heavy: opens the full DuckDB file locally for query processing.
+# Generates precomputed Parquet artifacts from DuckDB staging for graph-based
+# confidence refinement. Compute-heavy: runs graph algorithms locally.
 
-sec_analytics_job = define_asset_job(
-  name="sec_analytics",
-  description="Run analytics on published SEC DuckDB.",
-  selection=AssetSelection.assets(sec_analytics_computed),
+sec_artifact_generation_job = define_asset_job(
+  name="sec_artifact_generation",
+  description="Generate element + structure knowledge artifacts.",
+  selection=AssetSelection.assets(sec_knowledge_artifacts),
   tags={
     "pipeline": "sec",
-    "phase": "analytics",
-    # Compute-heavy: local DuckDB processing
+    "phase": "artifact",
+    # Same profile as analytics — local DuckDB + Python compute
     "ecs/cpu": "4096",
     "ecs/memory": "16384",
     "ecs/ephemeral_storage": "100",
-    # On-demand for predictable performance
     "ecs/run_task_kwargs": {
       "capacityProviderStrategy": [
         {"capacityProvider": "FARGATE", "weight": 1, "base": 1},

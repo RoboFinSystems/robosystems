@@ -9,6 +9,7 @@ from pathlib import Path
 
 import pandas as pd
 import pyarrow as pa
+import pyarrow.parquet as pq
 
 from robosystems.adapters.sec.processors.ids import (
   convert_schema_name_to_filename,
@@ -165,13 +166,16 @@ class ParquetWriter:
       final_filename = self.generate_standardized_filename(schema_name, is_relationship)
 
       filepath = self.output_dir / subdir / final_filename
+      filepath.parent.mkdir(parents=True, exist_ok=True)
 
       logger.debug(
         f"Saving {schema_name} to {final_filename}: {len(df)} rows, {len(df.columns)} columns"
       )
       logger.debug(f"Columns in {schema_name}: {list(df.columns)}")
 
-      df.to_parquet(filepath, index=False)
+      table = pa.Table.from_pandas(df, preserve_index=False)
+      with open(filepath, "wb") as f:
+        pq.write_table(table, f)
 
       if final_filename != filename:
         logger.info(f"📝 Standardized filename: {filename} -> {final_filename}")
@@ -244,13 +248,16 @@ class ParquetWriter:
         filepath = self.output_dir / subdir / final_filename
       else:
         filepath = self.output_dir / final_filename
+      filepath.parent.mkdir(parents=True, exist_ok=True)
 
       logger.info(
         f"Saving {table_name} to {final_filename}: {len(df)} rows, {len(df.columns)} columns"
       )
       logger.debug(f"Columns in {table_name}: {list(df.columns)}")
 
-      df.to_parquet(filepath, index=False)
+      table = pa.Table.from_pandas(df, preserve_index=False)
+      with open(filepath, "wb") as f:
+        pq.write_table(table, f)
 
       if final_filename != filename:
         logger.info(f"📝 Standardized filename: {filename} -> {final_filename}")

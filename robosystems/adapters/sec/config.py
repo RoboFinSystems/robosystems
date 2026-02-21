@@ -76,6 +76,9 @@ XBRL_COLUMN_STANDARDIZATION = False
 # Semantic enrichment: embedding-based canonical concept matching
 XBRL_SEMANTIC_ENRICHMENT = True
 
+# Graph-based confidence refinement: uses precomputed artifacts to adjust scores
+XBRL_GRAPH_REFINEMENT = True
+
 # =============================================================================
 # SEC PIPELINE CONFIGURATION
 # =============================================================================

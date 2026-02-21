@@ -205,6 +205,29 @@ def is_source_enabled(source: DataSourceType) -> bool:
 
 
 # =============================================================================
+# Artifact Path Helpers
+# =============================================================================
+
+
+def get_artifact_path(name: str) -> str:
+  """Get path to a precomputed artifact Parquet file.
+
+  Args:
+      name: Artifact name (e.g., "element_knowledge", "structure_profiles")
+
+  Returns:
+      Full path to the artifact Parquet file.
+
+  Example:
+      >>> get_artifact_path("element_knowledge")
+      './data/artifacts/element_knowledge.parquet'
+  """
+  from robosystems.config import env
+
+  return f"{env.ARTIFACT_PATH}/{name}.parquet"
+
+
+# =============================================================================
 # DuckDB Staging Path Helpers
 # =============================================================================
 
