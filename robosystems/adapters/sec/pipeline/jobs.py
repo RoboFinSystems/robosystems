@@ -88,7 +88,7 @@ sec_download_job = define_asset_job(
 # outputting consolidated parquet files. Parallel execution across quarters
 # is controlled by DAGSTER_MAX_CONCURRENT_RUNS.
 #
-# Uses Standard profile (2 vCPU, 8 GB) - processing is disk-buffered, not memory-intensive.
+# Uses Enhanced profile (4 vCPU, 16 GB) - embedding enrichment is memory-intensive.
 # Each filing is processed independently to disk, then uploaded to S3.
 # EFTS returns max 10k filings per quarterly partition, but batch_limit caps per run.
 sec_process_job = define_asset_job(
@@ -101,9 +101,9 @@ sec_process_job = define_asset_job(
   tags={
     "pipeline": "sec",
     "phase": "process",
-    # Standard profile: 2 vCPU, 8 GB, 50 GB storage - disk-buffered processing
-    "ecs/cpu": "2048",
-    "ecs/memory": "8192",
+    # Enhanced profile: 4 vCPU, 16 GB, 50 GB storage - embedding enrichment is memory-intensive
+    "ecs/cpu": "4096",
+    "ecs/memory": "16384",
     "ecs/ephemeral_storage": "50",
     # Long-running job (hours) - use on-demand to avoid Spot interruptions
     "ecs/run_task_kwargs": {
