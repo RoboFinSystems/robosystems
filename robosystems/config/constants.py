@@ -160,19 +160,14 @@ XBRL_EXTERNALIZATION_THRESHOLD = 1024  # characters
 # These tables contain millions of rows and consume significant memory
 XBRL_GRAPH_LARGE_NODES = "Fact,Element,Label,Association,Structure,Dimension,Report"
 
-# SEC Processing Batch Limit
-# Smaller batches leverage the merge strategy for crash resilience:
-# - Each batch flushes to S3, merging with existing data
-# - If job crashes, at most one batch is lost (not entire quarter)
-# - 2000 filings/batch = ~6 batches for Q2 (proxy season, ~11k filings)
-# - Sensor re-triggers until all pending files are processed
-SEC_PROCESS_BATCH_LIMIT = 2000
-
-# SEC Flush Interval — how many filings to accumulate before flushing to S3
-# Part-file output model: each flush writes part files (part_{uuid}.parquet)
-# under table subdirectories, avoiding memory-intensive consolidation.
+# SEC Processing Batch Size
+# Each Dagster run processes exactly one batch, then exits. The sensor
+# re-triggers if pending files remain, enabling natural memory release
+# between batches and crash resilience (at most one batch lost).
+# Part-file output: each batch writes part_{uuid}.parquet files per table.
 # 500 filings keeps Arrow concat under ~250MB for the largest tables.
-SEC_FLUSH_INTERVAL = 500
+# Q2 (proxy season, ~11k filings) = ~22 sensor-triggered runs.
+SEC_PROCESS_BATCH_SIZE = 500
 
 # =============================================================================
 # API VERSION CONSTANTS

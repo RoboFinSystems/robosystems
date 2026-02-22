@@ -752,7 +752,6 @@ class DuckDBStager:
             f"s3://{self.bucket}/{self.source_prefix}/"
             f"filed={y}-Q*/{entity_type}/{table_name}"
           )
-          s3_pattern_list.append(f"{base}.parquet")
           s3_pattern_list.append(f"{base}/*.parquet")
         s3_pattern: str | list[str] = s3_pattern_list
       else:
@@ -760,7 +759,7 @@ class DuckDBStager:
           f"s3://{self.bucket}/{self.source_prefix}/"
           f"{filed_pattern}/{entity_type}/{table_name}"
         )
-        s3_pattern = [f"{base}.parquet", f"{base}/*.parquet"]
+        s3_pattern = f"{base}/*.parquet"
 
       timeout = get_staging_timeout(table_name)
       size_hint = " (large table)" if is_large else ""
