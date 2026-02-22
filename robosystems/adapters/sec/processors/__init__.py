@@ -19,7 +19,6 @@ from .consolidation import (
   consolidate_parquet_from_disk,
   consolidate_parquet_tables_by_date,
   get_quarter_end_date,
-  merge_with_existing_s3,
 )
 from .constants import QUARTER_END_DAYS, SHARED_NODE_TABLES
 from .dataframe import DataFrameManager
@@ -118,7 +117,6 @@ __all__ = [
   "create_unit_id",
   "get_quarter_end_date",
   "make_plural",
-  "merge_with_existing_s3",
   "process_single_filing_to_memory",
   "safe_concat",
 ]

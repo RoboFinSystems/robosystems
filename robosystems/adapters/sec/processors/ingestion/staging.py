@@ -40,7 +40,7 @@ from .models import (
   TableInfo,
   get_staging_timeout,
   make_progress_logger,
-  s3_url_exists,
+  s3_get_table_patterns,
 )
 
 
@@ -401,30 +401,37 @@ class DuckDBStager:
           )
           continue
 
-        # Build S3 patterns for all quarters to scan
-        s3_patterns = [
-          f"s3://{self.bucket}/{self.source_prefix}/filed={y}-Q{q}/{entity_type}/{table_name}.parquet"
-          for y, q in quarters_to_scan
-        ]
-
-        # Filter to only existing files
-        if len(s3_patterns) > 1:
-          s3_patterns = [p for p in s3_patterns if s3_url_exists(self.s3_client, p)]
-          if not s3_patterns:
-            log_progress(
-              f"[{i}/{total_tables}] Skipped {table_name}: no files for any quarter"
+        # Build S3 patterns for all quarters, only including formats that exist.
+        # s3_get_table_patterns checks each format individually to avoid DuckDB
+        # errors from literal paths (no wildcards) that don't exist on S3.
+        s3_patterns: list[str] = []
+        for y, q in quarters_to_scan:
+          filed_pattern = f"filed={y}-Q{q}"
+          s3_patterns.extend(
+            s3_get_table_patterns(
+              self.s3_client,
+              self.bucket,
+              self.source_prefix,
+              filed_pattern,
+              entity_type,
+              table_name,
             )
-            successful_tables.append(table_name)
-            table_infos[table_name] = TableInfo(
-              name=table_name,
-              row_count=0,
-              file_count=0,
-              staged_at=datetime.now(UTC).isoformat(),
-              skipped=True,
-            )
-            continue
+          )
 
-        # Use single pattern if only one quarter
+        if not s3_patterns:
+          log_progress(
+            f"[{i}/{total_tables}] Skipped {table_name}: no files for any quarter"
+          )
+          successful_tables.append(table_name)
+          table_infos[table_name] = TableInfo(
+            name=table_name,
+            row_count=0,
+            file_count=0,
+            staged_at=datetime.now(UTC).isoformat(),
+            skipped=True,
+          )
+          continue
+
         s3_pattern: str | list[str] = (
           s3_patterns[0] if len(s3_patterns) == 1 else s3_patterns
         )
@@ -716,8 +723,6 @@ class DuckDBStager:
     failed_tables: list[tuple[str, str]] = []
     skipped_tables: list[str] = []
 
-    from datetime import UTC, datetime
-
     # Build partition pattern(s)
     # year_range_patterns is set when we need a list of per-year globs
     year_range_patterns: bool = False
@@ -738,18 +743,24 @@ class DuckDBStager:
     for i, (table_name, entity_type) in enumerate(tables.items(), 1):
       is_large = table_name in LARGE_STAGING_TABLES
 
-      # Build s3_pattern: single glob string or list of per-year globs
+      # Build s3_pattern: dual-format globs supporting both old and new layouts
+      # Old: TABLE.parquet, New: TABLE/*.parquet
       if year_range_patterns:
-        s3_pattern: str | list[str] = [
-          f"s3://{self.bucket}/{self.source_prefix}/"
-          f"filed={y}-Q*/{entity_type}/{table_name}.parquet"
-          for y in range(range_start, range_end + 1)
-        ]
+        s3_pattern_list: list[str] = []
+        for y in range(range_start, range_end + 1):
+          base = (
+            f"s3://{self.bucket}/{self.source_prefix}/"
+            f"filed={y}-Q*/{entity_type}/{table_name}"
+          )
+          s3_pattern_list.append(f"{base}.parquet")
+          s3_pattern_list.append(f"{base}/*.parquet")
+        s3_pattern: str | list[str] = s3_pattern_list
       else:
-        s3_pattern = (
+        base = (
           f"s3://{self.bucket}/{self.source_prefix}/"
-          f"{filed_pattern}/{entity_type}/{table_name}.parquet"
+          f"{filed_pattern}/{entity_type}/{table_name}"
         )
+        s3_pattern = [f"{base}.parquet", f"{base}/*.parquet"]
 
       timeout = get_staging_timeout(table_name)
       size_hint = " (large table)" if is_large else ""

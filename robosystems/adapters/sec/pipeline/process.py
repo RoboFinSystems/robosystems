@@ -4,6 +4,8 @@ This module contains the sec_processed_filings asset for processing
 SEC XBRL filings into consolidated parquet files.
 """
 
+import gc
+import uuid
 from pathlib import Path
 
 from dagster import (
@@ -18,7 +20,6 @@ from robosystems.adapters.sec.processors import (
   SECMetadataLoader,
   atomic_s3_upload,
   consolidate_parquet_from_disk,
-  merge_with_existing_s3,
   process_single_filing_to_memory,
 )
 from robosystems.config import env
@@ -51,28 +52,22 @@ def sec_processed_filings(
 ) -> MaterializeResult:
   """Process a batch of SEC filings (up to batch_limit per run).
 
-  This asset processes up to batch_limit pending SourceFiles (default 500),
+  This asset processes up to batch_limit pending SourceFiles (default 2000),
   then exits gracefully. The sensor will trigger another run if pending
   files remain, enabling natural memory release between batches.
 
-  Batch Processing Model:
-  - Each job processes at most batch_limit filings (default 500)
-  - Job exits after batch, container terminates, memory released
-  - Sensor detects remaining pending files, triggers next batch
-  - Continues until all filings are processed
-
   Memory Management:
-  - Bounded to batch_limit filings per container lifecycle
-  - Each filing's parquet written to local disk, not accumulated in memory
-  - Container exit between batches releases all memory naturally
-  - Much safer than processing thousands of filings in one container
+  - Periodic flush every flush_interval filings (default 500)
+  - Part-file output: each flush writes part_{uuid}.parquet files per table
+  - Shared tables (Element, Label, etc.) deduped at flush via pure Arrow (no Pandas)
+  - DuckDB handles final cross-part-file dedup during staging
+  - del + gc.collect() after each table upload to force memory release
 
-  Output Structure (quarterly partitions with append):
-    s3://bucket/sec/processed/filed=2024-Q1/nodes/Entity.parquet
-    - Aligns Dagster partition (quarterly) with S3 partition (quarterly)
-    - Single file per table per quarter, merged on each run
-    - Shared tables (Element, Label, etc.) deduplicated on identifier
-    - Simplifies staging - single glob per quarter
+  Output Structure (part files):
+    s3://bucket/sec/processed/filed=2024-Q1/nodes/Entity/part_a1b2c3d4e5f6.parquet
+    - Multiple part files per table per quarter (additive, no merge)
+    - UUID naming prevents collisions across runs
+    - DuckDB reads both old format (TABLE.parquet) and new (TABLE/*.parquet)
 
   Returns:
       MaterializeResult with processing statistics
@@ -188,23 +183,33 @@ def sec_processed_filings(
   pending_flush: list[dict] = []  # [{...file_info}, ...]
   total_flushed = 0
   tables_uploaded = 0  # Track number of table files uploaded
+  flush_batch_number = 0  # Track which flush cycle we're on
 
   def flush_to_s3() -> int:
-    """Consolidate disk buffer, merge with existing S3 data, upload, mark success.
+    """Consolidate disk buffer into part files on S3, mark success.
 
-    Uses quarterly partitions with append-based merging:
-    - Downloads existing TABLE.parquet from S3 (if exists)
-    - Merges new data with existing data
-    - Deduplicates shared tables (Element, Label, etc.) on identifier
-    - Uploads merged result atomically
+    Part-file output model (no consolidation with existing S3 data):
+    - For each table: concat batch's parquets (Arrow only) -> upload as part file
+    - Shared tables deduped within the batch via pure Arrow (no Pandas)
+    - S3 key: entity_type/table_name/part_{uuid_hex12}.parquet
+    - UUID naming prevents collisions across runs
+    - del + gc.collect() after each table to force memory release
+
+    Crash resilience: If the job crashes after S3 upload but before mark_success,
+    orphan part files remain on S3 and filings stay "pending". On re-run, new
+    part files are written alongside orphans (UUIDs prevent overwrites). This
+    creates duplicate rows across part files, but DuckDB handles dedup during
+    staging via GROUP BY + FIRST() with spill-to-disk.
     """
-    nonlocal tables_uploaded, total_flushed
+    nonlocal tables_uploaded, total_flushed, flush_batch_number
 
     if not pending_flush:
       return 0
 
+    flush_batch_number += 1
     context.log.info(
-      f"Flushing {len(pending_flush)} filings to S3 (partition: filed={partition_date})..."
+      f"Flush #{flush_batch_number}: {len(pending_flush)} filings to S3 "
+      f"(partition: filed={partition_date})..."
     )
 
     # Find all table directories in work_dir
@@ -217,28 +222,21 @@ def sec_processed_filings(
         table_keys.add(table_key)
 
     for table_key in sorted(table_keys):
-      # Consolidate this batch's data from disk
+      # Consolidate this batch's data from disk (Arrow only, no Pandas)
       new_parquet_bytes = consolidate_parquet_from_disk(work_dir, table_key)
       if not new_parquet_bytes:
         continue
 
       entity_type, table_name = table_key.split("/", 1)
-      # Single file per table per quarter: TABLE.parquet (not part files)
+      part_id = uuid.uuid4().hex[:12]
+      # Part file under table subdirectory: TABLE/part_{id}.parquet
       s3_key = get_processed_key(
         DataSourceType.SEC,
         "processed",
         f"filed={partition_date}",
         entity_type,
-        f"{table_name}.parquet",
-      )
-
-      # Merge with existing S3 data (append-based accumulation)
-      merged_bytes = merge_with_existing_s3(
-        s3_client=s3.client,
-        bucket=processed_bucket,
-        s3_key=s3_key,
-        new_data=new_parquet_bytes,
-        table_key=table_key,
+        table_name,
+        f"part_{part_id}.parquet",
       )
 
       # Upload atomically (temp file + copy pattern)
@@ -246,10 +244,14 @@ def sec_processed_filings(
         s3_client=s3.client,
         bucket=processed_bucket,
         final_key=s3_key,
-        data=merged_bytes,
+        data=new_parquet_bytes,
       )
       tables_uploaded += 1
-      context.log.info(f"Uploaded: {s3_key} ({len(merged_bytes):,} bytes)")
+      context.log.info(f"Uploaded: {s3_key} ({len(new_parquet_bytes):,} bytes)")
+
+      # Release memory for this table before processing the next
+      del new_parquet_bytes
+      gc.collect()
 
     # Mark all pending filings as success (data is now safely in S3)
     with db.get_session() as session:
@@ -261,7 +263,8 @@ def sec_processed_filings(
     flushed_count = len(pending_flush)
     total_flushed += flushed_count
     context.log.info(
-      f"Flushed {flushed_count} filings, {tables_uploaded} total table files uploaded"
+      f"Flush #{flush_batch_number}: {flushed_count} filings done, "
+      f"{tables_uploaded} total table files uploaded"
     )
 
     # Clear disk buffer and pending list
@@ -360,6 +363,14 @@ def sec_processed_filings(
           context.log.error(f"Stopping on error: {result.error}")
           break
 
+      # Periodic flush to bound memory usage
+      if len(pending_flush) >= config.flush_interval:
+        context.log.info(
+          f"Periodic flush triggered at {len(pending_flush)} pending filings "
+          f"(interval={config.flush_interval})..."
+        )
+        flush_to_s3()
+
       # Batch progress summary every 100 filings
       if (i + 1) % 100 == 0:
         context.log.info(
@@ -367,9 +378,13 @@ def sec_processed_filings(
           f"{succeeded} succeeded, {failed} failed, {skipped} skipped"
         )
 
-    # Flush all processed filings to S3 at end of batch
+    # Force garbage collection before final flush to reclaim any lingering
+    # memory from the last filing's XBRLGraphProcessor/SemanticEnricher
+    gc.collect()
+
+    # Flush remaining processed filings to S3
     if pending_flush:
-      context.log.info(f"Flushing {len(pending_flush)} filings to S3...")
+      context.log.info(f"Final flush: {len(pending_flush)} filings to S3...")
       flush_to_s3()
 
   finally:

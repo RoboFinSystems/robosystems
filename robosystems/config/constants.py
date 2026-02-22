@@ -168,6 +168,12 @@ XBRL_GRAPH_LARGE_NODES = "Fact,Element,Label,Association,Structure,Dimension,Rep
 # - Sensor re-triggers until all pending files are processed
 SEC_PROCESS_BATCH_LIMIT = 2000
 
+# SEC Flush Interval — how many filings to accumulate before flushing to S3
+# Part-file output model: each flush writes part files (part_{uuid}.parquet)
+# under table subdirectories, avoiding memory-intensive consolidation.
+# 500 filings keeps Arrow concat under ~250MB for the largest tables.
+SEC_FLUSH_INTERVAL = 500
+
 # =============================================================================
 # API VERSION CONSTANTS
 # =============================================================================

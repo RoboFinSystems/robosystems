@@ -22,6 +22,48 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 
+def _dedup_arrow_table(
+  table: pa.Table, column: str, label: str | None = None
+) -> pa.Table:
+  """Deduplicate an Arrow table on a column, keeping first occurrence.
+
+  Uses pure Arrow operations — no Pandas round-trip. Iterates the dedup
+  column to build a set of seen values, then filters via pa.Table.take().
+  For 500-filing batches, shared tables are typically 60-120K rows, so the
+  Python set approach is fast and memory-efficient.
+
+  Args:
+      table: Arrow table to deduplicate
+      column: Column name to deduplicate on
+      label: Optional label for debug logging (e.g. table_key)
+
+  Returns:
+      Deduplicated Arrow table
+  """
+  original_rows = table.num_rows
+  identifiers = table.column(column)
+
+  seen: set[str] = set()
+  keep_indices: list[int] = []
+  for i, val in enumerate(identifiers.to_pylist()):
+    if val not in seen:
+      seen.add(val)
+      keep_indices.append(i)
+
+  if len(keep_indices) == original_rows:
+    return table
+
+  result = table.take(keep_indices)
+  if label:
+    logger.debug(
+      "Deduplicated %s: %d -> %d rows",
+      label,
+      original_rows,
+      result.num_rows,
+    )
+  return result
+
+
 def get_quarter_end_date(year: int, quarter: int) -> str:
   """Get the last day of a quarter as YYYY-MM-DD string.
 
@@ -88,13 +130,12 @@ def consolidate_parquet_tables_by_date(
         continue
       # Concatenate all tables of this type for this date
       combined = pa.concat_tables(tables, promote_options="permissive")
+      del tables
 
-      # Deduplicate shared node tables on identifier column
-      # This reduces duplicates that DuckDB would otherwise have to handle
+      # Deduplicate shared node tables on identifier column (pure Arrow, no Pandas)
+      # Reduces part file size so DuckDB has less work during staging
       if key in SHARED_NODE_TABLES and "identifier" in combined.column_names:
-        df = combined.to_pandas()
-        df = df.drop_duplicates(subset=["identifier"], keep="first")
-        combined = pa.Table.from_pandas(df, preserve_index=False)
+        combined = _dedup_arrow_table(combined, "identifier")
 
       # Write to bytes
       buffer = BytesIO()
@@ -110,10 +151,10 @@ def consolidate_parquet_from_disk(
 ) -> bytes:
   """Consolidate all parquet files for a table from disk into single bytes.
 
-  For shared node tables (Element, Label, Reference, Unit, Period), this also
-  deduplicates on the identifier column to reduce memory pressure during
-  DuckDB staging. These tables have deterministic UUIDs, so duplicates across
-  filings are guaranteed to have the same identifier.
+  For shared node tables (Element, Label, Reference, Unit, Period), deduplicates
+  on the identifier column using pure Arrow (no Pandas round-trip). This reduces
+  part file sizes so DuckDB has less data to process during staging. DuckDB still
+  handles final dedup across part files via GROUP BY + FIRST() with spill-to-disk.
 
   Args:
       work_dir: Directory containing parquet files
@@ -145,24 +186,12 @@ def consolidate_parquet_from_disk(
 
   # Concatenate all tables
   combined = pa.concat_tables(tables, promote_options="permissive")
+  del tables
 
-  # Deduplicate shared node tables on identifier column
-  # This reduces duplicates that DuckDB would otherwise have to handle via
-  # memory-intensive ROW_NUMBER() window functions during staging
+  # Deduplicate shared node tables on identifier column (pure Arrow, no Pandas)
+  # Reduces part file size so DuckDB has less work during staging
   if table_key in SHARED_NODE_TABLES and "identifier" in combined.column_names:
-    original_rows = combined.num_rows
-    # Convert to pandas for deduplication, then back to Arrow
-    df = combined.to_pandas()
-    df = df.drop_duplicates(subset=["identifier"], keep="first")
-    combined = pa.Table.from_pandas(df, preserve_index=False)
-    deduped_rows = combined.num_rows
-    if original_rows != deduped_rows:
-      logger.debug(
-        "Deduplicated %s: %d -> %d rows",
-        table_key,
-        original_rows,
-        deduped_rows,
-      )
+    combined = _dedup_arrow_table(combined, "identifier", table_key)
 
   # Write to bytes
   buffer = BytesIO()
