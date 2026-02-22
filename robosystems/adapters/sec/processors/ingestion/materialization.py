@@ -40,7 +40,7 @@ from .models import (
   ProgressCallback,
   get_materialization_timeout,
   make_progress_logger,
-  s3_url_exists,
+  s3_table_data_exists,
 )
 
 
@@ -328,31 +328,30 @@ class LadybugMaterializer:
 
       total_tables = len(ordered_tables)
       for i, (table_name, entity_type) in enumerate(ordered_tables, 1):
-        # Build S3 paths for all quarters to scan
-        s3_paths = [
-          f"s3://{self.bucket}/{self.source_prefix}/filed={y}-Q{q}/{entity_type}/{table_name}.parquet"
-          for y, q in quarters_to_scan
-        ]
+        # Build dual-format S3 paths for all quarters to scan
+        # Supports both old format (TABLE.parquet) and new part-file format (TABLE/*.parquet)
+        s3_paths: list[str] = []
+        for y, q in quarters_to_scan:
+          filed_pattern = f"filed={y}-Q{q}"
+          if s3_table_data_exists(
+            self.s3_client,
+            self.bucket,
+            self.source_prefix,
+            filed_pattern,
+            entity_type,
+            table_name,
+          ):
+            base = f"s3://{self.bucket}/{self.source_prefix}/{filed_pattern}/{entity_type}/{table_name}"
+            s3_paths.append(f"{base}.parquet")
+            s3_paths.append(f"{base}/*.parquet")
 
-        # Filter to only existing files
-        if len(s3_paths) > 1:
-          s3_paths = [p for p in s3_paths if s3_url_exists(self.s3_client, p)]
-          if not s3_paths:
-            log_progress(
-              f"[{i}/{total_tables}] Skipped {table_name}: no files for any quarter"
-            )
-            successful_tables.append(table_name)
-            table_rows[table_name] = 0
-            continue
-        else:
-          # Single path - check if it exists
-          if not s3_url_exists(self.s3_client, s3_paths[0]):
-            log_progress(
-              f"[{i}/{total_tables}] Skipped {table_name}: no files for Q{quarter}"
-            )
-            successful_tables.append(table_name)
-            table_rows[table_name] = 0
-            continue
+        if not s3_paths:
+          log_progress(
+            f"[{i}/{total_tables}] Skipped {table_name}: no files for any quarter"
+          )
+          successful_tables.append(table_name)
+          table_rows[table_name] = 0
+          continue
 
         s3_pattern: str | list[str] = s3_paths[0] if len(s3_paths) == 1 else s3_paths
 
@@ -480,13 +479,23 @@ class LadybugMaterializer:
     )
 
     try:
-      # Step 1: Build S3 path for Entity parquet
-      entity_s3_path = (
-        f"s3://{self.bucket}/{self.source_prefix}/"
-        f"filed={year}-Q{quarter}/nodes/Entity.parquet"
+      # Step 1: Find Entity parquet(s) — supports both old and new format
+      import io
+
+      import pyarrow as pa
+      import pyarrow.parquet as pq
+
+      filed_pattern = f"filed={year}-Q{quarter}"
+      has_data = s3_table_data_exists(
+        self.s3_client,
+        self.bucket,
+        self.source_prefix,
+        filed_pattern,
+        "nodes",
+        "Entity",
       )
 
-      if not s3_url_exists(self.s3_client, entity_s3_path):
+      if not has_data:
         log_progress(f"No Entity file found for Q{quarter} {year}, skipping")
         return EntityUpdateResult(
           status="no_changes",
@@ -495,17 +504,35 @@ class LadybugMaterializer:
         )
 
       # Step 2: Read Entity parquet from S3 using boto3 + pyarrow
-      # Uses IAM role credentials automatically (works in ECS, SSO, etc.)
-      log_progress(f"Reading Entity parquet from S3: {entity_s3_path}")
+      # Try old format first (single file), then new format (part files)
+      log_progress(f"Reading Entity parquet from S3 for Q{quarter} {year}")
 
-      import io
+      old_key = f"{self.source_prefix}/{filed_pattern}/nodes/Entity.parquet"
+      if self.s3_client.object_exists(self.bucket, old_key):
+        # Old format: single file
+        response = self.s3_client.s3_client.get_object(Bucket=self.bucket, Key=old_key)
+        parquet_bytes = response["Body"].read()
+        table = pq.read_table(io.BytesIO(parquet_bytes))
+      else:
+        # New format: part files under Entity/ directory
+        part_prefix = f"{self.source_prefix}/{filed_pattern}/nodes/Entity/"
+        part_keys = self.s3_client.list_objects(self.bucket, prefix=part_prefix)
+        part_keys = [k for k in part_keys if k.endswith(".parquet")]
+        if not part_keys:
+          log_progress(f"No Entity part files found for Q{quarter} {year}, skipping")
+          return EntityUpdateResult(
+            status="no_changes",
+            entities_checked=0,
+            duration_ms=(time.time() - start_time) * 1000,
+          )
+        # Read and concat all part files (Entity is small, ~256KB/quarter)
+        tables = []
+        for key in part_keys:
+          response = self.s3_client.s3_client.get_object(Bucket=self.bucket, Key=key)
+          part_bytes = response["Body"].read()
+          tables.append(pq.read_table(io.BytesIO(part_bytes)))
+        table = pa.concat_tables(tables, promote_options="permissive")
 
-      import pyarrow.parquet as pq
-
-      s3_key = f"{self.source_prefix}/filed={year}-Q{quarter}/nodes/Entity.parquet"
-      response = self.s3_client.s3_client.get_object(Bucket=self.bucket, Key=s3_key)
-      parquet_bytes = response["Body"].read()
-      table = pq.read_table(io.BytesIO(parquet_bytes))
       latest_entities = table.to_pandas()
 
       if latest_entities.empty:

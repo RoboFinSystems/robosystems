@@ -88,13 +88,7 @@ def consolidate_parquet_tables_by_date(
         continue
       # Concatenate all tables of this type for this date
       combined = pa.concat_tables(tables, promote_options="permissive")
-
-      # Deduplicate shared node tables on identifier column
-      # This reduces duplicates that DuckDB would otherwise have to handle
-      if key in SHARED_NODE_TABLES and "identifier" in combined.column_names:
-        df = combined.to_pandas()
-        df = df.drop_duplicates(subset=["identifier"], keep="first")
-        combined = pa.Table.from_pandas(df, preserve_index=False)
+      del tables
 
       # Write to bytes
       buffer = BytesIO()
@@ -110,10 +104,8 @@ def consolidate_parquet_from_disk(
 ) -> bytes:
   """Consolidate all parquet files for a table from disk into single bytes.
 
-  For shared node tables (Element, Label, Reference, Unit, Period), this also
-  deduplicates on the identifier column to reduce memory pressure during
-  DuckDB staging. These tables have deterministic UUIDs, so duplicates across
-  filings are guaranteed to have the same identifier.
+  Pure Arrow concat — no dedup. Deduplication is handled by DuckDB during
+  staging via GROUP BY + FIRST() with spill-to-disk.
 
   Args:
       work_dir: Directory containing parquet files
@@ -145,24 +137,7 @@ def consolidate_parquet_from_disk(
 
   # Concatenate all tables
   combined = pa.concat_tables(tables, promote_options="permissive")
-
-  # Deduplicate shared node tables on identifier column
-  # This reduces duplicates that DuckDB would otherwise have to handle via
-  # memory-intensive ROW_NUMBER() window functions during staging
-  if table_key in SHARED_NODE_TABLES and "identifier" in combined.column_names:
-    original_rows = combined.num_rows
-    # Convert to pandas for deduplication, then back to Arrow
-    df = combined.to_pandas()
-    df = df.drop_duplicates(subset=["identifier"], keep="first")
-    combined = pa.Table.from_pandas(df, preserve_index=False)
-    deduped_rows = combined.num_rows
-    if original_rows != deduped_rows:
-      logger.debug(
-        "Deduplicated %s: %d -> %d rows",
-        table_key,
-        original_rows,
-        deduped_rows,
-      )
+  del tables
 
   # Write to bytes
   buffer = BytesIO()

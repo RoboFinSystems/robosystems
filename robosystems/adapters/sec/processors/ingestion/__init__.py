@@ -68,6 +68,8 @@ from .models import (
   get_materialization_timeout,
   get_staging_timeout,
   make_progress_logger,
+  s3_prefix_has_objects,
+  s3_table_data_exists,
   s3_url_exists,
 )
 from .staging import DuckDBStager
@@ -146,5 +148,7 @@ __all__ = [
   "get_materialization_timeout",
   "get_staging_timeout",
   "make_progress_logger",
+  "s3_prefix_has_objects",
+  "s3_table_data_exists",
   "s3_url_exists",
 ]

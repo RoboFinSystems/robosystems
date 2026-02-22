@@ -9,7 +9,7 @@ from datetime import UTC, datetime
 from dagster import Config, StaticPartitionsDefinition
 from pydantic import Field
 
-from robosystems.config.constants import SEC_PROCESS_BATCH_LIMIT
+from robosystems.config.constants import SEC_FLUSH_INTERVAL, SEC_PROCESS_BATCH_LIMIT
 
 # =============================================================================
 # Constants
@@ -102,18 +102,24 @@ class SECProcessConfig(Config):
 
   Memory Management:
   - Each job processes at most batch_limit filings (default 2,000)
-  - Job exits gracefully after batch, releasing all memory
-  - Sensor re-triggers if more pending files exist
-  - Processing is disk-buffered (not memory-intensive)
+  - Periodic flush every flush_interval filings (default 500)
+  - Part-file output: each flush writes part_{uuid}.parquet files
+  - No consolidation/dedup at flush time — DuckDB handles it during staging
+  - SemanticEnricher released before final flush to free ~300-500MB
 
-  Note: Smaller batches leverage the merge strategy for crash resilience.
-  Each batch flushes to S3 (merging with existing data), so a crash loses
-  at most one batch instead of an entire quarter.
+  Output Structure (part files):
+    s3://bucket/sec/processed/filed=2024-Q1/nodes/Entity/part_a1b2c3d4e5f6.parquet
+    - Multiple part files per table per quarter (additive, no merge)
+    - UUID naming prevents collisions across runs
+    - DuckDB reads both old format (TABLE.parquet) and new (TABLE/*.parquet)
   """
 
   # Max filings to process per job run before exiting gracefully.
-  # Smaller batches provide crash resilience via incremental S3 merging.
   batch_limit: int = SEC_PROCESS_BATCH_LIMIT
+
+  # Flush to S3 every N filings to bound memory usage.
+  # Each flush writes part files (no consolidation), keeping Arrow concat small.
+  flush_interval: int = SEC_FLUSH_INTERVAL
 
   # Continue processing even if some filings fail
   # If False, job fails on first error (for debugging)
