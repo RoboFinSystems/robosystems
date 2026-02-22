@@ -5,22 +5,9 @@ structure compositions from DuckDB staging databases. All heavy
 deduplication happens in DuckDB SQL to keep Python memory low.
 """
 
-from dataclasses import dataclass
 from pathlib import Path
 
 import duckdb
-
-
-@dataclass
-class ElementInfo:
-  """Metadata for an XBRL element."""
-
-  qname: str
-  name: str
-  period_type: str | None
-  balance: str | None
-  is_abstract: bool
-  is_numeric: bool
 
 
 class ArcExtractor:
@@ -235,39 +222,5 @@ class ArcExtractor:
       return result
     except Exception:
       return {}
-    finally:
-      conn.close()
-
-  def extract_all_elements(self) -> dict[str, ElementInfo]:
-    """Extract all element metadata from the database.
-
-    Returns:
-        Dict mapping qname to ElementInfo.
-    """
-    sql = """
-      SELECT
-        qname,
-        name,
-        period_type,
-        balance,
-        COALESCE(is_abstract, false) AS is_abstract,
-        COALESCE(is_numeric, false) AS is_numeric
-      FROM Element
-      WHERE qname IS NOT NULL
-    """
-    conn = self._connect()
-    try:
-      rows = conn.execute(sql).fetchall()
-      return {
-        row[0]: ElementInfo(
-          qname=row[0],
-          name=row[1],
-          period_type=row[2],
-          balance=row[3],
-          is_abstract=bool(row[4]),
-          is_numeric=bool(row[5]),
-        )
-        for row in rows
-      }
     finally:
       conn.close()

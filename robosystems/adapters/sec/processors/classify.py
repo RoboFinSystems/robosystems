@@ -209,29 +209,6 @@ DISCLOSURE_TO_CANONICAL: dict[str, str] = {
 }
 
 # ---------------------------------------------------------------------------
-# Type mapping (subset of graph_api/core/ladybug/manager.py:_map_schema_type_to_lbug)
-# ---------------------------------------------------------------------------
-
-_TYPE_MAP = {
-  "STRING": "STRING",
-  "INT64": "INT64",
-  "INT32": "INT32",
-  "DOUBLE": "DOUBLE",
-  "FLOAT": "FLOAT",
-  "BOOLEAN": "BOOLEAN",
-}
-
-
-def _map_type(schema_type: str) -> str:
-  mapped = _TYPE_MAP.get(schema_type.upper())
-  if mapped:
-    return mapped
-  if "[" in schema_type:
-    return schema_type
-  return "STRING"
-
-
-# ---------------------------------------------------------------------------
 # Schema DDL generation (minimal subset for classification)
 # ---------------------------------------------------------------------------
 

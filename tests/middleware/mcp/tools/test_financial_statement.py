@@ -38,7 +38,7 @@ class TestGetFinancialStatementDefinition:
     assert "income_statement" in enum_values
     assert "balance_sheet" in enum_values
     assert "cash_flow_statement" in enum_values
-    assert "stockholders_equity" in enum_values
+    assert "equity_statement" in enum_values
 
 
 class TestGetFinancialStatementExecution:

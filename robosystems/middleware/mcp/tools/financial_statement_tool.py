@@ -16,7 +16,7 @@ VALID_STATEMENT_TYPES = (
   "income_statement",
   "balance_sheet",
   "cash_flow_statement",
-  "stockholders_equity",
+  "equity_statement",
 )
 
 
@@ -37,7 +37,7 @@ class GetFinancialStatementTool(BaseTool):
 - income_statement — Revenue, expenses, net income
 - balance_sheet — Assets, liabilities, equity (instant periods)
 - cash_flow_statement — Operating, investing, financing activities
-- stockholders_equity — Equity components and changes
+- equity_statement — Equity components and changes
 
 **RETURNS:**
 - Facts with element names, values, periods, and period types

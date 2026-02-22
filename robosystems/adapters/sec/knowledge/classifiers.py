@@ -59,22 +59,6 @@ class ClassificationResult:
       return None
     return min(entries, key=lambda c: c.depth).statement
 
-  def get_statement_elements(self, stmt: StatementType) -> list[str]:
-    """Get all elements primarily classified under a statement."""
-    return [
-      qname
-      for qname, entries in self.classifications.items()
-      if min(entries, key=lambda c: c.depth).statement == stmt
-    ]
-
-  def summary(self) -> dict[str, int]:
-    """Count elements per primary statement."""
-    counts: dict[str, int] = {}
-    for entries in self.classifications.values():
-      primary = min(entries, key=lambda c: c.depth).statement
-      counts[primary.value] = counts.get(primary.value, 0) + 1
-    return counts
-
 
 # Known root elements for each financial statement
 STATEMENT_ROOTS: dict[StatementType, list[str]] = {
@@ -257,36 +241,3 @@ class StatementClassifier:
           edge_weight = graph.weight(node_idx, neighbor)
           visited.add(neighbor)
           queue.append((neighbor, depth + 1, cum_weight * edge_weight))
-
-  def analyze_structure(self, element_graph: ElementGraph) -> dict:
-    """Run structural analysis on the graph.
-
-    Uses connected components and core decomposition to understand
-    the overall structure of the element relationship graph.
-
-    Args:
-        element_graph: The element graph.
-
-    Returns:
-        Dict with structural metrics.
-    """
-    graph = element_graph.graph
-
-    # Connected components (on undirected view)
-    undirected = nk.graphtools.toUndirected(graph)
-    cc = nk.components.ConnectedComponents(undirected)
-    cc.run()
-
-    # Core decomposition
-    core = nk.centrality.CoreDecomposition(undirected)
-    core.run()
-
-    return {
-      "num_nodes": graph.numberOfNodes(),
-      "num_edges": graph.numberOfEdges(),
-      "num_components": cc.numberOfComponents(),
-      "largest_component_size": max(cc.getComponentSizes().values())
-      if cc.getComponentSizes()
-      else 0,
-      "max_core_number": max(core.scores()) if graph.numberOfNodes() > 0 else 0,
-    }
