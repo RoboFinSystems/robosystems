@@ -11,6 +11,7 @@ import pytest
 
 from robosystems.adapters.sec.processors.classify import (
   DISCLOSURE_CONCEPT_MAP,
+  DISCLOSURE_TO_CANONICAL,
   AssociationClassifier,
   TempLadybugContext,
   _generate_ddl,
@@ -196,7 +197,7 @@ class TestRollUpClassification:
     output_dir = _make_test_data(tmp_path, associations, elements, from_rels, to_rels)
 
     classifier = AssociationClassifier()
-    class_df, rel_df = classifier.classify(output_dir)
+    class_df, rel_df, canonical_hints = classifier.classify(output_dir)
 
     assert not class_df.empty
     rollups = class_df[class_df["type"] == "RollUp"]
@@ -236,7 +237,7 @@ class TestRollForwardClassification:
     output_dir = _make_test_data(tmp_path, associations, elements, from_rels, to_rels)
 
     classifier = AssociationClassifier()
-    class_df, rel_df = classifier.classify(output_dir)
+    class_df, rel_df, canonical_hints = classifier.classify(output_dir)
 
     assert not class_df.empty
     rf = class_df[class_df["type"] == "RollForward"]
@@ -285,7 +286,7 @@ class TestElementBasedClassifications:
     output_dir = _make_test_data(tmp_path, associations, elements, from_rels, to_rels)
 
     classifier = AssociationClassifier()
-    class_df, rel_df = classifier.classify(output_dir)
+    class_df, rel_df, canonical_hints = classifier.classify(output_dir)
 
     assert not class_df.empty
     matches = class_df[class_df["type"] == expected_type]
@@ -340,7 +341,7 @@ class TestManyToMany:
     output_dir = _make_test_data(tmp_path, associations, elements, from_rels, to_rels)
 
     classifier = AssociationClassifier()
-    class_df, rel_df = classifier.classify(output_dir)
+    class_df, rel_df, canonical_hints = classifier.classify(output_dir)
 
     # Should have at least RollUp + LineItems for assoc_pres
     types = set(class_df["type"].tolist())
@@ -384,7 +385,7 @@ class TestNoClassifications:
     output_dir = _make_test_data(tmp_path, associations, elements, from_rels, to_rels)
 
     classifier = AssociationClassifier()
-    class_df, rel_df = classifier.classify(output_dir)
+    class_df, rel_df, canonical_hints = classifier.classify(output_dir)
 
     assert class_df.empty
     assert rel_df.empty
@@ -395,7 +396,7 @@ class TestNoClassifications:
     output_dir.mkdir()
 
     classifier = AssociationClassifier()
-    class_df, rel_df = classifier.classify(output_dir)
+    class_df, rel_df, canonical_hints = classifier.classify(output_dir)
 
     assert class_df.empty
     assert rel_df.empty
@@ -496,7 +497,7 @@ class TestSemanticClassification:
     )
 
     classifier = AssociationClassifier()
-    class_df, rel_df = classifier.classify(output_dir)
+    class_df, rel_df, canonical_hints = classifier.classify(output_dir)
 
     # Should have at least one AssetsRollUp classification
     semantic = class_df[class_df["source"] == "disclosure_mechanics"]
@@ -540,7 +541,7 @@ class TestSemanticClassification:
     )
 
     classifier = AssociationClassifier()
-    class_df, rel_df = classifier.classify(output_dir)
+    class_df, rel_df, canonical_hints = classifier.classify(output_dir)
 
     semantic = class_df[class_df["source"] == "disclosure_mechanics"]
     assert not semantic.empty
@@ -587,7 +588,7 @@ class TestSemanticClassification:
     )
 
     classifier = AssociationClassifier()
-    class_df, rel_df = classifier.classify(output_dir)
+    class_df, rel_df, canonical_hints = classifier.classify(output_dir)
 
     # No semantic classifications should exist
     if not class_df.empty:
@@ -660,7 +661,7 @@ class TestSemanticClassification:
     )
 
     classifier = AssociationClassifier()
-    class_df, rel_df = classifier.classify(output_dir)
+    class_df, rel_df, canonical_hints = classifier.classify(output_dir)
 
     semantic = class_df[class_df["source"] == "disclosure_mechanics"]
     assert len(semantic) == 2
@@ -714,7 +715,7 @@ class TestSemanticClassification:
     )
 
     classifier = AssociationClassifier()
-    class_df, rel_df = classifier.classify(output_dir)
+    class_df, rel_df, canonical_hints = classifier.classify(output_dir)
 
     # Structural layer: RollUp from arcrole_analysis
     structural = class_df[class_df["source"] == "arcrole_analysis"]
@@ -748,3 +749,168 @@ class TestDisclosureConceptMap:
       DISCLOSURE_CONCEPT_MAP["CashAndCashEquivalentsPeriodIncreaseDecrease"]
       == "CashFlowStatement"
     )
+
+
+class TestDisclosureToCanonical:
+  def test_assets_root_gives_canonical_hint(self, tmp_path):
+    """Root of AssetsRollUp → canonical hint for total_assets."""
+    elements = _semantic_base_elements()
+    associations = [
+      {
+        "identifier": "assoc_calc_root",
+        "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item",
+        "order_value": 1.0,
+        "association_type": "Calculation",
+        "weight": 1.0,
+        "root": "True",
+        "preferred_label": None,
+      },
+    ]
+    structures = [{"identifier": "struct1"}]
+    struct_assoc_rels = [
+      {"from": "struct1", "to": "assoc_calc_root", "association_context": "calc"},
+    ]
+    from_rels = [{"from": "assoc_calc_root", "to": "elem_assets"}]
+
+    output_dir = _make_test_data(
+      tmp_path,
+      associations,
+      elements,
+      from_rels,
+      to_rels=[],
+      structures=structures,
+      struct_assoc_rels=struct_assoc_rels,
+    )
+
+    classifier = AssociationClassifier()
+    class_df, rel_df, canonical_hints = classifier.classify(output_dir)
+
+    # elem_assets should get a canonical hint for total_assets
+    assert "elem_assets" in canonical_hints
+    concept_id, confidence = canonical_hints["elem_assets"]
+    assert concept_id == "total_assets"
+    assert confidence == 0.97
+
+  def test_goodwill_root_gives_canonical_hint(self, tmp_path):
+    """Root of GoodwillRollForward → canonical hint for goodwill."""
+    elements = [
+      {
+        "identifier": "elem_goodwill",
+        "qname": "us-gaap:Goodwill",
+        "name": "Goodwill",
+        "period_type": "instant",
+        "classification": None,
+        "balance": "debit",
+        "uri": "http://example.com#Goodwill",
+      },
+    ]
+    associations = [
+      {
+        "identifier": "assoc_root",
+        "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item",
+        "order_value": 1.0,
+        "association_type": "Calculation",
+        "weight": 1.0,
+        "root": "True",
+        "preferred_label": None,
+      },
+    ]
+    structures = [{"identifier": "struct_gw"}]
+    struct_assoc_rels = [
+      {"from": "struct_gw", "to": "assoc_root", "association_context": "calc"},
+    ]
+    from_rels = [{"from": "assoc_root", "to": "elem_goodwill"}]
+
+    output_dir = _make_test_data(
+      tmp_path,
+      associations,
+      elements,
+      from_rels,
+      to_rels=[],
+      structures=structures,
+      struct_assoc_rels=struct_assoc_rels,
+    )
+
+    classifier = AssociationClassifier()
+    class_df, rel_df, canonical_hints = classifier.classify(output_dir)
+
+    assert "elem_goodwill" in canonical_hints
+    assert canonical_hints["elem_goodwill"] == ("goodwill", 0.97)
+
+  def test_unknown_disclosure_no_canonical_hint(self, tmp_path):
+    """Root of disclosure not in DISCLOSURE_TO_CANONICAL → no canonical hint."""
+    elements = [
+      {
+        "identifier": "elem_warranty",
+        "qname": "us-gaap:ProductWarrantyAccrual",
+        "name": "ProductWarrantyAccrual",
+        "period_type": "instant",
+        "classification": None,
+        "balance": "credit",
+        "uri": "http://example.com#ProductWarrantyAccrual",
+      },
+    ]
+    associations = [
+      {
+        "identifier": "assoc_root",
+        "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item",
+        "order_value": 1.0,
+        "association_type": "Calculation",
+        "weight": 1.0,
+        "root": "True",
+        "preferred_label": None,
+      },
+    ]
+    structures = [{"identifier": "struct_warranty"}]
+    struct_assoc_rels = [
+      {"from": "struct_warranty", "to": "assoc_root", "association_context": "calc"},
+    ]
+    from_rels = [{"from": "assoc_root", "to": "elem_warranty"}]
+
+    output_dir = _make_test_data(
+      tmp_path,
+      associations,
+      elements,
+      from_rels,
+      to_rels=[],
+      structures=structures,
+      struct_assoc_rels=struct_assoc_rels,
+    )
+
+    classifier = AssociationClassifier()
+    class_df, rel_df, canonical_hints = classifier.classify(output_dir)
+
+    # ProductWarrantyAccrual maps to StandardAndExtendedProductWarrantyMovementRollForward
+    # which is NOT in DISCLOSURE_TO_CANONICAL → no hint
+    assert "elem_warranty" not in canonical_hints
+
+  def test_no_structures_empty_hints(self, tmp_path):
+    """Without structure data, canonical_hints is empty."""
+    elements = _semantic_base_elements()
+    associations = [
+      {
+        "identifier": "assoc1",
+        "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child",
+        "order_value": 1.0,
+        "association_type": "Presentation",
+        "weight": None,
+        "root": "True",
+        "preferred_label": None,
+      },
+    ]
+    to_rels = [{"from": "assoc1", "to": "elem_assets"}]
+
+    output_dir = _make_test_data(tmp_path, associations, elements, [], to_rels)
+
+    classifier = AssociationClassifier()
+    class_df, rel_df, canonical_hints = classifier.classify(output_dir)
+
+    assert canonical_hints == {}
+
+  def test_mapping_key_entries(self):
+    """DISCLOSURE_TO_CANONICAL has expected key mappings."""
+    assert DISCLOSURE_TO_CANONICAL["AssetsRollUp"] == "total_assets"
+    assert DISCLOSURE_TO_CANONICAL["InventoryNetRollUp"] == "inventory"
+    assert DISCLOSURE_TO_CANONICAL["GoodwillRollForward"] == "goodwill"
+    assert DISCLOSURE_TO_CANONICAL["CashFlowStatement"] == "operating_cash_flow"
+    assert DISCLOSURE_TO_CANONICAL["IncomeStatement"] == "net_income"

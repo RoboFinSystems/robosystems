@@ -287,19 +287,40 @@ class XBRLGraphProcessor:
       from robosystems.adapters.sec.processors.classify import AssociationClassifier
 
       classifier = AssociationClassifier()
-      classifications_df, assoc_class_df = classifier.classify(self.output_dir)
-
-      if classifications_df.empty:
-        return
-
-      # Write additional parquet files alongside the originals
-      self.parquet_writer.write_dataframe(
-        classifications_df, "nodes/Classification.parquet"
+      classifications_df, assoc_class_df, canonical_hints = classifier.classify(
+        self.output_dir
       )
-      self.parquet_writer.write_dataframe(
-        assoc_class_df, "relationships/ASSOCIATION_HAS_CLASSIFICATION.parquet"
-      )
-      logger.info(f"Wrote {len(classifications_df)} association classifications")
+
+      if not classifications_df.empty:
+        # Write additional parquet files alongside the originals
+        self.parquet_writer.write_dataframe(
+          classifications_df, "nodes/Classification.parquet"
+        )
+        self.parquet_writer.write_dataframe(
+          assoc_class_df, "relationships/ASSOCIATION_HAS_CLASSIFICATION.parquet"
+        )
+        logger.info(f"Wrote {len(classifications_df)} association classifications")
+
+      # Apply disclosure-root canonical hints to elements
+      if (
+        canonical_hints and hasattr(self, "elements_df") and not self.elements_df.empty
+      ):
+        upgraded = 0
+        for elem_id, (concept_id, confidence) in canonical_hints.items():
+          mask = self.elements_df["identifier"] == elem_id
+          if not mask.any():
+            continue
+          current_conf = self.elements_df.loc[mask, "canonical_confidence"].iloc[0]
+          if current_conf is None or pd.isna(current_conf) or current_conf < confidence:
+            self.elements_df.loc[mask, "canonical_concept"] = concept_id
+            self.elements_df.loc[mask, "canonical_confidence"] = confidence
+            upgraded += 1
+        if upgraded:
+          # Re-write Element parquet with updated canonical values
+          self.parquet_writer.write_dataframe(self.elements_df, "nodes/Element.parquet")
+          logger.info(
+            f"Upgraded {upgraded} elements with disclosure-root canonical concepts"
+          )
     except Exception as e:
       # Classification is non-critical — log and continue
       logger.warning(f"Association classification failed (non-critical): {e}")

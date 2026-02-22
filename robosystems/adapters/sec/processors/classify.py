@@ -179,6 +179,35 @@ DISCLOSURE_CONCEPT_MAP: dict[str, str] = {
 }
 
 # ---------------------------------------------------------------------------
+# Disclosure-to-canonical concept bridge
+# ---------------------------------------------------------------------------
+# Maps disclosure names → canonical concept IDs. Only includes disclosures
+# where the root element unambiguously maps to a single canonical concept.
+# When an element is the calculation root of a known disclosure structure,
+# this gives us near-certain canonical identification without embeddings.
+
+DISCLOSURE_TO_CANONICAL: dict[str, str] = {
+  # Balance Sheet
+  "AssetsRollUp": "total_assets",
+  "InventoryNetRollUp": "inventory",
+  "GoodwillRollForward": "goodwill",
+  "PropertyPlantAndEquipmentNetByTypeRollUp": "property_plant_equipment",
+  "FiniteLivedIntangibleAssetsNetRollUp": "intangible_assets",
+  "AccountsNotesLoansAndFinancingReceivable": "accounts_receivable",
+  "LongTermDebtMaturities": "long_term_debt",
+  "CashAndCashEquivalentsDetails": "cash_and_equivalents",
+  # Income Statement
+  "IncomeStatement": "net_income",
+  "IncomeTaxExpenseBenefitDetails": "income_tax_expense",
+  "EarningsPerShareDisclosuresHierarchy": "eps_basic",
+  "EarningsPerShareBasicAndDilutedRollUp": "eps_basic",
+  "EffectiveIncomeTaxRateContinuingOperationsTaxRateReconciliationRollUp": "income_tax_expense",
+  "InterestAndOtherIncomeRollUp": "interest_expense",
+  # Cash Flow
+  "CashFlowStatement": "operating_cash_flow",
+}
+
+# ---------------------------------------------------------------------------
 # Type mapping (subset of graph_api/core/ladybug/manager.py:_map_schema_type_to_lbug)
 # ---------------------------------------------------------------------------
 
@@ -484,7 +513,9 @@ class AssociationClassifier:
   ASSOCIATION_HAS_CLASSIFICATION relationships as DataFrames.
   """
 
-  def classify(self, output_dir: Path) -> tuple[pd.DataFrame, pd.DataFrame]:
+  def classify(
+    self, output_dir: Path
+  ) -> tuple[pd.DataFrame, pd.DataFrame, dict[str, tuple[str, float]]]:
     """Run classification on a filing's parquet output.
 
     Runs two layers:
@@ -495,8 +526,10 @@ class AssociationClassifier:
         output_dir: Directory containing nodes/ and relationships/ parquet subdirs.
 
     Returns:
-        (classifications_df, association_classifications_df) — both may be empty
-        if no patterns are detected or required parquet files are missing.
+        (classifications_df, association_classifications_df, canonical_hints)
+        The first two may be empty if no patterns are detected.
+        canonical_hints maps element identifier → (canonical_concept_id, confidence)
+        for elements that are disclosure roots with a known canonical mapping.
     """
     # Check that required parquet files exist
     nodes_dir = output_dir / "nodes"
@@ -511,7 +544,7 @@ class AssociationClassifier:
 
     if not assoc_path.exists() or not elem_path.exists():
       logger.debug("Association or Element parquet not found, skipping classification")
-      return pd.DataFrame(), pd.DataFrame()
+      return pd.DataFrame(), pd.DataFrame(), {}
 
     classifications: list[dict] = []
     relationships: list[dict] = []
@@ -555,9 +588,9 @@ class AssociationClassifier:
           )
 
       # Layer 2: Semantic classification (disclosure mechanics)
-      semantic = self._classify_semantic(ctx)
-      classifications.extend(semantic[0])
-      relationships.extend(semantic[1])
+      semantic_classes, semantic_rels, canonical_hints = self._classify_semantic(ctx)
+      classifications.extend(semantic_classes)
+      relationships.extend(semantic_rels)
 
     classifications_df = (
       pd.DataFrame(classifications) if classifications else pd.DataFrame()
@@ -570,36 +603,47 @@ class AssociationClassifier:
         f"({', '.join(f'{t}: {c}' for t, c in classifications_df['type'].value_counts().items())})"
       )
 
-    return classifications_df, relationships_df
+    if canonical_hints:
+      logger.info(
+        f"Canonical hints from disclosure roots: {len(canonical_hints)} elements"
+      )
+
+    return classifications_df, relationships_df, canonical_hints
 
   def _classify_semantic(
     self, ctx: TempLadybugContext
-  ) -> tuple[list[dict], list[dict]]:
+  ) -> tuple[list[dict], list[dict], dict[str, tuple[str, float]]]:
     """Identify disclosure mechanics from calculation root elements.
 
     For each structure, finds the root calculation association, extracts the
     element's local name, and looks it up in DISCLOSURE_CONCEPT_MAP. If found,
     creates a Classification node attached to ALL associations in that structure.
+
+    Also builds canonical_hints: when a disclosure root maps to a known canonical
+    concept via DISCLOSURE_TO_CANONICAL, the root element gets a high-confidence
+    canonical concept hint.
     """
     classifications: list[dict] = []
     relationships: list[dict] = []
+    canonical_hints: dict[str, tuple[str, float]] = {}
 
-    # Find calculation root elements per structure
+    # Find calculation root elements per structure (include element identifier)
     try:
       roots = ctx.execute(
         """
         MATCH (s:Structure)-[:STRUCTURE_HAS_ASSOCIATION]->(a:Association)-[:ASSOCIATION_HAS_FROM_ELEMENT]->(root:Element)
         WHERE a.association_type = 'Calculation' AND a.root = 'True'
-        RETURN DISTINCT s.identifier AS structure_id, root.qname AS root_qname
+        RETURN DISTINCT s.identifier AS structure_id, root.qname AS root_qname, root.identifier AS root_id
         """
       )
     except Exception as e:
       logger.debug(f"Semantic classification query failed: {e}")
-      return classifications, relationships
+      return classifications, relationships, canonical_hints
 
     for row in roots:
       structure_id = row.get("structure_id")
       root_qname = row.get("root_qname")
+      root_id = row.get("root_id")
       if not structure_id or not root_qname:
         continue
 
@@ -608,6 +652,11 @@ class AssociationClassifier:
       disclosure_name = DISCLOSURE_CONCEPT_MAP.get(local_name)
       if not disclosure_name:
         continue
+
+      # Check if this disclosure root maps to a canonical concept
+      canonical_id = DISCLOSURE_TO_CANONICAL.get(disclosure_name)
+      if canonical_id and root_id and root_id not in canonical_hints:
+        canonical_hints[root_id] = (canonical_id, 0.97)
 
       # Get all associations in this structure
       try:
@@ -643,4 +692,4 @@ class AssociationClassifier:
         f"Semantic classification: {len(classifications)} disclosure patterns identified"
       )
 
-    return classifications, relationships
+    return classifications, relationships, canonical_hints
