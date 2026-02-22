@@ -708,7 +708,7 @@ class SemanticEnricher:
       mapped = stmt_to_structure.get(element_vote_type)
       if mapped == adjusted_type:
         adjusted_conf = min(1.0, adjusted_conf + 0.03)
-      elif mapped and mapped != adjusted_type:
+      elif mapped:
         adjusted_conf = max(0.0, adjusted_conf - 0.05)
 
     return (adjusted_type, round(adjusted_conf, 4))

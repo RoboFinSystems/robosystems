@@ -128,7 +128,8 @@ class DuckDBAnalyticsContext:
     Returns:
         Path to the written parquet file
     """
-    assert self._output_dir is not None
+    if self._output_dir is None:
+      raise RuntimeError("Output directory not set — use as context manager")
     type_dir = self._output_dir / table_type
     type_dir.mkdir(parents=True, exist_ok=True)
     output_path = type_dir / f"{table_name}.parquet"
@@ -152,7 +153,8 @@ class DuckDBAnalyticsContext:
     Returns:
         Mapping of table_name to S3 URI (or local path in dev)
     """
-    assert self._output_dir is not None
+    if self._output_dir is None:
+      raise RuntimeError("Output directory not set — use as context manager")
     results: dict[str, str] = {}
 
     parquet_files = list(self._output_dir.rglob("*.parquet"))

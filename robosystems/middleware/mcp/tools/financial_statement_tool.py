@@ -89,7 +89,7 @@ For balance sheets, only instant-period facts are returned. For other statements
       else None
     )
     period_type = arguments.get("period_type")
-    limit = arguments.get("limit", 50)
+    limit = max(1, min(int(arguments.get("limit", 50)), 1000))
 
     if not ticker:
       return {"error": "ticker is required"}

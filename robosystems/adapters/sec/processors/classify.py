@@ -427,8 +427,8 @@ class TempLadybugContext:
       if self._tmpdir is not None:
         try:
           shutil.rmtree(self._tmpdir, ignore_errors=True)
-        except Exception:
-          pass
+        except Exception as e:
+          logger.debug(f"Failed to remove temp directory {self._tmpdir}: {e}")
         self._tmpdir = None
 
 

@@ -9,6 +9,8 @@ from pathlib import Path
 
 import duckdb
 
+from robosystems.logger import logger
+
 
 class ArcExtractor:
   """Extracts arc relationships and element metadata from a DuckDB database.
@@ -180,7 +182,8 @@ class ArcExtractor:
 
       rows = conn.execute(sql).fetchall()
       return {row[0]: row[1] for row in rows}
-    except Exception:
+    except Exception as e:
+      logger.debug(f"extract_element_disclosure_types failed: {e}")
       return {}
     finally:
       conn.close()
@@ -220,7 +223,8 @@ class ArcExtractor:
       for qname, dtype in rows:
         result.setdefault(qname, set()).add(dtype)
       return result
-    except Exception:
+    except Exception as e:
+      logger.debug(f"extract_disclosure_root_elements failed: {e}")
       return {}
     finally:
       conn.close()

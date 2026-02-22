@@ -80,7 +80,7 @@ Run list-disclosures first to see valid disclosure_type values.""",
       else None
     )
     include_dimensions = arguments.get("include_dimensions", False)
-    limit = arguments.get("limit", 100)
+    limit = max(1, min(int(arguments.get("limit", 100)), 1000))
 
     if not disclosure_type:
       return {"error": "disclosure_type is required"}
