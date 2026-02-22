@@ -58,6 +58,10 @@ For balance sheets, only instant-period facts are returned. For other statements
             "description": "Type of financial statement",
             "enum": list(VALID_STATEMENT_TYPES),
           },
+          "accession_number": {
+            "type": "string",
+            "description": "Optional: filter to a specific filing (e.g. '0001045810-25-000023')",
+          },
           "period_type": {
             "type": "string",
             "description": "Filter by period type: 'annual' (duration facts only), 'quarterly' (duration facts only), 'instant' (point-in-time facts). Default depends on statement type.",
@@ -79,6 +83,11 @@ For balance sheets, only instant-period facts are returned. For other statements
 
     ticker = arguments.get("ticker", "").strip().upper()
     statement_type = arguments.get("statement_type", "").strip()
+    accession_number = (
+      arguments.get("accession_number", "").strip()
+      if arguments.get("accession_number")
+      else None
+    )
     period_type = arguments.get("period_type")
     limit = arguments.get("limit", 50)
 
@@ -92,44 +101,61 @@ For balance sheets, only instant-period facts are returned. For other statements
         f"Valid types: {', '.join(VALID_STATEMENT_TYPES)}"
       }
 
-    return await self._get_statement(ticker, statement_type, period_type, limit)
+    return await self._get_statement(
+      ticker, statement_type, accession_number, period_type, limit
+    )
 
   async def _get_statement(
     self,
     ticker: str,
     statement_type: str,
+    accession_number: str | None,
     period_type: str | None,
     limit: int,
   ) -> dict[str, Any]:
     result: dict[str, Any] = {
       "ticker": ticker,
       "statement_type": statement_type,
+      "accession_number": accession_number,
       "facts": [],
       "fact_count": 0,
     }
 
-    # Build period filter
-    period_filter = ""
+    # Build match parts and filters
+    match_parts = [
+      "(s:Structure)-[:STRUCTURE_HAS_FACT_SET]->(fs:FactSet)"
+      "-[:FACT_SET_CONTAINS_FACT]->(f:Fact)-[:FACT_HAS_ELEMENT]->(e:Element)",
+      "(f)-[:FACT_HAS_PERIOD]->(p:Period)",
+      "(f)-[:FACT_HAS_ENTITY]->(ent:Entity)",
+    ]
+
+    where_parts = [
+      "s.canonical_type = $statement_type",
+      "ent.ticker = $ticker",
+      "f.has_dimensions = false",
+      "f.numeric_value IS NOT NULL",
+    ]
+
+    params: dict[str, Any] = {"statement_type": statement_type, "ticker": ticker}
+
+    if accession_number:
+      match_parts.append("(r:Report)-[:REPORT_HAS_FACT]->(f)")
+      where_parts.append("r.accession_number = $accession_number")
+      params["accession_number"] = accession_number
+
+    # Period filter
     if period_type == "instant":
-      period_filter = " AND p.period_type = 'instant'"
+      where_parts.append("p.period_type = 'instant'")
     elif period_type == "annual":
-      period_filter = " AND p.duration_type = 'annual'"
+      where_parts.append("p.duration_type = 'annual'")
     elif period_type == "quarterly":
-      period_filter = " AND p.duration_type = 'quarterly'"
+      where_parts.append("p.duration_type = 'quarterly'")
     elif statement_type == "balance_sheet":
-      # Balance sheets default to instant periods
-      period_filter = " AND p.period_type = 'instant'"
+      where_parts.append("p.period_type = 'instant'")
 
     query = (
-      "MATCH (s:Structure)-[:STRUCTURE_HAS_FACT_SET]->(fs:FactSet)"
-      "-[:FACT_SET_CONTAINS_FACT]->(f:Fact)-[:FACT_HAS_ELEMENT]->(e:Element), "
-      "(f)-[:FACT_HAS_PERIOD]->(p:Period), "
-      "(f)-[:FACT_HAS_ENTITY]->(ent:Entity) "
-      f"WHERE s.canonical_type = $statement_type"
-      f" AND ent.ticker = $ticker"
-      f" AND f.has_dimensions = false"
-      f" AND f.numeric_value IS NOT NULL"
-      f"{period_filter} "
+      f"MATCH {', '.join(match_parts)} "
+      f"WHERE {' AND '.join(where_parts)} "
       "RETURN DISTINCT e.canonical_concept AS canonical_concept, e.qname AS qname, "
       "e.name AS name, f.numeric_value AS value, "
       "p.end_date AS end_date, p.period_type AS period_type, "
@@ -139,10 +165,7 @@ For balance sheets, only instant-period facts are returned. For other statements
     )
 
     try:
-      rows = await self.client.execute_query(
-        query,
-        parameters={"statement_type": statement_type, "ticker": ticker},
-      )
+      rows = await self.client.execute_query(query, parameters=params)
       if rows:
         for row in rows:
           result["facts"].append(

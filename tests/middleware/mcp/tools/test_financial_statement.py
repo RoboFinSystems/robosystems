@@ -27,6 +27,7 @@ class TestGetFinancialStatementDefinition:
     assert defn["name"] == "get-financial-statement"
     assert "ticker" in defn["inputSchema"]["properties"]
     assert "statement_type" in defn["inputSchema"]["properties"]
+    assert "accession_number" in defn["inputSchema"]["properties"]
     assert "period_type" in defn["inputSchema"]["properties"]
     assert "limit" in defn["inputSchema"]["properties"]
     assert set(defn["inputSchema"]["required"]) == {"ticker", "statement_type"}
@@ -154,6 +155,47 @@ class TestGetFinancialStatementExecution:
     params = call_kwargs[1].get("parameters", {})
     assert params["ticker"] == "AAPL"
     assert params["statement_type"] == "income_statement"
+
+  @pytest.mark.asyncio
+  async def test_accession_number_filter(self, tool, mock_client):
+    """Accession number should add Report join."""
+    mock_client.execute_query = AsyncMock(return_value=[])
+
+    await tool.execute(
+      {
+        "ticker": "NVDA",
+        "statement_type": "income_statement",
+        "accession_number": "0001045810-25-000023",
+      }
+    )
+
+    call_args = mock_client.execute_query.call_args[0][0]
+    assert "REPORT_HAS_FACT" in call_args
+
+    params = mock_client.execute_query.call_args[1].get("parameters", {})
+    assert params["accession_number"] == "0001045810-25-000023"
+
+  @pytest.mark.asyncio
+  async def test_accession_number_in_result(self, tool, mock_client):
+    mock_client.execute_query = AsyncMock(return_value=[])
+
+    result = await tool.execute(
+      {
+        "ticker": "NVDA",
+        "statement_type": "balance_sheet",
+        "accession_number": "0001045810-25-000023",
+      }
+    )
+    assert result["accession_number"] == "0001045810-25-000023"
+
+  @pytest.mark.asyncio
+  async def test_no_accession_number_no_report_join(self, tool, mock_client):
+    mock_client.execute_query = AsyncMock(return_value=[])
+
+    await tool.execute({"ticker": "NVDA", "statement_type": "income_statement"})
+
+    call_args = mock_client.execute_query.call_args[0][0]
+    assert "REPORT_HAS_FACT" not in call_args
 
   @pytest.mark.asyncio
   async def test_query_error_handling(self, tool, mock_client):

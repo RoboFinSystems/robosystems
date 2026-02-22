@@ -27,6 +27,7 @@ class TestGetDisclosureDetailDefinition:
     assert defn["name"] == "get-disclosure-detail"
     assert "disclosure_type" in defn["inputSchema"]["properties"]
     assert "ticker" in defn["inputSchema"]["properties"]
+    assert "accession_number" in defn["inputSchema"]["properties"]
     assert "include_dimensions" in defn["inputSchema"]["properties"]
     assert "limit" in defn["inputSchema"]["properties"]
     assert defn["inputSchema"]["required"] == ["disclosure_type"]
@@ -138,6 +139,45 @@ class TestGetDisclosureDetailExecution:
     result = await tool.execute({"disclosure_type": "AssetsRollUp"})
     assert "error" in result
     assert "db error" in result["error"]
+
+  @pytest.mark.asyncio
+  async def test_accession_number_filter(self, tool, mock_client):
+    """Accession number should add Report join."""
+    mock_client.execute_query = AsyncMock(return_value=[])
+
+    await tool.execute(
+      {
+        "disclosure_type": "AssetsRollUp",
+        "accession_number": "0001045810-25-000023",
+      }
+    )
+
+    call_args = mock_client.execute_query.call_args[0][0]
+    assert "REPORT_HAS_FACT" in call_args
+
+    params = mock_client.execute_query.call_args[1].get("parameters", {})
+    assert params["accession_number"] == "0001045810-25-000023"
+
+  @pytest.mark.asyncio
+  async def test_accession_number_in_result(self, tool, mock_client):
+    mock_client.execute_query = AsyncMock(return_value=[])
+
+    result = await tool.execute(
+      {
+        "disclosure_type": "AssetsRollUp",
+        "accession_number": "0001045810-25-000023",
+      }
+    )
+    assert result["accession_number"] == "0001045810-25-000023"
+
+  @pytest.mark.asyncio
+  async def test_no_accession_number_no_report_join(self, tool, mock_client):
+    mock_client.execute_query = AsyncMock(return_value=[])
+
+    await tool.execute({"disclosure_type": "AssetsRollUp"})
+
+    call_args = mock_client.execute_query.call_args[0][0]
+    assert "REPORT_HAS_FACT" not in call_args
 
   @pytest.mark.asyncio
   async def test_ticker_uppercased(self, tool, mock_client):

@@ -47,6 +47,10 @@ Run list-disclosures first to see valid disclosure_type values.""",
             "type": "string",
             "description": "Optional: filter to facts for a specific company ticker (e.g. 'NVDA')",
           },
+          "accession_number": {
+            "type": "string",
+            "description": "Optional: filter to a specific filing (e.g. '0001045810-25-000023')",
+          },
           "include_dimensions": {
             "type": "boolean",
             "description": "Include dimensional/segment breakdown facts (default: false)",
@@ -70,24 +74,33 @@ Run list-disclosures first to see valid disclosure_type values.""",
     ticker = (
       arguments.get("ticker", "").strip().upper() if arguments.get("ticker") else None
     )
+    accession_number = (
+      arguments.get("accession_number", "").strip()
+      if arguments.get("accession_number")
+      else None
+    )
     include_dimensions = arguments.get("include_dimensions", False)
     limit = arguments.get("limit", 100)
 
     if not disclosure_type:
       return {"error": "disclosure_type is required"}
 
-    return await self._get_detail(disclosure_type, ticker, include_dimensions, limit)
+    return await self._get_detail(
+      disclosure_type, ticker, accession_number, include_dimensions, limit
+    )
 
   async def _get_detail(
     self,
     disclosure_type: str,
     ticker: str | None,
+    accession_number: str | None,
     include_dimensions: bool,
     limit: int,
   ) -> dict[str, Any]:
     result: dict[str, Any] = {
       "disclosure_type": disclosure_type,
       "ticker": ticker,
+      "accession_number": accession_number,
       "facts": [],
       "fact_count": 0,
     }
@@ -113,6 +126,11 @@ Run list-disclosures first to see valid disclosure_type values.""",
       match_parts.append("(f)-[:FACT_HAS_ENTITY]->(ent:Entity)")
       where_parts.append("ent.ticker = $ticker")
       params["ticker"] = ticker
+
+    if accession_number:
+      match_parts.append("(r:Report)-[:REPORT_HAS_FACT]->(f)")
+      where_parts.append("r.accession_number = $accession_number")
+      params["accession_number"] = accession_number
 
     if not include_dimensions:
       where_parts.append("f.has_dimensions = false")
