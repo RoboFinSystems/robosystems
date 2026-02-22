@@ -234,7 +234,7 @@ jobs:
 
           # Create a proper JSON payload using jq to handle escaping
           PAYLOAD=$(jq -n \
-            --arg model "claude-sonnet-4-20250514" \
+            --arg model "${{ vars.CLAUDE_MODEL || 'claude-sonnet-4-6' }}" \
             --arg content "$PROMPT" \
             '{
               "model": $model,
