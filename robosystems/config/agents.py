@@ -19,9 +19,9 @@ from robosystems.config.env import env
 class BedrockModel(Enum):
   """Available AWS Bedrock Claude models."""
 
+  SONNET_4_6 = "claude-sonnet-4-6"
   SONNET_4_5 = "claude-sonnet-4-5-20250929"
-  SONNET_4 = "claude-sonnet-4-20250514"
-  SONNET_3_5_V2 = "claude-3-5-sonnet-20241022"  # Last resort fallback
+  SONNET_4 = "claude-sonnet-4-20250514"  # Last resort fallback
 
 
 class AgentExecutionMode(Enum):
@@ -68,15 +68,15 @@ class AgentConfig:
   # AWS Bedrock Model Configuration
   # Using regional inference profiles (us.*) for on-demand access
   BEDROCK_MODELS = {
+    BedrockModel.SONNET_4_6: "us.anthropic.claude-sonnet-4-6",
     BedrockModel.SONNET_4_5: "us.anthropic.claude-sonnet-4-5-20250929-v1:0",
     BedrockModel.SONNET_4: "us.anthropic.claude-sonnet-4-20250514-v1:0",
-    BedrockModel.SONNET_3_5_V2: "us.anthropic.claude-3-5-sonnet-20241022-v2:0",
   }
 
   # Default Model Configuration
   DEFAULT_MODEL_CONFIG = ModelConfig(
-    default_model=BedrockModel.SONNET_4_5,
-    fallback_model=BedrockModel.SONNET_4,
+    default_model=BedrockModel.SONNET_4_6,
+    fallback_model=BedrockModel.SONNET_4_5,
     region=env.AWS_BEDROCK_REGION,
     temperature=0.7,
     max_retries=3,
@@ -127,7 +127,7 @@ class AgentConfig:
   # Allows different agents to use different models if needed
   AGENT_MODEL_OVERRIDES: dict[str, BedrockModel] = {
     # Example: "financial": BedrockModel.SONNET_4_5,
-    # Example: "cypher": BedrockModel.SONNET_3_5_V2,
+    # Example: "cypher": BedrockModel.SONNET_4,
   }
 
   # Orchestrator Configuration
@@ -144,15 +144,15 @@ class AgentConfig:
   # AWS Pricing: $3 per MTok input, $15 per MTok output (all Sonnet models)
   # Credit conversion: 1 credit = $0.001 USD
   TOKEN_COSTS = {
+    BedrockModel.SONNET_4_6: {
+      "input_per_1k": Decimal("3.0"),  # $0.003 per 1k tokens
+      "output_per_1k": Decimal("15.0"),  # $0.015 per 1k tokens
+    },
     BedrockModel.SONNET_4_5: {
       "input_per_1k": Decimal("3.0"),  # $0.003 per 1k tokens
       "output_per_1k": Decimal("15.0"),  # $0.015 per 1k tokens
     },
     BedrockModel.SONNET_4: {
-      "input_per_1k": Decimal("3.0"),  # $0.003 per 1k tokens
-      "output_per_1k": Decimal("15.0"),  # $0.015 per 1k tokens
-    },
-    BedrockModel.SONNET_3_5_V2: {
       "input_per_1k": Decimal("3.0"),  # $0.003 per 1k tokens
       "output_per_1k": Decimal("15.0"),  # $0.015 per 1k tokens
     },
@@ -194,7 +194,7 @@ class AgentConfig:
     if not model:
       model = cls.DEFAULT_MODEL_CONFIG.default_model
 
-    return cls.BEDROCK_MODELS.get(model, cls.BEDROCK_MODELS[BedrockModel.SONNET_3_5_V2])
+    return cls.BEDROCK_MODELS.get(model, cls.BEDROCK_MODELS[BedrockModel.SONNET_4])
 
   @classmethod
   def get_execution_profile(cls, mode: AgentExecutionMode) -> ExecutionProfile:
@@ -243,7 +243,7 @@ class AgentConfig:
     Returns:
         Total cost in credits
     """
-    costs = cls.TOKEN_COSTS.get(model, cls.TOKEN_COSTS[BedrockModel.SONNET_3_5_V2])
+    costs = cls.TOKEN_COSTS.get(model, cls.TOKEN_COSTS[BedrockModel.SONNET_4])
 
     input_cost = (Decimal(input_tokens) / 1000) * costs["input_per_1k"]
     output_cost = (Decimal(output_tokens) / 1000) * costs["output_per_1k"]
