@@ -60,12 +60,12 @@ from .jobs import (
 def sec_processing_sensor(context: SensorEvaluationContext):
   """Discover quarters with pending SEC filings and trigger batch processing.
 
-  Each Dagster run processes up to SEC_PROCESS_BATCH_LIMIT filings then exits.
+  Each Dagster run processes up to SEC_PROCESS_BATCH_SIZE filings then exits.
   This sensor continuously triggers new runs while pending files remain,
   enabling natural memory release between batches and crash resilience.
 
   Batch Processing Model:
-  1. Job processes batch, flushes to S3 (merging with existing data), exits
+  1. Job processes batch, flushes part files to S3, exits
   2. Sensor runs every 5 minutes, detects remaining pending files
   3. Triggers another batch if pending files exist and no active run
   4. Repeats until all files processed
@@ -81,8 +81,8 @@ def sec_processing_sensor(context: SensorEvaluationContext):
 
   Output Structure:
   - All filings output to quarterly partitions (filed=YYYY-QN)
-  - Single file per table per quarter with append-based merging
-  - Shared tables (Element, Label, etc.) deduplicated on identifier
+  - Part files per table per quarter (part_{uuid}.parquet, additive)
+  - Shared tables deduped within batch; DuckDB handles cross-batch dedup
 
   Deduplication:
   - No run_key used - allows retries after failures

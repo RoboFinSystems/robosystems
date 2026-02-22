@@ -89,7 +89,7 @@ sec_download_job = define_asset_job(
 #
 # Uses Enhanced profile (4 vCPU, 16 GB) - embedding enrichment is memory-intensive.
 # Each filing is processed independently to disk, then uploaded to S3.
-# EFTS returns max 10k filings per quarterly partition, but batch_limit caps per run.
+# EFTS returns max 10k filings per quarterly partition, but batch_size caps per run.
 sec_process_job = define_asset_job(
   name="sec_process",
   description="Process SEC filings into parquet files.",

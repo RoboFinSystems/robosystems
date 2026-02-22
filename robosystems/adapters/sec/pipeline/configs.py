@@ -9,7 +9,7 @@ from datetime import UTC, datetime
 from dagster import Config, StaticPartitionsDefinition
 from pydantic import Field
 
-from robosystems.config.constants import SEC_FLUSH_INTERVAL, SEC_PROCESS_BATCH_LIMIT
+from robosystems.config.constants import SEC_PROCESS_BATCH_SIZE
 
 # =============================================================================
 # Constants
@@ -93,19 +93,19 @@ class SECDownloadConfig(Config):
 class SECProcessConfig(Config):
   """Configuration for batch filing processing by quarter.
 
-  Each Dagster run processes up to batch_limit filings and then exits.
+  Each Dagster run processes one batch of filings and then exits.
   The sensor will trigger another run if pending files remain, enabling
-  natural memory release between batches and better crash resilience.
+  natural memory release between batches and crash resilience.
 
   Individual filing failures are tracked in SourceFile records,
   but the job continues processing remaining filings in the batch.
 
   Memory Management:
-  - Each job processes at most batch_limit filings (default 2,000)
-  - Periodic flush every flush_interval filings (default 500)
-  - Part-file output: each flush writes part_{uuid}.parquet files
-  - No consolidation/dedup at flush time — DuckDB handles it during staging
-  - SemanticEnricher released before final flush to free ~300-500MB
+  - One batch per job run (default 500 filings), then container exits
+  - Part-file output: batch writes part_{uuid}.parquet files per table
+  - Shared tables (Element, Label, etc.) deduped within batch via pure Arrow
+  - DuckDB handles final cross-part-file dedup during staging
+  - del + gc.collect() after each table upload to force memory release
 
   Output Structure (part files):
     s3://bucket/sec/processed/filed=2024-Q1/nodes/Entity/part_a1b2c3d4e5f6.parquet
@@ -114,12 +114,10 @@ class SECProcessConfig(Config):
     - DuckDB reads both old format (TABLE.parquet) and new (TABLE/*.parquet)
   """
 
-  # Max filings to process per job run before exiting gracefully.
-  batch_limit: int = SEC_PROCESS_BATCH_LIMIT
-
-  # Flush to S3 every N filings to bound memory usage.
-  # Each flush writes part files (no consolidation), keeping Arrow concat small.
-  flush_interval: int = SEC_FLUSH_INTERVAL
+  # Filings per batch. Job processes this many, flushes to S3, then exits.
+  # Sensor re-triggers if more pending files remain.
+  # 500 keeps Arrow concat under ~250MB for the largest tables.
+  batch_size: int = SEC_PROCESS_BATCH_SIZE
 
   # Continue processing even if some filings fail
   # If False, job fails on first error (for debugging)
