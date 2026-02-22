@@ -378,6 +378,10 @@ class SemanticEnricher:
 
   # -- Canonical matching (elements) ----------------------------------------
 
+  # Top-N candidate selection parameters
+  _CANDIDATE_THRESHOLD = 0.80  # Only consider candidates at or above match threshold
+  _MAX_CANDIDATES = 3  # Cap to avoid unnecessary refinement work
+
   def match_canonical(
     self, embedding: list[float], element_metadata: dict
   ) -> tuple[str | None, float]:
@@ -387,7 +391,9 @@ class SemanticEnricher:
     1. Cosine similarity between embedding and all taxonomy embeddings
     2. Metadata boost: +0.10 for matching period_type, +0.10 for matching balance
     3. Known-element override: floor at 0.95 if qname in expected_elements
-    4. Threshold: minimum 0.70 confidence
+    4. Top-N candidates collected above threshold
+    5. Concept-aware refinement applied to each candidate (if enabled)
+    6. Winner selected after refinement
 
     Returns:
         (concept_id, confidence) or (None, 0.0) if below threshold.
@@ -405,8 +411,7 @@ class SemanticEnricher:
     if query_norm == 0:
       return (None, 0.0)
 
-    best_id = None
-    best_score = 0.0
+    candidates: list[tuple[float, str, CanonicalConcept]] = []
 
     for concept in taxonomy:
       if concept.embedding is None:
@@ -429,22 +434,49 @@ class SemanticEnricher:
       if elem_balance and concept.balance == elem_balance:
         cos_sim += 0.10
 
-      if cos_sim > best_score:
-        best_score = cos_sim
-        best_id = concept.id
+      if cos_sim >= self._CANDIDATE_THRESHOLD:
+        candidates.append((cos_sim, concept.id, concept))
 
-    if best_score >= 0.80:
-      from robosystems.adapters.sec.config import XBRL_GRAPH_REFINEMENT
+    if not candidates:
+      return (None, 0.0)
 
-      if XBRL_GRAPH_REFINEMENT:
-        best_score = self._refine_element_confidence(best_score, qname)
+    # Sort descending by score, cap at MAX_CANDIDATES
+    candidates.sort(reverse=True)
+    candidates = candidates[: self._MAX_CANDIDATES]
+
+    from robosystems.adapters.sec.config import XBRL_GRAPH_REFINEMENT
+
+    if XBRL_GRAPH_REFINEMENT:
+      # Refine each candidate with concept-aware signals, pick winner
+      refined = [
+        (self._refine_element_confidence(score, qname, concept), concept_id)
+        for score, concept_id, concept in candidates
+      ]
+      refined.sort(reverse=True)
+      best_score, best_id = refined[0]
+    else:
+      # No refinement — use raw best
+      best_score, best_id = candidates[0][0], candidates[0][1]
+
+    if best_score >= self._CANDIDATE_THRESHOLD:
       return (best_id, round(min(best_score, 1.0), 4))
     return (None, 0.0)
 
-  def _refine_element_confidence(self, raw_conf: float, qname: str) -> float:
+  # Mapping from element knowledge primary_statement to concept category
+  _STATEMENT_TO_CATEGORY = {
+    "IncomeStatement": "income_statement",
+    "BalanceSheet": "balance_sheet",
+    "CashFlow": "cash_flow",
+  }
+
+  def _refine_element_confidence(
+    self, raw_conf: float, qname: str, concept: CanonicalConcept | None = None
+  ) -> float:
     """Apply graph-structural refinement to a semantic confidence score.
 
     If element knowledge artifact is not available, returns raw_conf unchanged.
+    When a concept is provided, applies statement-alignment boost/penalty
+    before the quadratic penalty.
     """
     ek = self.element_knowledge
     if ek is None:
@@ -472,6 +504,16 @@ class SemanticEnricher:
       refined = base * penalty
     else:
       refined = base
+
+    # Statement alignment: compare element's primary_statement to concept category
+    if concept is not None:
+      primary_stmt = element_info.get("primary_statement")
+      if primary_stmt:
+        mapped_category = self._STATEMENT_TO_CATEGORY.get(primary_stmt)
+        if mapped_category == concept.category:
+          refined *= 1.08  # +8% boost for matching statement
+        elif mapped_category is not None:
+          refined *= 0.88  # -12% penalty for mismatched statement
 
     # Quadratic penalty below threshold
     threshold = 0.90

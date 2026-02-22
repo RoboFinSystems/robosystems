@@ -74,6 +74,7 @@ SEC_PRIMARY_START_YEAR = 2024
 # Top companies by market cap (as of 2024)
 # Used when --count is specified without --tickers
 # Note: Only US companies with SEC filings (no foreign ADRs like TSM)
+# Note: Excludes mega-financials (JPM, BRK-B) whose filings exceed local memory limits
 # LocalStack limits S3 listings to ~1000 files, so capped at 15 companies for local dev
 TOP_COMPANIES_BY_MARKET_CAP = [
   "AAPL",  # Apple - Tech
@@ -82,15 +83,15 @@ TOP_COMPANIES_BY_MARKET_CAP = [
   "GOOGL",  # Alphabet - Tech
   "AMZN",  # Amazon - Tech/Retail
   "META",  # Meta - Tech
-  "BRK-B",  # Berkshire Hathaway - Finance
   "LLY",  # Eli Lilly - Pharma
   "AVGO",  # Broadcom - Tech
-  "JPM",  # JPMorgan - Finance
   "WMT",  # Walmart - Retail
   "V",  # Visa - Finance
   "XOM",  # Exxon - Energy
   "UNH",  # UnitedHealth - Healthcare
   "COST",  # Costco - Retail
+  "ORCL",  # Oracle - Tech
+  "CRM",  # Salesforce - Tech
 ]
 
 DEFAULT_COMPANY_COUNT = 5

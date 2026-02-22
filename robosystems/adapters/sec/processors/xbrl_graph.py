@@ -62,6 +62,7 @@ class XBRLGraphProcessor:
     output_dir="./data/output",
     schema_config=None,
     local_file_path=None,
+    enricher=None,
   ):
     logger.debug(f"Initializing XBRL processor for report URI: {report_uri}")
     self.report_uri = report_uri  # Keep original SEC URL for metadata
@@ -99,9 +100,9 @@ class XBRLGraphProcessor:
     self.enable_type_prefixes = XBRL_TYPE_PREFIXES
     self.enable_column_standardization = XBRL_COLUMN_STANDARDIZATION
 
-    # Semantic enrichment (lazy enricher — model loaded on first use)
+    # Semantic enrichment (shared enricher preferred — avoids reloading model per filing)
     self.enable_semantic_enrichment = XBRL_SEMANTIC_ENRICHMENT
-    self._enricher = None
+    self._enricher = enricher
 
     if (
       self.enable_standardized_filenames

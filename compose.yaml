@@ -94,18 +94,22 @@ services:
     volumes:
       - ./robosystems:/app/robosystems
       - ./dagster_home:/app/dagster_home
+      - ./data/staging:/app/data/staging
+      - ./data/artifacts:/app/data/artifacts
     depends_on:
       pg:
         condition: service_healthy
+    # Runs sec_process job locally via `dagster job execute`
+    # Needs headroom for fastembed model + embedding computation
     restart: always
     deploy:
       resources:
         limits:
-          memory: 4g
-          cpus: "2"
+          memory: 8g
+          cpus: "4"
         reservations:
-          memory: 1g
-          cpus: "0.5"
+          memory: 2g
+          cpus: "1"
     profiles: ["dagster", "robosystems", "all"]
 
   # Dagster Daemon - Schedules, Sensors, and Run Coordination
@@ -125,6 +129,8 @@ services:
     volumes:
       - ./robosystems:/app/robosystems
       - ./dagster_home:/app/dagster_home
+      - ./data/staging:/app/data/staging
+      - ./data/artifacts:/app/data/artifacts
     depends_on:
       pg:
         condition: service_healthy
@@ -132,11 +138,11 @@ services:
     deploy:
       resources:
         limits:
-          memory: 4g
-          cpus: "2"
+          memory: 8g
+          cpus: "4"
         reservations:
-          memory: 1g
-          cpus: "0.5"
+          memory: 2g
+          cpus: "1"
     profiles: ["dagster", "robosystems", "all"]
 
   # Postgres - Database for RoboSystems

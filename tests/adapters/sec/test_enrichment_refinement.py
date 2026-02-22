@@ -7,6 +7,7 @@ structure refinement (refine_structure_confidence) methods.
 import pytest
 
 from robosystems.adapters.sec.enrichment import SemanticEnricher
+from robosystems.adapters.sec.taxonomy.concepts import CanonicalConcept
 
 
 @pytest.fixture()
@@ -129,6 +130,101 @@ class TestElementRefinement:
     # The gating happens in match_canonical, tested via integration.
     result = enricher._refine_element_confidence(0.85, "us-gaap:Revenue")
     assert result != 0.85  # Direct call still refines
+
+
+def _make_concept(concept_id: str, category: str) -> CanonicalConcept:
+  """Helper to create a minimal CanonicalConcept for testing."""
+  return CanonicalConcept(
+    id=concept_id,
+    display_name=concept_id,
+    category=category,
+    description="test",
+  )
+
+
+class TestConceptAwareRefinement:
+  """Tests for concept-aware statement alignment in _refine_element_confidence."""
+
+  def test_matching_statement_boosts(self, enricher):
+    """Element with matching primary_statement gets +8% boost."""
+    concept = _make_concept("net_income", "income_statement")
+    # us-gaap:MixedSignal has primary_statement=IncomeStatement → matches income_statement
+    # Use MixedSignal (moderate pagerank/agreement) to avoid hitting 1.0 cap
+    result_with = enricher._refine_element_confidence(
+      0.85, "us-gaap:MixedSignal", concept
+    )
+    result_without = enricher._refine_element_confidence(0.85, "us-gaap:MixedSignal")
+    assert result_with > result_without
+
+  def test_mismatched_statement_penalizes(self, enricher):
+    """Element with mismatched primary_statement gets -12% penalty."""
+    concept = _make_concept("total_assets", "balance_sheet")
+    # us-gaap:Revenue has primary_statement=IncomeStatement → mismatches balance_sheet
+    result_with = enricher._refine_element_confidence(0.85, "us-gaap:Revenue", concept)
+    result_without = enricher._refine_element_confidence(0.85, "us-gaap:Revenue")
+    assert result_with < result_without
+
+  def test_no_primary_statement_no_adjustment(self, enricher):
+    """Element without primary_statement gets no concept adjustment."""
+    # Add element with no primary_statement
+    enricher._element_knowledge["us-gaap:NoPrimary"] = {
+      "primary_statement": None,
+      "bfs_depth": 1,
+      "pagerank": 0.5,
+      "core_number": 3,
+      "neighborhood_agreement": 0.8,
+      "filing_count": 100,
+    }
+    concept = _make_concept("revenue", "income_statement")
+    result_with = enricher._refine_element_confidence(
+      0.85, "us-gaap:NoPrimary", concept
+    )
+    result_without = enricher._refine_element_confidence(0.85, "us-gaap:NoPrimary")
+    assert result_with == result_without
+
+  def test_no_concept_preserves_behavior(self, enricher):
+    """Passing concept=None preserves original refinement behavior."""
+    result_none = enricher._refine_element_confidence(0.85, "us-gaap:Revenue", None)
+    result_default = enricher._refine_element_confidence(0.85, "us-gaap:Revenue")
+    assert result_none == result_default
+
+  def test_candidate_reranking(self, enricher):
+    """Higher raw score loses to lower raw score when statement alignment differs.
+
+    Concept A (balance_sheet) scores 0.88 raw but element is IncomeStatement → penalized.
+    Concept B (income_statement) scores 0.85 raw and element matches → boosted.
+    After refinement, B should win.
+    """
+    concept_a = _make_concept("total_assets", "balance_sheet")
+    concept_b = _make_concept("revenue", "income_statement")
+
+    # us-gaap:Revenue has primary_statement=IncomeStatement
+    refined_a = enricher._refine_element_confidence(0.88, "us-gaap:Revenue", concept_a)
+    refined_b = enricher._refine_element_confidence(0.85, "us-gaap:Revenue", concept_b)
+    # B should win despite lower raw score
+    assert refined_b > refined_a
+
+  def test_same_category_preserves_ordering(self, enricher):
+    """When all candidates share the same category alignment, raw ordering preserved."""
+    concept_a = _make_concept("revenue", "income_statement")
+    concept_b = _make_concept("gross_profit", "income_statement")
+
+    # Both match IncomeStatement, so both get the same +8% boost
+    # Use MixedSignal (moderate pagerank/agreement) to avoid hitting 1.0 cap
+    refined_a = enricher._refine_element_confidence(
+      0.88, "us-gaap:MixedSignal", concept_a
+    )
+    refined_b = enricher._refine_element_confidence(
+      0.85, "us-gaap:MixedSignal", concept_b
+    )
+    # Higher raw score should still win when alignment is equal
+    assert refined_a > refined_b
+
+  def test_unknown_element_no_concept_effect(self, enricher):
+    """Element not in artifact returns raw score regardless of concept."""
+    concept = _make_concept("revenue", "income_statement")
+    result = enricher._refine_element_confidence(0.85, "custom:NeverSeen", concept)
+    assert result == 0.85
 
 
 class TestStructureRefinement:
