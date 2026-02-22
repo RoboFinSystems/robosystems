@@ -11,7 +11,10 @@ CASH_FLOW_CONCEPTS = (
     category="cash_flow",
     description="Net cash from operating activities",
     aliases=("cash from operations", "cfo"),
-    expected_elements=("us-gaap:NetCashProvidedByUsedInOperatingActivities",),
+    expected_elements=(
+      "us-gaap:NetCashProvidedByUsedInOperatingActivities",
+      "us-gaap:NetCashProvidedByUsedInOperatingActivitiesContinuingOperations",
+    ),
     period_type="duration",
     balance="debit",
   ),
