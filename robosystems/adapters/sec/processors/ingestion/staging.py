@@ -723,8 +723,6 @@ class DuckDBStager:
     failed_tables: list[tuple[str, str]] = []
     skipped_tables: list[str] = []
 
-    from datetime import UTC, datetime
-
     # Build partition pattern(s)
     # year_range_patterns is set when we need a list of per-year globs
     year_range_patterns: bool = False
