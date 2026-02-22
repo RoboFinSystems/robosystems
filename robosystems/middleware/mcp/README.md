@@ -37,7 +37,10 @@ mcp/
     ├── properties_tool.py  # Property discovery
     ├── example_queries_tool.py # Query examples and templates
     ├── workspace.py        # Workspace/subgraph management
-    └── data_tools.py       # Data operation tools (staging, materialization)
+    ├── data_tools.py       # Data operation tools (staging, materialization)
+    ├── financial_statement_tool.py  # Get financial statements by type
+    ├── list_disclosures_tool.py     # List disclosure types with counts
+    └── disclosure_detail_tool.py    # Get facts for a disclosure type
 ```
 
 ## Key Components
@@ -303,6 +306,49 @@ result = await tool.execute({
     "file_id": "optional_specific_file_id"
 })
 ```
+
+#### Curated Financial Tools
+
+Parameterized tools for structured financial data access. These use the FactSet traversal pattern (Structure → FactSet → Fact) and Association Classifications to return financial data without requiring Cypher knowledge.
+
+##### Get Financial Statement Tool (`financial_statement_tool.py`)
+
+Return a structured financial statement for a company.
+
+```python
+result = await tools.call_tool("get-financial-statement", {
+    "ticker": "NVDA",
+    "statement_type": "income_statement",  # or balance_sheet, cash_flow_statement, equity_statement
+    "period_type": "annual",               # optional: annual, quarterly, instant
+    "limit": 50
+})
+```
+
+##### List Disclosures Tool (`list_disclosures_tool.py`)
+
+List all disclosure types available in the graph with counts.
+
+```python
+result = await tools.call_tool("list-disclosures", {
+    "ticker": "NVDA"  # optional — omit for graph-wide counts
+})
+# Returns: { disclosures: [{ type: "AssetsRollUp", count: 42 }, ...] }
+```
+
+##### Get Disclosure Detail Tool (`disclosure_detail_tool.py`)
+
+Return facts for a specific disclosure type.
+
+```python
+result = await tools.call_tool("get-disclosure-detail", {
+    "disclosure_type": "AssetsRollUp",
+    "ticker": "NVDA",              # optional
+    "include_dimensions": False,   # optional, default false
+    "limit": 100
+})
+```
+
+These tools require that the graph has been enriched with Structure-level FactSets and Association Classifications (see `adapters/sec/enrichment.py`).
 
 ### 4. Query Validation (`query_validator.py`)
 

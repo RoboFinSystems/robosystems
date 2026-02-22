@@ -15,6 +15,7 @@ sec/
 │   ├── arelle.py                # ArelleClient - XBRL processing
 │   ├── downloader.py            # SECDownloader - bulk file downloads
 │   └── efts.py                  # EFTS API for filing discovery
+├── enrichment.py                # SemanticEnricher (embeddings + classification)
 ├── processors/                  # Data transformation
 │   ├── __init__.py              # Processor exports
 │   ├── metadata.py              # SECMetadataLoader for filer/report metadata
@@ -22,6 +23,7 @@ sec/
 │   ├── xbrl_graph.py            # XBRLGraphProcessor - filing to parquet
 │   ├── processing.py            # Single filing processing helpers
 │   ├── consolidation.py         # Parquet consolidation and S3 merge
+│   ├── classify.py              # Association classification pipeline
 │   ├── schema.py                # Schema adapter and config generator
 │   ├── dataframe.py             # DataFrame management
 │   ├── parquet.py               # Parquet file output
@@ -34,6 +36,20 @@ sec/
 │       ├── materializer.py      # LadybugMaterializer - DuckDB to graph
 │       ├── direct_copy.py       # LadybugDirectCopier - S3 to graph
 │       └── processor.py         # XBRLDuckDBGraphProcessor (unified)
+├── knowledge/                   # Offline knowledge artifact generation
+│   ├── __init__.py              # Package exports
+│   ├── extractors.py            # DuckDB data extraction (edges, filing counts)
+│   ├── graphs.py                # NetworkX graph construction
+│   ├── classifiers.py           # Statement type classification (BFS + heuristics)
+│   ├── artifact.py              # Artifact builders (element knowledge, structure profiles)
+│   └── framework.py             # DuckDBAnalyticsContext (sync context manager)
+├── taxonomy/                    # Canonical concept mappings
+│   ├── __init__.py              # ConceptTaxonomy registry
+│   ├── concepts.py              # Concept type definitions
+│   ├── structures.py            # Structure type definitions
+│   ├── balance_sheet.py         # Balance sheet concept mappings
+│   ├── cash_flow.py             # Cash flow concept mappings
+│   └── income_statement.py      # Income statement concept mappings
 └── pipeline/                    # Dagster orchestration
     ├── __init__.py              # get_dagster_components() discovery
     ├── README.md                # Pipeline documentation
@@ -68,6 +84,25 @@ sec/
 | `LadybugMaterializer` | Materialize from DuckDB to LadybugDB |
 | `LadybugDirectCopier` | Direct S3 to LadybugDB copy (bypasses DuckDB) |
 | `SECMetadataLoader` | Load filer/report metadata with caching |
+
+### Enrichment & Classification
+
+| Class | Purpose |
+|-------|---------|
+| `SemanticEnricher` | Inline enrichment during filing processing — fastembed embeddings, canonical concept mapping, structure `canonical_type` classification, association disclosure classification |
+| `ConceptTaxonomy` | Registry of canonical concept mappings per statement type (balance sheet, income statement, cash flow) |
+| `classify_associations()` | Offline association classification via TempLadybugDB — Cypher pattern matching for disclosure mechanics |
+
+### Knowledge Artifacts
+
+| Class | Purpose |
+|-------|---------|
+| `ArcExtractor` | Extracts deduplicated edges, filing counts, disclosure types from DuckDB |
+| `TaxonomyGraph` | Builds NetworkX directed graph from XBRL arc relationships |
+| `StatementClassifier` | BFS + heuristic classification of elements into statement types |
+| `ElementKnowledgeBuilder` | Generates `element_knowledge.parquet` (pagerank, statement type, disclosure type) |
+| `StructureProfileBuilder` | Generates `structure_profiles.parquet` and `structure_consensus.parquet` |
+| `DuckDBAnalyticsContext` | Sync context manager for running analytics on DuckDB staging files |
 
 ### Helper Modules
 
@@ -125,16 +160,37 @@ SEC EDGAR API
 ┌─────────────┐    ┌─────────────┐    ┌─────────────┐
 │  Download   │───▶│   Process   │───▶│    Stage    │
 │ (ZIP files) │    │ (Parquet)   │    │  (DuckDB)   │
-└─────────────┘    └─────────────┘    └─────────────┘
-                                            │
-                         ┌──────────────────┴──────────────────┐
-                         ▼                                     ▼
-                  ┌─────────────┐                       ┌─────────────┐
-                  │ Materialize │                       │ Direct Copy │
-                  │  (DuckDB →  │                       │  (S3 →      │
-                  │  LadybugDB) │                       │  LadybugDB) │
-                  └─────────────┘                       └─────────────┘
+└─────────────┘    └──────┬──────┘    └─────────────┘
+                          │                  │
+                   ┌──────▼──────┐           │
+                   │   Enrich    │    ┌──────┴──────────────────┐
+                   │ (Semantic + │    ▼                         ▼
+                   │  Classify)  │  ┌─────────────┐     ┌─────────────┐
+                   └─────────────┘  │ Materialize │     │ Direct Copy │
+                                    │  (DuckDB →  │     │  (S3 →      │
+                   ┌─────────────┐  │  LadybugDB) │     │  LadybugDB) │
+                   │  Knowledge  │  └─────────────┘     └─────────────┘
+                   │ (Artifacts) │
+                   │  offline    │
+                   └─────────────┘
 ```
+
+### Enrichment (inline, per-filing)
+
+During the Process step, `SemanticEnricher` adds semantic metadata:
+- **Canonical concepts**: Maps XBRL element qnames to canonical concepts (e.g. `us-gaap:RevenueFromContractWithCustomerExcludingAssessedTax` → `revenue`) using fastembed cosine similarity
+- **Structure classification**: Assigns `canonical_type` to Structure nodes (income_statement, balance_sheet, cash_flow_statement, equity_statement)
+- **Association classification**: Creates Classification nodes linking Associations to disclosure types (AssetsRollUp, RevenueBreakdown, etc.)
+- **Confidence refinement**: Uses knowledge artifacts to crush bad semantic matches and boost well-connected elements
+
+### Knowledge Artifacts (offline, corpus-level)
+
+Dagster jobs run `ArcExtractor` → `TaxonomyGraph` → `StatementClassifier` over the full DuckDB corpus to produce:
+- `element_knowledge.parquet` — pagerank, neighborhood agreement, BFS depth, statement type per element
+- `structure_profiles.parquet` — element composition fingerprints per structure type
+- `structure_consensus.parquet` — canonical type consensus across structures
+
+These artifacts are stored in `data/artifacts/` and loaded by `SemanticEnricher` at runtime.
 
 ## Configuration
 
@@ -142,6 +198,14 @@ Key configuration in `config.py`:
 - `XBRL_COLUMN_STANDARDIZATION` - Column name mapping
 - `XBRL_EXTERNALIZATION_THRESHOLD` - Size threshold for S3 externalization
 - `XBRL_STANDARDIZED_FILENAMES` - Output file naming
+
+### Feature Flags
+
+| Flag | Default | Purpose |
+|------|---------|---------|
+| `XBRL_SEMANTIC_ENRICHMENT` | `True` | Enable fastembed-based canonical concept mapping and structure classification |
+| `XBRL_ASSOCIATION_CLASSIFICATION` | `True` | Enable association-level disclosure classification (creates Classification nodes) |
+| `XBRL_GRAPH_REFINEMENT` | `True` | Enable knowledge artifact-based confidence refinement |
 
 ## Related Documentation
 

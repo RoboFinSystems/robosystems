@@ -20,6 +20,7 @@ adapters/
 │   ├── __init__.py              # SEC adapter exports
 │   ├── manifest.py              # SEC shared repository manifest
 │   ├── config.py                # XBRL processing configuration
+│   ├── enrichment.py            # SemanticEnricher (embeddings + classification)
 │   ├── client/                  # SEC API clients
 │   │   ├── edgar.py             # EDGAR API client
 │   │   ├── arelle.py            # Arelle XBRL processor client
@@ -31,6 +32,7 @@ adapters/
 │   │   ├── xbrl_graph.py        # XBRLGraphProcessor (main)
 │   │   ├── processing.py        # Single filing processing
 │   │   ├── consolidation.py     # Parquet consolidation
+│   │   ├── classify.py          # Association classification pipeline
 │   │   ├── schema.py            # Schema adapter and config
 │   │   ├── dataframe.py         # DataFrame management
 │   │   ├── parquet.py           # Parquet file output
@@ -41,6 +43,20 @@ adapters/
 │   │       ├── materializer.py  # LadybugMaterializer
 │   │       ├── direct_copy.py   # LadybugDirectCopier
 │   │       └── processor.py     # XBRLDuckDBGraphProcessor
+│   ├── knowledge/               # Offline knowledge artifact generation
+│   │   ├── __init__.py          # Package exports
+│   │   ├── extractors.py        # DuckDB data extraction (edges, filing counts)
+│   │   ├── graphs.py            # NetworkX graph construction
+│   │   ├── classifiers.py       # Statement type classification (BFS + heuristics)
+│   │   ├── artifact.py          # Artifact builders (element knowledge, structure profiles)
+│   │   └── framework.py         # DuckDBAnalyticsContext (sync context manager)
+│   ├── taxonomy/                # Canonical concept mappings
+│   │   ├── __init__.py          # ConceptTaxonomy registry
+│   │   ├── concepts.py          # Concept type definitions
+│   │   ├── structures.py        # Structure type definitions
+│   │   ├── balance_sheet.py     # Balance sheet concept mappings
+│   │   ├── cash_flow.py         # Cash flow concept mappings
+│   │   └── income_statement.py  # Income statement concept mappings
 │   └── pipeline/                # Dagster orchestration
 │       ├── __init__.py          # get_dagster_components() discovery
 │       ├── configs.py           # Run configurations
@@ -75,7 +91,7 @@ Shared repository adapters declare a `SharedRepositoryManifest` (defined in `bas
 | `id`, `name`, `description` | Identity (id doubles as graph_id) |
 | `data_source_type`, `data_source_url`, `sync_frequency` | Data source metadata |
 | `schema_type`, `schema_extensions` | Graph schema configuration |
-| `has_element_discovery` | MCP capability flags |
+| `has_element_discovery`, `has_semantic_enrichment` | MCP capability flags |
 | `plans` | Billing plans with pricing, credits, and features |
 | `rate_limits` | Per-plan rate limits (queries, MCP, agent, downloads) |
 | `allowed_endpoints`, `blocked_endpoints` | Endpoint access control |
@@ -97,13 +113,24 @@ Each adapter follows a consistent structure:
 1. **Client** - API connection and authentication
 2. **Processors** - Data transformation for graph ingestion
 3. **Manifest** (shared repos only) - Complete repository configuration
-4. **Models** (optional) - Service-specific data models
+4. **Enrichment** (optional) - Semantic enrichment and classification during processing
+5. **Knowledge** (optional) - Offline corpus-level artifact generation for confidence refinement
+6. **Taxonomy** (optional) - Canonical concept and structure type mappings
+7. **Models** (optional) - Service-specific data models
 
 ## Available Adapters
 
 ### SEC EDGAR (`sec/`) — Shared Repository
 
 Financial filing data from the SEC. Declared as a shared repository via `sec/manifest.py`.
+
+The SEC adapter has three processing layers:
+
+1. **Core pipeline** (`client/`, `processors/`, `pipeline/`) — Downloads XBRL filings from EDGAR, transforms them into graph nodes/relationships, stages in DuckDB, and materializes into LadybugDB.
+
+2. **Enrichment** (`enrichment.py`, `taxonomy/`) — `SemanticEnricher` runs inline during filing processing to add semantic metadata: canonical concept mapping via fastembed embeddings, Structure-level `canonical_type` classification (income_statement, balance_sheet, etc.), and Association-level disclosure classification. Controlled by feature flags `XBRL_SEMANTIC_ENRICHMENT`, `XBRL_ASSOCIATION_CLASSIFICATION`, and `XBRL_GRAPH_REFINEMENT`.
+
+3. **Knowledge artifacts** (`knowledge/`) — Offline Dagster jobs that analyze the full DuckDB corpus to generate confidence-refinement artifacts (`element_knowledge.parquet`, `structure_profiles.parquet`, `structure_consensus.parquet`). These artifacts are loaded at enrichment time to refine classification confidence — crushing bad semantic matches and boosting well-connected elements.
 
 ```python
 from robosystems.adapters.sec import (
