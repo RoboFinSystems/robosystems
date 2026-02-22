@@ -183,7 +183,6 @@ def sec_processed_filings(
   pending_flush: list[dict] = []  # [{...file_info}, ...]
   total_flushed = 0
   tables_uploaded = 0  # Track number of table files uploaded
-  flush_batch_number = 0  # Track which flush cycle we're on
 
   def flush_to_s3() -> int:
     """Consolidate disk buffer into part files on S3, mark success.
@@ -201,16 +200,10 @@ def sec_processed_filings(
     creates duplicate rows across part files, but DuckDB handles dedup during
     staging via GROUP BY + FIRST() with spill-to-disk.
     """
-    nonlocal tables_uploaded, total_flushed, flush_batch_number
+    nonlocal tables_uploaded, total_flushed
 
     if not pending_flush:
       return 0
-
-    flush_batch_number += 1
-    context.log.info(
-      f"Flush #{flush_batch_number}: {len(pending_flush)} filings to S3 "
-      f"(partition: filed={partition_date})..."
-    )
 
     # Find all table directories in work_dir
     # Disk structure: work_dir/nodes/Entity/...
@@ -263,8 +256,7 @@ def sec_processed_filings(
     flushed_count = len(pending_flush)
     total_flushed += flushed_count
     context.log.info(
-      f"Flush #{flush_batch_number}: {flushed_count} filings done, "
-      f"{tables_uploaded} total table files uploaded"
+      f"Flushed {flushed_count} filings, {tables_uploaded} table files uploaded"
     )
 
     # Clear disk buffer and pending list

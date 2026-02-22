@@ -81,8 +81,8 @@ def sec_processing_sensor(context: SensorEvaluationContext):
 
   Output Structure:
   - All filings output to quarterly partitions (filed=YYYY-QN)
-  - Single file per table per quarter with append-based merging
-  - Shared tables (Element, Label, etc.) deduplicated on identifier
+  - Part files per table per quarter (part_{uuid}.parquet, additive)
+  - Shared tables deduped within batch; DuckDB handles cross-batch dedup
 
   Deduplication:
   - No run_key used - allows retries after failures
