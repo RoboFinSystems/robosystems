@@ -88,6 +88,24 @@ CASH_FLOW_CONCEPTS = (
     balance="credit",
   ),
   CanonicalConcept(
+    id="net_change_in_cash",
+    display_name="Net Change in Cash",
+    category="cash_flow",
+    description="Net increase or decrease in cash, cash equivalents, and restricted cash during the period",
+    aliases=(
+      "change in cash",
+      "net increase in cash",
+      "cash period increase decrease",
+    ),
+    expected_elements=(
+      "us-gaap:CashCashEquivalentsRestrictedCashAndRestrictedCashEquivalentsPeriodIncreaseDecreaseIncludingExchangeRateEffect",
+      "us-gaap:CashAndCashEquivalentsPeriodIncreaseDecrease",
+      "us-gaap:CashCashEquivalentsRestrictedCashAndRestrictedCashEquivalentsPeriodIncreaseDecreaseExcludingExchangeRateEffect",
+    ),
+    period_type="duration",
+    balance="debit",
+  ),
+  CanonicalConcept(
     id="shares_outstanding",
     display_name="Shares Outstanding",
     category="per_share",
