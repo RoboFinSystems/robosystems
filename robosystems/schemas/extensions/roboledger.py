@@ -122,6 +122,16 @@ REPORTING_NODES = [
     ],
   ),
   Node(
+    name="Classification",
+    description="Structural pattern classification for associations (RollUp, RollForward, Hierarchy, etc.)",
+    properties=[
+      Property(name="identifier", type="STRING", is_primary_key=True),
+      Property(name="type", type="STRING"),
+      Property(name="source", type="STRING"),
+      Property(name="confidence", type="DOUBLE"),
+    ],
+  ),
+  Node(
     name="FactSet",
     description="Logical grouping of related facts",
     properties=[
@@ -246,6 +256,13 @@ REPORTING_RELATIONSHIPS = [
     from_node="Association",
     to_node="Element",
     description="Association to element (child)",
+    properties=[],
+  ),
+  Relationship(
+    name="ASSOCIATION_HAS_CLASSIFICATION",
+    from_node="Association",
+    to_node="Classification",
+    description="Association has structural pattern classification (many-to-many)",
     properties=[],
   ),
 ]

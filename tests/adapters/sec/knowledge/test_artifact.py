@@ -39,7 +39,8 @@ def synthetic_duckdb(tmp_path, monkeypatch):
       identifier VARCHAR PRIMARY KEY,
       association_type VARCHAR,
       weight DOUBLE,
-      order_value DOUBLE
+      order_value DOUBLE,
+      root VARCHAR
     )
   """)
 
@@ -142,7 +143,10 @@ def synthetic_duckdb(tmp_path, monkeypatch):
     ("assoc_6", "Calculation", "el_gross_profit", "el_cogs", -1.0),
   ]
   for aid, atype, from_el, to_el, weight in calc_arcs:
-    conn.execute("INSERT INTO Association VALUES (?, ?, ?, NULL)", [aid, atype, weight])
+    root = "True" if aid in ("assoc_1",) else "False"
+    conn.execute(
+      "INSERT INTO Association VALUES (?, ?, ?, NULL, ?)", [aid, atype, weight, root]
+    )
     conn.execute(
       "INSERT INTO ASSOCIATION_HAS_FROM_ELEMENT VALUES (?, ?)", [aid, from_el]
     )
@@ -175,6 +179,36 @@ def synthetic_duckdb(tmp_path, monkeypatch):
   conn.execute("INSERT INTO REPORT_HAS_FACT VALUES ('report_1', 'fact_1')")
   conn.execute("INSERT INTO REPORT_HAS_FACT VALUES ('report_1', 'fact_2')")
 
+  # Classification tables for disclosure mechanics
+  conn.execute("""
+    CREATE TABLE Classification (
+      identifier VARCHAR PRIMARY KEY,
+      type VARCHAR,
+      source VARCHAR,
+      confidence DOUBLE
+    )
+  """)
+
+  conn.execute("""
+    CREATE TABLE ASSOCIATION_HAS_CLASSIFICATION (
+      src VARCHAR,
+      dst VARCHAR
+    )
+  """)
+
+  # IncomeStatement disclosure classification linked to calc root association
+  conn.execute("""
+    INSERT INTO Classification VALUES
+    ('class_1', 'IncomeStatement', 'disclosure_mechanics', 1.0)
+  """)
+
+  # Link root calc association (assoc_1: NetIncomeLoss -> Revenue) to classification
+  conn.execute("""
+    INSERT INTO ASSOCIATION_HAS_CLASSIFICATION VALUES
+    ('assoc_1', 'class_1'),
+    ('assoc_2', 'class_1')
+  """)
+
   conn.close()
 
   # Set ARTIFACT_PATH to tmp_path so artifacts are written there
@@ -206,6 +240,7 @@ class TestElementKnowledgeBuilder:
       "core_number",
       "neighborhood_agreement",
       "filing_count",
+      "disclosure_type",
     }
 
   def test_element_classification(self, synthetic_duckdb, tmp_path, monkeypatch):
@@ -272,6 +307,74 @@ class TestElementKnowledgeBuilder:
     # NetIncomeLoss neighbors should all be IncomeStatement
     idx = cols["qname"].index("us-gaap:NetIncomeLoss")
     assert cols["neighborhood_agreement"][idx] > 0
+
+  def test_disclosure_type_column(self, synthetic_duckdb, tmp_path, monkeypatch):
+    """Elements in disclosure structures get a disclosure_type value."""
+    monkeypatch.setenv("ARTIFACT_PATH", str(tmp_path / "artifacts"))
+    from robosystems.adapters.sec.knowledge.artifact import ElementKnowledgeBuilder
+
+    builder = ElementKnowledgeBuilder(memory_limit="256MB")
+    path = builder.build(synthetic_duckdb)
+
+    table = _read_parquet(path)
+    cols = table.to_pydict()
+
+    assert "disclosure_type" in cols
+    # At least one element should have a non-null disclosure type
+    non_null = [dt for dt in cols["disclosure_type"] if dt is not None]
+    assert len(non_null) > 0
+
+  def test_build_without_classification_table(self, tmp_path, monkeypatch):
+    """Build succeeds when Classification table doesn't exist (old data)."""
+    monkeypatch.setenv("ARTIFACT_PATH", str(tmp_path / "artifacts"))
+
+    # Create a DuckDB without Classification tables
+    db_path = tmp_path / "old.duckdb"
+    conn = duckdb.connect(str(db_path))
+    conn.execute("""
+      CREATE TABLE Element (
+        identifier VARCHAR PRIMARY KEY, qname VARCHAR, name VARCHAR,
+        period_type VARCHAR, balance VARCHAR, is_abstract BOOLEAN, is_numeric BOOLEAN
+      )
+    """)
+    conn.execute("""
+      CREATE TABLE Association (
+        identifier VARCHAR PRIMARY KEY, association_type VARCHAR,
+        weight DOUBLE, order_value DOUBLE, root VARCHAR
+      )
+    """)
+    conn.execute("CREATE TABLE ASSOCIATION_HAS_FROM_ELEMENT (src VARCHAR, dst VARCHAR)")
+    conn.execute("CREATE TABLE ASSOCIATION_HAS_TO_ELEMENT (src VARCHAR, dst VARCHAR)")
+    conn.execute(
+      "CREATE TABLE Report (identifier VARCHAR PRIMARY KEY, filing_date VARCHAR)"
+    )
+    conn.execute("CREATE TABLE Fact (identifier VARCHAR PRIMARY KEY, value VARCHAR)")
+    conn.execute("CREATE TABLE FACT_HAS_ELEMENT (src VARCHAR, dst VARCHAR)")
+    conn.execute("CREATE TABLE REPORT_HAS_FACT (src VARCHAR, dst VARCHAR)")
+
+    # Insert minimal data (two elements to avoid self-loop in graph)
+    conn.execute(
+      "INSERT INTO Element VALUES ('e1', 'us-gaap:Assets', 'Assets', 'instant', 'debit', false, true)"
+    )
+    conn.execute(
+      "INSERT INTO Element VALUES ('e2', 'us-gaap:AssetsCurrent', 'AssetsCurrent', 'instant', 'debit', false, true)"
+    )
+    conn.execute(
+      "INSERT INTO Association VALUES ('a1', 'Calculation', 1.0, 1.0, 'True')"
+    )
+    conn.execute("INSERT INTO ASSOCIATION_HAS_FROM_ELEMENT VALUES ('a1', 'e1')")
+    conn.execute("INSERT INTO ASSOCIATION_HAS_TO_ELEMENT VALUES ('a1', 'e2')")
+    conn.close()
+
+    from robosystems.adapters.sec.knowledge.artifact import ElementKnowledgeBuilder
+
+    builder = ElementKnowledgeBuilder(memory_limit="256MB")
+    path = builder.build(db_path)
+
+    table = _read_parquet(path)
+    cols = table.to_pydict()
+    # disclosure_type should be all None
+    assert all(dt is None for dt in cols["disclosure_type"])
 
 
 class TestStructureKnowledgeBuilder:

@@ -137,6 +137,107 @@ class ArcExtractor:
     finally:
       conn.close()
 
+  def extract_element_disclosure_types(self) -> dict[str, str]:
+    """Extract the primary disclosure type for each element.
+
+    Joins Classification (disclosure_mechanics) through associations to elements.
+    For elements appearing in multiple disclosure structures, returns the most
+    frequent disclosure type.
+
+    Returns:
+        Dict mapping qname to primary disclosure type (e.g., "AssetsRollUp").
+        Empty dict if Classification table does not exist (backward compatibility).
+    """
+    sql = """
+      WITH element_disclosures AS (
+        SELECT e.qname, c.type AS disclosure_type, COUNT(*) AS freq
+        FROM Classification c
+        JOIN ASSOCIATION_HAS_CLASSIFICATION ahc ON c.identifier = ahc.dst
+        JOIN Association a ON ahc.src = a.identifier
+        JOIN ASSOCIATION_HAS_TO_ELEMENT ato ON a.identifier = ato.src
+        JOIN Element e ON ato.dst = e.identifier
+        WHERE c.source = 'disclosure_mechanics'
+          AND e.qname IS NOT NULL
+        GROUP BY e.qname, c.type
+
+        UNION ALL
+
+        SELECT e.qname, c.type AS disclosure_type, COUNT(*) AS freq
+        FROM Classification c
+        JOIN ASSOCIATION_HAS_CLASSIFICATION ahc ON c.identifier = ahc.dst
+        JOIN Association a ON ahc.src = a.identifier
+        JOIN ASSOCIATION_HAS_FROM_ELEMENT afrom ON a.identifier = afrom.src
+        JOIN Element e ON afrom.dst = e.identifier
+        WHERE c.source = 'disclosure_mechanics'
+          AND e.qname IS NOT NULL
+        GROUP BY e.qname, c.type
+      ),
+      ranked AS (
+        SELECT qname, disclosure_type,
+               SUM(freq) AS total_freq,
+               ROW_NUMBER() OVER (PARTITION BY qname ORDER BY SUM(freq) DESC) AS rn
+        FROM element_disclosures
+        GROUP BY qname, disclosure_type
+      )
+      SELECT qname, disclosure_type
+      FROM ranked
+      WHERE rn = 1
+    """
+    conn = self._connect()
+    try:
+      tables = {row[0] for row in conn.execute("SHOW TABLES").fetchall()}
+      if (
+        "Classification" not in tables or "ASSOCIATION_HAS_CLASSIFICATION" not in tables
+      ):
+        return {}
+
+      rows = conn.execute(sql).fetchall()
+      return {row[0]: row[1] for row in rows}
+    except Exception:
+      return {}
+    finally:
+      conn.close()
+
+  def extract_disclosure_root_elements(self) -> dict[str, set[str]]:
+    """Extract elements that are roots of disclosure-mechanics structures.
+
+    Finds calculation root elements (root='True') connected to disclosure_mechanics
+    classifications. These serve as BFS seed candidates for statement classification.
+
+    Returns:
+        Dict mapping root element qname to set of disclosure types.
+        Empty dict if Classification table does not exist (backward compatibility).
+    """
+    sql = """
+      SELECT DISTINCT e.qname, c.type AS disclosure_type
+      FROM Classification c
+      JOIN ASSOCIATION_HAS_CLASSIFICATION ahc ON c.identifier = ahc.dst
+      JOIN Association a ON ahc.src = a.identifier
+      JOIN ASSOCIATION_HAS_FROM_ELEMENT afrom ON a.identifier = afrom.src
+      JOIN Element e ON afrom.dst = e.identifier
+      WHERE c.source = 'disclosure_mechanics'
+        AND a.association_type = 'Calculation'
+        AND a.root = 'True'
+        AND e.qname IS NOT NULL
+    """
+    conn = self._connect()
+    try:
+      tables = {row[0] for row in conn.execute("SHOW TABLES").fetchall()}
+      if (
+        "Classification" not in tables or "ASSOCIATION_HAS_CLASSIFICATION" not in tables
+      ):
+        return {}
+
+      rows = conn.execute(sql).fetchall()
+      result: dict[str, set[str]] = {}
+      for qname, dtype in rows:
+        result.setdefault(qname, set()).add(dtype)
+      return result
+    except Exception:
+      return {}
+    finally:
+      conn.close()
+
   def extract_all_elements(self) -> dict[str, ElementInfo]:
     """Extract all element metadata from the database.
 

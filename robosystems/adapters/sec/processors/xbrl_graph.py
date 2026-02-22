@@ -233,6 +233,9 @@ class XBRLGraphProcessor:
 
       logger.info("Outputting parquet files")
       self.output_parquet_files()
+
+      self.classify_associations()
+
       logger.info("XBRL processing completed successfully")
     except Exception as e:
       logger.error(f"Error processing XBRL: {e}")
@@ -267,6 +270,39 @@ class XBRLGraphProcessor:
   def output_parquet_files(self):
     """Output all DataFrames to parquet files organized in nodes/ and relationships/ subdirectories."""
     self.parquet_writer.write_all_dataframes(self.schema_to_dataframe_mapping, self)
+
+  def classify_associations(self):
+    """Classify associations using Cypher pattern detection on temp embedded LadybugDB.
+
+    Runs after parquet output. Loads the filing's parquets into a temporary
+    LadybugDB, detects structural patterns (RollUp, RollForward, etc.),
+    and writes Classification nodes + relationships as additional parquets.
+    """
+    from robosystems.adapters.sec.config import XBRL_ASSOCIATION_CLASSIFICATION
+
+    if not XBRL_ASSOCIATION_CLASSIFICATION:
+      return
+
+    try:
+      from robosystems.adapters.sec.processors.classify import AssociationClassifier
+
+      classifier = AssociationClassifier()
+      classifications_df, assoc_class_df = classifier.classify(self.output_dir)
+
+      if classifications_df.empty:
+        return
+
+      # Write additional parquet files alongside the originals
+      self.parquet_writer.write_dataframe(
+        classifications_df, "nodes/Classification.parquet"
+      )
+      self.parquet_writer.write_dataframe(
+        assoc_class_df, "relationships/ASSOCIATION_HAS_CLASSIFICATION.parquet"
+      )
+      logger.info(f"Wrote {len(classifications_df)} association classifications")
+    except Exception as e:
+      # Classification is non-critical — log and continue
+      logger.warning(f"Association classification failed (non-critical): {e}")
 
   def enrich_dataframes(self):
     """Batch enrichment of Element, Label, and Structure DataFrames with embeddings and canonical concepts."""

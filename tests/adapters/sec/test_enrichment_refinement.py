@@ -23,6 +23,7 @@ def enricher():
       "core_number": 5,
       "neighborhood_agreement": 1.0,
       "filing_count": 500,
+      "disclosure_type": "RevenuefromExternalCustomersAttributedToForeignCountriesByGeographicArea",
     },
     "us-gaap:Assets": {
       "primary_statement": "BalanceSheet",
@@ -31,6 +32,7 @@ def enricher():
       "core_number": 8,
       "neighborhood_agreement": 1.0,
       "filing_count": 500,
+      "disclosure_type": "AssetsRollUp",
     },
     "custom:WeirdElement": {
       "primary_statement": "IncomeStatement",
@@ -39,6 +41,7 @@ def enricher():
       "core_number": 1,
       "neighborhood_agreement": 0.0,
       "filing_count": 2,
+      "disclosure_type": None,
     },
     "us-gaap:MixedSignal": {
       "primary_statement": "IncomeStatement",
@@ -47,6 +50,7 @@ def enricher():
       "core_number": 3,
       "neighborhood_agreement": 0.5,
       "filing_count": 100,
+      "disclosure_type": None,
     },
   }
   # Inject mock structure profiles
@@ -174,6 +178,7 @@ class TestConceptAwareRefinement:
       "core_number": 3,
       "neighborhood_agreement": 0.8,
       "filing_count": 100,
+      "disclosure_type": None,
     }
     concept = _make_concept("revenue", "income_statement")
     result_with = enricher._refine_element_confidence(

@@ -293,6 +293,8 @@ class SemanticEnricher:
       # Read columnar and transpose to row dicts
       columns = table.to_pydict()
       qnames = columns["qname"]
+      # Backward compat: disclosure_type may not exist in old artifacts
+      disclosure_types = columns.get("disclosure_type")
       for i, qname in enumerate(qnames):
         result[qname] = {
           "primary_statement": columns["primary_statement"][i],
@@ -301,6 +303,7 @@ class SemanticEnricher:
           "core_number": columns["core_number"][i],
           "neighborhood_agreement": columns["neighborhood_agreement"][i],
           "filing_count": columns["filing_count"][i],
+          "disclosure_type": disclosure_types[i] if disclosure_types else None,
         }
 
       logger.info(f"Loaded element knowledge artifact: {len(result)} elements")
@@ -469,6 +472,25 @@ class SemanticEnricher:
     "CashFlow": "cash_flow",
   }
 
+  @staticmethod
+  def _disclosure_type_to_category(disclosure_type: str) -> str | None:
+    """Map a disclosure type to a concept category string.
+
+    Lazily imports DISCLOSURE_TO_STATEMENT from classifiers and converts
+    StatementType enum to the category string used by CanonicalConcept.
+    """
+    from robosystems.adapters.sec.knowledge.classifiers import DISCLOSURE_TO_STATEMENT
+
+    stmt_type = DISCLOSURE_TO_STATEMENT.get(disclosure_type)
+    if stmt_type is None:
+      return None
+    return {
+      "IncomeStatement": "income_statement",
+      "BalanceSheet": "balance_sheet",
+      "CashFlow": "cash_flow",
+      "Equity": "equity",
+    }.get(stmt_type.value)
+
   def _refine_element_confidence(
     self, raw_conf: float, qname: str, concept: CanonicalConcept | None = None
   ) -> float:
@@ -508,12 +530,21 @@ class SemanticEnricher:
     # Statement alignment: compare element's primary_statement to concept category
     if concept is not None:
       primary_stmt = element_info.get("primary_statement")
+      disclosure_type = element_info.get("disclosure_type")
+
       if primary_stmt:
         mapped_category = self._STATEMENT_TO_CATEGORY.get(primary_stmt)
         if mapped_category == concept.category:
           refined *= 1.08  # +8% boost for matching statement
         elif mapped_category is not None:
           refined *= 0.88  # -12% penalty for mismatched statement
+      elif disclosure_type:
+        # Fallback: use disclosure_type when primary_statement is unavailable
+        mapped_category = self._disclosure_type_to_category(disclosure_type)
+        if mapped_category == concept.category:
+          refined *= 1.05  # +5% boost (lower confidence than direct statement match)
+        elif mapped_category is not None:
+          refined *= 0.92  # -8% penalty (softer than direct statement mismatch)
 
     # Quadratic penalty below threshold
     threshold = 0.90

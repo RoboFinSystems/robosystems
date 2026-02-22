@@ -35,7 +35,7 @@ class ElementKnowledgeBuilder:
   Output schema:
     qname (STRING), primary_statement (STRING), bfs_depth (INT32),
     pagerank (FLOAT), core_number (INT32), neighborhood_agreement (FLOAT),
-    filing_count (INT32)
+    filing_count (INT32), disclosure_type (STRING)
   """
 
   def __init__(self, memory_limit: str = "10GB") -> None:
@@ -63,6 +63,15 @@ class ElementKnowledgeBuilder:
     filing_counts = extractor.extract_element_filing_counts()
     logger.info(f"Extracted filing counts for {len(filing_counts)} elements")
 
+    # Extract disclosure classifications
+    logger.info("Extracting disclosure classifications")
+    disclosure_types = extractor.extract_element_disclosure_types()
+    disclosure_roots = extractor.extract_disclosure_root_elements()
+    logger.info(
+      f"Extracted disclosure types for {len(disclosure_types)} elements, "
+      f"{len(disclosure_roots)} disclosure roots"
+    )
+
     # Build graph from deduplicated edges
     logger.info("Building element graph")
     element_graph = build_element_graph_from_edges(edges)
@@ -78,7 +87,9 @@ class ElementKnowledgeBuilder:
     core_numbers = self._run_core_decomposition(element_graph)
 
     logger.info("Running BFS classification")
-    classifications = StatementClassifier().classify(element_graph)
+    classifications = StatementClassifier().classify(
+      element_graph, disclosure_roots=disclosure_roots or None
+    )
 
     logger.info("Computing neighborhood agreement")
     agreement_scores = self._compute_neighborhood_agreement(
@@ -93,6 +104,7 @@ class ElementKnowledgeBuilder:
     cores = []
     agreements = []
     f_counts = []
+    d_types = []
 
     for qname in element_graph.elements:
       qnames.append(qname)
@@ -111,6 +123,7 @@ class ElementKnowledgeBuilder:
       cores.append(core_numbers.get(idx, 0))
       agreements.append(agreement_scores.get(qname, 0.0))
       f_counts.append(filing_counts.get(qname, 0))
+      d_types.append(disclosure_types.get(qname))
 
     # Write Parquet
     table = pa.table(
@@ -122,6 +135,7 @@ class ElementKnowledgeBuilder:
         "core_number": pa.array(cores, type=pa.int32()),
         "neighborhood_agreement": pa.array(agreements, type=pa.float64()),
         "filing_count": pa.array(f_counts, type=pa.int32()),
+        "disclosure_type": pa.array(d_types, type=pa.string()),
       }
     )
 

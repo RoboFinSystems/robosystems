@@ -101,6 +101,29 @@ STATEMENT_ROOTS: dict[StatementType, list[str]] = {
 }
 
 
+# Authoritative mapping from Hoffman's disclosure-isSECType StatementType
+# disclosures to our StatementType enum. Only the 8 disclosures that Hoffman
+# classifies as StatementType (face of financial statement) are included.
+# All other disclosures (~987) are DisclosureType (notes) — their raw Hoffman
+# names flow through the disclosure_type column in element_knowledge.parquet
+# for downstream use, but are NOT mapped to statements.
+# Source: disclosure-isSECType arcrole from disclosure-mechanics_ALL.xsd
+DISCLOSURE_TO_STATEMENT: dict[str, StatementType] = {
+  # Income Statement
+  "IncomeStatement": StatementType.INCOME_STATEMENT,
+  "EarningsPerShareDisclosuresHierarchy": StatementType.INCOME_STATEMENT,
+  "StatementOfComprehensiveIncome": StatementType.INCOME_STATEMENT,
+  # Balance Sheet (BalanceSheet + its two required sub-disclosures)
+  "BalanceSheet": StatementType.BALANCE_SHEET,
+  "AssetsRollUp": StatementType.BALANCE_SHEET,
+  "LiabilitiesAndEquityRollUp": StatementType.BALANCE_SHEET,
+  # Cash Flow
+  "CashFlowStatement": StatementType.CASH_FLOW,
+  # Equity
+  "StatementOfChangesInEquity": StatementType.EQUITY,
+}
+
+
 class StatementClassifier:
   """Classifies XBRL elements into financial statement categories.
 
@@ -115,15 +138,21 @@ class StatementClassifier:
   ) -> None:
     self._roots = roots or STATEMENT_ROOTS
 
-  def classify(self, element_graph: ElementGraph) -> ClassificationResult:
+  def classify(
+    self,
+    element_graph: ElementGraph,
+    disclosure_roots: dict[str, set[str]] | None = None,
+  ) -> ClassificationResult:
     """Run statement classification on the element graph.
 
-    Performs BFS from each statement root element, tracking depth
-    and cumulative weight along the path. Uses connected components
-    and core decomposition for structural analysis.
+    Phase 1: BFS from hardcoded STATEMENT_ROOTS (weight 1.0).
+    Phase 2: BFS from disclosure root elements (weight 0.9), using
+    DISCLOSURE_TO_STATEMENT mapping. Only unclassified elements benefit.
 
     Args:
         element_graph: The element graph with index mappings.
+        disclosure_roots: Optional dict from extract_disclosure_root_elements().
+            Maps element qname to set of disclosure type names.
 
     Returns:
         ClassificationResult with per-element classifications.
@@ -131,7 +160,7 @@ class StatementClassifier:
     result = ClassificationResult()
     graph = element_graph.graph
 
-    # Run BFS from each root
+    # Phase 1: BFS from hardcoded roots
     for stmt_type, root_qnames in self._roots.items():
       for root_qname in root_qnames:
         root_idx = element_graph.get_idx(root_qname)
@@ -141,12 +170,56 @@ class StatementClassifier:
           graph, element_graph, root_idx, root_qname, stmt_type, result
         )
 
+    # Phase 2: BFS from disclosure root elements
+    if disclosure_roots:
+      self._classify_from_disclosure_roots(element_graph, disclosure_roots, result)
+
     # Identify unclassified elements
     all_qnames = set(element_graph.elements)
     classified_qnames = set(result.classifications.keys())
     result.unclassified = sorted(all_qnames - classified_qnames)
 
     return result
+
+  def _classify_from_disclosure_roots(
+    self,
+    element_graph: ElementGraph,
+    disclosure_roots: dict[str, set[str]],
+    result: ClassificationResult,
+  ) -> None:
+    """Phase 2: BFS from disclosure root elements with reduced weight.
+
+    For each disclosure root, maps its disclosure types to StatementType
+    via DISCLOSURE_TO_STATEMENT. Uses weight 0.9 to preserve priority of
+    hardcoded roots.
+    """
+    graph = element_graph.graph
+    seen_seeds: set[tuple[str, StatementType]] = set()
+
+    for qname, disclosure_types in disclosure_roots.items():
+      root_idx = element_graph.get_idx(qname)
+      if root_idx is None:
+        continue
+
+      for dtype in sorted(disclosure_types):
+        stmt_type = DISCLOSURE_TO_STATEMENT.get(dtype)
+        if stmt_type is None:
+          continue
+
+        seed_key = (qname, stmt_type)
+        if seed_key in seen_seeds:
+          continue
+        seen_seeds.add(seed_key)
+
+        self._bfs_classify(
+          graph,
+          element_graph,
+          root_idx,
+          qname,
+          stmt_type,
+          result,
+          initial_weight=0.9,
+        )
 
   def _bfs_classify(
     self,
@@ -156,13 +229,14 @@ class StatementClassifier:
     root_qname: str,
     stmt_type: StatementType,
     result: ClassificationResult,
+    initial_weight: float = 1.0,
   ) -> None:
     """BFS from a root node, classifying all reachable descendants."""
     visited: set[int] = set()
     queue: deque[tuple[int, int, float]] = deque()
 
     # Seed the root itself
-    queue.append((root_idx, 0, 1.0))
+    queue.append((root_idx, 0, initial_weight))
     visited.add(root_idx)
 
     while queue:
