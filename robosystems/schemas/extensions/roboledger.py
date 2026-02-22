@@ -218,13 +218,11 @@ REPORTING_RELATIONSHIPS = [
     properties=[],
   ),
   Relationship(
-    name="REPORT_HAS_FACT_SET",
-    from_node="Report",
+    name="STRUCTURE_HAS_FACT_SET",
+    from_node="Structure",
     to_node="FactSet",
-    description="Report contains fact sets",
-    properties=[
-      Property(name="fact_set_context", type="STRING"),
-    ],
+    description="Structure has a pre-computed set of facts for rendering",
+    properties=[],
   ),
   Relationship(
     name="REPORT_USES_TAXONOMY",

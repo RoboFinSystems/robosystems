@@ -77,7 +77,7 @@ class XBRLSchemaAdapter:
     # Relationship table mappings - complete list from XBRL processing
     "EntityReports": "ENTITY_HAS_REPORT",
     "ReportFacts": "REPORT_HAS_FACT",
-    "ReportFactSets": "REPORT_HAS_FACT_SET",
+    "StructureFactSets": "STRUCTURE_HAS_FACT_SET",
     "ReportTaxonomies": "REPORT_USES_TAXONOMY",
     "FactUnits": "FACT_HAS_UNIT",
     "FactDimensions": "FACT_HAS_DIMENSION",

@@ -24,7 +24,6 @@ from robosystems.adapters.sec.processors.ids import (
   create_element_id,
   create_entity_id,
   create_fact_id,
-  create_factset_id,
   create_label_id,
   create_period_id,
   create_reference_id,
@@ -287,26 +286,44 @@ class XBRLGraphProcessor:
       from robosystems.adapters.sec.processors.classify import AssociationClassifier
 
       classifier = AssociationClassifier()
-      classifications_df, assoc_class_df, canonical_hints = classifier.classify(
-        self.output_dir
-      )
+      result = classifier.classify(self.output_dir)
 
-      if not classifications_df.empty:
-        # Write additional parquet files alongside the originals
+      if not result.classifications_df.empty:
         self.parquet_writer.write_dataframe(
-          classifications_df, "nodes/Classification.parquet"
+          result.classifications_df, "nodes/Classification.parquet"
         )
         self.parquet_writer.write_dataframe(
-          assoc_class_df, "relationships/ASSOCIATION_HAS_CLASSIFICATION.parquet"
+          result.assoc_classifications_df,
+          "relationships/ASSOCIATION_HAS_CLASSIFICATION.parquet",
         )
-        logger.info(f"Wrote {len(classifications_df)} association classifications")
+        logger.info(
+          f"Wrote {len(result.classifications_df)} association classifications"
+        )
+
+      # Write structure-level FactSets
+      if not result.factsets_df.empty:
+        self.parquet_writer.write_dataframe(result.factsets_df, "nodes/FactSet.parquet")
+        self.parquet_writer.write_dataframe(
+          result.structure_factset_rels_df,
+          "relationships/STRUCTURE_HAS_FACT_SET.parquet",
+        )
+        self.parquet_writer.write_dataframe(
+          result.factset_fact_rels_df,
+          "relationships/FACT_SET_CONTAINS_FACT.parquet",
+        )
+        logger.info(
+          f"Wrote {len(result.factsets_df)} structure FactSets "
+          f"with {len(result.factset_fact_rels_df)} fact links"
+        )
 
       # Apply disclosure-root canonical hints to elements
       if (
-        canonical_hints and hasattr(self, "elements_df") and not self.elements_df.empty
+        result.canonical_hints
+        and hasattr(self, "elements_df")
+        and not self.elements_df.empty
       ):
         upgraded = 0
-        for elem_id, (concept_id, confidence) in canonical_hints.items():
+        for elem_id, (concept_id, confidence) in result.canonical_hints.items():
           mask = self.elements_df["identifier"] == elem_id
           if not mask.any():
             continue
@@ -316,7 +333,6 @@ class XBRLGraphProcessor:
             self.elements_df.loc[mask, "canonical_confidence"] = confidence
             upgraded += 1
         if upgraded:
-          # Re-write Element parquet with updated canonical values
           self.parquet_writer.write_dataframe(self.elements_df, "nodes/Element.parquet")
           logger.info(
             f"Upgraded {upgraded} elements with disclosure-root canonical concepts"
@@ -918,29 +934,7 @@ class XBRLGraphProcessor:
         self.make_taxonomy()
 
   def make_facts(self):
-    logger.debug("Creating fact set and processing facts")
-
-    # Create fact set - deterministic based on report URI
-    factset_uri = f"{self.report_uri}#factset"
-    factset_id = create_factset_id(factset_uri)
-    factset_data = {"identifier": factset_id}
-    new_factset_df = pd.DataFrame([factset_data])
-    self.fact_sets_df = self.safe_concat(self.fact_sets_df, new_factset_df)
-
-    # Connect fact set to report
-    if self.report_data:
-      report_factset_rel = {
-        "from": self.report_data["identifier"],
-        "to": factset_id,
-        "fact_set_context": f"Report facts for {self.report_data.get('form', 'filing')}",
-      }
-      new_report_factset_df = pd.DataFrame([report_factset_rel])
-      self.report_fact_sets_df = self.safe_concat(
-        self.report_fact_sets_df, new_report_factset_df
-      )
-
-    self.report_factset_id = factset_id
-    logger.debug(f"Created fact set with ID: {factset_id}")
+    logger.debug("Processing facts")
 
     fact_count = 0
     for xfact in self.arelle_cntlr.facts:
@@ -1049,19 +1043,6 @@ class XBRLGraphProcessor:
       }
       new_report_fact_df = pd.DataFrame([report_fact_rel])
       self.report_facts_df = self.safe_concat(self.report_facts_df, new_report_fact_df)
-
-    # Connect fact to fact set
-    factset_fact_rel = {
-      "from": self.report_factset_id,
-      "to": identifier,
-    }
-    new_factset_fact_df = pd.DataFrame([factset_fact_rel])
-    if hasattr(self, "fact_set_contains_facts_df"):
-      self.fact_set_contains_facts_df = self.safe_concat(
-        self.fact_set_contains_facts_df, new_factset_fact_df
-      )
-    else:
-      self.fact_set_contains_facts_df = new_factset_fact_df
 
     if xfact.unit is not None:
       logger.debug(f"Processing numeric fact with decimals: {fact_data['decimals']}")

@@ -45,6 +45,10 @@ def _make_test_data(
   to_rels: list[dict],
   structures: list[dict] | None = None,
   struct_assoc_rels: list[dict] | None = None,
+  facts: list[dict] | None = None,
+  reports: list[dict] | None = None,
+  fact_element_rels: list[dict] | None = None,
+  report_fact_rels: list[dict] | None = None,
 ) -> Path:
   """Write test parquet files and return the output directory."""
   output_dir = tmp_path / "output"
@@ -77,6 +81,26 @@ def _make_test_data(
     _write_parquet(
       pd.DataFrame(struct_assoc_rels),
       output_dir / "relationships" / "STRUCTURE_HAS_ASSOCIATION.parquet",
+    )
+  if facts:
+    _write_parquet(
+      pd.DataFrame(facts),
+      output_dir / "nodes" / "Fact.parquet",
+    )
+  if reports:
+    _write_parquet(
+      pd.DataFrame(reports),
+      output_dir / "nodes" / "Report.parquet",
+    )
+  if fact_element_rels:
+    _write_parquet(
+      pd.DataFrame(fact_element_rels),
+      output_dir / "relationships" / "FACT_HAS_ELEMENT.parquet",
+    )
+  if report_fact_rels:
+    _write_parquet(
+      pd.DataFrame(report_fact_rels),
+      output_dir / "relationships" / "REPORT_HAS_FACT.parquet",
     )
   return output_dir
 
@@ -197,7 +221,8 @@ class TestRollUpClassification:
     output_dir = _make_test_data(tmp_path, associations, elements, from_rels, to_rels)
 
     classifier = AssociationClassifier()
-    class_df, rel_df, canonical_hints = classifier.classify(output_dir)
+    result = classifier.classify(output_dir)
+    class_df = result.classifications_df
 
     assert not class_df.empty
     rollups = class_df[class_df["type"] == "RollUp"]
@@ -237,7 +262,8 @@ class TestRollForwardClassification:
     output_dir = _make_test_data(tmp_path, associations, elements, from_rels, to_rels)
 
     classifier = AssociationClassifier()
-    class_df, rel_df, canonical_hints = classifier.classify(output_dir)
+    result = classifier.classify(output_dir)
+    class_df = result.classifications_df
 
     assert not class_df.empty
     rf = class_df[class_df["type"] == "RollForward"]
@@ -286,7 +312,8 @@ class TestElementBasedClassifications:
     output_dir = _make_test_data(tmp_path, associations, elements, from_rels, to_rels)
 
     classifier = AssociationClassifier()
-    class_df, rel_df, canonical_hints = classifier.classify(output_dir)
+    result = classifier.classify(output_dir)
+    class_df = result.classifications_df
 
     assert not class_df.empty
     matches = class_df[class_df["type"] == expected_type]
@@ -341,7 +368,9 @@ class TestManyToMany:
     output_dir = _make_test_data(tmp_path, associations, elements, from_rels, to_rels)
 
     classifier = AssociationClassifier()
-    class_df, rel_df, canonical_hints = classifier.classify(output_dir)
+    result = classifier.classify(output_dir)
+    class_df = result.classifications_df
+    rel_df = result.assoc_classifications_df
 
     # Should have at least RollUp + LineItems for assoc_pres
     types = set(class_df["type"].tolist())
@@ -385,7 +414,9 @@ class TestNoClassifications:
     output_dir = _make_test_data(tmp_path, associations, elements, from_rels, to_rels)
 
     classifier = AssociationClassifier()
-    class_df, rel_df, canonical_hints = classifier.classify(output_dir)
+    result = classifier.classify(output_dir)
+    class_df = result.classifications_df
+    rel_df = result.assoc_classifications_df
 
     assert class_df.empty
     assert rel_df.empty
@@ -396,7 +427,9 @@ class TestNoClassifications:
     output_dir.mkdir()
 
     classifier = AssociationClassifier()
-    class_df, rel_df, canonical_hints = classifier.classify(output_dir)
+    result = classifier.classify(output_dir)
+    class_df = result.classifications_df
+    rel_df = result.assoc_classifications_df
 
     assert class_df.empty
     assert rel_df.empty
@@ -497,7 +530,9 @@ class TestSemanticClassification:
     )
 
     classifier = AssociationClassifier()
-    class_df, rel_df, canonical_hints = classifier.classify(output_dir)
+    result = classifier.classify(output_dir)
+    class_df = result.classifications_df
+    rel_df = result.assoc_classifications_df
 
     # Should have at least one AssetsRollUp classification
     semantic = class_df[class_df["source"] == "disclosure_mechanics"]
@@ -541,7 +576,8 @@ class TestSemanticClassification:
     )
 
     classifier = AssociationClassifier()
-    class_df, rel_df, canonical_hints = classifier.classify(output_dir)
+    result = classifier.classify(output_dir)
+    class_df = result.classifications_df
 
     semantic = class_df[class_df["source"] == "disclosure_mechanics"]
     assert not semantic.empty
@@ -588,7 +624,8 @@ class TestSemanticClassification:
     )
 
     classifier = AssociationClassifier()
-    class_df, rel_df, canonical_hints = classifier.classify(output_dir)
+    result = classifier.classify(output_dir)
+    class_df = result.classifications_df
 
     # No semantic classifications should exist
     if not class_df.empty:
@@ -661,7 +698,8 @@ class TestSemanticClassification:
     )
 
     classifier = AssociationClassifier()
-    class_df, rel_df, canonical_hints = classifier.classify(output_dir)
+    result = classifier.classify(output_dir)
+    class_df = result.classifications_df
 
     semantic = class_df[class_df["source"] == "disclosure_mechanics"]
     assert len(semantic) == 2
@@ -715,7 +753,9 @@ class TestSemanticClassification:
     )
 
     classifier = AssociationClassifier()
-    class_df, rel_df, canonical_hints = classifier.classify(output_dir)
+    result = classifier.classify(output_dir)
+    class_df = result.classifications_df
+    rel_df = result.assoc_classifications_df
 
     # Structural layer: RollUp from arcrole_analysis
     structural = class_df[class_df["source"] == "arcrole_analysis"]
@@ -783,7 +823,8 @@ class TestDisclosureToCanonical:
     )
 
     classifier = AssociationClassifier()
-    class_df, rel_df, canonical_hints = classifier.classify(output_dir)
+    result = classifier.classify(output_dir)
+    canonical_hints = result.canonical_hints
 
     # elem_assets should get a canonical hint for total_assets
     assert "elem_assets" in canonical_hints
@@ -832,7 +873,8 @@ class TestDisclosureToCanonical:
     )
 
     classifier = AssociationClassifier()
-    class_df, rel_df, canonical_hints = classifier.classify(output_dir)
+    result = classifier.classify(output_dir)
+    canonical_hints = result.canonical_hints
 
     assert "elem_goodwill" in canonical_hints
     assert canonical_hints["elem_goodwill"] == ("goodwill", 0.97)
@@ -878,7 +920,8 @@ class TestDisclosureToCanonical:
     )
 
     classifier = AssociationClassifier()
-    class_df, rel_df, canonical_hints = classifier.classify(output_dir)
+    result = classifier.classify(output_dir)
+    canonical_hints = result.canonical_hints
 
     # ProductWarrantyAccrual maps to StandardAndExtendedProductWarrantyMovementRollForward
     # which is NOT in DISCLOSURE_TO_CANONICAL → no hint
@@ -903,7 +946,8 @@ class TestDisclosureToCanonical:
     output_dir = _make_test_data(tmp_path, associations, elements, [], to_rels)
 
     classifier = AssociationClassifier()
-    class_df, rel_df, canonical_hints = classifier.classify(output_dir)
+    result = classifier.classify(output_dir)
+    canonical_hints = result.canonical_hints
 
     assert canonical_hints == {}
 
@@ -914,3 +958,232 @@ class TestDisclosureToCanonical:
     assert DISCLOSURE_TO_CANONICAL["GoodwillRollForward"] == "goodwill"
     assert DISCLOSURE_TO_CANONICAL["CashFlowStatement"] == "operating_cash_flow"
     assert DISCLOSURE_TO_CANONICAL["IncomeStatement"] == "net_income"
+
+
+# ---------------------------------------------------------------------------
+# Structure FactSet tests
+# ---------------------------------------------------------------------------
+
+
+class TestStructureFactSets:
+  def test_factset_created_per_structure(self, tmp_path):
+    """Each structure gets its own FactSet containing matching facts."""
+    elements = [
+      {
+        "identifier": "elem_rev",
+        "qname": "us-gaap:Revenues",
+        "name": "Revenues",
+        "period_type": "duration",
+        "classification": None,
+        "balance": "credit",
+        "uri": "http://example.com#Revenues",
+      },
+      {
+        "identifier": "elem_cogs",
+        "qname": "us-gaap:CostOfGoodsSold",
+        "name": "CostOfGoodsSold",
+        "period_type": "duration",
+        "classification": None,
+        "balance": "debit",
+        "uri": "http://example.com#CostOfGoodsSold",
+      },
+    ]
+    associations = [
+      {
+        "identifier": "assoc1",
+        "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child",
+        "order_value": 1.0,
+        "association_type": "Presentation",
+        "weight": None,
+        "root": "True",
+        "preferred_label": None,
+      },
+    ]
+    structures = [{"identifier": "struct_is"}]
+    struct_assoc_rels = [
+      {"from": "struct_is", "to": "assoc1", "association_context": "pres"},
+    ]
+    to_rels = [{"from": "assoc1", "to": "elem_rev"}]
+    from_rels = [{"from": "assoc1", "to": "elem_cogs"}]
+    facts = [
+      {"identifier": "fact_rev"},
+      {"identifier": "fact_cogs"},
+      {"identifier": "fact_unrelated"},
+    ]
+    reports = [{"identifier": "report1"}]
+    fact_element_rels = [
+      {"from": "fact_rev", "to": "elem_rev"},
+      {"from": "fact_cogs", "to": "elem_cogs"},
+      {"from": "fact_unrelated", "to": "elem_rev"},  # same element, different fact
+    ]
+    report_fact_rels = [
+      {"from": "report1", "to": "fact_rev"},
+      {"from": "report1", "to": "fact_cogs"},
+      {"from": "report1", "to": "fact_unrelated"},
+    ]
+
+    output_dir = _make_test_data(
+      tmp_path,
+      associations,
+      elements,
+      from_rels,
+      to_rels,
+      structures=structures,
+      struct_assoc_rels=struct_assoc_rels,
+      facts=facts,
+      reports=reports,
+      fact_element_rels=fact_element_rels,
+      report_fact_rels=report_fact_rels,
+    )
+
+    classifier = AssociationClassifier()
+    result = classifier.classify(output_dir)
+
+    # Should have one FactSet
+    assert not result.factsets_df.empty
+    assert len(result.factsets_df) == 1
+
+    # Structure linked to FactSet
+    assert not result.structure_factset_rels_df.empty
+    assert result.structure_factset_rels_df.iloc[0]["from"] == "struct_is"
+
+    # FactSet should contain all 3 facts (rev, cogs, and unrelated — all reference structure elements)
+    assert len(result.factset_fact_rels_df) == 3
+
+  def test_two_structures_separate_factsets(self, tmp_path):
+    """Two structures in same report get independent FactSets."""
+    elements = [
+      {
+        "identifier": "elem_a",
+        "qname": "us-gaap:Assets",
+        "name": "Assets",
+        "period_type": "instant",
+        "classification": None,
+        "balance": "debit",
+        "uri": "http://example.com#Assets",
+      },
+      {
+        "identifier": "elem_rev",
+        "qname": "us-gaap:Revenues",
+        "name": "Revenues",
+        "period_type": "duration",
+        "classification": None,
+        "balance": "credit",
+        "uri": "http://example.com#Revenues",
+      },
+    ]
+    associations = [
+      {
+        "identifier": "assoc_bs",
+        "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child",
+        "order_value": 1.0,
+        "association_type": "Presentation",
+        "weight": None,
+        "root": "True",
+        "preferred_label": None,
+      },
+      {
+        "identifier": "assoc_is",
+        "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child",
+        "order_value": 1.0,
+        "association_type": "Presentation",
+        "weight": None,
+        "root": "True",
+        "preferred_label": None,
+      },
+    ]
+    structures = [
+      {"identifier": "struct_bs"},
+      {"identifier": "struct_is"},
+    ]
+    struct_assoc_rels = [
+      {"from": "struct_bs", "to": "assoc_bs", "association_context": "pres"},
+      {"from": "struct_is", "to": "assoc_is", "association_context": "pres"},
+    ]
+    to_rels = [
+      {"from": "assoc_bs", "to": "elem_a"},
+      {"from": "assoc_is", "to": "elem_rev"},
+    ]
+    facts = [
+      {"identifier": "fact_assets"},
+      {"identifier": "fact_rev"},
+    ]
+    reports = [{"identifier": "report1"}]
+    fact_element_rels = [
+      {"from": "fact_assets", "to": "elem_a"},
+      {"from": "fact_rev", "to": "elem_rev"},
+    ]
+    report_fact_rels = [
+      {"from": "report1", "to": "fact_assets"},
+      {"from": "report1", "to": "fact_rev"},
+    ]
+
+    output_dir = _make_test_data(
+      tmp_path,
+      associations,
+      elements,
+      [],
+      to_rels,
+      structures=structures,
+      struct_assoc_rels=struct_assoc_rels,
+      facts=facts,
+      reports=reports,
+      fact_element_rels=fact_element_rels,
+      report_fact_rels=report_fact_rels,
+    )
+
+    classifier = AssociationClassifier()
+    result = classifier.classify(output_dir)
+
+    # Two FactSets
+    assert len(result.factsets_df) == 2
+
+    # Each structure linked to its own FactSet
+    assert len(result.structure_factset_rels_df) == 2
+    struct_ids = set(result.structure_factset_rels_df["from"].tolist())
+    assert struct_ids == {"struct_bs", "struct_is"}
+
+    # Each FactSet has 1 fact
+    fs_ids = set(result.factsets_df["identifier"].tolist())
+    for fs_id in fs_ids:
+      facts_in_set = result.factset_fact_rels_df[
+        result.factset_fact_rels_df["from"] == fs_id
+      ]
+      assert len(facts_in_set) == 1
+
+  def test_no_facts_no_factset(self, tmp_path):
+    """Structure with no matching facts gets no FactSet."""
+    elements = _semantic_base_elements()
+    associations = [
+      {
+        "identifier": "assoc1",
+        "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child",
+        "order_value": 1.0,
+        "association_type": "Presentation",
+        "weight": None,
+        "root": "True",
+        "preferred_label": None,
+      },
+    ]
+    structures = [{"identifier": "struct1"}]
+    struct_assoc_rels = [
+      {"from": "struct1", "to": "assoc1", "association_context": "pres"},
+    ]
+    to_rels = [{"from": "assoc1", "to": "elem_assets"}]
+
+    # No facts or reports
+    output_dir = _make_test_data(
+      tmp_path,
+      associations,
+      elements,
+      [],
+      to_rels,
+      structures=structures,
+      struct_assoc_rels=struct_assoc_rels,
+    )
+
+    classifier = AssociationClassifier()
+    result = classifier.classify(output_dir)
+
+    # No FactSets since no facts exist
+    assert result.factsets_df.empty

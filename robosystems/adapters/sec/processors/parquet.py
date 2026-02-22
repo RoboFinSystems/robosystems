@@ -481,7 +481,7 @@ class ParquetWriter:
     relationship_patterns = [
       "entity_reports",
       "report_facts",
-      "report_fact_sets",
+      "structure_fact_sets",
       "report_taxonomies",
       "fact_units",
       "fact_has_dimension_rel",
@@ -521,7 +521,7 @@ class ParquetWriter:
     self.write_dataframe(processor.associations_df, "nodes/Association.parquet")
     self.write_dataframe(processor.periods_df, "nodes/Period.parquet")
     self.write_dataframe(processor.taxonomies_df, "nodes/Taxonomy.parquet")
-    self.write_dataframe(processor.fact_sets_df, "nodes/FactSet.parquet")
+    # FactSet nodes are written by classify_associations()
     self.write_dataframe(processor.taxonomy_labels_df, "nodes/Label.parquet")
     self.write_dataframe(processor.taxonomy_references_df, "nodes/Reference.parquet")
 
@@ -531,9 +531,7 @@ class ParquetWriter:
     self.write_dataframe(
       processor.report_facts_df, "relationships/REPORT_HAS_FACT.parquet"
     )
-    self.write_dataframe(
-      processor.report_fact_sets_df, "relationships/REPORT_HAS_FACT_SET.parquet"
-    )
+    # FactSets and STRUCTURE_HAS_FACT_SET are written by classify_associations()
     self.write_dataframe(
       processor.report_uses_taxonomy_df, "relationships/REPORT_USES_TAXONOMY.parquet"
     )
@@ -556,10 +554,7 @@ class ParquetWriter:
     self.write_dataframe(
       processor.fact_periods_df, "relationships/FACT_HAS_PERIOD.parquet"
     )
-    self.write_dataframe(
-      processor.fact_set_contains_facts_df,
-      "relationships/FACT_SET_CONTAINS_FACT.parquet",
-    )
+    # FACT_SET_CONTAINS_FACT is written by classify_associations()
     self.write_dataframe(
       processor.element_labels_df, "relationships/ELEMENT_HAS_LABEL.parquet"
     )

@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import shutil
 import tempfile
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -270,10 +271,21 @@ def _generate_ddl() -> list[str]:
       identifier STRING,
       PRIMARY KEY (identifier)
     )""",
-    # Relationship tables (no properties)
+    # Fact and Report: minimal for FactSet building
+    """CREATE NODE TABLE IF NOT EXISTS Fact (
+      identifier STRING,
+      PRIMARY KEY (identifier)
+    )""",
+    """CREATE NODE TABLE IF NOT EXISTS Report (
+      identifier STRING,
+      PRIMARY KEY (identifier)
+    )""",
+    # Relationship tables
     "CREATE REL TABLE IF NOT EXISTS ASSOCIATION_HAS_FROM_ELEMENT (FROM Association TO Element)",
     "CREATE REL TABLE IF NOT EXISTS ASSOCIATION_HAS_TO_ELEMENT (FROM Association TO Element)",
     "CREATE REL TABLE IF NOT EXISTS STRUCTURE_HAS_ASSOCIATION (FROM Structure TO Association, association_context STRING)",
+    "CREATE REL TABLE IF NOT EXISTS FACT_HAS_ELEMENT (FROM Fact TO Element)",
+    "CREATE REL TABLE IF NOT EXISTS REPORT_HAS_FACT (FROM Report TO Fact)",
   ]
 
 
@@ -513,24 +525,40 @@ class AssociationClassifier:
   ASSOCIATION_HAS_CLASSIFICATION relationships as DataFrames.
   """
 
-  def classify(
-    self, output_dir: Path
-  ) -> tuple[pd.DataFrame, pd.DataFrame, dict[str, tuple[str, float]]]:
+  @dataclass
+  class ClassifyResult:
+    """Results from association classification and FactSet building."""
+
+    classifications_df: pd.DataFrame
+    assoc_classifications_df: pd.DataFrame
+    canonical_hints: dict[str, tuple[str, float]]
+    factsets_df: pd.DataFrame
+    structure_factset_rels_df: pd.DataFrame
+    factset_fact_rels_df: pd.DataFrame
+
+  def classify(self, output_dir: Path) -> ClassifyResult:
     """Run classification on a filing's parquet output.
 
-    Runs two layers:
+    Runs two layers of classification, then builds structure-level FactSets:
     1. Structural — Cypher pattern matching (RollUp, RollForward, etc.)
     2. Semantic — Disclosure mechanics lookup (AssetsRollUp, CashFlowStatement, etc.)
+    3. FactSets — Pre-computed fact groupings per structure for rendering
 
     Args:
         output_dir: Directory containing nodes/ and relationships/ parquet subdirs.
 
     Returns:
-        (classifications_df, association_classifications_df, canonical_hints)
-        The first two may be empty if no patterns are detected.
-        canonical_hints maps element identifier → (canonical_concept_id, confidence)
-        for elements that are disclosure roots with a known canonical mapping.
+        ClassifyResult with classification DataFrames, canonical hints, and FactSet data.
     """
+    empty = self.ClassifyResult(
+      classifications_df=pd.DataFrame(),
+      assoc_classifications_df=pd.DataFrame(),
+      canonical_hints={},
+      factsets_df=pd.DataFrame(),
+      structure_factset_rels_df=pd.DataFrame(),
+      factset_fact_rels_df=pd.DataFrame(),
+    )
+
     # Check that required parquet files exist
     nodes_dir = output_dir / "nodes"
     rels_dir = output_dir / "relationships"
@@ -541,10 +569,14 @@ class AssociationClassifier:
     to_path = rels_dir / "ASSOCIATION_HAS_TO_ELEMENT.parquet"
     struct_path = nodes_dir / "Structure.parquet"
     struct_assoc_path = rels_dir / "STRUCTURE_HAS_ASSOCIATION.parquet"
+    fact_path = nodes_dir / "Fact.parquet"
+    report_path = nodes_dir / "Report.parquet"
+    fact_elem_path = rels_dir / "FACT_HAS_ELEMENT.parquet"
+    report_fact_path = rels_dir / "REPORT_HAS_FACT.parquet"
 
     if not assoc_path.exists() or not elem_path.exists():
       logger.debug("Association or Element parquet not found, skipping classification")
-      return pd.DataFrame(), pd.DataFrame(), {}
+      return empty
 
     classifications: list[dict] = []
     relationships: list[dict] = []
@@ -557,6 +589,10 @@ class AssociationClassifier:
       ctx.load_parquet("ASSOCIATION_HAS_TO_ELEMENT", to_path)
       ctx.load_parquet("Structure", struct_path)
       ctx.load_parquet("STRUCTURE_HAS_ASSOCIATION", struct_assoc_path)
+      ctx.load_parquet("Fact", fact_path)
+      ctx.load_parquet("Report", report_path)
+      ctx.load_parquet("FACT_HAS_ELEMENT", fact_elem_path)
+      ctx.load_parquet("REPORT_HAS_FACT", report_fact_path)
 
       # Layer 1: Structural classification
       for classification_type, cypher in CLASSIFICATION_QUERIES.items():
@@ -592,6 +628,11 @@ class AssociationClassifier:
       classifications.extend(semantic_classes)
       relationships.extend(semantic_rels)
 
+      # Layer 3: Build structure-level FactSets
+      factsets_df, struct_fs_rels_df, fs_fact_rels_df = self._build_structure_factsets(
+        ctx
+      )
+
     classifications_df = (
       pd.DataFrame(classifications) if classifications else pd.DataFrame()
     )
@@ -608,7 +649,20 @@ class AssociationClassifier:
         f"Canonical hints from disclosure roots: {len(canonical_hints)} elements"
       )
 
-    return classifications_df, relationships_df, canonical_hints
+    if not factsets_df.empty:
+      logger.info(
+        f"Structure FactSets: {len(factsets_df)} sets, "
+        f"{len(fs_fact_rels_df)} fact links"
+      )
+
+    return self.ClassifyResult(
+      classifications_df=classifications_df,
+      assoc_classifications_df=relationships_df,
+      canonical_hints=canonical_hints,
+      factsets_df=factsets_df,
+      structure_factset_rels_df=struct_fs_rels_df,
+      factset_fact_rels_df=fs_fact_rels_df,
+    )
 
   def _classify_semantic(
     self, ctx: TempLadybugContext
@@ -693,3 +747,94 @@ class AssociationClassifier:
       )
 
     return classifications, relationships, canonical_hints
+
+  def _build_structure_factsets(
+    self, ctx: TempLadybugContext
+  ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    """Build pre-computed FactSets per Structure.
+
+    For each Structure, collects all Elements from its associations, then
+    finds all Facts in the report that reference those elements. Creates a
+    FactSet per Structure as a rendering manifest.
+
+    Returns:
+        (factsets_df, structure_factset_rels_df, factset_fact_rels_df)
+    """
+    factsets: list[dict] = []
+    structure_factset_rels: list[dict] = []
+    factset_fact_rels: list[dict] = []
+
+    # Get all structures and their elements (both FROM and TO)
+    try:
+      structure_elements = ctx.execute(
+        """
+        MATCH (s:Structure)-[:STRUCTURE_HAS_ASSOCIATION]->(a:Association)-[:ASSOCIATION_HAS_TO_ELEMENT]->(e:Element)
+        WITH s.identifier AS structure_id, COLLECT(DISTINCT e.identifier) AS to_elements
+        RETURN structure_id, to_elements
+        """
+      )
+    except Exception as e:
+      logger.debug(f"FactSet structure query failed: {e}")
+      return pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
+
+    # Also get FROM elements per structure
+    try:
+      from_elements = ctx.execute(
+        """
+        MATCH (s:Structure)-[:STRUCTURE_HAS_ASSOCIATION]->(a:Association)-[:ASSOCIATION_HAS_FROM_ELEMENT]->(e:Element)
+        WITH s.identifier AS structure_id, COLLECT(DISTINCT e.identifier) AS from_elements
+        RETURN structure_id, from_elements
+        """
+      )
+    except Exception:
+      from_elements = []
+
+    # Merge FROM and TO element sets per structure
+    from_by_struct = {
+      row["structure_id"]: set(row["from_elements"]) for row in from_elements
+    }
+
+    for row in structure_elements:
+      structure_id = row["structure_id"]
+      element_ids = set(row["to_elements"])
+      element_ids.update(from_by_struct.get(structure_id, set()))
+
+      if not element_ids:
+        continue
+
+      # Find all facts referencing these elements
+      try:
+        facts = ctx.execute(
+          """
+          MATCH (f:Fact)-[:FACT_HAS_ELEMENT]->(e:Element)
+          WHERE e.identifier IN $element_ids
+          RETURN DISTINCT f.identifier AS fact_id
+          """,
+          {"element_ids": list(element_ids)},
+        )
+      except Exception as e:
+        logger.debug(f"FactSet fact query failed for {structure_id}: {e}")
+        continue
+
+      if not facts:
+        continue
+
+      # Create FactSet for this structure
+      fs_id = generate_uuid7()
+      factsets.append({"identifier": fs_id})
+      structure_factset_rels.append({"from": structure_id, "to": fs_id})
+
+      for fact_row in facts:
+        fact_id = fact_row.get("fact_id")
+        if fact_id:
+          factset_fact_rels.append({"from": fs_id, "to": fact_id})
+
+    factsets_df = pd.DataFrame(factsets) if factsets else pd.DataFrame()
+    struct_fs_df = (
+      pd.DataFrame(structure_factset_rels) if structure_factset_rels else pd.DataFrame()
+    )
+    fs_fact_df = (
+      pd.DataFrame(factset_fact_rels) if factset_fact_rels else pd.DataFrame()
+    )
+
+    return factsets_df, struct_fs_df, fs_fact_df
