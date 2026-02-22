@@ -50,16 +50,16 @@ def sec_processed_filings(
   s3: S3Resource,
   db: DatabaseResource,
 ) -> MaterializeResult:
-  """Process a batch of SEC filings (up to batch_limit per run).
+  """Process one batch of SEC filings, flush to S3, then exit.
 
-  This asset processes up to batch_limit pending SourceFiles (default 2000),
-  then exits gracefully. The sensor will trigger another run if pending
-  files remain, enabling natural memory release between batches.
+  Processes up to batch_size pending SourceFiles (default 500), writes
+  part files to S3, marks them success, and exits. The sensor re-triggers
+  if more pending files remain, enabling natural memory release between runs.
 
   Memory Management:
-  - Periodic flush every flush_interval filings (default 500)
-  - Part-file output: each flush writes part_{uuid}.parquet files per table
-  - Shared tables (Element, Label, etc.) deduped at flush via pure Arrow (no Pandas)
+  - One batch per run (default 500 filings), then container exits
+  - Part-file output: batch writes part_{uuid}.parquet files per table
+  - Shared tables (Element, Label, etc.) deduped within batch via pure Arrow
   - DuckDB handles final cross-part-file dedup during staging
   - del + gc.collect() after each table upload to force memory release
 
@@ -120,7 +120,7 @@ def sec_processed_filings(
       session.commit()
 
   with db.get_session() as session:
-    # Query pending files, ordered by discovery time, limited to batch_limit.
+    # Query pending files, ordered by discovery time, limited to batch_size.
     # Sensor will re-trigger if more pending files exist after this batch.
     pending_files = (
       session.query(SourceFile)
@@ -132,7 +132,7 @@ def sec_processed_filings(
         )
       )
       .order_by(SourceFile.discovered_at.asc())
-      .limit(config.batch_limit)
+      .limit(config.batch_size)
       .all()
     )
 
@@ -165,7 +165,7 @@ def sec_processed_filings(
 
   context.log.info(
     f"Processing batch of {len(files_to_process)} filings for {partition_key} "
-    f"(batch_limit={config.batch_limit})"
+    f"(batch_size={config.batch_size})"
   )
 
   # Create work directory for disk-buffered processing
@@ -363,14 +363,6 @@ def sec_processed_filings(
           context.log.error(f"Stopping on error: {result.error}")
           break
 
-      # Periodic flush to bound memory usage
-      if len(pending_flush) >= config.flush_interval:
-        context.log.info(
-          f"Periodic flush triggered at {len(pending_flush)} pending filings "
-          f"(interval={config.flush_interval})..."
-        )
-        flush_to_s3()
-
       # Batch progress summary every 100 filings
       if (i + 1) % 100 == 0:
         context.log.info(
@@ -378,13 +370,13 @@ def sec_processed_filings(
           f"{succeeded} succeeded, {failed} failed, {skipped} skipped"
         )
 
-    # Force garbage collection before final flush to reclaim any lingering
+    # Force garbage collection before flush to reclaim any lingering
     # memory from the last filing's XBRLGraphProcessor/SemanticEnricher
     gc.collect()
 
-    # Flush remaining processed filings to S3
+    # Flush all processed filings to S3
     if pending_flush:
-      context.log.info(f"Final flush: {len(pending_flush)} filings to S3...")
+      context.log.info(f"Flushing {len(pending_flush)} filings to S3...")
       flush_to_s3()
 
   finally:
@@ -432,7 +424,7 @@ def sec_processed_filings(
       "filings_flushed": total_flushed,
       "failed_source_file_ids": failed_ids[:20],  # Limit to first 20
       "tables_uploaded": tables_uploaded,
-      "batch_limit": config.batch_limit,
+      "batch_size": config.batch_size,
       "form_types_filter": config.form_types,
       "remaining_pending": remaining_count,
     }
