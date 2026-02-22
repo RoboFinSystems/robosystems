@@ -14,10 +14,14 @@ Classes:
     LadybugMaterializer: Handles all LadybugDB materialization operations
 """
 
+import io
 import math
 import time
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
+
+import pyarrow as pa
+import pyarrow.parquet as pq
 
 if TYPE_CHECKING:
   from robosystems.graph_api.client.client import GraphClient
@@ -481,11 +485,6 @@ class LadybugMaterializer:
 
     try:
       # Step 1: Find Entity parquet(s) — supports both old and new format
-      import io
-
-      import pyarrow as pa
-      import pyarrow.parquet as pq
-
       filed_pattern = f"filed={year}-Q{quarter}"
       has_data = s3_table_data_exists(
         self.s3_client,
