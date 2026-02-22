@@ -358,3 +358,43 @@ def s3_table_data_exists(
     return True
 
   return False
+
+
+def s3_get_table_patterns(
+  s3_client: "S3Client",
+  bucket: str,
+  source_prefix: str,
+  filed_pattern: str,
+  entity_type: str,
+  table_name: str,
+) -> list[str]:
+  """Get S3 URL patterns for table data that actually exists.
+
+  Returns only patterns for formats where data is present, preventing
+  DuckDB errors from literal paths that don't exist. DuckDB treats paths
+  without wildcards as literal files and errors if they're missing.
+
+  Args:
+      s3_client: S3Client instance
+      bucket: S3 bucket name
+      source_prefix: Base prefix (e.g. "sec/processed")
+      filed_pattern: Filing partition (e.g. "filed=2024-Q1")
+      entity_type: Entity type (e.g. "nodes", "relationships")
+      table_name: Table name (e.g. "Element")
+
+  Returns:
+      List of S3 URL patterns (may be empty if no data exists)
+  """
+  base_key = f"{source_prefix}/{filed_pattern}/{entity_type}/{table_name}"
+  base_url = f"s3://{bucket}/{base_key}"
+  patterns: list[str] = []
+
+  # Check old format: TABLE.parquet (literal path — must exist to include)
+  if s3_client.object_exists(bucket, f"{base_key}.parquet"):
+    patterns.append(f"{base_url}.parquet")
+
+  # Check new format: TABLE/*.parquet (glob — DuckDB handles empty match)
+  if s3_prefix_has_objects(s3_client, bucket, f"{base_key}/"):
+    patterns.append(f"{base_url}/*.parquet")
+
+  return patterns

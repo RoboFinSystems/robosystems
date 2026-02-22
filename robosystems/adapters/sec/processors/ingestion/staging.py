@@ -40,7 +40,7 @@ from .models import (
   TableInfo,
   get_staging_timeout,
   make_progress_logger,
-  s3_table_data_exists,
+  s3_get_table_patterns,
 )
 
 
@@ -401,22 +401,22 @@ class DuckDBStager:
           )
           continue
 
-        # Build dual-format S3 patterns for all quarters to scan
-        # Supports both old format (TABLE.parquet) and new part-file format (TABLE/*.parquet)
+        # Build S3 patterns for all quarters, only including formats that exist.
+        # s3_get_table_patterns checks each format individually to avoid DuckDB
+        # errors from literal paths (no wildcards) that don't exist on S3.
         s3_patterns: list[str] = []
         for y, q in quarters_to_scan:
           filed_pattern = f"filed={y}-Q{q}"
-          if s3_table_data_exists(
-            self.s3_client,
-            self.bucket,
-            self.source_prefix,
-            filed_pattern,
-            entity_type,
-            table_name,
-          ):
-            base = f"s3://{self.bucket}/{self.source_prefix}/{filed_pattern}/{entity_type}/{table_name}"
-            s3_patterns.append(f"{base}.parquet")
-            s3_patterns.append(f"{base}/*.parquet")
+          s3_patterns.extend(
+            s3_get_table_patterns(
+              self.s3_client,
+              self.bucket,
+              self.source_prefix,
+              filed_pattern,
+              entity_type,
+              table_name,
+            )
+          )
 
         if not s3_patterns:
           log_progress(

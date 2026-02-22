@@ -40,6 +40,7 @@ from .models import (
   ProgressCallback,
   get_materialization_timeout,
   make_progress_logger,
+  s3_get_table_patterns,
   s3_table_data_exists,
 )
 
@@ -328,22 +329,22 @@ class LadybugMaterializer:
 
       total_tables = len(ordered_tables)
       for i, (table_name, entity_type) in enumerate(ordered_tables, 1):
-        # Build dual-format S3 paths for all quarters to scan
-        # Supports both old format (TABLE.parquet) and new part-file format (TABLE/*.parquet)
+        # Build S3 paths for all quarters, only including formats that exist.
+        # s3_get_table_patterns checks each format individually to avoid DuckDB
+        # errors from literal paths (no wildcards) that don't exist on S3.
         s3_paths: list[str] = []
         for y, q in quarters_to_scan:
           filed_pattern = f"filed={y}-Q{q}"
-          if s3_table_data_exists(
-            self.s3_client,
-            self.bucket,
-            self.source_prefix,
-            filed_pattern,
-            entity_type,
-            table_name,
-          ):
-            base = f"s3://{self.bucket}/{self.source_prefix}/{filed_pattern}/{entity_type}/{table_name}"
-            s3_paths.append(f"{base}.parquet")
-            s3_paths.append(f"{base}/*.parquet")
+          s3_paths.extend(
+            s3_get_table_patterns(
+              self.s3_client,
+              self.bucket,
+              self.source_prefix,
+              filed_pattern,
+              entity_type,
+              table_name,
+            )
+          )
 
         if not s3_paths:
           log_progress(
@@ -526,12 +527,20 @@ class LadybugMaterializer:
             duration_ms=(time.time() - start_time) * 1000,
           )
         # Read and concat all part files (Entity is small, ~256KB/quarter)
+        # Dedup on identifier — same company filing multiple forms in a quarter
+        # appears in multiple flush batches and therefore multiple part files
+        from robosystems.adapters.sec.processors.consolidation import (
+          _dedup_arrow_table,
+        )
+
         tables = []
         for key in part_keys:
           response = self.s3_client.s3_client.get_object(Bucket=self.bucket, Key=key)
           part_bytes = response["Body"].read()
           tables.append(pq.read_table(io.BytesIO(part_bytes)))
         table = pa.concat_tables(tables, promote_options="permissive")
+        if "identifier" in table.column_names:
+          table = _dedup_arrow_table(table, "identifier", "Entity")
 
       latest_entities = table.to_pandas()
 

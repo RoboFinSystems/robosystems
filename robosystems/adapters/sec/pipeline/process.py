@@ -4,6 +4,8 @@ This module contains the sec_processed_filings asset for processing
 SEC XBRL filings into consolidated parquet files.
 """
 
+import gc
+import uuid
 from pathlib import Path
 
 from dagster import (
@@ -57,8 +59,8 @@ def sec_processed_filings(
   Memory Management:
   - Periodic flush every flush_interval filings (default 500)
   - Part-file output: each flush writes part_{uuid}.parquet files per table
-  - No consolidation/dedup at flush time — DuckDB handles it during staging
-  - SemanticEnricher released before final flush to free ~300-500MB
+  - Shared tables (Element, Label, etc.) deduped at flush via pure Arrow (no Pandas)
+  - DuckDB handles final cross-part-file dedup during staging
   - del + gc.collect() after each table upload to force memory release
 
   Output Structure (part files):
@@ -188,13 +190,17 @@ def sec_processed_filings(
 
     Part-file output model (no consolidation with existing S3 data):
     - For each table: concat batch's parquets (Arrow only) -> upload as part file
+    - Shared tables deduped within the batch via pure Arrow (no Pandas)
     - S3 key: entity_type/table_name/part_{uuid_hex12}.parquet
     - UUID naming prevents collisions across runs
     - del + gc.collect() after each table to force memory release
-    """
-    import gc
-    import uuid
 
+    Crash resilience: If the job crashes after S3 upload but before mark_success,
+    orphan part files remain on S3 and filings stay "pending". On re-run, new
+    part files are written alongside orphans (UUIDs prevent overwrites). This
+    creates duplicate rows across part files, but DuckDB handles dedup during
+    staging via GROUP BY + FIRST() with spill-to-disk.
+    """
     nonlocal tables_uploaded, total_flushed, flush_batch_number
 
     if not pending_flush:
@@ -374,8 +380,6 @@ def sec_processed_filings(
 
     # Force garbage collection before final flush to reclaim any lingering
     # memory from the last filing's XBRLGraphProcessor/SemanticEnricher
-    import gc
-
     gc.collect()
 
     # Flush remaining processed filings to S3
