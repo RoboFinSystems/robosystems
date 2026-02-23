@@ -179,11 +179,20 @@ cat examples/credentials/config.json | grep api_key
 3. Restart your MCP-compatible AI tool
 
 4. The MCP server provides these tools:
+
+   **Curated Tools** (no Cypher needed):
+   - `get-financial-statement` - Structured financial statement by ticker and type (income_statement, balance_sheet, cash_flow_statement)
+   - `list-disclosures` - List disclosure types in the graph with fact counts
+   - `get-disclosure-detail` - Return facts for a specific disclosure type
+
+   **Graph Tools** (general purpose):
+   - `read-graph-cypher` - Run Cypher queries directly
    - `get-graph-schema` - View available node and relationship types
-   - `read-graph-cypher` - Run Cypher queries
+   - `describe-graph-structure` - Understand graph topology and counts
+   - `resolve-element` - Look up XBRL element details by name or canonical concept
+   - `resolve-structure` - Find structures by statement type or definition
    - `discover-properties` - Explore node properties
    - `discover-common-elements` - Find financial metrics (us-gaap tags)
-   - `discover-facts` - Explore fact patterns and dimensions
    - `get-example-queries` - Get sample queries
 
 **Example MCP Usage:**
@@ -192,9 +201,8 @@ cat examples/credentials/config.json | grep api_key
 You: What revenue did NVIDIA report in 2024?
 
 The AI will use:
-1. get-graph-schema to understand structure
-2. discover-common-elements to find "us-gaap:Revenues"
-3. read-graph-cypher to query for NVIDIA's revenue facts
+1. get-financial-statement with ticker=NVDA, statement_type=income_statement
+   → Returns structured revenue, expenses, net income with periods
 ```
 
 ### Option 2: Direct Cypher Queries (For Development)
@@ -265,10 +273,17 @@ just tables-query sec "SELECT f.value, f.numeric_value, p.instant_date, u.measur
 - `Entity` - Companies with SEC CIK identifiers
 - `Report` - 10-K and 10-Q filings
 - `Fact` - Financial metrics with values
-- `Element` - us-gaap metric definitions
+- `Element` - us-gaap metric definitions (with `canonical_concept` from enrichment)
 - `Period` - Date/duration contexts
 - `Unit` - Measurement units (USD, shares, etc.)
 - `Dimension` - Segments and breakdowns
+- `Structure` - XBRL presentation/calculation networks (with `canonical_type`)
+- `Association` - Parent-child element relationships within structures
+- `Classification` - Disclosure type tags on associations (e.g., AssetsRollUp, IncomeStatement)
+- `FactSet` - Logical groupings of facts by structure and statement type
+- `Label` - Human-readable labels for XBRL elements
+- `Reference` - Authoritative references (FASB codification links)
+- `Taxonomy` - Global XBRL taxonomy definitions
 
 ### Option 4: Python API (For Applications)
 
@@ -427,37 +442,72 @@ LIMIT 10;
 
 ## Understanding the Data Model
 
-The SEC graph database has the following structure:
+The SEC graph has 14 node types and 24 relationship types organized around two core traversal patterns.
 
-**Node Types:**
+### Node Types
 
-- **Entity** - Companies (e.g., NVIDIA, Apple)
-- **Report** - SEC filings (10-K, 10-Q)
-- **Fact** - Individual financial metrics
-- **Element** - Metric definitions (us-gaap tags)
-- **Period** - Time contexts (dates, durations)
+**Reporting nodes** (the data):
+- **Entity** - Companies (e.g., NVIDIA, Apple) with ticker, CIK, industry
+- **Report** - SEC filings (10-K, 10-Q) with form type, filing date, fiscal period
+- **Fact** - Individual financial data points with `numeric_value` and `value`
+- **Element** - XBRL metric definitions (us-gaap tags) with `canonical_concept` (e.g., "revenue", "net_income")
+- **Period** - Time contexts (instant dates or duration start/end)
 - **Unit** - Measurement units (USD, shares)
-- **Dimension** - Segments (geographic, product lines)
+- **Dimension** - Dimensional qualifiers (segments, geographic breakdowns)
 
-**Relationship Types:**
+**Structural nodes** (how data is organized):
+- **Structure** - XBRL presentation/calculation networks with `canonical_type` (e.g., "income_statement", "balance_sheet")
+- **Association** - Parent-child element relationships within structures (e.g., Revenue rolls up into GrossProfit)
+- **Classification** - Disclosure type labels on associations (e.g., AssetsRollUp, IncomeStatement, CashFlowStatement)
+- **FactSet** - Logical groupings of facts by structure and statement type
 
-- `ENTITY_HAS_REPORT` - Links companies to their filings
-- `REPORT_HAS_FACT` - Links filings to financial metrics
-- `FACT_HAS_ELEMENT` - Links facts to metric definitions
-- `FACT_HAS_PERIOD` - Links facts to time periods
-- `FACT_HAS_UNIT` - Links facts to units
-- `FACT_HAS_DIMENSION` - Links facts to segments
+**Reference nodes** (metadata):
+- **Label** - Human-readable labels for XBRL elements
+- **Reference** - Authoritative references (FASB codification)
+- **Taxonomy** - Global XBRL taxonomy definitions
 
-**Example Traversal:**
+### Key Traversal Patterns
+
+**Pattern 1: Fact-level queries** (individual financial data points)
 
 ```
 Entity (NVIDIA)
-  -[:ENTITY_HAS_REPORT]-> Report (10-K 2024)
-    -[:REPORT_HAS_FACT]-> Fact ($26.97B)
-      -[:FACT_HAS_ELEMENT]-> Element (us-gaap:Revenues)
-      -[:FACT_HAS_PERIOD]-> Period (2024-01-28)
-      -[:FACT_HAS_UNIT]-> Unit (USD)
+  ─[:ENTITY_HAS_REPORT]─▶ Report (10-K 2024)
+    ─[:REPORT_HAS_FACT]─▶ Fact ($26.97B)
+      ─[:FACT_HAS_ELEMENT]─▶ Element (us-gaap:Revenues, canonical_concept: "revenue")
+      ─[:FACT_HAS_PERIOD]─▶ Period (2024-01-28)
+      ─[:FACT_HAS_UNIT]─▶ Unit (USD)
+      ─[:FACT_HAS_DIMENSION]─▶ Dimension (optional, for segment breakdowns)
 ```
+
+**Pattern 2: Statement-level queries** (structured financial statements via FactSets)
+
+```
+Structure (canonical_type: "income_statement")
+  ─[:STRUCTURE_HAS_FACT_SET]─▶ FactSet
+    ─[:FACT_SET_CONTAINS_FACT]─▶ Fact ─[:FACT_HAS_ELEMENT]─▶ Element
+                                  └─[:FACT_HAS_ENTITY]─▶ Entity (filter by ticker)
+```
+
+This is what `get-financial-statement` uses — a single hop from Structure through FactSet to get all facts for a statement type, filtered by company.
+
+**Pattern 3: Taxonomy structure** (how elements relate to each other)
+
+```
+Structure
+  ─[:STRUCTURE_HAS_ASSOCIATION]─▶ Association
+    ─[:ASSOCIATION_HAS_FROM_ELEMENT]─▶ Element (parent, e.g., Assets)
+    ─[:ASSOCIATION_HAS_TO_ELEMENT]─▶ Element (child, e.g., CurrentAssets)
+    ─[:ASSOCIATION_HAS_CLASSIFICATION]─▶ Classification (type: "AssetsRollUp")
+```
+
+### Enriched Properties
+
+During processing, elements and structures are enriched with semantic metadata:
+
+- **`Element.canonical_concept`** — Standardized concept name (e.g., "revenue", "total_assets", "net_income"). Use this for cross-company comparisons instead of raw XBRL qnames.
+- **`Structure.canonical_type`** — Statement classification ("income_statement", "balance_sheet", "cash_flow_statement", "equity_statement", "comprehensive_income")
+- **`Classification.type`** — Disclosure mechanics label (e.g., "AssetsRollUp", "IncomeStatement", "LongTermDebtMaturities")
 
 ## Common Tasks
 
@@ -496,14 +546,16 @@ Use the MCP client's `discover-common-elements` tool or query directly:
 just graph-query sec "MATCH (el:Element) WHERE el.qname STARTS WITH 'us-gaap:' RETURN el.qname, el.name LIMIT 20"
 ```
 
-Common financial metrics:
+Common financial metrics (XBRL qname → canonical concept):
 
-- `us-gaap:Revenues` - Total revenue
-- `us-gaap:NetIncomeLoss` - Net income
-- `us-gaap:Assets` - Total assets
-- `us-gaap:Liabilities` - Total liabilities
-- `us-gaap:StockholdersEquity` - Shareholders' equity
-- `us-gaap:EarningsPerShareBasic` - EPS (basic)
+- `us-gaap:Revenues` → `revenue`
+- `us-gaap:NetIncomeLoss` → `net_income`
+- `us-gaap:Assets` → `total_assets`
+- `us-gaap:Liabilities` → `total_liabilities`
+- `us-gaap:StockholdersEquity` → `stockholders_equity`
+- `us-gaap:EarningsPerShareBasic` → `eps_basic`
+- `us-gaap:OperatingIncomeLoss` → `operating_income`
+- `us-gaap:CashAndCashEquivalentsAtCarryingValue` → `cash_and_equivalents`
 
 ### Query by Time Period
 
