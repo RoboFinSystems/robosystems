@@ -13,6 +13,7 @@ Bucket Configuration:
 from typing import Any, BinaryIO
 
 import boto3
+from botocore.config import Config
 from dagster import ConfigurableResource
 
 from robosystems.config import env
@@ -45,6 +46,8 @@ class S3Resource(ConfigurableResource):
     # Support LocalStack for local development
     if env.AWS_ENDPOINT_URL:
       kwargs["endpoint_url"] = env.AWS_ENDPOINT_URL
+      # Disable checksum validation — LocalStack's checksums are unreliable
+      kwargs["config"] = Config(response_checksum_validation="when_required")
     return boto3.client("s3", **kwargs)
 
   def upload_file(

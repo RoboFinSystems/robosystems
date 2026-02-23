@@ -42,6 +42,7 @@ def process_single_filing_to_memory(
   raw_bucket: str,
   metadata_loader: "SECMetadataLoader",
   allowed_form_types: list[str] | None = None,
+  enricher=None,
 ) -> ProcessedFilingResult:
   """Process a single filing and return parquet data in memory.
 
@@ -61,6 +62,8 @@ def process_single_filing_to_memory(
       allowed_form_types: If set, only process filings with these form types.
           Filings with non-matching types return success with empty tables
           and skipped_reason set.
+      enricher: Shared SemanticEnricher instance. If provided, reuses the model
+          across filings instead of loading a new one per filing.
 
   Returns:
       ProcessedFilingResult with parquet data or error
@@ -170,6 +173,7 @@ def process_single_filing_to_memory(
         output_dir=tmpdir,
         local_file_path=os.path.join(tmpdir, xbrl_files[0]),
         schema_config=schema_config,
+        enricher=enricher,
       )
 
       processor.process()

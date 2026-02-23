@@ -268,9 +268,10 @@ class TestGraphMCPTools:
     # + memory tools (3) if MCP_MEMORY_ENABLED=true
     # + data tools (1) if FACT_GRID_ENABLED=true
     # + element/facts tools (2) if graph type is SEC
-    # Max possible: 5 + 4 + 3 + 1 + 2 = 15
+    # + curated financial tools (3): financial-statement, list-disclosures, disclosure-detail
+    # Max possible: 5 + 4 + 3 + 1 + 2 + 3 = 18
     assert len(definitions) >= 5
-    assert len(definitions) <= 15
+    assert len(definitions) <= 18
 
     # Check example queries tool
     example_tool = next(t for t in definitions if t["name"] == "get-example-queries")

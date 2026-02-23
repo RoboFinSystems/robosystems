@@ -77,7 +77,7 @@ class XBRLSchemaAdapter:
     # Relationship table mappings - complete list from XBRL processing
     "EntityReports": "ENTITY_HAS_REPORT",
     "ReportFacts": "REPORT_HAS_FACT",
-    "ReportFactSets": "REPORT_HAS_FACT_SET",
+    "StructureFactSets": "STRUCTURE_HAS_FACT_SET",
     "ReportTaxonomies": "REPORT_USES_TAXONOMY",
     "FactUnits": "FACT_HAS_UNIT",
     "FactDimensions": "FACT_HAS_DIMENSION",
@@ -95,6 +95,13 @@ class XBRLSchemaAdapter:
     "AssociationToElements": "ASSOCIATION_HAS_TO_ELEMENT",
     "DimensionHasAxisElement": "DIMENSION_HAS_AXIS_ELEMENT",
     "DimensionHasMemberElement": "DIMENSION_HAS_MEMBER_ELEMENT",
+    # PascalCase variants from filename conversion in write_dataframe()
+    # (classify_associations writes parquets with underscore names that get
+    # title-cased: ASSOCIATION_HAS_CLASSIFICATION → AssociationHasClassification)
+    "AssociationHasClassification": "ASSOCIATION_HAS_CLASSIFICATION",
+    "StructureHasFactSet": "STRUCTURE_HAS_FACT_SET",
+    "FactSetContainsFact": "FACT_SET_CONTAINS_FACT",
+    "Factset": "FactSet",  # title() lowercases the S
   }
 
   def __init__(self, schema_config: dict[str, Any]):

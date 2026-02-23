@@ -24,7 +24,6 @@ from robosystems.adapters.sec.processors.ids import (
   create_element_id,
   create_entity_id,
   create_fact_id,
-  create_factset_id,
   create_label_id,
   create_period_id,
   create_reference_id,
@@ -62,6 +61,7 @@ class XBRLGraphProcessor:
     output_dir="./data/output",
     schema_config=None,
     local_file_path=None,
+    enricher=None,
   ):
     logger.debug(f"Initializing XBRL processor for report URI: {report_uri}")
     self.report_uri = report_uri  # Keep original SEC URL for metadata
@@ -99,9 +99,9 @@ class XBRLGraphProcessor:
     self.enable_type_prefixes = XBRL_TYPE_PREFIXES
     self.enable_column_standardization = XBRL_COLUMN_STANDARDIZATION
 
-    # Semantic enrichment (lazy enricher — model loaded on first use)
+    # Semantic enrichment (shared enricher preferred — avoids reloading model per filing)
     self.enable_semantic_enrichment = XBRL_SEMANTIC_ENRICHMENT
-    self._enricher = None
+    self._enricher = enricher
 
     if (
       self.enable_standardized_filenames
@@ -232,6 +232,9 @@ class XBRLGraphProcessor:
 
       logger.info("Outputting parquet files")
       self.output_parquet_files()
+
+      self.classify_associations()
+
       logger.info("XBRL processing completed successfully")
     except Exception as e:
       logger.error(f"Error processing XBRL: {e}")
@@ -266,6 +269,77 @@ class XBRLGraphProcessor:
   def output_parquet_files(self):
     """Output all DataFrames to parquet files organized in nodes/ and relationships/ subdirectories."""
     self.parquet_writer.write_all_dataframes(self.schema_to_dataframe_mapping, self)
+
+  def classify_associations(self):
+    """Classify associations using Cypher pattern detection on temp embedded LadybugDB.
+
+    Runs after parquet output. Loads the filing's parquets into a temporary
+    LadybugDB, detects structural patterns (RollUp, RollForward, etc.),
+    and writes Classification nodes + relationships as additional parquets.
+    """
+    from robosystems.adapters.sec.config import XBRL_ASSOCIATION_CLASSIFICATION
+
+    if not XBRL_ASSOCIATION_CLASSIFICATION:
+      return
+
+    try:
+      from robosystems.adapters.sec.processors.classify import AssociationClassifier
+
+      classifier = AssociationClassifier()
+      result = classifier.classify(self.output_dir)
+
+      if not result.classifications_df.empty:
+        self.parquet_writer.write_dataframe(
+          result.classifications_df, "nodes/Classification.parquet"
+        )
+        self.parquet_writer.write_dataframe(
+          result.assoc_classifications_df,
+          "relationships/ASSOCIATION_HAS_CLASSIFICATION.parquet",
+        )
+        logger.info(
+          f"Wrote {len(result.classifications_df)} association classifications"
+        )
+
+      # Write structure-level FactSets
+      if not result.factsets_df.empty:
+        self.parquet_writer.write_dataframe(result.factsets_df, "nodes/FactSet.parquet")
+        self.parquet_writer.write_dataframe(
+          result.structure_factset_rels_df,
+          "relationships/STRUCTURE_HAS_FACT_SET.parquet",
+        )
+        self.parquet_writer.write_dataframe(
+          result.factset_fact_rels_df,
+          "relationships/FACT_SET_CONTAINS_FACT.parquet",
+        )
+        logger.info(
+          f"Wrote {len(result.factsets_df)} structure FactSets "
+          f"with {len(result.factset_fact_rels_df)} fact links"
+        )
+
+      # Apply disclosure-root canonical hints to elements
+      if (
+        result.canonical_hints
+        and hasattr(self, "elements_df")
+        and not self.elements_df.empty
+      ):
+        upgraded = 0
+        for elem_id, (concept_id, confidence) in result.canonical_hints.items():
+          mask = self.elements_df["identifier"] == elem_id
+          if not mask.any():
+            continue
+          current_conf = self.elements_df.loc[mask, "canonical_confidence"].iloc[0]
+          if current_conf is None or pd.isna(current_conf) or current_conf < confidence:
+            self.elements_df.loc[mask, "canonical_concept"] = concept_id
+            self.elements_df.loc[mask, "canonical_confidence"] = confidence
+            upgraded += 1
+        if upgraded:
+          self.parquet_writer.write_dataframe(self.elements_df, "nodes/Element.parquet")
+          logger.info(
+            f"Upgraded {upgraded} elements with disclosure-root canonical concepts"
+          )
+    except Exception as e:
+      # Classification is non-critical — log and continue
+      logger.warning(f"Association classification failed (non-critical): {e}")
 
   def enrich_dataframes(self):
     """Batch enrichment of Element, Label, and Structure DataFrames with embeddings and canonical concepts."""
@@ -400,6 +474,54 @@ class XBRLGraphProcessor:
       else:
         all_embeddings = [None] * len(texts)
 
+      # Pre-compute structure → element qnames mapping for graph refinement
+      from robosystems.adapters.sec.config import XBRL_GRAPH_REFINEMENT
+
+      structure_element_map: dict[str, list[str]] = {}
+      structure_def_hashes: dict[str, str] = {}
+      if XBRL_GRAPH_REFINEMENT and (
+        hasattr(self, "structure_associations_df")
+        and not self.structure_associations_df.empty
+        and hasattr(self, "association_to_elements_df")
+        and not self.association_to_elements_df.empty
+        and hasattr(self, "elements_df")
+        and not self.elements_df.empty
+      ):
+        import hashlib
+
+        # Build association_id → element_qname mapping
+        assoc_to_qname: dict[str, str] = {}
+        elem_id_to_qname: dict[str, str] = {}
+        for _, erow in self.elements_df.iterrows():
+          eid = erow.get("identifier")
+          eq = erow.get("qname")
+          if eid and eq:
+            elem_id_to_qname[eid] = eq
+
+        for _, arow in self.association_to_elements_df.iterrows():
+          assoc_id = arow.get("from")
+          elem_id = arow.get("to")
+          if assoc_id and elem_id and elem_id in elem_id_to_qname:
+            assoc_to_qname[assoc_id] = elem_id_to_qname[elem_id]
+
+        # Build structure_id → [element_qnames]
+        for _, srow in self.structure_associations_df.iterrows():
+          struct_id = srow.get("from")
+          assoc_id = srow.get("to")
+          if struct_id and assoc_id and assoc_id in assoc_to_qname:
+            structure_element_map.setdefault(struct_id, []).append(
+              assoc_to_qname[assoc_id]
+            )
+
+        # Pre-compute definition hashes for consensus lookup
+        for _, row in self.structures_df.iterrows():
+          struct_id = row.get("identifier")
+          definition = row.get("definition", "") or ""
+          if struct_id:
+            structure_def_hashes[struct_id] = hashlib.md5(
+              definition.encode()
+            ).hexdigest()
+
       # Classify structures (heuristic first, then embedding fallback)
       # Only Statement types are classified; Disclosures are skipped entirely
       canonical_types = []
@@ -427,6 +549,26 @@ class XBRLGraphProcessor:
         else:
           canonical_types.append(None)
           canonical_confidences.append(None)
+
+      # Apply graph-based structure refinement
+      from robosystems.adapters.sec.config import XBRL_GRAPH_REFINEMENT
+
+      if XBRL_GRAPH_REFINEMENT:
+        for i, row in enumerate(self.structures_df.itertuples()):
+          ct = canonical_types[i]
+          cc = canonical_confidences[i]
+          if cc is None:
+            continue
+          struct_id = row.identifier if hasattr(row, "identifier") else None
+          if struct_id is None:
+            continue
+          elements = structure_element_map.get(struct_id, [])
+          def_hash = structure_def_hashes.get(struct_id, "")
+          refined_type, refined_conf = enricher.refine_structure_confidence(
+            ct, cc, elements, def_hash
+          )
+          canonical_types[i] = refined_type
+          canonical_confidences[i] = refined_conf
 
       self.structures_df["embedding"] = all_embeddings
       self.structures_df["canonical_type"] = canonical_types
@@ -792,29 +934,7 @@ class XBRLGraphProcessor:
         self.make_taxonomy()
 
   def make_facts(self):
-    logger.debug("Creating fact set and processing facts")
-
-    # Create fact set - deterministic based on report URI
-    factset_uri = f"{self.report_uri}#factset"
-    factset_id = create_factset_id(factset_uri)
-    factset_data = {"identifier": factset_id}
-    new_factset_df = pd.DataFrame([factset_data])
-    self.fact_sets_df = self.safe_concat(self.fact_sets_df, new_factset_df)
-
-    # Connect fact set to report
-    if self.report_data:
-      report_factset_rel = {
-        "from": self.report_data["identifier"],
-        "to": factset_id,
-        "fact_set_context": f"Report facts for {self.report_data.get('form', 'filing')}",
-      }
-      new_report_factset_df = pd.DataFrame([report_factset_rel])
-      self.report_fact_sets_df = self.safe_concat(
-        self.report_fact_sets_df, new_report_factset_df
-      )
-
-    self.report_factset_id = factset_id
-    logger.debug(f"Created fact set with ID: {factset_id}")
+    logger.debug("Processing facts")
 
     fact_count = 0
     for xfact in self.arelle_cntlr.facts:
@@ -923,19 +1043,6 @@ class XBRLGraphProcessor:
       }
       new_report_fact_df = pd.DataFrame([report_fact_rel])
       self.report_facts_df = self.safe_concat(self.report_facts_df, new_report_fact_df)
-
-    # Connect fact to fact set
-    factset_fact_rel = {
-      "from": self.report_factset_id,
-      "to": identifier,
-    }
-    new_factset_fact_df = pd.DataFrame([factset_fact_rel])
-    if hasattr(self, "fact_set_contains_facts_df"):
-      self.fact_set_contains_facts_df = self.safe_concat(
-        self.fact_set_contains_facts_df, new_factset_fact_df
-      )
-    else:
-      self.fact_set_contains_facts_df = new_factset_fact_df
 
     if xfact.unit is not None:
       logger.debug(f"Processing numeric fact with decimals: {fact_data['decimals']}")

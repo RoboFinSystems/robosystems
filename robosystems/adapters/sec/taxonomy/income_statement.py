@@ -1,10 +1,15 @@
 """
 Income statement canonical concepts.
+
+Ordered top-to-bottom following the standard income statement flow:
+Revenue → COGS → Gross Profit → Operating Expenses → Operating Income →
+Non-Operating → Pretax → Tax → Net Income → Comprehensive Income → EPS
 """
 
 from .concepts import CanonicalConcept
 
 INCOME_STATEMENT_CONCEPTS = (
+  # ── Revenue ──────────────────────────────────────────────────────────
   CanonicalConcept(
     id="revenue",
     display_name="Revenue",
@@ -47,6 +52,7 @@ INCOME_STATEMENT_CONCEPTS = (
     period_type="duration",
     balance="credit",
   ),
+  # ── Operating Expenses ───────────────────────────────────────────────
   CanonicalConcept(
     id="research_and_development",
     display_name="Research and Development",
@@ -75,16 +81,6 @@ INCOME_STATEMENT_CONCEPTS = (
     balance="debit",
   ),
   CanonicalConcept(
-    id="operating_income",
-    display_name="Operating Income",
-    category="income_statement",
-    description="Income from operations before interest and taxes",
-    aliases=("operating profit", "income from operations", "operating earnings"),
-    expected_elements=("us-gaap:OperatingIncomeLoss",),
-    period_type="duration",
-    balance="credit",
-  ),
-  CanonicalConcept(
     id="depreciation_amortization",
     display_name="Depreciation and Amortization",
     category="income_statement",
@@ -97,6 +93,104 @@ INCOME_STATEMENT_CONCEPTS = (
     ),
     period_type="duration",
     balance="debit",
+  ),
+  CanonicalConcept(
+    id="stock_based_compensation",
+    display_name="Stock-Based Compensation",
+    category="income_statement",
+    description="Stock-based compensation expense recognized in the period",
+    aliases=(
+      "share-based compensation",
+      "equity compensation",
+      "stock compensation expense",
+    ),
+    expected_elements=(
+      "us-gaap:AllocatedShareBasedCompensationExpense",
+      "us-gaap:ShareBasedCompensation",
+      "us-gaap:ShareBasedCompensationOptionAndIncentivePlansPolicy",
+    ),
+    period_type="duration",
+    balance="debit",
+  ),
+  CanonicalConcept(
+    id="other_operating_expense",
+    display_name="Other Operating Expense",
+    category="income_statement",
+    description="Other operating expenses not separately classified",
+    aliases=("other operating costs", "other operating charges"),
+    expected_elements=(
+      "us-gaap:OtherOperatingIncomeExpenseNet",
+      "us-gaap:OtherCostAndExpenseOperating",
+    ),
+    period_type="duration",
+    balance="debit",
+  ),
+  CanonicalConcept(
+    id="nonrecurring_operating_expense",
+    display_name="Non-Recurring Operating Expense",
+    category="income_statement",
+    description="Non-recurring operating charges such as restructuring, impairments, and writedowns that should be excluded from normalized earnings",
+    aliases=(
+      "one-off charges",
+      "special charges",
+      "non-recurring charges",
+      "unusual charges",
+    ),
+    expected_elements=(
+      "us-gaap:RestructuringCharges",
+      "us-gaap:RestructuringSettlementAndImpairmentProvisions",
+      "us-gaap:InventoryWriteDown",
+      "us-gaap:GoodwillImpairmentLoss",
+      "us-gaap:AssetImpairmentCharges",
+      "us-gaap:ImpairmentOfIntangibleAssetsExcludingGoodwill",
+      "us-gaap:ImpairmentOfIntangibleAssetsIndefinitelivedExcludingGoodwill",
+      "us-gaap:ImpairmentOfLongLivedAssetsHeldForUse",
+      "us-gaap:GainLossOnDispositionOfAssets",
+      "us-gaap:BusinessCombinationAcquisitionRelatedCosts",
+      "us-gaap:LitigationSettlementAmountAwardedToOtherParty",
+      "us-gaap:SeveranceCosts1",
+    ),
+    period_type="duration",
+    balance="debit",
+  ),
+  CanonicalConcept(
+    id="operating_expenses",
+    display_name="Operating Expenses",
+    category="income_statement",
+    description="Total operating expenses including cost of revenue and other operating costs",
+    aliases=("total operating expenses", "costs and expenses", "total costs"),
+    expected_elements=(
+      "us-gaap:OperatingExpenses",
+      "us-gaap:CostsAndExpenses",
+    ),
+    period_type="duration",
+    balance="debit",
+  ),
+  # ── Operating Income ─────────────────────────────────────────────────
+  CanonicalConcept(
+    id="operating_income",
+    display_name="Operating Income",
+    category="income_statement",
+    description="Income from operations before interest and taxes",
+    aliases=("operating profit", "income from operations", "operating earnings"),
+    expected_elements=("us-gaap:OperatingIncomeLoss",),
+    period_type="duration",
+    balance="credit",
+  ),
+  # ── Non-Operating ────────────────────────────────────────────────────
+  CanonicalConcept(
+    id="interest_income",
+    display_name="Interest Income",
+    category="income_statement",
+    description="Income earned from interest on investments, deposits, and securities",
+    aliases=("investment income interest", "interest and dividend income"),
+    expected_elements=(
+      "us-gaap:InvestmentIncomeInterest",
+      "us-gaap:InvestmentIncomeInterestAndDividend",
+      "us-gaap:InterestIncomeOther",
+    ),
+    period_type="duration",
+    balance="credit",
   ),
   CanonicalConcept(
     id="interest_expense",
@@ -113,6 +207,39 @@ INCOME_STATEMENT_CONCEPTS = (
     balance="debit",
   ),
   CanonicalConcept(
+    id="nonoperating_income",
+    display_name="Non-Operating Income",
+    category="income_statement",
+    description="Income and expense from non-operating activities such as interest and other gains and losses",
+    aliases=(
+      "non-operating income expense",
+      "other income expense",
+      "other income",
+      "non-operating expense",
+    ),
+    expected_elements=(
+      "us-gaap:NonoperatingIncomeExpense",
+      "us-gaap:OtherNonoperatingIncomeExpense",
+      "us-gaap:InvestmentIncomeNet",
+    ),
+    period_type="duration",
+    balance="credit",
+  ),
+  # ── Bottom Line ──────────────────────────────────────────────────────
+  CanonicalConcept(
+    id="pretax_income",
+    display_name="Pretax Income",
+    category="income_statement",
+    description="Income from continuing operations before income taxes",
+    aliases=("income before taxes", "earnings before taxes", "pre-tax income"),
+    expected_elements=(
+      "us-gaap:IncomeLossFromContinuingOperationsBeforeIncomeTaxesExtraordinaryItemsNoncontrollingInterest",
+      "us-gaap:IncomeLossFromContinuingOperationsBeforeIncomeTaxesMinorityInterestAndIncomeLossFromEquityMethodInvestments",
+    ),
+    period_type="duration",
+    balance="credit",
+  ),
+  CanonicalConcept(
     id="income_tax_expense",
     display_name="Income Tax Expense",
     category="income_statement",
@@ -121,6 +248,10 @@ INCOME_STATEMENT_CONCEPTS = (
     expected_elements=(
       "us-gaap:IncomeTaxExpenseBenefit",
       "us-gaap:CurrentIncomeTaxExpenseBenefit",
+      "us-gaap:FederalIncomeTaxExpenseBenefitContinuingOperations",
+      "us-gaap:StateAndLocalIncomeTaxExpenseBenefitContinuingOperations",
+      "us-gaap:ForeignIncomeTaxExpenseBenefitContinuingOperations",
+      "us-gaap:DeferredIncomeTaxExpenseBenefit",
     ),
     period_type="duration",
     balance="debit",
@@ -135,19 +266,77 @@ INCOME_STATEMENT_CONCEPTS = (
       "us-gaap:NetIncomeLoss",
       "us-gaap:ProfitLoss",
       "us-gaap:NetIncomeLossAvailableToCommonStockholdersBasic",
+      "us-gaap:IncomeLossAttributableToParent",
+      "us-gaap:IncomeLossIncludingPortionAttributableToNoncontrollingInterest",
+      "us-gaap:IncomeLossFromContinuingOperationsIncludingPortionAttributableToNoncontrollingInterest",
+    ),
+    period_type="duration",
+    balance="credit",
+  ),
+  # ── Comprehensive Income ─────────────────────────────────────────────
+  CanonicalConcept(
+    id="other_comprehensive_income",
+    display_name="Other Comprehensive Income",
+    category="income_statement",
+    description="Unrealized gains and losses not included in net income such as foreign currency, securities, and hedging adjustments",
+    aliases=(
+      "OCI",
+      "other comprehensive income loss",
+      "accumulated other comprehensive income",
+    ),
+    expected_elements=(
+      "us-gaap:OtherComprehensiveIncomeLossNetOfTax",
+      "us-gaap:OtherComprehensiveIncomeLossNetOfTaxPortionAttributableToParent",
+      "us-gaap:OtherComprehensiveIncomeAvailableforsaleSecuritiesAdjustmentNetOfTaxPortionAttributableToParent",
+      "us-gaap:OtherComprehensiveIncomeLossCashFlowHedgeGainLossAfterReclassificationAndTax",
+      "us-gaap:OtherComprehensiveIncomeLossPensionAndOtherPostretirementBenefitPlansAdjustmentBeforeTax",
+      "us-gaap:OtherComprehensiveIncomeLossPensionAndOtherPostretirementBenefitPlansAdjustmentNetOfTax",
+      "us-gaap:OtherComprehensiveIncomeLossAvailableForSaleSecuritiesAdjustmentNetOfTax",
+      "us-gaap:OtherComprehensiveIncomeLossBeforeTaxPortionAttributableToParent",
+      "us-gaap:OtherComprehensiveIncomeLossForeignCurrencyTransactionAndTranslationAdjustmentNetOfTax",
+      "us-gaap:ReclassificationFromAociCurrentPeriodNetOfTaxAttributableToParent",
     ),
     period_type="duration",
     balance="credit",
   ),
   CanonicalConcept(
-    id="ebitda",
-    display_name="EBITDA",
+    id="total_comprehensive_income",
+    display_name="Comprehensive Income",
     category="income_statement",
-    description="Earnings before interest, taxes, depreciation and amortization",
-    aliases=("adjusted ebitda",),
-    expected_elements=(),  # Typically calculated, rarely a single XBRL element
+    description="Total comprehensive income including net income and other comprehensive income",
+    aliases=("total comprehensive income", "comprehensive income net of tax"),
+    expected_elements=(
+      "us-gaap:ComprehensiveIncomeNetOfTax",
+      "us-gaap:ComprehensiveIncomeNetOfTaxIncludingPortionAttributableToNoncontrollingInterest",
+    ),
     period_type="duration",
     balance="credit",
+  ),
+  # ── Derived / Per-Share ──────────────────────────────────────────────
+  CanonicalConcept(
+    id="weighted_average_shares_basic",
+    display_name="Weighted Average Shares Outstanding (Basic)",
+    category="per_share",
+    description="Weighted average number of basic shares outstanding used as the denominator for basic EPS",
+    aliases=("basic shares", "weighted average basic shares"),
+    expected_elements=(
+      "us-gaap:WeightedAverageNumberOfSharesOutstandingBasic",
+      "us-gaap:WeightedAverageNumberOfShareOutstandingBasicAndDiluted",
+    ),
+    period_type="duration",
+    balance=None,
+    is_monetary=False,
+  ),
+  CanonicalConcept(
+    id="weighted_average_shares_diluted",
+    display_name="Weighted Average Shares Outstanding (Diluted)",
+    category="per_share",
+    description="Weighted average number of diluted shares outstanding used as the denominator for diluted EPS",
+    aliases=("diluted shares", "weighted average diluted shares"),
+    expected_elements=("us-gaap:WeightedAverageNumberOfDilutedSharesOutstanding",),
+    period_type="duration",
+    balance=None,
+    is_monetary=False,
   ),
   CanonicalConcept(
     id="eps_basic",
@@ -167,6 +356,20 @@ INCOME_STATEMENT_CONCEPTS = (
     description="Diluted earnings per share of common stock",
     aliases=("diluted eps", "earnings per share diluted"),
     expected_elements=("us-gaap:EarningsPerShareDiluted",),
+    period_type="duration",
+    balance=None,
+    is_monetary=False,
+  ),
+  CanonicalConcept(
+    id="dividends_per_share",
+    display_name="Dividends Per Share",
+    category="per_share",
+    description="Dividends declared per share of common stock",
+    aliases=("dps",),
+    expected_elements=(
+      "us-gaap:CommonStockDividendsPerShareDeclared",
+      "us-gaap:CommonStockDividendsPerShareCashPaid",
+    ),
     period_type="duration",
     balance=None,
     is_monetary=False,

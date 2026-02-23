@@ -361,10 +361,13 @@ class TestWriteDataFrameSchemaDriven:
 
     df = pd.DataFrame()
 
-    with patch.object(pd.DataFrame, "to_parquet") as mock_to_parquet:
+    with (
+      patch("robosystems.adapters.sec.processors.parquet.open", create=True),
+      patch("robosystems.adapters.sec.processors.parquet.pq.write_table") as mock_write,
+    ):
       writer.write_dataframe_schema_driven(df, "Entity.parquet", "Entity")
 
-      mock_to_parquet.assert_not_called()
+      mock_write.assert_not_called()
 
   def test_write_node_dataframe(self, mock_dependencies):
     schema_adapter, ingest_adapter, df_manager = mock_dependencies
@@ -377,13 +380,18 @@ class TestWriteDataFrameSchemaDriven:
 
     df = pd.DataFrame({"identifier": ["1", "2"], "name": ["A", "B"]})
 
-    with patch.object(pd.DataFrame, "to_parquet") as mock_to_parquet:
+    with (
+      patch(
+        "robosystems.adapters.sec.processors.parquet.open", create=True
+      ) as mock_open,
+      patch("robosystems.adapters.sec.processors.parquet.pq.write_table"),
+    ):
       writer.write_dataframe_schema_driven(df, "Entity.parquet", "Entity")
 
-      mock_to_parquet.assert_called_once()
-      args, kwargs = mock_to_parquet.call_args
-      assert "nodes" in str(args[0])
-      assert "Entity.parquet" in str(args[0])
+      mock_open.assert_called_once()
+      filepath = mock_open.call_args[0][0]
+      assert "nodes" in str(filepath)
+      assert "Entity.parquet" in str(filepath)
 
   def test_write_relationship_dataframe(self, mock_dependencies):
     schema_adapter, ingest_adapter, df_manager = mock_dependencies
@@ -396,14 +404,19 @@ class TestWriteDataFrameSchemaDriven:
 
     df = pd.DataFrame({"from": ["1", "2"], "to": ["3", "4"]})
 
-    with patch.object(pd.DataFrame, "to_parquet") as mock_to_parquet:
+    with (
+      patch(
+        "robosystems.adapters.sec.processors.parquet.open", create=True
+      ) as mock_open,
+      patch("robosystems.adapters.sec.processors.parquet.pq.write_table"),
+    ):
       writer.write_dataframe_schema_driven(
         df, "ENTITY_HAS_REPORT.parquet", "ENTITY_HAS_REPORT"
       )
 
-      mock_to_parquet.assert_called_once()
-      args, kwargs = mock_to_parquet.call_args
-      assert "relationships" in str(args[0])
+      mock_open.assert_called_once()
+      filepath = mock_open.call_args[0][0]
+      assert "relationships" in str(filepath)
 
   def test_deduplication_by_identifier(self, mock_dependencies):
     schema_adapter, ingest_adapter, df_manager = mock_dependencies
@@ -417,16 +430,22 @@ class TestWriteDataFrameSchemaDriven:
       {"identifier": ["1", "2", "1"], "name": ["A", "B", "A_duplicate"]}
     )
 
-    saved_dfs = []
+    written_tables = []
 
-    def capture_to_parquet(self, *args, **kwargs):
-      saved_dfs.append(self.copy())
+    def capture_write(table, f):
+      written_tables.append(table)
 
-    with patch.object(pd.DataFrame, "to_parquet", capture_to_parquet):
+    with (
+      patch("robosystems.adapters.sec.processors.parquet.open", create=True),
+      patch(
+        "robosystems.adapters.sec.processors.parquet.pq.write_table",
+        side_effect=capture_write,
+      ),
+    ):
       writer.write_dataframe_schema_driven(df, "Entity.parquet", "Entity")
 
-      assert len(saved_dfs) == 1
-      saved_df = saved_dfs[0]
+      assert len(written_tables) == 1
+      saved_df = written_tables[0].to_pandas()
       assert len(saved_df) == 2
       assert list(saved_df["identifier"]) == ["1", "2"]
 
@@ -442,18 +461,24 @@ class TestWriteDataFrameSchemaDriven:
       {"identifier": ["1", "2", "1"], "from": ["A", "B", "C"], "to": ["D", "E", "F"]}
     )
 
-    saved_dfs = []
+    written_tables = []
 
-    def capture_to_parquet(self, *args, **kwargs):
-      saved_dfs.append(self.copy())
+    def capture_write(table, f):
+      written_tables.append(table)
 
-    with patch.object(pd.DataFrame, "to_parquet", capture_to_parquet):
+    with (
+      patch("robosystems.adapters.sec.processors.parquet.open", create=True),
+      patch(
+        "robosystems.adapters.sec.processors.parquet.pq.write_table",
+        side_effect=capture_write,
+      ),
+    ):
       writer.write_dataframe_schema_driven(
         df, "ENTITY_HAS_REPORT.parquet", "ENTITY_HAS_REPORT"
       )
 
-      assert len(saved_dfs) == 1
-      saved_df = saved_dfs[0]
+      assert len(written_tables) == 1
+      saved_df = written_tables[0].to_pandas()
       assert len(saved_df) == 3
 
   def test_column_standardization_enabled(self, mock_dependencies):
@@ -474,7 +499,10 @@ class TestWriteDataFrameSchemaDriven:
 
     df = pd.DataFrame({"identifier": ["1"], "name": ["A"]})
 
-    with patch.object(pd.DataFrame, "to_parquet"):
+    with (
+      patch("robosystems.adapters.sec.processors.parquet.open", create=True),
+      patch("robosystems.adapters.sec.processors.parquet.pq.write_table"),
+    ):
       writer.write_dataframe_schema_driven(df, "Entity.parquet", "Entity")
 
       df_manager.standardize_dataframe_columns.assert_called_once()
@@ -490,12 +518,17 @@ class TestWriteDataFrame:
 
     df = pd.DataFrame({"identifier": ["1"], "name": ["A"]})
 
-    with patch.object(pd.DataFrame, "to_parquet") as mock_to_parquet:
+    with (
+      patch(
+        "robosystems.adapters.sec.processors.parquet.open", create=True
+      ) as mock_open,
+      patch("robosystems.adapters.sec.processors.parquet.pq.write_table"),
+    ):
       writer.write_dataframe(df, "nodes/Entity.parquet")
 
-      mock_to_parquet.assert_called_once()
-      args = mock_to_parquet.call_args[0]
-      assert "nodes" in str(args[0])
+      mock_open.assert_called_once()
+      filepath = mock_open.call_args[0][0]
+      assert "nodes" in str(filepath)
 
   def test_write_without_subdirectory(self, mock_dependencies):
     schema_adapter, ingest_adapter, df_manager = mock_dependencies
@@ -506,10 +539,15 @@ class TestWriteDataFrame:
 
     df = pd.DataFrame({"identifier": ["1"], "name": ["A"]})
 
-    with patch.object(pd.DataFrame, "to_parquet") as mock_to_parquet:
+    with (
+      patch(
+        "robosystems.adapters.sec.processors.parquet.open", create=True
+      ) as mock_open,
+      patch("robosystems.adapters.sec.processors.parquet.pq.write_table"),
+    ):
       writer.write_dataframe(df, "Entity.parquet")
 
-      mock_to_parquet.assert_called_once()
+      mock_open.assert_called_once()
 
   def test_table_name_conversion(self, mock_dependencies):
     schema_adapter, ingest_adapter, df_manager = mock_dependencies
@@ -520,7 +558,10 @@ class TestWriteDataFrame:
 
     df = pd.DataFrame({"identifier": ["1"], "from": ["A"], "to": ["B"]})
 
-    with patch.object(pd.DataFrame, "to_parquet"):
+    with (
+      patch("robosystems.adapters.sec.processors.parquet.open", create=True),
+      patch("robosystems.adapters.sec.processors.parquet.pq.write_table"),
+    ):
       writer.write_dataframe(df, "fact_has_dimension.parquet")
 
       df_manager.ensure_schema_completeness.assert_called_once()
@@ -541,7 +582,10 @@ class TestWriteAllDataFrames:
     ingest_adapter.get_all_relationship_tables.return_value = []
     df_manager.ensure_schema_completeness.side_effect = lambda df, schema: df
 
-    with patch.object(pd.DataFrame, "to_parquet"):
+    with (
+      patch("robosystems.adapters.sec.processors.parquet.open", create=True),
+      patch("robosystems.adapters.sec.processors.parquet.pq.write_table"),
+    ):
       writer.write_all_dataframes(mapping, processor)
 
   def test_write_all_without_schema_adapter(self, mock_dependencies):

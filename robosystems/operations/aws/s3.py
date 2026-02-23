@@ -227,6 +227,51 @@ class S3Client:
 
     return False
 
+  def download_file(
+    self,
+    bucket: str,
+    key: str,
+    file_path: str,
+    max_retries: int = 3,
+  ) -> bool:
+    """
+    Download an S3 object to a local file with retry logic.
+
+    Args:
+        bucket: S3 bucket name
+        key: S3 object key
+        file_path: Local path to write the file to
+        max_retries: Maximum number of retry attempts (default: 3)
+
+    Returns:
+        True if successful, False otherwise
+    """
+    non_retryable = {"AccessDenied", "InvalidBucketName", "NoSuchBucket", "NoSuchKey"}
+
+    for attempt in range(max_retries):
+      try:
+        self.s3_client.download_file(bucket, key, file_path)
+        logger.debug(f"Downloaded s3://{bucket}/{key} to {file_path}")
+        return True
+      except ClientError as e:
+        error_code = e.response.get("Error", {}).get("Code", "")
+        if error_code in non_retryable:
+          logger.debug(f"S3 download not available ({error_code}): s3://{bucket}/{key}")
+          return False
+        if attempt == max_retries - 1:
+          logger.error(f"Failed to download from S3 after {max_retries} attempts: {e}")
+          return False
+        wait_time = 2**attempt
+        logger.warning(
+          f"S3 download attempt {attempt + 1} failed, retrying in {wait_time}s: {e}"
+        )
+        time.sleep(wait_time)
+      except Exception as e:
+        logger.debug(f"S3 download not available: {e}")
+        return False
+
+    return False
+
   def download_string(self, bucket: str, key: str, max_retries: int = 3) -> str | None:
     """
     Download an S3 object as a string with retry logic.

@@ -610,6 +610,9 @@ class EnvConfig:
   # DuckDB Staging Configuration (for data ingestion/materialization)
   DUCKDB_STAGING_PATH = get_str_env("DUCKDB_STAGING_PATH", "./data/staging")
 
+  # Artifact Storage (precomputed Parquet files for enrichment refinement)
+  ARTIFACT_PATH = get_str_env("ARTIFACT_PATH", "./data/artifacts")
+
   # LadybugDB Admission Control
   # These use SSM tuning parameters in prod/staging for runtime adjustability
   # Override priority: env var > SSM /tuning/lbug_admission/ > default

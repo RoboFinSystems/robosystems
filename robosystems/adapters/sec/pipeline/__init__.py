@@ -33,6 +33,9 @@ Pipeline stages (run independently via separate jobs):
    - sec_duckdb_s3_published - Publish raw .duckdb to S3
    - sec_historical_duckdb_s3_published - Publish historical .duckdb to S3
 
+6. ARTIFACTS (graph-based confidence refinement):
+   - sec_knowledge_artifacts - Generate element + structure knowledge artifacts
+
 Post-materialization lineage (asset deps, not sensors):
   sec_graph_materialized -> sec_backup
   sec_graph_materialized -> sec_lbug_s3_published -> shared_replicas_refreshed
@@ -48,6 +51,10 @@ Usage:
     # components["schedules"] - list of Dagster schedules
 """
 
+from robosystems.adapters.sec.pipeline.artifact import (
+  SECArtifactConfig,
+  sec_knowledge_artifacts,
+)
 from robosystems.adapters.sec.pipeline.backup import sec_backup
 from robosystems.adapters.sec.pipeline.configs import (
   SEC_FORM_TYPE_BATCHES,
@@ -75,6 +82,7 @@ from robosystems.adapters.sec.pipeline.entity_update import (
   sec_entity_incremental_update,
 )
 from robosystems.adapters.sec.pipeline.jobs import (
+  sec_artifact_generation_job,
   sec_backup_job,
   sec_download_job,
   sec_duckdb_s3_publish_job,
@@ -134,6 +142,7 @@ def get_dagster_components():
       sec_historical_lbug_s3_published,
       sec_duckdb_s3_published,
       sec_historical_duckdb_s3_published,
+      sec_knowledge_artifacts,
     ],
     "jobs": [
       sec_download_job,
@@ -149,6 +158,7 @@ def get_dagster_components():
       sec_backup_job,
       sec_duckdb_s3_publish_job,
       sec_historical_duckdb_s3_publish_job,
+      sec_artifact_generation_job,
       sec_historical_lbug_s3_publish_job,
     ],
     "sensors": [
@@ -170,6 +180,7 @@ __all__ = [
   "SEC_PRIMARY_START_YEAR",
   "SEC_QUARTERS",
   "SEC_START_YEAR",
+  "SECArtifactConfig",
   "SECBackupConfig",
   "SECDownloadConfig",
   "SECEntityUpdateConfig",
@@ -179,6 +190,7 @@ __all__ = [
   "SECProcessConfig",
   "SECStageConfig",
   "get_dagster_components",
+  "sec_artifact_generation_job",
   "sec_backup",
   "sec_backup_job",
   "sec_download_job",
@@ -202,6 +214,7 @@ __all__ = [
   "sec_incremental_download_schedule",
   "sec_incremental_stage_job",
   "sec_incremental_staging_sensor",
+  "sec_knowledge_artifacts",
   "sec_lbug_s3_published",
   "sec_materialize_job",
   "sec_process_job",

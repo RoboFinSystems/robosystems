@@ -160,6 +160,7 @@ ENV PYTHONUNBUFFERED=1 \
 # Install runtime dependencies and uv
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libpq5 \
+    libatomic1 \
     postgresql-client \
     curl \
     git \

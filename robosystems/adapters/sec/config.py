@@ -76,6 +76,12 @@ XBRL_COLUMN_STANDARDIZATION = False
 # Semantic enrichment: embedding-based canonical concept matching
 XBRL_SEMANTIC_ENRICHMENT = True
 
+# Graph-based confidence refinement: uses precomputed artifacts to adjust scores
+XBRL_GRAPH_REFINEMENT = True
+
+# Association classification: Cypher-based pattern detection using temp embedded LadybugDB
+XBRL_ASSOCIATION_CLASSIFICATION = True
+
 # =============================================================================
 # SEC PIPELINE CONFIGURATION
 # =============================================================================

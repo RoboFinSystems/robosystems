@@ -42,6 +42,7 @@ from dagster import (
   define_asset_job,
 )
 
+from .artifact import sec_knowledge_artifacts
 from .backup import sec_backup
 from .configs import sec_quarter_partitions
 from .download import sec_raw_filings
@@ -416,6 +417,34 @@ sec_historical_lbug_s3_publish_job = define_asset_job(
     "ecs/memory": "512",
     "ecs/ephemeral_storage": "21",
     # On-demand to avoid interruptions during large uploads
+    "ecs/run_task_kwargs": {
+      "capacityProviderStrategy": [
+        {"capacityProvider": "FARGATE", "weight": 1, "base": 1},
+      ],
+    },
+  },
+)
+
+
+# ============================================================================
+# Phase 6: Artifact Generation (Knowledge artifacts for enrichment refinement)
+# ============================================================================
+# Generates precomputed Parquet artifacts from DuckDB staging for graph-based
+# confidence refinement. Compute-heavy: runs graph algorithms locally.
+
+sec_artifact_generation_job = define_asset_job(
+  name="sec_artifact_generation",
+  description="Generate element + structure knowledge artifacts.",
+  selection=AssetSelection.assets(sec_knowledge_artifacts),
+  tags={
+    "pipeline": "sec",
+    "phase": "artifact",
+    # Downloads full DuckDB staging file (~40GB+ pre-enrichment, growing with
+    # embeddings/enrichment data) then runs graph algorithms in-memory.
+    # Disk: DuckDB file + DuckDB spill-to-disk + output artifacts.
+    "ecs/cpu": "4096",
+    "ecs/memory": "16384",
+    "ecs/ephemeral_storage": "200",
     "ecs/run_task_kwargs": {
       "capacityProviderStrategy": [
         {"capacityProvider": "FARGATE", "weight": 1, "base": 1},

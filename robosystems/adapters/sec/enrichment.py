@@ -212,10 +212,15 @@ class SemanticEnricher:
   model at import time would be unacceptable.
   """
 
+  _UNSET = object()
+
   def __init__(self) -> None:
     self._model = None
     self._element_taxonomy = None
     self._structure_taxonomy = None
+    self._element_knowledge = self._UNSET
+    self._structure_profiles = self._UNSET
+    self._structure_consensus = self._UNSET
 
   # -- Lazy model loading ---------------------------------------------------
 
@@ -245,6 +250,152 @@ class SemanticEnricher:
       self._structure_taxonomy = get_structure_taxonomy(model=self.model)
     return self._structure_taxonomy
 
+  # -- Artifact lazy loading (graph-based refinement) -----------------------
+
+  @property
+  def element_knowledge(self) -> dict[str, dict] | None:
+    """Lazy-load element knowledge artifact from Parquet."""
+    if self._element_knowledge is self._UNSET:
+      self._element_knowledge = self._load_element_knowledge()
+    return self._element_knowledge
+
+  @property
+  def structure_profiles(self) -> dict[str, dict[str, float]] | None:
+    """Lazy-load structure profiles artifact."""
+    if self._structure_profiles is self._UNSET:
+      self._structure_profiles = self._load_structure_profiles()
+    return self._structure_profiles
+
+  @property
+  def structure_consensus(self) -> dict[str, dict] | None:
+    """Lazy-load structure consensus artifact."""
+    if self._structure_consensus is self._UNSET:
+      self._structure_consensus = self._load_structure_consensus()
+    return self._structure_consensus
+
+  def _ensure_artifact_local(self, name: str) -> str | None:
+    """Ensure an artifact parquet file exists locally, downloading from S3 if needed.
+
+    Returns the local path if available, None otherwise.
+    """
+    import os
+
+    from robosystems.config.storage.shared import get_artifact_path
+
+    path = get_artifact_path(name)
+
+    if os.path.exists(path):
+      return path
+
+    # S3 fallback: download artifact from shared processed bucket
+    try:
+      from robosystems.config import env
+      from robosystems.config.storage.shared import DataSourceType, get_processed_key
+      from robosystems.operations.aws.s3 import S3Client
+
+      s3_key = get_processed_key(DataSourceType.SEC, "artifacts", f"{name}.parquet")
+      bucket = env.SHARED_PROCESSED_BUCKET
+
+      os.makedirs(os.path.dirname(path), exist_ok=True)
+
+      s3 = S3Client()
+      if s3.download_file(bucket, s3_key, path):
+        logger.info(f"Downloaded artifact from s3://{bucket}/{s3_key}")
+        return path
+
+      logger.debug(f"Artifact not available on S3: {name}")
+      return None
+    except Exception as e:
+      logger.debug(f"S3 artifact download failed for {name}: {e}")
+      return None
+
+  def _load_element_knowledge(self) -> dict[str, dict] | None:
+    """Load element_knowledge.parquet into a qname-keyed dict."""
+    try:
+      path = self._ensure_artifact_local("element_knowledge")
+
+      if path is None:
+        return None
+
+      import pyarrow.parquet as pq
+
+      table = pq.read_table(path)
+      result = {}
+
+      # Read columnar and transpose to row dicts
+      columns = table.to_pydict()
+      qnames = columns["qname"]
+      # Backward compat: disclosure_type may not exist in old artifacts
+      disclosure_types = columns.get("disclosure_type")
+      for i, qname in enumerate(qnames):
+        result[qname] = {
+          "primary_statement": columns["primary_statement"][i],
+          "bfs_depth": columns["bfs_depth"][i],
+          "pagerank": columns["pagerank"][i],
+          "core_number": columns["core_number"][i],
+          "neighborhood_agreement": columns["neighborhood_agreement"][i],
+          "filing_count": columns["filing_count"][i],
+          "disclosure_type": disclosure_types[i] if disclosure_types else None,
+        }
+
+      logger.info(f"Loaded element knowledge artifact: {len(result)} elements")
+      return result
+    except Exception as e:
+      logger.debug(f"Element knowledge artifact not available: {e}")
+      return None
+
+  def _load_structure_profiles(self) -> dict[str, dict[str, float]] | None:
+    """Load structure_profiles.parquet into canonical_type → {qname → frequency}."""
+    try:
+      path = self._ensure_artifact_local("structure_profiles")
+
+      if path is None:
+        return None
+
+      import pyarrow.parquet as pq
+
+      table = pq.read_table(path)
+      columns = table.to_pydict()
+
+      result: dict[str, dict[str, float]] = {}
+      for i, ct in enumerate(columns["canonical_type"]):
+        if ct not in result:
+          result[ct] = {}
+        result[ct][columns["qname"][i]] = columns["frequency"][i]
+
+      logger.info(f"Loaded structure profiles artifact: {len(result)} types")
+      return result
+    except Exception as e:
+      logger.debug(f"Structure profiles artifact not available: {e}")
+      return None
+
+  def _load_structure_consensus(self) -> dict[str, dict] | None:
+    """Load structure_consensus.parquet into definition_hash-keyed dict."""
+    try:
+      path = self._ensure_artifact_local("structure_consensus")
+
+      if path is None:
+        return None
+
+      import pyarrow.parquet as pq
+
+      table = pq.read_table(path)
+      columns = table.to_pydict()
+
+      result = {}
+      for i, def_hash in enumerate(columns["definition_hash"]):
+        result[def_hash] = {
+          "canonical_type": columns["canonical_type"][i],
+          "consensus_ratio": columns["consensus_ratio"][i],
+          "filing_count": columns["filing_count"][i],
+        }
+
+      logger.info(f"Loaded structure consensus artifact: {len(result)} entries")
+      return result
+    except Exception as e:
+      logger.debug(f"Structure consensus artifact not available: {e}")
+      return None
+
   # -- Embedding ------------------------------------------------------------
 
   def embed_batch(self, texts: list[str]) -> list[list[float]]:
@@ -253,6 +404,10 @@ class SemanticEnricher:
     return [emb.tolist() for emb in embeddings]
 
   # -- Canonical matching (elements) ----------------------------------------
+
+  # Top-N candidate selection parameters
+  _CANDIDATE_THRESHOLD = 0.80  # Only consider candidates at or above match threshold
+  _MAX_CANDIDATES = 3  # Cap to avoid unnecessary refinement work
 
   def match_canonical(
     self, embedding: list[float], element_metadata: dict
@@ -263,7 +418,9 @@ class SemanticEnricher:
     1. Cosine similarity between embedding and all taxonomy embeddings
     2. Metadata boost: +0.10 for matching period_type, +0.10 for matching balance
     3. Known-element override: floor at 0.95 if qname in expected_elements
-    4. Threshold: minimum 0.70 confidence
+    4. Top-N candidates collected above threshold
+    5. Concept-aware refinement applied to each candidate (if enabled)
+    6. Winner selected after refinement
 
     Returns:
         (concept_id, confidence) or (None, 0.0) if below threshold.
@@ -281,8 +438,7 @@ class SemanticEnricher:
     if query_norm == 0:
       return (None, 0.0)
 
-    best_id = None
-    best_score = 0.0
+    candidates: list[tuple[float, str, CanonicalConcept]] = []
 
     for concept in taxonomy:
       if concept.embedding is None:
@@ -305,13 +461,121 @@ class SemanticEnricher:
       if elem_balance and concept.balance == elem_balance:
         cos_sim += 0.10
 
-      if cos_sim > best_score:
-        best_score = cos_sim
-        best_id = concept.id
+      if cos_sim >= self._CANDIDATE_THRESHOLD:
+        candidates.append((cos_sim, concept.id, concept))
 
-    if best_score >= 0.80:
+    if not candidates:
+      return (None, 0.0)
+
+    # Sort descending by score, cap at MAX_CANDIDATES
+    candidates.sort(reverse=True)
+    candidates = candidates[: self._MAX_CANDIDATES]
+
+    from robosystems.adapters.sec.config import XBRL_GRAPH_REFINEMENT
+
+    if XBRL_GRAPH_REFINEMENT:
+      # Refine each candidate with concept-aware signals, pick winner
+      refined = [
+        (self._refine_element_confidence(score, qname, concept), concept_id)
+        for score, concept_id, concept in candidates
+      ]
+      refined.sort(reverse=True)
+      best_score, best_id = refined[0]
+    else:
+      # No refinement — use raw best
+      best_score, best_id = candidates[0][0], candidates[0][1]
+
+    if best_score >= self._CANDIDATE_THRESHOLD:
       return (best_id, round(min(best_score, 1.0), 4))
     return (None, 0.0)
+
+  # Mapping from element knowledge primary_statement to concept category
+  _STATEMENT_TO_CATEGORY = {
+    "IncomeStatement": "income_statement",
+    "BalanceSheet": "balance_sheet",
+    "CashFlow": "cash_flow",
+  }
+
+  @staticmethod
+  def _disclosure_type_to_category(disclosure_type: str) -> str | None:
+    """Map a disclosure type to a concept category string.
+
+    Lazily imports DISCLOSURE_TO_STATEMENT from classifiers and converts
+    StatementType enum to the category string used by CanonicalConcept.
+    """
+    from robosystems.adapters.sec.knowledge.classifiers import DISCLOSURE_TO_STATEMENT
+
+    stmt_type = DISCLOSURE_TO_STATEMENT.get(disclosure_type)
+    if stmt_type is None:
+      return None
+    return {
+      "IncomeStatement": "income_statement",
+      "BalanceSheet": "balance_sheet",
+      "CashFlow": "cash_flow",
+      "Equity": "equity",
+    }.get(stmt_type.value)
+
+  def _refine_element_confidence(
+    self, raw_conf: float, qname: str, concept: CanonicalConcept | None = None
+  ) -> float:
+    """Apply graph-structural refinement to a semantic confidence score.
+
+    If element knowledge artifact is not available, returns raw_conf unchanged.
+    When a concept is provided, applies statement-alignment boost/penalty
+    before the quadratic penalty.
+    """
+    ek = self.element_knowledge
+    if ek is None:
+      return raw_conf
+
+    element_info = ek.get(qname)
+    if element_info is None:
+      return raw_conf  # Element not in artifact (new/rare element)
+
+    agreement = element_info["neighborhood_agreement"]
+    pagerank = element_info["pagerank"]
+
+    # PageRank boost: structurally central elements get up to 15% boost
+    pr_boost = 1.0 + 0.15 * (pagerank if pagerank is not None else 0.0)
+
+    base = raw_conf * pr_boost
+
+    # Agreement adjustment
+    if agreement is not None and agreement >= 0.8:
+      refined = base * (1.0 + 0.10 * agreement)  # Modest boost
+    elif agreement is not None and agreement >= 0.5:
+      refined = base  # Neutral zone
+    elif agreement is not None:
+      penalty = 0.6 + 0.4 * agreement  # Heavy penalty
+      refined = base * penalty
+    else:
+      refined = base
+
+    # Statement alignment: compare element's primary_statement to concept category
+    if concept is not None:
+      primary_stmt = element_info.get("primary_statement")
+      disclosure_type = element_info.get("disclosure_type")
+
+      if primary_stmt:
+        mapped_category = self._STATEMENT_TO_CATEGORY.get(primary_stmt)
+        if mapped_category == concept.category:
+          refined *= 1.08  # +8% boost for matching statement
+        elif mapped_category is not None:
+          refined *= 0.88  # -12% penalty for mismatched statement
+      elif disclosure_type:
+        # Fallback: use disclosure_type when primary_statement is unavailable
+        mapped_category = self._disclosure_type_to_category(disclosure_type)
+        if mapped_category == concept.category:
+          refined *= 1.05  # +5% boost (lower confidence than direct statement match)
+        elif mapped_category is not None:
+          refined *= 0.92  # -8% penalty (softer than direct statement mismatch)
+
+    # Quadratic penalty below threshold
+    threshold = 0.90
+    if refined < threshold:
+      refined *= (refined / threshold) ** 2.0
+
+    return round(min(1.0, max(0.0, refined)), 4)
 
   # -- Canonical matching (query-time, for MCP tools) -----------------------
 
@@ -386,3 +650,142 @@ class SemanticEnricher:
     if best_score >= 0.70:
       return (best_id, round(min(best_score, 1.0), 4))
     return (None, 0.0)
+
+  # -- Structure refinement ------------------------------------------------
+
+  def refine_structure_confidence(
+    self,
+    raw_type: str | None,
+    raw_conf: float,
+    structure_elements: list[str],
+    definition_hash: str,
+  ) -> tuple[str | None, float]:
+    """Refine structure classification using element composition and consensus.
+
+    Three layers (each additive):
+    1. Element composition voting — what do the elements inside say this is?
+    2. Cross-filing consensus — what did other filings call this structure?
+    3. Element knowledge cross-check — do the elements' primary_statements agree?
+
+    Returns adjusted (type, confidence). Returns (raw_type, raw_conf) unchanged
+    if artifacts are unavailable or structure has no elements.
+    """
+    from robosystems.adapters.sec.config import XBRL_GRAPH_REFINEMENT
+
+    if not XBRL_GRAPH_REFINEMENT:
+      return (raw_type, raw_conf)
+
+    if not structure_elements:
+      return (raw_type, raw_conf)
+
+    # Layer 1: Element composition voting
+    composition_type, composition_score = self._classify_by_composition(
+      structure_elements
+    )
+
+    # Layer 2: Cross-filing consensus
+    consensus_type, consensus_conf = self._lookup_structure_consensus(definition_hash)
+
+    # Layer 3: Element knowledge cross-check
+    element_vote_type = self._element_statement_vote(structure_elements)
+
+    # Combine signals
+    adjusted_type = raw_type
+    adjusted_conf = raw_conf
+
+    # If composition voting has a strong opinion
+    if composition_type and composition_score > 0.3:
+      if composition_type == raw_type:
+        # Agreement — boost confidence
+        adjusted_conf = min(1.0, adjusted_conf + 0.05 * composition_score)
+      elif raw_type is None:
+        # No heuristic match — use composition
+        adjusted_type = composition_type
+        adjusted_conf = composition_score * 0.85  # Scale down from raw score
+      elif composition_score > 0.6 and adjusted_conf < 0.75:
+        # Strong composition disagrees with weak heuristic — override
+        adjusted_type = composition_type
+        adjusted_conf = composition_score * 0.80
+
+    # Consensus can boost or penalize
+    if consensus_type and consensus_conf > 0.7:
+      if consensus_type == adjusted_type:
+        # Agreement — boost
+        adjusted_conf = min(1.0, adjusted_conf + 0.05 * consensus_conf)
+      elif adjusted_type is None:
+        adjusted_type = consensus_type
+        adjusted_conf = consensus_conf * 0.80
+      elif consensus_conf > 0.9 and adjusted_conf < 0.80:
+        # Very strong consensus disagrees — override
+        adjusted_type = consensus_type
+        adjusted_conf = consensus_conf * 0.85
+
+    # Element vote cross-check (validation, not override)
+    if element_vote_type and adjusted_type:
+      # Map element statement types to canonical structure types
+      stmt_to_structure = {
+        "IncomeStatement": "income_statement",
+        "BalanceSheet": "balance_sheet",
+        "CashFlow": "cash_flow_statement",
+        "Equity": "equity_statement",
+      }
+      mapped = stmt_to_structure.get(element_vote_type)
+      if mapped == adjusted_type:
+        adjusted_conf = min(1.0, adjusted_conf + 0.03)
+      elif mapped:
+        adjusted_conf = max(0.0, adjusted_conf - 0.05)
+
+    return (adjusted_type, round(adjusted_conf, 4))
+
+  def _classify_by_composition(
+    self, structure_elements: list[str]
+  ) -> tuple[str | None, float]:
+    """Score each canonical type by element overlap with its profile."""
+    profiles = self.structure_profiles
+    if profiles is None:
+      return (None, 0.0)
+
+    element_set = set(structure_elements)
+    best_type = None
+    best_score = 0.0
+
+    for canonical_type, profile in profiles.items():
+      overlap_score = sum(profile[q] for q in element_set if q in profile)
+      score = overlap_score / max(len(element_set), 1)
+
+      if score > best_score:
+        best_score = score
+        best_type = canonical_type
+
+    return (best_type, best_score)
+
+  def _lookup_structure_consensus(
+    self, definition_hash: str
+  ) -> tuple[str | None, float]:
+    """Look up cross-filing consensus for a structure definition hash."""
+    consensus = self.structure_consensus
+    if consensus is None:
+      return (None, 0.0)
+
+    entry = consensus.get(definition_hash)
+    if entry is None:
+      return (None, 0.0)
+
+    return (entry["canonical_type"], entry["consensus_ratio"])
+
+  def _element_statement_vote(self, structure_elements: list[str]) -> str | None:
+    """Majority vote of elements' primary_statement from element knowledge."""
+    ek = self.element_knowledge
+    if ek is None:
+      return None
+
+    votes: dict[str, int] = {}
+    for qname in structure_elements:
+      info = ek.get(qname)
+      if info and info.get("primary_statement"):
+        stmt = info["primary_statement"]
+        votes[stmt] = votes.get(stmt, 0) + 1
+
+    if not votes:
+      return None
+    return max(votes, key=votes.get)

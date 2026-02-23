@@ -175,6 +175,17 @@ def sec_processed_filings(
   # Create metadata loader for fetching SEC metadata
   metadata_loader = SECMetadataLoader()
 
+  # Create shared enricher — reuses fastembed model + taxonomies across all filings
+  # instead of loading ~130MB model per filing
+  from robosystems.adapters.sec.config import XBRL_SEMANTIC_ENRICHMENT
+
+  shared_enricher = None
+  if XBRL_SEMANTIC_ENRICHMENT:
+    from robosystems.adapters.sec.enrichment import SemanticEnricher
+
+    shared_enricher = SemanticEnricher()
+    context.log.info("Created shared SemanticEnricher for batch processing")
+
   # Track processing state
   succeeded = 0
   failed = 0
@@ -297,6 +308,7 @@ def sec_processed_filings(
         raw_bucket=raw_bucket,
         metadata_loader=metadata_loader,
         allowed_form_types=config.form_types,
+        enricher=shared_enricher,
       )
 
       filing_duration = time_module.time() - filing_start

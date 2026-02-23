@@ -1,20 +1,28 @@
 """
-Cash flow statement and per-share canonical concepts.
+Cash flow statement canonical concepts.
+
+Ordered following the standard cash flow statement layout:
+Operating → Investing → Financing → Net Change.
 """
 
 from .concepts import CanonicalConcept
 
 CASH_FLOW_CONCEPTS = (
+  # ── Operating Activities ─────────────────────────────────────────────
   CanonicalConcept(
     id="operating_cash_flow",
     display_name="Operating Cash Flow",
     category="cash_flow",
     description="Net cash from operating activities",
     aliases=("cash from operations", "cfo"),
-    expected_elements=("us-gaap:NetCashProvidedByUsedInOperatingActivities",),
+    expected_elements=(
+      "us-gaap:NetCashProvidedByUsedInOperatingActivities",
+      "us-gaap:NetCashProvidedByUsedInOperatingActivitiesContinuingOperations",
+    ),
     period_type="duration",
     balance="debit",
   ),
+  # ── Investing Activities ─────────────────────────────────────────────
   CanonicalConcept(
     id="capital_expenditures",
     display_name="Capital Expenditures",
@@ -29,16 +37,6 @@ CASH_FLOW_CONCEPTS = (
     balance="credit",
   ),
   CanonicalConcept(
-    id="free_cash_flow",
-    display_name="Free Cash Flow",
-    category="cash_flow",
-    description="Operating cash flow minus capital expenditures",
-    aliases=("fcf",),
-    expected_elements=(),  # Typically calculated, not a single XBRL element
-    period_type="duration",
-    balance="debit",
-  ),
-  CanonicalConcept(
     id="investing_cash_flow",
     display_name="Investing Cash Flow",
     category="cash_flow",
@@ -48,16 +46,7 @@ CASH_FLOW_CONCEPTS = (
     period_type="duration",
     balance="debit",
   ),
-  CanonicalConcept(
-    id="financing_cash_flow",
-    display_name="Financing Cash Flow",
-    category="cash_flow",
-    description="Net cash from financing activities",
-    aliases=("cash from financing",),
-    expected_elements=("us-gaap:NetCashProvidedByUsedInFinancingActivities",),
-    period_type="duration",
-    balance="debit",
-  ),
+  # ── Financing Activities ─────────────────────────────────────────────
   CanonicalConcept(
     id="dividends_paid",
     display_name="Dividends Paid",
@@ -85,43 +74,37 @@ CASH_FLOW_CONCEPTS = (
     balance="credit",
   ),
   CanonicalConcept(
-    id="shares_outstanding",
-    display_name="Shares Outstanding",
-    category="per_share",
-    description="Total shares of common stock outstanding",
-    aliases=("common shares outstanding", "weighted average shares"),
+    id="financing_cash_flow",
+    display_name="Financing Cash Flow",
+    category="cash_flow",
+    description="Net cash from financing activities",
+    aliases=("cash from financing",),
     expected_elements=(
-      "us-gaap:CommonStockSharesOutstanding",
-      "us-gaap:WeightedAverageNumberOfShareOutstandingBasicAndDiluted",
-      "us-gaap:WeightedAverageNumberOfSharesOutstandingBasic",
-    ),
-    period_type="instant",
-    balance=None,
-    is_monetary=False,
-  ),
-  CanonicalConcept(
-    id="dividends_per_share",
-    display_name="Dividends Per Share",
-    category="per_share",
-    description="Dividends declared per share of common stock",
-    aliases=("dps",),
-    expected_elements=(
-      "us-gaap:CommonStockDividendsPerShareDeclared",
-      "us-gaap:CommonStockDividendsPerShareCashPaid",
+      "us-gaap:NetCashProvidedByUsedInFinancingActivities",
+      "us-gaap:RepaymentsOfLongTermDebt",
+      "us-gaap:ProceedsFromIssuanceOfLongTermDebt",
+      "us-gaap:ProceedsFromRepaymentsOfShortTermDebtMaturingInMoreThanThreeMonths",
     ),
     period_type="duration",
-    balance=None,
-    is_monetary=False,
+    balance="debit",
   ),
+  # ── Net Change ───────────────────────────────────────────────────────
   CanonicalConcept(
-    id="book_value_per_share",
-    display_name="Book Value Per Share",
-    category="per_share",
-    description="Book value per share of common stock",
-    aliases=("bvps",),
-    expected_elements=("us-gaap:BookValuePerShareDiluted",),
-    period_type="instant",
-    balance=None,
-    is_monetary=False,
+    id="net_change_in_cash",
+    display_name="Net Change in Cash",
+    category="cash_flow",
+    description="Net increase or decrease in cash, cash equivalents, and restricted cash during the period",
+    aliases=(
+      "change in cash",
+      "net increase in cash",
+      "cash period increase decrease",
+    ),
+    expected_elements=(
+      "us-gaap:CashCashEquivalentsRestrictedCashAndRestrictedCashEquivalentsPeriodIncreaseDecreaseIncludingExchangeRateEffect",
+      "us-gaap:CashAndCashEquivalentsPeriodIncreaseDecrease",
+      "us-gaap:CashCashEquivalentsRestrictedCashAndRestrictedCashEquivalentsPeriodIncreaseDecreaseExcludingExchangeRateEffect",
+    ),
+    period_type="duration",
+    balance="debit",
   ),
 )
