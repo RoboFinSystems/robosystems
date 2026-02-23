@@ -273,16 +273,48 @@ class SemanticEnricher:
       self._structure_consensus = self._load_structure_consensus()
     return self._structure_consensus
 
+  def _ensure_artifact_local(self, name: str) -> str | None:
+    """Ensure an artifact parquet file exists locally, downloading from S3 if needed.
+
+    Returns the local path if available, None otherwise.
+    """
+    import os
+
+    from robosystems.config.storage.shared import get_artifact_path
+
+    path = get_artifact_path(name)
+
+    if os.path.exists(path):
+      return path
+
+    # S3 fallback: download artifact from shared processed bucket
+    try:
+      from robosystems.config import env
+      from robosystems.config.storage.shared import DataSourceType, get_processed_key
+      from robosystems.operations.aws.s3 import S3Client
+
+      s3_key = get_processed_key(DataSourceType.SEC, "artifacts", f"{name}.parquet")
+      bucket = env.SHARED_PROCESSED_BUCKET
+
+      os.makedirs(os.path.dirname(path), exist_ok=True)
+
+      s3 = S3Client()
+      if s3.download_file(bucket, s3_key, path):
+        logger.info(f"Downloaded artifact from s3://{bucket}/{s3_key}")
+        return path
+
+      logger.debug(f"Artifact not available on S3: {name}")
+      return None
+    except Exception as e:
+      logger.debug(f"S3 artifact download failed for {name}: {e}")
+      return None
+
   def _load_element_knowledge(self) -> dict[str, dict] | None:
     """Load element_knowledge.parquet into a qname-keyed dict."""
     try:
-      from robosystems.config.storage.shared import get_artifact_path
+      path = self._ensure_artifact_local("element_knowledge")
 
-      path = get_artifact_path("element_knowledge")
-
-      import os
-
-      if not os.path.exists(path):
+      if path is None:
         return None
 
       import pyarrow.parquet as pq
@@ -315,13 +347,9 @@ class SemanticEnricher:
   def _load_structure_profiles(self) -> dict[str, dict[str, float]] | None:
     """Load structure_profiles.parquet into canonical_type → {qname → frequency}."""
     try:
-      from robosystems.config.storage.shared import get_artifact_path
+      path = self._ensure_artifact_local("structure_profiles")
 
-      path = get_artifact_path("structure_profiles")
-
-      import os
-
-      if not os.path.exists(path):
+      if path is None:
         return None
 
       import pyarrow.parquet as pq
@@ -344,13 +372,9 @@ class SemanticEnricher:
   def _load_structure_consensus(self) -> dict[str, dict] | None:
     """Load structure_consensus.parquet into definition_hash-keyed dict."""
     try:
-      from robosystems.config.storage.shared import get_artifact_path
+      path = self._ensure_artifact_local("structure_consensus")
 
-      path = get_artifact_path("structure_consensus")
-
-      import os
-
-      if not os.path.exists(path):
+      if path is None:
         return None
 
       import pyarrow.parquet as pq
