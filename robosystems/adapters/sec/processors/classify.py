@@ -7,7 +7,7 @@ Two classification layers:
 
 2. **Semantic** — Identifies *what kind of* structure each association belongs to
    (e.g., "AssetsRollUp", "CashFlowStatement") by matching calculation root
-   elements against Hoffman's disclosure mechanics taxonomy (143 mappings).
+   elements against the Seattle Method disclosure mechanics taxonomy (143 mappings).
 
 Results are returned as DataFrames for the existing parquet pipeline to pick up.
 This module uses real_ladybug directly — no Graph API, no HTTP.
@@ -27,9 +27,9 @@ from robosystems.logger import logger
 from robosystems.utils.uuid import generate_uuid7
 
 # ---------------------------------------------------------------------------
-# Disclosure mechanics concept map (Hoffman taxonomy, 143 entries)
+# Disclosure mechanics concept map (Seattle Method taxonomy, 143 entries)
 # ---------------------------------------------------------------------------
-# Maps us-gaap element local name → Hoffman disclosure name.
+# Maps us-gaap element local name → Seattle Method disclosure name.
 # Source: conceptArrangementPattern-requiresConcept + concept-allowedAlternativeConcept
 # arcroles from the disclosure mechanics taxonomy.
 

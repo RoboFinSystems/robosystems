@@ -58,7 +58,7 @@ class TestDisclosureToStatement:
     assert DISCLOSURE_TO_STATEMENT["StatementOfChangesInEquity"] == StatementType.EQUITY
 
   def test_only_statement_types_mapped(self):
-    """Only 8 StatementType disclosures from Hoffman's taxonomy are mapped.
+    """Only 8 StatementType disclosures from the Seattle Method taxonomy are mapped.
     Note disclosures flow through disclosure_type column, not this mapping."""
     assert len(DISCLOSURE_TO_STATEMENT) == 8
     # Note disclosures are NOT mapped to statements
