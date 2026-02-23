@@ -85,11 +85,11 @@ STATEMENT_ROOTS: dict[StatementType, list[str]] = {
 }
 
 
-# Authoritative mapping from Hoffman's disclosure-isSECType StatementType
-# disclosures to our StatementType enum. Only the 8 disclosures that Hoffman
-# classifies as StatementType (face of financial statement) are included.
-# All other disclosures (~987) are DisclosureType (notes) — their raw Hoffman
-# names flow through the disclosure_type column in element_knowledge.parquet
+# Authoritative mapping from Seattle Method disclosure-isSECType StatementType
+# disclosures to our StatementType enum. Only the 8 disclosures that the
+# Seattle Method classifies as StatementType (face of financial statement) are
+# included. All other disclosures (~987) are DisclosureType (notes) — their raw
+# Seattle Method names flow through the disclosure_type column in element_knowledge.parquet
 # for downstream use, but are NOT mapped to statements.
 # Source: disclosure-isSECType arcrole from disclosure-mechanics_ALL.xsd
 DISCLOSURE_TO_STATEMENT: dict[str, StatementType] = {

@@ -84,13 +84,13 @@ sec_download_job = define_asset_job(
 
 
 # Phase 2: Process (quarterly batch processing)
-# Each run processes an entire quarter's worth of filings (up to 10,000),
-# outputting consolidated parquet files. Parallel execution across quarters
-# is controlled by DAGSTER_MAX_CONCURRENT_RUNS.
+# Each run processes up to 250 filings, flushes to S3, then exits.
+# Sensor re-triggers while pending files remain. Parallel execution across
+# quarters is controlled by DAGSTER_MAX_CONCURRENT_RUNS.
 #
 # Uses Enhanced profile (4 vCPU, 16 GB) - embedding enrichment is memory-intensive.
-# Each filing is processed independently to disk, then uploaded to S3.
-# EFTS returns max 10k filings per quarterly partition, but batch_size caps per run.
+# Spot-preferred: 250-filing batches keep runs to ~3-5 hrs, reducing Spot
+# interruption risk. On reclaim, pending filings are re-triggered by sensor.
 sec_process_job = define_asset_job(
   name="sec_process",
   description="Process SEC filings into parquet files.",
@@ -105,10 +105,12 @@ sec_process_job = define_asset_job(
     "ecs/cpu": "4096",
     "ecs/memory": "16384",
     "ecs/ephemeral_storage": "50",
-    # Long-running job (hours) - use on-demand to avoid Spot interruptions
+    # Spot-preferred: 250-filing batches keep runs to ~3-5 hrs, reducing
+    # interruption risk. On Spot reclaim, sensor re-triggers pending filings.
     "ecs/run_task_kwargs": {
       "capacityProviderStrategy": [
-        {"capacityProvider": "FARGATE", "weight": 1, "base": 1},
+        {"capacityProvider": "FARGATE_SPOT", "weight": 4, "base": 0},
+        {"capacityProvider": "FARGATE", "weight": 1, "base": 0},
       ],
     },
   },
