@@ -169,9 +169,7 @@ A curated knowledge graph of US public company financial data from SEC EDGAR XBR
 
 **Graph**: 14 node types (`Entity`, `Report`, `Fact`, `Element`, `Structure`, `Association`, `FactSet`, `Classification`, ...) and 24 relationship types modeling the full XBRL reporting hierarchy — from company filings down to individual financial facts with their taxonomy relationships and disclosure classifications.
 
-**Enrichment**: Every element is mapped to ~50 canonical financial concepts (revenue, net_income, total_assets, etc.) via fastembed cosine similarity. Structures are classified by statement type. Associations are tagged with disclosure types from [Charlie Hoffman's](http://xbrlsite.azurewebsites.net/2020/reporting-scheme/us-gaap/disclosure-mechanics/disclosure-mechanics_ALL.xsd) disclosure-mechanics taxonomy. Offline knowledge artifacts (PageRank, BFS classification, cross-filing consensus) refine confidence scores using an [icebug](https://github.com/Ladybug-Memory/icebug) graph built from the full corpus.
-
-**MCP Tools**: `get-financial-statement`, `list-disclosures`, `get-disclosure-detail` plus the standard graph tools (`read-graph-cypher`, `resolve-element`, `describe-graph-structure`, etc.).
+**Enrichment**: Every element is mapped to ~50 canonical financial concepts (revenue, net_income, total_assets, etc.) via fastembed cosine similarity. Structures are classified by statement type. Associations are tagged with disclosure types from [the Seattle Method](http://xbrlsite.com/seattlemethod/SeattleMethod.pdf) [disclosure-mechanics taxonomy](http://xbrlsite.azurewebsites.net/2020/reporting-scheme/us-gaap/disclosure-mechanics/disclosure-mechanics_ALL.xsd). Offline knowledge artifacts (PageRank, BFS classification, cross-filing consensus) refine confidence scores using an [icebug](https://github.com/Ladybug-Memory/icebug) graph built from the full corpus.
 
 ```bash
 just sec-load NVDA 2025  # Load NVIDIA filings locally
