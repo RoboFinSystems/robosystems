@@ -57,7 +57,12 @@ CASH_FLOW_CONCEPTS = (
     category="cash_flow",
     description="Net cash from financing activities",
     aliases=("cash from financing",),
-    expected_elements=("us-gaap:NetCashProvidedByUsedInFinancingActivities",),
+    expected_elements=(
+      "us-gaap:NetCashProvidedByUsedInFinancingActivities",
+      "us-gaap:RepaymentsOfLongTermDebt",
+      "us-gaap:ProceedsFromIssuanceOfLongTermDebt",
+      "us-gaap:ProceedsFromRepaymentsOfShortTermDebtMaturingInMoreThanThreeMonths",
+    ),
     period_type="duration",
     balance="debit",
   ),

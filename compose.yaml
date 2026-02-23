@@ -100,16 +100,16 @@ services:
       pg:
         condition: service_healthy
     # Runs sec_process job locally via `dagster job execute`
-    # Needs headroom for fastembed model + embedding computation
+    # Needs headroom for fastembed model + embedding computation (matches prod 16GB)
     restart: always
     deploy:
       resources:
         limits:
-          memory: 8g
-          cpus: "4"
+          memory: 16g
+          cpus: "8"
         reservations:
-          memory: 2g
-          cpus: "1"
+          memory: 4g
+          cpus: "2"
     profiles: ["dagster", "robosystems", "all"]
 
   # Dagster Daemon - Schedules, Sensors, and Run Coordination
@@ -138,11 +138,11 @@ services:
     deploy:
       resources:
         limits:
-          memory: 8g
-          cpus: "4"
-        reservations:
           memory: 2g
-          cpus: "1"
+          cpus: "2"
+        reservations:
+          memory: 512m
+          cpus: "0.5"
     profiles: ["dagster", "robosystems", "all"]
 
   # Postgres - Database for RoboSystems
