@@ -240,7 +240,6 @@ BALANCE_SHEET_CONCEPTS = (
     expected_elements=(
       "us-gaap:OtherLiabilitiesCurrent",
       "us-gaap:AccruedLiabilitiesCurrent",
-      "us-gaap:AccountsPayableAndAccruedLiabilitiesCurrent",
       "us-gaap:OperatingLeaseLiabilityCurrent",
       "us-gaap:FinanceLeaseLiabilityCurrent",
     ),

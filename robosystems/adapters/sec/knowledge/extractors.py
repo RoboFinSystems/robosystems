@@ -86,28 +86,32 @@ class ArcExtractor:
     """
     conn = self._connect()
     try:
-      # Build node index table in DuckDB
+      # Materialize deduplicated edges once — both node index and edge
+      # queries read from this temp table instead of re-running the 4-table join.
+      conn.execute("""
+        CREATE TEMPORARY TABLE _raw_edges AS
+        SELECT
+          parent_el.qname AS parent_qname,
+          child_el.qname AS child_qname,
+          MAX(ABS(COALESCE(a.weight, 1.0))) AS weight,
+          a.association_type
+        FROM Association a
+        JOIN ASSOCIATION_HAS_FROM_ELEMENT afrom ON a.identifier = afrom.src
+        JOIN Element parent_el ON afrom.dst = parent_el.identifier
+        JOIN ASSOCIATION_HAS_TO_ELEMENT ato ON a.identifier = ato.src
+        JOIN Element child_el ON ato.dst = child_el.identifier
+        WHERE a.association_type IN ('Calculation', 'Presentation')
+        GROUP BY parent_el.qname, child_el.qname, a.association_type
+      """)
+
+      # Build node index from materialized edges
       conn.execute("""
         CREATE TEMPORARY TABLE _node_index AS
-        WITH raw_edges AS (
-          SELECT
-            parent_el.qname AS parent_qname,
-            child_el.qname AS child_qname,
-            MAX(ABS(COALESCE(a.weight, 1.0))) AS weight,
-            a.association_type
-          FROM Association a
-          JOIN ASSOCIATION_HAS_FROM_ELEMENT afrom ON a.identifier = afrom.src
-          JOIN Element parent_el ON afrom.dst = parent_el.identifier
-          JOIN ASSOCIATION_HAS_TO_ELEMENT ato ON a.identifier = ato.src
-          JOIN Element child_el ON ato.dst = child_el.identifier
-          WHERE a.association_type IN ('Calculation', 'Presentation')
-          GROUP BY parent_el.qname, child_el.qname, a.association_type
-        ),
-        all_qnames AS (
+        WITH all_qnames AS (
           SELECT DISTINCT qname FROM (
-            SELECT parent_qname AS qname FROM raw_edges
+            SELECT parent_qname AS qname FROM _raw_edges
             UNION
-            SELECT child_qname AS qname FROM raw_edges
+            SELECT child_qname AS qname FROM _raw_edges
           )
         )
         SELECT qname, (ROW_NUMBER() OVER (ORDER BY qname)) - 1 AS node_id
@@ -122,24 +126,10 @@ class ArcExtractor:
 
       # Get edges with integer IDs, calc-first priority, sorted
       edges_arrow = conn.execute("""
-        WITH raw_edges AS (
-          SELECT
-            parent_el.qname AS parent_qname,
-            child_el.qname AS child_qname,
-            MAX(ABS(COALESCE(a.weight, 1.0))) AS weight,
-            a.association_type
-          FROM Association a
-          JOIN ASSOCIATION_HAS_FROM_ELEMENT afrom ON a.identifier = afrom.src
-          JOIN Element parent_el ON afrom.dst = parent_el.identifier
-          JOIN ASSOCIATION_HAS_TO_ELEMENT ato ON a.identifier = ato.src
-          JOIN Element child_el ON ato.dst = child_el.identifier
-          WHERE a.association_type IN ('Calculation', 'Presentation')
-          GROUP BY parent_el.qname, child_el.qname, a.association_type
-        ),
-        calc_edges AS (
+        WITH calc_edges AS (
           SELECT ni_p.node_id AS src, ni_c.node_id AS dst,
                  MAX(r.weight) AS weight
-          FROM raw_edges r
+          FROM _raw_edges r
           JOIN _node_index ni_p ON r.parent_qname = ni_p.qname
           JOIN _node_index ni_c ON r.child_qname = ni_c.qname
           WHERE r.association_type = 'Calculation'
@@ -147,7 +137,7 @@ class ArcExtractor:
         ),
         pres_edges AS (
           SELECT ni_p.node_id AS src, ni_c.node_id AS dst, 0.5 AS weight
-          FROM raw_edges r
+          FROM _raw_edges r
           JOIN _node_index ni_p ON r.parent_qname = ni_p.qname
           JOIN _node_index ni_c ON r.child_qname = ni_c.qname
           WHERE r.association_type = 'Presentation'
