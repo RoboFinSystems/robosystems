@@ -161,6 +161,23 @@ RoboSystems is built on a modern, scalable architecture with:
 
 **For detailed architecture documentation, see the [Architecture Overview](https://github.com/RoboFinSystems/robosystems/wiki/Architecture-Overview) in the Wiki.**
 
+## SEC Shared Repository
+
+A curated knowledge graph of US public company financial data from SEC EDGAR XBRL filings. Runs on the shared LadybugDB tier, accessible via MCP tools, Cypher queries, and the AI agent.
+
+**Pipeline**: EDGAR → Download → Process (Parquet) → Enrich (fastembed) → Stage (DuckDB) → Materialize (LadybugDB)
+
+**Graph**: 14 node types (`Entity`, `Report`, `Fact`, `Element`, `Structure`, `Association`, `FactSet`, `Classification`, ...) and 24 relationship types modeling the full XBRL reporting hierarchy — from company filings down to individual financial facts with their taxonomy relationships and disclosure classifications.
+
+**Enrichment**: Every element is mapped to ~50 canonical financial concepts (revenue, net_income, total_assets, etc.) via fastembed cosine similarity. Structures are classified by statement type. Associations are tagged with disclosure types from [the Seattle Method](http://xbrlsite.com/seattlemethod/SeattleMethod.pdf) [disclosure-mechanics taxonomy](http://xbrlsite.azurewebsites.net/2020/reporting-scheme/us-gaap/disclosure-mechanics/disclosure-mechanics_ALL.xsd). Offline knowledge artifacts (PageRank, BFS classification, cross-filing consensus) refine confidence scores using an [icebug](https://github.com/Ladybug-Memory/icebug) graph built from the full corpus.
+
+```bash
+just sec-load NVDA 2025  # Load NVIDIA filings locally
+just sec-health          # Check SEC database health
+```
+
+See [SEC Adapter](/robosystems/adapters/sec/README.md) and [SEC Pipeline](/robosystems/adapters/sec/pipeline/README.md) for detailed documentation.
+
 ## AI
 
 ### Model Context Protocol (MCP)
