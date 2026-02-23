@@ -21,7 +21,7 @@ import pyarrow.parquet as pq
 
 from robosystems.adapters.sec.knowledge.classifiers import StatementClassifier
 from robosystems.adapters.sec.knowledge.extractors import ArcExtractor
-from robosystems.adapters.sec.knowledge.graphs import build_element_graph_from_edges
+from robosystems.adapters.sec.knowledge.graphs import build_element_graph_from_arrow
 
 logger = logging.getLogger(__name__)
 
@@ -54,10 +54,10 @@ class ElementKnowledgeBuilder:
 
     extractor = ArcExtractor(db_path, memory_limit=self._memory_limit)
 
-    # Extract — deduplicated in SQL
-    logger.info("Extracting deduplicated edges")
-    edges = extractor.extract_deduplicated_edges()
-    logger.info(f"Extracted {len(edges)} unique edges")
+    # Extract graph as Arrow arrays (zero-copy DuckDB → Arrow → CSR)
+    logger.info("Extracting graph via Arrow zero-copy path")
+    nodes, edges_arrow = extractor.extract_graph_arrow()
+    logger.info(f"Extracted {len(nodes)} nodes, {edges_arrow.num_rows} edges (Arrow)")
 
     logger.info("Extracting element filing counts")
     filing_counts = extractor.extract_element_filing_counts()
@@ -72,9 +72,9 @@ class ElementKnowledgeBuilder:
       f"{len(disclosure_roots)} disclosure roots"
     )
 
-    # Build graph from deduplicated edges
-    logger.info("Building element graph")
-    element_graph = build_element_graph_from_edges(edges)
+    # Build graph from Arrow arrays via CSR
+    logger.info("Building element graph (Arrow → CSR)")
+    element_graph = build_element_graph_from_arrow(nodes, edges_arrow)
     logger.info(
       f"Graph: {element_graph.num_nodes} nodes, {element_graph.num_edges} edges"
     )

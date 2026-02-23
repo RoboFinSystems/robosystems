@@ -36,7 +36,7 @@ class SECArtifactConfig(Config):
   group_name="sec_pipeline",
   description="Generate element + structure knowledge artifacts from DuckDB staging",
   kinds={"duckdb", "analytics", "parquet"},
-  deps=["sec_duckdb_staged"],
+  deps=["sec_duckdb_s3_published"],
   metadata={"pipeline": "sec", "stage": "artifact"},
 )
 def sec_knowledge_artifacts(

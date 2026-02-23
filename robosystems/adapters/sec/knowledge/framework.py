@@ -206,11 +206,12 @@ class DuckDBAnalyticsContext:
     import boto3
     from boto3.s3.transfer import TransferConfig
 
-    # Same bucket/key pattern as _build_duckdb_s3_destination in publish.py
+    from robosystems.config.storage.graph import get_shared_repo_database_key
+
     sts = boto3.client("sts", region_name=env.AWS_REGION)
     account_id = sts.get_caller_identity()["Account"]
     bucket = f"robosystems-{account_id}-user-{env.ENVIRONMENT}"
-    s3_key = f"shared-repos/{self._duckdb_source}.duckdb"
+    s3_key = get_shared_repo_database_key(self._duckdb_source, ".duckdb")
 
     logger.info("Downloading s3://%s/%s -> %s", bucket, s3_key, dest_path)
 

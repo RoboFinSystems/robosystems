@@ -418,3 +418,115 @@ class TestStructureKnowledgeBuilder:
 
     for freq in cols["frequency"]:
       assert 0.0 <= freq <= 1.0
+
+
+class TestArrowGraphPath:
+  """Tests for the zero-copy DuckDB → Arrow → CSR graph construction path."""
+
+  def test_extract_graph_arrow_returns_arrow(self, synthetic_duckdb):
+    """extract_graph_arrow returns Arrow arrays, not Python lists."""
+    import pyarrow as pa
+
+    from robosystems.adapters.sec.knowledge.extractors import ArcExtractor
+
+    extractor = ArcExtractor(synthetic_duckdb, memory_limit="256MB")
+    nodes, edges = extractor.extract_graph_arrow()
+
+    assert isinstance(nodes, pa.ChunkedArray)
+    assert isinstance(edges, pa.Table)
+    assert len(nodes) > 0
+    assert edges.num_rows > 0
+    assert set(edges.column_names) == {"src", "dst", "weight"}
+
+  def test_arrow_graph_matches_legacy(self, synthetic_duckdb):
+    """Arrow path produces the same graph structure as the legacy tuple path."""
+    from robosystems.adapters.sec.knowledge.extractors import ArcExtractor
+    from robosystems.adapters.sec.knowledge.graphs import (
+      build_element_graph_from_arrow,
+      build_element_graph_from_edges,
+    )
+
+    extractor = ArcExtractor(synthetic_duckdb, memory_limit="256MB")
+
+    # Legacy path
+    edges_legacy = extractor.extract_deduplicated_edges()
+    graph_legacy = build_element_graph_from_edges(edges_legacy)
+
+    # Arrow path
+    nodes, edges_arrow = extractor.extract_graph_arrow()
+    graph_arrow = build_element_graph_from_arrow(nodes, edges_arrow)
+
+    # Same node count and edge count
+    assert graph_arrow.num_nodes == graph_legacy.num_nodes
+    assert graph_arrow.num_edges == graph_legacy.num_edges
+
+    # Same elements (sorted in both)
+    assert sorted(graph_arrow.elements) == sorted(graph_legacy.elements)
+
+    # Same edge weights for each edge
+    for qname in graph_legacy.elements:
+      legacy_idx = graph_legacy.get_idx(qname)
+      arrow_idx = graph_arrow.get_idx(qname)
+      assert legacy_idx is not None
+      assert arrow_idx is not None
+
+      legacy_neighbors = sorted(graph_legacy.graph.iterNeighbors(legacy_idx))
+      arrow_neighbors = sorted(graph_arrow.graph.iterNeighbors(arrow_idx))
+
+      legacy_neighbor_qnames = sorted(
+        graph_legacy.get_qname(n) for n in legacy_neighbors
+      )
+      arrow_neighbor_qnames = sorted(graph_arrow.get_qname(n) for n in arrow_neighbors)
+      assert arrow_neighbor_qnames == legacy_neighbor_qnames
+
+  def test_arrow_graph_pagerank(self, synthetic_duckdb):
+    """PageRank runs correctly on Arrow-constructed graph."""
+    import networkit as nk
+
+    from robosystems.adapters.sec.knowledge.extractors import ArcExtractor
+    from robosystems.adapters.sec.knowledge.graphs import build_element_graph_from_arrow
+
+    extractor = ArcExtractor(synthetic_duckdb, memory_limit="256MB")
+    nodes, edges = extractor.extract_graph_arrow()
+    graph = build_element_graph_from_arrow(nodes, edges)
+
+    pr = nk.centrality.PageRank(graph.graph, damp=0.85, tol=1e-6)
+    pr.run()
+    scores = pr.scores()
+
+    assert len(scores) == graph.num_nodes
+    assert any(s > 0 for s in scores)
+
+  def test_arrow_graph_core_decomposition(self, synthetic_duckdb):
+    """Core decomposition runs correctly on Arrow-constructed graph."""
+    import networkit as nk
+
+    from robosystems.adapters.sec.knowledge.extractors import ArcExtractor
+    from robosystems.adapters.sec.knowledge.graphs import build_element_graph_from_arrow
+
+    extractor = ArcExtractor(synthetic_duckdb, memory_limit="256MB")
+    nodes, edges = extractor.extract_graph_arrow()
+    graph = build_element_graph_from_arrow(nodes, edges)
+
+    undirected = nk.graphtools.toUndirected(graph.graph)
+    core = nk.centrality.CoreDecomposition(undirected)
+    core.run()
+    scores = core.scores()
+
+    assert len(scores) == graph.num_nodes
+
+  def test_calc_first_dedup(self, synthetic_duckdb):
+    """Calculation edges take priority over presentation edges."""
+    from robosystems.adapters.sec.knowledge.extractors import ArcExtractor
+    from robosystems.adapters.sec.knowledge.graphs import build_element_graph_from_arrow
+
+    extractor = ArcExtractor(synthetic_duckdb, memory_limit="256MB")
+    nodes, edges = extractor.extract_graph_arrow()
+    graph = build_element_graph_from_arrow(nodes, edges)
+
+    # NetIncomeLoss->Revenue should have calc weight (1.0), not presentation (0.5)
+    net_idx = graph.get_idx("us-gaap:NetIncomeLoss")
+    rev_idx = graph.get_idx("us-gaap:Revenues")
+    assert net_idx is not None
+    assert rev_idx is not None
+    assert graph.graph.weight(net_idx, rev_idx) == 1.0

@@ -5,11 +5,17 @@ structure compositions from DuckDB staging databases. All heavy
 deduplication happens in DuckDB SQL to keep Python memory low.
 """
 
+from __future__ import annotations
+
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import duckdb
 
 from robosystems.logger import logger
+
+if TYPE_CHECKING:
+  import pyarrow as pa
 
 
 class ArcExtractor:
@@ -63,6 +69,106 @@ class ArcExtractor:
     try:
       rows = conn.execute(sql).fetchall()
       return [(row[0], row[1], row[2], row[3]) for row in rows]
+    finally:
+      conn.close()
+
+  def extract_graph_arrow(self) -> tuple[pa.Array, pa.Table]:
+    """Extract node index and deduped edges as Arrow arrays for zero-copy CSR.
+
+    Pushes node indexing, deduplication, and calc-first priority into DuckDB SQL.
+    Returns Arrow arrays ready for Graph.fromCSR() — no Python per-element loops.
+
+    Returns:
+        Tuple of (nodes, edges) where:
+          - nodes: Arrow string array of qnames ordered by node ID
+          - edges: Arrow table with (src: int64, dst: int64, weight: float64),
+                   deduped with calc-first priority, sorted by (src, dst)
+    """
+    conn = self._connect()
+    try:
+      # Build node index table in DuckDB
+      conn.execute("""
+        CREATE TEMPORARY TABLE _node_index AS
+        WITH raw_edges AS (
+          SELECT
+            parent_el.qname AS parent_qname,
+            child_el.qname AS child_qname,
+            MAX(ABS(COALESCE(a.weight, 1.0))) AS weight,
+            a.association_type
+          FROM Association a
+          JOIN ASSOCIATION_HAS_FROM_ELEMENT afrom ON a.identifier = afrom.src
+          JOIN Element parent_el ON afrom.dst = parent_el.identifier
+          JOIN ASSOCIATION_HAS_TO_ELEMENT ato ON a.identifier = ato.src
+          JOIN Element child_el ON ato.dst = child_el.identifier
+          WHERE a.association_type IN ('Calculation', 'Presentation')
+          GROUP BY parent_el.qname, child_el.qname, a.association_type
+        ),
+        all_qnames AS (
+          SELECT DISTINCT qname FROM (
+            SELECT parent_qname AS qname FROM raw_edges
+            UNION
+            SELECT child_qname AS qname FROM raw_edges
+          )
+        )
+        SELECT qname, (ROW_NUMBER() OVER (ORDER BY qname)) - 1 AS node_id
+        FROM all_qnames
+      """)
+
+      # Get node list
+      nodes_arrow = conn.execute(
+        "SELECT qname FROM _node_index ORDER BY node_id"
+      ).fetch_arrow_table()
+      nodes = nodes_arrow.column("qname")
+
+      # Get edges with integer IDs, calc-first priority, sorted
+      edges_arrow = conn.execute("""
+        WITH raw_edges AS (
+          SELECT
+            parent_el.qname AS parent_qname,
+            child_el.qname AS child_qname,
+            MAX(ABS(COALESCE(a.weight, 1.0))) AS weight,
+            a.association_type
+          FROM Association a
+          JOIN ASSOCIATION_HAS_FROM_ELEMENT afrom ON a.identifier = afrom.src
+          JOIN Element parent_el ON afrom.dst = parent_el.identifier
+          JOIN ASSOCIATION_HAS_TO_ELEMENT ato ON a.identifier = ato.src
+          JOIN Element child_el ON ato.dst = child_el.identifier
+          WHERE a.association_type IN ('Calculation', 'Presentation')
+          GROUP BY parent_el.qname, child_el.qname, a.association_type
+        ),
+        calc_edges AS (
+          SELECT ni_p.node_id AS src, ni_c.node_id AS dst,
+                 MAX(r.weight) AS weight
+          FROM raw_edges r
+          JOIN _node_index ni_p ON r.parent_qname = ni_p.qname
+          JOIN _node_index ni_c ON r.child_qname = ni_c.qname
+          WHERE r.association_type = 'Calculation'
+          GROUP BY ni_p.node_id, ni_c.node_id
+        ),
+        pres_edges AS (
+          SELECT ni_p.node_id AS src, ni_c.node_id AS dst, 0.5 AS weight
+          FROM raw_edges r
+          JOIN _node_index ni_p ON r.parent_qname = ni_p.qname
+          JOIN _node_index ni_c ON r.child_qname = ni_c.qname
+          WHERE r.association_type = 'Presentation'
+          GROUP BY ni_p.node_id, ni_c.node_id
+        ),
+        combined AS (
+          SELECT src, dst, weight FROM calc_edges
+          UNION ALL
+          SELECT p.src, p.dst, p.weight FROM pres_edges p
+          WHERE NOT EXISTS (
+            SELECT 1 FROM calc_edges c WHERE c.src = p.src AND c.dst = p.dst
+          )
+        )
+        SELECT CAST(src AS BIGINT) AS src,
+               CAST(dst AS BIGINT) AS dst,
+               weight
+        FROM combined
+        ORDER BY src, dst
+      """).fetch_arrow_table()
+
+      return nodes, edges_arrow
     finally:
       conn.close()
 

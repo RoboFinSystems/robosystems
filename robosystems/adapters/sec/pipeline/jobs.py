@@ -439,10 +439,12 @@ sec_artifact_generation_job = define_asset_job(
   tags={
     "pipeline": "sec",
     "phase": "artifact",
-    # Same profile as analytics — local DuckDB + Python compute
+    # Downloads full DuckDB staging file (~40GB+ pre-enrichment, growing with
+    # embeddings/enrichment data) then runs graph algorithms in-memory.
+    # Disk: DuckDB file + DuckDB spill-to-disk + output artifacts.
     "ecs/cpu": "4096",
     "ecs/memory": "16384",
-    "ecs/ephemeral_storage": "100",
+    "ecs/ephemeral_storage": "200",
     "ecs/run_task_kwargs": {
       "capacityProviderStrategy": [
         {"capacityProvider": "FARGATE", "weight": 1, "base": 1},
