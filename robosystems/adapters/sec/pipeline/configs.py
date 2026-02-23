@@ -116,7 +116,7 @@ class SECProcessConfig(Config):
 
   # Filings per batch. Job processes this many, flushes to S3, then exits.
   # Sensor re-triggers if more pending files remain.
-  # 500 keeps Arrow concat under ~250MB for the largest tables.
+  # 250 keeps runs to ~3-5 hrs, reducing Spot interruption blast radius.
   batch_size: int = SEC_PROCESS_BATCH_SIZE
 
   # Continue processing even if some filings fail

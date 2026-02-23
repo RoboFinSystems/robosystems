@@ -165,9 +165,10 @@ XBRL_GRAPH_LARGE_NODES = "Fact,Element,Label,Association,Structure,Dimension,Rep
 # re-triggers if pending files remain, enabling natural memory release
 # between batches and crash resilience (at most one batch lost).
 # Part-file output: each batch writes part_{uuid}.parquet files per table.
-# 500 filings keeps Arrow concat under ~250MB for the largest tables.
-# Q2 (proxy season, ~11k filings) = ~22 sensor-triggered runs.
-SEC_PROCESS_BATCH_SIZE = 500
+# 250 filings keeps Arrow concat well under memory limits.
+# Smaller batches reduce blast radius of Spot interruptions (~3-5 hrs vs 6-10).
+# Q2 (proxy season, ~11k filings) = ~44 sensor-triggered runs.
+SEC_PROCESS_BATCH_SIZE = 250
 
 # =============================================================================
 # API VERSION CONSTANTS
