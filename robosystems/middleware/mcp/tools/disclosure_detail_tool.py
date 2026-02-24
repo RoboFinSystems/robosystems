@@ -49,7 +49,7 @@ Run list-disclosures first to see valid disclosure_type values.""",
           },
           "accession_number": {
             "type": "string",
-            "description": "Optional: filter to a specific filing (e.g. '0001045810-25-000023')",
+            "description": "Optional: filter to a specific report/filing by accession number",
           },
           "include_dimensions": {
             "type": "boolean",

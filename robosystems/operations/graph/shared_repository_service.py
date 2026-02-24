@@ -129,7 +129,8 @@ class SharedRepositoryService:
           graph_name=manifest.name,
           repository_type=repository_name,
           session=db,
-          base_schema=repository_name,
+          base_schema="base",
+          schema_extensions=list(manifest.schema_extensions),
           data_source_type=manifest.data_source_type,
           data_source_url=manifest.data_source_url,
           sync_frequency=manifest.sync_frequency,
@@ -148,7 +149,7 @@ class SharedRepositoryService:
               schema_type=manifest.schema_type,
               schema_ddl=schema_ddl,
               schema_json={
-                "base": repository_name,
+                "base": "base",
                 "extensions": extensions,
               },
               session=db,

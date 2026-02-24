@@ -256,56 +256,70 @@ class TestGraphMCPTools:
     return AsyncMock(spec=GraphMCPClient)
 
   @pytest.mark.unit
-  def test_get_tool_definitions(self, mock_graph_client):
-    """Test tool definitions retrieval."""
-    # Set up mock client with required attributes
-    mock_graph_client.graph_id = "test_graph"
-    tools = GraphMCPTools(mock_graph_client)
+  def test_get_tool_definitions_core_only(self, mock_graph_client):
+    """Test tool definitions for a graph with no schema extensions (custom graph)."""
+    mock_graph_client.graph_id = "kg_custom_graph"
+    tools = GraphMCPTools(mock_graph_client, schema_extensions=[])
     definitions = tools.get_tool_definitions_as_dict()
 
-    # Base tools (5): example queries, cypher, schema, properties, structure
-    # + workspace tools (4) if MCP_WORKSPACE_ENABLED=true
-    # + memory tools (3) if MCP_MEMORY_ENABLED=true
-    # + data tools (1) if FACT_GRID_ENABLED=true
-    # + element/facts tools (2) if graph type is SEC
-    # + curated financial tools (3): financial-statement, list-disclosures, disclosure-detail
-    # Max possible: 5 + 4 + 3 + 1 + 2 + 3 = 18
-    assert len(definitions) >= 5
-    assert len(definitions) <= 18
+    tool_names = {t["name"] for t in definitions}
 
-    # Check example queries tool
-    example_tool = next(t for t in definitions if t["name"] == "get-example-queries")
-    assert "Get example Cypher queries" in example_tool["description"]
-    assert "category" in example_tool["inputSchema"]["properties"]
+    # Core tools (4) should always be present
+    assert "read-graph-cypher" in tool_names
+    assert "get-graph-schema" in tool_names
+    assert "discover-properties" in tool_names
+    assert "describe-graph-structure" in tool_names
 
-    # Check Cypher tool
+    # roboledger extension tools should NOT be present
+    assert "get-example-queries" not in tool_names
+    assert "get-financial-statement" not in tool_names
+    assert "list-disclosures" not in tool_names
+    assert "get-disclosure-detail" not in tool_names
+    assert "discover-common-elements" not in tool_names
+    assert "resolve-element" not in tool_names
+    assert "resolve-structure" not in tool_names
+
+    # Verify core tool content
     cypher_tool = next(t for t in definitions if t["name"] == "read-graph-cypher")
     assert "Execute read-only Cypher queries" in cypher_tool["description"]
     assert "query" in cypher_tool["inputSchema"]["properties"]
 
-    # Check if element discovery tool is conditionally present
-    tool_names = {t["name"] for t in definitions}
-    if "discover-common-elements" in tool_names:
-      element_tool = next(
-        t for t in definitions if t["name"] == "discover-common-elements"
-      )
-      assert "commonly used Element nodes" in element_tool["description"]
-      assert "limit" in element_tool["inputSchema"]["properties"]
-
-    # Check schema tool
     schema_tool = next(t for t in definitions if t["name"] == "get-graph-schema")
     assert "Get the complete database schema" in schema_tool["description"]
 
-    # Check discover properties tool
     discover_tool = next(t for t in definitions if t["name"] == "discover-properties")
     assert "Discover available properties" in discover_tool["description"]
-    assert "node_type" in discover_tool["inputSchema"]["properties"]
 
-    # Check graph structure description tool
     describe_tool = next(
       t for t in definitions if t["name"] == "describe-graph-structure"
     )
     assert "Get a natural language description" in describe_tool["description"]
+
+  @pytest.mark.unit
+  def test_get_tool_definitions_with_roboledger(self, mock_graph_client):
+    """Test tool definitions for a graph with roboledger schema extension."""
+    mock_graph_client.graph_id = "test_graph"
+    tools = GraphMCPTools(mock_graph_client, schema_extensions=["roboledger"])
+    definitions = tools.get_tool_definitions_as_dict()
+
+    tool_names = {t["name"] for t in definitions}
+
+    # Core tools should be present
+    assert "read-graph-cypher" in tool_names
+    assert "get-graph-schema" in tool_names
+    assert "discover-properties" in tool_names
+    assert "describe-graph-structure" in tool_names
+
+    # roboledger extension tools should be present
+    assert "get-example-queries" in tool_names
+    assert "get-financial-statement" in tool_names
+    assert "list-disclosures" in tool_names
+    assert "get-disclosure-detail" in tool_names
+
+    # Verify example queries tool content
+    example_tool = next(t for t in definitions if t["name"] == "get-example-queries")
+    assert "Get example Cypher queries" in example_tool["description"]
+    assert "category" in example_tool["inputSchema"]["properties"]
 
   @pytest.mark.asyncio
   @pytest.mark.unit
@@ -549,6 +563,24 @@ class TestGraphMCPTools:
 
     assert "not available" in result
     assert "FACT_GRID_ENABLED" in result
+
+  @pytest.mark.asyncio
+  @pytest.mark.unit
+  async def test_roboledger_tool_disabled_returns_error(self, mock_graph_client):
+    """Test that roboledger-gated tools return proper error on custom graphs."""
+    mock_graph_client.graph_id = "kg_custom_graph"
+    tools = GraphMCPTools(mock_graph_client, schema_extensions=[])
+
+    for tool_name in [
+      "get-financial-statement",
+      "list-disclosures",
+      "get-disclosure-detail",
+      "get-example-queries",
+      "discover-common-elements",
+    ]:
+      result = await tools.call_tool(tool_name, {}, return_raw=False)
+      assert "not available" in result, f"{tool_name} should not be available"
+      assert "roboledger" in result, f"{tool_name} error should mention roboledger"
 
 
 class TestGraphMCPConfigurableSchema:

@@ -22,69 +22,37 @@ class CypherTool(BaseTool):
       "description": """Execute read-only Cypher queries against the graph database.
 
 **OVERVIEW:**
-Query the graph using Cypher syntax. The database uses either RoboSystems' financial schema or custom custom schemas.
-
-**ROBOSYSTEMS SCHEMA PATTERNS:**
-
-1. **Financial Reporting (SEC/XBRL):**
-   MATCH (e:Entity)-[:HAS_REPORT]->(r:Report)-[:REPORTED_IN]->(f:Fact)
-
-2. **Facts with Elements (Metrics):**
-   MATCH (f:Fact)-[:FACT_HAS_ELEMENT]->(el:Element)
-
-3. **Time-based Analysis:**
-   MATCH (f:Fact)-[:FACT_HAS_PERIOD]->(p:Period)
-
-4. **Dimensional Analysis (Segments):**
-   MATCH (f:Fact)-[:FACT_HAS_DIMENSION]->(d:Dimension)
-
-5. **Units and Context:**
-   MATCH (f:Fact)-[:FACT_HAS_UNIT]->(u:Unit)
+Query the graph using Cypher syntax. Use `get-graph-schema` first to discover available node types and relationships.
 
 **QUERY BEST PRACTICES:**
 - Always include LIMIT clause for large result sets
 - Use WHERE clauses to filter data effectively
-- Check for NULL values: WHERE f.numeric_value IS NOT NULL
-- Use CONTAINS for text search: WHERE e.name CONTAINS 'keyword'
+- Check for NULL values: WHERE n.property IS NOT NULL
+- Use CONTAINS for text search: WHERE n.name CONTAINS 'keyword'
+- When joining multiple relationships from the same node, use comma-separated patterns
+  in a SINGLE MATCH clause: `MATCH (n)-[:R1]->(a), (n)-[:R2]->(b)` (not separate MATCH clauses)
 
 **SECURITY:**
 - Only read operations allowed (MATCH, RETURN, WHERE, etc.)
 - No write operations (CREATE, SET, DELETE, etc.)
 - Query complexity is automatically monitored
 
-**NUMERIC VALUES:**
-`f.numeric_value` is the actual reported value in base units (USD, shares, ratios).
-No scaling or transformation needed. The `decimals` field is precision metadata only.
-
-**PERIOD FILTERING:**
-- Annual income/cash flow: `p.period_type = 'duration' AND p.duration_type = 'annual'`
-- Quarterly: `p.period_type = 'duration' AND p.duration_type = 'quarterly'`
-- Balance sheet (latest): `p.period_type = 'instant'` with `ORDER BY p.end_date DESC`
-
 **EXAMPLES:**
 ```cypher
-// Get company revenue (actual values, no scaling needed)
-MATCH (f:Fact {has_dimensions: false})-[:FACT_HAS_ELEMENT]->(el:Element {qname: 'us-gaap:Revenues'}),
-      (f)-[:FACT_HAS_PERIOD]->(p:Period),
-      (f)-[:FACT_HAS_ENTITY]->(e:Entity {ticker: 'NVDA'})
-WHERE f.numeric_value IS NOT NULL AND p.duration_type = 'annual'
-RETURN p.end_date, f.numeric_value
-ORDER BY p.end_date DESC LIMIT 10
+// Count nodes by type
+MATCH (n)
+WITH labels(n) AS label, count(n) AS count
+RETURN label, count ORDER BY count DESC
 
-// Find facts by time period
-MATCH (f:Fact)-[:FACT_HAS_PERIOD]->(p:Period)
-WHERE p.end_date >= '2024-01-01' AND p.period_type = 'duration'
-RETURN count(f) as facts_count
+// Explore node properties
+MATCH (n:Entity) RETURN keys(n) LIMIT 1
 
-// Explore available metrics
-MATCH (el:Element)
-RETURN el.name, el.qname, count(*) as usage_count
-ORDER BY usage_count DESC
-LIMIT 20
+// Find relationships between node types
+MATCH (a)-[r]->(b)
+RETURN DISTINCT labels(a)[0] AS from_type, type(r) AS rel_type, labels(b)[0] AS to_type
 ```
 
-**TIP:** Use `resolve-element` first to find the correct element qname for a company,
-then use this tool with the resolved qname.""",
+**TIP:** Use `get-graph-schema` and `discover-properties` to understand what's in the graph before writing complex queries.""",
       "inputSchema": {
         "type": "object",
         "properties": {
