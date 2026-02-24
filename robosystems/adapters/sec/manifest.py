@@ -19,6 +19,7 @@ SEC_MANIFEST = SharedRepositoryManifest(
   schema_extensions=("roboledger",),
   has_element_discovery=True,
   has_semantic_enrichment=True,
+  sibling_subgraphs=("historical",),  # sec_historical subgraph
   rate_limits={
     "starter": {
       "queries_per_minute": 10,

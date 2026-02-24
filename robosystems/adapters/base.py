@@ -40,6 +40,7 @@ class SharedRepositoryManifest:
   # MCP Capabilities
   has_element_discovery: bool = False
   has_semantic_enrichment: bool = False
+  sibling_subgraphs: tuple[str, ...] = ()  # ("historical",) → graph_id_historical
 
   # Status
   status: str = "available"  # available, coming_soon

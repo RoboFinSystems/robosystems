@@ -563,6 +563,7 @@ class Graph(Model):
     repository_type: str,
     session: Session,
     base_schema: str | None = None,
+    schema_extensions: list[str] | None = None,
     data_source_type: str | None = None,
     data_source_url: str | None = None,
     sync_frequency: str | None = None,
@@ -580,7 +581,8 @@ class Graph(Model):
         graph_name: Human-readable name
         repository_type: Type of repository (matches graph_id typically)
         session: Database session
-        base_schema: Schema to use (e.g., "sec")
+        base_schema: Base schema name (e.g., "base")
+        schema_extensions: Schema extensions (e.g., ["roboledger"])
         data_source_type: Source type (e.g., "sec_edgar")
         data_source_url: URL for data source
         sync_frequency: Sync frequency ("daily", "weekly", etc.)
@@ -600,7 +602,8 @@ class Graph(Model):
       graph_name=graph_name,
       graph_type="repository",
       session=session,
-      base_schema=base_schema or repository_type,
+      base_schema=base_schema or "base",
+      schema_extensions=schema_extensions,
       graph_tier=graph_tier,
       graph_instance_id=graph_instance_id,
       commit=False,

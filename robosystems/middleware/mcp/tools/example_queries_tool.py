@@ -15,6 +15,25 @@ class ExampleQueriesTool(BaseTool):
   Tool for generating example Cypher queries based on the graph schema.
   """
 
+  def _is_shared_financial_repo(self) -> bool:
+    """Check if this graph is a shared repository with financial reporting schema."""
+    try:
+      from robosystems.config.shared_repositories import (
+        get_manifest,
+        is_shared_repository_or_subgraph,
+        resolve_shared_repository_parent,
+      )
+
+      if is_shared_repository_or_subgraph(self.client.graph_id):
+        parent_id = resolve_shared_repository_parent(self.client.graph_id)
+        manifest = get_manifest(parent_id)
+        return manifest is not None and "roboledger" in (
+          manifest.schema_extensions or ()
+        )
+    except Exception as e:
+      logger.debug(f"Shared repo check failed for {self.client.graph_id}: {e}")
+    return False
+
   def get_tool_definition(self) -> dict[str, Any]:
     """Get the tool definition for example queries."""
     return {
@@ -106,8 +125,9 @@ List of example queries with explanations, tailored to the actual schema present
           }
         )
 
-      # SEC-specific queries
-      if self.client.graph_id == "sec" and (not category or category == "financial"):
+      # Financial reporting queries (shared repositories with roboledger schema)
+      is_shared_financial = self._is_shared_financial_repo()
+      if is_shared_financial and (not category or category == "financial"):
         examples.extend(
           [
             {

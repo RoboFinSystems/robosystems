@@ -60,7 +60,7 @@ For balance sheets, only instant-period facts are returned. For other statements
           },
           "accession_number": {
             "type": "string",
-            "description": "Optional: filter to a specific filing (e.g. '0001045810-25-000023')",
+            "description": "Optional: filter to a specific report/filing by accession number",
           },
           "period_type": {
             "type": "string",
