@@ -11,8 +11,8 @@ ENV PYTHONUNBUFFERED=1 \
     UV_CACHE_DIR=/tmp/uv-cache \
     UV_LINK_MODE=copy
 
-# Install system dependencies and uv using official installer
-RUN apt-get update && apt-get install -y --no-install-recommends \
+# Install system dependencies, apply security patches, and install uv
+RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-recommends \
     build-essential \
     git \
     libpq-dev \
@@ -157,8 +157,8 @@ ENV PYTHONUNBUFFERED=1 \
     DAGSTER_HOME="/app/dagster_home" \
     FASTEMBED_CACHE_PATH="/app/fastembed_cache"
 
-# Install runtime dependencies and uv
-RUN apt-get update && apt-get install -y --no-install-recommends \
+# Install runtime dependencies, apply security patches, and install uv
+RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-recommends \
     libpq5 \
     libatomic1 \
     postgresql-client \

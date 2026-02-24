@@ -23,8 +23,13 @@ on:
           - none
         default: all
 
+permissions:
+  contents: read
+
 jobs:
   create-branch:
+    permissions:
+      contents: write
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
