@@ -646,7 +646,7 @@ class TestUserRepository:
       graph_name="SEC EDGAR Filings",
       repository_type="sec",
       session=self.session,
-      base_schema="sec",
+      base_schema="base",
       data_source_type="sec_edgar",
       data_source_url="https://www.sec.gov/cgi-bin/browse-edgar",
       sync_frequency="daily",
