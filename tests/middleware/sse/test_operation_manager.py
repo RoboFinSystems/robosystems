@@ -127,9 +127,13 @@ class TestOperationContext:
 
   @pytest.mark.asyncio
   async def test_failure_path(self, manager, mock_storage):
-    with pytest.raises(ValueError):
+    exc = None
+    try:
       async with manager.operation_context("test", "u1") as _op_id:
         raise ValueError("boom")
+    except ValueError as e:
+      exc = e
+    assert exc is not None
     # Should have store_event for start + error
     assert mock_storage.store_event.call_count >= 2
     last_call = mock_storage.store_event.call_args_list[-1]
@@ -137,9 +141,13 @@ class TestOperationContext:
 
   @pytest.mark.asyncio
   async def test_cancellation_path(self, manager, mock_storage):
-    with pytest.raises(asyncio.CancelledError):
+    exc = None
+    try:
       async with manager.operation_context("test", "u1") as _op_id:
         raise asyncio.CancelledError()
+    except asyncio.CancelledError as e:
+      exc = e
+    assert exc is not None
     mock_storage.cancel_operation.assert_called_once()
 
 

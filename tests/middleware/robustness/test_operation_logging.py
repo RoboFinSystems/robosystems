@@ -255,8 +255,12 @@ class TestOperationContext:
     assert len(logs) == 1
 
   def test_failure_path(self, op_logger):
-    with pytest.raises(ValueError, match="boom"):
+    exc = None
+    try:
       with op_logger.operation_context(operation="test_op", endpoint="/test"):
         raise ValueError("boom")
+    except ValueError as e:
+      exc = e
+    assert exc is not None
     logs = op_logger.get_recent_logs(event_type=OperationLogEventType.OPERATION_FAILURE)
     assert len(logs) == 1
