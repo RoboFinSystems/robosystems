@@ -41,7 +41,7 @@ Query the graph using Cypher syntax. Use `get-graph-schema` first to discover av
 ```cypher
 // Count nodes by type
 MATCH (n)
-WITH labels(n)[0] AS label, count(n) AS count
+WITH labels(n) AS label, count(n) AS count
 RETURN label, count ORDER BY count DESC
 
 // Explore node properties

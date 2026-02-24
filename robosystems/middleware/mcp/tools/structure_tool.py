@@ -75,48 +75,57 @@ class StructureTool(BaseTool):
     try:
       schema = await self.client.get_schema()
 
-      # Count entities by type
-      node_counts = {}
-      rel_counts = {}
-      total_nodes = 0
-      total_rels = 0
-
+      # Get node labels and relationship types from schema
+      node_labels = set()
+      rel_labels = set()
       for item in schema:
         if item["type"] == "node":
-          count = item.get("count", 0)
-          node_counts[item["label"]] = count
-          total_nodes += count
+          node_labels.add(item["label"])
         elif item["type"] == "relationship":
-          count = item.get("count", 0)
-          rel_counts[item["label"]] = count
-          total_rels += count
+          rel_labels.add(item["label"])
 
-      # Detect graph context
-      is_roboledger = "Fact" in node_counts and "Element" in node_counts
+      # Get total node count (fast — no GROUP BY, sub-second even on 200M+ nodes)
+      total_nodes = 0
+      try:
+        count_result = await self.client.execute_query(
+          "MATCH (n) RETURN count(n) AS total"
+        )
+        if count_result:
+          total_nodes = count_result[0].get("total", 0)
+      except Exception as e:
+        logger.debug(f"Could not query total node count: {e}")
+
+      # Detect graph context from schema labels
+      is_roboledger = "Fact" in node_labels and "Element" in node_labels
       manifest = self._get_manifest()
       is_shared_repo = manifest is not None
 
       # Build description header
       if is_shared_repo:
         description = (
-          f"This is the {manifest.name} shared repository ({manifest.description}):\n\n"
+          f"This is the {manifest.name} shared repository "
+          f"({manifest.description}) "
+          f"with {total_nodes:,} nodes across {len(node_labels)} types:\n\n"
         )
       else:
-        description = f"This graph database contains {total_nodes:,} nodes and {total_rels:,} relationships:\n\n"
+        description = (
+          f"This graph database contains "
+          f"{total_nodes:,} nodes across {len(node_labels)} types:\n\n"
+        )
 
-      # Node counts
-      if node_counts:
+      # Node types (no counts — counting is too slow on large graphs, use get-graph-info)
+      if node_labels:
         description += "**Node Types:**\n"
-        sorted_nodes = sorted(node_counts.items(), key=lambda x: x[1], reverse=True)
-        for label, count in sorted_nodes[:10]:
-          description += f"- {label}: {count:,} nodes\n"
+        for label in sorted(node_labels):
+          description += f"- {label}\n"
 
       # Relationship types
-      if rel_counts:
+      if rel_labels:
         description += "\n**Relationship Types:**\n"
-        sorted_rels = sorted(rel_counts.items(), key=lambda x: x[1], reverse=True)
-        for label, count in sorted_rels[:10]:
-          description += f"- {label}: {count:,} relationships\n"
+        for label in sorted(rel_labels)[:15]:
+          description += f"- {label}\n"
+        if len(rel_labels) > 15:
+          description += f"  ... and {len(rel_labels) - 15} more\n"
 
       # Shared repository: mention sibling workspaces from manifest
       if is_shared_repo and manifest.sibling_subgraphs:
