@@ -7,9 +7,9 @@ This test suite covers:
 - save_view endpoint (async, delegates to save_view_as_report)
 """
 
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
 from fastapi import HTTPException
 
 from robosystems.config.graph_tier import GraphTier
@@ -111,7 +111,7 @@ class TestCreateView:
       ) as mock_agg,
       patch(f"{MODULE}.FactGridBuilder", return_value=mock_builder_instance),
     ):
-      result = await create_view(
+      await create_view(
         graph_id="kg_test",
         request=request,
         req=mock_req,
@@ -150,7 +150,7 @@ class TestCreateView:
       ) as mock_query,
       patch(f"{MODULE}.FactGridBuilder", return_value=mock_builder_instance),
     ):
-      result = await create_view(
+      await create_view(
         graph_id="kg_test",
         request=request,
         req=mock_req,
@@ -236,7 +236,7 @@ class TestCreateView:
       ) as mock_apply,
       patch(f"{MODULE}.FactGridBuilder", return_value=mock_builder_instance),
     ):
-      result = await create_view(
+      await create_view(
         graph_id="kg_test",
         request=request,
         req=mock_req,
@@ -244,7 +244,9 @@ class TestCreateView:
         session=mock_session,
       )
 
-    mock_get_mapping.assert_called_once_with("kg_test", "ms_abc", GraphTier.LADYBUG_STANDARD)
+    mock_get_mapping.assert_called_once_with(
+      "kg_test", "ms_abc", GraphTier.LADYBUG_STANDARD
+    )
     mock_apply.assert_called_once_with(mock_fact_data, {"some": "mapping"})
 
 

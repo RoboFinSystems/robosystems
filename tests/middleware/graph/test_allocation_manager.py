@@ -1,7 +1,7 @@
 """Simple working tests for allocation manager."""
 
 from datetime import UTC, datetime, timedelta
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 from botocore.exceptions import ClientError
@@ -9,7 +9,6 @@ from botocore.exceptions import ClientError
 from robosystems.middleware.graph.allocation_manager import (
   VALID_ENTITY_ID_PATTERN,
   VALID_INSTANCE_ID_PATTERN,
-  CapacityScalingTriggered,
   DatabaseLocation,
   DatabaseStatus,
   GraphTier,
@@ -196,6 +195,7 @@ class TestAllocationManagerRegression:
 # Helper to build botocore ClientError instances for mock assertions
 # ---------------------------------------------------------------------------
 
+
 def _client_error(code="ConditionalCheckFailedException", message="error"):
   """Create a botocore ClientError for testing."""
   return ClientError({"Error": {"Code": code, "Message": message}}, "operation_name")
@@ -260,6 +260,7 @@ def _make_manager(**overrides):
 # get_tier_config
 # ===========================================================================
 
+
 class TestGetTierConfig:
   """Tests for LadybugAllocationManager.get_tier_config."""
 
@@ -294,6 +295,7 @@ class TestGetTierConfig:
 # ===========================================================================
 # find_database_location
 # ===========================================================================
+
 
 class TestFindDatabaseLocation:
   """Tests for LadybugAllocationManager.find_database_location."""
@@ -481,6 +483,7 @@ class TestFindDatabaseLocation:
 # deallocate_database
 # ===========================================================================
 
+
 class TestDeallocateDatabase:
   """Tests for LadybugAllocationManager.deallocate_database."""
 
@@ -592,6 +595,7 @@ class TestDeallocateDatabase:
 # get_instance_databases
 # ===========================================================================
 
+
 class TestGetInstanceDatabases:
   """Tests for LadybugAllocationManager.get_instance_databases."""
 
@@ -651,6 +655,7 @@ class TestGetInstanceDatabases:
 # get_all_instances
 # ===========================================================================
 
+
 class TestGetAllInstances:
   """Tests for LadybugAllocationManager.get_all_instances."""
 
@@ -695,6 +700,7 @@ class TestGetAllInstances:
 # ===========================================================================
 # get_allocation_metrics
 # ===========================================================================
+
 
 class TestGetAllocationMetrics:
   """Tests for LadybugAllocationManager.get_allocation_metrics."""
@@ -775,7 +781,9 @@ class TestGetAllocationMetrics:
     manager = _make_manager()
 
     with patch.object(
-      manager, "get_all_instances", side_effect=_client_error("InternalServerError", "scan failed")
+      manager,
+      "get_all_instances",
+      side_effect=_client_error("InternalServerError", "scan failed"),
     ):
       metrics = await manager.get_allocation_metrics()
 
@@ -786,6 +794,7 @@ class TestGetAllocationMetrics:
 # ===========================================================================
 # check_tier_capacity
 # ===========================================================================
+
 
 class TestCheckTierCapacity:
   """Tests for LadybugAllocationManager.check_tier_capacity."""
@@ -824,9 +833,7 @@ class TestCheckTierCapacity:
     manager.instance_table.scan.return_value = {"Items": []}
     # ASG has headroom
     manager.autoscaling.describe_auto_scaling_groups.return_value = {
-      "AutoScalingGroups": [
-        {"DesiredCapacity": 1, "MaxSize": 5}
-      ]
+      "AutoScalingGroups": [{"DesiredCapacity": 1, "MaxSize": 5}]
     }
 
     result = await manager.check_tier_capacity(GraphTier.LADYBUG_STANDARD)
@@ -841,9 +848,7 @@ class TestCheckTierCapacity:
     manager.instance_table.scan.return_value = {"Items": []}
     # ASG at max
     manager.autoscaling.describe_auto_scaling_groups.return_value = {
-      "AutoScalingGroups": [
-        {"DesiredCapacity": 5, "MaxSize": 5}
-      ]
+      "AutoScalingGroups": [{"DesiredCapacity": 5, "MaxSize": 5}]
     }
 
     result = await manager.check_tier_capacity(GraphTier.LADYBUG_STANDARD)
@@ -853,6 +858,7 @@ class TestCheckTierCapacity:
 # ===========================================================================
 # _find_best_instance
 # ===========================================================================
+
 
 class TestFindBestInstance:
   """Tests for LadybugAllocationManager._find_best_instance."""
@@ -1008,6 +1014,7 @@ class TestFindBestInstance:
 # _trigger_scale_up
 # ===========================================================================
 
+
 class TestTriggerScaleUp:
   """Tests for LadybugAllocationManager._trigger_scale_up."""
 
@@ -1017,9 +1024,7 @@ class TestTriggerScaleUp:
     """Successfully increments ASG desired capacity by 1."""
     manager = _make_manager()
     manager.autoscaling.describe_auto_scaling_groups.return_value = {
-      "AutoScalingGroups": [
-        {"DesiredCapacity": 2, "MaxSize": 5}
-      ]
+      "AutoScalingGroups": [{"DesiredCapacity": 2, "MaxSize": 5}]
     }
     manager.autoscaling.set_desired_capacity.return_value = {}
 
@@ -1035,9 +1040,7 @@ class TestTriggerScaleUp:
     """Already at max returns False without calling set_desired_capacity."""
     manager = _make_manager()
     manager.autoscaling.describe_auto_scaling_groups.return_value = {
-      "AutoScalingGroups": [
-        {"DesiredCapacity": 5, "MaxSize": 5}
-      ]
+      "AutoScalingGroups": [{"DesiredCapacity": 5, "MaxSize": 5}]
     }
 
     result = await manager._trigger_scale_up(GraphTier.LADYBUG_STANDARD)
@@ -1069,9 +1072,7 @@ class TestTriggerScaleUp:
       seconds=360
     )
     manager.autoscaling.describe_auto_scaling_groups.return_value = {
-      "AutoScalingGroups": [
-        {"DesiredCapacity": 2, "MaxSize": 5}
-      ]
+      "AutoScalingGroups": [{"DesiredCapacity": 2, "MaxSize": 5}]
     }
     manager.autoscaling.set_desired_capacity.return_value = {}
 
@@ -1106,6 +1107,7 @@ class TestTriggerScaleUp:
 # ===========================================================================
 # _get_stack_name_for_tier
 # ===========================================================================
+
 
 class TestGetStackNameForTier:
   """Tests for LadybugAllocationManager._get_stack_name_for_tier."""
@@ -1164,6 +1166,7 @@ class TestGetStackNameForTier:
 # ===========================================================================
 # allocate_database (input validation)
 # ===========================================================================
+
 
 class TestAllocateDatabaseValidation:
   """Tests for allocate_database input validation paths."""
@@ -1238,6 +1241,7 @@ class TestAllocateDatabaseValidation:
 # Validation pattern tests
 # ===========================================================================
 
+
 class TestValidationPatterns:
   """Tests for compiled regex patterns used in input validation."""
 
@@ -1273,6 +1277,7 @@ class TestValidationPatterns:
 # ===========================================================================
 # InstanceInfo property tests
 # ===========================================================================
+
 
 class TestInstanceInfoProperties:
   """Additional property tests for InstanceInfo dataclass."""

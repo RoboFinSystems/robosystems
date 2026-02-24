@@ -826,11 +826,11 @@ class TestBackupMetadataHandling:
   async def test_validate_integrity_mismatched_checksum(self, backup_manager):
     """Integrity validation returns False when checksums differ."""
     metadata = MagicMock()
-    metadata.checksum = "0000000000000000000000000000000000000000000000000000000000000000"
-
-    result = await backup_manager._validate_backup_integrity(
-      b"some data", metadata
+    metadata.checksum = (
+      "0000000000000000000000000000000000000000000000000000000000000000"
     )
+
+    result = await backup_manager._validate_backup_integrity(b"some data", metadata)
     assert result is False
 
   @pytest.mark.unit
@@ -840,9 +840,7 @@ class TestBackupMetadataHandling:
     metadata = MagicMock()
     metadata.checksum = None
 
-    result = await backup_manager._validate_backup_integrity(
-      b"some data", metadata
-    )
+    result = await backup_manager._validate_backup_integrity(b"some data", metadata)
     assert result is False
 
 

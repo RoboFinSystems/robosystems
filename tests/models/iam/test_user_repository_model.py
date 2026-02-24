@@ -647,7 +647,6 @@ class TestUserRepository:
       repository_type="sec",
       session=self.session,
       base_schema="base",
-      schema_extensions=["roboledger"],
       data_source_type="sec_edgar",
       data_source_url="https://www.sec.gov/cgi-bin/browse-edgar",
       sync_frequency="daily",

@@ -194,8 +194,16 @@ class TestCheckInstanceHealth:
     """Invalid EC2 instance IDs are counted and handled."""
     instance_table = _make_dynamo_table(
       items=[
-        {"instance_id": "bad-id-format", "status": "healthy", "tier": "ladybug-standard"},
-        {"instance_id": "i-1234567890abcdef0", "status": "healthy", "tier": "ladybug-standard"},
+        {
+          "instance_id": "bad-id-format",
+          "status": "healthy",
+          "tier": "ladybug-standard",
+        },
+        {
+          "instance_id": "i-1234567890abcdef0",
+          "status": "healthy",
+          "tier": "ladybug-standard",
+        },
       ]
     )
     volume_table = _make_dynamo_table()
@@ -234,8 +242,16 @@ class TestCheckInstanceHealth:
     """InvalidInstanceID.NotFound triggers individual instance checks."""
     instance_table = _make_dynamo_table(
       items=[
-        {"instance_id": "i-1234567890abcdef0", "status": "healthy", "tier": "ladybug-standard"},
-        {"instance_id": "i-abcdef1234567890a", "status": "healthy", "tier": "ladybug-standard"},
+        {
+          "instance_id": "i-1234567890abcdef0",
+          "status": "healthy",
+          "tier": "ladybug-standard",
+        },
+        {
+          "instance_id": "i-abcdef1234567890a",
+          "status": "healthy",
+          "tier": "ladybug-standard",
+        },
       ]
     )
     volume_table = _make_dynamo_table()
@@ -250,18 +266,28 @@ class TestCheckInstanceHealth:
     monitor._dynamodb.Table.side_effect = table_router
 
     # Batch call fails with InvalidInstanceID.NotFound
-    error_response = {"Error": {"Code": "InvalidInstanceID.NotFound", "Message": "Not found"}}
+    error_response = {
+      "Error": {"Code": "InvalidInstanceID.NotFound", "Message": "Not found"}
+    }
     monitor._ec2.describe_instances.side_effect = [
       ClientError(error_response, "DescribeInstances"),
       # Individual fallback calls
       {
         "Reservations": [
-          {"Instances": [{"InstanceId": "i-1234567890abcdef0", "State": {"Name": "running"}}]}
+          {
+            "Instances": [
+              {"InstanceId": "i-1234567890abcdef0", "State": {"Name": "running"}}
+            ]
+          }
         ]
       },
       {
         "Reservations": [
-          {"Instances": [{"InstanceId": "i-abcdef1234567890a", "State": {"Name": "running"}}]}
+          {
+            "Instances": [
+              {"InstanceId": "i-abcdef1234567890a", "State": {"Name": "running"}}
+            ]
+          }
         ]
       },
     ]
@@ -304,9 +330,7 @@ class TestCleanupStaleGraphs:
       ]
     )
     # Instance table returns the instance so instance_id is "valid"
-    instance_table = _make_dynamo_table(
-      items=[{"instance_id": "i-1234567890abcdef0"}]
-    )
+    instance_table = _make_dynamo_table(items=[{"instance_id": "i-1234567890abcdef0"}])
 
     def table_router(name):
       if name == "test-graph":
