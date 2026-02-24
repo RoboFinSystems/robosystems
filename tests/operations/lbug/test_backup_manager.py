@@ -57,7 +57,6 @@ class TestBackupManager:
     for graph_id in valid_ids:
       try:
         MultiTenantUtils.validate_graph_id(graph_id)
-        print(f"✓ Valid graph ID: {graph_id}")
       except ValueError:
         pytest.fail(f"Expected {graph_id} to be valid")
 
@@ -74,7 +73,6 @@ class TestBackupManager:
     for graph_id in invalid_ids:
       with pytest.raises(ValueError):
         MultiTenantUtils.validate_graph_id(graph_id)
-        print(f"✓ Invalid graph ID rejected: {graph_id}")
 
     # Test shared repository detection (only registered repos return True)
     assert MultiTenantUtils.is_shared_repository("sec") is True
@@ -161,9 +159,6 @@ class TestBackupManager:
         return_value=mock_backup_metadata
       )
 
-      # Create backup job
-      from robosystems.operations.lbug.backup_manager import BackupFormat, BackupType
-
       backup_job = BackupJob(
         graph_id=graph_id,
         backup_type=BackupType.FULL,
@@ -186,8 +181,6 @@ class TestBackupManager:
 
       # Verify S3 upload was called
       backup_manager.s3_adapter.upload_backup.assert_called_once()
-
-      print("✓ Backup manager operations tested successfully")
 
   @pytest.mark.asyncio
   async def test_create_backup_error_scenarios(self, backup_manager):
@@ -444,9 +437,6 @@ class TestBackupManager:
     """Test listing backups and cleanup operations."""
     graph_id = "test_graph"
 
-    # Mock backup listing
-    from datetime import datetime
-
     mock_backups = [
       {
         "id": "backup1",
@@ -479,8 +469,8 @@ class TestBackupManager:
 
     deleted_count = await backup_manager.delete_old_backups(graph_id, retention_days)
 
-    # Should have called delete for old backups (implementation depends on date logic)
     assert isinstance(deleted_count, int)
+    assert deleted_count >= 0
 
   @pytest.mark.asyncio
   async def test_download_backup_functionality(self, backup_manager):

@@ -121,9 +121,10 @@ class TestGetSubscriptionPlan:
         return_value=SAMPLE_PLAN,
       ) as mock_get_plan,
     ):
-      pricing_service.get_subscription_plan(MOCK_USER_ID, MOCK_GRAPH_ID)
+      result = pricing_service.get_subscription_plan(MOCK_USER_ID, MOCK_GRAPH_ID)
 
       mock_get_plan.assert_called_with("ladybug-standard")
+      assert result == SAMPLE_PLAN
 
 
 class TestCalculateGraphMonthlyBill:
