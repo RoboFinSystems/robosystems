@@ -656,3 +656,232 @@ class TestBackupManager:
       # Test _drop_database_if_exists
       await backup_manager._drop_database_if_exists(graph_id)
       mock_remove.assert_called_once()
+
+
+class TestBackupJobDataclass:
+  """Test BackupJob dataclass construction, defaults, and enum coverage."""
+
+  @pytest.mark.unit
+  def test_backup_job_defaults(self):
+    """BackupJob auto-sets timestamp and uses correct compression/encryption defaults."""
+    before = datetime.now(UTC)
+    job = BackupJob(graph_id="test_graph", encryption=False)
+    after = datetime.now(UTC)
+
+    assert job.timestamp is not None
+    assert before <= job.timestamp <= after
+    assert job.compression is True
+    assert job.encryption is False
+    assert job.backup_format == BackupFormat.FULL_DUMP
+    assert job.backup_type == BackupType.FULL
+    assert job.retention_days == 90
+    assert job.allow_export is True
+    assert job.schedule is None
+
+  @pytest.mark.unit
+  def test_backup_format_enum_values(self):
+    """BackupFormat enum has the expected four values."""
+    assert BackupFormat.CSV.value == "csv"
+    assert BackupFormat.PARQUET.value == "parquet"
+    assert BackupFormat.JSON.value == "json"
+    assert BackupFormat.FULL_DUMP.value == "full_dump"
+    assert len(BackupFormat) == 4
+
+  @pytest.mark.unit
+  def test_backup_type_enum_values(self):
+    """BackupType enum has full and incremental values."""
+    assert BackupType.FULL.value == "full"
+    assert BackupType.INCREMENTAL.value == "incremental"
+    assert len(BackupType) == 2
+
+  @pytest.mark.unit
+  def test_restore_job_defaults(self):
+    """RestoreJob uses correct defaults for optional fields."""
+    metadata = MagicMock()
+    job = RestoreJob(
+      graph_id="test_graph",
+      backup_metadata=metadata,
+      backup_format=BackupFormat.FULL_DUMP,
+    )
+
+    assert job.create_new_database is True
+    assert job.drop_existing is False
+    assert job.verify_after_restore is True
+    assert job.progress_tracker is None
+
+  @pytest.mark.unit
+  def test_backup_job_valid_graph_id_formats(self):
+    """BackupJob accepts alphanumeric, underscore, and hyphen graph IDs."""
+    valid_ids = [
+      "abc123",
+      "graph_456",
+      "my-graph",
+      "kg1a2b3c",
+      "a_b-c",
+      "sec",
+    ]
+    for graph_id in valid_ids:
+      job = BackupJob(graph_id=graph_id, encryption=False)
+      assert job.graph_id == graph_id
+
+
+class TestBackupManagerInit:
+  """Test BackupManager initialization and attribute setup."""
+
+  @pytest.mark.unit
+  def test_init_with_s3_adapter(self):
+    """BackupManager initializes and stores the provided S3 adapter."""
+    s3_adapter = MagicMock(spec=S3BackupAdapter)
+    manager = BackupManager(s3_adapter=s3_adapter)
+    assert manager._s3_adapter is s3_adapter
+
+  @pytest.mark.unit
+  def test_init_stores_s3_adapter_attribute(self):
+    """BackupManager exposes s3_adapter via property that returns the stored adapter."""
+    s3_adapter = MagicMock(spec=S3BackupAdapter)
+    manager = BackupManager(s3_adapter=s3_adapter)
+    assert manager.s3_adapter is s3_adapter
+
+  @pytest.mark.unit
+  def test_has_get_content_type_and_filename_method(self):
+    """BackupManager has the _get_content_type_and_filename method."""
+    s3_adapter = MagicMock(spec=S3BackupAdapter)
+    manager = BackupManager(s3_adapter=s3_adapter)
+    assert hasattr(manager, "_get_content_type_and_filename")
+    assert callable(manager._get_content_type_and_filename)
+
+
+class TestGetContentTypeAndFilename:
+  """Test _get_content_type_and_filename for all format mappings."""
+
+  @pytest.fixture
+  def backup_manager(self):
+    """Create backup manager with mocked S3 adapter."""
+    s3_adapter = MagicMock(spec=S3BackupAdapter)
+    return BackupManager(s3_adapter=s3_adapter)
+
+  @pytest.mark.unit
+  def test_csv_format(self, backup_manager):
+    """CSV format returns text/csv content type."""
+    content_type, filename = backup_manager._get_content_type_and_filename(
+      "csv", "bk_001"
+    )
+    assert content_type == "text/csv"
+    assert filename == "bk_001.csv.zip"
+
+  @pytest.mark.unit
+  def test_json_format(self, backup_manager):
+    """JSON format returns application/json content type."""
+    content_type, filename = backup_manager._get_content_type_and_filename(
+      "json", "bk_002"
+    )
+    assert content_type == "application/json"
+    assert filename == "bk_002.json.zip"
+
+  @pytest.mark.unit
+  def test_parquet_format(self, backup_manager):
+    """Parquet format returns application/octet-stream content type."""
+    content_type, filename = backup_manager._get_content_type_and_filename(
+      "parquet", "bk_003"
+    )
+    assert content_type == "application/octet-stream"
+    assert filename == "bk_003.parquet.zip"
+
+  @pytest.mark.unit
+  def test_full_dump_format(self, backup_manager):
+    """Full dump format returns application/zip content type."""
+    content_type, filename = backup_manager._get_content_type_and_filename(
+      "full_dump", "bk_004"
+    )
+    assert content_type == "application/zip"
+    assert filename == "bk_004_database.lbug.zip"
+
+
+class TestBackupMetadataHandling:
+  """Test _validate_backup_integrity with various checksum scenarios."""
+
+  @pytest.fixture
+  def backup_manager(self):
+    """Create backup manager with mocked S3 adapter."""
+    s3_adapter = MagicMock(spec=S3BackupAdapter)
+    return BackupManager(s3_adapter=s3_adapter)
+
+  @pytest.mark.unit
+  @pytest.mark.asyncio
+  async def test_validate_integrity_matching_checksum(self, backup_manager):
+    """Integrity validation returns True when checksums match."""
+    import hashlib
+
+    data = b"test backup data"
+    expected_checksum = hashlib.sha256(data).hexdigest()
+
+    metadata = MagicMock()
+    metadata.checksum = expected_checksum
+
+    result = await backup_manager._validate_backup_integrity(data, metadata)
+    assert result is True
+
+  @pytest.mark.unit
+  @pytest.mark.asyncio
+  async def test_validate_integrity_mismatched_checksum(self, backup_manager):
+    """Integrity validation returns False when checksums differ."""
+    metadata = MagicMock()
+    metadata.checksum = "0000000000000000000000000000000000000000000000000000000000000000"
+
+    result = await backup_manager._validate_backup_integrity(
+      b"some data", metadata
+    )
+    assert result is False
+
+  @pytest.mark.unit
+  @pytest.mark.asyncio
+  async def test_validate_integrity_none_checksum(self, backup_manager):
+    """Integrity validation returns False when metadata checksum is None."""
+    metadata = MagicMock()
+    metadata.checksum = None
+
+    result = await backup_manager._validate_backup_integrity(
+      b"some data", metadata
+    )
+    assert result is False
+
+
+class TestRestoreJobValidation:
+  """Test RestoreJob construction with various flag combinations."""
+
+  @pytest.mark.unit
+  def test_restore_job_create_and_drop_flags(self):
+    """RestoreJob accepts create_new_database=True with drop_existing=True."""
+    metadata = MagicMock()
+    job = RestoreJob(
+      graph_id="test_graph",
+      backup_metadata=metadata,
+      backup_format=BackupFormat.FULL_DUMP,
+      create_new_database=True,
+      drop_existing=True,
+    )
+    assert job.create_new_database is True
+    assert job.drop_existing is True
+
+  @pytest.mark.unit
+  def test_restore_job_verify_after_restore(self):
+    """RestoreJob stores verify_after_restore=True."""
+    metadata = MagicMock()
+    job = RestoreJob(
+      graph_id="test_graph",
+      backup_metadata=metadata,
+      backup_format=BackupFormat.FULL_DUMP,
+      verify_after_restore=True,
+    )
+    assert job.verify_after_restore is True
+
+  @pytest.mark.unit
+  def test_restore_job_progress_tracker_default_none(self):
+    """RestoreJob progress_tracker defaults to None."""
+    metadata = MagicMock()
+    job = RestoreJob(
+      graph_id="test_graph",
+      backup_metadata=metadata,
+      backup_format=BackupFormat.FULL_DUMP,
+    )
+    assert job.progress_tracker is None
