@@ -186,10 +186,18 @@ class BaseAgent(ABC):
         GraphMCPTools,
         create_graph_mcp_client,
       )
+      from robosystems.middleware.mcp.tools.manager import resolve_schema_extensions
 
       self.graph_client = await create_graph_mcp_client(graph_id=self.graph_id)
-      self.mcp_tools = GraphMCPTools(self.graph_client)
-      self.logger.info(f"Initialized MCP tools for agent in graph {self.graph_id}")
+
+      schema_extensions = resolve_schema_extensions(self.graph_id)
+      self.mcp_tools = GraphMCPTools(
+        self.graph_client, schema_extensions=schema_extensions
+      )
+      self.logger.info(
+        f"Initialized MCP tools for agent in graph {self.graph_id} "
+        f"(extensions={schema_extensions})"
+      )
     except Exception as e:
       self.logger.error(f"Failed to initialize MCP tools: {e!s}")
       raise

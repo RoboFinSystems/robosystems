@@ -104,9 +104,18 @@ class MCPHandler:
       )
       # Attach user to client for workspace tools
       self.graph_client.user = self.user
-      self.mcp_tools = AdapterGraphMCPTools(self.graph_client)
+
+      # Resolve schema extensions for schema-driven tool gating
+      from robosystems.middleware.mcp.tools.manager import resolve_schema_extensions
+
+      schema_extensions = resolve_schema_extensions(self.graph_id)
+
+      self.mcp_tools = AdapterGraphMCPTools(
+        self.graph_client, schema_extensions=schema_extensions
+      )
       logger.info(
-        f"Initialized MCP handler with Graph adapter for graph {self.graph_id} at {repository_url or 'discovered endpoint'}"
+        f"Initialized MCP handler for graph {self.graph_id} "
+        f"(extensions={schema_extensions}, endpoint={repository_url or 'discovered'})"
       )
     except Exception as e:
       logger.error(f"Failed to initialize MCP client for {self.graph_id}: {e}")

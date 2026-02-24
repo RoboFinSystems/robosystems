@@ -3,6 +3,11 @@ Graph MCP Tools - MCP tools implementation using Graph API.
 
 This module contains the GraphMCPTools class which provides all the MCP tool
 functionality for interacting with graph databases.
+
+Tool availability is schema-driven:
+- Core tools (cypher, schema, properties, structure) are always available
+- Extension tools (financial statements, disclosures, etc.) require matching schema_extensions
+- Infrastructure tools (workspace, memory) are gated by feature flags
 """
 
 import json
@@ -33,30 +38,106 @@ from .workspace import (
 )
 
 
+def resolve_schema_extensions(graph_id: str) -> list[str]:
+  """Resolve schema extensions for a graph.
+
+  For shared repositories: reads from the adapter manifest (no DB query needed).
+  For user graphs: queries the PostgreSQL graphs table.
+
+  Returns:
+      List of extension names (e.g., ["roboledger"]), or empty list.
+  """
+  try:
+    from robosystems.config.shared_repositories import (
+      get_manifest,
+      is_shared_repository_or_subgraph,
+      resolve_shared_repository_parent,
+    )
+
+    if is_shared_repository_or_subgraph(graph_id):
+      parent_id = resolve_shared_repository_parent(graph_id)
+      manifest = get_manifest(parent_id)
+      if manifest and manifest.schema_extensions:
+        return list(manifest.schema_extensions)
+      return []
+  except Exception:
+    logger.debug(f"Manifest lookup failed for {graph_id}, trying PostgreSQL")
+
+  # User graph: query PostgreSQL
+  try:
+    from robosystems.database import get_db_session
+    from robosystems.models.iam import Graph
+
+    for session in get_db_session():
+      graph = Graph.get_by_id(graph_id, session)
+      if graph and graph.schema_extensions:
+        return list(graph.schema_extensions)
+  except Exception:
+    logger.debug(f"Could not resolve schema extensions for {graph_id}")
+
+  return []
+
+
 class GraphMCPTools:
   """
   MCP tools implementation using Graph API.
 
-  Provides the same interface as graph database MCP tools but uses Graph API backend.
+  Tool availability is layered:
+  - Layer 1 (Core): cypher, schema, properties, structure — always available
+  - Layer 2 (Schema): financial tools — only when schema_extensions includes "roboledger"
+  - Layer 3 (Infrastructure): workspace, memory, data — gated by feature flags
   """
 
-  def __init__(self, graph_client):
+  def __init__(
+    self,
+    graph_client,
+    schema_extensions: list[str] | tuple[str, ...] = (),
+  ):
     # Import here to avoid circular import
     from ..client import GraphMCPClient
 
     self.client: GraphMCPClient = graph_client
+    self.schema_extensions: tuple[str, ...] = tuple(schema_extensions)
 
     # Initialize query validator
     self.validator = GraphQueryValidator()
 
-    # Initialize individual tools
-    self.example_queries_tool = ExampleQueriesTool(graph_client)
+    # Layer 1: Core tools (always available for any graph)
     self.cypher_tool = CypherTool(graph_client)
     self.schema_tool = SchemaTool(graph_client)
     self.properties_tool = PropertiesTool(graph_client)
     self.structure_tool = StructureTool(graph_client)
-    self.elements_tool = ElementsTool(graph_client)
-    # Conditionally initialize workspace tools based on feature flag
+
+    # Layer 2: Schema extension tools (gated by schema_extensions)
+    self.example_queries_tool = None
+    self.elements_tool = None
+    self.financial_statement_tool = None
+    self.list_disclosures_tool = None
+    self.disclosure_detail_tool = None
+    self.resolve_element_tool = None
+    self.resolve_structure_tool = None
+
+    if self._has_extension("roboledger"):
+      self.example_queries_tool = ExampleQueriesTool(graph_client)
+      self.elements_tool = ElementsTool(graph_client)
+
+      from .disclosure_detail_tool import GetDisclosureDetailTool
+      from .financial_statement_tool import GetFinancialStatementTool
+      from .list_disclosures_tool import ListDisclosuresTool
+
+      self.financial_statement_tool = GetFinancialStatementTool(graph_client)
+      self.list_disclosures_tool = ListDisclosuresTool(graph_client)
+      self.disclosure_detail_tool = GetDisclosureDetailTool(graph_client)
+
+      # Semantic enrichment tools (roboledger + manifest flag)
+      if self._should_include_semantic_tools():
+        from .resolve_element_tool import ResolveElementTool
+        from .resolve_structure_tool import ResolveStructureTool
+
+        self.resolve_element_tool = ResolveElementTool(graph_client)
+        self.resolve_structure_tool = ResolveStructureTool(graph_client)
+
+    # Layer 3: Infrastructure tools (gated by feature flags)
     self.create_workspace_tool = None
     self.delete_workspace_tool = None
     self.list_workspaces_tool = None
@@ -67,7 +148,6 @@ class GraphMCPTools:
       self.list_workspaces_tool = ListWorkspacesTool(graph_client)
       self.switch_workspace_tool = SwitchWorkspaceTool(graph_client)
 
-    # Conditionally initialize memory tools based on feature flag
     self.write_cypher_tool = None
     self.add_node_table_tool = None
     self.add_relationship_table_tool = None
@@ -76,26 +156,6 @@ class GraphMCPTools:
       self.add_node_table_tool = AddNodeTableTool(graph_client)
       self.add_relationship_table_tool = AddRelationshipTableTool(graph_client)
 
-    # Conditionally initialize semantic enrichment tools
-    self.resolve_element_tool = None
-    self.resolve_structure_tool = None
-    if self._should_include_semantic_tools():
-      from .resolve_element_tool import ResolveElementTool
-      from .resolve_structure_tool import ResolveStructureTool
-
-      self.resolve_element_tool = ResolveElementTool(graph_client)
-      self.resolve_structure_tool = ResolveStructureTool(graph_client)
-
-    # Initialize curated financial tools (FactSet-powered)
-    from .disclosure_detail_tool import GetDisclosureDetailTool
-    from .financial_statement_tool import GetFinancialStatementTool
-    from .list_disclosures_tool import ListDisclosuresTool
-
-    self.financial_statement_tool = GetFinancialStatementTool(graph_client)
-    self.list_disclosures_tool = ListDisclosuresTool(graph_client)
-    self.disclosure_detail_tool = GetDisclosureDetailTool(graph_client)
-
-    # Conditionally initialize fact grid tool based on feature flag
     self.build_fact_grid_tool = None
     if env.FACT_GRID_ENABLED:
       from .data_tools import BuildFactGridTool
@@ -106,7 +166,13 @@ class GraphMCPTools:
     self._cache_hits = 0
     self._cache_misses = 0
 
-    logger.info("Initialized Graph MCP tools with query validator enabled")
+    logger.info(
+      f"Initialized Graph MCP tools (extensions={list(self.schema_extensions)})"
+    )
+
+  def _has_extension(self, extension: str) -> bool:
+    """Check if the graph has a specific schema extension."""
+    return extension in self.schema_extensions
 
   def _should_include_semantic_tools(self) -> bool:
     """Check if semantic enrichment tools should be included.
@@ -198,6 +264,8 @@ class GraphMCPTools:
 
   def _get_curated_tool_definitions(self) -> list[dict[str, Any]]:
     """Get curated financial tool definitions (FactSet-powered)."""
+    if self.financial_statement_tool is None:
+      return []
     return [
       self.financial_statement_tool.get_tool_definition(),
       self.list_disclosures_tool.get_tool_definition(),
@@ -208,36 +276,40 @@ class GraphMCPTools:
     """
     Get MCP tool definitions for graph databases, using compatible naming.
 
+    Tool availability is schema-driven:
+    - Core tools are always included (4 tools)
+    - RoboLedger extension tools require "roboledger" in schema_extensions
+    - Infrastructure tools are gated by feature flags
+
     Returns:
         List of tool definition dictionaries
     """
+    # Layer 1: Core tools (always available)
     tools = [
-      self.example_queries_tool.get_tool_definition(),
       self.cypher_tool.get_tool_definition(),
       self.schema_tool.get_tool_definition(),
       self.properties_tool.get_tool_definition(),
       self.structure_tool.get_tool_definition(),
     ]
 
-    # Add semantic enrichment tools first (preferred path for concept resolution)
-    tools.extend(self._get_semantic_tool_definitions())
+    # Layer 2: Schema extension tools (roboledger)
+    if self._has_extension("roboledger"):
+      tools.append(self.example_queries_tool.get_tool_definition())
 
-    # Conditionally include element discovery tool for financial graphs
-    if self._should_include_element_discovery():
-      tools.append(self.elements_tool.get_tool_definition())
+      # Semantic enrichment tools (preferred path for concept resolution)
+      tools.extend(self._get_semantic_tool_definitions())
 
-    # Add workspace management tools
-    # Note: switch-workspace is client-side only, others execute server-side
+      # Element discovery (conditioned on manifest flag)
+      if self._should_include_element_discovery():
+        tools.append(self.elements_tool.get_tool_definition())
+
+      # Curated financial tools (FactSet-powered)
+      tools.extend(self._get_curated_tool_definitions())
+
+    # Layer 3: Infrastructure tools (feature-flag gated)
     tools.extend(self._get_workspace_tool_definitions())
-
-    # Add memory tools (subgraph-only write operations)
     tools.extend(self._get_memory_tool_definitions())
-
-    # Add data operation tools
     tools.extend(self._get_data_tool_definitions())
-
-    # Add curated financial tools (FactSet-powered)
-    tools.extend(self._get_curated_tool_definitions())
 
     return tools
 
@@ -256,12 +328,8 @@ class GraphMCPTools:
         Tool execution result
     """
     try:
-      # Route to appropriate tool
-      if name == "get-example-queries":
-        result = await self.example_queries_tool.execute(arguments)
-        return result if return_raw else json.dumps(result, indent=2)
-
-      elif name == "read-graph-cypher":
+      # Layer 1: Core tools (always available)
+      if name == "read-graph-cypher":
         result = await self.cypher_tool.execute(arguments)
         return result if return_raw else json.dumps(result, indent=2)
 
@@ -295,11 +363,25 @@ class GraphMCPTools:
         result = await self.structure_tool.execute(arguments)
         return result if return_raw else result  # Already a string
 
+      # Layer 2: Schema extension tools (roboledger-gated)
+      elif name == "get-example-queries":
+        if self.example_queries_tool is None:
+          raise ValueError(
+            "get-example-queries tool is not available. "
+            "This graph does not have the roboledger schema extension."
+          )
+        result = await self.example_queries_tool.execute(arguments)
+        return result if return_raw else json.dumps(result, indent=2)
+
       elif name == "discover-common-elements":
+        if self.elements_tool is None:
+          raise ValueError(
+            "discover-common-elements tool is not available. "
+            "This graph does not have the roboledger schema extension."
+          )
         result = await self.elements_tool.execute(arguments)
         return result if return_raw else json.dumps(result, indent=2)
 
-      # Semantic enrichment tools
       elif name == "resolve-element":
         if self.resolve_element_tool is None:
           raise ValueError(
@@ -318,7 +400,34 @@ class GraphMCPTools:
         result = await self.resolve_structure_tool.execute(arguments)
         return result if return_raw else json.dumps(result, indent=2)
 
-      # Workspace management tools
+      elif name == "get-financial-statement":
+        if self.financial_statement_tool is None:
+          raise ValueError(
+            "get-financial-statement tool is not available. "
+            "This graph does not have the roboledger schema extension."
+          )
+        result = await self.financial_statement_tool.execute(arguments)
+        return result if return_raw else json.dumps(result, indent=2)
+
+      elif name == "list-disclosures":
+        if self.list_disclosures_tool is None:
+          raise ValueError(
+            "list-disclosures tool is not available. "
+            "This graph does not have the roboledger schema extension."
+          )
+        result = await self.list_disclosures_tool.execute(arguments)
+        return result if return_raw else json.dumps(result, indent=2)
+
+      elif name == "get-disclosure-detail":
+        if self.disclosure_detail_tool is None:
+          raise ValueError(
+            "get-disclosure-detail tool is not available. "
+            "This graph does not have the roboledger schema extension."
+          )
+        result = await self.disclosure_detail_tool.execute(arguments)
+        return result if return_raw else json.dumps(result, indent=2)
+
+      # Layer 3: Infrastructure tools (feature-flag gated)
       elif name == "create-workspace":
         if self.create_workspace_tool is None:
           raise ValueError(
@@ -356,7 +465,6 @@ class GraphMCPTools:
         result = await self.switch_workspace_tool.execute(arguments)
         return result if return_raw else json.dumps(result, indent=2)
 
-      # Memory tools (subgraph-only)
       elif name == "write-graph-cypher":
         if self.write_cypher_tool is None:
           raise ValueError(
@@ -384,7 +492,6 @@ class GraphMCPTools:
         result = await self.add_relationship_table_tool.execute(arguments)
         return result if return_raw else json.dumps(result, indent=2)
 
-      # Data operation tools
       elif name == "build-fact-grid":
         if self.build_fact_grid_tool is None:
           raise ValueError(
@@ -392,19 +499,6 @@ class GraphMCPTools:
             "Set FACT_GRID_ENABLED=true to enable this feature."
           )
         result = await self.build_fact_grid_tool.execute(arguments)
-        return result if return_raw else json.dumps(result, indent=2)
-
-      # Curated financial tools (FactSet-powered)
-      elif name == "get-financial-statement":
-        result = await self.financial_statement_tool.execute(arguments)
-        return result if return_raw else json.dumps(result, indent=2)
-
-      elif name == "list-disclosures":
-        result = await self.list_disclosures_tool.execute(arguments)
-        return result if return_raw else json.dumps(result, indent=2)
-
-      elif name == "get-disclosure-detail":
-        result = await self.disclosure_detail_tool.execute(arguments)
         return result if return_raw else json.dumps(result, indent=2)
 
       else:
