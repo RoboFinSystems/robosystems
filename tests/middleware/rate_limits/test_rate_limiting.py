@@ -277,7 +277,9 @@ class TestBillingRateLimitDependency:
       billing_rate_limit_dependency,
     )
 
-    request = _make_request(headers={"X-API-Key": "test-key"}, path="/v1/billing/checkout")
+    request = _make_request(
+      headers={"X-API-Key": "test-key"}, path="/v1/billing/checkout"
+    )
     with (
       patch(f"{MODULE}.rate_limit_cache") as mock_cache,
       patch(f"{MODULE}.get_int_env", return_value=60),
