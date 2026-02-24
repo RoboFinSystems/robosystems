@@ -192,3 +192,260 @@ class TestCreateCustomRateLimitDependency:
       call_args = mock_cache.check_rate_limit.call_args
       # Anonymous gets 1/10th: 100 // 10 = 10
       assert call_args[0][1] == 10
+
+  def test_exceeded_raises_429(self):
+    dep = create_custom_rate_limit_dependency(
+      limit_per_hour=100, window_seconds=60, limit_name="test_limit"
+    )
+    request = _make_request(headers={"X-API-Key": "test-key"})
+    with patch(f"{MODULE}.rate_limit_cache") as mock_cache:
+      mock_cache.check_rate_limit.return_value = (False, 0)
+      with pytest.raises(HTTPException) as exc_info:
+        dep(request)
+      assert exc_info.value.status_code == 429
+      assert "test_limit" in exc_info.value.detail
+
+
+@pytest.mark.unit
+class TestAuthRateLimitDependency:
+  """Tests for auth_rate_limit_dependency."""
+
+  def test_login_allowed(self):
+    from robosystems.middleware.rate_limits.rate_limiting import (
+      auth_rate_limit_dependency,
+    )
+
+    request = _make_request(path="/v1/auth/login")
+    with (
+      patch(f"{MODULE}.rate_limit_cache") as mock_cache,
+      patch(f"{MODULE}.get_int_env", return_value=300),
+    ):
+      mock_cache.check_rate_limit.return_value = (True, 4)
+      auth_rate_limit_dependency(request)
+      assert request.state.auth_rate_limit_remaining == 4
+
+  def test_login_exceeded_raises_429(self):
+    from robosystems.middleware.rate_limits.rate_limiting import (
+      auth_rate_limit_dependency,
+    )
+
+    request = _make_request(path="/v1/auth/login")
+    with (
+      patch(f"{MODULE}.rate_limit_cache") as mock_cache,
+      patch(f"{MODULE}.get_int_env", return_value=300),
+      patch(f"{MODULE}.SecurityAuditLogger"),
+    ):
+      mock_cache.check_rate_limit.return_value = (False, 0)
+      with pytest.raises(HTTPException) as exc_info:
+        auth_rate_limit_dependency(request)
+      assert exc_info.value.status_code == 429
+      assert "authentication" in exc_info.value.detail.lower()
+
+  def test_register_path(self):
+    from robosystems.middleware.rate_limits.rate_limiting import (
+      auth_rate_limit_dependency,
+    )
+
+    request = _make_request(path="/v1/auth/register")
+    with (
+      patch(f"{MODULE}.rate_limit_cache") as mock_cache,
+      patch(f"{MODULE}.get_int_env", return_value=3600),
+    ):
+      mock_cache.check_rate_limit.return_value = (True, 2)
+      auth_rate_limit_dependency(request)
+
+  def test_default_auth_path(self):
+    from robosystems.middleware.rate_limits.rate_limiting import (
+      auth_rate_limit_dependency,
+    )
+
+    request = _make_request(path="/v1/auth/verify-email")
+    with (
+      patch(f"{MODULE}.rate_limit_cache") as mock_cache,
+      patch(f"{MODULE}.get_int_env", return_value=300),
+    ):
+      mock_cache.check_rate_limit.return_value = (True, 8)
+      auth_rate_limit_dependency(request)
+
+
+@pytest.mark.unit
+class TestBillingRateLimitDependency:
+  """Tests for billing_rate_limit_dependency."""
+
+  def test_billing_allowed(self):
+    from robosystems.middleware.rate_limits.rate_limiting import (
+      billing_rate_limit_dependency,
+    )
+
+    request = _make_request(
+      headers={"X-API-Key": "test-key"}, path="/v1/billing/checkout"
+    )
+    with (
+      patch(f"{MODULE}.rate_limit_cache") as mock_cache,
+      patch(f"{MODULE}.get_int_env", return_value=60),
+    ):
+      mock_cache.check_rate_limit.return_value = (True, 55)
+      billing_rate_limit_dependency(request)
+      assert request.state.billing_rate_limit_remaining == 55
+
+  def test_billing_exceeded_raises_429(self):
+    from robosystems.middleware.rate_limits.rate_limiting import (
+      billing_rate_limit_dependency,
+    )
+
+    request = _make_request(path="/v1/billing/checkout")
+    with (
+      patch(f"{MODULE}.rate_limit_cache") as mock_cache,
+      patch(f"{MODULE}.get_int_env", return_value=60),
+    ):
+      mock_cache.check_rate_limit.return_value = (False, 0)
+      with pytest.raises(HTTPException) as exc_info:
+        billing_rate_limit_dependency(request)
+      assert exc_info.value.status_code == 429
+
+
+@pytest.mark.unit
+class TestNamedRateLimitDependencies:
+  """Tests for named rate limit dependency functions."""
+
+  @patch(f"{MODULE}.rate_limit_cache")
+  @patch(f"{MODULE}.get_int_env", return_value=600)
+  def test_user_management(self, mock_env, mock_cache):
+    from robosystems.middleware.rate_limits.rate_limiting import (
+      user_management_rate_limit_dependency,
+    )
+
+    mock_cache.check_rate_limit.return_value = (True, 599)
+    request = _make_request(headers={"X-API-Key": "key"})
+    user_management_rate_limit_dependency(request)
+
+  @patch(f"{MODULE}.rate_limit_cache")
+  @patch(f"{MODULE}.get_int_env", return_value=50)
+  def test_sync_operations(self, mock_env, mock_cache):
+    from robosystems.middleware.rate_limits.rate_limiting import (
+      sync_operations_rate_limit_dependency,
+    )
+
+    mock_cache.check_rate_limit.return_value = (True, 49)
+    request = _make_request(headers={"X-API-Key": "key"})
+    sync_operations_rate_limit_dependency(request)
+
+  @patch(f"{MODULE}.rate_limit_cache")
+  @patch(f"{MODULE}.get_int_env", return_value=30)
+  def test_connection_management(self, mock_env, mock_cache):
+    from robosystems.middleware.rate_limits.rate_limiting import (
+      connection_management_rate_limit_dependency,
+    )
+
+    mock_cache.check_rate_limit.return_value = (True, 29)
+    request = _make_request(headers={"X-API-Key": "key"})
+    connection_management_rate_limit_dependency(request)
+
+  @patch(f"{MODULE}.rate_limit_cache")
+  @patch(f"{MODULE}.get_int_env", return_value=100)
+  def test_analytics(self, mock_env, mock_cache):
+    from robosystems.middleware.rate_limits.rate_limiting import (
+      analytics_rate_limit_dependency,
+    )
+
+    mock_cache.check_rate_limit.return_value = (True, 99)
+    request = _make_request(headers={"X-API-Key": "key"})
+    analytics_rate_limit_dependency(request)
+
+  @patch(f"{MODULE}.rate_limit_cache")
+  @patch(f"{MODULE}.get_int_env", return_value=10)
+  def test_backup_operations(self, mock_env, mock_cache):
+    from robosystems.middleware.rate_limits.rate_limiting import (
+      backup_operations_rate_limit_dependency,
+    )
+
+    mock_cache.check_rate_limit.return_value = (True, 9)
+    request = _make_request(headers={"X-API-Key": "key"})
+    backup_operations_rate_limit_dependency(request)
+
+  @patch(f"{MODULE}.rate_limit_cache")
+  @patch(f"{MODULE}.get_int_env", return_value=60)
+  def test_sensitive_auth(self, mock_env, mock_cache):
+    from robosystems.middleware.rate_limits.rate_limiting import (
+      sensitive_auth_rate_limit_dependency,
+    )
+
+    mock_cache.check_rate_limit.return_value = (True, 59)
+    request = _make_request(headers={"X-API-Key": "key"})
+    sensitive_auth_rate_limit_dependency(request)
+
+  @patch(f"{MODULE}.rate_limit_cache")
+  @patch(f"{MODULE}.get_int_env", return_value=300)
+  def test_logout(self, mock_env, mock_cache):
+    from robosystems.middleware.rate_limits.rate_limiting import (
+      logout_rate_limit_dependency,
+    )
+
+    mock_cache.check_rate_limit.return_value = (True, 299)
+    request = _make_request(headers={"X-API-Key": "key"})
+    logout_rate_limit_dependency(request)
+
+  @patch(f"{MODULE}.rate_limit_cache")
+  @patch(f"{MODULE}.get_int_env", return_value=200)
+  def test_tasks_management(self, mock_env, mock_cache):
+    from robosystems.middleware.rate_limits.rate_limiting import (
+      tasks_management_rate_limit_dependency,
+    )
+
+    mock_cache.check_rate_limit.return_value = (True, 199)
+    request = _make_request(headers={"X-API-Key": "key"})
+    tasks_management_rate_limit_dependency(request)
+
+  @patch(f"{MODULE}.rate_limit_cache")
+  @patch(f"{MODULE}.get_int_env", return_value=600)
+  def test_auth_status(self, mock_env, mock_cache):
+    from robosystems.middleware.rate_limits.rate_limiting import (
+      auth_status_rate_limit_dependency,
+    )
+
+    mock_cache.check_rate_limit.return_value = (True, 599)
+    request = _make_request(headers={"X-API-Key": "key"})
+    auth_status_rate_limit_dependency(request)
+
+  @patch(f"{MODULE}.rate_limit_cache")
+  @patch(f"{MODULE}.get_int_env", return_value=100)
+  def test_sso(self, mock_env, mock_cache):
+    from robosystems.middleware.rate_limits.rate_limiting import (
+      sso_rate_limit_dependency,
+    )
+
+    mock_cache.check_rate_limit.return_value = (True, 99)
+    request = _make_request(headers={"X-API-Key": "key"})
+    sso_rate_limit_dependency(request)
+
+  @patch(f"{MODULE}.rate_limit_cache")
+  @patch(f"{MODULE}.get_int_env", return_value=200)
+  def test_general_api(self, mock_env, mock_cache):
+    from robosystems.middleware.rate_limits.rate_limiting import (
+      general_api_rate_limit_dependency,
+    )
+
+    mock_cache.check_rate_limit.return_value = (True, 199)
+    request = _make_request(headers={"X-API-Key": "key"})
+    general_api_rate_limit_dependency(request)
+
+  @patch(f"{MODULE}.rate_limit_cache")
+  @patch(f"{MODULE}.get_int_env", return_value=600)
+  def test_public_api(self, mock_env, mock_cache):
+    from robosystems.middleware.rate_limits.rate_limiting import (
+      public_api_rate_limit_dependency,
+    )
+
+    mock_cache.check_rate_limit.return_value = (True, 599)
+    request = _make_request(headers={"X-API-Key": "key"})
+    public_api_rate_limit_dependency(request)
+
+  @patch(f"{MODULE}.rate_limit_cache")
+  def test_jwt_refresh(self, mock_cache):
+    from robosystems.middleware.rate_limits.rate_limiting import (
+      jwt_refresh_rate_limit_dependency,
+    )
+
+    mock_cache.check_rate_limit.return_value = (True, 9)
+    request = _make_request(headers={"X-API-Key": "key"})
+    jwt_refresh_rate_limit_dependency(request)
