@@ -22,31 +22,17 @@ class ElementsTool(BaseTool):
 
 **WHEN TO USE:**
 - To understand what financial metrics are available in the database
-- To discover XBRL tags (us-gaap, ifrs, custom) being used
+- To discover element tags and categories being used
 - To find the most frequently reported metrics
 - Before querying for specific financial data
-- To explore custom "qb:" or "robo:" tags from non-SEC sources
 
 **RETURNS:**
 - Top elements by frequency with their qnames and labels
 - Element categories (us-gaap, ifrs, qb, robo, custom)
 - Usage statistics and sample facts
-- Common patterns for querying these elements
 
-**EXAMPLES:**
-For SEC data, you might see:
-- us-gaap:Revenues (Revenue)
-- us-gaap:NetIncomeLoss (Net Income/Loss)
-- us-gaap:Assets (Total Assets)
-
-For QuickBooks/custom data:
-- qb:AccountsReceivable
-- robo:CustomerLifetimeValue
-- custom:MonthlyRecurringRevenue
-
-**TIP:** For finding a specific financial concept (like "revenue" or "net income"),
-use `resolve-element` instead — it maps concepts directly to the correct element qname
-for a company. Use this tool when you need to browse all available elements.""",
+**TIP:** Use this tool to browse available elements. For finding a specific concept
+(like "revenue" or "net income"), use `resolve-element` instead.""",
       "inputSchema": {
         "type": "object",
         "properties": {

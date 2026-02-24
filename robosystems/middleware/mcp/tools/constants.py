@@ -22,4 +22,4 @@ Period nodes classify time context into three types:
 - `nine_months` - ~9 months duration
 - `annual` - ~12 months duration
 - `other` - Non-standard durations
-Note: Element.period_type uses XBRL semantics (instant/duration) - different property!"""
+Note: Element.period_type indicates the expected period type for that metric - different from Period.period_type!"""

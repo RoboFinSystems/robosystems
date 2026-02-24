@@ -28,18 +28,10 @@ class StructureTool(BaseTool):
 - To quickly assess what type of analysis is possible
 
 **RETURNS:** Human-readable description including:
-- Summary of the graph type (SEC, QuickBooks, Custom, etc.)
+- Summary of the graph contents and domain
 - Key entity counts and statistics
 - Primary data relationships and patterns
-- Available analysis capabilities
-- Data quality indicators
-
-**EXAMPLE OUTPUT:**
-"This is a financial graph database containing:
-- 150 companies with SEC filings
-- 2,500 XBRL reports (10-K and 10-Q filings)
-- 1.2M financial facts with standardized elements
-- Supports: peer analysis, trend analysis, ratio calculations" """,
+- Available analysis capabilities""",
       "inputSchema": {
         "type": "object",
         "properties": {},
@@ -52,143 +44,120 @@ class StructureTool(BaseTool):
     self._log_tool_execution("describe-graph-structure", arguments)
     return await self._describe_graph_structure()
 
+  def _get_manifest(self):
+    """Get the shared repository manifest for this graph, if any."""
+    try:
+      from robosystems.config.shared_repositories import (
+        get_manifest,
+        is_shared_repository_or_subgraph,
+        resolve_shared_repository_parent,
+      )
+
+      if is_shared_repository_or_subgraph(self.client.graph_id):
+        parent_id = resolve_shared_repository_parent(self.client.graph_id)
+        return get_manifest(parent_id)
+    except Exception:
+      pass
+    return None
+
   async def _describe_graph_structure(self) -> str:
     """
     Generate a natural language description of the graph structure.
+
+    Description adapts based on graph context:
+    - Shared repositories: Uses manifest name/description
+    - RoboLedger graphs: Financial data structure, dimensional fact warnings
+    - Generic graphs: Node/relationship counts and general analysis capabilities
 
     Returns:
         Human-readable description of the graph
     """
     try:
-      # Special handling for SEC databases (primary and historical)
-      if self.client.graph_id in ("sec", "sec_historical"):
-        # Get schema information
-        schema = await self.client.get_schema()
+      schema = await self.client.get_schema()
 
-        # Count entities
-        entity_counts = {}
-        for item in schema:
-          if item["type"] == "node" and item.get("count", 0) > 0:
-            entity_counts[item["label"]] = item["count"]
+      # Count entities by type
+      node_counts = {}
+      rel_counts = {}
+      total_nodes = 0
+      total_rels = 0
 
-        is_historical = self.client.graph_id == "sec_historical"
+      for item in schema:
+        if item["type"] == "node":
+          count = item.get("count", 0)
+          node_counts[item["label"]] = count
+          total_nodes += count
+        elif item["type"] == "relationship":
+          count = item.get("count", 0)
+          rel_counts[item["label"]] = count
+          total_rels += count
 
-        if is_historical:
-          description = (
-            "This is the SEC historical repository containing public company financial data "
-            "from 2009-2023:\n\n"
-          )
-        else:
-          description = (
-            "This is the SEC shared repository containing public company financial data "
-            "(2024+):\n\n"
-          )
+      # Detect graph context
+      is_roboledger = "Fact" in node_counts and "Element" in node_counts
+      manifest = self._get_manifest()
+      is_shared_repo = manifest is not None
 
-        # Add specific counts
-        if "Entity" in entity_counts:
-          description += f"- {entity_counts['Entity']:,} public companies\n"
-        if "Report" in entity_counts:
-          description += (
-            f"- {entity_counts['Report']:,} SEC filings (10-K, 10-Q, 8-K reports)\n"
-          )
-        if "Fact" in entity_counts:
-          description += (
-            f"- {entity_counts['Fact']:,} financial facts (XBRL data points)\n"
-          )
-        if "Element" in entity_counts:
-          description += f"- {entity_counts['Element']:,} financial concepts/metrics\n"
+      # Build description header
+      if is_shared_repo:
+        description = (
+          f"This is the {manifest.name} shared repository ({manifest.description}):\n\n"
+        )
+      else:
+        description = f"This graph database contains {total_nodes:,} nodes and {total_rels:,} relationships:\n\n"
 
-        # Add sibling workspace reference
-        if is_historical:
-          description += (
-            "\n**Note:** This is the historical archive (2009-2023). "
-            "For current data (2024+), switch to the `sec` workspace.\n"
-          )
-        else:
-          description += (
-            "\n**Note:** For historical data (2009-2023), switch to the "
-            "`sec_historical` workspace via `switch-workspace`.\n"
-          )
+      # Node counts
+      if node_counts:
+        description += "**Node Types:**\n"
+        sorted_nodes = sorted(node_counts.items(), key=lambda x: x[1], reverse=True)
+        for label, count in sorted_nodes[:10]:
+          description += f"- {label}: {count:,} nodes\n"
 
-        # Add capabilities
-        description += "\n**Analysis Capabilities:**\n"
-        description += "- Financial ratio analysis and peer comparisons\n"
-        description += "- Time series analysis across reporting periods\n"
-        description += "- Industry benchmarking and sector analysis\n"
-        description += "- XBRL taxonomy exploration\n"
-        description += "- Regulatory filing analysis\n"
+      # Relationship types
+      if rel_counts:
+        description += "\n**Relationship Types:**\n"
+        sorted_rels = sorted(rel_counts.items(), key=lambda x: x[1], reverse=True)
+        for label, count in sorted_rels[:10]:
+          description += f"- {label}: {count:,} relationships\n"
 
-        # Add data patterns
+      # Shared repository: mention sibling workspaces from manifest
+      if is_shared_repo and manifest.sibling_subgraphs:
+        siblings = [f"`{manifest.id}_{name}`" for name in manifest.sibling_subgraphs]
+        description += (
+          f"\n**Available workspaces:** {', '.join(siblings)} "
+          f"(use `switch-workspace` to access).\n"
+        )
+
+      # RoboLedger financial graphs: data structure and dimensional warning
+      if is_roboledger:
         description += "\n**Data Structure:**\n"
         description += "- Facts linked to Elements (financial metrics)\n"
         description += "- Facts linked to Periods (time context)\n"
-        description += "- Facts linked to Entities (companies)\n"
+        description += "- Facts linked to Entities (companies/organizations)\n"
         description += "- Facts may have Dimensions (segments/breakdowns)\n"
         description += "- Facts include Units (currency, shares, etc.)\n"
 
-        # Add critical warning about dimensional facts
-        description += "\n**⚠️ IMPORTANT - Dimensional Facts:**\n"
-        description += "~40% of facts have dimensional breakdowns (by segment, geography, product line).\n"
+        description += "\n**IMPORTANT - Dimensional Facts:**\n"
+        description += "Many facts have dimensional breakdowns (by segment, geography, product line).\n"
         description += "To get consolidated totals only, filter with:\n"
         description += "- `WHERE f.has_dimensions = false` (recommended)\n"
-        description += "- `WHERE NOT (f)-[:FACT_HAS_DIMENSION]->()`\n"
         description += (
-          "Without this filter, you'll get duplicate values for the same metric.\n"
+          "Without this filter, you may get duplicate values for the same metric.\n"
         )
 
-        # Add query pattern guidance
         description += "\n" + QUERY_PATTERN_GUIDANCE + "\n"
-
-        # Add period_type documentation
         description += "\n" + PERIOD_TYPE_GUIDANCE + "\n"
 
-        return description
-
+        description += "\n**Analysis Capabilities:**\n"
+        description += "- Financial ratio analysis and comparisons\n"
+        description += "- Time series analysis across reporting periods\n"
+        description += "- Industry benchmarking and sector analysis\n"
       else:
-        # Generic graph analysis
-        schema = await self.client.get_schema()
-
-        # Count entities by type
-        node_counts = {}
-        rel_counts = {}
-        total_nodes = 0
-        total_rels = 0
-
-        for item in schema:
-          if item["type"] == "node":
-            count = item.get("count", 0)
-            node_counts[item["label"]] = count
-            total_nodes += count
-          elif item["type"] == "relationship":
-            count = item.get("count", 0)
-            rel_counts[item["label"]] = count
-            total_rels += count
-
-        # Generate description
-        description = f"This graph database contains {total_nodes:,} nodes and {total_rels:,} relationships:\n\n"
-
-        # Top node types
-        if node_counts:
-          description += "**Node Types:**\n"
-          sorted_nodes = sorted(node_counts.items(), key=lambda x: x[1], reverse=True)
-          for label, count in sorted_nodes[:10]:  # Top 10
-            description += f"- {label}: {count:,} nodes\n"
-
-        # Top relationship types
-        if rel_counts:
-          description += "\n**Relationship Types:**\n"
-          sorted_rels = sorted(rel_counts.items(), key=lambda x: x[1], reverse=True)
-          for label, count in sorted_rels[:10]:  # Top 10
-            description += f"- {label}: {count:,} relationships\n"
-
-        # Data patterns
         description += "\n**Analysis Capabilities:**\n"
         description += "- Network analysis and relationship traversal\n"
         description += "- Pattern matching and graph algorithms\n"
         description += "- Centrality and connectivity analysis\n"
         description += "- Path finding and shortest path queries\n"
 
-        return description
+      return description
 
     except Exception as e:
       logger.error(f"Error describing graph structure: {e}")
