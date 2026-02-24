@@ -47,6 +47,7 @@ def resolve_schema_extensions(graph_id: str) -> list[str]:
   Returns:
       List of extension names (e.g., ["roboledger"]), or empty list.
   """
+  # Shared repos: resolve from manifest (in-memory, no DB needed)
   try:
     from robosystems.config.shared_repositories import (
       get_manifest,
@@ -61,19 +62,26 @@ def resolve_schema_extensions(graph_id: str) -> list[str]:
         return list(manifest.schema_extensions)
       return []
   except Exception:
-    logger.debug(f"Manifest lookup failed for {graph_id}, trying PostgreSQL")
+    logger.warning(f"Manifest lookup failed for {graph_id}, trying PostgreSQL")
 
   # User graph: query PostgreSQL
   try:
     from robosystems.database import get_db_session
     from robosystems.models.iam import Graph
 
-    for session in get_db_session():
-      graph = Graph.get_by_id(graph_id, session)
+    db_gen = get_db_session()
+    db = next(db_gen)
+    try:
+      graph = Graph.get_by_id(graph_id, db)
       if graph and graph.schema_extensions:
         return list(graph.schema_extensions)
+    finally:
+      try:
+        next(db_gen)
+      except StopIteration:
+        pass
   except Exception:
-    logger.debug(f"Could not resolve schema extensions for {graph_id}")
+    logger.warning(f"Could not resolve schema extensions for {graph_id}")
 
   return []
 

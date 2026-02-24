@@ -56,8 +56,8 @@ class StructureTool(BaseTool):
       if is_shared_repository_or_subgraph(self.client.graph_id):
         parent_id = resolve_shared_repository_parent(self.client.graph_id)
         return get_manifest(parent_id)
-    except Exception:
-      pass
+    except Exception as e:
+      logger.debug(f"Manifest lookup failed for {self.client.graph_id}: {e}")
     return None
 
   async def _describe_graph_structure(self) -> str:

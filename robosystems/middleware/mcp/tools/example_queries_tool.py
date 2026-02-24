@@ -30,8 +30,8 @@ class ExampleQueriesTool(BaseTool):
         return manifest is not None and "roboledger" in (
           manifest.schema_extensions or ()
         )
-    except Exception:
-      pass
+    except Exception as e:
+      logger.debug(f"Shared repo check failed for {self.client.graph_id}: {e}")
     return False
 
   def get_tool_definition(self) -> dict[str, Any]:
