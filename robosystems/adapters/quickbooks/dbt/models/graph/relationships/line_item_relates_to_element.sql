@@ -14,7 +14,7 @@ accounts as (
 
 select
   {{ generate_identifier(
-    qb_line_item_uri("'JournalEntry'", 'l.journal_entry_id', 'l.line_num')
+    qb_line_item_uri('l.tx_type', 'l.tx_number', 'l.line_num')
   ) }} as line_item_identifier,
   {{ generate_identifier(
     qb_element_uri('a.fully_qualified_name')

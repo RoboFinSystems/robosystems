@@ -9,9 +9,9 @@ with lines as (
 
 select
   {{ generate_identifier(
-    qb_line_item_uri("'JournalEntry'", 'journal_entry_id', 'line_num')
+    qb_line_item_uri('tx_type', 'tx_number', 'line_num')
   ) }} as identifier,
-  {{ qb_line_item_uri("'JournalEntry'", 'journal_entry_id', 'line_num') }} as uri,
+  {{ qb_line_item_uri('tx_type', 'tx_number', 'line_num') }} as uri,
   description,
   debit_amount,
   credit_amount,

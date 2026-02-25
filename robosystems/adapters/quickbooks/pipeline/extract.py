@@ -8,11 +8,9 @@ from dagster import AssetExecutionContext, MaterializeResult, asset
 
 from .configs import QBSyncConfig
 from .utils import (
-  filter_entries_by_date,
   flatten_company_info,
-  flatten_journal_entries,
-  flatten_journal_lines,
   get_pipeline_work_dir,
+  parse_journal_report,
   write_extract_parquet,
 )
 
@@ -32,15 +30,19 @@ def qb_extract(
 ) -> MaterializeResult:
   """Extract QuickBooks data to parquet files.
 
-  Fetches accounts, journal entries, and company info from the
-  QuickBooks API, then writes raw parquet files for dbt transformation.
+  Fetches accounts, company info, and the JournalReport (all transaction
+  types in double-entry format) from the QuickBooks API, then writes
+  raw parquet files for dbt transformation.
 
-  For incremental syncs, journal entries are filtered to the lookback
-  window (default 60 days) to reduce API costs.
+  The JournalReport includes invoices, bills, payments, purchases,
+  deposits, and manual journal entries — everything needed for a
+  complete accounting graph.
 
   Returns:
       MaterializeResult with extract_path metadata
   """
+  from datetime import datetime, timedelta
+
   from robosystems.adapters.quickbooks.client import QBClient
   from robosystems.database import SessionFactory
   from robosystems.models.iam.connection_credentials import ConnectionCredentials
@@ -75,19 +77,23 @@ def qb_extract(
   accounts = client.get_accounts()
   context.log.info(f"Fetched {len(accounts)} accounts")
 
-  # Fetch journal entries
-  raw_entries = client.get_journal_entries()
-  context.log.info(f"Fetched {len(raw_entries)} total journal entries from QB API")
+  # Fetch JournalReport (all transaction types in double-entry format)
+  # QB API requires explicit dates to return data
+  end_date = datetime.now().strftime("%Y-%m-%d")
+  if config.full_rebuild:
+    start_date = "2000-01-01"  # Far enough back to catch all history
+    context.log.info(f"Full rebuild: fetching transactions from {start_date}")
+  else:
+    start_date = (datetime.now() - timedelta(days=config.lookback_days)).strftime(
+      "%Y-%m-%d"
+    )
+    context.log.info(f"Incremental: fetching transactions from {start_date}")
 
-  # Filter for incremental sync
-  if not config.full_rebuild:
-    raw_entries = filter_entries_by_date(raw_entries, config.lookback_days)
+  report = client.get_transactions(start_date=start_date, end_date=end_date)
+  journal_entries, journal_lines = parse_journal_report(report)
 
-  # Flatten into tabular format
-  journal_entries = flatten_journal_entries(raw_entries)
-  journal_lines = flatten_journal_lines(raw_entries)
   context.log.info(
-    f"Flattened: {len(journal_entries)} entries, {len(journal_lines)} lines"
+    f"Parsed: {len(journal_entries)} transactions, {len(journal_lines)} lines"
   )
 
   # Write parquet to shared pipeline directory

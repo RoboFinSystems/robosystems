@@ -10,10 +10,10 @@ with lines as (
 
 select
   {{ generate_identifier(
-    qb_transaction_uri("'JournalEntry'", 'journal_entry_id')
+    qb_transaction_uri('tx_type', 'tx_number')
   ) }} as transaction_identifier,
   {{ generate_identifier(
-    qb_line_item_uri("'JournalEntry'", 'journal_entry_id', 'line_num')
+    qb_line_item_uri('tx_type', 'tx_number', 'line_num')
   ) }} as line_item_identifier,
   null as line_item_context
 from lines

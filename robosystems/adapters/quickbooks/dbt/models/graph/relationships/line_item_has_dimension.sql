@@ -11,7 +11,8 @@ with lines as (
 
 department_dims as (
   select
-    journal_entry_id,
+    tx_type,
+    tx_number,
     line_num,
     department_ref_id as ref_id,
     'department' as dimension_type
@@ -21,7 +22,8 @@ department_dims as (
 
 class_dims as (
   select
-    journal_entry_id,
+    tx_type,
+    tx_number,
     line_num,
     class_ref_id as ref_id,
     'class' as dimension_type
@@ -31,7 +33,8 @@ class_dims as (
 
 location_dims as (
   select
-    journal_entry_id,
+    tx_type,
+    tx_number,
     line_num,
     location_ref_id as ref_id,
     'location' as dimension_type
@@ -49,7 +52,7 @@ all_line_dims as (
 
 select
   {{ generate_identifier(
-    qb_line_item_uri("'JournalEntry'", 'journal_entry_id', 'line_num')
+    qb_line_item_uri('tx_type', 'tx_number', 'line_num')
   ) }} as line_item_identifier,
   {{ generate_identifier("concat(dimension_type, ':', ref_id)") }} as dimension_identifier
 from all_line_dims

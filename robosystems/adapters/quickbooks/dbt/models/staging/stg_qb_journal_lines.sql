@@ -8,6 +8,18 @@ with source as (
 
 select
   journal_entry_id,
+  -- Extract tx_type and tx_number from composite id (e.g. 'Invoice_123')
+  -- For seed data (plain numeric ids), default to 'JournalEntry'
+  case
+    when position('_' in journal_entry_id) > 0
+    then split_part(journal_entry_id, '_', 1)
+    else 'JournalEntry'
+  end as tx_type,
+  case
+    when position('_' in journal_entry_id) > 0
+    then split_part(journal_entry_id, '_', 2)
+    else journal_entry_id
+  end as tx_number,
   cast(line_num as integer) as line_num,
   cast("Amount" as double) as amount,
   "PostingType" as posting_type,
