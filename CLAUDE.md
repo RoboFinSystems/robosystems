@@ -211,6 +211,10 @@ just test-cov              # Coverage report
 just test-all              # Full suite with linting/formatting
 ```
 
+### Bash Timeouts
+
+Always use `timeout: 600000` (10 minutes) on Bash tool calls for `just test-all`, `just test`, and other test commands. The default 2-minute Bash timeout is too short for the full suite. CI has a 10-minute limit for the test step.
+
 ### Test Markers
 
 ```python

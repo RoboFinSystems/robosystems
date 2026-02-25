@@ -1,5 +1,9 @@
 Run `just test-all` and systematically fix all failures to achieve 100% completion.
 
+## Timeouts
+
+Always use `timeout: 600000` (10 minutes) on Bash calls for `just test-all` and `just test`. The default 2-minute Bash timeout is too short for the full suite. CI has a 10-minute limit for the test step.
+
 ## Strategy
 
 1. **Run full suite first**: `just test-all` to see the full picture
