@@ -52,14 +52,18 @@ class QBClient:
       logger.info(f"Refreshing QuickBooks token for realm {self.realm_id}")
       self.auth_client.refresh(refresh_token=refresh_token)
 
-    # The intuit-lib automatically updates the refresh token after a refresh call.
-    # We can capture it if needed, but for read-only operations, this is sufficient.
+    # Capture updated tokens after refresh
     self.refresh_token = self.auth_client.refresh_token
+    self.access_token = self.auth_client.access_token
+    logger.info(
+      f"Token refresh complete: access_token={'yes' if self.access_token else 'no'}, "
+      f"refresh_token={'yes' if self.refresh_token else 'no'}"
+    )
 
     self.client = QuickBooks(
       auth_client=self.auth_client,
       refresh_token=self.refresh_token,
-      entity_id=self.realm_id,
+      company_id=self.realm_id,
       minorversion=75,
     )
 

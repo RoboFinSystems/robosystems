@@ -321,9 +321,9 @@ async def list_connections(
   """
   try:
     # Get connections from service
-    connections = ConnectionService.list_connections(
-      entity_id=entity_id or "",
-      provider=provider.upper() if provider else "",
+    connections = await ConnectionService.list_connections(
+      entity_id=entity_id or None,
+      provider=provider or None,
       user_id=current_user.id,
       graph_id=graph_id,
     )

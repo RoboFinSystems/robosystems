@@ -22,7 +22,6 @@ from robosystems.adapters.plaid import (
 # QuickBooks adapter
 from robosystems.adapters.quickbooks import (
   QBClient,
-  QBTransactionsProcessor,
 )
 from robosystems.adapters.sec import (
   ArelleClient,
@@ -38,7 +37,6 @@ __all__ = [
   "PlaidTransactionsProcessor",
   # QuickBooks
   "QBClient",
-  "QBTransactionsProcessor",
   # SEC
   "SECClient",
   "XBRLDuckDBGraphProcessor",

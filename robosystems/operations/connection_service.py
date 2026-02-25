@@ -1,803 +1,382 @@
-"""
-Connection service for managing connections across graph database (metadata) and PostgreSQL (credentials).
+"""Connection service for managing data source connections.
+
+All connection metadata is stored in PostgreSQL (Connection model).
+Encrypted credentials are stored in ConnectionCredentials.
+No graph database operations — connections are platform metadata.
 """
 
-# Standard library
-from datetime import UTC, datetime
 from typing import Any
 
-# Third-party
 from sqlalchemy.orm import Session
 
-from ..config import URIConstants
-from ..database import session
-from ..logger import logger
-from ..middleware.graph import get_graph_repository
-from ..middleware.graph.utils import MultiTenantUtils
+from robosystems.database import SessionFactory
+from robosystems.logger import logger
+from robosystems.models.iam.connection import Connection
+from robosystems.models.iam.connection_credentials import ConnectionCredentials
 
-# Local imports
-# Connection model removed - using direct Cypher queries instead
-from ..models.iam.connection_credentials import ConnectionCredentials
-
-SYSTEM_USER_ID = "__system__"
-
-
-def _safe_datetime_conversion(dt_value):
-  """
-  Safely convert datetime values from various formats to Python datetime objects.
-
-  This function handles multiple datetime formats commonly encountered when working
-  with different data sources and databases, providing a unified conversion approach.
-
-  Type transformations handled:
-  - None → None (passthrough)
-  - datetime.datetime → datetime.datetime (passthrough)
-  - Objects with .datetime attribute → extracts datetime attribute
-  - Objects with .isoformat method → returns as-is (datetime-like)
-  - ISO format strings → parses to datetime (handles 'Z' as UTC)
-  - Unix timestamps (int/float) → converts from epoch time in UTC
-  - Unsupported types → None (with debug logging)
-
-  Args:
-      dt_value: A datetime value in any of the following formats:
-          - None
-          - datetime.datetime object
-          - Object with .datetime attribute (e.g., LadybugDB datetime)
-          - Object with .isoformat method (datetime-like)
-          - ISO 8601 string (e.g., "2024-01-01T12:00:00Z")
-          - Unix timestamp as int or float (seconds since epoch)
-
-  Returns:
-      datetime or None: A standard Python datetime object with timezone info,
-          or None if the input was None or could not be converted.
-
-  Examples:
-      >>> _safe_datetime_conversion(None)
-      None
-      >>> _safe_datetime_conversion(datetime.now())
-      datetime.datetime(...)
-      >>> _safe_datetime_conversion("2024-01-01T12:00:00Z")
-      datetime.datetime(2024, 1, 1, 12, 0, tzinfo=datetime.timezone.utc)
-      >>> _safe_datetime_conversion(1704110400.0)  # Unix timestamp
-      datetime.datetime(2024, 1, 1, 12, 0, tzinfo=datetime.timezone.utc)
-  """
-  if dt_value is None:
-    return None
-
-  # If it's already a Python datetime, return as-is
-  if isinstance(dt_value, datetime):
-    return dt_value
-
-  # If it has a datetime attribute, extract it
-  if hasattr(dt_value, "datetime"):
-    return dt_value.datetime
-
-  # Try to convert if it has isoformat (datetime-like object)
-  if hasattr(dt_value, "isoformat"):
-    return dt_value
-
-  # If it's a string, try to parse it
-  if isinstance(dt_value, str):
-    try:
-      return datetime.fromisoformat(dt_value.replace("Z", "+00:00"))
-    except ValueError:
-      logger.debug(f"Could not parse datetime string: {dt_value}")
-      return None
-
-  # If it's a float or int, assume it's a Unix timestamp
-  if isinstance(dt_value, (float, int)):
-    try:
-      return datetime.fromtimestamp(dt_value, tz=UTC)
-    except (ValueError, OSError):
-      logger.debug(f"Could not parse timestamp: {dt_value}")
-      return None
-
-  # If we can't convert it, log a warning and return None
-  logger.debug(f"Unable to convert datetime value of type {type(dt_value)}: {dt_value}")
-  return None
-
-
-class CredentialsNotFoundError(Exception):
-  """Raised when credentials are not found for a connection."""
-
-  pass
-
-
-class UserAccessDeniedError(Exception):
-  """Raised when a user is denied access to a connection."""
-
-  pass
+# System user ID for internal operations (Dagster, background tasks)
+SYSTEM_USER_ID = "system"
 
 
 class ConnectionService:
-  """Service for unified connection management across graph database and PostgreSQL."""
+  """Manages data source connections in PostgreSQL."""
 
-  @classmethod
+  @staticmethod
   async def create_connection(
-    cls,
     entity_id: str,
     provider: str,
     user_id: str,
-    credentials: dict[str, Any],
+    credentials: dict[str, Any] | None = None,
     metadata: dict[str, Any] | None = None,
-    expires_at: datetime | None = None,
     graph_id: str | None = None,
+    expires_at: Any = None,
     db_session: Session | None = None,
   ) -> dict[str, Any]:
-    """
-    Create a new connection with metadata in graph database and credentials in PostgreSQL.
+    """Create a new connection.
 
     Args:
-        entity_id: Entity identifier
-        provider: Provider type (QuickBooks, Plaid, SEC)
+        entity_id: Entity identifier (used as graph_id for backward compat)
+        provider: Provider name (quickbooks, plaid, sec)
         user_id: User who owns the connection
-        credentials: Dict of auth credentials to encrypt and store
-        metadata: Additional metadata for the connection
+        credentials: OAuth tokens or API keys to encrypt and store
+        metadata: Provider-specific metadata (realm_id, item_id, cik, etc.)
+        graph_id: Graph database ID (defaults to entity_id)
         expires_at: When credentials expire
-        graph_id: Graph database identifier (for multitenant mode)
-        db_session: Optional database session (if not provided, creates its own)
+        db_session: Optional existing database session
 
     Returns:
         Dict with connection details
     """
+    metadata = metadata or {}
+    target_graph_id = graph_id or entity_id
+
+    session = db_session or SessionFactory()
+    session_created = db_session is None
+
     try:
-      # Validate database creation if in multi-tenant mode and graph_id is provided
-      if MultiTenantUtils.is_multitenant_mode() and graph_id and graph_id != "default":
-        MultiTenantUtils.validate_database_creation(graph_id)
-
-      # Get appropriate database name using multi-tenant utilities
-      database_name = MultiTenantUtils.get_database_name(graph_id)
-      MultiTenantUtils.log_database_operation(
-        "Creating connection", database_name, graph_id
+      # Create connection record
+      conn = Connection.create(
+        graph_id=target_graph_id,
+        user_id=user_id,
+        provider=provider,
+        session=session,
+        status=metadata.get("status", "pending_oauth"),
+        realm_id=metadata.get("realm_id"),
+        item_id=metadata.get("item_id"),
+        cik=metadata.get("cik"),
+        entity_name=metadata.get("entity_name"),
+        institution_name=metadata.get("institution_name"),
+        auto_sync_enabled=metadata.get("auto_sync_enabled", True),
       )
 
-      # Get graph repository for the database
-      repository = await get_graph_repository(
-        graph_id or database_name, operation_type="write"
-      )
-
-      with repository:
-        entity_query = """
-        MATCH (c:Entity {identifier: $entity_id})
-        RETURN c.identifier as identifier, c.name as name
-        """
-        entity_result = repository.execute_single(
-          entity_query, {"entity_id": entity_id}
-        )
-        if not entity_result:
-          raise ValueError(f"Entity {entity_id} not found")
-
-        metadata = metadata or {}
-
-        # Generate connection URI and ID from configurable base domain
-        base_domain = URIConstants.ROBOSYSTEMS_BASE_URI
-        connection_uri = f"{base_domain}/connection/{provider.lower()}/{entity_id}"
-        connection_id = f"{provider.lower()}_{entity_id}_{user_id}"
-
-        # Check if connection already exists and delete it to avoid duplicates
-        existing_query = """
-        MATCH (conn:Connection {connection_id: $connection_id})
-        DETACH DELETE conn
-        """
-        existing_result = repository.execute_query(
-          existing_query, {"connection_id": connection_id}
-        )
-        if existing_result:
-          logger.info(
-            f"Deleted existing connection {connection_id} before creating new one."
-          )
-
-        # Create graph connection node using Cypher
-        connection_query = """
-        CREATE (conn:Connection {
-          provider: $provider,
-          uri: $uri,
-          connection_id: $connection_id,
-          realm_id: $realm_id,
-          item_id: $item_id,
-          cik: $cik,
-          status: 'connected',
-          entity_name: $entity_name,
-          institution_name: $institution_name,
-          expires_at: $expires_at,
-          auto_sync_enabled: $auto_sync_enabled
-        })
-        RETURN conn
-        """
-        repository.execute_query(
-          connection_query,
-          {
-            "provider": provider,
-            "uri": connection_uri,
-            "connection_id": connection_id,
-            "realm_id": metadata.get("realm_id"),
-            "item_id": metadata.get("item_id"),
-            "cik": metadata.get("cik"),
-            "entity_name": metadata.get("entity_name"),
-            "institution_name": metadata.get("institution_name"),
-            "expires_at": expires_at,
-            "auto_sync_enabled": metadata.get("auto_sync_enabled", True),
-          },
-        )
-
-        # Connect to entity
-        relationship_query = """
-        MATCH (c:Entity {identifier: $entity_id})
-        MATCH (conn:Connection {connection_id: $connection_id})
-        MERGE (c)-[:HAS_CONNECTION]->(conn)
-        """
-        repository.execute_query(
-          relationship_query, {"entity_id": entity_id, "connection_id": connection_id}
-        )
-
-      # Store encrypted credentials in PostgreSQL
-      pg_session = db_session or session()
-      session_created = db_session is None
-
-      try:
-        # Delete existing credentials if they exist to avoid duplicates
-        existing_creds = ConnectionCredentials.get_by_connection_id(
-          connection_id, pg_session
-        )
-        if existing_creds:
-          logger.info(
-            f"Deactivating existing credentials for connection {connection_id}."
-          )
-          existing_creds.deactivate(pg_session)
-
+      # Store credentials if provided
+      if credentials:
         ConnectionCredentials.create(
-          connection_id=connection_id,
+          connection_id=conn.id,
           provider=provider,
           user_id=user_id,
           credentials=credentials,
+          session=session,
           expires_at=expires_at,
-          session=pg_session,
         )
 
-        logger.info(f"Successfully created connection {connection_id}.")
+      logger.info(
+        f"Created connection {conn.id} for provider={provider}, "
+        f"graph={target_graph_id}, user={user_id}"
+      )
 
-        return {
-          "connection_id": connection_id,
-          "provider": provider,
-          "status": "connected",
-          "entity_id": entity_id,
-          "metadata": {
-            "realm_id": metadata.get("realm_id"),
-            "item_id": metadata.get("item_id"),
-            "cik": metadata.get("cik"),
-            "entity_name": metadata.get("entity_name"),
-            "institution_name": metadata.get("institution_name"),
-            "auto_sync_enabled": metadata.get("auto_sync_enabled", True),
-          },
-          "created_at": datetime.now(UTC),
-          "expires_at": expires_at,
-        }
-
-      finally:
-        if session_created:
-          session.remove()
+      return conn.to_dict()
 
     except Exception as e:
-      logger.error(
-        f"Failed to create connection for entity {entity_id}: {e}", exc_info=True
-      )
+      logger.error(f"Failed to create connection for entity {entity_id}: {e}")
       raise
+    finally:
+      if session_created:
+        session.close()
 
-  @classmethod
+  @staticmethod
   async def get_connection(
-    cls,
     connection_id: str,
-    user_id: str,
+    user_id: str | None = None,
     graph_id: str | None = None,
     db_session: Session | None = None,
   ) -> dict[str, Any] | None:
-    """
-    Get connection details including metadata and credentials.
+    """Get connection details.
 
     Args:
         connection_id: Connection identifier
-        user_id: User ID for access control
-        graph_id: Graph database identifier (for multitenant mode)
-        db_session: Optional database session (if not provided, creates its own)
+        user_id: Optional user filter (SYSTEM_USER_ID bypasses)
+        graph_id: Unused (kept for backward compat)
+        db_session: Optional existing database session
 
     Returns:
-        Dict with connection details including decrypted credentials
+        Dict with connection details including credentials, or None
     """
+    session = db_session or SessionFactory()
+    session_created = db_session is None
+
     try:
-      # Get appropriate database name using multi-tenant utilities
-      database_name = MultiTenantUtils.get_database_name(graph_id)
-      MultiTenantUtils.log_database_operation(
-        "Getting connection", database_name, graph_id
-      )
+      conn = Connection.get_by_id(connection_id, session)
+      if not conn:
+        logger.warning(f"Connection not found: {connection_id}")
+        return None
 
-      # Get graph repository for the database
-      repository = await get_graph_repository(
-        graph_id or database_name, operation_type="read"
-      )
+      # Check user access (system user can access any connection)
+      if user_id and user_id != SYSTEM_USER_ID and conn.user_id != user_id:
+        logger.warning(f"User {user_id} not authorized for connection {connection_id}")
+        return None
 
-      with repository:
-        connection_query = """
-        MATCH (conn:Connection {connection_id: $connection_id})
-        RETURN conn
-        """
-        result = repository.execute_single(
-          connection_query, {"connection_id": connection_id}
-        )
+      result = conn.to_dict()
 
-        if not result:
-          logger.warning(
-            f"Graph connection not found for connection_id: {connection_id} in database: {database_name}"
-          )
-          # Try to see what connections exist
-          list_query = """
-          MATCH (conn:Connection)
-          RETURN conn.connection_id as id
-          LIMIT 10
-          """
-          existing = repository.execute_query(list_query, {})
-          logger.info(
-            f"Existing connections in database {database_name}: {[r['id'] for r in existing]}"
-          )
-          return None
+      # Include decrypted credentials
+      cred = ConnectionCredentials.get_by_connection_id(connection_id, session)
+      if cred:
+        result["credentials"] = cred.get_credentials()
+        try:
+          result["is_expired"] = cred.is_expired()
+        except Exception:
+          result["is_expired"] = False
+        result["expires_at"] = cred.expires_at
+      else:
+        result["credentials"] = {}
+        result["is_expired"] = False
+        result["expires_at"] = None
 
-        # Extract connection properties from result
-        # Handle both dict and node object formats
-        conn_node = result["conn"]
-        if hasattr(conn_node, "_properties"):
-          conn_props = conn_node._properties
-        else:
-          conn_props = conn_node
-
-      # Get PostgreSQL credentials
-      pg_session = db_session or session()
-      session_created = db_session is None
-
-      try:
-        pg_credentials = ConnectionCredentials.get_by_connection_id(
-          connection_id, pg_session
-        )
-        if not pg_credentials:
-          logger.warning(f"Credentials not found for connection_id: {connection_id}")
-          raise CredentialsNotFoundError(f"Credentials not found for {connection_id}")
-
-        # Check user access - system tasks can bypass user check
-        # Otherwise, the user_id must match the one on the credential
-        if user_id != SYSTEM_USER_ID and pg_credentials.user_id != user_id:
-          logger.warning(
-            f"Access denied for user {user_id} to connection {connection_id}"
-          )
-          raise UserAccessDeniedError(f"User {user_id} cannot access this connection")
-
-        credentials = pg_credentials.get_credentials()
-
-        return {
-          "connection_id": connection_id,
-          "provider": conn_props.get("provider"),
-          "status": conn_props.get("status", "connected"),
-          "metadata": {
-            "realm_id": conn_props.get("realm_id"),
-            "item_id": conn_props.get("item_id"),
-            "cik": conn_props.get("cik"),
-            "entity_name": conn_props.get("entity_name"),
-            "institution_name": conn_props.get("institution_name"),
-            "auto_sync_enabled": conn_props.get("auto_sync_enabled", True),
-            "last_sync": _safe_datetime_conversion(conn_props.get("last_sync")),
-          },
-          "credentials": credentials,
-          "created_at": _safe_datetime_conversion(conn_props.get("created_at")),
-          "expires_at": pg_credentials.expires_at,
-          "is_expired": pg_credentials.is_expired(),
-        }
-
-      finally:
-        if session_created:
-          session.remove()
+      return result
 
     except Exception as e:
-      logger.error(f"Failed to get connection {connection_id}: {e}", exc_info=True)
-      raise
+      logger.error(f"Failed to get connection {connection_id}: {e}")
+      return None
+    finally:
+      if session_created:
+        session.close()
 
-  @classmethod
+  @staticmethod
   async def list_connections(
-    cls,
-    entity_id: str,
+    entity_id: str | None = None,
     provider: str | None = None,
     user_id: str | None = None,
     graph_id: str | None = None,
+    db_session: Session | None = None,
   ) -> list[dict[str, Any]]:
-    """
-    List connections for a entity, optionally filtered by provider and user.
+    """List connections with optional filters.
 
     Args:
-        entity_id: Entity identifier
-        provider: Optional provider filter
-        user_id: Optional user filter for access control
-        graph_id: Graph database identifier (for multitenant mode)
+        entity_id: Filter by graph_id (backward compat name)
+        provider: Filter by provider type
+        user_id: Filter by user (SYSTEM_USER_ID sees all)
+        graph_id: Filter by graph_id (takes precedence over entity_id)
+        db_session: Optional existing database session
 
     Returns:
-        List of connection dicts (without credentials for security)
+        List of connection dicts
     """
+    session = db_session or SessionFactory()
+    session_created = db_session is None
+
     try:
-      # Get appropriate database name using multi-tenant utilities
-      database_name = MultiTenantUtils.get_database_name(graph_id)
-      MultiTenantUtils.log_database_operation(
-        "Listing connections", database_name, graph_id
+      target_graph_id = graph_id or entity_id
+      filter_user_id = None if user_id == SYSTEM_USER_ID else user_id
+
+      connections = Connection.list_filtered(
+        session=session,
+        graph_id=target_graph_id,
+        user_id=filter_user_id,
+        provider=provider,
       )
-
-      logger.debug(f"Listing connections for entity {entity_id} in db {database_name}")
-      # Get graph repository for the database
-      repository = await get_graph_repository(
-        graph_id or database_name, operation_type="read"
-      )
-
-      with repository:
-        # Handle different query patterns based on filters
-        if entity_id and entity_id != "":
-          # Filter by specific entity
-          if provider:
-            cypher = """
-            MATCH (c:Entity {identifier: $entity_id})-[:HAS_CONNECTION]->(conn:Connection {provider: $provider})
-            RETURN conn, c.identifier as entity_id
-            """
-            results = repository.execute_query(
-              cypher, {"entity_id": entity_id, "provider": provider}
-            )
-          else:
-            cypher = """
-            MATCH (c:Entity {identifier: $entity_id})-[:HAS_CONNECTION]->(conn:Connection)
-            RETURN conn, c.identifier as entity_id
-            """
-            results = repository.execute_query(cypher, {"entity_id": entity_id})
-        else:
-          # No entity filter - get all connections with their companies
-          if provider:
-            cypher = """
-            MATCH (c:Entity)-[:HAS_CONNECTION]->(conn:Connection {provider: $provider})
-            RETURN conn, c.identifier as entity_id
-            """
-            results = repository.execute_query(cypher, {"provider": provider})
-          else:
-            cypher = """
-            MATCH (c:Entity)-[:HAS_CONNECTION]->(conn:Connection)
-            RETURN conn, c.identifier as entity_id
-            """
-            results = repository.execute_query(cypher, {})
-
-        # Convert graph records to Connection-like objects
-        connections = []
-        entity_ids = []
-        for record in results:
-          conn_node = record["conn"]
-          record_entity_id = record.get("entity_id", entity_id)
-
-          # Create a simple object with the properties we need
-          class SimpleConnection:
-            def __init__(self, properties):
-              for key, value in properties.items():
-                setattr(self, key, value)
-
-          # Handle both dict and node objects
-          if isinstance(conn_node, dict):
-            conn_obj = SimpleConnection(conn_node)
-          else:
-            conn_obj = SimpleConnection(conn_node._properties)
-          connections.append(conn_obj)
-          entity_ids.append(record_entity_id)
 
       result = []
-      pg_session = session()
+      for conn in connections:
+        conn_dict = conn.to_dict()
 
-      try:
-        for idx, conn in enumerate(connections):
-          # Get credential info without decrypting
-          pg_cred = ConnectionCredentials.get_by_connection_id(
-            conn.connection_id, pg_session
-          )
+        # Check if credentials exist (without decrypting)
+        cred = ConnectionCredentials.get_by_connection_id(conn.id, session)
+        conn_dict["has_credentials"] = cred is not None
+        try:
+          conn_dict["is_expired"] = cred.is_expired() if cred else False
+        except Exception:
+          conn_dict["is_expired"] = False
 
-          # Apply user filter if specified (system tasks can see all)
-          if (
-            user_id
-            and user_id != SYSTEM_USER_ID
-            and pg_cred
-            and pg_cred.user_id != user_id
-          ):
-            continue
+        result.append(conn_dict)
 
-          connection_dict = {
-            "connection_id": getattr(conn, "connection_id", None),
-            "provider": getattr(conn, "provider", None),
-            "status": getattr(conn, "status", "connected"),
-            "entity_id": entity_ids[idx],
-            "metadata": {
-              "realm_id": getattr(conn, "realm_id", None),
-              "item_id": getattr(conn, "item_id", None),
-              "cik": getattr(conn, "cik", None),
-              "entity_name": getattr(conn, "entity_name", None),
-              "institution_name": getattr(conn, "institution_name", None),
-              "auto_sync_enabled": getattr(conn, "auto_sync_enabled", True),
-              "last_sync": _safe_datetime_conversion(getattr(conn, "last_sync", None)),
-            },
-            "created_at": _safe_datetime_conversion(getattr(conn, "created_at", None)),
-            "expires_at": pg_cred.expires_at if pg_cred else None,
-            "is_expired": pg_cred.is_expired() if pg_cred else False,
-            "user_id": pg_cred.user_id if pg_cred else None,
-          }
-          result.append(connection_dict)
-
-        return result
-
-      finally:
-        session.remove()
+      return result
 
     except Exception as e:
-      logger.error(
-        f"Failed to list connections for entity {entity_id}: {e}", exc_info=True
-      )
+      logger.error(f"Failed to list connections: {e}")
       return []
+    finally:
+      if session_created:
+        session.close()
 
-  @classmethod
+  @staticmethod
   def update_connection_credentials(
-    cls,
     connection_id: str,
     user_id: str,
     credentials: dict[str, Any],
     db_session: Session | None = None,
   ) -> bool:
-    """
-    Update connection credentials.
+    """Update credentials for a connection.
 
     Args:
         connection_id: Connection identifier
-        user_id: User ID for access control
-        credentials: New credentials dict
-        db_session: Optional database session (if not provided, creates its own)
+        user_id: User performing the update
+        credentials: New credentials to encrypt and store
+        db_session: Optional existing database session
 
     Returns:
-        bool: True if successful, False otherwise
+        True if updated successfully
     """
+    session = db_session or SessionFactory()
+    session_created = db_session is None
+
     try:
-      pg_session = db_session or session()
-      session_created = db_session is None
-
-      try:
-        cred = ConnectionCredentials.get_by_connection_id(connection_id, pg_session)
-        if not cred:
-          raise CredentialsNotFoundError(
-            f"Credentials not found for connection {connection_id}"
-          )
-
-        if cred.user_id != user_id:
-          raise UserAccessDeniedError("User does not have permission to update")
-
-        cred.update_credentials(credentials, pg_session)
-        logger.info(f"Updated credentials for connection {connection_id}")
-        return True
-      finally:
-        if session_created:
-          session.remove()
-
-    except Exception as e:
-      logger.error(
-        f"Failed to update credentials for connection {connection_id}: {e}",
-        exc_info=True,
-      )
-      return False
-
-  @classmethod
-  async def update_last_sync(
-    cls, connection_id: str, graph_id: str | None = None
-  ) -> bool:
-    """
-    Update the last sync timestamp for a connection.
-
-    Args:
-        connection_id: Connection identifier
-        graph_id: Graph database identifier (for multitenant mode)
-
-    Returns:
-        True if successful
-    """
-    try:
-      # Get appropriate database name using multi-tenant utilities
-      database_name = MultiTenantUtils.get_database_name(graph_id)
-      MultiTenantUtils.log_database_operation(
-        "Updating last sync", database_name, graph_id
-      )
-
-      logger.debug(f"Updating last_sync for {connection_id} in db {database_name}")
-      # Get graph repository for the database
-      repository = await get_graph_repository(
-        graph_id or database_name, operation_type="write"
-      )
-
-      with repository:
-        update_query = """
-        MATCH (conn:Connection {connection_id: $connection_id})
-        SET conn.last_sync = $last_sync
-        RETURN conn
-        """
-        result = repository.execute_single(
-          update_query,
-          {"connection_id": connection_id, "last_sync": datetime.now(UTC)},
+      cred = ConnectionCredentials.get_by_connection_id(connection_id, session)
+      if cred:
+        cred.update_credentials(credentials, session)
+      else:
+        ConnectionCredentials.create(
+          connection_id=connection_id,
+          provider="",
+          user_id=user_id,
+          credentials=credentials,
+          session=session,
         )
-
-        if result:
-          logger.info(f"Updated last_sync for connection {connection_id}")
-          return True
-      return False
-
+      return True
     except Exception as e:
-      logger.error(
-        f"Failed to update last_sync for {connection_id}: {e}", exc_info=True
-      )
+      logger.error(f"Failed to update credentials for {connection_id}: {e}")
       return False
+    finally:
+      if session_created:
+        session.close()
 
-  @classmethod
+  @staticmethod
+  async def update_last_sync(
+    connection_id: str,
+    graph_id: str | None = None,
+    db_session: Session | None = None,
+  ) -> bool:
+    """Update last sync timestamp.
+
+    Args:
+        connection_id: Connection identifier
+        graph_id: Unused (kept for backward compat)
+        db_session: Optional existing database session
+
+    Returns:
+        True if updated successfully
+    """
+    session = db_session or SessionFactory()
+    session_created = db_session is None
+
+    try:
+      conn = Connection.get_by_id(connection_id, session)
+      if conn:
+        conn.update_last_sync(session)
+        logger.info(f"Updated last_sync for connection {connection_id}")
+        return True
+      logger.warning(f"Connection {connection_id} not found for last_sync update")
+      return False
+    except Exception as e:
+      logger.error(f"Failed to update last_sync for {connection_id}: {e}")
+      return False
+    finally:
+      if session_created:
+        session.close()
+
+  @staticmethod
   async def delete_connection(
-    cls,
     connection_id: str,
     user_id: str,
     graph_id: str | None = None,
     db_session: Session | None = None,
   ) -> bool:
-    """
-    Delete a connection from graph database and deactivate credentials in PostgreSQL.
+    """Delete a connection and deactivate its credentials.
 
     Args:
         connection_id: Connection identifier
-        user_id: User ID for access control
-        graph_id: Graph database identifier
-        db_session: Optional database session (if not provided, creates its own)
+        user_id: User performing the deletion
+        graph_id: Unused (kept for backward compat)
+        db_session: Optional existing database session
 
     Returns:
-        bool: True if successful, False otherwise
+        True if deleted successfully
     """
+    session = db_session or SessionFactory()
+    session_created = db_session is None
+
     try:
-      # First, verify user access via PostgreSQL
-      # This ensures a user can't delete a connection they don't own
-      pg_session = db_session or session()
-      session_created = db_session is None
+      conn = Connection.get_by_id(connection_id, session)
+      if not conn:
+        logger.warning(f"Connection {connection_id} not found for deletion")
+        return False
 
-      try:
-        cred = ConnectionCredentials.get_by_connection_id(connection_id, pg_session)
-        if cred and cred.user_id != user_id:
-          raise UserAccessDeniedError("User does not have permission to delete")
+      # Deactivate credentials (soft delete for audit trail)
+      cred = ConnectionCredentials.get_by_connection_id(connection_id, session)
+      if cred:
+        cred.deactivate(session)
 
-        if cred:
-          cred.deactivate(pg_session)
-          logger.info(f"Deactivated credentials for connection {connection_id}")
-
-        # Then, delete the connection from graph database
-        database_name = MultiTenantUtils.get_database_name(graph_id)
-        MultiTenantUtils.log_database_operation(
-          "Deleting connection", database_name, graph_id
-        )
-
-        logger.debug(f"Deleting connection {connection_id} in db {database_name}")
-
-        # Get graph repository for the database
-        repository = await get_graph_repository(
-          graph_id or database_name, operation_type="write"
-        )
-
-        with repository:
-          delete_query = """
-          MATCH (conn:Connection {connection_id: $connection_id})
-          DETACH DELETE conn
-          """
-          repository.execute_query(delete_query, {"connection_id": connection_id})
-
-        logger.info(f"Deleted connection {connection_id} from graph database")
-        return True
-
-      finally:
-        if session_created:
-          session.remove()
+      # Delete connection record
+      conn.delete(session)
+      logger.info(f"Deleted connection {connection_id}")
+      return True
 
     except Exception as e:
-      logger.error(f"Failed to delete connection {connection_id}: {e}", exc_info=True)
+      logger.error(f"Failed to delete connection {connection_id}: {e}")
       return False
+    finally:
+      if session_created:
+        session.close()
 
-  @classmethod
+  @staticmethod
   async def mark_connection_error(
-    cls, connection_id: str, graph_id: str | None = None
+    connection_id: str,
+    graph_id: str | None = None,
+    db_session: Session | None = None,
   ) -> bool:
-    """
-    Mark a connection as having an error.
+    """Mark connection as having an error."""
+    session = db_session or SessionFactory()
+    session_created = db_session is None
 
-    Args:
-        connection_id: Connection identifier
-        graph_id: Graph database identifier (for multitenant mode)
-
-    Returns:
-        True if successful
-    """
     try:
-      # Get appropriate database name using multi-tenant utilities
-      database_name = MultiTenantUtils.get_database_name(graph_id)
-      MultiTenantUtils.log_database_operation(
-        "Marking connection error", database_name, graph_id
-      )
-
-      logger.debug(f"Marking error for {connection_id} in db {database_name}")
-      # Get graph repository for the database
-      repository = await get_graph_repository(
-        graph_id or database_name, operation_type="write"
-      )
-
-      with repository:
-        update_query = """
-        MATCH (conn:Connection {connection_id: $connection_id})
-        SET conn.status = 'error'
-        RETURN conn
-        """
-        result = repository.execute_single(
-          update_query, {"connection_id": connection_id}
-        )
-
-        if result:
-          logger.warning(f"Marked connection {connection_id} with error status")
-          return True
-        return False
-
-    except Exception as e:
-      logger.error(
-        f"Failed to mark connection {connection_id} as error: {e}", exc_info=True
-      )
+      conn = Connection.get_by_id(connection_id, session)
+      if conn:
+        conn.update_status("error", session)
+        logger.warning(f"Marked connection {connection_id} with error status")
+        return True
       return False
+    except Exception as e:
+      logger.error(f"Failed to mark connection error for {connection_id}: {e}")
+      return False
+    finally:
+      if session_created:
+        session.close()
 
-  @classmethod
+  @staticmethod
   async def mark_connection_connected(
-    cls, connection_id: str, graph_id: str | None = None
+    connection_id: str,
+    graph_id: str | None = None,
+    db_session: Session | None = None,
   ) -> bool:
-    """
-    Mark a connection as connected/healthy.
+    """Mark connection as connected."""
+    session = db_session or SessionFactory()
+    session_created = db_session is None
 
-    Args:
-        connection_id: Connection identifier
-        graph_id: Graph database identifier (for multitenant mode)
-
-    Returns:
-        True if successful
-    """
     try:
-      # Get appropriate database name using multi-tenant utilities
-      database_name = MultiTenantUtils.get_database_name(graph_id)
-      MultiTenantUtils.log_database_operation(
-        "Marking connection active", database_name, graph_id
-      )
-
-      logger.debug(f"Marking connected for {connection_id} in db {database_name}")
-      # Get graph repository for the database
-      repository = await get_graph_repository(
-        graph_id or database_name, operation_type="write"
-      )
-
-      with repository:
-        update_query = """
-        MATCH (conn:Connection {connection_id: $connection_id})
-        SET conn.status = 'connected'
-        RETURN conn
-        """
-        result = repository.execute_single(
-          update_query, {"connection_id": connection_id}
-        )
-
-        if result:
-          logger.info(f"Marked connection {connection_id} as connected")
-          return True
-        return False
-
-    except Exception as e:
-      logger.error(
-        f"Failed to mark connection {connection_id} as connected: {e}",
-        exc_info=True,
-      )
+      conn = Connection.get_by_id(connection_id, session)
+      if conn:
+        conn.update_status("connected", session)
+        logger.info(f"Marked connection {connection_id} as connected")
+        return True
       return False
+    except Exception as e:
+      logger.error(f"Failed to mark connection connected for {connection_id}: {e}")
+      return False
+    finally:
+      if session_created:
+        session.close()
 
-  @classmethod
+  @staticmethod
   async def update(
-    cls,
     connection_id: str,
     user_id: str,
     metadata: dict[str, Any] | None = None,
@@ -806,76 +385,70 @@ class ConnectionService:
     graph_id: str | None = None,
     db_session: Session | None = None,
   ) -> bool:
-    """
-    Update connection metadata and/or credentials.
+    """Update connection metadata and/or credentials.
 
     Args:
         connection_id: Connection identifier
-        user_id: User ID for access control
-        metadata: Optional metadata updates (merged with existing)
-        credentials: Optional new credentials
-        status: Optional new status
-        graph_id: Graph database identifier (for multitenant mode)
-        db_session: Optional database session
+        user_id: User performing the update
+        metadata: Metadata fields to update
+        credentials: New credentials to encrypt
+        status: New status value
+        graph_id: Unused (kept for backward compat)
+        db_session: Optional existing database session
 
     Returns:
-        bool: True if successful
+        True if updated successfully
     """
+    session = db_session or SessionFactory()
+    session_created = db_session is None
+
     try:
-      # First update credentials if provided
+      conn = Connection.get_by_id(connection_id, session)
+      if not conn:
+        logger.warning(f"Connection {connection_id} not found for update")
+        return False
+
+      # Update metadata fields
+      update_kwargs = {}
+      if status:
+        update_kwargs["status"] = status
+      if metadata:
+        if "realm_id" in metadata:
+          update_kwargs["realm_id"] = metadata["realm_id"]
+        if "item_id" in metadata:
+          update_kwargs["item_id"] = metadata["item_id"]
+        if "cik" in metadata:
+          update_kwargs["cik"] = metadata["cik"]
+        if "entity_name" in metadata:
+          update_kwargs["entity_name"] = metadata["entity_name"]
+        if "institution_name" in metadata:
+          update_kwargs["institution_name"] = metadata["institution_name"]
+        if "auto_sync_enabled" in metadata:
+          update_kwargs["auto_sync_enabled"] = metadata["auto_sync_enabled"]
+
+      if update_kwargs:
+        conn.update_metadata(session, **update_kwargs)
+
+      # Update credentials if provided
       if credentials:
-        success = cls.update_connection_credentials(
-          connection_id, user_id, credentials, db_session
-        )
-        if not success:
-          return False
+        cred = ConnectionCredentials.get_by_connection_id(connection_id, session)
+        if cred:
+          cred.update_credentials(credentials, session)
+        else:
+          ConnectionCredentials.create(
+            connection_id=connection_id,
+            provider=conn.provider,
+            user_id=user_id,
+            credentials=credentials,
+            session=session,
+          )
 
-      # Then update graph metadata if provided
-      if metadata or status:
-        # Get appropriate database name
-        database_name = MultiTenantUtils.get_database_name(graph_id)
-        MultiTenantUtils.log_database_operation(
-          "Updating connection", database_name, graph_id
-        )
-
-        # Get graph repository
-        repository = await get_graph_repository(
-          graph_id or database_name, operation_type="write"
-        )
-
-        with repository:
-          # Build SET clause dynamically
-          set_clauses = []
-          params = {"connection_id": connection_id}
-
-          if status:
-            set_clauses.append("conn.status = $status")
-            params["status"] = status
-
-          if metadata:
-            for key, value in metadata.items():
-              safe_key = key.replace("-", "_")
-              set_clauses.append(f"conn.{safe_key} = ${safe_key}")
-              params[safe_key] = value
-
-          if set_clauses:
-            update_query = f"""
-            MATCH (conn:Connection {{connection_id: $connection_id}})
-            SET {", ".join(set_clauses)}
-            RETURN conn
-            """
-
-            result = repository.execute_single(update_query, params)
-
-            if result:
-              logger.info(f"Updated connection {connection_id} metadata")
-              return True
-            else:
-              logger.warning(f"Connection {connection_id} not found for update")
-              return False
-
+      logger.info(f"Updated connection {connection_id}")
       return True
 
     except Exception as e:
-      logger.error(f"Failed to update connection {connection_id}: {e}", exc_info=True)
+      logger.error(f"Failed to update connection {connection_id}: {e}")
       return False
+    finally:
+      if session_created:
+        session.close()

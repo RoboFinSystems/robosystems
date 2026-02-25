@@ -1,5 +1,6 @@
 """Shared connection models for all providers."""
 
+from datetime import datetime
 from typing import Literal
 
 from pydantic import BaseModel, Field, ValidationInfo, field_validator
@@ -100,13 +101,15 @@ class CreateConnectionRequest(ConnectionBase):
 class ConnectionResponse(BaseModel):
   """Connection response model."""
 
+  model_config = {"from_attributes": True}
+
   connection_id: str = Field(..., description="Unique connection identifier")
-  provider: ProviderType = Field(..., description="Connection provider type")
+  provider: str = Field(..., description="Connection provider type")
   entity_id: str = Field(..., description="Entity identifier")
   status: str = Field(..., description="Connection status")
-  created_at: str = Field(..., description="Creation timestamp")
-  updated_at: str | None = Field(None, description="Last update timestamp")
-  last_sync: str | None = Field(None, description="Last sync timestamp")
+  created_at: datetime | str = Field(..., description="Creation timestamp")
+  updated_at: datetime | str | None = Field(None, description="Last update timestamp")
+  last_sync: datetime | str | None = Field(None, description="Last sync timestamp")
   metadata: dict[str, object] = Field(..., description="Provider-specific metadata")
 
 

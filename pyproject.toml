@@ -55,6 +55,10 @@ dependencies = [
     "dagster-postgres>=0.25.0,<1.0",
     "dagster-aws>=0.25.0,<1.0",
 
+    # Data Transformation (dbt)
+    "dbt-core>=1.9.0,<2.0",
+    "dbt-duckdb>=1.9.0,<2.0",
+
     # Cloud Services (AWS)
     "boto3>=1.39.0,<2.0",
 

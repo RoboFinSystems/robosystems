@@ -606,17 +606,6 @@ def lbug_repository_with_schema(temp_lbug_db):
     )
     """,
     """
-    CREATE NODE TABLE Connection(
-        identifier STRING,
-        provider STRING,
-        uri STRING,
-        status STRING,
-        created_at TIMESTAMP,
-        updated_at TIMESTAMP,
-        PRIMARY KEY (identifier)
-    )
-    """,
-    """
     CREATE NODE TABLE User(
         identifier STRING,
         name STRING,
@@ -718,7 +707,6 @@ def lbug_repository_with_schema(temp_lbug_db):
     "CREATE REL TABLE HAS_REPORT(FROM Entity TO Report)",
     "CREATE REL TABLE REPORTED_IN(FROM Report TO Fact)",
     "CREATE REL TABLE HAS_USER(FROM Entity TO User)",
-    "CREATE REL TABLE HAS_CONNECTION(FROM Entity TO Connection)",
     "CREATE REL TABLE HAS_TRANSACTION(FROM Entity TO Transaction)",
     "CREATE REL TABLE HAS_SECURITY(FROM Entity TO Security)",
     "CREATE REL TABLE HAS_ELEMENT(FROM Fact TO Element)",

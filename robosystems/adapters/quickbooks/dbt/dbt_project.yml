@@ -1,0 +1,50 @@
+name: quickbooks
+version: "1.0.0"
+config-version: 2
+
+profile: quickbooks
+
+model-paths: ["models"]
+seed-paths: ["seeds"]
+test-paths: ["tests"]
+macro-paths: ["macros"]
+target-path: "target"
+clean-targets: ["target", "dbt_packages"]
+
+vars:
+  realm_id: "9341452700148642"
+  entity_identifier: ""
+  qb_base_uri: "https://quickbooks.intuit.com"
+  rs_base_uri: "https://api.robosystems.io"
+  use_seeds: false
+  qb_extract_path: "/tmp/qb_extract"
+
+seeds:
+  quickbooks:
+    +schema: raw
+    raw_journal_lines:
+      +column_types:
+        journal_entry_id: varchar
+        line_num: integer
+        Amount: double
+        PostingType: varchar
+        AccountRef_value: varchar
+        AccountRef_name: varchar
+        Description: varchar
+        DetailType: varchar
+        DepartmentRef_value: varchar
+        DepartmentRef_name: varchar
+        ClassRef_value: varchar
+        ClassRef_name: varchar
+        LocationRef_value: varchar
+        LocationRef_name: varchar
+
+models:
+  quickbooks:
+    staging:
+      +materialized: view
+    graph:
+      nodes:
+        +materialized: table
+      relationships:
+        +materialized: table

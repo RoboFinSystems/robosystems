@@ -99,6 +99,7 @@ update:
 # Run all tests (excludes slow tests)
 test-all:
     @just test
+    @just dbt-test
     -@just lint fix
     @just lint
     @just format
@@ -123,6 +124,20 @@ test-integration:
 # Run tests with coverage (excludes integration)
 test-cov:
     uv run pytest --cov=robosystems tests/ --ignore=tests/integration
+
+# Run QuickBooks dbt models and tests
+dbt-test:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    DBT_DIR="robosystems/adapters/quickbooks/dbt"
+    TMPDIR=$(mktemp -d)
+    trap "rm -rf $TMPDIR" EXIT
+    QB_DUCKDB_PATH="$TMPDIR/quickbooks.duckdb" uv run dbt build \
+        --profiles-dir "$DBT_DIR" \
+        --project-dir "$DBT_DIR" \
+        --target-path "$TMPDIR/target" \
+        --vars '{"use_seeds": true}'
+    echo "dbt: all models and tests passed"
 
 # Run code quality checks (auto-fix first, then verify)
 test-code:

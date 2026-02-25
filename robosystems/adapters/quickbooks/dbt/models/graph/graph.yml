@@ -1,0 +1,152 @@
+version: 2
+
+models:
+  # ── Node Models ──
+  - name: entity
+    description: Entity node from QuickBooks CompanyInfo
+    columns:
+      - name: identifier
+        tests:
+          - unique
+          - not_null
+      - name: name
+        tests:
+          - not_null
+
+  - name: element
+    description: Element node from QuickBooks Chart of Accounts
+    columns:
+      - name: identifier
+        tests:
+          - unique
+          - not_null
+      - name: uri
+        tests:
+          - unique
+          - not_null
+      - name: qname
+        tests:
+          - not_null
+      - name: balance
+        tests:
+          - accepted_values:
+              values: ["debit", "credit"]
+      - name: period_type
+        tests:
+          - accepted_values:
+              values: ["instant", "duration"]
+      - name: classification
+        tests:
+          - accepted_values:
+              values:
+                - asset
+                - liability
+                - equity
+                - revenue
+                - expense
+                - other income
+                - other expense
+
+  - name: transaction
+    description: Transaction node from QuickBooks Journal Entries
+    columns:
+      - name: identifier
+        tests:
+          - unique
+          - not_null
+      - name: uri
+        tests:
+          - unique
+          - not_null
+      - name: date
+        tests:
+          - not_null
+
+  - name: line_item
+    description: LineItem node from QuickBooks Journal Entry Lines
+    columns:
+      - name: identifier
+        tests:
+          - unique
+          - not_null
+
+  - name: dimension
+    description: Dimension node from QuickBooks Department/Class/Location
+    columns:
+      - name: identifier
+        tests:
+          - unique
+          - not_null
+      - name: axis
+        tests:
+          - not_null
+          - accepted_values:
+              values: ["Department", "Class", "Location"]
+      - name: member
+        tests:
+          - not_null
+
+  # ── Relationship Models ──
+  - name: entity_has_transaction
+    description: Links Entity to Transactions
+    columns:
+      - name: entity_identifier
+        tests:
+          - not_null
+          - relationships:
+              to: ref('entity')
+              field: identifier
+      - name: transaction_identifier
+        tests:
+          - not_null
+          - relationships:
+              to: ref('transaction')
+              field: identifier
+
+  - name: transaction_has_line_item
+    description: Links Transactions to LineItems
+    columns:
+      - name: transaction_identifier
+        tests:
+          - not_null
+          - relationships:
+              to: ref('transaction')
+              field: identifier
+      - name: line_item_identifier
+        tests:
+          - not_null
+          - relationships:
+              to: ref('line_item')
+              field: identifier
+
+  - name: line_item_relates_to_element
+    description: Maps LineItems to Elements (accounts)
+    columns:
+      - name: line_item_identifier
+        tests:
+          - not_null
+          - relationships:
+              to: ref('line_item')
+              field: identifier
+      - name: element_identifier
+        tests:
+          - not_null
+          - relationships:
+              to: ref('element')
+              field: identifier
+
+  - name: line_item_has_dimension
+    description: Links LineItems to Dimensions
+    columns:
+      - name: line_item_identifier
+        tests:
+          - not_null
+          - relationships:
+              to: ref('line_item')
+              field: identifier
+      - name: dimension_identifier
+        tests:
+          - not_null
+          - relationships:
+              to: ref('dimension')
+              field: identifier
