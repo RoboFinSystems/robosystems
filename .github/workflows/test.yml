@@ -227,23 +227,28 @@ jobs:
           # Run tests (exclude integration and slow tests)
           uv run pytest -v --tb=short --ignore=tests/integration -m "not slow"
 
-      - name: Run linting
+      - name: Run dbt tests
         timeout-minutes: 1
         run: |
-          timeout 60 uv run ruff check . --output-format=github || {
-            echo "::error::Linting timed out after 1 minute"
-            exit 1
-          }
+          echo "🔍 Running QuickBooks dbt models and tests..."
+          DBT_DIR="robosystems/adapters/quickbooks/dbt"
+          TMPDIR=$(mktemp -d)
+          QB_DUCKDB_PATH="$TMPDIR/quickbooks.duckdb" uv run dbt build \
+            --profiles-dir "$DBT_DIR" \
+            --project-dir "$DBT_DIR" \
+            --target-path "$TMPDIR/target" \
+            --vars '{"use_seeds": true}'
+          echo "✅ dbt: all models and tests passed"
+
+      - name: Run linting
+        timeout-minutes: 1
+        run: uv run ruff check . --output-format=github
 
       - name: Run type checking
         timeout-minutes: 3
-        run: |
-          echo "🔍 Starting type checking with basedpyright..."
-          export NODE_OPTIONS="--max-old-space-size=2048"
-          timeout 180 uv run basedpyright || {
-            echo "::error::Type checking timed out after 3 minutes"
-            exit 1
-          }
+        env:
+          NODE_OPTIONS: "--max-old-space-size=2048"
+        run: uv run basedpyright
 
       - name: Lint CloudFormation templates
         timeout-minutes: 1
