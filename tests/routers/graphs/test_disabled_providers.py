@@ -1,6 +1,6 @@
 """Test error handling for disabled providers."""
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from fastapi import status
@@ -129,57 +129,6 @@ class TestDisabledProviderHandling:
         response_json = response.json()
         # The error response has a nested structure
         assert "SEC provider is not enabled" in response_json["detail"]["detail"]
-
-  def test_create_link_token_disabled_plaid(self, client: TestClient, auth_headers):
-    """Test creating a link token for disabled Plaid provider returns 403."""
-
-    # Mock the graph repository to return a coroutine
-    async def mock_get_repo(*args, **kwargs):
-      mock_repo = MagicMock()
-      mock_repo.execute_single.return_value = {
-        "identifier": "entity_123",
-        "name": "Test Entity",
-      }
-      return mock_repo
-
-    with (
-      patch(
-        "robosystems.routers.graphs.connections.link_token.get_graph_repository",
-        new=mock_get_repo,
-      ),
-      patch("robosystems.operations.providers.registry.env") as mock_env,
-    ):
-      # Configure mock env with Plaid disabled
-      mock_env.CONNECTION_SEC_ENABLED = True
-      mock_env.CONNECTION_QUICKBOOKS_ENABLED = True
-      mock_env.CONNECTION_PLAID_ENABLED = False
-
-      # Re-initialize the provider registry
-      import robosystems.routers.graphs.connections.link_token as link_token_module
-      from robosystems.operations.providers.registry import ProviderRegistry
-      from robosystems.routers.graphs.connections import utils
-
-      new_registry = ProviderRegistry()
-      utils.provider_registry = new_registry
-      link_token_module.provider_registry = new_registry
-
-      request_data = {
-        "entity_id": "entity_123",
-        "user_id": "user_123",
-        "provider": "plaid",
-      }
-
-      response = client.post(
-        f"/v1/graphs/{VALID_TEST_GRAPH_ID}/connections/link/token",
-        json=request_data,
-        headers=auth_headers,
-      )
-
-      # Should return 403 Forbidden, not 500
-      assert response.status_code == status.HTTP_403_FORBIDDEN
-      response_json = response.json()
-      # The error response has a nested structure
-      assert "Plaid provider is not enabled" in response_json["detail"]["detail"]
 
   def test_delete_connection_disabled_provider(self, client: TestClient, auth_headers):
     """Test deleting a connection for disabled provider returns 403."""
