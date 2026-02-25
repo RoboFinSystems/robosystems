@@ -6,13 +6,11 @@ the graph output tables as qb_*.parquet for loading.
 
 import json
 import subprocess
-import tempfile
-from pathlib import Path
 
 from dagster import AssetExecutionContext, MaterializeResult, asset
 
 from .configs import QBSyncConfig
-from .utils import DBT_PROJECT_DIR, export_duckdb_tables
+from .utils import DBT_PROJECT_DIR, export_duckdb_tables, get_pipeline_work_dir
 
 
 @asset(
@@ -31,44 +29,25 @@ def qb_transform(
 ) -> MaterializeResult:
   """Run dbt build on extracted QB data and export graph tables.
 
-  1. Runs dbt build with the extracted parquet path as a var
-  2. Opens the output DuckDB and exports each graph table as qb_*.parquet
-
-  Reads extract_path from the qb_extract asset's metadata.
+  Reads extract parquet from the shared pipeline work directory,
+  runs dbt build, then exports graph tables as qb_*.parquet.
 
   Returns:
-      MaterializeResult with output_path metadata (dir with qb_*.parquet files)
+      MaterializeResult with output statistics
   """
-  # Get extract path from upstream asset metadata
-  extract_events = context.instance.get_latest_materialization_event(
-    context.asset_key_for_asset("qb_extract")
-  )
-  if not extract_events or not extract_events.asset_materialization:
-    raise ValueError("No extract metadata found — run qb_extract first")
-
-  extract_metadata = extract_events.asset_materialization.metadata
-  extract_path = extract_metadata.get("extract_path")
-  if not extract_path:
-    raise ValueError("extract_path not found in qb_extract metadata")
-  extract_path = (
-    extract_path.value if hasattr(extract_path, "value") else str(extract_path)
-  )
-
-  context.log.info(
-    f"Transform: extract_path={extract_path}, realm_id={config.realm_id}"
-  )
-
-  # Create temp directories for dbt output
-  work_dir = Path(tempfile.mkdtemp(prefix=f"qb_transform_{config.graph_id}_"))
+  work_dir = get_pipeline_work_dir(config.graph_id)
+  extract_dir = work_dir / "extract"
   duckdb_path = work_dir / "quickbooks.duckdb"
-  target_path = work_dir / "target"
+  target_path = work_dir / "dbt_target"
   output_dir = work_dir / "output"
+
+  context.log.info(f"Transform: extract_dir={extract_dir}, realm_id={config.realm_id}")
 
   # Build dbt vars
   dbt_vars = json.dumps(
     {
       "realm_id": config.realm_id,
-      "qb_extract_path": extract_path,
+      "qb_extract_path": str(extract_dir),
       "use_seeds": False,
     }
   )
@@ -97,9 +76,14 @@ def qb_transform(
     },
   )
 
+  # Log stdout/stderr regardless of outcome
+  if result.stdout:
+    for line in result.stdout.strip().split("\n")[-20:]:
+      context.log.info(f"dbt: {line.strip()}")
   if result.returncode != 0:
-    context.log.error(f"dbt build failed:\n{result.stderr}")
-    raise RuntimeError(f"dbt build failed: {result.stderr[-500:]}")
+    if result.stderr:
+      context.log.error(f"dbt stderr:\n{result.stderr[-1000:]}")
+    raise RuntimeError(f"dbt build failed (exit code {result.returncode})")
 
   context.log.info("dbt build succeeded")
 

@@ -4,9 +4,6 @@ Fetches data from QuickBooks API and writes raw parquet files
 to a temp directory for dbt transformation.
 """
 
-import tempfile
-from pathlib import Path
-
 from dagster import AssetExecutionContext, MaterializeResult, asset
 
 from .configs import QBSyncConfig
@@ -15,6 +12,7 @@ from .utils import (
   flatten_company_info,
   flatten_journal_entries,
   flatten_journal_lines,
+  get_pipeline_work_dir,
   write_extract_parquet,
 )
 
@@ -92,8 +90,8 @@ def qb_extract(
     f"Flattened: {len(journal_entries)} entries, {len(journal_lines)} lines"
   )
 
-  # Write parquet to temp directory
-  extract_dir = Path(tempfile.mkdtemp(prefix=f"qb_extract_{config.graph_id}_"))
+  # Write parquet to shared pipeline directory
+  extract_dir = get_pipeline_work_dir(config.graph_id) / "extract"
   write_extract_parquet(
     extract_dir, accounts, journal_entries, journal_lines, company_info
   )

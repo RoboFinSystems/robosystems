@@ -1,5 +1,6 @@
 """QuickBooks pipeline utilities."""
 
+import tempfile
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -7,6 +8,21 @@ from typing import Any
 import pandas as pd
 
 from robosystems.logger import logger
+
+
+def get_pipeline_work_dir(graph_id: str) -> Path:
+  """Get a deterministic work directory for a pipeline run.
+
+  All assets in the same pipeline run share this directory so they
+  can pass data between extract → transform → load without needing
+  Dagster IO managers or metadata lookups.
+
+  The directory persists for the lifetime of the temp dir (OS-managed).
+  """
+  base = Path(tempfile.gettempdir()) / "qb_pipeline" / graph_id
+  base.mkdir(parents=True, exist_ok=True)
+  return base
+
 
 # Graph output tables in dependency order (nodes first, then relationships)
 QB_NODE_TABLES = ["entity", "element", "dimension", "transaction", "line_item"]

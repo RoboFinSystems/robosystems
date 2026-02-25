@@ -10,7 +10,7 @@ from pathlib import Path
 from dagster import AssetExecutionContext, MaterializeResult, asset
 
 from .configs import QBSyncConfig
-from .utils import QB_ALL_TABLES
+from .utils import QB_ALL_TABLES, get_pipeline_work_dir
 
 # Map dbt output table names to schema table names (PascalCase for nodes)
 TABLE_NAME_MAP = {
@@ -65,19 +65,9 @@ def qb_load(
   Returns:
       MaterializeResult with load statistics
   """
-  # Get output path from upstream asset metadata
-  transform_events = context.instance.get_latest_materialization_event(
-    context.asset_key_for_asset("qb_transform")
-  )
-  if not transform_events or not transform_events.asset_materialization:
-    raise ValueError("No transform metadata found — run qb_transform first")
-
-  transform_metadata = transform_events.asset_materialization.metadata
-  output_path = transform_metadata.get("output_path")
-  if not output_path:
-    raise ValueError("output_path not found in qb_transform metadata")
-  output_path = output_path.value if hasattr(output_path, "value") else str(output_path)
-  output_dir = Path(output_path)
+  # Get output path from shared pipeline directory
+  work_dir = get_pipeline_work_dir(config.graph_id)
+  output_dir = work_dir / "output"
 
   context.log.info(
     f"Loading QB data for graph={config.graph_id}, output_dir={output_dir}"
