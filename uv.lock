@@ -1992,15 +1992,6 @@ wheels = [
 ]
 
 [[package]]
-name = "nulltype"
-version = "2.3.1"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/2f/ce/92289851364b7f816a839c8064aac06c01f3a3ecf33ab04adf9d0a0ab66a/nulltype-2.3.1.zip", hash = "sha256:64aa3cb2ab5e904d1b37175b9b922bea268c13f9ce32e3d373313150ab5ef272", size = 20119, upload-time = "2018-06-03T22:01:01.45Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/00/0f/47dde1a3cceac9858da0bfb92d2279bf5f993ed075b72983e92efc297db3/nulltype-2.3.1-py2.py3-none-any.whl", hash = "sha256:16ae565745118e37e0558441f5821c76351d8c3a789640b5bca277cf65b2271b", size = 11054, upload-time = "2018-06-03T22:01:04.03Z" },
-]
-
-[[package]]
 name = "numpy"
 version = "2.4.2"
 source = { registry = "https://pypi.org/simple" }
@@ -2467,17 +2458,6 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/4a/82/3a721f7d69dca802befb8af08b7c79ebcab461007ce1c18bd91a5d5896f9/pillow-11.3.0-cp314-cp314t-win_amd64.whl", hash = "sha256:8924748b688aa210d79883357d102cd64690e56b923a186f35a82cbc10f997db", size = 7121500, upload-time = "2025-07-01T09:15:48.512Z" },
     { url = "https://files.pythonhosted.org/packages/89/c7/5572fa4a3f45740eaab6ae86fcdf7195b55beac1371ac8c619d880cfe948/pillow-11.3.0-cp314-cp314t-win_arm64.whl", hash = "sha256:79ea0d14d3ebad43ec77ad5272e6ff9bba5b679ef73375ea760261207fa8e0aa", size = 2512835, upload-time = "2025-07-01T09:15:50.399Z" },
 ]
-
-[[package]]
-name = "plaid-python"
-version = "34.0.0"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "nulltype" },
-    { name = "python-dateutil" },
-    { name = "urllib3" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/ba/69/20c80ce6601be8269d95746138adcf6f0fbc2bcf70e844bb8df84359789f/plaid_python-34.0.0.tar.gz", hash = "sha256:c7aaf2ee4333c4135342601509e4a2abcd93522f2ca6efd228514d1a72275a19", size = 1070057, upload-time = "2025-06-12T23:06:49.504Z" }
 
 [[package]]
 name = "platformdirs"
@@ -3245,7 +3225,6 @@ dependencies = [
     { name = "opentelemetry-instrumentation-requests" },
     { name = "opentelemetry-sdk" },
     { name = "pandas" },
-    { name = "plaid-python" },
     { name = "psutil" },
     { name = "psycopg2-binary" },
     { name = "pyarrow" },
@@ -3335,7 +3314,6 @@ requires-dist = [
     { name = "opentelemetry-instrumentation-requests", specifier = ">=0.55b0,<1.0" },
     { name = "opentelemetry-sdk", specifier = ">=1.35.0,<2.0" },
     { name = "pandas", specifier = ">=2.3.0,<3.0" },
-    { name = "plaid-python", specifier = ">=34.0,<35.0" },
     { name = "psutil", specifier = ">=7.2.1,<8.0" },
     { name = "psycopg2-binary", specifier = ">=2.9.0,<3.0" },
     { name = "pyarrow", specifier = ">=20.0.0" },

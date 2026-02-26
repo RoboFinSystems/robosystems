@@ -1,1 +1,0 @@
-"""Plaid client tests."""

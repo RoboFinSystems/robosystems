@@ -288,10 +288,9 @@ TRANSACTION_NODES = [
       Property(name="number", type="STRING"),
       Property(name="sync_hash", type="STRING"),
       Property(name="currency", type="STRING"),
-      # Plaid-specific properties
-      Property(name="plaid_merchant_name", type="STRING"),
-      Property(name="plaid_category", type="STRING"),
-      Property(name="plaid_pending", type="BOOLEAN"),
+      Property(name="merchant_name", type="STRING"),
+      Property(name="category", type="STRING"),
+      Property(name="pending", type="BOOLEAN"),
       Property(name="updated_at", type="STRING"),
     ],
   ),

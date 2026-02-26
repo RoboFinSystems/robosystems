@@ -36,7 +36,7 @@ class ConnectionService:
 
     Args:
         entity_id: Entity identifier (used as graph_id for backward compat)
-        provider: Provider name (quickbooks, plaid, sec)
+        provider: Provider name (quickbooks, sec)
         user_id: User who owns the connection
         credentials: OAuth tokens or API keys to encrypt and store
         metadata: Provider-specific metadata (realm_id, item_id, cik, etc.)

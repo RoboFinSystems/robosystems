@@ -524,7 +524,7 @@ class TestSyncConnection:
     mock_user = _make_mock_user()
     mock_db = MagicMock()
     request = _make_sync_request()
-    connection_dict = _make_connection_dict(provider="plaid")
+    connection_dict = _make_connection_dict(provider="quickbooks")
     components = _make_robustness_components()
 
     with (
@@ -542,7 +542,7 @@ class TestSyncConnection:
       patch(f"{SYNC_MODULE}.provider_registry") as mock_registry,
     ):
       mock_registry.get_provider = MagicMock(return_value=MagicMock())
-      mock_registry.sync_connection = AsyncMock(return_value="task_plaid")
+      mock_registry.sync_connection = AsyncMock(return_value="task_quickbooks")
 
       result = await sync_connection(
         graph_id=GRAPH_ID,
@@ -553,7 +553,7 @@ class TestSyncConnection:
         _rate_limit=None,
       )
 
-    assert "PLAID" in result["message"]
+    assert "QUICKBOOKS" in result["message"]
 
   @pytest.mark.unit
   @pytest.mark.asyncio

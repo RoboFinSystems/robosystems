@@ -528,10 +528,6 @@ class EnvConfig:
     "CONNECTION_QUICKBOOKS_ENABLED",
     get_parameter_value("CONNECTION_QUICKBOOKS_ENABLED", "false").lower() == "true",
   )
-  CONNECTION_PLAID_ENABLED = get_bool_env(
-    "CONNECTION_PLAID_ENABLED",
-    get_parameter_value("CONNECTION_PLAID_ENABLED", "false").lower() == "true",
-  )
 
   # ==========================================================================
   # 3. GRAPH DATABASES - MULTI-BACKEND (LADYBUGDB AND NEO4J)
@@ -737,11 +733,6 @@ class EnvConfig:
     "INTUIT_REDIRECT_URI", "http://localhost:8000/auth/callback"
   )
   INTUIT_ENVIRONMENT = get_secret_value("INTUIT_ENVIRONMENT", "sandbox")
-
-  # Plaid
-  PLAID_CLIENT_ID = get_secret_value("PLAID_CLIENT_ID", "")
-  PLAID_CLIENT_SECRET = get_secret_value("PLAID_CLIENT_SECRET", "")
-  PLAID_ENVIRONMENT = get_secret_value("PLAID_ENVIRONMENT", "sandbox")
 
   # SEC
   # SEC_GOV_USER_AGENT is a secret identity for API access

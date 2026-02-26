@@ -107,9 +107,9 @@ class AccountingDataGenerator:
       "number": identifier,
       "sync_hash": None,
       "currency": "USD",
-      "plaid_merchant_name": None,
-      "plaid_category": None,
-      "plaid_pending": False,
+      "merchant_name": None,
+      "category": None,
+      "pending": False,
       "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
     }
 

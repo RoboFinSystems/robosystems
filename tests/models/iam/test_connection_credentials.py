@@ -33,7 +33,7 @@ class TestConnectionCredentialsModel:
     """Test that ConnectionCredentials ID is generated with proper format."""
     ConnectionCredentials(
       connection_id="conn_test",
-      provider="Plaid",
+      provider="QuickBooks",
       user_id="user_test",
     )
 
@@ -140,14 +140,14 @@ class TestConnectionCredentialsModel:
     """Test setting and getting credentials through public methods."""
     cred = ConnectionCredentials(
       connection_id="conn_test",
-      provider="Plaid",
+      provider="QuickBooks",
       user_id="user_test",
     )
 
     test_creds = {
-      "client_id": "plaid_client_id",
-      "secret": "plaid_secret",
-      "access_token": "plaid_access_token",
+      "client_id": "test_client_id",
+      "secret": "test_secret",
+      "access_token": "test_access_token",
     }
 
     # Mock the encryption key
@@ -265,7 +265,7 @@ class TestConnectionCredentialsModel:
       # Create credentials
       cred = ConnectionCredentials.create(
         connection_id="conn_find",
-        provider="Plaid",
+        provider="QuickBooks",
         user_id="user_find",
         credentials=test_creds,
         session=db_session,
@@ -324,10 +324,10 @@ class TestConnectionCredentialsModel:
 
       # Create one for different provider
       ConnectionCredentials.create(
-        connection_id="conn_plaid",
-        provider="Plaid",
+        connection_id="conn_other",
+        provider="SEC",
         user_id="user_multi",
-        credentials={"token": "plaid_token"},
+        credentials={"token": "other_token"},
         session=db_session,
       )
 
@@ -337,11 +337,11 @@ class TestConnectionCredentialsModel:
       )
       assert len(qb_creds) == 3
 
-      # Get Plaid credentials
-      plaid_creds = ConnectionCredentials.get_by_user_and_provider(
-        "user_multi", "Plaid", db_session
+      # Get SEC credentials
+      other_creds = ConnectionCredentials.get_by_user_and_provider(
+        "user_multi", "SEC", db_session
       )
-      assert len(plaid_creds) == 1
+      assert len(other_creds) == 1
 
   def test_update_credentials(self, db_session):
     """Test updating existing credentials."""
@@ -413,7 +413,7 @@ class TestConnectionCredentialsModel:
       # Create credentials
       cred = ConnectionCredentials.create(
         connection_id="conn_deactivate",
-        provider="Plaid",
+        provider="QuickBooks",
         user_id="user_deactivate",
         credentials=test_creds,
         session=db_session,
@@ -463,7 +463,7 @@ class TestConnectionCredentialsModel:
     # Future expiry
     cred2 = ConnectionCredentials(
       connection_id="conn_2",
-      provider="Plaid",
+      provider="QuickBooks",
       user_id="user_2",
       expires_at=datetime.now(UTC) + timedelta(hours=1),
     )
@@ -516,7 +516,7 @@ class TestConnectionCredentialsModel:
     cred = ConnectionCredentials(
       id="cred_test",
       connection_id="conn_test",
-      provider="Plaid",
+      provider="QuickBooks",
       user_id="user_test",
     )
 
@@ -576,7 +576,7 @@ class TestConnectionCredentialsModel:
   def test_multiple_providers_same_user(self, db_session):
     """Test that a user can have credentials for multiple providers."""
     user_id = "user_multi_provider"
-    providers = ["QuickBooks", "Plaid", "SEC", "Stripe"]
+    providers = ["QuickBooks", "SEC", "Stripe", "Custom"]
 
     with patch.object(
       ConnectionCredentials,

@@ -57,11 +57,6 @@ This endpoint initiates connections to external data sources:
 - Requires admin permissions in QuickBooks
 - Complete with OAuth callback
 
-**Plaid Connections**:
-- Returns Plaid Link token
-- User completes bank authentication
-- Exchange public token for access
-
 Note:
 This operation is included - no credit consumption required.""",
   responses={
@@ -90,7 +85,6 @@ async def create_connection(
   Supports multiple providers:
   - SEC: Requires CIK for public entity filings
   - QuickBooks: Requires OAuth authentication (separate flow)
-  - Plaid: Requires Link token flow for bank connections
   """
   # Initialize robustness components
   components = create_robustness_components()
@@ -145,9 +139,6 @@ async def create_connection(
       config = request.sec_config
     elif request.provider == "quickbooks":
       config = request.quickbooks_config
-    elif request.provider == "plaid":
-      config = request.plaid_config
-
     # Validate provider is enabled before any database operations
     provider_registry.get_provider(request.provider)
 
@@ -272,7 +263,7 @@ async def create_connection(
 Returns active and inactive connections with their current status.
 Connections can be filtered by:
 - **Entity**: Show connections for a specific entity
-- **Provider**: Filter by connection type (sec, quickbooks, plaid)
+- **Provider**: Filter by connection type (sec, quickbooks)
 
 Each connection shows:
 - Current sync status and health

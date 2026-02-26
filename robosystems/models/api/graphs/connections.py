@@ -6,7 +6,7 @@ from typing import Literal
 from pydantic import BaseModel, Field, ValidationInfo, field_validator
 
 # Provider types
-ProviderType = Literal["sec", "quickbooks", "plaid"]
+ProviderType = Literal["sec", "quickbooks"]
 
 
 class ConnectionBase(BaseModel):
@@ -43,36 +43,19 @@ class QuickBooksConnectionConfig(BaseModel):
   refresh_token: str | None = Field(None, description="OAuth refresh token")
 
 
-class PlaidConnectionConfig(BaseModel):
-  """Plaid-specific connection configuration."""
-
-  public_token: str | None = Field(None, description="Plaid public token for exchange")
-  access_token: str | None = Field(
-    None, description="Plaid access token (set after exchange)"
-  )
-  item_id: str | None = Field(None, description="Plaid item ID")
-  institution: dict[str, object] | None = Field(
-    None, description="Institution information"
-  )
-  accounts: list[dict[str, object]] | None = Field(
-    None, description="Connected accounts"
-  )
-
-
 class CreateConnectionRequest(ConnectionBase):
   """Request to create a new connection."""
 
   sec_config: SECConnectionConfig | None = None
   quickbooks_config: QuickBooksConnectionConfig | None = None
-  plaid_config: PlaidConnectionConfig | None = None
 
-  @field_validator("sec_config", "quickbooks_config", "plaid_config")
+  @field_validator("sec_config", "quickbooks_config")
   @classmethod
   def validate_provider_config(
     cls,
-    v: SECConnectionConfig | QuickBooksConnectionConfig | PlaidConnectionConfig | None,
+    v: SECConnectionConfig | QuickBooksConnectionConfig | None,
     info: ValidationInfo,
-  ) -> SECConnectionConfig | QuickBooksConnectionConfig | PlaidConnectionConfig | None:
+  ) -> SECConnectionConfig | QuickBooksConnectionConfig | None:
     """Ensure only the matching provider config is provided."""
     provider = info.data.get("provider")
     field_name = info.field_name
@@ -83,7 +66,6 @@ class CreateConnectionRequest(ConnectionBase):
     field_to_provider = {
       "sec_config": "sec",
       "quickbooks_config": "quickbooks",
-      "plaid_config": "plaid",
     }
 
     expected_provider = field_to_provider.get(field_name)

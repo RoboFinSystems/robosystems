@@ -8,11 +8,9 @@ from sqlalchemy.orm import Session
 from ...config import env
 from ...middleware.otel.metrics import get_endpoint_metrics
 from ...models.api.graphs.connections import (
-  PlaidConnectionConfig,
   QuickBooksConnectionConfig,
   SECConnectionConfig,
 )
-from .plaid_provider import PlaidProvider
 from .quickbooks_provider import (
   cleanup_quickbooks_connection,
   create_quickbooks_connection,
@@ -54,9 +52,6 @@ class ProviderRegistry:
   """Registry for connection providers."""
 
   def __init__(self):
-    # Initialize Plaid provider instance only if enabled
-    self._plaid_provider = PlaidProvider() if env.CONNECTION_PLAID_ENABLED else None
-
     # Map provider types to their handlers - only include enabled providers
     self._providers = {}
 
@@ -81,16 +76,6 @@ class ProviderRegistry:
         "config_class": QuickBooksConnectionConfig,
       }
 
-    # Add Plaid provider if enabled
-    if env.CONNECTION_PLAID_ENABLED and self._plaid_provider:
-      self._providers["plaid"] = {
-        "create": self._plaid_provider.create_connection,
-        "sync": self._plaid_provider.sync_connection,
-        "cleanup": self._plaid_provider.cleanup_connection,
-        "config_class": PlaidConnectionConfig,
-        "instance": self._plaid_provider,  # For special methods like link token
-      }
-
   def _record_feature_flag_status(self):
     """Record feature flag status at initialization for monitoring."""
     try:
@@ -99,7 +84,6 @@ class ProviderRegistry:
       for provider, enabled in [
         ("sec", env.CONNECTION_SEC_ENABLED),
         ("quickbooks", env.CONNECTION_QUICKBOOKS_ENABLED),
-        ("plaid", env.CONNECTION_PLAID_ENABLED),
       ]:
         metrics.record_business_event(
           endpoint="provider_registry",
@@ -137,11 +121,6 @@ class ProviderRegistry:
         raise ValueError(
           "QuickBooks provider is not enabled. Please contact support to enable this connection type."
         )
-      elif provider_lower == "plaid" and not env.CONNECTION_PLAID_ENABLED:
-        self._record_disabled_provider_request(provider_lower)
-        raise ValueError(
-          "Plaid provider is not enabled. Please contact support to enable this connection type."
-        )
       else:
         raise ValueError(f"Unknown provider type: {provider_type}")
     return provider
@@ -176,18 +155,6 @@ class ProviderRegistry:
       logger.warning(f"Request for disabled provider: {provider}")
     except Exception as e:
       logger.debug(f"Failed to record disabled provider metric: {e}")
-
-  def get_plaid_provider(self) -> PlaidProvider:
-    """Get Plaid provider instance for special operations."""
-    # Record provider request metric
-    self._record_provider_request("plaid")
-
-    if not self._plaid_provider:
-      self._record_disabled_provider_request("plaid")
-      raise ValueError(
-        "Plaid provider is not enabled. Please contact support to enable this connection type."
-      )
-    return self._plaid_provider
 
   async def create_connection(
     self,

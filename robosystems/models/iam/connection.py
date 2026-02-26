@@ -1,7 +1,7 @@
 """Connection model for managing data source connections.
 
 Connections represent links between a user's graph and external data sources
-(QuickBooks, Plaid, SEC). All connection metadata is stored in PostgreSQL.
+(QuickBooks, SEC). All connection metadata is stored in PostgreSQL.
 Encrypted credentials are stored separately in ConnectionCredentials.
 """
 
@@ -43,12 +43,12 @@ class Connection(Model):
   )
   graph_id = Column(String, ForeignKey("graphs.graph_id"), nullable=False)
   user_id = Column(String, ForeignKey("users.id"), nullable=False)
-  provider = Column(String, nullable=False)  # quickbooks, plaid, sec
+  provider = Column(String, nullable=False)  # quickbooks, sec
   status = Column(String, default=ConnectionStatus.PENDING_OAUTH, nullable=False)
 
   # Provider-specific metadata
   realm_id = Column(String, nullable=True)  # QuickBooks realm ID
-  item_id = Column(String, nullable=True)  # Plaid item ID
+  item_id = Column(String, nullable=True)
   cik = Column(String, nullable=True)  # SEC Central Index Key
   entity_name = Column(String, nullable=True)
   institution_name = Column(String, nullable=True)

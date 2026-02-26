@@ -21,8 +21,8 @@ select
   tx_number as number,
   null as sync_hash,
   'USD' as currency,
-  null as plaid_merchant_name,
-  null as plaid_category,
-  null as plaid_pending,
+  null as merchant_name,
+  null as category,
+  null as pending,
   current_timestamp::varchar as updated_at
 from entries

@@ -45,7 +45,6 @@ class TestConnectionFeatureFlags:
         # Configure mock env
         mock_env.CONNECTION_SEC_ENABLED = False
         mock_env.CONNECTION_QUICKBOOKS_ENABLED = False
-        mock_env.CONNECTION_PLAID_ENABLED = False
 
         # Mock ConnectionService to prevent database access in case route matching fails
         with patch(
@@ -73,7 +72,6 @@ class TestConnectionFeatureFlags:
         # Configure mock env
         mock_env.CONNECTION_SEC_ENABLED = True
         mock_env.CONNECTION_QUICKBOOKS_ENABLED = False
-        mock_env.CONNECTION_PLAID_ENABLED = False
 
         with patch(
           "robosystems.operations.connection_service.ConnectionService.get_connection"
@@ -103,7 +101,6 @@ class TestConnectionFeatureFlags:
         # Configure mock env
         mock_env.CONNECTION_SEC_ENABLED = False
         mock_env.CONNECTION_QUICKBOOKS_ENABLED = True
-        mock_env.CONNECTION_PLAID_ENABLED = False
 
         with patch(
           "robosystems.operations.connection_service.ConnectionService.get_connection"
@@ -119,34 +116,6 @@ class TestConnectionFeatureFlags:
     finally:
       app.dependency_overrides.clear()
 
-  def test_options_endpoint_plaid_only_enabled(self, client: TestClient, mock_user):
-    """Test connection options endpoint with only Plaid enabled."""
-    from main import app
-    from robosystems.middleware.auth.dependencies import get_current_user_with_graph
-
-    app.dependency_overrides[get_current_user_with_graph] = lambda: mock_user
-
-    try:
-      with patch("robosystems.routers.graphs.connections.options.env") as mock_env:
-        # Configure mock env
-        mock_env.CONNECTION_SEC_ENABLED = False
-        mock_env.CONNECTION_QUICKBOOKS_ENABLED = False
-        mock_env.CONNECTION_PLAID_ENABLED = True
-
-        with patch(
-          "robosystems.operations.connection_service.ConnectionService.get_connection"
-        ):
-          response = client.get("/v1/graphs/kg1a2b3c4d5e6f7a8b/connections/options")
-
-          assert response.status_code == 200
-          data = response.json()
-          assert data["total_providers"] == 1
-          assert len(data["providers"]) == 1
-          assert data["providers"][0]["provider"] == "plaid"
-          assert data["providers"][0]["display_name"] == "Bank Connections (Plaid)"
-    finally:
-      app.dependency_overrides.clear()
-
   def test_options_endpoint_all_enabled(self, client: TestClient, mock_user):
     """Test connection options endpoint with all providers enabled."""
     from main import app
@@ -159,7 +128,6 @@ class TestConnectionFeatureFlags:
         # Configure mock env
         mock_env.CONNECTION_SEC_ENABLED = True
         mock_env.CONNECTION_QUICKBOOKS_ENABLED = True
-        mock_env.CONNECTION_PLAID_ENABLED = True
 
         with patch(
           "robosystems.operations.connection_service.ConnectionService.get_connection"
@@ -168,14 +136,13 @@ class TestConnectionFeatureFlags:
 
           assert response.status_code == 200
           data = response.json()
-          assert data["total_providers"] == 3
-          assert len(data["providers"]) == 3
+          assert data["total_providers"] == 2
+          assert len(data["providers"]) == 2
 
           # Check all providers are present
           provider_names = [p["provider"] for p in data["providers"]]
           assert "sec" in provider_names
           assert "quickbooks" in provider_names
-          assert "plaid" in provider_names
     finally:
       app.dependency_overrides.clear()
 
@@ -188,10 +155,9 @@ class TestConnectionFeatureFlags:
 
     try:
       with patch("robosystems.routers.graphs.connections.options.env") as mock_env:
-        # Configure mock env - SEC and QuickBooks enabled, Plaid disabled
+        # Configure mock env - SEC and QuickBooks enabled
         mock_env.CONNECTION_SEC_ENABLED = True
         mock_env.CONNECTION_QUICKBOOKS_ENABLED = True
-        mock_env.CONNECTION_PLAID_ENABLED = False
 
         with patch(
           "robosystems.operations.connection_service.ConnectionService.get_connection"
@@ -206,7 +172,6 @@ class TestConnectionFeatureFlags:
           provider_names = [p["provider"] for p in data["providers"]]
           assert "sec" in provider_names
           assert "quickbooks" in provider_names
-          assert "plaid" not in provider_names
     finally:
       app.dependency_overrides.clear()
 
@@ -219,7 +184,6 @@ class TestProviderRegistry:
     with patch("robosystems.operations.providers.registry.env") as mock_env:
       mock_env.CONNECTION_SEC_ENABLED = False
       mock_env.CONNECTION_QUICKBOOKS_ENABLED = False
-      mock_env.CONNECTION_PLAID_ENABLED = False
 
       registry = ProviderRegistry()
       assert len(registry._providers) == 0
@@ -229,53 +193,26 @@ class TestProviderRegistry:
     with patch("robosystems.operations.providers.registry.env") as mock_env:
       mock_env.CONNECTION_SEC_ENABLED = True
       mock_env.CONNECTION_QUICKBOOKS_ENABLED = False
-      mock_env.CONNECTION_PLAID_ENABLED = False
 
       registry = ProviderRegistry()
       assert "sec" in registry._providers
       assert "quickbooks" not in registry._providers
-      assert "plaid" not in registry._providers
 
   def test_registry_with_quickbooks_enabled(self):
     """Test provider registry with QuickBooks enabled."""
     with patch("robosystems.operations.providers.registry.env") as mock_env:
       mock_env.CONNECTION_SEC_ENABLED = False
       mock_env.CONNECTION_QUICKBOOKS_ENABLED = True
-      mock_env.CONNECTION_PLAID_ENABLED = False
 
       registry = ProviderRegistry()
       assert "sec" not in registry._providers
       assert "quickbooks" in registry._providers
-      assert "plaid" not in registry._providers
-
-  def test_registry_with_plaid_enabled(self):
-    """Test provider registry with Plaid enabled."""
-    with (
-      patch("robosystems.operations.providers.registry.env") as mock_env,
-      patch(
-        "robosystems.operations.providers.registry.PlaidProvider"
-      ) as MockPlaidProvider,
-    ):
-      mock_env.CONNECTION_SEC_ENABLED = False
-      mock_env.CONNECTION_QUICKBOOKS_ENABLED = False
-      mock_env.CONNECTION_PLAID_ENABLED = True
-
-      # Mock PlaidProvider
-      mock_plaid = MagicMock()
-      MockPlaidProvider.return_value = mock_plaid
-
-      registry = ProviderRegistry()
-      assert "sec" not in registry._providers
-      assert "quickbooks" not in registry._providers
-      assert "plaid" in registry._providers
-      assert registry._plaid_provider == mock_plaid
 
   def test_registry_get_provider_disabled_sec(self):
     """Test getting SEC provider when disabled."""
     with patch("robosystems.operations.providers.registry.env") as mock_env:
       mock_env.CONNECTION_SEC_ENABLED = False
       mock_env.CONNECTION_QUICKBOOKS_ENABLED = False
-      mock_env.CONNECTION_PLAID_ENABLED = False
 
       registry = ProviderRegistry()
 
@@ -289,7 +226,6 @@ class TestProviderRegistry:
     with patch("robosystems.operations.providers.registry.env") as mock_env:
       mock_env.CONNECTION_SEC_ENABLED = False
       mock_env.CONNECTION_QUICKBOOKS_ENABLED = False
-      mock_env.CONNECTION_PLAID_ENABLED = False
 
       registry = ProviderRegistry()
 
@@ -298,26 +234,11 @@ class TestProviderRegistry:
 
       assert "QuickBooks provider is not enabled" in str(exc_info.value)
 
-  def test_registry_get_provider_disabled_plaid(self):
-    """Test getting Plaid provider when disabled."""
-    with patch("robosystems.operations.providers.registry.env") as mock_env:
-      mock_env.CONNECTION_SEC_ENABLED = False
-      mock_env.CONNECTION_QUICKBOOKS_ENABLED = False
-      mock_env.CONNECTION_PLAID_ENABLED = False
-
-      registry = ProviderRegistry()
-
-      with pytest.raises(ValueError) as exc_info:
-        registry.get_provider("plaid")
-
-      assert "Plaid provider is not enabled" in str(exc_info.value)
-
   def test_registry_get_unknown_provider(self):
     """Test getting unknown provider."""
     with patch("robosystems.operations.providers.registry.env") as mock_env:
       mock_env.CONNECTION_SEC_ENABLED = True
       mock_env.CONNECTION_QUICKBOOKS_ENABLED = True
-      mock_env.CONNECTION_PLAID_ENABLED = True
 
       registry = ProviderRegistry()
 
@@ -326,48 +247,12 @@ class TestProviderRegistry:
 
       assert "Unknown provider type: unknown" in str(exc_info.value)
 
-  def test_registry_get_plaid_provider_disabled(self):
-    """Test get_plaid_provider when Plaid is disabled."""
-    with patch("robosystems.operations.providers.registry.env") as mock_env:
-      mock_env.CONNECTION_SEC_ENABLED = False
-      mock_env.CONNECTION_QUICKBOOKS_ENABLED = False
-      mock_env.CONNECTION_PLAID_ENABLED = False
-
-      registry = ProviderRegistry()
-
-      with pytest.raises(ValueError) as exc_info:
-        registry.get_plaid_provider()
-
-      assert "Plaid provider is not enabled" in str(exc_info.value)
-
-  def test_registry_get_plaid_provider_enabled(self):
-    """Test get_plaid_provider when Plaid is enabled."""
-    with (
-      patch("robosystems.operations.providers.registry.env") as mock_env,
-      patch(
-        "robosystems.operations.providers.registry.PlaidProvider"
-      ) as MockPlaidProvider,
-    ):
-      mock_env.CONNECTION_SEC_ENABLED = False
-      mock_env.CONNECTION_QUICKBOOKS_ENABLED = False
-      mock_env.CONNECTION_PLAID_ENABLED = True
-
-      # Mock PlaidProvider
-      mock_plaid = MagicMock()
-      MockPlaidProvider.return_value = mock_plaid
-
-      registry = ProviderRegistry()
-      result = registry.get_plaid_provider()
-
-      assert result == mock_plaid
-
   @pytest.mark.asyncio
   async def test_create_connection_disabled_provider(self):
     """Test creating a connection with a disabled provider."""
     with patch("robosystems.operations.providers.registry.env") as mock_env:
       mock_env.CONNECTION_SEC_ENABLED = False
       mock_env.CONNECTION_QUICKBOOKS_ENABLED = False
-      mock_env.CONNECTION_PLAID_ENABLED = False
 
       registry = ProviderRegistry()
       mock_db = MagicMock(spec=Session)
@@ -390,7 +275,6 @@ class TestProviderRegistry:
     with patch("robosystems.operations.providers.registry.env") as mock_env:
       mock_env.CONNECTION_SEC_ENABLED = False
       mock_env.CONNECTION_QUICKBOOKS_ENABLED = False
-      mock_env.CONNECTION_PLAID_ENABLED = False
 
       registry = ProviderRegistry()
 
@@ -413,27 +297,28 @@ class TestProviderRegistry:
 
   @pytest.mark.asyncio
   async def test_cleanup_connection_disabled_provider(self):
-    """Test cleaning up a connection with a disabled provider."""
+    """Test cleaning up a connection with an unknown provider."""
     with patch("robosystems.operations.providers.registry.env") as mock_env:
       mock_env.CONNECTION_SEC_ENABLED = False
       mock_env.CONNECTION_QUICKBOOKS_ENABLED = False
-      mock_env.CONNECTION_PLAID_ENABLED = False
 
       registry = ProviderRegistry()
 
       connection = {
         "connection_id": "conn_123",
-        "provider": "plaid",
+        "provider": "unknown_provider",
         "entity_id": "test-entity",
         "status": "active",
       }
 
       with pytest.raises(ValueError) as exc_info:
         await registry.cleanup_connection(
-          provider_type="plaid", connection=connection, graph_id="kg1a2b3c4d5e6f7a8b"
+          provider_type="unknown_provider",
+          connection=connection,
+          graph_id="kg1a2b3c4d5e6f7a8b",
         )
 
-      assert "Plaid provider is not enabled" in str(exc_info.value)
+      assert "Unknown provider type" in str(exc_info.value)
 
 
 class TestEnvironmentConfiguration:
@@ -448,7 +333,6 @@ class TestEnvironmentConfiguration:
       # By default, all should be disabled (False)
       assert not get_bool_env("CONNECTION_SEC_ENABLED", False)
       assert not get_bool_env("CONNECTION_QUICKBOOKS_ENABLED", False)
-      assert not get_bool_env("CONNECTION_PLAID_ENABLED", False)
 
   def test_feature_flags_from_env(self):
     """Test feature flags can be set from environment variables."""
@@ -479,13 +363,11 @@ class TestEnvironmentConfiguration:
     env_vars = {
       "CONNECTION_SEC_ENABLED": "true",
       "CONNECTION_QUICKBOOKS_ENABLED": "false",
-      "CONNECTION_PLAID_ENABLED": "true",
     }
 
     with patch.dict("os.environ", env_vars, clear=True):
       assert get_bool_env("CONNECTION_SEC_ENABLED", False) is True
       assert not get_bool_env("CONNECTION_QUICKBOOKS_ENABLED", False)
-      assert get_bool_env("CONNECTION_PLAID_ENABLED", False) is True
 
 
 class TestGraphOperationFeatureFlags:

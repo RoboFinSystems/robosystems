@@ -176,12 +176,12 @@ class TestInitOAuth:
 
   @pytest.mark.unit
   @pytest.mark.asyncio
-  async def test_init_oauth_plaid_provider_raises_400(self):
-    """Plaid provider also raises 400 since only QuickBooks is supported."""
+  async def test_init_oauth_sec_provider_raises_400(self):
+    """SEC provider raises 400 since only QuickBooks is supported for OAuth."""
     mock_user = _make_mock_user()
     mock_db = MagicMock()
     request = _make_oauth_init_request()
-    connection_dict = _make_connection_dict(provider="plaid")
+    connection_dict = _make_connection_dict(provider="sec")
 
     with patch(
       f"{OAUTH_MODULE}.ConnectionService.get_connection",
@@ -529,7 +529,7 @@ class TestOAuthCallback:
     mock_user = _make_mock_user()
     mock_db = MagicMock()
     request = _make_oauth_callback_request()
-    connection_dict = _make_connection_dict(provider="plaid")
+    connection_dict = _make_connection_dict(provider="sec")
 
     state_data = {
       "user_id": USER_ID,
@@ -550,7 +550,7 @@ class TestOAuthCallback:
     ):
       with pytest.raises(HTTPException) as exc_info:
         await oauth_callback(
-          provider="plaid",
+          provider="sec",
           graph_id=GRAPH_ID,
           request=request,
           current_user=mock_user,

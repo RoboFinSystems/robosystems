@@ -3,7 +3,6 @@
 This module provides adapters for integrating with external financial data sources:
 - SEC EDGAR: Financial filings and XBRL data
 - QuickBooks: Small business accounting data
-- Plaid: Banking and transaction data
 
 Each adapter follows a consistent structure:
 - client/: API connection and authentication
@@ -11,13 +10,6 @@ Each adapter follows a consistent structure:
 
 AWS infrastructure services are in robosystems.operations.aws
 """
-
-# SEC EDGAR adapter
-# Plaid adapter
-from robosystems.adapters.plaid import (
-  PlaidClient,
-  PlaidTransactionsProcessor,
-)
 
 # QuickBooks adapter
 from robosystems.adapters.quickbooks import (
@@ -32,9 +24,6 @@ from robosystems.adapters.sec import (
 
 __all__ = [
   "ArelleClient",
-  # Plaid
-  "PlaidClient",
-  "PlaidTransactionsProcessor",
   # QuickBooks
   "QBClient",
   # SEC

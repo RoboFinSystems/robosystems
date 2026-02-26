@@ -252,7 +252,7 @@ class TestListConnections:
     mock_session = MagicMock()
     mock_conns = [
       _make_mock_connection(id="conn_1", provider="quickbooks"),
-      _make_mock_connection(id="conn_2", provider="plaid"),
+      _make_mock_connection(id="conn_2", provider="sec"),
     ]
 
     with (

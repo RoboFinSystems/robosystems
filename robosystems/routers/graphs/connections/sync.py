@@ -50,11 +50,6 @@ Initiates data sync based on provider type:
 - Generates fresh trial balance
 - Duration depends on data volume
 
-**Plaid Sync**:
-- Retrieves recent bank transactions
-- Updates account balances
-- Categorizes new transactions
-
 Note:
 This operation is included - no credit consumption required.
 

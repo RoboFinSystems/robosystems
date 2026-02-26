@@ -101,9 +101,6 @@ class EnvValidator:
       # QuickBooks integration
       "INTUIT_CLIENT_ID": "QuickBooks OAuth",
       "INTUIT_CLIENT_SECRET": "QuickBooks OAuth",
-      # Plaid integration
-      "PLAID_CLIENT_ID": "Plaid bank connections",
-      "PLAID_CLIENT_SECRET": "Plaid bank connections",
       # LadybugDB database
       "LBUG_DATABASE_PATH": "LadybugDB database storage",
     }
@@ -247,7 +244,6 @@ class EnvValidator:
       "debug": env_config.DEBUG,
       "features": {
         "quickbooks": bool(env_config.INTUIT_CLIENT_ID),
-        "plaid": bool(env_config.PLAID_CLIENT_ID),
         "sec": True,  # Always available
       },
       "database": {

@@ -60,12 +60,12 @@ class TestConnectionCreate:
     conn = Connection.create(
       graph_id="kg_test",
       user_id="usr_1",
-      provider="plaid",
+      provider="quickbooks",
       session=session,
     )
 
     assert conn.graph_id == "kg_test"
-    assert conn.provider == "plaid"
+    assert conn.provider == "quickbooks"
     assert conn.status == ConnectionStatus.PENDING_OAUTH
     assert conn.realm_id is None
     assert conn.item_id is None
@@ -122,7 +122,7 @@ class TestConnectionGetByGraphAndProvider:
     session = MagicMock()
     session.query.return_value.filter.return_value.order_by.return_value.all.return_value = []
 
-    result = Connection.get_by_graph_and_provider("kg_test", "plaid", session)
+    result = Connection.get_by_graph_and_provider("kg_test", "quickbooks", session)
 
     assert result == []
 
@@ -387,7 +387,7 @@ class TestConnectionToDict:
     conn = Connection(
       graph_id="kg_test",
       user_id="usr_1",
-      provider="plaid",
+      provider="quickbooks",
       status="pending_oauth",
       last_sync=None,
       created_at=datetime.now(UTC),
