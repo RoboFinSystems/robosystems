@@ -82,7 +82,7 @@ The `just demo-accounting` command runs all 5 steps automatically. This section 
 **What happens automatically:**
 - Creates new user in PostgreSQL database
 - Generates API key for authentication
-- Stores credentials locally in `examples/credentials/config.json`
+- Stores credentials locally in `.local/config.json`
 
 **Control via flags:**
 ```bash
@@ -472,11 +472,11 @@ You can access the demo accounting graph through any MCP-compatible AI tool (Cla
 
 **Setup MCP Client:**
 
-1. Run `just demo-accounting` to create credentials automatically (your API key is saved to `examples/credentials/config.json`)
+1. Run `just demo-accounting` to create credentials automatically (your API key is saved to `.local/config.json`)
 
 2. Get your API key and graph ID from the credentials file:
 ```bash
-cat examples/credentials/config.json | grep -E "api_key|graph_id"
+cat .local/config.json | grep -E "api_key|graph_id"
 ```
 
 3. Add to your MCP tool config. For Claude Desktop:
@@ -564,7 +564,7 @@ Reset and recreate everything:
 
 ```bash
 # Delete local credentials and data files
-rm -rf examples/credentials/config.json
+rm -rf .local/config.json
 rm -rf examples/accounting_demo/data/
 
 # Run with new user and graph
@@ -581,7 +581,7 @@ just demo-accounting
 
 ### Custom Financial Queries
 
-After running the demo, use the `just graph-query` command for ad-hoc analysis. Get your graph_id from `examples/credentials/config.json`:
+After running the demo, use the `just graph-query` command for ad-hoc analysis. Get your graph_id from `.local/config.json`:
 
 ```bash
 # Find all expenses over $1,000

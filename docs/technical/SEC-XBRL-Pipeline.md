@@ -54,7 +54,7 @@ just demo-sec TSLA 2023 true
 
 **Note:** Setup and loading takes 1-5 minutes depending on the number of years of data.
 
-**Your credentials are saved** to `examples/credentials/config.json` with your API key and user information.
+**Your credentials are saved** to `.local/config.json` with your API key and user information.
 
 ### Advanced: Manual Loading
 
@@ -119,7 +119,7 @@ In interactive mode, you can:
 
 ## Authentication Setup
 
-The `just demo-sec` command automatically creates user credentials for you. Your API key is saved in `examples/credentials/config.json`.
+The `just demo-sec` command automatically creates user credentials for you. Your API key is saved in `.local/config.json`.
 
 **Important:** The API key (starting with `rfs`) is your authentication credential, not to be confused with the JWT Token and Authorization Header.
 
@@ -149,11 +149,11 @@ Access data through any MCP-compatible AI tool (Claude Desktop, Claude Code, Cur
 
 **Setup MCP Client:**
 
-1. Run `just demo-sec` to create credentials automatically (your API key is saved to `examples/credentials/config.json`)
+1. Run `just demo-sec` to create credentials automatically (your API key is saved to `.local/config.json`)
 
 2. Get your API key from the credentials file:
 ```bash
-cat examples/credentials/config.json | grep api_key
+cat .local/config.json | grep api_key
 ```
 
 3. Add to your MCP tool config. For Claude Desktop:
@@ -295,7 +295,7 @@ import json
 from pathlib import Path
 
 # Load API key from credentials file (created by just demo-sec)
-credentials_path = Path("examples/credentials/config.json")
+credentials_path = Path(".local/config.json")
 with open(credentials_path) as f:
     credentials = json.load(f)
 

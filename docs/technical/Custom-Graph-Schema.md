@@ -140,7 +140,7 @@ The `just demo-custom-graph` command runs all 5 steps automatically. This sectio
 **What happens automatically:**
 - Creates new user in PostgreSQL database
 - Generates API key for authentication
-- Stores credentials locally in `examples/credentials/config.json`
+- Stores credentials locally in `.local/config.json`
 
 **Control via flags:**
 ```bash
@@ -418,11 +418,11 @@ You can access the demo custom graph through any MCP-compatible AI tool (Claude 
 
 **Setup MCP Client:**
 
-1. Run `just demo-custom-graph` to create credentials automatically (your API key is saved to `examples/credentials/config.json`)
+1. Run `just demo-custom-graph` to create credentials automatically (your API key is saved to `.local/config.json`)
 
 2. Get your API key and graph ID from the credentials file:
 ```bash
-cat examples/credentials/config.json | grep -E "api_key|graph_id"
+cat .local/config.json | grep -E "api_key|graph_id"
 ```
 
 3. Add to your MCP tool config. For Claude Desktop:
