@@ -669,8 +669,8 @@ async def get_available_extensions(
             # Override description with context-aware information
             description = (
               "Complete accounting system with XBRL reporting and GL transactions. "
-              "Context-aware: SEC repositories get reporting-only tables (9 nodes), "
-              "entity graphs get full accounting capabilities (12 nodes)."
+              "Context-aware: SEC repositories get reporting-only tables, "
+              "entity graphs get full accounting capabilities."
             )
           elif ext_info["name"] == "roboinvestor":
             loader = get_schema_loader([ext_info["name"]])
@@ -725,8 +725,8 @@ async def get_available_extensions(
           name="roboledger",
           description=(
             "Complete accounting system with XBRL reporting and GL transactions. "
-            "Context-aware: SEC repositories get reporting-only tables (9 nodes), "
-            "entity graphs get full accounting capabilities (12 nodes)."
+            "Context-aware: SEC repositories get reporting-only tables, "
+            "entity graphs get full accounting capabilities."
           ),
           enabled=False,
         ),
