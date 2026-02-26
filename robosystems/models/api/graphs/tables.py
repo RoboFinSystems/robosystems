@@ -21,7 +21,11 @@ class FileUploadStatus(str, Enum):
 
 
 class TableCreate(BaseModel):
-  table_name: str = Field(..., description="Table name")
+  table_name: str = Field(
+    ...,
+    description="Table name",
+    pattern=r"^[A-Za-z_][A-Za-z0-9_]*$",
+  )
   s3_pattern: str = Field(..., description="S3 glob pattern for parquet/csv files")
 
   class Config:
@@ -133,6 +137,7 @@ class FileUploadRequest(BaseModel):
   table_name: str | None = Field(
     default=None,
     description="Table name to associate file with (required for first-class /files endpoint)",
+    pattern=r"^[A-Za-z_][A-Za-z0-9_]*$",
     examples=["Entity", "Fact", "PERSON_WORKS_FOR_COMPANY"],
   )
 

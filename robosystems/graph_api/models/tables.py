@@ -4,6 +4,7 @@ DuckDB table-related Pydantic models for the Graph API.
 These models are used for staging table operations (create, query, materialize).
 """
 
+import re
 from typing import Any
 
 from pydantic import BaseModel, Field, field_validator
@@ -23,7 +24,11 @@ class TableCreateRequest(BaseModel):
   """Request to create a DuckDB staging table."""
 
   graph_id: str = Field(..., description="Graph database identifier")
-  table_name: str = Field(..., description="Table name")
+  table_name: str = Field(
+    ...,
+    description="Table name",
+    pattern=r"^[A-Za-z_][A-Za-z0-9_]*$",
+  )
   s3_pattern: str | list[str] = Field(
     ..., description="S3 glob pattern or list of S3 file paths"
   )
@@ -106,6 +111,21 @@ class TableMaterializationRequest(BaseModel):
     default=None,
     description="Optional list of file IDs to materialize. If None, materializes all files (full materialization).",
   )
+
+  @field_validator("file_ids")
+  @classmethod
+  def validate_file_ids(cls, v):
+    """Validate that each file_id is a valid UUID format."""
+    if v is not None:
+      uuid_pattern = re.compile(
+        r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+        re.IGNORECASE,
+      )
+      for fid in v:
+        if not uuid_pattern.match(fid):
+          raise ValueError(f"Invalid file_id format: {fid}. Must be a valid UUID.")
+    return v
+
   batch_num: int | None = Field(
     default=None,
     description="Current batch number (0-indexed) for hash-based batching. Use with num_batches.",

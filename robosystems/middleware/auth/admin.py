@@ -1,5 +1,6 @@
 """Admin authentication middleware using AWS Secrets Manager."""
 
+import hmac
 from functools import wraps
 from typing import Any
 
@@ -56,8 +57,8 @@ class AdminAuthMiddleware:
     if not admin_key:
       return None
 
-    # Check if the provided key matches
-    if api_key == admin_key:
+    # Check if the provided key matches (constant-time comparison)
+    if hmac.compare_digest(api_key, admin_key):
       # Return metadata for the valid key
       return {
         "key_id": "admin",

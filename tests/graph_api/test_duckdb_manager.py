@@ -4,6 +4,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 from fastapi import HTTPException
+from pydantic import ValidationError
 
 from robosystems.graph_api.core.duckdb.manager import (
   DuckDBTableManager,
@@ -118,15 +119,13 @@ class TestDuckDBTableManager:
     mock_pool = MagicMock()
     mock_get_pool.return_value = mock_pool
 
-    request = TableCreateRequest(
-      graph_id="test_graph",
-      table_name="invalid;DROP TABLE",
-      s3_pattern="s3://bucket/data/*.parquet",
-    )
-
-    with pytest.raises(HTTPException) as exc_info:
-      self.manager.create_table(request)
-    assert exc_info.value.status_code == 400
+    # Table name validation now happens at Pydantic model level
+    with pytest.raises(ValidationError, match="string_pattern_mismatch"):
+      TableCreateRequest(
+        graph_id="test_graph",
+        table_name="invalid;DROP TABLE",
+        s3_pattern="s3://bucket/data/*.parquet",
+      )
 
   @patch("robosystems.graph_api.core.duckdb.manager.get_duckdb_pool")
   def test_create_table_uses_quoted_table_name(self, mock_get_pool):
