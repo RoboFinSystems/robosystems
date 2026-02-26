@@ -3,14 +3,12 @@
 from typing import Any
 
 import httpx
-from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
 from ...adapters.sec.config import SEC_VALIDATE_CIK
 from ...config import env
 from ...logger import logger
 from ...middleware.graph import get_graph_repository
-from ...middleware.graph.utils import MultiTenantUtils
 from ...models.api.graphs.connections import SECConnectionConfig
 from ...operations.connection_service import ConnectionService
 
@@ -153,21 +151,20 @@ async def get_sec_filing_count(cik: str, graph_id: str | None = None) -> int:
 
 
 async def create_sec_connection(
-  entity_id: str, config: SECConnectionConfig, user_id: str, graph_id: str, db: Session
+  entity_id: str | None,
+  config: SECConnectionConfig,
+  user_id: str,
+  graph_id: str,
+  db: Session,
 ) -> str:
-  """Create SEC connection."""
-  # Update entity with CIK
-  repository = await get_graph_repository(graph_id, operation_type="write")
+  """Create SEC connection.
 
-  # Verify entity exists
-  entity_query = """
-    MATCH (c:Entity {identifier: $entity_id})
-    RETURN c.identifier as identifier, c.name as name
-    """
-  entity_result = repository.execute_single(entity_query, {"entity_id": entity_id})
+  Only requires a CIK. The entity is created by the SEC sync pipeline
+  when it processes XBRL filings — not assumed to exist in the graph.
 
-  if not entity_result:
-    raise HTTPException(status_code=404, detail="Entity not found")
+  Optionally validates the CIK with SEC API to get the entity name.
+  """
+  entity_name = None
 
   # Optionally validate CIK with SEC API
   if SEC_VALIDATE_CIK:
@@ -175,41 +172,24 @@ async def create_sec_connection(
       cik_info = await validate_cik_with_sec_api(config.cik)
       if not cik_info["is_valid"]:
         logger.warning(f"CIK {config.cik} not found in SEC database")
-      elif not config.entity_name and cik_info.get("entity_name"):
-        config.entity_name = cik_info["entity_name"]
+      else:
+        entity_name = cik_info.get("entity_name")
     except Exception as e:
       logger.warning(f"SEC CIK validation failed: {e}")
-      # Continue without validation
 
-  # Store connection
-  credentials = {"cik": config.cik}
+  # Store connection — no graph operations needed
   metadata = {
     "cik": config.cik,
-    "entity_name": config.entity_name or entity_result.get("name"),
+    "entity_name": entity_name,
   }
 
   connection_data = await ConnectionService.create_connection(
-    entity_id=entity_id,
-    provider="SEC",
+    entity_id=entity_id or "",
+    provider="sec",
     user_id=user_id,
-    credentials=credentials,
+    credentials={"cik": config.cik},
     metadata=metadata,
     graph_id=graph_id,
-  )
-
-  # Update entity with CIK
-  update_query = """
-    MATCH (c:Entity {identifier: $entity_id})
-    SET c.cik = $cik, c.database = $database_name
-    RETURN c.identifier as identifier
-    """
-  repository.execute_single(
-    update_query,
-    {
-      "entity_id": entity_id,
-      "cik": config.cik,
-      "database_name": MultiTenantUtils.get_database_name(graph_id),
-    },
   )
 
   return connection_data["connection_id"]

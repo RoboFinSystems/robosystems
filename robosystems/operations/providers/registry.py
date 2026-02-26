@@ -29,7 +29,7 @@ class ConnectionProvider(Protocol):
   """Protocol for connection providers."""
 
   async def create_connection(
-    self, entity_id: str, config: Any, user_id: str, graph_id: str, db: Session
+    self, entity_id: str | None, config: Any, user_id: str, graph_id: str, db: Session
   ) -> str:
     """Create a connection."""
     ...

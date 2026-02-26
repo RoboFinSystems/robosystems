@@ -97,7 +97,7 @@ async def create_connection(
     user_id=current_user.id,
     metadata={
       "provider": request.provider,
-      "entity_id": request.entity_id,
+      "entity_id": request.entity_id or "",
     },
   )
 
@@ -129,7 +129,7 @@ async def create_connection(
       user_id=current_user.id,
       metadata={
         "provider": request.provider,
-        "entity_id": request.entity_id,
+        "entity_id": request.entity_id or "",
       },
     )
 
@@ -145,7 +145,12 @@ async def create_connection(
     # Create connection using provider registry with timeout coordination
     connection_id = await asyncio.wait_for(
       provider_registry.create_connection(
-        request.provider, request.entity_id, config, current_user.id, graph_id, db
+        request.provider,
+        request.entity_id or "",
+        config,
+        current_user.id,
+        graph_id,
+        db,
       ),
       timeout=operation_timeout,
     )
@@ -169,7 +174,7 @@ async def create_connection(
       user_id=current_user.id,
       metadata={
         "provider": request.provider,
-        "entity_id": request.entity_id,
+        "entity_id": request.entity_id or "",
         "connection_id": connection_id,
       },
     )
@@ -177,7 +182,7 @@ async def create_connection(
     return ConnectionResponse(
       connection_id=connection["connection_id"],
       provider=connection["provider"].lower(),
-      entity_id=connection["entity_id"],
+      entity_id=connection.get("entity_id"),
       status=connection["status"],
       created_at=connection["created_at"],
       updated_at=connection.get("updated_at"),
@@ -326,7 +331,7 @@ async def list_connections(
         ConnectionResponse(
           connection_id=conn["connection_id"],
           provider=conn["provider"].lower(),
-          entity_id=conn["entity_id"],
+          entity_id=conn.get("entity_id"),
           status=conn["status"],
           created_at=conn["created_at"],
           updated_at=conn.get("updated_at"),
@@ -410,7 +415,7 @@ async def get_connection(
     return ConnectionResponse(
       connection_id=connection["connection_id"],
       provider=connection["provider"].lower(),
-      entity_id=connection["entity_id"],
+      entity_id=connection.get("entity_id"),
       status=connection["status"],
       created_at=connection["created_at"],
       updated_at=connection.get("updated_at"),

@@ -13,19 +13,25 @@ class ConnectionBase(BaseModel):
   """Base connection model."""
 
   provider: ProviderType = Field(..., description="Connection provider type")
-  entity_id: str = Field(..., min_length=1, description="Entity identifier")
+  entity_id: str | None = Field(
+    None,
+    min_length=1,
+    description="Entity identifier. Required for QuickBooks, optional for SEC "
+    "(SEC creates the entity from filing data).",
+  )
 
 
 class SECConnectionConfig(BaseModel):
   """SEC-specific connection configuration."""
 
-  cik: str = Field(..., min_length=1, max_length=10, description="10-digit CIK number")
-  entity_name: str | None = Field(None, description="Entity name from SEC")
+  cik: str = Field(
+    ..., min_length=1, max_length=10, description="SEC Central Index Key"
+  )
 
   @field_validator("cik")
   @classmethod
   def validate_cik(cls, v: str) -> str:
-    """Validate and normalize CIK format."""
+    """Validate and normalize CIK format. Auto-pads with leading zeros to 10 digits."""
     clean_cik = "".join(filter(str.isdigit, v))
     if not clean_cik:
       raise ValueError("CIK must contain digits")
@@ -48,6 +54,17 @@ class CreateConnectionRequest(ConnectionBase):
 
   sec_config: SECConnectionConfig | None = None
   quickbooks_config: QuickBooksConnectionConfig | None = None
+
+  @field_validator("entity_id")
+  @classmethod
+  def validate_entity_id_for_provider(
+    cls, v: str | None, info: ValidationInfo
+  ) -> str | None:
+    """Require entity_id for providers that need a pre-existing entity."""
+    provider = info.data.get("provider")
+    if provider == "quickbooks" and not v:
+      raise ValueError("entity_id is required for QuickBooks connections")
+    return v
 
   @field_validator("sec_config", "quickbooks_config")
   @classmethod
@@ -87,7 +104,7 @@ class ConnectionResponse(BaseModel):
 
   connection_id: str = Field(..., description="Unique connection identifier")
   provider: str = Field(..., description="Connection provider type")
-  entity_id: str = Field(..., description="Entity identifier")
+  entity_id: str | None = Field(None, description="Entity identifier")
   status: str = Field(..., description="Connection status")
   created_at: datetime | str = Field(..., description="Creation timestamp")
   updated_at: datetime | str | None = Field(None, description="Last update timestamp")

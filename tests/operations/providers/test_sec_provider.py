@@ -9,7 +9,6 @@ from unittest.mock import AsyncMock, Mock, patch
 
 import httpx
 import pytest
-from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
 from robosystems.models.api.graphs.connections import SECConnectionConfig
@@ -274,90 +273,68 @@ class TestCreateSECConnection:
   @pytest.fixture
   def sec_config(self):
     """Sample SEC connection configuration."""
-    return SECConnectionConfig(cik="0001234567", entity_name="Test Company Inc.")
+    return SECConnectionConfig(cik="0001234567")
 
   @pytest.mark.asyncio
   async def test_create_connection_success(self, mock_db, sec_config):
-    """Test successful SEC connection creation."""
-    # Mock repository
-    mock_repository = Mock()
-    mock_repository.execute_single.side_effect = [
-      {"identifier": "entity123", "name": "Test Entity"},  # Entity exists
-      {"identifier": "entity123"},  # Update successful
-    ]
-
-    # Mock connection service
+    """Test successful SEC connection creation — no graph queries needed."""
     mock_connection_data = {
       "connection_id": "conn123",
-      "entity_id": "entity123",
-      "provider": "SEC",
+      "provider": "sec",
     }
 
-    with patch(
-      "robosystems.operations.providers.sec_provider.get_graph_repository"
-    ) as mock_get_repo:
-      mock_get_repo.return_value = mock_repository
-
-      with patch(
+    with (
+      patch(
         "robosystems.operations.providers.sec_provider.ConnectionService.create_connection"
-      ) as mock_create:
-        mock_create.return_value = mock_connection_data
+      ) as mock_create,
+      patch("robosystems.operations.providers.sec_provider.SEC_VALIDATE_CIK", False),
+    ):
+      mock_create.return_value = mock_connection_data
 
-        with patch(
-          "robosystems.operations.providers.sec_provider.SEC_VALIDATE_CIK", False
-        ):
-          connection_id = await create_sec_connection(
-            entity_id="entity123",
-            config=sec_config,
-            user_id="user123",
-            graph_id="graph123",
-            db=mock_db,
-          )
+      connection_id = await create_sec_connection(
+        entity_id=None,
+        config=sec_config,
+        user_id="user123",
+        graph_id="graph123",
+        db=mock_db,
+      )
 
-          assert connection_id == "conn123"
+      assert connection_id == "conn123"
 
-          # Verify entity was queried
-          assert mock_repository.execute_single.call_count == 2
-
-          # Verify connection was created
-          mock_create.assert_called_once()
-          call_kwargs = mock_create.call_args[1]
-          assert call_kwargs["entity_id"] == "entity123"
-          assert call_kwargs["provider"] == "SEC"
-          assert call_kwargs["credentials"]["cik"] == "0001234567"
+      # Verify connection was created with CIK
+      mock_create.assert_called_once()
+      call_kwargs = mock_create.call_args[1]
+      assert call_kwargs["provider"] == "sec"
+      assert call_kwargs["credentials"]["cik"] == "0001234567"
+      assert call_kwargs["metadata"]["cik"] == "0001234567"
 
   @pytest.mark.asyncio
-  async def test_create_connection_entity_not_found(self, mock_db, sec_config):
-    """Test connection creation when entity doesn't exist."""
-    mock_repository = Mock()
-    mock_repository.execute_single.return_value = None  # Entity not found
+  async def test_create_connection_no_entity_id_required(self, mock_db, sec_config):
+    """Test that SEC connection creation does not require entity_id."""
+    with (
+      patch(
+        "robosystems.operations.providers.sec_provider.ConnectionService.create_connection"
+      ) as mock_create,
+      patch("robosystems.operations.providers.sec_provider.SEC_VALIDATE_CIK", False),
+    ):
+      mock_create.return_value = {"connection_id": "conn123"}
 
-    with patch(
-      "robosystems.operations.providers.sec_provider.get_graph_repository"
-    ) as mock_get_repo:
-      mock_get_repo.return_value = mock_repository
+      connection_id = await create_sec_connection(
+        entity_id=None,
+        config=sec_config,
+        user_id="user123",
+        graph_id="graph123",
+        db=mock_db,
+      )
 
-      with pytest.raises(HTTPException) as exc_info:
-        await create_sec_connection(
-          entity_id="nonexistent",
-          config=sec_config,
-          user_id="user123",
-          graph_id="graph123",
-          db=mock_db,
-        )
-
-      assert exc_info.value.status_code == 404
-      assert "Entity not found" in str(exc_info.value.detail)
+      assert connection_id == "conn123"
+      # entity_id should be empty string (not None) for DB storage
+      call_kwargs = mock_create.call_args[1]
+      assert call_kwargs["entity_id"] == ""
 
   @pytest.mark.asyncio
   async def test_create_connection_with_cik_validation(self, mock_db, sec_config):
-    """Test connection creation with CIK validation enabled."""
-    mock_repository = Mock()
-    mock_repository.execute_single.side_effect = [
-      {"identifier": "entity123", "name": "Test Entity"},
-      {"identifier": "entity123"},
-    ]
-
+    """Test connection creation with CIK validation populates entity_name."""
     mock_cik_info = {
       "is_valid": True,
       "cik": "0001234567",
@@ -365,84 +342,66 @@ class TestCreateSECConnection:
       "ticker": "TEST",
     }
 
-    with patch(
-      "robosystems.operations.providers.sec_provider.get_graph_repository"
-    ) as mock_get_repo:
-      mock_get_repo.return_value = mock_repository
-
-      with patch(
+    with (
+      patch(
         "robosystems.operations.providers.sec_provider.validate_cik_with_sec_api"
-      ) as mock_validate:
-        mock_validate.return_value = mock_cik_info
+      ) as mock_validate,
+      patch(
+        "robosystems.operations.providers.sec_provider.ConnectionService.create_connection"
+      ) as mock_create,
+      patch("robosystems.operations.providers.sec_provider.SEC_VALIDATE_CIK", True),
+    ):
+      mock_validate.return_value = mock_cik_info
+      mock_create.return_value = {"connection_id": "conn123"}
 
-        with patch(
-          "robosystems.operations.providers.sec_provider.ConnectionService.create_connection"
-        ) as mock_create:
-          mock_create.return_value = {"connection_id": "conn123"}
+      connection_id = await create_sec_connection(
+        entity_id=None,
+        config=sec_config,
+        user_id="user123",
+        graph_id="graph123",
+        db=mock_db,
+      )
 
-          with patch(
-            "robosystems.operations.providers.sec_provider.SEC_VALIDATE_CIK", True
-          ):
-            # Config without entity_name to test it gets set from validation
-            config_no_name = SECConnectionConfig(cik="0001234567", entity_name=None)
+      assert connection_id == "conn123"
+      mock_validate.assert_called_once_with("0001234567")
 
-            connection_id = await create_sec_connection(
-              entity_id="entity123",
-              config=config_no_name,
-              user_id="user123",
-              graph_id="graph123",
-              db=mock_db,
-            )
-
-            assert connection_id == "conn123"
-            mock_validate.assert_called_once_with("0001234567")
-
-            # Check entity name was updated from validation
-            call_kwargs = mock_create.call_args[1]
-            assert call_kwargs["metadata"]["entity_name"] == "Validated Company Name"
+      # Entity name should come from SEC API validation
+      call_kwargs = mock_create.call_args[1]
+      assert call_kwargs["metadata"]["entity_name"] == "Validated Company Name"
 
   @pytest.mark.asyncio
   async def test_create_connection_invalid_cik(self, mock_db):
-    """Test connection creation with invalid CIK."""
-    mock_repository = Mock()
-    mock_repository.execute_single.side_effect = [
-      {"identifier": "entity123", "name": "Test Entity"},
-      {"identifier": "entity123"},
-    ]
-
+    """Test connection creation with invalid CIK still creates connection."""
     mock_cik_info = {"is_valid": False, "cik": "9999999999", "error": "CIK not found"}
 
-    with patch(
-      "robosystems.operations.providers.sec_provider.get_graph_repository"
-    ) as mock_get_repo:
-      mock_get_repo.return_value = mock_repository
-
-      with patch(
+    with (
+      patch(
         "robosystems.operations.providers.sec_provider.validate_cik_with_sec_api"
-      ) as mock_validate:
-        mock_validate.return_value = mock_cik_info
+      ) as mock_validate,
+      patch(
+        "robosystems.operations.providers.sec_provider.ConnectionService.create_connection"
+      ) as mock_create,
+      patch("robosystems.operations.providers.sec_provider.SEC_VALIDATE_CIK", True),
+    ):
+      mock_validate.return_value = mock_cik_info
+      mock_create.return_value = {"connection_id": "conn123"}
 
-        with patch(
-          "robosystems.operations.providers.sec_provider.ConnectionService.create_connection"
-        ) as mock_create:
-          mock_create.return_value = {"connection_id": "conn123"}
+      config = SECConnectionConfig(cik="9999999999")
 
-          with patch(
-            "robosystems.operations.providers.sec_provider.SEC_VALIDATE_CIK", True
-          ):
-            config = SECConnectionConfig(cik="9999999999", entity_name=None)
+      # Should still create connection but log warning
+      connection_id = await create_sec_connection(
+        entity_id=None,
+        config=config,
+        user_id="user123",
+        graph_id="graph123",
+        db=mock_db,
+      )
 
-            # Should still create connection but log warning
-            connection_id = await create_sec_connection(
-              entity_id="entity123",
-              config=config,
-              user_id="user123",
-              graph_id="graph123",
-              db=mock_db,
-            )
-
-            assert connection_id == "conn123"
-            mock_validate.assert_called_once()
+      assert connection_id == "conn123"
+      mock_validate.assert_called_once()
+      # entity_name should be None since CIK is invalid
+      call_kwargs = mock_create.call_args[1]
+      assert call_kwargs["metadata"]["entity_name"] is None
 
 
 class TestSyncSECConnection:
