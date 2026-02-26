@@ -263,8 +263,6 @@ class IngestFileTool:
     """
     file_path = arguments.get("file_path")
     table_name = arguments.get("table_name")
-    ingest_to_graph = arguments.get("ingest_to_graph", False)
-
     if not file_path:
       return {"error": "missing_file_path", "message": "file_path is required"}
 
@@ -278,17 +276,24 @@ class IngestFileTool:
       # For now, return a message that this requires client SDK support
       return {
         "error": "client_sdk_required",
-        "message": "File upload requires robosystems-python-client SDK. Use client.upload_file() method instead.",
+        "message": "File upload requires robosystems-python-client SDK. Use the FileClient.upload() method instead.",
         "example": f"""
 from robosystems_client import RoboSystemsClient
+from robosystems_client.extensions.file_client import FileClient
 
-client = RoboSystemsClient(graph_id="{graph_id}")
-result = client.upload_file(
-    file_path="{file_path}",
-    table_name="{table_name}",
-    ingest_to_graph={ingest_to_graph}
+client = RoboSystemsClient(
+    base_url="http://localhost:8000",
+    token="your-api-key",
+    auth_header_name="X-API-Key",
+    prefix="",
 )
-print(f"Operation ID: {{result['operation_id']}}")
+files = FileClient({{"base_url": "http://localhost:8000", "token": "your-api-key"}})
+result = files.upload(
+    graph_id="{graph_id}",
+    table_name="{table_name}",
+    file_or_buffer="{file_path}",
+)
+print(f"Operation ID: {{result.operation_id}}")
         """,
       }
 
