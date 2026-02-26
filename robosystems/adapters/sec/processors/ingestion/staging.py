@@ -554,16 +554,18 @@ class DuckDBStager:
   DEFAULT_CHUNKING_THRESHOLD_BYTES = 20 * 1024 * 1024 * 1024  # 20 GiB
 
   # Fraction of DuckDB memory to use as chunking threshold.
-  # Parquet decompresses ~3-5x, plus hash aggregation overhead, so 40% of
-  # memory limit keeps a safe margin for the scan + dedup pipeline.
+  # The hierarchical merge (quarterly → yearly → final) bounds peak memory
+  # per merge step to ~4 quarters, so 75% is safe — single-shot staging
+  # only runs when total S3 data fits comfortably in DuckDB's allocation.
   CHUNKING_MEMORY_FRACTION = 0.75
 
   def _get_chunking_threshold_bytes(self, duckdb_memory_mb: int | None) -> int:
     """
     Calculate the S3 data size threshold for chunked staging.
 
-    If DuckDB memory is known (from boost response), threshold is 40% of that.
-    Otherwise falls back to a conservative 20 GiB default.
+    If DuckDB memory is known (from boost response), threshold is
+    CHUNKING_MEMORY_FRACTION of that. Otherwise falls back to a conservative
+    20 GiB default.
 
     Args:
         duckdb_memory_mb: DuckDB memory limit in MB (from boost response), or None
@@ -575,7 +577,7 @@ class DuckDBStager:
       threshold = int(duckdb_memory_mb * 1024 * 1024 * self.CHUNKING_MEMORY_FRACTION)
       logger.info(
         f"Chunking threshold: {threshold / (1024**3):.1f} GiB "
-        f"(40% of {duckdb_memory_mb}MB DuckDB memory)"
+        f"({int(self.CHUNKING_MEMORY_FRACTION * 100)}% of {duckdb_memory_mb}MB DuckDB memory)"
       )
       return threshold
     logger.info(
@@ -1014,20 +1016,7 @@ class DuckDBStager:
         graph_id=self.graph_id, sql=final_merge_sql, timeout=float(timeout)
       )
 
-      # Restore thread count — SET threads=1 persists on the pooled connection.
-      # Read configured value from graph tier config (graph.yml duckdb_max_threads).
-      try:
-        from robosystems.config.graph_tier import GraphTierConfig
-
-        tier = env.CLUSTER_TIER
-        default_threads = GraphTierConfig.get_duckdb_max_threads(tier) if tier else 4
-        await graph_client.query_table(
-          graph_id=self.graph_id,
-          sql=f"SET threads={default_threads}",
-          timeout=30.0,
-        )
-      except Exception:
-        pass  # Non-fatal
+      await self._restore_threads(graph_client)
 
       # Get final row count
       count_result = await graph_client.query_table(
@@ -1044,6 +1033,8 @@ class DuckDBStager:
       )
 
     except Exception as e:
+      # Restore thread count before cleanup — SET threads=1 persists on pooled connection
+      await self._restore_threads(graph_client)
       await self._cleanup_temp_tables(graph_client, all_temp_tables)
       return False, None, f"{table_name} merge failed: {e}"
 
@@ -1061,6 +1052,21 @@ class DuckDBStager:
       ),
       None,
     )
+
+  async def _restore_threads(self, graph_client: "GraphClient") -> None:
+    """Restore DuckDB thread count after SET threads=1 merge operations."""
+    try:
+      from robosystems.config.graph_tier import GraphTierConfig
+
+      tier = env.CLUSTER_TIER
+      default_threads = GraphTierConfig.get_duckdb_max_threads(tier) if tier else 4
+      await graph_client.query_table(
+        graph_id=self.graph_id,
+        sql=f"SET threads={default_threads}",
+        timeout=30.0,
+      )
+    except Exception:
+      pass  # Non-fatal
 
   async def _cleanup_temp_tables(
     self, graph_client: "GraphClient", temp_tables: list[str]
