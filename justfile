@@ -76,6 +76,7 @@ init:
     uv python install $(cat .python-version)
     @test -f {{_env}} || cp .env.example {{_env}}
     @test -f {{_local_env}} || cp .env.local.example {{_local_env}}
+    git config core.hooksPath .githooks
     @just venv
 
 # Create virtual environment (assumes uv is installed)
@@ -99,7 +100,7 @@ update:
 # Run all tests (excludes slow tests)
 test-all:
     @just test
-    @just dbt-test
+    @just test-dbt quickbooks
     -@just lint fix
     @just lint
     @just format
@@ -125,19 +126,13 @@ test-integration:
 test-cov:
     uv run pytest --cov=robosystems tests/ --ignore=tests/integration
 
-# Run QuickBooks dbt models and tests
-dbt-test:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    DBT_DIR="robosystems/adapters/quickbooks/dbt"
-    TMPDIR=$(mktemp -d)
-    trap "rm -rf $TMPDIR" EXIT
-    QB_DUCKDB_PATH="$TMPDIR/quickbooks.duckdb" uv run dbt build \
-        --profiles-dir "$DBT_DIR" \
-        --project-dir "$DBT_DIR" \
-        --target-path "$TMPDIR/target" \
+# Run dbt models and tests for an adapter
+test-dbt adapter tmpdir=`mktemp -d`:
+    DBT_DUCKDB_PATH="{{ tmpdir }}/{{ adapter }}.duckdb" uv run dbt build \
+        --profiles-dir "robosystems/adapters/{{ adapter }}/dbt" \
+        --project-dir "robosystems/adapters/{{ adapter }}/dbt" \
+        --target-path "{{ tmpdir }}/target" \
         --vars '{"use_seeds": true}'
-    echo "dbt: all models and tests passed"
 
 # Run code quality checks (auto-fix first, then verify)
 test-code:

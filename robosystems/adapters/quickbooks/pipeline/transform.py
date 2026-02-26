@@ -72,7 +72,7 @@ def qb_transform(
     cwd=str(DBT_PROJECT_DIR),
     env={
       **__import__("os").environ,
-      "QB_DUCKDB_PATH": str(duckdb_path),
+      "DBT_DUCKDB_PATH": str(duckdb_path),
     },
   )
 

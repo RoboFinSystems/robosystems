@@ -107,7 +107,7 @@ class TestDbtBuild:
       cwd=str(DBT_PROJECT_DIR),
       env={
         **__import__("os").environ,
-        "QB_DUCKDB_PATH": str(tmp_path / "quickbooks.duckdb"),
+        "DBT_DUCKDB_PATH": str(tmp_path / "quickbooks.duckdb"),
       },
     )
     assert result.returncode == 0, (
@@ -140,7 +140,7 @@ class TestDbtBuild:
       cwd=str(DBT_PROJECT_DIR),
       env={
         **__import__("os").environ,
-        "QB_DUCKDB_PATH": str(duckdb_path),
+        "DBT_DUCKDB_PATH": str(duckdb_path),
       },
       check=True,
     )

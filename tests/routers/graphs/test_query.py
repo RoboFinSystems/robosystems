@@ -262,46 +262,32 @@ async def test_cypher_query_unauthorized(test_user_graph: GraphUser, test_db):
     app.dependency_overrides = {}
 
 
-@pytest.mark.skip(
-  reason="Test has fixture conflict - async_client mocks the auth check being tested"
-)
 @pytest.mark.asyncio
 async def test_cypher_query_forbidden_graph(
-  async_client: AsyncClient, test_user: User, db_session: Session
+  auth_integration_client: AsyncClient, test_user: User, db_session: Session
 ):
-  """Test access to a graph the user doesn't have access to."""
+  """Test access to a graph the user doesn't have access to.
+
+  Uses auth_integration_client which does NOT override auth dependencies,
+  so real JWT validation and graph access checks run. The user has a valid
+  token but no GraphUser entry for the target graph, so access is denied.
+  """
   token = create_jwt_token(test_user.id)
   headers = {"Authorization": f"Bearer {token}"}
 
+  # Use a valid graph ID format (kg + 16+ hex) that the user has no access to
+  forbidden_graph_id = "kgffffffffffffff00"
+
   request_data = {"query": "MATCH (n) RETURN n LIMIT 1"}
 
-  # Try to access a graph the user doesn't have access to
-  # In test environment, the exception might propagate instead of being caught by middleware
-  try:
-    response = await async_client.post(
-      "/v1/graphs/entity_99999/query", json=request_data, headers=headers
-    )
+  response = await auth_integration_client.post(
+    f"/v1/graphs/{forbidden_graph_id}/query", json=request_data, headers=headers
+  )
 
-    # Should get 403 Forbidden, 402 Payment Required or 500 (credit decorator ValueError)
-    assert response.status_code in [402, 403, 500]
-    if response.status_code == 500:
-      # The credit decorator throws ValueError which gets caught by middleware
-      assert (
-        "No credit pool found" in response.text
-        or "Internal Server Error" in response.text
-        or "Failed to access graph" in response.text
-        or "Failed to access repository" in response.text
-      )
-    else:
-      data = response.json()
-      assert (
-        "No credit pool found" in data["detail"]
-        or "Access denied" in data["detail"]
-        or "don't have access" in data["detail"]
-      )
-  except ValueError as e:
-    # In test environment, the exception might propagate directly
-    assert "No credit pool found for graph entity_99999" in str(e)
+  # Should be rejected: 402 (no credits), 403 (no access), or 500 (credit pool error)
+  assert response.status_code in [402, 403, 500], (
+    f"Expected denial but got {response.status_code}: {response.text}"
+  )
 
 
 @pytest.mark.asyncio

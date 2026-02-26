@@ -509,9 +509,13 @@ def setup_database(test_db):
     User,
     UserAPIKey,
   )
+  from robosystems.models.iam.connection import Connection
+  from robosystems.models.iam.connection_credentials import ConnectionCredentials
 
   try:
     # Delete in reverse dependency order to avoid foreign key constraints
+    test_db.query(ConnectionCredentials).delete()
+    test_db.query(Connection).delete()
     test_db.query(UserAPIKey).delete()
     test_db.query(GraphCredits).delete()
     test_db.query(GraphUser).delete()
@@ -534,15 +538,6 @@ def mock_sec_client():
     # Ensure get_report_url returns a string
     client_instance.get_report_url.return_value = "http://example.com/report.xml"
     yield client_instance
-
-
-@pytest.fixture
-def mock_xbrl():
-  """Mock XBRL class for testing."""
-  with patch("robosystems.tasks.sec_filings.XBRLGraphProcessor") as mock_xbrl_class:
-    xbrl_instance = Mock()
-    mock_xbrl_class.return_value = xbrl_instance
-    yield mock_xbrl_class
 
 
 @pytest.fixture

@@ -233,7 +233,7 @@ jobs:
           echo "🔍 Running QuickBooks dbt models and tests..."
           DBT_DIR="robosystems/adapters/quickbooks/dbt"
           TMPDIR=$(mktemp -d)
-          QB_DUCKDB_PATH="$TMPDIR/quickbooks.duckdb" uv run dbt build \
+          DBT_DUCKDB_PATH="$TMPDIR/quickbooks.duckdb" uv run dbt build \
             --profiles-dir "$DBT_DIR" \
             --project-dir "$DBT_DIR" \
             --target-path "$TMPDIR/target" \
