@@ -82,7 +82,9 @@ def main():
 
     granted = []
     for repo_type in args.repositories:
-      if grant_repository_access(auth_client, repo_type):
+      if grant_repository_access(
+        auth_client, repo_type, credentials_path=CREDENTIALS_FILE
+      ):
         granted.append(repo_type)
 
     if granted:
