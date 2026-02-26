@@ -556,7 +556,7 @@ class DuckDBStager:
   # Fraction of DuckDB memory to use as chunking threshold.
   # Parquet decompresses ~3-5x, plus hash aggregation overhead, so 40% of
   # memory limit keeps a safe margin for the scan + dedup pipeline.
-  CHUNKING_MEMORY_FRACTION = 0.40
+  CHUNKING_MEMORY_FRACTION = 0.75
 
   def _get_chunking_threshold_bytes(self, duckdb_memory_mb: int | None) -> int:
     """
@@ -814,9 +814,7 @@ class DuckDBStager:
     elif "src" in columns and "dst" in columns:
       # Relationship table (already renamed from/to to src/dst)
       other_cols = [c for c in columns if c not in ("src", "dst")]
-      select_parts = ['"src"', '"dst"'] + [
-        f'FIRST("{c}") AS "{c}"' for c in other_cols
-      ]
+      select_parts = ['"src"', '"dst"'] + [f'FIRST("{c}") AS "{c}"' for c in other_cols]
       return (
         f'CREATE OR REPLACE TABLE "{target_table}" AS '
         f"SELECT {', '.join(select_parts)} "
@@ -852,7 +850,7 @@ class DuckDBStager:
     3. Final merge of year tables into target table (cross-year dedup)
     4. DROP remaining intermediate tables
 
-    This hierarchical approach keeps peak memory at ~8M rows per merge
+    This hierarchical approach keeps peak merge input at ~10M rows
     instead of 18M+ in a single-pass merge.
 
     Args:
@@ -1007,13 +1005,9 @@ class DuckDBStager:
             pass  # Non-fatal, cleanup will try again
 
       # Phase 3: Final merge of year tables into target table
-      log_progress(
-        f"  {table_name} final merge of {len(year_tables)} year tables..."
-      )
+      log_progress(f"  {table_name} final merge of {len(year_tables)} year tables...")
 
-      final_merge_sql = self._build_dedup_merge_sql(
-        table_name, year_tables, columns
-      )
+      final_merge_sql = self._build_dedup_merge_sql(table_name, year_tables, columns)
       final_merge_sql = f"SET threads=1; {final_merge_sql}"
 
       await graph_client.query_table(
