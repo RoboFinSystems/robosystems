@@ -780,6 +780,53 @@ class DuckDBStager:
 
     return False, None, f"Failed after {STAGING_MAX_RETRIES} attempts: {last_error}"
 
+  def _build_dedup_merge_sql(
+    self,
+    target_table: str,
+    source_tables: list[str],
+    columns: list[str],
+  ) -> str:
+    """
+    Build a CREATE OR REPLACE TABLE ... AS SELECT ... GROUP BY SQL statement
+    that deduplicates rows from multiple source tables via UNION ALL.
+
+    Args:
+        target_table: Name of the target table to create
+        source_tables: List of source table names to union
+        columns: Column names from schema probe
+
+    Returns:
+        SQL string (without SET threads prefix — caller adds that)
+    """
+    union_parts = [f'SELECT * FROM "{t}"' for t in source_tables]
+    union_sql = " UNION ALL ".join(union_parts)
+
+    if "identifier" in columns:
+      # Node table: dedup on identifier
+      other_cols = [c for c in columns if c != "identifier"]
+      select_parts = ['"identifier"'] + [f'FIRST("{c}") AS "{c}"' for c in other_cols]
+      return (
+        f'CREATE OR REPLACE TABLE "{target_table}" AS '
+        f"SELECT {', '.join(select_parts)} "
+        f"FROM ({union_sql}) "
+        f'GROUP BY "identifier"'
+      )
+    elif "src" in columns and "dst" in columns:
+      # Relationship table (already renamed from/to to src/dst)
+      other_cols = [c for c in columns if c not in ("src", "dst")]
+      select_parts = ['"src"', '"dst"'] + [
+        f'FIRST("{c}") AS "{c}"' for c in other_cols
+      ]
+      return (
+        f'CREATE OR REPLACE TABLE "{target_table}" AS '
+        f"SELECT {', '.join(select_parts)} "
+        f"FROM ({union_sql}) "
+        f'GROUP BY "src", "dst"'
+      )
+    else:
+      # Unknown schema — just union without dedup
+      return f'CREATE OR REPLACE TABLE "{target_table}" AS SELECT * FROM ({union_sql})'
+
   async def _stage_table_chunked(
     self,
     table_name: str,
@@ -792,19 +839,21 @@ class DuckDBStager:
     total_tables: int,
   ) -> tuple[bool, TableInfo | None, str | None]:
     """
-    Stage a large table using temp-table-per-quarter + final merge.
+    Stage a large table using hierarchical temp-table merging.
 
-    Instead of INSERT INTO (which re-dedupes against a growing table and gets
-    progressively slower), this creates independent temp tables per quarter,
-    then merges them in a single local-data pass.
+    Quarterly temp tables → year tables (cross-quarter dedup) → final table.
+    Each intermediate merge drastically reduces row count by eliminating
+    cross-partition duplicates (e.g., same XBRL labels across filings).
 
     Steps:
-    1. CREATE TABLE {table}__Q{n} for each quarter (S3 download + dedup per quarter)
-    2. CREATE TABLE {table} AS SELECT ... FROM all temps UNION ALL GROUP BY (local merge)
-    3. DROP temp tables
+    1. CREATE TABLE {table}__YYYY_QN for each quarter (S3 download + per-quarter dedup)
+    2. Merge quarterly tables into year tables with GROUP BY dedup (cross-quarter dedup)
+       - Drops quarterly temps after each year merge to free disk space
+    3. Final merge of year tables into target table (cross-year dedup)
+    4. DROP remaining intermediate tables
 
-    The final merge reads from local DuckDB tables (no S3 I/O), so hash
-    aggregation can spill to disk efficiently.
+    This hierarchical approach keeps peak memory at ~8M rows per merge
+    instead of 18M+ in a single-pass merge.
 
     Args:
         table_name: Name of the table to stage
@@ -820,10 +869,14 @@ class DuckDBStager:
         Tuple of (success, TableInfo or None, error or None)
     """
     timeout = get_staging_timeout(table_name)
-    temp_tables: list[str] = []
+    all_temp_tables: list[str] = []  # All temp tables for cleanup on failure
     total_raw_rows = 0
 
     # Phase 1: Create independent temp tables per quarter
+    # Track which temp tables belong to which year for hierarchical merge
+    year_temps: dict[int, list[str]] = {}
+    year_rows: dict[int, int] = {}
+
     quarters: list[tuple[int, int]] = []
     for y in range(chunk_start_year, chunk_end_year + 1):
       for q in range(1, 5):
@@ -848,15 +901,20 @@ class DuckDBStager:
           error = response.get("error", "Unknown error")
           if "No files found" in error:
             continue  # No data for this quarter, skip
-          # Cleanup temp tables created so far
-          await self._cleanup_temp_tables(graph_client, temp_tables)
+          await self._cleanup_temp_tables(graph_client, all_temp_tables)
           return False, None, f"{table_name} {year_val}-Q{q}: {error}"
 
         result = response.get("result", {})
         rows = result.get("row_count", 0)
         duration = response.get("duration_seconds", result.get("duration_seconds", 0))
         total_raw_rows += rows
-        temp_tables.append(temp_name)
+        all_temp_tables.append(temp_name)
+
+        if year_val not in year_temps:
+          year_temps[year_val] = []
+          year_rows[year_val] = 0
+        year_temps[year_val].append(temp_name)
+        year_rows[year_val] += rows
 
         log_progress(
           f"  {table_name} chunk {year_val}-Q{q}: {rows:,} rows in {duration:.1f}s"
@@ -866,10 +924,10 @@ class DuckDBStager:
         error_str = str(e)
         if "No files found" in error_str:
           continue  # No data for this quarter, skip
-        await self._cleanup_temp_tables(graph_client, temp_tables)
+        await self._cleanup_temp_tables(graph_client, all_temp_tables)
         return False, None, f"{table_name} {year_val}-Q{q}: {error_str}"
 
-    if not temp_tables:
+    if not all_temp_tables:
       return (
         True,
         TableInfo(
@@ -882,65 +940,84 @@ class DuckDBStager:
         None,
       )
 
-    # Phase 2: Merge all temp tables into final table with dedup
-    # This reads from local DuckDB tables (no S3 I/O) so it's fast and
-    # the hash aggregation can spill to disk efficiently.
+    # Probe schema from first temp table to determine dedup strategy
     try:
-      log_progress(
-        f"  {table_name} merging {len(temp_tables)} partitions ({total_raw_rows:,} raw rows)..."
-      )
-
-      # Probe schema from first temp table to determine dedup strategy
-      probe_sql = f'SELECT * FROM "{temp_tables[0]}" LIMIT 0'
+      probe_sql = f'SELECT * FROM "{all_temp_tables[0]}" LIMIT 0'
       probe_result = await graph_client.query_table(
         graph_id=self.graph_id, sql=probe_sql, timeout=30.0
       )
       columns = probe_result.get("columns", [])
+    except Exception as e:
+      await self._cleanup_temp_tables(graph_client, all_temp_tables)
+      return False, None, f"{table_name} schema probe failed: {e}"
 
-      # Build UNION ALL of all temp tables
-      union_parts = [f'SELECT * FROM "{t}"' for t in temp_tables]
-      union_sql = " UNION ALL ".join(union_parts)
+    # Phase 2: Merge quarterly tables into year tables (cross-quarter dedup)
+    # Each year merge handles at most 4 quarters (~8M rows), well within memory.
+    # After each year merge, drop quarterly temps to free disk space.
+    year_tables: list[str] = []
 
-      # Build dedup merge SQL based on table type
-      if "identifier" in columns:
-        # Node table: dedup on identifier
-        other_cols = [c for c in columns if c != "identifier"]
-        select_parts = ['"identifier"'] + [f'FIRST("{c}") AS "{c}"' for c in other_cols]
-        merge_sql = (
-          f'CREATE OR REPLACE TABLE "{table_name}" AS '
-          f"SELECT {', '.join(select_parts)} "
-          f"FROM ({union_sql}) "
-          f'GROUP BY "identifier"'
+    try:
+      log_progress(
+        f"  {table_name} merging {len(all_temp_tables)} partitions into "
+        f"{len(year_temps)} year tables ({total_raw_rows:,} raw rows)..."
+      )
+
+      for year_val in sorted(year_temps.keys()):
+        temps_for_year = year_temps[year_val]
+
+        if len(temps_for_year) == 1:
+          # Only one quarter for this year — use directly in final merge
+          year_tables.append(temps_for_year[0])
+          continue
+
+        year_table_name = f"{table_name}__Y{year_val}"
+        merge_sql = self._build_dedup_merge_sql(
+          year_table_name, temps_for_year, columns
         )
-      elif "src" in columns and "dst" in columns:
-        # Relationship table (already renamed from/to to src/dst)
-        other_cols = [c for c in columns if c not in ("src", "dst")]
-        select_parts = ['"src"', '"dst"'] + [
-          f'FIRST("{c}") AS "{c}"' for c in other_cols
-        ]
-        merge_sql = (
-          f'CREATE OR REPLACE TABLE "{table_name}" AS '
-          f"SELECT {', '.join(select_parts)} "
-          f"FROM ({union_sql}) "
-          f'GROUP BY "src", "dst"'
+        merge_sql = f"SET threads=1; {merge_sql}"
+
+        merge_start = time.monotonic()
+        await graph_client.query_table(
+          graph_id=self.graph_id, sql=merge_sql, timeout=float(timeout)
         )
-      else:
-        # Unknown schema — just union without dedup
-        merge_sql = (
-          f'CREATE OR REPLACE TABLE "{table_name}" AS SELECT * FROM ({union_sql})'
+        merge_elapsed = time.monotonic() - merge_start
+
+        # Get deduped row count
+        count_result = await graph_client.query_table(
+          graph_id=self.graph_id,
+          sql=f'SELECT COUNT(*) as cnt FROM "{year_table_name}"',
+          timeout=30.0,
+        )
+        year_count = count_result.get("rows", [[0]])[0][0]
+
+        log_progress(
+          f"  {table_name} year {year_val}: "
+          f"{year_rows[year_val]:,} -> {year_count:,} rows in {merge_elapsed:.1f}s"
         )
 
-      # Prefix with SET threads=1 to reduce buffer pool pressure during merge.
-      # With 4 threads, DuckDB scans all UNION ALL sources in parallel, filling
-      # the buffer pool with read-ahead pages from all sources simultaneously.
-      # With 1 thread, it scans sequentially — one source at a time — leaving
-      # memory for the hash aggregate to partition and spill to disk.
-      # We invalidate the connection after merge so the next operation gets a
-      # fresh connection with default thread count.
-      merge_sql = f"SET threads=1; {merge_sql}"
+        year_tables.append(year_table_name)
+        all_temp_tables.append(year_table_name)
+
+        # Drop quarterly temps for this year to free disk space
+        for t in temps_for_year:
+          try:
+            await graph_client.delete_table(self.graph_id, t)
+            all_temp_tables.remove(t)
+          except Exception:
+            pass  # Non-fatal, cleanup will try again
+
+      # Phase 3: Final merge of year tables into target table
+      log_progress(
+        f"  {table_name} final merge of {len(year_tables)} year tables..."
+      )
+
+      final_merge_sql = self._build_dedup_merge_sql(
+        table_name, year_tables, columns
+      )
+      final_merge_sql = f"SET threads=1; {final_merge_sql}"
 
       await graph_client.query_table(
-        graph_id=self.graph_id, sql=merge_sql, timeout=float(timeout)
+        graph_id=self.graph_id, sql=final_merge_sql, timeout=float(timeout)
       )
 
       # Restore thread count — SET threads=1 persists on the pooled connection.
@@ -969,15 +1046,16 @@ class DuckDBStager:
       log_progress(
         f"[{table_index}/{total_tables}] Staged {table_name}: "
         f"{final_rows:,} rows (from {total_raw_rows:,} raw across "
-        f"{len(temp_tables)} partitions)"
+        f"{len(year_temps)} years)"
       )
 
     except Exception as e:
-      await self._cleanup_temp_tables(graph_client, temp_tables)
+      await self._cleanup_temp_tables(graph_client, all_temp_tables)
       return False, None, f"{table_name} merge failed: {e}"
 
-    # Phase 3: Cleanup temp tables
-    await self._cleanup_temp_tables(graph_client, temp_tables)
+    # Phase 4: Cleanup intermediate tables (year tables + any remaining quarterly temps)
+    cleanup_tables = [t for t in all_temp_tables if t != table_name]
+    await self._cleanup_temp_tables(graph_client, cleanup_tables)
 
     return (
       True,
