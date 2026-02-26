@@ -60,10 +60,12 @@ def sec_duckdb_staged(
     context.log.info("Reset staging enabled - will delete DuckDB file first")
 
   # Boost DuckDB memory before staging (only applies to ladybug-shared tier)
+  duckdb_memory_mb: int | None = None
   try:
     from robosystems.graph_api.client.factory import boost_graph_memory
 
     boost_result = asyncio.run(boost_graph_memory(config.graph_id, target="duckdb"))
+    duckdb_memory_mb = boost_result.get("duckdb_boost_mb")
     context.log.info(f"Memory boost: {boost_result.get('message', 'done')}")
   except Exception as boost_err:
     context.log.warning(f"Could not boost memory (non-fatal): {boost_err}")
@@ -91,6 +93,7 @@ def sec_duckdb_staged(
       end_year=config.end_year,
       reset_staging=config.reset_staging,
       skip_taxonomy_relationships=config.skip_taxonomy_relationships,
+      duckdb_memory_mb=duckdb_memory_mb,
       progress_callback=dagster_progress,
     )
     return result
@@ -184,10 +187,12 @@ def sec_historical_duckdb_staged(
     context.log.info("Reset staging enabled - will delete DuckDB file first")
 
   # Boost DuckDB memory before staging (only applies to ladybug-shared tier)
+  duckdb_memory_mb: int | None = None
   try:
     from robosystems.graph_api.client.factory import boost_graph_memory
 
     boost_result = asyncio.run(boost_graph_memory(graph_id, target="duckdb"))
+    duckdb_memory_mb = boost_result.get("duckdb_boost_mb")
     context.log.info(f"Memory boost: {boost_result.get('message', 'done')}")
   except Exception as boost_err:
     context.log.warning(f"Could not boost memory (non-fatal): {boost_err}")
@@ -214,6 +219,7 @@ def sec_historical_duckdb_staged(
       end_year=end_year,
       reset_staging=config.reset_staging,
       skip_taxonomy_relationships=config.skip_taxonomy_relationships,
+      duckdb_memory_mb=duckdb_memory_mb,
       progress_callback=dagster_progress,
     )
     return result

@@ -232,7 +232,8 @@ def ensure_user_credentials(
 def grant_repository_access(
   auth_client: AuthenticatedClient,
   repository_type: str,
-  repository_plan: str = "unlimited",
+  repository_plan: str = "starter",
+  credentials_path: Optional[Path] = None,
 ) -> bool:
   """
   Grant shared repository access to the authenticated user.
@@ -240,7 +241,8 @@ def grant_repository_access(
   Args:
       auth_client: Authenticated client with JWT token
       repository_type: Type of repository (sec, industry, economic, etc.)
-      repository_plan: Plan tier (unlimited, standard, etc.)
+      repository_plan: Plan tier (starter, advanced, etc.)
+      credentials_path: Path to credentials file to save graph entry
 
   Returns:
       True if successful, False otherwise
@@ -260,6 +262,21 @@ def grant_repository_access(
 
   if response.status_code in (200, 201):
     print(f"✅ {repository_type.upper()} repository access granted successfully")
+
+    # Save repository as a graph in credentials config
+    if credentials_path:
+      credentials = load_credentials(credentials_path)
+      if credentials:
+        if "graphs" not in credentials:
+          credentials["graphs"] = {}
+        credentials["graphs"][repository_type] = {
+          "graph_id": repository_type,
+          "graph_created_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+          "repository_type": "shared",
+          "description": f"{repository_type.upper()} Shared Repository",
+        }
+        save_credentials(credentials_path, credentials)
+
     return True
   else:
     print(

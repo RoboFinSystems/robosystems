@@ -249,64 +249,6 @@ result = await tool.execute({
 })
 ```
 
-##### Ingest File Tool
-
-Upload and stage files in DuckDB for immediate querying before graph materialization.
-
-```python
-from robosystems.middleware.mcp.tools import IngestFileTool
-
-tool = IngestFileTool(client)
-result = await tool.execute({
-    "file_path": "/path/to/data.csv",
-    "table_name": "financial_data",
-    "ingest_to_graph": False
-})
-```
-
-##### Map Elements Tool
-
-Map Chart of Accounts elements to XBRL taxonomy elements (US-GAAP).
-
-```python
-from robosystems.middleware.mcp.tools import MapElementsTool
-
-tool = MapElementsTool(client)
-result = await tool.execute({
-    "structure_id": "mapping_123",
-    "source_elements": ["Revenue", "COGS"],
-    "target_taxonomy": "us-gaap"
-})
-```
-
-##### Query Staging Tool
-
-Execute SQL queries against DuckDB staging tables before materialization.
-
-```python
-from robosystems.middleware.mcp.tools import QueryStagingTool
-
-tool = QueryStagingTool(client)
-result = await tool.execute({
-    "sql": "SELECT * FROM financial_data WHERE amount > 1000",
-    "limit": 100
-})
-```
-
-##### Materialize Graph Tool
-
-Trigger materialization from DuckDB staging to LadybugDB graph database.
-
-```python
-from robosystems.middleware.mcp.tools import MaterializeGraphTool
-
-tool = MaterializeGraphTool(client)
-result = await tool.execute({
-    "table_name": "financial_data",
-    "file_id": "optional_specific_file_id"
-})
-```
-
 #### Curated Financial Tools
 
 Parameterized tools for structured financial data access. These use the FactSet traversal pattern (Structure → FactSet → Fact) and Association Classifications to return financial data without requiring Cypher knowledge.
