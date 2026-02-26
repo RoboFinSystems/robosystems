@@ -395,13 +395,21 @@ def sample_graph_credits(db_session, test_user, test_org):
     session=db_session,
   )
 
-  credits = GraphCredits.create_for_graph(
-    graph_id=graph_id,
-    user_id=test_user.id,
-    billing_admin_id=test_user.id,
-    monthly_allocation=Decimal("1000"),
-    session=db_session,
-  )
+  with patch(
+    "robosystems.config.graph_tier.GraphTierConfig.get_backup_limits",
+    return_value={
+      "max_backup_size_gb": 100,
+      "backup_retention_days": 90,
+      "max_backups_per_day": -1,
+    },
+  ):
+    credits = GraphCredits.create_for_graph(
+      graph_id=graph_id,
+      user_id=test_user.id,
+      billing_admin_id=test_user.id,
+      monthly_allocation=Decimal("1000"),
+      session=db_session,
+    )
   return credits
 
 

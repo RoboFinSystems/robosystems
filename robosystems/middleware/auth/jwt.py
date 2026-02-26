@@ -229,8 +229,8 @@ def create_sso_token(user_id: str) -> tuple[str, str]:
     "token_id": token_id,
     "exp": datetime.now(UTC) + timedelta(seconds=300),  # 5 minutes for better UX
     "iat": datetime.now(UTC),
-    "iss": "api.robosystems.ai",  # Issuer claim
-    "aud": ["robosystems.ai", "roboledger.ai", "roboinvestor.ai"],  # Audience claim
+    "iss": env.JWT_ISSUER,  # Issuer claim - must match env for all environments
+    "aud": env.JWT_AUDIENCE,  # Audience claim - must match env for all environments
   }
   token = jwt.encode(payload, secret_key, algorithm="HS256")
   return token, token_id

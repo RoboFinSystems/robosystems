@@ -184,7 +184,8 @@ async def materialize_table(
 
         # Check if table exists
         result = duck_conn.execute(
-          f"SELECT COUNT(*) FROM information_schema.tables WHERE table_name = '{table_name}'"
+          "SELECT COUNT(*) FROM information_schema.tables WHERE table_name = ?",
+          [table_name],
         ).fetchone()
 
         if not result or result[0] == 0:
@@ -207,7 +208,8 @@ async def materialize_table(
 
         # Check if file_id column exists in the table
         columns_result = duck_conn.execute(
-          f"SELECT column_name FROM information_schema.columns WHERE table_name = '{table_name}'"
+          "SELECT column_name FROM information_schema.columns WHERE table_name = ?",
+          [table_name],
         ).fetchall()
         column_names = [col[0] for col in columns_result]
         has_file_id = "file_id" in column_names
@@ -257,9 +259,11 @@ async def materialize_table(
 
           # Build file filter clause
           file_filter = ""
+          query_params: list[str] = []
           if request.file_ids and has_file_id:
-            file_ids_str = ", ".join([f"'{fid}'" for fid in request.file_ids])
-            file_filter = f"file_id IN ({file_ids_str})"
+            file_ids_placeholders = ", ".join(["?" for _ in request.file_ids])
+            file_filter = f"file_id IN ({file_ids_placeholders})"
+            query_params.extend(request.file_ids)
 
           # Build WHERE clause combining file filter and batch clause
           where = ""
@@ -284,10 +288,14 @@ async def materialize_table(
           else:
             select_expr = "*"
 
-          duck_conn.execute(
+          create_sql = (
             f"CREATE TABLE {temp_table_name} AS "
             f"SELECT {select_expr} FROM {table_name}{where}"
           )
+          if query_params:
+            duck_conn.execute(create_sql, query_params)
+          else:
+            duck_conn.execute(create_sql)
 
           if request.file_ids:
             logger.info(
@@ -542,7 +550,8 @@ async def fork_from_parent_duckdb(
 
           # Check if file_id column exists in the table
           columns_result = duck_conn.execute(
-            f"SELECT column_name FROM information_schema.columns WHERE table_name = '{table_name}'"
+            "SELECT column_name FROM information_schema.columns WHERE table_name = ?",
+            [table_name],
           ).fetchall()
           column_names = [col[0] for col in columns_result]
           has_file_id = "file_id" in column_names
