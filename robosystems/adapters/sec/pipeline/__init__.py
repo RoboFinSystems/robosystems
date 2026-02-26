@@ -78,6 +78,17 @@ from robosystems.adapters.sec.pipeline.duckdb_s3_publish import (
   sec_duckdb_s3_published,
   sec_historical_duckdb_s3_published,
 )
+
+# Entity sync pipeline (connection-based, per-user graph)
+from robosystems.adapters.sec.pipeline.entity_sync import (
+  get_dagster_components as get_entity_sync_components,
+)
+from robosystems.adapters.sec.pipeline.entity_sync import (
+  sec_entity_extract,
+  sec_entity_load,
+  sec_entity_sync_job,
+  sec_entity_transform,
+)
 from robosystems.adapters.sec.pipeline.entity_update import (
   sec_entity_incremental_update,
 )
@@ -127,6 +138,9 @@ def get_dagster_components():
   Returns a dictionary with keys: assets, jobs, sensors, schedules.
   Used by dagster/definitions.py to collect SEC pipeline components.
   """
+  # Get entity sync components
+  entity_sync = get_entity_sync_components()
+
   return {
     "assets": [
       sec_raw_filings,
@@ -143,6 +157,7 @@ def get_dagster_components():
       sec_duckdb_s3_published,
       sec_historical_duckdb_s3_published,
       sec_knowledge_artifacts,
+      *entity_sync["assets"],
     ],
     "jobs": [
       sec_download_job,
@@ -160,15 +175,18 @@ def get_dagster_components():
       sec_historical_duckdb_s3_publish_job,
       sec_artifact_generation_job,
       sec_historical_lbug_s3_publish_job,
+      *entity_sync["jobs"],
     ],
     "sensors": [
       sec_processing_sensor,
       sec_download_to_process_sensor,
       sec_incremental_staging_sensor,
       sec_stage_to_materialize_sensor,
+      *entity_sync["sensors"],
     ],
     "schedules": [
       sec_incremental_download_schedule,
+      *entity_sync["schedules"],
     ],
   }
 
@@ -199,7 +217,12 @@ __all__ = [
   "sec_duckdb_s3_publish_job",
   "sec_duckdb_s3_published",
   "sec_duckdb_staged",
+  # Entity sync pipeline
+  "sec_entity_extract",
   "sec_entity_incremental_update",
+  "sec_entity_load",
+  "sec_entity_sync_job",
+  "sec_entity_transform",
   "sec_entity_update_job",
   "sec_graph_materialized",
   "sec_historical_duckdb_s3_publish_job",

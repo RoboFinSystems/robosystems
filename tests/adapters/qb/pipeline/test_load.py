@@ -77,6 +77,10 @@ def _make_mock_graph_table(table_id="table_1"):
   """Create a mock GraphTable with expected attributes."""
   gt = Mock()
   gt.id = table_id
+  gt.row_count = 0
+  gt.file_count = 0
+  gt.total_size_bytes = 0
+  gt.update_stats = Mock()
   return gt
 
 
@@ -88,6 +92,7 @@ def _make_mock_graph_file(file_id="file_1"):
   gf.upload_status = "pending"
   gf.duckdb_status = "staged"
   gf.graph_status = "pending"
+  gf.mark_uploaded = Mock()
   gf.mark_duckdb_staged = Mock()
   gf.mark_graph_ingested = Mock()
   return gf

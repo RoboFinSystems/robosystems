@@ -144,7 +144,7 @@ test-code:
 
 # Run linting
 lint fix="":
-    uv run ruff check . {{ if fix != "" { "--fix" } else { "" } }}
+    uv run ruff check . {{ if fix != "" { "--fix --unsafe-fixes" } else { "" } }}
 
 # Format code
 format:

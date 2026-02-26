@@ -449,20 +449,87 @@ class TestSyncSECConnection:
   """Tests for SEC connection sync."""
 
   @pytest.mark.asyncio
-  async def test_sync_not_implemented(self):
-    """Test that sync raises NotImplementedError."""
+  async def test_sync_submits_dagster_job(self):
+    """Test that sync submits sec_entity_sync Dagster job."""
     connection = {
       "connection_id": "conn123",
       "entity_id": "entity123",
+      "user_id": "user456",
+      "metadata": {"cik": "0001234567"},
       "credentials": {"cik": "0001234567"},
     }
 
-    with pytest.raises(NotImplementedError) as exc_info:
-      await sync_sec_connection(
+    with patch(
+      "robosystems.middleware.sse.dagster_monitor.submit_dagster_job_sync"
+    ) as mock_submit:
+      mock_submit.return_value = "run_abc123"
+
+      run_id = await sync_sec_connection(
         connection=connection, sync_options=None, graph_id="graph123"
       )
 
-    assert "temporarily disabled" in str(exc_info.value)
+      assert run_id == "run_abc123"
+      mock_submit.assert_called_once()
+
+      call_kwargs = mock_submit.call_args[1]
+      assert call_kwargs["job_name"] == "sec_entity_sync"
+      assert call_kwargs["tags"]["graph_id"] == "graph123"
+      assert call_kwargs["tags"]["cik"] == "0001234567"
+      assert call_kwargs["tags"]["pipeline"] == "sec_entity"
+
+      # Verify config passed to all three assets
+      run_config = call_kwargs["run_config"]
+      for asset_name in [
+        "sec_entity_extract",
+        "sec_entity_transform",
+        "sec_entity_load",
+      ]:
+        asset_config = run_config["ops"][asset_name]["config"]
+        assert asset_config["graph_id"] == "graph123"
+        assert asset_config["cik"] == "0001234567"
+        assert asset_config["connection_id"] == "conn123"
+        assert asset_config["user_id"] == "user456"
+
+  @pytest.mark.asyncio
+  async def test_sync_with_custom_form_types(self):
+    """Test sync passes custom form_types from sync_options."""
+    connection = {
+      "connection_id": "conn123",
+      "entity_id": "entity123",
+      "user_id": "user456",
+      "metadata": {"cik": "0001234567"},
+    }
+
+    with patch(
+      "robosystems.middleware.sse.dagster_monitor.submit_dagster_job_sync"
+    ) as mock_submit:
+      mock_submit.return_value = "run_xyz"
+
+      await sync_sec_connection(
+        connection=connection,
+        sync_options={"form_types": ["10-K"], "skip_enrichment": False},
+        graph_id="graph123",
+      )
+
+      run_config = mock_submit.call_args[1]["run_config"]
+      config = run_config["ops"]["sec_entity_extract"]["config"]
+      assert config["form_types"] == ["10-K"]
+      assert config["skip_enrichment"] is False
+
+  @pytest.mark.asyncio
+  async def test_sync_missing_cik_raises_error(self):
+    """Test sync raises ValueError when CIK is missing from metadata."""
+    connection = {
+      "connection_id": "conn123",
+      "entity_id": "entity123",
+      "user_id": "user456",
+      "metadata": {},
+    }
+
+    with pytest.raises(ValueError, match="CIK not found"):
+      await sync_sec_connection(
+        connection=connection, sync_options=None, graph_id="graph123"
+      )
 
 
 class TestCleanupSECConnection:

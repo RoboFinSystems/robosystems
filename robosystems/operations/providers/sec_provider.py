@@ -218,24 +218,68 @@ async def create_sec_connection(
 async def sync_sec_connection(
   connection: dict[str, Any], sync_options: dict[str, Any] | None, graph_id: str
 ) -> str:
-  """Trigger SEC filing sync."""
+  """Trigger SEC filing sync via Dagster entity sync pipeline.
 
-  # TODO: Rebuild individual entity SEC sync to work with new orchestration system
-  # The old pipeline.orchestrate_bulk_pipeline is obsolete and doesn't align with
-  # the new phased orchestration approach. Need to implement a single-company
-  # loader that works with the connection system.
-  #
-  # Requirements for new implementation:
-  # 1. Use the company's CIK from the connection
-  # 2. Load data into the entity's specific graph (not the shared SEC repo)
-  # 3. Work with the new phased orchestration if possible
-  # 4. Support sync_options like year, max_filings, force_update
-  #
-  # For now, individual SEC syncing is disabled.
-  raise NotImplementedError(
-    "Individual SEC entity syncing is temporarily disabled. "
-    "Use 'just sec-load' for testing or the SEC orchestrator for batch processing."
+  Submits the sec_entity_sync job which discovers filings for the CIK
+  in the shared raw S3 bucket, processes XBRL into parquet, and loads
+  the data into the user's graph database.
+
+  The target graph must already exist with the RoboLedger schema.
+
+  Args:
+      connection: Connection dict with metadata (cik, etc.)
+      sync_options: Optional dict with form_types, skip_enrichment
+      graph_id: Target graph database ID
+
+  Returns:
+      Dagster run ID for progress tracking
+  """
+  from robosystems.middleware.sse.dagster_monitor import submit_dagster_job_sync
+
+  metadata = connection.get("metadata", {}) or {}
+  options = sync_options or {}
+
+  cik = metadata.get("cik", "")
+  connection_id = connection.get("connection_id", "")
+  user_id = connection.get("user_id", "")
+
+  if not cik:
+    raise ValueError("SEC CIK not found in connection metadata")
+
+  # Build config for all assets in the pipeline (they share SECEntitySyncConfig)
+  sync_config = {
+    "graph_id": graph_id,
+    "connection_id": connection_id,
+    "user_id": user_id,
+    "cik": cik,
+    "form_types": options.get("form_types", ["10-K", "10-Q", "20-F", "40-F"]),
+    "skip_enrichment": options.get("skip_enrichment", True),
+  }
+
+  run_config = {
+    "ops": {
+      "sec_entity_extract": {"config": sync_config},
+      "sec_entity_transform": {"config": sync_config},
+      "sec_entity_load": {"config": sync_config},
+    }
+  }
+
+  run_id = submit_dagster_job_sync(
+    job_name="sec_entity_sync",
+    run_config=run_config,
+    tags={
+      "graph_id": graph_id,
+      "connection_id": connection_id,
+      "cik": cik,
+      "pipeline": "sec_entity",
+    },
   )
+
+  logger.info(
+    f"SEC entity sync submitted for graph={graph_id}, "
+    f"cik={cik}, connection={connection_id}, run_id={run_id}"
+  )
+  return run_id
 
 
 async def cleanup_sec_connection(connection: dict[str, Any], graph_id: str) -> None:
