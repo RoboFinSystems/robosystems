@@ -141,6 +141,8 @@ def main():
     workers=args.workers,
     log_level=args.log_level,
     access_log=True,
+    loop="uvloop",
+    http="httptools",
   )
 
 
