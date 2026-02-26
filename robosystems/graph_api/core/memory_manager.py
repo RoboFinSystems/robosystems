@@ -485,6 +485,13 @@ def release_duckdb_memory(graph_id: str) -> dict[str, int | bool]:
     # Close all connections - this releases DuckDB's buffer memory
     pool.close_database_connections(graph_id)
 
+    # Clear the memory override so new connections use the tier default.
+    # Without this, new DuckDB connections (e.g., during materialization)
+    # pick up the stale boost and compete with LadybugDB for memory.
+    from robosystems.graph_api.core.duckdb.pool import set_duckdb_memory_override
+
+    set_duckdb_memory_override(None, graph_id=graph_id)
+
     logger.info(
       f"Released DuckDB memory for {graph_id}: closed {connections_before} connections"
     )
