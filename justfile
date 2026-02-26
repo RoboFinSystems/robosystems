@@ -313,7 +313,7 @@ demo-all:
     @just demo-element-mapping
     @just demo-sec
 
-# Create or reuse demo user (uses shared examples/credentials/config.json)
+# Create or reuse demo user (uses shared .local/config.json)
 demo-user *args="":
     uv run examples/credentials/main.py {{args}}
 
