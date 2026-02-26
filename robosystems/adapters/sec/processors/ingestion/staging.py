@@ -759,6 +759,18 @@ class DuckDBStager:
         except Exception as drop_err:
           logger.debug(f"Could not drop table {table_name} before retry: {drop_err}")
 
+        # Re-apply DuckDB memory boost before retry. The boost is stored in an
+        # in-memory dict on the Graph API — if the container restarted (OOM kill,
+        # health check failure), the override is lost and new connections get the
+        # default 10GB limit instead of the boosted 55GB. This is idempotent.
+        try:
+          await graph_client.boost_memory(self.graph_id, target="duckdb")
+          logger.info(
+            f"Re-verified DuckDB memory boost for {self.graph_id} before retry"
+          )
+        except Exception as boost_err:
+          logger.warning(f"Could not re-verify memory boost before retry: {boost_err}")
+
         await asyncio.sleep(backoff)
       else:
         log_progress(
