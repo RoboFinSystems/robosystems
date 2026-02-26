@@ -792,18 +792,19 @@ class DuckDBStager:
     total_tables: int,
   ) -> tuple[bool, TableInfo | None, str | None]:
     """
-    Stage a large table in per-quarter chunks to avoid OOM.
+    Stage a large table using temp-table-per-quarter + final merge.
 
-    Large tables (e.g., Label 51 GiB, Fact 500+ GiB) can exceed DuckDB's
-    memory limit even with spill-to-disk enabled. The S3 scan buffers +
-    decompression overhead exhaust memory when reading all files at once.
+    Instead of INSERT INTO (which re-dedupes against a growing table and gets
+    progressively slower), this creates independent temp tables per quarter,
+    then merges them in a single local-data pass.
 
-    This method splits staging into quarterly chunks:
-    1. First quarter with data -> CREATE TABLE (with dedup)
-    2. Subsequent quarters -> INSERT INTO (merge + dedup)
+    Steps:
+    1. CREATE TABLE {table}__Q{n} for each quarter (S3 download + dedup per quarter)
+    2. CREATE TABLE {table} AS SELECT ... FROM all temps UNION ALL GROUP BY (local merge)
+    3. DROP temp tables
 
-    Each quarter typically has 3-8 GiB of compressed parquet, well within
-    the 55 GiB memory limit.
+    The final merge reads from local DuckDB tables (no S3 I/O), so hash
+    aggregation can spill to disk efficiently.
 
     Args:
         table_name: Name of the table to stage
@@ -819,11 +820,10 @@ class DuckDBStager:
         Tuple of (success, TableInfo or None, error or None)
     """
     timeout = get_staging_timeout(table_name)
-    table_created = False
-    total_rows = 0
-    chunks_processed = 0
+    temp_tables: list[str] = []
+    total_raw_rows = 0
 
-    # Generate quarterly patterns
+    # Phase 1: Create independent temp tables per quarter
     quarters: list[tuple[int, int]] = []
     for y in range(chunk_start_year, chunk_end_year + 1):
       for q in range(1, 5):
@@ -834,35 +834,29 @@ class DuckDBStager:
         f"s3://{self.bucket}/{self.source_prefix}/"
         f"filed={year_val}-Q{q}/{entity_type}/{table_name}/*.parquet"
       )
+      temp_name = f"{table_name}__{year_val}_Q{q}"
 
       try:
-        if not table_created:
-          response = await graph_client.create_table(
-            graph_id=self.graph_id,
-            table_name=table_name,
-            s3_pattern=quarter_pattern,
-            timeout=timeout,
-          )
-        else:
-          response = await graph_client.insert_into_table(
-            graph_id=self.graph_id,
-            table_name=table_name,
-            s3_pattern=quarter_pattern,
-            timeout=timeout,
-          )
+        response = await graph_client.create_table(
+          graph_id=self.graph_id,
+          table_name=temp_name,
+          s3_pattern=quarter_pattern,
+          timeout=timeout,
+        )
 
         if response.get("status") == "failed":
           error = response.get("error", "Unknown error")
           if "No files found" in error:
             continue  # No data for this quarter, skip
+          # Cleanup temp tables created so far
+          await self._cleanup_temp_tables(graph_client, temp_tables)
           return False, None, f"{table_name} {year_val}-Q{q}: {error}"
 
         result = response.get("result", {})
         rows = result.get("row_count", 0)
         duration = response.get("duration_seconds", result.get("duration_seconds", 0))
-        total_rows += rows
-        chunks_processed += 1
-        table_created = True
+        total_raw_rows += rows
+        temp_tables.append(temp_name)
 
         log_progress(
           f"  {table_name} chunk {year_val}-Q{q}: {rows:,} rows in {duration:.1f}s"
@@ -872,10 +866,10 @@ class DuckDBStager:
         error_str = str(e)
         if "No files found" in error_str:
           continue  # No data for this quarter, skip
+        await self._cleanup_temp_tables(graph_client, temp_tables)
         return False, None, f"{table_name} {year_val}-Q{q}: {error_str}"
 
-    if not table_created:
-      # No data found for any quarter
+    if not temp_tables:
       return (
         True,
         TableInfo(
@@ -888,21 +882,99 @@ class DuckDBStager:
         None,
       )
 
-    log_progress(
-      f"[{table_index}/{total_tables}] Staged {table_name}: "
-      f"{total_rows:,} rows across {chunks_processed} quarterly chunks"
-    )
+    # Phase 2: Merge all temp tables into final table with dedup
+    # This reads from local DuckDB tables (no S3 I/O) so it's fast and
+    # the hash aggregation can spill to disk efficiently.
+    try:
+      log_progress(
+        f"  {table_name} merging {len(temp_tables)} partitions ({total_raw_rows:,} raw rows)..."
+      )
+
+      # Probe schema from first temp table to determine dedup strategy
+      probe_sql = f'SELECT * FROM "{temp_tables[0]}" LIMIT 0'
+      probe_result = await graph_client.query_table(
+        graph_id=self.graph_id, sql=probe_sql, timeout=30.0
+      )
+      columns = probe_result.get("columns", [])
+
+      # Build UNION ALL of all temp tables
+      union_parts = [f'SELECT * FROM "{t}"' for t in temp_tables]
+      union_sql = " UNION ALL ".join(union_parts)
+
+      # Build dedup merge SQL based on table type
+      if "identifier" in columns:
+        # Node table: dedup on identifier
+        other_cols = [c for c in columns if c != "identifier"]
+        select_parts = ['"identifier"'] + [f'FIRST("{c}") AS "{c}"' for c in other_cols]
+        merge_sql = (
+          f'CREATE OR REPLACE TABLE "{table_name}" AS '
+          f"SELECT {', '.join(select_parts)} "
+          f"FROM ({union_sql}) "
+          f'GROUP BY "identifier"'
+        )
+      elif "src" in columns and "dst" in columns:
+        # Relationship table (already renamed from/to to src/dst)
+        other_cols = [c for c in columns if c not in ("src", "dst")]
+        select_parts = ['"src"', '"dst"'] + [
+          f'FIRST("{c}") AS "{c}"' for c in other_cols
+        ]
+        merge_sql = (
+          f'CREATE OR REPLACE TABLE "{table_name}" AS '
+          f"SELECT {', '.join(select_parts)} "
+          f"FROM ({union_sql}) "
+          f'GROUP BY "src", "dst"'
+        )
+      else:
+        # Unknown schema — just union without dedup
+        merge_sql = (
+          f'CREATE OR REPLACE TABLE "{table_name}" AS SELECT * FROM ({union_sql})'
+        )
+
+      await graph_client.query_table(
+        graph_id=self.graph_id, sql=merge_sql, timeout=float(timeout)
+      )
+
+      # Get final row count
+      count_result = await graph_client.query_table(
+        graph_id=self.graph_id,
+        sql=f'SELECT COUNT(*) as cnt FROM "{table_name}"',
+        timeout=30.0,
+      )
+      final_rows = count_result.get("rows", [[0]])[0][0]
+
+      log_progress(
+        f"[{table_index}/{total_tables}] Staged {table_name}: "
+        f"{final_rows:,} rows (from {total_raw_rows:,} raw across "
+        f"{len(temp_tables)} partitions)"
+      )
+
+    except Exception as e:
+      await self._cleanup_temp_tables(graph_client, temp_tables)
+      return False, None, f"{table_name} merge failed: {e}"
+
+    # Phase 3: Cleanup temp tables
+    await self._cleanup_temp_tables(graph_client, temp_tables)
 
     return (
       True,
       TableInfo(
         name=table_name,
-        row_count=total_rows,
+        row_count=final_rows,
         file_count=0,
         staged_at=datetime.now(UTC).isoformat(),
       ),
       None,
     )
+
+  async def _cleanup_temp_tables(
+    self, graph_client: "GraphClient", temp_tables: list[str]
+  ) -> None:
+    """Drop temporary staging tables, logging but not raising on errors."""
+    for temp_name in temp_tables:
+      try:
+        await graph_client.delete_table(self.graph_id, temp_name)
+      except Exception as e:
+        logger.warning(f"Could not drop temp table {temp_name}: {e}")
 
   async def _create_tables_with_glob(
     self,
@@ -987,22 +1059,14 @@ class DuckDBStager:
           )
 
       if needs_chunking:
-
-        async def chunked_stage_fn() -> tuple[bool, TableInfo | None, str | None]:
-          return await self._stage_table_chunked(
-            table_name=table_name,
-            entity_type=entity_type,
-            chunk_start_year=chunk_start,
-            chunk_end_year=chunk_end,
-            graph_client=graph_client,
-            log_progress=log_progress,
-            table_index=i,
-            total_tables=total_tables,
-          )
-
-        success, table_info, error = await self._stage_table_with_retry(
+        # No retries for chunked staging — retrying re-downloads all S3 data
+        # and compounds disk usage. If it fails, something fundamental is wrong.
+        # The _stage_table_chunked method cleans up temp tables on failure.
+        success, table_info, error = await self._stage_table_chunked(
           table_name=table_name,
-          stage_fn=chunked_stage_fn,
+          entity_type=entity_type,
+          chunk_start_year=chunk_start,
+          chunk_end_year=chunk_end,
           graph_client=graph_client,
           log_progress=log_progress,
           table_index=i,
