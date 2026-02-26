@@ -291,6 +291,8 @@ Access via the RoboSystems Python client:
 
 ```python
 from robosystems_client import RoboSystemsClient
+from robosystems_client.api.query.execute_cypher_query import sync_detailed as execute_query
+from robosystems_client.models.cypher_query_request import CypherQueryRequest
 import json
 from pathlib import Path
 
@@ -301,22 +303,27 @@ with open(credentials_path) as f:
 
 # Initialize client with API key
 client = RoboSystemsClient(
-    api_url="http://localhost:8000",
-    api_key=credentials["api_key"],  # From demo-sec command
-    graph_id="sec"
+    base_url="http://localhost:8000",
+    token=credentials["api_key"],
+    auth_header_name="X-API-Key",
+    prefix="",
 )
 
 # Run Cypher query
-result = client.query_graph("""
+request = CypherQueryRequest(
+    query="""
     MATCH (e:Entity)-[:ENTITY_HAS_REPORT]->(r:Report)-[:REPORT_HAS_FACT]->(f:Fact)
     WHERE e.name CONTAINS 'NVIDIA'
     RETURN e.name, r.form, f.numeric_value
     LIMIT 10
-""")
+    """,
+    parameters={},
+)
 
-# Get graph schema
-schema = client.get_schema()
-print(schema)
+response = execute_query(graph_id="sec", client=client, body=request)
+
+if response.parsed:
+    print(f"Results: {response.parsed.data}")
 ```
 
 ### Option 5: G.V() Graph IDE For Interactive Exploration
