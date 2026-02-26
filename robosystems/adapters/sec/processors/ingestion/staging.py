@@ -930,9 +930,33 @@ class DuckDBStager:
           f'CREATE OR REPLACE TABLE "{table_name}" AS SELECT * FROM ({union_sql})'
         )
 
+      # Prefix with SET threads=1 to reduce buffer pool pressure during merge.
+      # With 4 threads, DuckDB scans all UNION ALL sources in parallel, filling
+      # the buffer pool with read-ahead pages from all sources simultaneously.
+      # With 1 thread, it scans sequentially — one source at a time — leaving
+      # memory for the hash aggregate to partition and spill to disk.
+      # We invalidate the connection after merge so the next operation gets a
+      # fresh connection with default thread count.
+      merge_sql = f"SET threads=1; {merge_sql}"
+
       await graph_client.query_table(
         graph_id=self.graph_id, sql=merge_sql, timeout=float(timeout)
       )
+
+      # Restore thread count — SET threads=1 persists on the pooled connection.
+      # Read configured value from graph tier config (graph.yml duckdb_max_threads).
+      try:
+        from robosystems.config.graph_tier import GraphTierConfig
+
+        tier = env.CLUSTER_TIER
+        default_threads = GraphTierConfig.get_duckdb_max_threads(tier) if tier else 4
+        await graph_client.query_table(
+          graph_id=self.graph_id,
+          sql=f"SET threads={default_threads}",
+          timeout=30.0,
+        )
+      except Exception:
+        pass  # Non-fatal
 
       # Get final row count
       count_result = await graph_client.query_table(
