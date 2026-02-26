@@ -8,11 +8,11 @@ with source as (
 
 select
   cast("Id" as varchar) as id,
-  "CompanyName" as company_name,
-  "LegalName" as legal_name,
-  "CompanyAddr_Line1" as address_line1,
-  "CompanyAddr_City" as city,
-  "CompanyAddr_CountrySubDivisionCode" as state,
-  "CompanyAddr_PostalCode" as postal_code,
-  "CompanyAddr_Country" as country
+  cast("CompanyName" as varchar) as company_name,
+  cast("LegalName" as varchar) as legal_name,
+  cast("CompanyAddr_Line1" as varchar) as address_line1,
+  cast("CompanyAddr_City" as varchar) as city,
+  cast("CompanyAddr_CountrySubDivisionCode" as varchar) as state,
+  cast("CompanyAddr_PostalCode" as varchar) as postal_code,
+  cast("CompanyAddr_Country" as varchar) as country
 from source

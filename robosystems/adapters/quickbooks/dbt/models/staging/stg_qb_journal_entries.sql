@@ -9,7 +9,7 @@ with source as (
 select
   cast("Id" as varchar) as id,
   -- Extract tx_type and tx_number from composite id (e.g. 'Invoice_123')
-  -- For seed data (plain numeric ids), default to 'JournalEntry'
+  -- For plain numeric ids, default to 'JournalEntry'
   case
     when position('_' in cast("Id" as varchar)) > 0
     then split_part(cast("Id" as varchar), '_', 1)
@@ -21,8 +21,8 @@ select
     else cast("Id" as varchar)
   end as tx_number,
   cast("TxnDate" as date) as txn_date,
-  "DocNumber" as doc_number,
+  cast("DocNumber" as varchar) as doc_number,
   cast("TotalAmt" as double) as total_amount,
-  "PrivateNote" as private_note,
+  cast("PrivateNote" as varchar) as private_note,
   cast("Adjustment" as boolean) as is_adjustment
 from source

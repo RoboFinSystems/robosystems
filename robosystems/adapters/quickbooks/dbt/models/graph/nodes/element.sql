@@ -25,11 +25,11 @@ select
   false as is_shares,
   false as is_fraction,
   false as is_textblock,
-  null as substitution_group,
-  null as item_type,
+  cast(null as varchar) as substitution_group,
+  cast(null as varchar) as item_type,
   lower(classification) as classification,
-  null as canonical_concept,
-  null as canonical_confidence,
-  null as embedding
+  cast(null as varchar) as canonical_concept,
+  cast(null as double) as canonical_confidence,
+  cast(null as float[384]) as embedding
 from accounts
 where is_active = true

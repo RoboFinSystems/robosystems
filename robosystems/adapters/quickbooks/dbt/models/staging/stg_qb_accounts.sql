@@ -8,17 +8,17 @@ with source as (
 
 select
   cast("Id" as varchar) as id,
-  "Name" as name,
-  "FullyQualifiedName" as fully_qualified_name,
-  "AccountType" as account_type,
+  cast("Name" as varchar) as name,
+  cast("FullyQualifiedName" as varchar) as fully_qualified_name,
+  cast("AccountType" as varchar) as account_type,
   case
-    when "AccountType" in ('Other Income') then 'Other Income'
-    when "AccountType" in ('Other Expense') then 'Other Expense'
-    else "Classification"
+    when cast("AccountType" as varchar) in ('Other Income') then 'Other Income'
+    when cast("AccountType" as varchar) in ('Other Expense') then 'Other Expense'
+    else cast("Classification" as varchar)
   end as classification,
-  cast(nullif("ParentRef", '') as varchar) as parent_ref,
+  nullif(cast("ParentRef" as varchar), '') as parent_ref,
   cast("Active" as boolean) as is_active,
   cast("CurrentBalance" as double) as current_balance,
-  "AccountSubType" as account_sub_type,
-  lower("Classification") as domain
+  cast("AccountSubType" as varchar) as account_sub_type,
+  lower(cast("Classification" as varchar)) as domain
 from source
