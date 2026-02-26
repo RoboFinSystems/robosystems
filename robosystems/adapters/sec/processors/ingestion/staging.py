@@ -1037,9 +1037,9 @@ class DuckDBStager:
 
       # For large tables, check S3 data size to decide if chunking is needed
       needs_chunking = False
+      chunk_start = year if year else range_start
+      chunk_end = year if year else range_end
       if is_large:
-        chunk_start = year if year else range_start
-        chunk_end = year if year else range_end
         s3_size = self._get_table_s3_size_bytes(
           entity_type, table_name, chunk_start, chunk_end
         )
