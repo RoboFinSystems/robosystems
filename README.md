@@ -3,7 +3,7 @@
 RoboSystems is an enterprise-grade financial knowledge graph platform that transforms complex financial and operational data into actionable intelligence through graph-based analytics and AI-powered insights.
 
 - **Graph-Based Financial Intelligence**: Leverages graph database technology to model complex financial relationships
-- **AI-Native Architecture**: Context graphs for LLM-powered financial and operational AI driven analytics
+- **AI-Native Architecture**: Context graphs built with embeddings, semantic enrichment, and confidence scoring for LLM-powered analytics
 - **Model Context Protocol (MCP)**: Standardized server and [client](https://www.npmjs.com/package/@robosystems/mcp) for LLM integration
 - **Multi-Source Data Integration**: SEC XBRL filings, QuickBooks accounting data, and custom financial datasets
 - **Enterprise-Ready Infrastructure**: Multi-tenant architecture with tiered scaling and production-grade query management

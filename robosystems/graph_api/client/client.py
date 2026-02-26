@@ -617,7 +617,7 @@ class GraphClient(BaseGraphClient):
     saturated by a large S3 upload) but the task itself is still running fine.
     """
     poll_interval = 5
-    max_polls = 60  # 5 minutes of polling at 5s intervals
+    max_polls = max(timeout // poll_interval, 60)  # Poll until timeout, minimum 5 min
 
     for i in range(max_polls):
       # Check overall timeout
