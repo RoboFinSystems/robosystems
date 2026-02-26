@@ -31,7 +31,6 @@ from robosystems.operations.aws.s3 import S3Client
 from robosystems.schemas.extensions.roboledger import RoboLedgerContext
 
 from .models import (
-  CHUNKED_STAGING_TABLES,
   LARGE_STAGING_TABLES,
   STAGING_MAX_RETRIES,
   STAGING_RETRY_BACKOFF_BASE,
@@ -80,6 +79,7 @@ class DuckDBStager:
     reset_staging: bool = False,
     skip_taxonomy_relationships: bool = False,
     use_glob: bool = True,
+    duckdb_memory_mb: int | None = None,
     progress_callback: ProgressCallback | None = None,
   ) -> StagingResult:
     """
@@ -245,6 +245,7 @@ class DuckDBStager:
           year=year,
           start_year=start_year,
           end_year=end_year,
+          duckdb_memory_mb=duckdb_memory_mb,
           progress_callback=log_progress,
         )
       else:
@@ -548,6 +549,79 @@ class DuckDBStager:
   # Private Helper Methods
   # =========================================================================
 
+  # Default chunking threshold when DuckDB memory info is unavailable.
+  # 20 GiB is conservative — Element (19 GiB) passes, Label (51 GiB) chunks.
+  DEFAULT_CHUNKING_THRESHOLD_BYTES = 20 * 1024 * 1024 * 1024  # 20 GiB
+
+  # Fraction of DuckDB memory to use as chunking threshold.
+  # Parquet decompresses ~3-5x, plus hash aggregation overhead, so 40% of
+  # memory limit keeps a safe margin for the scan + dedup pipeline.
+  CHUNKING_MEMORY_FRACTION = 0.40
+
+  def _get_chunking_threshold_bytes(self, duckdb_memory_mb: int | None) -> int:
+    """
+    Calculate the S3 data size threshold for chunked staging.
+
+    If DuckDB memory is known (from boost response), threshold is 40% of that.
+    Otherwise falls back to a conservative 20 GiB default.
+
+    Args:
+        duckdb_memory_mb: DuckDB memory limit in MB (from boost response), or None
+
+    Returns:
+        Threshold in bytes — tables with more S3 data than this get chunked
+    """
+    if duckdb_memory_mb and duckdb_memory_mb > 0:
+      threshold = int(duckdb_memory_mb * 1024 * 1024 * self.CHUNKING_MEMORY_FRACTION)
+      logger.info(
+        f"Chunking threshold: {threshold / (1024**3):.1f} GiB "
+        f"(40% of {duckdb_memory_mb}MB DuckDB memory)"
+      )
+      return threshold
+    logger.info(
+      f"Chunking threshold: {self.DEFAULT_CHUNKING_THRESHOLD_BYTES / (1024**3):.0f} GiB (default)"
+    )
+    return self.DEFAULT_CHUNKING_THRESHOLD_BYTES
+
+  def _get_table_s3_size_bytes(
+    self,
+    entity_type: str,
+    table_name: str,
+    start_year: int,
+    end_year: int,
+  ) -> int:
+    """
+    Get total S3 parquet size for a table across quarterly partitions.
+
+    Uses S3 ListObjectsV2 to sum file sizes. Queries per-year prefixes
+    to avoid listing the entire bucket.
+
+    Args:
+        entity_type: "nodes" or "relationships"
+        table_name: Table name (e.g., "Label", "Element")
+        start_year: First year to check
+        end_year: Last year to check (inclusive)
+
+    Returns:
+        Total size in bytes
+    """
+    total_bytes = 0
+    boto_client = self.s3_client.s3_client
+
+    for y in range(start_year, end_year + 1):
+      for q in range(1, 5):
+        prefix = f"{self.source_prefix}/filed={y}-Q{q}/{entity_type}/{table_name}/"
+        try:
+          paginator = boto_client.get_paginator("list_objects_v2")
+          for page in paginator.paginate(Bucket=self.bucket, Prefix=prefix):
+            for obj in page.get("Contents", []):
+              total_bytes += obj.get("Size", 0)
+        except Exception:
+          # Non-fatal — if we can't check size, skip this partition
+          continue
+
+    return total_bytes
+
   async def _discover_processed_files(
     self, year: int | None = None
   ) -> dict[str, list[str]]:
@@ -825,13 +899,15 @@ class DuckDBStager:
     year: int | None = None,
     start_year: int | None = None,
     end_year: int | None = None,
+    duckdb_memory_mb: int | None = None,
     progress_callback: ProgressCallback | None = None,
   ) -> tuple[list[str], dict[str, TableInfo]]:
     """
     Create DuckDB staging tables using glob patterns.
 
-    Uses single-pass staging for all tables, relying on DuckDB's external
-    aggregation with spill-to-disk for memory management of large tables.
+    For large tables (LARGE_STAGING_TABLES), checks S3 data size against
+    the DuckDB memory threshold. Tables exceeding the threshold are staged
+    in per-quarter chunks to avoid OOM.
 
     Args:
         tables: Dictionary mapping table names to entity type
@@ -839,6 +915,7 @@ class DuckDBStager:
         year: Optional single year filter
         start_year: Optional start of year range (inclusive)
         end_year: Optional end of year range (inclusive)
+        duckdb_memory_mb: DuckDB memory limit in MB (for chunking threshold)
         progress_callback: Optional progress callback
 
     Returns:
@@ -865,24 +942,39 @@ class DuckDBStager:
 
     log_progress = make_progress_logger(progress_callback)
 
+    # Calculate chunking threshold from DuckDB memory config
+    chunking_threshold = self._get_chunking_threshold_bytes(duckdb_memory_mb)
+
     total_tables = len(tables)
     for i, (table_name, entity_type) in enumerate(tables.items(), 1):
       is_large = table_name in LARGE_STAGING_TABLES
-      needs_chunking = table_name in CHUNKED_STAGING_TABLES
 
       timeout = get_staging_timeout(table_name)
 
-      if needs_chunking:
-        # Per-quarter chunked staging for tables with embeddings (FLOAT[384]).
-        # Embeddings inflate parquet size dramatically (Label: 51 GiB for 6M rows).
-        # Chunking by quarter keeps each operation to 3-8 GiB of compressed parquet.
+      # For large tables, check S3 data size to decide if chunking is needed
+      needs_chunking = False
+      if is_large:
         chunk_start = year if year else range_start
         chunk_end = year if year else range_end
-
-        log_progress(
-          f"[{i}/{total_tables}] Staging {table_name} (chunked by quarter) "
-          f"(timeout={timeout}s)..."
+        s3_size = self._get_table_s3_size_bytes(
+          entity_type, table_name, chunk_start, chunk_end
         )
+        s3_size_gib = s3_size / (1024**3)
+        threshold_gib = chunking_threshold / (1024**3)
+        if s3_size > chunking_threshold:
+          needs_chunking = True
+          log_progress(
+            f"[{i}/{total_tables}] Staging {table_name} "
+            f"({s3_size_gib:.1f} GiB > {threshold_gib:.1f} GiB threshold, chunked by quarter) "
+            f"(timeout={timeout}s)..."
+          )
+        else:
+          log_progress(
+            f"[{i}/{total_tables}] Staging {table_name} (large table, "
+            f"{s3_size_gib:.1f} GiB) (timeout={timeout}s)..."
+          )
+
+      if needs_chunking:
 
         async def chunked_stage_fn() -> tuple[bool, TableInfo | None, str | None]:
           return await self._stage_table_chunked(
@@ -923,10 +1015,11 @@ class DuckDBStager:
           )
           s3_pattern = f"{base}/*.parquet"
 
-        size_hint = " (large table)" if is_large else ""
-        log_progress(
-          f"[{i}/{total_tables}] Staging {table_name}{size_hint} (timeout={timeout}s)..."
-        )
+        if not is_large:
+          # Large tables already logged their size above
+          log_progress(
+            f"[{i}/{total_tables}] Staging {table_name} (timeout={timeout}s)..."
+          )
 
         async def standard_stage_fn() -> tuple[bool, TableInfo | None, str | None]:
           try:
