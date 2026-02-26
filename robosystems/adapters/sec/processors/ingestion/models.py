@@ -235,6 +235,19 @@ LARGE_STAGING_TABLES = frozenset(
   }
 )
 
+# Tables with embedding columns (FLOAT[384]) that require per-quarter chunked
+# staging. Embeddings inflate compressed parquet size dramatically (e.g., Label
+# is 51 GiB for only 6M rows). Reading all files at once exceeds DuckDB's memory
+# limit even with spill-to-disk. Chunked staging creates from the first quarter,
+# then INSERT INTO from subsequent quarters (with merge + dedup per chunk).
+CHUNKED_STAGING_TABLES = frozenset(
+  {
+    "Element",  # embedding FLOAT[384] - 19 GiB for 6.4M rows (OK now, risky for historical)
+    "Label",  # embedding FLOAT[384] - 51 GiB for 6M rows (OOMs at 55GB limit)
+    "Structure",  # embedding FLOAT[384] - will grow with historical data
+  }
+)
+
 # Taxonomy structure tables that can be skipped for instance-only mode
 # These encode XBRL taxonomy hierarchy (calculation/presentation/definition linkbases)
 # which are massive but not needed for basic fact analysis queries.

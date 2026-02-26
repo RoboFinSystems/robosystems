@@ -31,6 +31,7 @@ from robosystems.operations.aws.s3 import S3Client
 from robosystems.schemas.extensions.roboledger import RoboLedgerContext
 
 from .models import (
+  CHUNKED_STAGING_TABLES,
   LARGE_STAGING_TABLES,
   STAGING_MAX_RETRIES,
   STAGING_RETRY_BACKOFF_BASE,
@@ -98,7 +99,8 @@ class DuckDBStager:
     Memory Management:
     - Uses DuckDB's external aggregation with spill-to-disk for large tables
     - GROUP BY + FIRST() deduplication is more memory-efficient than ROW_NUMBER
-    - No chunking needed - single-pass staging handles 500M+ row tables
+    - Large tables (LARGE_STAGING_TABLES) use per-quarter chunked staging to
+      avoid OOM when S3 data exceeds DuckDB's memory limit
 
     Args:
         year: Optional single year filter. If provided, only files from that year.
@@ -692,6 +694,130 @@ class DuckDBStager:
 
     return False, None, f"Failed after {STAGING_MAX_RETRIES} attempts: {last_error}"
 
+  async def _stage_table_chunked(
+    self,
+    table_name: str,
+    entity_type: str,
+    chunk_start_year: int,
+    chunk_end_year: int,
+    graph_client: "GraphClient",
+    log_progress: ProgressCallback,
+    table_index: int,
+    total_tables: int,
+  ) -> tuple[bool, TableInfo | None, str | None]:
+    """
+    Stage a large table in per-quarter chunks to avoid OOM.
+
+    Large tables (e.g., Label 51 GiB, Fact 500+ GiB) can exceed DuckDB's
+    memory limit even with spill-to-disk enabled. The S3 scan buffers +
+    decompression overhead exhaust memory when reading all files at once.
+
+    This method splits staging into quarterly chunks:
+    1. First quarter with data -> CREATE TABLE (with dedup)
+    2. Subsequent quarters -> INSERT INTO (merge + dedup)
+
+    Each quarter typically has 3-8 GiB of compressed parquet, well within
+    the 55 GiB memory limit.
+
+    Args:
+        table_name: Name of the table to stage
+        entity_type: Entity type ("nodes" or "relationships")
+        chunk_start_year: First year to include
+        chunk_end_year: Last year to include (inclusive)
+        graph_client: Graph API client
+        log_progress: Progress callback
+        table_index: Current table index (for progress display)
+        total_tables: Total number of tables (for progress display)
+
+    Returns:
+        Tuple of (success, TableInfo or None, error or None)
+    """
+    timeout = get_staging_timeout(table_name)
+    table_created = False
+    total_rows = 0
+    chunks_processed = 0
+
+    # Generate quarterly patterns
+    quarters: list[tuple[int, int]] = []
+    for y in range(chunk_start_year, chunk_end_year + 1):
+      for q in range(1, 5):
+        quarters.append((y, q))
+
+    for year_val, q in quarters:
+      quarter_pattern = (
+        f"s3://{self.bucket}/{self.source_prefix}/"
+        f"filed={year_val}-Q{q}/{entity_type}/{table_name}/*.parquet"
+      )
+
+      try:
+        if not table_created:
+          response = await graph_client.create_table(
+            graph_id=self.graph_id,
+            table_name=table_name,
+            s3_pattern=quarter_pattern,
+            timeout=timeout,
+          )
+        else:
+          response = await graph_client.insert_into_table(
+            graph_id=self.graph_id,
+            table_name=table_name,
+            s3_pattern=quarter_pattern,
+            timeout=timeout,
+          )
+
+        if response.get("status") == "failed":
+          error = response.get("error", "Unknown error")
+          if "No files found" in error:
+            continue  # No data for this quarter, skip
+          return False, None, f"{table_name} {year_val}-Q{q}: {error}"
+
+        result = response.get("result", {})
+        rows = result.get("row_count", 0)
+        duration = response.get("duration_seconds", result.get("duration_seconds", 0))
+        total_rows += rows
+        chunks_processed += 1
+        table_created = True
+
+        log_progress(
+          f"  {table_name} chunk {year_val}-Q{q}: {rows:,} rows in {duration:.1f}s"
+        )
+
+      except Exception as e:
+        error_str = str(e)
+        if "No files found" in error_str:
+          continue  # No data for this quarter, skip
+        return False, None, f"{table_name} {year_val}-Q{q}: {error_str}"
+
+    if not table_created:
+      # No data found for any quarter
+      return (
+        True,
+        TableInfo(
+          name=table_name,
+          row_count=0,
+          file_count=0,
+          staged_at=datetime.now(UTC).isoformat(),
+          skipped=True,
+        ),
+        None,
+      )
+
+    log_progress(
+      f"[{table_index}/{total_tables}] Staged {table_name}: "
+      f"{total_rows:,} rows across {chunks_processed} quarterly chunks"
+    )
+
+    return (
+      True,
+      TableInfo(
+        name=table_name,
+        row_count=total_rows,
+        file_count=0,
+        staged_at=datetime.now(UTC).isoformat(),
+      ),
+      None,
+    )
+
   async def _create_tables_with_glob(
     self,
     tables: dict[str, str],
@@ -742,43 +868,115 @@ class DuckDBStager:
     total_tables = len(tables)
     for i, (table_name, entity_type) in enumerate(tables.items(), 1):
       is_large = table_name in LARGE_STAGING_TABLES
-
-      # Build s3_pattern: dual-format globs supporting both old and new layouts
-      # Old: TABLE.parquet, New: TABLE/*.parquet
-      if year_range_patterns:
-        s3_pattern_list: list[str] = []
-        for y in range(range_start, range_end + 1):
-          base = (
-            f"s3://{self.bucket}/{self.source_prefix}/"
-            f"filed={y}-Q*/{entity_type}/{table_name}"
-          )
-          s3_pattern_list.append(f"{base}/*.parquet")
-        s3_pattern: str | list[str] = s3_pattern_list
-      else:
-        base = (
-          f"s3://{self.bucket}/{self.source_prefix}/"
-          f"{filed_pattern}/{entity_type}/{table_name}"
-        )
-        s3_pattern = f"{base}/*.parquet"
+      needs_chunking = table_name in CHUNKED_STAGING_TABLES
 
       timeout = get_staging_timeout(table_name)
-      size_hint = " (large table)" if is_large else ""
-      log_progress(
-        f"[{i}/{total_tables}] Staging {table_name}{size_hint} (timeout={timeout}s)..."
-      )
 
-      async def standard_stage_fn() -> tuple[bool, TableInfo | None, str | None]:
-        try:
-          response = await graph_client.create_table(
-            graph_id=self.graph_id,
+      if needs_chunking:
+        # Per-quarter chunked staging for tables with embeddings (FLOAT[384]).
+        # Embeddings inflate parquet size dramatically (Label: 51 GiB for 6M rows).
+        # Chunking by quarter keeps each operation to 3-8 GiB of compressed parquet.
+        chunk_start = year if year else range_start
+        chunk_end = year if year else range_end
+
+        log_progress(
+          f"[{i}/{total_tables}] Staging {table_name} (chunked by quarter) "
+          f"(timeout={timeout}s)..."
+        )
+
+        async def chunked_stage_fn() -> tuple[bool, TableInfo | None, str | None]:
+          return await self._stage_table_chunked(
             table_name=table_name,
-            s3_pattern=s3_pattern,
-            timeout=timeout,
+            entity_type=entity_type,
+            chunk_start_year=chunk_start,
+            chunk_end_year=chunk_end,
+            graph_client=graph_client,
+            log_progress=log_progress,
+            table_index=i,
+            total_tables=total_tables,
           )
 
-          if response.get("status") == "failed":
-            error = response.get("error", "Unknown error")
-            if "No files found" in error:
+        success, table_info, error = await self._stage_table_with_retry(
+          table_name=table_name,
+          stage_fn=chunked_stage_fn,
+          graph_client=graph_client,
+          log_progress=log_progress,
+          table_index=i,
+          total_tables=total_tables,
+        )
+      else:
+        # Standard single-shot staging for small/medium tables
+        # Build s3_pattern: dual-format globs supporting both old and new layouts
+        if year_range_patterns:
+          s3_pattern_list: list[str] = []
+          for y in range(range_start, range_end + 1):
+            base = (
+              f"s3://{self.bucket}/{self.source_prefix}/"
+              f"filed={y}-Q*/{entity_type}/{table_name}"
+            )
+            s3_pattern_list.append(f"{base}/*.parquet")
+          s3_pattern: str | list[str] = s3_pattern_list
+        else:
+          base = (
+            f"s3://{self.bucket}/{self.source_prefix}/"
+            f"{filed_pattern}/{entity_type}/{table_name}"
+          )
+          s3_pattern = f"{base}/*.parquet"
+
+        size_hint = " (large table)" if is_large else ""
+        log_progress(
+          f"[{i}/{total_tables}] Staging {table_name}{size_hint} (timeout={timeout}s)..."
+        )
+
+        async def standard_stage_fn() -> tuple[bool, TableInfo | None, str | None]:
+          try:
+            response = await graph_client.create_table(
+              graph_id=self.graph_id,
+              table_name=table_name,
+              s3_pattern=s3_pattern,
+              timeout=timeout,
+            )
+
+            if response.get("status") == "failed":
+              error = response.get("error", "Unknown error")
+              if "No files found" in error:
+                return (
+                  True,
+                  TableInfo(
+                    name=table_name,
+                    row_count=0,
+                    file_count=0,
+                    staged_at=datetime.now(UTC).isoformat(),
+                    skipped=True,
+                  ),
+                  None,
+                )
+              return False, None, error
+
+            result = response.get("result", {})
+            duration = response.get(
+              "duration_seconds", result.get("duration_seconds", 0)
+            )
+            row_count = result.get("row_count", 0)
+
+            log_progress(
+              f"[{i}/{total_tables}] Staged {table_name}: {row_count:,} rows in {duration:.1f}s"
+            )
+
+            return (
+              True,
+              TableInfo(
+                name=table_name,
+                row_count=row_count,
+                file_count=0,
+                staged_at=datetime.now(UTC).isoformat(),
+              ),
+              None,
+            )
+
+          except Exception as e:
+            error_str = str(e)
+            if "No files found" in error_str:
               return (
                 True,
                 TableInfo(
@@ -790,51 +988,16 @@ class DuckDBStager:
                 ),
                 None,
               )
-            return False, None, error
+            return False, None, error_str
 
-          result = response.get("result", {})
-          duration = response.get("duration_seconds", result.get("duration_seconds", 0))
-          row_count = result.get("row_count", 0)
-
-          log_progress(
-            f"[{i}/{total_tables}] Staged {table_name}: {row_count:,} rows in {duration:.1f}s"
-          )
-
-          return (
-            True,
-            TableInfo(
-              name=table_name,
-              row_count=row_count,
-              file_count=0,
-              staged_at=datetime.now(UTC).isoformat(),
-            ),
-            None,
-          )
-
-        except Exception as e:
-          error_str = str(e)
-          if "No files found" in error_str:
-            return (
-              True,
-              TableInfo(
-                name=table_name,
-                row_count=0,
-                file_count=0,
-                staged_at=datetime.now(UTC).isoformat(),
-                skipped=True,
-              ),
-              None,
-            )
-          return False, None, error_str
-
-      success, table_info, error = await self._stage_table_with_retry(
-        table_name=table_name,
-        stage_fn=standard_stage_fn,
-        graph_client=graph_client,
-        log_progress=log_progress,
-        table_index=i,
-        total_tables=total_tables,
-      )
+        success, table_info, error = await self._stage_table_with_retry(
+          table_name=table_name,
+          stage_fn=standard_stage_fn,
+          graph_client=graph_client,
+          log_progress=log_progress,
+          table_index=i,
+          total_tables=total_tables,
+        )
 
       if success and table_info:
         if table_info.skipped:
