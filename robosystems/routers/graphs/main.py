@@ -573,7 +573,7 @@ the base graph schema with specialized nodes, relationships, and properties.
 
 **Available Extensions:**
 - **RoboLedger**: Complete accounting system with XBRL reporting, general ledger, and financial statements
-- **RoboInvestor**: Investment portfolio management and tracking
+- **RoboInvestor**: Investment portfolio management with securities tracking, trade execution, and risk analysis
 - **RoboSCM**: Supply chain management and logistics
 - **RoboFO**: Front office operations and CRM
 - **RoboHRM**: Human resources management
@@ -608,7 +608,7 @@ Extension listing is included - no credit consumption required.""",
               },
               {
                 "name": "roboinvestor",
-                "description": "Investment portfolio management and tracking",
+                "description": "Investment portfolio management with securities tracking, trade execution, and risk analysis.",
                 "enabled": False,
               },
             ]
@@ -669,8 +669,15 @@ async def get_available_extensions(
             # Override description with context-aware information
             description = (
               "Complete accounting system with XBRL reporting and GL transactions. "
-              "Context-aware: SEC repositories get reporting-only tables (9 nodes), "
-              "entity graphs get full accounting capabilities (12 nodes)."
+              "Context-aware: SEC repositories get reporting-only tables, "
+              "entity graphs get full accounting capabilities."
+            )
+          elif ext_info["name"] == "roboinvestor":
+            loader = get_schema_loader([ext_info["name"]])
+            description = (
+              "Investment portfolio management with securities tracking, trade execution, "
+              "and risk analysis. Includes market data, dividends, benchmarks, and "
+              "position-level performance monitoring."
             )
           else:
             loader = get_schema_loader([ext_info["name"]])
@@ -718,14 +725,18 @@ async def get_available_extensions(
           name="roboledger",
           description=(
             "Complete accounting system with XBRL reporting and GL transactions. "
-            "Context-aware: SEC repositories get reporting-only tables (9 nodes), "
-            "entity graphs get full accounting capabilities (12 nodes)."
+            "Context-aware: SEC repositories get reporting-only tables, "
+            "entity graphs get full accounting capabilities."
           ),
           enabled=False,
         ),
         AvailableExtension(
           name="roboinvestor",
-          description="Investment portfolio management and tracking",
+          description=(
+            "Investment portfolio management with securities tracking, trade execution, "
+            "and risk analysis. Includes market data, dividends, benchmarks, and "
+            "position-level performance monitoring."
+          ),
           enabled=False,
         ),
       ],
