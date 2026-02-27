@@ -4,6 +4,8 @@ Generates precomputed Parquet artifacts from the full DuckDB staging database:
   - element_knowledge.parquet: Graph-structural signals per element qname
   - structure_profiles.parquet: Element frequency distributions per canonical_type
   - structure_consensus.parquet: Cross-filing majority-vote for identical structures
+  - disclosure_profiles.parquet: Element frequency distributions per disclosure type
+  - disclosure_consensus.parquet: Cross-filing majority-vote for disclosure types
 
 These artifacts are lazy-loaded by the SemanticEnricher during per-filing
 processing to refine confidence scores using graph-structural signals.
@@ -356,5 +358,193 @@ class StructureKnowledgeBuilder:
 
     logger.info(
       f"Structure consensus: {len(definition_hashes)} entries -> {output_path}"
+    )
+    return output_path
+
+
+class DisclosureProfileBuilder:
+  """Generates disclosure classification artifacts from a DuckDB staging database.
+
+  Uses structures where DISCLOSURE_CONCEPT_MAP matched (labeled training data)
+  to build element composition profiles per disclosure type. Element importance
+  is weighted by PageRank from the element_knowledge artifact, making
+  high-centrality elements more discriminative.
+
+  Produces two artifacts:
+  1. disclosure_profiles.parquet — element frequency distributions per disclosure type,
+     weighted by icebug PageRank scores
+  2. disclosure_consensus.parquet — cross-filing majority-vote using disclosure type
+  """
+
+  def __init__(self, memory_limit: str = "10GB") -> None:
+    self._memory_limit = memory_limit
+
+  def build(self, db_path: str | Path) -> tuple[Path, Path]:
+    """Build both disclosure knowledge artifacts.
+
+    Args:
+        db_path: Path to the DuckDB staging database.
+
+    Returns:
+        Tuple of (profiles_path, consensus_path).
+    """
+    extractor = ArcExtractor(db_path, memory_limit=self._memory_limit)
+
+    logger.info("Extracting disclosure compositions")
+    compositions = extractor.extract_disclosure_compositions()
+    logger.info(f"Extracted {len(compositions)} disclosure compositions")
+
+    pagerank_scores = self._load_pagerank_scores()
+    if pagerank_scores:
+      logger.info(f"Loaded PageRank scores for {len(pagerank_scores)} elements")
+    else:
+      logger.info("PageRank scores unavailable, using frequency-only weighting")
+
+    profiles_path = self._compute_profiles(compositions, pagerank_scores)
+    consensus_path = self._compute_consensus(compositions)
+
+    return profiles_path, consensus_path
+
+  def _load_pagerank_scores(self) -> dict[str, float]:
+    """Load PageRank scores from element_knowledge artifact.
+
+    Reads directly via file I/O to avoid circular imports with enrichment.py.
+
+    Returns:
+        Dict mapping qname to normalized PageRank score.
+        Empty dict if artifact not available.
+    """
+    from robosystems.config.storage.shared import get_artifact_path
+
+    path = Path(get_artifact_path("element_knowledge"))
+    if not path.exists():
+      return {}
+
+    try:
+      table = pq.read_table(path, columns=["qname", "pagerank"])
+      cols = table.to_pydict()
+      return {
+        cols["qname"][i]: cols["pagerank"][i] or 0.0 for i in range(len(cols["qname"]))
+      }
+    except Exception as e:
+      logger.debug(f"Failed to load PageRank scores: {e}")
+      return {}
+
+  def _compute_profiles(
+    self,
+    compositions: list[tuple[str, str, str, list[str]]],
+    pagerank_scores: dict[str, float],
+  ) -> Path:
+    """Compute element frequency distributions per disclosure type.
+
+    For each disclosure type, compute how often each element qname appears
+    across all structures of that type. Weighted scores incorporate
+    PageRank centrality to make important elements more discriminative.
+    """
+    from robosystems.config.storage.shared import get_artifact_path
+
+    # Group structures by disclosure_type
+    type_structures: dict[str, list[list[str]]] = {}
+    for _sid, disclosure_type, _def_hash, element_qnames in compositions:
+      type_structures.setdefault(disclosure_type, []).append(element_qnames)
+
+    # Compute frequency and weighted score per element per type
+    disclosure_types = []
+    qnames = []
+    frequencies = []
+    weighted_scores = []
+    structure_counts = []
+
+    for dt, structure_lists in type_structures.items():
+      total = len(structure_lists)
+      if total == 0:
+        continue
+
+      element_counts: Counter[str] = Counter()
+      for elements in structure_lists:
+        for qname in set(elements):
+          element_counts[qname] += 1
+
+      for qname, count in element_counts.items():
+        freq = count / total
+        pr = pagerank_scores.get(qname, 0.0)
+        disclosure_types.append(dt)
+        qnames.append(qname)
+        frequencies.append(freq)
+        weighted_scores.append(freq * (1.0 + pr))
+        structure_counts.append(total)
+
+    table = pa.table(
+      {
+        "disclosure_type": pa.array(disclosure_types, type=pa.string()),
+        "qname": pa.array(qnames, type=pa.string()),
+        "frequency": pa.array(frequencies, type=pa.float64()),
+        "weighted_score": pa.array(weighted_scores, type=pa.float64()),
+        "structure_count": pa.array(structure_counts, type=pa.int32()),
+      }
+    )
+
+    output_path = Path(get_artifact_path("disclosure_profiles"))
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    with open(output_path, "wb") as f:
+      pq.write_table(table, f, compression="snappy")
+
+    logger.info(
+      f"Disclosure profiles: {len(disclosure_types)} rows, "
+      f"{len(type_structures)} types -> {output_path}"
+    )
+    return output_path
+
+  def _compute_consensus(
+    self,
+    compositions: list[tuple[str, str, str, list[str]]],
+  ) -> Path:
+    """Compute cross-filing majority-vote for identical structure definitions.
+
+    Groups structures by definition_hash and finds the majority-vote
+    disclosure_type for each group.
+    """
+    from robosystems.config.storage.shared import get_artifact_path
+
+    hash_votes: dict[str, list[str]] = {}
+    for _sid, disclosure_type, def_hash, _elements in compositions:
+      hash_votes.setdefault(def_hash, []).append(disclosure_type)
+
+    definition_hashes = []
+    consensus_types = []
+    consensus_ratios = []
+    filing_counts = []
+
+    for def_hash, votes in hash_votes.items():
+      if not votes:
+        continue
+
+      total = len(votes)
+      vote_counts = Counter(votes)
+      winner, winner_count = vote_counts.most_common(1)[0]
+
+      definition_hashes.append(def_hash)
+      consensus_types.append(winner)
+      consensus_ratios.append(winner_count / total)
+      filing_counts.append(total)
+
+    table = pa.table(
+      {
+        "definition_hash": pa.array(definition_hashes, type=pa.string()),
+        "disclosure_type": pa.array(consensus_types, type=pa.string()),
+        "consensus_ratio": pa.array(consensus_ratios, type=pa.float64()),
+        "filing_count": pa.array(filing_counts, type=pa.int32()),
+      }
+    )
+
+    output_path = Path(get_artifact_path("disclosure_consensus"))
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    with open(output_path, "wb") as f:
+      pq.write_table(table, f, compression="snappy")
+
+    logger.info(
+      f"Disclosure consensus: {len(definition_hashes)} entries -> {output_path}"
     )
     return output_path

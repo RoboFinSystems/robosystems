@@ -523,9 +523,11 @@ class XBRLGraphProcessor:
             ).hexdigest()
 
       # Classify structures (heuristic first, then embedding fallback)
-      # Only Statement types are classified; Disclosures are skipped entirely
+      # Statements use keyword heuristics + embeddings; Disclosures use
+      # composition profiles from disclosure_mechanics training data
       canonical_types = []
       canonical_confidences = []
+
       for idx, row in self.structures_df.iterrows():
         name = parsed_names[len(canonical_types)]
         definition = row.get("definition", "")
@@ -537,9 +539,24 @@ class XBRLGraphProcessor:
           canonical_types.append(heuristic_type)
           canonical_confidences.append(heuristic_conf)
         elif structure_type != "Statement":
-          # Skip embedding fallback for non-Statement types (Disclosures, etc.)
-          canonical_types.append(None)
-          canonical_confidences.append(None)
+          # For Disclosure structures, attempt disclosure composition classification
+          disc_type = None
+          disc_conf = None
+          if structure_type == "Disclosure" and XBRL_GRAPH_REFINEMENT:
+            struct_id = row.get("identifier")
+            elements = structure_element_map.get(struct_id, []) if struct_id else []
+            if elements:
+              # DEI detection first (deterministic, high confidence)
+              dei_type, dei_conf = enricher.detect_dei_structure(elements)
+              if dei_type:
+                disc_type, disc_conf = dei_type, dei_conf
+              else:
+                # Disclosure composition classification
+                d_type, d_score = enricher.classify_disclosure_by_composition(elements)
+                if d_type and d_score >= 0.3:
+                  disc_type, disc_conf = d_type, d_score
+          canonical_types.append(disc_type)
+          canonical_confidences.append(disc_conf)
         elif all_embeddings[len(canonical_types)] is not None:
           emb_type, emb_conf = enricher.match_structure_canonical(
             all_embeddings[len(canonical_types)]
@@ -550,8 +567,14 @@ class XBRLGraphProcessor:
           canonical_types.append(None)
           canonical_confidences.append(None)
 
-      # Apply graph-based structure refinement
-      from robosystems.adapters.sec.config import XBRL_GRAPH_REFINEMENT
+      # Apply graph-based refinement
+      statement_types = {
+        "income_statement",
+        "balance_sheet",
+        "cash_flow_statement",
+        "equity_statement",
+        "comprehensive_income",
+      }
 
       if XBRL_GRAPH_REFINEMENT:
         for i, row in enumerate(self.structures_df.itertuples()):
@@ -564,9 +587,17 @@ class XBRLGraphProcessor:
             continue
           elements = structure_element_map.get(struct_id, [])
           def_hash = structure_def_hashes.get(struct_id, "")
-          refined_type, refined_conf = enricher.refine_structure_confidence(
-            ct, cc, elements, def_hash
-          )
+
+          if ct in statement_types:
+            # Statement refinement (existing pipeline)
+            refined_type, refined_conf = enricher.refine_structure_confidence(
+              ct, cc, elements, def_hash
+            )
+          else:
+            # Disclosure refinement
+            refined_type, refined_conf = enricher.refine_disclosure_confidence(
+              ct, cc, elements, def_hash
+            )
           canonical_types[i] = refined_type
           canonical_confidences[i] = refined_conf
 

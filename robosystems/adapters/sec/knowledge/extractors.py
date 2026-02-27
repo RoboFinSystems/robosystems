@@ -284,6 +284,62 @@ class ArcExtractor:
     finally:
       conn.close()
 
+  def extract_disclosure_compositions(
+    self,
+  ) -> list[tuple[str, str, str, list[str]]]:
+    """Extract structure element compositions grouped by disclosure type.
+
+    Finds structures that have disclosure_mechanics classifications, then
+    collects all element qnames per (structure, disclosure_type). This provides
+    labeled training data for disclosure-level composition profiles.
+
+    Returns:
+        List of (structure_id, disclosure_type, definition_hash, [element_qnames]).
+        Only includes structures with disclosure_mechanics classifications.
+        Empty list if Classification table does not exist (backward compatibility).
+    """
+    sql = """
+      WITH disclosure_structures AS (
+        SELECT DISTINCT
+          s.identifier AS structure_id,
+          c.type AS disclosure_type
+        FROM Structure s
+        JOIN STRUCTURE_HAS_ASSOCIATION sha ON s.identifier = sha.src
+        JOIN Association a ON sha.dst = a.identifier
+        JOIN ASSOCIATION_HAS_CLASSIFICATION ahc ON a.identifier = ahc.src
+        JOIN Classification c ON ahc.dst = c.identifier
+        WHERE c.source = 'disclosure_mechanics'
+      )
+      SELECT
+        ds.structure_id,
+        ds.disclosure_type,
+        MD5(COALESCE(s.definition, '')) AS definition_hash,
+        LIST(DISTINCT el.qname ORDER BY el.qname) AS element_qnames
+      FROM disclosure_structures ds
+      JOIN Structure s ON ds.structure_id = s.identifier
+      JOIN STRUCTURE_HAS_ASSOCIATION sha ON s.identifier = sha.src
+      JOIN Association a ON sha.dst = a.identifier
+      JOIN ASSOCIATION_HAS_TO_ELEMENT ato ON a.identifier = ato.src
+      JOIN Element el ON ato.dst = el.identifier
+      WHERE el.qname IS NOT NULL
+      GROUP BY ds.structure_id, ds.disclosure_type, s.definition
+    """
+    conn = self._connect()
+    try:
+      tables = {row[0] for row in conn.execute("SHOW TABLES").fetchall()}
+      if (
+        "Classification" not in tables or "ASSOCIATION_HAS_CLASSIFICATION" not in tables
+      ):
+        return []
+
+      rows = conn.execute(sql).fetchall()
+      return [(row[0], row[1], row[2], row[3] if row[3] else []) for row in rows]
+    except Exception as e:
+      logger.debug(f"extract_disclosure_compositions failed: {e}")
+      return []
+    finally:
+      conn.close()
+
   def extract_disclosure_root_elements(self) -> dict[str, set[str]]:
     """Extract elements that are roots of disclosure-mechanics structures.
 
