@@ -21,6 +21,7 @@ from robosystems.adapters.sec.pipeline.configs import (
   SECStageConfig,
   sec_quarter_partitions,
 )
+from robosystems.config.constants import SEC_PROCESS_BATCH_SIZE
 
 
 @pytest.mark.unit
@@ -164,8 +165,9 @@ class TestSECProcessConfig:
   def test_default_values(self):
     """Test default configuration values."""
     config = SECProcessConfig()
-    assert config.batch_size == 250
+    assert config.batch_size == SEC_PROCESS_BATCH_SIZE
     assert config.continue_on_error is True
+    assert config.enable_cache is True
     assert config.form_types is None
 
   def test_custom_batch_size(self):
