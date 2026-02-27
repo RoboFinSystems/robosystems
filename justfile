@@ -346,7 +346,6 @@ demo-custom-graph flags="new-graph" real_s3="false" base_url="http://localhost:8
         {{ if real_s3 == "true" { "--real-s3" } else { "" } }}
 
 
-
 ## Graph API ##
 
 # Graph API - health check
