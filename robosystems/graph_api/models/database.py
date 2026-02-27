@@ -90,6 +90,10 @@ class BackupRequest(BaseModel):
     default=True,
     description="Run CHECKPOINT to flush WAL before backup",
   )
+  vacuum: bool = Field(
+    default=False,
+    description="Run VACUUM to compact database before backup (DuckDB only)",
+  )
 
 
 class BackupResponse(BaseModel):

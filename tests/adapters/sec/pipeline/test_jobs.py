@@ -225,7 +225,7 @@ class TestSECArtifactJob:
   def test_job_has_enhanced_ecs_profile(self):
     """Test artifact generation job has enhanced ECS profile for compute."""
     assert sec_artifact_generation_job.tags.get("ecs/cpu") == "4096"
-    assert sec_artifact_generation_job.tags.get("ecs/memory") == "16384"
+    assert sec_artifact_generation_job.tags.get("ecs/memory") == "30720"
 
 
 @pytest.mark.unit

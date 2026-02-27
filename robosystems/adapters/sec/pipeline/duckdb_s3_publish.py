@@ -1,10 +1,12 @@
 """SEC DuckDB S3 Publish Assets.
 
 Publishes DuckDB staging databases to S3 as raw .duckdb files.
+Runs VACUUM before upload to compact the database and reclaim space
+from incremental staging operations.
 
 Two assets for the two DuckDB staging databases:
-- sec_duckdb_s3_published: Publishes sec.duckdb (2024+ data, ~27GB)
-- sec_historical_duckdb_s3_published: Publishes sec_historical.duckdb (2009-2023, ~33GB)
+- sec_duckdb_s3_published: Publishes sec.duckdb (2024+ data)
+- sec_historical_duckdb_s3_published: Publishes sec_historical.duckdb (2009-2023)
 
 These complement the .lbug publish assets (sec_lbug_s3_published,
 sec_historical_lbug_s3_published) which serve the replica cluster.
@@ -36,7 +38,7 @@ def sec_duckdb_s3_published(
 
   Delegates to the shared publish_duckdb_to_s3() helper which handles:
   - Graph Client Factory (auth, routing, circuit breakers)
-  - DuckDB CHECKPOINT + S3 multipart upload on-instance
+  - DuckDB VACUUM + CHECKPOINT + S3 multipart upload on-instance
   - Upload verification
 
   Returns:
@@ -59,6 +61,8 @@ def sec_historical_duckdb_s3_published(
   context: AssetExecutionContext,
 ) -> MaterializeResult:
   """Publish SEC historical DuckDB staging database to S3.
+
+  Runs VACUUM + CHECKPOINT on-instance before S3 multipart upload.
 
   Returns:
       MaterializeResult with S3 URI and upload statistics

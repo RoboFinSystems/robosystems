@@ -15,31 +15,14 @@ from robosystems.models.api.views import (
   ViewSourceType,
 )
 from robosystems.models.iam import User
-from robosystems.models.iam.graph import Graph, GraphTier
 from robosystems.operations.views import (
   FactGridBuilder,
   aggregate_trial_balance,
-  apply_element_mapping,
-  get_mapping_structure,
   query_facts_with_aspects,
   save_view_as_report,
 )
 
 router = APIRouter(prefix="/views", tags=["Views"])
-
-
-def get_graph_tier(graph_id: str, session: Session) -> GraphTier:
-  """Detect graph tier from graph_id."""
-  graph = session.query(Graph).filter(Graph.graph_id == graph_id).first()
-  if graph and graph.graph_tier:
-    tier_map = {
-      "ladybug-standard": GraphTier.LADYBUG_STANDARD,
-      "ladybug-large": GraphTier.LADYBUG_LARGE,
-      "ladybug-xlarge": GraphTier.LADYBUG_XLARGE,
-      "ladybug-shared": GraphTier.LADYBUG_SHARED,
-    }
-    return tier_map.get(graph.graph_tier.lower(), GraphTier.LADYBUG_STANDARD)
-  return GraphTier.LADYBUG_STANDARD
 
 
 @router.post("", operation_id="create_view")
@@ -108,18 +91,6 @@ async def create_view(
         status_code=400,
         detail=f"Unsupported source type: {request.source.type}",
       )
-
-    if request.mapping_structure_id:
-      tier = get_graph_tier(graph_id, session)
-      mapping = await get_mapping_structure(
-        graph_id, request.mapping_structure_id, tier
-      )
-      if not mapping:
-        raise HTTPException(
-          status_code=404,
-          detail=f"Mapping structure not found: {request.mapping_structure_id}",
-        )
-      fact_data = apply_element_mapping(fact_data, mapping.structure)
 
     builder = FactGridBuilder()
     fact_grid = builder.build(
@@ -201,18 +172,3 @@ async def save_view(
       status_code=500,
       detail=f"Failed to save view: {e!s}",
     ) from e
-
-
-# Element mapping endpoints have been removed.
-# These operations are now handled via client-side extensions
-# that write to subgraph workspaces using the public /query endpoint.
-#
-# See:
-# - robosystems-python-client/robosystems_client/extensions/element_mapping_client.py
-# - robosystems-python-client/robosystems_client/extensions/subgraph_workspace_client.py
-#
-# Architecture:
-# 1. Create subgraph workspace (write-enabled)
-# 2. Use ElementMappingClient to write mappings to subgraph via /query
-# 3. Apply mappings client-side when generating views
-# 4. Export subgraph → parquet → S3 → incremental ingest to main graph

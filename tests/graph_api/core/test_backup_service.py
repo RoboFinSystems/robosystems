@@ -97,6 +97,43 @@ class TestCheckpoint:
       service._duckdb_checkpoint("test_graph")
 
 
+class TestDuckDBVacuum:
+  """Tests for _duckdb_vacuum method."""
+
+  @pytest.mark.unit
+  def test_duckdb_vacuum_calls_execute(self):
+    """_duckdb_vacuum opens a connection and runs VACUUM."""
+    from robosystems.graph_api.core.backup_service import OnInstanceBackupService
+
+    mock_conn = MagicMock()
+    mock_pool = MagicMock()
+    mock_pool.get_connection.return_value.__enter__ = MagicMock(return_value=mock_conn)
+    mock_pool.get_connection.return_value.__exit__ = MagicMock(return_value=False)
+
+    service = OnInstanceBackupService(
+      db_manager=MagicMock(),
+      task_manager=MagicMock(),
+      duckdb_pool=mock_pool,
+    )
+    service._duckdb_vacuum("test_graph")
+
+    mock_pool.get_connection.assert_called_once_with("test_graph")
+    mock_conn.execute.assert_called_once_with("VACUUM")
+
+  @pytest.mark.unit
+  def test_duckdb_vacuum_no_pool_raises(self):
+    """_duckdb_vacuum raises RuntimeError when duckdb_pool is None."""
+    from robosystems.graph_api.core.backup_service import OnInstanceBackupService
+
+    service = OnInstanceBackupService(
+      db_manager=MagicMock(),
+      task_manager=MagicMock(),
+      duckdb_pool=None,
+    )
+    with pytest.raises(RuntimeError, match="DuckDB pool not provided"):
+      service._duckdb_vacuum("test_graph")
+
+
 class TestResolvePaths:
   """Tests for _resolve_db_path and _resolve_duckdb_path."""
 
@@ -243,5 +280,106 @@ class TestExecuteBackup:
           backup_type="unknown",
           s3_destination={"bucket": "bucket", "key": "key"},
         )
+    finally:
+      temp_path.unlink(missing_ok=True)
+
+  @pytest.mark.unit
+  @pytest.mark.asyncio
+  async def test_duckdb_backup_with_vacuum(self):
+    """DuckDB backup calls VACUUM before CHECKPOINT when vacuum=True."""
+    from robosystems.graph_api.core.backup_service import OnInstanceBackupService
+
+    mock_task_manager = AsyncMock()
+    call_order = []
+
+    with tempfile.NamedTemporaryFile(suffix=".duckdb", delete=False) as f:
+      f.write(b"test data")
+      temp_path = Path(f.name)
+
+    try:
+      upload_result = {
+        "status": "success",
+        "s3_uri": "s3://bucket/key",
+        "s3_bucket": "bucket",
+        "s3_key": "key",
+        "original_size_bytes": 9,
+        "uploaded_size_bytes": 9,
+        "uploaded_at": "2025-01-01T00:00:00+00:00",
+      }
+
+      service = OnInstanceBackupService(
+        db_manager=MagicMock(),
+        task_manager=mock_task_manager,
+        duckdb_pool=MagicMock(),
+      )
+
+      def track_vacuum(graph_id):
+        call_order.append("vacuum")
+
+      def track_checkpoint(graph_id):
+        call_order.append("checkpoint")
+
+      with (
+        patch.object(service, "_duckdb_vacuum", side_effect=track_vacuum),
+        patch.object(service, "_duckdb_checkpoint", side_effect=track_checkpoint),
+        patch.object(service, "_resolve_duckdb_path", return_value=temp_path),
+        patch.object(service, "_upload_replica", return_value=upload_result),
+      ):
+        result = await service.execute_backup(
+          task_id="task-4",
+          graph_id="sec",
+          backup_type="duckdb_staging",
+          s3_destination={"bucket": "bucket", "key": "key"},
+          vacuum=True,
+        )
+
+      assert result["status"] == "success"
+      assert call_order == ["vacuum", "checkpoint"]
+    finally:
+      temp_path.unlink(missing_ok=True)
+
+  @pytest.mark.unit
+  @pytest.mark.asyncio
+  async def test_duckdb_backup_without_vacuum(self):
+    """DuckDB backup skips VACUUM when vacuum=False (default)."""
+    from robosystems.graph_api.core.backup_service import OnInstanceBackupService
+
+    mock_task_manager = AsyncMock()
+
+    with tempfile.NamedTemporaryFile(suffix=".duckdb", delete=False) as f:
+      f.write(b"test data")
+      temp_path = Path(f.name)
+
+    try:
+      upload_result = {
+        "status": "success",
+        "s3_uri": "s3://bucket/key",
+        "s3_bucket": "bucket",
+        "s3_key": "key",
+        "original_size_bytes": 9,
+        "uploaded_size_bytes": 9,
+        "uploaded_at": "2025-01-01T00:00:00+00:00",
+      }
+
+      service = OnInstanceBackupService(
+        db_manager=MagicMock(),
+        task_manager=mock_task_manager,
+        duckdb_pool=MagicMock(),
+      )
+
+      with (
+        patch.object(service, "_duckdb_vacuum") as mock_vacuum,
+        patch.object(service, "_duckdb_checkpoint"),
+        patch.object(service, "_resolve_duckdb_path", return_value=temp_path),
+        patch.object(service, "_upload_replica", return_value=upload_result),
+      ):
+        await service.execute_backup(
+          task_id="task-5",
+          graph_id="sec",
+          backup_type="duckdb_staging",
+          s3_destination={"bucket": "bucket", "key": "key"},
+        )
+
+      mock_vacuum.assert_not_called()
     finally:
       temp_path.unlink(missing_ok=True)
