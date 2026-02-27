@@ -5,6 +5,7 @@ SEC XBRL filings into consolidated parquet files.
 """
 
 import gc
+import signal
 import uuid
 from pathlib import Path
 
@@ -19,11 +20,19 @@ from sqlalchemy import and_
 from robosystems.adapters.sec.processors import (
   SECMetadataLoader,
   atomic_s3_upload,
+  cache_exists,
   consolidate_parquet_from_disk,
+  delete_cache_keys,
+  download_and_extract,
   process_single_filing_to_memory,
+  zip_and_upload,
 )
 from robosystems.config import env
-from robosystems.config.storage.shared import DataSourceType, get_processed_key
+from robosystems.config.storage.shared import (
+  DataSourceType,
+  get_cache_key,
+  get_processed_key,
+)
 from robosystems.dagster.resources import DatabaseResource, S3Resource
 from robosystems.models.iam import SourceFile
 
@@ -52,12 +61,19 @@ def sec_processed_filings(
 ) -> MaterializeResult:
   """Process one batch of SEC filings, flush to S3, then exit.
 
-  Processes up to batch_size pending SourceFiles (default 500), writes
+  Processes up to batch_size pending SourceFiles (default 1000), writes
   part files to S3, marks them success, and exits. The sensor re-triggers
   if more pending files remain, enabling natural memory release between runs.
 
+  Spot Resilience:
+  - Each filing's results are cached to S3 as a zip immediately after processing
+  - On restart, cached results are restored from S3 (skips reprocessing)
+  - SIGTERM handler stops the loop; best-effort flush follows (if the 2-minute
+    spot window allows, filings are consolidated and marked success — if not,
+    the cache covers them on the next run)
+
   Memory Management:
-  - One batch per run (default 500 filings), then container exits
+  - One batch per run (default 1000 filings), then container exits
   - Part-file output: batch writes part_{uuid}.parquet files per table
   - Shared tables (Element, Label, etc.) deduped within batch via pure Arrow
   - DuckDB handles final cross-part-file dedup during staging
@@ -186,12 +202,30 @@ def sec_processed_filings(
     shared_enricher = SemanticEnricher()
     context.log.info("Created shared SemanticEnricher for batch processing")
 
+  # SIGTERM handler for spot instance resilience.
+  # With the S3 cache, every completed filing is already safe — SIGTERM just
+  # stops the loop so the current filing can finish and be cached before exit.
+  shutting_down = False
+
+  def handle_sigterm(signum, frame):
+    nonlocal shutting_down
+    shutting_down = True
+    context.log.warning(
+      "SIGTERM received — finishing current filing then exiting. "
+      "All completed filings are safe in S3 cache."
+    )
+
+  original_sigterm = signal.getsignal(signal.SIGTERM)
+  signal.signal(signal.SIGTERM, handle_sigterm)
+
   # Track processing state
   succeeded = 0
   failed = 0
   skipped = 0
+  cache_hits = 0
   failed_ids: list[str] = []
   pending_flush: list[dict] = []  # [{...file_info}, ...]
+  flushed_cache_keys: list[str] = []  # Cache keys to delete after successful flush
   total_flushed = 0
   tables_uploaded = 0  # Track number of table files uploaded
 
@@ -270,6 +304,12 @@ def sec_processed_filings(
       f"Flushed {flushed_count} filings, {tables_uploaded} table files uploaded"
     )
 
+    # Clean up S3 cache entries for flushed filings
+    if config.enable_cache and flushed_cache_keys:
+      deleted = delete_cache_keys(s3.client, processed_bucket, flushed_cache_keys)
+      context.log.info(f"Cleaned up {deleted} cache entries from S3")
+      flushed_cache_keys.clear()
+
     # Clear disk buffer and pending list
     for item in work_dir.iterdir():
       if item.is_dir():
@@ -283,9 +323,49 @@ def sec_processed_filings(
   # Process each filing
   try:
     for i, file_info in enumerate(files_to_process):
+      # Check for SIGTERM before starting a new filing
+      if shutting_down:
+        context.log.warning(
+          f"Shutting down after SIGTERM — {i}/{len(files_to_process)} filings processed, "
+          f"{len(pending_flush)} pending flush (cached on S3)"
+        )
+        break
+
       source_file_id = file_info["id"]
       storage_key = file_info["storage_key"]
       file_partition_key = file_info["partition_key"]
+
+      # Check S3 cache for previously processed results (spot resilience)
+      if config.enable_cache:
+        cache_key = get_cache_key(DataSourceType.SEC, partition_date, source_file_id)
+        try:
+          if cache_exists(s3.client, processed_bucket, cache_key):
+            filing_start = time_module.time()
+            download_and_extract(
+              s3.client, processed_bucket, cache_key, work_dir, source_file_id
+            )
+            filing_duration = time_module.time() - filing_start
+
+            # Mark as processing then track for flush
+            with db.get_session() as session:
+              sf = SourceFile.get_by_storage_key(storage_key, session)
+              if sf:
+                sf.mark_processing(session)
+
+            succeeded += 1
+            cache_hits += 1
+            pending_flush.append(file_info)
+            flushed_cache_keys.append(cache_key)
+            context.log.info(
+              f"[{i + 1}/{len(files_to_process)}] Cache hit: {file_partition_key} "
+              f"({filing_duration:.1f}s)"
+            )
+            continue
+        except Exception as e:
+          context.log.warning(
+            f"[{i + 1}/{len(files_to_process)}] Cache read failed for "
+            f"{file_partition_key}, reprocessing: {e}"
+          )
 
       # Log filing start
       context.log.info(
@@ -337,6 +417,18 @@ def sec_processed_filings(
           parquet_path = table_dir / f"{source_file_id}.parquet"
           parquet_path.write_bytes(parquet_bytes)
 
+        # Cache to S3 for spot resilience (single zip, atomic PUT)
+        if config.enable_cache:
+          cache_key = get_cache_key(DataSourceType.SEC, partition_date, source_file_id)
+          try:
+            zip_and_upload(s3.client, processed_bucket, cache_key, result.tables)
+            flushed_cache_keys.append(cache_key)
+          except Exception as e:
+            context.log.warning(
+              f"[{i + 1}/{len(files_to_process)}] Cache write failed for "
+              f"{file_partition_key} (non-fatal): {e}"
+            )
+
         succeeded += 1
         pending_flush.append(file_info)
 
@@ -371,7 +463,8 @@ def sec_processed_filings(
       if (i + 1) % 100 == 0:
         context.log.info(
           f"Progress: {i + 1}/{len(files_to_process)} processed, "
-          f"{succeeded} succeeded, {failed} failed, {skipped} skipped"
+          f"{succeeded} succeeded, {failed} failed, {skipped} skipped, "
+          f"{cache_hits} cache hits"
         )
 
     # Force garbage collection before flush to reclaim any lingering
@@ -384,6 +477,9 @@ def sec_processed_filings(
       flush_to_s3()
 
   finally:
+    # Restore original SIGTERM handler
+    signal.signal(signal.SIGTERM, original_sigterm)
+
     # Cleanup work directory
     if work_dir.exists():
       shutil.rmtree(work_dir)
@@ -391,8 +487,9 @@ def sec_processed_filings(
 
   context.log.info(
     f"Complete: {succeeded}/{len(files_to_process)} filings succeeded, "
-    f"{skipped} skipped, {failed} failed, "
+    f"{skipped} skipped, {failed} failed, {cache_hits} cache hits, "
     f"{tables_uploaded} table files uploaded to partition filed={partition_date}"
+    + (" (terminated by SIGTERM)" if shutting_down else "")
   )
 
   # Check if more pending files exist (sensor will trigger another run)
@@ -427,6 +524,8 @@ def sec_processed_filings(
       "filings_skipped": skipped,
       "filings_flushed": total_flushed,
       "failed_source_file_ids": failed_ids[:20],  # Limit to first 20
+      "cache_hits": cache_hits,
+      "sigterm_received": shutting_down,
       "tables_uploaded": tables_uploaded,
       "batch_size": config.batch_size,
       "form_types_filter": config.form_types,

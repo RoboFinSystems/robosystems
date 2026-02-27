@@ -123,6 +123,12 @@ class SECProcessConfig(Config):
   # If False, job fails on first error (for debugging)
   continue_on_error: bool = True
 
+  # Cache individual filing results to S3 for spot instance resilience.
+  # After processing each filing, its parquet outputs are zipped and uploaded
+  # to a cache directory. On restart, cached results are restored instead of
+  # reprocessing. Set to False for local dev or debugging.
+  enable_cache: bool = True
+
   # Form types to include (None = all types, no filtering).
   # Filings with non-matching form types are marked "skipped" in SourceFile.
   # Example: ["10-K", "20-F", "40-F"] for annual reports only.
