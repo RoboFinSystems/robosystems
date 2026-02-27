@@ -34,6 +34,8 @@ from robosystems.schemas.extensions.roboledger import RoboLedgerContext
 
 from .models import (
   CHUNKED_MATERIALIZATION_TIMEOUT,
+  EMBEDDING_MATERIALIZATION_BATCH_SIZE,
+  EMBEDDING_TABLES,
   ENTITY_UPDATE_BATCH_SIZE,
   INCREMENTAL_COPY_TIMEOUT,
   LARGE_STAGING_TABLES,
@@ -882,9 +884,22 @@ class LadybugMaterializer:
             logger.warning(f"Could not get row count for {table_name}: {count_err}")
             row_count = 0
 
+        # Use lower batch size for tables with embeddings (FLOAT[384] = ~1.5KB/row)
+        # to prevent OOM during LadybugDB COPY + checkpoint
+        effective_batch_size = (
+          EMBEDDING_MATERIALIZATION_BATCH_SIZE
+          if table_name in EMBEDDING_TABLES
+          else batch_size
+        )
+        if table_name in EMBEDDING_TABLES:
+          log_progress(
+            f"[{i}/{total_tables}] Using embedding batch size for {table_name} "
+            f"({effective_batch_size:,} rows vs standard {batch_size:,})"
+          )
+
         # Use hash-based batched materialization for very large tables
-        if batch_materialization and row_count > batch_size:
-          num_batches = (row_count + batch_size - 1) // batch_size
+        if batch_materialization and row_count > effective_batch_size:
+          num_batches = (row_count + effective_batch_size - 1) // effective_batch_size
           log_progress(
             f"[{i}/{total_tables}] Materializing {table_name} in {num_batches} batches "
             f"({row_count:,} rows, hash-based)..."

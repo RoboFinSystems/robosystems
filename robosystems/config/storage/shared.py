@@ -145,6 +145,28 @@ def get_processed_key(source: DataSourceType, *parts: str) -> str:
   return config.processed_prefix.rstrip("/")
 
 
+def get_cache_key(source: DataSourceType, partition: str, source_file_id: str) -> str:
+  """Build an S3 key for a processing cache entry.
+
+  Used for spot instance resilience — caches individual filing results
+  so they can be restored after an interruption without reprocessing.
+
+  Args:
+      source: The data source type
+      partition: Partition identifier (e.g., "2024-Q1")
+      source_file_id: SourceFile ID
+
+  Returns:
+      S3 key string (without bucket name)
+
+  Example:
+      >>> get_cache_key(DataSourceType.SEC, "2024-Q1", "sf_01ABC")
+      'sec/cache/2024-Q1/sf_01ABC.zip'
+  """
+  config = DATA_SOURCES[source]
+  return f"{config.processed_prefix}cache/{partition}/{source_file_id}.zip"
+
+
 def get_raw_uri(bucket: str, source: DataSourceType, *parts: str) -> str:
   """Build a full S3 URI for raw data.
 
