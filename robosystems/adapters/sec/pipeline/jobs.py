@@ -105,11 +105,11 @@ sec_process_job = define_asset_job(
     "ecs/cpu": "4096",
     "ecs/memory": "16384",
     "ecs/ephemeral_storage": "50",
-    # Spot-preferred: 250-filing batches keep runs to ~3-5 hrs, reducing
-    # interruption risk. On Spot reclaim, sensor re-triggers pending filings.
+    # Spot-preferred: S3 cache makes runs fully resilient to Spot interruptions.
+    # On reclaim, completed filings are restored from cache on next run.
     "ecs/run_task_kwargs": {
       "capacityProviderStrategy": [
-        {"capacityProvider": "FARGATE_SPOT", "weight": 4, "base": 0},
+        {"capacityProvider": "FARGATE_SPOT", "weight": 9, "base": 0},
         {"capacityProvider": "FARGATE", "weight": 1, "base": 0},
       ],
     },

@@ -84,7 +84,9 @@ def download_and_extract(
       if not name.endswith(".parquet"):
         continue
       table_key = name.removesuffix(".parquet")
-      table_dir = work_dir / table_key
+      table_dir = (work_dir / table_key).resolve()
+      if not str(table_dir).startswith(str(work_dir.resolve())):
+        continue
       table_dir.mkdir(parents=True, exist_ok=True)
       parquet_path = table_dir / f"{source_file_id}.parquet"
       parquet_path.write_bytes(zf.read(name))

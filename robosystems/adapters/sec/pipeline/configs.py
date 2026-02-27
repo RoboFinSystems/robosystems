@@ -101,7 +101,7 @@ class SECProcessConfig(Config):
   but the job continues processing remaining filings in the batch.
 
   Memory Management:
-  - One batch per job run (default 500 filings), then container exits
+  - One batch per job run (default 1000 filings), then container exits
   - Part-file output: batch writes part_{uuid}.parquet files per table
   - Shared tables (Element, Label, etc.) deduped within batch via pure Arrow
   - DuckDB handles final cross-part-file dedup during staging
@@ -116,7 +116,7 @@ class SECProcessConfig(Config):
 
   # Filings per batch. Job processes this many, flushes to S3, then exits.
   # Sensor re-triggers if more pending files remain.
-  # 250 keeps runs to ~3-5 hrs, reducing Spot interruption blast radius.
+  # S3 cache makes batch size independent of Spot interruption risk.
   batch_size: int = SEC_PROCESS_BATCH_SIZE
 
   # Continue processing even if some filings fail

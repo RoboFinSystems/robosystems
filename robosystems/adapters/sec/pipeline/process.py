@@ -306,8 +306,11 @@ def sec_processed_filings(
 
     # Clean up S3 cache entries for flushed filings
     if config.enable_cache and flushed_cache_keys:
-      deleted = delete_cache_keys(s3.client, processed_bucket, flushed_cache_keys)
-      context.log.info(f"Cleaned up {deleted} cache entries from S3")
+      try:
+        deleted = delete_cache_keys(s3.client, processed_bucket, flushed_cache_keys)
+        context.log.info(f"Cleaned up {deleted} cache entries from S3")
+      except Exception as e:
+        context.log.warning(f"Cache cleanup failed (non-fatal): {e}")
       flushed_cache_keys.clear()
 
     # Clear disk buffer and pending list
