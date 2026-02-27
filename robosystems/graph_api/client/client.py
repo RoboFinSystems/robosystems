@@ -1138,6 +1138,7 @@ class GraphClient(BaseGraphClient):
     backup_type: str = "standard",
     s3_destination: dict[str, str] | None = None,
     checkpoint: bool = True,
+    vacuum: bool = False,
   ) -> dict[str, Any]:
     """
     Create a backup of a database.
@@ -1150,6 +1151,7 @@ class GraphClient(BaseGraphClient):
         backup_type: "standard", "replica", or "shared_repository"
         s3_destination: Target S3 location (required for replica/shared_repository)
         checkpoint: Run CHECKPOINT before backup
+        vacuum: Run VACUUM to compact database before backup (DuckDB only)
 
     Returns:
         Task information including task_id and monitor_url
@@ -1160,6 +1162,7 @@ class GraphClient(BaseGraphClient):
       "encryption": encryption,
       "backup_type": backup_type,
       "checkpoint": checkpoint,
+      "vacuum": vacuum,
     }
     if s3_destination:
       payload["s3_destination"] = s3_destination
@@ -1182,6 +1185,7 @@ class GraphClient(BaseGraphClient):
     backup_type: str = "standard",
     s3_destination: dict[str, str] | None = None,
     checkpoint: bool = True,
+    vacuum: bool = False,
   ) -> dict[str, Any]:
     """
     Create a backup and monitor via SSE.
@@ -1195,6 +1199,7 @@ class GraphClient(BaseGraphClient):
         backup_type: "standard", "replica", or "shared_repository"
         s3_destination: Target S3 location (required for replica/shared_repository)
         checkpoint: Run CHECKPOINT before backup
+        vacuum: Run VACUUM to compact database before backup (DuckDB only)
 
     Returns:
         Dict with backup results:
@@ -1215,6 +1220,7 @@ class GraphClient(BaseGraphClient):
         backup_type=backup_type,
         s3_destination=s3_destination,
         checkpoint=checkpoint,
+        vacuum=vacuum,
       )
 
       task_id = start_response["task_id"]

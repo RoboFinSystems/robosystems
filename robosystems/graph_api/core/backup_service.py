@@ -61,6 +61,7 @@ class OnInstanceBackupService:
     compression: bool = True,
     encryption: bool = False,
     checkpoint: bool = True,
+    vacuum: bool = False,
   ) -> dict[str, Any]:
     """Execute backup entirely on-instance, upload to S3.
 
@@ -89,8 +90,17 @@ class OnInstanceBackupService:
         },
       )
 
-      # Step 1: CHECKPOINT if requested
+      # Step 0: VACUUM if requested (DuckDB only, before CHECKPOINT)
       is_duckdb = backup_type == "duckdb_staging"
+      if vacuum and is_duckdb:
+        logger.info(f"[Task {task_id}] Running VACUUM on {graph_id}")
+        await self.task_manager.update_task(
+          task_id, progress_percent=2, metadata={"stage": "vacuum"}
+        )
+        self._duckdb_vacuum(graph_id)
+        logger.info(f"[Task {task_id}] VACUUM completed")
+
+      # Step 1: CHECKPOINT if requested
       if checkpoint:
         logger.info(f"[Task {task_id}] Running CHECKPOINT on {graph_id}")
         await self.task_manager.update_task(
@@ -161,6 +171,13 @@ class OnInstanceBackupService:
       raise RuntimeError("DuckDB pool not provided for duckdb_staging backup")
     with self.duckdb_pool.get_connection(graph_id) as conn:
       conn.execute("CHECKPOINT")
+
+  def _duckdb_vacuum(self, graph_id: str) -> None:
+    """VACUUM via DuckDB connection pool to compact the database file."""
+    if self.duckdb_pool is None:
+      raise RuntimeError("DuckDB pool not provided for duckdb_staging vacuum")
+    with self.duckdb_pool.get_connection(graph_id) as conn:
+      conn.execute("VACUUM")
 
   def _resolve_db_path(self, graph_id: str) -> Path:
     """Get local .lbug path for a database."""

@@ -207,6 +207,7 @@ def _run_duckdb_backup(graph_id: str, bucket: str, s3_key: str) -> dict[str, Any
         s3_destination={"bucket": bucket, "key": s3_key},
         compression=False,
         checkpoint=True,
+        vacuum=True,
         timeout=TASK_TIME_LIMIT,
       )
     finally:
