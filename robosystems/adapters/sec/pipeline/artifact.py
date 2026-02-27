@@ -29,7 +29,7 @@ class SECArtifactConfig(Config):
   """Configuration for SEC artifact generation."""
 
   duckdb_source: str = "sec"
-  memory_limit: str = "10GB"
+  memory_limit: str = "20GB"
 
 
 @asset(

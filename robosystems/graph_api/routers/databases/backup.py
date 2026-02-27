@@ -39,6 +39,7 @@ async def perform_backup(
   backup_type: str = "standard",
   s3_destination: dict | None = None,
   checkpoint: bool = True,
+  vacuum: bool = False,
   db_manager=None,
   duckdb_pool=None,
 ) -> None:
@@ -71,6 +72,7 @@ async def perform_backup(
         compression=compression,
         encryption=encryption,
         checkpoint=checkpoint,
+        vacuum=vacuum,
       )
 
       await backup_task_manager.complete_task(task_id, result=result)
@@ -222,6 +224,7 @@ async def create_backup(
     backup_type=request.backup_type,
     s3_destination=s3_dest_dict,
     checkpoint=request.checkpoint,
+    vacuum=request.vacuum,
     db_manager=ladybug_service.db_manager,
     duckdb_pool=duckdb_pool,
   )
