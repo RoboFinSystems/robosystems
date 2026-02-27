@@ -198,6 +198,7 @@ MATERIALIZATION_BATCH_SIZE = 20_000_000  # 20M rows per batch
 # smaller materialization batches. Embeddings are ~1.5KB per row (384 x 4 bytes),
 # making these tables ~100x heavier per row during LadybugDB COPY + checkpoint.
 # At 1M rows x FLOAT[384], each batch = ~1.5GB of embedding data.
+# Note: All entries must also be in LARGE_STAGING_TABLES so row_count is fetched.
 EMBEDDING_TABLES = frozenset({"Element", "Label", "Structure"})
 EMBEDDING_MATERIALIZATION_BATCH_SIZE = 1_000_000  # 1M rows per batch
 

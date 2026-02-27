@@ -891,6 +891,11 @@ class LadybugMaterializer:
           if table_name in EMBEDDING_TABLES
           else batch_size
         )
+        if table_name in EMBEDDING_TABLES:
+          log_progress(
+            f"[{i}/{total_tables}] Using embedding batch size for {table_name} "
+            f"({effective_batch_size:,} rows vs standard {batch_size:,})"
+          )
 
         # Use hash-based batched materialization for very large tables
         if batch_materialization and row_count > effective_batch_size:
