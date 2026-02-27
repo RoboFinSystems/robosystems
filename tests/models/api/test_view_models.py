@@ -296,7 +296,6 @@ class TestCreateViewRequest:
     )
     assert model.name is None
     assert model.presentation_formats == ["pivot_table"]
-    assert model.mapping_structure_id is None
 
   def test_full_request(self):
     model = CreateViewRequest(
@@ -311,7 +310,5 @@ class TestCreateViewRequest:
         columns=[ViewAxisConfig(type="period")],
       ),
       presentation_formats=["pivot_table", "chart"],
-      mapping_structure_id="map_123",
     )
     assert model.name == "Q4 Revenue"
-    assert model.mapping_structure_id == "map_123"

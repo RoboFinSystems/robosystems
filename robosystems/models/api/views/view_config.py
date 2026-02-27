@@ -94,7 +94,3 @@ class CreateViewRequest(BaseModel):
   presentation_formats: list[str] = Field(
     default=["pivot_table"], description="Presentation formats to generate"
   )
-  mapping_structure_id: str | None = Field(
-    default=None,
-    description="Optional mapping structure ID to aggregate Chart of Accounts elements into reporting taxonomy elements",
-  )
