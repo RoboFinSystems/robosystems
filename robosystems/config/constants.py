@@ -166,9 +166,11 @@ XBRL_GRAPH_LARGE_NODES = "Fact,Element,Label,Association,Structure,Dimension,Rep
 # between batches and crash resilience (at most one batch lost).
 # Part-file output: each batch writes part_{uuid}.parquet files per table.
 # 250 filings keeps Arrow concat well under memory limits.
-# Smaller batches reduce blast radius of Spot interruptions (~3-5 hrs vs 6-10).
-# Q2 (proxy season, ~11k filings) = ~44 sensor-triggered runs.
-SEC_PROCESS_BATCH_SIZE = 250
+# S3 zip cache makes batch size independent of Spot interruption risk.
+# 1000 balances consolidation quality (fewer part files for DuckDB) with
+# Arrow dedup memory pressure from embedding columns.
+# Q2 (proxy season, ~11k filings) = ~11 sensor-triggered runs.
+SEC_PROCESS_BATCH_SIZE = 1000
 
 # =============================================================================
 # API VERSION CONSTANTS
