@@ -14,6 +14,12 @@ Main Components:
 - ids: UUID generation and naming utilities
 """
 
+from .cache import (
+  cache_exists,
+  delete_cache_keys,
+  download_and_extract,
+  zip_and_upload,
+)
 from .consolidation import (
   atomic_s3_upload,
   consolidate_parquet_from_disk,
@@ -95,6 +101,8 @@ __all__ = [
   "XBRLSchemaConfigGenerator",
   # Consolidation functions
   "atomic_s3_upload",
+  # Cache helpers
+  "cache_exists",
   # Naming utilities
   "camel_to_snake",
   "consolidate_parquet_from_disk",
@@ -115,8 +123,11 @@ __all__ = [
   "create_structure_id",
   "create_taxonomy_id",
   "create_unit_id",
+  "delete_cache_keys",
+  "download_and_extract",
   "get_quarter_end_date",
   "make_plural",
   "process_single_filing_to_memory",
   "safe_concat",
+  "zip_and_upload",
 ]
