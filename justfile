@@ -320,7 +320,6 @@ migrate-reset env=_local_env:
 demo-all:
     @just demo-accounting
     @just demo-custom-graph
-    @just demo-element-mapping
     @just demo-sec
 
 # Create or reuse demo user (uses shared .local/config.json)
@@ -355,14 +354,6 @@ demo-custom-graph flags="new-graph" real_s3="false" base_url="http://localhost:8
         --base-url {{base_url}} \
         {{ if flags != "" { "--flags " + flags } else { "" } }} \
         {{ if real_s3 == "true" { "--real-s3" } else { "" } }}
-
-# Run element mapping demo end-to-end (demonstrates CoA → US-GAAP aggregation)
-demo-element-mapping flags="new-graph" real_s3="false" base_url="http://localhost:8000":
-    uv run examples/element_mapping_demo/main.py \
-        --base-url {{base_url}} \
-        {{ if flags != "" { "--flags " + flags } else { "" } }} \
-        {{ if real_s3 == "true" { "--real-s3" } else { "" } }}
-
 
 
 ## Graph API ##
