@@ -145,40 +145,6 @@ just demo-custom-graph skip-queries
 
 **Customization:** Edit `schema.json` to define your own node types and relationships
 
-### 4. Element Mapping Demo - CoA to US-GAAP Aggregation
-
-Demonstrates mapping a Chart of Accounts to US-GAAP taxonomy elements using subgraphs and views.
-
-**Features:**
-- Chart of Accounts to US-GAAP element mapping
-- Subgraph workspace creation
-- View generation with aggregation
-- Materialized report saving
-
-**Usage:**
-```bash
-# Run with new graph (default)
-just demo-element-mapping
-
-# Create new user and graph
-just demo-element-mapping new-user,new-graph
-
-# Skip verification queries
-just demo-element-mapping skip-queries
-```
-
-**What It Does:**
-1. Sets up user credentials (or reuses existing)
-2. Creates graph with accounting schema
-3. Generates accounting data with element mappings
-4. Uploads and ingests via staging tables
-5. Creates subgraph workspace with CoA to US-GAAP mappings
-6. Tests view generation and saves materialized reports
-
-**Location:** `/examples/element_mapping_demo/`
-
-**Documentation:** See [README.md](element_mapping_demo/README.md) for detailed guide
-
 ## Credential Management
 
 All demos share a common credential system for authentication.
