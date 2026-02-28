@@ -372,7 +372,7 @@ class DisclosureProfileBuilder:
 
   Produces two artifacts:
   1. disclosure_profiles.parquet — element frequency distributions per disclosure type,
-     weighted by icebug PageRank scores
+     weighted by element_knowledge PageRank scores
   2. disclosure_consensus.parquet — cross-filing majority-vote using disclosure type
   """
 

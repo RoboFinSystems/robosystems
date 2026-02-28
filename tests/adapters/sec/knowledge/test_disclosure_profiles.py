@@ -425,6 +425,16 @@ class TestBalanceSheetRollupDetection:
     assert dtype is None
     assert conf == 0.0
 
+  def test_current_assets_liabilities_not_rollup(self):
+    """AssetsCurrent + LiabilitiesCurrent alone is not a rollup (no Assets root)."""
+    from robosystems.adapters.sec.enrichment import SemanticEnricher
+
+    dtype, conf = SemanticEnricher.detect_balance_sheet_rollup(
+      ["us-gaap:AssetsCurrent", "us-gaap:LiabilitiesCurrent"]
+    )
+    assert dtype is None
+    assert conf == 0.0
+
 
 # ---------------------------------------------------------------------------
 # SemanticEnricher._lookup_disclosure_consensus()

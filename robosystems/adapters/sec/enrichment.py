@@ -951,7 +951,6 @@ class SemanticEnricher:
 
     assets_roots = {
       "us-gaap:Assets",
-      "us-gaap:AssetsCurrent",
     }
     liab_equity_roots = {
       "us-gaap:LiabilitiesAndStockholdersEquity",
@@ -1019,6 +1018,11 @@ class SemanticEnricher:
     Returns adjusted (type, confidence). Returns (raw_type, raw_conf) unchanged
     if artifacts are unavailable or structure has no elements.
     """
+    from robosystems.adapters.sec.config import XBRL_GRAPH_REFINEMENT
+
+    if not XBRL_GRAPH_REFINEMENT:
+      return (raw_type, raw_conf)
+
     if not structure_elements:
       return (raw_type, raw_conf)
 
