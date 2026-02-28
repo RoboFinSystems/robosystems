@@ -76,6 +76,11 @@ aws_cmd() {
 # POLICY DOCUMENT
 # =============================================================================
 
+# Marketplace product IDs (global, not account-specific):
+#   prod-5ukwuglpt66kg = Claude Sonnet 4.6
+#   prod-mxcfnwvpd6kb4 = Claude Sonnet 4.5
+#   prod-4pmewlybdftbs = Claude Sonnet 4
+# Full list: https://docs.aws.amazon.com/bedrock/latest/userguide/model-access-product-ids.html
 BEDROCK_POLICY=$(cat <<'EOF'
 {
     "Version": "2012-10-17",
@@ -100,6 +105,24 @@ BEDROCK_POLICY=$(cat <<'EOF'
                 "bedrock:ListFoundationModels"
             ],
             "Resource": "*"
+        },
+        {
+            "Sid": "MarketplaceModelSubscription",
+            "Effect": "Allow",
+            "Action": [
+                "aws-marketplace:ViewSubscriptions",
+                "aws-marketplace:Subscribe"
+            ],
+            "Resource": "*",
+            "Condition": {
+                "ForAnyValue:StringEquals": {
+                    "aws-marketplace:ProductId": [
+                        "prod-5ukwuglpt66kg",
+                        "prod-mxcfnwvpd6kb4",
+                        "prod-4pmewlybdftbs"
+                    ]
+                }
+            }
         }
     ]
 }
@@ -143,7 +166,21 @@ create_or_get_policy() {
 
     # Check if policy exists
     if aws_cmd iam get-policy --policy-arn "$POLICY_ARN" &>/dev/null; then
-        print_success "Policy already exists: ${POLICY_NAME}"
+        print_step "Policy exists, updating to latest version: ${POLICY_NAME}"
+
+        # Delete old non-default versions (max 5 versions allowed)
+        OLD_VERSIONS=$(aws_cmd iam list-policy-versions --policy-arn "$POLICY_ARN" \
+            --query 'Versions[?IsDefaultVersion==`false`].VersionId' --output text)
+        for ver in $OLD_VERSIONS; do
+            aws_cmd iam delete-policy-version --policy-arn "$POLICY_ARN" --version-id "$ver" 2>/dev/null || true
+        done
+
+        aws_cmd iam create-policy-version \
+            --policy-arn "$POLICY_ARN" \
+            --policy-document "$BEDROCK_POLICY" \
+            --set-as-default \
+            --output text > /dev/null
+        print_success "Updated policy: ${POLICY_NAME}"
     else
         print_step "Creating policy: ${POLICY_NAME}"
         aws_cmd iam create-policy \
