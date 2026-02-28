@@ -322,6 +322,111 @@ class TestDEIDetection:
 
 
 # ---------------------------------------------------------------------------
+# SemanticEnricher.detect_balance_sheet_rollup()
+# ---------------------------------------------------------------------------
+
+
+class TestBalanceSheetRollupDetection:
+  def test_assets_rollup_with_companions(self):
+    """Structure with Assets root and structural companions returns AssetsRollUp."""
+    from robosystems.adapters.sec.enrichment import SemanticEnricher
+
+    dtype, conf = SemanticEnricher.detect_balance_sheet_rollup(
+      [
+        "us-gaap:Assets",
+        "us-gaap:AssetsCurrent",
+        "us-gaap:LiabilitiesCurrent",
+        "us-gaap:CashAndCashEquivalentsAtCarryingValue",
+        "us-gaap:RetainedEarningsAccumulatedDeficit",
+      ]
+    )
+    assert dtype == "AssetsRollUp"
+    assert conf == 0.95
+
+  def test_liab_equity_with_companions(self):
+    """Structure with L&E root and companions returns LiabilitiesAndEquityRollUp."""
+    from robosystems.adapters.sec.enrichment import SemanticEnricher
+
+    dtype, conf = SemanticEnricher.detect_balance_sheet_rollup(
+      [
+        "us-gaap:LiabilitiesAndStockholdersEquity",
+        "us-gaap:LiabilitiesCurrent",
+        "us-gaap:RetainedEarningsAccumulatedDeficit",
+        "us-gaap:CommonStockValue",
+      ]
+    )
+    assert dtype == "LiabilitiesAndEquityRollUp"
+    assert conf == 0.95
+
+  def test_full_balance_sheet_prefers_assets(self):
+    """Full balance sheet with both roots prefers AssetsRollUp."""
+    from robosystems.adapters.sec.enrichment import SemanticEnricher
+
+    dtype, conf = SemanticEnricher.detect_balance_sheet_rollup(
+      [
+        "us-gaap:Assets",
+        "us-gaap:AssetsCurrent",
+        "us-gaap:LiabilitiesAndStockholdersEquity",
+        "us-gaap:LiabilitiesCurrent",
+        "us-gaap:RetainedEarningsAccumulatedDeficit",
+        "us-gaap:CommitmentsAndContingencies",
+        "us-gaap:AccumulatedOtherComprehensiveIncomeLossNetOfTax",
+      ]
+    )
+    assert dtype == "AssetsRollUp"
+    assert conf == 0.95
+
+  def test_vie_disclosure_not_matched(self):
+    """VIE disclosure with us-gaap:Assets but no companions returns (None, 0.0)."""
+    from robosystems.adapters.sec.enrichment import SemanticEnricher
+
+    dtype, conf = SemanticEnricher.detect_balance_sheet_rollup(
+      [
+        "us-gaap:Assets",
+        "us-gaap:Liabilities",
+        "us-gaap:VariableInterestEntityLineItems",
+        "us-gaap:VariableInterestEntityEntityMaximumLossExposureAmount",
+      ]
+    )
+    assert dtype is None
+    assert conf == 0.0
+
+  def test_segment_reconciliation_not_matched(self):
+    """Segment reconciliation with us-gaap:Assets but no companions returns (None, 0.0)."""
+    from robosystems.adapters.sec.enrichment import SemanticEnricher
+
+    dtype, conf = SemanticEnricher.detect_balance_sheet_rollup(
+      [
+        "us-gaap:Assets",
+        "us-gaap:ReconciliationOfAssetsFromSegmentToConsolidatedTable",
+        "us-gaap:SegmentDomain",
+      ]
+    )
+    assert dtype is None
+    assert conf == 0.0
+
+  def test_non_balance_sheet_returns_none(self):
+    """Structure without balance sheet root elements returns (None, 0.0)."""
+    from robosystems.adapters.sec.enrichment import SemanticEnricher
+
+    dtype, conf = SemanticEnricher.detect_balance_sheet_rollup(
+      ["us-gaap:Goodwill", "us-gaap:IntangibleAssetsNetExcludingGoodwill"]
+    )
+    assert dtype is None
+    assert conf == 0.0
+
+  def test_insufficient_companions_returns_none(self):
+    """Assets root with only 1 companion is not enough to confirm rollup."""
+    from robosystems.adapters.sec.enrichment import SemanticEnricher
+
+    dtype, conf = SemanticEnricher.detect_balance_sheet_rollup(
+      ["us-gaap:Assets", "us-gaap:AssetsCurrent"]
+    )
+    assert dtype is None
+    assert conf == 0.0
+
+
+# ---------------------------------------------------------------------------
 # SemanticEnricher._lookup_disclosure_consensus()
 # ---------------------------------------------------------------------------
 

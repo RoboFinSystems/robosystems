@@ -551,10 +551,17 @@ class XBRLGraphProcessor:
               if dei_type:
                 disc_type, disc_conf = dei_type, dei_conf
               else:
-                # Disclosure composition classification
-                d_type, d_score = enricher.classify_disclosure_by_composition(elements)
-                if d_type and d_score >= 0.3:
-                  disc_type, disc_conf = d_type, d_score
+                # Balance sheet rollup detection (deterministic)
+                bs_type, bs_conf = enricher.detect_balance_sheet_rollup(elements)
+                if bs_type:
+                  disc_type, disc_conf = bs_type, bs_conf
+                else:
+                  # Disclosure composition classification (probabilistic fallback)
+                  d_type, d_score = enricher.classify_disclosure_by_composition(
+                    elements
+                  )
+                  if d_type and d_score >= 0.3:
+                    disc_type, disc_conf = d_type, d_score
           canonical_types.append(disc_type)
           canonical_confidences.append(disc_conf)
         elif all_embeddings[len(canonical_types)] is not None:

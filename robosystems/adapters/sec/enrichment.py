@@ -932,6 +932,63 @@ class SemanticEnricher:
 
     return ("DocumentInformation", 0.85)
 
+  @staticmethod
+  def detect_balance_sheet_rollup(
+    structure_elements: list[str],
+  ) -> tuple[str | None, float]:
+    """Detect AssetsRollUp or LiabilitiesAndEquityRollUp by root elements.
+
+    Balance sheet rollup structures universally use standard us-gaap root
+    elements (Assets, LiabilitiesAndStockholdersEquity) alongside structural
+    companions (AssetsCurrent, LiabilitiesCurrent, etc.). The companion
+    requirement distinguishes real rollups from structures that merely
+    reference us-gaap:Assets (e.g., VIE disclosures, segment reconciliations).
+
+    Returns:
+        (disclosure_type, confidence) or (None, 0.0) if not a balance sheet rollup.
+    """
+    element_set = set(structure_elements)
+
+    assets_roots = {
+      "us-gaap:Assets",
+      "us-gaap:AssetsCurrent",
+    }
+    liab_equity_roots = {
+      "us-gaap:LiabilitiesAndStockholdersEquity",
+    }
+    # Structural companions that appear in real balance sheet rollups
+    # but not in VIE/segment disclosures that merely reference totals.
+    balance_sheet_companions = {
+      "us-gaap:AssetsCurrent",
+      "us-gaap:LiabilitiesCurrent",
+      "us-gaap:AssetsAbstract",
+      "us-gaap:RetainedEarningsAccumulatedDeficit",
+      "us-gaap:CommitmentsAndContingencies",
+      "us-gaap:AccumulatedOtherComprehensiveIncomeLossNetOfTax",
+    }
+
+    has_assets = bool(element_set & assets_roots)
+    has_liab_equity = bool(element_set & liab_equity_roots)
+    companion_count = len(element_set & balance_sheet_companions)
+
+    # Require at least 2 structural companions to confirm this is a real
+    # balance sheet rollup, not a VIE or segment that references totals.
+    if companion_count < 2:
+      return (None, 0.0)
+
+    if has_assets and has_liab_equity:
+      # Full balance sheet structure contains both rollups.
+      # Prefer AssetsRollUp — maps to canonical total_assets concept
+      # and the accounting identity A = L + E means assets is the
+      # primary classification.
+      return ("AssetsRollUp", 0.95)
+    elif has_assets:
+      return ("AssetsRollUp", 0.95)
+    elif has_liab_equity:
+      return ("LiabilitiesAndEquityRollUp", 0.95)
+
+    return (None, 0.0)
+
   def _lookup_disclosure_consensus(
     self, definition_hash: str
   ) -> tuple[str | None, float]:

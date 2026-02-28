@@ -289,13 +289,18 @@ class ArcExtractor:
   ) -> list[tuple[str, str, str, list[str]]]:
     """Extract structure element compositions grouped by disclosure type.
 
-    Finds structures that have disclosure_mechanics classifications, then
-    collects all element qnames per (structure, disclosure_type). This provides
-    labeled training data for disclosure-level composition profiles.
+    Finds Disclosure-typed structures that have disclosure_mechanics
+    classifications, then collects all element qnames per
+    (structure, disclosure_type). This provides labeled training data
+    for disclosure-level composition profiles.
+
+    Only includes structures with type='Disclosure' to avoid polluting
+    profiles with Statement-typed structures (e.g., balance sheets)
+    whose elements would cause false matches in the Disclosure classifier.
 
     Returns:
         List of (structure_id, disclosure_type, definition_hash, [element_qnames]).
-        Only includes structures with disclosure_mechanics classifications.
+        Only includes Disclosure structures with disclosure_mechanics classifications.
         Empty list if Classification table does not exist (backward compatibility).
     """
     sql = """
@@ -309,6 +314,7 @@ class ArcExtractor:
         JOIN ASSOCIATION_HAS_CLASSIFICATION ahc ON a.identifier = ahc.src
         JOIN Classification c ON ahc.dst = c.identifier
         WHERE c.source = 'disclosure_mechanics'
+          AND s.type = 'Disclosure'
       )
       SELECT
         ds.structure_id,
