@@ -533,13 +533,13 @@ class TestBuildFactGridTool:
 
   @pytest.mark.asyncio
   @pytest.mark.unit
-  async def test_build_fact_grid_missing_periods(self, mock_graph_client):
-    """Test fact grid building fails without periods."""
+  async def test_build_fact_grid_missing_period_filter(self, mock_graph_client):
+    """Test fact grid building fails without any period scoping."""
     tool = BuildFactGridTool(mock_graph_client)
 
     result = await tool.execute({"elements": ["us-gaap:Assets"]})
 
-    assert result["error"] == "missing_periods"
+    assert result["error"] == "missing_period_filter"
 
   @pytest.mark.asyncio
   @pytest.mark.unit

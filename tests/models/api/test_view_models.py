@@ -13,8 +13,6 @@ from robosystems.models.api.views.view_config import (
   CreateViewRequest,
   ViewAxisConfig,
   ViewConfig,
-  ViewSource,
-  ViewSourceType,
 )
 
 
@@ -184,35 +182,6 @@ class TestSaveViewResponse:
 
 
 @pytest.mark.unit
-class TestViewSourceType:
-  def test_enum_values(self):
-    assert ViewSourceType.TRANSACTIONS == "transactions"
-    assert ViewSourceType.FACT_SET == "fact_set"
-
-
-@pytest.mark.unit
-class TestViewSource:
-  def test_valid_transactions_source(self):
-    model = ViewSource(
-      type=ViewSourceType.TRANSACTIONS,
-      period_start="2024-01-01",
-      period_end="2024-12-31",
-    )
-    assert model.type == ViewSourceType.TRANSACTIONS
-
-  def test_valid_fact_set_source(self):
-    model = ViewSource(
-      type=ViewSourceType.FACT_SET,
-      fact_set_id="fs_123",
-    )
-    assert model.fact_set_id == "fs_123"
-
-  def test_type_required(self):
-    with pytest.raises(ValidationError):
-      ViewSource()  # type: ignore[call-arg]
-
-
-@pytest.mark.unit
 class TestViewAxisConfig:
   def test_valid_element_axis(self):
     model = ViewAxisConfig(type="element")
@@ -288,27 +257,64 @@ class TestViewConfig:
 class TestCreateViewRequest:
   def test_minimal_request(self):
     model = CreateViewRequest(
-      source=ViewSource(
-        type=ViewSourceType.TRANSACTIONS,
-        period_start="2024-01-01",
-        period_end="2024-12-31",
-      ),
+      elements=["us-gaap:Assets"],
+      period_type="instant",
     )
-    assert model.name is None
-    assert model.presentation_formats == ["pivot_table"]
+    assert model.elements == ["us-gaap:Assets"]
+    assert model.canonical_concepts == []
+    assert model.include_summary is False
 
-  def test_full_request(self):
+  def test_with_canonical_concepts(self):
     model = CreateViewRequest(
-      name="Q4 Revenue",
-      source=ViewSource(
-        type=ViewSourceType.TRANSACTIONS,
-        period_start="2024-10-01",
-        period_end="2024-12-31",
-      ),
-      view_config=ViewConfig(
-        rows=[ViewAxisConfig(type="element")],
-        columns=[ViewAxisConfig(type="period")],
-      ),
-      presentation_formats=["pivot_table", "chart"],
+      canonical_concepts=["revenue", "net_income"],
+      period_type="annual",
     )
-    assert model.name == "Q4 Revenue"
+    assert model.canonical_concepts == ["revenue", "net_income"]
+    assert model.elements == []
+
+  def test_with_entity_filters(self):
+    model = CreateViewRequest(
+      elements=["us-gaap:Assets"],
+      period_type="instant",
+      entity="NVDA",
+    )
+    assert model.entity == "NVDA"
+
+  def test_with_multi_entity(self):
+    model = CreateViewRequest(
+      elements=["us-gaap:Assets"],
+      period_type="instant",
+      entities=["NVDA", "AAPL"],
+    )
+    assert model.entities == ["NVDA", "AAPL"]
+
+  def test_with_report_filters(self):
+    model = CreateViewRequest(
+      elements=["us-gaap:NetIncomeLoss"],
+      form="10-K",
+      fiscal_year=2024,
+      fiscal_period="FY",
+      period_type="annual",
+    )
+    assert model.form == "10-K"
+    assert model.fiscal_year == 2024
+    assert model.fiscal_period == "FY"
+
+  def test_invalid_period_type(self):
+    with pytest.raises(ValidationError):
+      CreateViewRequest(
+        elements=["us-gaap:Assets"],
+        period_type="biannual",
+      )
+
+  def test_defaults(self):
+    model = CreateViewRequest()
+    assert model.elements == []
+    assert model.canonical_concepts == []
+    assert model.periods == []
+    assert model.entities == []
+    assert model.entity is None
+    assert model.form is None
+    assert model.fiscal_year is None
+    assert model.period_type is None
+    assert model.include_summary is False

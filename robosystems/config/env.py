@@ -403,7 +403,7 @@ class EnvConfig:
   # --- Platform Operations ---
   USER_REGISTRATION_ENABLED = get_bool_env(
     "USER_REGISTRATION_ENABLED",
-    get_parameter_value("USER_REGISTRATION_ENABLED", "false").lower() == "true",
+    get_parameter_value("USER_REGISTRATION_ENABLED", "true").lower() == "true",
   )
   # For forked/self-hosted deployments: Set BILLING_ENABLED=false in SSM Parameter Store
   # This disables payment requirements since you're paying for your own infrastructure
@@ -478,7 +478,7 @@ class EnvConfig:
   )
   FACT_GRID_ENABLED = get_bool_env(
     "FACT_GRID_ENABLED",
-    get_parameter_value("FACT_GRID_ENABLED", "false").lower() == "true",
+    get_parameter_value("FACT_GRID_ENABLED", "true").lower() == "true",
   )
   MCP_AUTO_LIMIT_ENABLED = get_bool_env(
     "MCP_AUTO_LIMIT_ENABLED",
@@ -517,20 +517,20 @@ class EnvConfig:
   # Individual provider flags below require CONNECTIONS_ENABLED=true to function
   CONNECTIONS_ENABLED = get_bool_env(
     "CONNECTIONS_ENABLED",
-    get_parameter_value("CONNECTIONS_ENABLED", "false").lower() == "true",
+    get_parameter_value("CONNECTIONS_ENABLED", "true").lower() == "true",
   )
   # Individual provider flags (require CONNECTIONS_ENABLED=true)
   CONNECTION_SEC_ENABLED = get_bool_env(
     "CONNECTION_SEC_ENABLED",
-    get_parameter_value("CONNECTION_SEC_ENABLED", "false").lower() == "true",
+    get_parameter_value("CONNECTION_SEC_ENABLED", "true").lower() == "true",
   )
   CONNECTION_QUICKBOOKS_ENABLED = get_bool_env(
     "CONNECTION_QUICKBOOKS_ENABLED",
-    get_parameter_value("CONNECTION_QUICKBOOKS_ENABLED", "false").lower() == "true",
+    get_parameter_value("CONNECTION_QUICKBOOKS_ENABLED", "true").lower() == "true",
   )
   CONNECTION_PLAID_ENABLED = get_bool_env(
     "CONNECTION_PLAID_ENABLED",
-    get_parameter_value("CONNECTION_PLAID_ENABLED", "false").lower() == "true",
+    get_parameter_value("CONNECTION_PLAID_ENABLED", "true").lower() == "true",
   )
 
   # ==========================================================================

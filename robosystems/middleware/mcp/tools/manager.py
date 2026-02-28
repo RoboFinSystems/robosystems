@@ -314,10 +314,12 @@ class GraphMCPTools:
       # Curated financial tools (FactSet-powered)
       tools.extend(self._get_curated_tool_definitions())
 
+      # Fact grid tool (custom element/period/entity queries)
+      tools.extend(self._get_data_tool_definitions())
+
     # Layer 3: Infrastructure tools (feature-flag gated)
     tools.extend(self._get_workspace_tool_definitions())
     tools.extend(self._get_memory_tool_definitions())
-    tools.extend(self._get_data_tool_definitions())
 
     return tools
 
