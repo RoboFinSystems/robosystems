@@ -11,14 +11,11 @@ from robosystems.models.api.views import (
   SaveViewRequest,
   SaveViewResponse,
   ViewMetadata,
-  ViewResponse,
-  ViewSourceType,
 )
 from robosystems.models.iam import User
 from robosystems.operations.views import (
   FactGridBuilder,
-  aggregate_trial_balance,
-  query_facts_with_aspects,
+  query_fact_grid,
   save_view_as_report,
 )
 
@@ -34,69 +31,45 @@ async def create_view(
   session: Session = Depends(get_db_session),
 ):
   """
-  Generate financial report view from data source (dual-mode support).
+  Build a fact grid from existing facts in the graph.
 
-  **Mode 1: Transaction Aggregation (generate_from_transactions)**
-  - Aggregates raw transaction data to trial balance
-  - Creates facts on-demand
-  - Shows real-time reporting from source of truth
-
-  **Mode 2: Existing Facts (pivot_existing_facts)**
-  - Queries existing Fact nodes
-  - Supports multi-dimensional analysis
-  - Works with SEC filings and pre-computed facts
-
-  Both modes:
-  - Build FactGrid from data
-  - Generate pivot table presentation
-  - Return consistent response format
+  Queries Fact nodes by element qnames or canonical concepts, with optional
+  filters for periods, entities, filing form, fiscal context, and period type.
+  Returns deduplicated consolidated facts as a pivot table.
   """
   start_time = time.time()
 
+  if not request.elements and not request.canonical_concepts:
+    raise HTTPException(
+      status_code=400,
+      detail="Provide elements (qnames) and/or canonical_concepts",
+    )
+
+  if not request.periods and not request.period_type and request.fiscal_year is None:
+    raise HTTPException(
+      status_code=400,
+      detail="Provide periods, period_type, or fiscal_year to scope the query",
+    )
+
   try:
-    requested_dimensions = []
-    if request.view_config:
-      all_axes = (request.view_config.rows or []) + (request.view_config.columns or [])
-      for axis in all_axes:
-        if axis.type == "dimension" and axis.dimension_axis:
-          requested_dimensions.append(axis.dimension_axis)
-
-    if request.source.type == ViewSourceType.TRANSACTIONS:
-      fact_data = await aggregate_trial_balance(
-        graph_id=graph_id,
-        period_start=request.source.period_start,
-        period_end=request.source.period_end,
-        entity_id=request.source.entity_id,
-        requested_dimensions=requested_dimensions or None,
-      )
-      source = "trial_balance_aggregation"
-      period_start = request.source.period_start
-      period_end = request.source.period_end
-
-    elif request.source.type == ViewSourceType.FACT_SET:
-      fact_data = await query_facts_with_aspects(
-        graph_id=graph_id,
-        fact_set_id=request.source.fact_set_id,
-        period_start=request.source.period_start,
-        period_end=request.source.period_end,
-        entity_id=request.source.entity_id,
-        requested_dimensions=requested_dimensions or None,
-      )
-      source = "fact_set_query"
-      period_start = request.source.period_start
-      period_end = request.source.period_end
-
-    else:
-      raise HTTPException(
-        status_code=400,
-        detail=f"Unsupported source type: {request.source.type}",
-      )
+    fact_data = await query_fact_grid(
+      graph_id=graph_id,
+      elements=request.elements or None,
+      canonical_concepts=request.canonical_concepts or None,
+      periods=request.periods or None,
+      entity=request.entity,
+      entities=request.entities or None,
+      form=request.form,
+      fiscal_year=request.fiscal_year,
+      fiscal_period=request.fiscal_period,
+      period_type=request.period_type,
+    )
 
     builder = FactGridBuilder()
     fact_grid = builder.build(
       fact_data=fact_data,
       view_config=request.view_config,
-      source=source,
+      source="fact_grid",
     )
 
     pivot_table = builder.generate_pivot_table(fact_grid, request.view_config)
@@ -107,16 +80,37 @@ async def create_view(
       view_id=str(uuid.uuid4()),
       facts_processed=fact_grid.metadata.fact_count,
       construction_time_ms=construction_time_ms,
-      source=source,
-      period_start=period_start,
-      period_end=period_end,
+      source="fact_grid",
     )
 
-    return ViewResponse(
-      metadata=metadata,
-      presentations={"pivot_table": pivot_table},
-    )
+    response_data = {
+      "metadata": metadata,
+      "presentations": {"pivot_table": pivot_table},
+    }
 
+    if (
+      request.include_summary
+      and fact_grid.facts_df is not None
+      and not fact_grid.facts_df.empty
+    ):
+      df = fact_grid.facts_df
+      if "element_name" in df.columns and "value" in df.columns:
+        summary = {}
+        for element_name in df["element_name"].unique():
+          element_data = df[df["element_name"] == element_name]
+          summary[element_name] = {
+            "count": len(element_data),
+            "total": float(element_data["value"].sum()),
+            "average": float(element_data["value"].mean()),
+            "min": float(element_data["value"].min()),
+            "max": float(element_data["value"].max()),
+          }
+        response_data["summary"] = summary
+
+    return response_data
+
+  except HTTPException:
+    raise
   except Exception as e:
     raise HTTPException(
       status_code=500,
@@ -138,30 +132,6 @@ async def save_view(
   Converts computed view results into persistent Report, Fact, and Structure nodes.
   This establishes what data exists in the subgraph, which then defines what
   needs to be exported for publishing to the parent graph.
-
-  **Create Mode** (no report_id provided):
-  - Generates new report_id from entity + period + report type
-  - Creates new Report, Facts, and Structures
-
-  **Update Mode** (report_id provided):
-  - Deletes all existing Facts and Structures for the report
-  - Updates Report metadata
-  - Creates fresh Facts and Structures from current view
-  - Useful for refreshing reports with updated data or view configurations
-
-  **This is NOT publishing** - it only creates nodes in the subgraph workspace.
-  Publishing (export → parquet → parent ingest) happens separately.
-
-  Creates/Updates:
-  - Report node with metadata
-  - Fact nodes with all aspects (period, entity, element, unit)
-  - PresentationStructure nodes (how facts are displayed)
-  - CalculationStructure nodes (how facts roll up)
-
-  Returns:
-  - report_id: Unique identifier used as parquet export prefix
-  - parquet_export_prefix: Filename prefix for future exports
-  - All created facts and structures
   """
   try:
     response = await save_view_as_report(graph_id, request)

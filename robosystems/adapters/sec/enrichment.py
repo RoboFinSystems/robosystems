@@ -221,6 +221,8 @@ class SemanticEnricher:
     self._element_knowledge = self._UNSET
     self._structure_profiles = self._UNSET
     self._structure_consensus = self._UNSET
+    self._disclosure_profiles = self._UNSET
+    self._disclosure_consensus = self._UNSET
 
   # -- Lazy model loading ---------------------------------------------------
 
@@ -394,6 +396,72 @@ class SemanticEnricher:
       return result
     except Exception as e:
       logger.debug(f"Structure consensus artifact not available: {e}")
+      return None
+
+  @property
+  def disclosure_profiles(self) -> dict[str, dict[str, float]] | None:
+    """Lazy-load disclosure profiles artifact."""
+    if self._disclosure_profiles is self._UNSET:
+      self._disclosure_profiles = self._load_disclosure_profiles()
+    return self._disclosure_profiles
+
+  @property
+  def disclosure_consensus(self) -> dict[str, dict] | None:
+    """Lazy-load disclosure consensus artifact."""
+    if self._disclosure_consensus is self._UNSET:
+      self._disclosure_consensus = self._load_disclosure_consensus()
+    return self._disclosure_consensus
+
+  def _load_disclosure_profiles(self) -> dict[str, dict[str, float]] | None:
+    """Load disclosure_profiles.parquet into disclosure_type -> {qname -> weighted_score}."""
+    try:
+      path = self._ensure_artifact_local("disclosure_profiles")
+
+      if path is None:
+        return None
+
+      import pyarrow.parquet as pq
+
+      table = pq.read_table(path)
+      columns = table.to_pydict()
+
+      result: dict[str, dict[str, float]] = {}
+      for i, dt in enumerate(columns["disclosure_type"]):
+        if dt not in result:
+          result[dt] = {}
+        result[dt][columns["qname"][i]] = columns["weighted_score"][i]
+
+      logger.info(f"Loaded disclosure profiles artifact: {len(result)} types")
+      return result
+    except Exception as e:
+      logger.debug(f"Disclosure profiles artifact not available: {e}")
+      return None
+
+  def _load_disclosure_consensus(self) -> dict[str, dict] | None:
+    """Load disclosure_consensus.parquet into definition_hash-keyed dict."""
+    try:
+      path = self._ensure_artifact_local("disclosure_consensus")
+
+      if path is None:
+        return None
+
+      import pyarrow.parquet as pq
+
+      table = pq.read_table(path)
+      columns = table.to_pydict()
+
+      result = {}
+      for i, def_hash in enumerate(columns["definition_hash"]):
+        result[def_hash] = {
+          "disclosure_type": columns["disclosure_type"][i],
+          "consensus_ratio": columns["consensus_ratio"][i],
+          "filing_count": columns["filing_count"][i],
+        }
+
+      logger.info(f"Loaded disclosure consensus artifact: {len(result)} entries")
+      return result
+    except Exception as e:
+      logger.debug(f"Disclosure consensus artifact not available: {e}")
       return None
 
   # -- Embedding ------------------------------------------------------------
@@ -789,3 +857,205 @@ class SemanticEnricher:
     if not votes:
       return None
     return max(votes, key=votes.get)
+
+  # -- Disclosure classification ---------------------------------------------
+
+  def classify_disclosure_by_composition(
+    self, structure_elements: list[str]
+  ) -> tuple[str | None, float]:
+    """Score each disclosure type by element overlap with its profile.
+
+    Uses PageRank-weighted scores from disclosure profiles, normalized
+    by structure size. Elements with higher graph centrality are more
+    discriminative than raw frequency alone.
+
+    Returns:
+        (disclosure_type, score) or (None, 0.0) if no profiles available.
+    """
+    profiles = self.disclosure_profiles
+    if profiles is None:
+      return (None, 0.0)
+
+    element_set = set(structure_elements)
+    best_type = None
+    best_score = 0.0
+
+    for disclosure_type, profile in profiles.items():
+      overlap_score = sum(profile[q] for q in element_set if q in profile)
+      score = overlap_score / max(len(element_set), 1)
+
+      if score > best_score:
+        best_score = score
+        best_type = disclosure_type
+
+    return (best_type, best_score)
+
+  @staticmethod
+  def detect_dei_structure(
+    structure_elements: list[str],
+  ) -> tuple[str | None, float]:
+    """Detect Document/Entity Information structures by dei: namespace.
+
+    If a structure contains elements in the dei: namespace, it is
+    deterministically classified as DocumentInformation or EntityInformation.
+
+    Returns:
+        (disclosure_type, confidence) or (None, 0.0) if not a DEI structure.
+    """
+    dei_elements = [q for q in structure_elements if q.startswith("dei:")]
+    if not dei_elements:
+      return (None, 0.0)
+
+    entity_indicators = {
+      "dei:EntityRegistrantName",
+      "dei:EntityCentralIndexKey",
+      "dei:EntityFileNumber",
+      "dei:EntityTaxIdentificationNumber",
+      "dei:EntityIncorporationStateCountryCode",
+    }
+    document_indicators = {
+      "dei:DocumentType",
+      "dei:DocumentPeriodEndDate",
+      "dei:DocumentFiscalYearFocus",
+      "dei:DocumentFiscalPeriodFocus",
+      "dei:AmendmentFlag",
+    }
+
+    dei_set = set(dei_elements)
+    entity_count = len(dei_set & entity_indicators)
+    document_count = len(dei_set & document_indicators)
+
+    if entity_count > document_count:
+      return ("EntityInformation", 0.95)
+    elif document_count > 0 or len(dei_elements) >= 2:
+      return ("DocumentInformation", 0.95)
+
+    return ("DocumentInformation", 0.85)
+
+  @staticmethod
+  def detect_balance_sheet_rollup(
+    structure_elements: list[str],
+  ) -> tuple[str | None, float]:
+    """Detect AssetsRollUp or LiabilitiesAndEquityRollUp by root elements.
+
+    Balance sheet rollup structures universally use standard us-gaap root
+    elements (Assets, LiabilitiesAndStockholdersEquity) alongside structural
+    companions (AssetsCurrent, LiabilitiesCurrent, etc.). The companion
+    requirement distinguishes real rollups from structures that merely
+    reference us-gaap:Assets (e.g., VIE disclosures, segment reconciliations).
+
+    Returns:
+        (disclosure_type, confidence) or (None, 0.0) if not a balance sheet rollup.
+    """
+    element_set = set(structure_elements)
+
+    assets_roots = {
+      "us-gaap:Assets",
+    }
+    liab_equity_roots = {
+      "us-gaap:LiabilitiesAndStockholdersEquity",
+    }
+    # Structural companions that appear in real balance sheet rollups
+    # but not in VIE/segment disclosures that merely reference totals.
+    balance_sheet_companions = {
+      "us-gaap:AssetsCurrent",
+      "us-gaap:LiabilitiesCurrent",
+      "us-gaap:AssetsAbstract",
+      "us-gaap:RetainedEarningsAccumulatedDeficit",
+      "us-gaap:CommitmentsAndContingencies",
+      "us-gaap:AccumulatedOtherComprehensiveIncomeLossNetOfTax",
+    }
+
+    has_assets = bool(element_set & assets_roots)
+    has_liab_equity = bool(element_set & liab_equity_roots)
+    companion_count = len(element_set & balance_sheet_companions)
+
+    # Require at least 2 structural companions to confirm this is a real
+    # balance sheet rollup, not a VIE or segment that references totals.
+    if companion_count < 2:
+      return (None, 0.0)
+
+    if has_assets and has_liab_equity:
+      # Full balance sheet structure contains both rollups.
+      # Prefer AssetsRollUp — maps to canonical total_assets concept
+      # and the accounting identity A = L + E means assets is the
+      # primary classification.
+      return ("AssetsRollUp", 0.95)
+    elif has_assets:
+      return ("AssetsRollUp", 0.95)
+    elif has_liab_equity:
+      return ("LiabilitiesAndEquityRollUp", 0.95)
+
+    return (None, 0.0)
+
+  def _lookup_disclosure_consensus(
+    self, definition_hash: str
+  ) -> tuple[str | None, float]:
+    """Look up cross-filing disclosure consensus for a structure definition hash."""
+    consensus = self.disclosure_consensus
+    if consensus is None:
+      return (None, 0.0)
+
+    entry = consensus.get(definition_hash)
+    if entry is None:
+      return (None, 0.0)
+
+    return (entry["disclosure_type"], entry["consensus_ratio"])
+
+  def refine_disclosure_confidence(
+    self,
+    raw_type: str | None,
+    raw_conf: float,
+    structure_elements: list[str],
+    definition_hash: str,
+  ) -> tuple[str | None, float]:
+    """Refine disclosure classification using consensus and element knowledge.
+
+    Two layers:
+    1. Cross-filing consensus — what did other filings classify this structure as?
+    2. Element knowledge disclosure_type vote — do the elements agree?
+
+    Returns adjusted (type, confidence). Returns (raw_type, raw_conf) unchanged
+    if artifacts are unavailable or structure has no elements.
+    """
+    from robosystems.adapters.sec.config import XBRL_GRAPH_REFINEMENT
+
+    if not XBRL_GRAPH_REFINEMENT:
+      return (raw_type, raw_conf)
+
+    if not structure_elements:
+      return (raw_type, raw_conf)
+
+    adjusted_type = raw_type
+    adjusted_conf = raw_conf
+
+    # Layer 1: Cross-filing consensus
+    consensus_type, consensus_conf = self._lookup_disclosure_consensus(definition_hash)
+    if consensus_type and consensus_conf > 0.7:
+      if consensus_type == adjusted_type:
+        adjusted_conf = min(1.0, adjusted_conf + 0.05 * consensus_conf)
+      elif adjusted_type is None:
+        adjusted_type = consensus_type
+        adjusted_conf = consensus_conf * 0.80
+      elif consensus_conf > 0.9 and adjusted_conf < 0.80:
+        adjusted_type = consensus_type
+        adjusted_conf = consensus_conf * 0.85
+
+    # Layer 2: Element disclosure_type majority vote
+    ek = self.element_knowledge
+    if ek is not None:
+      votes: dict[str, int] = {}
+      for qname in structure_elements:
+        info = ek.get(qname)
+        if info and info.get("disclosure_type"):
+          dt = info["disclosure_type"]
+          votes[dt] = votes.get(dt, 0) + 1
+
+      if votes:
+        top_vote = max(votes, key=votes.get)
+        if top_vote == adjusted_type:
+          adjusted_conf = min(1.0, adjusted_conf + 0.03)
+        elif top_vote and adjusted_type:
+          adjusted_conf = max(0.0, adjusted_conf - 0.05)
+
+    return (adjusted_type, round(adjusted_conf, 4))

@@ -14,8 +14,6 @@ from robosystems.models.api.views.view_config import (
   CreateViewRequest,
   ViewAxisConfig,
   ViewConfig,
-  ViewSource,
-  ViewSourceType,
 )
 from robosystems.models.api.views.view_response import (
   PivotTablePresentation,
@@ -38,6 +36,4 @@ __all__ = [
   "ViewConfig",
   "ViewMetadata",
   "ViewResponse",
-  "ViewSource",
-  "ViewSourceType",
 ]

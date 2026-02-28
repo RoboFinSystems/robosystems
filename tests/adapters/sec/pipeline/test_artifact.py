@@ -36,10 +36,12 @@ class TestSecKnowledgeArtifacts:
   @patch("robosystems.adapters.sec.knowledge.framework.DuckDBAnalyticsContext")
   @patch("robosystems.adapters.sec.knowledge.artifact.ElementKnowledgeBuilder")
   @patch("robosystems.adapters.sec.knowledge.artifact.StructureKnowledgeBuilder")
+  @patch("robosystems.adapters.sec.knowledge.artifact.DisclosureProfileBuilder")
   @patch("robosystems.config.env")
   def test_successful_artifact_generation_dev(
     self,
     mock_env,
+    mock_disclosure_builder_cls,
     mock_structure_builder_cls,
     mock_element_builder_cls,
     mock_analytics_ctx_cls,
@@ -67,6 +69,16 @@ class TestSecKnowledgeArtifacts:
     mock_structure_builder.build.return_value = (profiles_path, consensus_path)
     mock_structure_builder_cls.return_value = mock_structure_builder
 
+    # Mock disclosure builder
+    mock_disclosure_builder = MagicMock()
+    disc_profiles_path = Path("/tmp/disclosure_profiles.parquet")
+    disc_consensus_path = Path("/tmp/disclosure_consensus.parquet")
+    mock_disclosure_builder.build.return_value = (
+      disc_profiles_path,
+      disc_consensus_path,
+    )
+    mock_disclosure_builder_cls.return_value = mock_disclosure_builder
+
     config = SECArtifactConfig()
     context = build_asset_context()
 
@@ -76,14 +88,18 @@ class TestSecKnowledgeArtifacts:
     assert result.metadata["element_knowledge_path"] == str(element_path)
     assert result.metadata["structure_profiles_path"] == str(profiles_path)
     assert result.metadata["structure_consensus_path"] == str(consensus_path)
+    assert result.metadata["disclosure_profiles_path"] == str(disc_profiles_path)
+    assert result.metadata["disclosure_consensus_path"] == str(disc_consensus_path)
 
   @patch("robosystems.adapters.sec.knowledge.framework.DuckDBAnalyticsContext")
   @patch("robosystems.adapters.sec.knowledge.artifact.ElementKnowledgeBuilder")
   @patch("robosystems.adapters.sec.knowledge.artifact.StructureKnowledgeBuilder")
+  @patch("robosystems.adapters.sec.knowledge.artifact.DisclosureProfileBuilder")
   @patch("robosystems.config.env")
   def test_artifact_generation_skips_upload_in_dev(
     self,
     mock_env,
+    mock_disclosure_builder_cls,
     mock_structure_builder_cls,
     mock_element_builder_cls,
     mock_analytics_ctx_cls,
@@ -108,6 +124,13 @@ class TestSecKnowledgeArtifacts:
     )
     mock_structure_builder_cls.return_value = mock_structure_builder
 
+    mock_disclosure_builder = MagicMock()
+    mock_disclosure_builder.build.return_value = (
+      Path("/tmp/disc_profiles.parquet"),
+      Path("/tmp/disc_consensus.parquet"),
+    )
+    mock_disclosure_builder_cls.return_value = mock_disclosure_builder
+
     config = SECArtifactConfig()
     context = build_asset_context()
 
@@ -118,10 +141,12 @@ class TestSecKnowledgeArtifacts:
   @patch("robosystems.adapters.sec.knowledge.framework.DuckDBAnalyticsContext")
   @patch("robosystems.adapters.sec.knowledge.artifact.ElementKnowledgeBuilder")
   @patch("robosystems.adapters.sec.knowledge.artifact.StructureKnowledgeBuilder")
+  @patch("robosystems.adapters.sec.knowledge.artifact.DisclosureProfileBuilder")
   @patch("robosystems.config.env")
   def test_artifact_uses_custom_memory_limit(
     self,
     mock_env,
+    mock_disclosure_builder_cls,
     mock_structure_builder_cls,
     mock_element_builder_cls,
     mock_analytics_ctx_cls,
@@ -146,6 +171,13 @@ class TestSecKnowledgeArtifacts:
     )
     mock_structure_builder_cls.return_value = mock_structure_builder
 
+    mock_disclosure_builder = MagicMock()
+    mock_disclosure_builder.build.return_value = (
+      Path("/tmp/disc_profiles.parquet"),
+      Path("/tmp/disc_consensus.parquet"),
+    )
+    mock_disclosure_builder_cls.return_value = mock_disclosure_builder
+
     config = SECArtifactConfig(memory_limit="16GB")
     context = build_asset_context()
 
@@ -154,14 +186,17 @@ class TestSecKnowledgeArtifacts:
     # Verify memory limit passed to builders
     mock_element_builder_cls.assert_called_once_with(memory_limit="16GB")
     mock_structure_builder_cls.assert_called_once_with(memory_limit="16GB")
+    mock_disclosure_builder_cls.assert_called_once_with(memory_limit="16GB")
 
   @patch("robosystems.adapters.sec.knowledge.framework.DuckDBAnalyticsContext")
   @patch("robosystems.adapters.sec.knowledge.artifact.ElementKnowledgeBuilder")
   @patch("robosystems.adapters.sec.knowledge.artifact.StructureKnowledgeBuilder")
+  @patch("robosystems.adapters.sec.knowledge.artifact.DisclosureProfileBuilder")
   @patch("robosystems.config.env")
   def test_artifact_uses_duckdb_source(
     self,
     mock_env,
+    mock_disclosure_builder_cls,
     mock_structure_builder_cls,
     mock_element_builder_cls,
     mock_analytics_ctx_cls,
@@ -185,6 +220,13 @@ class TestSecKnowledgeArtifacts:
       Path("/tmp/consensus.parquet"),
     )
     mock_structure_builder_cls.return_value = mock_structure_builder
+
+    mock_disclosure_builder = MagicMock()
+    mock_disclosure_builder.build.return_value = (
+      Path("/tmp/disc_profiles.parquet"),
+      Path("/tmp/disc_consensus.parquet"),
+    )
+    mock_disclosure_builder_cls.return_value = mock_disclosure_builder
 
     config = SECArtifactConfig(duckdb_source="sec_historical")
     context = build_asset_context()
