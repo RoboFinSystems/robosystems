@@ -3,7 +3,6 @@ Tests for the views router.
 
 This test suite covers:
 - create_view endpoint (fact grid query)
-- save_view endpoint (delegates to save_view_as_report)
 """
 
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -11,7 +10,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from fastapi import HTTPException
 
-from robosystems.routers.graphs.views import create_view, save_view
+from robosystems.routers.graphs.views import create_view
 
 MODULE = "robosystems.routers.graphs.views"
 
@@ -176,50 +175,3 @@ class TestCreateView:
 
     assert exc_info.value.status_code == 500
     assert "connection lost" in exc_info.value.detail
-
-
-@pytest.mark.asyncio
-class TestSaveView:
-  """Tests for save_view endpoint."""
-
-  @pytest.mark.unit
-  async def test_happy_path_calls_save_view_as_report(self):
-    """Successful save delegates to save_view_as_report and returns its response."""
-    mock_response = MagicMock()
-    mock_response.report_id = "rpt_001"
-
-    with patch(
-      f"{MODULE}.save_view_as_report",
-      new_callable=AsyncMock,
-      return_value=mock_response,
-    ) as mock_save:
-      result = await save_view(
-        graph_id="kg_test",
-        request=MagicMock(),
-        req=MagicMock(),
-        current_user=MagicMock(),
-        session=MagicMock(),
-      )
-
-    mock_save.assert_called_once()
-    assert result == mock_response
-
-  @pytest.mark.unit
-  async def test_error_wraps_in_500(self):
-    """RuntimeError from save_view_as_report is wrapped in HTTPException(500)."""
-    with patch(
-      f"{MODULE}.save_view_as_report",
-      new_callable=AsyncMock,
-      side_effect=RuntimeError("disk full"),
-    ):
-      with pytest.raises(HTTPException) as exc_info:
-        await save_view(
-          graph_id="kg_test",
-          request=MagicMock(),
-          req=MagicMock(),
-          current_user=MagicMock(),
-          session=MagicMock(),
-        )
-
-    assert exc_info.value.status_code == 500
-    assert "disk full" in exc_info.value.detail

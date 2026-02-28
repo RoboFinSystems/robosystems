@@ -8,15 +8,12 @@ from robosystems.database import get_db_session
 from robosystems.middleware.auth.dependencies import get_current_user
 from robosystems.models.api.views import (
   CreateViewRequest,
-  SaveViewRequest,
-  SaveViewResponse,
   ViewMetadata,
 )
 from robosystems.models.iam import User
 from robosystems.operations.views import (
   FactGridBuilder,
   query_fact_grid,
-  save_view_as_report,
 )
 
 router = APIRouter(prefix="/views", tags=["Views"])
@@ -115,30 +112,4 @@ async def create_view(
     raise HTTPException(
       status_code=500,
       detail=f"Failed to create view: {e!s}",
-    ) from e
-
-
-@router.post("/save", operation_id="save_view")
-async def save_view(
-  graph_id: str,
-  request: SaveViewRequest,
-  req: Request,
-  current_user: User = Depends(get_current_user),
-  session: Session = Depends(get_db_session),
-) -> SaveViewResponse:
-  """
-  Save or update view as materialized report in the graph.
-
-  Converts computed view results into persistent Report, Fact, and Structure nodes.
-  This establishes what data exists in the subgraph, which then defines what
-  needs to be exported for publishing to the parent graph.
-  """
-  try:
-    response = await save_view_as_report(graph_id, request)
-    return response
-
-  except Exception as e:
-    raise HTTPException(
-      status_code=500,
-      detail=f"Failed to save view: {e!s}",
     ) from e
