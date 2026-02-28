@@ -27,6 +27,7 @@ from robosystems.adapters.sec.processors import (
   process_single_filing_to_memory,
   zip_and_upload,
 )
+from robosystems.adapters.sec.processors.constants import SEC_CONSOLIDATION_CHUNK_SIZE
 from robosystems.config import env
 from robosystems.config.storage.shared import (
   DataSourceType,
@@ -260,35 +261,42 @@ def sec_processed_filings(
         table_keys.add(table_key)
 
     for table_key in sorted(table_keys):
-      # Consolidate this batch's data from disk (Arrow only, no Pandas)
-      new_parquet_bytes = consolidate_parquet_from_disk(work_dir, table_key)
-      if not new_parquet_bytes:
+      # Consolidate in chunks to limit peak Arrow memory.
+      # Each chunk produces a separate part file on S3.
+      parquet_chunks = consolidate_parquet_from_disk(
+        work_dir, table_key, max_files_per_chunk=SEC_CONSOLIDATION_CHUNK_SIZE
+      )
+      if not parquet_chunks:
         continue
 
       entity_type, table_name = table_key.split("/", 1)
-      part_id = uuid.uuid4().hex[:12]
-      # Part file under table subdirectory: TABLE/part_{id}.parquet
-      s3_key = get_processed_key(
-        DataSourceType.SEC,
-        "processed",
-        f"filed={partition_date}",
-        entity_type,
-        table_name,
-        f"part_{part_id}.parquet",
-      )
 
-      # Upload atomically (temp file + copy pattern)
-      atomic_s3_upload(
-        s3_client=s3.client,
-        bucket=processed_bucket,
-        final_key=s3_key,
-        data=new_parquet_bytes,
-      )
-      tables_uploaded += 1
-      context.log.info(f"Uploaded: {s3_key} ({len(new_parquet_bytes):,} bytes)")
+      for chunk_bytes in parquet_chunks:
+        part_id = uuid.uuid4().hex[:12]
+        # Part file under table subdirectory: TABLE/part_{id}.parquet
+        s3_key = get_processed_key(
+          DataSourceType.SEC,
+          "processed",
+          f"filed={partition_date}",
+          entity_type,
+          table_name,
+          f"part_{part_id}.parquet",
+        )
 
-      # Release memory for this table before processing the next
-      del new_parquet_bytes
+        # Upload atomically (temp file + copy pattern)
+        atomic_s3_upload(
+          s3_client=s3.client,
+          bucket=processed_bucket,
+          final_key=s3_key,
+          data=chunk_bytes,
+        )
+        tables_uploaded += 1
+        context.log.info(f"Uploaded: {s3_key} ({len(chunk_bytes):,} bytes)")
+
+        # Release memory for this chunk before processing the next
+        del chunk_bytes
+
+      del parquet_chunks
       gc.collect()
 
     # Mark all pending filings as success (data is now safely in S3)
@@ -470,8 +478,13 @@ def sec_processed_filings(
           f"{cache_hits} cache hits"
         )
 
-    # Force garbage collection before flush to reclaim any lingering
-    # memory from the last filing's XBRLGraphProcessor/SemanticEnricher
+    # Release heavy objects before flush to reclaim memory.
+    # SemanticEnricher holds fastembed model (~130 MB) + taxonomy data.
+    # These are no longer needed — all filings have been processed.
+    if shared_enricher is not None:
+      del shared_enricher
+      context.log.info("Released SemanticEnricher before flush")
+    del metadata_loader
     gc.collect()
 
     # Flush all processed filings to S3
