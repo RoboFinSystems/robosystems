@@ -483,7 +483,6 @@ def sec_processed_filings(
     # These are no longer needed — all filings have been processed.
     if shared_enricher is not None:
       del shared_enricher
-      shared_enricher = None
       context.log.info("Released SemanticEnricher before flush")
     del metadata_loader
     gc.collect()

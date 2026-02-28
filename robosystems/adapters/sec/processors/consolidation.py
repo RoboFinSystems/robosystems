@@ -195,8 +195,8 @@ def consolidate_parquet_from_disk(
       try:
         table = pq.read_table(pq_file)
         tables.append(table)
-      except Exception:
-        # Skip corrupted files
+      except Exception as e:
+        logger.warning("Skipping corrupted parquet file %s: %s", pq_file, e)
         continue
 
     if not tables:
@@ -212,9 +212,8 @@ def consolidate_parquet_from_disk(
     pq.write_table(combined, buffer)
     results.append(buffer.getvalue())
 
-    # Release memory before next chunk
+    # Release Arrow memory before next chunk
     del combined
-    del buffer
 
   return results
 
