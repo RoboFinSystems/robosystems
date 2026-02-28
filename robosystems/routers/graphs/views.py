@@ -2,9 +2,7 @@ import time
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from sqlalchemy.orm import Session
 
-from robosystems.database import get_db_session
 from robosystems.middleware.auth.dependencies import get_current_user
 from robosystems.models.api.views import (
   CreateViewRequest,
@@ -25,7 +23,6 @@ async def create_view(
   request: CreateViewRequest,
   req: Request,
   current_user: User = Depends(get_current_user),
-  session: Session = Depends(get_db_session),
 ):
   """
   Build a fact grid from existing facts in the graph.

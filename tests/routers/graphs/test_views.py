@@ -81,7 +81,6 @@ class TestCreateView:
         request=request,
         req=MagicMock(),
         current_user=MagicMock(),
-        session=MagicMock(),
       )
 
     mock_query.assert_called_once()
@@ -114,7 +113,6 @@ class TestCreateView:
         request=request,
         req=MagicMock(),
         current_user=MagicMock(),
-        session=MagicMock(),
       )
 
     assert mock_query.call_args.kwargs["entity"] == "NVDA"
@@ -130,7 +128,6 @@ class TestCreateView:
         request=request,
         req=MagicMock(),
         current_user=MagicMock(),
-        session=MagicMock(),
       )
 
     assert exc_info.value.status_code == 400
@@ -148,7 +145,6 @@ class TestCreateView:
         request=request,
         req=MagicMock(),
         current_user=MagicMock(),
-        session=MagicMock(),
       )
 
     assert exc_info.value.status_code == 400
@@ -170,7 +166,6 @@ class TestCreateView:
           request=request,
           req=MagicMock(),
           current_user=MagicMock(),
-          session=MagicMock(),
         )
 
     assert exc_info.value.status_code == 500
