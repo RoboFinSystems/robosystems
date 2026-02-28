@@ -7,6 +7,7 @@ graph-based confidence refinement.
 """
 
 from robosystems.adapters.sec.knowledge.artifact import (
+  DisclosureProfileBuilder,
   ElementKnowledgeBuilder,
   StructureKnowledgeBuilder,
 )
@@ -16,6 +17,7 @@ from robosystems.adapters.sec.knowledge.framework import DuckDBAnalyticsContext
 
 __all__ = [
   "ArcExtractor",
+  "DisclosureProfileBuilder",
   "DuckDBAnalyticsContext",
   "ElementKnowledgeBuilder",
   "StatementClassifier",

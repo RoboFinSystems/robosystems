@@ -1,28 +1,4 @@
-from enum import Enum
-
 from pydantic import BaseModel, Field, field_validator
-
-
-class ViewSourceType(str, Enum):
-  TRANSACTIONS = "transactions"
-  FACT_SET = "fact_set"
-
-
-class ViewSource(BaseModel):
-  type: ViewSourceType = Field(..., description="Type of data source")
-  period_start: str | None = Field(
-    None, description="Start date for transaction aggregation (YYYY-MM-DD)"
-  )
-  period_end: str | None = Field(
-    None, description="End date for transaction aggregation (YYYY-MM-DD)"
-  )
-  fact_set_id: str | None = Field(
-    None, description="FactSet ID for existing facts mode"
-  )
-  entity_id: str | None = Field(None, description="Filter by entity (optional)")
-
-  class Config:
-    use_enum_values = True
 
 
 class ViewAxisConfig(BaseModel):
@@ -86,11 +62,55 @@ class ViewConfig(BaseModel):
 
 
 class CreateViewRequest(BaseModel):
-  name: str | None = Field(None, description="Optional name for the view")
-  source: ViewSource = Field(..., description="Data source configuration")
+  elements: list[str] = Field(
+    default_factory=list,
+    description="Element qnames (e.g., 'us-gaap:Assets'). Can combine with canonical_concepts.",
+  )
+  canonical_concepts: list[str] = Field(
+    default_factory=list,
+    description="Canonical concept names (e.g., 'revenue', 'net_income'). Matches all mapped qnames.",
+  )
+  periods: list[str] = Field(
+    default_factory=list,
+    description="Period end dates (YYYY-MM-DD format)",
+  )
+  entity: str | None = Field(
+    None,
+    description="Filter by entity ticker, CIK, or name",
+  )
+  entities: list[str] = Field(
+    default_factory=list,
+    description="Filter by multiple entity tickers (e.g., ['NVDA', 'AAPL'])",
+  )
+  form: str | None = Field(
+    None,
+    description="Filter by SEC filing form type (e.g., '10-K', '10-Q')",
+  )
+  fiscal_year: int | None = Field(
+    None,
+    description="Filter by fiscal year (e.g., 2024)",
+  )
+  fiscal_period: str | None = Field(
+    None,
+    description="Filter by fiscal period (e.g., 'FY', 'Q1', 'Q2', 'Q3')",
+  )
+  period_type: str | None = Field(
+    None,
+    description="Filter by period type: 'annual', 'quarterly', or 'instant'",
+  )
+  include_summary: bool = Field(
+    default=False,
+    description="Include summary statistics per element",
+  )
   view_config: ViewConfig = Field(
-    default_factory=ViewConfig, description="View configuration"
+    default_factory=ViewConfig, description="View/pivot configuration"
   )
-  presentation_formats: list[str] = Field(
-    default=["pivot_table"], description="Presentation formats to generate"
-  )
+
+  @field_validator("period_type")
+  @classmethod
+  def validate_period_type(cls, v: str | None) -> str | None:
+    if v is not None and v not in ("annual", "quarterly", "instant"):
+      raise ValueError(
+        f"period_type must be 'annual', 'quarterly', or 'instant', got: {v}"
+      )
+    return v

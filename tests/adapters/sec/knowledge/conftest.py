@@ -168,16 +168,89 @@ def sec_duckdb(tmp_path):
   conn.execute("INSERT INTO REPORT_HAS_FACT VALUES ('report_2', 'fact_2')")
   conn.execute("INSERT INTO REPORT_HAS_FACT VALUES ('report_1', 'fact_3')")
 
+  # DEI elements
+  conn.execute(
+    "INSERT INTO Element VALUES "
+    "('el_doc_type', 'dei:DocumentType', 'Document Type', 'duration', NULL, false, false)"
+  )
+  conn.execute(
+    "INSERT INTO Element VALUES "
+    "('el_doc_period', 'dei:DocumentPeriodEndDate', 'Document Period End Date', "
+    "'duration', NULL, false, false)"
+  )
+  conn.execute(
+    "INSERT INTO Element VALUES "
+    "('el_entity_name', 'dei:EntityRegistrantName', 'Entity Registrant Name', "
+    "'duration', NULL, false, false)"
+  )
+
+  # Disclosure structures
+  conn.execute("""
+        INSERT INTO Structure VALUES
+        ('struct_assets_disc', 'Composition of Certain Financial Statement Captions',
+         '0002001 - Disclosure - Composition of Certain Financial Statement Captions',
+         NULL, 'Disclosure'),
+        ('struct_goodwill_disc', 'Goodwill',
+         '0002002 - Disclosure - Goodwill',
+         NULL, 'Disclosure'),
+        ('struct_dei', 'Document Entity Information',
+         '0000001 - Document - Document and Entity Information',
+         NULL, 'Document')
+    """)
+
+  # Associations for disclosure structures
+  conn.execute(
+    "INSERT INTO Association VALUES ('assoc_disc_1', 'Calculation', 1.0, NULL, 'True')"
+  )
+  conn.execute(
+    "INSERT INTO Association VALUES "
+    "('assoc_disc_2', 'Presentation', NULL, NULL, 'False')"
+  )
+  conn.execute(
+    "INSERT INTO Association VALUES "
+    "('assoc_disc_3', 'Presentation', NULL, NULL, 'False')"
+  )
+  conn.execute(
+    "INSERT INTO Association VALUES "
+    "('assoc_disc_4', 'Presentation', NULL, NULL, 'False')"
+  )
+
+  # Link disclosure structures to associations
+  conn.execute("""
+        INSERT INTO STRUCTURE_HAS_ASSOCIATION VALUES
+        ('struct_assets_disc', 'assoc_disc_1'),
+        ('struct_assets_disc', 'assoc_disc_2'),
+        ('struct_goodwill_disc', 'assoc_disc_3'),
+        ('struct_dei', 'assoc_disc_4')
+    """)
+
+  # Link disclosure associations to elements
+  conn.execute(
+    "INSERT INTO ASSOCIATION_HAS_TO_ELEMENT VALUES ('assoc_disc_1', 'el_liabilities')"
+  )
+  conn.execute(
+    "INSERT INTO ASSOCIATION_HAS_TO_ELEMENT VALUES ('assoc_disc_2', 'el_equity')"
+  )
+  conn.execute(
+    "INSERT INTO ASSOCIATION_HAS_TO_ELEMENT VALUES ('assoc_disc_3', 'el_equity')"
+  )
+  conn.execute(
+    "INSERT INTO ASSOCIATION_HAS_TO_ELEMENT VALUES ('assoc_disc_4', 'el_doc_type')"
+  )
+
   # Classification data
   conn.execute("""
         INSERT INTO Classification VALUES
         ('class_is', 'IncomeStatement', 'disclosure_mechanics', 1.0),
-        ('class_bs', 'AssetsRollUp', 'disclosure_mechanics', 1.0)
+        ('class_bs', 'AssetsRollUp', 'disclosure_mechanics', 1.0),
+        ('class_gw', 'GoodwillRollForward', 'disclosure_mechanics', 1.0)
     """)
   conn.execute("""
         INSERT INTO ASSOCIATION_HAS_CLASSIFICATION VALUES
         ('assoc_calc_1', 'class_is'),
-        ('assoc_calc_5', 'class_bs')
+        ('assoc_calc_5', 'class_bs'),
+        ('assoc_disc_1', 'class_bs'),
+        ('assoc_disc_3', 'class_gw')
     """)
 
   conn.close()

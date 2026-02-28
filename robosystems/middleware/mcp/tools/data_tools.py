@@ -19,19 +19,77 @@ class BuildFactGridTool:
   def get_tool_definition(self) -> dict[str, Any]:
     return {
       "name": "build-fact-grid",
-      "description": "Construct multidimensional fact grid from graph data. Retrieves facts based on elements, periods, and optional dimensions. Returns structured data with element names, values, and periods. Use include_summary=true to add aggregated statistics (count, total, avg, min, max) by element.",
+      "description": """Construct multidimensional fact grid from graph data. Retrieves facts based on elements, periods, and optional dimensions. Returns structured data with element names, values, and periods. Use include_summary=true to add aggregated statistics (count, total, avg, min, max) by element.
+
+**WHEN TO USE:**
+- When the user asks to compare specific financial metrics across periods or companies
+- To build custom cross-company comparisons (e.g., "compare NVDA and AAPL total assets")
+- When you need precise control over which elements, periods, and entities to include
+- For ad-hoc financial analysis that doesn't fit a standard statement format
+
+**HOW IT DIFFERS FROM get-financial-statement:**
+- get-financial-statement returns ALL line items for a standard statement (income statement, balance sheet, etc.)
+- build-fact-grid returns SPECIFIC elements you choose, across any combination of periods and entities
+
+**INPUTS:**
+- elements: XBRL qnames (e.g., 'us-gaap:Assets'). Use resolve-element to find qnames.
+- canonical_concepts: Normalized concept names (e.g., 'revenue', 'net_income'). Matches ALL element qnames mapped to each concept across companies. Can be combined with elements.
+- periods: End dates in YYYY-MM-DD format
+- entity/entities: Filter by ticker, CIK, or name. Use 'entities' array for multi-company.
+- period_type: 'annual', 'quarterly', or 'instant'. Important for duration elements (revenue, net income).
+- form: SEC filing type ('10-K', '10-Q')
+- fiscal_year/fiscal_period: Filter by report fiscal context
+
+**RETURNS:**
+- Deduplicated facts with element qnames, names, values, periods, and units
+- Entity ticker and name included when entity filters are used
+- Only consolidated totals (dimensional breakdowns excluded)
+
+**TIP:**
+For income statement items (revenue, net income), always specify period_type='annual' or 'quarterly' to avoid mixing duration types. Use canonical_concepts for cross-company comparisons where companies may use different XBRL tags for the same concept.""",
       "inputSchema": {
         "type": "object",
         "properties": {
           "elements": {
             "type": "array",
             "items": {"type": "string"},
-            "description": "Element URIs or identifiers to include in the grid",
+            "description": "Element qnames to include in the grid (e.g., 'us-gaap:Assets', 'us-gaap:Revenues'). Can be combined with canonical_concepts.",
+          },
+          "canonical_concepts": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": "Canonical concept names (e.g., 'revenue', 'net_income', 'total_assets'). Matches ALL element qnames mapped to each concept, solving cross-company variation (e.g., 'revenue' matches both us-gaap:Revenues and us-gaap:RevenueFromContractWithCustomerExcludingAssessedTax). Can be combined with elements.",
           },
           "periods": {
             "type": "array",
             "items": {"type": "string"},
             "description": "Period end dates (YYYY-MM-DD format) or quarters (YYYY-QN)",
+          },
+          "entity": {
+            "type": "string",
+            "description": "Filter by entity ticker (e.g., 'NVDA'), CIK, or name. Matches against Entity ticker, cik, and name properties.",
+          },
+          "entities": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": "Filter by multiple entity tickers (e.g., ['NVDA', 'AAPL']). Use instead of 'entity' for multi-company comparisons.",
+          },
+          "form": {
+            "type": "string",
+            "description": "Filter by SEC filing form type (e.g., '10-K', '10-Q')",
+          },
+          "fiscal_year": {
+            "type": "integer",
+            "description": "Filter by fiscal year (e.g., 2024). Uses Report.fiscal_year_focus.",
+          },
+          "fiscal_period": {
+            "type": "string",
+            "description": "Filter by fiscal period (e.g., 'FY', 'Q1', 'Q2', 'Q3'). Uses Report.fiscal_period_focus.",
+          },
+          "period_type": {
+            "type": "string",
+            "description": "Filter by period type: 'annual' (duration facts only), 'quarterly' (duration facts only), 'instant' (point-in-time facts). Default depends on statement type.",
+            "enum": ["annual", "quarterly", "instant"],
           },
           "dimensions": {
             "type": "object",
@@ -54,7 +112,7 @@ class BuildFactGridTool:
             "default": False,
           },
         },
-        "required": ["elements", "periods"],
+        "required": [],
       },
     }
 
@@ -69,19 +127,29 @@ class BuildFactGridTool:
         Dict with fact grid data and metadata
     """
     elements = arguments.get("elements", [])
+    canonical_concepts = arguments.get("canonical_concepts", [])
     periods = arguments.get("periods", [])
+    entity = arguments.get("entity")
+    entities = arguments.get("entities")
+    form = arguments.get("form")
+    fiscal_year = arguments.get("fiscal_year")
+    fiscal_period = arguments.get("fiscal_period")
+    period_type = arguments.get("period_type")
     rows = arguments.get("rows", [])
     columns = arguments.get("columns", [])
     include_summary = arguments.get("include_summary", False)
 
-    if not elements:
+    if not elements and not canonical_concepts:
       return {
         "error": "missing_elements",
-        "message": "At least one element is required",
+        "message": "Provide elements (qnames) and/or canonical_concepts",
       }
 
-    if not periods:
-      return {"error": "missing_periods", "message": "At least one period is required"}
+    if not periods and not period_type and fiscal_year is None:
+      return {
+        "error": "missing_period_filter",
+        "message": "Provide periods, period_type, or fiscal_year to scope the query",
+      }
 
     # Validate rows and columns structure
     if rows and not isinstance(rows, list):
@@ -108,27 +176,94 @@ class BuildFactGridTool:
     try:
       graph_id = self.client.graph_id
 
-      # Build parameterized Cypher query to prevent injection
-      query = """
-      MATCH (f:Fact)-[:FACT_HAS_ELEMENT]->(el:Element)
-      MATCH (f)-[:FACT_HAS_PERIOD]->(p:Period)
-      MATCH (f)-[:FACT_HAS_UNIT]->(u:Unit)
-      WHERE el.uri IN $elements
-        AND p.end_date IN $periods
-      RETURN
-        el.uri as element_id,
-        el.name as element_name,
-        p.end_date as period_end,
-        f.numeric_value as value,
-        u.value as unit,
-        NULL as dimension_member
-      """
+      # Build parameterized Cypher query with optional filters
+      match_clauses = [
+        "MATCH (f:Fact)-[:FACT_HAS_ELEMENT]->(el:Element)",
+        "MATCH (f)-[:FACT_HAS_PERIOD]->(p:Period)",
+        "MATCH (f)-[:FACT_HAS_UNIT]->(u:Unit)",
+      ]
+      where_clauses = [
+        "f.has_dimensions = false",
+      ]
+      parameters: dict[str, Any] = {}
+
+      # Element filter: qnames, canonical concepts, or both
+      if elements and canonical_concepts:
+        where_clauses.append(
+          "(el.qname IN $elements OR el.canonical_concept IN $canonical_concepts)"
+        )
+        parameters["elements"] = elements
+        parameters["canonical_concepts"] = canonical_concepts
+      elif elements:
+        where_clauses.append("el.qname IN $elements")
+        parameters["elements"] = elements
+      elif canonical_concepts:
+        where_clauses.append("el.canonical_concept IN $canonical_concepts")
+        parameters["canonical_concepts"] = canonical_concepts
+
+      if periods:
+        where_clauses.append("p.end_date IN $periods")
+        parameters["periods"] = periods
+
+      if period_type:
+        if period_type == "instant":
+          where_clauses.append("p.period_type = 'instant'")
+        elif period_type == "annual":
+          where_clauses.append("p.duration_type = 'annual'")
+        elif period_type == "quarterly":
+          where_clauses.append("p.duration_type = 'quarterly'")
+
+      # Normalize entity filter: single 'entity' or multi 'entities'
+      entity_list = entities if entities else ([entity] if entity else None)
+
+      if entity_list:
+        match_clauses.append("MATCH (f)-[:FACT_HAS_ENTITY]->(ent:Entity)")
+        where_clauses.append(
+          "(ent.ticker IN $entities OR ent.cik IN $entities OR ent.name IN $entities)"
+        )
+        parameters["entities"] = entity_list
+
+      if form or fiscal_year is not None or fiscal_period:
+        match_clauses.append("MATCH (r:Report)-[:REPORT_HAS_FACT]->(f)")
+        if form:
+          where_clauses.append("r.form = $form")
+          parameters["form"] = form
+        if fiscal_year is not None:
+          where_clauses.append("r.fiscal_year_focus = $fiscal_year")
+          parameters["fiscal_year"] = fiscal_year
+        if fiscal_period:
+          where_clauses.append("r.fiscal_period_focus = $fiscal_period")
+          parameters["fiscal_period"] = fiscal_period
+
+      if entity_list:
+        return_clause = """
+        RETURN DISTINCT
+          el.qname as element_id,
+          el.name as element_name,
+          p.end_date as period_end,
+          f.numeric_value as value,
+          u.value as unit,
+          ent.ticker as entity_ticker,
+          ent.name as entity_name
+        """
+      else:
+        return_clause = """
+        RETURN DISTINCT
+          el.qname as element_id,
+          el.name as element_name,
+          p.end_date as period_end,
+          f.numeric_value as value,
+          u.value as unit
+        """
+
+      query = "\n".join(match_clauses)
+      query += "\nWHERE " + "\n  AND ".join(where_clauses)
+      query += return_clause
 
       # Execute query through Graph API with parameters
       from robosystems.middleware.graph import get_universal_repository
 
       repository = await get_universal_repository(graph_id, "read")
-      parameters = {"elements": elements, "periods": periods}
       result = await repository.execute_query(query, parameters)
 
       # Convert to DataFrame (lazy import pandas)
