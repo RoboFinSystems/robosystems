@@ -121,7 +121,7 @@ neo4j = [
 ]
 dev = [
     # RoboSystems client for demo and testing
-    "robosystems-client==0.2.30",
+    "robosystems-client>=0.2.30,<0.3",
 
     # Optional backends (for testing)
     "neo4j>=5.15.0,<6.0",
