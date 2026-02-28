@@ -451,10 +451,19 @@ Resources:
                   - bedrock:ListFoundationModels
                   - bedrock:ListInferenceProfiles
                 Resource: "*"
+              # Scoped to Anthropic Claude model product IDs only
+              # See: https://docs.aws.amazon.com/bedrock/latest/userguide/model-access-product-ids.html
               - Effect: Allow
                 Action:
                   - aws-marketplace:ViewSubscriptions
+                  - aws-marketplace:Subscribe
                 Resource: "*"
+                Condition:
+                  ForAnyValue:StringEquals:
+                    aws-marketplace:ProductId:
+                      - prod-5ukwuglpt66kg  # Claude Sonnet 4.6
+                      - prod-mxcfnwvpd6kb4  # Claude Sonnet 4.5
+                      - prod-4pmewlybdftbs   # Claude Sonnet 4
 
   # ECS Task Execution Role
   ApiTaskExecutionRole:
