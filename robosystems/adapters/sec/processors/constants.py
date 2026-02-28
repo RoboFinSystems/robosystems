@@ -18,6 +18,12 @@ SHARED_NODE_TABLES = frozenset(
   }
 )
 
+# Maximum parquet files to consolidate in a single chunk during flush_to_s3.
+# Limits peak Arrow memory to ~chunk_size * avg_file_size.
+# For Label with 1000 files at ~1.3 MB each, chunks of 100 = ~130 MB peak
+# instead of 1.3 GB all at once.
+SEC_CONSOLIDATION_CHUNK_SIZE = 100
+
 # Quarter end dates mapping for partitioning
 QUARTER_END_DAYS = {
   1: "-03-31",
