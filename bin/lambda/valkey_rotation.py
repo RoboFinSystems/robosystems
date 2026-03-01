@@ -175,6 +175,7 @@ def set_secret(secret_arn: str, token: str) -> None:
       ReplicationGroupId=replication_group_id,
       AuthToken=new_auth_token,
       AuthTokenUpdateStrategy="ROTATE",  # Rotate without downtime
+      ApplyImmediately=True,
     )
 
     logger.info(f"Initiated auth token rotation for {replication_group_id}")
