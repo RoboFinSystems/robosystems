@@ -46,9 +46,31 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
   try:
     secret_arn = event["SecretId"]
     step = event["Step"]
-    token = event.get("Token", "AWSCURRENT")
+    token = event["ClientRequestToken"]
 
     logger.info(f"Starting {step} for secret {secret_arn}")
+
+    # Validate rotation is enabled and version stages are correct
+    metadata = secrets_client.describe_secret(SecretId=secret_arn)
+    if not metadata["RotationEnabled"]:
+      logger.error("Secret is not enabled for rotation")
+      raise ValueError(f"Secret {secret_arn} is not enabled for rotation")
+
+    versions = metadata["VersionIdsToStages"]
+    if token not in versions:
+      logger.error("Secret version has no stage for rotation")
+      raise ValueError(
+        f"Secret version {token} has no stage for rotation of secret {secret_arn}"
+      )
+
+    if "AWSCURRENT" in versions[token]:
+      logger.info("Secret version already set as AWSCURRENT")
+      return {"statusCode": 200, "body": "Secret version already current"}
+    elif "AWSPENDING" not in versions[token]:
+      logger.error("Secret version not set as AWSPENDING for rotation")
+      raise ValueError(
+        f"Secret version {token} not set as AWSPENDING for rotation of secret {secret_arn}"
+      )
 
     # Route to appropriate step handler
     if step == "createSecret":
@@ -153,6 +175,7 @@ def set_secret(secret_arn: str, token: str) -> None:
       ReplicationGroupId=replication_group_id,
       AuthToken=new_auth_token,
       AuthTokenUpdateStrategy="ROTATE",  # Rotate without downtime
+      ApplyImmediately=True,
     )
 
     logger.info(f"Initiated auth token rotation for {replication_group_id}")
@@ -269,49 +292,53 @@ def finish_secret(secret_arn: str, token: str) -> None:
   Step 4: Finalize the rotation.
 
   Moves the AWSPENDING version to AWSCURRENT and removes the old version.
-  This completes the rotation process.
+  This completes the rotation process. Explicitly cleans up the AWSPENDING
+  label as a safety net (known AWS quirk where it doesn't always get removed).
   """
+  metadata = secrets_client.describe_secret(SecretId=secret_arn)
+  current_version = None
+  for version in metadata["VersionIdsToStages"]:
+    if "AWSCURRENT" in metadata["VersionIdsToStages"][version]:
+      current_version = version
+      break
+
+  # If token already has AWSCURRENT, rotation was already completed
+  if current_version == token:
+    logger.info(f"finishSecret: Version {token} already has AWSCURRENT")
+    _remove_pending_stage(secret_arn, token)
+    return
+
+  if current_version is None:
+    logger.warning(
+      f"finishSecret: No version with AWSCURRENT found for secret {secret_arn}"
+    )
+
+  # Move AWSCURRENT to the new version
+  secrets_client.update_secret_version_stage(
+    SecretId=secret_arn,
+    VersionStage="AWSCURRENT",
+    MoveToVersionId=token,
+    RemoveFromVersionId=current_version,
+  )
+  logger.info("finishSecret: Successfully set AWSCURRENT stage to new version")
+
+  # Explicitly remove AWSPENDING as a safety net
+  _remove_pending_stage(secret_arn, token)
+
+
+def _remove_pending_stage(secret_arn: str, version_id: str) -> None:
+  """Remove AWSPENDING label from a version. Non-fatal if already removed."""
   try:
-    # Get current and pending versions
-    current_secret = secrets_client.get_secret_value(
-      SecretId=secret_arn, VersionStage="AWSCURRENT"
-    )
-    pending_secret = secrets_client.get_secret_value(
-      SecretId=secret_arn, VersionStage="AWSPENDING"
-    )
-
-    # Update version stages
-    secrets_client.update_secret_version_stage(
-      SecretId=secret_arn,
-      VersionStage="AWSCURRENT",
-      MoveToVersionId=pending_secret["VersionId"],
-      RemoveFromVersionId=current_secret["VersionId"],
-    )
-
-    logger.info("Successfully moved AWSPENDING to AWSCURRENT")
-
-    # Clean up old version
-    secrets_client.update_secret_version_stage(
-      SecretId=secret_arn,
-      VersionStage="AWSPREVIOUS",
-      MoveToVersionId=current_secret["VersionId"],
-    )
-
-    logger.info("Successfully moved old AWSCURRENT to AWSPREVIOUS")
-
-    # Remove AWSPENDING stage to complete rotation
     secrets_client.update_secret_version_stage(
       SecretId=secret_arn,
       VersionStage="AWSPENDING",
-      RemoveFromVersionId=pending_secret["VersionId"],
+      RemoveFromVersionId=version_id,
     )
-
-    logger.info("Successfully removed AWSPENDING stage")
-
+    logger.info("finishSecret: Explicitly removed AWSPENDING label")
   except Exception as e:
-    error_type = type(e).__name__
-    logger.error(f"Failed to finish secret rotation: {error_type}")
-    raise
+    logger.warning(
+      f"finishSecret: Could not remove AWSPENDING label (non-fatal): {e!s}"
+    )
 
 
 if __name__ == "__main__":
@@ -329,7 +356,11 @@ if __name__ == "__main__":
   if not os.environ.get("VALKEY_REPLICATION_GROUP_ID"):
     os.environ["VALKEY_REPLICATION_GROUP_ID"] = "robosystems-prod-valkey"
 
-  event = {"SecretId": secret_arn, "Step": step, "Token": "AWSCURRENT"}
+  event = {
+    "SecretId": secret_arn,
+    "Step": step,
+    "ClientRequestToken": "test-token-00000000-0000-0000-0000-000000000000",
+  }
 
   result = lambda_handler(event, None)
   print(f"Result: {result}")
