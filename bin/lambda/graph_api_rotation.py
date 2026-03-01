@@ -284,7 +284,9 @@ def finish_secret(arn: str, token: str) -> None:
   """
   Finish the rotation by updating version stages.
 
-  This step promotes the pending secret to current.
+  This step promotes the pending secret to current and explicitly cleans up
+  the AWSPENDING label. Secrets Manager should remove AWSPENDING automatically
+  when AWSCURRENT is moved, but this does not always happen (known AWS quirk).
   """
   metadata = secrets_client.describe_secret(SecretId=arn)
   current_version = None
@@ -293,7 +295,16 @@ def finish_secret(arn: str, token: str) -> None:
       current_version = version
       break
 
-  # Update version stages
+  # If token already has AWSCURRENT, rotation was already completed
+  if current_version == token:
+    logger.info(f"finishSecret: Version {token} already has AWSCURRENT")
+    _remove_pending_stage(arn, token)
+    return
+
+  if current_version is None:
+    logger.warning(f"finishSecret: No version with AWSCURRENT found for secret {arn}")
+
+  # Move AWSCURRENT to the new version
   secrets_client.update_secret_version_stage(
     SecretId=arn,
     VersionStage="AWSCURRENT",
@@ -302,9 +313,11 @@ def finish_secret(arn: str, token: str) -> None:
   )
   logger.info("finishSecret: Successfully set AWSCURRENT stage to new version")
 
+  # Explicitly remove AWSPENDING as a safety net
+  _remove_pending_stage(arn, token)
+
   # Log rotation completion
   try:
-    # Get the new current secret to log the rotation
     new_secret = secrets_client.get_secret_value(
       SecretId=arn, VersionStage="AWSCURRENT"
     )
@@ -315,3 +328,18 @@ def finish_secret(arn: str, token: str) -> None:
     )
   except Exception as e:
     logger.warning(f"Could not log rotation completion details: {e!s}")
+
+
+def _remove_pending_stage(arn: str, version_id: str) -> None:
+  """Remove AWSPENDING label from a version. Non-fatal if already removed."""
+  try:
+    secrets_client.update_secret_version_stage(
+      SecretId=arn,
+      VersionStage="AWSPENDING",
+      RemoveFromVersionId=version_id,
+    )
+    logger.info("finishSecret: Explicitly removed AWSPENDING label")
+  except Exception as e:
+    logger.warning(
+      f"finishSecret: Could not remove AWSPENDING label (non-fatal): {e!s}"
+    )

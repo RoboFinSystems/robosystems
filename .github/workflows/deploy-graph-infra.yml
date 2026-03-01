@@ -27,11 +27,6 @@ on:
         type: string
 
       # Infrastructure Configuration
-      enable_secret_rotation:
-        description: "Enable automatic rotation of API keys"
-        required: false
-        type: string
-        default: "false"
       lambda_image_uri:
         description: "ECR image URI for Lambda functions (container-based deployment)"
         required: true
@@ -104,7 +99,6 @@ jobs:
           # Build parameters
           INFRA_STACK_PARAMS="ParameterKey=Environment,ParameterValue=${{ inputs.environment }} \
                 ParameterKey=SNSAlertEmail,ParameterValue=${{ inputs.aws_sns_alert_email }} \
-                ParameterKey=EnableSecretRotation,ParameterValue=${{ inputs.enable_secret_rotation }} \
                 ParameterKey=LambdaImageUri,ParameterValue=${{ inputs.lambda_image_uri }}"
 
           # Deploy or update the stack

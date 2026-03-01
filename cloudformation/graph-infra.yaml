@@ -11,17 +11,6 @@ Parameters:
     Description: Environment name (prod or staging)
     ConstraintDescription: Must be prod or staging
 
-  # Security Configuration
-  EnableSecretRotation:
-    Type: String
-    Default: "false"
-    AllowedValues:
-      - "true"
-      - "false"
-    Description: Enable automatic rotation of API keys
-    ConstraintDescription: Must be true or false
-  # NOTE: RotationScheduleDays parameter removed - rotation now managed via GitHub Actions
-
   # Lambda Configuration
   LambdaImageUri:
     Type: String
@@ -44,9 +33,6 @@ Parameters:
     Default: GraphInfra
     Description: Component tag for resource identification and billing
     ConstraintDescription: Must be a valid tag value
-
-Conditions:
-  EnableRotation: !Equals [!Ref EnableSecretRotation, "true"]
 
 Resources:
   # ===== DynamoDB Tables =====
@@ -374,7 +360,6 @@ Resources:
   # Lambda function for secret rotation
   SecretRotationLambda:
     Type: AWS::Lambda::Function
-    Condition: EnableRotation
     DeletionPolicy: Delete
     UpdateReplacePolicy: Delete
     Properties:
@@ -409,7 +394,6 @@ Resources:
   # IAM role for rotation Lambda
   SecretRotationRole:
     Type: AWS::IAM::Role
-    Condition: EnableRotation
     DeletionPolicy: Delete
     UpdateReplacePolicy: Retain
     Properties:
@@ -469,15 +453,27 @@ Resources:
         - Key: CreatedBy
           Value: CloudFormation
 
-  # NOTE: Automatic rotation schedule has been removed.
-  # Rotation is now managed via GitHub Actions workflow (secrets-rotation.yml)
-  # which orchestrates rotation + service refresh atomically.
-  # The rotation Lambda is still available for on-demand invocation.
+  # Rotation schedule associates the Lambda with the secret so Secrets Manager
+  # knows which Lambda to invoke. Actual rotation cadence is managed by the
+  # GitHub Actions workflow (secrets-rotation.yml) which orchestrates rotation +
+  # service refresh atomically. The high AutomaticallyAfterDays prevents SM from
+  # auto-triggering outside of the GHA workflow.
+  SecretRotationSchedule:
+    Type: AWS::SecretsManager::RotationSchedule
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+    DependsOn:
+      - LambdaInvokePermission
+    Properties:
+      SecretId: !Ref GraphApiSecret
+      RotationLambdaARN: !GetAtt SecretRotationLambda.Arn
+      RotationRules:
+        AutomaticallyAfterDays: 1000
+      RotateImmediatelyOnUpdate: false
 
   # Permission for Secrets Manager to invoke Lambda
   LambdaInvokePermission:
     Type: AWS::Lambda::Permission
-    Condition: EnableRotation
     DeletionPolicy: Delete
     UpdateReplacePolicy: Retain
     Properties:
