@@ -80,13 +80,17 @@ def create_secret(secret_arn: str, token: str) -> None:
   of the secret without modifying the current AWSCURRENT version.
   """
   try:
-    # Check if AWSPENDING version already exists
+    # Check if AWSPENDING version already exists for THIS rotation token
     try:
-      secrets_client.get_secret_value(SecretId=secret_arn, VersionStage="AWSPENDING")
-      logger.info("AWSPENDING version already exists, skipping creation")
+      secrets_client.get_secret_value(
+        SecretId=secret_arn, VersionStage="AWSPENDING", VersionId=token
+      )
+      logger.info(
+        f"AWSPENDING version already exists for token {token}, skipping creation"
+      )
       return
     except secrets_client.exceptions.ResourceNotFoundException:
-      pass  # Expected - no pending version exists yet
+      pass  # Expected - no pending version exists yet for this token
 
     # Get current secret to understand structure
     current_secret = secrets_client.get_secret_value(
@@ -106,14 +110,15 @@ def create_secret(secret_arn: str, token: str) -> None:
     new_secret_data = current_data.copy()
     new_secret_data["VALKEY_AUTH_TOKEN"] = new_token
 
-    # Store as AWSPENDING version
+    # Store as AWSPENDING version, associated with the rotation token
     secrets_client.put_secret_value(
       SecretId=secret_arn,
+      ClientRequestToken=token,
       SecretString=json.dumps(new_secret_data),
       VersionStages=["AWSPENDING"],
     )
 
-    logger.info("Successfully created new auth token in AWSPENDING version")
+    logger.info(f"Successfully created new auth token in AWSPENDING version {token}")
 
   except Exception as e:
     error_type = type(e).__name__
