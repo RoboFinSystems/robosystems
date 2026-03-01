@@ -605,17 +605,17 @@ Resources:
               Value: dagster-daemon
             - Name: DAGSTER_HOME
               Value: /app/dagster_home
-            # Database Configuration (constructed from direct params + secret)
-            - Name: DATABASE_URL
-              Value: !Sub "postgresql://postgres:{{resolve:secretsmanager:robosystems/${Environment}/postgres:SecretString:POSTGRES_PASSWORD}}@${DatabaseEndpoint}:${DatabasePort}/robosystems?sslmode=require"
+            # Database Configuration (URL constructed at runtime from components + secret)
+            - Name: DATABASE_ENDPOINT
+              Value: !Ref DatabaseEndpoint
+            - Name: DATABASE_PORT
+              Value: !Ref DatabasePort
             - Name: DAGSTER_POSTGRES_HOST
               Value: !Ref DatabaseEndpoint
             - Name: DAGSTER_POSTGRES_PORT
               Value: !Ref DatabasePort
             - Name: DAGSTER_POSTGRES_USER
               Value: "postgres"
-            - Name: DAGSTER_POSTGRES_PASSWORD
-              Value: !Sub "{{resolve:secretsmanager:robosystems/${Environment}/postgres:SecretString:POSTGRES_PASSWORD}}"
             - Name: DAGSTER_POSTGRES_DB
               Value: dagster
             - Name: VALKEY_URL
@@ -653,6 +653,11 @@ Resources:
             # Run coordinator configuration
             - Name: DAGSTER_MAX_CONCURRENT_RUNS
               Value: !Ref MaxConcurrentRuns
+          Secrets:
+            - Name: POSTGRES_PASSWORD
+              ValueFrom: !Sub "arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:robosystems/${Environment}/postgres:POSTGRES_PASSWORD::"
+            - Name: DAGSTER_POSTGRES_PASSWORD
+              ValueFrom: !Sub "arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:robosystems/${Environment}/postgres:POSTGRES_PASSWORD::"
 
   WebserverTaskDefinition:
     Type: AWS::ECS::TaskDefinition
@@ -700,17 +705,17 @@ Resources:
               Value: /app/dagster_home
             - Name: DAGSTER_PORT
               Value: "3000"
-            # Database Configuration (constructed from direct params + secret)
-            - Name: DATABASE_URL
-              Value: !Sub "postgresql://postgres:{{resolve:secretsmanager:robosystems/${Environment}/postgres:SecretString:POSTGRES_PASSWORD}}@${DatabaseEndpoint}:${DatabasePort}/robosystems?sslmode=require"
+            # Database Configuration (URL constructed at runtime from components + secret)
+            - Name: DATABASE_ENDPOINT
+              Value: !Ref DatabaseEndpoint
+            - Name: DATABASE_PORT
+              Value: !Ref DatabasePort
             - Name: DAGSTER_POSTGRES_HOST
               Value: !Ref DatabaseEndpoint
             - Name: DAGSTER_POSTGRES_PORT
               Value: !Ref DatabasePort
             - Name: DAGSTER_POSTGRES_USER
               Value: "postgres"
-            - Name: DAGSTER_POSTGRES_PASSWORD
-              Value: !Sub "{{resolve:secretsmanager:robosystems/${Environment}/postgres:SecretString:POSTGRES_PASSWORD}}"
             - Name: DAGSTER_POSTGRES_DB
               Value: dagster
             - Name: VALKEY_URL
@@ -745,6 +750,11 @@ Resources:
             # Run coordinator configuration (shared config with daemon)
             - Name: DAGSTER_MAX_CONCURRENT_RUNS
               Value: !Ref MaxConcurrentRuns
+          Secrets:
+            - Name: POSTGRES_PASSWORD
+              ValueFrom: !Sub "arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:robosystems/${Environment}/postgres:POSTGRES_PASSWORD::"
+            - Name: DAGSTER_POSTGRES_PASSWORD
+              ValueFrom: !Sub "arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:robosystems/${Environment}/postgres:POSTGRES_PASSWORD::"
           HealthCheck:
             Command:
               [
@@ -801,9 +811,11 @@ Resources:
           Environment:
             - Name: ENVIRONMENT
               Value: !Ref Environment
-            # Database Configuration (constructed from direct params + secret)
-            - Name: DATABASE_URL
-              Value: !Sub "postgresql://postgres:{{resolve:secretsmanager:robosystems/${Environment}/postgres:SecretString:POSTGRES_PASSWORD}}@${DatabaseEndpoint}:${DatabasePort}/robosystems?sslmode=require"
+            # Database Configuration (URL constructed at runtime from components + secret)
+            - Name: DATABASE_ENDPOINT
+              Value: !Ref DatabaseEndpoint
+            - Name: DATABASE_PORT
+              Value: !Ref DatabasePort
             - Name: DAGSTER_HOME
               Value: /app/dagster_home
             - Name: DAGSTER_POSTGRES_HOST
@@ -812,8 +824,6 @@ Resources:
               Value: !Ref DatabasePort
             - Name: DAGSTER_POSTGRES_USER
               Value: "postgres"
-            - Name: DAGSTER_POSTGRES_PASSWORD
-              Value: !Sub "{{resolve:secretsmanager:robosystems/${Environment}/postgres:SecretString:POSTGRES_PASSWORD}}"
             - Name: DAGSTER_POSTGRES_DB
               Value: dagster
             - Name: VALKEY_URL
@@ -838,6 +848,11 @@ Resources:
               Value: !Ref PublicDataCDNURL
             - Name: DAGSTER_MAX_CONCURRENT_RUNS
               Value: !Ref MaxConcurrentRuns
+          Secrets:
+            - Name: POSTGRES_PASSWORD
+              ValueFrom: !Sub "arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:robosystems/${Environment}/postgres:POSTGRES_PASSWORD::"
+            - Name: DAGSTER_POSTGRES_PASSWORD
+              ValueFrom: !Sub "arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:robosystems/${Environment}/postgres:POSTGRES_PASSWORD::"
 
   # ========================================
   # ECS SERVICES
