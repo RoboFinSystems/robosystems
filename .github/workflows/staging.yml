@@ -528,6 +528,8 @@ jobs:
       # Database Configuration (from Postgres stack outputs)
       database_endpoint: ${{ needs.deploy-postgres.outputs.database_endpoint }}
       database_port: ${{ needs.deploy-postgres.outputs.database_port }}
+      # Lambda Configuration (container-based)
+      lambda_image_uri: ${{ needs.build.outputs.lambda_image }}
       # Cache Configuration
       valkey_url: ${{ needs.deploy-valkey.outputs.valkey_url }}
       valkey_sg_id: ${{ needs.deploy-valkey.outputs.valkey_sg_id }}

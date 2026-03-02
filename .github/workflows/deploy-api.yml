@@ -159,6 +159,13 @@ on:
         type: string
         default: "5432"
 
+      # Lambda Configuration (container-based)
+      lambda_image_uri:
+        description: "ECR image URI for Lambda functions (container-based deployment)"
+        required: false
+        type: string
+        default: ""
+
       # Other Configuration
       prometheus_stack_name:
         description: "Name of the Prometheus CloudFormation stack for this environment"
@@ -308,7 +315,8 @@ jobs:
                 ParameterKey=DeploymentBucketArn,ParameterValue=\"${{ inputs.deployment_bucket_arn }}\" \
                 ParameterKey=UserDataBucketArn,ParameterValue=\"${{ inputs.user_data_bucket_arn }}\" \
                 ParameterKey=DatabaseEndpoint,ParameterValue=${{ inputs.database_endpoint }} \
-                ParameterKey=DatabasePort,ParameterValue=${{ inputs.database_port }}"
+                ParameterKey=DatabasePort,ParameterValue=${{ inputs.database_port }} \
+                ParameterKey=LambdaImageUri,ParameterValue=${{ inputs.lambda_image_uri }}"
 
           # Deploy or update the stack
           if [ "$STACK_ACTION" = "create-stack" ]; then

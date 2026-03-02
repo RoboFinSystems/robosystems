@@ -227,18 +227,18 @@ class TestConsolidateParquetFromDisk:
   """Tests for consolidate_parquet_from_disk."""
 
   def test_nonexistent_directory(self):
-    """Returns empty list for nonexistent directory."""
+    """Returns None for nonexistent directory."""
     with tempfile.TemporaryDirectory() as tmpdir:
       result = consolidate_parquet_from_disk(Path(tmpdir), "nodes/NonExistent")
-      assert result == []
+      assert result is None
 
   def test_empty_directory(self):
-    """Returns empty list for directory with no parquet files."""
+    """Returns None for directory with no parquet files."""
     with tempfile.TemporaryDirectory() as tmpdir:
       table_dir = Path(tmpdir) / "nodes" / "Entity"
       table_dir.mkdir(parents=True)
       result = consolidate_parquet_from_disk(Path(tmpdir), "nodes/Entity")
-      assert result == []
+      assert result is None
 
   @staticmethod
   def _write_parquet(table, path):
@@ -257,12 +257,12 @@ class TestConsolidateParquetFromDisk:
       self._write_parquet(table, table_dir / "part_001.parquet")
 
       result = consolidate_parquet_from_disk(Path(tmpdir), "nodes/Entity")
-      assert len(result) == 1
-      read_back = pq.read_table(BytesIO(result[0]))
+      assert result is not None
+      read_back = pq.read_table(BytesIO(result))
       assert read_back.num_rows == 2
 
   def test_multiple_files(self):
-    """Consolidates multiple parquet files into one chunk."""
+    """Consolidates multiple parquet files into one output."""
     with tempfile.TemporaryDirectory() as tmpdir:
       table_dir = Path(tmpdir) / "nodes" / "Entity"
       table_dir.mkdir(parents=True)
@@ -273,8 +273,8 @@ class TestConsolidateParquetFromDisk:
       self._write_parquet(t2, table_dir / "part_002.parquet")
 
       result = consolidate_parquet_from_disk(Path(tmpdir), "nodes/Entity")
-      assert len(result) == 1
-      read_back = pq.read_table(BytesIO(result[0]))
+      assert result is not None
+      read_back = pq.read_table(BytesIO(result))
       assert read_back.num_rows == 2
 
   def test_shared_table_dedup(self):
@@ -289,8 +289,8 @@ class TestConsolidateParquetFromDisk:
       self._write_parquet(t2, table_dir / "part_002.parquet")
 
       result = consolidate_parquet_from_disk(Path(tmpdir), "nodes/Element")
-      assert len(result) == 1
-      read_back = pq.read_table(BytesIO(result[0]))
+      assert result is not None
+      read_back = pq.read_table(BytesIO(result))
       assert read_back.num_rows == 3
 
   def test_corrupted_file_skipped(self):
@@ -305,12 +305,12 @@ class TestConsolidateParquetFromDisk:
       (table_dir / "bad.parquet").write_bytes(b"not a parquet file")
 
       result = consolidate_parquet_from_disk(Path(tmpdir), "nodes/Entity")
-      assert len(result) == 1
-      read_back = pq.read_table(BytesIO(result[0]))
+      assert result is not None
+      read_back = pq.read_table(BytesIO(result))
       assert read_back.num_rows == 1
 
-  def test_all_corrupted_returns_empty(self):
-    """Returns empty list when all files are corrupted."""
+  def test_all_corrupted_returns_none(self):
+    """Returns None when all files are corrupted."""
     with tempfile.TemporaryDirectory() as tmpdir:
       table_dir = Path(tmpdir) / "nodes" / "Entity"
       table_dir.mkdir(parents=True)
@@ -318,10 +318,10 @@ class TestConsolidateParquetFromDisk:
       (table_dir / "bad2.parquet").write_bytes(b"also corrupt")
 
       result = consolidate_parquet_from_disk(Path(tmpdir), "nodes/Entity")
-      assert result == []
+      assert result is None
 
-  def test_chunked_multiple_chunks(self):
-    """With max_files_per_chunk=2 and 5 files, produces 3 chunks."""
+  def test_many_files_consolidated(self):
+    """All files consolidated into single output regardless of count."""
     with tempfile.TemporaryDirectory() as tmpdir:
       table_dir = Path(tmpdir) / "nodes" / "Entity"
       table_dir.mkdir(parents=True)
@@ -330,16 +330,13 @@ class TestConsolidateParquetFromDisk:
         t = pa.table({"identifier": [f"e{i}"], "name": [f"Entity{i}"]})
         self._write_parquet(t, table_dir / f"part_{i:03d}.parquet")
 
-      result = consolidate_parquet_from_disk(
-        Path(tmpdir), "nodes/Entity", max_files_per_chunk=2
-      )
-      assert len(result) == 3  # chunks of 2, 2, 1
-      # Total rows across all chunks equals 5
-      total_rows = sum(pq.read_table(BytesIO(chunk)).num_rows for chunk in result)
-      assert total_rows == 5
+      result = consolidate_parquet_from_disk(Path(tmpdir), "nodes/Entity")
+      assert result is not None
+      read_back = pq.read_table(BytesIO(result))
+      assert read_back.num_rows == 5
 
-  def test_chunked_shared_table_dedup_within_chunk(self):
-    """Shared tables dedup within each chunk but not across chunks."""
+  def test_shared_table_dedup_across_all_files(self):
+    """Shared tables dedup across all files in the batch."""
     with tempfile.TemporaryDirectory() as tmpdir:
       table_dir = Path(tmpdir) / "nodes" / "Element"
       table_dir.mkdir(parents=True)
@@ -354,20 +351,11 @@ class TestConsolidateParquetFromDisk:
       self._write_parquet(t3, table_dir / "part_003.parquet")
       self._write_parquet(t4, table_dir / "part_004.parquet")
 
-      result = consolidate_parquet_from_disk(
-        Path(tmpdir), "nodes/Element", max_files_per_chunk=2
-      )
-      assert len(result) == 2  # chunks of 2 files each
-
-      # Chunk 1 (files 1+2): a, b, c -> 3 rows (b deduped within chunk)
-      chunk1 = pq.read_table(BytesIO(result[0]))
-      assert chunk1.num_rows == 3
-
-      # Chunk 2 (files 3+4): c, d, e -> 3 rows (d deduped within chunk)
-      chunk2 = pq.read_table(BytesIO(result[1]))
-      assert chunk2.num_rows == 3
-
-      # Cross-chunk duplicates (c appears in both chunks) are left for DuckDB
+      result = consolidate_parquet_from_disk(Path(tmpdir), "nodes/Element")
+      assert result is not None
+      read_back = pq.read_table(BytesIO(result))
+      # All duplicates deduped: a, b, c, d, e = 5 unique rows
+      assert read_back.num_rows == 5
 
 
 @pytest.mark.unit

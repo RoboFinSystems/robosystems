@@ -1,22 +1,20 @@
 """
-Graph API Key Rotation Lambda Function
+API Key Rotation Lambda Function
 
-Implements AWS Secrets Manager rotation for Graph API keys (used by all backends).
-Generates new API keys and stores them securely.
+Generic Secrets Manager rotation for API keys. Handles:
+- Graph API keys (JSON with GRAPH_API_KEY, ENVIRONMENT fields)
+- Admin API keys (plain string)
 
 This function handles the 4-step rotation process:
-1. createSecret - Generate new API keys
+1. createSecret - Generate new credentials
 2. setSecret - No action needed (keys are validated at runtime)
-3. testSecret - Verify the new keys are valid
+3. testSecret - Verify the new credentials are valid
 4. finishSecret - Complete the rotation
-
-Supports both:
-- Graph API keys (GRAPH_API_KEY) - unified authentication for all backends
-- Neo4j credentials (NEO4J_PASSWORD for graph-neo4j)
 """
 
 import json
 import logging
+import os
 import secrets
 import string
 from datetime import UTC, datetime
@@ -27,13 +25,16 @@ import boto3
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
-# Initialize AWS clients
-secrets_client = boto3.client("secretsmanager")
+# Initialize AWS clients (SECRETS_MANAGER_ENDPOINT enables VPC endpoint support)
+_endpoint_url = os.environ.get("SECRETS_MANAGER_ENDPOINT")
+secrets_client = boto3.client(
+  "secretsmanager", endpoint_url=_endpoint_url if _endpoint_url else None
+)
 
 
 def generate_api_key(prefix: str = "lbug", length: int = 32) -> str:
   """
-  Generate a secure API key.
+  Generate a secure API key with a prefix.
 
   Args:
       prefix: Prefix for the API key
@@ -42,41 +43,39 @@ def generate_api_key(prefix: str = "lbug", length: int = 32) -> str:
   Returns:
       A secure API key string
   """
-  # Use a secure random generator
   alphabet = string.ascii_letters + string.digits
   random_part = "".join(secrets.choice(alphabet) for _ in range(length))
   return f"{prefix}_{random_part}"
 
 
-def generate_password(length: int = 32) -> str:
+def generate_plain_key(length: int = 64) -> str:
   """
-  Generate a secure password for Neo4j.
+  Generate a secure plain API key (no prefix, alphanumeric only).
 
   Args:
-      length: Length of the password
+      length: Length of the key
 
   Returns:
-      A secure password string
+      A secure alphanumeric string
   """
-  # Include special characters for stronger passwords
-  alphabet = string.ascii_letters + string.digits + "!@#$%^&*()-_=+[]{}|;:,.<>?"
-  password = "".join(secrets.choice(alphabet) for _ in range(length))
-  return password
+  alphabet = string.ascii_letters + string.digits
+  return "".join(secrets.choice(alphabet) for _ in range(length))
 
 
-def is_neo4j_secret(secret_dict: dict[str, Any]) -> bool:
+def _detect_secret_type(secret_string: str) -> str:
   """
-  Determine if this is a Neo4j secret based on its structure.
+  Detect the type of secret from its current value.
 
-  Args:
-      secret_dict: The secret dictionary
-
-  Returns:
-      True if this is a Neo4j secret, False if it's a Graph API key secret
+  Returns one of: 'graph_api', 'plain'
   """
-  # Neo4j secrets have NEO4J_PASSWORD and TIER fields
-  # Graph API secrets have GRAPH_API_KEY
-  return "NEO4J_PASSWORD" in secret_dict or "TIER" in secret_dict
+  try:
+    secret_dict = json.loads(secret_string)
+    if isinstance(secret_dict, dict) and "GRAPH_API_KEY" in secret_dict:
+      return "graph_api"
+  except (json.JSONDecodeError, TypeError):
+    # Non-JSON or invalid format — treat as plain string API key
+    pass
+  return "plain"
 
 
 def lambda_handler(event: dict[str, Any], context: Any) -> None:
@@ -128,48 +127,45 @@ def lambda_handler(event: dict[str, Any], context: Any) -> None:
 
 def create_secret(arn: str, token: str) -> None:
   """
-  Generate new credentials (API keys for LadybugDB or password for Neo4j).
+  Generate new credentials based on the current secret type.
 
   This step generates new credentials and stores them as the AWSPENDING version.
   """
-  # Get the current secret to preserve the structure
+  # Get the current secret to determine type and preserve structure
   try:
     current_secret = secrets_client.get_secret_value(
       SecretId=arn, VersionStage="AWSCURRENT"
     )
-    current_dict = json.loads(current_secret["SecretString"])
-  except Exception:
-    # If no current secret exists, create a new structure
-    current_dict = {}
+    current_string = current_secret["SecretString"]
+  except Exception as e:
+    logger.error(f"createSecret: Failed to retrieve current secret: {e!s}")
+    raise
 
-  # Determine secret type and generate appropriate credentials
-  if is_neo4j_secret(current_dict):
-    # Neo4j secret - rotate password
-    tier = current_dict.get("TIER", "unknown")
+  secret_type = _detect_secret_type(current_string)
+
+  if secret_type == "graph_api":
+    current_dict = json.loads(current_string)
     environment = current_dict.get("ENVIRONMENT", "unknown")
-    new_secret = {
-      "NEO4J_PASSWORD": generate_password(),
-      "TIER": tier,
-      "ENVIRONMENT": environment,
-      "GENERATED_AT": datetime.now(UTC).isoformat(),
-    }
-    logger.info(f"createSecret: Generating new Neo4j password for tier {tier}")
-  else:
-    # Graph API key secret
-    environment = current_dict.get("ENVIRONMENT", "unknown")
-    new_secret = {
-      "GRAPH_API_KEY": generate_api_key(f"graph_{environment}", 64),
-      "ENVIRONMENT": environment,
-      "GENERATED_AT": datetime.now(UTC).isoformat(),
-      "rotation_version": token,
-    }
+    new_secret_string = json.dumps(
+      {
+        "GRAPH_API_KEY": generate_api_key(f"graph_{environment}", 64),
+        "ENVIRONMENT": environment,
+        "GENERATED_AT": datetime.now(UTC).isoformat(),
+        "rotation_version": token,
+      }
+    )
     logger.info("createSecret: Generating new Graph API key")
+
+  else:
+    # Plain string API key (admin keys, etc.)
+    new_secret_string = generate_plain_key(64)
+    logger.info("createSecret: Generating new plain API key")
 
   # Put the secret
   secrets_client.put_secret_value(
     SecretId=arn,
     ClientRequestToken=token,
-    SecretString=json.dumps(new_secret),
+    SecretString=new_secret_string,
     VersionStages=["AWSPENDING"],
   )
   logger.info("createSecret: Successfully generated new credentials")
@@ -192,92 +188,82 @@ def test_secret(arn: str, token: str) -> None:
   Test the pending secret.
 
   This step verifies that the new credentials are properly formatted and valid.
-  In a production environment, this could make test API calls to verify the credentials work.
   """
   # Get the pending secret
   pending_secret = secrets_client.get_secret_value(
     SecretId=arn, VersionStage="AWSPENDING", VersionId=token
   )
-  pending_dict = json.loads(pending_secret["SecretString"])
+  pending_string = pending_secret["SecretString"]
+  secret_type = _detect_secret_type(pending_string)
 
-  # Determine secret type and validate accordingly
-  if is_neo4j_secret(pending_dict):
-    # Validate Neo4j password
-    if "NEO4J_PASSWORD" not in pending_dict:
-      raise ValueError("Missing required key: NEO4J_PASSWORD")
-
-    password = pending_dict["NEO4J_PASSWORD"]
-    if not password or not isinstance(password, str):
-      raise ValueError("Invalid password format for NEO4J_PASSWORD")
-
-    # Validate password strength (at least 16 characters)
-    if len(password) < 16:
-      raise ValueError("Password must be at least 16 characters")
-
-    # Validate required metadata
-    if "TIER" not in pending_dict:
-      raise ValueError("Missing TIER field for Neo4j secret")
-    if "ENVIRONMENT" not in pending_dict:
-      raise ValueError("Missing ENVIRONMENT field")
-
+  if secret_type == "graph_api":
+    pending_dict = json.loads(pending_string)
+    _validate_graph_api_key(pending_dict)
     logger.info(
-      f"testSecret: Successfully validated new Neo4j password for tier {pending_dict['TIER']}"
+      f"testSecret: Successfully validated new Graph API key for {pending_dict.get('ENVIRONMENT', 'unknown')}"
     )
+
   else:
-    # Validate Graph API key
-    if "GRAPH_API_KEY" not in pending_dict:
-      raise ValueError("Missing required key: GRAPH_API_KEY")
+    # Plain string API key
+    _validate_plain_key(pending_string)
+    logger.info("testSecret: Successfully validated new plain API key")
 
-    api_key = pending_dict["GRAPH_API_KEY"]
-    if not api_key or not isinstance(api_key, str):
-      raise ValueError("Invalid API key format for GRAPH_API_KEY")
 
-    # Validate minimum total key length (should be at least 70 chars for graph_env_64chars)
-    if len(api_key) < 70:
-      raise ValueError(f"API key too short: {len(api_key)} chars, expected at least 70")
+def _validate_graph_api_key(pending_dict: dict[str, Any]) -> None:
+  """Validate a Graph API key secret."""
+  if "GRAPH_API_KEY" not in pending_dict:
+    raise ValueError("Missing required key: GRAPH_API_KEY")
 
-    # Validate key format (graph_environment_randomstring)
-    if "_" not in api_key:
-      raise ValueError("Invalid API key format: missing underscore")
+  api_key = pending_dict["GRAPH_API_KEY"]
+  if not api_key or not isinstance(api_key, str):
+    raise ValueError("Invalid API key format for GRAPH_API_KEY")
 
-    parts = api_key.split("_", 2)  # Split into max 3 parts: graph, environment, random
-    if len(parts) != 3:
-      raise ValueError(
-        "Invalid API key format: expected graph_environment_randomstring"
-      )
+  # Validate minimum total key length (should be at least 70 chars for graph_env_64chars)
+  if len(api_key) < 70:
+    raise ValueError(f"API key too short: {len(api_key)} chars, expected at least 70")
 
-    # Validate prefix
-    if parts[0] != "graph":
-      raise ValueError(f"Invalid API key prefix: expected 'graph', got '{parts[0]}'")
+  # Validate key format (graph_environment_randomstring)
+  if "_" not in api_key:
+    raise ValueError("Invalid API key format: missing underscore")
 
-    # Validate environment
-    valid_environments = ["prod", "staging"]
-    if parts[1] not in valid_environments:
-      raise ValueError(
-        f"Invalid environment: expected one of {valid_environments}, got '{parts[1]}'"
-      )
+  parts = api_key.split("_", 2)  # Split into max 3 parts: graph, environment, random
+  if len(parts) != 3:
+    raise ValueError("Invalid API key format: expected graph_environment_randomstring")
 
-    # Validate random part has sufficient length (should be 64 chars)
-    random_part = parts[2]
-    if len(random_part) < 64:
-      raise ValueError(
-        f"Random part too short: {len(random_part)} chars, expected at least 64"
-      )
+  if parts[0] != "graph":
+    raise ValueError(f"Invalid API key prefix: expected 'graph', got '{parts[0]}'")
 
-    # Validate random part contains only alphanumeric characters and allowed symbols
-    if not all(c.isalnum() or c in "-_" for c in random_part):
-      raise ValueError(
-        "Invalid API key format: random part must be alphanumeric with - or _"
-      )
+  valid_environments = ["prod", "staging"]
+  if parts[1] not in valid_environments:
+    raise ValueError(
+      f"Invalid environment: expected one of {valid_environments}, got '{parts[1]}'"
+    )
 
-    logger.info(f"testSecret: Successfully validated new Graph API key for {parts[1]}")
+  random_part = parts[2]
+  if len(random_part) < 64:
+    raise ValueError(
+      f"Random part too short: {len(random_part)} chars, expected at least 64"
+    )
 
-  # Validate metadata
+  if not all(c.isalnum() or c in "-_" for c in random_part):
+    raise ValueError(
+      "Invalid API key format: random part must be alphanumeric with - or _"
+    )
+
   if "GENERATED_AT" not in pending_dict:
     raise ValueError("Missing GENERATED_AT timestamp")
 
-  # In production, you could make test API calls here to verify the credentials work
-  # For now, we just validate the format
+
+def _validate_plain_key(key: str) -> None:
+  """Validate a plain string API key."""
+  if not key or not isinstance(key, str):
+    raise ValueError("Invalid plain API key: empty or not a string")
+
+  if len(key) < 32:
+    raise ValueError(f"Plain API key too short: {len(key)} chars, expected at least 32")
+
+  if not all(c.isalnum() for c in key):
+    raise ValueError("Plain API key must be alphanumeric only")
 
 
 def finish_secret(arn: str, token: str) -> None:
@@ -321,10 +307,14 @@ def finish_secret(arn: str, token: str) -> None:
     new_secret = secrets_client.get_secret_value(
       SecretId=arn, VersionStage="AWSCURRENT"
     )
-    secret_dict = json.loads(new_secret["SecretString"])
-    secret_type = "Neo4j password" if is_neo4j_secret(secret_dict) else "Graph API key"
+    secret_string = new_secret["SecretString"]
+    secret_type = _detect_secret_type(secret_string)
+    type_label = {
+      "graph_api": "Graph API key",
+      "plain": "API key",
+    }
     logger.info(
-      f"{secret_type} rotation completed successfully. Generated at: {secret_dict.get('GENERATED_AT', 'unknown')}"
+      f"{type_label.get(secret_type, 'Secret')} rotation completed successfully"
     )
   except Exception as e:
     logger.warning(f"Could not log rotation completion details: {e!s}")

@@ -357,7 +357,7 @@ Resources:
         - Key: CreatedBy
           Value: CloudFormation
 
-  # Lambda function for secret rotation
+  # Lambda function for Graph API secret rotation
   SecretRotationLambda:
     Type: AWS::Lambda::Function
     DeletionPolicy: Delete
@@ -378,7 +378,7 @@ Resources:
         ImageUri: !Ref LambdaImageUri
       ImageConfig:
         Command:
-          - graph_api_rotation.lambda_handler
+          - api_key_rotation.lambda_handler
       Tags:
         - Key: Name
           Value: !Sub "${AWS::StackName}-api-secret-rotation"

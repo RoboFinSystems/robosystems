@@ -22,7 +22,7 @@ RUN uv export --only-group lambda --no-hashes --frozen > requirements.txt && \
 
 # Copy all Lambda function code
 # Each function has a lambda_handler entry point
-COPY bin/lambda/graph_api_rotation.py ./
+COPY bin/lambda/api_key_rotation.py ./
 COPY bin/lambda/graph_volume_detachment.py ./
 COPY bin/lambda/graph_volume_manager.py ./
 COPY bin/lambda/graph_volume_monitor.py ./
