@@ -27,7 +27,6 @@ from robosystems.adapters.sec.processors import (
   process_single_filing_to_memory,
   zip_and_upload,
 )
-from robosystems.adapters.sec.processors.constants import SEC_CONSOLIDATION_CHUNK_SIZE
 from robosystems.config import env
 from robosystems.config.storage.shared import (
   DataSourceType,
@@ -62,9 +61,10 @@ def sec_processed_filings(
 ) -> MaterializeResult:
   """Process one batch of SEC filings, flush to S3, then exit.
 
-  Processes up to batch_size pending SourceFiles (default 1000), writes
-  part files to S3, marks them success, and exits. The sensor re-triggers
-  if more pending files remain, enabling natural memory release between runs.
+  Processes up to batch_size pending SourceFiles (default 250), writes
+  one part file per table to S3, marks them success, and exits. The sensor
+  re-triggers if more pending files remain, enabling natural memory release
+  between runs.
 
   Spot Resilience:
   - Each filing's results are cached to S3 as a zip immediately after processing
@@ -74,15 +74,16 @@ def sec_processed_filings(
     the cache covers them on the next run)
 
   Memory Management:
-  - One batch per run (default 1000 filings), then container exits
-  - Part-file output: batch writes part_{uuid}.parquet files per table
+  - One batch per run (default 250 filings), then container exits
+  - Small batch size keeps Arrow concat under ~325 MB peak (Label at ~1.3 MB/file)
+  - One part file per table per batch (no chunking needed)
   - Shared tables (Element, Label, etc.) deduped within batch via pure Arrow
-  - DuckDB handles final cross-part-file dedup during staging
+  - DuckDB handles final cross-batch dedup during staging
   - del + gc.collect() after each table upload to force memory release
 
   Output Structure (part files):
     s3://bucket/sec/processed/filed=2024-Q1/nodes/Entity/part_a1b2c3d4e5f6.parquet
-    - Multiple part files per table per quarter (additive, no merge)
+    - One part file per table per batch, multiple batches per quarter
     - UUID naming prevents collisions across runs
     - DuckDB reads both old format (TABLE.parquet) and new (TABLE/*.parquet)
 
@@ -231,14 +232,10 @@ def sec_processed_filings(
   tables_uploaded = 0  # Track number of table files uploaded
 
   def flush_to_s3() -> int:
-    """Consolidate disk buffer into part files on S3, mark success.
+    """Consolidate disk buffer into one part file per table on S3, mark success.
 
-    Part-file output model (no consolidation with existing S3 data):
-    - For each table: concat batch's parquets (Arrow only) -> upload as part file
-    - Shared tables deduped within the batch via pure Arrow (no Pandas)
-    - S3 key: entity_type/table_name/part_{uuid_hex12}.parquet
-    - UUID naming prevents collisions across runs
-    - del + gc.collect() after each table to force memory release
+    For each table: concat all parquets in the batch (Arrow) -> upload as
+    a single part file. Shared tables deduped within the batch via pure Arrow.
 
     Crash resilience: If the job crashes after S3 upload but before mark_success,
     orphan part files remain on S3 and filings stay "pending". On re-run, new
@@ -261,42 +258,31 @@ def sec_processed_filings(
         table_keys.add(table_key)
 
     for table_key in sorted(table_keys):
-      # Consolidate in chunks to limit peak Arrow memory.
-      # Each chunk produces a separate part file on S3.
-      parquet_chunks = consolidate_parquet_from_disk(
-        work_dir, table_key, max_files_per_chunk=SEC_CONSOLIDATION_CHUNK_SIZE
-      )
-      if not parquet_chunks:
+      consolidated = consolidate_parquet_from_disk(work_dir, table_key)
+      if not consolidated:
         continue
 
       entity_type, table_name = table_key.split("/", 1)
+      part_id = uuid.uuid4().hex[:12]
+      s3_key = get_processed_key(
+        DataSourceType.SEC,
+        "processed",
+        f"filed={partition_date}",
+        entity_type,
+        table_name,
+        f"part_{part_id}.parquet",
+      )
 
-      for chunk_bytes in parquet_chunks:
-        part_id = uuid.uuid4().hex[:12]
-        # Part file under table subdirectory: TABLE/part_{id}.parquet
-        s3_key = get_processed_key(
-          DataSourceType.SEC,
-          "processed",
-          f"filed={partition_date}",
-          entity_type,
-          table_name,
-          f"part_{part_id}.parquet",
-        )
+      atomic_s3_upload(
+        s3_client=s3.client,
+        bucket=processed_bucket,
+        final_key=s3_key,
+        data=consolidated,
+      )
+      tables_uploaded += 1
+      context.log.info(f"Uploaded: {s3_key} ({len(consolidated):,} bytes)")
 
-        # Upload atomically (temp file + copy pattern)
-        atomic_s3_upload(
-          s3_client=s3.client,
-          bucket=processed_bucket,
-          final_key=s3_key,
-          data=chunk_bytes,
-        )
-        tables_uploaded += 1
-        context.log.info(f"Uploaded: {s3_key} ({len(chunk_bytes):,} bytes)")
-
-        # Release memory for this chunk before processing the next
-        del chunk_bytes
-
-      del parquet_chunks
+      del consolidated
       gc.collect()
 
     # Mark all pending filings as success (data is now safely in S3)
