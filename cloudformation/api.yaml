@@ -1163,7 +1163,7 @@ Resources:
     Type: AWS::IAM::Role
     Condition: HasLambdaImage
     DeletionPolicy: Delete
-    UpdateReplacePolicy: Retain
+    UpdateReplacePolicy: Delete
     Properties:
       RoleName: !Sub "robosystems-api-${Environment}-admin-key-rotation-role"
       AssumeRolePolicyDocument:
@@ -1226,7 +1226,7 @@ Resources:
     Type: AWS::Lambda::Permission
     Condition: HasLambdaImage
     DeletionPolicy: Delete
-    UpdateReplacePolicy: Retain
+    UpdateReplacePolicy: Delete
     Properties:
       FunctionName: !Ref ApiKeyRotationLambda
       Action: lambda:InvokeFunction
@@ -1238,7 +1238,7 @@ Resources:
     Type: AWS::SecretsManager::RotationSchedule
     Condition: HasLambdaImage
     DeletionPolicy: Delete
-    UpdateReplacePolicy: Retain
+    UpdateReplacePolicy: Delete
     DependsOn:
       - ApiKeyRotationInvokePermission
     Properties:

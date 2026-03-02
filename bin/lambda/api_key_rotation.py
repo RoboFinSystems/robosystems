@@ -4,7 +4,6 @@ API Key Rotation Lambda Function
 Generic Secrets Manager rotation for API keys. Handles:
 - Graph API keys (JSON with GRAPH_API_KEY, ENVIRONMENT fields)
 - Admin API keys (plain string)
-- Neo4j credentials (JSON with NEO4J_PASSWORD, TIER fields)
 
 This function handles the 4-step rotation process:
 1. createSecret - Generate new credentials
@@ -15,6 +14,7 @@ This function handles the 4-step rotation process:
 
 import json
 import logging
+import os
 import secrets
 import string
 from datetime import UTC, datetime
@@ -25,8 +25,11 @@ import boto3
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
-# Initialize AWS clients
-secrets_client = boto3.client("secretsmanager")
+# Initialize AWS clients (SECRETS_MANAGER_ENDPOINT enables VPC endpoint support)
+_endpoint_url = os.environ.get("SECRETS_MANAGER_ENDPOINT")
+secrets_client = boto3.client(
+  "secretsmanager", endpoint_url=_endpoint_url if _endpoint_url else None
+)
 
 
 def generate_api_key(prefix: str = "lbug", length: int = 32) -> str:
@@ -59,35 +62,18 @@ def generate_plain_key(length: int = 64) -> str:
   return "".join(secrets.choice(alphabet) for _ in range(length))
 
 
-def generate_password(length: int = 32) -> str:
-  """
-  Generate a secure password for Neo4j.
-
-  Args:
-      length: Length of the password
-
-  Returns:
-      A secure password string
-  """
-  alphabet = string.ascii_letters + string.digits + "!@#$%^&*()-_=+[]{}|;:,.<>?"
-  password = "".join(secrets.choice(alphabet) for _ in range(length))
-  return password
-
-
 def _detect_secret_type(secret_string: str) -> str:
   """
   Detect the type of secret from its current value.
 
-  Returns one of: 'neo4j', 'graph_api', 'plain'
+  Returns one of: 'graph_api', 'plain'
   """
   try:
     secret_dict = json.loads(secret_string)
-    if isinstance(secret_dict, dict):
-      if "NEO4J_PASSWORD" in secret_dict or "TIER" in secret_dict:
-        return "neo4j"
-      if "GRAPH_API_KEY" in secret_dict:
-        return "graph_api"
+    if isinstance(secret_dict, dict) and "GRAPH_API_KEY" in secret_dict:
+      return "graph_api"
   except (json.JSONDecodeError, TypeError):
+    # Non-JSON or invalid format — treat as plain string API key
     pass
   return "plain"
 
@@ -151,26 +137,13 @@ def create_secret(arn: str, token: str) -> None:
       SecretId=arn, VersionStage="AWSCURRENT"
     )
     current_string = current_secret["SecretString"]
-  except Exception:
-    current_string = ""
+  except Exception as e:
+    logger.error(f"createSecret: Failed to retrieve current secret: {e!s}")
+    raise
 
   secret_type = _detect_secret_type(current_string)
 
-  if secret_type == "neo4j":
-    current_dict = json.loads(current_string)
-    tier = current_dict.get("TIER", "unknown")
-    environment = current_dict.get("ENVIRONMENT", "unknown")
-    new_secret_string = json.dumps(
-      {
-        "NEO4J_PASSWORD": generate_password(),
-        "TIER": tier,
-        "ENVIRONMENT": environment,
-        "GENERATED_AT": datetime.now(UTC).isoformat(),
-      }
-    )
-    logger.info(f"createSecret: Generating new Neo4j password for tier {tier}")
-
-  elif secret_type == "graph_api":
+  if secret_type == "graph_api":
     current_dict = json.loads(current_string)
     environment = current_dict.get("ENVIRONMENT", "unknown")
     new_secret_string = json.dumps(
@@ -223,14 +196,7 @@ def test_secret(arn: str, token: str) -> None:
   pending_string = pending_secret["SecretString"]
   secret_type = _detect_secret_type(pending_string)
 
-  if secret_type == "neo4j":
-    pending_dict = json.loads(pending_string)
-    _validate_neo4j(pending_dict)
-    logger.info(
-      f"testSecret: Successfully validated new Neo4j password for tier {pending_dict['TIER']}"
-    )
-
-  elif secret_type == "graph_api":
+  if secret_type == "graph_api":
     pending_dict = json.loads(pending_string)
     _validate_graph_api_key(pending_dict)
     logger.info(
@@ -241,26 +207,6 @@ def test_secret(arn: str, token: str) -> None:
     # Plain string API key
     _validate_plain_key(pending_string)
     logger.info("testSecret: Successfully validated new plain API key")
-
-
-def _validate_neo4j(pending_dict: dict[str, Any]) -> None:
-  """Validate a Neo4j password secret."""
-  if "NEO4J_PASSWORD" not in pending_dict:
-    raise ValueError("Missing required key: NEO4J_PASSWORD")
-
-  password = pending_dict["NEO4J_PASSWORD"]
-  if not password or not isinstance(password, str):
-    raise ValueError("Invalid password format for NEO4J_PASSWORD")
-
-  if len(password) < 16:
-    raise ValueError("Password must be at least 16 characters")
-
-  if "TIER" not in pending_dict:
-    raise ValueError("Missing TIER field for Neo4j secret")
-  if "ENVIRONMENT" not in pending_dict:
-    raise ValueError("Missing ENVIRONMENT field")
-  if "GENERATED_AT" not in pending_dict:
-    raise ValueError("Missing GENERATED_AT timestamp")
 
 
 def _validate_graph_api_key(pending_dict: dict[str, Any]) -> None:
@@ -364,7 +310,6 @@ def finish_secret(arn: str, token: str) -> None:
     secret_string = new_secret["SecretString"]
     secret_type = _detect_secret_type(secret_string)
     type_label = {
-      "neo4j": "Neo4j password",
       "graph_api": "Graph API key",
       "plain": "API key",
     }
