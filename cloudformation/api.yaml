@@ -204,6 +204,12 @@ Parameters:
     Description: "PostgreSQL database port"
     Default: "5432"
 
+  # Lambda Configuration (container-based)
+  LambdaImageUri:
+    Type: String
+    Description: ECR image URI for Lambda functions (container-based deployment)
+    Default: ""
+
   # S3 Bucket Configuration (from S3 stack outputs)
   SharedProcessedBucketArn:
     Type: String
@@ -218,6 +224,7 @@ Parameters:
 Conditions:
   HasObservabilityStack: !Not [!Equals [!Ref PrometheusStackName, ""]]
   IsProduction: !Equals [!Ref Environment, "prod"]
+  HasLambdaImage: !Not [!Equals [!Ref LambdaImageUri, ""]]
   # Access mode conditions
   HasDomain: !Not [!Equals [!Ref DomainName, ""]]
   IsPublicWithDomain: !Equals [!Ref ApiAccessMode, "public"]
@@ -1111,6 +1118,135 @@ Resources:
       Threshold: 5
       ComparisonOperator: GreaterThanThreshold
       TreatMissingData: notBreaching
+
+  # ===========================================
+  # API Key Rotation Lambda
+  # ===========================================
+  # Admin API key rotation Lambda.
+  # Only created when LambdaImageUri is provided (i.e., during full deployments).
+
+  ApiKeyRotationLambda:
+    Type: AWS::Lambda::Function
+    Condition: HasLambdaImage
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      FunctionName: !Sub "${AWS::StackName}-admin-key-rotation"
+      Description: "Admin API Key Rotation Lambda - container-based deployment"
+      PackageType: Image
+      Architectures:
+        - arm64
+      Role: !GetAtt ApiKeyRotationRole.Arn
+      Timeout: 60
+      MemorySize: 128
+      Environment:
+        Variables:
+          SECRETS_MANAGER_ENDPOINT: !Sub https://secretsmanager.${AWS::Region}.amazonaws.com
+      Code:
+        ImageUri: !Ref LambdaImageUri
+      ImageConfig:
+        Command:
+          - api_key_rotation.lambda_handler
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-admin-key-rotation"
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: !Ref ServiceTag
+        - Key: Component
+          Value: !Ref ComponentTag
+        - Key: CreatedBy
+          Value: CloudFormation
+
+  ApiKeyRotationRole:
+    Type: AWS::IAM::Role
+    Condition: HasLambdaImage
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+    Properties:
+      RoleName: !Sub "robosystems-api-${Environment}-admin-key-rotation-role"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: ApiKeyRotationPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - secretsmanager:DescribeSecret
+                  - secretsmanager:GetSecretValue
+                  - secretsmanager:PutSecretValue
+                  - secretsmanager:UpdateSecretVersionStage
+                Resource: !Ref AdminKeySecret
+              # KMS permissions for secret rotation
+              - Effect: Allow
+                Action:
+                  - kms:Decrypt
+                  - kms:DescribeKey
+                  - kms:GenerateDataKey
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:kms:${AWS::Region}:${AWS::AccountId}:alias/aws/secretsmanager"
+                Condition:
+                  StringEquals:
+                    "kms:ViaService":
+                      - !Sub "secretsmanager.${AWS::Region}.amazonaws.com"
+              # ECR permissions for container-based Lambda
+              - Effect: Allow
+                Action:
+                  - ecr:GetAuthorizationToken
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - ecr:BatchGetImage
+                  - ecr:GetDownloadUrlForLayer
+                Resource: !Sub "arn:${AWS::Partition}:ecr:${AWS::Region}:${AWS::AccountId}:repository/robosystems"
+      Tags:
+        - Key: Name
+          Value: !Sub "robosystems-api-${Environment}-admin-key-rotation-role"
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: !Ref ServiceTag
+        - Key: Component
+          Value: !Ref ComponentTag
+        - Key: CreatedBy
+          Value: CloudFormation
+
+  # Permission for Secrets Manager to invoke the rotation Lambda
+  ApiKeyRotationInvokePermission:
+    Type: AWS::Lambda::Permission
+    Condition: HasLambdaImage
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+    Properties:
+      FunctionName: !Ref ApiKeyRotationLambda
+      Action: lambda:InvokeFunction
+      Principal: secretsmanager.amazonaws.com
+
+  # Rotation schedule — cadence managed by secrets-rotation.yml workflow;
+  # high AutomaticallyAfterDays prevents SM from auto-triggering outside the workflow.
+  AdminKeyRotationSchedule:
+    Type: AWS::SecretsManager::RotationSchedule
+    Condition: HasLambdaImage
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+    DependsOn:
+      - ApiKeyRotationInvokePermission
+    Properties:
+      SecretId: !Ref AdminKeySecret
+      RotationLambdaARN: !GetAtt ApiKeyRotationLambda.Arn
+      RotationRules:
+        AutomaticallyAfterDays: 1000
+      RotateImmediatelyOnUpdate: false
 
   # ========================================
   # SERVICE DISCOVERY (Internal DNS)
