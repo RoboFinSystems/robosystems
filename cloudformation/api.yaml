@@ -228,7 +228,6 @@ Conditions:
   # Access mode conditions
   HasDomain: !Not [!Equals [!Ref DomainName, ""]]
   IsPublicWithDomain: !Equals [!Ref ApiAccessMode, "public"]
-  IsPublicHttp: !Equals [!Ref ApiAccessMode, "public-http"]
   IsInternal: !Equals [!Ref ApiAccessMode, "internal"]
   # Combined condition: internet-facing ALB (public or public-http)
   IsInternetFacing: !Or
@@ -468,9 +467,9 @@ Resources:
                 Condition:
                   ForAnyValue:StringEquals:
                     aws-marketplace:ProductId:
-                      - prod-5ukwuglpt66kg  # Claude Sonnet 4.6
-                      - prod-mxcfnwvpd6kb4  # Claude Sonnet 4.5
-                      - prod-4pmewlybdftbs   # Claude Sonnet 4
+                      - prod-5ukwuglpt66kg # Claude Sonnet 4.6
+                      - prod-mxcfnwvpd6kb4 # Claude Sonnet 4.5
+                      - prod-4pmewlybdftbs # Claude Sonnet 4
 
   # ECS Task Execution Role
   ApiTaskExecutionRole:
@@ -1343,72 +1342,6 @@ Outputs:
     Export:
       Name: !Sub ${AWS::StackName}-AdminKeySecretArn
 
-  AdminKeyInstructions:
-    Condition: IsPublicWithDomain
-    Description: Instructions for using the admin key (public mode - SSM tunnel required)
-    Value: !Sub |
-      Admin key has been created in AWS Secrets Manager.
-
-      IMPORTANT: Admin API is NOT accessible via public internet.
-      You must use SSM tunnel for admin operations.
-
-      1. Start the internal tunnel:
-         ./bin/tools/tunnels.sh ${Environment} api-internal
-
-      2. Use the admin CLI with --tunnel flag:
-         just admin ${Environment} --tunnel subscriptions list
-
-      Or manually:
-         curl -H "Authorization: Bearer <KEY>" http://localhost:8000/admin/v1/subscriptions
-
-      To retrieve the key:
-      aws secretsmanager get-secret-value --secret-id robosystems/${Environment}/admin --region ${AWS::Region}
-
-      Public API endpoint (non-admin): https://${DomainName}
-
-  PublicHttpAccessInstructions:
-    Condition: IsPublicHttp
-    Description: Instructions for accessing public API via ALB DNS (HTTP only)
-    Value: !Sub |
-      This API is configured for public HTTP access (no domain/TLS).
-
-      API endpoint: http://${ApiALB.DNSName}
-
-      ADMIN ACCESS (via SSM tunnel only):
-      1. Start tunnel: ./bin/tools/tunnels.sh ${Environment} api-internal
-      2. Use CLI: just admin ${Environment} --tunnel subscriptions list
-
-      Admin key location:
-      aws secretsmanager get-secret-value --secret-id robosystems/${Environment}/admin --region ${AWS::Region}
-
-      LIMITATIONS (public-http mode):
-      - No TLS encryption - credentials/tokens sent in plain text
-      - Admin API blocked on public endpoint (use SSM tunnel)
-      - OAuth integrations (Google, QuickBooks) will NOT work - providers require HTTPS redirect URLs
-
-  InternalAccessInstructions:
-    Condition: IsInternal
-    Description: Instructions for accessing internal API via bastion tunnel
-    Value: !Sub |
-      This API is configured for internal access only (no public domain).
-
-      To access via bastion tunnel:
-      1. Start the tunnel: ./bin/tools/tunnels.sh ${Environment} api-internal
-      2. Access API at: http://localhost:8000
-
-      Admin CLI:
-      just admin ${Environment} --tunnel subscriptions list
-
-      Admin key location:
-      aws secretsmanager get-secret-value --secret-id robosystems/${Environment}/admin --region ${AWS::Region}
-
-      Example API call (with tunnel running):
-      curl -H "Authorization: Bearer <KEY>" http://localhost:8000/admin/v1/subscriptions
-
-      LIMITATIONS (internal mode):
-      - OAuth integrations (Google, QuickBooks) will NOT work - external providers cannot redirect to internal URLs
-      - JWT tokens use default issuer/audience (api.robosystems.ai) - override via AWS Secrets Manager for forks
-
   # Service Discovery Outputs
   ApiServiceDiscoveryEndpoint:
     Description: Internal DNS endpoint for direct API access (bypasses ALB)
@@ -1427,18 +1360,3 @@ Outputs:
     Value: !GetAtt ApiNamespace.Arn
     Export:
       Name: !Sub ${AWS::StackName}-ServiceDiscoveryNamespaceArn
-
-  AdminInternalAccessInstructions:
-    Description: Instructions for admin access via service discovery (all modes)
-    Value: !Sub |
-      ADMIN ACCESS (via Service Discovery - bypasses ALB IP restrictions):
-
-      1. Start internal tunnel:
-         ./bin/tools/tunnels.sh ${Environment} api-internal
-
-      2. Access admin API at: http://localhost:8000/admin/v1/
-
-      Internal endpoint: api.${Environment}.robosystems.local:8000
-
-      This method works regardless of API access mode (public/internal)
-      and bypasses ALB IP restrictions for admin operations.
