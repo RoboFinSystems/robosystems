@@ -253,11 +253,9 @@ def merge_with_existing_s3(
   combined = pa.concat_tables([existing_table, new_table], promote_options="permissive")
   pre_dedup_rows = combined.num_rows
 
-  # Deduplicate shared tables on identifier
+  # Deduplicate shared tables on identifier (pure Arrow, no Pandas round-trip)
   if table_key in SHARED_NODE_TABLES and "identifier" in combined.column_names:
-    df = combined.to_pandas()
-    df = df.drop_duplicates(subset=["identifier"], keep="first")
-    combined = pa.Table.from_pandas(df, preserve_index=False)
+    combined = _dedup_arrow_table(combined, "identifier", table_key)
 
   # Write merged result
   buffer = BytesIO()
