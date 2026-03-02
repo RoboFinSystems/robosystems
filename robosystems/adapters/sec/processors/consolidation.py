@@ -29,7 +29,7 @@ def _dedup_arrow_table(
 
   Uses pure Arrow operations — no Pandas round-trip. Iterates the dedup
   column to build a set of seen values, then filters via pa.Table.take().
-  For 500-filing batches, shared tables are typically 60-120K rows, so the
+  For 250-filing batches, shared tables are typically 30-60K rows, so the
   Python set approach is fast and memory-efficient.
 
   Args:
@@ -148,74 +148,53 @@ def consolidate_parquet_tables_by_date(
 def consolidate_parquet_from_disk(
   work_dir: Path,
   table_key: str,
-  max_files_per_chunk: int | None = None,
-) -> list[bytes]:
-  """Consolidate parquet files for a table from disk into one or more byte chunks.
+) -> bytes | None:
+  """Consolidate all parquet files for a table from disk into a single bytes object.
 
-  When max_files_per_chunk is None, all files are consolidated into a single
-  bytes object (returned as a single-element list). When set, files are processed
-  in chunks of that size, each chunk producing a separate bytes object. This limits
-  peak Arrow memory to ~chunk_size * avg_file_size instead of loading all files.
+  Reads all parquet files for a table, concatenates them via Arrow, and returns
+  consolidated parquet bytes. With batch sizes of 250 filings, peak Arrow memory
+  stays well under limits (~325 MB for Label at ~1.3 MB/file).
 
   For shared node tables (Element, Label, Reference, Unit, Period), deduplicates
-  on the identifier column within each chunk using pure Arrow. Cross-chunk
-  deduplication is handled by DuckDB during staging via GROUP BY + FIRST().
+  on the identifier column using pure Arrow. Cross-batch deduplication is handled
+  by DuckDB during staging via GROUP BY + FIRST().
 
   Args:
       work_dir: Directory containing parquet files
       table_key: Table key like "nodes/Entity"
-      max_files_per_chunk: Max files per consolidation chunk (None = all files)
 
   Returns:
-      List of consolidated parquet bytes (empty list if no data)
+      Consolidated parquet bytes, or None if no data
   """
   table_dir = work_dir / table_key
   if not table_dir.exists():
-    return []
+    return None
 
   parquet_files = sorted(table_dir.glob("*.parquet"))
   if not parquet_files:
-    return []
+    return None
 
-  # Determine chunk boundaries
-  if max_files_per_chunk is None or len(parquet_files) <= max_files_per_chunk:
-    chunks = [parquet_files]
-  else:
-    chunks = [
-      parquet_files[i : i + max_files_per_chunk]
-      for i in range(0, len(parquet_files), max_files_per_chunk)
-    ]
-
-  is_shared = table_key in SHARED_NODE_TABLES
-  results: list[bytes] = []
-
-  for chunk_files in chunks:
-    tables = []
-    for pq_file in chunk_files:
-      try:
-        table = pq.read_table(pq_file)
-        tables.append(table)
-      except Exception as e:
-        logger.warning("Skipping corrupted parquet file %s: %s", pq_file, e)
-        continue
-
-    if not tables:
+  tables = []
+  for pq_file in parquet_files:
+    try:
+      table = pq.read_table(pq_file)
+      tables.append(table)
+    except Exception as e:
+      logger.warning("Skipping corrupted parquet file %s: %s", pq_file, e)
       continue
 
-    combined = pa.concat_tables(tables, promote_options="permissive")
-    del tables
+  if not tables:
+    return None
 
-    if is_shared and "identifier" in combined.column_names:
-      combined = _dedup_arrow_table(combined, "identifier", table_key)
+  combined = pa.concat_tables(tables, promote_options="permissive")
+  del tables
 
-    buffer = BytesIO()
-    pq.write_table(combined, buffer)
-    results.append(buffer.getvalue())
+  if table_key in SHARED_NODE_TABLES and "identifier" in combined.column_names:
+    combined = _dedup_arrow_table(combined, "identifier", table_key)
 
-    # Release Arrow memory before next chunk
-    del combined
-
-  return results
+  buffer = BytesIO()
+  pq.write_table(combined, buffer)
+  return buffer.getvalue()
 
 
 def merge_with_existing_s3(

@@ -101,15 +101,16 @@ class SECProcessConfig(Config):
   but the job continues processing remaining filings in the batch.
 
   Memory Management:
-  - One batch per job run (default 1000 filings), then container exits
-  - Part-file output: batch writes part_{uuid}.parquet files per table
+  - One batch per job run (default 250 filings), then container exits
+  - Small batch keeps Arrow concat under ~325 MB peak (Label at ~1.3 MB/file)
+  - One part file per table per batch (no chunking needed)
   - Shared tables (Element, Label, etc.) deduped within batch via pure Arrow
-  - DuckDB handles final cross-part-file dedup during staging
+  - DuckDB handles final cross-batch dedup during staging
   - del + gc.collect() after each table upload to force memory release
 
   Output Structure (part files):
     s3://bucket/sec/processed/filed=2024-Q1/nodes/Entity/part_a1b2c3d4e5f6.parquet
-    - Multiple part files per table per quarter (additive, no merge)
+    - One part file per table per batch, multiple batches per quarter
     - UUID naming prevents collisions across runs
     - DuckDB reads both old format (TABLE.parquet) and new (TABLE/*.parquet)
   """
