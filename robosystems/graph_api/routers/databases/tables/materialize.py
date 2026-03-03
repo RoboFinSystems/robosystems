@@ -399,6 +399,11 @@ async def materialize_table(
           # Must happen AFTER data is loaded (indexes on empty tables are empty)
           ladybug_service.db_manager.create_vector_index(conn, table_name)
 
+          # Checkpoint again to persist vector index to disk
+          # Without this, the index exists only in-memory and is lost when
+          # force_database_cleanup destroys the Database object below
+          conn.execute("CHECKPOINT")
+
         # Release buffer pool memory - data is safe on disk now
         ladybug_service.db_manager.connection_pool.force_database_cleanup(
           graph_id, aggressive=True
