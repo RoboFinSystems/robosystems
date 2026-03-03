@@ -110,12 +110,19 @@ class MCPHandler:
 
       schema_extensions = resolve_schema_extensions(self.graph_id)
 
+      # Shared repositories are read-only (no workspace mutations or write tools)
+      from robosystems.config.shared_repositories import (
+        is_shared_repository_or_subgraph,
+      )
+
+      read_only = is_shared_repository_or_subgraph(self.graph_id)
+
       self.mcp_tools = AdapterGraphMCPTools(
-        self.graph_client, schema_extensions=schema_extensions
+        self.graph_client, schema_extensions=schema_extensions, read_only=read_only
       )
       logger.info(
         f"Initialized MCP handler for graph {self.graph_id} "
-        f"(extensions={schema_extensions}, endpoint={repository_url or 'discovered'})"
+        f"(extensions={schema_extensions}, read_only={read_only}, endpoint={repository_url or 'discovered'})"
       )
     except Exception as e:
       logger.error(f"Failed to initialize MCP client for {self.graph_id}: {e}")
