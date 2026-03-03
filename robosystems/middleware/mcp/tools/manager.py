@@ -280,6 +280,12 @@ class GraphMCPTools:
       self.disclosure_detail_tool.get_tool_definition(),
     ]
 
+  def _tool_unavailable_reason(self, tool_name: str, feature_flag: str) -> str:
+    """Return a context-aware error message for unavailable tools."""
+    if self.read_only:
+      return f"{tool_name} is not available on this read-only graph."
+    return f"{tool_name} tool is not available. Set {feature_flag}=true to enable this feature."
+
   def get_tool_definitions_as_dict(self) -> list[dict[str, Any]]:
     """
     Get MCP tool definitions for graph databases, using compatible naming.
@@ -441,8 +447,7 @@ class GraphMCPTools:
       elif name == "create-workspace":
         if self.create_workspace_tool is None:
           raise ValueError(
-            "create-workspace tool is not available. "
-            "Set MCP_WORKSPACE_ENABLED=true to enable this feature."
+            self._tool_unavailable_reason("create-workspace", "MCP_WORKSPACE_ENABLED")
           )
         result = await self.create_workspace_tool.execute(arguments)
         return result if return_raw else json.dumps(result, indent=2)
@@ -450,8 +455,7 @@ class GraphMCPTools:
       elif name == "delete-workspace":
         if self.delete_workspace_tool is None:
           raise ValueError(
-            "delete-workspace tool is not available. "
-            "Set MCP_WORKSPACE_ENABLED=true to enable this feature."
+            self._tool_unavailable_reason("delete-workspace", "MCP_WORKSPACE_ENABLED")
           )
         result = await self.delete_workspace_tool.execute(arguments)
         return result if return_raw else json.dumps(result, indent=2)
@@ -478,8 +482,7 @@ class GraphMCPTools:
       elif name == "write-graph-cypher":
         if self.write_cypher_tool is None:
           raise ValueError(
-            "write-graph-cypher tool is not available. "
-            "Set MCP_MEMORY_ENABLED=true to enable this feature."
+            self._tool_unavailable_reason("write-graph-cypher", "MCP_MEMORY_ENABLED")
           )
         result = await self.write_cypher_tool.execute(arguments)
         return result if return_raw else json.dumps(result, indent=2)
@@ -487,8 +490,7 @@ class GraphMCPTools:
       elif name == "add-node-table":
         if self.add_node_table_tool is None:
           raise ValueError(
-            "add-node-table tool is not available. "
-            "Set MCP_MEMORY_ENABLED=true to enable this feature."
+            self._tool_unavailable_reason("add-node-table", "MCP_MEMORY_ENABLED")
           )
         result = await self.add_node_table_tool.execute(arguments)
         return result if return_raw else json.dumps(result, indent=2)
@@ -496,8 +498,9 @@ class GraphMCPTools:
       elif name == "add-relationship-table":
         if self.add_relationship_table_tool is None:
           raise ValueError(
-            "add-relationship-table tool is not available. "
-            "Set MCP_MEMORY_ENABLED=true to enable this feature."
+            self._tool_unavailable_reason(
+              "add-relationship-table", "MCP_MEMORY_ENABLED"
+            )
           )
         result = await self.add_relationship_table_tool.execute(arguments)
         return result if return_raw else json.dumps(result, indent=2)
