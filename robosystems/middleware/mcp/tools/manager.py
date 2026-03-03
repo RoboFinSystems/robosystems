@@ -100,12 +100,14 @@ class GraphMCPTools:
     self,
     graph_client,
     schema_extensions: list[str] | tuple[str, ...] = (),
+    read_only: bool = False,
   ):
     # Import here to avoid circular import
     from ..client import GraphMCPClient
 
     self.client: GraphMCPClient = graph_client
     self.schema_extensions: tuple[str, ...] = tuple(schema_extensions)
+    self.read_only: bool = read_only
 
     # Initialize query validator
     self.validator = GraphQueryValidator()
@@ -145,21 +147,24 @@ class GraphMCPTools:
         self.resolve_element_tool = ResolveElementTool(graph_client)
         self.resolve_structure_tool = ResolveStructureTool(graph_client)
 
-    # Layer 3: Infrastructure tools (gated by feature flags)
+    # Layer 3: Infrastructure tools (gated by feature flags + read_only)
     self.create_workspace_tool = None
     self.delete_workspace_tool = None
     self.list_workspaces_tool = None
     self.switch_workspace_tool = None
     if env.MCP_WORKSPACE_ENABLED:
-      self.create_workspace_tool = CreateWorkspaceTool(graph_client)
-      self.delete_workspace_tool = DeleteWorkspaceTool(graph_client)
+      # Navigation tools (switch/list) are always available
       self.list_workspaces_tool = ListWorkspacesTool(graph_client)
       self.switch_workspace_tool = SwitchWorkspaceTool(graph_client)
+      # Mutation tools (create/delete) are blocked for read-only graphs
+      if not read_only:
+        self.create_workspace_tool = CreateWorkspaceTool(graph_client)
+        self.delete_workspace_tool = DeleteWorkspaceTool(graph_client)
 
     self.write_cypher_tool = None
     self.add_node_table_tool = None
     self.add_relationship_table_tool = None
-    if env.MCP_MEMORY_ENABLED:
+    if env.MCP_MEMORY_ENABLED and not read_only:
       self.write_cypher_tool = WriteCypherTool(graph_client)
       self.add_node_table_tool = AddNodeTableTool(graph_client)
       self.add_relationship_table_tool = AddRelationshipTableTool(graph_client)
@@ -175,7 +180,7 @@ class GraphMCPTools:
     self._cache_misses = 0
 
     logger.info(
-      f"Initialized Graph MCP tools (extensions={list(self.schema_extensions)})"
+      f"Initialized Graph MCP tools (extensions={list(self.schema_extensions)}, read_only={self.read_only})"
     )
 
   def _has_extension(self, extension: str) -> bool:
@@ -232,16 +237,19 @@ class GraphMCPTools:
     Get workspace management tool definitions from actual tool implementations.
 
     Returns:
-        List of workspace tool definitions (empty if MCP_WORKSPACE_ENABLED is false)
+        List of workspace tool definitions (empty if MCP_WORKSPACE_ENABLED is false).
+        For read-only graphs, only navigation tools (switch/list) are included.
     """
-    if self.create_workspace_tool is None:
-      return []
-    return [
-      self.create_workspace_tool.get_tool_definition(),
-      self.switch_workspace_tool.get_tool_definition(),
-      self.delete_workspace_tool.get_tool_definition(),
-      self.list_workspaces_tool.get_tool_definition(),
-    ]
+    tools = []
+    if self.switch_workspace_tool is not None:
+      tools.append(self.switch_workspace_tool.get_tool_definition())
+    if self.list_workspaces_tool is not None:
+      tools.append(self.list_workspaces_tool.get_tool_definition())
+    if self.create_workspace_tool is not None:
+      tools.append(self.create_workspace_tool.get_tool_definition())
+    if self.delete_workspace_tool is not None:
+      tools.append(self.delete_workspace_tool.get_tool_definition())
+    return tools
 
   def _get_memory_tool_definitions(self) -> list[dict[str, Any]]:
     """
