@@ -210,7 +210,7 @@ function setup_full_config() {
     fi
 
     # API Access Mode & Domain Configuration
-    # Modes: 'public' (HTTPS with domain), 'public-http' (HTTP via ALB DNS), 'internal' (bastion tunnel)
+    # Modes: 'public' (HTTPS with domain) or 'internal' (bastion tunnel)
     # Workflows default to 'internal' if not set - explicit setting here for visibility
     # API_ACCESS_MODE may be pre-set by bootstrap.sh
     local access_mode="${API_ACCESS_MODE:-}"
@@ -235,7 +235,7 @@ function setup_full_config() {
     if $setup_staging; then
         gh variable set API_ACCESS_MODE_STAGING --body "$access_mode"
     fi
-    # To use public-http mode (ALB DNS, no TLS): gh variable set API_ACCESS_MODE_PROD --body "public-http"
+    # To use public mode (HTTPS with domain): gh variable set API_ACCESS_MODE_PROD --body "public"
 
     # API Scaling Configuration
     gh variable set API_MIN_CAPACITY_PROD --body "1"

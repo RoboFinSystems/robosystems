@@ -680,7 +680,6 @@ setup_secrets_and_variables() {
         echo "API Access Mode:"
         echo "  1) Internal (default) - Access via bastion tunnel, no public exposure"
         echo "  2) Public             - Internet-facing with custom domain (HTTPS)"
-        echo "  3) Public HTTP        - Internet-facing without domain (HTTP only)"
         echo ""
         read -p "Select access mode [1]: " access_mode_choice
         access_mode_choice=${access_mode_choice:-1}
@@ -688,7 +687,6 @@ setup_secrets_and_variables() {
         case "$access_mode_choice" in
             1) export API_ACCESS_MODE="internal" ;;
             2) export API_ACCESS_MODE="public" ;;
-            3) export API_ACCESS_MODE="public-http" ;;
             *) export API_ACCESS_MODE="internal" ;;
         esac
         print_info "API access mode: $API_ACCESS_MODE"

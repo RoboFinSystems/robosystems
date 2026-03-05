@@ -504,7 +504,7 @@ jobs:
       cpu_target_value: ${{ vars.API_CPU_TARGET_PROD || '70' }}
       memory_target_value: ${{ vars.API_MEMORY_TARGET_PROD || '80' }}
       # Access Mode & Domain Configuration
-      # API_ACCESS_MODE_PROD: 'public' (HTTPS with domain), 'public-http' (HTTP via ALB), 'internal' (bastion tunnel)
+      # API_ACCESS_MODE_PROD: 'public' (HTTPS with domain) or 'internal' (bastion tunnel)
       api_access_mode: ${{ vars.API_ACCESS_MODE_PROD || 'internal' }}
       domain_name: ${{ vars.API_DOMAIN_NAME_PROD || '' }}
       domain_name_root: ${{ needs.stack-config.outputs.domain_name_root }}
@@ -693,12 +693,6 @@ jobs:
             cat >> $GITHUB_STEP_SUMMARY << EOF
           - **Mode**: Public (HTTPS)
           - **URL**: https://${API_DOMAIN}
-          - **Admin CLI**: \`just admin prod --tunnel <command>\` (requires \`just bastion-tunnel prod api-internal\`)
-          EOF
-          elif [ "$API_ACCESS_MODE" = "public-http" ]; then
-            cat >> $GITHUB_STEP_SUMMARY << EOF
-          - **Mode**: Public HTTP (no TLS)
-          - **URL**: See CloudFormation outputs for ALB DNS
           - **Admin CLI**: \`just admin prod --tunnel <command>\` (requires \`just bastion-tunnel prod api-internal\`)
           EOF
           else
