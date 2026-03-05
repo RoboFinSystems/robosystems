@@ -550,14 +550,15 @@ class DuckDBStager:
   # =========================================================================
 
   # Default chunking threshold when DuckDB memory info is unavailable.
-  # 20 GiB is conservative — Element (19 GiB) passes, Label (51 GiB) chunks.
-  DEFAULT_CHUNKING_THRESHOLD_BYTES = 20 * 1024 * 1024 * 1024  # 20 GiB
+  # 15 GiB is conservative — ensures tables like Element (34+ GiB for historical) get chunked.
+  DEFAULT_CHUNKING_THRESHOLD_BYTES = 15 * 1024 * 1024 * 1024  # 15 GiB
 
   # Fraction of DuckDB memory to use as chunking threshold.
-  # The hierarchical merge (quarterly → yearly → final) bounds peak memory
-  # per merge step to ~4 quarters, so 75% is safe — single-shot staging
-  # only runs when total S3 data fits comfortably in DuckDB's allocation.
-  CHUNKING_MEMORY_FRACTION = 0.75
+  # Parquet decompresses 2-4x in DuckDB, and GROUP BY dedup needs working memory.
+  # At 0.75, Element historical (34.7 GiB S3) slipped under the 38.4 GiB threshold
+  # (0.75 * 51.2 GiB) and OOMed during single-shot staging. 0.50 gives a ~25.6 GiB
+  # threshold with 51.2 GiB memory, routing Element to safe chunked staging.
+  CHUNKING_MEMORY_FRACTION = 0.50
 
   def _get_chunking_threshold_bytes(self, duckdb_memory_mb: int | None) -> int:
     """
