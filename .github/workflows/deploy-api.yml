@@ -103,7 +103,7 @@ on:
 
       # Access Mode Configuration
       api_access_mode:
-        description: "API access mode: 'public' (HTTPS with domain), 'public-http' (HTTP via ALB DNS), 'internal' (via bastion tunnel)"
+        description: "API access mode: 'public' (HTTPS with domain) or 'internal' (via bastion tunnel)"
         required: false
         type: string
         default: "internal"
@@ -260,17 +260,13 @@ jobs:
               fi
               echo "   Hosted zone: $HOSTED_ZONE_ID"
               ;;
-            "public-http")
-              echo "🌐 Public deployment with ALB DNS (HTTP only, no TLS)"
-              echo "   Access will be via ALB DNS name"
-              ;;
             "internal")
               echo "🔒 Internal-only deployment"
               echo "   Access will be via bastion tunnel only"
               ;;
             *)
               echo "ERROR: Invalid api_access_mode: $API_ACCESS_MODE"
-              echo "   Valid values: public, public-http, internal"
+              echo "   Valid values: public, internal"
               exit 1
               ;;
           esac
@@ -377,7 +373,7 @@ jobs:
           echo "api_sg_id=$API_SG_ID" >> $GITHUB_OUTPUT
           echo "API Security Group ID: $API_SG_ID"
 
-          # Get API ALB ARN for WAF (only exists when api_access_mode is public or public-http)
+          # Get API ALB ARN for WAF (only exists when api_access_mode is public)
           API_ALB_ARN=$(aws cloudformation describe-stacks \
             --stack-name ${{ inputs.stack_name }} \
             --query "Stacks[0].Outputs[?OutputKey=='ApiALBArn'].OutputValue" \

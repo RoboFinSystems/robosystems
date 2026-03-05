@@ -367,7 +367,7 @@ class EnvConfig:
   # Default JWT_ISSUER is derived from ROBOSYSTEMS_API_URL (strips protocol)
   # Override via Secrets Manager for custom deployments:
   # - internal mode: set JWT_ISSUER=localhost (access via bastion tunnel)
-  # - public-http mode: uses ALB DNS automatically, or set custom value
+  # - public mode: uses custom domain automatically, or set custom value
   # Derive default JWT issuer/audience from ROBOSYSTEMS_API_URL, stripping protocol
   _jwt_default_domain = (
     os.getenv("ROBOSYSTEMS_API_URL", "https://api.robosystems.ai")

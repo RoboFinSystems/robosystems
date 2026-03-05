@@ -230,7 +230,7 @@ just ssm-set prod tuning/cache/BALANCE_TTL 600
 **Environment Variables Used**:
 | Variable | Source | Description |
 |----------|--------|-------------|
-| `API_ACCESS_MODE` | Bootstrap | API access mode (internal, public, public-http) |
+| `API_ACCESS_MODE` | Bootstrap | API access mode (internal or public) |
 | `SETUP_STAGING` | Bootstrap | Whether to create staging resources |
 
 ---
@@ -633,7 +633,6 @@ When forking to a different AWS account:
 5. **API Access Mode**: Choose your access mode during bootstrap:
    - `internal` (default): Access via bastion tunnel, JWT uses localhost
    - `public`: Internet-facing with custom domain and HTTPS
-   - `public-http`: Internet-facing via ALB DNS, HTTP only
 
 See the [Bootstrap Guide](https://github.com/RoboFinSystems/robosystems/wiki/Bootstrap-Guide) for complete fork deployment instructions.
 

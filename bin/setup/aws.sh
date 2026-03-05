@@ -42,7 +42,7 @@ echo ""
 # ENVIRONMENT VARIABLES
 # =============================================================================
 #
-# API_ACCESS_MODE   - API access mode: 'internal' (default), 'public', 'public-http'
+# API_ACCESS_MODE   - API access mode: 'internal' (default) or 'public'
 #                     When 'internal', sets JWT_ISSUER/JWT_AUDIENCE to 'localhost'
 # SETUP_STAGING     - Set to 'true' to also create staging resources
 # SKIP_SECRETS      - Set to 'true' to skip Secrets Manager setup
