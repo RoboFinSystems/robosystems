@@ -31,6 +31,7 @@ from robosystems.operations.aws.s3 import S3Client
 from robosystems.schemas.extensions.roboledger import RoboLedgerContext
 
 from .models import (
+  EMBEDDING_TABLES,
   LARGE_STAGING_TABLES,
   STAGING_MAX_RETRIES,
   STAGING_RETRY_BACKOFF_BASE,
@@ -566,7 +567,7 @@ class DuckDBStager:
 
     If DuckDB memory is known (from boost response), threshold is
     CHUNKING_MEMORY_FRACTION of that. Otherwise falls back to a conservative
-    20 GiB default.
+    15 GiB default.
 
     Args:
         duckdb_memory_mb: DuckDB memory limit in MB (from boost response), or None
@@ -873,6 +874,16 @@ class DuckDBStager:
     all_temp_tables: list[str] = []  # All temp tables for cleanup on failure
     total_raw_rows = 0
 
+    # Re-verify DuckDB memory boost before chunked staging. If a previous table
+    # OOMed and crashed the Graph API container, the boost (stored in-memory) is
+    # lost. Without this, subsequent tables run with the default ~9 GiB limit.
+    try:
+      await graph_client.boost_memory(self.graph_id, target="duckdb")
+    except Exception as boost_err:
+      logger.warning(
+        f"Could not re-verify memory boost for chunked staging: {boost_err}"
+      )
+
     # Phase 1: Create independent temp tables per quarter
     # Track which temp tables belong to which year for hierarchical merge
     year_temps: dict[int, list[str]] = {}
@@ -1008,14 +1019,86 @@ class DuckDBStager:
             pass  # Non-fatal, cleanup will try again
 
       # Phase 3: Final merge of year tables into target table
-      log_progress(f"  {table_name} final merge of {len(year_tables)} year tables...")
+      # For embedding tables (FLOAT[384]), merge in groups to cap peak hash table
+      # size. A single merge of 9+ year tables (~10M+ rows with embeddings) OOMs
+      # even with threads=1 because GROUP BY hash tables don't spill efficiently
+      # for wide rows. Merging in groups of 3 keeps peak at ~3M rows per step,
+      # and cross-year dedup drastically reduces rows at each tier.
+      merge_group_size = 3 if table_name in EMBEDDING_TABLES else len(year_tables)
 
-      final_merge_sql = self._build_dedup_merge_sql(table_name, year_tables, columns)
-      final_merge_sql = f"SET threads=1; {final_merge_sql}"
+      if len(year_tables) > merge_group_size:
+        log_progress(
+          f"  {table_name} hierarchical final merge: {len(year_tables)} year tables "
+          f"in groups of {merge_group_size}..."
+        )
+        current_tables = year_tables
+        tier = 0
 
-      await graph_client.query_table(
-        graph_id=self.graph_id, sql=final_merge_sql, timeout=float(timeout)
-      )
+        while len(current_tables) > merge_group_size:
+          tier += 1
+          next_tables: list[str] = []
+
+          for g in range(0, len(current_tables), merge_group_size):
+            group = current_tables[g : g + merge_group_size]
+
+            if len(group) == 1:
+              next_tables.append(group[0])
+              continue
+
+            group_name = f"{table_name}__tier{tier}_g{g // merge_group_size}"
+            merge_sql = self._build_dedup_merge_sql(group_name, group, columns)
+            merge_sql = f"SET threads=1; {merge_sql}"
+
+            merge_start = time.monotonic()
+            await graph_client.query_table(
+              graph_id=self.graph_id, sql=merge_sql, timeout=float(timeout)
+            )
+            merge_elapsed = time.monotonic() - merge_start
+
+            count_result = await graph_client.query_table(
+              graph_id=self.graph_id,
+              sql=f'SELECT COUNT(*) as cnt FROM "{group_name}"',
+              timeout=30.0,
+            )
+            group_count = count_result.get("rows", [[0]])[0][0]
+
+            log_progress(
+              f"  {table_name} tier {tier} group {g // merge_group_size}: "
+              f"{len(group)} tables -> {group_count:,} rows in {merge_elapsed:.1f}s"
+            )
+
+            next_tables.append(group_name)
+            all_temp_tables.append(group_name)
+
+            # Drop merged source tables to free disk space
+            for t in group:
+              try:
+                await graph_client.delete_table(self.graph_id, t)
+                if t in all_temp_tables:
+                  all_temp_tables.remove(t)
+              except Exception:
+                pass
+
+          current_tables = next_tables
+
+        # Final merge of remaining tables into target
+        log_progress(f"  {table_name} final merge of {len(current_tables)} tables...")
+        final_merge_sql = self._build_dedup_merge_sql(
+          table_name, current_tables, columns
+        )
+        final_merge_sql = f"SET threads=1; {final_merge_sql}"
+
+        await graph_client.query_table(
+          graph_id=self.graph_id, sql=final_merge_sql, timeout=float(timeout)
+        )
+      else:
+        log_progress(f"  {table_name} final merge of {len(year_tables)} year tables...")
+        final_merge_sql = self._build_dedup_merge_sql(table_name, year_tables, columns)
+        final_merge_sql = f"SET threads=1; {final_merge_sql}"
+
+        await graph_client.query_table(
+          graph_id=self.graph_id, sql=final_merge_sql, timeout=float(timeout)
+        )
 
       await self._restore_threads(graph_client)
 
