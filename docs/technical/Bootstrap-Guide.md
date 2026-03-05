@@ -227,42 +227,23 @@ npm run setup:bootstrap
 
 ## API Access Modes
 
-RoboSystems supports three API access modes, configured via `API_ACCESS_MODE_PROD` / `API_ACCESS_MODE_STAGING`:
+RoboSystems supports two API access modes, configured via `API_ACCESS_MODE_PROD` / `API_ACCESS_MODE_STAGING`:
 
 | Mode | ALB Scheme | TLS | Domain Required | Use Case |
 |------|------------|-----|-----------------|----------|
-| `internal` | Internal | No | No | Development, testing, private deployments |
-| `public-http` | Internet-facing | No | No | Quick public access without domain setup |
+| `internal` | Internal | No | No | Zero public attack surface, VPC-only access |
 | `public` | Internet-facing | Yes | Yes | Production with custom domain |
 
 ### Internal Mode (Default)
 
-No custom domain required. Access via bastion tunnel:
+No public attack surface. The ALB is internal (not internet-accessible) and all access is through the VPC via bastion tunnel:
 
 ```bash
 just bastion-tunnel prod all
 # API at http://localhost:8000
 ```
 
-This is the default - no GitHub variables needed. The ALB is internal (not internet-accessible) and you connect through SSM port forwarding.
-
-### Public HTTP Mode
-
-Internet-facing ALB without TLS. Useful for testing or when you don't have a domain:
-
-```bash
-gh variable set API_ACCESS_MODE_PROD --body "public-http"
-just deploy prod
-```
-
-After deployment, access via the ALB DNS name (shown in CloudFormation outputs).
-
-**Limitations:**
-- No TLS encryption (credentials sent in plain text)
-- OAuth integrations (Google, QuickBooks) won't work (require HTTPS redirect URLs)
-- Not recommended for production with sensitive data
-
-**Why no HTTPS without a domain?** AWS ACM certificates require domain validation - you must prove you own the domain. The ALB's auto-generated DNS (`*.elb.amazonaws.com`) is AWS-owned, so you can't get a certificate for it. If you need HTTPS, register a domain (~$10-12/year for `.dev` or `.click`) and use `public` mode.
+This is the default - no GitHub variables needed.
 
 ### Public Mode (Custom Domain)
 
@@ -282,11 +263,7 @@ Full production setup with HTTPS and custom domain:
 You can switch modes at any time:
 
 ```bash
-# Switch from internal to public-http
-gh variable set API_ACCESS_MODE_PROD --body "public-http"
-just deploy prod
-
-# Switch to full public with domain
+# Switch from internal to public with domain
 gh variable set API_ACCESS_MODE_PROD --body "public"
 gh variable set API_DOMAIN_NAME_ROOT --body "yourdomain.com"
 gh variable set API_DOMAIN_NAME_PROD --body "api.yourdomain.com"
