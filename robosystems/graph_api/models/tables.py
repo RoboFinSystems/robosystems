@@ -36,6 +36,12 @@ class TableCreateRequest(BaseModel):
     default=None,
     description="Optional map of s3_key -> file_id for provenance tracking",
   )
+  deduplicate: bool = Field(
+    default=True,
+    description="Deduplicate rows on insert using NOT EXISTS on dedup key "
+    "(identifier for nodes, src/dst for relationships). "
+    "Safe for tables with wide columns like FLOAT[384] embeddings.",
+  )
   timeout_seconds: int = Field(
     default=1800,
     ge=60,

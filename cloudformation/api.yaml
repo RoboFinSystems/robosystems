@@ -118,7 +118,7 @@ Parameters:
     Description: |
       API access mode:
       - public: Internet-facing ALB with custom domain and HTTPS (requires DomainName)
-      - internal: Internal ALB accessible via bastion tunnel only
+      - internal: Internal ALB accessible via SSM tunnel only
 
   # Domain & DNS Configuration (Required only when ApiAccessMode=public)
   DomainName:
@@ -610,7 +610,7 @@ Resources:
       CidrIp: 0.0.0.0/0
       Description: Allow HTTP traffic to ALB
 
-  # Security Group Rule - Internal HTTP to ALB (via bastion tunnel)
+  # Security Group Rule - Internal HTTP to ALB (via SSM tunnel)
   # Only created when internal mode - restricted to VPC CIDR
   InternalHTTPToALBSecurityGroupIngress:
     Type: AWS::EC2::SecurityGroupIngress
@@ -621,7 +621,7 @@ Resources:
       FromPort: 80
       ToPort: 80
       CidrIp: 10.0.0.0/8
-      Description: Allow HTTP traffic from VPC (internal ALB via bastion tunnel)
+      Description: Allow HTTP traffic from VPC (internal ALB via SSM tunnel)
 
   # Security Group Rule - ALB to ECS Tasks
   ALBToApiSecurityGroupIngress:
@@ -920,7 +920,7 @@ Resources:
 
   # Application Load Balancer
   # When IsPublicWithDomain (public): internet-facing in public subnets
-  # When IsInternal: internal in private subnets (access via bastion tunnel)
+  # When IsInternal: internal in private subnets (access via SSM tunnel)
   ApiALB:
     Type: AWS::ElasticLoadBalancingV2::LoadBalancer
     DeletionPolicy: Delete

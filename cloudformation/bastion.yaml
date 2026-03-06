@@ -356,7 +356,7 @@ Outputs:
 
   TunnelCommand:
     Description: Tunnels script command (uses SSM - no SSH keys required)
-    Value: !Sub just bastion-tunnel ${Environment} all
+    Value: !Sub just tunnel ${Environment} all
 
   TunnelUsage:
     Description: Available tunnel services

@@ -366,7 +366,7 @@ class EnvConfig:
   # JWT Issuer and Audience - configurable for different deployments
   # Default JWT_ISSUER is derived from ROBOSYSTEMS_API_URL (strips protocol)
   # Override via Secrets Manager for custom deployments:
-  # - internal mode: set JWT_ISSUER=localhost (access via bastion tunnel)
+  # - internal mode: set JWT_ISSUER=localhost (access via SSM tunnel)
   # - public mode: uses custom domain automatically, or set custom value
   # Derive default JWT issuer/audience from ROBOSYSTEMS_API_URL, stripping protocol
   _jwt_default_domain = (

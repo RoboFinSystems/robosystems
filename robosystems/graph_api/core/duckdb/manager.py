@@ -392,29 +392,37 @@ class DuckDBTableManager:
   @validate_table_name_decorator
   def insert_into_table(self, request: TableCreateRequest) -> TableCreateResponse:
     """
-    Insert data into an existing table from S3 files with incremental deduplication.
+    Insert data into an existing table from S3 files.
 
-    Uses NOT EXISTS to insert only new rows from S3 parquet files into the
-    existing table. The NOT EXISTS hash join holds only dedup key strings
-    (identifier or src/dst) in memory, which DuckDB can spill to disk.
+    Supports two deduplication strategies controlled by request.deduplicate:
 
-    This avoids GROUP BY + FIRST() which cannot spill FLOAT[384] aggregate
-    state, causing OOM for embedding tables with 10M+ unique groups.
+    deduplicate=False (default):
+      Simple INSERT INTO append. No dedup overhead — callers are responsible
+      for ensuring no duplicate rows.
 
-    Deduplication Strategy:
-    1. Load new parquet data into a temp table
-    2. INSERT INTO existing table rows from temp WHERE NOT EXISTS (match on dedup key)
-    3. Drop temp table
+    deduplicate=True:
+      Uses INSERT INTO ... SELECT ... WHERE NOT EXISTS to skip rows whose
+      dedup key already exists in the target table. The NOT EXISTS hash join
+      only holds dedup key strings in memory, which DuckDB can spill to disk.
+
+      This is safe for tables with wide columns like FLOAT[384] embeddings.
+      The previous GROUP BY + FIRST() approach could not spill aggregate state
+      for fixed-size list columns, causing OOM at 10M+ unique groups.
+
+    Dedup keys:
+    - Node tables (has "identifier"): dedup on identifier
+    - Relationship tables (has src/dst or from/to): dedup on src+dst or from+to
+    - Unknown schema: no dedup (plain append)
 
     Prerequisites:
     - Table must already exist (created via create_table)
     - Schema must be compatible with the new files
 
     Args:
-        request: TableCreateRequest with graph_id, table_name, and s3_pattern
+        request: TableCreateRequest with graph_id, table_name, s3_pattern, deduplicate
 
     Returns:
-        TableCreateResponse with status, timing info, and row_count (net rows added after dedupe)
+        TableCreateResponse with status, timing info, and row_count (net rows added)
 
     Raises:
         HTTPException: If table doesn't exist or insert fails
@@ -430,7 +438,8 @@ class DuckDBTableManager:
 
     logger.info(
       f"Inserting into table {request.table_name} for graph {request.graph_id} "
-      f"from {file_count} {'files' if is_list else ''} (with deduplication)"
+      f"from {file_count} {'files' if is_list else ''} "
+      f"(deduplicate={request.deduplicate})"
     )
 
     pool = get_duckdb_pool()
@@ -438,19 +447,10 @@ class DuckDBTableManager:
     try:
       with pool.get_connection(request.graph_id) as conn:
         quoted_table = f'"{request.table_name}"'
-        temp_table = f'"{request.table_name}_insert_temp"'
 
         # Count rows before insert
         count_before = conn.execute(f"SELECT COUNT(*) FROM {quoted_table}").fetchone()
         rows_before = count_before[0] if count_before else 0
-
-        # Detect table type from existing schema
-        probe_result = conn.execute(f"SELECT * FROM {quoted_table} LIMIT 0").description
-        column_names = [col[0] for col in probe_result]
-        has_identifier = "identifier" in column_names
-        has_from_to = "from" in column_names or (
-          "src" in column_names and "dst" in column_names
-        )
 
         # Build parquet read expression
         if is_list:
@@ -461,75 +461,53 @@ class DuckDBTableManager:
         else:
           parquet_read = f"read_parquet('{request.s3_pattern}', union_by_name=true, hive_partitioning=false)"
 
-        # Load new data into temp table, handling from/to -> src/dst rename
-        if has_from_to and "src" in column_names and "from" not in column_names:
-          # Existing table uses src/dst but parquet may have from/to
-          create_temp_sql = f"""
-            CREATE OR REPLACE TABLE {temp_table} AS
-            SELECT "from" as src, "to" as dst, * EXCLUDE ("from", "to")
-            FROM {parquet_read}
-          """
-        else:
-          create_temp_sql = f"""
-            CREATE OR REPLACE TABLE {temp_table} AS
-            SELECT * FROM {parquet_read}
-          """
+        if request.deduplicate:
+          # Detect table type from existing schema for dedup key
+          probe_result = conn.execute(
+            f"SELECT * FROM {quoted_table} LIMIT 0"
+          ).description
+          column_names = [col[0] for col in probe_result]
+          has_identifier = "identifier" in column_names
+          has_src_dst = "src" in column_names and "dst" in column_names
+          has_from_to = "from" in column_names and "to" in column_names
 
-        conn.execute(create_temp_sql)
-
-        # INSERT only new rows using NOT EXISTS on dedup key.
-        # The hash join holds only dedup key strings in memory, not wide
-        # columns like FLOAT[384] embeddings, so DuckDB can spill safely.
-        if has_identifier:
-          insert_sql = f"""
-            INSERT INTO {quoted_table}
-            SELECT t.* FROM {temp_table} t
-            WHERE NOT EXISTS (
-              SELECT 1 FROM {quoted_table} a
-              WHERE a."identifier" = t."identifier"
+          # Build NOT EXISTS dedup clause
+          if has_identifier:
+            dedup_where = (
+              f"WHERE NOT EXISTS (SELECT 1 FROM {quoted_table} a "
+              f'WHERE a."identifier" = t."identifier")'
             )
-          """
-        elif has_from_to:
-          if "src" in column_names:
-            insert_sql = f"""
-              INSERT INTO {quoted_table}
-              SELECT t.* FROM {temp_table} t
-              WHERE NOT EXISTS (
-                SELECT 1 FROM {quoted_table} a
-                WHERE a."src" = t."src" AND a."dst" = t."dst"
-              )
-            """
+          elif has_src_dst:
+            dedup_where = (
+              f"WHERE NOT EXISTS (SELECT 1 FROM {quoted_table} a "
+              f'WHERE a."src" = t."src" AND a."dst" = t."dst")'
+            )
+          elif has_from_to:
+            dedup_where = (
+              f"WHERE NOT EXISTS (SELECT 1 FROM {quoted_table} a "
+              f'WHERE a."from" = t."from" AND a."to" = t."to")'
+            )
           else:
-            insert_sql = f"""
-              INSERT INTO {quoted_table}
-              SELECT t.* FROM {temp_table} t
-              WHERE NOT EXISTS (
-                SELECT 1 FROM {quoted_table} a
-                WHERE a."from" = t."from" AND a."to" = t."to"
-              )
-            """
+            # Unknown schema — no dedup key, plain append
+            dedup_where = ""
+
+          sql = (
+            f"INSERT INTO {quoted_table} SELECT t.* FROM {parquet_read} t {dedup_where}"
+          )
         else:
-          # Unknown table type: just append without deduplication
-          insert_sql = f"""
-            INSERT INTO {quoted_table}
-            SELECT * FROM {temp_table}
-          """
+          # Simple append — no dedup
+          sql = f"INSERT INTO {quoted_table} SELECT * FROM {parquet_read}"
 
-        conn.execute(insert_sql)
+        conn.execute(sql)
 
-        # Drop temp table
-        conn.execute(f"DROP TABLE IF EXISTS {temp_table}")
-
-        # Count rows after merge + dedupe
+        # Count rows after insert
         count_after = conn.execute(f"SELECT COUNT(*) FROM {quoted_table}").fetchone()
         rows_after = count_after[0] if count_after else 0
         rows_added = rows_after - rows_before
 
-        # CRITICAL: Checkpoint to flush WAL and clear accumulated state.
+        # Checkpoint to flush WAL and clear accumulated state.
         # Without this, chunked ingestion (multiple INSERTs in sequence) causes
         # WAL growth and connection state accumulation that eventually stalls.
-        # This is especially important for large tables like Association (~200M rows)
-        # where 17 sequential INSERTs would otherwise accumulate significant state.
         try:
           conn.execute("CHECKPOINT")
           logger.debug(f"Checkpointed DuckDB after INSERT into {request.table_name}")
@@ -542,7 +520,7 @@ class DuckDBTableManager:
         logger.info(
           f"Inserted into table {request.table_name} for graph {request.graph_id} "
           f"in {execution_time_ms:.2f}ms ({file_count} {'files' if is_list else ''}, "
-          f"{rows_added:,} net rows added, {rows_after:,} total after dedupe)"
+          f"{rows_added:,} net rows added, {rows_after:,} total)"
         )
 
         return TableCreateResponse(
@@ -554,12 +532,6 @@ class DuckDBTableManager:
         )
 
     except Exception as e:
-      # Clean up temp table on failure
-      try:
-        with pool.get_connection(request.graph_id) as conn:
-          conn.execute(f'DROP TABLE IF EXISTS "{request.table_name}_insert_temp"')
-      except Exception:
-        pass
       logger.error(f"Failed to insert into table {request.table_name}: {e}")
       raise HTTPException(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -904,7 +876,8 @@ class DuckDBTableManager:
 
         # Check if file_id column exists
         columns_result = conn.execute(
-          f"SELECT column_name FROM information_schema.columns WHERE table_name = '{table_name}'"
+          "SELECT column_name FROM information_schema.columns WHERE table_name = ?",
+          [table_name],
         ).fetchall()
         column_names = [row[0] for row in columns_result]
 

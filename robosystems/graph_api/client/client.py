@@ -1445,12 +1445,16 @@ class GraphClient(BaseGraphClient):
     table_name: str,
     s3_pattern: str | list[str],
     timeout: int = 1800,  # 30 minutes default for large file sets
+    deduplicate: bool = True,
   ) -> dict[str, Any]:
     """
     Insert data into an existing DuckDB staging table with SSE monitoring.
 
     This method starts a background table insert task and monitors it via SSE
     until completion. Used for incremental data append to existing tables.
+
+    Deduplication uses NOT EXISTS on the dedup key (identifier for nodes,
+    src/dst for relationships). Safe for tables with FLOAT[384] embeddings.
 
     Prerequisites:
     - Table must already exist (created via create_table)
@@ -1461,6 +1465,7 @@ class GraphClient(BaseGraphClient):
         table_name: Name of the existing table
         s3_pattern: S3 glob pattern (string) or list of S3 file paths
         timeout: Maximum time to wait for completion (seconds), default 30 min
+        deduplicate: Dedup rows using NOT EXISTS on dedup key. Default True.
 
     Returns:
         Dict with insert results:
@@ -1480,6 +1485,7 @@ class GraphClient(BaseGraphClient):
         "graph_id": graph_id,
         "table_name": table_name,
         "s3_pattern": s3_pattern,
+        "deduplicate": deduplicate,
         "timeout_seconds": timeout,  # Pass timeout to server for background task
       }
 
