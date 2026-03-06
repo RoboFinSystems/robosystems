@@ -22,6 +22,7 @@ from robosystems.graph_api.routers import (
   health,
   info,
   metrics,
+  migration,
   tasks,
 )
 from robosystems.logger import logger
@@ -303,6 +304,7 @@ def create_app() -> FastAPI:
 
   # Task management (generic for all task types)
   app.include_router(tasks.router)
+  app.include_router(migration.router)
 
   # Table routers (DuckDB staging) - now database-scoped under /databases/{graph_id}/tables
   app.include_router(databases.tables.router)
