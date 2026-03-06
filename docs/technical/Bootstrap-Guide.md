@@ -202,7 +202,7 @@ Initial deployment creates all infrastructure (VPC, databases, ECS services). Su
 
 **Verify deployment:**
 ```bash
-just bastion-tunnel prod all    # Connect to all services
+just tunnel prod all    # Connect to all services
 # API at http://localhost:8000
 # Dagster at http://localhost:8002
 ```
@@ -236,10 +236,10 @@ RoboSystems supports two API access modes, configured via `API_ACCESS_MODE_PROD`
 
 ### Internal Mode (Default)
 
-No public attack surface. The ALB is internal (not internet-accessible) and all access is through the VPC via bastion tunnel:
+No public attack surface. The ALB is internal (not internet-accessible) and all access is through the VPC via SSM tunnel:
 
 ```bash
-just bastion-tunnel prod all
+just tunnel prod all
 # API at http://localhost:8000
 ```
 
@@ -330,7 +330,7 @@ just deploy prod                  # Production (~20-30 min initial)
 just deploy staging               # Staging
 
 # Connect
-just bastion-tunnel prod all      # All tunnels (postgres, valkey, dagster, api)
+just tunnel prod all              # All tunnels (postgres, valkey, dagster, api)
 
 # SSM Parameters
 just ssm-list prod features       # List feature flags
