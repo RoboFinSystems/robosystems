@@ -231,12 +231,12 @@ RoboSystems supports two API access modes, configured via `API_ACCESS_MODE_PROD`
 
 | Mode | ALB Scheme | TLS | Domain Required | Use Case |
 |------|------------|-----|-----------------|----------|
-| `internal` | Internal | No | No | Zero public attack surface, VPC-only access |
+| `internal` | Internal | No | No | VPC-only access, no public endpoints |
 | `public` | Internet-facing | Yes | Yes | Production with custom domain |
 
 ### Internal Mode (Default)
 
-No public attack surface. The ALB is internal (not internet-accessible) and all access is through the VPC via SSM tunnel:
+The ALB is internal (not internet-accessible) and all access is through the VPC via SSM tunnel:
 
 ```bash
 just tunnel prod all
