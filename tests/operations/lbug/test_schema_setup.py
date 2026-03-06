@@ -317,7 +317,7 @@ class TestLadybugSchemaManagerAdditional:
 class TestEnsureSchema:
   """Test cases for ensure_schema function."""
 
-  @patch("robosystems.graph_api.core.ladybug.engine.Engine")
+  @patch("robosystems.operations.lbug.schema_setup.Engine")
   @patch("robosystems.operations.lbug.path_utils.ensure_lbug_directory")
   def test_ensure_schema_success(self, mock_ensure_dir, mock_engine_class):
     """Test successful schema creation."""
@@ -341,7 +341,7 @@ class TestEnsureSchema:
     mock_manager.initialize_schema.assert_called_once()
 
   @patch("robosystems.operations.lbug.schema_setup.LadybugSchemaManager")
-  @patch("robosystems.graph_api.core.ladybug.engine.Engine")
+  @patch("robosystems.operations.lbug.schema_setup.Engine")
   @patch("robosystems.operations.lbug.path_utils.ensure_lbug_directory")
   def test_ensure_schema_error(
     self, mock_ensure_dir, mock_engine_class, mock_manager_class

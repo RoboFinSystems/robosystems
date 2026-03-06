@@ -169,17 +169,18 @@ class SchemaInstaller:
   def _get_schema_info(self, conn) -> dict[str, Any]:
     """Get current schema information from database."""
     try:
-      # Query node tables
-      node_result = conn.execute("CALL lbug.node_table_names() RETURN *")
+      # Query all tables and filter by type
+      table_result = conn.execute("CALL show_tables() RETURN *")
       nodes = []
-      while node_result.has_next():
-        nodes.append(node_result.get_next()[0])
-
-      # Query rel tables
-      rel_result = conn.execute("CALL lbug.rel_table_names() RETURN *")
       relationships = []
-      while rel_result.has_next():
-        relationships.append(rel_result.get_next()[0])
+      while table_result.has_next():
+        row = table_result.get_next()
+        table_name = row[1]  # name column
+        table_type = row[2]  # type column
+        if table_type == "NODE":
+          nodes.append(table_name)
+        elif table_type == "REL":
+          relationships.append(table_name)
 
       return {
         "nodes": sorted(nodes),

@@ -28,7 +28,7 @@ RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-reco
 ARG TARGETARCH=arm64
 # Extension version: pinned to match the real_ladybug Python package for ABI compatibility.
 # This version is used for both the repo source path and the runtime install path.
-ARG LADYBUG_EXT_VERSION=0.13.0
+ARG LADYBUG_EXT_VERSION=0.15.0
 
 # Create extension directories using internal version (where LadybugDB looks)
 RUN mkdir -p /ladybug-extension/${LADYBUG_EXT_VERSION}/linux_${TARGETARCH}/httpfs \
@@ -147,7 +147,7 @@ FROM python:3.13-slim
 # Accept architecture argument in runtime stage
 ARG TARGETARCH=arm64
 # Must match builder stage — used for extension install paths
-ARG LADYBUG_EXT_VERSION=0.13.0
+ARG LADYBUG_EXT_VERSION=0.15.0
 
 # Set environment variables
 ENV PYTHONUNBUFFERED=1 \
@@ -207,9 +207,9 @@ RUN chown appuser:appuser /usr/local/bin/uv
 # Create data directory for persistent storage
 RUN mkdir -p /app/data && chown -R appuser:appuser /app/data
 # Create extension directory in appuser's home (where LadybugDB looks for extensions)
-# Extensions are stored at ~/.lbug/extension/{VERSION}/{PLATFORM}/{EXTENSION_NAME}/
+# Extensions are stored at ~/.lbdb/extension/{VERSION}/{PLATFORM}/{EXTENSION_NAME}/
 # This is in the container filesystem, NOT persistent volume, so extensions refresh with each deploy
-RUN mkdir -p /home/appuser/.lbug/extension/${LADYBUG_EXT_VERSION}/linux_${TARGETARCH} && chown -R appuser:appuser /home/appuser/.lbug
+RUN mkdir -p /home/appuser/.lbdb/extension/${LADYBUG_EXT_VERSION}/linux_${TARGETARCH} && chown -R appuser:appuser /home/appuser/.lbdb
 # Give appuser write access to /app for log files
 RUN chown -R appuser:appuser /app
 
@@ -218,25 +218,25 @@ COPY --from=builder --chown=appuser:appuser \
     /app/fastembed_cache /app/fastembed_cache
 
 # Copy LadybugDB extensions to user home directory
-# LadybugDB expects extensions at ~/.lbug/extension/{VERSION}/{PLATFORM}/{EXTENSION_NAME}/
+# LadybugDB expects extensions at ~/.lbdb/extension/{VERSION}/{PLATFORM}/{EXTENSION_NAME}/
 COPY --from=builder --chown=appuser:appuser \
     /ladybug-extension/${LADYBUG_EXT_VERSION}/linux_${TARGETARCH}/httpfs \
-    /home/appuser/.lbug/extension/${LADYBUG_EXT_VERSION}/linux_${TARGETARCH}/httpfs
+    /home/appuser/.lbdb/extension/${LADYBUG_EXT_VERSION}/linux_${TARGETARCH}/httpfs
 
 COPY --from=builder --chown=appuser:appuser \
     /ladybug-extension/${LADYBUG_EXT_VERSION}/linux_${TARGETARCH}/duckdb \
-    /home/appuser/.lbug/extension/${LADYBUG_EXT_VERSION}/linux_${TARGETARCH}/duckdb
+    /home/appuser/.lbdb/extension/${LADYBUG_EXT_VERSION}/linux_${TARGETARCH}/duckdb
 
 COPY --from=builder --chown=appuser:appuser \
     /ladybug-extension/${LADYBUG_EXT_VERSION}/linux_${TARGETARCH}/vector \
-    /home/appuser/.lbug/extension/${LADYBUG_EXT_VERSION}/linux_${TARGETARCH}/vector
+    /home/appuser/.lbdb/extension/${LADYBUG_EXT_VERSION}/linux_${TARGETARCH}/vector
 
 # Copy libduckdb.so to the common extension directory where LadybugDB looks for it
 # This is required by the DuckDB extension to actually load DuckDB functionality
-RUN mkdir -p /home/appuser/.lbug/extension/${LADYBUG_EXT_VERSION}/linux_${TARGETARCH}/common
+RUN mkdir -p /home/appuser/.lbdb/extension/${LADYBUG_EXT_VERSION}/linux_${TARGETARCH}/common
 COPY --from=builder --chown=appuser:appuser \
     /usr/local/lib/libduckdb.so \
-    /home/appuser/.lbug/extension/${LADYBUG_EXT_VERSION}/linux_${TARGETARCH}/common/libduckdb.so
+    /home/appuser/.lbdb/extension/${LADYBUG_EXT_VERSION}/linux_${TARGETARCH}/common/libduckdb.so
 
 # Switch to non-root user
 USER appuser

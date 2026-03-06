@@ -88,16 +88,17 @@ def create_app() -> FastAPI:
       asyncio.create_task(warmup_local_databases())
 
     # Clear stale extension cache from persistent volume
-    # LadybugDB caches extensions in {home_directory}/.lbug/extension/
+    # LadybugDB caches extensions in {home_directory}/.lbdb/extension/ (v0.15+)
     # When container images are updated, stale cached extensions can cause
     # ABI mismatch errors (undefined symbols). Clear the cache on startup
     # to force LadybugDB to use fresh extensions from the container image.
     import shutil
 
     cache_paths_to_clear = [
-      # Current path (after fix): home_dir=base_path, cache at base_path/.lbug/extension
+      # Current path (v0.15+): home_dir=base_path, cache at base_path/.lbdb/extension
+      Path(env.LBUG_DATABASE_PATH) / ".lbdb" / "extension",
+      # Legacy paths (v0.13 and earlier)
       Path(env.LBUG_DATABASE_PATH) / ".lbug" / "extension",
-      # Legacy double-nested path: home_dir=base_path/.lbug, cache at base_path/.lbug/.lbug/extension
       Path(env.LBUG_DATABASE_PATH) / ".lbug" / ".lbug" / "extension",
     ]
     for cache_path in cache_paths_to_clear:

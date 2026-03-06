@@ -173,7 +173,7 @@ class LadybugBackend(GraphBackend):
   ) -> dict[str, Any]:
     # Use ConnectionPool's context manager - this is the 1.0.1 pattern
     with self.connection_pool.get_connection(graph_id, read_only=False) as conn:
-      # Load httpfs extension by name - LadybugDB finds it at ~/.lbug/extension/{VERSION}/{PLATFORM}/
+      # Load httpfs extension by name - LadybugDB finds it at ~/.lbdb/extension/{VERSION}/{PLATFORM}/
       try:
         self._load_httpfs_extension(conn)
       except Exception as e:

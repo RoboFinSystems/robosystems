@@ -320,7 +320,7 @@ async def materialize_table(
     try:
       with ladybug_service.db_manager.connection_pool.get_connection(graph_id) as conn:
         # Install and load DuckDB extension - LadybugDB finds it at
-        # ~/.lbug/extension/{VERSION}/{PLATFORM}/duckdb/ (bundled in Docker image)
+        # ~/.lbdb/extension/{VERSION}/{PLATFORM}/duckdb/ (bundled in Docker image)
         try:
           conn.execute("INSTALL duckdb")
           conn.execute("LOAD duckdb")
@@ -580,7 +580,7 @@ async def fork_from_parent_duckdb(
         subgraph_id
       ) as conn:
         # Install and load DuckDB extension - LadybugDB finds it at
-        # ~/.lbug/extension/{VERSION}/{PLATFORM}/duckdb/ (bundled in Docker image)
+        # ~/.lbdb/extension/{VERSION}/{PLATFORM}/duckdb/ (bundled in Docker image)
         try:
           conn.execute("INSTALL duckdb")
           conn.execute("LOAD duckdb")
