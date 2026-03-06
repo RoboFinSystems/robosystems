@@ -69,12 +69,12 @@ from robosystems.dagster.jobs.infrastructure import (
   weekly_health_check_job,
   weekly_health_check_schedule,
 )
+from robosystems.dagster.jobs.invoice_billing import (
+  invoice_subscription_renewal_job,
+)
 from robosystems.dagster.jobs.migration import (
   ladybug_migration_export_job,
   ladybug_migration_import_job,
-)
-from robosystems.dagster.jobs.invoice_billing import (
-  invoice_subscription_renewal_job,
 )
 from robosystems.dagster.jobs.notifications import (
   send_email_job,

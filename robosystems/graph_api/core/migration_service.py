@@ -28,8 +28,9 @@ from robosystems.config.storage.graph import get_backup_key
 from robosystems.graph_api.core.task_manager import migration_task_manager
 from robosystems.logger import logger
 
-# Migration state — health endpoint returns 503 while True
+# Migration state — health endpoint returns 503 while import is running
 _migration_in_progress = False
+_export_in_progress = False
 _migration_lock = threading.Lock()
 _active_task_id: str | None = None
 
@@ -45,6 +46,13 @@ def _set_migration_in_progress(value: bool, task_id: str | None = None) -> None:
   with _migration_lock:
     _migration_in_progress = value
     _active_task_id = task_id if value else None
+
+
+def _set_export_in_progress(value: bool) -> None:
+  """Set export state (thread-safe)."""
+  global _export_in_progress
+  with _migration_lock:
+    _export_in_progress = value
 
 
 def get_active_task_id() -> str | None:
@@ -138,8 +146,8 @@ class MigrationService:
           cr = conn.execute(f"MATCH (n:{name}) RETURN count(n) as c")
           if cr.has_next():
             node_count += cr.get_next()[0]
-        except Exception:
-          pass
+        except Exception as e:
+          logger.warning(f"Failed to count nodes in {name}: {e}")
     return node_count
 
   def _get_rel_table_count(self, conn) -> int:
@@ -184,7 +192,13 @@ class MigrationService:
     3. For each database: EXPORT DATABASE to exports/{graph_id}/
     4. Write migration.json manifest
     """
+    if _export_in_progress:
+      await migration_task_manager.fail_task(task_id, "Export already in progress")
+      return
+
     try:
+      _set_export_in_progress(True)
+
       await migration_task_manager.update_task(
         task_id,
         status="running",
@@ -217,6 +231,8 @@ class MigrationService:
 
         logger.info(f"Exporting {db_name} ({i + 1}/{len(databases)})")
 
+        db = None
+        conn = None
         try:
           db = lbug.Database(str(db_file), read_only=True)
           conn = lbug.Connection(db)
@@ -227,36 +243,37 @@ class MigrationService:
 
           # Export to Parquet
           conn.execute(f"EXPORT DATABASE '{export_dir}'")
-
-          conn.close()
-          db.close()
-
-          # Upload system backup to S3 (safety net)
-          db_size = db_file.stat().st_size
-          system_backup_key = self._upload_system_backup(
-            db_file, db_name, source_version, target_version
-          )
-
-          manifest_databases.append(
-            {
-              "graph_id": db_name,
-              "export_path": f"exports/{db_name}",
-              "node_count": node_count,
-              "relationship_tables": rel_tables,
-              "size_bytes": db_size,
-              "system_backup_key": system_backup_key,
-              "exported_at": datetime.now(UTC).isoformat(),
-            }
-          )
-
-          logger.info(
-            f"Exported {db_name}: {node_count} nodes, "
-            f"{rel_tables} rel tables, {db_size / 1024 / 1024:.1f} MB"
-          )
-
         except Exception as e:
           logger.error(f"Failed to export {db_name}: {e}")
           raise RuntimeError(f"Export failed for {db_name}: {e}")
+        finally:
+          if conn:
+            conn.close()
+          if db:
+            db.close()
+
+        # Upload system backup to S3 (safety net)
+        db_size = db_file.stat().st_size
+        system_backup_key = self._upload_system_backup(
+          db_file, db_name, source_version, target_version
+        )
+
+        manifest_databases.append(
+          {
+            "graph_id": db_name,
+            "export_path": f"exports/{db_name}",
+            "node_count": node_count,
+            "relationship_tables": rel_tables,
+            "size_bytes": db_size,
+            "system_backup_key": system_backup_key,
+            "exported_at": datetime.now(UTC).isoformat(),
+          }
+        )
+
+        logger.info(
+          f"Exported {db_name}: {node_count} nodes, "
+          f"{rel_tables} rel tables, {db_size / 1024 / 1024:.1f} MB"
+        )
 
         # Update progress
         progress = int((i + 1) / len(databases) * 100)
@@ -302,6 +319,8 @@ class MigrationService:
     except Exception as e:
       logger.error(f"Migration export failed: {e}")
       await migration_task_manager.fail_task(task_id, str(e))
+    finally:
+      _set_export_in_progress(False)
 
   async def import_all_databases(self, task_id: str) -> None:
     """
@@ -381,23 +400,24 @@ class MigrationService:
 
         # Create fresh database and import
         start_time = time.time()
-        db = lbug.Database(str(db_file))
-        conn = lbug.Connection(db)
-
+        db = None
+        conn = None
         try:
+          db = lbug.Database(str(db_file))
+          conn = lbug.Connection(db)
           conn.execute(f"IMPORT DATABASE '{export_dir}'")
+
+          # Verify node counts
+          actual_nodes = self._get_node_count(conn)
+          expected_nodes = entry.get("node_count", 0)
+          duration = time.time() - start_time
         except Exception as e:
-          conn.close()
-          db.close()
           raise RuntimeError(f"IMPORT DATABASE failed for {db_name}: {e}")
-
-        # Verify node counts
-        actual_nodes = self._get_node_count(conn)
-        expected_nodes = entry.get("node_count", 0)
-        duration = time.time() - start_time
-
-        conn.close()
-        db.close()
+        finally:
+          if conn:
+            conn.close()
+          if db:
+            db.close()
 
         if expected_nodes > 0 and actual_nodes != expected_nodes:
           # Allow small tolerance for concurrent writes between export and import

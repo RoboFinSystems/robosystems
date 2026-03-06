@@ -83,10 +83,7 @@ def _get_writer_instances(
   if not include_shared_master:
     excluded_types.add("shared_master")
 
-  writers = [
-    inst for inst in all_items
-    if inst.get("node_type") not in excluded_types
-  ]
+  writers = [inst for inst in all_items if inst.get("node_type") not in excluded_types]
 
   # Log what we found
   healthy = sum(1 for w in writers if w.get("status") == "healthy")
@@ -128,9 +125,7 @@ async def _poll_task(
     if status == "completed":
       return task
     elif status == "failed":
-      raise RuntimeError(
-        f"Task {task_id} failed: {task.get('error', 'unknown error')}"
-      )
+      raise RuntimeError(f"Task {task_id} failed: {task.get('error', 'unknown error')}")
 
     if time.time() - start > max_wait:
       raise RuntimeError(
@@ -201,7 +196,7 @@ async def _run_parallel(coros: list, instance_ids: list[str]) -> list[dict[str, 
   raw_results = await asyncio.gather(*coros, return_exceptions=True)
 
   results = []
-  for instance_id, result in zip(instance_ids, raw_results):
+  for instance_id, result in zip(instance_ids, raw_results, strict=True):
     if isinstance(result, Exception):
       results.append(
         {"instance_id": instance_id, "status": "failed", "error": str(result)}
@@ -276,9 +271,7 @@ def export_all_instances(
 
   if failed > 0:
     errors = [r["error"] for r in results if r["status"] == "failed"]
-    raise RuntimeError(
-      f"Export failed on {failed} instance(s): {'; '.join(errors)}"
-    )
+    raise RuntimeError(f"Export failed on {failed} instance(s): {'; '.join(errors)}")
 
   return {
     "source_version": config.source_version,
@@ -353,9 +346,7 @@ def import_all_instances(
 
   if failed > 0:
     errors = [r["error"] for r in results if r["status"] == "failed"]
-    raise RuntimeError(
-      f"Import failed on {failed} instance(s): {'; '.join(errors)}"
-    )
+    raise RuntimeError(f"Import failed on {failed} instance(s): {'; '.join(errors)}")
 
   return {
     "instances": results,
