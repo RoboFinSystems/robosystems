@@ -1,13 +1,19 @@
 """
-Download rate limiting for shared repository backup downloads.
+Download rate limiting for backup downloads.
 
-This module implements monthly download limits for shared repository backups.
-Uses Valkey DB 1 (RATE_LIMITS) with monthly TTL expiration.
+This module implements monthly download limits for both shared repository
+and dedicated graph backup downloads. Uses Valkey DB 1 (RATE_LIMITS)
+with monthly TTL expiration.
+
+Limits by product:
+- Shared repositories: Defined in adapter manifests (e.g., SEC starter=0, pro=1)
+- Dedicated graphs: Defined in billing/core.py (standard=2, large=4, xlarge=unlimited)
 """
 
 from datetime import UTC, datetime
 from typing import Any
 
+from robosystems.config.billing.core import get_tier_backup_downloads_per_month
 from robosystems.config.shared_repositories import (
   get_rate_limits as _get_rate_limits,
 )
@@ -19,7 +25,7 @@ from robosystems.logger import logger
 
 
 class DownloadRateLimiter:
-  """Rate limiter for shared repository backup downloads."""
+  """Rate limiter for backup downloads (shared repos and dedicated graphs)."""
 
   # Default limit if not configured
   DEFAULT_DOWNLOADS_PER_MONTH = 1
@@ -47,6 +53,14 @@ class DownloadRateLimiter:
         f"Failed to get download limit for repository={repository}, plan={plan}: {e}"
       )
     return cls.DEFAULT_DOWNLOADS_PER_MONTH
+
+  @classmethod
+  def _get_graph_tier_monthly_limit(cls, graph_tier: str) -> int:
+    """Get the monthly download limit for a graph subscription tier.
+
+    Returns 0 for unlimited (e.g., xlarge tier).
+    """
+    return get_tier_backup_downloads_per_month(graph_tier)
 
   @classmethod
   def _get_reset_time(cls) -> datetime:
@@ -94,6 +108,52 @@ class DownloadRateLimiter:
       logger.debug(
         f"Download limit check for user {user_id} on {repository}: "
         f"used={used}, limit={monthly_limit}, remaining={remaining}"
+      )
+
+      return allowed, remaining, reset_at
+    finally:
+      if redis_client is not None:
+        await redis_client.aclose()
+
+  @classmethod
+  async def check_graph_download_limit(
+    cls,
+    user_id: str,
+    graph_id: str,
+    graph_tier: str,
+  ) -> tuple[bool, int, datetime]:
+    """Check if user has remaining backup downloads for a dedicated graph.
+
+    Args:
+        user_id: User ID
+        graph_id: Graph database identifier
+        graph_tier: Graph subscription tier (e.g., "ladybug-standard")
+
+    Returns:
+        Tuple of (allowed, remaining, resets_at)
+        - allowed: True if download is permitted (always True if unlimited)
+        - remaining: Number of downloads remaining (-1 if unlimited)
+        - resets_at: When the limit resets (first of next month, UTC)
+    """
+    monthly_limit = cls._get_graph_tier_monthly_limit(graph_tier)
+    reset_at = cls._get_reset_time()
+
+    # 0 means unlimited for graph tiers
+    if monthly_limit == 0:
+      return True, -1, reset_at
+
+    redis_client = None
+    try:
+      redis_client = cls._get_redis_client()
+      key = cls._get_key(user_id, graph_id)
+      current = await redis_client.get(key)
+      used = int(current) if current else 0
+      remaining = max(0, monthly_limit - used)
+      allowed = used < monthly_limit
+
+      logger.debug(
+        f"Graph download limit check for user {user_id} on {graph_id} "
+        f"(tier={graph_tier}): used={used}, limit={monthly_limit}, remaining={remaining}"
       )
 
       return allowed, remaining, reset_at
