@@ -948,7 +948,7 @@ Outputs:
     Export:
       Name: !Sub ${AWS::StackName}-ClusterArn
 
-  # Internal access endpoint (use with bastion port forwarding)
+  # Internal access endpoint (use with SSM port forwarding)
   DagsterInternalEndpoint:
     Description: Internal DNS endpoint for Dagster webserver (use with SSM tunnel)
     Value: !Sub webserver.dagster.${Environment}.robosystems.local
