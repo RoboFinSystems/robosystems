@@ -828,11 +828,28 @@ class DuckDBStager:
       # Unknown schema — just union without dedup
       return f'CREATE OR REPLACE TABLE "{target_table}" AS SELECT * FROM ({union_sql})'
 
-  # DuckDB settings prefix for merge operations.
-  # - threads=1: reduces per-thread memory overhead during aggregation
-  # - preserve_insertion_order=false: enables out-of-core hash aggregation
-  #   (DuckDB can partition and spill hash table to disk when disabled)
-  MERGE_SETTINGS_SQL = "SET threads=1; SET preserve_insertion_order=false; "
+  # Fraction of DuckDB boosted memory to allow during merge operations.
+  # DuckDB's memory tracking underestimates FLOAT[384] array allocations,
+  # so actual RSS exceeds tracked usage. Without capping, the Linux OOM killer
+  # terminates the process before DuckDB triggers spill-to-disk.
+  # 60% of 55GB boost = ~33GB limit, leaving ~22GB headroom for untracked
+  # allocations + OS. Element (10.6M groups) survived at ~95% with no cap;
+  # Label (11.3M groups) OOM-killed — the extra 7% of groups pushed past the limit.
+  MERGE_MEMORY_FRACTION = 0.60
+
+  def _get_merge_settings_sql(self, duckdb_memory_mb: int | None) -> str:
+    """Build SET statements prefix for merge operations.
+
+    Configures DuckDB for memory-safe dedup merges:
+    - threads=1: reduces per-thread memory overhead
+    - preserve_insertion_order=false: enables out-of-core hash aggregation
+    - memory_limit (if boost known): caps DuckDB to force earlier spill
+    """
+    parts = "SET threads=1; SET preserve_insertion_order=false; "
+    if duckdb_memory_mb and duckdb_memory_mb > 0:
+      merge_mb = int(duckdb_memory_mb * self.MERGE_MEMORY_FRACTION)
+      parts += f"SET memory_limit='{merge_mb}MB'; "
+    return parts
 
   async def _stage_table_chunked(
     self,
@@ -844,6 +861,7 @@ class DuckDBStager:
     log_progress: ProgressCallback,
     table_index: int,
     total_tables: int,
+    duckdb_memory_mb: int | None = None,
   ) -> tuple[bool, TableInfo | None, str | None]:
     """
     Stage a large table using hierarchical temp-table merging.
@@ -888,6 +906,9 @@ class DuckDBStager:
       logger.warning(
         f"Could not re-verify memory boost for chunked staging: {boost_err}"
       )
+
+    # Build merge settings with reduced memory_limit for spill-to-disk safety
+    merge_settings = self._get_merge_settings_sql(duckdb_memory_mb)
 
     # Phase 1: Create independent temp tables per quarter
     year_temps: dict[int, list[str]] = {}
@@ -987,7 +1008,7 @@ class DuckDBStager:
         merge_sql = self._build_dedup_merge_sql(
           year_table_name, temps_for_year, columns
         )
-        merge_sql = f"{self.MERGE_SETTINGS_SQL}{merge_sql}"
+        merge_sql = f"{merge_settings}{merge_sql}"
 
         merge_start = time.monotonic()
         await graph_client.query_table(
@@ -1043,7 +1064,7 @@ class DuckDBStager:
 
           group_name = f"{table_name}__tier{tier}_g{g // merge_group_size}"
           merge_sql = self._build_dedup_merge_sql(group_name, group, columns)
-          merge_sql = f"{self.MERGE_SETTINGS_SQL}{merge_sql}"
+          merge_sql = f"{merge_settings}{merge_sql}"
 
           merge_start = time.monotonic()
           await graph_client.query_table(
@@ -1080,13 +1101,13 @@ class DuckDBStager:
       # Final merge of remaining tables into target
       log_progress(f"  {table_name} final merge of {len(current_tables)} tables...")
       final_merge_sql = self._build_dedup_merge_sql(table_name, current_tables, columns)
-      final_merge_sql = f"{self.MERGE_SETTINGS_SQL}{final_merge_sql}"
+      final_merge_sql = f"{merge_settings}{final_merge_sql}"
 
       await graph_client.query_table(
         graph_id=self.graph_id, sql=final_merge_sql, timeout=float(timeout)
       )
 
-      await self._restore_threads(graph_client)
+      await self._restore_duckdb_settings(graph_client)
 
       # Get final row count
       count_result = await graph_client.query_table(
@@ -1104,7 +1125,7 @@ class DuckDBStager:
 
     except Exception as e:
       # Restore thread count before cleanup — SET threads=1 persists on pooled connection
-      await self._restore_threads(graph_client)
+      await self._restore_duckdb_settings(graph_client)
       await self._cleanup_temp_tables(graph_client, all_temp_tables)
       return False, None, f"{table_name} merge failed: {e}"
 
@@ -1123,16 +1144,28 @@ class DuckDBStager:
       None,
     )
 
-  async def _restore_threads(self, graph_client: "GraphClient") -> None:
-    """Restore DuckDB settings after merge operations (threads, insertion order)."""
+  async def _restore_duckdb_settings(self, graph_client: "GraphClient") -> None:
+    """Restore DuckDB settings after merge operations.
+
+    Resets threads, insertion order, and memory_limit back to defaults.
+    The memory_limit is restored to the full boost (or tier default) so
+    subsequent S3 downloads get the full allocation.
+    """
     try:
       from robosystems.config.graph_tier import GraphTierConfig
 
       tier = env.CLUSTER_TIER
       default_threads = GraphTierConfig.get_duckdb_max_threads(tier) if tier else 4
+      # Restore memory_limit to the full boost so S3 downloads aren't capped
+      boost_limit = GraphTierConfig.get_duckdb_memory_boost(tier) if tier else None
+      memory_sql = f"SET memory_limit='{boost_limit}'; " if boost_limit else ""
       await graph_client.query_table(
         graph_id=self.graph_id,
-        sql=(f"SET threads={default_threads}; SET preserve_insertion_order=true"),
+        sql=(
+          f"SET threads={default_threads}; "
+          f"SET preserve_insertion_order=true; "
+          f"{memory_sql}"
+        ),
         timeout=30.0,
       )
     except Exception:
@@ -1243,6 +1276,7 @@ class DuckDBStager:
           log_progress=log_progress,
           table_index=i,
           total_tables=total_tables,
+          duckdb_memory_mb=duckdb_memory_mb,
         )
       else:
         # Standard single-shot staging for small/medium tables
