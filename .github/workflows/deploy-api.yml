@@ -103,7 +103,7 @@ on:
 
       # Access Mode Configuration
       api_access_mode:
-        description: "API access mode: 'public' (HTTPS with domain) or 'internal' (via bastion tunnel)"
+        description: "API access mode: 'public' (HTTPS with domain) or 'internal' (via SSM tunnel)"
         required: false
         type: string
         default: "internal"
@@ -262,7 +262,7 @@ jobs:
               ;;
             "internal")
               echo "🔒 Internal-only deployment"
-              echo "   Access will be via bastion tunnel only"
+              echo "   Access will be via SSM tunnel only"
               ;;
             *)
               echo "ERROR: Invalid api_access_mode: $API_ACCESS_MODE"

@@ -225,14 +225,14 @@
       "problemMatcher": []
     },
     {
-      "label": "Bastion Tunnel",
+      "label": "SSM Tunnel",
       "type": "shell",
       "command": "direnv",
       "args": [
         "exec",
         ".",
         "just",
-        "bastion-tunnel",
+        "tunnel",
         "${input:environment}",
         "${input:tunnelService}"
       ],

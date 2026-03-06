@@ -83,7 +83,7 @@ function create_production_secret() {
 
     echo "Setting production secret values..."
 
-    # Build JWT entries for internal mode (localhost access via bastion tunnel)
+    # Build JWT entries for internal mode (localhost access via SSM tunnel)
     local jwt_entries=""
     if [ "${API_ACCESS_MODE:-internal}" = "internal" ]; then
         jwt_entries="\"JWT_ISSUER\": \"localhost\", \"JWT_AUDIENCE\": \"localhost\","
@@ -144,7 +144,7 @@ function create_staging_secret() {
 
     echo "Setting staging secret values..."
 
-    # Build JWT entries for internal mode (localhost access via bastion tunnel)
+    # Build JWT entries for internal mode (localhost access via SSM tunnel)
     local jwt_entries=""
     if [ "${API_ACCESS_MODE:-internal}" = "internal" ]; then
         jwt_entries="\"JWT_ISSUER\": \"localhost\", \"JWT_AUDIENCE\": \"localhost\","

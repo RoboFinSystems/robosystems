@@ -85,7 +85,7 @@ Parameters:
     MinValue: 0
     MaxValue: 100
     Description: Weight for FARGATE_SPOT capacity provider for daemon
-  # Webserver: UI and bastion tunnel access - configurable Spot ratio
+  # Webserver: UI and SSM tunnel access - configurable Spot ratio
   WebserverFargateWeight:
     Type: Number
     Default: 20
@@ -950,7 +950,7 @@ Outputs:
 
   # Internal access endpoint (use with bastion port forwarding)
   DagsterInternalEndpoint:
-    Description: Internal DNS endpoint for Dagster webserver (use with bastion tunnel)
+    Description: Internal DNS endpoint for Dagster webserver (use with SSM tunnel)
     Value: !Sub webserver.dagster.${Environment}.robosystems.local
     Export:
       Name: !Sub ${AWS::StackName}-InternalEndpoint
@@ -987,5 +987,5 @@ Outputs:
       Name: !Sub ${AWS::StackName}-DagsterUrl
 
   TunnelCommand:
-    Description: Command to access Dagster UI via bastion tunnel
+    Description: Command to access Dagster UI via SSM tunnel
     Value: !Sub "./bin/tools/tunnels.sh ${Environment} dagster"
