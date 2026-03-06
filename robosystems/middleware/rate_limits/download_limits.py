@@ -56,11 +56,9 @@ class DownloadRateLimiter:
 
   @classmethod
   def _get_graph_tier_monthly_limit(cls, graph_tier: str) -> int:
-    """Get the monthly download limit for a graph subscription tier.
-
-    Returns 0 for unlimited (e.g., xlarge tier).
-    """
-    return get_tier_backup_downloads_per_month(graph_tier)
+    """Get the monthly download limit for a graph subscription tier."""
+    limit = get_tier_backup_downloads_per_month(graph_tier)
+    return limit if limit > 0 else cls.DEFAULT_DOWNLOADS_PER_MONTH
 
   @classmethod
   def _get_reset_time(cls) -> datetime:
@@ -131,16 +129,12 @@ class DownloadRateLimiter:
 
     Returns:
         Tuple of (allowed, remaining, resets_at)
-        - allowed: True if download is permitted (always True if unlimited)
-        - remaining: Number of downloads remaining (-1 if unlimited)
+        - allowed: True if download is permitted
+        - remaining: Number of downloads remaining this month
         - resets_at: When the limit resets (first of next month, UTC)
     """
     monthly_limit = cls._get_graph_tier_monthly_limit(graph_tier)
     reset_at = cls._get_reset_time()
-
-    # 0 means unlimited for graph tiers
-    if monthly_limit == 0:
-      return True, -1, reset_at
 
     redis_client = None
     try:

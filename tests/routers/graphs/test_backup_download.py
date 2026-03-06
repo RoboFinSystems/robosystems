@@ -503,7 +503,7 @@ class TestBackupDownloadEndpoint:
   @patch("robosystems.routers.graphs.backups.download.Graph.get_by_id")
   @patch("robosystems.middleware.graph.utils.MultiTenantUtils.is_shared_repository")
   @patch("robosystems.models.iam.GraphUser.get_by_user_id")
-  def test_download_unlimited_for_xlarge_tier(
+  def test_download_allowed_for_xlarge_tier(
     self,
     mock_get_by_user_id,
     mock_is_shared,
@@ -514,7 +514,7 @@ class TestBackupDownloadEndpoint:
     client,
     mock_auth_user,
   ):
-    """Test that xlarge tier has unlimited downloads (no counter increment)."""
+    """Test that xlarge tier downloads work and count is tracked."""
     from robosystems.database import get_db_session
     from robosystems.middleware.auth.dependencies import get_current_user_with_graph
 
@@ -530,14 +530,14 @@ class TestBackupDownloadEndpoint:
       mock_user_graph.role = "admin"
       mock_get_by_user_id.return_value = [mock_user_graph]
 
-      # Graph has xlarge tier (unlimited)
+      # Graph has xlarge tier (10 downloads/month)
       mock_graph_record = MagicMock()
       mock_graph_record.graph_tier = "ladybug-xlarge"
       mock_get_graph.return_value = mock_graph_record
 
-      # Unlimited = always allowed
+      # Under limit
       reset_time = datetime.now(UTC) + timedelta(hours=5)
-      mock_check_graph_limit.return_value = (True, -1, reset_time)
+      mock_check_graph_limit.return_value = (True, 9, reset_time)
 
       mock_backup_mgr = MagicMock()
       mock_backup_mgr.get_backup_download_url = AsyncMock(
@@ -551,8 +551,8 @@ class TestBackupDownloadEndpoint:
 
       assert response.status_code == 200
 
-      # Verify download count was NOT incremented (xlarge = unlimited, limit=0)
-      mock_increment.assert_not_called()
+      # All tiers now track download count
+      mock_increment.assert_called_once()
     finally:
       if get_current_user_with_graph in app.dependency_overrides:
         del app.dependency_overrides[get_current_user_with_graph]
@@ -599,7 +599,7 @@ class TestBackupDownloadEndpoint:
       mock_get_graph.return_value = mock_graph_record
 
       reset_time = datetime.now(UTC) + timedelta(hours=5)
-      mock_check_graph_limit.return_value = (True, -1, reset_time)
+      mock_check_graph_limit.return_value = (True, 9, reset_time)
 
       # Backup not found
       mock_backup_mgr = MagicMock()

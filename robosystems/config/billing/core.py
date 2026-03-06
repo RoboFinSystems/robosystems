@@ -61,7 +61,7 @@ DEFAULT_GRAPH_BILLING_PLANS: list[dict[str, Any]] = [
     "max_queries_per_hour": None,  # Unlimited
     "infrastructure": "Dedicated r7g.xlarge (4 vCPU, 32 GB RAM)",
     "backup_retention_days": 90,
-    "backup_downloads_per_month": 0,  # 0 = unlimited
+    "backup_downloads_per_month": 10,  # ~$18 worst-case egress at 200GB avg
     "priority_support": True,
   },
 ]

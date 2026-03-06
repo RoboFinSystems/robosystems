@@ -172,20 +172,11 @@ async def get_backup_download_url(
       )
 
     # Increment download count for rate limiting
-    if is_shared:
+    if is_shared or (graph_record and graph_record.graph_tier):
       await DownloadRateLimiter.increment_download_count(
         user_id=str(current_user.id),
         repository=graph_id,
       )
-    elif graph_record and graph_record.graph_tier:
-      tier_limit = DownloadRateLimiter._get_graph_tier_monthly_limit(
-        str(graph_record.graph_tier)
-      )
-      if tier_limit > 0:  # Only track if not unlimited
-        await DownloadRateLimiter.increment_download_count(
-          user_id=str(current_user.id),
-          repository=graph_id,
-        )
 
     # Record business event
     metrics_instance = get_endpoint_metrics()
