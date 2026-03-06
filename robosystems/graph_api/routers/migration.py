@@ -82,3 +82,14 @@ async def migration_status() -> MigrationStatusResponse:
   """
   status = migration_service.get_status()
   return MigrationStatusResponse(**status)
+
+
+@router.post("/cleanup")
+async def cleanup_pre_migration() -> dict:
+  """
+  Delete .pre-migration files after verifying the migration succeeded.
+
+  System backups in S3 remain as the safety net. Call this after
+  confirming the migrated databases are working correctly.
+  """
+  return migration_service.cleanup_pre_migration_files()

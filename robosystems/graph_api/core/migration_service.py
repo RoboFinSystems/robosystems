@@ -19,14 +19,18 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+import boto3
 import real_ladybug as lbug
+from boto3.s3.transfer import TransferConfig
 
 from robosystems.config import env
+from robosystems.config.storage.graph import get_backup_key
 from robosystems.graph_api.core.task_manager import migration_task_manager
 from robosystems.logger import logger
 
-# Migration state — health endpoint returns 503 while True
+# Migration state — health endpoint returns 503 while import is running
 _migration_in_progress = False
+_export_in_progress = False
 _migration_lock = threading.Lock()
 _active_task_id: str | None = None
 
@@ -44,6 +48,13 @@ def _set_migration_in_progress(value: bool, task_id: str | None = None) -> None:
     _active_task_id = task_id if value else None
 
 
+def _set_export_in_progress(value: bool) -> None:
+  """Set export state (thread-safe)."""
+  global _export_in_progress
+  with _migration_lock:
+    _export_in_progress = value
+
+
 def get_active_task_id() -> str | None:
   """Get the currently active migration task ID."""
   return _active_task_id
@@ -56,6 +67,61 @@ class MigrationService:
     self.base_path = base_path or Path(env.LBUG_DATABASE_PATH)
     self.exports_path = self.base_path / "exports"
     self.manifest_path = self.base_path / "migration.json"
+
+  def _get_s3_client(self):
+    """Create S3 client using instance credentials."""
+    s3_config = env.get_s3_config()
+    kwargs = {"region_name": s3_config.get("region_name")}
+    if s3_config.get("endpoint_url"):
+      kwargs["endpoint_url"] = s3_config["endpoint_url"]
+    if s3_config.get("aws_access_key_id"):
+      kwargs["aws_access_key_id"] = s3_config["aws_access_key_id"]
+      kwargs["aws_secret_access_key"] = s3_config.get("aws_secret_access_key")
+    return boto3.client("s3", **kwargs)
+
+  def _upload_system_backup(
+    self, db_file: Path, graph_id: str, source_version: str, target_version: str
+  ) -> str:
+    """Upload .lbug file to S3 as a system backup before migration.
+
+    Returns:
+        S3 key of the uploaded backup
+    """
+    timestamp = datetime.now(UTC)
+    s3_key = get_backup_key(graph_id, "system", timestamp, extension=".lbug")
+    bucket = env.S3_GRAPH_BUCKET
+
+    s3_client = self._get_s3_client()
+    transfer_config = TransferConfig(
+      multipart_chunksize=100 * 1024 * 1024,
+      multipart_threshold=100 * 1024 * 1024,
+      max_concurrency=4,
+    )
+
+    db_size = db_file.stat().st_size
+    logger.info(
+      f"Uploading system backup for {graph_id} "
+      f"({db_size / 1024 / 1024:.1f} MB) to s3://{bucket}/{s3_key}"
+    )
+
+    s3_client.upload_file(
+      str(db_file),
+      bucket,
+      s3_key,
+      Config=transfer_config,
+      ExtraArgs={
+        "Metadata": {
+          "backup_type": "system",
+          "source_version": source_version,
+          "target_version": target_version,
+          "created_at": timestamp.isoformat(),
+          "original_size": str(db_size),
+        },
+      },
+    )
+
+    logger.info(f"System backup uploaded: s3://{bucket}/{s3_key}")
+    return s3_key
 
   def _discover_databases(self) -> list[str]:
     """Find all .lbug database files on this instance."""
@@ -80,8 +146,8 @@ class MigrationService:
           cr = conn.execute(f"MATCH (n:{name}) RETURN count(n) as c")
           if cr.has_next():
             node_count += cr.get_next()[0]
-        except Exception:
-          pass
+        except Exception as e:
+          logger.warning(f"Failed to count nodes in {name}: {e}")
     return node_count
 
   def _get_rel_table_count(self, conn) -> int:
@@ -126,7 +192,13 @@ class MigrationService:
     3. For each database: EXPORT DATABASE to exports/{graph_id}/
     4. Write migration.json manifest
     """
+    if _export_in_progress:
+      await migration_task_manager.fail_task(task_id, "Export already in progress")
+      return
+
     try:
+      _set_export_in_progress(True)
+
       await migration_task_manager.update_task(
         task_id,
         status="running",
@@ -159,6 +231,8 @@ class MigrationService:
 
         logger.info(f"Exporting {db_name} ({i + 1}/{len(databases)})")
 
+        db = None
+        conn = None
         try:
           db = lbug.Database(str(db_file), read_only=True)
           conn = lbug.Connection(db)
@@ -167,32 +241,39 @@ class MigrationService:
           node_count = self._get_node_count(conn)
           rel_tables = self._get_rel_table_count(conn)
 
-          # Export
+          # Export to Parquet
           conn.execute(f"EXPORT DATABASE '{export_dir}'")
-
-          db_size = db_file.stat().st_size
-          manifest_databases.append(
-            {
-              "graph_id": db_name,
-              "export_path": f"exports/{db_name}",
-              "node_count": node_count,
-              "relationship_tables": rel_tables,
-              "size_bytes": db_size,
-              "exported_at": datetime.now(UTC).isoformat(),
-            }
-          )
-
-          conn.close()
-          db.close()
-
-          logger.info(
-            f"Exported {db_name}: {node_count} nodes, "
-            f"{rel_tables} rel tables, {db_size / 1024 / 1024:.1f} MB"
-          )
-
         except Exception as e:
           logger.error(f"Failed to export {db_name}: {e}")
           raise RuntimeError(f"Export failed for {db_name}: {e}")
+        finally:
+          if conn:
+            conn.close()
+          if db:
+            db.close()
+
+        # Upload system backup to S3 (safety net)
+        db_size = db_file.stat().st_size
+        system_backup_key = self._upload_system_backup(
+          db_file, db_name, source_version, target_version
+        )
+
+        manifest_databases.append(
+          {
+            "graph_id": db_name,
+            "export_path": f"exports/{db_name}",
+            "node_count": node_count,
+            "relationship_tables": rel_tables,
+            "size_bytes": db_size,
+            "system_backup_key": system_backup_key,
+            "exported_at": datetime.now(UTC).isoformat(),
+          }
+        )
+
+        logger.info(
+          f"Exported {db_name}: {node_count} nodes, "
+          f"{rel_tables} rel tables, {db_size / 1024 / 1024:.1f} MB"
+        )
 
         # Update progress
         progress = int((i + 1) / len(databases) * 100)
@@ -238,6 +319,8 @@ class MigrationService:
     except Exception as e:
       logger.error(f"Migration export failed: {e}")
       await migration_task_manager.fail_task(task_id, str(e))
+    finally:
+      _set_export_in_progress(False)
 
   async def import_all_databases(self, task_id: str) -> None:
     """
@@ -317,23 +400,24 @@ class MigrationService:
 
         # Create fresh database and import
         start_time = time.time()
-        db = lbug.Database(str(db_file))
-        conn = lbug.Connection(db)
-
+        db = None
+        conn = None
         try:
+          db = lbug.Database(str(db_file))
+          conn = lbug.Connection(db)
           conn.execute(f"IMPORT DATABASE '{export_dir}'")
+
+          # Verify node counts
+          actual_nodes = self._get_node_count(conn)
+          expected_nodes = entry.get("node_count", 0)
+          duration = time.time() - start_time
         except Exception as e:
-          conn.close()
-          db.close()
           raise RuntimeError(f"IMPORT DATABASE failed for {db_name}: {e}")
-
-        # Verify node counts
-        actual_nodes = self._get_node_count(conn)
-        expected_nodes = entry.get("node_count", 0)
-        duration = time.time() - start_time
-
-        conn.close()
-        db.close()
+        finally:
+          if conn:
+            conn.close()
+          if db:
+            db.close()
 
         if expected_nodes > 0 and actual_nodes != expected_nodes:
           # Allow small tolerance for concurrent writes between export and import
@@ -434,4 +518,34 @@ class MigrationService:
       "manifest": manifest,
       "pre_migration_files": pre_migration_files,
       "active_task_id": get_active_task_id(),
+    }
+
+  def cleanup_pre_migration_files(self) -> dict[str, Any]:
+    """Delete .pre-migration files after successful migration.
+
+    These files are the original .lbug databases from the old version.
+    System backups in S3 provide the safety net after cleanup.
+
+    Returns:
+        Cleanup result with files deleted and total size freed
+    """
+    deleted = []
+    total_freed = 0
+
+    for f in sorted(self.base_path.iterdir()):
+      if f.name.endswith(".pre-migration"):
+        size = f.stat().st_size
+        os.remove(f)
+        deleted.append(f.name)
+        total_freed += size
+        logger.info(f"Deleted {f.name} ({size / 1024 / 1024:.1f} MB)")
+
+    logger.info(
+      f"Cleanup complete: {len(deleted)} files, "
+      f"{total_freed / 1024 / 1024:.1f} MB freed"
+    )
+
+    return {
+      "files_deleted": deleted,
+      "total_freed_bytes": total_freed,
     }
