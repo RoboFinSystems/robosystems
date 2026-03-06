@@ -16,6 +16,7 @@ from sse_starlette.sse import EventSourceResponse
 from robosystems.config.valkey_registry import ValkeyDatabase
 from robosystems.graph_api.core.task_manager import (
   backup_task_manager,
+  migration_task_manager,
   restore_task_manager,
 )
 from robosystems.graph_api.core.task_sse import TaskType, generate_task_sse_events
@@ -42,6 +43,7 @@ class UnifiedTaskManager:
       "restore": restore_task_manager,
       "copy": ingestion_task_manager,  # Copy uses ingestion manager
       "staging": staging_task_manager,  # DuckDB table creation from S3
+      "migration": migration_task_manager,  # Version migration export/import
     }
 
   async def get_redis(self) -> redis_async.Redis:
@@ -126,6 +128,8 @@ class UnifiedTaskManager:
       return TaskType.RESTORE
     elif task_id.startswith("staging"):
       return TaskType.STAGING
+    elif task_id.startswith("migration"):
+      return TaskType.MIGRATION
     else:
       # Default to ingestion for unknown types
       return TaskType.INGESTION
