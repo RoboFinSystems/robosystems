@@ -1799,3 +1799,15 @@ class GraphClient(BaseGraphClient):
     """
     response = await self._request("GET", "/migration/status")
     return response.json()
+
+  async def migration_cleanup(self) -> dict[str, Any]:
+    """
+    Delete .pre-migration files on this instance after verifying migration success.
+
+    System backups in S3 remain as the safety net.
+
+    Returns:
+        Cleanup result with files deleted and bytes freed
+    """
+    response = await self._request("POST", "/migration/cleanup")
+    return response.json()

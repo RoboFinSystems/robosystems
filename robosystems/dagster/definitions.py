@@ -69,6 +69,10 @@ from robosystems.dagster.jobs.infrastructure import (
   weekly_health_check_job,
   weekly_health_check_schedule,
 )
+from robosystems.dagster.jobs.migration import (
+  ladybug_migration_export_job,
+  ladybug_migration_import_job,
+)
 from robosystems.dagster.jobs.invoice_billing import (
   invoice_subscription_renewal_job,
 )
@@ -160,6 +164,9 @@ all_jobs = [
   deprovision_suspended_graphs_job,
   # Platform: Shared repository (standalone refresh only)
   shared_repository_refresh_replicas_job,
+  # Platform: Version migration (manually triggered)
+  ladybug_migration_export_job,
+  ladybug_migration_import_job,
   # Platform: Notifications
   send_email_job,
   # Adapter: SEC pipeline

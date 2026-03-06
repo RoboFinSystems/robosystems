@@ -19,9 +19,12 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+import boto3
 import real_ladybug as lbug
+from boto3.s3.transfer import TransferConfig
 
 from robosystems.config import env
+from robosystems.config.storage.graph import get_backup_key
 from robosystems.graph_api.core.task_manager import migration_task_manager
 from robosystems.logger import logger
 
@@ -56,6 +59,61 @@ class MigrationService:
     self.base_path = base_path or Path(env.LBUG_DATABASE_PATH)
     self.exports_path = self.base_path / "exports"
     self.manifest_path = self.base_path / "migration.json"
+
+  def _get_s3_client(self):
+    """Create S3 client using instance credentials."""
+    s3_config = env.get_s3_config()
+    kwargs = {"region_name": s3_config.get("region_name")}
+    if s3_config.get("endpoint_url"):
+      kwargs["endpoint_url"] = s3_config["endpoint_url"]
+    if s3_config.get("aws_access_key_id"):
+      kwargs["aws_access_key_id"] = s3_config["aws_access_key_id"]
+      kwargs["aws_secret_access_key"] = s3_config.get("aws_secret_access_key")
+    return boto3.client("s3", **kwargs)
+
+  def _upload_system_backup(
+    self, db_file: Path, graph_id: str, source_version: str, target_version: str
+  ) -> str:
+    """Upload .lbug file to S3 as a system backup before migration.
+
+    Returns:
+        S3 key of the uploaded backup
+    """
+    timestamp = datetime.now(UTC)
+    s3_key = get_backup_key(graph_id, "system", timestamp, extension=".lbug")
+    bucket = env.S3_GRAPH_BUCKET
+
+    s3_client = self._get_s3_client()
+    transfer_config = TransferConfig(
+      multipart_chunksize=100 * 1024 * 1024,
+      multipart_threshold=100 * 1024 * 1024,
+      max_concurrency=4,
+    )
+
+    db_size = db_file.stat().st_size
+    logger.info(
+      f"Uploading system backup for {graph_id} "
+      f"({db_size / 1024 / 1024:.1f} MB) to s3://{bucket}/{s3_key}"
+    )
+
+    s3_client.upload_file(
+      str(db_file),
+      bucket,
+      s3_key,
+      Config=transfer_config,
+      ExtraArgs={
+        "Metadata": {
+          "backup_type": "system",
+          "source_version": source_version,
+          "target_version": target_version,
+          "created_at": timestamp.isoformat(),
+          "original_size": str(db_size),
+        },
+      },
+    )
+
+    logger.info(f"System backup uploaded: s3://{bucket}/{s3_key}")
+    return s3_key
 
   def _discover_databases(self) -> list[str]:
     """Find all .lbug database files on this instance."""
@@ -167,10 +225,18 @@ class MigrationService:
           node_count = self._get_node_count(conn)
           rel_tables = self._get_rel_table_count(conn)
 
-          # Export
+          # Export to Parquet
           conn.execute(f"EXPORT DATABASE '{export_dir}'")
 
+          conn.close()
+          db.close()
+
+          # Upload system backup to S3 (safety net)
           db_size = db_file.stat().st_size
+          system_backup_key = self._upload_system_backup(
+            db_file, db_name, source_version, target_version
+          )
+
           manifest_databases.append(
             {
               "graph_id": db_name,
@@ -178,12 +244,10 @@ class MigrationService:
               "node_count": node_count,
               "relationship_tables": rel_tables,
               "size_bytes": db_size,
+              "system_backup_key": system_backup_key,
               "exported_at": datetime.now(UTC).isoformat(),
             }
           )
-
-          conn.close()
-          db.close()
 
           logger.info(
             f"Exported {db_name}: {node_count} nodes, "
@@ -434,4 +498,34 @@ class MigrationService:
       "manifest": manifest,
       "pre_migration_files": pre_migration_files,
       "active_task_id": get_active_task_id(),
+    }
+
+  def cleanup_pre_migration_files(self) -> dict[str, Any]:
+    """Delete .pre-migration files after successful migration.
+
+    These files are the original .lbug databases from the old version.
+    System backups in S3 provide the safety net after cleanup.
+
+    Returns:
+        Cleanup result with files deleted and total size freed
+    """
+    deleted = []
+    total_freed = 0
+
+    for f in sorted(self.base_path.iterdir()):
+      if f.name.endswith(".pre-migration"):
+        size = f.stat().st_size
+        os.remove(f)
+        deleted.append(f.name)
+        total_freed += size
+        logger.info(f"Deleted {f.name} ({size / 1024 / 1024:.1f} MB)")
+
+    logger.info(
+      f"Cleanup complete: {len(deleted)} files, "
+      f"{total_freed / 1024 / 1024:.1f} MB freed"
+    )
+
+    return {
+      "files_deleted": deleted,
+      "total_freed_bytes": total_freed,
     }

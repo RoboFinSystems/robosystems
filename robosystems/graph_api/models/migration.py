@@ -16,6 +16,7 @@ class DatabaseExportResult(BaseModel):
   node_count: int
   relationship_tables: int
   size_bytes: int
+  system_backup_key: str | None = None
   exported_at: str
 
 
