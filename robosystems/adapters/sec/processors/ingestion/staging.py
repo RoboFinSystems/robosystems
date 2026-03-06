@@ -820,6 +820,7 @@ class DuckDBStager:
     accumulator_name = f"{table_name}__acc"
     columns: list[str] | None = None
     accumulator_rows = 0
+    current_temp: str | None = None  # Track for cleanup on failure
 
     # Re-verify DuckDB memory boost before chunked staging. If a previous table
     # OOMed and crashed the Graph API container, the boost (stored in-memory) is
@@ -843,6 +844,7 @@ class DuckDBStager:
           f"filed={year_val}-Q{q}/{entity_type}/{table_name}/*.parquet"
         )
         temp_name = f"{table_name}__{year_val}_Q{q}"
+        current_temp = temp_name
 
         # Download quarter from S3
         try:
@@ -857,13 +859,13 @@ class DuckDBStager:
             error = response.get("error", "Unknown error")
             if "No files found" in error:
               continue
-            await self._cleanup_temp_tables(graph_client, [accumulator_name])
+            await self._cleanup_temp_tables(graph_client, [accumulator_name, temp_name])
             return False, None, f"{table_name} {year_val}-Q{q}: {error}"
 
         except Exception as e:
           if "No files found" in str(e):
             continue
-          await self._cleanup_temp_tables(graph_client, [accumulator_name])
+          await self._cleanup_temp_tables(graph_client, [accumulator_name, temp_name])
           return False, None, f"{table_name} {year_val}-Q{q}: {e}"
 
         result = response.get("result", {})
@@ -890,6 +892,7 @@ class DuckDBStager:
           await graph_client.query_table(
             graph_id=self.graph_id, sql=rename_sql, timeout=30.0
           )
+          current_temp = None
           accumulator_rows = rows
           log_progress(
             f"  {table_name} {year_val}-Q{q}: {rows:,} rows in {dl_duration:.1f}s "
@@ -942,6 +945,7 @@ class DuckDBStager:
         # Drop temp table to free disk space
         try:
           await graph_client.delete_table(self.graph_id, temp_name)
+          current_temp = None
         except Exception:
           pass
 
@@ -983,7 +987,10 @@ class DuckDBStager:
       )
 
     except Exception as e:
-      await self._cleanup_temp_tables(graph_client, [accumulator_name])
+      cleanup = [accumulator_name]
+      if current_temp:
+        cleanup.append(current_temp)
+      await self._cleanup_temp_tables(graph_client, cleanup)
       return False, None, f"{table_name} failed: {e}"
 
   async def _cleanup_temp_tables(
