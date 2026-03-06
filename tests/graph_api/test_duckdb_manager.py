@@ -93,6 +93,7 @@ class TestDuckDBTableManager:
       mock_probe_result,  # Schema probe
       None,  # CREATE TABLE statement
       mock_count_result,  # COUNT(*) query
+      None,  # CHECKPOINT
     ]
 
     request = TableCreateRequest(
@@ -144,6 +145,7 @@ class TestDuckDBTableManager:
       mock_probe_result,  # Schema probe
       None,  # CREATE TABLE statement
       mock_count_result,  # COUNT(*) query
+      None,  # CHECKPOINT
     ]
 
     request = TableCreateRequest(
@@ -596,14 +598,14 @@ class TestInsertIntoTable:
     assert "NOT EXISTS" not in insert_sql[0]
 
   @patch("robosystems.graph_api.core.duckdb.manager.get_duckdb_pool")
-  def test_insert_deduplicate_default_is_false(self, mock_get_pool):
-    """Default deduplicate is False on TableCreateRequest."""
+  def test_insert_deduplicate_default_is_true(self, mock_get_pool):
+    """Default deduplicate is True on TableCreateRequest."""
     request = TableCreateRequest(
       graph_id="test_graph",
       table_name="Entity",
       s3_pattern="s3://bucket/data/*.parquet",
     )
-    assert request.deduplicate is False
+    assert request.deduplicate is True
 
   @patch("robosystems.graph_api.core.duckdb.manager.get_duckdb_pool")
   def test_insert_with_file_list(self, mock_get_pool):

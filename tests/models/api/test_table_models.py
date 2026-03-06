@@ -36,11 +36,7 @@ class TestFileStatusUpdate:
     model = FileStatusUpdate(status="uploaded")
     dumped = model.model_dump()
 
-    assert dumped == {
-      "status": "uploaded",
-      "ingest_to_graph": False,
-      "deduplicate": True,
-    }
+    assert dumped == {"status": "uploaded", "ingest_to_graph": False}
 
   def test_model_json_schema(self):
     schema = FileStatusUpdate.model_json_schema()
@@ -65,17 +61,3 @@ class TestFileStatusUpdate:
 
     assert '"status":"archived"' in json_str
     assert '"ingest_to_graph":false' in json_str
-    assert '"deduplicate":true' in json_str
-
-  def test_deduplicate_default_is_true(self):
-    model = FileStatusUpdate(status="uploaded")
-    assert model.deduplicate is True
-
-  def test_deduplicate_false(self):
-    model = FileStatusUpdate(status="uploaded", deduplicate=False)
-    assert model.deduplicate is False
-
-  def test_deduplicate_in_json_roundtrip(self):
-    json_data = '{"status": "uploaded", "deduplicate": false}'
-    model = FileStatusUpdate.model_validate_json(json_data)
-    assert model.deduplicate is False

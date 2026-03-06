@@ -37,7 +37,6 @@ async def stage_file_directly(
   s3_key: str,
   file_size_bytes: int,
   row_count: int | None = None,
-  deduplicate: bool = True,
 ) -> dict[str, Any]:
   """
   Stage a file directly to DuckDB without Dagster orchestration.
@@ -56,8 +55,6 @@ async def stage_file_directly(
       s3_key: The S3 key of the file
       file_size_bytes: Size of the file in bytes
       row_count: Optional row count for the file
-      deduplicate: If True, skip rows whose dedup key already exists in the
-          target table using NOT EXISTS. Default True.
 
   Returns:
       Dict with staging result including status, duration, etc.
@@ -130,7 +127,7 @@ async def stage_file_directly(
           graph_id=graph_id,
           table_name=table.table_name,
           s3_pattern=[new_file_s3],
-          deduplicate=deduplicate,
+          deduplicate=True,
         )
       else:
         # Table does not exist - create with all files (first-file path)

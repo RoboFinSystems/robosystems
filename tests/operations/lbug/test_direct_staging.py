@@ -712,7 +712,7 @@ class TestStageFileDirectly:
 
 
 class TestStageFileDirectlyDeduplicate:
-  """Test deduplicate parameter passthrough in stage_file_directly."""
+  """Test that insert_into_table always deduplicates."""
 
   @pytest.fixture
   def mock_db_session(self):
@@ -748,10 +748,10 @@ class TestStageFileDirectlyDeduplicate:
 
   @pytest.mark.unit
   @pytest.mark.asyncio
-  async def test_deduplicate_true_passed_to_insert(
+  async def test_insert_always_deduplicates(
     self, mock_db_session, mock_graph_file, mock_graph_table, mock_graph_client
   ):
-    """Test that deduplicate=True is passed through to insert_into_table."""
+    """Test that insert_into_table is called with deduplicate=True."""
     with (
       patch(FACTORY_PATH) as mock_factory,
       patch(GRAPH_FILE_PATH) as mock_file_class,
@@ -772,7 +772,6 @@ class TestStageFileDirectlyDeduplicate:
         table_id="gt_table1",
         s3_key="graphs/kg1234/tables/entity/file1.parquet",
         file_size_bytes=1024,
-        deduplicate=True,
       )
 
       assert result["status"] == "success"
@@ -782,113 +781,6 @@ class TestStageFileDirectlyDeduplicate:
         s3_pattern=["s3://robosystems-local/graphs/kg1234/tables/entity/file1.parquet"],
         deduplicate=True,
       )
-
-  @pytest.mark.unit
-  @pytest.mark.asyncio
-  async def test_deduplicate_false_passed_to_insert(
-    self, mock_db_session, mock_graph_file, mock_graph_table, mock_graph_client
-  ):
-    """Test that deduplicate=False is passed through to insert_into_table."""
-    with (
-      patch(FACTORY_PATH) as mock_factory,
-      patch(GRAPH_FILE_PATH) as mock_file_class,
-      patch(GRAPH_TABLE_PATH) as mock_table_class,
-      patch(f"{MODULE}._report_staging_materialization", new_callable=AsyncMock),
-      patch(f"{MODULE}.env") as mock_env,
-    ):
-      mock_env.USER_DATA_BUCKET = "robosystems-local"
-      mock_file_class.get_by_id.return_value = mock_graph_file
-      mock_table_class.get_by_id.return_value = mock_graph_table
-      mock_file_class.get_all_for_table.return_value = [mock_graph_file]
-      mock_factory.create_client = AsyncMock(return_value=mock_graph_client)
-
-      result = await stage_file_directly(
-        db=mock_db_session,
-        file_id="gf_file1",
-        graph_id="kg1234567890abcdef",
-        table_id="gt_table1",
-        s3_key="graphs/kg1234/tables/entity/file1.parquet",
-        file_size_bytes=1024,
-        deduplicate=False,
-      )
-
-      assert result["status"] == "success"
-      mock_graph_client.insert_into_table.assert_called_once_with(
-        graph_id="kg1234567890abcdef",
-        table_name="Entity",
-        s3_pattern=["s3://robosystems-local/graphs/kg1234/tables/entity/file1.parquet"],
-        deduplicate=False,
-      )
-
-  @pytest.mark.unit
-  @pytest.mark.asyncio
-  async def test_deduplicate_default_is_true(
-    self, mock_db_session, mock_graph_file, mock_graph_table, mock_graph_client
-  ):
-    """Test that the default deduplicate value is True."""
-    with (
-      patch(FACTORY_PATH) as mock_factory,
-      patch(GRAPH_FILE_PATH) as mock_file_class,
-      patch(GRAPH_TABLE_PATH) as mock_table_class,
-      patch(f"{MODULE}._report_staging_materialization", new_callable=AsyncMock),
-      patch(f"{MODULE}.env") as mock_env,
-    ):
-      mock_env.USER_DATA_BUCKET = "robosystems-local"
-      mock_file_class.get_by_id.return_value = mock_graph_file
-      mock_table_class.get_by_id.return_value = mock_graph_table
-      mock_file_class.get_all_for_table.return_value = [mock_graph_file]
-      mock_factory.create_client = AsyncMock(return_value=mock_graph_client)
-
-      await stage_file_directly(
-        db=mock_db_session,
-        file_id="gf_file1",
-        graph_id="kg1234567890abcdef",
-        table_id="gt_table1",
-        s3_key="graphs/kg1234/tables/entity/file1.parquet",
-        file_size_bytes=1024,
-        # No deduplicate arg — should default to True
-      )
-
-      call_kwargs = mock_graph_client.insert_into_table.call_args.kwargs
-      assert call_kwargs["deduplicate"] is True
-
-  @pytest.mark.unit
-  @pytest.mark.asyncio
-  async def test_deduplicate_not_used_for_new_table(
-    self, mock_db_session, mock_graph_file, mock_graph_table
-  ):
-    """Test that create_table path (new table) doesn't pass deduplicate."""
-    mock_client = AsyncMock()
-    mock_client.list_tables = AsyncMock(return_value=[])
-    mock_client.create_table = AsyncMock(return_value={"status": "created", "rows": 50})
-    mock_client.close = AsyncMock()
-
-    with (
-      patch(FACTORY_PATH) as mock_factory,
-      patch(GRAPH_FILE_PATH) as mock_file_class,
-      patch(GRAPH_TABLE_PATH) as mock_table_class,
-      patch(f"{MODULE}._report_staging_materialization", new_callable=AsyncMock),
-      patch(f"{MODULE}.env") as mock_env,
-    ):
-      mock_env.USER_DATA_BUCKET = "robosystems-local"
-      mock_file_class.get_by_id.return_value = mock_graph_file
-      mock_table_class.get_by_id.return_value = mock_graph_table
-      mock_file_class.get_all_for_table.return_value = [mock_graph_file]
-      mock_factory.create_client = AsyncMock(return_value=mock_client)
-
-      result = await stage_file_directly(
-        db=mock_db_session,
-        file_id="gf_file1",
-        graph_id="kg1234567890abcdef",
-        table_id="gt_table1",
-        s3_key="graphs/kg1234/tables/entity/file1.parquet",
-        file_size_bytes=1024,
-        deduplicate=True,
-      )
-
-      assert result["status"] == "success"
-      mock_client.create_table.assert_called_once()
-      mock_client.insert_into_table.assert_not_called()
 
 
 class TestReportStagingMaterialization:

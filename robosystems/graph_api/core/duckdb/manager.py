@@ -876,7 +876,8 @@ class DuckDBTableManager:
 
         # Check if file_id column exists
         columns_result = conn.execute(
-          f"SELECT column_name FROM information_schema.columns WHERE table_name = '{table_name}'"
+          "SELECT column_name FROM information_schema.columns WHERE table_name = ?",
+          [table_name],
         ).fetchall()
         column_names = [row[0] for row in columns_result]
 

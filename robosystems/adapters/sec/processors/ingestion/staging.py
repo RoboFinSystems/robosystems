@@ -449,7 +449,6 @@ class DuckDBStager:
               table_name=table_name,
               s3_pattern=s3_pattern,
               timeout=timeout,
-              deduplicate=True,
             )
 
             if response.get("status") == "failed":
