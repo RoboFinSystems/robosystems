@@ -387,6 +387,7 @@ async def materialize_table(
 
       # Checkpoint, build vector indexes, and release LadybugDB memory
       # This prevents memory accumulation during multi-table materialization
+      is_batch = request.batch_num is not None
       try:
         with ladybug_service.db_manager.connection_pool.get_connection(
           graph_id
@@ -395,14 +396,15 @@ async def materialize_table(
           conn.execute("CHECKPOINT")
           logger.debug(f"Checkpointed LadybugDB after {table_name} materialization")
 
-          # Build HNSW vector index for tables with embedding columns
-          # Must happen AFTER data is loaded (indexes on empty tables are empty)
-          ladybug_service.db_manager.create_vector_index(conn, table_name)
-
-          # Checkpoint again to persist vector index to disk
-          # Without this, the index exists only in-memory and is lost when
-          # force_database_cleanup destroys the Database object below
-          conn.execute("CHECKPOINT")
+          # Build HNSW vector index for tables with embedding columns.
+          # Skip during batched materialization — the caller is responsible
+          # for rebuilding the index once after all batches complete.
+          # Building per-batch creates an index covering only batch 1's data
+          # (subsequent batches see "already exists" and skip).
+          if not is_batch:
+            ladybug_service.db_manager.create_vector_index(conn, table_name)
+            # Checkpoint again to persist vector index to disk
+            conn.execute("CHECKPOINT")
 
         # Release buffer pool memory - data is safe on disk now
         ladybug_service.db_manager.connection_pool.force_database_cleanup(

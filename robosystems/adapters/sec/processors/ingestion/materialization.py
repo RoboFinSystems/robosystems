@@ -835,6 +835,52 @@ class LadybugMaterializer:
     finally:
       db.close()
 
+  @staticmethod
+  async def _rebuild_vector_index(
+    graph_client: "GraphClient",
+    graph_id: str,
+    table_name: str,
+    log_progress: ProgressCallback | None = None,
+  ) -> None:
+    """Rebuild HNSW vector index for a table after batched materialization.
+
+    Drops the existing partial index (covers only batch 1) and creates a
+    fresh one over the full dataset. Runs via the query endpoint on the master.
+    """
+    index_name = f"{table_name.lower()}_vec_index"
+
+    if log_progress:
+      log_progress(f"  [{table_name}] Rebuilding vector index over full data...")
+
+    # Drop existing partial index
+    try:
+      await graph_client.query(
+        f"CALL DROP_VECTOR_INDEX('{table_name}', '{index_name}')",
+        graph_id,
+      )
+    except Exception as e:
+      if "doesn't have an index" not in str(e):
+        logger.warning(f"Could not drop vector index {index_name}: {e}")
+
+    # Create fresh index over all data
+    try:
+      await graph_client.query(
+        f"CALL CREATE_VECTOR_INDEX('{table_name}', '{index_name}', 'embedding')",
+        graph_id,
+      )
+      if log_progress:
+        log_progress(f"  [{table_name}] Vector index rebuilt successfully")
+    except Exception as e:
+      logger.warning(f"Could not create vector index {index_name}: {e}")
+      if log_progress:
+        log_progress(f"  [{table_name}] Vector index rebuild failed: {e}")
+
+    # Checkpoint to persist index to disk (survives backup/restore)
+    try:
+      await graph_client.query("CHECKPOINT", graph_id)
+    except Exception as e:
+      logger.warning(f"Could not checkpoint after vector index rebuild: {e}")
+
   async def _trigger_ingestion(
     self,
     table_names: list[str],
@@ -948,6 +994,15 @@ class LadybugMaterializer:
             f"[{i}/{total_tables}] Materialized {table_name}: "
             f"{table_rows:,} rows in {table_time_ms / 1000:.1f}s ({num_batches} batches)"
           )
+
+          # Rebuild vector index after all batches complete for embedding tables.
+          # The materialize endpoint skips per-batch index creation because
+          # CREATE_VECTOR_INDEX on batch 1 only indexes batch 1's data, and
+          # subsequent batches see "already exists" and skip.
+          if table_name in EMBEDDING_TABLES:
+            await self._rebuild_vector_index(
+              graph_client, self.graph_id, table_name, log_progress
+            )
 
         else:
           # Standard single-pass materialization
