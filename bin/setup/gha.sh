@@ -153,12 +153,12 @@ function setup_full_config() {
 
     # Domain configuration (optional for VPC-only deployments)
     echo "📋 Domain Configuration:"
-    echo "   Leave empty for VPC-only deployment (access via bastion tunnel)"
+    echo "   Leave empty for VPC-only deployment (access via SSM tunnel)"
     while true; do
         read -p "Enter Root Domain (e.g., robosystems.ai) or press Enter to skip: " ROOT_DOMAIN
         # Allow empty for VPC-only deployment
         if [ -z "$ROOT_DOMAIN" ]; then
-            print_info "No domain configured - API will be accessible via bastion tunnel only"
+            print_info "No domain configured - API will be accessible via SSM tunnel only"
             break
         fi
         # Basic domain validation: must contain at least one dot and valid characters
@@ -210,7 +210,7 @@ function setup_full_config() {
     fi
 
     # API Access Mode & Domain Configuration
-    # Modes: 'public' (HTTPS with domain), 'public-http' (HTTP via ALB DNS), 'internal' (bastion tunnel)
+    # Modes: 'public' (HTTPS with domain) or 'internal' (SSM tunnel)
     # Workflows default to 'internal' if not set - explicit setting here for visibility
     # API_ACCESS_MODE may be pre-set by bootstrap.sh
     local access_mode="${API_ACCESS_MODE:-}"
@@ -235,7 +235,7 @@ function setup_full_config() {
     if $setup_staging; then
         gh variable set API_ACCESS_MODE_STAGING --body "$access_mode"
     fi
-    # To use public-http mode (ALB DNS, no TLS): gh variable set API_ACCESS_MODE_PROD --body "public-http"
+    # To use public mode (HTTPS with domain): gh variable set API_ACCESS_MODE_PROD --body "public"
 
     # API Scaling Configuration
     gh variable set API_MIN_CAPACITY_PROD --body "1"
@@ -299,7 +299,7 @@ function setup_full_config() {
     # Daemon: Orchestration - can handle brief interruptions
     gh variable set DAGSTER_DAEMON_FARGATE_WEIGHT_PROD --body "20"
     gh variable set DAGSTER_DAEMON_FARGATE_SPOT_WEIGHT_PROD --body "80"
-    # Webserver: UI/bastion tunnel - 80/20 Spot like daemon
+    # Webserver: UI/SSM tunnel - 80/20 Spot like daemon
     gh variable set DAGSTER_WEBSERVER_FARGATE_WEIGHT_PROD --body "20"
     gh variable set DAGSTER_WEBSERVER_FARGATE_SPOT_WEIGHT_PROD --body "80"
     # Base: Minimum tasks guaranteed on On-Demand (set >0 when using Savings Plans)
@@ -551,7 +551,7 @@ function setup_full_config() {
             echo "  🌐 Domain: api.$ROOT_DOMAIN (prod only)"
         fi
     else
-        echo "  🌐 Domain: VPC-only (bastion tunnel access)"
+        echo "  🌐 Domain: VPC-only (SSM tunnel access)"
     fi
     echo "  📦 Repository: ${GITHUB_ORG}/${REPO_NAME}"
     echo "  🐳 ECR: $ECR_REPOSITORY"

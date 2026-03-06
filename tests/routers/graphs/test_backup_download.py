@@ -143,7 +143,7 @@ class TestBackupDownloadEndpoint:
     new_callable=AsyncMock,
   )
   @patch(
-    "robosystems.routers.graphs.backups.download.DownloadRateLimiter._get_monthly_limit"
+    "robosystems.routers.graphs.backups.download.DownloadRateLimiter.get_shared_repo_monthly_limit"
   )
   @patch(
     "robosystems.routers.graphs.backups.download.UserRepository.get_by_user_and_repository"
@@ -215,7 +215,7 @@ class TestBackupDownloadEndpoint:
     new_callable=AsyncMock,
   )
   @patch(
-    "robosystems.routers.graphs.backups.download.DownloadRateLimiter._get_monthly_limit"
+    "robosystems.routers.graphs.backups.download.DownloadRateLimiter.get_shared_repo_monthly_limit"
   )
   @patch(
     "robosystems.routers.graphs.backups.download.UserRepository.get_by_user_and_repository"
@@ -289,7 +289,7 @@ class TestBackupDownloadEndpoint:
     new_callable=AsyncMock,
   )
   @patch(
-    "robosystems.routers.graphs.backups.download.DownloadRateLimiter._get_monthly_limit"
+    "robosystems.routers.graphs.backups.download.DownloadRateLimiter.get_shared_repo_monthly_limit"
   )
   @patch(
     "robosystems.routers.graphs.backups.download.UserRepository.get_by_user_and_repository"
@@ -357,7 +357,7 @@ class TestBackupDownloadEndpoint:
       # Verify increment was called
       mock_increment.assert_called_once_with(
         user_id="test-user-123",
-        repository="sec",
+        resource_id="sec",
       )
     finally:
       if get_current_user_with_graph in app.dependency_overrides:
@@ -366,17 +366,29 @@ class TestBackupDownloadEndpoint:
         del app.dependency_overrides[get_db_session]
 
   @patch("robosystems.routers.graphs.backups.download.get_backup_manager")
+  @patch(
+    "robosystems.routers.graphs.backups.download.DownloadRateLimiter.increment_download_count",
+    new_callable=AsyncMock,
+  )
+  @patch(
+    "robosystems.routers.graphs.backups.download.DownloadRateLimiter.check_graph_download_limit",
+    new_callable=AsyncMock,
+  )
+  @patch("robosystems.routers.graphs.backups.download.Graph.get_by_id")
   @patch("robosystems.middleware.graph.utils.MultiTenantUtils.is_shared_repository")
   @patch("robosystems.models.iam.GraphUser.get_by_user_id")
-  def test_download_no_rate_limit_for_user_graphs(
+  def test_download_allowed_for_user_graph_under_limit(
     self,
     mock_get_by_user_id,
     mock_is_shared,
+    mock_get_graph,
+    mock_check_graph_limit,
+    mock_increment,
     mock_get_backup_manager,
     client,
     mock_auth_user,
   ):
-    """Test that user graphs don't have download rate limits."""
+    """Test that user graph downloads are allowed when under tier limit."""
     from robosystems.database import get_db_session
     from robosystems.middleware.auth.dependencies import get_current_user_with_graph
 
@@ -385,16 +397,22 @@ class TestBackupDownloadEndpoint:
     app.dependency_overrides[get_db_session] = lambda: mock_session
 
     try:
-      # This is NOT a shared repository
       mock_is_shared.return_value = False
 
-      # User has graph access
       mock_user_graph = MagicMock()
       mock_user_graph.graph_id = "kg0123456789abcdef"
       mock_user_graph.role = "admin"
       mock_get_by_user_id.return_value = [mock_user_graph]
 
-      # Mock backup manager to return a download URL
+      # Graph has standard tier
+      mock_graph_record = MagicMock()
+      mock_graph_record.graph_tier = "ladybug-standard"
+      mock_get_graph.return_value = mock_graph_record
+
+      # Under limit
+      reset_time = datetime.now(UTC) + timedelta(hours=5)
+      mock_check_graph_limit.return_value = (True, 1, reset_time)
+
       mock_backup_mgr = MagicMock()
       mock_backup_mgr.get_backup_download_url = AsyncMock(
         return_value="https://s3.amazonaws.com/bucket/backup.lbug?signature=xyz"
@@ -408,6 +426,9 @@ class TestBackupDownloadEndpoint:
       assert response.status_code == 200
       data = response.json()
       assert "download_url" in data
+
+      # Verify download count was incremented (standard tier has limit > 0)
+      mock_increment.assert_called_once()
     finally:
       if get_current_user_with_graph in app.dependency_overrides:
         del app.dependency_overrides[get_current_user_with_graph]
@@ -415,12 +436,143 @@ class TestBackupDownloadEndpoint:
         del app.dependency_overrides[get_db_session]
 
   @patch("robosystems.routers.graphs.backups.download.get_backup_manager")
+  @patch(
+    "robosystems.routers.graphs.backups.download.DownloadRateLimiter.check_graph_download_limit",
+    new_callable=AsyncMock,
+  )
+  @patch("robosystems.routers.graphs.backups.download.Graph.get_by_id")
+  @patch("robosystems.middleware.graph.utils.MultiTenantUtils.is_shared_repository")
+  @patch("robosystems.models.iam.GraphUser.get_by_user_id")
+  def test_download_rate_limit_exceeded_for_user_graph(
+    self,
+    mock_get_by_user_id,
+    mock_is_shared,
+    mock_get_graph,
+    mock_check_graph_limit,
+    mock_get_backup_manager,
+    client,
+    mock_auth_user,
+  ):
+    """Test that exceeding tier download limit returns 429 for user graphs."""
+    from robosystems.database import get_db_session
+    from robosystems.middleware.auth.dependencies import get_current_user_with_graph
+
+    mock_session = MagicMock()
+    app.dependency_overrides[get_current_user_with_graph] = lambda: mock_auth_user
+    app.dependency_overrides[get_db_session] = lambda: mock_session
+
+    try:
+      mock_is_shared.return_value = False
+
+      mock_user_graph = MagicMock()
+      mock_user_graph.graph_id = "kg0123456789abcdef"
+      mock_user_graph.role = "admin"
+      mock_get_by_user_id.return_value = [mock_user_graph]
+
+      # Graph has standard tier (2 downloads/month)
+      mock_graph_record = MagicMock()
+      mock_graph_record.graph_tier = "ladybug-standard"
+      mock_get_graph.return_value = mock_graph_record
+
+      # Limit exceeded
+      reset_time = datetime.now(UTC) + timedelta(hours=5)
+      mock_check_graph_limit.return_value = (False, 0, reset_time)
+
+      mock_auth_user.id = "test-user-123"
+
+      response = client.get("/v1/graphs/kg0123456789abcdef/backups/backup123/download")
+
+      assert response.status_code == 429
+      assert "limit" in response.json()["detail"].lower()
+      assert "X-RateLimit-Remaining" in response.headers
+    finally:
+      if get_current_user_with_graph in app.dependency_overrides:
+        del app.dependency_overrides[get_current_user_with_graph]
+      if get_db_session in app.dependency_overrides:
+        del app.dependency_overrides[get_db_session]
+
+  @patch("robosystems.routers.graphs.backups.download.get_backup_manager")
+  @patch(
+    "robosystems.routers.graphs.backups.download.DownloadRateLimiter.increment_download_count",
+    new_callable=AsyncMock,
+  )
+  @patch(
+    "robosystems.routers.graphs.backups.download.DownloadRateLimiter.check_graph_download_limit",
+    new_callable=AsyncMock,
+  )
+  @patch("robosystems.routers.graphs.backups.download.Graph.get_by_id")
+  @patch("robosystems.middleware.graph.utils.MultiTenantUtils.is_shared_repository")
+  @patch("robosystems.models.iam.GraphUser.get_by_user_id")
+  def test_download_allowed_for_xlarge_tier(
+    self,
+    mock_get_by_user_id,
+    mock_is_shared,
+    mock_get_graph,
+    mock_check_graph_limit,
+    mock_increment,
+    mock_get_backup_manager,
+    client,
+    mock_auth_user,
+  ):
+    """Test that xlarge tier downloads work and count is tracked."""
+    from robosystems.database import get_db_session
+    from robosystems.middleware.auth.dependencies import get_current_user_with_graph
+
+    mock_session = MagicMock()
+    app.dependency_overrides[get_current_user_with_graph] = lambda: mock_auth_user
+    app.dependency_overrides[get_db_session] = lambda: mock_session
+
+    try:
+      mock_is_shared.return_value = False
+
+      mock_user_graph = MagicMock()
+      mock_user_graph.graph_id = "kg0123456789abcdef"
+      mock_user_graph.role = "admin"
+      mock_get_by_user_id.return_value = [mock_user_graph]
+
+      # Graph has xlarge tier (10 downloads/month)
+      mock_graph_record = MagicMock()
+      mock_graph_record.graph_tier = "ladybug-xlarge"
+      mock_get_graph.return_value = mock_graph_record
+
+      # Under limit
+      reset_time = datetime.now(UTC) + timedelta(hours=5)
+      mock_check_graph_limit.return_value = (True, 9, reset_time)
+
+      mock_backup_mgr = MagicMock()
+      mock_backup_mgr.get_backup_download_url = AsyncMock(
+        return_value="https://s3.amazonaws.com/bucket/backup.lbug?signature=xyz"
+      )
+      mock_get_backup_manager.return_value = mock_backup_mgr
+
+      mock_auth_user.id = "test-user-123"
+
+      response = client.get("/v1/graphs/kg0123456789abcdef/backups/backup123/download")
+
+      assert response.status_code == 200
+
+      # All tiers now track download count
+      mock_increment.assert_called_once()
+    finally:
+      if get_current_user_with_graph in app.dependency_overrides:
+        del app.dependency_overrides[get_current_user_with_graph]
+      if get_db_session in app.dependency_overrides:
+        del app.dependency_overrides[get_db_session]
+
+  @patch("robosystems.routers.graphs.backups.download.get_backup_manager")
+  @patch(
+    "robosystems.routers.graphs.backups.download.DownloadRateLimiter.check_graph_download_limit",
+    new_callable=AsyncMock,
+  )
+  @patch("robosystems.routers.graphs.backups.download.Graph.get_by_id")
   @patch("robosystems.middleware.graph.utils.MultiTenantUtils.is_shared_repository")
   @patch("robosystems.models.iam.GraphUser.get_by_user_id")
   def test_download_returns_404_when_backup_not_found(
     self,
     mock_get_by_user_id,
     mock_is_shared,
+    mock_get_graph,
+    mock_check_graph_limit,
     mock_get_backup_manager,
     client,
     mock_auth_user,
@@ -434,16 +586,22 @@ class TestBackupDownloadEndpoint:
     app.dependency_overrides[get_db_session] = lambda: mock_session
 
     try:
-      # Not a shared repository
       mock_is_shared.return_value = False
 
-      # User has graph access
       mock_user_graph = MagicMock()
       mock_user_graph.graph_id = "kg0123456789abcdef"
       mock_user_graph.role = "admin"
       mock_get_by_user_id.return_value = [mock_user_graph]
 
-      # Mock backup manager to return None (backup not found)
+      # Graph with xlarge tier (10 downloads/month)
+      mock_graph_record = MagicMock()
+      mock_graph_record.graph_tier = "ladybug-xlarge"
+      mock_get_graph.return_value = mock_graph_record
+
+      reset_time = datetime.now(UTC) + timedelta(hours=5)
+      mock_check_graph_limit.return_value = (True, 9, reset_time)
+
+      # Backup not found
       mock_backup_mgr = MagicMock()
       mock_backup_mgr.get_backup_download_url = AsyncMock(return_value=None)
       mock_get_backup_manager.return_value = mock_backup_mgr

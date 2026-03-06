@@ -42,7 +42,7 @@ echo ""
 # ENVIRONMENT VARIABLES
 # =============================================================================
 #
-# API_ACCESS_MODE   - API access mode: 'internal' (default), 'public', 'public-http'
+# API_ACCESS_MODE   - API access mode: 'internal' (default) or 'public'
 #                     When 'internal', sets JWT_ISSUER/JWT_AUDIENCE to 'localhost'
 # SETUP_STAGING     - Set to 'true' to also create staging resources
 # SKIP_SECRETS      - Set to 'true' to skip Secrets Manager setup
@@ -83,7 +83,7 @@ function create_production_secret() {
 
     echo "Setting production secret values..."
 
-    # Build JWT entries for internal mode (localhost access via bastion tunnel)
+    # Build JWT entries for internal mode (localhost access via SSM tunnel)
     local jwt_entries=""
     if [ "${API_ACCESS_MODE:-internal}" = "internal" ]; then
         jwt_entries="\"JWT_ISSUER\": \"localhost\", \"JWT_AUDIENCE\": \"localhost\","
@@ -144,7 +144,7 @@ function create_staging_secret() {
 
     echo "Setting staging secret values..."
 
-    # Build JWT entries for internal mode (localhost access via bastion tunnel)
+    # Build JWT entries for internal mode (localhost access via SSM tunnel)
     local jwt_entries=""
     if [ "${API_ACCESS_MODE:-internal}" = "internal" ]; then
         jwt_entries="\"JWT_ISSUER\": \"localhost\", \"JWT_AUDIENCE\": \"localhost\","

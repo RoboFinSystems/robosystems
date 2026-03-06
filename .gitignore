@@ -129,6 +129,7 @@ dmypy.json
 
 # AI - Claude Code
 .claude/settings.local.json
+.claude/agents/platform-economist.md
 CLAUDE.local.md
 
 .gemini/

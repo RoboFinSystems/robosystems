@@ -114,13 +114,11 @@ Parameters:
     Default: internal
     AllowedValues:
       - public
-      - public-http
       - internal
     Description: |
       API access mode:
       - public: Internet-facing ALB with custom domain and HTTPS (requires DomainName)
-      - public-http: Internet-facing ALB with AWS DNS, HTTP only (no domain needed)
-      - internal: Internal ALB accessible via bastion tunnel only
+      - internal: Internal ALB accessible via SSM tunnel only
 
   # Domain & DNS Configuration (Required only when ApiAccessMode=public)
   DomainName:
@@ -229,10 +227,6 @@ Conditions:
   HasDomain: !Not [!Equals [!Ref DomainName, ""]]
   IsPublicWithDomain: !Equals [!Ref ApiAccessMode, "public"]
   IsInternal: !Equals [!Ref ApiAccessMode, "internal"]
-  # Combined condition: internet-facing ALB (public or public-http)
-  IsInternetFacing: !Or
-    - !Equals [!Ref ApiAccessMode, "public"]
-    - !Equals [!Ref ApiAccessMode, "public-http"]
 
 Mappings:
   LogRetentionPolicies:
@@ -603,11 +597,11 @@ Resources:
       CidrIp: 0.0.0.0/0
       Description: Allow direct HTTPS traffic to ALB
 
-  # Security Group Rule - Public HTTP to ALB (internet-facing modes)
-  # Created for both 'public' (redirect to HTTPS) and 'public-http' (direct access)
+  # Security Group Rule - Public HTTP to ALB (public mode)
+  # In 'public' mode: redirects to HTTPS via listener rule
   PublicHTTPToALBSecurityGroupIngress:
     Type: AWS::EC2::SecurityGroupIngress
-    Condition: IsInternetFacing
+    Condition: IsPublicWithDomain
     Properties:
       GroupId: !Ref ALBSecurityGroup
       IpProtocol: tcp
@@ -616,7 +610,7 @@ Resources:
       CidrIp: 0.0.0.0/0
       Description: Allow HTTP traffic to ALB
 
-  # Security Group Rule - Internal HTTP to ALB (via bastion tunnel)
+  # Security Group Rule - Internal HTTP to ALB (via SSM tunnel)
   # Only created when internal mode - restricted to VPC CIDR
   InternalHTTPToALBSecurityGroupIngress:
     Type: AWS::EC2::SecurityGroupIngress
@@ -627,7 +621,7 @@ Resources:
       FromPort: 80
       ToPort: 80
       CidrIp: 10.0.0.0/8
-      Description: Allow HTTP traffic from VPC (internal ALB via bastion tunnel)
+      Description: Allow HTTP traffic from VPC (internal ALB via SSM tunnel)
 
   # Security Group Rule - ALB to ECS Tasks
   ALBToApiSecurityGroupIngress:
@@ -925,16 +919,16 @@ Resources:
         ScaleInCooldown: 180
 
   # Application Load Balancer
-  # When IsInternetFacing (public or public-http): internet-facing in public subnets
-  # When IsInternal: internal in private subnets (access via bastion tunnel)
+  # When IsPublicWithDomain (public): internet-facing in public subnets
+  # When IsInternal: internal in private subnets (access via SSM tunnel)
   ApiALB:
     Type: AWS::ElasticLoadBalancingV2::LoadBalancer
     DeletionPolicy: Delete
     UpdateReplacePolicy: Retain
     Properties:
       Name: !Sub robosystems-api-${Environment}-alb
-      Scheme: !If [IsInternetFacing, internet-facing, internal]
-      Subnets: !If [IsInternetFacing, !Ref PublicSubnetIds, !Ref SubnetIds]
+      Scheme: !If [IsPublicWithDomain, internet-facing, internal]
+      Subnets: !If [IsPublicWithDomain, !Ref PublicSubnetIds, !Ref SubnetIds]
       SecurityGroups:
         - !Ref ALBSecurityGroup
       Tags:
@@ -1042,7 +1036,6 @@ Resources:
 
   # HTTP Listener - always exists (unconditional)
   # public mode: redirects to HTTPS
-  # public-http mode: forwards directly to target group (HTTP only)
   # internal mode: forwards directly to target group (HTTP via tunnel)
   ApiHttpListener:
     Type: AWS::ElasticLoadBalancingV2::Listener
@@ -1290,7 +1283,7 @@ Resources:
 
 Outputs:
   ApiAccessMode:
-    Description: API access mode (public, public-http, or internal)
+    Description: API access mode (public or internal)
     Value: !Ref ApiAccessMode
   ApiUrl:
     Description: URL of the API endpoint
@@ -1305,7 +1298,7 @@ Outputs:
       Name: !Sub ${AWS::StackName}-LoadBalancerDNS
   LoadBalancerScheme:
     Description: ALB scheme (internet-facing or internal)
-    Value: !If [IsInternetFacing, internet-facing, internal]
+    Value: !If [IsPublicWithDomain, internet-facing, internal]
   ClusterName:
     Description: Name of the ECS Cluster
     Value: !Ref ApiCluster

@@ -18,7 +18,7 @@ VALKEY_ENDPOINT=""
 DAGSTER_ENDPOINT=""
 API_ENDPOINT=""
 API_INTERNAL_ENDPOINT=""  # Service Discovery endpoint (bypasses ALB)
-API_ACCESS_MODE=""        # internal, public-http, or public
+API_ACCESS_MODE=""        # internal or public
 
 
 # Colors for output
@@ -241,7 +241,7 @@ discover_infrastructure() {
         echo -e "${YELLOW}Using default API internal endpoint: $API_INTERNAL_ENDPOINT${NC}"
     fi
 
-    # Discover API access mode (internal, public-http, public)
+    # Discover API access mode (internal or public)
     echo -e "${YELLOW}Looking for API access mode...${NC}"
 
     API_ACCESS_MODE=$(aws cloudformation describe-stacks \
@@ -427,7 +427,7 @@ setup_api_tunnel() {
     fi
 
     # Warn if API is in public mode - ALB tunnel has limitations
-    if [[ "$API_ACCESS_MODE" == "public" || "$API_ACCESS_MODE" == "public-http" ]]; then
+    if [[ "$API_ACCESS_MODE" == "public" ]]; then
         echo ""
         echo -e "${YELLOW}⚠️  WARNING: API is in '$API_ACCESS_MODE' mode${NC}"
         echo -e "${YELLOW}The ALB tunnel has limitations:${NC}"
@@ -516,7 +516,7 @@ setup_all_tunnels() {
         start_ssm_tunnel_background "$API_ENDPOINT" "80" "8000" "API"
         ((tunnel_count++))
         sleep 1
-    elif [[ "$API_ACCESS_MODE" == "public" || "$API_ACCESS_MODE" == "public-http" ]]; then
+    elif [[ "$API_ACCESS_MODE" == "public" ]]; then
         # Public mode: use api-internal (Service Discovery) to bypass ALB restrictions
         # This allows admin CLI access since ALB blocks /admin/v1/* in public mode
         if [[ -n "$API_INTERNAL_ENDPOINT" ]]; then
@@ -551,7 +551,7 @@ setup_all_tunnels() {
 
     if [[ "$API_ACCESS_MODE" == "internal" ]]; then
         echo "API:        curl http://localhost:8000/v1/status"
-    elif [[ "$API_ACCESS_MODE" == "public" || "$API_ACCESS_MODE" == "public-http" ]]; then
+    elif [[ "$API_ACCESS_MODE" == "public" ]]; then
         echo "API:        curl http://localhost:8000/v1/status (via api-internal)"
         echo "Admin CLI:  just admin $environment stats"
     fi

@@ -127,6 +127,7 @@ async def stage_file_directly(
           graph_id=graph_id,
           table_name=table.table_name,
           s3_pattern=[new_file_s3],
+          deduplicate=True,
         )
       else:
         # Table does not exist - create with all files (first-file path)
