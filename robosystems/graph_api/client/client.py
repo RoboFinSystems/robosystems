@@ -1750,3 +1750,64 @@ class GraphClient(BaseGraphClient):
         retries=0,
       )
       return response.json()
+
+  # Migration endpoints
+
+  async def migration_export(
+    self, source_version: str, target_version: str
+  ) -> dict[str, Any]:
+    """
+    Start migration export on this instance.
+
+    Args:
+        source_version: Current LadybugDB version
+        target_version: Target LadybugDB version
+
+    Returns:
+        Task ID and monitor URL
+    """
+    response = await self._request(
+      "POST",
+      "/migration/export",
+      params={"source_version": source_version, "target_version": target_version},
+      timeout=30.0,
+      retries=0,
+    )
+    return response.json()
+
+  async def migration_import(self) -> dict[str, Any]:
+    """
+    Start migration import on this instance.
+
+    Returns:
+        Task ID and monitor URL
+    """
+    response = await self._request(
+      "POST",
+      "/migration/import",
+      timeout=30.0,
+      retries=0,
+    )
+    return response.json()
+
+  async def migration_status(self) -> dict[str, Any]:
+    """
+    Check migration status on this instance.
+
+    Returns:
+        Migration status including pending flag, manifest, and pre-migration files
+    """
+    response = await self._request("GET", "/migration/status")
+    return response.json()
+
+  async def migration_cleanup(self) -> dict[str, Any]:
+    """
+    Delete .pre-migration files on this instance after verifying migration success.
+
+    System backups in S3 remain as the safety net.
+
+    Returns:
+        Cleanup result with files deleted and bytes freed
+    """
+    response = await self._request("POST", "/migration/cleanup")
+    return response.json()

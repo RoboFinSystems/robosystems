@@ -84,6 +84,19 @@ async def health_check(
       },
     )
 
+  # Migration mode: return 503 while importing databases
+  from robosystems.graph_api.core.migration_service import is_migration_in_progress
+
+  if is_migration_in_progress():
+    logger.debug("Migration in progress - returning 503")
+    return JSONResponse(
+      status_code=503,
+      content={
+        "status": "migrating",
+        "message": "Version migration in progress - not ready for traffic",
+      },
+    )
+
   try:
     # Basic check that service is accessible
     uptime = service.get_uptime()
