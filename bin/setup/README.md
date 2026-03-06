@@ -631,7 +631,7 @@ When forking to a different AWS account:
 4. **Secrets**: New secrets are created with auto-generated keys.
 
 5. **API Access Mode**: Choose your access mode during bootstrap:
-   - `internal` (default): Access via bastion tunnel, JWT uses localhost
+   - `internal` (default): Access via SSM tunnel, JWT uses localhost
    - `public`: Internet-facing with custom domain and HTTPS
 
 See the [Bootstrap Guide](https://github.com/RoboFinSystems/robosystems/wiki/Bootstrap-Guide) for complete fork deployment instructions.
