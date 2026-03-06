@@ -717,7 +717,7 @@ async def update_file(
 
           logger.info(
             f"Small file detected ({actual_file_size / (1024 * 1024):.2f} MB < {SMALL_FILE_STAGING_THRESHOLD_MB} MB). "
-            f"Using direct staging for file {file_id}"
+            f"Using direct staging for file {file_id} (deduplicate={request.deduplicate})"
           )
 
           try:
@@ -729,6 +729,7 @@ async def update_file(
               s3_key=graph_file.s3_key,
               file_size_bytes=actual_file_size,
               row_count=actual_row_count,
+              deduplicate=request.deduplicate,
             )
 
             if staging_result.get("status") == "success":

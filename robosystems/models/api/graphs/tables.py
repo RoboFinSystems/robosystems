@@ -176,6 +176,13 @@ class FileStatusUpdate(BaseModel):
     default=False,
     description="Auto-ingest to graph after DuckDB staging. Default=false (batch mode). Set to true for real-time incremental updates.",
   )
+  deduplicate: bool = Field(
+    default=True,
+    description="Deduplicate rows when inserting into an existing DuckDB staging table. "
+    "Uses NOT EXISTS on the dedup key (identifier for nodes, src/dst for relationships) "
+    "to skip rows that already exist. Safe for tables with embedding columns. "
+    "Default=true. Set to false for append-only tables with guaranteed unique rows.",
+  )
 
   class Config:
     extra = "forbid"
@@ -183,6 +190,7 @@ class FileStatusUpdate(BaseModel):
       "examples": [
         {"status": "uploaded"},
         {"status": "uploaded", "ingest_to_graph": True},
+        {"status": "uploaded", "deduplicate": False},
         {"status": "disabled"},
       ]
     }

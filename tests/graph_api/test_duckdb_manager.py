@@ -392,6 +392,306 @@ class TestDuckDBTableManager:
     assert "Failed to delete table" in exc_info.value.detail
 
 
+class TestInsertIntoTable:
+  def setup_method(self):
+    self.manager = DuckDBTableManager()
+
+  @patch("robosystems.graph_api.core.duckdb.manager.get_duckdb_pool")
+  def test_insert_deduplicate_false_plain_append(self, mock_get_pool):
+    """deduplicate=False uses plain INSERT INTO without NOT EXISTS."""
+    mock_pool = MagicMock()
+    mock_conn = MagicMock()
+    mock_pool.get_connection.return_value.__enter__.return_value = mock_conn
+    mock_get_pool.return_value = mock_pool
+
+    mock_count = MagicMock()
+    mock_count.fetchone.side_effect = [(100,), (150,)]
+    mock_conn.execute.return_value = mock_count
+
+    request = TableCreateRequest(
+      graph_id="test_graph",
+      table_name="Entity",
+      s3_pattern="s3://bucket/data/*.parquet",
+      deduplicate=False,
+    )
+
+    response = self.manager.insert_into_table(request)
+
+    assert response.status == "success"
+    assert response.row_count == 50  # 150 - 100
+
+    execute_calls = [call[0][0] for call in mock_conn.execute.call_args_list]
+    insert_sql = [c for c in execute_calls if "INSERT INTO" in c]
+    assert len(insert_sql) == 1
+    assert "NOT EXISTS" not in insert_sql[0]
+    assert "read_parquet" in insert_sql[0]
+
+  @patch("robosystems.graph_api.core.duckdb.manager.get_duckdb_pool")
+  def test_insert_deduplicate_true_node_table(self, mock_get_pool):
+    """deduplicate=True on node table uses NOT EXISTS on identifier."""
+    mock_pool = MagicMock()
+    mock_conn = MagicMock()
+    mock_pool.get_connection.return_value.__enter__.return_value = mock_conn
+    mock_get_pool.return_value = mock_pool
+
+    # First call: COUNT before
+    mock_count_before = MagicMock()
+    mock_count_before.fetchone.return_value = (100,)
+
+    # Second call: schema probe
+    mock_probe = MagicMock()
+    mock_probe.description = [("identifier", None), ("name", None), ("embedding", None)]
+
+    # Third call: INSERT
+    # Fourth call: COUNT after
+    mock_count_after = MagicMock()
+    mock_count_after.fetchone.return_value = (120,)
+
+    mock_conn.execute.side_effect = [
+      mock_count_before,  # COUNT before
+      mock_probe,  # schema probe
+      None,  # INSERT INTO
+      mock_count_after,  # COUNT after
+      None,  # CHECKPOINT
+    ]
+
+    request = TableCreateRequest(
+      graph_id="test_graph",
+      table_name="Entity",
+      s3_pattern="s3://bucket/data/*.parquet",
+      deduplicate=True,
+    )
+
+    response = self.manager.insert_into_table(request)
+
+    assert response.status == "success"
+    assert response.row_count == 20  # 120 - 100
+
+    execute_calls = [call[0][0] for call in mock_conn.execute.call_args_list]
+    insert_sql = [c for c in execute_calls if "INSERT INTO" in c]
+    assert len(insert_sql) == 1
+    assert "NOT EXISTS" in insert_sql[0]
+    assert '"identifier"' in insert_sql[0]
+
+  @patch("robosystems.graph_api.core.duckdb.manager.get_duckdb_pool")
+  def test_insert_deduplicate_true_relationship_src_dst(self, mock_get_pool):
+    """deduplicate=True on relationship table uses NOT EXISTS on src+dst."""
+    mock_pool = MagicMock()
+    mock_conn = MagicMock()
+    mock_pool.get_connection.return_value.__enter__.return_value = mock_conn
+    mock_get_pool.return_value = mock_pool
+
+    mock_count_before = MagicMock()
+    mock_count_before.fetchone.return_value = (200,)
+
+    mock_probe = MagicMock()
+    mock_probe.description = [("src", None), ("dst", None), ("weight", None)]
+
+    mock_count_after = MagicMock()
+    mock_count_after.fetchone.return_value = (250,)
+
+    mock_conn.execute.side_effect = [
+      mock_count_before,
+      mock_probe,
+      None,  # INSERT
+      mock_count_after,
+      None,  # CHECKPOINT
+    ]
+
+    request = TableCreateRequest(
+      graph_id="test_graph",
+      table_name="HAS_LABEL",
+      s3_pattern="s3://bucket/data/*.parquet",
+      deduplicate=True,
+    )
+
+    response = self.manager.insert_into_table(request)
+
+    assert response.status == "success"
+    execute_calls = [call[0][0] for call in mock_conn.execute.call_args_list]
+    insert_sql = [c for c in execute_calls if "INSERT INTO" in c]
+    assert len(insert_sql) == 1
+    assert "NOT EXISTS" in insert_sql[0]
+    assert '"src"' in insert_sql[0]
+    assert '"dst"' in insert_sql[0]
+
+  @patch("robosystems.graph_api.core.duckdb.manager.get_duckdb_pool")
+  def test_insert_deduplicate_true_relationship_from_to(self, mock_get_pool):
+    """deduplicate=True on relationship table with from/to columns."""
+    mock_pool = MagicMock()
+    mock_conn = MagicMock()
+    mock_pool.get_connection.return_value.__enter__.return_value = mock_conn
+    mock_get_pool.return_value = mock_pool
+
+    mock_count_before = MagicMock()
+    mock_count_before.fetchone.return_value = (50,)
+
+    mock_probe = MagicMock()
+    mock_probe.description = [("from", None), ("to", None)]
+
+    mock_count_after = MagicMock()
+    mock_count_after.fetchone.return_value = (70,)
+
+    mock_conn.execute.side_effect = [
+      mock_count_before,
+      mock_probe,
+      None,
+      mock_count_after,
+      None,
+    ]
+
+    request = TableCreateRequest(
+      graph_id="test_graph",
+      table_name="RELATES_TO",
+      s3_pattern="s3://bucket/data/*.parquet",
+      deduplicate=True,
+    )
+
+    response = self.manager.insert_into_table(request)
+
+    assert response.status == "success"
+    execute_calls = [call[0][0] for call in mock_conn.execute.call_args_list]
+    insert_sql = [c for c in execute_calls if "INSERT INTO" in c]
+    assert "NOT EXISTS" in insert_sql[0]
+    assert '"from"' in insert_sql[0]
+    assert '"to"' in insert_sql[0]
+
+  @patch("robosystems.graph_api.core.duckdb.manager.get_duckdb_pool")
+  def test_insert_deduplicate_true_unknown_schema_no_dedup(self, mock_get_pool):
+    """deduplicate=True with unknown schema (no identifier/src/dst/from/to) does plain append."""
+    mock_pool = MagicMock()
+    mock_conn = MagicMock()
+    mock_pool.get_connection.return_value.__enter__.return_value = mock_conn
+    mock_get_pool.return_value = mock_pool
+
+    mock_count_before = MagicMock()
+    mock_count_before.fetchone.return_value = (10,)
+
+    mock_probe = MagicMock()
+    mock_probe.description = [("col_a", None), ("col_b", None)]
+
+    mock_count_after = MagicMock()
+    mock_count_after.fetchone.return_value = (20,)
+
+    mock_conn.execute.side_effect = [
+      mock_count_before,
+      mock_probe,
+      None,
+      mock_count_after,
+      None,
+    ]
+
+    request = TableCreateRequest(
+      graph_id="test_graph",
+      table_name="CustomData",
+      s3_pattern="s3://bucket/data/*.parquet",
+      deduplicate=True,
+    )
+
+    response = self.manager.insert_into_table(request)
+
+    assert response.status == "success"
+    execute_calls = [call[0][0] for call in mock_conn.execute.call_args_list]
+    insert_sql = [c for c in execute_calls if "INSERT INTO" in c]
+    assert "NOT EXISTS" not in insert_sql[0]
+
+  @patch("robosystems.graph_api.core.duckdb.manager.get_duckdb_pool")
+  def test_insert_deduplicate_default_is_false(self, mock_get_pool):
+    """Default deduplicate is False on TableCreateRequest."""
+    request = TableCreateRequest(
+      graph_id="test_graph",
+      table_name="Entity",
+      s3_pattern="s3://bucket/data/*.parquet",
+    )
+    assert request.deduplicate is False
+
+  @patch("robosystems.graph_api.core.duckdb.manager.get_duckdb_pool")
+  def test_insert_with_file_list(self, mock_get_pool):
+    """Test insert with list of S3 files and deduplicate=True."""
+    mock_pool = MagicMock()
+    mock_conn = MagicMock()
+    mock_pool.get_connection.return_value.__enter__.return_value = mock_conn
+    mock_get_pool.return_value = mock_pool
+
+    mock_count_before = MagicMock()
+    mock_count_before.fetchone.return_value = (0,)
+
+    mock_probe = MagicMock()
+    mock_probe.description = [("identifier", None), ("value", None)]
+
+    mock_count_after = MagicMock()
+    mock_count_after.fetchone.return_value = (100,)
+
+    mock_conn.execute.side_effect = [
+      mock_count_before,
+      mock_probe,
+      None,
+      mock_count_after,
+      None,
+    ]
+
+    request = TableCreateRequest(
+      graph_id="test_graph",
+      table_name="Element",
+      s3_pattern=["s3://bucket/file1.parquet", "s3://bucket/file2.parquet"],
+      deduplicate=True,
+    )
+
+    response = self.manager.insert_into_table(request)
+
+    assert response.status == "success"
+    execute_calls = [call[0][0] for call in mock_conn.execute.call_args_list]
+    insert_sql = [c for c in execute_calls if "INSERT INTO" in c]
+    assert "file1.parquet" in insert_sql[0]
+    assert "file2.parquet" in insert_sql[0]
+    assert "NOT EXISTS" in insert_sql[0]
+
+  @patch("robosystems.graph_api.core.duckdb.manager.get_duckdb_pool")
+  def test_insert_checkpoints_after_insert(self, mock_get_pool):
+    """Test that CHECKPOINT is called after insert."""
+    mock_pool = MagicMock()
+    mock_conn = MagicMock()
+    mock_pool.get_connection.return_value.__enter__.return_value = mock_conn
+    mock_get_pool.return_value = mock_pool
+
+    mock_count = MagicMock()
+    mock_count.fetchone.return_value = (0,)
+    mock_conn.execute.return_value = mock_count
+
+    request = TableCreateRequest(
+      graph_id="test_graph",
+      table_name="Entity",
+      s3_pattern="s3://bucket/data/*.parquet",
+      deduplicate=False,
+    )
+
+    self.manager.insert_into_table(request)
+
+    execute_calls = [call[0][0] for call in mock_conn.execute.call_args_list]
+    assert "CHECKPOINT" in execute_calls
+
+  @patch("robosystems.graph_api.core.duckdb.manager.get_duckdb_pool")
+  def test_insert_failure_raises_http_exception(self, mock_get_pool):
+    """Test that insert failure raises HTTPException."""
+    mock_pool = MagicMock()
+    mock_conn = MagicMock()
+    mock_conn.execute.side_effect = Exception("DuckDB OOM")
+    mock_pool.get_connection.return_value.__enter__.return_value = mock_conn
+    mock_get_pool.return_value = mock_pool
+
+    request = TableCreateRequest(
+      graph_id="test_graph",
+      table_name="Entity",
+      s3_pattern="s3://bucket/data/*.parquet",
+      deduplicate=True,
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+      self.manager.insert_into_table(request)
+    assert exc_info.value.status_code == 500
+    assert "Failed to insert" in exc_info.value.detail
+
+
 class TestTableRequestModels:
   def test_table_create_request_valid(self):
     request = TableCreateRequest(

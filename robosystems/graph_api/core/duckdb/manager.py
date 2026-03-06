@@ -392,29 +392,37 @@ class DuckDBTableManager:
   @validate_table_name_decorator
   def insert_into_table(self, request: TableCreateRequest) -> TableCreateResponse:
     """
-    Insert data into an existing table from S3 files with incremental deduplication.
+    Insert data into an existing table from S3 files.
 
-    This method merges new data with existing data and deduplicates using
-    GROUP BY + FIRST() for better memory efficiency and spill-to-disk support.
+    Supports two deduplication strategies controlled by request.deduplicate:
 
-    Deduplication Strategy:
-    1. UNION ALL existing table with new parquet data
-    2. Deduplicate on identifier (nodes) or from/to (relationships) using GROUP BY
-    3. Replace original table with deduplicated result
+    deduplicate=False (default):
+      Simple INSERT INTO append. No dedup overhead — callers are responsible
+      for ensuring no duplicate rows.
 
-    This is more memory-efficient than post-staging deduplication because
-    each insert dedupes incrementally (e.g., 20M rows) rather than all at
-    once at the end (e.g., 900M rows).
+    deduplicate=True:
+      Uses INSERT INTO ... SELECT ... WHERE NOT EXISTS to skip rows whose
+      dedup key already exists in the target table. The NOT EXISTS hash join
+      only holds dedup key strings in memory, which DuckDB can spill to disk.
+
+      This is safe for tables with wide columns like FLOAT[384] embeddings.
+      The previous GROUP BY + FIRST() approach could not spill aggregate state
+      for fixed-size list columns, causing OOM at 10M+ unique groups.
+
+    Dedup keys:
+    - Node tables (has "identifier"): dedup on identifier
+    - Relationship tables (has src/dst or from/to): dedup on src+dst or from+to
+    - Unknown schema: no dedup (plain append)
 
     Prerequisites:
     - Table must already exist (created via create_table)
     - Schema must be compatible with the new files
 
     Args:
-        request: TableCreateRequest with graph_id, table_name, and s3_pattern
+        request: TableCreateRequest with graph_id, table_name, s3_pattern, deduplicate
 
     Returns:
-        TableCreateResponse with status, timing info, and row_count (net rows added after dedupe)
+        TableCreateResponse with status, timing info, and row_count (net rows added)
 
     Raises:
         HTTPException: If table doesn't exist or insert fails
@@ -430,7 +438,8 @@ class DuckDBTableManager:
 
     logger.info(
       f"Inserting into table {request.table_name} for graph {request.graph_id} "
-      f"from {file_count} {'files' if is_list else ''} (with deduplication)"
+      f"from {file_count} {'files' if is_list else ''} "
+      f"(deduplicate={request.deduplicate})"
     )
 
     pool = get_duckdb_pool()
@@ -438,19 +447,10 @@ class DuckDBTableManager:
     try:
       with pool.get_connection(request.graph_id) as conn:
         quoted_table = f'"{request.table_name}"'
-        temp_table = f'"{request.table_name}_insert_temp"'
 
-        # Count rows before merge
+        # Count rows before insert
         count_before = conn.execute(f"SELECT COUNT(*) FROM {quoted_table}").fetchone()
         rows_before = count_before[0] if count_before else 0
-
-        # Detect table type from existing schema
-        probe_result = conn.execute(f"SELECT * FROM {quoted_table} LIMIT 0").description
-        column_names = [col[0] for col in probe_result]
-        has_identifier = "identifier" in column_names
-        has_from_to = "from" in column_names or (
-          "src" in column_names and "dst" in column_names
-        )
 
         # Build parquet read expression
         if is_list:
@@ -459,97 +459,55 @@ class DuckDBTableManager:
             f"read_parquet({files_list}, union_by_name=true, hive_partitioning=false)"
           )
         else:
-          # For pattern, we need to use parameter binding differently
           parquet_read = f"read_parquet('{request.s3_pattern}', union_by_name=true, hive_partitioning=false)"
 
-        # Build merge + dedupe SQL based on table type
-        # Uses GROUP BY + FIRST() for better memory efficiency and spill support
-        if has_identifier:
-          # Node table: deduplicate on identifier
-          dedupe_cols = ["identifier"]
-          other_cols = [c for c in column_names if c not in dedupe_cols]
-          select_parts = [f'"{c}"' for c in dedupe_cols] + [
-            f'FIRST("{c}") AS "{c}"' for c in other_cols
-          ]
-          select_clause = ", ".join(select_parts)
-          group_by_clause = ", ".join(f'"{c}"' for c in dedupe_cols)
+        if request.deduplicate:
+          # Detect table type from existing schema for dedup key
+          probe_result = conn.execute(
+            f"SELECT * FROM {quoted_table} LIMIT 0"
+          ).description
+          column_names = [col[0] for col in probe_result]
+          has_identifier = "identifier" in column_names
+          has_src_dst = "src" in column_names and "dst" in column_names
+          has_from_to = "from" in column_names and "to" in column_names
 
-          sql = f"""
-            CREATE OR REPLACE TABLE {temp_table} AS
-            SELECT {select_clause}
-            FROM (
-              SELECT * FROM {quoted_table}
-              UNION ALL
-              SELECT * FROM {parquet_read}
+          # Build NOT EXISTS dedup clause
+          if has_identifier:
+            dedup_where = (
+              f"WHERE NOT EXISTS (SELECT 1 FROM {quoted_table} a "
+              f'WHERE a."identifier" = t."identifier")'
             )
-            GROUP BY {group_by_clause}
-          """
-        elif has_from_to:
-          # Relationship table: deduplicate on src/dst (or from/to)
-          # Check if already renamed to src/dst or still from/to
-          if "src" in column_names:
-            dedupe_cols = ["src", "dst"]
-            other_cols = [c for c in column_names if c not in dedupe_cols]
-            select_parts = [f'"{c}"' for c in dedupe_cols] + [
-              f'FIRST("{c}") AS "{c}"' for c in other_cols
-            ]
-            select_clause = ", ".join(select_parts)
-
-            sql = f"""
-              CREATE OR REPLACE TABLE {temp_table} AS
-              SELECT {select_clause}
-              FROM (
-                SELECT * FROM {quoted_table}
-                UNION ALL
-                SELECT "from" as src, "to" as dst, * EXCLUDE ("from", "to")
-                FROM {parquet_read}
-              )
-              GROUP BY src, dst
-            """
+          elif has_src_dst:
+            dedup_where = (
+              f"WHERE NOT EXISTS (SELECT 1 FROM {quoted_table} a "
+              f'WHERE a."src" = t."src" AND a."dst" = t."dst")'
+            )
+          elif has_from_to:
+            dedup_where = (
+              f"WHERE NOT EXISTS (SELECT 1 FROM {quoted_table} a "
+              f'WHERE a."from" = t."from" AND a."to" = t."to")'
+            )
           else:
-            dedupe_cols = ["from", "to"]
-            other_cols = [c for c in column_names if c not in dedupe_cols]
-            select_parts = [f'"{c}"' for c in dedupe_cols] + [
-              f'FIRST("{c}") AS "{c}"' for c in other_cols
-            ]
-            select_clause = ", ".join(select_parts)
+            # Unknown schema — no dedup key, plain append
+            dedup_where = ""
 
-            sql = f"""
-              CREATE OR REPLACE TABLE {temp_table} AS
-              SELECT {select_clause}
-              FROM (
-                SELECT * FROM {quoted_table}
-                UNION ALL
-                SELECT * FROM {parquet_read}
-              )
-              GROUP BY "from", "to"
-            """
+          sql = (
+            f"INSERT INTO {quoted_table} SELECT t.* FROM {parquet_read} t {dedup_where}"
+          )
         else:
-          # Unknown table type: just append without deduplication
-          sql = f"""
-            CREATE OR REPLACE TABLE {temp_table} AS
-            SELECT * FROM {quoted_table}
-            UNION ALL
-            SELECT * FROM {parquet_read}
-          """
+          # Simple append — no dedup
+          sql = f"INSERT INTO {quoted_table} SELECT * FROM {parquet_read}"
 
-        # Execute merge + dedupe
         conn.execute(sql)
 
-        # Replace original with deduplicated result
-        conn.execute(f"DROP TABLE {quoted_table}")
-        conn.execute(f"ALTER TABLE {temp_table} RENAME TO {quoted_table}")
-
-        # Count rows after merge + dedupe
+        # Count rows after insert
         count_after = conn.execute(f"SELECT COUNT(*) FROM {quoted_table}").fetchone()
         rows_after = count_after[0] if count_after else 0
         rows_added = rows_after - rows_before
 
-        # CRITICAL: Checkpoint to flush WAL and clear accumulated state.
+        # Checkpoint to flush WAL and clear accumulated state.
         # Without this, chunked ingestion (multiple INSERTs in sequence) causes
         # WAL growth and connection state accumulation that eventually stalls.
-        # This is especially important for large tables like Association (~200M rows)
-        # where 17 sequential INSERTs would otherwise accumulate significant state.
         try:
           conn.execute("CHECKPOINT")
           logger.debug(f"Checkpointed DuckDB after INSERT into {request.table_name}")
@@ -562,7 +520,7 @@ class DuckDBTableManager:
         logger.info(
           f"Inserted into table {request.table_name} for graph {request.graph_id} "
           f"in {execution_time_ms:.2f}ms ({file_count} {'files' if is_list else ''}, "
-          f"{rows_added:,} net rows added, {rows_after:,} total after dedupe)"
+          f"{rows_added:,} net rows added, {rows_after:,} total)"
         )
 
         return TableCreateResponse(
