@@ -37,6 +37,7 @@ DEFAULT_GRAPH_BILLING_PLANS: list[dict[str, Any]] = [
     "max_queries_per_hour": 10000,
     "infrastructure": "Dedicated m7g.large (2 vCPU, 8 GB RAM)",
     "backup_retention_days": 7,
+    "backup_downloads_per_month": 2,  # ~$3.60 worst-case egress at 20GB avg
     "priority_support": True,
   },
   {
@@ -48,6 +49,7 @@ DEFAULT_GRAPH_BILLING_PLANS: list[dict[str, Any]] = [
     "max_queries_per_hour": 50000,
     "infrastructure": "Dedicated r7g.large (2 vCPU, 16 GB RAM)",
     "backup_retention_days": 30,
+    "backup_downloads_per_month": 4,  # ~$9.00 worst-case egress at 25GB avg
     "priority_support": True,
   },
   {
@@ -59,6 +61,7 @@ DEFAULT_GRAPH_BILLING_PLANS: list[dict[str, Any]] = [
     "max_queries_per_hour": None,  # Unlimited
     "infrastructure": "Dedicated r7g.xlarge (4 vCPU, 32 GB RAM)",
     "backup_retention_days": 90,
+    "backup_downloads_per_month": 10,  # ~$18 worst-case egress at 200GB avg
     "priority_support": True,
   },
 ]
@@ -78,6 +81,14 @@ TIER_CREDIT_ALLOCATIONS = {
   plan["name"]: plan["monthly_credit_allocation"]
   for plan in DEFAULT_GRAPH_BILLING_PLANS
 }
+
+
+def get_tier_backup_downloads_per_month(tier: str) -> int | None:
+  """Get monthly backup download limit for a tier. Returns None if tier not found."""
+  for plan in DEFAULT_GRAPH_BILLING_PLANS:
+    if plan["name"] == tier:
+      return plan.get("backup_downloads_per_month", 0)
+  return None
 
 
 class BillingConfig:

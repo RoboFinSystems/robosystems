@@ -20,7 +20,7 @@ RoboSystems is an enterprise-grade financial knowledge graph platform that trans
 - **QuickBooks Integration**: Complete accounting synchronization with trial balance creation
 - **DuckDB Staging System**: High-performance data validation and bulk ingestion pipeline
 - **Dagster Orchestration**: Data pipeline orchestration for SEC filings, backups, billing, and scheduled jobs
-- **Credit-Based Billing**: Flexible credits for AI operations based on token usage or storage overage
+- **Credit-Based Billing**: Flexible credits for AI operations based on token usage
 
 ## Quick Start
 

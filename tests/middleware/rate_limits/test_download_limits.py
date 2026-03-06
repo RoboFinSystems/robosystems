@@ -31,17 +31,17 @@ class TestDownloadRateLimiter:
 
   def test_get_monthly_limit_starter_plan(self):
     """Test monthly limit for STARTER plan (downloads disabled)."""
-    limit = DownloadRateLimiter._get_monthly_limit("sec", "starter")
+    limit = DownloadRateLimiter.get_shared_repo_monthly_limit("sec", "starter")
     assert limit == 0  # Starter plan has no download access
 
   def test_get_monthly_limit_advanced_plan(self):
     """Test monthly limit for ADVANCED plan."""
-    limit = DownloadRateLimiter._get_monthly_limit("sec", "advanced")
+    limit = DownloadRateLimiter.get_shared_repo_monthly_limit("sec", "advanced")
     assert limit == 1  # Advanced gets 1 download/month
 
   def test_get_monthly_limit_unknown_repository(self):
     """Test monthly limit falls back to default for unknown repository."""
-    limit = DownloadRateLimiter._get_monthly_limit("unknown_repo", "starter")
+    limit = DownloadRateLimiter.get_shared_repo_monthly_limit("unknown_repo", "starter")
     assert limit == DownloadRateLimiter.DEFAULT_DOWNLOADS_PER_MONTH
 
   def test_get_reset_time_is_first_of_next_month_utc(self):
@@ -148,7 +148,7 @@ class TestDownloadRateLimiter:
     ):
       count = await DownloadRateLimiter.increment_download_count(
         user_id="user123",
-        repository="sec",
+        resource_id="sec",
       )
 
     assert count == 1
@@ -166,7 +166,7 @@ class TestDownloadRateLimiter:
     ):
       count = await DownloadRateLimiter.increment_download_count(
         user_id="user123",
-        repository="sec",
+        resource_id="sec",
       )
 
     assert count == 2
@@ -240,7 +240,7 @@ class TestDownloadRateLimiter:
     ):
       await DownloadRateLimiter.increment_download_count(
         user_id="user123",
-        repository="sec",
+        resource_id="sec",
       )
 
     mock_redis.aclose.assert_called_once()

@@ -28,7 +28,7 @@ from robosystems.middleware.rate_limits import (
   subscription_aware_rate_limit_dependency,
 )
 from robosystems.models.api.graphs.backups import BackupDownloadUrlResponse
-from robosystems.models.iam import User, UserRepository
+from robosystems.models.iam import Graph, User, UserRepository
 
 from .utils import get_backup_manager
 
@@ -89,10 +89,12 @@ async def get_backup_download_url(
   """
   try:
     # Access validated by get_current_user_with_graph dependency
+    is_shared = MultiTenantUtils.is_shared_repository(graph_id)
+    has_tier_limit = False
 
-    # Check if this is a shared repository - apply download rate limiting
-    if MultiTenantUtils.is_shared_repository(graph_id):
-      # Get user's repository subscription
+    # Check download rate limits based on graph type
+    if is_shared:
+      # Shared repository: check subscription and plan-based limits
       user_repo = UserRepository.get_by_user_and_repository(
         str(current_user.id), graph_id, session
       )
@@ -102,9 +104,8 @@ async def get_backup_download_url(
           detail="Repository subscription required for backup downloads",
         )
 
-      # Check monthly download limit
       plan = user_repo.repository_plan
-      monthly_limit = DownloadRateLimiter._get_monthly_limit(graph_id, plan)
+      monthly_limit = DownloadRateLimiter.get_shared_repo_monthly_limit(graph_id, plan)
 
       # Limit of 0 means downloads are not available on this plan
       if monthly_limit == 0:
@@ -129,6 +130,44 @@ async def get_backup_download_url(
             "X-RateLimit-Reset": resets_at.isoformat(),
           },
         )
+    else:
+      # Dedicated graph: check tier-based download limits
+      graph_record = Graph.get_by_id(graph_id, session)
+      if not graph_record:
+        logger.warning(
+          f"Graph record not found for {graph_id} during download limit check"
+        )
+        raise HTTPException(
+          status_code=status.HTTP_404_NOT_FOUND,
+          detail="Graph not found",
+        )
+
+      if graph_record.graph_tier:
+        has_tier_limit = True
+        tier_limit = DownloadRateLimiter.get_graph_tier_monthly_limit(
+          str(graph_record.graph_tier)
+        )
+
+        (
+          allowed,
+          remaining,
+          resets_at,
+        ) = await DownloadRateLimiter.check_graph_download_limit(
+          user_id=str(current_user.id),
+          graph_id=graph_id,
+          graph_tier=str(graph_record.graph_tier),
+        )
+
+        if not allowed:
+          raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=f"Monthly backup download limit ({tier_limit}) exceeded. Limit resets at {resets_at.isoformat()}.",
+            headers={
+              "X-RateLimit-Limit": str(tier_limit),
+              "X-RateLimit-Remaining": "0",
+              "X-RateLimit-Reset": resets_at.isoformat(),
+            },
+          )
 
     # Get backup manager and generate download URL
     backup_manager = get_backup_manager()
@@ -143,11 +182,11 @@ async def get_backup_download_url(
         detail="Backup not found or cannot be downloaded",
       )
 
-    # Increment download count for shared repositories
-    if MultiTenantUtils.is_shared_repository(graph_id):
+    # Increment download count for rate limiting
+    if is_shared or has_tier_limit:
       await DownloadRateLimiter.increment_download_count(
         user_id=str(current_user.id),
-        repository=graph_id,
+        resource_id=graph_id,
       )
 
     # Record business event
@@ -161,7 +200,7 @@ async def get_backup_download_url(
         "graph_id": graph_id,
         "backup_id": backup_id,
         "expires_in": expires_in,
-        "is_shared_repository": MultiTenantUtils.is_shared_repository(graph_id),
+        "is_shared_repository": is_shared,
       },
       user_id=current_user.id,
     )
