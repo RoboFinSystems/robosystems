@@ -83,12 +83,12 @@ TIER_CREDIT_ALLOCATIONS = {
 }
 
 
-def get_tier_backup_downloads_per_month(tier: str) -> int:
-  """Get monthly backup download limit for a tier. Returns 0 for unlimited."""
+def get_tier_backup_downloads_per_month(tier: str) -> int | None:
+  """Get monthly backup download limit for a tier. Returns None if tier not found."""
   for plan in DEFAULT_GRAPH_BILLING_PLANS:
     if plan["name"] == tier:
       return plan.get("backup_downloads_per_month", 0)
-  return 0
+  return None
 
 
 class BillingConfig:

@@ -7,7 +7,7 @@ with monthly TTL expiration.
 
 Limits by product:
 - Shared repositories: Defined in adapter manifests (e.g., SEC starter=0, pro=1)
-- Dedicated graphs: Defined in billing/core.py (standard=2, large=4, xlarge=unlimited)
+- Dedicated graphs: Defined in billing/core.py (standard=2, large=4, xlarge=10)
 """
 
 from datetime import UTC, datetime
@@ -36,14 +36,14 @@ class DownloadRateLimiter:
     return create_async_redis_client(ValkeyDatabase.RATE_LIMITS)
 
   @classmethod
-  def _get_key(cls, user_id: str, repository: str) -> str:
+  def _get_key(cls, user_id: str, resource_id: str) -> str:
     """Build the Redis key for download tracking."""
     month = datetime.now(UTC).strftime("%Y%m")
-    return f"download_limit:{repository}:{user_id}:{month}"
+    return f"download_limit:{resource_id}:{user_id}:{month}"
 
   @classmethod
-  def _get_monthly_limit(cls, repository: str, plan: str) -> int:
-    """Get the monthly download limit for a repository and plan."""
+  def get_shared_repo_monthly_limit(cls, repository: str, plan: str) -> int:
+    """Get the monthly download limit for a shared repository and plan."""
     try:
       limits = _get_rate_limits(repository, plan)
       if limits:
@@ -55,10 +55,16 @@ class DownloadRateLimiter:
     return cls.DEFAULT_DOWNLOADS_PER_MONTH
 
   @classmethod
-  def _get_graph_tier_monthly_limit(cls, graph_tier: str) -> int:
-    """Get the monthly download limit for a graph subscription tier."""
+  def get_graph_tier_monthly_limit(cls, graph_tier: str) -> int:
+    """Get the monthly download limit for a graph subscription tier.
+
+    Returns DEFAULT_DOWNLOADS_PER_MONTH if tier is not found in billing config.
+    """
     limit = get_tier_backup_downloads_per_month(graph_tier)
-    return limit if limit > 0 else cls.DEFAULT_DOWNLOADS_PER_MONTH
+    if limit is None:
+      logger.warning(f"Unknown graph tier '{graph_tier}', using default download limit")
+      return cls.DEFAULT_DOWNLOADS_PER_MONTH
+    return limit
 
   @classmethod
   def _get_reset_time(cls) -> datetime:
@@ -71,6 +77,44 @@ class DownloadRateLimiter:
     return next_month
 
   @classmethod
+  async def _check_limit(
+    cls,
+    user_id: str,
+    resource_id: str,
+    monthly_limit: int,
+  ) -> tuple[bool, int, datetime]:
+    """Check if user has remaining downloads for the month.
+
+    Args:
+        user_id: User ID
+        resource_id: Repository or graph ID
+        monthly_limit: Configured monthly download limit
+
+    Returns:
+        Tuple of (allowed, remaining, resets_at)
+    """
+    reset_at = cls._get_reset_time()
+
+    redis_client = None
+    try:
+      redis_client = cls._get_redis_client()
+      key = cls._get_key(user_id, resource_id)
+      current = await redis_client.get(key)
+      used = int(current) if current else 0
+      remaining = max(0, monthly_limit - used)
+      allowed = used < monthly_limit
+
+      logger.debug(
+        f"Download limit check on {resource_id}: "
+        f"used={used}, limit={monthly_limit}, remaining={remaining}"
+      )
+
+      return allowed, remaining, reset_at
+    finally:
+      if redis_client is not None:
+        await redis_client.aclose()
+
+  @classmethod
   async def check_download_limit(
     cls,
     user_id: str,
@@ -78,7 +122,7 @@ class DownloadRateLimiter:
     plan: str,
   ) -> tuple[bool, int, datetime]:
     """
-    Check if user has remaining downloads for the month.
+    Check if user has remaining downloads for a shared repository.
 
     Args:
         user_id: User ID
@@ -91,27 +135,8 @@ class DownloadRateLimiter:
         - remaining: Number of downloads remaining this month
         - resets_at: When the limit resets (first of next month, UTC)
     """
-    monthly_limit = cls._get_monthly_limit(repository, plan)
-    reset_at = cls._get_reset_time()
-
-    redis_client = None
-    try:
-      redis_client = cls._get_redis_client()
-      key = cls._get_key(user_id, repository)
-      current = await redis_client.get(key)
-      used = int(current) if current else 0
-      remaining = max(0, monthly_limit - used)
-      allowed = used < monthly_limit
-
-      logger.debug(
-        f"Download limit check for user {user_id} on {repository}: "
-        f"used={used}, limit={monthly_limit}, remaining={remaining}"
-      )
-
-      return allowed, remaining, reset_at
-    finally:
-      if redis_client is not None:
-        await redis_client.aclose()
+    monthly_limit = cls.get_shared_repo_monthly_limit(repository, plan)
+    return await cls._check_limit(user_id, repository, monthly_limit)
 
   @classmethod
   async def check_graph_download_limit(
@@ -133,40 +158,21 @@ class DownloadRateLimiter:
         - remaining: Number of downloads remaining this month
         - resets_at: When the limit resets (first of next month, UTC)
     """
-    monthly_limit = cls._get_graph_tier_monthly_limit(graph_tier)
-    reset_at = cls._get_reset_time()
-
-    redis_client = None
-    try:
-      redis_client = cls._get_redis_client()
-      key = cls._get_key(user_id, graph_id)
-      current = await redis_client.get(key)
-      used = int(current) if current else 0
-      remaining = max(0, monthly_limit - used)
-      allowed = used < monthly_limit
-
-      logger.debug(
-        f"Graph download limit check for user {user_id} on {graph_id} "
-        f"(tier={graph_tier}): used={used}, limit={monthly_limit}, remaining={remaining}"
-      )
-
-      return allowed, remaining, reset_at
-    finally:
-      if redis_client is not None:
-        await redis_client.aclose()
+    monthly_limit = cls.get_graph_tier_monthly_limit(graph_tier)
+    return await cls._check_limit(user_id, graph_id, monthly_limit)
 
   @classmethod
   async def increment_download_count(
     cls,
     user_id: str,
-    repository: str,
+    resource_id: str,
   ) -> int:
     """
     Increment the download counter for a user.
 
     Args:
         user_id: User ID
-        repository: Repository ID (e.g., "sec")
+        resource_id: Repository ID or graph ID
 
     Returns:
         New download count for this month
@@ -174,7 +180,7 @@ class DownloadRateLimiter:
     redis_client = None
     try:
       redis_client = cls._get_redis_client()
-      key = cls._get_key(user_id, repository)
+      key = cls._get_key(user_id, resource_id)
 
       # Increment and set TTL to expire at start of next month
       count = await redis_client.incr(key)
@@ -185,9 +191,7 @@ class DownloadRateLimiter:
         ttl_seconds = int((reset_at - datetime.now(UTC)).total_seconds())
         await redis_client.expire(key, ttl_seconds)
 
-      logger.info(
-        f"Download count incremented for user {user_id} on {repository}: count={count}"
-      )
+      logger.info(f"Download count incremented on {resource_id}: count={count}")
 
       return count
     finally:
@@ -216,7 +220,7 @@ class DownloadRateLimiter:
         - remaining: Downloads remaining this month
         - resets_at: ISO timestamp when limit resets
     """
-    monthly_limit = cls._get_monthly_limit(repository, plan)
+    monthly_limit = cls.get_shared_repo_monthly_limit(repository, plan)
     reset_at = cls._get_reset_time()
 
     redis_client = None

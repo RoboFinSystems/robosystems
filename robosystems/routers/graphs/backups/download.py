@@ -90,7 +90,7 @@ async def get_backup_download_url(
   try:
     # Access validated by get_current_user_with_graph dependency
     is_shared = MultiTenantUtils.is_shared_repository(graph_id)
-    graph_record = None
+    has_tier_limit = False
 
     # Check download rate limits based on graph type
     if is_shared:
@@ -105,7 +105,7 @@ async def get_backup_download_url(
         )
 
       plan = user_repo.repository_plan
-      monthly_limit = DownloadRateLimiter._get_monthly_limit(graph_id, plan)
+      monthly_limit = DownloadRateLimiter.get_shared_repo_monthly_limit(graph_id, plan)
 
       # Limit of 0 means downloads are not available on this plan
       if monthly_limit == 0:
@@ -133,7 +133,21 @@ async def get_backup_download_url(
     else:
       # Dedicated graph: check tier-based download limits
       graph_record = Graph.get_by_id(graph_id, session)
-      if graph_record and graph_record.graph_tier:
+      if not graph_record:
+        logger.warning(
+          f"Graph record not found for {graph_id} during download limit check"
+        )
+        raise HTTPException(
+          status_code=status.HTTP_404_NOT_FOUND,
+          detail="Graph not found",
+        )
+
+      if graph_record.graph_tier:
+        has_tier_limit = True
+        tier_limit = DownloadRateLimiter.get_graph_tier_monthly_limit(
+          str(graph_record.graph_tier)
+        )
+
         (
           allowed,
           remaining,
@@ -145,9 +159,6 @@ async def get_backup_download_url(
         )
 
         if not allowed:
-          tier_limit = DownloadRateLimiter._get_graph_tier_monthly_limit(
-            str(graph_record.graph_tier)
-          )
           raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail=f"Monthly backup download limit ({tier_limit}) exceeded. Limit resets at {resets_at.isoformat()}.",
@@ -172,10 +183,10 @@ async def get_backup_download_url(
       )
 
     # Increment download count for rate limiting
-    if is_shared or (graph_record and graph_record.graph_tier):
+    if is_shared or has_tier_limit:
       await DownloadRateLimiter.increment_download_count(
         user_id=str(current_user.id),
-        repository=graph_id,
+        resource_id=graph_id,
       )
 
     # Record business event

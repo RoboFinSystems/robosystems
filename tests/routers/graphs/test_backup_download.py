@@ -143,7 +143,7 @@ class TestBackupDownloadEndpoint:
     new_callable=AsyncMock,
   )
   @patch(
-    "robosystems.routers.graphs.backups.download.DownloadRateLimiter._get_monthly_limit"
+    "robosystems.routers.graphs.backups.download.DownloadRateLimiter.get_shared_repo_monthly_limit"
   )
   @patch(
     "robosystems.routers.graphs.backups.download.UserRepository.get_by_user_and_repository"
@@ -215,7 +215,7 @@ class TestBackupDownloadEndpoint:
     new_callable=AsyncMock,
   )
   @patch(
-    "robosystems.routers.graphs.backups.download.DownloadRateLimiter._get_monthly_limit"
+    "robosystems.routers.graphs.backups.download.DownloadRateLimiter.get_shared_repo_monthly_limit"
   )
   @patch(
     "robosystems.routers.graphs.backups.download.UserRepository.get_by_user_and_repository"
@@ -289,7 +289,7 @@ class TestBackupDownloadEndpoint:
     new_callable=AsyncMock,
   )
   @patch(
-    "robosystems.routers.graphs.backups.download.DownloadRateLimiter._get_monthly_limit"
+    "robosystems.routers.graphs.backups.download.DownloadRateLimiter.get_shared_repo_monthly_limit"
   )
   @patch(
     "robosystems.routers.graphs.backups.download.UserRepository.get_by_user_and_repository"
@@ -357,7 +357,7 @@ class TestBackupDownloadEndpoint:
       # Verify increment was called
       mock_increment.assert_called_once_with(
         user_id="test-user-123",
-        repository="sec",
+        resource_id="sec",
       )
     finally:
       if get_current_user_with_graph in app.dependency_overrides:
@@ -593,7 +593,7 @@ class TestBackupDownloadEndpoint:
       mock_user_graph.role = "admin"
       mock_get_by_user_id.return_value = [mock_user_graph]
 
-      # Graph with xlarge tier (unlimited downloads)
+      # Graph with xlarge tier (10 downloads/month)
       mock_graph_record = MagicMock()
       mock_graph_record.graph_tier = "ladybug-xlarge"
       mock_get_graph.return_value = mock_graph_record
