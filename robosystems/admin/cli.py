@@ -124,7 +124,7 @@ class AdminAPIClient:
       result = subprocess.run(cmd, capture_output=True, text=True, check=False, env=env)
       api_access_mode = result.stdout.strip() if result.returncode == 0 else ""
 
-      if api_access_mode in ("public", "public-http"):
+      if api_access_mode == "public":
         raise click.ClickException(
           f"Direct API access is blocked in '{api_access_mode}' mode.\n\n"
           f"The ALB blocks all /admin/v1/* endpoints when API is publicly accessible.\n\n"

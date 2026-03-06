@@ -690,7 +690,7 @@ When forking RoboSystems to a different AWS account:
 2. **S3 Bucket Names**: Automatically namespaced with account ID to avoid collisions
 3. **OIDC Trust**: Update `GitHubOrganization` parameter in bootstrap
 4. **Secrets**: Create new secrets in Secrets Manager
-5. **Domain Names**: Optional - works without custom domains via bastion tunnel
+5. **Domain Names**: Optional - works without custom domains via SSM tunnel
 
 See the [Bootstrap Guide](https://github.com/RoboFinSystems/robosystems/wiki/Bootstrap-Guide) for complete fork deployment instructions.
 
