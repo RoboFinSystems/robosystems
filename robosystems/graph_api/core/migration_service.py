@@ -48,11 +48,32 @@ def _set_migration_in_progress(value: bool, task_id: str | None = None) -> None:
     _active_task_id = task_id if value else None
 
 
-def _set_export_in_progress(value: bool) -> None:
-  """Set export state (thread-safe)."""
+def _try_start_export() -> bool:
+  """Atomically check and set export state. Returns True if acquired."""
   global _export_in_progress
   with _migration_lock:
-    _export_in_progress = value
+    if _export_in_progress:
+      return False
+    _export_in_progress = True
+    return True
+
+
+def _clear_export_in_progress() -> None:
+  """Clear export state."""
+  global _export_in_progress
+  with _migration_lock:
+    _export_in_progress = False
+
+
+def _try_start_import(task_id: str) -> bool:
+  """Atomically check and set import state. Returns True if acquired."""
+  global _migration_in_progress, _active_task_id
+  with _migration_lock:
+    if _migration_in_progress:
+      return False
+    _migration_in_progress = True
+    _active_task_id = task_id
+    return True
 
 
 def get_active_task_id() -> str | None:
@@ -125,6 +146,8 @@ class MigrationService:
 
   def _discover_databases(self) -> list[str]:
     """Find all .lbug database files on this instance."""
+    if not self.base_path.exists():
+      return []
     databases = []
     for f in sorted(self.base_path.iterdir()):
       if f.suffix == ".lbug" and f.is_file():
@@ -192,13 +215,11 @@ class MigrationService:
     3. For each database: EXPORT DATABASE to exports/{graph_id}/
     4. Write migration.json manifest
     """
-    if _export_in_progress:
+    if not _try_start_export():
       await migration_task_manager.fail_task(task_id, "Export already in progress")
       return
 
     try:
-      _set_export_in_progress(True)
-
       await migration_task_manager.update_task(
         task_id,
         status="running",
@@ -320,7 +341,7 @@ class MigrationService:
       logger.error(f"Migration export failed: {e}")
       await migration_task_manager.fail_task(task_id, str(e))
     finally:
-      _set_export_in_progress(False)
+      _clear_export_in_progress()
 
   async def import_all_databases(self, task_id: str) -> None:
     """
@@ -333,10 +354,13 @@ class MigrationService:
     5. On success: cleanup and clear flag
     6. On failure: restore .pre-migration files and clear flag
     """
+    if not _try_start_import(task_id):
+      await migration_task_manager.fail_task(task_id, "Import already in progress")
+      return
+
     renamed_files: list[tuple[Path, Path]] = []
 
     try:
-      _set_migration_in_progress(True, task_id)
       logger.info("Migration import started - health returning 503")
 
       await migration_task_manager.update_task(
@@ -508,9 +532,10 @@ class MigrationService:
 
     # Find .pre-migration files
     pre_migration_files = []
-    for f in sorted(self.base_path.iterdir()):
-      if f.name.endswith(".pre-migration"):
-        pre_migration_files.append(f.name)
+    if self.base_path.exists():
+      for f in sorted(self.base_path.iterdir()):
+        if f.name.endswith(".pre-migration"):
+          pre_migration_files.append(f.name)
 
     return {
       "migration_pending": manifest is not None,
@@ -531,6 +556,9 @@ class MigrationService:
     """
     deleted = []
     total_freed = 0
+
+    if not self.base_path.exists():
+      return {"files_deleted": [], "total_freed_bytes": 0}
 
     for f in sorted(self.base_path.iterdir()):
       if f.name.endswith(".pre-migration"):

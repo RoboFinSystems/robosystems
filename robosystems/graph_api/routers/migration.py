@@ -5,9 +5,12 @@ Instance-level endpoints called by Dagster jobs to orchestrate
 export (pre-deploy) and import (post-deploy) of all databases.
 """
 
-from fastapi import APIRouter, BackgroundTasks, Query
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Query
 
-from robosystems.graph_api.core.migration_service import MigrationService
+from robosystems.graph_api.core.migration_service import (
+  MigrationService,
+  is_migration_in_progress,
+)
 from robosystems.graph_api.core.task_manager import migration_task_manager
 from robosystems.graph_api.models.migration import (
   MigrationExportResponse,
@@ -91,5 +94,20 @@ async def cleanup_pre_migration() -> dict:
 
   System backups in S3 remain as the safety net. Call this after
   confirming the migrated databases are working correctly.
+
+  Refuses to run if a migration is in progress or if a manifest
+  still exists (indicating import hasn't completed).
   """
+  if is_migration_in_progress():
+    raise HTTPException(
+      status_code=409,
+      detail="Cannot cleanup while migration is in progress",
+    )
+
+  if migration_service.manifest_path.exists():
+    raise HTTPException(
+      status_code=409,
+      detail="Cannot cleanup: migration.json still exists (import not yet completed)",
+    )
+
   return migration_service.cleanup_pre_migration_files()

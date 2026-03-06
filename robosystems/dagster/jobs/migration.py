@@ -118,8 +118,7 @@ async def _poll_task(
   start = time.time()
 
   while True:
-    response = await client._request("GET", f"/tasks/{task_id}/status")
-    task = response.json()
+    task = await client.get_task_status(task_id)
     status = task.get("status")
 
     if status == "completed":
