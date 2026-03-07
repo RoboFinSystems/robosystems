@@ -161,19 +161,26 @@ async def materialize_table(
   # Fast path: rebuild vector index only (no data copy)
   # Used after batched materialization to build HNSW index over full dataset
   if request.rebuild_vector_index:
-    import time as _time
-
-    start = _time.time()
+    logger.info(
+      f"Rebuilding vector index for {table_name} on {graph_id} (this may take several minutes)..."
+    )
     try:
       with ladybug_service.db_manager.connection_pool.get_connection(graph_id) as conn:
-        conn.execute("CALL timeout=3600000")  # 60 minutes
-        success = ladybug_service.db_manager.rebuild_vector_index(conn, table_name)
-        if success:
-          conn.execute("CHECKPOINT")
+        try:
+          conn.execute("CALL timeout=3600000")  # 60 minutes
+          success = ladybug_service.db_manager.rebuild_vector_index(conn, table_name)
+          if success:
+            conn.execute("CHECKPOINT")
+            logger.info(f"Checkpointed after vector index rebuild for {table_name}")
+        finally:
+          conn.execute("CALL timeout=120000")  # Reset to default
       ladybug_service.db_manager.connection_pool.force_database_cleanup(
         graph_id, aggressive=True
       )
-      elapsed = (_time.time() - start) * 1000
+      elapsed = (time.time() - start_time) * 1000
+      logger.info(
+        f"Vector index rebuild for {table_name} completed in {elapsed / 1000:.1f}s"
+      )
       return TableMaterializationResponse(
         status="success" if success else "skipped",
         graph_id=graph_id,

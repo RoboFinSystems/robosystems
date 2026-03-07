@@ -1648,7 +1648,7 @@ class GraphClient(BaseGraphClient):
     """Rebuild HNSW vector index on a table after batched materialization.
 
     Uses the materialize endpoint with rebuild_vector_index=True to get
-    a write connection with extended timeout (60 min).
+    a write connection with extended timeout (10 min client, 60 min server).
     """
     response = await self._request(
       "POST",
