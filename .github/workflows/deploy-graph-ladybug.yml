@@ -81,6 +81,13 @@ on:
         type: string
         default: ""
 
+      # Config Profile Override
+      config_profile:
+        description: "Override config profile for graph.yml lookup (e.g., 'production' to use prod configs in staging)"
+        required: false
+        type: string
+        default: ""
+
       # Tier Specifications (from graph.yml)
       instance_type:
         description: "EC2 instance type for this tier"
@@ -291,6 +298,7 @@ jobs:
                 ParameterKey=VolumeDetachmentTopicArn,ParameterValue=\"${{ inputs.volume_detachment_topic_arn }}\" \
                 ParameterKey=VolumeManagerFunctionArn,ParameterValue=\"${{ inputs.volume_manager_function_arn }}\" \
                 ParameterKey=SharedRepositories,ParameterValue=\"${{ inputs.shared_repositories }}\" \
+                ParameterKey=ConfigProfile,ParameterValue=\"${{ inputs.config_profile }}\" \
                 ParameterKey=ServiceTag,ParameterValue=\"RoboSystems\" \
                 ParameterKey=ComponentTag,ParameterValue=\"LadybugWriter\""
 

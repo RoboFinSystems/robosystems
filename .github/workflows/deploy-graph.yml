@@ -124,6 +124,11 @@ on:
         type: string
         description: Shared tier maximum instances
         default: ""
+      lbug_shared_config_profile:
+        required: false
+        type: string
+        description: Override config profile for shared master (e.g., "production" to use prod configs in staging)
+        default: ""
 
       # Shared Replicas Configuration
       shared_replicas_enabled:
@@ -396,6 +401,13 @@ jobs:
 
               echo "  Scaling for ${WRITER_NAME}: min=$MIN_INSTANCES, max=$MAX_INSTANCES"
 
+              # Config profile override for shared master (use production configs in staging)
+              if [ "$WRITER_NAME" = "ladybug-shared" ] && [ -n "${{ inputs.lbug_shared_config_profile }}" ]; then
+                CONFIG_PROFILE="${{ inputs.lbug_shared_config_profile }}"
+                echo "  Config profile override: reading shared config from ${CONFIG_PROFILE}"
+                writer=$(yq eval -o=json ".${CONFIG_PROFILE}.writers[] | select(.name == \"ladybug-shared\")" .github/configs/graph.yml)
+              fi
+
               # Build the matrix entry from writer config with nested instance specs
               MATRIX_ENTRY=$(echo "$writer" | jq --arg min "$MIN_INSTANCES" --arg max "$MAX_INSTANCES" '{
                 name: .name,
@@ -471,6 +483,7 @@ jobs:
       # Graph Writer Configuration
       writer_tier: ${{ matrix.tier }}
       shared_repositories: ${{ matrix.tier == 'ladybug-shared' && inputs.shared_repositories || '' }}
+      config_profile: ${{ matrix.tier == 'ladybug-shared' && inputs.lbug_shared_config_profile || '' }}
       # Instance Configuration
       instance_type: ${{ matrix.instance_type }}
       databases_per_instance: "${{ matrix.databases_per_instance }}"

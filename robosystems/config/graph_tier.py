@@ -98,6 +98,12 @@ class GraphTierConfig:
       else:
         environment = "staging"
 
+    # Allow config profile override for shared master (e.g., staging using production configs)
+    # This lets staging deploy production-sized hardware with matching memory/performance settings
+    config_profile = os.getenv("LBUG_CONFIG_PROFILE")
+    if config_profile and tier == GraphTier.LADYBUG_SHARED.value:
+      environment = config_profile
+
     config = cls._load_config()
 
     env_config = config.get(environment, {})
