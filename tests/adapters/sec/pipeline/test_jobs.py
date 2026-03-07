@@ -4,7 +4,6 @@ import pytest
 
 from robosystems.adapters.sec.pipeline.jobs import (
   sec_artifact_generation_job,
-  sec_backup_job,
   sec_download_job,
   sec_duckdb_s3_publish_job,
   sec_entity_update_job,
@@ -171,23 +170,6 @@ class TestSECEntityUpdateJob:
 
 
 @pytest.mark.unit
-class TestSECBackupJob:
-  """Tests for sec_backup_job definition."""
-
-  def test_job_name(self):
-    """Test backup job has correct name."""
-    assert sec_backup_job.name == "sec_create_backup"
-
-  def test_job_has_pipeline_tag(self):
-    """Test backup job has pipeline tag."""
-    assert sec_backup_job.tags.get("pipeline") == "sec"
-
-  def test_job_has_backup_phase(self):
-    """Test backup job has backup phase tag."""
-    assert sec_backup_job.tags.get("phase") == "backup"
-
-
-@pytest.mark.unit
 class TestSECS3PublishJobs:
   """Tests for S3 publish job definitions."""
 
@@ -245,7 +227,6 @@ class TestAllJobsConsistency:
       sec_historical_materialize_job,
       sec_historical_staged_materialize_job,
       sec_entity_update_job,
-      sec_backup_job,
       sec_duckdb_s3_publish_job,
       sec_historical_duckdb_s3_publish_job,
       sec_historical_lbug_s3_publish_job,
@@ -269,7 +250,6 @@ class TestAllJobsConsistency:
       sec_historical_materialize_job,
       sec_historical_staged_materialize_job,
       sec_entity_update_job,
-      sec_backup_job,
       sec_duckdb_s3_publish_job,
       sec_historical_duckdb_s3_publish_job,
       sec_historical_lbug_s3_publish_job,

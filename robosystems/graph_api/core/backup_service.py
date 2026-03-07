@@ -6,10 +6,11 @@ uploading results to S3 via multipart upload with progress tracking.
 All heavy work (CHECKPOINT, compression, upload) happens on-instance,
 avoiding the need to transfer large databases over HTTP.
 
-Supports four backup types:
+Supports five backup types:
 - replica: Raw .lbug upload to S3 (downloaded by replica fleet at startup)
-- shared_repository: Compressed tar.gz to S3 (for subscriber downloads)
+- shared_repository: Compressed tar.gz to S3 (legacy, prefer r2_download)
 - duckdb_staging: Raw .duckdb upload to S3 (for local dev / analytics)
+- r2_download: Raw .lbug upload to Cloudflare R2 (zero-egress subscriber downloads)
 - standard: ZIP + optional encrypt to S3 (existing user backup flow)
 """
 
@@ -137,6 +138,16 @@ class OnInstanceBackupService:
         result = self._upload_replica(
           db_path, bucket, key, task_id, db_size, backup_type=backup_type
         )
+      elif backup_type == "r2_download":
+        result = self._upload_replica(
+          db_path,
+          bucket,
+          key,
+          task_id,
+          db_size,
+          backup_type=backup_type,
+          s3_client=self._get_r2_client(),
+        )
       elif backup_type == "shared_repository":
         result = self._upload_shared_repository(
           db_path, bucket, key, task_id, graph_id, db_size
@@ -202,6 +213,13 @@ class OnInstanceBackupService:
       kwargs["aws_secret_access_key"] = s3_config.get("aws_secret_access_key")
     return boto3.client("s3", **kwargs)
 
+  def _get_r2_client(self):
+    """Create Cloudflare R2 client (S3-compatible) for zero-egress downloads."""
+    r2_config = env.get_r2_config()
+    if not r2_config:
+      raise RuntimeError("R2 not configured — set R2_ENDPOINT_URL and R2 credentials")
+    return boto3.client("s3", **r2_config)
+
   @staticmethod
   def _cleanup_stale_temp_dirs(parent_dir: Path, max_age_hours: int = 24) -> None:
     """Remove temp directories older than max_age_hours from a previous crash."""
@@ -226,14 +244,16 @@ class OnInstanceBackupService:
     task_id: str,
     db_size: int,
     backup_type: str = "replica",
+    s3_client=None,
   ) -> dict[str, Any]:
-    """Raw database upload to S3 (no compression).
+    """Raw database upload to S3 or R2 (no compression).
 
-    Used for both .lbug replica uploads and .duckdb staging uploads.
+    Used for .lbug replica uploads, .duckdb staging uploads, and R2 downloads.
     """
     logger.info(f"[Task {task_id}] Uploading {db_path.name} to s3://{bucket}/{key}")
 
-    s3_client = self._get_s3_client()
+    if s3_client is None:
+      s3_client = self._get_s3_client()
     transfer_config = TransferConfig(
       multipart_chunksize=S3_MULTIPART_CHUNKSIZE,
       multipart_threshold=S3_MULTIPART_THRESHOLD,

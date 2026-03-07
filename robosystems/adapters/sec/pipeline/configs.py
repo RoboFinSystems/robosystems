@@ -251,19 +251,3 @@ class SECEntityUpdateConfig(Config):
   quarter: int | None = Field(
     default=None, ge=1, le=4, description="Quarter 1-4 (default: current)"
   )
-
-
-# =============================================================================
-# Backup Configuration
-# =============================================================================
-
-
-class SECBackupConfig(Config):
-  """Configuration for SEC backup generation."""
-
-  graph_id: str = "sec"
-  retention_days: int = 14
-  compression: bool = True
-  encryption: bool = False  # Unencrypted for downloads
-  backup_type: str = "full"
-  backup_format: str = "full_dump"

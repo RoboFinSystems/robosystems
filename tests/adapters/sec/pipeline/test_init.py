@@ -43,7 +43,8 @@ class TestGetDagsterComponents:
     """Test that the expected number of assets are registered."""
     components = get_dagster_components()
     # 14 assets: download, process, 3 stage, 2 materialize,
-    # entity update, backup, 2 lbug publish, 2 duckdb publish, knowledge artifact
+    # entity update, 2 lbug s3 publish, 2 duckdb s3 publish,
+    # 1 lbug r2 publish, knowledge artifact
     assert len(components["assets"]) == 14
 
   def test_expected_number_of_jobs(self):
@@ -74,8 +75,8 @@ class TestGetDagsterComponents:
       "sec_processed_filings",
       "sec_duckdb_staged",
       "sec_graph_materialized",
-      "sec_backup",
       "sec_lbug_s3_published",
+      "sec_lbug_r2_published",
       "sec_knowledge_artifacts",
     }
 
@@ -93,7 +94,7 @@ class TestGetDagsterComponents:
       "sec_stage",
       "sec_materialize",
       "sec_staged_materialize",
-      "sec_create_backup",
+      "sec_lbug_r2_publish",
     }
 
     for expected in expected_jobs:
