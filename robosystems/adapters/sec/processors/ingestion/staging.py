@@ -595,6 +595,15 @@ class DuckDBStager:
         except Exception:
           pass  # Index may not exist yet
 
+        # Cast embedding from DOUBLE[] (parquet default) to FLOAT[384] (required by HNSW)
+        try:
+          await client.query_table(
+            graph_id=self.graph_id,
+            sql=f'ALTER TABLE "{table_name}" ALTER COLUMN embedding TYPE FLOAT[384]',
+          )
+        except Exception:
+          pass  # Already correct type
+
         await client.query_table(
           graph_id=self.graph_id,
           sql=(

@@ -416,6 +416,8 @@ class DuckDBConnectionPool:
           except Exception:
             conn.execute("INSTALL vss")
             conn.execute("LOAD vss")
+          # Required for HNSW indexes on persistent (non-in-memory) DuckDB databases
+          conn.execute("SET hnsw_enable_experimental_persistence = true")
           logger.debug("VSS extension loaded for DuckDB connection")
         except Exception as vss_err:
           logger.warning(f"Could not load vss extension: {vss_err}")

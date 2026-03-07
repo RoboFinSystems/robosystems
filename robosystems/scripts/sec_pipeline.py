@@ -228,7 +228,8 @@ class SECPipeline:
         "reset_staging": reset_staging,
         "start_year": None,
         "end_year": None,
-        "build_hnsw_index": os.getenv("DUCKDB_HNSW_INDEX_ENABLED", "false").lower() == "true",
+        "build_hnsw_index": os.getenv("DUCKDB_HNSW_INDEX_ENABLED", "false").lower()
+        == "true",
       }
       if year:
         stage_config["year"] = int(year)
