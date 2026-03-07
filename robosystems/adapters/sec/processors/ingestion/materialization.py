@@ -885,13 +885,20 @@ class LadybugMaterializer:
             row_count = 0
 
         # Use lower batch size for tables with embeddings (FLOAT[384] = ~1.5KB/row)
-        # to prevent OOM during LadybugDB COPY + checkpoint
-        effective_batch_size = (
-          EMBEDDING_MATERIALIZATION_BATCH_SIZE
-          if table_name in EMBEDDING_TABLES
-          else batch_size
+        # to prevent OOM during LadybugDB COPY + checkpoint.
+        # When embeddings are not materialized (MATERIALIZE_EMBEDDINGS_ENABLED=false),
+        # the column is NULL so standard batch size is fine.
+        from robosystems.graph_api.routers.databases.tables.materialize import (
+          _should_materialize_embeddings,
         )
-        if table_name in EMBEDDING_TABLES:
+
+        use_embedding_batch = (
+          table_name in EMBEDDING_TABLES and _should_materialize_embeddings()
+        )
+        effective_batch_size = (
+          EMBEDDING_MATERIALIZATION_BATCH_SIZE if use_embedding_batch else batch_size
+        )
+        if use_embedding_batch:
           log_progress(
             f"[{i}/{total_tables}] Using embedding batch size for {table_name} "
             f"({effective_batch_size:,} rows vs standard {batch_size:,})"

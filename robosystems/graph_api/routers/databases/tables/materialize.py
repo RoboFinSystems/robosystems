@@ -218,6 +218,7 @@ async def materialize_table(
     target_columns = _get_target_columns(ladybug_service, graph_id, table_name)
 
     # Check if table exists, create temp copy without file_id
+    temp_table_created = False
     try:
       with duckdb_pool.get_connection(graph_id) as duck_conn:
         checkpoint_with_retry(duck_conn, graph_id, context="DuckDB")

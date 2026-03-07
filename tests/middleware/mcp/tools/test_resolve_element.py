@@ -29,7 +29,7 @@ def _query_router(**responses):
   """
   defaults = {
     "CONTAINS": [],  # Text fallback (most specific, checked first)
-    'canonical_concept = "': [],  # Canonical WHERE clause (not RETURN clause)
+    "canonical_concept = $canonical_id": [],  # Canonical WHERE clause (not RETURN clause)
     "ELEMENT_HAS_LABEL": [],
     "FACT_HAS_ELEMENT": [],
   }
@@ -85,7 +85,7 @@ class TestResolveElementExecution:
 
     mock_client.execute_query = _query_router(
       **{
-        'canonical_concept = "': [
+        "canonical_concept = $canonical_id": [
           {
             "qname": "us-gaap:Revenues",
             "confidence": 0.95,
@@ -122,7 +122,7 @@ class TestResolveElementExecution:
 
     mock_client.execute_query = _query_router(
       **{
-        'canonical_concept = "': [
+        "canonical_concept = $canonical_id": [
           {
             "qname": "us-gaap:Revenues",
             "confidence": 0.95,
@@ -154,7 +154,7 @@ class TestResolveElementExecution:
 
     mock_client.execute_query = _query_router(
       **{
-        'canonical_concept = "': [
+        "canonical_concept = $canonical_id": [
           {
             "qname": "us-gaap:Revenues",
             "confidence": 0.95,
@@ -227,7 +227,7 @@ class TestResolveElementExecution:
 
     mock_client.execute_query = _query_router(
       **{
-        'canonical_concept = "': [
+        "canonical_concept = $canonical_id": [
           {"qname": "us-gaap:Assets", "confidence": 0.95, "fact_count": 200}
         ],
         "ELEMENT_HAS_LABEL": [{"qname": "us-gaap:Assets", "label": "Assets"}],
@@ -261,7 +261,7 @@ class TestResolveElementExecution:
     # But canonical lookup works
     mock_client.execute_query = _query_router(
       **{
-        'canonical_concept = "': [
+        "canonical_concept = $canonical_id": [
           {"qname": "us-gaap:Revenues", "confidence": 0.95, "fact_count": 100}
         ],
         "ELEMENT_HAS_LABEL": [{"qname": "us-gaap:Revenues", "label": "Revenue"}],

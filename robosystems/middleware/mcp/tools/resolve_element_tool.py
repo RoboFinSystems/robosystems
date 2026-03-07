@@ -128,38 +128,41 @@ Use the returned query_hint directly in read-graph-cypher for immediate results.
       )
 
     try:
+      params: dict[str, Any] = {"canonical_id": canonical_id}
       if accession_number:
         query = (
           "MATCH (r:Report)-[:REPORT_HAS_FACT]->(f:Fact)-[:FACT_HAS_ELEMENT]->(e:Element) "
-          f'WHERE e.canonical_concept = "{canonical_id}" '
-          f'AND r.accession_number = "{accession_number}" '
+          "WHERE e.canonical_concept = $canonical_id "
+          "AND r.accession_number = $accession_number "
           "AND f.has_dimensions = false "
           "RETURN DISTINCT e.qname AS qname, e.canonical_confidence AS confidence, "
           "count(f) AS fact_count "
           "ORDER BY fact_count DESC LIMIT 20"
         )
+        params["accession_number"] = accession_number
       elif ticker:
         query = (
           "MATCH (f:Fact)-[:FACT_HAS_ELEMENT]->(e:Element), "
           "(f)-[:FACT_HAS_ENTITY]->(ent:Entity) "
-          f'WHERE e.canonical_concept = "{canonical_id}" '
-          f'AND ent.ticker = "{ticker}" '
+          "WHERE e.canonical_concept = $canonical_id "
+          "AND ent.ticker = $ticker "
           "AND f.has_dimensions = false "
           "RETURN DISTINCT e.qname AS qname, e.canonical_confidence AS confidence, "
           "count(f) AS fact_count "
           "ORDER BY fact_count DESC LIMIT 20"
         )
+        params["ticker"] = ticker
       else:
         query = (
           "MATCH (f:Fact)-[:FACT_HAS_ELEMENT]->(e:Element) "
-          f'WHERE e.canonical_concept = "{canonical_id}" '
+          "WHERE e.canonical_concept = $canonical_id "
           "AND f.has_dimensions = false "
           "RETURN DISTINCT e.qname AS qname, e.canonical_confidence AS confidence, "
           "count(f) AS fact_count "
           "ORDER BY fact_count DESC LIMIT 20"
         )
 
-      rows = await self.client.execute_query(query) or []
+      rows = await self.client.execute_query(query, params=params) or []
     except Exception as e:
       logger.warning(f"Canonical element query failed: {e}")
       rows = []
@@ -361,15 +364,16 @@ Use the returned query_hint directly in read-graph-cypher for immediate results.
     """Fetch labels for elements by qname."""
     if not qnames:
       return {}
-    qnames_str = ", ".join(f'"{q}"' for q in qnames)
     try:
       label_query = (
-        f"MATCH (e:Element)-[:ELEMENT_HAS_LABEL]->(l:Label) "
-        f"WHERE e.qname IN [{qnames_str}] "
-        f'AND l.type = "http://www.xbrl.org/2003/role/label" '
-        f"RETURN e.qname AS qname, l.value AS label"
+        "MATCH (e:Element)-[:ELEMENT_HAS_LABEL]->(l:Label) "
+        "WHERE e.qname IN $qnames "
+        'AND l.type = "http://www.xbrl.org/2003/role/label" '
+        "RETURN e.qname AS qname, l.value AS label"
       )
-      label_rows = await self.client.execute_query(label_query) or []
+      label_rows = (
+        await self.client.execute_query(label_query, params={"qnames": qnames}) or []
+      )
       return {r["qname"]: r["label"] for r in label_rows if r.get("label")}
     except Exception as e:
       logger.debug(f"Label enrichment failed: {e}")
@@ -384,28 +388,30 @@ Use the returned query_hint directly in read-graph-cypher for immediate results.
     """Fetch fact counts for elements by qname."""
     if not qnames:
       return {}
-    qnames_str = ", ".join(f'"{q}"' for q in qnames)
     try:
+      params: dict[str, Any] = {"qnames": qnames}
       if accession_number:
         query = (
           "MATCH (r:Report)-[:REPORT_HAS_FACT]->(f:Fact)-[:FACT_HAS_ELEMENT]->(e:Element) "
-          f'WHERE e.qname IN [{qnames_str}] AND r.accession_number = "{accession_number}" '
+          "WHERE e.qname IN $qnames AND r.accession_number = $accession_number "
           "RETURN e.qname AS qname, count(f) AS fact_count"
         )
+        params["accession_number"] = accession_number
       elif ticker:
         query = (
           "MATCH (f:Fact)-[:FACT_HAS_ELEMENT]->(e:Element), "
           "(f)-[:FACT_HAS_ENTITY]->(ent:Entity) "
-          f'WHERE e.qname IN [{qnames_str}] AND ent.ticker = "{ticker}" '
+          "WHERE e.qname IN $qnames AND ent.ticker = $ticker "
           "RETURN e.qname AS qname, count(f) AS fact_count"
         )
+        params["ticker"] = ticker
       else:
         query = (
           "MATCH (f:Fact)-[:FACT_HAS_ELEMENT]->(e:Element) "
-          f"WHERE e.qname IN [{qnames_str}] "
+          "WHERE e.qname IN $qnames "
           "RETURN e.qname AS qname, count(f) AS fact_count"
         )
-      rows = await self.client.execute_query(query) or []
+      rows = await self.client.execute_query(query, params=params) or []
       return {r["qname"]: r["fact_count"] for r in rows}
     except Exception as e:
       logger.debug(f"Fact count enrichment failed: {e}")
