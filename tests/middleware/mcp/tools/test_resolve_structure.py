@@ -93,8 +93,9 @@ class TestResolveStructureExecution:
     await tool.execute({"statement_type": "income_statement"})
 
     # Verify the query was called and includes the parenthetical filter
-    call_args = mock_client.execute_query.call_args[0][0]
-    assert "Parenthetical" in call_args
+    call_args = mock_client.execute_query.call_args
+    query = call_args[0][0]
+    assert "Parenthetical" in query
 
   @pytest.mark.asyncio
   async def test_include_parenthetical(self, tool, mock_client):
@@ -105,8 +106,9 @@ class TestResolveStructureExecution:
       {"statement_type": "income_statement", "include_parenthetical": True}
     )
 
-    call_args = mock_client.execute_query.call_args[0][0]
-    assert "[Parenthetical]" not in call_args
+    call_args = mock_client.execute_query.call_args
+    query = call_args[0][0]
+    assert "[Parenthetical]" not in query
 
   @pytest.mark.asyncio
   async def test_with_accession_number_filter(self, tool, mock_client):
@@ -134,10 +136,13 @@ class TestResolveStructureExecution:
     assert result["structures"][0]["accession_number"] == "0001045810-25-000023"
     assert result["structures"][0]["form"] == "10-K"
 
-    # Verify query includes accession_number filter
-    call_args = mock_client.execute_query.call_args[0][0]
-    assert "0001045810-25-000023" in call_args
-    assert "REPORT_USES_TAXONOMY" in call_args
+    # Verify query uses parameterized accession_number filter
+    call_args = mock_client.execute_query.call_args
+    query = call_args[0][0]
+    params = call_args[1]["params"]
+    assert "$accession_number" in query
+    assert params["accession_number"] == "0001045810-25-000023"
+    assert "REPORT_USES_TAXONOMY" in query
 
   @pytest.mark.asyncio
   async def test_with_ticker_and_accession_number(self, tool, mock_client):
@@ -167,10 +172,14 @@ class TestResolveStructureExecution:
     assert result["ticker"] == "NVDA"
     assert result["accession_number"] == "0001045810-25-000023"
 
-    # Verify query includes both filters
-    call_args = mock_client.execute_query.call_args[0][0]
-    assert "NVDA" in call_args
-    assert "0001045810-25-000023" in call_args
+    # Verify query uses parameterized filters
+    call_args = mock_client.execute_query.call_args
+    query = call_args[0][0]
+    params = call_args[1]["params"]
+    assert "$ticker" in query
+    assert "$accession_number" in query
+    assert params["ticker"] == "NVDA"
+    assert params["accession_number"] == "0001045810-25-000023"
 
   @pytest.mark.asyncio
   async def test_no_results(self, tool, mock_client):

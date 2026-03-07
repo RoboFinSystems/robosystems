@@ -2,11 +2,15 @@
 Properties Tool - Discovers available properties for specific node types.
 """
 
+import re
 from typing import Any
 
 from robosystems.logger import logger
 
 from .base_tool import BaseTool
+
+# Only allow valid Cypher label names: alphanumeric + underscore, starting with a letter
+_VALID_LABEL_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_]*$")
 
 
 class PropertiesTool(BaseTool):
@@ -61,6 +65,10 @@ This is more thorough than the schema tool - it actually samples the data to sho
     node_type = arguments.get("node_type")
     if not node_type:
       raise ValueError("node_type parameter is required")
+    if not _VALID_LABEL_RE.match(node_type):
+      return {
+        "error": f"Invalid node_type '{node_type}'. Must be alphanumeric (e.g. 'Entity', 'Fact')."
+      }
 
     sample_size = min(arguments.get("sample_size", 5), 20)
     return await self._discover_properties(node_type, sample_size)
