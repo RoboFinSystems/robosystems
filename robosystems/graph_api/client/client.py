@@ -1639,6 +1639,26 @@ class GraphClient(BaseGraphClient):
     )
     return response.json()
 
+  async def rebuild_vector_index(
+    self,
+    graph_id: str,
+    table_name: str,
+    timeout: float = 600.0,
+  ) -> dict[str, Any]:
+    """Rebuild HNSW vector index on a table after batched materialization.
+
+    Uses the materialize endpoint with rebuild_vector_index=True to get
+    a write connection with extended timeout (10 min client, 60 min server).
+    """
+    response = await self._request(
+      "POST",
+      f"/databases/{graph_id}/tables/{table_name}/materialize",
+      json_data={"rebuild_vector_index": True},
+      timeout=timeout,
+      retries=0,
+    )
+    return response.json()
+
   async def fork_from_parent(
     self,
     parent_graph_id: str,
