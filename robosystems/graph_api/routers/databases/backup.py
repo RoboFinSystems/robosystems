@@ -52,7 +52,7 @@ async def perform_backup(
   """
   try:
     if (
-      backup_type in ("replica", "shared_repository", "duckdb_staging")
+      backup_type in ("replica", "shared_repository", "duckdb_staging", "r2_download")
       and s3_destination
     ):
       # On-instance backup: CHECKPOINT + direct S3 upload
@@ -178,7 +178,8 @@ async def create_backup(
 
   # Validate s3_destination for non-standard backup types
   if (
-    request.backup_type in ("replica", "shared_repository", "duckdb_staging")
+    request.backup_type
+    in ("replica", "shared_repository", "duckdb_staging", "r2_download")
     and not request.s3_destination
   ):
     raise HTTPException(

@@ -30,14 +30,14 @@ class TestDownloadRateLimiter:
     assert key1 != key2
 
   def test_get_monthly_limit_starter_plan(self):
-    """Test monthly limit for STARTER plan (downloads disabled)."""
+    """Test monthly limit for STARTER plan."""
     limit = DownloadRateLimiter.get_shared_repo_monthly_limit("sec", "starter")
-    assert limit == 0  # Starter plan has no download access
+    assert limit == 1  # Starter gets 1 download/month (R2 zero-egress)
 
   def test_get_monthly_limit_advanced_plan(self):
     """Test monthly limit for ADVANCED plan."""
     limit = DownloadRateLimiter.get_shared_repo_monthly_limit("sec", "advanced")
-    assert limit == 1  # Advanced gets 1 download/month
+    assert limit == 4  # Advanced gets 4 downloads/month (R2 zero-egress)
 
   def test_get_monthly_limit_unknown_repository(self):
     """Test monthly limit falls back to default for unknown repository."""
@@ -76,18 +76,18 @@ class TestDownloadRateLimiter:
       allowed, remaining, reset_at = await DownloadRateLimiter.check_download_limit(
         user_id="user123",
         repository="sec",
-        plan="advanced",  # Limit is 1
+        plan="advanced",  # Limit is 4
       )
 
     assert allowed is True
-    assert remaining == 1
+    assert remaining == 4
     assert reset_at > datetime.now(UTC)
 
   @pytest.mark.asyncio
   async def test_check_download_limit_blocks_when_at_limit(self):
     """Test download is blocked when at monthly limit."""
     mock_redis = AsyncMock()
-    mock_redis.get.return_value = b"1"  # 1 download used (at limit for ADVANCED)
+    mock_redis.get.return_value = b"4"  # 4 downloads used (at limit for ADVANCED)
 
     with patch.object(
       DownloadRateLimiter, "_get_redis_client", return_value=mock_redis
@@ -95,7 +95,7 @@ class TestDownloadRateLimiter:
       allowed, remaining, reset_at = await DownloadRateLimiter.check_download_limit(
         user_id="user123",
         repository="sec",
-        plan="advanced",  # Limit is 1
+        plan="advanced",  # Limit is 4
       )
 
     assert allowed is False
@@ -105,7 +105,7 @@ class TestDownloadRateLimiter:
   async def test_check_download_limit_blocks_when_over_limit(self):
     """Test download is blocked when over monthly limit."""
     mock_redis = AsyncMock()
-    mock_redis.get.return_value = b"3"  # 3 downloads used (over limit for ADVANCED)
+    mock_redis.get.return_value = b"10"  # 10 downloads used (over limit for ADVANCED)
 
     with patch.object(
       DownloadRateLimiter, "_get_redis_client", return_value=mock_redis
@@ -113,15 +113,15 @@ class TestDownloadRateLimiter:
       allowed, remaining, reset_at = await DownloadRateLimiter.check_download_limit(
         user_id="user123",
         repository="sec",
-        plan="advanced",  # Limit is 1
+        plan="advanced",  # Limit is 4
       )
 
     assert allowed is False
     assert remaining == 0  # Never negative
 
   @pytest.mark.asyncio
-  async def test_check_download_limit_starter_always_blocked(self):
-    """Test starter plan is always blocked (limit is 0)."""
+  async def test_check_download_limit_starter_allows_when_under_limit(self):
+    """Test starter plan allows downloads (limit is 1)."""
     mock_redis = AsyncMock()
     mock_redis.get.return_value = None  # No downloads yet
 
@@ -131,11 +131,11 @@ class TestDownloadRateLimiter:
       allowed, remaining, reset_at = await DownloadRateLimiter.check_download_limit(
         user_id="user123",
         repository="sec",
-        plan="starter",  # Limit is 0
+        plan="starter",  # Limit is 1
       )
 
-    assert allowed is False
-    assert remaining == 0
+    assert allowed is True
+    assert remaining == 1
 
   @pytest.mark.asyncio
   async def test_increment_download_count_first_increment(self):
@@ -185,19 +185,19 @@ class TestDownloadRateLimiter:
       quota = await DownloadRateLimiter.get_download_quota(
         user_id="user123",
         repository="sec",
-        plan="advanced",  # Limit is 1
+        plan="advanced",  # Limit is 4
       )
 
-    assert quota["limit_per_month"] == 1
+    assert quota["limit_per_month"] == 4
     assert quota["used_this_month"] == 0
-    assert quota["remaining"] == 1
+    assert quota["remaining"] == 4
     assert "resets_at" in quota
 
   @pytest.mark.asyncio
   async def test_get_download_quota_at_limit(self):
     """Test get_download_quota when limit is reached."""
     mock_redis = AsyncMock()
-    mock_redis.get.return_value = b"1"  # 1 download used
+    mock_redis.get.return_value = b"4"  # 4 downloads used
 
     with patch.object(
       DownloadRateLimiter, "_get_redis_client", return_value=mock_redis
@@ -205,11 +205,11 @@ class TestDownloadRateLimiter:
       quota = await DownloadRateLimiter.get_download_quota(
         user_id="user123",
         repository="sec",
-        plan="advanced",  # Limit is 1
+        plan="advanced",  # Limit is 4
       )
 
-    assert quota["limit_per_month"] == 1
-    assert quota["used_this_month"] == 1
+    assert quota["limit_per_month"] == 4
+    assert quota["used_this_month"] == 4
     assert quota["remaining"] == 0
 
   @pytest.mark.asyncio
@@ -268,7 +268,7 @@ class TestDownloadRateLimiterIntegration:
 
   @pytest.mark.asyncio
   async def test_full_download_cycle(self):
-    """Test a complete download cycle from 0 to limit (1/month for advanced)."""
+    """Test a complete download cycle from 0 to limit (4/month for advanced)."""
     mock_redis = AsyncMock()
     download_count = {"value": 0}
 
@@ -287,16 +287,18 @@ class TestDownloadRateLimiterIntegration:
     with patch.object(
       DownloadRateLimiter, "_get_redis_client", return_value=mock_redis
     ):
-      # First download - should be allowed (advanced plan, limit 1)
+      # First download - should be allowed (advanced plan, limit 4)
       allowed, remaining, _ = await DownloadRateLimiter.check_download_limit(
         "user1", "sec", "advanced"
       )
       assert allowed is True
-      assert remaining == 1
+      assert remaining == 4
 
-      await DownloadRateLimiter.increment_download_count("user1", "sec")
+      # Use all 4 downloads
+      for _ in range(4):
+        await DownloadRateLimiter.increment_download_count("user1", "sec")
 
-      # Second download - should be blocked (1 used, limit 1)
+      # Fifth download - should be blocked (4 used, limit 4)
       allowed, remaining, _ = await DownloadRateLimiter.check_download_limit(
         "user1", "sec", "advanced"
       )
@@ -307,7 +309,7 @@ class TestDownloadRateLimiterIntegration:
   async def test_different_users_have_separate_limits(self):
     """Test that different users have independent download limits."""
     mock_redis = AsyncMock()
-    user_counts = {"user1": 1, "user2": 0}
+    user_counts = {"user1": 4, "user2": 0}
 
     def mock_get(key):
       for user, count in user_counts.items():
@@ -322,7 +324,7 @@ class TestDownloadRateLimiterIntegration:
     with patch.object(
       DownloadRateLimiter, "_get_redis_client", return_value=mock_redis
     ):
-      # User1 has used their 1 download (advanced plan, limit 1)
+      # User1 has used all 4 downloads (advanced plan, limit 4)
       allowed1, remaining1, _ = await DownloadRateLimiter.check_download_limit(
         "user1", "sec", "advanced"
       )
@@ -334,13 +336,13 @@ class TestDownloadRateLimiterIntegration:
         "user2", "sec", "advanced"
       )
       assert allowed2 is True
-      assert remaining2 == 1
+      assert remaining2 == 4
 
   @pytest.mark.asyncio
   async def test_different_repositories_have_separate_limits(self):
     """Test that different repositories have independent download limits."""
     mock_redis = AsyncMock()
-    repo_counts = {"sec": 1, "economic": 0}
+    repo_counts = {"sec": 4, "economic": 0}
 
     def mock_get(key):
       for repo, count in repo_counts.items():
@@ -355,7 +357,7 @@ class TestDownloadRateLimiterIntegration:
     with patch.object(
       DownloadRateLimiter, "_get_redis_client", return_value=mock_redis
     ):
-      # SEC has 1 download used (advanced plan, limit 1)
+      # SEC has 4 downloads used (advanced plan, limit 4)
       allowed1, remaining1, _ = await DownloadRateLimiter.check_download_limit(
         "user1", "sec", "advanced"
       )

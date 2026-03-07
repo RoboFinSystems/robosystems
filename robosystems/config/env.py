@@ -391,6 +391,12 @@ class EnvConfig:
   TURNSTILE_SECRET_KEY = get_secret_value("TURNSTILE_SECRET_KEY", "")
   TURNSTILE_SITE_KEY = get_secret_value("TURNSTILE_SITE_KEY", "")
 
+  # Cloudflare R2 (S3-compatible object storage for zero-egress downloads)
+  R2_ACCESS_KEY_ID = get_secret_value("R2_ACCESS_KEY_ID", "")
+  R2_SECRET_ACCESS_KEY = get_secret_value("R2_SECRET_ACCESS_KEY", "")
+  R2_ENDPOINT_URL = get_secret_value("R2_ENDPOINT_URL", "")
+  R2_BUCKET_NAME = get_secret_value("R2_BUCKET_NAME", "")
+
   # ==========================================================================
   # 2. FEATURE FLAGS
   # ==========================================================================
@@ -1089,6 +1095,23 @@ class EnvConfig:
       config["endpoint_url"] = cls.AWS_ENDPOINT_URL
 
     return config
+
+  @classmethod
+  def get_r2_config(cls) -> dict:
+    """
+    Get Cloudflare R2 configuration as a dict for boto3.
+    R2 uses S3-compatible API with a custom endpoint URL.
+    Returns empty dict if R2 is not configured.
+    """
+    if not cls.R2_ENDPOINT_URL:
+      return {}
+
+    return {
+      "endpoint_url": cls.R2_ENDPOINT_URL,
+      "aws_access_key_id": cls.R2_ACCESS_KEY_ID,
+      "aws_secret_access_key": cls.R2_SECRET_ACCESS_KEY,
+      "region_name": "auto",
+    }
 
   @classmethod
   def get_cors_origins(cls) -> list[str]:

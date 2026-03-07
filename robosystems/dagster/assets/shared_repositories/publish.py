@@ -1,12 +1,12 @@
-"""Shared Repository S3 Publish Helpers.
+"""Shared Repository Publish Helpers (S3 + R2).
 
-Provides the core publish-to-S3 logic that per-repository assets call.
+Provides the core publish logic that per-repository assets call.
 Each shared repository (SEC, future industry/economic) defines a thin
-asset with deps on its own materialization, then delegates to publish_to_s3().
+asset with deps on its own materialization, then delegates here.
 
-Replicas use LadybugDB S3 ATTACH to connect directly to the published
-database via the httpfs extension. This is distinct from user backup
-which creates compressed, downloadable backups for subscribers.
+Two publish targets:
+- S3: Raw .lbug/.duckdb for replica fleet (S3 ATTACH via httpfs)
+- R2: Raw .lbug for subscriber downloads (zero egress fees)
 """
 
 import asyncio
@@ -17,7 +17,10 @@ from dagster import AssetExecutionContext, MaterializeResult
 
 from robosystems.config import env
 from robosystems.config.constants import TASK_TIME_LIMIT
-from robosystems.config.storage.graph import get_shared_repo_database_key
+from robosystems.config.storage.graph import (
+  get_r2_download_key,
+  get_shared_repo_database_key,
+)
 
 
 def _validate_shared_graph_id(graph_id: str) -> None:
@@ -247,3 +250,189 @@ def _run_backup(graph_id: str, bucket: str, s3_key: str) -> dict[str, Any]:
       await client.close()
 
   return asyncio.run(_execute())
+
+
+# =============================================================================
+# R2 Publish Helpers (zero-egress subscriber downloads)
+# =============================================================================
+
+
+def publish_to_r2(
+  context: AssetExecutionContext,
+  graph_id: str,
+  db_resource,
+) -> MaterializeResult:
+  """Publish a shared repository .lbug to R2 for subscriber downloads.
+
+  Same on-instance backup pattern as publish_to_s3(), but uploads to
+  Cloudflare R2 instead of AWS S3. Creates/updates a GraphBackup record
+  so the file appears in the backup list and can be downloaded via
+  presigned URL with zero egress fees.
+
+  Args:
+      context: Dagster asset execution context
+      graph_id: Shared repository graph ID (e.g., "sec")
+      db_resource: DatabaseResource for GraphBackup record access
+
+  Returns:
+      MaterializeResult with R2 URI and upload statistics
+  """
+  context.log.info(f"Publishing {graph_id} database to R2 for subscriber downloads")
+
+  if env.ENVIRONMENT == "dev":
+    context.log.info("Skipping R2 publish in dev environment")
+    return MaterializeResult(
+      metadata={
+        "status": "skipped",
+        "reason": "dev_environment",
+        "graph_id": graph_id,
+      }
+    )
+
+  import boto3
+
+  _validate_shared_graph_id(graph_id)
+
+  r2_info = _build_r2_destination(graph_id)
+  bucket = r2_info["bucket"]
+  r2_key = r2_info["r2_key"]
+  r2_uri = r2_info["r2_uri"]
+
+  context.log.info(f"Target: {r2_uri}")
+
+  result = _run_r2_backup(graph_id, bucket, r2_key)
+
+  if result.get("status") != "completed":
+    error = result.get("error", "Unknown error")
+    raise RuntimeError(f"R2 publish failed for {graph_id}: {error}")
+
+  # Verify upload via R2 head_object
+  r2_config = env.get_r2_config()
+  r2_client = boto3.client("s3", **r2_config)
+  head = r2_client.head_object(Bucket=bucket, Key=r2_key)
+  file_size = head["ContentLength"]
+  last_modified = head["LastModified"]
+
+  context.log.info(
+    f"Database published to R2: {r2_uri} "
+    f"(size: {file_size / (1024**3):.2f}GB, modified: {last_modified})"
+  )
+
+  # Create/update GraphBackup record
+  _upsert_r2_backup_record(
+    graph_id=graph_id,
+    bucket=bucket,
+    key=r2_key,
+    file_size=file_size,
+    backup_type="r2_download",
+    db_resource=db_resource,
+    dagster_run_id=context.run_id,
+  )
+
+  return MaterializeResult(
+    metadata={
+      "r2_uri": r2_uri,
+      "r2_bucket": bucket,
+      "r2_key": r2_key,
+      "file_size_bytes": file_size,
+      "file_size_gb": round(file_size / (1024**3), 2),
+      "last_modified": last_modified.isoformat(),
+      "graph_id": graph_id,
+      "published_at": datetime.now(UTC).isoformat(),
+    }
+  )
+
+
+def _build_r2_destination(graph_id: str) -> dict[str, str]:
+  """Build R2 bucket/key/uri for a subscriber download."""
+  bucket = env.R2_BUCKET_NAME
+  if not bucket:
+    raise RuntimeError("R2_BUCKET_NAME not configured")
+  r2_key = get_r2_download_key(graph_id, ".lbug")
+  r2_uri = f"r2://{bucket}/{r2_key}"
+  return {"bucket": bucket, "r2_key": r2_key, "r2_uri": r2_uri}
+
+
+def _run_r2_backup(graph_id: str, bucket: str, r2_key: str) -> dict[str, Any]:
+  """Run the R2 backup via Graph Client Factory."""
+  from robosystems.graph_api.client.factory import get_graph_client_for_sec_ingestion
+
+  async def _execute():
+    client = await get_graph_client_for_sec_ingestion()
+    try:
+      return await client.backup_with_sse(
+        graph_id=graph_id,
+        backup_type="r2_download",
+        s3_destination={"bucket": bucket, "key": r2_key},
+        compression=False,
+        checkpoint=True,
+        timeout=TASK_TIME_LIMIT,
+      )
+    finally:
+      await client.close()
+
+  return asyncio.run(_execute())
+
+
+def _upsert_r2_backup_record(
+  graph_id: str,
+  bucket: str,
+  key: str,
+  file_size: int,
+  backup_type: str,
+  db_resource,
+  dagster_run_id: str = "",
+) -> None:
+  """Create or update a GraphBackup record for an R2 download.
+
+  Uses a fixed R2 key (overwritten each publish), so we update the existing
+  record if one exists rather than creating a new one each time.
+  """
+  from robosystems.middleware.graph.utils import MultiTenantUtils
+  from robosystems.models.iam.graph_backup import GraphBackup
+
+  database_name = MultiTenantUtils.get_database_name(graph_id)
+  now = datetime.now(UTC)
+
+  with db_resource.get_session() as session:
+    existing = GraphBackup.get_latest_successful(graph_id, backup_type, session)
+
+    if existing:
+      # Update existing record with new timestamp and size
+      existing.completed_at = now
+      existing.original_size_bytes = file_size
+      existing.compressed_size_bytes = file_size  # Uncompressed
+      existing.encrypted_size_bytes = file_size
+      existing.s3_bucket = bucket
+      existing.s3_key = key
+      existing.backup_metadata = {
+        "storage": "r2",
+        "format": "raw",
+        "dagster_run_id": dagster_run_id,
+      }
+      existing.updated_at = now
+      session.commit()
+    else:
+      # Create new record
+      backup = GraphBackup.create(
+        graph_id=graph_id,
+        database_name=database_name,
+        backup_type=backup_type,
+        s3_bucket=bucket,
+        s3_key=key,
+        session=session,
+        compression_enabled=False,
+        encryption_enabled=False,
+      )
+      backup.complete_backup(
+        session=session,
+        original_size=file_size,
+        compressed_size=file_size,
+        encrypted_size=file_size,
+        checksum="",
+        metadata={
+          "storage": "r2",
+          "format": "raw",
+          "dagster_run_id": dagster_run_id,
+        },
+      )
