@@ -162,7 +162,7 @@ Use the returned query_hint directly in read-graph-cypher for immediate results.
           "ORDER BY fact_count DESC LIMIT 20"
         )
 
-      rows = await self.client.execute_query(query, params=params) or []
+      rows = await self.client.execute_query(query, parameters=params) or []
     except Exception as e:
       logger.warning(f"Canonical element query failed: {e}")
       rows = []
@@ -229,7 +229,7 @@ Use the returned query_hint directly in read-graph-cypher for immediate results.
           "ORDER BY e.canonical_confidence DESC LIMIT 10"
         )
         params = {"search_term": search_term}
-      rows = await self.client.execute_query(query, params=params) or []
+      rows = await self.client.execute_query(query, parameters=params) or []
       for row in rows:
         result["matches"].append(
           {
@@ -282,11 +282,10 @@ Use the returned query_hint directly in read-graph-cypher for immediate results.
     # Step 3: DuckDB vector similarity search on staging Element table
     # Uses list_cosine_similarity() — brute-force but fast on columnar data.
     # If too slow, add HNSW index: CREATE INDEX ... USING HNSW (embedding)
-    vec_literal = str(query_embedding)
     try:
       search_sql = (
         "SELECT qname, canonical_concept, canonical_confidence, "
-        f"  list_cosine_similarity(embedding, {vec_literal}) AS score "
+        "  list_cosine_similarity(embedding, $1) AS score "
         "FROM Element "
         "WHERE embedding IS NOT NULL "
         "ORDER BY score DESC LIMIT 40"
@@ -294,6 +293,7 @@ Use the returned query_hint directly in read-graph-cypher for immediate results.
       search_response = await self.client.query_table(
         graph_id=self._get_graph_id(),
         sql=search_sql,
+        parameters=[query_embedding],
       )
       raw_rows = self._table_rows_to_dicts(search_response)
     except Exception as e:
@@ -372,7 +372,8 @@ Use the returned query_hint directly in read-graph-cypher for immediate results.
         "RETURN e.qname AS qname, l.value AS label"
       )
       label_rows = (
-        await self.client.execute_query(label_query, params={"qnames": qnames}) or []
+        await self.client.execute_query(label_query, parameters={"qnames": qnames})
+        or []
       )
       return {r["qname"]: r["label"] for r in label_rows if r.get("label")}
     except Exception as e:
@@ -411,7 +412,7 @@ Use the returned query_hint directly in read-graph-cypher for immediate results.
           "WHERE e.qname IN $qnames "
           "RETURN e.qname AS qname, count(f) AS fact_count"
         )
-      rows = await self.client.execute_query(query, params=params) or []
+      rows = await self.client.execute_query(query, parameters=params) or []
       return {r["qname"]: r["fact_count"] for r in rows}
     except Exception as e:
       logger.debug(f"Fact count enrichment failed: {e}")
@@ -421,40 +422,48 @@ Use the returned query_hint directly in read-graph-cypher for immediate results.
   def _build_query_hint(
     result: dict[str, Any], ticker: str | None, accession_number: str | None
   ) -> None:
-    """Build a ready-to-use Cypher query hint from the top match."""
+    """Build a ready-to-use Cypher query hint from the top match.
+
+    Uses $param syntax so the hint is safe to pass directly to read-graph-cypher.
+    """
     if not result["matches"]:
       return
     top = result["matches"][0]
     qname = top["qname"]
+    hint_params: dict[str, str] = {"qname": qname}
+
     if accession_number:
+      hint_params["accession_number"] = accession_number
       result["query_hint"] = (
-        f"MATCH (r:Report)-[:REPORT_HAS_FACT]->(f:Fact)-[:FACT_HAS_ELEMENT]->(e:Element), "
-        f"(f)-[:FACT_HAS_PERIOD]->(p:Period) "
-        f'WHERE e.qname = "{qname}" AND r.accession_number = "{accession_number}" '
-        f"AND f.has_dimensions = false "
-        f"RETURN e.qname AS element, f.numeric_value AS value, "
-        f"p.end_date AS date, p.duration_type AS period_type "
-        f"ORDER BY p.end_date DESC LIMIT 20"
+        "MATCH (r:Report)-[:REPORT_HAS_FACT]->(f:Fact)-[:FACT_HAS_ELEMENT]->(e:Element), "
+        "(f)-[:FACT_HAS_PERIOD]->(p:Period) "
+        "WHERE e.qname = $qname AND r.accession_number = $accession_number "
+        "AND f.has_dimensions = false "
+        "RETURN e.qname AS element, f.numeric_value AS value, "
+        "p.end_date AS date, p.duration_type AS period_type "
+        "ORDER BY p.end_date DESC LIMIT 20"
       )
     elif ticker:
+      hint_params["ticker"] = ticker
       result["query_hint"] = (
-        f"MATCH (f:Fact)-[:FACT_HAS_ELEMENT]->(e:Element), "
-        f"(f)-[:FACT_HAS_PERIOD]->(p:Period), "
-        f"(f)-[:FACT_HAS_ENTITY]->(ent:Entity) "
-        f'WHERE e.qname = "{qname}" AND ent.ticker = "{ticker}" '
-        f"AND f.has_dimensions = false "
-        f"RETURN ent.ticker AS ticker, e.qname AS element, "
-        f"f.numeric_value AS value, p.end_date AS date, "
-        f"p.duration_type AS period_type "
-        f"ORDER BY p.end_date DESC LIMIT 20"
+        "MATCH (f:Fact)-[:FACT_HAS_ELEMENT]->(e:Element), "
+        "(f)-[:FACT_HAS_PERIOD]->(p:Period), "
+        "(f)-[:FACT_HAS_ENTITY]->(ent:Entity) "
+        "WHERE e.qname = $qname AND ent.ticker = $ticker "
+        "AND f.has_dimensions = false "
+        "RETURN ent.ticker AS ticker, e.qname AS element, "
+        "f.numeric_value AS value, p.end_date AS date, "
+        "p.duration_type AS period_type "
+        "ORDER BY p.end_date DESC LIMIT 20"
       )
     else:
       result["query_hint"] = (
-        f"MATCH (f:Fact)-[:FACT_HAS_ELEMENT]->(e:Element), "
-        f"(f)-[:FACT_HAS_PERIOD]->(p:Period) "
-        f'WHERE e.qname = "{qname}" '
-        f"AND f.has_dimensions = false "
-        f"RETURN e.qname AS element, f.numeric_value AS value, "
-        f"p.end_date AS date, p.duration_type AS period_type "
-        f"ORDER BY p.end_date DESC LIMIT 20"
+        "MATCH (f:Fact)-[:FACT_HAS_ELEMENT]->(e:Element), "
+        "(f)-[:FACT_HAS_PERIOD]->(p:Period) "
+        "WHERE e.qname = $qname "
+        "AND f.has_dimensions = false "
+        "RETURN e.qname AS element, f.numeric_value AS value, "
+        "p.end_date AS date, p.duration_type AS period_type "
+        "ORDER BY p.end_date DESC LIMIT 20"
       )
+    result["query_hint_params"] = hint_params

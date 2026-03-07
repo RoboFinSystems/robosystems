@@ -135,7 +135,8 @@ class TestResolveElementExecution:
 
     result = await tool.execute({"concept": "revenue", "ticker": "NVDA"})
     assert result["ticker"] == "NVDA"
-    assert "NVDA" in result["query_hint"]
+    assert "$ticker" in result["query_hint"]
+    assert result["query_hint_params"]["ticker"] == "NVDA"
 
   @pytest.mark.asyncio
   async def test_with_accession_number_filter(self, mock_client):
@@ -169,7 +170,8 @@ class TestResolveElementExecution:
       {"concept": "revenue", "accession_number": "0001045810-25-000023"}
     )
     assert result["accession_number"] == "0001045810-25-000023"
-    assert "0001045810-25-000023" in result["query_hint"]
+    assert "$accession_number" in result["query_hint"]
+    assert result["query_hint_params"]["accession_number"] == "0001045810-25-000023"
     assert "REPORT_HAS_FACT" in result["query_hint"]
     assert result["matches"][0]["fact_count"] == 12
 
@@ -236,7 +238,8 @@ class TestResolveElementExecution:
 
     result = await tool.execute({"concept": "total assets"})
     assert result["query_hint"] is not None
-    assert "us-gaap:Assets" in result["query_hint"]
+    assert "$qname" in result["query_hint"]
+    assert result["query_hint_params"]["qname"] == "us-gaap:Assets"
     assert "has_dimensions = false" in result["query_hint"]
 
   @pytest.mark.asyncio

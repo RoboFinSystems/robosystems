@@ -153,6 +153,8 @@ For balance sheets, only instant-period facts are returned. For other statements
     elif statement_type == "balance_sheet":
       where_parts.append("p.period_type = 'instant'")
 
+    params["limit"] = limit
+
     query = (
       f"MATCH {', '.join(match_parts)} "
       f"WHERE {' AND '.join(where_parts)} "
@@ -161,7 +163,7 @@ For balance sheets, only instant-period facts are returned. For other statements
       "p.end_date AS end_date, p.period_type AS period_type, "
       "p.duration_type AS duration_type "
       "ORDER BY end_date DESC "
-      f"LIMIT {limit}"
+      "LIMIT $limit"
     )
 
     try:
