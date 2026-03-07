@@ -140,10 +140,6 @@ class TableMaterializationRequest(BaseModel):
     default=None,
     description="Total number of batches for hash-based partitioning. Each row goes to exactly one batch based on hash(identifier) % num_batches.",
   )
-  rebuild_vector_index: bool = Field(
-    default=False,
-    description="Skip data copy, only rebuild HNSW vector index on the table's embedding column. Use after batched materialization.",
-  )
 
   class Config:
     extra = "forbid"
