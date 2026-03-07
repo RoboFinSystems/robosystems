@@ -37,10 +37,9 @@ def _is_hnsw_index_enabled() -> bool:
       return cached_result
 
   try:
-    from robosystems.config.parameter_store import get_parameter_manager
+    from robosystems.config.parameter_store import get_parameter_value
 
-    manager = get_parameter_manager()
-    value = manager.get_parameter("DUCKDB_HNSW_INDEX_ENABLED", default="false")
+    value = get_parameter_value("DUCKDB_HNSW_INDEX_ENABLED", default="false")
     result = value.lower() == "true"
   except Exception:
     result = False

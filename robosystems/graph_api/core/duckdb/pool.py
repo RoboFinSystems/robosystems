@@ -138,10 +138,9 @@ class DuckDBConnectionPool:
       return True
 
     try:
-      from robosystems.config.parameter_store import get_parameter_manager
+      from robosystems.config.parameter_store import get_parameter_value
 
-      manager = get_parameter_manager()
-      value = manager.get_parameter("DUCKDB_HNSW_INDEX_ENABLED", default="false")
+      value = get_parameter_value("DUCKDB_HNSW_INDEX_ENABLED", default="false")
       self._vss_enabled = value.lower() == "true"
     except Exception:
       self._vss_enabled = False
