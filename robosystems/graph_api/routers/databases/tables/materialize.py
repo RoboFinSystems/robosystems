@@ -158,43 +158,6 @@ async def materialize_table(
       detail="Materialization not allowed on read-only nodes",
     )
 
-  # Fast path: rebuild vector index only (no data copy)
-  # Used after batched materialization to build HNSW index over full dataset
-  if request.rebuild_vector_index:
-    logger.info(
-      f"Rebuilding vector index for {table_name} on {graph_id} (this may take several minutes)..."
-    )
-    try:
-      with ladybug_service.db_manager.connection_pool.get_connection(graph_id) as conn:
-        try:
-          conn.execute("CALL timeout=3600000")  # 60 minutes
-          success = ladybug_service.db_manager.rebuild_vector_index(conn, table_name)
-          if success:
-            conn.execute("CHECKPOINT")
-            logger.info(f"Checkpointed after vector index rebuild for {table_name}")
-        finally:
-          conn.execute("CALL timeout=120000")  # Reset to default
-      ladybug_service.db_manager.connection_pool.force_database_cleanup(
-        graph_id, aggressive=True
-      )
-      elapsed = (time.time() - start_time) * 1000
-      logger.info(
-        f"Vector index rebuild for {table_name} completed in {elapsed / 1000:.1f}s"
-      )
-      return TableMaterializationResponse(
-        status="success" if success else "skipped",
-        graph_id=graph_id,
-        table_name=table_name,
-        rows_ingested=0,
-        execution_time_ms=elapsed,
-      )
-    except Exception as e:
-      logger.error(f"Failed to rebuild vector index for {table_name}: {e}")
-      raise HTTPException(
-        status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
-        detail=f"Failed to rebuild vector index: {e!s}",
-      )
-
   try:
     duck_path = f"{env.DUCKDB_STAGING_PATH}/{graph_id}.duckdb"
 
@@ -424,7 +387,12 @@ async def materialize_table(
 
       # Checkpoint, build vector indexes, and release LadybugDB memory
       # This prevents memory accumulation during multi-table materialization
-      is_batch = request.batch_num is not None
+      is_last_batch = (
+        request.batch_num is not None
+        and request.num_batches is not None
+        and request.batch_num == request.num_batches - 1
+      )
+      is_non_batched = request.batch_num is None
       try:
         with ladybug_service.db_manager.connection_pool.get_connection(
           graph_id
@@ -434,11 +402,22 @@ async def materialize_table(
           logger.debug(f"Checkpointed LadybugDB after {table_name} materialization")
 
           # Build HNSW vector index for tables with embedding columns.
-          # Skip during batched materialization — the caller is responsible
-          # for rebuilding the index once after all batches complete.
-          # Building per-batch creates an index covering only batch 1's data
-          # (subsequent batches see "already exists" and skip).
-          if not is_batch:
+          # For batched materialization, only build on the LAST batch — all data
+          # is loaded at that point. Uses rebuild (drop+create) to ensure the
+          # index covers all rows, not just one batch's worth.
+          # Uses reduced HNSW parameters for faster build on large tables.
+          if is_last_batch:
+            logger.info(
+              f"Last batch complete for {table_name} — rebuilding vector index "
+              f"over full dataset (this may take several minutes)..."
+            )
+            try:
+              conn.execute("CALL timeout=3600000")  # 60 minutes for index build
+              ladybug_service.db_manager.rebuild_vector_index(conn, table_name)
+            finally:
+              conn.execute("CALL timeout=120000")  # Reset
+            conn.execute("CHECKPOINT")
+          elif is_non_batched:
             ladybug_service.db_manager.create_vector_index(conn, table_name)
             # Checkpoint again to persist vector index to disk
             conn.execute("CHECKPOINT")
