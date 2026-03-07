@@ -563,6 +563,10 @@ class DuckDBStager:
   # Tables that benefit from HNSW vector indexes on their embedding column
   _HNSW_INDEX_TABLES = {"Element"}
 
+  # Timeout for HNSW index build (column cast + index creation).
+  # 6M rows x 384-dim vectors can take 5-30 minutes depending on memory.
+  _HNSW_INDEX_TIMEOUT = 3600.0  # 1 hour
+
   async def _build_hnsw_indexes(
     self,
     client: "GraphClient",
@@ -581,6 +585,8 @@ class DuckDBStager:
     if not tables_to_index:
       return
 
+    timeout = self._HNSW_INDEX_TIMEOUT
+
     for table_name in tables_to_index:
       index_name = f"idx_{table_name.lower()}_embedding_hnsw"
       log_progress(f"Building HNSW index on {table_name}.embedding...")
@@ -591,9 +597,20 @@ class DuckDBStager:
           await client.query_table(
             graph_id=self.graph_id,
             sql=f'DROP INDEX IF EXISTS "{index_name}"',
+            timeout=60.0,
           )
         except Exception:
           pass  # Index may not exist yet
+
+        # Cast embedding from DOUBLE[] (parquet default) to FLOAT[384] (required by HNSW)
+        try:
+          await client.query_table(
+            graph_id=self.graph_id,
+            sql=f'ALTER TABLE "{table_name}" ALTER COLUMN embedding TYPE FLOAT[384]',
+            timeout=timeout,
+          )
+        except Exception:
+          pass  # Already correct type
 
         await client.query_table(
           graph_id=self.graph_id,
@@ -601,6 +618,7 @@ class DuckDBStager:
             f'CREATE INDEX "{index_name}" ON "{table_name}" '
             f"USING HNSW (embedding) WITH (metric = 'cosine')"
           ),
+          timeout=timeout,
         )
         log_progress(f"HNSW index {index_name} created on {table_name}.embedding")
       except Exception as e:

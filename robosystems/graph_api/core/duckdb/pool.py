@@ -138,10 +138,9 @@ class DuckDBConnectionPool:
       return True
 
     try:
-      from robosystems.config.parameter_store import get_parameter_manager
+      from robosystems.config.parameter_store import get_parameter_value
 
-      manager = get_parameter_manager()
-      value = manager.get_parameter("DUCKDB_HNSW_INDEX_ENABLED", default="false")
+      value = get_parameter_value("DUCKDB_HNSW_INDEX_ENABLED", default="false")
       self._vss_enabled = value.lower() == "true"
     except Exception:
       self._vss_enabled = False
@@ -417,6 +416,8 @@ class DuckDBConnectionPool:
           except Exception:
             conn.execute("INSTALL vss")
             conn.execute("LOAD vss")
+          # Required for HNSW indexes on persistent (non-in-memory) DuckDB databases
+          conn.execute("SET hnsw_enable_experimental_persistence = true")
           logger.debug("VSS extension loaded for DuckDB connection")
         except Exception as vss_err:
           logger.warning(f"Could not load vss extension: {vss_err}")

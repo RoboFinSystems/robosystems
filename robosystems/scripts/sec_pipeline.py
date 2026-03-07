@@ -218,6 +218,8 @@ class SECPipeline:
         reset_staging: Whether to delete DuckDB file before staging (fresh start)
         rebuild_graph: Whether to rebuild LadybugDB (materialize jobs)
     """
+    import os
+
     if job_type == "stage":
       # sec_stage job - stages to persistent DuckDB only (Stage 1)
       # Note: staging doesn't touch LadybugDB - rebuild is handled by materialize
@@ -226,6 +228,8 @@ class SECPipeline:
         "reset_staging": reset_staging,
         "start_year": None,
         "end_year": None,
+        "build_hnsw_index": os.getenv("DUCKDB_HNSW_INDEX_ENABLED", "false").lower()
+        == "true",
       }
       if year:
         stage_config["year"] = int(year)
@@ -266,8 +270,6 @@ class SECPipeline:
     with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
       yaml.dump(config, f, default_flow_style=False)
       config_path = f.name
-
-    import os
 
     os.chmod(config_path, 0o644)
 
