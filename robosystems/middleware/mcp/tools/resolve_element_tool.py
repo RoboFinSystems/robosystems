@@ -162,7 +162,7 @@ Use the returned query_hint directly in read-graph-cypher for immediate results.
           "ORDER BY fact_count DESC LIMIT 20"
         )
 
-      rows = await self.client.execute_query(query, params=params) or []
+      rows = await self.client.execute_query(query, parameters=params) or []
     except Exception as e:
       logger.warning(f"Canonical element query failed: {e}")
       rows = []
@@ -229,7 +229,7 @@ Use the returned query_hint directly in read-graph-cypher for immediate results.
           "ORDER BY e.canonical_confidence DESC LIMIT 10"
         )
         params = {"search_term": search_term}
-      rows = await self.client.execute_query(query, params=params) or []
+      rows = await self.client.execute_query(query, parameters=params) or []
       for row in rows:
         result["matches"].append(
           {
@@ -372,7 +372,8 @@ Use the returned query_hint directly in read-graph-cypher for immediate results.
         "RETURN e.qname AS qname, l.value AS label"
       )
       label_rows = (
-        await self.client.execute_query(label_query, params={"qnames": qnames}) or []
+        await self.client.execute_query(label_query, parameters={"qnames": qnames})
+        or []
       )
       return {r["qname"]: r["label"] for r in label_rows if r.get("label")}
     except Exception as e:
@@ -411,7 +412,7 @@ Use the returned query_hint directly in read-graph-cypher for immediate results.
           "WHERE e.qname IN $qnames "
           "RETURN e.qname AS qname, count(f) AS fact_count"
         )
-      rows = await self.client.execute_query(query, params=params) or []
+      rows = await self.client.execute_query(query, parameters=params) or []
       return {r["qname"]: r["fact_count"] for r in rows}
     except Exception as e:
       logger.debug(f"Fact count enrichment failed: {e}")

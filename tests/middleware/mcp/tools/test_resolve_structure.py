@@ -139,7 +139,7 @@ class TestResolveStructureExecution:
     # Verify query uses parameterized accession_number filter
     call_args = mock_client.execute_query.call_args
     query = call_args[0][0]
-    params = call_args[1]["params"]
+    params = call_args[1]["parameters"]
     assert "$accession_number" in query
     assert params["accession_number"] == "0001045810-25-000023"
     assert "REPORT_USES_TAXONOMY" in query
@@ -175,7 +175,7 @@ class TestResolveStructureExecution:
     # Verify query uses parameterized filters
     call_args = mock_client.execute_query.call_args
     query = call_args[0][0]
-    params = call_args[1]["params"]
+    params = call_args[1]["parameters"]
     assert "$ticker" in query
     assert "$accession_number" in query
     assert params["ticker"] == "NVDA"

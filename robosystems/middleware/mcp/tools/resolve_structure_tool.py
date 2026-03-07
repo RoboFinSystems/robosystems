@@ -166,7 +166,7 @@ Use returned structure identifiers to explore element hierarchies via STRUCTURE_
       )
 
     try:
-      rows = await self.client.execute_query(query, params=params)
+      rows = await self.client.execute_query(query, parameters=params)
       if rows:
         for row in rows:
           structure = {

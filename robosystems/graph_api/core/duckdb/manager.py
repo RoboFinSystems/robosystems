@@ -786,7 +786,9 @@ class DuckDBTableManager:
         conn.execute(f"DROP VIEW IF EXISTS {quoted_table}")
         conn.execute(f"DROP TABLE IF EXISTS {quoted_table}")
 
-        s3_pattern_list = ", ".join([f"'{key}'" for key in s3_keys])
+        s3_pattern_list = ", ".join(
+          [f"'{key.replace(chr(39), chr(39) * 2)}'" for key in s3_keys]
+        )
         # union_by_name=true handles schema variations between files
         create_view_sql = f"CREATE VIEW {quoted_table} AS SELECT * FROM read_parquet([{s3_pattern_list}], union_by_name=true)"
         conn.execute(create_view_sql)
