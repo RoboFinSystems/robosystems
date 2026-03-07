@@ -845,41 +845,28 @@ class LadybugMaterializer:
     """Rebuild HNSW vector index for a table after batched materialization.
 
     Drops the existing partial index (covers only batch 1) and creates a
-    fresh one over the full dataset. Runs via the query endpoint on the master.
+    fresh one over the full dataset. Uses the materialize endpoint with
+    rebuild_vector_index=True to get a write connection with extended timeout.
     """
-    index_name = f"{table_name.lower()}_vec_index"
-
     if log_progress:
       log_progress(f"  [{table_name}] Rebuilding vector index over full data...")
 
-    # Drop existing partial index
     try:
-      await graph_client.query(
-        f"CALL DROP_VECTOR_INDEX('{table_name}', '{index_name}')",
-        graph_id,
+      response = await graph_client.rebuild_vector_index(
+        graph_id=graph_id,
+        table_name=table_name,
+        timeout=600.0,  # 10 min client timeout
       )
-    except Exception as e:
-      if "doesn't have an index" not in str(e):
-        logger.warning(f"Could not drop vector index {index_name}: {e}")
-
-    # Create fresh index over all data
-    try:
-      await graph_client.query(
-        f"CALL CREATE_VECTOR_INDEX('{table_name}', '{index_name}', 'embedding')",
-        graph_id,
-      )
+      status = response.get("status", "unknown")
+      elapsed = response.get("execution_time_ms", 0)
       if log_progress:
-        log_progress(f"  [{table_name}] Vector index rebuilt successfully")
+        log_progress(
+          f"  [{table_name}] Vector index rebuild {status} ({elapsed / 1000:.1f}s)"
+        )
     except Exception as e:
-      logger.warning(f"Could not create vector index {index_name}: {e}")
+      logger.warning(f"Could not rebuild vector index for {table_name}: {e}")
       if log_progress:
         log_progress(f"  [{table_name}] Vector index rebuild failed: {e}")
-
-    # Checkpoint to persist index to disk (survives backup/restore)
-    try:
-      await graph_client.query("CHECKPOINT", graph_id)
-    except Exception as e:
-      logger.warning(f"Could not checkpoint after vector index rebuild: {e}")
 
   async def _trigger_ingestion(
     self,

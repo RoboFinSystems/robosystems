@@ -158,6 +158,36 @@ async def materialize_table(
       detail="Materialization not allowed on read-only nodes",
     )
 
+  # Fast path: rebuild vector index only (no data copy)
+  # Used after batched materialization to build HNSW index over full dataset
+  if request.rebuild_vector_index:
+    import time as _time
+
+    start = _time.time()
+    try:
+      with ladybug_service.db_manager.connection_pool.get_connection(graph_id) as conn:
+        conn.execute("CALL timeout=3600000")  # 60 minutes
+        success = ladybug_service.db_manager.rebuild_vector_index(conn, table_name)
+        if success:
+          conn.execute("CHECKPOINT")
+      ladybug_service.db_manager.connection_pool.force_database_cleanup(
+        graph_id, aggressive=True
+      )
+      elapsed = (_time.time() - start) * 1000
+      return TableMaterializationResponse(
+        status="success" if success else "skipped",
+        graph_id=graph_id,
+        table_name=table_name,
+        rows_ingested=0,
+        execution_time_ms=elapsed,
+      )
+    except Exception as e:
+      logger.error(f"Failed to rebuild vector index for {table_name}: {e}")
+      raise HTTPException(
+        status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
+        detail=f"Failed to rebuild vector index: {e!s}",
+      )
+
   try:
     duck_path = f"{env.DUCKDB_STAGING_PATH}/{graph_id}.duckdb"
 
