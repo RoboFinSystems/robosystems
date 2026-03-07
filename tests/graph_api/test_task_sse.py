@@ -215,11 +215,24 @@ class TestTaskSSE:
     message = _get_progress_message(TaskType.RESTORE, task)
     assert message == "Restoring staging-db..."
 
-  def test_get_progress_message_generic(self):
-    """Test progress message generation for generic tasks."""
+  def test_get_progress_message_migration(self):
+    """Test progress message generation for migration tasks."""
+    task = {
+      "metadata": {
+        "operation": "export",
+        "current_database": "sec",
+        "databases_completed": 1,
+        "databases_total": 3,
+      }
+    }
+    message = _get_progress_message(TaskType.MIGRATION, task)
+    assert message == "Migration export: sec (1/3)"
+
+  def test_get_progress_message_migration_no_metadata(self):
+    """Test progress message generation for migration tasks without metadata."""
     task = {}
     message = _get_progress_message(TaskType.MIGRATION, task)
-    assert message == "Processing migration task..."
+    assert message == "Migration migration in progress..."
 
   def test_get_completion_message_ingestion(self):
     """Test completion message generation for ingestion tasks."""
@@ -269,11 +282,11 @@ class TestTaskSSE:
     message = _get_failure_message(TaskType.RESTORE, task)
     assert message == "Failed to restore archive-db"
 
-  def test_get_failure_message_generic(self):
-    """Test failure message generation for generic tasks."""
-    task = {}
+  def test_get_failure_message_migration(self):
+    """Test failure message generation for migration tasks."""
+    task = {"metadata": {"operation": "import"}}
     message = _get_failure_message(TaskType.MIGRATION, task)
-    assert message == "Failed to complete migration task"
+    assert message == "Migration import failed"
 
   def test_calculate_duration_valid(self):
     """Test duration calculation with valid timestamps."""

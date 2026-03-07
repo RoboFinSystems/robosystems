@@ -193,12 +193,16 @@ class DuckDBTableManager:
     for s3_key in s3_files:
       file_id = file_id_map.get(s3_key, "unknown")
 
+      # Escape single quotes to prevent SQL injection via S3 keys or file IDs
+      safe_s3_key = s3_key.replace("'", "''")
+      safe_file_id = file_id.replace("'", "''")
+
       if has_identifier:
         # Node table: keep identifier, add file_id
         # union_by_name=true handles schema variations between files
         select = f"""
-          SELECT *, '{file_id}' as file_id
-          FROM read_parquet('{s3_key}', union_by_name=true, hive_partitioning=false)
+          SELECT *, '{safe_file_id}' as file_id
+          FROM read_parquet('{safe_s3_key}', union_by_name=true, hive_partitioning=false)
         """
       elif has_from_to:
         # Relationship table: rename from/to to src/dst, add file_id
@@ -208,15 +212,15 @@ class DuckDBTableManager:
             "from" as src,
             "to" as dst,
             * EXCLUDE ("from", "to"),
-            '{file_id}' as file_id
-          FROM read_parquet('{s3_key}', union_by_name=true, hive_partitioning=false)
+            '{safe_file_id}' as file_id
+          FROM read_parquet('{safe_s3_key}', union_by_name=true, hive_partitioning=false)
         """
       else:
         # Unknown table: just add file_id
         # union_by_name=true handles schema variations between files
         select = f"""
-          SELECT *, '{file_id}' as file_id
-          FROM read_parquet('{s3_key}', union_by_name=true, hive_partitioning=false)
+          SELECT *, '{safe_file_id}' as file_id
+          FROM read_parquet('{safe_s3_key}', union_by_name=true, hive_partitioning=false)
         """
 
       selects.append(select)
@@ -344,9 +348,13 @@ class DuckDBTableManager:
 
           if is_list:
             # Replace placeholder with DuckDB list syntax: ['file1', 'file2', ...]
-            # Use single quotes for strings (DuckDB requirement)
+            # Escape single quotes to prevent SQL injection via S3 paths
             files_list = (
-              "[" + ", ".join(f"'{path}'" for path in request.s3_pattern) + "]"
+              "["
+              + ", ".join(
+                f"'{path.replace(chr(39), chr(39) * 2)}'" for path in request.s3_pattern
+              )
+              + "]"
             )
             sql = sql.replace("__FILES_PLACEHOLDER__", files_list)
             conn.execute(sql)
@@ -452,14 +460,21 @@ class DuckDBTableManager:
         count_before = conn.execute(f"SELECT COUNT(*) FROM {quoted_table}").fetchone()
         rows_before = count_before[0] if count_before else 0
 
-        # Build parquet read expression
+        # Build parquet read expression (escape single quotes to prevent SQL injection)
         if is_list:
-          files_list = "[" + ", ".join(f"'{path}'" for path in request.s3_pattern) + "]"
+          files_list = (
+            "["
+            + ", ".join(
+              f"'{path.replace(chr(39), chr(39) * 2)}'" for path in request.s3_pattern
+            )
+            + "]"
+          )
           parquet_read = (
             f"read_parquet({files_list}, union_by_name=true, hive_partitioning=false)"
           )
         else:
-          parquet_read = f"read_parquet('{request.s3_pattern}', union_by_name=true, hive_partitioning=false)"
+          safe_pattern = request.s3_pattern.replace("'", "''")
+          parquet_read = f"read_parquet('{safe_pattern}', union_by_name=true, hive_partitioning=false)"
 
         if request.deduplicate:
           # Detect table type from existing schema for dedup key
@@ -771,7 +786,9 @@ class DuckDBTableManager:
         conn.execute(f"DROP VIEW IF EXISTS {quoted_table}")
         conn.execute(f"DROP TABLE IF EXISTS {quoted_table}")
 
-        s3_pattern_list = ", ".join([f"'{key}'" for key in s3_keys])
+        s3_pattern_list = ", ".join(
+          [f"'{key.replace(chr(39), chr(39) * 2)}'" for key in s3_keys]
+        )
         # union_by_name=true handles schema variations between files
         create_view_sql = f"CREATE VIEW {quoted_table} AS SELECT * FROM read_parquet([{s3_pattern_list}], union_by_name=true)"
         conn.execute(create_view_sql)

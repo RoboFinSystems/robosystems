@@ -719,6 +719,51 @@ class LadybugDatabaseManager:
       logger.debug(f"No vector index created for {table_name}: {e}")
       return False
 
+  def rebuild_vector_index(
+    self, conn: lbug.Connection, table_name: str, column: str = "embedding"
+  ) -> bool:
+    """Drop and recreate HNSW vector index to cover all data.
+
+    Used after batched materialization where CREATE_VECTOR_INDEX during batch 1
+    only indexes batch 1's rows, and subsequent batches see "already exists".
+    Dropping first ensures the rebuilt index covers the full table.
+
+    Returns True if index was rebuilt successfully.
+    """
+    index_name = f"{table_name.lower()}_vec_index"
+
+    try:
+      try:
+        conn.execute("LOAD EXTENSION vector")
+      except Exception:
+        conn.execute("INSTALL vector")
+        conn.execute("LOAD EXTENSION vector")
+
+      # Drop existing index (ignore if it doesn't exist)
+      try:
+        conn.execute(f"CALL DROP_VECTOR_INDEX('{table_name}', '{index_name}')")
+        logger.info(f"Dropped existing vector index {index_name} on {table_name}")
+      except Exception as drop_err:
+        if "doesn't have an index" not in str(drop_err):
+          logger.debug(f"Could not drop vector index {index_name}: {drop_err}")
+
+      # Create fresh index over all data with tuned HNSW parameters.
+      # Reduced from defaults (mu=30, ml=60, efc=200) for faster build on
+      # large tables (6M+ rows). Still accurate for top-10/20 retrieval.
+      # cache_embeddings=false avoids loading all vectors into buffer pool
+      # at once (6.6M x 384 x 4B = ~10GB), preventing OOM on large tables.
+      conn.execute(
+        f"CALL CREATE_VECTOR_INDEX('{table_name}', '{index_name}', '{column}', "
+        f"mu := 16, ml := 32, efc := 100, cache_embeddings := false)"
+      )
+      logger.info(
+        f"Rebuilt vector index {index_name} on {table_name}.{column} (full data)"
+      )
+      return True
+    except Exception as e:
+      logger.debug(f"No vector index rebuilt for {table_name}: {e}")
+      return False
+
   def _apply_custom_schema(self, conn: lbug.Connection, custom_ddl: str | None) -> bool:
     """Apply custom schema DDL to database."""
     if not custom_ddl:

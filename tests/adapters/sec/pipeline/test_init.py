@@ -74,8 +74,8 @@ class TestGetDagsterComponents:
       "sec_processed_filings",
       "sec_duckdb_staged",
       "sec_graph_materialized",
-      "sec_backup",
       "sec_lbug_s3_published",
+      "sec_lbug_r2_published",
       "sec_knowledge_artifacts",
       "sec_entity_extract",
       "sec_entity_transform",
@@ -96,8 +96,8 @@ class TestGetDagsterComponents:
       "sec_stage",
       "sec_materialize",
       "sec_staged_materialize",
-      "sec_create_backup",
       "sec_entity_sync",
+      "sec_lbug_r2_publish",
     }
 
     for expected in expected_jobs:

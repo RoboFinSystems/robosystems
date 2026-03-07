@@ -135,6 +135,8 @@ Run list-disclosures first to see valid disclosure_type values.""",
     if not include_dimensions:
       where_parts.append("f.has_dimensions = false")
 
+    params["limit"] = limit
+
     query = (
       f"MATCH {', '.join(match_parts)} "
       f"WHERE {' AND '.join(where_parts)} "
@@ -143,7 +145,7 @@ Run list-disclosures first to see valid disclosure_type values.""",
       "p.end_date AS end_date, p.period_type AS period_type, "
       "p.duration_type AS duration_type "
       "ORDER BY end_date DESC "
-      f"LIMIT {limit}"
+      "LIMIT $limit"
     )
 
     try:

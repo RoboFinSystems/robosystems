@@ -10,9 +10,8 @@ publish asset with deps on its own materialization asset.
 The lineage chain:
   sec_graph_materialized -> sec_lbug_s3_published -> shared_replicas_refreshed
 
-This complements sec_backup which creates compressed, downloadable backups
-for users. This asset creates the raw .lbug source-of-truth for the
-replica fleet via S3 ATTACH.
+This asset creates the raw .lbug source-of-truth for the replica fleet
+via S3 ATTACH. Subscriber downloads are served via R2 (sec_lbug_r2_published).
 """
 
 from dagster import (

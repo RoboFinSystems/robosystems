@@ -39,6 +39,7 @@ class BackupType(str, Enum):
 
   FULL = "full"
   INCREMENTAL = "incremental"
+  SYSTEM = "system"
 
 
 class GraphBackup(Model):

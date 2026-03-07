@@ -52,6 +52,7 @@ class GraphStorageType(Enum):
   DATABASES = "graph-databases"  # Instance-level database backups
   SHARED_REPO_DATABASES = "shared-repositories/databases"  # Published snapshots
   SHARED_REPO_BACKUPS = "shared-repositories/backups"  # Subscriber backups
+  R2_DOWNLOADS = "downloads"  # R2 zero-egress subscriber downloads
 
 
 @dataclass
@@ -89,6 +90,11 @@ GRAPH_STORAGE: dict[GraphStorageType, GraphStorageConfig] = {
     storage_type=GraphStorageType.SHARED_REPO_BACKUPS,
     prefix="shared-repositories/backups/",
     description="Compressed shared repository backups for subscriber downloads",
+  ),
+  GraphStorageType.R2_DOWNLOADS: GraphStorageConfig(
+    storage_type=GraphStorageType.R2_DOWNLOADS,
+    prefix="downloads/",
+    description="Uncompressed database files on R2 for zero-egress subscriber downloads",
   ),
 }
 
@@ -372,6 +378,33 @@ def get_shared_repo_backup_prefix(graph_id: str | None = None) -> str:
   if graph_id:
     prefix += f"{graph_id}/"
   return prefix
+
+
+# =============================================================================
+# R2 Download Helpers
+# =============================================================================
+
+
+def get_r2_download_key(graph_id: str, extension: str = ".lbug") -> str:
+  """Build R2 key for a subscriber download file.
+
+  Uses a fixed key (no timestamp) — each publish overwrites the previous copy.
+
+  Args:
+      graph_id: Graph database identifier (e.g., "sec")
+      extension: File extension (".lbug" or ".duckdb")
+
+  Returns:
+      R2 key string (without bucket name)
+
+  Example:
+      >>> get_r2_download_key("sec")
+      'downloads/sec/sec.lbug'
+      >>> get_r2_download_key("sec", ".duckdb")
+      'downloads/sec/sec.duckdb'
+  """
+  config = GRAPH_STORAGE[GraphStorageType.R2_DOWNLOADS]
+  return f"{config.prefix}{graph_id}/{graph_id}{extension}"
 
 
 # =============================================================================
