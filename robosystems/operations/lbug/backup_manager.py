@@ -184,14 +184,33 @@ class BackupManager:
 
         # Format timestamp for filename (aligned with created_at shown in frontend)
         timestamp_str = backup.created_at.strftime("%Y%m%d_%H%M%S")
-        filename = f"{graph_id}_{timestamp_str}.zip"
+        is_r2 = (
+          backup.backup_metadata
+          and isinstance(backup.backup_metadata, dict)
+          and backup.backup_metadata.get("storage") == "r2"
+        )
+        # R2 backups are raw .lbug files, S3 backups are .zip
+        extension = ".lbug" if is_r2 else ".zip"
+        filename = f"{graph_id}_{timestamp_str}{extension}"
 
-        # Generate presigned URL using the S3 key from the backup record
+        # Choose S3 or R2 client based on backup storage type
         import asyncio
+
+        if is_r2:
+          import boto3
+
+          from robosystems.config import env
+
+          r2_config = env.get_r2_config()
+          if not r2_config:
+            raise RuntimeError("R2 not configured for R2-backed backup download")
+          presign_client = boto3.client("s3", **r2_config)
+        else:
+          presign_client = self.s3_adapter.s3_client
 
         url = await asyncio.get_event_loop().run_in_executor(
           None,
-          lambda: self.s3_adapter.s3_client.generate_presigned_url(
+          lambda: presign_client.generate_presigned_url(
             "get_object",
             Params={
               "Bucket": backup.s3_bucket,

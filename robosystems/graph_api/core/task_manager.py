@@ -169,3 +169,4 @@ class GenericTaskManager:
 # Global instances for each task type
 backup_task_manager = GenericTaskManager(task_prefix="backup")
 restore_task_manager = GenericTaskManager(task_prefix="restore")
+migration_task_manager = GenericTaskManager(task_prefix="migration")

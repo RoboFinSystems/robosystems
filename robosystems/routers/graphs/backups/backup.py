@@ -87,7 +87,7 @@ async def list_backups(
     # List backups from database instead of S3
     logger.info(f"Querying database for backups of graph: {graph_id}")
 
-    from robosystems.models.iam import BackupStatus, GraphBackup
+    from robosystems.models.iam import BackupStatus, BackupType, GraphBackup
 
     # Query database for backups
     backup_records = (
@@ -95,6 +95,7 @@ async def list_backups(
       .filter(
         GraphBackup.graph_id == graph_id,
         GraphBackup.status.in_([BackupStatus.COMPLETED, BackupStatus.IN_PROGRESS]),
+        GraphBackup.backup_type != BackupType.SYSTEM.value,
       )
       .order_by(GraphBackup.created_at.desc())
       .offset(offset)
@@ -107,6 +108,7 @@ async def list_backups(
       .filter(
         GraphBackup.graph_id == graph_id,
         GraphBackup.status.in_([BackupStatus.COMPLETED, BackupStatus.IN_PROGRESS]),
+        GraphBackup.backup_type != BackupType.SYSTEM.value,
       )
       .count()
     )

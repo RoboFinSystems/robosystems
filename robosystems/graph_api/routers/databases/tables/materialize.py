@@ -13,6 +13,40 @@ from robosystems.graph_api.models.tables import (
 )
 from robosystems.logger import logger
 
+# Cache for MATERIALIZE_EMBEDDINGS_ENABLED feature flag (avoids SSM call per table)
+_materialize_embeddings_cache: tuple[bool, float] | None = None
+_CACHE_TTL = 60.0  # seconds
+
+
+def _should_materialize_embeddings() -> bool:
+  """Check if embedding columns should be materialized to LadybugDB.
+
+  Controlled by SSM: /robosystems/{env}/features/MATERIALIZE_EMBEDDINGS_ENABLED
+  Default: false (embeddings stay in DuckDB staging only).
+  """
+  import time
+
+  global _materialize_embeddings_cache
+  now = time.time()
+  if (
+    _materialize_embeddings_cache
+    and now - _materialize_embeddings_cache[1] < _CACHE_TTL
+  ):
+    return _materialize_embeddings_cache[0]
+
+  try:
+    from robosystems.config.parameter_store import ParameterStoreManager
+
+    manager = ParameterStoreManager()
+    value = manager.get_parameter("MATERIALIZE_EMBEDDINGS_ENABLED", default="false")
+    result = value.lower() == "true"
+  except Exception:
+    result = False
+
+  _materialize_embeddings_cache = (result, now)
+  return result
+
+
 # Type mapping from LadybugDB types to DuckDB-compatible cast types
 _LBUG_TO_DUCK_TYPE = {
   "STRING": "VARCHAR",
@@ -66,17 +100,21 @@ def _build_reconciled_select(
   target_columns: list[tuple[str, str]],
   source_column_names: list[str],
   source_table: str,
-  exclude_file_id: bool,
+  exclude_cols: set[str] | None = None,
+  null_cols: set[str] | None = None,
 ) -> str:
   """Build a SELECT expression that reconciles source columns to target schema.
 
   Adds missing columns as NULL with correct type. Casts existing columns
   to the target type (handles DuckDB inferring NULL columns as INT32).
+  Columns in null_cols are included as NULL (preserving column count for COPY).
 
   For relationship tables, `from` and `to` are implicit in LadybugDB's
   TABLE_INFO but must be included in the DuckDB source. They are passed
   through first if present.
   """
+  exclude = exclude_cols or set()
+  nullify = null_cols or set()
   parts = []
   source_set = set(source_column_names)
   target_name_set = {c[0] for c in target_columns}
@@ -88,10 +126,12 @@ def _build_reconciled_select(
       parts.append(f'"{implicit_col}"')
 
   for col_name, lbug_type in target_columns:
-    if col_name == "file_id" and exclude_file_id:
+    if col_name in exclude:
       continue
     duck_type = _lbug_type_to_duck(lbug_type)
-    if col_name in source_set:
+    if col_name in nullify:
+      parts.append(f"NULL::{duck_type} AS {col_name}")
+    elif col_name in source_set:
       parts.append(f"TRY_CAST({col_name} AS {duck_type}) AS {col_name}")
     else:
       parts.append(f"NULL::{duck_type} AS {col_name}")
@@ -178,6 +218,7 @@ async def materialize_table(
     target_columns = _get_target_columns(ladybug_service, graph_id, table_name)
 
     # Check if table exists, create temp copy without file_id
+    temp_table_created = False
     try:
       with duckdb_pool.get_connection(graph_id) as duck_conn:
         checkpoint_with_retry(duck_conn, graph_id, context="DuckDB")
@@ -223,7 +264,19 @@ async def materialize_table(
           source_names = set(column_names) - _ignore_cols
           needs_reconciliation = target_names != source_names
 
-        # Optimization: Skip temp table when not needed (no file_id, no batching, no filter, no reconciliation)
+        # Columns to NULL out (keep column for schema match, but skip data).
+        # Embeddings stay in DuckDB staging for vector search; materializing
+        # them to LadybugDB is optional (HNSW indexes don't work at scale
+        # in LadybugDB v0.13.1). Enable via: just ssm-set {env} features/MATERIALIZE_EMBEDDINGS_ENABLED true
+        null_cols: set[str] = set()
+        if "embedding" in column_names and not _should_materialize_embeddings():
+          null_cols.add("embedding")
+          logger.info(
+            f"Nulling embedding column for {table_name} materialization "
+            f"(enable via features/MATERIALIZE_EMBEDDINGS_ENABLED)"
+          )
+
+        # Optimization: Skip temp table when not needed (no file_id, no batching, no filter, no reconciliation, no null cols)
         has_hash_batching = (
           request.num_batches is not None and request.batch_num is not None
         )
@@ -232,6 +285,7 @@ async def materialize_table(
           and not has_hash_batching
           and not request.file_ids
           and not needs_reconciliation
+          and not null_cols
         )
 
         if can_skip_temp_table:
@@ -274,17 +328,30 @@ async def materialize_table(
           elif batch_clause:
             where = batch_clause
 
-          # Build SELECT expression: reconciled columns or SELECT *
-          if needs_reconciliation and target_columns:
+          # Columns to exclude from materialization
+          exclude_cols: set[str] = set()
+          if has_file_id:
+            exclude_cols.add("file_id")
+
+          # Build SELECT expression
+          # Force reconciliation when nulling columns — the reconciled path
+          # iterates target columns (not source), so column count always matches.
+          use_reconciliation = (needs_reconciliation or null_cols) and target_columns
+          if use_reconciliation:
             select_expr = _build_reconciled_select(
-              target_columns, column_names, table_name, exclude_file_id=has_file_id
+              target_columns,
+              column_names,
+              table_name,
+              exclude_cols=exclude_cols,
+              null_cols=null_cols,
             )
             logger.debug(
               f"Reconciling columns for {table_name} "
               f"(source: {len(column_names)}, target: {len(target_columns)})"
             )
-          elif has_file_id:
-            select_expr = "* EXCLUDE (file_id)"
+          elif exclude_cols:
+            exclude_list = ", ".join(exclude_cols)
+            select_expr = f"* EXCLUDE ({exclude_list})"
           else:
             select_expr = "*"
 
@@ -385,24 +452,21 @@ async def materialize_table(
         f"Materialized {rows_ingested} rows from {table_name} in {execution_time_ms / 1000:.1f}s"
       )
 
-      # Checkpoint, build vector indexes, and release LadybugDB memory
+      # Checkpoint and release LadybugDB memory
       # This prevents memory accumulation during multi-table materialization
       try:
         with ladybug_service.db_manager.connection_pool.get_connection(
           graph_id
         ) as conn:
-          # Checkpoint to flush data to disk
           conn.execute("CHECKPOINT")
           logger.debug(f"Checkpointed LadybugDB after {table_name} materialization")
 
-          # Build HNSW vector index for tables with embedding columns
-          # Must happen AFTER data is loaded (indexes on empty tables are empty)
-          ladybug_service.db_manager.create_vector_index(conn, table_name)
-
-          # Checkpoint again to persist vector index to disk
-          # Without this, the index exists only in-memory and is lost when
-          # force_database_cleanup destroys the Database object below
-          conn.execute("CHECKPOINT")
+          # Build HNSW vector index when embeddings are materialized.
+          # Gated behind MATERIALIZE_EMBEDDINGS_ENABLED flag — disabled by default
+          # because LadybugDB HNSW hangs on 6M+ row tables in v0.13.1.
+          if _should_materialize_embeddings():
+            ladybug_service.db_manager.create_vector_index(conn, table_name)
+            conn.execute("CHECKPOINT")
 
         # Release buffer pool memory - data is safe on disk now
         ladybug_service.db_manager.connection_pool.force_database_cleanup(

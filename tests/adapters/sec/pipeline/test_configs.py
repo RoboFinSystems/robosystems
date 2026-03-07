@@ -11,7 +11,6 @@ from robosystems.adapters.sec.pipeline.configs import (
   SEC_PRIMARY_START_YEAR,
   SEC_QUARTERS,
   SEC_START_YEAR,
-  SECBackupConfig,
   SECDownloadConfig,
   SECEntityUpdateConfig,
   SECHistoricalStageConfig,
@@ -311,23 +310,3 @@ class TestSECEntityUpdateConfig:
     config = SECEntityUpdateConfig(year=2025, quarter=1)
     assert config.year == 2025
     assert config.quarter == 1
-
-
-@pytest.mark.unit
-class TestSECBackupConfig:
-  """Tests for SECBackupConfig."""
-
-  def test_default_values(self):
-    """Test default configuration values."""
-    config = SECBackupConfig()
-    assert config.graph_id == "sec"
-    assert config.retention_days == 14
-    assert config.compression is True
-    assert config.encryption is False
-    assert config.backup_type == "full"
-    assert config.backup_format == "full_dump"
-
-  def test_custom_retention(self):
-    """Test custom retention days."""
-    config = SECBackupConfig(retention_days=30)
-    assert config.retention_days == 30

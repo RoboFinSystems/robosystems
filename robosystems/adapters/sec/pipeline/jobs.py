@@ -43,7 +43,6 @@ from dagster import (
 )
 
 from .artifact import sec_knowledge_artifacts
-from .backup import sec_backup
 from .configs import sec_quarter_partitions
 from .download import sec_raw_filings
 from .duckdb_s3_publish import (
@@ -56,6 +55,7 @@ from .materialize import (
   sec_historical_materialized,
 )
 from .process import sec_processed_filings
+from .r2_publish import sec_lbug_r2_published
 from .s3_publish import sec_historical_lbug_s3_published
 from .stage import (
   sec_duckdb_incremental_staged,
@@ -330,35 +330,7 @@ sec_entity_update_job = define_asset_job(
 
 
 # ============================================================================
-# Phase 4: Backup (Downloadable .lbug for Users)
-# ============================================================================
-# Creates downloadable backups of the SEC database for users with
-# repository subscriptions. Run after materialization completes.
-
-sec_backup_job = define_asset_job(
-  name="sec_create_backup",
-  description="Create downloadable SEC database backup.",
-  selection=AssetSelection.assets(sec_backup),
-  tags={
-    "pipeline": "sec",
-    "phase": "backup",
-    # Minimal profile: just orchestrating Graph API calls, no local compute
-    # Backup runs entirely on-instance (CHECKPOINT + tar.gz + S3 upload)
-    "ecs/cpu": "256",
-    "ecs/memory": "512",
-    "ecs/ephemeral_storage": "21",
-    # On-demand to avoid interruptions during backup monitoring
-    "ecs/run_task_kwargs": {
-      "capacityProviderStrategy": [
-        {"capacityProvider": "FARGATE", "weight": 1, "base": 1},
-      ],
-    },
-  },
-)
-
-
-# ============================================================================
-# Phase 5: S3 Publish (DuckDB + Historical LadybugDB)
+# Phase 4: S3 Publish (DuckDB + Historical LadybugDB)
 # ============================================================================
 # Primary LadybugDB publish (sec_lbug_s3_published) has no job here - it's
 # triggered by asset lineage from sec_graph_materialized.
@@ -414,6 +386,34 @@ sec_historical_lbug_s3_publish_job = define_asset_job(
   tags={
     "pipeline": "sec",
     "phase": "s3_publish",
+    # Minimal profile: just orchestrating Graph API calls, no local compute
+    "ecs/cpu": "256",
+    "ecs/memory": "512",
+    "ecs/ephemeral_storage": "21",
+    # On-demand to avoid interruptions during large uploads
+    "ecs/run_task_kwargs": {
+      "capacityProviderStrategy": [
+        {"capacityProvider": "FARGATE", "weight": 1, "base": 1},
+      ],
+    },
+  },
+)
+
+
+# ============================================================================
+# Phase 5b: R2 Publish (Zero-egress subscriber downloads)
+# ============================================================================
+# Publishes raw .lbug to Cloudflare R2 for subscriber downloads.
+# Same on-instance backup pattern as S3 publish, but R2 has zero egress fees.
+# Creates/updates GraphBackup record so file appears in download list.
+
+sec_lbug_r2_publish_job = define_asset_job(
+  name="sec_lbug_r2_publish",
+  description="Publish SEC database to R2 for zero-egress subscriber downloads.",
+  selection=AssetSelection.assets(sec_lbug_r2_published),
+  tags={
+    "pipeline": "sec",
+    "phase": "r2_publish",
     # Minimal profile: just orchestrating Graph API calls, no local compute
     "ecs/cpu": "256",
     "ecs/memory": "512",

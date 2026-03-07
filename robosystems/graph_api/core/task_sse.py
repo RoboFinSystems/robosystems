@@ -175,6 +175,15 @@ def _get_progress_message(task_type: TaskType, task: dict[str, Any]) -> str:
     if file_count > 0:
       return f"Staging {table_name} from {file_count} files..."
     return f"Staging {table_name}..."
+  elif task_type == TaskType.MIGRATION:
+    metadata = task.get("metadata", {})
+    operation = metadata.get("operation", "migration")
+    current_db = metadata.get("current_database", "")
+    completed = metadata.get("databases_completed", 0)
+    total = metadata.get("databases_total", 0)
+    if current_db and total > 0:
+      return f"Migration {operation}: {current_db} ({completed}/{total})"
+    return f"Migration {operation} in progress..."
   else:
     return f"Processing {task_type.value} task..."
 
@@ -207,6 +216,10 @@ def _get_completion_message(task_type: TaskType, task: dict[str, Any]) -> str:
     if duration > 0:
       return f"Successfully staged {table_name} in {duration:.1f}s"
     return f"Successfully staged {table_name}"
+  elif task_type == TaskType.MIGRATION:
+    operation = metadata.get("operation", "migration")
+    count = result.get("databases_exported") or result.get("databases_imported", 0)
+    return f"Migration {operation} complete: {count} databases"
   else:
     return f"Successfully completed {task_type.value} task"
 
@@ -227,6 +240,9 @@ def _get_failure_message(task_type: TaskType, task: dict[str, Any]) -> str:
   elif task_type == TaskType.STAGING:
     table_name = metadata.get("table_name", "table")
     return f"Failed to stage {table_name}"
+  elif task_type == TaskType.MIGRATION:
+    operation = metadata.get("operation", "migration")
+    return f"Migration {operation} failed"
   else:
     return f"Failed to complete {task_type.value} task"
 
