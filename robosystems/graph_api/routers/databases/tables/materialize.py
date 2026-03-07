@@ -264,7 +264,19 @@ async def materialize_table(
           source_names = set(column_names) - _ignore_cols
           needs_reconciliation = target_names != source_names
 
-        # Optimization: Skip temp table when not needed (no file_id, no batching, no filter, no reconciliation)
+        # Columns to NULL out (keep column for schema match, but skip data).
+        # Embeddings stay in DuckDB staging for vector search; materializing
+        # them to LadybugDB is optional (HNSW indexes don't work at scale
+        # in LadybugDB v0.13.1). Enable via: just ssm-set {env} features/MATERIALIZE_EMBEDDINGS_ENABLED true
+        null_cols: set[str] = set()
+        if "embedding" in column_names and not _should_materialize_embeddings():
+          null_cols.add("embedding")
+          logger.info(
+            f"Nulling embedding column for {table_name} materialization "
+            f"(enable via features/MATERIALIZE_EMBEDDINGS_ENABLED)"
+          )
+
+        # Optimization: Skip temp table when not needed (no file_id, no batching, no filter, no reconciliation, no null cols)
         has_hash_batching = (
           request.num_batches is not None and request.batch_num is not None
         )
@@ -273,6 +285,7 @@ async def materialize_table(
           and not has_hash_batching
           and not request.file_ids
           and not needs_reconciliation
+          and not null_cols
         )
 
         if can_skip_temp_table:
@@ -319,18 +332,6 @@ async def materialize_table(
           exclude_cols: set[str] = set()
           if has_file_id:
             exclude_cols.add("file_id")
-
-          # Columns to NULL out (keep column for schema match, but skip data).
-          # Embeddings stay in DuckDB staging for vector search; materializing
-          # them to LadybugDB is optional (HNSW indexes don't work at scale
-          # in LadybugDB v0.13.1). Enable via: just ssm-set {env} features/MATERIALIZE_EMBEDDINGS_ENABLED true
-          null_cols: set[str] = set()
-          if "embedding" in column_names and not _should_materialize_embeddings():
-            null_cols.add("embedding")
-            logger.info(
-              f"Nulling embedding column for {table_name} materialization "
-              f"(enable via features/MATERIALIZE_EMBEDDINGS_ENABLED)"
-            )
 
           # Build SELECT expression
           # Force reconciliation when nulling columns — the reconciled path
