@@ -1,6 +1,6 @@
 """Tests for resolve-element MCP tool."""
 
-from unittest.mock import AsyncMock, Mock, patch
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 
@@ -92,9 +92,7 @@ class TestResolveElementExecution:
             "fact_count": 100,
           }
         ],
-        "ELEMENT_HAS_LABEL": [
-          {"qname": "us-gaap:Revenues", "label": "Revenue"}
-        ],
+        "ELEMENT_HAS_LABEL": [{"qname": "us-gaap:Revenues", "label": "Revenue"}],
       }
     )
 
@@ -131,9 +129,7 @@ class TestResolveElementExecution:
             "fact_count": 50,
           }
         ],
-        "ELEMENT_HAS_LABEL": [
-          {"qname": "us-gaap:Revenues", "label": "Revenue"}
-        ],
+        "ELEMENT_HAS_LABEL": [{"qname": "us-gaap:Revenues", "label": "Revenue"}],
       }
     )
 
@@ -165,9 +161,7 @@ class TestResolveElementExecution:
             "fact_count": 12,
           }
         ],
-        "ELEMENT_HAS_LABEL": [
-          {"qname": "us-gaap:Revenues", "label": "Revenue"}
-        ],
+        "ELEMENT_HAS_LABEL": [{"qname": "us-gaap:Revenues", "label": "Revenue"}],
       }
     )
 
@@ -270,9 +264,7 @@ class TestResolveElementExecution:
         'canonical_concept = "': [
           {"qname": "us-gaap:Revenues", "confidence": 0.95, "fact_count": 100}
         ],
-        "ELEMENT_HAS_LABEL": [
-          {"qname": "us-gaap:Revenues", "label": "Revenue"}
-        ],
+        "ELEMENT_HAS_LABEL": [{"qname": "us-gaap:Revenues", "label": "Revenue"}],
       }
     )
 
