@@ -110,23 +110,21 @@ def create_app() -> FastAPI:
           logger.warning(f"Failed to clear extension cache at {cache_path}: {e}")
 
     # Initialize DuckDB connection pool for staging tables
-    # Skip on replicas - they are read-only and never use staging tables
-    duckdb_pool = None
-    if os.getenv("LBUG_ROLE") != "replica":
-      from robosystems.graph_api.core.duckdb import initialize_duckdb_pool
+    # Masters use staging for materialization; replicas use it for MCP vector search.
+    # Replicas download staging files in the background after startup, so the pool
+    # initializes with the path but connections are lazy (created on first query).
+    from robosystems.graph_api.core.duckdb import initialize_duckdb_pool
 
-      duckdb_base_path = Path(env.DUCKDB_STAGING_PATH)
-      duckdb_pool = initialize_duckdb_pool(
-        base_path=str(duckdb_base_path),
-        max_connections_per_db=3,
-        connection_ttl_minutes=30,
-      )
-      logger.info(
-        f"Initialized DuckDB connection pool at {duckdb_base_path} "
-        "(databases persist with graph lifecycle)"
-      )
-    else:
-      logger.info("Skipping DuckDB initialization (replica mode)")
+    duckdb_base_path = Path(env.DUCKDB_STAGING_PATH)
+    duckdb_pool = initialize_duckdb_pool(
+      base_path=str(duckdb_base_path),
+      max_connections_per_db=3,
+      connection_ttl_minutes=30,
+    )
+    logger.info(
+      f"Initialized DuckDB connection pool at {duckdb_base_path} "
+      "(databases persist with graph lifecycle)"
+    )
 
     yield  # Application runs here
 

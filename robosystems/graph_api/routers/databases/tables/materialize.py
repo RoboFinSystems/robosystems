@@ -13,6 +13,40 @@ from robosystems.graph_api.models.tables import (
 )
 from robosystems.logger import logger
 
+# Cache for MATERIALIZE_EMBEDDINGS_ENABLED feature flag (avoids SSM call per table)
+_materialize_embeddings_cache: tuple[bool, float] | None = None
+_CACHE_TTL = 60.0  # seconds
+
+
+def _should_materialize_embeddings() -> bool:
+  """Check if embedding columns should be materialized to LadybugDB.
+
+  Controlled by SSM: /robosystems/{env}/features/MATERIALIZE_EMBEDDINGS_ENABLED
+  Default: false (embeddings stay in DuckDB staging only).
+  """
+  import time
+
+  global _materialize_embeddings_cache
+  now = time.time()
+  if (
+    _materialize_embeddings_cache
+    and now - _materialize_embeddings_cache[1] < _CACHE_TTL
+  ):
+    return _materialize_embeddings_cache[0]
+
+  try:
+    from robosystems.config.parameter_store import ParameterStoreManager
+
+    manager = ParameterStoreManager()
+    value = manager.get_parameter("MATERIALIZE_EMBEDDINGS_ENABLED", default="false")
+    result = value.lower() == "true"
+  except Exception:
+    result = False
+
+  _materialize_embeddings_cache = (result, now)
+  return result
+
+
 # Type mapping from LadybugDB types to DuckDB-compatible cast types
 _LBUG_TO_DUCK_TYPE = {
   "STRING": "VARCHAR",
@@ -66,7 +100,7 @@ def _build_reconciled_select(
   target_columns: list[tuple[str, str]],
   source_column_names: list[str],
   source_table: str,
-  exclude_file_id: bool,
+  exclude_cols: set[str] | None = None,
 ) -> str:
   """Build a SELECT expression that reconciles source columns to target schema.
 
@@ -77,6 +111,7 @@ def _build_reconciled_select(
   TABLE_INFO but must be included in the DuckDB source. They are passed
   through first if present.
   """
+  exclude = exclude_cols or set()
   parts = []
   source_set = set(source_column_names)
   target_name_set = {c[0] for c in target_columns}
@@ -88,7 +123,7 @@ def _build_reconciled_select(
       parts.append(f'"{implicit_col}"')
 
   for col_name, lbug_type in target_columns:
-    if col_name == "file_id" and exclude_file_id:
+    if col_name in exclude:
       continue
     duck_type = _lbug_type_to_duck(lbug_type)
     if col_name in source_set:
@@ -274,17 +309,33 @@ async def materialize_table(
           elif batch_clause:
             where = batch_clause
 
+          # Build EXCLUDE list for columns to skip during materialization
+          exclude_cols = set()
+          if has_file_id:
+            exclude_cols.add("file_id")
+          # Skip embedding columns unless materialization is enabled via SSM.
+          # Embeddings stay in DuckDB staging for vector search; materializing
+          # them to LadybugDB is optional (HNSW indexes don't work at scale
+          # in LadybugDB v0.13.1). Enable via: just ssm-set {env} features/MATERIALIZE_EMBEDDINGS_ENABLED true
+          if "embedding" in column_names and not _should_materialize_embeddings():
+            exclude_cols.add("embedding")
+            logger.info(
+              f"Excluding embedding column from {table_name} materialization "
+              f"(enable via features/MATERIALIZE_EMBEDDINGS_ENABLED)"
+            )
+
           # Build SELECT expression: reconciled columns or SELECT *
           if needs_reconciliation and target_columns:
             select_expr = _build_reconciled_select(
-              target_columns, column_names, table_name, exclude_file_id=has_file_id
+              target_columns, column_names, table_name, exclude_cols=exclude_cols
             )
             logger.debug(
               f"Reconciling columns for {table_name} "
               f"(source: {len(column_names)}, target: {len(target_columns)})"
             )
-          elif has_file_id:
-            select_expr = "* EXCLUDE (file_id)"
+          elif exclude_cols:
+            exclude_list = ", ".join(exclude_cols)
+            select_expr = f"* EXCLUDE ({exclude_list})"
           else:
             select_expr = "*"
 
@@ -385,41 +436,20 @@ async def materialize_table(
         f"Materialized {rows_ingested} rows from {table_name} in {execution_time_ms / 1000:.1f}s"
       )
 
-      # Checkpoint, build vector indexes, and release LadybugDB memory
+      # Checkpoint and release LadybugDB memory
       # This prevents memory accumulation during multi-table materialization
-      is_last_batch = (
-        request.batch_num is not None
-        and request.num_batches is not None
-        and request.batch_num == request.num_batches - 1
-      )
-      is_non_batched = request.batch_num is None
       try:
         with ladybug_service.db_manager.connection_pool.get_connection(
           graph_id
         ) as conn:
-          # Checkpoint to flush data to disk
           conn.execute("CHECKPOINT")
           logger.debug(f"Checkpointed LadybugDB after {table_name} materialization")
 
-          # Build HNSW vector index for tables with embedding columns.
-          # For batched materialization, only build on the LAST batch — all data
-          # is loaded at that point. Uses rebuild (drop+create) to ensure the
-          # index covers all rows, not just one batch's worth.
-          # Uses reduced HNSW parameters for faster build on large tables.
-          if is_last_batch:
-            logger.info(
-              f"Last batch complete for {table_name} — rebuilding vector index "
-              f"over full dataset (this may take several minutes)..."
-            )
-            try:
-              conn.execute("CALL timeout=3600000")  # 60 minutes for index build
-              ladybug_service.db_manager.rebuild_vector_index(conn, table_name)
-            finally:
-              conn.execute("CALL timeout=120000")  # Reset
-            conn.execute("CHECKPOINT")
-          elif is_non_batched:
+          # Build HNSW vector index when embeddings are materialized.
+          # Gated behind MATERIALIZE_EMBEDDINGS_ENABLED flag — disabled by default
+          # because LadybugDB HNSW hangs on 6M+ row tables in v0.13.1.
+          if _should_materialize_embeddings():
             ladybug_service.db_manager.create_vector_index(conn, table_name)
-            # Checkpoint again to persist vector index to disk
             conn.execute("CHECKPOINT")
 
         # Release buffer pool memory - data is safe on disk now
