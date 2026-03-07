@@ -404,6 +404,11 @@ jobs:
               # Config profile override for shared master (use production configs in staging)
               if [ "$WRITER_NAME" = "ladybug-shared" ] && [ -n "${{ inputs.lbug_shared_config_profile }}" ]; then
                 CONFIG_PROFILE="${{ inputs.lbug_shared_config_profile }}"
+                # Validate config profile against known environments
+                if [[ ! "$CONFIG_PROFILE" =~ ^(production|staging|development)$ ]]; then
+                  echo "::error::Invalid config profile: ${CONFIG_PROFILE}. Must be one of: production, staging, development"
+                  exit 1
+                fi
                 echo "  Config profile override: reading shared config from ${CONFIG_PROFILE}"
                 writer=$(yq eval -o=json ".${CONFIG_PROFILE}.writers[] | select(.name == \"ladybug-shared\")" .github/configs/graph.yml)
               fi

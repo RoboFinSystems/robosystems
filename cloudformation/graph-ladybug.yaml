@@ -445,7 +445,7 @@ Resources:
             INSTANCE_ID=$INSTANCE_ID
             PRIVATE_IP=$PRIVATE_IP
             $([ "${WriterTier}" = "ladybug-shared" ] && [ -n "${SharedRepositories}" ] && echo "SHARED_REPOSITORIES=${SharedRepositories}")
-            $([ -n "${ConfigProfile}" ] && echo "LBUG_CONFIG_PROFILE=${ConfigProfile}")
+            $([ "${WriterTier}" = "ladybug-shared" ] && [ -n "${ConfigProfile}" ] && echo "LBUG_CONFIG_PROFILE=${ConfigProfile}")
             EOF
 
             # Ensure cfn-signal will run even if setup has issues

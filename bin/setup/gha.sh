@@ -415,6 +415,8 @@ function setup_full_config() {
         gh variable set LBUG_SHARED_ENABLED_STAGING --body "false"
         gh variable set LBUG_SHARED_MIN_INSTANCES_STAGING --body "1"
         gh variable set LBUG_SHARED_MAX_INSTANCES_STAGING --body "1"
+        # Config profile override: set to "production" to use prod-sized hardware in staging
+        gh variable set LBUG_SHARED_CONFIG_PROFILE_STAGING --body "staging"
     fi
 
     # Shared Replicas Configuration - Read-Only Fleet
