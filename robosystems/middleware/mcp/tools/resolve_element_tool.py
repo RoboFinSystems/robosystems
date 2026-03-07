@@ -1,16 +1,52 @@
 """
 Resolve Element Tool — Maps natural-language financial concepts to XBRL elements.
 
-Primary: DuckDB vector search using list_cosine_similarity() on staging
-Element table. Falls back to canonical concept lookup on the graph if
-DuckDB staging is unavailable.
+Primary: DuckDB vector search on staging Element table. Uses HNSW-accelerated
+query (array_cosine_distance) when DUCKDB_HNSW_INDEX_ENABLED is true, otherwise
+brute-force list_cosine_similarity. Falls back to canonical concept lookup on the
+graph if DuckDB staging is unavailable.
 """
 
+import time
 from typing import Any
 
 from robosystems.logger import logger
 
 from .base_tool import BaseTool
+
+# Cache for DUCKDB_HNSW_INDEX_ENABLED feature flag
+_hnsw_enabled_cache: tuple[bool, float] | None = None
+_HNSW_CACHE_TTL = 60.0  # seconds
+
+
+def _is_hnsw_index_enabled() -> bool:
+  """Check if HNSW vector indexes are available on DuckDB staging tables.
+
+  Controlled by SSM: /robosystems/{env}/features/DUCKDB_HNSW_INDEX_ENABLED
+  Default: false (vector search uses brute-force list_cosine_similarity).
+
+  Set to true after staging with build_hnsw_index=True and replicas
+  have synced the indexed DuckDB file.
+  """
+  global _hnsw_enabled_cache
+
+  now = time.time()
+  if _hnsw_enabled_cache is not None:
+    cached_result, cached_time = _hnsw_enabled_cache
+    if now - cached_time < _HNSW_CACHE_TTL:
+      return cached_result
+
+  try:
+    from robosystems.config.parameter_store import ParameterStoreManager
+
+    manager = ParameterStoreManager()
+    value = manager.get_parameter("DUCKDB_HNSW_INDEX_ENABLED", default="false")
+    result = value.lower() == "true"
+  except Exception:
+    result = False
+
+  _hnsw_enabled_cache = (result, now)
+  return result
 
 
 class ResolveElementTool(BaseTool):
@@ -279,19 +315,29 @@ Use the returned query_hint directly in read-graph-cypher for immediate results.
       result["canonical_id"] = canonical.id
       result["canonical_name"] = canonical.display_name
 
-    # Step 3: DuckDB vector similarity search on staging Element table
-    # Uses list_cosine_similarity() — brute-force but fast on columnar data.
-    # If too slow, add HNSW index: CREATE INDEX ... USING HNSW (embedding)
+    # Step 3: DuckDB vector similarity search on staging Element table.
+    # Uses HNSW-accelerated query when index is available (SSM flag),
+    # otherwise brute-force list_cosine_similarity.
+    graph_id = self._get_graph_id()
     try:
-      search_sql = (
-        "SELECT qname, canonical_concept, canonical_confidence, "
-        "  list_cosine_similarity(embedding, $1) AS score "
-        "FROM Element "
-        "WHERE embedding IS NOT NULL "
-        "ORDER BY score DESC LIMIT 40"
-      )
+      if _is_hnsw_index_enabled():
+        search_sql = (
+          "SELECT qname, canonical_concept, canonical_confidence, "
+          "  1.0 - array_cosine_distance(embedding, $1::FLOAT[384]) AS score "
+          "FROM Element "
+          "WHERE embedding IS NOT NULL "
+          "ORDER BY array_cosine_distance(embedding, $1::FLOAT[384]) ASC LIMIT 40"
+        )
+      else:
+        search_sql = (
+          "SELECT qname, canonical_concept, canonical_confidence, "
+          "  list_cosine_similarity(embedding, $1) AS score "
+          "FROM Element "
+          "WHERE embedding IS NOT NULL "
+          "ORDER BY score DESC LIMIT 40"
+        )
       search_response = await self.client.query_table(
-        graph_id=self._get_graph_id(),
+        graph_id=graph_id,
         sql=search_sql,
         parameters=[query_embedding],
       )
