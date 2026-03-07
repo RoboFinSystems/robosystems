@@ -94,6 +94,7 @@ def sec_duckdb_staged(
       reset_staging=config.reset_staging,
       skip_taxonomy_relationships=config.skip_taxonomy_relationships,
       duckdb_memory_mb=duckdb_memory_mb,
+      build_hnsw_index=config.build_hnsw_index,
       progress_callback=dagster_progress,
     )
     return result
@@ -220,6 +221,7 @@ def sec_historical_duckdb_staged(
       reset_staging=config.reset_staging,
       skip_taxonomy_relationships=config.skip_taxonomy_relationships,
       duckdb_memory_mb=duckdb_memory_mb,
+      build_hnsw_index=config.build_hnsw_index,
       progress_callback=dagster_progress,
     )
     return result
@@ -313,6 +315,7 @@ def sec_duckdb_incremental_staged(
       year=config.year,
       quarter=config.quarter,
       skip_taxonomy_relationships=config.skip_taxonomy_relationships,
+      build_hnsw_index=config.build_hnsw_index,
       progress_callback=context.log.info,
     )
 
