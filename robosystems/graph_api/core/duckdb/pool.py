@@ -138,9 +138,9 @@ class DuckDBConnectionPool:
       return True
 
     try:
-      from robosystems.config.parameter_store import ParameterStoreManager
+      from robosystems.config.parameter_store import get_parameter_manager
 
-      manager = ParameterStoreManager()
+      manager = get_parameter_manager()
       value = manager.get_parameter("DUCKDB_HNSW_INDEX_ENABLED", default="false")
       self._vss_enabled = value.lower() == "true"
     except Exception:
@@ -419,7 +419,7 @@ class DuckDBConnectionPool:
             conn.execute("LOAD vss")
           logger.debug("VSS extension loaded for DuckDB connection")
         except Exception as vss_err:
-          logger.debug(f"Could not load vss extension: {vss_err}")
+          logger.warning(f"Could not load vss extension: {vss_err}")
 
       # Configure S3 endpoint if using LocalStack or custom endpoint
       if env.AWS_ENDPOINT_URL:

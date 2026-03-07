@@ -37,9 +37,9 @@ def _is_hnsw_index_enabled() -> bool:
       return cached_result
 
   try:
-    from robosystems.config.parameter_store import ParameterStoreManager
+    from robosystems.config.parameter_store import get_parameter_manager
 
-    manager = ParameterStoreManager()
+    manager = get_parameter_manager()
     value = manager.get_parameter("DUCKDB_HNSW_INDEX_ENABLED", default="false")
     result = value.lower() == "true"
   except Exception:
@@ -322,11 +322,14 @@ Use the returned query_hint directly in read-graph-cypher for immediate results.
     try:
       if _is_hnsw_index_enabled():
         search_sql = (
-          "SELECT qname, canonical_concept, canonical_confidence, "
-          "  1.0 - array_cosine_distance(embedding, $1::FLOAT[384]) AS score "
-          "FROM Element "
-          "WHERE embedding IS NOT NULL "
-          "ORDER BY array_cosine_distance(embedding, $1::FLOAT[384]) ASC LIMIT 40"
+          "WITH ranked AS ("
+          "  SELECT qname, canonical_concept, canonical_confidence, "
+          "    array_cosine_distance(embedding, $1::FLOAT[384]) AS dist "
+          "  FROM Element "
+          "  WHERE embedding IS NOT NULL "
+          "  ORDER BY dist ASC LIMIT 40"
+          ") SELECT qname, canonical_concept, canonical_confidence, "
+          "  1.0 - dist AS score FROM ranked"
         )
       else:
         search_sql = (

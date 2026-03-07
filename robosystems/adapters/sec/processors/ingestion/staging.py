@@ -561,7 +561,7 @@ class DuckDBStager:
   # =========================================================================
 
   # Tables that benefit from HNSW vector indexes on their embedding column
-  _HNSW_INDEX_TABLES = {"Element", "Label"}
+  _HNSW_INDEX_TABLES = {"Element"}
 
   async def _build_hnsw_indexes(
     self,
