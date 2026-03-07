@@ -1,11 +1,9 @@
 """
 Resolve Element Tool — Maps natural-language financial concepts to XBRL elements.
 
-Vector-search-first architecture:
-  1. Taxonomy match: embed query → match canonical concept in-memory (<1ms)
-  2. Element vector search: HNSW index on Element embeddings — O(log N) at any scale
-  3. Fact count enrichment: primary key + CSR traversal (indexed)
-  4. Label vector search fallback: HNSW index on Label embeddings
+Primary: DuckDB vector search using list_cosine_similarity() on staging
+Element table. Falls back to canonical concept lookup on the graph if
+DuckDB staging is unavailable.
 """
 
 from typing import Any
@@ -89,11 +87,17 @@ Use the returned query_hint directly in read-graph-cypher for immediate results.
     if not concept:
       return {"error": "concept is required"}
 
-    return await self._resolve(concept, ticker, accession_number)
+    # Try DuckDB vector search first, fall back to canonical lookup
+    return await self._resolve_vector(concept, ticker, accession_number)
 
-  async def _resolve(
+  # ---------------------------------------------------------------------------
+  # Canonical concept lookup (default) — no vector index required
+  # ---------------------------------------------------------------------------
+
+  async def _resolve_canonical(
     self, concept: str, ticker: str | None, accession_number: str | None = None
   ) -> dict[str, Any]:
+    """Resolve using canonical_concept property on Element nodes."""
     enricher = self.enricher
     result: dict[str, Any] = {
       "concept": concept,
@@ -105,7 +109,163 @@ Use the returned query_hint directly in read-graph-cypher for immediate results.
       "query_hint": None,
     }
 
-    # Step 1: Embed the query (~10ms)
+    # Step 1: Embed query and match to canonical taxonomy in-memory
+    try:
+      query_embedding = enricher.embed_batch([concept])[0]
+      canonical = enricher.match_canonical_from_query(query_embedding)
+      if canonical:
+        result["canonical_id"] = canonical.id
+        result["canonical_name"] = canonical.display_name
+    except Exception as e:
+      logger.warning(f"Canonical matching failed, falling back to text: {e}")
+
+    # Step 2: Query elements by canonical_concept property
+    canonical_id = result["canonical_id"]
+    if not canonical_id:
+      # No canonical match — try direct text search on element qname/name
+      return await self._resolve_text_fallback(
+        result, concept, ticker, accession_number
+      )
+
+    try:
+      params: dict[str, Any] = {"canonical_id": canonical_id}
+      if accession_number:
+        query = (
+          "MATCH (r:Report)-[:REPORT_HAS_FACT]->(f:Fact)-[:FACT_HAS_ELEMENT]->(e:Element) "
+          "WHERE e.canonical_concept = $canonical_id "
+          "AND r.accession_number = $accession_number "
+          "AND f.has_dimensions = false "
+          "RETURN DISTINCT e.qname AS qname, e.canonical_confidence AS confidence, "
+          "count(f) AS fact_count "
+          "ORDER BY fact_count DESC LIMIT 20"
+        )
+        params["accession_number"] = accession_number
+      elif ticker:
+        query = (
+          "MATCH (f:Fact)-[:FACT_HAS_ELEMENT]->(e:Element), "
+          "(f)-[:FACT_HAS_ENTITY]->(ent:Entity) "
+          "WHERE e.canonical_concept = $canonical_id "
+          "AND ent.ticker = $ticker "
+          "AND f.has_dimensions = false "
+          "RETURN DISTINCT e.qname AS qname, e.canonical_confidence AS confidence, "
+          "count(f) AS fact_count "
+          "ORDER BY fact_count DESC LIMIT 20"
+        )
+        params["ticker"] = ticker
+      else:
+        query = (
+          "MATCH (f:Fact)-[:FACT_HAS_ELEMENT]->(e:Element) "
+          "WHERE e.canonical_concept = $canonical_id "
+          "AND f.has_dimensions = false "
+          "RETURN DISTINCT e.qname AS qname, e.canonical_confidence AS confidence, "
+          "count(f) AS fact_count "
+          "ORDER BY fact_count DESC LIMIT 20"
+        )
+
+      rows = await self.client.execute_query(query, parameters=params) or []
+    except Exception as e:
+      logger.warning(f"Canonical element query failed: {e}")
+      rows = []
+
+    if not rows:
+      return await self._resolve_text_fallback(
+        result, concept, ticker, accession_number
+      )
+
+    # Step 3: Enrich with labels
+    qnames = [r["qname"] for r in rows if r.get("qname")]
+    labels = await self._fetch_labels_by_qname(qnames)
+
+    # Build matches
+    for row in rows:
+      qname = row.get("qname")
+      if not qname:
+        continue
+      result["matches"].append(
+        {
+          "qname": qname,
+          "confidence": row.get("confidence"),
+          "label": labels.get(qname),
+          "fact_count": row.get("fact_count"),
+          "score": row.get("confidence"),
+        }
+      )
+
+    result["matches"] = result["matches"][:10]
+    self._build_query_hint(result, ticker, accession_number)
+    return result
+
+  async def _resolve_text_fallback(
+    self,
+    result: dict[str, Any],
+    concept: str,
+    ticker: str | None,
+    accession_number: str | None,
+  ) -> dict[str, Any]:
+    """Fallback: search element labels by text when no canonical match."""
+    search_term = concept.lower()
+    try:
+      if ticker:
+        query = (
+          "MATCH (f:Fact)-[:FACT_HAS_ELEMENT]->(e:Element)-[:ELEMENT_HAS_LABEL]->(l:Label), "
+          "(f)-[:FACT_HAS_ENTITY]->(ent:Entity) "
+          "WHERE l.value CONTAINS $search_term "
+          'AND l.type = "http://www.xbrl.org/2003/role/label" '
+          "AND ent.ticker = $ticker "
+          "AND f.has_dimensions = false "
+          "RETURN DISTINCT e.qname AS qname, l.value AS label, "
+          "e.canonical_concept AS concept, e.canonical_confidence AS confidence, "
+          "count(f) AS fact_count "
+          "ORDER BY fact_count DESC LIMIT 10"
+        )
+        params = {"search_term": search_term, "ticker": ticker}
+      else:
+        query = (
+          "MATCH (e:Element)-[:ELEMENT_HAS_LABEL]->(l:Label) "
+          "WHERE l.value CONTAINS $search_term "
+          'AND l.type = "http://www.xbrl.org/2003/role/label" '
+          "RETURN DISTINCT e.qname AS qname, l.value AS label, "
+          "e.canonical_concept AS concept, e.canonical_confidence AS confidence "
+          "ORDER BY e.canonical_confidence DESC LIMIT 10"
+        )
+        params = {"search_term": search_term}
+      rows = await self.client.execute_query(query, parameters=params) or []
+      for row in rows:
+        result["matches"].append(
+          {
+            "qname": row.get("qname"),
+            "confidence": row.get("confidence"),
+            "label": row.get("label"),
+            "fact_count": row.get("fact_count"),
+            "score": row.get("confidence"),
+          }
+        )
+    except Exception as e:
+      logger.warning(f"Text fallback search failed: {e}")
+
+    self._build_query_hint(result, ticker, accession_number)
+    return result
+
+  # ---------------------------------------------------------------------------
+  # Vector search via DuckDB staging (feature-flagged)
+  # ---------------------------------------------------------------------------
+
+  async def _resolve_vector(
+    self, concept: str, ticker: str | None, accession_number: str | None = None
+  ) -> dict[str, Any]:
+    """Resolve using DuckDB vector similarity search on staging Element table."""
+    enricher = self.enricher
+    result: dict[str, Any] = {
+      "concept": concept,
+      "ticker": ticker,
+      "accession_number": accession_number,
+      "canonical_id": None,
+      "canonical_name": None,
+      "matches": [],
+      "query_hint": None,
+    }
+
+    # Step 1: Embed the query
     try:
       query_embedding = enricher.embed_batch([concept])[0]
     except Exception as e:
@@ -113,180 +273,197 @@ Use the returned query_hint directly in read-graph-cypher for immediate results.
       result["error"] = f"Embedding failed: {e}"
       return result
 
-    # Step 2: Match to canonical taxonomy in-memory (<1ms for ~40 concepts)
+    # Step 2: Match to canonical taxonomy in-memory
     canonical = enricher.match_canonical_from_query(query_embedding)
     if canonical:
       result["canonical_id"] = canonical.id
       result["canonical_name"] = canonical.display_name
 
-    # Step 3: HNSW vector search on Element embeddings — O(log N)
-    # LadybugDB QUERY_VECTOR_INDEX returns (node, distance) where distance is
-    # cosine distance (0 = identical, 2 = opposite). Lower = more similar.
-    vec_str = str(query_embedding)
-    search_results = []
+    # Step 3: DuckDB vector similarity search on staging Element table
+    # Uses list_cosine_similarity() — brute-force but fast on columnar data.
+    # If too slow, add HNSW index: CREATE INDEX ... USING HNSW (embedding)
     try:
-      search_query = (
-        f"CALL QUERY_VECTOR_INDEX('Element', 'element_vec_index', {vec_str}, 20) "
-        f"RETURN node.identifier AS id, node.qname AS qname, "
-        f"node.canonical_concept AS canonical, "
-        f"node.canonical_confidence AS confidence, distance "
-        f"ORDER BY distance"
+      search_sql = (
+        "SELECT qname, canonical_concept, canonical_confidence, "
+        "  list_cosine_similarity(embedding, $1) AS score "
+        "FROM Element "
+        "WHERE embedding IS NOT NULL "
+        "ORDER BY score DESC LIMIT 40"
       )
-      search_results = await self.client.execute_query(search_query) or []
+      search_response = await self.client.query_table(
+        graph_id=self._get_graph_id(),
+        sql=search_sql,
+        parameters=[query_embedding],
+      )
+      raw_rows = self._table_rows_to_dicts(search_response)
     except Exception as e:
-      logger.warning(f"Element vector search failed: {e}")
+      logger.warning(f"DuckDB vector search failed, falling back to canonical: {e}")
+      return await self._resolve_canonical(concept, ticker, accession_number)
 
-    # Deduplicate by qname (same element may appear from different filings)
-    seen_qnames: set[str] = set()
-    unique_results = []
-    for row in search_results:
+    if not raw_rows:
+      return await self._resolve_canonical(concept, ticker, accession_number)
+
+    # Deduplicate by qname in Python (avoids expensive GROUP BY on FLOAT[384])
+    seen: set[str] = set()
+    search_rows = []
+    for row in raw_rows:
       qname = row.get("qname")
-      if qname and qname not in seen_qnames:
-        seen_qnames.add(qname)
-        unique_results.append(row)
+      if qname and qname not in seen:
+        seen.add(qname)
+        search_rows.append(row)
+      if len(search_rows) >= 20:
+        break
 
-    # Step 4: Enrich with fact counts (primary key hash index + CSR traversal)
-    fact_counts: dict[str, int] = {}
-    labels: dict[str, str] = {}
-    if unique_results:
-      element_ids = [r["id"] for r in unique_results if r.get("id")]
-      if element_ids:
-        ids_str = ", ".join(f'"{eid}"' for eid in element_ids)
+    # Step 4: Enrich with fact counts and labels from graph
+    qnames = [r["qname"] for r in search_rows if r.get("qname")]
+    fact_counts = await self._fetch_fact_counts(qnames, ticker, accession_number)
+    labels = await self._fetch_labels_by_qname(qnames)
 
-        # Fact count query — uses primary key index for element lookup,
-        # CSR index for relationship traversal
-        try:
-          if accession_number:
-            fact_query = (
-              f"MATCH (r:Report)-[:REPORT_HAS_FACT]->(f:Fact)-[:FACT_HAS_ELEMENT]->(e:Element) "
-              f'WHERE e.identifier IN [{ids_str}] AND r.accession_number = "{accession_number}" '
-              f"RETURN e.identifier AS id, count(f) AS fact_count"
-            )
-          elif ticker:
-            fact_query = (
-              f"MATCH (f:Fact)-[:FACT_HAS_ELEMENT]->(e:Element), "
-              f"(f)-[:FACT_HAS_ENTITY]->(ent:Entity) "
-              f'WHERE e.identifier IN [{ids_str}] AND ent.ticker = "{ticker}" '
-              f"RETURN e.identifier AS id, count(f) AS fact_count"
-            )
-          else:
-            fact_query = (
-              f"MATCH (f:Fact)-[:FACT_HAS_ELEMENT]->(e:Element) "
-              f"WHERE e.identifier IN [{ids_str}] "
-              f"RETURN e.identifier AS id, count(f) AS fact_count"
-            )
-          fact_rows = await self.client.execute_query(fact_query) or []
-          fact_counts = {r["id"]: r["fact_count"] for r in fact_rows}
-        except Exception as e:
-          logger.debug(f"Fact count enrichment failed: {e}")
-
-        # Label query — uses primary key index + CSR traversal
-        try:
-          label_query = (
-            f"MATCH (e:Element)-[:ELEMENT_HAS_LABEL]->(l:Label) "
-            f"WHERE e.identifier IN [{ids_str}] "
-            f'AND l.type = "http://www.xbrl.org/2003/role/label" '
-            f"RETURN e.identifier AS id, l.value AS label"
-          )
-          label_rows = await self.client.execute_query(label_query) or []
-          labels = {r["id"]: r["label"] for r in label_rows if r.get("label")}
-        except Exception as e:
-          logger.debug(f"Label enrichment failed: {e}")
-
-    # Build matches list (convert cosine distance to similarity: 1 - distance)
-    for row in unique_results:
-      eid = row.get("id")
-      fc = fact_counts.get(eid, 0)
-
-      # When filtering by ticker or accession, skip elements not in that scope
+    for row in search_rows:
+      qname = row.get("qname")
+      if not qname:
+        continue
+      fc = fact_counts.get(qname, 0)
       if (ticker or accession_number) and fc == 0:
         continue
-
-      distance = row.get("distance", 1.0)
-      similarity = round(1.0 - distance, 4)
-
       result["matches"].append(
         {
-          "qname": row.get("qname"),
-          "confidence": row.get("confidence"),
-          "label": labels.get(eid),
+          "qname": qname,
+          "confidence": row.get("canonical_confidence"),
+          "label": labels.get(qname),
           "fact_count": fc if fc > 0 else None,
-          "score": similarity,
+          "score": round(row.get("score", 0), 4),
         }
       )
 
-    # Sort: fact_count (descending) first, then similarity score
+    # Sort: fact_count desc, then score desc
     result["matches"].sort(
       key=lambda m: (m.get("fact_count") or 0, m.get("score") or 0),
       reverse=True,
     )
     result["matches"] = result["matches"][:10]
-
-    # Step 5: Label vector search fallback if too few results
-    if len(result["matches"]) < 3:
-      try:
-        label_search_query = (
-          f"CALL QUERY_VECTOR_INDEX('Label', 'label_vec_index', {vec_str}, 20) "
-          f"WITH node, distance "
-          f"MATCH (e:Element)-[:ELEMENT_HAS_LABEL]->(node) "
-          f"RETURN DISTINCT e.qname AS qname, node.value AS label, distance "
-          f"ORDER BY distance LIMIT 10"
-        )
-        label_search_results = await self.client.execute_query(label_search_query) or []
-        existing_qnames = {m["qname"] for m in result["matches"]}
-        for row in label_search_results:
-          qname = row.get("qname")
-          if qname and qname not in existing_qnames:
-            dist = row.get("distance", 1.0)
-            sim = round(1.0 - dist, 4)
-            result["matches"].append(
-              {
-                "qname": qname,
-                "confidence": sim,
-                "label": row.get("label"),
-                "fact_count": None,
-                "score": sim,
-              }
-            )
-            existing_qnames.add(qname)
-      except Exception as e:
-        logger.debug(f"Label vector search fallback failed: {e}")
-
-    # Build query_hint from top match
-    if result["matches"]:
-      top = result["matches"][0]
-      qname = top["qname"]
-      if accession_number:
-        result["query_hint"] = (
-          f"MATCH (r:Report)-[:REPORT_HAS_FACT]->(f:Fact)-[:FACT_HAS_ELEMENT]->(e:Element), "
-          f"(f)-[:FACT_HAS_PERIOD]->(p:Period) "
-          f'WHERE e.qname = "{qname}" AND r.accession_number = "{accession_number}" '
-          f"AND f.has_dimensions = false "
-          f"RETURN e.qname AS element, f.numeric_value AS value, "
-          f"p.end_date AS date, p.duration_type AS period_type "
-          f"ORDER BY p.end_date DESC LIMIT 20"
-        )
-      elif ticker:
-        result["query_hint"] = (
-          f"MATCH (f:Fact)-[:FACT_HAS_ELEMENT]->(e:Element), "
-          f"(f)-[:FACT_HAS_PERIOD]->(p:Period), "
-          f"(f)-[:FACT_HAS_ENTITY]->(ent:Entity) "
-          f'WHERE e.qname = "{qname}" AND ent.ticker = "{ticker}" '
-          f"AND f.has_dimensions = false "
-          f"RETURN ent.ticker AS ticker, e.qname AS element, "
-          f"f.numeric_value AS value, p.end_date AS date, "
-          f"p.duration_type AS period_type "
-          f"ORDER BY p.end_date DESC LIMIT 20"
-        )
-      else:
-        result["query_hint"] = (
-          f"MATCH (f:Fact)-[:FACT_HAS_ELEMENT]->(e:Element), "
-          f"(f)-[:FACT_HAS_PERIOD]->(p:Period) "
-          f'WHERE e.qname = "{qname}" '
-          f"AND f.has_dimensions = false "
-          f"RETURN e.qname AS element, f.numeric_value AS value, "
-          f"p.end_date AS date, p.duration_type AS period_type "
-          f"ORDER BY p.end_date DESC LIMIT 20"
-        )
-
+    self._build_query_hint(result, ticker, accession_number)
     return result
+
+  # ---------------------------------------------------------------------------
+  # Shared helpers
+  # ---------------------------------------------------------------------------
+
+  def _get_graph_id(self) -> str:
+    """Get the current graph ID from the client."""
+    return getattr(self.client, "_database_name", None) or self.client.graph_id or "sec"
+
+  @staticmethod
+  def _table_rows_to_dicts(response: dict[str, Any]) -> list[dict[str, Any]]:
+    """Convert query_table response to list of dicts."""
+    columns = response.get("columns", [])
+    rows = response.get("rows", [])
+    return [dict(zip(columns, row, strict=False)) for row in rows]
+
+  async def _fetch_labels_by_qname(self, qnames: list[str]) -> dict[str, str]:
+    """Fetch labels for elements by qname."""
+    if not qnames:
+      return {}
+    try:
+      label_query = (
+        "MATCH (e:Element)-[:ELEMENT_HAS_LABEL]->(l:Label) "
+        "WHERE e.qname IN $qnames "
+        'AND l.type = "http://www.xbrl.org/2003/role/label" '
+        "RETURN e.qname AS qname, l.value AS label"
+      )
+      label_rows = (
+        await self.client.execute_query(label_query, parameters={"qnames": qnames})
+        or []
+      )
+      return {r["qname"]: r["label"] for r in label_rows if r.get("label")}
+    except Exception as e:
+      logger.debug(f"Label enrichment failed: {e}")
+      return {}
+
+  async def _fetch_fact_counts(
+    self,
+    qnames: list[str],
+    ticker: str | None,
+    accession_number: str | None,
+  ) -> dict[str, int]:
+    """Fetch fact counts for elements by qname."""
+    if not qnames:
+      return {}
+    try:
+      params: dict[str, Any] = {"qnames": qnames}
+      if accession_number:
+        query = (
+          "MATCH (r:Report)-[:REPORT_HAS_FACT]->(f:Fact)-[:FACT_HAS_ELEMENT]->(e:Element) "
+          "WHERE e.qname IN $qnames AND r.accession_number = $accession_number "
+          "RETURN e.qname AS qname, count(f) AS fact_count"
+        )
+        params["accession_number"] = accession_number
+      elif ticker:
+        query = (
+          "MATCH (f:Fact)-[:FACT_HAS_ELEMENT]->(e:Element), "
+          "(f)-[:FACT_HAS_ENTITY]->(ent:Entity) "
+          "WHERE e.qname IN $qnames AND ent.ticker = $ticker "
+          "RETURN e.qname AS qname, count(f) AS fact_count"
+        )
+        params["ticker"] = ticker
+      else:
+        query = (
+          "MATCH (f:Fact)-[:FACT_HAS_ELEMENT]->(e:Element) "
+          "WHERE e.qname IN $qnames "
+          "RETURN e.qname AS qname, count(f) AS fact_count"
+        )
+      rows = await self.client.execute_query(query, parameters=params) or []
+      return {r["qname"]: r["fact_count"] for r in rows}
+    except Exception as e:
+      logger.debug(f"Fact count enrichment failed: {e}")
+      return {}
+
+  @staticmethod
+  def _build_query_hint(
+    result: dict[str, Any], ticker: str | None, accession_number: str | None
+  ) -> None:
+    """Build a ready-to-use Cypher query hint from the top match.
+
+    Uses $param syntax so the hint is safe to pass directly to read-graph-cypher.
+    """
+    if not result["matches"]:
+      return
+    top = result["matches"][0]
+    qname = top["qname"]
+    hint_params: dict[str, str] = {"qname": qname}
+
+    if accession_number:
+      hint_params["accession_number"] = accession_number
+      result["query_hint"] = (
+        "MATCH (r:Report)-[:REPORT_HAS_FACT]->(f:Fact)-[:FACT_HAS_ELEMENT]->(e:Element), "
+        "(f)-[:FACT_HAS_PERIOD]->(p:Period) "
+        "WHERE e.qname = $qname AND r.accession_number = $accession_number "
+        "AND f.has_dimensions = false "
+        "RETURN e.qname AS element, f.numeric_value AS value, "
+        "p.end_date AS date, p.duration_type AS period_type "
+        "ORDER BY p.end_date DESC LIMIT 20"
+      )
+    elif ticker:
+      hint_params["ticker"] = ticker
+      result["query_hint"] = (
+        "MATCH (f:Fact)-[:FACT_HAS_ELEMENT]->(e:Element), "
+        "(f)-[:FACT_HAS_PERIOD]->(p:Period), "
+        "(f)-[:FACT_HAS_ENTITY]->(ent:Entity) "
+        "WHERE e.qname = $qname AND ent.ticker = $ticker "
+        "AND f.has_dimensions = false "
+        "RETURN ent.ticker AS ticker, e.qname AS element, "
+        "f.numeric_value AS value, p.end_date AS date, "
+        "p.duration_type AS period_type "
+        "ORDER BY p.end_date DESC LIMIT 20"
+      )
+    else:
+      result["query_hint"] = (
+        "MATCH (f:Fact)-[:FACT_HAS_ELEMENT]->(e:Element), "
+        "(f)-[:FACT_HAS_PERIOD]->(p:Period) "
+        "WHERE e.qname = $qname "
+        "AND f.has_dimensions = false "
+        "RETURN e.qname AS element, f.numeric_value AS value, "
+        "p.end_date AS date, p.duration_type AS period_type "
+        "ORDER BY p.end_date DESC LIMIT 20"
+      )
+    result["query_hint_params"] = hint_params

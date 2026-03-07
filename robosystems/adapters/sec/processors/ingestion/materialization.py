@@ -34,8 +34,6 @@ from robosystems.schemas.extensions.roboledger import RoboLedgerContext
 
 from .models import (
   CHUNKED_MATERIALIZATION_TIMEOUT,
-  EMBEDDING_MATERIALIZATION_BATCH_SIZE,
-  EMBEDDING_TABLES,
   ENTITY_UPDATE_BATCH_SIZE,
   INCREMENTAL_COPY_TIMEOUT,
   LARGE_STAGING_TABLES,
@@ -835,39 +833,6 @@ class LadybugMaterializer:
     finally:
       db.close()
 
-  @staticmethod
-  async def _rebuild_vector_index(
-    graph_client: "GraphClient",
-    graph_id: str,
-    table_name: str,
-    log_progress: ProgressCallback | None = None,
-  ) -> None:
-    """Rebuild HNSW vector index for a table after batched materialization.
-
-    Drops the existing partial index (covers only batch 1) and creates a
-    fresh one over the full dataset. Uses the materialize endpoint with
-    rebuild_vector_index=True to get a write connection with extended timeout.
-    """
-    if log_progress:
-      log_progress(f"  [{table_name}] Rebuilding vector index over full data...")
-
-    try:
-      response = await graph_client.rebuild_vector_index(
-        graph_id=graph_id,
-        table_name=table_name,
-        timeout=600.0,  # 10 min client timeout
-      )
-      status = response.get("status", "unknown")
-      elapsed = response.get("execution_time_ms", 0)
-      if log_progress:
-        log_progress(
-          f"  [{table_name}] Vector index rebuild {status} ({elapsed / 1000:.1f}s)"
-        )
-    except Exception as e:
-      logger.warning(f"Could not rebuild vector index for {table_name}: {e}")
-      if log_progress:
-        log_progress(f"  [{table_name}] Vector index rebuild failed: {e}")
-
   async def _trigger_ingestion(
     self,
     table_names: list[str],
@@ -917,22 +882,9 @@ class LadybugMaterializer:
             logger.warning(f"Could not get row count for {table_name}: {count_err}")
             row_count = 0
 
-        # Use lower batch size for tables with embeddings (FLOAT[384] = ~1.5KB/row)
-        # to prevent OOM during LadybugDB COPY + checkpoint
-        effective_batch_size = (
-          EMBEDDING_MATERIALIZATION_BATCH_SIZE
-          if table_name in EMBEDDING_TABLES
-          else batch_size
-        )
-        if table_name in EMBEDDING_TABLES:
-          log_progress(
-            f"[{i}/{total_tables}] Using embedding batch size for {table_name} "
-            f"({effective_batch_size:,} rows vs standard {batch_size:,})"
-          )
-
         # Use hash-based batched materialization for very large tables
-        if batch_materialization and row_count > effective_batch_size:
-          num_batches = (row_count + effective_batch_size - 1) // effective_batch_size
+        if batch_materialization and row_count > batch_size:
+          num_batches = (row_count + batch_size - 1) // batch_size
           log_progress(
             f"[{i}/{total_tables}] Materializing {table_name} in {num_batches} batches "
             f"({row_count:,} rows, hash-based)..."
@@ -981,15 +933,6 @@ class LadybugMaterializer:
             f"[{i}/{total_tables}] Materialized {table_name}: "
             f"{table_rows:,} rows in {table_time_ms / 1000:.1f}s ({num_batches} batches)"
           )
-
-          # Rebuild vector index after all batches complete for embedding tables.
-          # The materialize endpoint skips per-batch index creation because
-          # CREATE_VECTOR_INDEX on batch 1 only indexes batch 1's data, and
-          # subsequent batches see "already exists" and skip.
-          if table_name in EMBEDDING_TABLES:
-            await self._rebuild_vector_index(
-              graph_client, self.graph_id, table_name, log_progress
-            )
 
         else:
           # Standard single-pass materialization

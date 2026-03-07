@@ -747,9 +747,14 @@ class LadybugDatabaseManager:
         if "doesn't have an index" not in str(drop_err):
           logger.debug(f"Could not drop vector index {index_name}: {drop_err}")
 
-      # Create fresh index over all data
+      # Create fresh index over all data with tuned HNSW parameters.
+      # Reduced from defaults (mu=30, ml=60, efc=200) for faster build on
+      # large tables (6M+ rows). Still accurate for top-10/20 retrieval.
+      # cache_embeddings=false avoids loading all vectors into buffer pool
+      # at once (6.6M x 384 x 4B = ~10GB), preventing OOM on large tables.
       conn.execute(
-        f"CALL CREATE_VECTOR_INDEX('{table_name}', '{index_name}', '{column}')"
+        f"CALL CREATE_VECTOR_INDEX('{table_name}', '{index_name}', '{column}', "
+        f"mu := 16, ml := 32, efc := 100, cache_embeddings := false)"
       )
       logger.info(
         f"Rebuilt vector index {index_name} on {table_name}.{column} (full data)"

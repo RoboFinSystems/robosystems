@@ -117,16 +117,19 @@ Use returned structure identifiers to explore element hierarchies via STRUCTURE_
     # Determine if we need to join through Report → Taxonomy
     needs_report_join = ticker or accession_number
 
+    params: dict[str, Any] = {"statement_type": statement_type}
+
     if needs_report_join:
       # Filter via entity → report → taxonomy → structure
       match_clause = (
         "MATCH (r:Report)-[:REPORT_USES_TAXONOMY]->(t:Taxonomy)"
         "<-[:STRUCTURE_HAS_TAXONOMY]-(s:Structure) "
       )
-      where_parts = [f's.canonical_type = "{statement_type}"']
+      where_parts = ["s.canonical_type = $statement_type"]
 
       if accession_number:
-        where_parts.append(f'r.accession_number = "{accession_number}"')
+        where_parts.append("r.accession_number = $accession_number")
+        params["accession_number"] = accession_number
 
       if ticker:
         # Add entity join for ticker filtering
@@ -135,34 +138,35 @@ Use returned structure identifiers to explore element hierarchies via STRUCTURE_
           "-[:REPORT_USES_TAXONOMY]->(t:Taxonomy)"
           "<-[:STRUCTURE_HAS_TAXONOMY]-(s:Structure) "
         )
-        where_parts.append(f'ent.ticker = "{ticker}"')
+        where_parts.append("ent.ticker = $ticker")
+        params["ticker"] = ticker
 
       query = (
         f"{match_clause}"
         f"WHERE {' AND '.join(where_parts)}"
         f"{parenthetical_filter} "
-        f"RETURN s.identifier AS id, s.definition AS definition, "
-        f"s.name AS name, s.type AS type, s.number AS number, "
-        f"s.canonical_type AS canonical_type, "
-        f"s.canonical_confidence AS canonical_confidence, "
-        f"r.accession_number AS accession_number, "
-        f"r.form AS form, r.filing_date AS filing_date "
-        f"ORDER BY r.filing_date DESC LIMIT 20"
+        "RETURN s.identifier AS id, s.definition AS definition, "
+        "s.name AS name, s.type AS type, s.number AS number, "
+        "s.canonical_type AS canonical_type, "
+        "s.canonical_confidence AS canonical_confidence, "
+        "r.accession_number AS accession_number, "
+        "r.form AS form, r.filing_date AS filing_date "
+        "ORDER BY r.filing_date DESC LIMIT 20"
       )
     else:
       query = (
-        f"MATCH (s:Structure) "
-        f'WHERE s.canonical_type = "{statement_type}"'
+        "MATCH (s:Structure) "
+        "WHERE s.canonical_type = $statement_type"
         f"{parenthetical_filter} "
-        f"RETURN s.identifier AS id, s.definition AS definition, "
-        f"s.name AS name, s.type AS type, s.number AS number, "
-        f"s.canonical_type AS canonical_type, "
-        f"s.canonical_confidence AS canonical_confidence "
-        f"ORDER BY s.canonical_confidence DESC LIMIT 20"
+        "RETURN s.identifier AS id, s.definition AS definition, "
+        "s.name AS name, s.type AS type, s.number AS number, "
+        "s.canonical_type AS canonical_type, "
+        "s.canonical_confidence AS canonical_confidence "
+        "ORDER BY s.canonical_confidence DESC LIMIT 20"
       )
 
     try:
-      rows = await self.client.execute_query(query)
+      rows = await self.client.execute_query(query, parameters=params)
       if rows:
         for row in rows:
           structure = {
