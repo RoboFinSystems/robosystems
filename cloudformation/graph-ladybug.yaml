@@ -90,6 +90,12 @@ Parameters:
     AllowedPattern: "^$|^[a-z0-9_]+(,[a-z0-9_]+)*$"
     ConstraintDescription: Must be a comma-separated list of repository names (sec, sec_historical, industry, economic)
 
+  # Config Profile Override (optional - allows staging to use production configs)
+  ConfigProfile:
+    Type: String
+    Default: ""
+    Description: Override config profile for graph.yml lookup (e.g., "production" to use prod configs in staging)
+
   # Tier Configuration Parameters (passed from graph.yml via workflow)
   InstanceType:
     Type: String
@@ -439,6 +445,7 @@ Resources:
             INSTANCE_ID=$INSTANCE_ID
             PRIVATE_IP=$PRIVATE_IP
             $([ "${WriterTier}" = "ladybug-shared" ] && [ -n "${SharedRepositories}" ] && echo "SHARED_REPOSITORIES=${SharedRepositories}")
+            $([ "${WriterTier}" = "ladybug-shared" ] && [ -n "${ConfigProfile}" ] && echo "LBUG_CONFIG_PROFILE=${ConfigProfile}")
             EOF
 
             # Ensure cfn-signal will run even if setup has issues
