@@ -101,17 +101,20 @@ def _build_reconciled_select(
   source_column_names: list[str],
   source_table: str,
   exclude_cols: set[str] | None = None,
+  null_cols: set[str] | None = None,
 ) -> str:
   """Build a SELECT expression that reconciles source columns to target schema.
 
   Adds missing columns as NULL with correct type. Casts existing columns
   to the target type (handles DuckDB inferring NULL columns as INT32).
+  Columns in null_cols are included as NULL (preserving column count for COPY).
 
   For relationship tables, `from` and `to` are implicit in LadybugDB's
   TABLE_INFO but must be included in the DuckDB source. They are passed
   through first if present.
   """
   exclude = exclude_cols or set()
+  nullify = null_cols or set()
   parts = []
   source_set = set(source_column_names)
   target_name_set = {c[0] for c in target_columns}
@@ -126,7 +129,9 @@ def _build_reconciled_select(
     if col_name in exclude:
       continue
     duck_type = _lbug_type_to_duck(lbug_type)
-    if col_name in source_set:
+    if col_name in nullify:
+      parts.append(f"NULL::{duck_type} AS {col_name}")
+    elif col_name in source_set:
       parts.append(f"TRY_CAST({col_name} AS {duck_type}) AS {col_name}")
     else:
       parts.append(f"NULL::{duck_type} AS {col_name}")
@@ -309,33 +314,47 @@ async def materialize_table(
           elif batch_clause:
             where = batch_clause
 
-          # Build EXCLUDE list for columns to skip during materialization
-          exclude_cols = set()
+          # Columns to exclude from materialization
+          exclude_cols: set[str] = set()
           if has_file_id:
             exclude_cols.add("file_id")
-          # Skip embedding columns unless materialization is enabled via SSM.
+
+          # Columns to NULL out (keep column for schema match, but skip data).
           # Embeddings stay in DuckDB staging for vector search; materializing
           # them to LadybugDB is optional (HNSW indexes don't work at scale
           # in LadybugDB v0.13.1). Enable via: just ssm-set {env} features/MATERIALIZE_EMBEDDINGS_ENABLED true
+          null_cols: set[str] = set()
           if "embedding" in column_names and not _should_materialize_embeddings():
-            exclude_cols.add("embedding")
+            null_cols.add("embedding")
             logger.info(
-              f"Excluding embedding column from {table_name} materialization "
+              f"Nulling embedding column for {table_name} materialization "
               f"(enable via features/MATERIALIZE_EMBEDDINGS_ENABLED)"
             )
 
-          # Build SELECT expression: reconciled columns or SELECT *
+          # Build SELECT expression
           if needs_reconciliation and target_columns:
             select_expr = _build_reconciled_select(
-              target_columns, column_names, table_name, exclude_cols=exclude_cols
+              target_columns,
+              column_names,
+              table_name,
+              exclude_cols=exclude_cols,
+              null_cols=null_cols,
             )
             logger.debug(
               f"Reconciling columns for {table_name} "
               f"(source: {len(column_names)}, target: {len(target_columns)})"
             )
-          elif exclude_cols:
-            exclude_list = ", ".join(exclude_cols)
-            select_expr = f"* EXCLUDE ({exclude_list})"
+          elif exclude_cols or null_cols:
+            # Build explicit column list with NULLs and exclusions
+            parts = []
+            for col in column_names:
+              if col in exclude_cols:
+                continue
+              elif col in null_cols:
+                parts.append(f"NULL AS {col}")
+              else:
+                parts.append(col)
+            select_expr = ", ".join(parts)
           else:
             select_expr = "*"
 
