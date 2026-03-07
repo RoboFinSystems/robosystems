@@ -332,7 +332,10 @@ async def materialize_table(
             )
 
           # Build SELECT expression
-          if needs_reconciliation and target_columns:
+          # Force reconciliation when nulling columns — the reconciled path
+          # iterates target columns (not source), so column count always matches.
+          use_reconciliation = (needs_reconciliation or null_cols) and target_columns
+          if use_reconciliation:
             select_expr = _build_reconciled_select(
               target_columns,
               column_names,
@@ -344,17 +347,9 @@ async def materialize_table(
               f"Reconciling columns for {table_name} "
               f"(source: {len(column_names)}, target: {len(target_columns)})"
             )
-          elif exclude_cols or null_cols:
-            # Build explicit column list with NULLs and exclusions
-            parts = []
-            for col in column_names:
-              if col in exclude_cols:
-                continue
-              elif col in null_cols:
-                parts.append(f"NULL AS {col}")
-              else:
-                parts.append(col)
-            select_expr = ", ".join(parts)
+          elif exclude_cols:
+            exclude_list = ", ".join(exclude_cols)
+            select_expr = f"* EXCLUDE ({exclude_list})"
           else:
             select_expr = "*"
 
