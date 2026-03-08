@@ -189,13 +189,14 @@ def _create_invoice_from_stripe(
 ) -> Any:
   """Create a BillingInvoice and line items from Stripe invoice data.
 
-  Returns the created invoice, or None if it already exists.
+  Returns the invoice (newly created or existing).
   """
   from robosystems.models.billing import BillingInvoice, BillingInvoiceLineItem
 
   stripe_invoice_id: str = invoice_data.get("id", "")
-  period_start = invoice_data.get("period_start")
-  period_end = invoice_data.get("period_end")
+  now_ts = int(datetime.now(UTC).timestamp())
+  period_start = invoice_data.get("period_start") or now_ts
+  period_end = invoice_data.get("period_end") or now_ts
   due_date = invoice_data.get("due_date")
   status = invoice_data.get("status", "draft")
 
