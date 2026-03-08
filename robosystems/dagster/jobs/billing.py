@@ -108,6 +108,49 @@ async def _handle_checkout_completed(
 
     context.log.info(f"Payment collected for org {customer.org_id}")
 
+    # Backfill invoice if invoice.created/payment_succeeded arrived before
+    # this handler set the provider_subscription_id (race condition).
+    # The checkout session includes the Stripe invoice ID — look it up
+    # from the audit log where the invoice webhook data was stored.
+    stripe_invoice_id = session_data.get("invoice")
+    if stripe_invoice_id and stripe_subscription_id:
+      from robosystems.models.billing import BillingAuditLog, BillingInvoice
+
+      existing = (
+        db_session.query(BillingInvoice)
+        .filter(BillingInvoice.stripe_invoice_id == stripe_invoice_id)
+        .first()
+      )
+      if not existing:
+        # Find the invoice data from the earlier webhook audit log
+        audit = (
+          db_session.query(BillingAuditLog)
+          .filter(
+            BillingAuditLog.event_data["webhook_type"].astext == "invoice.created",
+            BillingAuditLog.event_data["data"]["id"].astext == stripe_invoice_id,
+          )
+          .first()
+        )
+        if audit and audit.event_data.get("data"):
+          invoice = _create_invoice_from_stripe(
+            audit.event_data["data"], subscription, db_session, context
+          )
+          if invoice:
+            # Check if it was already paid
+            stripe_status = audit.event_data["data"].get("status")
+            if stripe_status == "paid":
+              invoice.status = "paid"
+              invoice.paid_at = datetime.now(UTC)
+              invoice.payment_method = "stripe"
+              invoice.payment_reference = stripe_invoice_id
+              db_session.commit()
+            context.log.info(f"Backfilled invoice {stripe_invoice_id} from audit log")
+        else:
+          context.log.info(
+            f"Invoice {stripe_invoice_id} audit log not found, "
+            "will be synced on next invoice event"
+          )
+
     # Trigger provisioning via sensor (set status to provisioning)
     await _trigger_resource_provisioning(subscription, db_session, context)
 
@@ -115,38 +158,46 @@ async def _handle_checkout_completed(
     context.log.warning(f"Checkout completed but payment not paid: {payment_status}")
 
 
-async def _handle_invoice_created(
-  invoice_data: dict, db_session: Any, context: OpExecutionContext
-) -> None:
-  """Handle invoice.created event from Stripe.
+def _find_subscription_by_stripe_id(
+  stripe_subscription_id: str, db_session: Any
+) -> Any:
+  """Find a BillingSubscription by Stripe subscription ID.
 
-  Creates a BillingInvoice from Stripe data, using Stripe's invoice number
-  and syncing all line items from the Stripe invoice.
+  Tries provider_subscription_id first, then falls back to
+  stripe_subscription_id column. This handles the race condition where
+  Stripe fires invoice events before checkout.session.completed updates
+  the provider_subscription_id field.
   """
-  from robosystems.models.billing import (
-    BillingInvoice,
-    BillingInvoiceLineItem,
-    BillingSubscription,
+  from robosystems.models.billing import BillingSubscription
+
+  subscription = BillingSubscription.get_by_provider_subscription_id(
+    stripe_subscription_id, db_session
+  )
+  if subscription:
+    return subscription
+
+  return BillingSubscription.get_by_stripe_subscription_id(
+    stripe_subscription_id, db_session
   )
 
+
+def _create_invoice_from_stripe(
+  invoice_data: dict,
+  subscription: Any,
+  db_session: Any,
+  context: Any,
+) -> Any:
+  """Create a BillingInvoice and line items from Stripe invoice data.
+
+  Returns the created invoice, or None if it already exists.
+  """
+  from robosystems.models.billing import BillingInvoice, BillingInvoiceLineItem
+
   stripe_invoice_id: str = invoice_data.get("id", "")
-  subscription_id = invoice_data.get("subscription")
   period_start = invoice_data.get("period_start")
   period_end = invoice_data.get("period_end")
   due_date = invoice_data.get("due_date")
   status = invoice_data.get("status", "draft")
-
-  if not subscription_id:
-    context.log.info("Invoice created but no subscription ID")
-    return
-
-  subscription = BillingSubscription.get_by_provider_subscription_id(
-    subscription_id, db_session
-  )
-
-  if not subscription:
-    context.log.warning(f"Subscription not found for Stripe invoice: {subscription_id}")
-    return
 
   existing_invoice = (
     db_session.query(BillingInvoice)
@@ -156,9 +207,8 @@ async def _handle_invoice_created(
 
   if existing_invoice:
     context.log.info(f"Invoice already synced from Stripe: {stripe_invoice_id}")
-    return
+    return existing_invoice
 
-  # Use Stripe's invoice number; fall back for drafts which may not have one yet
   stripe_number = invoice_data.get("number")
   invoice_number = stripe_number or f"STRIPE-{stripe_invoice_id[-8:]}"
 
@@ -183,7 +233,6 @@ async def _handle_invoice_created(
   db_session.add(invoice)
   db_session.flush()
 
-  # Sync line items from Stripe
   lines = invoice_data.get("lines", {}).get("data", [])
   for line in lines:
     line_period = line.get("period", {})
@@ -209,16 +258,47 @@ async def _handle_invoice_created(
     f"Synced Stripe invoice {stripe_invoice_id} ({invoice_number}) "
     f"with {len(lines)} line items"
   )
+  return invoice
+
+
+async def _handle_invoice_created(
+  invoice_data: dict, db_session: Any, context: OpExecutionContext
+) -> None:
+  """Handle invoice.created event from Stripe.
+
+  Creates a BillingInvoice from Stripe data, using Stripe's invoice number
+  and syncing all line items from the Stripe invoice.
+  """
+  subscription_id = invoice_data.get("subscription")
+
+  if not subscription_id:
+    context.log.info("Invoice created but no subscription ID")
+    return
+
+  subscription = _find_subscription_by_stripe_id(subscription_id, db_session)
+
+  if not subscription:
+    context.log.warning(
+      f"Subscription not found for Stripe invoice: {subscription_id} "
+      "(will be created when payment_succeeded arrives)"
+    )
+    return
+
+  _create_invoice_from_stripe(invoice_data, subscription, db_session, context)
 
 
 async def _handle_payment_succeeded(
   invoice_data: dict, db_session: Any, context: OpExecutionContext
 ) -> None:
-  """Handle invoice.payment_succeeded event."""
+  """Handle invoice.payment_succeeded event.
+
+  If the invoice record doesn't exist yet (race condition: invoice.created
+  fires before checkout.session.completed updates the subscription's
+  provider_subscription_id), this handler creates it.
+  """
   from robosystems.models.billing import (
     BillingCustomer,
     BillingInvoice,
-    BillingSubscription,
   )
 
   stripe_invoice_id = invoice_data.get("id")
@@ -229,9 +309,7 @@ async def _handle_payment_succeeded(
     context.log.info("Payment succeeded but no subscription ID in invoice")
     return
 
-  subscription = BillingSubscription.get_by_provider_subscription_id(
-    subscription_id, db_session
-  )
+  subscription = _find_subscription_by_stripe_id(subscription_id, db_session)
 
   if not subscription:
     context.log.warning(f"Subscription not found for invoice: {subscription_id}")
@@ -254,7 +332,6 @@ async def _handle_payment_succeeded(
     invoice.paid_at = datetime.now(UTC)
     invoice.payment_method = "stripe"
     invoice.payment_reference = stripe_invoice_id
-    # Update fields that may not have been available at invoice.created time
     invoice.invoice_pdf = invoice_data.get("invoice_pdf") or invoice.invoice_pdf
     invoice.hosted_invoice_url = (
       invoice_data.get("hosted_invoice_url") or invoice.hosted_invoice_url
@@ -263,10 +340,21 @@ async def _handle_payment_succeeded(
 
     context.log.info(f"Marked invoice {invoice.invoice_number} as paid")
   else:
-    context.log.warning(
-      f"Invoice not found for payment_succeeded: {stripe_invoice_id} "
-      "(invoice.created webhook may have been missed)"
+    # invoice.created was missed (race condition) — create it now
+    context.log.info(
+      f"Invoice not found for payment_succeeded: {stripe_invoice_id}, "
+      "creating from payment data"
     )
+    invoice = _create_invoice_from_stripe(
+      invoice_data, subscription, db_session, context
+    )
+    if invoice:
+      invoice.status = "paid"
+      invoice.paid_at = datetime.now(UTC)
+      invoice.payment_method = "stripe"
+      invoice.payment_reference = stripe_invoice_id
+      db_session.commit()
+      context.log.info(f"Created and marked invoice {invoice.invoice_number} as paid")
 
   if subscription.status in ["pending_payment", "provisioning"]:
     await _trigger_resource_provisioning(subscription, db_session, context)
@@ -278,16 +366,12 @@ async def _handle_payment_failed(
   invoice_data: dict, db_session: Any, context: OpExecutionContext
 ) -> None:
   """Handle invoice.payment_failed event."""
-  from robosystems.models.billing import BillingSubscription
-
   subscription_id = invoice_data.get("subscription")
 
   if not subscription_id:
     return
 
-  subscription = BillingSubscription.get_by_provider_subscription_id(
-    subscription_id, db_session
-  )
+  subscription = _find_subscription_by_stripe_id(subscription_id, db_session)
 
   if not subscription:
     context.log.warning(f"Subscription not found for failed payment: {subscription_id}")
