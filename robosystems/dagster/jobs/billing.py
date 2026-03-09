@@ -139,12 +139,16 @@ def _find_subscription_by_stripe_id(
 
 
 def _find_subscription_by_customer(stripe_customer_id: str, db_session: Any) -> Any:
-  """Find the most recent provisioning/pending subscription for a Stripe customer.
+  """Find the most recent subscription for a Stripe customer during checkout.
 
   In Stripe Checkout flow, invoice.created and payment_succeeded webhooks
   arrive with a customer ID but no subscription ID (the subscription is
   created as part of checkout). This finds the subscription by matching
-  the customer's org to recent subscriptions in transitional states.
+  the customer's org to recent subscriptions.
+
+  Includes active status because checkout.session.completed may have already
+  activated the subscription before invoice webhooks are processed. The
+  5-minute recency guard prevents matching older unrelated subscriptions.
   """
   from robosystems.models.billing import BillingCustomer, BillingSubscription
 
@@ -152,11 +156,14 @@ def _find_subscription_by_customer(stripe_customer_id: str, db_session: Any) -> 
   if not customer:
     return None
 
+  recency_cutoff = datetime.now(UTC) - timedelta(minutes=5)
+
   return (
     db_session.query(BillingSubscription)
     .filter(
       BillingSubscription.org_id == customer.org_id,
       BillingSubscription.status.in_(["pending_payment", "provisioning", "active"]),
+      BillingSubscription.created_at >= recency_cutoff,
     )
     .order_by(BillingSubscription.created_at.desc())
     .first()
@@ -215,6 +222,12 @@ def _create_invoice_from_stripe(
 
   db_session.add(invoice)
   db_session.flush()
+
+  if not subscription.resource_id:
+    context.log.warning(
+      f"Subscription {subscription.id} has no resource_id yet "
+      f"(status={subscription.status}) — line items will use empty resource_id"
+    )
 
   lines = invoice_data.get("lines", {}).get("data", [])
   for line in lines:

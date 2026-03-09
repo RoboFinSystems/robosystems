@@ -58,11 +58,7 @@ async def _process_webhook_event(
     elif event_type == "invoice.created":
       await _handle_invoice_created(event_data, db, ctx)
 
-    elif event_type in (
-      "invoice.payment_succeeded",
-      "invoice.paid",
-      "invoice_payment.paid",
-    ):
+    elif event_type in ("invoice.payment_succeeded", "invoice.paid"):
       await _handle_payment_succeeded(event_data, db, ctx)
 
     elif event_type == "invoice.payment_failed":
