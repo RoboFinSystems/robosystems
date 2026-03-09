@@ -98,7 +98,7 @@ def update_credentials(data: dict):
 
 
 def create_sec_subscription(
-  api_key: str, base_url: str, plan_name: str = "sec-starter"
+  api_key: str, base_url: str, plan_name: str = "starter"
 ):
   """Create SEC repository subscription via API."""
   try:
@@ -164,8 +164,8 @@ def main():
   )
   parser.add_argument(
     "--plan",
-    default="sec-starter",
-    help="SEC subscription plan (default: sec-starter)",
+    default="starter",
+    help="SEC subscription plan (default: starter)",
   )
   parser.add_argument(
     "--subscribe-only",
