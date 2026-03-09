@@ -133,6 +133,25 @@ class PaymentProvider(ABC):
     pass
 
   @abstractmethod
+  def change_subscription_price(
+    self,
+    subscription_id: str,
+    new_price_id: str,
+    proration_behavior: str = "create_prorations",
+  ) -> dict[str, Any]:
+    """Change the price on an existing subscription (upgrade/downgrade).
+
+    Args:
+        subscription_id: Provider subscription ID
+        new_price_id: New price ID to switch to
+        proration_behavior: How to handle prorations
+
+    Returns:
+        Updated subscription data
+    """
+    pass
+
+  @abstractmethod
   def create_portal_session(self, customer_id: str, return_url: str) -> str:
     """Create a customer portal session for managing payment methods.
 
@@ -266,15 +285,13 @@ class StripePaymentProvider(PaymentProvider):
   ) -> str:
     """Get or create Stripe price for a plan, with caching and auto-creation.
 
-    This method implements the auto-create pattern:
-    1. Check in-memory cache for existing price ID
-    2. If not cached, search Stripe for existing product
-    3. If not in Stripe, create from billing config
-    4. Cache the result with 24-hour TTL
-    5. Use threading lock to prevent race conditions
+    For graph plans: one Stripe product per plan (ladybug-standard, etc.)
+    For repository plans: one Stripe product per repository with multiple prices.
+      The product is found by the manifest's display name (e.g., "SEC EDGAR Filings")
+      and prices are matched by unit_amount.
 
     Args:
-        plan_name: Internal plan name (e.g., "ladybug-standard", "sec-starter")
+        plan_name: Internal plan name (e.g., "ladybug-standard", "starter")
         resource_type: "graph" or "repository"
         repository_id: Required when resource_type is "repository" (e.g., "sec")
 
@@ -316,76 +333,197 @@ class StripePaymentProvider(PaymentProvider):
       if not plan_config:
         raise ValueError(f"Plan '{plan_name}' not found in billing config")
 
-      search_query = f'metadata["plan_name"]:"{plan_name}" AND metadata["environment"]:"{env.ENVIRONMENT}"'
-      products = self.stripe.Product.search(query=search_query, limit=1)
+      target_amount = plan_config.get(
+        "base_price_cents", plan_config.get("price_cents")
+      )
 
-      if products.data:
-        product = products.data[0]
-        logger.info(f"Found existing Stripe product for {plan_name}: {product.id}")
-
-        prices = self.stripe.Price.list(product=product.id, active=True, limit=1)
-
-        if prices.data:
-          price_id = prices.data[0].id
-          logger.info(f"Found existing Stripe price for {plan_name}: {price_id}")
-        else:
-          logger.warning(
-            f"No active price for product {product.id}, creating new price"
-          )
-          price = self.stripe.Price.create(
-            product=product.id,
-            unit_amount=plan_config.get(
-              "base_price_cents", plan_config.get("price_cents")
-            ),
-            currency="usd",
-            recurring={"interval": "month"},
-          )
-          price_id = price.id
-          logger.info(f"Created new Stripe price for existing product: {price_id}")
+      if resource_type == "repository":
+        price_id = self._get_or_create_repository_price(
+          repository_id, plan_name, plan_config, target_amount
+        )
       else:
-        product_name = plan_config.get("display_name", plan_config.get("name"))
-
-        logger.info(f"Creating new Stripe product for {plan_name}")
-        product = self.stripe.Product.create(
-          name=product_name,
-          description=plan_config.get("description", ""),
-          metadata={
-            "plan_name": plan_name,
-            "resource_type": resource_type,
-            "environment": env.ENVIRONMENT,
-          },
-        )
-
-        price = self.stripe.Price.create(
-          product=product.id,
-          unit_amount=plan_config.get(
-            "base_price_cents", plan_config.get("price_cents")
-          ),
-          currency="usd",
-          recurring={"interval": "month"},
-          metadata={
-            "plan_name": plan_name,
-            "resource_type": resource_type,
-            "environment": env.ENVIRONMENT,
-          },
-        )
-        price_id = price.id
-
-        logger.info(
-          f"Created Stripe product and price for {plan_name}",
-          extra={
-            "plan_name": plan_name,
-            "product_id": product.id,
-            "price_id": price_id,
-            "amount": plan_config.get(
-              "base_price_cents", plan_config.get("price_cents")
-            ),
-          },
+        price_id = self._get_or_create_graph_price(
+          plan_name, plan_config, target_amount
         )
 
       self._price_cache[cache_key] = (price_id, time.time() + 86400)
-
       return price_id
+
+  def _get_or_create_repository_price(
+    self,
+    repository_id: str,
+    plan_name: str,
+    plan_config: dict[str, Any],
+    target_amount: int,
+  ) -> str:
+    """Find or create a price on a single-product-per-repository in Stripe.
+
+    Repositories use one Stripe product (found by manifest name) with a separate
+    price for each plan tier, matched by unit_amount. This enables upgrade/downgrade
+    via Stripe subscription item swap.
+    """
+    from ...config.shared_repositories import get_manifest
+
+    manifest = get_manifest(repository_id)
+    if not manifest:
+      raise ValueError(f"No manifest found for repository '{repository_id}'")
+
+    product_name = manifest.name  # e.g., "SEC EDGAR Filings"
+
+    # Search for existing product by name and environment
+    search_query = (
+      f'name:"{product_name}" AND metadata["environment"]:"{env.ENVIRONMENT}"'
+    )
+    products = self.stripe.Product.search(query=search_query, limit=1)
+
+    if products.data:
+      product = products.data[0]
+      logger.info(f"Found existing Stripe product for {repository_id}: {product.id}")
+    else:
+      # Create new unified product for this repository
+      logger.info(f"Creating new Stripe product for repository {repository_id}")
+      product = self.stripe.Product.create(
+        name=product_name,
+        description=manifest.description,
+        metadata={
+          "repository_id": repository_id,
+          "resource_type": "repository",
+          "environment": env.ENVIRONMENT,
+        },
+      )
+      logger.info(f"Created Stripe product {product.id} for {repository_id}")
+
+    # Find existing price matching the target amount on this product
+    prices = self.stripe.Price.list(product=product.id, active=True, limit=100)
+    for price in prices.data:
+      if price.unit_amount == target_amount and price.recurring:
+        logger.info(
+          f"Found existing price {price.id} ({target_amount} cents) "
+          f"for {repository_id}/{plan_name}"
+        )
+        return price.id
+
+    # No matching price found — create one
+    price = self.stripe.Price.create(
+      product=product.id,
+      unit_amount=target_amount,
+      currency="usd",
+      recurring={"interval": "month"},
+      metadata={
+        "plan_name": plan_name,
+        "repository_id": repository_id,
+        "environment": env.ENVIRONMENT,
+      },
+    )
+    logger.info(
+      f"Created price {price.id} ({target_amount} cents) for {repository_id}/{plan_name}",
+      extra={"product_id": product.id, "price_id": price.id, "amount": target_amount},
+    )
+    return price.id
+
+  def _get_or_create_graph_price(
+    self,
+    plan_name: str,
+    plan_config: dict[str, Any],
+    target_amount: int,
+  ) -> str:
+    """Find or create a price for a graph plan (one product per plan)."""
+    search_query = f'metadata["plan_name"]:"{plan_name}" AND metadata["environment"]:"{env.ENVIRONMENT}"'
+    products = self.stripe.Product.search(query=search_query, limit=1)
+
+    if products.data:
+      product = products.data[0]
+      logger.info(f"Found existing Stripe product for {plan_name}: {product.id}")
+
+      prices = self.stripe.Price.list(product=product.id, active=True, limit=1)
+      if prices.data:
+        return prices.data[0].id
+
+      logger.warning(f"No active price for product {product.id}, creating new price")
+      price = self.stripe.Price.create(
+        product=product.id,
+        unit_amount=target_amount,
+        currency="usd",
+        recurring={"interval": "month"},
+      )
+      return price.id
+
+    product_name = plan_config.get("display_name", plan_config.get("name"))
+    logger.info(f"Creating new Stripe product for {plan_name}")
+    product = self.stripe.Product.create(
+      name=product_name,
+      description=plan_config.get("description", ""),
+      metadata={
+        "plan_name": plan_name,
+        "resource_type": "graph",
+        "environment": env.ENVIRONMENT,
+      },
+    )
+
+    price = self.stripe.Price.create(
+      product=product.id,
+      unit_amount=target_amount,
+      currency="usd",
+      recurring={"interval": "month"},
+      metadata={
+        "plan_name": plan_name,
+        "resource_type": "graph",
+        "environment": env.ENVIRONMENT,
+      },
+    )
+
+    logger.info(
+      f"Created Stripe product and price for {plan_name}",
+      extra={
+        "plan_name": plan_name,
+        "product_id": product.id,
+        "price_id": price.id,
+        "amount": target_amount,
+      },
+    )
+    return price.id
+
+  def change_subscription_price(
+    self,
+    subscription_id: str,
+    new_price_id: str,
+    proration_behavior: str = "create_prorations",
+  ) -> dict[str, Any]:
+    """Change the price on an existing Stripe subscription (upgrade/downgrade).
+
+    Swaps the subscription item to the new price. Both prices must be on the
+    same product (single-product-per-repository pattern).
+
+    Args:
+        subscription_id: Stripe subscription ID
+        new_price_id: New Stripe price ID to switch to
+        proration_behavior: How to handle prorations (default: create_prorations)
+
+    Returns:
+        Updated subscription data
+    """
+    subscription = self.stripe.Subscription.retrieve(subscription_id)
+    current_item = subscription["items"]["data"][0]
+
+    updated = self.stripe.Subscription.modify(
+      subscription_id,
+      items=[
+        {"id": current_item.id, "price": new_price_id},
+      ],
+      proration_behavior=proration_behavior,
+    )
+
+    logger.info(
+      f"Changed subscription {subscription_id} to price {new_price_id}",
+      extra={
+        "subscription_id": subscription_id,
+        "old_price": current_item.price.id,
+        "new_price": new_price_id,
+        "proration_behavior": proration_behavior,
+      },
+    )
+
+    return {"subscription_id": updated.id, "status": updated.status}
 
   def list_payment_methods(self, customer_id: str) -> list[dict[str, Any]]:
     """List payment methods for a Stripe customer."""

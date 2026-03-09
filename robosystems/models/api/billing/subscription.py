@@ -213,5 +213,5 @@ class UpgradeSubscriptionRequest(BaseModel):
   """Request to upgrade a subscription."""
 
   new_plan_name: str = Field(
-    ..., description="New plan name to upgrade to", examples=["sec-professional"]
+    ..., description="New plan name to change to", examples=["advanced"]
   )
