@@ -127,7 +127,7 @@ async def _handle_checkout_completed(
           db_session.query(BillingAuditLog)
           .filter(
             BillingAuditLog.event_data["webhook_type"].astext == "invoice.created",
-            BillingAuditLog.event_data["data"]["id"].astext == stripe_invoice_id,
+            BillingAuditLog.event_data[("data", "id")].astext == stripe_invoice_id,
           )
           .first()
         )

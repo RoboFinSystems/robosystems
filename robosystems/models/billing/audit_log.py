@@ -3,7 +3,8 @@
 from datetime import UTC, datetime
 from enum import Enum
 
-from sqlalchemy import JSON, Column, DateTime, ForeignKey, Index, String
+from sqlalchemy import Column, DateTime, ForeignKey, Index, String
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Session
 
 from ...database import Base
@@ -73,7 +74,7 @@ class BillingAuditLog(Base):
 
   invoice_id = Column(String, ForeignKey("billing_invoices.id"), nullable=True)
 
-  event_data = Column(JSON, nullable=True)
+  event_data = Column(JSONB, nullable=True)
   description = Column(String, nullable=False)
 
   actor_user_id = Column(String, ForeignKey("users.id"), nullable=True)
@@ -238,8 +239,8 @@ class BillingAuditLog(Base):
       .filter(
         and_(
           cls.event_type == BillingEventType.WEBHOOK_RECEIVED.value,
-          cls.event_data.op("->>")("provider") == provider,
-          cls.event_data.op("->>")("event_id") == event_id,
+          cls.event_data["provider"].astext == provider,
+          cls.event_data["event_id"].astext == event_id,
         )
       )
       .first()
