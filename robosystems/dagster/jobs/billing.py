@@ -222,8 +222,8 @@ def _create_invoice_from_stripe(
     line_item = BillingInvoiceLineItem(
       invoice_id=invoice.id,
       subscription_id=subscription.id,
-      resource_type=subscription.resource_type,
-      resource_id=subscription.resource_id,
+      resource_type=subscription.resource_type or "unknown",
+      resource_id=subscription.resource_id or "",
       description=line.get("description") or subscription.plan_name,
       quantity=line.get("quantity", 1),
       unit_price_cents=line.get("unit_amount_excluding_tax") or line.get("amount", 0),
@@ -562,12 +562,18 @@ async def _handle_subscription_updated(
 
   # --- Portal cancellation (cancel_at_period_end) ---
   # Mirrors the UI cancel: mark canceled, keep access until period end
-  if cancel_at_period_end and subscription.status != "canceled":
-    subscription.cancel(db_session, immediate=False)
-    context.log.info(
-      f"Subscription {subscription.id} canceled via Stripe portal "
-      f"(ends at period end: {subscription.ends_at})"
-    )
+  if cancel_at_period_end:
+    if subscription.status != "canceled":
+      subscription.cancel(db_session, immediate=False)
+      context.log.info(
+        f"Subscription {subscription.id} canceled via Stripe portal "
+        f"(ends at period end: {subscription.ends_at})"
+      )
+    else:
+      context.log.info(
+        f"Subscription {subscription.id} already canceled locally, "
+        f"ignoring cancel_at_period_end update from Stripe"
+      )
     return
 
   # --- Portal reactivation (user removed pending cancellation) ---
@@ -655,9 +661,15 @@ async def _handle_subscription_deleted(
 
   if subscription.status == "canceled":
     # Already canceled (via portal updated handler or UI cancel button).
-    # Just ensure access terminates now; preserve original canceled_at timestamp.
+    # Preserve original canceled_at timestamp. Use Stripe's period end if
+    # the user paid for the current period, otherwise terminate now.
     now = datetime.now(UTC)
-    subscription.ends_at = now
+    period_end_ts = subscription_data.get("current_period_end")
+    if period_end_ts:
+      period_end = datetime.fromtimestamp(period_end_ts, tz=UTC)
+      subscription.ends_at = period_end if period_end > now else now
+    else:
+      subscription.ends_at = now
     subscription.updated_at = now
     db_session.commit()
     context.log.info(
