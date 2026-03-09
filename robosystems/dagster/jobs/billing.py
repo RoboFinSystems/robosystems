@@ -108,49 +108,6 @@ async def _handle_checkout_completed(
 
     context.log.info(f"Payment collected for org {customer.org_id}")
 
-    # Backfill invoice if invoice.created/payment_succeeded arrived before
-    # this handler set the provider_subscription_id (race condition).
-    # The checkout session includes the Stripe invoice ID — look it up
-    # from the audit log where the invoice webhook data was stored.
-    stripe_invoice_id = session_data.get("invoice")
-    if stripe_invoice_id and stripe_subscription_id:
-      from robosystems.models.billing import BillingAuditLog, BillingInvoice
-
-      existing = (
-        db_session.query(BillingInvoice)
-        .filter(BillingInvoice.stripe_invoice_id == stripe_invoice_id)
-        .first()
-      )
-      if not existing:
-        # Find the invoice data from the earlier webhook audit log
-        audit = (
-          db_session.query(BillingAuditLog)
-          .filter(
-            BillingAuditLog.event_data["webhook_type"].astext == "invoice.created",
-            BillingAuditLog.event_data[("data", "id")].astext == stripe_invoice_id,
-          )
-          .first()
-        )
-        if audit and audit.event_data.get("data"):
-          invoice = _create_invoice_from_stripe(
-            audit.event_data["data"], subscription, db_session, context
-          )
-          if invoice:
-            # Check if it was already paid
-            stripe_status = audit.event_data["data"].get("status")
-            if stripe_status == "paid":
-              invoice.status = "paid"
-              invoice.paid_at = datetime.now(UTC)
-              invoice.payment_method = "stripe"
-              invoice.payment_reference = stripe_invoice_id
-              db_session.commit()
-            context.log.info(f"Backfilled invoice {stripe_invoice_id} from audit log")
-        else:
-          context.log.info(
-            f"Invoice {stripe_invoice_id} audit log not found, "
-            "will be synced on next invoice event"
-          )
-
     # Trigger provisioning via sensor (set status to provisioning)
     await _trigger_resource_provisioning(subscription, db_session, context)
 
@@ -178,6 +135,31 @@ def _find_subscription_by_stripe_id(
 
   return BillingSubscription.get_by_stripe_subscription_id(
     stripe_subscription_id, db_session
+  )
+
+
+def _find_subscription_by_customer(stripe_customer_id: str, db_session: Any) -> Any:
+  """Find the most recent provisioning/pending subscription for a Stripe customer.
+
+  In Stripe Checkout flow, invoice.created and payment_succeeded webhooks
+  arrive with a customer ID but no subscription ID (the subscription is
+  created as part of checkout). This finds the subscription by matching
+  the customer's org to recent subscriptions in transitional states.
+  """
+  from robosystems.models.billing import BillingCustomer, BillingSubscription
+
+  customer = BillingCustomer.get_by_stripe_customer_id(stripe_customer_id, db_session)
+  if not customer:
+    return None
+
+  return (
+    db_session.query(BillingSubscription)
+    .filter(
+      BillingSubscription.org_id == customer.org_id,
+      BillingSubscription.status.in_(["pending_payment", "provisioning", "active"]),
+    )
+    .order_by(BillingSubscription.created_at.desc())
+    .first()
   )
 
 
@@ -269,19 +251,29 @@ async def _handle_invoice_created(
 
   Creates a BillingInvoice from Stripe data, using Stripe's invoice number
   and syncing all line items from the Stripe invoice.
+
+  In Stripe Checkout flow, the invoice arrives without a subscription ID
+  because the subscription is created as part of checkout. We fall back to
+  matching by customer ID in that case.
   """
   subscription_id = invoice_data.get("subscription")
+  customer_id = invoice_data.get("customer")
 
-  if not subscription_id:
-    context.log.info("Invoice created but no subscription ID")
-    return
+  subscription = None
+  if subscription_id:
+    subscription = _find_subscription_by_stripe_id(subscription_id, db_session)
 
-  subscription = _find_subscription_by_stripe_id(subscription_id, db_session)
+  if not subscription and customer_id:
+    subscription = _find_subscription_by_customer(customer_id, db_session)
+    if subscription:
+      context.log.info(
+        f"Matched invoice to subscription {subscription.id} via customer {customer_id}"
+      )
 
   if not subscription:
     context.log.warning(
-      f"Subscription not found for Stripe invoice: {subscription_id} "
-      "(will be created when payment_succeeded arrives)"
+      f"Subscription not found for Stripe invoice "
+      f"(subscription={subscription_id}, customer={customer_id})"
     )
     return
 
@@ -306,14 +298,22 @@ async def _handle_payment_succeeded(
   subscription_id = invoice_data.get("subscription")
   customer_id = invoice_data.get("customer")
 
-  if not subscription_id:
-    context.log.info("Payment succeeded but no subscription ID in invoice")
-    return
+  subscription = None
+  if subscription_id:
+    subscription = _find_subscription_by_stripe_id(subscription_id, db_session)
 
-  subscription = _find_subscription_by_stripe_id(subscription_id, db_session)
+  if not subscription and customer_id:
+    subscription = _find_subscription_by_customer(customer_id, db_session)
+    if subscription:
+      context.log.info(
+        f"Matched payment to subscription {subscription.id} via customer {customer_id}"
+      )
 
   if not subscription:
-    context.log.warning(f"Subscription not found for invoice: {subscription_id}")
+    context.log.warning(
+      f"Subscription not found for payment "
+      f"(subscription={subscription_id}, customer={customer_id})"
+    )
     return
 
   customer = BillingCustomer.get_by_stripe_customer_id(customer_id, db_session)

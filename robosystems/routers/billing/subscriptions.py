@@ -69,7 +69,14 @@ async def list_subscriptions(
 
     subscriptions = (
       db.query(BillingSubscription)
-      .filter(BillingSubscription.org_id == org_id)
+      .filter(
+        BillingSubscription.org_id == org_id,
+        # Exclude orphaned subscriptions that never completed provisioning
+        ~(
+          BillingSubscription.status.in_(["canceled", "failed"])
+          & BillingSubscription.resource_id.is_(None)
+        ),
+      )
       .order_by(BillingSubscription.created_at.desc())
       .all()
     )
