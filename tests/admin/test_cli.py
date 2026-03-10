@@ -259,8 +259,8 @@ class TestSubscriptionsCommands:
         "list",
         "--status",
         "ACTIVE",
-        "--tier",
-        "ladybug-large",
+        "--email",
+        "user@test.com",
       ],
     )
     assert result.exit_code == 0
@@ -270,8 +270,8 @@ class TestSubscriptionsCommands:
       params={
         "limit": 100,
         "include_canceled": False,
-        "status": "ACTIVE",
-        "tier": "ladybug-large",
+        "status_filter": "active",
+        "user_email": "user@test.com",
       },
     )
 

@@ -79,12 +79,10 @@ async def list_invoices(
           period_start=invoice.period_start,
           period_end=invoice.period_end,
           due_date=invoice.due_date,
-          payment_terms=invoice.payment_terms,
           payment_method=invoice.payment_method,
           payment_reference=invoice.payment_reference,
           sent_at=invoice.sent_at,
           paid_at=invoice.paid_at,
-          voided_at=invoice.voided_at,
           created_at=invoice.created_at,
           line_items=[
             InvoiceLineItemResponse(
@@ -175,12 +173,10 @@ async def get_invoice(
       period_start=invoice.period_start,
       period_end=invoice.period_end,
       due_date=invoice.due_date,
-      payment_terms=invoice.payment_terms,
       payment_method=invoice.payment_method,
       payment_reference=invoice.payment_reference,
       sent_at=invoice.sent_at,
       paid_at=invoice.paid_at,
-      voided_at=invoice.voided_at,
       created_at=invoice.created_at,
       line_items=[
         InvoiceLineItemResponse(
@@ -271,12 +267,10 @@ async def mark_invoice_paid(
       period_start=invoice.period_start,
       period_end=invoice.period_end,
       due_date=invoice.due_date,
-      payment_terms=invoice.payment_terms,
       payment_method=invoice.payment_method,
       payment_reference=invoice.payment_reference,
       sent_at=invoice.sent_at,
       paid_at=invoice.paid_at,
-      voided_at=invoice.voided_at,
       created_at=invoice.created_at,
       line_items=[
         InvoiceLineItemResponse(
