@@ -109,8 +109,8 @@ on:
         required: false
         type: string
         default: "false"
-      spot_base:
-        description: "Minimum number of on-demand instances (never Spot)"
+      od_base:
+        description: "Minimum number of on-demand instances (never Spot, guaranteed capacity)"
         required: false
         type: string
         default: "0"
@@ -119,16 +119,6 @@ on:
         required: false
         type: string
         default: "0"
-      spot_strategy:
-        description: "Spot instance allocation strategy"
-        required: false
-        type: string
-        default: "price-capacity-optimized"
-      spot_rebalance:
-        description: "Proactive replacement of Spot instances at elevated risk of interruption"
-        required: false
-        type: string
-        default: "true"
 
       # Docker Configuration
       ecr_image_tag:
@@ -338,7 +328,7 @@ jobs:
             echo "is_new_stack=false" >> $GITHUB_OUTPUT
           fi
 
-          # Convert Spot weight (% Spot) to on-demand percentage (ASG API uses on-demand %)
+          # Convert Spot percentage to on-demand percentage (ASG API uses on-demand %)
           SPOT_ON_DEMAND_PCT=$((100 - ${{ inputs.spot_weight }}))
 
           # Build parameters
@@ -368,10 +358,8 @@ jobs:
             ParameterKey=DatabaseEndpoint,ParameterValue=${{ inputs.database_endpoint }} \
             ParameterKey=DatabasePort,ParameterValue=${{ inputs.database_port }} \
             ParameterKey=SpotEnabled,ParameterValue=${{ inputs.spot_enabled }} \
-            ParameterKey=SpotOnDemandBaseCapacity,ParameterValue=${{ inputs.spot_base }} \
+            ParameterKey=SpotOnDemandBaseCapacity,ParameterValue=${{ inputs.od_base }} \
             ParameterKey=SpotOnDemandPercentageAboveBase,ParameterValue=${SPOT_ON_DEMAND_PCT} \
-            ParameterKey=SpotAllocationStrategy,ParameterValue=${{ inputs.spot_strategy }} \
-            ParameterKey=SpotCapacityRebalance,ParameterValue=${{ inputs.spot_rebalance }} \
             ParameterKey=SNSAlertEmail,ParameterValue=${{ inputs.aws_sns_alert_email }} \
             ParameterKey=ServiceTag,ParameterValue=RoboSystems \
             ParameterKey=ComponentTag,ParameterValue=SharedReplica"
