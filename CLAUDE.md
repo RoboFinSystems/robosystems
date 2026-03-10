@@ -40,8 +40,8 @@ just start                 # Start full Docker stack
 just restart               # Quick restart (Python code changes only)
 just rebuild               # Full rebuild (dependency/Dockerfile changes)
 just test                  # Run tests (excludes slow/integration)
-just logs api              # View API logs
-just logs dagster-daemon   # View Dagster daemon logs
+just logs container=api              # View API logs
+just logs container=dagster-daemon   # View Dagster daemon logs
 ```
 
 ### Code Quality
@@ -50,7 +50,7 @@ just logs dagster-daemon   # View Dagster daemon logs
 just lint fix              # Fix linting issues
 just format                # Format code
 just typecheck             # Type checking
-just test-all              # Full test suite with all checks
+just test-all              # Full suite with all checks
 ```
 
 ### Database Operations
@@ -88,185 +88,13 @@ just demo-custom-graph     # Run custom graph demo
 just demo-sec NVDA 2025    # Run SEC demo
 ```
 
-## Architecture Overview
+## Code Standards
 
-```
-robosystems/
-├── routers/           # API endpoints (thin layer, calls operations)
-├── operations/        # Business logic orchestration
-│   ├── graph/         # Graph services (credit, entity, subscription)
-│   └── lbug/          # LadybugDB operations (backup, ingest)
-├── middleware/        # Cross-cutting concerns
-│   ├── auth/          # Authentication (JWT, API keys, SSO)
-│   ├── billing/       # Credit consumption tracking
-│   ├── graph/         # Graph routing and multi-tenancy
-│   └── rate_limits/   # Burst protection
-├── dagster/           # Dagster orchestration
-│   ├── jobs/          # Job definitions (billing, infrastructure, SEC)
-│   ├── sensors/       # Event-driven triggers
-│   ├── assets/        # Data pipeline assets
-│   └── resources/     # Dagster resources (DB, S3, Graph)
-├── adapters/          # External service integrations (SEC, QuickBooks)
-├── models/
-│   ├── api/           # Pydantic request/response models
-│   └── iam/           # SQLAlchemy database models
-├── config/            # Centralized configuration
-├── schemas/           # Graph schema definitions
-└── graph_api/         # Graph API microservice
-```
-
-### Key Architectural Patterns
-
-1. **Operations orchestrate, adapters integrate**: Operations coordinate business logic; adapters handle external service integration and data transformation
-2. **Multi-tenant by design**: All graph operations are scoped to `graph_id`
-3. **Credit-based AI billing**: Only AI operations (Anthropic/OpenAI) consume credits; database operations are free
-4. **Pluggable graph backend**: LadybugDB (default) or Neo4j via `GRAPH_BACKEND_TYPE`
-
-## Environment Configuration
-
-### Dual .env Pattern
-
-- **`.env`**: Container hostnames for Docker services (e.g., `postgres:5432`)
-  - Used by: Docker Compose, containers communicating with each other
-- **`.env.local`**: Localhost URLs for host commands (e.g., `localhost:5432`)
-  - Used by: Justfile recipes, local scripts, migrations run on host
-
-Both are auto-created from `.example` templates by `just start` or `just init`.
-
-**When to edit which:**
-- Adding secrets/credentials → Update both files
-- Changing service ports → Update both files
-- Local overrides only → Update `.env.local` only
-
-### Key Environment Variables
-
-```bash
-# Core
-ENVIRONMENT=dev|staging|prod
-DATABASE_URL=postgresql://...
-VALKEY_URL=redis://...
-
-# Graph API
-GRAPH_API_URL=http://localhost:8001
-GRAPH_BACKEND_TYPE=ladybug|neo4j_community
-LBUG_DATABASE_PATH=/data/lbug-dbs
-
-# Feature Flags
-ENABLE_RATE_LIMITING=true
-ENABLE_CREDITS=true
-```
-
-## Configuration System (`/robosystems/config/`)
-
-All configuration is centralized and config-as-code:
-
-| Module                  | Purpose                                        |
-| ----------------------- | ---------------------------------------------- |
-| `env.py`                | Environment variables with validation          |
-| `shared_repositories.py`| Shared repository registry, plans, and rate limits |
-| `billing/`              | Subscription plans and pricing (core, ai, storage) |
-| `graph_tier.py`         | Graph tier config from `.github/configs/graph.yml` |
-| `rate_limits.py`        | Burst-focused rate limiting (1-minute windows) |
-| `credits.py`            | AI operation credit costs                      |
-| `agents.py`             | Claude model configuration (Bedrock)           |
-| `validation.py`         | Startup configuration checks                   |
-| `valkey_registry.py`    | Redis database allocation                      |
-| `storage/`              | S3 path helpers (shared data, graph storage)   |
-
-### Subscription Tiers
-
-| Tier              | Credits/Month | Max Subgraphs | API Rate Multiplier |
-| ----------------- | ------------- | ------------- | ------------------- |
-| ladybug-standard  | 8,000         | 3             | 1.0x                |
-| ladybug-large     | 32,000        | 10            | 2.5x                |
-| ladybug-xlarge    | 100,000       | 25            | 5.0x                |
-
-### Credit System
-
-- **AI Operations**: Token-based billing (Anthropic/OpenAI in-house agents only)
-- **MCP Tool Access**: Unlimited (no credits for external tool calls)
-- **Database Operations**: 100% included (queries, backups, imports - no credits)
-- **Storage**: Separate optional billing (not credits)
-
-### Valkey/Redis Database Allocation
-
-```python
-from robosystems.config.valkey_registry import ValkeyDatabase, ValkeyURLBuilder
-
-# Always use the registry, never hardcode database numbers
-redis_url = ValkeyURLBuilder.build_url(env.VALKEY_URL, ValkeyDatabase.AUTH)
-```
-
-Database numbers: 0=Auth, 1=Rate limits, 2=Graph routing, 3=SSE, 4=Locks, 5-15=Available
-
-## Testing
-
-### Test Commands
-
-```bash
-just test                  # Unit tests (fast, no external deps)
-just test routers          # Run tests at /tests/routers
-just test-integration      # Integration tests
-just test-cov              # Coverage report
-just test-all              # Full suite with linting/formatting
-```
-
-### Bash Timeouts
-
-Always use `timeout: 600000` (10 minutes) on Bash tool calls for `just test-all`, `just test`, and other test commands. The default 2-minute Bash timeout is too short for the full suite. CI has a 10-minute limit for the test step.
-
-### Test Markers
-
-```python
-@pytest.mark.unit          # Fast, isolated
-@pytest.mark.integration   # May use databases
-@pytest.mark.slow          # Long-running
-@pytest.mark.security      # Security-focused
-```
-
-### Long-Running Tests
-
-For tests exceeding the default pytest timeout, use the `@pytest.mark.timeout` decorator:
-
-```python
-@pytest.mark.timeout(300)  # 5 minutes
-@pytest.mark.slow
-def test_long_running_operation():
-    pass
-```
-
-Or configure in `pytest.ini` for specific test paths.
-
-## Graph API
-
-### Backends
-
-- **LadybugDB** (default): Embedded columnar graph database
-- **Neo4j Community**: Client-server with Bolt protocol
-
-### Key Endpoints
-
-```http
-POST /databases                           # Create database
-POST /databases/{graph_id}/query          # Execute Cypher
-POST /databases/{graph_id}/tables         # Create staging table
-POST /databases/{graph_id}/tables/query   # Query staging (SQL)
-POST /databases/{graph_id}/tables/{name}/materialize  # Materialize to graph
-GET  /health                              # Health check
-```
-
-### LadybugDB Limitations
-
-- Sequential ingestion (one file at a time per database)
-- Maximum 3 concurrent connections per database
-- Single writer per database at a time
-
-### Subgraphs (Dedicated Tiers Only)
-
-- **Tiers**: ladybug-large (10 max), ladybug-xlarge (25 max)
-- **Naming**: Alphanumeric only, 1-20 chars (no hyphens/underscores)
-- **ID Format**: `{parent_graph_id}_{subgraph_name}` (e.g., `kg123_dev`)
-- **Features**: Shared credit pool, shared permissions, isolated data
+- **Python 3.13** with uv package management
+- **Ruff** formatting (88-char lines, double quotes)
+- **basedpyright** for type checking
+- **Self-documenting code**: Prefer clear names over comments; add comments only for non-obvious logic
+- **Emojis**: Only in interactive scripts (`/examples/`), never in production code or logs
 
 ## Common Patterns
 
@@ -302,13 +130,163 @@ if await credit_service.has_sufficient_credits("operation"):
 2. Generate migration: `just migrate-create "description"`
 3. Review and run: `just migrate-up`
 
-## Code Standards
+## Architecture Overview
 
-- **Python 3.13** with uv package management
-- **Ruff** formatting (88-char lines, double quotes)
-- **basedpyright** for type checking
-- **Self-documenting code**: Prefer clear names over comments; add comments only for non-obvious logic
-- **Emojis**: Only in interactive scripts (`/examples/`), never in production code or logs
+```
+robosystems/
+├── routers/           # API endpoints (thin layer, calls operations)
+├── operations/        # Business logic orchestration
+│   ├── graph/         # Graph services (credit, entity, subscription)
+│   ├── lbug/          # LadybugDB operations (backup, ingest)
+│   ├── agents/        # AI agent operations
+│   ├── providers/     # Provider registry and implementations
+│   └── views/         # Data view operations
+├── middleware/        # Cross-cutting concerns
+│   ├── auth/          # Authentication (JWT, API keys, SSO)
+│   ├── billing/       # Credit consumption tracking
+│   ├── graph/         # Graph routing and multi-tenancy
+│   ├── rate_limits/   # Burst protection
+│   ├── sse/           # Server-Sent Events
+│   └── ...            # mcp, otel, robustness
+├── dagster/           # Dagster orchestration (jobs, sensors, assets, resources)
+├── adapters/          # External service integrations (SEC, QuickBooks)
+├── admin/             # Admin CLI and utilities
+├── security/          # Security controls (audit, auth protection, encryption)
+├── models/
+│   ├── api/           # Pydantic request/response models
+│   ├── billing/       # Billing models
+│   └── iam/           # SQLAlchemy database models
+├── config/            # Centralized configuration (see config/README.md)
+├── schemas/           # Graph schema definitions
+└── graph_api/         # Graph API microservice
+```
+
+### Key Architectural Patterns
+
+1. **Operations orchestrate, adapters integrate**: Operations coordinate business logic; adapters handle external service integration and data transformation
+2. **Multi-tenant by design**: All graph operations are scoped to `graph_id`
+3. **Credit-based AI billing**: Only AI operations (Anthropic/OpenAI) consume credits; database operations are free
+4. **Pluggable graph backend**: LadybugDB (default) or Neo4j via `GRAPH_BACKEND_TYPE`
+
+## Testing
+
+### Test Commands
+
+```bash
+just test                  # Unit tests (fast, no external deps)
+just test routers          # Run tests at /tests/routers
+just test-integration      # Integration tests
+just test-cov              # Coverage report
+just test-all              # Full suite with all checks
+```
+
+### Bash Timeouts
+
+Always use `timeout: 600000` (10 minutes) on Bash tool calls for `just test-all`, `just test`, and other test commands. The default 2-minute Bash timeout is too short for the full suite. CI has a 10-minute limit for the test step.
+
+### Test Markers
+
+```python
+@pytest.mark.unit          # Fast, isolated
+@pytest.mark.integration   # May use databases
+@pytest.mark.slow          # Long-running
+@pytest.mark.security      # Security-focused
+```
+
+### Long-Running Tests
+
+For tests exceeding the default pytest timeout, use the `@pytest.mark.timeout` decorator:
+
+```python
+@pytest.mark.timeout(300)  # 5 minutes
+@pytest.mark.slow
+def test_long_running_operation():
+    pass
+```
+
+Or configure in `pytest.ini` for specific test paths.
+
+## Environment Configuration
+
+### Dual .env Pattern
+
+- **`.env`**: Container hostnames for Docker services (e.g., `postgres:5432`)
+  - Used by: Docker Compose, containers communicating with each other
+- **`.env.local`**: Localhost URLs for host commands (e.g., `localhost:5432`)
+  - Used by: Justfile recipes, local scripts, migrations run on host
+
+Both are auto-created from `.example` templates by `just start` or `just init`.
+
+**When to edit which:**
+- Adding secrets/credentials → Update both files
+- Changing service ports → Update both files
+- Local overrides only → Update `.env.local` only
+
+### Key Environment Variables
+
+```bash
+# Core
+ENVIRONMENT=dev|staging|prod
+DATABASE_URL=postgresql://...
+VALKEY_URL=redis://...
+
+# Graph API
+GRAPH_API_URL=http://localhost:8001
+GRAPH_BACKEND_TYPE=ladybug|neo4j_community
+LBUG_DATABASE_PATH=/data/lbug-dbs
+
+# Feature Flags
+RATE_LIMIT_ENABLED=true
+BILLING_ENABLED=true
+```
+
+## Configuration System
+
+All configuration is centralized in `/robosystems/config/`. See `config/README.md` for full details.
+
+| Module                  | Purpose                                        |
+| ----------------------- | ---------------------------------------------- |
+| `env.py`                | Environment variables with validation          |
+| `shared_repositories.py`| Shared repository registry and manifests       |
+| `billing/`              | Subscription plans and pricing                 |
+| `graph_tier.py`         | Graph tier config from `.github/configs/graph.yml` |
+| `rate_limits.py`        | Burst-focused rate limiting (1-minute windows) |
+| `credits.py`            | AI operation credit costs                      |
+| `agents.py`             | Claude model configuration (Bedrock)           |
+| `validation.py`         | Startup configuration checks                   |
+| `valkey_registry.py`    | Valkey database allocation (never hardcode DB numbers) |
+| `storage/`              | S3 path helpers (shared data, graph storage)   |
+
+## Graph API
+
+### Backends
+
+- **LadybugDB** (default): Embedded columnar graph database
+- **Neo4j Community**: Client-server with Bolt protocol
+
+### Key Endpoints
+
+```http
+POST /databases                           # Create database
+POST /databases/{graph_id}/query          # Execute Cypher
+POST /databases/{graph_id}/tables         # Create staging table
+POST /databases/{graph_id}/tables/query   # Query staging (SQL)
+POST /databases/{graph_id}/tables/{name}/materialize  # Materialize to graph
+GET  /health                              # Health check
+```
+
+### LadybugDB Limitations
+
+- Sequential ingestion (one file at a time per database)
+- Connection pool size configurable (default 3, production config 10)
+- Single writer per database at a time
+
+### Subgraphs
+
+- **Tiers**: ladybug-standard (3 max), ladybug-large (10 max), ladybug-xlarge (25 max)
+- **Naming**: Alphanumeric only, 1-20 chars (no hyphens/underscores)
+- **ID Format**: `{parent_graph_id}_{subgraph_name}` (e.g., `kg123_dev`)
+- **Features**: Shared credit pool, shared permissions, isolated data
 
 ## Troubleshooting
 
@@ -317,8 +295,8 @@ if await credit_service.has_sufficient_credits("operation"):
 ```bash
 just restart               # Code changes not picked up
 just rebuild               # Dependency changes not working
-just logs api              # Check API logs
-just logs-grep worker ERROR  # Search worker logs
+just logs container=api              # Check API logs
+just logs-grep container=worker pattern=ERROR  # Search worker logs
 ```
 
 ### Database Issues
@@ -336,18 +314,37 @@ just graph-health          # Check Graph API
 just graph-info GRAPH_ID   # Database info
 ```
 
-### Cache/Queue Issues
+### Cache Issues
 
 ```bash
-just valkey-list-queue QUEUE  # List queue contents
-just valkey-clear-queue QUEUE # Clear queue
+just admin dev cache info               # View all cache databases
+just admin dev cache info auth          # View specific database
+just admin dev cache keys auth --pattern "apikey:*"  # List matching keys
+just admin dev cache flush auth         # Flush single database
+```
+
+## Admin CLI
+
+```bash
+just admin dev stats                         # System stats
+just admin dev customers list                # List customers
+just admin dev subscriptions list            # List subscriptions
+just admin dev subscriptions audit SUB_ID    # Audit subscription
+just admin dev invoices list                 # List invoices
+just admin dev credits list                  # List credit allocations
+just admin dev credits add-bonus GRAPH_ID    # Grant bonus credits
+just admin dev credits analytics             # Credit usage analytics
+just admin dev instances list                # List graph instances
+just admin dev instances scale TIER DESIRED  # Scale ASG
+just admin dev cache info                    # View all cache databases
+just admin dev cache flush auth              # Flush single database
 ```
 
 ## CI/CD
 
-- **GitHub-hosted runners** (default): Free for public repos, used for tests, builds, and deployments
+- **GitHub-hosted runners** (default): Used for tests, builds, and deployments
 - **Self-hosted runners** (optional): Set `RUNNER_LABELS` repo variable to use self-hosted runners
-- **Branches**: `staging` → staging, `main` → production
+- **Deployments**: Manual workflow dispatch via `staging.yml` and `prod.yml`
 - **Infrastructure Config**: `.github/configs/graph.yml`
 
 ## AWS Infrastructure
@@ -360,6 +357,37 @@ just valkey-clear-queue QUEUE # Clear queue
 | Cache       | ElastiCache       | Valkey-compatible              |
 
 Instance sizes and capacity are managed via GitHub Actions variables (`just gha-list`) and vary between staging and production.
+
+## GitHub Actions Variables
+
+```bash
+just gha-list                          # List all variables
+just gha-list SHARED_REPLICAS          # Filter by pattern (case-insensitive)
+just gha-get SHARED_REPLICAS_INSTANCE_WARMUP_PROD  # Get single variable
+just gha-set SHARED_REPLICAS_INSTANCE_WARMUP_PROD 900  # Set variable
+just gha-delete SOME_OLD_VARIABLE      # Delete variable
+```
+
+Variables follow the naming convention `COMPONENT_SETTING_ENVIRONMENT` (e.g., `SHARED_REPLICAS_INSTANCE_WARMUP_PROD`). Run `just setup-gha` to initialize all variables with defaults.
+
+## SSM Parameters
+
+```bash
+just ssm-list prod features            # List feature flags
+just ssm-list prod tuning              # List tuning parameters
+just ssm-get prod features/mcp-memory  # Get single parameter
+just ssm-set prod features/mcp-memory true   # Set parameter
+just ssm-delete prod features/old-flag       # Delete parameter
+```
+
+Parameters are stored at `/robosystems/{env}/{category}/{name}` in SSM Parameter Store. Unlike GitHub variables (which require redeployment), SSM parameters take effect immediately at runtime.
+
+## Secret Management
+
+- **AWS Secrets Manager Base**: `robosystems/{staging|prod}`
+- **Components**: `robosystems/{staging|prod}/{postgres|valkey|admin|graph-api}`
+- Monthly rotation via GitHub Actions (`secrets-rotation.yml`) using Lambda functions
+- Never commit secrets to code
 
 ## Key READMEs
 
@@ -376,55 +404,3 @@ Before working in a directory, read its README:
 - `/robosystems/models/iam/README.md` - Database models
 - `/tests/README.md` - Testing guide
 - `/examples/README.md` - Demo scripts
-
-## Admin CLI
-
-```bash
-just admin dev stats                    # System stats
-just admin dev customers list           # List customers
-just admin dev subscriptions list       # List subscriptions
-just admin dev credits grant USER AMT   # Grant bonus credits
-
-# Cache Management
-just admin dev cache info               # View all cache databases
-just admin dev cache info auth          # View specific database
-just admin dev cache keys auth --pattern "apikey:*"  # List matching keys
-just admin dev cache delete-keys auth --pattern "old:*"  # Delete matching keys
-just admin dev cache flush auth         # Flush single database
-just admin dev cache flush all -y       # Flush all databases (skip confirmation)
-```
-
-## GitHub Actions Variables
-
-Manage CI/CD configuration variables (non-sensitive, stored in GitHub):
-
-```bash
-just gha-list                          # List all variables
-just gha-list SHARED_REPLICAS          # Filter by pattern (case-insensitive)
-just gha-list _PROD                    # List all prod variables
-just gha-get SHARED_REPLICAS_INSTANCE_WARMUP_PROD  # Get single variable
-just gha-set SHARED_REPLICAS_INSTANCE_WARMUP_PROD 900  # Set variable
-just gha-delete SOME_OLD_VARIABLE      # Delete variable
-```
-
-Variables follow the naming convention `COMPONENT_SETTING_ENVIRONMENT` (e.g., `SHARED_REPLICAS_INSTANCE_WARMUP_PROD`). Run `just setup-gha` to initialize all variables with defaults.
-
-## SSM Parameters
-
-Manage AWS Systems Manager parameters for runtime feature flags and tuning:
-
-```bash
-just ssm-list prod features            # List feature flags
-just ssm-list prod tuning              # List tuning parameters
-just ssm-get prod features/mcp-memory  # Get single parameter
-just ssm-set prod features/mcp-memory true   # Set parameter
-just ssm-delete prod features/old-flag       # Delete parameter
-```
-
-Parameters are stored at `/robosystems/{env}/{category}/{name}` in SSM Parameter Store. Unlike GitHub variables (which require redeployment), SSM parameters take effect immediately at runtime.
-
-## Secret Management
-
-- **AWS Secrets Manager Base**: `robosystems/{staging|prod}`
-- **Components**: `robosystems/{staging|prod}/{postgres|s3|ladybug}`
-- Never commit secrets to code
