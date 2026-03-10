@@ -85,7 +85,7 @@ uv run dagster asset materialize -m robosystems.dagster \
 
 Publish databases to S3 for the replica fleet and vector search:
 
-- `sec_lbug_s3_published` — LadybugDB .lbug file for replica S3 ATTACH
+- `sec_lbug_s3_published` — LadybugDB .lbug file for replica fleet
 - `sec_duckdb_s3_published` — DuckDB .duckdb file for embedding/vector search
 - `sec_lbug_r2_published` — R2 copy for zero-egress subscriber downloads (manual/weekly)
 

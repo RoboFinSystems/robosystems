@@ -177,7 +177,7 @@ All configuration is centralized and config-as-code:
 
 | Tier              | Credits/Month | Max Subgraphs | API Rate Multiplier |
 | ----------------- | ------------- | ------------- | ------------------- |
-| ladybug-standard  | 8,000         | 0             | 1.0x                |
+| ladybug-standard  | 8,000         | 3             | 1.0x                |
 | ladybug-large     | 32,000        | 10            | 2.5x                |
 | ladybug-xlarge    | 100,000       | 25            | 5.0x                |
 

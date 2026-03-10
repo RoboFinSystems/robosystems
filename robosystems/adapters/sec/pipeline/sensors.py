@@ -537,7 +537,7 @@ def sec_stage_to_materialize_sensor(context: RunStatusSensorContext):
 #   materialize → lbug S3 publish → duckdb S3 publish
 #
 # Sequential to avoid overloading the instance with concurrent uploads.
-# LadybugDB publish serves the replica fleet (S3 ATTACH).
+# LadybugDB publish serves the replica fleet (downloaded to local disk on boot).
 # DuckDB publish serves vector search (embedding columns for MCP tools).
 # Replica refresh cycles instances to pick up new S3 databases.
 
