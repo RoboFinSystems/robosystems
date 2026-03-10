@@ -16,7 +16,7 @@ from .configs import SECMaterializeConfig
   group_name="sec_pipeline",
   description="Materialize SEC graph from DuckDB to LadybugDB",
   kinds={"ladybug"},
-  deps=["sec_duckdb_staged"],
+  deps=["sec_duckdb_staged", "sec_duckdb_incremental_staged"],
   metadata={
     "pipeline": "sec",
     "graph_id": "sec",

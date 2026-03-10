@@ -440,18 +440,27 @@ class TestInsertIntoTable:
     mock_count_before = MagicMock()
     mock_count_before.fetchone.return_value = (100,)
 
-    # Second call: schema probe
+    # Second call: table schema probe
     mock_probe = MagicMock()
     mock_probe.description = [("identifier", None), ("name", None), ("embedding", None)]
 
-    # Third call: INSERT
-    # Fourth call: COUNT after
+    # Third call: parquet schema probe
+    mock_parquet_probe = MagicMock()
+    mock_parquet_probe.description = [
+      ("identifier", None),
+      ("name", None),
+      ("embedding", None),
+    ]
+
+    # Fourth call: INSERT
+    # Fifth call: COUNT after
     mock_count_after = MagicMock()
     mock_count_after.fetchone.return_value = (120,)
 
     mock_conn.execute.side_effect = [
       mock_count_before,  # COUNT before
-      mock_probe,  # schema probe
+      mock_probe,  # table schema probe
+      mock_parquet_probe,  # parquet schema probe
       None,  # INSERT INTO
       mock_count_after,  # COUNT after
       None,  # CHECKPOINT
@@ -477,7 +486,7 @@ class TestInsertIntoTable:
 
   @patch("robosystems.graph_api.core.duckdb.manager.get_duckdb_pool")
   def test_insert_deduplicate_true_relationship_src_dst(self, mock_get_pool):
-    """deduplicate=True on relationship table uses NOT EXISTS on src+dst."""
+    """deduplicate=True on table with src/dst but parquet with from/to renames columns."""
     mock_pool = MagicMock()
     mock_conn = MagicMock()
     mock_pool.get_connection.return_value.__enter__.return_value = mock_conn
@@ -486,15 +495,21 @@ class TestInsertIntoTable:
     mock_count_before = MagicMock()
     mock_count_before.fetchone.return_value = (200,)
 
+    # Table has src/dst (renamed during initial CREATE)
     mock_probe = MagicMock()
     mock_probe.description = [("src", None), ("dst", None), ("weight", None)]
+
+    # Parquet still has from/to (original column names)
+    mock_parquet_probe = MagicMock()
+    mock_parquet_probe.description = [("from", None), ("to", None), ("weight", None)]
 
     mock_count_after = MagicMock()
     mock_count_after.fetchone.return_value = (250,)
 
     mock_conn.execute.side_effect = [
       mock_count_before,
-      mock_probe,
+      mock_probe,  # table schema probe
+      mock_parquet_probe,  # parquet schema probe
       None,  # INSERT
       mock_count_after,
       None,  # CHECKPOINT
@@ -514,12 +529,16 @@ class TestInsertIntoTable:
     insert_sql = [c for c in execute_calls if "INSERT INTO" in c]
     assert len(insert_sql) == 1
     assert "NOT EXISTS" in insert_sql[0]
-    assert '"src"' in insert_sql[0]
-    assert '"dst"' in insert_sql[0]
+    # Dedup references parquet's from/to against table's src/dst
+    assert 'a."src" = t."from"' in insert_sql[0]
+    assert 'a."dst" = t."to"' in insert_sql[0]
+    # SELECT renames from/to to src/dst
+    assert '"from" AS src' in insert_sql[0]
+    assert '"to" AS dst' in insert_sql[0]
 
   @patch("robosystems.graph_api.core.duckdb.manager.get_duckdb_pool")
   def test_insert_deduplicate_true_relationship_from_to(self, mock_get_pool):
-    """deduplicate=True on relationship table with from/to columns."""
+    """deduplicate=True on relationship table with from/to columns (no rename)."""
     mock_pool = MagicMock()
     mock_conn = MagicMock()
     mock_pool.get_connection.return_value.__enter__.return_value = mock_conn
@@ -531,12 +550,16 @@ class TestInsertIntoTable:
     mock_probe = MagicMock()
     mock_probe.description = [("from", None), ("to", None)]
 
+    mock_parquet_probe = MagicMock()
+    mock_parquet_probe.description = [("from", None), ("to", None)]
+
     mock_count_after = MagicMock()
     mock_count_after.fetchone.return_value = (70,)
 
     mock_conn.execute.side_effect = [
       mock_count_before,
       mock_probe,
+      mock_parquet_probe,
       None,
       mock_count_after,
       None,
@@ -572,12 +595,16 @@ class TestInsertIntoTable:
     mock_probe = MagicMock()
     mock_probe.description = [("col_a", None), ("col_b", None)]
 
+    mock_parquet_probe = MagicMock()
+    mock_parquet_probe.description = [("col_a", None), ("col_b", None)]
+
     mock_count_after = MagicMock()
     mock_count_after.fetchone.return_value = (20,)
 
     mock_conn.execute.side_effect = [
       mock_count_before,
       mock_probe,
+      mock_parquet_probe,
       None,
       mock_count_after,
       None,
@@ -621,12 +648,16 @@ class TestInsertIntoTable:
     mock_probe = MagicMock()
     mock_probe.description = [("identifier", None), ("value", None)]
 
+    mock_parquet_probe = MagicMock()
+    mock_parquet_probe.description = [("identifier", None), ("value", None)]
+
     mock_count_after = MagicMock()
     mock_count_after.fetchone.return_value = (100,)
 
     mock_conn.execute.side_effect = [
       mock_count_before,
       mock_probe,
+      mock_parquet_probe,
       None,
       mock_count_after,
       None,
