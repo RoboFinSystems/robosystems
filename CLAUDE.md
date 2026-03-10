@@ -326,19 +326,14 @@ just admin dev cache flush auth         # Flush single database
 ## Admin CLI
 
 ```bash
-just admin dev stats                         # System stats
-just admin dev customers list                # List customers
-just admin dev subscriptions list            # List subscriptions
-just admin dev subscriptions audit SUB_ID    # Audit subscription
-just admin dev invoices list                 # List invoices
-just admin dev credits list                  # List credit allocations
-just admin dev credits add-bonus GRAPH_ID    # Grant bonus credits
-just admin dev credits analytics             # Credit usage analytics
-just admin dev instances list                # List graph instances
-just admin dev instances scale TIER DESIRED  # Scale ASG
-just admin dev cache info                    # View all cache databases
-just admin dev cache flush auth              # Flush single database
+just admin dev --help                    # List all command groups
+just admin dev stats                     # Subscription & revenue stats
+just admin dev subscriptions list        # List all subscriptions
+just admin dev invoices list             # List invoices
+just admin dev cache info                # View cache databases
 ```
+
+Command groups: `subscriptions`, `invoices`, `credits`, `graphs`, `users`, `orgs`, `cache`, `instances`, `migrations`. Use `--help` on any group for options.
 
 ## CI/CD
 
