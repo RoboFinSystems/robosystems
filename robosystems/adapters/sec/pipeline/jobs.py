@@ -56,7 +56,7 @@ from .materialize import (
 )
 from .process import sec_processed_filings
 from .r2_publish import sec_lbug_r2_published
-from .s3_publish import sec_historical_lbug_s3_published
+from .s3_publish import sec_historical_lbug_s3_published, sec_lbug_s3_published
 from .stage import (
   sec_duckdb_incremental_staged,
   sec_duckdb_staged,
@@ -330,11 +330,31 @@ sec_entity_update_job = define_asset_job(
 
 
 # ============================================================================
-# Phase 4: S3 Publish (DuckDB + Historical LadybugDB)
+# Phase 4: S3 Publish (LadybugDB + DuckDB)
 # ============================================================================
-# Primary LadybugDB publish (sec_lbug_s3_published) has no job here - it's
-# triggered by asset lineage from sec_graph_materialized.
-# This section covers: DuckDB publishes + historical LadybugDB (ad-hoc).
+# Post-materialization publish chain (sequential to avoid overloading instance):
+#   materialize → lbug S3 publish → duckdb S3 publish
+# Orchestrated by sec_post_materialize_publish_sensor.
+
+sec_lbug_s3_publish_job = define_asset_job(
+  name="sec_lbug_s3_publish",
+  description="Publish SEC LadybugDB database to S3 for replica cluster.",
+  selection=AssetSelection.assets(sec_lbug_s3_published),
+  tags={
+    "pipeline": "sec",
+    "phase": "lbug_s3_publish",
+    # Minimal profile: just orchestrating Graph API calls, no local compute
+    "ecs/cpu": "256",
+    "ecs/memory": "512",
+    "ecs/ephemeral_storage": "21",
+    # On-demand to avoid interruptions during large uploads
+    "ecs/run_task_kwargs": {
+      "capacityProviderStrategy": [
+        {"capacityProvider": "FARGATE", "weight": 1, "base": 1},
+      ],
+    },
+  },
+)
 
 sec_duckdb_s3_publish_job = define_asset_job(
   name="sec_duckdb_s3_publish",

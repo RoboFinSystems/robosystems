@@ -5,13 +5,11 @@ All sensors start STOPPED by default - enable in Dagster UI when ready.
 
 Nightly Pipeline (enable all for automated daily updates):
 - Phase 1 (Download): sec_incremental_download_schedule triggers at 9pm EST weekdays
-- Phase 2 (Process): sec_download_to_process_sensor chains download → process
-- Phase 3 (Stage): sec_incremental_staging_sensor chains process → stage (DuckDB INSERT)
+- Phase 2+3 (Process+Stage): sec_incremental_pipeline_sensor chains
+  download → process (batched loop) → stage (DuckDB INSERT)
 - Phase 4 (Materialize): sec_stage_to_materialize_sensor chains stage → full graph rebuild
-
-Post-materialization S3 publish and replica refresh are handled by asset lineage:
-  sec_graph_materialized -> sec_lbug_s3_published -> shared_replicas_refreshed
-  sec_historical_materialized -> sec_historical_lbug_s3_published -> shared_replicas_refreshed
+- Phase 5 (Publish+Refresh): sec_post_materialize_publish_sensor chains
+  materialize → lbug S3 publish → duckdb S3 publish → replica refresh
 
 Manual Operations (not in automated chain):
 - sec_entity_update_job: Update mutable Entity attributes (run manually after materialize)
@@ -23,8 +21,6 @@ Nightly flow: New data is added to existing DuckDB tables (INSERT with dedup),
 then the LadybugDB graph is fully rebuilt from DuckDB. The sec graph (2024+ only)
 is small enough for nightly rebuilds (~75GB vs ~300GB monolith).
 """
-
-from datetime import UTC, datetime
 
 from dagster import (
   DagsterRunStatus,
@@ -41,11 +37,16 @@ from dagster import (
 )
 
 from robosystems.config import env
+from robosystems.dagster.jobs.shared_repository import (
+  shared_repository_refresh_replicas_job,
+)
 
 from .configs import SEC_HISTORICAL_FORM_TYPES, SEC_PRIMARY_START_YEAR
 from .jobs import (
   sec_download_job,
+  sec_duckdb_s3_publish_job,
   sec_incremental_stage_job,
+  sec_lbug_s3_publish_job,
   sec_materialize_job,
   sec_process_job,
 )
@@ -282,20 +283,38 @@ def sec_incremental_download_schedule(context):
 
 @run_status_sensor(
   run_status=DagsterRunStatus.SUCCESS,
-  monitored_jobs=[sec_download_job],
-  request_job=sec_process_job,
+  monitored_jobs=[sec_download_job, sec_process_job],
+  request_jobs=[sec_process_job, sec_incremental_stage_job],
   default_status=DefaultSensorStatus.STOPPED,  # Enable in Dagster UI when ready
   minimum_interval_seconds=60,
-  description="Chain: download success → trigger processing",
+  description="Chain: download → process (batched) → stage. Self-contained incremental pipeline.",
 )
-def sec_download_to_process_sensor(context: RunStatusSensorContext):
-  """Trigger SEC processing after download completes successfully.
+def sec_incremental_pipeline_sensor(context: RunStatusSensorContext):
+  """Orchestrate the full incremental SEC pipeline: download → process → stage.
 
-  Part of the automated incremental pipeline. When a download job succeeds,
-  this triggers processing for the same partition (quarter).
+  Monitors both download and process job completions:
+  - On download success: triggers first process batch for the partition
+  - On process success: checks for remaining pending files
+    - If pending remain in this partition: triggers next process batch
+    - If this partition drained but others still pending: waits
+    - If all partitions drained: triggers incremental DuckDB staging
 
-  Enable via: SEC_INCREMENTAL_PIPELINE_ENABLED=true
+  Each process run handles SEC_PROCESS_BATCH_SIZE filings (default 250) then
+  exits, enabling natural memory release between batches and spot resilience
+  via the S3 filing cache. This sensor re-triggers process runs until the
+  queue is drained across all partitions, then hands off to staging.
+
+  At quarter boundaries, the download schedule scans two quarters (current +
+  previous). This sensor waits for both partitions to fully drain before
+  triggering staging, ensuring DuckDB receives a complete batch.
+
+  The stage_to_materialize_sensor handles the next step (stage → materialize).
   """
+  import re
+
+  from robosystems.database import session as SessionLocal
+  from robosystems.models.iam import SourceFile
+
   if env.ENVIRONMENT == "dev":
     context.log.info("Skipping chain sensor in dev environment")
     return
@@ -308,11 +327,101 @@ def sec_download_to_process_sensor(context: RunStatusSensorContext):
     context.log.info("Skipping - not an incremental pipeline run")
     return
 
-  # Get partition from the completed download run
+  # Get partition from the completed run
   partition_key = dagster_run.tags.get("dagster/partition")
   if not partition_key:
-    context.log.warning("No partition key found on download run")
+    context.log.warning("No partition key found on completed run")
     return
+
+  batch_id = run_tags.get("batch_id")
+
+  # When triggered by a process job completion, check if pending files remain
+  if dagster_run.job_name == "sec_process":
+    quarter_pattern = re.compile(r"^(\d{4}-Q[1-4])_")
+    session = None
+    try:
+      session = SessionLocal()
+      pending_files = (
+        session.query(SourceFile.partition_key)
+        .filter(
+          SourceFile.graph_id == "sec",
+          SourceFile.status == "pending",
+          SourceFile.partition_key.isnot(None),
+        )
+        .all()
+      )
+
+      # Count pending in this partition and total across all partitions
+      pending_in_partition = 0
+      total_pending = len(pending_files)
+      for (pk,) in pending_files:
+        if pk and (m := quarter_pattern.match(pk)) and m.group(1) == partition_key:
+          pending_in_partition += 1
+
+    except Exception as e:
+      context.log.error(f"Database query failed: {e}")
+      return
+    finally:
+      if session:
+        session.close()
+
+    if pending_in_partition > 0:
+      # This partition still has pending files — trigger next batch
+      context.log.info(
+        f"Process batch completed for {partition_key}, "
+        f"{pending_in_partition} files still pending, triggering next batch"
+      )
+    elif total_pending > 0:
+      # This partition is done but other partitions from the same batch
+      # (e.g., quarter boundary scan) still have pending files.
+      # Wait for all partitions to drain before triggering staging.
+      context.log.info(
+        f"Partition {partition_key} fully processed, but {total_pending} files "
+        f"pending in other partitions — waiting for batch to complete"
+      )
+      return
+    else:
+      # All partitions drained — trigger incremental DuckDB staging
+      context.log.info(
+        "All pending files processed across all partitions, triggering DuckDB staging"
+      )
+
+      # Check if stage job is already running
+      active_stage_runs = context.instance.get_runs(
+        filters=RunsFilter(
+          job_name="sec_incremental_stage",
+          statuses=[DagsterRunStatus.STARTED, DagsterRunStatus.QUEUED],
+        ),
+        limit=1,
+      )
+      if active_stage_runs:
+        context.log.info(
+          f"Incremental stage already running (run_id={active_stage_runs[0].run_id}), skipping"
+        )
+        return
+
+      yield RunRequest(
+        run_key=f"sec-stage-chain-{batch_id or partition_key}-{dagster_run.run_id[:8]}",
+        job_name="sec_incremental_stage",
+        run_config={
+          "ops": {
+            "sec_duckdb_incremental_staged": {
+              "config": {
+                "graph_id": "sec",
+              }
+            },
+          }
+        },
+        tags={
+          "pipeline": "sec",
+          "phase": "incremental_stage",
+          "mode": "incremental",
+          "batch_id": batch_id,
+        },
+      )
+      return
+  else:
+    context.log.info(f"Download completed for {partition_key}, triggering processing")
 
   # Check for already running process job for this partition
   active_runs = context.instance.get_runs(
@@ -327,147 +436,16 @@ def sec_download_to_process_sensor(context: RunStatusSensorContext):
     context.log.info(f"Process job already running for {partition_key}, skipping")
     return
 
-  # Propagate batch_id for downstream batch tracking
-  batch_id = run_tags.get("batch_id")
-
-  context.log.info(
-    f"Download completed for {partition_key} (batch={batch_id}), triggering processing"
-  )
-
   yield RunRequest(
     run_key=f"sec-process-chain-{partition_key}-{dagster_run.run_id[:8]}",
+    job_name="sec_process",
     partition_key=partition_key,
     tags={
       "pipeline": "sec",
       "phase": "process",
       "mode": "incremental",
       "quarter": partition_key,
-      "batch_id": batch_id,  # Propagate for batch tracking
-    },
-  )
-
-
-# ============================================================================
-# SEC Incremental Staging Sensor
-# ============================================================================
-# This sensor triggers DuckDB staging after processing completes:
-#   download → process → stage (DuckDB) → copy (LadybugDB) → S3 sync
-#
-# Controlled by: SEC_INCREMENTAL_PIPELINE_ENABLED=true
-#
-# DuckDB staging keeps the staging tables in sync for potential full rebuilds.
-# LadybugDB updates happen via direct S3 copy (next step in chain).
-
-
-@sensor(
-  job=sec_incremental_stage_job,
-  minimum_interval_seconds=300,  # Check every 5 minutes
-  default_status=DefaultSensorStatus.STOPPED,  # Enable in Dagster UI when ready
-  description="Trigger incremental DuckDB staging when all pending SourceFiles are processed",
-)
-def sec_incremental_staging_sensor(context: SensorEvaluationContext):
-  """Trigger incremental DuckDB staging when all pending SourceFiles are processed.
-
-  Part of the automated incremental pipeline. Detects when pending count
-  reaches 0 (all files processed), then triggers incremental staging for
-  current quarter. Keeps DuckDB in sync for potential full rebuilds.
-
-  Next step: sec_stage_to_materialize_sensor triggers full LadybugDB rebuild after staging.
-
-  Controlled by: SEC_INCREMENTAL_PIPELINE_ENABLED=true
-  """
-  from datetime import timedelta
-
-  from robosystems.database import session as SessionLocal
-  from robosystems.models.iam import SourceFile
-
-  # Skip in dev - use manual job triggers for testing
-  if env.ENVIRONMENT == "dev":
-    yield SkipReason("Skipped in dev - use Dagster UI to trigger manually")
-    return
-
-  session = None
-  try:
-    session = SessionLocal()
-
-    # Check for pending files
-    pending_count = (
-      session.query(SourceFile)
-      .filter(
-        SourceFile.graph_id == "sec",
-        SourceFile.status == "pending",
-      )
-      .count()
-    )
-
-    if pending_count > 0:
-      yield SkipReason(f"{pending_count} files still pending processing")
-      return
-
-    # Check if there are recently processed files (last 24 hours)
-    cutoff = datetime.now(UTC) - timedelta(hours=24)
-
-    recent_count = (
-      session.query(SourceFile)
-      .filter(
-        SourceFile.graph_id == "sec",
-        SourceFile.status == "success",
-        SourceFile.processed_at >= cutoff,
-      )
-      .count()
-    )
-
-    if recent_count == 0:
-      yield SkipReason("No recently processed files to stage")
-      return
-
-  except Exception as e:
-    context.log.error(f"Database query failed: {e}")
-    yield SkipReason(f"Database error: {e}")
-    return
-  finally:
-    if session:
-      session.close()
-
-  # Check if incremental stage job is already running
-  active_runs = context.instance.get_runs(
-    filters=RunsFilter(
-      job_name="sec_incremental_stage",
-      statuses=[DagsterRunStatus.STARTED, DagsterRunStatus.QUEUED],
-    ),
-    limit=1,
-  )
-  if active_runs:
-    context.log.info(
-      f"Incremental stage already running (run_id={active_runs[0].run_id}), skipping"
-    )
-    return
-
-  # Create run key based on current date to prevent duplicate daily runs
-  today = datetime.now(UTC).strftime("%Y-%m-%d")
-  run_key = f"sec-incremental-stage-{today}"
-
-  context.log.info(
-    f"All processing complete ({recent_count} files in last 24h), "
-    f"triggering incremental DuckDB staging"
-  )
-
-  yield RunRequest(
-    run_key=run_key,
-    run_config={
-      "ops": {
-        "sec_duckdb_incremental_staged": {
-          "config": {
-            "graph_id": "sec",
-            # year/quarter default to current if not specified
-          }
-        },
-      }
-    },
-    tags={
-      "pipeline": "sec",
-      "phase": "incremental_stage",
-      "mode": "incremental",
+      "batch_id": batch_id,
     },
   )
 
@@ -479,8 +457,8 @@ def sec_incremental_staging_sensor(context: SensorEvaluationContext):
 # rebuild from DuckDB. The sec graph (2024+ only) is small enough for nightly
 # rebuilds, and this ensures the graph is always consistent with DuckDB.
 #
-# Chain: stage (DuckDB INSERT) → materialize (full rebuild) → S3 sync
-# S3 sync is handled by sec_post_materialize_s3_sync_sensor (already exists).
+# Chain: stage (DuckDB INSERT) → materialize (full rebuild) → S3 publish
+# S3 publishes are handled by sec_post_materialize_publish_sensor.
 
 
 @run_status_sensor(
@@ -495,11 +473,11 @@ def sec_stage_to_materialize_sensor(context: RunStatusSensorContext):
   """Trigger full LadybugDB rebuild after incremental DuckDB staging completes.
 
   Part of the nightly pipeline chain:
-    process → stage (DuckDB INSERT) → materialize (full rebuild) → S3 sync
+    process → stage (DuckDB INSERT) → materialize (full rebuild) → S3 publish
 
   After new data is added to DuckDB, the LadybugDB graph is fully rebuilt.
   The sec graph (2024+ only, ~75GB) is small enough for nightly rebuilds.
-  S3 sync is handled by the existing sec_post_materialize_s3_sync_sensor.
+  S3 publishes are handled by sec_post_materialize_publish_sensor.
   """
   if env.ENVIRONMENT == "dev":
     context.log.info("Skipping chain sensor in dev environment")
@@ -547,6 +525,103 @@ def sec_stage_to_materialize_sensor(context: RunStatusSensorContext):
     tags={
       "pipeline": "sec",
       "phase": "materialize",
+      "mode": "incremental",
+    },
+  )
+
+
+# ============================================================================
+# SEC Post-Materialize Publish Sensor (Sequential S3 Uploads)
+# ============================================================================
+# After materialization, publish both databases to S3 sequentially:
+#   materialize → lbug S3 publish → duckdb S3 publish
+#
+# Sequential to avoid overloading the instance with concurrent uploads.
+# LadybugDB publish serves the replica fleet (S3 ATTACH).
+# DuckDB publish serves vector search (embedding columns for MCP tools).
+# Replica refresh cycles instances to pick up new S3 databases.
+
+
+@run_status_sensor(
+  run_status=DagsterRunStatus.SUCCESS,
+  monitored_jobs=[
+    sec_materialize_job,
+    sec_lbug_s3_publish_job,
+    sec_duckdb_s3_publish_job,
+  ],
+  request_jobs=[
+    sec_lbug_s3_publish_job,
+    sec_duckdb_s3_publish_job,
+    shared_repository_refresh_replicas_job,
+  ],
+  default_status=DefaultSensorStatus.STOPPED,  # Enable in Dagster UI when ready
+  minimum_interval_seconds=60,
+  description=(
+    "Chain: materialize → lbug S3 publish → duckdb S3 publish → replica refresh"
+  ),
+)
+def sec_post_materialize_publish_sensor(context: RunStatusSensorContext):
+  """Publish databases to S3 and refresh replicas after materialization.
+
+  Sequential chain to avoid overloading the instance:
+  - On materialize success: triggers lbug S3 publish
+  - On lbug publish success: triggers duckdb S3 publish
+  - On duckdb publish success: triggers rolling replica refresh
+
+  The replica refresh uses conservative policies (min_healthy=100%,
+  max_healthy=200%) so old instances stay alive serving traffic until
+  new instances finish downloading (~15 min) and pass health checks.
+  """
+  if env.ENVIRONMENT == "dev":
+    context.log.info("Skipping publish sensor in dev environment")
+    return
+
+  dagster_run = context.dagster_run
+
+  # Only chain incremental pipeline runs
+  run_tags = dagster_run.tags or {}
+  if run_tags.get("mode") != "incremental":
+    context.log.info("Skipping - not an incremental pipeline run")
+    return
+
+  if dagster_run.job_name == "sec_materialize":
+    next_job_name = "sec_lbug_s3_publish"
+    next_phase = "lbug_s3_publish"
+    context.log.info("Materialization complete, triggering LadybugDB S3 publish")
+
+  elif dagster_run.job_name == "sec_lbug_s3_publish":
+    next_job_name = "sec_duckdb_s3_publish"
+    next_phase = "duckdb_s3_publish"
+    context.log.info("LadybugDB S3 publish complete, triggering DuckDB S3 publish")
+
+  elif dagster_run.job_name == "sec_duckdb_s3_publish":
+    next_job_name = "shared_repository_refresh_replicas_job"
+    next_phase = "replica_refresh"
+    context.log.info("DuckDB S3 publish complete, triggering replica refresh")
+
+  else:
+    return
+
+  # Check if next job is already running
+  active_runs = context.instance.get_runs(
+    filters=RunsFilter(
+      job_name=next_job_name,
+      statuses=[DagsterRunStatus.STARTED, DagsterRunStatus.QUEUED],
+    ),
+    limit=1,
+  )
+  if active_runs:
+    context.log.info(
+      f"{next_job_name} already running (run_id={active_runs[0].run_id}), skipping"
+    )
+    return
+
+  yield RunRequest(
+    run_key=f"sec-{next_phase}-chain-{dagster_run.run_id[:8]}",
+    job_name=next_job_name,
+    tags={
+      "pipeline": "sec",
+      "phase": next_phase,
       "mode": "incremental",
     },
   )

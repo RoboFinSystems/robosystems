@@ -154,10 +154,11 @@ RoboSystems is built on a modern, scalable architecture with:
 
 **Infrastructure:**
 
-- ECS Fargate for API, Workers, and Dagster (ARM64/Graviton with Spot capacity)
-- EC2 auto-scaling groups for LadybugDB writer clusters
+- ECS Fargate for API and Dagster (ARM64/Graviton with Spot capacity)
+- EC2 ASG for LadybugDB writer clusters
+- EC2 ALB + ASG for LadybugDB shared replica clusters
 - RDS PostgreSQL + ElastiCache Valkey
-- CloudFormation infrastructure deployed via GitHub Actions (OIDC)
+- CloudFormation infrastructure deployed via GitHub Actions via OIDC
 
 **For detailed architecture documentation, see the [Architecture Overview](https://github.com/RoboFinSystems/robosystems/wiki/Architecture-Overview) in the Wiki.**
 
@@ -165,14 +166,14 @@ RoboSystems is built on a modern, scalable architecture with:
 
 A curated knowledge graph of US public company financial data from SEC EDGAR XBRL filings. Runs on the shared LadybugDB tier, accessible via MCP tools, Cypher queries, and the AI agent.
 
-**Pipeline**: EDGAR → Download → Process (Parquet) → Enrich (fastembed) → Stage (DuckDB) → Materialize (LadybugDB)
+**Pipeline**: EDGAR → Download → Process (Parquet) → Stage (DuckDB) → Enrich (fastembed) → Materialize (LadybugDB)
 
-**Graph**: 14 node types (`Entity`, `Report`, `Fact`, `Element`, `Structure`, `Association`, `FactSet`, `Classification`, ...) and 24 relationship types modeling the full XBRL reporting hierarchy — from company filings down to individual financial facts with their taxonomy relationships and disclosure classifications.
+**Graph**: 14 node types (`Entity`, `Report`, `Fact`, `Element`, `Structure`, `Association`, ...) and 24 relationship types modeling the full XBRL reporting hierarchy — from company filings down to individual financial facts with their taxonomy relationships and disclosure classifications.
 
-**Enrichment**: Every element is mapped to ~50 canonical financial concepts (revenue, net_income, total_assets, etc.) via fastembed cosine similarity. Structures are classified by statement type. Associations are tagged with disclosure types from [the Seattle Method](http://xbrlsite.com/seattlemethod/SeattleMethod.pdf) [disclosure-mechanics taxonomy](http://xbrlsite.azurewebsites.net/2020/reporting-scheme/us-gaap/disclosure-mechanics/disclosure-mechanics_ALL.xsd). Offline knowledge artifacts (PageRank, BFS classification, cross-filing consensus) refine confidence scores using an [icebug](https://github.com/Ladybug-Memory/icebug) graph built from the full corpus.
+**Enrichment**: Every element is mapped to ~50 canonical financial concepts (revenue, net_income, total_assets, etc.) via fastembed cosine similarity. Structures are classified by statement type. Associations are tagged with disclosure types from the [Seattle Method](http://xbrlsite.com/seattlemethod/SeattleMethod.pdf) disclosure-mechanics taxonomy. Offline knowledge artifacts (PageRank, BFS classification, cross-filing consensus) refine confidence scores using an [icebug](https://github.com/Ladybug-Memory/icebug) graph built from the full corpus.
 
 ```bash
-just sec-load NVDA 2025  # Load NVIDIA filings locally
+just sec-load NVDA 2025  # Load NVIDIA filings for 2025
 just sec-health          # Check SEC database health
 ```
 
@@ -197,8 +198,8 @@ See [SEC Adapter](/robosystems/adapters/sec/README.md) and [SEC Pipeline](/robos
 ### Credit System
 
 - **AI Operations Only**: Credits are consumed exclusively by AI agent calls (Anthropic Claude via AWS Bedrock)
-- **Token-Based Billing**: ~38 credits per agent call, billed on actual token usage
-- **Storage Included**: All database operations, queries, imports, exports, and storage are included in tier pricing
+- **Token-Based Billing**: ~1 credits per agent call, billed on actual token usage
+- **Storage Included**: All database operations, queries, backups, restores, and storage are included in tier pricing
 - **MCP Tool Access**: Unlimited — no credits consumed for external MCP tool calls
 
 ## Client Libraries
@@ -293,7 +294,7 @@ pip install robosystems-client
 **Security & Compliance:**
 
 - **[SECURITY.md](/SECURITY.md)** - Security features
-- **[COMPLIANCE.md](/COMPLIANCE.md)** - SOC 2 compliance
+- **[COMPLIANCE.md](/COMPLIANCE.md)** - SOC 2 compliance features
 
 ## API Reference
 
