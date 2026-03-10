@@ -3,7 +3,7 @@ Service offering API endpoint.
 
 Provides comprehensive information about all subscription offerings:
 - Per-graph infrastructure subscriptions (ladybug-standard, ladybug-large, ladybug-xlarge)
-- Shared repository subscriptions (SEC, industry, economic data)
+- Shared repository subscriptions
 - Operation costs and credit information
 - Features and capabilities for each infrastructure tier
 """
@@ -51,7 +51,7 @@ applications to display subscription options.
 
 Includes:
 - Graph infrastructure tiers (ladybug-standard, ladybug-large, ladybug-xlarge) - per-graph pricing
-- Shared repository subscriptions (SEC, industry, economic data) - org-level
+- Shared repository subscriptions - org-level
 - Operation costs and credit information
 - Features and capabilities for each tier
 - Enabled/disabled status for repositories

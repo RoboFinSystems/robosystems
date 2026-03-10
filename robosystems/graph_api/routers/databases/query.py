@@ -35,7 +35,7 @@ _REBUILD_CACHE_TTL = 30  # seconds
 def _is_graph_rebuilding(graph_id: str) -> bool:
   """Check if a graph is currently rebuilding, using a cached RDS lookup.
 
-  Skipped for shared replicas — they serve an independent S3 snapshot and should
+  Skipped for shared replicas — they serve an independent local copy and should
   not be affected by the master setting rebuilding status on the same graph_id.
   """
   if os.getenv("LBUG_ROLE") == "replica":

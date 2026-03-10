@@ -314,7 +314,7 @@ Core utilities for multi-tenant database operations and validation.
 
 - **Database Name Resolution**: Maps graph IDs to database names
 - **Access Pattern Management**: Determines routing strategies
-- **Shared Repository Support**: Handles SEC, industry, economic data
+- **Shared Repository Support**: Routes to shared repository infrastructure
 - **Validation**: Input validation and security checks
 - **Graph Type Detection**: Identifies user vs shared vs system graphs
 

@@ -11,7 +11,7 @@
 # - Standard: Dedicated m7g.large, single database + 3 subgraphs, cost-efficient entry
 # - Large: Dedicated r7g.large, subgraphs for organization, team collaboration
 # - XLarge: Dedicated r7g.xlarge, maximum subgraphs, advanced scale
-# - Shared: Public data repositories (SEC, industry, economic) - separate infrastructure
+# - Shared: Public data repositories (SEC) - separate infrastructure
 
 production:
   writers:
@@ -229,7 +229,7 @@ production:
     # LADYBUGDB SHARED TIER - Public Data Repositories
     # =========================================================================
     - name: ladybug-shared
-      description: Shared public data repositories (SEC, industry, economic) - LadybugDB backend
+      description: Shared public data repositories (SEC) - LadybugDB backend
       backend: ladybug
       stack_suffix: LadybugShared
       tier: ladybug-shared
@@ -297,7 +297,7 @@ production:
   # ===========================================================================
   replicas:
     - name: shared-replicas
-      description: Read replicas for shared repositories (SEC, industry, economic)
+      description: Read replicas for shared repositories (SEC)
       template: graph-ladybug-replicas.yaml
       depends_on: ladybug-shared # Only deploy after shared master exists
 

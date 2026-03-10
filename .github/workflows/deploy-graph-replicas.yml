@@ -1,8 +1,8 @@
 name: Deploy Graph Shared Replicas
 
-# Deploys read-only replica fleet for shared repositories (SEC, industry, economic)
-# Replicas use S3 ATTACH to connect to S3-hosted database files via httpfs
-# Database is synced to S3 by Dagster's shared_repository_s3_sync job
+# Deploys read-only replica fleet for shared repositories (SEC)
+# Replicas download .lbug and .duckdb files from S3 to local disk on boot
+# Databases are published to S3 by Dagster's sec_lbug_s3_publish and sec_duckdb_s3_publish jobs
 
 on:
   workflow_call:
