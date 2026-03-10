@@ -518,11 +518,27 @@ Resources:
           LaunchTemplateSpecification:
             LaunchTemplateId: !Ref ReplicaLaunchTemplate
             Version: !GetAtt ReplicaLaunchTemplate.LatestVersionNumber
+          # Spot pool diversification: 8 GB ARM64 alternatives to primary InstanceType
+          Overrides:
+            - InstanceType: !Ref InstanceType
+            - InstanceType: m6g.large
+            - InstanceType: t4g.large
+            - InstanceType: r6g.medium
+            - InstanceType: r7g.medium
+            - InstanceType: r8g.medium
         InstancesDistribution:
-          OnDemandBaseCapacity: !If [IsSpotEnabled, !Ref SpotOnDemandBaseCapacity, 0]
-          OnDemandPercentageAboveBaseCapacity: !If [IsSpotEnabled, !Ref SpotOnDemandPercentageAboveBase, 100]
-          SpotAllocationStrategy: !If [IsSpotEnabled, !Ref SpotAllocationStrategy, !Ref "AWS::NoValue"]
-      CapacityRebalance: !If [IsSpotCapacityRebalance, true, !Ref "AWS::NoValue"]
+          OnDemandBaseCapacity:
+            !If [IsSpotEnabled, !Ref SpotOnDemandBaseCapacity, 0]
+          OnDemandPercentageAboveBaseCapacity:
+            !If [IsSpotEnabled, !Ref SpotOnDemandPercentageAboveBase, 100]
+          SpotAllocationStrategy:
+            !If [
+              IsSpotEnabled,
+              !Ref SpotAllocationStrategy,
+              !Ref "AWS::NoValue",
+            ]
+      CapacityRebalance:
+        !If [IsSpotCapacityRebalance, true, !Ref "AWS::NoValue"]
       TargetGroupARNs:
         - !Ref ReplicaTargetGroup
       HealthCheckType: ELB
