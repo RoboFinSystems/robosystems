@@ -94,10 +94,10 @@ just test-cov               # Tests with coverage
 ### Log Monitoring
 
 ```bash
-just logs api                 # View API logs (last 100 lines)
-just logs graph-api           # View Graph API logs (last 100 lines)
-just logs dagster-webserver   # View Dagster Webserver logs
-just logs dagster-daemon      # View Dagster Daemon logs
+just logs container=api                 # View API logs (last 100 lines)
+just logs container=graph-api           # View Graph API logs (last 100 lines)
+just logs container=dagster-webserver   # View Dagster Webserver logs
+just logs container=dagster-daemon      # View Dagster Daemon logs
 ```
 
 **See [justfile](justfile) for 50+ development commands** including database migrations, CloudFormation linting, graph operations, administration, and more.
@@ -290,8 +290,7 @@ pip install robosystems-client
 
 **Security & Compliance:**
 
-- **[SECURITY.md](/SECURITY.md)** - Security features
-- **[COMPLIANCE.md](/COMPLIANCE.md)** - SOC 2 compliance features
+- **[SECURITY.md](/SECURITY.md)** - Security features and compliance configuration
 
 ## API Reference
 
