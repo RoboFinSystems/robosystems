@@ -8,7 +8,7 @@ This guide walks you through bootstrapping a fresh fork of RoboSystems.
 - [Prerequisites](#prerequisites)
 - [Fresh AWS Account Setup](#fresh-aws-account-setup)
 - [Bootstrap](#bootstrap)
-- [SSM Parameters](#ssm-parameters)
+- [SSM Parameters & Secrets Manager](#ssm-parameters--secrets-manager)
 - [Deploy](#deploy)
 - [Multi-Repository Setup](#multi-repository-setup)
 - [API Access Modes](#api-access-modes)
@@ -91,8 +91,9 @@ Bootstrap handles everything:
 
 **What gets created in AWS:**
 - OIDC Identity Provider for GitHub Actions
-- IAM Role: `RoboSystemsGitHubActionsRole` (backend)
-- IAM Role: `RoboSystemsGitHubActionsFrontendRole` (frontend apps)
+- IAM Role: `RoboSystemsGitHubActionsRole` (backend deployments)
+- IAM Role: `RoboSystemsGitHubActionsFrontendRole` (frontend app deployments)
+- IAM Role: `RoboSystemsAppSuperAdminRole` (application admin via SSO)
 - ECR Repository with lifecycle policy
 
 ### Optional GitHub Secrets
@@ -115,13 +116,14 @@ While bootstrap sets the core OIDC variables (`AWS_ROLE_ARN`, `AWS_ACCOUNT_ID`, 
 
 | Category | Examples | Purpose |
 |----------|----------|---------|
-| API | `API_MIN_CAPACITY_*`, `API_ACCESS_MODE_*` | Scaling, domain, Spot/On-Demand mix |
+| API | `API_MIN_CAPACITY_*`, `API_CPU_*`, `API_FARGATE_SPOT_WEIGHT_*` | Scaling, Fargate sizing, Spot/On-Demand mix |
 | Database | `DATABASE_INSTANCE_SIZE_*`, `DATABASE_POSTGRES_VERSION_*` | RDS sizing and configuration |
-| Dagster | `DAGSTER_DAEMON_CPU_*`, `DAGSTER_MAX_CONCURRENT_RUNS_*` | Orchestration resources |
+| Dagster | `DAGSTER_DAEMON_CPU_*`, `DAGSTER_MAX_CONCURRENT_RUNS_*` | Orchestration resources and Spot config |
 | LadybugDB | `LBUG_*_ENABLED_*`, `LBUG_*_MIN_INSTANCES_*` | Graph database tier configuration |
+| Shared Replicas | `SHARED_REPLICAS_*`, `SHARED_REPOSITORIES_*` | Read-only replica fleet for shared repos |
 | Valkey | `VALKEY_NODE_TYPE_*`, `VALKEY_ENCRYPTION_ENABLED_*` | Cache configuration |
-| Security | `WAF_ENABLED_*`, `VPC_FLOW_LOGS_ENABLED` | WAF, audit logging |
-| Infrastructure | `VPC_ENDPOINT_MODE`, `MAX_AVAILABILITY_ZONES` | VPC and networking |
+| Security | `WAF_ENABLED_*`, `VPC_FLOW_LOGS_ENABLED`, `CLOUDTRAIL_ENABLED` | WAF, audit logging, compliance |
+| Infrastructure | `VPC_ENDPOINT_MODE`, `VPC_SECOND_OCTET`, `MAX_AVAILABILITY_ZONES` | VPC and networking |
 
 **When to run:**
 - During bootstrap (prompted) - the recommended path since you opt-in to each step
@@ -131,31 +133,58 @@ While bootstrap sets the core OIDC variables (`AWS_ROLE_ARN`, `AWS_ACCOUNT_ID`, 
 
 ### Application Secrets (`just setup-aws`)
 
-Prompted during bootstrap (or run standalone later). Creates:
+Prompted during bootstrap (or run standalone later). Creates both Secrets Manager credentials and SSM parameters. See [SSM Parameters & Secrets Manager](#ssm-parameters--secrets-manager) for full details on what gets created and how to manage it.
 
-**Secrets Manager** (`robosystems/prod`, `robosystems/staging`):
-- Auto-generated encryption keys (JWT, connection credentials, backup)
-- Integration placeholders: QuickBooks, Plaid, Stripe, Turnstile (configure later)
+Safe to re-run — existing resources are never overwritten.
 
-**SSM Parameter Store**:
-- Feature flags (`/robosystems/{env}/features/*`)
-- Tuning parameters (`/robosystems/{env}/tuning/*`)
+**Fork-specific:** GitHub Actions workflows automatically pass your AWS account ID as a namespace to CloudFormation, creating unique bucket names like `robosystems-{account-id}-shared-raw-{env}`.
 
-Safe to re-run - existing secrets are never overwritten. To customize later:
+### SSM Parameters & Secrets Manager
 
+Both are created by `just setup-aws`. Secrets Manager holds sensitive credentials; SSM Parameter Store holds feature flags and runtime tuning.
+
+#### Secrets Manager
+
+Stores encryption keys, API credentials, and integration secrets. One secret per environment.
+
+**Secret hierarchy:**
+```
+robosystems/{env}                      # Single JSON secret per environment
+  ├── JWT_SECRET_KEY                   # JWT signing key (auto-generated)
+  ├── JWT_ISSUER                       # JWT issuer (set in internal mode)
+  ├── JWT_AUDIENCE                     # JWT audience (set in internal mode)
+  ├── CONNECTION_CREDENTIALS_KEY       # Fernet key for OAuth tokens (auto-generated)
+  ├── GRAPH_BACKUP_ENCRYPTION_KEY      # Graph backup encryption (auto-generated)
+  ├── INTUIT_CLIENT_ID                 # QuickBooks OAuth
+  ├── INTUIT_CLIENT_SECRET
+  ├── INTUIT_ENVIRONMENT               # "production" or "sandbox"
+  ├── INTUIT_REDIRECT_URI
+  ├── PLAID_CLIENT_ID                  # Plaid integration
+  ├── PLAID_CLIENT_SECRET
+  ├── PLAID_ENVIRONMENT                # "production" or "sandbox"
+  ├── SEC_GOV_USER_AGENT               # SEC EDGAR API identification
+  ├── OPENFIGI_API_KEY                 # OpenFIGI security resolution
+  ├── STRIPE_SECRET_KEY                # Stripe billing
+  ├── STRIPE_PUBLISHABLE_KEY
+  ├── STRIPE_WEBHOOK_SECRET
+  ├── TURNSTILE_SECRET_KEY             # Cloudflare Turnstile captcha
+  └── TURNSTILE_SITE_KEY
+```
+
+**Managing secrets:**
 ```bash
 # View current values
 aws secretsmanager get-secret-value --secret-id robosystems/prod --query SecretString --output text | jq .
 
-# Update values
+# Update values (merge into existing JSON)
 aws secretsmanager put-secret-value --secret-id robosystems/prod --secret-string "$(cat updated.json)"
 ```
 
-**Fork-specific:** GitHub Actions workflows automatically pass your AWS account ID as a namespace to CloudFormation, creating unique bucket names like `robosystems-{account-id}-shared-raw-{env}`.
+Safe to re-run `just setup-aws` — existing secrets are never overwritten. Three keys (`JWT_SECRET_KEY`, `CONNECTION_CREDENTIALS_KEY`, `GRAPH_BACKUP_ENCRYPTION_KEY`) are auto-generated; all others are placeholders to configure later.
 
-### SSM Parameters
+#### SSM Parameter Store
 
-SSM Parameter Store holds feature flags and tuning parameters. Created by `just setup-aws`.
+Feature flags and tuning parameters. Uses SSM for cost efficiency (FREE tier vs $0.40/secret/month).
 
 **Parameter hierarchy:**
 ```
@@ -168,10 +197,15 @@ SSM Parameter Store holds feature flags and tuning parameters. Created by `just 
     cache/            # Cache TTLs (BALANCE_TTL, JWT_TTL, etc.)
     admission/        # Main API thresholds (MEMORY_THRESHOLD, CPU_THRESHOLD, QUEUE_THRESHOLD)
     lbug_admission/   # LadybugDB/Graph API thresholds (MEMORY_THRESHOLD, CPU_THRESHOLD)
-    queues/           # Queue config (MAX_SIZE, MAX_CONCURRENT)
+    database/         # Connection pool (POOL_SIZE, MAX_OVERFLOW, POOL_TIMEOUT, POOL_RECYCLE)
+    queues/           # Queue config (MAX_SIZE, MAX_CONCURRENT, MAX_PER_USER, TIMEOUT)
     circuits/         # Circuit breakers (THRESHOLD, TIMEOUT)
     load_shedding/    # Load shedding (START_PRESSURE, STOP_PRESSURE)
-    mcp/              # MCP limits (MAX_RESULT_ROWS, MAX_RESULT_SIZE_MB)
+    mcp/              # MCP limits (MAX_RESULT_ROWS, MAX_RESULT_SIZE_MB, POOL_*)
+    workers/          # Worker pool (MAX_WORKERS)
+    timeouts/         # HTTP/query timeouts (GRAPH_HTTP, GRAPH_QUERY)
+    sse/              # Server-sent events (MAX_CONNECTIONS_PER_USER, QUEUE_SIZE)
+    limits/           # Org limits (ORG_GRAPHS_DEFAULT)
 ```
 
 **Managing parameters:**
@@ -209,12 +243,13 @@ just tunnel prod all    # Connect to all services
 
 ## Multi-Repository Setup
 
-The OIDC stack creates two roles:
+The OIDC stack creates three roles:
 
-| Role | Repositories | Permissions |
-|------|--------------|-------------|
+| Role | Repositories / Users | Permissions |
+|------|----------------------|-------------|
 | `RoboSystemsGitHubActionsRole` | `robosystems` | Full infrastructure |
 | `RoboSystemsGitHubActionsFrontendRole` | `robosystems-app`, `roboledger-app`, `roboinvestor-app` | Limited frontend |
+| `RoboSystemsAppSuperAdminRole` | SSO users (via IAM Identity Center) | Application admin only (no infra) |
 
 After bootstrapping the backend, set up frontend apps:
 
@@ -331,6 +366,9 @@ just deploy staging               # Staging
 
 # Connect
 just tunnel prod all              # All tunnels (postgres, valkey, dagster, api)
+
+# Secrets Manager
+aws secretsmanager get-secret-value --secret-id robosystems/prod --query SecretString --output text | jq .
 
 # SSM Parameters
 just ssm-list prod features       # List feature flags

@@ -36,7 +36,7 @@ RoboSystems is built on a modern, scalable architecture designed for enterprise 
                            ↓
 ┌─────────────────────────────────────────────────────────┐
 │                   Adapters Layer                        │
-│          (SEC, QuickBooks, Plaid Integrations)          │
+│         (SEC, QuickBooks, External Integrations)        │
 └─────────────────────────────────────────────────────────┘
                            ↓
 ┌─────────────────────────────────────────────────────────┐
@@ -112,7 +112,7 @@ dagster/
 └── sensors/
     └── provisioning.py    # Watch for pending subscriptions
 
-adapters/sec/pipeline/     # SEC pipeline (9 assets, 12 jobs, 6 sensors, 1 schedule)
+adapters/sec/pipeline/     # SEC pipeline (assets, jobs, sensors, schedule)
 adapters/custom_*/pipeline/ # Fork-friendly custom adapter pipelines
 ```
 
@@ -229,7 +229,7 @@ High-performance data ingestion pipeline bridging raw data to LadybugDB:
 **Cluster-Based Deployment:**
 - **Writer Clusters**: EC2 auto-scaling groups for graph writes
 - **Multi-Tenant Isolation**: Each entity gets dedicated database
-- **Shared Repositories**: Common databases (SEC, industry, economic data)
+- **Shared Repositories**: Public databases (SEC) accessible to all users
 - **DynamoDB Registry**: Track database allocation across instances
 - **API-First**: All access through REST APIs, no direct connections
 
@@ -238,12 +238,12 @@ High-performance data ingestion pipeline bridging raw data to LadybugDB:
 The platform offers multiple tiers with different isolation levels and capabilities:
 
 
-| Tier | Display Name | Isolation | Subgraphs | Description |
-|------|--------------|-----------|-----------|-------------|
-| `ladybug-standard` | LadybugDB Standard | Dedicated m7g.large (8 GB) | 3 max | Dedicated instance, cost-efficient entry tier |
+| Tier | Display Name | Instance | Subgraphs | Description |
+|------|--------------|----------|-----------|-------------|
+| `ladybug-standard` | LadybugDB Standard | Dedicated m7g.large (8 GB) | 3 max | Cost-efficient entry tier with subgraph support |
 | `ladybug-large` | LadybugDB Large | Dedicated r7g.large (16 GB) | 10 max | Enhanced performance for growing teams |
 | `ladybug-xlarge` | LadybugDB XLarge | Dedicated r7g.xlarge (32 GB) | 25 max | Maximum performance and scale |
-| `ladybug-shared` | — | Platform | — | Public repositories (SEC, industry, economic) |
+| `ladybug-shared` | — | Platform r7g.xlarge | — | Public repositories (SEC) |
 
 *Note: Neo4j backend tiers exist in the codebase but are experimental and disabled by default.*
 
@@ -328,14 +328,12 @@ adapters/
 │       ├── process.py      # sec_processed_filings asset
 │       ├── stage.py        # DuckDB staging assets
 │       ├── materialize.py  # LadybugDB materialization assets
-│       ├── jobs.py         # 12 SEC job definitions
-│       └── sensors.py      # 6 sensors + 1 schedule
-├── quickbooks/             # QuickBooks adapter (stubbed)
-│   ├── client/api.py       # QBClient - OAuth client
-│   └── processors/         # Transaction processing (stubbed)
-└── plaid/                  # Plaid adapter (stubbed)
-    ├── client/api.py       # PlaidClient
-    └── processors/         # Transaction sync (stubbed)
+│       ├── jobs.py         # Job definitions
+│       └── sensors.py      # Sensors + schedule
+├── quickbooks/             # QuickBooks adapter
+│   ├── client/             # QB OAuth client
+│   ├── dbt/                # dbt transforms (JSON → graph-shaped Parquet)
+│   └── pipeline/           # Dagster extract/transform/load assets
 ```
 
 **Adapter Pattern:**
@@ -363,7 +361,6 @@ The adapter directory structure is designed as a **merge boundary** for forks. A
 adapters/
 ├── sec/                 # ← Upstream (don't modify)
 ├── quickbooks/          # ← Upstream (don't modify)
-├── plaid/               # ← Upstream (don't modify)
 └── custom_*/            # ← Your namespace (upstream never touches)
     └── custom_erp/      #    Your custom integrations
 ```
@@ -439,7 +436,7 @@ This enables `git pull upstream main` without merge conflicts on your custom ada
 
 - **Primary Backend**: LadybugDB embedded graph database with columnar storage
 - **Multi-Tenant**: Separate database per entity (`kg12345abc`) with memory/storage isolation
-- **Shared Repositories**: SEC, industry, economic data in dedicated read-optimized clusters
+- **Shared Repositories**: Public datasets (SEC) served by dedicated read-only replica fleet
 - **Subgraphs**: Isolated workspaces for teams, AI memory, and environments (see [Subgraphs](#subgraphs-workspaces))
 - **Cypher Queries**: Full Cypher query language support for graph traversal and analytics
 
@@ -500,18 +497,22 @@ S3 storage is organized into four canonical buckets with consistent naming (`rob
 **Key Structure:**
 
 ```
-# Shared data (SEC, FRED, etc.)
+# Shared data (SEC)
 s3://robosystems-shared-raw-{env}/
-  sec/year=2024/{cik}/{accession}.zip
+  sec/{cik}/{accession}.zip
 
 s3://robosystems-shared-processed-{env}/
-  sec/year=2024/nodes/Entity/*.parquet
+  sec/processed/filed=2024-Q1/nodes/Entity/part_*.parquet
 
 # User/graph data
 s3://robosystems-user-{env}/
   user-staging/{user_id}/{graph_id}/{table}/*.parquet
   graph-backups/databases/{graph_id}/full/*.lbug.gz
-  graph-databases/{env}/{graph_id}/*.tar.gz
+
+# Shared repository databases (downloaded by replicas on boot)
+s3://robosystems-user-{env}/
+  shared-repositories/databases/sec.lbug
+  shared-repositories/databases/sec.duckdb
 ```
 
 **Configuration**: Path helpers are centralized in [`robosystems/config/storage/`](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/config/storage/README.md) with `shared.py` for external data sources and `graph.py` for customer graph storage
@@ -620,7 +621,7 @@ All infrastructure is managed through CloudFormation templates in `/cloudformati
 - **`graph-infra.yaml`**: Base infrastructure (DynamoDB registries, security groups, IAM roles, SNS alerts)
 - **`graph-volumes.yaml`**: EBS volume lifecycle management (auto-expansion, snapshots, retention)
 - **`graph-ladybug.yaml`**: Auto-scaling EC2 writer clusters for LadybugDB (multi-tenant and dedicated tiers)
-- **`graph-ladybug-replicas.yaml`**: Read replica fleet for shared repositories (SEC, industry, economic)
+- **`graph-ladybug-replicas.yaml`**: Read replica fleet for shared repositories (download .lbug/.duckdb from S3 on boot)
 
 #### Observability
 
@@ -730,30 +731,21 @@ See individual app repositories for specific deployment workflows.
 
 ### SEC EDGAR
 
-**Purpose**: Financial filing data source
+**Purpose**: Public company financial data
 
-- XBRL filing downloads via Dagster pipeline
-- Year-partitioned processing (2019-2025)
-- Arelle-based XBRL parsing and transformation
+- XBRL filing downloads via Dagster pipeline (quarterly partitions)
+- Arelle-based XBRL parsing with fastembed enrichment
+- Nightly automated incremental pipeline (download → process → stage → materialize → publish → replica refresh)
 - Rate-limited API access with backoff
 
 ### QuickBooks API
 
 **Purpose**: Accounting data synchronization
 
-- OAuth-based authentication
-- Real-time account sync
-- Transaction processing
-- Trial balance generation
-
-### Plaid API
-
-**Purpose**: Banking and financial institution connections
-
-- OAuth-based Link integration
-- Transaction synchronization via Dagster
-- Account balance tracking
-- Multi-institution support
+- OAuth 2.0 authentication with token management
+- Full dbt transformation pipeline (JSON → graph-shaped Parquet)
+- Dagster extract/transform/load assets
+- Full rebuild and incremental sync modes
 
 ### Anthropic Claude (via AWS Bedrock)
 
@@ -806,6 +798,7 @@ See individual app repositories for specific deployment workflows.
 
 **Wiki Guides:**
 - **[Bootstrap Guide](Bootstrap-Guide)** - Set up a fresh fork with AWS OIDC authentication
+- **[Data Pipeline Guide](Pipeline-Guide)** - Dagster data orchestration and custom integrations
 - **[SEC XBRL Pipeline](SEC-XBRL-Pipeline)** - Load and query SEC financial filings
 - **[Accounting Demo](Accounting-Demo)** - Interactive demo of graph-based accounting
 - **[Custom Graph Schema](Custom-Graph-Schema)** - Design and build custom graph databases

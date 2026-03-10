@@ -74,14 +74,15 @@ robosystems/adapters/
 │       ├── materialize.py      # LadybugDB materialization
 │       ├── entity_update.py    # Entity incremental update
 │       ├── backup.py           # SEC backup asset
-│       ├── jobs.py             # 12 SEC job definitions
-│       └── sensors.py          # 6 sensors + 1 schedule
-├── quickbooks/                 # QuickBooks adapter (stubbed)
+│       ├── jobs.py             # Job definitions
+│       └── sensors.py          # Sensors + schedule
+├── quickbooks/                 # QuickBooks adapter
 │   ├── client/                 # QB OAuth client
-│   └── processors/             # Transaction processing (stubbed)
-└── plaid/                      # Plaid adapter (stubbed)
+│   ├── dbt/                    # dbt transforms (JSON → graph-shaped Parquet)
+│   └── pipeline/               # Dagster extract/transform/load assets
+└── plaid/                      # Plaid adapter (scaffolded)
     ├── client/                 # Plaid API client
-    └── processors/             # Transaction sync (stubbed)
+    └── processors/             # Transaction sync
 
 robosystems/dagster/            # Platform orchestration (collector)
 ├── definitions.py              # Collects platform + adapter pipelines
@@ -116,7 +117,7 @@ Dagster runs on ECS Fargate (orchestration only). Heavy compute happens on the s
 ├──────────────────────────────────────────────────────────────┤
 │  SHARED REPLICAS (graph-ladybug-replicas.yaml)               │
 │  ├── ASG: Min=2, Max=10, TargetTracking on CPU               │
-│  ├── LaunchTemplate: SnapshotId updated by Dagster job       │
+│  ├── S3 download: Pull .lbug + .duckdb from S3 on boot      │
 │  ├── Instance: r7g.medium (read-only, smaller than master)   │
 │  └── ALB on port 8001, health check /status                  │
 └──────────────────────────────────────────────────────────────┘
@@ -133,23 +134,23 @@ Dagster runs on ECS Fargate (orchestration only). Heavy compute happens on the s
 | Parquet to S3             | ✅ Handles         | -                         |
 | DuckDB staging            | -                  | ✅ Graph API handles      |
 | LadybugDB materialization | -                  | ✅ Graph API handles      |
-| EBS snapshots             | ✅ AWS API calls   | Source volume             |
+| S3 publish (.lbug/.duckdb)| ✅ Orchestrates    | ✅ Uploads files          |
 | Replica refresh           | ✅ AWS API calls   | -                         |
 
-### Snapshot → Replica Flow
+### S3 Publish → Replica Refresh Flow
 
 ```
-1. Dagster job: create_snapshot()
-   └── EBS snapshot of master's volume (tagged with run_id)
+1. Dagster sensor: sec_post_materialize_publish_sensor
+   ├── Publish .lbug to S3 (LadybugDB graph database)
+   └── Publish .duckdb to S3 (DuckDB with embeddings for vector search)
 
-2. Dagster job: update_replica_launch_template()
-   └── Update ASG launch template with new SnapshotId
+2. Dagster sensor: triggers shared_repository_refresh_replicas_job
+   └── Rolling ASG instance refresh (min_healthy=100%, max_healthy=200%)
 
-3. Dagster job: refresh_replica_instances()
-   └── Trigger rolling instance refresh (ASG replaces instances)
-
-4. New replicas boot with updated data
-   └── Mount snapshot, start container, register with ALB
+3. New replicas boot alongside old ones
+   ├── Download .lbug + .duckdb from S3 (~15 min for ~85GB)
+   ├── Start Graph API, pass health check
+   └── Register with ALB, old instance terminated
 ```
 
 ---
@@ -230,7 +231,7 @@ All pipelines use DuckDB staging regardless of source:
 
 | Aspect        | Shared Repos (SEC)       | Company Graphs (QuickBooks) |
 | ------------- | ------------------------ | --------------------------- |
-| Write pattern | Rebuild weekly/monthly   | Incremental daily           |
+| Write pattern | Nightly incremental + rebuild | Incremental daily      |
 | Read pattern  | High volume, cacheable   | Low volume, fresh           |
 | Scaling       | Horizontal (replicas)    | Vertical (bigger instance)  |
 | Data size     | 1TB+                     | 1-100GB                     |
@@ -245,7 +246,7 @@ All pipelines use DuckDB staging regardless of source:
 | **Dagster (all jobs)**     | ECS Fargate   | None (ephemeral)      | Orchestration only. Heavy compute via Graph API.    |
 | **Shared master**          | Raw EC2 + ASG | Dynamic (Vol Manager) | Graph API handles DuckDB + LadybugDB.               |
 | **Customer graph writers** | Raw EC2 + ASG | Dynamic per-customer  | Volume Manager assigns EBS per customer allocation. |
-| **Shared replicas**        | Raw EC2 + ASG | Snapshot-restored     | All replicas identical. EBS from snapshot at launch.|
+| **Shared replicas**        | Raw EC2 + ASG | S3 download at boot   | All replicas identical. Download .lbug/.duckdb from S3.|
 
 ### Why Fargate for Dagster
 
@@ -255,7 +256,7 @@ All pipelines use DuckDB staging regardless of source:
 - Process with Arelle → parquet (CPU-bound, Fargate handles)
 - Upload parquet to S3 (network I/O)
 - Call Graph API for materialization (HTTP call, master does work)
-- AWS API calls for snapshots/replicas (lightweight)
+- AWS API calls for replica refresh (lightweight)
 
 **Benefits:**
 - Simpler infrastructure (no EC2 capacity provider)
@@ -283,7 +284,7 @@ All pipelines use DuckDB staging regardless of source:
 | **DuckDB-only staging**           | Standardized validation layer for all pipelines                                 |
 | **Two pipeline patterns**         | Arelle for XBRL semantics (SEC), dbt for API JSON transforms (QB/Plaid)         |
 | **GitHub repos for adapters**     | Customization is the value prop; dbt projects don't fit pip                     |
-| **EBS snapshots for replicas**    | Dagster creates snapshot, updates ASG launch template, triggers refresh         |
+| **S3 publish for replicas**       | Dagster publishes to S3, triggers rolling refresh; replicas download on boot    |
 
 ---
 
