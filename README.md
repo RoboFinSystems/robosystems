@@ -34,7 +34,7 @@ brew install uv just
 just start
 
 # Start robosystems with frontend apps (robosystems-app, roboledger-app, roboinvestor-app)
-just start all
+just start apps
 ```
 
 This initializes the `.env` file and starts the complete RoboSystems stack with:
@@ -53,7 +53,7 @@ This initializes the `.env` file and starts the complete RoboSystems stack with:
 | Graph API  | http://localhost:8001 |
 | Dagster UI | http://localhost:8002 |
 
-With `just start all` (frontend apps):
+With `just start apps` (frontend apps):
 
 | App              | URL                   |
 | ---------------- | --------------------- |
@@ -68,7 +68,7 @@ With `just start all` (frontend apps):
 just init
 ```
 
-## Examples & Demos
+## Examples
 
 See RoboSystems in action with runnable demos that create graphs, load data, and execute queries with the `robosystems-client`:
 
@@ -77,10 +77,6 @@ just demo-sec               # Loads NVIDIA's SEC XBRL data via Dagster pipeline
 just demo-accounting        # Creates chart of accounts with 6 months of transactions
 just demo-custom-graph      # Builds custom graph schema with relationship networks
 ```
-
-- **[SEC Demo](/examples/sec_demo)** - Real public company financials from SEC XBRL filings
-- **[Accounting Demo](/examples/accounting_demo)** - Double-entry bookkeeping with trial balance and financial statements
-- **[Custom Graph Demo](/examples/custom_graph_demo)** - Generic graph with custom schema and relationship patterns
 
 Each demo has a corresponding [Wiki article](https://github.com/RoboFinSystems/robosystems/wiki) with detailed guides.
 
@@ -98,10 +94,10 @@ just test-cov               # Tests with coverage
 ### Log Monitoring
 
 ```bash
-just logs api                        # View API logs (last 100 lines)
-just logs api lines=200              # View more lines
-just logs api follow=1               # Tail API logs
-just logs-grep api "pipeline" 500    # Search API logs
+just logs api                 # View API logs (last 100 lines)
+just logs graph-api           # View Graph API logs (last 100 lines)
+just logs dagster-webserver   # View Dagster Webserver logs
+just logs dagster-daemon      # View Dagster Daemon logs
 ```
 
 **See [justfile](justfile) for 50+ development commands** including database migrations, CloudFormation linting, graph operations, administration, and more.
@@ -133,7 +129,7 @@ RoboSystems is built on a modern, scalable architecture with:
 
 **Application Layer:**
 
-- FastAPI REST API with versioned endpoints (`/v1/`)
+- FastAPI REST API with versioned endpoints
 - MCP Server for AI-powered graph database access
 - Agent Interface for text-to-Cypher natural language queries
 - Dagster for data pipeline orchestration and background jobs
@@ -143,7 +139,7 @@ RoboSystems is built on a modern, scalable architecture with:
 - Embedded columnar graph database purpose-built for financial analytics
 - Native DuckDB integration for high-performance staging and ingestion
 - Tiered infrastructure with configurable memory, rate limits, and subgraph allocations
-- Shared tier hosts public repositories (SEC, industry, economic) with read replicas
+- Shared tier hosts public repositories with read replicas
 
 **Data Layer:**
 
@@ -154,10 +150,11 @@ RoboSystems is built on a modern, scalable architecture with:
 
 **Infrastructure:**
 
-- ECS Fargate for API, Workers, and Dagster (ARM64/Graviton with Spot capacity)
-- EC2 auto-scaling groups for LadybugDB writer clusters
+- ECS Fargate for API and Dagster
+- EC2 ASG for LadybugDB writer clusters
+- EC2 ALB + ASG for LadybugDB shared replica clusters
 - RDS PostgreSQL + ElastiCache Valkey
-- CloudFormation infrastructure deployed via GitHub Actions (OIDC)
+- CloudFormation infrastructure deployed via GitHub Actions with OIDC
 
 **For detailed architecture documentation, see the [Architecture Overview](https://github.com/RoboFinSystems/robosystems/wiki/Architecture-Overview) in the Wiki.**
 
@@ -165,14 +162,14 @@ RoboSystems is built on a modern, scalable architecture with:
 
 A curated knowledge graph of US public company financial data from SEC EDGAR XBRL filings. Runs on the shared LadybugDB tier, accessible via MCP tools, Cypher queries, and the AI agent.
 
-**Pipeline**: EDGAR → Download → Process (Parquet) → Enrich (fastembed) → Stage (DuckDB) → Materialize (LadybugDB)
+**Pipeline**: EDGAR → Download → Process (Parquet) → Stage (DuckDB) → Enrich (fastembed) → Materialize (LadybugDB)
 
-**Graph**: 14 node types (`Entity`, `Report`, `Fact`, `Element`, `Structure`, `Association`, `FactSet`, `Classification`, ...) and 24 relationship types modeling the full XBRL reporting hierarchy — from company filings down to individual financial facts with their taxonomy relationships and disclosure classifications.
+**Graph**: 14 node types (`Entity`, `Report`, `Fact`, `Element`, `Structure`, `Association`, ...) and 24 relationship types modeling the full XBRL reporting hierarchy — from company filings down to individual financial facts with their taxonomy relationships and disclosure classifications.
 
-**Enrichment**: Every element is mapped to ~50 canonical financial concepts (revenue, net_income, total_assets, etc.) via fastembed cosine similarity. Structures are classified by statement type. Associations are tagged with disclosure types from [the Seattle Method](http://xbrlsite.com/seattlemethod/SeattleMethod.pdf) [disclosure-mechanics taxonomy](http://xbrlsite.azurewebsites.net/2020/reporting-scheme/us-gaap/disclosure-mechanics/disclosure-mechanics_ALL.xsd). Offline knowledge artifacts (PageRank, BFS classification, cross-filing consensus) refine confidence scores using an [icebug](https://github.com/Ladybug-Memory/icebug) graph built from the full corpus.
+**Enrichment**: Every element is mapped to ~50 canonical financial concepts (revenue, net_income, total_assets, etc.) via fastembed cosine similarity. Structures are classified by statement type. Associations are tagged with disclosure types from the [Seattle Method](http://xbrlsite.com/seattlemethod/SeattleMethod.pdf) disclosure-mechanics taxonomy. Offline knowledge artifacts (PageRank, BFS classification, cross-filing consensus) refine confidence scores using an [icebug](https://github.com/Ladybug-Memory/icebug) graph built from the full corpus.
 
 ```bash
-just sec-load NVDA 2025  # Load NVIDIA filings locally
+just sec-load NVDA 2025  # Load NVIDIA filings for 2025
 just sec-health          # Check SEC database health
 ```
 
@@ -182,9 +179,9 @@ See [SEC Adapter](/robosystems/adapters/sec/README.md) and [SEC Pipeline](/robos
 
 ### Model Context Protocol (MCP)
 
-- **Financial Analysis**: Natural language queries across entity and benchmark data
-- **Cross-Database Queries**: Compare entity data against SEC public data
-- **Tools**: Rich toolkit for graph queries, schema introspection, fact discovery, AI memory operations, workspace management, and cross-database financial analysis
+- **Financial Analysis**: Natural language queries across enterprise data and public benchmark data
+- **Cross-Database Queries**: Compare user graph data against SEC shared repository data
+- **Tools**: Rich toolkit for graph queries, schema introspection, fact discovery, financial analysis, and AI memory operations
 - **Handler Pool**: Managed MCP handler instances with resource limits
 
 ### Agent System
@@ -197,9 +194,8 @@ See [SEC Adapter](/robosystems/adapters/sec/README.md) and [SEC Pipeline](/robos
 ### Credit System
 
 - **AI Operations Only**: Credits are consumed exclusively by AI agent calls (Anthropic Claude via AWS Bedrock)
-- **Token-Based Billing**: ~38 credits per agent call, billed on actual token usage
-- **Storage Included**: All database operations, queries, imports, exports, and storage are included in tier pricing
-- **MCP Tool Access**: Unlimited — no credits consumed for external MCP tool calls
+- **Token-Based Billing**: ~1-2 credits per text-to-Cypher call based on actual token usage and cost
+- **MCP Tool Access**: No credits consumed for external MCP calls not using agent-based tools
 
 ## Client Libraries
 
@@ -248,20 +244,22 @@ pip install robosystems-client
 - **[Getting Started](https://github.com/RoboFinSystems/robosystems/wiki)** - Quick start and overview
 - **[Bootstrap Guide](https://github.com/RoboFinSystems/robosystems/wiki/Bootstrap-Guide)** - Fork and deploy to your AWS account
 - **[Architecture Overview](https://github.com/RoboFinSystems/robosystems/wiki/Architecture-Overview)** - System design and components
+- **[Data Pipeline Guide](https://github.com/RoboFinSystems/robosystems/wiki/Pipeline-Guide)** - Dagster data orchestration and custom integrations
 - **[SEC XBRL Pipeline](https://github.com/RoboFinSystems/robosystems/wiki/SEC-XBRL-Pipeline)** - Working with SEC financial data
-- **[Accounting Demo](https://github.com/RoboFinSystems/robosystems/wiki/Accounting-Demo)** - Complete guide to graph-based accounting workflows
+- **[Accounting Demo](https://github.com/RoboFinSystems/robosystems/wiki/Accounting-Demo)** - Complete guide to graph-based accounting demo
+- **[Custom Graph Demo](https://github.com/RoboFinSystems/robosystems/wiki/Custom-Graph-Schema)** - Guide for creating a custom schema graph demo
 
 ### Developer Documentation (Codebase)
 
 **Core Services:**
 
+- **[Adapters](/robosystems/adapters/README.md)** - External service integrations
 - **[Operations](/robosystems/operations/README.md)** - Business workflow orchestration
-- **[Adapters](/robosystems/adapters/README.md)** - External service integrations (SEC, QuickBooks)
 - **[Schemas](/robosystems/schemas/README.md)** - Graph schema definitions
-- **[IAM Models](/robosystems/models/iam/README.md)** - Database models and migrations
-- **[API Models](/robosystems/models/api/README.md)** - API request/response models
 - **[Configuration](/robosystems/config/README.md)** - Configuration management
 - **[Dagster](/robosystems/dagster/README.md)** - Data pipeline and task orchestration
+- **[IAM Models](/robosystems/models/iam/README.md)** - Database models and migrations
+- **[API Models](/robosystems/models/api/README.md)** - API request/response models
 
 **Graph Database System:**
 
@@ -293,7 +291,7 @@ pip install robosystems-client
 **Security & Compliance:**
 
 - **[SECURITY.md](/SECURITY.md)** - Security features
-- **[COMPLIANCE.md](/COMPLIANCE.md)** - SOC 2 compliance
+- **[COMPLIANCE.md](/COMPLIANCE.md)** - SOC 2 compliance features
 
 ## API Reference
 

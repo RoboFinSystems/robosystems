@@ -2,8 +2,7 @@
 
 The sec_processing_sensor is covered in test_sec.py.
 This file covers the incremental pipeline chain sensors:
-- sec_download_to_process_sensor
-- sec_incremental_staging_sensor
+- sec_incremental_pipeline_sensor (download → process loop → stage)
 - sec_stage_to_materialize_sensor
 - sec_incremental_download_schedule
 """
@@ -15,16 +14,14 @@ import pytest
 from dagster import (
   DagsterRunStatus,
   RunRequest,
-  SkipReason,
   build_schedule_context,
-  build_sensor_context,
 )
 
 from robosystems.adapters.sec.pipeline.sensors import (
   _get_quarters_to_scan,
-  sec_download_to_process_sensor,
   sec_incremental_download_schedule,
-  sec_incremental_staging_sensor,
+  sec_incremental_pipeline_sensor,
+  sec_post_materialize_publish_sensor,
   sec_stage_to_materialize_sensor,
 )
 
@@ -71,8 +68,11 @@ def _build_run_status_context(
 
 
 @pytest.mark.unit
-class TestSecDownloadToProcessSensor:
-  """Tests for sec_download_to_process_sensor."""
+class TestSecIncrementalPipelineSensor:
+  """Tests for sec_incremental_pipeline_sensor.
+
+  This sensor orchestrates: download → process (batched loop) → stage.
+  """
 
   @patch("robosystems.adapters.sec.pipeline.sensors.env")
   def test_skips_in_dev_environment(self, mock_env):
@@ -80,12 +80,12 @@ class TestSecDownloadToProcessSensor:
     mock_env.ENVIRONMENT = "dev"
 
     context = _build_run_status_context(
-      sensor_name="sec_download_to_process_sensor",
+      sensor_name="sec_incremental_pipeline_sensor",
       tags={"mode": "incremental", "dagster/partition": "2025-Q1"},
     )
 
-    result = list(sec_download_to_process_sensor(context))
-    assert len(result) == 0  # Returns nothing (info log only)
+    result = list(sec_incremental_pipeline_sensor(context))
+    assert len(result) == 0
 
   @patch("robosystems.adapters.sec.pipeline.sensors.env")
   def test_skips_non_incremental_runs(self, mock_env):
@@ -93,11 +93,11 @@ class TestSecDownloadToProcessSensor:
     mock_env.ENVIRONMENT = "prod"
 
     context = _build_run_status_context(
-      sensor_name="sec_download_to_process_sensor",
+      sensor_name="sec_incremental_pipeline_sensor",
       tags={"mode": "backfill", "dagster/partition": "2025-Q1"},
     )
 
-    result = list(sec_download_to_process_sensor(context))
+    result = list(sec_incremental_pipeline_sensor(context))
     assert len(result) == 0
 
   @patch("robosystems.adapters.sec.pipeline.sensors.env")
@@ -106,23 +106,23 @@ class TestSecDownloadToProcessSensor:
     mock_env.ENVIRONMENT = "prod"
 
     context = _build_run_status_context(
-      sensor_name="sec_download_to_process_sensor",
-      tags={"mode": "incremental"},  # Missing dagster/partition
+      sensor_name="sec_incremental_pipeline_sensor",
+      tags={"mode": "incremental"},
     )
 
-    result = list(sec_download_to_process_sensor(context))
+    result = list(sec_incremental_pipeline_sensor(context))
     assert len(result) == 0
 
   @patch("robosystems.adapters.sec.pipeline.sensors.env")
-  def test_yields_run_request_for_incremental(self, mock_env):
-    """Test sensor yields RunRequest for incremental download success."""
+  def test_download_triggers_process(self, mock_env):
+    """Test download success triggers first process batch."""
     mock_env.ENVIRONMENT = "prod"
 
     from dagster import DagsterInstance
 
     with DagsterInstance.ephemeral() as instance:
       context = _build_run_status_context(
-        sensor_name="sec_download_to_process_sensor",
+        sensor_name="sec_incremental_pipeline_sensor",
         job_name="sec_download",
         run_id="run-abc123",
         tags={
@@ -134,13 +134,14 @@ class TestSecDownloadToProcessSensor:
         get_runs_return=[],
       )
 
-      result = list(sec_download_to_process_sensor(context))
+      result = list(sec_incremental_pipeline_sensor(context))
 
     assert len(result) == 1
     assert isinstance(result[0], RunRequest)
+    assert result[0].job_name == "sec_process"
     assert result[0].partition_key == "2025-Q1"
     assert result[0].tags["mode"] == "incremental"
-    assert result[0].tags["pipeline"] == "sec"
+    assert result[0].tags["batch_id"] == "20250225-21"
 
   @patch("robosystems.adapters.sec.pipeline.sensors.env")
   def test_skips_when_process_already_running(self, mock_env):
@@ -154,7 +155,7 @@ class TestSecDownloadToProcessSensor:
 
     with DagsterInstance.ephemeral() as instance:
       context = _build_run_status_context(
-        sensor_name="sec_download_to_process_sensor",
+        sensor_name="sec_incremental_pipeline_sensor",
         job_name="sec_download",
         run_id="run-abc123",
         tags={
@@ -165,109 +166,185 @@ class TestSecDownloadToProcessSensor:
         get_runs_return=[active_run],
       )
 
-      result = list(sec_download_to_process_sensor(context))
+      result = list(sec_incremental_pipeline_sensor(context))
 
     assert len(result) == 0
 
-
-@pytest.mark.unit
-class TestSecIncrementalStagingSensor:
-  """Tests for sec_incremental_staging_sensor."""
-
-  @patch("robosystems.adapters.sec.pipeline.sensors.env")
-  def test_skips_in_dev_environment(self, mock_env):
-    """Test sensor skips in dev environment."""
-    mock_env.ENVIRONMENT = "dev"
-
-    context = build_sensor_context()
-    result = list(sec_incremental_staging_sensor(context))
-
-    assert len(result) == 1
-    assert isinstance(result[0], SkipReason)
-    assert "dev" in str(result[0]).lower()
-
   @patch("robosystems.database.session")
   @patch("robosystems.adapters.sec.pipeline.sensors.env")
-  def test_skips_when_pending_files_exist(self, mock_env, mock_session_factory):
-    """Test sensor skips when pending files still exist."""
+  def test_process_retriggers_when_pending_remain(self, mock_env, mock_session_factory):
+    """Test process success re-triggers another batch when pending files remain."""
     mock_env.ENVIRONMENT = "prod"
 
+    # Mock SourceFile query returning pending files for the partition
     mock_session = MagicMock()
     mock_query = MagicMock()
     mock_query.filter.return_value = mock_query
-    mock_query.count.return_value = 42  # 42 pending files
+    mock_query.all.return_value = [
+      ("2025-Q1_0001234567_0001234567-25-000001",),
+      ("2025-Q1_0001234567_0001234567-25-000002",),
+    ]
     mock_session.query.return_value = mock_query
     mock_session_factory.return_value = mock_session
 
-    context = build_sensor_context()
-    result = list(sec_incremental_staging_sensor(context))
+    from dagster import DagsterInstance
+
+    with DagsterInstance.ephemeral() as instance:
+      context = _build_run_status_context(
+        sensor_name="sec_incremental_pipeline_sensor",
+        job_name="sec_process",
+        run_id="run-proc-001",
+        tags={
+          "mode": "incremental",
+          "dagster/partition": "2025-Q1",
+          "quarter": "2025-Q1",
+          "batch_id": "20250225-21",
+        },
+        instance=instance,
+        get_runs_return=[],
+      )
+
+      result = list(sec_incremental_pipeline_sensor(context))
 
     assert len(result) == 1
-    assert isinstance(result[0], SkipReason)
-    assert "42" in str(result[0]) or "pending" in str(result[0]).lower()
+    assert isinstance(result[0], RunRequest)
+    assert result[0].job_name == "sec_process"
+    assert result[0].partition_key == "2025-Q1"
 
   @patch("robosystems.database.session")
   @patch("robosystems.adapters.sec.pipeline.sensors.env")
-  def test_skips_when_no_recently_processed(self, mock_env, mock_session_factory):
-    """Test sensor skips when no recently processed files."""
+  def test_process_triggers_stage_when_queue_drained(
+    self, mock_env, mock_session_factory
+  ):
+    """Test process success triggers staging when no pending files remain."""
     mock_env.ENVIRONMENT = "prod"
 
+    # Mock SourceFile query returning no pending files
     mock_session = MagicMock()
     mock_query = MagicMock()
     mock_query.filter.return_value = mock_query
-    # First count() = 0 pending files, second count() = 0 recent files
-    mock_query.count.side_effect = [0, 0]
+    mock_query.all.return_value = []  # No pending files
     mock_session.query.return_value = mock_query
     mock_session_factory.return_value = mock_session
 
-    context = build_sensor_context()
-    result = list(sec_incremental_staging_sensor(context))
+    from dagster import DagsterInstance
+
+    with DagsterInstance.ephemeral() as instance:
+      context = _build_run_status_context(
+        sensor_name="sec_incremental_pipeline_sensor",
+        job_name="sec_process",
+        run_id="run-proc-final",
+        tags={
+          "mode": "incremental",
+          "dagster/partition": "2025-Q1",
+          "quarter": "2025-Q1",
+          "batch_id": "20250225-21",
+        },
+        instance=instance,
+        get_runs_return=[],
+      )
+
+      result = list(sec_incremental_pipeline_sensor(context))
 
     assert len(result) == 1
-    assert isinstance(result[0], SkipReason)
-    assert "recently processed" in str(result[0]).lower()
+    assert isinstance(result[0], RunRequest)
+    assert result[0].job_name == "sec_incremental_stage"
+    assert result[0].tags["phase"] == "incremental_stage"
+    assert result[0].tags["mode"] == "incremental"
+
+  @patch("robosystems.database.session")
+  @patch("robosystems.adapters.sec.pipeline.sensors.env")
+  def test_waits_for_other_partitions_before_staging(
+    self, mock_env, mock_session_factory
+  ):
+    """Test sensor waits when this partition is done but others still have pending files."""
+    mock_env.ENVIRONMENT = "prod"
+
+    # This partition (2025-Q1) is drained, but 2024-Q4 still has pending files
+    mock_session = MagicMock()
+    mock_query = MagicMock()
+    mock_query.filter.return_value = mock_query
+    mock_query.all.return_value = [
+      ("2024-Q4_0001234567_0001234567-24-000001",),
+      ("2024-Q4_0001234567_0001234567-24-000002",),
+    ]
+    mock_session.query.return_value = mock_query
+    mock_session_factory.return_value = mock_session
+
+    context = _build_run_status_context(
+      sensor_name="sec_incremental_pipeline_sensor",
+      job_name="sec_process",
+      run_id="run-proc-q1-done",
+      tags={
+        "mode": "incremental",
+        "dagster/partition": "2025-Q1",
+        "quarter": "2025-Q1",
+        "batch_id": "20250401-21",
+      },
+    )
+
+    result = list(sec_incremental_pipeline_sensor(context))
+
+    # Should not trigger stage or another process run
+    assert len(result) == 0
+
+  @patch("robosystems.database.session")
+  @patch("robosystems.adapters.sec.pipeline.sensors.env")
+  def test_skips_stage_when_stage_already_running(self, mock_env, mock_session_factory):
+    """Test sensor skips staging when stage job is already running."""
+    mock_env.ENVIRONMENT = "prod"
+
+    # Mock no pending files
+    mock_session = MagicMock()
+    mock_query = MagicMock()
+    mock_query.filter.return_value = mock_query
+    mock_query.all.return_value = []
+    mock_session.query.return_value = mock_query
+    mock_session_factory.return_value = mock_session
+
+    from dagster import DagsterInstance
+
+    active_run = MagicMock()
+    active_run.run_id = "active-stage-run"
+
+    with DagsterInstance.ephemeral() as instance:
+      context = _build_run_status_context(
+        sensor_name="sec_incremental_pipeline_sensor",
+        job_name="sec_process",
+        run_id="run-proc-final",
+        tags={
+          "mode": "incremental",
+          "dagster/partition": "2025-Q1",
+          "quarter": "2025-Q1",
+        },
+        instance=instance,
+        get_runs_return=[active_run],
+      )
+
+      result = list(sec_incremental_pipeline_sensor(context))
+
+    assert len(result) == 0
 
   @patch("robosystems.database.session")
   @patch("robosystems.adapters.sec.pipeline.sensors.env")
   def test_handles_database_error(self, mock_env, mock_session_factory):
-    """Test sensor handles database errors gracefully."""
+    """Test sensor handles database errors gracefully on process completion."""
     mock_env.ENVIRONMENT = "prod"
     mock_session_factory.side_effect = Exception("DB connection refused")
 
-    context = build_sensor_context()
-    result = list(sec_incremental_staging_sensor(context))
+    context = _build_run_status_context(
+      sensor_name="sec_incremental_pipeline_sensor",
+      job_name="sec_process",
+      run_id="run-proc-001",
+      tags={
+        "mode": "incremental",
+        "dagster/partition": "2025-Q1",
+        "quarter": "2025-Q1",
+      },
+    )
 
-    assert len(result) == 1
-    assert isinstance(result[0], SkipReason)
-    assert "Database error" in str(result[0])
-
-  @patch("robosystems.database.session")
-  @patch("robosystems.adapters.sec.pipeline.sensors.env")
-  def test_yields_run_request_when_processing_complete(
-    self, mock_env, mock_session_factory
-  ):
-    """Test sensor yields RunRequest when all pending files are processed."""
-    from dagster import DagsterInstance
-
-    mock_env.ENVIRONMENT = "prod"
-
-    mock_session = MagicMock()
-    mock_query = MagicMock()
-    mock_query.filter.return_value = mock_query
-    # First count() = 0 pending, second count() = 100 recently processed
-    mock_query.count.side_effect = [0, 100]
-    mock_session.query.return_value = mock_query
-    mock_session_factory.return_value = mock_session
-
-    with DagsterInstance.ephemeral() as instance:
-      with patch.object(instance, "get_runs", return_value=[]):
-        context = build_sensor_context(instance=instance)
-        result = list(sec_incremental_staging_sensor(context))
-
-    assert len(result) == 1
-    assert isinstance(result[0], RunRequest)
-    assert result[0].tags["pipeline"] == "sec"
-    assert result[0].tags["mode"] == "incremental"
+    result = list(sec_incremental_pipeline_sensor(context))
+    assert len(result) == 0  # Returns nothing on DB error
 
 
 @pytest.mark.unit
@@ -347,6 +424,138 @@ class TestSecStageToMaterializeSensor:
       )
 
       result = list(sec_stage_to_materialize_sensor(context))
+
+    assert len(result) == 0
+
+
+@pytest.mark.unit
+class TestSecPostMaterializePublishSensor:
+  """Tests for sec_post_materialize_publish_sensor.
+
+  This sensor orchestrates: materialize → lbug S3 publish → duckdb S3 publish → replica refresh.
+  """
+
+  @patch("robosystems.adapters.sec.pipeline.sensors.env")
+  def test_skips_in_dev_environment(self, mock_env):
+    """Test sensor skips in dev environment."""
+    mock_env.ENVIRONMENT = "dev"
+
+    context = _build_run_status_context(
+      sensor_name="sec_post_materialize_publish_sensor",
+      job_name="sec_materialize",
+      tags={"mode": "incremental"},
+    )
+
+    result = list(sec_post_materialize_publish_sensor(context))
+    assert len(result) == 0
+
+  @patch("robosystems.adapters.sec.pipeline.sensors.env")
+  def test_skips_non_incremental_runs(self, mock_env):
+    """Test sensor skips non-incremental runs."""
+    mock_env.ENVIRONMENT = "prod"
+
+    context = _build_run_status_context(
+      sensor_name="sec_post_materialize_publish_sensor",
+      job_name="sec_materialize",
+      tags={"mode": "full"},
+    )
+
+    result = list(sec_post_materialize_publish_sensor(context))
+    assert len(result) == 0
+
+  @patch("robosystems.adapters.sec.pipeline.sensors.env")
+  def test_materialize_triggers_lbug_publish(self, mock_env):
+    """Test materialize success triggers lbug S3 publish."""
+    mock_env.ENVIRONMENT = "prod"
+
+    from dagster import DagsterInstance
+
+    with DagsterInstance.ephemeral() as instance:
+      context = _build_run_status_context(
+        sensor_name="sec_post_materialize_publish_sensor",
+        job_name="sec_materialize",
+        run_id="run-mat-001",
+        tags={"mode": "incremental"},
+        instance=instance,
+        get_runs_return=[],
+      )
+
+      result = list(sec_post_materialize_publish_sensor(context))
+
+    assert len(result) == 1
+    assert isinstance(result[0], RunRequest)
+    assert result[0].job_name == "sec_lbug_s3_publish"
+    assert result[0].tags["phase"] == "lbug_s3_publish"
+
+  @patch("robosystems.adapters.sec.pipeline.sensors.env")
+  def test_lbug_publish_triggers_duckdb_publish(self, mock_env):
+    """Test lbug publish success triggers duckdb S3 publish."""
+    mock_env.ENVIRONMENT = "prod"
+
+    from dagster import DagsterInstance
+
+    with DagsterInstance.ephemeral() as instance:
+      context = _build_run_status_context(
+        sensor_name="sec_post_materialize_publish_sensor",
+        job_name="sec_lbug_s3_publish",
+        run_id="run-lbug-001",
+        tags={"mode": "incremental"},
+        instance=instance,
+        get_runs_return=[],
+      )
+
+      result = list(sec_post_materialize_publish_sensor(context))
+
+    assert len(result) == 1
+    assert isinstance(result[0], RunRequest)
+    assert result[0].job_name == "sec_duckdb_s3_publish"
+    assert result[0].tags["phase"] == "duckdb_s3_publish"
+
+  @patch("robosystems.adapters.sec.pipeline.sensors.env")
+  def test_duckdb_publish_triggers_replica_refresh(self, mock_env):
+    """Test duckdb publish success triggers replica refresh."""
+    mock_env.ENVIRONMENT = "prod"
+
+    from dagster import DagsterInstance
+
+    with DagsterInstance.ephemeral() as instance:
+      context = _build_run_status_context(
+        sensor_name="sec_post_materialize_publish_sensor",
+        job_name="sec_duckdb_s3_publish",
+        run_id="run-duckdb-001",
+        tags={"mode": "incremental"},
+        instance=instance,
+        get_runs_return=[],
+      )
+
+      result = list(sec_post_materialize_publish_sensor(context))
+
+    assert len(result) == 1
+    assert isinstance(result[0], RunRequest)
+    assert result[0].job_name == "shared_repository_refresh_replicas_job"
+    assert result[0].tags["phase"] == "replica_refresh"
+
+  @patch("robosystems.adapters.sec.pipeline.sensors.env")
+  def test_skips_when_next_job_already_running(self, mock_env):
+    """Test sensor skips when next job is already running."""
+    mock_env.ENVIRONMENT = "prod"
+
+    from dagster import DagsterInstance
+
+    active_run = MagicMock()
+    active_run.run_id = "active-publish-run"
+
+    with DagsterInstance.ephemeral() as instance:
+      context = _build_run_status_context(
+        sensor_name="sec_post_materialize_publish_sensor",
+        job_name="sec_materialize",
+        run_id="run-mat-001",
+        tags={"mode": "incremental"},
+        instance=instance,
+        get_runs_return=[active_run],
+      )
+
+      result = list(sec_post_materialize_publish_sensor(context))
 
     assert len(result) == 0
 

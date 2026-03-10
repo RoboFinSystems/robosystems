@@ -36,10 +36,10 @@ Pipeline stages (run independently via separate jobs):
 6. ARTIFACTS (graph-based confidence refinement):
    - sec_knowledge_artifacts - Generate element + structure knowledge artifacts
 
-Post-materialization lineage (asset deps, not sensors):
-  sec_graph_materialized -> sec_lbug_s3_published -> shared_replicas_refreshed
-  sec_graph_materialized -> sec_lbug_r2_published
-  sec_historical_materialized -> sec_historical_lbug_s3_published -> shared_replicas_refreshed
+Nightly incremental chain (sensor-driven):
+  download → process (250 batch loop) → stage (DuckDB INSERT)
+  → materialize (full LadybugDB rebuild) → lbug S3 publish
+  → duckdb S3 publish → replica refresh
 
 Usage:
     from robosystems.adapters.sec.pipeline import get_dagster_components
@@ -91,6 +91,7 @@ from robosystems.adapters.sec.pipeline.jobs import (
   sec_historical_staged_materialize_job,
   sec_incremental_stage_job,
   sec_lbug_r2_publish_job,
+  sec_lbug_s3_publish_job,
   sec_materialize_job,
   sec_process_job,
   sec_stage_job,
@@ -107,9 +108,9 @@ from robosystems.adapters.sec.pipeline.s3_publish import (
   sec_lbug_s3_published,
 )
 from robosystems.adapters.sec.pipeline.sensors import (
-  sec_download_to_process_sensor,
   sec_incremental_download_schedule,
-  sec_incremental_staging_sensor,
+  sec_incremental_pipeline_sensor,
+  sec_post_materialize_publish_sensor,
   sec_processing_sensor,
   sec_stage_to_materialize_sensor,
 )
@@ -154,6 +155,7 @@ def get_dagster_components():
       sec_historical_staged_materialize_job,
       sec_incremental_stage_job,
       sec_entity_update_job,
+      sec_lbug_s3_publish_job,
       sec_duckdb_s3_publish_job,
       sec_historical_duckdb_s3_publish_job,
       sec_lbug_r2_publish_job,
@@ -162,9 +164,9 @@ def get_dagster_components():
     ],
     "sensors": [
       sec_processing_sensor,
-      sec_download_to_process_sensor,
-      sec_incremental_staging_sensor,
+      sec_incremental_pipeline_sensor,
       sec_stage_to_materialize_sensor,
+      sec_post_materialize_publish_sensor,
     ],
     "schedules": [
       sec_incremental_download_schedule,
@@ -190,7 +192,6 @@ __all__ = [
   "get_dagster_components",
   "sec_artifact_generation_job",
   "sec_download_job",
-  "sec_download_to_process_sensor",
   "sec_duckdb_incremental_staged",
   "sec_duckdb_s3_publish_job",
   "sec_duckdb_s3_published",
@@ -208,13 +209,15 @@ __all__ = [
   "sec_historical_stage_job",
   "sec_historical_staged_materialize_job",
   "sec_incremental_download_schedule",
+  "sec_incremental_pipeline_sensor",
   "sec_incremental_stage_job",
-  "sec_incremental_staging_sensor",
   "sec_knowledge_artifacts",
   "sec_lbug_r2_publish_job",
   "sec_lbug_r2_published",
+  "sec_lbug_s3_publish_job",
   "sec_lbug_s3_published",
   "sec_materialize_job",
+  "sec_post_materialize_publish_sensor",
   "sec_process_job",
   "sec_processed_filings",
   "sec_processing_sensor",
