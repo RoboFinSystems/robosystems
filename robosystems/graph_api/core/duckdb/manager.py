@@ -486,17 +486,40 @@ class DuckDBTableManager:
           has_src_dst = "src" in column_names and "dst" in column_names
           has_from_to = "from" in column_names and "to" in column_names
 
-          # Build NOT EXISTS dedup clause
+          # Also probe the parquet schema to detect column name mismatches.
+          # Initial CREATE TABLE renames from/to → src/dst for LadybugDB compat,
+          # but parquet files still use from/to.
+          parquet_probe = conn.execute(
+            f"SELECT * FROM {parquet_read} LIMIT 0"
+          ).description
+          parquet_columns = [col[0] for col in parquet_probe]
+          parquet_has_from_to = "from" in parquet_columns and "to" in parquet_columns
+
+          # Build NOT EXISTS dedup clause and SELECT expression
+          select_expr = "t.*"
           if has_identifier:
             dedup_where = (
               f"WHERE NOT EXISTS (SELECT 1 FROM {quoted_table} a "
               f'WHERE a."identifier" = t."identifier")'
             )
           elif has_src_dst:
-            dedup_where = (
-              f"WHERE NOT EXISTS (SELECT 1 FROM {quoted_table} a "
-              f'WHERE a."src" = t."src" AND a."dst" = t."dst")'
-            )
+            if parquet_has_from_to:
+              # Table has src/dst (from initial CREATE), parquet has from/to.
+              # Rename in SELECT and use parquet column names in dedup.
+              other_cols = [c for c in parquet_columns if c not in ("from", "to")]
+              select_parts = ['"from" AS src', '"to" AS dst'] + [
+                f't."{c}"' for c in other_cols
+              ]
+              select_expr = ", ".join(select_parts)
+              dedup_where = (
+                f"WHERE NOT EXISTS (SELECT 1 FROM {quoted_table} a "
+                f'WHERE a."src" = t."from" AND a."dst" = t."to")'
+              )
+            else:
+              dedup_where = (
+                f"WHERE NOT EXISTS (SELECT 1 FROM {quoted_table} a "
+                f'WHERE a."src" = t."src" AND a."dst" = t."dst")'
+              )
           elif has_from_to:
             dedup_where = (
               f"WHERE NOT EXISTS (SELECT 1 FROM {quoted_table} a "
@@ -506,9 +529,7 @@ class DuckDBTableManager:
             # Unknown schema — no dedup key, plain append
             dedup_where = ""
 
-          sql = (
-            f"INSERT INTO {quoted_table} SELECT t.* FROM {parquet_read} t {dedup_where}"
-          )
+          sql = f"INSERT INTO {quoted_table} SELECT {select_expr} FROM {parquet_read} t {dedup_where}"
         else:
           # Simple append — no dedup
           sql = f"INSERT INTO {quoted_table} SELECT * FROM {parquet_read}"
