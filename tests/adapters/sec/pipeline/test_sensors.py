@@ -21,6 +21,7 @@ from robosystems.adapters.sec.pipeline.sensors import (
   _get_quarters_to_scan,
   sec_incremental_download_schedule,
   sec_incremental_pipeline_sensor,
+  sec_post_materialize_publish_sensor,
   sec_stage_to_materialize_sensor,
 )
 
@@ -423,6 +424,138 @@ class TestSecStageToMaterializeSensor:
       )
 
       result = list(sec_stage_to_materialize_sensor(context))
+
+    assert len(result) == 0
+
+
+@pytest.mark.unit
+class TestSecPostMaterializePublishSensor:
+  """Tests for sec_post_materialize_publish_sensor.
+
+  This sensor orchestrates: materialize → lbug S3 publish → duckdb S3 publish → replica refresh.
+  """
+
+  @patch("robosystems.adapters.sec.pipeline.sensors.env")
+  def test_skips_in_dev_environment(self, mock_env):
+    """Test sensor skips in dev environment."""
+    mock_env.ENVIRONMENT = "dev"
+
+    context = _build_run_status_context(
+      sensor_name="sec_post_materialize_publish_sensor",
+      job_name="sec_materialize",
+      tags={"mode": "incremental"},
+    )
+
+    result = list(sec_post_materialize_publish_sensor(context))
+    assert len(result) == 0
+
+  @patch("robosystems.adapters.sec.pipeline.sensors.env")
+  def test_skips_non_incremental_runs(self, mock_env):
+    """Test sensor skips non-incremental runs."""
+    mock_env.ENVIRONMENT = "prod"
+
+    context = _build_run_status_context(
+      sensor_name="sec_post_materialize_publish_sensor",
+      job_name="sec_materialize",
+      tags={"mode": "full"},
+    )
+
+    result = list(sec_post_materialize_publish_sensor(context))
+    assert len(result) == 0
+
+  @patch("robosystems.adapters.sec.pipeline.sensors.env")
+  def test_materialize_triggers_lbug_publish(self, mock_env):
+    """Test materialize success triggers lbug S3 publish."""
+    mock_env.ENVIRONMENT = "prod"
+
+    from dagster import DagsterInstance
+
+    with DagsterInstance.ephemeral() as instance:
+      context = _build_run_status_context(
+        sensor_name="sec_post_materialize_publish_sensor",
+        job_name="sec_materialize",
+        run_id="run-mat-001",
+        tags={"mode": "incremental"},
+        instance=instance,
+        get_runs_return=[],
+      )
+
+      result = list(sec_post_materialize_publish_sensor(context))
+
+    assert len(result) == 1
+    assert isinstance(result[0], RunRequest)
+    assert result[0].job_name == "sec_lbug_s3_publish"
+    assert result[0].tags["phase"] == "lbug_s3_publish"
+
+  @patch("robosystems.adapters.sec.pipeline.sensors.env")
+  def test_lbug_publish_triggers_duckdb_publish(self, mock_env):
+    """Test lbug publish success triggers duckdb S3 publish."""
+    mock_env.ENVIRONMENT = "prod"
+
+    from dagster import DagsterInstance
+
+    with DagsterInstance.ephemeral() as instance:
+      context = _build_run_status_context(
+        sensor_name="sec_post_materialize_publish_sensor",
+        job_name="sec_lbug_s3_publish",
+        run_id="run-lbug-001",
+        tags={"mode": "incremental"},
+        instance=instance,
+        get_runs_return=[],
+      )
+
+      result = list(sec_post_materialize_publish_sensor(context))
+
+    assert len(result) == 1
+    assert isinstance(result[0], RunRequest)
+    assert result[0].job_name == "sec_duckdb_s3_publish"
+    assert result[0].tags["phase"] == "duckdb_s3_publish"
+
+  @patch("robosystems.adapters.sec.pipeline.sensors.env")
+  def test_duckdb_publish_triggers_replica_refresh(self, mock_env):
+    """Test duckdb publish success triggers replica refresh."""
+    mock_env.ENVIRONMENT = "prod"
+
+    from dagster import DagsterInstance
+
+    with DagsterInstance.ephemeral() as instance:
+      context = _build_run_status_context(
+        sensor_name="sec_post_materialize_publish_sensor",
+        job_name="sec_duckdb_s3_publish",
+        run_id="run-duckdb-001",
+        tags={"mode": "incremental"},
+        instance=instance,
+        get_runs_return=[],
+      )
+
+      result = list(sec_post_materialize_publish_sensor(context))
+
+    assert len(result) == 1
+    assert isinstance(result[0], RunRequest)
+    assert result[0].job_name == "shared_repository_refresh_replicas_job"
+    assert result[0].tags["phase"] == "replica_refresh"
+
+  @patch("robosystems.adapters.sec.pipeline.sensors.env")
+  def test_skips_when_next_job_already_running(self, mock_env):
+    """Test sensor skips when next job is already running."""
+    mock_env.ENVIRONMENT = "prod"
+
+    from dagster import DagsterInstance
+
+    active_run = MagicMock()
+    active_run.run_id = "active-publish-run"
+
+    with DagsterInstance.ephemeral() as instance:
+      context = _build_run_status_context(
+        sensor_name="sec_post_materialize_publish_sensor",
+        job_name="sec_materialize",
+        run_id="run-mat-001",
+        tags={"mode": "incremental"},
+        instance=instance,
+        get_runs_return=[active_run],
+      )
+
+      result = list(sec_post_materialize_publish_sensor(context))
 
     assert len(result) == 0
 

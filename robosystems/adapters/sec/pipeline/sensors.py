@@ -276,7 +276,7 @@ def sec_incremental_download_schedule(context):
         "pipeline": "sec",
         "phase": "download",
         "mode": "incremental",
-        "batch_id": batch_id,  # Track jobs from same schedule tick
+        "batch_id": batch_id or "",  # Track jobs from same schedule tick
       },
     )
 
@@ -366,7 +366,7 @@ def sec_incremental_pipeline_sensor(context: RunStatusSensorContext):
         session.close()
 
     if pending_in_partition > 0:
-      # This partition still has pending files — trigger next batch
+      # Fall through to yield another process RunRequest below
       context.log.info(
         f"Process batch completed for {partition_key}, "
         f"{pending_in_partition} files still pending, triggering next batch"
@@ -416,7 +416,7 @@ def sec_incremental_pipeline_sensor(context: RunStatusSensorContext):
           "pipeline": "sec",
           "phase": "incremental_stage",
           "mode": "incremental",
-          "batch_id": batch_id,
+          "batch_id": batch_id or "",
         },
       )
       return
@@ -445,7 +445,7 @@ def sec_incremental_pipeline_sensor(context: RunStatusSensorContext):
       "phase": "process",
       "mode": "incremental",
       "quarter": partition_key,
-      "batch_id": batch_id,
+      "batch_id": batch_id or "",
     },
   )
 

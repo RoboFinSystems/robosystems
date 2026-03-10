@@ -36,10 +36,10 @@ Pipeline stages (run independently via separate jobs):
 6. ARTIFACTS (graph-based confidence refinement):
    - sec_knowledge_artifacts - Generate element + structure knowledge artifacts
 
-Post-materialization lineage (asset deps, not sensors):
-  sec_graph_materialized -> sec_lbug_s3_published -> shared_replicas_refreshed
-  sec_graph_materialized -> sec_lbug_r2_published
-  sec_historical_materialized -> sec_historical_lbug_s3_published -> shared_replicas_refreshed
+Nightly incremental chain (sensor-driven):
+  download → process (250 batch loop) → stage (DuckDB INSERT)
+  → materialize (full LadybugDB rebuild) → lbug S3 publish
+  → duckdb S3 publish → replica refresh
 
 Usage:
     from robosystems.adapters.sec.pipeline import get_dagster_components
