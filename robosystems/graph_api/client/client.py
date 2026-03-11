@@ -378,9 +378,7 @@ class GraphClient(BaseGraphClient):
     async def stream_chunks() -> AsyncGenerator[dict[str, Any]]:
       """Stream NDJSON chunks from Graph API server."""
       stream_start = time.time()
-      stream_status = 0
-      stream_error = False
-      stream_error_type = None
+      metrics_recorded = False
 
       try:
         async with self.client.stream(
@@ -390,10 +388,7 @@ class GraphClient(BaseGraphClient):
           params=params,
           timeout=httpx.Timeout(300.0, connect=10.0),  # 5 min stream timeout
         ) as response:
-          stream_status = response.status_code
           if response.status_code >= 400:
-            stream_error = True
-            stream_error_type = "client" if response.status_code < 500 else "server"
             error_text = await response.aread()
             try:
               error_data = json.loads(error_text)
@@ -415,6 +410,7 @@ class GraphClient(BaseGraphClient):
             error=False,
             error_type=None,
           )
+          metrics_recorded = True
 
           # Stream NDJSON lines
           async for line in response.aiter_lines():
@@ -427,25 +423,23 @@ class GraphClient(BaseGraphClient):
                 continue
 
       except Exception as e:
-        if not stream_error:
-          stream_error = True
-          stream_status = getattr(e, "status_code", 0)
+        if not metrics_recorded:
           from .exceptions import GraphTimeoutError, GraphTransientError
 
           if isinstance(e, GraphTimeoutError):
-            stream_error_type = "timeout"
+            error_type = "timeout"
           elif isinstance(e, GraphTransientError):
-            stream_error_type = "transient"
+            error_type = "transient"
           else:
-            stream_error_type = "server"
+            error_type = "server"
 
           self._emit_graph_api_metrics(
             method="POST",
             path=f"/databases/{graph_id}/query",
             duration=time.time() - stream_start,
-            status_code=stream_status,
+            status_code=getattr(e, "status_code", 0),
             error=True,
-            error_type=stream_error_type,
+            error_type=error_type,
           )
         raise
 
