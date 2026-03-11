@@ -609,7 +609,7 @@ def sse_connection_rate_limit_dependency(request: Request):
     endpoint = str(request.url.path)
 
     SecurityAuditLogger.log_rate_limit_exceeded(
-      user_id=get_user_from_request(request),
+      user_id=user_id,
       ip_address=client_ip,
       user_agent=user_agent,
       endpoint=endpoint,
