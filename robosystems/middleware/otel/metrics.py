@@ -720,7 +720,13 @@ class EndpointMetrics:
       return []
 
   def _observe_db_pool(self, options: CallbackOptions) -> list[Observation]:
-    """Observable callback for SQLAlchemy connection pool metrics."""
+    """Observable callback for SQLAlchemy connection pool metrics.
+
+    Note: pool.overflow() returns negative values when overflow slots are
+    available (e.g., -5 means 5 unused overflow slots). We clamp to 0 for
+    the "overflow" observation since negative connections don't make sense
+    in dashboards.
+    """
     try:
       from robosystems.database import engine
 
@@ -728,7 +734,7 @@ class EndpointMetrics:
       return [
         Observation(pool.checkedout(), {"state": "checked_out"}),
         Observation(pool.checkedin(), {"state": "idle"}),
-        Observation(pool.overflow(), {"state": "overflow"}),
+        Observation(max(0, pool.overflow()), {"state": "overflow"}),
         Observation(pool.size(), {"state": "pool_size"}),
       ]
     except Exception:
