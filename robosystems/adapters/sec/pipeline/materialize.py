@@ -95,7 +95,7 @@ def sec_graph_materialized(
 
   if result.status == "partial":
     failed = [t for t in (result.tables or []) if t.get("status") == "error"]
-    failed_names = [t["table_name"] for t in failed]
+    failed_names = [t.get("table_name", "unknown") for t in failed]
     for t in failed:
       context.log.error(f"FAILED: {t['table_name']} — {t.get('error', 'unknown')}")
     raise Failure(
@@ -234,7 +234,7 @@ def sec_historical_materialized(
 
   if result.status == "partial":
     failed = [t for t in (result.tables or []) if t.get("status") == "error"]
-    failed_names = [t["table_name"] for t in failed]
+    failed_names = [t.get("table_name", "unknown") for t in failed]
     for t in failed:
       context.log.error(f"FAILED: {t['table_name']} — {t.get('error', 'unknown')}")
     raise Failure(

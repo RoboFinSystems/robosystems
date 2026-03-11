@@ -967,9 +967,7 @@ class LadybugMaterializer:
           )
 
       except Exception as e:
-        logger.error(f"Failed to materialize table {table_name}: {e}")
-        if progress_callback:
-          progress_callback(f"[{i}/{total_tables}] FAILED {table_name}: {e}")
+        log_progress(f"[{i}/{total_tables}] FAILED {table_name}: {e}")
         results.append(
           {
             "table_name": table_name,

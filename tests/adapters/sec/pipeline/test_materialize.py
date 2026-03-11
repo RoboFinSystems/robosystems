@@ -95,7 +95,7 @@ class TestSecGraphMaterialized:
     config = SECMaterializeConfig()
     context = build_asset_context()
 
-    with pytest.raises(Failure, match="1 table.*failed.*Fact"):
+    with pytest.raises(Failure, match=r"1 table.*failed.*Fact"):
       sec_graph_materialized(context, config)
 
   @patch("robosystems.adapters.sec.XBRLDuckDBGraphProcessor")
