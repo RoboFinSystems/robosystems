@@ -183,6 +183,14 @@ class EndpointMetrics:
         unit="queries",
       )
 
+      # Database connection pool metrics
+      self._db_pool_gauge = self.meter.create_observable_gauge(
+        "robosystems_db_pool_connections",
+        callbacks=[self._observe_db_pool],
+        description="SQLAlchemy connection pool state",
+        unit="connections",
+      )
+
       # SSE monitoring metrics
       self._sse_connections_active = self.meter.create_up_down_counter(
         "robosystems_sse_connections_active",
@@ -709,6 +717,21 @@ class EndpointMetrics:
       return observations
     except Exception:
       # Return empty list if queue not initialized
+      return []
+
+  def _observe_db_pool(self, options: CallbackOptions) -> list[Observation]:
+    """Observable callback for SQLAlchemy connection pool metrics."""
+    try:
+      from robosystems.database import engine
+
+      pool = engine.pool
+      return [
+        Observation(pool.checkedout(), {"state": "checked_out"}),
+        Observation(pool.checkedin(), {"state": "idle"}),
+        Observation(pool.overflow(), {"state": "overflow"}),
+        Observation(pool.size(), {"state": "pool_size"}),
+      ]
+    except Exception:
       return []
 
 
