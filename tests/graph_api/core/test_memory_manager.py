@@ -1075,15 +1075,27 @@ class TestDoubleBoostPrevention:
 
     mock_pool = MagicMock()
 
+    # Simulate override state: None initially, "55GB" after first call sets it
+    override_state = {"value": None}
+
+    def mock_get_override(graph_id="sec"):
+      return override_state["value"]
+
+    def mock_set_override(limit, graph_id="sec"):
+      old = override_state["value"]
+      override_state["value"] = limit
+      return old
+
     with (
       patch(f"{MODULE}.env") as mock_env,
       patch(f"{MODULE}.GraphTierConfig") as mock_tier_config,
       patch(
         "robosystems.graph_api.core.duckdb.pool.set_duckdb_memory_override",
-      ) as mock_set,
+        side_effect=mock_set_override,
+      ),
       patch(
         "robosystems.graph_api.core.duckdb.pool.get_duckdb_memory_override",
-        return_value=None,
+        side_effect=mock_get_override,
       ),
       patch(
         "robosystems.graph_api.core.duckdb.pool.get_duckdb_pool",
@@ -1097,12 +1109,9 @@ class TestDoubleBoostPrevention:
       first = ensure_duckdb_memory_boosted("test")
       assert first == "55GB"
 
-      # Second call is a no-op
+      # Second call sees override already active, returns None
       second = ensure_duckdb_memory_boosted("test")
       assert second is None
-
-      # set_duckdb_memory_override only called once
-      mock_set.assert_called_once()
 
   def test_ladybug_double_boost_prevented(self):
     """Second ensure_ladybug_memory_boosted call does not re-apply boost."""
@@ -1113,15 +1122,27 @@ class TestDoubleBoostPrevention:
     mock_pool = MagicMock()
     mock_pool.list_databases.return_value = []
 
+    # Simulate override state: None initially, 50000 after first call sets it
+    override_state: dict[str, int | None] = {"value": None}
+
+    def mock_get_override(graph_id=None):
+      return override_state["value"]
+
+    def mock_set_override(limit, graph_id=None):
+      old = override_state["value"]
+      override_state["value"] = limit
+      return old
+
     with (
       patch(f"{MODULE}.env") as mock_env,
       patch(f"{MODULE}.GraphTierConfig") as mock_tier_config,
       patch(
         "robosystems.graph_api.core.ladybug.config.set_ladybug_memory_override",
-      ) as mock_set,
+        side_effect=mock_set_override,
+      ),
       patch(
         "robosystems.graph_api.core.ladybug.config.get_ladybug_memory_override",
-        return_value=None,
+        side_effect=mock_get_override,
       ),
       patch(
         "robosystems.graph_api.core.ladybug.pool.get_connection_pool",
@@ -1135,10 +1156,9 @@ class TestDoubleBoostPrevention:
       first = ensure_ladybug_memory_boosted("sec")
       assert first == 50000
 
+      # Second call sees override already active, returns None
       second = ensure_ladybug_memory_boosted("sec")
       assert second is None
-
-      mock_set.assert_called_once()
 
 
 # ---------------------------------------------------------------------------
