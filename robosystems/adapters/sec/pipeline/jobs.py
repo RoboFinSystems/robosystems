@@ -136,9 +136,9 @@ sec_stage_job = define_asset_job(
   tags={
     "pipeline": "sec",
     "phase": "stage",
-    # Minimal profile: just orchestrating Graph API calls, no local compute
-    "ecs/cpu": "256",
-    "ecs/memory": "512",
+    # Light profile: HTTP orchestration to Graph API
+    "ecs/cpu": "512",
+    "ecs/memory": "2048",
     "ecs/ephemeral_storage": "21",
     # On-demand to avoid interruptions (long-running orchestration)
     "ecs/run_task_kwargs": {
@@ -160,9 +160,9 @@ sec_materialize_job = define_asset_job(
   tags={
     "pipeline": "sec",
     "phase": "materialize",
-    # Minimal profile: just orchestrating Graph API calls, no local compute
-    "ecs/cpu": "256",
-    "ecs/memory": "512",
+    # Light profile: HTTP orchestration to Graph API
+    "ecs/cpu": "512",
+    "ecs/memory": "2048",
     "ecs/ephemeral_storage": "21",
     # On-demand to avoid interruptions (long-running orchestration)
     "ecs/run_task_kwargs": {
@@ -183,9 +183,9 @@ sec_staged_materialize_job = define_asset_job(
   tags={
     "pipeline": "sec",
     "phase": "full",
-    # Minimal profile: just orchestrating Graph API calls, no local compute
-    "ecs/cpu": "256",
-    "ecs/memory": "512",
+    # Light profile: HTTP orchestration to Graph API
+    "ecs/cpu": "512",
+    "ecs/memory": "2048",
     "ecs/ephemeral_storage": "21",
     # On-demand to avoid interruptions (long-running orchestration)
     "ecs/run_task_kwargs": {
@@ -215,9 +215,9 @@ sec_incremental_stage_job = define_asset_job(
   tags={
     "pipeline": "sec",
     "mode": "incremental",
-    # Minimal profile: just orchestrating Graph API calls, no local compute
-    "ecs/cpu": "256",
-    "ecs/memory": "512",
+    # Light profile: HTTP orchestration to Graph API
+    "ecs/cpu": "512",
+    "ecs/memory": "2048",
     "ecs/ephemeral_storage": "21",
     # On-demand to avoid interruptions (long-running orchestration)
     "ecs/run_task_kwargs": {
@@ -242,8 +242,8 @@ sec_historical_stage_job = define_asset_job(
   tags={
     "pipeline": "sec",
     "phase": "historical_stage",
-    "ecs/cpu": "256",
-    "ecs/memory": "512",
+    "ecs/cpu": "512",
+    "ecs/memory": "2048",
     "ecs/ephemeral_storage": "21",
     "ecs/run_task_kwargs": {
       "capacityProviderStrategy": [
@@ -260,8 +260,8 @@ sec_historical_materialize_job = define_asset_job(
   tags={
     "pipeline": "sec",
     "phase": "historical_materialize",
-    "ecs/cpu": "256",
-    "ecs/memory": "512",
+    "ecs/cpu": "512",
+    "ecs/memory": "2048",
     "ecs/ephemeral_storage": "21",
     "ecs/run_task_kwargs": {
       "capacityProviderStrategy": [
@@ -280,8 +280,8 @@ sec_historical_staged_materialize_job = define_asset_job(
   tags={
     "pipeline": "sec",
     "phase": "historical_full",
-    "ecs/cpu": "256",
-    "ecs/memory": "512",
+    "ecs/cpu": "512",
+    "ecs/memory": "2048",
     "ecs/ephemeral_storage": "21",
     "ecs/run_task_kwargs": {
       "capacityProviderStrategy": [
@@ -315,9 +315,9 @@ sec_entity_update_job = define_asset_job(
   tags={
     "pipeline": "sec",
     "mode": "entity_update",
-    # Minimal profile: just orchestrating Graph API calls, no local compute
-    "ecs/cpu": "256",
-    "ecs/memory": "512",
+    # Light profile: HTTP orchestration to Graph API
+    "ecs/cpu": "512",
+    "ecs/memory": "2048",
     "ecs/ephemeral_storage": "21",
     # On-demand to avoid interruptions (long-running orchestration)
     "ecs/run_task_kwargs": {
@@ -343,9 +343,9 @@ sec_lbug_s3_publish_job = define_asset_job(
   tags={
     "pipeline": "sec",
     "phase": "lbug_s3_publish",
-    # Minimal profile: just orchestrating Graph API calls, no local compute
-    "ecs/cpu": "256",
-    "ecs/memory": "512",
+    # Light profile: HTTP orchestration to Graph API
+    "ecs/cpu": "512",
+    "ecs/memory": "2048",
     "ecs/ephemeral_storage": "21",
     # On-demand to avoid interruptions during large uploads
     "ecs/run_task_kwargs": {
@@ -363,9 +363,9 @@ sec_duckdb_s3_publish_job = define_asset_job(
   tags={
     "pipeline": "sec",
     "phase": "duckdb_s3_publish",
-    # Minimal profile: just orchestrating Graph API calls, no local compute
-    "ecs/cpu": "256",
-    "ecs/memory": "512",
+    # Light profile: HTTP orchestration to Graph API
+    "ecs/cpu": "512",
+    "ecs/memory": "2048",
     "ecs/ephemeral_storage": "21",
     # On-demand to avoid interruptions during large uploads
     "ecs/run_task_kwargs": {
@@ -383,9 +383,9 @@ sec_historical_duckdb_s3_publish_job = define_asset_job(
   tags={
     "pipeline": "sec",
     "phase": "duckdb_s3_publish",
-    # Minimal profile: just orchestrating Graph API calls, no local compute
-    "ecs/cpu": "256",
-    "ecs/memory": "512",
+    # Light profile: HTTP orchestration to Graph API
+    "ecs/cpu": "512",
+    "ecs/memory": "2048",
     "ecs/ephemeral_storage": "21",
     # On-demand to avoid interruptions during large uploads
     "ecs/run_task_kwargs": {
@@ -406,9 +406,9 @@ sec_historical_lbug_s3_publish_job = define_asset_job(
   tags={
     "pipeline": "sec",
     "phase": "s3_publish",
-    # Minimal profile: just orchestrating Graph API calls, no local compute
-    "ecs/cpu": "256",
-    "ecs/memory": "512",
+    # Light profile: HTTP orchestration to Graph API
+    "ecs/cpu": "512",
+    "ecs/memory": "2048",
     "ecs/ephemeral_storage": "21",
     # On-demand to avoid interruptions during large uploads
     "ecs/run_task_kwargs": {
@@ -434,9 +434,9 @@ sec_lbug_r2_publish_job = define_asset_job(
   tags={
     "pipeline": "sec",
     "phase": "r2_publish",
-    # Minimal profile: just orchestrating Graph API calls, no local compute
-    "ecs/cpu": "256",
-    "ecs/memory": "512",
+    # Light profile: HTTP orchestration to Graph API
+    "ecs/cpu": "512",
+    "ecs/memory": "2048",
     "ecs/ephemeral_storage": "21",
     # On-demand to avoid interruptions during large uploads
     "ecs/run_task_kwargs": {
