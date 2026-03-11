@@ -6,7 +6,7 @@ This module contains the DuckDB staging assets:
 - sec_duckdb_incremental_staged: Incremental staging for current quarter
 """
 
-from dagster import AssetExecutionContext, MaterializeResult, asset
+from dagster import AssetExecutionContext, Failure, MaterializeResult, asset
 
 from robosystems.config import env
 
@@ -112,13 +112,14 @@ def sec_duckdb_staged(
 
   if result.status == "error":
     context.log.error(f"Staging failed: {result.error}")
-    return MaterializeResult(
+    raise Failure(
+      description=f"DuckDB staging failed: {result.error}",
       metadata={
         "graph_id": config.graph_id,
         "status": "error",
-        "error": result.error,
+        "error": result.error or "",
         "duration_ms": result.duration_ms,
-      }
+      },
     )
 
   context.log.info(
@@ -239,13 +240,14 @@ def sec_historical_duckdb_staged(
 
   if result.status == "error":
     context.log.error(f"Staging failed: {result.error}")
-    return MaterializeResult(
+    raise Failure(
+      description=f"Historical DuckDB staging failed: {result.error}",
       metadata={
         "graph_id": graph_id,
         "status": "error",
-        "error": result.error,
+        "error": result.error or "",
         "duration_ms": result.duration_ms,
-      }
+      },
     )
 
   context.log.info(
@@ -332,13 +334,14 @@ def sec_duckdb_incremental_staged(
 
   if result.status == "error":
     context.log.error(f"Incremental staging failed: {result.error}")
-    return MaterializeResult(
+    raise Failure(
+      description=f"Incremental DuckDB staging failed: {result.error}",
       metadata={
         "graph_id": config.graph_id,
         "status": "error",
         "error": result.error or "Unknown error",
         "duration_ms": result.duration_ms,
-      }
+      },
     )
 
   if result.status == "partial":
@@ -347,14 +350,14 @@ def sec_duckdb_incremental_staged(
       f"{len(result.table_names)} tables succeeded but some failed. "
       f"Downstream materialization should not proceed with incomplete data."
     )
-    return MaterializeResult(
+    raise Failure(
+      description="Partial staging failure - not all tables were updated",
       metadata={
         "graph_id": config.graph_id,
-        "status": "error",
-        "error": "Partial staging failure - not all tables were updated",
+        "status": "partial",
         "tables_staged": len(result.table_names),
         "duration_ms": result.duration_ms,
-      }
+      },
     )
 
   context.log.info(
