@@ -219,13 +219,15 @@ class LadybugMaterializer:
       )
 
       duration = time.time() - start_time
+      failed_count = ingestion_results.get("failed_count", 0)
+      status = "partial" if failed_count > 0 else "success"
 
       log_progress(
         f"Materialization complete in {duration:.2f}s: "
         f"{ingestion_results.get('total_rows_ingested', 0):,} rows ingested"
       )
       return MaterializeResult(
-        status="success",
+        status=status,
         total_rows_ingested=ingestion_results.get("total_rows_ingested", 0),
         duration_ms=ingestion_results.get("duration_ms", 0),
         tables=ingestion_results.get("tables", []),
@@ -976,8 +978,24 @@ class LadybugMaterializer:
           }
         )
 
+    # Log summary of any failures so they're easy to find in logs
+    failed = [r for r in results if r.get("status") == "error"]
+    succeeded = [r for r in results if r.get("status") != "error"]
+
+    if failed:
+      failed_names = [r["table_name"] for r in failed]
+      log_progress(
+        f"MATERIALIZATION SUMMARY: {len(succeeded)}/{total_tables} tables succeeded, "
+        f"{len(failed)} FAILED: {failed_names}"
+      )
+      for r in failed:
+        log_progress(f"  FAILED: {r['table_name']} — {r.get('error', 'unknown error')}")
+    else:
+      log_progress(f"MATERIALIZATION SUMMARY: All {total_tables}/{total_tables} tables succeeded")
+
     return {
       "total_rows_ingested": total_rows,
       "duration_ms": total_time_ms,
       "tables": results,
+      "failed_count": len(failed),
     }

@@ -5,7 +5,7 @@ This module contains the graph materialization assets:
 - sec_historical_materialized: Full DuckDB → LadybugDB materialization for sec_historical
 """
 
-from dagster import AssetExecutionContext, MaterializeResult, asset
+from dagster import AssetExecutionContext, Failure, MaterializeResult, asset
 
 from robosystems.config import env
 
@@ -84,12 +84,33 @@ def sec_graph_materialized(
 
   if result.status == "error":
     context.log.error(f"Materialization failed: {result.error}")
-    return MaterializeResult(
+    raise Failure(
+      description=f"Materialization failed: {result.error}",
       metadata={
         "graph_id": config.graph_id,
         "status": "error",
-        "error": result.error,
-      }
+        "error": result.error or "",
+      },
+    )
+
+  if result.status == "partial":
+    failed = [t for t in (result.tables or []) if t.get("status") == "error"]
+    failed_names = [t["table_name"] for t in failed]
+    for t in failed:
+      context.log.error(f"FAILED: {t['table_name']} — {t.get('error', 'unknown')}")
+    raise Failure(
+      description=(
+        f"Materialization incomplete: {len(failed)} table(s) failed: {failed_names}. "
+        f"Blocking S3 publish to prevent bad data reaching replicas."
+      ),
+      metadata={
+        "graph_id": config.graph_id,
+        "status": "partial",
+        "total_rows_ingested": result.total_rows_ingested,
+        "duration_ms": result.duration_ms,
+        "failed_tables": failed_names,
+        "tables": result.tables or [],
+      },
     )
 
   context.log.info(
@@ -202,12 +223,33 @@ def sec_historical_materialized(
 
   if result.status == "error":
     context.log.error(f"Materialization failed: {result.error}")
-    return MaterializeResult(
+    raise Failure(
+      description=f"Historical materialization failed: {result.error}",
       metadata={
         "graph_id": graph_id,
         "status": "error",
-        "error": result.error,
-      }
+        "error": result.error or "",
+      },
+    )
+
+  if result.status == "partial":
+    failed = [t for t in (result.tables or []) if t.get("status") == "error"]
+    failed_names = [t["table_name"] for t in failed]
+    for t in failed:
+      context.log.error(f"FAILED: {t['table_name']} — {t.get('error', 'unknown')}")
+    raise Failure(
+      description=(
+        f"Historical materialization incomplete: {len(failed)} table(s) failed: {failed_names}. "
+        f"Blocking S3 publish to prevent bad data reaching replicas."
+      ),
+      metadata={
+        "graph_id": graph_id,
+        "status": "partial",
+        "total_rows_ingested": result.total_rows_ingested,
+        "duration_ms": result.duration_ms,
+        "failed_tables": failed_names,
+        "tables": result.tables or [],
+      },
     )
 
   context.log.info(
