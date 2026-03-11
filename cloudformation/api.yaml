@@ -774,6 +774,10 @@ Resources:
 
                     processors:
                       batch:
+                      filter/healthcheck:
+                        metrics:
+                          datapoint:
+                            - 'attributes["http.route"] == "/v1/status" or attributes["http.route"] == "/status" or attributes["http.route"] == "/health"'
 
                     exporters:
                       prometheusremotewrite:
@@ -795,7 +799,7 @@ Resources:
                       pipelines:
                         metrics:
                           receivers: [otlp]
-                          processors: [batch]
+                          processors: [filter/healthcheck, batch]
                           exporters: [prometheusremotewrite, debug]
                       telemetry:
                         logs:

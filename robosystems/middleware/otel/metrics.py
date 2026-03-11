@@ -14,6 +14,61 @@ from typing import Any
 
 from opentelemetry import metrics
 from opentelemetry.metrics import CallbackOptions, Observation
+from opentelemetry.sdk.metrics.view import ExplicitBucketHistogramAggregation, View
+
+# Custom histogram buckets tuned for API latency distribution:
+# Dense coverage in 10ms-500ms range where most graph queries land,
+# sparse coverage at sub-ms (health checks excluded) and multi-second (agent/AI ops)
+API_DURATION_BUCKETS = (
+  0.005,
+  0.01,
+  0.025,
+  0.05,
+  0.075,
+  0.1,
+  0.15,
+  0.2,
+  0.3,
+  0.5,
+  0.75,
+  1.0,
+  2.5,
+  5.0,
+  10.0,
+)
+
+QUERY_DURATION_BUCKETS = (
+  0.01,
+  0.025,
+  0.05,
+  0.1,
+  0.25,
+  0.5,
+  1.0,
+  2.5,
+  5.0,
+  10.0,
+  30.0,
+  60.0,
+)
+
+
+def get_metric_views() -> list[View]:
+  """Return View configurations for custom histogram buckets."""
+  return [
+    View(
+      instrument_name="robosystems_api_request_duration_seconds",
+      aggregation=ExplicitBucketHistogramAggregation(boundaries=API_DURATION_BUCKETS),
+    ),
+    View(
+      instrument_name="robosystems_query_wait_time_seconds",
+      aggregation=ExplicitBucketHistogramAggregation(boundaries=QUERY_DURATION_BUCKETS),
+    ),
+    View(
+      instrument_name="robosystems_query_execution_time_seconds",
+      aggregation=ExplicitBucketHistogramAggregation(boundaries=QUERY_DURATION_BUCKETS),
+    ),
+  ]
 
 
 class MetricType(Enum):
@@ -39,6 +94,8 @@ class EndpointMetrics:
     self._graph_node_count = None
     self._graph_relationship_count = None
     self._graph_size_estimate = None
+    self._rate_limit_counter = None
+    self._credit_consumption = None
 
   def _ensure_instruments(self):
     """Lazy initialization of metric instruments."""
@@ -175,6 +232,18 @@ class EndpointMetrics:
       self._query_user_limits = self.meter.create_counter(
         "robosystems_query_user_limit_rejections_total",
         description="Queries rejected due to per-user limits",
+      )
+
+      # Rate limit metrics
+      self._rate_limit_counter = self.meter.create_counter(
+        "robosystems_rate_limit_rejections_total",
+        description="Total rate limit rejections by endpoint and limit type",
+      )
+
+      # Credit consumption metrics
+      self._credit_consumption = self.meter.create_counter(
+        "robosystems_credits_consumed_total",
+        description="Total credits consumed by operation type",
       )
 
   def record_request(
@@ -367,12 +436,14 @@ class EndpointMetrics:
     success: bool,
     rejection_reason: str | None = None,
   ):
-    """Record query submission to queue."""
+    """Record query submission to queue.
+
+    Note: graph_id/user_id are NOT used as metric attributes to avoid
+    unbounded cardinality. Only priority and success are dimensions.
+    """
     self._ensure_instruments()
 
     attributes = {
-      "graph_id": graph_id,
-      "user_id": user_id,
       "priority": str(priority),
       "success": str(success),
     }
@@ -381,8 +452,10 @@ class EndpointMetrics:
       self._query_submissions.add(1, attributes)
 
     if not success:
-      rejection_attrs = attributes.copy()
-      rejection_attrs["reason"] = rejection_reason or "unknown"
+      rejection_attrs = {
+        "priority": str(priority),
+        "reason": rejection_reason or "unknown",
+      }
 
       if rejection_reason == "queue_full" and self._query_queue_rejections is not None:
         self._query_queue_rejections.add(1, rejection_attrs)
@@ -400,8 +473,6 @@ class EndpointMetrics:
     self._ensure_instruments()
 
     attributes = {
-      "graph_id": graph_id,
-      "user_id": user_id,
       "priority": str(priority),
     }
 
@@ -420,8 +491,6 @@ class EndpointMetrics:
     self._ensure_instruments()
 
     attributes = {
-      "graph_id": graph_id,
-      "user_id": user_id,
       "status": status,
     }
 
@@ -511,6 +580,37 @@ class EndpointMetrics:
     }
     if self._sse_connection_queue_overflows is not None:
       self._sse_connection_queue_overflows.add(1, attributes)
+
+  def record_rate_limit_rejection(
+    self,
+    endpoint: str,
+    limit_type: str,
+    identifier_type: str,
+  ):
+    """Record a rate limit rejection."""
+    self._ensure_instruments()
+    attributes = {
+      "endpoint": endpoint,
+      "limit_type": limit_type,
+      "identifier_type": identifier_type,
+    }
+    if self._rate_limit_counter is not None:
+      self._rate_limit_counter.add(1, attributes)
+
+  def record_credit_consumption(
+    self,
+    operation_type: str,
+    credits_consumed: float,
+    graph_tier: str,
+  ):
+    """Record credit consumption for an AI operation."""
+    self._ensure_instruments()
+    attributes = {
+      "operation_type": operation_type,
+      "graph_tier": graph_tier,
+    }
+    if self._credit_consumption is not None:
+      self._credit_consumption.add(credits_consumed, attributes)
 
   def _observe_queue_size(self, options: CallbackOptions) -> list[Observation]:
     """Observable callback for queue size metrics."""

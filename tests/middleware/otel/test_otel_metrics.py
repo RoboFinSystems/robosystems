@@ -205,8 +205,8 @@ class TestEndpointMetricsClass:
 
     # Verify counters and histograms were created after first use
     assert (
-      meter.create_counter.call_count == 16
-    )  # request, error, auth_attempts, auth_failures, business_events, query_submissions, query_queue_rejections, query_completions, query_user_limits + 7 SSE counters
+      meter.create_counter.call_count == 18
+    )  # request, error, auth_attempts, auth_failures, business_events, query_submissions, query_queue_rejections, query_completions, query_user_limits + 7 SSE counters + rate_limit, credit_consumption
     assert (
       meter.create_histogram.call_count == 3
     )  # request_duration, query_wait_time, query_execution_time
