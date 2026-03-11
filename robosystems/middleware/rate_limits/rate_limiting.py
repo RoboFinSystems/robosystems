@@ -143,7 +143,7 @@ def rate_limit_dependency(request: Request):
         identifier_type=identifier_type,
       )
     except Exception:
-      pass
+      pass  # Metrics are best-effort, never break rate limiting
 
     # Calculate reset time safely
     current_time = getattr(request.state, "current_time", None) or int(time.time())
@@ -209,7 +209,7 @@ def auth_rate_limit_dependency(request: Request):
         identifier_type="ip",
       )
     except Exception:
-      pass
+      pass  # Metrics are best-effort, never break rate limiting
 
     # Also log as suspicious activity for auth endpoints
     SecurityAuditLogger.log_security_event(
@@ -529,7 +529,7 @@ def subscription_aware_rate_limit_dependency(request: Request):
         identifier_type="subscription",
       )
     except Exception:
-      pass
+      pass  # Metrics are best-effort, never break rate limiting
 
     # Calculate reset time
     current_time = getattr(request.state, "current_time", None) or int(time.time())
@@ -626,7 +626,7 @@ def sse_connection_rate_limit_dependency(request: Request):
         identifier_type="user",
       )
     except Exception:
-      pass
+      pass  # Metrics are best-effort, never break rate limiting
 
     # Calculate reset time
     current_time = getattr(request.state, "current_time", None) or int(time.time())

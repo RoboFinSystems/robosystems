@@ -256,7 +256,7 @@ class CreditService:
           graph_tier=graph_tier_val,
         )
       except Exception:
-        pass
+        pass  # Metrics are best-effort, never break credit consumption
 
       return {
         "success": True,

@@ -201,7 +201,7 @@ class SSEConnectionManager:
               m = get_endpoint_metrics()
               m.record_sse_queue_overflow(operation_id, connection_id)
             except Exception:
-              pass
+              pass  # Metrics are best-effort, never break SSE delivery
             # Try to notify client of error before removal
             await self._handle_connection_error(
               operation_id, connection_id, "Queue overflow"
@@ -218,7 +218,7 @@ class SSEConnectionManager:
         if failed_count > 0:
           m.record_sse_event_failed(operation_id, "queue_full")
       except Exception:
-        pass
+        pass  # Metrics are best-effort, never break SSE delivery
 
   async def get_active_connections(self, operation_id: str) -> int:
     """Get number of active connections for an operation."""

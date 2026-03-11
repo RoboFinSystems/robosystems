@@ -139,6 +139,68 @@ class GraphClient(BaseGraphClient):
       raise RuntimeError("Retry logic failed without capturing an exception")
     raise last_error
 
+  @staticmethod
+  def _classify_operation(path: str) -> str:
+    """Classify a Graph API path into an operation name for metrics."""
+    # Normalize: /databases/{id}/query -> query, /databases -> create_database, etc.
+    parts = path.strip("/").split("/")
+    if len(parts) == 0:
+      return "unknown"
+    if parts[-1] == "query":
+      return "query"
+    if parts[-1] == "tables" and len(parts) >= 2:
+      return "table_ops"
+    if parts[-1] == "materialize":
+      return "materialize"
+    if parts[-1] == "schema":
+      return "schema"
+    if parts[-1] == "backup":
+      return "backup"
+    if parts[-1] == "restore":
+      return "restore"
+    if parts[-1] == "metrics":
+      return "metrics"
+    if parts[-1] == "health":
+      return "health"
+    if parts[-1] == "info":
+      return "info"
+    if parts[-1] == "databases" or (len(parts) == 2 and parts[0] == "databases"):
+      return "database_ops"
+    if "memory" in parts[-1]:
+      return "memory"
+    if "fork" in parts[-1] or "copy" in parts[-1]:
+      return "fork"
+    if "ingest" in path or "s3" in parts[-1]:
+      return "ingest"
+    if parts[-1] in ("tasks", "task"):
+      return "task"
+    return "other"
+
+  def _emit_graph_api_metrics(
+    self,
+    method: str,
+    path: str,
+    duration: float,
+    status_code: int,
+    error: bool,
+    error_type: str | None,
+  ):
+    """Emit OTel metrics for a Graph API call."""
+    try:
+      from robosystems.middleware.otel.metrics import get_endpoint_metrics
+
+      get_endpoint_metrics().record_graph_api_call(
+        method=method,
+        operation=self._classify_operation(path),
+        duration=duration,
+        status_code=status_code,
+        route_target=self._route_target or "unknown",
+        error=error,
+        error_type=error_type,
+      )
+    except Exception:
+      pass  # Metrics are best-effort, never break graph API calls
+
   async def _request(
     self,
     method: str,
@@ -201,13 +263,48 @@ class GraphClient(BaseGraphClient):
 
       return response
 
-    # Skip retry logic if explicitly disabled (retries=0)
-    # Use for non-idempotent operations like materialization where
-    # retries can cause duplicate data
-    if retries == 0:
-      return await make_request()
+    # Time the entire request including retries
+    start_time = time.time()
+    status_code = 0
+    error_occurred = False
+    error_type = None
 
-    return await self._execute_with_retry(make_request)
+    try:
+      # Skip retry logic if explicitly disabled (retries=0)
+      if retries == 0:
+        response = await make_request()
+      else:
+        response = await self._execute_with_retry(make_request)
+
+      status_code = response.status_code
+      return response
+
+    except Exception as e:
+      error_occurred = True
+      status_code = getattr(e, "status_code", 0)
+      # Classify error type for metrics
+      from .exceptions import GraphClientError, GraphTimeoutError, GraphTransientError
+
+      if isinstance(e, GraphTimeoutError):
+        error_type = "timeout"
+      elif isinstance(e, GraphTransientError):
+        error_type = "transient"
+      elif isinstance(e, GraphClientError):
+        error_type = "client"
+      else:
+        error_type = "server"
+      raise
+
+    finally:
+      duration = time.time() - start_time
+      self._emit_graph_api_metrics(
+        method=method,
+        path=path,
+        duration=duration,
+        status_code=status_code,
+        error=error_occurred,
+        error_type=error_type,
+      )
 
   # API Methods
 

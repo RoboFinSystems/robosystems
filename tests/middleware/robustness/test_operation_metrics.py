@@ -1,7 +1,5 @@
 """Circuit breaker metrics and operation metric shim tests."""
 
-import pytest
-
 from robosystems.middleware.robustness.operation_metrics import (
   CircuitBreakerMetrics,
   OperationStatus,

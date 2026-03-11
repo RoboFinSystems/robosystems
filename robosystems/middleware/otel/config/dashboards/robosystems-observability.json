@@ -967,7 +967,7 @@
       "type": "timeseries",
       "targets": [
         {
-          "expr": "robosystems_query_queue_size{priority=\"all\"}",
+          "expr": "sum(robosystems_query_queue_size)",
           "refId": "A",
           "legendFormat": "Queue Size"
         }
