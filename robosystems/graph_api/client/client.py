@@ -377,34 +377,71 @@ class GraphClient(BaseGraphClient):
     # This allows the graph database instance to do the chunking
     async def stream_chunks() -> AsyncGenerator[dict[str, Any]]:
       """Stream NDJSON chunks from Graph API server."""
-      async with self.client.stream(
-        "POST",
-        f"/databases/{graph_id}/query",
-        json=payload,
-        params=params,
-        timeout=httpx.Timeout(300.0, connect=10.0),  # 5 min stream timeout
-      ) as response:
-        if response.status_code >= 400:
-          error_text = await response.aread()
-          try:
-            error_data = json.loads(error_text)
-          except Exception:
-            error_data = {
-              "detail": error_text.decode()
-              if isinstance(error_text, bytes)
-              else error_text
-            }
-          raise self._handle_response_error(response.status_code, error_data)
+      stream_start = time.time()
+      metrics_recorded = False
 
-        # Stream NDJSON lines
-        async for line in response.aiter_lines():
-          if line:
+      try:
+        async with self.client.stream(
+          "POST",
+          f"/databases/{graph_id}/query",
+          json=payload,
+          params=params,
+          timeout=httpx.Timeout(300.0, connect=10.0),  # 5 min stream timeout
+        ) as response:
+          if response.status_code >= 400:
+            error_text = await response.aread()
             try:
-              chunk = json.loads(line)
-              yield chunk
-            except json.JSONDecodeError as e:
-              logger.error(f"Failed to parse NDJSON line: {e}, line: {line[:100]}")
-              continue
+              error_data = json.loads(error_text)
+            except Exception:
+              error_data = {
+                "detail": error_text.decode()
+                if isinstance(error_text, bytes)
+                else error_text
+              }
+            raise self._handle_response_error(response.status_code, error_data)
+
+          # Record time-to-first-byte as the query metric
+          ttfb = time.time() - stream_start
+          self._emit_graph_api_metrics(
+            method="POST",
+            path=f"/databases/{graph_id}/query",
+            duration=ttfb,
+            status_code=response.status_code,
+            error=False,
+            error_type=None,
+          )
+          metrics_recorded = True
+
+          # Stream NDJSON lines
+          async for line in response.aiter_lines():
+            if line:
+              try:
+                chunk = json.loads(line)
+                yield chunk
+              except json.JSONDecodeError as e:
+                logger.error(f"Failed to parse NDJSON line: {e}, line: {line[:100]}")
+                continue
+
+      except Exception as e:
+        if not metrics_recorded:
+          from .exceptions import GraphTimeoutError, GraphTransientError
+
+          if isinstance(e, GraphTimeoutError):
+            error_type = "timeout"
+          elif isinstance(e, GraphTransientError):
+            error_type = "transient"
+          else:
+            error_type = "server"
+
+          self._emit_graph_api_metrics(
+            method="POST",
+            path=f"/databases/{graph_id}/query",
+            duration=time.time() - stream_start,
+            status_code=getattr(e, "status_code", 0),
+            error=True,
+            error_type=error_type,
+          )
+        raise
 
     return stream_chunks()
 
