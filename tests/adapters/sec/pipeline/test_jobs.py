@@ -79,10 +79,10 @@ class TestSECStageJob:
     """Test stage job has pipeline tag."""
     assert sec_stage_job.tags.get("pipeline") == "sec"
 
-  def test_job_has_minimal_ecs_profile(self):
-    """Test stage job uses minimal ECS profile (orchestration only)."""
-    assert sec_stage_job.tags.get("ecs/cpu") == "256"
-    assert sec_stage_job.tags.get("ecs/memory") == "512"
+  def test_job_has_light_ecs_profile(self):
+    """Test stage job uses light ECS profile (HTTP orchestration)."""
+    assert sec_stage_job.tags.get("ecs/cpu") == "512"
+    assert sec_stage_job.tags.get("ecs/memory") == "2048"
 
 
 @pytest.mark.unit

@@ -495,10 +495,14 @@ class DuckDBTableManager:
           parquet_columns = [col[0] for col in parquet_probe]
           parquet_has_from_to = "from" in parquet_columns and "to" in parquet_columns
 
-          # Build NOT EXISTS dedup clause and SELECT expression
+          # Build dedup: first deduplicate within the incoming batch (intra-batch),
+          # then filter out rows already in the target table (inter-batch).
+          # Intra-batch dedup is needed when multiple parquet files (e.g., from
+          # different quarters) contain the same row (e.g., Taxonomy URIs).
           select_expr = "t.*"
           if has_identifier:
-            dedup_where = (
+            intra_dedup = 'QUALIFY ROW_NUMBER() OVER (PARTITION BY "identifier") = 1'
+            inter_dedup = (
               f"WHERE NOT EXISTS (SELECT 1 FROM {quoted_table} a "
               f'WHERE a."identifier" = t."identifier")'
             )
@@ -511,25 +515,37 @@ class DuckDBTableManager:
                 f't."{c}"' for c in other_cols
               ]
               select_expr = ", ".join(select_parts)
-              dedup_where = (
+              intra_dedup = 'QUALIFY ROW_NUMBER() OVER (PARTITION BY "from", "to") = 1'
+              inter_dedup = (
                 f"WHERE NOT EXISTS (SELECT 1 FROM {quoted_table} a "
                 f'WHERE a."src" = t."from" AND a."dst" = t."to")'
               )
             else:
-              dedup_where = (
+              intra_dedup = 'QUALIFY ROW_NUMBER() OVER (PARTITION BY "src", "dst") = 1'
+              inter_dedup = (
                 f"WHERE NOT EXISTS (SELECT 1 FROM {quoted_table} a "
                 f'WHERE a."src" = t."src" AND a."dst" = t."dst")'
               )
           elif has_from_to:
-            dedup_where = (
+            intra_dedup = 'QUALIFY ROW_NUMBER() OVER (PARTITION BY "from", "to") = 1'
+            inter_dedup = (
               f"WHERE NOT EXISTS (SELECT 1 FROM {quoted_table} a "
               f'WHERE a."from" = t."from" AND a."to" = t."to")'
             )
           else:
             # Unknown schema — no dedup key, plain append
-            dedup_where = ""
+            intra_dedup = ""
+            inter_dedup = ""
 
-          sql = f"INSERT INTO {quoted_table} SELECT {select_expr} FROM {parquet_read} t {dedup_where}"
+          # CTE deduplicates within incoming batch, outer query filters against existing rows
+          if intra_dedup:
+            sql = (
+              f"INSERT INTO {quoted_table} "
+              f"WITH new_data AS (SELECT * FROM {parquet_read} {intra_dedup}) "
+              f"SELECT {select_expr} FROM new_data t {inter_dedup}"
+            )
+          else:
+            sql = f"INSERT INTO {quoted_table} SELECT {select_expr} FROM {parquet_read} t {inter_dedup}"
         else:
           # Simple append — no dedup
           sql = f"INSERT INTO {quoted_table} SELECT * FROM {parquet_read}"
