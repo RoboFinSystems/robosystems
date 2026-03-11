@@ -155,8 +155,8 @@ async def boost_memory(
               duckdb_boost_mb = int(current[:-2]) * 1024
             elif current.endswith("MB"):
               duckdb_boost_mb = int(current[:-2])
-          except (ValueError, AttributeError):
-            pass
+          except (ValueError, AttributeError) as e:
+            logger.warning(f"Could not parse DuckDB override value '{current}': {e}")
 
   if request.target in ("ladybug", "both"):
     result = ensure_ladybug_memory_boosted(graph_id)
