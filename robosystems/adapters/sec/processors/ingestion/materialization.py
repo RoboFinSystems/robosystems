@@ -991,7 +991,9 @@ class LadybugMaterializer:
       for r in failed:
         log_progress(f"  FAILED: {r['table_name']} — {r.get('error', 'unknown error')}")
     else:
-      log_progress(f"MATERIALIZATION SUMMARY: All {total_tables}/{total_tables} tables succeeded")
+      log_progress(
+        f"MATERIALIZATION SUMMARY: All {total_tables}/{total_tables} tables succeeded"
+      )
 
     return {
       "total_rows_ingested": total_rows,
