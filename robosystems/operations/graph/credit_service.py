@@ -787,15 +787,21 @@ class CreditService:
     if success:
       self.session.commit()
 
+      repo_plan = shared_credits.user_repository.repository_plan
+      addon_tier = repo_plan.value if hasattr(repo_plan, "value") else str(repo_plan)
+
       return {
         "success": True,
         "credits_consumed": float(base_cost),
         "remaining_balance": float(shared_credits.current_balance),
         "cached": False,
         "addon_type": shared_credits.user_repository.repository_type,
-        "addon_tier": shared_credits.user_repository.repository_plan.value,
+        "addon_tier": addon_tier,
       }
     else:
+      repo_plan = shared_credits.user_repository.repository_plan
+      addon_tier = repo_plan.value if hasattr(repo_plan, "value") else str(repo_plan)
+
       return {
         "success": False,
         "error": "Insufficient shared repository credits",
@@ -803,7 +809,7 @@ class CreditService:
         "required_credits": float(base_cost),
         "available_credits": float(shared_credits.current_balance),
         "addon_type": shared_credits.user_repository.repository_type,
-        "addon_tier": shared_credits.user_repository.repository_plan.value,
+        "addon_tier": addon_tier,
       }
 
   def get_shared_repository_summary(self, user_id: str) -> dict[str, Any]:
@@ -1092,6 +1098,10 @@ class CreditService:
       "claude-opus-4.1-20250805": "anthropic_claude_4.1_opus",  # Full model ID
       "claude-4-sonnet": "anthropic_claude_4_sonnet",
       "claude-4.1-sonnet": "anthropic_claude_4_sonnet",
+      # AWS Bedrock model IDs
+      "us.anthropic.claude-sonnet-4-6": "anthropic_claude_4_sonnet",
+      "us.anthropic.claude-sonnet-4-5-20250929-v1:0": "anthropic_claude_4_sonnet",
+      "us.anthropic.claude-sonnet-4-20250514-v1:0": "anthropic_claude_4_sonnet",
       # Legacy Claude 3 models
       "claude-3-opus": "anthropic_claude_3_opus",
       "claude-3-sonnet": "anthropic_claude_3_sonnet",
