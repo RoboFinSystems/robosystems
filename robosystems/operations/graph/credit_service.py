@@ -241,6 +241,23 @@ class CreditService:
       except Exception as e:
         logger.warning(f"Failed to update credit cache after consumption: {e}")
 
+      # Record OTel credit consumption metric
+      try:
+        from ...middleware.otel.metrics import get_endpoint_metrics
+
+        graph_tier_val = (
+          credits.graph_tier.value
+          if hasattr(credits.graph_tier, "value")
+          else str(credits.graph_tier)
+        )
+        get_endpoint_metrics().record_credit_consumption(
+          operation_type=operation_type,
+          credits_consumed=float(consumption_result["credits_consumed"]),
+          graph_tier=graph_tier_val,
+        )
+      except Exception:
+        pass  # Metrics are best-effort, never break credit consumption
+
       return {
         "success": True,
         "credits_consumed": consumption_result["credits_consumed"],
