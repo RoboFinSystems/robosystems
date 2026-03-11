@@ -132,7 +132,7 @@ async def boost_memory(
     result = ensure_duckdb_memory_boosted(graph_id)
     if result:
       duckdb_boosted = True
-      # Parse the boost value (e.g., "55GB" -> 55000)
+      # Parse the boost value (e.g., "55GB" -> 56320)
       try:
         if result.endswith("GB"):
           duckdb_boost_mb = int(result[:-2]) * 1024
@@ -143,8 +143,20 @@ async def boost_memory(
         logger.warning(f"Could not parse DuckDB boost value '{result}': {e}")
       logger.info(f"DuckDB memory boosted to {result} for {graph_id}")
     else:
-      # Already boosted or no boost configured
+      # Already boosted or no boost configured — look up current override
       duckdb_boosted = is_duckdb_memory_boosted(graph_id)
+      if duckdb_boosted:
+        from robosystems.graph_api.core.duckdb.pool import get_duckdb_memory_override
+
+        current = get_duckdb_memory_override(graph_id)
+        if current:
+          try:
+            if current.endswith("GB"):
+              duckdb_boost_mb = int(current[:-2]) * 1024
+            elif current.endswith("MB"):
+              duckdb_boost_mb = int(current[:-2])
+          except (ValueError, AttributeError) as e:
+            logger.warning(f"Could not parse DuckDB override value '{current}': {e}")
 
   if request.target in ("ladybug", "both"):
     result = ensure_ladybug_memory_boosted(graph_id)
@@ -153,8 +165,16 @@ async def boost_memory(
       ladybug_boost_mb = result
       logger.info(f"LadybugDB memory boosted to {result}MB for {graph_id}")
     else:
-      # Already boosted or no boost configured
+      # Already boosted or no boost configured — look up current override
       ladybug_boosted = is_ladybug_memory_boosted(graph_id)
+      if ladybug_boosted:
+        from robosystems.graph_api.core.ladybug.config import (
+          get_ladybug_memory_override,
+        )
+
+        current = get_ladybug_memory_override(graph_id)
+        if current:
+          ladybug_boost_mb = current
 
   # Build message
   parts = []

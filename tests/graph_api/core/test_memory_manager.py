@@ -608,16 +608,29 @@ class TestEnsureDuckdbMemoryBoosted:
     mock_set_override.assert_called_once_with("55GB", "test_graph")
 
   def test_already_boosted_returns_none(self):
-    """Second call for the same graph_id returns None (already boosted)."""
+    """Returns None when override is already active for this graph."""
     from robosystems.graph_api.core.memory_manager import (
       _active_duckdb_boosts,
       ensure_duckdb_memory_boosted,
     )
 
-    _active_duckdb_boosts.add("test_graph")
+    _active_duckdb_boosts.discard("test_graph")
 
-    result = ensure_duckdb_memory_boosted("test_graph")
+    with (
+      patch(f"{MODULE}.env") as mock_env,
+      patch(f"{MODULE}.GraphTierConfig") as mock_tier_config,
+      patch(
+        "robosystems.graph_api.core.duckdb.pool.get_duckdb_memory_override",
+        return_value="55GB",
+      ),
+    ):
+      mock_env.CLUSTER_TIER = "ladybug-shared"
+      mock_tier_config.get_duckdb_memory_boost.return_value = "55GB"
+
+      result = ensure_duckdb_memory_boosted("test_graph")
+
     assert result is None
+    assert "test_graph" in _active_duckdb_boosts
 
   def test_no_tier_returns_none(self):
     """Returns None when CLUSTER_TIER is not set."""
@@ -855,16 +868,29 @@ class TestEnsureLadybugMemoryBoosted:
     mock_set_override.assert_called_once_with(50000, graph_id="sec")
 
   def test_already_boosted_returns_none(self):
-    """Second call returns None."""
+    """Returns None when override is already active for this graph."""
     from robosystems.graph_api.core.memory_manager import (
       _active_ladybug_boosts,
       ensure_ladybug_memory_boosted,
     )
 
-    _active_ladybug_boosts.add("sec")
+    _active_ladybug_boosts.discard("sec")
 
-    result = ensure_ladybug_memory_boosted("sec")
+    with (
+      patch(f"{MODULE}.env") as mock_env,
+      patch(f"{MODULE}.GraphTierConfig") as mock_tier_config,
+      patch(
+        "robosystems.graph_api.core.ladybug.config.get_ladybug_memory_override",
+        return_value=50000,
+      ),
+    ):
+      mock_env.CLUSTER_TIER = "ladybug-shared"
+      mock_tier_config.get_ladybug_memory_boost_mb.return_value = 50000
+
+      result = ensure_ladybug_memory_boosted("sec")
+
     assert result is None
+    assert "sec" in _active_ladybug_boosts
 
   def test_no_tier_returns_none(self):
     """Returns None when CLUSTER_TIER is not set."""
@@ -1075,6 +1101,127 @@ class TestDoubleBoostPrevention:
 
     mock_pool = MagicMock()
 
+    # Simulate override state: None initially, "55GB" after first call sets it
+    override_state = {"value": None}
+
+    def mock_get_override(graph_id="sec"):
+      return override_state["value"]
+
+    def mock_set_override(limit, graph_id="sec"):
+      old = override_state["value"]
+      override_state["value"] = limit
+      return old
+
+    with (
+      patch(f"{MODULE}.env") as mock_env,
+      patch(f"{MODULE}.GraphTierConfig") as mock_tier_config,
+      patch(
+        "robosystems.graph_api.core.duckdb.pool.set_duckdb_memory_override",
+        side_effect=mock_set_override,
+      ),
+      patch(
+        "robosystems.graph_api.core.duckdb.pool.get_duckdb_memory_override",
+        side_effect=mock_get_override,
+      ),
+      patch(
+        "robosystems.graph_api.core.duckdb.pool.get_duckdb_pool",
+        return_value=mock_pool,
+      ),
+    ):
+      mock_env.CLUSTER_TIER = "ladybug-shared"
+      mock_tier_config.get_duckdb_memory_boost.return_value = "55GB"
+
+      # First call applies boost
+      first = ensure_duckdb_memory_boosted("test")
+      assert first == "55GB"
+
+      # Second call sees override already active, returns None
+      second = ensure_duckdb_memory_boosted("test")
+      assert second is None
+
+  def test_ladybug_double_boost_prevented(self):
+    """Second ensure_ladybug_memory_boosted call does not re-apply boost."""
+    from robosystems.graph_api.core.memory_manager import (
+      ensure_ladybug_memory_boosted,
+    )
+
+    mock_pool = MagicMock()
+    mock_pool.list_databases.return_value = []
+
+    # Simulate override state: None initially, 50000 after first call sets it
+    override_state: dict[str, int | None] = {"value": None}
+
+    def mock_get_override(graph_id=None):
+      return override_state["value"]
+
+    def mock_set_override(limit, graph_id=None):
+      old = override_state["value"]
+      override_state["value"] = limit
+      return old
+
+    with (
+      patch(f"{MODULE}.env") as mock_env,
+      patch(f"{MODULE}.GraphTierConfig") as mock_tier_config,
+      patch(
+        "robosystems.graph_api.core.ladybug.config.set_ladybug_memory_override",
+        side_effect=mock_set_override,
+      ),
+      patch(
+        "robosystems.graph_api.core.ladybug.config.get_ladybug_memory_override",
+        side_effect=mock_get_override,
+      ),
+      patch(
+        "robosystems.graph_api.core.ladybug.pool.get_connection_pool",
+        return_value=mock_pool,
+      ),
+      patch(f"{MODULE}.release_duckdb_memory", return_value={"connections_closed": 0}),
+    ):
+      mock_env.CLUSTER_TIER = "ladybug-shared"
+      mock_tier_config.get_ladybug_memory_boost_mb.return_value = 50000
+
+      first = ensure_ladybug_memory_boosted("sec")
+      assert first == 50000
+
+      # Second call sees override already active, returns None
+      second = ensure_ladybug_memory_boosted("sec")
+      assert second is None
+
+
+# ---------------------------------------------------------------------------
+# Stale tracking set regression tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+class TestStaleTrackingSetRegression:
+  """Regression tests for stale tracking set bug.
+
+  When a Dagster run is cancelled before release_graph_memory cleans up,
+  the tracking set retains the graph_id but the actual override is cleared.
+  The next run must re-apply the boost instead of short-circuiting.
+  """
+
+  def setup_method(self):
+    from robosystems.graph_api.core.memory_manager import (
+      _active_duckdb_boosts,
+      _active_ladybug_boosts,
+    )
+
+    _active_duckdb_boosts.discard("sec")
+    _active_ladybug_boosts.discard("sec")
+
+  def test_duckdb_stale_tracking_set_reapplies_boost(self):
+    """DuckDB boost is re-applied when tracking set is stale (override cleared)."""
+    from robosystems.graph_api.core.memory_manager import (
+      _active_duckdb_boosts,
+      ensure_duckdb_memory_boosted,
+    )
+
+    # Simulate stale state: tracking set has entry but override was cleared
+    _active_duckdb_boosts.add("sec")
+
+    mock_pool = MagicMock()
+
     with (
       patch(f"{MODULE}.env") as mock_env,
       patch(f"{MODULE}.GraphTierConfig") as mock_tier_config,
@@ -1093,22 +1240,22 @@ class TestDoubleBoostPrevention:
       mock_env.CLUSTER_TIER = "ladybug-shared"
       mock_tier_config.get_duckdb_memory_boost.return_value = "55GB"
 
-      # First call applies boost
-      first = ensure_duckdb_memory_boosted("test")
-      assert first == "55GB"
+      result = ensure_duckdb_memory_boosted("sec")
 
-      # Second call is a no-op
-      second = ensure_duckdb_memory_boosted("test")
-      assert second is None
+    # Boost must be re-applied, not skipped
+    assert result == "55GB"
+    mock_set.assert_called_once_with("55GB", "sec")
+    mock_pool.reconfigure_memory_limit.assert_called_once_with("sec", "55GB")
 
-      # set_duckdb_memory_override only called once
-      mock_set.assert_called_once()
-
-  def test_ladybug_double_boost_prevented(self):
-    """Second ensure_ladybug_memory_boosted call does not re-apply boost."""
+  def test_ladybug_stale_tracking_set_reapplies_boost(self):
+    """LadybugDB boost is re-applied when tracking set is stale (override cleared)."""
     from robosystems.graph_api.core.memory_manager import (
+      _active_ladybug_boosts,
       ensure_ladybug_memory_boosted,
     )
+
+    # Simulate stale state: tracking set has entry but override was cleared
+    _active_ladybug_boosts.add("sec")
 
     mock_pool = MagicMock()
     mock_pool.list_databases.return_value = []
@@ -1132,13 +1279,12 @@ class TestDoubleBoostPrevention:
       mock_env.CLUSTER_TIER = "ladybug-shared"
       mock_tier_config.get_ladybug_memory_boost_mb.return_value = 50000
 
-      first = ensure_ladybug_memory_boosted("sec")
-      assert first == 50000
+      result = ensure_ladybug_memory_boosted("sec")
 
-      second = ensure_ladybug_memory_boosted("sec")
-      assert second is None
-
-      mock_set.assert_called_once()
+    # Boost must be re-applied, not skipped
+    assert result == 50000
+    mock_set.assert_called_once_with(50000, graph_id="sec")
+    mock_pool.recreate_database.assert_called_once_with("sec")
 
 
 # ---------------------------------------------------------------------------
