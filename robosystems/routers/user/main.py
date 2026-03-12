@@ -191,7 +191,7 @@ async def update_user_profile(
       user_in_session.email = (
         sanitized_email if sanitized_email else update_data["email"]
       )
-      if sanitized_email and sanitized_email != current_user.email:
+      if sanitized_email:
         email_changed = True
         if env.EMAIL_VERIFICATION_ENABLED:
           user_in_session.email_verified = False
@@ -256,8 +256,6 @@ async def update_user_profile(
     except Exception as e:
       logger.error(f"Failed to invalidate user cache after profile update: {e}")
 
-    current_user = user_in_session
-
     client_ip = fastapi_request.client.host if fastapi_request.client else None
     user_agent = fastapi_request.headers.get("user-agent")
 
@@ -270,9 +268,8 @@ async def update_user_profile(
       details={
         "action": "profile_updated",
         "fields_changed": fields_updated,
-        "email_changed": "email" in fields_updated,
+        "email_changed": email_changed,
         "name_changed": "name" in fields_updated,
-        "old_email": current_user.email if "email" in fields_updated else None,
       },
       risk_level="low",
     )
@@ -285,17 +282,17 @@ async def update_user_profile(
       event_data={
         "user_id": user_id,
         "fields_updated": ",".join(fields_updated),
-        "email_changed": "email" in fields_updated,
+        "email_changed": email_changed,
         "name_changed": "name" in fields_updated,
       },
       user_id=user_id,
     )
 
     return UserResponse(
-      id=current_user.id,
-      name=current_user.name,
-      email=current_user.email,
-      email_verified=current_user.email_verified,
+      id=user_in_session.id,
+      name=user_in_session.name,
+      email=user_in_session.email,
+      email_verified=user_in_session.email_verified,
       accounts=[],
     )
 

@@ -41,6 +41,7 @@ class UserResponse(BaseModel):
         "id": "user-123",
         "name": "johndoe",
         "email": "john@example.com",
+        "email_verified": True,
         "accounts": [
           {
             "provider": "github",
