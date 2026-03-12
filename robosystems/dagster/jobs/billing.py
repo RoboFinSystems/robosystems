@@ -115,12 +115,25 @@ async def _handle_checkout_completed(
     context.log.warning(f"Checkout completed but payment not paid: {payment_status}")
 
 
+class SubscriptionNotFoundError(Exception):
+  """Raised when a webhook event cannot be matched to a BillingSubscription.
+
+  Caught separately from ValueError/Exception in the webhook handler so that
+  "not found" triggers a Stripe retry, while unrelated errors are logged.
+  """
+
+
 def _extract_stripe_subscription_id(data: dict) -> str | None:
   """Extract subscription ID from any Stripe event payload.
 
   Stripe's payload structure varies across API versions and event types.
   Instead of assuming a single location, search all known paths.
   """
+  # The object IS a subscription (customer.subscription.updated/deleted)
+  obj_id = data.get("id", "")
+  if isinstance(obj_id, str) and obj_id.startswith("sub_"):
+    return obj_id
+
   # Direct field (older API versions)
   if sub_id := data.get("subscription"):
     if isinstance(sub_id, str):
@@ -154,8 +167,7 @@ def _resolve_subscription(event_data: dict, db_session: Any, context: Any) -> An
   back to customer ID. This is the single entry point for subscription
   lookup — all handlers should use this instead of rolling their own.
 
-  Raises ValueError if the subscription cannot be found, so callers
-  can distinguish "not found" from "found but nothing to do."
+  Raises SubscriptionNotFoundError if the subscription cannot be found.
   """
   from robosystems.models.billing import BillingCustomer, BillingSubscription
 
@@ -175,10 +187,19 @@ def _resolve_subscription(event_data: dict, db_session: Any, context: Any) -> An
       return subscription
 
   # --- Fallback: customer ID → org → subscription ---
+  # Prefer active/provisioning over canceled to avoid matching a stale
+  # subscription when the org has re-subscribed.
   customer_id = event_data.get("customer")
   if customer_id:
     customer = BillingCustomer.get_by_stripe_customer_id(customer_id, db_session)
     if customer:
+      from sqlalchemy import case
+
+      status_priority = case(
+        {"active": 0, "provisioning": 1, "pending_payment": 2, "canceled": 3},
+        value=BillingSubscription.status,
+        else_=4,
+      )
       subscription = (
         db_session.query(BillingSubscription)
         .filter(
@@ -187,7 +208,7 @@ def _resolve_subscription(event_data: dict, db_session: Any, context: Any) -> An
             ["pending_payment", "provisioning", "active", "canceled"]
           ),
         )
-        .order_by(BillingSubscription.created_at.desc())
+        .order_by(status_priority, BillingSubscription.created_at.desc())
         .first()
       )
       if subscription:
@@ -196,7 +217,7 @@ def _resolve_subscription(event_data: dict, db_session: Any, context: Any) -> An
         )
         return subscription
 
-  raise ValueError(
+  raise SubscriptionNotFoundError(
     f"Subscription not found (stripe_sub={stripe_sub_id}, "
     f"customer={event_data.get('customer')})"
   )

@@ -11,6 +11,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from robosystems.dagster.jobs.billing import (
+  SubscriptionNotFoundError,
   _extract_stripe_subscription_id,
   _resolve_subscription,
 )
@@ -227,13 +228,21 @@ class TestExtractStripeSubscriptionId:
     assert result == "sub_1SzioUReD8VoQizPuBWqzco7"
 
   def test_subscription_updated_event(self):
-    """Subscription updated — sub ID is the object ID, not in 'subscription' field.
-
-    The subscription object itself doesn't have a 'subscription' field.
-    The ID should be found via items.data[].subscription.
-    """
+    """Subscription updated — sub ID extracted from object's own id field."""
     result = _extract_stripe_subscription_id(RENEWAL_SUBSCRIPTION_UPDATED)
     assert result == "sub_1SzioUReD8VoQizPuBWqzco7"
+
+  def test_subscription_object_with_empty_items(self):
+    """Subscription object with no items still resolves via id field."""
+    payload = {
+      "id": "sub_empty_items",
+      "object": "subscription",
+      "customer": "cus_test",
+      "status": "active",
+      "items": {"data": [], "object": "list"},
+    }
+    result = _extract_stripe_subscription_id(payload)
+    assert result == "sub_empty_items"
 
   def test_legacy_invoice_top_level_subscription(self):
     """Legacy format — sub ID at top level."""
@@ -433,7 +442,7 @@ class TestResolveSubscription:
   @patch("robosystems.models.billing.BillingCustomer")
   @patch("robosystems.models.billing.BillingSubscription")
   def test_raises_value_error_when_not_found(self, MockSub, MockCustomer):
-    """Raises ValueError when subscription cannot be found anywhere."""
+    """Raises SubscriptionNotFoundError when subscription cannot be found."""
     MockSub.get_by_provider_subscription_id.return_value = None
     MockSub.get_by_stripe_subscription_id.return_value = None
     MockCustomer.get_by_stripe_customer_id.return_value = None
@@ -441,13 +450,13 @@ class TestResolveSubscription:
     ctx = MagicMock()
     db = MagicMock()
 
-    with pytest.raises(ValueError, match="Subscription not found"):
+    with pytest.raises(SubscriptionNotFoundError, match="Subscription not found"):
       _resolve_subscription(RENEWAL_INVOICE_CREATED, db, ctx)
 
   @patch("robosystems.models.billing.BillingCustomer")
   @patch("robosystems.models.billing.BillingSubscription")
   def test_raises_when_customer_has_no_subscriptions(self, MockSub, MockCustomer):
-    """Raises ValueError when customer exists but has no subscriptions."""
+    """Raises SubscriptionNotFoundError when customer exists but has no subs."""
     mock_customer = self._make_mock_customer()
 
     MockSub.get_by_provider_subscription_id.return_value = None
@@ -463,7 +472,7 @@ class TestResolveSubscription:
     mock_query.first.return_value = None
     db.query.return_value = mock_query
 
-    with pytest.raises(ValueError, match="Subscription not found"):
+    with pytest.raises(SubscriptionNotFoundError, match="Subscription not found"):
       _resolve_subscription(RENEWAL_INVOICE_CREATED, db, ctx)
 
   @patch("robosystems.models.billing.BillingCustomer")
