@@ -121,7 +121,7 @@ sec_post_materialize_publish_sensor:
 | `sec_incremental_download_schedule` | `sec_download_job` | 9pm EST weekdays |
 | `sec_incremental_pipeline_sensor` | `sec_process_job`, `sec_incremental_stage_job` | Chains download → process (batched loop) → stage |
 | `sec_stage_to_materialize_sensor` | `sec_materialize_job` | Chains stage → full graph rebuild |
-| `sec_post_materialize_publish_sensor` | `sec_lbug_s3_publish_job`, `sec_duckdb_s3_publish_job`, `shared_repository_refresh_replicas_job` | Chains materialize → lbug publish → duckdb publish → replica refresh |
+| `sec_post_materialize_publish_sensor` | `sec_lbug_s3_publish_job`, `sec_duckdb_s3_publish_job`, `shared_replicas_refresh_job` | Chains materialize → lbug publish → duckdb publish → replica refresh |
 
 ### Backfill Processing (enable for bulk/manual processing)
 
