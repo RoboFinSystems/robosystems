@@ -69,7 +69,16 @@ async def update_user_password(
   user_id = getattr(current_user, "id", None) if current_user else None
 
   try:
-    if not current_user.password_hash:
+    # Fetch full user from DB — cached user from get_current_user may not have password_hash
+    user_with_password = User.get_by_id(user_id, db)
+    if not user_with_password:
+      raise create_error_response(
+        status_code=status.HTTP_404_NOT_FOUND,
+        detail="User not found",
+        code=ErrorCode.NOT_FOUND,
+      )
+
+    if not user_with_password.password_hash:
       metrics_instance = get_endpoint_metrics()
       metrics_instance.record_business_event(
         endpoint="/v1/user/password",
@@ -86,7 +95,7 @@ async def update_user_password(
 
     if not bcrypt.checkpw(
       request.current_password.encode("utf-8"),
-      current_user.password_hash.encode("utf-8"),
+      user_with_password.password_hash.encode("utf-8"),
     ):
       metrics_instance = get_endpoint_metrics()
       metrics_instance.record_business_event(
