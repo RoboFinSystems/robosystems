@@ -618,10 +618,6 @@ async def sso_complete(
         status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found or inactive"
       )
 
-    # SSO providers verify email ownership, so auto-verify if not already
-    if not user.email_verified:
-      user.verify_email(session)
-
     # Create new JWT token for this session
     jwt_token = create_jwt_token(user.id)
 
