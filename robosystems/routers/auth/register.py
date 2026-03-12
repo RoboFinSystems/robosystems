@@ -2,6 +2,7 @@
 
 from fastapi import (
   APIRouter,
+  BackgroundTasks,
   Depends,
   HTTPException,
   Request,
@@ -11,15 +12,20 @@ from fastapi import (
 from sqlalchemy.orm import Session
 
 from ...config import env
-from ...config.constants import JWT_EXPIRY_HOURS, TOKEN_GRACE_PERIOD_MINUTES
+from ...config.constants import (
+  EMAIL_TOKEN_EXPIRY_HOURS,
+  JWT_EXPIRY_HOURS,
+  TOKEN_GRACE_PERIOD_MINUTES,
+)
 from ...database import get_async_db_session
 from ...logger import logger
 from ...middleware.auth.jwt import create_jwt_token
 from ...middleware.otel.metrics import endpoint_metrics_decorator, record_auth_metrics
 from ...middleware.rate_limits import auth_rate_limit_dependency
+from ...middleware.sse import build_email_job_config, run_and_monitor_dagster_job
 from ...models.api.auth import AuthResponse, RegisterRequest
 from ...models.api.common import ErrorResponse
-from ...models.iam import Org, OrgLimits, User
+from ...models.iam import Org, OrgLimits, User, UserToken
 from ...security import SecurityAuditLogger, SecurityEventType
 from ...security.auth_protection import AdvancedAuthProtection
 from ...security.captcha import captcha_service
@@ -29,7 +35,7 @@ from ...security.input_validation import (
   validate_email,
   validate_password_strength,
 )
-from .utils import hash_password
+from .utils import detect_app_source, hash_password
 
 # Create router for register endpoint
 router = APIRouter()
@@ -60,6 +66,7 @@ async def register(
   request: RegisterRequest,
   response: Response,
   fastapi_request: Request,
+  background_tasks: BackgroundTasks,
   session: Session = Depends(get_async_db_session),
   rate_limit: None = Depends(auth_rate_limit_dependency),
 ) -> AuthResponse:
@@ -278,9 +285,46 @@ async def register(
         f"Email automatically verified for development user: {sanitized_email}"
       )
     else:
-      # In production, email verification is required
-      # TODO: Send email verification email here
-      logger.info(f"Email verification required for production user: {sanitized_email}")
+      # In production, queue verification email
+      reg_client_ip = fastapi_request.client.host if fastapi_request.client else None
+      reg_user_agent = fastapi_request.headers.get("user-agent")
+
+      token = UserToken.create_token(
+        user_id=user.id,
+        token_type="email_verification",
+        hours=EMAIL_TOKEN_EXPIRY_HOURS,
+        session=session,
+        ip_address=reg_client_ip,
+        user_agent=reg_user_agent,
+      )
+
+      app = detect_app_source(fastapi_request)
+
+      run_config = build_email_job_config(
+        email_type="email_verification",
+        to_email=sanitized_email,
+        user_name=sanitized_name,
+        token=token,
+        app=app,
+      )
+      background_tasks.add_task(
+        run_and_monitor_dagster_job,
+        job_name="send_email_job",
+        operation_id=None,
+        run_config=run_config,
+      )
+
+      SecurityAuditLogger.log_security_event(
+        event_type=SecurityEventType.EMAIL_SENT,
+        user_id=user.id,
+        ip_address=reg_client_ip,
+        user_agent=reg_user_agent,
+        endpoint="/v1/auth/register",
+        details={"email_type": "verification", "app_source": app},
+        risk_level="low",
+      )
+
+      logger.info(f"Queued verification email for new user: {sanitized_email}")
 
     # Create personal organization for the user
     # RoboSystems is org-centric: all resources belong to orgs, not users
@@ -363,6 +407,7 @@ async def register(
       "id": user.id,
       "name": user.name,
       "email": user.email,
+      "email_verified": user.email_verified,
     },
     org={
       "id": org.id,

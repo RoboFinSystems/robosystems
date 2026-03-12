@@ -18,6 +18,23 @@ from robosystems.security import password as password_module
 
 password_module.PasswordSecurity.BCRYPT_ROUNDS = 4  # Fast for tests
 
+
+@pytest.fixture(autouse=True)
+def mock_email_dagster_jobs():
+  """Mock Dagster email jobs globally so registration/email-change tests don't need Dagster running.
+
+  NOTE: This prevents real Dagster calls in all tests. If you need to verify that an email job
+  is actually triggered, use the mock's assert_called methods rather than disabling this fixture.
+  """
+  with (
+    patch("robosystems.routers.auth.register.run_and_monitor_dagster_job"),
+    patch("robosystems.routers.auth.register.build_email_job_config"),
+    patch("robosystems.routers.user.main.run_and_monitor_dagster_job"),
+    patch("robosystems.routers.user.main.build_email_job_config"),
+  ):
+    yield
+
+
 # Valid test graph IDs matching the GRAPH_ID_PATTERN
 # Pattern: kg + 16+ hex chars (lowercase, 0-9 and a-f only)
 # Actual formats: kg + 16 (generic) or kg + 18 (entity with 14 ULID + 4 hash)

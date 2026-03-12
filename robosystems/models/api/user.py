@@ -28,6 +28,9 @@ class UserResponse(BaseModel):
   id: str = Field(..., description="Unique identifier for the user")
   name: str | None = Field(None, description="User's display name")
   email: str | None = Field(None, description="User's email address")
+  email_verified: bool = Field(
+    default=False, description="Whether user's email is verified"
+  )
   accounts: list[AccountInfo] = Field(
     default_factory=list, description="User's authentication accounts"
   )
@@ -38,6 +41,7 @@ class UserResponse(BaseModel):
         "id": "user-123",
         "name": "johndoe",
         "email": "john@example.com",
+        "email_verified": True,
         "accounts": [
           {
             "provider": "github",

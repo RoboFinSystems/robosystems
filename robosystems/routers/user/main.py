@@ -2,9 +2,11 @@
 
 from datetime import UTC, datetime
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 
+from ...config import env
+from ...config.constants import EMAIL_TOKEN_EXPIRY_HOURS
 from ...database import get_db_session
 from ...logger import logger
 from ...middleware.auth.dependencies import get_current_user
@@ -13,6 +15,7 @@ from ...middleware.otel.metrics import (
   get_endpoint_metrics,
 )
 from ...middleware.rate_limits import user_management_rate_limit_dependency
+from ...middleware.sse import build_email_job_config, run_and_monitor_dagster_job
 from ...models.api.common import (
   ErrorCode,
   create_error_response,
@@ -21,12 +24,13 @@ from ...models.api.user import (
   UpdateUserRequest,
   UserResponse,
 )
-from ...models.iam import User
+from ...models.iam import User, UserToken
 from ...security import SecurityAuditLogger, SecurityEventType
 from ...security.input_validation import (
   sanitize_string,
   validate_email,
 )
+from ..auth.utils import detect_app_source
 
 router = APIRouter(tags=["User"])
 
@@ -65,6 +69,7 @@ async def get_current_user_info(
       id=current_user.id,
       name=current_user.name,
       email=current_user.email,
+      email_verified=current_user.email_verified,
       accounts=[],
     )
 
@@ -106,6 +111,7 @@ async def get_current_user_info(
 async def update_user_profile(
   request: UpdateUserRequest,
   fastapi_request: Request,
+  background_tasks: BackgroundTasks,
   current_user: User = Depends(get_current_user),
   db: Session = Depends(get_db_session),
   _rate_limit: None = Depends(user_management_rate_limit_dependency),
@@ -144,6 +150,7 @@ async def update_user_profile(
 
     fields_updated = list(update_data.keys())
     sanitized_email = None
+    email_changed = False
 
     if "email" in update_data and update_data["email"] != current_user.email:
       if not validate_email(update_data["email"]):
@@ -184,11 +191,63 @@ async def update_user_profile(
       user_in_session.email = (
         sanitized_email if sanitized_email else update_data["email"]
       )
+      if sanitized_email:
+        email_changed = True
+        if env.EMAIL_VERIFICATION_ENABLED:
+          user_in_session.email_verified = False
 
     user_in_session.updated_at = datetime.now(UTC)
 
     db.commit()
     db.refresh(user_in_session)
+
+    # Queue verification email for new email address
+    if email_changed and env.EMAIL_VERIFICATION_ENABLED:
+      client_ip = fastapi_request.client.host if fastapi_request.client else None
+      user_agent = fastapi_request.headers.get("user-agent")
+
+      token = UserToken.create_token(
+        user_id=user_id,
+        token_type="email_verification",
+        hours=EMAIL_TOKEN_EXPIRY_HOURS,
+        session=db,
+        ip_address=client_ip,
+        user_agent=user_agent,
+      )
+
+      app = detect_app_source(fastapi_request)
+
+      run_config = build_email_job_config(
+        email_type="email_verification",
+        to_email=user_in_session.email,
+        user_name=user_in_session.name,
+        token=token,
+        app=app,
+      )
+      background_tasks.add_task(
+        run_and_monitor_dagster_job,
+        job_name="send_email_job",
+        operation_id=None,
+        run_config=run_config,
+      )
+
+      SecurityAuditLogger.log_security_event(
+        event_type=SecurityEventType.EMAIL_SENT,
+        user_id=str(user_id),
+        ip_address=client_ip,
+        user_agent=user_agent,
+        endpoint="/v1/user",
+        details={
+          "email_type": "verification",
+          "reason": "email_changed",
+          "app_source": app,
+        },
+        risk_level="low",
+      )
+
+      logger.info(
+        f"Queued verification email for changed email: {user_in_session.email}"
+      )
 
     try:
       from ...middleware.auth.cache import api_key_cache
@@ -196,8 +255,6 @@ async def update_user_profile(
       api_key_cache.invalidate_user_data(user_id)
     except Exception as e:
       logger.error(f"Failed to invalidate user cache after profile update: {e}")
-
-    current_user = user_in_session
 
     client_ip = fastapi_request.client.host if fastapi_request.client else None
     user_agent = fastapi_request.headers.get("user-agent")
@@ -211,9 +268,8 @@ async def update_user_profile(
       details={
         "action": "profile_updated",
         "fields_changed": fields_updated,
-        "email_changed": "email" in fields_updated,
+        "email_changed": email_changed,
         "name_changed": "name" in fields_updated,
-        "old_email": current_user.email if "email" in fields_updated else None,
       },
       risk_level="low",
     )
@@ -226,16 +282,17 @@ async def update_user_profile(
       event_data={
         "user_id": user_id,
         "fields_updated": ",".join(fields_updated),
-        "email_changed": "email" in fields_updated,
+        "email_changed": email_changed,
         "name_changed": "name" in fields_updated,
       },
       user_id=user_id,
     )
 
     return UserResponse(
-      id=current_user.id,
-      name=current_user.name,
-      email=current_user.email,
+      id=user_in_session.id,
+      name=user_in_session.name,
+      email=user_in_session.email,
+      email_verified=user_in_session.email_verified,
       accounts=[],
     )
 

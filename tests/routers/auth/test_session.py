@@ -22,6 +22,7 @@ def mock_user():
   user.name = "Test User"
   user.email = "test@example.com"
   user.is_active = True
+  user.email_verified = True
   return user
 
 
@@ -33,6 +34,7 @@ def mock_inactive_user():
   user.name = "Inactive User"
   user.email = "inactive@example.com"
   user.is_active = False
+  user.email_verified = False
   return user
 
 
@@ -71,7 +73,12 @@ class TestGetMe:
     )
 
     # Verify result
-    expected = {"id": "user_123", "name": "Test User", "email": "test@example.com"}
+    expected = {
+      "id": "user_123",
+      "name": "Test User",
+      "email": "test@example.com",
+      "email_verified": True,
+    }
     assert result == expected
 
     # Verify mocks were called correctly (now includes device fingerprint)
@@ -112,7 +119,12 @@ class TestGetMe:
     )
 
     # Verify result
-    expected = {"id": "user_123", "name": "Test User", "email": "test@example.com"}
+    expected = {
+      "id": "user_123",
+      "name": "Test User",
+      "email": "test@example.com",
+      "email_verified": True,
+    }
     assert result == expected
 
     # Verify JWT token was extracted from Bearer header (now includes device fingerprint)
