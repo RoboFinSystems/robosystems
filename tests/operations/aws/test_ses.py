@@ -66,7 +66,7 @@ class TestSESEmailService:
 
     # Verify message content
     message = call_args.kwargs["Message"]
-    assert "Verify Your Roboledger Email" in message["Subject"]["Data"]
+    assert "Verify your RoboLedger email" in message["Subject"]["Data"]
     assert "Test User" in message["Body"]["Html"]["Data"]
     assert "verification_token_123" in message["Body"]["Html"]["Data"]
 
@@ -97,7 +97,7 @@ class TestSESEmailService:
 
     # Verify message content
     message = call_args.kwargs["Message"]
-    assert "Roboinvestor Password Reset" in message["Subject"]["Data"]
+    assert "RoboInvestor password reset" in message["Subject"]["Data"]
     assert "Reset User" in message["Body"]["Html"]["Data"]
     assert "reset_token_456" in message["Body"]["Html"]["Data"]
 
@@ -117,9 +117,9 @@ class TestSESEmailService:
     # Check message content
     call_args = mock_ses_client.send_email.call_args
     message = call_args.kwargs["Message"]
-    assert "Welcome to Robosystems!" in message["Subject"]["Data"]
+    assert "Welcome to RoboSystems" in message["Subject"]["Data"]
     assert "Welcome User" in message["Body"]["Html"]["Data"]
-    assert "dashboard" in message["Body"]["Html"]["Data"]
+    assert "home" in message["Body"]["Html"]["Data"]
 
   @pytest.mark.asyncio
   async def test_send_email_with_client_error(self, ses_service, mock_ses_client):
