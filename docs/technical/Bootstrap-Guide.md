@@ -95,6 +95,7 @@ Bootstrap handles everything:
 - IAM Role: `RoboSystemsGitHubActionsFrontendRole` (frontend app deployments)
 - IAM Role: `RoboSystemsAppSuperAdminRole` (application admin via SSO)
 - ECR Repository with lifecycle policy
+- SES email identity for your domain (DKIM verified, production access requested)
 
 ### Optional GitHub Secrets
 
@@ -333,6 +334,38 @@ This checks for the OIDC infrastructure (deployed by the main robosystems repo) 
    ```
 3. Deploy - ACM certificates and DNS records created automatically
 
+## SES Email Identity
+
+Bootstrap automatically sets up Amazon SES for transactional emails (account verification, password reset, welcome). You'll be prompted for your email domain (default: `robosystems.ai`), which is saved as the `SES_DOMAIN` GitHub variable.
+
+This involves three steps:
+
+1. **Domain identity** — Creates an SES email identity for your domain
+2. **DKIM verification** — Adds CNAME records to Route53 (or prints them for manual DNS setup if the hosted zone isn't in the same account)
+3. **Production access** — Requests sandbox removal so emails can be sent to any address
+
+**New accounts start in SES sandbox mode**, which only allows sending to verified email addresses. Production access is required for real user registration. AWS typically approves the request within 24 hours (often instantly for transactional-only use cases).
+
+**Verify SES status:**
+```bash
+# Check domain verification (replace with your domain)
+aws sesv2 get-email-identity --email-identity yourdomain.com --region us-east-1 \
+  --query '{DkimStatus: DkimAttributes.Status, SendingEnabled: VerifiedForSendingStatus}'
+
+# Check production access
+aws sesv2 get-account --region us-east-1 \
+  --query '{ProductionAccess: ProductionAccessEnabled, SendingEnabled: SendingEnabled}'
+```
+
+**If DKIM is still pending**, verify the DNS records exist:
+```bash
+DOMAIN=yourdomain.com
+aws route53 list-resource-record-sets \
+  --hosted-zone-id $(aws route53 list-hosted-zones --query "HostedZones[?Name=='${DOMAIN}.'].Id" --output text | sed 's|/hostedzone/||') \
+  --query "ResourceRecordSets[?contains(Name, '_domainkey')].[Name,ResourceRecords[0].Value]" \
+  --output table
+```
+
 ## Troubleshooting
 
 ### SSO: "No accounts found"
@@ -352,6 +385,11 @@ echo 'export AWS_REGION=us-east-1' >> .envrc && direnv allow
 1. Verify OIDC stack deployed successfully
 2. Check branch matches allowed conditions (main, release/*, v* tags)
 3. Ensure workflow has `permissions: id-token: write`
+
+### SES: Verification emails not sending
+1. Check domain is verified: `aws sesv2 get-email-identity --email-identity robosystems.ai --region us-east-1`
+2. Check production access: `aws sesv2 get-account --region us-east-1 --query 'ProductionAccessEnabled'`
+3. If in sandbox, either request production access or verify recipient email: `aws ses verify-email-identity --email-address user@example.com --region us-east-1`
 
 ## Quick Reference
 
