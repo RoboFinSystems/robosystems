@@ -115,58 +115,111 @@ async def _handle_checkout_completed(
     context.log.warning(f"Checkout completed but payment not paid: {payment_status}")
 
 
-def _find_subscription_by_stripe_id(
-  stripe_subscription_id: str, db_session: Any
-) -> Any:
-  """Find a BillingSubscription by Stripe subscription ID.
+class SubscriptionNotFoundError(Exception):
+  """Raised when a webhook event cannot be matched to a BillingSubscription.
 
-  Tries provider_subscription_id first, then falls back to
-  stripe_subscription_id column. This handles the race condition where
-  Stripe fires invoice events before checkout.session.completed updates
-  the provider_subscription_id field.
+  Caught separately from ValueError/Exception in the webhook handler so that
+  "not found" triggers a Stripe retry, while unrelated errors are logged.
   """
-  from robosystems.models.billing import BillingSubscription
-
-  subscription = BillingSubscription.get_by_provider_subscription_id(
-    stripe_subscription_id, db_session
-  )
-  if subscription:
-    return subscription
-
-  return BillingSubscription.get_by_stripe_subscription_id(
-    stripe_subscription_id, db_session
-  )
 
 
-def _find_subscription_by_customer(stripe_customer_id: str, db_session: Any) -> Any:
-  """Find the most recent subscription for a Stripe customer during checkout.
+def _extract_stripe_subscription_id(data: dict) -> str | None:
+  """Extract subscription ID from any Stripe event payload.
 
-  In Stripe Checkout flow, invoice.created and payment_succeeded webhooks
-  arrive with a customer ID but no subscription ID (the subscription is
-  created as part of checkout). This finds the subscription by matching
-  the customer's org to recent subscriptions.
+  Stripe's payload structure varies across API versions and event types.
+  Instead of assuming a single location, search all known paths.
+  """
+  # The object IS a subscription (customer.subscription.updated/deleted)
+  obj_id = data.get("id", "")
+  if isinstance(obj_id, str) and obj_id.startswith("sub_"):
+    return obj_id
 
-  Includes active status because checkout.session.completed may have already
-  activated the subscription before invoice webhooks are processed. The
-  5-minute recency guard prevents matching older unrelated subscriptions.
+  # Direct field (older API versions)
+  if sub_id := data.get("subscription"):
+    if isinstance(sub_id, str):
+      return sub_id
+
+  # Nested under parent (newer API versions for invoices)
+  if parent := data.get("parent"):
+    if sub_details := parent.get("subscription_details"):
+      if sub_id := sub_details.get("subscription"):
+        return sub_id
+
+  # Inside line items (invoices use "lines", subscriptions use "items")
+  for key in ("lines", "items"):
+    for item in data.get(key, {}).get("data", []):
+      if parent := item.get("parent"):
+        if sub_details := parent.get("subscription_item_details"):
+          if sub_id := sub_details.get("subscription"):
+            return sub_id
+      # Older/simpler format
+      if sub_id := item.get("subscription"):
+        if isinstance(sub_id, str):
+          return sub_id
+
+  return None
+
+
+def _resolve_subscription(event_data: dict, db_session: Any, context: Any) -> Any:
+  """Resolve the BillingSubscription for any Stripe event.
+
+  Tries subscription ID first (multiple payload locations), then falls
+  back to customer ID. This is the single entry point for subscription
+  lookup — all handlers should use this instead of rolling their own.
+
+  Raises SubscriptionNotFoundError if the subscription cannot be found.
   """
   from robosystems.models.billing import BillingCustomer, BillingSubscription
 
-  customer = BillingCustomer.get_by_stripe_customer_id(stripe_customer_id, db_session)
-  if not customer:
-    return None
-
-  recency_cutoff = datetime.now(UTC) - timedelta(minutes=5)
-
-  return (
-    db_session.query(BillingSubscription)
-    .filter(
-      BillingSubscription.org_id == customer.org_id,
-      BillingSubscription.status.in_(["pending_payment", "provisioning", "active"]),
-      BillingSubscription.created_at >= recency_cutoff,
+  # --- Try by subscription ID (multiple locations) ---
+  stripe_sub_id = _extract_stripe_subscription_id(event_data)
+  if stripe_sub_id:
+    subscription = BillingSubscription.get_by_provider_subscription_id(
+      stripe_sub_id, db_session
     )
-    .order_by(BillingSubscription.created_at.desc())
-    .first()
+    if subscription:
+      return subscription
+
+    subscription = BillingSubscription.get_by_stripe_subscription_id(
+      stripe_sub_id, db_session
+    )
+    if subscription:
+      return subscription
+
+  # --- Fallback: customer ID → org → subscription ---
+  # Prefer active/provisioning over canceled to avoid matching a stale
+  # subscription when the org has re-subscribed.
+  customer_id = event_data.get("customer")
+  if customer_id:
+    customer = BillingCustomer.get_by_stripe_customer_id(customer_id, db_session)
+    if customer:
+      from sqlalchemy import case
+
+      status_priority = case(
+        {"active": 0, "provisioning": 1, "pending_payment": 2, "canceled": 3},
+        value=BillingSubscription.status,
+        else_=4,
+      )
+      subscription = (
+        db_session.query(BillingSubscription)
+        .filter(
+          BillingSubscription.org_id == customer.org_id,
+          BillingSubscription.status.in_(
+            ["pending_payment", "provisioning", "active", "canceled"]
+          ),
+        )
+        .order_by(status_priority, BillingSubscription.created_at.desc())
+        .first()
+      )
+      if subscription:
+        context.log.info(
+          f"Resolved subscription {subscription.id} via customer {customer_id}"
+        )
+        return subscription
+
+  raise SubscriptionNotFoundError(
+    f"Subscription not found (stripe_sub={stripe_sub_id}, "
+    f"customer={event_data.get('customer')})"
   )
 
 
@@ -264,32 +317,8 @@ async def _handle_invoice_created(
 
   Creates a BillingInvoice from Stripe data, using Stripe's invoice number
   and syncing all line items from the Stripe invoice.
-
-  In Stripe Checkout flow, the invoice arrives without a subscription ID
-  because the subscription is created as part of checkout. We fall back to
-  matching by customer ID in that case.
   """
-  subscription_id = invoice_data.get("subscription")
-  customer_id = invoice_data.get("customer")
-
-  subscription = None
-  if subscription_id:
-    subscription = _find_subscription_by_stripe_id(subscription_id, db_session)
-
-  if not subscription and customer_id:
-    subscription = _find_subscription_by_customer(customer_id, db_session)
-    if subscription:
-      context.log.info(
-        f"Matched invoice to subscription {subscription.id} via customer {customer_id}"
-      )
-
-  if not subscription:
-    context.log.warning(
-      f"Subscription not found for Stripe invoice "
-      f"(subscription={subscription_id}, customer={customer_id})"
-    )
-    return
-
+  subscription = _resolve_subscription(invoice_data, db_session, context)
   _create_invoice_from_stripe(invoice_data, subscription, db_session, context)
 
 
@@ -308,26 +337,9 @@ async def _handle_payment_succeeded(
   )
 
   stripe_invoice_id = invoice_data.get("id")
-  subscription_id = invoice_data.get("subscription")
   customer_id = invoice_data.get("customer")
 
-  subscription = None
-  if subscription_id:
-    subscription = _find_subscription_by_stripe_id(subscription_id, db_session)
-
-  if not subscription and customer_id:
-    subscription = _find_subscription_by_customer(customer_id, db_session)
-    if subscription:
-      context.log.info(
-        f"Matched payment to subscription {subscription.id} via customer {customer_id}"
-      )
-
-  if not subscription:
-    context.log.warning(
-      f"Subscription not found for payment "
-      f"(subscription={subscription_id}, customer={customer_id})"
-    )
-    return
+  subscription = _resolve_subscription(invoice_data, db_session, context)
 
   customer = BillingCustomer.get_by_stripe_customer_id(customer_id, db_session)
 
@@ -380,16 +392,7 @@ async def _handle_payment_failed(
   invoice_data: dict, db_session: Any, context: OpExecutionContext
 ) -> None:
   """Handle invoice.payment_failed event."""
-  subscription_id = invoice_data.get("subscription")
-
-  if not subscription_id:
-    return
-
-  subscription = _find_subscription_by_stripe_id(subscription_id, db_session)
-
-  if not subscription:
-    context.log.warning(f"Subscription not found for failed payment: {subscription_id}")
-    return
+  subscription = _resolve_subscription(invoice_data, db_session, context)
 
   if subscription.status == "pending_payment":
     subscription.status = "unpaid"
@@ -551,23 +554,23 @@ async def _handle_subscription_updated(
   """
   from datetime import UTC, datetime
 
-  from robosystems.models.billing import BillingSubscription
-
-  subscription_id = subscription_data.get("id")
   status = subscription_data.get("status")
   cancel_at_period_end = subscription_data.get("cancel_at_period_end", False)
 
-  subscription = BillingSubscription.get_by_provider_subscription_id(
-    subscription_id, db_session
-  )
-
-  if not subscription:
-    context.log.warning(f"Subscription not found for update: {subscription_id}")
-    return
+  subscription = _resolve_subscription(subscription_data, db_session, context)
 
   # Sync billing period dates from Stripe
+  # Newer Stripe API versions moved these from the subscription root
+  # to items.data[].current_period_start/end
   period_start = subscription_data.get("current_period_start")
   period_end = subscription_data.get("current_period_end")
+
+  if not period_start or not period_end:
+    items = subscription_data.get("items", {}).get("data", [])
+    if items:
+      period_start = period_start or items[0].get("current_period_start")
+      period_end = period_end or items[0].get("current_period_end")
+
   if period_start:
     subscription.current_period_start = datetime.fromtimestamp(period_start, tz=UTC)
   if period_end:
@@ -660,24 +663,19 @@ async def _handle_subscription_deleted(
   """
   from datetime import UTC, datetime
 
-  from robosystems.models.billing import BillingSubscription
-
-  subscription_id = subscription_data.get("id")
-
-  subscription = BillingSubscription.get_by_provider_subscription_id(
-    subscription_id, db_session
-  )
-
-  if not subscription:
-    context.log.warning(f"Subscription not found for deletion: {subscription_id}")
-    return
+  subscription = _resolve_subscription(subscription_data, db_session, context)
 
   if subscription.status == "canceled":
     # Already canceled (via portal updated handler or UI cancel button).
     # Preserve original canceled_at timestamp. Use Stripe's period end if
     # the user paid for the current period, otherwise terminate now.
     now = datetime.now(UTC)
+    # Period end may be at item level in newer Stripe API versions
     period_end_ts = subscription_data.get("current_period_end")
+    if not period_end_ts:
+      items = subscription_data.get("items", {}).get("data", [])
+      if items:
+        period_end_ts = items[0].get("current_period_end")
     if period_end_ts:
       period_end = datetime.fromtimestamp(period_end_ts, tz=UTC)
       subscription.ends_at = period_end if period_end > now else now
