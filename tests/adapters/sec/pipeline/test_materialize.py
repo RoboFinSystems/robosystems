@@ -3,7 +3,7 @@
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from dagster import MaterializeResult, build_asset_context
+from dagster import Failure, MaterializeResult, build_asset_context
 
 from robosystems.adapters.sec.pipeline.configs import SECMaterializeConfig
 from robosystems.adapters.sec.pipeline.materialize import (
@@ -61,7 +61,7 @@ class TestSecGraphMaterialized:
   @patch("robosystems.adapters.sec.XBRLDuckDBGraphProcessor")
   @patch("robosystems.graph_api.client.factory.boost_graph_memory")
   def test_materialization_error(self, mock_boost, mock_processor_cls):
-    """Test materialization error handling."""
+    """Test materialization error raises Failure to block downstream sensors."""
     mat_result = _make_materialize_result(status="error", error="Connection refused")
     mock_processor = MagicMock()
     mock_processor.materialize_from_duckdb = AsyncMock(return_value=mat_result)
@@ -72,10 +72,31 @@ class TestSecGraphMaterialized:
     config = SECMaterializeConfig()
     context = build_asset_context()
 
-    result = sec_graph_materialized(context, config)
+    with pytest.raises(Failure, match="Connection refused"):
+      sec_graph_materialized(context, config)
 
-    assert result.metadata["status"] == "error"
-    assert "Connection refused" in str(result.metadata["error"])
+  @patch("robosystems.adapters.sec.XBRLDuckDBGraphProcessor")
+  @patch("robosystems.graph_api.client.factory.boost_graph_memory")
+  def test_materialization_partial_raises_failure(self, mock_boost, mock_processor_cls):
+    """Test partial materialization raises Failure to block S3 publish."""
+    failed_tables = [
+      {"table_name": "Fact", "status": "error", "error": "OOM"},
+      {"table_name": "Entity", "rows_ingested": 5000, "status": "success"},
+    ]
+    mat_result = _make_materialize_result(
+      status="partial", total_rows_ingested=5000, tables=failed_tables
+    )
+    mock_processor = MagicMock()
+    mock_processor.materialize_from_duckdb = AsyncMock(return_value=mat_result)
+    mock_processor_cls.return_value = mock_processor
+
+    mock_boost.return_value = {"message": "boosted"}
+
+    config = SECMaterializeConfig()
+    context = build_asset_context()
+
+    with pytest.raises(Failure, match=r"1 table.*failed.*Fact"):
+      sec_graph_materialized(context, config)
 
   @patch("robosystems.adapters.sec.XBRLDuckDBGraphProcessor")
   @patch("robosystems.graph_api.client.factory.boost_graph_memory")
@@ -251,7 +272,7 @@ class TestSecHistoricalMaterialized:
   def test_historical_materialization_error(
     self, mock_boost, mock_ensure_subgraph, mock_processor_cls, mock_env
   ):
-    """Test historical materialization error handling."""
+    """Test historical materialization error raises Failure to block downstream sensors."""
     mock_env.ENVIRONMENT = "dev"
 
     mat_result = _make_materialize_result(status="error", error="Timeout")
@@ -265,7 +286,5 @@ class TestSecHistoricalMaterialized:
     config = SECMaterializeConfig(graph_id="sec_historical")
     context = build_asset_context()
 
-    result = sec_historical_materialized(context, config)
-
-    assert result.metadata["status"] == "error"
-    assert "Timeout" in str(result.metadata["error"])
+    with pytest.raises(Failure, match="Timeout"):
+      sec_historical_materialized(context, config)

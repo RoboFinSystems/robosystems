@@ -35,11 +35,9 @@ class InvoiceResponse(BaseModel):
   period_start: datetime
   period_end: datetime
   due_date: datetime | None
-  payment_terms: str
   payment_method: str | None
   payment_reference: str | None
   sent_at: datetime | None
   paid_at: datetime | None
-  voided_at: datetime | None
   created_at: datetime
   line_items: list[InvoiceLineItemResponse]

@@ -41,7 +41,7 @@ The Graph Client and Factory system provides the critical interface between the 
 
 The factory is responsible for intelligent routing decisions based on:
 
-- **Graph Type**: User graphs vs shared repositories (SEC, industry, economic)
+- **Graph Type**: User graphs vs shared repositories
 - **Operation Type**: Read vs Write operations
 - **Environment**: Development, Staging, Production
 - **Tier**: ladybug-standard, ladybug-large, ladybug-xlarge for user graphs
@@ -52,7 +52,7 @@ The factory is responsible for intelligent routing decisions based on:
 ##### LadybugDB Backend
 
 ```python
-# Shared Repositories (SEC, industry, economic)
+# Shared Repositories
 ├── Write Operations → Shared Master (always)
 └── Read Operations
     ├── Production/Staging

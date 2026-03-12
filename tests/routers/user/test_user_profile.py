@@ -29,6 +29,7 @@ class TestUserProfile:
     mock_user.id = "test-user-123"
     mock_user.email = "test@example.com"
     mock_user.name = "Test User"
+    mock_user.email_verified = True
     mock_user.password_hash = "dummy_hash"
     mock_user.accounts = []
     mock_user.__name__ = "User"  # Add __name__ attribute for logging
@@ -151,6 +152,7 @@ class TestUserProfile:
     mock_user.id = test_user.id
     mock_user.email = test_user.email
     mock_user.name = test_user.name
+    mock_user.email_verified = True
     mock_user.accounts = []
 
     # Override dependencies
@@ -264,6 +266,7 @@ class TestUserGraphs:
     mock_user.id = "test-user-456"
     mock_user.email = "graphtest@example.com"
     mock_user.name = "Graph Test User"
+    mock_user.email_verified = True
 
     # Mock user graphs with proper datetime objects and Graph relationships
     from datetime import datetime
@@ -932,6 +935,7 @@ class TestUserEndpointsMetrics:
     mock_user.id = "test-user-metrics"
     mock_user.email = "metrics@example.com"
     mock_user.name = "Metrics Test User"
+    mock_user.email_verified = True
     mock_user.accounts = []
     return mock_user
 

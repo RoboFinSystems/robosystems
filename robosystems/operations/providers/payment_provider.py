@@ -135,14 +135,14 @@ class PaymentProvider(ABC):
   @abstractmethod
   def change_subscription_price(
     self,
-    stripe_subscription_id: str,
+    subscription_id: str,
     new_price_id: str,
     proration_behavior: str = "create_prorations",
   ) -> dict[str, Any]:
     """Change the price on an existing subscription (upgrade/downgrade).
 
     Args:
-        stripe_subscription_id: Provider subscription ID
+        subscription_id: Provider subscription ID
         new_price_id: New price ID to switch to
         proration_behavior: How to handle prorations
 
@@ -370,8 +370,10 @@ class StripePaymentProvider(PaymentProvider):
 
     product_name = manifest.name  # e.g., "SEC EDGAR Filings"
 
-    # Search for existing product by name
-    search_query = f'name:"{product_name}"'
+    # Search for existing product by name and environment
+    search_query = (
+      f'name:"{product_name}" AND metadata["environment"]:"{env.ENVIRONMENT}"'
+    )
     products = self.stripe.Product.search(query=search_query, limit=1)
 
     if products.data:
@@ -483,7 +485,7 @@ class StripePaymentProvider(PaymentProvider):
 
   def change_subscription_price(
     self,
-    stripe_subscription_id: str,
+    subscription_id: str,
     new_price_id: str,
     proration_behavior: str = "create_prorations",
   ) -> dict[str, Any]:
@@ -493,18 +495,18 @@ class StripePaymentProvider(PaymentProvider):
     same product (single-product-per-repository pattern).
 
     Args:
-        stripe_subscription_id: Stripe subscription ID
+        subscription_id: Stripe subscription ID
         new_price_id: New Stripe price ID to switch to
         proration_behavior: How to handle prorations (default: create_prorations)
 
     Returns:
         Updated subscription data
     """
-    subscription = self.stripe.Subscription.retrieve(stripe_subscription_id)
+    subscription = self.stripe.Subscription.retrieve(subscription_id)
     current_item = subscription["items"]["data"][0]
 
     updated = self.stripe.Subscription.modify(
-      stripe_subscription_id,
+      subscription_id,
       items=[
         {"id": current_item.id, "price": new_price_id},
       ],
@@ -512,9 +514,9 @@ class StripePaymentProvider(PaymentProvider):
     )
 
     logger.info(
-      f"Changed subscription {stripe_subscription_id} to price {new_price_id}",
+      f"Changed subscription {subscription_id} to price {new_price_id}",
       extra={
-        "subscription_id": stripe_subscription_id,
+        "subscription_id": subscription_id,
         "old_price": current_item.price.id,
         "new_price": new_price_id,
         "proration_behavior": proration_behavior,

@@ -28,7 +28,7 @@ All graph storage uses the USER_DATA_BUCKET with organized prefixes:
           {graph_id}_{timestamp}.tar.gz
 
     shared-repositories/             # Shared repository data
-      databases/                     # Published database snapshots (replica fleet boot)
+      databases/                     # Published databases (downloaded by replicas on boot)
         {graph_id}.lbug
         {graph_id}.duckdb
       backups/                       # Compressed backups (subscriber downloads)
@@ -84,7 +84,7 @@ GRAPH_STORAGE: dict[GraphStorageType, GraphStorageConfig] = {
   GraphStorageType.SHARED_REPO_DATABASES: GraphStorageConfig(
     storage_type=GraphStorageType.SHARED_REPO_DATABASES,
     prefix="shared-repositories/databases/",
-    description="Published shared repository database snapshots for replica fleet",
+    description="Published shared repository databases for replica fleet",
   ),
   GraphStorageType.SHARED_REPO_BACKUPS: GraphStorageConfig(
     storage_type=GraphStorageType.SHARED_REPO_BACKUPS,

@@ -122,13 +122,28 @@ def rate_limit_dependency(request: Request):
     if ":" in identifier and identifier.startswith("user:"):
       user_id = identifier.split(":")[1]
 
+    identifier_type = identifier.split(":")[0] if ":" in identifier else "anonymous"
+    limit_type_str = f"general_api_{identifier_type}"
+
     SecurityAuditLogger.log_rate_limit_exceeded(
       user_id=user_id,
       ip_address=client_ip,
       user_agent=user_agent,
       endpoint=endpoint,
-      limit_type=f"general_api_{identifier.split(':')[0] if ':' in identifier else 'anonymous'}",
+      limit_type=limit_type_str,
     )
+
+    # Record OTel rate limit metric
+    try:
+      from robosystems.middleware.otel.metrics import get_endpoint_metrics
+
+      get_endpoint_metrics().record_rate_limit_rejection(
+        endpoint=endpoint,
+        limit_type=limit_type_str,
+        identifier_type=identifier_type,
+      )
+    except Exception:
+      pass  # Metrics are best-effort, never break rate limiting
 
     # Calculate reset time safely
     current_time = getattr(request.state, "current_time", None) or int(time.time())
@@ -175,12 +190,26 @@ def auth_rate_limit_dependency(request: Request):
     user_agent = request.headers.get("user-agent")
     endpoint = str(request.url.path)
 
+    auth_limit_type = f"auth_{path.split('/')[-1] if '/' in path else 'unknown'}"
+
     SecurityAuditLogger.log_rate_limit_exceeded(
       ip_address=client_ip,
       user_agent=user_agent,
       endpoint=endpoint,
-      limit_type=f"auth_{path.split('/')[-1] if '/' in path else 'unknown'}",
+      limit_type=auth_limit_type,
     )
+
+    # Record OTel rate limit metric
+    try:
+      from robosystems.middleware.otel.metrics import get_endpoint_metrics
+
+      get_endpoint_metrics().record_rate_limit_rejection(
+        endpoint=endpoint,
+        limit_type=auth_limit_type,
+        identifier_type="ip",
+      )
+    except Exception:
+      pass  # Metrics are best-effort, never break rate limiting
 
     # Also log as suspicious activity for auth endpoints
     SecurityAuditLogger.log_security_event(
@@ -480,13 +509,27 @@ def subscription_aware_rate_limit_dependency(request: Request):
     user_agent = request.headers.get("user-agent")
     endpoint = str(request.url.path)
 
+    sub_limit_type = f"subscription_{subscription_tier}_{category.value}"
+
     SecurityAuditLogger.log_rate_limit_exceeded(
       user_id=user_id,
       ip_address=client_ip,
       user_agent=user_agent,
       endpoint=endpoint,
-      limit_type=f"subscription_{subscription_tier}_{category.value}",
+      limit_type=sub_limit_type,
     )
+
+    # Record OTel rate limit metric
+    try:
+      from robosystems.middleware.otel.metrics import get_endpoint_metrics
+
+      get_endpoint_metrics().record_rate_limit_rejection(
+        endpoint=endpoint,
+        limit_type=sub_limit_type,
+        identifier_type="subscription",
+      )
+    except Exception:
+      pass  # Metrics are best-effort, never break rate limiting
 
     # Calculate reset time
     current_time = getattr(request.state, "current_time", None) or int(time.time())
@@ -566,12 +609,24 @@ def sse_connection_rate_limit_dependency(request: Request):
     endpoint = str(request.url.path)
 
     SecurityAuditLogger.log_rate_limit_exceeded(
-      user_id=get_user_from_request(request),
+      user_id=user_id,
       ip_address=client_ip,
       user_agent=user_agent,
       endpoint=endpoint,
       limit_type="sse_connections",
     )
+
+    # Record OTel rate limit metric
+    try:
+      from robosystems.middleware.otel.metrics import get_endpoint_metrics
+
+      get_endpoint_metrics().record_rate_limit_rejection(
+        endpoint=endpoint,
+        limit_type="sse_connections",
+        identifier_type="user",
+      )
+    except Exception:
+      pass  # Metrics are best-effort, never break rate limiting
 
     # Calculate reset time
     current_time = getattr(request.state, "current_time", None) or int(time.time())

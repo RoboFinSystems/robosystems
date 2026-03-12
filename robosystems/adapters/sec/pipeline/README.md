@@ -5,18 +5,21 @@ This package contains all Dagster orchestration for the SEC adapter: assets, job
 ## Directory Structure
 
 ```
-adapters/sec/pipeline/          # This folder
+adapters/sec/pipeline/
 ├── README.md                   # This file
 ├── __init__.py                 # get_dagster_components() discovery
 ├── configs.py                  # All configuration classes
 ├── download.py                 # sec_raw_filings asset
 ├── process.py                  # sec_processed_filings asset
 ├── stage.py                    # sec_duckdb_staged, sec_duckdb_incremental_staged
-├── materialize.py              # sec_graph_materialized, sec_graph_incremental_copy, sec_graph_direct_copy
+├── materialize.py              # sec_graph_materialized, sec_historical_materialized
 ├── entity_update.py            # sec_entity_incremental_update asset
-├── backup.py                   # sec_backup asset
-├── jobs.py                     # 12 SEC job definitions
-└── sensors.py                  # 6 sensors + 1 schedule
+├── s3_publish.py               # sec_lbug_s3_published, sec_historical_lbug_s3_published
+├── duckdb_s3_publish.py        # sec_duckdb_s3_published, sec_historical_duckdb_s3_published
+├── r2_publish.py               # sec_lbug_r2_published
+├── artifact.py                 # sec_knowledge_artifacts
+├── jobs.py                     # Job definitions
+└── sensors.py                  # Sensors + schedule
 ```
 
 ## Discovery Pattern
@@ -47,7 +50,7 @@ uv run dagster asset materialize -m robosystems.dagster \
 
 ### 2. Process (`sec_processed_filings`)
 
-Processes raw XBRL files into consolidated parquet files (one per table per quarter).
+Processes raw XBRL files into parquet part files (one per table per batch). Each run handles up to 250 filings (SEC_PROCESS_BATCH_SIZE) then exits for memory release.
 
 ```bash
 uv run dagster asset materialize -m robosystems.dagster \
@@ -55,48 +58,78 @@ uv run dagster asset materialize -m robosystems.dagster \
   --partition 2024-Q1
 ```
 
-### 3. Stage (`sec_duckdb_staged`)
+### 3. Stage (`sec_duckdb_staged` / `sec_duckdb_incremental_staged`)
 
-Stages processed parquet files to persistent DuckDB for querying and materialization.
+Stages processed parquet files to persistent DuckDB. Full rebuild uses `CREATE TABLE ... GROUP BY + FIRST()` dedup. Incremental uses `INSERT INTO ... WHERE NOT EXISTS` dedup.
 
 ```bash
+# Full rebuild (initial load)
 uv run dagster asset materialize -m robosystems.dagster \
   --select sec_duckdb_staged
+
+# Incremental (nightly updates)
+uv run dagster asset materialize -m robosystems.dagster \
+  --select sec_duckdb_incremental_staged
 ```
 
 ### 4. Materialize (`sec_graph_materialized`)
 
-Materializes from DuckDB staging to LadybugDB graph database.
+Full LadybugDB rebuild from DuckDB staging. Skips embedding columns (vector search served by DuckDB directly).
 
 ```bash
 uv run dagster asset materialize -m robosystems.dagster \
   --select sec_graph_materialized
 ```
 
-### Alternative: Direct Copy (`sec_graph_direct_copy`)
+### 5. Publish
 
-Bypasses DuckDB staging, copying directly from S3 to LadybugDB.
+Publish databases to S3 for the replica fleet and vector search:
 
-```bash
-uv run dagster asset materialize -m robosystems.dagster \
-  --select sec_graph_direct_copy
+- `sec_lbug_s3_published` — LadybugDB .lbug file for replica fleet
+- `sec_duckdb_s3_published` — DuckDB .duckdb file for embedding/vector search
+- `sec_lbug_r2_published` — R2 copy for zero-egress subscriber downloads (manual/weekly)
+
+## Automated Nightly Pipeline
+
+The full automated chain (enable all sensors + schedule in Dagster UI):
+
+```
+9pm EST (sec_incremental_download_schedule)
+  → download (current quarter + previous at boundary)
+
+sec_incremental_pipeline_sensor:
+  → process (250-batch loop, spot-safe via S3 cache)
+  → process → process → ...
+  → stage (DuckDB INSERT with NOT EXISTS dedup)
+  [waits for all partitions to drain at quarter boundaries]
+
+sec_stage_to_materialize_sensor:
+  → materialize (full LadybugDB rebuild from DuckDB)
+
+sec_post_materialize_publish_sensor:
+  → lbug S3 publish
+  → duckdb S3 publish (sequential to avoid overloading instance)
+  → replica refresh (rolling, min_healthy=100%, ~15 min warmup)
 ```
 
-## Incremental Updates
+## Sensors and Schedules
 
-For daily incremental updates (after initial load):
+### Incremental Pipeline (enable all for automated nightly updates)
 
-| Asset | Purpose |
-|-------|---------|
-| `sec_graph_incremental_copy` | Copy current quarter's new filings to LadybugDB |
-| `sec_entity_incremental_update` | Update mutable Entity attributes (name, ticker changes) |
-| `sec_duckdb_incremental_staged` | INSERT new files to existing DuckDB tables |
+| Sensor/Schedule | Triggers | Purpose |
+|-----------------|----------|---------|
+| `sec_incremental_download_schedule` | `sec_download_job` | 9pm EST weekdays |
+| `sec_incremental_pipeline_sensor` | `sec_process_job`, `sec_incremental_stage_job` | Chains download → process (batched loop) → stage |
+| `sec_stage_to_materialize_sensor` | `sec_materialize_job` | Chains stage → full graph rebuild |
+| `sec_post_materialize_publish_sensor` | `sec_lbug_s3_publish_job`, `sec_duckdb_s3_publish_job`, `shared_repository_refresh_replicas_job` | Chains materialize → lbug publish → duckdb publish → replica refresh |
 
-```bash
-# Daily incremental pipeline
-uv run dagster asset materialize -m robosystems.dagster \
-  --select sec_graph_incremental_copy
-```
+### Backfill Processing (enable for bulk/manual processing)
+
+| Sensor | Triggers | Purpose |
+|--------|----------|---------|
+| `sec_processing_sensor` | `sec_process_job` | Discovers pending SourceFiles across all quarters, triggers batch processing. Polls every 5 min. |
+
+All sensors start **STOPPED** by default. Enable in Dagster UI when ready.
 
 ## Configuration Classes
 
@@ -105,78 +138,31 @@ All configs are in `configs.py`:
 | Config | Asset | Key Options |
 |--------|-------|-------------|
 | `SECDownloadConfig` | `sec_raw_filings` | `form_types`, `tickers`, `dry_run` |
-| `SECProcessConfig` | `sec_processed_filings` | `batch_limit`, `continue_on_error` |
-| `SECStageConfig` | `sec_duckdb_staged` | `reset_staging`, `year` |
+| `SECProcessConfig` | `sec_processed_filings` | `batch_size`, `continue_on_error`, `form_types` |
+| `SECStageConfig` | `sec_duckdb_staged` | `reset_staging`, `year`, `start_year`/`end_year` |
+| `SECIncrementalStageConfig` | `sec_duckdb_incremental_staged` | `year`, `quarter` |
 | `SECMaterializeConfig` | `sec_graph_materialized` | `rebuild_graph`, `batch_materialization` |
-| `SECDirectCopyConfig` | `sec_graph_direct_copy` | `rebuild_graph`, `year` |
-| `SECIncrementalCopyConfig` | `sec_graph_incremental_copy` | `year`, `quarter` |
 | `SECEntityUpdateConfig` | `sec_entity_incremental_update` | `year`, `quarter` |
-| `SECBackupConfig` | `sec_backup` | `retention_days`, `compression` |
-
-## Jobs
-
-Jobs group assets for execution. Defined in `jobs.py`:
-
-| Job | Assets | Use Case |
-|-----|--------|----------|
-| `sec_download_job` | `sec_raw_filings` | Download raw filings |
-| `sec_process_job` | `sec_processed_filings` | Process to parquet |
-| `sec_stage_job` | `sec_duckdb_staged` | Stage to DuckDB |
-| `sec_materialize_job` | `sec_graph_materialized` | Materialize to graph |
-| `sec_staged_materialize_job` | `sec_duckdb_staged` + `sec_graph_materialized` | Full pipeline |
-| `sec_direct_copy_job` | `sec_graph_direct_copy` | Direct S3 -> LadybugDB |
-| `sec_incremental_copy_job` | `sec_graph_incremental_copy` | Daily incremental |
-| `sec_incremental_stage_job` | `sec_duckdb_incremental_staged` | Incremental DuckDB |
-| `sec_entity_update_job` | `sec_entity_incremental_update` | Update mutable entities |
-| `sec_backup_job` | `sec_backup` | Create downloadable backup |
-| `sec_s3_publish_job` | `shared_repository_s3_published` | Publish to S3 for replicas |
-| `sec_replica_refresh_job` | `shared_replicas_refreshed` | Rolling replica refresh |
-
-## Sensors and Schedules
-
-Automated triggers defined in `sensors.py`:
-
-### Backfill Sensors (enable for bulk processing)
-
-| Sensor | Triggers | Purpose |
-|--------|----------|---------|
-| `sec_processing_sensor` | `sec_process_job` | Discovers pending SourceFiles, triggers batch processing per quarter |
-| `sec_post_materialize_s3_sync_sensor` | `shared_repository_s3_sync_job` | Syncs to S3 after materialization |
-
-### Incremental Pipeline (enable all for automated daily updates)
-
-| Sensor/Schedule | Triggers | Purpose |
-|-----------------|----------|---------|
-| `sec_incremental_download_schedule` | `sec_download_job` | 9pm EST weekdays |
-| `sec_download_to_process_sensor` | `sec_process_job` | Chains download -> process |
-| `sec_incremental_staging_sensor` | `sec_incremental_stage_job` | Chains process -> stage |
-| `sec_stage_to_copy_sensor` | `sec_incremental_copy_job` | Chains stage -> copy |
-| `sec_incremental_post_ingest_s3_sync_sensor` | `shared_repository_s3_sync_job` | Chains copy -> S3 sync |
-
-All sensors start **STOPPED** by default. Enable in Dagster UI when ready for automated processing.
 
 ## Data Flow
 
 ```
                          SEC Pipeline
 
-  Download     Process      Stage       Materialize
-  (S3 ZIP) --> (Parquet) --> (DuckDB) --> (LadybugDB)
-                  |                          ^
-                  |         Direct Copy -----+
-                  +-------> (S3 -> LadybugDB)
-
-  Backup (post-materialization)
+  Download     Process      Stage         Materialize    Publish
+  (S3 ZIP) --> (Parquet) --> (DuckDB) ---> (LadybugDB) --> S3 (.lbug)
+                                |                          → Replica refresh
+                                +------------------------> S3 (.duckdb)
+                                                           → Vector search
 ```
 
 ## Cross-Cutting Imports
 
-This pipeline imports from platform modules (adapter -> platform):
-- `dagster/resources/` - DatabaseResource, S3Resource
-- `dagster/assets/shared_repositories/` - S3 publish and replica refresh assets
-- `dagster/jobs/shared_repository` - S3 sync job (used by sensors)
+This pipeline imports from platform modules (adapter → platform):
+- `dagster/assets/shared_repositories/` — Replica refresh asset
+- `dagster/jobs/shared_repository` — Replica refresh job (used by publish sensor)
 
 ## Related Files
 
-- [`adapters/sec/`](../README.md) - SEC adapter (clients, processors)
-- [`dagster/definitions.py`](../../../dagster/definitions.py) - Component collector
+- [`adapters/sec/`](../README.md) — SEC adapter (clients, processors)
+- [`dagster/definitions.py`](../../../dagster/definitions.py) — Component collector

@@ -101,6 +101,7 @@ async def get_me(
       "id": user.id,
       "email": user.email,
       "name": user.name,
+      "email_verified": user.email_verified,
     }
 
   except HTTPException:
@@ -284,6 +285,7 @@ async def refresh_session(
         "id": user.id,
         "name": user.name,
         "email": user.email,
+        "email_verified": user.email_verified,
       },
       message="Session refreshed successfully",
       token=new_jwt_token,  # Return new JWT for Bearer authentication

@@ -153,9 +153,8 @@ class AdminAPIClient:
     if self.environment == "dev":
       admin_key = os.getenv("ADMIN_API_KEY")
       if admin_key:
-        mode = "direct" if self.use_direct else "tunnel"
         console.print(
-          f"[green]✓[/green] Connected to {self.environment} admin API via {mode} (using ADMIN_API_KEY from environment)"
+          f"[green]✓[/green] Connected to {self.environment} admin API (using ADMIN_API_KEY from .env.local)"
         )
         return admin_key
 
@@ -335,26 +334,24 @@ def subscriptions():
 
 
 @subscriptions.command("list")
-@click.option("--status", help="Filter by status (ACTIVE, PAUSED, CANCELED)")
-@click.option(
-  "--tier", help="Filter by tier (LADYBUG_STANDARD, LADYBUG_LARGE, LADYBUG_XLARGE)"
-)
+@click.option("--status", help="Filter by status (active, paused, canceled)")
 @click.option("--email", help="Filter by owner email")
+@click.option("--resource-type", help="Filter by resource type (graph, repository)")
 @click.option("--include-canceled", is_flag=True, help="Include canceled subscriptions")
 @click.option("--limit", default=100, help="Maximum number of results")
 @click.pass_obj
-def list_subscriptions(client, status, tier, email, include_canceled, limit):
-  """List all graph subscriptions."""
+def list_subscriptions(client, status, email, resource_type, include_canceled, limit):
+  """List all subscriptions."""
   params = {
     "limit": limit,
     "include_canceled": include_canceled,
   }
   if status:
-    params["status"] = status
-  if tier:
-    params["tier"] = tier
+    params["status_filter"] = status.lower()
   if email:
-    params["owner_email"] = email
+    params["user_email"] = email
+  if resource_type:
+    params["resource_type"] = resource_type
 
   subscriptions = client._make_request("GET", "/admin/v1/subscriptions", params=params)
 
@@ -486,7 +483,7 @@ def create_subscription(
 @subscriptions.command("update")
 @click.argument("subscription_id")
 @click.option(
-  "--status", type=click.Choice(["ACTIVE", "PAUSED", "CANCELED"]), help="New status"
+  "--status", type=click.Choice(["active", "paused", "canceled"]), help="New status"
 )
 @click.option(
   "--plan-name",
@@ -596,7 +593,6 @@ def list_invoices(client, status, user_id, limit):
   table.add_column("Status", overflow="fold")
   table.add_column("Total", justify="right")
   table.add_column("Due Date", overflow="fold")
-  table.add_column("Payment Terms", overflow="fold")
   table.add_column("Created", overflow="fold")
 
   for invoice in invoices:
@@ -606,7 +602,6 @@ def list_invoices(client, status, user_id, limit):
       invoice["status"],
       f"${invoice['total_cents'] / 100:.2f}",
       invoice["due_date"][:10] if invoice.get("due_date") else "N/A",
-      invoice["payment_terms"],
       invoice["created_at"][:10],
     )
 
@@ -648,7 +643,6 @@ def get_invoice(client, invoice_id):
   )
   if invoice.get("due_date"):
     click.echo(f"  Due Date: {invoice['due_date'][:10]}")
-  click.echo(f"  Payment Terms: {invoice['payment_terms']}")
   if invoice.get("paid_at"):
     click.echo(f"  Paid: {invoice['paid_at'][:10]}")
 
@@ -698,7 +692,7 @@ def mark_invoice_paid(client, invoice_id, payment_method, payment_reference):
 def stats(client):
   """Show subscription and customer statistics."""
   all_subs = client._make_request(
-    "GET", "/admin/v1/subscriptions", params={"limit": 1000}
+    "GET", "/admin/v1/subscriptions", params={"limit": 1000, "include_canceled": True}
   )
 
   if not all_subs:
@@ -723,7 +717,7 @@ def stats(client):
     interval = sub.get("billing_interval", "monthly")
     stats_data["by_billing"][interval] = stats_data["by_billing"].get(interval, 0) + 1
 
-    if sub["status"] == "ACTIVE" and sub.get("base_price_cents"):
+    if sub["status"].lower() == "active" and sub.get("base_price_cents"):
       stats_data["revenue"] += sub["base_price_cents"]
 
   console.print()

@@ -35,6 +35,9 @@ from robosystems.routers import (
   router as v1_router,
 )
 from robosystems.routers.admin import (
+  cache_router as admin_cache_router,
+)
+from robosystems.routers.admin import (
   credits_router as admin_credits_router,
 )
 from robosystems.routers.admin import (
@@ -315,6 +318,7 @@ def create_app() -> FastAPI:
 
   # Include admin routers (hidden from public docs)
   # The admin routers will not appear in the auto-generated docs
+  app.include_router(admin_cache_router, include_in_schema=False)
   app.include_router(admin_subscription_router, include_in_schema=False)
   app.include_router(admin_invoice_router, include_in_schema=False)
   app.include_router(admin_webhooks_router, include_in_schema=False)

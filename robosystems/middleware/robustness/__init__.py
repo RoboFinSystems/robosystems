@@ -2,7 +2,7 @@
 Robustness middleware components.
 
 This module provides reusable components for error handling, circuit breaking,
-credit management, metrics collection, and observability across all endpoints.
+and observability across all endpoints.
 """
 
 from .circuit_breaker import CircuitBreakerManager

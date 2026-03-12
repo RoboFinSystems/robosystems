@@ -101,7 +101,7 @@ that the user has access to, including their role/access level and selection sta
 - Graphs you create or have been invited to
 
 **Shared Repositories (isRepository: true):**
-- Read-only data repositories like SEC filings, industry benchmarks
+- Read-only data repositories (e.g., SEC filings)
 - Access levels: `read`, `write` (for data contributions), `admin`
 - Cannot be selected (each has separate subscription)
 - Require separate subscriptions (personal, cannot be shared)

@@ -50,7 +50,7 @@ class TestGetDagsterComponents:
   def test_expected_number_of_jobs(self):
     """Test that the expected number of jobs are registered."""
     components = get_dagster_components()
-    assert len(components["jobs"]) == 15
+    assert len(components["jobs"]) == 16
 
   def test_expected_number_of_sensors(self):
     """Test that the expected number of sensors are registered."""

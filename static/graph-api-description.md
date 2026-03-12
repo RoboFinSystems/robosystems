@@ -1,4 +1,4 @@
-High-performance REST API for graph database operations with pluggable backend support. Provides multi-tenant database management with isolated instances, OpenCypher query execution, DuckDB-powered data ingestion from S3 and Parquet sources, and comprehensive backup/restore capabilities. Features tiered infrastructure (shared, dedicated, and enterprise instances), optional subgraph support for data partitioning, and shared repositories for public datasets (SEC filings, industry, economic data). Built-in health monitoring, streaming query results, and flexible deployment with LadybugDB (primary) or optional Neo4j backends.
+High-performance REST API for graph database operations with pluggable backend support. Provides multi-tenant database management with isolated instances, OpenCypher query execution, DuckDB-powered data ingestion from S3 and Parquet sources, and comprehensive backup/restore capabilities. Features tiered infrastructure with dedicated instances and subgraph support, plus shared repositories for public datasets (SEC filings). Built-in health monitoring, streaming query results, and flexible deployment with LadybugDB (primary) or optional Neo4j backends.
 
 ## Core Features
 
@@ -62,18 +62,16 @@ Each graph database is isolated with dedicated:
 
 ### Shared Repositories
 
-Shared data repositories (SEC filings, industry data) are available as read-only shared databases accessible through user subscriptions.
+Shared data repositories (currently SEC filings) are available as read-only databases accessible through user subscriptions. Served by a dedicated replica fleet that downloads published databases from S3 on boot.
 
 ### Infrastructure Tiers
 
 The API supports multiple infrastructure tiers optimized for different workload requirements:
 
-**LadybugDB Tiers** (default, always available):
-
-- **ladybug-standard**: Multi-tenant shared instances (r7g.large, 10 databases per instance)
-- **ladybug-large**: Dedicated instances with subgraph support (r7g.large, 10 subgraphs)
-- **ladybug-xlarge**: High-performance dedicated instances (r7g.xlarge, 25 subgraphs)
-- **ladybug-shared**: Dedicated infrastructure for shared repositories (SEC, industry, economic)
+- **ladybug-standard**: Dedicated m7g.large instances (8 GB, 3 subgraphs)
+- **ladybug-large**: Dedicated r7g.large instances (16 GB, 10 subgraphs)
+- **ladybug-xlarge**: Dedicated r7g.xlarge instances (32 GB, 25 subgraphs)
+- **ladybug-shared**: Platform infrastructure for shared repositories
 
 Each tier provides different performance characteristics, resource allocations, and feature sets. Configuration details are managed centrally and may vary by environment.
 

@@ -14,6 +14,10 @@ exporters:
 
 processors:
   batch:
+  filter/healthcheck:
+    metrics:
+      datapoint:
+        - 'attributes["http.route"] == "/v1/status" or attributes["http.route"] == "/status" or attributes["http.route"] == "/health"'
 
 service:
   pipelines:
@@ -23,7 +27,7 @@ service:
       exporters: [logging]
     metrics:
       receivers: [otlp]
-      processors: [batch]
+      processors: [filter/healthcheck, batch]
       exporters: [prometheus, logging]
   telemetry:
     metrics:

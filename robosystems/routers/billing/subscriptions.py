@@ -69,7 +69,14 @@ async def list_subscriptions(
 
     subscriptions = (
       db.query(BillingSubscription)
-      .filter(BillingSubscription.org_id == org_id)
+      .filter(
+        BillingSubscription.org_id == org_id,
+        # Exclude orphaned subscriptions that never completed provisioning
+        ~(
+          BillingSubscription.status.in_(["canceled", "failed"])
+          & BillingSubscription.resource_id.is_(None)
+        ),
+      )
       .order_by(BillingSubscription.created_at.desc())
       .all()
     )
@@ -252,7 +259,10 @@ async def cancel_subscription(
     if subscription.stripe_subscription_id:
       try:
         provider = get_payment_provider("stripe")
-        provider.stripe.Subscription.cancel(subscription.stripe_subscription_id)
+        provider.stripe.Subscription.modify(
+          subscription.stripe_subscription_id,
+          cancel_at_period_end=True,
+        )
         logger.info(
           f"Canceled Stripe subscription {subscription.stripe_subscription_id}",
           extra={"subscription_id": subscription_id},

@@ -23,6 +23,7 @@ def mock_user_with_accounts():
   mock_user.id = "test-user-id"
   mock_user.name = "Test User"
   mock_user.email = "test@example.com"
+  mock_user.email_verified = True
   mock_user.accounts = [mock_account]
 
   return mock_user
@@ -35,6 +36,7 @@ def mock_user_without_accounts():
   mock_user.id = "test-user-id"
   mock_user.name = "Test User"
   mock_user.email = "test@example.com"
+  mock_user.email_verified = True
   mock_user.accounts = []
 
   return mock_user

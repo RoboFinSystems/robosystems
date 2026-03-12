@@ -10,15 +10,9 @@ from importlib.metadata import PackageNotFoundError, version
 
 from fastapi import APIRouter
 
-from robosystems.middleware.otel.metrics import (
-  endpoint_metrics_decorator,
-)
 from robosystems.models.api.common import HealthStatus
 
-# Create router without authentication requirements
 router = APIRouter()
-
-# Use centralized metrics - no need for global variables
 
 
 def get_app_version() -> str:
@@ -37,7 +31,6 @@ def get_app_version() -> str:
   description="Service health check endpoint for monitoring and load balancers",
   responses={200: {"description": "Service is healthy", "model": HealthStatus}},
 )
-@endpoint_metrics_decorator(endpoint_name="/v1/status")
 async def service_status():
   """
   Service status endpoint for AWS load balancer and monitoring.

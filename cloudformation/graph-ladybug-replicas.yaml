@@ -154,21 +154,6 @@ Parameters:
     MinValue: 0
     MaxValue: 100
     Description: Percentage of instances above base capacity that are on-demand (0 = all Spot above base)
-  SpotAllocationStrategy:
-    Type: String
-    Default: price-capacity-optimized
-    AllowedValues:
-      - price-capacity-optimized
-      - capacity-optimized
-      - lowest-price
-    Description: Spot instance allocation strategy
-  SpotCapacityRebalance:
-    Type: String
-    Default: "true"
-    AllowedValues:
-      - "true"
-      - "false"
-    Description: Proactive replacement of Spot instances at elevated risk of interruption
 
   # Cache Configuration
   ValkeyClientSecurityGroupId:
@@ -213,9 +198,6 @@ Conditions:
   HasMinInstances: !Not [!Equals [!Ref MinInstances, 0]]
   HasResponseTimeScaling: !Equals [!Ref EnableResponseTimeScaling, "true"]
   IsSpotEnabled: !Equals [!Ref SpotEnabled, "true"]
-  IsSpotCapacityRebalance: !And
-    - !Condition IsSpotEnabled
-    - !Equals [!Ref SpotCapacityRebalance, "true"]
 
 Resources:
   # ========================================
@@ -518,11 +500,22 @@ Resources:
           LaunchTemplateSpecification:
             LaunchTemplateId: !Ref ReplicaLaunchTemplate
             Version: !GetAtt ReplicaLaunchTemplate.LatestVersionNumber
+          # Spot pool diversification: 8 GB ARM64 alternatives to primary InstanceType
+          Overrides:
+            - InstanceType: !Ref InstanceType
+            - InstanceType: m6g.large
+            - InstanceType: t4g.large
+            - InstanceType: r6g.medium
+            - InstanceType: r7g.medium
+            - InstanceType: r8g.medium
         InstancesDistribution:
-          OnDemandBaseCapacity: !If [IsSpotEnabled, !Ref SpotOnDemandBaseCapacity, 0]
-          OnDemandPercentageAboveBaseCapacity: !If [IsSpotEnabled, !Ref SpotOnDemandPercentageAboveBase, 100]
-          SpotAllocationStrategy: !If [IsSpotEnabled, !Ref SpotAllocationStrategy, !Ref "AWS::NoValue"]
-      CapacityRebalance: !If [IsSpotCapacityRebalance, true, !Ref "AWS::NoValue"]
+          OnDemandBaseCapacity:
+            !If [IsSpotEnabled, !Ref SpotOnDemandBaseCapacity, 0]
+          OnDemandPercentageAboveBaseCapacity:
+            !If [IsSpotEnabled, !Ref SpotOnDemandPercentageAboveBase, 100]
+          SpotAllocationStrategy:
+            !If [IsSpotEnabled, price-capacity-optimized, !Ref "AWS::NoValue"]
+      CapacityRebalance: !If [IsSpotEnabled, true, !Ref "AWS::NoValue"]
       TargetGroupARNs:
         - !Ref ReplicaTargetGroup
       HealthCheckType: ELB
