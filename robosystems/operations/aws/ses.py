@@ -1,5 +1,6 @@
 """AWS SES adapter for sending transactional emails."""
 
+from datetime import UTC, datetime
 from typing import Any
 
 import boto3
@@ -11,6 +12,90 @@ from robosystems.config.constants import (
   PASSWORD_RESET_TOKEN_EXPIRY_HOURS,
 )
 from robosystems.logger import logger
+
+# Brand colors (from tailwind.config.ts)
+_BRAND_PRIMARY = "#1B3A57"  # primary-800 (dark blue)
+_BRAND_BLUE = "#3B7AF5"  # primary-500 (bright blue)
+_BRAND_GREEN = "#00D4AA"  # secondary-500 (bright green)
+_BRAND_DARK = "#172E47"  # primary-950
+_BRAND_LIGHT = "#EFF6FF"  # primary-50
+_BRAND_BORDER = "#BFDBFE"  # primary-200
+_BRAND_MUTED = "#64748b"
+_BRAND_DANGER = "#dc2626"
+
+# App display names
+_APP_DISPLAY_NAMES = {
+  "roboledger": "RoboLedger",
+  "roboinvestor": "RoboInvestor",
+  "robosystems": "RoboSystems",
+}
+_DEFAULT_APP = "robosystems"
+
+
+def _base_template(app_name: str, content_html: str) -> str:
+  """Wrap content in the shared email layout."""
+  year = datetime.now(UTC).year
+  return f"""\
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{app_name}</title>
+</head>
+<body style="margin:0;padding:0;background-color:{_BRAND_LIGHT};font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:{_BRAND_LIGHT};">
+    <tr>
+      <td align="center" style="padding:40px 20px;">
+        <table role="presentation" width="560" cellpadding="0" cellspacing="0" style="max-width:560px;width:100%;">
+          <!-- Header -->
+          <tr>
+            <td style="padding:28px 32px;background-color:{_BRAND_PRIMARY};border-radius:12px 12px 0 0;">
+              <span style="font-size:22px;font-weight:700;color:#ffffff;letter-spacing:-0.3px;">{app_name}</span>
+            </td>
+          </tr>
+          <!-- Accent bar -->
+          <tr>
+            <td style="height:3px;background-color:{_BRAND_GREEN};font-size:0;line-height:0;">&nbsp;</td>
+          </tr>
+          <!-- Body -->
+          <tr>
+            <td style="padding:36px 32px;background-color:#ffffff;border-left:1px solid {_BRAND_BORDER};border-right:1px solid {_BRAND_BORDER};">
+              {content_html}
+            </td>
+          </tr>
+          <!-- Footer -->
+          <tr>
+            <td style="padding:24px 32px;background-color:{_BRAND_LIGHT};border:1px solid {_BRAND_BORDER};border-top:none;border-radius:0 0 12px 12px;text-align:center;">
+              <p style="margin:0;font-size:12px;color:{_BRAND_MUTED};">&copy; {year} RFS LLC. All rights reserved.</p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>"""
+
+
+def _button(url: str, label: str, color: str = _BRAND_BLUE) -> str:
+  """Render a CTA button."""
+  return f"""\
+<table role="presentation" cellpadding="0" cellspacing="0" style="margin:28px 0;">
+  <tr>
+    <td style="border-radius:8px;background-color:{color};">
+      <a href="{url}" target="_blank" style="display:inline-block;padding:14px 32px;font-size:15px;font-weight:600;color:#ffffff;text-decoration:none;border-radius:8px;">{label}</a>
+    </td>
+  </tr>
+</table>"""
+
+
+def _muted(text: str) -> str:
+  return f'<p style="margin:0 0 8px;font-size:13px;line-height:1.5;color:{_BRAND_MUTED};">{text}</p>'
+
+
+def _paragraph(text: str) -> str:
+  return f'<p style="margin:0 0 16px;font-size:15px;line-height:1.6;color:{_BRAND_DARK};">{text}</p>'
 
 
 class SESEmailService:
@@ -38,185 +123,16 @@ class SESEmailService:
   ) -> dict[str, str]:
     """Get email subject and body templates based on email type."""
     app_name = template_data.get("app_name", "RoboSystems")
-    user_name = template_data.get("user_name", "User")
+    user_name = template_data.get("user_name", "there")
 
     templates = {
-      "email_verification": {
-        "subject": f"Verify Your {app_name} Email",
-        "html": f"""
-<!DOCTYPE html>
-<html>
-<head>
-    <style>
-        body {{ font-family: Arial, sans-serif; line-height: 1.6; color: #333; }}
-        .container {{ max-width: 600px; margin: 0 auto; padding: 20px; }}
-        .header {{ background-color: #1a1a2e; color: white; padding: 20px; text-align: center; border-radius: 5px 5px 0 0; }}
-        .content {{ padding: 30px; background-color: #f8f9fa; border: 1px solid #dee2e6; border-top: none; }}
-        .button {{ display: inline-block; padding: 12px 30px; background-color: #007bff; color: white !important; text-decoration: none; border-radius: 5px; margin: 20px 0; font-weight: bold; }}
-        .footer {{ text-align: center; padding: 20px; color: #6c757d; font-size: 12px; }}
-        .link {{ word-break: break-all; color: #007bff; }}
-    </style>
-</head>
-<body>
-    <div class="container">
-        <div class="header">
-            <h1>{app_name}</h1>
-        </div>
-        <div class="content">
-            <h2>Welcome, {user_name}!</h2>
-            <p>Thank you for signing up for {app_name}. Please verify your email address by clicking the button below:</p>
-            <div style="text-align: center;">
-                <a href="{template_data.get("verification_url", "#")}" class="button">Verify Email Address</a>
-            </div>
-            <p style="color: #6c757d; font-size: 14px;">Or copy and paste this link into your browser:</p>
-            <p class="link">{template_data.get("verification_url", "#")}</p>
-            <p style="color: #6c757d; font-size: 14px; margin-top: 30px;">This link will expire in {template_data.get("expiry_hours", "24")} hours.</p>
-            <p style="color: #6c757d; font-size: 14px;">If you didn't create an account, you can safely ignore this email.</p>
-        </div>
-        <div class="footer">
-            <p>&copy; 2024 RoboSystems. All rights reserved.</p>
-            <p>This is an automated message, please do not reply to this email.</p>
-        </div>
-    </div>
-</body>
-</html>""",
-        "text": f"""Welcome to {app_name}, {user_name}!
-
-Please verify your email address by clicking the link below:
-{template_data.get("verification_url", "")}
-
-This link will expire in {template_data.get("expiry_hours", "24")} hours.
-
-If you didn't create an account, you can safely ignore this email.
-
-Best regards,
-The {app_name} Team""",
-      },
-      "password_reset": {
-        "subject": f"{app_name} Password Reset Request",
-        "html": f"""
-<!DOCTYPE html>
-<html>
-<head>
-    <style>
-        body {{ font-family: Arial, sans-serif; line-height: 1.6; color: #333; }}
-        .container {{ max-width: 600px; margin: 0 auto; padding: 20px; }}
-        .header {{ background-color: #1a1a2e; color: white; padding: 20px; text-align: center; border-radius: 5px 5px 0 0; }}
-        .content {{ padding: 30px; background-color: #f8f9fa; border: 1px solid #dee2e6; border-top: none; }}
-        .button {{ display: inline-block; padding: 12px 30px; background-color: #dc3545; color: white !important; text-decoration: none; border-radius: 5px; margin: 20px 0; font-weight: bold; }}
-        .footer {{ text-align: center; padding: 20px; color: #6c757d; font-size: 12px; }}
-        .link {{ word-break: break-all; color: #007bff; }}
-        .warning {{ background-color: #fff3cd; border: 1px solid #ffc107; padding: 10px; border-radius: 5px; margin-top: 20px; }}
-    </style>
-</head>
-<body>
-    <div class="container">
-        <div class="header">
-            <h1>{app_name}</h1>
-        </div>
-        <div class="content">
-            <h2>Password Reset Request</h2>
-            <p>Hi {user_name},</p>
-            <p>We received a request to reset your password for your {app_name} account.</p>
-            <div style="text-align: center;">
-                <a href="{template_data.get("reset_url", "#")}" class="button">Reset Password</a>
-            </div>
-            <p style="color: #6c757d; font-size: 14px;">Or copy and paste this link into your browser:</p>
-            <p class="link">{template_data.get("reset_url", "#")}</p>
-            <p style="color: #6c757d; font-size: 14px; margin-top: 30px;">This link will expire in {template_data.get("expiry_hours", "1")} hour(s).</p>
-            <div class="warning">
-                <strong>Security Notice:</strong> If you didn't request this password reset, please ignore this email. Your password will remain unchanged.
-            </div>
-        </div>
-        <div class="footer">
-            <p>&copy; 2024 RoboSystems. All rights reserved.</p>
-            <p>This is an automated message, please do not reply to this email.</p>
-        </div>
-    </div>
-</body>
-</html>""",
-        "text": f"""Password Reset Request for {app_name}
-
-Hi {user_name},
-
-We received a request to reset your password for your {app_name} account.
-
-Click the link below to reset your password:
-{template_data.get("reset_url", "")}
-
-This link will expire in {template_data.get("expiry_hours", "1")} hour(s).
-
-Security Notice: If you didn't request this password reset, please ignore this email. Your password will remain unchanged.
-
-Best regards,
-The {app_name} Team""",
-      },
-      "welcome": {
-        "subject": f"Welcome to {app_name}!",
-        "html": f"""
-<!DOCTYPE html>
-<html>
-<head>
-    <style>
-        body {{ font-family: Arial, sans-serif; line-height: 1.6; color: #333; }}
-        .container {{ max-width: 600px; margin: 0 auto; padding: 20px; }}
-        .header {{ background-color: #1a1a2e; color: white; padding: 20px; text-align: center; border-radius: 5px 5px 0 0; }}
-        .content {{ padding: 30px; background-color: #f8f9fa; border: 1px solid #dee2e6; border-top: none; }}
-        .button {{ display: inline-block; padding: 12px 30px; background-color: #28a745; color: white !important; text-decoration: none; border-radius: 5px; margin: 20px 0; font-weight: bold; }}
-        .footer {{ text-align: center; padding: 20px; color: #6c757d; font-size: 12px; }}
-        .features {{ background-color: white; padding: 20px; border-radius: 5px; margin: 20px 0; }}
-        .features ul {{ margin: 10px 0; padding-left: 20px; }}
-    </style>
-</head>
-<body>
-    <div class="container">
-        <div class="header">
-            <h1>Welcome to {app_name}!</h1>
-        </div>
-        <div class="content">
-            <h2>Your email has been verified!</h2>
-            <p>Hi {user_name},</p>
-            <p>Thank you for verifying your email address. Your account is now fully activated and ready to use.</p>
-            <div style="text-align: center;">
-                <a href="{template_data.get("dashboard_url", "#")}" class="button">Go to Dashboard</a>
-            </div>
-            <div class="features">
-                <h3>Get Started:</h3>
-                <ul>
-                    <li>Complete your profile settings</li>
-                    <li>Connect your data sources</li>
-                    <li>Explore our documentation and tutorials</li>
-                    <li>Join our community forum</li>
-                </ul>
-            </div>
-            <p>If you have any questions or need assistance, our support team is here to help.</p>
-        </div>
-        <div class="footer">
-            <p>&copy; 2024 RoboSystems. All rights reserved.</p>
-            <p>This is an automated message, please do not reply to this email.</p>
-        </div>
-    </div>
-</body>
-</html>""",
-        "text": f"""Welcome to {app_name}!
-
-Hi {user_name},
-
-Thank you for verifying your email address. Your account is now fully activated and ready to use.
-
-Visit your dashboard: {template_data.get("dashboard_url", "")}
-
-Get Started:
-- Complete your profile settings
-- Connect your data sources
-- Explore our documentation and tutorials
-- Join our community forum
-
-If you have any questions or need assistance, our support team is here to help.
-
-Best regards,
-The {app_name} Team""",
-      },
+      "email_verification": self._verification_template(
+        app_name, user_name, template_data
+      ),
+      "password_reset": self._password_reset_template(
+        app_name, user_name, template_data
+      ),
+      "welcome": self._welcome_template(app_name, user_name, template_data),
     }
 
     return templates.get(
@@ -227,6 +143,108 @@ The {app_name} Team""",
         "text": str(template_data),
       },
     )
+
+  # -- Templates --------------------------------------------------------
+
+  @staticmethod
+  def _verification_template(
+    app_name: str, user_name: str, data: dict[str, Any]
+  ) -> dict[str, str]:
+    url = data.get("verification_url", "#")
+    expiry = data.get("expiry_hours", 24)
+
+    content = (
+      _paragraph(f"Hi {user_name},")
+      + _paragraph(
+        f"Thanks for creating a {app_name} account. "
+        "Please verify your email address to get started."
+      )
+      + _button(url, "Verify Email Address")
+      + _muted("Or copy and paste this URL into your browser:")
+      + f'<p style="margin:0 0 20px;font-size:13px;line-height:1.5;color:{_BRAND_PRIMARY};word-break:break-all;">{url}</p>'
+      + _muted(f"This link expires in {expiry} hours.")
+      + _muted("If you didn't create this account, you can safely ignore this email.")
+    )
+
+    return {
+      "subject": f"Verify your {app_name} email",
+      "html": _base_template(app_name, content),
+      "text": f"""Hi {user_name},
+
+Thanks for creating a {app_name} account. Please verify your email address by visiting:
+
+{url}
+
+This link expires in {expiry} hours.
+
+If you didn't create this account, you can safely ignore this email.
+
+{app_name}""",
+    }
+
+  @staticmethod
+  def _password_reset_template(
+    app_name: str, user_name: str, data: dict[str, Any]
+  ) -> dict[str, str]:
+    url = data.get("reset_url", "#")
+    expiry = data.get("expiry_hours", 1)
+
+    content = (
+      _paragraph(f"Hi {user_name},")
+      + _paragraph(
+        f"We received a request to reset the password for your {app_name} account."
+      )
+      + _button(url, "Reset Password", _BRAND_DANGER)
+      + _muted("Or copy and paste this URL into your browser:")
+      + f'<p style="margin:0 0 20px;font-size:13px;line-height:1.5;color:{_BRAND_PRIMARY};word-break:break-all;">{url}</p>'
+      + _muted(f"This link expires in {expiry} hour{'s' if expiry != 1 else ''}.")
+      + '<div style="margin-top:24px;padding:16px;background-color:#fef2f2;border:1px solid #fecaca;border-radius:8px;">'
+      + '<p style="margin:0;font-size:13px;line-height:1.5;color:#991b1b;">'
+      "If you didn't request this, no action is needed. Your password will not change."
+      "</p></div>"
+    )
+
+    return {
+      "subject": f"{app_name} password reset",
+      "html": _base_template(app_name, content),
+      "text": f"""Hi {user_name},
+
+We received a request to reset the password for your {app_name} account.
+
+Reset your password: {url}
+
+This link expires in {expiry} hour{"s" if expiry != 1 else ""}.
+
+If you didn't request this, no action is needed. Your password will not change.
+
+{app_name}""",
+    }
+
+  @staticmethod
+  def _welcome_template(
+    app_name: str, user_name: str, data: dict[str, Any]
+  ) -> dict[str, str]:
+    url = data.get("dashboard_url", "#")
+
+    content = (
+      _paragraph(f"Hi {user_name},")
+      + _paragraph("Your email has been verified and your account is ready to go.")
+      + _button(url, "Go to Dashboard")
+    )
+
+    return {
+      "subject": f"Welcome to {app_name}",
+      "html": _base_template(app_name, content),
+      "text": f"""Hi {user_name},
+
+Your email has been verified and your account is ready to go.
+
+Visit your dashboard: {url}
+
+{app_name}""",
+    }
+
+  # -- Send -------------------------------------------------------------
 
   async def send_email(
     self, email_type: str, to_email: str, template_data: dict[str, Any]
@@ -317,18 +335,11 @@ The {app_name} Team""",
         True if email was sent successfully, False otherwise
     """
     # Get app-specific URL
-    base_url = self.app_urls.get(app, self.app_urls["roboledger"])
-
-    # Map app names for display
-    app_display_names = {
-      "roboledger": "Roboledger",
-      "roboinvestor": "Roboinvestor",
-      "robosystems": "Robosystems",
-    }
+    base_url = self.app_urls.get(app, self.app_urls[_DEFAULT_APP])
 
     template_data = {
       "user_name": user_name,
-      "app_name": app_display_names.get(app, "RoboSystems"),
+      "app_name": _APP_DISPLAY_NAMES.get(app, _APP_DISPLAY_NAMES[_DEFAULT_APP]),
       "verification_url": f"{base_url}/auth/verify-email?token={token}",
       "expiry_hours": EMAIL_TOKEN_EXPIRY_HOURS,
     }
@@ -355,18 +366,11 @@ The {app_name} Team""",
         True if email was sent successfully, False otherwise
     """
     # Get app-specific URL
-    base_url = self.app_urls.get(app, self.app_urls["roboledger"])
-
-    # Map app names for display
-    app_display_names = {
-      "roboledger": "Roboledger",
-      "roboinvestor": "Roboinvestor",
-      "robosystems": "Robosystems",
-    }
+    base_url = self.app_urls.get(app, self.app_urls[_DEFAULT_APP])
 
     template_data = {
       "user_name": user_name,
-      "app_name": app_display_names.get(app, "RoboSystems"),
+      "app_name": _APP_DISPLAY_NAMES.get(app, _APP_DISPLAY_NAMES[_DEFAULT_APP]),
       "reset_url": f"{base_url}/auth/reset-password?token={token}",
       "expiry_hours": PASSWORD_RESET_TOKEN_EXPIRY_HOURS,
     }
@@ -388,19 +392,12 @@ The {app_name} Team""",
         True if email was sent successfully, False otherwise
     """
     # Get app-specific URL
-    base_url = self.app_urls.get(app, self.app_urls["roboledger"])
-
-    # Map app names for display
-    app_display_names = {
-      "roboledger": "Roboledger",
-      "roboinvestor": "Roboinvestor",
-      "robosystems": "Robosystems",
-    }
+    base_url = self.app_urls.get(app, self.app_urls[_DEFAULT_APP])
 
     template_data = {
       "user_name": user_name,
-      "app_name": app_display_names.get(app, "RoboSystems"),
-      "dashboard_url": f"{base_url}/dashboard",
+      "app_name": _APP_DISPLAY_NAMES.get(app, _APP_DISPLAY_NAMES[_DEFAULT_APP]),
+      "dashboard_url": f"{base_url}/home",
     }
 
     return await self.send_email("welcome", user_email, template_data)

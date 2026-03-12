@@ -175,6 +175,21 @@ on:
         description: "CloudFront CDN URL for public data (from S3 stack)"
         required: true
         type: string
+      robosystems_app_url:
+        description: "RoboSystems frontend URL"
+        required: false
+        type: string
+        default: "https://robosystems.ai"
+      roboledger_app_url:
+        description: "RoboLedger frontend URL"
+        required: false
+        type: string
+        default: "https://roboledger.ai"
+      roboinvestor_app_url:
+        description: "RoboInvestor frontend URL"
+        required: false
+        type: string
+        default: "https://roboinvestor.ai"
 
 jobs:
   deploy:
@@ -275,7 +290,10 @@ jobs:
                 ParameterKey=UserDataBucketArn,ParameterValue=\"${{ inputs.user_data_bucket_arn }}\" \
                 ParameterKey=PublicDataBucketArn,ParameterValue=\"${{ inputs.public_data_bucket_arn }}\" \
                 ParameterKey=LogsBucketArn,ParameterValue=\"${{ inputs.logs_bucket_arn }}\" \
-                ParameterKey=PublicDataCDNURL,ParameterValue=\"${{ inputs.public_data_cdn_url }}\""
+                ParameterKey=PublicDataCDNURL,ParameterValue=\"${{ inputs.public_data_cdn_url }}\" \
+                ParameterKey=RoboSystemsAppUrl,ParameterValue=\"${{ inputs.robosystems_app_url }}\" \
+                ParameterKey=RoboLedgerAppUrl,ParameterValue=\"${{ inputs.roboledger_app_url }}\" \
+                ParameterKey=RoboInvestorAppUrl,ParameterValue=\"${{ inputs.roboinvestor_app_url }}\""
 
           # Deploy or update the stack
           if [ "$STACK_ACTION" = "create-stack" ]; then

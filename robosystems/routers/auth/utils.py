@@ -98,8 +98,8 @@ def detect_app_source(request) -> str:
   if app_header in ["roboledger", "roboinvestor", "robosystems"]:
     return app_header
 
-  # Default to roboledger
-  return "roboledger"
+  # Default to robosystems (main hub)
+  return "robosystems"
 
 
 def get_token_hash(token: str) -> str:
