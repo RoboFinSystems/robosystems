@@ -31,6 +31,7 @@ class TestPasswordResetEndpoints:
     mock_user.email = "forgot@example.com"
     mock_user.name = "Forgot User"
     mock_user.is_active = True
+    mock_user.email_verified = True
     mock_get_user.return_value = mock_user
 
     # Mock token creation
@@ -209,6 +210,7 @@ class TestPasswordResetEndpoints:
     mock_user.email = "reset@example.com"
     mock_user.name = "Reset User"
     mock_user.is_active = True
+    mock_user.email_verified = True
     mock_user.update = Mock()  # Mock the update method on the instance
     mock_get_user.return_value = mock_user
 
@@ -319,6 +321,7 @@ class TestPasswordResetEndpoints:
     mock_user.email = "app@example.com"
     mock_user.name = "App User"
     mock_user.is_active = True
+    mock_user.email_verified = True
     mock_get_user.return_value = mock_user
 
     mock_create_token.return_value = "token_app"
@@ -364,6 +367,7 @@ class TestPasswordResetEndpoints:
     mock_user.email = "audit@example.com"
     mock_user.name = "Audit User"
     mock_user.is_active = True
+    mock_user.email_verified = True
     mock_get_user.return_value = mock_user
 
     mock_create_token.return_value = "token_audit"
@@ -399,6 +403,7 @@ class TestPasswordResetEndpoints:
     mock_user.email = "complete@example.com"
     mock_user.name = "Complete User"
     mock_user.is_active = True
+    mock_user.email_verified = True
     mock_user.update = Mock()  # Mock the update method on the instance
     mock_get_user.return_value = mock_user
 
