@@ -224,7 +224,6 @@ function create_ssm_feature_flags() {
         "SSE_ENABLED=true"
         "SUBGRAPH_CREATION_ENABLED=true"
         "USER_REGISTRATION_ENABLED=${user_reg}"
-        "MATERIALIZE_EMBEDDINGS_ENABLED=false"
         "DUCKDB_HNSW_INDEX_ENABLED=false"
     )
 

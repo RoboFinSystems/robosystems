@@ -34,6 +34,7 @@ from robosystems.dagster.jobs.notifications import (
   send_email_job,
 )
 from robosystems.dagster.jobs.shared_repository import (
+  shared_replicas_refresh_job,
   shared_repository_refresh_replicas_job,
 )
 
@@ -45,6 +46,7 @@ __all__ = [
   "monthly_credit_allocation_job",
   "monthly_usage_report_job",
   "send_email_job",
+  "shared_replicas_refresh_job",
   "shared_repository_refresh_replicas_job",
   "weekly_health_check_job",
 ]

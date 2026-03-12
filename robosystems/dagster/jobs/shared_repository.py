@@ -1,27 +1,56 @@
 """Dagster jobs for shared repository replica management.
 
-Provides a standalone job for refreshing the replica fleet without
-publishing a new database. Useful for:
-- Forcing a refresh after a failed previous refresh
-- Rolling out non-database changes (e.g., new AMI, code updates)
+Two jobs for refreshing the shared replica fleet:
 
-The publish + refresh pipeline is handled by asset lineage:
-  sec_graph_materialized -> sec_lbug_s3_published -> shared_replicas_refreshed
+1. shared_replicas_refresh_job (asset job):
+   Materializes the shared_replicas_refreshed asset. Used by the automated
+   pipeline sensor chain (materialize → publish → refresh) so Dagster
+   tracks the materialization in asset lineage.
 
-This file only contains the standalone refresh job for ad-hoc operations.
+2. shared_repository_refresh_replicas_job (standalone op job):
+   Fire-and-forget refresh for ad-hoc operations:
+   - Forcing a refresh after a failed previous refresh
+   - Rolling out non-database changes (e.g., new AMI, code updates)
 """
 
 from typing import Any
 
 import boto3
 from dagster import (
+  AssetSelection,
   Config,
   OpExecutionContext,
+  define_asset_job,
   job,
   op,
 )
 
 from robosystems.config import env
+from robosystems.dagster.assets.shared_repositories.replicas import (
+  shared_replicas_refreshed,
+)
+
+# Asset job: materializes shared_replicas_refreshed asset.
+# Used by sec_post_materialize_publish_sensor to keep asset lineage accurate.
+shared_replicas_refresh_job = define_asset_job(
+  name="shared_replicas_refresh",
+  description="Refresh shared replica fleet (materializes shared_replicas_refreshed asset).",
+  selection=AssetSelection.assets(shared_replicas_refreshed),
+  tags={
+    "pipeline": "shared",
+    "phase": "replica_refresh",
+    # Light profile: just AWS API calls to start ASG refresh + polling
+    "ecs/cpu": "512",
+    "ecs/memory": "2048",
+    "ecs/ephemeral_storage": "21",
+    # On-demand to avoid Spot interruptions during long polling
+    "ecs/run_task_kwargs": {
+      "capacityProviderStrategy": [
+        {"capacityProvider": "FARGATE", "weight": 1, "base": 1},
+      ],
+    },
+  },
+)
 
 
 class ReplicaConfig(Config):
