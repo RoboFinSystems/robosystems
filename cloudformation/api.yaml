@@ -166,6 +166,20 @@ Parameters:
     AllowedPattern: ^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$
     ConstraintDescription: Must be a valid email address
 
+  # Frontend URLs (for transactional email links, billing redirects, CORS)
+  RoboSystemsAppUrl:
+    Type: String
+    Description: RoboSystems frontend URL
+    Default: "https://robosystems.ai"
+  RoboLedgerAppUrl:
+    Type: String
+    Description: RoboLedger frontend URL
+    Default: "https://roboledger.ai"
+  RoboInvestorAppUrl:
+    Type: String
+    Description: RoboInvestor frontend URL
+    Default: "https://roboinvestor.ai"
+
   # Cache Configuration
   ValkeyUrl:
     Type: String
@@ -717,6 +731,13 @@ Resources:
                 - !Sub "http://${ApiALB.DNSName}"
             - Name: EMAIL_FROM_ADDRESS
               Value: !Ref EmailFromAddress
+            # Frontend URLs (for transactional email links, billing redirects)
+            - Name: ROBOSYSTEMS_URL
+              Value: !Ref RoboSystemsAppUrl
+            - Name: ROBOLEDGER_URL
+              Value: !Ref RoboLedgerAppUrl
+            - Name: ROBOINVESTOR_URL
+              Value: !Ref RoboInvestorAppUrl
             # Database Configuration (URL constructed at runtime from components + secret)
             - Name: DATABASE_ENDPOINT
               Value: !Ref DatabaseEndpoint

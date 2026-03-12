@@ -60,12 +60,26 @@ except ImportError:
 # Import parameter store for feature flags (SSM Parameter Store)
 # Feature flags use SSM instead of Secrets Manager for cost efficiency
 try:
-  from .parameter_store import get_parameter_value
+  from .parameter_store import get_parameter_value, preload_feature_flags
 
   PARAMETER_STORE_AVAILABLE = True
-except ImportError:
+
+  # Preload all feature flags in a single batch API call before EnvConfig
+  # class definition. This populates the cache so individual get_parameter_value
+  # calls don't each make a separate SSM API call (which can fail under load).
+  _preloaded_flags = preload_feature_flags()
+  if _preloaded_flags:
+    print(f"Preloaded {len(_preloaded_flags)} feature flags from SSM")
+  elif os.getenv("ENVIRONMENT", "dev") in ("prod", "staging"):
+    print("WARNING: No feature flags loaded from SSM. All flags will use defaults.")
+except Exception as _e:
   # If parameter_store can't be imported, fall back to default values
+  # Catch all exceptions (not just ImportError) to handle transitive failures
   PARAMETER_STORE_AVAILABLE = False
+  print(
+    f"WARNING: Parameter store unavailable ({type(_e).__name__}: {_e}). "
+    "All feature flags will use defaults (false)."
+  )
 
   def get_parameter_value(key: str, default: str = "") -> str:
     """
@@ -355,10 +369,10 @@ class EnvConfig:
   # Service URLs
   # ROBOSYSTEMS_API_URL is set by CloudFormation based on access mode (domain or ALB DNS)
   ROBOSYSTEMS_API_URL = get_str_env("ROBOSYSTEMS_API_URL", "https://api.robosystems.ai")
-  # Frontend URLs - configurable via Secrets Manager for forks with custom domains
-  ROBOLEDGER_URL = get_secret_value("ROBOLEDGER_URL", "https://roboledger.ai")
-  ROBOINVESTOR_URL = get_secret_value("ROBOINVESTOR_URL", "https://roboinvestor.ai")
-  ROBOSYSTEMS_URL = get_secret_value("ROBOSYSTEMS_URL", "https://robosystems.ai")
+  # Frontend URLs - set via CloudFormation environment variables
+  ROBOLEDGER_URL = get_str_env("ROBOLEDGER_URL", "https://roboledger.ai")
+  ROBOINVESTOR_URL = get_str_env("ROBOINVESTOR_URL", "https://roboinvestor.ai")
+  ROBOSYSTEMS_URL = get_str_env("ROBOSYSTEMS_URL", "https://robosystems.ai")
 
   # JWT configuration
   JWT_SECRET_KEY = get_secret_value("JWT_SECRET_KEY", "")
