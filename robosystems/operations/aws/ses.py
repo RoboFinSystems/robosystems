@@ -23,6 +23,14 @@ _BRAND_BORDER = "#BFDBFE"  # primary-200
 _BRAND_MUTED = "#64748b"
 _BRAND_DANGER = "#dc2626"
 
+# App display names
+_APP_DISPLAY_NAMES = {
+  "roboledger": "RoboLedger",
+  "roboinvestor": "RoboInvestor",
+  "robosystems": "RoboSystems",
+}
+_DEFAULT_APP = "robosystems"
+
 
 def _base_template(app_name: str, content_html: str) -> str:
   """Wrap content in the shared email layout."""
@@ -327,18 +335,11 @@ Visit your dashboard: {url}
         True if email was sent successfully, False otherwise
     """
     # Get app-specific URL
-    base_url = self.app_urls.get(app, self.app_urls["roboledger"])
-
-    # Map app names for display
-    app_display_names = {
-      "roboledger": "RoboLedger",
-      "roboinvestor": "RoboInvestor",
-      "robosystems": "RoboSystems",
-    }
+    base_url = self.app_urls.get(app, self.app_urls[_DEFAULT_APP])
 
     template_data = {
       "user_name": user_name,
-      "app_name": app_display_names.get(app, "RoboSystems"),
+      "app_name": _APP_DISPLAY_NAMES.get(app, _APP_DISPLAY_NAMES[_DEFAULT_APP]),
       "verification_url": f"{base_url}/auth/verify-email?token={token}",
       "expiry_hours": EMAIL_TOKEN_EXPIRY_HOURS,
     }
@@ -365,18 +366,11 @@ Visit your dashboard: {url}
         True if email was sent successfully, False otherwise
     """
     # Get app-specific URL
-    base_url = self.app_urls.get(app, self.app_urls["roboledger"])
-
-    # Map app names for display
-    app_display_names = {
-      "roboledger": "RoboLedger",
-      "roboinvestor": "RoboInvestor",
-      "robosystems": "RoboSystems",
-    }
+    base_url = self.app_urls.get(app, self.app_urls[_DEFAULT_APP])
 
     template_data = {
       "user_name": user_name,
-      "app_name": app_display_names.get(app, "RoboSystems"),
+      "app_name": _APP_DISPLAY_NAMES.get(app, _APP_DISPLAY_NAMES[_DEFAULT_APP]),
       "reset_url": f"{base_url}/auth/reset-password?token={token}",
       "expiry_hours": PASSWORD_RESET_TOKEN_EXPIRY_HOURS,
     }
@@ -398,18 +392,11 @@ Visit your dashboard: {url}
         True if email was sent successfully, False otherwise
     """
     # Get app-specific URL
-    base_url = self.app_urls.get(app, self.app_urls["roboledger"])
-
-    # Map app names for display
-    app_display_names = {
-      "roboledger": "RoboLedger",
-      "roboinvestor": "RoboInvestor",
-      "robosystems": "RoboSystems",
-    }
+    base_url = self.app_urls.get(app, self.app_urls[_DEFAULT_APP])
 
     template_data = {
       "user_name": user_name,
-      "app_name": app_display_names.get(app, "RoboSystems"),
+      "app_name": _APP_DISPLAY_NAMES.get(app, _APP_DISPLAY_NAMES[_DEFAULT_APP]),
       "dashboard_url": f"{base_url}/home",
     }
 

@@ -227,8 +227,8 @@ class TestSESEmailService:
 
     call_args = mock_ses_client.send_email.call_args
     message = call_args.kwargs["Message"]
-    # Should fall back to roboledger URL
-    assert "roboledger" in message["Body"]["Html"]["Data"].lower()
+    # Should fall back to robosystems (default app)
+    assert "robosystems" in message["Body"]["Html"]["Data"].lower()
 
   @pytest.mark.asyncio
   async def test_email_environment_included(self, mock_ses_client):
