@@ -25,10 +25,11 @@ def get_pipeline_work_dir(graph_id: str) -> Path:
 
 
 # Graph output tables in dependency order (nodes first, then relationships)
-QB_NODE_TABLES = ["entity", "element", "dimension", "transaction", "line_item"]
+QB_NODE_TABLES = ["entity", "element", "dimension", "transaction", "entry", "line_item"]
 QB_RELATIONSHIP_TABLES = [
   "entity_has_transaction",
-  "transaction_has_line_item",
+  "transaction_has_entry",
+  "entry_has_line_item",
   "line_item_relates_to_element",
   "line_item_has_dimension",
 ]

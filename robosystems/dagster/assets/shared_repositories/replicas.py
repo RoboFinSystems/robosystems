@@ -1,12 +1,12 @@
 """Shared Replica Fleet Refresh Asset.
 
 This asset triggers and monitors the rolling refresh of the shared replica fleet
-after a new database has been published to S3. Replicas use S3 ATTACH to connect
-to the published database, so a refresh cycles instances to pick up the new version.
+after a new database has been published to S3. Replicas download .lbug and .duckdb
+files from S3 to local disk on boot, so a refresh cycles instances to pick up the
+new version.
 
-The replica fleet is a single shared ASG that serves all shared repositories
-(SEC, industry, economic, etc.). Refreshing it cycles all instances regardless
-of which repository was published.
+The replica fleet is a single shared ASG that serves all shared repositories.
+Refreshing it cycles all instances regardless of which repository was published.
 
 At scale (100+ replicas), this can take hours. The asset monitors progress and
 logs each stage of the refresh for visibility.
@@ -39,7 +39,7 @@ class SharedReplicaRefreshConfig(Config):
   max_healthy_percentage: int = 200
 
   # Seconds to wait for new instance to become healthy
-  # S3 ATTACH download + warmup takes ~10-15 min for 85GB database
+  # S3 download to local disk + warmup takes ~10-15 min for 85GB database
   instance_warmup_seconds: int = 900
 
   # How often to poll for refresh status (seconds)
@@ -69,7 +69,7 @@ def shared_replicas_refreshed(
   """Trigger and monitor rolling refresh of shared replica fleet.
 
   After a shared repository database is published to S3, replicas need to be
-  cycled to pick up the new version via S3 ATTACH. This asset:
+  cycled to pick up the new version. New instances download from S3. This asset:
 
   1. Checks for existing in-progress refresh
   2. Starts a new rolling instance refresh

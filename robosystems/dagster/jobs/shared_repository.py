@@ -32,7 +32,7 @@ class ReplicaConfig(Config):
   # 200 = allow temporarily doubling fleet during refresh
   max_healthy_percentage: int = 200
   # Set to 900s to match CloudFormation HealthCheckGracePeriod (15 min)
-  # Large S3 ATTACH databases need significant warmup time for httpfs caching
+  # Large database downloads from S3 need significant warmup time
   instance_warmup_seconds: int = 900
 
 

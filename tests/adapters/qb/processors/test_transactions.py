@@ -50,6 +50,7 @@ class TestDbtProject:
     assert (nodes_dir / "entity.sql").exists()
     assert (nodes_dir / "element.sql").exists()
     assert (nodes_dir / "transaction.sql").exists()
+    assert (nodes_dir / "entry.sql").exists()
     assert (nodes_dir / "line_item.sql").exists()
     assert (nodes_dir / "dimension.sql").exists()
 
@@ -57,7 +58,8 @@ class TestDbtProject:
     """Verify graph relationship model SQL files exist."""
     rels_dir = DBT_PROJECT_DIR / "models" / "graph" / "relationships"
     assert (rels_dir / "entity_has_transaction.sql").exists()
-    assert (rels_dir / "transaction_has_line_item.sql").exists()
+    assert (rels_dir / "transaction_has_entry.sql").exists()
+    assert (rels_dir / "entry_has_line_item.sql").exists()
     assert (rels_dir / "line_item_relates_to_element.sql").exists()
     assert (rels_dir / "line_item_has_dimension.sql").exists()
 
@@ -153,12 +155,14 @@ class TestDbtBuild:
       assert "entity" in tables
       assert "element" in tables
       assert "transaction" in tables
+      assert "entry" in tables
       assert "line_item" in tables
       assert "dimension" in tables
 
       # Verify relationship tables exist
       assert "entity_has_transaction" in tables
-      assert "transaction_has_line_item" in tables
+      assert "transaction_has_entry" in tables
+      assert "entry_has_line_item" in tables
       assert "line_item_relates_to_element" in tables
       assert "line_item_has_dimension" in tables
 

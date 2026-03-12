@@ -14,7 +14,7 @@ def test_get_plan_details_returns_plan_metadata():
 
   assert details is not None
   assert details["price_cents"] == 9900
-  assert "Everything in Starter" in details["features"][1]
+  assert "Everything in Starter" in details["features"]
 
 
 def test_get_plan_details_returns_none_for_unknown():

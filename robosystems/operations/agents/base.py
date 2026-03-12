@@ -236,8 +236,8 @@ class BaseAgent(ABC):
         Credit consumption result or None if no session
     """
     if not self.db_session:
-      self.logger.debug(
-        f"No DB session for credit consumption. "
+      self.logger.warning(
+        f"No DB session for credit consumption (graph={self.graph_id}). "
         f"Tokens used - Input: {input_tokens}, Output: {output_tokens}"
       )
       return None
@@ -267,7 +267,11 @@ class BaseAgent(ABC):
       return result
 
     except Exception as e:
-      self.logger.error(f"Error consuming credits: {e!s}")
+      self.logger.error(
+        f"Error consuming credits for graph={self.graph_id} model={model} "
+        f"tokens=({input_tokens}/{output_tokens}): {e!s}",
+        exc_info=True,
+      )
       return None
 
   def validate_mode(self, mode: AgentMode) -> None:

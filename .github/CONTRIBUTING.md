@@ -145,22 +145,16 @@ Look for issues labeled `good first issue` or `help wanted`. These are great sta
 
 ### Environment Configuration
 
-Copy the example environment file and configure:
-
-```bash
-cp .env.example .env
-# Edit .env with your configuration
-```
+Environment files are auto-created from `.example` templates by `just start` or `just init`. See CLAUDE.md for the dual `.env` / `.env.local` pattern.
 
 ## Coding Standards
 
 ### Python Code Style
 
-- **Formatter**: Black with 88 character line length
-- **Linter**: Ruff
-- **Type checking**: Pyright/Basedpyright
-- **Docstrings**: Google style
+- **Formatter/Linter**: Ruff (88 character line length, double quotes)
+- **Type checking**: basedpyright
 - **Import sorting**: Ruff's isort rules
+- **Self-documenting code**: Prefer clear names over comments; add comments only for non-obvious logic
 
 Run code quality checks:
 
@@ -207,7 +201,6 @@ docs(readme): update deployment instructions
 - Keep files focused and single-purpose
 - Use descriptive names for functions, variables, and classes
 - Add type hints to all function signatures
-- Write docstrings for all public functions and classes
 
 ## Testing
 
@@ -231,10 +224,10 @@ just test tests/test_specific.py
 just test-cov
 
 # Run only unit tests
-pytest -m unit
+uv run pytest -m unit
 
 # Run integration tests
-pytest -m integration
+just test-integration
 ```
 
 ### Writing Tests

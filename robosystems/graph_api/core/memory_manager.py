@@ -204,11 +204,6 @@ def ensure_duckdb_memory_boosted(graph_id: str) -> str | None:
     set_duckdb_memory_override,
   )
 
-  # Check if already boosted for this graph
-  if graph_id in _active_duckdb_boosts:
-    logger.debug(f"DuckDB memory already boosted for {graph_id}")
-    return None
-
   # Check if boost is configured for this tier
   tier = env.CLUSTER_TIER
   if not tier:
@@ -218,7 +213,7 @@ def ensure_duckdb_memory_boosted(graph_id: str) -> str | None:
   if not boost_limit:
     return None
 
-  # Check if override is already set for this graph
+  # Check if override is already set for this graph (actual state, not tracking set)
   current_override = get_duckdb_memory_override(graph_id)
   if current_override:
     logger.debug(
@@ -227,7 +222,13 @@ def ensure_duckdb_memory_boosted(graph_id: str) -> str | None:
     _active_duckdb_boosts.add(graph_id)
     return None
 
-  # Apply boost
+  # Apply boost (or re-apply if tracking set was stale from a previous cancelled run)
+  if graph_id in _active_duckdb_boosts:
+    logger.warning(
+      f"DuckDB tracking set had stale entry for {graph_id} "
+      f"(override was cleared but tracking set was not). Re-applying boost."
+    )
+
   logger.info(f"Boosting DuckDB memory to {boost_limit} for staging {graph_id}")
   set_duckdb_memory_override(boost_limit, graph_id)
   _active_duckdb_boosts.add(graph_id)
@@ -344,11 +345,6 @@ def ensure_ladybug_memory_boosted(graph_id: str) -> int | None:
   )
   from robosystems.graph_api.core.ladybug.pool import get_connection_pool
 
-  # Check if already boosted for this graph
-  if graph_id in _active_ladybug_boosts:
-    logger.debug(f"LadybugDB memory already boosted for {graph_id}")
-    return None
-
   # Check if boost is configured for this tier
   tier = env.CLUSTER_TIER
   if not tier:
@@ -358,7 +354,7 @@ def ensure_ladybug_memory_boosted(graph_id: str) -> int | None:
   if not boost_mb:
     return None
 
-  # Check if override is already set for this specific graph
+  # Check if override is already set for this specific graph (actual state, not tracking set)
   current_override = get_ladybug_memory_override(graph_id)
   if current_override:
     logger.debug(
@@ -366,6 +362,13 @@ def ensure_ladybug_memory_boosted(graph_id: str) -> int | None:
     )
     _active_ladybug_boosts.add(graph_id)
     return None
+
+  # If tracking set says boosted but override is gone, log stale entry
+  if graph_id in _active_ladybug_boosts:
+    logger.warning(
+      f"LadybugDB tracking set had stale entry for {graph_id} "
+      f"(override was cleared but tracking set was not). Re-applying boost."
+    )
 
   # NOTE: The operations below (DuckDB release, subgraph eviction) are currently
   # only reachable on the shared tier (the only tier with ladybug_memory_boost_mb

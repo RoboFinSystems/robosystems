@@ -31,7 +31,7 @@ router = APIRouter(prefix="/admin/v1/subscriptions", tags=["admin"])
 @require_admin(permissions=["subscription:read"])
 async def list_subscriptions(
   request: Request,
-  resource_type: str | None = Query("graph", description="Filter by resource type"),
+  resource_type: str | None = Query(None, description="Filter by resource type"),
   status_filter: str | None = Query(None, description="Filter by status"),
   user_email: str | None = None,
   include_canceled: bool = False,

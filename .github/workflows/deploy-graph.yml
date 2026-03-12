@@ -198,26 +198,16 @@ on:
         type: string
         description: Enable Spot instances for shared replicas
         default: "false"
-      shared_replicas_spot_base:
+      shared_replicas_od_base:
         required: false
         type: string
-        description: Minimum on-demand instances for shared replicas (never Spot)
+        description: Minimum on-demand instances for shared replicas (never Spot, guaranteed capacity)
         default: "0"
       shared_replicas_spot_weight:
         required: false
         type: string
         description: Percentage above base that is Spot for shared replicas (0 = all on-demand, 90 = 90% Spot)
         default: "0"
-      shared_replicas_spot_strategy:
-        required: false
-        type: string
-        description: Spot allocation strategy for shared replicas
-        default: "price-capacity-optimized"
-      shared_replicas_spot_rebalance:
-        required: false
-        type: string
-        description: Proactive Spot replacement for shared replicas
-        default: "true"
 
       # AMI Configuration
       ami_id:
@@ -538,10 +528,8 @@ jobs:
       health_check_grace_period: ${{ inputs.shared_replicas_health_check_grace_period }}
       # Spot Configuration
       spot_enabled: ${{ inputs.shared_replicas_spot_enabled }}
-      spot_base: ${{ inputs.shared_replicas_spot_base }}
+      od_base: ${{ inputs.shared_replicas_od_base }}
       spot_weight: ${{ inputs.shared_replicas_spot_weight }}
-      spot_strategy: ${{ inputs.shared_replicas_spot_strategy }}
-      spot_rebalance: ${{ inputs.shared_replicas_spot_rebalance }}
       ecr_image_tag: ${{ inputs.ecr_image_tag }}
       # Cache Configuration
       valkey_sg_id: ${{ inputs.valkey_sg_id }}

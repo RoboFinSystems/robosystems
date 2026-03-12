@@ -36,6 +36,15 @@ concat(
 {% endmacro %}
 
 
+{% macro qb_entry_uri(tx_type_expr, tx_id_expr) %}
+{# Generate QuickBooks entry URI. 1:1 with transaction for QB data. #}
+concat(
+  {{ qb_transaction_uri(tx_type_expr, tx_id_expr) }},
+  '/entry'
+)
+{% endmacro %}
+
+
 {% macro qb_line_item_uri(tx_type_expr, tx_id_expr, line_num_expr) %}
 {# Generate QuickBooks line item URI. Mirrors uri_utils.qb_line_item_uri() #}
 concat(

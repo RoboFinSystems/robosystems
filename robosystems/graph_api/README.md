@@ -168,23 +168,20 @@ For Neo4j deployments:
 
 ### Infrastructure Configuration
 
-Infrastructure is configurable based on workload requirements. Example configurations:
+All tiers use dedicated instances (1 database per instance). Configuration is defined in [`.github/configs/graph.yml`](/.github/configs/graph.yml).
 
-#### Production Environment
+#### Production Tiers
 
-| Configuration Type      | Instance Type | DBs/Instance | Memory/DB | Scaling | Use Case                        |
-| ----------------------- | ------------- | ------------ | --------- | ------- | ------------------------------- |
-| **Multi-Tenant**        | r7g.xlarge    | 10           | 2GB       | 1-10    | Cost-effective shared resources |
-| **Dedicated**           | r7g.large     | 1            | 14GB      | 0-5     | Isolated workloads              |
-| **High-Performance**    | r7g.xlarge    | 1            | 28GB      | 0-3     | Maximum performance             |
-| **Shared Repositories** | r7g.large     | N/A          | Shared    | 1       | Public data (SEC, etc.)         |
+| Tier | Instance | Memory | Subgraphs | Use Case |
+| ---- | -------- | ------ | --------- | -------- |
+| **ladybug-standard** | m7g.large | 8 GB | 3 | Cost-efficient entry tier |
+| **ladybug-large** | r7g.large | 16 GB | 10 | Enhanced performance |
+| **ladybug-xlarge** | r7g.xlarge | 32 GB | 25 | Maximum scale |
+| **ladybug-shared** | r7g.2xlarge | 64 GB | — | Public repositories (SEC) |
 
-#### Staging Environment
+#### Shared Replica Fleet
 
-| Configuration Type      | Instance Type | DBs/Instance | Memory/DB | Scaling |
-| ----------------------- | ------------- | ------------ | --------- | ------- |
-| **Multi-Tenant**        | r7g.medium    | 10           | 700MB     | 1-5     |
-| **Shared Repositories** | r7g.medium    | N/A          | Shared    | 1       |
+Read-only replicas download `.lbug` and `.duckdb` files from S3 on boot and serve queries locally. Refreshed via rolling ASG instance refresh after new databases are published.
 
 ### DynamoDB Registry Tables
 
@@ -603,7 +600,7 @@ LBUG_HEALTH_CHECKS_ENABLED=true        # Enable health checking
 ### Schema Types
 
 - **Entity**: Multi-tenant databases with accounting extensions
-- **Shared**: Repository databases (SEC, industry, economic)
+- **Shared**: Public repository databases (SEC)
 - **Custom**: Custom schemas with custom DDL
 
 ## Security

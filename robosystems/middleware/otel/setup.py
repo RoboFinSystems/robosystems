@@ -131,7 +131,14 @@ def setup_telemetry(app: FastAPI) -> None:
         "Skipping OTLP metrics exporter for localhost endpoint in dev environment (use observability profile)"
       )
 
-    _meter_provider = MeterProvider(resource=resource, metric_readers=metric_readers)
+    # Custom histogram bucket views for better percentile accuracy
+    from robosystems.middleware.otel.metrics import get_metric_views
+
+    _meter_provider = MeterProvider(
+      resource=resource,
+      metric_readers=metric_readers,
+      views=get_metric_views(),
+    )
     metrics.set_meter_provider(_meter_provider)
 
     # Configure exporters
@@ -179,8 +186,13 @@ def setup_telemetry(app: FastAPI) -> None:
     for exporter in exporters:
       _tracer_provider.add_span_processor(BatchSpanProcessor(exporter))
 
-    # Instrument FastAPI
-    FastAPIInstrumentor.instrument_app(app, tracer_provider=_tracer_provider)
+    # Instrument FastAPI (exclude health check endpoints from auto-instrumentation
+    # to prevent misleading metrics from high-frequency ALB health checks)
+    FastAPIInstrumentor.instrument_app(
+      app,
+      tracer_provider=_tracer_provider,
+      excluded_urls="status,health",
+    )
 
     # Instrument other libraries
     RequestsInstrumentor().instrument()

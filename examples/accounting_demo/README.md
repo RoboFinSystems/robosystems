@@ -6,8 +6,9 @@ This demo showcases RoboSystems' graph database capabilities for accounting and 
 
 - **1 Entity**: Acme Consulting LLC (fictional consulting company)
 - **20 Accounts**: Complete chart of accounts (Assets, Liabilities, Equity, Revenue, Expenses)
-- **~30 Transactions**: 6 months of business transactions per month (rent, consulting revenue, salaries, expenses)
-- **~60 Line Items**: Double-entry journal entries
+- **~30 Transactions**: 6 months of business events per month (rent, consulting revenue, salaries, expenses)
+- **~30 Entries**: Ledger entries (1:1 with transactions in demo)
+- **~60 Line Items**: Debits and credits within each entry
 
 ## Quick Start - Run All Steps
 
@@ -107,7 +108,7 @@ ORDER BY e.classification, e.name
 ### Cash Flow
 See all transactions affecting the Cash account:
 ```cypher
-MATCH (t:Transaction)-[:TRANSACTION_HAS_LINE_ITEM]->(li:LineItem)-[:LINE_ITEM_RELATES_TO_ELEMENT]->(e:Element)
+MATCH (t:Transaction)-[:TRANSACTION_HAS_ENTRY]->(en:Entry)-[:ENTRY_HAS_LINE_ITEM]->(li:LineItem)-[:LINE_ITEM_RELATES_TO_ELEMENT]->(e:Element)
 WHERE e.name = 'Cash'
 RETURN
     t.date AS date,
@@ -121,7 +122,7 @@ LIMIT 20
 ### Revenue by Month
 Analyze revenue trends:
 ```cypher
-MATCH (t:Transaction)-[:TRANSACTION_HAS_LINE_ITEM]->(li:LineItem)-[:LINE_ITEM_RELATES_TO_ELEMENT]->(e:Element)
+MATCH (t:Transaction)-[:TRANSACTION_HAS_ENTRY]->(en:Entry)-[:ENTRY_HAS_LINE_ITEM]->(li:LineItem)-[:LINE_ITEM_RELATES_TO_ELEMENT]->(e:Element)
 WHERE e.classification = 'revenue'
 RETURN
     substring(t.date, 1, 7) AS month,
@@ -132,7 +133,7 @@ ORDER BY month
 ### Profitability Analysis
 Monthly profit/loss:
 ```cypher
-MATCH (t:Transaction)-[:TRANSACTION_HAS_LINE_ITEM]->(li:LineItem)-[:LINE_ITEM_RELATES_TO_ELEMENT]->(e:Element)
+MATCH (t:Transaction)-[:TRANSACTION_HAS_ENTRY]->(en:Entry)-[:ENTRY_HAS_LINE_ITEM]->(li:LineItem)-[:LINE_ITEM_RELATES_TO_ELEMENT]->(e:Element)
 WHERE e.classification IN ['revenue', 'expense']
 WITH
     substring(t.date, 1, 7) AS month,
@@ -157,21 +158,25 @@ ORDER BY month
 **Nodes:**
 - `Entity`: The business entity (Acme Consulting LLC)
 - `Element`: Chart of accounts (individual accounts)
-- `Transaction`: Business transactions
-- `LineItem`: Journal entry lines (debits and credits)
+- `Transaction`: Business events (invoices, payments, expenses)
+- `Entry`: Ledger entries (accounting interpretation of transactions)
+- `LineItem`: Debits and credits within each entry
 
 **Relationships:**
-- `TRANSACTION_HAS_LINE_ITEM`: Links transactions to their journal entries
-- `LINE_ITEM_RELATES_TO_ELEMENT`: Links journal entries to accounts
+- `TRANSACTION_HAS_ENTRY`: Links business events to ledger entries
+- `ENTRY_HAS_LINE_ITEM`: Links entries to their debits/credits
+- `LINE_ITEM_RELATES_TO_ELEMENT`: Links line items to accounts
 
 ### Data Format
 
 All data is uploaded as Parquet files for optimal performance:
 - `Entity.parquet`: Business entity metadata
 - `Element.parquet`: Chart of accounts
-- `Transaction.parquet`: Transaction metadata
-- `LineItem.parquet`: Double-entry journal entries
-- `TRANSACTION_HAS_LINE_ITEM.parquet`: Transaction-to-line-item relationships
+- `Transaction.parquet`: Business event metadata
+- `Entry.parquet`: Ledger entry metadata
+- `LineItem.parquet`: Debits and credits
+- `TRANSACTION_HAS_ENTRY.parquet`: Transaction-to-entry relationships
+- `ENTRY_HAS_LINE_ITEM.parquet`: Entry-to-line-item relationships
 - `LINE_ITEM_RELATES_TO_ELEMENT.parquet`: Line-item-to-account relationships
 
 ### Accounting Principles

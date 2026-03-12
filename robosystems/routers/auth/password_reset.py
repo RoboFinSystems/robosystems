@@ -315,6 +315,7 @@ async def reset_password(
       "id": user.id,
       "name": user.name,
       "email": user.email,
+      "email_verified": user.email_verified,
     },
     message="Password reset successfully. You are now logged in.",
     token=jwt_token,

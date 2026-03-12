@@ -479,11 +479,11 @@ async def change_plan(
   _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
 ) -> GraphSubscriptionResponse:
   """Change plan on a shared repository subscription (upgrade or downgrade)."""
-  from ...models.iam import OrgRole, OrgUser
-  from ...models.iam.user_repository import UserRepository
-  from ...operations.providers.payment_provider import get_payment_provider
-
   try:
+    from ...models.iam import OrgRole, OrgUser
+    from ...models.iam.user_repository import UserRepository
+    from ...operations.providers.payment_provider import get_payment_provider
+
     if not is_shared_repository(graph_id):
       raise HTTPException(
         status_code=400,
@@ -522,15 +522,8 @@ async def change_plan(
       )
 
     new_plan_name = request.new_plan_name
-    # Extract plan tier (e.g., "sec-starter" -> "starter", or "starter" as-is)
-    new_plan_tier = (
-      new_plan_name.split("-")[-1] if "-" in new_plan_name else new_plan_name
-    )
 
-    if new_plan_tier == subscription.plan_name:
-      raise HTTPException(status_code=400, detail="Already on this plan")
-
-    # Validate the new plan exists
+    # Validate the new plan exists — BillingConfig handles tier extraction internally
     plan_config = BillingConfig.get_repository_plan(graph_id, new_plan_name)
     if not plan_config:
       raise HTTPException(
@@ -538,7 +531,38 @@ async def change_plan(
         detail=f"Invalid plan '{new_plan_name}' for repository '{graph_id}'",
       )
 
+    # Use the canonical plan name from config (not string splitting)
+    new_plan_tier = plan_config["name"]
+    if new_plan_tier == subscription.plan_name:
+      raise HTTPException(status_code=400, detail="Already on this plan")
+
     new_price_cents = plan_config["price_cents"]
+    new_credits = plan_config.get("monthly_credits", 0)
+    old_plan = subscription.plan_name
+    is_upgrade = new_price_cents > subscription.base_price_cents
+
+    # Update DB first — if this fails, Stripe stays consistent
+    subscription.update_plan(new_plan_tier, new_price_cents, db)
+
+    # Update UserRepository access (credits, rate limits)
+    user_repo = UserRepository.get_by_user_and_repository(current_user.id, graph_id, db)
+    if not user_repo:
+      logger.error(
+        f"No UserRepository record for user {current_user.id} on {graph_id} "
+        f"during plan change — credits and rate limits were NOT updated",
+        extra={"user_id": current_user.id, "repository_id": graph_id},
+      )
+      raise HTTPException(
+        status_code=500,
+        detail="Repository access record not found. Please contact support.",
+      )
+
+    user_repo.upgrade_tier(
+      new_plan=new_plan_tier,
+      session=db,
+      new_price_cents=new_price_cents,
+      new_credits=new_credits,
+    )
 
     # Update Stripe subscription if linked
     stripe_sub_id = subscription.stripe_subscription_id
@@ -550,24 +574,37 @@ async def change_plan(
         repository_id=graph_id,
       )
       provider.change_subscription_price(
-        stripe_subscription_id=stripe_sub_id,
+        subscription_id=stripe_sub_id,
         new_price_id=new_stripe_price_id,
       )
 
-    # Update BillingSubscription record
-    old_plan = subscription.plan_name
-    subscription.update_plan(new_plan_tier, new_price_cents, db)
-
-    # Update UserRepository access (credits, rate limits)
-    new_credits = plan_config.get("monthly_credits", 0)
-    user_repo = UserRepository.get_by_user_and_repository(current_user.id, graph_id, db)
-    if user_repo:
-      user_repo.upgrade_tier(
-        new_plan=new_plan_tier,
-        session=db,
-        new_price_cents=new_price_cents,
-        new_credits=new_credits,
-      )
+    # Audit log
+    org_id = user_orgs[0].org_id
+    BillingAuditLog.log_event(
+      session=db,
+      event_type=(
+        BillingEventType.PLAN_UPGRADED
+        if is_upgrade
+        else BillingEventType.PLAN_DOWNGRADED
+      ),
+      org_id=org_id,
+      subscription_id=subscription.id,
+      description=(
+        f"Changed {graph_id} plan from {old_plan} to {new_plan_tier} "
+        f"(${subscription.base_price_cents / 100:.0f}/mo)"
+      ),
+      actor_type="user",
+      actor_user_id=current_user.id,
+      event_data={
+        "resource_type": "repository",
+        "resource_id": graph_id,
+        "old_plan": old_plan,
+        "new_plan": new_plan_tier,
+        "old_price_cents": subscription.base_price_cents,
+        "new_price_cents": new_price_cents,
+        "new_credits": new_credits,
+      },
+    )
 
     logger.info(
       f"Changed repository {graph_id} plan: {old_plan} -> {new_plan_tier}",

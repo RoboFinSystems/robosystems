@@ -36,6 +36,7 @@ async def _process_webhook_event(
   after the request session has been closed.
   """
   from robosystems.dagster.jobs.billing import (
+    SubscriptionNotFoundError,
     _handle_charge_refunded,
     _handle_checkout_completed,
     _handle_invoice_created,
@@ -103,6 +104,14 @@ async def _process_webhook_event(
       extra={"event_id": event_id, "event_type": event_type},
     )
 
+  except SubscriptionNotFoundError as e:
+    # Subscription not found — do NOT mark as processed so Stripe retries.
+    # This handles timing issues where checkout.session.completed hasn't
+    # fired yet but invoice webhooks have already arrived.
+    logger.warning(
+      f"Webhook {event_type} deferred (will retry): {e}",
+      extra={"event_id": event_id, "event_type": event_type},
+    )
   except Exception as e:
     logger.error(
       f"Failed to process webhook {event_type}: {e}",

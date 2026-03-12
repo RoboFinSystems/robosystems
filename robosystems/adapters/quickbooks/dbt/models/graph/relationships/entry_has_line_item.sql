@@ -1,7 +1,7 @@
 {#
-  TRANSACTION_HAS_LINE_ITEM relationship.
-  Links Transactions to their LineItems.
-  Matches TRANSACTION_HAS_LINE_ITEM in schemas/extensions/roboledger.py.
+  ENTRY_HAS_LINE_ITEM relationship.
+  Links Entries to their LineItems.
+  Matches ENTRY_HAS_LINE_ITEM in schemas/extensions/roboledger.py.
 #}
 
 with lines as (
@@ -10,8 +10,8 @@ with lines as (
 
 select
   {{ generate_identifier(
-    qb_transaction_uri('tx_type', 'tx_number')
-  ) }} as transaction_identifier,
+    qb_entry_uri('tx_type', 'tx_number')
+  ) }} as entry_identifier,
   {{ generate_identifier(
     qb_line_item_uri('tx_type', 'tx_number', 'line_num')
   ) }} as line_item_identifier,

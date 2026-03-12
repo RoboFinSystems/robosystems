@@ -5,7 +5,7 @@ Each shared repository (SEC, future industry/economic) defines a thin
 asset with deps on its own materialization, then delegates here.
 
 Two publish targets:
-- S3: Raw .lbug/.duckdb for replica fleet (S3 ATTACH via httpfs)
+- S3: Raw .lbug/.duckdb for replica fleet (downloaded to local disk on boot)
 - R2: Raw .lbug for subscriber downloads (zero egress fees)
 """
 

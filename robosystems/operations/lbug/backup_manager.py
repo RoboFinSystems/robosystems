@@ -182,8 +182,11 @@ class BackupManager:
         if backup.encryption_enabled:
           raise ValueError("Encrypted backups cannot be downloaded")
 
-        # Format timestamp for filename (aligned with created_at shown in frontend)
-        timestamp_str = backup.created_at.strftime("%Y%m%d_%H%M%S")
+        # Use completed_at for filename timestamp — for shared repos the record
+        # is upserted so created_at stays fixed while completed_at reflects
+        # the actual publish date
+        timestamp = backup.completed_at or backup.created_at
+        timestamp_str = timestamp.strftime("%Y%m%d_%H%M%S")
         is_r2 = (
           backup.backup_metadata
           and isinstance(backup.backup_metadata, dict)

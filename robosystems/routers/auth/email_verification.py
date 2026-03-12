@@ -281,6 +281,7 @@ async def verify_email(
       "id": user.id,
       "name": user.name,
       "email": user.email,
+      "email_verified": user.email_verified,
     },
     message="Email verified successfully. Welcome to RoboSystems!",
     token=jwt_token,

@@ -14,6 +14,86 @@ from typing import Any
 
 from opentelemetry import metrics
 from opentelemetry.metrics import CallbackOptions, Observation
+from opentelemetry.sdk.metrics.view import ExplicitBucketHistogramAggregation, View
+
+# Custom histogram buckets tuned for API latency distribution:
+# Dense coverage in 10ms-500ms range where most graph queries land,
+# sparse coverage at sub-ms (health checks excluded) and multi-second (agent/AI ops)
+API_DURATION_BUCKETS = (
+  0.005,
+  0.01,
+  0.025,
+  0.05,
+  0.075,
+  0.1,
+  0.15,
+  0.2,
+  0.3,
+  0.5,
+  0.75,
+  1.0,
+  2.5,
+  5.0,
+  10.0,
+)
+
+QUERY_DURATION_BUCKETS = (
+  0.01,
+  0.025,
+  0.05,
+  0.1,
+  0.25,
+  0.5,
+  1.0,
+  2.5,
+  5.0,
+  10.0,
+  30.0,
+  60.0,
+)
+
+# Graph API proxy calls — covers fast reads through slow ingestion/backup
+GRAPH_API_DURATION_BUCKETS = (
+  0.005,
+  0.01,
+  0.025,
+  0.05,
+  0.1,
+  0.25,
+  0.5,
+  1.0,
+  2.5,
+  5.0,
+  10.0,
+  30.0,
+  60.0,
+  120.0,
+  300.0,
+)
+
+
+def get_metric_views() -> list[View]:
+  """Return View configurations for custom histogram buckets."""
+  return [
+    View(
+      instrument_name="robosystems_api_request_duration_seconds",
+      aggregation=ExplicitBucketHistogramAggregation(boundaries=API_DURATION_BUCKETS),
+    ),
+    View(
+      instrument_name="robosystems_query_wait_time_seconds",
+      aggregation=ExplicitBucketHistogramAggregation(boundaries=QUERY_DURATION_BUCKETS),
+    ),
+    View(
+      instrument_name="robosystems_query_execution_time_seconds",
+      aggregation=ExplicitBucketHistogramAggregation(boundaries=QUERY_DURATION_BUCKETS),
+    ),
+    View(
+      instrument_name="robosystems_graph_api_duration_seconds",
+      aggregation=ExplicitBucketHistogramAggregation(
+        boundaries=GRAPH_API_DURATION_BUCKETS
+      ),
+    ),
+  ]
 
 
 class MetricType(Enum):
@@ -39,6 +119,11 @@ class EndpointMetrics:
     self._graph_node_count = None
     self._graph_relationship_count = None
     self._graph_size_estimate = None
+    self._rate_limit_counter = None
+    self._credit_consumption = None
+    self._graph_api_duration = None
+    self._graph_api_requests = None
+    self._graph_api_errors = None
 
   def _ensure_instruments(self):
     """Lazy initialization of metric instruments."""
@@ -96,6 +181,14 @@ class EndpointMetrics:
         callbacks=[self._observe_queue_size],
         description="Current number of queries in the queue by priority",
         unit="queries",
+      )
+
+      # Database connection pool metrics
+      self._db_pool_gauge = self.meter.create_observable_gauge(
+        "robosystems_db_pool_connections",
+        callbacks=[self._observe_db_pool],
+        description="SQLAlchemy connection pool state",
+        unit="connections",
       )
 
       # SSE monitoring metrics
@@ -175,6 +268,35 @@ class EndpointMetrics:
       self._query_user_limits = self.meter.create_counter(
         "robosystems_query_user_limit_rejections_total",
         description="Queries rejected due to per-user limits",
+      )
+
+      # Rate limit metrics
+      self._rate_limit_counter = self.meter.create_counter(
+        "robosystems_rate_limit_rejections_total",
+        description="Total rate limit rejections by endpoint and limit type",
+      )
+
+      # Credit consumption metrics
+      self._credit_consumption = self.meter.create_counter(
+        "robosystems_credits_consumed_total",
+        description="Total credits consumed by operation type",
+      )
+
+      # Graph API proxy metrics — indirect observability of LadybugDB from the API side
+      self._graph_api_duration = self.meter.create_histogram(
+        "robosystems_graph_api_duration_seconds",
+        description="Duration of HTTP calls from API to Graph API (LadybugDB)",
+        unit="s",
+      )
+
+      self._graph_api_requests = self.meter.create_counter(
+        "robosystems_graph_api_requests_total",
+        description="Total HTTP requests from API to Graph API",
+      )
+
+      self._graph_api_errors = self.meter.create_counter(
+        "robosystems_graph_api_errors_total",
+        description="Total failed HTTP requests from API to Graph API",
       )
 
   def record_request(
@@ -367,12 +489,14 @@ class EndpointMetrics:
     success: bool,
     rejection_reason: str | None = None,
   ):
-    """Record query submission to queue."""
+    """Record query submission to queue.
+
+    Note: graph_id/user_id are NOT used as metric attributes to avoid
+    unbounded cardinality. Only priority and success are dimensions.
+    """
     self._ensure_instruments()
 
     attributes = {
-      "graph_id": graph_id,
-      "user_id": user_id,
       "priority": str(priority),
       "success": str(success),
     }
@@ -381,8 +505,10 @@ class EndpointMetrics:
       self._query_submissions.add(1, attributes)
 
     if not success:
-      rejection_attrs = attributes.copy()
-      rejection_attrs["reason"] = rejection_reason or "unknown"
+      rejection_attrs = {
+        "priority": str(priority),
+        "reason": rejection_reason or "unknown",
+      }
 
       if rejection_reason == "queue_full" and self._query_queue_rejections is not None:
         self._query_queue_rejections.add(1, rejection_attrs)
@@ -400,8 +526,6 @@ class EndpointMetrics:
     self._ensure_instruments()
 
     attributes = {
-      "graph_id": graph_id,
-      "user_id": user_id,
       "priority": str(priority),
     }
 
@@ -420,8 +544,6 @@ class EndpointMetrics:
     self._ensure_instruments()
 
     attributes = {
-      "graph_id": graph_id,
-      "user_id": user_id,
       "status": status,
     }
 
@@ -442,34 +564,29 @@ class EndpointMetrics:
   # SSE Monitoring Methods
 
   def record_sse_connection_opened(self, user_id: str, operation_id: str):
-    """Record an SSE connection being opened."""
+    """Record an SSE connection being opened.
+
+    Note: user_id/operation_id are NOT used as metric attributes to avoid
+    unbounded cardinality. They are kept in the method signature for logging context.
+    """
     self._ensure_instruments()
-    attributes = {
-      "user_id": user_id,
-      "operation_id": operation_id,
-    }
     if self._sse_connections_opened is not None:
-      self._sse_connections_opened.add(1, attributes)
+      self._sse_connections_opened.add(1, {})
     if self._sse_connections_active is not None:
-      self._sse_connections_active.add(1, {"user_id": user_id})
+      self._sse_connections_active.add(1, {})
 
   def record_sse_connection_closed(self, user_id: str, operation_id: str):
     """Record an SSE connection being closed."""
     self._ensure_instruments()
-    attributes = {
-      "user_id": user_id,
-      "operation_id": operation_id,
-    }
     if self._sse_connections_closed is not None:
-      self._sse_connections_closed.add(1, attributes)
+      self._sse_connections_closed.add(1, {})
     if self._sse_connections_active is not None:
-      self._sse_connections_active.add(-1, {"user_id": user_id})
+      self._sse_connections_active.add(-1, {})
 
   def record_sse_connection_rejected(self, user_id: str, reason: str):
     """Record an SSE connection being rejected."""
     self._ensure_instruments()
     attributes = {
-      "user_id": user_id,
       "reason": reason,
     }
     if self._sse_connections_rejected is not None:
@@ -479,7 +596,6 @@ class EndpointMetrics:
     """Record a successful SSE event emission."""
     self._ensure_instruments()
     attributes = {
-      "operation_id": operation_id,
       "event_type": event_type,
     }
     if self._sse_events_emitted is not None:
@@ -489,7 +605,6 @@ class EndpointMetrics:
     """Record a failed SSE event emission."""
     self._ensure_instruments()
     attributes = {
-      "operation_id": operation_id,
       "failure_reason": failure_reason,
     }
     if self._sse_events_failed is not None:
@@ -500,17 +615,91 @@ class EndpointMetrics:
       failure_reason == "redis_error"
       and self._sse_redis_circuit_breaker_opens is not None
     ):
-      self._sse_redis_circuit_breaker_opens.add(1, {"operation_id": operation_id})
+      self._sse_redis_circuit_breaker_opens.add(1, {})
 
   def record_sse_queue_overflow(self, operation_id: str, connection_id: str):
     """Record an SSE connection queue overflow event."""
     self._ensure_instruments()
-    attributes = {
-      "operation_id": operation_id,
-      "connection_id": connection_id,
-    }
     if self._sse_connection_queue_overflows is not None:
-      self._sse_connection_queue_overflows.add(1, attributes)
+      self._sse_connection_queue_overflows.add(1, {})
+
+  def record_rate_limit_rejection(
+    self,
+    endpoint: str,
+    limit_type: str,
+    identifier_type: str,
+  ):
+    """Record a rate limit rejection."""
+    self._ensure_instruments()
+    attributes = {
+      "endpoint": endpoint,
+      "limit_type": limit_type,
+      "identifier_type": identifier_type,
+    }
+    if self._rate_limit_counter is not None:
+      self._rate_limit_counter.add(1, attributes)
+
+  def record_credit_consumption(
+    self,
+    operation_type: str,
+    credits_consumed: float,
+    graph_tier: str,
+  ):
+    """Record credit consumption for an AI operation."""
+    self._ensure_instruments()
+    attributes = {
+      "operation_type": operation_type,
+      "graph_tier": graph_tier,
+    }
+    if self._credit_consumption is not None:
+      self._credit_consumption.add(credits_consumed, attributes)
+
+  def record_graph_api_call(
+    self,
+    method: str,
+    operation: str,
+    duration: float,
+    status_code: int,
+    route_target: str,
+    error: bool = False,
+    error_type: str | None = None,
+  ):
+    """Record an HTTP call from the API to the Graph API (LadybugDB).
+
+    This provides indirect observability of the Graph API from the API side,
+    since the Graph API runs on EC2 without an OTel sidecar.
+
+    Args:
+        method: HTTP method (GET, POST, DELETE)
+        operation: Normalized operation name (query, create_database, backup, etc.)
+        duration: Request duration in seconds
+        status_code: HTTP response status code
+        route_target: Routing target (user_graph, shared_master, shared_replica)
+        error: Whether the request failed
+        error_type: Error category (timeout, connection, client_4xx, server_5xx)
+    """
+    self._ensure_instruments()
+
+    attributes = {
+      "method": method,
+      "operation": operation,
+      "status_code": str(status_code),
+      "route_target": route_target,
+    }
+
+    if self._graph_api_duration is not None:
+      self._graph_api_duration.record(duration, attributes)
+    if self._graph_api_requests is not None:
+      self._graph_api_requests.add(1, attributes)
+
+    if error and self._graph_api_errors is not None:
+      error_attributes = {
+        "method": method,
+        "operation": operation,
+        "route_target": route_target,
+        "error_type": error_type or "unknown",
+      }
+      self._graph_api_errors.add(1, error_attributes)
 
   def _observe_queue_size(self, options: CallbackOptions) -> list[Observation]:
     """Observable callback for queue size metrics."""
@@ -525,13 +714,30 @@ class EndpointMetrics:
       for priority, count in priority_counts.items():
         observations.append(Observation(count, {"priority": str(priority)}))
 
-      # Also add total queue size
-      stats = queue_manager.get_stats()
-      observations.append(Observation(stats["queue_size"], {"priority": "all"}))
-
       return observations
     except Exception:
       # Return empty list if queue not initialized
+      return []
+
+  def _observe_db_pool(self, options: CallbackOptions) -> list[Observation]:
+    """Observable callback for SQLAlchemy connection pool metrics.
+
+    Note: pool.overflow() returns negative values when overflow slots are
+    available (e.g., -5 means 5 unused overflow slots). We clamp to 0 for
+    the "overflow" observation since negative connections don't make sense
+    in dashboards.
+    """
+    try:
+      from robosystems.database import engine
+
+      pool = engine.pool
+      return [
+        Observation(pool.checkedout(), {"state": "checked_out"}),
+        Observation(pool.checkedin(), {"state": "idle"}),
+        Observation(max(0, pool.overflow()), {"state": "overflow"}),
+        Observation(pool.size(), {"state": "pool_size"}),
+      ]
+    except Exception:
       return []
 
 

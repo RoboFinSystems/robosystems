@@ -218,6 +218,7 @@ async def login(
       "id": user.id,
       "name": user.name,
       "email": user.email,
+      "email_verified": user.email_verified,
     },
     message="Login successful",
     token=jwt_token,  # Return JWT for Bearer authentication

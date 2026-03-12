@@ -3,7 +3,7 @@
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from dagster import MaterializeResult, build_asset_context
+from dagster import Failure, MaterializeResult, build_asset_context
 
 from robosystems.adapters.sec.pipeline.configs import (
   SECHistoricalStageConfig,
@@ -83,7 +83,7 @@ class TestSecDuckdbStaged:
   def test_staging_error(
     self, mock_boost, mock_ensure_repo, mock_processor_cls, mock_env
   ):
-    """Test staging returns error metadata on failure."""
+    """Test staging raises Failure to block downstream materialization."""
     mock_env.ENVIRONMENT = "dev"
 
     staging_result = _make_staging_result(status="error", error="DuckDB out of memory")
@@ -97,11 +97,8 @@ class TestSecDuckdbStaged:
     config = SECStageConfig()
     context = build_asset_context()
 
-    result = sec_duckdb_staged(context, config)
-
-    assert isinstance(result, MaterializeResult)
-    assert result.metadata["status"] == "error"
-    assert "DuckDB out of memory" in str(result.metadata["error"])
+    with pytest.raises(Failure, match="DuckDB out of memory"):
+      sec_duckdb_staged(context, config)
 
   @patch("robosystems.config.env")
   @patch("robosystems.adapters.sec.XBRLDuckDBGraphProcessor")
@@ -240,7 +237,7 @@ class TestSecHistoricalDuckdbStaged:
   def test_historical_staging_error(
     self, mock_boost, mock_ensure_subgraph, mock_processor_cls, mock_env
   ):
-    """Test historical staging error handling."""
+    """Test historical staging raises Failure to block downstream materialization."""
     mock_env.ENVIRONMENT = "dev"
 
     staging_result = _make_staging_result(status="error", error="Staging failed")
@@ -254,9 +251,8 @@ class TestSecHistoricalDuckdbStaged:
     config = SECHistoricalStageConfig()
     context = build_asset_context()
 
-    result = sec_historical_duckdb_staged(context, config)
-
-    assert result.metadata["status"] == "error"
+    with pytest.raises(Failure, match="Staging failed"):
+      sec_historical_duckdb_staged(context, config)
 
   @patch("robosystems.config.env")
   @patch("robosystems.adapters.sec.XBRLDuckDBGraphProcessor")
@@ -322,7 +318,7 @@ class TestSecDuckdbIncrementalStaged:
   @patch("robosystems.adapters.sec.XBRLDuckDBGraphProcessor")
   @patch("robosystems.graph_api.client.factory.boost_graph_memory")
   def test_incremental_staging_error(self, mock_boost, mock_processor_cls):
-    """Test incremental staging error handling."""
+    """Test incremental staging raises Failure to block downstream materialization."""
     staging_result = _make_staging_result(status="error", error="Tables do not exist")
     mock_processor = MagicMock()
     mock_processor.stage_incremental_to_duckdb = AsyncMock(return_value=staging_result)
@@ -333,14 +329,13 @@ class TestSecDuckdbIncrementalStaged:
     config = SECIncrementalStageConfig(year=2025, quarter=1)
     context = build_asset_context()
 
-    result = sec_duckdb_incremental_staged(context, config)
-
-    assert result.metadata["status"] == "error"
+    with pytest.raises(Failure, match="Tables do not exist"):
+      sec_duckdb_incremental_staged(context, config)
 
   @patch("robosystems.adapters.sec.XBRLDuckDBGraphProcessor")
   @patch("robosystems.graph_api.client.factory.boost_graph_memory")
   def test_incremental_staging_partial_failure(self, mock_boost, mock_processor_cls):
-    """Test incremental staging with partial failure reports as error."""
+    """Test incremental staging with partial failure raises Failure."""
     staging_result = _make_staging_result(status="partial")
     mock_processor = MagicMock()
     mock_processor.stage_incremental_to_duckdb = AsyncMock(return_value=staging_result)
@@ -351,10 +346,8 @@ class TestSecDuckdbIncrementalStaged:
     config = SECIncrementalStageConfig(year=2025, quarter=1)
     context = build_asset_context()
 
-    result = sec_duckdb_incremental_staged(context, config)
-
-    # Partial staging should report as error to prevent downstream materialization
-    assert result.metadata["status"] == "error"
+    with pytest.raises(Failure, match="Partial staging failure"):
+      sec_duckdb_incremental_staged(context, config)
 
   @patch("robosystems.adapters.sec.XBRLDuckDBGraphProcessor")
   @patch("robosystems.graph_api.client.factory.boost_graph_memory")

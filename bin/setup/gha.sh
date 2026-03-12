@@ -436,10 +436,8 @@ function setup_full_config() {
     gh variable set SHARED_REPOSITORIES_PROD --body "sec"
     # Shared Replicas Spot Configuration (disabled by default for safety)
     gh variable set SHARED_REPLICAS_SPOT_ENABLED_PROD --body "false"
-    gh variable set SHARED_REPLICAS_SPOT_BASE_PROD --body "0"
+    gh variable set SHARED_REPLICAS_OD_BASE_PROD --body "0"
     gh variable set SHARED_REPLICAS_SPOT_WEIGHT_PROD --body "0"
-    gh variable set SHARED_REPLICAS_SPOT_STRATEGY_PROD --body "price-capacity-optimized"
-    gh variable set SHARED_REPLICAS_SPOT_REBALANCE_PROD --body "true"
     if $setup_staging; then
         gh variable set SHARED_REPLICAS_ENABLED_STAGING --body "false"
         gh variable set SHARED_REPLICAS_MIN_INSTANCES_STAGING --body "1"
@@ -455,10 +453,8 @@ function setup_full_config() {
         gh variable set SHARED_REPOSITORIES_STAGING --body "sec"
         # Shared Replicas Spot Configuration (disabled by default for safety)
         gh variable set SHARED_REPLICAS_SPOT_ENABLED_STAGING --body "false"
-        gh variable set SHARED_REPLICAS_SPOT_BASE_STAGING --body "0"
+        gh variable set SHARED_REPLICAS_OD_BASE_STAGING --body "0"
         gh variable set SHARED_REPLICAS_SPOT_WEIGHT_STAGING --body "0"
-        gh variable set SHARED_REPLICAS_SPOT_STRATEGY_STAGING --body "price-capacity-optimized"
-        gh variable set SHARED_REPLICAS_SPOT_REBALANCE_STAGING --body "true"
     fi
 
     # Note: Neo4j variables removed - Neo4j backend is disabled by default in graph.yml

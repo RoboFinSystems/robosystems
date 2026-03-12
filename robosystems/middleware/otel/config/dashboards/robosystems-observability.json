@@ -32,7 +32,7 @@
   "panels": [
     {
       "id": 1,
-      "title": "🚀 API Overview",
+      "title": "API Overview",
       "type": "row",
       "collapsed": false,
       "gridPos": {
@@ -48,7 +48,7 @@
       "type": "stat",
       "targets": [
         {
-          "expr": "sum(rate(robosystems_api_requests_total[5m]))",
+          "expr": "sum(rate(robosystems_api_requests_total{endpoint=~\"$endpoint\", method=~\"$method\"}[5m]))",
           "refId": "A",
           "legendFormat": "Requests/sec"
         }
@@ -92,7 +92,7 @@
       "type": "piechart",
       "targets": [
         {
-          "expr": "sum by (status_code) (rate(robosystems_api_requests_total[5m]))",
+          "expr": "sum by (status_code) (rate(robosystems_api_requests_total{endpoint=~\"$endpoint\", method=~\"$method\"}[5m]))",
           "refId": "A",
           "legendFormat": "{{status_code}}"
         }
@@ -189,17 +189,17 @@
       "type": "timeseries",
       "targets": [
         {
-          "expr": "histogram_quantile(0.50, rate(robosystems_api_request_duration_seconds_bucket[5m]))",
+          "expr": "histogram_quantile(0.50, rate(robosystems_api_request_duration_seconds_bucket{endpoint=~\"$endpoint\", method=~\"$method\"}[5m]))",
           "refId": "A",
           "legendFormat": "p50"
         },
         {
-          "expr": "histogram_quantile(0.95, rate(robosystems_api_request_duration_seconds_bucket[5m]))",
+          "expr": "histogram_quantile(0.95, rate(robosystems_api_request_duration_seconds_bucket{endpoint=~\"$endpoint\", method=~\"$method\"}[5m]))",
           "refId": "B",
           "legendFormat": "p95"
         },
         {
-          "expr": "histogram_quantile(0.99, rate(robosystems_api_request_duration_seconds_bucket[5m]))",
+          "expr": "histogram_quantile(0.99, rate(robosystems_api_request_duration_seconds_bucket{endpoint=~\"$endpoint\", method=~\"$method\"}[5m]))",
           "refId": "C",
           "legendFormat": "p99"
         }
@@ -254,7 +254,7 @@
       "type": "stat",
       "targets": [
         {
-          "expr": "100 * sum(rate(robosystems_api_requests_total{status_code=~\"4..|5..\"}[5m])) / sum(rate(robosystems_api_requests_total[5m]))",
+          "expr": "100 * sum(rate(robosystems_api_requests_total{status_code=~\"4..|5..\", endpoint=~\"$endpoint\", method=~\"$method\"}[5m])) / sum(rate(robosystems_api_requests_total{endpoint=~\"$endpoint\", method=~\"$method\"}[5m]))",
           "refId": "A",
           "legendFormat": "Error Rate"
         }
@@ -295,13 +295,13 @@
     },
     {
       "id": 6,
-      "title": "Active Users",
+      "title": "Authenticated RPS",
       "type": "stat",
       "targets": [
         {
-          "expr": "count(count by (user_id) (rate(robosystems_api_requests_total{user_id!=\"\"}[5m]) > 0))",
+          "expr": "sum(rate(robosystems_api_requests_total{user_authenticated=\"true\", endpoint=~\"$endpoint\", method=~\"$method\"}[5m]))",
           "refId": "A",
-          "legendFormat": "Active Users"
+          "legendFormat": "Authenticated RPS"
         }
       ],
       "fieldConfig": {
@@ -325,9 +325,9 @@
               ]
             }
           },
-          "unit": "short",
+          "unit": "reqps",
           "min": 0,
-          "displayName": "Active Users (5m)"
+          "displayName": "Authenticated RPS"
         }
       },
       "gridPos": {
@@ -426,7 +426,7 @@
     },
     {
       "id": 10,
-      "title": "📊 Endpoint Performance",
+      "title": "Endpoint Performance",
       "type": "row",
       "collapsed": false,
       "gridPos": {
@@ -442,7 +442,7 @@
       "type": "table",
       "targets": [
         {
-          "expr": "topk(15, sum by (endpoint, method) (rate(robosystems_api_requests_total[5m])))",
+          "expr": "topk(15, sum by (endpoint, method) (rate(robosystems_api_requests_total{endpoint=~\"$endpoint\", method=~\"$method\"}[5m])))",
           "refId": "A",
           "format": "table",
           "instant": true
@@ -513,7 +513,7 @@
       "type": "table",
       "targets": [
         {
-          "expr": "topk(15, histogram_quantile(0.95, rate(robosystems_api_request_duration_seconds_bucket[5m])))",
+          "expr": "topk(15, histogram_quantile(0.95, rate(robosystems_api_request_duration_seconds_bucket{endpoint=~\"$endpoint\", method=~\"$method\"}[5m])))",
           "refId": "A",
           "format": "table",
           "instant": true
@@ -596,7 +596,7 @@
     },
     {
       "id": 20,
-      "title": "🔐 Authentication & Business Events",
+      "title": "Authentication & Business Events",
       "type": "row",
       "collapsed": false,
       "gridPos": {
@@ -807,7 +807,7 @@
     },
     {
       "id": 30,
-      "title": "📈 API Usage Patterns",
+      "title": "API Usage Patterns",
       "type": "row",
       "collapsed": false,
       "gridPos": {
@@ -823,7 +823,7 @@
       "type": "timeseries",
       "targets": [
         {
-          "expr": "sum by (endpoint) (rate(robosystems_api_requests_total[5m]))",
+          "expr": "sum by (endpoint) (rate(robosystems_api_requests_total{endpoint=~\"$endpoint\", method=~\"$method\"}[5m]))",
           "refId": "A",
           "legendFormat": "{{endpoint}}"
         }
@@ -838,7 +838,7 @@
             "axisPlacement": "auto",
             "barAlignment": 0,
             "drawStyle": "line",
-            "fillOpacity": 5,
+            "fillOpacity": 10,
             "gradientMode": "none",
             "hideFrom": {
               "legend": false,
@@ -846,7 +846,7 @@
               "vis": false
             },
             "lineInterpolation": "linear",
-            "lineWidth": 1,
+            "lineWidth": 2,
             "pointSize": 5,
             "scaleDistribution": {
               "type": "linear"
@@ -889,7 +889,7 @@
       "type": "timeseries",
       "targets": [
         {
-          "expr": "sum by (endpoint, status_code) (rate(robosystems_api_requests_total{status_code=~\"4..|5..\"}[5m]))",
+          "expr": "sum by (endpoint, status_code) (rate(robosystems_api_requests_total{status_code=~\"4..|5..\", endpoint=~\"$endpoint\", method=~\"$method\"}[5m]))",
           "refId": "A",
           "legendFormat": "{{endpoint}} - {{status_code}}"
         }
@@ -950,8 +950,8 @@
       }
     },
     {
-      "id": 40,
-      "title": "🔧 System Health",
+      "id": 69,
+      "title": "Query Queue Performance",
       "type": "row",
       "collapsed": false,
       "gridPos": {
@@ -959,6 +959,938 @@
         "w": 24,
         "x": 0,
         "y": 34
+      }
+    },
+    {
+      "id": 70,
+      "title": "Query Queue Size",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "sum(robosystems_query_queue_size)",
+          "refId": "A",
+          "legendFormat": "Queue Size"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisLabel": "Queries",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "vis": false
+            },
+            "lineInterpolation": "linear",
+            "lineWidth": 2,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "unit": "short",
+          "min": 0
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 35
+      }
+    },
+    {
+      "id": 71,
+      "title": "Query Wait Time p95",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, rate(robosystems_query_wait_time_seconds_bucket[5m]))",
+          "refId": "A",
+          "legendFormat": "p95 Wait Time"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisLabel": "Duration",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "vis": false
+            },
+            "lineInterpolation": "linear",
+            "lineWidth": 2,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "unit": "s",
+          "min": 0
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 35
+      }
+    },
+    {
+      "id": 72,
+      "title": "Query Execution Time p95",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, rate(robosystems_query_execution_time_seconds_bucket[5m]))",
+          "refId": "A",
+          "legendFormat": "p95 Execution Time"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisLabel": "Duration",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "vis": false
+            },
+            "lineInterpolation": "linear",
+            "lineWidth": 2,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "unit": "s",
+          "min": 0
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 35
+      }
+    },
+    {
+      "id": 73,
+      "title": "Query Submissions",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "sum(rate(robosystems_query_submissions_total{success=\"true\"}[5m]))",
+          "refId": "A",
+          "legendFormat": "Accepted"
+        },
+        {
+          "expr": "sum(rate(robosystems_query_submissions_total{success=\"false\"}[5m]))",
+          "refId": "B",
+          "legendFormat": "Rejected"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisLabel": "Rate",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "vis": false
+            },
+            "lineInterpolation": "linear",
+            "lineWidth": 2,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "unit": "reqps",
+          "min": 0
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Accepted"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "green"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Rejected"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "red"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 43
+      }
+    },
+    {
+      "id": 74,
+      "title": "Queue Rejections by Reason",
+      "type": "piechart",
+      "targets": [
+        {
+          "expr": "sum by (reason) (rate(robosystems_query_queue_rejections_total[5m]))",
+          "refId": "A",
+          "legendFormat": "{{reason}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "vis": false
+            }
+          }
+        }
+      },
+      "options": {
+        "reduceOptions": {
+          "values": false,
+          "calcs": ["lastNotNull"],
+          "fields": ""
+        },
+        "pieType": "pie",
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        },
+        "legend": {
+          "displayMode": "list",
+          "placement": "right"
+        },
+        "displayLabels": ["percent"]
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 43
+      }
+    },
+    {
+      "id": 75,
+      "title": "Concurrent Executions",
+      "type": "stat",
+      "targets": [
+        {
+          "expr": "robosystems_query_concurrent_executions",
+          "refId": "A",
+          "legendFormat": "Concurrent"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds",
+            "thresholds": {
+              "steps": [
+                {
+                  "color": "green",
+                  "value": null
+                },
+                {
+                  "color": "yellow",
+                  "value": 5
+                },
+                {
+                  "color": "red",
+                  "value": 10
+                }
+              ]
+            }
+          },
+          "unit": "short",
+          "min": 0,
+          "displayName": "Concurrent Queries"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 4,
+        "x": 16,
+        "y": 43
+      }
+    },
+    {
+      "id": 79,
+      "title": "SSE & Real-time",
+      "type": "row",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 51
+      }
+    },
+    {
+      "id": 80,
+      "title": "SSE Active Connections",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "sum(robosystems_sse_connections_active)",
+          "refId": "A",
+          "legendFormat": "Active Connections"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisLabel": "Connections",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "vis": false
+            },
+            "lineInterpolation": "linear",
+            "lineWidth": 2,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "unit": "short",
+          "min": 0
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 52
+      }
+    },
+    {
+      "id": 81,
+      "title": "SSE Events",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "sum(rate(robosystems_sse_events_emitted_total[5m]))",
+          "refId": "A",
+          "legendFormat": "Emitted"
+        },
+        {
+          "expr": "sum(rate(robosystems_sse_events_failed_total[5m]))",
+          "refId": "B",
+          "legendFormat": "Failed"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisLabel": "Events/sec",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "vis": false
+            },
+            "lineInterpolation": "linear",
+            "lineWidth": 2,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "unit": "short",
+          "min": 0
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Emitted"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "green"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Failed"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "red"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 52
+      }
+    },
+    {
+      "id": 82,
+      "title": "SSE Connection Lifecycle",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "sum(rate(robosystems_sse_connections_opened_total[5m]))",
+          "refId": "A",
+          "legendFormat": "Opened"
+        },
+        {
+          "expr": "sum(rate(robosystems_sse_connections_closed_total[5m]))",
+          "refId": "B",
+          "legendFormat": "Closed"
+        },
+        {
+          "expr": "sum(rate(robosystems_sse_connections_rejected_total[5m]))",
+          "refId": "C",
+          "legendFormat": "Rejected"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisLabel": "Events/sec",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "vis": false
+            },
+            "lineInterpolation": "linear",
+            "lineWidth": 2,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "unit": "short",
+          "min": 0
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Opened"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "green"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Closed"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "yellow"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Rejected"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "red"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 52
+      }
+    },
+    {
+      "id": 89,
+      "title": "Rate Limits & Credits",
+      "type": "row",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 60
+      }
+    },
+    {
+      "id": 90,
+      "title": "Rate Limit Rejections",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "sum by (limit_type) (rate(robosystems_rate_limit_rejections_total[5m]))",
+          "refId": "A",
+          "legendFormat": "{{limit_type}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisLabel": "Rejections/sec",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "vis": false
+            },
+            "lineInterpolation": "linear",
+            "lineWidth": 2,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "unit": "reqps",
+          "min": 0
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 61
+      }
+    },
+    {
+      "id": 91,
+      "title": "Credit Consumption",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "sum by (operation_type) (rate(robosystems_credits_consumed_total[5m]))",
+          "refId": "A",
+          "legendFormat": "{{operation_type}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisLabel": "Credits/sec",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "vis": false
+            },
+            "lineInterpolation": "linear",
+            "lineWidth": 2,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "unit": "short",
+          "min": 0
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 61
+      }
+    },
+    {
+      "id": 99,
+      "title": "Graph Database Metrics",
+      "type": "row",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 69
+      }
+    },
+    {
+      "id": 100,
+      "title": "Graph Sizes",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "robosystems_graph_size_bytes",
+          "refId": "A",
+          "legendFormat": "{{graph_id}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisLabel": "Size",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "vis": false
+            },
+            "lineInterpolation": "linear",
+            "lineWidth": 2,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "unit": "bytes",
+          "min": 0
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 70
+      }
+    },
+    {
+      "id": 101,
+      "title": "Node Counts",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "robosystems_graph_nodes_total",
+          "refId": "A",
+          "legendFormat": "{{graph_id}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisLabel": "Nodes",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "vis": false
+            },
+            "lineInterpolation": "linear",
+            "lineWidth": 2,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "unit": "short",
+          "min": 0
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 70
+      }
+    },
+    {
+      "id": 102,
+      "title": "Relationship Counts",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "robosystems_graph_relationships_total",
+          "refId": "A",
+          "legendFormat": "{{graph_id}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisLabel": "Relationships",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "vis": false
+            },
+            "lineInterpolation": "linear",
+            "lineWidth": 2,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "unit": "short",
+          "min": 0
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 70
+      }
+    },
+    {
+      "id": 40,
+      "title": "System Health",
+      "type": "row",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 78
       }
     },
     {
@@ -1028,7 +1960,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 35
+        "y": 79
       }
     },
     {
@@ -1037,7 +1969,7 @@
       "type": "table",
       "targets": [
         {
-          "expr": "topk(10, 100 * sum by (endpoint) (rate(robosystems_api_requests_total{status_code=~\"4..|5..\"}[5m])) / sum by (endpoint) (rate(robosystems_api_requests_total[5m])))",
+          "expr": "topk(10, 100 * sum by (endpoint) (rate(robosystems_api_requests_total{status_code=~\"4..|5..\", endpoint=~\"$endpoint\", method=~\"$method\"}[5m])) / sum by (endpoint) (rate(robosystems_api_requests_total{endpoint=~\"$endpoint\", method=~\"$method\"}[5m])))",
           "refId": "A",
           "format": "table",
           "instant": true
@@ -1115,19 +2047,19 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 35
+        "y": 79
       }
     },
     {
       "id": 50,
-      "title": "📋 Business Metrics Detail",
+      "title": "Business Metrics Detail",
       "type": "row",
       "collapsed": true,
       "gridPos": {
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 43
+        "y": 87
       },
       "panels": [
         {
@@ -1182,7 +2114,7 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 44
+            "y": 88
           }
         },
         {
@@ -1237,7 +2169,7 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 44
+            "y": 88
           }
         },
         {
@@ -1292,21 +2224,21 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 44
+            "y": 88
           }
         }
       ]
     },
     {
       "id": 60,
-      "title": "🚨 Alerts & SLIs",
+      "title": "Alerts & SLIs",
       "type": "row",
       "collapsed": true,
       "gridPos": {
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 44
+        "y": 88
       },
       "panels": [
         {
@@ -1315,7 +2247,7 @@
           "type": "stat",
           "targets": [
             {
-              "expr": "100 * sum(rate(robosystems_api_requests_total{status_code!~\"5..\"}[5m])) / sum(rate(robosystems_api_requests_total[5m]))",
+              "expr": "100 * sum(rate(robosystems_api_requests_total{status_code!~\"5..\", endpoint=~\"$endpoint\", method=~\"$method\"}[5m])) / sum(rate(robosystems_api_requests_total{endpoint=~\"$endpoint\", method=~\"$method\"}[5m]))",
               "refId": "A",
               "legendFormat": "Availability %"
             }
@@ -1351,7 +2283,7 @@
             "h": 8,
             "w": 6,
             "x": 0,
-            "y": 45
+            "y": 89
           }
         },
         {
@@ -1360,7 +2292,7 @@
           "type": "stat",
           "targets": [
             {
-              "expr": "histogram_quantile(0.95, rate(robosystems_api_request_duration_seconds_bucket[5m])) * 1000",
+              "expr": "histogram_quantile(0.95, rate(robosystems_api_request_duration_seconds_bucket{endpoint=~\"$endpoint\", method=~\"$method\"}[5m])) * 1000",
               "refId": "A",
               "legendFormat": "p95 Latency"
             }
@@ -1395,7 +2327,7 @@
             "h": 8,
             "w": 6,
             "x": 6,
-            "y": 45
+            "y": 89
           }
         },
         {
@@ -1404,7 +2336,7 @@
           "type": "stat",
           "targets": [
             {
-              "expr": "100 - (100 * sum(rate(robosystems_api_requests_total{status_code=~\"4..|5..\"}[30d])) / sum(rate(robosystems_api_requests_total[30d])))",
+              "expr": "100 - (100 * sum(rate(robosystems_api_requests_total{status_code=~\"5..\", endpoint=~\"$endpoint\", method=~\"$method\"}[30d])) / sum(rate(robosystems_api_requests_total{endpoint=~\"$endpoint\", method=~\"$method\"}[30d])))",
               "refId": "A",
               "legendFormat": "Error Budget Remaining"
             }
@@ -1440,7 +2372,7 @@
             "h": 8,
             "w": 6,
             "x": 12,
-            "y": 45
+            "y": 89
           }
         },
         {
@@ -1449,7 +2381,7 @@
           "type": "stat",
           "targets": [
             {
-              "expr": "abs((rate(robosystems_api_requests_total[5m]) - rate(robosystems_api_requests_total[1h] offset 1h)) / rate(robosystems_api_requests_total[1h] offset 1h)) * 100",
+              "expr": "abs((rate(robosystems_api_requests_total{endpoint=~\"$endpoint\", method=~\"$method\"}[5m]) - rate(robosystems_api_requests_total{endpoint=~\"$endpoint\", method=~\"$method\"}[1h] offset 1h)) / rate(robosystems_api_requests_total{endpoint=~\"$endpoint\", method=~\"$method\"}[1h] offset 1h)) * 100",
               "refId": "A",
               "legendFormat": "Rate Change %"
             }
@@ -1484,7 +2416,7 @@
             "h": 8,
             "w": 6,
             "x": 18,
-            "y": 45
+            "y": 89
           }
         }
       ]

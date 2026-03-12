@@ -103,14 +103,52 @@ models:
               to: ref('transaction')
               field: identifier
 
-  - name: transaction_has_line_item
-    description: Links Transactions to LineItems
+  - name: entry
+    description: Entry node - ledger entries (1:1 with Transaction for QB data)
+    columns:
+      - name: identifier
+        tests:
+          - unique
+          - not_null
+      - name: uri
+        tests:
+          - unique
+          - not_null
+      - name: status
+        tests:
+          - accepted_values:
+              values: ["draft", "posted", "reversed"]
+      - name: type
+        tests:
+          - accepted_values:
+              values: ["standard", "adjusting", "closing", "reversing"]
+
+  # ── Relationship Models ──
+
+  - name: transaction_has_entry
+    description: Links Transactions to Entries
     columns:
       - name: transaction_identifier
         tests:
           - not_null
           - relationships:
               to: ref('transaction')
+              field: identifier
+      - name: entry_identifier
+        tests:
+          - not_null
+          - relationships:
+              to: ref('entry')
+              field: identifier
+
+  - name: entry_has_line_item
+    description: Links Entries to LineItems
+    columns:
+      - name: entry_identifier
+        tests:
+          - not_null
+          - relationships:
+              to: ref('entry')
               field: identifier
       - name: line_item_identifier
         tests:
