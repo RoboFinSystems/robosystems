@@ -377,6 +377,88 @@ class TestElementKnowledgeBuilder:
     assert all(dt is None for dt in cols["disclosure_type"])
 
 
+class TestClassifyByStructureMembership:
+  """Tests for ElementKnowledgeBuilder._classify_by_structure_membership."""
+
+  def test_majority_vote_picks_highest_count(self):
+    from robosystems.adapters.sec.knowledge.artifact import ElementKnowledgeBuilder
+
+    membership = {
+      "us-gaap:DepreciationDepletionAndAmortization": {
+        "cash_flow_statement": 19000,
+        "income_statement": 3200,
+        "IncomeStatement": 2400,
+      },
+    }
+    result = ElementKnowledgeBuilder._classify_by_structure_membership(membership)
+    # 19000 CashFlow vs 5600 IncomeStatement (3200+2400)
+    assert result["us-gaap:DepreciationDepletionAndAmortization"] == "CashFlow"
+
+  def test_income_statement_variants_aggregate(self):
+    from robosystems.adapters.sec.knowledge.artifact import ElementKnowledgeBuilder
+
+    membership = {
+      "us-gaap:NetIncomeLoss": {
+        "income_statement": 46000,
+        "IncomeStatement": 27000,
+        "comprehensive_income": 42000,
+        "cash_flow_statement": 26000,
+      },
+    }
+    result = ElementKnowledgeBuilder._classify_by_structure_membership(membership)
+    # IS: 46000+27000+42000=115000 vs CF: 26000
+    assert result["us-gaap:NetIncomeLoss"] == "IncomeStatement"
+
+  def test_balance_sheet_variants_aggregate(self):
+    from robosystems.adapters.sec.knowledge.artifact import ElementKnowledgeBuilder
+
+    membership = {
+      "us-gaap:Assets": {
+        "balance_sheet": 100000,
+        "AssetsRollUp": 3000,
+        "cash_flow_statement": 50,
+      },
+    }
+    result = ElementKnowledgeBuilder._classify_by_structure_membership(membership)
+    assert result["us-gaap:Assets"] == "BalanceSheet"
+
+  def test_disclosure_only_types_ignored(self):
+    from robosystems.adapters.sec.knowledge.artifact import ElementKnowledgeBuilder
+
+    membership = {
+      "us-gaap:SomeDisclosureElement": {
+        "DocumentInformation": 50000,
+        "NetBenefitCosts": 10000,
+      },
+    }
+    result = ElementKnowledgeBuilder._classify_by_structure_membership(membership)
+    # No statement-relevant types → element not classified
+    assert "us-gaap:SomeDisclosureElement" not in result
+
+  def test_empty_input(self):
+    from robosystems.adapters.sec.knowledge.artifact import ElementKnowledgeBuilder
+
+    result = ElementKnowledgeBuilder._classify_by_structure_membership({})
+    assert result == {}
+
+  def test_multiple_elements(self):
+    from robosystems.adapters.sec.knowledge.artifact import ElementKnowledgeBuilder
+
+    membership = {
+      "us-gaap:NetCashProvidedByUsedInOperatingActivities": {
+        "cash_flow_statement": 50000,
+        "IncomeStatement": 900,
+      },
+      "us-gaap:StockholdersEquity": {
+        "equity_statement": 69000,
+        "balance_sheet": 102000,
+      },
+    }
+    result = ElementKnowledgeBuilder._classify_by_structure_membership(membership)
+    assert result["us-gaap:NetCashProvidedByUsedInOperatingActivities"] == "CashFlow"
+    assert result["us-gaap:StockholdersEquity"] == "BalanceSheet"
+
+
 class TestStructureKnowledgeBuilder:
   def test_build_produces_both_parquets(self, synthetic_duckdb, tmp_path, monkeypatch):
     """Structure builder creates both profile and consensus parquet files."""
