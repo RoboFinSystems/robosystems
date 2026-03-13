@@ -179,7 +179,10 @@ mount $DATA_DEVICE /mnt/ladybug-data
 echo "$DATA_DEVICE /mnt/ladybug-data xfs defaults,nofail 0 2" >> /etc/fstab
 
 # Create directory structure with proper ownership
-mkdir -p /mnt/ladybug-data/{databases,backups,logs,staging}
+# Staging lives under databases/ so the container sees it at /app/data/staging/
+# through the single data mount (no separate staging mount needed)
+mkdir -p /mnt/ladybug-data/{databases,backups,logs}
+mkdir -p /mnt/ladybug-data/databases/staging
 
 # Docker containers typically run as UID 1000, set ownership accordingly
 chown -R 1000:1000 /mnt/ladybug-data
@@ -367,11 +370,9 @@ export INSTANCE_TYPE="${INSTANCE_TYPE}"
 export AWS_REGION="${REGION}"
 export CLUSTER_TIER="${CLUSTER_TIER}"
 export DATA_MOUNT_SOURCE="/mnt/ladybug-data/databases"
-export DATA_MOUNT_TARGET="/app/data/lbug-dbs"
+export DATA_MOUNT_TARGET="/app/data"
 export LOGS_MOUNT_SOURCE="/mnt/ladybug-data/logs"
 export LOGS_MOUNT_TARGET="/app/logs"
-export STAGING_MOUNT_SOURCE="/mnt/ladybug-data/staging"
-export STAGING_MOUNT_TARGET="/app/data/staging"
 
 # Set DOCKER_PROFILE based on node type
 if [ "${LBUG_NODE_TYPE}" = "shared_master" ] || [ "${LBUG_NODE_TYPE}" = "shared_replica" ]; then
@@ -405,8 +406,6 @@ echo "DATA_MOUNT_SOURCE=${DATA_MOUNT_SOURCE}" >> /etc/environment
 echo "DATA_MOUNT_TARGET=${DATA_MOUNT_TARGET}" >> /etc/environment
 echo "LOGS_MOUNT_SOURCE=${LOGS_MOUNT_SOURCE}" >> /etc/environment
 echo "LOGS_MOUNT_TARGET=${LOGS_MOUNT_TARGET}" >> /etc/environment
-echo "STAGING_MOUNT_SOURCE=${STAGING_MOUNT_SOURCE}" >> /etc/environment
-echo "STAGING_MOUNT_TARGET=${STAGING_MOUNT_TARGET}" >> /etc/environment
 echo "DOCKER_PROFILE=${DOCKER_PROFILE}" >> /etc/environment
 
 # Run shared container runner
