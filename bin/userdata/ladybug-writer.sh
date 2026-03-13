@@ -401,6 +401,13 @@ echo "SHARED_REPOSITORIES=${SHARED_REPOSITORIES:-}" >> /etc/environment
 echo "DATABASE_ENDPOINT=${DATABASE_ENDPOINT:-}" >> /etc/environment
 echo "DATABASE_PORT=${DATABASE_PORT:-5432}" >> /etc/environment
 echo "VALKEY_URL=${VALKEY_URL:-}" >> /etc/environment
+echo "DATA_MOUNT_SOURCE=${DATA_MOUNT_SOURCE}" >> /etc/environment
+echo "DATA_MOUNT_TARGET=${DATA_MOUNT_TARGET}" >> /etc/environment
+echo "LOGS_MOUNT_SOURCE=${LOGS_MOUNT_SOURCE}" >> /etc/environment
+echo "LOGS_MOUNT_TARGET=${LOGS_MOUNT_TARGET}" >> /etc/environment
+echo "STAGING_MOUNT_SOURCE=${STAGING_MOUNT_SOURCE}" >> /etc/environment
+echo "STAGING_MOUNT_TARGET=${STAGING_MOUNT_TARGET}" >> /etc/environment
+echo "DOCKER_PROFILE=${DOCKER_PROFILE}" >> /etc/environment
 
 # Run shared container runner
 /usr/local/bin/run-graph-container.sh
