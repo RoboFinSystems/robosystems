@@ -1734,6 +1734,7 @@ class GraphClient(BaseGraphClient):
     file_ids: list[str] | None = None,
     batch_num: int | None = None,
     num_batches: int | None = None,
+    materialize_embeddings: bool = False,
     timeout: float = 600.0,
   ) -> dict[str, Any]:
     """
@@ -1750,6 +1751,7 @@ class GraphClient(BaseGraphClient):
         file_ids: Optional list of file IDs to materialize. If None, materializes all rows.
         batch_num: Current batch number (0-indexed) for hash-based batching.
         num_batches: Total number of batches. Each row goes to one batch based on hash(key) % num_batches.
+        materialize_embeddings: Include embedding columns in materialization. Default false.
         timeout: Request timeout in seconds. Default 600s (10 min) for large bulk operations.
 
     Returns:
@@ -1763,6 +1765,9 @@ class GraphClient(BaseGraphClient):
     if batch_num is not None and num_batches is not None:
       json_data["batch_num"] = batch_num
       json_data["num_batches"] = num_batches
+
+    if materialize_embeddings:
+      json_data["materialize_embeddings"] = True
 
     response = await self._request(
       "POST",

@@ -108,8 +108,8 @@ class TestDisclosureSeededBFS:
     classifier = StatementClassifier()
     result = classifier.classify(graph, disclosure_roots=disclosure_roots)
 
-    entries = result.classifications["custom:TotalAssets"]
-    assert entries[0].weight == 0.9
+    by_type = result.classifications["custom:TotalAssets"]
+    assert by_type[StatementType.BALANCE_SHEET].weight == 0.9
 
   def test_hardcoded_roots_take_priority(self):
     """When an element is reachable from both hardcoded and disclosure roots,
@@ -120,11 +120,10 @@ class TestDisclosureSeededBFS:
     classifier = StatementClassifier()
     result = classifier.classify(graph, disclosure_roots=disclosure_roots)
 
-    entries = result.classifications.get("us-gaap:Assets", [])
-    # Should have entries from both
-    stmt_weights = {e.statement: e.weight for e in entries}
-    assert StatementType.INCOME_STATEMENT in stmt_weights
-    assert stmt_weights[StatementType.INCOME_STATEMENT] == 1.0
+    by_type = result.classifications.get("us-gaap:Assets", {})
+    # Should have entries from both statement types
+    assert StatementType.INCOME_STATEMENT in by_type
+    assert by_type[StatementType.INCOME_STATEMENT].weight == 1.0
 
   def test_unmapped_disclosure_type_ignored(self):
     """Disclosure types not in DISCLOSURE_TO_STATEMENT are skipped."""

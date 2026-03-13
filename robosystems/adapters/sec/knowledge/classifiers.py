@@ -7,6 +7,7 @@ traversal from known root elements through calculation/presentation graphs.
 
 from __future__ import annotations
 
+import logging
 from collections import deque
 from dataclasses import dataclass, field
 from enum import Enum
@@ -16,6 +17,8 @@ import networkit as nk
 
 if TYPE_CHECKING:
   from robosystems.adapters.sec.knowledge.graphs import ElementGraph
+
+logger = logging.getLogger(__name__)
 
 
 class StatementType(str, Enum):
@@ -39,9 +42,17 @@ class Classification:
 
 @dataclass
 class ClassificationResult:
-  """Complete classification results."""
+  """Complete classification results.
 
-  classifications: dict[str, list[Classification]] = field(default_factory=dict)
+  Stores at most one Classification per (qname, StatementType) pair —
+  the shallowest path wins. This keeps memory bounded at O(nodes x 4)
+  instead of O(nodes x roots).
+  """
+
+  # qname -> {StatementType -> best Classification}
+  classifications: dict[str, dict[StatementType, Classification]] = field(
+    default_factory=dict
+  )
   unclassified: list[str] = field(default_factory=list)
 
   @property
@@ -54,10 +65,25 @@ class ClassificationResult:
 
   def get_primary_statement(self, qname: str) -> StatementType | None:
     """Get the primary (shallowest) statement for an element."""
-    entries = self.classifications.get(qname)
-    if not entries:
+    by_type = self.classifications.get(qname)
+    if not by_type:
       return None
-    return min(entries, key=lambda c: c.depth).statement
+    best = min(by_type.values(), key=lambda c: c.depth)
+    return best.statement
+
+  def get_min_depth(self, qname: str) -> int | None:
+    """Get the minimum BFS depth across all statement types."""
+    by_type = self.classifications.get(qname)
+    if not by_type:
+      return None
+    return min(c.depth for c in by_type.values())
+
+  def get_all_classifications(self, qname: str) -> list[Classification]:
+    """Get all classifications for an element (one per statement type)."""
+    by_type = self.classifications.get(qname)
+    if not by_type:
+      return []
+    return list(by_type.values())
 
 
 # Known root elements for each financial statement
@@ -112,8 +138,9 @@ class StatementClassifier:
   """Classifies XBRL elements into financial statement categories.
 
   Uses BFS from known root elements to propagate statement classification
-  through the calculation/presentation graph. Elements reachable from
-  multiple statement roots receive multiple classifications.
+  through the calculation/presentation graph. For each (element, statement_type)
+  pair, only the shallowest classification is kept to bound memory at
+  O(nodes x 4 statement types) regardless of how many roots are used.
   """
 
   def __init__(
@@ -145,24 +172,40 @@ class StatementClassifier:
     graph = element_graph.graph
 
     # Phase 1: BFS from hardcoded roots
+    hardcoded_count = 0
     for stmt_type, root_qnames in self._roots.items():
       for root_qname in root_qnames:
         root_idx = element_graph.get_idx(root_qname)
         if root_idx is None:
+          logger.debug(f"Hardcoded root not found in graph: {root_qname}")
           continue
+        hardcoded_count += 1
         self._bfs_classify(
           graph, element_graph, root_idx, root_qname, stmt_type, result
         )
+    logger.info(
+      f"Phase 1 complete: {hardcoded_count} hardcoded roots, "
+      f"{result.total_classified} elements classified"
+    )
 
     # Phase 2: BFS from disclosure root elements
     if disclosure_roots:
+      pre_count = result.total_classified
       self._classify_from_disclosure_roots(element_graph, disclosure_roots, result)
+      logger.info(
+        f"Phase 2 complete: {result.total_classified - pre_count} new elements "
+        f"classified from disclosure roots, {result.total_classified} total"
+      )
 
     # Identify unclassified elements
     all_qnames = set(element_graph.elements)
     classified_qnames = set(result.classifications.keys())
     result.unclassified = sorted(all_qnames - classified_qnames)
 
+    logger.info(
+      f"Classification complete: {result.total_classified} classified, "
+      f"{result.total_unclassified} unclassified out of {len(all_qnames)} elements"
+    )
     return result
 
   def _classify_from_disclosure_roots(
@@ -179,21 +222,28 @@ class StatementClassifier:
     """
     graph = element_graph.graph
     seen_seeds: set[tuple[str, StatementType]] = set()
+    total_roots = len(disclosure_roots)
+    mapped_count = 0
+    skipped_unmapped = 0
+    skipped_not_in_graph = 0
 
     for qname, disclosure_types in disclosure_roots.items():
       root_idx = element_graph.get_idx(qname)
       if root_idx is None:
+        skipped_not_in_graph += 1
         continue
 
       for dtype in sorted(disclosure_types):
         stmt_type = DISCLOSURE_TO_STATEMENT.get(dtype)
         if stmt_type is None:
+          skipped_unmapped += 1
           continue
 
         seed_key = (qname, stmt_type)
         if seed_key in seen_seeds:
           continue
         seen_seeds.add(seed_key)
+        mapped_count += 1
 
         self._bfs_classify(
           graph,
@@ -205,6 +255,12 @@ class StatementClassifier:
           initial_weight=0.9,
         )
 
+    logger.info(
+      f"Disclosure roots: {total_roots} total, {mapped_count} mapped to statements, "
+      f"{skipped_unmapped} unmapped disclosure types, "
+      f"{skipped_not_in_graph} not found in graph"
+    )
+
   def _bfs_classify(
     self,
     graph: nk.Graph,
@@ -215,7 +271,12 @@ class StatementClassifier:
     result: ClassificationResult,
     initial_weight: float = 1.0,
   ) -> None:
-    """BFS from a root node, classifying all reachable descendants."""
+    """BFS from a root node, classifying all reachable descendants.
+
+    Only updates a node's classification if the new path is shallower
+    than any existing classification for the same statement type.
+    Skips subtrees where all nodes already have shallower classifications.
+    """
     visited: set[int] = set()
     queue: deque[tuple[int, int, float]] = deque()
 
@@ -227,13 +288,23 @@ class StatementClassifier:
       node_idx, depth, cum_weight = queue.popleft()
       qname = element_graph.get_qname(node_idx)
 
-      classification = Classification(
+      # Only store if this is the shallowest path for this (qname, stmt_type)
+      by_type = result.classifications.get(qname)
+      if by_type is not None:
+        existing = by_type.get(stmt_type)
+        if existing is not None and existing.depth <= depth:
+          # Already have a shallower classification — skip this subtree
+          continue
+      else:
+        by_type = {}
+        result.classifications[qname] = by_type
+
+      by_type[stmt_type] = Classification(
         statement=stmt_type,
         depth=depth,
         weight=cum_weight,
         via_root=root_qname,
       )
-      result.classifications.setdefault(qname, []).append(classification)
 
       # Traverse outgoing edges (parent -> child)
       for neighbor in graph.iterNeighbors(node_idx):

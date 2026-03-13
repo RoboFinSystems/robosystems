@@ -165,6 +165,21 @@ on:
         required: false
         type: string
         default: ""
+      robosystems_app_url:
+        description: "RoboSystems frontend URL"
+        required: false
+        type: string
+        default: "https://robosystems.ai"
+      roboledger_app_url:
+        description: "RoboLedger frontend URL"
+        required: false
+        type: string
+        default: "https://roboledger.ai"
+      roboinvestor_app_url:
+        description: "RoboInvestor frontend URL"
+        required: false
+        type: string
+        default: "https://roboinvestor.ai"
 
       # Other Configuration
       prometheus_stack_name:
@@ -312,7 +327,10 @@ jobs:
                 ParameterKey=UserDataBucketArn,ParameterValue=\"${{ inputs.user_data_bucket_arn }}\" \
                 ParameterKey=DatabaseEndpoint,ParameterValue=${{ inputs.database_endpoint }} \
                 ParameterKey=DatabasePort,ParameterValue=${{ inputs.database_port }} \
-                ParameterKey=LambdaImageUri,ParameterValue=${{ inputs.lambda_image_uri }}"
+                ParameterKey=LambdaImageUri,ParameterValue=${{ inputs.lambda_image_uri }} \
+                ParameterKey=RoboSystemsAppUrl,ParameterValue=\"${{ inputs.robosystems_app_url }}\" \
+                ParameterKey=RoboLedgerAppUrl,ParameterValue=\"${{ inputs.roboledger_app_url }}\" \
+                ParameterKey=RoboInvestorAppUrl,ParameterValue=\"${{ inputs.roboinvestor_app_url }}\""
 
           # Deploy or update the stack
           if [ "$STACK_ACTION" = "create-stack" ]; then

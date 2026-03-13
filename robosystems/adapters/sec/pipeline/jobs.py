@@ -461,14 +461,13 @@ sec_artifact_generation_job = define_asset_job(
   tags={
     "pipeline": "sec",
     "phase": "artifact",
-    # Downloads full DuckDB staging file from S3 then runs graph algorithms
-    # in-memory. File size depends on VACUUM cadence (compacted at each
-    # DuckDB S3 publish). Disk: DuckDB file + spill-to-disk + output artifacts.
-    # Memory: 30GB (4 vCPU max) reduces DuckDB spill-to-disk pressure.
-    # Ephemeral: 200GB is the Fargate maximum.
-    "ecs/cpu": "4096",
-    "ecs/memory": "30720",
-    "ecs/ephemeral_storage": "200",
+    # Downloads full DuckDB staging file from S3 then runs graph algorithms.
+    # DuckDB uses threads=1 + spill-to-disk for large joins.
+    # Observed peak: ~14.4 GB (Mar 2026, 104 GB corpus). 16 GB to test lower bound.
+    # Ephemeral: 150GB covers 104GB DuckDB + spill + artifacts.
+    "ecs/cpu": "2048",
+    "ecs/memory": "16384",
+    "ecs/ephemeral_storage": "150",
     "ecs/run_task_kwargs": {
       "capacityProviderStrategy": [
         {"capacityProvider": "FARGATE", "weight": 1, "base": 1},

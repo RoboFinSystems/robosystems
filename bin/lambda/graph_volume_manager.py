@@ -442,7 +442,7 @@ def create_and_attach_volume(
     "ladybug-standard": {"size": 50, "iops": 3000},
     "ladybug-large": {"size": 50, "iops": 3000},
     "ladybug-xlarge": {"size": 50, "iops": 3000},
-    "ladybug-shared": {"size": 50, "iops": 3000},
+    "ladybug-shared": {"size": 200, "iops": 3000},
     "neo4j-community-large": {"size": 50, "iops": 3000},
     "neo4j-enterprise-xlarge": {"size": 50, "iops": 3000},
   }
@@ -478,7 +478,12 @@ def create_and_attach_volume(
           {"Key": "CreatedAt", "Value": datetime.now(UTC).isoformat()},
           {"Key": "DatabaseId", "Value": databases[0] if databases else "unassigned"},
           {"Key": "InstanceId", "Value": instance_id},
-          {"Key": "DLMManaged", "Value": "true"},
+          {
+            "Key": "DLMSnapshot",
+            "Value": "false"
+            if node_type in ("shared_master", "shared_replica")
+            else "true",
+          },
         ],
       }
     ],
@@ -624,22 +629,28 @@ def cleanup_orphaned_volumes() -> dict[str, Any]:
       continue
 
     volume_id = item["volume_id"]
+    node_type = item.get("node_type", "")
     try:
-      # Create snapshot before deletion
-      ec2.create_snapshot(
-        VolumeId=volume_id,
-        Description=f"Orphaned volume cleanup - {volume_id}",
-        TagSpecifications=[
-          {
-            "ResourceType": "snapshot",
-            "Tags": [
-              {"Key": "Name", "Value": f"orphaned-{volume_id}"},
-              {"Key": "Environment", "Value": ENVIRONMENT},
-              {"Key": "AutoDelete", "Value": "true"},
-            ],
-          }
-        ],
-      )
+      # Skip snapshots for shared volumes - they're backed up to S3
+      if node_type not in ("shared_master", "shared_replica"):
+        ec2.create_snapshot(
+          VolumeId=volume_id,
+          Description=f"Orphaned volume cleanup - {volume_id}",
+          TagSpecifications=[
+            {
+              "ResourceType": "snapshot",
+              "Tags": [
+                {"Key": "Name", "Value": f"orphaned-{volume_id}"},
+                {"Key": "Environment", "Value": ENVIRONMENT},
+                {"Key": "AutoDelete", "Value": "true"},
+              ],
+            }
+          ],
+        )
+      else:
+        logger.info(
+          f"Skipping snapshot for shared volume {volume_id} (backed up to S3)"
+        )
 
       # Delete volume
       ec2.delete_volume(VolumeId=volume_id)

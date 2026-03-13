@@ -20,7 +20,7 @@ class TestSECArtifactConfig:
     """Test default configuration values."""
     config = SECArtifactConfig()
     assert config.duckdb_source == "sec"
-    assert config.memory_limit == "20GB"
+    assert config.memory_limit == "8GB"
 
   def test_custom_values(self):
     """Test custom configuration values."""
@@ -235,5 +235,5 @@ class TestSecKnowledgeArtifacts:
 
     mock_analytics_ctx_cls.assert_called_once_with(
       duckdb_source="sec_historical",
-      memory_limit="20GB",
+      memory_limit="256MB",
     )

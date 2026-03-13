@@ -868,8 +868,12 @@ class TestUserPasswordUpdate:
     # Handle structured error response
     assert "incorrect" in data["detail"]["detail"].lower()
 
-  def test_update_password_mismatch(self, client_with_password_user: TestClient):
+  @patch("robosystems.models.iam.User.get_by_id")
+  def test_update_password_mismatch(
+    self, mock_get_by_id, client_with_password_user: TestClient
+  ):
     """Test password update with confirmation mismatch."""
+    mock_get_by_id.return_value = client_with_password_user.mock_user
     password_data = {
       "current_password": "originalPassword123",
       "new_password": "NewSecure@Password456!",
@@ -883,7 +887,10 @@ class TestUserPasswordUpdate:
     # Handle structured error response
     assert "do not match" in data["detail"]["detail"].lower()
 
-  def test_update_password_weak_password(self, client_with_password_user: TestClient):
+  @patch("robosystems.models.iam.User.get_by_id")
+  def test_update_password_weak_password(
+    self, mock_get_by_id, client_with_password_user: TestClient
+  ):
     """Test password update with weak new password."""
     password_data = {
       "current_password": "originalPassword123",

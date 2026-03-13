@@ -96,6 +96,12 @@ class DuckDBAnalyticsContext:
         self._tmpdir.cleanup()
         self._tmpdir = None
 
+  def close_connection(self) -> None:
+    """Close the DuckDB connection while keeping the context (and temp dir) alive."""
+    if self._conn is not None:
+      self._conn.close()
+      self._conn = None
+
   @property
   def conn(self) -> duckdb.DuckDBPyConnection:
     if self._conn is None:

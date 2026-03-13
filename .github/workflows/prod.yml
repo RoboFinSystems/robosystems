@@ -528,6 +528,9 @@ jobs:
       # Other Configuration
       prometheus_stack_name: ${{ needs.deploy-prometheus.outputs.prometheus_stack_name || '' }}
       aws_sns_alert_email: ${{ vars.AWS_SNS_ALERT_EMAIL }}
+      robosystems_app_url: ${{ vars.ROBOSYSTEMS_APP_URL_PROD || 'https://robosystems.ai' }}
+      roboledger_app_url: ${{ vars.ROBOLEDGER_APP_URL_PROD || 'https://roboledger.ai' }}
+      roboinvestor_app_url: ${{ vars.ROBOINVESTOR_APP_URL_PROD || 'https://roboinvestor.ai' }}
     secrets: inherit
 
   deploy-dagster:
@@ -594,6 +597,9 @@ jobs:
       public_data_bucket_arn: ${{ needs.deploy-s3.outputs.public_data_bucket_arn }}
       logs_bucket_arn: ${{ needs.deploy-s3.outputs.logs_bucket_arn }}
       public_data_cdn_url: ${{ needs.deploy-s3.outputs.public_data_cdn_url }}
+      robosystems_app_url: ${{ vars.ROBOSYSTEMS_APP_URL_PROD || 'https://robosystems.ai' }}
+      roboledger_app_url: ${{ vars.ROBOLEDGER_APP_URL_PROD || 'https://roboledger.ai' }}
+      roboinvestor_app_url: ${{ vars.ROBOINVESTOR_APP_URL_PROD || 'https://roboinvestor.ai' }}
     secrets: inherit
 
   # Service refresh - currently only graph containers (ECS services auto-deploy via version tags)

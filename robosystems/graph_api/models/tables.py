@@ -140,6 +140,10 @@ class TableMaterializationRequest(BaseModel):
     default=None,
     description="Total number of batches for hash-based partitioning. Each row goes to exactly one batch based on hash(identifier) % num_batches.",
   )
+  materialize_embeddings: bool = Field(
+    default=False,
+    description="Whether to materialize embedding columns to LadybugDB. Default false — embeddings stay in DuckDB staging only.",
+  )
 
   class Config:
     extra = "forbid"

@@ -38,7 +38,7 @@ from dagster import (
 
 from robosystems.config import env
 from robosystems.dagster.jobs.shared_repository import (
-  shared_repository_refresh_replicas_job,
+  shared_replicas_refresh_job,
 )
 
 from .configs import SEC_HISTORICAL_FORM_TYPES, SEC_PRIMARY_START_YEAR
@@ -552,7 +552,7 @@ def sec_stage_to_materialize_sensor(context: RunStatusSensorContext):
   request_jobs=[
     sec_lbug_s3_publish_job,
     sec_duckdb_s3_publish_job,
-    shared_repository_refresh_replicas_job,
+    shared_replicas_refresh_job,
   ],
   default_status=DefaultSensorStatus.STOPPED,  # Enable in Dagster UI when ready
   minimum_interval_seconds=60,
@@ -595,7 +595,7 @@ def sec_post_materialize_publish_sensor(context: RunStatusSensorContext):
     context.log.info("LadybugDB S3 publish complete, triggering DuckDB S3 publish")
 
   elif dagster_run.job_name == "sec_duckdb_s3_publish":
-    next_job_name = "shared_repository_refresh_replicas_job"
+    next_job_name = "shared_replicas_refresh"
     next_phase = "replica_refresh"
     context.log.info("DuckDB S3 publish complete, triggering replica refresh")
 

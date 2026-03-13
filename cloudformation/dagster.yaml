@@ -196,6 +196,20 @@ Parameters:
     Type: String
     Description: CloudFront CDN URL for public data (from S3 stack output)
 
+  # Frontend URLs (for transactional email links)
+  RoboSystemsAppUrl:
+    Type: String
+    Description: RoboSystems frontend URL
+    Default: "https://robosystems.ai"
+  RoboLedgerAppUrl:
+    Type: String
+    Description: RoboLedger frontend URL
+    Default: "https://roboledger.ai"
+  RoboInvestorAppUrl:
+    Type: String
+    Description: RoboInvestor frontend URL
+    Default: "https://roboinvestor.ai"
+
 Conditions:
   HasBastionAccess: !Not [!Equals [!Ref BastionSecurityGroupId, ""]]
   HasApiAccess: !Not [!Equals [!Ref ApiSecurityGroupId, ""]]
@@ -376,7 +390,9 @@ Resources:
                   - ssm:GetParameters
                   - ssm:GetParametersByPath
                 Resource:
+                  - !Sub "arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/robosystems/${Environment}/features"
                   - !Sub "arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/robosystems/${Environment}/features/*"
+                  - !Sub "arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/robosystems/${Environment}/tuning"
                   - !Sub "arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/robosystems/${Environment}/tuning/*"
               # Secrets Manager - ListSecrets for ECS run launcher tag-based discovery
               # Note: ListSecrets doesn't support resource-level permissions
@@ -653,6 +669,13 @@ Resources:
             # Run coordinator configuration
             - Name: DAGSTER_MAX_CONCURRENT_RUNS
               Value: !Ref MaxConcurrentRuns
+            # Frontend URLs (for transactional email links)
+            - Name: ROBOSYSTEMS_URL
+              Value: !Ref RoboSystemsAppUrl
+            - Name: ROBOLEDGER_URL
+              Value: !Ref RoboLedgerAppUrl
+            - Name: ROBOINVESTOR_URL
+              Value: !Ref RoboInvestorAppUrl
           Secrets:
             - Name: POSTGRES_PASSWORD
               ValueFrom: !Sub "arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:robosystems/${Environment}/postgres:POSTGRES_PASSWORD::"
@@ -848,6 +871,13 @@ Resources:
               Value: !Ref PublicDataCDNURL
             - Name: DAGSTER_MAX_CONCURRENT_RUNS
               Value: !Ref MaxConcurrentRuns
+            # Frontend URLs (for transactional email links)
+            - Name: ROBOSYSTEMS_URL
+              Value: !Ref RoboSystemsAppUrl
+            - Name: ROBOLEDGER_URL
+              Value: !Ref RoboLedgerAppUrl
+            - Name: ROBOINVESTOR_URL
+              Value: !Ref RoboInvestorAppUrl
           Secrets:
             - Name: POSTGRES_PASSWORD
               ValueFrom: !Sub "arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:robosystems/${Environment}/postgres:POSTGRES_PASSWORD::"
