@@ -47,9 +47,11 @@ def _log_memory(label: str) -> None:
           vm_rss = int(line.split()[1]) / (1024 * 1024)  # kB -> GB
         elif line.startswith("VmHWM:"):
           vm_hwm = int(line.split()[1]) / (1024 * 1024)  # kB -> GB
-      if vm_rss is not None:
+      if vm_rss is not None and vm_hwm is not None:
         logger.info(f"[memory] {label}: {vm_rss:.2f} GB current, {vm_hwm:.2f} GB peak")
-        return
+      elif vm_rss is not None:
+        logger.info(f"[memory] {label}: {vm_rss:.2f} GB current")
+      return
 
     # macOS fallback: only peak RSS available
     import resource
@@ -61,7 +63,7 @@ def _log_memory(label: str) -> None:
       rss_gb = rss_bytes / (1024**2)
     logger.info(f"[memory] {label}: {rss_gb:.2f} GB peak RSS")
   except Exception:
-    pass
+    logger.debug("Memory logging failed", exc_info=True)
 
 
 class ElementKnowledgeBuilder:

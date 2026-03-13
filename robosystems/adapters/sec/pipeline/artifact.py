@@ -87,12 +87,11 @@ def sec_knowledge_artifacts(
         f"{disk.free / (1024**3):.1f} GB free of {disk.total / (1024**3):.1f} GB"
       )
     except Exception:
-      pass
+      pass  # Non-fatal: disk usage logging is best-effort
 
     # Close the idle DuckDB connection to free its memory buffer.
-    if ctx._conn is not None:
-      ctx._conn.close()
-      ctx._conn = None
+    # The context stays open to keep the temp directory alive (prod S3 download).
+    ctx.close_connection()
     gc.collect()
     _log_memory("after DuckDB download + connection close")
 
