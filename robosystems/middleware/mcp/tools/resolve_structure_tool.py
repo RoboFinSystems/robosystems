@@ -102,7 +102,11 @@ Use returned structure identifiers to explore element hierarchies via STRUCTURE_
   async def execute(self, arguments: dict[str, Any]) -> dict[str, Any]:
     self._log_tool_execution("resolve-structure", arguments)
 
-    statement_type = arguments.get("statement_type", "").strip() if arguments.get("statement_type") else None
+    statement_type = (
+      arguments.get("statement_type", "").strip()
+      if arguments.get("statement_type")
+      else None
+    )
     query = arguments.get("query", "").strip() if arguments.get("query") else None
     ticker = (
       arguments.get("ticker", "").strip().upper() if arguments.get("ticker") else None
@@ -160,7 +164,7 @@ Use returned structure identifiers to explore element hierarchies via STRUCTURE_
     graph_id = self._get_graph_id()
     try:
       search_sql = (
-        "SELECT identifier, definition, name, type, number, "
+        "SELECT identifier, definition, name, type, "
         "  canonical_type, canonical_confidence, "
         "  list_cosine_similarity(embedding, $1) AS score "
         "FROM Structure "
@@ -184,8 +188,7 @@ Use returned structure identifiers to explore element hierarchies via STRUCTURE_
     # Step 3: Filter parentheticals in Python (DuckDB definition column)
     if not include_parenthetical:
       raw_rows = [
-        r for r in raw_rows
-        if not self._is_parenthetical(r.get("definition", ""))
+        r for r in raw_rows if not self._is_parenthetical(r.get("definition", ""))
       ]
 
     # Step 4: If ticker or accession_number, filter to structures that belong

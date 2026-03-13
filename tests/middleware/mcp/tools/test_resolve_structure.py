@@ -1,6 +1,6 @@
 """Tests for resolve-structure MCP tool."""
 
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -32,7 +32,7 @@ class TestResolveStructureToolDefinition:
   def test_no_required_fields(self, tool):
     """Neither statement_type nor query is required — but one must be provided."""
     defn = tool.get_tool_definition()
-    assert "required" not in defn["inputSchema"] or defn["inputSchema"].get("required") is None
+    assert "required" not in defn["inputSchema"]
 
   def test_statement_type_enum(self, tool):
     defn = tool.get_tool_definition()
@@ -57,7 +57,9 @@ class TestResolveStructureCanonical:
 
   @pytest.mark.asyncio
   async def test_both_inputs_rejected(self, tool):
-    result = await tool.execute({"statement_type": "balance_sheet", "query": "cash flow"})
+    result = await tool.execute(
+      {"statement_type": "balance_sheet", "query": "cash flow"}
+    )
     assert "error" in result
     assert "not both" in result["error"]
 
@@ -211,14 +213,6 @@ class TestResolveStructureVectorSearch:
   """Tests for the vector search (query) path."""
 
   @pytest.fixture
-  def mock_enricher(self):
-    with patch(
-      "robosystems.middleware.mcp.tools.resolve_structure_tool.ResolveStructureTool.enricher",
-      new_callable=lambda: property(lambda self: self._mock_enricher),
-    ):
-      yield
-
-  @pytest.fixture
   def tool_with_enricher(self, mock_client):
     tool = ResolveStructureTool(mock_client)
     mock_enricher = AsyncMock()
@@ -232,21 +226,32 @@ class TestResolveStructureVectorSearch:
     mock_client.query_table = AsyncMock(
       return_value={
         "columns": [
-          "identifier", "definition", "name", "type", "number",
-          "canonical_type", "canonical_confidence", "score",
+          "identifier",
+          "definition",
+          "name",
+          "type",
+          "canonical_type",
+          "canonical_confidence",
+          "score",
         ],
         "rows": [
           [
             "struct-cf-1",
             "0001003 - Statement - CONSOLIDATED STATEMENTS OF CASH FLOWS",
             "CONSOLIDATED STATEMENTS OF CASH FLOWS",
-            "Statement", "0001003", "cash_flow_statement", 0.72, 0.91,
+            "Statement",
+            "cash_flow_statement",
+            0.72,
+            0.91,
           ],
           [
             "struct-cf-2",
             "0001003 - Statement - CASH FLOWS FROM OPERATIONS",
             "CASH FLOWS FROM OPERATIONS",
-            "Statement", "0001003", None, None, 0.85,
+            "Statement",
+            None,
+            None,
+            0.85,
           ],
         ],
       }
@@ -266,12 +271,33 @@ class TestResolveStructureVectorSearch:
     mock_client.query_table = AsyncMock(
       return_value={
         "columns": [
-          "identifier", "definition", "name", "type", "number",
-          "canonical_type", "canonical_confidence", "score",
+          "identifier",
+          "definition",
+          "name",
+          "type",
+          "canonical_type",
+          "canonical_confidence",
+          "score",
         ],
         "rows": [
-          ["struct-1", "Statement - CASH FLOWS", "CASH FLOWS", "Statement", "3", "cash_flow_statement", 0.7, 0.92],
-          ["struct-2", "Statement - OTHER CASH FLOWS", "OTHER CASH FLOWS", "Statement", "3", None, None, 0.88],
+          [
+            "struct-1",
+            "Statement - CASH FLOWS",
+            "CASH FLOWS",
+            "Statement",
+            "cash_flow_statement",
+            0.7,
+            0.92,
+          ],
+          [
+            "struct-2",
+            "Statement - OTHER CASH FLOWS",
+            "OTHER CASH FLOWS",
+            "Statement",
+            None,
+            None,
+            0.88,
+          ],
         ],
       }
     )
@@ -281,7 +307,14 @@ class TestResolveStructureVectorSearch:
     mock_client.execute_query = AsyncMock(
       side_effect=[
         [{"id": "struct-1"}],  # _fetch_structure_ids_for_report
-        [{"id": "struct-1", "accession_number": "000-123", "form": "10-K", "filing_date": "2025-01-15"}],  # _fetch_report_metadata
+        [
+          {
+            "id": "struct-1",
+            "accession_number": "000-123",
+            "form": "10-K",
+            "filing_date": "2025-01-15",
+          }
+        ],  # _fetch_report_metadata
       ]
     )
 
@@ -293,16 +326,31 @@ class TestResolveStructureVectorSearch:
     assert result["structures"][0]["score"] == 0.92
 
   @pytest.mark.asyncio
-  async def test_vector_search_with_accession_number(self, tool_with_enricher, mock_client):
+  async def test_vector_search_with_accession_number(
+    self, tool_with_enricher, mock_client
+  ):
     """Vector search with accession_number filters to matching filing."""
     mock_client.query_table = AsyncMock(
       return_value={
         "columns": [
-          "identifier", "definition", "name", "type", "number",
-          "canonical_type", "canonical_confidence", "score",
+          "identifier",
+          "definition",
+          "name",
+          "type",
+          "canonical_type",
+          "canonical_confidence",
+          "score",
         ],
         "rows": [
-          ["struct-1", "Statement - BALANCE SHEETS", "BALANCE SHEETS", "Statement", "2", "balance_sheet", 0.8, 0.95],
+          [
+            "struct-1",
+            "Statement - BALANCE SHEETS",
+            "BALANCE SHEETS",
+            "Statement",
+            "balance_sheet",
+            0.8,
+            0.95,
+          ],
         ],
       }
     )
@@ -310,7 +358,14 @@ class TestResolveStructureVectorSearch:
     mock_client.execute_query = AsyncMock(
       side_effect=[
         [{"id": "struct-1"}],  # _fetch_structure_ids_for_report
-        [{"id": "struct-1", "accession_number": "000-456", "form": "10-Q", "filing_date": "2025-03-01"}],
+        [
+          {
+            "id": "struct-1",
+            "accession_number": "000-456",
+            "form": "10-Q",
+            "filing_date": "2025-03-01",
+          }
+        ],
       ]
     )
 
@@ -322,17 +377,40 @@ class TestResolveStructureVectorSearch:
     assert result["structures"][0]["accession_number"] == "000-456"
 
   @pytest.mark.asyncio
-  async def test_vector_search_excludes_parenthetical(self, tool_with_enricher, mock_client):
+  async def test_vector_search_excludes_parenthetical(
+    self, tool_with_enricher, mock_client
+  ):
     """Parenthetical structures are excluded by default in vector search."""
     mock_client.query_table = AsyncMock(
       return_value={
         "columns": [
-          "identifier", "definition", "name", "type", "number",
-          "canonical_type", "canonical_confidence", "score",
+          "identifier",
+          "definition",
+          "name",
+          "type",
+          "canonical_type",
+          "canonical_confidence",
+          "score",
         ],
         "rows": [
-          ["struct-1", "Statement - BALANCE SHEETS", "BALANCE SHEETS", "Statement", "2", "balance_sheet", 0.8, 0.95],
-          ["struct-2", "Statement - BALANCE SHEETS [Parenthetical]", "BALANCE SHEETS (Parenthetical)", "Statement", "2", "balance_sheet", 0.75, 0.90],
+          [
+            "struct-1",
+            "Statement - BALANCE SHEETS",
+            "BALANCE SHEETS",
+            "Statement",
+            "balance_sheet",
+            0.8,
+            0.95,
+          ],
+          [
+            "struct-2",
+            "Statement - BALANCE SHEETS [Parenthetical]",
+            "BALANCE SHEETS (Parenthetical)",
+            "Statement",
+            "balance_sheet",
+            0.75,
+            0.90,
+          ],
         ],
       }
     )
@@ -342,17 +420,40 @@ class TestResolveStructureVectorSearch:
     assert result["structures"][0]["identifier"] == "struct-1"
 
   @pytest.mark.asyncio
-  async def test_vector_search_includes_parenthetical(self, tool_with_enricher, mock_client):
+  async def test_vector_search_includes_parenthetical(
+    self, tool_with_enricher, mock_client
+  ):
     """Parenthetical structures included when requested."""
     mock_client.query_table = AsyncMock(
       return_value={
         "columns": [
-          "identifier", "definition", "name", "type", "number",
-          "canonical_type", "canonical_confidence", "score",
+          "identifier",
+          "definition",
+          "name",
+          "type",
+          "canonical_type",
+          "canonical_confidence",
+          "score",
         ],
         "rows": [
-          ["struct-1", "Statement - BALANCE SHEETS", "BALANCE SHEETS", "Statement", "2", "balance_sheet", 0.8, 0.95],
-          ["struct-2", "Statement - BALANCE SHEETS [Parenthetical]", "BALANCE SHEETS (Parenthetical)", "Statement", "2", "balance_sheet", 0.75, 0.90],
+          [
+            "struct-1",
+            "Statement - BALANCE SHEETS",
+            "BALANCE SHEETS",
+            "Statement",
+            "balance_sheet",
+            0.8,
+            0.95,
+          ],
+          [
+            "struct-2",
+            "Statement - BALANCE SHEETS [Parenthetical]",
+            "BALANCE SHEETS (Parenthetical)",
+            "Statement",
+            "balance_sheet",
+            0.75,
+            0.90,
+          ],
         ],
       }
     )
@@ -385,24 +486,37 @@ class TestResolveStructureVectorSearch:
   @pytest.mark.asyncio
   async def test_vector_search_no_results(self, tool_with_enricher, mock_client):
     """Empty DuckDB results return empty structures list."""
-    mock_client.query_table = AsyncMock(
-      return_value={"columns": [], "rows": []}
-    )
+    mock_client.query_table = AsyncMock(return_value={"columns": [], "rows": []})
 
     result = await tool_with_enricher.execute({"query": "nonexistent structure"})
     assert result["structures"] == []
 
   @pytest.mark.asyncio
-  async def test_vector_search_ticker_no_matching_structures(self, tool_with_enricher, mock_client):
+  async def test_vector_search_ticker_no_matching_structures(
+    self, tool_with_enricher, mock_client
+  ):
     """When ticker filter yields no matching structure IDs, return empty."""
     mock_client.query_table = AsyncMock(
       return_value={
         "columns": [
-          "identifier", "definition", "name", "type", "number",
-          "canonical_type", "canonical_confidence", "score",
+          "identifier",
+          "definition",
+          "name",
+          "type",
+          "canonical_type",
+          "canonical_confidence",
+          "score",
         ],
         "rows": [
-          ["struct-1", "Statement - INCOME", "INCOME", "Statement", "1", "income_statement", 0.8, 0.90],
+          [
+            "struct-1",
+            "Statement - INCOME",
+            "INCOME",
+            "Statement",
+            "income_statement",
+            0.8,
+            0.90,
+          ],
         ],
       }
     )
