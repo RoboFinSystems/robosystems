@@ -397,3 +397,59 @@ class ArcExtractor:
       return {}
     finally:
       conn.close()
+
+  def extract_element_structure_membership(self) -> dict[str, dict[str, int]]:
+    """Extract structure canonical_type membership counts per element.
+
+    For each element, counts how many structures of each canonical_type
+    contain it. Used to determine primary_statement via majority vote
+    across structure types, replacing BFS-based classification which
+    suffers from cross-statement arc pollution in the deduped graph
+    (e.g., indirect cash flow method creates IS→CF calculation arcs).
+
+    Returns:
+        Dict mapping qname to {canonical_type: structure_count}.
+        Only includes elements appearing in structures with non-null canonical_type.
+    """
+    sql = """
+      WITH element_structures AS (
+        SELECT e.qname, s.canonical_type, s.identifier
+        FROM Structure s
+        JOIN STRUCTURE_HAS_ASSOCIATION sha ON s.identifier = sha.src
+        JOIN Association a ON sha.dst = a.identifier
+        JOIN ASSOCIATION_HAS_TO_ELEMENT ato ON a.identifier = ato.src
+        JOIN Element e ON ato.dst = e.identifier
+        WHERE s.canonical_type IS NOT NULL AND e.qname IS NOT NULL
+
+        UNION ALL
+
+        SELECT e.qname, s.canonical_type, s.identifier
+        FROM Structure s
+        JOIN STRUCTURE_HAS_ASSOCIATION sha ON s.identifier = sha.src
+        JOIN Association a ON sha.dst = a.identifier
+        JOIN ASSOCIATION_HAS_FROM_ELEMENT afrom ON a.identifier = afrom.src
+        JOIN Element e ON afrom.dst = e.identifier
+        WHERE s.canonical_type IS NOT NULL AND e.qname IS NOT NULL
+      )
+      SELECT qname, canonical_type, COUNT(DISTINCT identifier) AS cnt
+      FROM element_structures
+      GROUP BY qname, canonical_type
+    """
+    conn = self._connect()
+    try:
+      tables = {row[0] for row in conn.execute("SHOW TABLES").fetchall()}
+      if "Structure" not in tables or "STRUCTURE_HAS_ASSOCIATION" not in tables:
+        return {}
+
+      rows = conn.execute(sql).fetchall()
+      result: dict[str, dict[str, int]] = {}
+      for qname, canonical_type, count in rows:
+        if qname not in result:
+          result[qname] = {}
+        result[qname][canonical_type] = count
+      return result
+    except Exception as e:
+      logger.debug(f"extract_element_structure_membership failed: {e}")
+      return {}
+    finally:
+      conn.close()
