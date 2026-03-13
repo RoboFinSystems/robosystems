@@ -57,11 +57,13 @@ def sec_knowledge_artifacts(
     DisclosureProfileBuilder,
     ElementKnowledgeBuilder,
     StructureKnowledgeBuilder,
+    _log_memory,
   )
   from robosystems.adapters.sec.knowledge.framework import DuckDBAnalyticsContext
   from robosystems.config import env
 
   is_prod = env.ENVIRONMENT != "dev"
+  _log_memory("asset start")
 
   # Keep context open for temp dir lifetime (prod S3 download), but close the
   # idle DuckDB connection immediately — builders open their own connections.
@@ -70,13 +72,29 @@ def sec_knowledge_artifacts(
     memory_limit="256MB",
   ) as ctx:
     db_path = ctx.db_path
-    context.log.info(f"Building artifacts from DuckDB at: {db_path}")
+    db_size_gb = db_path.stat().st_size / (1024**3) if db_path.exists() else 0
+    context.log.info(
+      f"Building artifacts from DuckDB at: {db_path} ({db_size_gb:.1f} GB)"
+    )
+
+    # Log available disk space (important: 104GB file on 200GB ephemeral)
+    try:
+      import shutil
+
+      disk = shutil.disk_usage(str(db_path.parent))
+      context.log.info(
+        f"Disk: {disk.used / (1024**3):.1f} GB used, "
+        f"{disk.free / (1024**3):.1f} GB free of {disk.total / (1024**3):.1f} GB"
+      )
+    except Exception:
+      pass
 
     # Close the idle DuckDB connection to free its memory buffer.
     if ctx._conn is not None:
       ctx._conn.close()
       ctx._conn = None
     gc.collect()
+    _log_memory("after DuckDB download + connection close")
 
     # --- Element knowledge (must run first — PageRank used by disclosure profiles) ---
     context.log.info("Building element knowledge artifact")
@@ -84,6 +102,7 @@ def sec_knowledge_artifacts(
     element_path = element_builder.build(db_path)
     del element_builder
     gc.collect()
+    _log_memory("after element builder cleanup")
     context.log.info(f"Element knowledge artifact written to: {element_path}")
 
     if is_prod:
@@ -95,6 +114,7 @@ def sec_knowledge_artifacts(
     profiles_path, consensus_path = structure_builder.build(db_path)
     del structure_builder
     gc.collect()
+    _log_memory("after structure builder cleanup")
     context.log.info(f"Structure profiles artifact written to: {profiles_path}")
     context.log.info(f"Structure consensus artifact written to: {consensus_path}")
 
@@ -108,6 +128,7 @@ def sec_knowledge_artifacts(
     disc_profiles_path, disc_consensus_path = disclosure_builder.build(db_path)
     del disclosure_builder
     gc.collect()
+    _log_memory("after disclosure builder cleanup")
     context.log.info(f"Disclosure profiles artifact written to: {disc_profiles_path}")
     context.log.info(f"Disclosure consensus artifact written to: {disc_consensus_path}")
 

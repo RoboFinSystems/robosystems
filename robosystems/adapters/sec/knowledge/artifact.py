@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import gc
 import logging
+import os
 from collections import Counter
 from pathlib import Path
 
@@ -27,6 +28,40 @@ from robosystems.adapters.sec.knowledge.extractors import ArcExtractor
 from robosystems.adapters.sec.knowledge.graphs import build_element_graph_from_arrow
 
 logger = logging.getLogger(__name__)
+
+
+def _log_memory(label: str) -> None:
+  """Log current and peak process RSS memory usage.
+
+  On Linux (ECS/Fargate), reads /proc/self/status for current VmRSS and peak VmHWM.
+  Falls back to resource.getrusage for peak RSS on macOS.
+  """
+  try:
+    proc_status = Path("/proc/self/status")
+    if proc_status.exists():
+      # Linux: read current and peak RSS from /proc
+      status = proc_status.read_text()
+      vm_rss = vm_hwm = None
+      for line in status.splitlines():
+        if line.startswith("VmRSS:"):
+          vm_rss = int(line.split()[1]) / (1024 * 1024)  # kB -> GB
+        elif line.startswith("VmHWM:"):
+          vm_hwm = int(line.split()[1]) / (1024 * 1024)  # kB -> GB
+      if vm_rss is not None:
+        logger.info(f"[memory] {label}: {vm_rss:.2f} GB current, {vm_hwm:.2f} GB peak")
+        return
+
+    # macOS fallback: only peak RSS available
+    import resource
+
+    rss_bytes = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+    if os.uname().sysname == "Darwin":
+      rss_gb = rss_bytes / (1024**3)
+    else:
+      rss_gb = rss_bytes / (1024**2)
+    logger.info(f"[memory] {label}: {rss_gb:.2f} GB peak RSS")
+  except Exception:
+    pass
 
 
 class ElementKnowledgeBuilder:
@@ -59,6 +94,7 @@ class ElementKnowledgeBuilder:
     """
     from robosystems.config.storage.shared import get_artifact_path
 
+    _log_memory("start")
     extractor = ArcExtractor(db_path, memory_limit=self._memory_limit)
 
     # --- Phase 1: Extract from DuckDB (connections open/close per call) ---
@@ -66,10 +102,12 @@ class ElementKnowledgeBuilder:
     logger.info("Extracting graph via Arrow zero-copy path")
     nodes, edges_arrow = extractor.extract_graph_arrow()
     logger.info(f"Extracted {len(nodes)} nodes, {edges_arrow.num_rows} edges (Arrow)")
+    _log_memory("after extract_graph_arrow")
 
     logger.info("Extracting element filing counts")
     filing_counts = extractor.extract_element_filing_counts()
     logger.info(f"Extracted filing counts for {len(filing_counts)} elements")
+    _log_memory("after extract_element_filing_counts")
 
     logger.info("Extracting disclosure classifications")
     disclosure_types = extractor.extract_element_disclosure_types()
@@ -78,10 +116,12 @@ class ElementKnowledgeBuilder:
       f"Extracted disclosure types for {len(disclosure_types)} elements, "
       f"{len(disclosure_roots)} disclosure roots"
     )
+    _log_memory("after disclosure extractions")
 
     # Done with DuckDB — extractor holds no state
     del extractor
     gc.collect()
+    _log_memory("after extractor cleanup")
 
     # --- Phase 2: Build graph (frees Arrow arrays immediately after) ---
 
@@ -94,14 +134,17 @@ class ElementKnowledgeBuilder:
     # Arrow arrays are copied into the CSR — free them
     del nodes, edges_arrow
     gc.collect()
+    _log_memory("after graph build + arrow cleanup")
 
     # --- Phase 3: Structural analysis (free each result before next) ---
 
     logger.info("Running PageRank")
     pagerank_scores = self._run_pagerank(element_graph)
+    _log_memory("after PageRank")
 
     logger.info("Running core decomposition")
     core_numbers = self._run_core_decomposition(element_graph)
+    _log_memory("after core decomposition")
 
     logger.info("Running BFS classification")
     classifications = StatementClassifier().classify(
@@ -109,14 +152,21 @@ class ElementKnowledgeBuilder:
     )
     del disclosure_roots
     gc.collect()
+    _log_memory("after BFS classification")
 
     logger.info("Computing neighborhood agreement")
     agreement_scores = self._compute_neighborhood_agreement(
       element_graph, classifications
     )
+    _log_memory("after neighborhood agreement")
 
     # --- Phase 4: Build output rows (then free graph + analysis dicts) ---
 
+    logger.info(
+      f"Building output rows: {len(element_graph.elements)} elements, "
+      f"{classifications.total_classified} classified, "
+      f"{classifications.total_unclassified} unclassified"
+    )
     qnames = []
     primary_statements = []
     bfs_depths = []
@@ -132,11 +182,8 @@ class ElementKnowledgeBuilder:
       stmt = classifications.get_primary_statement(qname)
       primary_statements.append(stmt.value if stmt else None)
 
-      entries = classifications.classifications.get(qname)
-      if entries:
-        bfs_depths.append(min(e.depth for e in entries))
-      else:
-        bfs_depths.append(None)
+      min_depth = classifications.get_min_depth(qname)
+      bfs_depths.append(min_depth)
 
       idx = element_graph.get_idx(qname)
       pageranks.append(pagerank_scores.get(idx, 0.0))
@@ -149,8 +196,10 @@ class ElementKnowledgeBuilder:
     del element_graph, pagerank_scores, core_numbers, classifications
     del agreement_scores, filing_counts, disclosure_types
     gc.collect()
+    _log_memory("after building output rows + cleanup")
 
     # --- Phase 5: Write Parquet ---
+    logger.info(f"Writing parquet with {len(qnames)} rows")
 
     table = pa.table(
       {
@@ -264,14 +313,17 @@ class StructureKnowledgeBuilder:
     Returns:
         Tuple of (profiles_path, consensus_path).
     """
+    _log_memory("structure builder start")
     extractor = ArcExtractor(db_path, memory_limit=self._memory_limit)
 
     logger.info("Extracting structure compositions")
     compositions = extractor.extract_structure_compositions()
     logger.info(f"Extracted {len(compositions)} structure compositions")
+    _log_memory("after structure extraction")
 
     profiles_path = self._compute_profiles(compositions)
     consensus_path = self._compute_consensus(compositions)
+    _log_memory("after structure profiles + consensus")
 
     return profiles_path, consensus_path
 
@@ -419,11 +471,13 @@ class DisclosureProfileBuilder:
     Returns:
         Tuple of (profiles_path, consensus_path).
     """
+    _log_memory("disclosure builder start")
     extractor = ArcExtractor(db_path, memory_limit=self._memory_limit)
 
     logger.info("Extracting disclosure compositions")
     compositions = extractor.extract_disclosure_compositions()
     logger.info(f"Extracted {len(compositions)} disclosure compositions")
+    _log_memory("after disclosure extraction")
 
     pagerank_scores = self._load_pagerank_scores()
     if pagerank_scores:
@@ -433,6 +487,7 @@ class DisclosureProfileBuilder:
 
     profiles_path = self._compute_profiles(compositions, pagerank_scores)
     consensus_path = self._compute_consensus(compositions)
+    _log_memory("after disclosure profiles + consensus")
 
     return profiles_path, consensus_path
 
