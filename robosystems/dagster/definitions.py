@@ -83,6 +83,7 @@ from robosystems.dagster.jobs.notifications import (
   send_email_job,
 )
 from robosystems.dagster.jobs.shared_repository import (
+  shared_replicas_refresh_job,
   shared_repository_refresh_replicas_job,
 )
 from robosystems.dagster.resources import (
@@ -168,7 +169,8 @@ all_jobs = [
   # Platform: Graph lifecycle
   suspend_expired_graphs_job,
   deprovision_suspended_graphs_job,
-  # Platform: Shared repository (standalone refresh only)
+  # Platform: Shared repository
+  shared_replicas_refresh_job,
   shared_repository_refresh_replicas_job,
   # Platform: Version migration (manually triggered)
   ladybug_migration_export_job,

@@ -626,6 +626,168 @@ setup_ecr_repository() {
 }
 
 # =============================================================================
+# SES EMAIL IDENTITY
+# =============================================================================
+
+setup_ses_identity() {
+    print_header "SES Email Identity Setup"
+
+    print_info "Transactional emails (verification, password reset, welcome) require a verified SES domain."
+    echo ""
+
+    # Check if already set in GitHub
+    local existing_domain
+    existing_domain=$(gh variable get SES_DOMAIN 2>/dev/null || echo "")
+
+    if [ -n "$existing_domain" ]; then
+        print_success "SES_DOMAIN already set: $existing_domain"
+        local email_domain="$existing_domain"
+    else
+        read -p "Enter email domain [robosystems.ai]: " email_domain
+        email_domain=${email_domain:-robosystems.ai}
+    fi
+
+    print_info "Domain: ${email_domain}"
+    echo ""
+
+    # Save to GitHub variables for future reference
+    if [ -z "$existing_domain" ] || [ "$existing_domain" != "$email_domain" ]; then
+        gh variable set SES_DOMAIN --body "$email_domain"
+        print_success "Set SES_DOMAIN GitHub variable"
+    fi
+
+    # Check if identity already exists and is verified
+    local identity_status
+    identity_status=$(aws sesv2 get-email-identity \
+        --email-identity "${email_domain}" \
+        --region "${AWS_REGION}" \
+        --query 'DkimAttributes.Status' \
+        --output text 2>/dev/null) || identity_status=""
+
+    if [ "$identity_status" = "SUCCESS" ]; then
+        print_success "SES domain identity already verified: ${email_domain}"
+        ensure_ses_production_access
+        return 0
+    fi
+
+    if [ -n "$identity_status" ]; then
+        print_warning "SES identity exists but DKIM status: ${identity_status}"
+    else
+        print_step "Creating SES email identity for ${email_domain}..."
+
+        aws sesv2 create-email-identity \
+            --email-identity "${email_domain}" \
+            --region "${AWS_REGION}" >/dev/null
+
+        print_success "SES email identity created"
+    fi
+
+    # Get DKIM tokens
+    local dkim_tokens
+    dkim_tokens=$(aws sesv2 get-email-identity \
+        --email-identity "${email_domain}" \
+        --region "${AWS_REGION}" \
+        --query 'DkimAttributes.Tokens' \
+        --output json 2>/dev/null)
+
+    if [ -z "$dkim_tokens" ] || [ "$dkim_tokens" = "null" ]; then
+        print_warning "Could not retrieve DKIM tokens"
+        print_info "Check the SES console for DNS records"
+        return 0
+    fi
+
+    # Try to add DKIM records to Route53 automatically
+    local hosted_zone_id
+    hosted_zone_id=$(aws route53 list-hosted-zones \
+        --query "HostedZones[?Name=='${email_domain}.'].Id" \
+        --output text 2>/dev/null | sed 's|/hostedzone/||') || hosted_zone_id=""
+
+    if [ -n "$hosted_zone_id" ]; then
+        print_step "Adding DKIM records to Route53 hosted zone..."
+
+        # Build the change batch JSON
+        local changes="["
+        local first=true
+        for token in $(echo "$dkim_tokens" | jq -r '.[]'); do
+            if [ "$first" = true ]; then
+                first=false
+            else
+                changes+=","
+            fi
+            changes+="{
+                \"Action\": \"UPSERT\",
+                \"ResourceRecordSet\": {
+                    \"Name\": \"${token}._domainkey.${email_domain}\",
+                    \"Type\": \"CNAME\",
+                    \"TTL\": 300,
+                    \"ResourceRecords\": [{\"Value\": \"${token}.dkim.amazonses.com\"}]
+                }
+            }"
+        done
+        changes+="]"
+
+        aws route53 change-resource-record-sets \
+            --hosted-zone-id "$hosted_zone_id" \
+            --change-batch "{
+                \"Comment\": \"SES DKIM verification for ${email_domain}\",
+                \"Changes\": ${changes}
+            }" >/dev/null
+
+        print_success "DKIM records added to Route53"
+        print_info "DKIM verification usually completes within a few minutes"
+    else
+        # No Route53 zone - print records for manual DNS setup
+        echo ""
+        print_warning "Route53 hosted zone not found for ${email_domain}"
+        print_step "Add these CNAME records to your DNS provider:"
+        echo ""
+
+        echo "$dkim_tokens" | jq -r '.[]' | while read -r token; do
+            echo -e "  ${CYAN}CNAME${NC}  ${token}._domainkey.${email_domain}"
+            echo -e "  ${CYAN}Value${NC}  ${token}.dkim.amazonses.com"
+            echo ""
+        done
+    fi
+
+    # Request production access
+    ensure_ses_production_access
+}
+
+ensure_ses_production_access() {
+    # Check if already in production mode
+    local production_access
+    production_access=$(aws sesv2 get-account \
+        --region "${AWS_REGION}" \
+        --query 'ProductionAccessEnabled' \
+        --output text 2>/dev/null) || production_access=""
+
+    if [ "$production_access" = "True" ]; then
+        print_success "SES production access already enabled"
+        return 0
+    fi
+
+    print_step "Requesting SES production access..."
+    print_info "SES sandbox mode only allows sending to verified addresses"
+    print_info "Production access is required for transactional emails"
+    echo ""
+
+    aws sesv2 put-account-details \
+        --production-access-enabled \
+        --mail-type TRANSACTIONAL \
+        --website-url "https://${email_domain:-robosystems.ai}" \
+        --use-case-description "Transactional emails only: account email verification, password reset, and welcome emails for our B2B SaaS platform. No marketing or bulk emails. Low volume - estimated under 1000 emails/month." \
+        --contact-language EN \
+        --additional-contact-email-addresses "${ALERT_EMAIL:-}" \
+        --region "${AWS_REGION}" 2>/dev/null && {
+        print_success "SES production access requested"
+        print_info "AWS typically approves within 24 hours"
+    } || {
+        print_warning "Could not request production access automatically"
+        print_info "Request production access via the SES console"
+    }
+}
+
+# =============================================================================
 # AWS SECRETS & GITHUB VARIABLES SETUP
 # =============================================================================
 
@@ -932,6 +1094,9 @@ main() {
 
     # Setup ECR repository
     setup_ecr_repository
+
+    # Setup SES email identity for transactional emails
+    setup_ses_identity
 
     # Check GitHub secrets
     check_github_secrets

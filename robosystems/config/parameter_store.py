@@ -422,7 +422,13 @@ def get_parameter_value(key: str, default: str = "") -> str:
       ssm_value = manager.get_parameter(key, default="")
       if ssm_value:
         return ssm_value
+      else:
+        # SSM returned empty — parameter may not exist
+        print(
+          f"WARNING: SSM parameter '{key}' returned empty, using default: '{default}'"
+        )
     except Exception as e:
+      print(f"WARNING: Failed to get SSM parameter '{key}': {type(e).__name__}: {e}")
       logger.warning(f"Failed to get parameter '{key}' from SSM: {e}")
 
   # Priority 3: Default value

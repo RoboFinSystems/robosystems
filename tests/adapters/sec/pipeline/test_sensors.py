@@ -532,7 +532,7 @@ class TestSecPostMaterializePublishSensor:
 
     assert len(result) == 1
     assert isinstance(result[0], RunRequest)
-    assert result[0].job_name == "shared_repository_refresh_replicas_job"
+    assert result[0].job_name == "shared_replicas_refresh"
     assert result[0].tags["phase"] == "replica_refresh"
 
   @patch("robosystems.adapters.sec.pipeline.sensors.env")

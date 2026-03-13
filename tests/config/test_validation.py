@@ -37,6 +37,8 @@ class MockEnvConfig:
     self.LBUG_ACCESS_PATTERN = "multi-tenant"
     self.RATE_LIMIT_ENABLED = True
     self.SECURITY_AUDIT_ENABLED = True
+    self.EMAIL_VERIFICATION_ENABLED = True
+    self.CAPTCHA_ENABLED = False
 
 
 class TestConfigValidationError:

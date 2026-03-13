@@ -257,6 +257,8 @@ class EnvValidator:
       "security": {
         "rate_limiting": env_config.RATE_LIMIT_ENABLED,
         "audit_logging": env_config.SECURITY_AUDIT_ENABLED,
+        "email_verification": env_config.EMAIL_VERIFICATION_ENABLED,
+        "captcha": env_config.CAPTCHA_ENABLED,
       },
       "agents": {
         "config_valid": agent_validation["valid"],

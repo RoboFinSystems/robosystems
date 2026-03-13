@@ -13,40 +13,6 @@ from robosystems.graph_api.models.tables import (
 )
 from robosystems.logger import logger
 
-# Cache for MATERIALIZE_EMBEDDINGS_ENABLED feature flag (avoids SSM call per table)
-_materialize_embeddings_cache: tuple[bool, float] | None = None
-_CACHE_TTL = 60.0  # seconds
-
-
-def _should_materialize_embeddings() -> bool:
-  """Check if embedding columns should be materialized to LadybugDB.
-
-  Controlled by SSM: /robosystems/{env}/features/MATERIALIZE_EMBEDDINGS_ENABLED
-  Default: false (embeddings stay in DuckDB staging only).
-  """
-  import time
-
-  global _materialize_embeddings_cache
-  now = time.time()
-  if (
-    _materialize_embeddings_cache
-    and now - _materialize_embeddings_cache[1] < _CACHE_TTL
-  ):
-    return _materialize_embeddings_cache[0]
-
-  try:
-    from robosystems.config.parameter_store import ParameterStoreManager
-
-    manager = ParameterStoreManager()
-    value = manager.get_parameter("MATERIALIZE_EMBEDDINGS_ENABLED", default="false")
-    result = value.lower() == "true"
-  except Exception:
-    result = False
-
-  _materialize_embeddings_cache = (result, now)
-  return result
-
-
 # Type mapping from LadybugDB types to DuckDB-compatible cast types
 _LBUG_TO_DUCK_TYPE = {
   "STRING": "VARCHAR",
@@ -267,13 +233,13 @@ async def materialize_table(
         # Columns to NULL out (keep column for schema match, but skip data).
         # Embeddings stay in DuckDB staging for vector search; materializing
         # them to LadybugDB is optional (HNSW indexes don't work at scale
-        # in LadybugDB v0.13.1). Enable via: just ssm-set {env} features/MATERIALIZE_EMBEDDINGS_ENABLED true
+        # in LadybugDB v0.13.1). Pass materialize_embeddings=true to include them.
         null_cols: set[str] = set()
-        if "embedding" in column_names and not _should_materialize_embeddings():
+        if "embedding" in column_names and not request.materialize_embeddings:
           null_cols.add("embedding")
           logger.info(
             f"Nulling embedding column for {table_name} materialization "
-            f"(enable via features/MATERIALIZE_EMBEDDINGS_ENABLED)"
+            f"(pass materialize_embeddings=true to include)"
           )
 
         # Optimization: Skip temp table when not needed (no file_id, no batching, no filter, no reconciliation, no null cols)
@@ -462,9 +428,8 @@ async def materialize_table(
           logger.debug(f"Checkpointed LadybugDB after {table_name} materialization")
 
           # Build HNSW vector index when embeddings are materialized.
-          # Gated behind MATERIALIZE_EMBEDDINGS_ENABLED flag — disabled by default
-          # because LadybugDB HNSW hangs on 6M+ row tables in v0.13.1.
-          if _should_materialize_embeddings():
+          # Disabled by default because LadybugDB HNSW hangs on 6M+ row tables in v0.13.1.
+          if request.materialize_embeddings:
             ladybug_service.db_manager.create_vector_index(conn, table_name)
             conn.execute("CHECKPOINT")
 
