@@ -28,17 +28,30 @@ class ArcExtractor:
   Args:
       db_path: Path to the DuckDB database file.
       memory_limit: DuckDB memory limit (default "4GB"). Lower for large databases.
+      threads: DuckDB thread count. Lower = less memory for hash joins.
+          Default 1 to minimize peak memory on large corpora (each thread
+          creates its own hash table partition for joins).
   """
 
-  def __init__(self, db_path: str | Path, memory_limit: str = "4GB") -> None:
+  def __init__(
+    self,
+    db_path: str | Path,
+    memory_limit: str = "4GB",
+    threads: int = 1,
+  ) -> None:
     self._db_path = Path(db_path)
     self._memory_limit = memory_limit
+    self._threads = threads
     if not self._db_path.exists():
       raise FileNotFoundError(f"Database not found: {self._db_path}")
 
   def _connect(self) -> duckdb.DuckDBPyConnection:
     conn = duckdb.connect(str(self._db_path), read_only=True)
     conn.execute(f"SET memory_limit = '{self._memory_limit}'")
+    conn.execute(f"SET threads = {self._threads}")
+    # Ensure spill-to-disk uses the same directory as the database file
+    temp_dir = str(self._db_path.parent)
+    conn.execute(f"SET temp_directory = '{temp_dir}'")
     return conn
 
   def extract_deduplicated_edges(self) -> list[tuple[str, str, float, str]]:
@@ -165,9 +178,9 @@ class ArcExtractor:
   def extract_element_filing_counts(self) -> dict[str, int]:
     """Count distinct filings per element qname.
 
-    Uses Element -> Fact -> Report chain to count filings since there
-    is no direct ELEMENT_BELONGS_TO_FILING relationship. DuckDB handles
-    the COUNT(DISTINCT) efficiently with spill-to-disk.
+    Uses relationship tables as bridges (FACT_HAS_ELEMENT.src = fact identifier,
+    REPORT_HAS_FACT.dst = fact identifier, REPORT_HAS_FACT.src = report identifier)
+    to count filings without scanning the Fact or Report tables themselves.
 
     Returns:
         Dict mapping qname to filing count.
@@ -175,12 +188,10 @@ class ArcExtractor:
     sql = """
       SELECT
         e.qname,
-        COUNT(DISTINCT r.identifier) AS filing_count
+        COUNT(DISTINCT rhf.src) AS filing_count
       FROM Element e
       JOIN FACT_HAS_ELEMENT fhe ON e.identifier = fhe.dst
-      JOIN Fact f ON fhe.src = f.identifier
-      JOIN REPORT_HAS_FACT rhf ON f.identifier = rhf.dst
-      JOIN Report r ON rhf.src = r.identifier
+      JOIN REPORT_HAS_FACT rhf ON fhe.src = rhf.dst
       WHERE e.qname IS NOT NULL
       GROUP BY e.qname
     """
