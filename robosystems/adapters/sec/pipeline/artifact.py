@@ -14,6 +14,7 @@ Dev: opens local DuckDB at {DUCKDB_STAGING_PATH}/{source}.duckdb
 Prod: downloads from S3 first (same pattern as DuckDBAnalyticsContext)
 """
 
+import gc
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -31,7 +32,7 @@ class SECArtifactConfig(Config):
   """Configuration for SEC artifact generation."""
 
   duckdb_source: str = "sec"
-  memory_limit: str = "20GB"
+  memory_limit: str = "8GB"
 
 
 @asset(
@@ -48,7 +49,9 @@ def sec_knowledge_artifacts(
   """Generate all knowledge artifacts for graph-based confidence refinement.
 
   Downloads the DuckDB staging file (in prod) or opens it locally (in dev),
-  then runs both ElementKnowledgeBuilder and StructureKnowledgeBuilder.
+  then runs each builder sequentially. Each artifact is uploaded to S3
+  immediately after generation (in non-dev), and the builder is freed before
+  the next one starts to keep peak memory bounded.
   """
   from robosystems.adapters.sec.knowledge.artifact import (
     DisclosureProfileBuilder,
@@ -58,44 +61,59 @@ def sec_knowledge_artifacts(
   from robosystems.adapters.sec.knowledge.framework import DuckDBAnalyticsContext
   from robosystems.config import env
 
-  # Use DuckDBAnalyticsContext to handle S3 download in prod
+  is_prod = env.ENVIRONMENT != "dev"
+
+  # Keep context open for temp dir lifetime (prod S3 download), but close the
+  # idle DuckDB connection immediately — builders open their own connections.
   with DuckDBAnalyticsContext(
     duckdb_source=config.duckdb_source,
-    memory_limit=config.memory_limit,
+    memory_limit="256MB",
   ) as ctx:
     db_path = ctx.db_path
     context.log.info(f"Building artifacts from DuckDB at: {db_path}")
 
-    # Build element knowledge artifact (must run first — PageRank used by disclosure profiles)
+    # Close the idle DuckDB connection to free its memory buffer.
+    if ctx._conn is not None:
+      ctx._conn.close()
+      ctx._conn = None
+    gc.collect()
+
+    # --- Element knowledge (must run first — PageRank used by disclosure profiles) ---
     context.log.info("Building element knowledge artifact")
     element_builder = ElementKnowledgeBuilder(memory_limit=config.memory_limit)
     element_path = element_builder.build(db_path)
+    del element_builder
+    gc.collect()
     context.log.info(f"Element knowledge artifact written to: {element_path}")
 
-    # Build structure knowledge artifacts
+    if is_prod:
+      _upload_artifact(context, element_path, "element_knowledge.parquet")
+
+    # --- Structure knowledge ---
     context.log.info("Building structure knowledge artifacts")
     structure_builder = StructureKnowledgeBuilder(memory_limit=config.memory_limit)
     profiles_path, consensus_path = structure_builder.build(db_path)
+    del structure_builder
+    gc.collect()
     context.log.info(f"Structure profiles artifact written to: {profiles_path}")
     context.log.info(f"Structure consensus artifact written to: {consensus_path}")
 
-    # Build disclosure knowledge artifacts (uses PageRank from element_knowledge)
+    if is_prod:
+      _upload_artifact(context, profiles_path, "structure_profiles.parquet")
+      _upload_artifact(context, consensus_path, "structure_consensus.parquet")
+
+    # --- Disclosure knowledge (uses PageRank from element_knowledge) ---
     context.log.info("Building disclosure knowledge artifacts")
     disclosure_builder = DisclosureProfileBuilder(memory_limit=config.memory_limit)
     disc_profiles_path, disc_consensus_path = disclosure_builder.build(db_path)
+    del disclosure_builder
+    gc.collect()
     context.log.info(f"Disclosure profiles artifact written to: {disc_profiles_path}")
     context.log.info(f"Disclosure consensus artifact written to: {disc_consensus_path}")
 
-    # In prod, upload artifacts to S3
-    if env.ENVIRONMENT != "dev":
-      _upload_artifacts_to_s3(
-        context,
-        element_path,
-        profiles_path,
-        consensus_path,
-        disc_profiles_path,
-        disc_consensus_path,
-      )
+    if is_prod:
+      _upload_artifact(context, disc_profiles_path, "disclosure_profiles.parquet")
+      _upload_artifact(context, disc_consensus_path, "disclosure_consensus.parquet")
 
   return MaterializeResult(
     metadata={
@@ -108,33 +126,18 @@ def sec_knowledge_artifacts(
   )
 
 
-def _upload_artifacts_to_s3(
+def _upload_artifact(
   context: AssetExecutionContext,
-  element_path: "Path",
-  profiles_path: "Path",
-  consensus_path: "Path",
-  disc_profiles_path: "Path | None" = None,
-  disc_consensus_path: "Path | None" = None,
+  local_path: "Path",
+  filename: str,
 ) -> None:
-  """Upload generated artifacts to S3 for distribution."""
+  """Upload a single artifact to S3."""
   from robosystems.config import env
   from robosystems.config.storage.shared import DataSourceType, get_processed_key
   from robosystems.operations.aws.s3 import S3Client
 
   s3 = S3Client()
   bucket = env.SHARED_PROCESSED_BUCKET
-
-  artifact_files = [
-    (element_path, "element_knowledge.parquet"),
-    (profiles_path, "structure_profiles.parquet"),
-    (consensus_path, "structure_consensus.parquet"),
-  ]
-  if disc_profiles_path:
-    artifact_files.append((disc_profiles_path, "disclosure_profiles.parquet"))
-  if disc_consensus_path:
-    artifact_files.append((disc_consensus_path, "disclosure_consensus.parquet"))
-
-  for local_path, filename in artifact_files:
-    s3_key = get_processed_key(DataSourceType.SEC, "artifacts", filename)
-    context.log.info(f"Uploading {filename} to s3://{bucket}/{s3_key}")
-    s3.upload_file(str(local_path), bucket, s3_key)
+  s3_key = get_processed_key(DataSourceType.SEC, "artifacts", filename)
+  context.log.info(f"Uploading {filename} to s3://{bucket}/{s3_key}")
+  s3.upload_file(str(local_path), bucket, s3_key)

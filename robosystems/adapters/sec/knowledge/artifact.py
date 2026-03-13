@@ -13,6 +13,7 @@ processing to refine confidence scores using graph-structural signals.
 
 from __future__ import annotations
 
+import gc
 import logging
 from collections import Counter
 from pathlib import Path
@@ -40,11 +41,15 @@ class ElementKnowledgeBuilder:
     filing_count (INT32), disclosure_type (STRING)
   """
 
-  def __init__(self, memory_limit: str = "10GB") -> None:
+  def __init__(self, memory_limit: str = "8GB") -> None:
     self._memory_limit = memory_limit
 
   def build(self, db_path: str | Path) -> Path:
     """Build the element knowledge artifact and write to ARTIFACT_PATH.
+
+    Memory-conscious: frees intermediate results aggressively between steps.
+    DuckDB uses spill-to-disk with a low memory limit; Python objects are
+    deleted and gc.collect()'d as soon as they're no longer needed.
 
     Args:
         db_path: Path to the DuckDB staging database.
@@ -56,7 +61,8 @@ class ElementKnowledgeBuilder:
 
     extractor = ArcExtractor(db_path, memory_limit=self._memory_limit)
 
-    # Extract graph as Arrow arrays (zero-copy DuckDB → Arrow → CSR)
+    # --- Phase 1: Extract from DuckDB (connections open/close per call) ---
+
     logger.info("Extracting graph via Arrow zero-copy path")
     nodes, edges_arrow = extractor.extract_graph_arrow()
     logger.info(f"Extracted {len(nodes)} nodes, {edges_arrow.num_rows} edges (Arrow)")
@@ -65,7 +71,6 @@ class ElementKnowledgeBuilder:
     filing_counts = extractor.extract_element_filing_counts()
     logger.info(f"Extracted filing counts for {len(filing_counts)} elements")
 
-    # Extract disclosure classifications
     logger.info("Extracting disclosure classifications")
     disclosure_types = extractor.extract_element_disclosure_types()
     disclosure_roots = extractor.extract_disclosure_root_elements()
@@ -74,14 +79,24 @@ class ElementKnowledgeBuilder:
       f"{len(disclosure_roots)} disclosure roots"
     )
 
-    # Build graph from Arrow arrays via CSR
+    # Done with DuckDB — extractor holds no state
+    del extractor
+    gc.collect()
+
+    # --- Phase 2: Build graph (frees Arrow arrays immediately after) ---
+
     logger.info("Building element graph (Arrow → CSR)")
     element_graph = build_element_graph_from_arrow(nodes, edges_arrow)
     logger.info(
       f"Graph: {element_graph.num_nodes} nodes, {element_graph.num_edges} edges"
     )
 
-    # Structural analysis
+    # Arrow arrays are copied into the CSR — free them
+    del nodes, edges_arrow
+    gc.collect()
+
+    # --- Phase 3: Structural analysis (free each result before next) ---
+
     logger.info("Running PageRank")
     pagerank_scores = self._run_pagerank(element_graph)
 
@@ -92,13 +107,16 @@ class ElementKnowledgeBuilder:
     classifications = StatementClassifier().classify(
       element_graph, disclosure_roots=disclosure_roots or None
     )
+    del disclosure_roots
+    gc.collect()
 
     logger.info("Computing neighborhood agreement")
     agreement_scores = self._compute_neighborhood_agreement(
       element_graph, classifications
     )
 
-    # Build rows
+    # --- Phase 4: Build output rows (then free graph + analysis dicts) ---
+
     qnames = []
     primary_statements = []
     bfs_depths = []
@@ -127,7 +145,13 @@ class ElementKnowledgeBuilder:
       f_counts.append(filing_counts.get(qname, 0))
       d_types.append(disclosure_types.get(qname))
 
-    # Write Parquet
+    # Free all analysis objects — only column lists needed for Parquet write
+    del element_graph, pagerank_scores, core_numbers, classifications
+    del agreement_scores, filing_counts, disclosure_types
+    gc.collect()
+
+    # --- Phase 5: Write Parquet ---
+
     table = pa.table(
       {
         "qname": pa.array(qnames, type=pa.string()),
@@ -165,7 +189,9 @@ class ElementKnowledgeBuilder:
     if max_score == 0:
       max_score = 1.0
 
-    return {i: s / max_score for i, s in enumerate(scores)}
+    result = {i: s / max_score for i, s in enumerate(scores)}
+    del pr, scores
+    return result
 
   def _run_core_decomposition(self, element_graph) -> dict[int, int]:
     """Run k-core decomposition on the element graph."""
@@ -176,8 +202,13 @@ class ElementKnowledgeBuilder:
     undirected = nk.graphtools.toUndirected(graph)
     core = nk.centrality.CoreDecomposition(undirected)
     core.run()
+    scores = {i: int(s) for i, s in enumerate(core.scores())}
 
-    return {i: int(s) for i, s in enumerate(core.scores())}
+    # Free the undirected copy immediately (can be as large as the original graph)
+    del undirected, core
+    gc.collect()
+
+    return scores
 
   def _compute_neighborhood_agreement(
     self, element_graph, classifications
@@ -221,7 +252,7 @@ class StructureKnowledgeBuilder:
   2. structure_consensus.parquet — cross-filing majority-vote for identical structures
   """
 
-  def __init__(self, memory_limit: str = "10GB") -> None:
+  def __init__(self, memory_limit: str = "8GB") -> None:
     self._memory_limit = memory_limit
 
   def build(self, db_path: str | Path) -> tuple[Path, Path]:
@@ -376,7 +407,7 @@ class DisclosureProfileBuilder:
   2. disclosure_consensus.parquet — cross-filing majority-vote using disclosure type
   """
 
-  def __init__(self, memory_limit: str = "10GB") -> None:
+  def __init__(self, memory_limit: str = "8GB") -> None:
     self._memory_limit = memory_limit
 
   def build(self, db_path: str | Path) -> tuple[Path, Path]:
