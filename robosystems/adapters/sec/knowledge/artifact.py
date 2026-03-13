@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import gc
 import logging
+import math
 import os
 from collections import Counter
 from pathlib import Path
@@ -120,6 +121,13 @@ class ElementKnowledgeBuilder:
     )
     _log_memory("after disclosure extractions")
 
+    logger.info("Extracting structure membership for statement classification")
+    structure_membership = extractor.extract_element_structure_membership()
+    logger.info(
+      f"Extracted structure membership for {len(structure_membership)} elements"
+    )
+    _log_memory("after structure membership extraction")
+
     # Done with DuckDB — extractor holds no state
     del extractor
     gc.collect()
@@ -148,7 +156,7 @@ class ElementKnowledgeBuilder:
     core_numbers = self._run_core_decomposition(element_graph)
     _log_memory("after core decomposition")
 
-    logger.info("Running BFS classification")
+    logger.info("Running BFS classification (for bfs_depth)")
     classifications = StatementClassifier().classify(
       element_graph, disclosure_roots=disclosure_roots or None
     )
@@ -156,9 +164,19 @@ class ElementKnowledgeBuilder:
     gc.collect()
     _log_memory("after BFS classification")
 
-    logger.info("Computing neighborhood agreement")
+    logger.info("Computing primary_statement from structure membership")
+    membership_statements = self._classify_by_structure_membership(structure_membership)
+    logger.info(
+      f"Structure membership classified {len(membership_statements)} elements "
+      f"(BFS classified {classifications.total_classified})"
+    )
+    del structure_membership
+    gc.collect()
+    _log_memory("after structure membership classification")
+
+    logger.info("Computing neighborhood agreement (bidirectional)")
     agreement_scores = self._compute_neighborhood_agreement(
-      element_graph, classifications
+      element_graph, membership_statements
     )
     _log_memory("after neighborhood agreement")
 
@@ -166,8 +184,8 @@ class ElementKnowledgeBuilder:
 
     logger.info(
       f"Building output rows: {len(element_graph.elements)} elements, "
-      f"{classifications.total_classified} classified, "
-      f"{classifications.total_unclassified} unclassified"
+      f"{len(membership_statements)} membership-classified, "
+      f"{classifications.total_classified} BFS-classified"
     )
     qnames = []
     primary_statements = []
@@ -181,9 +199,10 @@ class ElementKnowledgeBuilder:
     for qname in element_graph.elements:
       qnames.append(qname)
 
-      stmt = classifications.get_primary_statement(qname)
-      primary_statements.append(stmt.value if stmt else None)
+      # primary_statement from structure membership (not BFS)
+      primary_statements.append(membership_statements.get(qname))
 
+      # bfs_depth still from BFS (useful as secondary signal)
       min_depth = classifications.get_min_depth(qname)
       bfs_depths.append(min_depth)
 
@@ -196,7 +215,7 @@ class ElementKnowledgeBuilder:
 
     # Free all analysis objects — only column lists needed for Parquet write
     del element_graph, pagerank_scores, core_numbers, classifications
-    del agreement_scores, filing_counts, disclosure_types
+    del agreement_scores, filing_counts, disclosure_types, membership_statements
     gc.collect()
     _log_memory("after building output rows + cleanup")
 
@@ -226,7 +245,14 @@ class ElementKnowledgeBuilder:
     return output_path
 
   def _run_pagerank(self, element_graph) -> dict[int, float]:
-    """Run PageRank on the element graph."""
+    """Run PageRank on the element graph.
+
+    Uses log-normalization to spread the heavy-tailed distribution.
+    Raw PageRank is extremely concentrated (top element is 1000x the 99th
+    percentile), so max-normalization compresses 98%+ of elements to near-zero.
+    Log-transform preserves relative ordering while distributing signal
+    across the full [0, 1] range.
+    """
     graph = element_graph.graph
     if graph.numberOfNodes() == 0:
       return {}
@@ -235,13 +261,24 @@ class ElementKnowledgeBuilder:
     pr.run()
     scores = pr.scores()
 
-    # Normalize to 0-1
-    max_score = max(scores) if scores else 1.0
-    if max_score == 0:
-      max_score = 1.0
+    # Log-normalize to spread the heavy-tailed distribution
+    nonzero = [s for s in scores if s > 0]
+    if not nonzero:
+      result = dict.fromkeys(range(len(scores)), 0.0)
+      del pr, scores
+      return result
 
-    result = {i: s / max_score for i, s in enumerate(scores)}
-    del pr, scores
+    min_score = min(nonzero)
+    log_scores = {}
+    for i, s in enumerate(scores):
+      if s > 0:
+        log_scores[i] = math.log(s / min_score + 1.0)
+      else:
+        log_scores[i] = 0.0
+
+    max_log = max(log_scores.values()) or 1.0
+    result = {i: s / max_log for i, s in log_scores.items()}
+    del pr, scores, log_scores
     return result
 
   def _run_core_decomposition(self, element_graph) -> dict[int, int]:
@@ -262,9 +299,16 @@ class ElementKnowledgeBuilder:
     return scores
 
   def _compute_neighborhood_agreement(
-    self, element_graph, classifications
+    self,
+    element_graph,
+    primary_statements: dict[str, str],
   ) -> dict[str, float]:
-    """Compute fraction of neighbors sharing the same primary statement."""
+    """Compute fraction of neighbors sharing the same primary statement.
+
+    Uses both outgoing AND incoming neighbors (bidirectional). The original
+    outgoing-only approach gave agreement=0.0 to 92%+ of elements because
+    most elements are leaves with zero outgoing edges in the directed graph.
+    """
     graph = element_graph.graph
     result = {}
 
@@ -273,12 +317,15 @@ class ElementKnowledgeBuilder:
       if idx is None:
         continue
 
-      my_stmt = classifications.get_primary_statement(qname)
+      my_stmt = primary_statements.get(qname)
       if my_stmt is None:
         result[qname] = 0.0
         continue
 
-      neighbors = list(graph.iterNeighbors(idx))
+      # Bidirectional: both outgoing and incoming neighbors
+      neighbors = set(graph.iterNeighbors(idx))
+      neighbors.update(graph.iterInNeighbors(idx))
+
       if not neighbors:
         result[qname] = 0.0
         continue
@@ -286,11 +333,59 @@ class ElementKnowledgeBuilder:
       agree = 0
       for n_idx in neighbors:
         n_qname = element_graph.get_qname(n_idx)
-        n_stmt = classifications.get_primary_statement(n_qname)
-        if n_stmt == my_stmt:
+        if primary_statements.get(n_qname) == my_stmt:
           agree += 1
 
       result[qname] = agree / len(neighbors)
+
+    return result
+
+  # Mapping from structure canonical_type to StatementType string value.
+  # Only statement-relevant types are included; disclosure types like
+  # DocumentInformation, NetBenefitCosts, etc. are ignored.
+  _CANONICAL_TO_STATEMENT: dict[str, str] = {
+    # Primary statement types (lowercase)
+    "income_statement": "IncomeStatement",
+    "balance_sheet": "BalanceSheet",
+    "cash_flow_statement": "CashFlow",
+    "equity_statement": "Equity",
+    "comprehensive_income": "IncomeStatement",
+    # Disclosure types that map to statements (CamelCase)
+    "IncomeStatement": "IncomeStatement",
+    "AssetsRollUp": "BalanceSheet",
+    "LiabilitiesAndEquityRollUp": "BalanceSheet",
+  }
+
+  @staticmethod
+  def _classify_by_structure_membership(
+    membership: dict[str, dict[str, int]],
+  ) -> dict[str, str]:
+    """Classify elements by majority vote of structure canonical_type membership.
+
+    For each element, maps its structure canonical_types to statement types
+    and picks the statement with the highest total structure count.
+
+    This replaces BFS-based classification which suffers from cross-statement
+    arc pollution in the deduped graph. The indirect cash flow method creates
+    calculation arcs from IS roots (NetIncomeLoss) to CF elements, causing
+    IS BFS to reach every cash flow element before CF BFS.
+
+    Structure membership is immune to this because it uses structure-level
+    classifications (62K cash_flow_statement structures correctly identified)
+    rather than element-level graph traversal.
+    """
+    mapping = ElementKnowledgeBuilder._CANONICAL_TO_STATEMENT
+    result: dict[str, str] = {}
+
+    for qname, type_counts in membership.items():
+      statement_counts: dict[str, int] = {}
+      for canonical_type, count in type_counts.items():
+        stmt = mapping.get(canonical_type)
+        if stmt:
+          statement_counts[stmt] = statement_counts.get(stmt, 0) + count
+
+      if statement_counts:
+        result[qname] = max(statement_counts, key=statement_counts.get)  # type: ignore[arg-type]
 
     return result
 
