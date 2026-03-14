@@ -37,8 +37,8 @@ from ...security import SecurityAuditLogger, SecurityEventType
 from ...security.input_validation import (
   sanitize_string,
   validate_email,
-  validate_password_strength,
 )
+from ...security.password import PasswordSecurity
 from .utils import detect_app_source, hash_password
 
 # Create router for password reset endpoints
@@ -261,12 +261,12 @@ async def reset_password(
       detail="User not found",
     )
 
-  # Validate password strength
-  password_valid, password_issues = validate_password_strength(request.new_password)
-  if not password_valid:
+  # Validate password strength (uses same rules as /password/check endpoint)
+  password_result = PasswordSecurity.validate_password(request.new_password)
+  if not password_result.is_valid:
     raise HTTPException(
       status_code=status.HTTP_400_BAD_REQUEST,
-      detail=f"Password requirements not met: {', '.join(password_issues)}",
+      detail=f"Password requirements not met: {', '.join(password_result.errors)}",
     )
 
   # Hash new password
