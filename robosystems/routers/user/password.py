@@ -22,7 +22,7 @@ from ...models.api.common import (
 )
 from ...models.api.user import UpdatePasswordRequest
 from ...models.iam import User
-from ...security.input_validation import validate_password_strength
+from ...security.password import PasswordSecurity
 
 router = APIRouter(tags=["User"])
 
@@ -126,11 +126,11 @@ async def update_user_password(
         code=ErrorCode.INVALID_INPUT,
       )
 
-    password_valid, password_issues = validate_password_strength(request.new_password)
-    if not password_valid:
+    password_result = PasswordSecurity.validate_password(request.new_password)
+    if not password_result.is_valid:
       raise create_error_response(
         status_code=status.HTTP_400_BAD_REQUEST,
-        detail=f"Password requirements not met: {', '.join(password_issues)}",
+        detail=f"Password requirements not met: {', '.join(password_result.errors)}",
         code=ErrorCode.INVALID_INPUT,
       )
 

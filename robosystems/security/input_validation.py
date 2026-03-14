@@ -63,35 +63,6 @@ def sanitize_user_input(data: dict) -> dict:
   return sanitized
 
 
-def validate_password_strength(password: str) -> tuple[bool, list[str]]:
-  """Validate password meets security requirements.
-
-  Args:
-      password: Password to validate
-
-  Returns:
-      Tuple of (is_valid, list_of_issues)
-  """
-  issues = []
-
-  if len(password) < 8:
-    issues.append("Password must be at least 8 characters long")
-
-  if not re.search(r"[a-z]", password):
-    issues.append("Password must contain at least one lowercase letter")
-
-  if not re.search(r"[A-Z]", password):
-    issues.append("Password must contain at least one uppercase letter")
-
-  if not re.search(r"[0-9]", password):
-    issues.append("Password must contain at least one digit")
-
-  if not re.search(r"[!@#$%^&*()_+\-=\[\]{};:,.<>?]", password):
-    issues.append("Password must contain at least one special character")
-
-  return len(issues) == 0, issues
-
-
 def validate_username(username: str) -> bool:
   """Validate username format.
 
