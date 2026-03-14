@@ -464,10 +464,10 @@ sec_artifact_generation_job = define_asset_job(
     # Downloads full DuckDB staging file from S3 then runs graph algorithms.
     # DuckDB uses threads=1 + spill-to-disk for large joins.
     # Observed peak: ~14.4 GB (Mar 2026, 104 GB corpus). 16 GB to test lower bound.
-    # Ephemeral: 150GB covers 104GB DuckDB + spill + artifacts.
+    # Ephemeral: 200GB covers 104GB DuckDB + spill (structure membership query) + artifacts.
     "ecs/cpu": "2048",
     "ecs/memory": "16384",
-    "ecs/ephemeral_storage": "150",
+    "ecs/ephemeral_storage": "200",
     "ecs/run_task_kwargs": {
       "capacityProviderStrategy": [
         {"capacityProvider": "FARGATE", "weight": 1, "base": 1},
