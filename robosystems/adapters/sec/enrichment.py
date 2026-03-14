@@ -297,7 +297,7 @@ class SemanticEnricher:
 
     os.makedirs(os.path.dirname(path), exist_ok=True)
 
-    if env.ENVIRONMENT == "dev":
+    if env.is_development():
       return self._download_artifact_r2(name, path)
 
     return self._download_artifact_s3(name, path)
@@ -328,6 +328,7 @@ class SemanticEnricher:
   def _download_artifact_r2(name: str, path: str) -> str | None:
     """Download artifact from R2 public URL (dev, no credentials needed)."""
     try:
+      import shutil
       from urllib.request import Request, urlopen
 
       from robosystems.config import env
@@ -341,10 +342,8 @@ class SemanticEnricher:
       url = f"{env.R2_PUBLIC_URL}/{r2_key}"
 
       logger.info(f"Downloading artifact from {url}")
-      import shutil
-
       req = Request(url, headers={"User-Agent": "RoboSystems/1.0"})
-      with urlopen(req) as resp, open(path, "wb") as f:
+      with urlopen(req, timeout=30) as resp, open(path, "wb") as f:
         shutil.copyfileobj(resp, f)
       return path
     except Exception as e:

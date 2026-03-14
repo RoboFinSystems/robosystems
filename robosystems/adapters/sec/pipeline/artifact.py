@@ -106,7 +106,9 @@ def sec_knowledge_artifacts(
     context.log.info(f"Element knowledge artifact written to: {element_path}")
 
     if is_prod:
-      _upload_artifact(context, element_path, "element_knowledge.parquet", config.publish_r2)
+      _upload_artifact(
+        context, element_path, "element_knowledge.parquet", config.publish_r2
+      )
 
     # --- Structure knowledge ---
     context.log.info("Building structure knowledge artifacts")
@@ -119,8 +121,12 @@ def sec_knowledge_artifacts(
     context.log.info(f"Structure consensus artifact written to: {consensus_path}")
 
     if is_prod:
-      _upload_artifact(context, profiles_path, "structure_profiles.parquet", config.publish_r2)
-      _upload_artifact(context, consensus_path, "structure_consensus.parquet", config.publish_r2)
+      _upload_artifact(
+        context, profiles_path, "structure_profiles.parquet", config.publish_r2
+      )
+      _upload_artifact(
+        context, consensus_path, "structure_consensus.parquet", config.publish_r2
+      )
 
     # --- Disclosure knowledge (uses PageRank from element_knowledge) ---
     context.log.info("Building disclosure knowledge artifacts")
@@ -133,8 +139,12 @@ def sec_knowledge_artifacts(
     context.log.info(f"Disclosure consensus artifact written to: {disc_consensus_path}")
 
     if is_prod:
-      _upload_artifact(context, disc_profiles_path, "disclosure_profiles.parquet", config.publish_r2)
-      _upload_artifact(context, disc_consensus_path, "disclosure_consensus.parquet", config.publish_r2)
+      _upload_artifact(
+        context, disc_profiles_path, "disclosure_profiles.parquet", config.publish_r2
+      )
+      _upload_artifact(
+        context, disc_consensus_path, "disclosure_consensus.parquet", config.publish_r2
+      )
 
   return MaterializeResult(
     metadata={
