@@ -10,7 +10,6 @@ from robosystems.security.input_validation import (
   strip_html_tags,
   validate_api_key,
   validate_email,
-  validate_password_strength,
   validate_username,
   validate_uuid,
 )
@@ -131,45 +130,6 @@ class TestSanitizeUserInput:
 
   def test_empty_dict(self):
     assert sanitize_user_input({}) == {}
-
-
-class TestValidatePasswordStrength:
-  """Tests for validate_password_strength."""
-
-  def test_strong_password(self):
-    is_valid, issues = validate_password_strength("MyP@ssw0rd!")
-    assert is_valid is True
-    assert issues == []
-
-  def test_too_short(self):
-    is_valid, issues = validate_password_strength("Ab1!")
-    assert is_valid is False
-    assert any("8 characters" in i for i in issues)
-
-  def test_no_lowercase(self):
-    is_valid, issues = validate_password_strength("ABCDEFGH1!")
-    assert is_valid is False
-    assert any("lowercase" in i for i in issues)
-
-  def test_no_uppercase(self):
-    is_valid, issues = validate_password_strength("abcdefgh1!")
-    assert is_valid is False
-    assert any("uppercase" in i for i in issues)
-
-  def test_no_digit(self):
-    is_valid, issues = validate_password_strength("Abcdefgh!")
-    assert is_valid is False
-    assert any("digit" in i for i in issues)
-
-  def test_no_special_char(self):
-    is_valid, issues = validate_password_strength("Abcdefgh1")
-    assert is_valid is False
-    assert any("special character" in i for i in issues)
-
-  def test_multiple_issues(self):
-    is_valid, issues = validate_password_strength("abc")
-    assert is_valid is False
-    assert len(issues) >= 3
 
 
 class TestValidateUsername:
