@@ -828,8 +828,8 @@ class TestUserPasswordUpdate:
 
     password_data = {
       "current_password": "originalPassword123",
-      "new_password": "NewSecure@Password456!",
-      "confirm_password": "NewSecure@Password456!",
+      "new_password": "Tr0pic@lBreeze#99",
+      "confirm_password": "Tr0pic@lBreeze#99",
     }
 
     response = client_with_password_user.put("/v1/user/password", json=password_data)
@@ -857,8 +857,8 @@ class TestUserPasswordUpdate:
 
     password_data = {
       "current_password": "wrongPassword123",
-      "new_password": "NewSecure@Password456!",
-      "confirm_password": "NewSecure@Password456!",
+      "new_password": "Tr0pic@lBreeze#99",
+      "confirm_password": "Tr0pic@lBreeze#99",
     }
 
     response = client_with_password_user.put("/v1/user/password", json=password_data)

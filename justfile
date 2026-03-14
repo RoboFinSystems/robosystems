@@ -503,9 +503,9 @@ clean:
 # Clean up development data (reset all local data)
 clean-data:
     @just clean
+    rm -rf ./data/artifacts
     rm -rf ./data/lbug-dbs
     rm -rf ./data/staging
-    rm -rf ./data/arelle
     rm -rf ./data/neo4j
     rm -rf ./data/localstack
     rm -rf ./data/postgres

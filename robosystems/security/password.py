@@ -118,7 +118,7 @@ class PasswordSecurity:
       "uppercase": bool(re.search(r"[A-Z]", password)),
       "lowercase": bool(re.search(r"[a-z]", password)),
       "digits": bool(re.search(r"[0-9]", password)),
-      "special": bool(re.search(r'[!@#$%^&*(),.?":{}|<>]', password)),
+      "special": bool(re.search(r'[!@#$%^&*()\-_+=\[\]{};:,.?"|<>\\/>~`]', password)),
     }
 
     # Character requirements
