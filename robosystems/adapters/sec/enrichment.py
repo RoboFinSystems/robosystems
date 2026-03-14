@@ -276,7 +276,11 @@ class SemanticEnricher:
     return self._structure_consensus
 
   def _ensure_artifact_local(self, name: str) -> str | None:
-    """Ensure an artifact parquet file exists locally, downloading from S3 if needed.
+    """Ensure an artifact parquet file exists locally, downloading if needed.
+
+    Download sources by environment:
+      - prod/staging: S3 shared processed bucket (private, fast)
+      - dev: Cloudflare R2 public URL (no credentials required)
 
     Returns the local path if available, None otherwise.
     """
@@ -289,7 +293,18 @@ class SemanticEnricher:
     if os.path.exists(path):
       return path
 
-    # S3 fallback: download artifact from shared processed bucket
+    from robosystems.config import env
+
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+
+    if env.ENVIRONMENT == "dev":
+      return self._download_artifact_r2(name, path)
+
+    return self._download_artifact_s3(name, path)
+
+  @staticmethod
+  def _download_artifact_s3(name: str, path: str) -> str | None:
+    """Download artifact from S3 shared processed bucket (prod/staging)."""
     try:
       from robosystems.config import env
       from robosystems.config.storage.shared import DataSourceType, get_processed_key
@@ -297,8 +312,6 @@ class SemanticEnricher:
 
       s3_key = get_processed_key(DataSourceType.SEC, "artifacts", f"{name}.parquet")
       bucket = env.SHARED_PROCESSED_BUCKET
-
-      os.makedirs(os.path.dirname(path), exist_ok=True)
 
       s3 = S3Client()
       if s3.download_file(bucket, s3_key, path):
@@ -309,6 +322,33 @@ class SemanticEnricher:
       return None
     except Exception as e:
       logger.debug(f"S3 artifact download failed for {name}: {e}")
+      return None
+
+  @staticmethod
+  def _download_artifact_r2(name: str, path: str) -> str | None:
+    """Download artifact from R2 public URL (dev, no credentials needed)."""
+    try:
+      from urllib.request import Request, urlopen
+
+      from robosystems.config import env
+      from robosystems.config.storage.shared import get_artifact_r2_key
+
+      if not env.R2_PUBLIC_URL:
+        logger.debug("R2_PUBLIC_URL not configured, skipping artifact download")
+        return None
+
+      r2_key = get_artifact_r2_key(name)
+      url = f"{env.R2_PUBLIC_URL}/{r2_key}"
+
+      logger.info(f"Downloading artifact from {url}")
+      import shutil
+
+      req = Request(url, headers={"User-Agent": "RoboSystems/1.0"})
+      with urlopen(req) as resp, open(path, "wb") as f:
+        shutil.copyfileobj(resp, f)
+      return path
+    except Exception as e:
+      logger.debug(f"R2 artifact download failed for {name}: {e}")
       return None
 
   def _load_element_knowledge(self) -> dict[str, dict] | None:

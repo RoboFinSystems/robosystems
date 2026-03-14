@@ -410,6 +410,8 @@ class EnvConfig:
   R2_SECRET_ACCESS_KEY = get_secret_value("R2_SECRET_ACCESS_KEY", "")
   R2_ENDPOINT_URL = get_secret_value("R2_ENDPOINT_URL", "")
   R2_BUCKET_NAME = get_secret_value("R2_BUCKET_NAME", "")
+  R2_PUBLIC_BUCKET_NAME = get_secret_value("R2_PUBLIC_BUCKET_NAME", "")  # Public bucket for artifacts
+  R2_PUBLIC_URL = get_secret_value("R2_PUBLIC_URL", "")  # Public bucket URL (no auth needed)
 
   # ==========================================================================
   # 2. FEATURE FLAGS

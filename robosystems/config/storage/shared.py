@@ -249,6 +249,22 @@ def get_artifact_path(name: str) -> str:
   return f"{env.ARTIFACT_PATH}/{name}.parquet"
 
 
+def get_artifact_r2_key(name: str) -> str:
+  """Get R2 key for a precomputed artifact Parquet file.
+
+  Args:
+      name: Artifact name (e.g., "element_knowledge", "structure_profiles")
+
+  Returns:
+      R2 key string (without bucket name).
+
+  Example:
+      >>> get_artifact_r2_key("element_knowledge")
+      'sec/artifacts/element_knowledge.parquet'
+  """
+  return f"sec/artifacts/{name}.parquet"
+
+
 # =============================================================================
 # DuckDB Staging Path Helpers
 # =============================================================================

@@ -33,6 +33,7 @@ class SECArtifactConfig(Config):
 
   duckdb_source: str = "sec"
   memory_limit: str = "8GB"
+  publish_r2: bool = False
 
 
 @asset(
@@ -105,7 +106,7 @@ def sec_knowledge_artifacts(
     context.log.info(f"Element knowledge artifact written to: {element_path}")
 
     if is_prod:
-      _upload_artifact(context, element_path, "element_knowledge.parquet")
+      _upload_artifact(context, element_path, "element_knowledge.parquet", config.publish_r2)
 
     # --- Structure knowledge ---
     context.log.info("Building structure knowledge artifacts")
@@ -118,8 +119,8 @@ def sec_knowledge_artifacts(
     context.log.info(f"Structure consensus artifact written to: {consensus_path}")
 
     if is_prod:
-      _upload_artifact(context, profiles_path, "structure_profiles.parquet")
-      _upload_artifact(context, consensus_path, "structure_consensus.parquet")
+      _upload_artifact(context, profiles_path, "structure_profiles.parquet", config.publish_r2)
+      _upload_artifact(context, consensus_path, "structure_consensus.parquet", config.publish_r2)
 
     # --- Disclosure knowledge (uses PageRank from element_knowledge) ---
     context.log.info("Building disclosure knowledge artifacts")
@@ -132,8 +133,8 @@ def sec_knowledge_artifacts(
     context.log.info(f"Disclosure consensus artifact written to: {disc_consensus_path}")
 
     if is_prod:
-      _upload_artifact(context, disc_profiles_path, "disclosure_profiles.parquet")
-      _upload_artifact(context, disc_consensus_path, "disclosure_consensus.parquet")
+      _upload_artifact(context, disc_profiles_path, "disclosure_profiles.parquet", config.publish_r2)
+      _upload_artifact(context, disc_consensus_path, "disclosure_consensus.parquet", config.publish_r2)
 
   return MaterializeResult(
     metadata={
@@ -150,14 +151,51 @@ def _upload_artifact(
   context: AssetExecutionContext,
   local_path: "Path",
   filename: str,
+  publish_r2: bool = False,
 ) -> None:
-  """Upload a single artifact to S3."""
+  """Upload a single artifact to S3 and optionally R2.
+
+  S3 is the primary store for prod/staging enrichment (private).
+  R2 provides public downloads for local development (zero egress).
+  R2 upload only runs when publish_r2=True (set via Dagster config).
+  """
   from robosystems.config import env
   from robosystems.config.storage.shared import DataSourceType, get_processed_key
   from robosystems.operations.aws.s3 import S3Client
 
+  # S3 upload (primary — used by prod/staging enrichment)
   s3 = S3Client()
   bucket = env.SHARED_PROCESSED_BUCKET
   s3_key = get_processed_key(DataSourceType.SEC, "artifacts", filename)
   context.log.info(f"Uploading {filename} to s3://{bucket}/{s3_key}")
   s3.upload_file(str(local_path), bucket, s3_key)
+
+  # R2 upload (public — used by dev enrichment)
+  if publish_r2:
+    _upload_artifact_r2(context, local_path, filename)
+
+
+def _upload_artifact_r2(
+  context: AssetExecutionContext,
+  local_path: "Path",
+  filename: str,
+) -> None:
+  """Upload a single artifact to the public R2 bucket for dev downloads."""
+  from robosystems.config import env
+  from robosystems.config.storage.shared import get_artifact_r2_key
+
+  r2_config = env.get_r2_config()
+  if not r2_config or not env.R2_PUBLIC_BUCKET_NAME:
+    return
+
+  try:
+    import boto3
+
+    name = filename.removesuffix(".parquet")
+    r2 = boto3.client("s3", **r2_config)
+    r2_key = get_artifact_r2_key(name)
+    bucket = env.R2_PUBLIC_BUCKET_NAME
+    context.log.info(f"Uploading {filename} to r2://{bucket}/{r2_key}")
+    r2.upload_file(str(local_path), bucket, r2_key)
+  except Exception as e:
+    context.log.warning(f"R2 upload failed for {filename} (non-fatal): {e}")
