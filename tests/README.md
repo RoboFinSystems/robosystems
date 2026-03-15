@@ -13,9 +13,6 @@ just test-cov
 
 # Run all tests including linting and formatting
 just test-all
-
-# Run integration tests
-just test-integration
 ```
 
 ## End-to-End Validation

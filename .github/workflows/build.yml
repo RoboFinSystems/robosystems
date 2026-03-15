@@ -277,7 +277,7 @@ jobs:
           mask-password: "true"
 
       - name: Run Trivy vulnerability scanner
-        uses: aquasecurity/trivy-action@master
+        uses: aquasecurity/trivy-action@0.35.0
         env:
           TRIVY_PLATFORM: linux/arm64
         with:
@@ -404,7 +404,7 @@ jobs:
           mask-password: "true"
 
       - name: Run Trivy vulnerability scanner
-        uses: aquasecurity/trivy-action@master
+        uses: aquasecurity/trivy-action@0.35.0
         env:
           TRIVY_PLATFORM: linux/arm64
         with:

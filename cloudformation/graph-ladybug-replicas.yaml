@@ -391,6 +391,10 @@ Resources:
         InstanceType: !Ref InstanceType
         IamInstanceProfile:
           Arn: !GetAtt ReplicaInstanceProfile.Arn
+        MetadataOptions:
+          HttpEndpoint: enabled
+          HttpTokens: required
+          HttpPutResponseHopLimit: 1
         SecurityGroupIds:
           - !Ref ReplicaSecurityGroup
           - !Ref ValkeyClientSecurityGroupId

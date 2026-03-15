@@ -1,6 +1,4 @@
-"""
-Integration tests for schema management functionality.
-"""
+"""Tests for schema management functionality."""
 
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -9,7 +7,6 @@ import pytest
 from tests.conftest import VALID_TEST_GRAPH_ID
 
 
-@pytest.mark.integration
 class TestSchemaManagementIntegration:
   """Integration tests for the complete schema management flow."""
 

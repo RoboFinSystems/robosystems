@@ -501,8 +501,8 @@ async def create_backup(
   except HTTPException:
     raise
   except Exception as e:
-    logger.error(f"Failed to create backup for graph {graph_id}: {e!s}")
+    logger.error(f"Failed to create backup for graph {graph_id}: {e!s}", exc_info=True)
     raise HTTPException(
       status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-      detail=f"Failed to initiate backup: {e!s}",
+      detail="Failed to initiate backup.",
     )

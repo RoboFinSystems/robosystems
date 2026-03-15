@@ -186,12 +186,12 @@ async def delete_subgraph(
       detail="Failed to delete subgraph due to database error",
     )
   except Exception as e:
-    logger.error(f"Unexpected error deleting subgraph: {e}")
+    logger.error(f"Unexpected error deleting subgraph: {e}", exc_info=True)
     # Record failure metric
     log_metric("subgraph_deletion_failed", 1, {"error_type": "unexpected"})
     # Mark circuit breaker failure
     circuit_breaker.record_failure(graph_id, "subgraph_delete")
     raise HTTPException(
       status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-      detail=f"Failed to delete subgraph: {e!s}",
+      detail="Failed to delete subgraph.",
     )

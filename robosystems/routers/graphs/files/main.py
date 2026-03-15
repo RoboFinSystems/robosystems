@@ -266,11 +266,12 @@ async def list_files(
         "duration_ms": execution_time,
         "error_type": type(e).__name__,
       },
+      exc_info=True,
     )
 
     raise HTTPException(
       status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-      detail=f"Failed to list files: {e!s}",
+      detail="Failed to list files.",
     )
 
 
@@ -478,11 +479,12 @@ async def get_file(
         "duration_ms": execution_time,
         "error_type": type(e).__name__,
       },
+      exc_info=True,
     )
 
     raise HTTPException(
       status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-      detail=f"Failed to retrieve file: {e!s}",
+      detail="Failed to retrieve file.",
     )
 
 
@@ -794,9 +796,9 @@ async def delete_file(
       },
     )
 
-    logger.error(f"Failed to delete file {file_id}: {e}")
+    logger.error(f"Failed to delete file {file_id}: {e}", exc_info=True)
     db.rollback()
     raise HTTPException(
       status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-      detail=f"Failed to delete file: {e!s}",
+      detail="Failed to delete file.",
     )

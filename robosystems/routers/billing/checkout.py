@@ -176,10 +176,10 @@ async def create_checkout_session(
         repository_id=repo_name if request.resource_type == "repository" else None,
       )
     except ValueError as e:
-      logger.error(f"Failed to get Stripe price: {e}")
+      logger.error(f"Failed to get Stripe price: {e}", exc_info=True)
       raise HTTPException(
         status_code=500,
-        detail=f"Payment configuration error: {e!s}",
+        detail="Payment configuration error.",
       )
 
     # Create Stripe checkout session

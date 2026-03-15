@@ -105,24 +105,19 @@ test-all:
     @just typecheck
     @just cf-lint-all
 
-# Run tests (exclude integration and slow tests)
+# Run tests (exclude slow tests)
 test module="":
     uv run pytest \
         {{ if module != "" { "tests/" + module } else { "" } }} \
-        --ignore=tests/integration \
         -m "not slow"
 
 # Run ALL tests including slow ones
 test-full:
     uv run pytest
 
-# Run integration tests
-test-integration:
-    uv run pytest tests/integration
-
-# Run tests with coverage (excludes integration)
+# Run tests with coverage
 test-cov:
-    uv run pytest --cov=robosystems tests/ --ignore=tests/integration
+    uv run pytest --cov=robosystems tests/
 
 # Run code quality checks (auto-fix first, then verify)
 test-code:
