@@ -3,7 +3,7 @@
 # Each Lambda specifies its handler via ImageConfig.Command in CloudFormation
 
 # Use AWS Lambda Python base image (ARM64 for Graviton cost savings)
-FROM public.ecr.aws/lambda/python:3.13-arm64
+FROM public.ecr.aws/lambda/python:3.14-arm64
 
 # Install uv for dependency export
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
