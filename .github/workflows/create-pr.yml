@@ -55,7 +55,7 @@ jobs:
           fi
 
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           # ACTIONS_TOKEN preferred for pushing to protected branches
           token: ${{ secrets.ACTIONS_TOKEN || github.token }}

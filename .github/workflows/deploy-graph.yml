@@ -245,7 +245,7 @@ jobs:
 
       - name: Checkout (for action)
         if: steps.check.outputs.skip_lookup == 'false'
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           sparse-checkout: .github/actions/get-latest-ami
 
@@ -282,7 +282,7 @@ jobs:
       replica_instance_type: ${{ steps.set-matrix.outputs.replica_instance_type }}
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           sparse-checkout: |
             .github/configs/graph.yml
