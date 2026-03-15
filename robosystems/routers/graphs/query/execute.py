@@ -832,10 +832,10 @@ async def execute_cypher_query(
         status_code=http_status.HTTP_402_PAYMENT_REQUIRED,
         detail="No credit pool found for this graph. Please check your subscription.",
       )
-    # Re-raise other ValueErrors
+    # Re-raise other ValueErrors — 400s are client errors, keep specific message
     raise HTTPException(
       status_code=http_status.HTTP_400_BAD_REQUEST,
-      detail="Invalid query request.",
+      detail=str(e),
     )
 
   except HTTPException as exc:

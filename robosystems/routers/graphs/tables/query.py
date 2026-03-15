@@ -285,5 +285,5 @@ async def query_tables(
 
     raise HTTPException(
       status_code=status.HTTP_400_BAD_REQUEST,
-      detail="Query failed.",
+      detail=f"Query failed: {e!s}",
     )

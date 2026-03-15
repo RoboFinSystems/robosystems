@@ -8,8 +8,8 @@ updates:
     labels:
       - "dependencies"
 
-  # Python — uv/pip dependencies in pyproject.toml
-  - package-ecosystem: "pip"
+  # Python — uv dependencies in pyproject.toml and uv.lock
+  - package-ecosystem: "uv"
     directory: "/"
     schedule:
       interval: "monthly"
