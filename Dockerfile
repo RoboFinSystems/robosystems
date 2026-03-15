@@ -3,7 +3,7 @@ FROM ghcr.io/ladybugdb/extension-repo:latest AS extensions
 
 # Stage 1: Builder
 # Using Python 3.13 slim (Debian Trixie/13) for GLIBC 2.38+ required by LadybugDB extensions
-FROM python:3.13-slim AS builder
+FROM python:3.14-slim AS builder
 
 # Set environment variables
 ENV PYTHONUNBUFFERED=1 \
@@ -142,7 +142,7 @@ RUN .venv/bin/python -c "from fastembed import TextEmbedding; TextEmbedding('BAA
 
 # Stage 2: Runtime
 # Using Python 3.13 slim (Debian Trixie/13) for GLIBC 2.38+ required by LadybugDB extensions
-FROM python:3.13-slim
+FROM python:3.14-slim
 
 # Accept architecture argument in runtime stage
 ARG TARGETARCH=arm64
