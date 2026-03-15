@@ -207,7 +207,7 @@ async def test_agent_error_handling(
     assert response.status_code == 500
     data = response.json()
     assert "detail" in data
-    assert "Test error" in data["detail"]
+    assert "internal error" in data["detail"].lower()
 
 
 # Note: MCP Client integration tests are in tests/adapters/test_mcp.py

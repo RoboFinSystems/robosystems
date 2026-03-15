@@ -341,8 +341,8 @@ async def export_graph_schema(
   except HTTPException:
     raise
   except Exception as e:
-    logger.error(f"Schema export error: {e}")
+    logger.error(f"Schema export error: {e}", exc_info=True)
     raise HTTPException(
       status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-      detail=f"Failed to export schema: {e!s}",
+      detail="Failed to export schema.",
     )

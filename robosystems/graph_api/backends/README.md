@@ -305,17 +305,6 @@ pytest tests/unit/graph_api/backends/test_lbug_backend.py
 pytest tests/unit/graph_api/backends/test_neo4j_backend.py
 ```
 
-### Integration Tests
-
-```bash
-# Requires running backend instances
-pytest tests/integration/graph_api/ -m backend_integration
-
-# Test specific backend
-GRAPH_BACKEND_TYPE=ladybug pytest tests/integration/graph_api/
-GRAPH_BACKEND_TYPE=neo4j_community pytest tests/integration/graph_api/
-```
-
 ## Performance Characteristics
 
 ### LadybugDB Backend

@@ -177,6 +177,7 @@ def client_with_mocked_auth(test_db, test_user):
   mock_user.name = test_user.name
   mock_user.email = test_user.email
   mock_user.password_hash = test_user.password_hash
+  mock_user.email_verified = True
   mock_user.accounts = []
 
   # Override the dependencies

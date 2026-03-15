@@ -224,8 +224,8 @@ jobs:
       - name: Run tests
         timeout-minutes: 10
         run: |
-          # Run tests (exclude integration and slow tests)
-          uv run pytest -v --tb=short --ignore=tests/integration -m "not slow"
+          # Run tests (exclude slow tests)
+          uv run pytest -v --tb=short -m "not slow"
 
       - name: Run linting
         timeout-minutes: 1
@@ -252,7 +252,7 @@ jobs:
           uv run cfn-lint
 
       - name: Scan dependencies for vulnerabilities
-        uses: aquasecurity/trivy-action@master
+        uses: aquasecurity/trivy-action@0.35.0
         with:
           scan-type: 'fs'
           scan-ref: '.'

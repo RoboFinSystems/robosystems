@@ -244,6 +244,10 @@ Resources:
             - HasValkeySecurityGroup
             - [!Ref BastionHostSecurityGroup, !Ref ValkeySecurityGroupId]
             - [!Ref BastionHostSecurityGroup]
+      MetadataOptions:
+        HttpEndpoint: enabled
+        HttpTokens: required
+        HttpPutResponseHopLimit: 1
       BlockDeviceMappings:
         - Ebs:
             VolumeType: gp3

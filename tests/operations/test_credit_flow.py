@@ -1,11 +1,9 @@
-"""Integration tests for credit consumption flow.
+"""Tests for credit consumption flow.
 
 Exercises: routers/graphs/credits.py → operations/graph/credit_service.py → models/iam/graph_credits.py
 """
 
 from decimal import Decimal
-
-import pytest
 
 from robosystems.operations.graph.credit_service import (
   CreditService,
@@ -13,7 +11,6 @@ from robosystems.operations.graph.credit_service import (
 )
 
 
-@pytest.mark.integration
 class TestCreditServiceFlow:
   """Test credit service operations with real database."""
 

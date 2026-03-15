@@ -1,11 +1,9 @@
-"""Integration tests for subscription lifecycle.
+"""Tests for subscription lifecycle.
 
 Exercises: operations/graph/subscription_service.py → models/billing/* → middleware/billing/enforcement.py
 """
 
 from unittest.mock import patch
-
-import pytest
 
 from robosystems.middleware.billing.enforcement import (
   _cache_subscription,
@@ -20,7 +18,6 @@ from robosystems.operations.graph.subscription_service import (
 )
 
 
-@pytest.mark.integration
 class TestSubscriptionServiceHelpers:
   """Test subscription service helper functions."""
 
@@ -37,7 +34,6 @@ class TestSubscriptionServiceHelpers:
     assert max_tier == "ladybug-xlarge"
 
 
-@pytest.mark.integration
 class TestSubscriptionCreation:
   """Test subscription creation flow."""
 
@@ -82,7 +78,6 @@ class TestSubscriptionCreation:
     assert sub1.id == sub2.id
 
 
-@pytest.mark.integration
 class TestSubscriptionEnforcement:
   """Test subscription enforcement cache."""
 

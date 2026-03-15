@@ -673,10 +673,10 @@ async def call_mcp_tool(
             )
           except Exception as e:
             await handler.close()
-            logger.error(f"Direct tool execution failed: {e}")
+            logger.error(f"Direct tool execution failed: {e}", exc_info=True)
             raise HTTPException(
               status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
-              detail=f"Tool execution failed: {e!s}",
+              detail="Tool execution failed.",
             )
 
       elif strategy == MCPExecutionStrategy.SCHEMA_CACHED:

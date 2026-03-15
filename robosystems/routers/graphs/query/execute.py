@@ -368,10 +368,12 @@ async def execute_cypher_query(
           detail=f"Repository '{graph_id}' not found",
         )
       else:
-        logger.error(f"Failed to get repository {graph_id}: {error_message}")
+        logger.error(
+          f"Failed to get repository {graph_id}: {error_message}", exc_info=True
+        )
         raise HTTPException(
           status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
-          detail=f"Failed to access repository: {error_message}",
+          detail="Failed to access repository.",
         )
 
     # Log structured query attempt with business context
@@ -828,12 +830,12 @@ async def execute_cypher_query(
     if "No credit pool found" in str(e):
       raise HTTPException(
         status_code=http_status.HTTP_402_PAYMENT_REQUIRED,
-        detail=str(e),
+        detail="No credit pool found for this graph. Please check your subscription.",
       )
     # Re-raise other ValueErrors
     raise HTTPException(
       status_code=http_status.HTTP_400_BAD_REQUEST,
-      detail=str(e),
+      detail="Invalid query request.",
     )
 
   except HTTPException as exc:

@@ -19,7 +19,6 @@ from robosystems.operations.graph.subgraph_service import SubgraphService
 
 
 @pytest.mark.asyncio
-@pytest.mark.integration
 class TestSubgraphOperations:
   """Test subgraph operations including all TODO implementations."""
 

@@ -61,9 +61,10 @@ async def get_graph_repository_dependency(
   except HTTPException:
     raise
   except GraphClientError as e:
+    logger.error(f"Graph client error for graph {graph_id}: {e}")
     raise HTTPException(
       status_code=e.status_code or status.HTTP_400_BAD_REQUEST,
-      detail=str(e),
+      detail="Failed to access the requested graph.",
     )
   except Exception as e:
     logger.exception(f"Error creating repository for graph {graph_id}: {e}")

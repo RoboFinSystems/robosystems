@@ -234,7 +234,7 @@ async def create_link_token(
     logger.warning(f"Provider not available for link token: {e}")
     raise create_error_response(
       status_code=status.HTTP_403_FORBIDDEN,
-      detail=str(e),
+      detail="The requested provider is not available.",
       code=ErrorCode.FORBIDDEN,
     )
   except Exception as e:

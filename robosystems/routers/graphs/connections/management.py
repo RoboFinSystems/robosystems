@@ -240,7 +240,7 @@ async def create_connection(
     logger.warning(f"Provider not available for connection: {e}")
     raise create_error_response(
       status_code=status.HTTP_403_FORBIDDEN,
-      detail=str(e),
+      detail="The requested provider is not available.",
       code=ErrorCode.FORBIDDEN,
     )
   except Exception as e:
@@ -523,13 +523,13 @@ async def delete_connection(
     logger.warning(f"Provider not available for connection cleanup: {e}")
     raise create_error_response(
       status_code=status.HTTP_403_FORBIDDEN,
-      detail=str(e),
+      detail="The requested provider is not available.",
       code=ErrorCode.FORBIDDEN,
     )
   except Exception as e:
-    logger.error(f"Failed to delete connection {connection_id}: {e}")
+    logger.error(f"Failed to delete connection {connection_id}: {e}", exc_info=True)
     raise create_error_response(
       status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-      detail=f"Failed to delete connection: {e!s}",
+      detail="Failed to delete connection.",
       code=ErrorCode.INTERNAL_ERROR,
     )

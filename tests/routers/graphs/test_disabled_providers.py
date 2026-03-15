@@ -47,7 +47,7 @@ class TestDisabledProviderHandling:
       assert response.status_code == status.HTTP_403_FORBIDDEN
       response_json = response.json()
       # Check the error message (response_json is the full error object with detail, code, timestamp)
-      assert "SEC provider is not enabled" in str(response_json)
+      assert "not available" in str(response_json).lower()
 
   def test_create_connection_disabled_plaid_provider(
     self, client: TestClient, auth_headers
@@ -84,7 +84,7 @@ class TestDisabledProviderHandling:
       assert response.status_code == status.HTTP_403_FORBIDDEN
       response_json = response.json()
       # Check the error message (response_json is the full error object with detail, code, timestamp)
-      assert "Plaid provider is not enabled" in str(response_json)
+      assert "not available" in str(response_json).lower()
 
   def test_sync_connection_disabled_provider(self, client: TestClient, auth_headers):
     """Test syncing a connection for disabled provider returns 403."""
@@ -128,7 +128,7 @@ class TestDisabledProviderHandling:
         assert response.status_code == status.HTTP_403_FORBIDDEN
         response_json = response.json()
         # The error response has a nested structure
-        assert "SEC provider is not enabled" in response_json["detail"]["detail"]
+        assert "not available" in response_json["detail"]["detail"].lower()
 
   def test_create_link_token_disabled_plaid(self, client: TestClient, auth_headers):
     """Test creating a link token for disabled Plaid provider returns 403."""
@@ -179,7 +179,7 @@ class TestDisabledProviderHandling:
       assert response.status_code == status.HTTP_403_FORBIDDEN
       response_json = response.json()
       # The error response has a nested structure
-      assert "Plaid provider is not enabled" in response_json["detail"]["detail"]
+      assert "not available" in response_json["detail"]["detail"].lower()
 
   def test_delete_connection_disabled_provider(self, client: TestClient, auth_headers):
     """Test deleting a connection for disabled provider returns 403."""
@@ -227,9 +227,7 @@ class TestDisabledProviderHandling:
           assert response.status_code == status.HTTP_403_FORBIDDEN
           response_json = response.json()
           # The error response has a nested structure
-          assert (
-            "QuickBooks provider is not enabled" in response_json["detail"]["detail"]
-          )
+          assert "not available" in response_json["detail"]["detail"].lower()
 
   def test_invalid_provider_returns_422(self, client: TestClient, auth_headers):
     """Test that invalid provider values return 422 validation error."""

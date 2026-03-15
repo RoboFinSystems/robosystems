@@ -152,12 +152,12 @@ async def get_subgraph_info(
       detail="Failed to get subgraph info due to database error",
     )
   except Exception as e:
-    logger.error(f"Unexpected error getting subgraph info: {e}")
+    logger.error(f"Unexpected error getting subgraph info: {e}", exc_info=True)
     # Record failure metric
     log_metric("subgraph_info_failed", 1, {"error_type": "unexpected"})
     # Mark circuit breaker failure
     circuit_breaker.record_failure(graph_id, "subgraph_info")
     raise HTTPException(
       status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-      detail=f"Failed to get subgraph info: {e!s}",
+      detail="Failed to get subgraph info.",
     )

@@ -280,9 +280,10 @@ async def query_tables(
         "graph_id": graph_id,
         "error_type": type(e).__name__,
       },
+      exc_info=True,
     )
 
     raise HTTPException(
       status_code=status.HTTP_400_BAD_REQUEST,
-      detail=f"Query failed: {e!s}",
+      detail="Query failed.",
     )
