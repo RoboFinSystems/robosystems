@@ -135,7 +135,7 @@ jobs:
           - 4566:4566
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: ${{ github.repository }}
           ref: ${{ github.ref }}
@@ -143,13 +143,13 @@ jobs:
 
       - name: Setup Python (GitHub-hosted runners only)
         if: runner.os == 'Linux' && !contains(runner.name, 'robosystems')
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: ${{ inputs.python-version || '3.13' }}
 
       - name: Install uv (GitHub-hosted runners only)
         if: runner.os == 'Linux' && !contains(runner.name, 'robosystems')
-        uses: astral-sh/setup-uv@v6
+        uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true
           cache-dependency-glob: "uv.lock"
@@ -223,8 +223,8 @@ jobs:
       - name: Run tests
         timeout-minutes: 10
         run: |
-          # Run tests (exclude integration and slow tests)
-          uv run pytest -v --tb=short --ignore=tests/integration -m "not slow"
+          # Run tests (exclude slow tests)
+          uv run pytest -v --tb=short -m "not slow"
 
       - name: Run dbt tests
         timeout-minutes: 1
@@ -256,7 +256,7 @@ jobs:
           uv run cfn-lint
 
       - name: Scan dependencies for vulnerabilities
-        uses: aquasecurity/trivy-action@master
+        uses: aquasecurity/trivy-action@0.35.0
         with:
           scan-type: 'fs'
           scan-ref: '.'

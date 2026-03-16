@@ -253,9 +253,10 @@ async def list_tables(
         "graph_id": graph_id,
         "error_type": type(e).__name__,
       },
+      exc_info=True,
     )
 
     raise HTTPException(
       status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-      detail=f"Failed to list tables: {e!s}",
+      detail="Failed to list tables.",
     )

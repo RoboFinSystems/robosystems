@@ -225,9 +225,6 @@ just test-cov
 
 # Run only unit tests
 uv run pytest -m unit
-
-# Run integration tests
-just test-integration
 ```
 
 ### Writing Tests

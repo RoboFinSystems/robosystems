@@ -1,0 +1,31 @@
+version: 2
+updates:
+  # GitHub Actions — pinned action versions (e.g., trivy-action@0.35.0)
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "monthly"
+    labels:
+      - "dependencies"
+
+  # Python — uv dependencies in pyproject.toml and uv.lock
+  - package-ecosystem: "uv"
+    directory: "/"
+    schedule:
+      interval: "monthly"
+    labels:
+      - "dependencies"
+
+  # Docker — base images in Dockerfiles
+  - package-ecosystem: "docker"
+    directory: "/"
+    schedule:
+      interval: "monthly"
+    labels:
+      - "dependencies"
+    ignore:
+      # Never auto-bump Python runtime versions — requires explicit migration
+      - dependency-name: "python"
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
+      - dependency-name: "lambda/python"
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]

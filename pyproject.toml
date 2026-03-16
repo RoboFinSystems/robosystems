@@ -34,7 +34,7 @@ dependencies = [
     # Web Framework & API
     "fastapi>=0.116.0,<1.0",
     "python-multipart>=0.0.16,<1.0",
-    "sse-starlette>=2.4.1,<3.0",
+    "sse-starlette>=3.3.2,<4.0",
     "uvicorn>=0.35.0,<1.0",
     "uvloop>=0.21.0,<1.0",
     "httptools>=0.6.0,<1.0",
@@ -49,7 +49,7 @@ dependencies = [
     "sqlalchemy>=2.0.0,<3.0",
 
     # Caching
-    "redis>=6.2.0,<7.0",
+    "redis>=7.0.0,<8.0",
 
     # Data Orchestration (Dagster)
     "dagster>=1.9.0,<2.0",
@@ -65,7 +65,7 @@ dependencies = [
     "boto3>=1.39.0,<2.0",
 
     # Data Processing & Analytics
-    "arelle-release~=2.38.1",
+    "arelle-release~=2.39.1",
     "icebug>=12.0,<13.0",
     "fastembed>=0.4.0,<1.0",
     "numpy>=1.26.0,<3.0",
@@ -121,7 +121,7 @@ neo4j = [
 ]
 dev = [
     # RoboSystems client for demo and testing
-    "robosystems-client>=0.2.30,<0.3",
+    "robosystems-client==0.2.34",
 
     # Optional backends (for testing)
     "neo4j>=5.15.0,<6.0",
@@ -156,7 +156,7 @@ build-backend = "setuptools.build_meta"
 lambda = [
     "boto3>=1.39.0,<2.0",           # AWS SDK (all Lambdas)
     "psycopg2-binary>=2.9.0,<3.0",  # PostgreSQL (postgres-init, postgres-rotation)
-    "redis>=6.2.0,<7.0",            # Valkey/Redis (valkey-rotation)
+    "redis>=7.0.0,<8.0",            # Valkey/Redis (valkey-rotation)
     "urllib3>=2.0.0,<3.0",          # HTTP client (graph-volume-monitor)
 ]
 

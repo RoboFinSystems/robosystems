@@ -218,7 +218,7 @@ async def sync_connection(
     logger.warning(f"Provider not available for sync: {e}")
     raise create_error_response(
       status_code=status.HTTP_403_FORBIDDEN,
-      detail=str(e),
+      detail="The requested provider is not available.",
       code=ErrorCode.FORBIDDEN,
     )
   except Exception as e:

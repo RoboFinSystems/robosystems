@@ -46,7 +46,44 @@ class TestDisabledProviderHandling:
       assert response.status_code == status.HTTP_403_FORBIDDEN
       response_json = response.json()
       # Check the error message (response_json is the full error object with detail, code, timestamp)
-      assert "SEC provider is not enabled" in str(response_json)
+      assert "not available" in str(response_json).lower()
+
+  def test_create_connection_disabled_plaid_provider(
+    self, client: TestClient, auth_headers
+  ):
+    """Test creating a connection for disabled Plaid provider returns 403."""
+    with patch("robosystems.operations.providers.registry.env") as mock_env:
+      # Configure mock env with Plaid disabled
+      mock_env.CONNECTION_SEC_ENABLED = True
+      mock_env.CONNECTION_QUICKBOOKS_ENABLED = True
+      mock_env.CONNECTION_PLAID_ENABLED = False
+
+      # Re-initialize the provider registry with Plaid disabled
+      import robosystems.routers.graphs.connections.management as management
+      from robosystems.operations.providers.registry import ProviderRegistry
+      from robosystems.routers.graphs.connections import utils
+
+      new_registry = ProviderRegistry()
+      utils.provider_registry = new_registry
+      management.provider_registry = new_registry
+
+      request_data = {
+        "provider": "plaid",
+        "entity_id": "entity_123",
+        "plaid_config": {"link_token": "test_token"},
+      }
+
+      response = client.post(
+        f"/v1/graphs/{VALID_TEST_GRAPH_ID}/connections",
+        json=request_data,
+        headers=auth_headers,
+      )
+
+      # Should return 403 Forbidden, not 500
+      assert response.status_code == status.HTTP_403_FORBIDDEN
+      response_json = response.json()
+      # Check the error message (response_json is the full error object with detail, code, timestamp)
+      assert "not available" in str(response_json).lower()
 
   def test_sync_connection_disabled_provider(self, client: TestClient, auth_headers):
     """Test syncing a connection for disabled provider returns 403."""
@@ -89,7 +126,7 @@ class TestDisabledProviderHandling:
         assert response.status_code == status.HTTP_403_FORBIDDEN
         response_json = response.json()
         # The error response has a nested structure
-        assert "SEC provider is not enabled" in response_json["detail"]["detail"]
+        assert "not available" in response_json["detail"]["detail"].lower()
 
   def test_delete_connection_disabled_provider(self, client: TestClient, auth_headers):
     """Test deleting a connection for disabled provider returns 403."""
@@ -136,9 +173,7 @@ class TestDisabledProviderHandling:
           assert response.status_code == status.HTTP_403_FORBIDDEN
           response_json = response.json()
           # The error response has a nested structure
-          assert (
-            "QuickBooks provider is not enabled" in response_json["detail"]["detail"]
-          )
+          assert "not available" in response_json["detail"]["detail"].lower()
 
   def test_invalid_provider_returns_422(self, client: TestClient, auth_headers):
     """Test that invalid provider values return 422 validation error."""

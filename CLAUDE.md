@@ -175,7 +175,6 @@ robosystems/
 ```bash
 just test                  # Unit tests (fast, no external deps)
 just test routers          # Run tests at /tests/routers
-just test-integration      # Integration tests
 just test-cov              # Coverage report
 just test-all              # Full suite with all checks
 ```

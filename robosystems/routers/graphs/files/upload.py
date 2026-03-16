@@ -390,10 +390,12 @@ async def create_file_upload(
       },
     )
 
-    logger.error(f"Failed to generate upload URL for {request.file_name}: {e}")
+    logger.error(
+      f"Failed to generate upload URL for {request.file_name}: {e}", exc_info=True
+    )
     raise HTTPException(
       status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-      detail=f"Failed to generate upload URL: {e!s}",
+      detail="Failed to generate upload URL.",
     )
 
 
@@ -924,8 +926,8 @@ async def update_file(
       },
     )
 
-    logger.error(f"Failed to update file {file_id}: {e}")
+    logger.error(f"Failed to update file {file_id}: {e}", exc_info=True)
     raise HTTPException(
       status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-      detail=f"Failed to update file: {e!s}",
+      detail="Failed to update file.",
     )

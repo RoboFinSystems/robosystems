@@ -1,3 +1,4 @@
+import logging
 import time
 import uuid
 
@@ -13,6 +14,8 @@ from robosystems.operations.views import (
   FactGridBuilder,
   query_fact_grid,
 )
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/views", tags=["Views"])
 
@@ -106,7 +109,8 @@ async def create_view(
   except HTTPException:
     raise
   except Exception as e:
+    logger.error(f"Failed to create view: {e}", exc_info=True)
     raise HTTPException(
       status_code=500,
-      detail=f"Failed to create view: {e!s}",
-    ) from e
+      detail="Failed to create view.",
+    )

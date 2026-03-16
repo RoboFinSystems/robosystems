@@ -280,6 +280,7 @@ async def query_tables(
         "graph_id": graph_id,
         "error_type": type(e).__name__,
       },
+      exc_info=True,
     )
 
     raise HTTPException(
