@@ -26,7 +26,7 @@ class TestResolveStructureToolDefinition:
     assert "statement_type" in defn["inputSchema"]["properties"]
     assert "query" in defn["inputSchema"]["properties"]
     assert "ticker" in defn["inputSchema"]["properties"]
-    assert "accession_number" in defn["inputSchema"]["properties"]
+    assert "report_id" in defn["inputSchema"]["properties"]
     assert "include_parenthetical" in defn["inputSchema"]["properties"]
 
   def test_no_required_fields(self, tool):
@@ -131,7 +131,7 @@ class TestResolveStructureCanonical:
     assert "[Parenthetical]" not in query
 
   @pytest.mark.asyncio
-  async def test_with_accession_number_filter(self, tool, mock_client):
+  async def test_with_report_id_filter(self, tool, mock_client):
     mock_client.execute_query = AsyncMock(
       return_value=[
         {
@@ -141,7 +141,7 @@ class TestResolveStructureCanonical:
           "definition": "0001002 - Statement - CONSOLIDATED BALANCE SHEETS",
           "canonical_type": "balance_sheet",
           "canonical_confidence": 0.85,
-          "accession_number": "0001045810-25-000023",
+          "report_id": "0001045810-25-000023",
           "form": "10-K",
           "filing_date": "2025-02-26",
         }
@@ -149,23 +149,23 @@ class TestResolveStructureCanonical:
     )
 
     result = await tool.execute(
-      {"statement_type": "balance_sheet", "accession_number": "0001045810-25-000023"}
+      {"statement_type": "balance_sheet", "report_id": "0001045810-25-000023"}
     )
-    assert result["accession_number"] == "0001045810-25-000023"
+    assert result["report_id"] == "0001045810-25-000023"
     assert len(result["structures"]) == 1
-    assert result["structures"][0]["accession_number"] == "0001045810-25-000023"
+    assert result["structures"][0]["report_id"] == "0001045810-25-000023"
     assert result["structures"][0]["form"] == "10-K"
 
-    # Verify query uses parameterized accession_number filter
+    # Verify query uses parameterized report_id filter
     call_args = mock_client.execute_query.call_args
     query = call_args[0][0]
     params = call_args[1]["parameters"]
-    assert "$accession_number" in query
-    assert params["accession_number"] == "0001045810-25-000023"
+    assert "$report_id" in query
+    assert params["report_id"] == "0001045810-25-000023"
     assert "REPORT_USES_TAXONOMY" in query
 
   @pytest.mark.asyncio
-  async def test_with_ticker_and_accession_number(self, tool, mock_client):
+  async def test_with_ticker_and_report_id(self, tool, mock_client):
     mock_client.execute_query = AsyncMock(
       return_value=[
         {
@@ -175,7 +175,7 @@ class TestResolveStructureCanonical:
           "definition": "0001002 - Statement - CONSOLIDATED BALANCE SHEETS",
           "canonical_type": "balance_sheet",
           "canonical_confidence": 0.85,
-          "accession_number": "0001045810-25-000023",
+          "report_id": "0001045810-25-000023",
           "form": "10-K",
           "filing_date": "2025-02-26",
         }
@@ -186,20 +186,20 @@ class TestResolveStructureCanonical:
       {
         "statement_type": "balance_sheet",
         "ticker": "NVDA",
-        "accession_number": "0001045810-25-000023",
+        "report_id": "0001045810-25-000023",
       }
     )
     assert result["ticker"] == "NVDA"
-    assert result["accession_number"] == "0001045810-25-000023"
+    assert result["report_id"] == "0001045810-25-000023"
 
     # Verify query uses parameterized filters
     call_args = mock_client.execute_query.call_args
     query = call_args[0][0]
     params = call_args[1]["parameters"]
     assert "$ticker" in query
-    assert "$accession_number" in query
+    assert "$report_id" in query
     assert params["ticker"] == "NVDA"
-    assert params["accession_number"] == "0001045810-25-000023"
+    assert params["report_id"] == "0001045810-25-000023"
 
   @pytest.mark.asyncio
   async def test_no_results(self, tool, mock_client):
@@ -310,7 +310,7 @@ class TestResolveStructureVectorSearch:
         [
           {
             "id": "struct-1",
-            "accession_number": "000-123",
+            "report_id": "000-123",
             "form": "10-K",
             "filing_date": "2025-01-15",
           }
@@ -326,10 +326,8 @@ class TestResolveStructureVectorSearch:
     assert result["structures"][0]["score"] == 0.92
 
   @pytest.mark.asyncio
-  async def test_vector_search_with_accession_number(
-    self, tool_with_enricher, mock_client
-  ):
-    """Vector search with accession_number filters to matching filing."""
+  async def test_vector_search_with_report_id(self, tool_with_enricher, mock_client):
+    """Vector search with report_id filters to matching filing."""
     mock_client.query_table = AsyncMock(
       return_value={
         "columns": [
@@ -361,7 +359,7 @@ class TestResolveStructureVectorSearch:
         [
           {
             "id": "struct-1",
-            "accession_number": "000-456",
+            "report_id": "000-456",
             "form": "10-Q",
             "filing_date": "2025-03-01",
           }
@@ -370,11 +368,11 @@ class TestResolveStructureVectorSearch:
     )
 
     result = await tool_with_enricher.execute(
-      {"query": "balance sheet", "accession_number": "000-456"}
+      {"query": "balance sheet", "report_id": "000-456"}
     )
-    assert result["accession_number"] == "000-456"
+    assert result["report_id"] == "000-456"
     assert len(result["structures"]) == 1
-    assert result["structures"][0]["accession_number"] == "000-456"
+    assert result["structures"][0]["report_id"] == "000-456"
 
   @pytest.mark.asyncio
   async def test_vector_search_excludes_parenthetical(

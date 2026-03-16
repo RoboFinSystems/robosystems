@@ -91,7 +91,7 @@ Shared repository adapters declare a `SharedRepositoryManifest` (defined in `bas
 | `id`, `name`, `description` | Identity (id doubles as graph_id) |
 | `data_source_type`, `data_source_url`, `sync_frequency` | Data source metadata |
 | `schema_type`, `schema_extensions` | Graph schema configuration |
-| `has_element_discovery`, `has_semantic_enrichment` | MCP capability flags |
+| `has_semantic_enrichment` | MCP capability flags |
 | `plans` | Billing plans with pricing, credits, and features |
 | `rate_limits` | Per-plan rate limits (queries, MCP, agent, downloads) |
 | `allowed_endpoints`, `blocked_endpoints` | Endpoint access control |

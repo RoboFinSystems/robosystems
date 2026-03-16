@@ -174,13 +174,12 @@ For income statement items (revenue, net income), always specify period_type='an
         }
 
     try:
-      graph_id = self.client.graph_id
-
-      # Build parameterized Cypher query with optional filters
-      match_clauses = [
-        "MATCH (f:Fact)-[:FACT_HAS_ELEMENT]->(el:Element)",
-        "MATCH (f)-[:FACT_HAS_PERIOD]->(p:Period)",
-        "MATCH (f)-[:FACT_HAS_UNIT]->(u:Unit)",
+      # Build parameterized Cypher query with comma-separated patterns
+      # in a single MATCH clause for performance
+      match_parts = [
+        "(f:Fact)-[:FACT_HAS_ELEMENT]->(el:Element)",
+        "(f)-[:FACT_HAS_PERIOD]->(p:Period)",
+        "(f)-[:FACT_HAS_UNIT]->(u:Unit)",
       ]
       where_clauses = [
         "f.has_dimensions = false",
@@ -217,14 +216,14 @@ For income statement items (revenue, net income), always specify period_type='an
       entity_list = entities if entities else ([entity] if entity else None)
 
       if entity_list:
-        match_clauses.append("MATCH (f)-[:FACT_HAS_ENTITY]->(ent:Entity)")
+        match_parts.append("(f)-[:FACT_HAS_ENTITY]->(ent:Entity)")
         where_clauses.append(
           "(ent.ticker IN $entities OR ent.cik IN $entities OR ent.name IN $entities)"
         )
         parameters["entities"] = entity_list
 
       if form or fiscal_year is not None or fiscal_period:
-        match_clauses.append("MATCH (r:Report)-[:REPORT_HAS_FACT]->(f)")
+        match_parts.append("(r:Report)-[:REPORT_HAS_FACT]->(f)")
         if form:
           where_clauses.append("r.form = $form")
           parameters["form"] = form
@@ -256,15 +255,17 @@ For income statement items (revenue, net income), always specify period_type='an
           u.value as unit
         """
 
-      query = "\n".join(match_clauses)
+      query = "MATCH " + ", ".join(match_parts)
       query += "\nWHERE " + "\n  AND ".join(where_clauses)
       query += return_clause
 
-      # Execute query through Graph API with parameters
-      from robosystems.middleware.graph import get_universal_repository
+      # Execute query through MCP client (consistent with all other tools)
+      result = await self.client.execute_query(query, parameters=parameters)
 
-      repository = await get_universal_repository(graph_id, "read")
-      result = await repository.execute_query(query, parameters)
+      # Deduplicate by (element, period, entity) — same fact can appear in
+      # multiple filings (comparative periods). Keep first occurrence.
+      if result:
+        result = self._deduplicate_facts(result, has_entity=entity_list is not None)
 
       # Convert to DataFrame (lazy import pandas)
       import pandas as pd
@@ -346,3 +347,24 @@ For income statement items (revenue, net income), always specify period_type='an
 
       logger.error(traceback.format_exc())
       return {"error": "construction_failed", "message": str(e)}
+
+  @staticmethod
+  def _deduplicate_facts(
+    rows: list[dict[str, Any]], has_entity: bool
+  ) -> list[dict[str, Any]]:
+    """Deduplicate facts by (element, period, entity), keeping first occurrence."""
+    seen: set[tuple] = set()
+    deduped: list[dict[str, Any]] = []
+    for row in rows:
+      if has_entity:
+        key = (
+          row.get("element_id", ""),
+          row.get("period_end", ""),
+          row.get("entity_ticker", ""),
+        )
+      else:
+        key = (row.get("element_id", ""), row.get("period_end", ""))
+      if key not in seen:
+        seen.add(key)
+        deduped.append(row)
+    return deduped
