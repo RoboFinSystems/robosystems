@@ -449,31 +449,44 @@ class TestHandleInvoiceCreated:
     mock_db_session.commit.assert_called_once()
     mock_context.log.info.assert_called()
 
-  async def test_no_subscription_id_returns_early(self, mock_db_session, mock_context):
-    """Returns early with info log when invoice has no subscription ID."""
-    invoice_data = make_invoice_data(subscription_id=None)
-
-    from robosystems.dagster.jobs.billing import _handle_invoice_created
-
-    await _handle_invoice_created(invoice_data, mock_db_session, mock_context)
-
-    mock_context.log.info.assert_called_once()
-    mock_db_session.add.assert_not_called()
-
-  async def test_subscription_not_found_logs_warning(
+  async def test_no_subscription_id_raises_not_found(
     self, mock_db_session, mock_context
   ):
-    """Logs warning when subscription is not found for invoice."""
-    invoice_data = make_invoice_data()
+    """Raises SubscriptionNotFoundError when invoice has no subscription ID."""
+    invoice_data = make_invoice_data(subscription_id=None)
 
-    with patch(PATCH_BILLING_SUB) as MockSub:
-      MockSub.get_by_provider_subscription_id.return_value = None
+    from robosystems.dagster.jobs.billing import (
+      SubscriptionNotFoundError,
+      _handle_invoice_created,
+    )
 
-      from robosystems.dagster.jobs.billing import _handle_invoice_created
-
+    with pytest.raises(SubscriptionNotFoundError):
       await _handle_invoice_created(invoice_data, mock_db_session, mock_context)
 
-    mock_context.log.warning.assert_called_once()
+    mock_db_session.add.assert_not_called()
+
+  async def test_subscription_not_found_raises_error(
+    self, mock_db_session, mock_context
+  ):
+    """Raises SubscriptionNotFoundError when subscription cannot be resolved."""
+    invoice_data = make_invoice_data()
+
+    with (
+      patch(PATCH_BILLING_SUB) as MockSub,
+      patch(f"{_BILLING}.BillingCustomer") as MockCustomer,
+    ):
+      MockSub.get_by_provider_subscription_id.return_value = None
+      MockSub.get_by_stripe_subscription_id.return_value = None
+      MockCustomer.get_by_stripe_customer_id.return_value = None
+
+      from robosystems.dagster.jobs.billing import (
+        SubscriptionNotFoundError,
+        _handle_invoice_created,
+      )
+
+      with pytest.raises(SubscriptionNotFoundError):
+        await _handle_invoice_created(invoice_data, mock_db_session, mock_context)
+
     mock_db_session.add.assert_not_called()
 
   async def test_already_synced_invoice_skips_creation(
@@ -723,35 +736,26 @@ class TestHandlePaymentSucceeded:
 
     mock_trigger.assert_not_awaited()
 
-  async def test_no_subscription_id_returns_early(self, mock_db_session, mock_context):
-    """Returns early when invoice has no subscription ID."""
+  async def test_no_subscription_id_raises_not_found(
+    self, mock_db_session, mock_context
+  ):
+    """Raises SubscriptionNotFoundError when invoice has no subscription ID."""
     invoice_data = make_invoice_data(subscription_id=None)
 
-    from robosystems.dagster.jobs.billing import _handle_payment_succeeded
+    from robosystems.dagster.jobs.billing import (
+      SubscriptionNotFoundError,
+      _handle_payment_succeeded,
+    )
 
-    await _handle_payment_succeeded(invoice_data, mock_db_session, mock_context)
+    with pytest.raises(SubscriptionNotFoundError):
+      await _handle_payment_succeeded(invoice_data, mock_db_session, mock_context)
 
     mock_db_session.commit.assert_not_called()
 
-  async def test_subscription_not_found_logs_warning(
-    self, mock_db_session, mock_context
-  ):
-    """Logs warning and returns early when subscription not found."""
-    invoice_data = make_invoice_data()
-
-    with patch(PATCH_BILLING_SUB) as MockSub:
-      MockSub.get_by_provider_subscription_id.return_value = None
-
-      from robosystems.dagster.jobs.billing import _handle_payment_succeeded
-
-      await _handle_payment_succeeded(invoice_data, mock_db_session, mock_context)
-
-    mock_context.log.warning.assert_called_once()
-
-  async def test_missing_invoice_logs_warning_but_continues(
+  async def test_missing_invoice_creates_from_payment_data(
     self, mock_db_session, mock_context, mock_subscription, mock_customer
   ):
-    """Logs warning when invoice not found but still processes subscription."""
+    """Creates invoice from payment data when invoice not found (race condition)."""
     invoice_data = make_invoice_data()
     mock_subscription.status = "active"
 
@@ -768,7 +772,6 @@ class TestHandlePaymentSucceeded:
 
       await _handle_payment_succeeded(invoice_data, mock_db_session, mock_context)
 
-    mock_context.log.warning.assert_called_once()
     mock_context.log.info.assert_called()
 
   async def test_missing_customer_skips_payment_method_update(
@@ -868,30 +871,20 @@ class TestHandlePaymentFailed:
     assert mock_subscription.status == "active"
     mock_db_session.commit.assert_not_called()
 
-  async def test_no_subscription_id_returns_early(self, mock_db_session, mock_context):
-    """Returns silently when invoice has no subscription ID."""
-    invoice_data = make_invoice_data(subscription_id=None)
-
-    from robosystems.dagster.jobs.billing import _handle_payment_failed
-
-    await _handle_payment_failed(invoice_data, mock_db_session, mock_context)
-
-    mock_db_session.commit.assert_not_called()
-
-  async def test_subscription_not_found_logs_warning(
+  async def test_no_subscription_id_raises_not_found(
     self, mock_db_session, mock_context
   ):
-    """Logs warning when subscription not found for failed payment."""
-    invoice_data = make_invoice_data()
+    """Raises SubscriptionNotFoundError when invoice has no subscription ID."""
+    invoice_data = make_invoice_data(subscription_id=None)
 
-    with patch(PATCH_BILLING_SUB) as MockSub:
-      MockSub.get_by_provider_subscription_id.return_value = None
+    from robosystems.dagster.jobs.billing import (
+      SubscriptionNotFoundError,
+      _handle_payment_failed,
+    )
 
-      from robosystems.dagster.jobs.billing import _handle_payment_failed
-
+    with pytest.raises(SubscriptionNotFoundError):
       await _handle_payment_failed(invoice_data, mock_db_session, mock_context)
 
-    mock_context.log.warning.assert_called_once()
     mock_db_session.commit.assert_not_called()
 
   async def test_preserves_existing_metadata_keys(
@@ -1541,20 +1534,28 @@ class TestHandleSubscriptionUpdated:
     assert mock_subscription.current_period_start is not None
     assert mock_subscription.current_period_end is not None
 
-  async def test_subscription_not_found_logs_warning(
+  async def test_subscription_not_found_raises_error(
     self, mock_db_session, mock_context
   ):
-    """Logs warning and returns when subscription not found."""
+    """Raises SubscriptionNotFoundError when subscription not found."""
     sub_data = make_subscription_data()
 
-    with patch(PATCH_BILLING_SUB) as MockSub:
+    with (
+      patch(PATCH_BILLING_SUB) as MockSub,
+      patch(f"{_BILLING}.BillingCustomer") as MockCustomer,
+    ):
       MockSub.get_by_provider_subscription_id.return_value = None
+      MockSub.get_by_stripe_subscription_id.return_value = None
+      MockCustomer.get_by_stripe_customer_id.return_value = None
 
-      from robosystems.dagster.jobs.billing import _handle_subscription_updated
+      from robosystems.dagster.jobs.billing import (
+        SubscriptionNotFoundError,
+        _handle_subscription_updated,
+      )
 
-      await _handle_subscription_updated(sub_data, mock_db_session, mock_context)
+      with pytest.raises(SubscriptionNotFoundError):
+        await _handle_subscription_updated(sub_data, mock_db_session, mock_context)
 
-    mock_context.log.warning.assert_called_once()
     mock_db_session.commit.assert_not_called()
 
   async def test_reactivation_requires_future_ends_at(
@@ -1658,20 +1659,28 @@ class TestHandleSubscriptionDeleted:
 
     mock_subscription.cancel.assert_called_once_with(mock_db_session, immediate=True)
 
-  async def test_subscription_not_found_logs_warning(
+  async def test_subscription_not_found_raises_error(
     self, mock_db_session, mock_context
   ):
-    """Logs warning and returns when subscription not found for deletion."""
+    """Raises SubscriptionNotFoundError when subscription not found for deletion."""
     sub_data = {"id": "sub_unknown"}
 
-    with patch(PATCH_BILLING_SUB) as MockSub:
+    with (
+      patch(PATCH_BILLING_SUB) as MockSub,
+      patch(f"{_BILLING}.BillingCustomer") as MockCustomer,
+    ):
       MockSub.get_by_provider_subscription_id.return_value = None
+      MockSub.get_by_stripe_subscription_id.return_value = None
+      MockCustomer.get_by_stripe_customer_id.return_value = None
 
-      from robosystems.dagster.jobs.billing import _handle_subscription_deleted
+      from robosystems.dagster.jobs.billing import (
+        SubscriptionNotFoundError,
+        _handle_subscription_deleted,
+      )
 
-      await _handle_subscription_deleted(sub_data, mock_db_session, mock_context)
+      with pytest.raises(SubscriptionNotFoundError):
+        await _handle_subscription_deleted(sub_data, mock_db_session, mock_context)
 
-    mock_context.log.warning.assert_called_once()
     mock_db_session.commit.assert_not_called()
 
   async def test_provisioning_subscription_immediate_cancel(
