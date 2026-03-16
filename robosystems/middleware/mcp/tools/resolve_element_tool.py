@@ -114,9 +114,7 @@ Use the returned query_hint directly in read-graph-cypher for immediate results.
       arguments.get("ticker", "").strip().upper() if arguments.get("ticker") else None
     )
     report_id = (
-      arguments.get("report_id", "").strip()
-      if arguments.get("report_id")
-      else None
+      arguments.get("report_id", "").strip() if arguments.get("report_id") else None
     )
 
     if not concept:
@@ -158,9 +156,7 @@ Use the returned query_hint directly in read-graph-cypher for immediate results.
     canonical_id = result["canonical_id"]
     if not canonical_id:
       # No canonical match — try direct text search on element qname/name
-      return await self._resolve_text_fallback(
-        result, concept, ticker, report_id
-      )
+      return await self._resolve_text_fallback(result, concept, ticker, report_id)
 
     try:
       params: dict[str, Any] = {"canonical_id": canonical_id}
@@ -203,9 +199,7 @@ Use the returned query_hint directly in read-graph-cypher for immediate results.
       rows = []
 
     if not rows:
-      return await self._resolve_text_fallback(
-        result, concept, ticker, report_id
-      )
+      return await self._resolve_text_fallback(result, concept, ticker, report_id)
 
     # Step 3: Enrich with labels
     qnames = [r["qname"] for r in rows if r.get("qname")]

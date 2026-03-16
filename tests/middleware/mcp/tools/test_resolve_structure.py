@@ -326,9 +326,7 @@ class TestResolveStructureVectorSearch:
     assert result["structures"][0]["score"] == 0.92
 
   @pytest.mark.asyncio
-  async def test_vector_search_with_report_id(
-    self, tool_with_enricher, mock_client
-  ):
+  async def test_vector_search_with_report_id(self, tool_with_enricher, mock_client):
     """Vector search with report_id filters to matching filing."""
     mock_client.query_table = AsyncMock(
       return_value={

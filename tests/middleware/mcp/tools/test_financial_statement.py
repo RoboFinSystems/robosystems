@@ -1,6 +1,6 @@
 """Tests for get-financial-statement MCP tool."""
 
-from unittest.mock import AsyncMock, call
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -57,9 +57,7 @@ class TestGetFinancialStatementExecution:
 
   @pytest.mark.asyncio
   async def test_unknown_statement_type(self, tool):
-    result = await tool.execute(
-      {"ticker": "NVDA", "statement_type": "profit_and_loss"}
-    )
+    result = await tool.execute({"ticker": "NVDA", "statement_type": "profit_and_loss"})
     assert "error" in result
     assert "Unknown statement_type" in result["error"]
 
@@ -125,8 +123,16 @@ class TestGetFinancialStatementExecution:
     # Auto-resolve returns a report, then main query uses annual filter
     mock_client.execute_query = AsyncMock(
       side_effect=[
-        [{"accession_number": "acc-1", "identifier": "id-1", "form": "10-K",
-          "filing_date": "2025-10-31", "fiscal_year": 2025, "fiscal_period": "FY"}],
+        [
+          {
+            "accession_number": "acc-1",
+            "identifier": "id-1",
+            "form": "10-K",
+            "filing_date": "2025-10-31",
+            "fiscal_year": 2025,
+            "fiscal_period": "FY",
+          }
+        ],
         [],
       ]
     )
@@ -147,8 +153,16 @@ class TestGetFinancialStatementExecution:
   async def test_period_type_quarterly_filter(self, tool, mock_client):
     mock_client.execute_query = AsyncMock(
       side_effect=[
-        [{"accession_number": "acc-1", "identifier": "id-1", "form": "10-Q",
-          "filing_date": "2025-08-01", "fiscal_year": 2025, "fiscal_period": "Q3"}],
+        [
+          {
+            "accession_number": "acc-1",
+            "identifier": "id-1",
+            "form": "10-Q",
+            "filing_date": "2025-08-01",
+            "fiscal_year": 2025,
+            "fiscal_period": "Q3",
+          }
+        ],
         [],
       ]
     )
@@ -183,8 +197,16 @@ class TestGetFinancialStatementExecution:
     """Verify query passes ticker and statement_type as parameters."""
     mock_client.execute_query = AsyncMock(
       side_effect=[
-        [{"accession_number": "acc-1", "identifier": "id-1", "form": "10-K",
-          "filing_date": "2025-10-31", "fiscal_year": 2025, "fiscal_period": "FY"}],
+        [
+          {
+            "accession_number": "acc-1",
+            "identifier": "id-1",
+            "form": "10-K",
+            "filing_date": "2025-10-31",
+            "fiscal_year": 2025,
+            "fiscal_period": "FY",
+          }
+        ],
         [],
       ]
     )
@@ -199,7 +221,7 @@ class TestGetFinancialStatementExecution:
 
   @pytest.mark.asyncio
   async def test_report_id_filter(self, tool, mock_client):
-    """report_id should add Report join matching both identifier and accession_number."""
+    """report_id should add Report join matching by identifier."""
     mock_client.execute_query = AsyncMock(return_value=[])
 
     await tool.execute(
@@ -219,9 +241,7 @@ class TestGetFinancialStatementExecution:
 
   @pytest.mark.asyncio
   async def test_query_error_handling(self, tool, mock_client):
-    mock_client.execute_query = AsyncMock(
-      side_effect=Exception("connection refused")
-    )
+    mock_client.execute_query = AsyncMock(side_effect=Exception("connection refused"))
 
     result = await tool.execute(
       {
@@ -240,8 +260,16 @@ class TestAutoResolve:
     """Annual period_type should look for 10-K, 20-F, 40-F."""
     mock_client.execute_query = AsyncMock(
       side_effect=[
-        [{"accession_number": "acc-1", "identifier": "id-1", "form": "10-K",
-          "filing_date": "2025-10-31", "fiscal_year": 2025, "fiscal_period": "FY"}],
+        [
+          {
+            "accession_number": "acc-1",
+            "identifier": "id-1",
+            "form": "10-K",
+            "filing_date": "2025-10-31",
+            "fiscal_year": 2025,
+            "fiscal_period": "FY",
+          }
+        ],
         [],
       ]
     )
@@ -265,8 +293,16 @@ class TestAutoResolve:
     """Quarterly period_type should include 10-Q plus annual forms."""
     mock_client.execute_query = AsyncMock(
       side_effect=[
-        [{"accession_number": "acc-q1", "identifier": "id-q1", "form": "10-Q",
-          "filing_date": "2025-08-01", "fiscal_year": 2025, "fiscal_period": "Q3"}],
+        [
+          {
+            "accession_number": "acc-q1",
+            "identifier": "id-q1",
+            "form": "10-Q",
+            "filing_date": "2025-08-01",
+            "fiscal_year": 2025,
+            "fiscal_period": "Q3",
+          }
+        ],
         [],
       ]
     )
@@ -289,8 +325,16 @@ class TestAutoResolve:
     """fiscal_year should be passed to the resolve query."""
     mock_client.execute_query = AsyncMock(
       side_effect=[
-        [{"accession_number": "acc-1", "identifier": "id-1", "form": "10-K",
-          "filing_date": "2024-11-01", "fiscal_year": 2024, "fiscal_period": "FY"}],
+        [
+          {
+            "accession_number": "acc-1",
+            "identifier": "id-1",
+            "form": "10-K",
+            "filing_date": "2024-11-01",
+            "fiscal_year": 2024,
+            "fiscal_period": "FY",
+          }
+        ],
         [],
       ]
     )
@@ -343,15 +387,21 @@ class TestAutoResolve:
     """No period_type defaults to annual forms for resolve."""
     mock_client.execute_query = AsyncMock(
       side_effect=[
-        [{"accession_number": "acc-1", "identifier": "id-1", "form": "10-K",
-          "filing_date": "2025-10-31", "fiscal_year": 2025, "fiscal_period": "FY"}],
+        [
+          {
+            "accession_number": "acc-1",
+            "identifier": "id-1",
+            "form": "10-K",
+            "filing_date": "2025-10-31",
+            "fiscal_year": 2025,
+            "fiscal_period": "FY",
+          }
+        ],
         [],
       ]
     )
 
-    await tool.execute(
-      {"ticker": "AAPL", "statement_type": "income_statement"}
-    )
+    await tool.execute({"ticker": "AAPL", "statement_type": "income_statement"})
 
     resolve_params = mock_client.execute_query.call_args_list[0][1]["parameters"]
     assert resolve_params["forms"] == ["10-K", "20-F", "40-F"]
@@ -380,7 +430,11 @@ class TestDeduplication:
       {"qname": "us-gaap:Revenues", "end_date": "2025-09-27", "value": 416161000000},
       {"qname": "us-gaap:Revenues", "end_date": "2025-09-27", "value": 416161000000},
       {"qname": "us-gaap:Revenues", "end_date": "2024-09-28", "value": 391035000000},
-      {"qname": "us-gaap:NetIncomeLoss", "end_date": "2025-09-27", "value": 112010000000},
+      {
+        "qname": "us-gaap:NetIncomeLoss",
+        "end_date": "2025-09-27",
+        "value": 112010000000,
+      },
     ]
     deduped = tool._deduplicate_facts(rows)
     assert len(deduped) == 3
@@ -406,7 +460,11 @@ class TestDeduplication:
   def test_dedup_no_duplicates(self, tool):
     rows = [
       {"qname": "us-gaap:Revenues", "end_date": "2025-09-27", "value": 416161000000},
-      {"qname": "us-gaap:NetIncomeLoss", "end_date": "2025-09-27", "value": 112010000000},
+      {
+        "qname": "us-gaap:NetIncomeLoss",
+        "end_date": "2025-09-27",
+        "value": 112010000000,
+      },
     ]
     deduped = tool._deduplicate_facts(rows)
     assert len(deduped) == 2

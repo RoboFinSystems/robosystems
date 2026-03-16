@@ -112,9 +112,7 @@ Use returned structure identifiers to explore element hierarchies via STRUCTURE_
       arguments.get("ticker", "").strip().upper() if arguments.get("ticker") else None
     )
     report_id = (
-      arguments.get("report_id", "").strip()
-      if arguments.get("report_id")
-      else None
+      arguments.get("report_id", "").strip() if arguments.get("report_id") else None
     )
     include_parenthetical = arguments.get("include_parenthetical", False)
 
@@ -125,9 +123,7 @@ Use returned structure identifiers to explore element hierarchies via STRUCTURE_
       return {"error": "Either statement_type or query is required"}
 
     if query:
-      return await self._resolve_vector(
-        query, ticker, report_id, include_parenthetical
-      )
+      return await self._resolve_vector(query, ticker, report_id, include_parenthetical)
 
     return await self._resolve_canonical(
       statement_type, ticker, report_id, include_parenthetical

@@ -112,9 +112,7 @@ For balance sheets, only instant-period facts are returned. For other statements
     ticker = arguments.get("ticker", "").strip().upper()
     statement_type = arguments.get("statement_type", "").strip()
     report_id = (
-      arguments.get("report_id", "").strip()
-      if arguments.get("report_id")
-      else None
+      arguments.get("report_id", "").strip() if arguments.get("report_id") else None
     )
     fiscal_year = arguments.get("fiscal_year")
     period_type = arguments.get("period_type")
@@ -138,18 +136,18 @@ For balance sheets, only instant-period facts are returned. For other statements
     self,
     ticker: str,
     period_type: str | None,
-    statement_type: str,
     fiscal_year: int | None,
   ) -> dict[str, Any] | None:
     """Auto-resolve the most recent relevant report for the given filters."""
     # Determine which forms to look for
-    if period_type == "quarterly":
-      forms = QUARTERLY_FORMS
-    elif period_type == "annual" or period_type is None:
-      # Default to annual forms (also covers balance_sheet default)
+    if period_type == "annual":
       forms = ANNUAL_FORMS
+    elif period_type in ("quarterly", "instant"):
+      # quarterly: 10-Q + annual forms for international filers
+      # instant: balance sheet data appears in both annual and quarterly filings
+      forms = QUARTERLY_FORMS
     else:
-      # instant — use annual forms
+      # No period_type specified — default to annual forms
       forms = ANNUAL_FORMS
 
     where_parts = ["ent.ticker = $ticker", "r.form IN $forms"]
@@ -194,7 +192,7 @@ For balance sheets, only instant-period facts are returned. For other statements
     # Auto-resolve report when no report_id provided
     if not report_id:
       resolved_report = await self._resolve_report(
-        ticker, period_type, statement_type, fiscal_year
+        ticker, period_type, fiscal_year
       )
       if resolved_report:
         report_id = resolved_report["identifier"]
@@ -202,6 +200,7 @@ For balance sheets, only instant-period facts are returned. For other statements
     result: dict[str, Any] = {
       "ticker": ticker,
       "statement_type": statement_type,
+      "report_id": report_id,
       "facts": [],
       "fact_count": 0,
     }

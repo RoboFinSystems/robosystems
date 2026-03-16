@@ -190,8 +190,6 @@ class TestCallToolSuccess:
     assert "cache" in result.lower()
 
 
-
-
 class TestBuildErrorContext:
   def test_basic_context(self, tools):
     ctx = tools._build_error_context("read-graph-cypher", {}, ValueError("test"))

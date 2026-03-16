@@ -544,9 +544,7 @@ class TestBuildFactGridTool:
     """Test fact grid building handles query errors."""
     tool = BuildFactGridTool(mock_graph_client)
 
-    mock_graph_client.execute_query = AsyncMock(
-      side_effect=Exception("Query failed")
-    )
+    mock_graph_client.execute_query = AsyncMock(side_effect=Exception("Query failed"))
 
     result = await tool.execute(
       {"elements": ["us-gaap:Assets"], "periods": ["2023-12-31"]}
