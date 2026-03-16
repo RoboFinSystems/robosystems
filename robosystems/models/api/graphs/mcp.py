@@ -15,7 +15,7 @@ class MCPToolCall(BaseModel):
           "value": {
             "name": "read-graph-cypher",
             "arguments": {
-              "query": "MATCH (n) RETURN labels(n)[0] AS type, count(n) AS count ORDER BY count DESC",
+              "query": "MATCH (n) RETURN label(n) AS type, count(n) AS count ORDER BY count DESC",
               "parameters": {},
             },
           },

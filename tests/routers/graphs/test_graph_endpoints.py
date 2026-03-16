@@ -1,12 +1,9 @@
-"""Integration tests for graph management endpoints.
+"""Tests for graph management endpoints.
 
 Exercises: routers/graphs/main.py, info.py, schema/*.py, subscriptions.py
 """
 
-import pytest
 
-
-@pytest.mark.integration
 class TestGraphInfoEndpoints:
   """Test graph info and management endpoints through the API."""
 
@@ -26,7 +23,6 @@ class TestGraphInfoEndpoints:
     assert response.status_code in [200, 500, 502, 503]
 
 
-@pytest.mark.integration
 class TestGraphSchemaEndpoints:
   """Test graph schema endpoints."""
 
@@ -47,7 +43,6 @@ class TestGraphSchemaEndpoints:
     assert response.status_code in [200, 422, 500, 502, 503]
 
 
-@pytest.mark.integration
 class TestGraphSubscriptionEndpoints:
   """Test subscription-related endpoints."""
 
@@ -61,7 +56,6 @@ class TestGraphSubscriptionEndpoints:
     assert response.status_code in [200, 404]
 
 
-@pytest.mark.integration
 class TestGraphCreditEndpoints:
   """Test credit-related endpoints through API."""
 
@@ -82,7 +76,6 @@ class TestGraphCreditEndpoints:
     assert response.status_code in [200, 404]
 
 
-@pytest.mark.integration
 class TestOfferingEndpoints:
   """Test public offering/pricing endpoints."""
 
@@ -107,7 +100,6 @@ class TestOfferingEndpoints:
       assert "name" in plan
 
 
-@pytest.mark.integration
 class TestUserEndpoints:
   """Test user management endpoints."""
 

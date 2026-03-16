@@ -521,6 +521,10 @@ Resources:
         InstanceType: !Ref InstanceType
         IamInstanceProfile:
           Arn: !GetAtt WriterInstanceProfile.Arn
+        MetadataOptions:
+          HttpEndpoint: enabled
+          HttpTokens: required
+          HttpPutResponseHopLimit: 1
         SecurityGroupIds:
           - !Ref WriterSecurityGroup
           - !Ref ValkeyClientSecurityGroupId

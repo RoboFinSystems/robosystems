@@ -169,4 +169,4 @@ class TestCreateView:
         )
 
     assert exc_info.value.status_code == 500
-    assert "connection lost" in exc_info.value.detail
+    assert "Failed to create view" in exc_info.value.detail

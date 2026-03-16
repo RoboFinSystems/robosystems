@@ -34,7 +34,7 @@ jobs:
       release_url: ${{ steps.set-outputs.outputs.release_url }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: ${{ github.repository }}
           ref: ${{ inputs.branch_ref }}
@@ -253,7 +253,7 @@ jobs:
 
       - name: Create GitHub Release
         if: steps.check-tag.outputs.tag_exists == 'false'
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ steps.get-version.outputs.version }}
           name: Release v${{ steps.get-version.outputs.version }}

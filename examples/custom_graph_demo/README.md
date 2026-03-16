@@ -78,7 +78,7 @@ High-level overview of node counts:
 
 ```cypher
 MATCH (n)
-WITH labels(n)[0] AS label, count(n) AS count
+WITH label(n) AS label, count(n) AS count
 RETURN label, count
 ORDER BY count DESC
 ```

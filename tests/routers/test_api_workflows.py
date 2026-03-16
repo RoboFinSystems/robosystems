@@ -70,7 +70,7 @@ class TestUserRegistrationWorkflow:
     if profile_response.status_code != 200:
       print(f"Response status: {profile_response.status_code}")
       print(f"Response body: {profile_response.text}")
-      print(f"API key (first 10 chars): {plain_key[:10]}...")
+      print("API key was provided but authentication failed")
     assert profile_response.status_code == 200
 
     profile_data = profile_response.json()

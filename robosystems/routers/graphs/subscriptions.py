@@ -400,7 +400,7 @@ async def create_repository_subscription(
         },
       )
     except Exception as e:
-      logger.error(f"Repository provisioning failed: {e}")
+      logger.error(f"Repository provisioning failed: {e}", exc_info=True)
       # Subscription was created but provisioning failed
       # The subscription will be in a bad state - mark it as failed
       failed_sub = db.query(BillingSubscription).filter_by(id=subscription_id).first()
@@ -421,7 +421,7 @@ async def create_repository_subscription(
         db.commit()
       raise HTTPException(
         status_code=500,
-        detail=f"Repository provisioning failed: {e}",
+        detail="Repository provisioning failed.",
       )
 
     # Re-fetch subscription to get updated state from provisioning

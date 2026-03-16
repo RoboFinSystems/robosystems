@@ -257,10 +257,12 @@ async def get_graph_metrics(
       },
     )
 
-    logger.error(f"Error getting graph metrics for user {current_user.id}: {e!s}")
+    logger.error(
+      f"Error getting graph metrics for user {current_user.id}: {e!s}", exc_info=True
+    )
     raise HTTPException(
       status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-      detail=f"Failed to retrieve graph metrics: {e!s}",
+      detail="Failed to retrieve graph metrics.",
     )
 
 
@@ -584,10 +586,12 @@ async def get_graph_usage_analytics(
       },
     )
 
-    logger.error(f"Error getting usage analytics for graph {graph_id}: {e!s}")
+    logger.error(
+      f"Error getting usage analytics for graph {graph_id}: {e!s}", exc_info=True
+    )
     raise HTTPException(
       status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-      detail=f"Failed to retrieve usage analytics: {e!s}",
+      detail="Failed to retrieve usage analytics.",
     )
 
 

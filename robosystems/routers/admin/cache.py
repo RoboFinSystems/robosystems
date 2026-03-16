@@ -95,9 +95,10 @@ async def cache_database_info(request: Request, database: str):
     finally:
       client.close()
   except Exception as e:
+    logger.error(f"Failed to connect to cache database: {e}", exc_info=True)
     raise HTTPException(
       status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-      detail=f"Failed to connect to database: {e}",
+      detail="Failed to connect to database.",
     )
 
   logger.info(
@@ -131,9 +132,10 @@ async def cache_flush(request: Request, database: str):
     finally:
       client.close()
   except Exception as e:
+    logger.error(f"Failed to flush cache database: {e}", exc_info=True)
     raise HTTPException(
       status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-      detail=f"Failed to flush database: {e}",
+      detail="Failed to flush database.",
     )
 
   logger.warning(
@@ -214,9 +216,10 @@ async def cache_keys(
     finally:
       client.close()
   except Exception as e:
+    logger.error(f"Failed to scan cache database: {e}", exc_info=True)
     raise HTTPException(
       status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-      detail=f"Failed to scan database: {e}",
+      detail="Failed to scan database.",
     )
 
   logger.info(
@@ -267,9 +270,10 @@ async def cache_delete_keys(
     finally:
       client.close()
   except Exception as e:
+    logger.error(f"Failed to delete cache keys: {e}", exc_info=True)
     raise HTTPException(
       status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-      detail=f"Failed to delete keys: {e}",
+      detail="Failed to delete keys.",
     )
 
   logger.warning(

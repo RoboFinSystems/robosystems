@@ -33,7 +33,7 @@ brew install uv just
 # Start robosystems backend api
 just start
 
-# Start robosystems with frontend apps (robosystems-app, roboledger-app, roboinvestor-app)
+# Start frontend apps - robosystems-app, roboledger-app, roboinvestor-app
 just start apps
 ```
 

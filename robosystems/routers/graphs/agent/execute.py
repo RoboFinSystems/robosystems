@@ -319,8 +319,11 @@ async def auto_agent(
       )
 
   except Exception as e:
-    logger.error(f"Agent routing error: {e!s}")
-    raise HTTPException(status_code=500, detail=str(e))
+    logger.error(f"Agent routing error: {e!s}", exc_info=True)
+    raise HTTPException(
+      status_code=500,
+      detail="An internal error occurred while routing the agent request.",
+    )
 
 
 @router.get(
@@ -506,8 +509,11 @@ async def specific_agent(
   except HTTPException:
     raise
   except Exception as e:
-    logger.error(f"Agent execution error: {e!s}")
-    raise HTTPException(status_code=500, detail=str(e))
+    logger.error(f"Agent execution error: {e!s}", exc_info=True)
+    raise HTTPException(
+      status_code=500,
+      detail="An internal error occurred while executing the agent.",
+    )
 
 
 @router.post(

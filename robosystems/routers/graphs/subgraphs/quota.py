@@ -134,12 +134,12 @@ async def get_subgraph_quota(
       detail="Failed to get subgraph quota due to database error",
     )
   except Exception as e:
-    logger.error(f"Unexpected error getting subgraph quota: {e}")
+    logger.error(f"Unexpected error getting subgraph quota: {e}", exc_info=True)
     # Record failure metric
     log_metric("subgraph_quota_check_failed", 1, {"error_type": "unexpected"})
     # Mark circuit breaker failure
     circuit_breaker.record_failure(graph_id, "subgraph_quota")
     raise HTTPException(
       status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-      detail=f"Failed to get subgraph quota: {e!s}",
+      detail="Failed to get subgraph quota.",
     )

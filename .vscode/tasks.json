@@ -110,13 +110,6 @@
       "problemMatcher": []
     },
     {
-      "label": "Test Integration",
-      "type": "shell",
-      "command": "just",
-      "args": ["test-integration"],
-      "problemMatcher": []
-    },
-    {
       "label": "Test Coverage",
       "type": "shell",
       "command": "just",
