@@ -191,9 +191,7 @@ For balance sheets, only instant-period facts are returned. For other statements
 
     # Auto-resolve report when no report_id provided
     if not report_id:
-      resolved_report = await self._resolve_report(
-        ticker, period_type, fiscal_year
-      )
+      resolved_report = await self._resolve_report(ticker, period_type, fiscal_year)
       if resolved_report:
         report_id = resolved_report["identifier"]
 
