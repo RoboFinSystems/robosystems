@@ -282,7 +282,7 @@ Examples:
   python graph_query.py --url http://localhost:8001 --graph-id sec --query "MATCH (c:Entity) RETURN c.name" --format json
 
   # Query Neo4j (change URL to Neo4j API)
-  python graph_query.py --url http://localhost:8001 --graph-id sec --query "MATCH (n) RETURN labels(n)[0] as label, count(n) as count"
+  python graph_query.py --url http://localhost:8001 --graph-id sec --query "MATCH (n) RETURN label(n) as label, count(n) as count"
         """,
   )
 

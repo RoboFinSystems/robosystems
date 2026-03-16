@@ -196,7 +196,7 @@ def run_verification_queries(extensions, graph_id):
   queries = {
     "Total nodes": "MATCH (n) RETURN count(n) AS total_nodes",
     "Total relationships": "MATCH ()-[r]->() RETURN count(r) AS total_rels",
-    "Node types": "MATCH (n) RETURN labels(n)[0] AS type, count(n) AS count ORDER BY count DESC",
+    "Node types": "MATCH (n) RETURN label(n) AS type, count(n) AS count ORDER BY count DESC",
   }
 
   for description, query in queries.items():

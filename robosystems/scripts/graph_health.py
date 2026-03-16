@@ -49,7 +49,7 @@ REPOSITORY_SCHEMAS = {
     "node_counts": {
       "nodes": "MATCH (n) RETURN count(n) as count",
     },
-    "sample_query": "MATCH (n) RETURN labels(n)[0] as label, count(*) as count LIMIT 10",
+    "sample_query": "MATCH (n) RETURN label(n) as label, count(*) as count LIMIT 10",
     "sample_fields": ["label", "count"],
     "primary_node": None,
   },
