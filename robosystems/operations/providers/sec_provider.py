@@ -3,14 +3,12 @@
 from typing import Any
 
 import httpx
-from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
 from ...adapters.sec.config import SEC_VALIDATE_CIK
 from ...config import env
 from ...logger import logger
 from ...middleware.graph import get_graph_repository
-from ...middleware.graph.utils import MultiTenantUtils
 from ...models.api.graphs.connections import SECConnectionConfig
 from ...operations.connection_service import ConnectionService
 
@@ -153,21 +151,20 @@ async def get_sec_filing_count(cik: str, graph_id: str | None = None) -> int:
 
 
 async def create_sec_connection(
-  entity_id: str, config: SECConnectionConfig, user_id: str, graph_id: str, db: Session
+  entity_id: str | None,
+  config: SECConnectionConfig,
+  user_id: str,
+  graph_id: str,
+  db: Session,
 ) -> str:
-  """Create SEC connection."""
-  # Update entity with CIK
-  repository = await get_graph_repository(graph_id, operation_type="write")
+  """Create SEC connection.
 
-  # Verify entity exists
-  entity_query = """
-    MATCH (c:Entity {identifier: $entity_id})
-    RETURN c.identifier as identifier, c.name as name
-    """
-  entity_result = repository.execute_single(entity_query, {"entity_id": entity_id})
+  Only requires a CIK. The entity is created by the SEC sync pipeline
+  when it processes XBRL filings — not assumed to exist in the graph.
 
-  if not entity_result:
-    raise HTTPException(status_code=404, detail="Entity not found")
+  Optionally validates the CIK with SEC API to get the entity name.
+  """
+  entity_name = None
 
   # Optionally validate CIK with SEC API
   if SEC_VALIDATE_CIK:
@@ -175,41 +172,24 @@ async def create_sec_connection(
       cik_info = await validate_cik_with_sec_api(config.cik)
       if not cik_info["is_valid"]:
         logger.warning(f"CIK {config.cik} not found in SEC database")
-      elif not config.entity_name and cik_info.get("entity_name"):
-        config.entity_name = cik_info["entity_name"]
+      else:
+        entity_name = cik_info.get("entity_name")
     except Exception as e:
       logger.warning(f"SEC CIK validation failed: {e}")
-      # Continue without validation
 
-  # Store connection
-  credentials = {"cik": config.cik}
+  # Store connection — no graph operations needed
   metadata = {
     "cik": config.cik,
-    "entity_name": config.entity_name or entity_result.get("name"),
+    "entity_name": entity_name,
   }
 
   connection_data = await ConnectionService.create_connection(
-    entity_id=entity_id,
-    provider="SEC",
+    entity_id=entity_id or "",
+    provider="sec",
     user_id=user_id,
-    credentials=credentials,
+    credentials={"cik": config.cik},
     metadata=metadata,
     graph_id=graph_id,
-  )
-
-  # Update entity with CIK
-  update_query = """
-    MATCH (c:Entity {identifier: $entity_id})
-    SET c.cik = $cik, c.database = $database_name
-    RETURN c.identifier as identifier
-    """
-  repository.execute_single(
-    update_query,
-    {
-      "entity_id": entity_id,
-      "cik": config.cik,
-      "database_name": MultiTenantUtils.get_database_name(graph_id),
-    },
   )
 
   return connection_data["connection_id"]
@@ -218,24 +198,68 @@ async def create_sec_connection(
 async def sync_sec_connection(
   connection: dict[str, Any], sync_options: dict[str, Any] | None, graph_id: str
 ) -> str:
-  """Trigger SEC filing sync."""
+  """Trigger SEC filing sync via Dagster entity sync pipeline.
 
-  # TODO: Rebuild individual entity SEC sync to work with new orchestration system
-  # The old pipeline.orchestrate_bulk_pipeline is obsolete and doesn't align with
-  # the new phased orchestration approach. Need to implement a single-company
-  # loader that works with the connection system.
-  #
-  # Requirements for new implementation:
-  # 1. Use the company's CIK from the connection
-  # 2. Load data into the entity's specific graph (not the shared SEC repo)
-  # 3. Work with the new phased orchestration if possible
-  # 4. Support sync_options like year, max_filings, force_update
-  #
-  # For now, individual SEC syncing is disabled.
-  raise NotImplementedError(
-    "Individual SEC entity syncing is temporarily disabled. "
-    "Use 'just sec-load' for testing or the SEC orchestrator for batch processing."
+  Submits the sec_entity_sync job which discovers filings for the CIK
+  in the shared raw S3 bucket, processes XBRL into parquet, and loads
+  the data into the user's graph database.
+
+  The target graph must already exist with the RoboLedger schema.
+
+  Args:
+      connection: Connection dict with metadata (cik, etc.)
+      sync_options: Optional dict with form_types, skip_enrichment
+      graph_id: Target graph database ID
+
+  Returns:
+      Dagster run ID for progress tracking
+  """
+  from robosystems.middleware.sse.dagster_monitor import submit_dagster_job_sync
+
+  metadata = connection.get("metadata", {}) or {}
+  options = sync_options or {}
+
+  cik = metadata.get("cik", "")
+  connection_id = connection.get("connection_id", "")
+  user_id = connection.get("user_id", "")
+
+  if not cik:
+    raise ValueError("SEC CIK not found in connection metadata")
+
+  # Build config for all assets in the pipeline (they share SECEntitySyncConfig)
+  sync_config = {
+    "graph_id": graph_id,
+    "connection_id": connection_id,
+    "user_id": user_id,
+    "cik": cik,
+    "form_types": options.get("form_types", ["10-K", "10-Q", "20-F", "40-F"]),
+    "skip_enrichment": options.get("skip_enrichment", True),
+  }
+
+  run_config = {
+    "ops": {
+      "sec_entity_extract": {"config": sync_config},
+      "sec_entity_transform": {"config": sync_config},
+      "sec_entity_load": {"config": sync_config},
+    }
+  }
+
+  run_id = submit_dagster_job_sync(
+    job_name="sec_entity_sync",
+    run_config=run_config,
+    tags={
+      "graph_id": graph_id,
+      "connection_id": connection_id,
+      "cik": cik,
+      "pipeline": "sec_entity",
+    },
   )
+
+  logger.info(
+    f"SEC entity sync submitted for graph={graph_id}, "
+    f"cik={cik}, connection={connection_id}, run_id={run_id}"
+  )
+  return run_id
 
 
 async def cleanup_sec_connection(connection: dict[str, Any], graph_id: str) -> None:

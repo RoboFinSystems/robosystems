@@ -1,93 +1,74 @@
-"""QuickBooks Load Asset.
+"""SEC Entity Sync Load Asset.
 
-Registers parquet files as GraphFiles, uploads to S3, stages to
-DuckDB on the graph instance, and materializes to LadybugDB.
+Registers parquet files as GraphFiles, uploads to the user's S3 bucket,
+stages to DuckDB on the graph instance, and materializes to LadybugDB.
+
+Follows the same pattern as the QuickBooks load asset.
 """
 
 import asyncio
+import json
 from pathlib import Path
 
 from dagster import AssetExecutionContext, MaterializeResult, asset
 
-from .configs import QBSyncConfig
-from .utils import QB_ALL_TABLES, get_pipeline_work_dir
-
-# Map dbt output table names to schema table names (PascalCase for nodes)
-TABLE_NAME_MAP = {
-  "entity": "Entity",
-  "element": "Element",
-  "dimension": "Dimension",
-  "transaction": "Transaction",
-  "entry": "Entry",
-  "line_item": "LineItem",
-  "entity_has_transaction": "ENTITY_HAS_TRANSACTION",
-  "transaction_has_entry": "TRANSACTION_HAS_ENTRY",
-  "entry_has_line_item": "ENTRY_HAS_LINE_ITEM",
-  "line_item_relates_to_element": "LINE_ITEM_RELATES_TO_ELEMENT",
-  "line_item_has_dimension": "LINE_ITEM_HAS_DIMENSION",
-}
-
-# Determine table type for GraphTable registration
-TABLE_TYPES = {
-  "Entity": "node",
-  "Element": "node",
-  "Dimension": "node",
-  "Transaction": "node",
-  "Entry": "node",
-  "LineItem": "node",
-  "ENTITY_HAS_TRANSACTION": "relationship",
-  "TRANSACTION_HAS_ENTRY": "relationship",
-  "ENTRY_HAS_LINE_ITEM": "relationship",
-  "LINE_ITEM_RELATES_TO_ELEMENT": "relationship",
-  "LINE_ITEM_HAS_DIMENSION": "relationship",
-}
+from .configs import SECEntitySyncConfig
+from .utils import get_pipeline_work_dir
 
 
 @asset(
-  group_name="qb_pipeline",
-  description="Load QB parquet files to Graph API DuckDB staging and materialize to LadybugDB",
-  deps=["qb_transform"],
+  group_name="sec_entity_pipeline",
+  description="Load SEC parquet files to Graph API DuckDB staging and materialize to LadybugDB",
+  deps=["sec_entity_transform"],
   kinds={"s3", "duckdb", "ladybug"},
   metadata={
-    "pipeline": "quickbooks",
+    "pipeline": "sec_entity",
     "stage": "load",
   },
 )
-def qb_load(
+def sec_entity_load(
   context: AssetExecutionContext,
-  config: QBSyncConfig,
+  config: SECEntitySyncConfig,
 ) -> MaterializeResult:
-  """Load QB parquet files into the graph database.
+  """Load SEC parquet files into the user's graph database.
 
   For each table:
   1. Get or create GraphTable record
   2. Create GraphFile record
-  3. Upload parquet to S3
+  3. Upload parquet to USER_DATA_BUCKET
   4. Stage to DuckDB on graph instance via Graph API
   5. Materialize from DuckDB to LadybugDB
 
   Returns:
       MaterializeResult with load statistics
   """
-  # Get output path from shared pipeline directory
   work_dir = get_pipeline_work_dir(config.graph_id)
   output_dir = work_dir / "output"
+  meta_path = work_dir / "table_metadata.json"
+
+  if not meta_path.exists():
+    raise ValueError(
+      f"Table metadata not found at {meta_path}. Run sec_entity_transform first."
+    )
+
+  table_meta = json.loads(meta_path.read_text())
 
   context.log.info(
-    f"Loading QB data for graph={config.graph_id}, output_dir={output_dir}"
+    f"Loading SEC data for graph={config.graph_id}, tables={len(table_meta)}"
   )
 
-  result = asyncio.run(_load_tables(context, config, output_dir))
+  result = asyncio.run(_load_tables(context, config, output_dir, table_meta))
 
   return MaterializeResult(metadata=result)
 
 
 async def _load_tables(
   context: AssetExecutionContext,
-  config: QBSyncConfig,
+  config: SECEntitySyncConfig,
   output_dir: Path,
+  table_meta: dict[str, dict[str, str]],
 ) -> dict:
-  """Load all QB tables: register, upload, stage, materialize."""
+  """Load all SEC tables: register, upload, stage, materialize."""
   from robosystems.config import env
   from robosystems.config.storage.graph import get_staging_key
   from robosystems.database import SessionFactory
@@ -103,41 +84,52 @@ async def _load_tables(
   tables_materialized = 0
   total_rows = 0
 
+  # Build ordered table list: all nodes first, then all relationships
+  # This ensures foreign key constraints are satisfied during materialization
+  node_tables = [
+    name for name, meta in table_meta.items() if meta["entity_type"] == "nodes"
+  ]
+  rel_tables = [
+    name for name, meta in table_meta.items() if meta["entity_type"] == "relationships"
+  ]
+  ordered_tables = node_tables + rel_tables
+
   with SessionFactory() as session:
-    # Process tables in dependency order (nodes first, then relationships)
-    for dbt_table in QB_ALL_TABLES:
-      schema_table = TABLE_NAME_MAP[dbt_table]
-      table_type = TABLE_TYPES[schema_table]
-      parquet_file = output_dir / f"qb_{dbt_table}.parquet"
+    # Stage all tables (upload to S3, create DuckDB tables)
+    for table_name in ordered_tables:
+      meta = table_meta[table_name]
+      entity_type = meta["entity_type"]
+      table_type = "node" if entity_type == "nodes" else "relationship"
+      parquet_file = output_dir / f"sec_{table_name}.parquet"
 
       if not parquet_file.exists():
-        context.log.info(f"Skipping {schema_table}: no parquet file")
+        context.log.info(f"Skipping {table_name}: no parquet file")
         continue
 
       file_size = parquet_file.stat().st_size
       row_count = _count_parquet_rows(parquet_file)
 
-      context.log.info(f"Loading {schema_table}: {row_count} rows, {file_size:,} bytes")
+      context.log.info(f"Loading {table_name}: {row_count} rows, {file_size:,} bytes")
 
       # 1. Get or create GraphTable
-      graph_table = GraphTable.get_by_name(config.graph_id, schema_table, session)
+      graph_table = GraphTable.get_by_name(config.graph_id, table_name, session)
       if not graph_table:
         graph_table = GraphTable.create(
           graph_id=config.graph_id,
-          table_name=schema_table,
+          table_name=table_name,
           table_type=table_type,
           schema_json={},
           session=session,
         )
-        context.log.info(f"Created GraphTable: {schema_table}")
+        context.log.info(f"Created GraphTable: {table_name}")
 
       # 2. Create GraphFile record
-      file_name = f"qb_{schema_table}.parquet"
+      file_name = f"sec_{table_name}.parquet"
       graph_file = GraphFile.create(
         graph_id=config.graph_id,
         table_id=graph_table.id,
         file_name=file_name,
-        s3_key="",  # Will be set after computing key
+        s3_key="",  # Set after computing key
         file_format="parquet",
         file_size_bytes=file_size,
         upload_method="pipeline",
@@ -150,7 +142,7 @@ async def _load_tables(
       s3_key = get_staging_key(
         user_id=config.user_id,
         graph_id=config.graph_id,
-        table_name=schema_table,
+        table_name=table_name,
         file_id=graph_file.id,
         filename=file_name,
       )
@@ -184,47 +176,46 @@ async def _load_tables(
       try:
         await client.create_table(
           graph_id=config.graph_id,
-          table_name=schema_table,
+          table_name=table_name,
           s3_pattern=[s3_uri],
           file_id_map=file_id_map,
         )
         graph_file.mark_duckdb_staged(session=session, row_count=row_count)
         tables_staged += 1
-        context.log.info(f"Staged {schema_table} to DuckDB")
+        context.log.info(f"Staged {table_name} to DuckDB")
       except Exception as e:
-        context.log.error(f"Failed to stage {schema_table}: {e}")
+        context.log.error(f"Failed to stage {table_name}: {e}")
         raise
 
     # 5. Materialize all staged tables to LadybugDB
     context.log.info("Materializing all tables to LadybugDB...")
     client = await get_graph_client(config.graph_id, operation_type="write")
 
-    for dbt_table in QB_ALL_TABLES:
-      schema_table = TABLE_NAME_MAP[dbt_table]
-      parquet_file = output_dir / f"qb_{dbt_table}.parquet"
+    for table_name in ordered_tables:
+      parquet_file = output_dir / f"sec_{table_name}.parquet"
       if not parquet_file.exists():
         continue
 
       try:
         mat_result = await client.materialize_table(
           graph_id=config.graph_id,
-          table_name=schema_table,
+          table_name=table_name,
           ignore_errors=True,
         )
         rows = mat_result.get("rows_ingested", 0) if mat_result else 0
         total_rows += rows
         tables_materialized += 1
-        context.log.info(f"Materialized {schema_table}: {rows} rows")
+        context.log.info(f"Materialized {table_name}: {rows} rows")
 
         # Mark files as ingested
-        graph_table = GraphTable.get_by_name(config.graph_id, schema_table, session)
+        graph_table = GraphTable.get_by_name(config.graph_id, table_name, session)
         if graph_table:
           files = GraphFile.get_all_for_table(graph_table.id, session)
           for f in files:
             if f.duckdb_status == "staged" and f.graph_status != "ingested":
               f.mark_graph_ingested(session=session)
       except Exception as e:
-        context.log.error(f"Failed to materialize {schema_table}: {e}")
+        context.log.error(f"Failed to materialize {table_name}: {e}")
         raise
 
     # 6. Update last sync timestamp
@@ -235,12 +226,13 @@ async def _load_tables(
       context.log.warning(f"Failed to update last_sync (non-fatal): {e}")
 
   context.log.info(
-    f"Load complete: {tables_staged} staged, {tables_materialized} materialized, "
-    f"{total_rows} total rows"
+    f"Load complete: {tables_staged} staged, "
+    f"{tables_materialized} materialized, {total_rows} total rows"
   )
 
   return {
     "graph_id": config.graph_id,
+    "cik": config.cik,
     "tables_staged": tables_staged,
     "tables_materialized": tables_materialized,
     "total_rows": total_rows,
