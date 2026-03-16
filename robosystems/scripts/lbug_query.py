@@ -9,7 +9,7 @@ Usage:
     # Single quotes are auto-converted to double quotes for easier shell usage
     python lbug_query.py --db-path ./data/lbug-dbs/sec --query "MATCH (c:Entity) RETURN c.name LIMIT 5"
     python lbug_query.py --db-path ./data/lbug-dbs/sec --query "MATCH (c:Entity {ticker: 'NVDA'}) RETURN c.name"
-    python lbug_query.py --db-path ./data/lbug-dbs/sec --query "MATCH (n) RETURN labels(n)[0] as type, count(*) as count"
+    python lbug_query.py --db-path ./data/lbug-dbs/sec --query "MATCH (n) RETURN label(n) as type, count(*) as count"
 """
 
 import argparse
@@ -135,7 +135,7 @@ Examples:
   python lbug_query.py --db-path ./data/lbug-dbs/sec --query "MATCH (c:Entity {ticker: 'NVDA'}) RETURN c.name"
 
   # Count nodes by type
-  python lbug_query.py --db-path ./data/lbug-dbs/sec --query "MATCH (n) RETURN labels(n)[0] as type, count(*) as count"
+  python lbug_query.py --db-path ./data/lbug-dbs/sec --query "MATCH (n) RETURN label(n) as type, count(*) as count"
 
   # JSON output
   python lbug_query.py --db-path ./data/lbug-dbs/sec --query "MATCH (c:Entity) RETURN c.name" --format json

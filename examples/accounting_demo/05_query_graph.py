@@ -42,7 +42,7 @@ PRESET_QUERIES = {
     "description": "Count all nodes by type",
     "query": """
 MATCH (n)
-RETURN labels(n)[0] AS type, count(n) AS count
+RETURN label(n) AS type, count(n) AS count
 ORDER BY count DESC
         """,
   },
