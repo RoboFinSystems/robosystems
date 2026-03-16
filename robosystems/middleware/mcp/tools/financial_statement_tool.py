@@ -19,6 +19,11 @@ VALID_STATEMENT_TYPES = (
   "equity_statement",
 )
 
+# Forms used by domestic filers
+ANNUAL_FORMS = ["10-K", "20-F", "40-F"]
+# Quarterly forms (include annual since international filers may only have annual)
+QUARTERLY_FORMS = ["10-K", "20-F", "40-F", "10-Q"]
+
 
 class GetFinancialStatementTool(BaseTool):
   """MCP tool that returns a structured financial statement for a company/period."""
@@ -39,9 +44,17 @@ class GetFinancialStatementTool(BaseTool):
 - cash_flow_statement — Operating, investing, financing activities
 - equity_statement — Equity components and changes
 
+**AUTO-RESOLVE BEHAVIOR:**
+When no report_id is provided, the tool automatically finds the most recent
+relevant filing based on period_type:
+- annual → latest 10-K, 20-F, or 40-F
+- quarterly → latest 10-Q (or 10-K/20-F/40-F for international filers)
+- Use fiscal_year to target a specific year
+
 **RETURNS:**
 - Facts with element names, values, periods, and period types
 - Ordered by period end date (most recent first)
+- Deduplicated by element and period (keeps most recent filing)
 - Filters out dimensional/segment breakdowns by default
 
 **TIP:**
@@ -58,13 +71,28 @@ For balance sheets, only instant-period facts are returned. For other statements
             "description": "Type of financial statement",
             "enum": list(VALID_STATEMENT_TYPES),
           },
-          "accession_number": {
+          "report_id": {
             "type": "string",
-            "description": "Optional: filter to a specific report/filing by accession number",
+            "description": (
+              "Optional: filter to a specific report by its identifier. "
+              "When omitted, the latest relevant filing "
+              "is auto-resolved based on period_type."
+            ),
+          },
+          "fiscal_year": {
+            "type": "integer",
+            "description": (
+              "Optional: filter to a specific fiscal year (e.g. 2025). "
+              "Used during auto-resolve to find the right filing."
+            ),
           },
           "period_type": {
             "type": "string",
-            "description": "Filter by period type: 'annual' (duration facts only), 'quarterly' (duration facts only), 'instant' (point-in-time facts). Default depends on statement type.",
+            "description": (
+              "Filter by period type: 'annual' (10-K/20-F/40-F, duration facts), "
+              "'quarterly' (10-Q or annual filings, duration facts), "
+              "'instant' (point-in-time facts). Default depends on statement type."
+            ),
             "enum": ["annual", "quarterly", "instant"],
           },
           "limit": {
@@ -83,11 +111,12 @@ For balance sheets, only instant-period facts are returned. For other statements
 
     ticker = arguments.get("ticker", "").strip().upper()
     statement_type = arguments.get("statement_type", "").strip()
-    accession_number = (
-      arguments.get("accession_number", "").strip()
-      if arguments.get("accession_number")
+    report_id = (
+      arguments.get("report_id", "").strip()
+      if arguments.get("report_id")
       else None
     )
+    fiscal_year = arguments.get("fiscal_year")
     period_type = arguments.get("period_type")
     limit = max(1, min(int(arguments.get("limit", 50)), 1000))
 
@@ -102,24 +131,89 @@ For balance sheets, only instant-period facts are returned. For other statements
       }
 
     return await self._get_statement(
-      ticker, statement_type, accession_number, period_type, limit
+      ticker, statement_type, report_id, fiscal_year, period_type, limit
     )
+
+  async def _resolve_report(
+    self,
+    ticker: str,
+    period_type: str | None,
+    statement_type: str,
+    fiscal_year: int | None,
+  ) -> dict[str, Any] | None:
+    """Auto-resolve the most recent relevant report for the given filters."""
+    # Determine which forms to look for
+    if period_type == "quarterly":
+      forms = QUARTERLY_FORMS
+    elif period_type == "annual" or period_type is None:
+      # Default to annual forms (also covers balance_sheet default)
+      forms = ANNUAL_FORMS
+    else:
+      # instant — use annual forms
+      forms = ANNUAL_FORMS
+
+    where_parts = ["ent.ticker = $ticker", "r.form IN $forms"]
+    params: dict[str, Any] = {"ticker": ticker, "forms": forms}
+
+    if fiscal_year is not None:
+      where_parts.append("r.fiscal_year_focus = $fiscal_year")
+      params["fiscal_year"] = fiscal_year
+
+    query = (
+      "MATCH (ent:Entity)-[:ENTITY_HAS_REPORT]->(r:Report) "
+      f"WHERE {' AND '.join(where_parts)} "
+      "RETURN r.identifier AS identifier, "
+      "r.form AS form, r.filing_date AS filing_date, "
+      "r.fiscal_year_focus AS fiscal_year, r.fiscal_period_focus AS fiscal_period "
+      "ORDER BY r.filing_date DESC LIMIT 1"
+    )
+
+    try:
+      rows = await self.client.execute_query(query, parameters=params)
+      if rows:
+        return rows[0]
+    except Exception as e:
+      logger.warning(f"Report auto-resolve failed for {ticker}: {e}")
+
+    # If quarterly didn't find a 10-Q, the company may only file annual forms
+    # (international filers with 20-F/40-F). Already covered since QUARTERLY_FORMS
+    # includes annual forms.
+    return None
 
   async def _get_statement(
     self,
     ticker: str,
     statement_type: str,
-    accession_number: str | None,
+    report_id: str | None,
+    fiscal_year: int | None,
     period_type: str | None,
     limit: int,
   ) -> dict[str, Any]:
+    resolved_report = None
+
+    # Auto-resolve report when no report_id provided
+    if not report_id:
+      resolved_report = await self._resolve_report(
+        ticker, period_type, statement_type, fiscal_year
+      )
+      if resolved_report:
+        report_id = resolved_report["identifier"]
+
     result: dict[str, Any] = {
       "ticker": ticker,
       "statement_type": statement_type,
-      "accession_number": accession_number,
       "facts": [],
       "fact_count": 0,
     }
+
+    if resolved_report:
+      result["resolved_report"] = {
+        "report_id": resolved_report.get("identifier"),
+        "form": resolved_report.get("form"),
+        "filing_date": resolved_report.get("filing_date"),
+        "fiscal_year": resolved_report.get("fiscal_year"),
+        "fiscal_period": resolved_report.get("fiscal_period"),
+      }
 
     # Build match parts and filters
     match_parts = [
@@ -138,10 +232,10 @@ For balance sheets, only instant-period facts are returned. For other statements
 
     params: dict[str, Any] = {"statement_type": statement_type, "ticker": ticker}
 
-    if accession_number:
+    if report_id:
       match_parts.append("(r:Report)-[:REPORT_HAS_FACT]->(f)")
-      where_parts.append("r.accession_number = $accession_number")
-      params["accession_number"] = accession_number
+      where_parts.append("r.identifier = $report_id")
+      params["report_id"] = report_id
 
     # Period filter
     if period_type == "instant":
@@ -153,7 +247,9 @@ For balance sheets, only instant-period facts are returned. For other statements
     elif statement_type == "balance_sheet":
       where_parts.append("p.period_type = 'instant'")
 
-    params["limit"] = limit
+    # Request extra rows for dedup, then trim to limit
+    fetch_limit = min(limit * 3, 1000)
+    params["limit"] = fetch_limit
 
     query = (
       f"MATCH {', '.join(match_parts)} "
@@ -169,7 +265,8 @@ For balance sheets, only instant-period facts are returned. For other statements
     try:
       rows = await self.client.execute_query(query, parameters=params)
       if rows:
-        for row in rows:
+        deduped = self._deduplicate_facts(rows)
+        for row in deduped[:limit]:
           result["facts"].append(
             {
               "canonical_concept": row.get("canonical_concept"),
@@ -193,3 +290,19 @@ For balance sheets, only instant-period facts are returned. For other statements
       )
 
     return result
+
+  @staticmethod
+  def _deduplicate_facts(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Deduplicate facts by (qname, end_date), keeping the first occurrence.
+
+    Since results are ordered by end_date DESC, the first occurrence for each
+    (qname, end_date) pair comes from the most recent filing.
+    """
+    seen: set[tuple[str, str]] = set()
+    deduped: list[dict[str, Any]] = []
+    for row in rows:
+      key = (row.get("qname", ""), row.get("end_date", ""))
+      if key not in seen:
+        seen.add(key)
+        deduped.append(row)
+    return deduped

@@ -488,21 +488,18 @@ class TestBuildFactGridTool:
     """Test successful fact grid building."""
     tool = BuildFactGridTool(mock_graph_client)
 
-    with (
-      patch("robosystems.middleware.graph.get_universal_repository") as mock_repo,
-      patch(
-        "robosystems.operations.views.fact_grid_builder.FactGridBuilder"
-      ) as mock_builder_class,
-    ):
-      mock_repository = AsyncMock()
-      mock_repo.return_value = mock_repository
-      mock_repository.execute_query.return_value = [
-        {
-          "element_id": "us-gaap:Assets",
-          "period_end": "2023-12-31",
-          "value": 1000000,
-        }
-      ]
+    with patch(
+      "robosystems.operations.views.fact_grid_builder.FactGridBuilder"
+    ) as mock_builder_class:
+      mock_graph_client.execute_query = AsyncMock(
+        return_value=[
+          {
+            "element_id": "us-gaap:Assets",
+            "period_end": "2023-12-31",
+            "value": 1000000,
+          }
+        ]
+      )
 
       mock_builder = MagicMock()
       mock_builder_class.return_value = mock_builder
@@ -547,14 +544,13 @@ class TestBuildFactGridTool:
     """Test fact grid building handles query errors."""
     tool = BuildFactGridTool(mock_graph_client)
 
-    with patch("robosystems.middleware.graph.get_universal_repository") as mock_repo:
-      mock_repository = AsyncMock()
-      mock_repo.return_value = mock_repository
-      mock_repository.execute_query.side_effect = Exception("Query failed")
+    mock_graph_client.execute_query = AsyncMock(
+      side_effect=Exception("Query failed")
+    )
 
-      result = await tool.execute(
-        {"elements": ["us-gaap:Assets"], "periods": ["2023-12-31"]}
-      )
+    result = await tool.execute(
+      {"elements": ["us-gaap:Assets"], "periods": ["2023-12-31"]}
+    )
 
     assert result["error"] == "construction_failed"
     assert "Query failed" in result["message"]

@@ -1,6 +1,6 @@
 """Tests for get-financial-statement MCP tool."""
 
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, call
 
 import pytest
 
@@ -27,7 +27,8 @@ class TestGetFinancialStatementDefinition:
     assert defn["name"] == "get-financial-statement"
     assert "ticker" in defn["inputSchema"]["properties"]
     assert "statement_type" in defn["inputSchema"]["properties"]
-    assert "accession_number" in defn["inputSchema"]["properties"]
+    assert "report_id" in defn["inputSchema"]["properties"]
+    assert "fiscal_year" in defn["inputSchema"]["properties"]
     assert "period_type" in defn["inputSchema"]["properties"]
     assert "limit" in defn["inputSchema"]["properties"]
     assert set(defn["inputSchema"]["required"]) == {"ticker", "statement_type"}
@@ -56,12 +57,15 @@ class TestGetFinancialStatementExecution:
 
   @pytest.mark.asyncio
   async def test_unknown_statement_type(self, tool):
-    result = await tool.execute({"ticker": "NVDA", "statement_type": "profit_and_loss"})
+    result = await tool.execute(
+      {"ticker": "NVDA", "statement_type": "profit_and_loss"}
+    )
     assert "error" in result
     assert "Unknown statement_type" in result["error"]
 
   @pytest.mark.asyncio
-  async def test_income_statement(self, tool, mock_client):
+  async def test_income_statement_with_report_id(self, tool, mock_client):
+    """With explicit report_id, skips auto-resolve and queries directly."""
     mock_client.execute_query = AsyncMock(
       return_value=[
         {
@@ -86,27 +90,46 @@ class TestGetFinancialStatementExecution:
     )
 
     result = await tool.execute(
-      {"ticker": "NVDA", "statement_type": "income_statement"}
+      {
+        "ticker": "NVDA",
+        "statement_type": "income_statement",
+        "report_id": "0001045810-25-000023",
+      }
     )
     assert result["ticker"] == "NVDA"
     assert result["statement_type"] == "income_statement"
     assert result["fact_count"] == 2
     assert result["facts"][0]["qname"] == "us-gaap:Revenues"
     assert result["facts"][1]["value"] == 29760000000
+    # Only one query call (no auto-resolve)
+    assert mock_client.execute_query.call_count == 1
 
   @pytest.mark.asyncio
   async def test_balance_sheet_instant_filter(self, tool, mock_client):
     """Balance sheet should default to instant period filter."""
     mock_client.execute_query = AsyncMock(return_value=[])
 
-    await tool.execute({"ticker": "NVDA", "statement_type": "balance_sheet"})
+    await tool.execute(
+      {
+        "ticker": "NVDA",
+        "statement_type": "balance_sheet",
+        "report_id": "some-id",
+      }
+    )
 
     call_args = mock_client.execute_query.call_args[0][0]
     assert "p.period_type = 'instant'" in call_args
 
   @pytest.mark.asyncio
   async def test_period_type_annual_filter(self, tool, mock_client):
-    mock_client.execute_query = AsyncMock(return_value=[])
+    # Auto-resolve returns a report, then main query uses annual filter
+    mock_client.execute_query = AsyncMock(
+      side_effect=[
+        [{"accession_number": "acc-1", "identifier": "id-1", "form": "10-K",
+          "filing_date": "2025-10-31", "fiscal_year": 2025, "fiscal_period": "FY"}],
+        [],
+      ]
+    )
 
     await tool.execute(
       {
@@ -116,12 +139,19 @@ class TestGetFinancialStatementExecution:
       }
     )
 
-    call_args = mock_client.execute_query.call_args[0][0]
+    # Second call is the main query
+    call_args = mock_client.execute_query.call_args_list[1][0][0]
     assert "p.duration_type = 'annual'" in call_args
 
   @pytest.mark.asyncio
   async def test_period_type_quarterly_filter(self, tool, mock_client):
-    mock_client.execute_query = AsyncMock(return_value=[])
+    mock_client.execute_query = AsyncMock(
+      side_effect=[
+        [{"accession_number": "acc-1", "identifier": "id-1", "form": "10-Q",
+          "filing_date": "2025-08-01", "fiscal_year": 2025, "fiscal_period": "Q3"}],
+        [],
+      ]
+    )
 
     await tool.execute(
       {
@@ -131,7 +161,7 @@ class TestGetFinancialStatementExecution:
       }
     )
 
-    call_args = mock_client.execute_query.call_args[0][0]
+    call_args = mock_client.execute_query.call_args_list[1][0][0]
     assert "p.duration_type = 'quarterly'" in call_args
 
   @pytest.mark.asyncio
@@ -139,7 +169,11 @@ class TestGetFinancialStatementExecution:
     mock_client.execute_query = AsyncMock(return_value=[])
 
     result = await tool.execute(
-      {"ticker": "ZZZZ", "statement_type": "income_statement"}
+      {
+        "ticker": "ZZZZ",
+        "statement_type": "income_statement",
+        "report_id": "some-id",
+      }
     )
     assert result["fact_count"] == 0
     assert "tip" in result
@@ -147,62 +181,232 @@ class TestGetFinancialStatementExecution:
   @pytest.mark.asyncio
   async def test_query_uses_parameters(self, tool, mock_client):
     """Verify query passes ticker and statement_type as parameters."""
-    mock_client.execute_query = AsyncMock(return_value=[])
+    mock_client.execute_query = AsyncMock(
+      side_effect=[
+        [{"accession_number": "acc-1", "identifier": "id-1", "form": "10-K",
+          "filing_date": "2025-10-31", "fiscal_year": 2025, "fiscal_period": "FY"}],
+        [],
+      ]
+    )
 
     await tool.execute({"ticker": "aapl", "statement_type": "income_statement"})
 
-    call_kwargs = mock_client.execute_query.call_args
+    # Main query is the second call
+    call_kwargs = mock_client.execute_query.call_args_list[1]
     params = call_kwargs[1].get("parameters", {})
     assert params["ticker"] == "AAPL"
     assert params["statement_type"] == "income_statement"
 
   @pytest.mark.asyncio
-  async def test_accession_number_filter(self, tool, mock_client):
-    """Accession number should add Report join."""
+  async def test_report_id_filter(self, tool, mock_client):
+    """report_id should add Report join matching both identifier and accession_number."""
     mock_client.execute_query = AsyncMock(return_value=[])
 
     await tool.execute(
       {
         "ticker": "NVDA",
         "statement_type": "income_statement",
-        "accession_number": "0001045810-25-000023",
+        "report_id": "0001045810-25-000023",
       }
     )
 
     call_args = mock_client.execute_query.call_args[0][0]
     assert "REPORT_HAS_FACT" in call_args
+    assert "r.identifier = $report_id" in call_args
 
     params = mock_client.execute_query.call_args[1].get("parameters", {})
-    assert params["accession_number"] == "0001045810-25-000023"
+    assert params["report_id"] == "0001045810-25-000023"
 
   @pytest.mark.asyncio
-  async def test_accession_number_in_result(self, tool, mock_client):
-    mock_client.execute_query = AsyncMock(return_value=[])
+  async def test_query_error_handling(self, tool, mock_client):
+    mock_client.execute_query = AsyncMock(
+      side_effect=Exception("connection refused")
+    )
 
     result = await tool.execute(
       {
         "ticker": "NVDA",
-        "statement_type": "balance_sheet",
-        "accession_number": "0001045810-25-000023",
+        "statement_type": "income_statement",
+        "report_id": "some-id",
       }
-    )
-    assert result["accession_number"] == "0001045810-25-000023"
-
-  @pytest.mark.asyncio
-  async def test_no_accession_number_no_report_join(self, tool, mock_client):
-    mock_client.execute_query = AsyncMock(return_value=[])
-
-    await tool.execute({"ticker": "NVDA", "statement_type": "income_statement"})
-
-    call_args = mock_client.execute_query.call_args[0][0]
-    assert "REPORT_HAS_FACT" not in call_args
-
-  @pytest.mark.asyncio
-  async def test_query_error_handling(self, tool, mock_client):
-    mock_client.execute_query = AsyncMock(side_effect=Exception("connection refused"))
-
-    result = await tool.execute(
-      {"ticker": "NVDA", "statement_type": "income_statement"}
     )
     assert "error" in result
     assert "connection refused" in result["error"]
+
+
+class TestAutoResolve:
+  @pytest.mark.asyncio
+  async def test_annual_resolves_10k_forms(self, tool, mock_client):
+    """Annual period_type should look for 10-K, 20-F, 40-F."""
+    mock_client.execute_query = AsyncMock(
+      side_effect=[
+        [{"accession_number": "acc-1", "identifier": "id-1", "form": "10-K",
+          "filing_date": "2025-10-31", "fiscal_year": 2025, "fiscal_period": "FY"}],
+        [],
+      ]
+    )
+
+    result = await tool.execute(
+      {"ticker": "AAPL", "statement_type": "income_statement", "period_type": "annual"}
+    )
+
+    # Check resolve query used annual forms
+    resolve_query = mock_client.execute_query.call_args_list[0][0][0]
+    resolve_params = mock_client.execute_query.call_args_list[0][1]["parameters"]
+    assert "r.form IN $forms" in resolve_query
+    assert resolve_params["forms"] == ["10-K", "20-F", "40-F"]
+
+    # Check resolved report is in result
+    assert "resolved_report" in result
+    assert result["resolved_report"]["form"] == "10-K"
+
+  @pytest.mark.asyncio
+  async def test_quarterly_resolves_all_forms(self, tool, mock_client):
+    """Quarterly period_type should include 10-Q plus annual forms."""
+    mock_client.execute_query = AsyncMock(
+      side_effect=[
+        [{"accession_number": "acc-q1", "identifier": "id-q1", "form": "10-Q",
+          "filing_date": "2025-08-01", "fiscal_year": 2025, "fiscal_period": "Q3"}],
+        [],
+      ]
+    )
+
+    await tool.execute(
+      {
+        "ticker": "AAPL",
+        "statement_type": "income_statement",
+        "period_type": "quarterly",
+      }
+    )
+
+    resolve_params = mock_client.execute_query.call_args_list[0][1]["parameters"]
+    assert "10-Q" in resolve_params["forms"]
+    assert "10-K" in resolve_params["forms"]
+    assert "20-F" in resolve_params["forms"]
+
+  @pytest.mark.asyncio
+  async def test_fiscal_year_filter(self, tool, mock_client):
+    """fiscal_year should be passed to the resolve query."""
+    mock_client.execute_query = AsyncMock(
+      side_effect=[
+        [{"accession_number": "acc-1", "identifier": "id-1", "form": "10-K",
+          "filing_date": "2024-11-01", "fiscal_year": 2024, "fiscal_period": "FY"}],
+        [],
+      ]
+    )
+
+    await tool.execute(
+      {
+        "ticker": "AAPL",
+        "statement_type": "income_statement",
+        "period_type": "annual",
+        "fiscal_year": 2024,
+      }
+    )
+
+    resolve_query = mock_client.execute_query.call_args_list[0][0][0]
+    resolve_params = mock_client.execute_query.call_args_list[0][1]["parameters"]
+    assert "r.fiscal_year_focus = $fiscal_year" in resolve_query
+    assert resolve_params["fiscal_year"] == 2024
+
+  @pytest.mark.asyncio
+  async def test_no_report_found_still_queries(self, tool, mock_client):
+    """When auto-resolve finds no report, query proceeds without report filter."""
+    mock_client.execute_query = AsyncMock(
+      side_effect=[
+        [],  # No report found
+        [
+          {
+            "canonical_concept": "revenue",
+            "qname": "us-gaap:Revenues",
+            "name": "Revenues",
+            "value": 1000,
+            "end_date": "2025-01-01",
+            "period_type": "duration",
+            "duration_type": "annual",
+          }
+        ],
+      ]
+    )
+
+    result = await tool.execute(
+      {"ticker": "ZZZZ", "statement_type": "income_statement"}
+    )
+
+    # Main query should not have REPORT_HAS_FACT
+    main_query = mock_client.execute_query.call_args_list[1][0][0]
+    assert "REPORT_HAS_FACT" not in main_query
+    assert "resolved_report" not in result
+
+  @pytest.mark.asyncio
+  async def test_default_period_type_resolves_annual(self, tool, mock_client):
+    """No period_type defaults to annual forms for resolve."""
+    mock_client.execute_query = AsyncMock(
+      side_effect=[
+        [{"accession_number": "acc-1", "identifier": "id-1", "form": "10-K",
+          "filing_date": "2025-10-31", "fiscal_year": 2025, "fiscal_period": "FY"}],
+        [],
+      ]
+    )
+
+    await tool.execute(
+      {"ticker": "AAPL", "statement_type": "income_statement"}
+    )
+
+    resolve_params = mock_client.execute_query.call_args_list[0][1]["parameters"]
+    assert resolve_params["forms"] == ["10-K", "20-F", "40-F"]
+
+  @pytest.mark.asyncio
+  async def test_resolve_error_falls_through(self, tool, mock_client):
+    """If resolve query fails, main query still runs without report filter."""
+    mock_client.execute_query = AsyncMock(
+      side_effect=[
+        Exception("resolve timeout"),
+        [],  # Main query succeeds
+      ]
+    )
+
+    result = await tool.execute(
+      {"ticker": "AAPL", "statement_type": "income_statement"}
+    )
+
+    assert "resolved_report" not in result
+    assert result["fact_count"] == 0
+
+
+class TestDeduplication:
+  def test_dedup_by_qname_and_end_date(self, tool):
+    rows = [
+      {"qname": "us-gaap:Revenues", "end_date": "2025-09-27", "value": 416161000000},
+      {"qname": "us-gaap:Revenues", "end_date": "2025-09-27", "value": 416161000000},
+      {"qname": "us-gaap:Revenues", "end_date": "2024-09-28", "value": 391035000000},
+      {"qname": "us-gaap:NetIncomeLoss", "end_date": "2025-09-27", "value": 112010000000},
+    ]
+    deduped = tool._deduplicate_facts(rows)
+    assert len(deduped) == 3
+    assert deduped[0]["end_date"] == "2025-09-27"
+    assert deduped[0]["qname"] == "us-gaap:Revenues"
+    assert deduped[1]["end_date"] == "2024-09-28"
+    assert deduped[2]["qname"] == "us-gaap:NetIncomeLoss"
+
+  def test_dedup_keeps_first_occurrence(self, tool):
+    """First occurrence wins — since results are ordered by end_date DESC,
+    this keeps the most recent filing's value."""
+    rows = [
+      {"qname": "us-gaap:Revenues", "end_date": "2024-09-28", "value": 391035000000},
+      {"qname": "us-gaap:Revenues", "end_date": "2024-09-28", "value": 999999999999},
+    ]
+    deduped = tool._deduplicate_facts(rows)
+    assert len(deduped) == 1
+    assert deduped[0]["value"] == 391035000000
+
+  def test_dedup_empty_list(self, tool):
+    assert tool._deduplicate_facts([]) == []
+
+  def test_dedup_no_duplicates(self, tool):
+    rows = [
+      {"qname": "us-gaap:Revenues", "end_date": "2025-09-27", "value": 416161000000},
+      {"qname": "us-gaap:NetIncomeLoss", "end_date": "2025-09-27", "value": 112010000000},
+    ]
+    deduped = tool._deduplicate_facts(rows)
+    assert len(deduped) == 2

@@ -58,11 +58,11 @@ class TestHasExtension:
 class TestGetToolDefinitionsAsDict:
   def test_core_tools_always_present(self, tools):
     defs = tools.get_tool_definitions_as_dict()
-    assert len(defs) >= 4  # cypher, schema, properties, structure
+    assert len(defs) >= 2  # cypher, schema
 
   def test_roboledger_adds_tools(self, tools_with_roboledger):
     defs = tools_with_roboledger.get_tool_definitions_as_dict()
-    assert len(defs) > 4  # Core + extension tools
+    assert len(defs) > 2  # Core + extension tools
 
 
 class TestGetToolDefinitionHelpers:
@@ -83,7 +83,7 @@ class TestGetToolDefinitionHelpers:
 
   def test_curated_tools_present_with_roboledger(self, tools_with_roboledger):
     defs = tools_with_roboledger._get_curated_tool_definitions()
-    assert len(defs) == 3  # financial_statement, list_disclosures, disclosure_detail
+    assert len(defs) == 1  # financial_statement only
 
 
 class TestCallToolErrors:
@@ -113,11 +113,6 @@ class TestCallToolErrors:
     assert "not available" in result or "Error" in result
 
   @pytest.mark.asyncio
-  async def test_disabled_elements_raises(self, tools):
-    result = await tools.call_tool("discover-common-elements", {})
-    assert "not available" in result or "Error" in result
-
-  @pytest.mark.asyncio
   async def test_disabled_resolve_element_raises(self, tools):
     result = await tools.call_tool("resolve-element", {})
     assert "not available" in result or "Error" in result
@@ -130,16 +125,6 @@ class TestCallToolErrors:
   @pytest.mark.asyncio
   async def test_disabled_financial_statement_raises(self, tools):
     result = await tools.call_tool("get-financial-statement", {})
-    assert "not available" in result or "Error" in result
-
-  @pytest.mark.asyncio
-  async def test_disabled_list_disclosures_raises(self, tools):
-    result = await tools.call_tool("list-disclosures", {})
-    assert "not available" in result or "Error" in result
-
-  @pytest.mark.asyncio
-  async def test_disabled_disclosure_detail_raises(self, tools):
-    result = await tools.call_tool("get-disclosure-detail", {})
     assert "not available" in result or "Error" in result
 
   @pytest.mark.asyncio
@@ -204,17 +189,7 @@ class TestCallToolSuccess:
     assert isinstance(result, str)
     assert "cache" in result.lower()
 
-  @pytest.mark.asyncio
-  async def test_properties_tool(self, tools):
-    tools.properties_tool.execute = AsyncMock(return_value={"props": []})
-    result = await tools.call_tool("discover-properties", {"node_type": "Entity"})
-    assert isinstance(result, str)
 
-  @pytest.mark.asyncio
-  async def test_structure_tool(self, tools):
-    tools.structure_tool.execute = AsyncMock(return_value="Schema description")
-    result = await tools.call_tool("describe-graph-structure", {})
-    assert result == "Schema description"
 
 
 class TestBuildErrorContext:
@@ -270,13 +245,7 @@ class TestEnhanceErrorMessage:
     msg = tools._enhance_error_message(
       "timeout during schema fetch", "get-graph-schema", {}
     )
-    assert "discover-properties" in msg
-
-  def test_properties_unknown_node(self, tools):
-    msg = tools._enhance_error_message(
-      "error", "discover-properties", {"node_type": "Foo"}
-    )
-    assert "Foo" in msg
+    assert "read-graph-cypher" in msg
 
   def test_unauthorized_adds_auth_help(self, tools):
     msg = tools._enhance_error_message("unauthorized access", "any-tool", {})
