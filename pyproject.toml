@@ -40,7 +40,7 @@ dependencies = [
     "httptools>=0.6.0,<1.0",
 
     # Graph Databases
-    "real-ladybug==0.13.1",
+    "real-ladybug==0.15.1",
     "duckdb>=1.1.0,<2.0",
 
     # Relational Database (PostgreSQL)
