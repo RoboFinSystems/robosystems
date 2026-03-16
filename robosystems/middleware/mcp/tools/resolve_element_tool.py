@@ -96,9 +96,9 @@ Use the returned query_hint directly in read-graph-cypher for immediate results.
             "type": "string",
             "description": "Optional: filter to elements reported by a specific company ticker (e.g. 'NVDA', 'AAPL')",
           },
-          "accession_number": {
+          "report_id": {
             "type": "string",
-            "description": "Optional: filter to elements used in a specific filing (e.g. '0001045810-25-000023')",
+            "description": "Optional: filter to elements used in a specific report by its identifier",
           },
         },
         "required": ["concept"],
@@ -113,31 +113,29 @@ Use the returned query_hint directly in read-graph-cypher for immediate results.
     ticker = (
       arguments.get("ticker", "").strip().upper() if arguments.get("ticker") else None
     )
-    accession_number = (
-      arguments.get("accession_number", "").strip()
-      if arguments.get("accession_number")
-      else None
+    report_id = (
+      arguments.get("report_id", "").strip() if arguments.get("report_id") else None
     )
 
     if not concept:
       return {"error": "concept is required"}
 
     # Try DuckDB vector search first, fall back to canonical lookup
-    return await self._resolve_vector(concept, ticker, accession_number)
+    return await self._resolve_vector(concept, ticker, report_id)
 
   # ---------------------------------------------------------------------------
   # Canonical concept lookup (default) — no vector index required
   # ---------------------------------------------------------------------------
 
   async def _resolve_canonical(
-    self, concept: str, ticker: str | None, accession_number: str | None = None
+    self, concept: str, ticker: str | None, report_id: str | None = None
   ) -> dict[str, Any]:
     """Resolve using canonical_concept property on Element nodes."""
     enricher = self.enricher
     result: dict[str, Any] = {
       "concept": concept,
       "ticker": ticker,
-      "accession_number": accession_number,
+      "report_id": report_id,
       "canonical_id": None,
       "canonical_name": None,
       "matches": [],
@@ -158,23 +156,21 @@ Use the returned query_hint directly in read-graph-cypher for immediate results.
     canonical_id = result["canonical_id"]
     if not canonical_id:
       # No canonical match — try direct text search on element qname/name
-      return await self._resolve_text_fallback(
-        result, concept, ticker, accession_number
-      )
+      return await self._resolve_text_fallback(result, concept, ticker, report_id)
 
     try:
       params: dict[str, Any] = {"canonical_id": canonical_id}
-      if accession_number:
+      if report_id:
         query = (
           "MATCH (r:Report)-[:REPORT_HAS_FACT]->(f:Fact)-[:FACT_HAS_ELEMENT]->(e:Element) "
           "WHERE e.canonical_concept = $canonical_id "
-          "AND r.accession_number = $accession_number "
+          "AND r.identifier = $report_id "
           "AND f.has_dimensions = false "
           "RETURN DISTINCT e.qname AS qname, e.canonical_confidence AS confidence, "
           "count(f) AS fact_count "
           "ORDER BY fact_count DESC LIMIT 20"
         )
-        params["accession_number"] = accession_number
+        params["report_id"] = report_id
       elif ticker:
         query = (
           "MATCH (f:Fact)-[:FACT_HAS_ELEMENT]->(e:Element), "
@@ -203,9 +199,7 @@ Use the returned query_hint directly in read-graph-cypher for immediate results.
       rows = []
 
     if not rows:
-      return await self._resolve_text_fallback(
-        result, concept, ticker, accession_number
-      )
+      return await self._resolve_text_fallback(result, concept, ticker, report_id)
 
     # Step 3: Enrich with labels
     qnames = [r["qname"] for r in rows if r.get("qname")]
@@ -227,7 +221,7 @@ Use the returned query_hint directly in read-graph-cypher for immediate results.
       )
 
     result["matches"] = result["matches"][:10]
-    self._build_query_hint(result, ticker, accession_number)
+    self._build_query_hint(result, ticker, report_id)
     return result
 
   async def _resolve_text_fallback(
@@ -235,7 +229,7 @@ Use the returned query_hint directly in read-graph-cypher for immediate results.
     result: dict[str, Any],
     concept: str,
     ticker: str | None,
-    accession_number: str | None,
+    report_id: str | None,
   ) -> dict[str, Any]:
     """Fallback: search element labels by text when no canonical match."""
     search_term = concept.lower()
@@ -278,7 +272,7 @@ Use the returned query_hint directly in read-graph-cypher for immediate results.
     except Exception as e:
       logger.warning(f"Text fallback search failed: {e}")
 
-    self._build_query_hint(result, ticker, accession_number)
+    self._build_query_hint(result, ticker, report_id)
     return result
 
   # ---------------------------------------------------------------------------
@@ -286,14 +280,14 @@ Use the returned query_hint directly in read-graph-cypher for immediate results.
   # ---------------------------------------------------------------------------
 
   async def _resolve_vector(
-    self, concept: str, ticker: str | None, accession_number: str | None = None
+    self, concept: str, ticker: str | None, report_id: str | None = None
   ) -> dict[str, Any]:
     """Resolve using DuckDB vector similarity search on staging Element table."""
     enricher = self.enricher
     result: dict[str, Any] = {
       "concept": concept,
       "ticker": ticker,
-      "accession_number": accession_number,
+      "report_id": report_id,
       "canonical_id": None,
       "canonical_name": None,
       "matches": [],
@@ -346,10 +340,10 @@ Use the returned query_hint directly in read-graph-cypher for immediate results.
       raw_rows = self._table_rows_to_dicts(search_response)
     except Exception as e:
       logger.warning(f"DuckDB vector search failed, falling back to canonical: {e}")
-      return await self._resolve_canonical(concept, ticker, accession_number)
+      return await self._resolve_canonical(concept, ticker, report_id)
 
     if not raw_rows:
-      return await self._resolve_canonical(concept, ticker, accession_number)
+      return await self._resolve_canonical(concept, ticker, report_id)
 
     # Deduplicate by qname in Python (avoids expensive GROUP BY on FLOAT[384])
     seen: set[str] = set()
@@ -364,7 +358,7 @@ Use the returned query_hint directly in read-graph-cypher for immediate results.
 
     # Step 4: Enrich with fact counts and labels from graph
     qnames = [r["qname"] for r in search_rows if r.get("qname")]
-    fact_counts = await self._fetch_fact_counts(qnames, ticker, accession_number)
+    fact_counts = await self._fetch_fact_counts(qnames, ticker, report_id)
     labels = await self._fetch_labels_by_qname(qnames)
 
     for row in search_rows:
@@ -372,7 +366,7 @@ Use the returned query_hint directly in read-graph-cypher for immediate results.
       if not qname:
         continue
       fc = fact_counts.get(qname, 0)
-      if (ticker or accession_number) and fc == 0:
+      if (ticker or report_id) and fc == 0:
         continue
       result["matches"].append(
         {
@@ -390,7 +384,7 @@ Use the returned query_hint directly in read-graph-cypher for immediate results.
       reverse=True,
     )
     result["matches"] = result["matches"][:10]
-    self._build_query_hint(result, ticker, accession_number)
+    self._build_query_hint(result, ticker, report_id)
     return result
 
   # ---------------------------------------------------------------------------
@@ -432,20 +426,20 @@ Use the returned query_hint directly in read-graph-cypher for immediate results.
     self,
     qnames: list[str],
     ticker: str | None,
-    accession_number: str | None,
+    report_id: str | None,
   ) -> dict[str, int]:
     """Fetch fact counts for elements by qname."""
     if not qnames:
       return {}
     try:
       params: dict[str, Any] = {"qnames": qnames}
-      if accession_number:
+      if report_id:
         query = (
           "MATCH (r:Report)-[:REPORT_HAS_FACT]->(f:Fact)-[:FACT_HAS_ELEMENT]->(e:Element) "
-          "WHERE e.qname IN $qnames AND r.accession_number = $accession_number "
+          "WHERE e.qname IN $qnames AND r.identifier = $report_id "
           "RETURN e.qname AS qname, count(f) AS fact_count"
         )
-        params["accession_number"] = accession_number
+        params["report_id"] = report_id
       elif ticker:
         query = (
           "MATCH (f:Fact)-[:FACT_HAS_ELEMENT]->(e:Element), "
@@ -468,7 +462,7 @@ Use the returned query_hint directly in read-graph-cypher for immediate results.
 
   @staticmethod
   def _build_query_hint(
-    result: dict[str, Any], ticker: str | None, accession_number: str | None
+    result: dict[str, Any], ticker: str | None, report_id: str | None
   ) -> None:
     """Build a ready-to-use Cypher query hint from the top match.
 
@@ -480,12 +474,12 @@ Use the returned query_hint directly in read-graph-cypher for immediate results.
     qname = top["qname"]
     hint_params: dict[str, str] = {"qname": qname}
 
-    if accession_number:
-      hint_params["accession_number"] = accession_number
+    if report_id:
+      hint_params["report_id"] = report_id
       result["query_hint"] = (
         "MATCH (r:Report)-[:REPORT_HAS_FACT]->(f:Fact)-[:FACT_HAS_ELEMENT]->(e:Element), "
         "(f)-[:FACT_HAS_PERIOD]->(p:Period) "
-        "WHERE e.qname = $qname AND r.accession_number = $accession_number "
+        "WHERE e.qname = $qname AND r.identifier = $report_id "
         "AND f.has_dimensions = false "
         "RETURN e.qname AS element, f.numeric_value AS value, "
         "p.end_date AS date, p.duration_type AS period_type "

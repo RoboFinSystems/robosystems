@@ -8,15 +8,12 @@ together to create the full MCP tools interface.
 from .base_tool import BaseTool
 from .cypher_tool import CypherTool
 from .data_tools import BuildFactGridTool
-from .elements_tool import ElementsTool
 from .example_queries_tool import ExampleQueriesTool
 from .manager import GraphMCPTools
 from .memory import AddNodeTableTool, AddRelationshipTableTool, WriteCypherTool
-from .properties_tool import PropertiesTool
 from .resolve_element_tool import ResolveElementTool
 from .resolve_structure_tool import ResolveStructureTool
 from .schema_tool import SchemaTool
-from .structure_tool import StructureTool
 from .workspace import (
   CreateWorkspaceTool,
   DeleteWorkspaceTool,
@@ -32,15 +29,12 @@ __all__ = [
   "CreateWorkspaceTool",
   "CypherTool",
   "DeleteWorkspaceTool",
-  "ElementsTool",
   "ExampleQueriesTool",
   "GraphMCPTools",
   "ListWorkspacesTool",
-  "PropertiesTool",
   "ResolveElementTool",
   "ResolveStructureTool",
   "SchemaTool",
-  "StructureTool",
   "SwitchWorkspaceTool",
   "WriteCypherTool",
 ]

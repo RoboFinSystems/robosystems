@@ -26,22 +26,53 @@ mcp/
 ├── query_validator.py       # Query validation and complexity checks
 ├── exceptions.py            # MCP-specific exception classes
 └── tools/                   # MCP tool implementations
-    ├── base_tool.py        # Base tool interface
-    ├── manager.py          # Tool management and registry
-    ├── cypher_tool.py      # Cypher query execution
-    ├── schema_tool.py      # Schema introspection
-    ├── structure_tool.py   # Graph structure exploration
-    ├── elements_tool.py    # Element/taxonomy queries
-    ├── resolve_element_tool.py  # Concept → XBRL element resolution
-    ├── resolve_structure_tool.py # Statement type → structure resolution
-    ├── properties_tool.py  # Property discovery
-    ├── example_queries_tool.py # Query examples and templates
-    ├── workspace.py        # Workspace/subgraph management
-    ├── data_tools.py       # Data operation tools (staging, materialization)
-    ├── financial_statement_tool.py  # Get financial statements by type
-    ├── list_disclosures_tool.py     # List disclosure types with counts
-    └── disclosure_detail_tool.py    # Get facts for a disclosure type
+    ├── base_tool.py         # Base tool interface
+    ├── manager.py           # Tool management and registry
+    ├── cypher_tool.py       # Cypher query execution
+    ├── schema_tool.py       # Schema introspection
+    ├── resolve_element_tool.py   # Concept → XBRL element resolution (vector search)
+    ├── resolve_structure_tool.py # Statement type → structure resolution (vector search)
+    ├── example_queries_tool.py   # Query examples and templates
+    ├── financial_statement_tool.py  # Get financial statements (auto-resolve reports)
+    ├── data_tools.py        # Build fact grid (cross-company comparisons)
+    ├── workspace.py         # Workspace/subgraph management
+    └── memory.py            # Write operations (subgraph-only)
 ```
+
+## Tool Layers
+
+Tools are organized into three availability layers:
+
+### Layer 1: Core (always available)
+
+| Tool | Description |
+|------|-------------|
+| `read-graph-cypher` | Execute read-only Cypher queries with validation |
+| `get-graph-schema` | Get complete database schema (cached 60s) |
+
+### Layer 2: Schema Extensions (require `roboledger` in `schema_extensions`)
+
+| Tool | Description |
+|------|-------------|
+| `get-example-queries` | Working query patterns tailored to the graph schema |
+| `resolve-element` | Vector search: map concepts ("revenue") to XBRL element qnames |
+| `resolve-structure` | Vector search: find statement structures by type or free-text |
+| `get-financial-statement` | Structured statement data with auto-resolve and dedup |
+| `build-fact-grid` | Cross-company comparisons via canonical concepts |
+
+`resolve-element` and `resolve-structure` additionally require `has_semantic_enrichment=True` on the manifest.
+
+### Layer 3: Infrastructure (feature-flag gated)
+
+| Tool | Flag | Description |
+|------|------|-------------|
+| `create-workspace` | `MCP_WORKSPACE_ENABLED` | Create subgraph workspace |
+| `delete-workspace` | `MCP_WORKSPACE_ENABLED` | Delete workspace |
+| `list-workspaces` | `MCP_WORKSPACE_ENABLED` | List available workspaces |
+| `switch-workspace` | `MCP_WORKSPACE_ENABLED` | Switch active workspace context |
+| `write-graph-cypher` | `MCP_MEMORY_ENABLED` | Execute write Cypher (subgraphs only) |
+| `add-node-table` | `MCP_MEMORY_ENABLED` | Create staging table for nodes |
+| `add-relationship-table` | `MCP_MEMORY_ENABLED` | Create staging table for relationships |
 
 ## Key Components
 
@@ -67,7 +98,7 @@ client = await create_graph_mcp_client(graph_id="sec")
 
 # Execute Cypher query
 result = await client.execute_query(
-    "MATCH (c:Company) WHERE c.ticker = 'AAPL' RETURN c"
+    "MATCH (e:Entity) WHERE e.ticker = 'AAPL' RETURN e"
 )
 
 # Get schema information
@@ -108,189 +139,14 @@ async with acquire_graph_mcp_client(graph_id="kg1a2b3c") as client:
 
 ### 3. MCP Tools (`tools/`)
 
-Specialized tools for different graph database operations.
+All tools use `self.client.execute_query()` for consistent routing, auth, and error handling.
 
-**Available Tools:**
+**Key patterns:**
 
-#### Cypher Tool (`cypher_tool.py`)
-
-Execute Cypher queries with validation and result processing.
-
-```python
-from robosystems.middleware.mcp.tools import CypherTool
-
-tool = CypherTool(client)
-result = await tool.execute({
-    "query": "MATCH (c:Company) RETURN c.name LIMIT 10"
-})
-```
-
-#### Schema Tool (`schema_tool.py`)
-
-Introspect graph schema and structure.
-
-```python
-from robosystems.middleware.mcp.tools import SchemaTool
-
-tool = SchemaTool(client)
-schema = await tool.get_schema()
-# Returns node types, relationships, and properties
-```
-
-#### Structure Tool (`structure_tool.py`)
-
-Explore graph structure and relationships.
-
-```python
-from robosystems.middleware.mcp.tools import StructureTool
-
-tool = StructureTool(client)
-structure = await tool.get_structure({
-    "node_type": "Company",
-    "depth": 2
-})
-```
-
-#### Resolve Element Tool (`resolve_element_tool.py`)
-
-Map natural-language financial concepts to XBRL element qnames.
-
-```python
-from robosystems.middleware.mcp.tools import ResolveElementTool
-
-tool = ResolveElementTool(client)
-result = await tool.execute({
-    "concept": "revenue",
-    "ticker": "NVDA"
-})
-# Returns matching qnames, confidence scores, and a ready-to-use query hint
-```
-
-#### Resolve Structure Tool (`resolve_structure_tool.py`)
-
-Find financial statement structures by type (income statement, balance sheet, etc.).
-
-```python
-from robosystems.middleware.mcp.tools import ResolveStructureTool
-
-tool = ResolveStructureTool(client)
-result = await tool.execute({
-    "statement_type": "income_statement",
-    "ticker": "NVDA"
-})
-```
-
-#### Properties Tool (`properties_tool.py`)
-
-Discover available properties on nodes.
-
-```python
-from robosystems.middleware.mcp.tools import PropertiesTool
-
-tool = PropertiesTool(client)
-properties = await tool.discover({
-    "node_type": "Company"
-})
-```
-
-#### Example Queries Tool (`example_queries_tool.py`)
-
-Provide query templates and examples.
-
-```python
-from robosystems.middleware.mcp.tools import ExampleQueriesTool
-
-tool = ExampleQueriesTool(client)
-examples = await tool.get_examples({
-    "category": "financial_analysis"
-})
-```
-
-#### Workspace Tools (`workspace.py`)
-
-Manage workspaces (subgraphs) for isolated development and testing environments.
-
-**Available Operations:**
-
-- `create-workspace` - Create new workspace/subgraph
-- `delete-workspace` - Delete existing workspace
-- `list-workspaces` - List all workspaces for parent graph
-- `switch-workspace` - Switch active workspace context
-
-```python
-from robosystems.middleware.mcp.tools import CreateWorkspaceTool
-
-tool = CreateWorkspaceTool(client)
-result = await tool.execute({
-    "name": "dev",
-    "description": "Development workspace",
-    "fork_parent": False
-})
-```
-
-#### Data Operation Tools (`data_tools.py`)
-
-Tools for data ingestion, staging, and graph materialization workflows.
-
-##### Build Fact Grid Tool
-
-Construct multidimensional fact grids from graph data for analysis.
-
-```python
-from robosystems.middleware.mcp.tools import BuildFactGridTool
-
-tool = BuildFactGridTool(client)
-result = await tool.execute({
-    "elements": ["us-gaap:Assets", "us-gaap:Liabilities"],
-    "periods": ["2023-12-31", "2024-12-31"],
-    "dimensions": {},
-    "rows": [{"dimension": "element"}],
-    "columns": [{"dimension": "period"}]
-})
-```
-
-#### Curated Financial Tools
-
-Parameterized tools for structured financial data access. These use the FactSet traversal pattern (Structure → FactSet → Fact) and Association Classifications to return financial data without requiring Cypher knowledge.
-
-##### Get Financial Statement Tool (`financial_statement_tool.py`)
-
-Return a structured financial statement for a company.
-
-```python
-result = await tools.call_tool("get-financial-statement", {
-    "ticker": "NVDA",
-    "statement_type": "income_statement",  # or balance_sheet, cash_flow_statement, equity_statement
-    "period_type": "annual",               # optional: annual, quarterly, instant
-    "limit": 50
-})
-```
-
-##### List Disclosures Tool (`list_disclosures_tool.py`)
-
-List all disclosure types available in the graph with counts.
-
-```python
-result = await tools.call_tool("list-disclosures", {
-    "ticker": "NVDA"  # optional — omit for graph-wide counts
-})
-# Returns: { disclosures: [{ type: "AssetsRollUp", count: 42 }, ...] }
-```
-
-##### Get Disclosure Detail Tool (`disclosure_detail_tool.py`)
-
-Return facts for a specific disclosure type.
-
-```python
-result = await tools.call_tool("get-disclosure-detail", {
-    "disclosure_type": "AssetsRollUp",
-    "ticker": "NVDA",              # optional
-    "include_dimensions": False,   # optional, default false
-    "limit": 100
-})
-```
-
-These tools require that the graph has been enriched with Structure-level FactSets and Association Classifications (see `adapters/sec/enrichment.py`).
+- **Auto-resolve**: `get-financial-statement` automatically finds the latest relevant report when no `report_id` is provided
+- **Vector search**: `resolve-element` and `resolve-structure` use DuckDB cosine similarity on staging tables
+- **Deduplication**: Financial tools deduplicate facts that appear in multiple filings (comparative periods)
+- **Parameterized queries**: All tools use `$param` syntax to prevent injection
 
 ### 4. Query Validation (`query_validator.py`)
 
@@ -303,14 +159,6 @@ Validates query complexity and enforces limits to prevent resource exhaustion.
 - Timeout enforcement (30 seconds default)
 - Result size limits
 - Protection against expensive operations
-
-**Configuration:**
-
-```bash
-GRAPH_MAX_QUERY_LENGTH=50000      # Maximum query size (bytes)
-GRAPH_QUERY_TIMEOUT=30            # Query timeout (seconds)
-MCP_MAX_COMPLEXITY_SCORE=100      # Complexity threshold
-```
 
 ### 5. Exception Handling (`exceptions.py`)
 
@@ -328,24 +176,6 @@ Comprehensive exception hierarchy for MCP operations.
 - `GraphResourceNotFoundError` - Resource not found
 - `GraphRateLimitError` - Rate limit exceeded
 - `LadybugDBSchemaError` - Schema validation failed
-
-**Usage:**
-
-```python
-from robosystems.middleware.mcp import (
-    GraphQueryTimeoutError,
-    GraphValidationError
-)
-
-try:
-    result = await client.execute_query(query)
-except GraphQueryTimeoutError:
-    # Handle timeout
-    logger.warning("Query timed out")
-except GraphValidationError as e:
-    # Handle validation error
-    logger.error(f"Invalid query: {e}")
-```
 
 ## Configuration
 
@@ -370,6 +200,9 @@ MCP_POOL_LIFETIME=3600                 # Connection lifetime (seconds)
 MCP_ENABLE_POOLING=true                # Enable connection pooling
 MCP_ENABLE_CACHING=true                # Enable schema caching
 MCP_ENABLE_VALIDATION=true             # Enable query validation
+MCP_WORKSPACE_ENABLED=false            # Enable workspace tools
+MCP_MEMORY_ENABLED=false               # Enable write/memory tools
+FACT_GRID_ENABLED=false                # Enable build-fact-grid tool
 ```
 
 ## Integration Patterns
@@ -407,42 +240,6 @@ response = await agent.execute({
 })
 ```
 
-## Performance Optimization
-
-### Connection Pooling Benefits
-
-- **Reduced Latency**: Reuse existing connections (saves ~100ms per request)
-- **Lower Overhead**: Avoid repeated client initialization
-- **Resource Efficiency**: Limit concurrent connections
-- **Automatic Cleanup**: Remove idle connections
-
-### Best Practices
-
-1. **Use Connection Pool**: Always use `acquire_graph_mcp_client` for pooled connections
-2. **Set Appropriate Timeouts**: Match timeouts to query complexity
-3. **Validate Queries**: Enable query validation to prevent expensive operations
-4. **Cache Schema**: Enable schema caching for repeated introspection
-5. **Handle Errors**: Implement proper error handling for timeouts and failures
-
-## Monitoring
-
-### Key Metrics
-
-- Connection pool utilization per graph
-- Query execution times (P50, P95, P99)
-- Timeout rates by graph
-- Error rates by exception type
-- Schema cache hit rates
-
-### Health Checks
-
-```python
-# Check MCP client health
-health = await client.health_check()
-print(f"Status: {health['status']}")
-print(f"Latency: {health['latency_ms']}ms")
-```
-
 ## Troubleshooting
 
 ### Common Issues
@@ -465,32 +262,12 @@ print(f"Latency: {health['latency_ms']}ms")
 - Verify query length is within limits
 - Review complexity score (simplify query if needed)
 
-**4. Authentication Failures**
-
-- Verify graph access permissions
-- Check API key validity
-- Ensure user has access to graph
-
 ### Debug Mode
 
 ```python
 import logging
 logging.getLogger("robosystems.middleware.mcp").setLevel(logging.DEBUG)
-
-# Provides detailed logs for:
-# - Connection pool operations
-# - Query execution and timing
-# - Tool invocations
-# - Error stack traces
 ```
-
-## Security Considerations
-
-1. **Query Validation**: Always enabled to prevent injection attacks
-2. **Timeout Enforcement**: Prevents resource exhaustion
-3. **Access Control**: Integration with auth middleware
-4. **Audit Logging**: All queries logged for compliance
-5. **Rate Limiting**: Integration with rate limiting middleware
 
 ## Related Documentation
 
@@ -498,12 +275,3 @@ logging.getLogger("robosystems.middleware.mcp").setLevel(logging.DEBUG)
 - **[Graph Middleware](/robosystems/middleware/graph/README.md)** - Graph routing layer
 - **[Authentication](/robosystems/middleware/auth/README.md)** - Auth integration
 - **[Configuration](/robosystems/config/README.md)** - Configuration system
-
-## Support
-
-For MCP-specific issues:
-
-- Check Graph API health and connectivity
-- Review query validation errors for syntax issues
-- Monitor connection pool metrics
-- Consult Graph API logs for backend errors

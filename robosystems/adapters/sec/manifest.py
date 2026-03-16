@@ -17,7 +17,6 @@ SEC_MANIFEST = SharedRepositoryManifest(
   data_source_url="https://www.sec.gov/cgi-bin/browse-edgar",
   sync_frequency="daily",
   schema_extensions=("roboledger",),
-  has_element_discovery=True,
   has_semantic_enrichment=True,
   sibling_subgraphs=("historical",),  # sec_historical subgraph
   rate_limits={

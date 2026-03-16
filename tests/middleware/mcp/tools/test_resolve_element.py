@@ -57,7 +57,7 @@ class TestResolveElementToolDefinition:
     assert defn["name"] == "resolve-element"
     assert "concept" in defn["inputSchema"]["properties"]
     assert "ticker" in defn["inputSchema"]["properties"]
-    assert "accession_number" in defn["inputSchema"]["properties"]
+    assert "report_id" in defn["inputSchema"]["properties"]
     assert defn["inputSchema"]["required"] == ["concept"]
 
 
@@ -139,7 +139,7 @@ class TestResolveElementExecution:
     assert result["query_hint_params"]["ticker"] == "NVDA"
 
   @pytest.mark.asyncio
-  async def test_with_accession_number_filter(self, mock_client):
+  async def test_with_report_id_filter(self, mock_client):
     from robosystems.adapters.sec.taxonomy.concepts import CanonicalConcept
 
     mock_concept = CanonicalConcept(
@@ -167,11 +167,11 @@ class TestResolveElementExecution:
     )
 
     result = await tool.execute(
-      {"concept": "revenue", "accession_number": "0001045810-25-000023"}
+      {"concept": "revenue", "report_id": "0001045810-25-000023"}
     )
-    assert result["accession_number"] == "0001045810-25-000023"
-    assert "$accession_number" in result["query_hint"]
-    assert result["query_hint_params"]["accession_number"] == "0001045810-25-000023"
+    assert result["report_id"] == "0001045810-25-000023"
+    assert "$report_id" in result["query_hint"]
+    assert result["query_hint_params"]["report_id"] == "0001045810-25-000023"
     assert "REPORT_HAS_FACT" in result["query_hint"]
     assert result["matches"][0]["fact_count"] == 12
 
