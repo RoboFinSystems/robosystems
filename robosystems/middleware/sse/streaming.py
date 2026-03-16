@@ -168,6 +168,8 @@ class SSEConnectionManager:
         operation_id: Operation identifier
         event: Event to broadcast
     """
+    failed_connections: list[str] = []
+
     async with self._lock:
       if operation_id not in self.connections:
         logger.info(
@@ -194,6 +196,7 @@ class SSEConnectionManager:
           except asyncio.QueueFull:
             logger.warning(f"Queue full for connection {connection_id}, removing")
             failed_count += 1
+            failed_connections.append(connection_id)
             # Record queue overflow metric
             try:
               from robosystems.middleware.otel.metrics import get_endpoint_metrics
@@ -202,11 +205,6 @@ class SSEConnectionManager:
               m.record_sse_queue_overflow(operation_id, connection_id)
             except Exception:
               pass  # Metrics are best-effort, never break SSE delivery
-            # Try to notify client of error before removal
-            await self._handle_connection_error(
-              operation_id, connection_id, "Queue overflow"
-            )
-            await self.remove_connection(operation_id, connection_id)
 
       # Record event emission metrics
       try:
@@ -219,6 +217,11 @@ class SSEConnectionManager:
           m.record_sse_event_failed(operation_id, "queue_full")
       except Exception:
         pass  # Metrics are best-effort, never break SSE delivery
+
+    # Clean up failed connections outside the lock to avoid deadlock
+    for connection_id in failed_connections:
+      await self._handle_connection_error(operation_id, connection_id, "Queue overflow")
+      await self.remove_connection(operation_id, connection_id)
 
   async def get_active_connections(self, operation_id: str) -> int:
     """Get number of active connections for an operation."""
