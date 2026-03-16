@@ -4,7 +4,7 @@
 #}
 
 with line_items as (
-  select * from {{ ref('line_item') }}
+  select * from {{ ref('line_items') }}
 ),
 
 totals as (
@@ -16,4 +16,4 @@ totals as (
 
 select *
 from totals
-where abs(total_debits - total_credits) > 0.01
+where abs(total_debits - total_credits) > 1

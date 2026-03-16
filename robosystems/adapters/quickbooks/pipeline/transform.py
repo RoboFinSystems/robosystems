@@ -1,7 +1,7 @@
 """QuickBooks Transform Asset.
 
-Runs dbt-duckdb models against extracted parquet files and exports
-the graph output tables as qb_*.parquet for loading.
+Runs dbt-duckdb models against extracted parquet files to produce
+OLTP tables in DuckDB for loading into PostgreSQL.
 """
 
 import json
@@ -10,12 +10,12 @@ import subprocess
 from dagster import AssetExecutionContext, MaterializeResult, asset
 
 from .configs import QBSyncConfig
-from .utils import DBT_PROJECT_DIR, export_duckdb_tables, get_pipeline_work_dir
+from .utils import DBT_PROJECT_DIR, QB_LEDGER_TABLES, get_pipeline_work_dir
 
 
 @asset(
   group_name="qb_pipeline",
-  description="Transform QB data via dbt-duckdb, export graph tables as parquet",
+  description="Transform QB data via dbt-duckdb, produce OLTP tables in DuckDB",
   deps=["qb_extract"],
   kinds={"dbt", "duckdb"},
   metadata={
@@ -27,19 +27,19 @@ def qb_transform(
   context: AssetExecutionContext,
   config: QBSyncConfig,
 ) -> MaterializeResult:
-  """Run dbt build on extracted QB data and export graph tables.
+  """Run dbt build on extracted QB data.
 
   Reads extract parquet from the shared pipeline work directory,
-  runs dbt build, then exports graph tables as qb_*.parquet.
+  runs dbt build, producing OLTP tables in DuckDB.
+  The load asset reads from this DuckDB directly.
 
   Returns:
-      MaterializeResult with output statistics
+      MaterializeResult with duckdb_path and table statistics
   """
   work_dir = get_pipeline_work_dir(config.graph_id)
   extract_dir = work_dir / "extract"
   duckdb_path = work_dir / "quickbooks.duckdb"
   target_path = work_dir / "dbt_target"
-  output_dir = work_dir / "output"
 
   context.log.info(f"Transform: extract_dir={extract_dir}, realm_id={config.realm_id}")
 
@@ -87,19 +87,28 @@ def qb_transform(
 
   context.log.info("dbt build succeeded")
 
-  # Export graph tables from DuckDB to parquet
-  table_counts = export_duckdb_tables(duckdb_path, output_dir)
-  total_rows = sum(table_counts.values())
+  # Count rows in OLTP tables
+  import duckdb
 
-  context.log.info(
-    f"Exported {len(table_counts)} tables ({total_rows} total rows) → {output_dir}"
-  )
+  table_counts = {}
+  con = duckdb.connect(str(duckdb_path), read_only=True)
+  try:
+    existing_tables = {row[0] for row in con.execute("SHOW TABLES").fetchall()}
+    for table in QB_LEDGER_TABLES:
+      if table in existing_tables:
+        row_count = con.execute(f"SELECT count(*) FROM {table}").fetchone()
+        table_counts[table] = row_count[0] if row_count else 0
+  finally:
+    con.close()
+
+  total_rows = sum(table_counts.values())
+  context.log.info(f"OLTP tables: {len(table_counts)} tables, {total_rows} total rows")
 
   return MaterializeResult(
     metadata={
-      "output_path": str(output_dir),
+      "duckdb_path": str(duckdb_path),
       "graph_id": config.graph_id,
-      "tables_exported": len(table_counts),
+      "tables": len(table_counts),
       "total_rows": total_rows,
       **{f"rows_{k}": v for k, v in table_counts.items()},
     }

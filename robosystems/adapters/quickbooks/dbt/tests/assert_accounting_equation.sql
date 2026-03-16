@@ -1,6 +1,5 @@
 {#
-  Accounting equation: Assets = Liabilities + Equity
-  (Net of debits and credits by classification)
+  Accounting equation: Assets = Liabilities + Equity + Net Income
 
   For balance sheet accounts:
   - Assets have debit normal balance (debits increase, credits decrease)
@@ -10,32 +9,27 @@
   Net balance = debits - credits for debit-normal accounts
   Net balance = credits - debits for credit-normal accounts
 
-  Test: total_assets - total_liabilities - total_equity should equal 0
-  (within rounding tolerance)
+  Test: total_assets - total_liabilities - total_equity - net_income should equal 0
+  (within rounding tolerance of 1 cent since amounts are in cents)
 
   Returns rows if the equation is violated.
 #}
 
 with line_items as (
-  select * from {{ ref('line_item') }}
+  select * from {{ ref('line_items') }}
 ),
 
-line_elements as (
-  select * from {{ ref('line_item_relates_to_element') }}
-),
-
-elements as (
-  select * from {{ ref('element') }}
+accounts as (
+  select * from {{ ref('accounts') }}
 ),
 
 classified_lines as (
   select
     li.debit_amount,
     li.credit_amount,
-    e.classification
+    a.classification
   from line_items li
-  inner join line_elements le on li.identifier = le.line_item_identifier
-  inner join elements e on le.element_identifier = e.identifier
+  inner join accounts a on li.account_external_id = a.external_id
 ),
 
 balances as (
@@ -44,9 +38,7 @@ balances as (
     sum(case when classification = 'liability' then credit_amount - debit_amount else 0 end) as total_liabilities,
     sum(case when classification = 'equity' then credit_amount - debit_amount else 0 end) as total_equity,
     sum(case when classification = 'revenue' then credit_amount - debit_amount else 0 end) as total_revenue,
-    sum(case when classification = 'expense' then debit_amount - credit_amount else 0 end) as total_expenses,
-    sum(case when classification = 'other income' then credit_amount - debit_amount else 0 end) as total_other_income,
-    sum(case when classification = 'other expense' then debit_amount - credit_amount else 0 end) as total_other_expenses
+    sum(case when classification = 'expense' then debit_amount - credit_amount else 0 end) as total_expenses
   from classified_lines
 ),
 
@@ -55,12 +47,12 @@ equation_check as (
     total_assets,
     total_liabilities,
     total_equity,
-    (total_revenue - total_expenses + total_other_income - total_other_expenses) as net_income,
+    (total_revenue - total_expenses) as net_income,
     total_assets - total_liabilities - total_equity
-      - (total_revenue - total_expenses + total_other_income - total_other_expenses) as imbalance
+      - (total_revenue - total_expenses) as imbalance
   from balances
 )
 
 select *
 from equation_check
-where abs(imbalance) > 0.01
+where abs(imbalance) > 1

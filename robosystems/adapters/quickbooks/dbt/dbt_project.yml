@@ -43,8 +43,5 @@ models:
   quickbooks:
     staging:
       +materialized: view
-    graph:
-      nodes:
-        +materialized: table
-      relationships:
-        +materialized: table
+    ledger:
+      +materialized: table

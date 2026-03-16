@@ -44,32 +44,20 @@ class TestDbtProject:
     assert (staging_dir / "stg_qb_journal_lines.sql").exists()
     assert (staging_dir / "stg_qb_company_info.sql").exists()
 
-  def test_graph_node_models_exist(self):
-    """Verify graph node model SQL files exist."""
-    nodes_dir = DBT_PROJECT_DIR / "models" / "graph" / "nodes"
-    assert (nodes_dir / "entity.sql").exists()
-    assert (nodes_dir / "element.sql").exists()
-    assert (nodes_dir / "transaction.sql").exists()
-    assert (nodes_dir / "entry.sql").exists()
-    assert (nodes_dir / "line_item.sql").exists()
-    assert (nodes_dir / "dimension.sql").exists()
-
-  def test_graph_relationship_models_exist(self):
-    """Verify graph relationship model SQL files exist."""
-    rels_dir = DBT_PROJECT_DIR / "models" / "graph" / "relationships"
-    assert (rels_dir / "entity_has_transaction.sql").exists()
-    assert (rels_dir / "transaction_has_entry.sql").exists()
-    assert (rels_dir / "entry_has_line_item.sql").exists()
-    assert (rels_dir / "line_item_relates_to_element.sql").exists()
-    assert (rels_dir / "line_item_has_dimension.sql").exists()
+  def test_oltp_models_exist(self):
+    """Verify OLTP output model SQL files exist."""
+    oltp_dir = DBT_PROJECT_DIR / "models" / "ledger"
+    assert (oltp_dir / "accounts.sql").exists()
+    assert (oltp_dir / "transactions.sql").exists()
+    assert (oltp_dir / "entries.sql").exists()
+    assert (oltp_dir / "line_items.sql").exists()
+    assert (oltp_dir / "dimensions.sql").exists()
 
   def test_macros_exist(self):
     """Verify macro SQL files exist."""
     macros_dir = DBT_PROJECT_DIR / "macros"
     assert (macros_dir / "normal_balance.sql").exists()
     assert (macros_dir / "classification.sql").exists()
-    assert (macros_dir / "uri_generators.sql").exists()
-    assert (macros_dir / "generate_identifier.sql").exists()
 
   def test_custom_tests_exist(self):
     """Verify custom test SQL files exist."""
@@ -151,40 +139,29 @@ class TestDbtBuild:
     try:
       tables = {row[0] for row in con.execute("SHOW TABLES").fetchall()}
 
-      # Verify node tables exist
-      assert "entity" in tables
-      assert "element" in tables
-      assert "transaction" in tables
-      assert "entry" in tables
-      assert "line_item" in tables
-      assert "dimension" in tables
-
-      # Verify relationship tables exist
-      assert "entity_has_transaction" in tables
-      assert "transaction_has_entry" in tables
-      assert "entry_has_line_item" in tables
-      assert "line_item_relates_to_element" in tables
-      assert "line_item_has_dimension" in tables
+      # Verify OLTP output tables exist
+      assert "accounts" in tables
+      assert "transactions" in tables
+      assert "entries" in tables
+      assert "line_items" in tables
+      assert "dimensions" in tables
 
       # Verify row counts
-      entity_count = con.execute("SELECT count(*) FROM entity").fetchone()[0]
-      assert entity_count == 1, f"Expected 1 entity, got {entity_count}"
+      acct_count = con.execute("SELECT count(*) FROM accounts").fetchone()[0]
+      assert acct_count == 15, f"Expected 15 accounts, got {acct_count}"
 
-      element_count = con.execute("SELECT count(*) FROM element").fetchone()[0]
-      assert element_count == 15, f"Expected 15 elements, got {element_count}"
-
-      tx_count = con.execute("SELECT count(*) FROM transaction").fetchone()[0]
+      tx_count = con.execute("SELECT count(*) FROM transactions").fetchone()[0]
       assert tx_count == 15, f"Expected 15 transactions, got {tx_count}"
 
-      li_count = con.execute("SELECT count(*) FROM line_item").fetchone()[0]
+      li_count = con.execute("SELECT count(*) FROM line_items").fetchone()[0]
       assert li_count == 30, f"Expected 30 line items, got {li_count}"
 
-      # Verify debits = credits
+      # Verify debits = credits (amounts in cents)
       result = con.execute("""
         SELECT sum(debit_amount) as debits, sum(credit_amount) as credits
-        FROM line_item
+        FROM line_items
       """).fetchone()
-      assert abs(result[0] - result[1]) < 0.01, (
+      assert abs(result[0] - result[1]) <= 1, (
         f"Debits ({result[0]}) != Credits ({result[1]})"
       )
     finally:

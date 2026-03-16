@@ -24,16 +24,8 @@ def get_pipeline_work_dir(graph_id: str) -> Path:
   return base
 
 
-# Graph output tables in dependency order (nodes first, then relationships)
-QB_NODE_TABLES = ["entity", "element", "dimension", "transaction", "entry", "line_item"]
-QB_RELATIONSHIP_TABLES = [
-  "entity_has_transaction",
-  "transaction_has_entry",
-  "entry_has_line_item",
-  "line_item_relates_to_element",
-  "line_item_has_dimension",
-]
-QB_ALL_TABLES = QB_NODE_TABLES + QB_RELATIONSHIP_TABLES
+# Ledger output tables from dbt (dependency order for FK resolution)
+QB_LEDGER_TABLES = ["accounts", "transactions", "entries", "line_items", "dimensions"]
 
 # dbt project location (relative to repo root)
 DBT_PROJECT_DIR = Path(__file__).resolve().parents[1] / "dbt"
@@ -369,46 +361,3 @@ def write_extract_parquet(
     f"Wrote extract parquet: {len(accounts)} accounts, "
     f"{len(journal_entries)} entries, {len(journal_lines)} lines"
   )
-
-
-def export_duckdb_tables(duckdb_path: Path, output_dir: Path) -> dict[str, int]:
-  """Export dbt output tables from DuckDB to parquet files.
-
-  Exports each graph table as qb_{TableName}.parquet for loading
-  into the Graph API staging infrastructure.
-
-  Args:
-      duckdb_path: Path to the dbt output DuckDB file
-      output_dir: Directory to write qb_*.parquet files
-
-  Returns:
-      Dict mapping table name to row count
-  """
-  import duckdb
-
-  output_dir.mkdir(parents=True, exist_ok=True)
-  results = {}
-
-  con = duckdb.connect(str(duckdb_path), read_only=True)
-  try:
-    existing_tables = {row[0] for row in con.execute("SHOW TABLES").fetchall()}
-
-    for table in QB_ALL_TABLES:
-      if table not in existing_tables:
-        logger.warning(f"Table '{table}' not found in DuckDB, skipping export")
-        continue
-
-      result = con.execute(f"SELECT count(*) FROM {table}").fetchone()
-      row_count = result[0] if result else 0
-      if row_count == 0:
-        logger.info(f"Table '{table}' is empty, skipping export")
-        continue
-
-      output_file = output_dir / f"qb_{table}.parquet"
-      con.execute(f"COPY {table} TO '{output_file}' (FORMAT PARQUET)")
-      results[table] = row_count
-      logger.info(f"Exported {table}: {row_count} rows → {output_file.name}")
-  finally:
-    con.close()
-
-  return results
