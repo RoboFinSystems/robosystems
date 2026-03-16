@@ -470,6 +470,8 @@ def get_redis_connection_params(environment: str | None = None) -> dict[str, Any
   Returns:
       Dictionary of connection parameters for Redis client.
   """
+  import redis.exceptions as redis_exceptions
+
   if environment is None:
     environment = os.getenv("ENVIRONMENT", "dev").lower()
 
@@ -478,7 +480,10 @@ def get_redis_connection_params(environment: str | None = None) -> dict[str, Any
     "socket_connect_timeout": 5,  # 5 second connection timeout
     "socket_timeout": 5,  # 5 second operation timeout
     "retry_on_timeout": True,
-    "retry_on_error": [ConnectionError, TimeoutError],
+    "retry_on_error": [
+      redis_exceptions.ConnectionError,
+      redis_exceptions.TimeoutError,
+    ],
     "health_check_interval": 30,  # Health check every 30 seconds
   }
 
