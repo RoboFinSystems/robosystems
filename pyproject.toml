@@ -65,7 +65,7 @@ dependencies = [
     "icebug>=12.0,<13.0",
     "fastembed>=0.4.0,<1.0",
     "numpy>=1.26.0,<3.0",
-    "pandas>=2.3.0,<3.0",
+    "pandas>=2.3.0,<4.0",
     "pyarrow>=20.0.0",
 
     # External API Integrations
