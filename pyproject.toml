@@ -61,7 +61,7 @@ dependencies = [
     "boto3>=1.39.0,<2.0",
 
     # Data Processing & Analytics
-    "arelle-release~=2.38.1",
+    "arelle-release~=2.39.1",
     "icebug>=12.0,<13.0",
     "fastembed>=0.4.0,<1.0",
     "numpy>=1.26.0,<3.0",

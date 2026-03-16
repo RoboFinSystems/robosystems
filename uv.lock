@@ -150,7 +150,7 @@ wheels = [
 
 [[package]]
 name = "arelle-release"
-version = "2.38.20"
+version = "2.39.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "bottle" },
@@ -169,9 +169,9 @@ dependencies = [
     { name = "truststore" },
     { name = "typing-extensions" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/aa/47/c0fad2f117ab7e25efee2638ea1ca5a6ac77b0f05cf64288a4d50b22a795/arelle_release-2.38.20.tar.gz", hash = "sha256:803ee73389133dc29291ce17340e0cba0c19bb5badae795b8b1a89a6914d8519", size = 5319913, upload-time = "2026-03-07T02:07:52.112Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/b4/f3/da42d02158a779dad6fecbec237f155391f83f56fc03b627af32944ada80/arelle_release-2.39.1.tar.gz", hash = "sha256:c8489a74d9bd34f0ae60f96ca49e4f38cebd1a64a878f5733d0eaad1d2ee0509", size = 5334966, upload-time = "2026-03-13T21:17:30.682Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/d5/dd/a98ae54f7246bb087ad703827e5dcd84fba8a90027a301b925be3a639d26/arelle_release-2.38.20-py3-none-any.whl", hash = "sha256:2cbd44582cf34460e3c3a84593ecbdd8cbde29f4117c4d5d512da9b2d2a4ef31", size = 5729277, upload-time = "2026-03-07T02:07:49.474Z" },
+    { url = "https://files.pythonhosted.org/packages/df/14/46ff19f13108621db7475de10d12cebe0d35ae5462b24af3a547fb563238/arelle_release-2.39.1-py3-none-any.whl", hash = "sha256:9fa45b425be2b24cad48173b2a2588a2d1ccf8f388e7d553b98a2563fd139fe3", size = 5746586, upload-time = "2026-03-13T21:17:28.672Z" },
 ]
 
 [[package]]
@@ -3012,7 +3012,7 @@ lambda = [
 requires-dist = [
     { name = "aiohttp", specifier = ">=3.12.0" },
     { name = "alembic", specifier = ">=1.16.0,<2.0" },
-    { name = "arelle-release", specifier = "~=2.38.1" },
+    { name = "arelle-release", specifier = "~=2.39.1" },
     { name = "async-timeout", specifier = ">=5.0.0,<6.0" },
     { name = "awscli-local", marker = "extra == 'dev'", specifier = ">=0.22.0,<1.0" },
     { name = "basedpyright", marker = "extra == 'dev'", specifier = ">=1.22.0,<2.0" },
