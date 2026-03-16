@@ -23,3 +23,9 @@ updates:
       interval: "monthly"
     labels:
       - "dependencies"
+    ignore:
+      # Never auto-bump Python runtime versions — requires explicit migration
+      - dependency-name: "python"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "lambda/python"
+        update-types: ["version-update:semver-major"]

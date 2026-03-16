@@ -202,7 +202,7 @@ jobs:
       is_new_stack: ${{ steps.deploy-stack.outputs.is_new_stack }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: ${{ github.repository }}
           ref: ${{ github.ref }}

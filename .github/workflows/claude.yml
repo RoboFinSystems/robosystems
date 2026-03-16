@@ -19,7 +19,7 @@ jobs:
       runner_config: ${{ steps.check.outputs.runner_config }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Check runner availability
         id: check
@@ -48,7 +48,7 @@ jobs:
       actions: read # Required for Claude to read CI results on PRs
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Run Claude Code
         id: claude
