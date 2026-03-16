@@ -2192,14 +2192,14 @@ wheels = [
 
 [[package]]
 name = "plaid-python"
-version = "34.0.0"
+version = "38.4.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "nulltype" },
     { name = "python-dateutil" },
     { name = "urllib3" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/ba/69/20c80ce6601be8269d95746138adcf6f0fbc2bcf70e844bb8df84359789f/plaid_python-34.0.0.tar.gz", hash = "sha256:c7aaf2ee4333c4135342601509e4a2abcd93522f2ca6efd228514d1a72275a19", size = 1070057, upload-time = "2025-06-12T23:06:49.504Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/c7/1d/fa7ee92973930438e908886d6e2035fcd29589652aebd90fc28ee9e894c2/plaid_python-38.4.0.tar.gz", hash = "sha256:cdd56262a865eb58d424b3f85b9e41ca5b79e0f0aec71e968afe9aa46d9f84b4", size = 1184149, upload-time = "2026-03-05T21:05:24.698Z" }
 
 [[package]]
 name = "platformdirs"
@@ -3047,7 +3047,7 @@ requires-dist = [
     { name = "opentelemetry-instrumentation-requests", specifier = ">=0.55b0,<1.0" },
     { name = "opentelemetry-sdk", specifier = ">=1.35.0,<2.0" },
     { name = "pandas", specifier = ">=2.3.0,<3.0" },
-    { name = "plaid-python", specifier = ">=34.0,<35.0" },
+    { name = "plaid-python", specifier = ">=34.0,<39.0" },
     { name = "psutil", specifier = ">=7.2.1,<8.0" },
     { name = "psycopg2-binary", specifier = ">=2.9.0,<3.0" },
     { name = "pyarrow", specifier = ">=20.0.0" },
