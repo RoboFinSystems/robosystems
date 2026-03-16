@@ -48,8 +48,8 @@ class TestGetDagsterComponents:
   def test_expected_number_of_jobs(self):
     """Test that the expected number of jobs are registered."""
     components = get_dagster_components()
-    # 15 shared pipeline jobs + 1 entity sync job
-    assert len(components["jobs"]) == 16
+    # 16 shared pipeline jobs + 1 entity sync job
+    assert len(components["jobs"]) == 17
 
   def test_expected_number_of_sensors(self):
     """Test that the expected number of sensors are registered."""
