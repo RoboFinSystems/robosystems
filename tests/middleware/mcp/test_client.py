@@ -264,20 +264,20 @@ class TestGraphMCPTools:
 
     tool_names = {t["name"] for t in definitions}
 
-    # Core tools (4) should always be present
+    # Core tools (2) should always be present
     assert "read-graph-cypher" in tool_names
     assert "get-graph-schema" in tool_names
-    assert "discover-properties" in tool_names
-    assert "describe-graph-structure" in tool_names
 
     # roboledger extension tools should NOT be present
     assert "get-example-queries" not in tool_names
     assert "get-financial-statement" not in tool_names
-    assert "list-disclosures" not in tool_names
-    assert "get-disclosure-detail" not in tool_names
-    assert "discover-common-elements" not in tool_names
     assert "resolve-element" not in tool_names
     assert "resolve-structure" not in tool_names
+
+    # Removed tools should NOT be present
+    assert "discover-properties" not in tool_names
+    assert "list-disclosures" not in tool_names
+    assert "get-disclosure-detail" not in tool_names
 
     # Verify core tool content
     cypher_tool = next(t for t in definitions if t["name"] == "read-graph-cypher")
@@ -286,14 +286,6 @@ class TestGraphMCPTools:
 
     schema_tool = next(t for t in definitions if t["name"] == "get-graph-schema")
     assert "Get the complete database schema" in schema_tool["description"]
-
-    discover_tool = next(t for t in definitions if t["name"] == "discover-properties")
-    assert "Discover available properties" in discover_tool["description"]
-
-    describe_tool = next(
-      t for t in definitions if t["name"] == "describe-graph-structure"
-    )
-    assert "Get a natural language description" in describe_tool["description"]
 
   @pytest.mark.unit
   def test_get_tool_definitions_with_roboledger(self, mock_graph_client):
@@ -307,14 +299,15 @@ class TestGraphMCPTools:
     # Core tools should be present
     assert "read-graph-cypher" in tool_names
     assert "get-graph-schema" in tool_names
-    assert "discover-properties" in tool_names
-    assert "describe-graph-structure" in tool_names
 
     # roboledger extension tools should be present
     assert "get-example-queries" in tool_names
     assert "get-financial-statement" in tool_names
-    assert "list-disclosures" in tool_names
-    assert "get-disclosure-detail" in tool_names
+
+    # Removed tools should NOT be present
+    assert "discover-properties" not in tool_names
+    assert "list-disclosures" not in tool_names
+    assert "get-disclosure-detail" not in tool_names
 
     # Verify example queries tool content
     example_tool = next(t for t in definitions if t["name"] == "get-example-queries")
@@ -464,10 +457,8 @@ class TestGraphMCPTools:
 
     tools = GraphMCPTools(mock_graph_client)
 
-    with patch("robosystems.middleware.graph.get_universal_repository") as mock_repo:
-      mock_repository = AsyncMock()
-      mock_repo.return_value = mock_repository
-      mock_repository.execute_query.return_value = [
+    mock_graph_client.execute_query = AsyncMock(
+      return_value=[
         {
           "element_id": "test:Element",
           "element_name": "Cash",
@@ -477,15 +468,16 @@ class TestGraphMCPTools:
           "dimension_member": None,
         }
       ]
+    )
 
-      result = await tools.call_tool(
-        "build-fact-grid",
-        {
-          "elements": ["test:Element"],
-          "periods": ["2025-01-01"],
-        },
-        return_raw=True,
-      )
+    result = await tools.call_tool(
+      "build-fact-grid",
+      {
+        "elements": ["test:Element"],
+        "periods": ["2025-01-01"],
+      },
+      return_raw=True,
+    )
 
     assert result["success"] is True
     assert result["fact_count"] == 1
@@ -573,10 +565,7 @@ class TestGraphMCPTools:
 
     for tool_name in [
       "get-financial-statement",
-      "list-disclosures",
-      "get-disclosure-detail",
       "get-example-queries",
-      "discover-common-elements",
     ]:
       result = await tools.call_tool(tool_name, {}, return_raw=False)
       assert "not available" in result, f"{tool_name} should not be available"

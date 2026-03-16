@@ -52,7 +52,7 @@ MATCH (a)-[r]->(b)
 RETURN DISTINCT labels(a)[0] AS from_type, type(r) AS rel_type, labels(b)[0] AS to_type
 ```
 
-**TIP:** Use `get-graph-schema` and `discover-properties` to understand what's in the graph before writing complex queries.""",
+**TIP:** Use `get-graph-schema` to understand what's in the graph before writing complex queries.""",
       "inputSchema": {
         "type": "object",
         "properties": {

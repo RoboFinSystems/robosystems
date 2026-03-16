@@ -170,7 +170,7 @@ LIMIT 10""",
               "description": "Find reports by form type",
               "query": """MATCH (r:Report)
 WHERE r.form = '10-K' OR r.form = '10-Q'
-RETURN r.form, r.filing_date, r.accession_number
+RETURN r.form, r.filing_date, r.identifier
 LIMIT 10""",
               "explanation": "Report nodes contain SEC filing metadata",
             },

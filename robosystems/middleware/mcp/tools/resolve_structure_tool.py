@@ -85,9 +85,9 @@ Use returned structure identifiers to explore element hierarchies via STRUCTURE_
             "type": "string",
             "description": "Optional: filter to structures from a specific company's filings (e.g. 'NVDA')",
           },
-          "accession_number": {
+          "report_id": {
             "type": "string",
-            "description": "Optional: filter to structures from a specific filing (e.g. '0001045810-25-000023')",
+            "description": "Optional: filter to structures from a specific report by its identifier",
           },
           "include_parenthetical": {
             "type": "boolean",
@@ -111,10 +111,8 @@ Use returned structure identifiers to explore element hierarchies via STRUCTURE_
     ticker = (
       arguments.get("ticker", "").strip().upper() if arguments.get("ticker") else None
     )
-    accession_number = (
-      arguments.get("accession_number", "").strip()
-      if arguments.get("accession_number")
-      else None
+    report_id = (
+      arguments.get("report_id", "").strip() if arguments.get("report_id") else None
     )
     include_parenthetical = arguments.get("include_parenthetical", False)
 
@@ -125,12 +123,10 @@ Use returned structure identifiers to explore element hierarchies via STRUCTURE_
       return {"error": "Either statement_type or query is required"}
 
     if query:
-      return await self._resolve_vector(
-        query, ticker, accession_number, include_parenthetical
-      )
+      return await self._resolve_vector(query, ticker, report_id, include_parenthetical)
 
     return await self._resolve_canonical(
-      statement_type, ticker, accession_number, include_parenthetical
+      statement_type, ticker, report_id, include_parenthetical
     )
 
   # ---------------------------------------------------------------------------
@@ -141,14 +137,14 @@ Use returned structure identifiers to explore element hierarchies via STRUCTURE_
     self,
     query: str,
     ticker: str | None,
-    accession_number: str | None,
+    report_id: str | None,
     include_parenthetical: bool,
   ) -> dict[str, Any]:
     """Resolve using DuckDB vector similarity search on staging Structure table."""
     result: dict[str, Any] = {
       "query": query,
       "ticker": ticker,
-      "accession_number": accession_number,
+      "report_id": report_id,
       "structures": [],
     }
 
@@ -191,18 +187,18 @@ Use returned structure identifiers to explore element hierarchies via STRUCTURE_
         r for r in raw_rows if not self._is_parenthetical(r.get("definition", ""))
       ]
 
-    # Step 4: If ticker or accession_number, filter to structures that belong
+    # Step 4: If ticker or report_id, filter to structures that belong
     # to matching reports via graph lookup
-    if ticker or accession_number:
+    if ticker or report_id:
       # Get the set of structure identifiers that match the report filter
-      valid_ids = await self._fetch_structure_ids_for_report(ticker, accession_number)
+      valid_ids = await self._fetch_structure_ids_for_report(ticker, report_id)
       if valid_ids is not None:
         filtered = [r for r in raw_rows if r.get("identifier") in valid_ids]
         # Also enrich with report metadata
         report_meta = await self._fetch_report_metadata_for_structures(
           [r["identifier"] for r in filtered if r.get("identifier")],
           ticker,
-          accession_number,
+          report_id,
         )
         for row in filtered:
           sid = row.get("identifier")
@@ -243,13 +239,13 @@ Use returned structure identifiers to explore element hierarchies via STRUCTURE_
     self,
     statement_type: str,
     ticker: str | None,
-    accession_number: str | None,
+    report_id: str | None,
     include_parenthetical: bool,
   ) -> dict[str, Any]:
     result: dict[str, Any] = {
       "statement_type": statement_type,
       "ticker": ticker,
-      "accession_number": accession_number,
+      "report_id": report_id,
       "structures": [],
     }
 
@@ -262,7 +258,7 @@ Use returned structure identifiers to explore element hierarchies via STRUCTURE_
       )
 
     # Determine if we need to join through Report → Taxonomy
-    needs_report_join = ticker or accession_number
+    needs_report_join = ticker or report_id
 
     params: dict[str, Any] = {"statement_type": statement_type}
 
@@ -274,9 +270,9 @@ Use returned structure identifiers to explore element hierarchies via STRUCTURE_
       )
       where_parts = ["s.canonical_type = $statement_type"]
 
-      if accession_number:
-        where_parts.append("r.accession_number = $accession_number")
-        params["accession_number"] = accession_number
+      if report_id:
+        where_parts.append("r.identifier = $report_id")
+        params["report_id"] = report_id
 
       if ticker:
         # Add entity join for ticker filtering
@@ -296,7 +292,7 @@ Use returned structure identifiers to explore element hierarchies via STRUCTURE_
         "s.name AS name, s.type AS type, s.number AS number, "
         "s.canonical_type AS canonical_type, "
         "s.canonical_confidence AS canonical_confidence, "
-        "r.accession_number AS accession_number, "
+        "r.identifier AS report_id, "
         "r.form AS form, r.filing_date AS filing_date "
         "ORDER BY r.filing_date DESC LIMIT 20"
       )
@@ -325,7 +321,7 @@ Use returned structure identifiers to explore element hierarchies via STRUCTURE_
             "canonical_confidence": row.get("canonical_confidence"),
           }
           if needs_report_join:
-            structure["accession_number"] = row.get("accession_number")
+            structure["report_id"] = row.get("report_id")
             structure["form"] = row.get("form")
             structure["filing_date"] = row.get("filing_date")
           result["structures"].append(structure)
@@ -358,29 +354,29 @@ Use returned structure identifiers to explore element hierarchies via STRUCTURE_
     return "[Parenthetical]" in definition or "(Parenthetical)" in definition
 
   async def _fetch_structure_ids_for_report(
-    self, ticker: str | None, accession_number: str | None
+    self, ticker: str | None, report_id: str | None
   ) -> set[str] | None:
     """Fetch structure identifiers that belong to matching reports."""
     try:
       params: dict[str, Any] = {}
 
-      if ticker and accession_number:
+      if ticker and report_id:
         query = (
           "MATCH (ent:Entity)-[:ENTITY_HAS_REPORT]->(r:Report)"
           "-[:REPORT_USES_TAXONOMY]->(t:Taxonomy)"
           "<-[:STRUCTURE_HAS_TAXONOMY]-(s:Structure) "
-          "WHERE ent.ticker = $ticker AND r.accession_number = $accession_number "
+          "WHERE ent.ticker = $ticker AND r.identifier = $report_id "
           "RETURN s.identifier AS id"
         )
-        params = {"ticker": ticker, "accession_number": accession_number}
-      elif accession_number:
+        params = {"ticker": ticker, "report_id": report_id}
+      elif report_id:
         query = (
           "MATCH (r:Report)-[:REPORT_USES_TAXONOMY]->(t:Taxonomy)"
           "<-[:STRUCTURE_HAS_TAXONOMY]-(s:Structure) "
-          "WHERE r.accession_number = $accession_number "
+          "WHERE r.identifier = $report_id "
           "RETURN s.identifier AS id"
         )
-        params = {"accession_number": accession_number}
+        params = {"report_id": report_id}
       elif ticker:
         query = (
           "MATCH (ent:Entity)-[:ENTITY_HAS_REPORT]->(r:Report)"
@@ -403,9 +399,9 @@ Use returned structure identifiers to explore element hierarchies via STRUCTURE_
     self,
     structure_ids: list[str],
     ticker: str | None,
-    accession_number: str | None,
+    report_id: str | None,
   ) -> dict[str, dict[str, Any]]:
-    """Fetch report metadata (accession_number, form, filing_date) for structures."""
+    """Fetch report metadata (identifier, form, filing_date) for structures."""
     if not structure_ids:
       return {}
     try:
@@ -417,20 +413,20 @@ Use returned structure identifiers to explore element hierarchies via STRUCTURE_
           "-[:REPORT_USES_TAXONOMY]->(t:Taxonomy)"
           "<-[:STRUCTURE_HAS_TAXONOMY]-(s:Structure) "
           "WHERE s.identifier IN $structure_ids AND ent.ticker = $ticker "
-          "RETURN s.identifier AS id, r.accession_number AS accession_number, "
+          "RETURN s.identifier AS id, r.identifier AS report_id, "
           "r.form AS form, r.filing_date AS filing_date "
           "ORDER BY r.filing_date DESC"
         )
         params["ticker"] = ticker
-      elif accession_number:
+      elif report_id:
         query = (
           "MATCH (r:Report)-[:REPORT_USES_TAXONOMY]->(t:Taxonomy)"
           "<-[:STRUCTURE_HAS_TAXONOMY]-(s:Structure) "
-          "WHERE s.identifier IN $structure_ids AND r.accession_number = $accession_number "
-          "RETURN s.identifier AS id, r.accession_number AS accession_number, "
+          "WHERE s.identifier IN $structure_ids AND r.identifier = $report_id "
+          "RETURN s.identifier AS id, r.identifier AS report_id, "
           "r.form AS form, r.filing_date AS filing_date"
         )
-        params["accession_number"] = accession_number
+        params["report_id"] = report_id
       else:
         return {}
 
@@ -440,7 +436,7 @@ Use returned structure identifiers to explore element hierarchies via STRUCTURE_
         sid = row.get("id")
         if sid and sid not in result:  # Keep first (most recent filing_date)
           result[sid] = {
-            "accession_number": row.get("accession_number"),
+            "report_id": row.get("report_id"),
             "form": row.get("form"),
             "filing_date": row.get("filing_date"),
           }

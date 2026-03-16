@@ -38,7 +38,6 @@ class SharedRepositoryManifest:
   schema_extensions: tuple[str, ...] = ()  # ("roboledger",)
 
   # MCP Capabilities
-  has_element_discovery: bool = False
   has_semantic_enrichment: bool = False
   sibling_subgraphs: tuple[str, ...] = ()  # ("historical",) → graph_id_historical
 
