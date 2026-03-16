@@ -282,31 +282,32 @@ admin environment="dev" *args="":
 
 
 ## Database Operations ##
+# Usage: just migrate-up [db] — db is "platform" (default) or "ledger"
 
 # Create new migration
-migrate-create message env=_local_env:
-    UV_ENV_FILE={{env}} uv run alembic revision --autogenerate -m "{{message}}"
+migrate-create message db="platform" env=_local_env:
+    UV_ENV_FILE={{env}} uv run alembic -c migrations/{{db}}.ini revision --autogenerate -m "{{message}}"
 
 # Run migrations
-migrate-up env=_local_env:
-    UV_ENV_FILE={{env}} uv run alembic upgrade head
+migrate-up db="platform" env=_local_env:
+    UV_ENV_FILE={{env}} uv run alembic -c migrations/{{db}}.ini upgrade head
 
 # Rollback migration
-migrate-down env=_local_env:
-    UV_ENV_FILE={{env}} uv run alembic downgrade -1
+migrate-down db="platform" env=_local_env:
+    UV_ENV_FILE={{env}} uv run alembic -c migrations/{{db}}.ini downgrade -1
 
 # Show migration history
-migrate-history env=_local_env:
-    UV_ENV_FILE={{env}} uv run alembic history
+migrate-history db="platform" env=_local_env:
+    UV_ENV_FILE={{env}} uv run alembic -c migrations/{{db}}.ini history
 
 # Show current migration
-migrate-current env=_local_env:
-    UV_ENV_FILE={{env}} uv run alembic current
+migrate-current db="platform" env=_local_env:
+    UV_ENV_FILE={{env}} uv run alembic -c migrations/{{db}}.ini current
 
-# Reset database (drop and recreate all auth tables)
-migrate-reset env=_local_env:
-    UV_ENV_FILE={{env}} uv run alembic downgrade base
-    UV_ENV_FILE={{env}} uv run alembic upgrade head
+# Reset database
+migrate-reset db="platform" env=_local_env:
+    UV_ENV_FILE={{env}} uv run alembic -c migrations/{{db}}.ini downgrade base
+    UV_ENV_FILE={{env}} uv run alembic -c migrations/{{db}}.ini upgrade head
 
 
 ## Demo Scripts ##

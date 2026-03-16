@@ -555,6 +555,12 @@ class EnvConfig:
     get_parameter_value("CONNECTION_QUICKBOOKS_ENABLED", "true").lower() == "true",
   )
 
+  # --- Ledger (RoboLedger OLTP) ---
+  LEDGER_ENABLED = get_bool_env(
+    "LEDGER_ENABLED",
+    get_parameter_value("LEDGER_ENABLED", "false").lower() == "true",
+  )
+
   # ==========================================================================
   # 3. GRAPH DATABASES - MULTI-BACKEND (LADYBUGDB AND NEO4J)
   # ==========================================================================
@@ -672,6 +678,13 @@ class EnvConfig:
     else "postgresql://postgres:postgres@localhost:5432/robosystems"
   )
   DATABASE_ECHO = get_bool_env("DATABASE_ECHO", False)
+
+  # RoboLedger OLTP Database (accounting system of record)
+  ROBOLEDGER_DATABASE_URL = get_str_env("ROBOLEDGER_DATABASE_URL", "") or (
+    f"postgresql://postgres:{get_secret_value('POSTGRES_PASSWORD', 'postgres')}@{get_str_env('DATABASE_ENDPOINT', '')}:{get_str_env('DATABASE_PORT', '5432')}/roboledger?sslmode=require"
+    if get_str_env("DATABASE_ENDPOINT", "")
+    else "postgresql://postgres:postgres@localhost:5432/roboledger"
+  )
 
   # ==========================================================================
   # 5. CACHE AND QUEUE CONFIGURATION (VALKEY/REDIS)
