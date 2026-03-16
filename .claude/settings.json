@@ -136,7 +136,6 @@
       "Bash(just create-*)"
     ],
     "deny": [
-      "Bash(git commit:*)",
       "Bash(git push:*)",
       "Bash(git reset:*)",
       "Bash(git clean:*)",
