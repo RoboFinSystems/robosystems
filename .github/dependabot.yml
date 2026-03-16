@@ -26,6 +26,6 @@ updates:
     ignore:
       # Never auto-bump Python runtime versions — requires explicit migration
       - dependency-name: "python"
-        update-types: ["version-update:semver-major"]
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
       - dependency-name: "lambda/python"
-        update-types: ["version-update:semver-major"]
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
