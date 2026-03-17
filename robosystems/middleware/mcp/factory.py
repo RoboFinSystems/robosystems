@@ -31,14 +31,12 @@ async def create_graph_mcp_client(
   """
   # If URL not provided, use GraphClientFactory to discover the proper endpoint
   if not api_base_url:
+    from robosystems.config.shared_repositories import is_shared_repository_or_subgraph
     from robosystems.graph_api.client.factory import GraphClientFactory
-    from robosystems.middleware.graph.utils import MultiTenantUtils
 
     # Determine operation type based on graph
-    # Shared repositories are read-only from the application perspective
-    operation_type = (
-      "read" if MultiTenantUtils.is_shared_repository(graph_id) else "write"
-    )
+    # Shared repositories and their subgraphs (e.g. sec_historical) are read-only
+    operation_type = "read" if is_shared_repository_or_subgraph(graph_id) else "write"
 
     # Get a client from the factory which will discover the proper endpoint
     # The factory handles routing appropriately:

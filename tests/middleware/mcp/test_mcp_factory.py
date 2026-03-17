@@ -45,17 +45,17 @@ class TestCreateGraphMCPClient:
   @patch("robosystems.middleware.mcp.factory.env")
   @patch("robosystems.middleware.mcp.factory.GraphMCPClient")
   @patch("robosystems.graph_api.client.factory.GraphClientFactory")
-  @patch("robosystems.middleware.graph.utils.MultiTenantUtils")
+  @patch("robosystems.config.shared_repositories.is_shared_repository_or_subgraph")
   async def test_create_client_with_discovery_shared_repo(
-    self, mock_utils, mock_factory, mock_client_class, mock_env, mock_tuning
+    self, mock_is_shared, mock_factory, mock_client_class, mock_env, mock_tuning
   ):
     """Test creating client with URL discovery for shared repository."""
     mock_tuning.get_graph_http_timeout.return_value = 30
     mock_tuning.get_graph_query_timeout.return_value = 30
     mock_env.GRAPH_MAX_QUERY_LENGTH = "50000"
 
-    # Mock shared repository detection
-    mock_utils.is_shared_repository.return_value = True
+    # Mock shared repository detection (includes subgraphs)
+    mock_is_shared.return_value = True
 
     # Mock client factory
     mock_graph_client = Mock()
@@ -69,7 +69,7 @@ class TestCreateGraphMCPClient:
     await create_graph_mcp_client("sec")
 
     # Verify shared repository detection
-    mock_utils.is_shared_repository.assert_called_once_with("sec")
+    mock_is_shared.assert_called_once_with("sec")
 
     # Verify factory called with read operation for shared repo
     mock_factory.create_client.assert_called_once_with(
@@ -89,9 +89,9 @@ class TestCreateGraphMCPClient:
   @patch("robosystems.middleware.mcp.factory.env")
   @patch("robosystems.middleware.mcp.factory.GraphMCPClient")
   @patch("robosystems.graph_api.client.factory.GraphClientFactory")
-  @patch("robosystems.middleware.graph.utils.MultiTenantUtils")
+  @patch("robosystems.config.shared_repositories.is_shared_repository_or_subgraph")
   async def test_create_client_with_discovery_user_graph(
-    self, mock_utils, mock_factory, mock_client_class, mock_env, mock_tuning
+    self, mock_is_shared, mock_factory, mock_client_class, mock_env, mock_tuning
   ):
     """Test creating client with URL discovery for user graph."""
     mock_tuning.get_graph_http_timeout.return_value = 30
@@ -99,7 +99,7 @@ class TestCreateGraphMCPClient:
     mock_env.GRAPH_MAX_QUERY_LENGTH = "50000"
 
     # Mock user graph detection
-    mock_utils.is_shared_repository.return_value = False
+    mock_is_shared.return_value = False
 
     # Mock client factory
     mock_graph_client = Mock()
@@ -114,7 +114,7 @@ class TestCreateGraphMCPClient:
     await create_graph_mcp_client("kg123abc")
 
     # Verify user graph detection
-    mock_utils.is_shared_repository.assert_called_once_with("kg123abc")
+    mock_is_shared.assert_called_once_with("kg123abc")
 
     # Verify factory called with write operation for user graph
     mock_factory.create_client.assert_called_once_with(
@@ -134,16 +134,16 @@ class TestCreateGraphMCPClient:
   @patch("robosystems.middleware.mcp.factory.env")
   @patch("robosystems.middleware.mcp.factory.GraphMCPClient")
   @patch("robosystems.graph_api.client.factory.GraphClientFactory")
-  @patch("robosystems.middleware.graph.utils.MultiTenantUtils")
+  @patch("robosystems.config.shared_repositories.is_shared_repository_or_subgraph")
   async def test_create_client_url_discovery_fallback_base_url(
-    self, mock_utils, mock_factory, mock_client_class, mock_env, mock_tuning
+    self, mock_is_shared, mock_factory, mock_client_class, mock_env, mock_tuning
   ):
     """Test URL discovery with fallback to base_url attribute."""
     mock_tuning.get_graph_http_timeout.return_value = 30
     mock_tuning.get_graph_query_timeout.return_value = 30
     mock_env.GRAPH_MAX_QUERY_LENGTH = "50000"
 
-    mock_utils.is_shared_repository.return_value = False
+    mock_is_shared.return_value = False
 
     # Mock client with base_url attribute
     mock_graph_client = Mock()
@@ -169,9 +169,9 @@ class TestCreateGraphMCPClient:
   @patch("robosystems.middleware.mcp.factory.env")
   @patch("robosystems.middleware.mcp.factory.GraphMCPClient")
   @patch("robosystems.graph_api.client.factory.GraphClientFactory")
-  @patch("robosystems.middleware.graph.utils.MultiTenantUtils")
+  @patch("robosystems.config.shared_repositories.is_shared_repository_or_subgraph")
   async def test_create_client_url_discovery_env_fallback(
-    self, mock_utils, mock_factory, mock_client_class, mock_env, mock_tuning
+    self, mock_is_shared, mock_factory, mock_client_class, mock_env, mock_tuning
   ):
     """Test URL discovery with fallback to environment variable."""
     mock_tuning.get_graph_http_timeout.return_value = 30
@@ -179,7 +179,7 @@ class TestCreateGraphMCPClient:
     mock_env.GRAPH_MAX_QUERY_LENGTH = "50000"
     mock_env.GRAPH_API_URL = "http://env-fallback.com"
 
-    mock_utils.is_shared_repository.return_value = False
+    mock_is_shared.return_value = False
 
     # Mock client with no URL attributes
     mock_graph_client = Mock()
@@ -205,9 +205,9 @@ class TestCreateGraphMCPClient:
   @patch("robosystems.middleware.mcp.factory.env")
   @patch("robosystems.middleware.mcp.factory.GraphMCPClient")
   @patch("robosystems.graph_api.client.factory.GraphClientFactory")
-  @patch("robosystems.middleware.graph.utils.MultiTenantUtils")
+  @patch("robosystems.config.shared_repositories.is_shared_repository_or_subgraph")
   async def test_create_client_url_discovery_final_fallback(
-    self, mock_utils, mock_factory, mock_client_class, mock_env, mock_tuning
+    self, mock_is_shared, mock_factory, mock_client_class, mock_env, mock_tuning
   ):
     """Test URL discovery with final localhost fallback."""
     mock_tuning.get_graph_http_timeout.return_value = 30
@@ -215,7 +215,7 @@ class TestCreateGraphMCPClient:
     mock_env.GRAPH_MAX_QUERY_LENGTH = "50000"
     mock_env.GRAPH_API_URL = None
 
-    mock_utils.is_shared_repository.return_value = False
+    mock_is_shared.return_value = False
 
     # Mock client with no URL attributes
     mock_graph_client = Mock()
@@ -289,16 +289,16 @@ class TestCreateGraphMCPClient:
   @patch("robosystems.middleware.mcp.factory.env")
   @patch("robosystems.middleware.mcp.factory.GraphMCPClient")
   @patch("robosystems.graph_api.client.factory.GraphClientFactory")
-  @patch("robosystems.middleware.graph.utils.MultiTenantUtils")
+  @patch("robosystems.config.shared_repositories.is_shared_repository_or_subgraph")
   async def test_create_client_logs_discovery(
-    self, mock_utils, mock_factory, mock_client_class, mock_env, mock_logger
+    self, mock_is_shared, mock_factory, mock_client_class, mock_env, mock_logger
   ):
     """Test that URL discovery is logged."""
     mock_env.GRAPH_HTTP_TIMEOUT = 30
     mock_env.GRAPH_QUERY_TIMEOUT = 60
     mock_env.GRAPH_MAX_QUERY_LENGTH = "50000"
 
-    mock_utils.is_shared_repository.return_value = True
+    mock_is_shared.return_value = True
 
     mock_graph_client = Mock()
     mock_graph_client.config.base_url = "http://discovered.com"

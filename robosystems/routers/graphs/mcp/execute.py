@@ -86,7 +86,9 @@ def _get_user_priority(user: User) -> int:
 
 def _get_mcp_operation_type(graph_id: str) -> str:
   """Determine the correct operation type for MCP operations."""
-  if MultiTenantUtils.is_shared_repository(graph_id):
+  from robosystems.config.shared_repositories import is_shared_repository_or_subgraph
+
+  if is_shared_repository_or_subgraph(graph_id):
     return "read"
   else:
     return "write"

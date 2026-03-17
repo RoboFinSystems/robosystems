@@ -45,14 +45,12 @@ timeout_coordinator = TimeoutCoordinator()
 
 async def _get_graph_client(graph_id: str) -> GraphClient:
   """Get Graph client for the specified graph using factory for endpoint discovery."""
+  from robosystems.config.shared_repositories import is_shared_repository_or_subgraph
   from robosystems.graph_api.client.factory import GraphClientFactory
-  from robosystems.middleware.graph.utils import MultiTenantUtils
 
   # Determine operation type based on graph
-  # Shared repositories are read-only from the application perspective
-  operation_type = (
-    "read" if MultiTenantUtils.is_shared_repository(graph_id) else "write"
-  )
+  # Shared repositories and their subgraphs (e.g. sec_historical) are read-only
+  operation_type = "read" if is_shared_repository_or_subgraph(graph_id) else "write"
 
   # Create client using factory for endpoint discovery
   # Factory automatically handles routing:
