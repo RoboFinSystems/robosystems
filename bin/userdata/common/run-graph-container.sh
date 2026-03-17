@@ -119,6 +119,10 @@ if [ -n "${STAGING_MOUNT_SOURCE}" ] && [ -n "${STAGING_MOUNT_TARGET}" ]; then
   VOLUME_MOUNTS="${VOLUME_MOUNTS} -v ${STAGING_MOUNT_SOURCE}:${STAGING_MOUNT_TARGET}"
   echo "Adding staging volume mount: ${STAGING_MOUNT_SOURCE} -> ${STAGING_MOUNT_TARGET}"
 fi
+if [ -n "${LANCE_MOUNT_SOURCE}" ] && [ -n "${LANCE_MOUNT_TARGET}" ] && [ -d "${LANCE_MOUNT_SOURCE}" ]; then
+  VOLUME_MOUNTS="${VOLUME_MOUNTS} -v ${LANCE_MOUNT_SOURCE}:${LANCE_MOUNT_TARGET}:ro"
+  echo "Adding lance volume mount: ${LANCE_MOUNT_SOURCE} -> ${LANCE_MOUNT_TARGET} (read-only)"
+fi
 
 # Run the container with CloudWatch logging
 echo "Starting ${DATABASE_TYPE} container..."
@@ -155,6 +159,7 @@ docker run -d \
   -e DATABASE_PORT=${DATABASE_PORT:-5432} \
   -e VALKEY_URL=${VALKEY_URL:-} \
   -e DUCKDB_STAGING_PATH=${STAGING_MOUNT_TARGET:-/app/data/staging} \
+  -e LANCE_INDEX_PATH=${LANCE_MOUNT_TARGET:-/app/data/lance} \
   ${EXTRA_ENV_VARS} \
   ${ECR_IMAGE} \
   ${ENTRYPOINT_OVERRIDE:-/app/bin/entrypoint.sh} || {

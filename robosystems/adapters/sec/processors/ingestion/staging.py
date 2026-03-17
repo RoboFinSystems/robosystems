@@ -81,7 +81,6 @@ class DuckDBStager:
     use_glob: bool = True,
     duckdb_memory_mb: int | None = None,
     stage_embeddings: bool = False,
-    build_hnsw_index: bool = False,
     progress_callback: ProgressCallback | None = None,
   ) -> StagingResult:
     """
@@ -278,11 +277,6 @@ class DuckDBStager:
         f"{len(successful_tables)} tables from {total_files} files"
       )
 
-      # Build HNSW vector indexes on embedding columns for accelerated search.
-      # When enabled, converts ~15s brute-force scans to sub-second HNSW lookups.
-      if build_hnsw_index and successful_tables:
-        await self._build_hnsw_indexes(client, successful_tables, log_progress)
-
       return StagingResult(
         status=status,
         table_names=successful_tables,
@@ -308,7 +302,6 @@ class DuckDBStager:
     quarter: int | None = None,
     skip_taxonomy_relationships: bool = False,
     stage_embeddings: bool = False,
-    build_hnsw_index: bool = False,
     progress_callback: ProgressCallback | None = None,
   ) -> StagingResult:
     """
@@ -540,10 +533,6 @@ class DuckDBStager:
         f"{len(successful_tables)}/{total_tables} tables, {total_rows:,} net new rows"
       )
 
-      # Rebuild HNSW indexes after incremental insert (index must cover new rows)
-      if build_hnsw_index and successful_tables:
-        await self._build_hnsw_indexes(client, successful_tables, log_progress)
-
       return StagingResult(
         status=status,
         table_names=successful_tables,
@@ -561,74 +550,6 @@ class DuckDBStager:
         error=str(e),
         duration_ms=(time.time() - start_time) * 1000,
       )
-
-  # =========================================================================
-  # HNSW Vector Index
-  # =========================================================================
-
-  # Tables that benefit from HNSW vector indexes on their embedding column
-  _HNSW_INDEX_TABLES = {"Element"}
-
-  # Timeout for HNSW index build (column cast + index creation).
-  # 6M rows x 384-dim vectors can take 5-30 minutes depending on memory.
-  _HNSW_INDEX_TIMEOUT = 3600.0  # 1 hour
-
-  async def _build_hnsw_indexes(
-    self,
-    client: "GraphClient",
-    staged_tables: list[str],
-    log_progress: ProgressCallback,
-  ) -> None:
-    """Build HNSW vector indexes on embedding columns for accelerated search.
-
-    Uses DuckDB's vss extension to create cosine-metric HNSW indexes.
-    Drops existing indexes first (required after incremental inserts since
-    HNSW indexes don't auto-update with new rows).
-
-    Non-fatal: logs warnings on failure but does not raise.
-    """
-    tables_to_index = [t for t in staged_tables if t in self._HNSW_INDEX_TABLES]
-    if not tables_to_index:
-      return
-
-    timeout = self._HNSW_INDEX_TIMEOUT
-
-    for table_name in tables_to_index:
-      index_name = f"idx_{table_name.lower()}_embedding_hnsw"
-      log_progress(f"Building HNSW index on {table_name}.embedding...")
-
-      try:
-        # Drop existing index (required for rebuild after incremental inserts)
-        try:
-          await client.query_table(
-            graph_id=self.graph_id,
-            sql=f'DROP INDEX IF EXISTS "{index_name}"',
-            timeout=60.0,
-          )
-        except Exception:
-          pass  # Index may not exist yet
-
-        # Cast embedding from DOUBLE[] (parquet default) to FLOAT[384] (required by HNSW)
-        try:
-          await client.query_table(
-            graph_id=self.graph_id,
-            sql=f'ALTER TABLE "{table_name}" ALTER COLUMN embedding TYPE FLOAT[384]',
-            timeout=timeout,
-          )
-        except Exception:
-          pass  # Already correct type
-
-        await client.query_table(
-          graph_id=self.graph_id,
-          sql=(
-            f'CREATE INDEX "{index_name}" ON "{table_name}" '
-            f"USING HNSW (embedding) WITH (metric = 'cosine')"
-          ),
-          timeout=timeout,
-        )
-        log_progress(f"HNSW index {index_name} created on {table_name}.embedding")
-      except Exception as e:
-        logger.warning(f"Could not create HNSW index on {table_name}.embedding: {e}")
 
   # =========================================================================
   # Private Helper Methods

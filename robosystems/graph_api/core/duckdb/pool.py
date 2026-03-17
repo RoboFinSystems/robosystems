@@ -109,9 +109,6 @@ class DuckDBConnectionPool:
     self._last_cleanup = datetime.now(UTC)
     self._last_health_check = datetime.now(UTC)
 
-    # VSS extension loading decision (cached for pool lifetime)
-    self._vss_enabled: bool | None = None
-
     # Register cleanup on process exit
     weakref.finalize(self, self._cleanup_all_connections)
 
@@ -119,34 +116,6 @@ class DuckDBConnectionPool:
       f"Initialized DuckDB connection pool: {max_connections_per_db} max per DB, "
       f"{connection_ttl_minutes}min TTL (databases persist with graph lifecycle)"
     )
-
-  def _should_load_vss(self) -> bool:
-    """Check if the vss extension should be loaded on DuckDB connections.
-
-    Masters always load it (Dagster staging may build HNSW indexes).
-    Replicas only load it when DUCKDB_HNSW_INDEX_ENABLED is true
-    (index exists in the downloaded DuckDB file from S3).
-
-    Cached for pool lifetime — requires restart to pick up changes.
-    """
-    if self._vss_enabled is not None:
-      return self._vss_enabled
-
-    import os
-
-    if os.getenv("LBUG_ROLE", "master") == "master":
-      self._vss_enabled = True
-      return True
-
-    try:
-      from robosystems.config.parameter_store import get_parameter_value
-
-      value = get_parameter_value("DUCKDB_HNSW_INDEX_ENABLED", default="false")
-      self._vss_enabled = value.lower() == "true"
-    except Exception:
-      self._vss_enabled = False
-
-    return self._vss_enabled
 
   @contextmanager
   def get_connection(self, graph_id: str):
@@ -413,23 +382,6 @@ class DuckDBConnectionPool:
           logger.debug(
             f"Could not load AWS credentials from provider chain: {cred_err}"
           )
-
-      # Load vss extension for HNSW vector indexes on staging tables.
-      # Masters always load it (Dagster staging may build indexes).
-      # Replicas only load it when DUCKDB_HNSW_INDEX_ENABLED is true
-      # (index exists in the downloaded DuckDB file from S3).
-      if self._should_load_vss():
-        try:
-          try:
-            conn.execute("LOAD vss")
-          except Exception:
-            conn.execute("INSTALL vss")
-            conn.execute("LOAD vss")
-          # Required for HNSW indexes on persistent (non-in-memory) DuckDB databases
-          conn.execute("SET hnsw_enable_experimental_persistence = true")
-          logger.debug("VSS extension loaded for DuckDB connection")
-        except Exception as vss_err:
-          logger.warning(f"Could not load vss extension: {vss_err}")
 
       # Configure S3 endpoint if using LocalStack or custom endpoint
       if env.AWS_ENDPOINT_URL:

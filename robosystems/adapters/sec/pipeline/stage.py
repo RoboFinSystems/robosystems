@@ -95,7 +95,6 @@ def sec_duckdb_staged(
       skip_taxonomy_relationships=config.skip_taxonomy_relationships,
       duckdb_memory_mb=duckdb_memory_mb,
       stage_embeddings=config.stage_embeddings,
-      build_hnsw_index=config.build_hnsw_index,
       progress_callback=dagster_progress,
     )
     return result
@@ -224,7 +223,6 @@ def sec_historical_duckdb_staged(
       skip_taxonomy_relationships=config.skip_taxonomy_relationships,
       duckdb_memory_mb=duckdb_memory_mb,
       stage_embeddings=config.stage_embeddings,
-      build_hnsw_index=config.build_hnsw_index,
       progress_callback=dagster_progress,
     )
     return result
@@ -320,7 +318,6 @@ def sec_duckdb_incremental_staged(
       quarter=config.quarter,
       skip_taxonomy_relationships=config.skip_taxonomy_relationships,
       stage_embeddings=config.stage_embeddings,
-      build_hnsw_index=config.build_hnsw_index,
       progress_callback=context.log.info,
     )
 
