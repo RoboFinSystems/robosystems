@@ -518,6 +518,10 @@ class EnvConfig:
     "MCP_MEMORY_ENABLED",
     get_parameter_value("MCP_MEMORY_ENABLED", "true").lower() == "true",
   )
+  MCP_VECTOR_SEARCH_ENABLED = get_bool_env(
+    "MCP_VECTOR_SEARCH_ENABLED",
+    get_parameter_value("MCP_VECTOR_SEARCH_ENABLED", "false").lower() == "true",
+  )
 
   # --- Shared Repository Operations ---
   SHARED_MASTER_READS_ENABLED = get_bool_env(
@@ -553,6 +557,12 @@ class EnvConfig:
   CONNECTION_QUICKBOOKS_ENABLED = get_bool_env(
     "CONNECTION_QUICKBOOKS_ENABLED",
     get_parameter_value("CONNECTION_QUICKBOOKS_ENABLED", "true").lower() == "true",
+  )
+
+  # --- Ledger (RoboLedger OLTP) ---
+  LEDGER_ENABLED = get_bool_env(
+    "LEDGER_ENABLED",
+    get_parameter_value("LEDGER_ENABLED", "false").lower() == "true",
   )
 
   # ==========================================================================
@@ -636,6 +646,9 @@ class EnvConfig:
   # Artifact Storage (precomputed Parquet files for enrichment refinement)
   ARTIFACT_PATH = get_str_env("ARTIFACT_PATH", "./data/artifacts")
 
+  # LanceDB Vector Search Index (for MCP element resolution)
+  LANCE_INDEX_PATH = get_str_env("LANCE_INDEX_PATH", "./data/lance")
+
   # LadybugDB Admission Control
   # These use SSM tuning parameters in prod/staging for runtime adjustability
   # Override priority: env var > SSM /tuning/lbug_admission/ > default
@@ -672,6 +685,13 @@ class EnvConfig:
     else "postgresql://postgres:postgres@localhost:5432/robosystems"
   )
   DATABASE_ECHO = get_bool_env("DATABASE_ECHO", False)
+
+  # RoboLedger OLTP Database (accounting system of record)
+  ROBOLEDGER_DATABASE_URL = get_str_env("ROBOLEDGER_DATABASE_URL", "") or (
+    f"postgresql://postgres:{get_secret_value('POSTGRES_PASSWORD', 'postgres')}@{get_str_env('DATABASE_ENDPOINT', '')}:{get_str_env('DATABASE_PORT', '5432')}/roboledger?sslmode=require"
+    if get_str_env("DATABASE_ENDPOINT", "")
+    else "postgresql://postgres:postgres@localhost:5432/roboledger"
+  )
 
   # ==========================================================================
   # 5. CACHE AND QUEUE CONFIGURATION (VALKEY/REDIS)

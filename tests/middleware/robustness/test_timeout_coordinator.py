@@ -60,8 +60,7 @@ class TestTimeoutCoordinator:
       "cypher_query",
       "read-graph-cypher",
       "get-graph-schema",
-      "get_schema",
-      "get_graph_info",
+      "get-graph-info",
       "default",
     ]
 
@@ -151,7 +150,7 @@ class TestTimeoutCoordinator:
 
     # Default configurations should be valid
     assert coordinator.validate_timeout_hierarchy("cypher_query") is True
-    assert coordinator.validate_timeout_hierarchy("get_schema") is True
+    assert coordinator.validate_timeout_hierarchy("get-graph-schema") is True
     assert coordinator.validate_timeout_hierarchy("default") is True
 
   def test_validate_timeout_hierarchy_invalid(self):
@@ -211,10 +210,10 @@ class TestTimeoutCoordinator:
     assert write_timeout == 30.0  # Should use cypher_query endpoint timeout
 
     schema_timeout = coordinator.calculate_timeout("schema_operation")
-    assert schema_timeout == 30.0  # Should use get_schema endpoint timeout
+    assert schema_timeout == 30.0  # Should use get-graph-schema endpoint timeout
 
     info_timeout = coordinator.calculate_timeout("graph_info")
-    assert info_timeout == 30.0  # Should use get_graph_info endpoint timeout
+    assert info_timeout == 30.0  # Should use get-graph-info endpoint timeout
 
   def test_calculate_timeout_unknown_operation(self):
     """Test calculating timeout for unknown operation."""
@@ -333,8 +332,8 @@ class TestTimeoutCoordinator:
     """Test specific tool configurations have expected values."""
     coordinator = TimeoutCoordinator()
 
-    # Test get_graph_info has different timeouts
-    info_config = coordinator.get_timeout_config("get_graph_info")
+    # Test get-graph-info has different timeouts
+    info_config = coordinator.get_timeout_config("get-graph-info")
     assert info_config.endpoint_timeout == 30.0
     assert info_config.queue_timeout == 25.0
     assert info_config.tool_timeout == 20.0
@@ -359,10 +358,10 @@ class TestTimeoutCoordinator:
     # database_query and database_write should both use cypher_query config
     assert query_timeout == write_timeout == 30.0
 
-    # schema_operation should use get_schema config
+    # schema_operation should use get-graph-schema config
     assert schema_timeout == 30.0
 
-    # graph_info should use get_graph_info config
+    # graph_info should use get-graph-info config
     assert info_timeout == 30.0
 
   def test_timeout_consistency_across_methods(self):
@@ -408,7 +407,7 @@ class TestTimeoutCoordinator:
 
     # Get two different configurations
     config1 = coordinator.get_timeout_config("cypher_query")
-    config2 = coordinator.get_timeout_config("get_graph_info")
+    config2 = coordinator.get_timeout_config("get-graph-info")
 
     # They should be different objects
     assert config1 is not config2

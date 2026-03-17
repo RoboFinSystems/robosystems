@@ -40,6 +40,7 @@ class ValkeyDatabase(IntEnum):
   GRAPH_ROUTING = 2  # Graph client factory (URLs, health)
   SSE = 3  # Real-time event pub/sub and task state tracking
   LOCKS = 4  # Distributed locks (SSO, materialize)
+  MCP_CACHE = 5  # MCP tool result cache (schema, info)
 
   @classmethod
   def get_next_available(cls) -> int:
@@ -410,6 +411,7 @@ def get_database_purpose(database: ValkeyDatabase) -> str:
     ValkeyDatabase.SSE: "Real-time event pub/sub for SSE streams and task state tracking",
     ValkeyDatabase.LOCKS: "Distributed locks for SSO and materialize coordination",
     ValkeyDatabase.GRAPH_ROUTING: "Graph client factory routing (URLs, health, discovery)",
+    ValkeyDatabase.MCP_CACHE: "MCP tool result cache (schema, info)",
   }
 
   return descriptions.get(

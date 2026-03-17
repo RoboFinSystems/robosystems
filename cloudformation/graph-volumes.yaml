@@ -106,8 +106,8 @@ Resources:
             Value: GraphVolumeManager
           - Key: Environment
             Value: !Ref Environment
-          - Key: DLMSnapshot
-            Value: "true"
+          - Key: NodeType
+            Value: writer
         Schedules:
           - Name: DailySnapshots
             CopyTags: true

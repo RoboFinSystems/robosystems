@@ -231,9 +231,8 @@ async def materialize_table(
           needs_reconciliation = target_names != source_names
 
         # Columns to NULL out (keep column for schema match, but skip data).
-        # Embeddings stay in DuckDB staging for vector search; materializing
-        # them to LadybugDB is optional (HNSW indexes don't work at scale
-        # in LadybugDB v0.13.1). Pass materialize_embeddings=true to include them.
+        # Embeddings stay in DuckDB staging for LanceDB vector search; materializing
+        # them to LadybugDB is optional. Pass materialize_embeddings=true to include them.
         null_cols: set[str] = set()
         if "embedding" in column_names and not request.materialize_embeddings:
           null_cols.add("embedding")
@@ -427,8 +426,7 @@ async def materialize_table(
           conn.execute("CHECKPOINT")
           logger.debug(f"Checkpointed LadybugDB after {table_name} materialization")
 
-          # Build HNSW vector index when embeddings are materialized.
-          # Disabled by default because LadybugDB HNSW hangs on 6M+ row tables in v0.13.1.
+          # Build vector index when embeddings are materialized.
           if request.materialize_embeddings:
             ladybug_service.db_manager.create_vector_index(conn, table_name)
             conn.execute("CHECKPOINT")

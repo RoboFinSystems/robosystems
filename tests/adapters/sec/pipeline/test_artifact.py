@@ -33,6 +33,7 @@ class TestSECArtifactConfig:
 class TestSecKnowledgeArtifacts:
   """Tests for sec_knowledge_artifacts asset."""
 
+  @patch("robosystems.adapters.sec.knowledge.lance_index.LanceIndexBuilder")
   @patch("robosystems.adapters.sec.knowledge.framework.DuckDBAnalyticsContext")
   @patch("robosystems.adapters.sec.knowledge.artifact.ElementKnowledgeBuilder")
   @patch("robosystems.adapters.sec.knowledge.artifact.StructureKnowledgeBuilder")
@@ -45,6 +46,7 @@ class TestSecKnowledgeArtifacts:
     mock_structure_builder_cls,
     mock_element_builder_cls,
     mock_analytics_ctx_cls,
+    mock_lance_builder_cls,
   ):
     """Test successful artifact generation in dev environment."""
     mock_env.ENVIRONMENT = "dev"
@@ -79,6 +81,12 @@ class TestSecKnowledgeArtifacts:
     )
     mock_disclosure_builder_cls.return_value = mock_disclosure_builder
 
+    # Mock lance builder
+    mock_lance_builder = MagicMock()
+    lance_tar_path = Path("/tmp/sec.lance.tar.gz")
+    mock_lance_builder.build_and_tar.return_value = lance_tar_path
+    mock_lance_builder_cls.return_value = mock_lance_builder
+
     config = SECArtifactConfig()
     context = build_asset_context()
 
@@ -90,7 +98,9 @@ class TestSecKnowledgeArtifacts:
     assert result.metadata["structure_consensus_path"] == str(consensus_path)
     assert result.metadata["disclosure_profiles_path"] == str(disc_profiles_path)
     assert result.metadata["disclosure_consensus_path"] == str(disc_consensus_path)
+    assert result.metadata["lance_index_path"] == str(lance_tar_path)
 
+  @patch("robosystems.adapters.sec.knowledge.lance_index.LanceIndexBuilder")
   @patch("robosystems.adapters.sec.knowledge.framework.DuckDBAnalyticsContext")
   @patch("robosystems.adapters.sec.knowledge.artifact.ElementKnowledgeBuilder")
   @patch("robosystems.adapters.sec.knowledge.artifact.StructureKnowledgeBuilder")
@@ -103,6 +113,7 @@ class TestSecKnowledgeArtifacts:
     mock_structure_builder_cls,
     mock_element_builder_cls,
     mock_analytics_ctx_cls,
+    mock_lance_builder_cls,
   ):
     """Test that artifacts are NOT uploaded to S3 in dev environment."""
     mock_env.ENVIRONMENT = "dev"
@@ -131,6 +142,10 @@ class TestSecKnowledgeArtifacts:
     )
     mock_disclosure_builder_cls.return_value = mock_disclosure_builder
 
+    mock_lance_builder = MagicMock()
+    mock_lance_builder.build_and_tar.return_value = Path("/tmp/sec.lance.tar.gz")
+    mock_lance_builder_cls.return_value = mock_lance_builder
+
     config = SECArtifactConfig()
     context = build_asset_context()
 
@@ -138,6 +153,7 @@ class TestSecKnowledgeArtifacts:
     result = sec_knowledge_artifacts(context, config)
     assert isinstance(result, MaterializeResult)
 
+  @patch("robosystems.adapters.sec.knowledge.lance_index.LanceIndexBuilder")
   @patch("robosystems.adapters.sec.knowledge.framework.DuckDBAnalyticsContext")
   @patch("robosystems.adapters.sec.knowledge.artifact.ElementKnowledgeBuilder")
   @patch("robosystems.adapters.sec.knowledge.artifact.StructureKnowledgeBuilder")
@@ -150,6 +166,7 @@ class TestSecKnowledgeArtifacts:
     mock_structure_builder_cls,
     mock_element_builder_cls,
     mock_analytics_ctx_cls,
+    mock_lance_builder_cls,
   ):
     """Test that custom memory limit is passed to builders."""
     mock_env.ENVIRONMENT = "dev"
@@ -178,6 +195,10 @@ class TestSecKnowledgeArtifacts:
     )
     mock_disclosure_builder_cls.return_value = mock_disclosure_builder
 
+    mock_lance_builder = MagicMock()
+    mock_lance_builder.build_and_tar.return_value = Path("/tmp/sec.lance.tar.gz")
+    mock_lance_builder_cls.return_value = mock_lance_builder
+
     config = SECArtifactConfig(memory_limit="16GB")
     context = build_asset_context()
 
@@ -187,7 +208,9 @@ class TestSecKnowledgeArtifacts:
     mock_element_builder_cls.assert_called_once_with(memory_limit="16GB")
     mock_structure_builder_cls.assert_called_once_with(memory_limit="16GB")
     mock_disclosure_builder_cls.assert_called_once_with(memory_limit="16GB")
+    mock_lance_builder_cls.assert_called_once_with(memory_limit="16GB")
 
+  @patch("robosystems.adapters.sec.knowledge.lance_index.LanceIndexBuilder")
   @patch("robosystems.adapters.sec.knowledge.framework.DuckDBAnalyticsContext")
   @patch("robosystems.adapters.sec.knowledge.artifact.ElementKnowledgeBuilder")
   @patch("robosystems.adapters.sec.knowledge.artifact.StructureKnowledgeBuilder")
@@ -200,6 +223,7 @@ class TestSecKnowledgeArtifacts:
     mock_structure_builder_cls,
     mock_element_builder_cls,
     mock_analytics_ctx_cls,
+    mock_lance_builder_cls,
   ):
     """Test that custom duckdb_source is passed to analytics context."""
     mock_env.ENVIRONMENT = "dev"
@@ -227,6 +251,10 @@ class TestSecKnowledgeArtifacts:
       Path("/tmp/disc_consensus.parquet"),
     )
     mock_disclosure_builder_cls.return_value = mock_disclosure_builder
+
+    mock_lance_builder = MagicMock()
+    mock_lance_builder.build_and_tar.return_value = Path("/tmp/sec.lance.tar.gz")
+    mock_lance_builder_cls.return_value = mock_lance_builder
 
     config = SECArtifactConfig(duckdb_source="sec_historical")
     context = build_asset_context()

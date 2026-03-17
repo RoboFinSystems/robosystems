@@ -30,8 +30,7 @@ mcp/
     ├── manager.py           # Tool management and registry
     ├── cypher_tool.py       # Cypher query execution
     ├── schema_tool.py       # Schema introspection
-    ├── resolve_element_tool.py   # Concept → XBRL element resolution (vector search)
-    ├── resolve_structure_tool.py # Statement type → structure resolution (vector search)
+    ├── resolve_element_tool.py   # Concept → XBRL element resolution (canonical matching)
     ├── example_queries_tool.py   # Query examples and templates
     ├── financial_statement_tool.py  # Get financial statements (auto-resolve reports)
     ├── data_tools.py        # Build fact grid (cross-company comparisons)
@@ -55,12 +54,11 @@ Tools are organized into three availability layers:
 | Tool | Description |
 |------|-------------|
 | `get-example-queries` | Working query patterns tailored to the graph schema |
-| `resolve-element` | Vector search: map concepts ("revenue") to XBRL element qnames |
-| `resolve-structure` | Vector search: find statement structures by type or free-text |
+| `resolve-element` | Map concepts ("revenue") to XBRL element qnames via canonical matching |
 | `get-financial-statement` | Structured statement data with auto-resolve and dedup |
 | `build-fact-grid` | Cross-company comparisons via canonical concepts |
 
-`resolve-element` and `resolve-structure` additionally require `has_semantic_enrichment=True` on the manifest.
+`resolve-element` additionally requires `has_semantic_enrichment=True` on the manifest.
 
 ### Layer 3: Infrastructure (feature-flag gated)
 
@@ -144,7 +142,7 @@ All tools use `self.client.execute_query()` for consistent routing, auth, and er
 **Key patterns:**
 
 - **Auto-resolve**: `get-financial-statement` automatically finds the latest relevant report when no `report_id` is provided
-- **Vector search**: `resolve-element` and `resolve-structure` use DuckDB cosine similarity on staging tables
+- **Canonical matching**: `resolve-element` uses in-memory embedding match to map concepts to XBRL elements
 - **Deduplication**: Financial tools deduplicate facts that appear in multiple filings (comparative periods)
 - **Parameterized queries**: All tools use `$param` syntax to prevent injection
 

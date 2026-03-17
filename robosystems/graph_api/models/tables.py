@@ -36,6 +36,12 @@ class TableCreateRequest(BaseModel):
     default=None,
     description="Optional map of s3_key -> file_id for provenance tracking",
   )
+  null_columns: list[str] | None = Field(
+    default=None,
+    description="Columns to NULL out in the staged table (e.g., ['embedding'] "
+    "to skip large vector data). Column remains in schema as NULL. "
+    "Data stays in parquet source files for future use.",
+  )
   deduplicate: bool = Field(
     default=True,
     description="Deduplicate rows on insert using NOT EXISTS on dedup key "

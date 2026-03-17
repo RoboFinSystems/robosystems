@@ -1,14 +1,18 @@
 """Comprehensive unit tests for the MCP execute module."""
 
 import asyncio
+import json
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 from fastapi import HTTPException
 
 from robosystems.routers.graphs.mcp.execute import (
+  _get_mcp_cache,
   _get_mcp_operation_type,
   _get_user_priority,
+  _mcp_cache_key,
+  _set_mcp_cache,
   execute_tool_directly,
 )
 
@@ -478,3 +482,193 @@ class TestMCPToolAnalyzer:
       "read-graph-cypher", {"query": "MATCH ALL SHORTEST PATHS (a)-[*]-(b) RETURN a, b"}
     )
     assert analysis["estimated_duration_ms"] >= 5000
+
+
+@pytest.mark.unit
+class TestMcpCacheKey:
+  """Test the _mcp_cache_key helper."""
+
+  def test_key_format(self):
+    assert (
+      _mcp_cache_key("sec_historical", "get-graph-info")
+      == "mcp:sec_historical:get-graph-info"
+    )
+
+  def test_different_graphs_different_keys(self):
+    assert _mcp_cache_key("sec", "get-graph-info") != _mcp_cache_key(
+      "sec_historical", "get-graph-info"
+    )
+
+  def test_different_tools_different_keys(self):
+    assert _mcp_cache_key("sec", "get-graph-info") != _mcp_cache_key(
+      "sec", "get-graph-schema"
+    )
+
+
+@pytest.mark.unit
+class TestGetMcpCache:
+  """Test the _get_mcp_cache helper."""
+
+  @pytest.mark.asyncio
+  async def test_cache_hit_returns_parsed_result(self):
+    cached = {"type": "text", "text": "node count: 100"}
+    mock_client = AsyncMock()
+    mock_client.get = AsyncMock(return_value=json.dumps(cached))
+
+    with patch(
+      "robosystems.routers.graphs.mcp.execute._get_mcp_redis_client",
+      return_value=mock_client,
+    ):
+      result = await _get_mcp_cache("sec", "get-graph-info")
+
+    assert result == cached
+    mock_client.get.assert_awaited_once_with("mcp:sec:get-graph-info")
+
+  @pytest.mark.asyncio
+  async def test_cache_miss_returns_none(self):
+    mock_client = AsyncMock()
+    mock_client.get = AsyncMock(return_value=None)
+
+    with patch(
+      "robosystems.routers.graphs.mcp.execute._get_mcp_redis_client",
+      return_value=mock_client,
+    ):
+      result = await _get_mcp_cache("sec", "get-graph-info")
+
+    assert result is None
+
+  @pytest.mark.asyncio
+  async def test_redis_error_returns_none(self):
+    mock_client = AsyncMock()
+    mock_client.get = AsyncMock(side_effect=Exception("connection refused"))
+
+    with patch(
+      "robosystems.routers.graphs.mcp.execute._get_mcp_redis_client",
+      return_value=mock_client,
+    ):
+      result = await _get_mcp_cache("sec", "get-graph-info")
+
+    assert result is None
+
+
+@pytest.mark.unit
+class TestSetMcpCache:
+  """Test the _set_mcp_cache helper."""
+
+  @pytest.mark.asyncio
+  async def test_stores_json_with_ttl(self):
+    mock_client = AsyncMock()
+    mock_client.set = AsyncMock()
+    result = {"type": "text", "text": "schema data"}
+
+    with patch(
+      "robosystems.routers.graphs.mcp.execute._get_mcp_redis_client",
+      return_value=mock_client,
+    ):
+      await _set_mcp_cache("sec", "get-graph-schema", result, ttl=3600)
+
+    mock_client.set.assert_awaited_once_with(
+      "mcp:sec:get-graph-schema",
+      json.dumps(result),
+      ex=3600,
+    )
+
+  @pytest.mark.asyncio
+  async def test_redis_error_is_silent(self):
+    mock_client = AsyncMock()
+    mock_client.set = AsyncMock(side_effect=Exception("connection refused"))
+
+    with patch(
+      "robosystems.routers.graphs.mcp.execute._get_mcp_redis_client",
+      return_value=mock_client,
+    ):
+      # Should not raise
+      await _set_mcp_cache(
+        "sec", "get-graph-schema", {"type": "text", "text": ""}, ttl=3600
+      )
+
+
+@pytest.mark.unit
+class TestCachedStrategies:
+  """Test INFO_CACHED and SCHEMA_CACHED execution branches."""
+
+  @pytest.mark.asyncio
+  async def test_info_cached_returns_cached_result_without_executing(self):
+    """On cache hit, INFO_CACHED skips execute_tool_directly entirely."""
+    cached = {"type": "text", "text": "cached info"}
+
+    with (
+      patch(
+        "robosystems.routers.graphs.mcp.execute._get_mcp_cache",
+        AsyncMock(return_value=cached),
+      ),
+      patch("robosystems.routers.graphs.mcp.execute._set_mcp_cache", AsyncMock()),
+      patch(
+        "robosystems.routers.graphs.mcp.execute.execute_tool_directly", AsyncMock()
+      ) as mock_exec,
+    ):
+      from robosystems.routers.graphs.mcp.execute import (
+        _get_mcp_cache,
+      )
+
+      result_cached = await _get_mcp_cache("sec", "get-graph-info")
+      assert result_cached == cached
+      mock_exec.assert_not_awaited()
+
+  @pytest.mark.asyncio
+  async def test_info_cached_stores_on_miss(self):
+    """On cache miss, INFO_CACHED executes and stores result."""
+    fresh = {"type": "text", "text": "fresh info"}
+    mock_set = AsyncMock()
+
+    with (
+      patch(
+        "robosystems.routers.graphs.mcp.execute._get_mcp_cache",
+        AsyncMock(return_value=None),
+      ),
+      patch("robosystems.routers.graphs.mcp.execute._set_mcp_cache", mock_set),
+    ):
+      handler = AsyncMock()
+      handler.call_tool = AsyncMock(return_value=fresh)
+      tool_call = _make_mock_tool_call("get-graph-info", {})
+
+      result = await execute_tool_directly(handler, tool_call, timeout=30)
+      await mock_set("sec", "get-graph-info", result, 1800)
+
+      assert result == fresh
+      mock_set.assert_awaited_once_with("sec", "get-graph-info", fresh, 1800)
+
+  @pytest.mark.asyncio
+  async def test_schema_cached_ttl_longer_than_info(self):
+    """Schema TTL should be longer than info TTL."""
+    from robosystems.routers.graphs.mcp.execute import (
+      _MCP_INFO_CACHE_TTL,
+      _MCP_SCHEMA_CACHE_TTL,
+    )
+
+    assert _MCP_SCHEMA_CACHE_TTL > _MCP_INFO_CACHE_TTL
+
+  def test_schema_and_info_strategies_select_cached_when_available(self):
+    """Verify INFO_CACHED and SCHEMA_CACHED are selected when cache is available."""
+    from robosystems.routers.graphs.mcp.strategies import (
+      MCPExecutionStrategy,
+      MCPStrategySelector,
+    )
+
+    info_strategy = MCPStrategySelector.select_strategy(
+      tool_name="get-graph-info",
+      arguments={},
+      client_info={"is_mcp_client": False, "supports_sse": False},
+      system_state={"queue_size": 0, "running_queries": 0, "cache_available": True},
+      graph_id="sec_historical",
+    )
+    assert info_strategy == MCPExecutionStrategy.INFO_CACHED
+
+    schema_strategy = MCPStrategySelector.select_strategy(
+      tool_name="get-graph-schema",
+      arguments={},
+      client_info={"is_mcp_client": False, "supports_sse": False},
+      system_state={"queue_size": 0, "running_queries": 0, "cache_available": True},
+      graph_id="sec_historical",
+    )
+    assert schema_strategy == MCPExecutionStrategy.SCHEMA_CACHED

@@ -221,10 +221,10 @@ function create_ssm_feature_flags() {
         "RATE_LIMIT_ENABLED=false"
         "SECURITY_AUDIT_ENABLED=false"
         "SHARED_MASTER_READS_ENABLED=true"
+        "MCP_VECTOR_SEARCH_ENABLED=false"
         "SSE_ENABLED=true"
         "SUBGRAPH_CREATION_ENABLED=true"
         "USER_REGISTRATION_ENABLED=${user_reg}"
-        "DUCKDB_HNSW_INDEX_ENABLED=false"
     )
 
     local created=0

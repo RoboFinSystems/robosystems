@@ -6,8 +6,6 @@ This module provides helper utilities for query execution.
 
 from typing import Any
 
-from robosystems.middleware.graph.utils import MultiTenantUtils
-
 
 def get_query_operation_type(graph_id: str) -> str:
   """
@@ -15,7 +13,7 @@ def get_query_operation_type(graph_id: str) -> str:
 
   For consistency with distributed LadybugDB architecture:
   - User graphs: Always use 'write' to ensure writer cluster routing
-  - Shared repositories: Use 'read' for reader cluster routing
+  - Shared repositories (and subgraphs): Use 'read' for reader cluster routing
 
   Args:
       graph_id: Graph database identifier
@@ -23,7 +21,9 @@ def get_query_operation_type(graph_id: str) -> str:
   Returns:
       Operation type: 'read' or 'write'
   """
-  if MultiTenantUtils.is_shared_repository(graph_id):
+  from robosystems.config.shared_repositories import is_shared_repository_or_subgraph
+
+  if is_shared_repository_or_subgraph(graph_id):
     return "read"
   else:
     return "write"

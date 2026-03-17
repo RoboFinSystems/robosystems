@@ -309,8 +309,8 @@ production:
         max_memory_mb: 5120 # 5GB available (8GB - 2GB OS - 1GB app overhead)
         memory_per_db_mb: 3584 # 3.5GB for parent databases (sec)
         memory_per_subgraph_mb: 2048 # 2GB for subgraphs (sec_historical) - oversubscribed
-        duckdb_memory_limit: "0" # No DuckDB on replicas - read-only, no staging tables
-        duckdb_max_threads: 0 # No DuckDB on replicas
+        duckdb_memory_limit: "0" # No DuckDB queries on replicas
+        duckdb_max_threads: 0 # No DuckDB queries on replicas
 
 # =============================================================================
 # STAGING ENVIRONMENT
@@ -544,8 +544,8 @@ staging:
         max_memory_mb: 5120 # 5GB available (8GB - 2GB OS - 1GB app overhead)
         memory_per_db_mb: 3584 # 3.5GB for parent databases (sec)
         memory_per_subgraph_mb: 2048 # 2GB for subgraphs (sec_historical) - oversubscribed
-        duckdb_memory_limit: "0" # No DuckDB on replicas - read-only, no staging tables
-        duckdb_max_threads: 0 # No DuckDB on replicas
+        duckdb_memory_limit: "0" # No DuckDB queries on replicas
+        duckdb_max_threads: 0 # No DuckDB queries on replicas
 
 # =============================================================================
 # DEVELOPMENT ENVIRONMENT

@@ -12,13 +12,13 @@ Pipeline stages:
 
 2. TRANSFORM (qb_transform):
    - Run dbt-duckdb models against extracted parquet
-   - Export graph tables (nodes + relationships) as qb_*.parquet
+   - Produce OLTP tables in DuckDB (accounts, transactions, etc.)
 
 3. LOAD (qb_load):
-   - Register GraphFile records in PostgreSQL
-   - Upload qb_*.parquet to S3 user-staging path
-   - Stage to DuckDB on graph instance via Graph API
-   - Materialize from DuckDB to LadybugDB
+   - Read OLTP tables from DuckDB via OLTPLoader
+   - Delete existing data for this source + connection
+   - Insert into roboledger PostgreSQL tenant schema
+   - Resolve foreign keys using external_id lookups
    - Update connection last_sync timestamp
 
 Usage:

@@ -107,6 +107,10 @@ MAIN_API_TAGS = [
     "description": "🛍️ Service offerings - View available offers and pricing",
   },
   {
+    "name": "Ledger",
+    "description": "Ledger - Accounting data: accounts, transactions, trial balance, and summaries",
+  },
+  {
     "name": "Status",
     "description": "❤️ Service status - API status and monitoring",
   },

@@ -1,7 +1,7 @@
 """Tests for QuickBooks transform Dagster asset."""
 
 from subprocess import CompletedProcess
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 from dagster import build_asset_context
@@ -28,6 +28,28 @@ def _make_config(
   )
 
 
+def _make_duckdb_mock(table_counts: dict[str, int]):
+  """Create a DuckDB connection mock for row counting."""
+  mock_con = MagicMock()
+  table_names = list(table_counts.keys())
+
+  def execute_side_effect(query):
+    result = MagicMock()
+    if query == "SHOW TABLES":
+      result.fetchall.return_value = [(t,) for t in table_names]
+    else:
+      for t, count in table_counts.items():
+        if f"count(*) FROM {t}" in query:
+          result.fetchone.return_value = (count,)
+          break
+      else:
+        result.fetchone.return_value = (0,)
+    return result
+
+  mock_con.execute.side_effect = execute_side_effect
+  return mock_con
+
+
 @pytest.mark.unit
 class TestQbTransformSuccess:
   """Test successful execution paths for qb_transform."""
@@ -43,14 +65,14 @@ class TestQbTransformSuccess:
     work_dir = tmp_path / "qb_pipeline" / config.graph_id
     work_dir.mkdir(parents=True)
 
-    table_counts = {"entity": 5, "transaction": 12, "element": 3}
-
     successful_proc = CompletedProcess(
       args=["dbt", "build"],
       returncode=0,
       stdout="Running with dbt=1.8\nCompleted successfully.",
       stderr="",
     )
+
+    mock_con = _make_duckdb_mock({"accounts": 5, "transactions": 12, "entries": 3})
 
     with (
       patch(
@@ -61,24 +83,21 @@ class TestQbTransformSuccess:
         "robosystems.adapters.quickbooks.pipeline.transform.subprocess.run",
         return_value=successful_proc,
       ),
-      patch(
-        "robosystems.adapters.quickbooks.pipeline.transform.export_duckdb_tables",
-        return_value=table_counts,
-      ),
+      patch("duckdb.connect", return_value=mock_con),
     ):
       context = build_asset_context()
       result = qb_transform(context, config)
 
     assert isinstance(result, MaterializeResult)
     assert result.metadata["graph_id"] == config.graph_id
-    assert result.metadata["tables_exported"] == 3
+    assert result.metadata["tables"] == 3
     assert result.metadata["total_rows"] == 20
-    assert result.metadata["rows_entity"] == 5
-    assert result.metadata["rows_transaction"] == 12
-    assert result.metadata["rows_element"] == 3
+    assert result.metadata["rows_accounts"] == 5
+    assert result.metadata["rows_transactions"] == 12
+    assert result.metadata["rows_entries"] == 3
 
-  def test_transform_result_output_path_in_metadata(self, tmp_path):
-    """Test output_path is set in the result metadata."""
+  def test_transform_result_includes_duckdb_path(self, tmp_path):
+    """Test duckdb_path is set in the result metadata."""
     from dagster import MaterializeResult
 
     from robosystems.adapters.quickbooks.pipeline.transform import qb_transform
@@ -95,6 +114,8 @@ class TestQbTransformSuccess:
       stderr="",
     )
 
+    mock_con = _make_duckdb_mock({"accounts": 10})
+
     with (
       patch(
         "robosystems.adapters.quickbooks.pipeline.transform.get_pipeline_work_dir",
@@ -104,16 +125,13 @@ class TestQbTransformSuccess:
         "robosystems.adapters.quickbooks.pipeline.transform.subprocess.run",
         return_value=successful_proc,
       ),
-      patch(
-        "robosystems.adapters.quickbooks.pipeline.transform.export_duckdb_tables",
-        return_value={"entity": 10},
-      ),
+      patch("duckdb.connect", return_value=mock_con),
     ):
       context = build_asset_context()
       result = qb_transform(context, config)
 
     assert isinstance(result, MaterializeResult)
-    assert "output" in result.metadata["output_path"]
+    assert "quickbooks.duckdb" in result.metadata["duckdb_path"]
 
   def test_transform_dbt_called_with_correct_vars(self, tmp_path):
     """Test that dbt build is called with realm_id and qb_extract_path vars."""
@@ -133,6 +151,8 @@ class TestQbTransformSuccess:
       stderr="",
     )
 
+    mock_con = _make_duckdb_mock({})
+
     with (
       patch(
         "robosystems.adapters.quickbooks.pipeline.transform.get_pipeline_work_dir",
@@ -142,10 +162,7 @@ class TestQbTransformSuccess:
         "robosystems.adapters.quickbooks.pipeline.transform.subprocess.run",
         return_value=successful_proc,
       ) as mock_run,
-      patch(
-        "robosystems.adapters.quickbooks.pipeline.transform.export_duckdb_tables",
-        return_value={},
-      ),
+      patch("duckdb.connect", return_value=mock_con),
     ):
       context = build_asset_context()
       qb_transform(context, config)
@@ -178,6 +195,8 @@ class TestQbTransformSuccess:
       stderr="",
     )
 
+    mock_con = _make_duckdb_mock({})
+
     with (
       patch(
         "robosystems.adapters.quickbooks.pipeline.transform.get_pipeline_work_dir",
@@ -187,10 +206,7 @@ class TestQbTransformSuccess:
         "robosystems.adapters.quickbooks.pipeline.transform.subprocess.run",
         return_value=successful_proc,
       ) as mock_run,
-      patch(
-        "robosystems.adapters.quickbooks.pipeline.transform.export_duckdb_tables",
-        return_value={},
-      ),
+      patch("duckdb.connect", return_value=mock_con),
     ):
       context = build_asset_context()
       qb_transform(context, config)
@@ -199,7 +215,6 @@ class TestQbTransformSuccess:
     target_idx = cmd.index("--target-path")
     target_path = cmd[target_idx + 1]
 
-    # The target path should be inside the work directory
     assert str(work_dir) in target_path
 
   def test_transform_dbt_env_includes_duckdb_path(self, tmp_path):
@@ -218,6 +233,8 @@ class TestQbTransformSuccess:
       stderr="",
     )
 
+    mock_con = _make_duckdb_mock({})
+
     with (
       patch(
         "robosystems.adapters.quickbooks.pipeline.transform.get_pipeline_work_dir",
@@ -227,10 +244,7 @@ class TestQbTransformSuccess:
         "robosystems.adapters.quickbooks.pipeline.transform.subprocess.run",
         return_value=successful_proc,
       ) as mock_run,
-      patch(
-        "robosystems.adapters.quickbooks.pipeline.transform.export_duckdb_tables",
-        return_value={},
-      ),
+      patch("duckdb.connect", return_value=mock_con),
     ):
       context = build_asset_context()
       qb_transform(context, config)
@@ -240,50 +254,8 @@ class TestQbTransformSuccess:
     assert "DBT_DUCKDB_PATH" in env
     assert "quickbooks.duckdb" in env["DBT_DUCKDB_PATH"]
 
-  def test_transform_export_called_with_correct_paths(self, tmp_path):
-    """Test export_duckdb_tables is called with the right duckdb_path and output_dir."""
-    from robosystems.adapters.quickbooks.pipeline.transform import qb_transform
-
-    config = _make_config(graph_id="kg_export_test")
-
-    work_dir = tmp_path / "qb_pipeline" / config.graph_id
-    work_dir.mkdir(parents=True)
-
-    successful_proc = CompletedProcess(
-      args=["dbt", "build"],
-      returncode=0,
-      stdout="",
-      stderr="",
-    )
-
-    with (
-      patch(
-        "robosystems.adapters.quickbooks.pipeline.transform.get_pipeline_work_dir",
-        return_value=work_dir,
-      ),
-      patch(
-        "robosystems.adapters.quickbooks.pipeline.transform.subprocess.run",
-        return_value=successful_proc,
-      ),
-      patch(
-        "robosystems.adapters.quickbooks.pipeline.transform.export_duckdb_tables",
-        return_value={},
-      ) as mock_export,
-    ):
-      context = build_asset_context()
-      qb_transform(context, config)
-
-    mock_export.assert_called_once()
-    export_call = mock_export.call_args
-    duckdb_path_arg = export_call[0][0]
-    output_dir_arg = export_call[0][1]
-
-    assert "quickbooks.duckdb" in str(duckdb_path_arg)
-    assert "output" in str(output_dir_arg)
-
   def test_transform_empty_tables_returns_zero_rows(self, tmp_path):
-    """Test that no exported tables produces total_rows=0."""
-
+    """Test that no tables produces total_rows=0."""
     from robosystems.adapters.quickbooks.pipeline.transform import qb_transform
 
     config = _make_config()
@@ -298,6 +270,8 @@ class TestQbTransformSuccess:
       stderr="",
     )
 
+    mock_con = _make_duckdb_mock({})
+
     with (
       patch(
         "robosystems.adapters.quickbooks.pipeline.transform.get_pipeline_work_dir",
@@ -307,15 +281,12 @@ class TestQbTransformSuccess:
         "robosystems.adapters.quickbooks.pipeline.transform.subprocess.run",
         return_value=successful_proc,
       ),
-      patch(
-        "robosystems.adapters.quickbooks.pipeline.transform.export_duckdb_tables",
-        return_value={},
-      ),
+      patch("duckdb.connect", return_value=mock_con),
     ):
       context = build_asset_context()
       result = qb_transform(context, config)
 
-    assert result.metadata["tables_exported"] == 0
+    assert result.metadata["tables"] == 0
     assert result.metadata["total_rows"] == 0
 
   def test_transform_dbt_stdout_is_logged(self, tmp_path):
@@ -335,6 +306,8 @@ class TestQbTransformSuccess:
       stderr="",
     )
 
+    mock_con = _make_duckdb_mock({})
+
     with (
       patch(
         "robosystems.adapters.quickbooks.pipeline.transform.get_pipeline_work_dir",
@@ -344,13 +317,8 @@ class TestQbTransformSuccess:
         "robosystems.adapters.quickbooks.pipeline.transform.subprocess.run",
         return_value=successful_proc,
       ),
-      patch(
-        "robosystems.adapters.quickbooks.pipeline.transform.export_duckdb_tables",
-        return_value={},
-      ),
+      patch("duckdb.connect", return_value=mock_con),
     ):
-      # Use a real build_asset_context - stdout is logged via context.log.info
-      # We verify it doesn't crash; the actual log output goes to Dagster's stream
       context = build_asset_context()
       qb_transform(context, config)
 
@@ -419,8 +387,8 @@ class TestQbTransformFailure:
       with pytest.raises(RuntimeError, match="5"):
         qb_transform(context, config)
 
-  def test_transform_export_not_called_on_dbt_failure(self, tmp_path):
-    """Test that export_duckdb_tables is not called when dbt fails."""
+  def test_transform_duckdb_not_opened_on_dbt_failure(self, tmp_path):
+    """Test that DuckDB is not opened when dbt fails."""
     from robosystems.adapters.quickbooks.pipeline.transform import qb_transform
 
     config = _make_config()
@@ -444,13 +412,10 @@ class TestQbTransformFailure:
         "robosystems.adapters.quickbooks.pipeline.transform.subprocess.run",
         return_value=failed_proc,
       ),
-      patch(
-        "robosystems.adapters.quickbooks.pipeline.transform.export_duckdb_tables",
-        return_value={},
-      ) as mock_export,
+      patch("duckdb.connect") as mock_duckdb,
     ):
       context = build_asset_context()
       with pytest.raises(RuntimeError):
         qb_transform(context, config)
 
-    mock_export.assert_not_called()
+    mock_duckdb.assert_not_called()
