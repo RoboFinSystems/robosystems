@@ -9,7 +9,7 @@ from pydantic import BaseModel
 from robosystems.models.api.common import PaginationInfo
 
 
-class TransactionSummaryResponse(BaseModel):
+class LedgerTransactionSummaryResponse(BaseModel):
   id: str
   number: str | None = None
   type: str
@@ -25,12 +25,12 @@ class TransactionSummaryResponse(BaseModel):
   status: str
 
 
-class TransactionListResponse(BaseModel):
-  transactions: list[TransactionSummaryResponse]
+class LedgerTransactionListResponse(BaseModel):
+  transactions: list[LedgerTransactionSummaryResponse]
   pagination: PaginationInfo
 
 
-class LineItemResponse(BaseModel):
+class LedgerLineItemResponse(BaseModel):
   id: str
   account_id: str
   account_name: str | None = None
@@ -41,7 +41,7 @@ class LineItemResponse(BaseModel):
   line_order: int
 
 
-class EntryResponse(BaseModel):
+class LedgerEntryResponse(BaseModel):
   id: str
   number: str | None = None
   type: str
@@ -49,10 +49,10 @@ class EntryResponse(BaseModel):
   memo: str | None = None
   status: str
   posted_at: datetime | None = None
-  line_items: list[LineItemResponse]
+  line_items: list[LedgerLineItemResponse]
 
 
-class TransactionDetailResponse(BaseModel):
+class LedgerTransactionDetailResponse(BaseModel):
   id: str
   number: str | None = None
   type: str
@@ -68,4 +68,4 @@ class TransactionDetailResponse(BaseModel):
   source_id: str | None = None
   status: str
   posted_at: datetime | None = None
-  entries: list[EntryResponse]
+  entries: list[LedgerEntryResponse]

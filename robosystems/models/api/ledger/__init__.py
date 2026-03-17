@@ -8,11 +8,11 @@ from .accounts import (
 )
 from .summary import LedgerSummaryResponse
 from .transactions import (
-  EntryResponse,
-  LineItemResponse,
-  TransactionDetailResponse,
-  TransactionListResponse,
-  TransactionSummaryResponse,
+  LedgerEntryResponse,
+  LedgerLineItemResponse,
+  LedgerTransactionDetailResponse,
+  LedgerTransactionListResponse,
+  LedgerTransactionSummaryResponse,
 )
 from .trial_balance import TrialBalanceResponse, TrialBalanceRow
 
@@ -21,12 +21,12 @@ __all__ = [
   "AccountResponse",
   "AccountTreeNode",
   "AccountTreeResponse",
-  "EntryResponse",
+  "LedgerEntryResponse",
+  "LedgerLineItemResponse",
   "LedgerSummaryResponse",
-  "LineItemResponse",
-  "TransactionDetailResponse",
-  "TransactionListResponse",
-  "TransactionSummaryResponse",
+  "LedgerTransactionDetailResponse",
+  "LedgerTransactionListResponse",
+  "LedgerTransactionSummaryResponse",
   "TrialBalanceResponse",
   "TrialBalanceRow",
   "cents_to_dollars",

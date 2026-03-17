@@ -12,11 +12,11 @@ from robosystems.middleware.rate_limits import subscription_aware_rate_limit_dep
 from robosystems.models.api.common import create_error_response, create_pagination_info
 from robosystems.models.api.ledger import cents_to_dollars
 from robosystems.models.api.ledger.transactions import (
-  EntryResponse,
-  LineItemResponse,
-  TransactionDetailResponse,
-  TransactionListResponse,
-  TransactionSummaryResponse,
+  LedgerEntryResponse,
+  LedgerLineItemResponse,
+  LedgerTransactionDetailResponse,
+  LedgerTransactionListResponse,
+  LedgerTransactionSummaryResponse,
 )
 from robosystems.models.iam import User
 from robosystems.models.ledger import Account, Entry, LineItem, Transaction
@@ -24,8 +24,8 @@ from robosystems.models.ledger import Account, Entry, LineItem, Transaction
 router = APIRouter()
 
 
-def _txn_to_summary(row: Transaction) -> TransactionSummaryResponse:
-  return TransactionSummaryResponse(
+def _txn_to_summary(row: Transaction) -> LedgerTransactionSummaryResponse:
+  return LedgerTransactionSummaryResponse(
     id=row.id,
     number=row.number,
     type=row.type,
@@ -44,7 +44,7 @@ def _txn_to_summary(row: Transaction) -> TransactionSummaryResponse:
 
 @router.get(
   "/transactions",
-  response_model=TransactionListResponse,
+  response_model=LedgerTransactionListResponse,
   operation_id="listLedgerTransactions",
   summary="List Transactions",
   tags=["Ledger"],
@@ -85,7 +85,7 @@ async def list_transactions(
         .all()
       )
 
-      return TransactionListResponse(
+      return LedgerTransactionListResponse(
         transactions=[_txn_to_summary(r) for r in rows],
         pagination=create_pagination_info(total, limit, offset),
       )
@@ -103,7 +103,7 @@ async def list_transactions(
 
 @router.get(
   "/transactions/{transaction_id}",
-  response_model=TransactionDetailResponse,
+  response_model=LedgerTransactionDetailResponse,
   operation_id="getLedgerTransaction",
   summary="Transaction Detail",
   tags=["Ledger"],
@@ -143,7 +143,7 @@ async def get_transaction(
         ).all()
 
         li_responses = [
-          LineItemResponse(
+          LedgerLineItemResponse(
             id=li.id,
             account_id=li.account_id,
             account_name=acct_name,
@@ -157,7 +157,7 @@ async def get_transaction(
         ]
 
         entry_responses.append(
-          EntryResponse(
+          LedgerEntryResponse(
             id=entry.id,
             number=entry.number,
             type=entry.type,
@@ -169,7 +169,7 @@ async def get_transaction(
           )
         )
 
-      return TransactionDetailResponse(
+      return LedgerTransactionDetailResponse(
         id=txn.id,
         number=txn.number,
         type=txn.type,
