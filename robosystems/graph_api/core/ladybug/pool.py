@@ -292,7 +292,7 @@ class LadybugConnectionPool:
           f"compression: enabled, auto_checkpoint: enabled, threshold: {checkpoint_threshold // (1024 * 1024)}MB"
         )
 
-        # Load vector extension for HNSW indexes and QUERY_VECTOR_INDEX
+        # Load vector extension for FLOAT[N] column support and vector indexes
         # Must happen once per Database object (persists across connections)
         # Pre-installed in Docker image; INSTALL is fallback for local dev
         try:

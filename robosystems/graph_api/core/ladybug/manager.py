@@ -198,7 +198,7 @@ class LadybugDatabaseManager:
         f"compression: enabled, auto_checkpoint: enabled, threshold: {checkpoint_threshold // (1024 * 1024)}MB"
       )
 
-      # Load vector extension for FLOAT[N] columns and HNSW indexes
+      # Load vector extension for FLOAT[N] column support
       # Pre-installed in Docker image; INSTALL is fallback for local dev
       try:
         try:

@@ -171,7 +171,6 @@ class SECStageConfig(Config):
   stage_embeddings: bool = (
     True  # Include embedding columns (used by LanceDB index builder)
   )
-  build_hnsw_index: bool = False  # Build HNSW vector index on embedding columns
 
 
 class SECHistoricalStageConfig(Config):
@@ -189,7 +188,6 @@ class SECHistoricalStageConfig(Config):
   stage_embeddings: bool = (
     True  # Include embedding columns (used by LanceDB index builder)
   )
-  build_hnsw_index: bool = False  # Build HNSW vector index on embedding columns
 
 
 class SECIncrementalStageConfig(Config):
@@ -210,7 +208,6 @@ class SECIncrementalStageConfig(Config):
   stage_embeddings: bool = (
     True  # Include embedding columns (used by LanceDB index builder)
   )
-  build_hnsw_index: bool = False  # Build HNSW vector index on embedding columns
 
 
 # =============================================================================
