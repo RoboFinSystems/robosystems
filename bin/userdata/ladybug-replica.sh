@@ -255,36 +255,13 @@ aws dynamodb update-item \
   --region ${AWS_REGION}
 
 # ==================================================================================
-# DUCKDB STAGING DOWNLOAD (Background - non-blocking)
+# DUCKDB STAGING DOWNLOAD (Skipped)
 # ==================================================================================
-# Download DuckDB staging databases for MCP vector search (list_cosine_similarity).
-# This runs AFTER the container is healthy so it doesn't delay serving graph queries.
-# If download fails, MCP tools fall back to canonical concept lookup on the graph.
-echo "Starting background DuckDB staging download..."
-
-(
-  for REPO in "${REPOS[@]}"; do
-    REPO=$(echo "$REPO" | tr -d ' ')
-    # Skip subgraphs (contain underscore) — DuckDB vector search not supported yet
-    if [[ "$REPO" == *"_"* ]]; then
-      echo "Skipping DuckDB staging for subgraph ${REPO}"
-      continue
-    fi
-    DUCKDB_S3_URI="${SHARED_DATABASE_S3_PREFIX%/}/${REPO}.duckdb"
-    DUCKDB_LOCAL_PATH="/mnt/ladybug-data/databases/staging/${REPO}.duckdb"
-    echo "Downloading DuckDB staging for ${REPO}: ${DUCKDB_S3_URI}"
-    START_TIME=$(date +%s)
-    if aws s3 cp "${DUCKDB_S3_URI}" "${DUCKDB_LOCAL_PATH}" --region "${AWS_REGION}" --only-show-errors 2>/dev/null; then
-      ELAPSED=$(( $(date +%s) - START_TIME ))
-      FILE_SIZE_MB=$(( $(stat -c%s "${DUCKDB_LOCAL_PATH}" 2>/dev/null || stat -f%z "${DUCKDB_LOCAL_PATH}") / 1048576 ))
-      echo "Downloaded DuckDB staging for ${REPO}: ${FILE_SIZE_MB}MB in ${ELAPSED}s"
-    else
-      echo "WARNING: DuckDB staging not available for ${REPO} (MCP will use canonical fallback)"
-    fi
-  done
-  chown -R 1000:1000 /mnt/ladybug-data/databases/staging
-  echo "DuckDB staging download complete at $(date)"
-) >> "$LOG_FILE" 2>&1 &
+# DuckDB staging files are not needed on replicas — MCP tools use canonical concept
+# matching on the graph, not DuckDB vector search. Skipping this download saves
+# ~10 minutes of boot time and avoids downloading a 100GB+ file.
+# If DuckDB staging is ever needed on replicas, re-enable this section.
+echo "Skipping DuckDB staging download (not used on replicas)"
 
 # ==================================================================================
 # HEALTH CHECK CRON SETUP
