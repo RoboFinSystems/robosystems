@@ -1,5 +1,7 @@
 """Ledger account endpoints."""
 
+import json
+
 from fastapi import APIRouter, Depends, Path, Query
 from sqlalchemy import func, select
 
@@ -20,8 +22,19 @@ from robosystems.models.ledger import Account
 router = APIRouter()
 
 
+def _parse_meta(raw) -> dict:
+  if isinstance(raw, dict):
+    return raw
+  if isinstance(raw, str):
+    try:
+      return json.loads(raw)
+    except (ValueError, TypeError):
+      return {}
+  return {}
+
+
 def _account_to_response(row: Account) -> AccountResponse:
-  meta = row.metadata_ or {}
+  meta = _parse_meta(row.metadata_)
   return AccountResponse(
     id=row.id,
     code=row.code,
@@ -112,7 +125,7 @@ async def get_account_tree(
       roots: list[AccountTreeNode] = []
 
       for r in rows:
-        meta = r.metadata_ or {}
+        meta = _parse_meta(r.metadata_)
         node = AccountTreeNode(
           id=r.id,
           code=r.code,

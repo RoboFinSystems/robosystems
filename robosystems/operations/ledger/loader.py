@@ -7,11 +7,25 @@ models; the loader only sees the standardized OLTP output tables.
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 
 from robosystems.logger import logger
+
+
+def _parse_metadata(raw) -> dict:
+  """Parse metadata from dbt output — may be a dict, JSON string, or None."""
+  if isinstance(raw, dict):
+    return raw
+  if isinstance(raw, str):
+    try:
+      parsed = json.loads(raw)
+      return parsed if isinstance(parsed, dict) else {}
+    except (ValueError, TypeError):
+      return {}
+  return {}
 
 
 @dataclass
@@ -184,7 +198,7 @@ class OLTPLoader:
               is_placeholder=bool(row.get("is_placeholder", False)),
               external_id=ext_id,
               external_source=str(row["external_source"]),
-              metadata_={},
+              metadata_=_parse_metadata(row.get("metadata")),
               version=1,
               created_at=now,
               updated_at=now,
