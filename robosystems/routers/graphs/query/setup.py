@@ -11,7 +11,6 @@ from typing import Any
 from robosystems.logger import logger
 from robosystems.middleware.graph.query_queue import get_query_queue
 from robosystems.middleware.graph.router import GraphRouter
-from robosystems.middleware.graph.utils import MultiTenantUtils
 from robosystems.middleware.robustness import CircuitBreakerManager
 
 
@@ -21,9 +20,11 @@ def _get_query_operation_type(graph_id: str) -> str:
 
   For consistency with distributed LadybugDB architecture:
   - User graphs: Always use 'write' to ensure writer cluster routing
-  - Shared repositories: Use 'read' for reader cluster routing
+  - Shared repositories (and subgraphs): Use 'read' for reader cluster routing
   """
-  if MultiTenantUtils.is_shared_repository(graph_id):
+  from robosystems.config.shared_repositories import is_shared_repository_or_subgraph
+
+  if is_shared_repository_or_subgraph(graph_id):
     return "read"
   else:
     return "write"

@@ -73,6 +73,64 @@ router = APIRouter()
 # Circuit breaker instance
 circuit_breaker = CircuitBreakerManager()
 
+# MCP result cache TTLs (seconds).
+# To manually invalidate: just admin dev cache flush mcp_cache
+_MCP_INFO_CACHE_TTL = 1800  # 30 minutes
+_MCP_SCHEMA_CACHE_TTL = 3600  # 1 hour
+
+# Shared module-level Redis client for MCP cache — created once, reuses connection pool.
+# Lazily initialized on first use to avoid import-time URL resolution issues.
+_mcp_redis_client: Any = None
+
+
+def _get_mcp_redis_client() -> Any:
+  """Return the shared async Redis client for MCP_CACHE, creating it on first call."""
+  global _mcp_redis_client
+  if _mcp_redis_client is None:
+    from robosystems.config.valkey_registry import (
+      ValkeyDatabase,
+      create_async_redis_client,
+    )
+
+    _mcp_redis_client = create_async_redis_client(ValkeyDatabase.MCP_CACHE)
+  return _mcp_redis_client
+
+
+def _mcp_cache_key(graph_id: str, tool_name: str) -> str:
+  """Build a Valkey cache key for MCP tool results.
+
+  Both get-graph-schema and get-graph-info accept no arguments (empty inputSchema),
+  so the graph_id + tool_name combination is sufficient to uniquely identify results.
+  """
+  return f"mcp:{graph_id}:{tool_name}"
+
+
+async def _get_mcp_cache(graph_id: str, tool_name: str) -> dict[str, Any] | None:
+  """Get a cached MCP tool result from Valkey. Returns None on miss or error."""
+  try:
+    data = await _get_mcp_redis_client().get(_mcp_cache_key(graph_id, tool_name))
+    if data:
+      logger.debug(f"MCP cache hit for {tool_name} on {graph_id}")
+      return json.loads(data)
+  except Exception as e:
+    logger.debug(f"MCP cache read error for {tool_name} on {graph_id}: {e}")
+  return None
+
+
+async def _set_mcp_cache(
+  graph_id: str, tool_name: str, result: dict[str, Any], ttl: int
+) -> None:
+  """Store an MCP tool result in Valkey cache."""
+  try:
+    await _get_mcp_redis_client().set(
+      _mcp_cache_key(graph_id, tool_name),
+      json.dumps(result),
+      ex=ttl,
+    )
+    logger.debug(f"MCP cache set for {tool_name} on {graph_id} (ttl={ttl}s)")
+  except Exception as e:
+    logger.debug(f"MCP cache write error for {tool_name} on {graph_id}: {e}")
+
 
 def _get_user_priority(user: User) -> int:
   """Get query priority based on user subscription tier."""
@@ -86,7 +144,9 @@ def _get_user_priority(user: User) -> int:
 
 def _get_mcp_operation_type(graph_id: str) -> str:
   """Determine the correct operation type for MCP operations."""
-  if MultiTenantUtils.is_shared_repository(graph_id):
+  from robosystems.config.shared_repositories import is_shared_repository_or_subgraph
+
+  if is_shared_repository_or_subgraph(graph_id):
     return "read"
   else:
     return "write"
@@ -469,7 +529,7 @@ async def call_mcp_tool(
         "queue_size": tool_stats["queue_size"] + query_stats["queue_size"],
         "running_queries": tool_stats["running_queries"]
         + query_stats["running_queries"],
-        "cache_available": True,  # TODO: Check actual cache status
+        "cache_available": True,
       }
     else:
       system_state = {
@@ -680,17 +740,23 @@ async def call_mcp_tool(
             )
 
       elif strategy == MCPExecutionStrategy.SCHEMA_CACHED:
-        # Use cached schema if available
-        # TODO: Implement schema caching
+        cached = await _get_mcp_cache(graph_id, tool_call.name)
+        if cached is not None:
+          await handler.close()
+          return MCPToolResult(result=cached)
         result = await execute_tool_directly(handler, tool_call, timeout)
         await handler.close()
+        await _set_mcp_cache(graph_id, tool_call.name, result, _MCP_SCHEMA_CACHE_TTL)
         return MCPToolResult(result=result)
 
       elif strategy == MCPExecutionStrategy.INFO_CACHED:
-        # Use cached info if available
-        # TODO: Implement info caching
+        cached = await _get_mcp_cache(graph_id, tool_call.name)
+        if cached is not None:
+          await handler.close()
+          return MCPToolResult(result=cached)
         result = await execute_tool_directly(handler, tool_call, timeout)
         await handler.close()
+        await _set_mcp_cache(graph_id, tool_call.name, result, _MCP_INFO_CACHE_TTL)
         return MCPToolResult(result=result)
 
       else:

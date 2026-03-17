@@ -112,7 +112,6 @@
       "mcp__robosystems__read-graph-cypher",
       "mcp__robosystems__build-fact-grid",
       "mcp__robosystems__resolve-element",
-      "mcp__robosystems__resolve-structure",
       "mcp__robosystems__get-financial-statement",
       "mcp__robosystems__list-workspaces",
       "mcp__robosystems__switch-workspace"

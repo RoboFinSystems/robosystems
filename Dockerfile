@@ -54,7 +54,7 @@ COPY --from=extensions \
     /usr/share/nginx/html/v${LADYBUG_EXT_VERSION}/linux_${TARGETARCH}/duckdb/libduckdb_loader.lbug_extension \
     /ladybug-extension/${LADYBUG_EXT_VERSION}/linux_${TARGETARCH}/duckdb/libduckdb_loader.lbug_extension
 
-# Copy vector extension (required for HNSW indexes and QUERY_VECTOR_INDEX)
+# Copy vector extension (required for FLOAT[N] column support and vector indexes)
 COPY --from=extensions \
     /usr/share/nginx/html/v${LADYBUG_EXT_VERSION}/linux_${TARGETARCH}/vector/libvector.lbug_extension \
     /ladybug-extension/${LADYBUG_EXT_VERSION}/linux_${TARGETARCH}/vector/libvector.lbug_extension

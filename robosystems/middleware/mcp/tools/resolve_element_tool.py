@@ -1,51 +1,16 @@
 """
 Resolve Element Tool — Maps natural-language financial concepts to XBRL elements.
 
-Primary: DuckDB vector search on staging Element table. Uses HNSW-accelerated
-query (array_cosine_distance) when DUCKDB_HNSW_INDEX_ENABLED is true, otherwise
-brute-force list_cosine_similarity. Falls back to canonical concept lookup on the
-graph if DuckDB staging is unavailable.
+Uses LanceDB vector search (when available) over 2.6M+ element embeddings for
+fast semantic matching. Falls back to in-memory canonical concept matching via
+SemanticEnricher, then to graph-based text search.
 """
 
-import time
 from typing import Any
 
 from robosystems.logger import logger
 
 from .base_tool import BaseTool
-
-# Cache for DUCKDB_HNSW_INDEX_ENABLED feature flag
-_hnsw_enabled_cache: tuple[bool, float] | None = None
-_HNSW_CACHE_TTL = 60.0  # seconds
-
-
-def _is_hnsw_index_enabled() -> bool:
-  """Check if HNSW vector indexes are available on DuckDB staging tables.
-
-  Controlled by SSM: /robosystems/{env}/features/DUCKDB_HNSW_INDEX_ENABLED
-  Default: false (vector search uses brute-force list_cosine_similarity).
-
-  Set to true after staging with build_hnsw_index=True and replicas
-  have synced the indexed DuckDB file.
-  """
-  global _hnsw_enabled_cache
-
-  now = time.time()
-  if _hnsw_enabled_cache is not None:
-    cached_result, cached_time = _hnsw_enabled_cache
-    if now - cached_time < _HNSW_CACHE_TTL:
-      return cached_result
-
-  try:
-    from robosystems.config.parameter_store import get_parameter_value
-
-    value = get_parameter_value("DUCKDB_HNSW_INDEX_ENABLED", default="false")
-    result = value.lower() == "true"
-  except Exception:
-    result = False
-
-  _hnsw_enabled_cache = (result, now)
-  return result
 
 
 class ResolveElementTool(BaseTool):
@@ -54,6 +19,8 @@ class ResolveElementTool(BaseTool):
   def __init__(self, client):
     super().__init__(client)
     self._enricher = None
+    self._lance_search = None
+    self._lance_checked = False
 
   @property
   def enricher(self):
@@ -63,6 +30,27 @@ class ResolveElementTool(BaseTool):
 
       self._enricher = SemanticEnricher()
     return self._enricher
+
+  @property
+  def lance_search(self):
+    """Lazy-load the LanceDB search instance. Returns None if unavailable or disabled."""
+    if not self._lance_checked:
+      self._lance_checked = True
+      try:
+        from robosystems.config import env
+
+        if not env.MCP_VECTOR_SEARCH_ENABLED:
+          logger.debug(
+            "LanceDB vector search disabled (MCP_VECTOR_SEARCH_ENABLED=false)"
+          )
+          return None
+
+        from robosystems.adapters.sec.knowledge.lance_search import LanceElementSearch
+
+        self._lance_search = LanceElementSearch.get_instance()
+      except Exception as e:
+        logger.debug(f"LanceDB search not available: {e}")
+    return self._lance_search
 
   def get_tool_definition(self) -> dict[str, Any]:
     return {
@@ -120,17 +108,22 @@ Use the returned query_hint directly in read-graph-cypher for immediate results.
     if not concept:
       return {"error": "concept is required"}
 
-    # Try DuckDB vector search first, fall back to canonical lookup
-    return await self._resolve_vector(concept, ticker, report_id)
+    return await self._resolve_canonical(concept, ticker, report_id)
 
   # ---------------------------------------------------------------------------
-  # Canonical concept lookup (default) — no vector index required
+  # Resolution — LanceDB vector search → canonical fallback → text fallback
   # ---------------------------------------------------------------------------
 
   async def _resolve_canonical(
     self, concept: str, ticker: str | None, report_id: str | None = None
   ) -> dict[str, Any]:
-    """Resolve using canonical_concept property on Element nodes."""
+    """Resolve a concept to XBRL elements.
+
+    Resolution order:
+    1. LanceDB vector search (2.6M+ elements, ~5ms) — if index available
+    2. Canonical concept matching (~40 concepts, in-memory) — fallback
+    3. Text search on element labels — final fallback
+    """
     enricher = self.enricher
     result: dict[str, Any] = {
       "concept": concept,
@@ -142,20 +135,33 @@ Use the returned query_hint directly in read-graph-cypher for immediate results.
       "query_hint": None,
     }
 
-    # Step 1: Embed query and match to canonical taxonomy in-memory
+    # Step 1: Embed query
+    query_embedding = None
     try:
       query_embedding = enricher.embed_batch([concept])[0]
-      canonical = enricher.match_canonical_from_query(query_embedding)
-      if canonical:
-        result["canonical_id"] = canonical.id
-        result["canonical_name"] = canonical.display_name
     except Exception as e:
-      logger.warning(f"Canonical matching failed, falling back to text: {e}")
+      logger.warning(f"Embedding failed: {e}")
 
-    # Step 2: Query elements by canonical_concept property
+    # Step 2: Try LanceDB vector search first (covers all elements)
+    if query_embedding and self.lance_search:
+      lance_result = await self._resolve_via_lance(
+        result, query_embedding, ticker, report_id
+      )
+      if lance_result["matches"]:
+        return lance_result
+
+    # Step 3: Fall back to canonical concept matching
+    if query_embedding:
+      try:
+        canonical = enricher.match_canonical_from_query(query_embedding)
+        if canonical:
+          result["canonical_id"] = canonical.id
+          result["canonical_name"] = canonical.display_name
+      except Exception as e:
+        logger.warning(f"Canonical matching failed: {e}")
+
     canonical_id = result["canonical_id"]
     if not canonical_id:
-      # No canonical match — try direct text search on element qname/name
       return await self._resolve_text_fallback(result, concept, ticker, report_id)
 
     try:
@@ -201,11 +207,10 @@ Use the returned query_hint directly in read-graph-cypher for immediate results.
     if not rows:
       return await self._resolve_text_fallback(result, concept, ticker, report_id)
 
-    # Step 3: Enrich with labels
+    # Enrich with labels
     qnames = [r["qname"] for r in rows if r.get("qname")]
     labels = await self._fetch_labels_by_qname(qnames)
 
-    # Build matches
     for row in rows:
       qname = row.get("qname")
       if not qname:
@@ -223,6 +228,134 @@ Use the returned query_hint directly in read-graph-cypher for immediate results.
     result["matches"] = result["matches"][:10]
     self._build_query_hint(result, ticker, report_id)
     return result
+
+  # ---------------------------------------------------------------------------
+  # LanceDB vector search path
+  # ---------------------------------------------------------------------------
+
+  async def _resolve_via_lance(
+    self,
+    result: dict[str, Any],
+    query_embedding: list[float],
+    ticker: str | None,
+    report_id: str | None,
+  ) -> dict[str, Any]:
+    """Resolve using LanceDB vector search over all element embeddings.
+
+    LanceDB provides semantic candidates (fast ~5ms ANN search), then the graph
+    filters and enriches with fact counts, labels, and optional ticker/report scope.
+    """
+    try:
+      lance_results = self.lance_search.search(query_embedding, limit=20)
+      if not lance_results:
+        return result
+
+      # Deduplicate qnames (same qname may appear from different filings)
+      seen_qnames: set[str] = set()
+      unique_results = []
+      for r in lance_results:
+        qname = r.get("qname")
+        if qname and qname not in seen_qnames:
+          seen_qnames.add(qname)
+          unique_results.append(r)
+
+      qnames = [r["qname"] for r in unique_results]
+
+      # Build a similarity lookup for scoring
+      similarity_by_qname = {}
+      for r in unique_results:
+        similarity_by_qname[r["qname"]] = round(1.0 - r.get("_distance", 0.0), 4)
+
+      # Query graph with lance candidates + optional ticker/report filter
+      rows = await self._fetch_lance_candidates(qnames, ticker, report_id)
+      labels = await self._fetch_labels_by_qname(
+        [r["qname"] for r in rows] if rows else qnames
+      )
+
+      if rows:
+        # Graph returned scoped results — use those
+        for row in rows:
+          qname = row["qname"]
+          result["matches"].append(
+            {
+              "qname": qname,
+              "confidence": row.get("confidence"),
+              "label": labels.get(qname),
+              "fact_count": row.get("fact_count", 0),
+              "score": similarity_by_qname.get(qname, 0.0),
+            }
+          )
+      else:
+        # No graph results (no ticker/report filter, or no matches in scope)
+        # Fall back to lance results directly
+        for r in unique_results:
+          qname = r["qname"]
+          result["matches"].append(
+            {
+              "qname": qname,
+              "confidence": r.get("canonical_confidence"),
+              "label": labels.get(qname),
+              "fact_count": 0,
+              "score": similarity_by_qname.get(qname, 0.0),
+            }
+          )
+
+      # Set canonical info from top match if available
+      if result["matches"] and unique_results[0].get("canonical_concept"):
+        result["canonical_id"] = unique_results[0]["canonical_concept"]
+
+      result["matches"] = result["matches"][:10]
+      self._build_query_hint(result, ticker, report_id)
+    except Exception as e:
+      logger.warning(f"LanceDB search failed, falling back: {e}")
+
+    return result
+
+  async def _fetch_lance_candidates(
+    self,
+    qnames: list[str],
+    ticker: str | None,
+    report_id: str | None,
+  ) -> list[dict]:
+    """Query graph for lance candidates, filtered by optional ticker/report scope."""
+    if not qnames:
+      return []
+    try:
+      params: dict[str, Any] = {"qnames": qnames}
+      if report_id:
+        query = (
+          "MATCH (r:Report)-[:REPORT_HAS_FACT]->(f:Fact)-[:FACT_HAS_ELEMENT]->(e:Element) "
+          "WHERE e.qname IN $qnames AND r.identifier = $report_id "
+          "AND f.has_dimensions = false "
+          "RETURN DISTINCT e.qname AS qname, e.canonical_confidence AS confidence, "
+          "count(f) AS fact_count "
+          "ORDER BY fact_count DESC"
+        )
+        params["report_id"] = report_id
+      elif ticker:
+        query = (
+          "MATCH (f:Fact)-[:FACT_HAS_ELEMENT]->(e:Element), "
+          "(f)-[:FACT_HAS_ENTITY]->(ent:Entity) "
+          "WHERE e.qname IN $qnames AND ent.ticker = $ticker "
+          "AND f.has_dimensions = false "
+          "RETURN DISTINCT e.qname AS qname, e.canonical_confidence AS confidence, "
+          "count(f) AS fact_count "
+          "ORDER BY fact_count DESC"
+        )
+        params["ticker"] = ticker
+      else:
+        query = (
+          "MATCH (f:Fact)-[:FACT_HAS_ELEMENT]->(e:Element) "
+          "WHERE e.qname IN $qnames "
+          "AND f.has_dimensions = false "
+          "RETURN DISTINCT e.qname AS qname, e.canonical_confidence AS confidence, "
+          "count(f) AS fact_count "
+          "ORDER BY fact_count DESC"
+        )
+      return await self.client.execute_query(query, parameters=params) or []
+    except Exception as e:
+      logger.warning(f"Lance candidate graph query failed: {e}")
+      return []
 
   async def _resolve_text_fallback(
     self,
@@ -276,131 +409,8 @@ Use the returned query_hint directly in read-graph-cypher for immediate results.
     return result
 
   # ---------------------------------------------------------------------------
-  # Vector search via DuckDB staging (feature-flagged)
-  # ---------------------------------------------------------------------------
-
-  async def _resolve_vector(
-    self, concept: str, ticker: str | None, report_id: str | None = None
-  ) -> dict[str, Any]:
-    """Resolve using DuckDB vector similarity search on staging Element table."""
-    enricher = self.enricher
-    result: dict[str, Any] = {
-      "concept": concept,
-      "ticker": ticker,
-      "report_id": report_id,
-      "canonical_id": None,
-      "canonical_name": None,
-      "matches": [],
-      "query_hint": None,
-    }
-
-    # Step 1: Embed the query
-    try:
-      query_embedding = enricher.embed_batch([concept])[0]
-    except Exception as e:
-      logger.error(f"Failed to embed concept query: {e}")
-      result["error"] = f"Embedding failed: {e}"
-      return result
-
-    # Step 2: Match to canonical taxonomy in-memory
-    canonical = enricher.match_canonical_from_query(query_embedding)
-    if canonical:
-      result["canonical_id"] = canonical.id
-      result["canonical_name"] = canonical.display_name
-
-    # Step 3: DuckDB vector similarity search on staging Element table.
-    # Uses HNSW-accelerated query when index is available (SSM flag),
-    # otherwise brute-force list_cosine_similarity.
-    graph_id = self._get_graph_id()
-    try:
-      if _is_hnsw_index_enabled():
-        search_sql = (
-          "WITH ranked AS ("
-          "  SELECT qname, canonical_concept, canonical_confidence, "
-          "    array_cosine_distance(embedding, $1::FLOAT[384]) AS dist "
-          "  FROM Element "
-          "  WHERE embedding IS NOT NULL "
-          "  ORDER BY dist ASC LIMIT 40"
-          ") SELECT qname, canonical_concept, canonical_confidence, "
-          "  1.0 - dist AS score FROM ranked"
-        )
-      else:
-        search_sql = (
-          "SELECT qname, canonical_concept, canonical_confidence, "
-          "  list_cosine_similarity(embedding, $1) AS score "
-          "FROM Element "
-          "WHERE embedding IS NOT NULL "
-          "ORDER BY score DESC LIMIT 40"
-        )
-      search_response = await self.client.query_table(
-        graph_id=graph_id,
-        sql=search_sql,
-        parameters=[query_embedding],
-      )
-      raw_rows = self._table_rows_to_dicts(search_response)
-    except Exception as e:
-      logger.warning(f"DuckDB vector search failed, falling back to canonical: {e}")
-      return await self._resolve_canonical(concept, ticker, report_id)
-
-    if not raw_rows:
-      return await self._resolve_canonical(concept, ticker, report_id)
-
-    # Deduplicate by qname in Python (avoids expensive GROUP BY on FLOAT[384])
-    seen: set[str] = set()
-    search_rows = []
-    for row in raw_rows:
-      qname = row.get("qname")
-      if qname and qname not in seen:
-        seen.add(qname)
-        search_rows.append(row)
-      if len(search_rows) >= 20:
-        break
-
-    # Step 4: Enrich with fact counts and labels from graph
-    qnames = [r["qname"] for r in search_rows if r.get("qname")]
-    fact_counts = await self._fetch_fact_counts(qnames, ticker, report_id)
-    labels = await self._fetch_labels_by_qname(qnames)
-
-    for row in search_rows:
-      qname = row.get("qname")
-      if not qname:
-        continue
-      fc = fact_counts.get(qname, 0)
-      if (ticker or report_id) and fc == 0:
-        continue
-      result["matches"].append(
-        {
-          "qname": qname,
-          "confidence": row.get("canonical_confidence"),
-          "label": labels.get(qname),
-          "fact_count": fc if fc > 0 else None,
-          "score": round(row.get("score", 0), 4),
-        }
-      )
-
-    # Sort: fact_count desc, then score desc
-    result["matches"].sort(
-      key=lambda m: (m.get("fact_count") or 0, m.get("score") or 0),
-      reverse=True,
-    )
-    result["matches"] = result["matches"][:10]
-    self._build_query_hint(result, ticker, report_id)
-    return result
-
-  # ---------------------------------------------------------------------------
   # Shared helpers
   # ---------------------------------------------------------------------------
-
-  def _get_graph_id(self) -> str:
-    """Get the current graph ID from the client."""
-    return getattr(self.client, "_database_name", None) or self.client.graph_id or "sec"
-
-  @staticmethod
-  def _table_rows_to_dicts(response: dict[str, Any]) -> list[dict[str, Any]]:
-    """Convert query_table response to list of dicts."""
-    columns = response.get("columns", [])
-    rows = response.get("rows", [])
-    return [dict(zip(columns, row, strict=False)) for row in rows]
 
   async def _fetch_labels_by_qname(self, qnames: list[str]) -> dict[str, str]:
     """Fetch labels for elements by qname."""
@@ -420,44 +430,6 @@ Use the returned query_hint directly in read-graph-cypher for immediate results.
       return {r["qname"]: r["label"] for r in label_rows if r.get("label")}
     except Exception as e:
       logger.debug(f"Label enrichment failed: {e}")
-      return {}
-
-  async def _fetch_fact_counts(
-    self,
-    qnames: list[str],
-    ticker: str | None,
-    report_id: str | None,
-  ) -> dict[str, int]:
-    """Fetch fact counts for elements by qname."""
-    if not qnames:
-      return {}
-    try:
-      params: dict[str, Any] = {"qnames": qnames}
-      if report_id:
-        query = (
-          "MATCH (r:Report)-[:REPORT_HAS_FACT]->(f:Fact)-[:FACT_HAS_ELEMENT]->(e:Element) "
-          "WHERE e.qname IN $qnames AND r.identifier = $report_id "
-          "RETURN e.qname AS qname, count(f) AS fact_count"
-        )
-        params["report_id"] = report_id
-      elif ticker:
-        query = (
-          "MATCH (f:Fact)-[:FACT_HAS_ELEMENT]->(e:Element), "
-          "(f)-[:FACT_HAS_ENTITY]->(ent:Entity) "
-          "WHERE e.qname IN $qnames AND ent.ticker = $ticker "
-          "RETURN e.qname AS qname, count(f) AS fact_count"
-        )
-        params["ticker"] = ticker
-      else:
-        query = (
-          "MATCH (f:Fact)-[:FACT_HAS_ELEMENT]->(e:Element) "
-          "WHERE e.qname IN $qnames "
-          "RETURN e.qname AS qname, count(f) AS fact_count"
-        )
-      rows = await self.client.execute_query(query, parameters=params) or []
-      return {r["qname"]: r["fact_count"] for r in rows}
-    except Exception as e:
-      logger.debug(f"Fact count enrichment failed: {e}")
       return {}
 
   @staticmethod

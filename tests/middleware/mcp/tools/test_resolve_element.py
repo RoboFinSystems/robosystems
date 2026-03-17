@@ -243,8 +243,8 @@ class TestResolveElementExecution:
     assert "has_dimensions = false" in result["query_hint"]
 
   @pytest.mark.asyncio
-  async def test_falls_back_to_canonical_when_duckdb_fails(self, mock_client):
-    """When DuckDB vector search fails, falls back to canonical lookup."""
+  async def test_canonical_lookup_with_labels(self, mock_client):
+    """Canonical lookup enriches results with labels."""
     from robosystems.adapters.sec.taxonomy.concepts import CanonicalConcept
 
     mock_concept = CanonicalConcept(
@@ -258,10 +258,6 @@ class TestResolveElementExecution:
     tool = ResolveElementTool(mock_client)
     tool._enricher = _make_mock_enricher(canonical_concept=mock_concept)
 
-    # DuckDB query_table fails
-    mock_client.query_table = AsyncMock(side_effect=Exception("DuckDB not available"))
-
-    # But canonical lookup works
     mock_client.execute_query = _query_router(
       **{
         "canonical_concept = $canonical_id": [

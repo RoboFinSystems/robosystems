@@ -518,6 +518,10 @@ class EnvConfig:
     "MCP_MEMORY_ENABLED",
     get_parameter_value("MCP_MEMORY_ENABLED", "true").lower() == "true",
   )
+  MCP_VECTOR_SEARCH_ENABLED = get_bool_env(
+    "MCP_VECTOR_SEARCH_ENABLED",
+    get_parameter_value("MCP_VECTOR_SEARCH_ENABLED", "false").lower() == "true",
+  )
 
   # --- Shared Repository Operations ---
   SHARED_MASTER_READS_ENABLED = get_bool_env(
@@ -641,6 +645,9 @@ class EnvConfig:
 
   # Artifact Storage (precomputed Parquet files for enrichment refinement)
   ARTIFACT_PATH = get_str_env("ARTIFACT_PATH", "./data/artifacts")
+
+  # LanceDB Vector Search Index (for MCP element resolution)
+  LANCE_INDEX_PATH = get_str_env("LANCE_INDEX_PATH", "./data/lance")
 
   # LadybugDB Admission Control
   # These use SSM tuning parameters in prod/staging for runtime adjustability

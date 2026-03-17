@@ -1511,6 +1511,7 @@ class GraphClient(BaseGraphClient):
     table_name: str,
     s3_pattern: str | list[str],
     file_id_map: dict[str, str] | None = None,
+    null_columns: list[str] | None = None,
     timeout: int = 1800,  # 30 minutes default for large file sets
   ) -> dict[str, Any]:
     """
@@ -1549,6 +1550,8 @@ class GraphClient(BaseGraphClient):
       }
       if file_id_map is not None:
         json_data["file_id_map"] = file_id_map
+      if null_columns is not None:
+        json_data["null_columns"] = null_columns
 
       start_response = await self._request(
         "POST",
@@ -1580,6 +1583,7 @@ class GraphClient(BaseGraphClient):
     s3_pattern: str | list[str],
     timeout: int = 1800,  # 30 minutes default for large file sets
     deduplicate: bool = True,
+    null_columns: list[str] | None = None,
   ) -> dict[str, Any]:
     """
     Insert data into an existing DuckDB staging table with SSE monitoring.
@@ -1622,6 +1626,8 @@ class GraphClient(BaseGraphClient):
         "deduplicate": deduplicate,
         "timeout_seconds": timeout,  # Pass timeout to server for background task
       }
+      if null_columns is not None:
+        json_data["null_columns"] = null_columns
 
       start_response = await self._request(
         "POST",
