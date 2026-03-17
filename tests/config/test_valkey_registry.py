@@ -24,17 +24,17 @@ class TestValkeyDatabase:
 
   def test_get_next_available(self):
     """Test getting the next available database number."""
-    # Currently databases 0-4 are used, so next should be 5
+    # Currently databases 0-5 are used, so next should be 6
     next_db = ValkeyDatabase.get_next_available()
-    assert next_db == 5
+    assert next_db == 6
 
   def test_get_next_available_validates_range(self):
     """Test that get_next_available respects the 0-15 range."""
     next_db = ValkeyDatabase.get_next_available()
     assert next_db >= 0
     assert next_db <= 15
-    # Since we have 5 databases defined (0-4), next should be 5
-    assert next_db == 5
+    # Since we have 6 databases defined (0-5), next should be 6
+    assert next_db == 6
 
   def test_get_next_available_algorithm(self):
     """Test the algorithm by mocking the enum iteration."""
@@ -57,7 +57,7 @@ class TestValkeyDatabase:
   def test_enum_iteration(self):
     """Test that we can iterate over database enum."""
     databases = list(ValkeyDatabase)
-    assert len(databases) == 5  # Currently 5 databases allocated
+    assert len(databases) == 6  # Currently 6 databases allocated
     assert ValkeyDatabase.AUTH in databases
     assert ValkeyDatabase.GRAPH_ROUTING in databases
 

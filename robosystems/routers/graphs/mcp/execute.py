@@ -73,6 +73,60 @@ router = APIRouter()
 # Circuit breaker instance
 circuit_breaker = CircuitBreakerManager()
 
+# MCP result cache TTLs (seconds)
+_MCP_INFO_CACHE_TTL = 1800  # 30 minutes
+_MCP_SCHEMA_CACHE_TTL = 3600  # 1 hour
+
+
+def _mcp_cache_key(graph_id: str, tool_name: str) -> str:
+  """Build a Valkey cache key for MCP tool results."""
+  return f"mcp:{graph_id}:{tool_name}"
+
+
+async def _get_mcp_cache(graph_id: str, tool_name: str) -> dict[str, Any] | None:
+  """Get a cached MCP tool result from Valkey. Returns None on miss or error."""
+  try:
+    from robosystems.config.valkey_registry import (
+      ValkeyDatabase,
+      create_async_redis_client,
+    )
+
+    client = create_async_redis_client(ValkeyDatabase.MCP_CACHE)
+    try:
+      data = await client.get(_mcp_cache_key(graph_id, tool_name))
+      if data:
+        logger.debug(f"MCP cache hit for {tool_name} on {graph_id}")
+        return json.loads(data)
+    finally:
+      await client.aclose()
+  except Exception as e:
+    logger.debug(f"MCP cache read error for {tool_name} on {graph_id}: {e}")
+  return None
+
+
+async def _set_mcp_cache(
+  graph_id: str, tool_name: str, result: dict[str, Any], ttl: int
+) -> None:
+  """Store an MCP tool result in Valkey cache."""
+  try:
+    from robosystems.config.valkey_registry import (
+      ValkeyDatabase,
+      create_async_redis_client,
+    )
+
+    client = create_async_redis_client(ValkeyDatabase.MCP_CACHE)
+    try:
+      await client.set(
+        _mcp_cache_key(graph_id, tool_name),
+        json.dumps(result),
+        ex=ttl,
+      )
+      logger.debug(f"MCP cache set for {tool_name} on {graph_id} (ttl={ttl}s)")
+    finally:
+      await client.aclose()
+  except Exception as e:
+    logger.debug(f"MCP cache write error for {tool_name} on {graph_id}: {e}")
+
 
 def _get_user_priority(user: User) -> int:
   """Get query priority based on user subscription tier."""
@@ -471,13 +525,13 @@ async def call_mcp_tool(
         "queue_size": tool_stats["queue_size"] + query_stats["queue_size"],
         "running_queries": tool_stats["running_queries"]
         + query_stats["running_queries"],
-        "cache_available": False,  # TODO: Implement schema/info caching before enabling
+        "cache_available": True,
       }
     else:
       system_state = {
         "queue_size": tool_stats["queue_size"],
         "running_queries": tool_stats["running_queries"],
-        "cache_available": False,
+        "cache_available": True,
       }
 
     # Select execution strategy
@@ -682,17 +736,23 @@ async def call_mcp_tool(
             )
 
       elif strategy == MCPExecutionStrategy.SCHEMA_CACHED:
-        # Use cached schema if available
-        # TODO: Implement schema caching
+        cached = await _get_mcp_cache(graph_id, tool_call.name)
+        if cached is not None:
+          await handler.close()
+          return MCPToolResult(result=cached)
         result = await execute_tool_directly(handler, tool_call, timeout)
         await handler.close()
+        await _set_mcp_cache(graph_id, tool_call.name, result, _MCP_SCHEMA_CACHE_TTL)
         return MCPToolResult(result=result)
 
       elif strategy == MCPExecutionStrategy.INFO_CACHED:
-        # Use cached info if available
-        # TODO: Implement info caching
+        cached = await _get_mcp_cache(graph_id, tool_call.name)
+        if cached is not None:
+          await handler.close()
+          return MCPToolResult(result=cached)
         result = await execute_tool_directly(handler, tool_call, timeout)
         await handler.close()
+        await _set_mcp_cache(graph_id, tool_call.name, result, _MCP_INFO_CACHE_TTL)
         return MCPToolResult(result=result)
 
       else:
