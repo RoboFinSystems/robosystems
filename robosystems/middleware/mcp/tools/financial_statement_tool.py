@@ -215,7 +215,7 @@ For balance sheets, only instant-period facts are returned. For other statements
     # Build query using inline node properties for planner hints.
     # When report_id is available, start from Report (highly selective) and
     # intersect with FactSet membership — avoids slow Structure→FactSet→Fact chain.
-    params: dict[str, Any] = {"statement_type": statement_type, "ticker": ticker}
+    params: dict[str, Any] = {"statement_type": statement_type}
 
     # Period filter — inline on Period node when possible
     period_props = ""
@@ -254,6 +254,7 @@ For balance sheets, only instant-period facts are returned. For other statements
         "(f)-[:FACT_HAS_ENTITY]->(ent:Entity {ticker: $ticker})",
       ]
       where_parts = ["f.numeric_value IS NOT NULL"]
+      params["ticker"] = ticker
 
     # Request extra rows for dedup, then trim to limit
     fetch_limit = min(limit * 3, 1000)

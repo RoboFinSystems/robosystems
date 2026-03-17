@@ -370,20 +370,6 @@ def aggregate_streamed_results(events: list[dict[str, Any]]) -> dict[str, Any]:
       "result": schema,
     }
 
-  elif any(e.get("event") == "description_section" for e in events):
-    # Aggregate description sections
-    sections = []
-
-    for event in events:
-      if event.get("event") == "description_section":
-        sections.append(event["data"]["content"])
-
-    return {
-      "success": True,
-      "tool": tool_name,
-      "result": "\n\n".join(sections),
-    }
-
   else:
     # Look for a simple result event
     for event in events:
