@@ -744,6 +744,18 @@ wheels = [
 ]
 
 [[package]]
+name = "deprecation"
+version = "2.1.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "packaging" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/5a/d3/8ae2869247df154b64c1884d7346d412fed0c49df84db635aab2d1c40e62/deprecation-2.1.0.tar.gz", hash = "sha256:72b3bde64e5d778694b0cf68178aed03d15e15477116add3fb773e581f9518ff", size = 173788, upload-time = "2020-04-20T14:23:38.738Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/02/c3/253a89ee03fc9b9682f1541728eb66db7db22148cd94f89ab22528cd1e1b/deprecation-2.1.0-py2.py3-none-any.whl", hash = "sha256:a10811591210e1fb0e768a8c25517cabeabcba6f0bf96564f8ff45189f90b14a", size = 11178, upload-time = "2020-04-20T14:23:36.581Z" },
+]
+
+[[package]]
 name = "dnspython"
 version = "2.8.0"
 source = { registry = "https://pypi.org/simple" }
@@ -1387,6 +1399,55 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/19/74/a633ee74eb36c44aa6d1095e7cc5569bebf04342ee146178e2d36600708b/jsonschema_specifications-2025.9.1.tar.gz", hash = "sha256:b540987f239e745613c7a9176f3edb72b832a4ac465cf02712288397832b5e8d", size = 32855, upload-time = "2025-09-08T01:34:59.186Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/41/45/1a4ed80516f02155c51f51e8cedb3c1902296743db0bbc66608a0db2814f/jsonschema_specifications-2025.9.1-py3-none-any.whl", hash = "sha256:98802fee3a11ee76ecaca44429fda8a41bff98b00a0f2838151b113f210cc6fe", size = 18437, upload-time = "2025-09-08T01:34:57.871Z" },
+]
+
+[[package]]
+name = "lance-namespace"
+version = "0.6.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "lance-namespace-urllib3-client" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/70/28/6148a9cbcdb0040e69b23e669c27ea574fa6742e9ded6f515bfe061a223f/lance_namespace-0.6.0.tar.gz", hash = "sha256:6e052aafd8d8a6979704e9c422068e493aaf2e0646b8408353e3c313aa7df80e", size = 10671, upload-time = "2026-03-16T06:37:17.59Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/6f/c4/347f52e7a4650b0070fdc71a75a52a8df2ae6f3e2e5ab425428776a2af1a/lance_namespace-0.6.0-py3-none-any.whl", hash = "sha256:5fbd388058a038aade86a5fb9cab74430a11697fc29771bea7bf006c34b5385a", size = 12496, upload-time = "2026-03-16T06:37:15.537Z" },
+]
+
+[[package]]
+name = "lance-namespace-urllib3-client"
+version = "0.6.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "pydantic" },
+    { name = "python-dateutil" },
+    { name = "typing-extensions" },
+    { name = "urllib3" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/34/9b/1baa59c7aab9556983a974a74022e9cc6bf561b7fa37c715127bf3089e46/lance_namespace_urllib3_client-0.6.0.tar.gz", hash = "sha256:b6ad2311815fc6caddbfee60de4dc8bf236f2e74dabd30a62df9768098eeae8c", size = 182555, upload-time = "2026-03-16T06:37:16.765Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/09/e6/47078ab8705a565e9e5e2b8699ed9ad033955afe288caead4e2cd398ad4e/lance_namespace_urllib3_client-0.6.0-py3-none-any.whl", hash = "sha256:05c96220620a06834770c44cde94910690fc1c307ccda04fd4fde045c1be7753", size = 317108, upload-time = "2026-03-16T06:37:14.545Z" },
+]
+
+[[package]]
+name = "lancedb"
+version = "0.30.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "deprecation" },
+    { name = "lance-namespace" },
+    { name = "numpy" },
+    { name = "packaging" },
+    { name = "pyarrow" },
+    { name = "pydantic" },
+    { name = "tqdm" },
+]
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/13/2f/1577778ad57dba0c55dc13d87230583e14541c82562483ecf8bb2f8e8a00/lancedb-0.30.0-cp39-abi3-macosx_11_0_arm64.whl", hash = "sha256:be2a9a43a65c330ccfd08115afb26106cd8d16788522fe7693d3a1f4e01ad321", size = 41959907, upload-time = "2026-03-16T23:03:04.551Z" },
+    { url = "https://files.pythonhosted.org/packages/f1/ca/8c2a04ce499a2a97d1a0de2b7e84fa8166f988a9a495e1ada860110489c2/lancedb-0.30.0-cp39-abi3-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:be6a4ba2a1799a426cbf2ba5ea2559a7389a569e9a31f2409d531ceb59d42f35", size = 43873070, upload-time = "2026-03-16T23:11:01.352Z" },
+    { url = "https://files.pythonhosted.org/packages/16/68/e01bf7837454a5ce9e2f6773905e07b09a949bc88136c0773c8166ed7729/lancedb-0.30.0-cp39-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:0a967ec05f9930770aeb077bc5579769b1bedf559fcd03a592d9644084625918", size = 46891197, upload-time = "2026-03-16T23:14:39.18Z" },
+    { url = "https://files.pythonhosted.org/packages/43/d1/9085ad17abd98f3a180d7860df3190b2d76f99f533c76d7c7494cec4139d/lancedb-0.30.0-cp39-abi3-manylinux_2_28_aarch64.whl", hash = "sha256:05c66f40f7d4f6f24208e786c40f84b87b1b8e55505305849dd3fed3b78431a3", size = 43877660, upload-time = "2026-03-16T23:11:00.837Z" },
+    { url = "https://files.pythonhosted.org/packages/ea/69/504ee25c57c3f23c80276b5b7b5e4c0f98a5197a7e9e51d3c50500d2b53a/lancedb-0.30.0-cp39-abi3-manylinux_2_28_x86_64.whl", hash = "sha256:bdcd27d98554ed11b6f345b14d1307b0e2332d5654767e9ee2e23d9b2d6513d1", size = 46932144, upload-time = "2026-03-16T23:15:00.474Z" },
+    { url = "https://files.pythonhosted.org/packages/2c/85/d5550f22023e672af1945394f7a06a578fcab2980ecc6666acef3428a771/lancedb-0.30.0-cp39-abi3-win_amd64.whl", hash = "sha256:4751ff0446b90be4d4dccfe05f6c105f403a05f3b8531ab99eedc1c656aca950", size = 51121310, upload-time = "2026-03-16T23:43:23.89Z" },
 ]
 
 [[package]]
@@ -2947,6 +3008,7 @@ dependencies = [
     { name = "httpx-sse" },
     { name = "icebug" },
     { name = "intuit-oauth" },
+    { name = "lancedb" },
     { name = "lxml" },
     { name = "numpy" },
     { name = "opentelemetry-api" },
@@ -3034,6 +3096,7 @@ requires-dist = [
     { name = "httpx-sse", specifier = ">=0.4.0" },
     { name = "icebug", specifier = ">=12.0,<13.0" },
     { name = "intuit-oauth", specifier = ">=1.2.0,<2.0" },
+    { name = "lancedb", specifier = ">=0.30.0,<1.0" },
     { name = "lxml", specifier = ">=5.4.0,<6.0" },
     { name = "moto", extras = ["s3"], marker = "extra == 'dev'", specifier = ">=5.1.6,<6.0" },
     { name = "neo4j", marker = "extra == 'dev'", specifier = ">=5.15.0,<6.0" },

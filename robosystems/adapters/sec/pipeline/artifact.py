@@ -146,6 +146,24 @@ def sec_knowledge_artifacts(
         context, disc_consensus_path, "disclosure_consensus.parquet", config.publish_r2
       )
 
+    # --- LanceDB vector search index ---
+    context.log.info("Building LanceDB vector search index")
+    from robosystems.adapters.sec.knowledge.lance_index import LanceIndexBuilder
+
+    lance_builder = LanceIndexBuilder(memory_limit=config.memory_limit)
+    lance_tar_path = lance_builder.build_and_tar(db_path)
+    del lance_builder
+    gc.collect()
+    _log_memory("after lance builder cleanup")
+    context.log.info(f"LanceDB index tar.gz written to: {lance_tar_path}")
+
+    if is_prod and lance_tar_path.exists():
+      _upload_lance_index(context, lance_tar_path, config.duckdb_source)
+    elif not lance_tar_path.exists():
+      context.log.warning(
+        "Lance index tar.gz not created (no elements with embeddings?)"
+      )
+
   return MaterializeResult(
     metadata={
       "element_knowledge_path": str(element_path),
@@ -153,6 +171,7 @@ def sec_knowledge_artifacts(
       "structure_consensus_path": str(consensus_path),
       "disclosure_profiles_path": str(disc_profiles_path),
       "disclosure_consensus_path": str(disc_consensus_path),
+      "lance_index_path": str(lance_tar_path),
     }
   )
 
@@ -183,6 +202,32 @@ def _upload_artifact(
   # R2 upload (public — used by dev enrichment)
   if publish_r2:
     _upload_artifact_r2(context, local_path, filename)
+
+
+def _upload_lance_index(
+  context: AssetExecutionContext,
+  tar_path: "Path",
+  graph_id: str,
+) -> None:
+  """Upload the LanceDB index tar.gz to the user-data bucket.
+
+  Stored alongside .lbug and .duckdb files at:
+    s3://{user-data-bucket}/shared-repositories/databases/{graph_id}.lance.tar.gz
+
+  Replicas download and extract this during boot for MCP vector search.
+  """
+  from robosystems.config import env
+  from robosystems.config.storage.graph import get_shared_repo_database_key
+  from robosystems.operations.aws.s3 import S3Client
+
+  s3 = S3Client()
+  bucket = env.USER_DATA_BUCKET
+  s3_key = get_shared_repo_database_key(graph_id, ".lance.tar.gz")
+  context.log.info(f"Uploading lance index to s3://{bucket}/{s3_key}")
+  s3.upload_file(str(tar_path), bucket, s3_key)
+
+  file_size_mb = tar_path.stat().st_size / (1024 * 1024)
+  context.log.info(f"Lance index uploaded: {file_size_mb:.1f} MB")
 
 
 def _upload_artifact_r2(

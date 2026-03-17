@@ -216,6 +216,8 @@ export LOGS_MOUNT_SOURCE="/mnt/ladybug-data/logs"
 export LOGS_MOUNT_TARGET="/app/logs"
 export STAGING_MOUNT_SOURCE="/mnt/ladybug-data/databases/staging"
 export STAGING_MOUNT_TARGET="/app/data/staging"
+export LANCE_MOUNT_SOURCE="/mnt/ladybug-data/databases/lance"
+export LANCE_MOUNT_TARGET="/app/data/lance"
 
 # Replica-specific: use shared profile
 export DOCKER_PROFILE="ladybug-shared-writer"
@@ -237,6 +239,7 @@ echo "AWS_REGION=${AWS_REGION}" >> /etc/environment
 echo "CLUSTER_TIER=${CLUSTER_TIER}" >> /etc/environment
 echo "REPOSITORY_TYPE=${REPOSITORY_TYPE}" >> /etc/environment
 echo "SHARED_REPOSITORIES=${SHARED_REPOSITORIES}" >> /etc/environment
+echo "LANCE_INDEX_PATH=/app/data/lance" >> /etc/environment
 echo "DATABASE_ENDPOINT=${DATABASE_ENDPOINT:-}" >> /etc/environment
 echo "DATABASE_PORT=${DATABASE_PORT:-5432}" >> /etc/environment
 echo "VALKEY_URL=${VALKEY_URL:-}" >> /etc/environment
@@ -255,12 +258,34 @@ aws dynamodb update-item \
   --region ${AWS_REGION}
 
 # ==================================================================================
+# LANCEDB VECTOR INDEX DOWNLOAD (Optional — for MCP vector search)
+# ==================================================================================
+# Downloads the LanceDB vector search index from S3 if available. This enables
+# fast (~5ms) semantic search over 2.6M+ element embeddings in the resolve-element
+# MCP tool. Non-fatal: replicas boot normally without it (falls back to canonical matching).
+echo "Downloading LanceDB vector index from S3 (optional)..."
+
+LANCE_ARCHIVE_URI="${SHARED_DATABASE_S3_PREFIX%/}/sec.lance.tar.gz"
+LANCE_DIR="/mnt/ladybug-data/databases/lance"
+
+mkdir -p "${LANCE_DIR}"
+START_TIME=$(date +%s)
+aws s3 cp "${LANCE_ARCHIVE_URI}" "/tmp/sec.lance.tar.gz" \
+  --region "${AWS_REGION}" --only-show-errors 2>/dev/null && {
+  tar -xzf /tmp/sec.lance.tar.gz -C "${LANCE_DIR}/"
+  rm -f /tmp/sec.lance.tar.gz
+  ELAPSED=$(( $(date +%s) - START_TIME ))
+  echo "LanceDB index extracted to ${LANCE_DIR} in ${ELAPSED}s"
+} || {
+  echo "LanceDB index not available (non-fatal, falling back to canonical matching)"
+}
+
+# ==================================================================================
 # DUCKDB STAGING DOWNLOAD (Skipped)
 # ==================================================================================
-# DuckDB staging files are not needed on replicas — MCP tools use canonical concept
-# matching on the graph, not DuckDB vector search. Skipping this download saves
-# ~10 minutes of boot time and avoids downloading a 100GB+ file.
-# If DuckDB staging is ever needed on replicas, re-enable this section.
+# DuckDB staging files are not needed on replicas — MCP tools use LanceDB for
+# vector search and canonical concept matching on the graph. Skipping this download
+# saves ~10 minutes of boot time and avoids downloading a 100GB+ file.
 echo "Skipping DuckDB staging download (not used on replicas)"
 
 # ==================================================================================
