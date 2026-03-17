@@ -20,6 +20,7 @@ class AccountResponse(BaseModel):
   currency: str
   is_active: bool
   is_placeholder: bool
+  account_type: str | None = None
   external_id: str | None = None
   external_source: str | None = None
 
@@ -34,6 +35,7 @@ class AccountTreeNode(BaseModel):
   code: str
   name: str
   classification: str
+  account_type: str | None = None
   balance_type: str
   depth: int
   is_active: bool

@@ -39,6 +39,7 @@ async def get_trial_balance(
       result = session.execute(
         text("""
           SELECT a.id, a.code, a.name, a.classification,
+                 a.metadata->>'account_type' AS account_type,
                  COALESCE(SUM(li.debit_amount), 0) AS total_debits,
                  COALESCE(SUM(li.credit_amount), 0) AS total_credits
           FROM accounts a
@@ -47,7 +48,7 @@ async def get_trial_balance(
           WHERE e.status = 'posted'
             AND (e.posting_date >= :start_date OR :start_date IS NULL)
             AND (e.posting_date <= :end_date OR :end_date IS NULL)
-          GROUP BY a.id, a.code, a.name, a.classification
+          GROUP BY a.id, a.code, a.name, a.classification, a.metadata->>'account_type'
           ORDER BY a.code
         """),
         {"start_date": start_date, "end_date": end_date},
@@ -68,6 +69,7 @@ async def get_trial_balance(
             account_code=row.code,
             account_name=row.name,
             classification=row.classification,
+            account_type=row.account_type,
             total_debits=debits,
             total_credits=credits,
             net_balance=debits - credits,

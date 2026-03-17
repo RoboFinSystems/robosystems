@@ -35,5 +35,5 @@ select
     'USD'                                       as currency,
     a.is_active,
     false                                       as is_placeholder,
-    '{}'::json                                  as metadata
+    json_object('account_type', a.account_type) as metadata
 from accounts a

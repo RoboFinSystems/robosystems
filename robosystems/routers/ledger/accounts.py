@@ -21,6 +21,7 @@ router = APIRouter()
 
 
 def _account_to_response(row: Account) -> AccountResponse:
+  meta = row.metadata_ or {}
   return AccountResponse(
     id=row.id,
     code=row.code,
@@ -34,6 +35,7 @@ def _account_to_response(row: Account) -> AccountResponse:
     currency=row.currency,
     is_active=row.is_active,
     is_placeholder=row.is_placeholder,
+    account_type=meta.get("account_type"),
     external_id=row.external_id,
     external_source=row.external_source,
   )
@@ -110,11 +112,13 @@ async def get_account_tree(
       roots: list[AccountTreeNode] = []
 
       for r in rows:
+        meta = r.metadata_ or {}
         node = AccountTreeNode(
           id=r.id,
           code=r.code,
           name=r.name,
           classification=r.classification,
+          account_type=meta.get("account_type"),
           balance_type=r.balance_type,
           depth=r.depth,
           is_active=r.is_active,
