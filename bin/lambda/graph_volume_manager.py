@@ -478,12 +478,6 @@ def create_and_attach_volume(
           {"Key": "CreatedAt", "Value": datetime.now(UTC).isoformat()},
           {"Key": "DatabaseId", "Value": databases[0] if databases else "unassigned"},
           {"Key": "InstanceId", "Value": instance_id},
-          {
-            "Key": "DLMSnapshot",
-            "Value": "false"
-            if node_type in ("shared_master", "shared_replica")
-            else "true",
-          },
         ],
       }
     ],

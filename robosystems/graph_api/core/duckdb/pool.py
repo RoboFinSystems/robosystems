@@ -16,6 +16,7 @@ Key features:
 - Per-database DuckDB instances (one per graph_id)
 """
 
+import os
 import threading
 import weakref
 from contextlib import contextmanager
@@ -234,6 +235,14 @@ class DuckDBConnectionPool:
 
       # Ensure database directory exists
       db_path.parent.mkdir(parents=True, exist_ok=True)
+
+      # On replicas, DuckDB files are downloaded from S3 in the background.
+      # Don't create an empty database — wait for the real file to arrive.
+      if os.getenv("LBUG_ROLE") == "replica" and not db_path.exists():
+        raise FileNotFoundError(
+          f"DuckDB staging file not yet available: {db_path} "
+          "(background S3 download may still be in progress)"
+        )
 
       # Create DuckDB connection
       conn = duckdb.connect(str(db_path))

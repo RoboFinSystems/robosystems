@@ -89,6 +89,7 @@ class DuckDBTableManager:
     has_from_to: bool,
     use_list: bool,
     column_names: list[str] | None = None,
+    null_columns: set[str] | None = None,
   ) -> str:
     """
     Build CREATE TABLE SQL with deduplication using GROUP BY + FIRST().
@@ -118,10 +119,12 @@ class DuckDBTableManager:
       # Node table: deduplicate on identifier using GROUP BY + FIRST()
       # FIRST() is an aggregate that returns an arbitrary value from the group
       # union_by_name=true handles schema variations between files
+      null_cols = null_columns or set()
       dedupe_cols = ["identifier"]
       other_cols = [c for c in column_names if c not in dedupe_cols]
       select_parts = [f'"{c}"' for c in dedupe_cols] + [
-        f'FIRST("{c}") AS "{c}"' for c in other_cols
+        f'NULL AS "{c}"' if c in null_cols else f'FIRST("{c}") AS "{c}"'
+        for c in other_cols
       ]
       select_clause = ", ".join(select_parts)
       group_by_clause = ", ".join(f'"{c}"' for c in dedupe_cols)
@@ -135,11 +138,13 @@ class DuckDBTableManager:
     elif has_from_to and column_names:
       # Relationship table: deduplicate on (from, to) and rename to src/dst
       # IMPORTANT: LadybugDB expects columns in order: src, dst, then properties
+      null_cols = null_columns or set()
       dedupe_cols = ["from", "to"]
       other_cols = [c for c in column_names if c not in dedupe_cols]
       # Build select: src, dst first, then FIRST() for other columns
       select_parts = ['"from" AS src', '"to" AS dst'] + [
-        f'FIRST("{c}") AS "{c}"' for c in other_cols
+        f'NULL AS "{c}"' if c in null_cols else f'FIRST("{c}") AS "{c}"'
+        for c in other_cols
       ]
       select_clause = ", ".join(select_parts)
 
@@ -166,6 +171,7 @@ class DuckDBTableManager:
     s3_files: list[str],
     file_id_map: dict[str, str],
     column_names: list[str] | None = None,
+    null_columns: set[str] | None = None,
   ) -> str:
     """
     Build CREATE TABLE SQL with file_id column injection (v2 incremental ingestion).
@@ -231,12 +237,16 @@ class DuckDBTableManager:
     # Wrap in deduplication using GROUP BY + FIRST() for better memory efficiency
     if has_identifier and column_names:
       # Node table: dedupe on identifier, keep first file_id
+      null_cols = null_columns or set()
       dedupe_cols = ["identifier"]
       other_cols = [c for c in column_names if c not in dedupe_cols]
       # Include file_id in the aggregation
       select_parts = (
         [f'"{c}"' for c in dedupe_cols]
-        + [f'FIRST("{c}") AS "{c}"' for c in other_cols]
+        + [
+          f'NULL AS "{c}"' if c in null_cols else f'FIRST("{c}") AS "{c}"'
+          for c in other_cols
+        ]
         + ["FIRST(file_id) AS file_id"]
       )
       select_clause = ", ".join(select_parts)
@@ -251,10 +261,14 @@ class DuckDBTableManager:
     elif has_from_to and column_names:
       # Relationship table: dedupe on src/dst (already renamed in union_query)
       # Note: column_names has original names (from, to), but union_query renamed them
+      null_cols = null_columns or set()
       other_cols = [c for c in column_names if c not in ["from", "to"]]
       select_parts = (
         ["src", "dst"]
-        + [f'FIRST("{c}") AS "{c}"' for c in other_cols]
+        + [
+          f'NULL AS "{c}"' if c in null_cols else f'FIRST("{c}") AS "{c}"'
+          for c in other_cols
+        ]
         + ["FIRST(file_id) AS file_id"]
       )
       select_clause = ", ".join(select_parts)
@@ -329,6 +343,9 @@ class DuckDBTableManager:
         has_identifier = "identifier" in column_names
         has_from_to = "from" in column_names and "to" in column_names
 
+        # Columns to NULL out (keep in schema, skip data)
+        null_cols = set(request.null_columns) if request.null_columns else None
+
         # v2 Incremental Ingestion: Build UNION ALL with file_id injection
         if has_file_id_map and is_list:
           sql = self._build_table_sql_with_file_id(
@@ -338,12 +355,18 @@ class DuckDBTableManager:
             request.s3_pattern,
             request.file_id_map,
             column_names,
+            null_columns=null_cols,
           )
           conn.execute(sql)
         else:
           # Legacy path: without file_id tracking
           sql = self._build_table_sql(
-            quoted_table, has_identifier, has_from_to, is_list, column_names
+            quoted_table,
+            has_identifier,
+            has_from_to,
+            is_list,
+            column_names,
+            null_columns=null_cols,
           )
 
           if is_list:
@@ -476,6 +499,8 @@ class DuckDBTableManager:
           safe_pattern = request.s3_pattern.replace("'", "''")
           parquet_read = f"read_parquet('{safe_pattern}', union_by_name=true, hive_partitioning=false)"
 
+        null_cols = set(request.null_columns) if request.null_columns else None
+
         if request.deduplicate:
           # Detect table type from existing schema for dedup key
           probe_result = conn.execute(
@@ -499,7 +524,21 @@ class DuckDBTableManager:
           # then filter out rows already in the target table (inter-batch).
           # Intra-batch dedup is needed when multiple parquet files (e.g., from
           # different quarters) contain the same row (e.g., Taxonomy URIs).
-          select_expr = "t.*"
+
+          # Build select expression, nulling out specified columns
+          def _col_expr(col: str, alias: str | None = None) -> str:
+            target = alias or col
+            if null_cols and col in null_cols:
+              return f'NULL AS "{target}"'
+            if alias:
+              return f'"{col}" AS {alias}'
+            return f't."{col}"'
+
+          if null_cols:
+            select_expr = ", ".join(_col_expr(c) for c in parquet_columns)
+          else:
+            select_expr = "t.*"
+
           if has_identifier:
             intra_dedup = 'QUALIFY ROW_NUMBER() OVER (PARTITION BY "identifier") = 1'
             inter_dedup = (
@@ -511,8 +550,8 @@ class DuckDBTableManager:
               # Table has src/dst (from initial CREATE), parquet has from/to.
               # Rename in SELECT and use parquet column names in dedup.
               other_cols = [c for c in parquet_columns if c not in ("from", "to")]
-              select_parts = ['"from" AS src', '"to" AS dst'] + [
-                f't."{c}"' for c in other_cols
+              select_parts = [_col_expr("from", "src"), _col_expr("to", "dst")] + [
+                _col_expr(c) for c in other_cols
               ]
               select_expr = ", ".join(select_parts)
               intra_dedup = 'QUALIFY ROW_NUMBER() OVER (PARTITION BY "from", "to") = 1'
@@ -548,7 +587,17 @@ class DuckDBTableManager:
             sql = f"INSERT INTO {quoted_table} SELECT {select_expr} FROM {parquet_read} t {inter_dedup}"
         else:
           # Simple append — no dedup
-          sql = f"INSERT INTO {quoted_table} SELECT * FROM {parquet_read}"
+          if null_cols:
+            probe_result = conn.execute(
+              f"SELECT * FROM {parquet_read} LIMIT 0"
+            ).description
+            append_columns = [col[0] for col in probe_result]
+            append_expr = ", ".join(
+              f'NULL AS "{c}"' if c in null_cols else f'"{c}"' for c in append_columns
+            )
+            sql = f"INSERT INTO {quoted_table} SELECT {append_expr} FROM {parquet_read}"
+          else:
+            sql = f"INSERT INTO {quoted_table} SELECT * FROM {parquet_read}"
 
         conn.execute(sql)
 

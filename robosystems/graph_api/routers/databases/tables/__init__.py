@@ -7,7 +7,7 @@ from . import management, materialize, query
 
 
 def _require_staging_enabled():
-  """Block all staging table endpoints on replicas (DuckDB is not initialized)."""
+  """Block all staging table endpoints on replicas."""
   if os.getenv("LBUG_ROLE") == "replica":
     raise HTTPException(
       status_code=http_status.HTTP_501_NOT_IMPLEMENTED,

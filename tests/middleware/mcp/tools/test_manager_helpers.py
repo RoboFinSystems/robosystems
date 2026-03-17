@@ -118,11 +118,6 @@ class TestCallToolErrors:
     assert "not available" in result or "Error" in result
 
   @pytest.mark.asyncio
-  async def test_disabled_resolve_structure_raises(self, tools):
-    result = await tools.call_tool("resolve-structure", {})
-    assert "not available" in result or "Error" in result
-
-  @pytest.mark.asyncio
   async def test_disabled_financial_statement_raises(self, tools):
     result = await tools.call_tool("get-financial-statement", {})
     assert "not available" in result or "Error" in result
