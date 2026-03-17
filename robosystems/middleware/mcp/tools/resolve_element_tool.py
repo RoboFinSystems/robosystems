@@ -432,44 +432,6 @@ Use the returned query_hint directly in read-graph-cypher for immediate results.
       logger.debug(f"Label enrichment failed: {e}")
       return {}
 
-  async def _fetch_fact_counts(
-    self,
-    qnames: list[str],
-    ticker: str | None,
-    report_id: str | None,
-  ) -> dict[str, int]:
-    """Fetch fact counts for elements by qname."""
-    if not qnames:
-      return {}
-    try:
-      params: dict[str, Any] = {"qnames": qnames}
-      if report_id:
-        query = (
-          "MATCH (r:Report)-[:REPORT_HAS_FACT]->(f:Fact)-[:FACT_HAS_ELEMENT]->(e:Element) "
-          "WHERE e.qname IN $qnames AND r.identifier = $report_id "
-          "RETURN e.qname AS qname, count(f) AS fact_count"
-        )
-        params["report_id"] = report_id
-      elif ticker:
-        query = (
-          "MATCH (f:Fact)-[:FACT_HAS_ELEMENT]->(e:Element), "
-          "(f)-[:FACT_HAS_ENTITY]->(ent:Entity) "
-          "WHERE e.qname IN $qnames AND ent.ticker = $ticker "
-          "RETURN e.qname AS qname, count(f) AS fact_count"
-        )
-        params["ticker"] = ticker
-      else:
-        query = (
-          "MATCH (f:Fact)-[:FACT_HAS_ELEMENT]->(e:Element) "
-          "WHERE e.qname IN $qnames "
-          "RETURN e.qname AS qname, count(f) AS fact_count"
-        )
-      rows = await self.client.execute_query(query, parameters=params) or []
-      return {r["qname"]: r["fact_count"] for r in rows}
-    except Exception as e:
-      logger.debug(f"Fact count enrichment failed: {e}")
-      return {}
-
   @staticmethod
   def _build_query_hint(
     result: dict[str, Any], ticker: str | None, report_id: str | None

@@ -120,7 +120,7 @@ echo "Downloading shared databases from S3..."
 
 SHARED_DATABASE_S3_PREFIX="${LBUG_S3_ATTACH_PREFIX:?"LBUG_S3_ATTACH_PREFIX must be set"}"
 
-mkdir -p /mnt/ladybug-data/{logs,cache,databases/lbug-dbs,databases/staging}
+mkdir -p /mnt/ladybug-data/{logs,cache,databases/lbug-dbs,databases/staging,databases/lance}
 
 IFS=',' read -ra REPOS <<< "${SHARED_REPOSITORIES}"
 for REPO in "${REPOS[@]}"; do

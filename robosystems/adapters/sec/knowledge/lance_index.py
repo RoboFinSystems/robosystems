@@ -66,6 +66,7 @@ class LanceIndexBuilder:
     logger.info(f"Building LanceDB index from {db_path}")
 
     # Extract fact-linked numeric elements with embeddings via DuckDB
+    row_count = 0
     con = duckdb.connect(str(db_path), read_only=True)
     try:
       con.execute(f"SET memory_limit = '{self._memory_limit}'")
@@ -78,7 +79,6 @@ class LanceIndexBuilder:
       logger.info("Querying fact-linked numeric elements with embeddings...")
       arrow_table = con.execute("""
         SELECT
-          e.identifier,
           e.qname,
           e.name,
           e.canonical_concept,
