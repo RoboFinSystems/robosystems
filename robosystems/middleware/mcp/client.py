@@ -597,20 +597,6 @@ class GraphMCPClient:
     # If we can't infer, return Unknown
     return ("Unknown", "Unknown")
 
-  async def describe_graph_structure(self) -> str:
-    """
-    Generate a natural language description of the graph structure.
-
-    Returns:
-        Human-readable description of the graph
-    """
-    # Import here to avoid circular import
-    from .tools import GraphMCPTools
-
-    # Delegate to MCP tools (empty extensions — only needs core structure tool)
-    mcp_tools = GraphMCPTools(self, schema_extensions=[])
-    return await mcp_tools.structure_tool._describe_graph_structure()
-
   async def get_graph_info(self) -> dict[str, Any]:
     """
     Get basic graph information and statistics (optimized for large databases).

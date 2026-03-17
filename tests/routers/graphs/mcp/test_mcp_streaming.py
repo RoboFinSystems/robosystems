@@ -8,7 +8,6 @@ import pytest
 from robosystems.routers.graphs.mcp.streaming import (
   aggregate_streamed_results,
   stream_cypher_query,
-  stream_graph_description,
   stream_mcp_tool_execution,
   stream_schema_retrieval,
 )
@@ -58,24 +57,6 @@ class TestStreamMcpToolExecution:
     event_types = [e["event"] for e in events]
     assert "start" in event_types
     assert "progress" in event_types
-    assert "complete" in event_types
-
-  @pytest.mark.asyncio
-  async def test_describe_tool_routes_to_stream_description(self):
-    """Test that describe-graph-structure routes correctly."""
-    handler = AsyncMock()
-    handler.call_tool = AsyncMock(
-      return_value={"type": "text", "text": "Graph description"}
-    )
-
-    events = await _collect_events(
-      stream_mcp_tool_execution(
-        handler, "describe-graph-structure", {}, "json_complete"
-      )
-    )
-
-    event_types = [e["event"] for e in events]
-    assert "start" in event_types
     assert "complete" in event_types
 
   @pytest.mark.asyncio
@@ -341,79 +322,6 @@ class TestStreamSchemaRetrieval:
 
 
 @pytest.mark.unit
-class TestStreamGraphDescription:
-  """Test the stream_graph_description function."""
-
-  @pytest.mark.asyncio
-  async def test_sections_split_by_double_newline(self):
-    """Test that description is split into sections by double newline."""
-    handler = AsyncMock()
-    handler.call_tool = AsyncMock(
-      return_value={"type": "text", "text": "Section 1\n\nSection 2\n\nSection 3"}
-    )
-
-    events = await _collect_events(stream_graph_description(handler, {}))
-
-    section_events = [e for e in events if e["event"] == "description_section"]
-    assert len(section_events) == 3
-    assert section_events[0]["data"]["content"] == "Section 1"
-    assert section_events[1]["data"]["content"] == "Section 2"
-    assert section_events[2]["data"]["content"] == "Section 3"
-
-  @pytest.mark.asyncio
-  async def test_single_section_description(self):
-    """Test description with no double newlines."""
-    handler = AsyncMock()
-    handler.call_tool = AsyncMock(
-      return_value={"type": "text", "text": "Simple description"}
-    )
-
-    events = await _collect_events(stream_graph_description(handler, {}))
-
-    section_events = [e for e in events if e["event"] == "description_section"]
-    assert len(section_events) == 1
-
-  @pytest.mark.asyncio
-  async def test_non_dict_result_converted_to_str(self):
-    """Test that non-dict results are converted to string."""
-    handler = AsyncMock()
-    handler.call_tool = AsyncMock(return_value=42)
-
-    events = await _collect_events(stream_graph_description(handler, {}))
-
-    section_events = [e for e in events if e["event"] == "description_section"]
-    assert len(section_events) >= 1
-    assert "42" in section_events[0]["data"]["content"]
-
-  @pytest.mark.asyncio
-  async def test_progress_events_bookend(self):
-    """Test that progress events are emitted at start and end."""
-    handler = AsyncMock()
-    handler.call_tool = AsyncMock(return_value={"type": "text", "text": "Description"})
-
-    events = await _collect_events(stream_graph_description(handler, {}))
-
-    progress_events = [e for e in events if e["event"] == "progress"]
-    assert len(progress_events) >= 2
-    # First progress is "Analyzing graph structure..."
-    assert progress_events[0]["data"]["progress"] == 25
-    # Last progress is "Description complete"
-    assert progress_events[-1]["data"]["progress"] == 100
-
-  @pytest.mark.asyncio
-  async def test_section_numbers_are_sequential(self):
-    """Test that section_number increments correctly."""
-    handler = AsyncMock()
-    handler.call_tool = AsyncMock(return_value={"type": "text", "text": "A\n\nB\n\nC"})
-
-    events = await _collect_events(stream_graph_description(handler, {}))
-
-    section_events = [e for e in events if e["event"] == "description_section"]
-    for i, ev in enumerate(section_events):
-      assert ev["data"]["section_number"] == i + 1
-
-
-@pytest.mark.unit
 class TestAggregateStreamedResults:
   """Test the aggregate_streamed_results function."""
 
@@ -472,26 +380,6 @@ class TestAggregateStreamedResults:
     assert result["tool"] == "get-graph-schema"
     assert len(result["result"]["node_tables"]) == 2
     assert len(result["result"]["relationship_tables"]) == 1
-
-  def test_aggregates_description_sections(self):
-    """Test aggregation of description_section events."""
-    events = [
-      {"event": "start", "data": {"tool": "describe-graph-structure"}},
-      {
-        "event": "description_section",
-        "data": {"content": "Part 1", "section_number": 1},
-      },
-      {
-        "event": "description_section",
-        "data": {"content": "Part 2", "section_number": 2},
-      },
-      {"event": "complete", "data": {"tool": "describe-graph-structure"}},
-    ]
-
-    result = aggregate_streamed_results(events)
-
-    assert result["success"] is True
-    assert result["result"] == "Part 1\n\nPart 2"
 
   def test_returns_error_on_error_event(self):
     """Test that error events produce error result."""

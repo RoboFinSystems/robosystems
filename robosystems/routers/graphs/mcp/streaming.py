@@ -5,7 +5,6 @@ This module provides streaming capabilities that are transparently handled
 by the Node.js MCP client, presenting a unified interface to AI agents.
 """
 
-import asyncio
 import json
 from collections.abc import AsyncGenerator
 from datetime import UTC, datetime
@@ -62,11 +61,6 @@ async def stream_mcp_tool_execution(
     elif tool_name in ["get-graph-schema", "get-neo4j-schema", "get-ladybug-schema"]:
       # Stream schema in parts
       async for event in stream_schema_retrieval(handler, tool_name, arguments):
-        yield event
-
-    elif tool_name == "describe-graph-structure":
-      # Stream description progressively
-      async for event in stream_graph_description(handler, arguments):
         yield event
 
     else:
@@ -300,56 +294,6 @@ async def stream_schema_retrieval(
     "event": "progress",
     "data": {
       "message": "Schema retrieval complete",
-      "progress": 100,
-    },
-  }
-
-
-async def stream_graph_description(
-  handler: Any,
-  arguments: dict[str, Any],
-) -> AsyncGenerator[dict[str, Any]]:
-  """
-  Stream graph description in parts for better AI agent comprehension.
-  """
-  yield {
-    "event": "progress",
-    "data": {
-      "message": "Analyzing graph structure...",
-      "progress": 25,
-    },
-  }
-
-  # Get description
-  result = await handler.call_tool("describe-graph-structure", arguments)
-
-  # Parse result
-  if isinstance(result, dict) and "text" in result:
-    description = result["text"]
-  else:
-    description = str(result)
-
-  # Split into sections if possible
-  sections = description.split("\n\n")
-
-  for i, section in enumerate(sections):
-    if section.strip():
-      progress = 25 + (50 * (i + 1) / len(sections))
-      yield {
-        "event": "description_section",
-        "data": {
-          "section_number": i + 1,
-          "content": section,
-          "progress": min(progress, 75),
-        },
-      }
-      # Small delay for readability in real-time streams
-      await asyncio.sleep(0.05)
-
-  yield {
-    "event": "progress",
-    "data": {
-      "message": "Description complete",
       "progress": 100,
     },
   }
