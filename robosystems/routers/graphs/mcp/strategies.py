@@ -331,8 +331,8 @@ class MCPStrategySelector(BaseStrategySelector):
       MCPExecutionStrategy.QUEUE_SIMPLE: 60,
       MCPExecutionStrategy.CACHED: 5,
       MCPExecutionStrategy.STREAM_AGGREGATED: 120,
-      MCPExecutionStrategy.SCHEMA_CACHED: 5,
-      MCPExecutionStrategy.INFO_CACHED: 5,
+      MCPExecutionStrategy.SCHEMA_CACHED: 30,
+      MCPExecutionStrategy.INFO_CACHED: 30,
     }
 
     # Default to 60 seconds if not specified

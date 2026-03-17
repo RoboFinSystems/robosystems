@@ -45,13 +45,7 @@ class TimeoutCoordinator:
         tool_timeout=25.0,  # 3s buffer
         instance_timeout=20.0,  # 5s buffer
       ),
-      "get_schema": TimeoutConfiguration(
-        endpoint_timeout=30.0,  # 30s API limit
-        queue_timeout=28.0,  # 2s buffer
-        tool_timeout=25.0,  # 3s buffer
-        instance_timeout=20.0,  # 5s buffer
-      ),
-      "get_graph_info": TimeoutConfiguration(
+      "get-graph-info": TimeoutConfiguration(
         endpoint_timeout=30.0,  # 30 seconds total
         queue_timeout=25.0,  # 25 seconds for queue processing
         tool_timeout=20.0,  # 20 seconds for tool execution
@@ -158,8 +152,8 @@ class TimeoutCoordinator:
     operation_mapping = {
       "database_query": "cypher_query",
       "database_write": "cypher_query",
-      "schema_operation": "get_schema",
-      "graph_info": "get_graph_info",
+      "schema_operation": "get-graph-schema",
+      "graph_info": "get-graph-info",
     }
 
     tool_name = operation_mapping.get(operation_type, "default")

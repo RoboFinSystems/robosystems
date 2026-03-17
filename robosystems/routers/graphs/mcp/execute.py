@@ -471,13 +471,13 @@ async def call_mcp_tool(
         "queue_size": tool_stats["queue_size"] + query_stats["queue_size"],
         "running_queries": tool_stats["running_queries"]
         + query_stats["running_queries"],
-        "cache_available": True,  # TODO: Check actual cache status
+        "cache_available": False,  # TODO: Implement schema/info caching before enabling
       }
     else:
       system_state = {
         "queue_size": tool_stats["queue_size"],
         "running_queries": tool_stats["running_queries"],
-        "cache_available": True,
+        "cache_available": False,
       }
 
     # Select execution strategy
