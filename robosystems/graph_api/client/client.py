@@ -1583,6 +1583,7 @@ class GraphClient(BaseGraphClient):
     s3_pattern: str | list[str],
     timeout: int = 1800,  # 30 minutes default for large file sets
     deduplicate: bool = True,
+    null_columns: list[str] | None = None,
   ) -> dict[str, Any]:
     """
     Insert data into an existing DuckDB staging table with SSE monitoring.
@@ -1625,6 +1626,8 @@ class GraphClient(BaseGraphClient):
         "deduplicate": deduplicate,
         "timeout_seconds": timeout,  # Pass timeout to server for background task
       }
+      if null_columns is not None:
+        json_data["null_columns"] = null_columns
 
       start_response = await self._request(
         "POST",

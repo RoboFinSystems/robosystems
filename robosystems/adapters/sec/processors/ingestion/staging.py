@@ -354,6 +354,7 @@ class DuckDBStager:
       prev_year, prev_quarter = get_previous_quarter(year, quarter)
       quarters_to_scan.append((prev_year, prev_quarter))
 
+    null_columns = None if stage_embeddings else ["embedding"]
     quarters_str = ", ".join(f"{y}-Q{q}" for y, q in quarters_to_scan)
     logger.info(
       f"Starting incremental DuckDB staging for graph {self.graph_id} "
@@ -460,6 +461,7 @@ class DuckDBStager:
               table_name=table_name,
               s3_pattern=s3_pattern,
               timeout=timeout,
+              null_columns=null_columns,
             )
 
             if response.get("status") == "failed":
@@ -872,7 +874,7 @@ class DuckDBStager:
     chunk_end_year: int,
     graph_client: "GraphClient",
     null_columns: list[str] | None = None,
-    log_progress: ProgressCallback = None,
+    log_progress: ProgressCallback | None = None,
     table_index: int = 0,
     total_tables: int = 0,
   ) -> tuple[bool, TableInfo | None, str | None]:
@@ -899,6 +901,8 @@ class DuckDBStager:
     Returns:
         Tuple of (success, TableInfo or None, error or None)
     """
+    if log_progress is None:
+      log_progress = make_progress_logger(None)
     timeout = get_staging_timeout(table_name)
     total_raw_rows = 0
     accumulator_name = f"{table_name}__acc"
