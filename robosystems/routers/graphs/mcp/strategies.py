@@ -42,7 +42,7 @@ class MCPToolAnalyzer(BaseAnalyzer):
   # Tool categories
   QUERY_TOOLS = ["read-graph-cypher", "read-neo4j-cypher", "read-ladybug-cypher"]
   SCHEMA_TOOLS = ["get-graph-schema", "get-neo4j-schema", "get-ladybug-schema"]
-  INFO_TOOLS = ["get-graph-info", "describe-graph-structure"]
+  INFO_TOOLS = ["get-graph-info"]
 
   def analyze(self, tool_name: str, arguments: dict[str, Any]) -> dict[str, Any]:
     """
