@@ -241,7 +241,7 @@ class MCPStrategySelector(BaseStrategySelector):
     if analysis["tool_category"] == "query":
       return cls._select_query_strategy(analysis, is_mcp_client, client_info)
     elif analysis["tool_category"] == "schema":
-      return cls._select_schema_strategy(analysis, client_info)
+      return cls._select_schema_strategy()
     elif analysis["tool_category"] == "info":
       return MCPExecutionStrategy.JSON_IMMEDIATE
 
@@ -308,14 +308,15 @@ class MCPStrategySelector(BaseStrategySelector):
         return MCPExecutionStrategy.SSE_PROGRESS
 
   @classmethod
-  def _select_schema_strategy(
-    cls, analysis: dict[str, Any], client_info: dict[str, Any]
-  ) -> MCPExecutionStrategy:
-    """Select strategy for schema tools."""
-    if analysis["supports_progress"] and client_info.get("supports_sse"):
-      return MCPExecutionStrategy.SSE_PROGRESS
-    else:
-      return MCPExecutionStrategy.JSON_COMPLETE
+  def _select_schema_strategy(cls) -> MCPExecutionStrategy:
+    """Select strategy for schema tools.
+
+    Schema fetches are fast (<150ms) so SSE adds no value. MCP clients send
+    Accept: text/event-stream which would otherwise trigger SSE_PROGRESS, but
+    the EventSource reconnect is always GET which 405s on this POST-only endpoint.
+    Always use JSON_COMPLETE for schema.
+    """
+    return MCPExecutionStrategy.JSON_COMPLETE
 
   @classmethod
   def get_timeout_for_strategy(cls, strategy: MCPExecutionStrategy) -> int:
