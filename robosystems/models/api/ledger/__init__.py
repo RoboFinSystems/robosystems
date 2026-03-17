@@ -33,6 +33,6 @@ __all__ = [
 ]
 
 
-def cents_to_dollars(cents: int) -> float:
+def cents_to_dollars(cents: int | float) -> float:
   """Convert minor currency units (cents) to dollars."""
-  return cents / 100.0
+  return float(cents) / 100.0
