@@ -371,22 +371,6 @@ class GraphMCPClient:
       user_msg = self._sanitize_error_message(e, "query execution")
       raise GraphAPIError(user_msg)
 
-  async def query_table(
-    self,
-    graph_id: str,
-    sql: str,
-    parameters: list[Any] | None = None,
-  ) -> dict[str, Any]:
-    """
-    Execute SQL query on DuckDB staging tables.
-
-    Delegates to the underlying GraphClient which calls the
-    POST /databases/{graph_id}/tables/query endpoint.
-    """
-    return await self.graph_client.query_table(
-      graph_id=graph_id, sql=sql, parameters=parameters
-    )
-
   async def get_schema(self) -> list[dict[str, Any]]:
     """
     Get database schema information (optimized for large databases).

@@ -129,10 +129,8 @@ class GraphMCPTools:
       # Semantic enrichment tools (roboledger + manifest flag)
       if self._should_include_semantic_tools():
         from .resolve_element_tool import ResolveElementTool
-        from .resolve_structure_tool import ResolveStructureTool
 
         self.resolve_element_tool = ResolveElementTool(graph_client)
-        self.resolve_structure_tool = ResolveStructureTool(graph_client)
 
     # Layer 3: Infrastructure tools (gated by feature flags + read_only)
     self.create_workspace_tool = None
@@ -200,7 +198,6 @@ class GraphMCPTools:
       return []
     return [
       self.resolve_element_tool.get_tool_definition(),
-      self.resolve_structure_tool.get_tool_definition(),
     ]
 
   def _get_workspace_tool_definitions(self) -> list[dict[str, Any]]:
@@ -359,15 +356,6 @@ class GraphMCPTools:
             "This graph does not have semantic enrichment enabled."
           )
         result = await self.resolve_element_tool.execute(arguments)
-        return result if return_raw else json.dumps(result, indent=2)
-
-      elif name == "resolve-structure":
-        if self.resolve_structure_tool is None:
-          raise ValueError(
-            "resolve-structure tool is not available. "
-            "This graph does not have semantic enrichment enabled."
-          )
-        result = await self.resolve_structure_tool.execute(arguments)
         return result if return_raw else json.dumps(result, indent=2)
 
       elif name == "get-financial-statement":

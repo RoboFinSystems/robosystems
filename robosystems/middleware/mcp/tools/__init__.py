@@ -12,7 +12,6 @@ from .example_queries_tool import ExampleQueriesTool
 from .manager import GraphMCPTools
 from .memory import AddNodeTableTool, AddRelationshipTableTool, WriteCypherTool
 from .resolve_element_tool import ResolveElementTool
-from .resolve_structure_tool import ResolveStructureTool
 from .schema_tool import SchemaTool
 from .workspace import (
   CreateWorkspaceTool,
@@ -33,7 +32,6 @@ __all__ = [
   "GraphMCPTools",
   "ListWorkspacesTool",
   "ResolveElementTool",
-  "ResolveStructureTool",
   "SchemaTool",
   "SwitchWorkspaceTool",
   "WriteCypherTool",

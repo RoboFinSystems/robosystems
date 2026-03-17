@@ -1,51 +1,16 @@
 """
 Resolve Element Tool — Maps natural-language financial concepts to XBRL elements.
 
-Primary: DuckDB vector search on staging Element table. Uses HNSW-accelerated
-query (array_cosine_distance) when DUCKDB_HNSW_INDEX_ENABLED is true, otherwise
-brute-force list_cosine_similarity. Falls back to canonical concept lookup on the
-graph if DuckDB staging is unavailable.
+Uses in-memory canonical concept matching via SemanticEnricher to map natural
+language queries to XBRL element qnames. Falls back to graph-based text search
+when no canonical match is found.
 """
 
-import time
 from typing import Any
 
 from robosystems.logger import logger
 
 from .base_tool import BaseTool
-
-# Cache for DUCKDB_HNSW_INDEX_ENABLED feature flag
-_hnsw_enabled_cache: tuple[bool, float] | None = None
-_HNSW_CACHE_TTL = 60.0  # seconds
-
-
-def _is_hnsw_index_enabled() -> bool:
-  """Check if HNSW vector indexes are available on DuckDB staging tables.
-
-  Controlled by SSM: /robosystems/{env}/features/DUCKDB_HNSW_INDEX_ENABLED
-  Default: false (vector search uses brute-force list_cosine_similarity).
-
-  Set to true after staging with build_hnsw_index=True and replicas
-  have synced the indexed DuckDB file.
-  """
-  global _hnsw_enabled_cache
-
-  now = time.time()
-  if _hnsw_enabled_cache is not None:
-    cached_result, cached_time = _hnsw_enabled_cache
-    if now - cached_time < _HNSW_CACHE_TTL:
-      return cached_result
-
-  try:
-    from robosystems.config.parameter_store import get_parameter_value
-
-    value = get_parameter_value("DUCKDB_HNSW_INDEX_ENABLED", default="false")
-    result = value.lower() == "true"
-  except Exception:
-    result = False
-
-  _hnsw_enabled_cache = (result, now)
-  return result
 
 
 class ResolveElementTool(BaseTool):
@@ -120,11 +85,10 @@ Use the returned query_hint directly in read-graph-cypher for immediate results.
     if not concept:
       return {"error": "concept is required"}
 
-    # Try DuckDB vector search first, fall back to canonical lookup
-    return await self._resolve_vector(concept, ticker, report_id)
+    return await self._resolve_canonical(concept, ticker, report_id)
 
   # ---------------------------------------------------------------------------
-  # Canonical concept lookup (default) — no vector index required
+  # Canonical concept lookup — in-memory embedding match + graph query
   # ---------------------------------------------------------------------------
 
   async def _resolve_canonical(
@@ -276,131 +240,8 @@ Use the returned query_hint directly in read-graph-cypher for immediate results.
     return result
 
   # ---------------------------------------------------------------------------
-  # Vector search via DuckDB staging (feature-flagged)
-  # ---------------------------------------------------------------------------
-
-  async def _resolve_vector(
-    self, concept: str, ticker: str | None, report_id: str | None = None
-  ) -> dict[str, Any]:
-    """Resolve using DuckDB vector similarity search on staging Element table."""
-    enricher = self.enricher
-    result: dict[str, Any] = {
-      "concept": concept,
-      "ticker": ticker,
-      "report_id": report_id,
-      "canonical_id": None,
-      "canonical_name": None,
-      "matches": [],
-      "query_hint": None,
-    }
-
-    # Step 1: Embed the query
-    try:
-      query_embedding = enricher.embed_batch([concept])[0]
-    except Exception as e:
-      logger.error(f"Failed to embed concept query: {e}")
-      result["error"] = f"Embedding failed: {e}"
-      return result
-
-    # Step 2: Match to canonical taxonomy in-memory
-    canonical = enricher.match_canonical_from_query(query_embedding)
-    if canonical:
-      result["canonical_id"] = canonical.id
-      result["canonical_name"] = canonical.display_name
-
-    # Step 3: DuckDB vector similarity search on staging Element table.
-    # Uses HNSW-accelerated query when index is available (SSM flag),
-    # otherwise brute-force list_cosine_similarity.
-    graph_id = self._get_graph_id()
-    try:
-      if _is_hnsw_index_enabled():
-        search_sql = (
-          "WITH ranked AS ("
-          "  SELECT qname, canonical_concept, canonical_confidence, "
-          "    array_cosine_distance(embedding, $1::FLOAT[384]) AS dist "
-          "  FROM Element "
-          "  WHERE embedding IS NOT NULL "
-          "  ORDER BY dist ASC LIMIT 40"
-          ") SELECT qname, canonical_concept, canonical_confidence, "
-          "  1.0 - dist AS score FROM ranked"
-        )
-      else:
-        search_sql = (
-          "SELECT qname, canonical_concept, canonical_confidence, "
-          "  list_cosine_similarity(embedding, $1) AS score "
-          "FROM Element "
-          "WHERE embedding IS NOT NULL "
-          "ORDER BY score DESC LIMIT 40"
-        )
-      search_response = await self.client.query_table(
-        graph_id=graph_id,
-        sql=search_sql,
-        parameters=[query_embedding],
-      )
-      raw_rows = self._table_rows_to_dicts(search_response)
-    except Exception as e:
-      logger.warning(f"DuckDB vector search failed, falling back to canonical: {e}")
-      return await self._resolve_canonical(concept, ticker, report_id)
-
-    if not raw_rows:
-      return await self._resolve_canonical(concept, ticker, report_id)
-
-    # Deduplicate by qname in Python (avoids expensive GROUP BY on FLOAT[384])
-    seen: set[str] = set()
-    search_rows = []
-    for row in raw_rows:
-      qname = row.get("qname")
-      if qname and qname not in seen:
-        seen.add(qname)
-        search_rows.append(row)
-      if len(search_rows) >= 20:
-        break
-
-    # Step 4: Enrich with fact counts and labels from graph
-    qnames = [r["qname"] for r in search_rows if r.get("qname")]
-    fact_counts = await self._fetch_fact_counts(qnames, ticker, report_id)
-    labels = await self._fetch_labels_by_qname(qnames)
-
-    for row in search_rows:
-      qname = row.get("qname")
-      if not qname:
-        continue
-      fc = fact_counts.get(qname, 0)
-      if (ticker or report_id) and fc == 0:
-        continue
-      result["matches"].append(
-        {
-          "qname": qname,
-          "confidence": row.get("canonical_confidence"),
-          "label": labels.get(qname),
-          "fact_count": fc if fc > 0 else None,
-          "score": round(row.get("score", 0), 4),
-        }
-      )
-
-    # Sort: fact_count desc, then score desc
-    result["matches"].sort(
-      key=lambda m: (m.get("fact_count") or 0, m.get("score") or 0),
-      reverse=True,
-    )
-    result["matches"] = result["matches"][:10]
-    self._build_query_hint(result, ticker, report_id)
-    return result
-
-  # ---------------------------------------------------------------------------
   # Shared helpers
   # ---------------------------------------------------------------------------
-
-  def _get_graph_id(self) -> str:
-    """Get the current graph ID from the client."""
-    return getattr(self.client, "_database_name", None) or self.client.graph_id or "sec"
-
-  @staticmethod
-  def _table_rows_to_dicts(response: dict[str, Any]) -> list[dict[str, Any]]:
-    """Convert query_table response to list of dicts."""
-    columns = response.get("columns", [])
-    rows = response.get("rows", [])
-    return [dict(zip(columns, row, strict=False)) for row in rows]
 
   async def _fetch_labels_by_qname(self, qnames: list[str]) -> dict[str, str]:
     """Fetch labels for elements by qname."""

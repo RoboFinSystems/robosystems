@@ -80,6 +80,7 @@ class DuckDBStager:
     skip_taxonomy_relationships: bool = False,
     use_glob: bool = True,
     duckdb_memory_mb: int | None = None,
+    stage_embeddings: bool = False,
     build_hnsw_index: bool = False,
     progress_callback: ProgressCallback | None = None,
   ) -> StagingResult:
@@ -247,14 +248,16 @@ class DuckDBStager:
           start_year=start_year,
           end_year=end_year,
           duckdb_memory_mb=duckdb_memory_mb,
+          stage_embeddings=stage_embeddings,
           progress_callback=log_progress,
         )
       else:
         log_progress(
           "Step 2: Creating DuckDB staging tables via file lists (legacy)..."
         )
+        null_columns = None if stage_embeddings else ["embedding"]
         successful_tables, table_infos = await self._create_tables_with_info(
-          tables_info, client
+          tables_info, client, null_columns=null_columns
         )
 
       # Determine expected table count based on mode
@@ -304,6 +307,7 @@ class DuckDBStager:
     year: int | None = None,
     quarter: int | None = None,
     skip_taxonomy_relationships: bool = False,
+    stage_embeddings: bool = False,
     build_hnsw_index: bool = False,
     progress_callback: ProgressCallback | None = None,
   ) -> StagingResult:
@@ -867,9 +871,10 @@ class DuckDBStager:
     chunk_start_year: int,
     chunk_end_year: int,
     graph_client: "GraphClient",
-    log_progress: ProgressCallback,
-    table_index: int,
-    total_tables: int,
+    null_columns: list[str] | None = None,
+    log_progress: ProgressCallback = None,
+    table_index: int = 0,
+    total_tables: int = 0,
   ) -> tuple[bool, TableInfo | None, str | None]:
     """
     Stage a large table using accumulative INSERT with dedup.
@@ -931,6 +936,7 @@ class DuckDBStager:
             graph_id=self.graph_id,
             table_name=temp_name,
             s3_pattern=quarter_pattern,
+            null_columns=null_columns,
             timeout=timeout,
           )
 
@@ -1090,6 +1096,7 @@ class DuckDBStager:
     start_year: int | None = None,
     end_year: int | None = None,
     duckdb_memory_mb: int | None = None,
+    stage_embeddings: bool = False,
     progress_callback: ProgressCallback | None = None,
   ) -> tuple[list[str], dict[str, TableInfo]]:
     """
@@ -1115,6 +1122,10 @@ class DuckDBStager:
     table_infos: dict[str, TableInfo] = {}
     failed_tables: list[tuple[str, str]] = []
     skipped_tables: list[str] = []
+
+    # When stage_embeddings=False, NULL out embedding columns to shrink DuckDB file.
+    # Data stays in parquet source files for future use.
+    null_columns = None if stage_embeddings else ["embedding"]
 
     # Build partition pattern(s)
     # year_range_patterns is set when we need a list of per-year globs
@@ -1174,6 +1185,7 @@ class DuckDBStager:
           chunk_start_year=chunk_start,
           chunk_end_year=chunk_end,
           graph_client=graph_client,
+          null_columns=null_columns,
           log_progress=log_progress,
           table_index=i,
           total_tables=total_tables,
@@ -1209,6 +1221,7 @@ class DuckDBStager:
               graph_id=self.graph_id,
               table_name=table_name,
               s3_pattern=s3_pattern,
+              null_columns=null_columns,
               timeout=timeout,
             )
 
@@ -1313,6 +1326,7 @@ class DuckDBStager:
     self,
     tables_info: dict[str, list[str]],
     graph_client: "GraphClient",
+    null_columns: list[str] | None = None,
   ) -> tuple[list[str], dict[str, TableInfo]]:
     """
     Create DuckDB staging tables from explicit file lists (legacy mode).
@@ -1338,6 +1352,7 @@ class DuckDBStager:
           graph_id=self.graph_id,
           table_name=table_name,
           s3_pattern=s3_files,
+          null_columns=null_columns,
           timeout=1800,
         )
 
