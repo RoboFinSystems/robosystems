@@ -66,7 +66,7 @@ class TimeoutCoordinator:
     Get timeout configuration for a specific tool.
 
     Args:
-        tool_name: Name of the tool (e.g., 'cypher_query', 'get_schema')
+        tool_name: Name of the tool (e.g., 'cypher_query', 'get-graph-schema')
 
     Returns:
         TimeoutConfiguration for the tool

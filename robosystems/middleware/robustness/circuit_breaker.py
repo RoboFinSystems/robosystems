@@ -97,7 +97,7 @@ class CircuitBreakerManager:
 
     Args:
         graph_id: Target graph identifier
-        operation: Operation name (e.g., 'cypher_query', 'get_schema')
+        operation: Operation name (e.g., 'cypher_query', 'get-graph-schema')
 
     Returns:
         True if operation should proceed
