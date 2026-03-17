@@ -264,7 +264,6 @@ class TestCallMcpToolValidation:
 
     assert "get-graph-schema" not in cypher_tools
     assert "get-graph-info" not in cypher_tools
-    assert "describe-graph-structure" not in cypher_tools
 
 
 @pytest.mark.unit

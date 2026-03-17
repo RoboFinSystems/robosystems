@@ -189,16 +189,6 @@ class MCPHandler:
       }
     )
 
-    # Add describe-graph-structure tool if not already present
-    if not any(t["name"] == "describe-graph-structure" for t in tools):
-      tools.append(
-        {
-          "name": "describe-graph-structure",
-          "description": f"Get a natural language description of the {graph_type} {self.graph_id} structure and contents",
-          "inputSchema": {"type": "object", "properties": {}},
-        }
-      )
-
     return tools
 
   async def call_tool(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
@@ -218,11 +208,6 @@ class MCPHandler:
       if name == "get-graph-info":
         # Custom graph info tool - use standard timeout
         return await asyncio.wait_for(self._get_graph_info(), timeout=tool_timeout)
-      elif name == "describe-graph-structure":
-        # Custom description tool
-        return await asyncio.wait_for(
-          self._get_graph_description(), timeout=tool_timeout
-        )
       else:
         # Use coordinated timeout for tools with proper instance timeout
         instance_timeout = timeout_coordinator.get_instance_timeout(name)
@@ -355,52 +340,6 @@ class MCPHandler:
       return {
         "type": "text",
         "text": "Error getting graph info: service temporarily unavailable.",
-      }
-
-  async def _get_graph_description(self) -> dict[str, Any]:
-    """Get natural language description of graph structure."""
-    try:
-      # Use describe-graph-structure if available
-      if self.graph_client and hasattr(self.graph_client, "describe_graph_structure"):
-        description = await self.graph_client.describe_graph_structure()
-      else:
-        # Ensure MCP tools are initialized
-        await self._ensure_initialized()
-        assert self.mcp_tools is not None, "MCP tools not initialized"
-        # Generate description from schema
-        schema_result = await self.mcp_tools.call_tool(
-          "get-graph-schema", {}, return_raw=True
-        )
-
-        node_tables = [t for t in schema_result if t.get("type") == "node"]
-        rel_tables = [t for t in schema_result if t.get("type") == "relationship"]
-
-        description = f"Graph Database: {self.graph_id}\n\n"
-        description += f"This graph contains {len(node_tables)} node types and {len(rel_tables)} relationship types.\n\n"
-
-        if node_tables:
-          description += "Node Types:\n"
-          for table in node_tables[:5]:  # Limit to first 5
-            description += f"- {table.get('label', 'Unknown')}"
-            if table.get("count", 0) > 0:
-              description += f" ({table['count']} records)"
-            description += "\n"
-          if len(node_tables) > 5:
-            description += f"  ... and {len(node_tables) - 5} more\n"
-
-        if rel_tables:
-          description += "\nRelationship Types:\n"
-          for table in rel_tables[:5]:  # Limit to first 5
-            description += f"- {table.get('label', 'Unknown')}\n"
-          if len(rel_tables) > 5:
-            description += f"  ... and {len(rel_tables) - 5} more\n"
-
-      return {"type": "text", "text": description}
-    except Exception as e:
-      logger.error(f"Error getting graph description: {e}")
-      return {
-        "type": "text",
-        "text": "Error getting graph description: service temporarily unavailable.",
       }
 
   async def close(self):

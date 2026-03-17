@@ -116,7 +116,7 @@ class TestGetFinancialStatementExecution:
     )
 
     call_args = mock_client.execute_query.call_args[0][0]
-    assert "p.period_type = 'instant'" in call_args
+    assert "period_type: 'instant'" in call_args
 
   @pytest.mark.asyncio
   async def test_period_type_annual_filter(self, tool, mock_client):
@@ -147,7 +147,7 @@ class TestGetFinancialStatementExecution:
 
     # Second call is the main query
     call_args = mock_client.execute_query.call_args_list[1][0][0]
-    assert "p.duration_type = 'annual'" in call_args
+    assert "duration_type: 'annual'" in call_args
 
   @pytest.mark.asyncio
   async def test_period_type_quarterly_filter(self, tool, mock_client):
@@ -176,7 +176,7 @@ class TestGetFinancialStatementExecution:
     )
 
     call_args = mock_client.execute_query.call_args_list[1][0][0]
-    assert "p.duration_type = 'quarterly'" in call_args
+    assert "duration_type: 'quarterly'" in call_args
 
   @pytest.mark.asyncio
   async def test_no_results_shows_tip(self, tool, mock_client):
@@ -213,11 +213,14 @@ class TestGetFinancialStatementExecution:
 
     await tool.execute({"ticker": "aapl", "statement_type": "income_statement"})
 
-    # Main query is the second call
-    call_kwargs = mock_client.execute_query.call_args_list[1]
-    params = call_kwargs[1].get("parameters", {})
-    assert params["ticker"] == "AAPL"
-    assert params["statement_type"] == "income_statement"
+    # Resolve query (first call) uses ticker
+    resolve_params = mock_client.execute_query.call_args_list[0][1]["parameters"]
+    assert resolve_params["ticker"] == "AAPL"
+
+    # Main query (second call) uses statement_type and report_id
+    main_params = mock_client.execute_query.call_args_list[1][1]["parameters"]
+    assert main_params["statement_type"] == "income_statement"
+    assert main_params["report_id"] == "id-1"
 
   @pytest.mark.asyncio
   async def test_report_id_filter(self, tool, mock_client):
@@ -234,7 +237,8 @@ class TestGetFinancialStatementExecution:
 
     call_args = mock_client.execute_query.call_args[0][0]
     assert "REPORT_HAS_FACT" in call_args
-    assert "r.identifier = $report_id" in call_args
+    assert "identifier: $report_id" in call_args
+    assert "FACT_SET_CONTAINS_FACT" in call_args
 
     params = mock_client.execute_query.call_args[1].get("parameters", {})
     assert params["report_id"] == "0001045810-25-000023"

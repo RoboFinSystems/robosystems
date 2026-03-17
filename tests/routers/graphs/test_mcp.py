@@ -57,8 +57,6 @@ def mock_mcp_handler(mock_mcp_client):
       "get-graph-schema",
       "read-graph-cypher",
       "get-example-queries",
-      "discover-properties",
-      "describe-graph-structure",
     ]
   )
   handler.get_tools = AsyncMock(return_value=[])

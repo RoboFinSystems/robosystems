@@ -383,7 +383,7 @@ Resources:
         MetadataOptions:
           HttpEndpoint: enabled
           HttpTokens: required
-          HttpPutResponseHopLimit: 1
+          HttpPutResponseHopLimit: 2
         SecurityGroupIds:
           - !Ref WriterSecurityGroup
           - !Ref ValkeyClientSecurityGroupId

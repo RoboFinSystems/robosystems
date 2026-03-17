@@ -353,6 +353,12 @@ Resources:
                   StringEquals:
                     "kms:ViaService":
                       - !Sub secretsmanager.${AWS::Region}.amazonaws.com
+              # EC2 for instance metadata (ASG name, volume discovery)
+              - Effect: Allow
+                Action:
+                  - ec2:DescribeInstances
+                  - ec2:DescribeTags
+                Resource: "*"
               # CloudFormation for shared replica ALB discovery
               - Effect: Allow
                 Action:
@@ -394,7 +400,7 @@ Resources:
         MetadataOptions:
           HttpEndpoint: enabled
           HttpTokens: required
-          HttpPutResponseHopLimit: 1
+          HttpPutResponseHopLimit: 2
         SecurityGroupIds:
           - !Ref ReplicaSecurityGroup
           - !Ref ValkeyClientSecurityGroupId

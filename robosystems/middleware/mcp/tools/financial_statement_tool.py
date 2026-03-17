@@ -212,37 +212,49 @@ For balance sheets, only instant-period facts are returned. For other statements
         "fiscal_period": resolved_report.get("fiscal_period"),
       }
 
-    # Build match parts and filters
-    match_parts = [
-      "(s:Structure)-[:STRUCTURE_HAS_FACT_SET]->(fs:FactSet)"
-      "-[:FACT_SET_CONTAINS_FACT]->(f:Fact)-[:FACT_HAS_ELEMENT]->(e:Element)",
-      "(f)-[:FACT_HAS_PERIOD]->(p:Period)",
-      "(f)-[:FACT_HAS_ENTITY]->(ent:Entity)",
-    ]
+    # Build query using inline node properties for planner hints.
+    # When report_id is available, start from Report (highly selective) and
+    # intersect with FactSet membership — avoids slow Structure→FactSet→Fact chain.
+    params: dict[str, Any] = {"statement_type": statement_type}
 
-    where_parts = [
-      "s.canonical_type = $statement_type",
-      "ent.ticker = $ticker",
-      "f.has_dimensions = false",
-      "f.numeric_value IS NOT NULL",
-    ]
+    # Period filter — inline on Period node when possible
+    period_props = ""
+    if period_type == "instant":
+      period_props = " {period_type: 'instant'}"
+    elif period_type == "annual":
+      period_props = " {duration_type: 'annual'}"
+    elif period_type == "quarterly":
+      period_props = " {duration_type: 'quarterly'}"
+    elif statement_type == "balance_sheet":
+      period_props = " {period_type: 'instant'}"
 
-    params: dict[str, Any] = {"statement_type": statement_type, "ticker": ticker}
+    period_match = f"(f)-[:FACT_HAS_PERIOD]->(p:Period{period_props})"
 
     if report_id:
-      match_parts.append("(r:Report)-[:REPORT_HAS_FACT]->(f)")
-      where_parts.append("r.identifier = $report_id")
+      # Fast path: start from Report, intersect with FactSet for statement filtering
+      match_parts = [
+        "(s:Structure {canonical_type: $statement_type})"
+        "-[:STRUCTURE_HAS_FACT_SET]->(fs:FactSet)",
+        "(r:Report {identifier: $report_id})"
+        "-[:REPORT_HAS_FACT]->(f:Fact {has_dimensions: false})"
+        "-[:FACT_HAS_ELEMENT]->(e:Element)",
+        "(fs)-[:FACT_SET_CONTAINS_FACT]->(f)",
+        period_match,
+      ]
+      where_parts = ["f.numeric_value IS NOT NULL"]
       params["report_id"] = report_id
-
-    # Period filter
-    if period_type == "instant":
-      where_parts.append("p.period_type = 'instant'")
-    elif period_type == "annual":
-      where_parts.append("p.duration_type = 'annual'")
-    elif period_type == "quarterly":
-      where_parts.append("p.duration_type = 'quarterly'")
-    elif statement_type == "balance_sheet":
-      where_parts.append("p.period_type = 'instant'")
+    else:
+      # No report_id — use Structure-first traversal (slower but works globally)
+      match_parts = [
+        "(s:Structure {canonical_type: $statement_type})"
+        "-[:STRUCTURE_HAS_FACT_SET]->(fs:FactSet)"
+        "-[:FACT_SET_CONTAINS_FACT]->(f:Fact {has_dimensions: false})"
+        "-[:FACT_HAS_ELEMENT]->(e:Element)",
+        period_match,
+        "(f)-[:FACT_HAS_ENTITY]->(ent:Entity {ticker: $ticker})",
+      ]
+      where_parts = ["f.numeric_value IS NOT NULL"]
+      params["ticker"] = ticker
 
     # Request extra rows for dedup, then trim to limit
     fetch_limit = min(limit * 3, 1000)
