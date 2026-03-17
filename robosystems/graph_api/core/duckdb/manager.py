@@ -361,7 +361,11 @@ class DuckDBTableManager:
         else:
           # Legacy path: without file_id tracking
           sql = self._build_table_sql(
-            quoted_table, has_identifier, has_from_to, is_list, column_names,
+            quoted_table,
+            has_identifier,
+            has_from_to,
+            is_list,
+            column_names,
             null_columns=null_cols,
           )
 
