@@ -5,9 +5,40 @@ Provides tools for:
 - Fact grid construction
 """
 
+import re
 from typing import Any
 
 from robosystems.logger import logger
+
+# Pre-compiled patterns for inline Cypher node filter sanitization.
+_SAFE_STR_RE = re.compile(r"[\w:\-]+")
+_TICKER_RE = re.compile(r"[A-Za-z][A-Za-z0-9.\-]{0,9}")
+
+
+def _safe_str(value: str) -> str | None:
+  """Sanitize a value for inline Cypher node pattern use.
+
+  Only allows alphanumeric, colon, hyphen, underscore — the characters
+  present in valid XBRL qnames and canonical concept names.
+  Returns None if the value contains anything else, triggering fallback
+  to a parameterized WHERE clause.
+
+  Note: LadybugDB inline node filters (e.g. {qname: 'x'}) anchor traversal
+  to a specific node, dramatically outperforming WHERE-clause filters on large
+  graphs. Parameterized node patterns are not supported by LadybugDB, so string
+  interpolation is required — this function provides the injection guard.
+  """
+  return value if _SAFE_STR_RE.fullmatch(value) else None
+
+
+def _is_ticker(value: str) -> bool:
+  """Return True if value looks like a stock ticker (not a CIK or company name).
+
+  Tickers start with a letter and contain only alphanumeric, dot, or hyphen,
+  up to 10 chars (covers BRK.B, BF-B, etc.). CIKs are all-digits; company
+  names contain spaces — both fall back to the WHERE clause.
+  """
+  return bool(_TICKER_RE.fullmatch(value))
 
 
 class BuildFactGridTool:
@@ -175,30 +206,84 @@ For income statement items (revenue, net income), always specify period_type='an
 
     try:
       # Build parameterized Cypher query with comma-separated patterns
-      # in a single MATCH clause for performance
-      match_parts = [
-        "(f:Fact)-[:FACT_HAS_ELEMENT]->(el:Element)",
-        "(f)-[:FACT_HAS_PERIOD]->(p:Period)",
-        "(f)-[:FACT_HAS_UNIT]->(u:Unit)",
-      ]
-      where_clauses = [
-        "f.has_dimensions = false",
-      ]
+      # in a single MATCH clause for performance.
+      #
+      # LadybugDB query notes:
+      # - Inline string filters (e.g. {qname: 'x'}) anchor traversal to specific
+      #   nodes, avoiding full Fact scans on large graphs. Use for entity/element.
+      # - Inline boolean filters (e.g. {has_dimensions: false}) silently return
+      #   zero results — booleans must stay in WHERE.
+      # - DISTINCT + ORDER BY together returns empty results (LadybugDB bug).
+      #   Sort in Python after deduplication instead.
       parameters: dict[str, Any] = {}
 
-      # Element filter: qnames, canonical concepts, or both
-      if elements and canonical_concepts:
-        where_clauses.append(
+      # Normalize entity filter: single 'entity' or multi 'entities'
+      entity_list = entities if entities else ([entity] if entity else None)
+
+      # Build Element node pattern — inline single qname or canonical_concept for
+      # fast index lookup, fall back to WHERE for multiple values or mixed queries.
+      if elements and len(elements) == 1 and not canonical_concepts:
+        safe = _safe_str(elements[0])
+        if safe:
+          element_pattern = f"(el:Element {{qname: '{safe}'}})"
+          element_where: list[str] = []
+        else:
+          element_pattern = "(el:Element)"
+          element_where = ["el.qname IN $elements"]
+          parameters["elements"] = elements
+      elif not elements and len(canonical_concepts) == 1:
+        safe = _safe_str(canonical_concepts[0])
+        if safe:
+          element_pattern = f"(el:Element {{canonical_concept: '{safe}'}})"
+          element_where = []
+        else:
+          element_pattern = "(el:Element)"
+          element_where = ["el.canonical_concept IN $canonical_concepts"]
+          parameters["canonical_concepts"] = canonical_concepts
+      elif elements and canonical_concepts:
+        element_pattern = "(el:Element)"
+        element_where = [
           "(el.qname IN $elements OR el.canonical_concept IN $canonical_concepts)"
-        )
+        ]
         parameters["elements"] = elements
         parameters["canonical_concepts"] = canonical_concepts
       elif elements:
-        where_clauses.append("el.qname IN $elements")
+        element_pattern = "(el:Element)"
+        element_where = ["el.qname IN $elements"]
         parameters["elements"] = elements
-      elif canonical_concepts:
-        where_clauses.append("el.canonical_concept IN $canonical_concepts")
+      else:
+        element_pattern = "(el:Element)"
+        element_where = ["el.canonical_concept IN $canonical_concepts"]
         parameters["canonical_concepts"] = canonical_concepts
+
+      # Build Entity node pattern — inline single ticker for fast index lookup,
+      # fall back to WHERE for multiple entities, CIKs, or company names.
+      # _safe_str guards the interpolation; _is_ticker ensures it's a ticker
+      # (not a CIK or name) so the inline {ticker: 'x'} filter is correct.
+      if entity_list and len(entity_list) == 1 and _is_ticker(entity_list[0]):
+        safe_ticker = _safe_str(entity_list[0].upper()) or entity_list[0].upper()
+        entity_pattern = f"(ent:Entity {{ticker: '{safe_ticker}'}})"
+        entity_where: list[str] = []
+      elif entity_list:
+        entity_pattern = "(ent:Entity)"
+        entity_where = [
+          "(ent.ticker IN $entities OR ent.cik IN $entities OR ent.name IN $entities)"
+        ]
+        parameters["entities"] = entity_list
+      else:
+        entity_pattern = None
+        entity_where = []
+
+      # Assemble MATCH parts — start from Fact, traverse to anchored nodes
+      match_parts = [
+        f"(f:Fact)-[:FACT_HAS_ELEMENT]->{element_pattern}",
+        "(f)-[:FACT_HAS_PERIOD]->(p:Period)",
+        "(f)-[:FACT_HAS_UNIT]->(u:Unit)",
+      ]
+      if entity_pattern:
+        match_parts.append(f"(f)-[:FACT_HAS_ENTITY]->{entity_pattern}")
+
+      where_clauses = ["f.has_dimensions = false", *element_where, *entity_where]
 
       if periods:
         where_clauses.append("p.end_date IN $periods")
@@ -212,16 +297,6 @@ For income statement items (revenue, net income), always specify period_type='an
         elif period_type == "quarterly":
           where_clauses.append("p.duration_type = 'quarterly'")
 
-      # Normalize entity filter: single 'entity' or multi 'entities'
-      entity_list = entities if entities else ([entity] if entity else None)
-
-      if entity_list:
-        match_parts.append("(f)-[:FACT_HAS_ENTITY]->(ent:Entity)")
-        where_clauses.append(
-          "(ent.ticker IN $entities OR ent.cik IN $entities OR ent.name IN $entities)"
-        )
-        parameters["entities"] = entity_list
-
       if form or fiscal_year is not None or fiscal_period:
         match_parts.append("(r:Report)-[:REPORT_HAS_FACT]->(f)")
         if form:
@@ -234,9 +309,11 @@ For income statement items (revenue, net income), always specify period_type='an
           where_clauses.append("r.fiscal_period_focus = $fiscal_period")
           parameters["fiscal_period"] = fiscal_period
 
-      if entity_list:
+      # Omit ORDER BY — DISTINCT + ORDER BY returns empty results in LadybugDB.
+      # Sorting is applied in Python after deduplication.
+      if entity_pattern:
         return_clause = """
-        RETURN DISTINCT
+        RETURN
           el.qname as element_id,
           el.name as element_name,
           p.end_date as period_end,
@@ -247,7 +324,7 @@ For income statement items (revenue, net income), always specify period_type='an
         """
       else:
         return_clause = """
-        RETURN DISTINCT
+        RETURN
           el.qname as element_id,
           el.name as element_name,
           p.end_date as period_end,
@@ -352,7 +429,11 @@ For income statement items (revenue, net income), always specify period_type='an
   def _deduplicate_facts(
     rows: list[dict[str, Any]], has_entity: bool
   ) -> list[dict[str, Any]]:
-    """Deduplicate facts by (element, period, entity), keeping first occurrence."""
+    """Deduplicate facts by (element, period, entity), keeping first occurrence.
+
+    Also sorts by period_end descending — ORDER BY is omitted from the Cypher
+    query because DISTINCT + ORDER BY returns empty results in LadybugDB.
+    """
     seen: set[tuple] = set()
     deduped: list[dict[str, Any]] = []
     for row in rows:
@@ -360,11 +441,12 @@ For income statement items (revenue, net income), always specify period_type='an
         key = (
           row.get("element_id", ""),
           row.get("period_end", ""),
-          row.get("entity_ticker", ""),
+          row.get("entity_ticker") or row.get("entity_name", ""),
         )
       else:
         key = (row.get("element_id", ""), row.get("period_end", ""))
       if key not in seen:
         seen.add(key)
         deduped.append(row)
+    deduped.sort(key=lambda r: r.get("period_end", "") or "", reverse=True)
     return deduped
