@@ -10,6 +10,10 @@ from typing import Any
 
 from robosystems.logger import logger
 
+# Pre-compiled patterns for inline Cypher node filter sanitization.
+_SAFE_STR_RE = re.compile(r"[\w:\-]+")
+_TICKER_RE = re.compile(r"[A-Za-z][A-Za-z0-9.\-]{0,9}")
+
 
 def _safe_str(value: str) -> str | None:
   """Sanitize a value for inline Cypher node pattern use.
@@ -18,8 +22,13 @@ def _safe_str(value: str) -> str | None:
   present in valid XBRL qnames and canonical concept names.
   Returns None if the value contains anything else, triggering fallback
   to a parameterized WHERE clause.
+
+  Note: LadybugDB inline node filters (e.g. {qname: 'x'}) anchor traversal
+  to a specific node, dramatically outperforming WHERE-clause filters on large
+  graphs. Parameterized node patterns are not supported by LadybugDB, so string
+  interpolation is required — this function provides the injection guard.
   """
-  return value if re.fullmatch(r"[\w:\-]+", value) else None
+  return value if _SAFE_STR_RE.fullmatch(value) else None
 
 
 def _is_ticker(value: str) -> bool:
@@ -29,7 +38,7 @@ def _is_ticker(value: str) -> bool:
   up to 10 chars (covers BRK.B, BF-B, etc.). CIKs are all-digits; company
   names contain spaces — both fall back to the WHERE clause.
   """
-  return bool(re.fullmatch(r"[A-Za-z][A-Za-z0-9.\-]{0,9}", value))
+  return bool(_TICKER_RE.fullmatch(value))
 
 
 class BuildFactGridTool:
@@ -249,8 +258,11 @@ For income statement items (revenue, net income), always specify period_type='an
 
       # Build Entity node pattern — inline single ticker for fast index lookup,
       # fall back to WHERE for multiple entities, CIKs, or company names.
+      # _safe_str guards the interpolation; _is_ticker ensures it's a ticker
+      # (not a CIK or name) so the inline {ticker: 'x'} filter is correct.
       if entity_list and len(entity_list) == 1 and _is_ticker(entity_list[0]):
-        entity_pattern = f"(ent:Entity {{ticker: '{entity_list[0].upper()}'}})"
+        safe_ticker = _safe_str(entity_list[0].upper()) or entity_list[0].upper()
+        entity_pattern = f"(ent:Entity {{ticker: '{safe_ticker}'}})"
         entity_where: list[str] = []
       elif entity_list:
         entity_pattern = "(ent:Entity)"
@@ -429,7 +441,7 @@ For income statement items (revenue, net income), always specify period_type='an
         key = (
           row.get("element_id", ""),
           row.get("period_end", ""),
-          row.get("entity_ticker", ""),
+          row.get("entity_ticker") or row.get("entity_name", ""),
         )
       else:
         key = (row.get("element_id", ""), row.get("period_end", ""))
