@@ -240,7 +240,7 @@ Use the returned query_hint directly in read-graph-cypher for immediate results.
     try:
       # Call vector search endpoint on graph instance via graph client
       lance_results = await self.client.vector_search(
-        graph_id="sec",
+        graph_id=self.client.graph_id,
         table_name="Element",
         embedding=query_embedding,
         limit=20,
