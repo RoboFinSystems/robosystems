@@ -101,6 +101,7 @@ class LanceElementSearch:
             "canonical_confidence",
             "classification",
             "balance",
+            "_distance",
           ]
         )
         .with_row_id(False)
