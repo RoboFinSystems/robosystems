@@ -59,6 +59,7 @@ services:
       - ./data/lbug-dbs:/app/data/lbug-dbs
       - ./data/staging:/app/data/staging
       - ./data/artifacts:/app/data/artifacts
+      - ./data/lance:/app/data/lance
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
       interval: 30s

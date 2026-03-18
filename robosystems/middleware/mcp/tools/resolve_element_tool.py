@@ -19,8 +19,7 @@ class ResolveElementTool(BaseTool):
   def __init__(self, client):
     super().__init__(client)
     self._enricher = None
-    self._lance_search = None
-    self._lance_checked = False
+    self._vector_search_enabled: bool | None = None
 
   @property
   def enricher(self):
@@ -32,25 +31,16 @@ class ResolveElementTool(BaseTool):
     return self._enricher
 
   @property
-  def lance_search(self):
-    """Lazy-load the LanceDB search instance. Returns None if unavailable or disabled."""
-    if not self._lance_checked:
-      self._lance_checked = True
+  def vector_search_enabled(self) -> bool:
+    """Check if vector search is enabled via feature flag."""
+    if self._vector_search_enabled is None:
       try:
         from robosystems.config import env
 
-        if not env.MCP_VECTOR_SEARCH_ENABLED:
-          logger.debug(
-            "LanceDB vector search disabled (MCP_VECTOR_SEARCH_ENABLED=false)"
-          )
-          return None
-
-        from robosystems.adapters.sec.knowledge.lance_search import LanceElementSearch
-
-        self._lance_search = LanceElementSearch.get_instance()
-      except Exception as e:
-        logger.debug(f"LanceDB search not available: {e}")
-    return self._lance_search
+        self._vector_search_enabled = env.MCP_VECTOR_SEARCH_ENABLED
+      except Exception:
+        self._vector_search_enabled = False
+    return self._vector_search_enabled
 
   def get_tool_definition(self) -> dict[str, Any]:
     return {
@@ -142,8 +132,8 @@ Use the returned query_hint directly in read-graph-cypher for immediate results.
     except Exception as e:
       logger.warning(f"Embedding failed: {e}")
 
-    # Step 2: Try LanceDB vector search first (covers all elements)
-    if query_embedding and self.lance_search:
+    # Step 2: Try vector search via Graph API (covers all elements)
+    if query_embedding and self.vector_search_enabled:
       lance_result = await self._resolve_via_lance(
         result, query_embedding, ticker, report_id
       )
@@ -240,17 +230,24 @@ Use the returned query_hint directly in read-graph-cypher for immediate results.
     ticker: str | None,
     report_id: str | None,
   ) -> dict[str, Any]:
-    """Resolve using LanceDB vector search over all element embeddings.
+    """Resolve using vector search via Graph API on shared replicas.
 
-    LanceDB provides semantic candidates (fast ~5ms ANN search), then the graph
-    filters and enriches with fact counts, labels, and optional ticker/report scope.
+    The Graph API vector search endpoint runs LanceDB on the replica's local
+    disk (~5ms ANN search), then we filter and enrich with fact counts, labels,
+    and optional ticker/report scope via Cypher queries.
     """
     try:
-      lance_results = self.lance_search.search(query_embedding, limit=20)
+      # Call vector search endpoint on graph instance via graph client
+      lance_results = await self.client.vector_search(
+        graph_id="sec",
+        table_name="Element",
+        embedding=query_embedding,
+        limit=20,
+      )
       if not lance_results:
         return result
 
-      # Deduplicate qnames (same qname may appear from different filings)
+      # Deduplicate qnames (safety net — index should already be deduped)
       seen_qnames: set[str] = set()
       unique_results = []
       for r in lance_results:
@@ -264,7 +261,7 @@ Use the returned query_hint directly in read-graph-cypher for immediate results.
       # Build a similarity lookup for scoring
       similarity_by_qname = {}
       for r in unique_results:
-        similarity_by_qname[r["qname"]] = round(1.0 - r.get("_distance", 0.0), 4)
+        similarity_by_qname[r["qname"]] = round(1.0 - r.get("distance", 0.0), 4)
 
       # Query graph with lance candidates + optional ticker/report filter
       rows = await self._fetch_lance_candidates(qnames, ticker, report_id)
@@ -287,7 +284,7 @@ Use the returned query_hint directly in read-graph-cypher for immediate results.
           )
       else:
         # No graph results (no ticker/report filter, or no matches in scope)
-        # Fall back to lance results directly
+        # Fall back to vector search results directly
         for r in unique_results:
           qname = r["qname"]
           result["matches"].append(
@@ -307,7 +304,7 @@ Use the returned query_hint directly in read-graph-cypher for immediate results.
       result["matches"] = result["matches"][:10]
       self._build_query_hint(result, ticker, report_id)
     except Exception as e:
-      logger.warning(f"LanceDB search failed, falling back: {e}")
+      logger.warning(f"Vector search failed, falling back: {e}")
 
     return result
 

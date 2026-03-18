@@ -100,15 +100,6 @@ def sec_duckdb_staged(
 
   result = asyncio.run(run_staging())
 
-  # Release DuckDB memory after staging (closes connections, frees buffers)
-  try:
-    from robosystems.graph_api.client.factory import release_graph_memory
-
-    release_result = asyncio.run(release_graph_memory(config.graph_id, target="duckdb"))
-    context.log.info(f"Memory release: {release_result.get('message', 'done')}")
-  except Exception as release_err:
-    context.log.warning(f"Could not release memory (non-fatal): {release_err}")
-
   if result.status == "error":
     context.log.error(f"Staging failed: {result.error}")
     raise Failure(
@@ -126,6 +117,78 @@ def sec_duckdb_staged(
     f"{result.total_files} files, {result.duration_ms / 1000:.2f}s"
   )
 
+  # Build vector index from Element embeddings (while DuckDB memory is still boosted).
+  # Non-fatal: if the build fails, staging still succeeds — vector search falls
+  # back to canonical matching. The index is built on-instance from the DuckDB
+  # staging table that was just created above.
+  # SEC-specific query: only numeric, non-textblock elements that have facts,
+  # deduplicated by qname (highest canonical confidence wins).
+  SEC_ELEMENT_VECTOR_QUERY = """
+    SELECT
+      e.qname,
+      e.name,
+      e.canonical_concept,
+      e.canonical_confidence,
+      e.classification,
+      e.balance,
+      e.embedding::FLOAT[384] AS vector
+    FROM Element e
+    WHERE e.is_numeric = true
+      AND e.is_textblock = false
+      AND e.embedding IS NOT NULL
+      AND e.identifier IN (
+        SELECT DISTINCT dst FROM FACT_HAS_ELEMENT
+      )
+    QUALIFY ROW_NUMBER() OVER (
+      PARTITION BY e.qname
+      ORDER BY e.canonical_confidence DESC NULLS LAST, e.identifier
+    ) = 1
+  """
+
+  lance_metadata: dict = {}
+  if "Element" in result.table_names:
+    try:
+      from robosystems.graph_api.client.factory import (
+        get_graph_client_for_sec_ingestion,
+      )
+
+      async def run_vector_build():
+        client = await get_graph_client_for_sec_ingestion()
+        try:
+          return await client.vector_build(
+            graph_id=config.graph_id,
+            table_name="Element",
+            query=SEC_ELEMENT_VECTOR_QUERY,
+          )
+        finally:
+          await client.close()
+
+      context.log.info("Building vector index for Element table...")
+      lance_result = asyncio.run(run_vector_build())
+      lance_metadata = {
+        "lance_row_count": lance_result.get("row_count", 0),
+        "lance_size_mb": lance_result.get("index_size_mb", 0),
+        "lance_duration_ms": lance_result.get("duration_ms", 0),
+      }
+      context.log.info(
+        f"Vector index built: {lance_result.get('row_count', 0):,} rows, "
+        f"{lance_result.get('index_size_mb', 0):.1f} MB, "
+        f"{lance_result.get('duration_ms', 0) / 1000:.1f}s"
+      )
+    except Exception as lance_err:
+      context.log.warning(f"Vector index build failed (non-fatal): {lance_err}")
+  else:
+    context.log.info("Skipping vector index build (Element table not staged)")
+
+  # Release DuckDB memory after staging + vector build (closes connections, frees buffers)
+  try:
+    from robosystems.graph_api.client.factory import release_graph_memory
+
+    release_result = asyncio.run(release_graph_memory(config.graph_id, target="duckdb"))
+    context.log.info(f"Memory release: {release_result.get('message', 'done')}")
+  except Exception as release_err:
+    context.log.warning(f"Could not release memory (non-fatal): {release_err}")
+
   return MaterializeResult(
     metadata={
       "graph_id": config.graph_id,
@@ -136,6 +199,7 @@ def sec_duckdb_staged(
       "total_rows": result.total_rows,
       "duckdb_path": result.duckdb_path,
       "duration_ms": result.duration_ms,
+      **lance_metadata,
     }
   )
 
