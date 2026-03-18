@@ -31,6 +31,7 @@ from robosystems.operations.aws.s3 import S3Client
 from robosystems.schemas.extensions.roboledger import RoboLedgerContext
 
 from .models import (
+  EMBEDDING_NULL_TABLES,
   LARGE_STAGING_TABLES,
   STAGING_MAX_RETRIES,
   STAGING_RETRY_BACKOFF_BASE,
@@ -80,7 +81,6 @@ class DuckDBStager:
     skip_taxonomy_relationships: bool = False,
     use_glob: bool = True,
     duckdb_memory_mb: int | None = None,
-    stage_embeddings: bool = False,
     progress_callback: ProgressCallback | None = None,
   ) -> StagingResult:
     """
@@ -247,16 +247,14 @@ class DuckDBStager:
           start_year=start_year,
           end_year=end_year,
           duckdb_memory_mb=duckdb_memory_mb,
-          stage_embeddings=stage_embeddings,
           progress_callback=log_progress,
         )
       else:
         log_progress(
           "Step 2: Creating DuckDB staging tables via file lists (legacy)..."
         )
-        null_columns = None if stage_embeddings else ["embedding"]
         successful_tables, table_infos = await self._create_tables_with_info(
-          tables_info, client, null_columns=null_columns
+          tables_info, client, null_columns=["embedding"]
         )
 
       # Determine expected table count based on mode
@@ -301,7 +299,6 @@ class DuckDBStager:
     year: int | None = None,
     quarter: int | None = None,
     skip_taxonomy_relationships: bool = False,
-    stage_embeddings: bool = False,
     progress_callback: ProgressCallback | None = None,
   ) -> StagingResult:
     """
@@ -347,7 +344,6 @@ class DuckDBStager:
       prev_year, prev_quarter = get_previous_quarter(year, quarter)
       quarters_to_scan.append((prev_year, prev_quarter))
 
-    null_columns = None if stage_embeddings else ["embedding"]
     quarters_str = ", ".join(f"{y}-Q{q}" for y, q in quarters_to_scan)
     logger.info(
       f"Starting incremental DuckDB staging for graph {self.graph_id} "
@@ -445,6 +441,9 @@ class DuckDBStager:
         )
 
         timeout = get_staging_timeout(table_name)
+        table_null_columns = (
+          ["embedding"] if table_name in EMBEDDING_NULL_TABLES else None
+        )
         log_progress(f"[{i}/{total_tables}] INSERT {table_name} (Q{quarter} {year})...")
 
         async def incremental_insert_fn() -> tuple[bool, TableInfo | None, str | None]:
@@ -454,7 +453,7 @@ class DuckDBStager:
               table_name=table_name,
               s3_pattern=s3_pattern,
               timeout=timeout,
-              null_columns=null_columns,
+              null_columns=table_null_columns,
             )
 
             if response.get("status") == "failed":
@@ -1021,7 +1020,6 @@ class DuckDBStager:
     start_year: int | None = None,
     end_year: int | None = None,
     duckdb_memory_mb: int | None = None,
-    stage_embeddings: bool = False,
     progress_callback: ProgressCallback | None = None,
   ) -> tuple[list[str], dict[str, TableInfo]]:
     """
@@ -1048,10 +1046,6 @@ class DuckDBStager:
     failed_tables: list[tuple[str, str]] = []
     skipped_tables: list[str] = []
 
-    # When stage_embeddings=False, NULL out embedding columns to shrink DuckDB file.
-    # Data stays in parquet source files for future use.
-    null_columns = None if stage_embeddings else ["embedding"]
-
     # Build partition pattern(s)
     # year_range_patterns is set when we need a list of per-year globs
     year_range_patterns: bool = False
@@ -1074,6 +1068,9 @@ class DuckDBStager:
     total_tables = len(tables)
     for i, (table_name, entity_type) in enumerate(tables.items(), 1):
       is_large = table_name in LARGE_STAGING_TABLES
+      # NULL out embedding columns for Label/Structure (unused after enrichment).
+      # Element embeddings are kept for the LanceDB vector search index.
+      null_columns = ["embedding"] if table_name in EMBEDDING_NULL_TABLES else None
 
       timeout = get_staging_timeout(table_name)
 
