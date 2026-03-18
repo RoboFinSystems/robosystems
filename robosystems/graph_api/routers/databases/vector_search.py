@@ -23,6 +23,7 @@ Search works on any instance that has the lance index on disk — masters
 build it locally, replicas download it from S3 at boot.
 """
 
+import asyncio
 import os
 import re
 
@@ -110,14 +111,32 @@ class VectorSearchResponse(BaseModel):
   execution_time_ms: float
 
 
+class VectorExportRequest(BaseModel):
+  """Request to export a vector index, optionally uploading to S3."""
+
+  s3_bucket: str | None = Field(
+    default=None,
+    description="S3 bucket to upload the tar.gz to. If provided with s3_key, "
+    "the upload runs on this instance (required for Dagster workers that "
+    "cannot access this instance's filesystem).",
+  )
+  s3_key: str | None = Field(
+    default=None,
+    description="S3 object key for the upload.",
+  )
+
+  class Config:
+    extra = "forbid"
+
+
 class VectorExportResponse(BaseModel):
   """Response from vector index export."""
 
   graph_id: str
   table_name: str
-  tar_path: str
   size_mb: float
   duration_ms: float
+  s3_uri: str | None = None
 
 
 class VectorIndexInfo(BaseModel):
@@ -188,7 +207,8 @@ async def vector_build(
   manager = _get_lance_manager()
 
   try:
-    result = manager.build(
+    result = await asyncio.to_thread(
+      manager.build,
       graph_id=graph_id,
       table_name=table_name,
       query=request.query,
@@ -264,20 +284,31 @@ async def vector_search(
 async def vector_export(
   graph_id: str,
   table_name: str,
+  request: VectorExportRequest | None = None,
 ) -> VectorExportResponse:
-  """Package the lance index as tar.gz for S3 publish / replica download.
+  """Package the lance index as tar.gz and optionally upload to S3.
 
-  The tar.gz is written to local disk. The caller (typically a Dagster job)
-  is responsible for uploading it to S3.
+  When s3_bucket and s3_key are provided in the request body, the tar.gz
+  is uploaded directly from this instance to S3. This is required because
+  the Dagster worker calling this endpoint runs on Fargate and cannot
+  access this instance's filesystem.
 
   Only available on writer/master instances.
   """
   _require_writer()
 
   manager = _get_lance_manager()
+  s3_bucket = request.s3_bucket if request else None
+  s3_key = request.s3_key if request else None
 
   try:
-    result = manager.export(graph_id=graph_id, table_name=table_name)
+    result = await asyncio.to_thread(
+      manager.export,
+      graph_id=graph_id,
+      table_name=table_name,
+      s3_bucket=s3_bucket,
+      s3_key=s3_key,
+    )
   except ValueError as e:
     raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e)) from e
   except Exception as e:
@@ -290,9 +321,9 @@ async def vector_export(
   return VectorExportResponse(
     graph_id=result["graph_id"],
     table_name=result["table_name"],
-    tar_path=result["tar_path"],
     size_mb=result["size_mb"],
     duration_ms=result["duration_ms"],
+    s3_uri=result.get("s3_uri"),
   )
 
 

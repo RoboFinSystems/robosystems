@@ -1170,24 +1170,35 @@ class GraphClient(BaseGraphClient):
     self,
     graph_id: str,
     table_name: str,
+    s3_bucket: str | None = None,
+    s3_key: str | None = None,
     timeout: int = 300,
   ) -> dict[str, Any]:
     """
-    Export a vector index as tar.gz on the graph instance.
+    Export a vector index as tar.gz, optionally uploading to S3.
 
-    Packages the lance index for S3 upload / replica download.
+    When s3_bucket and s3_key are provided, the Graph API instance uploads
+    the tar.gz directly to S3 (required because the caller may not have
+    access to the instance's filesystem).
 
     Args:
         graph_id: Graph database identifier
         table_name: Table whose index to export
+        s3_bucket: S3 bucket to upload to (optional)
+        s3_key: S3 object key (optional)
         timeout: Request timeout in seconds
 
     Returns:
-        Dict with tar_path, size_mb, duration_ms.
+        Dict with size_mb, duration_ms, and s3_uri if uploaded.
     """
+    json_data: dict[str, Any] = {}
+    if s3_bucket and s3_key:
+      json_data["s3_bucket"] = s3_bucket
+      json_data["s3_key"] = s3_key
     response = await self._request(
       "POST",
       f"/databases/{graph_id}/tables/{table_name}/vector/export",
+      json_data=json_data if json_data else None,
       timeout=float(timeout),
     )
     return response.json()

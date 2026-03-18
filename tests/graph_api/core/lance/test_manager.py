@@ -554,7 +554,6 @@ class TestLanceManagerExport:
 
     assert output.exists()
     assert result["size_bytes"] > 0
-    assert result["tar_path"] == str(output)
 
   def test_export_archive_structure(
     self, manager, duckdb_with_elements, sec_vector_query, tmp_path
@@ -596,8 +595,9 @@ class TestLanceManagerExport:
     )
 
     result = manager.export("sec", "Element")
-    expected = str(manager._graph_dir("sec") / "Element.lance.tar.gz")
-    assert result["tar_path"] == expected
+    assert result["size_bytes"] > 0
+    assert result["graph_id"] == "sec"
+    assert result["table_name"] == "Element"
 
 
 # ---------------------------------------------------------------------------

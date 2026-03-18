@@ -355,18 +355,26 @@ class LanceManager:
     self,
     graph_id: str,
     table_name: str,
+    s3_bucket: str | None = None,
+    s3_key: str | None = None,
     output_path: str | Path | None = None,
   ) -> dict:
-    """Package a lance index as tar.gz for S3 upload / replica download.
+    """Package a lance index as tar.gz and optionally upload to S3.
+
+    When s3_bucket and s3_key are provided, the tar.gz is uploaded directly
+    from this instance to S3 (required because the Dagster worker that calls
+    this endpoint cannot access this instance's filesystem).
 
     Args:
         graph_id: Graph database identifier.
         table_name: Table name whose index to export.
-        output_path: Path for the output tar.gz. If None, writes to
-            {LANCE_INDEX_PATH}/{graph_id}/{table_name}.lance.tar.gz
+        s3_bucket: If provided, upload the tar.gz to this S3 bucket.
+        s3_key: S3 object key for the upload.
+        output_path: Path for the local tar.gz. If None, uses a temp path
+            under {LANCE_INDEX_PATH}/{graph_id}/.
 
     Returns:
-        Dict with tar_path, size_bytes, row_count.
+        Dict with size_bytes, size_mb, duration_ms, and s3_uri if uploaded.
 
     Raises:
         ValueError: If no index exists for this graph + table.
@@ -396,14 +404,35 @@ class LanceManager:
       f"{duration_ms / 1000:.1f}s"
     )
 
-    return {
+    result = {
       "graph_id": graph_id,
       "table_name": table_name,
-      "tar_path": str(output_path),
       "size_bytes": tar_size,
       "size_mb": round(tar_size / (1024**2), 1),
       "duration_ms": round(duration_ms, 2),
     }
+
+    # Upload to S3 if bucket/key provided (runs on this instance, not the caller)
+    if s3_bucket and s3_key:
+      import boto3
+
+      s3 = boto3.client("s3")
+      logger.info(f"Uploading lance tar.gz to s3://{s3_bucket}/{s3_key}")
+      s3.upload_file(str(output_path), s3_bucket, s3_key)
+
+      # Verify upload
+      head = s3.head_object(Bucket=s3_bucket, Key=s3_key)
+      result["s3_uri"] = f"s3://{s3_bucket}/{s3_key}"
+      result["s3_size_bytes"] = head["ContentLength"]
+      logger.info(
+        f"Lance index uploaded to S3: s3://{s3_bucket}/{s3_key} "
+        f"({head['ContentLength'] / (1024**2):.1f} MB)"
+      )
+
+      # Clean up local tar.gz after successful upload
+      output_path.unlink(missing_ok=True)
+
+    return result
 
   # ---------------------------------------------------------------------------
   # Delete: clean up lance index

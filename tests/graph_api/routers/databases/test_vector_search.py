@@ -223,7 +223,6 @@ class TestVectorSearchRouter:
     mock_mgr.export.return_value = {
       "graph_id": "sec",
       "table_name": "Element",
-      "tar_path": "/app/data/lance/sec/Element.lance.tar.gz",
       "size_mb": 3200.0,
       "duration_ms": 45000.0,
     }
@@ -233,8 +232,37 @@ class TestVectorSearchRouter:
 
     assert response.status_code == status.HTTP_200_OK
     data = response.json()
-    assert data["tar_path"] == "/app/data/lance/sec/Element.lance.tar.gz"
     assert data["size_mb"] == 3200.0
+    assert data["s3_uri"] is None
+
+  @patch("robosystems.graph_api.routers.databases.vector_search._get_lance_manager")
+  def test_export_with_s3_upload(self, mock_get_manager, client, monkeypatch):
+    monkeypatch.setenv("LBUG_ROLE", "master")
+
+    mock_mgr = MagicMock()
+    mock_mgr.export.return_value = {
+      "graph_id": "sec",
+      "table_name": "Element",
+      "size_mb": 3200.0,
+      "duration_ms": 45000.0,
+      "s3_uri": "s3://my-bucket/sec.Element.lance.tar.gz",
+    }
+    mock_get_manager.return_value = mock_mgr
+
+    response = client.post(
+      "/databases/sec/tables/Element/vector/export",
+      json={"s3_bucket": "my-bucket", "s3_key": "sec.Element.lance.tar.gz"},
+    )
+
+    assert response.status_code == status.HTTP_200_OK
+    data = response.json()
+    assert data["s3_uri"] == "s3://my-bucket/sec.Element.lance.tar.gz"
+    mock_mgr.export.assert_called_once_with(
+      graph_id="sec",
+      table_name="Element",
+      s3_bucket="my-bucket",
+      s3_key="sec.Element.lance.tar.gz",
+    )
 
   def test_export_blocked_on_replica(self, client, monkeypatch):
     monkeypatch.setenv("LBUG_ROLE", "replica")
