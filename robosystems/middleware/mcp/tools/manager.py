@@ -176,11 +176,19 @@ class GraphMCPTools:
     """Check if semantic enrichment tools should be included.
 
     Returns true if the manifest declares has_semantic_enrichment=True.
+    Resolves subgraph parent so that subgraphs inherit the parent manifest.
     """
     try:
-      from robosystems.config.shared_repositories import get_manifest
+      from robosystems.config.shared_repositories import (
+        get_manifest,
+        is_shared_repository_or_subgraph,
+        resolve_shared_repository_parent,
+      )
 
-      manifest = get_manifest(self.client.graph_id)
+      graph_id = self.client.graph_id
+      if is_shared_repository_or_subgraph(graph_id):
+        graph_id = resolve_shared_repository_parent(graph_id)
+      manifest = get_manifest(graph_id)
       if manifest and manifest.has_semantic_enrichment:
         return True
     except Exception as exc:
