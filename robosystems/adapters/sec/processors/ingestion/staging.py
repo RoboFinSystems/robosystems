@@ -56,6 +56,10 @@ class DuckDBStager:
   - Uses Graph API client to communicate with Graph API container
   - DuckDB pool lives on Graph API side, not on worker
   - Supports both full rebuild and incremental staging modes
+
+  Embedding columns are NULLed per-table during staging: Label and Structure
+  embeddings (only used during enrichment) are dropped, while Element embeddings
+  are preserved for the LanceDB vector search index.
   """
 
   def __init__(self, graph_id: str = "sec", source_prefix: str | None = None):
@@ -72,6 +76,16 @@ class DuckDBStager:
     # New structure: sec/processed/filed=YYYY-MM-DD/nodes/TABLE/*.parquet
     self.source_prefix = source_prefix or "sec/processed"
 
+  @staticmethod
+  def _get_null_columns(table_name: str) -> list[str] | None:
+    """Get columns to NULL out for a given table during DuckDB staging.
+
+    Label and Structure embeddings are only used during enrichment and are
+    not needed after staging. Element embeddings are preserved for the
+    LanceDB vector search index.
+    """
+    return ["embedding"] if table_name in EMBEDDING_NULL_TABLES else None
+
   async def stage_to_duckdb(
     self,
     year: int | None = None,
@@ -79,7 +93,6 @@ class DuckDBStager:
     end_year: int | None = None,
     reset_staging: bool = False,
     skip_taxonomy_relationships: bool = False,
-    use_glob: bool = True,
     duckdb_memory_mb: int | None = None,
     progress_callback: ProgressCallback | None = None,
   ) -> StagingResult:
@@ -109,7 +122,6 @@ class DuckDBStager:
         end_year: Optional end of year range (inclusive). Used with start_year.
         reset_staging: If True, delete entire DuckDB staging database first.
         skip_taxonomy_relationships: If True, skip taxonomy structure tables.
-        use_glob: If True (default), use glob patterns for efficient discovery.
         progress_callback: Optional callback for progress logging.
 
     Returns:
@@ -175,90 +187,43 @@ class DuckDBStager:
           duration_ms=(time.time() - start_time) * 1000,
         )
 
-      # Step 1: Get table names from schema (no S3 discovery needed for glob mode)
-      tables_by_type: dict[str, str] = {}
-      tables_info: dict[str, list[str]] = {}
+      # Step 1: Get table names from schema
+      logger.info("Step 1: Getting table names from schema...")
+      tables_by_type = RoboLedgerContext.get_all_table_names_for_context(
+        RoboLedgerContext.SEC_REPOSITORY
+      )
+      logger.info(f"Schema defines {len(tables_by_type)} tables to stage")
 
-      if use_glob:
-        logger.info("Step 1: Getting table names from schema (glob mode)...")
-        # Schema-driven: get all tables for SEC repository context
-        tables_by_type = RoboLedgerContext.get_all_table_names_for_context(
-          RoboLedgerContext.SEC_REPOSITORY
+      # Filter out taxonomy structure tables if requested (instance-only mode)
+      if skip_taxonomy_relationships:
+        original_count = len(tables_by_type)
+        tables_by_type = {
+          name: entity_type
+          for name, entity_type in tables_by_type.items()
+          if name not in TAXONOMY_STRUCTURE_TABLES
+        }
+        skipped_count = original_count - len(tables_by_type)
+        log_progress(
+          f"Instance-only mode: skipping {skipped_count} taxonomy structure tables "
+          f"(Association, Structure, TAXONOMY_HAS_*, etc.)"
         )
-        logger.info(f"Schema defines {len(tables_by_type)} tables to stage")
+        logger.info(f"After filtering: {len(tables_by_type)} tables to stage")
 
-        # Filter out taxonomy structure tables if requested (instance-only mode)
-        if skip_taxonomy_relationships:
-          original_count = len(tables_by_type)
-          tables_by_type = {
-            name: entity_type
-            for name, entity_type in tables_by_type.items()
-            if name not in TAXONOMY_STRUCTURE_TABLES
-          }
-          skipped_count = original_count - len(tables_by_type)
-          log_progress(
-            f"Instance-only mode: skipping {skipped_count} taxonomy structure tables "
-            f"(Association, Structure, TAXONOMY_HAS_*, etc.)"
-          )
-          logger.info(f"After filtering: {len(tables_by_type)} tables to stage")
-
-        # With glob, we don't know file count upfront
-        total_files = 0
-      else:
-        logger.info("Step 1: Discovering processed Parquet files (legacy mode)...")
-        tables_info = await self._discover_processed_files(year)
-
-        if not tables_info:
-          logger.warning("No processed files found")
-          return StagingResult(
-            status="no_data",
-            table_names=[],
-            error="No processed files found",
-            duration_ms=(time.time() - start_time) * 1000,
-          )
-
-        logger.info(f"Found {len(tables_info)} tables to stage")
-
-        # Filter out taxonomy structure tables if requested
-        if skip_taxonomy_relationships:
-          original_count = len(tables_info)
-          tables_info = {
-            name: files
-            for name, files in tables_info.items()
-            if name not in TAXONOMY_STRUCTURE_TABLES
-          }
-          skipped_count = original_count - len(tables_info)
-          log_progress(
-            f"Instance-only mode: skipping {skipped_count} taxonomy structure tables "
-            f"(Association, Structure, TAXONOMY_HAS_*, etc.)"
-          )
-          logger.info(f"After filtering: {len(tables_info)} tables to stage")
-        total_files = sum(len(files) for files in tables_info.values())
-        logger.info(f"Total files: {total_files}")
+      total_files = 0
 
       # Step 2: Create DuckDB staging tables via Graph API
-      if use_glob:
-        # Full mode: CREATE TABLE from glob patterns
-        log_progress(f"Step 2: Creating {len(tables_by_type)} DuckDB staging tables...")
-        successful_tables, table_infos = await self._create_tables_with_glob(
-          tables_by_type,
-          client,
-          year=year,
-          start_year=start_year,
-          end_year=end_year,
-          duckdb_memory_mb=duckdb_memory_mb,
-          progress_callback=log_progress,
-        )
-      else:
-        log_progress(
-          "Step 2: Creating DuckDB staging tables via file lists (legacy)..."
-        )
-        successful_tables, table_infos = await self._create_tables_with_info(
-          tables_info, client, null_columns=["embedding"]
-        )
+      log_progress(f"Step 2: Creating {len(tables_by_type)} DuckDB staging tables...")
+      successful_tables, table_infos = await self._create_tables_with_glob(
+        tables_by_type,
+        client,
+        year=year,
+        start_year=start_year,
+        end_year=end_year,
+        duckdb_memory_mb=duckdb_memory_mb,
+        progress_callback=log_progress,
+      )
 
-      # Determine expected table count based on mode
-      expected_table_count = len(tables_by_type) if use_glob else len(tables_info)
+      expected_table_count = len(tables_by_type)
       status = (
         "success" if len(successful_tables) == expected_table_count else "partial"
       )
@@ -441,9 +406,7 @@ class DuckDBStager:
         )
 
         timeout = get_staging_timeout(table_name)
-        table_null_columns = (
-          ["embedding"] if table_name in EMBEDDING_NULL_TABLES else None
-        )
+        table_null_columns = self._get_null_columns(table_name)
         log_progress(f"[{i}/{total_tables}] INSERT {table_name} (Q{quarter} {year})...")
 
         async def incremental_insert_fn() -> tuple[bool, TableInfo | None, str | None]:
@@ -627,94 +590,6 @@ class DuckDBStager:
           continue
 
     return total_bytes
-
-  async def _discover_processed_files(
-    self, year: int | None = None
-  ) -> dict[str, list[str]]:
-    """
-    Discover processed Parquet files from S3 (legacy mode).
-
-    Scans the processed files directory structure:
-    processed/year=YYYY/nodes/TableName/file.parquet
-    processed/year=YYYY/relationships/TableName/file.parquet
-
-    Args:
-        year: Optional year filter. If None, scans all year subdirectories.
-
-    Returns:
-        Dictionary mapping table names to list of S3 keys
-    """
-    tables_info: dict[str, list[str]] = {}
-
-    # Determine which years to scan
-    if year is None:
-      year_prefix = f"{self.source_prefix}/"
-      logger.info(f"Discovering year subdirectories in {self.bucket}/{year_prefix}")
-
-      paginator = self.s3_client.s3_client.get_paginator("list_objects_v2")
-      pages = paginator.paginate(Bucket=self.bucket, Prefix=year_prefix, Delimiter="/")
-
-      years_to_scan = []
-      for page in pages:
-        if "CommonPrefixes" in page:
-          for prefix_info in page["CommonPrefixes"]:
-            prefix_path = prefix_info["Prefix"]
-            if "year=" in prefix_path:
-              year_part = prefix_path.split("year=")[1].rstrip("/")
-              try:
-                year_num = int(year_part)
-                years_to_scan.append(year_num)
-                logger.debug(f"Found year subdirectory: {year_num}")
-              except ValueError:
-                logger.debug(f"Skipping non-year prefix: {prefix_path}")
-
-      if not years_to_scan:
-        logger.warning(f"No year subdirectories found under {year_prefix}")
-        return tables_info
-
-      logger.info(
-        f"Discovered {len(years_to_scan)} years to scan: {sorted(years_to_scan)}"
-      )
-    else:
-      years_to_scan = [year]
-
-    # Scan both nodes and relationships directories
-    for entity_type in ["nodes", "relationships"]:
-      for scan_year in years_to_scan:
-        prefix = f"{self.source_prefix}/year={scan_year}/{entity_type}/"
-        logger.debug(f"Scanning S3 bucket {self.bucket} with prefix {prefix}")
-
-        paginator = self.s3_client.s3_client.get_paginator("list_objects_v2")
-        pages = paginator.paginate(Bucket=self.bucket, Prefix=prefix)
-
-        for page in pages:
-          if "Contents" not in page:
-            continue
-
-          for obj in page["Contents"]:
-            key = obj["Key"]
-
-            if not key.endswith(".parquet"):
-              continue
-
-            path_parts = key.replace(prefix, "").split("/")
-
-            if len(path_parts) >= 2:
-              table_name = path_parts[0]
-            else:
-              logger.debug(f"Skipping file with unexpected path structure: {key}")
-              continue
-
-            if table_name not in tables_info:
-              tables_info[table_name] = []
-
-            tables_info[table_name].append(key)
-
-    logger.info(f"Discovered {len(tables_info)} tables with files:")
-    for table_name, files in tables_info.items():
-      logger.info(f"  - {table_name}: {len(files)} files")
-
-    return tables_info
 
   async def _stage_table_with_retry(
     self,
@@ -1068,9 +943,7 @@ class DuckDBStager:
     total_tables = len(tables)
     for i, (table_name, entity_type) in enumerate(tables.items(), 1):
       is_large = table_name in LARGE_STAGING_TABLES
-      # NULL out embedding columns for Label/Structure (unused after enrichment).
-      # Element embeddings are kept for the LanceDB vector search index.
-      null_columns = ["embedding"] if table_name in EMBEDDING_NULL_TABLES else None
+      null_columns = self._get_null_columns(table_name)
 
       timeout = get_staging_timeout(table_name)
 
@@ -1228,83 +1101,6 @@ class DuckDBStager:
       logger.info(
         f"Skipped {len(skipped_tables)} tables with no files: {skipped_tables}"
       )
-
-    if failed_tables:
-      logger.warning(
-        f"DuckDB table creation: {len(successful_tables)} succeeded, "
-        f"{len(failed_tables)} failed"
-      )
-      for tbl_name, error in failed_tables:
-        logger.error(f"  Failed: {tbl_name} - {error}")
-
-      raise RuntimeError(
-        f"Failed to create {len(failed_tables)} DuckDB tables: "
-        f"{[t[0] for t in failed_tables]}"
-      )
-
-    return successful_tables, table_infos
-
-  async def _create_tables_with_info(
-    self,
-    tables_info: dict[str, list[str]],
-    graph_client: "GraphClient",
-    null_columns: list[str] | None = None,
-  ) -> tuple[list[str], dict[str, TableInfo]]:
-    """
-    Create DuckDB staging tables from explicit file lists (legacy mode).
-
-    Args:
-        tables_info: Dictionary mapping table names to S3 keys
-        graph_client: Graph API client instance
-
-    Returns:
-        Tuple of (successful_table_names, table_info_dict)
-    """
-    successful_tables: list[str] = []
-    table_infos: dict[str, TableInfo] = {}
-    failed_tables: list[tuple[str, str]] = []
-
-    for table_name, s3_keys in tables_info.items():
-      logger.info(f"Creating DuckDB table: {table_name} ({len(s3_keys)} files)")
-
-      s3_files = [f"s3://{self.bucket}/{key}" for key in s3_keys]
-
-      try:
-        response = await graph_client.create_table(
-          graph_id=self.graph_id,
-          table_name=table_name,
-          s3_pattern=s3_files,
-          null_columns=null_columns,
-          timeout=1800,
-        )
-
-        if response.get("status") == "failed":
-          error = response.get("error", "Unknown error")
-          logger.error(f"Failed to create DuckDB table {table_name}: {error}")
-          failed_tables.append((table_name, error))
-          continue
-
-        result = response.get("result", {})
-        duration = response.get("duration_seconds", result.get("duration_seconds", 0))
-        row_count = result.get("row_count", 0)
-
-        logger.info(
-          f"Created DuckDB table {table_name} in {duration:.1f}s "
-          f"(from {len(s3_keys)} files, {row_count} rows)"
-        )
-
-        successful_tables.append(table_name)
-        table_infos[table_name] = TableInfo(
-          name=table_name,
-          row_count=row_count,
-          file_count=len(s3_keys),
-          staged_at=datetime.now(UTC).isoformat(),
-        )
-
-      except Exception as e:
-        logger.error(f"Failed to create DuckDB table {table_name}: {e}")
-        failed_tables.append((table_name, str(e)))
-        continue
 
     if failed_tables:
       logger.warning(

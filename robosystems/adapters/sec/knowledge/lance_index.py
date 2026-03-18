@@ -97,7 +97,7 @@ class LanceIndexBuilder:
           )
         QUALIFY ROW_NUMBER() OVER (
           PARTITION BY e.qname
-          ORDER BY e.canonical_confidence DESC NULLS LAST
+          ORDER BY e.canonical_confidence DESC NULLS LAST, e.identifier
         ) = 1
       """).fetch_arrow_table()
 
