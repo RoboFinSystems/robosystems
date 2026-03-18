@@ -532,8 +532,8 @@ class TestSecPostMaterializePublishSensor:
 
     assert len(result) == 1
     assert isinstance(result[0], RunRequest)
-    assert result[0].job_name == "shared_replicas_refresh"
-    assert result[0].tags["phase"] == "replica_refresh"
+    assert result[0].job_name == "sec_vector_s3_publish"
+    assert result[0].tags["phase"] == "vector_s3_publish"
 
   @patch("robosystems.adapters.sec.pipeline.sensors.env")
   def test_skips_when_next_job_already_running(self, mock_env):

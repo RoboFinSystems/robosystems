@@ -260,25 +260,34 @@ aws dynamodb update-item \
 # ==================================================================================
 # LANCEDB VECTOR INDEX DOWNLOAD (Optional — for MCP vector search)
 # ==================================================================================
-# Downloads the LanceDB vector search index from S3 if available. This enables
-# fast (~5ms) semantic search over 2.6M+ element embeddings in the resolve-element
-# MCP tool. Non-fatal: replicas boot normally without it (falls back to canonical matching).
-echo "Downloading LanceDB vector index from S3 (optional)..."
+# Downloads LanceDB vector search indexes from S3 if available. These enable
+# fast (~5ms) semantic search over element embeddings in the resolve-element
+# MCP tool. Non-fatal: replicas boot normally without them (falls back to canonical matching).
+#
+# Index files follow the pattern: {graph_id}.{table_name}.lance.tar.gz
+# Extracted to: /mnt/ladybug-data/databases/lance/{graph_id}/{table_name}/
+echo "Downloading LanceDB vector indexes from S3 (optional)..."
 
-LANCE_ARCHIVE_URI="${SHARED_DATABASE_S3_PREFIX%/}/sec.lance.tar.gz"
 LANCE_DIR="/mnt/ladybug-data/databases/lance"
-
 mkdir -p "${LANCE_DIR}"
-START_TIME=$(date +%s)
-aws s3 cp "${LANCE_ARCHIVE_URI}" "/tmp/sec.lance.tar.gz" \
-  --region "${AWS_REGION}" --only-show-errors 2>/dev/null && {
-  tar -xzf /tmp/sec.lance.tar.gz -C "${LANCE_DIR}/"
-  rm -f /tmp/sec.lance.tar.gz
-  ELAPSED=$(( $(date +%s) - START_TIME ))
-  echo "LanceDB index extracted to ${LANCE_DIR} in ${ELAPSED}s"
-} || {
-  echo "LanceDB index not available (non-fatal, falling back to canonical matching)"
-}
+
+# Download vector index for each shared repository
+IFS=',' read -ra REPOS <<< "${SHARED_REPOSITORIES}"
+for REPO in "${REPOS[@]}"; do
+  REPO=$(echo "$REPO" | tr -d ' ')
+  # Element table vector index
+  LANCE_ARCHIVE_URI="${SHARED_DATABASE_S3_PREFIX%/}/${REPO}.Element.lance.tar.gz"
+  START_TIME=$(date +%s)
+  aws s3 cp "${LANCE_ARCHIVE_URI}" "/tmp/${REPO}.Element.lance.tar.gz" \
+    --region "${AWS_REGION}" --only-show-errors 2>/dev/null && {
+    tar -xzf "/tmp/${REPO}.Element.lance.tar.gz" -C "${LANCE_DIR}/"
+    rm -f "/tmp/${REPO}.Element.lance.tar.gz"
+    ELAPSED=$(( $(date +%s) - START_TIME ))
+    echo "LanceDB index for ${REPO}/Element extracted to ${LANCE_DIR} in ${ELAPSED}s"
+  } || {
+    echo "LanceDB index for ${REPO}/Element not available (non-fatal)"
+  }
+done
 
 # ==================================================================================
 # DUCKDB STAGING DOWNLOAD (Skipped)
