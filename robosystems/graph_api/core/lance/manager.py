@@ -12,7 +12,8 @@ Follows the same lifecycle pattern as DuckDB staging:
 Directory structure on disk:
   {LANCE_INDEX_PATH}/
     {graph_id}/
-      {table_name}.lance/    ← LanceDB directory (one per indexed table)
+      {table_name}/          ← LanceDB db directory (one per indexed table)
+        {table_name}.lance/  ← LanceDB internal format
 
 The embedding column convention:
   - Column must be named "embedding"
@@ -60,12 +61,16 @@ class LanceManager:
     return self.base_path / graph_id
 
   def _table_dir(self, graph_id: str, table_name: str) -> Path:
-    """Get the lance directory for a specific table's index."""
-    return self._graph_dir(graph_id) / f"{table_name}.lance"
+    """Get the lance DB directory for a specific table's index.
+
+    LanceDB creates {table_name}.lance/ inside this directory, so the full
+    on-disk path is: {base_path}/{graph_id}/{table_name}/{table_name}.lance/
+    """
+    return self._graph_dir(graph_id) / table_name
 
   def _build_dir(self, graph_id: str, table_name: str) -> Path:
     """Get a temporary build directory (atomic swap on success)."""
-    return self._graph_dir(graph_id) / f"{table_name}.lance.building"
+    return self._graph_dir(graph_id) / f"{table_name}.building"
 
   def index_exists(self, graph_id: str, table_name: str) -> bool:
     """Check if a lance index exists for this graph + table."""
@@ -167,26 +172,39 @@ class LanceManager:
 
     logger.info(f"Building lance index for {graph_id}/{table_name} from {duckdb_path}")
 
-    # Step 1: Execute the caller's query against DuckDB staging
-    con = duckdb.connect(str(duckdb_path), read_only=True)
+    # Step 1: Execute the caller's query against DuckDB staging.
+    # Use the DuckDB connection pool if available — DuckDB does not allow
+    # opening a second connection with different config (read_only vs read_write,
+    # different memory_limit) on the same file. The pool already manages the
+    # connection used by staging, so we borrow it.
     try:
-      con.execute(f"SET memory_limit = '{memory_limit}'")
+      from robosystems.graph_api.core.duckdb import get_duckdb_pool
 
-      logger.info("Executing vector extraction query against DuckDB...")
-      arrow_table = con.execute(query).fetch_arrow_table()
-      row_count = arrow_table.num_rows
+      pool = get_duckdb_pool()
+      with pool.get_connection(graph_id) as con:
+        logger.info("Executing vector extraction query against DuckDB (via pool)...")
+        arrow_table = con.execute(query).fetch_arrow_table()
+    except Exception:
+      # Fallback: open a standalone connection (works when no pool exists,
+      # e.g., in tests or when the pool hasn't opened this database yet)
+      logger.info("Pool unavailable, opening standalone DuckDB connection...")
+      con = duckdb.connect(str(duckdb_path), read_only=True)
+      try:
+        con.execute(f"SET memory_limit = '{memory_limit}'")
+        arrow_table = con.execute(query).fetch_arrow_table()
+      finally:
+        con.close()
 
-      # Validate the query returned a "vector" column
-      col_names = [field.name for field in arrow_table.schema]
-      if "vector" not in col_names:
-        raise ValueError(
-          'Query must return a "vector" column (e.g., embedding::FLOAT[384] AS vector)'
-        )
+    row_count = arrow_table.num_rows
 
-      logger.info(f"Extracted {row_count:,} rows for lance index")
+    # Validate the query returned a "vector" column
+    col_names = [field.name for field in arrow_table.schema]
+    if "vector" not in col_names:
+      raise ValueError(
+        'Query must return a "vector" column (e.g., embedding::FLOAT[384] AS vector)'
+      )
 
-    finally:
-      con.close()
+    logger.info(f"Extracted {row_count:,} rows for lance index")
 
     if row_count == 0:
       raise ValueError("Query returned no rows — cannot build vector index.")
@@ -225,7 +243,7 @@ class LanceManager:
 
     # Step 3: Atomic swap — replace old index with new one
     if final_dir.exists():
-      backup_dir = graph_dir / f"{table_name}.lance.old"
+      backup_dir = graph_dir / f"{table_name}.old"
       if backup_dir.exists():
         shutil.rmtree(backup_dir)
       final_dir.rename(backup_dir)
@@ -367,8 +385,8 @@ class LanceManager:
     logger.info(f"Exporting lance index {graph_id}/{table_name} to {output_path}")
 
     with tarfile.open(str(output_path), "w:gz") as tar:
-      # Archive with arcname so extraction gives {graph_id}/{table_name}.lance/
-      tar.add(str(table_dir), arcname=f"{graph_id}/{table_name}.lance")
+      # Archive with arcname so extraction gives {graph_id}/{table_name}/
+      tar.add(str(table_dir), arcname=f"{graph_id}/{table_name}")
 
     tar_size = output_path.stat().st_size
     duration_ms = (time.time() - start_time) * 1000

@@ -386,9 +386,9 @@ class TestLanceManagerBuild:
 
     # No .old or .building directories left
     graph_dir = manager._graph_dir("sec")
-    assert not (graph_dir / "Element.lance.old").exists()
-    assert not (graph_dir / "Element.lance.building").exists()
-    assert (graph_dir / "Element.lance").is_dir()
+    assert not (graph_dir / "Element.old").exists()
+    assert not (graph_dir / "Element.building").exists()
+    assert (graph_dir / "Element").is_dir()
 
   def test_build_multiple_graphs(
     self, manager, duckdb_with_elements, simple_vector_query
@@ -577,8 +577,8 @@ class TestLanceManagerExport:
     with tarfile.open(str(output), "r:gz") as tar:
       tar.extractall(str(extract_dir))
 
-    # Should have sec/Element.lance/ directory
-    assert (extract_dir / "sec" / "Element.lance").is_dir()
+    # Should have sec/Element/ directory (LanceDB creates Element.lance/ inside)
+    assert (extract_dir / "sec" / "Element").is_dir()
 
   def test_export_no_index_raises(self, manager):
     """Export fails with clear error when no index exists."""

@@ -132,15 +132,7 @@ Use the returned query_hint directly in read-graph-cypher for immediate results.
     except Exception as e:
       logger.warning(f"Embedding failed: {e}")
 
-    # Step 2: Try vector search via Graph API (covers all elements)
-    if query_embedding and self.vector_search_enabled:
-      lance_result = await self._resolve_via_lance(
-        result, query_embedding, ticker, report_id
-      )
-      if lance_result["matches"]:
-        return lance_result
-
-    # Step 3: Fall back to canonical concept matching
+    # Step 2: Try canonical concept matching first (curated, deterministic)
     if query_embedding:
       try:
         canonical = enricher.match_canonical_from_query(query_embedding)
@@ -151,6 +143,15 @@ Use the returned query_hint directly in read-graph-cypher for immediate results.
         logger.warning(f"Canonical matching failed: {e}")
 
     canonical_id = result["canonical_id"]
+
+    # Step 3: If no canonical match, try vector search (covers all elements)
+    if not canonical_id and query_embedding and self.vector_search_enabled:
+      lance_result = await self._resolve_via_lance(
+        result, query_embedding, ticker, report_id
+      )
+      if lance_result["matches"]:
+        return lance_result
+
     if not canonical_id:
       return await self._resolve_text_fallback(result, concept, ticker, report_id)
 
@@ -296,6 +297,9 @@ Use the returned query_hint directly in read-graph-cypher for immediate results.
               "score": similarity_by_qname.get(qname, 0.0),
             }
           )
+
+      # Sort by similarity score (highest first), not fact count
+      result["matches"].sort(key=lambda m: m.get("score", 0.0), reverse=True)
 
       # Set canonical info from top match if available
       if result["matches"] and unique_results[0].get("canonical_concept"):

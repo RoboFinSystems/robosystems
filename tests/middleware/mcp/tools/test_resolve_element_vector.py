@@ -11,7 +11,6 @@ import pytest
 
 from robosystems.middleware.mcp.tools.resolve_element_tool import ResolveElementTool
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -203,12 +202,24 @@ class TestVectorSearchResolution:
   async def test_lance_deduplicates_qnames(self, tool, mock_client):
     """Duplicate qnames from vector search are deduplicated."""
     mock_client.vector_search.return_value = [
-      {"qname": "us-gaap:Revenues", "distance": 0.05, "canonical_concept": "revenue",
-       "canonical_confidence": 0.95},
-      {"qname": "us-gaap:Revenues", "distance": 0.06, "canonical_concept": "revenue",
-       "canonical_confidence": 0.95},
-      {"qname": "us-gaap:NetIncomeLoss", "distance": 0.10, "canonical_concept": "net_income",
-       "canonical_confidence": 0.92},
+      {
+        "qname": "us-gaap:Revenues",
+        "distance": 0.05,
+        "canonical_concept": "revenue",
+        "canonical_confidence": 0.95,
+      },
+      {
+        "qname": "us-gaap:Revenues",
+        "distance": 0.06,
+        "canonical_concept": "revenue",
+        "canonical_confidence": 0.95,
+      },
+      {
+        "qname": "us-gaap:NetIncomeLoss",
+        "distance": 0.10,
+        "canonical_concept": "net_income",
+        "canonical_confidence": 0.92,
+      },
     ]
 
     mock_client.execute_query = _query_router()

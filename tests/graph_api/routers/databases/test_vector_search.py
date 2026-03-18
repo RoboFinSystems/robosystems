@@ -157,7 +157,9 @@ class TestVectorSearchRouter:
     assert response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
 
   @patch("robosystems.graph_api.routers.databases.vector_search._get_lance_manager")
-  def test_build_valid_memory_limit_formats(self, mock_get_manager, client, monkeypatch):
+  def test_build_valid_memory_limit_formats(
+    self, mock_get_manager, client, monkeypatch
+  ):
     """Various valid DuckDB memory formats are accepted by the validator."""
     monkeypatch.setenv("LBUG_ROLE", "master")
 

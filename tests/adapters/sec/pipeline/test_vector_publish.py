@@ -71,9 +71,7 @@ class TestSecVectorS3Published:
   )
   @patch("robosystems.config.storage.graph.get_shared_repo_database_key")
   @patch("robosystems.adapters.sec.pipeline.vector_publish.env")
-  def test_successful_export_and_upload(
-    self, mock_env, mock_get_key, mock_get_client
-  ):
+  def test_successful_export_and_upload(self, mock_env, mock_get_key, mock_get_client):
     """Asset exports, uploads to S3, and returns full metadata."""
     mock_env.ENVIRONMENT = "prod"
     mock_env.AWS_REGION = "us-east-1"
@@ -97,8 +95,8 @@ class TestSecVectorS3Published:
     mock_s3.head_object.return_value = {"ContentLength": 44564480}
 
     mock_boto3 = MagicMock()
-    mock_boto3.client.side_effect = (
-      lambda svc, **kw: mock_sts if svc == "sts" else mock_s3
+    mock_boto3.client.side_effect = lambda svc, **kw: (
+      mock_sts if svc == "sts" else mock_s3
     )
 
     with patch.dict(sys.modules, {"boto3": mock_boto3}):
@@ -152,8 +150,8 @@ class TestSecVectorS3Published:
     mock_s3.head_object.return_value = {"ContentLength": 1024}
 
     mock_boto3 = MagicMock()
-    mock_boto3.client.side_effect = (
-      lambda svc, **kw: mock_sts if svc == "sts" else mock_s3
+    mock_boto3.client.side_effect = lambda svc, **kw: (
+      mock_sts if svc == "sts" else mock_s3
     )
 
     with patch.dict(sys.modules, {"boto3": mock_boto3}):

@@ -265,7 +265,7 @@ aws dynamodb update-item \
 # MCP tool. Non-fatal: replicas boot normally without them (falls back to canonical matching).
 #
 # Index files follow the pattern: {graph_id}.{table_name}.lance.tar.gz
-# Extracted to: /mnt/ladybug-data/databases/lance/{graph_id}/{table_name}.lance/
+# Extracted to: /mnt/ladybug-data/databases/lance/{graph_id}/{table_name}/
 echo "Downloading LanceDB vector indexes from S3 (optional)..."
 
 LANCE_DIR="/mnt/ladybug-data/databases/lance"
