@@ -28,7 +28,7 @@ import os
 import re
 
 from fastapi import APIRouter, HTTPException, status
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from robosystems.logger import logger
 
@@ -124,6 +124,12 @@ class VectorExportRequest(BaseModel):
     default=None,
     description="S3 object key for the upload.",
   )
+
+  @model_validator(mode="after")
+  def validate_s3_params(self):
+    if bool(self.s3_bucket) != bool(self.s3_key):
+      raise ValueError("s3_bucket and s3_key must both be provided or both omitted")
+    return self
 
   class Config:
     extra = "forbid"

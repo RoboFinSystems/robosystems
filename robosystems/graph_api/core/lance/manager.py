@@ -416,7 +416,9 @@ class LanceManager:
     if s3_bucket and s3_key:
       import boto3
 
-      s3 = boto3.client("s3")
+      from robosystems.config import env as _env
+
+      s3 = boto3.client("s3", region_name=_env.AWS_REGION)
       logger.info(f"Uploading lance tar.gz to s3://{s3_bucket}/{s3_key}")
       s3.upload_file(str(output_path), s3_bucket, s3_key)
 
