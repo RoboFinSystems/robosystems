@@ -31,15 +31,16 @@ Pipeline stages (run independently via separate jobs):
    - sec_historical_lbug_s3_published - Publish historical .lbug to S3 for replica cluster
    - sec_duckdb_s3_published - Publish raw .duckdb to S3
    - sec_historical_duckdb_s3_published - Publish historical .duckdb to S3
+   - sec_vector_s3_published - Export and publish vector index to S3 for replica cluster
    - sec_lbug_r2_published - Publish raw .lbug to R2 for zero-egress subscriber downloads
 
 6. ARTIFACTS (graph-based confidence refinement):
    - sec_knowledge_artifacts - Generate element + structure knowledge artifacts
 
 Nightly incremental chain (sensor-driven):
-  download → process (250 batch loop) → stage (DuckDB INSERT)
+  download → process (250 batch loop) → stage (DuckDB INSERT + vector build)
   → materialize (full LadybugDB rebuild) → lbug S3 publish
-  → duckdb S3 publish → replica refresh
+  → duckdb S3 publish → vector S3 publish → replica refresh
 
 Usage:
     from robosystems.adapters.sec.pipeline import get_dagster_components
@@ -107,6 +108,7 @@ from robosystems.adapters.sec.pipeline.jobs import (
   sec_process_job,
   sec_stage_job,
   sec_staged_materialize_job,
+  sec_vector_s3_publish_job,
 )
 from robosystems.adapters.sec.pipeline.materialize import (
   sec_graph_materialized,
@@ -130,6 +132,7 @@ from robosystems.adapters.sec.pipeline.stage import (
   sec_duckdb_staged,
   sec_historical_duckdb_staged,
 )
+from robosystems.adapters.sec.pipeline.vector_publish import sec_vector_s3_published
 
 
 def get_dagster_components():
@@ -156,6 +159,7 @@ def get_dagster_components():
       sec_duckdb_s3_published,
       sec_historical_duckdb_s3_published,
       sec_lbug_r2_published,
+      sec_vector_s3_published,
       sec_knowledge_artifacts,
       *entity_sync["assets"],
     ],
@@ -174,6 +178,7 @@ def get_dagster_components():
       sec_duckdb_s3_publish_job,
       sec_historical_duckdb_s3_publish_job,
       sec_lbug_r2_publish_job,
+      sec_vector_s3_publish_job,
       sec_artifact_generation_job,
       sec_historical_lbug_s3_publish_job,
       *entity_sync["jobs"],
@@ -249,4 +254,6 @@ __all__ = [
   "sec_stage_job",
   "sec_stage_to_materialize_sensor",
   "sec_staged_materialize_job",
+  "sec_vector_s3_publish_job",
+  "sec_vector_s3_published",
 ]

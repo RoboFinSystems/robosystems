@@ -49,6 +49,7 @@ from .jobs import (
   sec_lbug_s3_publish_job,
   sec_materialize_job,
   sec_process_job,
+  sec_vector_s3_publish_job,
 )
 
 
@@ -548,16 +549,18 @@ def sec_stage_to_materialize_sensor(context: RunStatusSensorContext):
     sec_materialize_job,
     sec_lbug_s3_publish_job,
     sec_duckdb_s3_publish_job,
+    sec_vector_s3_publish_job,
   ],
   request_jobs=[
     sec_lbug_s3_publish_job,
     sec_duckdb_s3_publish_job,
+    sec_vector_s3_publish_job,
     shared_replicas_refresh_job,
   ],
   default_status=DefaultSensorStatus.STOPPED,  # Enable in Dagster UI when ready
   minimum_interval_seconds=60,
   description=(
-    "Chain: materialize → lbug S3 publish → duckdb S3 publish → replica refresh"
+    "Chain: materialize → lbug S3 → duckdb S3 → vector S3 → replica refresh"
   ),
 )
 def sec_post_materialize_publish_sensor(context: RunStatusSensorContext):
@@ -566,7 +569,8 @@ def sec_post_materialize_publish_sensor(context: RunStatusSensorContext):
   Sequential chain to avoid overloading the instance:
   - On materialize success: triggers lbug S3 publish
   - On lbug publish success: triggers duckdb S3 publish
-  - On duckdb publish success: triggers rolling replica refresh
+  - On duckdb publish success: triggers vector index S3 publish
+  - On vector publish success: triggers rolling replica refresh
 
   The replica refresh uses conservative policies (min_healthy=100%,
   max_healthy=200%) so old instances stay alive serving traffic until
@@ -595,9 +599,14 @@ def sec_post_materialize_publish_sensor(context: RunStatusSensorContext):
     context.log.info("LadybugDB S3 publish complete, triggering DuckDB S3 publish")
 
   elif dagster_run.job_name == "sec_duckdb_s3_publish":
+    next_job_name = "sec_vector_s3_publish"
+    next_phase = "vector_s3_publish"
+    context.log.info("DuckDB S3 publish complete, triggering vector index S3 publish")
+
+  elif dagster_run.job_name == "sec_vector_s3_publish":
     next_job_name = "shared_replicas_refresh"
     next_phase = "replica_refresh"
-    context.log.info("DuckDB S3 publish complete, triggering replica refresh")
+    context.log.info("Vector S3 publish complete, triggering replica refresh")
 
   else:
     return

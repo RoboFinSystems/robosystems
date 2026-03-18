@@ -120,8 +120,14 @@ if [ -n "${STAGING_MOUNT_SOURCE}" ] && [ -n "${STAGING_MOUNT_TARGET}" ]; then
   echo "Adding staging volume mount: ${STAGING_MOUNT_SOURCE} -> ${STAGING_MOUNT_TARGET}"
 fi
 if [ -n "${LANCE_MOUNT_SOURCE}" ] && [ -n "${LANCE_MOUNT_TARGET}" ] && [ -d "${LANCE_MOUNT_SOURCE}" ]; then
-  VOLUME_MOUNTS="${VOLUME_MOUNTS} -v ${LANCE_MOUNT_SOURCE}:${LANCE_MOUNT_TARGET}:ro"
-  echo "Adding lance volume mount: ${LANCE_MOUNT_SOURCE} -> ${LANCE_MOUNT_TARGET} (read-only)"
+  # Writers need read-write for vector/build; replicas are read-only
+  if [ "${NODE_TYPE}" = "shared_replica" ]; then
+    VOLUME_MOUNTS="${VOLUME_MOUNTS} -v ${LANCE_MOUNT_SOURCE}:${LANCE_MOUNT_TARGET}:ro"
+    echo "Adding lance volume mount: ${LANCE_MOUNT_SOURCE} -> ${LANCE_MOUNT_TARGET} (read-only)"
+  else
+    VOLUME_MOUNTS="${VOLUME_MOUNTS} -v ${LANCE_MOUNT_SOURCE}:${LANCE_MOUNT_TARGET}"
+    echo "Adding lance volume mount: ${LANCE_MOUNT_SOURCE} -> ${LANCE_MOUNT_TARGET} (read-write)"
+  fi
 fi
 
 # Run the container with CloudWatch logging

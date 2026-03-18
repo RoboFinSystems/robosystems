@@ -312,6 +312,17 @@ class LadybugDatabaseManager:
         # Legacy cleanup for old .db directories
         shutil.rmtree(db_path)
 
+      # Clean up lance vector indexes for this graph
+      try:
+        from robosystems.graph_api.core.lance import LanceManager
+
+        lance_mgr = LanceManager()
+        lance_result = lance_mgr.delete(graph_id)
+        if lance_result.get("deleted"):
+          logger.info(f"Deleted lance indexes for {graph_id}")
+      except Exception as lance_err:
+        logger.warning(f"Could not delete lance indexes for {graph_id}: {lance_err}")
+
       # Clean up DuckDB staging database alongside LadybugDB database
       # Skip if preserve_duckdb is True (for retry/incremental scenarios)
       if not preserve_duckdb:

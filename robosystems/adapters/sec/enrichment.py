@@ -718,7 +718,7 @@ class SemanticEnricher:
         best_score = cos_sim
         best = concept
 
-    if best_score >= 0.50:
+    if best_score >= 0.75:
       return best
     return None
 

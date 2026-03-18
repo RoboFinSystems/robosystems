@@ -42,14 +42,14 @@ class TestGetDagsterComponents:
   def test_expected_number_of_assets(self):
     """Test that the expected number of assets are registered."""
     components = get_dagster_components()
-    # 14 shared pipeline assets + 3 entity sync assets (extract, transform, load)
-    assert len(components["assets"]) == 17
+    # 15 shared pipeline assets + 1 vector s3 publish + 2 entity sync assets (extract/transform/load)
+    assert len(components["assets"]) == 18
 
   def test_expected_number_of_jobs(self):
     """Test that the expected number of jobs are registered."""
     components = get_dagster_components()
-    # 16 shared pipeline jobs + 1 entity sync job
-    assert len(components["jobs"]) == 17
+    # 16 shared pipeline jobs + 1 vector s3 publish + 1 entity sync
+    assert len(components["jobs"]) == 18
 
   def test_expected_number_of_sensors(self):
     """Test that the expected number of sensors are registered."""
@@ -76,6 +76,7 @@ class TestGetDagsterComponents:
       "sec_graph_materialized",
       "sec_lbug_s3_published",
       "sec_lbug_r2_published",
+      "sec_vector_s3_published",
       "sec_knowledge_artifacts",
       "sec_entity_extract",
       "sec_entity_transform",
@@ -97,6 +98,7 @@ class TestGetDagsterComponents:
       "sec_materialize",
       "sec_staged_materialize",
       "sec_entity_sync",
+      "sec_vector_s3_publish",
       "sec_lbug_r2_publish",
     }
 

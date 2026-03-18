@@ -1,7 +1,7 @@
 """Tests for DuckDB staging operations.
 
-Tests DuckDBStager initialization, stage_to_duckdb with glob and legacy modes,
-stage_incremental_to_duckdb, retry logic, and error handling.
+Tests DuckDBStager initialization, stage_to_duckdb, stage_incremental_to_duckdb,
+retry logic, and error handling.
 """
 
 from unittest.mock import AsyncMock, patch
@@ -124,7 +124,7 @@ class TestStageToDuckDBGlobMode:
     from robosystems.adapters.sec.processors.ingestion.staging import DuckDBStager
 
     stager = DuckDBStager()
-    result = await stager.stage_to_duckdb(use_glob=True)
+    result = await stager.stage_to_duckdb()
 
     assert result.status == "success"
     assert len(result.table_names) == 2
@@ -167,7 +167,7 @@ class TestStageToDuckDBGlobMode:
     from robosystems.adapters.sec.processors.ingestion.staging import DuckDBStager
 
     stager = DuckDBStager()
-    result = await stager.stage_to_duckdb(use_glob=True)
+    result = await stager.stage_to_duckdb()
 
     assert result.status == "success"
     assert "Entity" in result.table_names
@@ -208,47 +208,13 @@ class TestStageToDuckDBGlobMode:
     from robosystems.adapters.sec.processors.ingestion.staging import DuckDBStager
 
     stager = DuckDBStager()
-    result = await stager.stage_to_duckdb(year=2024, use_glob=True)
+    result = await stager.stage_to_duckdb(year=2024)
 
     assert result.status == "success"
     # Verify the S3 pattern uses the year filter
     create_call = mock_client.create_table.call_args
     s3_pattern = create_call.kwargs["s3_pattern"]
     assert "filed=2024-Q*" in s3_pattern
-
-
-@pytest.mark.unit
-class TestStageToDuckDBLegacyMode:
-  """Tests for stage_to_duckdb in legacy (file list) mode."""
-
-  @pytest.mark.asyncio
-  @patch(
-    "robosystems.adapters.sec.processors.ingestion.staging.get_staging_duckdb_path"
-  )
-  @patch("robosystems.adapters.sec.processors.ingestion.staging.get_graph_client")
-  @patch("robosystems.adapters.sec.processors.ingestion.staging.S3Client")
-  @patch("robosystems.adapters.sec.processors.ingestion.staging.env")
-  async def test_no_data_in_legacy_mode(
-    self, mock_env, mock_s3_client, mock_get_client, mock_duckdb_path
-  ):
-    """Returns no_data when no processed files are found in legacy mode."""
-    mock_env.SHARED_PROCESSED_BUCKET = "test-bucket"
-    mock_duckdb_path.return_value = "/data/staging/sec.duckdb"
-
-    mock_client = AsyncMock()
-    mock_get_client.return_value = mock_client
-
-    from robosystems.adapters.sec.processors.ingestion.staging import DuckDBStager
-
-    stager = DuckDBStager()
-
-    # Mock _discover_processed_files to return empty
-    stager._discover_processed_files = AsyncMock(return_value={})
-
-    result = await stager.stage_to_duckdb(use_glob=False)
-
-    assert result.status == "no_data"
-    assert "No processed files found" in result.error
 
 
 @pytest.mark.unit
@@ -591,7 +557,7 @@ class TestStageToDuckDBResetStaging:
     from robosystems.adapters.sec.processors.ingestion.staging import DuckDBStager
 
     stager = DuckDBStager()
-    await stager.stage_to_duckdb(reset_staging=True, use_glob=True)
+    await stager.stage_to_duckdb(reset_staging=True)
 
     mock_client.delete_database.assert_called_once_with("sec", staging_only=True)
 
@@ -626,7 +592,7 @@ class TestStageToDuckDBResetStaging:
 
     stager = DuckDBStager()
     # Should NOT raise despite reset failure
-    result = await stager.stage_to_duckdb(reset_staging=True, use_glob=True)
+    result = await stager.stage_to_duckdb(reset_staging=True)
     assert result.status == "success"
 
 
@@ -665,7 +631,7 @@ class TestStageToDuckDBExceptionHandling:
     from robosystems.adapters.sec.processors.ingestion.staging import DuckDBStager
 
     stager = DuckDBStager()
-    result = await stager.stage_to_duckdb(use_glob=True)
+    result = await stager.stage_to_duckdb()
 
     assert result.status == "error"
     assert "Schema error" in result.error
