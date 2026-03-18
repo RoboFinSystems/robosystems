@@ -76,7 +76,9 @@ class LanceIndexBuilder:
       total = row[0] if row else 0
       logger.info(f"Total elements in staging: {total:,}")
 
-      logger.info("Querying fact-linked numeric elements with embeddings...")
+      logger.info(
+        "Querying fact-linked numeric elements with embeddings (deduplicated by qname)..."
+      )
       arrow_table = con.execute("""
         SELECT
           e.qname,
@@ -93,6 +95,10 @@ class LanceIndexBuilder:
           AND e.identifier IN (
             SELECT DISTINCT dst FROM FACT_HAS_ELEMENT
           )
+        QUALIFY ROW_NUMBER() OVER (
+          PARTITION BY e.qname
+          ORDER BY e.canonical_confidence DESC NULLS LAST
+        ) = 1
       """).fetch_arrow_table()
 
       row_count = arrow_table.num_rows
