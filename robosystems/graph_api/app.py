@@ -298,6 +298,9 @@ def create_app() -> FastAPI:
   app.include_router(
     databases.memory.router
   )  # Memory management for staging/materialization
+  app.include_router(
+    databases.vector_search.router
+  )  # LanceDB vector index (build/export on writers, search on all)
 
   # Task management (generic for all task types)
   app.include_router(tasks.router)

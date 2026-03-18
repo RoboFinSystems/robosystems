@@ -1096,6 +1096,113 @@ class GraphClient(BaseGraphClient):
     # Return just the tables array for compatibility
     return schema_data.get("tables", [])
 
+  async def vector_search(
+    self,
+    graph_id: str,
+    table_name: str,
+    embedding: list[float],
+    limit: int = 20,
+    select: list[str] | None = None,
+  ) -> list[dict[str, Any]]:
+    """
+    Search for similar rows by embedding via the Graph API vector index.
+
+    Calls the LanceDB vector search endpoint on graph instances (master
+    or replicas). The index must have been built via vector_build first.
+
+    Args:
+        graph_id: Graph database identifier (e.g., "sec")
+        table_name: Table whose vector index to search (e.g., "Element")
+        embedding: Query embedding vector (e.g., 384-dim float array)
+        limit: Maximum number of results to return
+        select: Columns to include in results. If None, returns all.
+
+    Returns:
+        List of result dicts with matched columns + distance.
+    """
+    json_data: dict[str, Any] = {"embedding": embedding, "limit": limit}
+    if select is not None:
+      json_data["select"] = select
+    response = await self._request(
+      "POST",
+      f"/databases/{graph_id}/tables/{table_name}/vector/search",
+      json_data=json_data,
+      timeout=10.0,
+    )
+    data = response.json()
+    return data.get("results", [])
+
+  async def vector_build(
+    self,
+    graph_id: str,
+    table_name: str,
+    query: str,
+    memory_limit: str = "8GB",
+    timeout: int = 900,
+  ) -> dict[str, Any]:
+    """
+    Build a vector index from a DuckDB query on the graph instance.
+
+    Runs the provided SQL query against the DuckDB staging database and
+    builds an IVF-PQ vector index from the results. The query must return
+    a "vector" column — all other columns become searchable metadata.
+
+    Args:
+        graph_id: Graph database identifier
+        table_name: Name for the lance index (e.g., "Element")
+        query: DuckDB SQL that selects rows to index. Must include a
+            "vector" column (e.g., ``embedding::FLOAT[384] AS vector``).
+        memory_limit: DuckDB memory limit for the query
+        timeout: Request timeout in seconds (build can take 10+ minutes)
+
+    Returns:
+        Dict with row_count, num_partitions, index_size_mb, duration_ms.
+    """
+    response = await self._request(
+      "POST",
+      f"/databases/{graph_id}/tables/{table_name}/vector/build",
+      json_data={"query": query, "memory_limit": memory_limit},
+      timeout=float(timeout),
+    )
+    return response.json()
+
+  async def vector_export(
+    self,
+    graph_id: str,
+    table_name: str,
+    s3_bucket: str | None = None,
+    s3_key: str | None = None,
+    timeout: int = 300,
+  ) -> dict[str, Any]:
+    """
+    Export a vector index as tar.gz, optionally uploading to S3.
+
+    When s3_bucket and s3_key are provided, the Graph API instance uploads
+    the tar.gz directly to S3 (required because the caller may not have
+    access to the instance's filesystem).
+
+    Args:
+        graph_id: Graph database identifier
+        table_name: Table whose index to export
+        s3_bucket: S3 bucket to upload to (optional)
+        s3_key: S3 object key (optional)
+        timeout: Request timeout in seconds
+
+    Returns:
+        Dict with size_mb, duration_ms, and s3_uri if uploaded.
+    """
+    json_data: dict[str, Any] = {}
+    if s3_bucket and s3_key:
+      json_data["s3_bucket"] = s3_bucket
+      json_data["s3_key"] = s3_key
+    response = await self._request(
+      "POST",
+      f"/databases/{graph_id}/tables/{table_name}/vector/export",
+      json_data=json_data if json_data else None,
+      timeout=float(timeout),
+    )
+    return response.json()
+
   async def install_schema(
     self,
     graph_id: str,

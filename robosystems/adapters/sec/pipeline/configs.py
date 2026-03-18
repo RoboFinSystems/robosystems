@@ -168,9 +168,6 @@ class SECStageConfig(Config):
   end_year: int | None = None  # Optional end of year range (None = through current)
   reset_staging: bool = False  # Delete entire DuckDB staging database first
   skip_taxonomy_relationships: bool = False  # Skip taxonomy structure tables
-  stage_embeddings: bool = (
-    True  # Include embedding columns (used by LanceDB index builder)
-  )
 
 
 class SECHistoricalStageConfig(Config):
@@ -185,9 +182,6 @@ class SECHistoricalStageConfig(Config):
   end_year: int = SEC_HISTORICAL_END_YEAR  # End of year range (default: 2023)
   reset_staging: bool = False  # Delete entire DuckDB staging database first
   skip_taxonomy_relationships: bool = False  # Skip taxonomy structure tables
-  stage_embeddings: bool = (
-    True  # Include embedding columns (used by LanceDB index builder)
-  )
 
 
 class SECIncrementalStageConfig(Config):
@@ -205,9 +199,6 @@ class SECIncrementalStageConfig(Config):
     default=None, ge=1, le=4
   )  # Quarter 1-4 (default: current)
   skip_taxonomy_relationships: bool = False  # Skip taxonomy structure tables
-  stage_embeddings: bool = (
-    True  # Include embedding columns (used by LanceDB index builder)
-  )
 
 
 # =============================================================================

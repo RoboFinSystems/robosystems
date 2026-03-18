@@ -122,6 +122,23 @@ class GraphMCPClient:
     self.max_result_rows = GraphMCPClient._config_cache["max_result_rows"]
     self.auto_limit_enabled = GraphMCPClient._config_cache["auto_limit_enabled"]
 
+  async def vector_search(
+    self,
+    graph_id: str,
+    table_name: str,
+    embedding: list[float],
+    limit: int = 20,
+    select: list[str] | None = None,
+  ) -> list[dict[str, Any]]:
+    """Delegate vector search to the underlying GraphClient."""
+    return await self.graph_client.vector_search(
+      graph_id=graph_id,
+      table_name=table_name,
+      embedding=embedding,
+      limit=limit,
+      select=select,
+    )
+
   async def close(self):
     """Close HTTP clients in proper order."""
     # Close the Graph client first (handles database connections, may need httpx for cleanup)
