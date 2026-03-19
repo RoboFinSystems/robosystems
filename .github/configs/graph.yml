@@ -256,7 +256,7 @@ production:
 
       # Instance configuration
       instance:
-        type: r7g.xlarge # 32GB RAM, 4 vCPU - DuckDB spill-to-disk handles staging overflow
+        type: r7g.2xlarge # 64GB RAM - required for large Fact table staging without dedup
         databases_per_instance: 1 # One repository per instance (SEC gets dedicated instance)
         # Note: Major repositories like SEC get dedicated instances for performance
 
@@ -265,16 +265,15 @@ production:
         # During staging/materialization, memory is temporarily boosted via overrides.
         # This prevents OOM when both systems are active (staging reads + materialization writes).
         #
-        # Container has ~28GB limit (32GB instance - 2GB OS - kernel overhead)
-        # Default: 5GB each leaves 18GB headroom for OS buffers, temp files, etc.
-        # Boost: Staging gets 26GB DuckDB (spill-to-disk for overflow),
-        #        Materialization gets 24GB LadybugDB
-        max_memory_mb: 5120 # 5GB default for LadybugDB (boosted to 24GB during materialization)
-        memory_per_db_mb: 5120 # 5GB per database default
+        # Container has ~59GB limit (64GB instance - 2GB OS - kernel overhead)
+        # Default: 10GB each leaves 39GB headroom for OS buffers, temp files, etc.
+        # Boost: Staging gets 55GB DuckDB, Materialization gets 50GB LadybugDB
+        max_memory_mb: 10240 # 10GB default for LadybugDB (boosted to 50GB during materialization)
+        memory_per_db_mb: 10240 # 10GB per database default
 
         # Memory boost settings (used by staging/materialization code)
-        duckdb_memory_boost: "26GB" # Applied during DuckDB staging operations (spill-to-disk for overflow)
-        ladybug_memory_boost_mb: 24576 # 24GB - Applied during LadybugDB materialization
+        duckdb_memory_boost: "55GB" # Applied during DuckDB staging operations
+        ladybug_memory_boost_mb: 51200 # 50GB - Applied during LadybugDB materialization
 
         # LadybugDB-specific performance settings (optimized for read-heavy analytical queries)
         chunk_size: 2500 # Large chunks for bulk operations
@@ -285,8 +284,8 @@ production:
 
         # DuckDB staging configuration - CONSERVATIVE DEFAULT
         # Default is low; boosted to duckdb_memory_boost during staging operations
-        duckdb_memory_limit: "5GB"
-        duckdb_max_threads: 4 # r7g.xlarge = 4 vCPU
+        duckdb_memory_limit: "10GB"
+        duckdb_max_threads: 4 # r7g.2xlarge = 8 vCPU, use 4 for DuckDB
 
       # Deployment configuration
       deployment:
@@ -513,19 +512,19 @@ staging:
         max_backups_per_day: 5
 
       instance:
-        type: r7g.xlarge # 32GB RAM, 4 vCPU - aligned with production
+        type: r7g.large # 16GB RAM, 2 vCPU - scaled down from production r7g.2xlarge
         databases_per_instance: 1
-        max_memory_mb: 5120 # 5GB default for LadybugDB (boosted to 24GB during materialization)
+        max_memory_mb: 5120 # 5GB default for LadybugDB
         memory_per_db_mb: 5120 # 5GB per database default
-        duckdb_memory_boost: "26GB" # Applied during DuckDB staging operations (spill-to-disk for overflow)
-        ladybug_memory_boost_mb: 24576 # 24GB - Applied during LadybugDB materialization
-        chunk_size: 2500
+        duckdb_memory_boost: "12GB" # Applied during DuckDB staging operations (spill-to-disk for overflow)
+        ladybug_memory_boost_mb: 12288 # 12GB - Applied during LadybugDB materialization
+        chunk_size: 2000
         query_timeout: 300
         max_query_length: 100000
-        ingestion_batch_size: 10000
-        connection_pool_size: 100
-        duckdb_memory_limit: "5GB" # Aligned with production
-        duckdb_max_threads: 4 # r7g.xlarge = 4 vCPU
+        ingestion_batch_size: 5000
+        connection_pool_size: 50
+        duckdb_memory_limit: "5GB"
+        duckdb_max_threads: 2 # r7g.large = 2 vCPU
 
       deployment:
         enable_var: LBUG_SHARED_ENABLED_STAGING
