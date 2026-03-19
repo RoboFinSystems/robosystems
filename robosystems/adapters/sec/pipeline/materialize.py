@@ -73,7 +73,6 @@ def sec_graph_materialized(
   async def run_materialization():
     result = await processor.materialize_from_duckdb(
       rebuild=config.rebuild_graph,
-      skip_taxonomy_relationships=config.skip_taxonomy_relationships,
       batch_materialization=config.batch_materialization,
       batch_size=config.materialization_batch_size,
       progress_callback=dagster_progress,
@@ -212,7 +211,6 @@ def sec_historical_materialized(
 
     result = await processor.materialize_from_duckdb(
       rebuild=config.rebuild_graph,
-      skip_taxonomy_relationships=config.skip_taxonomy_relationships,
       batch_materialization=config.batch_materialization,
       batch_size=config.materialization_batch_size,
       progress_callback=dagster_progress,

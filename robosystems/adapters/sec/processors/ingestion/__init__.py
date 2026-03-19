@@ -57,7 +57,6 @@ from .models import (
   MATERIALIZATION_BATCH_SIZE,
   STAGING_MAX_RETRIES,
   STAGING_RETRY_BACKOFF_BASE,
-  TAXONOMY_STRUCTURE_TABLES,
   # Result models
   EntityUpdateResult,
   MaterializeResult,
@@ -131,7 +130,6 @@ __all__ = [
   "MATERIALIZATION_BATCH_SIZE",
   "STAGING_MAX_RETRIES",
   "STAGING_RETRY_BACKOFF_BASE",
-  "TAXONOMY_STRUCTURE_TABLES",
   # Main processor classes
   "DuckDBStager",  # Stage 1: DuckDB staging
   "EntityUpdateResult",
