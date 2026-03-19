@@ -293,7 +293,6 @@ just setup-gha
 | ----------------------------- | ------------ | --------------- | ------------------------ |
 | `API_MIN_CAPACITY_*`          | `1`          | `1`             | Min ECS tasks            |
 | `API_MAX_CAPACITY_*`          | `10`         | `2`             | Max ECS tasks            |
-| `API_ASG_REFRESH_*`           | `true`       | `true`          | Refresh on deploy        |
 | `API_CPU_*`                   | `512`        | `512`           | Fargate CPU units        |
 | `API_MEMORY_*`                | `1024`       | `1024`          | Fargate memory (MB)      |
 | `API_CPU_TARGET_*`            | `70`         | `70`            | CPU auto-scaling target  |
@@ -311,7 +310,6 @@ just setup-gha
 | `DAGSTER_WEBSERVER_CPU_*`                 | `512`        | Webserver CPU units      |
 | `DAGSTER_WEBSERVER_MEMORY_*`              | `1024`       | Webserver memory (MB)    |
 | `DAGSTER_MAX_CONCURRENT_RUNS_*`           | `20`         | Max concurrent runs      |
-| `DAGSTER_REFRESH_ECS_*`                   | `true`       | Refresh ECS on deploy    |
 | `DAGSTER_CONTAINER_INSIGHTS_*`            | `disabled`   | Container insights       |
 | `DAGSTER_DAEMON_FARGATE_WEIGHT_*`         | `20`         | Daemon On-Demand weight  |
 | `DAGSTER_DAEMON_FARGATE_SPOT_WEIGHT_*`    | `80`         | Daemon Spot weight       |
@@ -356,7 +354,6 @@ just setup-gha
 | `LBUG_SHARED_ENABLED_*`             | `false`      | Enable shared tier                       |
 | `LBUG_SHARED_MIN_INSTANCES_*`       | `1`          | Min shared instances                     |
 | `LBUG_SHARED_MAX_INSTANCES_*`       | `1`          | Max shared instances                     |
-| `LBUG_SHARED_CONFIG_PROFILE_STAGING`| `staging`    | Config profile override for staging      |
 
 #### Shared Replicas Configuration
 

@@ -454,7 +454,6 @@ jobs:
       lbug_xlarge_max_instances: ${{ vars.LBUG_XLARGE_MAX_INSTANCES_STAGING }}
       lbug_shared_min_instances: ${{ vars.LBUG_SHARED_MIN_INSTANCES_STAGING }}
       lbug_shared_max_instances: ${{ vars.LBUG_SHARED_MAX_INSTANCES_STAGING }}
-      lbug_shared_config_profile: ${{ vars.LBUG_SHARED_CONFIG_PROFILE_STAGING || '' }}
       # Shared Replicas Configuration
       shared_replicas_enabled: ${{ vars.SHARED_REPLICAS_ENABLED_STAGING || 'false' }}
       shared_replicas_min_instances: ${{ vars.SHARED_REPLICAS_MIN_INSTANCES_STAGING || '1' }}
