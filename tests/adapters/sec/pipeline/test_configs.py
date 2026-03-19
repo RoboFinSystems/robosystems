@@ -197,7 +197,6 @@ class TestSECStageConfig:
     assert config.start_year == SEC_PRIMARY_START_YEAR
     assert config.end_year is None
     assert config.reset_staging is False
-    assert config.skip_taxonomy_relationships is False
 
   def test_year_filter(self):
     """Test single year filter."""
@@ -227,7 +226,6 @@ class TestSECHistoricalStageConfig:
     assert config.start_year == SEC_START_YEAR
     assert config.end_year == SEC_HISTORICAL_END_YEAR
     assert config.reset_staging is False
-    assert config.skip_taxonomy_relationships is False
 
   def test_custom_year_range(self):
     """Test custom year range."""
@@ -246,7 +244,6 @@ class TestSECIncrementalStageConfig:
     assert config.graph_id == "sec"
     assert config.year is None
     assert config.quarter is None
-    assert config.skip_taxonomy_relationships is False
 
   def test_specific_quarter(self):
     """Test specific quarter configuration."""
@@ -274,7 +271,6 @@ class TestSECMaterializeConfig:
     config = SECMaterializeConfig()
     assert config.graph_id == "sec"
     assert config.rebuild_graph is True
-    assert config.skip_taxonomy_relationships is False
     assert config.batch_materialization is True
     assert config.materialization_batch_size == 20_000_000
 

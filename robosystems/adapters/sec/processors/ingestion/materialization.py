@@ -38,7 +38,6 @@ from .models import (
   INCREMENTAL_COPY_TIMEOUT,
   LARGE_STAGING_TABLES,
   MATERIALIZATION_BATCH_SIZE,
-  TAXONOMY_STRUCTURE_TABLES,
   EntityUpdateResult,
   MaterializeResult,
   ProgressCallback,
@@ -107,7 +106,6 @@ class LadybugMaterializer:
     self,
     table_names: list[str] | None = None,
     rebuild: bool = False,
-    skip_taxonomy_relationships: bool = False,
     batch_materialization: bool = True,
     batch_size: int = MATERIALIZATION_BATCH_SIZE,
     progress_callback: ProgressCallback | None = None,
@@ -129,7 +127,6 @@ class LadybugMaterializer:
         table_names: Optional list of specific tables to materialize.
                      If None, materializes all tables from the schema.
         rebuild: If True, delete and recreate the LadybugDB database.
-        skip_taxonomy_relationships: If True, skip taxonomy structure tables.
         batch_materialization: If True (default), use hash-based batching
                      for large tables to prevent OOM.
         batch_size: Rows per batch (default: 20M).
@@ -152,17 +149,6 @@ class LadybugMaterializer:
         )
         table_names = list(tables_by_type.keys())
         logger.info(f"Schema defines {len(table_names)} tables to materialize")
-
-      # Filter out taxonomy structure tables if requested
-      if skip_taxonomy_relationships:
-        original_count = len(table_names)
-        table_names = [t for t in table_names if t not in TAXONOMY_STRUCTURE_TABLES]
-        skipped_count = original_count - len(table_names)
-        log_progress(
-          f"Instance-only mode: skipping {skipped_count} taxonomy structure tables "
-          f"(Association, Structure, TAXONOMY_HAS_*, etc.)"
-        )
-        logger.info(f"After filtering: {len(table_names)} tables to materialize")
 
       if not table_names:
         logger.warning("No tables to materialize")
@@ -244,7 +230,6 @@ class LadybugMaterializer:
     self,
     year: int | None = None,
     quarter: int | None = None,
-    skip_taxonomy_relationships: bool = False,
     copy_timeout: int = INCREMENTAL_COPY_TIMEOUT,
     progress_callback: ProgressCallback | None = None,
   ) -> MaterializeResult:
@@ -265,7 +250,6 @@ class LadybugMaterializer:
     Args:
         year: Year to copy (default: current year)
         quarter: Quarter to copy 1-4 (default: current quarter)
-        skip_taxonomy_relationships: If True, skip taxonomy structure tables
         copy_timeout: Timeout per table (default: 10 min)
         progress_callback: Optional callback for Dagster logging
 
@@ -306,13 +290,6 @@ class LadybugMaterializer:
       tables_by_type = RoboLedgerContext.get_all_table_names_for_context(
         RoboLedgerContext.SEC_REPOSITORY
       )
-
-      if skip_taxonomy_relationships:
-        tables_by_type = {
-          name: entity_type
-          for name, entity_type in tables_by_type.items()
-          if name not in TAXONOMY_STRUCTURE_TABLES
-        }
 
       # Sort: nodes first, then relationships
       node_tables = [
