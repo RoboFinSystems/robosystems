@@ -35,7 +35,6 @@ from .models import (
   LARGE_STAGING_TABLES,
   STAGING_MAX_RETRIES,
   STAGING_RETRY_BACKOFF_BASE,
-  TAXONOMY_STRUCTURE_TABLES,
   ProgressCallback,
   StagingResult,
   TableInfo,
@@ -92,7 +91,6 @@ class DuckDBStager:
     start_year: int | None = None,
     end_year: int | None = None,
     reset_staging: bool = False,
-    skip_taxonomy_relationships: bool = False,
     duckdb_memory_mb: int | None = None,
     progress_callback: ProgressCallback | None = None,
   ) -> StagingResult:
@@ -121,7 +119,6 @@ class DuckDBStager:
         start_year: Optional start of year range (inclusive). Used with end_year.
         end_year: Optional end of year range (inclusive). Used with start_year.
         reset_staging: If True, delete entire DuckDB staging database first.
-        skip_taxonomy_relationships: If True, skip taxonomy structure tables.
         progress_callback: Optional callback for progress logging.
 
     Returns:
@@ -194,21 +191,6 @@ class DuckDBStager:
       )
       logger.info(f"Schema defines {len(tables_by_type)} tables to stage")
 
-      # Filter out taxonomy structure tables if requested (instance-only mode)
-      if skip_taxonomy_relationships:
-        original_count = len(tables_by_type)
-        tables_by_type = {
-          name: entity_type
-          for name, entity_type in tables_by_type.items()
-          if name not in TAXONOMY_STRUCTURE_TABLES
-        }
-        skipped_count = original_count - len(tables_by_type)
-        log_progress(
-          f"Instance-only mode: skipping {skipped_count} taxonomy structure tables "
-          f"(Association, Structure, TAXONOMY_HAS_*, etc.)"
-        )
-        logger.info(f"After filtering: {len(tables_by_type)} tables to stage")
-
       total_files = 0
 
       # Step 2: Create DuckDB staging tables via Graph API
@@ -263,7 +245,6 @@ class DuckDBStager:
     self,
     year: int | None = None,
     quarter: int | None = None,
-    skip_taxonomy_relationships: bool = False,
     progress_callback: ProgressCallback | None = None,
   ) -> StagingResult:
     """
@@ -282,7 +263,6 @@ class DuckDBStager:
     Args:
         year: Year to stage (default: current year)
         quarter: Quarter to stage 1-4 (default: current quarter)
-        skip_taxonomy_relationships: If True, skip taxonomy structure tables
         progress_callback: Optional callback for Dagster logging
 
     Returns:
@@ -340,13 +320,6 @@ class DuckDBStager:
       tables_by_type = RoboLedgerContext.get_all_table_names_for_context(
         RoboLedgerContext.SEC_REPOSITORY
       )
-
-      if skip_taxonomy_relationships:
-        tables_by_type = {
-          name: entity_type
-          for name, entity_type in tables_by_type.items()
-          if name not in TAXONOMY_STRUCTURE_TABLES
-        }
 
       # Stage each table incrementally
       successful_tables: list[str] = []
@@ -846,6 +819,10 @@ class DuckDBStager:
           ),
           None,
         )
+
+      # Drop existing target table before renaming accumulator
+      drop_sql = f'DROP TABLE IF EXISTS "{table_name}"'
+      await graph_client.query_table(graph_id=self.graph_id, sql=drop_sql, timeout=30.0)
 
       # Rename accumulator to final target table
       rename_sql = f'ALTER TABLE "{accumulator_name}" RENAME TO "{table_name}"'

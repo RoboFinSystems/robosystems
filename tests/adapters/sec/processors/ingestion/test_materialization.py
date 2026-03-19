@@ -254,59 +254,6 @@ class TestMaterializeFromDuckDBSuccess:
     assert result.total_rows_ingested == 100
     mock_client.materialize_table.assert_called_once()
 
-  @pytest.mark.asyncio
-  @patch(
-    "robosystems.operations.graph.shared_repository_service.ensure_shared_repository_exists",
-    new_callable=AsyncMock,
-  )
-  @patch(
-    "robosystems.adapters.sec.processors.ingestion.materialization.get_graph_client"
-  )
-  @patch(
-    "robosystems.adapters.sec.processors.ingestion.materialization.RoboLedgerContext"
-  )
-  @patch("robosystems.adapters.sec.processors.ingestion.materialization.S3Client")
-  @patch("robosystems.adapters.sec.processors.ingestion.materialization.env")
-  async def test_skip_taxonomy_relationships(
-    self,
-    mock_env,
-    mock_s3_client,
-    mock_context,
-    mock_get_client,
-    mock_ensure_repo,
-  ):
-    """skip_taxonomy_relationships=True filters out taxonomy tables."""
-    mock_env.SHARED_PROCESSED_BUCKET = "test-bucket"
-    mock_env.ENVIRONMENT = "dev"
-
-    mock_context.get_all_table_names_for_context.return_value = {
-      "Entity": "nodes",
-      "Structure": "nodes",
-      "Association": "nodes",
-    }
-    mock_context.SEC_REPOSITORY = "sec"
-
-    mock_ensure_repo.return_value = {"status": "exists"}
-
-    mock_client = AsyncMock()
-    mock_get_client.return_value = mock_client
-    mock_client.materialize_table.return_value = {
-      "rows_ingested": 50,
-      "execution_time_ms": 200,
-      "status": "success",
-    }
-
-    from robosystems.adapters.sec.processors.ingestion.materialization import (
-      LadybugMaterializer,
-    )
-
-    mat = LadybugMaterializer()
-    result = await mat.materialize_from_duckdb(skip_taxonomy_relationships=True)
-
-    assert result.status == "success"
-    # Only Entity should be materialized; Structure and Association are taxonomy tables
-    mock_client.materialize_table.assert_called_once()
-
 
 @pytest.mark.unit
 class TestCopyIncrementalToLadybug:

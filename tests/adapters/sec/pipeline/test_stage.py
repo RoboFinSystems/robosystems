@@ -364,9 +364,7 @@ class TestSecDuckdbIncrementalStaged:
     mock_boost.return_value = {"message": "boosted"}
     mock_release.return_value = {"message": "released"}
 
-    config = SECIncrementalStageConfig(
-      year=2025, quarter=2, skip_taxonomy_relationships=True
-    )
+    config = SECIncrementalStageConfig(year=2025, quarter=2)
     context = build_asset_context()
 
     sec_duckdb_incremental_staged(context, config)
@@ -374,4 +372,3 @@ class TestSecDuckdbIncrementalStaged:
     call_kwargs = mock_processor.stage_incremental_to_duckdb.call_args
     assert call_kwargs.kwargs["year"] == 2025
     assert call_kwargs.kwargs["quarter"] == 2
-    assert call_kwargs.kwargs["skip_taxonomy_relationships"] is True

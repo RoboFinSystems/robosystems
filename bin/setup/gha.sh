@@ -196,7 +196,7 @@ function setup_full_config() {
     echo "Setting all variables..."
 
     # Core Infrastructure
-    gh variable set ECR_REPOSITORY --body "$ECR_REPOSITORY"
+    gh variable set AWS_ECR_REPOSITORY --body "$ECR_REPOSITORY"
 
     # AWS Configuration (typically org-level, set at repo level for forks)
     gh variable set AWS_ACCOUNT_ID --body "$AWS_ACCOUNT_ID"
@@ -240,11 +240,9 @@ function setup_full_config() {
     # API Scaling Configuration
     gh variable set API_MIN_CAPACITY_PROD --body "1"
     gh variable set API_MAX_CAPACITY_PROD --body "10"
-    gh variable set API_ASG_REFRESH_PROD --body "true"
     if $setup_staging; then
         gh variable set API_MIN_CAPACITY_STAGING --body "1"
         gh variable set API_MAX_CAPACITY_STAGING --body "2"
-        gh variable set API_ASG_REFRESH_STAGING --body "true"
     fi
 
     # API Fargate Task Sizing
@@ -314,12 +312,6 @@ function setup_full_config() {
         gh variable set API_FARGATE_BASE_STAGING --body "0"
         gh variable set DAGSTER_DAEMON_FARGATE_BASE_STAGING --body "0"
         gh variable set DAGSTER_WEBSERVER_FARGATE_BASE_STAGING --body "0"
-    fi
-
-    # Dagster Deployment Options
-    gh variable set DAGSTER_REFRESH_ECS_PROD --body "true"
-    if $setup_staging; then
-        gh variable set DAGSTER_REFRESH_ECS_STAGING --body "true"
     fi
 
     # Dagster Monitoring Configuration
@@ -415,8 +407,6 @@ function setup_full_config() {
         gh variable set LBUG_SHARED_ENABLED_STAGING --body "false"
         gh variable set LBUG_SHARED_MIN_INSTANCES_STAGING --body "1"
         gh variable set LBUG_SHARED_MAX_INSTANCES_STAGING --body "1"
-        # Config profile override: set to "production" to use prod-sized hardware in staging
-        gh variable set LBUG_SHARED_CONFIG_PROFILE_STAGING --body "staging"
     fi
 
     # Shared Replicas Configuration - Read-Only Fleet
@@ -493,7 +483,7 @@ function setup_full_config() {
     fi
 
     # Infrastructure Configuration
-    gh variable set MAX_AVAILABILITY_ZONES --body "2"
+    gh variable set VPC_MAX_AVAILABILITY_ZONES --body "2"
     # VPC Endpoint Mode: 'gateway' (free S3+DynamoDB), 'minimal' (~$22/mo), 'full' (~$45/mo)
     # 'minimal' is recommended - includes ECR endpoints to avoid NAT data transfer costs during deployments
     gh variable set VPC_ENDPOINT_MODE --body "minimal"

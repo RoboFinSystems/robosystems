@@ -857,7 +857,7 @@ class GraphClient(BaseGraphClient):
         preserve_duckdb: If True, preserve DuckDB staging database for retry scenarios.
             Useful when you want to rebuild LadybugDB from existing staging.
         staging_only: If True, delete only DuckDB staging, preserve LadybugDB graph.
-            Useful for re-staging with different settings (e.g., skip_taxonomy_relationships).
+            Useful for re-staging with different settings.
 
     Note: preserve_duckdb and staging_only are mutually exclusive.
     """
