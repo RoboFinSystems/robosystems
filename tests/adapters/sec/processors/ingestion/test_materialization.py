@@ -761,7 +761,7 @@ class TestTriggerIngestion:
       table_names=["Entity"],
       graph_client=mock_client,
       batch_materialization=True,
-      batch_size=20_000_000,
+      batch_size=10_000_000,
     )
 
     assert result["total_rows_ingested"] == 500
@@ -794,7 +794,7 @@ class TestTriggerIngestion:
       table_names=["Fact"],
       graph_client=mock_client,
       batch_materialization=True,
-      batch_size=20_000_000,
+      batch_size=10_000_000,
     )
 
     # 50M / 20M = 3 batches
