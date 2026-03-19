@@ -271,7 +271,7 @@ just setup-gha
 
 | Variable              | Default       | Description                           |
 | --------------------- | ------------- | ------------------------------------- |
-| `ECR_REPOSITORY`      | `robosystems` | ECR repository name                   |
+| `AWS_ECR_REPOSITORY`  | `robosystems` | ECR repository name                   |
 | `AWS_ACCOUNT_ID`      | User input    | AWS account ID                        |
 | `AWS_REGION`          | `us-east-1`   | AWS region                            |
 | `ENVIRONMENT_PROD`    | `prod`        | Production environment name           |
@@ -416,7 +416,7 @@ just setup-gha
 | Variable                       | Default    | Description                           |
 | ------------------------------ | ---------- | ------------------------------------- |
 | `AWS_SNS_ALERT_EMAIL`          | User input | CloudWatch alert email                |
-| `MAX_AVAILABILITY_ZONES`       | `2`        | Max AZs to use                        |
+| `VPC_MAX_AVAILABILITY_ZONES`   | `2`        | Max AZs to use                        |
 | `VPC_ENDPOINT_MODE`            | `minimal`  | VPC endpoints (gateway/minimal/full)  |
 | `VPC_SECOND_OCTET`             | `0`        | VPC CIDR second octet (for peering)   |
 | `OBSERVABILITY_ENABLED_*`      | `true`     | Enable observability                  |

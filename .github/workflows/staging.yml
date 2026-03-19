@@ -146,7 +146,7 @@ jobs:
     with:
       environment: ${{ vars.ENVIRONMENT_STAGING || 'staging' }}
       aws_region: ${{ vars.AWS_REGION || 'us-east-1' }}
-      ecr_repository: ${{ vars.ECR_REPOSITORY || 'robosystems' }}
+      ecr_repository: ${{ vars.AWS_ECR_REPOSITORY || 'robosystems' }}
       # Docker Hub publishing for staging: disabled (staging builds should not go to Docker Hub)
       publish_to_dockerhub: false
     secrets:
@@ -188,7 +188,7 @@ jobs:
       aws_region: ${{ vars.AWS_REGION || 'us-east-1' }}
       # VPC Configuration
       endpoint_mode: ${{ vars.VPC_ENDPOINT_MODE || 'none' }}
-      max_availability_zones: ${{ vars.MAX_AVAILABILITY_ZONES || '2' }}
+      max_availability_zones: ${{ vars.VPC_MAX_AVAILABILITY_ZONES || '2' }}
       vpc_second_octet: ${{ vars.VPC_SECOND_OCTET || '0' }}
       # VPC Flow Logs Configuration (VPC-level, not environment-specific)
       vpc_flow_logs_enabled: ${{ vars.VPC_FLOW_LOGS_ENABLED || 'false' }}
