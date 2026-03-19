@@ -127,6 +127,8 @@
       "Bash(gh secret delete:*)",
       "Bash(aws ssm put-parameter:*)",
       "Bash(aws ssm delete-parameter:*)",
+      "Bash(aws ec2 terminate-instances:*)",
+      "Bash(aws autoscaling update-auto-scaling-group:*)",
       "Bash(just create-*)"
     ],
     "deny": [

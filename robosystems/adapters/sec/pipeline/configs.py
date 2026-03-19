@@ -154,9 +154,7 @@ class SECStageConfig(Config):
     - start_year: Defaults to SEC_PRIMARY_START_YEAR (2024). Override for broader range.
 
   Common scenarios:
-    - Normal re-run: Use defaults (reset_staging=False). Tables are overwritten.
-    - Enable skip_taxonomy_relationships: Set reset_staging=True AND skip_taxonomy_relationships=True.
-      Without reset_staging, old taxonomy tables would remain in DuckDB.
+    - Normal re-run: Use defaults. Tables are overwritten (accumulator drops before rename).
     - Fresh start after corruption: Set reset_staging=True to delete all staging.
   """
 
@@ -167,7 +165,6 @@ class SECStageConfig(Config):
   )
   end_year: int | None = None  # Optional end of year range (None = through current)
   reset_staging: bool = False  # Delete entire DuckDB staging database first
-  skip_taxonomy_relationships: bool = False  # Skip taxonomy structure tables
 
 
 class SECHistoricalStageConfig(Config):
@@ -181,7 +178,6 @@ class SECHistoricalStageConfig(Config):
   start_year: int = SEC_START_YEAR  # Start of year range (default: 2009)
   end_year: int = SEC_HISTORICAL_END_YEAR  # End of year range (default: 2023)
   reset_staging: bool = False  # Delete entire DuckDB staging database first
-  skip_taxonomy_relationships: bool = False  # Skip taxonomy structure tables
 
 
 class SECIncrementalStageConfig(Config):
@@ -198,7 +194,6 @@ class SECIncrementalStageConfig(Config):
   quarter: int | None = Field(
     default=None, ge=1, le=4
   )  # Quarter 1-4 (default: current)
-  skip_taxonomy_relationships: bool = False  # Skip taxonomy structure tables
 
 
 # =============================================================================
@@ -218,8 +213,6 @@ class SECMaterializeConfig(Config):
                    with the roboledger SEC schema before materializing.
                    DuckDB staging is preserved. Set to False only for retry scenarios
                    where you want to resume without losing existing graph data.
-    skip_taxonomy_relationships: If True, skip materializing taxonomy structure
-                                 tables (Association, Structure, TAXONOMY_HAS_*, etc.)
     batch_materialization: If True (default), use hash-based batching for tables
                            with more rows than materialization_batch_size.
     materialization_batch_size: Rows per batch when batch_materialization is enabled
@@ -228,7 +221,6 @@ class SECMaterializeConfig(Config):
 
   graph_id: str = "sec"  # Target graph ID
   rebuild_graph: bool = True  # Rebuild LadybugDB before materialization
-  skip_taxonomy_relationships: bool = False  # Skip taxonomy structure tables
   batch_materialization: bool = True  # Hash-based batching for large tables
   materialization_batch_size: int = Field(
     default=20_000_000, ge=1_000_000

@@ -637,10 +637,10 @@ setup_ses_identity() {
 
     # Check if already set in GitHub
     local existing_domain
-    existing_domain=$(gh variable get SES_DOMAIN 2>/dev/null || echo "")
+    existing_domain=$(gh variable get AWS_SES_DOMAIN 2>/dev/null || echo "")
 
     if [ -n "$existing_domain" ]; then
-        print_success "SES_DOMAIN already set: $existing_domain"
+        print_success "AWS_SES_DOMAIN already set: $existing_domain"
         local email_domain="$existing_domain"
     else
         read -p "Enter email domain [robosystems.ai]: " email_domain
@@ -652,8 +652,8 @@ setup_ses_identity() {
 
     # Save to GitHub variables for future reference
     if [ -z "$existing_domain" ] || [ "$existing_domain" != "$email_domain" ]; then
-        gh variable set SES_DOMAIN --body "$email_domain"
-        print_success "Set SES_DOMAIN GitHub variable"
+        gh variable set AWS_SES_DOMAIN --body "$email_domain"
+        print_success "Set AWS_SES_DOMAIN GitHub variable"
     fi
 
     # Check if identity already exists and is verified

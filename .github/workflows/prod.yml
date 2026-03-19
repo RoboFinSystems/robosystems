@@ -127,7 +127,7 @@ jobs:
     with:
       environment: ${{ vars.ENVIRONMENT_PROD || 'prod' }}
       aws_region: ${{ vars.AWS_REGION || 'us-east-1' }}
-      ecr_repository: ${{ vars.ECR_REPOSITORY || 'robosystems' }}
+      ecr_repository: ${{ vars.AWS_ECR_REPOSITORY || 'robosystems' }}
       # Docker Hub publishing: only when explicitly enabled AND deploying from a version tag or release branch
       # Set DOCKERHUB_PUBLISHING_ENABLED to 'true' in GitHub variables when ready to publish
       # Supports: refs/tags/v*.*.* (releases) and refs/heads/release/* (hotfixes)
@@ -171,7 +171,7 @@ jobs:
       aws_region: ${{ vars.AWS_REGION || 'us-east-1' }}
       # VPC Configuration
       endpoint_mode: ${{ vars.VPC_ENDPOINT_MODE || 'none' }}
-      max_availability_zones: ${{ vars.MAX_AVAILABILITY_ZONES || '2' }}
+      max_availability_zones: ${{ vars.VPC_MAX_AVAILABILITY_ZONES || '2' }}
       vpc_second_octet: ${{ vars.VPC_SECOND_OCTET || '0' }}
       # VPC Flow Logs Configuration (VPC-level, not environment-specific)
       vpc_flow_logs_enabled: ${{ vars.VPC_FLOW_LOGS_ENABLED || 'false' }}

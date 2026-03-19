@@ -268,6 +268,10 @@ gha-delete name:
     @gh variable delete {{name}} --yes
     @echo "Deleted {{name}}"
 
+# List GitHub organization variables (optionally filter by pattern)
+gha-list-org filter="":
+    @gh variable list --org $(gh repo view --json owner -q .owner.login) {{ if filter != "" { "| grep -i " + filter } else { "" } }}
+
 
 ## Admin CLI ##
 

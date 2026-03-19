@@ -235,26 +235,6 @@ LARGE_STAGING_TABLES = frozenset(
   }
 )
 
-# Taxonomy structure tables that can be skipped for instance-only mode
-# These encode XBRL taxonomy hierarchy (calculation/presentation/definition linkbases)
-# which are massive but not needed for basic fact analysis queries.
-# Skipping these allows more historical data to fit in the same storage budget.
-TAXONOMY_STRUCTURE_TABLES = frozenset(
-  {
-    # Structure nodes (XBRL presentation/calculation/definition trees)
-    "Structure",  # XBRL presentation/calculation structures
-    # Association nodes (element-to-element relationships - MASSIVE, larger than Facts)
-    "Association",
-    # Structure relationships
-    "STRUCTURE_HAS_TAXONOMY",  # Structure -> Taxonomy
-    "STRUCTURE_HAS_ASSOCIATION",  # Structure -> Association
-    "STRUCTURE_HAS_CHILD",  # Structure tree hierarchy
-    "STRUCTURE_HAS_PARENT",  # Structure tree hierarchy
-    # Association relationships (the real storage hogs)
-    "ASSOCIATION_HAS_FROM_ELEMENT",  # Association -> Element (source)
-    "ASSOCIATION_HAS_TO_ELEMENT",  # Association -> Element (target)
-  }
-)
 
 # Tables whose embedding columns should be NULLed out during DuckDB staging.
 # Label and Structure embeddings are only used during enrichment (classification),

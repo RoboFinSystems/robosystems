@@ -318,10 +318,10 @@ production:
 staging:
   writers:
     # =========================================================================
-    # LADYBUGDB STANDARD TIER - Staging (dedicated, reduced resources)
+    # LADYBUGDB STANDARD TIER - Staging
     # =========================================================================
     - name: ladybug-standard
-      description: Dedicated m7g.medium LadybugDB tier for staging (reduced resources)
+      description: Dedicated m7g.large LadybugDB tier with subgraph support
       backend: ladybug
       stack_suffix: LadybugStandard
       tier: ladybug-standard
@@ -359,16 +359,16 @@ staging:
         auto_reset: true
 
       instance:
-        type: m7g.medium # 4GB RAM - smaller for staging
+        type: m7g.large # 8GB RAM, 2 vCPUs, ARM64 - aligned with production
         databases_per_instance: 1 # Dedicated
-        max_memory_mb: 3072 # 3GB available (4GB - 1GB OS)
+        max_memory_mb: 6144 # 6GB available (8GB - 2GB OS overhead)
         memory_per_db_mb: 2048 # 2GB per database
-        chunk_size: 750
+        chunk_size: 1000
         query_timeout: 30
         max_query_length: 10000
-        ingestion_batch_size: 750
+        ingestion_batch_size: 1000
         connection_pool_size: 10
-        duckdb_memory_limit: "1GB" # Conservative for staging
+        duckdb_memory_limit: "2GB" # Aligned with production
         duckdb_max_threads: 2
 
       deployment:
@@ -376,10 +376,10 @@ staging:
         always_enabled: true
 
     # =========================================================================
-    # LADYBUGDB LARGE TIER - Staging (testing subgraph features)
+    # LADYBUGDB LARGE TIER - Staging
     # =========================================================================
     - name: ladybug-large
-      description: Dedicated r7g.medium with subgraph support for staging (10 subgraphs)
+      description: Dedicated r7g.large with subgraph support (10 subgraphs)
       backend: ladybug
       stack_suffix: LadybugLarge
       tier: ladybug-large
@@ -388,16 +388,16 @@ staging:
       api_rate_multiplier: 2.5
 
       copy_operations:
-        max_file_size_gb: 2.0
-        timeout_seconds: 600
-        concurrent_operations: 2
-        max_files_per_operation: 200
-        daily_copy_operations: 25
+        max_file_size_gb: 5.0
+        timeout_seconds: 1800
+        concurrent_operations: 3
+        max_files_per_operation: 1000
+        daily_copy_operations: 50
 
       backup_limits:
         max_backup_size_gb: 50
-        backup_retention_days: 14
-        max_backups_per_day: 5
+        backup_retention_days: 30
+        max_backups_per_day: 10
 
       # Graph content limits (same as production)
       graph_limits:
@@ -415,27 +415,27 @@ staging:
         auto_reset: true
 
       instance:
-        type: r7g.medium # Smaller for staging
+        type: r7g.large # 16GB RAM, 2 vCPUs, ARM64 - aligned with production
         databases_per_instance: 1
-        max_memory_mb: 7168 # 7GB total
-        memory_per_db_mb: 650 # ~650MB per database (7GB / 11)
-        chunk_size: 1000
+        max_memory_mb: 14336 # 14GB total available for parent + subgraphs
+        memory_per_db_mb: 1300 # ~1.3GB average per database (14GB / 11 databases)
+        chunk_size: 1500
         query_timeout: 60
         max_query_length: 25000
-        ingestion_batch_size: 1500
-        connection_pool_size: 15
-        duckdb_memory_limit: "2GB" # Moderate for staging dedicated
-        duckdb_max_threads: 2 # r7g.medium = 1 vCPU, allow 2 for DuckDB efficiency
+        ingestion_batch_size: 2500
+        connection_pool_size: 25
+        duckdb_memory_limit: "4GB" # Aligned with production
+        duckdb_max_threads: 2 # r7g.large = 2 vCPU
 
       deployment:
         enable_var: LBUG_LARGE_ENABLED_STAGING
         enabled_default: false
 
     # =========================================================================
-    # LADYBUGDB XLARGE TIER - Staging (testing advanced subgraph features)
+    # LADYBUGDB XLARGE TIER - Staging
     # =========================================================================
     - name: ladybug-xlarge
-      description: Dedicated r7g.large with maximum subgraph support for staging (25 subgraphs)
+      description: Dedicated r7g.xlarge with maximum subgraph support (25 subgraphs)
       backend: ladybug
       stack_suffix: LadybugXlarge
       tier: ladybug-xlarge
@@ -444,16 +444,16 @@ staging:
       api_rate_multiplier: 5.0
 
       copy_operations:
-        max_file_size_gb: 5.0
-        timeout_seconds: 1800
-        concurrent_operations: 3
-        max_files_per_operation: 1000
-        daily_copy_operations: 100
+        max_file_size_gb: 10.0
+        timeout_seconds: 3600
+        concurrent_operations: 5
+        max_files_per_operation: 10000
+        daily_copy_operations: -1
 
       backup_limits:
         max_backup_size_gb: 100
-        backup_retention_days: 30
-        max_backups_per_day: 10
+        backup_retention_days: 90
+        max_backups_per_day: -1
 
       # Graph content limits (same as production)
       graph_limits:
@@ -471,27 +471,27 @@ staging:
         auto_reset: true
 
       instance:
-        type: r7g.large # Use r7g.large instead of xlarge for staging cost savings
+        type: r7g.xlarge # 32GB RAM, 4 vCPUs, ARM64 - aligned with production
         databases_per_instance: 1
-        max_memory_mb: 14336 # 14GB total (16GB - 2GB OS)
-        memory_per_db_mb: 550 # ~550MB per database (14GB / 26 databases)
-        chunk_size: 1500
+        max_memory_mb: 30720 # 30GB available (32GB - 2GB OS overhead)
+        memory_per_db_mb: 1180 # ~1.2GB average per database (30GB / 26 databases)
+        chunk_size: 2000
         query_timeout: 120
         max_query_length: 50000
-        ingestion_batch_size: 3000
-        connection_pool_size: 30
-        duckdb_memory_limit: "4GB" # More memory for staging xlarge
-        duckdb_max_threads: 2 # r7g.large = 2 vCPU
+        ingestion_batch_size: 5000
+        connection_pool_size: 50
+        duckdb_memory_limit: "8GB" # Aligned with production
+        duckdb_max_threads: 4 # r7g.xlarge = 4 vCPU
 
       deployment:
         enable_var: LBUG_XLARGE_ENABLED_STAGING
         enabled_default: false
 
     # =========================================================================
-    # LADYBUGDB SHARED TIER - Staging (testing public repositories)
+    # LADYBUGDB SHARED TIER - Staging
     # =========================================================================
     - name: ladybug-shared
-      description: Shared repositories for staging environment (LadybugDB backend)
+      description: Shared public data repositories (SEC) - LadybugDB backend
       backend: ladybug
       stack_suffix: LadybugShared
       tier: ladybug-shared
@@ -500,29 +500,31 @@ staging:
       api_rate_multiplier: null
 
       copy_operations:
-        max_file_size_gb: 5.0
-        timeout_seconds: 1800
-        concurrent_operations: 5
-        max_files_per_operation: 500
-        daily_copy_operations: 100
+        max_file_size_gb: 10.0
+        timeout_seconds: 3600
+        concurrent_operations: 3
+        max_files_per_operation: 10000
+        daily_copy_operations: -1
 
       backup_limits:
         max_backup_size_gb: 100
-        backup_retention_days: 30
-        max_backups_per_day: 10
+        backup_retention_days: 90
+        max_backups_per_day: 5
 
       instance:
-        type: r7g.medium # Smaller for staging
+        type: r7g.large # 16GB RAM, 2 vCPU - scaled down from production r7g.2xlarge
         databases_per_instance: 1
-        max_memory_mb: 7168
-        memory_per_db_mb: 7168
+        max_memory_mb: 5120 # 5GB default for LadybugDB
+        memory_per_db_mb: 5120 # 5GB per database default
+        duckdb_memory_boost: "12GB" # Applied during DuckDB staging operations (spill-to-disk for overflow)
+        ladybug_memory_boost_mb: 12288 # 12GB - Applied during LadybugDB materialization
         chunk_size: 2000
         query_timeout: 300
         max_query_length: 100000
         ingestion_batch_size: 5000
         connection_pool_size: 50
-        duckdb_memory_limit: "4GB" # Needs extra memory for SEC staging tests
-        duckdb_max_threads: 2 # r7g.medium = 1 vCPU, allow 2 for DuckDB efficiency
+        duckdb_memory_limit: "5GB"
+        duckdb_max_threads: 2 # r7g.large = 2 vCPU
 
       deployment:
         enable_var: LBUG_SHARED_ENABLED_STAGING
