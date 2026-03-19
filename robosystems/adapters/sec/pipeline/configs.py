@@ -223,7 +223,7 @@ class SECMaterializeConfig(Config):
   rebuild_graph: bool = True  # Rebuild LadybugDB before materialization
   batch_materialization: bool = True  # Hash-based batching for large tables
   materialization_batch_size: int = Field(
-    default=10_000_000, ge=1_000_000
+    default=20_000_000, ge=1_000_000
   )  # Rows per batch
 
 

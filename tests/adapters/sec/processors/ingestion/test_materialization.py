@@ -761,7 +761,7 @@ class TestTriggerIngestion:
       table_names=["Entity"],
       graph_client=mock_client,
       batch_materialization=True,
-      batch_size=10_000_000,
+      batch_size=20_000_000,
     )
 
     assert result["total_rows_ingested"] == 500
@@ -794,15 +794,15 @@ class TestTriggerIngestion:
       table_names=["Fact"],
       graph_client=mock_client,
       batch_materialization=True,
-      batch_size=10_000_000,
+      batch_size=20_000_000,
     )
 
-    # 50M / 10M = 5 batches
-    assert mock_client.materialize_table.call_count == 5
+    # 50M / 20M = 3 batches
+    assert mock_client.materialize_table.call_count == 3
     # Check that batch_num and num_batches were passed
     first_call = mock_client.materialize_table.call_args_list[0]
     assert first_call.kwargs["batch_num"] == 0
-    assert first_call.kwargs["num_batches"] == 5
+    assert first_call.kwargs["num_batches"] == 3
 
   @pytest.mark.asyncio
   @patch("robosystems.adapters.sec.processors.ingestion.materialization.S3Client")

@@ -272,7 +272,7 @@ class TestSECMaterializeConfig:
     assert config.graph_id == "sec"
     assert config.rebuild_graph is True
     assert config.batch_materialization is True
-    assert config.materialization_batch_size == 10_000_000
+    assert config.materialization_batch_size == 20_000_000
 
   def test_no_rebuild(self):
     """Test configuration without rebuild."""
