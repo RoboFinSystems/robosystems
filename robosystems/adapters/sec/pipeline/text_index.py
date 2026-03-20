@@ -95,6 +95,33 @@ def _partition_year(key: str) -> int:
   return 0
 
 
+def _get_indexed_accessions(os_client, graph_id: str) -> set[str]:
+  """Get accession numbers already indexed for a graph_id.
+
+  Uses a terms aggregation to efficiently retrieve all unique accession numbers
+  without fetching full documents. Returns empty set if index doesn't exist.
+  """
+  try:
+    result = os_client.client.search(
+      index=os_client.index_name,
+      body={
+        "size": 0,
+        "query": {"term": {"graph_id": graph_id}},
+        "aggs": {
+          "accessions": {
+            "terms": {"field": "accession_number", "size": 50000}
+          }
+        },
+      },
+    )
+    return {
+      b["key"]
+      for b in result["aggregations"]["accessions"]["buckets"]
+    }
+  except Exception:
+    return set()
+
+
 def _list_s3_parquet_keys(s3, bucket: str, prefix: str) -> list[str]:
   """List all .parquet keys under a prefix."""
   keys: list[str] = []
@@ -203,6 +230,13 @@ def sec_textblocks_indexed(
 
   os_client = OpenSearchClient(env.OPENSEARCH_URL, env.OPENSEARCH_INDEX)
   os_client.create_index_if_not_exists()
+
+  # Get already-indexed accessions for incremental skip
+  indexed_accessions = _get_indexed_accessions(os_client, config.graph_id)
+  if indexed_accessions:
+    context.log.info(
+      f"Found {len(indexed_accessions)} already-indexed accessions, will skip"
+    )
 
   # Discover parquet files for each table
   prefix_base = get_processed_key(DataSourceType.SEC, "processed")
@@ -366,6 +400,16 @@ def sec_textblocks_indexed(
     fact_id = fact.get("identifier")
     value_url = fact.get("value", "")
 
+    # Resolve report early for accession check
+    report_id = fact_to_report.get(fact_id)
+    report_info = report_lookup.get(report_id, {}) if report_id else {}
+
+    # Skip already-indexed accessions (incremental)
+    accession = report_info.get("accession_number", "")
+    if accession and accession in indexed_accessions:
+      skipped += 1
+      continue
+
     # Resolve element
     element_id = fact_to_element.get(fact_id)
     element_info = element_lookup.get(element_id, {}) if element_id else {}
@@ -374,10 +418,6 @@ def sec_textblocks_indexed(
     if not element_info.get("is_textblock", False):
       skipped += 1
       continue
-
-    # Resolve report and entity
-    report_id = fact_to_report.get(fact_id)
-    report_info = report_lookup.get(report_id, {}) if report_id else {}
 
     entity_id = report_to_entity.get(report_id) if report_id else None
     entity_info = entity_lookup.get(entity_id, {}) if entity_id else {}
@@ -484,6 +524,13 @@ def sec_narratives_indexed(
 
   os_client = OpenSearchClient(env.OPENSEARCH_URL, env.OPENSEARCH_INDEX)
   os_client.create_index_if_not_exists()
+
+  # Get already-indexed accessions for incremental skip
+  indexed_accessions = _get_indexed_accessions(os_client, config.graph_id)
+  if indexed_accessions:
+    context.log.info(
+      f"Found {len(indexed_accessions)} already-indexed accessions, will skip"
+    )
 
   # Read Report parquets to get filing metadata (accession → form, filing_date, etc.)
   prefix_base = get_processed_key(DataSourceType.SEC, "processed")
@@ -593,6 +640,10 @@ def sec_narratives_indexed(
 
     # Skip if not in our target metadata
     if accession not in accession_metadata:
+      continue
+
+    # Skip already-indexed accessions (incremental)
+    if accession in indexed_accessions:
       continue
 
     meta = accession_metadata[accession]

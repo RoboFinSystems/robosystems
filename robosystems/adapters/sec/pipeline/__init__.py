@@ -41,6 +41,7 @@ Nightly incremental chain (sensor-driven):
   download → process (250 batch loop) → stage (DuckDB INSERT + vector build)
   → materialize (full LadybugDB rebuild) → lbug S3 publish
   → duckdb S3 publish → vector S3 publish → replica refresh
+  → text index (parallel with materialize: textblocks + narratives → OpenSearch)
 
 Usage:
     from robosystems.adapters.sec.pipeline import get_dagster_components
@@ -115,6 +116,7 @@ from robosystems.adapters.sec.pipeline.sensors import (
   sec_incremental_download_schedule,
   sec_incremental_pipeline_sensor,
   sec_post_materialize_publish_sensor,
+  sec_post_stage_index_sensor,
   sec_processing_sensor,
   sec_stage_to_materialize_sensor,
 )
@@ -182,6 +184,7 @@ def get_dagster_components():
       sec_incremental_pipeline_sensor,
       sec_stage_to_materialize_sensor,
       sec_post_materialize_publish_sensor,
+      sec_post_stage_index_sensor,
     ],
     "schedules": [
       sec_incremental_download_schedule,
@@ -235,6 +238,7 @@ __all__ = [
   "sec_narratives_index_job",
   "sec_narratives_indexed",
   "sec_post_materialize_publish_sensor",
+  "sec_post_stage_index_sensor",
   "sec_process_job",
   "sec_processed_filings",
   "sec_processing_sensor",
