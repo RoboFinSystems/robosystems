@@ -260,6 +260,20 @@
       "problemMatcher": []
     },
     {
+      "label": "Clean Data",
+      "type": "shell",
+      "command": "just",
+      "args": ["clean-data"],
+      "problemMatcher": []
+    },
+    {
+      "label": "Reset Local",
+      "type": "shell",
+      "command": "just",
+      "args": ["reset-local"],
+      "problemMatcher": []
+    },
+    {
       "label": "Claude Code",
       "type": "shell",
       "command": "claude",

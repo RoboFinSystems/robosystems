@@ -240,3 +240,37 @@ class SECEntityUpdateConfig(Config):
   quarter: int | None = Field(
     default=None, ge=1, le=4, description="Quarter 1-4 (default: current)"
   )
+
+
+# =============================================================================
+# Text Search Index Configuration
+# =============================================================================
+
+
+class SECTextBlockIndexConfig(Config):
+  """Configuration for XBRL text block OpenSearch indexing."""
+
+  graph_id: str = "sec"
+  start_year: int | None = Field(
+    default=SEC_PRIMARY_START_YEAR,
+    description="Only index filings from this year forward (default: 2024)",
+  )
+  min_content_length: int = Field(
+    default=200, description="Skip text blocks shorter than this after HTML stripping"
+  )
+
+
+class SECNarrativeIndexConfig(Config):
+  """Configuration for narrative section extraction and OpenSearch indexing."""
+
+  graph_id: str = "sec"
+  start_year: int | None = Field(
+    default=SEC_PRIMARY_START_YEAR,
+    description="Only index filings from this year forward (default: 2024)",
+  )
+  max_section_length: int = Field(
+    default=50000, description="Truncate sections longer than this (chars)"
+  )
+  form_types: list[str] = Field(
+    default=["10-K", "10-Q"], description="Form types to extract narratives from"
+  )

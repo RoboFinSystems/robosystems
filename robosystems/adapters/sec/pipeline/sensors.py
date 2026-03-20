@@ -10,6 +10,8 @@ Nightly Pipeline (enable all for automated daily updates):
 - Phase 4 (Materialize): sec_stage_to_materialize_sensor chains stage → full graph rebuild
 - Phase 5 (Publish+Refresh): sec_post_materialize_publish_sensor chains
   materialize → lbug S3 publish → duckdb S3 publish → replica refresh
+- Phase 5c (Text Index): sec_post_stage_index_sensor chains
+  stage → textblocks index + narratives index (parallel, incremental)
 
 Manual Operations (not in automated chain):
 - sec_entity_update_job: Update mutable Entity attributes (run manually after materialize)
@@ -48,7 +50,10 @@ from .jobs import (
   sec_incremental_stage_job,
   sec_lbug_s3_publish_job,
   sec_materialize_job,
+  sec_narratives_index_job,
   sec_process_job,
+  sec_stage_job,
+  sec_textblocks_index_job,
   sec_vector_s3_publish_job,
 )
 
@@ -634,3 +639,81 @@ def sec_post_materialize_publish_sensor(context: RunStatusSensorContext):
       "mode": "incremental",
     },
   )
+
+
+# ============================================================================
+# SEC Post-Stage Text Index Sensor (OpenSearch Indexing)
+# ============================================================================
+# After staging completes, index text content into OpenSearch in parallel
+# with the materialization branch. Both index jobs are independent and
+# idempotent (OpenSearch upserts by document_id).
+#
+# Chain: stage → text index (parallel with materialize branch)
+
+
+@run_status_sensor(
+  run_status=DagsterRunStatus.SUCCESS,
+  monitored_jobs=[
+    sec_incremental_stage_job,
+    sec_stage_job,
+  ],
+  request_jobs=[
+    sec_textblocks_index_job,
+    sec_narratives_index_job,
+  ],
+  default_status=DefaultSensorStatus.STOPPED,
+  minimum_interval_seconds=60,
+  description="Chain: stage → text search indexing (textblocks + narratives)",
+)
+def sec_post_stage_index_sensor(context: RunStatusSensorContext):
+  """Trigger text search indexing after staging completes.
+
+  Runs both indexing jobs in parallel since they're independent.
+  Both jobs use incremental logic — they query OpenSearch for
+  already-indexed accessions and skip them.
+  """
+  if env.ENVIRONMENT == "dev":
+    context.log.info("Skipping text index sensor in dev environment")
+    return
+
+  dagster_run = context.dagster_run
+
+  # Only chain incremental pipeline runs
+  run_tags = dagster_run.tags or {}
+  if run_tags.get("mode") != "incremental":
+    context.log.info("Skipping - not an incremental pipeline run")
+    return
+
+  graph_id = run_tags.get("graph_id", "sec")
+
+  for job_name in ["sec_textblocks_index", "sec_narratives_index"]:
+    # Skip if already running
+    active_runs = context.instance.get_runs(
+      filters=RunsFilter(
+        job_name=job_name,
+        statuses=[DagsterRunStatus.STARTED, DagsterRunStatus.QUEUED],
+      ),
+      limit=1,
+    )
+    if active_runs:
+      context.log.info(
+        f"{job_name} already running (run_id={active_runs[0].run_id}), skipping"
+      )
+      continue
+
+    # Map job name to asset op name
+    asset_name = job_name.replace("_index", "_indexed")
+    context.log.info(
+      f"Staging complete (run_id={dagster_run.run_id}), triggering {job_name}"
+    )
+
+    yield RunRequest(
+      run_key=f"sec-{job_name}-chain-{dagster_run.run_id[:8]}",
+      job_name=job_name,
+      run_config={"ops": {asset_name: {"config": {"graph_id": graph_id}}}},
+      tags={
+        "pipeline": "sec",
+        "phase": "text_index",
+        "mode": "incremental",
+      },
+    )

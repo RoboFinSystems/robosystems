@@ -246,6 +246,35 @@ services:
           cpus: "0.5"
     profiles: ["localstack", "robosystems", "all"]
 
+  # OpenSearch - Full-text search for filing narratives
+  opensearch:
+    container_name: robosystems-opensearch
+    image: opensearchproject/opensearch:2
+    environment:
+      - discovery.type=single-node
+      - DISABLE_SECURITY_PLUGIN=true
+      - OPENSEARCH_JAVA_OPTS=-Xms512m -Xmx512m
+    ports:
+      - "9200:9200"
+    volumes:
+      - ./data/opensearch:/usr/share/opensearch/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:9200/_cluster/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    restart: always
+    deploy:
+      resources:
+        limits:
+          memory: 1g
+          cpus: "1"
+        reservations:
+          memory: 512m
+          cpus: "0.5"
+    profiles: ["opensearch", "robosystems", "all"]
+
   # Graph API (Neo4j) - Alternative Neo4j Backend (Optional)
   graph-api-neo4j:
     container_name: robosystems-graph-api-neo4j

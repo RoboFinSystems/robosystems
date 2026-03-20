@@ -102,6 +102,12 @@ if env.FACT_GRID_ENABLED:
 
   router.include_router(views_router)  # No prefix - handles /views internally
 
+# Conditionally include search router based on feature flag
+if env.TEXT_SEARCH_ENABLED:
+  from .graphs import search_router
+
+  router.include_router(search_router)  # No prefix - handles /search internally
+
 router.include_router(materialize_router)  # No prefix - handles /materialize endpoint
 router.include_router(files_router)  # No prefix - handles /files endpoint
 

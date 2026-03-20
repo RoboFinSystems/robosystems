@@ -41,6 +41,7 @@ Nightly incremental chain (sensor-driven):
   download → process (250 batch loop) → stage (DuckDB INSERT + vector build)
   → materialize (full LadybugDB rebuild) → lbug S3 publish
   → duckdb S3 publish → vector S3 publish → replica refresh
+  → text index (parallel with materialize: textblocks + narratives → OpenSearch)
 
 Usage:
     from robosystems.adapters.sec.pipeline import get_dagster_components
@@ -94,9 +95,11 @@ from robosystems.adapters.sec.pipeline.jobs import (
   sec_lbug_r2_publish_job,
   sec_lbug_s3_publish_job,
   sec_materialize_job,
+  sec_narratives_index_job,
   sec_process_job,
   sec_stage_job,
   sec_staged_materialize_job,
+  sec_textblocks_index_job,
   sec_vector_s3_publish_job,
 )
 from robosystems.adapters.sec.pipeline.materialize import (
@@ -113,6 +116,7 @@ from robosystems.adapters.sec.pipeline.sensors import (
   sec_incremental_download_schedule,
   sec_incremental_pipeline_sensor,
   sec_post_materialize_publish_sensor,
+  sec_post_stage_index_sensor,
   sec_processing_sensor,
   sec_stage_to_materialize_sensor,
 )
@@ -120,6 +124,10 @@ from robosystems.adapters.sec.pipeline.stage import (
   sec_duckdb_incremental_staged,
   sec_duckdb_staged,
   sec_historical_duckdb_staged,
+)
+from robosystems.adapters.sec.pipeline.text_index import (
+  sec_narratives_indexed,
+  sec_textblocks_indexed,
 )
 from robosystems.adapters.sec.pipeline.vector_publish import sec_vector_s3_published
 
@@ -147,6 +155,8 @@ def get_dagster_components():
       sec_lbug_r2_published,
       sec_vector_s3_published,
       sec_knowledge_artifacts,
+      sec_textblocks_indexed,
+      sec_narratives_indexed,
     ],
     "jobs": [
       sec_download_job,
@@ -166,12 +176,15 @@ def get_dagster_components():
       sec_vector_s3_publish_job,
       sec_artifact_generation_job,
       sec_historical_lbug_s3_publish_job,
+      sec_textblocks_index_job,
+      sec_narratives_index_job,
     ],
     "sensors": [
       sec_processing_sensor,
       sec_incremental_pipeline_sensor,
       sec_stage_to_materialize_sensor,
       sec_post_materialize_publish_sensor,
+      sec_post_stage_index_sensor,
     ],
     "schedules": [
       sec_incremental_download_schedule,
@@ -222,7 +235,10 @@ __all__ = [
   "sec_lbug_s3_publish_job",
   "sec_lbug_s3_published",
   "sec_materialize_job",
+  "sec_narratives_index_job",
+  "sec_narratives_indexed",
   "sec_post_materialize_publish_sensor",
+  "sec_post_stage_index_sensor",
   "sec_process_job",
   "sec_processed_filings",
   "sec_processing_sensor",
@@ -231,6 +247,8 @@ __all__ = [
   "sec_stage_job",
   "sec_stage_to_materialize_sensor",
   "sec_staged_materialize_job",
+  "sec_textblocks_index_job",
+  "sec_textblocks_indexed",
   "sec_vector_s3_publish_job",
   "sec_vector_s3_published",
 ]

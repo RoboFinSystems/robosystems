@@ -47,3 +47,9 @@ if env.FACT_GRID_ENABLED:
   from .views import router as views_router  # noqa: F401
 
   __all__.append("views_router")
+
+# Conditionally export search_router based on feature flag
+if env.TEXT_SEARCH_ENABLED:
+  from .search import router as search_router  # noqa: F401
+
+  __all__.append("search_router")

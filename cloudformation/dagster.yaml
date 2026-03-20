@@ -122,6 +122,14 @@ Parameters:
     Type: String
     Description: Security group ID for applications connecting to Valkey
     AllowedPattern: ^sg-[0-9a-f]+$
+  OpenSearchEndpoint:
+    Type: String
+    Description: OpenSearch domain endpoint URL (empty if not deployed)
+    Default: ""
+  OpenSearchClientSecurityGroupId:
+    Type: String
+    Description: Security group ID for applications connecting to OpenSearch (empty if not deployed)
+    Default: ""
 
   # Database Configuration (uses existing RDS)
   DatabaseEndpoint:
@@ -213,6 +221,7 @@ Parameters:
 Conditions:
   HasBastionAccess: !Not [!Equals [!Ref BastionSecurityGroupId, ""]]
   HasApiAccess: !Not [!Equals [!Ref ApiSecurityGroupId, ""]]
+  HasOpenSearch: !Not [!Equals [!Ref OpenSearchEndpoint, ""]]
 
 Resources:
   # ========================================
@@ -636,6 +645,11 @@ Resources:
               Value: dagster
             - Name: VALKEY_URL
               Value: !Ref ValkeyUrl
+            - !If
+              - HasOpenSearch
+              - Name: OPENSEARCH_URL
+                Value: !Ref OpenSearchEndpoint
+              - !Ref "AWS::NoValue"
             - Name: AWS_REGION
               Value: !Ref AWS::Region
             # Run database migrations on daemon startup (singleton pattern)
@@ -743,6 +757,11 @@ Resources:
               Value: dagster
             - Name: VALKEY_URL
               Value: !Ref ValkeyUrl
+            - !If
+              - HasOpenSearch
+              - Name: OPENSEARCH_URL
+                Value: !Ref OpenSearchEndpoint
+              - !Ref "AWS::NoValue"
             - Name: AWS_REGION
               Value: !Ref AWS::Region
             # EcsRunLauncher configuration - needed for webserver to understand run launcher
@@ -851,6 +870,11 @@ Resources:
               Value: dagster
             - Name: VALKEY_URL
               Value: !Ref ValkeyUrl
+            - !If
+              - HasOpenSearch
+              - Name: OPENSEARCH_URL
+                Value: !Ref OpenSearchEndpoint
+              - !Ref "AWS::NoValue"
             - Name: AWS_REGION
               Value: !Ref AWS::Region
             - Name: SHARED_RAW_BUCKET
@@ -907,6 +931,7 @@ Resources:
             - !Ref DagsterSecurityGroup
             - !Ref ValkeyClientSecurityGroupId
             - !Ref DatabaseSecurityGroupId
+            - !If [HasOpenSearch, !Ref OpenSearchClientSecurityGroupId, !Ref "AWS::NoValue"]
       TaskDefinition: !Ref DaemonTaskDefinition
       EnableExecuteCommand: true
       PropagateTags: SERVICE
@@ -943,6 +968,7 @@ Resources:
             - !Ref DagsterSecurityGroup
             - !Ref ValkeyClientSecurityGroupId
             - !Ref DatabaseSecurityGroupId
+            - !If [HasOpenSearch, !Ref OpenSearchClientSecurityGroupId, !Ref "AWS::NoValue"]
       TaskDefinition: !Ref WebserverTaskDefinition
       # Service Discovery registration
       ServiceRegistries:

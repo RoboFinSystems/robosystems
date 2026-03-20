@@ -522,6 +522,14 @@ class EnvConfig:
     "MCP_VECTOR_SEARCH_ENABLED",
     get_parameter_value("MCP_VECTOR_SEARCH_ENABLED", "false").lower() == "true",
   )
+  TEXT_SEARCH_ENABLED = get_bool_env(
+    "TEXT_SEARCH_ENABLED",
+    get_parameter_value("TEXT_SEARCH_ENABLED", "false").lower() == "true",
+  )
+
+  # --- OpenSearch ---
+  OPENSEARCH_URL = get_str_env("OPENSEARCH_URL", "http://localhost:9200")
+  OPENSEARCH_INDEX = get_str_env("OPENSEARCH_INDEX", "documents")
 
   # --- Shared Repository Operations ---
   SHARED_MASTER_READS_ENABLED = get_bool_env(
