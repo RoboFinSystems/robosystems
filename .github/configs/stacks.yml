@@ -34,6 +34,12 @@ prod:
       database_endpoint: DatabaseEndpoint
       security_group: DatabaseSecurityGroupId
 
+  opensearch:
+    stack_name: RoboSystemsOpenSearchProd
+    outputs:
+      endpoint: OpenSearchEndpoint
+      security_group: OpenSearchClientSecurityGroupId
+
   s3:
     stack_name: RoboSystemsS3Prod
     outputs:
@@ -179,6 +185,12 @@ staging:
       database_url: DatabaseUrl
       database_endpoint: DatabaseEndpoint
       security_group: DatabaseSecurityGroupId
+
+  opensearch:
+    stack_name: RoboSystemsOpenSearchStaging
+    outputs:
+      endpoint: OpenSearchEndpoint
+      security_group: OpenSearchClientSecurityGroupId
 
   s3:
     stack_name: RoboSystemsS3Staging

@@ -1,0 +1,296 @@
+"""Tests for iXBRL disclosure parser.
+
+Covers:
+- TextBlock extraction from ix:nonNumeric elements
+- Continuation chain resolution
+- Element extraction from nested ix:nonFraction tags
+- Label derivation from element qnames
+- Filtering (DEI/ECD skip, min word count, dedup)
+"""
+
+import pytest
+
+from robosystems.adapters.sec.ixbrl_parser import (
+  _extract_elements_from_block,
+  _label_from_element_name,
+  _strip_html,
+  iXBRLParser,
+)
+
+
+@pytest.mark.unit
+class TestLabelFromElementName:
+  """Tests for _label_from_element_name."""
+
+  def test_strips_namespace_and_textblock_suffix(self):
+    assert (
+      _label_from_element_name("us-gaap:GoodwillDisclosureTextBlock")
+      == "Goodwill Disclosure"
+    )
+
+  def test_strips_table_textblock_suffix(self):
+    assert (
+      _label_from_element_name("us-gaap:DebtSecuritiesAvailableForSaleTableTextBlock")
+      == "Debt Securities Available For Sale Table"
+    )
+
+  def test_splits_camel_case(self):
+    assert (
+      _label_from_element_name("us-gaap:RevenueFromContractWithCustomerPolicyTextBlock")
+      == "Revenue From Contract With Customer Policy"
+    )
+
+  def test_handles_company_namespace(self):
+    assert (
+      _label_from_element_name("nvda:NatureOfOperationsPolicyTextBlock")
+      == "Nature Of Operations Policy"
+    )
+
+  def test_handles_no_namespace(self):
+    assert (
+      _label_from_element_name("GoodwillDisclosureTextBlock") == "Goodwill Disclosure"
+    )
+
+  def test_handles_no_suffix(self):
+    assert _label_from_element_name("us-gaap:Revenue") == "Revenue"
+
+
+@pytest.mark.unit
+class TestStripHtml:
+  """Tests for _strip_html."""
+
+  def test_strips_tags(self):
+    assert "Hello world" in _strip_html("<p>Hello <b>world</b></p>")
+
+  def test_removes_style_tags(self):
+    result = _strip_html("<style>.hidden{}</style><p>Visible</p>")
+    assert "hidden" not in result
+    assert "Visible" in result
+
+  def test_removes_script_tags(self):
+    result = _strip_html("<script>alert('x')</script><p>Content</p>")
+    assert "alert" not in result
+    assert "Content" in result
+
+  def test_normalizes_whitespace(self):
+    result = _strip_html("<p>Hello</p>   <p>World</p>")
+    assert "  " not in result
+
+  def test_handles_html_entities(self):
+    result = _strip_html("<p>A&amp;B&nbsp;C</p>")
+    assert "A&B" in result
+
+
+@pytest.mark.unit
+class TestExtractElementsFromBlock:
+  """Tests for _extract_elements_from_block."""
+
+  def test_extracts_nonFraction_elements(self):
+    html = """
+    <ix:nonFraction name="us-gaap:Goodwill" contextRef="c1">32431</ix:nonFraction>
+    <ix:nonFraction name="us-gaap:GoodwillImpairmentLoss" contextRef="c2">0</ix:nonFraction>
+    """
+    elements = _extract_elements_from_block(html)
+    assert "us-gaap:Goodwill" in elements
+    assert "us-gaap:GoodwillImpairmentLoss" in elements
+
+  def test_extracts_nonNumeric_non_textblock_elements(self):
+    html = """
+    <ix:nonNumeric name="us-gaap:FiscalPeriod" contextRef="c1">FY</ix:nonNumeric>
+    """
+    elements = _extract_elements_from_block(html)
+    assert "us-gaap:FiscalPeriod" in elements
+
+  def test_skips_textblock_elements(self):
+    html = """
+    <ix:nonNumeric name="us-gaap:GoodwillDisclosureTextBlock" contextRef="c1">text</ix:nonNumeric>
+    """
+    elements = _extract_elements_from_block(html)
+    assert "us-gaap:GoodwillDisclosureTextBlock" not in elements
+
+  def test_skips_dei_elements(self):
+    html = """
+    <ix:nonNumeric name="dei:EntityRegistrantName" contextRef="c1">NVIDIA</ix:nonNumeric>
+    """
+    elements = _extract_elements_from_block(html)
+    assert len(elements) == 0
+
+  def test_deduplicates_elements(self):
+    html = """
+    <ix:nonFraction name="us-gaap:Goodwill" contextRef="c1">100</ix:nonFraction>
+    <ix:nonFraction name="us-gaap:Goodwill" contextRef="c2">200</ix:nonFraction>
+    """
+    elements = _extract_elements_from_block(html)
+    assert elements.count("us-gaap:Goodwill") == 1
+
+  def test_returns_sorted(self):
+    html = """
+    <ix:nonFraction name="us-gaap:Revenue" contextRef="c1">100</ix:nonFraction>
+    <ix:nonFraction name="us-gaap:Assets" contextRef="c2">200</ix:nonFraction>
+    """
+    elements = _extract_elements_from_block(html)
+    assert elements == sorted(elements)
+
+  def test_empty_block(self):
+    assert _extract_elements_from_block("<p>No XBRL tags here</p>") == []
+
+
+@pytest.mark.unit
+class TestiXBRLParser:
+  """Tests for iXBRLParser.parse()."""
+
+  def test_extracts_simple_textblock(self):
+    html = """
+    <html><body>
+    <ix:nonNumeric contextRef="c-1" name="us-gaap:GoodwillDisclosureTextBlock" id="f-1">
+      <p>The following table summarizes goodwill by segment.
+      <ix:nonFraction name="us-gaap:Goodwill" contextRef="c1">32431</ix:nonFraction>
+      million in total goodwill was recorded during the period.
+      Additional goodwill details are provided below with impairment analysis.</p>
+    </ix:nonNumeric>
+    </body></html>
+    """
+    parser = iXBRLParser()
+    sections = parser.parse(html)
+
+    assert len(sections) == 1
+    assert sections[0].section_id == "us-gaap:GoodwillDisclosureTextBlock"
+    assert sections[0].section_label == "Goodwill Disclosure"
+    assert "goodwill" in sections[0].content.lower()
+    assert "us-gaap:Goodwill" in sections[0].xbrl_elements
+    assert sections[0].element_count == 1
+
+  def test_resolves_continuation_chain(self):
+    html = """
+    <html><body>
+    <ix:nonNumeric contextRef="c-1" name="us-gaap:DebtDisclosureTextBlock" id="f-1" continuedAt="f-1-cont">
+      Debt Overview
+    </ix:nonNumeric>
+    <ix:continuation id="f-1-cont">
+      <p>The company has outstanding debt of
+      <ix:nonFraction name="us-gaap:DebtInstrumentCarryingAmount" contextRef="c1">5000</ix:nonFraction>
+      million. The weighted average interest rate is
+      <ix:nonFraction name="us-gaap:DebtInstrumentInterestRateStatedPercentage" contextRef="c2">3.5</ix:nonFraction>
+      percent. These debt instruments mature over the next ten years with various covenants and restrictions.</p>
+    </ix:continuation>
+    </body></html>
+    """
+    parser = iXBRLParser()
+    sections = parser.parse(html)
+
+    assert len(sections) == 1
+    s = sections[0]
+    assert s.section_id == "us-gaap:DebtDisclosureTextBlock"
+    assert "5000" in s.content
+    assert "us-gaap:DebtInstrumentCarryingAmount" in s.xbrl_elements
+    assert "us-gaap:DebtInstrumentInterestRateStatedPercentage" in s.xbrl_elements
+    assert s.element_count == 2
+
+  def test_skips_dei_textblocks(self):
+    html = """
+    <html><body>
+    <ix:nonNumeric contextRef="c-1" name="dei:DocumentsIncorporatedByReferenceTextBlock" id="f-1">
+      Some reference text that is long enough to pass word count filters
+      and contains enough words to normally be included as a section.
+    </ix:nonNumeric>
+    </body></html>
+    """
+    parser = iXBRLParser()
+    sections = parser.parse(html)
+    assert len(sections) == 0
+
+  def test_skips_ecd_textblocks(self):
+    html = """
+    <html><body>
+    <ix:nonNumeric contextRef="c-1" name="ecd:MtrlTermsOfTrdArrTextBlock" id="f-1">
+      Executive compensation disclosure text that is long enough to pass
+      the minimum word count filter but should be skipped anyway.
+    </ix:nonNumeric>
+    </body></html>
+    """
+    parser = iXBRLParser()
+    sections = parser.parse(html)
+    assert len(sections) == 0
+
+  def test_skips_trivial_sections(self):
+    html = """
+    <html><body>
+    <ix:nonNumeric contextRef="c-1" name="us-gaap:ShortTextBlock" id="f-1">
+      Too short.
+    </ix:nonNumeric>
+    </body></html>
+    """
+    parser = iXBRLParser()
+    sections = parser.parse(html)
+    assert len(sections) == 0
+
+  def test_deduplicates_same_element(self):
+    html = """
+    <html><body>
+    <ix:nonNumeric contextRef="c-1" name="us-gaap:RevenueTextBlock" id="f-1">
+      First occurrence with enough words to pass the minimum word count
+      filter that requires at least twenty words in the content section.
+    </ix:nonNumeric>
+    <ix:nonNumeric contextRef="c-2" name="us-gaap:RevenueTextBlock" id="f-2">
+      Second occurrence also with enough words to pass the minimum word
+      count filter but should be deduplicated by the parser logic.
+    </ix:nonNumeric>
+    </body></html>
+    """
+    parser = iXBRLParser()
+    sections = parser.parse(html)
+    assert len(sections) == 1
+
+  def test_truncates_long_sections(self):
+    long_text = "word " * 20000  # ~100k chars
+    html = f"""
+    <html><body>
+    <ix:nonNumeric contextRef="c-1" name="us-gaap:LongDisclosureTextBlock" id="f-1">
+      {long_text}
+    </ix:nonNumeric>
+    </body></html>
+    """
+    parser = iXBRLParser(max_section_length=100)
+    sections = parser.parse(html)
+    assert len(sections) == 1
+    assert sections[0].content.endswith("[Section truncated]")
+
+  def test_multiple_sections(self):
+    filler = " ".join(["disclosure"] * 25)
+    html = f"""
+    <html><body>
+    <ix:nonNumeric contextRef="c-1" name="us-gaap:GoodwillDisclosureTextBlock" id="f-1">
+      <p>{filler}</p>
+    </ix:nonNumeric>
+    <ix:nonNumeric contextRef="c-1" name="us-gaap:DebtDisclosureTextBlock" id="f-2">
+      <p>{filler}</p>
+    </ix:nonNumeric>
+    <ix:nonNumeric contextRef="c-1" name="us-gaap:IncomeTaxDisclosureTextBlock" id="f-3">
+      <p>{filler}</p>
+    </ix:nonNumeric>
+    </body></html>
+    """
+    parser = iXBRLParser()
+    sections = parser.parse(html)
+    assert len(sections) == 3
+    ids = {s.section_id for s in sections}
+    assert "us-gaap:GoodwillDisclosureTextBlock" in ids
+    assert "us-gaap:DebtDisclosureTextBlock" in ids
+    assert "us-gaap:IncomeTaxDisclosureTextBlock" in ids
+
+  def test_continuation_chain_with_cycle_protection(self):
+    """Ensure visited set prevents infinite loops from malformed data."""
+    html = """
+    <html><body>
+    <ix:nonNumeric contextRef="c-1" name="us-gaap:TestTextBlock" id="f-1" continuedAt="f-1-a">
+      Start content with enough words to pass the minimum word count filter easily.
+    </ix:nonNumeric>
+    <ix:continuation id="f-1-a" continuedAt="f-1-a">
+      Continuation that references itself with circular chain which should be handled gracefully.
+    </ix:continuation>
+    </body></html>
+    """
+    parser = iXBRLParser()
+    sections = parser.parse(html)
+    # Should not hang — visited set breaks the cycle
+    assert len(sections) == 1
