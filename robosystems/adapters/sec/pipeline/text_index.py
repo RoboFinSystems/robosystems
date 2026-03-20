@@ -85,6 +85,16 @@ def _derive_section_label(element_name: str) -> str:
   return label.strip()
 
 
+def _partition_year(key: str) -> int:
+  """Extract year from a filed= partition key (e.g., 'filed=2025-Q1' → 2025)."""
+  for part in key.split("/"):
+    if part.startswith("filed="):
+      return int(part.split("=")[1][:4])
+    if part.startswith("year="):
+      return int(part.split("=")[1][:4])
+  return 0
+
+
 def _list_s3_parquet_keys(s3, bucket: str, prefix: str) -> list[str]:
   """List all .parquet keys under a prefix."""
   keys: list[str] = []
@@ -196,11 +206,30 @@ def sec_textblocks_indexed(
 
   # Discover parquet files for each table
   prefix_base = get_processed_key(DataSourceType.SEC, "processed")
-  context.log.info(f"Scanning parquets from s3://{processed_bucket}/{prefix_base}/")
+
+  if config.start_year:
+    context.log.info(
+      f"Scanning parquets from s3://{processed_bucket}/{prefix_base}/ "
+      f"(start_year={config.start_year})"
+    )
+  else:
+    context.log.info(f"Scanning parquets from s3://{processed_bucket}/{prefix_base}/")
 
   # Read Entity, Report, Element, Fact parquets
-  # We scan all filed=* partitions
-  entity_keys = _list_s3_parquet_keys(s3, processed_bucket, f"{prefix_base}/filed=")
+  all_parquet_keys = _list_s3_parquet_keys(
+    s3, processed_bucket, f"{prefix_base}/filed="
+  )
+
+  # Filter by start_year if specified (partition format: filed=2025-Q1)
+  if config.start_year:
+    all_parquet_keys = [
+      k for k in all_parquet_keys if _partition_year(k) >= config.start_year
+    ]
+    context.log.info(
+      f"Filtered to {len(all_parquet_keys)} parquets (>= {config.start_year})"
+    )
+
+  entity_keys = all_parquet_keys
   node_keys = {
     "Entity": [k for k in entity_keys if "/nodes/Entity/" in k],
     "Report": [k for k in entity_keys if "/nodes/Report/" in k],
@@ -461,6 +490,16 @@ def sec_narratives_indexed(
   all_parquet_keys = _list_s3_parquet_keys(
     s3, processed_bucket, f"{prefix_base}/filed="
   )
+
+  # Filter by start_year if specified
+  if config.start_year:
+    all_parquet_keys = [
+      k for k in all_parquet_keys if _partition_year(k) >= config.start_year
+    ]
+    context.log.info(
+      f"Filtered to {len(all_parquet_keys)} parquets (>= {config.start_year})"
+    )
+
   report_keys = [k for k in all_parquet_keys if "/nodes/Report/" in k]
   entity_keys = [k for k in all_parquet_keys if "/nodes/Entity/" in k]
   ehr_keys = [k for k in all_parquet_keys if "/relationships/ENTITY_HAS_REPORT/" in k]
@@ -540,6 +579,10 @@ def sec_narratives_indexed(
     for obj in page.get("Contents", []):
       if obj["Key"].endswith(".zip"):
         zip_keys.append(obj["Key"])
+
+  # Filter ZIPs by start_year if specified (key format: sec/year=2025/CIK/ACCESSION.zip)
+  if config.start_year:
+    zip_keys = [k for k in zip_keys if _partition_year(k) >= config.start_year]
 
   context.log.info(f"Found {len(zip_keys)} raw ZIP files")
 

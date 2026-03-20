@@ -209,6 +209,7 @@ class SECPipeline:
     reset_staging: bool = False,
     rebuild_graph: bool = False,
     skip_taxonomy: bool = False,
+    start_year: int | None = None,
   ) -> str:
     """Create YAML config for Dagster job.
 
@@ -251,19 +252,21 @@ class SECPipeline:
         }
       }
     elif job_type == "textblocks_index":
+      tb_cfg: dict[str, Any] = {"graph_id": graph_id}
+      if start_year:
+        tb_cfg["start_year"] = start_year
       config = {
         "ops": {
-          "sec_textblocks_indexed": {
-            "config": {"graph_id": graph_id},
-          },
+          "sec_textblocks_indexed": {"config": tb_cfg},
         }
       }
     elif job_type == "narratives_index":
+      narr_cfg: dict[str, Any] = {"graph_id": graph_id}
+      if start_year:
+        narr_cfg["start_year"] = start_year
       config = {
         "ops": {
-          "sec_narratives_indexed": {
-            "config": {"graph_id": graph_id},
-          },
+          "sec_narratives_indexed": {"config": narr_cfg},
         }
       }
     else:
@@ -1266,9 +1269,13 @@ def cmd_index(args):
 
   Requires processed parquets to exist in S3 (run after processing completes).
   """
+  start_year = getattr(args, "start_year", None)
+
   logger.info("=" * 60)
   logger.info("SEC Text Search Indexing (Phase 4)")
   logger.info("=" * 60)
+  if start_year:
+    logger.info(f"Start year: {start_year}")
 
   pipeline = SECPipeline(
     tickers=[],
@@ -1290,6 +1297,7 @@ def cmd_index(args):
     year=None,
     job_type="textblocks_index",
     graph_id=args.graph_id,
+    start_year=start_year,
   )
   tb_result = pipeline.run_stage(
     job_name="sec_textblocks_index",
@@ -1309,6 +1317,7 @@ def cmd_index(args):
     year=None,
     job_type="narratives_index",
     graph_id=args.graph_id,
+    start_year=start_year,
   )
   narr_result = pipeline.run_stage(
     job_name="sec_narratives_index",
@@ -1507,6 +1516,12 @@ def main():
   )
   index_parser.add_argument(
     "--graph-id", type=str, default="sec", help="Graph ID (default: sec)"
+  )
+  index_parser.add_argument(
+    "--start-year",
+    type=int,
+    default=None,
+    help="Only index filings from this year forward (default: all)",
   )
   index_parser.add_argument(
     "--timeout",

@@ -456,9 +456,10 @@ sec-materialize-graph env=_local_env:
 # --- Phase 4: Text Search Indexing ---
 
 # Index text blocks + narratives into OpenSearch (requires processed parquets in S3)
-sec-index env=_local_env:
+sec-index start_year="" env=_local_env:
     UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.sec_pipeline index \
-        --graph-id sec
+        --graph-id sec \
+        {{ if start_year != "" { "--start-year " + start_year } else { "" } }}
 
 # --- Utilities ---
 

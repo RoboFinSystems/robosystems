@@ -251,6 +251,10 @@ class SECTextBlockIndexConfig(Config):
   """Configuration for XBRL text block OpenSearch indexing."""
 
   graph_id: str = "sec"
+  start_year: int | None = Field(
+    default=SEC_PRIMARY_START_YEAR,
+    description="Only index filings from this year forward (default: 2024)",
+  )
   min_content_length: int = Field(
     default=200, description="Skip text blocks shorter than this after HTML stripping"
   )
@@ -260,6 +264,10 @@ class SECNarrativeIndexConfig(Config):
   """Configuration for narrative section extraction and OpenSearch indexing."""
 
   graph_id: str = "sec"
+  start_year: int | None = Field(
+    default=SEC_PRIMARY_START_YEAR,
+    description="Only index filings from this year forward (default: 2024)",
+  )
   max_section_length: int = Field(
     default=50000, description="Truncate sections longer than this (chars)"
   )
