@@ -37,6 +37,8 @@ class SearchService:
       filters["section"] = request.section
     if request.element:
       filters["element"] = request.element
+    if request.source_type:
+      filters["source_type"] = request.source_type
     if request.fiscal_year:
       filters["fiscal_year"] = request.fiscal_year
     if request.date_from:

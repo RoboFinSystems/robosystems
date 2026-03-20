@@ -68,9 +68,11 @@ def _label_from_element_name(name: str) -> str:
 
 def _strip_html(html: str) -> str:
   """Strip HTML tags and normalize whitespace."""
-  text = re.sub(r"<style[^>]*>.*?</style>", " ", html, flags=re.DOTALL | re.IGNORECASE)
   text = re.sub(
-    r"<script[^>]*>.*?</script>", " ", text, flags=re.DOTALL | re.IGNORECASE
+    r"<style[^>]*>.*?</\s*style\s*>", " ", html, flags=re.DOTALL | re.IGNORECASE
+  )
+  text = re.sub(
+    r"<script[^>]*>.*?</\s*script\s*>", " ", text, flags=re.DOTALL | re.IGNORECASE
   )
   text = re.sub(r"<[^>]+>", " ", text)
   text = re.sub(r"&nbsp;?", " ", text)

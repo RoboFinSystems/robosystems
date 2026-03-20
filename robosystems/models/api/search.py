@@ -18,6 +18,10 @@ class SearchRequest(BaseModel):
     None,
     description="Filter by XBRL element qname (e.g., us-gaap:Goodwill)",
   )
+  source_type: str | None = Field(
+    None,
+    description="Filter by source type (xbrl_textblock, narrative_section, ixbrl_disclosure)",
+  )
   fiscal_year: int | None = Field(None, description="Filter by fiscal year")
   date_from: str | None = Field(
     None,

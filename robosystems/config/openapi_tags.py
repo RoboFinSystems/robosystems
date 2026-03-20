@@ -39,6 +39,10 @@ MAIN_API_TAGS = [
     "description": "👁️ Views - Create and manage multi-dimensional fact grids with XBRL-style hypercubes",
   },
   {
+    "name": "Search",
+    "description": "🔎 Search - Full-text search across filing narratives, disclosures, and XBRL text content",
+  },
+  {
     "name": "Backup",
     "description": "💾 Database backup - Create, restore, and manage graph database backups",
   },

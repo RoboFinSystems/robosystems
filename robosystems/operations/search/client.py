@@ -224,6 +224,8 @@ class OpenSearchClient:
         filter_clauses.append({"term": {"fiscal_year": filters["fiscal_year"]}})
       if filters.get("element"):
         filter_clauses.append({"term": {"xbrl_elements": filters["element"]}})
+      if filters.get("source_type"):
+        filter_clauses.append({"term": {"source_type": filters["source_type"]}})
       if filters.get("date_from"):
         filter_clauses.append({"range": {"filing_date": {"gte": filters["date_from"]}}})
       if filters.get("date_to"):
