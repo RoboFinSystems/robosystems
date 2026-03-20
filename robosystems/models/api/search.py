@@ -16,10 +16,14 @@ class SearchRequest(BaseModel):
   )
   fiscal_year: int | None = Field(None, description="Filter by fiscal year")
   date_from: str | None = Field(
-    None, description="Filter filings on or after date (YYYY-MM-DD)"
+    None,
+    pattern=r"^\d{4}-\d{2}-\d{2}$",
+    description="Filter filings on or after date (YYYY-MM-DD)",
   )
   date_to: str | None = Field(
-    None, description="Filter filings on or before date (YYYY-MM-DD)"
+    None,
+    pattern=r"^\d{4}-\d{2}-\d{2}$",
+    description="Filter filings on or before date (YYYY-MM-DD)",
   )
   size: int = Field(10, ge=1, le=50, description="Max results to return")
   offset: int = Field(0, ge=0, description="Pagination offset")

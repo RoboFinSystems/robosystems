@@ -1,8 +1,10 @@
-"""Full-text search MCP tools for document discovery and retrieval.
+"""Full-text search MCP tools for SEC filing document discovery and retrieval.
 
 Two-tool pattern:
-1. search-documents: Broad search returning snippets with metadata
+1. search-documents: Keyword search returning ranked snippets with metadata
 2. get-document-section: Drill into a specific result for full content
+
+Uses BM25 keyword matching via OpenSearch. Semantic/vector search is planned.
 """
 
 from typing import Any
@@ -19,7 +21,7 @@ class SearchDocumentsTool:
   def get_tool_definition(self) -> dict[str, Any]:
     return {
       "name": "search-documents",
-      "description": """Full-text search across SEC filing narratives and text content. Searches MD&A, risk factors, business descriptions, cybersecurity disclosures, and other qualitative content.
+      "description": """Full-text keyword search across SEC filing narratives and disclosures. Searches MD&A, risk factors, business descriptions, cybersecurity disclosures, and other qualitative content using keyword matching (BM25).
 
 **WHEN TO USE:**
 - When the user asks about topics, risks, strategies, or disclosures mentioned in filings
@@ -37,6 +39,7 @@ class SearchDocumentsTool:
 - Use get-document-section with the document_id to read the full section text
 
 **TIPS:**
+- Use specific keywords that would appear in filings (e.g., "tariff" not "trade war concerns")
 - Use entity filter to focus on one company's filings
 - Use section filter (item_1a, item_7) to target specific filing sections
 - Results include both XBRL text blocks and extracted narrative sections""",

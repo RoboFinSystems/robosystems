@@ -16,6 +16,7 @@ Both run parallel to the DuckDB staging branch.
 
 import hashlib
 import io
+import math
 import re
 import zipfile
 from typing import Any
@@ -134,8 +135,8 @@ def _get_indexed_accessions(os_client, graph_id: str) -> set[str]:
       if len(buckets) < 10000:
         break
 
-  except Exception:
-    pass
+  except Exception as e:
+    logger.warning(f"Failed to query indexed accessions: {e}")
 
   return accessions
 
@@ -357,7 +358,7 @@ def sec_textblocks_indexed(
     report_lookup[row.get("identifier")] = {
       "filing_date": str(row.get("filing_date", "")),
       "form": row.get("form", ""),
-      "fiscal_year": int(fy) if fy is not None and fy == fy else None,
+      "fiscal_year": int(fy) if fy is not None and not math.isnan(fy) else None,
       "fiscal_period": row.get("fiscal_period_focus", ""),
       "accession_number": row.get("accession_number", ""),
     }
@@ -620,7 +621,7 @@ def sec_narratives_indexed(
     accession_metadata[accession] = {
       "form_type": report.get("form", ""),
       "filing_date": str(report.get("filing_date", "")),
-      "fiscal_year": int(fy) if fy is not None and fy == fy else None,
+      "fiscal_year": int(fy) if fy is not None and not math.isnan(fy) else None,
       "fiscal_period": report.get("fiscal_period_focus", ""),
       "cik": entity_info.get("cik", str(report.get("cik", ""))),
       "ticker": entity_info.get("ticker", ""),
