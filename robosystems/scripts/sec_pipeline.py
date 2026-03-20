@@ -250,6 +250,22 @@ class SECPipeline:
           },
         }
       }
+    elif job_type == "textblocks_index":
+      config = {
+        "ops": {
+          "sec_textblocks_indexed": {
+            "config": {"graph_id": graph_id},
+          },
+        }
+      }
+    elif job_type == "narratives_index":
+      config = {
+        "ops": {
+          "sec_narratives_indexed": {
+            "config": {"graph_id": graph_id},
+          },
+        }
+      }
     else:
       # sec_download job: download raw ZIPs only (no processing)
       # EFTS-based discovery - resolves tickers to CIKs in the asset
@@ -454,6 +470,48 @@ class SECPipeline:
           )
       else:
         logger.error(f"  Staging failed: {stage_result.error}")
+
+    # Phase 4: Text Search Indexing (OpenSearch)
+    if not self.skip_processing:
+      logger.info(f"\n{'=' * 60}")
+      logger.info("TEXT SEARCH INDEXING (OpenSearch)")
+      logger.info(f"{'=' * 60}")
+
+      # Text blocks indexing
+      logger.info("\n[TEXT BLOCKS] Indexing XBRL text blocks...")
+      tb_config_path = self._create_job_config(
+        tickers=self.tickers,
+        year=None,
+        job_type="textblocks_index",
+      )
+      tb_result = self.run_stage(
+        job_name="sec_textblocks_index",
+        config_path=tb_config_path,
+        timeout=self.materialize_timeout,
+      )
+      all_results.append(tb_result)
+      if tb_result.success:
+        logger.info(f"  Text blocks indexed ({tb_result.duration_seconds:.1f}s)")
+      else:
+        logger.warning(f"  Text block indexing issues: {tb_result.error}")
+
+      # Narrative sections indexing
+      logger.info("\n[NARRATIVES] Extracting and indexing narrative sections...")
+      narr_config_path = self._create_job_config(
+        tickers=self.tickers,
+        year=None,
+        job_type="narratives_index",
+      )
+      narr_result = self.run_stage(
+        job_name="sec_narratives_index",
+        config_path=narr_config_path,
+        timeout=self.materialize_timeout,
+      )
+      all_results.append(narr_result)
+      if narr_result.success:
+        logger.info(f"  Narratives indexed ({narr_result.duration_seconds:.1f}s)")
+      else:
+        logger.warning(f"  Narrative indexing issues: {narr_result.error}")
 
     # Summary
     overall_duration = time.time() - overall_start
@@ -1199,6 +1257,103 @@ def cmd_process(args):
   return 0 if result.success else 1
 
 
+def cmd_index(args):
+  """Index text blocks and narratives into OpenSearch (Phase 4).
+
+  Runs both indexing jobs:
+  1. sec_textblocks_indexed — reads processed parquets, fetches externalized HTML, indexes
+  2. sec_narratives_indexed — reads raw ZIPs, extracts sections, externalizes, indexes
+
+  Requires processed parquets to exist in S3 (run after processing completes).
+  """
+  logger.info("=" * 60)
+  logger.info("SEC Text Search Indexing (Phase 4)")
+  logger.info("=" * 60)
+
+  pipeline = SECPipeline(
+    tickers=[],
+    years=[],
+    skip_download=True,
+    skip_processing=True,
+    skip_reset=True,
+    verbose=args.verbose,
+    materialize_timeout=args.timeout,
+  )
+
+  results = []
+  start_time = time.time()
+
+  # Text blocks
+  logger.info("\n[TEXT BLOCKS] Indexing XBRL text blocks...")
+  tb_config = pipeline._create_job_config(
+    tickers=[],
+    year=None,
+    job_type="textblocks_index",
+    graph_id=args.graph_id,
+  )
+  tb_result = pipeline.run_stage(
+    job_name="sec_textblocks_index",
+    config_path=tb_config,
+    timeout=args.timeout,
+  )
+  results.append(tb_result)
+  if tb_result.success:
+    logger.info(f"  Text blocks indexed ({tb_result.duration_seconds:.1f}s)")
+  else:
+    logger.error(f"  Text block indexing failed: {tb_result.error}")
+
+  # Narratives
+  logger.info("\n[NARRATIVES] Extracting and indexing narrative sections...")
+  narr_config = pipeline._create_job_config(
+    tickers=[],
+    year=None,
+    job_type="narratives_index",
+    graph_id=args.graph_id,
+  )
+  narr_result = pipeline.run_stage(
+    job_name="sec_narratives_index",
+    config_path=narr_config,
+    timeout=args.timeout,
+  )
+  results.append(narr_result)
+  if narr_result.success:
+    logger.info(f"  Narratives indexed ({narr_result.duration_seconds:.1f}s)")
+  else:
+    logger.error(f"  Narrative indexing failed: {narr_result.error}")
+
+  duration = time.time() - start_time
+  successful = sum(1 for r in results if r.success)
+  failed = sum(1 for r in results if not r.success)
+
+  logger.info(f"\n{'=' * 60}")
+  logger.info("SUMMARY")
+  logger.info(f"{'=' * 60}")
+  logger.info(f"Jobs: {successful} succeeded, {failed} failed")
+  logger.info(f"Duration: {duration:.1f}s ({duration / 60:.1f} min)")
+
+  if args.json:
+    print(
+      json.dumps(
+        {
+          "status": "success" if failed == 0 else "failure",
+          "graph_id": args.graph_id,
+          "textblocks": {
+            "success": tb_result.success,
+            "duration": tb_result.duration_seconds,
+          },
+          "narratives": {
+            "success": narr_result.success,
+            "duration": narr_result.duration_seconds,
+          },
+          "duration_seconds": duration,
+        },
+        indent=2,
+      )
+    )
+
+  return 0 if failed == 0 else 1
+
+
 def main():
   parser = argparse.ArgumentParser(
     description="SEC Pipeline - XBRL Data Processing via Dagster",
@@ -1345,6 +1500,25 @@ def main():
   )
   process_parser.add_argument("--json", action="store_true", help="JSON output")
 
+  # Index command (Phase 4 - text search indexing)
+  index_parser = subparsers.add_parser(
+    "index",
+    help="Index text blocks + narratives into OpenSearch (Phase 4)",
+  )
+  index_parser.add_argument(
+    "--graph-id", type=str, default="sec", help="Graph ID (default: sec)"
+  )
+  index_parser.add_argument(
+    "--timeout",
+    type=int,
+    default=DEFAULT_MATERIALIZE_TIMEOUT,
+    help=f"Timeout in seconds (default: {DEFAULT_MATERIALIZE_TIMEOUT})",
+  )
+  index_parser.add_argument(
+    "-v", "--verbose", action="store_true", help="Verbose output"
+  )
+  index_parser.add_argument("--json", action="store_true", help="JSON output")
+
   args = parser.parse_args()
 
   if args.command == "run":
@@ -1359,6 +1533,8 @@ def main():
     sys.exit(cmd_materialize_graph(args))
   elif args.command == "process":
     sys.exit(cmd_process(args))
+  elif args.command == "index":
+    sys.exit(cmd_index(args))
   else:
     parser.print_help()
     sys.exit(0)

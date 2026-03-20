@@ -453,6 +453,13 @@ sec-materialize-graph env=_local_env:
     UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.sec_pipeline materialize-graph \
         --graph-id sec
 
+# --- Phase 4: Text Search Indexing ---
+
+# Index text blocks + narratives into OpenSearch (requires processed parquets in S3)
+sec-index env=_local_env:
+    UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.sec_pipeline index \
+        --graph-id sec
+
 # --- Utilities ---
 
 # Reset SEC database and S3 data (use clear_s3="" to skip S3/SourceFiles cleanup)
@@ -498,6 +505,7 @@ clean-data:
     rm -rf ./data/lance
     rm -rf ./data/neo4j
     rm -rf ./data/localstack
+    rm -rf ./data/opensearch
     rm -rf ./data/postgres
     rm -rf ./data/valkey
     rm -rf ./.local/config.json
