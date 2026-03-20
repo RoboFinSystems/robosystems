@@ -710,13 +710,7 @@ def sec_post_stage_index_sensor(context: RunStatusSensorContext):
     yield RunRequest(
       run_key=f"sec-{job_name}-chain-{dagster_run.run_id[:8]}",
       job_name=job_name,
-      run_config={
-        "ops": {
-          asset_name: {
-            "config": {"graph_id": graph_id}
-          }
-        }
-      },
+      run_config={"ops": {asset_name: {"config": {"graph_id": graph_id}}}},
       tags={
         "pipeline": "sec",
         "phase": "text_index",
