@@ -14,6 +14,14 @@ class SearchRequest(BaseModel):
   section: str | None = Field(
     None, description="Filter by section ID (item_1, item_1a, item_7, etc.)"
   )
+  element: str | None = Field(
+    None,
+    description="Filter by XBRL element qname (e.g., us-gaap:Goodwill)",
+  )
+  source_type: str | None = Field(
+    None,
+    description="Filter by source type (xbrl_textblock, narrative_section, ixbrl_disclosure)",
+  )
   fiscal_year: int | None = Field(None, description="Filter by fiscal year")
   date_from: str | None = Field(
     None,
@@ -43,6 +51,7 @@ class SearchHit(BaseModel):
   filing_date: str | None = None
   fiscal_year: int | None = None
   form_type: str | None = None
+  xbrl_elements: list[str] | None = None  # XBRL element qnames in this section
   snippet: str  # Highlighted excerpt from content
   content_length: int = 0
   content_url: str | None = None
@@ -74,6 +83,7 @@ class DocumentSection(BaseModel):
   fiscal_period: str | None = None
   form_type: str | None = None
   accession_number: str | None = None
+  xbrl_elements: list[str] | None = None
   content: str
   content_url: str | None = None
   content_length: int = 0

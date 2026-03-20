@@ -37,12 +37,21 @@ class SearchDocumentsTool:
 - Ranked results with relevance scores and text snippets showing matched content
 - Each result includes entity, filing date, form type, section label, and a document_id
 - Use get-document-section with the document_id to read the full section text
+- iXBRL disclosure results include xbrl_elements — the XBRL fact tags found within that section
+
+**GRAPH CROSS-REFERENCE (iXBRL disclosures):**
+- iXBRL disclosure results contain xbrl_elements (e.g., us-gaap:Goodwill, us-gaap:Revenues)
+- These are the same element qnames used in the knowledge graph
+- Use resolve-element to look up element details, then read-graph-cypher or build-fact-grid to get the structured financial data for those elements
+- This bridges unstructured narrative context ↔ structured financial facts
+- Example flow: search "goodwill impairment" → find disclosure with us-gaap:Goodwill → query graph for actual goodwill values across periods
+- Use the element filter to go the other direction: find all disclosures containing a specific XBRL fact
 
 **TIPS:**
 - Use specific keywords that would appear in filings (e.g., "tariff" not "trade war concerns")
 - Use entity filter to focus on one company's filings
 - Use section filter (item_1a, item_7) to target specific filing sections
-- Results include both XBRL text blocks and extracted narrative sections""",
+- Results include XBRL text blocks, extracted narrative sections, and iXBRL disclosures""",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -61,6 +70,10 @@ class SearchDocumentsTool:
           "section": {
             "type": "string",
             "description": "Optional: filter by section ID (item_1, item_1a, item_1c, item_2, item_7, item_7a)",
+          },
+          "element": {
+            "type": "string",
+            "description": "Optional: filter by XBRL element qname to find disclosures containing that fact (e.g., us-gaap:Goodwill, us-gaap:Revenues)",
           },
           "fiscal_year": {
             "type": "integer",
@@ -92,6 +105,7 @@ class SearchDocumentsTool:
       entity=arguments.get("entity"),
       form_type=arguments.get("form_type"),
       section=arguments.get("section"),
+      element=arguments.get("element"),
       fiscal_year=arguments.get("fiscal_year"),
       size=min(arguments.get("size", 10), 50),
     )
@@ -124,7 +138,8 @@ class GetDocumentSectionTool:
 
 **RETURNS:**
 - Complete section text with entity, filing, and section metadata
-- content_url for the CDN-hosted clean text (when available)""",
+- content_url for the CDN-hosted clean text (when available)
+- For iXBRL disclosures: xbrl_elements list of XBRL fact tags in this section — use resolve-element or read-graph-cypher to cross-reference with the knowledge graph""",
       "inputSchema": {
         "type": "object",
         "properties": {

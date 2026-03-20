@@ -40,7 +40,8 @@ class TestGetIndexedAccessions:
     assert result == {"0001045810-25-000014", "0001045810-25-000015"}
     # Verify graph_id filter was sent
     call_body = os_client.client.search.call_args.kwargs["body"]
-    assert call_body["query"] == {"term": {"graph_id": "sec"}}
+    filters = call_body["query"]["bool"]["filter"]
+    assert {"term": {"graph_id": "sec"}} in filters
 
   def test_paginates_multiple_pages(self):
     """Composite agg paginates when buckets == page size."""
@@ -114,7 +115,35 @@ class TestGetIndexedAccessions:
     _get_indexed_accessions(os_client, "custom_graph")
 
     call_body = os_client.client.search.call_args.kwargs["body"]
-    assert call_body["query"] == {"term": {"graph_id": "custom_graph"}}
+    filters = call_body["query"]["bool"]["filter"]
+    assert {"term": {"graph_id": "custom_graph"}} in filters
+
+  def test_filters_by_source_type(self):
+    """Verify source_type filter is added when specified."""
+    os_client = MagicMock()
+    os_client.client.search.return_value = {
+      "aggregations": {"accessions": {"buckets": []}}
+    }
+
+    _get_indexed_accessions(os_client, "sec", source_type="narrative_section")
+
+    call_body = os_client.client.search.call_args.kwargs["body"]
+    filters = call_body["query"]["bool"]["filter"]
+    assert {"term": {"graph_id": "sec"}} in filters
+    assert {"term": {"source_type": "narrative_section"}} in filters
+
+  def test_no_source_type_filter_when_none(self):
+    """Verify no source_type filter when not specified."""
+    os_client = MagicMock()
+    os_client.client.search.return_value = {
+      "aggregations": {"accessions": {"buckets": []}}
+    }
+
+    _get_indexed_accessions(os_client, "sec")
+
+    call_body = os_client.client.search.call_args.kwargs["body"]
+    filters = call_body["query"]["bool"]["filter"]
+    assert len(filters) == 1  # Only graph_id
 
 
 @pytest.mark.unit

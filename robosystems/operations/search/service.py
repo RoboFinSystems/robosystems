@@ -35,6 +35,10 @@ class SearchService:
       filters["form_type"] = request.form_type
     if request.section:
       filters["section"] = request.section
+    if request.element:
+      filters["element"] = request.element
+    if request.source_type:
+      filters["source_type"] = request.source_type
     if request.fiscal_year:
       filters["fiscal_year"] = request.fiscal_year
     if request.date_from:
@@ -74,6 +78,7 @@ class SearchService:
           section_label=source.get("section_label"),
           section_id=source.get("section_id"),
           element_qname=source.get("element_qname"),
+          xbrl_elements=source.get("xbrl_elements"),
           filing_date=source.get("filing_date"),
           fiscal_year=source.get("fiscal_year"),
           form_type=source.get("form_type"),

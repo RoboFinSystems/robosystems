@@ -274,3 +274,19 @@ class SECNarrativeIndexConfig(Config):
   form_types: list[str] = Field(
     default=["10-K", "10-Q"], description="Form types to extract narratives from"
   )
+
+
+class SECiXBRLIndexConfig(Config):
+  """Configuration for iXBRL disclosure extraction and OpenSearch indexing."""
+
+  graph_id: str = "sec"
+  start_year: int | None = Field(
+    default=SEC_PRIMARY_START_YEAR,
+    description="Only index filings from this year forward (default: 2024)",
+  )
+  max_section_length: int = Field(
+    default=50000, description="Truncate sections longer than this (chars)"
+  )
+  form_types: list[str] = Field(
+    default=["10-K", "10-Q"], description="Form types to extract iXBRL disclosures from"
+  )

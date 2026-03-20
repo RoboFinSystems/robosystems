@@ -1,6 +1,6 @@
 """SEC Text Search Indexing Assets.
 
-Two assets for indexing SEC filing text content into OpenSearch:
+Three assets for indexing SEC filing text content into OpenSearch:
 
 1. sec_textblocks_indexed — Index XBRL text blocks (already externalized to S3)
    Reads processed parquets (Fact + Entity + Report + Element), fetches externalized
@@ -10,8 +10,13 @@ Two assets for indexing SEC filing text content into OpenSearch:
    Reads raw ZIP files, extracts 10-K/10-Q HTML, detects Item sections,
    externalizes clean text to S3/CDN, indexes into OpenSearch.
 
-Both depend on sec_processed_filings (need Entity/Report metadata from parquets).
-Both run parallel to the DuckDB staging branch.
+3. sec_ixbrl_disclosures_indexed — Extract iXBRL disclosure sections with XBRL element metadata
+   Reads raw ZIP files, parses iXBRL text blocks (ix:nonNumeric TextBlock elements),
+   extracts nested XBRL element qnames, indexes with element metadata for
+   bidirectional navigation between knowledge graph and document search.
+
+All depend on sec_processed_filings (need Entity/Report metadata from parquets).
+All run parallel to the DuckDB staging branch.
 """
 
 import hashlib
@@ -32,7 +37,11 @@ from robosystems.config.storage.shared import (
 )
 from robosystems.logger import logger
 
-from .configs import SECNarrativeIndexConfig, SECTextBlockIndexConfig
+from .configs import (
+  SECiXBRLIndexConfig,
+  SECNarrativeIndexConfig,
+  SECTextBlockIndexConfig,
+)
 
 
 def _get_s3_client():
@@ -96,16 +105,31 @@ def _partition_year(key: str) -> int:
   return 0
 
 
-def _get_indexed_accessions(os_client, graph_id: str) -> set[str]:
-  """Get accession numbers already indexed for a graph_id.
+def _get_indexed_accessions(
+  os_client, graph_id: str, source_type: str | None = None
+) -> set[str]:
+  """Get accession numbers already indexed for a graph_id and source_type.
 
   Uses a composite aggregation to paginate through all unique accession numbers
   without an upper bound. Returns empty set if index doesn't exist.
+
+  Args:
+    os_client: OpenSearch client instance
+    graph_id: Tenant filter
+    source_type: Optional source type filter (e.g., "xbrl_textblock",
+      "narrative_section", "ixbrl_disclosure"). When set, only returns
+      accessions indexed for that specific source type, allowing each
+      asset to track its own progress independently.
   """
   accessions: set[str] = set()
   after: dict | None = None
 
   try:
+    # Build query with mandatory graph_id + optional source_type filter
+    query_filter: list[dict] = [{"term": {"graph_id": graph_id}}]
+    if source_type:
+      query_filter.append({"term": {"source_type": source_type}})
+
     while True:
       agg: dict = {
         "composite": {
@@ -120,7 +144,7 @@ def _get_indexed_accessions(os_client, graph_id: str) -> set[str]:
         index=os_client.index_name,
         body={
           "size": 0,
-          "query": {"term": {"graph_id": graph_id}},
+          "query": {"bool": {"filter": query_filter}},
           "aggs": {"accessions": agg},
         },
       )
@@ -197,6 +221,76 @@ def _strip_html(html: str) -> str:
     return text.strip()
 
 
+def _extract_html_from_zip(zip_bytes: bytes) -> str | None:
+  """Extract the main filing HTML from a ZIP file.
+
+  Picks the largest non-exhibit HTM file, filtering out XBRL taxonomy files,
+  viewer artifacts, and common exhibit patterns. Returns None if no valid
+  HTML file is found.
+  """
+  with zipfile.ZipFile(io.BytesIO(zip_bytes)) as zf:
+    htm_candidates: list[tuple[str, int]] = []
+    for info in zf.infolist():
+      name_lower = info.filename.lower()
+      if not name_lower.endswith((".htm", ".html")):
+        continue
+      # Skip known non-filing files
+      if any(
+        skip in name_lower
+        for skip in [
+          "filingsummary",
+          "metalinks",
+          "defnref",
+          "_cal.",
+          "_def.",
+          "_lab.",
+          "_pre.",
+          ".xsd",
+        ]
+      ):
+        continue
+      # Skip R-files (viewer artifacts)
+      basename = name_lower.rsplit("/", 1)[-1]
+      if re.match(r"^r\d+\.htm", basename):
+        continue
+      # Skip exhibits (ex, consent, subsidiary, certification patterns)
+      if any(
+        pat in basename for pat in ["ex1", "ex2", "ex3", "ex4", "consent", "subsidiar"]
+      ):
+        continue
+      htm_candidates.append((info.filename, info.file_size))
+
+    if not htm_candidates:
+      return None
+
+    # Pick the largest file — the main filing document is always the biggest
+    main_file = max(htm_candidates, key=lambda x: x[1])[0]
+    return zf.read(main_file).decode("utf-8", errors="replace")
+
+
+def _extract_ixbrl_doc_type(html: str) -> str | None:
+  """Extract dei:DocumentType from iXBRL header.
+
+  Returns the document type (e.g., '10-K', '10-Q', 'DEF 14A', '20-F')
+  or None if not found. This is more reliable than regex on visible text.
+
+  Handles two common iXBRL patterns:
+  1. Direct value: <ix:nonNumeric name="dei:DocumentType">10-K</ix:nonNumeric>
+  2. Nested span: <ix:nonNumeric name="dei:DocumentType"><span>10-K</span></ix:nonNumeric>
+  """
+  match = re.search(
+    r'name=["\']dei:DocumentType["\'][^>]*>(.*?)</ix:non',
+    html[:2000000],
+    re.IGNORECASE | re.DOTALL,
+  )
+  if match:
+    # Strip any nested HTML tags to get the plain text value
+    value = re.sub(r"<[^>]+>", "", match.group(1)).strip()
+    if value:
+      return value
+  return None
+
+
 def _url_to_s3_key(url: str) -> tuple[str, str] | None:
   """Parse an externalized text block URL back to bucket + key.
 
@@ -250,8 +344,10 @@ def sec_textblocks_indexed(
   os_client = OpenSearchClient(env.OPENSEARCH_URL, env.OPENSEARCH_INDEX)
   os_client.create_index_if_not_exists()
 
-  # Get already-indexed accessions for incremental skip
-  indexed_accessions = _get_indexed_accessions(os_client, config.graph_id)
+  # Get already-indexed accessions for incremental skip (scoped to this source type)
+  indexed_accessions = _get_indexed_accessions(
+    os_client, config.graph_id, source_type="xbrl_textblock"
+  )
   if indexed_accessions:
     context.log.info(
       f"Found {len(indexed_accessions)} already-indexed accessions, will skip"
@@ -544,8 +640,10 @@ def sec_narratives_indexed(
   os_client = OpenSearchClient(env.OPENSEARCH_URL, env.OPENSEARCH_INDEX)
   os_client.create_index_if_not_exists()
 
-  # Get already-indexed accessions for incremental skip
-  indexed_accessions = _get_indexed_accessions(os_client, config.graph_id)
+  # Get already-indexed accessions for incremental skip (scoped to this source type)
+  indexed_accessions = _get_indexed_accessions(
+    os_client, config.graph_id, source_type="narrative_section"
+  )
   if indexed_accessions:
     context.log.info(
       f"Found {len(indexed_accessions)} already-indexed accessions, will skip"
@@ -674,57 +772,27 @@ def sec_narratives_indexed(
     cik = meta.get("cik", "")
 
     try:
-      # Download ZIP
       response = s3.get_object(Bucket=raw_bucket, Key=zip_key)
       zip_bytes = response["Body"].read()
 
-      # Extract HTML from ZIP — pick the largest non-exhibit HTM file
-      html_content = None
-      with zipfile.ZipFile(io.BytesIO(zip_bytes)) as zf:
-        htm_candidates: list[tuple[str, int]] = []
-        for info in zf.infolist():
-          name_lower = info.filename.lower()
-          if not name_lower.endswith((".htm", ".html")):
-            continue
-          # Skip known non-filing files
-          if any(
-            skip in name_lower
-            for skip in [
-              "filingsummary",
-              "metalinks",
-              "defnref",
-              "_cal.",
-              "_def.",
-              "_lab.",
-              "_pre.",
-              ".xsd",
-            ]
-          ):
-            continue
-          # Skip R-files (viewer artifacts)
-          basename = name_lower.rsplit("/", 1)[-1]
-          if re.match(r"^r\d+\.htm", basename):
-            continue
-          # Skip exhibits (ex, consent, subsidiary, certification patterns)
-          if any(
-            pat in basename
-            for pat in ["ex1", "ex2", "ex3", "ex4", "consent", "subsidiar"]
-          ):
-            continue
-          htm_candidates.append((info.filename, info.file_size))
-
-        if htm_candidates:
-          # Pick the largest file — the main filing document is always the biggest
-          main_file = max(htm_candidates, key=lambda x: x[1])[0]
-          html_content = zf.read(main_file).decode("utf-8", errors="replace")
-
+      html_content = _extract_html_from_zip(zip_bytes)
       if not html_content:
         context.log.debug(f"No HTML found in {zip_key}")
         errors += 1
         continue
 
+      # Verify actual document type via iXBRL tag (catches proxy statements
+      # that are larger than the actual filing in the same accession ZIP)
+      ixbrl_doc_type = _extract_ixbrl_doc_type(html_content)
+      if ixbrl_doc_type and ixbrl_doc_type.upper() not in form_types_upper:
+        context.log.debug(
+          f"Skipping {accession}: iXBRL doc type '{ixbrl_doc_type}' "
+          f"not in {form_types_upper}"
+        )
+        continue
+
       # Extract narrative sections
-      sections = extractor.extract(html_content, meta["form_type"])
+      sections = extractor.extract(html_content, ixbrl_doc_type or meta["form_type"])
       filings_processed += 1
 
       if not sections:
@@ -809,6 +877,248 @@ def sec_narratives_indexed(
       "source_type": "narrative_section",
       "filings_processed": filings_processed,
       "sections_extracted": sections_extracted,
+      "documents_indexed": result["indexed"],
+      "errors": errors + result["errors"],
+    }
+  )
+
+
+@asset(
+  group_name="sec_pipeline",
+  description="Extract iXBRL disclosure sections with XBRL element metadata into OpenSearch",
+  kinds={"opensearch"},
+  deps=["sec_processed_filings"],
+  metadata={
+    "pipeline": "sec",
+    "stage": "text_index",
+    "source": "ixbrl_disclosures",
+  },
+)
+def sec_ixbrl_disclosures_indexed(
+  context: AssetExecutionContext,
+  config: SECiXBRLIndexConfig,
+) -> MaterializeResult:
+  """Extract iXBRL disclosure sections and index with XBRL element metadata.
+
+  For each filing ZIP:
+  1. Extract iXBRL HTML (largest HTM file)
+  2. Verify document type via dei:DocumentType iXBRL tag
+  3. Parse ix:nonNumeric TextBlock elements as disclosure sections
+  4. Extract nested ix:nonFraction element qnames per section
+  5. Index into OpenSearch with source_type="ixbrl_disclosure" + xbrl_elements metadata
+
+  Enables bidirectional navigation: search → graph (find facts in a disclosure)
+  and graph → search (find the disclosure discussing a fact).
+  """
+  from robosystems.adapters.sec.ixbrl_parser import iXBRLParser
+  from robosystems.operations.search.client import OpenSearchClient
+
+  s3 = _get_s3_client()
+  raw_bucket = _get_raw_bucket()
+  processed_bucket = _get_processed_bucket()
+
+  parser = iXBRLParser(max_section_length=config.max_section_length)
+
+  os_client = OpenSearchClient(env.OPENSEARCH_URL, env.OPENSEARCH_INDEX)
+  os_client.create_index_if_not_exists()
+
+  # Get already-indexed accessions for incremental skip (scoped to this source type)
+  indexed_accessions = _get_indexed_accessions(
+    os_client, config.graph_id, source_type="ixbrl_disclosure"
+  )
+  if indexed_accessions:
+    context.log.info(
+      f"Found {len(indexed_accessions)} already-indexed accessions, will skip"
+    )
+
+  # Read Report parquets for filing metadata
+  prefix_base = get_processed_key(DataSourceType.SEC, "processed")
+  all_parquet_keys = _list_s3_parquet_keys(
+    s3, processed_bucket, f"{prefix_base}/filed="
+  )
+
+  if config.start_year:
+    all_parquet_keys = [
+      k for k in all_parquet_keys if _partition_year(k) >= config.start_year
+    ]
+    context.log.info(
+      f"Filtered to {len(all_parquet_keys)} parquets (>= {config.start_year})"
+    )
+
+  report_keys = [k for k in all_parquet_keys if "/nodes/Report/" in k]
+  entity_keys = [k for k in all_parquet_keys if "/nodes/Entity/" in k]
+  ehr_keys = [k for k in all_parquet_keys if "/relationships/ENTITY_HAS_REPORT/" in k]
+
+  context.log.info(f"Reading {len(report_keys)} Report parquets for metadata...")
+  report_table = _read_parquets_from_s3(s3, processed_bucket, report_keys)
+  entity_table = _read_parquets_from_s3(s3, processed_bucket, entity_keys)
+  ehr_table = _read_parquets_from_s3(s3, processed_bucket, ehr_keys)
+
+  if report_table is None:
+    context.log.warning("No Report parquets found")
+    return MaterializeResult(
+      metadata={"status": "no_data", "graph_id": config.graph_id}
+    )
+
+  reports_df = report_table.to_pandas()
+  form_types_upper = [ft.upper() for ft in config.form_types]
+  target_reports = reports_df[
+    reports_df["form"].str.upper().isin(form_types_upper)
+  ].copy()
+
+  # Build entity lookup
+  entity_lookup: dict[str, dict[str, str]] = {}
+  report_to_entity: dict[str, str] = {}
+  if entity_table is not None:
+    entities_df = entity_table.to_pandas()
+    for _, row in entities_df.iterrows():
+      entity_lookup[row.get("identifier")] = {
+        "ticker": str(row.get("ticker", "")),
+        "name": str(row.get("name", "")),
+        "cik": str(row.get("cik", "")),
+      }
+  if ehr_table is not None:
+    ehr_df = ehr_table.to_pandas()
+    for _, row in ehr_df.iterrows():
+      report_to_entity[row.get("to")] = row.get("from")
+
+  # Build accession → metadata
+  accession_metadata: dict[str, dict[str, Any]] = {}
+  for _, report in target_reports.iterrows():
+    accession = report.get("accession_number", "")
+    if not accession:
+      continue
+    entity_id = report_to_entity.get(report.get("identifier"))
+    entity_info = entity_lookup.get(entity_id, {}) if entity_id else {}
+    fy = report.get("fiscal_year_focus")
+    accession_metadata[accession] = {
+      "form_type": report.get("form", ""),
+      "filing_date": str(report.get("filing_date", "")),
+      "fiscal_year": int(fy) if fy is not None and not math.isnan(fy) else None,
+      "fiscal_period": report.get("fiscal_period_focus", ""),
+      "cik": entity_info.get("cik", str(report.get("cik", ""))),
+      "ticker": entity_info.get("ticker", ""),
+      "entity_name": entity_info.get("name", ""),
+    }
+
+  context.log.info(f"Built metadata for {len(accession_metadata)} accessions")
+
+  # Scan raw ZIPs
+  documents: list[dict[str, Any]] = []
+  filings_processed = 0
+  sections_extracted = 0
+  total_elements = 0
+  errors = 0
+
+  raw_prefix = get_raw_key(DataSourceType.SEC)
+  paginator = s3.get_paginator("list_objects_v2")
+
+  zip_keys: list[str] = []
+  for page in paginator.paginate(Bucket=raw_bucket, Prefix=raw_prefix):
+    for obj in page.get("Contents", []):
+      if obj["Key"].endswith(".zip"):
+        zip_keys.append(obj["Key"])
+
+  if config.start_year:
+    zip_keys = [k for k in zip_keys if _partition_year(k) >= config.start_year]
+
+  context.log.info(f"Found {len(zip_keys)} raw ZIP files")
+
+  for zip_key in zip_keys:
+    filename = zip_key.rsplit("/", 1)[-1]
+    accession = filename.replace(".zip", "")
+
+    if accession not in accession_metadata:
+      continue
+
+    if accession in indexed_accessions:
+      continue
+
+    meta = accession_metadata[accession]
+    cik = meta.get("cik", "")
+
+    try:
+      response = s3.get_object(Bucket=raw_bucket, Key=zip_key)
+      zip_bytes = response["Body"].read()
+
+      html_content = _extract_html_from_zip(zip_bytes)
+      if not html_content:
+        errors += 1
+        continue
+
+      # Verify document type via iXBRL tag
+      ixbrl_doc_type = _extract_ixbrl_doc_type(html_content)
+      if ixbrl_doc_type and ixbrl_doc_type.upper() not in form_types_upper:
+        continue
+
+      # Parse iXBRL disclosure sections
+      sections = parser.parse(html_content)
+      filings_processed += 1
+
+      if not sections:
+        continue
+
+      for section in sections:
+        sections_extracted += 1
+        total_elements += section.element_count
+
+        doc_id = hashlib.sha256(
+          f"{config.graph_id}:ixbrl:{accession}:{section.section_id}".encode()
+        ).hexdigest()[:16]
+
+        documents.append(
+          {
+            "graph_id": config.graph_id,
+            "document_id": doc_id,
+            "source_type": "ixbrl_disclosure",
+            "entity_ticker": meta.get("ticker"),
+            "entity_name": meta.get("entity_name"),
+            "entity_cik": cik,
+            "section_id": section.section_id,
+            "section_label": section.section_label,
+            "content": section.content,
+            "content_length": len(section.content),
+            "xbrl_elements": section.xbrl_elements,
+            "xbrl_element_count": section.element_count,
+            "filing_date": meta.get("filing_date"),
+            "fiscal_year": meta.get("fiscal_year"),
+            "fiscal_period": meta.get("fiscal_period"),
+            "form_type": meta.get("form_type"),
+            "accession_number": accession,
+          }
+        )
+
+    except Exception as e:
+      context.log.warning(f"Error processing {zip_key}: {e}")
+      errors += 1
+      continue
+
+    # Batch index to limit memory
+    if len(documents) >= 500:
+      result = os_client.bulk_index(documents)
+      context.log.info(f"Batch indexed {result['indexed']} disclosures")
+      documents = []
+
+  # Index remaining
+  result = {"indexed": 0, "errors": 0}
+  if documents:
+    result = os_client.bulk_index(documents)
+    context.log.info(
+      f"Indexed {result['indexed']} disclosures ({result['errors']} errors)"
+    )
+
+  context.log.info(
+    f"iXBRL indexing complete: {filings_processed} filings, "
+    f"{sections_extracted} sections, {total_elements} elements, {errors} errors"
+  )
+
+  return MaterializeResult(
+    metadata={
+      "graph_id": config.graph_id,
+      "source_type": "ixbrl_disclosure",
+      "filings_processed": filings_processed,
+      "sections_extracted": sections_extracted,
+      "total_elements": total_elements,
       "documents_indexed": result["indexed"],
       "errors": errors + result["errors"],
     }

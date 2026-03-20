@@ -48,6 +48,7 @@ from .jobs import (
   sec_download_job,
   sec_duckdb_s3_publish_job,
   sec_incremental_stage_job,
+  sec_ixbrl_index_job,
   sec_lbug_s3_publish_job,
   sec_materialize_job,
   sec_narratives_index_job,
@@ -660,10 +661,11 @@ def sec_post_materialize_publish_sensor(context: RunStatusSensorContext):
   request_jobs=[
     sec_textblocks_index_job,
     sec_narratives_index_job,
+    sec_ixbrl_index_job,
   ],
   default_status=DefaultSensorStatus.STOPPED,
   minimum_interval_seconds=60,
-  description="Chain: stage → text search indexing (textblocks + narratives)",
+  description="Chain: stage → text search indexing (textblocks + narratives + iXBRL disclosures)",
 )
 def sec_post_stage_index_sensor(context: RunStatusSensorContext):
   """Trigger text search indexing after staging completes.
@@ -686,7 +688,14 @@ def sec_post_stage_index_sensor(context: RunStatusSensorContext):
 
   graph_id = run_tags.get("graph_id", "sec")
 
-  for job_name in ["sec_textblocks_index", "sec_narratives_index"]:
+  # Job name → asset op name mapping
+  index_jobs = {
+    "sec_textblocks_index": "sec_textblocks_indexed",
+    "sec_narratives_index": "sec_narratives_indexed",
+    "sec_ixbrl_index": "sec_ixbrl_disclosures_indexed",
+  }
+
+  for job_name, asset_name in index_jobs.items():
     # Skip if already running
     active_runs = context.instance.get_runs(
       filters=RunsFilter(
@@ -700,9 +709,6 @@ def sec_post_stage_index_sensor(context: RunStatusSensorContext):
         f"{job_name} already running (run_id={active_runs[0].run_id}), skipping"
       )
       continue
-
-    # Map job name to asset op name
-    asset_name = job_name.replace("_index", "_indexed")
     context.log.info(
       f"Staging complete (run_id={dagster_run.run_id}), triggering {job_name}"
     )
