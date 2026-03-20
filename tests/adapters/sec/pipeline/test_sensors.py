@@ -22,6 +22,7 @@ from robosystems.adapters.sec.pipeline.sensors import (
   sec_incremental_download_schedule,
   sec_incremental_pipeline_sensor,
   sec_post_materialize_publish_sensor,
+  sec_post_stage_index_sensor,
   sec_stage_to_materialize_sensor,
 )
 
@@ -652,3 +653,154 @@ class TestGetQuartersToScan:
     for key in result:
       parts = key.split("-Q")
       assert len(parts) == 2
+
+
+@pytest.mark.unit
+class TestSecPostStageIndexSensor:
+  """Tests for sec_post_stage_index_sensor.
+
+  This sensor orchestrates: stage → text search indexing (textblocks + narratives).
+  Both index jobs fire in parallel after staging completes.
+  """
+
+  @patch("robosystems.adapters.sec.pipeline.sensors.env")
+  def test_skips_in_dev_environment(self, mock_env):
+    """Test sensor skips in dev environment."""
+    mock_env.ENVIRONMENT = "dev"
+
+    context = _build_run_status_context(
+      sensor_name="sec_post_stage_index_sensor",
+      job_name="sec_incremental_stage",
+      tags={"mode": "incremental"},
+    )
+
+    result = list(sec_post_stage_index_sensor(context))
+    assert len(result) == 0
+
+  @patch("robosystems.adapters.sec.pipeline.sensors.env")
+  def test_skips_non_incremental_runs(self, mock_env):
+    """Test sensor skips non-incremental runs."""
+    mock_env.ENVIRONMENT = "prod"
+
+    context = _build_run_status_context(
+      sensor_name="sec_post_stage_index_sensor",
+      job_name="sec_incremental_stage",
+      tags={"mode": "full"},
+    )
+
+    result = list(sec_post_stage_index_sensor(context))
+    assert len(result) == 0
+
+  @patch("robosystems.adapters.sec.pipeline.sensors.env")
+  def test_yields_two_run_requests_for_both_jobs(self, mock_env):
+    """Test sensor yields RunRequests for both textblocks and narratives."""
+    mock_env.ENVIRONMENT = "prod"
+
+    from dagster import DagsterInstance
+
+    with DagsterInstance.ephemeral() as instance:
+      context = _build_run_status_context(
+        sensor_name="sec_post_stage_index_sensor",
+        job_name="sec_incremental_stage",
+        run_id="run-stage-001",
+        tags={"mode": "incremental"},
+        instance=instance,
+        get_runs_return=[],
+      )
+
+      result = list(sec_post_stage_index_sensor(context))
+
+    assert len(result) == 2
+    job_names = {r.job_name for r in result}
+    assert job_names == {"sec_textblocks_index", "sec_narratives_index"}
+
+    for r in result:
+      assert isinstance(r, RunRequest)
+      assert r.tags["phase"] == "text_index"
+      assert r.tags["mode"] == "incremental"
+
+  @patch("robosystems.adapters.sec.pipeline.sensors.env")
+  def test_passes_graph_id_in_config(self, mock_env):
+    """Test sensor passes graph_id through run config."""
+    mock_env.ENVIRONMENT = "prod"
+
+    from dagster import DagsterInstance
+
+    with DagsterInstance.ephemeral() as instance:
+      context = _build_run_status_context(
+        sensor_name="sec_post_stage_index_sensor",
+        job_name="sec_incremental_stage",
+        run_id="run-stage-001",
+        tags={"mode": "incremental", "graph_id": "sec"},
+        instance=instance,
+        get_runs_return=[],
+      )
+
+      result = list(sec_post_stage_index_sensor(context))
+
+    # Verify config includes graph_id for both jobs
+    for r in result:
+      asset_name = r.job_name.replace("_index", "_indexed")
+      config = r.run_config["ops"][asset_name]["config"]
+      assert config["graph_id"] == "sec"
+
+  @patch("robosystems.adapters.sec.pipeline.sensors.env")
+  def test_defaults_graph_id_to_sec(self, mock_env):
+    """Test sensor defaults graph_id to 'sec' when not in tags."""
+    mock_env.ENVIRONMENT = "prod"
+
+    from dagster import DagsterInstance
+
+    with DagsterInstance.ephemeral() as instance:
+      context = _build_run_status_context(
+        sensor_name="sec_post_stage_index_sensor",
+        job_name="sec_incremental_stage",
+        run_id="run-stage-001",
+        tags={"mode": "incremental"},  # No graph_id tag
+        instance=instance,
+        get_runs_return=[],
+      )
+
+      result = list(sec_post_stage_index_sensor(context))
+
+    config = result[0].run_config["ops"]["sec_textblocks_indexed"]["config"]
+    assert config["graph_id"] == "sec"
+
+  @patch("robosystems.adapters.sec.pipeline.sensors.env")
+  def test_skips_job_when_already_running(self, mock_env):
+    """Test sensor skips a job when it's already running."""
+    mock_env.ENVIRONMENT = "prod"
+
+    from dagster import DagsterInstance
+
+    active_run = MagicMock()
+    active_run.run_id = "active-index-run"
+
+    with DagsterInstance.ephemeral() as instance:
+      context = _build_run_status_context(
+        sensor_name="sec_post_stage_index_sensor",
+        job_name="sec_incremental_stage",
+        run_id="run-stage-001",
+        tags={"mode": "incremental"},
+        instance=instance,
+        get_runs_return=[active_run],  # Both jobs appear running
+      )
+
+      result = list(sec_post_stage_index_sensor(context))
+
+    # Both jobs skipped because get_runs returns active run for each check
+    assert len(result) == 0
+
+  @patch("robosystems.adapters.sec.pipeline.sensors.env")
+  def test_skips_when_no_mode_tag(self, mock_env):
+    """Test sensor skips when mode tag is missing entirely."""
+    mock_env.ENVIRONMENT = "prod"
+
+    context = _build_run_status_context(
+      sensor_name="sec_post_stage_index_sensor",
+      job_name="sec_incremental_stage",
+      tags={},  # No mode tag
+    )
+
+    result = list(sec_post_stage_index_sensor(context))
+    assert len(result) == 0
