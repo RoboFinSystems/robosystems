@@ -17,7 +17,9 @@ INDEX_MAPPING = {
       "graph_id": {"type": "keyword"},
       # Document identity
       "document_id": {"type": "keyword"},
-      "source_type": {"type": "keyword"},  # "xbrl_textblock" or "narrative_section"
+      "source_type": {
+        "type": "keyword"
+      },  # "xbrl_textblock", "narrative_section", or "ixbrl_disclosure"
       # Entity metadata
       "entity_ticker": {"type": "keyword"},
       "entity_cik": {"type": "keyword"},
@@ -32,6 +34,9 @@ INDEX_MAPPING = {
         "type": "text",
         "fields": {"keyword": {"type": "keyword"}},
       },
+      # XBRL element metadata (for ixbrl_disclosure source type)
+      "xbrl_elements": {"type": "keyword"},  # Element qnames in this section
+      "xbrl_element_count": {"type": "integer"},
       # Content
       "content": {"type": "text", "analyzer": "standard"},
       "content_url": {"type": "keyword"},  # CDN URL for full retrieval
@@ -217,6 +222,8 @@ class OpenSearchClient:
         filter_clauses.append({"term": {"section_id": filters["section"].lower()}})
       if filters.get("fiscal_year"):
         filter_clauses.append({"term": {"fiscal_year": filters["fiscal_year"]}})
+      if filters.get("element"):
+        filter_clauses.append({"term": {"xbrl_elements": filters["element"]}})
       if filters.get("date_from"):
         filter_clauses.append({"range": {"filing_date": {"gte": filters["date_from"]}}})
       if filters.get("date_to"):

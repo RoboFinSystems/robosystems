@@ -62,6 +62,10 @@ class SearchDocumentsTool:
             "type": "string",
             "description": "Optional: filter by section ID (item_1, item_1a, item_1c, item_2, item_7, item_7a)",
           },
+          "element": {
+            "type": "string",
+            "description": "Optional: filter by XBRL element qname to find disclosures containing that fact (e.g., us-gaap:Goodwill, us-gaap:Revenues)",
+          },
           "fiscal_year": {
             "type": "integer",
             "description": "Optional: filter by fiscal year",
@@ -92,6 +96,7 @@ class SearchDocumentsTool:
       entity=arguments.get("entity"),
       form_type=arguments.get("form_type"),
       section=arguments.get("section"),
+      element=arguments.get("element"),
       fiscal_year=arguments.get("fiscal_year"),
       size=min(arguments.get("size", 10), 50),
     )

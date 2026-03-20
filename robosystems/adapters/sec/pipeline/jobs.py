@@ -62,7 +62,11 @@ from .stage import (
   sec_duckdb_staged,
   sec_historical_duckdb_staged,
 )
-from .text_index import sec_narratives_indexed, sec_textblocks_indexed
+from .text_index import (
+  sec_ixbrl_disclosures_indexed,
+  sec_narratives_indexed,
+  sec_textblocks_indexed,
+)
 from .vector_publish import sec_vector_s3_published
 
 # ============================================================================
@@ -513,6 +517,26 @@ sec_narratives_index_job = define_asset_job(
   name="sec_narratives_index",
   description="Extract and index narrative sections from SEC filings into OpenSearch.",
   selection=AssetSelection.assets(sec_narratives_indexed),
+  tags={
+    "pipeline": "sec",
+    "phase": "text_index",
+    "ecs/cpu": "1024",
+    "ecs/memory": "4096",
+    "ecs/ephemeral_storage": "50",
+    "ecs/run_task_kwargs": {
+      "capacityProviderStrategy": [
+        {"capacityProvider": "FARGATE_SPOT", "weight": 9, "base": 0},
+        {"capacityProvider": "FARGATE", "weight": 1, "base": 0},
+      ],
+    },
+  },
+)
+
+
+sec_ixbrl_index_job = define_asset_job(
+  name="sec_ixbrl_index",
+  description="Extract iXBRL disclosure sections with XBRL element metadata into OpenSearch.",
+  selection=AssetSelection.assets(sec_ixbrl_disclosures_indexed),
   tags={
     "pipeline": "sec",
     "phase": "text_index",

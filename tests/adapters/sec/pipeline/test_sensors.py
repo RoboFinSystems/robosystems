@@ -692,8 +692,8 @@ class TestSecPostStageIndexSensor:
     assert len(result) == 0
 
   @patch("robosystems.adapters.sec.pipeline.sensors.env")
-  def test_yields_two_run_requests_for_both_jobs(self, mock_env):
-    """Test sensor yields RunRequests for both textblocks and narratives."""
+  def test_yields_run_requests_for_all_index_jobs(self, mock_env):
+    """Test sensor yields RunRequests for textblocks, narratives, and iXBRL."""
     mock_env.ENVIRONMENT = "prod"
 
     from dagster import DagsterInstance
@@ -710,9 +710,13 @@ class TestSecPostStageIndexSensor:
 
       result = list(sec_post_stage_index_sensor(context))
 
-    assert len(result) == 2
+    assert len(result) == 3
     job_names = {r.job_name for r in result}
-    assert job_names == {"sec_textblocks_index", "sec_narratives_index"}
+    assert job_names == {
+      "sec_textblocks_index",
+      "sec_narratives_index",
+      "sec_ixbrl_index",
+    }
 
     for r in result:
       assert isinstance(r, RunRequest)
@@ -738,10 +742,12 @@ class TestSecPostStageIndexSensor:
 
       result = list(sec_post_stage_index_sensor(context))
 
-    # Verify config includes graph_id for both jobs
+    # Verify config includes graph_id for all jobs
     for r in result:
-      asset_name = r.job_name.replace("_index", "_indexed")
-      config = r.run_config["ops"][asset_name]["config"]
+      # Find the asset op name in the run config
+      ops = r.run_config["ops"]
+      assert len(ops) == 1
+      config = next(iter(ops.values()))["config"]
       assert config["graph_id"] == "sec"
 
   @patch("robosystems.adapters.sec.pipeline.sensors.env")

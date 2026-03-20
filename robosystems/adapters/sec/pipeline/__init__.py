@@ -92,6 +92,7 @@ from robosystems.adapters.sec.pipeline.jobs import (
   sec_historical_stage_job,
   sec_historical_staged_materialize_job,
   sec_incremental_stage_job,
+  sec_ixbrl_index_job,
   sec_lbug_r2_publish_job,
   sec_lbug_s3_publish_job,
   sec_materialize_job,
@@ -126,6 +127,7 @@ from robosystems.adapters.sec.pipeline.stage import (
   sec_historical_duckdb_staged,
 )
 from robosystems.adapters.sec.pipeline.text_index import (
+  sec_ixbrl_disclosures_indexed,
   sec_narratives_indexed,
   sec_textblocks_indexed,
 )
@@ -157,6 +159,7 @@ def get_dagster_components():
       sec_knowledge_artifacts,
       sec_textblocks_indexed,
       sec_narratives_indexed,
+      sec_ixbrl_disclosures_indexed,
     ],
     "jobs": [
       sec_download_job,
@@ -178,6 +181,7 @@ def get_dagster_components():
       sec_historical_lbug_s3_publish_job,
       sec_textblocks_index_job,
       sec_narratives_index_job,
+      sec_ixbrl_index_job,
     ],
     "sensors": [
       sec_processing_sensor,
@@ -229,6 +233,8 @@ __all__ = [
   "sec_incremental_download_schedule",
   "sec_incremental_pipeline_sensor",
   "sec_incremental_stage_job",
+  "sec_ixbrl_disclosures_indexed",
+  "sec_ixbrl_index_job",
   "sec_knowledge_artifacts",
   "sec_lbug_r2_publish_job",
   "sec_lbug_r2_published",
