@@ -109,6 +109,9 @@ dependencies = [
     "beautifulsoup4>=4.13.0,<5.0",
     "lxml>=5.4.0,<6.0",
 
+    # Search
+    "opensearch-py>=2.4.0,<3.0",
+
     # Utilities
     "holidays>=0.76.0,<1.0",
     "psutil>=7.2.1,<8.0",

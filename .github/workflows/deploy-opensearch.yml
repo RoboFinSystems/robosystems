@@ -1,0 +1,200 @@
+name: Deploy OpenSearch
+
+on:
+  workflow_call:
+    inputs:
+      # Stack & Repository Configuration
+      stack_name:
+        description: "CloudFormation stack name"
+        required: true
+        type: string
+      environment:
+        description: "Environment to deploy to (prod, staging)"
+        required: true
+        type: string
+
+      # GHA Runner Configuration
+      runner_config:
+        description: "GitHub Actions runner configuration (JSON array)"
+        required: false
+        type: string
+        default: '["ubuntu-latest"]'
+
+      # AWS Configuration
+      aws_region:
+        description: "AWS region for deployment"
+        required: true
+        type: string
+      vpc_id:
+        description: "VPC ID for OpenSearch"
+        required: true
+        type: string
+      subnet_id:
+        description: "Private subnet ID for OpenSearch (single-AZ)"
+        required: true
+        type: string
+
+      # Instance Configuration
+      instance_type:
+        description: "OpenSearch instance type"
+        required: false
+        type: string
+        default: "t3.medium.search"
+      ebs_volume_size:
+        description: "EBS volume size in GB"
+        required: false
+        type: string
+        default: "100"
+
+      # Engine Configuration
+      engine_version:
+        description: "OpenSearch engine version"
+        required: false
+        type: string
+        default: "OpenSearch_2.17"
+
+      # Notification Configuration
+      aws_sns_alert_email:
+        description: "Email address for SNS alerts and notifications"
+        required: true
+        type: string
+
+    outputs:
+      opensearch_endpoint:
+        description: "OpenSearch domain endpoint URL"
+        value: ${{ jobs.deploy.outputs.opensearch_endpoint }}
+      opensearch_sg_id:
+        description: "Security group ID for applications connecting to OpenSearch"
+        value: ${{ jobs.deploy.outputs.opensearch_sg_id }}
+
+jobs:
+  deploy:
+    runs-on: ${{ fromJSON(inputs.runner_config) }}
+    timeout-minutes: 45  # OpenSearch domain creation can take 15-30 min
+    permissions:
+      id-token: write
+      contents: read
+    outputs:
+      opensearch_endpoint: ${{ steps.stack-outputs.outputs.opensearch_endpoint }}
+      opensearch_sg_id: ${{ steps.stack-outputs.outputs.opensearch_sg_id }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          repository: ${{ github.repository }}
+          ref: ${{ github.ref }}
+          token: ${{ github.token }}
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ inputs.aws_region }}
+
+      - name: Deploy OpenSearch CloudFormation Stack
+        id: deploy-stack
+        run: |
+          if aws cloudformation describe-stacks --stack-name ${{ inputs.stack_name }} 2>&1 | grep -q 'Stack with id ${{ inputs.stack_name }} does not exist'; then
+            STACK_ACTION="create-stack"
+            echo "Creating new stack ${{ inputs.stack_name }}"
+            echo "is_new_stack=true" >> $GITHUB_OUTPUT
+          else
+            STACK_ACTION="update-stack"
+            echo "Updating existing stack ${{ inputs.stack_name }}"
+            echo "is_new_stack=false" >> $GITHUB_OUTPUT
+          fi
+
+          # Extract first subnet from comma-separated list (single-AZ deployment)
+          SUBNET_ID=$(echo "${{ inputs.subnet_id }}" | cut -d ',' -f1)
+
+          OPENSEARCH_STACK_PARAMS="ParameterKey=VpcId,ParameterValue=${{ inputs.vpc_id }} \
+                ParameterKey=SubnetId,ParameterValue=${SUBNET_ID} \
+                ParameterKey=Environment,ParameterValue=${{ inputs.environment }} \
+                ParameterKey=InstanceType,ParameterValue=${{ inputs.instance_type }} \
+                ParameterKey=EBSVolumeSize,ParameterValue=${{ inputs.ebs_volume_size }} \
+                ParameterKey=EngineVersion,ParameterValue=${{ inputs.engine_version }} \
+                ParameterKey=SNSAlertEmail,ParameterValue=${{ inputs.aws_sns_alert_email }}"
+
+          if [ "$STACK_ACTION" = "create-stack" ]; then
+            aws cloudformation $STACK_ACTION \
+              --stack-name ${{ inputs.stack_name }} \
+              --template-body file://cloudformation/opensearch.yaml \
+              --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM \
+              --parameters $OPENSEARCH_STACK_PARAMS \
+              --tags \
+                Key=Environment,Value=${{ inputs.environment }} \
+                Key=Service,Value=RoboSystems \
+                Key=Component,Value=opensearch \
+                Key=Repository,Value=${{ github.repository }} \
+                Key=CreatedBy,Value=GitHubActions
+          else
+            UPDATE_OUTPUT=$(aws cloudformation $STACK_ACTION \
+              --stack-name ${{ inputs.stack_name }} \
+              --template-body file://cloudformation/opensearch.yaml \
+              --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM \
+              --parameters $OPENSEARCH_STACK_PARAMS \
+              --tags \
+                Key=Environment,Value=${{ inputs.environment }} \
+                Key=Service,Value=RoboSystems \
+                Key=Component,Value=opensearch \
+                Key=Repository,Value=${{ github.repository }} \
+                Key=CreatedBy,Value=GitHubActions 2>&1) || true
+
+            if echo "$UPDATE_OUTPUT" | grep -q "No updates are to be performed"; then
+              echo "Stack is already up to date - no changes needed"
+              echo "is_new_stack=false" >> $GITHUB_OUTPUT
+            elif echo "$UPDATE_OUTPUT" | grep -q "error"; then
+              echo "Error updating stack: $UPDATE_OUTPUT"
+              exit 1
+            else
+              echo "Stack update initiated successfully"
+              echo "is_new_stack=false" >> $GITHUB_OUTPUT
+            fi
+          fi
+
+      - name: Monitor Stack Deployment
+        uses: ./.github/actions/monitor-stack-deployment
+        with:
+          stack-name: ${{ inputs.stack_name }}
+          timeout: "2700"
+          interval: "10"
+
+      - name: Get Stack Outputs
+        id: stack-outputs
+        run: |
+          echo "Retrieving stack outputs..."
+
+          OPENSEARCH_ENDPOINT=$(aws cloudformation describe-stacks \
+            --stack-name ${{ inputs.stack_name }} \
+            --query "Stacks[0].Outputs[?OutputKey=='OpenSearchEndpoint'].OutputValue" \
+            --output text)
+
+          OPENSEARCH_CLIENT_SG=$(aws cloudformation describe-stacks \
+            --stack-name ${{ inputs.stack_name }} \
+            --query "Stacks[0].Outputs[?OutputKey=='OpenSearchClientSecurityGroupId'].OutputValue" \
+            --output text)
+
+          if [ -n "$OPENSEARCH_ENDPOINT" ]; then
+            echo "opensearch_endpoint=$OPENSEARCH_ENDPOINT" >> $GITHUB_OUTPUT
+            echo "Found OpenSearch endpoint: $OPENSEARCH_ENDPOINT"
+          else
+            echo "Warning: Could not retrieve OpenSearch endpoint"
+            exit 1
+          fi
+
+          if [ -n "$OPENSEARCH_CLIENT_SG" ]; then
+            echo "opensearch_sg_id=$OPENSEARCH_CLIENT_SG" >> $GITHUB_OUTPUT
+            echo "Found OpenSearch client security group: $OPENSEARCH_CLIENT_SG"
+          else
+            echo "Warning: Could not retrieve OpenSearch client security group"
+          fi
+
+      - name: Update Deployment Status
+        if: always()
+        run: |
+          if [ "${{ steps.deploy-stack.outputs.is_new_stack }}" == "true" ]; then
+            echo "OpenSearch stack creation completed"
+          else
+            echo "OpenSearch stack update completed"
+          fi

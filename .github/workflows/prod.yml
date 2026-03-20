@@ -63,6 +63,7 @@ jobs:
       waf_stack: ${{ steps.load.outputs.waf_stack }}
       cloudtrail_stack: ${{ steps.load.outputs.cloudtrail_stack }}
       dagster_stack: ${{ steps.load.outputs.dagster_stack }}
+      opensearch_stack: ${{ steps.load.outputs.opensearch_stack }}
       domain_name_root: ${{ steps.load.outputs.domain_name_root }}
       graph_ami_id: ${{ steps.ami.outputs.ami_id }}
     steps:
@@ -110,6 +111,7 @@ jobs:
           echo "waf_stack=$(./bin/tools/stack-config.sh $ENV waf)" >> $GITHUB_OUTPUT
           echo "cloudtrail_stack=$(./bin/tools/stack-config.sh $ENV cloudtrail)" >> $GITHUB_OUTPUT
           echo "dagster_stack=$(./bin/tools/stack-config.sh $ENV dagster)" >> $GITHUB_OUTPUT
+          echo "opensearch_stack=$(./bin/tools/stack-config.sh $ENV opensearch)" >> $GITHUB_OUTPUT
 
           # Domain configuration - leave empty for isolated deployment (no custom domains)
           echo "domain_name_root=${{ vars.API_DOMAIN_NAME_ROOT || '' }}" >> $GITHUB_OUTPUT
@@ -281,6 +283,28 @@ jobs:
       snapshot_retention_days: ${{ vars.VALKEY_SNAPSHOT_RETENTION_DAYS_PROD || '7' }}
       # Lambda Configuration (container-based)
       lambda_image_uri: ${{ needs.build.outputs.lambda_image }}
+      # Other Configuration
+      aws_sns_alert_email: ${{ vars.AWS_SNS_ALERT_EMAIL }}
+    secrets: inherit
+
+  deploy-opensearch:
+    # Text search disabled by default - set OPENSEARCH_ENABLED_PROD=true to enable
+    if: vars.OPENSEARCH_ENABLED_PROD == 'true'
+    needs: [runner, create-deployment, stack-config, deploy-vpc]
+    uses: ./.github/workflows/deploy-opensearch.yml
+    with:
+      # Stack & Repository Configuration
+      stack_name: ${{ needs.stack-config.outputs.opensearch_stack }}
+      environment: ${{ vars.ENVIRONMENT_PROD || 'prod' }}
+      # GHA Runner Configuration
+      runner_config: ${{ needs.runner.outputs.runner_config }}
+      # AWS Configuration
+      aws_region: ${{ vars.AWS_REGION || 'us-east-1' }}
+      vpc_id: ${{ needs.deploy-vpc.outputs.vpc_id }}
+      subnet_id: ${{ needs.deploy-vpc.outputs.private_subnet_ids }}
+      # Instance Configuration
+      instance_type: ${{ vars.OPENSEARCH_INSTANCE_TYPE_PROD || 't3.medium.search' }}
+      ebs_volume_size: ${{ vars.OPENSEARCH_EBS_SIZE_PROD || '100' }}
       # Other Configuration
       aws_sns_alert_email: ${{ vars.AWS_SNS_ALERT_EMAIL }}
     secrets: inherit
@@ -471,6 +495,7 @@ jobs:
         deploy-s3,
         deploy-grafana,
         deploy-prometheus,
+        deploy-opensearch,
         deploy-bastion,
       ]
     if: ${{ !cancelled() && !contains(needs.*.result, 'cancelled') && !contains(needs.*.result, 'failure') }}
@@ -515,6 +540,9 @@ jobs:
       valkey_url: ${{ needs.deploy-valkey.outputs.valkey_url }}
       valkey_sg_id: ${{ needs.deploy-valkey.outputs.valkey_sg_id }}
       bastion_sg_id: ${{ needs.deploy-bastion.outputs.bastion_sg_id }}
+      # OpenSearch Configuration (optional, empty when OPENSEARCH_ENABLED_PROD=false)
+      opensearch_endpoint: ${{ needs.deploy-opensearch.outputs.opensearch_endpoint || '' }}
+      opensearch_sg_id: ${{ needs.deploy-opensearch.outputs.opensearch_sg_id || '' }}
       # WAF Configuration (environment-specific, skipped for internal-only deployments)
       waf_enabled: ${{ vars.WAF_ENABLED_PROD || 'false' }}
       waf_stack_name: ${{ needs.stack-config.outputs.waf_stack }}
@@ -546,6 +574,7 @@ jobs:
         deploy-s3,
         deploy-grafana,
         deploy-prometheus,
+        deploy-opensearch,
         deploy-bastion,
       ]
     if: ${{ !cancelled() && !contains(needs.*.result, 'cancelled') && !contains(needs.*.result, 'failure') }}
@@ -585,6 +614,9 @@ jobs:
       valkey_sg_id: ${{ needs.deploy-valkey.outputs.valkey_sg_id }}
       # Database Security Group
       database_sg_id: ${{ needs.deploy-postgres.outputs.database_sg_id }}
+      # OpenSearch Configuration (optional, empty when OPENSEARCH_ENABLED_PROD=false)
+      opensearch_endpoint: ${{ needs.deploy-opensearch.outputs.opensearch_endpoint || '' }}
+      opensearch_sg_id: ${{ needs.deploy-opensearch.outputs.opensearch_sg_id || '' }}
       # Bastion Access (for internal UI access)
       bastion_sg_id: ${{ needs.deploy-bastion.outputs.bastion_sg_id }}
       # Monitoring Configuration
@@ -635,6 +667,7 @@ jobs:
         deploy-s3,
         deploy-grafana,
         deploy-prometheus,
+        deploy-opensearch,
         deploy-bastion,
         deploy-api,
         deploy-dagster,
@@ -653,6 +686,7 @@ jobs:
       needs.deploy-s3.result == 'success' &&
       (needs.deploy-grafana.result == 'success' || needs.deploy-grafana.result == 'skipped') &&
       (needs.deploy-prometheus.result == 'success' || needs.deploy-prometheus.result == 'skipped') &&
+      (needs.deploy-opensearch.result == 'success' || needs.deploy-opensearch.result == 'skipped') &&
       needs.deploy-bastion.result == 'success' &&
       needs.deploy-api.result == 'success' &&
       needs.deploy-dagster.result == 'success' &&

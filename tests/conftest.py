@@ -519,6 +519,7 @@ def setup_database(test_db):
   test_db.rollback()
   # Also clean any committed data by truncating tables
   from robosystems.models.iam import (
+    ConnectionCredentials,
     Graph,
     GraphCredits,
     GraphUser,
@@ -528,7 +529,6 @@ def setup_database(test_db):
     UserAPIKey,
   )
   from robosystems.models.iam.connection import Connection
-  from robosystems.models.iam.connection_credentials import ConnectionCredentials
 
   try:
     # Delete in reverse dependency order to avoid foreign key constraints

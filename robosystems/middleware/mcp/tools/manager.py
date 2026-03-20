@@ -160,6 +160,15 @@ class GraphMCPTools:
 
       self.build_fact_grid_tool = BuildFactGridTool(graph_client)
 
+    # Layer 3: Text search tools (gated by TEXT_SEARCH_ENABLED)
+    self.search_documents_tool = None
+    self.get_document_section_tool = None
+    if env.TEXT_SEARCH_ENABLED:
+      from .search_tools import GetDocumentSectionTool, SearchDocumentsTool
+
+      self.search_documents_tool = SearchDocumentsTool(graph_client)
+      self.get_document_section_tool = GetDocumentSectionTool(graph_client)
+
     # Cache statistics (inherited from schema tool)
     self._cache_hits = 0
     self._cache_misses = 0
@@ -254,6 +263,20 @@ class GraphMCPTools:
       tools.append(self.build_fact_grid_tool.get_tool_definition())
     return tools
 
+  def _get_search_tool_definitions(self) -> list[dict[str, Any]]:
+    """
+    Get text search tool definitions.
+
+    Returns:
+        List of search tool definitions (empty if TEXT_SEARCH_ENABLED is false)
+    """
+    tools = []
+    if self.search_documents_tool is not None:
+      tools.append(self.search_documents_tool.get_tool_definition())
+    if self.get_document_section_tool is not None:
+      tools.append(self.get_document_section_tool.get_tool_definition())
+    return tools
+
   def _get_curated_tool_definitions(self) -> list[dict[str, Any]]:
     """Get curated financial tool definitions (FactSet-powered)."""
     if self.financial_statement_tool is None:
@@ -302,6 +325,7 @@ class GraphMCPTools:
     # Layer 3: Infrastructure tools (feature-flag gated)
     tools.extend(self._get_workspace_tool_definitions())
     tools.extend(self._get_memory_tool_definitions())
+    tools.extend(self._get_search_tool_definitions())
 
     return tools
 
@@ -444,6 +468,22 @@ class GraphMCPTools:
             "Set FACT_GRID_ENABLED=true to enable this feature."
           )
         result = await self.build_fact_grid_tool.execute(arguments)
+        return result if return_raw else json.dumps(result, indent=2)
+
+      elif name == "search-documents":
+        if self.search_documents_tool is None:
+          raise ValueError(
+            self._tool_unavailable_reason("search-documents", "TEXT_SEARCH_ENABLED")
+          )
+        result = await self.search_documents_tool.execute(arguments)
+        return result if return_raw else json.dumps(result, indent=2)
+
+      elif name == "get-document-section":
+        if self.get_document_section_tool is None:
+          raise ValueError(
+            self._tool_unavailable_reason("get-document-section", "TEXT_SEARCH_ENABLED")
+          )
+        result = await self.get_document_section_tool.execute(arguments)
         return result if return_raw else json.dumps(result, indent=2)
 
       else:
