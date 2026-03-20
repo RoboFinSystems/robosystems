@@ -98,28 +98,46 @@ def _partition_year(key: str) -> int:
 def _get_indexed_accessions(os_client, graph_id: str) -> set[str]:
   """Get accession numbers already indexed for a graph_id.
 
-  Uses a terms aggregation to efficiently retrieve all unique accession numbers
-  without fetching full documents. Returns empty set if index doesn't exist.
+  Uses a composite aggregation to paginate through all unique accession numbers
+  without an upper bound. Returns empty set if index doesn't exist.
   """
+  accessions: set[str] = set()
+  after: dict | None = None
+
   try:
-    result = os_client.client.search(
-      index=os_client.index_name,
-      body={
-        "size": 0,
-        "query": {"term": {"graph_id": graph_id}},
-        "aggs": {
-          "accessions": {
-            "terms": {"field": "accession_number", "size": 50000}
-          }
+    while True:
+      agg: dict = {
+        "composite": {
+          "sources": [{"accession": {"terms": {"field": "accession_number"}}}],
+          "size": 10000,
+        }
+      }
+      if after:
+        agg["composite"]["after"] = after
+
+      result = os_client.client.search(
+        index=os_client.index_name,
+        body={
+          "size": 0,
+          "query": {"term": {"graph_id": graph_id}},
+          "aggs": {"accessions": agg},
         },
-      },
-    )
-    return {
-      b["key"]
-      for b in result["aggregations"]["accessions"]["buckets"]
-    }
+      )
+
+      buckets = result["aggregations"]["accessions"]["buckets"]
+      if not buckets:
+        break
+
+      accessions.update(b["key"]["accession"] for b in buckets)
+      after = buckets[-1]["key"]
+
+      if len(buckets) < 10000:
+        break
+
   except Exception:
-    return set()
+    pass
+
+  return accessions
 
 
 def _list_s3_parquet_keys(s3, bucket: str, prefix: str) -> list[str]:
