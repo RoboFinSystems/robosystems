@@ -369,6 +369,17 @@ function setup_full_config() {
         gh variable set VALKEY_VERSION_STAGING --body "8.1"
     fi
 
+    # OpenSearch Configuration (text search for filing narratives)
+    # Disabled by default - enable when OpenSearch infrastructure is needed
+    gh variable set OPENSEARCH_ENABLED_PROD --body "false"
+    gh variable set OPENSEARCH_INSTANCE_TYPE_PROD --body "t3.medium.search"
+    gh variable set OPENSEARCH_EBS_SIZE_PROD --body "100"
+    if $setup_staging; then
+        gh variable set OPENSEARCH_ENABLED_STAGING --body "false"
+        gh variable set OPENSEARCH_INSTANCE_TYPE_STAGING --body "t3.medium.search"
+        gh variable set OPENSEARCH_EBS_SIZE_STAGING --body "100"
+    fi
+
     # LadybugDB Writer Configuration - Standard Tier
     # Note: LBUG_STANDARD_ENABLED is not needed - standard tier is always deployed (always_enabled: true in graph.yml)
     gh variable set LBUG_STANDARD_MIN_INSTANCES_PROD --body "1"

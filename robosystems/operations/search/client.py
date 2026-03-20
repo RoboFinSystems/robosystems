@@ -63,18 +63,47 @@ class OpenSearchClient:
 
   @property
   def client(self):
-    """Lazy-initialize the OpenSearch client."""
+    """Lazy-initialize the OpenSearch client.
+
+    Detects AWS managed domains by URL pattern and uses SigV4 auth automatically.
+    Local/Docker URLs use direct connection with no auth.
+    """
     if self._client is None:
       from opensearchpy import OpenSearch
 
-      self._client = OpenSearch(
-        hosts=[self.url],
-        use_ssl=self.url.startswith("https"),
-        verify_certs=False,
-        timeout=30,
-        max_retries=3,
-        retry_on_timeout=True,
-      )
+      is_aws = ".es.amazonaws.com" in self.url or ".aoss.amazonaws.com" in self.url
+
+      if is_aws:
+        from opensearchpy import AWSV4SignerAuth, RequestsHttpConnection
+
+        from robosystems.config import env
+
+        session = __import__("boto3").Session()
+        credentials = session.get_credentials()
+        service = "aoss" if ".aoss." in self.url else "es"
+        auth = AWSV4SignerAuth(credentials, env.AWS_REGION, service)
+
+        # Parse host from URL (opensearch-py wants host without scheme)
+        host = self.url.replace("https://", "").replace("http://", "").rstrip("/")
+        self._client = OpenSearch(
+          hosts=[{"host": host, "port": 443}],
+          http_auth=auth,
+          use_ssl=True,
+          verify_certs=True,
+          connection_class=RequestsHttpConnection,
+          timeout=30,
+          max_retries=3,
+          retry_on_timeout=True,
+        )
+      else:
+        self._client = OpenSearch(
+          hosts=[self.url],
+          use_ssl=self.url.startswith("https"),
+          verify_certs=False,
+          timeout=30,
+          max_retries=3,
+          retry_on_timeout=True,
+        )
     return self._client
 
   def create_index_if_not_exists(self) -> None:

@@ -116,6 +116,16 @@ on:
         description: "Security group ID for Valkey access"
         required: true
         type: string
+      opensearch_endpoint:
+        description: "OpenSearch domain endpoint URL (empty if not deployed)"
+        required: false
+        type: string
+        default: ""
+      opensearch_sg_id:
+        description: "Security group ID for OpenSearch access (empty if not deployed)"
+        required: false
+        type: string
+        default: ""
 
       # Database Configuration (from Postgres stack outputs)
       database_endpoint:
@@ -278,6 +288,8 @@ jobs:
                 ParameterKey=WebserverFargateBase,ParameterValue=${{ inputs.webserver_fargate_base }} \
                 ParameterKey=ValkeyUrl,ParameterValue=${{ inputs.valkey_url }} \
                 ParameterKey=ValkeyClientSecurityGroupId,ParameterValue=${{ inputs.valkey_sg_id }} \
+                ParameterKey=OpenSearchEndpoint,ParameterValue=\"${{ inputs.opensearch_endpoint }}\" \
+                ParameterKey=OpenSearchClientSecurityGroupId,ParameterValue=\"${{ inputs.opensearch_sg_id }}\" \
                 ParameterKey=DatabaseEndpoint,ParameterValue=${{ inputs.database_endpoint }} \
                 ParameterKey=DatabasePort,ParameterValue=${{ inputs.database_port }} \
                 ParameterKey=DatabaseSecurityGroupId,ParameterValue=${{ inputs.database_sg_id }} \

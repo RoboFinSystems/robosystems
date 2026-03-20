@@ -191,6 +191,14 @@ Parameters:
     Description: Security group ID for applications connecting to Valkey
     AllowedPattern: ^sg-[0-9a-f]+$
     ConstraintDescription: Must be a valid security group ID
+  OpenSearchEndpoint:
+    Type: String
+    Description: OpenSearch domain endpoint URL (empty if not deployed)
+    Default: ""
+  OpenSearchClientSecurityGroupId:
+    Type: String
+    Description: Security group ID for applications connecting to OpenSearch (empty if not deployed)
+    Default: ""
   BastionSecurityGroupId:
     Type: String
     Description: Security group ID for bastion host (for SSM tunnel access to admin API)
@@ -241,6 +249,7 @@ Conditions:
   HasDomain: !Not [!Equals [!Ref DomainName, ""]]
   IsPublicWithDomain: !Equals [!Ref ApiAccessMode, "public"]
   IsInternal: !Equals [!Ref ApiAccessMode, "internal"]
+  HasOpenSearch: !Not [!Equals [!Ref OpenSearchEndpoint, ""]]
 
 Mappings:
   LogRetentionPolicies:
@@ -707,6 +716,12 @@ Resources:
             # Cache & Message Queue Configuration
             - Name: VALKEY_URL
               Value: !Ref ValkeyUrl
+            # OpenSearch Configuration (optional)
+            - !If
+              - HasOpenSearch
+              - Name: OPENSEARCH_URL
+                Value: !Ref OpenSearchEndpoint
+              - !Ref "AWS::NoValue"
             # S3 Bucket Configuration (derived from ARN parameters)
             - Name: SHARED_PROCESSED_BUCKET
               Value: !Select [5, !Split [":", !Ref SharedProcessedBucketArn]]
@@ -878,6 +893,7 @@ Resources:
           SecurityGroups:
             - !Ref ApiSecurityGroup
             - !Ref ValkeyClientSecurityGroupId
+            - !If [HasOpenSearch, !Ref OpenSearchClientSecurityGroupId, !Ref "AWS::NoValue"]
       TaskDefinition: !Ref ApiTaskDefinition
       LoadBalancers:
         - ContainerName: api-container
