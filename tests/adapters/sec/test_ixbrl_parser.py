@@ -11,7 +11,6 @@ Covers:
 import pytest
 
 from robosystems.adapters.sec.ixbrl_parser import (
-  MIN_SECTION_WORDS,
   _extract_elements_from_block,
   _label_from_element_name,
   _strip_html,
@@ -48,7 +47,9 @@ class TestLabelFromElementName:
     )
 
   def test_handles_no_namespace(self):
-    assert _label_from_element_name("GoodwillDisclosureTextBlock") == "Goodwill Disclosure"
+    assert (
+      _label_from_element_name("GoodwillDisclosureTextBlock") == "Goodwill Disclosure"
+    )
 
   def test_handles_no_suffix(self):
     assert _label_from_element_name("us-gaap:Revenue") == "Revenue"

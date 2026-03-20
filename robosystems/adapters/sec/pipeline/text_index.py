@@ -255,8 +255,7 @@ def _extract_html_from_zip(zip_bytes: bytes) -> str | None:
         continue
       # Skip exhibits (ex, consent, subsidiary, certification patterns)
       if any(
-        pat in basename
-        for pat in ["ex1", "ex2", "ex3", "ex4", "consent", "subsidiar"]
+        pat in basename for pat in ["ex1", "ex2", "ex3", "ex4", "consent", "subsidiar"]
       ):
         continue
       htm_candidates.append((info.filename, info.file_size))
