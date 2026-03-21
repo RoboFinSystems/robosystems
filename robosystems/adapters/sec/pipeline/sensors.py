@@ -24,6 +24,8 @@ then the LadybugDB graph is fully rebuilt from DuckDB. The sec graph (2024+ only
 is small enough for nightly rebuilds (~75GB vs ~300GB monolith).
 """
 
+from datetime import UTC, datetime
+
 from dagster import (
   DagsterRunStatus,
   DefaultScheduleStatus,
@@ -692,9 +694,7 @@ def sec_post_stage_index_sensor(context: RunStatusSensorContext):
   # Try to get from upstream run tags, otherwise compute from current date
   partition_key = run_tags.get("dagster/partition")
   if not partition_key:
-    from datetime import datetime, timezone
-
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     quarter = (now.month - 1) // 3 + 1
     partition_key = f"{now.year}-Q{quarter}"
 

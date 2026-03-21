@@ -29,8 +29,6 @@ from typing import Any
 import boto3
 from dagster import AssetExecutionContext, BackfillPolicy, MaterializeResult, asset
 
-from robosystems.adapters.sec.pipeline.configs import sec_quarter_partitions
-
 from robosystems.config import env
 from robosystems.config.storage.shared import (
   DataSourceType,
@@ -43,6 +41,7 @@ from .configs import (
   SECiXBRLIndexConfig,
   SECNarrativeIndexConfig,
   SECTextBlockIndexConfig,
+  sec_quarter_partitions,
 )
 
 
@@ -95,16 +94,6 @@ def _derive_section_label(element_name: str) -> str:
     label = re.sub(r"([A-Z]+)([A-Z][a-z])", r"\1 \2", label)
 
   return label.strip()
-
-
-def _partition_year(key: str) -> int:
-  """Extract year from a filed= partition key (e.g., 'filed=2025-Q1' → 2025)."""
-  for part in key.split("/"):
-    if part.startswith("filed="):
-      return int(part.split("=")[1][:4])
-    if part.startswith("year="):
-      return int(part.split("=")[1][:4])
-  return 0
 
 
 def _get_indexed_accessions(
@@ -388,9 +377,7 @@ def sec_textblocks_indexed(
     f"Scanning parquets from s3://{processed_bucket}/{partition_prefix}/"
   )
 
-  all_parquet_keys = _list_s3_parquet_keys(
-    s3, processed_bucket, partition_prefix
-  )
+  all_parquet_keys = _list_s3_parquet_keys(s3, processed_bucket, partition_prefix)
   context.log.info(f"Found {len(all_parquet_keys)} parquets for {partition_key}")
   node_keys = {
     "Entity": [k for k in all_parquet_keys if "/nodes/Entity/" in k],
@@ -414,20 +401,31 @@ def sec_textblocks_indexed(
 
   context.log.info("Reading Entity table...")
   entity_table = _read_parquets_from_s3(
-    s3, processed_bucket, node_keys["Entity"],
+    s3,
+    processed_bucket,
+    node_keys["Entity"],
     columns=["identifier", "ticker", "name", "cik"],
   )
   context.log.info("Reading Report table...")
   report_table = _read_parquets_from_s3(
-    s3, processed_bucket, node_keys["Report"],
+    s3,
+    processed_bucket,
+    node_keys["Report"],
     columns=[
-      "identifier", "accession_number", "form", "filing_date",
-      "fiscal_year_focus", "fiscal_period_focus", "cik",
+      "identifier",
+      "accession_number",
+      "form",
+      "filing_date",
+      "fiscal_year_focus",
+      "fiscal_period_focus",
+      "cik",
     ],
   )
   context.log.info("Reading Element table...")
   element_table = _read_parquets_from_s3(
-    s3, processed_bucket, node_keys["Element"],
+    s3,
+    processed_bucket,
+    node_keys["Element"],
     columns=["identifier", "qname", "name", "is_textblock"],
   )
 
@@ -447,40 +445,36 @@ def sec_textblocks_indexed(
     f"{len(reports_df)} reports, {len(elements_df)} elements"
   )
 
-  entity_lookup: dict[str, dict[str, str]] = {}
-  for _, row in entities_df.iterrows():
-    entity_lookup[row.get("identifier")] = {
-      "ticker": row.get("ticker", ""),
-      "name": row.get("name", ""),
-      "cik": str(row.get("cik", "")),
-    }
+  entities_df = entities_df.fillna("")
+  entities_df["cik"] = entities_df["cik"].astype(str)
+  entity_lookup: dict[str, dict[str, str]] = entities_df.set_index("identifier")[
+    ["ticker", "name", "cik"]
+  ].to_dict("index")
   del entities_df, entity_table
 
-  report_lookup: dict[str, dict[str, Any]] = {}
-  for _, row in reports_df.iterrows():
-    fy = row.get("fiscal_year_focus")
-    report_lookup[row.get("identifier")] = {
-      "filing_date": str(row.get("filing_date", "")),
-      "form": row.get("form", ""),
-      "fiscal_year": int(fy) if fy is not None and not math.isnan(fy) else None,
-      "fiscal_period": row.get("fiscal_period_focus", ""),
-      "accession_number": row.get("accession_number", ""),
-    }
+  reports_df["filing_date"] = reports_df["filing_date"].astype(str)
+  reports_df["fiscal_year"] = reports_df["fiscal_year_focus"].apply(
+    lambda fy: (
+      int(fy)
+      if fy is not None and not (isinstance(fy, float) and math.isnan(fy))
+      else None
+    )
+  )
+  reports_df = reports_df.rename(columns={"fiscal_period_focus": "fiscal_period"})
+  reports_df = reports_df.fillna("")
+  report_lookup: dict[str, dict[str, Any]] = reports_df.set_index("identifier")[
+    ["filing_date", "form", "fiscal_year", "fiscal_period", "accession_number"]
+  ].to_dict("index")
   del reports_df, report_table
 
   # Build element lookup and extract textblock element IDs for early filtering
-  element_lookup: dict[str, dict[str, Any]] = {}
-  textblock_element_ids: set[str] = set()
-  for _, row in elements_df.iterrows():
-    eid = row.get("identifier")
-    is_tb = row.get("is_textblock", False)
-    element_lookup[eid] = {
-      "qname": row.get("qname", ""),
-      "name": row.get("name", ""),
-      "is_textblock": is_tb,
-    }
-    if is_tb:
-      textblock_element_ids.add(eid)
+  elements_df = elements_df.fillna({"qname": "", "name": "", "is_textblock": False})
+  element_lookup: dict[str, dict[str, Any]] = elements_df.set_index("identifier")[
+    ["qname", "name", "is_textblock"]
+  ].to_dict("index")
+  textblock_element_ids: set[str] = set(
+    elements_df.loc[elements_df["is_textblock"], "identifier"]
+  )
   del elements_df, element_table
 
   context.log.info(f"Found {len(textblock_element_ids)} textblock element types")
@@ -516,15 +510,16 @@ def sec_textblocks_indexed(
     if table is None:
       continue
     df = table.to_pandas()
-    for _, row in df.iterrows():
-      element_id = row.get("to")
-      if element_id in textblock_element_ids:
-        fact_id = row.get("from")
-        fact_to_element[fact_id] = element_id
-        textblock_fact_ids.add(fact_id)
-    del df, table
+    # Filter to only edges pointing at textblock elements
+    mask = df["to"].isin(textblock_element_ids)
+    matched = df.loc[mask]
+    fact_to_element.update(dict(zip(matched["from"], matched["to"], strict=False)))
+    textblock_fact_ids.update(matched["from"])
+    del df, table, matched
 
-  context.log.info(f"Found {len(textblock_fact_ids)} facts linked to textblock elements")
+  context.log.info(
+    f"Found {len(textblock_fact_ids)} facts linked to textblock elements"
+  )
 
   if not textblock_fact_ids:
     context.log.info("No textblock facts found")
@@ -549,14 +544,10 @@ def sec_textblocks_indexed(
     if table is None:
       continue
     df = table.to_pandas()
-    for _, row in df.iterrows():
-      fid = row.get("identifier")
-      if fid in textblock_fact_ids and row.get("value_type") == "external":
-        external_textblock_facts.append({
-          "identifier": fid,
-          "value": row.get("value", ""),
-        })
-    del df, table
+    mask = df["identifier"].isin(textblock_fact_ids) & (df["value_type"] == "external")
+    matched = df.loc[mask, ["identifier", "value"]].fillna("")
+    external_textblock_facts.extend(matched.to_dict("records"))
+    del df, table, matched
 
   context.log.info(f"Found {len(external_textblock_facts)} external textblock facts")
 
@@ -581,11 +572,10 @@ def sec_textblocks_indexed(
     if table is None:
       continue
     df = table.to_pandas()
-    for _, row in df.iterrows():
-      fact_id = row.get("to")
-      if fact_id in textblock_fact_ids:
-        fact_to_report[fact_id] = row.get("from")
-    del df, table
+    mask = df["to"].isin(textblock_fact_ids)
+    matched = df.loc[mask]
+    fact_to_report.update(dict(zip(matched["to"], matched["from"], strict=False)))
+    del df, table, matched
 
   context.log.info(f"Mapped {len(fact_to_report)} textblock facts to reports")
 
@@ -595,8 +585,7 @@ def sec_textblocks_indexed(
   ehr_table = _read_parquets_from_s3(s3, processed_bucket, ehr_keys)
   if ehr_table is not None:
     ehr_df = ehr_table.to_pandas()
-    for _, row in ehr_df.iterrows():
-      report_to_entity[row.get("to")] = row.get("from")
+    report_to_entity = dict(zip(ehr_df["to"], ehr_df["from"], strict=False))
     del ehr_df, ehr_table
 
   context.log.info(f"Mapped {len(report_to_entity)} reports to entities")
@@ -681,9 +670,7 @@ def sec_textblocks_indexed(
       )
       documents.clear()
 
-  context.log.info(
-    f"Processing complete ({skipped} skipped, {errors} errors so far)"
-  )
+  context.log.info(f"Processing complete ({skipped} skipped, {errors} errors so far)")
 
   # Index remaining documents
   if documents:
@@ -760,11 +747,11 @@ def sec_narratives_indexed(
   prefix_base = get_processed_key(DataSourceType.SEC, "processed")
   partition_prefix = f"{prefix_base}/filed={partition_key}"
 
-  context.log.info(f"Scanning parquets from s3://{processed_bucket}/{partition_prefix}/")
-
-  all_parquet_keys = _list_s3_parquet_keys(
-    s3, processed_bucket, partition_prefix
+  context.log.info(
+    f"Scanning parquets from s3://{processed_bucket}/{partition_prefix}/"
   )
+
+  all_parquet_keys = _list_s3_parquet_keys(s3, processed_bucket, partition_prefix)
   context.log.info(f"Found {len(all_parquet_keys)} parquets for {partition_key}")
 
   report_keys = [k for k in all_parquet_keys if "/nodes/Report/" in k]
@@ -773,14 +760,23 @@ def sec_narratives_indexed(
 
   context.log.info(f"Reading {len(report_keys)} Report parquets for metadata...")
   report_table = _read_parquets_from_s3(
-    s3, processed_bucket, report_keys,
+    s3,
+    processed_bucket,
+    report_keys,
     columns=[
-      "identifier", "accession_number", "form", "filing_date",
-      "fiscal_year_focus", "fiscal_period_focus", "cik",
+      "identifier",
+      "accession_number",
+      "form",
+      "filing_date",
+      "fiscal_year_focus",
+      "fiscal_period_focus",
+      "cik",
     ],
   )
   entity_table = _read_parquets_from_s3(
-    s3, processed_bucket, entity_keys,
+    s3,
+    processed_bucket,
+    entity_keys,
     columns=["identifier", "ticker", "name", "cik"],
   )
   ehr_table = _read_parquets_from_s3(s3, processed_bucket, ehr_keys)
@@ -1056,11 +1052,11 @@ def sec_ixbrl_disclosures_indexed(
   prefix_base = get_processed_key(DataSourceType.SEC, "processed")
   partition_prefix = f"{prefix_base}/filed={partition_key}"
 
-  context.log.info(f"Scanning parquets from s3://{processed_bucket}/{partition_prefix}/")
-
-  all_parquet_keys = _list_s3_parquet_keys(
-    s3, processed_bucket, partition_prefix
+  context.log.info(
+    f"Scanning parquets from s3://{processed_bucket}/{partition_prefix}/"
   )
+
+  all_parquet_keys = _list_s3_parquet_keys(s3, processed_bucket, partition_prefix)
   context.log.info(f"Found {len(all_parquet_keys)} parquets for {partition_key}")
 
   report_keys = [k for k in all_parquet_keys if "/nodes/Report/" in k]
@@ -1069,14 +1065,23 @@ def sec_ixbrl_disclosures_indexed(
 
   context.log.info(f"Reading {len(report_keys)} Report parquets for metadata...")
   report_table = _read_parquets_from_s3(
-    s3, processed_bucket, report_keys,
+    s3,
+    processed_bucket,
+    report_keys,
     columns=[
-      "identifier", "accession_number", "form", "filing_date",
-      "fiscal_year_focus", "fiscal_period_focus", "cik",
+      "identifier",
+      "accession_number",
+      "form",
+      "filing_date",
+      "fiscal_year_focus",
+      "fiscal_period_focus",
+      "cik",
     ],
   )
   entity_table = _read_parquets_from_s3(
-    s3, processed_bucket, entity_keys,
+    s3,
+    processed_bucket,
+    entity_keys,
     columns=["identifier", "ticker", "name", "cik"],
   )
   ehr_table = _read_parquets_from_s3(s3, processed_bucket, ehr_keys)
@@ -1138,7 +1143,9 @@ def sec_ixbrl_disclosures_indexed(
   total_elements = 0
   errors = 0
 
-  # Scan raw ZIPs scoped to this partition's year
+  # Scan raw ZIPs scoped to this partition's year.
+  # Raw ZIPs use year= partitions (annual), but accession_metadata
+  # from the quarterly processed parquets handles fine-grained filtering.
   partition_year = partition_key.split("-Q")[0]  # "2026-Q1" → "2026"
   raw_prefix = f"{get_raw_key(DataSourceType.SEC)}/year={partition_year}"
   paginator = s3.get_paginator("list_objects_v2")
