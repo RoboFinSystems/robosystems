@@ -24,6 +24,8 @@ then the LadybugDB graph is fully rebuilt from DuckDB. The sec graph (2024+ only
 is small enough for nightly rebuilds (~75GB vs ~300GB monolith).
 """
 
+from datetime import UTC, datetime
+
 from dagster import (
   DagsterRunStatus,
   DefaultScheduleStatus,
@@ -670,9 +672,9 @@ def sec_post_materialize_publish_sensor(context: RunStatusSensorContext):
 def sec_post_stage_index_sensor(context: RunStatusSensorContext):
   """Trigger text search indexing after staging completes.
 
-  Runs both indexing jobs in parallel since they're independent.
-  Both jobs use incremental logic — they query OpenSearch for
-  already-indexed accessions and skip them.
+  Runs all three indexing jobs in parallel since they're independent.
+  Each job is partitioned by quarter. The sensor derives the current
+  quarter from the upstream run tags or the current date.
   """
   if env.ENVIRONMENT == "dev":
     context.log.info("Skipping text index sensor in dev environment")
@@ -687,6 +689,16 @@ def sec_post_stage_index_sensor(context: RunStatusSensorContext):
     return
 
   graph_id = run_tags.get("graph_id", "sec")
+
+  # Derive the current quarter partition key
+  # Try to get from upstream run tags, otherwise compute from current date
+  partition_key = run_tags.get("dagster/partition")
+  if not partition_key:
+    now = datetime.now(UTC)
+    quarter = (now.month - 1) // 3 + 1
+    partition_key = f"{now.year}-Q{quarter}"
+
+  context.log.info(f"Will index partition {partition_key}")
 
   # Job name → asset op name mapping
   index_jobs = {
@@ -710,13 +722,15 @@ def sec_post_stage_index_sensor(context: RunStatusSensorContext):
       )
       continue
     context.log.info(
-      f"Staging complete (run_id={dagster_run.run_id}), triggering {job_name}"
+      f"Staging complete (run_id={dagster_run.run_id}), triggering {job_name} "
+      f"for {partition_key}"
     )
 
     yield RunRequest(
-      run_key=f"sec-{job_name}-chain-{dagster_run.run_id[:8]}",
+      run_key=f"sec-{job_name}-chain-{partition_key}-{dagster_run.run_id[:8]}",
       job_name=job_name,
       run_config={"ops": {asset_name: {"config": {"graph_id": graph_id}}}},
+      partition_key=partition_key,
       tags={
         "pipeline": "sec",
         "phase": "text_index",

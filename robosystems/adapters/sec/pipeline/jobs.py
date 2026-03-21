@@ -496,12 +496,15 @@ sec_lbug_r2_publish_job = define_asset_job(
 
 sec_textblocks_index_job = define_asset_job(
   name="sec_textblocks_index",
-  description="Index XBRL text blocks into OpenSearch.",
+  description="Index XBRL text blocks into OpenSearch (partitioned by quarter).",
   selection=AssetSelection.assets(sec_textblocks_indexed),
+  partitions_def=sec_quarter_partitions,
   tags={
     "pipeline": "sec",
     "phase": "text_index",
-    "ecs/cpu": "1024",
+    # Streaming approach: loads one parquet at a time, filters early.
+    # Peak memory: element lookup (~1M entries) + filtered textblock facts.
+    "ecs/cpu": "512",
     "ecs/memory": "4096",
     "ecs/ephemeral_storage": "21",
     "ecs/run_task_kwargs": {
@@ -515,14 +518,16 @@ sec_textblocks_index_job = define_asset_job(
 
 sec_narratives_index_job = define_asset_job(
   name="sec_narratives_index",
-  description="Extract and index narrative sections from SEC filings into OpenSearch.",
+  description="Extract and index narrative sections from SEC filings into OpenSearch (partitioned by quarter).",
   selection=AssetSelection.assets(sec_narratives_indexed),
+  partitions_def=sec_quarter_partitions,
   tags={
     "pipeline": "sec",
     "phase": "text_index",
-    "ecs/cpu": "1024",
-    "ecs/memory": "4096",
-    "ecs/ephemeral_storage": "50",
+    # Processes raw ZIPs one at a time. Memory bounded by single filing HTML (~2MB).
+    "ecs/cpu": "512",
+    "ecs/memory": "2048",
+    "ecs/ephemeral_storage": "21",
     "ecs/run_task_kwargs": {
       "capacityProviderStrategy": [
         {"capacityProvider": "FARGATE_SPOT", "weight": 9, "base": 0},
@@ -535,14 +540,16 @@ sec_narratives_index_job = define_asset_job(
 
 sec_ixbrl_index_job = define_asset_job(
   name="sec_ixbrl_index",
-  description="Extract iXBRL disclosure sections with XBRL element metadata into OpenSearch.",
+  description="Extract iXBRL disclosure sections with XBRL element metadata into OpenSearch (partitioned by quarter).",
   selection=AssetSelection.assets(sec_ixbrl_disclosures_indexed),
+  partitions_def=sec_quarter_partitions,
   tags={
     "pipeline": "sec",
     "phase": "text_index",
-    "ecs/cpu": "1024",
-    "ecs/memory": "4096",
-    "ecs/ephemeral_storage": "50",
+    # Processes raw ZIPs one at a time. Memory bounded by single filing HTML (~2MB).
+    "ecs/cpu": "512",
+    "ecs/memory": "2048",
+    "ecs/ephemeral_storage": "21",
     "ecs/run_task_kwargs": {
       "capacityProviderStrategy": [
         {"capacityProvider": "FARGATE_SPOT", "weight": 9, "base": 0},

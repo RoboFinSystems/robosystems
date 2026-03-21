@@ -3,7 +3,6 @@
 Covers:
 - _get_indexed_accessions() composite aggregation pagination
 - _derive_section_label() element name cleanup
-- _partition_year() partition key parsing
 """
 
 from unittest.mock import MagicMock
@@ -13,7 +12,6 @@ import pytest
 from robosystems.adapters.sec.pipeline.text_index import (
   _derive_section_label,
   _get_indexed_accessions,
-  _partition_year,
 )
 
 
@@ -170,24 +168,3 @@ class TestDeriveSectionLabel:
 
   def test_handles_empty_string(self):
     assert _derive_section_label("") == ""
-
-
-@pytest.mark.unit
-class TestPartitionYear:
-  """Tests for _partition_year key parsing."""
-
-  def test_extracts_year_from_filed_partition(self):
-    assert (
-      _partition_year("sec/processed/filed=2025-Q1/nodes/Entity/part.parquet") == 2025
-    )
-
-  def test_extracts_year_from_year_partition(self):
-    assert _partition_year("sec/year=2024/0001045810/filing.zip") == 2024
-
-  def test_returns_zero_for_no_partition(self):
-    assert _partition_year("sec/some/random/path.parquet") == 0
-
-  def test_handles_filed_partition_different_quarters(self):
-    assert (
-      _partition_year("sec/processed/filed=2024-Q4/nodes/Fact/part.parquet") == 2024
-    )
