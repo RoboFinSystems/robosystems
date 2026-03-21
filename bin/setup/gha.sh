@@ -262,11 +262,9 @@ function setup_full_config() {
     fi
 
     # API Capacity Provider Configuration (Spot vs On-Demand)
-    # API can handle Spot interruptions via ALB health checks and auto-scaling
-    gh variable set API_FARGATE_WEIGHT_PROD --body "10"
-    gh variable set API_FARGATE_SPOT_WEIGHT_PROD --body "90"
+    # Single spot_weight variable; on-demand weight derived as (100 - spot_weight) in deploy workflow
+    gh variable set API_FARGATE_SPOT_WEIGHT_PROD --body "0"
     if $setup_staging; then
-        gh variable set API_FARGATE_WEIGHT_STAGING --body "10"
         gh variable set API_FARGATE_SPOT_WEIGHT_STAGING --body "90"
     fi
 
@@ -294,20 +292,15 @@ function setup_full_config() {
     fi
 
     # Dagster Capacity Provider Configuration (Spot vs On-Demand)
-    # Daemon: Orchestration - can handle brief interruptions
-    gh variable set DAGSTER_DAEMON_FARGATE_WEIGHT_PROD --body "20"
-    gh variable set DAGSTER_DAEMON_FARGATE_SPOT_WEIGHT_PROD --body "80"
-    # Webserver: UI/SSM tunnel - 80/20 Spot like daemon
-    gh variable set DAGSTER_WEBSERVER_FARGATE_WEIGHT_PROD --body "20"
-    gh variable set DAGSTER_WEBSERVER_FARGATE_SPOT_WEIGHT_PROD --body "80"
+    # Single spot_weight variable; on-demand weight derived as (100 - spot_weight) in deploy workflow
+    gh variable set DAGSTER_DAEMON_FARGATE_SPOT_WEIGHT_PROD --body "0"
+    gh variable set DAGSTER_WEBSERVER_FARGATE_SPOT_WEIGHT_PROD --body "0"
     # Base: Minimum tasks guaranteed on On-Demand (set >0 when using Savings Plans)
     gh variable set API_FARGATE_BASE_PROD --body "0"
     gh variable set DAGSTER_DAEMON_FARGATE_BASE_PROD --body "0"
     gh variable set DAGSTER_WEBSERVER_FARGATE_BASE_PROD --body "0"
     if $setup_staging; then
-        gh variable set DAGSTER_DAEMON_FARGATE_WEIGHT_STAGING --body "20"
         gh variable set DAGSTER_DAEMON_FARGATE_SPOT_WEIGHT_STAGING --body "80"
-        gh variable set DAGSTER_WEBSERVER_FARGATE_WEIGHT_STAGING --body "20"
         gh variable set DAGSTER_WEBSERVER_FARGATE_SPOT_WEIGHT_STAGING --body "80"
         gh variable set API_FARGATE_BASE_STAGING --body "0"
         gh variable set DAGSTER_DAEMON_FARGATE_BASE_STAGING --body "0"

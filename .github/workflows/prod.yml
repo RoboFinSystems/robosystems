@@ -518,8 +518,7 @@ jobs:
       desired_count: ${{ vars.API_MIN_CAPACITY_PROD || '1' }}
       cpu: ${{ vars.API_CPU_PROD || '512' }}
       memory: ${{ vars.API_MEMORY_PROD || '1024' }}
-      fargate_weight: ${{ vars.API_FARGATE_WEIGHT_PROD || '10' }}
-      fargate_spot_weight: ${{ vars.API_FARGATE_SPOT_WEIGHT_PROD || '90' }}
+      fargate_spot_weight: ${{ vars.API_FARGATE_SPOT_WEIGHT_PROD || '0' }}
       fargate_base: ${{ vars.API_FARGATE_BASE_PROD || '0' }}
       # Auto-scaling Configuration
       min_capacity: ${{ vars.API_MIN_CAPACITY_PROD || '1' }}
@@ -600,10 +599,8 @@ jobs:
       # Run Job Profiles: hardcoded in deploy-dagster.yml (Light/Standard/Compute/Heavy)
       max_concurrent_runs: ${{ vars.DAGSTER_MAX_CONCURRENT_RUNS_PROD || '20' }}
       # Capacity Provider Configuration (Spot vs On-Demand)
-      daemon_fargate_weight: ${{ vars.DAGSTER_DAEMON_FARGATE_WEIGHT_PROD || '20' }}
-      daemon_fargate_spot_weight: ${{ vars.DAGSTER_DAEMON_FARGATE_SPOT_WEIGHT_PROD || '80' }}
-      webserver_fargate_weight: ${{ vars.DAGSTER_WEBSERVER_FARGATE_WEIGHT_PROD || '20' }}
-      webserver_fargate_spot_weight: ${{ vars.DAGSTER_WEBSERVER_FARGATE_SPOT_WEIGHT_PROD || '80' }}
+      daemon_fargate_spot_weight: ${{ vars.DAGSTER_DAEMON_FARGATE_SPOT_WEIGHT_PROD || '0' }}
+      webserver_fargate_spot_weight: ${{ vars.DAGSTER_WEBSERVER_FARGATE_SPOT_WEIGHT_PROD || '0' }}
       daemon_fargate_base: ${{ vars.DAGSTER_DAEMON_FARGATE_BASE_PROD || '0' }}
       webserver_fargate_base: ${{ vars.DAGSTER_WEBSERVER_FARGATE_BASE_PROD || '0' }}
       # Database Configuration (from Postgres stack outputs)
