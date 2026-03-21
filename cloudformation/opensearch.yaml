@@ -123,9 +123,7 @@ Resources:
           Value: CloudFormation
 
   # NOTE: OpenSearch VPC access requires the service-linked role AWSServiceRoleForAmazonOpenSearchService.
-  # This role is account-wide and created automatically on first VPC domain creation,
-  # or manually via: aws iam create-service-linked-role --aws-service-name es.amazonaws.com
-  # It is NOT managed in this template to avoid conflicts between staging/prod stacks.
+  # This role is account-wide and managed in bootstrap-oidc.yaml (OpenSearchServiceLinkedRole).
 
   # OpenSearch Domain
   OpenSearchDomain:
