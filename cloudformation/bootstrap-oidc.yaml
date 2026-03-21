@@ -50,6 +50,20 @@ Resources:
           Value: CloudFormation
 
   # =============================================================================
+  # SERVICE-LINKED ROLES - Account-wide roles required by AWS services
+  # =============================================================================
+
+  # Required for OpenSearch domains deployed in a VPC.
+  # Account-wide (shared by staging and prod), so it lives here in bootstrap.
+  OpenSearchServiceLinkedRole:
+    Type: AWS::IAM::ServiceLinkedRole
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      AWSServiceName: es.amazonaws.com
+      Description: Allows Amazon OpenSearch Service to manage VPC resources
+
+  # =============================================================================
   # BACKEND ROLE - Full infrastructure permissions for main robosystems repo
   # =============================================================================
   GitHubActionsRole:
