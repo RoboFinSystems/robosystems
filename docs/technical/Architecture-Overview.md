@@ -72,7 +72,7 @@ The FastAPI backend provides a RESTful API with:
 Model Context Protocol server for AI integration:
 
 - **MCP Endpoints**: FastAPI router exposing MCP-compliant tool endpoints
-- **Specialized Tools**: Cypher queries, schema introspection, fact grids, workspace management, and memory graph operations (write Cypher, add node/relationship tables)
+- **Specialized Tools**: Cypher queries, schema introspection, fact grids, workspace management, memory graph operations (write Cypher, add node/relationship tables), semantic element resolution (LanceDB vector search), and document search (OpenSearch full-text)
 - **Streaming Support**: SSE for memory-efficient large result processing
 - **Query Validation**: Complexity scoring and timeout enforcement
 
@@ -153,6 +153,7 @@ RoboSystems is built on **LadybugDB**, a high-performance embedded graph databas
 
 **Performance Features:**
 - **Bulk Ingestion**: S3 Parquet → DuckDB staging → LadybugDB graph pipeline
+- **Vector Search**: LanceDB IVF-PQ indexes for semantic similarity queries (~5ms latency over millions of elements)
 - **Streaming Results**: NDJSON support for memory-efficient large query responses
 - **Connection Pooling**: Efficient resource management per database
 - **Admission Control**: CPU/memory backpressure to prevent overload
@@ -175,6 +176,7 @@ FastAPI microservice providing unified interface for all backends:
 - **HTTP REST Interface**: Port 8001 (default)
 - **Backend Abstraction**: Consistent API regardless of backend
 - **Multi-Database Management**: Multiple databases per instance
+- **Vector Search**: LanceDB-backed semantic similarity endpoints (build, search, export, delete)
 - **Connection Pooling**: Efficient resource management
 - **Streaming Support**: NDJSON for large query results
 - **Admission Control**: CPU/memory backpressure
@@ -224,6 +226,33 @@ High-performance data ingestion pipeline bridging raw data to LadybugDB:
 - **S3 Integration**: Direct S3 file access via httpfs extension
 - **SQL Preview**: Query staged data with full SQL before graph materialization
 
+### LanceDB Vector Search
+
+**Location**: `/robosystems/graph_api/core/lance/`
+
+Embedded vector search engine for semantic similarity queries on graph data:
+
+- **IVF-PQ Indexes**: Approximate nearest neighbor search using Inverted File with Product Quantization
+- **Per-Graph Indexes**: Each graph/table pair gets its own vector index at `{LANCE_INDEX_PATH}/{graph_id}/{table_name}/`
+- **Embedding Model**: BAAI/bge-small-en-v1.5 via fastembed (384-dimensional vectors, cosine distance)
+- **Lifecycle**: Build from DuckDB staging → Search on instance → Export as tar.gz to S3 → Replicas download on boot
+- **Graceful Degradation**: Brute-force search below 1,000 rows; falls back to canonical concept matching if index unavailable
+
+**Graph API Endpoints:**
+- `POST /databases/{graph_id}/tables/{table_name}/vector/build` — Build index from DuckDB query (writers only)
+- `POST /databases/{graph_id}/tables/{table_name}/vector/search` — Query vector index (writers + replicas)
+- `POST /databases/{graph_id}/tables/{table_name}/vector/export` — Package and upload to S3 (writers only)
+- `GET /databases/{graph_id}/tables/{table_name}/vector` — Index metadata
+- `DELETE /databases/{graph_id}/tables/{table_name}/vector` — Delete index
+
+**Primary Use Case — SEC Element Resolution:**
+Semantic search over 2.6M+ XBRL elements enables the MCP `resolve-element` tool to map natural-language financial concepts (e.g., "revenue") to exact XBRL element names with ~5ms query latency. Gated by the `MCP_VECTOR_SEARCH_ENABLED` feature flag (SSM Parameter Store).
+
+**Infrastructure:**
+- Writer instances build indexes during DuckDB staging and export to S3
+- Replica instances download `{repo}.Element.lance.tar.gz` archives at boot (non-fatal if unavailable)
+- No additional infrastructure required — runs embedded on existing graph API instances
+
 ### Infrastructure Design
 
 **Cluster-Based Deployment:**
@@ -243,7 +272,7 @@ The platform offers multiple tiers with different isolation levels and capabilit
 | `ladybug-standard` | LadybugDB Standard | Dedicated m7g.large (8 GB) | 3 max | Cost-efficient entry tier with subgraph support |
 | `ladybug-large` | LadybugDB Large | Dedicated r7g.large (16 GB) | 10 max | Enhanced performance for growing teams |
 | `ladybug-xlarge` | LadybugDB XLarge | Dedicated r7g.xlarge (32 GB) | 25 max | Maximum performance and scale |
-| `ladybug-shared` | — | Platform r7g.xlarge | — | Public repositories (SEC) |
+| `ladybug-shared` | — | Platform r7g.2xlarge (64 GB) | 10 (platform-managed) | Public repositories (SEC) |
 
 *Note: Neo4j backend tiers exist in the codebase but are experimental and disabled by default.*
 
@@ -299,6 +328,8 @@ Business workflow orchestration and service layer:
 - **Table Service**: Schema-driven DuckDB staging table management and file ingestion
 - **Data Ingestion**: High-performance bulk data loading using COPY operations
 - **Credit Service**: AI agent usage tracking with token-based consumption
+- **Search Service**: OpenSearch-backed full-text document search with multi-tenant graph_id isolation
+- **Connection Service**: Provider-agnostic connection management (QuickBooks, Plaid, SEC) with encrypted credential storage
 
 **See**: [Operations Documentation](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/operations/README.md) in codebase
 
@@ -328,6 +359,8 @@ adapters/
 │       ├── process.py      # sec_processed_filings asset
 │       ├── stage.py        # DuckDB staging assets
 │       ├── materialize.py  # LadybugDB materialization assets
+│       ├── vector_publish.py # LanceDB vector index S3 publishing
+│       ├── text_index.py   # OpenSearch text indexing (textblocks, narratives, iXBRL)
 │       ├── jobs.py         # Job definitions
 │       └── sensors.py      # Sensors + schedule
 ├── quickbooks/             # QuickBooks adapter
@@ -450,6 +483,32 @@ This enables `git pull upstream main` without merge conflicts on your custom ada
 - **High performance**: Columnar storage, direct S3 access
 - **Default path**: `./data/staging/` (configurable via `DUCKDB_STAGING_PATH`)
 
+### LanceDB
+
+**Purpose**: Vector similarity search on graph instances
+
+- **Embedded Engine**: Runs alongside LadybugDB on EC2 graph instances (no separate cluster)
+- **Per-Graph Indexes**: `{LANCE_INDEX_PATH}/{graph_id}/{table_name}/{table_name}.lance/`
+- **IVF-PQ Partitions**: Optimized for large-scale ANN search (cosine distance, 384-dim vectors)
+- **S3 Distribution**: Indexes exported as tar.gz archives, downloaded by replicas at boot
+- **Default path**: `./data/lance/` (configurable via `LANCE_INDEX_PATH`)
+
+### OpenSearch
+
+**Purpose**: Unstructured content search — keyword and semantic search across documents scoped by `graph_id`
+
+OpenSearch complements LadybugDB (structured graph data) and LanceDB (vector similarity on graph elements) by providing a search layer for unstructured text content: filing narratives, user-uploaded documents, third-party connection documents, and AI agent memories.
+
+- **BM25 Keyword Search**: Standard analyzer for natural language queries over document text
+- **Semantic Search**: `knn_vector` field (384-dim HNSW, cosine similarity) for embedding-based retrieval
+- **Multi-Tenant Isolation**: Every query filters by `graph_id` at the client level
+- **Source Types**: `xbrl_textblock`, `narrative_section`, `ixbrl_disclosure` (SEC); `uploaded_doc`, `connection_doc`, `memory` (user content — planned)
+- **Externalized Content**: Full text stored in S3/CDN; OpenSearch holds metadata, snippets, and embeddings
+- **Feature-Flag Gated**: `TEXT_SEARCH_ENABLED` SSM parameter controls availability
+- **Environment variables**: `OPENSEARCH_URL` (default: `http://localhost:9200`), `OPENSEARCH_INDEX` (default: `documents`)
+
+Currently indexing SEC filing content (text blocks, narrative sections, iXBRL disclosures). Planned expansion to user document uploads, third-party connections (Google Drive, Notion), and AI agent semantic memory. See `local/docs/specs/document-search-platform.md` for the full roadmap.
+
 ### DynamoDB
 
 **Purpose**: Service registry and metadata
@@ -513,6 +572,7 @@ s3://robosystems-user-{env}/
 s3://robosystems-user-{env}/
   shared-repositories/databases/sec.lbug
   shared-repositories/databases/sec.duckdb
+  shared-repositories/databases/sec.Element.lance.tar.gz
 ```
 
 **Configuration**: Path helpers are centralized in [`robosystems/config/storage/`](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/config/storage/README.md) with `shared.py` for external data sources and `graph.py` for customer graph storage
@@ -530,6 +590,9 @@ s3://robosystems-user-{env}/
 - **RDS PostgreSQL**: Primary database (auto-scaling storage, optional Aurora upgrade)
 - **ElastiCache**: Valkey/Redis cache
 - **DynamoDB**: Service registries (on-demand pricing)
+
+**Search & Analytics**:
+- **OpenSearch Service**: Unstructured content search with keyword and semantic capabilities (single-node, VPC-private, feature-flag gated)
 
 **Storage**:
 - **S3**: Data lake and file storage
@@ -621,7 +684,11 @@ All infrastructure is managed through CloudFormation templates in `/cloudformati
 - **`graph-infra.yaml`**: Base infrastructure (DynamoDB registries, security groups, IAM roles, SNS alerts)
 - **`graph-volumes.yaml`**: EBS volume lifecycle management (auto-expansion, snapshots, retention)
 - **`graph-ladybug.yaml`**: Auto-scaling EC2 writer clusters for LadybugDB (multi-tenant and dedicated tiers)
-- **`graph-ladybug-replicas.yaml`**: Read replica fleet for shared repositories (download .lbug/.duckdb from S3 on boot)
+- **`graph-ladybug-replicas.yaml`**: Read replica fleet for shared repositories (download .lbug and .lance.tar.gz from S3 on boot)
+
+#### Search
+
+- **`opensearch.yaml`**: Amazon OpenSearch Service domain for unstructured content search (VPC-private, feature-flag gated)
 
 #### Observability
 
@@ -736,6 +803,8 @@ See individual app repositories for specific deployment workflows.
 - XBRL filing downloads via Dagster pipeline (quarterly partitions)
 - Arelle-based XBRL parsing with fastembed enrichment
 - Nightly automated incremental pipeline (download → process → stage → materialize → publish → replica refresh)
+- LanceDB vector indexes for semantic XBRL element resolution via MCP tools
+- OpenSearch text indexing of filing narratives, text blocks, and iXBRL disclosures
 - Rate-limited API access with backoff
 
 ### QuickBooks API

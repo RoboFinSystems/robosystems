@@ -189,11 +189,15 @@ cat .local/config.json | grep api_key
    - `read-graph-cypher` - Run Cypher queries directly
    - `get-graph-schema` - View available node and relationship types
    - `describe-graph-structure` - Understand graph topology and counts
-   - `resolve-element` - Look up XBRL element details by name or canonical concept
+   - `resolve-element` - Look up XBRL element details by name or canonical concept (uses LanceDB vector search when available)
    - `resolve-structure` - Find structures by statement type or definition
    - `discover-properties` - Explore node properties
    - `discover-common-elements` - Find financial metrics (us-gaap tags)
    - `get-example-queries` - Get sample queries
+
+   **Search Tools** (requires `TEXT_SEARCH_ENABLED=true` in `.env.local`):
+   - `search-documents` - Full-text search across filing narratives, MD&A, risk factors, and iXBRL disclosures
+   - `get-document-section` - Retrieve full text of a document found via search
 
 **Example MCP Usage:**
 
@@ -628,7 +632,7 @@ just sec-load NVDA 2025
 
 ## Resources
 
-- **Dagster Pipeline**: See `/robosystems/dagster/assets/sec/` for pipeline implementation
+- **Dagster Pipeline**: See `/robosystems/adapters/sec/pipeline/` for pipeline implementation
 - **SEC Adapters**: See `/robosystems/adapters/sec/` for SEC client and processors
 - **Health Check**: `just sec-health v` for diagnostic information
 - **G.V()**: [https://gdotv.com/](https://gdotv.com/) - Recommended graph visualization tool for Ladybug

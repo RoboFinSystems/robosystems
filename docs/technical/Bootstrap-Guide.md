@@ -123,8 +123,9 @@ While bootstrap sets the core OIDC variables (`AWS_ROLE_ARN`, `AWS_ACCOUNT_ID`, 
 | LadybugDB | `LBUG_*_ENABLED_*`, `LBUG_*_MIN_INSTANCES_*` | Graph database tier configuration |
 | Shared Replicas | `SHARED_REPLICAS_*`, `SHARED_REPOSITORIES_*` | Read-only replica fleet for shared repos |
 | Valkey | `VALKEY_NODE_TYPE_*`, `VALKEY_ENCRYPTION_ENABLED_*` | Cache configuration |
+| OpenSearch | `OPENSEARCH_ENABLED_*`, `OPENSEARCH_INSTANCE_TYPE_*`, `OPENSEARCH_EBS_SIZE_*` | Document search (disabled by default) |
 | Security | `WAF_ENABLED_*`, `VPC_FLOW_LOGS_ENABLED`, `CLOUDTRAIL_ENABLED` | WAF, audit logging, compliance |
-| Infrastructure | `VPC_ENDPOINT_MODE`, `VPC_SECOND_OCTET`, `MAX_AVAILABILITY_ZONES` | VPC and networking |
+| Infrastructure | `VPC_ENDPOINT_MODE`, `VPC_SECOND_OCTET`, `VPC_MAX_AVAILABILITY_ZONES` | VPC and networking |
 
 **When to run:**
 - During bootstrap (prompted) - the recommended path since you opt-in to each step
@@ -190,9 +191,13 @@ Feature flags and tuning parameters. Uses SSM for cost efficiency (FREE tier vs 
 **Parameter hierarchy:**
 ```
 /robosystems/{env}/
-  features/           # Boolean feature flags
+  features/           # Boolean feature flags (~25 flags)
     RATE_LIMIT_ENABLED
     BILLING_ENABLED
+    CONNECTIONS_ENABLED
+    TEXT_SEARCH_ENABLED
+    MCP_VECTOR_SEARCH_ENABLED
+    MCP_MEMORY_ENABLED
     ...
   tuning/             # Runtime tunables
     cache/            # Cache TTLs (BALANCE_TTL, JWT_TTL, etc.)
@@ -439,8 +444,13 @@ aws sts get-caller-identity
 | `valkey.yaml` | GitHub Actions | ElastiCache Redis |
 | `s3.yaml` | GitHub Actions | S3 buckets |
 | `api.yaml` | GitHub Actions | ECS API service |
+| `waf.yaml` | GitHub Actions | Web Application Firewall (optional) |
 | `dagster.yaml` | GitHub Actions | ECS Dagster service |
+| `opensearch.yaml` | GitHub Actions | OpenSearch document search (optional) |
 | `graph-*.yaml` | GitHub Actions | LadybugDB infrastructure |
+| `prometheus.yaml` | GitHub Actions | Managed Prometheus (optional) |
+| `grafana.yaml` | GitHub Actions | Managed Grafana (optional) |
+| `cloudtrail.yaml` | GitHub Actions | AWS audit logging (optional) |
 | `bastion.yaml` | GitHub Actions | SSM bastion host |
 
 ## Related Documentation
