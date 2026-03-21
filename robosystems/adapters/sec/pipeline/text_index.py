@@ -224,9 +224,11 @@ def _strip_html(html: str) -> str:
 def _extract_html_from_zip(zip_bytes: bytes) -> str | None:
   """Extract the main filing HTML from a ZIP file.
 
-  Picks the largest non-exhibit HTM file, filtering out XBRL taxonomy files,
-  viewer artifacts, and common exhibit patterns. Returns None if no valid
-  HTML file is found.
+  Strategy: prefer the file containing a dei:DocumentType iXBRL tag (the actual
+  filing), falling back to the largest non-exhibit HTM file. The iXBRL check
+  handles cases where exhibits (e.g., credit card agreements) are larger than
+  the filing itself (seen with COST, where 'costex102...' exhibit is 1.4MB vs
+  the 832KB filing).
   """
   with zipfile.ZipFile(io.BytesIO(zip_bytes)) as zf:
     htm_candidates: list[tuple[str, int]] = []
@@ -253,18 +255,29 @@ def _extract_html_from_zip(zip_bytes: bytes) -> str | None:
       basename = name_lower.rsplit("/", 1)[-1]
       if re.match(r"^r\d+\.htm", basename):
         continue
-      # Skip exhibits (ex, consent, subsidiary, certification patterns)
-      if any(
-        pat in basename for pat in ["ex1", "ex2", "ex3", "ex4", "consent", "subsidiar"]
-      ):
-        continue
       htm_candidates.append((info.filename, info.file_size))
 
     if not htm_candidates:
       return None
 
-    # Pick the largest file — the main filing document is always the biggest
-    main_file = max(htm_candidates, key=lambda x: x[1])[0]
+    # Strategy 1: Find the file with dei:DocumentType iXBRL tag (the actual filing)
+    # Check candidates from largest to smallest (filing is usually large)
+    for filename, _ in sorted(htm_candidates, key=lambda x: -x[1]):
+      content = zf.read(filename).decode("utf-8", errors="replace")
+      if _extract_ixbrl_doc_type(content) is not None:
+        return content
+
+    # Strategy 2: Fall back to largest non-exhibit file (pre-iXBRL filings)
+    fallback = [
+      (f, s)
+      for f, s in htm_candidates
+      if not any(
+        pat in f.lower().rsplit("/", 1)[-1]
+        for pat in ["ex1", "ex2", "ex3", "ex4", "consent", "subsidiar"]
+      )
+    ]
+    candidates = fallback or htm_candidates
+    main_file = max(candidates, key=lambda x: x[1])[0]
     return zf.read(main_file).decode("utf-8", errors="replace")
 
 

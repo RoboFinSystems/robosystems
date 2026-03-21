@@ -16,6 +16,8 @@ sec/
 │   ├── downloader.py            # SECDownloader - bulk file downloads
 │   └── efts.py                  # EFTS API for filing discovery
 ├── enrichment.py                # SemanticEnricher (embeddings + classification)
+├── narrative_extractor.py       # NarrativeExtractor - Item section detection from 10-K/10-Q HTML
+├── ixbrl_parser.py              # iXBRLParser - disclosure sections with XBRL element metadata
 ├── processors/                  # Data transformation
 │   ├── __init__.py              # Processor exports
 │   ├── metadata.py              # SECMetadataLoader for filer/report metadata
@@ -59,8 +61,9 @@ sec/
     ├── stage.py                 # DuckDB staging assets
     ├── materialize.py           # LadybugDB materialization assets
     ├── entity_update.py         # Entity incremental update asset
+    ├── text_index.py            # OpenSearch text indexing (textblocks, narratives, iXBRL)
     ├── backup.py                # Backup asset
-    ├── jobs.py                  # 12 SEC job definitions
+    ├── jobs.py                  # 21 SEC job definitions
     └── sensors.py               # 6 sensors + 1 schedule
 ```
 
@@ -84,6 +87,13 @@ sec/
 | `LadybugMaterializer`      | Materialize from DuckDB to LadybugDB              |
 | `LadybugDirectCopier`      | Direct S3 to LadybugDB copy (bypasses DuckDB)     |
 | `SECMetadataLoader`        | Load filer/report metadata with caching           |
+
+### Text Extraction
+
+| Class | Purpose |
+| ----- | ------- |
+| `NarrativeExtractor` | Extract Item sections (Business, Risk Factors, MD&A, Cybersecurity, etc.) from 10-K/10-Q HTML using heuristic section detection |
+| `iXBRLParser` | Extract iXBRL disclosure sections (`ix:nonNumeric TextBlock` elements) with XBRL element metadata for graph cross-reference |
 
 ### Enrichment & Classification
 
@@ -160,19 +170,28 @@ SEC EDGAR API
 ┌─────────────┐    ┌─────────────┐    ┌─────────────┐
 │  Download   │───▶│   Process   │───▶│    Stage    │
 │ (ZIP files) │    │ (Parquet)   │    │  (DuckDB)   │
-└─────────────┘    └──────┬──────┘    └─────────────┘
-                          │                  │
-                   ┌──────▼──────┐           │
-                   │   Enrich    │    ┌──────┴──────────────────┐
-                   │ (Semantic + │    ▼                         ▼
-                   │  Classify)  │  ┌─────────────┐     ┌─────────────┐
-                   └─────────────┘  │ Materialize │     │ Direct Copy │
-                                    │  (DuckDB →  │     │  (S3 →      │
-                   ┌─────────────┐  │  LadybugDB) │     │  LadybugDB) │
-                   │  Knowledge  │  └─────────────┘     └─────────────┘
-                   │ (Artifacts) │
-                   │  offline    │
-                   └─────────────┘
+└──────┬──────┘    └──────┬──────┘    └─────────────┘
+       │                  │                  │
+       │           ┌──────▼──────┐           │
+       │           │   Enrich    │    ┌──────┴──────────────────┐
+       │           │ (Semantic + │    ▼                         ▼
+       │           │  Classify)  │  ┌─────────────┐     ┌─────────────┐
+       │           └─────────────┘  │ Materialize │     │ Direct Copy │
+       │                            │  (DuckDB →  │     │  (S3 →      │
+       │           ┌─────────────┐  │  LadybugDB) │     │  LadybugDB) │
+       │           │  Knowledge  │  └─────────────┘     └─────────────┘
+       │           │ (Artifacts) │
+       │           │  offline    │
+       │           └─────────────┘
+       │
+       ▼
+┌─────────────┐
+│ Text Index  │
+│ (OpenSearch)│
+│ Narratives, │
+│ iXBRL, Text │
+│ Blocks      │
+└─────────────┘
 ```
 
 ### Enrichment (inline, per-filing)
