@@ -374,6 +374,13 @@ Resources:
                   - bedrock:InvokeModel
                   - bedrock:InvokeModelWithResponseStream
                 Resource: "*"
+
+              # OpenSearch
+              - Sid: OpenSearch
+                Effect: Allow
+                Action:
+                  - es:*
+                Resource: "*"
       Tags:
         - Key: Name
           Value: !Sub ${ServiceTag}-github-actions-role
