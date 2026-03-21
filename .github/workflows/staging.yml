@@ -307,7 +307,7 @@ jobs:
   deploy-opensearch:
     # Text search disabled by default - set OPENSEARCH_ENABLED_STAGING=true to enable
     if: vars.OPENSEARCH_ENABLED_STAGING == 'true'
-    needs: [runner, create-deployment, stack-config, deploy-vpc]
+    needs: [runner, create-deployment, stack-config, deploy-vpc, deploy-bastion]
     uses: ./.github/workflows/deploy-opensearch.yml
     with:
       # Stack & Repository Configuration
@@ -322,6 +322,8 @@ jobs:
       # Instance Configuration
       instance_type: ${{ vars.OPENSEARCH_INSTANCE_TYPE_STAGING || 't3.medium.search' }}
       ebs_volume_size: ${{ vars.OPENSEARCH_EBS_SIZE_STAGING || '100' }}
+      # Bastion Access
+      bastion_sg_id: ${{ needs.deploy-bastion.outputs.bastion_sg_id }}
       # Other Configuration
       aws_sns_alert_email: ${{ vars.AWS_SNS_ALERT_EMAIL }}
     secrets: inherit
