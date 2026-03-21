@@ -262,10 +262,12 @@ def _extract_html_from_zip(zip_bytes: bytes) -> str | None:
 
     # Strategy 1: Find the file with dei:DocumentType iXBRL tag (the actual filing)
     # Check candidates from largest to smallest (filing is usually large)
+    # Read only first 2MB for the iXBRL check to avoid decoding large exhibits
     for filename, _ in sorted(htm_candidates, key=lambda x: -x[1]):
-      content = zf.read(filename).decode("utf-8", errors="replace")
-      if _extract_ixbrl_doc_type(content) is not None:
-        return content
+      raw = zf.read(filename)
+      prefix = raw[:2_000_000].decode("utf-8", errors="replace")
+      if _extract_ixbrl_doc_type(prefix) is not None:
+        return raw.decode("utf-8", errors="replace")
 
     # Strategy 2: Fall back to largest non-exhibit file (pre-iXBRL filings)
     fallback = [

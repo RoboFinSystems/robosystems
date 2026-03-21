@@ -205,7 +205,9 @@ class NarrativeExtractor:
 
     # Build list of ALL Item/PART heading positions as boundaries
     all_boundaries: list[int] = []
-    for m in re.finditer(r"(?:^|\n)\s*(?:Item|ITEM)\s+\d+[A-Z]?[\.\u2014\u2013]", text):
+    for m in re.finditer(
+      r"(?:^|\n)\s*(?:Item|ITEM)\s+\d+[A-Z]?[\.\s\u2014\u2013:]", text
+    ):
       all_boundaries.append(m.start())
     for m in re.finditer(r"(?:^|\n)\s*(?:PART|Part)\s+[IV]+\b", text):
       all_boundaries.append(m.start())
