@@ -3,7 +3,7 @@
 # RoboSystems AWS SSM Tunnels
 # Usage: ./bin/tools/tunnels.sh [environment] [service]
 # Environments: prod, staging, dev
-# Services: postgres, valkey, dagster, api, all
+# Services: postgres, valkey, dagster, api, api-internal, opensearch, all
 
 set -euo pipefail
 
@@ -129,6 +129,7 @@ print_usage() {
 
 discover_infrastructure() {
     local environment=$1
+    local service=${2:-all}
 
     # Validate environment
     if [[ ! "$environment" =~ ^(prod|staging|dev)$ ]]; then
@@ -243,23 +244,25 @@ discover_infrastructure() {
         echo -e "${YELLOW}Using default API internal endpoint: $API_INTERNAL_ENDPOINT${NC}"
     fi
 
-    # Discover OpenSearch endpoint
-    echo -e "${YELLOW}Looking for OpenSearch endpoint...${NC}"
+    # Discover OpenSearch endpoint (only when needed)
+    if [[ "$service" == "opensearch" || "$service" == "all" ]]; then
+        echo -e "${YELLOW}Looking for OpenSearch endpoint...${NC}"
 
-    local opensearch_stack="RoboSystemsOpenSearch${env_capitalized}"
-    OPENSEARCH_ENDPOINT=$(aws cloudformation describe-stacks \
-        --stack-name "$opensearch_stack" \
-        --query 'Stacks[0].Outputs[?OutputKey==`OpenSearchEndpoint`].OutputValue' \
-        --output text \
-        --region "$AWS_REGION" 2>/dev/null || echo "")
+        local opensearch_stack="RoboSystemsOpenSearch${env_capitalized}"
+        OPENSEARCH_ENDPOINT=$(aws cloudformation describe-stacks \
+            --stack-name "$opensearch_stack" \
+            --query 'Stacks[0].Outputs[?OutputKey==`OpenSearchEndpoint`].OutputValue' \
+            --output text \
+            --region "$AWS_REGION" 2>/dev/null || echo "")
 
-    if [[ -z "$OPENSEARCH_ENDPOINT" || "$OPENSEARCH_ENDPOINT" == "None" ]]; then
-        echo -e "${YELLOW}Warning: Could not find OpenSearch endpoint for $environment${NC}"
-        OPENSEARCH_ENDPOINT="NOT_FOUND"
-    else
-        # Strip https:// prefix — SSM tunnel needs bare hostname
-        OPENSEARCH_ENDPOINT="${OPENSEARCH_ENDPOINT#https://}"
-        OPENSEARCH_ENDPOINT="${OPENSEARCH_ENDPOINT#http://}"
+        if [[ -z "$OPENSEARCH_ENDPOINT" || "$OPENSEARCH_ENDPOINT" == "None" ]]; then
+            echo -e "${YELLOW}Warning: Could not find OpenSearch endpoint for $environment${NC}"
+            OPENSEARCH_ENDPOINT="NOT_FOUND"
+        else
+            # Strip https:// prefix — SSM tunnel needs bare hostname
+            OPENSEARCH_ENDPOINT="${OPENSEARCH_ENDPOINT#https://}"
+            OPENSEARCH_ENDPOINT="${OPENSEARCH_ENDPOINT#http://}"
+        fi
     fi
 
     # Discover API access mode (internal or public)
@@ -285,7 +288,9 @@ discover_infrastructure() {
     echo -e "  API (ALB):    ${GREEN}$API_ENDPOINT${NC}"
     echo -e "  API (Direct): ${GREEN}$API_INTERNAL_ENDPOINT${NC}"
     echo -e "  API Mode:     ${GREEN}$API_ACCESS_MODE${NC}"
-    echo -e "  OpenSearch:   ${GREEN}$OPENSEARCH_ENDPOINT${NC}"
+    if [[ -n "$OPENSEARCH_ENDPOINT" ]]; then
+        echo -e "  OpenSearch:   ${GREEN}$OPENSEARCH_ENDPOINT${NC}"
+    fi
     echo ""
 }
 
@@ -780,7 +785,7 @@ main() {
     esac
 
     # Discover infrastructure
-    discover_infrastructure "$environment"
+    discover_infrastructure "$environment" "$service"
 
     # Check and start bastion if needed
     check_bastion_status "$environment"
