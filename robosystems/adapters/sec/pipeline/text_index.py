@@ -27,7 +27,9 @@ import zipfile
 from typing import Any
 
 import boto3
-from dagster import AssetExecutionContext, MaterializeResult, asset
+from dagster import AssetExecutionContext, BackfillPolicy, MaterializeResult, asset
+
+from robosystems.adapters.sec.pipeline.configs import sec_quarter_partitions
 
 from robosystems.config import env
 from robosystems.config.storage.shared import (
@@ -176,8 +178,15 @@ def _list_s3_parquet_keys(s3, bucket: str, prefix: str) -> list[str]:
   return keys
 
 
-def _read_parquets_from_s3(s3, bucket: str, keys: list[str]):
-  """Read multiple parquet files from S3 and concatenate into a single PyArrow table."""
+def _read_parquets_from_s3(
+  s3, bucket: str, keys: list[str], columns: list[str] | None = None
+):
+  """Read multiple parquet files from S3 and concatenate into a single PyArrow table.
+
+  Args:
+    columns: If specified, only read these columns from each parquet file.
+      This avoids loading large columns (e.g. embeddings) that aren't needed.
+  """
   import pyarrow.parquet as pq
 
   tables = []
@@ -185,7 +194,7 @@ def _read_parquets_from_s3(s3, bucket: str, keys: list[str]):
     try:
       response = s3.get_object(Bucket=bucket, Key=key)
       buf = io.BytesIO(response["Body"].read())
-      table = pq.read_table(buf)
+      table = pq.read_table(buf, columns=columns)
       tables.append(table)
     except Exception as e:
       logger.warning(f"Failed to read parquet {key}: {e}")
@@ -334,6 +343,8 @@ def _url_to_s3_key(url: str) -> tuple[str, str] | None:
   description="Index XBRL text blocks into OpenSearch for full-text search",
   kinds={"opensearch"},
   deps=["sec_processed_filings"],
+  partitions_def=sec_quarter_partitions,
+  backfill_policy=BackfillPolicy.single_run(),
   metadata={
     "pipeline": "sec",
     "stage": "text_index",
@@ -346,8 +357,8 @@ def sec_textblocks_indexed(
 ) -> MaterializeResult:
   """Index externalized XBRL text blocks into OpenSearch.
 
-  Reads processed parquet files to find externalized text block facts,
-  fetches content from S3, strips HTML, and bulk indexes into OpenSearch.
+  Partitioned by quarter (e.g. 2026-Q1). Each run processes one quarter's
+  parquets, making backfills trivial and memory bounded.
 
   Joins Fact (value_type=external) + Element (is_textblock=true) + Entity + Report.
   """
@@ -368,37 +379,24 @@ def sec_textblocks_indexed(
       f"Found {len(indexed_accessions)} already-indexed accessions, will skip"
     )
 
-  # Discover parquet files for each table
+  # Use partition key to scope to a single quarter
+  partition_key = context.partition_key  # e.g. "2026-Q1"
   prefix_base = get_processed_key(DataSourceType.SEC, "processed")
+  partition_prefix = f"{prefix_base}/filed={partition_key}"
 
-  if config.start_year:
-    context.log.info(
-      f"Scanning parquets from s3://{processed_bucket}/{prefix_base}/ "
-      f"(start_year={config.start_year})"
-    )
-  else:
-    context.log.info(f"Scanning parquets from s3://{processed_bucket}/{prefix_base}/")
-
-  # Read Entity, Report, Element, Fact parquets
-  all_parquet_keys = _list_s3_parquet_keys(
-    s3, processed_bucket, f"{prefix_base}/filed="
+  context.log.info(
+    f"Scanning parquets from s3://{processed_bucket}/{partition_prefix}/"
   )
 
-  # Filter by start_year if specified (partition format: filed=2025-Q1)
-  if config.start_year:
-    all_parquet_keys = [
-      k for k in all_parquet_keys if _partition_year(k) >= config.start_year
-    ]
-    context.log.info(
-      f"Filtered to {len(all_parquet_keys)} parquets (>= {config.start_year})"
-    )
-
-  entity_keys = all_parquet_keys
+  all_parquet_keys = _list_s3_parquet_keys(
+    s3, processed_bucket, partition_prefix
+  )
+  context.log.info(f"Found {len(all_parquet_keys)} parquets for {partition_key}")
   node_keys = {
-    "Entity": [k for k in entity_keys if "/nodes/Entity/" in k],
-    "Report": [k for k in entity_keys if "/nodes/Report/" in k],
-    "Element": [k for k in entity_keys if "/nodes/Element/" in k],
-    "Fact": [k for k in entity_keys if "/nodes/Fact/" in k],
+    "Entity": [k for k in all_parquet_keys if "/nodes/Entity/" in k],
+    "Report": [k for k in all_parquet_keys if "/nodes/Report/" in k],
+    "Element": [k for k in all_parquet_keys if "/nodes/Element/" in k],
+    "Fact": [k for k in all_parquet_keys if "/nodes/Fact/" in k],
   }
 
   for table, keys in node_keys.items():
@@ -410,60 +408,55 @@ def sec_textblocks_indexed(
       metadata={"status": "no_data", "graph_id": config.graph_id}
     )
 
-  # Read tables
-  context.log.info("Reading Entity table...")
-  entity_table = _read_parquets_from_s3(s3, processed_bucket, node_keys["Entity"])
-  context.log.info("Reading Report table...")
-  report_table = _read_parquets_from_s3(s3, processed_bucket, node_keys["Report"])
-  context.log.info("Reading Element table...")
-  element_table = _read_parquets_from_s3(s3, processed_bucket, node_keys["Element"])
-  context.log.info("Reading Fact table...")
-  fact_table = _read_parquets_from_s3(s3, processed_bucket, node_keys["Fact"])
+  # --- Phase 1: Load small lookup tables (Entity, Report, Element) ---
+  # Entity and Report are small (~5K rows). Element is large (~1M rows) but
+  # we only need 4 small columns (no embeddings) so it's manageable.
 
-  if any(t is None for t in [entity_table, report_table, element_table, fact_table]):
-    context.log.warning("Failed to read one or more parquet tables")
+  context.log.info("Reading Entity table...")
+  entity_table = _read_parquets_from_s3(
+    s3, processed_bucket, node_keys["Entity"],
+    columns=["identifier", "ticker", "name", "cik"],
+  )
+  context.log.info("Reading Report table...")
+  report_table = _read_parquets_from_s3(
+    s3, processed_bucket, node_keys["Report"],
+    columns=[
+      "identifier", "accession_number", "form", "filing_date",
+      "fiscal_year_focus", "fiscal_period_focus", "cik",
+    ],
+  )
+  context.log.info("Reading Element table...")
+  element_table = _read_parquets_from_s3(
+    s3, processed_bucket, node_keys["Element"],
+    columns=["identifier", "qname", "name", "is_textblock"],
+  )
+
+  if any(t is None for t in [entity_table, report_table, element_table]):
+    context.log.warning("Failed to read one or more lookup tables")
     return MaterializeResult(
       metadata={"status": "read_error", "graph_id": config.graph_id}
     )
 
-  # Convert to pandas for joins
-
-  facts_df = fact_table.to_pandas()
+  # Build lookup dicts
   entities_df = entity_table.to_pandas()
   reports_df = report_table.to_pandas()
   elements_df = element_table.to_pandas()
 
   context.log.info(
-    f"Loaded {len(facts_df)} facts, {len(entities_df)} entities, "
+    f"Loaded {len(entities_df)} entities, "
     f"{len(reports_df)} reports, {len(elements_df)} elements"
   )
 
-  # Filter to external text block facts
-  external_facts = facts_df[facts_df["value_type"] == "external"].copy()
-  context.log.info(f"Found {len(external_facts)} externalized facts")
-
-  if external_facts.empty:
-    context.log.info("No externalized facts to index")
-    return MaterializeResult(
-      metadata={
-        "graph_id": config.graph_id,
-        "source_type": "xbrl_textblock",
-        "documents_indexed": 0,
-      }
-    )
-
-  # Build lookup dicts from entities, reports, elements
-  # Entity: identifier → {ticker, name, cik}
-  entity_lookup = {}
+  entity_lookup: dict[str, dict[str, str]] = {}
   for _, row in entities_df.iterrows():
     entity_lookup[row.get("identifier")] = {
       "ticker": row.get("ticker", ""),
       "name": row.get("name", ""),
       "cik": str(row.get("cik", "")),
     }
+  del entities_df, entity_table
 
-  # Report: identifier → {filing_date, form, fiscal_year, fiscal_period, accession}
-  report_lookup = {}
+  report_lookup: dict[str, dict[str, Any]] = {}
   for _, row in reports_df.iterrows():
     fy = row.get("fiscal_year_focus")
     report_lookup[row.get("identifier")] = {
@@ -473,64 +466,152 @@ def sec_textblocks_indexed(
       "fiscal_period": row.get("fiscal_period_focus", ""),
       "accession_number": row.get("accession_number", ""),
     }
+  del reports_df, report_table
 
-  # Element: identifier → {qname, name, is_textblock}
-  element_lookup = {}
+  # Build element lookup and extract textblock element IDs for early filtering
+  element_lookup: dict[str, dict[str, Any]] = {}
+  textblock_element_ids: set[str] = set()
   for _, row in elements_df.iterrows():
-    element_lookup[row.get("identifier")] = {
+    eid = row.get("identifier")
+    is_tb = row.get("is_textblock", False)
+    element_lookup[eid] = {
       "qname": row.get("qname", ""),
       "name": row.get("name", ""),
-      "is_textblock": row.get("is_textblock", False),
+      "is_textblock": is_tb,
     }
+    if is_tb:
+      textblock_element_ids.add(eid)
+  del elements_df, element_table
 
-  # Now read the relationship parquets to resolve Fact → Entity, Report, Element
-  # REPORT_HAS_FACT: source=report_id, target=fact_id
-  # FACT_HAS_ELEMENT: source=fact_id, target=element_id
-  # ENTITY_HAS_REPORT: source=entity_id, target=report_id
-  rel_keys = [k for k in entity_keys if "/relationships/" in k]
-  rhf_keys = [k for k in rel_keys if "/REPORT_HAS_FACT/" in k]
+  context.log.info(f"Found {len(textblock_element_ids)} textblock element types")
+
+  if not textblock_element_ids:
+    context.log.info("No textblock elements found")
+    return MaterializeResult(
+      metadata={
+        "graph_id": config.graph_id,
+        "source_type": "xbrl_textblock",
+        "documents_indexed": 0,
+      }
+    )
+
+  # --- Phase 2: Stream relationship parquets with early filtering ---
+  # Instead of loading all 7M+ edges, stream one file at a time and
+  # filter to only the edges we need (textblock facts).
+
+  rel_keys = [k for k in all_parquet_keys if "/relationships/" in k]
   fhe_keys = [k for k in rel_keys if "/FACT_HAS_ELEMENT/" in k]
+  rhf_keys = [k for k in rel_keys if "/REPORT_HAS_FACT/" in k]
   ehr_keys = [k for k in rel_keys if "/ENTITY_HAS_REPORT/" in k]
 
-  context.log.info("Reading relationship parquets...")
-  rhf_table = _read_parquets_from_s3(s3, processed_bucket, rhf_keys)
-  fhe_table = _read_parquets_from_s3(s3, processed_bucket, fhe_keys)
-  ehr_table = _read_parquets_from_s3(s3, processed_bucket, ehr_keys)
-
-  # Build mappings: fact_id → report_id, fact_id → element_id, report_id → entity_id
-  fact_to_report: dict[str, str] = {}
-  if rhf_table is not None:
-    rhf_df = rhf_table.to_pandas()
-    for _, row in rhf_df.iterrows():
-      fact_to_report[row.get("to")] = row.get("from")
-
+  # Step 2a: Stream FACT_HAS_ELEMENT to find fact_ids that map to textblock elements
+  context.log.info(
+    f"Streaming {len(fhe_keys)} FACT_HAS_ELEMENT parquets "
+    f"(filtering to {len(textblock_element_ids)} textblock elements)..."
+  )
   fact_to_element: dict[str, str] = {}
-  if fhe_table is not None:
-    fhe_df = fhe_table.to_pandas()
-    for _, row in fhe_df.iterrows():
-      fact_to_element[row.get("from")] = row.get("to")
+  textblock_fact_ids: set[str] = set()
+  for key in fhe_keys:
+    table = _read_parquets_from_s3(s3, processed_bucket, [key])
+    if table is None:
+      continue
+    df = table.to_pandas()
+    for _, row in df.iterrows():
+      element_id = row.get("to")
+      if element_id in textblock_element_ids:
+        fact_id = row.get("from")
+        fact_to_element[fact_id] = element_id
+        textblock_fact_ids.add(fact_id)
+    del df, table
 
+  context.log.info(f"Found {len(textblock_fact_ids)} facts linked to textblock elements")
+
+  if not textblock_fact_ids:
+    context.log.info("No textblock facts found")
+    return MaterializeResult(
+      metadata={
+        "graph_id": config.graph_id,
+        "source_type": "xbrl_textblock",
+        "documents_indexed": 0,
+      }
+    )
+
+  # Step 2b: Stream Fact parquets to get external textblock facts only
+  context.log.info(
+    f"Streaming {len(node_keys['Fact'])} Fact parquets "
+    f"(filtering to {len(textblock_fact_ids)} textblock facts)..."
+  )
+  external_textblock_facts: list[dict[str, str]] = []
+  for key in node_keys["Fact"]:
+    table = _read_parquets_from_s3(
+      s3, processed_bucket, [key], columns=["identifier", "value", "value_type"]
+    )
+    if table is None:
+      continue
+    df = table.to_pandas()
+    for _, row in df.iterrows():
+      fid = row.get("identifier")
+      if fid in textblock_fact_ids and row.get("value_type") == "external":
+        external_textblock_facts.append({
+          "identifier": fid,
+          "value": row.get("value", ""),
+        })
+    del df, table
+
+  context.log.info(f"Found {len(external_textblock_facts)} external textblock facts")
+
+  if not external_textblock_facts:
+    context.log.info("No externalized textblock facts to index")
+    return MaterializeResult(
+      metadata={
+        "graph_id": config.graph_id,
+        "source_type": "xbrl_textblock",
+        "documents_indexed": 0,
+      }
+    )
+
+  # Step 2c: Stream REPORT_HAS_FACT to map textblock facts to reports
+  context.log.info(
+    f"Streaming {len(rhf_keys)} REPORT_HAS_FACT parquets "
+    f"(filtering to {len(textblock_fact_ids)} textblock facts)..."
+  )
+  fact_to_report: dict[str, str] = {}
+  for key in rhf_keys:
+    table = _read_parquets_from_s3(s3, processed_bucket, [key])
+    if table is None:
+      continue
+    df = table.to_pandas()
+    for _, row in df.iterrows():
+      fact_id = row.get("to")
+      if fact_id in textblock_fact_ids:
+        fact_to_report[fact_id] = row.get("from")
+    del df, table
+
+  context.log.info(f"Mapped {len(fact_to_report)} textblock facts to reports")
+
+  # Step 2d: ENTITY_HAS_REPORT is small (~5K edges), load normally
+  context.log.info(f"Reading {len(ehr_keys)} ENTITY_HAS_REPORT parquets...")
   report_to_entity: dict[str, str] = {}
+  ehr_table = _read_parquets_from_s3(s3, processed_bucket, ehr_keys)
   if ehr_table is not None:
     ehr_df = ehr_table.to_pandas()
     for _, row in ehr_df.iterrows():
       report_to_entity[row.get("to")] = row.get("from")
+    del ehr_df, ehr_table
 
-  context.log.info(
-    f"Relationship mappings: {len(fact_to_report)} fact→report, "
-    f"{len(fact_to_element)} fact→element, {len(report_to_entity)} report→entity"
-  )
+  context.log.info(f"Mapped {len(report_to_entity)} reports to entities")
 
-  # Build OpenSearch documents
+  # --- Phase 3: Build and index OpenSearch documents ---
   documents: list[dict[str, Any]] = []
+  total_indexed = 0
   errors = 0
   skipped = 0
 
-  for _, fact in external_facts.iterrows():
-    fact_id = fact.get("identifier")
-    value_url = fact.get("value", "")
+  for fact in external_textblock_facts:
+    fact_id = fact["identifier"]
+    value_url = fact["value"]
 
-    # Resolve report early for accession check
+    # Resolve report for accession check
     report_id = fact_to_report.get(fact_id)
     report_info = report_lookup.get(report_id, {}) if report_id else {}
 
@@ -543,11 +624,6 @@ def sec_textblocks_indexed(
     # Resolve element
     element_id = fact_to_element.get(fact_id)
     element_info = element_lookup.get(element_id, {}) if element_id else {}
-
-    # Only index text blocks
-    if not element_info.get("is_textblock", False):
-      skipped += 1
-      continue
 
     entity_id = report_to_entity.get(report_id) if report_id else None
     entity_info = entity_lookup.get(entity_id, {}) if entity_id else {}
@@ -594,26 +670,39 @@ def sec_textblocks_indexed(
       }
     )
 
+    # Bulk index in batches to limit memory from accumulated documents
+    if len(documents) >= 1000:
+      batch_result = os_client.bulk_index(documents)
+      total_indexed += batch_result["indexed"]
+      errors += batch_result["errors"]
+      context.log.info(
+        f"Batch indexed {batch_result['indexed']} docs "
+        f"({batch_result['errors']} errors, {total_indexed} total)"
+      )
+      documents.clear()
+
   context.log.info(
-    f"Built {len(documents)} documents ({skipped} skipped, {errors} errors)"
+    f"Processing complete ({skipped} skipped, {errors} errors so far)"
   )
 
-  # Bulk index
-  result = {"indexed": 0, "errors": 0}
+  # Index remaining documents
   if documents:
-    result = os_client.bulk_index(documents)
+    batch_result = os_client.bulk_index(documents)
+    total_indexed += batch_result["indexed"]
+    errors += batch_result["errors"]
     context.log.info(
-      f"Indexed {result['indexed']} text blocks ({result['errors']} errors)"
+      f"Final batch indexed {batch_result['indexed']} docs "
+      f"({batch_result['errors']} errors)"
     )
 
   return MaterializeResult(
     metadata={
       "graph_id": config.graph_id,
       "source_type": "xbrl_textblock",
-      "documents_indexed": result["indexed"],
+      "documents_indexed": total_indexed,
       "documents_skipped": skipped,
-      "errors": errors + result["errors"],
-      "total_facts_scanned": len(external_facts),
+      "errors": errors,
+      "total_textblock_facts": len(external_textblock_facts),
     }
   )
 
@@ -623,6 +712,8 @@ def sec_textblocks_indexed(
   description="Extract and index narrative sections from SEC filings into OpenSearch",
   kinds={"opensearch", "s3"},
   deps=["sec_processed_filings"],
+  partitions_def=sec_quarter_partitions,
+  backfill_policy=BackfillPolicy.single_run(),
   metadata={
     "pipeline": "sec",
     "stage": "text_index",
@@ -635,7 +726,7 @@ def sec_narratives_indexed(
 ) -> MaterializeResult:
   """Extract narrative sections from raw 10-K/10-Q filings and index into OpenSearch.
 
-  For each filing ZIP in the raw bucket:
+  Partitioned by quarter (e.g. 2026-Q1). For each filing ZIP in the raw bucket:
   1. Extract HTML document from ZIP
   2. Run NarrativeExtractor to detect and extract Item sections
   3. Upload clean text to public data S3 bucket (CDN-served)
@@ -664,28 +755,34 @@ def sec_narratives_indexed(
       f"Found {len(indexed_accessions)} already-indexed accessions, will skip"
     )
 
-  # Read Report parquets to get filing metadata (accession → form, filing_date, etc.)
+  # Use partition key to scope to a single quarter
+  partition_key = context.partition_key  # e.g. "2026-Q1"
   prefix_base = get_processed_key(DataSourceType.SEC, "processed")
-  all_parquet_keys = _list_s3_parquet_keys(
-    s3, processed_bucket, f"{prefix_base}/filed="
-  )
+  partition_prefix = f"{prefix_base}/filed={partition_key}"
 
-  # Filter by start_year if specified
-  if config.start_year:
-    all_parquet_keys = [
-      k for k in all_parquet_keys if _partition_year(k) >= config.start_year
-    ]
-    context.log.info(
-      f"Filtered to {len(all_parquet_keys)} parquets (>= {config.start_year})"
-    )
+  context.log.info(f"Scanning parquets from s3://{processed_bucket}/{partition_prefix}/")
+
+  all_parquet_keys = _list_s3_parquet_keys(
+    s3, processed_bucket, partition_prefix
+  )
+  context.log.info(f"Found {len(all_parquet_keys)} parquets for {partition_key}")
 
   report_keys = [k for k in all_parquet_keys if "/nodes/Report/" in k]
   entity_keys = [k for k in all_parquet_keys if "/nodes/Entity/" in k]
   ehr_keys = [k for k in all_parquet_keys if "/relationships/ENTITY_HAS_REPORT/" in k]
 
   context.log.info(f"Reading {len(report_keys)} Report parquets for metadata...")
-  report_table = _read_parquets_from_s3(s3, processed_bucket, report_keys)
-  entity_table = _read_parquets_from_s3(s3, processed_bucket, entity_keys)
+  report_table = _read_parquets_from_s3(
+    s3, processed_bucket, report_keys,
+    columns=[
+      "identifier", "accession_number", "form", "filing_date",
+      "fiscal_year_focus", "fiscal_period_focus", "cik",
+    ],
+  )
+  entity_table = _read_parquets_from_s3(
+    s3, processed_bucket, entity_keys,
+    columns=["identifier", "ticker", "name", "cik"],
+  )
   ehr_table = _read_parquets_from_s3(s3, processed_bucket, ehr_keys)
 
   if report_table is None:
@@ -745,12 +842,16 @@ def sec_narratives_indexed(
 
   # List raw ZIPs and process those matching our target accessions
   documents: list[dict[str, Any]] = []
+  total_indexed = 0
   filings_processed = 0
   sections_extracted = 0
   errors = 0
 
-  # Scan raw bucket for ZIPs
-  raw_prefix = get_raw_key(DataSourceType.SEC)
+  # Scan raw bucket for ZIPs scoped to this partition's year
+  # Raw ZIPs use year= partitions (annual), but accession_metadata
+  # from the quarterly processed parquets handles fine-grained filtering
+  partition_year = partition_key.split("-Q")[0]  # "2026-Q1" → "2026"
+  raw_prefix = f"{get_raw_key(DataSourceType.SEC)}/year={partition_year}"
   paginator = s3.get_paginator("list_objects_v2")
 
   zip_keys: list[str] = []
@@ -759,11 +860,7 @@ def sec_narratives_indexed(
       if obj["Key"].endswith(".zip"):
         zip_keys.append(obj["Key"])
 
-  # Filter ZIPs by start_year if specified (key format: sec/year=2025/CIK/ACCESSION.zip)
-  if config.start_year:
-    zip_keys = [k for k in zip_keys if _partition_year(k) >= config.start_year]
-
-  context.log.info(f"Found {len(zip_keys)} raw ZIP files")
+  context.log.info(f"Found {len(zip_keys)} raw ZIP files for year={partition_year}")
 
   for zip_key in zip_keys:
     # Extract accession from key: sec/year=2026/CIK/ACCESSION.zip
@@ -867,23 +964,29 @@ def sec_narratives_indexed(
       errors += 1
       continue
 
-    # Batch index every 100 filings to limit memory
+    # Batch index to limit memory
     if len(documents) >= 500:
-      result = os_client.bulk_index(documents)
-      context.log.info(f"Batch indexed {result['indexed']} sections")
-      documents = []
+      batch_result = os_client.bulk_index(documents)
+      total_indexed += batch_result["indexed"]
+      errors += batch_result["errors"]
+      context.log.info(
+        f"Batch indexed {batch_result['indexed']} sections ({total_indexed} total)"
+      )
+      documents.clear()
 
   # Index remaining documents
-  result = {"indexed": 0, "errors": 0}
   if documents:
-    result = os_client.bulk_index(documents)
+    batch_result = os_client.bulk_index(documents)
+    total_indexed += batch_result["indexed"]
+    errors += batch_result["errors"]
     context.log.info(
-      f"Indexed {result['indexed']} narrative sections ({result['errors']} errors)"
+      f"Final batch indexed {batch_result['indexed']} sections "
+      f"({batch_result['errors']} errors)"
     )
 
   context.log.info(
     f"Narrative indexing complete: {filings_processed} filings, "
-    f"{sections_extracted} sections, {errors} errors"
+    f"{sections_extracted} sections, {total_indexed} indexed, {errors} errors"
   )
 
   return MaterializeResult(
@@ -892,8 +995,8 @@ def sec_narratives_indexed(
       "source_type": "narrative_section",
       "filings_processed": filings_processed,
       "sections_extracted": sections_extracted,
-      "documents_indexed": result["indexed"],
-      "errors": errors + result["errors"],
+      "documents_indexed": total_indexed,
+      "errors": errors,
     }
   )
 
@@ -903,6 +1006,8 @@ def sec_narratives_indexed(
   description="Extract iXBRL disclosure sections with XBRL element metadata into OpenSearch",
   kinds={"opensearch"},
   deps=["sec_processed_filings"],
+  partitions_def=sec_quarter_partitions,
+  backfill_policy=BackfillPolicy.single_run(),
   metadata={
     "pipeline": "sec",
     "stage": "text_index",
@@ -915,7 +1020,7 @@ def sec_ixbrl_disclosures_indexed(
 ) -> MaterializeResult:
   """Extract iXBRL disclosure sections and index with XBRL element metadata.
 
-  For each filing ZIP:
+  Partitioned by quarter (e.g. 2026-Q1). For each filing ZIP:
   1. Extract iXBRL HTML (largest HTM file)
   2. Verify document type via dei:DocumentType iXBRL tag
   3. Parse ix:nonNumeric TextBlock elements as disclosure sections
@@ -946,27 +1051,34 @@ def sec_ixbrl_disclosures_indexed(
       f"Found {len(indexed_accessions)} already-indexed accessions, will skip"
     )
 
-  # Read Report parquets for filing metadata
+  # Use partition key to scope to a single quarter
+  partition_key = context.partition_key  # e.g. "2026-Q1"
   prefix_base = get_processed_key(DataSourceType.SEC, "processed")
-  all_parquet_keys = _list_s3_parquet_keys(
-    s3, processed_bucket, f"{prefix_base}/filed="
-  )
+  partition_prefix = f"{prefix_base}/filed={partition_key}"
 
-  if config.start_year:
-    all_parquet_keys = [
-      k for k in all_parquet_keys if _partition_year(k) >= config.start_year
-    ]
-    context.log.info(
-      f"Filtered to {len(all_parquet_keys)} parquets (>= {config.start_year})"
-    )
+  context.log.info(f"Scanning parquets from s3://{processed_bucket}/{partition_prefix}/")
+
+  all_parquet_keys = _list_s3_parquet_keys(
+    s3, processed_bucket, partition_prefix
+  )
+  context.log.info(f"Found {len(all_parquet_keys)} parquets for {partition_key}")
 
   report_keys = [k for k in all_parquet_keys if "/nodes/Report/" in k]
   entity_keys = [k for k in all_parquet_keys if "/nodes/Entity/" in k]
   ehr_keys = [k for k in all_parquet_keys if "/relationships/ENTITY_HAS_REPORT/" in k]
 
   context.log.info(f"Reading {len(report_keys)} Report parquets for metadata...")
-  report_table = _read_parquets_from_s3(s3, processed_bucket, report_keys)
-  entity_table = _read_parquets_from_s3(s3, processed_bucket, entity_keys)
+  report_table = _read_parquets_from_s3(
+    s3, processed_bucket, report_keys,
+    columns=[
+      "identifier", "accession_number", "form", "filing_date",
+      "fiscal_year_focus", "fiscal_period_focus", "cik",
+    ],
+  )
+  entity_table = _read_parquets_from_s3(
+    s3, processed_bucket, entity_keys,
+    columns=["identifier", "ticker", "name", "cik"],
+  )
   ehr_table = _read_parquets_from_s3(s3, processed_bucket, ehr_keys)
 
   if report_table is None:
@@ -1020,12 +1132,15 @@ def sec_ixbrl_disclosures_indexed(
 
   # Scan raw ZIPs
   documents: list[dict[str, Any]] = []
+  total_indexed = 0
   filings_processed = 0
   sections_extracted = 0
   total_elements = 0
   errors = 0
 
-  raw_prefix = get_raw_key(DataSourceType.SEC)
+  # Scan raw ZIPs scoped to this partition's year
+  partition_year = partition_key.split("-Q")[0]  # "2026-Q1" → "2026"
+  raw_prefix = f"{get_raw_key(DataSourceType.SEC)}/year={partition_year}"
   paginator = s3.get_paginator("list_objects_v2")
 
   zip_keys: list[str] = []
@@ -1034,10 +1149,7 @@ def sec_ixbrl_disclosures_indexed(
       if obj["Key"].endswith(".zip"):
         zip_keys.append(obj["Key"])
 
-  if config.start_year:
-    zip_keys = [k for k in zip_keys if _partition_year(k) >= config.start_year]
-
-  context.log.info(f"Found {len(zip_keys)} raw ZIP files")
+  context.log.info(f"Found {len(zip_keys)} raw ZIP files for year={partition_year}")
 
   for zip_key in zip_keys:
     filename = zip_key.rsplit("/", 1)[-1]
@@ -1110,21 +1222,28 @@ def sec_ixbrl_disclosures_indexed(
 
     # Batch index to limit memory
     if len(documents) >= 500:
-      result = os_client.bulk_index(documents)
-      context.log.info(f"Batch indexed {result['indexed']} disclosures")
-      documents = []
+      batch_result = os_client.bulk_index(documents)
+      total_indexed += batch_result["indexed"]
+      errors += batch_result["errors"]
+      context.log.info(
+        f"Batch indexed {batch_result['indexed']} disclosures ({total_indexed} total)"
+      )
+      documents.clear()
 
   # Index remaining
-  result = {"indexed": 0, "errors": 0}
   if documents:
-    result = os_client.bulk_index(documents)
+    batch_result = os_client.bulk_index(documents)
+    total_indexed += batch_result["indexed"]
+    errors += batch_result["errors"]
     context.log.info(
-      f"Indexed {result['indexed']} disclosures ({result['errors']} errors)"
+      f"Final batch indexed {batch_result['indexed']} disclosures "
+      f"({batch_result['errors']} errors)"
     )
 
   context.log.info(
     f"iXBRL indexing complete: {filings_processed} filings, "
-    f"{sections_extracted} sections, {total_elements} elements, {errors} errors"
+    f"{sections_extracted} sections, {total_elements} elements, "
+    f"{total_indexed} indexed, {errors} errors"
   )
 
   return MaterializeResult(
@@ -1134,7 +1253,7 @@ def sec_ixbrl_disclosures_indexed(
       "filings_processed": filings_processed,
       "sections_extracted": sections_extracted,
       "total_elements": total_elements,
-      "documents_indexed": result["indexed"],
-      "errors": errors + result["errors"],
+      "documents_indexed": total_indexed,
+      "errors": errors,
     }
   )

@@ -248,26 +248,26 @@ class SECEntityUpdateConfig(Config):
 
 
 class SECTextBlockIndexConfig(Config):
-  """Configuration for XBRL text block OpenSearch indexing."""
+  """Configuration for XBRL text block OpenSearch indexing.
+
+  Partitioned by quarter (e.g. 2026-Q1). Each run indexes one quarter's
+  textblocks, making backfills trivial and memory bounded.
+  """
 
   graph_id: str = "sec"
-  start_year: int | None = Field(
-    default=SEC_PRIMARY_START_YEAR,
-    description="Only index filings from this year forward (default: 2024)",
-  )
   min_content_length: int = Field(
     default=200, description="Skip text blocks shorter than this after HTML stripping"
   )
 
 
 class SECNarrativeIndexConfig(Config):
-  """Configuration for narrative section extraction and OpenSearch indexing."""
+  """Configuration for narrative section extraction and OpenSearch indexing.
+
+  Partitioned by quarter (e.g. 2026-Q1). Each run extracts and indexes
+  narrative sections from one quarter's filings.
+  """
 
   graph_id: str = "sec"
-  start_year: int | None = Field(
-    default=SEC_PRIMARY_START_YEAR,
-    description="Only index filings from this year forward (default: 2024)",
-  )
   max_section_length: int = Field(
     default=50000, description="Truncate sections longer than this (chars)"
   )
@@ -277,13 +277,13 @@ class SECNarrativeIndexConfig(Config):
 
 
 class SECiXBRLIndexConfig(Config):
-  """Configuration for iXBRL disclosure extraction and OpenSearch indexing."""
+  """Configuration for iXBRL disclosure extraction and OpenSearch indexing.
+
+  Partitioned by quarter (e.g. 2026-Q1). Each run extracts and indexes
+  iXBRL disclosures from one quarter's filings.
+  """
 
   graph_id: str = "sec"
-  start_year: int | None = Field(
-    default=SEC_PRIMARY_START_YEAR,
-    description="Only index filings from this year forward (default: 2024)",
-  )
   max_section_length: int = Field(
     default=50000, description="Truncate sections longer than this (chars)"
   )
