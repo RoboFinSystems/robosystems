@@ -49,11 +49,24 @@ INDEX_MAPPING = {
       "accession_number": {"type": "keyword"},
       # Timestamps
       "indexed_at": {"type": "date"},
+      # Embedding (populated by future vector search phase; field reserved now
+      # to avoid index recreation later)
+      "embedding": {
+        "type": "knn_vector",
+        "dimension": 384,  # fastembed BAAI/bge-small-en-v1.5
+        "method": {
+          "name": "hnsw",
+          "space_type": "cosinesimil",
+          "engine": "nmslib",
+        },
+      },
+      "embedding_model": {"type": "keyword"},  # "fastembed" or "bedrock"
     }
   },
   "settings": {
     "number_of_shards": 1,
     "number_of_replicas": 0,  # Single node for dev; production will differ
+    "index.knn": True,
   },
 }
 

@@ -34,6 +34,7 @@ mcp/
     ├── example_queries_tool.py   # Query examples and templates
     ├── financial_statement_tool.py  # Get financial statements (auto-resolve reports)
     ├── data_tools.py        # Build fact grid (cross-company comparisons)
+    ├── search_tools.py      # Document search and retrieval (OpenSearch)
     ├── workspace.py         # Workspace/subgraph management
     └── memory.py            # Write operations (subgraph-only)
 ```
@@ -60,7 +61,16 @@ Tools are organized into three availability layers:
 
 `resolve-element` additionally requires `has_semantic_enrichment=True` on the manifest.
 
-### Layer 3: Infrastructure (feature-flag gated)
+### Layer 3: Search (feature-flag gated)
+
+| Tool | Flag | Description |
+|------|------|-------------|
+| `search-documents` | `TEXT_SEARCH_ENABLED` | Full-text keyword search across filing narratives, disclosures, and text blocks |
+| `get-document-section` | `TEXT_SEARCH_ENABLED` | Retrieve full text of a document section by ID |
+
+`search-documents` returns ranked results with snippets and metadata. iXBRL disclosure results include `xbrl_elements` — the XBRL fact tags in that section — enabling graph cross-reference via `resolve-element` or `read-graph-cypher`.
+
+### Layer 4: Infrastructure (feature-flag gated)
 
 | Tool | Flag | Description |
 |------|------|-------------|
@@ -201,6 +211,7 @@ MCP_ENABLE_VALIDATION=true             # Enable query validation
 MCP_WORKSPACE_ENABLED=false            # Enable workspace tools
 MCP_MEMORY_ENABLED=false               # Enable write/memory tools
 FACT_GRID_ENABLED=false                # Enable build-fact-grid tool
+TEXT_SEARCH_ENABLED=false              # Enable search-documents and get-document-section tools
 ```
 
 ## Integration Patterns

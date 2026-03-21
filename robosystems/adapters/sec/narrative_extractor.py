@@ -141,11 +141,13 @@ def _find_item_sections(text: str, target_items: dict) -> dict:
   sections = {}
 
   for item_num, (section_id, label) in target_items.items():
-    # Match "ITEM 1." or "ITEM 1A." with word boundary
+    # Match "ITEM 1." or "ITEM 1A." followed by separator
+    # Separators: period, whitespace, em-dash (U+2014), en-dash (U+2013), colon
+    # Em-dash format seen in COST filings: "Item 2—Management's Discussion..."
     if item_num[-1].isalpha():
-      pattern = rf"ITEM\s+{re.escape(item_num)}[\.\s]"
+      pattern = rf"ITEM\s+{re.escape(item_num)}[\.\s\u2014\u2013:]"
     else:
-      pattern = rf"ITEM\s+{re.escape(item_num)}(?![A-Z])[\.\s]"
+      pattern = rf"ITEM\s+{re.escape(item_num)}(?![A-Z])[\.\s\u2014\u2013:]"
 
     matches = list(re.finditer(pattern, text, re.IGNORECASE))
 
@@ -203,7 +205,9 @@ class NarrativeExtractor:
 
     # Build list of ALL Item/PART heading positions as boundaries
     all_boundaries: list[int] = []
-    for m in re.finditer(r"(?:^|\n)\s*(?:Item|ITEM)\s+\d+[A-Z]?\.", text):
+    for m in re.finditer(
+      r"(?:^|\n)\s*(?:Item|ITEM)\s+\d+[A-Z]?[\.\s\u2014\u2013:]", text
+    ):
       all_boundaries.append(m.start())
     for m in re.finditer(r"(?:^|\n)\s*(?:PART|Part)\s+[IV]+\b", text):
       all_boundaries.append(m.start())

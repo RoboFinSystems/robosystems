@@ -19,6 +19,7 @@ Infrastructure as Code for deploying RoboSystems to AWS. All templates are deplo
 | `graph-ladybug.yaml` | LadybugDB writers | VPC, S3, Valkey, graph-infra | ~$50+ (EC2) |
 | `graph-ladybug-replicas.yaml` | LadybugDB readers | VPC, S3 | ~$30+ (EC2) |
 | `graph-neo4j.yaml` | Neo4j (alternative) | VPC, graph-infra | ~$50+ (EC2) |
+| `opensearch.yaml` | Document search | VPC | ~$30 (t3.medium.search) |
 | `prometheus.yaml` | Metrics collection | None | ~$0.03/metric-series |
 | `grafana.yaml` | Dashboards | None | ~$9/user/month |
 | `cloudtrail.yaml` | Audit logging | None | ~$2+ |
@@ -53,6 +54,8 @@ Templates have cross-stack dependencies that determine deployment order:
 │  valkey.yaml ◄────── ElastiCache Valkey (depends on VPC)                   │
 │  graph-volumes.yaml ◄ EBS volume management Lambda (depends on VPC,        │
 │                       graph-infra)                                          │
+│  opensearch.yaml ◄─── OpenSearch managed domain for document search        │
+│                       (depends on VPC)                                      │
 └─────────────────────────────────────────────────────────────────────────────┘
                                       │
                                       ▼
@@ -194,6 +197,37 @@ Templates have cross-stack dependencies that determine deployment order:
 - `{StackName}-ValkeyEndpoint` - Valkey endpoint
 - `{StackName}-ValkeyPort` - Valkey port (6379)
 - `{StackName}-ValkeySecurityGroup` - Security group ID
+
+---
+
+#### `opensearch.yaml`
+**Purpose**: Amazon OpenSearch Service managed domain for full-text document search (BM25) across SEC filing narratives, iXBRL disclosures, and text blocks.
+
+**Dependencies**: VPC stack
+
+**Key Resources**:
+- `AWS::OpenSearchService::Domain` - Managed OpenSearch domain (single-node, single-AZ)
+- `AWS::EC2::SecurityGroup` - Domain access security group + client security group
+- `AWS::CloudWatch::Alarm` - Cluster red status and free storage alarms
+- `AWS::SNS::Topic` - Alert notifications
+- `AWS::Logs::LogGroup` - Application and slow query logs
+
+**Parameters**:
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `Environment` | `prod` | Environment name |
+| `InstanceType` | `t3.medium.search` | OpenSearch instance type |
+| `EBSVolumeSize` | `100` | EBS volume size in GB |
+| `EngineVersion` | `OpenSearch_2.17` | OpenSearch engine version |
+| `VpcId` | Required | VPC ID |
+| `SubnetId` | Required | Private subnet ID (single-AZ) |
+| `SNSAlertEmail` | Required | Email for alert notifications |
+
+**Exports**:
+- `{StackName}-OpenSearchEndpoint` - Domain endpoint URL
+- `{StackName}-OpenSearchDomainArn` - Domain ARN
+
+**Feature-flag gated**: Deployed via `deploy-opensearch.yml` workflow, controlled by `OPENSEARCH_ENABLED_{ENV}` GitHub variable. Application access gated by `TEXT_SEARCH_ENABLED` SSM parameter.
 
 ---
 
