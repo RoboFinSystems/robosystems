@@ -230,28 +230,14 @@ High-performance data ingestion pipeline bridging raw data to LadybugDB:
 
 **Location**: `/robosystems/graph_api/core/lance/`
 
-Embedded vector search engine for semantic similarity queries on graph data:
+Embedded vector search on graph API instances — no additional infrastructure required:
 
-- **IVF-PQ Indexes**: Approximate nearest neighbor search using Inverted File with Product Quantization
-- **Per-Graph Indexes**: Each graph/table pair gets its own vector index at `{LANCE_INDEX_PATH}/{graph_id}/{table_name}/`
-- **Embedding Model**: BAAI/bge-small-en-v1.5 via fastembed (384-dimensional vectors, cosine distance)
+- **IVF-PQ Indexes**: Approximate nearest neighbor search (cosine distance, 384-dim vectors)
+- **Per-Graph Indexes**: Each graph/table pair gets its own index at `{LANCE_INDEX_PATH}/{graph_id}/{table_name}/`
+- **Embedding Model**: BAAI/bge-small-en-v1.5 via fastembed
 - **Lifecycle**: Build from DuckDB staging → Search on instance → Export as tar.gz to S3 → Replicas download on boot
-- **Graceful Degradation**: Brute-force search below 1,000 rows; falls back to canonical concept matching if index unavailable
-
-**Graph API Endpoints:**
-- `POST /databases/{graph_id}/tables/{table_name}/vector/build` — Build index from DuckDB query (writers only)
-- `POST /databases/{graph_id}/tables/{table_name}/vector/search` — Query vector index (writers + replicas)
-- `POST /databases/{graph_id}/tables/{table_name}/vector/export` — Package and upload to S3 (writers only)
-- `GET /databases/{graph_id}/tables/{table_name}/vector` — Index metadata
-- `DELETE /databases/{graph_id}/tables/{table_name}/vector` — Delete index
-
-**Primary Use Case — SEC Element Resolution:**
-Semantic search over 2.6M+ XBRL elements enables the MCP `resolve-element` tool to map natural-language financial concepts (e.g., "revenue") to exact XBRL element names with ~5ms query latency. Gated by the `MCP_VECTOR_SEARCH_ENABLED` feature flag (SSM Parameter Store).
-
-**Infrastructure:**
-- Writer instances build indexes during DuckDB staging and export to S3
-- Replica instances download `{repo}.Element.lance.tar.gz` archives at boot (non-fatal if unavailable)
-- No additional infrastructure required — runs embedded on existing graph API instances
+- **Graceful Degradation**: Brute-force below 1,000 rows; falls back to canonical concept matching if index unavailable
+- **Primary Use Case**: MCP `resolve-element` tool maps natural-language financial concepts to XBRL element names (~5ms latency). Gated by `MCP_VECTOR_SEARCH_ENABLED` (SSM).
 
 ### Infrastructure Design
 
