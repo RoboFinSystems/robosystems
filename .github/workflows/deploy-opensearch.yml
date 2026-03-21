@@ -53,6 +53,13 @@ on:
         type: string
         default: "OpenSearch_2.17"
 
+      # Bastion Access (optional)
+      bastion_sg_id:
+        description: "Bastion security group ID for tunnel access (empty to skip)"
+        required: false
+        type: string
+        default: ""
+
       # Notification Configuration
       aws_sns_alert_email:
         description: "Email address for SNS alerts and notifications"
@@ -114,6 +121,7 @@ jobs:
                 ParameterKey=InstanceType,ParameterValue=${{ inputs.instance_type }} \
                 ParameterKey=EBSVolumeSize,ParameterValue=${{ inputs.ebs_volume_size }} \
                 ParameterKey=EngineVersion,ParameterValue=${{ inputs.engine_version }} \
+                ParameterKey=BastionSecurityGroupId,ParameterValue=${{ inputs.bastion_sg_id }} \
                 ParameterKey=SNSAlertEmail,ParameterValue=${{ inputs.aws_sns_alert_email }}"
 
           if [ "$STACK_ACTION" = "create-stack" ]; then
