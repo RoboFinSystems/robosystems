@@ -481,19 +481,14 @@ This enables `git pull upstream main` without merge conflicts on your custom ada
 
 ### OpenSearch
 
-**Purpose**: Unstructured content search — keyword and semantic search across documents scoped by `graph_id`
-
-OpenSearch complements LadybugDB (structured graph data) and LanceDB (vector similarity on graph elements) by providing a search layer for unstructured text content: filing narratives, user-uploaded documents, third-party connection documents, and AI agent memories.
+**Purpose**: Unstructured content search with keyword and semantic capabilities, scoped by `graph_id`
 
 - **BM25 Keyword Search**: Standard analyzer for natural language queries over document text
 - **Semantic Search**: `knn_vector` field (384-dim HNSW, cosine similarity) for embedding-based retrieval
 - **Multi-Tenant Isolation**: Every query filters by `graph_id` at the client level
-- **Source Types**: `xbrl_textblock`, `narrative_section`, `ixbrl_disclosure` (SEC); `uploaded_doc`, `connection_doc`, `memory` (user content — planned)
+- **Source Types**: SEC content (`xbrl_textblock`, `narrative_section`, `ixbrl_disclosure`); planned: `uploaded_doc`, `connection_doc`, `memory`
 - **Externalized Content**: Full text stored in S3/CDN; OpenSearch holds metadata, snippets, and embeddings
 - **Feature-Flag Gated**: `TEXT_SEARCH_ENABLED` SSM parameter controls availability
-- **Environment variables**: `OPENSEARCH_URL` (default: `http://localhost:9200`), `OPENSEARCH_INDEX` (default: `documents`)
-
-Currently indexing SEC filing content (text blocks, narrative sections, iXBRL disclosures). Planned expansion to user document uploads, third-party connections (Google Drive, Notion), and AI agent semantic memory. See `local/docs/specs/document-search-platform.md` for the full roadmap.
 
 ### DynamoDB
 
