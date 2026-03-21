@@ -5,7 +5,6 @@ RoboSystems is an enterprise-grade financial knowledge graph platform that trans
 - **Graph-Based Financial Intelligence**: Leverages graph database technology to model complex financial relationships
 - **AI-Native Architecture**: Context graphs built with embeddings, semantic enrichment, and confidence scoring for LLM-powered analytics
 - **Model Context Protocol (MCP)**: Standardized server and [client](https://www.npmjs.com/package/@robosystems/mcp) for LLM integration
-- **Document Search**: Full-text search across SEC filing narratives and iXBRL disclosures with XBRL element metadata bridging structured and unstructured content
 - **Multi-Source Data Integration**: SEC XBRL filings, QuickBooks accounting data, and custom financial datasets
 - **Enterprise-Ready Infrastructure**: Multi-tenant architecture with tiered scaling and production-grade query management
 - **Developer-First API**: RESTful API designed for integration with financial applications
@@ -19,7 +18,7 @@ RoboSystems is an enterprise-grade financial knowledge graph platform that trans
 - **Entity & Generic Graphs**: Curated schemas for RoboLedger/RoboInvestor, plus custom schema support
 - **Shared Repositories**: SEC XBRL filings knowledge graph for context mining and benchmarking
 - **QuickBooks Integration**: Complete accounting synchronization with trial balance creation
-- **OpenSearch Document Search**: BM25 keyword search across SEC filing narratives, risk factors, and iXBRL disclosures with graph cross-reference via XBRL element metadata
+- **Document Search**: Full-text and semantic search across unstructured content via OpenSearch, complementing the structured knowledge graph
 - **DuckDB Staging System**: High-performance data validation and bulk ingestion pipeline
 - **Dagster Orchestration**: Data pipeline orchestration for SEC filings, backups, billing, and scheduled jobs
 - **Credit-Based Billing**: Flexible credits for AI operations based on token usage
