@@ -1,8 +1,9 @@
 # RoboSystems
 
-RoboSystems is an enterprise-grade financial knowledge graph platform that transforms complex financial and operational data into actionable intelligence through graph-based analytics and AI-powered insights.
+RoboSystems is an enterprise-grade financial intelligence platform that unifies structured data, document search, and AI memory — transforming complex financial and operational data into actionable intelligence.
 
-- **Graph-Based Financial Intelligence**: Leverages graph database technology to model complex financial relationships
+- **Knowledge Graph**: Leverages graph database technology to model complex financial relationships and structured XBRL facts
+- **Document Search**: Full-text and semantic search across SEC filings, uploaded documents, and connected sources via OpenSearch
 - **AI-Native Architecture**: Context graphs built with embeddings, semantic enrichment, and confidence scoring for LLM-powered analytics
 - **Model Context Protocol (MCP)**: Standardized server and [client](https://www.npmjs.com/package/@robosystems/mcp) for LLM integration
 - **Multi-Source Data Integration**: SEC XBRL filings, QuickBooks accounting data, and custom financial datasets
@@ -18,7 +19,6 @@ RoboSystems is an enterprise-grade financial knowledge graph platform that trans
 - **Entity & Generic Graphs**: Curated schemas for RoboLedger/RoboInvestor, plus custom schema support
 - **Shared Repositories**: SEC XBRL filings knowledge graph for context mining and benchmarking
 - **QuickBooks Integration**: Complete accounting synchronization with trial balance creation
-- **Document Search**: Full-text and semantic search across unstructured content via OpenSearch, complementing the structured knowledge graph
 - **DuckDB Staging System**: High-performance data validation and bulk ingestion pipeline
 - **Dagster Orchestration**: Data pipeline orchestration for SEC filings, backups, billing, and scheduled jobs
 - **Credit-Based Billing**: Flexible credits for AI operations based on token usage
