@@ -289,34 +289,31 @@ just setup-gha
 
 #### API Scaling & Sizing
 
-| Variable                      | Prod Default | Staging Default | Description              |
-| ----------------------------- | ------------ | --------------- | ------------------------ |
-| `API_MIN_CAPACITY_*`          | `1`          | `1`             | Min ECS tasks            |
-| `API_MAX_CAPACITY_*`          | `10`         | `2`             | Max ECS tasks            |
-| `API_CPU_*`                   | `512`        | `512`           | Fargate CPU units        |
-| `API_MEMORY_*`                | `1024`       | `1024`          | Fargate memory (MB)      |
-| `API_CPU_TARGET_*`            | `70`         | `70`            | CPU auto-scaling target  |
-| `API_MEMORY_TARGET_*`         | `80`         | `80`            | Memory auto-scaling target |
-| `API_FARGATE_WEIGHT_*`        | `10`         | `10`            | On-Demand weight         |
-| `API_FARGATE_SPOT_WEIGHT_*`   | `90`         | `90`            | Spot weight              |
-| `API_FARGATE_BASE_*`          | `0`          | `0`             | On-Demand base capacity  |
+| Variable                    | Prod Default | Staging Default | Description                            |
+| --------------------------- | ------------ | --------------- | -------------------------------------- |
+| `API_MIN_CAPACITY_*`        | `1`          | `1`             | Min ECS tasks                          |
+| `API_MAX_CAPACITY_*`        | `10`         | `2`             | Max ECS tasks                          |
+| `API_CPU_*`                 | `512`        | `512`           | Fargate CPU units                      |
+| `API_MEMORY_*`              | `1024`       | `1024`          | Fargate memory (MB)                    |
+| `API_CPU_TARGET_*`          | `70`         | `70`            | CPU auto-scaling target                |
+| `API_MEMORY_TARGET_*`       | `80`         | `80`            | Memory auto-scaling target             |
+| `API_FARGATE_SPOT_WEIGHT_*` | `90`         | `90`            | Spot weight (OD derived as 100 - spot) |
+| `API_FARGATE_BASE_*`        | `0`          | `0`             | On-Demand base capacity                |
 
 #### Dagster Configuration
 
-| Variable                                  | Prod Default | Description              |
-| ----------------------------------------- | ------------ | ------------------------ |
-| `DAGSTER_DAEMON_CPU_*`                    | `1024`       | Daemon CPU units         |
-| `DAGSTER_DAEMON_MEMORY_*`                 | `2048`       | Daemon memory (MB)       |
-| `DAGSTER_WEBSERVER_CPU_*`                 | `512`        | Webserver CPU units      |
-| `DAGSTER_WEBSERVER_MEMORY_*`              | `1024`       | Webserver memory (MB)    |
-| `DAGSTER_MAX_CONCURRENT_RUNS_*`           | `20`         | Max concurrent runs      |
-| `DAGSTER_CONTAINER_INSIGHTS_*`            | `disabled`   | Container insights       |
-| `DAGSTER_DAEMON_FARGATE_WEIGHT_*`         | `20`         | Daemon On-Demand weight  |
-| `DAGSTER_DAEMON_FARGATE_SPOT_WEIGHT_*`    | `80`         | Daemon Spot weight       |
-| `DAGSTER_WEBSERVER_FARGATE_WEIGHT_*`      | `20`         | Webserver On-Demand weight |
-| `DAGSTER_WEBSERVER_FARGATE_SPOT_WEIGHT_*` | `80`         | Webserver Spot weight    |
-| `DAGSTER_DAEMON_FARGATE_BASE_*`           | `0`          | Daemon On-Demand base    |
-| `DAGSTER_WEBSERVER_FARGATE_BASE_*`        | `0`          | Webserver On-Demand base |
+| Variable                                  | Prod Default | Description                                      |
+| ----------------------------------------- | ------------ | ------------------------------------------------ |
+| `DAGSTER_DAEMON_CPU_*`                    | `1024`       | Daemon CPU units                                 |
+| `DAGSTER_DAEMON_MEMORY_*`                 | `2048`       | Daemon memory (MB)                               |
+| `DAGSTER_WEBSERVER_CPU_*`                 | `512`        | Webserver CPU units                              |
+| `DAGSTER_WEBSERVER_MEMORY_*`              | `1024`       | Webserver memory (MB)                            |
+| `DAGSTER_MAX_CONCURRENT_RUNS_*`           | `20`         | Max concurrent runs                              |
+| `DAGSTER_CONTAINER_INSIGHTS_*`            | `disabled`   | Container insights                               |
+| `DAGSTER_DAEMON_FARGATE_SPOT_WEIGHT_*`    | `80`         | Daemon Spot weight (OD derived as 100 - spot)    |
+| `DAGSTER_WEBSERVER_FARGATE_SPOT_WEIGHT_*` | `80`         | Webserver Spot weight (OD derived as 100 - spot) |
+| `DAGSTER_DAEMON_FARGATE_BASE_*`           | `0`          | Daemon On-Demand base                            |
+| `DAGSTER_WEBSERVER_FARGATE_BASE_*`        | `0`          | Webserver On-Demand base                         |
 
 #### Database Configuration
 
@@ -351,31 +348,31 @@ just setup-gha
 | `LBUG_XLARGE_ENABLED_*`         | `false`      | Enable xlarge tier                       |
 | `LBUG_XLARGE_MIN_INSTANCES_*`   | `0`          | Min xlarge instances                     |
 | `LBUG_XLARGE_MAX_INSTANCES_*`   | `10`         | Max xlarge instances                     |
-| `LBUG_SHARED_ENABLED_*`             | `false`      | Enable shared tier                       |
-| `LBUG_SHARED_MIN_INSTANCES_*`       | `1`          | Min shared instances                     |
-| `LBUG_SHARED_MAX_INSTANCES_*`       | `1`          | Max shared instances                     |
+| `LBUG_SHARED_ENABLED_*`         | `false`      | Enable shared tier                       |
+| `LBUG_SHARED_MIN_INSTANCES_*`   | `1`          | Min shared instances                     |
+| `LBUG_SHARED_MAX_INSTANCES_*`   | `1`          | Max shared instances                     |
 
 #### Shared Replicas Configuration
 
-| Variable                                       | Prod Default               | Description                    |
-| ---------------------------------------------- | -------------------------- | ------------------------------ |
-| `SHARED_REPLICAS_ENABLED_*`                    | `false`                    | Enable read-only replica fleet |
-| `SHARED_REPLICAS_MIN_INSTANCES_*`              | `1`                        | Min replica instances          |
-| `SHARED_REPLICAS_MAX_INSTANCES_*`              | `3`                        | Max replica instances          |
-| `SHARED_REPLICAS_DESIRED_CAPACITY_*`           | `1`                        | Initial desired capacity       |
-| `SHARED_REPLICAS_ROOT_VOLUME_SIZE_*`           | `150`                      | Root volume size (GB)          |
-| `SHARED_REPLICAS_CPU_TARGET_*`                 | `70`                       | CPU auto-scaling target        |
-| `SHARED_REPLICAS_MEMORY_TARGET_*`              | `80`                       | Memory auto-scaling target     |
-| `SHARED_REPLICAS_ENABLE_RESPONSE_TIME_SCALING_*` | `false`                 | Response time scaling          |
-| `SHARED_REPLICAS_RESPONSE_TIME_TARGET_*`       | `5`                        | Response time target (s)       |
-| `SHARED_REPLICAS_INSTANCE_WARMUP_*`            | `900`                      | Instance warmup (s)            |
-| `SHARED_REPLICAS_HEALTH_CHECK_GRACE_PERIOD_*`  | `900`                      | Health check grace (s)         |
-| `SHARED_REPOSITORIES_*`                        | `sec`                      | Repos to replicate             |
-| `SHARED_REPLICAS_SPOT_ENABLED_*`               | `false`                    | Enable Spot instances          |
-| `SHARED_REPLICAS_SPOT_BASE_*`                  | `0`                        | On-Demand base capacity        |
-| `SHARED_REPLICAS_SPOT_WEIGHT_*`                | `0`                        | Spot weight                    |
-| `SHARED_REPLICAS_SPOT_STRATEGY_*`              | `price-capacity-optimized` | Spot allocation strategy       |
-| `SHARED_REPLICAS_SPOT_REBALANCE_*`             | `true`                     | Enable Spot rebalancing        |
+| Variable                                         | Prod Default               | Description                    |
+| ------------------------------------------------ | -------------------------- | ------------------------------ |
+| `SHARED_REPLICAS_ENABLED_*`                      | `false`                    | Enable read-only replica fleet |
+| `SHARED_REPLICAS_MIN_INSTANCES_*`                | `1`                        | Min replica instances          |
+| `SHARED_REPLICAS_MAX_INSTANCES_*`                | `3`                        | Max replica instances          |
+| `SHARED_REPLICAS_DESIRED_CAPACITY_*`             | `1`                        | Initial desired capacity       |
+| `SHARED_REPLICAS_ROOT_VOLUME_SIZE_*`             | `150`                      | Root volume size (GB)          |
+| `SHARED_REPLICAS_CPU_TARGET_*`                   | `70`                       | CPU auto-scaling target        |
+| `SHARED_REPLICAS_MEMORY_TARGET_*`                | `80`                       | Memory auto-scaling target     |
+| `SHARED_REPLICAS_ENABLE_RESPONSE_TIME_SCALING_*` | `false`                    | Response time scaling          |
+| `SHARED_REPLICAS_RESPONSE_TIME_TARGET_*`         | `5`                        | Response time target (s)       |
+| `SHARED_REPLICAS_INSTANCE_WARMUP_*`              | `900`                      | Instance warmup (s)            |
+| `SHARED_REPLICAS_HEALTH_CHECK_GRACE_PERIOD_*`    | `900`                      | Health check grace (s)         |
+| `SHARED_REPOSITORIES_*`                          | `sec`                      | Repos to replicate             |
+| `SHARED_REPLICAS_SPOT_ENABLED_*`                 | `false`                    | Enable Spot instances          |
+| `SHARED_REPLICAS_SPOT_BASE_*`                    | `0`                        | On-Demand base capacity        |
+| `SHARED_REPLICAS_SPOT_WEIGHT_*`                  | `0`                        | Spot weight                    |
+| `SHARED_REPLICAS_SPOT_STRATEGY_*`                | `price-capacity-optimized` | Spot allocation strategy       |
+| `SHARED_REPLICAS_SPOT_REBALANCE_*`               | `true`                     | Enable Spot rebalancing        |
 
 #### Graph Settings
 
@@ -413,15 +410,15 @@ just setup-gha
 
 #### Other
 
-| Variable                       | Default    | Description                           |
-| ------------------------------ | ---------- | ------------------------------------- |
-| `AWS_SNS_ALERT_EMAIL`          | User input | CloudWatch alert email                |
-| `VPC_MAX_AVAILABILITY_ZONES`   | `2`        | Max AZs to use                        |
-| `VPC_ENDPOINT_MODE`            | `minimal`  | VPC endpoints (gateway/minimal/full)  |
-| `VPC_SECOND_OCTET`             | `0`        | VPC CIDR second octet (for peering)   |
-| `OBSERVABILITY_ENABLED_*`      | `true`     | Enable observability                  |
-| `DOCKERHUB_PUBLISHING_ENABLED` | `false`    | Publish to Docker Hub                 |
-| `PUBLIC_DOMAIN_NAME_*`         | (optional) | Public data domain                    |
+| Variable                       | Default    | Description                          |
+| ------------------------------ | ---------- | ------------------------------------ |
+| `AWS_SNS_ALERT_EMAIL`          | User input | CloudWatch alert email               |
+| `VPC_MAX_AVAILABILITY_ZONES`   | `2`        | Max AZs to use                       |
+| `VPC_ENDPOINT_MODE`            | `minimal`  | VPC endpoints (gateway/minimal/full) |
+| `VPC_SECOND_OCTET`             | `0`        | VPC CIDR second octet (for peering)  |
+| `OBSERVABILITY_ENABLED_*`      | `true`     | Enable observability                 |
+| `DOCKERHUB_PUBLISHING_ENABLED` | `false`    | Publish to Docker Hub                |
+| `PUBLIC_DOMAIN_NAME_*`         | (optional) | Public data domain                   |
 
 ---
 
