@@ -14,7 +14,12 @@ from fastapi import APIRouter, Depends, HTTPException, Path, status
 from sqlalchemy.orm import Session
 
 from ...config import BillingConfig, env
-from ...config.shared_repositories import is_shared_repository as _is_shared_repo
+from ...config.shared_repositories import (
+  is_shared_repository_or_subgraph as _is_shared_repo_or_sub,
+)
+from ...config.shared_repositories import (
+  resolve_shared_repository_parent,
+)
 from ...database import get_db_session
 from ...middleware.auth.dependencies import get_current_user
 from ...middleware.graph.types import GRAPH_OR_SUBGRAPH_ID_PATTERN
@@ -37,8 +42,8 @@ router = APIRouter(
 
 
 def is_shared_repository(graph_id: str) -> bool:
-  """Check if a graph_id refers to a shared repository."""
-  return _is_shared_repo(graph_id)
+  """Check if a graph_id refers to a shared repository or subgraph of one."""
+  return _is_shared_repo_or_sub(graph_id)
 
 
 def _get_plan_display_name(plan_name: str, resource_type: str, resource_id: str) -> str:
@@ -158,9 +163,11 @@ async def get_subscription(
       )
 
     if is_shared_repository(graph_id):
+      # Subscriptions are on the parent repo, not subgraphs
+      parent_repo_id = resolve_shared_repository_parent(graph_id)
       subscription = BillingSubscription.get_by_resource_and_user(
         resource_type="repository",
-        resource_id=graph_id,
+        resource_id=parent_repo_id,
         user_id=current_user.id,
         session=db,
       )
@@ -238,9 +245,10 @@ async def create_repository_subscription(
         ),
       )
 
+    parent_repo_id = resolve_shared_repository_parent(graph_id)
     existing = BillingSubscription.get_by_resource_and_user(
       resource_type="repository",
-      resource_id=graph_id,
+      resource_id=parent_repo_id,
       user_id=current_user.id,
       session=db,
     )
@@ -251,7 +259,7 @@ async def create_repository_subscription(
         detail=f"You already have an active subscription to the {graph_id} repository",
       )
 
-    plan_config = BillingConfig.get_repository_plan(graph_id, request.plan_name)
+    plan_config = BillingConfig.get_repository_plan(parent_repo_id, request.plan_name)
     if not plan_config:
       raise HTTPException(
         status_code=400,
@@ -286,7 +294,7 @@ async def create_repository_subscription(
     subscription = BillingSubscription.create_subscription(
       org_id=org_id,
       resource_type="repository",
-      resource_id=graph_id,
+      resource_id=parent_repo_id,
       plan_name=request.plan_name,
       base_price_cents=plan_config["price_cents"],
       session=db,
@@ -502,10 +510,11 @@ async def change_plan(
         detail="Only organization owners can change subscription plans",
       )
 
-    # Find existing subscription
+    # Find existing subscription (subscriptions are on the parent repo)
+    parent_repo_id = resolve_shared_repository_parent(graph_id)
     subscription = BillingSubscription.get_by_resource_and_user(
       resource_type="repository",
-      resource_id=graph_id,
+      resource_id=parent_repo_id,
       user_id=current_user.id,
       session=db,
     )
@@ -524,7 +533,7 @@ async def change_plan(
     new_plan_name = request.new_plan_name
 
     # Validate the new plan exists — BillingConfig handles tier extraction internally
-    plan_config = BillingConfig.get_repository_plan(graph_id, new_plan_name)
+    plan_config = BillingConfig.get_repository_plan(parent_repo_id, new_plan_name)
     if not plan_config:
       raise HTTPException(
         status_code=400,

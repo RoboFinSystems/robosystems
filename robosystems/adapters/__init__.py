@@ -11,23 +11,26 @@ Each adapter follows a consistent structure:
 AWS infrastructure services are in robosystems.operations.aws
 """
 
-# QuickBooks adapter
-from robosystems.adapters.quickbooks import (
-  QBClient,
-)
-from robosystems.adapters.sec import (
-  ArelleClient,
-  SECClient,
-  XBRLDuckDBGraphProcessor,
-  XBRLGraphProcessor,
-)
-
-__all__ = [
-  "ArelleClient",
-  # QuickBooks
-  "QBClient",
+_LAZY_IMPORTS = {
   # SEC
-  "SECClient",
-  "XBRLDuckDBGraphProcessor",
-  "XBRLGraphProcessor",
-]
+  "ArelleClient": "robosystems.adapters.sec",
+  "SECClient": "robosystems.adapters.sec",
+  "XBRLDuckDBGraphProcessor": "robosystems.adapters.sec",
+  "XBRLGraphProcessor": "robosystems.adapters.sec",
+  # Plaid
+  "PlaidClient": "robosystems.adapters.plaid",
+  "PlaidTransactionsProcessor": "robosystems.adapters.plaid",
+  # QuickBooks
+  "QBClient": "robosystems.adapters.quickbooks",
+  "QBTransactionsProcessor": "robosystems.adapters.quickbooks",
+}
+
+
+def __getattr__(name: str):
+  """Lazy import adapter classes on first access."""
+  if name in _LAZY_IMPORTS:
+    import importlib
+
+    module = importlib.import_module(_LAZY_IMPORTS[name])
+    return getattr(module, name)
+  raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

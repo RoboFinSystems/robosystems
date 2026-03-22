@@ -30,6 +30,25 @@ def is_shared_repository(graph_id: str | None) -> bool:
   return _registry_check(graph_id)
 
 
+def is_shared_repository_or_subgraph(graph_id: str | None) -> bool:
+  """
+  Check if the given graph_id is a shared repository OR a subgraph of one.
+
+  This checks both parent IDs (e.g., "sec") and subgraph IDs (e.g., "sec_historical").
+
+  Args:
+      graph_id: Graph identifier to check
+
+  Returns:
+      bool: True if this is a shared repository or subgraph of one
+  """
+  from robosystems.config.shared_repositories import (
+    is_shared_repository_or_subgraph as _registry_check,
+  )
+
+  return _registry_check(graph_id)
+
+
 def validate_graph_id(graph_id: str) -> str:
   """
   Validate graph_id meets database naming requirements.

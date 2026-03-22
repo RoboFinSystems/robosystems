@@ -2,29 +2,41 @@
 
 from datetime import UTC, datetime
 
-from robosystems.adapters.sec.client import SEC_BASE_URL, SECClient, enable_test_mode
-from robosystems.adapters.sec.client.arelle import ArelleClient
-from robosystems.adapters.sec.processors import (
-  XBRL_GRAPH_PROCESSOR_VERSION,
-  IngestTableInfo,
-  MaterializeResult,
-  SchemaIngestConfig,
-  SECMetadataLoader,
-  StagingResult,
-  TableInfo,
-  XBRLDuckDBGraphProcessor,
-  XBRLGraphProcessor,
-  XBRLSchemaAdapter,
-  XBRLSchemaConfigGenerator,
-  create_custom_ingestion_processor,
-  create_roboledger_ingestion_processor,
-)
-
 # Quarter overlap window for incremental updates.
 # SEC filings submitted near quarter-end may not appear in EFTS for 1-2 days
 # due to SEC indexing delays and UTC/EST timing differences. We scan the
 # previous quarter during the first N days of a new quarter to catch these.
 QUARTER_OVERLAP_DAYS = 5
+
+_LAZY_IMPORTS = {
+  "SEC_BASE_URL": "robosystems.adapters.sec.client",
+  "SECClient": "robosystems.adapters.sec.client",
+  "enable_test_mode": "robosystems.adapters.sec.client",
+  "ArelleClient": "robosystems.adapters.sec.client.arelle",
+  "XBRL_GRAPH_PROCESSOR_VERSION": "robosystems.adapters.sec.processors",
+  "IngestTableInfo": "robosystems.adapters.sec.processors",
+  "MaterializeResult": "robosystems.adapters.sec.processors",
+  "SchemaIngestConfig": "robosystems.adapters.sec.processors",
+  "SECMetadataLoader": "robosystems.adapters.sec.processors",
+  "StagingResult": "robosystems.adapters.sec.processors",
+  "TableInfo": "robosystems.adapters.sec.processors",
+  "XBRLDuckDBGraphProcessor": "robosystems.adapters.sec.processors",
+  "XBRLGraphProcessor": "robosystems.adapters.sec.processors",
+  "XBRLSchemaAdapter": "robosystems.adapters.sec.processors",
+  "XBRLSchemaConfigGenerator": "robosystems.adapters.sec.processors",
+  "create_custom_ingestion_processor": "robosystems.adapters.sec.processors",
+  "create_roboledger_ingestion_processor": "robosystems.adapters.sec.processors",
+}
+
+
+def __getattr__(name: str):
+  """Lazy import SEC adapter classes on first access."""
+  if name in _LAZY_IMPORTS:
+    import importlib
+
+    module = importlib.import_module(_LAZY_IMPORTS[name])
+    return getattr(module, name)
+  raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 def get_current_quarter(now: datetime | None = None) -> tuple[int, int]:
@@ -98,29 +110,3 @@ def get_quarters_to_scan(now: datetime | None = None) -> list[str]:
     quarters.append(f"{prev_year}-Q{prev_quarter}")
 
   return quarters
-
-
-__all__ = [
-  "QUARTER_OVERLAP_DAYS",
-  "SEC_BASE_URL",
-  "XBRL_GRAPH_PROCESSOR_VERSION",
-  "ArelleClient",
-  "IngestTableInfo",
-  "MaterializeResult",
-  "SECClient",
-  "SECMetadataLoader",
-  "SchemaIngestConfig",
-  "StagingResult",
-  "TableInfo",
-  "XBRLDuckDBGraphProcessor",
-  "XBRLGraphProcessor",
-  "XBRLSchemaAdapter",
-  "XBRLSchemaConfigGenerator",
-  "create_custom_ingestion_processor",
-  "create_roboledger_ingestion_processor",
-  "enable_test_mode",
-  "get_current_quarter",
-  "get_previous_quarter",
-  "get_quarters_to_scan",
-  "is_in_quarter_overlap_window",
-]

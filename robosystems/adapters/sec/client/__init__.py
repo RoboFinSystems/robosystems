@@ -1,47 +1,29 @@
 """SEC EDGAR API clients."""
 
-from robosystems.adapters.sec.client.arelle import ArelleClient
-from robosystems.adapters.sec.client.edgar import (
-  SEC_BASE_URL,
-  SECClient,
-  enable_test_mode,
-)
-
-# Lazy imports to avoid circular dependencies
-# These modules import from robosystems.operations which imports back here
+_LAZY_IMPORTS = {
+  "ArelleClient": "robosystems.adapters.sec.client.arelle",
+  "SEC_BASE_URL": "robosystems.adapters.sec.client.edgar",
+  "SECClient": "robosystems.adapters.sec.client.edgar",
+  "enable_test_mode": "robosystems.adapters.sec.client.edgar",
+  "EFTSClient": "robosystems.adapters.sec.client.efts",
+  "EFTSHit": "robosystems.adapters.sec.client.efts",
+  "query_efts": "robosystems.adapters.sec.client.efts",
+  "query_efts_sync": "robosystems.adapters.sec.client.efts",
+  "SECDownloader": "robosystems.adapters.sec.client.downloader",
+  "DownloadStats": "robosystems.adapters.sec.client.downloader",
+  "download_sec_filings": "robosystems.adapters.sec.client.downloader",
+  "download_sec_filings_sync": "robosystems.adapters.sec.client.downloader",
+  "AsyncRateLimiter": "robosystems.adapters.sec.client.rate_limiter",
+  "RateMonitor": "robosystems.adapters.sec.client.rate_limiter",
+  "RateStats": "robosystems.adapters.sec.client.rate_limiter",
+}
 
 
 def __getattr__(name: str):
-  """Lazy import for modules that cause circular imports."""
-  if name in ("EFTSClient", "EFTSHit", "query_efts", "query_efts_sync"):
-    from robosystems.adapters.sec.client import efts
+  """Lazy import all SEC client classes on first access."""
+  if name in _LAZY_IMPORTS:
+    import importlib
 
-    return getattr(efts, name)
-  elif name in (
-    "SECDownloader",
-    "DownloadStats",
-    "download_sec_filings",
-    "download_sec_filings_sync",
-  ):
-    from robosystems.adapters.sec.client import downloader
-
-    return getattr(downloader, name)
-  elif name in ("AsyncRateLimiter", "RateMonitor", "RateStats"):
-    from robosystems.adapters.sec.client import rate_limiter
-
-    return getattr(rate_limiter, name)
+    module = importlib.import_module(_LAZY_IMPORTS[name])
+    return getattr(module, name)
   raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
-
-
-__all__ = [
-  # Eagerly loaded (safe for `from ... import *`)
-  "SEC_BASE_URL",
-  "ArelleClient",
-  "SECClient",
-  "enable_test_mode",
-]
-
-# Note: The following are available via lazy import (use direct imports):
-# - EFTSClient, EFTSHit, query_efts, query_efts_sync (from .efts)
-# - SECDownloader, DownloadStats, download_sec_filings, download_sec_filings_sync (from .downloader)
-# - AsyncRateLimiter, RateMonitor, RateStats (from .rate_limiter)

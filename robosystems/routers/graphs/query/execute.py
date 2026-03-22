@@ -317,7 +317,7 @@ async def execute_cypher_query(
       )
 
     # Block writes on shared repositories
-    if is_write and MultiTenantUtils.is_shared_repository(graph_id):
+    if is_write and MultiTenantUtils.is_shared_repository_or_subgraph(graph_id):
       logger.warning(
         f"User {current_user.id} attempted write on shared repository {graph_id}"
       )
@@ -900,15 +900,23 @@ async def _check_shared_repository_limits(
       HTTPException: If access is denied or rate limits are exceeded
   """
   from robosystems.config import env
-  from robosystems.config.shared_repositories import is_shared_repository
+  from robosystems.config.shared_repositories import (
+    is_shared_repository_or_subgraph,
+    resolve_shared_repository_parent,
+  )
   from robosystems.models.iam.user_repository import UserRepository
 
-  # Only apply to shared repositories
-  if not is_shared_repository(graph_id):
+  # Only apply to shared repositories (including subgraphs like sec_historical)
+  if not is_shared_repository_or_subgraph(graph_id):
     return
 
+  # Resolve subgraph to parent for subscription lookup (subscriptions are on the parent)
+  parent_repo_id = resolve_shared_repository_parent(graph_id)
+
   # ALWAYS check access (authorization) - this is not gated by rate limiting
-  repo_access = UserRepository.get_by_user_and_repository(user.id, graph_id, session)
+  repo_access = UserRepository.get_by_user_and_repository(
+    user.id, parent_repo_id, session
+  )
   if not repo_access:
     logger.warning(
       f"User {user.id} attempted to access shared repository {graph_id} without access"

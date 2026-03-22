@@ -270,9 +270,11 @@ class GraphTypeRegistry:
 
     # Fallback: pattern-based detection (for cases without session)
     # Check if it's a known shared repository
-    from ...config.shared_repositories import is_shared_repository as _is_shared_repo
+    from ...config.shared_repositories import (
+      is_shared_repository_or_subgraph as _is_shared_repo_or_sub,
+    )
 
-    if _is_shared_repo(graph_id):
+    if _is_shared_repo_or_sub(graph_id):
       return GraphIdentity(
         graph_id=graph_id,
         category=GraphCategory.SHARED,

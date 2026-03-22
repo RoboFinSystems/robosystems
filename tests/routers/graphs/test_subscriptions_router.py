@@ -19,12 +19,12 @@ class TestIsSharedRepository:
 
   @pytest.mark.unit
   def test_shared_repo_returns_true(self):
-    with patch(f"{MODULE}._is_shared_repo", return_value=True):
+    with patch(f"{MODULE}._is_shared_repo_or_sub", return_value=True):
       assert is_shared_repository("sec") is True
 
   @pytest.mark.unit
   def test_user_graph_returns_false(self):
-    with patch(f"{MODULE}._is_shared_repo", return_value=False):
+    with patch(f"{MODULE}._is_shared_repo_or_sub", return_value=False):
       assert is_shared_repository("kg1a2b3c") is False
 
 

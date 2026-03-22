@@ -29,7 +29,7 @@ from datetime import UTC, datetime
 from fastapi import APIRouter, Body, Depends, HTTPException, Path, status
 from sqlalchemy.orm import Session
 
-from robosystems.config.shared_repositories import is_shared_repository
+from robosystems.config.shared_repositories import is_shared_repository_or_subgraph
 from robosystems.database import get_db_session
 from robosystems.logger import api_logger, logger
 from robosystems.middleware.auth.dependencies import get_current_user_with_graph
@@ -168,7 +168,7 @@ async def query_tables(
   circuit_breaker.check_circuit(graph_id, "table_query")
 
   # Block shared repositories
-  if is_shared_repository(graph_id.lower()):
+  if is_shared_repository_or_subgraph(graph_id.lower()):
     logger.warning(
       f"User {current_user.id} attempted SQL query on shared repository {graph_id}"
     )
