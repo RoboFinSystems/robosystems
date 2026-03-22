@@ -185,55 +185,26 @@ class TestS3ClientUploadString:
     assert call_kwargs["ContentType"] == "text/plain"
     assert call_kwargs["Metadata"] == {"author": "test"}
 
-  @patch("robosystems.operations.aws.s3.time.sleep")
-  def test_upload_string_retries_on_transient_error(self, mock_sleep):
-    """Transient errors trigger retries with exponential backoff."""
-    client = self._make_client()
-    client.s3_client = MagicMock()
-
-    transient_error = _make_client_error("InternalError", "transient")
-    client.s3_client.put_object.side_effect = [transient_error, None]
-
-    result = client.upload_string("data", "bucket", "key", max_retries=3)
-
-    assert result is True
-    assert client.s3_client.put_object.call_count == 2
-    mock_sleep.assert_called_once_with(1)  # 2^0 = 1
-
-  def test_upload_string_non_retryable_access_denied(self):
-    """AccessDenied (security error) returns False immediately."""
+  def test_upload_string_access_denied_returns_false(self):
+    """AccessDenied (security error) returns False."""
     client = self._make_client()
     client.s3_client = MagicMock()
     client.s3_client.put_object.side_effect = _make_client_error("AccessDenied")
 
-    result = client.upload_string("data", "bucket", "key", max_retries=3)
+    result = client.upload_string("data", "bucket", "key")
 
     assert result is False
     assert client.s3_client.put_object.call_count == 1
 
-  def test_upload_string_non_retryable_no_such_bucket(self):
-    """NoSuchBucket returns False immediately without retry."""
+  def test_upload_string_client_error_returns_false(self):
+    """ClientError returns False."""
     client = self._make_client()
     client.s3_client = MagicMock()
-    client.s3_client.put_object.side_effect = _make_client_error("NoSuchBucket")
+    client.s3_client.put_object.side_effect = _make_client_error("InternalError")
 
-    result = client.upload_string("data", "bucket", "key", max_retries=3)
-
-    assert result is False
-    assert client.s3_client.put_object.call_count == 1
-
-  @patch("robosystems.operations.aws.s3.time.sleep")
-  def test_upload_string_exhausts_retries(self, mock_sleep):
-    """Returns False after exhausting all retries."""
-    client = self._make_client()
-    client.s3_client = MagicMock()
-    transient = _make_client_error("InternalError")
-    client.s3_client.put_object.side_effect = [transient, transient, transient]
-
-    result = client.upload_string("data", "bucket", "key", max_retries=3)
+    result = client.upload_string("data", "bucket", "key")
 
     assert result is False
-    assert client.s3_client.put_object.call_count == 3
 
   def test_upload_string_unexpected_exception(self):
     """Generic exceptions return False immediately."""
@@ -288,29 +259,16 @@ class TestS3ClientUploadFile:
     call_args = client.s3_client.upload_file.call_args
     assert call_args[1]["ExtraArgs"]["ContentType"] == "text/plain"
 
-  def test_upload_file_non_retryable_error(self):
-    """InvalidBucketName returns False immediately."""
+  def test_upload_file_client_error_returns_false(self):
+    """ClientError returns False."""
     client = self._make_client()
     client.s3_client = MagicMock()
     client.s3_client.upload_file.side_effect = _make_client_error("InvalidBucketName")
 
-    result = client.upload_file("/tmp/f.txt", "bucket", "key", max_retries=3)
+    result = client.upload_file("/tmp/f.txt", "bucket", "key")
 
     assert result is False
     assert client.s3_client.upload_file.call_count == 1
-
-  @patch("robosystems.operations.aws.s3.time.sleep")
-  def test_upload_file_retries_then_succeeds(self, mock_sleep):
-    """Transient error followed by success works."""
-    client = self._make_client()
-    client.s3_client = MagicMock()
-    transient = _make_client_error("InternalError")
-    client.s3_client.upload_file.side_effect = [transient, None]
-
-    result = client.upload_file("/tmp/f.txt", "bucket", "key", max_retries=3)
-
-    assert result is True
-    assert client.s3_client.upload_file.call_count == 2
 
   def test_upload_file_unexpected_error(self):
     """Generic exception returns False."""
@@ -353,39 +311,26 @@ class TestS3ClientDownloadFile:
     )
 
   def test_download_file_no_such_key(self):
-    """NoSuchKey returns False immediately (non-retryable)."""
+    """NoSuchKey returns False."""
     client = self._make_client()
     client.s3_client = MagicMock()
     client.s3_client.download_file.side_effect = _make_client_error("NoSuchKey")
 
-    result = client.download_file("bucket", "key.txt", "/tmp/out.txt", max_retries=3)
+    result = client.download_file("bucket", "key.txt", "/tmp/out.txt")
 
     assert result is False
     assert client.s3_client.download_file.call_count == 1
 
   def test_download_file_access_denied(self):
-    """AccessDenied returns False immediately (non-retryable)."""
+    """AccessDenied returns False."""
     client = self._make_client()
     client.s3_client = MagicMock()
     client.s3_client.download_file.side_effect = _make_client_error("AccessDenied")
 
-    result = client.download_file("bucket", "key.txt", "/tmp/out.txt", max_retries=3)
+    result = client.download_file("bucket", "key.txt", "/tmp/out.txt")
 
     assert result is False
     assert client.s3_client.download_file.call_count == 1
-
-  @patch("robosystems.operations.aws.s3.time.sleep")
-  def test_download_file_retries_on_transient_error(self, mock_sleep):
-    """Retryable error triggers exponential backoff."""
-    client = self._make_client()
-    client.s3_client = MagicMock()
-    transient = _make_client_error("InternalError")
-    client.s3_client.download_file.side_effect = [transient, None]
-
-    result = client.download_file("bucket", "key", "/tmp/out", max_retries=3)
-
-    assert result is True
-    assert client.s3_client.download_file.call_count == 2
 
   def test_download_file_generic_exception(self):
     """Non-ClientError exceptions return False."""
@@ -428,51 +373,34 @@ class TestS3ClientDownloadString:
     assert result == "hello world"
 
   def test_download_string_no_such_key_returns_none(self):
-    """NoSuchKey returns None (non-retryable)."""
+    """NoSuchKey returns None."""
     client = self._make_client()
     client.s3_client = MagicMock()
     client.s3_client.get_object.side_effect = _make_client_error("NoSuchKey")
 
-    result = client.download_string("bucket", "missing.txt", max_retries=3)
+    result = client.download_string("bucket", "missing.txt")
 
     assert result is None
     assert client.s3_client.get_object.call_count == 1
 
   def test_download_string_access_denied_returns_none(self):
-    """AccessDenied returns None immediately."""
+    """AccessDenied returns None."""
     client = self._make_client()
     client.s3_client = MagicMock()
     client.s3_client.get_object.side_effect = _make_client_error("AccessDenied")
 
-    result = client.download_string("bucket", "secret.txt", max_retries=3)
+    result = client.download_string("bucket", "secret.txt")
 
     assert result is None
     assert client.s3_client.get_object.call_count == 1
 
-  @patch("robosystems.operations.aws.s3.time.sleep")
-  def test_download_string_retries_then_succeeds(self, mock_sleep):
-    """Transient error retried, succeeds on second attempt."""
+  def test_download_string_client_error_returns_none(self):
+    """ClientError returns None."""
     client = self._make_client()
     client.s3_client = MagicMock()
-    body_mock = MagicMock()
-    body_mock.read.return_value = b"ok"
-    transient = _make_client_error("InternalError")
-    client.s3_client.get_object.side_effect = [transient, {"Body": body_mock}]
+    client.s3_client.get_object.side_effect = _make_client_error("InternalError")
 
-    result = client.download_string("bucket", "key", max_retries=3)
-
-    assert result == "ok"
-    assert client.s3_client.get_object.call_count == 2
-
-  @patch("robosystems.operations.aws.s3.time.sleep")
-  def test_download_string_exhausts_retries(self, mock_sleep):
-    """Returns None after all retries are exhausted."""
-    client = self._make_client()
-    client.s3_client = MagicMock()
-    err = _make_client_error("InternalError")
-    client.s3_client.get_object.side_effect = [err, err, err]
-
-    result = client.download_string("bucket", "key", max_retries=3)
+    result = client.download_string("bucket", "key")
 
     assert result is None
 
@@ -736,7 +664,7 @@ class TestS3ClientBatchUploadStrings:
       ("content3", "bucket", "key3"),
     ]
 
-    results = client.batch_upload_strings(items, max_retries=1)
+    results = client.batch_upload_strings(items)
 
     assert results["key1"] is True
     assert results["key2"] is False

@@ -29,6 +29,11 @@ on:
         description: "VPC ID for ECS tasks"
         required: true
         type: string
+      vpc_cidr:
+        description: "VPC CIDR block for security group rules"
+        required: false
+        type: string
+        default: "10.0.0.0/16"
       subnet_ids:
         description: "Private subnet IDs for ECS tasks (comma-separated)"
         required: true
@@ -307,6 +312,7 @@ jobs:
           # Build parameters
           API_STACK_PARAMS="ParameterKey=Environment,ParameterValue=${{ inputs.environment }} \
                 ParameterKey=VpcId,ParameterValue=${{ inputs.vpc_id }} \
+                ParameterKey=VpcCidr,ParameterValue=${{ inputs.vpc_cidr }} \
                 ParameterKey=SubnetIds,ParameterValue=\"${{ inputs.subnet_ids }}\" \
                 ParameterKey=PublicSubnetIds,ParameterValue=\"${{ inputs.public_subnet_ids }}\" \
                 ParameterKey=ECRRepositoryUrl,ParameterValue=${{ inputs.ecr_repository_url }} \
