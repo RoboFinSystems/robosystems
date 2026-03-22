@@ -35,18 +35,3 @@ def __getattr__(name: str):
     module = importlib.import_module(_LAZY_IMPORTS[name])
     return getattr(module, name)
   raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
-
-
-__all__ = [
-  "ArelleClient",
-  # Plaid
-  "PlaidClient",
-  "PlaidTransactionsProcessor",
-  # QuickBooks
-  "QBClient",
-  "QBTransactionsProcessor",
-  # SEC
-  "SECClient",
-  "XBRLDuckDBGraphProcessor",
-  "XBRLGraphProcessor",
-]

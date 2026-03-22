@@ -109,7 +109,7 @@ class S3Client:
     if metadata:
       put_args["Metadata"] = metadata
 
-    security_errors = {"AccessDenied", "UnauthorizedAccess", "TokenRefreshRequired"}
+    security_errors = {"AccessDenied"}
 
     try:
       self.s3_client.put_object(**put_args)
@@ -204,7 +204,10 @@ class S3Client:
 
     except ClientError as e:
       error_code = e.response.get("Error", {}).get("Code", "")
-      logger.debug(f"S3 download not available ({error_code}): s3://{bucket}/{key}")
+      if error_code == "AccessDenied":
+        logger.error(f"S3 download access denied: s3://{bucket}/{key}")
+      else:
+        logger.debug(f"S3 download not available ({error_code}): s3://{bucket}/{key}")
       return False
 
     except Exception as e:
