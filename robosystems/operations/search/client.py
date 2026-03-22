@@ -305,9 +305,14 @@ class OpenSearchClient:
   ) -> dict[str, Any]:
     """Hybrid text + vector search with mandatory graph_id filtering.
 
-    Combines BM25 text matching with KNN vector similarity. OpenSearch runs
-    both independently and merges scores. Falls back gracefully when documents
-    lack embeddings — they still match on text.
+    Combines BM25 text matching with KNN vector similarity by nesting both
+    inside a bool.should clause. Documents matching either text or vector
+    (or both) are returned, ranked by combined score.
+
+    Note on pagination: KNN does not support offset-based pagination natively.
+    When offset > 0, we over-fetch (size + offset) results and let OpenSearch
+    handle the windowing. This is fine for typical result sets but becomes
+    inefficient at very high offsets.
 
     Args:
         query: Search query string
@@ -321,6 +326,9 @@ class OpenSearchClient:
         OpenSearch response with hits and highlights
     """
     filter_clauses = self._build_filter_clauses(graph_id, filters)
+
+    # Over-fetch for KNN to support offset pagination
+    knn_k = min(size + offset, 100)  # Cap at 100 to limit KNN cost
 
     search_body: dict[str, Any] = {
       "query": {
@@ -337,15 +345,16 @@ class OpenSearchClient:
                 "type": "best_fields",
               }
             },
+            {
+              "knn": {
+                "embedding": {
+                  "vector": query_embedding,
+                  "k": knn_k,
+                }
+              }
+            },
           ],
           "filter": filter_clauses,
-        }
-      },
-      "knn": {
-        "embedding": {
-          "vector": query_embedding,
-          "k": size,
-          "filter": {"bool": {"filter": filter_clauses}},
         }
       },
       "highlight": self._highlight_config(),

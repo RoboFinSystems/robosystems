@@ -19,6 +19,7 @@ All depend on sec_processed_filings (need Entity/Report metadata from parquets).
 All run parallel to the DuckDB staging branch.
 """
 
+import gc
 import hashlib
 import io
 import math
@@ -47,16 +48,23 @@ from .configs import (
 EMBEDDING_MODEL_NAME = "bge-small-en-v1.5"
 
 
-def _embed_document_batch(enricher, documents: list[dict], context) -> None:
+def _embed_document_batch(enricher, documents: list[dict]) -> bool:
   """Add embeddings to documents in-place using fastembed.
 
   Called before bulk_index when enable_embeddings is True.
+  Returns True if embeddings were added, False on failure (documents
+  are still indexed without embeddings).
   """
-  texts = [doc.get("content", "") for doc in documents]
-  embeddings = enricher.embed_batch(texts)
-  for doc, emb in zip(documents, embeddings, strict=True):
-    doc["embedding"] = emb
-    doc["embedding_model"] = EMBEDDING_MODEL_NAME
+  try:
+    texts = [doc.get("content", "") for doc in documents]
+    embeddings = enricher.embed_batch(texts)
+    for doc, emb in zip(documents, embeddings, strict=True):
+      doc["embedding"] = emb
+      doc["embedding_model"] = EMBEDDING_MODEL_NAME
+    return True
+  except Exception as e:
+    logger.warning(f"Embedding generation failed, indexing without vectors: {e}")
+    return False
 
 
 def _get_s3_client():
@@ -688,7 +696,7 @@ def sec_textblocks_indexed(
     # Bulk index in batches to limit memory from accumulated documents
     if len(documents) >= 1000:
       if enricher:
-        _embed_document_batch(enricher, documents, context)
+        _embed_document_batch(enricher, documents)
       batch_result = os_client.bulk_index(documents)
       total_indexed += batch_result["indexed"]
       errors += batch_result["errors"]
@@ -703,7 +711,7 @@ def sec_textblocks_indexed(
   # Index remaining documents
   if documents:
     if enricher:
-      _embed_document_batch(enricher, documents, context)
+      _embed_document_batch(enricher, documents)
     batch_result = os_client.bulk_index(documents)
     total_indexed += batch_result["indexed"]
     errors += batch_result["errors"]
@@ -715,8 +723,6 @@ def sec_textblocks_indexed(
   # Release enricher memory
   if enricher:
     del enricher
-    import gc
-
     gc.collect()
 
   return MaterializeResult(
@@ -1012,7 +1018,7 @@ def sec_narratives_indexed(
     # Batch index to limit memory
     if len(documents) >= 500:
       if enricher:
-        _embed_document_batch(enricher, documents, context)
+        _embed_document_batch(enricher, documents)
       batch_result = os_client.bulk_index(documents)
       total_indexed += batch_result["indexed"]
       errors += batch_result["errors"]
@@ -1024,7 +1030,7 @@ def sec_narratives_indexed(
   # Index remaining documents
   if documents:
     if enricher:
-      _embed_document_batch(enricher, documents, context)
+      _embed_document_batch(enricher, documents)
     batch_result = os_client.bulk_index(documents)
     total_indexed += batch_result["indexed"]
     errors += batch_result["errors"]
@@ -1036,8 +1042,6 @@ def sec_narratives_indexed(
   # Release enricher memory
   if enricher:
     del enricher
-    import gc
-
     gc.collect()
 
   context.log.info(
@@ -1302,7 +1306,7 @@ def sec_ixbrl_disclosures_indexed(
     # Batch index to limit memory
     if len(documents) >= 500:
       if enricher:
-        _embed_document_batch(enricher, documents, context)
+        _embed_document_batch(enricher, documents)
       batch_result = os_client.bulk_index(documents)
       total_indexed += batch_result["indexed"]
       errors += batch_result["errors"]
@@ -1314,7 +1318,7 @@ def sec_ixbrl_disclosures_indexed(
   # Index remaining
   if documents:
     if enricher:
-      _embed_document_batch(enricher, documents, context)
+      _embed_document_batch(enricher, documents)
     batch_result = os_client.bulk_index(documents)
     total_indexed += batch_result["indexed"]
     errors += batch_result["errors"]
@@ -1326,8 +1330,6 @@ def sec_ixbrl_disclosures_indexed(
   # Release enricher memory
   if enricher:
     del enricher
-    import gc
-
     gc.collect()
 
   context.log.info(

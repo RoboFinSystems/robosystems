@@ -116,6 +116,7 @@ from robosystems.adapters.sec.pipeline.s3_publish import (
 from robosystems.adapters.sec.pipeline.sensors import (
   sec_incremental_download_schedule,
   sec_incremental_pipeline_sensor,
+  sec_index_retry_sensor,
   sec_post_materialize_publish_sensor,
   sec_post_stage_index_sensor,
   sec_processing_sensor,
@@ -189,6 +190,7 @@ def get_dagster_components():
       sec_stage_to_materialize_sensor,
       sec_post_materialize_publish_sensor,
       sec_post_stage_index_sensor,
+      sec_index_retry_sensor,
     ],
     "schedules": [
       sec_incremental_download_schedule,
@@ -233,6 +235,7 @@ __all__ = [
   "sec_incremental_download_schedule",
   "sec_incremental_pipeline_sensor",
   "sec_incremental_stage_job",
+  "sec_index_retry_sensor",
   "sec_ixbrl_disclosures_indexed",
   "sec_ixbrl_index_job",
   "sec_knowledge_artifacts",

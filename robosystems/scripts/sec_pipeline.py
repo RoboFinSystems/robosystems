@@ -51,6 +51,7 @@ Usage:
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -218,7 +219,6 @@ class SECPipeline:
         reset_staging: Whether to delete DuckDB file before staging (fresh start)
         rebuild_graph: Whether to rebuild LadybugDB (materialize jobs)
     """
-    import os
 
     if job_type == "stage":
       # sec_stage job - stages to persistent DuckDB only (Stage 1)
@@ -253,13 +253,25 @@ class SECPipeline:
     elif job_type == "textblocks_index":
       config = {
         "ops": {
-          "sec_textblocks_indexed": {"config": {"graph_id": graph_id}},
+          "sec_textblocks_indexed": {
+            "config": {
+              "graph_id": graph_id,
+              "enable_embeddings": os.getenv("SEMANTIC_SEARCH_ENABLED", "false").lower()
+              == "true",
+            }
+          },
         }
       }
     elif job_type == "narratives_index":
       config = {
         "ops": {
-          "sec_narratives_indexed": {"config": {"graph_id": graph_id}},
+          "sec_narratives_indexed": {
+            "config": {
+              "graph_id": graph_id,
+              "enable_embeddings": os.getenv("SEMANTIC_SEARCH_ENABLED", "false").lower()
+              == "true",
+            }
+          },
         }
       }
     else:

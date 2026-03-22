@@ -737,3 +737,89 @@ def sec_post_stage_index_sensor(context: RunStatusSensorContext):
         "mode": "incremental",
       },
     )
+
+
+# Maximum number of automatic retries before giving up
+_INDEX_RETRY_MAX = 3
+
+
+@run_status_sensor(
+  run_status=DagsterRunStatus.FAILURE,
+  monitored_jobs=[
+    sec_textblocks_index_job,
+    sec_narratives_index_job,
+    sec_ixbrl_index_job,
+  ],
+  request_jobs=[
+    sec_textblocks_index_job,
+    sec_narratives_index_job,
+    sec_ixbrl_index_job,
+  ],
+  default_status=DefaultSensorStatus.STOPPED,
+  minimum_interval_seconds=60,
+  description=(
+    "Retry failed text search indexing jobs (e.g. Spot interruptions). "
+    "Incremental skip ensures completed batches are not re-indexed. "
+    f"Caps at {_INDEX_RETRY_MAX} retries per partition to avoid loops."
+  ),
+)
+def sec_index_retry_sensor(context: RunStatusSensorContext):
+  """Retry failed indexing jobs with the same partition and config.
+
+  Designed for Spot resilience: when a Fargate Spot task is reclaimed,
+  the Dagster run fails. This sensor detects the failure and re-launches
+  with the same partition key and run config. The OpenSearch incremental
+  skip (_get_indexed_accessions) ensures already-indexed batches are not
+  reprocessed, so retries only do the remaining work.
+  """
+  dagster_run = context.dagster_run
+  job_name = dagster_run.job_name
+  run_tags = dagster_run.tags or {}
+
+  partition_key = run_tags.get("dagster/partition")
+  if not partition_key:
+    context.log.warning(
+      f"No partition key on failed run {dagster_run.run_id}, skipping retry"
+    )
+    return
+
+  # Track retry count to cap retries
+  retry_count = int(run_tags.get("retry_count", "0"))
+  if retry_count >= _INDEX_RETRY_MAX:
+    context.log.warning(
+      f"{job_name} for {partition_key} has failed {retry_count} times, "
+      f"not retrying (max {_INDEX_RETRY_MAX})"
+    )
+    return
+
+  # Check if the job is already running for this partition
+  active_runs = context.instance.get_runs(
+    filters=RunsFilter(
+      job_name=job_name,
+      statuses=[DagsterRunStatus.STARTED, DagsterRunStatus.QUEUED],
+    ),
+    limit=1,
+  )
+  if active_runs:
+    context.log.info(
+      f"{job_name} already running (run_id={active_runs[0].run_id}), skipping retry"
+    )
+    return
+
+  next_retry = retry_count + 1
+  context.log.info(
+    f"Retrying {job_name} for {partition_key} "
+    f"(attempt {next_retry}/{_INDEX_RETRY_MAX}, failed run: {dagster_run.run_id})"
+  )
+
+  yield RunRequest(
+    run_key=f"sec-{job_name}-retry-{partition_key}-{next_retry}-{dagster_run.run_id[:8]}",
+    job_name=job_name,
+    run_config=dagster_run.run_config,
+    partition_key=partition_key,
+    tags={
+      **{k: v for k, v in run_tags.items() if not k.startswith("dagster/")},
+      "retry_count": str(next_retry),
+      "retry_of": dagster_run.run_id,
+    },
+  )

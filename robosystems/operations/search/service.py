@@ -4,8 +4,11 @@ Provides graph_id-scoped search and retrieval, mapping OpenSearch
 responses to Pydantic models.
 """
 
-from typing import Any
+from __future__ import annotations
 
+from typing import TYPE_CHECKING, Any
+
+from robosystems.config import env
 from robosystems.logger import logger
 from robosystems.models.api.search import (
   DocumentSection,
@@ -16,6 +19,9 @@ from robosystems.models.api.search import (
 
 from .client import OpenSearchClient
 
+if TYPE_CHECKING:
+  from robosystems.adapters.sec.enrichment import SemanticEnricher
+
 # Snippet fallback length when no highlights available
 SNIPPET_FALLBACK_LENGTH = 300
 
@@ -25,10 +31,10 @@ class SearchService:
 
   def __init__(self, client: OpenSearchClient) -> None:
     self.client = client
-    self._enricher = None
+    self._enricher: SemanticEnricher | None = None
 
   @property
-  def enricher(self):
+  def enricher(self) -> SemanticEnricher:
     """Lazy-load fastembed model for query embedding (semantic search)."""
     if self._enricher is None:
       from robosystems.adapters.sec.enrichment import SemanticEnricher
@@ -39,8 +45,6 @@ class SearchService:
 
   def search_documents(self, graph_id: str, request: SearchRequest) -> SearchResponse:
     """Search documents with graph_id isolation."""
-    from robosystems.config import env
-
     filters: dict[str, Any] = {}
     if request.entity:
       filters["entity"] = request.entity
@@ -174,8 +178,6 @@ def get_search_service() -> SearchService | None:
   global _service
   if _service is not None:
     return _service
-
-  from robosystems.config import env
 
   if not env.TEXT_SEARCH_ENABLED:
     return None
