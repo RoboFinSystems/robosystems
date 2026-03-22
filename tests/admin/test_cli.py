@@ -26,11 +26,19 @@ def wide_console():
   from rich.console import Console
 
   import robosystems.admin.cli as cli_module
+  import robosystems.admin.commands.billing as billing_module
+  import robosystems.admin.commands.graphs as graphs_module
+  import robosystems.admin.commands.ops as ops_module
+  import robosystems.admin.commands.users_orgs as users_orgs_module
 
-  original_console = cli_module.console
-  cli_module.console = Console(width=200, highlight=False, force_terminal=False)
+  wide = Console(width=200, highlight=False, force_terminal=False)
+  modules = [cli_module, billing_module, graphs_module, ops_module, users_orgs_module]
+  originals = [m.console for m in modules]
+  for m in modules:
+    m.console = wide
   yield
-  cli_module.console = original_console
+  for m, orig in zip(modules, originals, strict=True):
+    m.console = orig
 
 
 @pytest.fixture(autouse=True)
@@ -820,7 +828,7 @@ class TestMigrationsCommands:
     mock_result.stderr = ""
 
     with patch(
-      "robosystems.admin.cli.subprocess.run", return_value=mock_result
+      "robosystems.admin.commands.ops.subprocess.run", return_value=mock_result
     ) as mock_run:
       result = runner.invoke(cli, ["-e", "dev", "migrations", "up"])
       assert result.exit_code == 0
@@ -837,7 +845,7 @@ class TestMigrationsCommands:
     mock_result.stderr = ""
 
     with patch(
-      "robosystems.admin.cli.subprocess.run", return_value=mock_result
+      "robosystems.admin.commands.ops.subprocess.run", return_value=mock_result
     ) as mock_run:
       result = runner.invoke(cli, ["-e", "dev", "migrations", "down"])
       assert result.exit_code == 0
@@ -854,7 +862,7 @@ class TestMigrationsCommands:
     mock_result.stderr = ""
 
     with patch(
-      "robosystems.admin.cli.subprocess.run", return_value=mock_result
+      "robosystems.admin.commands.ops.subprocess.run", return_value=mock_result
     ) as mock_run:
       result = runner.invoke(cli, ["-e", "dev", "migrations", "current"])
       assert result.exit_code == 0
@@ -865,7 +873,7 @@ class TestMigrationsCommands:
       )
 
   def test_up_prod(self, runner):
-    with patch("robosystems.admin.cli.SSMExecutor") as MockSSM:
+    with patch("robosystems.admin.commands.ops.SSMExecutor") as MockSSM:
       mock_executor = MagicMock()
       mock_executor.execute.return_value = ("Migration done", "", 0)
       MockSSM.return_value = mock_executor
@@ -1055,7 +1063,7 @@ class TestInstancesCommands:
       "shared-replicas": None,
     }
 
-    with patch("robosystems.admin.cli.InstancesHelper") as MockHelper:
+    with patch("robosystems.admin.commands.ops.InstancesHelper") as MockHelper:
       helper = MagicMock()
       helper.get_all_instances.return_value = instances
       helper.get_all_asg_info.return_value = asgs
@@ -1076,7 +1084,7 @@ class TestInstancesCommands:
     ]
     asg = _make_asg()
 
-    with patch("robosystems.admin.cli.InstancesHelper") as MockHelper:
+    with patch("robosystems.admin.commands.ops.InstancesHelper") as MockHelper:
       helper = MagicMock()
       helper.get_instance.return_value = inst
       helper.get_graphs_for_instance.return_value = graphs
@@ -1091,7 +1099,7 @@ class TestInstancesCommands:
       assert "kg2222222222222222" in result.output
 
   def test_info_instance_not_found(self, runner):
-    with patch("robosystems.admin.cli.InstancesHelper") as MockHelper:
+    with patch("robosystems.admin.commands.ops.InstancesHelper") as MockHelper:
       helper = MagicMock()
       helper.get_instance.return_value = None
       MockHelper.return_value = helper
@@ -1108,7 +1116,7 @@ class TestInstancesCommands:
       _make_instance("i-001", "ladybug-standard", database_count=1),
     ]
 
-    with patch("robosystems.admin.cli.InstancesHelper") as MockHelper:
+    with patch("robosystems.admin.commands.ops.InstancesHelper") as MockHelper:
       helper = MagicMock()
       helper.get_asg_info.return_value = asg
       helper.get_all_instances.return_value = instances
@@ -1130,7 +1138,7 @@ class TestInstancesCommands:
       _make_instance("i-001", "ladybug-standard", database_count=1),
     ]
 
-    with patch("robosystems.admin.cli.InstancesHelper") as MockHelper:
+    with patch("robosystems.admin.commands.ops.InstancesHelper") as MockHelper:
       helper = MagicMock()
       helper.get_asg_info.return_value = asg
       helper.get_all_instances.return_value = instances
@@ -1166,7 +1174,7 @@ class TestInstancesCommands:
   def test_scale_rejects_desired_above_max(self, runner):
     asg = _make_asg(desired=2, min_size=1, max_size=4)
 
-    with patch("robosystems.admin.cli.InstancesHelper") as MockHelper:
+    with patch("robosystems.admin.commands.ops.InstancesHelper") as MockHelper:
       helper = MagicMock()
       helper.get_asg_info.return_value = asg
       helper._asg_name.return_value = "robosystems-ladybug-standard-writers-staging-asg"
@@ -1187,7 +1195,7 @@ class TestInstancesCommands:
       _make_instance("i-003", "ladybug-standard", database_count=0),
     ]
 
-    with patch("robosystems.admin.cli.InstancesHelper") as MockHelper:
+    with patch("robosystems.admin.commands.ops.InstancesHelper") as MockHelper:
       helper = MagicMock()
       helper.get_asg_info.return_value = asg
       helper.get_all_instances.return_value = instances
@@ -1217,7 +1225,7 @@ class TestInstancesCommands:
       },
     ]
 
-    with patch("robosystems.admin.cli.InstancesHelper") as MockHelper:
+    with patch("robosystems.admin.commands.ops.InstancesHelper") as MockHelper:
       helper = MagicMock()
       helper.get_asg_info.return_value = asg
       helper.get_all_instances.return_value = instances
@@ -1246,7 +1254,7 @@ class TestInstancesCommands:
       _make_graph("kg1111111111111111", "i-001"),
     ]
 
-    with patch("robosystems.admin.cli.InstancesHelper") as MockHelper:
+    with patch("robosystems.admin.commands.ops.InstancesHelper") as MockHelper:
       helper = MagicMock()
       helper.get_all_instances.return_value = instances
       helper.get_all_graphs.return_value = graphs
@@ -1272,7 +1280,7 @@ class TestInstancesCommands:
       "shared-replicas": None,
     }
 
-    with patch("robosystems.admin.cli.InstancesHelper") as MockHelper:
+    with patch("robosystems.admin.commands.ops.InstancesHelper") as MockHelper:
       helper = MagicMock()
       helper.get_all_instances.return_value = instances
       helper.get_all_graphs.return_value = graphs
@@ -1321,7 +1329,7 @@ class TestInstancesCommands:
       ),
     }
 
-    with patch("robosystems.admin.cli.InstancesHelper") as MockHelper:
+    with patch("robosystems.admin.commands.ops.InstancesHelper") as MockHelper:
       helper = MagicMock()
       helper.get_all_instances.return_value = instances
       helper.get_all_asg_info.return_value = asgs
@@ -1347,7 +1355,7 @@ class TestInstancesCommands:
       },
     ]
 
-    with patch("robosystems.admin.cli.InstancesHelper") as MockHelper:
+    with patch("robosystems.admin.commands.ops.InstancesHelper") as MockHelper:
       helper = MagicMock()
       helper.get_asg_info.return_value = asg
       helper.get_all_instances.return_value = instances
@@ -1386,7 +1394,7 @@ class TestInstancesCommands:
 
 class TestInstancesHelper:
   def test_asg_name_writers(self):
-    from robosystems.admin.cli import InstancesHelper
+    from robosystems.admin.commands.ops import InstancesHelper
 
     with patch.object(InstancesHelper, "__init__", return_value=None):
       helper = InstancesHelper.__new__(InstancesHelper)
@@ -1401,7 +1409,7 @@ class TestInstancesHelper:
       )
 
   def test_asg_name_shared_replicas(self):
-    from robosystems.admin.cli import InstancesHelper
+    from robosystems.admin.commands.ops import InstancesHelper
 
     with patch.object(InstancesHelper, "__init__", return_value=None):
       helper = InstancesHelper.__new__(InstancesHelper)
@@ -1411,7 +1419,7 @@ class TestInstancesHelper:
       )
 
   def test_gha_var_name_writers(self):
-    from robosystems.admin.cli import InstancesHelper
+    from robosystems.admin.commands.ops import InstancesHelper
 
     with patch.object(InstancesHelper, "__init__", return_value=None):
       helper = InstancesHelper.__new__(InstancesHelper)
@@ -1430,7 +1438,7 @@ class TestInstancesHelper:
       )
 
   def test_gha_var_name_shared_replicas(self):
-    from robosystems.admin.cli import InstancesHelper
+    from robosystems.admin.commands.ops import InstancesHelper
 
     with patch.object(InstancesHelper, "__init__", return_value=None):
       helper = InstancesHelper.__new__(InstancesHelper)
@@ -1449,7 +1457,7 @@ class TestInstancesHelper:
       )
 
   def test_gha_var_name_staging(self):
-    from robosystems.admin.cli import InstancesHelper
+    from robosystems.admin.commands.ops import InstancesHelper
 
     with patch.object(InstancesHelper, "__init__", return_value=None):
       helper = InstancesHelper.__new__(InstancesHelper)
