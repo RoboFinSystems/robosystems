@@ -2,7 +2,8 @@
 
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException
+from starlette import status as http_status
 
 from robosystems.middleware.auth.dependencies import get_current_user_with_graph
 from robosystems.models.api.search import (
@@ -29,14 +30,87 @@ def _require_search_service():
   return service
 
 
+async def _check_search_rate_limit(
+  graph_id: str, current_user: User, endpoint: str
+) -> None:
+  """Apply dual-layer rate limiting for search on shared repositories."""
+  from robosystems.config import env
+  from robosystems.config.shared_repositories import is_shared_repository
+
+  if not is_shared_repository(graph_id):
+    return
+
+  if not env.RATE_LIMIT_ENABLED:
+    return
+
+  from robosystems.config.valkey_registry import (
+    ValkeyDatabase,
+    create_async_redis_client,
+  )
+
+  # Check user has access to the shared repo
+  from robosystems.middleware.auth.session import SessionFactory
+  from robosystems.middleware.rate_limits import DualLayerRateLimiter
+  from robosystems.models.iam.user_repository import UserRepository
+
+  session = SessionFactory()
+  try:
+    repo_access = UserRepository.get_by_user_and_repository(
+      current_user.id, graph_id, session
+    )
+  finally:
+    session.close()
+
+  if not repo_access:
+    raise HTTPException(
+      status_code=http_status.HTTP_403_FORBIDDEN,
+      detail=f"Access to {graph_id.upper()} repository requires a subscription. "
+      "Visit https://roboledger.ai/pricing",
+    )
+
+  redis_client = create_async_redis_client(ValkeyDatabase.RATE_LIMITS)
+
+  try:
+    limiter = DualLayerRateLimiter(redis_client)
+    user_tier = getattr(current_user, "subscription_tier", None) or "ladybug-standard"
+
+    limit_check = await limiter.check_limits(
+      user_id=str(current_user.id),
+      graph_id=graph_id,
+      operation="search",
+      endpoint=endpoint,
+      user_tier=user_tier,
+      repository_plan=repo_access.repository_plan,
+    )
+
+    if not limit_check["allowed"]:
+      reason = limit_check.get("reason", "unknown")
+      message = limit_check.get("message", "Rate limit exceeded")
+
+      if reason == "no_access" or reason == "endpoint_not_allowed":
+        raise HTTPException(
+          status_code=http_status.HTTP_403_FORBIDDEN,
+          detail=message,
+        )
+      else:
+        retry_after = str(limit_check.get("detail", {}).get("reset_in", 60))
+        raise HTTPException(
+          status_code=http_status.HTTP_429_TOO_MANY_REQUESTS,
+          detail=message,
+          headers={"Retry-After": retry_after},
+        )
+  finally:
+    await redis_client.aclose()
+
+
 @router.post("", operation_id="search_documents")
 async def search_documents(
   graph_id: str,
   request: SearchRequest,
-  req: Request,
   current_user: User = Depends(get_current_user_with_graph),
 ) -> SearchResponse:
   """Search filing narratives and text content within a graph."""
+  await _check_search_rate_limit(graph_id, current_user, "search")
   service = _require_search_service()
   return service.search_documents(graph_id, request)
 
@@ -45,10 +119,10 @@ async def search_documents(
 async def get_document_section(
   graph_id: str,
   document_id: str,
-  req: Request,
   current_user: User = Depends(get_current_user_with_graph),
 ) -> DocumentSection:
   """Retrieve the full text of a document section by ID."""
+  await _check_search_rate_limit(graph_id, current_user, "search")
   service = _require_search_service()
   result = service.get_document_section(graph_id, document_id)
   if result is None:
