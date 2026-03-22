@@ -322,6 +322,8 @@ jobs:
       # Instance Configuration
       instance_type: ${{ vars.OPENSEARCH_INSTANCE_TYPE_STAGING || 't3.medium.search' }}
       ebs_volume_size: ${{ vars.OPENSEARCH_EBS_SIZE_STAGING || '100' }}
+      # Engine Version Configuration (set to pin version, empty uses template default)
+      engine_version: ${{ vars.OPENSEARCH_VERSION_STAGING || '' }}
       # Bastion Access
       bastion_sg_id: ${{ needs.deploy-bastion.outputs.bastion_sg_id }}
       # Other Configuration

@@ -39,19 +39,19 @@ on:
         description: "OpenSearch instance type"
         required: false
         type: string
-        default: "t3.medium.search"
+        default: "t3.small.search"
       ebs_volume_size:
         description: "EBS volume size in GB"
         required: false
         type: string
         default: "100"
 
-      # Engine Configuration
+      # Engine Version Configuration
+      # FORK NOTE: Set OPENSEARCH_VERSION_<ENV> to pin your version
       engine_version:
-        description: "OpenSearch engine version (e.g., 2.17, 2.19)"
+        description: "OpenSearch engine version (leave empty to use template default)"
         required: false
         type: string
-        default: "2.17"
 
       # Bastion Access (optional)
       bastion_sg_id:
@@ -120,9 +120,17 @@ jobs:
                 ParameterKey=Environment,ParameterValue=${{ inputs.environment }} \
                 ParameterKey=InstanceType,ParameterValue=${{ inputs.instance_type }} \
                 ParameterKey=EBSVolumeSize,ParameterValue=${{ inputs.ebs_volume_size }} \
-                ParameterKey=EngineVersion,ParameterValue=OpenSearch_${{ inputs.engine_version }} \
                 ParameterKey=BastionSecurityGroupId,ParameterValue=${{ inputs.bastion_sg_id }} \
                 ParameterKey=SNSAlertEmail,ParameterValue=${{ inputs.aws_sns_alert_email }}"
+
+          # Add version parameter only if explicitly set (allows forks to use template default)
+          if [ -n "${{ inputs.engine_version }}" ]; then
+            OPENSEARCH_STACK_PARAMS="$OPENSEARCH_STACK_PARAMS \
+                ParameterKey=EngineVersion,ParameterValue=OpenSearch_${{ inputs.engine_version }}"
+            echo "Using OpenSearch version: ${{ inputs.engine_version }}"
+          else
+            echo "Using template default OpenSearch version"
+          fi
 
           if [ "$STACK_ACTION" = "create-stack" ]; then
             aws cloudformation $STACK_ACTION \

@@ -20,7 +20,7 @@ Parameters:
   InstanceType:
     Type: String
     Description: OpenSearch instance type
-    Default: t3.medium.search
+    Default: t3.small.search
     AllowedValues:
       # T3 - Burstable (cost-effective for variable loads)
       - t3.small.search    # 2 GB RAM, up to 100 GB EBS
@@ -46,11 +46,11 @@ Parameters:
   EngineVersion:
     Type: String
     Description: OpenSearch engine version
-    Default: "OpenSearch_2.17"
+    Default: "OpenSearch_2.19"
     AllowedValues:
+      - "OpenSearch_2.19"
       - "OpenSearch_2.17"
       - "OpenSearch_2.15"
-      - "OpenSearch_2.13"
 
   # Bastion Access (optional)
   BastionSecurityGroupId:
