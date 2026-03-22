@@ -48,10 +48,10 @@ on:
 
       # Engine Configuration
       engine_version:
-        description: "OpenSearch engine version"
+        description: "OpenSearch engine version (e.g., 2.17, 2.19)"
         required: false
         type: string
-        default: "OpenSearch_2.17"
+        default: "2.17"
 
       # Bastion Access (optional)
       bastion_sg_id:
@@ -120,7 +120,7 @@ jobs:
                 ParameterKey=Environment,ParameterValue=${{ inputs.environment }} \
                 ParameterKey=InstanceType,ParameterValue=${{ inputs.instance_type }} \
                 ParameterKey=EBSVolumeSize,ParameterValue=${{ inputs.ebs_volume_size }} \
-                ParameterKey=EngineVersion,ParameterValue=${{ inputs.engine_version }} \
+                ParameterKey=EngineVersion,ParameterValue=OpenSearch_${{ inputs.engine_version }} \
                 ParameterKey=BastionSecurityGroupId,ParameterValue=${{ inputs.bastion_sg_id }} \
                 ParameterKey=SNSAlertEmail,ParameterValue=${{ inputs.aws_sns_alert_email }}"
 

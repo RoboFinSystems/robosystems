@@ -452,7 +452,6 @@ def sec_textblocks_indexed(
       "filing_date",
       "fiscal_year_focus",
       "fiscal_period_focus",
-      "cik",
     ],
   )
   context.log.info("Reading Element table...")
@@ -481,6 +480,7 @@ def sec_textblocks_indexed(
 
   entities_df = entities_df.fillna("")
   entities_df["cik"] = entities_df["cik"].astype(str)
+  entities_df = entities_df.drop_duplicates(subset=["identifier"], keep="first")
   entity_lookup: dict[str, dict[str, str]] = entities_df.set_index("identifier")[
     ["ticker", "name", "cik"]
   ].to_dict("index")
@@ -496,6 +496,7 @@ def sec_textblocks_indexed(
   )
   reports_df = reports_df.rename(columns={"fiscal_period_focus": "fiscal_period"})
   reports_df = reports_df.fillna("")
+  reports_df = reports_df.drop_duplicates(subset=["identifier"], keep="first")
   report_lookup: dict[str, dict[str, Any]] = reports_df.set_index("identifier")[
     ["filing_date", "form", "fiscal_year", "fiscal_period", "accession_number"]
   ].to_dict("index")
@@ -825,7 +826,6 @@ def sec_narratives_indexed(
       "filing_date",
       "fiscal_year_focus",
       "fiscal_period_focus",
-      "cik",
     ],
   )
   entity_table = _read_parquets_from_s3(
@@ -884,7 +884,7 @@ def sec_narratives_indexed(
       "filing_date": str(report.get("filing_date", "")),
       "fiscal_year": int(fy) if fy is not None and not math.isnan(fy) else None,
       "fiscal_period": report.get("fiscal_period_focus", ""),
-      "cik": entity_info.get("cik", str(report.get("cik", ""))),
+      "cik": entity_info.get("cik", ""),
       "ticker": entity_info.get("ticker", ""),
       "entity_name": entity_info.get("name", ""),
     }
@@ -1151,7 +1151,6 @@ def sec_ixbrl_disclosures_indexed(
       "filing_date",
       "fiscal_year_focus",
       "fiscal_period_focus",
-      "cik",
     ],
   )
   entity_table = _read_parquets_from_s3(
@@ -1204,7 +1203,7 @@ def sec_ixbrl_disclosures_indexed(
       "filing_date": str(report.get("filing_date", "")),
       "fiscal_year": int(fy) if fy is not None and not math.isnan(fy) else None,
       "fiscal_period": report.get("fiscal_period_focus", ""),
-      "cik": entity_info.get("cik", str(report.get("cik", ""))),
+      "cik": entity_info.get("cik", ""),
       "ticker": entity_info.get("ticker", ""),
       "entity_name": entity_info.get("name", ""),
     }

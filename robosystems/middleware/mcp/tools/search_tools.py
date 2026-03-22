@@ -49,7 +49,8 @@ class SearchDocumentsTool:
 - Use the element filter to go the other direction: find all disclosures containing a specific XBRL fact
 
 **TIPS:**
-- Use specific keywords that would appear in filings (e.g., "tariff" not "trade war concerns")
+- With semantic search, natural language queries work well (e.g., "trade war concerns", "supply chain disruptions")
+- For exact keyword matching, set semantic=false (e.g., searching for a specific term like "LIBOR")
 - Use entity filter to focus on one company's filings
 - Use section filter (item_1a, item_7) to target specific filing sections
 - Results include XBRL text blocks, extracted narrative sections, and iXBRL disclosures""",
@@ -82,8 +83,7 @@ class SearchDocumentsTool:
           },
           "semantic": {
             "type": "boolean",
-            "description": "Enable semantic (vector) search for better conceptual matching. Only works when SEMANTIC_SEARCH_ENABLED is true and embeddings have been indexed.",
-            "default": True,
+            "description": "Enable semantic (vector) search for better conceptual matching. Defaults to the SEMANTIC_SEARCH_ENABLED feature flag. Set to false for exact keyword matching only.",
           },
           "size": {
             "type": "integer",

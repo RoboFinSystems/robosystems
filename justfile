@@ -462,20 +462,19 @@ sec-index quarter env=_local_env:
 
 # --- Phase 5: Text Search Query ---
 
-# Search OpenSearch for filing text content
+# Search OpenSearch for filing text content (semantic search enabled by default)
 # Examples:
 #   just search sec "revenue growth"
-#   just search sec "risk factors" entity=NVDA
-#   just search sec "inventory" form_type=10-K fiscal_year=2025
+#   just search sec "risk factors" --entity NVDA
+#   just search sec "inventory" --form-type 10-K --fiscal-year 2025
+#   just search sec "revenue" --size 3
+#   just search sec "revenue" --no-semantic
 #   just search-count sec
-search graph_id query entity="" form_type="" fiscal_year="" source_type="" size="10" env=_local_env:
-    UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.search_query \
+search graph_id query *flags:
+    UV_ENV_FILE={{_local_env}} uv run python -m robosystems.scripts.search_query \
         --graph-id {{graph_id}} \
-        {{ if entity != "" { "--entity " + entity } else { "" } }} \
-        {{ if form_type != "" { "--form-type " + form_type } else { "" } }} \
-        {{ if fiscal_year != "" { "--fiscal-year " + fiscal_year } else { "" } }} \
-        {{ if source_type != "" { "--source-type " + source_type } else { "" } }} \
-        --size {{size}} \
+        --semantic \
+        {{flags}} \
         "{{query}}"
 
 # Show OpenSearch document count and breakdown

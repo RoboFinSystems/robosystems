@@ -528,7 +528,7 @@ class EnvConfig:
   )
   SEMANTIC_SEARCH_ENABLED = get_bool_env(
     "SEMANTIC_SEARCH_ENABLED",
-    get_parameter_value("SEMANTIC_SEARCH_ENABLED", "false").lower() == "true",
+    get_parameter_value("SEMANTIC_SEARCH_ENABLED", "true").lower() == "true",
   )
 
   # --- OpenSearch ---

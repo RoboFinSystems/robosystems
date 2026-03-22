@@ -57,7 +57,7 @@ def main():
   parser.add_argument("--size", type=int, default=10, help="Max results (default: 10)")
   parser.add_argument(
     "--semantic",
-    action="store_true",
+    action=argparse.BooleanOptionalAction,
     default=False,
     help="Enable semantic (hybrid) search using vector embeddings",
   )
