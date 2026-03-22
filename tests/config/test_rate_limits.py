@@ -13,12 +13,12 @@ def test_periods_convert_to_expected_seconds():
   assert RateLimitPeriod.DAY.to_seconds() == 86400
 
 
-def test_unknown_tier_falls_back_to_free_limits():
-  # pick category only present in free config
+def test_unknown_tier_falls_back_to_base_limits():
+  # pick category only present in base config
   limit, window = RateLimitConfig.get_rate_limit("mystery", EndpointCategory.AUTH)
 
   assert (
-    limit == RateLimitConfig.SUBSCRIPTION_RATE_LIMITS["free"][EndpointCategory.AUTH][0]
+    limit == RateLimitConfig.SUBSCRIPTION_RATE_LIMITS["base"][EndpointCategory.AUTH][0]
   )
   assert window == RateLimitPeriod.MINUTE.to_seconds()
 
@@ -76,6 +76,9 @@ def test_multiplier_can_be_skipped(monkeypatch):
     # Other graph endpoints
     ("/v1/graphs/abc/mcp/execute", "POST", EndpointCategory.GRAPH_MCP),
     ("/v1/graphs/abc/agent/run", "POST", EndpointCategory.GRAPH_AGENT),
+    # Search endpoints (OpenSearch)
+    ("/v1/graphs/abc/search", "POST", EndpointCategory.GRAPH_SEARCH),
+    ("/v1/graphs/abc/search/doc123", "GET", EndpointCategory.GRAPH_SEARCH),
     ("/v1/graphs/abc/graph/backup", "POST", EndpointCategory.GRAPH_BACKUP),
     ("/v1/graphs/abc/graph/query", "POST", EndpointCategory.GRAPH_QUERY),
     ("/v1/graphs/abc/graph/analytics", "GET", EndpointCategory.GRAPH_ANALYTICS),

@@ -97,7 +97,7 @@ production:
       max_subgraphs: 10 # Support up to 10 subgraphs (1 parent + 10 children = 11 databases total)
 
       # Resource limits
-      api_rate_multiplier: 2.5 # 2.5x rate limits for team usage
+      api_rate_multiplier: 1.5 # 1.5x rate limits (2x RAM, same CPU as standard)
 
       # Copy operation limits
       copy_operations:
@@ -168,7 +168,7 @@ production:
       # Note: 1 parent + 25 subgraphs = 26 databases total on xlarge instance
 
       # Resource limits
-      api_rate_multiplier: 5.0 # 5x rate limits for enterprise usage
+      api_rate_multiplier: 2.5 # 2.5x rate limits (4x RAM, 2x CPU vs standard)
 
       # Copy operation limits
       copy_operations:

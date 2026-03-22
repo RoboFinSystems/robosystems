@@ -96,6 +96,11 @@ class TestRequireSearchService:
 class TestSearchDocuments:
   """Tests for search_documents endpoint."""
 
+  @pytest.fixture(autouse=True)
+  def _skip_rate_limit(self):
+    with patch(f"{MODULE}._check_search_rate_limit", return_value=None):
+      yield
+
   @pytest.mark.unit
   async def test_returns_search_response(self):
     mock_service = MagicMock()
@@ -107,7 +112,6 @@ class TestSearchDocuments:
       result = await search_documents(
         graph_id="sec",
         request=request,
-        req=MagicMock(),
         current_user=MagicMock(),
       )
 
@@ -128,7 +132,6 @@ class TestSearchDocuments:
       await search_documents(
         graph_id="custom_graph",
         request=request,
-        req=MagicMock(),
         current_user=MagicMock(),
       )
 
@@ -151,7 +154,6 @@ class TestSearchDocuments:
       await search_documents(
         graph_id="sec",
         request=request,
-        req=MagicMock(),
         current_user=MagicMock(),
       )
 
@@ -168,7 +170,6 @@ class TestSearchDocuments:
         await search_documents(
           graph_id="sec",
           request=SearchRequest(query="test"),
-          req=MagicMock(),
           current_user=MagicMock(),
         )
       assert exc_info.value.status_code == 503
@@ -177,6 +178,11 @@ class TestSearchDocuments:
 @pytest.mark.asyncio
 class TestGetDocumentSection:
   """Tests for get_document_section endpoint."""
+
+  @pytest.fixture(autouse=True)
+  def _skip_rate_limit(self):
+    with patch(f"{MODULE}._check_search_rate_limit", return_value=None):
+      yield
 
   @pytest.mark.unit
   async def test_returns_document_section(self):
@@ -188,7 +194,6 @@ class TestGetDocumentSection:
       result = await get_document_section(
         graph_id="sec",
         document_id="abc123",
-        req=MagicMock(),
         current_user=MagicMock(),
       )
 
@@ -207,7 +212,6 @@ class TestGetDocumentSection:
         await get_document_section(
           graph_id="sec",
           document_id="nonexistent",
-          req=MagicMock(),
           current_user=MagicMock(),
         )
       assert exc_info.value.status_code == 404
@@ -224,7 +228,6 @@ class TestGetDocumentSection:
       await get_document_section(
         graph_id="custom_graph",
         document_id="abc123",
-        req=MagicMock(),
         current_user=MagicMock(),
       )
 
@@ -239,7 +242,6 @@ class TestGetDocumentSection:
         await get_document_section(
           graph_id="sec",
           document_id="abc123",
-          req=MagicMock(),
           current_user=MagicMock(),
         )
       assert exc_info.value.status_code == 503
