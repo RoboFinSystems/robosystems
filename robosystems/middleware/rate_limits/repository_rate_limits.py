@@ -32,6 +32,7 @@ class AllowedSharedEndpoints(str, Enum):
   QUERY = "query"  # Direct Cypher queries
   MCP = "mcp"  # MCP tool access
   AGENT = "agent"  # AI agent operations
+  SEARCH = "search"  # Full-text search (OpenSearch)
   SCHEMA = "schema"  # Schema inspection
   STATUS = "status"  # Status checks
 
@@ -195,7 +196,12 @@ class DualLayerRateLimiter:
       return {"allowed": False, "message": "No access to repository"}
 
     # Map operation to limit keys
-    operation_keys = {"query": "queries", "mcp": "mcp_queries", "agent": "agent_calls"}
+    operation_keys = {
+      "query": "queries",
+      "mcp": "mcp_queries",
+      "agent": "agent_calls",
+      "search": "searches",
+    }
 
     base_key = operation_keys.get(operation, "queries")
 
@@ -273,6 +279,7 @@ class DualLayerRateLimiter:
       "query": EndpointCategory.GRAPH_QUERY,
       "mcp": EndpointCategory.GRAPH_MCP,
       "agent": EndpointCategory.GRAPH_AGENT,
+      "search": EndpointCategory.GRAPH_SEARCH,
     }
     return mapping.get(operation, EndpointCategory.GRAPH_READ)
 
@@ -286,7 +293,7 @@ class DualLayerRateLimiter:
     stats = {}
 
     # Get current usage for each operation type
-    for operation in ["query", "mcp", "agent"]:
+    for operation in ["query", "mcp", "agent", "search"]:
       operation_stats = {}
 
       # Check each time window

@@ -472,8 +472,8 @@ def subscription_aware_rate_limit_dependency(request: Request):
   # Get user identification
   user_id = get_user_from_request(request)
   if not user_id:
-    # Anonymous users get free tier limits
-    subscription_tier = "free"
+    # Anonymous users get base tier limits
+    subscription_tier = "base"
     identifier = f"anon_sub:{request.client.host if request.client else 'unknown'}"
   else:
     # All authenticated users get ladybug-standard tier rate limits
@@ -537,7 +537,7 @@ def subscription_aware_rate_limit_dependency(request: Request):
 
     # Provide helpful error message
     upgrade_msg = ""
-    if subscription_tier in ["free", "starter"]:
+    if subscription_tier == "base":
       upgrade_msg = " Upgrade your subscription for higher limits."
 
     raise HTTPException(
@@ -583,7 +583,7 @@ def sse_connection_rate_limit_dependency(request: Request):
   # Determine subscription tier
   # For now, all authenticated users get ladybug-standard tier
   # In the future, this could check actual subscription status
-  subscription_tier = "ladybug-standard" if user_id else "free"
+  subscription_tier = "ladybug-standard" if user_id else "base"
 
   # Get rate limit for SSE based on subscription tier
   rate_limit = RateLimitConfig.get_rate_limit(subscription_tier, EndpointCategory.SSE)

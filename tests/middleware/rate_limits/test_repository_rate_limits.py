@@ -17,6 +17,7 @@ class TestAllowedSharedEndpoints:
     assert AllowedSharedEndpoints.QUERY.value == "query"
     assert AllowedSharedEndpoints.MCP.value == "mcp"
     assert AllowedSharedEndpoints.AGENT.value == "agent"
+    assert AllowedSharedEndpoints.SEARCH.value == "search"
     assert AllowedSharedEndpoints.SCHEMA.value == "schema"
     assert AllowedSharedEndpoints.STATUS.value == "status"
 
@@ -136,6 +137,7 @@ class TestDualLayerRateLimiter:
     assert limiter._operation_to_category("query") == EndpointCategory.GRAPH_QUERY
     assert limiter._operation_to_category("mcp") == EndpointCategory.GRAPH_MCP
     assert limiter._operation_to_category("agent") == EndpointCategory.GRAPH_AGENT
+    assert limiter._operation_to_category("search") == EndpointCategory.GRAPH_SEARCH
     assert limiter._operation_to_category("unknown") == EndpointCategory.GRAPH_READ
 
   @pytest.mark.asyncio
