@@ -2,7 +2,7 @@
 
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException
 from starlette import status as http_status
 
 from robosystems.middleware.auth.dependencies import get_current_user_with_graph
@@ -72,7 +72,7 @@ async def _check_search_rate_limit(
 
   try:
     limiter = DualLayerRateLimiter(redis_client)
-    user_tier = "ladybug-standard"
+    user_tier = getattr(current_user, "subscription_tier", None) or "ladybug-standard"
 
     limit_check = await limiter.check_limits(
       user_id=str(current_user.id),
@@ -93,10 +93,11 @@ async def _check_search_rate_limit(
           detail=message,
         )
       else:
+        retry_after = str(limit_check.get("detail", {}).get("reset_in", 60))
         raise HTTPException(
           status_code=http_status.HTTP_429_TOO_MANY_REQUESTS,
           detail=message,
-          headers={"Retry-After": "60"},
+          headers={"Retry-After": retry_after},
         )
   finally:
     await redis_client.aclose()
@@ -106,7 +107,6 @@ async def _check_search_rate_limit(
 async def search_documents(
   graph_id: str,
   request: SearchRequest,
-  req: Request,
   current_user: User = Depends(get_current_user_with_graph),
 ) -> SearchResponse:
   """Search filing narratives and text content within a graph."""
@@ -119,7 +119,6 @@ async def search_documents(
 async def get_document_section(
   graph_id: str,
   document_id: str,
-  req: Request,
   current_user: User = Depends(get_current_user_with_graph),
 ) -> DocumentSection:
   """Retrieve the full text of a document section by ID."""

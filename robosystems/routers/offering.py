@@ -211,6 +211,7 @@ async def get_service_offerings(
             plan_info["rate_limits"] = {
               "queries_per_hour": rate_limits.get("queries_per_hour"),
               "mcp_queries_per_hour": rate_limits.get("mcp_queries_per_hour"),
+              "searches_per_hour": rate_limits.get("searches_per_hour"),
               "agent_calls_per_hour": rate_limits.get("agent_calls_per_hour"),
             }
 

@@ -17,6 +17,7 @@ class TestAllowedSharedEndpoints:
     assert AllowedSharedEndpoints.QUERY.value == "query"
     assert AllowedSharedEndpoints.MCP.value == "mcp"
     assert AllowedSharedEndpoints.AGENT.value == "agent"
+    assert AllowedSharedEndpoints.SEARCH.value == "search"
     assert AllowedSharedEndpoints.SCHEMA.value == "schema"
     assert AllowedSharedEndpoints.STATUS.value == "status"
 

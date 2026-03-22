@@ -13,8 +13,8 @@ def test_periods_convert_to_expected_seconds():
   assert RateLimitPeriod.DAY.to_seconds() == 86400
 
 
-def test_unknown_tier_falls_back_to_free_limits():
-  # pick category only present in free config
+def test_unknown_tier_falls_back_to_base_limits():
+  # pick category only present in base config
   limit, window = RateLimitConfig.get_rate_limit("mystery", EndpointCategory.AUTH)
 
   assert (
