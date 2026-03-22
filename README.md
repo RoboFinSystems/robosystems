@@ -44,7 +44,7 @@ This initializes the `.env` file and starts the complete RoboSystems stack with:
 - Dagster for data pipeline orchestration
 - PostgreSQL for graph metadata, IAM and Dagster
 - Valkey for caching, SSE messaging, and rate limiting
-- OpenSearch for full-text document search
+- OpenSearch for full-text and semantic document search
 - Localstack for S3 and DynamoDB emulation
 
 **Service URLs:**
@@ -146,7 +146,7 @@ RoboSystems is built on a modern, scalable architecture with:
 **Data Layer:**
 
 - PostgreSQL for IAM, graph metadata, and Dagster
-- OpenSearch for full-text document search (BM25) with graph_id tenant isolation
+- OpenSearch for full-text and semantic document search (BM25 + KNN) with graph_id tenant isolation
 - LanceDB for graph element vector similarity search (IVF-PQ indexes)
 - Valkey for caching, SSE messaging, and rate limiting
 - AWS S3 for data lake storage and static assets
@@ -158,6 +158,7 @@ RoboSystems is built on a modern, scalable architecture with:
 - EC2 ASG for LadybugDB writer clusters
 - EC2 ALB + ASG for LadybugDB shared replica clusters
 - RDS PostgreSQL + ElastiCache Valkey
+- OpenSearch for full-text and semantic document search
 - CloudFormation infrastructure deployed via GitHub Actions with OIDC
 
 **For detailed architecture documentation, see the [Architecture Overview](https://github.com/RoboFinSystems/robosystems/wiki/Architecture-Overview) in the Wiki.**
@@ -166,11 +167,11 @@ RoboSystems is built on a modern, scalable architecture with:
 
 A curated knowledge graph of US public company financial data from SEC EDGAR XBRL filings. Runs on the shared LadybugDB tier, accessible via MCP tools, Cypher queries, and the AI agent.
 
-**Pipeline**: EDGAR → Download → Process (Parquet) → Stage (DuckDB) → Enrich (fastembed) → Materialize (LadybugDB) → Index (OpenSearch)
+**Pipeline**: EDGAR → Download → Process (Parquet) → Stage (DuckDB) → Enrich (fastembed) → Materialize (LadybugDB) → Index + Embed (OpenSearch)
 
 **Graph**: 14 node types (`Entity`, `Report`, `Fact`, `Element`, `Structure`, `Association`, ...) and 24 relationship types modeling the full XBRL reporting hierarchy — from company filings down to individual financial facts with their taxonomy relationships and disclosure classifications.
 
-**Document Search**: Full-text BM25 search via OpenSearch across XBRL text blocks, narrative sections (MD&A, Risk Factors, Cybersecurity), and iXBRL disclosures with XBRL element metadata bridging graph facts and filing context.
+**Document Search**: Full-text and semantic search via OpenSearch across XBRL text blocks, narrative sections (MD&A, Risk Factors, Cybersecurity), and iXBRL disclosures. Hybrid search combines BM25 keyword matching with KNN vector similarity (fastembed bge-small-en-v1.5, 384-dim embeddings) for conceptual query understanding. iXBRL element metadata bridges graph facts and filing context.
 
 **Enrichment**: Every element is mapped to ~50 canonical financial concepts (revenue, net_income, total_assets, etc.) via fastembed cosine similarity. Structures are classified by statement type. Associations are tagged with disclosure types from the [Seattle Method](http://xbrlsite.com/seattlemethod/SeattleMethod.pdf) disclosure-mechanics taxonomy. Offline knowledge artifacts (PageRank, BFS classification, cross-filing consensus) refine confidence scores using an [icebug](https://github.com/Ladybug-Memory/icebug) graph built from the full corpus.
 
