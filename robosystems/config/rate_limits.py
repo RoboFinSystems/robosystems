@@ -45,6 +45,7 @@ class EndpointCategory(str, Enum):
   GRAPH_SYNC = "graph_sync"
   GRAPH_MCP = "graph_mcp"
   GRAPH_AGENT = "graph_agent"
+  GRAPH_SEARCH = "graph_search"  # OpenSearch full-text search (shared resource)
 
   # High-cost operations
   GRAPH_QUERY = "graph_query"  # Direct Cypher queries
@@ -87,150 +88,119 @@ class RateLimitConfig:
   SUBSCRIPTION_RATE_LIMITS: dict[
     str, dict[EndpointCategory, tuple[int, RateLimitPeriod]]
   ] = {
-    "free": {
-      # Non-graph endpoints - keep some restrictions for free tier
+    # -----------------------------------------------------------------------
+    # MANAGED SERVICE RATE LIMITS
+    # All tiers share managed infrastructure. Limits are conservative to
+    # protect shared resources (OpenSearch t3.medium, LadybugDB on m7g/r7g).
+    # For self-hosted scale, customers deploy their own infrastructure.
+    # Loosen these as infra scales up.
+    # -----------------------------------------------------------------------
+    "base": {
+      # Anonymous / unrecognized tier — tightest limits
       EndpointCategory.AUTH: (10, RateLimitPeriod.MINUTE),
+      EndpointCategory.USER_MANAGEMENT: (30, RateLimitPeriod.MINUTE),
+      EndpointCategory.TASKS: (30, RateLimitPeriod.MINUTE),
+      EndpointCategory.STATUS: (60, RateLimitPeriod.MINUTE),
+      EndpointCategory.SSE: (3, RateLimitPeriod.MINUTE),
+      EndpointCategory.BILLING: (60, RateLimitPeriod.MINUTE),  # Never block payments
+      # Graph-scoped
+      EndpointCategory.GRAPH_READ: (30, RateLimitPeriod.MINUTE),
+      EndpointCategory.GRAPH_WRITE: (10, RateLimitPeriod.MINUTE),
+      EndpointCategory.GRAPH_ANALYTICS: (5, RateLimitPeriod.MINUTE),
+      EndpointCategory.GRAPH_BACKUP: (2, RateLimitPeriod.MINUTE),
+      EndpointCategory.GRAPH_SYNC: (3, RateLimitPeriod.MINUTE),
+      EndpointCategory.GRAPH_MCP: (5, RateLimitPeriod.MINUTE),
+      EndpointCategory.GRAPH_AGENT: (3, RateLimitPeriod.MINUTE),
+      EndpointCategory.GRAPH_SEARCH: (5, RateLimitPeriod.MINUTE),
+      EndpointCategory.GRAPH_QUERY: (20, RateLimitPeriod.MINUTE),
+      EndpointCategory.GRAPH_IMPORT: (2, RateLimitPeriod.MINUTE),
+      # Table operations
+      EndpointCategory.TABLE_QUERY: (15, RateLimitPeriod.MINUTE),
+      EndpointCategory.TABLE_UPLOAD: (5, RateLimitPeriod.MINUTE),
+      EndpointCategory.TABLE_MANAGEMENT: (5, RateLimitPeriod.MINUTE),
+    },
+    # ladybug-standard: m7g.large (8GB, 2 vCPU) — anchor tier
+    "ladybug-standard": {
+      EndpointCategory.AUTH: (20, RateLimitPeriod.MINUTE),
       EndpointCategory.USER_MANAGEMENT: (60, RateLimitPeriod.MINUTE),
       EndpointCategory.TASKS: (60, RateLimitPeriod.MINUTE),
       EndpointCategory.STATUS: (120, RateLimitPeriod.MINUTE),
-      EndpointCategory.SSE: (
-        5,
-        RateLimitPeriod.MINUTE,
-      ),  # Limited SSE connections for free
+      EndpointCategory.SSE: (5, RateLimitPeriod.MINUTE),
       EndpointCategory.BILLING: (60, RateLimitPeriod.MINUTE),  # Never block payments
-      # Graph-scoped endpoints - burst protection only
-      EndpointCategory.GRAPH_READ: (100, RateLimitPeriod.MINUTE),
-      EndpointCategory.GRAPH_WRITE: (20, RateLimitPeriod.MINUTE),
-      EndpointCategory.GRAPH_ANALYTICS: (10, RateLimitPeriod.MINUTE),
-      EndpointCategory.GRAPH_BACKUP: (2, RateLimitPeriod.MINUTE),
-      EndpointCategory.GRAPH_SYNC: (5, RateLimitPeriod.MINUTE),
-      EndpointCategory.GRAPH_MCP: (10, RateLimitPeriod.MINUTE),
-      EndpointCategory.GRAPH_AGENT: (5, RateLimitPeriod.MINUTE),
-      EndpointCategory.GRAPH_QUERY: (50, RateLimitPeriod.MINUTE),
-      EndpointCategory.GRAPH_IMPORT: (2, RateLimitPeriod.MINUTE),
-      # Table operations - free tier
-      EndpointCategory.TABLE_QUERY: (30, RateLimitPeriod.MINUTE),
-      EndpointCategory.TABLE_UPLOAD: (10, RateLimitPeriod.MINUTE),
-      EndpointCategory.TABLE_MANAGEMENT: (10, RateLimitPeriod.MINUTE),
-    },
-    # Technical tier names (primary)
-    "ladybug-standard": {
-      # Non-graph endpoints - generous burst limits
-      EndpointCategory.AUTH: (20, RateLimitPeriod.MINUTE),
-      EndpointCategory.USER_MANAGEMENT: (600, RateLimitPeriod.MINUTE),
-      EndpointCategory.TASKS: (200, RateLimitPeriod.MINUTE),
-      EndpointCategory.STATUS: (600, RateLimitPeriod.MINUTE),
-      EndpointCategory.SSE: (
+      # Graph-scoped — sized for m7g.large
+      EndpointCategory.GRAPH_READ: (120, RateLimitPeriod.MINUTE),
+      EndpointCategory.GRAPH_WRITE: (30, RateLimitPeriod.MINUTE),
+      EndpointCategory.GRAPH_ANALYTICS: (15, RateLimitPeriod.MINUTE),
+      EndpointCategory.GRAPH_BACKUP: (5, RateLimitPeriod.MINUTE),
+      EndpointCategory.GRAPH_SYNC: (10, RateLimitPeriod.MINUTE),
+      EndpointCategory.GRAPH_MCP: (30, RateLimitPeriod.MINUTE),
+      EndpointCategory.GRAPH_AGENT: (15, RateLimitPeriod.MINUTE),
+      EndpointCategory.GRAPH_SEARCH: (
         10,
         RateLimitPeriod.MINUTE,
-      ),  # Standard SSE connection rate
-      EndpointCategory.BILLING: (60, RateLimitPeriod.MINUTE),  # Never block payments
-      # Graph-scoped endpoints - HIGH BURST LIMITS
-      EndpointCategory.GRAPH_READ: (500, RateLimitPeriod.MINUTE),  # 30k/hour possible
-      EndpointCategory.GRAPH_WRITE: (100, RateLimitPeriod.MINUTE),  # 6k/hour possible
-      EndpointCategory.GRAPH_ANALYTICS: (
-        50,
-        RateLimitPeriod.MINUTE,
-      ),  # 3k/hour possible
-      EndpointCategory.GRAPH_BACKUP: (10, RateLimitPeriod.MINUTE),  # 600/hour possible
-      EndpointCategory.GRAPH_SYNC: (100, RateLimitPeriod.MINUTE),  # 6k/hour possible
-      EndpointCategory.GRAPH_MCP: (100, RateLimitPeriod.MINUTE),  # 6k/hour possible
-      EndpointCategory.GRAPH_AGENT: (50, RateLimitPeriod.MINUTE),  # 3k/hour possible
-      EndpointCategory.GRAPH_QUERY: (200, RateLimitPeriod.MINUTE),  # 12k/hour possible
-      EndpointCategory.GRAPH_IMPORT: (50, RateLimitPeriod.MINUTE),  # 3k/hour possible
-      # Table operations (generous burst limits)
-      EndpointCategory.TABLE_QUERY: (60, RateLimitPeriod.MINUTE),  # 3.6k/hour possible
-      EndpointCategory.TABLE_UPLOAD: (20, RateLimitPeriod.MINUTE),  # 1.2k/hour possible
-      EndpointCategory.TABLE_MANAGEMENT: (
-        30,
-        RateLimitPeriod.MINUTE,
-      ),  # 1.8k/hour possible
+      ),  # Shared OpenSearch t3.medium
+      EndpointCategory.GRAPH_QUERY: (60, RateLimitPeriod.MINUTE),
+      EndpointCategory.GRAPH_IMPORT: (10, RateLimitPeriod.MINUTE),
+      # Table operations
+      EndpointCategory.TABLE_QUERY: (30, RateLimitPeriod.MINUTE),
+      EndpointCategory.TABLE_UPLOAD: (10, RateLimitPeriod.MINUTE),
+      EndpointCategory.TABLE_MANAGEMENT: (15, RateLimitPeriod.MINUTE),
     },
+    # ladybug-large: r7g.large (16GB, 2 vCPU)
+    # Same base values as standard — graph.yml api_rate_multiplier (1.5x) handles scaling
     "ladybug-large": {
-      # Non-graph endpoints - very high burst limits
-      EndpointCategory.AUTH: (50, RateLimitPeriod.MINUTE),
-      EndpointCategory.USER_MANAGEMENT: (1000, RateLimitPeriod.MINUTE),
-      EndpointCategory.TASKS: (1000, RateLimitPeriod.MINUTE),
-      EndpointCategory.STATUS: (3000, RateLimitPeriod.MINUTE),
-      EndpointCategory.SSE: (
-        30,
-        RateLimitPeriod.MINUTE,
-      ),  # More SSE connections for large tier
+      EndpointCategory.AUTH: (20, RateLimitPeriod.MINUTE),
+      EndpointCategory.USER_MANAGEMENT: (60, RateLimitPeriod.MINUTE),
+      EndpointCategory.TASKS: (60, RateLimitPeriod.MINUTE),
+      EndpointCategory.STATUS: (120, RateLimitPeriod.MINUTE),
+      EndpointCategory.SSE: (5, RateLimitPeriod.MINUTE),
       EndpointCategory.BILLING: (60, RateLimitPeriod.MINUTE),  # Never block payments
-      # Graph-scoped endpoints - VERY HIGH BURST LIMITS
-      EndpointCategory.GRAPH_READ: (2000, RateLimitPeriod.MINUTE),  # 120k/hour possible
-      EndpointCategory.GRAPH_WRITE: (500, RateLimitPeriod.MINUTE),  # 30k/hour possible
-      EndpointCategory.GRAPH_ANALYTICS: (
-        200,
+      # Graph-scoped — same base, multiplied by 1.5x from graph.yml
+      EndpointCategory.GRAPH_READ: (120, RateLimitPeriod.MINUTE),
+      EndpointCategory.GRAPH_WRITE: (30, RateLimitPeriod.MINUTE),
+      EndpointCategory.GRAPH_ANALYTICS: (15, RateLimitPeriod.MINUTE),
+      EndpointCategory.GRAPH_BACKUP: (5, RateLimitPeriod.MINUTE),
+      EndpointCategory.GRAPH_SYNC: (10, RateLimitPeriod.MINUTE),
+      EndpointCategory.GRAPH_MCP: (30, RateLimitPeriod.MINUTE),
+      EndpointCategory.GRAPH_AGENT: (15, RateLimitPeriod.MINUTE),
+      EndpointCategory.GRAPH_SEARCH: (
+        10,
         RateLimitPeriod.MINUTE,
-      ),  # 12k/hour possible
-      EndpointCategory.GRAPH_BACKUP: (50, RateLimitPeriod.MINUTE),  # 3k/hour possible
-      EndpointCategory.GRAPH_SYNC: (500, RateLimitPeriod.MINUTE),  # 30k/hour possible
-      EndpointCategory.GRAPH_MCP: (500, RateLimitPeriod.MINUTE),  # 30k/hour possible
-      EndpointCategory.GRAPH_AGENT: (200, RateLimitPeriod.MINUTE),  # 12k/hour possible
-      EndpointCategory.GRAPH_QUERY: (1000, RateLimitPeriod.MINUTE),  # 60k/hour possible
-      EndpointCategory.GRAPH_IMPORT: (200, RateLimitPeriod.MINUTE),  # 12k/hour possible
-      # Table operations - large tier (very high burst limits)
-      EndpointCategory.TABLE_QUERY: (300, RateLimitPeriod.MINUTE),  # 18k/hour possible
-      EndpointCategory.TABLE_UPLOAD: (100, RateLimitPeriod.MINUTE),  # 6k/hour possible
-      EndpointCategory.TABLE_MANAGEMENT: (
-        150,
-        RateLimitPeriod.MINUTE,
-      ),  # 9k/hour possible
+      ),  # Shared OpenSearch t3.medium
+      EndpointCategory.GRAPH_QUERY: (60, RateLimitPeriod.MINUTE),
+      EndpointCategory.GRAPH_IMPORT: (10, RateLimitPeriod.MINUTE),
+      # Table operations
+      EndpointCategory.TABLE_QUERY: (30, RateLimitPeriod.MINUTE),
+      EndpointCategory.TABLE_UPLOAD: (10, RateLimitPeriod.MINUTE),
+      EndpointCategory.TABLE_MANAGEMENT: (15, RateLimitPeriod.MINUTE),
     },
+    # ladybug-xlarge: r7g.xlarge (32GB, 4 vCPU)
+    # Same base values as standard — graph.yml api_rate_multiplier (2.5x) handles scaling
     "ladybug-xlarge": {
-      # XLarge tier gets extreme burst limits - essentially unlimited
-      # Only safety limits to prevent complete system abuse
-      EndpointCategory.AUTH: (100, RateLimitPeriod.MINUTE),
-      EndpointCategory.USER_MANAGEMENT: (3000, RateLimitPeriod.MINUTE),
-      EndpointCategory.TASKS: (5000, RateLimitPeriod.MINUTE),
-      EndpointCategory.STATUS: (10000, RateLimitPeriod.MINUTE),
-      EndpointCategory.SSE: (
-        100,
-        RateLimitPeriod.MINUTE,
-      ),  # Generous SSE connections for xlarge tier
+      EndpointCategory.AUTH: (20, RateLimitPeriod.MINUTE),
+      EndpointCategory.USER_MANAGEMENT: (60, RateLimitPeriod.MINUTE),
+      EndpointCategory.TASKS: (60, RateLimitPeriod.MINUTE),
+      EndpointCategory.STATUS: (120, RateLimitPeriod.MINUTE),
+      EndpointCategory.SSE: (5, RateLimitPeriod.MINUTE),
       EndpointCategory.BILLING: (60, RateLimitPeriod.MINUTE),  # Never block payments
-      # Graph-scoped endpoints - EXTREME BURST LIMITS
-      EndpointCategory.GRAPH_READ: (
-        10000,
+      # Graph-scoped — same base, multiplied by 2.5x from graph.yml
+      EndpointCategory.GRAPH_READ: (120, RateLimitPeriod.MINUTE),
+      EndpointCategory.GRAPH_WRITE: (30, RateLimitPeriod.MINUTE),
+      EndpointCategory.GRAPH_ANALYTICS: (15, RateLimitPeriod.MINUTE),
+      EndpointCategory.GRAPH_BACKUP: (5, RateLimitPeriod.MINUTE),
+      EndpointCategory.GRAPH_SYNC: (10, RateLimitPeriod.MINUTE),
+      EndpointCategory.GRAPH_MCP: (30, RateLimitPeriod.MINUTE),
+      EndpointCategory.GRAPH_AGENT: (15, RateLimitPeriod.MINUTE),
+      EndpointCategory.GRAPH_SEARCH: (
+        10,
         RateLimitPeriod.MINUTE,
-      ),  # 600k/hour possible
-      EndpointCategory.GRAPH_WRITE: (
-        5000,
-        RateLimitPeriod.MINUTE,
-      ),  # 300k/hour possible
-      EndpointCategory.GRAPH_ANALYTICS: (
-        2000,
-        RateLimitPeriod.MINUTE,
-      ),  # 120k/hour possible
-      EndpointCategory.GRAPH_BACKUP: (200, RateLimitPeriod.MINUTE),  # 12k/hour possible
-      EndpointCategory.GRAPH_SYNC: (2000, RateLimitPeriod.MINUTE),  # 120k/hour possible
-      EndpointCategory.GRAPH_MCP: (5000, RateLimitPeriod.MINUTE),  # 300k/hour possible
-      EndpointCategory.GRAPH_AGENT: (
-        2000,
-        RateLimitPeriod.MINUTE,
-      ),  # 120k/hour possible
-      EndpointCategory.GRAPH_QUERY: (
-        10000,
-        RateLimitPeriod.MINUTE,
-      ),  # 600k/hour possible
-      EndpointCategory.GRAPH_IMPORT: (
-        1000,
-        RateLimitPeriod.MINUTE,
-      ),  # 60k/hour possible
-      # Table operations - xlarge tier (extreme burst limits)
-      EndpointCategory.TABLE_QUERY: (
-        1000,
-        RateLimitPeriod.MINUTE,
-      ),  # 60k/hour possible
-      EndpointCategory.TABLE_UPLOAD: (
-        500,
-        RateLimitPeriod.MINUTE,
-      ),  # 30k/hour possible
-      EndpointCategory.TABLE_MANAGEMENT: (
-        500,
-        RateLimitPeriod.MINUTE,
-      ),  # 30k/hour possible
+      ),  # Shared OpenSearch t3.medium
+      EndpointCategory.GRAPH_QUERY: (60, RateLimitPeriod.MINUTE),
+      EndpointCategory.GRAPH_IMPORT: (10, RateLimitPeriod.MINUTE),
+      # Table operations
+      EndpointCategory.TABLE_QUERY: (30, RateLimitPeriod.MINUTE),
+      EndpointCategory.TABLE_UPLOAD: (10, RateLimitPeriod.MINUTE),
+      EndpointCategory.TABLE_MANAGEMENT: (15, RateLimitPeriod.MINUTE),
     },
   }
 
@@ -246,8 +216,8 @@ class RateLimitConfig:
     """
     tier_limits = cls.SUBSCRIPTION_RATE_LIMITS.get(tier)
     if not tier_limits:
-      # Default to free tier if unknown
-      tier_limits = cls.SUBSCRIPTION_RATE_LIMITS["free"]
+      # Default to base tier if unknown
+      tier_limits = cls.SUBSCRIPTION_RATE_LIMITS["base"]
 
     limit_config = tier_limits.get(category)
     if not limit_config:
@@ -352,6 +322,10 @@ class RateLimitConfig:
         return EndpointCategory.GRAPH_MCP
       elif endpoint_type == "agent":
         return EndpointCategory.GRAPH_AGENT
+
+      # Search operations (OpenSearch - shared resource)
+      elif endpoint_type == "search":
+        return EndpointCategory.GRAPH_SEARCH
 
       # Backup operations
       elif endpoint_type == "graph" and "backup" in path:

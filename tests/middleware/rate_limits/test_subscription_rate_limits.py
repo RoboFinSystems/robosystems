@@ -21,8 +21,8 @@ class TestSubscriptionRateLimits:
 
   def test_get_subscription_rate_limit(self):
     """Test getting subscription rate limit for tier and category."""
-    # Test for various tiers
-    tiers = ["free", "starter", "pro", "enterprise"]
+    # Test for actual tiers
+    tiers = ["base", "ladybug-standard", "ladybug-large", "ladybug-xlarge"]
     categories = [
       EndpointCategory.GRAPH_READ,
       EndpointCategory.GRAPH_WRITE,
@@ -49,10 +49,14 @@ class TestSubscriptionRateLimits:
     """Test that get_subscription_rate_limit delegates to RateLimitConfig."""
     mock_get_rate_limit.return_value = (100, 60)
 
-    result = get_subscription_rate_limit("pro", EndpointCategory.GRAPH_READ)
+    result = get_subscription_rate_limit(
+      "ladybug-standard", EndpointCategory.GRAPH_READ
+    )
 
     assert result == (100, 60)
-    mock_get_rate_limit.assert_called_once_with("pro", EndpointCategory.GRAPH_READ)
+    mock_get_rate_limit.assert_called_once_with(
+      "ladybug-standard", EndpointCategory.GRAPH_READ
+    )
 
   def test_get_endpoint_category_query_endpoints(self):
     """Test endpoint categorization for query endpoints."""
@@ -186,26 +190,18 @@ class TestSubscriptionRateLimits:
           )  # window in seconds or period
 
   def test_rate_limit_hierarchy(self):
-    """Test that rate limits follow expected hierarchy."""
-    # If we have access to actual limits, verify enterprise > pro > starter > free
-    if SUBSCRIPTION_RATE_LIMITS and len(SUBSCRIPTION_RATE_LIMITS) > 0:
-      # Get limits for a common category if available
-      test_category = EndpointCategory.GRAPH_READ
+    """Test that rate limits follow expected hierarchy: base <= standard <= large <= xlarge."""
+    test_category = EndpointCategory.GRAPH_READ
 
-      free_limit = get_subscription_rate_limit("free", test_category)
-      starter_limit = get_subscription_rate_limit("starter", test_category)
-      pro_limit = get_subscription_rate_limit("pro", test_category)
-      enterprise_limit = get_subscription_rate_limit("enterprise", test_category)
+    base_limit = get_subscription_rate_limit("base", test_category)
+    standard_limit = get_subscription_rate_limit("ladybug-standard", test_category)
+    large_limit = get_subscription_rate_limit("ladybug-large", test_category)
+    xlarge_limit = get_subscription_rate_limit("ladybug-xlarge", test_category)
 
-      # If all tiers have limits, verify hierarchy
-      if all([free_limit, starter_limit, pro_limit, enterprise_limit]):
-        # Higher tiers should have higher or equal limits
-        assert free_limit is not None and starter_limit is not None
-        assert free_limit[0] <= starter_limit[0]
-        assert starter_limit is not None and pro_limit is not None
-        assert starter_limit[0] <= pro_limit[0]
-        assert pro_limit is not None and enterprise_limit is not None
-        assert pro_limit[0] <= enterprise_limit[0]
+    assert all([base_limit, standard_limit, large_limit, xlarge_limit])
+    assert base_limit[0] <= standard_limit[0]
+    assert standard_limit[0] <= large_limit[0]
+    assert large_limit[0] <= xlarge_limit[0]
 
   def test_endpoint_category_enum_values(self):
     """Test that EndpointCategory enum is accessible."""
@@ -224,7 +220,9 @@ class TestSubscriptionRateLimits:
     mock_config.get_endpoint_category.return_value = EndpointCategory.GRAPH_READ
 
     # Test get_subscription_rate_limit
-    result1 = get_subscription_rate_limit("pro", EndpointCategory.GRAPH_READ)
+    result1 = get_subscription_rate_limit(
+      "ladybug-standard", EndpointCategory.GRAPH_READ
+    )
     assert result1 == (100, 60)
 
     # Test get_endpoint_category
