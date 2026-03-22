@@ -4,7 +4,8 @@ Two-tool pattern:
 1. search-documents: Keyword search returning ranked snippets with metadata
 2. get-document-section: Drill into a specific result for full content
 
-Uses BM25 keyword matching via OpenSearch. Semantic/vector search is planned.
+Uses BM25 keyword matching via OpenSearch. When SEMANTIC_SEARCH_ENABLED is true,
+hybrid search combines BM25 with vector similarity for better conceptual matching.
 """
 
 from typing import Any
@@ -21,7 +22,7 @@ class SearchDocumentsTool:
   def get_tool_definition(self) -> dict[str, Any]:
     return {
       "name": "search-documents",
-      "description": """Full-text keyword search across SEC filing narratives and disclosures. Searches MD&A, risk factors, business descriptions, cybersecurity disclosures, and other qualitative content using keyword matching (BM25).
+      "description": """Search across SEC filing narratives and disclosures. Searches MD&A, risk factors, business descriptions, cybersecurity disclosures, and other qualitative content. Uses keyword matching (BM25) by default; when semantic search is enabled, combines keyword matching with vector similarity for better conceptual results.
 
 **WHEN TO USE:**
 - When the user asks about topics, risks, strategies, or disclosures mentioned in filings
@@ -79,6 +80,11 @@ class SearchDocumentsTool:
             "type": "integer",
             "description": "Optional: filter by fiscal year",
           },
+          "semantic": {
+            "type": "boolean",
+            "description": "Enable semantic (vector) search for better conceptual matching. Only works when SEMANTIC_SEARCH_ENABLED is true and embeddings have been indexed.",
+            "default": True,
+          },
           "size": {
             "type": "integer",
             "description": "Max results (default 10, max 50)",
@@ -100,6 +106,8 @@ class SearchDocumentsTool:
 
     graph_id = self.client.graph_id
 
+    from robosystems.config import env
+
     request = SearchRequest(
       query=arguments["query"],
       entity=arguments.get("entity"),
@@ -107,6 +115,7 @@ class SearchDocumentsTool:
       section=arguments.get("section"),
       element=arguments.get("element"),
       fiscal_year=arguments.get("fiscal_year"),
+      semantic=arguments.get("semantic", env.SEMANTIC_SEARCH_ENABLED),
       size=min(arguments.get("size", 10), 50),
     )
 

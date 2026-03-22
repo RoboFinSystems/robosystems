@@ -792,11 +792,12 @@ def sec_index_retry_sensor(context: RunStatusSensorContext):
     )
     return
 
-  # Check if the job is already running for this partition
+  # Check if the job is already running for this specific partition
   active_runs = context.instance.get_runs(
     filters=RunsFilter(
       job_name=job_name,
       statuses=[DagsterRunStatus.STARTED, DagsterRunStatus.QUEUED],
+      tags={"dagster/partition": partition_key},
     ),
     limit=1,
   )
