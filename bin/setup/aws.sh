@@ -348,6 +348,9 @@ function create_ssm_tuning_parameters() {
         "sse/MAX_CONNECTIONS_PER_USER=5"
         "sse/QUEUE_SIZE=100"
 
+        # Indexing
+        "indexing/ENABLE_EMBEDDINGS=true"
+
         # Limits
         "limits/ORG_GRAPHS_DEFAULT=10"
 

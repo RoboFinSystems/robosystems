@@ -726,10 +726,24 @@ def sec_post_stage_index_sensor(context: RunStatusSensorContext):
       f"for {partition_key}"
     )
 
+    # Read embedding config from SSM tuning param (runtime-toggleable)
+    from robosystems.config.tuning import TuningConfig
+
+    enable_embeddings = TuningConfig.get_indexing_enable_embeddings()
+
     yield RunRequest(
       run_key=f"sec-{job_name}-chain-{partition_key}-{dagster_run.run_id[:8]}",
       job_name=job_name,
-      run_config={"ops": {asset_name: {"config": {"graph_id": graph_id}}}},
+      run_config={
+        "ops": {
+          asset_name: {
+            "config": {
+              "graph_id": graph_id,
+              "enable_embeddings": enable_embeddings,
+            }
+          }
+        }
+      },
       partition_key=partition_key,
       tags={
         "pipeline": "sec",
