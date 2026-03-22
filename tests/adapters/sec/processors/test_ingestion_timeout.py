@@ -63,6 +63,7 @@ class TestStagingTimeoutConfiguration:
       "STRUCTURE_HAS_ASSOCIATION",
       "ASSOCIATION_HAS_FROM_ELEMENT",
       "ASSOCIATION_HAS_TO_ELEMENT",
+      "ASSOCIATION_HAS_CLASSIFICATION",
     }
     assert expected_tables == LARGE_STAGING_TABLES
 
@@ -102,6 +103,7 @@ class TestGetStagingTimeout:
       "STRUCTURE_HAS_ASSOCIATION",
       "ASSOCIATION_HAS_FROM_ELEMENT",
       "ASSOCIATION_HAS_TO_ELEMENT",
+      "ASSOCIATION_HAS_CLASSIFICATION",
     ],
   )
   def test_large_tables_get_extended_timeout(self, table_name: str):

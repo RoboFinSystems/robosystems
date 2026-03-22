@@ -202,6 +202,10 @@ class DuckDBConnectionPool:
     try:
       db_path = self._get_database_path(graph_id)
 
+      # Defense-in-depth: verify resolved path stays under base_path
+      if not db_path.resolve().is_relative_to(self.base_path.resolve()):
+        raise ValueError(f"Path escapes base directory: {db_path}")
+
       # Ensure database directory exists
       db_path.parent.mkdir(parents=True, exist_ok=True)
 
