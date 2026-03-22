@@ -51,6 +51,7 @@ Usage:
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -218,7 +219,6 @@ class SECPipeline:
         reset_staging: Whether to delete DuckDB file before staging (fresh start)
         rebuild_graph: Whether to rebuild LadybugDB (materialize jobs)
     """
-    import os
 
     if job_type == "stage":
       # sec_stage job - stages to persistent DuckDB only (Stage 1)
@@ -251,15 +251,42 @@ class SECPipeline:
         }
       }
     elif job_type == "textblocks_index":
+      from robosystems.config.tuning import TuningConfig
+
       config = {
         "ops": {
-          "sec_textblocks_indexed": {"config": {"graph_id": graph_id}},
+          "sec_textblocks_indexed": {
+            "config": {
+              "graph_id": graph_id,
+              "enable_embeddings": TuningConfig.get_indexing_enable_embeddings(),
+            }
+          },
         }
       }
     elif job_type == "narratives_index":
+      from robosystems.config.tuning import TuningConfig
+
       config = {
         "ops": {
-          "sec_narratives_indexed": {"config": {"graph_id": graph_id}},
+          "sec_narratives_indexed": {
+            "config": {
+              "graph_id": graph_id,
+              "enable_embeddings": TuningConfig.get_indexing_enable_embeddings(),
+            }
+          },
+        }
+      }
+    elif job_type == "ixbrl_index":
+      from robosystems.config.tuning import TuningConfig
+
+      config = {
+        "ops": {
+          "sec_ixbrl_disclosures_indexed": {
+            "config": {
+              "graph_id": graph_id,
+              "enable_embeddings": TuningConfig.get_indexing_enable_embeddings(),
+            }
+          },
         }
       }
     else:
@@ -509,6 +536,26 @@ class SECPipeline:
           logger.info(f"  Narratives indexed ({narr_result.duration_seconds:.1f}s)")
         else:
           logger.warning(f"  Narrative indexing issues: {narr_result.error}")
+
+        logger.info(f"\n[INDEX {quarter}] iXBRL disclosures...")
+        ixbrl_config_path = self._create_job_config(
+          tickers=self.tickers,
+          year=None,
+          job_type="ixbrl_index",
+        )
+        ixbrl_result = self.run_stage(
+          job_name="sec_ixbrl_index",
+          config_path=ixbrl_config_path,
+          year=quarter,
+          timeout=self.materialize_timeout,
+        )
+        all_results.append(ixbrl_result)
+        if ixbrl_result.success:
+          logger.info(
+            f"  iXBRL disclosures indexed ({ixbrl_result.duration_seconds:.1f}s)"
+          )
+        else:
+          logger.warning(f"  iXBRL indexing issues: {ixbrl_result.error}")
 
     # Summary
     overall_duration = time.time() - overall_start
@@ -1255,11 +1302,12 @@ def cmd_process(args):
 
 
 def cmd_index(args):
-  """Index text blocks and narratives into OpenSearch (Phase 4).
+  """Index text content into OpenSearch (Phase 4).
 
-  Runs both indexing jobs (partitioned by quarter):
+  Runs all three indexing jobs (partitioned by quarter):
   1. sec_textblocks_indexed — reads processed parquets, fetches externalized HTML, indexes
   2. sec_narratives_indexed — reads raw ZIPs, extracts sections, externalizes, indexes
+  3. sec_ixbrl_disclosures_indexed — parses iXBRL disclosure sections with XBRL element metadata
 
   Requires processed parquets to exist in S3 (run after processing completes).
   """
@@ -1322,6 +1370,26 @@ def cmd_index(args):
     logger.info(f"  Narratives indexed ({narr_result.duration_seconds:.1f}s)")
   else:
     logger.error(f"  Narrative indexing failed: {narr_result.error}")
+
+  # iXBRL disclosures
+  logger.info("\n[IXBRL] Extracting and indexing iXBRL disclosure sections...")
+  ixbrl_config = pipeline._create_job_config(
+    tickers=[],
+    year=None,
+    job_type="ixbrl_index",
+    graph_id=args.graph_id,
+  )
+  ixbrl_result = pipeline.run_stage(
+    job_name="sec_ixbrl_index",
+    config_path=ixbrl_config,
+    year=quarter,
+    timeout=args.timeout,
+  )
+  results.append(ixbrl_result)
+  if ixbrl_result.success:
+    logger.info(f"  iXBRL disclosures indexed ({ixbrl_result.duration_seconds:.1f}s)")
+  else:
+    logger.error(f"  iXBRL indexing failed: {ixbrl_result.error}")
 
   duration = time.time() - start_time
   successful = sum(1 for r in results if r.success)

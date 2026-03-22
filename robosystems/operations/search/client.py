@@ -189,27 +189,10 @@ class OpenSearchClient:
     )
     return {"indexed": total_indexed, "errors": total_errors}
 
-  def search(
-    self,
-    query: str,
-    graph_id: str,
-    filters: dict[str, Any] | None = None,
-    size: int = 10,
-    offset: int = 0,
-  ) -> dict[str, Any]:
-    """Search documents with mandatory graph_id filtering.
-
-    Args:
-        query: Search query string
-        graph_id: Required tenant filter
-        filters: Optional additional filters (entity, form_type, section, fiscal_year, etc.)
-        size: Max results to return
-        offset: Pagination offset
-
-    Returns:
-        OpenSearch response with hits and highlights
-    """
-    # Build filter clauses — graph_id is always required
+  def _build_filter_clauses(
+    self, graph_id: str, filters: dict[str, Any] | None = None
+  ) -> list[dict[str, Any]]:
+    """Build OpenSearch filter clauses with mandatory graph_id tenant isolation."""
     filter_clauses: list[dict[str, Any]] = [
       {"term": {"graph_id": graph_id}},
     ]
@@ -244,6 +227,44 @@ class OpenSearchClient:
       if filters.get("date_to"):
         filter_clauses.append({"range": {"filing_date": {"lte": filters["date_to"]}}})
 
+    return filter_clauses
+
+  @staticmethod
+  def _highlight_config() -> dict[str, Any]:
+    """Standard highlight configuration for search results."""
+    return {
+      "fields": {
+        "content": {
+          "fragment_size": 200,
+          "number_of_fragments": 3,
+          "pre_tags": [""],
+          "post_tags": [""],
+        }
+      }
+    }
+
+  def search(
+    self,
+    query: str,
+    graph_id: str,
+    filters: dict[str, Any] | None = None,
+    size: int = 10,
+    offset: int = 0,
+  ) -> dict[str, Any]:
+    """Search documents with mandatory graph_id filtering.
+
+    Args:
+        query: Search query string
+        graph_id: Required tenant filter
+        filters: Optional additional filters (entity, form_type, section, fiscal_year, etc.)
+        size: Max results to return
+        offset: Pagination offset
+
+    Returns:
+        OpenSearch response with hits and highlights
+    """
+    filter_clauses = self._build_filter_clauses(graph_id, filters)
+
     search_body: dict[str, Any] = {
       "query": {
         "bool": {
@@ -263,20 +284,84 @@ class OpenSearchClient:
           "filter": filter_clauses,
         }
       },
-      "highlight": {
-        "fields": {
-          "content": {
-            "fragment_size": 200,
-            "number_of_fragments": 3,
-            "pre_tags": [""],
-            "post_tags": [""],
-          }
-        }
-      },
+      "highlight": self._highlight_config(),
       "size": size,
       "from": offset,
       "_source": {
         "excludes": ["content"],
+      },
+    }
+
+    return self.client.search(index=self.index_name, body=search_body)
+
+  def hybrid_search(
+    self,
+    query: str,
+    query_embedding: list[float],
+    graph_id: str,
+    filters: dict[str, Any] | None = None,
+    size: int = 10,
+    offset: int = 0,
+  ) -> dict[str, Any]:
+    """Hybrid text + vector search with mandatory graph_id filtering.
+
+    Combines BM25 text matching with KNN vector similarity by nesting both
+    inside a bool.should clause. Documents matching either text or vector
+    (or both) are returned, ranked by combined score.
+
+    Note on pagination: KNN does not support offset-based pagination natively.
+    When offset > 0, we over-fetch (size + offset) results and let OpenSearch
+    handle the windowing. This is fine for typical result sets but becomes
+    inefficient at very high offsets.
+
+    Args:
+        query: Search query string
+        query_embedding: 384-dim embedding of the query from fastembed
+        graph_id: Required tenant filter
+        filters: Optional additional filters
+        size: Max results to return
+        offset: Pagination offset
+
+    Returns:
+        OpenSearch response with hits and highlights
+    """
+    filter_clauses = self._build_filter_clauses(graph_id, filters)
+
+    # Over-fetch for KNN to support offset pagination
+    knn_k = min(size + offset, 100)  # Cap at 100 to limit KNN cost
+
+    search_body: dict[str, Any] = {
+      "query": {
+        "bool": {
+          "should": [
+            {
+              "multi_match": {
+                "query": query,
+                "fields": [
+                  "content",
+                  "section_label^2",
+                  "entity_name^1.5",
+                ],
+                "type": "best_fields",
+              }
+            },
+            {
+              "knn": {
+                "embedding": {
+                  "vector": query_embedding,
+                  "k": knn_k,
+                }
+              }
+            },
+          ],
+          "filter": filter_clauses,
+        }
+      },
+      "highlight": self._highlight_config(),
+      "size": size,
+      "from": offset,
+      "_source": {
+        "excludes": ["content", "embedding"],
       },
     }
 

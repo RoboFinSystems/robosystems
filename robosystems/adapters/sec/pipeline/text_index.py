@@ -19,6 +19,7 @@ All depend on sec_processed_filings (need Entity/Report metadata from parquets).
 All run parallel to the DuckDB staging branch.
 """
 
+import gc
 import hashlib
 import io
 import math
@@ -43,6 +44,27 @@ from .configs import (
   SECTextBlockIndexConfig,
   sec_quarter_partitions,
 )
+
+EMBEDDING_MODEL_NAME = "bge-small-en-v1.5"
+
+
+def _embed_document_batch(enricher, documents: list[dict]) -> bool:
+  """Add embeddings to documents in-place using fastembed.
+
+  Called before bulk_index when enable_embeddings is True.
+  Returns True if embeddings were added, False on failure (documents
+  are still indexed without embeddings).
+  """
+  try:
+    texts = [doc.get("content", "") for doc in documents]
+    embeddings = enricher.embed_batch(texts)
+    for doc, emb in zip(documents, embeddings, strict=True):
+      doc["embedding"] = emb
+      doc["embedding_model"] = EMBEDDING_MODEL_NAME
+    return True
+  except Exception as e:
+    logger.warning(f"Embedding generation failed, indexing without vectors: {e}")
+    return False
 
 
 def _get_s3_client():
@@ -359,10 +381,22 @@ def sec_textblocks_indexed(
   os_client = OpenSearchClient(env.OPENSEARCH_URL, env.OPENSEARCH_INDEX)
   os_client.create_index_if_not_exists()
 
+  # Optionally load fastembed for embedding generation
+  enricher = None
+  if config.enable_embeddings:
+    from robosystems.adapters.sec.enrichment import SemanticEnricher
+
+    enricher = SemanticEnricher()
+    context.log.info("Loaded SemanticEnricher for embedding generation")
+
   # Get already-indexed accessions for incremental skip (scoped to this source type)
-  indexed_accessions = _get_indexed_accessions(
-    os_client, config.graph_id, source_type="xbrl_textblock"
-  )
+  if config.force_reindex:
+    indexed_accessions: set[str] = set()
+    context.log.info("Force reindex enabled — will re-index all documents")
+  else:
+    indexed_accessions = _get_indexed_accessions(
+      os_client, config.graph_id, source_type="xbrl_textblock"
+    )
   if indexed_accessions:
     context.log.info(
       f"Found {len(indexed_accessions)} already-indexed accessions, will skip"
@@ -418,7 +452,6 @@ def sec_textblocks_indexed(
       "filing_date",
       "fiscal_year_focus",
       "fiscal_period_focus",
-      "cik",
     ],
   )
   context.log.info("Reading Element table...")
@@ -447,6 +480,7 @@ def sec_textblocks_indexed(
 
   entities_df = entities_df.fillna("")
   entities_df["cik"] = entities_df["cik"].astype(str)
+  entities_df = entities_df.drop_duplicates(subset=["identifier"], keep="first")
   entity_lookup: dict[str, dict[str, str]] = entities_df.set_index("identifier")[
     ["ticker", "name", "cik"]
   ].to_dict("index")
@@ -462,6 +496,7 @@ def sec_textblocks_indexed(
   )
   reports_df = reports_df.rename(columns={"fiscal_period_focus": "fiscal_period"})
   reports_df = reports_df.fillna("")
+  reports_df = reports_df.drop_duplicates(subset=["identifier"], keep="first")
   report_lookup: dict[str, dict[str, Any]] = reports_df.set_index("identifier")[
     ["filing_date", "form", "fiscal_year", "fiscal_period", "accession_number"]
   ].to_dict("index")
@@ -661,6 +696,8 @@ def sec_textblocks_indexed(
 
     # Bulk index in batches to limit memory from accumulated documents
     if len(documents) >= 1000:
+      if enricher:
+        _embed_document_batch(enricher, documents)
       batch_result = os_client.bulk_index(documents)
       total_indexed += batch_result["indexed"]
       errors += batch_result["errors"]
@@ -674,6 +711,8 @@ def sec_textblocks_indexed(
 
   # Index remaining documents
   if documents:
+    if enricher:
+      _embed_document_batch(enricher, documents)
     batch_result = os_client.bulk_index(documents)
     total_indexed += batch_result["indexed"]
     errors += batch_result["errors"]
@@ -681,6 +720,11 @@ def sec_textblocks_indexed(
       f"Final batch indexed {batch_result['indexed']} docs "
       f"({batch_result['errors']} errors)"
     )
+
+  # Release enricher memory
+  if enricher:
+    del enricher
+    gc.collect()
 
   return MaterializeResult(
     metadata={
@@ -733,10 +777,22 @@ def sec_narratives_indexed(
   os_client = OpenSearchClient(env.OPENSEARCH_URL, env.OPENSEARCH_INDEX)
   os_client.create_index_if_not_exists()
 
+  # Optionally load fastembed for embedding generation
+  enricher = None
+  if config.enable_embeddings:
+    from robosystems.adapters.sec.enrichment import SemanticEnricher
+
+    enricher = SemanticEnricher()
+    context.log.info("Loaded SemanticEnricher for embedding generation")
+
   # Get already-indexed accessions for incremental skip (scoped to this source type)
-  indexed_accessions = _get_indexed_accessions(
-    os_client, config.graph_id, source_type="narrative_section"
-  )
+  if config.force_reindex:
+    indexed_accessions: set[str] = set()
+    context.log.info("Force reindex enabled — will re-index all documents")
+  else:
+    indexed_accessions = _get_indexed_accessions(
+      os_client, config.graph_id, source_type="narrative_section"
+    )
   if indexed_accessions:
     context.log.info(
       f"Found {len(indexed_accessions)} already-indexed accessions, will skip"
@@ -770,7 +826,6 @@ def sec_narratives_indexed(
       "filing_date",
       "fiscal_year_focus",
       "fiscal_period_focus",
-      "cik",
     ],
   )
   entity_table = _read_parquets_from_s3(
@@ -829,7 +884,7 @@ def sec_narratives_indexed(
       "filing_date": str(report.get("filing_date", "")),
       "fiscal_year": int(fy) if fy is not None and not math.isnan(fy) else None,
       "fiscal_period": report.get("fiscal_period_focus", ""),
-      "cik": entity_info.get("cik", str(report.get("cik", ""))),
+      "cik": entity_info.get("cik", ""),
       "ticker": entity_info.get("ticker", ""),
       "entity_name": entity_info.get("name", ""),
     }
@@ -962,6 +1017,8 @@ def sec_narratives_indexed(
 
     # Batch index to limit memory
     if len(documents) >= 500:
+      if enricher:
+        _embed_document_batch(enricher, documents)
       batch_result = os_client.bulk_index(documents)
       total_indexed += batch_result["indexed"]
       errors += batch_result["errors"]
@@ -972,6 +1029,8 @@ def sec_narratives_indexed(
 
   # Index remaining documents
   if documents:
+    if enricher:
+      _embed_document_batch(enricher, documents)
     batch_result = os_client.bulk_index(documents)
     total_indexed += batch_result["indexed"]
     errors += batch_result["errors"]
@@ -979,6 +1038,11 @@ def sec_narratives_indexed(
       f"Final batch indexed {batch_result['indexed']} sections "
       f"({batch_result['errors']} errors)"
     )
+
+  # Release enricher memory
+  if enricher:
+    del enricher
+    gc.collect()
 
   context.log.info(
     f"Narrative indexing complete: {filings_processed} filings, "
@@ -1038,10 +1102,22 @@ def sec_ixbrl_disclosures_indexed(
   os_client = OpenSearchClient(env.OPENSEARCH_URL, env.OPENSEARCH_INDEX)
   os_client.create_index_if_not_exists()
 
+  # Optionally load fastembed for embedding generation
+  enricher = None
+  if config.enable_embeddings:
+    from robosystems.adapters.sec.enrichment import SemanticEnricher
+
+    enricher = SemanticEnricher()
+    context.log.info("Loaded SemanticEnricher for embedding generation")
+
   # Get already-indexed accessions for incremental skip (scoped to this source type)
-  indexed_accessions = _get_indexed_accessions(
-    os_client, config.graph_id, source_type="ixbrl_disclosure"
-  )
+  if config.force_reindex:
+    indexed_accessions: set[str] = set()
+    context.log.info("Force reindex enabled — will re-index all documents")
+  else:
+    indexed_accessions = _get_indexed_accessions(
+      os_client, config.graph_id, source_type="ixbrl_disclosure"
+    )
   if indexed_accessions:
     context.log.info(
       f"Found {len(indexed_accessions)} already-indexed accessions, will skip"
@@ -1075,7 +1151,6 @@ def sec_ixbrl_disclosures_indexed(
       "filing_date",
       "fiscal_year_focus",
       "fiscal_period_focus",
-      "cik",
     ],
   )
   entity_table = _read_parquets_from_s3(
@@ -1128,7 +1203,7 @@ def sec_ixbrl_disclosures_indexed(
       "filing_date": str(report.get("filing_date", "")),
       "fiscal_year": int(fy) if fy is not None and not math.isnan(fy) else None,
       "fiscal_period": report.get("fiscal_period_focus", ""),
-      "cik": entity_info.get("cik", str(report.get("cik", ""))),
+      "cik": entity_info.get("cik", ""),
       "ticker": entity_info.get("ticker", ""),
       "entity_name": entity_info.get("name", ""),
     }
@@ -1229,6 +1304,8 @@ def sec_ixbrl_disclosures_indexed(
 
     # Batch index to limit memory
     if len(documents) >= 500:
+      if enricher:
+        _embed_document_batch(enricher, documents)
       batch_result = os_client.bulk_index(documents)
       total_indexed += batch_result["indexed"]
       errors += batch_result["errors"]
@@ -1239,6 +1316,8 @@ def sec_ixbrl_disclosures_indexed(
 
   # Index remaining
   if documents:
+    if enricher:
+      _embed_document_batch(enricher, documents)
     batch_result = os_client.bulk_index(documents)
     total_indexed += batch_result["indexed"]
     errors += batch_result["errors"]
@@ -1246,6 +1325,11 @@ def sec_ixbrl_disclosures_indexed(
       f"Final batch indexed {batch_result['indexed']} disclosures "
       f"({batch_result['errors']} errors)"
     )
+
+  # Release enricher memory
+  if enricher:
+    del enricher
+    gc.collect()
 
   context.log.info(
     f"iXBRL indexing complete: {filings_processed} filings, "

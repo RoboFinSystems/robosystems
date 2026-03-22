@@ -39,19 +39,19 @@ on:
         description: "OpenSearch instance type"
         required: false
         type: string
-        default: "t3.medium.search"
+        default: "t3.small.search"
       ebs_volume_size:
         description: "EBS volume size in GB"
         required: false
         type: string
         default: "100"
 
-      # Engine Configuration
+      # Engine Version Configuration
       engine_version:
-        description: "OpenSearch engine version"
+        description: "OpenSearch engine version (e.g., 2.17, 2.19)"
         required: false
         type: string
-        default: "OpenSearch_2.17"
+        default: "2.19"
 
       # Bastion Access (optional)
       bastion_sg_id:
@@ -120,7 +120,7 @@ jobs:
                 ParameterKey=Environment,ParameterValue=${{ inputs.environment }} \
                 ParameterKey=InstanceType,ParameterValue=${{ inputs.instance_type }} \
                 ParameterKey=EBSVolumeSize,ParameterValue=${{ inputs.ebs_volume_size }} \
-                ParameterKey=EngineVersion,ParameterValue=${{ inputs.engine_version }} \
+                ParameterKey=EngineVersion,ParameterValue=OpenSearch_${{ inputs.engine_version }} \
                 ParameterKey=BastionSecurityGroupId,ParameterValue=${{ inputs.bastion_sg_id }} \
                 ParameterKey=SNSAlertEmail,ParameterValue=${{ inputs.aws_sns_alert_email }}"
 
@@ -133,7 +133,7 @@ jobs:
               --tags \
                 Key=Environment,Value=${{ inputs.environment }} \
                 Key=Service,Value=RoboSystems \
-                Key=Component,Value=opensearch \
+                Key=Component,Value=OpenSearch \
                 Key=Repository,Value=${{ github.repository }} \
                 Key=CreatedBy,Value=GitHubActions
           else
@@ -145,7 +145,7 @@ jobs:
               --tags \
                 Key=Environment,Value=${{ inputs.environment }} \
                 Key=Service,Value=RoboSystems \
-                Key=Component,Value=opensearch \
+                Key=Component,Value=OpenSearch \
                 Key=Repository,Value=${{ github.repository }} \
                 Key=CreatedBy,Value=GitHubActions 2>&1) || true
 

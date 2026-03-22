@@ -349,6 +349,7 @@ Command groups: `subscriptions`, `invoices`, `credits`, `graphs`, `users`, `orgs
 | PostgreSQL  | RDS               | Burstable T4g instance         |
 | LadybugDB   | EC2 ARM64         | R7g instances (tier-dependent) |
 | Cache       | ElastiCache       | Valkey-compatible              |
+| Search      | OpenSearch         | Full-text + semantic (KNN)     |
 
 Instance sizes and capacity are managed via GitHub Actions variables (`just gha-list`) and vary between staging and production.
 

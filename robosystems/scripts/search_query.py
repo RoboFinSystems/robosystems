@@ -56,6 +56,12 @@ def main():
   )
   parser.add_argument("--size", type=int, default=10, help="Max results (default: 10)")
   parser.add_argument(
+    "--semantic",
+    action=argparse.BooleanOptionalAction,
+    default=False,
+    help="Enable semantic (hybrid) search using vector embeddings",
+  )
+  parser.add_argument(
     "--format",
     type=str,
     default="table",
@@ -158,18 +164,37 @@ def main():
   if args.source_type:
     filter_clauses.append({"term": {"source_type": args.source_type}})
 
+  text_clause = {
+    "multi_match": {
+      "query": args.query,
+      "fields": ["content", "section_label^2", "entity_name^1.5"],
+      "type": "best_fields",
+    }
+  }
+
+  should_clauses = [text_clause]
+
+  # Semantic search: embed the query and add KNN clause
+  if args.semantic:
+    try:
+      from robosystems.adapters.sec.enrichment import SemanticEnricher
+
+      enricher = SemanticEnricher()
+      query_embedding = enricher.embed_batch([args.query])[0]
+      should_clauses.append(
+        {"knn": {"embedding": {"vector": query_embedding, "k": args.size}}}
+      )
+      print("[semantic search enabled]\n")
+    except Exception as e:
+      print(
+        f"[semantic search unavailable: {e}, falling back to text]\n", file=sys.stderr
+      )
+
   search_body = {
     "query": {
       "bool": {
-        "must": [
-          {
-            "multi_match": {
-              "query": args.query,
-              "fields": ["content", "section_label^2", "entity_name^1.5"],
-              "type": "best_fields",
-            }
-          }
-        ],
+        "should": should_clauses,
+        "minimum_should_match": 1,
         "filter": filter_clauses,
       }
     },
