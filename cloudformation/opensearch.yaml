@@ -323,6 +323,17 @@ Resources:
       AlarmActions:
         - !Ref OpenSearchNotificationTopic
       TreatMissingData: notBreaching
+      Tags:
+        - Key: Name
+          Value: !Sub "robosystems-opensearch-${Environment}-cluster-red"
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: !Ref ServiceTag
+        - Key: Component
+          Value: !Ref ComponentTag
+        - Key: CreatedBy
+          Value: CloudFormation
 
   OpenSearchFreeStorageAlarm:
     Type: AWS::CloudWatch::Alarm
@@ -346,6 +357,17 @@ Resources:
       AlarmActions:
         - !Ref OpenSearchNotificationTopic
       TreatMissingData: notBreaching
+      Tags:
+        - Key: Name
+          Value: !Sub "robosystems-opensearch-${Environment}-low-storage"
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: !Ref ServiceTag
+        - Key: Component
+          Value: !Ref ComponentTag
+        - Key: CreatedBy
+          Value: CloudFormation
 
 Outputs:
   OpenSearchEndpoint:

@@ -194,6 +194,7 @@ def main():
     "query": {
       "bool": {
         "should": should_clauses,
+        "minimum_should_match": 1,
         "filter": filter_clauses,
       }
     },

@@ -10,6 +10,7 @@ hybrid search combines BM25 with vector similarity for better conceptual matchin
 
 from typing import Any
 
+from robosystems.config import env
 from robosystems.logger import logger
 
 
@@ -105,8 +106,6 @@ class SearchDocumentsTool:
       return {"error": "Text search is not available"}
 
     graph_id = self.client.graph_id
-
-    from robosystems.config import env
 
     request = SearchRequest(
       query=arguments["query"],

@@ -133,7 +133,7 @@ jobs:
               --tags \
                 Key=Environment,Value=${{ inputs.environment }} \
                 Key=Service,Value=RoboSystems \
-                Key=Component,Value=opensearch \
+                Key=Component,Value=OpenSearch \
                 Key=Repository,Value=${{ github.repository }} \
                 Key=CreatedBy,Value=GitHubActions
           else
@@ -145,7 +145,7 @@ jobs:
               --tags \
                 Key=Environment,Value=${{ inputs.environment }} \
                 Key=Service,Value=RoboSystems \
-                Key=Component,Value=opensearch \
+                Key=Component,Value=OpenSearch \
                 Key=Repository,Value=${{ github.repository }} \
                 Key=CreatedBy,Value=GitHubActions 2>&1) || true
 

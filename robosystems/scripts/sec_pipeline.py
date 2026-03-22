@@ -251,37 +251,40 @@ class SECPipeline:
         }
       }
     elif job_type == "textblocks_index":
+      from robosystems.config.tuning import TuningConfig
+
       config = {
         "ops": {
           "sec_textblocks_indexed": {
             "config": {
               "graph_id": graph_id,
-              "enable_embeddings": os.getenv("SEMANTIC_SEARCH_ENABLED", "false").lower()
-              == "true",
+              "enable_embeddings": TuningConfig.get_indexing_enable_embeddings(),
             }
           },
         }
       }
     elif job_type == "narratives_index":
+      from robosystems.config.tuning import TuningConfig
+
       config = {
         "ops": {
           "sec_narratives_indexed": {
             "config": {
               "graph_id": graph_id,
-              "enable_embeddings": os.getenv("SEMANTIC_SEARCH_ENABLED", "false").lower()
-              == "true",
+              "enable_embeddings": TuningConfig.get_indexing_enable_embeddings(),
             }
           },
         }
       }
     elif job_type == "ixbrl_index":
+      from robosystems.config.tuning import TuningConfig
+
       config = {
         "ops": {
           "sec_ixbrl_disclosures_indexed": {
             "config": {
               "graph_id": graph_id,
-              "enable_embeddings": os.getenv("SEMANTIC_SEARCH_ENABLED", "false").lower()
-              == "true",
+              "enable_embeddings": TuningConfig.get_indexing_enable_embeddings(),
             }
           },
         }
