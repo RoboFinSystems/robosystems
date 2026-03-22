@@ -26,6 +26,7 @@ default:
 # Start service
 start profile="robosystems" build="":
     @test -f {{_env}} || cp .env.example {{_env}}
+    @test -f {{_local_env}} || cp .env.local.example {{_local_env}}
     docker compose -f compose.yaml --env-file {{_env}} --profile {{profile}} up \
         {{ if build != "" { "--build" } else { "" } }} --detach
 

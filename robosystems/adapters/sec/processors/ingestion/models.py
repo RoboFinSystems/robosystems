@@ -232,6 +232,7 @@ LARGE_STAGING_TABLES = frozenset(
     "STRUCTURE_HAS_ASSOCIATION",  # ~200M rows - Structure -> Association
     "ASSOCIATION_HAS_FROM_ELEMENT",  # ~206M rows - Association -> Element
     "ASSOCIATION_HAS_TO_ELEMENT",  # ~206M rows - Association -> Element
+    "ASSOCIATION_HAS_CLASSIFICATION",  # ~206M rows - Association -> Classification
   }
 )
 
