@@ -259,7 +259,7 @@ async def create_repository_subscription(
         detail=f"You already have an active subscription to the {graph_id} repository",
       )
 
-    plan_config = BillingConfig.get_repository_plan(graph_id, request.plan_name)
+    plan_config = BillingConfig.get_repository_plan(parent_repo_id, request.plan_name)
     if not plan_config:
       raise HTTPException(
         status_code=400,
@@ -533,7 +533,7 @@ async def change_plan(
     new_plan_name = request.new_plan_name
 
     # Validate the new plan exists — BillingConfig handles tier extraction internally
-    plan_config = BillingConfig.get_repository_plan(graph_id, new_plan_name)
+    plan_config = BillingConfig.get_repository_plan(parent_repo_id, new_plan_name)
     if not plan_config:
       raise HTTPException(
         status_code=400,

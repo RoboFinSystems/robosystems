@@ -58,8 +58,8 @@ def verify_parent_graph_access(
   if is_shared_repository_or_subgraph(graph_id.lower()):
     raise HTTPException(
       status_code=status.HTTP_403_FORBIDDEN,
-      detail="Shared repositories cannot have subgraphs. "
-      "Subgraphs are only available for user-owned Enterprise and Premium graphs.",
+      detail="Shared repositories and their subgraphs cannot have nested subgraphs. "
+      "Subgraphs are only available for user-owned graphs.",
     )
 
   # Get GraphUser for role checking
