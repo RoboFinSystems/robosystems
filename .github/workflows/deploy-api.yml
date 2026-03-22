@@ -63,16 +63,11 @@ on:
         required: false
         type: string
         default: "1024"
-      fargate_weight:
-        description: "Weight for FARGATE capacity provider (On-Demand instances)"
-        required: false
-        type: string
-        default: "10"
       fargate_spot_weight:
-        description: "Weight for FARGATE_SPOT capacity provider (Spot instances)"
+        description: "Percentage of tasks on Spot (0 = all on-demand, 90 = 90% Spot). On-demand weight is derived as 100 - spot_weight."
         required: false
         type: string
-        default: "90"
+        default: "0"
       fargate_base:
         description: "Minimum tasks guaranteed on FARGATE (On-Demand). Set to 1+ for guaranteed availability."
         required: false
@@ -306,6 +301,9 @@ jobs:
             echo "is_new_stack=false" >> $GITHUB_OUTPUT
           fi
 
+          # Convert Spot percentage to on-demand weight (capacity providers use relative weights)
+          FARGATE_OD_WEIGHT=$((100 - ${{ inputs.fargate_spot_weight }}))
+
           # Build parameters
           API_STACK_PARAMS="ParameterKey=Environment,ParameterValue=${{ inputs.environment }} \
                 ParameterKey=VpcId,ParameterValue=${{ inputs.vpc_id }} \
@@ -330,7 +328,7 @@ jobs:
                 ParameterKey=CPUTargetValue,ParameterValue=${{ inputs.cpu_target_value }} \
                 ParameterKey=MemoryTargetValue,ParameterValue=${{ inputs.memory_target_value }} \
                 ParameterKey=FargateSpotWeight,ParameterValue=${{ inputs.fargate_spot_weight }} \
-                ParameterKey=FargateWeight,ParameterValue=${{ inputs.fargate_weight }} \
+                ParameterKey=FargateWeight,ParameterValue=${FARGATE_OD_WEIGHT} \
                 ParameterKey=FargateBase,ParameterValue=${{ inputs.fargate_base }} \
                 ParameterKey=PrometheusStackName,ParameterValue=\"${{ inputs.prometheus_stack_name }}\" \
                 ParameterKey=EmailFromAddress,ParameterValue=\"${{ inputs.aws_sns_alert_email }}\" \

@@ -262,11 +262,9 @@ function setup_full_config() {
     fi
 
     # API Capacity Provider Configuration (Spot vs On-Demand)
-    # API can handle Spot interruptions via ALB health checks and auto-scaling
-    gh variable set API_FARGATE_WEIGHT_PROD --body "10"
-    gh variable set API_FARGATE_SPOT_WEIGHT_PROD --body "90"
+    # Single spot_weight variable; on-demand weight derived as (100 - spot_weight) in deploy workflow
+    gh variable set API_FARGATE_SPOT_WEIGHT_PROD --body "0"
     if $setup_staging; then
-        gh variable set API_FARGATE_WEIGHT_STAGING --body "10"
         gh variable set API_FARGATE_SPOT_WEIGHT_STAGING --body "90"
     fi
 
@@ -294,20 +292,15 @@ function setup_full_config() {
     fi
 
     # Dagster Capacity Provider Configuration (Spot vs On-Demand)
-    # Daemon: Orchestration - can handle brief interruptions
-    gh variable set DAGSTER_DAEMON_FARGATE_WEIGHT_PROD --body "20"
-    gh variable set DAGSTER_DAEMON_FARGATE_SPOT_WEIGHT_PROD --body "80"
-    # Webserver: UI/SSM tunnel - 80/20 Spot like daemon
-    gh variable set DAGSTER_WEBSERVER_FARGATE_WEIGHT_PROD --body "20"
-    gh variable set DAGSTER_WEBSERVER_FARGATE_SPOT_WEIGHT_PROD --body "80"
+    # Single spot_weight variable; on-demand weight derived as (100 - spot_weight) in deploy workflow
+    gh variable set DAGSTER_DAEMON_FARGATE_SPOT_WEIGHT_PROD --body "0"
+    gh variable set DAGSTER_WEBSERVER_FARGATE_SPOT_WEIGHT_PROD --body "0"
     # Base: Minimum tasks guaranteed on On-Demand (set >0 when using Savings Plans)
     gh variable set API_FARGATE_BASE_PROD --body "0"
     gh variable set DAGSTER_DAEMON_FARGATE_BASE_PROD --body "0"
     gh variable set DAGSTER_WEBSERVER_FARGATE_BASE_PROD --body "0"
     if $setup_staging; then
-        gh variable set DAGSTER_DAEMON_FARGATE_WEIGHT_STAGING --body "20"
         gh variable set DAGSTER_DAEMON_FARGATE_SPOT_WEIGHT_STAGING --body "80"
-        gh variable set DAGSTER_WEBSERVER_FARGATE_WEIGHT_STAGING --body "20"
         gh variable set DAGSTER_WEBSERVER_FARGATE_SPOT_WEIGHT_STAGING --body "80"
         gh variable set API_FARGATE_BASE_STAGING --body "0"
         gh variable set DAGSTER_DAEMON_FARGATE_BASE_STAGING --body "0"
@@ -326,14 +319,12 @@ function setup_full_config() {
     gh variable set DATABASE_ALLOCATED_STORAGE_PROD --body "20"
     gh variable set DATABASE_MAX_ALLOCATED_STORAGE_PROD --body "100"
     gh variable set DATABASE_MULTI_AZ_ENABLED_PROD --body "false"
-    gh variable set DATABASE_POSTGRES_VERSION_PROD --body "16.11"
     if $setup_staging; then
         gh variable set DATABASE_ENGINE_STAGING --body "postgres"
         gh variable set DATABASE_INSTANCE_SIZE_STAGING --body "db.t4g.small"
         gh variable set DATABASE_ALLOCATED_STORAGE_STAGING --body "20"
         gh variable set DATABASE_MAX_ALLOCATED_STORAGE_STAGING --body "100"
         gh variable set DATABASE_MULTI_AZ_ENABLED_STAGING --body "false"
-        gh variable set DATABASE_POSTGRES_VERSION_STAGING --body "16.11"
     fi
 
     # VPC Flow Logs Configuration (SOC 2 - VPC-level, not environment-specific)
@@ -360,13 +351,11 @@ function setup_full_config() {
     gh variable set VALKEY_NUM_NODES_PROD --body "1"
     gh variable set VALKEY_ENCRYPTION_ENABLED_PROD --body "true"
     gh variable set VALKEY_SNAPSHOT_RETENTION_DAYS_PROD --body "7"
-    gh variable set VALKEY_VERSION_PROD --body "8.1"
     if $setup_staging; then
         gh variable set VALKEY_NODE_TYPE_STAGING --body "cache.t4g.micro"
         gh variable set VALKEY_NUM_NODES_STAGING --body "1"
         gh variable set VALKEY_ENCRYPTION_ENABLED_STAGING --body "true"
         gh variable set VALKEY_SNAPSHOT_RETENTION_DAYS_STAGING --body "0"
-        gh variable set VALKEY_VERSION_STAGING --body "8.1"
     fi
 
     # OpenSearch Configuration (text search for filing narratives)

@@ -248,45 +248,63 @@ class SECEntityUpdateConfig(Config):
 
 
 class SECTextBlockIndexConfig(Config):
-  """Configuration for XBRL text block OpenSearch indexing."""
+  """Configuration for XBRL text block OpenSearch indexing.
+
+  Partitioned by quarter (e.g. 2026-Q1). Each run indexes one quarter's
+  textblocks, making backfills trivial and memory bounded.
+  """
 
   graph_id: str = "sec"
-  start_year: int | None = Field(
-    default=SEC_PRIMARY_START_YEAR,
-    description="Only index filings from this year forward (default: 2024)",
-  )
   min_content_length: int = Field(
     default=200, description="Skip text blocks shorter than this after HTML stripping"
+  )
+  enable_embeddings: bool = Field(
+    default=False, description="Generate vector embeddings for semantic search"
+  )
+  force_reindex: bool = Field(
+    default=False, description="Re-index all documents (ignore incremental skip)"
   )
 
 
 class SECNarrativeIndexConfig(Config):
-  """Configuration for narrative section extraction and OpenSearch indexing."""
+  """Configuration for narrative section extraction and OpenSearch indexing.
+
+  Partitioned by quarter (e.g. 2026-Q1). Each run extracts and indexes
+  narrative sections from one quarter's filings.
+  """
 
   graph_id: str = "sec"
-  start_year: int | None = Field(
-    default=SEC_PRIMARY_START_YEAR,
-    description="Only index filings from this year forward (default: 2024)",
-  )
   max_section_length: int = Field(
     default=50000, description="Truncate sections longer than this (chars)"
   )
   form_types: list[str] = Field(
     default=["10-K", "10-Q"], description="Form types to extract narratives from"
   )
+  enable_embeddings: bool = Field(
+    default=False, description="Generate vector embeddings for semantic search"
+  )
+  force_reindex: bool = Field(
+    default=False, description="Re-index all documents (ignore incremental skip)"
+  )
 
 
 class SECiXBRLIndexConfig(Config):
-  """Configuration for iXBRL disclosure extraction and OpenSearch indexing."""
+  """Configuration for iXBRL disclosure extraction and OpenSearch indexing.
+
+  Partitioned by quarter (e.g. 2026-Q1). Each run extracts and indexes
+  iXBRL disclosures from one quarter's filings.
+  """
 
   graph_id: str = "sec"
-  start_year: int | None = Field(
-    default=SEC_PRIMARY_START_YEAR,
-    description="Only index filings from this year forward (default: 2024)",
-  )
   max_section_length: int = Field(
     default=50000, description="Truncate sections longer than this (chars)"
   )
   form_types: list[str] = Field(
     default=["10-K", "10-Q"], description="Form types to extract iXBRL disclosures from"
+  )
+  enable_embeddings: bool = Field(
+    default=False, description="Generate vector embeddings for semantic search"
+  )
+  force_reindex: bool = Field(
+    default=False, description="Re-index all documents (ignore incremental skip)"
   )

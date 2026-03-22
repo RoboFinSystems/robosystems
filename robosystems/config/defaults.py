@@ -190,6 +190,16 @@ class SSEDefaults:
   QUEUE_SIZE = 100  # Event queue size per connection
 
 
+class IndexingDefaults:
+  """
+  Indexing pipeline defaults.
+
+  These values control OpenSearch text indexing behavior for SEC filings.
+  """
+
+  ENABLE_EMBEDDINGS = True  # Generate vector embeddings for semantic search
+
+
 class LimitsDefaults:
   """
   Default limits for various resources.
@@ -238,6 +248,8 @@ SSM_TUNING_PATHS = {
   # SSE
   "sse/MAX_CONNECTIONS_PER_USER": SSEDefaults.MAX_CONNECTIONS_PER_USER,
   "sse/QUEUE_SIZE": SSEDefaults.QUEUE_SIZE,
+  # Indexing
+  "indexing/ENABLE_EMBEDDINGS": IndexingDefaults.ENABLE_EMBEDDINGS,
   # Limits
   "limits/ORG_GRAPHS_DEFAULT": LimitsDefaults.ORG_GRAPHS_DEFAULT,
   # Database Pool

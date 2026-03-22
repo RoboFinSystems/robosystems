@@ -76,26 +76,16 @@ on:
         default: "20"
 
       # Capacity Provider Configuration (Spot vs On-Demand)
-      daemon_fargate_weight:
-        description: "Weight for FARGATE (On-Demand) capacity provider for daemon"
-        required: false
-        type: string
-        default: "20"
       daemon_fargate_spot_weight:
-        description: "Weight for FARGATE_SPOT capacity provider for daemon"
+        description: "Percentage of daemon tasks on Spot (0 = all on-demand, 80 = 80% Spot). On-demand weight is derived as 100 - spot_weight."
         required: false
         type: string
-        default: "80"
-      webserver_fargate_weight:
-        description: "Weight for FARGATE (On-Demand) capacity provider for webserver"
-        required: false
-        type: string
-        default: "20"
+        default: "0"
       webserver_fargate_spot_weight:
-        description: "Weight for FARGATE_SPOT capacity provider for webserver"
+        description: "Percentage of webserver tasks on Spot (0 = all on-demand, 80 = 80% Spot). On-demand weight is derived as 100 - spot_weight."
         required: false
         type: string
-        default: "80"
+        default: "0"
       daemon_fargate_base:
         description: "Minimum daemon tasks guaranteed on FARGATE (On-Demand)"
         required: false
@@ -268,6 +258,10 @@ jobs:
             echo "is_new_stack=false" >> $GITHUB_OUTPUT
           fi
 
+          # Convert Spot percentages to on-demand weights (capacity providers use relative weights)
+          DAEMON_OD_WEIGHT=$((100 - ${{ inputs.daemon_fargate_spot_weight }}))
+          WEBSERVER_OD_WEIGHT=$((100 - ${{ inputs.webserver_fargate_spot_weight }}))
+
           STACK_PARAMS="ParameterKey=Environment,ParameterValue=${{ inputs.environment }} \
                 ParameterKey=VpcId,ParameterValue=${{ inputs.vpc_id }} \
                 ParameterKey=SubnetIds,ParameterValue=\"${{ inputs.subnet_ids }}\" \
@@ -280,10 +274,10 @@ jobs:
                 ParameterKey=RunJobCpu,ParameterValue=512 \
                 ParameterKey=RunJobMemory,ParameterValue=2048 \
                 ParameterKey=MaxConcurrentRuns,ParameterValue=${{ inputs.max_concurrent_runs }} \
-                ParameterKey=DaemonFargateWeight,ParameterValue=${{ inputs.daemon_fargate_weight }} \
+                ParameterKey=DaemonFargateWeight,ParameterValue=${DAEMON_OD_WEIGHT} \
                 ParameterKey=DaemonFargateSpotWeight,ParameterValue=${{ inputs.daemon_fargate_spot_weight }} \
                 ParameterKey=DaemonFargateBase,ParameterValue=${{ inputs.daemon_fargate_base }} \
-                ParameterKey=WebserverFargateWeight,ParameterValue=${{ inputs.webserver_fargate_weight }} \
+                ParameterKey=WebserverFargateWeight,ParameterValue=${WEBSERVER_OD_WEIGHT} \
                 ParameterKey=WebserverFargateSpotWeight,ParameterValue=${{ inputs.webserver_fargate_spot_weight }} \
                 ParameterKey=WebserverFargateBase,ParameterValue=${{ inputs.webserver_fargate_base }} \
                 ParameterKey=ValkeyUrl,ParameterValue=${{ inputs.valkey_url }} \

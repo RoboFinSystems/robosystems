@@ -526,6 +526,10 @@ class EnvConfig:
     "TEXT_SEARCH_ENABLED",
     get_parameter_value("TEXT_SEARCH_ENABLED", "false").lower() == "true",
   )
+  SEMANTIC_SEARCH_ENABLED = get_bool_env(
+    "SEMANTIC_SEARCH_ENABLED",
+    get_parameter_value("SEMANTIC_SEARCH_ENABLED", "true").lower() == "true",
+  )
 
   # --- OpenSearch ---
   OPENSEARCH_URL = get_str_env("OPENSEARCH_URL", "http://localhost:9200")

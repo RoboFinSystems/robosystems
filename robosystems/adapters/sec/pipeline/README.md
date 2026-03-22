@@ -18,6 +18,7 @@ adapters/sec/pipeline/
 ├── duckdb_s3_publish.py        # sec_duckdb_s3_published, sec_historical_duckdb_s3_published
 ├── r2_publish.py               # sec_lbug_r2_published
 ├── artifact.py                 # sec_knowledge_artifacts
+├── text_index.py               # sec_textblocks_indexed, sec_narratives_indexed, sec_ixbrl_disclosures_indexed
 ├── jobs.py                     # Job definitions
 └── sensors.py                  # Sensors + schedule
 ```
@@ -81,7 +82,28 @@ uv run dagster asset materialize -m robosystems.dagster \
   --select sec_graph_materialized
 ```
 
-### 5. Publish
+### 5. Text Search Indexing (`sec_textblocks_indexed`, `sec_narratives_indexed`, `sec_ixbrl_disclosures_indexed`)
+
+Three assets index SEC filing text content into OpenSearch for full-text BM25 search. All depend on `sec_processed_filings` and run parallel to the DuckDB staging branch.
+
+| Asset | Source | Content |
+|-------|--------|---------|
+| `sec_textblocks_indexed` | Processed parquets + S3 HTML | XBRL text block disclosures |
+| `sec_narratives_indexed` | Raw filing ZIPs | Item sections (MD&A, Risk Factors, Business, Cybersecurity) from 10-K/10-Q |
+| `sec_ixbrl_disclosures_indexed` | Raw filing ZIPs | iXBRL disclosure sections with XBRL element metadata for graph cross-reference |
+
+```bash
+uv run dagster asset materialize -m robosystems.dagster \
+  --select sec_textblocks_indexed
+
+uv run dagster asset materialize -m robosystems.dagster \
+  --select sec_narratives_indexed
+
+uv run dagster asset materialize -m robosystems.dagster \
+  --select sec_ixbrl_disclosures_indexed
+```
+
+### 6. Publish
 
 Publish databases to S3 for the replica fleet and vector search:
 
@@ -105,6 +127,7 @@ sec_incremental_pipeline_sensor:
 
 sec_stage_to_materialize_sensor:
   → materialize (full LadybugDB rebuild from DuckDB)
+  → text index (3 assets in parallel, after staging completes)
 
 sec_post_materialize_publish_sensor:
   → lbug S3 publish
@@ -143,6 +166,9 @@ All configs are in `configs.py`:
 | `SECIncrementalStageConfig` | `sec_duckdb_incremental_staged` | `year`, `quarter` |
 | `SECMaterializeConfig` | `sec_graph_materialized` | `rebuild_graph`, `batch_materialization` |
 | `SECEntityUpdateConfig` | `sec_entity_incremental_update` | `year`, `quarter` |
+| `SECTextBlockIndexConfig` | `sec_textblocks_indexed` | `graph_id`, `min_content_length`, `start_year` |
+| `SECNarrativeIndexConfig` | `sec_narratives_indexed` | `graph_id`, `max_section_length`, `start_year` |
+| `SECiXBRLIndexConfig` | `sec_ixbrl_disclosures_indexed` | `graph_id`, `max_section_length`, `start_year` |
 
 ## Data Flow
 
@@ -151,9 +177,11 @@ All configs are in `configs.py`:
 
   Download     Process      Stage         Materialize    Publish
   (S3 ZIP) --> (Parquet) --> (DuckDB) ---> (LadybugDB) --> S3 (.lbug)
-                                |                          → Replica refresh
-                                +------------------------> S3 (.duckdb)
-                                                           → Vector search
+                  |              |                          → Replica refresh
+                  |              +------------------------> S3 (.duckdb)
+                  |                                         → Vector search
+                  +-------> Text Index (OpenSearch)
+                            → Text blocks, narratives, iXBRL disclosures
 ```
 
 ## Cross-Cutting Imports

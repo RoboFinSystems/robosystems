@@ -537,6 +537,19 @@ Resources:
                   - ses:SendEmail
                 Resource:
                   - !Sub "arn:${AWS::Partition}:ses:${AWS::Region}:${AWS::AccountId}:identity/robosystems.ai"
+              # OpenSearch for text search indexing
+              - !If
+                - HasOpenSearch
+                - Effect: Allow
+                  Action:
+                    - es:ESHttpGet
+                    - es:ESHttpHead
+                    - es:ESHttpPost
+                    - es:ESHttpPut
+                    - es:ESHttpDelete
+                  Resource:
+                    - !Sub "arn:${AWS::Partition}:es:${AWS::Region}:${AWS::AccountId}:domain/robosystems-${Environment}/*"
+                - !Ref "AWS::NoValue"
       Tags:
         - Key: Environment
           Value: !Ref Environment
