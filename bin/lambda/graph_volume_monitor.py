@@ -39,10 +39,35 @@ EXPANSION_FACTOR = float(os.environ.get("EXPANSION_FACTOR", "1.5"))  # 50% incre
 MIN_EXPANSION_GB = int(os.environ.get("MIN_EXPANSION_GB", "50"))
 MAX_VOLUME_SIZE_GB = int(os.environ.get("MAX_VOLUME_SIZE_GB", "16384"))  # EBS limit
 GRAPH_API_PORT = os.environ.get("GRAPH_API_PORT", "8001")
-GRAPH_API_KEY = os.environ.get("GRAPH_API_KEY", "")
+GRAPH_API_SECRET_ARN = os.environ.get("GRAPH_API_SECRET_ARN", "")
 
 # HTTP client for API calls
 http = urllib3.PoolManager()
+
+# Cached secret value (fetched once per Lambda invocation)
+_cached_graph_api_key: str | None = None
+
+
+def _get_graph_api_key() -> str:
+  """Fetch GRAPH_API_KEY from Secrets Manager, cached for Lambda lifetime."""
+  global _cached_graph_api_key
+  if _cached_graph_api_key is not None:
+    return _cached_graph_api_key
+
+  if not GRAPH_API_SECRET_ARN:
+    _cached_graph_api_key = ""
+    return _cached_graph_api_key
+
+  try:
+    secrets_client = boto3.client("secretsmanager")
+    response = secrets_client.get_secret_value(SecretId=GRAPH_API_SECRET_ARN)
+    secret = json.loads(response["SecretString"])
+    _cached_graph_api_key = secret.get("GRAPH_API_KEY", "")
+  except Exception as e:
+    logger.error(f"Failed to fetch Graph API key from Secrets Manager: {e}")
+    _cached_graph_api_key = ""
+
+  return _cached_graph_api_key
 
 
 def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
@@ -523,8 +548,9 @@ def get_volume_metrics_from_instance(instance: dict) -> dict | None:
 
     # Add API key to headers if configured
     headers = {}
-    if GRAPH_API_KEY:
-      headers["X-Graph-API-Key"] = GRAPH_API_KEY
+    api_key = _get_graph_api_key()
+    if api_key:
+      headers["X-Graph-API-Key"] = api_key
 
     response = http.request(
       "GET",

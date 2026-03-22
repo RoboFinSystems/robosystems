@@ -504,6 +504,7 @@ def sec_textblocks_indexed(
 
   # Build element lookup and extract textblock element IDs for early filtering
   elements_df = elements_df.fillna({"qname": "", "name": "", "is_textblock": False})
+  elements_df = elements_df.drop_duplicates(subset=["identifier"], keep="first")
   element_lookup: dict[str, dict[str, Any]] = elements_df.set_index("identifier")[
     ["qname", "name", "is_textblock"]
   ].to_dict("index")

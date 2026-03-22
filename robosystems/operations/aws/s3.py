@@ -6,13 +6,13 @@ import asyncio
 import gzip
 import hashlib
 import json
-import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from typing import Any
 
 import boto3
+from botocore.config import Config as BotoConfig
 from botocore.exceptions import ClientError, NoCredentialsError
 
 from robosystems.config import env
@@ -64,7 +64,11 @@ class S3Client:
       # Development: try to use AWS CLI profile
       logger.debug("Using default AWS credentials chain for S3 access")
 
-    self.s3_client = boto3.client("s3", **s3_config)
+    self.s3_client = boto3.client(
+      "s3",
+      config=BotoConfig(retries={"mode": "adaptive", "max_attempts": 3}),
+      **s3_config,
+    )
 
     logger.debug(f"Initialized S3Client for region {self.region_name}")
 
@@ -75,10 +79,11 @@ class S3Client:
     key: str,
     content_type: str | None = None,
     metadata: dict[str, str] | None = None,
-    max_retries: int = 3,
   ) -> bool:
     """
-    Upload a string as an S3 object with retry logic.
+    Upload a string as an S3 object.
+
+    Retries are handled by the boto3 client's adaptive retry configuration.
 
     Args:
         content: String content to upload
@@ -86,16 +91,13 @@ class S3Client:
         key: S3 object key
         content_type: MIME type for the content
         metadata: Additional metadata for the object
-        max_retries: Maximum number of retry attempts (default: 3)
 
     Returns:
         True if successful, False otherwise
     """
-    # Convert string to bytes
     content_bytes = content.encode("utf-8")
 
-    # Prepare put_object arguments
-    put_args = {
+    put_args: dict[str, Any] = {
       "Bucket": bucket,
       "Key": key,
       "Body": content_bytes,
@@ -107,54 +109,29 @@ class S3Client:
     if metadata:
       put_args["Metadata"] = metadata
 
-    # Non-retryable error codes with security classification
-    non_retryable = {"AccessDenied", "InvalidBucketName", "NoSuchBucket"}
-    security_errors = {"AccessDenied", "UnauthorizedAccess", "TokenRefreshRequired"}
+    security_errors = {"AccessDenied"}
 
-    for attempt in range(max_retries):
-      try:
-        # Upload to S3
-        self.s3_client.put_object(**put_args)
+    try:
+      self.s3_client.put_object(**put_args)
+      logger.debug(
+        f"Successfully uploaded {len(content_bytes)} bytes to s3://{bucket}/{key}"
+      )
+      return True
 
-        logger.debug(
-          f"Successfully uploaded {len(content_bytes)} bytes to s3://{bucket}/{key}"
+    except ClientError as e:
+      error_code = e.response.get("Error", {}).get("Code", "")
+      if error_code in security_errors:
+        logger.critical(
+          f"S3 SECURITY VIOLATION - {error_code}: Bucket={bucket}, Key={key}, "
+          f"Error={e!s}"
         )
-        return True
+      else:
+        logger.error(f"S3 upload failed ({error_code}): {e}")
+      return False
 
-      except ClientError as e:
-        error_code = e.response.get("Error", {}).get("Code", "")
-
-        # Log security errors separately for audit trail
-        if error_code in security_errors:
-          logger.critical(
-            f"S3 SECURITY VIOLATION - {error_code}: Bucket={bucket}, Key={key}, "
-            f"Error={e!s}, Attempt={attempt + 1}"
-          )
-          # Security errors should not be retried
-          return False
-
-        # Don't retry other non-retryable errors
-        if error_code in non_retryable:
-          logger.error(f"Non-retryable S3 error {error_code}: {e}")
-          return False
-
-        # Last attempt failed
-        if attempt == max_retries - 1:
-          logger.error(f"Failed to upload to S3 after {max_retries} attempts: {e}")
-          return False
-
-        # Exponential backoff: 1, 2, 4 seconds
-        wait_time = 2**attempt
-        logger.warning(
-          f"S3 upload attempt {attempt + 1} failed, retrying in {wait_time}s: {e}"
-        )
-        time.sleep(wait_time)
-
-      except Exception as e:
-        logger.error(f"Unexpected error uploading to S3: {e}")
-        return False
-
-    return False
+    except Exception as e:
+      logger.error(f"Unexpected error uploading to S3: {e}")
+      return False
 
   def upload_file(
     self,
@@ -163,10 +140,11 @@ class S3Client:
     key: str,
     content_type: str | None = None,
     metadata: dict[str, str] | None = None,
-    max_retries: int = 3,
   ) -> bool:
     """
-    Upload a file to S3 with retry logic.
+    Upload a file to S3.
+
+    Retries are handled by the boto3 client's adaptive retry configuration.
 
     Args:
         file_path: Path to the file to upload
@@ -174,157 +152,100 @@ class S3Client:
         key: S3 object key
         content_type: MIME type for the content
         metadata: Additional metadata for the object
-        max_retries: Maximum number of retry attempts (default: 3)
 
     Returns:
         True if successful, False otherwise
     """
-    # Prepare extra args
     extra_args = {}
-
     if content_type:
       extra_args["ContentType"] = content_type
-
     if metadata:
       extra_args["Metadata"] = metadata
 
-    # Non-retryable error codes
-    non_retryable = {"AccessDenied", "InvalidBucketName", "NoSuchBucket"}
+    try:
+      self.s3_client.upload_file(
+        file_path, bucket, key, ExtraArgs=extra_args if extra_args else None
+      )
+      logger.debug(f"Successfully uploaded file {file_path} to s3://{bucket}/{key}")
+      return True
 
-    for attempt in range(max_retries):
-      try:
-        # Upload file
-        self.s3_client.upload_file(
-          file_path, bucket, key, ExtraArgs=extra_args if extra_args else None
-        )
+    except ClientError as e:
+      error_code = e.response.get("Error", {}).get("Code", "")
+      logger.error(f"S3 file upload failed ({error_code}): {e}")
+      return False
 
-        logger.debug(f"Successfully uploaded file {file_path} to s3://{bucket}/{key}")
-        return True
-
-      except ClientError as e:
-        error_code = e.response.get("Error", {}).get("Code", "")
-
-        # Don't retry non-retryable errors
-        if error_code in non_retryable:
-          logger.error(f"Non-retryable S3 error {error_code}: {e}")
-          return False
-
-        # Last attempt failed
-        if attempt == max_retries - 1:
-          logger.error(f"Failed to upload file to S3 after {max_retries} attempts: {e}")
-          return False
-
-        # Exponential backoff: 1, 2, 4 seconds
-        wait_time = 2**attempt
-        logger.warning(
-          f"S3 file upload attempt {attempt + 1} failed, retrying in {wait_time}s: {e}"
-        )
-        time.sleep(wait_time)
-
-      except Exception as e:
-        logger.error(f"Unexpected error uploading file to S3: {e}")
-        return False
-
-    return False
+    except Exception as e:
+      logger.error(f"Unexpected error uploading file to S3: {e}")
+      return False
 
   def download_file(
     self,
     bucket: str,
     key: str,
     file_path: str,
-    max_retries: int = 3,
   ) -> bool:
     """
-    Download an S3 object to a local file with retry logic.
+    Download an S3 object to a local file.
+
+    Retries are handled by the boto3 client's adaptive retry configuration.
 
     Args:
         bucket: S3 bucket name
         key: S3 object key
         file_path: Local path to write the file to
-        max_retries: Maximum number of retry attempts (default: 3)
 
     Returns:
         True if successful, False otherwise
     """
-    non_retryable = {"AccessDenied", "InvalidBucketName", "NoSuchBucket", "NoSuchKey"}
+    try:
+      self.s3_client.download_file(bucket, key, file_path)
+      logger.debug(f"Downloaded s3://{bucket}/{key} to {file_path}")
+      return True
 
-    for attempt in range(max_retries):
-      try:
-        self.s3_client.download_file(bucket, key, file_path)
-        logger.debug(f"Downloaded s3://{bucket}/{key} to {file_path}")
-        return True
-      except ClientError as e:
-        error_code = e.response.get("Error", {}).get("Code", "")
-        if error_code in non_retryable:
-          logger.debug(f"S3 download not available ({error_code}): s3://{bucket}/{key}")
-          return False
-        if attempt == max_retries - 1:
-          logger.error(f"Failed to download from S3 after {max_retries} attempts: {e}")
-          return False
-        wait_time = 2**attempt
-        logger.warning(
-          f"S3 download attempt {attempt + 1} failed, retrying in {wait_time}s: {e}"
-        )
-        time.sleep(wait_time)
-      except Exception as e:
-        logger.debug(f"S3 download not available: {e}")
-        return False
+    except ClientError as e:
+      error_code = e.response.get("Error", {}).get("Code", "")
+      if error_code == "AccessDenied":
+        logger.error(f"S3 download access denied: s3://{bucket}/{key}")
+      else:
+        logger.debug(f"S3 download not available ({error_code}): s3://{bucket}/{key}")
+      return False
 
-    return False
+    except Exception as e:
+      logger.debug(f"S3 download not available: {e}")
+      return False
 
-  def download_string(self, bucket: str, key: str, max_retries: int = 3) -> str | None:
+  def download_string(self, bucket: str, key: str) -> str | None:
     """
-    Download an S3 object as a string with retry logic.
+    Download an S3 object as a string.
+
+    Retries are handled by the boto3 client's adaptive retry configuration.
 
     Args:
         bucket: S3 bucket name
         key: S3 object key
-        max_retries: Maximum number of retry attempts (default: 3)
 
     Returns:
         Content as string if successful, None otherwise
     """
-    # Non-retryable error codes
-    non_retryable = {"NoSuchKey", "NoSuchBucket", "AccessDenied"}
+    try:
+      response = self.s3_client.get_object(Bucket=bucket, Key=key)
+      content = response["Body"].read().decode("utf-8")
+      logger.debug(
+        f"Successfully downloaded {len(content)} characters from s3://{bucket}/{key}"
+      )
+      return content
 
-    for attempt in range(max_retries):
-      try:
-        response = self.s3_client.get_object(Bucket=bucket, Key=key)
-        content = response["Body"].read().decode("utf-8")
+    except ClientError as e:
+      error_code = e.response.get("Error", {}).get("Code", "")
+      if error_code == "NoSuchKey":
+        logger.warning(f"Object not found: s3://{bucket}/{key}")
+      else:
+        logger.error(f"S3 download failed ({error_code}): {e}")
+      return None
 
-        logger.debug(
-          f"Successfully downloaded {len(content)} characters from s3://{bucket}/{key}"
-        )
-        return content
-
-      except ClientError as e:
-        error_code = e.response.get("Error", {}).get("Code", "")
-
-        # Don't retry non-retryable errors
-        if error_code in non_retryable:
-          if error_code == "NoSuchKey":
-            logger.warning(f"Object not found: s3://{bucket}/{key}")
-          else:
-            logger.error(f"Non-retryable S3 error {error_code}: {e}")
-          return None
-
-        # Last attempt failed
-        if attempt == max_retries - 1:
-          logger.error(f"Failed to download from S3 after {max_retries} attempts: {e}")
-          return None
-
-        # Exponential backoff: 1, 2, 4 seconds
-        wait_time = 2**attempt
-        logger.warning(
-          f"S3 download attempt {attempt + 1} failed, retrying in {wait_time}s: {e}"
-        )
-        time.sleep(wait_time)
-
-      except Exception as e:
-        logger.error(f"Unexpected error downloading from S3: {e}")
-        return None
-
-    return None
+    except Exception as e:
+      logger.error(f"Unexpected error downloading from S3: {e}")
+      return None
 
   def delete_object(self, bucket: str, key: str) -> bool:
     """
@@ -425,29 +346,26 @@ class S3Client:
     content_type: str | None = None,
     metadata: dict[str, str] | None = None,
     max_workers: int | None = None,
-    max_retries: int = 3,
   ) -> dict[str, bool]:
     """
-    Upload multiple strings to S3 in parallel with retry logic.
+    Upload multiple strings to S3 in parallel.
 
     Args:
         items: List of tuples containing (content, bucket, key)
         content_type: MIME type for all content
         metadata: Additional metadata for all objects
         max_workers: Maximum number of parallel uploads (uses SSM tunable if not specified)
-        max_retries: Maximum number of retry attempts per upload (default: 3)
 
     Returns:
         Dictionary mapping S3 keys to upload success status
     """
-    # Resolve max_workers from SSM tuning if not explicitly provided
     if max_workers is None:
       max_workers = TuningConfig.get_max_workers()
 
     results = {}
 
     def upload_item(item: tuple[str, str, str]) -> tuple[str, bool]:
-      """Upload a single item with retry logic."""
+      """Upload a single item."""
       content, bucket, key = item
       success = self.upload_string(
         content=content,
@@ -455,7 +373,6 @@ class S3Client:
         key=key,
         content_type=content_type,
         metadata=metadata,
-        max_retries=max_retries,
       )
       return key, success
 

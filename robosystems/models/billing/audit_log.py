@@ -3,7 +3,7 @@
 from datetime import UTC, datetime
 from enum import Enum
 
-from sqlalchemy import Column, DateTime, ForeignKey, Index, String
+from sqlalchemy import Column, DateTime, ForeignKey, Index, String, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Session
 
@@ -90,6 +90,13 @@ class BillingAuditLog(Base):
     Index("idx_billing_audit_event_type", "event_type"),
     Index("idx_billing_audit_timestamp", "event_timestamp"),
     Index("idx_billing_audit_actor", "actor_user_id"),
+    Index(
+      "idx_webhook_idempotency",
+      text("(event_data->>'event_id')"),
+      text("(event_data->>'provider')"),
+      unique=True,
+      postgresql_where=text("event_type = 'webhook_received'"),
+    ),
   )
 
   def __repr__(self) -> str:

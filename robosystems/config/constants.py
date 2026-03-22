@@ -61,7 +61,6 @@ MAX_SAMPLING_RATE = 1.0
 
 # JWT Token Expiration
 JWT_ACCESS_TOKEN_EXPIRE_MINUTES = 30
-JWT_REFRESH_TOKEN_EXPIRE_DAYS = 30
 JWT_EXPIRY_HOURS = 0.5  # 30 minutes - used for access token creation
 
 # Email Token Expiration

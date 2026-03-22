@@ -458,9 +458,9 @@ Resources:
           MIN_EXPANSION_GB: "50"
           MAX_VOLUME_SIZE_GB: "16384"
           GRAPH_API_PORT: "8001"
-          GRAPH_API_KEY: !If
+          GRAPH_API_SECRET_ARN: !If
             - HasGraphApiSecret
-            - !Sub "{{resolve:secretsmanager:${GraphApiSecretArn}:SecretString:GRAPH_API_KEY}}"
+            - !Ref GraphApiSecretArn
             - ""
       Code:
         ImageUri: !Ref LambdaImageUri
