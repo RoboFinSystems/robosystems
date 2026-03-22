@@ -146,7 +146,7 @@ RoboSystems is built on a modern, scalable architecture with:
 **Data Layer:**
 
 - PostgreSQL for IAM, graph metadata, and Dagster
-- OpenSearch for full-text and semantic document search (BM25 + KNN) with graph_id tenant isolation
+- OpenSearch for full-text and semantic document search (BM25 + KNN)
 - LanceDB for graph element vector similarity search (IVF-PQ indexes)
 - Valkey for caching, SSE messaging, and rate limiting
 - AWS S3 for data lake storage and static assets
