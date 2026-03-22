@@ -27,22 +27,3 @@ def __getattr__(name: str):
     module = importlib.import_module(_LAZY_IMPORTS[name])
     return getattr(module, name)
   raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
-
-
-__all__ = [
-  "SEC_BASE_URL",
-  "ArelleClient",
-  "AsyncRateLimiter",
-  "DownloadStats",
-  "EFTSClient",
-  "EFTSHit",
-  "RateMonitor",
-  "RateStats",
-  "SECClient",
-  "SECDownloader",
-  "download_sec_filings",
-  "download_sec_filings_sync",
-  "enable_test_mode",
-  "query_efts",
-  "query_efts_sync",
-]

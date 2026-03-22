@@ -110,29 +110,3 @@ def get_quarters_to_scan(now: datetime | None = None) -> list[str]:
     quarters.append(f"{prev_year}-Q{prev_quarter}")
 
   return quarters
-
-
-__all__ = [
-  "QUARTER_OVERLAP_DAYS",
-  "SEC_BASE_URL",
-  "XBRL_GRAPH_PROCESSOR_VERSION",
-  "ArelleClient",
-  "IngestTableInfo",
-  "MaterializeResult",
-  "SECClient",
-  "SECMetadataLoader",
-  "SchemaIngestConfig",
-  "StagingResult",
-  "TableInfo",
-  "XBRLDuckDBGraphProcessor",
-  "XBRLGraphProcessor",
-  "XBRLSchemaAdapter",
-  "XBRLSchemaConfigGenerator",
-  "create_custom_ingestion_processor",
-  "create_roboledger_ingestion_processor",
-  "enable_test_mode",
-  "get_current_quarter",
-  "get_previous_quarter",
-  "get_quarters_to_scan",
-  "is_in_quarter_overlap_window",
-]
