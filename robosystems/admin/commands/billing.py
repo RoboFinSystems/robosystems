@@ -356,7 +356,7 @@ def mark_invoice_paid(client, invoice_id, payment_method, payment_reference):
     params["payment_reference"] = payment_reference
 
   invoice = client._make_request(
-    "PATCH", f"/admin/v1/invoices/{invoice_id}/mark-paid", params=params
+    "PATCH", f"/admin/v1/invoices/{invoice_id}/mark-paid", data=params
   )
 
   click.echo(f"✅ Marked invoice {invoice['invoice_number']} as paid")
