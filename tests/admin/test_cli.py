@@ -11,8 +11,15 @@ import click
 import pytest
 from click.testing import CliRunner
 
+import robosystems.admin.cli as cli_module
+import robosystems.admin.commands.billing as billing_module
+import robosystems.admin.commands.graphs as graphs_module
+import robosystems.admin.commands.ops as ops_module
+import robosystems.admin.commands.users_orgs as users_orgs_module
 from robosystems.admin.cli import AdminAPIClient, cli
 from robosystems.admin.ssm_executor import SSMExecutor
+
+InstancesHelper = ops_module.InstancesHelper
 
 
 @pytest.fixture
@@ -25,11 +32,7 @@ def wide_console():
   """Force Rich console to use wide output so tables don't wrap."""
   from rich.console import Console
 
-  import robosystems.admin.cli as cli_module
-  import robosystems.admin.commands.billing as billing_module
-  import robosystems.admin.commands.graphs as graphs_module
-  import robosystems.admin.commands.ops as ops_module
-  import robosystems.admin.commands.users_orgs as users_orgs_module
+  # Module aliases imported at module level
 
   wide = Console(width=200, highlight=False, force_terminal=False)
   modules = [cli_module, billing_module, graphs_module, ops_module, users_orgs_module]
@@ -459,7 +462,7 @@ class TestInvoicesCommands:
     mock_make_request.assert_called_once_with(
       "PATCH",
       "/admin/v1/invoices/inv-1/mark-paid",
-      params={"payment_method": "bank_transfer", "payment_reference": "TXN-123"},
+      data={"payment_method": "bank_transfer", "payment_reference": "TXN-123"},
     )
     assert "Marked invoice INV-001 as paid" in result.output
 
@@ -721,7 +724,7 @@ class TestOrgsCommands:
     mock_make_request.assert_called_once_with(
       "PATCH",
       "/admin/v1/orgs/org-1",
-      params={
+      data={
         "invoice_billing_enabled": True,
         "billing_email": "new@acme.com",
         "payment_terms": "net_60",
@@ -1394,7 +1397,6 @@ class TestInstancesCommands:
 
 class TestInstancesHelper:
   def test_asg_name_writers(self):
-    from robosystems.admin.commands.ops import InstancesHelper
 
     with patch.object(InstancesHelper, "__init__", return_value=None):
       helper = InstancesHelper.__new__(InstancesHelper)
@@ -1409,7 +1411,6 @@ class TestInstancesHelper:
       )
 
   def test_asg_name_shared_replicas(self):
-    from robosystems.admin.commands.ops import InstancesHelper
 
     with patch.object(InstancesHelper, "__init__", return_value=None):
       helper = InstancesHelper.__new__(InstancesHelper)
@@ -1419,7 +1420,6 @@ class TestInstancesHelper:
       )
 
   def test_gha_var_name_writers(self):
-    from robosystems.admin.commands.ops import InstancesHelper
 
     with patch.object(InstancesHelper, "__init__", return_value=None):
       helper = InstancesHelper.__new__(InstancesHelper)
@@ -1438,7 +1438,6 @@ class TestInstancesHelper:
       )
 
   def test_gha_var_name_shared_replicas(self):
-    from robosystems.admin.commands.ops import InstancesHelper
 
     with patch.object(InstancesHelper, "__init__", return_value=None):
       helper = InstancesHelper.__new__(InstancesHelper)
@@ -1457,7 +1456,6 @@ class TestInstancesHelper:
       )
 
   def test_gha_var_name_staging(self):
-    from robosystems.admin.commands.ops import InstancesHelper
 
     with patch.object(InstancesHelper, "__init__", return_value=None):
       helper = InstancesHelper.__new__(InstancesHelper)

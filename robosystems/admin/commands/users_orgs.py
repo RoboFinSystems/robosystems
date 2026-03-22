@@ -265,7 +265,7 @@ def update_org(
     click.echo("❌ No updates specified")
     return
 
-  org = client._make_request("PATCH", f"/admin/v1/orgs/{org_id}", params=params)
+  org = client._make_request("PATCH", f"/admin/v1/orgs/{org_id}", data=params)
 
   click.echo(f"✅ Updated org {org['org_id']}")
   click.echo(f"   Name: {org.get('name', 'N/A')}")
