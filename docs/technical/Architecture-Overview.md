@@ -72,7 +72,7 @@ The FastAPI backend provides a RESTful API with:
 Model Context Protocol server for AI integration:
 
 - **MCP Endpoints**: FastAPI router exposing MCP-compliant tool endpoints
-- **Specialized Tools**: Cypher queries, schema introspection, fact grids, workspace management, memory graph operations (write Cypher, add node/relationship tables), semantic element resolution (LanceDB vector search), and document search (OpenSearch full-text)
+- **Specialized Tools**: Cypher queries, schema introspection, fact grids, workspace management, memory graph operations (write Cypher, add node/relationship tables), semantic element resolution (LanceDB vector search), and document search (OpenSearch full-text + semantic)
 - **Streaming Support**: SSE for memory-efficient large result processing
 - **Query Validation**: Complexity scoring and timeout enforcement
 
@@ -314,7 +314,7 @@ Business workflow orchestration and service layer:
 - **Table Service**: Schema-driven DuckDB staging table management and file ingestion
 - **Data Ingestion**: High-performance bulk data loading using COPY operations
 - **Credit Service**: AI agent usage tracking with token-based consumption
-- **Search Service**: OpenSearch-backed full-text document search with multi-tenant graph_id isolation
+- **Search Service**: OpenSearch-backed full-text and semantic document search with multi-tenant graph_id isolation
 - **Connection Service**: Provider-agnostic connection management (QuickBooks, Plaid, SEC) with encrypted credential storage
 
 **See**: [Operations Documentation](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/operations/README.md) in codebase
@@ -488,7 +488,7 @@ This enables `git pull upstream main` without merge conflicts on your custom ada
 - **Multi-Tenant Isolation**: Every query filters by `graph_id` at the client level
 - **Source Types**: SEC content (`xbrl_textblock`, `narrative_section`, `ixbrl_disclosure`); planned: `uploaded_doc`, `connection_doc`, `memory`
 - **Externalized Content**: Full text stored in S3/CDN; OpenSearch holds metadata, snippets, and embeddings
-- **Feature-Flag Gated**: `TEXT_SEARCH_ENABLED` SSM parameter controls availability
+- **Feature-Flag Gated**: `TEXT_SEARCH_ENABLED` controls availability; `SEMANTIC_SEARCH_ENABLED` controls hybrid KNN search; `tuning/indexing/ENABLE_EMBEDDINGS` controls embedding generation during indexing
 
 ### DynamoDB
 
@@ -785,7 +785,7 @@ See individual app repositories for specific deployment workflows.
 - Arelle-based XBRL parsing with fastembed enrichment
 - Nightly automated incremental pipeline (download → process → stage → materialize → publish → replica refresh)
 - LanceDB vector indexes for semantic XBRL element resolution via MCP tools
-- OpenSearch text indexing of filing narratives, text blocks, and iXBRL disclosures
+- OpenSearch text and semantic indexing of filing narratives, text blocks, and iXBRL disclosures
 - Rate-limited API access with backoff
 
 ### QuickBooks API
