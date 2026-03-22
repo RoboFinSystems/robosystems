@@ -35,9 +35,12 @@ async def _check_search_rate_limit(
 ) -> None:
   """Apply dual-layer rate limiting for search on shared repositories."""
   from robosystems.config import env
-  from robosystems.config.shared_repositories import is_shared_repository
+  from robosystems.config.shared_repositories import (
+    is_shared_repository_or_subgraph,
+    resolve_shared_repository_parent,
+  )
 
-  if not is_shared_repository(graph_id):
+  if not is_shared_repository_or_subgraph(graph_id):
     return
 
   if not env.RATE_LIMIT_ENABLED:
@@ -48,15 +51,16 @@ async def _check_search_rate_limit(
     create_async_redis_client,
   )
 
-  # Check user has access to the shared repo
+  # Check user has access to the shared repo (subscriptions are on the parent)
   from robosystems.middleware.auth.session import SessionFactory
   from robosystems.middleware.rate_limits import DualLayerRateLimiter
   from robosystems.models.iam.user_repository import UserRepository
 
+  parent_repo_id = resolve_shared_repository_parent(graph_id)
   session = SessionFactory()
   try:
     repo_access = UserRepository.get_by_user_and_repository(
-      current_user.id, graph_id, session
+      current_user.id, parent_repo_id, session
     )
   finally:
     session.close()

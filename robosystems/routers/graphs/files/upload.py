@@ -69,7 +69,7 @@ from robosystems.config.constants import (
   SMALL_FILE_STAGING_THRESHOLD_MB,
 )
 from robosystems.config.graph_tier import GraphTierConfig
-from robosystems.config.shared_repositories import is_shared_repository
+from robosystems.config.shared_repositories import is_shared_repository_or_subgraph
 from robosystems.database import get_db_session
 from robosystems.logger import api_logger, logger
 from robosystems.middleware.auth.dependencies import get_current_user_with_graph
@@ -190,7 +190,7 @@ async def create_file_upload(
       detail="table_name is required in request body",
     )
 
-  if is_shared_repository(graph_id.lower()):
+  if is_shared_repository_or_subgraph(graph_id.lower()):
     logger.warning(
       f"User {current_user.id} attempted file upload on shared repository {graph_id}"
     )
@@ -480,7 +480,7 @@ async def update_file(
   """
   start_time = datetime.now(UTC)
 
-  if is_shared_repository(graph_id.lower()):
+  if is_shared_repository_or_subgraph(graph_id.lower()):
     logger.warning(
       f"User {current_user.id} attempted file status update on shared repository {graph_id}"
     )

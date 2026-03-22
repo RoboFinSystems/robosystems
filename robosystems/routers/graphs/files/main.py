@@ -26,7 +26,7 @@ from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
 from sqlalchemy.orm import Session
 
 from robosystems.config import env
-from robosystems.config.shared_repositories import is_shared_repository
+from robosystems.config.shared_repositories import is_shared_repository_or_subgraph
 from robosystems.database import get_db_session
 from robosystems.logger import api_logger, logger
 from robosystems.middleware.auth.dependencies import get_current_user_with_graph
@@ -586,7 +586,7 @@ async def delete_file(
 
   require_graph_access(graph_id, db, require_write=True)
 
-  if is_shared_repository(graph_id.lower()):
+  if is_shared_repository_or_subgraph(graph_id.lower()):
     logger.warning(
       f"User {current_user.id} attempted file deletion on shared repository {graph_id}"
     )

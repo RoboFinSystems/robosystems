@@ -22,7 +22,8 @@ from robosystems.config.shared_repositories import (
   is_endpoint_allowed as _is_endpoint_allowed,
 )
 from robosystems.config.shared_repositories import (
-  is_shared_repository,
+  is_shared_repository_or_subgraph,
+  resolve_shared_repository_parent,
 )
 
 
@@ -103,10 +104,13 @@ class DualLayerRateLimiter:
         Dict with allowed status and details
     """
 
-    # Check if this is a shared repository
-    if is_shared_repository(graph_id):
+    # Check if this is a shared repository (including subgraphs like sec_historical)
+    if is_shared_repository_or_subgraph(graph_id):
+      # Resolve subgraph to parent for policy lookups
+      parent_repo_id = resolve_shared_repository_parent(graph_id)
+
       # First check if the endpoint is even allowed
-      if not SharedRepositoryRateLimits.is_endpoint_allowed(graph_id, endpoint):
+      if not SharedRepositoryRateLimits.is_endpoint_allowed(parent_repo_id, endpoint):
         return {
           "allowed": False,
           "reason": "endpoint_not_allowed",
@@ -135,9 +139,10 @@ class DualLayerRateLimiter:
 
     # Layer 2: Check repository-specific limits (if applicable)
     repo_check = None
-    if is_shared_repository(graph_id) and repository_plan:
+    if is_shared_repository_or_subgraph(graph_id) and repository_plan:
+      parent_id = resolve_shared_repository_parent(graph_id)
       repo_check = await self._check_repository_limit(
-        user_id, graph_id, operation, repository_plan
+        user_id, parent_id, operation, repository_plan
       )
       if not repo_check["allowed"]:
         return {
@@ -150,7 +155,7 @@ class DualLayerRateLimiter:
     return {
       "allowed": True,
       "burst": burst_check,
-      "repo": repo_check if is_shared_repository(graph_id) else None,
+      "repo": repo_check if is_shared_repository_or_subgraph(graph_id) else None,
     }
 
   async def _check_burst_limit(self, user_id: str, operation: str, tier: str) -> dict:

@@ -502,7 +502,7 @@ class TestCreateFileUploadSharedRepoAccess:
       _patch_require_graph_access(),
       patch.object(
         upload_module,
-        "is_shared_repository",
+        "is_shared_repository_or_subgraph",
         return_value=True,
       ),
     ):
@@ -546,7 +546,9 @@ class TestCreateFileUploadGraphNotFound:
 
     with (
       _patch_require_graph_access(),
-      patch.object(upload_module, "is_shared_repository", return_value=False),
+      patch.object(
+        upload_module, "is_shared_repository_or_subgraph", return_value=False
+      ),
       _patch_universal_repo(return_value=None),
     ):
       with pytest.raises(HTTPException) as exc_info:
@@ -568,7 +570,9 @@ class TestUpdateFileStatusValidation:
   async def test_rejects_shared_repo_status_update(self):
     request = FileStatusUpdate(status="uploaded")
 
-    with patch.object(upload_module, "is_shared_repository", return_value=True):
+    with patch.object(
+      upload_module, "is_shared_repository_or_subgraph", return_value=True
+    ):
       with pytest.raises(HTTPException) as exc_info:
         await upload_module.update_file(
           background_tasks=Mock(),
@@ -588,7 +592,9 @@ class TestUpdateFileStatusValidation:
     mock_file.graph_id = "kg01234567890abcdef"
 
     with (
-      patch.object(upload_module, "is_shared_repository", return_value=False),
+      patch.object(
+        upload_module, "is_shared_repository_or_subgraph", return_value=False
+      ),
       _patch_universal_repo(),
       patch.object(
         upload_module.GraphFile,
@@ -614,7 +620,9 @@ class TestUpdateFileStatusValidation:
     request = FileStatusUpdate(status="uploaded")
 
     with (
-      patch.object(upload_module, "is_shared_repository", return_value=False),
+      patch.object(
+        upload_module, "is_shared_repository_or_subgraph", return_value=False
+      ),
       _patch_universal_repo(),
       patch.object(upload_module.GraphFile, "get_by_id", return_value=None),
     ):
@@ -637,7 +645,9 @@ class TestUpdateFileStatusValidation:
     mock_file.graph_id = "kg_different_graph_id"
 
     with (
-      patch.object(upload_module, "is_shared_repository", return_value=False),
+      patch.object(
+        upload_module, "is_shared_repository_or_subgraph", return_value=False
+      ),
       _patch_universal_repo(),
       patch.object(
         upload_module.GraphFile,
@@ -666,7 +676,9 @@ class TestUpdateFileStatusValidation:
     mock_file.upload_status = "uploaded"
 
     with (
-      patch.object(upload_module, "is_shared_repository", return_value=False),
+      patch.object(
+        upload_module, "is_shared_repository_or_subgraph", return_value=False
+      ),
       _patch_universal_repo(),
       patch.object(
         upload_module.GraphFile,
@@ -695,7 +707,9 @@ class TestUpdateFileStatusValidation:
     mock_file.upload_status = "uploaded"
 
     with (
-      patch.object(upload_module, "is_shared_repository", return_value=False),
+      patch.object(
+        upload_module, "is_shared_repository_or_subgraph", return_value=False
+      ),
       _patch_universal_repo(),
       patch.object(
         upload_module.GraphFile,
@@ -731,7 +745,9 @@ class TestUpdateFileFileSizeValidation:
     mock_s3.s3_client.head_object = Mock(return_value={"ContentLength": 0})
 
     with (
-      patch.object(upload_module, "is_shared_repository", return_value=False),
+      patch.object(
+        upload_module, "is_shared_repository_or_subgraph", return_value=False
+      ),
       _patch_universal_repo(),
       patch.object(
         upload_module.GraphFile,
@@ -769,7 +785,9 @@ class TestUpdateFileFileSizeValidation:
     )
 
     with (
-      patch.object(upload_module, "is_shared_repository", return_value=False),
+      patch.object(
+        upload_module, "is_shared_repository_or_subgraph", return_value=False
+      ),
       _patch_universal_repo(),
       patch.object(
         upload_module.GraphFile,
@@ -812,7 +830,9 @@ class TestUpdateFileFileSizeValidation:
     mock_table.total_size_bytes = 11 * 1024 * 1024 * 1024  # 11 GB
 
     with (
-      patch.object(upload_module, "is_shared_repository", return_value=False),
+      patch.object(
+        upload_module, "is_shared_repository_or_subgraph", return_value=False
+      ),
       _patch_universal_repo(),
       patch.object(
         upload_module.GraphFile,
@@ -857,7 +877,9 @@ class TestUpdateFileFileSizeValidation:
     mock_s3.s3_client.head_object = Mock(side_effect=Exception("Not found"))
 
     with (
-      patch.object(upload_module, "is_shared_repository", return_value=False),
+      patch.object(
+        upload_module, "is_shared_repository_or_subgraph", return_value=False
+      ),
       _patch_universal_repo(),
       patch.object(
         upload_module.GraphFile,
