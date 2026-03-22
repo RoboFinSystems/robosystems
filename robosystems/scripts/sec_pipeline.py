@@ -209,7 +209,6 @@ class SECPipeline:
     reset_staging: bool = False,
     rebuild_graph: bool = False,
     skip_taxonomy: bool = False,
-    start_year: int | None = None,
   ) -> str:
     """Create YAML config for Dagster job.
 
@@ -252,21 +251,15 @@ class SECPipeline:
         }
       }
     elif job_type == "textblocks_index":
-      tb_cfg: dict[str, Any] = {"graph_id": graph_id}
-      if start_year:
-        tb_cfg["start_year"] = start_year
       config = {
         "ops": {
-          "sec_textblocks_indexed": {"config": tb_cfg},
+          "sec_textblocks_indexed": {"config": {"graph_id": graph_id}},
         }
       }
     elif job_type == "narratives_index":
-      narr_cfg: dict[str, Any] = {"graph_id": graph_id}
-      if start_year:
-        narr_cfg["start_year"] = start_year
       config = {
         "ops": {
-          "sec_narratives_indexed": {"config": narr_cfg},
+          "sec_narratives_indexed": {"config": {"graph_id": graph_id}},
         }
       }
     else:
@@ -474,47 +467,48 @@ class SECPipeline:
       else:
         logger.error(f"  Staging failed: {stage_result.error}")
 
-    # Phase 4: Text Search Indexing (OpenSearch)
+    # Phase 4: Text Search Indexing (OpenSearch) — partitioned by quarter
     if not self.skip_processing:
       logger.info(f"\n{'=' * 60}")
       logger.info("TEXT SEARCH INDEXING (OpenSearch)")
       logger.info(f"{'=' * 60}")
 
-      # Text blocks indexing
-      logger.info("\n[TEXT BLOCKS] Indexing XBRL text blocks...")
-      tb_config_path = self._create_job_config(
-        tickers=self.tickers,
-        year=None,
-        job_type="textblocks_index",
-      )
-      tb_result = self.run_stage(
-        job_name="sec_textblocks_index",
-        config_path=tb_config_path,
-        timeout=self.materialize_timeout,
-      )
-      all_results.append(tb_result)
-      if tb_result.success:
-        logger.info(f"  Text blocks indexed ({tb_result.duration_seconds:.1f}s)")
-      else:
-        logger.warning(f"  Text block indexing issues: {tb_result.error}")
+      for quarter in quarters:
+        logger.info(f"\n[INDEX {quarter}] Text blocks...")
+        tb_config_path = self._create_job_config(
+          tickers=self.tickers,
+          year=None,
+          job_type="textblocks_index",
+        )
+        tb_result = self.run_stage(
+          job_name="sec_textblocks_index",
+          config_path=tb_config_path,
+          year=quarter,
+          timeout=self.materialize_timeout,
+        )
+        all_results.append(tb_result)
+        if tb_result.success:
+          logger.info(f"  Text blocks indexed ({tb_result.duration_seconds:.1f}s)")
+        else:
+          logger.warning(f"  Text block indexing issues: {tb_result.error}")
 
-      # Narrative sections indexing
-      logger.info("\n[NARRATIVES] Extracting and indexing narrative sections...")
-      narr_config_path = self._create_job_config(
-        tickers=self.tickers,
-        year=None,
-        job_type="narratives_index",
-      )
-      narr_result = self.run_stage(
-        job_name="sec_narratives_index",
-        config_path=narr_config_path,
-        timeout=self.materialize_timeout,
-      )
-      all_results.append(narr_result)
-      if narr_result.success:
-        logger.info(f"  Narratives indexed ({narr_result.duration_seconds:.1f}s)")
-      else:
-        logger.warning(f"  Narrative indexing issues: {narr_result.error}")
+        logger.info(f"\n[INDEX {quarter}] Narratives...")
+        narr_config_path = self._create_job_config(
+          tickers=self.tickers,
+          year=None,
+          job_type="narratives_index",
+        )
+        narr_result = self.run_stage(
+          job_name="sec_narratives_index",
+          config_path=narr_config_path,
+          year=quarter,
+          timeout=self.materialize_timeout,
+        )
+        all_results.append(narr_result)
+        if narr_result.success:
+          logger.info(f"  Narratives indexed ({narr_result.duration_seconds:.1f}s)")
+        else:
+          logger.warning(f"  Narrative indexing issues: {narr_result.error}")
 
     # Summary
     overall_duration = time.time() - overall_start
@@ -1263,19 +1257,18 @@ def cmd_process(args):
 def cmd_index(args):
   """Index text blocks and narratives into OpenSearch (Phase 4).
 
-  Runs both indexing jobs:
+  Runs both indexing jobs (partitioned by quarter):
   1. sec_textblocks_indexed — reads processed parquets, fetches externalized HTML, indexes
   2. sec_narratives_indexed — reads raw ZIPs, extracts sections, externalizes, indexes
 
   Requires processed parquets to exist in S3 (run after processing completes).
   """
-  start_year = getattr(args, "start_year", None)
+  quarter = args.quarter
 
   logger.info("=" * 60)
   logger.info("SEC Text Search Indexing (Phase 4)")
   logger.info("=" * 60)
-  if start_year:
-    logger.info(f"Start year: {start_year}")
+  logger.info(f"Quarter: {quarter}")
 
   pipeline = SECPipeline(
     tickers=[],
@@ -1297,11 +1290,11 @@ def cmd_index(args):
     year=None,
     job_type="textblocks_index",
     graph_id=args.graph_id,
-    start_year=start_year,
   )
   tb_result = pipeline.run_stage(
     job_name="sec_textblocks_index",
     config_path=tb_config,
+    year=quarter,
     timeout=args.timeout,
   )
   results.append(tb_result)
@@ -1317,11 +1310,11 @@ def cmd_index(args):
     year=None,
     job_type="narratives_index",
     graph_id=args.graph_id,
-    start_year=start_year,
   )
   narr_result = pipeline.run_stage(
     job_name="sec_narratives_index",
     config_path=narr_config,
+    year=quarter,
     timeout=args.timeout,
   )
   results.append(narr_result)
@@ -1515,13 +1508,12 @@ def main():
     help="Index text blocks + narratives into OpenSearch (Phase 4)",
   )
   index_parser.add_argument(
-    "--graph-id", type=str, default="sec", help="Graph ID (default: sec)"
+    "quarter",
+    type=str,
+    help="Quarter to index (e.g. 2026-Q1)",
   )
   index_parser.add_argument(
-    "--start-year",
-    type=int,
-    default=None,
-    help="Only index filings from this year forward (default: all)",
+    "--graph-id", type=str, default="sec", help="Graph ID (default: sec)"
   )
   index_parser.add_argument(
     "--timeout",
