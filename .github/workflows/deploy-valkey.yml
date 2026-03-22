@@ -47,12 +47,11 @@ on:
         default: "1"
 
       # Valkey Version Configuration
-      # FORK NOTE: Set VALKEY_VERSION_<ENV> to pin your version
       valkey_version:
-        description: "Valkey engine version (leave empty to use template default)"
+        description: "Valkey engine version (e.g., 8.1)"
         required: false
         type: string
-        default: ""
+        default: "8.1"
 
       # Security Configuration
       encryption_enabled:
@@ -139,17 +138,8 @@ jobs:
                 ParameterKey=NumCacheNodes,ParameterValue=${{ inputs.num_cache_nodes }} \
                 ParameterKey=EnableEncryption,ParameterValue=${{ inputs.encryption_enabled }} \
                 ParameterKey=SnapshotRetentionDays,ParameterValue=${{ inputs.snapshot_retention_days }} \
-                ParameterKey=LambdaImageUri,ParameterValue=${{ inputs.lambda_image_uri }}"
-
-          # Add version parameter only if explicitly set (allows forks to pin versions)
-          # Parameter group family is auto-derived from version via CloudFormation Mappings
-          if [ -n "${{ inputs.valkey_version }}" ]; then
-            VALKEY_STACK_PARAMS="$VALKEY_STACK_PARAMS \
+                ParameterKey=LambdaImageUri,ParameterValue=${{ inputs.lambda_image_uri }} \
                 ParameterKey=ValkeyEngineVersion,ParameterValue=${{ inputs.valkey_version }}"
-            echo "Using Valkey version: ${{ inputs.valkey_version }}"
-          else
-            echo "Using template default Valkey version"
-          fi
 
           # Deploy or update the stack
           if [ "$STACK_ACTION" = "create-stack" ]; then
