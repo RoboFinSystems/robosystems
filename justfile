@@ -466,11 +466,32 @@ sec-materialize-graph env=_local_env:
 
 # --- Phase 4: Text Search Indexing ---
 
-# Index text blocks + narratives into OpenSearch (requires processed parquets in S3)
-sec-index start_year="" env=_local_env:
-    UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.sec_pipeline index \
-        --graph-id sec \
-        {{ if start_year != "" { "--start-year " + start_year } else { "" } }}
+# Index text blocks + narratives into OpenSearch (partitioned by quarter)
+sec-index quarter env=_local_env:
+    UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.sec_pipeline index {{quarter}} \
+        --graph-id sec
+
+# --- Phase 5: Text Search Query ---
+
+# Search OpenSearch for filing text content (semantic search enabled by default)
+# Examples:
+#   just search sec "revenue growth"
+#   just search sec "risk factors" --entity NVDA
+#   just search sec "inventory" --form-type 10-K --fiscal-year 2025
+#   just search sec "revenue" --size 3
+#   just search sec "revenue" --no-semantic
+#   just search-count sec
+search graph_id query *flags:
+    UV_ENV_FILE={{_local_env}} uv run python -m robosystems.scripts.search_query \
+        --graph-id {{graph_id}} \
+        --semantic \
+        {{flags}} \
+        "{{query}}"
+
+# Show OpenSearch document count and breakdown
+search-count graph_id="sec" env=_local_env:
+    UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.search_query \
+        --graph-id {{graph_id}} --count
 
 # --- Utilities ---
 

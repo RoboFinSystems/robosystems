@@ -245,8 +245,8 @@ jobs:
       subnet_ids: ${{ needs.deploy-vpc.outputs.private_subnet_ids }}
       # Database Engine Configuration
       engine: ${{ vars.DATABASE_ENGINE_PROD || 'postgres' }}
-      # Database Version Configuration (set to pin version, empty uses template default)
-      postgres_version: ${{ vars.DATABASE_POSTGRES_VERSION_PROD || '' }}
+      # Database Version Configuration
+      postgres_version: ${{ vars.DATABASE_POSTGRES_VERSION_PROD || '16.11' }}
       # Instance Configuration
       instance_size: ${{ vars.DATABASE_INSTANCE_SIZE_PROD || 'db.t4g.small' }}
       allocated_storage: ${{ vars.DATABASE_ALLOCATED_STORAGE_PROD || '20' }}
@@ -275,8 +275,8 @@ jobs:
       # Instance Configuration
       node_type: ${{ vars.VALKEY_NODE_TYPE_PROD || 'cache.t4g.micro' }}
       num_cache_nodes: ${{ vars.VALKEY_NUM_NODES_PROD || '1' }}
-      # Valkey Version Configuration (set to pin version, empty uses template default)
-      valkey_version: ${{ vars.VALKEY_VERSION_PROD || '' }}
+      # Valkey Version Configuration
+      valkey_version: ${{ vars.VALKEY_VERSION_PROD || '8.1' }}
       # Security Configuration
       encryption_enabled: ${{ vars.VALKEY_ENCRYPTION_ENABLED_PROD || 'true' }}
       # Backup Configuration
@@ -290,7 +290,7 @@ jobs:
   deploy-opensearch:
     # Text search disabled by default - set OPENSEARCH_ENABLED_PROD=true to enable
     if: vars.OPENSEARCH_ENABLED_PROD == 'true'
-    needs: [runner, create-deployment, stack-config, deploy-vpc]
+    needs: [runner, create-deployment, stack-config, deploy-vpc, deploy-bastion]
     uses: ./.github/workflows/deploy-opensearch.yml
     with:
       # Stack & Repository Configuration
@@ -305,6 +305,10 @@ jobs:
       # Instance Configuration
       instance_type: ${{ vars.OPENSEARCH_INSTANCE_TYPE_PROD || 't3.medium.search' }}
       ebs_volume_size: ${{ vars.OPENSEARCH_EBS_SIZE_PROD || '100' }}
+      # Engine Version Configuration
+      engine_version: ${{ vars.OPENSEARCH_VERSION_PROD || '2.19' }}
+      # Bastion Access
+      bastion_sg_id: ${{ needs.deploy-bastion.outputs.bastion_sg_id }}
       # Other Configuration
       aws_sns_alert_email: ${{ vars.AWS_SNS_ALERT_EMAIL }}
     secrets: inherit
@@ -518,8 +522,7 @@ jobs:
       desired_count: ${{ vars.API_MIN_CAPACITY_PROD || '1' }}
       cpu: ${{ vars.API_CPU_PROD || '512' }}
       memory: ${{ vars.API_MEMORY_PROD || '1024' }}
-      fargate_weight: ${{ vars.API_FARGATE_WEIGHT_PROD || '10' }}
-      fargate_spot_weight: ${{ vars.API_FARGATE_SPOT_WEIGHT_PROD || '90' }}
+      fargate_spot_weight: ${{ vars.API_FARGATE_SPOT_WEIGHT_PROD || '0' }}
       fargate_base: ${{ vars.API_FARGATE_BASE_PROD || '0' }}
       # Auto-scaling Configuration
       min_capacity: ${{ vars.API_MIN_CAPACITY_PROD || '1' }}
@@ -600,10 +603,8 @@ jobs:
       # Run Job Profiles: hardcoded in deploy-dagster.yml (Light/Standard/Compute/Heavy)
       max_concurrent_runs: ${{ vars.DAGSTER_MAX_CONCURRENT_RUNS_PROD || '20' }}
       # Capacity Provider Configuration (Spot vs On-Demand)
-      daemon_fargate_weight: ${{ vars.DAGSTER_DAEMON_FARGATE_WEIGHT_PROD || '20' }}
-      daemon_fargate_spot_weight: ${{ vars.DAGSTER_DAEMON_FARGATE_SPOT_WEIGHT_PROD || '80' }}
-      webserver_fargate_weight: ${{ vars.DAGSTER_WEBSERVER_FARGATE_WEIGHT_PROD || '20' }}
-      webserver_fargate_spot_weight: ${{ vars.DAGSTER_WEBSERVER_FARGATE_SPOT_WEIGHT_PROD || '80' }}
+      daemon_fargate_spot_weight: ${{ vars.DAGSTER_DAEMON_FARGATE_SPOT_WEIGHT_PROD || '0' }}
+      webserver_fargate_spot_weight: ${{ vars.DAGSTER_WEBSERVER_FARGATE_SPOT_WEIGHT_PROD || '0' }}
       daemon_fargate_base: ${{ vars.DAGSTER_DAEMON_FARGATE_BASE_PROD || '0' }}
       webserver_fargate_base: ${{ vars.DAGSTER_WEBSERVER_FARGATE_BASE_PROD || '0' }}
       # Database Configuration (from Postgres stack outputs)

@@ -489,6 +489,17 @@ Resources:
                       - prod-5ukwuglpt66kg # Claude Sonnet 4.6
                       - prod-mxcfnwvpd6kb4 # Claude Sonnet 4.5
                       - prod-4pmewlybdftbs # Claude Sonnet 4
+              # OpenSearch for text search queries
+              - !If
+                - HasOpenSearch
+                - Effect: Allow
+                  Action:
+                    - es:ESHttpGet
+                    - es:ESHttpHead
+                    - es:ESHttpPost
+                  Resource:
+                    - !Sub "arn:${AWS::Partition}:es:${AWS::Region}:${AWS::AccountId}:domain/robosystems-${Environment}/*"
+                - !Ref "AWS::NoValue"
 
   # ECS Task Execution Role
   ApiTaskExecutionRole:

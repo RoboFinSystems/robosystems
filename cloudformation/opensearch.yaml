@@ -20,7 +20,7 @@ Parameters:
   InstanceType:
     Type: String
     Description: OpenSearch instance type
-    Default: t3.medium.search
+    Default: t3.small.search
     AllowedValues:
       # T3 - Burstable (cost-effective for variable loads)
       - t3.small.search    # 2 GB RAM, up to 100 GB EBS
@@ -46,11 +46,17 @@ Parameters:
   EngineVersion:
     Type: String
     Description: OpenSearch engine version
-    Default: "OpenSearch_2.17"
+    Default: "OpenSearch_2.19"
     AllowedValues:
+      - "OpenSearch_2.19"
       - "OpenSearch_2.17"
       - "OpenSearch_2.15"
-      - "OpenSearch_2.13"
+
+  # Bastion Access (optional)
+  BastionSecurityGroupId:
+    Type: String
+    Description: Bastion host security group ID for tunnel access (empty to skip)
+    Default: ""
 
   # Monitoring
   SNSAlertEmail:
@@ -71,6 +77,7 @@ Parameters:
 
 Conditions:
   IsProduction: !Equals [!Ref Environment, prod]
+  HasBastion: !Not [!Equals [!Ref BastionSecurityGroupId, ""]]
 
 Resources:
   # Security Group for OpenSearch Domain
@@ -88,6 +95,14 @@ Resources:
           ToPort: 443
           SourceSecurityGroupId: !Ref OpenSearchClientSecurityGroup
           Description: Allow HTTPS access from application clients
+        - !If
+          - HasBastion
+          - IpProtocol: tcp
+            FromPort: 443
+            ToPort: 443
+            SourceSecurityGroupId: !Ref BastionSecurityGroupId
+            Description: Allow HTTPS access from bastion host (SSM tunnels)
+          - !Ref "AWS::NoValue"
       SecurityGroupEgress: []
       Tags:
         - Key: Name
@@ -123,9 +138,7 @@ Resources:
           Value: CloudFormation
 
   # NOTE: OpenSearch VPC access requires the service-linked role AWSServiceRoleForAmazonOpenSearchService.
-  # This role is account-wide and created automatically on first VPC domain creation,
-  # or manually via: aws iam create-service-linked-role --aws-service-name es.amazonaws.com
-  # It is NOT managed in this template to avoid conflicts between staging/prod stacks.
+  # This role is account-wide and managed in bootstrap-oidc.yaml (OpenSearchServiceLinkedRole).
 
   # OpenSearch Domain
   OpenSearchDomain:
@@ -310,6 +323,17 @@ Resources:
       AlarmActions:
         - !Ref OpenSearchNotificationTopic
       TreatMissingData: notBreaching
+      Tags:
+        - Key: Name
+          Value: !Sub "robosystems-opensearch-${Environment}-cluster-red"
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: !Ref ServiceTag
+        - Key: Component
+          Value: !Ref ComponentTag
+        - Key: CreatedBy
+          Value: CloudFormation
 
   OpenSearchFreeStorageAlarm:
     Type: AWS::CloudWatch::Alarm
@@ -333,6 +357,17 @@ Resources:
       AlarmActions:
         - !Ref OpenSearchNotificationTopic
       TreatMissingData: notBreaching
+      Tags:
+        - Key: Name
+          Value: !Sub "robosystems-opensearch-${Environment}-low-storage"
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: !Ref ServiceTag
+        - Key: Component
+          Value: !Ref ComponentTag
+        - Key: CreatedBy
+          Value: CloudFormation
 
 Outputs:
   OpenSearchEndpoint:

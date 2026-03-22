@@ -344,6 +344,8 @@
         "valkey",
         "dagster",
         "api",
+        "api-internal",
+        "opensearch",
         "shell",
         "migrate"
       ]

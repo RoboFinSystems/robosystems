@@ -4,11 +4,13 @@ Two-tool pattern:
 1. search-documents: Keyword search returning ranked snippets with metadata
 2. get-document-section: Drill into a specific result for full content
 
-Uses BM25 keyword matching via OpenSearch. Semantic/vector search is planned.
+Uses BM25 keyword matching via OpenSearch. When SEMANTIC_SEARCH_ENABLED is true,
+hybrid search combines BM25 with vector similarity for better conceptual matching.
 """
 
 from typing import Any
 
+from robosystems.config import env
 from robosystems.logger import logger
 
 
@@ -21,7 +23,7 @@ class SearchDocumentsTool:
   def get_tool_definition(self) -> dict[str, Any]:
     return {
       "name": "search-documents",
-      "description": """Full-text keyword search across SEC filing narratives and disclosures. Searches MD&A, risk factors, business descriptions, cybersecurity disclosures, and other qualitative content using keyword matching (BM25).
+      "description": """Search across SEC filing narratives and disclosures. Searches MD&A, risk factors, business descriptions, cybersecurity disclosures, and other qualitative content. Uses keyword matching (BM25) by default; when semantic search is enabled, combines keyword matching with vector similarity for better conceptual results.
 
 **WHEN TO USE:**
 - When the user asks about topics, risks, strategies, or disclosures mentioned in filings
@@ -48,7 +50,8 @@ class SearchDocumentsTool:
 - Use the element filter to go the other direction: find all disclosures containing a specific XBRL fact
 
 **TIPS:**
-- Use specific keywords that would appear in filings (e.g., "tariff" not "trade war concerns")
+- With semantic search, natural language queries work well (e.g., "trade war concerns", "supply chain disruptions")
+- For exact keyword matching, set semantic=false (e.g., searching for a specific term like "LIBOR")
 - Use entity filter to focus on one company's filings
 - Use section filter (item_1a, item_7) to target specific filing sections
 - Results include XBRL text blocks, extracted narrative sections, and iXBRL disclosures""",
@@ -79,6 +82,10 @@ class SearchDocumentsTool:
             "type": "integer",
             "description": "Optional: filter by fiscal year",
           },
+          "semantic": {
+            "type": "boolean",
+            "description": "Enable semantic (vector) search for better conceptual matching. Defaults to the SEMANTIC_SEARCH_ENABLED feature flag. Set to false for exact keyword matching only.",
+          },
           "size": {
             "type": "integer",
             "description": "Max results (default 10, max 50)",
@@ -107,6 +114,7 @@ class SearchDocumentsTool:
       section=arguments.get("section"),
       element=arguments.get("element"),
       fiscal_year=arguments.get("fiscal_year"),
+      semantic=arguments.get("semantic", env.SEMANTIC_SEARCH_ENABLED),
       size=min(arguments.get("size", 10), 50),
     )
 

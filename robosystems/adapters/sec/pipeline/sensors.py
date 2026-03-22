@@ -24,6 +24,8 @@ then the LadybugDB graph is fully rebuilt from DuckDB. The sec graph (2024+ only
 is small enough for nightly rebuilds (~75GB vs ~300GB monolith).
 """
 
+from datetime import UTC, datetime
+
 from dagster import (
   DagsterRunStatus,
   DefaultScheduleStatus,
@@ -670,9 +672,9 @@ def sec_post_materialize_publish_sensor(context: RunStatusSensorContext):
 def sec_post_stage_index_sensor(context: RunStatusSensorContext):
   """Trigger text search indexing after staging completes.
 
-  Runs both indexing jobs in parallel since they're independent.
-  Both jobs use incremental logic — they query OpenSearch for
-  already-indexed accessions and skip them.
+  Runs all three indexing jobs in parallel since they're independent.
+  Each job is partitioned by quarter. The sensor derives the current
+  quarter from the upstream run tags or the current date.
   """
   if env.ENVIRONMENT == "dev":
     context.log.info("Skipping text index sensor in dev environment")
@@ -687,6 +689,16 @@ def sec_post_stage_index_sensor(context: RunStatusSensorContext):
     return
 
   graph_id = run_tags.get("graph_id", "sec")
+
+  # Derive the current quarter partition key
+  # Try to get from upstream run tags, otherwise compute from current date
+  partition_key = run_tags.get("dagster/partition")
+  if not partition_key:
+    now = datetime.now(UTC)
+    quarter = (now.month - 1) // 3 + 1
+    partition_key = f"{now.year}-Q{quarter}"
+
+  context.log.info(f"Will index partition {partition_key}")
 
   # Job name → asset op name mapping
   index_jobs = {
@@ -710,16 +722,119 @@ def sec_post_stage_index_sensor(context: RunStatusSensorContext):
       )
       continue
     context.log.info(
-      f"Staging complete (run_id={dagster_run.run_id}), triggering {job_name}"
+      f"Staging complete (run_id={dagster_run.run_id}), triggering {job_name} "
+      f"for {partition_key}"
     )
 
+    # Read embedding config from SSM tuning param (runtime-toggleable)
+    from robosystems.config.tuning import TuningConfig
+
+    enable_embeddings = TuningConfig.get_indexing_enable_embeddings()
+
     yield RunRequest(
-      run_key=f"sec-{job_name}-chain-{dagster_run.run_id[:8]}",
+      run_key=f"sec-{job_name}-chain-{partition_key}-{dagster_run.run_id[:8]}",
       job_name=job_name,
-      run_config={"ops": {asset_name: {"config": {"graph_id": graph_id}}}},
+      run_config={
+        "ops": {
+          asset_name: {
+            "config": {
+              "graph_id": graph_id,
+              "enable_embeddings": enable_embeddings,
+            }
+          }
+        }
+      },
+      partition_key=partition_key,
       tags={
         "pipeline": "sec",
         "phase": "text_index",
         "mode": "incremental",
       },
     )
+
+
+# Maximum number of automatic retries before giving up
+_INDEX_RETRY_MAX = 3
+
+
+@run_status_sensor(
+  run_status=DagsterRunStatus.FAILURE,
+  monitored_jobs=[
+    sec_textblocks_index_job,
+    sec_narratives_index_job,
+    sec_ixbrl_index_job,
+  ],
+  request_jobs=[
+    sec_textblocks_index_job,
+    sec_narratives_index_job,
+    sec_ixbrl_index_job,
+  ],
+  default_status=DefaultSensorStatus.STOPPED,
+  minimum_interval_seconds=60,
+  description=(
+    "Retry failed text search indexing jobs (e.g. Spot interruptions). "
+    "Incremental skip ensures completed batches are not re-indexed. "
+    f"Caps at {_INDEX_RETRY_MAX} retries per partition to avoid loops."
+  ),
+)
+def sec_index_retry_sensor(context: RunStatusSensorContext):
+  """Retry failed indexing jobs with the same partition and config.
+
+  Designed for Spot resilience: when a Fargate Spot task is reclaimed,
+  the Dagster run fails. This sensor detects the failure and re-launches
+  with the same partition key and run config. The OpenSearch incremental
+  skip (_get_indexed_accessions) ensures already-indexed batches are not
+  reprocessed, so retries only do the remaining work.
+  """
+  dagster_run = context.dagster_run
+  job_name = dagster_run.job_name
+  run_tags = dagster_run.tags or {}
+
+  partition_key = run_tags.get("dagster/partition")
+  if not partition_key:
+    context.log.warning(
+      f"No partition key on failed run {dagster_run.run_id}, skipping retry"
+    )
+    return
+
+  # Track retry count to cap retries
+  retry_count = int(run_tags.get("retry_count", "0"))
+  if retry_count >= _INDEX_RETRY_MAX:
+    context.log.warning(
+      f"{job_name} for {partition_key} has failed {retry_count} times, "
+      f"not retrying (max {_INDEX_RETRY_MAX})"
+    )
+    return
+
+  # Check if the job is already running for this specific partition
+  active_runs = context.instance.get_runs(
+    filters=RunsFilter(
+      job_name=job_name,
+      statuses=[DagsterRunStatus.STARTED, DagsterRunStatus.QUEUED],
+      tags={"dagster/partition": partition_key},
+    ),
+    limit=1,
+  )
+  if active_runs:
+    context.log.info(
+      f"{job_name} already running (run_id={active_runs[0].run_id}), skipping retry"
+    )
+    return
+
+  next_retry = retry_count + 1
+  context.log.info(
+    f"Retrying {job_name} for {partition_key} "
+    f"(attempt {next_retry}/{_INDEX_RETRY_MAX}, failed run: {dagster_run.run_id})"
+  )
+
+  yield RunRequest(
+    run_key=f"sec-{job_name}-retry-{partition_key}-{next_retry}-{dagster_run.run_id[:8]}",
+    job_name=job_name,
+    run_config=dagster_run.run_config,
+    partition_key=partition_key,
+    tags={
+      **{k: v for k, v in run_tags.items() if not k.startswith("dagster/")},
+      "retry_count": str(next_retry),
+      "retry_of": dagster_run.run_id,
+    },
+  )

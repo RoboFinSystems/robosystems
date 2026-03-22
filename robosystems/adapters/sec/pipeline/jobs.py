@@ -494,61 +494,56 @@ sec_lbug_r2_publish_job = define_asset_job(
 # Index filing text content into OpenSearch for full-text search.
 # Two assets: XBRL text blocks (already externalized) + narrative sections (extracted from raw HTML).
 
+SEC_INDEX_ECS_TAGS = {
+  # 1 vCPU, 4 GB — lighter than sec_process (4 vCPU/16 GB) but sized for
+  # fastembed model (~130 MB) when enable_embeddings=True. Extra CPU helps
+  # embedding throughput. Spot-preferred with OpenSearch incremental skip
+  # providing crash resilience (completed batches survive Spot reclaim).
+  "ecs/cpu": "1024",
+  "ecs/memory": "4096",
+  "ecs/ephemeral_storage": "21",
+  "ecs/run_task_kwargs": {
+    "capacityProviderStrategy": [
+      {"capacityProvider": "FARGATE_SPOT", "weight": 9, "base": 0},
+      {"capacityProvider": "FARGATE", "weight": 1, "base": 0},
+    ],
+  },
+}
+
 sec_textblocks_index_job = define_asset_job(
   name="sec_textblocks_index",
-  description="Index XBRL text blocks into OpenSearch.",
+  description="Index XBRL text blocks into OpenSearch (partitioned by quarter).",
   selection=AssetSelection.assets(sec_textblocks_indexed),
+  partitions_def=sec_quarter_partitions,
   tags={
     "pipeline": "sec",
     "phase": "text_index",
-    "ecs/cpu": "1024",
-    "ecs/memory": "4096",
-    "ecs/ephemeral_storage": "21",
-    "ecs/run_task_kwargs": {
-      "capacityProviderStrategy": [
-        {"capacityProvider": "FARGATE_SPOT", "weight": 9, "base": 0},
-        {"capacityProvider": "FARGATE", "weight": 1, "base": 0},
-      ],
-    },
+    **SEC_INDEX_ECS_TAGS,
   },
 )
 
 sec_narratives_index_job = define_asset_job(
   name="sec_narratives_index",
-  description="Extract and index narrative sections from SEC filings into OpenSearch.",
+  description="Extract and index narrative sections from SEC filings into OpenSearch (partitioned by quarter).",
   selection=AssetSelection.assets(sec_narratives_indexed),
+  partitions_def=sec_quarter_partitions,
   tags={
     "pipeline": "sec",
     "phase": "text_index",
-    "ecs/cpu": "1024",
-    "ecs/memory": "4096",
-    "ecs/ephemeral_storage": "50",
-    "ecs/run_task_kwargs": {
-      "capacityProviderStrategy": [
-        {"capacityProvider": "FARGATE_SPOT", "weight": 9, "base": 0},
-        {"capacityProvider": "FARGATE", "weight": 1, "base": 0},
-      ],
-    },
+    **SEC_INDEX_ECS_TAGS,
   },
 )
 
 
 sec_ixbrl_index_job = define_asset_job(
   name="sec_ixbrl_index",
-  description="Extract iXBRL disclosure sections with XBRL element metadata into OpenSearch.",
+  description="Extract iXBRL disclosure sections with XBRL element metadata into OpenSearch (partitioned by quarter).",
   selection=AssetSelection.assets(sec_ixbrl_disclosures_indexed),
+  partitions_def=sec_quarter_partitions,
   tags={
     "pipeline": "sec",
     "phase": "text_index",
-    "ecs/cpu": "1024",
-    "ecs/memory": "4096",
-    "ecs/ephemeral_storage": "50",
-    "ecs/run_task_kwargs": {
-      "capacityProviderStrategy": [
-        {"capacityProvider": "FARGATE_SPOT", "weight": 9, "base": 0},
-        {"capacityProvider": "FARGATE", "weight": 1, "base": 0},
-      ],
-    },
+    **SEC_INDEX_ECS_TAGS,
   },
 )
 
