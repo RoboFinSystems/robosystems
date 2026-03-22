@@ -19,7 +19,7 @@ INDEX_MAPPING = {
       "document_id": {"type": "keyword"},
       "source_type": {
         "type": "keyword"
-      },  # "xbrl_textblock", "narrative_section", or "ixbrl_disclosure"
+      },  # "xbrl_textblock", "narrative_section", "ixbrl_disclosure", "uploaded_doc", "memory", "connection_doc"
       # Entity metadata
       "entity_ticker": {"type": "keyword"},
       "entity_cik": {"type": "keyword"},
@@ -47,6 +47,22 @@ INDEX_MAPPING = {
       "fiscal_period": {"type": "keyword"},
       "form_type": {"type": "keyword"},
       "accession_number": {"type": "keyword"},
+      # Document metadata (uploaded docs, memories, connections)
+      "tags": {"type": "keyword"},
+      "category": {"type": "keyword"},
+      "document_title": {
+        "type": "text",
+        "fields": {"keyword": {"type": "keyword"}},
+      },
+      "folder": {"type": "keyword"},
+      # Connection-specific
+      "source_provider": {"type": "keyword"},
+      "source_file_id": {"type": "keyword"},
+      "source_file_name": {
+        "type": "text",
+        "fields": {"keyword": {"type": "keyword"}},
+      },
+      "last_modified": {"type": "date"},
       # Timestamps
       "indexed_at": {"type": "date"},
       # Embedding (populated by future vector search phase; field reserved now
@@ -226,6 +242,12 @@ class OpenSearchClient:
         filter_clauses.append({"range": {"filing_date": {"gte": filters["date_from"]}}})
       if filters.get("date_to"):
         filter_clauses.append({"range": {"filing_date": {"lte": filters["date_to"]}}})
+      if filters.get("tags"):
+        filter_clauses.append({"terms": {"tags": filters["tags"]}})
+      if filters.get("folder"):
+        filter_clauses.append({"term": {"folder": filters["folder"]}})
+      if filters.get("category"):
+        filter_clauses.append({"term": {"category": filters["category"]}})
 
     return filter_clauses
 
@@ -397,6 +419,127 @@ class OpenSearchClient:
     deleted = result.get("deleted", 0)
     logger.info(f"Deleted {deleted} documents for graph_id={graph_id}")
     return deleted
+
+  def delete_document(self, document_id: str, graph_id: str) -> bool:
+    """Delete a single document by ID with graph_id verification."""
+    doc = self.get_document(document_id, graph_id)
+    if doc is None:
+      return False
+    try:
+      self.client.delete(index=self.index_name, id=document_id)
+      return True
+    except Exception as e:
+      logger.error(f"Error deleting document {document_id}: {e}")
+      raise
+
+  def delete_by_document_prefix(self, graph_id: str, prefix: str) -> int:
+    """Delete all documents matching a document_id prefix within a graph.
+
+    Used to remove all sections of a document during re-upload.
+    """
+    result = self.client.delete_by_query(
+      index=self.index_name,
+      body={
+        "query": {
+          "bool": {
+            "filter": [
+              {"term": {"graph_id": graph_id}},
+              {"prefix": {"document_id": prefix}},
+            ]
+          }
+        }
+      },
+    )
+    deleted = result.get("deleted", 0)
+    logger.info(
+      f"Deleted {deleted} documents with prefix={prefix} for graph_id={graph_id}"
+    )
+    return deleted
+
+  def count_by_source_type(self, graph_id: str, source_type: str) -> int:
+    """Count documents matching graph_id and source_type."""
+    result = self.client.count(
+      index=self.index_name,
+      body={
+        "query": {
+          "bool": {
+            "filter": [
+              {"term": {"graph_id": graph_id}},
+              {"term": {"source_type": source_type}},
+            ]
+          }
+        }
+      },
+    )
+    return result.get("count", 0)
+
+  def knn_search(
+    self,
+    query_embedding: list[float],
+    graph_id: str,
+    filters: dict[str, Any] | None = None,
+    size: int = 10,
+  ) -> dict[str, Any]:
+    """Pure kNN vector search with mandatory graph_id filtering.
+
+    Unlike hybrid_search, this uses ONLY vector similarity (no BM25).
+    Used by recall-text for semantic memory retrieval.
+    """
+    filter_clauses = self._build_filter_clauses(graph_id, filters)
+
+    search_body: dict[str, Any] = {
+      "query": {
+        "knn": {
+          "embedding": {
+            "vector": query_embedding,
+            "k": min(size, 100),
+            "filter": {"bool": {"filter": filter_clauses}},
+          }
+        }
+      },
+      "size": size,
+      "_source": {
+        "excludes": ["embedding"],
+      },
+    }
+
+    return self.client.search(index=self.index_name, body=search_body)
+
+  def list_documents(
+    self,
+    graph_id: str,
+    source_type: str | None = None,
+    size: int = 100,
+  ) -> dict[str, Any]:
+    """List unique documents by title using terms aggregation.
+
+    Returns document titles with section counts, grouped by source_type.
+    """
+    filter_clauses: list[dict[str, Any]] = [{"term": {"graph_id": graph_id}}]
+    if source_type:
+      filter_clauses.append({"term": {"source_type": source_type}})
+
+    search_body: dict[str, Any] = {
+      "size": 0,
+      "query": {"bool": {"filter": filter_clauses}},
+      "aggs": {
+        "documents": {
+          "terms": {
+            "field": "document_title.keyword",
+            "size": size,
+            "order": {"_key": "asc"},
+          },
+          "aggs": {
+            "source_type": {"terms": {"field": "source_type", "size": 10}},
+            "folder": {"terms": {"field": "folder", "size": 1}},
+            "tags": {"terms": {"field": "tags", "size": 20}},
+            "last_indexed": {"max": {"field": "indexed_at"}},
+          },
+        },
+      },
+    }
+
+    return self.client.search(index=self.index_name, body=search_body)
 
   def health(self) -> dict[str, Any]:
     """Check OpenSearch cluster health."""

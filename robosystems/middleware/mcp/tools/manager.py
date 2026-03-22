@@ -169,6 +169,16 @@ class GraphMCPTools:
       self.search_documents_tool = SearchDocumentsTool(graph_client)
       self.get_document_section_tool = GetDocumentSectionTool(graph_client)
 
+    # Layer 3: Semantic memory tools (gated by TEXT_SEARCH_ENABLED + MCP_MEMORY_ENABLED)
+    self.remember_text_tool = None
+    self.recall_text_tool = None
+    if env.TEXT_SEARCH_ENABLED and env.MCP_MEMORY_ENABLED:
+      from .semantic_memory import RecallTextTool, RememberTextTool
+
+      self.recall_text_tool = RecallTextTool(graph_client)
+      if not read_only:
+        self.remember_text_tool = RememberTextTool(graph_client)
+
     # Cache statistics (inherited from schema tool)
     self._cache_hits = 0
     self._cache_misses = 0
@@ -326,7 +336,17 @@ class GraphMCPTools:
     tools.extend(self._get_workspace_tool_definitions())
     tools.extend(self._get_memory_tool_definitions())
     tools.extend(self._get_search_tool_definitions())
+    tools.extend(self._get_semantic_memory_tool_definitions())
 
+    return tools
+
+  def _get_semantic_memory_tool_definitions(self) -> list[dict[str, Any]]:
+    """Get semantic memory tool definitions (remember-text, recall-text)."""
+    tools = []
+    if self.recall_text_tool is not None:
+      tools.append(self.recall_text_tool.get_tool_definition())
+    if self.remember_text_tool is not None:
+      tools.append(self.remember_text_tool.get_tool_definition())
     return tools
 
   async def call_tool(
@@ -484,6 +504,22 @@ class GraphMCPTools:
             self._tool_unavailable_reason("get-document-section", "TEXT_SEARCH_ENABLED")
           )
         result = await self.get_document_section_tool.execute(arguments)
+        return result if return_raw else json.dumps(result, indent=2)
+
+      elif name == "remember-text":
+        if self.remember_text_tool is None:
+          raise ValueError(
+            self._tool_unavailable_reason("remember-text", "TEXT_SEARCH_ENABLED")
+          )
+        result = await self.remember_text_tool.execute(arguments)
+        return result if return_raw else json.dumps(result, indent=2)
+
+      elif name == "recall-text":
+        if self.recall_text_tool is None:
+          raise ValueError(
+            self._tool_unavailable_reason("recall-text", "TEXT_SEARCH_ENABLED")
+          )
+        result = await self.recall_text_tool.execute(arguments)
         return result if return_raw else json.dumps(result, indent=2)
 
       else:
