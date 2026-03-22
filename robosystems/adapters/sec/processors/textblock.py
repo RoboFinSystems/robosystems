@@ -137,7 +137,6 @@ class TextBlockExternalizer:
       items=self.upload_queue,
       content_type=None,
       max_workers=TuningConfig.get_max_workers(),
-      max_retries=3,
     )
 
     successful = sum(1 for success in results.values() if success)
