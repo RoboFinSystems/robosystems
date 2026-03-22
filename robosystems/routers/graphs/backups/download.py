@@ -89,14 +89,20 @@ async def get_backup_download_url(
   """
   try:
     # Access validated by get_current_user_with_graph dependency
-    is_shared = MultiTenantUtils.is_shared_repository(graph_id)
+    is_shared = MultiTenantUtils.is_shared_repository_or_subgraph(graph_id)
     has_tier_limit = False
 
     # Check download rate limits based on graph type
     if is_shared:
       # Shared repository: check subscription and plan-based limits
+      # Resolve subgraph to parent for subscription lookup
+      from robosystems.config.shared_repositories import (
+        resolve_shared_repository_parent,
+      )
+
+      parent_repo_id = resolve_shared_repository_parent(graph_id)
       user_repo = UserRepository.get_by_user_and_repository(
-        str(current_user.id), graph_id, session
+        str(current_user.id), parent_repo_id, session
       )
       if not user_repo:
         raise HTTPException(
@@ -105,7 +111,9 @@ async def get_backup_download_url(
         )
 
       plan = user_repo.repository_plan
-      monthly_limit = DownloadRateLimiter.get_shared_repo_monthly_limit(graph_id, plan)
+      monthly_limit = DownloadRateLimiter.get_shared_repo_monthly_limit(
+        parent_repo_id, plan
+      )
 
       # Limit of 0 means downloads are not available on this plan
       if monthly_limit == 0:
@@ -116,7 +124,7 @@ async def get_backup_download_url(
 
       allowed, remaining, resets_at = await DownloadRateLimiter.check_download_limit(
         user_id=str(current_user.id),
-        repository=graph_id,
+        repository=parent_repo_id,
         plan=plan,
       )
 

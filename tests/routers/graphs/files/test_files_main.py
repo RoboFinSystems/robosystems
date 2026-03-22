@@ -417,7 +417,7 @@ class TestDeleteFile:
     """Test that deleting from shared repository is rejected."""
     with (
       _patch_require_graph_access(),
-      patch.object(files_module, "is_shared_repository", return_value=True),
+      patch.object(files_module, "is_shared_repository_or_subgraph", return_value=True),
     ):
       with pytest.raises(HTTPException) as exc_info:
         await files_module.delete_file(
@@ -435,7 +435,9 @@ class TestDeleteFile:
     """Test delete returns 404 when file does not exist."""
     with (
       _patch_require_graph_access(),
-      patch.object(files_module, "is_shared_repository", return_value=False),
+      patch.object(
+        files_module, "is_shared_repository_or_subgraph", return_value=False
+      ),
       _patch_universal_repo(),
       patch.object(files_module.GraphFile, "get_by_id", return_value=None),
     ):
@@ -470,7 +472,9 @@ class TestDeleteFile:
 
     with (
       _patch_require_graph_access(),
-      patch.object(files_module, "is_shared_repository", return_value=False),
+      patch.object(
+        files_module, "is_shared_repository_or_subgraph", return_value=False
+      ),
       _patch_universal_repo(),
       patch.object(
         files_module.GraphFile,
@@ -528,7 +532,9 @@ class TestDeleteFile:
 
     with (
       _patch_require_graph_access(),
-      patch.object(files_module, "is_shared_repository", return_value=False),
+      patch.object(
+        files_module, "is_shared_repository_or_subgraph", return_value=False
+      ),
       _patch_universal_repo(),
       patch.object(
         files_module.GraphFile,
@@ -587,7 +593,9 @@ class TestDeleteFile:
 
     with (
       _patch_require_graph_access(),
-      patch.object(files_module, "is_shared_repository", return_value=False),
+      patch.object(
+        files_module, "is_shared_repository_or_subgraph", return_value=False
+      ),
       _patch_universal_repo(),
       patch.object(
         files_module.GraphFile,

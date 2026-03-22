@@ -47,6 +47,7 @@ from .subgraph import (
 )
 from .validation import (
   is_shared_repository,
+  is_shared_repository_or_subgraph,
   validate_database_creation,
   validate_graph_id,
 )
@@ -63,6 +64,7 @@ class MultiTenantUtils:
   validate_graph_id = staticmethod(validate_graph_id)
   validate_database_creation = staticmethod(validate_database_creation)
   is_shared_repository = staticmethod(is_shared_repository)
+  is_shared_repository_or_subgraph = staticmethod(is_shared_repository_or_subgraph)
 
   # Database methods
   get_database_name = staticmethod(get_database_name)
@@ -131,6 +133,7 @@ __all__ = [
   "is_multitenant_mode",
   "is_parent_graph",
   "is_shared_repository",
+  "is_shared_repository_or_subgraph",
   "is_subgraph",
   "is_user_graph",
   "list_shared_repositories",

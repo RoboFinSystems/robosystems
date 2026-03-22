@@ -8,7 +8,7 @@ from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
 from robosystems.config.graph_tier import get_tier_max_subgraphs
-from robosystems.config.shared_repositories import is_shared_repository
+from robosystems.config.shared_repositories import is_shared_repository_or_subgraph
 from robosystems.logger import log_metric
 from robosystems.middleware.graph.utils import (
   construct_subgraph_id,
@@ -55,7 +55,7 @@ def verify_parent_graph_access(
   parent_graph = require_graph_access(graph_id, session, require_write=True)
 
   # Block shared repositories from having subgraphs
-  if is_shared_repository(graph_id.lower()):
+  if is_shared_repository_or_subgraph(graph_id.lower()):
     raise HTTPException(
       status_code=status.HTTP_403_FORBIDDEN,
       detail="Shared repositories cannot have subgraphs. "

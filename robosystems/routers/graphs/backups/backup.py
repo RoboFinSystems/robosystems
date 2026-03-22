@@ -318,7 +318,7 @@ async def create_backup(
     verify_admin_access(current_user, graph_id, db)
 
     # Block backup creation for shared repositories
-    if MultiTenantUtils.is_shared_repository(graph_id):
+    if MultiTenantUtils.is_shared_repository_or_subgraph(graph_id):
       logger.warning(
         f"User {current_user.id} attempted backup creation on shared repository {graph_id}"
       )
