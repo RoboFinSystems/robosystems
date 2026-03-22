@@ -455,11 +455,33 @@ sec-materialize-graph env=_local_env:
 
 # --- Phase 4: Text Search Indexing ---
 
-# Index text blocks + narratives into OpenSearch (requires processed parquets in S3)
-sec-index start_year="" env=_local_env:
-    UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.sec_pipeline index \
-        --graph-id sec \
-        {{ if start_year != "" { "--start-year " + start_year } else { "" } }}
+# Index text blocks + narratives into OpenSearch (partitioned by quarter)
+sec-index quarter env=_local_env:
+    UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.sec_pipeline index {{quarter}} \
+        --graph-id sec
+
+# --- Phase 5: Text Search Query ---
+
+# Search OpenSearch for filing text content
+# Examples:
+#   just search sec "revenue growth"
+#   just search sec "risk factors" entity=NVDA
+#   just search sec "inventory" form_type=10-K fiscal_year=2025
+#   just search-count sec
+search graph_id query entity="" form_type="" fiscal_year="" source_type="" size="10" env=_local_env:
+    UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.search_query \
+        --graph-id {{graph_id}} \
+        {{ if entity != "" { "--entity " + entity } else { "" } }} \
+        {{ if form_type != "" { "--form-type " + form_type } else { "" } }} \
+        {{ if fiscal_year != "" { "--fiscal-year " + fiscal_year } else { "" } }} \
+        {{ if source_type != "" { "--source-type " + source_type } else { "" } }} \
+        --size {{size}} \
+        "{{query}}"
+
+# Show OpenSearch document count and breakdown
+search-count graph_id="sec" env=_local_env:
+    UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.search_query \
+        --graph-id {{graph_id}} --count
 
 # --- Utilities ---
 
