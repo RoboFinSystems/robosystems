@@ -25,9 +25,22 @@ class SearchService:
 
   def __init__(self, client: OpenSearchClient) -> None:
     self.client = client
+    self._enricher = None
+
+  @property
+  def enricher(self):
+    """Lazy-load fastembed model for query embedding (semantic search)."""
+    if self._enricher is None:
+      from robosystems.adapters.sec.enrichment import SemanticEnricher
+
+      self._enricher = SemanticEnricher()
+      logger.info("Loaded SemanticEnricher for query embedding")
+    return self._enricher
 
   def search_documents(self, graph_id: str, request: SearchRequest) -> SearchResponse:
     """Search documents with graph_id isolation."""
+    from robosystems.config import env
+
     filters: dict[str, Any] = {}
     if request.entity:
       filters["entity"] = request.entity
@@ -46,13 +59,26 @@ class SearchService:
     if request.date_to:
       filters["date_to"] = request.date_to
 
-    result = self.client.search(
-      query=request.query,
-      graph_id=graph_id,
-      filters=filters if filters else None,
-      size=request.size,
-      offset=request.offset,
-    )
+    use_semantic = env.SEMANTIC_SEARCH_ENABLED and request.semantic
+
+    if use_semantic:
+      query_embedding = self.enricher.embed_batch([request.query])[0]
+      result = self.client.hybrid_search(
+        query=request.query,
+        query_embedding=query_embedding,
+        graph_id=graph_id,
+        filters=filters if filters else None,
+        size=request.size,
+        offset=request.offset,
+      )
+    else:
+      result = self.client.search(
+        query=request.query,
+        graph_id=graph_id,
+        filters=filters if filters else None,
+        size=request.size,
+        offset=request.offset,
+      )
 
     hits = []
     for hit in result.get("hits", {}).get("hits", []):

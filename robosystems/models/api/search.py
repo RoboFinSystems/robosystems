@@ -33,6 +33,9 @@ class SearchRequest(BaseModel):
     pattern=r"^\d{4}-\d{2}-\d{2}$",
     description="Filter filings on or before date (YYYY-MM-DD)",
   )
+  semantic: bool = Field(
+    False, description="Enable semantic (vector) search if available"
+  )
   size: int = Field(10, ge=1, le=50, description="Max results to return")
   offset: int = Field(0, ge=0, description="Pagination offset")
 
