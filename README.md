@@ -140,6 +140,7 @@ RoboSystems is built on a modern, scalable architecture with:
 
 - Embedded columnar graph database purpose-built for financial analytics
 - Native DuckDB integration for high-performance staging and ingestion
+- LanceDB vector search for semantic element resolution (IVF-PQ indexes, 384-dim embeddings)
 - Tiered infrastructure with configurable memory, rate limits, and subgraph allocations
 - Shared tier hosts public repositories with read replicas
 
@@ -147,7 +148,6 @@ RoboSystems is built on a modern, scalable architecture with:
 
 - PostgreSQL for IAM, graph metadata, and Dagster
 - OpenSearch for full-text and semantic document search (BM25 + KNN)
-- LanceDB for graph element vector similarity search (IVF-PQ indexes)
 - Valkey for caching, SSE messaging, and rate limiting
 - AWS S3 for data lake storage and static assets
 - DynamoDB for instance/graph/volume registry
