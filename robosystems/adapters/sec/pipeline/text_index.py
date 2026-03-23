@@ -55,7 +55,7 @@ _EMBEDDING_MAX_CHARS = 2000
 
 # Smaller batches reduce peak memory from tokenizer/ONNX intermediate
 # buffers. 200 docs x 2000 chars = 400KB vs 1000 x 50KB = 50MB.
-EMBEDDING_BATCH_SIZE = 200
+_EMBEDDING_BATCH_SIZE = 200
 
 
 def _embed_document_batch(enricher, documents: list[dict]) -> bool:
@@ -643,7 +643,7 @@ def sec_textblocks_indexed(
   del all_parquet_keys, node_keys, rel_keys, fhe_keys, rhf_keys, ehr_keys
   gc.collect()
 
-  batch_size = EMBEDDING_BATCH_SIZE if enricher else 1000
+  batch_size = _EMBEDDING_BATCH_SIZE if enricher else 1000
   documents: list[dict[str, Any]] = []
   total_indexed = 0
   errors = 0
@@ -915,7 +915,7 @@ def sec_narratives_indexed(
   gc.collect()
 
   # List raw ZIPs and process those matching our target accessions
-  batch_size = EMBEDDING_BATCH_SIZE if enricher else 500
+  batch_size = _EMBEDDING_BATCH_SIZE if enricher else 500
   documents: list[dict[str, Any]] = []
   total_indexed = 0
   filings_processed = 0
@@ -1240,7 +1240,7 @@ def sec_ixbrl_disclosures_indexed(
   gc.collect()
 
   # Scan raw ZIPs
-  batch_size = EMBEDDING_BATCH_SIZE if enricher else 500
+  batch_size = _EMBEDDING_BATCH_SIZE if enricher else 500
   documents: list[dict[str, Any]] = []
   total_indexed = 0
   filings_processed = 0
