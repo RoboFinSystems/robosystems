@@ -495,12 +495,13 @@ sec_lbug_r2_publish_job = define_asset_job(
 # Two assets: XBRL text blocks (already externalized) + narrative sections (extracted from raw HTML).
 
 SEC_INDEX_ECS_TAGS = {
-  # 1 vCPU, 4 GB — lighter than sec_process (4 vCPU/16 GB) but sized for
-  # fastembed model (~130 MB) when enable_embeddings=True. Extra CPU helps
-  # embedding throughput. Spot-preferred with OpenSearch incremental skip
-  # providing crash resilience (completed batches survive Spot reclaim).
-  "ecs/cpu": "1024",
-  "ecs/memory": "4096",
+  # Default: 4 vCPU, 16 GB sized for embeddings (fastembed ONNX runtime +
+  # model weights + lookup data). Override down to 1 vCPU/4 GB for
+  # text-only runs via Launchpad tags.
+  # Spot-preferred with OpenSearch incremental skip providing crash
+  # resilience (completed batches survive Spot reclaim).
+  "ecs/cpu": "4096",
+  "ecs/memory": "16384",
   "ecs/ephemeral_storage": "21",
   "ecs/run_task_kwargs": {
     "capacityProviderStrategy": [

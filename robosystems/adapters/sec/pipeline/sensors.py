@@ -707,6 +707,14 @@ def sec_post_stage_index_sensor(context: RunStatusSensorContext):
     "sec_ixbrl_index": "sec_ixbrl_disclosures_indexed",
   }
 
+  # Read EMBEDDINGS_ENABLED at trigger time (not cached env import)
+  # so SSM changes take effect without restarting Dagster daemon.
+  from robosystems.config.parameter_store import get_parameter_value
+
+  enable_embeddings = (
+    get_parameter_value("EMBEDDINGS_ENABLED", "true").lower() == "true"
+  )
+
   for job_name, asset_name in index_jobs.items():
     # Skip if already running
     active_runs = context.instance.get_runs(
@@ -725,11 +733,6 @@ def sec_post_stage_index_sensor(context: RunStatusSensorContext):
       f"Staging complete (run_id={dagster_run.run_id}), triggering {job_name} "
       f"for {partition_key}"
     )
-
-    # Read embedding config from SSM tuning param (runtime-toggleable)
-    from robosystems.config.tuning import TuningConfig
-
-    enable_embeddings = TuningConfig.get_indexing_enable_embeddings()
 
     yield RunRequest(
       run_key=f"sec-{job_name}-chain-{partition_key}-{dagster_run.run_id[:8]}",

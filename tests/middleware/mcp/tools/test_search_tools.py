@@ -106,6 +106,45 @@ class TestGetDocumentSectionTool:
       assert "error" in result
 
 
+class TestResolveSearchGraphId:
+  """Test _resolve_search_graph_id mixin for subgraph → parent resolution."""
+
+  def test_shared_repo_parent_unchanged(self):
+    """Parent shared repo graph_id passes through unchanged."""
+    client = MagicMock()
+    client.graph_id = "sec"
+    tool = SearchDocumentsTool(client)
+    assert tool._resolve_search_graph_id() == "sec"
+
+  def test_shared_repo_subgraph_resolves_to_parent(self):
+    """Subgraph of shared repo resolves to parent (sec_historical → sec)."""
+    client = MagicMock()
+    client.graph_id = "sec_historical"
+    tool = SearchDocumentsTool(client)
+    assert tool._resolve_search_graph_id() == "sec"
+
+  def test_user_graph_unchanged(self):
+    """User-owned graph passes through unchanged (ValueError fallback)."""
+    client = MagicMock()
+    client.graph_id = "kg123"
+    tool = SearchDocumentsTool(client)
+    assert tool._resolve_search_graph_id() == "kg123"
+
+  def test_user_subgraph_unchanged(self):
+    """Subgraph of user-owned graph passes through unchanged (ValueError fallback)."""
+    client = MagicMock()
+    client.graph_id = "kg123_dev"
+    tool = SearchDocumentsTool(client)
+    assert tool._resolve_search_graph_id() == "kg123_dev"
+
+  def test_get_document_section_also_resolves(self):
+    """GetDocumentSectionTool inherits the same resolution logic."""
+    client = MagicMock()
+    client.graph_id = "sec_historical"
+    tool = GetDocumentSectionTool(client)
+    assert tool._resolve_search_graph_id() == "sec"
+
+
 class TestToolRegistration:
   @patch.dict("os.environ", {"TEXT_SEARCH_ENABLED": "true"})
   def test_tools_registered_when_enabled(self):
