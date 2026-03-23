@@ -61,13 +61,12 @@ def upload_documents(extensions, graph_id: str) -> None:
 
   total_sections = 0
   for md_file in md_files:
-    result = extensions.documents.upload_file(graph_id=graph_id, file_path=md_file)
-
-    if result.success:
+    try:
+      result = extensions.documents.upload_file(graph_id=graph_id, file_path=md_file)
       total_sections += result.sections_indexed
       print(f"   ✅ {md_file.name}: {result.sections_indexed} sections indexed")
-    else:
-      print(f"   ❌ {md_file.name}: {result.error}")
+    except Exception as e:
+      print(f"   ❌ {md_file.name}: {e}")
 
   print(f"\n📊 Total: {total_sections} sections indexed across {len(md_files)} documents")
 
