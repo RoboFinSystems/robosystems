@@ -16,7 +16,7 @@ console = Console()
 # Self-contained Python script for bastion execution.
 # Uses only stdlib (no boto3) — manual SigV4 signing via IMDSv2 credentials.
 _OPENSEARCH_QUERY_SCRIPT = """
-import json, urllib.request, ssl, hmac, hashlib, datetime, sys
+import json, urllib.request, ssl, hmac, hashlib, datetime, sys, os, base64
 
 host = "{host}"
 region = "{region}"
@@ -93,8 +93,7 @@ def query_os(path, body):
     }}
 
     req = urllib.request.Request(url, data=data.encode(), headers=headers)
-    ctx = ssl._create_unverified_context()
-    resp = urllib.request.urlopen(req, context=ctx)
+    resp = urllib.request.urlopen(req, context=ssl.create_default_context())
     return json.loads(resp.read().decode())
 
 
@@ -128,7 +127,7 @@ if action == "count":
     print(json.dumps(result))
 
 elif action == "search":
-    query_text = "{query_text}"
+    query_text = base64.b64decode(os.environ.get("QUERY_TEXT_B64", "")).decode("utf-8")
     size = {size}
     search_body = {{
         "query": {{
@@ -202,16 +201,17 @@ def _run_opensearch_script(
     index="documents",
     action=action,
     graph_id=graph_id,
-    query_text=query_text.replace('"', '\\"'),
     size=size,
   )
 
-  # Base64 encode to avoid shell quoting issues
+  # Base64 encode script and query text to avoid shell quoting issues.
+  # Query text is passed as env var to prevent template injection.
   script_b64 = base64.b64encode(script.encode()).decode()
+  query_b64 = base64.b64encode(query_text.encode()).decode()
 
   executor = SSMExecutor(client.environment, aws_profile=client.aws_profile)
   stdout, stderr, _ = executor.execute(
-    f"echo {script_b64} | base64 -d | python3",
+    f"export QUERY_TEXT_B64={query_b64} && echo {script_b64} | base64 -d | python3",
     stream_output=False,
   )
 

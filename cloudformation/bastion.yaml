@@ -132,7 +132,8 @@ Resources:
                 Resource:
                   - !Sub "arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:robosystems/*/postgres*"
                   - !Sub "arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:robosystems/*/valkey*"
-              # OpenSearch read-only access (allows admin CLI queries from bastion)
+              # OpenSearch access for admin CLI (search queries, index stats).
+              # ESHttpPost is required for _search and _count API calls.
               - Effect: Allow
                 Action:
                   - es:ESHttpGet

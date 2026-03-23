@@ -3,7 +3,7 @@
 # RoboSystems AWS SSM Tunnels
 # Usage: ./bin/tools/tunnels.sh [environment] [service]
 # Environments: prod, staging, dev
-# Services: postgres, valkey, dagster, api, api-internal, opensearch, all
+# Services: postgres, valkey, dagster, api, api-internal, all
 
 set -euo pipefail
 
@@ -19,7 +19,6 @@ DAGSTER_ENDPOINT=""
 API_ENDPOINT=""
 API_INTERNAL_ENDPOINT=""  # Service Discovery endpoint (bypasses ALB)
 API_ACCESS_MODE=""        # internal or public
-OPENSEARCH_ENDPOINT=""
 
 
 # Colors for output
@@ -114,7 +113,6 @@ print_usage() {
     echo "  dagster       - Dagster webserver tunnel (localhost:8002)"
     echo "  api           - API ALB tunnel (localhost:8000)"
     echo "  api-internal  - API direct tunnel (localhost:8000, bypasses ALB)"
-    echo "  opensearch    - OpenSearch tunnel (localhost:9200)"
     echo "  all           - All service tunnels (runs in background)"
     echo ""
     echo -e "${GREEN}======================================================================"
@@ -244,27 +242,6 @@ discover_infrastructure() {
         echo -e "${YELLOW}Using default API internal endpoint: $API_INTERNAL_ENDPOINT${NC}"
     fi
 
-    # Discover OpenSearch endpoint (only when needed)
-    if [[ "$service" == "opensearch" || "$service" == "all" ]]; then
-        echo -e "${YELLOW}Looking for OpenSearch endpoint...${NC}"
-
-        local opensearch_stack="RoboSystemsOpenSearch${env_capitalized}"
-        OPENSEARCH_ENDPOINT=$(aws cloudformation describe-stacks \
-            --stack-name "$opensearch_stack" \
-            --query 'Stacks[0].Outputs[?OutputKey==`OpenSearchEndpoint`].OutputValue' \
-            --output text \
-            --region "$AWS_REGION" 2>/dev/null || echo "")
-
-        if [[ -z "$OPENSEARCH_ENDPOINT" || "$OPENSEARCH_ENDPOINT" == "None" ]]; then
-            echo -e "${YELLOW}Warning: Could not find OpenSearch endpoint for $environment${NC}"
-            OPENSEARCH_ENDPOINT="NOT_FOUND"
-        else
-            # Strip https:// prefix — SSM tunnel needs bare hostname
-            OPENSEARCH_ENDPOINT="${OPENSEARCH_ENDPOINT#https://}"
-            OPENSEARCH_ENDPOINT="${OPENSEARCH_ENDPOINT#http://}"
-        fi
-    fi
-
     # Discover API access mode (internal or public)
     echo -e "${YELLOW}Looking for API access mode...${NC}"
 
@@ -288,9 +265,6 @@ discover_infrastructure() {
     echo -e "  API (ALB):    ${GREEN}$API_ENDPOINT${NC}"
     echo -e "  API (Direct): ${GREEN}$API_INTERNAL_ENDPOINT${NC}"
     echo -e "  API Mode:     ${GREEN}$API_ACCESS_MODE${NC}"
-    if [[ -n "$OPENSEARCH_ENDPOINT" ]]; then
-        echo -e "  OpenSearch:   ${GREEN}$OPENSEARCH_ENDPOINT${NC}"
-    fi
     echo ""
 }
 
@@ -512,25 +486,6 @@ setup_api_internal_tunnel() {
     start_ssm_tunnel "$API_INTERNAL_ENDPOINT" "8000" "8000" "API-Internal"
 }
 
-setup_opensearch_tunnel() {
-    if [[ "$OPENSEARCH_ENDPOINT" == "NOT_FOUND" ]]; then
-        echo -e "${RED}Error: OpenSearch endpoint not found${NC}"
-        exit 1
-    fi
-
-    echo ""
-    echo -e "${YELLOW}Access OpenSearch with:${NC}"
-    echo "curl https://localhost:9200 --insecure"
-    echo "curl https://localhost:9200/_cluster/health --insecure"
-    echo "curl https://localhost:9200/_cat/indices --insecure"
-    echo ""
-    echo -e "${YELLOW}Note: Use --insecure or -k because the TLS cert is for the VPC endpoint${NC}"
-    echo -e "${YELLOW}Press Ctrl+C to stop the tunnel${NC}"
-    echo ""
-
-    start_ssm_tunnel "$OPENSEARCH_ENDPOINT" "443" "9200" "OpenSearch"
-}
-
 setup_all_tunnels() {
     local environment=$1
     local tunnel_count=0
@@ -553,12 +508,6 @@ setup_all_tunnels() {
 
     if [[ -n "$DAGSTER_ENDPOINT" && "$DAGSTER_ENDPOINT" != "NOT_FOUND" ]]; then
         start_ssm_tunnel_background "$DAGSTER_ENDPOINT" "3000" "8002" "Dagster"
-        ((tunnel_count++))
-        sleep 1
-    fi
-
-    if [[ "$OPENSEARCH_ENDPOINT" != "NOT_FOUND" ]]; then
-        start_ssm_tunnel_background "$OPENSEARCH_ENDPOINT" "443" "9200" "OpenSearch"
         ((tunnel_count++))
         sleep 1
     fi
@@ -599,10 +548,6 @@ setup_all_tunnels() {
 
     if [[ -n "$DAGSTER_ENDPOINT" && "$DAGSTER_ENDPOINT" != "NOT_FOUND" ]]; then
         echo "Dagster:    Open http://127.0.0.1:8002 in your browser"
-    fi
-
-    if [[ "$OPENSEARCH_ENDPOINT" != "NOT_FOUND" ]]; then
-        echo "OpenSearch: curl https://localhost:9200/_cluster/health -k"
     fi
 
     if [[ "$API_ACCESS_MODE" == "internal" ]]; then
@@ -746,7 +691,7 @@ main() {
                 fi
                 shift
                 ;;
-            postgres|valkey|dagster|api|api-internal|opensearch|migrate|shell|all)
+            postgres|valkey|dagster|api|api-internal|migrate|shell|all)
                 if [[ -z "$service" ]]; then
                     service="$1"
                 else
@@ -806,9 +751,6 @@ main() {
             ;;
         api-internal)
             setup_api_internal_tunnel
-            ;;
-        opensearch)
-            setup_opensearch_tunnel
             ;;
         migrate)
             run_database_migration "$environment"
