@@ -495,25 +495,11 @@ sec_lbug_r2_publish_job = define_asset_job(
 # Two assets: XBRL text blocks (already externalized) + narrative sections (extracted from raw HTML).
 
 SEC_INDEX_ECS_TAGS = {
-  # Text-only baseline: 1 vCPU, 4 GB. When EMBEDDINGS_ENABLED feature flag
-  # is on, the sensor overrides to SEC_INDEX_EMBEDDINGS_ECS_TAGS.
+  # Default: 4 vCPU, 16 GB sized for embeddings (fastembed ONNX runtime +
+  # model weights + lookup data). Override down to 1 vCPU/4 GB for
+  # text-only runs via Launchpad tags.
   # Spot-preferred with OpenSearch incremental skip providing crash
   # resilience (completed batches survive Spot reclaim).
-  "ecs/cpu": "1024",
-  "ecs/memory": "4096",
-  "ecs/ephemeral_storage": "21",
-  "ecs/run_task_kwargs": {
-    "capacityProviderStrategy": [
-      {"capacityProvider": "FARGATE_SPOT", "weight": 9, "base": 0},
-      {"capacityProvider": "FARGATE", "weight": 1, "base": 0},
-    ],
-  },
-}
-
-SEC_INDEX_EMBEDDINGS_ECS_TAGS = {
-  # Embeddings profile: 4 vCPU, 16 GB. fastembed ONNX runtime + model
-  # weights (~1-2 GB) plus lookup data (337K facts, entity/report/element
-  # dicts) need more headroom than 8 GB. Matches sec_process job sizing.
   "ecs/cpu": "4096",
   "ecs/memory": "16384",
   "ecs/ephemeral_storage": "21",
