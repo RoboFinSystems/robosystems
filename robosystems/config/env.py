@@ -532,7 +532,7 @@ class EnvConfig:
   )
   EMBEDDINGS_ENABLED = get_bool_env(
     "EMBEDDINGS_ENABLED",
-    get_parameter_value("EMBEDDINGS_ENABLED", "false").lower() == "true",
+    get_parameter_value("EMBEDDINGS_ENABLED", "true").lower() == "true",
   )
 
   # --- OpenSearch ---

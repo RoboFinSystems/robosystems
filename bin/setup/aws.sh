@@ -222,7 +222,7 @@ function create_ssm_feature_flags() {
         "SECURITY_AUDIT_ENABLED=false"
         "SHARED_MASTER_READS_ENABLED=true"
         "MCP_VECTOR_SEARCH_ENABLED=false"
-        "EMBEDDINGS_ENABLED=false"
+        "EMBEDDINGS_ENABLED=true"
         "SEMANTIC_SEARCH_ENABLED=true"
         "SSE_ENABLED=true"
         "TEXT_SEARCH_ENABLED=false"

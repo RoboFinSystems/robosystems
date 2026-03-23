@@ -643,6 +643,9 @@ def sec_textblocks_indexed(
   del all_parquet_keys, node_keys, rel_keys, fhe_keys, rhf_keys, ehr_keys
   gc.collect()
 
+  # Textblocks are individual XBRL elements (typically 1-5KB each), unlike
+  # narrative/iXBRL sections (up to 50KB). 1000 x 5KB = 5MB, safely under
+  # OpenSearch's 10MB bulk request limit.
   batch_size = _EMBEDDING_BATCH_SIZE if enricher else 1000
   documents: list[dict[str, Any]] = []
   total_indexed = 0
@@ -915,7 +918,9 @@ def sec_narratives_indexed(
   gc.collect()
 
   # List raw ZIPs and process those matching our target accessions
-  batch_size = _EMBEDDING_BATCH_SIZE if enricher else 500
+  # Narrative sections can be up to 50KB each (max_section_length).
+  # Batch of 100 x 50KB = 5MB, safely under OpenSearch's 10MB bulk request limit.
+  batch_size = 100
   documents: list[dict[str, Any]] = []
   total_indexed = 0
   filings_processed = 0
@@ -1240,7 +1245,9 @@ def sec_ixbrl_disclosures_indexed(
   gc.collect()
 
   # Scan raw ZIPs
-  batch_size = _EMBEDDING_BATCH_SIZE if enricher else 500
+  # iXBRL disclosures can be up to 50KB each (max_section_length).
+  # Batch of 100 x 50KB = 5MB, safely under OpenSearch's 10MB bulk request limit.
+  batch_size = 100
   documents: list[dict[str, Any]] = []
   total_indexed = 0
   filings_processed = 0
