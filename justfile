@@ -95,6 +95,10 @@ update:
     uv lock --upgrade
     uv sync --all-extras --dev
 
+# Install local Python SDK (editable, overrides PyPI version; `just install` to restore)
+sdk-local:
+    uv pip install -e ../robosystems-python-client
+
 
 ## Testing ##
 
