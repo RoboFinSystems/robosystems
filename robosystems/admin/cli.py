@@ -48,6 +48,7 @@ from ..logger import get_logger
 from .commands.billing import credits, invoices, subscriptions
 from .commands.graphs import graphs
 from .commands.ops import cache, instances, migrations
+from .commands.search import search
 from .commands.users_orgs import orgs, users
 
 logger = get_logger(__name__)
@@ -357,6 +358,7 @@ cli.add_command(orgs)
 cli.add_command(migrations)
 cli.add_command(cache)
 cli.add_command(instances)
+cli.add_command(search)
 
 
 if __name__ == "__main__":
