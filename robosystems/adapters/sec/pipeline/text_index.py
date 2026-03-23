@@ -47,6 +47,16 @@ from .configs import (
 
 EMBEDDING_MODEL_NAME = "bge-small-en-v1.5"
 
+# bge-small-en-v1.5 has a 512-token context window (~2000 chars).
+# Text beyond this is silently truncated by the tokenizer, so passing
+# full 50-100KB textblocks wastes memory on tokenizer buffers without
+# improving embedding quality.
+_EMBEDDING_MAX_CHARS = 2000
+
+# Smaller batches reduce peak memory from tokenizer/ONNX intermediate
+# buffers. 200 docs x 2000 chars = 400KB vs 1000 x 50KB = 50MB.
+_EMBEDDING_BATCH_SIZE = 200
+
 
 def _embed_document_batch(enricher, documents: list[dict]) -> bool:
   """Add embeddings to documents in-place using fastembed.
@@ -56,7 +66,7 @@ def _embed_document_batch(enricher, documents: list[dict]) -> bool:
   are still indexed without embeddings).
   """
   try:
-    texts = [doc.get("content", "") for doc in documents]
+    texts = [doc.get("content", "")[:_EMBEDDING_MAX_CHARS] for doc in documents]
     embeddings = enricher.embed_batch(texts)
     for doc, emb in zip(documents, embeddings, strict=True):
       doc["embedding"] = emb
@@ -627,6 +637,13 @@ def sec_textblocks_indexed(
   context.log.info(f"Mapped {len(report_to_entity)} reports to entities")
 
   # --- Phase 3: Build and index OpenSearch documents ---
+  # Free intermediate data no longer needed to reduce memory before
+  # potentially loading the fastembed model (~500MB with ONNX runtime).
+  del textblock_fact_ids, textblock_element_ids
+  del all_parquet_keys, node_keys, rel_keys, fhe_keys, rhf_keys, ehr_keys
+  gc.collect()
+
+  batch_size = _EMBEDDING_BATCH_SIZE if enricher else 1000
   documents: list[dict[str, Any]] = []
   total_indexed = 0
   errors = 0
@@ -696,7 +713,7 @@ def sec_textblocks_indexed(
     )
 
     # Bulk index in batches to limit memory from accumulated documents
-    if len(documents) >= 1000:
+    if len(documents) >= batch_size:
       if enricher:
         _embed_document_batch(enricher, documents)
       batch_result = os_client.bulk_index(documents)
@@ -892,7 +909,13 @@ def sec_narratives_indexed(
 
   context.log.info(f"Built metadata for {len(accession_metadata)} accessions")
 
+  # Free intermediate data before potentially loading fastembed model
+  del reports_df, report_table, target_reports, entity_lookup, report_to_entity
+  del all_parquet_keys, report_keys, entity_keys, ehr_keys
+  gc.collect()
+
   # List raw ZIPs and process those matching our target accessions
+  batch_size = _EMBEDDING_BATCH_SIZE if enricher else 500
   documents: list[dict[str, Any]] = []
   total_indexed = 0
   filings_processed = 0
@@ -1017,7 +1040,7 @@ def sec_narratives_indexed(
       continue
 
     # Batch index to limit memory
-    if len(documents) >= 500:
+    if len(documents) >= batch_size:
       if enricher:
         _embed_document_batch(enricher, documents)
       batch_result = os_client.bulk_index(documents)
@@ -1211,7 +1234,13 @@ def sec_ixbrl_disclosures_indexed(
 
   context.log.info(f"Built metadata for {len(accession_metadata)} accessions")
 
+  # Free intermediate data before potentially loading fastembed model
+  del reports_df, report_table, target_reports, entity_lookup, report_to_entity
+  del all_parquet_keys, report_keys, entity_keys, ehr_keys
+  gc.collect()
+
   # Scan raw ZIPs
+  batch_size = _EMBEDDING_BATCH_SIZE if enricher else 500
   documents: list[dict[str, Any]] = []
   total_indexed = 0
   filings_processed = 0
@@ -1304,7 +1333,7 @@ def sec_ixbrl_disclosures_indexed(
       continue
 
     # Batch index to limit memory
-    if len(documents) >= 500:
+    if len(documents) >= batch_size:
       if enricher:
         _embed_document_batch(enricher, documents)
       batch_result = os_client.bulk_index(documents)
