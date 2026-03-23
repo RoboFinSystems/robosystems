@@ -14,7 +14,31 @@ from robosystems.config import env
 from robosystems.logger import logger
 
 
-class SearchDocumentsTool:
+class _SearchToolMixin:
+  """Shared logic for search tools."""
+
+  client: Any  # graph_client with .graph_id
+
+  def _resolve_search_graph_id(self) -> str:
+    """Resolve to parent graph_id for search queries.
+
+    Search indexes use the parent graph_id (e.g. "sec" not "sec_historical").
+    Subgraphs are a storage optimization, not a search boundary.
+    For non-shared-repository graphs, returns the graph_id unchanged.
+    """
+    from robosystems.config.shared_repositories import (
+      resolve_shared_repository_parent,
+    )
+
+    graph_id = self.client.graph_id
+    try:
+      return resolve_shared_repository_parent(graph_id)
+    except ValueError:
+      # Not a shared repository — use as-is
+      return graph_id
+
+
+class SearchDocumentsTool(_SearchToolMixin):
   """Search filing narratives and text content across a graph."""
 
   def __init__(self, graph_client):
@@ -105,7 +129,9 @@ class SearchDocumentsTool:
     if service is None:
       return {"error": "Text search is not available"}
 
-    graph_id = self.client.graph_id
+    # Search indexes use the parent graph_id (e.g. "sec" not "sec_historical").
+    # Subgraphs are a storage split, not a search boundary.
+    graph_id = self._resolve_search_graph_id()
 
     request = SearchRequest(
       query=arguments["query"],
@@ -128,7 +154,7 @@ class SearchDocumentsTool:
       return {"error": f"Search failed: {e}"}
 
 
-class GetDocumentSectionTool:
+class GetDocumentSectionTool(_SearchToolMixin):
   """Retrieve the full text of a document section found via search."""
 
   def __init__(self, graph_client):
@@ -167,7 +193,8 @@ class GetDocumentSectionTool:
     if service is None:
       return {"error": "Text search is not available"}
 
-    graph_id = self.client.graph_id
+    # Search indexes use the parent graph_id (e.g. "sec" not "sec_historical")
+    graph_id = self._resolve_search_graph_id()
     document_id = arguments["document_id"]
 
     logger.info(f"MCP get-document-section: doc_id={document_id} graph_id={graph_id}")
