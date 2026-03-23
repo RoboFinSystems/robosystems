@@ -715,12 +715,6 @@ def sec_post_stage_index_sensor(context: RunStatusSensorContext):
     get_parameter_value("EMBEDDINGS_ENABLED", "true").lower() == "true"
   )
 
-  ecs_overrides = {}
-  if enable_embeddings:
-    from .jobs import SEC_INDEX_EMBEDDINGS_ECS_TAGS
-
-    ecs_overrides = SEC_INDEX_EMBEDDINGS_ECS_TAGS
-
   for job_name, asset_name in index_jobs.items():
     # Skip if already running
     active_runs = context.instance.get_runs(
@@ -758,7 +752,6 @@ def sec_post_stage_index_sensor(context: RunStatusSensorContext):
         "pipeline": "sec",
         "phase": "text_index",
         "mode": "incremental",
-        **ecs_overrides,
       },
     )
 
