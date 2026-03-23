@@ -495,12 +495,27 @@ sec_lbug_r2_publish_job = define_asset_job(
 # Two assets: XBRL text blocks (already externalized) + narrative sections (extracted from raw HTML).
 
 SEC_INDEX_ECS_TAGS = {
-  # 1 vCPU, 4 GB — lighter than sec_process (4 vCPU/16 GB) but sized for
-  # fastembed model (~130 MB) when enable_embeddings=True. Extra CPU helps
-  # embedding throughput. Spot-preferred with OpenSearch incremental skip
-  # providing crash resilience (completed batches survive Spot reclaim).
+  # Text-only baseline: 1 vCPU, 4 GB. When EMBEDDINGS_ENABLED feature flag
+  # is on, the sensor overrides to SEC_INDEX_EMBEDDINGS_ECS_TAGS.
+  # Spot-preferred with OpenSearch incremental skip providing crash
+  # resilience (completed batches survive Spot reclaim).
   "ecs/cpu": "1024",
   "ecs/memory": "4096",
+  "ecs/ephemeral_storage": "21",
+  "ecs/run_task_kwargs": {
+    "capacityProviderStrategy": [
+      {"capacityProvider": "FARGATE_SPOT", "weight": 9, "base": 0},
+      {"capacityProvider": "FARGATE", "weight": 1, "base": 0},
+    ],
+  },
+}
+
+SEC_INDEX_EMBEDDINGS_ECS_TAGS = {
+  # Embeddings profile: 2 vCPU, 8 GB. fastembed ONNX runtime + model
+  # weights + tokenizer buffers need ~1-2 GB on top of the text-only
+  # baseline. Extra CPU improves embedding throughput.
+  "ecs/cpu": "2048",
+  "ecs/memory": "8192",
   "ecs/ephemeral_storage": "21",
   "ecs/run_task_kwargs": {
     "capacityProviderStrategy": [

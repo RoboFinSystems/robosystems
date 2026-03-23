@@ -57,7 +57,6 @@ from .defaults import (
   CacheDefaults,
   CircuitBreakerDefaults,
   DatabaseDefaults,
-  IndexingDefaults,
   LimitsDefaults,
   LoadSheddingDefaults,
   MCPDefaults,
@@ -374,20 +373,6 @@ class TuningConfig:
   def get_database_pool_recycle(cls) -> int:
     """Get connection recycle time in seconds (handles RDS connection drops)."""
     return cls.get_int("database/POOL_RECYCLE", DatabaseDefaults.POOL_RECYCLE)
-
-  # =========================================================================
-  # INDEXING ACCESSORS
-  # =========================================================================
-
-  @classmethod
-  def get_indexing_enable_embeddings(cls) -> bool:
-    """Get whether OpenSearch indexing should generate vector embeddings."""
-    return (
-      cls.get(
-        "indexing/ENABLE_EMBEDDINGS", str(IndexingDefaults.ENABLE_EMBEDDINGS)
-      ).lower()
-      == "true"
-    )
 
   # =========================================================================
   # LIMITS ACCESSORS

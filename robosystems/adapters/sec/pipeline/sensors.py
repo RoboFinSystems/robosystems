@@ -726,10 +726,15 @@ def sec_post_stage_index_sensor(context: RunStatusSensorContext):
       f"for {partition_key}"
     )
 
-    # Read embedding config from SSM tuning param (runtime-toggleable)
-    from robosystems.config.tuning import TuningConfig
+    # EMBEDDINGS_ENABLED feature flag controls both embedding generation
+    # and ECS resource allocation (2 vCPU/8 GB vs 1 vCPU/4 GB).
+    enable_embeddings = env.EMBEDDINGS_ENABLED
 
-    enable_embeddings = TuningConfig.get_indexing_enable_embeddings()
+    ecs_overrides = {}
+    if enable_embeddings:
+      from .jobs import SEC_INDEX_EMBEDDINGS_ECS_TAGS
+
+      ecs_overrides = SEC_INDEX_EMBEDDINGS_ECS_TAGS
 
     yield RunRequest(
       run_key=f"sec-{job_name}-chain-{partition_key}-{dagster_run.run_id[:8]}",
@@ -749,6 +754,7 @@ def sec_post_stage_index_sensor(context: RunStatusSensorContext):
         "pipeline": "sec",
         "phase": "text_index",
         "mode": "incremental",
+        **ecs_overrides,
       },
     )
 
