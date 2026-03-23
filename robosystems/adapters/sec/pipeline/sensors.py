@@ -726,9 +726,13 @@ def sec_post_stage_index_sensor(context: RunStatusSensorContext):
       f"for {partition_key}"
     )
 
-    # EMBEDDINGS_ENABLED feature flag controls both embedding generation
-    # and ECS resource allocation (2 vCPU/8 GB vs 1 vCPU/4 GB).
-    enable_embeddings = env.EMBEDDINGS_ENABLED
+    # Read EMBEDDINGS_ENABLED at trigger time (not cached env import)
+    # so SSM changes take effect without restarting Dagster daemon.
+    from robosystems.config.parameter_store import get_parameter_value
+
+    enable_embeddings = (
+      get_parameter_value("EMBEDDINGS_ENABLED", "false").lower() == "true"
+    )
 
     ecs_overrides = {}
     if enable_embeddings:

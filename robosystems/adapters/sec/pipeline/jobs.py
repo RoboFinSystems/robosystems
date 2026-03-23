@@ -511,11 +511,11 @@ SEC_INDEX_ECS_TAGS = {
 }
 
 SEC_INDEX_EMBEDDINGS_ECS_TAGS = {
-  # Embeddings profile: 2 vCPU, 8 GB. fastembed ONNX runtime + model
-  # weights + tokenizer buffers need ~1-2 GB on top of the text-only
-  # baseline. Extra CPU improves embedding throughput.
-  "ecs/cpu": "2048",
-  "ecs/memory": "8192",
+  # Embeddings profile: 4 vCPU, 16 GB. fastembed ONNX runtime + model
+  # weights (~1-2 GB) plus lookup data (337K facts, entity/report/element
+  # dicts) need more headroom than 8 GB. Matches sec_process job sizing.
+  "ecs/cpu": "4096",
+  "ecs/memory": "16384",
   "ecs/ephemeral_storage": "21",
   "ecs/run_task_kwargs": {
     "capacityProviderStrategy": [
