@@ -226,7 +226,9 @@ async def oauth_callback(
       )
 
       # Store tokens
-      quickbooks_oauth_handler.store_tokens(connection_id, tokens, provider_data, db)
+      quickbooks_oauth_handler.store_tokens(
+        connection_id, tokens, provider_data, db, user_id=str(current_user.id)
+      )
 
       # Update connection metadata
       metadata = connection["metadata"]

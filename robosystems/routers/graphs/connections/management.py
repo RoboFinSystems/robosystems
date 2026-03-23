@@ -57,11 +57,6 @@ This endpoint initiates connections to external data sources:
 - Requires admin permissions in QuickBooks
 - Complete with OAuth callback
 
-**Plaid Connections**:
-- Returns Plaid Link token
-- User completes bank authentication
-- Exchange public token for access
-
 Note:
 This operation is included - no credit consumption required.""",
   responses={
@@ -90,7 +85,6 @@ async def create_connection(
   Supports multiple providers:
   - SEC: Requires CIK for public entity filings
   - QuickBooks: Requires OAuth authentication (separate flow)
-  - Plaid: Requires Link token flow for bank connections
   """
   # Initialize robustness components
   components = create_robustness_components()
@@ -103,7 +97,7 @@ async def create_connection(
     user_id=current_user.id,
     metadata={
       "provider": request.provider,
-      "entity_id": request.entity_id,
+      "entity_id": request.entity_id or "",
     },
   )
 
@@ -135,7 +129,7 @@ async def create_connection(
       user_id=current_user.id,
       metadata={
         "provider": request.provider,
-        "entity_id": request.entity_id,
+        "entity_id": request.entity_id or "",
       },
     )
 
@@ -145,16 +139,18 @@ async def create_connection(
       config = request.sec_config
     elif request.provider == "quickbooks":
       config = request.quickbooks_config
-    elif request.provider == "plaid":
-      config = request.plaid_config
-
     # Validate provider is enabled before any database operations
     provider_registry.get_provider(request.provider)
 
     # Create connection using provider registry with timeout coordination
     connection_id = await asyncio.wait_for(
       provider_registry.create_connection(
-        request.provider, request.entity_id, config, current_user.id, graph_id, db
+        request.provider,
+        request.entity_id or "",
+        config,
+        current_user.id,
+        graph_id,
+        db,
       ),
       timeout=operation_timeout,
     )
@@ -178,7 +174,7 @@ async def create_connection(
       user_id=current_user.id,
       metadata={
         "provider": request.provider,
-        "entity_id": request.entity_id,
+        "entity_id": request.entity_id or "",
         "connection_id": connection_id,
       },
     )
@@ -186,7 +182,7 @@ async def create_connection(
     return ConnectionResponse(
       connection_id=connection["connection_id"],
       provider=connection["provider"].lower(),
-      entity_id=connection["entity_id"],
+      entity_id=connection.get("entity_id"),
       status=connection["status"],
       created_at=connection["created_at"],
       updated_at=connection.get("updated_at"),
@@ -212,7 +208,7 @@ async def create_connection(
     raise create_error_response(
       status_code=status.HTTP_504_GATEWAY_TIMEOUT,
       detail="Connection creation timed out",
-      code=ErrorCode.TIMEOUT,
+      code=ErrorCode.OPERATION_FAILED,
     )
   except HTTPException:
     # Record circuit breaker failure for HTTP exceptions
@@ -272,7 +268,7 @@ async def create_connection(
 Returns active and inactive connections with their current status.
 Connections can be filtered by:
 - **Entity**: Show connections for a specific entity
-- **Provider**: Filter by connection type (sec, quickbooks, plaid)
+- **Provider**: Filter by connection type (sec, quickbooks)
 
 Each connection shows:
 - Current sync status and health
@@ -321,9 +317,9 @@ async def list_connections(
   """
   try:
     # Get connections from service
-    connections = ConnectionService.list_connections(
-      entity_id=entity_id or "",
-      provider=provider.upper() if provider else "",
+    connections = await ConnectionService.list_connections(
+      entity_id=entity_id or None,
+      provider=provider or None,
       user_id=current_user.id,
       graph_id=graph_id,
     )
@@ -335,7 +331,7 @@ async def list_connections(
         ConnectionResponse(
           connection_id=conn["connection_id"],
           provider=conn["provider"].lower(),
-          entity_id=conn["entity_id"],
+          entity_id=conn.get("entity_id"),
           status=conn["status"],
           created_at=conn["created_at"],
           updated_at=conn.get("updated_at"),
@@ -419,7 +415,7 @@ async def get_connection(
     return ConnectionResponse(
       connection_id=connection["connection_id"],
       provider=connection["provider"].lower(),
-      entity_id=connection["entity_id"],
+      entity_id=connection.get("entity_id"),
       status=connection["status"],
       created_at=connection["created_at"],
       updated_at=connection.get("updated_at"),

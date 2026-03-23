@@ -30,7 +30,7 @@ class ConnectionCredentials(Model):
   connection_id = Column(
     String, nullable=False, index=True
   )  # References Graph Connection.connection_id
-  provider = Column(String, nullable=False, index=True)  # QuickBooks, Plaid, SEC
+  provider = Column(String, nullable=False, index=True)  # QuickBooks, SEC
   user_id = Column(String, nullable=False, index=True)  # References User.id
 
   # Encrypted credential storage

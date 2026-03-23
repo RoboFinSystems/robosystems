@@ -83,7 +83,7 @@ class TestQBClient:
       mock_qb_class.assert_called_once_with(
         auth_client=mock_auth_client,
         refresh_token="new_refresh_token_789",
-        entity_id=realm_id,
+        company_id=realm_id,
         minorversion=75,
       )
 
@@ -147,8 +147,8 @@ class TestQBClient:
       # Execute
       client = QBClient(realm_id, credentials)
 
-      # Verify access token is None
-      assert client.access_token is None
+      # After refresh, access_token is populated from auth_client
+      assert client.access_token == mock_auth_client.access_token
 
   @patch("quickbooks.objects.company_info.CompanyInfo")
   def test_get_entity_info(self, mock_company_info, mock_qb_client):

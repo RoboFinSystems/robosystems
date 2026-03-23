@@ -156,14 +156,13 @@ class OAuthHandler:
       "grant_type": "authorization_code",
       "code": code,
       "redirect_uri": redirect_uri,
-      "client_id": self.provider.client_id,
-      "client_secret": self.provider.client_secret,
     }
 
     async with httpx.AsyncClient() as client:
       response = await client.post(
         self.provider.token_url,
         data=token_data,
+        auth=(self.provider.client_id, self.provider.client_secret),
         headers={
           "Accept": "application/json",
           "Content-Type": "application/x-www-form-urlencoded",
@@ -192,8 +191,6 @@ class OAuthHandler:
     refresh_data = {
       "grant_type": "refresh_token",
       "refresh_token": refresh_token,
-      "client_id": self.provider.client_id,
-      "client_secret": self.provider.client_secret,
       **self.provider.get_refresh_params(),
     }
 
@@ -201,6 +198,7 @@ class OAuthHandler:
       response = await client.post(
         self.provider.token_url,
         data=refresh_data,
+        auth=(self.provider.client_id, self.provider.client_secret),
         headers={
           "Accept": "application/json",
           "Content-Type": "application/x-www-form-urlencoded",
@@ -230,16 +228,11 @@ class OAuthHandler:
     tokens: dict[str, Any],
     provider_data: dict[str, Any],
     db: Session,
+    user_id: str | None = None,
   ):
-    """Store OAuth tokens securely."""
-    # Store in ConnectionCredentials model
-    credentials = ConnectionCredentials.get_or_create(
-      connection_id=connection_id, db=db
-    )
-
-    # Encrypt and store tokens
+    """Store OAuth tokens securely via ConnectionCredentials."""
     expires_at = tokens.get("expires_at")
-    credentials.credentials = {
+    credential_data = {
       "access_token": tokens.get("access_token"),
       "refresh_token": tokens.get("refresh_token"),
       "token_type": tokens.get("token_type", "Bearer"),
@@ -248,8 +241,23 @@ class OAuthHandler:
       **provider_data,
     }
 
-    db.commit()
-    logger.info(f"Stored OAuth tokens for connection {connection_id}")
+    # Check if credentials already exist for this connection
+    existing = ConnectionCredentials.get_by_connection_id(connection_id, db)
+    if existing:
+      existing.update_credentials(credential_data, db)
+      if expires_at:
+        existing.update_expiry(expires_at, db)
+      logger.info(f"Updated OAuth tokens for connection {connection_id}")
+    else:
+      ConnectionCredentials.create(
+        connection_id=connection_id,
+        provider=self.provider.name,
+        user_id=user_id or "",
+        credentials=credential_data,
+        session=db,
+        expires_at=expires_at,
+      )
+      logger.info(f"Created OAuth tokens for connection {connection_id}")
 
   async def validate_connection(self, access_token: str) -> bool:
     """Validate OAuth connection is working."""

@@ -12,8 +12,6 @@ from ..middleware.graph.allocation_manager import (
 from ..middleware.graph.utils import AccessPattern, MultiTenantUtils
 from .connection_service import (
   ConnectionService,
-  CredentialsNotFoundError,
-  UserAccessDeniedError,
 )
 from .graph.credit_service import CreditService
 from .graph.entity_graph_service import EntityGraphService, EntityGraphServiceSync
@@ -44,7 +42,6 @@ __all__ = [
   "BackupType",
   "ConnectionProvider",
   "ConnectionService",
-  "CredentialsNotFoundError",
   "CreditService",
   "DatabaseLocation",
   "DatabaseStatus",
@@ -68,5 +65,4 @@ __all__ = [
   "ProviderRegistry",
   "RepositorySubscriptionService",
   "RestoreJob",
-  "UserAccessDeniedError",
 ]

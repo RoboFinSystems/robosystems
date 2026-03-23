@@ -154,6 +154,13 @@ admin_router_v1.include_router(admin_graphs_router)
 admin_router_v1.include_router(admin_users_router)
 admin_router_v1.include_router(admin_orgs_router)
 
+# Ledger routes (separate top-level prefix, not under /v1/graphs)
+if env.LEDGER_ENABLED:
+  from .ledger import router as ledger_router
+
+  ledger_router_v1 = APIRouter(prefix="/v1/ledger/{graph_id}", tags=["Ledger"])
+  ledger_router_v1.include_router(ledger_router)
+
 # Export routers for main application
 __all__ = [
   "admin_router_v1",

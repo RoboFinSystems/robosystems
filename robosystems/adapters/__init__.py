@@ -3,7 +3,6 @@
 This module provides adapters for integrating with external financial data sources:
 - SEC EDGAR: Financial filings and XBRL data
 - QuickBooks: Small business accounting data
-- Plaid: Banking and transaction data
 
 Each adapter follows a consistent structure:
 - client/: API connection and authentication

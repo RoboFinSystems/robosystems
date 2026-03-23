@@ -25,8 +25,6 @@ class MockEnvConfig:
     self.AWS_SECRET_ACCESS_KEY = "test-secret-key"
     self.INTUIT_CLIENT_ID = None
     self.INTUIT_CLIENT_SECRET = None
-    self.PLAID_CLIENT_ID = None
-    self.PLAID_CLIENT_SECRET = None
     self.LBUG_DATABASE_PATH = "/tmp/lbug-dbs"
     self.GRAPH_API_URL = "http://localhost:8001"
     self.GRAPH_API_KEY = None
@@ -72,7 +70,6 @@ class TestEnvValidator:
       # Check for warnings about missing features
       warning_calls = [call[0][0] for call in mock_logger.warning.call_args_list]
       assert any("INTUIT_CLIENT_ID" in msg for msg in warning_calls)
-      assert any("PLAID_CLIENT_ID" in msg for msg in warning_calls)
 
   def test_validate_required_vars_prod_environment_success(self):
     """Test successful validation in production environment."""
@@ -270,7 +267,6 @@ class TestEnvValidator:
     """Test getting configuration summary."""
     env_config = MockEnvConfig()
     env_config.INTUIT_CLIENT_ID = "intuit-id"
-    env_config.PLAID_CLIENT_ID = "plaid-id"
     env_config.GRAPH_API_KEY = "lbug-key"
 
     summary = EnvValidator.get_config_summary(env_config)
@@ -278,7 +274,6 @@ class TestEnvValidator:
     assert summary["environment"] == "dev"
     assert summary["debug"] is False
     assert summary["features"]["quickbooks"] is True
-    assert summary["features"]["plaid"] is True
     assert summary["features"]["sec"] is True
     assert summary["database"]["type"] == "postgresql"
     assert summary["database"]["configured"] is True

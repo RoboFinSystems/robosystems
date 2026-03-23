@@ -341,7 +341,7 @@ def user_management_rate_limit_dependency(request: Request):
 
 
 def sync_operations_rate_limit_dependency(request: Request):
-  """Rate limiting for external sync operations (QB, Plaid, SEC)."""
+  """Rate limiting for external sync operations (QB, SEC)."""
   limit = get_int_env("RATE_LIMIT_SYNC_OPS", "50")  # 50/minute
   return create_custom_rate_limit_dependency(limit, 60, "sync_operations")(request)
 

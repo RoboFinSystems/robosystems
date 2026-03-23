@@ -90,7 +90,7 @@ ORDER BY category, account
   "cash_flow": {
     "description": "Cash flow transactions (most recent)",
     "query": """
-MATCH (t:Transaction)-[:TRANSACTION_HAS_LINE_ITEM]->(li:LineItem)-[:LINE_ITEM_RELATES_TO_ELEMENT]->(e:Element)
+MATCH (t:Transaction)-[:TRANSACTION_HAS_ENTRY]->(en:Entry)-[:ENTRY_HAS_LINE_ITEM]->(li:LineItem)-[:LINE_ITEM_RELATES_TO_ELEMENT]->(e:Element)
 WHERE e.name = 'Cash'
 RETURN
     t.date AS date,
@@ -104,7 +104,7 @@ LIMIT 20
   "revenue_by_month": {
     "description": "Revenue trends by month",
     "query": """
-MATCH (t:Transaction)-[:TRANSACTION_HAS_LINE_ITEM]->(li:LineItem)-[:LINE_ITEM_RELATES_TO_ELEMENT]->(e:Element)
+MATCH (t:Transaction)-[:TRANSACTION_HAS_ENTRY]->(en:Entry)-[:ENTRY_HAS_LINE_ITEM]->(li:LineItem)-[:LINE_ITEM_RELATES_TO_ELEMENT]->(e:Element)
 WHERE e.classification = 'revenue'
 RETURN
     substring(t.date, 1, 7) AS month,
@@ -115,7 +115,7 @@ ORDER BY month
   "expense_by_month": {
     "description": "Expense trends by month",
     "query": """
-MATCH (t:Transaction)-[:TRANSACTION_HAS_LINE_ITEM]->(li:LineItem)-[:LINE_ITEM_RELATES_TO_ELEMENT]->(e:Element)
+MATCH (t:Transaction)-[:TRANSACTION_HAS_ENTRY]->(en:Entry)-[:ENTRY_HAS_LINE_ITEM]->(li:LineItem)-[:LINE_ITEM_RELATES_TO_ELEMENT]->(e:Element)
 WHERE e.classification = 'expense'
 RETURN
     substring(t.date, 1, 7) AS month,
@@ -126,7 +126,7 @@ ORDER BY month
   "profitability": {
     "description": "Profitability by month (Revenue - Expenses)",
     "query": """
-MATCH (t:Transaction)-[:TRANSACTION_HAS_LINE_ITEM]->(li:LineItem)-[:LINE_ITEM_RELATES_TO_ELEMENT]->(e:Element)
+MATCH (t:Transaction)-[:TRANSACTION_HAS_ENTRY]->(en:Entry)-[:ENTRY_HAS_LINE_ITEM]->(li:LineItem)-[:LINE_ITEM_RELATES_TO_ELEMENT]->(e:Element)
 WHERE e.classification IN ['revenue', 'expense']
 WITH
     substring(t.date, 1, 7) AS month,
@@ -199,7 +199,7 @@ LIMIT 10
   "report_lineage": {
     "description": "Data lineage: Transactions to Reports",
     "query": """
-MATCH (t:Transaction)-[:TRANSACTION_HAS_LINE_ITEM]->(li:LineItem)-[:LINE_ITEM_RELATES_TO_ELEMENT]->(e:Element)
+MATCH (t:Transaction)-[:TRANSACTION_HAS_ENTRY]->(en:Entry)-[:ENTRY_HAS_LINE_ITEM]->(li:LineItem)-[:LINE_ITEM_RELATES_TO_ELEMENT]->(e:Element)
 MATCH (r:Report)-[:REPORT_HAS_FACT]->(f:Fact)-[:FACT_HAS_ELEMENT]->(e)
 WHERE substring(t.date, 1, 7) = '2025-09'
 WITH e.name AS account, count(DISTINCT t) AS transactions, count(DISTINCT li) AS line_items, count(DISTINCT f) AS facts

@@ -1,1 +1,0 @@
-"""Plaid adapter tests."""

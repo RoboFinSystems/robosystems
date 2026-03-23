@@ -2,41 +2,16 @@
 
 This adapter provides:
 - QBClient: OAuth-authenticated API client for QuickBooks Online
-- QBTransactionsProcessor: Graph ingestion for accounts and transactions (stubbed)
-- URI utilities for consistent graph entity identifiers
+- dbt project (dbt/) for QB data transformation to RoboLedger schema
 
-NOTE: The transaction processor is currently stubbed. When QuickBooks
-integration is reimplemented, connections will be managed in PostgreSQL
-rather than the graph database.
+Data pipeline architecture:
+  1. Extract: QBClient fetches accounts, journal entries, company info
+  2. Transform: dbt-duckdb models transform raw QB data to RoboLedger schema
+  3. Materialize: DuckDB tables materialized to user's LadybugDB graph
 """
 
 from robosystems.adapters.quickbooks.client import QBClient
-from robosystems.adapters.quickbooks.processors import (
-  QBTransactionsProcessor,
-  qb_chart_of_accounts_uri,
-  qb_coa_network_uri,
-  qb_element_uri,
-  qb_entity_uri,
-  qb_line_item_uri,
-  qb_stripped_account_name,
-  qb_transaction_uri,
-  rl_coa_root_element_uri,
-  rl_entity_uri,
-)
 
 __all__ = [
-  # Client
   "QBClient",
-  # Processors
-  "QBTransactionsProcessor",
-  "qb_chart_of_accounts_uri",
-  "qb_coa_network_uri",
-  "qb_element_uri",
-  # URI utilities
-  "qb_entity_uri",
-  "qb_line_item_uri",
-  "qb_stripped_account_name",
-  "qb_transaction_uri",
-  "rl_coa_root_element_uri",
-  "rl_entity_uri",
 ]

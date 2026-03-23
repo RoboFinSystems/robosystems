@@ -42,16 +42,13 @@ class TestGetDagsterComponents:
   def test_expected_number_of_assets(self):
     """Test that the expected number of assets are registered."""
     components = get_dagster_components()
-    # 18 assets: download, process, 3 stage, 2 materialize,
-    # entity update, 2 lbug s3 publish, 2 duckdb s3 publish,
-    # 1 vector s3 publish, 1 lbug r2 publish, knowledge artifact,
-    # 3 text index (textblocks + narratives + ixbrl disclosures)
-    assert len(components["assets"]) == 18
+    # Core SEC shared pipeline + publish + artifacts + entity sync + text indexing
+    assert len(components["assets"]) == 21
 
   def test_expected_number_of_jobs(self):
     """Test that the expected number of jobs are registered."""
     components = get_dagster_components()
-    assert len(components["jobs"]) == 20
+    assert len(components["jobs"]) == 21
 
   def test_expected_number_of_sensors(self):
     """Test that the expected number of sensors are registered."""
@@ -78,7 +75,11 @@ class TestGetDagsterComponents:
       "sec_graph_materialized",
       "sec_lbug_s3_published",
       "sec_lbug_r2_published",
+      "sec_vector_s3_published",
       "sec_knowledge_artifacts",
+      "sec_entity_extract",
+      "sec_entity_transform",
+      "sec_entity_load",
     }
 
     for expected in expected_assets:
@@ -95,6 +96,8 @@ class TestGetDagsterComponents:
       "sec_stage",
       "sec_materialize",
       "sec_staged_materialize",
+      "sec_entity_sync",
+      "sec_vector_s3_publish",
       "sec_lbug_r2_publish",
     }
 
