@@ -28,15 +28,15 @@ on:
 
       # Capacity Limits (account-level OCU caps for cost control)
       max_indexing_ocu:
-        description: "Maximum indexing OCUs (minimum 1, multiples of 2)"
+        description: "Maximum indexing OCUs (minimum 2, multiples of 2)"
         required: false
         type: string
-        default: "1"
+        default: "2"
       max_search_ocu:
-        description: "Maximum search OCUs (minimum 1, multiples of 2)"
+        description: "Maximum search OCUs (minimum 2, multiples of 2)"
         required: false
         type: string
-        default: "1"
+        default: "2"
       standby_replicas:
         description: "Enable standby replicas for HA (ENABLED/DISABLED, doubles min OCU cost)"
         required: false
