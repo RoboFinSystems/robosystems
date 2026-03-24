@@ -146,7 +146,7 @@ class TestResolveSearchGraphId:
 
 
 class TestToolRegistration:
-  @patch.dict("os.environ", {"TEXT_SEARCH_ENABLED": "true"})
+  @patch.dict("os.environ", {"SEMANTIC_SEARCH_ENABLED": "true"})
   def test_tools_registered_when_enabled(self):
     """Verify search tools appear in tool definitions when enabled."""
     # This tests the manager integration indirectly

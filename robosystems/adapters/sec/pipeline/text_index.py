@@ -61,7 +61,7 @@ _EMBEDDING_BATCH_SIZE = 200
 def _embed_document_batch(enricher, documents: list[dict]) -> bool:
   """Add embeddings to documents in-place using fastembed.
 
-  Called before bulk_index when enable_embeddings is True.
+  Called before bulk_index to generate embeddings for hybrid search.
   Returns True if embeddings were added, False on failure (documents
   are still indexed without embeddings).
   """
@@ -391,13 +391,11 @@ def sec_textblocks_indexed(
   os_client = OpenSearchClient(env.OPENSEARCH_URL, env.OPENSEARCH_INDEX)
   os_client.create_index_if_not_exists()
 
-  # Optionally load fastembed for embedding generation
-  enricher = None
-  if config.enable_embeddings:
-    from robosystems.adapters.sec.enrichment import SemanticEnricher
+  # Load fastembed for embedding generation (required for hybrid search)
+  from robosystems.adapters.sec.enrichment import SemanticEnricher
 
-    enricher = SemanticEnricher()
-    context.log.info("Loaded SemanticEnricher for embedding generation")
+  enricher = SemanticEnricher()
+  context.log.info("Loaded SemanticEnricher for embedding generation")
 
   # Get already-indexed accessions for incremental skip (scoped to this source type)
   if config.force_reindex:
@@ -646,7 +644,7 @@ def sec_textblocks_indexed(
   # Textblocks are individual XBRL elements (typically 1-5KB each), unlike
   # narrative/iXBRL sections (up to 50KB). 1000 x 5KB = 5MB, safely under
   # OpenSearch's 10MB bulk request limit.
-  batch_size = _EMBEDDING_BATCH_SIZE if enricher else 1000
+  batch_size = _EMBEDDING_BATCH_SIZE
   documents: list[dict[str, Any]] = []
   total_indexed = 0
   errors = 0
@@ -717,8 +715,7 @@ def sec_textblocks_indexed(
 
     # Bulk index in batches to limit memory from accumulated documents
     if len(documents) >= batch_size:
-      if enricher:
-        _embed_document_batch(enricher, documents)
+      _embed_document_batch(enricher, documents)
       batch_result = os_client.bulk_index(documents)
       total_indexed += batch_result["indexed"]
       errors += batch_result["errors"]
@@ -732,8 +729,7 @@ def sec_textblocks_indexed(
 
   # Index remaining documents
   if documents:
-    if enricher:
-      _embed_document_batch(enricher, documents)
+    _embed_document_batch(enricher, documents)
     batch_result = os_client.bulk_index(documents)
     total_indexed += batch_result["indexed"]
     errors += batch_result["errors"]
@@ -743,9 +739,8 @@ def sec_textblocks_indexed(
     )
 
   # Release enricher memory
-  if enricher:
-    del enricher
-    gc.collect()
+  del enricher
+  gc.collect()
 
   return MaterializeResult(
     metadata={
@@ -798,13 +793,11 @@ def sec_narratives_indexed(
   os_client = OpenSearchClient(env.OPENSEARCH_URL, env.OPENSEARCH_INDEX)
   os_client.create_index_if_not_exists()
 
-  # Optionally load fastembed for embedding generation
-  enricher = None
-  if config.enable_embeddings:
-    from robosystems.adapters.sec.enrichment import SemanticEnricher
+  # Load fastembed for embedding generation (required for hybrid search)
+  from robosystems.adapters.sec.enrichment import SemanticEnricher
 
-    enricher = SemanticEnricher()
-    context.log.info("Loaded SemanticEnricher for embedding generation")
+  enricher = SemanticEnricher()
+  context.log.info("Loaded SemanticEnricher for embedding generation")
 
   # Get already-indexed accessions for incremental skip (scoped to this source type)
   if config.force_reindex:
@@ -1046,8 +1039,7 @@ def sec_narratives_indexed(
 
     # Batch index to limit memory
     if len(documents) >= batch_size:
-      if enricher:
-        _embed_document_batch(enricher, documents)
+      _embed_document_batch(enricher, documents)
       batch_result = os_client.bulk_index(documents)
       total_indexed += batch_result["indexed"]
       errors += batch_result["errors"]
@@ -1058,8 +1050,7 @@ def sec_narratives_indexed(
 
   # Index remaining documents
   if documents:
-    if enricher:
-      _embed_document_batch(enricher, documents)
+    _embed_document_batch(enricher, documents)
     batch_result = os_client.bulk_index(documents)
     total_indexed += batch_result["indexed"]
     errors += batch_result["errors"]
@@ -1069,9 +1060,8 @@ def sec_narratives_indexed(
     )
 
   # Release enricher memory
-  if enricher:
-    del enricher
-    gc.collect()
+  del enricher
+  gc.collect()
 
   context.log.info(
     f"Narrative indexing complete: {filings_processed} filings, "
@@ -1131,13 +1121,11 @@ def sec_ixbrl_disclosures_indexed(
   os_client = OpenSearchClient(env.OPENSEARCH_URL, env.OPENSEARCH_INDEX)
   os_client.create_index_if_not_exists()
 
-  # Optionally load fastembed for embedding generation
-  enricher = None
-  if config.enable_embeddings:
-    from robosystems.adapters.sec.enrichment import SemanticEnricher
+  # Load fastembed for embedding generation (required for hybrid search)
+  from robosystems.adapters.sec.enrichment import SemanticEnricher
 
-    enricher = SemanticEnricher()
-    context.log.info("Loaded SemanticEnricher for embedding generation")
+  enricher = SemanticEnricher()
+  context.log.info("Loaded SemanticEnricher for embedding generation")
 
   # Get already-indexed accessions for incremental skip (scoped to this source type)
   if config.force_reindex:
@@ -1341,8 +1329,7 @@ def sec_ixbrl_disclosures_indexed(
 
     # Batch index to limit memory
     if len(documents) >= batch_size:
-      if enricher:
-        _embed_document_batch(enricher, documents)
+      _embed_document_batch(enricher, documents)
       batch_result = os_client.bulk_index(documents)
       total_indexed += batch_result["indexed"]
       errors += batch_result["errors"]
@@ -1353,8 +1340,7 @@ def sec_ixbrl_disclosures_indexed(
 
   # Index remaining
   if documents:
-    if enricher:
-      _embed_document_batch(enricher, documents)
+    _embed_document_batch(enricher, documents)
     batch_result = os_client.bulk_index(documents)
     total_indexed += batch_result["indexed"]
     errors += batch_result["errors"]
@@ -1364,9 +1350,8 @@ def sec_ixbrl_disclosures_indexed(
     )
 
   # Release enricher memory
-  if enricher:
-    del enricher
-    gc.collect()
+  del enricher
+  gc.collect()
 
   context.log.info(
     f"iXBRL indexing complete: {filings_processed} filings, "

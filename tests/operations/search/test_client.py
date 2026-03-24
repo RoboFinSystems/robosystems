@@ -4,7 +4,13 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from robosystems.operations.search.client import INDEX_MAPPING, OpenSearchClient
+from robosystems.operations.search.client import (
+  HYBRID_PIPELINE_NAME,
+  INDEX_MAPPING,
+  OpenSearchClient,
+)
+
+DUMMY_EMBEDDING = [0.1] * 384
 
 
 @pytest.fixture
@@ -33,6 +39,13 @@ class TestCreateIndex:
     mock_opensearch.indices.exists.return_value = True
     client.create_index_if_not_exists()
     mock_opensearch.indices.create.assert_not_called()
+
+  def test_creates_hybrid_pipeline(self, client, mock_opensearch):
+    mock_opensearch.indices.exists.return_value = True
+    client.create_index_if_not_exists()
+    mock_opensearch.http.put.assert_called_once()
+    call_args = mock_opensearch.http.put.call_args
+    assert HYBRID_PIPELINE_NAME in call_args.args[0]
 
 
 class TestIndexDocument:
@@ -72,44 +85,76 @@ class TestSearch:
     """Critical security test: every search must filter by graph_id."""
     mock_opensearch.search.return_value = {"hits": {"total": {"value": 0}, "hits": []}}
 
-    client.search("test query", graph_id="sec")
+    client.search("test query", DUMMY_EMBEDDING, graph_id="sec")
 
     call_args = mock_opensearch.search.call_args
     body = call_args.kwargs["body"]
-    filter_clauses = body["query"]["bool"]["filter"]
+    filter_clauses = body["post_filter"]["bool"]["filter"]
 
     # First filter must be graph_id term
     assert filter_clauses[0] == {"term": {"graph_id": "sec"}}
 
-  def test_applies_entity_filter(self, client, mock_opensearch):
+  def test_uses_hybrid_query(self, client, mock_opensearch):
     mock_opensearch.search.return_value = {"hits": {"total": {"value": 0}, "hits": []}}
 
-    client.search("test", graph_id="sec", filters={"entity": "NVDA"})
+    client.search("test", DUMMY_EMBEDDING, graph_id="sec")
 
     call_args = mock_opensearch.search.call_args
     body = call_args.kwargs["body"]
-    filter_clauses = body["query"]["bool"]["filter"]
+    assert "hybrid" in body["query"]
+    queries = body["query"]["hybrid"]["queries"]
+    assert len(queries) == 2
+    assert "multi_match" in queries[0]
+    assert "knn" in queries[1]
+
+  def test_uses_search_pipeline(self, client, mock_opensearch):
+    mock_opensearch.search.return_value = {"hits": {"total": {"value": 0}, "hits": []}}
+
+    client.search("test", DUMMY_EMBEDDING, graph_id="sec")
+
+    call_args = mock_opensearch.search.call_args
+    assert call_args.kwargs["params"]["search_pipeline"] == HYBRID_PIPELINE_NAME
+
+  def test_applies_entity_filter(self, client, mock_opensearch):
+    mock_opensearch.search.return_value = {"hits": {"total": {"value": 0}, "hits": []}}
+
+    client.search("test", DUMMY_EMBEDDING, graph_id="sec", filters={"entity": "NVDA"})
+
+    call_args = mock_opensearch.search.call_args
+    body = call_args.kwargs["body"]
+    filter_clauses = body["post_filter"]["bool"]["filter"]
     assert len(filter_clauses) == 2  # graph_id + entity
 
   def test_applies_form_type_filter(self, client, mock_opensearch):
     mock_opensearch.search.return_value = {"hits": {"total": {"value": 0}, "hits": []}}
 
-    client.search("test", graph_id="sec", filters={"form_type": "10-K"})
+    client.search(
+      "test", DUMMY_EMBEDDING, graph_id="sec", filters={"form_type": "10-K"}
+    )
 
     call_args = mock_opensearch.search.call_args
     body = call_args.kwargs["body"]
-    filter_clauses = body["query"]["bool"]["filter"]
+    filter_clauses = body["post_filter"]["bool"]["filter"]
     assert {"term": {"form_type": "10-K"}} in filter_clauses
 
   def test_includes_highlights(self, client, mock_opensearch):
     mock_opensearch.search.return_value = {"hits": {"total": {"value": 0}, "hits": []}}
 
-    client.search("test", graph_id="sec")
+    client.search("test", DUMMY_EMBEDDING, graph_id="sec")
 
     call_args = mock_opensearch.search.call_args
     body = call_args.kwargs["body"]
     assert "highlight" in body
     assert "content" in body["highlight"]["fields"]
+
+  def test_excludes_embedding_from_source(self, client, mock_opensearch):
+    mock_opensearch.search.return_value = {"hits": {"total": {"value": 0}, "hits": []}}
+
+    client.search("test", DUMMY_EMBEDDING, graph_id="sec")
+
+    call_args = mock_opensearch.search.call_args
+    body = call_args.kwargs["body"]
+    assert "embedding" in body["_source"]["excludes"]
 
 
 class TestGetDocument:
