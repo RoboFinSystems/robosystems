@@ -317,15 +317,10 @@ jobs:
       runner_config: ${{ needs.runner.outputs.runner_config }}
       # AWS Configuration
       aws_region: ${{ vars.AWS_REGION || 'us-east-1' }}
-      vpc_id: ${{ needs.deploy-vpc.outputs.vpc_id }}
-      subnet_id: ${{ needs.deploy-vpc.outputs.private_subnet_ids }}
-      # Instance Configuration
-      instance_type: ${{ vars.OPENSEARCH_INSTANCE_TYPE_STAGING || 't3.medium.search' }}
-      ebs_volume_size: ${{ vars.OPENSEARCH_EBS_SIZE_STAGING || '100' }}
-      # Engine Version Configuration
-      engine_version: ${{ vars.OPENSEARCH_VERSION_STAGING || '2.19' }}
-      # Bastion Access
-      bastion_sg_id: ${{ needs.deploy-bastion.outputs.bastion_sg_id }}
+      # Capacity limits (account-level OCU caps)
+      max_indexing_ocu: ${{ vars.OPENSEARCH_MAX_INDEXING_OCU_STAGING || '1' }}
+      max_search_ocu: ${{ vars.OPENSEARCH_MAX_SEARCH_OCU_STAGING || '1' }}
+      standby_replicas: ${{ vars.OPENSEARCH_STANDBY_REPLICAS_STAGING || 'DISABLED' }}
       # Other Configuration
       aws_sns_alert_email: ${{ vars.AWS_SNS_ALERT_EMAIL }}
     secrets: inherit
@@ -562,7 +557,6 @@ jobs:
       bastion_sg_id: ${{ needs.deploy-bastion.outputs.bastion_sg_id }}
       # OpenSearch Configuration (optional, empty when OPENSEARCH_ENABLED_STAGING=false)
       opensearch_endpoint: ${{ needs.deploy-opensearch.outputs.opensearch_endpoint || '' }}
-      opensearch_sg_id: ${{ needs.deploy-opensearch.outputs.opensearch_sg_id || '' }}
       # WAF Configuration (environment-specific, skipped for internal-only deployments)
       waf_enabled: ${{ vars.WAF_ENABLED_STAGING || 'false' }}
       waf_stack_name: ${{ needs.stack-config.outputs.waf_stack }}
@@ -634,7 +628,6 @@ jobs:
       database_sg_id: ${{ needs.deploy-postgres.outputs.database_sg_id }}
       # OpenSearch Configuration (optional, empty when OPENSEARCH_ENABLED_STAGING=false)
       opensearch_endpoint: ${{ needs.deploy-opensearch.outputs.opensearch_endpoint || '' }}
-      opensearch_sg_id: ${{ needs.deploy-opensearch.outputs.opensearch_sg_id || '' }}
       # Bastion Access (for internal UI access)
       bastion_sg_id: ${{ needs.deploy-bastion.outputs.bastion_sg_id }}
       # Monitoring Configuration

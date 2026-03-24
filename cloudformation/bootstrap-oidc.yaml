@@ -394,6 +394,7 @@ Resources:
                 Effect: Allow
                 Action:
                   - es:*
+                  - aoss:*
                 Resource: "*"
       Tags:
         - Key: Name

@@ -104,7 +104,7 @@ class SearchService:
 
       hits.append(
         SearchHit(
-          document_id=hit.get("_id", source.get("document_id", "")),
+          document_id=source.get("document_id", hit.get("_id", "")),
           score=hit.get("_score", 0.0),
           source_type=source.get("source_type", ""),
           entity_ticker=source.get("entity_ticker"),
