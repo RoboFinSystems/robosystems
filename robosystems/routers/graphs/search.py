@@ -52,7 +52,7 @@ async def _check_search_rate_limit(
   )
 
   # Check user has access to the shared repo (subscriptions are on the parent)
-  from robosystems.middleware.auth.session import SessionFactory
+  from robosystems.database import SessionFactory
   from robosystems.middleware.rate_limits import DualLayerRateLimiter
   from robosystems.models.iam.user_repository import UserRepository
 
