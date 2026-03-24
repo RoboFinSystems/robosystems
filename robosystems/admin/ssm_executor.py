@@ -50,7 +50,7 @@ class SSMExecutor:
       "ec2",
       "describe-instances",
       "--filters",
-      f"Name=tag:Name,Values=robosystems-{self.environment}-bastion",
+      f"Name=tag:Name,Values=robosystems-bastion-host-{self.environment}",
       "Name=instance-state-name,Values=running,stopped",
       "--query",
       "Reservations[0].Instances[0].InstanceId",
