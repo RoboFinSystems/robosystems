@@ -200,11 +200,8 @@ jobs:
             --platform "$PLATFORMS" \
             --push \
             $ATTESTATION_FLAGS \
-            --cache-from "type=registry,ref=${ECR_URL}:buildcache" \
-            --cache-from "type=registry,ref=${ECR_URL}:deps-cache" \
-            --cache-to "type=registry,ref=${ECR_URL}:buildcache,mode=max" \
-            --cache-to "type=registry,ref=${ECR_URL}:deps-cache,mode=max" \
-            --build-arg BUILDKIT_INLINE_CACHE=1 \
+            --cache-from type=gha,scope=main \
+            --cache-to type=gha,scope=main,mode=max \
             --build-arg UV_CACHE_DIR=/tmp/uv-cache \
             $TAGS \
             -f Dockerfile .
@@ -369,8 +366,8 @@ jobs:
             --platform linux/arm64 \
             --push \
             --provenance=false \
-            --cache-from "type=registry,ref=${ECR_URL}:lambda-cache" \
-            --cache-to "type=registry,ref=${ECR_URL}:lambda-cache,mode=max" \
+            --cache-from type=gha,scope=lambda \
+            --cache-to type=gha,scope=lambda,mode=max \
             -t "${ECR_URL}:${IMAGE_TAG}" \
             -f Dockerfile.lambda .
 
