@@ -1,4 +1,4 @@
-Description: "RoboSystems OpenSearch Serverless - Full-Text & Semantic Search"
+Description: "RoboSystems OpenSearch Service - Full-Text Search"
 
 Parameters:
   # Environment
@@ -8,12 +8,55 @@ Parameters:
     Default: prod
     AllowedValues: [staging, prod]
 
-  # Collection Configuration
-  StandbyReplicas:
+  # Infrastructure & Networking Configuration
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: VPC ID for OpenSearch deployment
+  SubnetId:
+    Type: AWS::EC2::Subnet::Id
+    Description: Private subnet ID for OpenSearch domain (single-AZ)
+
+  # Instance Configuration
+  InstanceType:
     Type: String
-    Description: Enable standby replicas for high availability (doubles minimum OCU cost)
-    Default: "DISABLED"
-    AllowedValues: ["ENABLED", "DISABLED"]
+    Description: OpenSearch instance type
+    Default: t3.small.search
+    AllowedValues:
+      # T3 - Burstable (cost-effective for variable loads)
+      - t3.small.search    # 2 GB RAM, up to 100 GB EBS
+      - t3.medium.search   # 4 GB RAM, up to 200 GB EBS
+      # M6g - General Purpose Graviton2
+      - m6g.large.search   # 8 GB RAM
+      - m6g.xlarge.search  # 16 GB RAM
+      # R6g - Memory Optimized Graviton2
+      - r6g.large.search   # 16 GB RAM
+      - r6g.xlarge.search  # 32 GB RAM
+      # R7g - Memory Optimized Graviton3
+      - r7g.large.search   # 16 GB RAM
+      - r7g.xlarge.search  # 32 GB RAM
+
+  EBSVolumeSize:
+    Type: Number
+    Description: EBS volume size in GB
+    Default: 100
+    MinValue: 10
+    MaxValue: 1000
+
+  # Engine Configuration
+  EngineVersion:
+    Type: String
+    Description: OpenSearch engine version
+    Default: "OpenSearch_2.19"
+    AllowedValues:
+      - "OpenSearch_2.19"
+      - "OpenSearch_2.17"
+      - "OpenSearch_2.15"
+
+  # Bastion Access (optional)
+  BastionSecurityGroupId:
+    Type: String
+    Description: Bastion host security group ID for tunnel access (empty to skip)
+    Default: ""
 
   # Monitoring
   SNSAlertEmail:
@@ -32,110 +75,136 @@ Parameters:
     Description: Component tag for resource identification and billing
     Default: OpenSearch
 
-# TODO: VPC Endpoint for private access
-# Currently uses public endpoint with IAM SigV4 auth. All other infrastructure
-# (RDS, Valkey, LadybugDB) is VPC-only. To align AOSS with that posture:
-# 1. Add AWS::OpenSearchServerless::VpcEndpoint resource
-# 2. Add Route53 private hosted zone to resolve AOSS hostname to VPC endpoint
-# 3. Set AllowFromPublic: false in NetworkPolicy
-# 4. Wire VpcId/SubnetIds params from deploy-vpc outputs
-# Tracked for future implementation when data transfer costs justify it.
+Conditions:
+  IsProduction: !Equals [!Ref Environment, prod]
+  HasBastion: !Not [!Equals [!Ref BastionSecurityGroupId, ""]]
 
 Resources:
-  # Encryption Policy — required before collection creation
-  EncryptionPolicy:
-    Type: AWS::OpenSearchServerless::SecurityPolicy
-    Properties:
-      Name: !Sub "robosystems-${Environment}-enc"
-      Type: encryption
-      Policy: !Sub >
-        {
-          "Rules": [
-            {
-              "ResourceType": "collection",
-              "Resource": ["collection/robosystems-${Environment}"]
-            }
-          ],
-          "AWSOwnedKey": true
-        }
-
-  # Network Policy — public access with IAM SigV4 authentication
-  NetworkPolicy:
-    Type: AWS::OpenSearchServerless::SecurityPolicy
-    Properties:
-      Name: !Sub "robosystems-${Environment}-net"
-      Type: network
-      Policy: !Sub >
-        [
-          {
-            "Rules": [
-              {
-                "ResourceType": "collection",
-                "Resource": ["collection/robosystems-${Environment}"]
-              },
-              {
-                "ResourceType": "dashboard",
-                "Resource": ["collection/robosystems-${Environment}"]
-              }
-            ],
-            "AllowFromPublic": true
-          }
-        ]
-
-  # Data Access Policy — grants API, Dagster, and GitHub Actions roles access
-  # Uses account root principal so any IAM role in the account with aoss:*
-  # permissions can access the collection. Fine-grained access is controlled
-  # by the IAM policies on each role (api.yaml, dagster.yaml, bootstrap-oidc.yaml).
-  DataAccessPolicy:
-    Type: AWS::OpenSearchServerless::AccessPolicy
-    Properties:
-      Name: !Sub "robosystems-${Environment}-data"
-      Type: data
-      Policy: !Sub >
-        [
-          {
-            "Rules": [
-              {
-                "ResourceType": "index",
-                "Resource": ["index/robosystems-${Environment}/*"],
-                "Permission": [
-                  "aoss:CreateIndex",
-                  "aoss:DeleteIndex",
-                  "aoss:UpdateIndex",
-                  "aoss:DescribeIndex",
-                  "aoss:ReadDocument",
-                  "aoss:WriteDocument"
-                ]
-              },
-              {
-                "ResourceType": "collection",
-                "Resource": ["collection/robosystems-${Environment}"],
-                "Permission": [
-                  "aoss:CreateCollectionItems",
-                  "aoss:DeleteCollectionItems",
-                  "aoss:UpdateCollectionItems",
-                  "aoss:DescribeCollectionItems"
-                ]
-              }
-            ],
-            "Principal": ["arn:${AWS::Partition}:iam::${AWS::AccountId}:root"]
-          }
-        ]
-
-  # Serverless Collection
-  Collection:
-    Type: AWS::OpenSearchServerless::Collection
-    DeletionPolicy: Retain
+  # Security Group for OpenSearch Domain
+  OpenSearchSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    DeletionPolicy: Delete
     UpdateReplacePolicy: Retain
-    DependsOn:
-      - EncryptionPolicy
-      - NetworkPolicy
-      - DataAccessPolicy
     Properties:
-      Name: !Sub "robosystems-${Environment}"
-      Type: VECTORSEARCH
-      StandbyReplicas: !Ref StandbyReplicas
-      Description: !Sub "RoboSystems ${Environment} full-text and semantic search"
+      GroupDescription: Security group for RoboSystems OpenSearch domain
+      GroupName: !Sub "robosystems-opensearch-sg-${Environment}"
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          SourceSecurityGroupId: !Ref OpenSearchClientSecurityGroup
+          Description: Allow HTTPS access from application clients
+        - !If
+          - HasBastion
+          - IpProtocol: tcp
+            FromPort: 443
+            ToPort: 443
+            SourceSecurityGroupId: !Ref BastionSecurityGroupId
+            Description: Allow HTTPS access from bastion host (SSM tunnels)
+          - !Ref "AWS::NoValue"
+      SecurityGroupEgress: []
+      Tags:
+        - Key: Name
+          Value: !Sub "${ServiceTag}-opensearch-sg-${Environment}"
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: !Ref ServiceTag
+        - Key: Component
+          Value: !Ref ComponentTag
+        - Key: CreatedBy
+          Value: CloudFormation
+
+  # Client Security Group (for ECS tasks to reference)
+  OpenSearchClientSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+    Properties:
+      GroupDescription: Security group for applications connecting to OpenSearch
+      GroupName: !Sub "robosystems-${Environment}-opensearch-client-sg"
+      VpcId: !Ref VpcId
+      Tags:
+        - Key: Name
+          Value: !Sub "robosystems-${Environment}-opensearch-client-sg"
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: !Ref ServiceTag
+        - Key: Component
+          Value: !Ref ComponentTag
+        - Key: CreatedBy
+          Value: CloudFormation
+
+  # NOTE: OpenSearch VPC access requires the service-linked role AWSServiceRoleForAmazonOpenSearchService.
+  # This role is account-wide and managed in bootstrap-oidc.yaml (OpenSearchServiceLinkedRole).
+
+  # OpenSearch Domain
+  OpenSearchDomain:
+    Type: AWS::OpenSearchService::Domain
+    DeletionPolicy: !If [IsProduction, Retain, Delete]
+    UpdateReplacePolicy: Retain
+    Properties:
+      DomainName: !Sub "robosystems-${Environment}"
+      EngineVersion: !Ref EngineVersion
+
+      # Cluster Configuration — single node, no dedicated masters
+      ClusterConfig:
+        InstanceType: !Ref InstanceType
+        InstanceCount: 1
+        DedicatedMasterEnabled: false
+        ZoneAwarenessEnabled: false
+        WarmEnabled: false
+
+      # Storage
+      EBSOptions:
+        EBSEnabled: true
+        VolumeType: gp3
+        VolumeSize: !Ref EBSVolumeSize
+        Iops: 3000
+        Throughput: 125
+
+      # VPC Configuration — private subnet only
+      VPCOptions:
+        SubnetIds:
+          - !Ref SubnetId
+        SecurityGroupIds:
+          - !Ref OpenSearchSecurityGroup
+
+      # Access Policy — IAM-based, no fine-grained access control
+      # All access controlled by security group + IAM
+      AccessPolicies:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS: !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:root"
+            Action: "es:*"
+            Resource: !Sub "arn:${AWS::Partition}:es:${AWS::Region}:${AWS::AccountId}:domain/robosystems-${Environment}/*"
+
+      # Encryption
+      EncryptionAtRestOptions:
+        Enabled: true
+      NodeToNodeEncryptionOptions:
+        Enabled: true
+      DomainEndpointOptions:
+        EnforceHTTPS: true
+        TLSSecurityPolicy: Policy-Min-TLS-1-2-PFS-2023-10
+
+      # Software updates
+      SoftwareUpdateOptions:
+        AutoSoftwareUpdateEnabled: true
+
+      # Logging
+      LogPublishingOptions:
+        ES_APPLICATION_LOGS:
+          CloudWatchLogsLogGroupArn: !GetAtt OpenSearchAppLogGroup.Arn
+          Enabled: true
+        INDEX_SLOW_LOGS:
+          CloudWatchLogsLogGroupArn: !GetAtt OpenSearchSlowLogGroup.Arn
+          Enabled: true
+
       Tags:
         - Key: Name
           Value: !Sub "${ServiceTag}-opensearch-${Environment}"
@@ -147,6 +216,66 @@ Resources:
           Value: !Ref ComponentTag
         - Key: CreatedBy
           Value: CloudFormation
+
+  # CloudWatch Log Groups for OpenSearch
+  OpenSearchAppLogGroup:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      LogGroupName: !Sub "/aws/opensearch/robosystems-${Environment}/app-logs"
+      RetentionInDays: 30
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: !Ref ServiceTag
+        - Key: Component
+          Value: !Ref ComponentTag
+        - Key: CreatedBy
+          Value: CloudFormation
+
+  OpenSearchSlowLogGroup:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      LogGroupName: !Sub "/aws/opensearch/robosystems-${Environment}/slow-logs"
+      RetentionInDays: 30
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: !Ref ServiceTag
+        - Key: Component
+          Value: !Ref ComponentTag
+        - Key: CreatedBy
+          Value: CloudFormation
+
+  # Log Resource Policy — allows OpenSearch to write to CloudWatch
+  OpenSearchLogPolicy:
+    Type: AWS::Logs::ResourcePolicy
+    Properties:
+      PolicyName: !Sub "robosystems-opensearch-${Environment}-logs"
+      PolicyDocument: !Sub |
+        {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "es.amazonaws.com"
+              },
+              "Action": [
+                "logs:PutLogEvents",
+                "logs:CreateLogStream"
+              ],
+              "Resource": [
+                "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/opensearch/robosystems-${Environment}/*"
+              ]
+            }
+          ]
+        }
 
   # SNS Topic for Alerts
   OpenSearchNotificationTopic:
@@ -171,22 +300,24 @@ Resources:
         - Key: CreatedBy
           Value: CloudFormation
 
-  # CloudWatch Alarms — AOSS metrics are account-level (ClientId dimension)
-  SearchOCUAlarm:
+  # CloudWatch Alarms
+  OpenSearchClusterRedAlarm:
     Type: AWS::CloudWatch::Alarm
     DeletionPolicy: Delete
     UpdateReplacePolicy: Delete
     Properties:
-      AlarmName: !Sub "robosystems-opensearch-${Environment}-search-ocu-high"
-      AlarmDescription: OpenSearch Serverless search OCU usage above minimum
-      MetricName: SearchOCU
-      Namespace: AWS/AOSS
+      AlarmName: !Sub "robosystems-opensearch-${Environment}-cluster-red"
+      AlarmDescription: OpenSearch cluster status is RED
+      MetricName: "ClusterStatus.red"
+      Namespace: AWS/ES
       Statistic: Maximum
-      Period: 300
-      EvaluationPeriods: 6
-      Threshold: 1.5
-      ComparisonOperator: GreaterThanThreshold
+      Period: 60
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
       Dimensions:
+        - Name: DomainName
+          Value: !Ref OpenSearchDomain
         - Name: ClientId
           Value: !Ref "AWS::AccountId"
       AlarmActions:
@@ -194,7 +325,7 @@ Resources:
       TreatMissingData: notBreaching
       Tags:
         - Key: Name
-          Value: !Sub "robosystems-opensearch-${Environment}-search-ocu-high"
+          Value: !Sub "robosystems-opensearch-${Environment}-cluster-red"
         - Key: Environment
           Value: !Ref Environment
         - Key: Service
@@ -204,21 +335,23 @@ Resources:
         - Key: CreatedBy
           Value: CloudFormation
 
-  IndexingOCUAlarm:
+  OpenSearchFreeStorageAlarm:
     Type: AWS::CloudWatch::Alarm
     DeletionPolicy: Delete
     UpdateReplacePolicy: Delete
     Properties:
-      AlarmName: !Sub "robosystems-opensearch-${Environment}-indexing-ocu-high"
-      AlarmDescription: OpenSearch Serverless indexing OCU usage above minimum
-      MetricName: IndexingOCU
-      Namespace: AWS/AOSS
-      Statistic: Maximum
+      AlarmName: !Sub "robosystems-opensearch-${Environment}-low-storage"
+      AlarmDescription: OpenSearch free storage below 10 GB
+      MetricName: FreeStorageSpace
+      Namespace: AWS/ES
+      Statistic: Minimum
       Period: 300
-      EvaluationPeriods: 6
-      Threshold: 1.5
-      ComparisonOperator: GreaterThanThreshold
+      EvaluationPeriods: 1
+      Threshold: 10000
+      ComparisonOperator: LessThanOrEqualToThreshold
       Dimensions:
+        - Name: DomainName
+          Value: !Ref OpenSearchDomain
         - Name: ClientId
           Value: !Ref "AWS::AccountId"
       AlarmActions:
@@ -226,7 +359,7 @@ Resources:
       TreatMissingData: notBreaching
       Tags:
         - Key: Name
-          Value: !Sub "robosystems-opensearch-${Environment}-indexing-ocu-high"
+          Value: !Sub "robosystems-opensearch-${Environment}-low-storage"
         - Key: Environment
           Value: !Ref Environment
         - Key: Service
@@ -238,16 +371,28 @@ Resources:
 
 Outputs:
   OpenSearchEndpoint:
-    Description: OpenSearch Serverless collection endpoint
-    Value: !GetAtt Collection.CollectionEndpoint
+    Description: OpenSearch domain endpoint
+    Value: !Sub "https://${OpenSearchDomain.DomainEndpoint}"
     Export:
       Name: !Sub "${AWS::StackName}-${Environment}-OpenSearchEndpoint"
 
-  OpenSearchCollectionId:
-    Description: OpenSearch Serverless collection ID
-    Value: !GetAtt Collection.Id
+  OpenSearchDomainArn:
+    Description: OpenSearch domain ARN
+    Value: !GetAtt OpenSearchDomain.Arn
     Export:
-      Name: !Sub "${AWS::StackName}-${Environment}-OpenSearchCollectionId"
+      Name: !Sub "${AWS::StackName}-${Environment}-OpenSearchDomainArn"
+
+  OpenSearchDomainName:
+    Description: OpenSearch domain name
+    Value: !Ref OpenSearchDomain
+    Export:
+      Name: !Sub "${AWS::StackName}-${Environment}-OpenSearchDomainName"
+
+  OpenSearchClientSecurityGroupId:
+    Description: Security group ID for applications connecting to OpenSearch
+    Value: !Ref OpenSearchClientSecurityGroup
+    Export:
+      Name: !Sub "${AWS::StackName}-${Environment}-OpenSearchClientSecurityGroupId"
 
   OpenSearchNotificationTopicArn:
     Description: SNS topic ARN for OpenSearch notifications

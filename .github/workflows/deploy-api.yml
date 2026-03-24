@@ -134,6 +134,11 @@ on:
         required: false
         type: string
         default: ""
+      opensearch_sg_id:
+        description: "Security group ID for applications connecting to OpenSearch (empty if not deployed)"
+        required: false
+        type: string
+        default: ""
       bastion_sg_id:
         description: "Security group ID for bastion host (for SSM tunnel access to admin API)"
         required: true
@@ -318,6 +323,7 @@ jobs:
                 ParameterKey=ValkeyUrl,ParameterValue=${{ inputs.valkey_url }} \
                 ParameterKey=ValkeyClientSecurityGroupId,ParameterValue=${{ inputs.valkey_sg_id }} \
                 ParameterKey=OpenSearchEndpoint,ParameterValue=\"${{ inputs.opensearch_endpoint }}\" \
+                ParameterKey=OpenSearchClientSecurityGroupId,ParameterValue=\"${{ inputs.opensearch_sg_id }}\" \
                 ParameterKey=BastionSecurityGroupId,ParameterValue=${{ inputs.bastion_sg_id }} \
                 ParameterKey=ApiAccessMode,ParameterValue=${{ inputs.api_access_mode }} \
                 ParameterKey=DomainName,ParameterValue=\"${{ inputs.domain_name }}\" \

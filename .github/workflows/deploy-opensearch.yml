@@ -25,23 +25,40 @@ on:
         description: "AWS region for deployment"
         required: true
         type: string
+      vpc_id:
+        description: "VPC ID for OpenSearch"
+        required: true
+        type: string
+      subnet_id:
+        description: "Private subnet ID for OpenSearch (single-AZ)"
+        required: true
+        type: string
 
-      # Capacity Limits (account-level OCU caps for cost control)
-      max_indexing_ocu:
-        description: "Maximum indexing OCUs (minimum 1, multiples of 2)"
+      # Instance Configuration
+      instance_type:
+        description: "OpenSearch instance type"
         required: false
         type: string
-        default: "1"
-      max_search_ocu:
-        description: "Maximum search OCUs (minimum 1, multiples of 2)"
+        default: "t3.small.search"
+      ebs_volume_size:
+        description: "EBS volume size in GB"
         required: false
         type: string
-        default: "1"
-      standby_replicas:
-        description: "Enable standby replicas for HA (ENABLED/DISABLED, doubles min OCU cost)"
+        default: "100"
+
+      # Engine Version Configuration
+      engine_version:
+        description: "OpenSearch engine version (e.g., 2.17, 2.19)"
         required: false
         type: string
-        default: "DISABLED"
+        default: "2.19"
+
+      # Bastion Access (optional)
+      bastion_sg_id:
+        description: "Bastion security group ID for tunnel access (empty to skip)"
+        required: false
+        type: string
+        default: ""
 
       # Notification Configuration
       aws_sns_alert_email:
@@ -51,18 +68,22 @@ on:
 
     outputs:
       opensearch_endpoint:
-        description: "OpenSearch Serverless collection endpoint URL"
+        description: "OpenSearch domain endpoint URL"
         value: ${{ jobs.deploy.outputs.opensearch_endpoint }}
+      opensearch_sg_id:
+        description: "Security group ID for applications connecting to OpenSearch"
+        value: ${{ jobs.deploy.outputs.opensearch_sg_id }}
 
 jobs:
   deploy:
     runs-on: ${{ fromJSON(inputs.runner_config) }}
-    timeout-minutes: 15  # Serverless collection creation is faster (~5 min)
+    timeout-minutes: 45  # OpenSearch domain creation can take 15-30 min
     permissions:
       id-token: write
       contents: read
     outputs:
       opensearch_endpoint: ${{ steps.stack-outputs.outputs.opensearch_endpoint }}
+      opensearch_sg_id: ${{ steps.stack-outputs.outputs.opensearch_sg_id }}
 
     steps:
       - name: Checkout
@@ -91,8 +112,16 @@ jobs:
             echo "is_new_stack=false" >> $GITHUB_OUTPUT
           fi
 
-          OPENSEARCH_STACK_PARAMS="ParameterKey=Environment,ParameterValue=${{ inputs.environment }} \
-                ParameterKey=StandbyReplicas,ParameterValue=${{ inputs.standby_replicas }} \
+          # Extract first subnet from comma-separated list (single-AZ deployment)
+          SUBNET_ID=$(echo "${{ inputs.subnet_id }}" | cut -d ',' -f1)
+
+          OPENSEARCH_STACK_PARAMS="ParameterKey=VpcId,ParameterValue=${{ inputs.vpc_id }} \
+                ParameterKey=SubnetId,ParameterValue=${SUBNET_ID} \
+                ParameterKey=Environment,ParameterValue=${{ inputs.environment }} \
+                ParameterKey=InstanceType,ParameterValue=${{ inputs.instance_type }} \
+                ParameterKey=EBSVolumeSize,ParameterValue=${{ inputs.ebs_volume_size }} \
+                ParameterKey=EngineVersion,ParameterValue=OpenSearch_${{ inputs.engine_version }} \
+                ParameterKey=BastionSecurityGroupId,ParameterValue=${{ inputs.bastion_sg_id }} \
                 ParameterKey=SNSAlertEmail,ParameterValue=${{ inputs.aws_sns_alert_email }}"
 
           if [ "$STACK_ACTION" = "create-stack" ]; then
@@ -136,17 +165,8 @@ jobs:
         uses: ./.github/actions/monitor-stack-deployment
         with:
           stack-name: ${{ inputs.stack_name }}
-          timeout: "900"
+          timeout: "2700"
           interval: "10"
-
-      - name: Configure OCU Capacity Limits
-        run: |
-          echo "Setting account-level OCU capacity limits..."
-          echo "  Max indexing: ${{ inputs.max_indexing_ocu }} OCUs"
-          echo "  Max search: ${{ inputs.max_search_ocu }} OCUs"
-          aws opensearchserverless update-account-settings \
-            --capacity-limits "{\"maxIndexingCapacityInOCU\": ${{ inputs.max_indexing_ocu }}, \"maxSearchCapacityInOCU\": ${{ inputs.max_search_ocu }}}"
-          echo "OCU capacity limits configured"
 
       - name: Get Stack Outputs
         id: stack-outputs
@@ -158,6 +178,11 @@ jobs:
             --query "Stacks[0].Outputs[?OutputKey=='OpenSearchEndpoint'].OutputValue" \
             --output text)
 
+          OPENSEARCH_CLIENT_SG=$(aws cloudformation describe-stacks \
+            --stack-name ${{ inputs.stack_name }} \
+            --query "Stacks[0].Outputs[?OutputKey=='OpenSearchClientSecurityGroupId'].OutputValue" \
+            --output text)
+
           if [ -n "$OPENSEARCH_ENDPOINT" ]; then
             echo "opensearch_endpoint=$OPENSEARCH_ENDPOINT" >> $GITHUB_OUTPUT
             echo "Found OpenSearch endpoint: $OPENSEARCH_ENDPOINT"
@@ -166,11 +191,18 @@ jobs:
             exit 1
           fi
 
+          if [ -n "$OPENSEARCH_CLIENT_SG" ]; then
+            echo "opensearch_sg_id=$OPENSEARCH_CLIENT_SG" >> $GITHUB_OUTPUT
+            echo "Found OpenSearch client security group: $OPENSEARCH_CLIENT_SG"
+          else
+            echo "Warning: Could not retrieve OpenSearch client security group"
+          fi
+
       - name: Update Deployment Status
         if: always()
         run: |
           if [ "${{ steps.deploy-stack.outputs.is_new_stack }}" == "true" ]; then
-            echo "OpenSearch Serverless stack creation completed"
+            echo "OpenSearch stack creation completed"
           else
-            echo "OpenSearch Serverless stack update completed"
+            echo "OpenSearch stack update completed"
           fi

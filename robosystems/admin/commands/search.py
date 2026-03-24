@@ -21,7 +21,6 @@ import json, urllib.request, ssl, hmac, hashlib, datetime, sys, os, base64
 host = "{host}"
 region = "{region}"
 index_name = "{index}"
-service = "aoss" if ".aoss." in host else "es"
 
 # IMDSv2 credentials
 token_req = urllib.request.Request(
@@ -72,13 +71,13 @@ def query_os(path, body):
     payload_hash = hashlib.sha256(data.encode("utf-8")).hexdigest()
     canonical_request = f"POST\\n{{path}}\\n\\n{{canonical_headers}}\\n{{signed_headers}}\\n{{payload_hash}}"
 
-    credential_scope = f"{{date_stamp}}/{{region}}/{{service}}/aws4_request"
+    credential_scope = f"{{date_stamp}}/{{region}}/es/aws4_request"
     string_to_sign = (
         f"AWS4-HMAC-SHA256\\n{{amz_date}}\\n{{credential_scope}}\\n"
         f"{{hashlib.sha256(canonical_request.encode('utf-8')).hexdigest()}}"
     )
 
-    signing_key = get_signature_key(secret_key, date_stamp, region, service)
+    signing_key = get_signature_key(secret_key, date_stamp, region, "es")
     signature = hmac.new(signing_key, string_to_sign.encode("utf-8"), hashlib.sha256).hexdigest()
 
     auth = (
@@ -161,7 +160,7 @@ elif action == "search":
 
 
 def _get_opensearch_endpoint(environment: str, aws_profile: str) -> str:
-  """Get OpenSearch endpoint from CloudFormation stack."""
+  """Get OpenSearch VPC endpoint from CloudFormation stack."""
   stack_name = f"RoboSystemsOpenSearch{environment.capitalize()}"
   cmd = [
     "aws",
@@ -169,21 +168,18 @@ def _get_opensearch_endpoint(environment: str, aws_profile: str) -> str:
     "describe-stacks",
     "--stack-name",
     stack_name,
+    "--query",
+    "Stacks[0].Outputs[?OutputKey==`OpenSearchEndpoint`].OutputValue",
     "--output",
-    "json",
+    "text",
     "--profile",
     aws_profile,
     "--region",
     "us-east-1",
   ]
   result = subprocess.run(cmd, capture_output=True, text=True, check=True)
-  stacks = json.loads(result.stdout)
-  outputs = stacks.get("Stacks", [{}])[0].get("Outputs", [])
-  endpoint = next(
-    (o["OutputValue"] for o in outputs if o["OutputKey"] == "OpenSearchEndpoint"),
-    None,
-  )
-  if not endpoint:
+  endpoint = result.stdout.strip()
+  if not endpoint or endpoint == "None":
     raise click.ClickException(f"OpenSearch endpoint not found for {environment}")
   # Strip https:// prefix — we need just the hostname
   return endpoint.replace("https://", "").replace("http://", "").rstrip("/")

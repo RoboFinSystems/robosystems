@@ -201,7 +201,10 @@ Parameters:
     Type: String
     Description: OpenSearch domain endpoint URL (empty if not deployed)
     Default: ""
-  # OpenSearchClientSecurityGroupId removed — serverless uses IAM-based access, not security groups
+  OpenSearchClientSecurityGroupId:
+    Type: String
+    Description: Security group ID for applications connecting to OpenSearch (empty if not deployed)
+    Default: ""
   BastionSecurityGroupId:
     Type: String
     Description: Security group ID for bastion host (for SSM tunnel access to admin API)
@@ -492,14 +495,17 @@ Resources:
                       - prod-5ukwuglpt66kg # Claude Sonnet 4.6
                       - prod-mxcfnwvpd6kb4 # Claude Sonnet 4.5
                       - prod-4pmewlybdftbs # Claude Sonnet 4
-              # OpenSearch Serverless for text search queries
+              # OpenSearch for text search queries
               - !If
                 - HasOpenSearch
                 - Effect: Allow
                   Action:
-                    - aoss:APIAccessAll
+                    - es:ESHttpGet
+                    - es:ESHttpHead
+                    - es:ESHttpPost
+                    - es:ESHttpPut
                   Resource:
-                    - !Sub "arn:${AWS::Partition}:aoss:${AWS::Region}:${AWS::AccountId}:collection/*"
+                    - !Sub "arn:${AWS::Partition}:es:${AWS::Region}:${AWS::AccountId}:domain/robosystems-${Environment}/*"
                 - !Ref "AWS::NoValue"
 
   # ECS Task Execution Role
@@ -905,7 +911,7 @@ Resources:
           SecurityGroups:
             - !Ref ApiSecurityGroup
             - !Ref ValkeyClientSecurityGroupId
-            # OpenSearch Serverless uses IAM-based access, no security group needed
+            - !If [HasOpenSearch, !Ref OpenSearchClientSecurityGroupId, !Ref "AWS::NoValue"]
       TaskDefinition: !Ref ApiTaskDefinition
       LoadBalancers:
         - ContainerName: api-container

@@ -126,7 +126,10 @@ Parameters:
     Type: String
     Description: OpenSearch domain endpoint URL (empty if not deployed)
     Default: ""
-  # OpenSearchClientSecurityGroupId removed — serverless uses IAM-based access, not security groups
+  OpenSearchClientSecurityGroupId:
+    Type: String
+    Description: Security group ID for applications connecting to OpenSearch (empty if not deployed)
+    Default: ""
 
   # Database Configuration (uses existing RDS)
   DatabaseEndpoint:
@@ -534,14 +537,18 @@ Resources:
                   - ses:SendEmail
                 Resource:
                   - !Sub "arn:${AWS::Partition}:ses:${AWS::Region}:${AWS::AccountId}:identity/robosystems.ai"
-              # OpenSearch Serverless for text search indexing
+              # OpenSearch for text search indexing
               - !If
                 - HasOpenSearch
                 - Effect: Allow
                   Action:
-                    - aoss:APIAccessAll
+                    - es:ESHttpGet
+                    - es:ESHttpHead
+                    - es:ESHttpPost
+                    - es:ESHttpPut
+                    - es:ESHttpDelete
                   Resource:
-                    - !Sub "arn:${AWS::Partition}:aoss:${AWS::Region}:${AWS::AccountId}:collection/*"
+                    - !Sub "arn:${AWS::Partition}:es:${AWS::Region}:${AWS::AccountId}:domain/robosystems-${Environment}/*"
                 - !Ref "AWS::NoValue"
       Tags:
         - Key: Environment
@@ -937,7 +944,7 @@ Resources:
             - !Ref DagsterSecurityGroup
             - !Ref ValkeyClientSecurityGroupId
             - !Ref DatabaseSecurityGroupId
-            # OpenSearch Serverless uses IAM-based access, no security group needed
+            - !If [HasOpenSearch, !Ref OpenSearchClientSecurityGroupId, !Ref "AWS::NoValue"]
       TaskDefinition: !Ref DaemonTaskDefinition
       EnableExecuteCommand: true
       PropagateTags: SERVICE
@@ -974,7 +981,7 @@ Resources:
             - !Ref DagsterSecurityGroup
             - !Ref ValkeyClientSecurityGroupId
             - !Ref DatabaseSecurityGroupId
-            # OpenSearch Serverless uses IAM-based access, no security group needed
+            - !If [HasOpenSearch, !Ref OpenSearchClientSecurityGroupId, !Ref "AWS::NoValue"]
       TaskDefinition: !Ref WebserverTaskDefinition
       # Service Discovery registration
       ServiceRegistries:

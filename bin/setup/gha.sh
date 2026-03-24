@@ -358,17 +358,15 @@ function setup_full_config() {
         gh variable set VALKEY_SNAPSHOT_RETENTION_DAYS_STAGING --body "0"
     fi
 
-    # OpenSearch Serverless Configuration (text search for filing narratives)
-    # Disabled by default - enable when search infrastructure is needed
+    # OpenSearch Configuration (text search for filing narratives)
+    # Disabled by default - enable when OpenSearch infrastructure is needed
     gh variable set OPENSEARCH_ENABLED_PROD --body "false"
-    gh variable set OPENSEARCH_MAX_INDEXING_OCU_PROD --body "1"
-    gh variable set OPENSEARCH_MAX_SEARCH_OCU_PROD --body "1"
-    gh variable set OPENSEARCH_STANDBY_REPLICAS_PROD --body "DISABLED"
+    gh variable set OPENSEARCH_INSTANCE_TYPE_PROD --body "t3.medium.search"
+    gh variable set OPENSEARCH_EBS_SIZE_PROD --body "100"
     if $setup_staging; then
         gh variable set OPENSEARCH_ENABLED_STAGING --body "false"
-        gh variable set OPENSEARCH_MAX_INDEXING_OCU_STAGING --body "1"
-        gh variable set OPENSEARCH_MAX_SEARCH_OCU_STAGING --body "1"
-        gh variable set OPENSEARCH_STANDBY_REPLICAS_STAGING --body "DISABLED"
+        gh variable set OPENSEARCH_INSTANCE_TYPE_STAGING --body "t3.medium.search"
+        gh variable set OPENSEARCH_EBS_SIZE_STAGING --body "100"
     fi
 
     # LadybugDB Writer Configuration - Standard Tier

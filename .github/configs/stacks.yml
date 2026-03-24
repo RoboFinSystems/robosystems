@@ -38,6 +38,7 @@ prod:
     stack_name: RoboSystemsOpenSearchProd
     outputs:
       endpoint: OpenSearchEndpoint
+      security_group: OpenSearchClientSecurityGroupId
 
   s3:
     stack_name: RoboSystemsS3Prod
@@ -189,6 +190,7 @@ staging:
     stack_name: RoboSystemsOpenSearchStaging
     outputs:
       endpoint: OpenSearchEndpoint
+      security_group: OpenSearchClientSecurityGroupId
 
   s3:
     stack_name: RoboSystemsS3Staging

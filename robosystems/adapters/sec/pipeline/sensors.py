@@ -649,7 +649,7 @@ def sec_post_materialize_publish_sensor(context: RunStatusSensorContext):
 # ============================================================================
 # After staging completes, index text content into OpenSearch in parallel
 # with the materialization branch. Both index jobs are independent and
-# idempotent (skips already-indexed accessions via composite aggregation).
+# idempotent (OpenSearch upserts by document_id).
 #
 # Chain: stage → text index (parallel with materialize branch)
 
