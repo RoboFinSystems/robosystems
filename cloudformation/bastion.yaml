@@ -132,15 +132,12 @@ Resources:
                 Resource:
                   - !Sub "arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:robosystems/*/postgres*"
                   - !Sub "arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:robosystems/*/valkey*"
-              # OpenSearch access for admin CLI (search queries, index stats).
-              # ESHttpPost is required for _search and _count API calls.
+              # OpenSearch Serverless access for admin CLI (search queries, index stats)
               - Effect: Allow
                 Action:
-                  - es:ESHttpGet
-                  - es:ESHttpPost
-                  - es:ESHttpHead
+                  - aoss:APIAccessAll
                 Resource:
-                  - !Sub "arn:${AWS::Partition}:es:${AWS::Region}:${AWS::AccountId}:domain/robosystems-*/*"
+                  - !Sub "arn:${AWS::Partition}:aoss:${AWS::Region}:${AWS::AccountId}:collection/*"
               # SSM Parameter Store permissions for feature flags and tuning parameters (allows debugging via bastion)
               - Effect: Allow
                 Action:

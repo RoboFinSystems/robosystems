@@ -9,7 +9,33 @@ from typing import Any
 
 from robosystems.logger import logger
 
-# Index mapping definition
+# Search pipeline for hybrid (BM25 + KNN) score normalization.
+# Without this, BM25 scores (~10-40) drown out KNN cosine scores (~0-1).
+# The normalization processor maps both to [0,1] before combining.
+HYBRID_PIPELINE_NAME = "hybrid-search-pipeline"
+HYBRID_PIPELINE_BODY: dict[str, Any] = {
+  "description": "Normalizes and combines BM25 + KNN scores for hybrid search",
+  "phase_results_processors": [
+    {
+      "normalization-processor": {
+        "normalization": {
+          "technique": "min_max",
+        },
+        "combination": {
+          "technique": "arithmetic_mean",
+          "parameters": {
+            # [BM25 weight, KNN weight] — slightly favor semantic relevance
+            "weights": [0.4, 0.6],
+          },
+        },
+      }
+    }
+  ],
+}
+
+# Index mapping definition — compatible with both managed OpenSearch and Serverless (AOSS).
+# Serverless requires faiss engine (nmslib not available). For normalized embeddings
+# (bge-small-en-v1.5), innerproduct is equivalent to cosine similarity.
 INDEX_MAPPING = {
   "mappings": {
     "properties": {
@@ -49,23 +75,20 @@ INDEX_MAPPING = {
       "accession_number": {"type": "keyword"},
       # Timestamps
       "indexed_at": {"type": "date"},
-      # Embedding (populated by future vector search phase; field reserved now
-      # to avoid index recreation later)
+      # Embedding — faiss engine for Serverless compatibility
       "embedding": {
         "type": "knn_vector",
         "dimension": 384,  # fastembed BAAI/bge-small-en-v1.5
         "method": {
           "name": "hnsw",
-          "space_type": "cosinesimil",
-          "engine": "nmslib",
+          "space_type": "innerproduct",
+          "engine": "faiss",
         },
       },
       "embedding_model": {"type": "keyword"},  # "fastembed" or "bedrock"
     }
   },
   "settings": {
-    "number_of_shards": 1,
-    "number_of_replicas": 0,  # Single node for dev; production will differ
     "index.knn": True,
   },
 }
@@ -124,17 +147,51 @@ class OpenSearchClient:
         )
     return self._client
 
+  @property
+  def is_serverless(self) -> bool:
+    """True if connected to OpenSearch Serverless (AOSS)."""
+    return ".aoss." in self.url
+
   def create_index_if_not_exists(self) -> None:
     """Create the index with mapping if it doesn't exist."""
     try:
-      if not self.client.indices.exists(index=self.index_name):
-        self.client.indices.create(index=self.index_name, body=INDEX_MAPPING)
-        logger.info(f"Created OpenSearch index: {self.index_name}")
+      if self.is_serverless:
+        # AOSS: indices.exists() may not work reliably; try-create instead
+        try:
+          self.client.indices.create(index=self.index_name, body=INDEX_MAPPING)
+          logger.info(f"Created AOSS index: {self.index_name}")
+        except Exception as e:
+          if "resource_already_exists_exception" in str(e).lower():
+            logger.debug(f"AOSS index already exists: {self.index_name}")
+          else:
+            raise
       else:
-        logger.debug(f"OpenSearch index already exists: {self.index_name}")
+        if not self.client.indices.exists(index=self.index_name):
+          self.client.indices.create(index=self.index_name, body=INDEX_MAPPING)
+          logger.info(f"Created OpenSearch index: {self.index_name}")
+        else:
+          logger.debug(f"OpenSearch index already exists: {self.index_name}")
     except Exception as e:
       logger.error(f"Failed to create OpenSearch index: {e}")
       raise
+
+    self._create_hybrid_pipeline()
+
+  def _create_hybrid_pipeline(self) -> None:
+    """Create or update the hybrid search pipeline for score normalization.
+
+    This pipeline normalizes BM25 and KNN scores to the same scale before
+    combining them. Without it, BM25 scores (~10-40) dominate KNN cosine
+    similarity scores (~0-1), making the vector component negligible.
+    """
+    try:
+      self.client.http.put(
+        f"/_search/pipeline/{HYBRID_PIPELINE_NAME}",
+        body=HYBRID_PIPELINE_BODY,
+      )
+      logger.info(f"Created/updated hybrid search pipeline: {HYBRID_PIPELINE_NAME}")
+    except Exception as e:
+      logger.warning(f"Failed to create hybrid search pipeline: {e}")
 
   def index_document(self, document: dict[str, Any]) -> None:
     """Index a single document. Requires graph_id field."""
@@ -142,7 +199,9 @@ class OpenSearchClient:
       raise ValueError("Document must contain graph_id field")
 
     document["indexed_at"] = datetime.now(UTC).isoformat()
-    doc_id = document.get("document_id")
+    # AOSS VECTOR_SEARCH collections don't support custom _id on index.
+    # document_id is stored as a field for retrieval; OS generates the _id.
+    doc_id = document.get("document_id") if not self.is_serverless else None
 
     self.client.index(
       index=self.index_name,
@@ -163,11 +222,12 @@ class OpenSearchClient:
       if "graph_id" not in doc:
         raise ValueError("All documents must contain graph_id field")
       doc["indexed_at"] = now
-      action = {
+      action: dict[str, Any] = {
         "_index": self.index_name,
         "_source": doc,
       }
-      if "document_id" in doc:
+      # AOSS VECTOR_SEARCH collections don't support custom _id on index
+      if not self.is_serverless and "document_id" in doc:
         action["_id"] = doc["document_id"]
       actions.append(action)
 
@@ -305,14 +365,14 @@ class OpenSearchClient:
   ) -> dict[str, Any]:
     """Hybrid text + vector search with mandatory graph_id filtering.
 
-    Combines BM25 text matching with KNN vector similarity by nesting both
-    inside a bool.should clause. Documents matching either text or vector
-    (or both) are returned, ranked by combined score.
+    Uses OpenSearch's native hybrid query type with a normalization search
+    pipeline. The pipeline normalizes BM25 and KNN scores to [0,1] via
+    min_max, then combines them with weighted arithmetic mean (0.4 BM25,
+    0.6 KNN). This ensures vector similarity actually influences ranking
+    instead of being drowned out by raw BM25 scores.
 
-    Note on pagination: KNN does not support offset-based pagination natively.
-    When offset > 0, we over-fetch (size + offset) results and let OpenSearch
-    handle the windowing. This is fine for typical result sets but becomes
-    inefficient at very high offsets.
+    Filters are applied via post_filter (OpenSearch 2.x and Serverless
+    don't support filters inside hybrid queries — that's OpenSearch 3.0+).
 
     Args:
         query: Search query string
@@ -330,10 +390,13 @@ class OpenSearchClient:
     # Over-fetch for KNN to support offset pagination
     knn_k = min(size + offset, 100)  # Cap at 100 to limit KNN cost
 
+    # The hybrid query's queries array is positional — index 0 maps to
+    # weight 0 (BM25=0.4) and index 1 maps to weight 1 (KNN=0.6) in
+    # the normalization pipeline.
     search_body: dict[str, Any] = {
       "query": {
-        "bool": {
-          "should": [
+        "hybrid": {
+          "queries": [
             {
               "multi_match": {
                 "query": query,
@@ -354,6 +417,11 @@ class OpenSearchClient:
               }
             },
           ],
+        }
+      },
+      # Filters via post_filter (hybrid.filter is OpenSearch 3.0+ only)
+      "post_filter": {
+        "bool": {
           "filter": filter_clauses,
         }
       },
@@ -365,23 +433,52 @@ class OpenSearchClient:
       },
     }
 
-    return self.client.search(index=self.index_name, body=search_body)
+    return self.client.search(
+      index=self.index_name,
+      body=search_body,
+      params={"search_pipeline": HYBRID_PIPELINE_NAME},
+    )
 
   def get_document(self, document_id: str, graph_id: str) -> dict[str, Any] | None:
-    """Get a document by ID, with graph_id verification for tenant isolation."""
+    """Get a document by ID, with graph_id verification for tenant isolation.
+
+    On AOSS VECTOR_SEARCH collections, _id is auto-generated so we search
+    by the document_id field instead of using the GET API.
+    """
     try:
-      result = self.client.get(index=self.index_name, id=document_id)
-      source = result.get("_source", {})
-
-      # Verify graph_id matches — defense in depth
-      if source.get("graph_id") != graph_id:
-        logger.warning(
-          f"graph_id mismatch on document {document_id}: "
-          f"expected {graph_id}, got {source.get('graph_id')}"
+      if self.is_serverless:
+        # AOSS: search by document_id field (custom _id not available)
+        result = self.client.search(
+          index=self.index_name,
+          body={
+            "query": {
+              "bool": {
+                "filter": [
+                  {"term": {"document_id": document_id}},
+                  {"term": {"graph_id": graph_id}},
+                ]
+              }
+            },
+            "size": 1,
+          },
         )
-        return None
+        hits = result.get("hits", {}).get("hits", [])
+        if not hits:
+          return None
+        return hits[0].get("_source", {})
+      else:
+        result = self.client.get(index=self.index_name, id=document_id)
+        source = result.get("_source", {})
 
-      return source
+        # Verify graph_id matches — defense in depth
+        if source.get("graph_id") != graph_id:
+          logger.warning(
+            f"graph_id mismatch on document {document_id}: "
+            f"expected {graph_id}, got {source.get('graph_id')}"
+          )
+          return None
+
+        return source
     except Exception as e:
       if "NotFoundError" in type(e).__name__:
         return None
@@ -399,8 +496,12 @@ class OpenSearchClient:
     return deleted
 
   def health(self) -> dict[str, Any]:
-    """Check OpenSearch cluster health."""
+    """Check OpenSearch health."""
     try:
+      if self.is_serverless:
+        # AOSS doesn't support cluster.health() — use index check as probe
+        self.client.indices.get(index=self.index_name)
+        return {"status": "green", "backend": "serverless"}
       return self.client.cluster.health()
     except Exception as e:
       return {"status": "unavailable", "error": str(e)}
