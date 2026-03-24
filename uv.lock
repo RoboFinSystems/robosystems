@@ -3008,7 +3008,7 @@ wheels = [
 
 [[package]]
 name = "robosystems"
-version = "1.4.48"
+version = "1.4.49"
 source = { editable = "." }
 dependencies = [
     { name = "aiohttp" },
