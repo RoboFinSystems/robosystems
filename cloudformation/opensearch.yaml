@@ -8,19 +8,12 @@ Parameters:
     Default: prod
     AllowedValues: [staging, prod]
 
-
-  # VPC Endpoint (optional — eliminates NAT data transfer costs)
-  VpcEndpointEnabled:
+  # Collection Configuration
+  StandbyReplicas:
     Type: String
-    Description: Enable VPC endpoint for private access (disables public access)
-    Default: "false"
-    AllowedValues: ["true", "false"]
-  VpcId:
-    Type: String
-    Description: VPC ID for private endpoint
-  SubnetIds:
-    Type: String
-    Description: Comma-separated private subnet IDs for VPC endpoint
+    Description: Enable standby replicas for high availability (doubles minimum OCU cost)
+    Default: "DISABLED"
+    AllowedValues: ["ENABLED", "DISABLED"]
 
   # Monitoring
   SNSAlertEmail:
@@ -39,19 +32,16 @@ Parameters:
     Description: Component tag for resource identification and billing
     Default: OpenSearch
 
-Conditions:
-  HasVpcEndpoint: !Equals [!Ref VpcEndpointEnabled, "true"]
+# TODO: VPC Endpoint for private access
+# Currently uses public endpoint with IAM SigV4 auth. All other infrastructure
+# (RDS, Valkey, LadybugDB) is VPC-only. To align AOSS with that posture:
+# 1. Add AWS::OpenSearchServerless::VpcEndpoint resource
+# 2. Add Route53 private hosted zone to resolve AOSS hostname to VPC endpoint
+# 3. Set AllowFromPublic: false in NetworkPolicy
+# 4. Wire VpcId/SubnetIds params from deploy-vpc outputs
+# Tracked for future implementation when data transfer costs justify it.
 
 Resources:
-  # VPC Endpoint — optional, eliminates NAT data transfer costs (~$7.30/month per AZ)
-  VpcEndpoint:
-    Type: AWS::OpenSearchServerless::VpcEndpoint
-    Condition: HasVpcEndpoint
-    Properties:
-      Name: !Sub "robosystems-${Environment}"
-      VpcId: !Ref VpcId
-      SubnetIds: !Split [",", !Ref SubnetIds]
-
   # Encryption Policy — required before collection creation
   EncryptionPolicy:
     Type: AWS::OpenSearchServerless::SecurityPolicy
@@ -69,49 +59,28 @@ Resources:
           "AWSOwnedKey": true
         }
 
-  # Network Policy — configurable public/private access
-  # When VPC endpoint enabled: adds SourceVPCEs for private path
-  # PublicAccessEnabled controls whether public internet access is allowed
+  # Network Policy — public access with IAM SigV4 authentication
   NetworkPolicy:
     Type: AWS::OpenSearchServerless::SecurityPolicy
     Properties:
       Name: !Sub "robosystems-${Environment}-net"
       Type: network
-      Policy: !If
-        - HasVpcEndpoint
-        - !Sub >
-            [
+      Policy: !Sub >
+        [
+          {
+            "Rules": [
               {
-                "Rules": [
-                  {
-                    "ResourceType": "collection",
-                    "Resource": ["collection/robosystems-${Environment}"]
-                  },
-                  {
-                    "ResourceType": "dashboard",
-                    "Resource": ["collection/robosystems-${Environment}"]
-                  }
-                ],
-                "AllowFromPublic": false,
-                "SourceVPCEs": ["${VpcEndpoint}"]
-              }
-            ]
-        - !Sub >
-            [
+                "ResourceType": "collection",
+                "Resource": ["collection/robosystems-${Environment}"]
+              },
               {
-                "Rules": [
-                  {
-                    "ResourceType": "collection",
-                    "Resource": ["collection/robosystems-${Environment}"]
-                  },
-                  {
-                    "ResourceType": "dashboard",
-                    "Resource": ["collection/robosystems-${Environment}"]
-                  }
-                ],
-                "AllowFromPublic": true
+                "ResourceType": "dashboard",
+                "Resource": ["collection/robosystems-${Environment}"]
               }
-            ]
+            ],
+            "AllowFromPublic": true
+          }
+        ]
 
   # Data Access Policy — grants API, Dagster, and GitHub Actions roles access
   # Uses account root principal so any IAM role in the account with aoss:*
@@ -165,7 +134,7 @@ Resources:
     Properties:
       Name: !Sub "robosystems-${Environment}"
       Type: VECTORSEARCH
-      StandbyReplicas: DISABLED
+      StandbyReplicas: !Ref StandbyReplicas
       Description: !Sub "RoboSystems ${Environment} full-text and semantic search"
       Tags:
         - Key: Name

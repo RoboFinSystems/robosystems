@@ -363,12 +363,10 @@ function setup_full_config() {
     gh variable set OPENSEARCH_ENABLED_PROD --body "false"
     gh variable set OPENSEARCH_MAX_INDEXING_OCU_PROD --body "1"
     gh variable set OPENSEARCH_MAX_SEARCH_OCU_PROD --body "1"
-    gh variable set OPENSEARCH_VPC_ENDPOINT_ENABLED_PROD --body "false"
     if $setup_staging; then
         gh variable set OPENSEARCH_ENABLED_STAGING --body "false"
         gh variable set OPENSEARCH_MAX_INDEXING_OCU_STAGING --body "1"
         gh variable set OPENSEARCH_MAX_SEARCH_OCU_STAGING --body "1"
-        gh variable set OPENSEARCH_VPC_ENDPOINT_ENABLED_STAGING --body "false"
     fi
 
     # LadybugDB Writer Configuration - Standard Tier

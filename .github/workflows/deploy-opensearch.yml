@@ -37,23 +37,11 @@ on:
         required: false
         type: string
         default: "1"
-
-      # VPC Endpoint (optional — eliminates NAT data transfer costs)
-      vpc_endpoint_enabled:
-        description: "Enable VPC endpoint for private access (disables public access) (true/false)"
+      standby_replicas:
+        description: "Enable standby replicas for HA (ENABLED/DISABLED, doubles min OCU cost)"
         required: false
         type: string
-        default: "false"
-      vpc_id:
-        description: "VPC ID (always passed, only used when vpc_endpoint_enabled=true)"
-        required: false
-        type: string
-        default: ""
-      subnet_ids:
-        description: "Comma-separated private subnet IDs (only used when vpc_endpoint_enabled=true)"
-        required: false
-        type: string
-        default: ""
+        default: "DISABLED"
 
       # Notification Configuration
       aws_sns_alert_email:
@@ -104,9 +92,7 @@ jobs:
           fi
 
           OPENSEARCH_STACK_PARAMS="ParameterKey=Environment,ParameterValue=${{ inputs.environment }} \
-                ParameterKey=VpcEndpointEnabled,ParameterValue=${{ inputs.vpc_endpoint_enabled }} \
-                ParameterKey=VpcId,ParameterValue=\"${{ inputs.vpc_id }}\" \
-                ParameterKey=SubnetIds,ParameterValue=\"${{ inputs.subnet_ids }}\" \
+                ParameterKey=StandbyReplicas,ParameterValue=${{ inputs.standby_replicas }} \
                 ParameterKey=SNSAlertEmail,ParameterValue=${{ inputs.aws_sns_alert_email }}"
 
           if [ "$STACK_ACTION" = "create-stack" ]; then

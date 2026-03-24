@@ -526,6 +526,9 @@ class OpenSearchClient:
         logger.warning(
           f"Bulk delete had {len(errors)} failures for graph_id={graph_id}"
         )
+      if success == 0:
+        logger.error(f"Bulk delete made no progress for graph_id={graph_id}, aborting")
+        break
       deleted += success
 
     logger.info(f"Deleted {deleted} documents for graph_id={graph_id}")

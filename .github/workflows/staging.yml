@@ -317,13 +317,10 @@ jobs:
       runner_config: ${{ needs.runner.outputs.runner_config }}
       # AWS Configuration
       aws_region: ${{ vars.AWS_REGION || 'us-east-1' }}
-      vpc_id: ${{ needs.deploy-vpc.outputs.vpc_id }}
-      subnet_ids: ${{ needs.deploy-vpc.outputs.private_subnet_ids }}
       # Capacity limits (account-level OCU caps)
       max_indexing_ocu: ${{ vars.OPENSEARCH_MAX_INDEXING_OCU_STAGING || '1' }}
       max_search_ocu: ${{ vars.OPENSEARCH_MAX_SEARCH_OCU_STAGING || '1' }}
-      # VPC endpoint (optional — eliminates NAT data transfer costs)
-      vpc_endpoint_enabled: ${{ vars.OPENSEARCH_VPC_ENDPOINT_ENABLED_STAGING || 'false' }}
+      standby_replicas: ${{ vars.OPENSEARCH_STANDBY_REPLICAS_STAGING || 'DISABLED' }}
       # Other Configuration
       aws_sns_alert_email: ${{ vars.AWS_SNS_ALERT_EMAIL }}
     secrets: inherit
