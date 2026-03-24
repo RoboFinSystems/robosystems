@@ -503,6 +503,7 @@ Resources:
                     - es:ESHttpGet
                     - es:ESHttpHead
                     - es:ESHttpPost
+                    - es:ESHttpPut
                   Resource:
                     - !Sub "arn:${AWS::Partition}:es:${AWS::Region}:${AWS::AccountId}:domain/robosystems-${Environment}/*"
                 - !Ref "AWS::NoValue"
