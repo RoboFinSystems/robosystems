@@ -40,7 +40,7 @@ on:
 
       # VPC Endpoint (optional — eliminates NAT data transfer costs)
       vpc_endpoint_enabled:
-        description: "Enable VPC endpoint for private access (true/false)"
+        description: "Enable VPC endpoint for private access (disables public access) (true/false)"
         required: false
         type: string
         default: "false"

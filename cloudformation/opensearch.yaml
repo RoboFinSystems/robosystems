@@ -12,7 +12,7 @@ Parameters:
   # VPC Endpoint (optional — eliminates NAT data transfer costs)
   VpcEndpointEnabled:
     Type: String
-    Description: Enable VPC endpoint for private access
+    Description: Enable VPC endpoint for private access (disables public access)
     Default: "false"
     AllowedValues: ["true", "false"]
   VpcId:
@@ -69,7 +69,9 @@ Resources:
           "AWSOwnedKey": true
         }
 
-  # Network Policy — public access by default, private via VPC endpoint when enabled
+  # Network Policy — configurable public/private access
+  # When VPC endpoint enabled: adds SourceVPCEs for private path
+  # PublicAccessEnabled controls whether public internet access is allowed
   NetworkPolicy:
     Type: AWS::OpenSearchServerless::SecurityPolicy
     Properties:
@@ -90,7 +92,7 @@ Resources:
                     "Resource": ["collection/robosystems-${Environment}"]
                   }
                 ],
-                "AllowFromPublic": true,
+                "AllowFromPublic": false,
                 "SourceVPCEs": ["${VpcEndpoint}"]
               }
             ]

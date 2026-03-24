@@ -503,6 +503,8 @@ class OpenSearchClient:
       return deleted
 
     # AOSS: scroll and bulk delete by _id
+    from opensearchpy.helpers import bulk
+
     deleted = 0
     while True:
       result = self.client.search(
@@ -519,9 +521,11 @@ class OpenSearchClient:
       actions = [
         {"_op_type": "delete", "_index": self.index_name, "_id": h["_id"]} for h in hits
       ]
-      from opensearchpy.helpers import bulk
-
-      success, _ = bulk(self.client, actions, raise_on_error=False)
+      success, errors = bulk(self.client, actions, raise_on_error=False)
+      if errors:
+        logger.warning(
+          f"Bulk delete had {len(errors)} failures for graph_id={graph_id}"
+        )
       deleted += success
 
     logger.info(f"Deleted {deleted} documents for graph_id={graph_id}")
