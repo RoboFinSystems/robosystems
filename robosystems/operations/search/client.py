@@ -115,11 +115,12 @@ class OpenSearchClient:
       is_aws = ".es.amazonaws.com" in self.url or ".aoss.amazonaws.com" in self.url
 
       if is_aws:
+        import boto3
         from opensearchpy import AWSV4SignerAuth, RequestsHttpConnection
 
         from robosystems.config import env
 
-        session = __import__("boto3").Session()
+        session = boto3.Session()
         credentials = session.get_credentials()
         service = "aoss" if ".aoss." in self.url else "es"
         auth = AWSV4SignerAuth(credentials, env.AWS_REGION, service)
