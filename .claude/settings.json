@@ -132,6 +132,17 @@
       "Bash(just create-*)"
     ],
     "deny": [
+      "Bash(just admin * migrations:*)",
+      "Bash(just admin * cache flush:*)",
+      "Bash(just admin * cache delete-keys:*)",
+      "Bash(just admin * instances scale:*)",
+      "Bash(just admin * instances cleanup:*)",
+      "Bash(uv run python -m robosystems.admin.cli * migrations:*)",
+      "Bash(uv run python -m robosystems.admin.cli * cache flush:*)",
+      "Bash(uv run python -m robosystems.admin.cli * cache delete-keys:*)",
+      "Bash(uv run python -m robosystems.admin.cli * instances scale:*)",
+      "Bash(uv run python -m robosystems.admin.cli * instances cleanup:*)",
+      "Bash(aws ssm send-command:*)",
       "Bash(git push:*)",
       "Bash(git reset:*)",
       "Bash(git clean:*)",
