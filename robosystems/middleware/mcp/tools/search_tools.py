@@ -144,7 +144,10 @@ class SearchDocumentsTool(_SearchToolMixin):
       size=min(arguments.get("size", 10), 50),
     )
 
-    logger.info(f"MCP search-documents: query='{request.query}' graph_id={graph_id}")
+    logger.info(
+      f"MCP search-documents: query='{request.query}' graph_id={graph_id} "
+      f"semantic={request.semantic} env_semantic={env.SEMANTIC_SEARCH_ENABLED}"
+    )
 
     try:
       response = service.search_documents(graph_id, request)

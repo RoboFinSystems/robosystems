@@ -68,6 +68,10 @@ class SearchService:
       filters["date_to"] = request.date_to
 
     use_semantic = env.SEMANTIC_SEARCH_ENABLED and request.semantic
+    logger.info(
+      f"Search mode: use_semantic={use_semantic} "
+      f"(env={env.SEMANTIC_SEARCH_ENABLED}, req={request.semantic})"
+    )
 
     if use_semantic:
       query_embedding = self.embedding_service.embed_single(request.query)
