@@ -57,11 +57,15 @@ def create_app() -> FastAPI:
     # Startup
     logger.info("Graph API starting up")
 
-    # Replica warmup: open local databases and warm buffer pool before serving traffic
+    # Replica warmup: load data into OS page cache before serving traffic.
+    # LadybugDB is columnar — each property and edge type is a separate file.
+    # A simple count(n) only touches the node ID column. These queries force
+    # the OS to page in label indexes, property columns, and edge lists so
+    # that real MCP queries don't hit cold disk on first call.
     if os.getenv("LBUG_ROLE") == "replica":
 
       async def warmup_local_databases():
-        """Warm up local databases by opening them and running a simple query."""
+        """Warm up local databases with progressive scans."""
         from robosystems.graph_api.routers.health import mark_replica_ready
 
         def _do_warmup():
@@ -70,14 +74,54 @@ def create_app() -> FastAPI:
           service = get_ladybug_service()
           databases = service.db_manager.list_databases()
           logger.info(f"Warming up {len(databases)} local databases...")
+
           for db_name in databases:
+            succeeded = 0
+            failed = 0
+
+            # Phase 1: Label scan — pages in all node label index data
             try:
               with service.db_manager.get_connection(db_name, read_only=True) as conn:
-                conn.execute("MATCH (n) RETURN count(n) LIMIT 1")
-              logger.info(f"Warmed up database: {db_name}")
+                result = conn.execute("MATCH (n) RETURN labels(n), count(n)")
+                result.close()
+              succeeded += 1
+              logger.info(f"Warmup [{db_name}] label scan: ok")
             except Exception as e:
-              logger.error(f"Warmup failed for {db_name}: {e}")
-              raise
+              failed += 1
+              logger.warning(f"Warmup [{db_name}] label scan: {e}")
+
+            # Phase 2: Discover labels, then for each label:
+            #   Property scan — RETURN n LIMIT 500 loads all column files
+            try:
+              with service.db_manager.get_connection(db_name, read_only=True) as conn:
+                result = conn.execute("MATCH (n) RETURN DISTINCT labels(n) AS lbl")
+                node_labels: list[str] = []
+                while result.has_next():
+                  row = result.get_next()
+                  if row and row[0]:
+                    node_labels.append(row[0])
+                result.close()
+            except Exception as e:
+              logger.warning(f"Warmup [{db_name}] label discovery: {e}")
+              node_labels = []
+
+            for label in node_labels:
+              try:
+                with service.db_manager.get_connection(db_name, read_only=True) as conn:
+                  r = conn.execute(f"MATCH (n:{label}) RETURN n LIMIT 500")
+                  r.close()
+                succeeded += 1
+                logger.info(f"Warmup [{db_name}] properties {label}: ok")
+              except Exception as e:
+                failed += 1
+                logger.warning(f"Warmup [{db_name}] properties {label}: {e}")
+
+            if succeeded == 0 and failed > 0:
+              raise RuntimeError(
+                f"All warmup queries failed for {db_name} ({failed} failures)"
+              )
+
+            logger.info(f"Warmed up {db_name}: {succeeded} ok, {failed} failed")
 
         try:
           await asyncio.to_thread(_do_warmup)
