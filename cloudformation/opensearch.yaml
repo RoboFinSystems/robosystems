@@ -8,6 +8,20 @@ Parameters:
     Default: prod
     AllowedValues: [staging, prod]
 
+
+  # VPC Endpoint (optional — eliminates NAT data transfer costs)
+  VpcEndpointEnabled:
+    Type: String
+    Description: Enable VPC endpoint for private access
+    Default: "false"
+    AllowedValues: ["true", "false"]
+  VpcId:
+    Type: String
+    Description: VPC ID for private endpoint
+  SubnetIds:
+    Type: String
+    Description: Comma-separated private subnet IDs for VPC endpoint
+
   # Monitoring
   SNSAlertEmail:
     Type: String
@@ -25,7 +39,19 @@ Parameters:
     Description: Component tag for resource identification and billing
     Default: OpenSearch
 
+Conditions:
+  HasVpcEndpoint: !Equals [!Ref VpcEndpointEnabled, "true"]
+
 Resources:
+  # VPC Endpoint — optional, eliminates NAT data transfer costs (~$7.30/month per AZ)
+  VpcEndpoint:
+    Type: AWS::OpenSearchServerless::VpcEndpoint
+    Condition: HasVpcEndpoint
+    Properties:
+      Name: !Sub "robosystems-${Environment}"
+      VpcId: !Ref VpcId
+      SubnetIds: !Split [",", !Ref SubnetIds]
+
   # Encryption Policy — required before collection creation
   EncryptionPolicy:
     Type: AWS::OpenSearchServerless::SecurityPolicy
@@ -43,28 +69,47 @@ Resources:
           "AWSOwnedKey": true
         }
 
-  # Network Policy — public access (simplest; VPC endpoint can be added later)
+  # Network Policy — public access by default, private via VPC endpoint when enabled
   NetworkPolicy:
     Type: AWS::OpenSearchServerless::SecurityPolicy
     Properties:
       Name: !Sub "robosystems-${Environment}-net"
       Type: network
-      Policy: !Sub >
-        [
-          {
-            "Rules": [
+      Policy: !If
+        - HasVpcEndpoint
+        - !Sub >
+            [
               {
-                "ResourceType": "collection",
-                "Resource": ["collection/robosystems-${Environment}"]
-              },
-              {
-                "ResourceType": "dashboard",
-                "Resource": ["collection/robosystems-${Environment}"]
+                "Rules": [
+                  {
+                    "ResourceType": "collection",
+                    "Resource": ["collection/robosystems-${Environment}"]
+                  },
+                  {
+                    "ResourceType": "dashboard",
+                    "Resource": ["collection/robosystems-${Environment}"]
+                  }
+                ],
+                "AllowFromPublic": true,
+                "SourceVPCEs": ["${VpcEndpoint}"]
               }
-            ],
-            "AllowFromPublic": true
-          }
-        ]
+            ]
+        - !Sub >
+            [
+              {
+                "Rules": [
+                  {
+                    "ResourceType": "collection",
+                    "Resource": ["collection/robosystems-${Environment}"]
+                  },
+                  {
+                    "ResourceType": "dashboard",
+                    "Resource": ["collection/robosystems-${Environment}"]
+                  }
+                ],
+                "AllowFromPublic": true
+              }
+            ]
 
   # Data Access Policy — grants API, Dagster, and GitHub Actions roles access
   # Uses account root principal so any IAM role in the account with aoss:*

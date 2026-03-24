@@ -157,11 +157,13 @@ class OpenSearchClient:
     try:
       if self.is_serverless:
         # AOSS: indices.exists() may not work reliably; try-create instead
+        from opensearchpy.exceptions import RequestError
+
         try:
           self.client.indices.create(index=self.index_name, body=INDEX_MAPPING)
           logger.info(f"Created AOSS index: {self.index_name}")
-        except Exception as e:
-          if "resource_already_exists_exception" in str(e).lower():
+        except RequestError as e:
+          if e.error == "resource_already_exists_exception":
             logger.debug(f"AOSS index already exists: {self.index_name}")
           else:
             raise
@@ -486,12 +488,42 @@ class OpenSearchClient:
       raise
 
   def delete_by_graph_id(self, graph_id: str) -> int:
-    """Delete all documents for a graph_id. Used for graph cleanup."""
-    result = self.client.delete_by_query(
-      index=self.index_name,
-      body={"query": {"term": {"graph_id": graph_id}}},
-    )
-    deleted = result.get("deleted", 0)
+    """Delete all documents for a graph_id. Used for graph cleanup.
+
+    On AOSS VECTOR_SEARCH collections, _delete_by_query is not supported.
+    Falls back to scroll-and-bulk-delete pattern.
+    """
+    if not self.is_serverless:
+      result = self.client.delete_by_query(
+        index=self.index_name,
+        body={"query": {"term": {"graph_id": graph_id}}},
+      )
+      deleted = result.get("deleted", 0)
+      logger.info(f"Deleted {deleted} documents for graph_id={graph_id}")
+      return deleted
+
+    # AOSS: scroll and bulk delete by _id
+    deleted = 0
+    while True:
+      result = self.client.search(
+        index=self.index_name,
+        body={
+          "query": {"term": {"graph_id": graph_id}},
+          "size": 500,
+          "_source": False,
+        },
+      )
+      hits = result.get("hits", {}).get("hits", [])
+      if not hits:
+        break
+      actions = [
+        {"_op_type": "delete", "_index": self.index_name, "_id": h["_id"]} for h in hits
+      ]
+      from opensearchpy.helpers import bulk
+
+      success, _ = bulk(self.client, actions, raise_on_error=False)
+      deleted += success
+
     logger.info(f"Deleted {deleted} documents for graph_id={graph_id}")
     return deleted
 
