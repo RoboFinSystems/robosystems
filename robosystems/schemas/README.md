@@ -71,7 +71,6 @@ The base schema (`base.py`) provides foundational nodes and relationships that a
 | **Entity**        | Organizations, companies, subsidiaries | identifier, cik, ticker, name, entity_type     |
 | **Period**        | Time periods for data                  | start_date, end_date, fiscal_year, period_type |
 | **Unit**          | Measurement units                      | measure, value, numerator_uri                  |
-| **Connection**    | External system integrations           | provider, connection_id, status                |
 | **Element**       | XBRL taxonomy elements                 | qname, period_type, is_numeric                 |
 | **Label**         | Human-readable element labels          | value, type, language                          |
 | **Reference**     | Authoritative element references       | value, type                                    |
@@ -79,8 +78,6 @@ The base schema (`base.py`) provides foundational nodes and relationships that a
 
 ### Core Relationships
 
-- **USER_HAS_ACCESS** → Entity: Access control and permissions
-- **ENTITY_HAS_CONNECTION** → Connection: External integrations
 - **ENTITY_OWNS_ENTITY** → Entity: Hierarchical ownership
 - **ELEMENT_HAS_LABEL** → Label: Human-readable descriptions
 - **ELEMENT_IN_TAXONOMY** → Taxonomy: Taxonomy membership

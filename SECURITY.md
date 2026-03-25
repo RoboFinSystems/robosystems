@@ -101,7 +101,7 @@ Security controls implemented at the infrastructure, application, and data level
 - AWS Secrets Manager integration with hierarchical secret organization
 - Base secret (`robosystems/{env}`) plus extension secrets (`robosystems/{env}/{component}`)
 - TTL-based caching (1-hour default) with two-level LRU + timestamp cache
-- 40+ secrets mapped (JWT, database, S3, Stripe, Intuit, Plaid, etc.)
+- 40+ secrets mapped (JWT, database, S3, Stripe, Intuit, etc.)
 - Graceful fallback to environment variables in development
 
 ### Secrets Rotation
@@ -348,6 +348,7 @@ Production environment enforces at startup:
 - All third-party APIs use encrypted connections
 - OAuth 2.0 for QuickBooks integration
 - Read-only access for SEC EDGAR data
+
 
 ## Security Testing
 

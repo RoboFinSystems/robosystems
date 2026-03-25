@@ -17,9 +17,6 @@ _LAZY_IMPORTS = {
   "SECClient": "robosystems.adapters.sec",
   "XBRLDuckDBGraphProcessor": "robosystems.adapters.sec",
   "XBRLGraphProcessor": "robosystems.adapters.sec",
-  # Plaid
-  "PlaidClient": "robosystems.adapters.plaid",
-  "PlaidTransactionsProcessor": "robosystems.adapters.plaid",
   # QuickBooks
   "QBClient": "robosystems.adapters.quickbooks",
   "QBTransactionsProcessor": "robosystems.adapters.quickbooks",

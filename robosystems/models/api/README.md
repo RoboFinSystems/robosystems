@@ -52,7 +52,7 @@ This directory centralizes all Pydantic models used for:
 
 ### Integration & Connectivity
 
-- **`connection.py`** - External service connections (SEC, QuickBooks, Plaid)
+- **`connection.py`** - External service connections (SEC, QuickBooks)
 - **`mcp.py`** - Model Context Protocol for AI interactions
 - **`agent.py`** - AI agent requests and responses
 

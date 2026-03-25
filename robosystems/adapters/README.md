@@ -6,7 +6,7 @@ This directory contains external service integrations that connect RoboSystems t
 
 **Shared repository adapters** (e.g., SEC) serve platform-wide public data. They include a `manifest.py` that declares identity, billing plans, rate limits, endpoint access, and credit costs. The manifest is the single source of truth — the registry in `config/shared_repositories.py` collects manifests and provides the query API used by billing, middleware, and operations.
 
-**Private adapters** (e.g., QuickBooks, Plaid) integrate with per-user external services. They have clients and processors but no manifest, since they operate on individual user graphs rather than shared platform data.
+**Private adapters** (e.g., QuickBooks) integrate with per-user external services. They have clients and processors but no manifest, since they operate on individual user graphs rather than shared platform data.
 
 ## Directory Structure
 
@@ -66,19 +66,12 @@ adapters/
 │       ├── materialize.py       # LadybugDB materialization assets
 │       ├── jobs.py              # 12 SEC job definitions
 │       └── sensors.py           # 6 sensors + 1 schedule
-├── quickbooks/                  # QuickBooks adapter (private, stubbed)
-│   ├── __init__.py              # QuickBooks adapter exports
-│   ├── client/                  # QuickBooks API client
-│   │   └── api.py               # OAuth client
-│   └── processors/              # Transaction processing
-│       ├── transactions.py      # Transaction sync (stubbed)
-│       └── uri_utils.py         # URI generation utilities
-└── plaid/                       # Plaid adapter (private, stubbed)
-    ├── __init__.py              # Plaid adapter exports
-    ├── client/                  # Plaid API client
-    │   └── api.py               # PlaidClient
-    └── processors/              # Banking data transformation
-        ├── transactions.py      # PlaidTransactionsProcessor
+└── quickbooks/                  # QuickBooks adapter (private, stubbed)
+    ├── __init__.py              # QuickBooks adapter exports
+    ├── client/                  # QuickBooks API client
+    │   └── api.py               # OAuth client
+    └── processors/              # Transaction processing
+        ├── transactions.py      # Transaction sync (stubbed)
         └── uri_utils.py         # URI generation utilities
 ```
 
@@ -160,23 +153,6 @@ from robosystems.adapters.quickbooks import (
 client = QBClient(realm_id="123456", qb_credentials=credentials)
 ```
 
-### Plaid (`plaid/`) — Private
-
-Banking and financial institution connections:
-
-```python
-from robosystems.adapters.plaid import (
-    PlaidClient,                 # Plaid API client
-    PlaidTransactionsProcessor,  # Transaction sync to graph
-    plaid_account_element_uri,   # URI generation utilities
-)
-
-# Initialize Plaid client with access token
-client = PlaidClient(access_token="access-sandbox-xxx")
-accounts = client.get_accounts()
-transactions = client.sync_transactions(cursor=None)
-```
-
 ## Usage with Dagster
 
 Adapters are used by Dagster assets to process data:
@@ -195,7 +171,7 @@ For local development:
 just sec-load NVDA 2025    # Load company via Dagster pipeline
 ```
 
-**Note:** Currently only the SEC adapter has active Dagster assets. QuickBooks and Plaid adapters are stubbed for future implementation.
+**Note:** Currently only the SEC adapter has active Dagster assets. The QuickBooks adapter is stubbed for future implementation.
 
 ## Adding New Adapters
 
@@ -215,7 +191,7 @@ For platform-wide public data sources (like SEC):
 
 ### Private Adapter
 
-For per-user external service integrations (like QuickBooks, Plaid):
+For per-user external service integrations (like QuickBooks):
 
 1. Create directory: `adapters/{service_name}/`
 2. Add client module: `client/{api}.py`
@@ -233,7 +209,6 @@ The adapter directory structure is designed as a **merge boundary** for forks. C
 adapters/
 ├── sec/                 # ← Upstream maintains, shared repository
 ├── quickbooks/          # ← Upstream maintains, stubbed
-├── plaid/               # ← Upstream maintains, stubbed
 │
 └── custom_*/            # ← Fork namespace (upstream NEVER touches)
     ├── custom_erp/      #    Your custom ERP integration

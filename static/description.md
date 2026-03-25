@@ -6,7 +6,7 @@ RoboSystems is a knowledge graph platform for enterprise financial and operation
 - **Multi-Tenant Architecture**: Isolated database instances with tier-based resource allocation
 - **AI Agent Integration**: MCP (Model Context Protocol) support enables AI agents to query and analyze your knowledge graphs
 - **DuckDB Staging**: High-performance data validation and bulk ingestion pipeline with Parquet optimization
-- **Data Integration**: Connect QuickBooks, Plaid banking, and SEC XBRL filings in a unified graph
+- **Data Integration**: Connect QuickBooks and SEC XBRL filings in a unified graph
 - **Shared Repositories**: Access to curated SEC filing data and other shared knowledge graphs
 
 ## API Modules
@@ -29,7 +29,7 @@ RoboSystems is a knowledge graph platform for enterprise financial and operation
 
 - **SEC Filings**: Process XBRL documents and build filing knowledge graphs
 - **QuickBooks**: Sync transactions, accounts, and financial reports
-- **Plaid**: Import bank transactions and account balances
+
 
 ### User & Access
 
