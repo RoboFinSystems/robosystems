@@ -49,7 +49,6 @@ from .duckdb_s3_publish import (
   sec_duckdb_s3_published,
   sec_historical_duckdb_s3_published,
 )
-from .entity_update import sec_entity_incremental_update
 from .materialize import (
   sec_graph_materialized,
   sec_historical_materialized,
@@ -289,43 +288,6 @@ sec_historical_staged_materialize_job = define_asset_job(
     "ecs/cpu": "512",
     "ecs/memory": "2048",
     "ecs/ephemeral_storage": "21",
-    "ecs/run_task_kwargs": {
-      "capacityProviderStrategy": [
-        {"capacityProvider": "FARGATE", "weight": 1, "base": 1},
-      ],
-    },
-  },
-)
-
-
-# ============================================================================
-# Phase 3d: Entity Update (Update Mutable Entity Attributes)
-# ============================================================================
-# Updates existing Entity nodes with latest attribute values.
-# Entity nodes are unique in being mutable - company names, tickers,
-# filer categories can change over time.
-#
-# Materialization rebuilds the graph from DuckDB but cannot update existing
-# Entity nodes with changed attributes. This job uses Cypher MERGE to update
-# existing Entity nodes with latest values.
-#
-# Typically 50-200 entities change per quarter. MERGE is 40x slower than COPY,
-# but acceptable for small update volumes.
-#
-# Chain: process → stage → materialize → entity_update → S3 sync
-
-sec_entity_update_job = define_asset_job(
-  name="sec_entity_update",
-  description="Update mutable Entity attributes via Cypher MERGE.",
-  selection=AssetSelection.assets(sec_entity_incremental_update),
-  tags={
-    "pipeline": "sec",
-    "mode": "entity_update",
-    # Light profile: HTTP orchestration to Graph API
-    "ecs/cpu": "512",
-    "ecs/memory": "2048",
-    "ecs/ephemeral_storage": "21",
-    # On-demand to avoid interruptions (long-running orchestration)
     "ecs/run_task_kwargs": {
       "capacityProviderStrategy": [
         {"capacityProvider": "FARGATE", "weight": 1, "base": 1},

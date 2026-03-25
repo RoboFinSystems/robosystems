@@ -48,8 +48,6 @@ from .models import (
   CHUNKED_MATERIALIZATION_TIMEOUT,
   DEFAULT_MATERIALIZATION_TIMEOUT,
   DEFAULT_STAGING_TIMEOUT,
-  ENTITY_UPDATE_BATCH_SIZE,
-  ENTITY_UPDATE_TIMEOUT,
   INCREMENTAL_COPY_TIMEOUT,
   LARGE_MATERIALIZATION_TIMEOUT,
   LARGE_STAGING_TABLES,
@@ -58,7 +56,6 @@ from .models import (
   STAGING_MAX_RETRIES,
   STAGING_RETRY_BACKOFF_BASE,
   # Result models
-  EntityUpdateResult,
   MaterializeResult,
   ProgressCallback,
   StagingResult,
@@ -120,8 +117,6 @@ __all__ = [
   "CHUNKED_MATERIALIZATION_TIMEOUT",
   "DEFAULT_MATERIALIZATION_TIMEOUT",
   "DEFAULT_STAGING_TIMEOUT",
-  "ENTITY_UPDATE_BATCH_SIZE",
-  "ENTITY_UPDATE_TIMEOUT",
   "INCREMENTAL_COPY_TIMEOUT",
   "LARGE_MATERIALIZATION_TIMEOUT",
   # Constants (commonly referenced)
@@ -132,7 +127,6 @@ __all__ = [
   "STAGING_RETRY_BACKOFF_BASE",
   # Main processor classes
   "DuckDBStager",  # Stage 1: DuckDB staging
-  "EntityUpdateResult",
   "LadybugMaterializer",  # Stage 2: LadybugDB materialization
   "MaterializeResult",
   # Callback type

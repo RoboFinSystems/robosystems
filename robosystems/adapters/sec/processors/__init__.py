@@ -49,7 +49,6 @@ from .ids import (
   safe_concat,
 )
 from .ingestion import (
-  EntityUpdateResult,
   MaterializeResult,
   StagingResult,
   TableInfo,
@@ -76,8 +75,6 @@ __all__ = [
   "XBRL_GRAPH_PROCESSOR_VERSION",
   # DataFrame management
   "DataFrameManager",
-  # Entity update result
-  "EntityUpdateResult",
   "IngestTableInfo",
   # Staging result models
   "MaterializeResult",

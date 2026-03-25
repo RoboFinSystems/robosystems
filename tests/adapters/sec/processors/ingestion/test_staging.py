@@ -404,7 +404,7 @@ class TestStageIncrementalToDuckDB:
     mock_patterns,
     mock_sleep,
   ):
-    """Successful incremental insert returns updated row counts."""
+    """Successful incremental Entity upsert uses DELETE+INSERT strategy."""
     mock_env.SHARED_PROCESSED_BUCKET = "test-bucket"
 
     mock_context.get_all_table_names_for_context.return_value = {
@@ -414,11 +414,12 @@ class TestStageIncrementalToDuckDB:
 
     mock_client = AsyncMock()
     mock_client.list_tables.return_value = [{"table_name": "Entity"}]
-    mock_client.insert_into_table.return_value = {
+    mock_client.create_table.return_value = {
       "status": "success",
       "result": {"row_count": 50},
-      "duration_seconds": 2.0,
     }
+    mock_client.query_table.return_value = {"rows": [[50]]}
+    mock_client.delete_table.return_value = None
     mock_get_client.return_value = mock_client
 
     mock_patterns.return_value = [
@@ -433,6 +434,12 @@ class TestStageIncrementalToDuckDB:
     assert result.status == "success"
     assert "Entity" in result.table_names
     assert result.total_rows == 50
+
+    # Entity should use create_table (temp), query_table (DELETE+INSERT+COUNT),
+    # and delete_table (cleanup) — NOT insert_into_table
+    mock_client.create_table.assert_called_once()
+    mock_client.insert_into_table.assert_not_called()
+    assert mock_client.query_table.call_count == 3  # DELETE, INSERT, COUNT
 
   @pytest.mark.asyncio
   @patch("robosystems.adapters.sec.processors.ingestion.staging.asyncio.sleep")
@@ -502,11 +509,12 @@ class TestStageIncrementalToDuckDB:
     mock_client = AsyncMock()
     # Only Entity exists in DuckDB
     mock_client.list_tables.return_value = [{"table_name": "Entity"}]
-    mock_client.insert_into_table.return_value = {
+    mock_client.create_table.return_value = {
       "status": "success",
       "result": {"row_count": 10},
-      "duration_seconds": 0.5,
     }
+    mock_client.query_table.return_value = {"rows": [[10]]}
+    mock_client.delete_table.return_value = None
     mock_get_client.return_value = mock_client
 
     mock_patterns.return_value = [
@@ -522,6 +530,191 @@ class TestStageIncrementalToDuckDB:
     assert "Entity" in result.table_names
     assert "NewTable" in result.table_names
     assert result.tables["NewTable"].skipped is True
+
+  @pytest.mark.asyncio
+  @patch("robosystems.adapters.sec.processors.ingestion.staging.asyncio.sleep")
+  @patch("robosystems.adapters.sec.processors.ingestion.staging.s3_get_table_patterns")
+  @patch("robosystems.adapters.sec.processors.ingestion.staging.RoboLedgerContext")
+  @patch("robosystems.adapters.sec.processors.ingestion.staging.get_graph_client")
+  @patch("robosystems.adapters.sec.processors.ingestion.staging.S3Client")
+  @patch("robosystems.adapters.sec.processors.ingestion.staging.env")
+  async def test_entity_upsert_no_files_skips(
+    self,
+    mock_env,
+    mock_s3_client,
+    mock_get_client,
+    mock_context,
+    mock_patterns,
+    mock_sleep,
+  ):
+    """Entity upsert with no files found is skipped."""
+    mock_env.SHARED_PROCESSED_BUCKET = "test-bucket"
+    mock_context.get_all_table_names_for_context.return_value = {"Entity": "nodes"}
+    mock_context.SEC_REPOSITORY = "sec"
+
+    mock_client = AsyncMock()
+    mock_client.list_tables.return_value = [{"table_name": "Entity"}]
+    mock_client.create_table.return_value = {
+      "status": "failed",
+      "error": "No files found",
+    }
+    mock_get_client.return_value = mock_client
+
+    mock_patterns.return_value = [
+      "s3://test-bucket/sec/processed/filed=2024-Q1/nodes/Entity/*.parquet"
+    ]
+
+    from robosystems.adapters.sec.processors.ingestion.staging import DuckDBStager
+
+    stager = DuckDBStager()
+    result = await stager.stage_incremental_to_duckdb(year=2024, quarter=1)
+
+    assert result.status == "success"
+    assert result.tables["Entity"].skipped is True
+
+  @pytest.mark.asyncio
+  @patch("robosystems.adapters.sec.processors.ingestion.staging.asyncio.sleep")
+  @patch("robosystems.adapters.sec.processors.ingestion.staging.s3_get_table_patterns")
+  @patch("robosystems.adapters.sec.processors.ingestion.staging.RoboLedgerContext")
+  @patch("robosystems.adapters.sec.processors.ingestion.staging.get_graph_client")
+  @patch("robosystems.adapters.sec.processors.ingestion.staging.S3Client")
+  @patch("robosystems.adapters.sec.processors.ingestion.staging.env")
+  async def test_entity_upsert_cleanup_on_error(
+    self,
+    mock_env,
+    mock_s3_client,
+    mock_get_client,
+    mock_context,
+    mock_patterns,
+    mock_sleep,
+  ):
+    """Entity upsert cleans up temp table on error."""
+    mock_env.SHARED_PROCESSED_BUCKET = "test-bucket"
+    mock_context.get_all_table_names_for_context.return_value = {"Entity": "nodes"}
+    mock_context.SEC_REPOSITORY = "sec"
+
+    mock_client = AsyncMock()
+    mock_client.list_tables.return_value = [{"table_name": "Entity"}]
+    mock_client.create_table.return_value = {
+      "status": "success",
+      "result": {"row_count": 50},
+    }
+    # DELETE query fails
+    mock_client.query_table.side_effect = Exception("DuckDB connection error")
+    mock_client.delete_table.return_value = None
+    mock_get_client.return_value = mock_client
+
+    mock_patterns.return_value = [
+      "s3://test-bucket/sec/processed/filed=2024-Q1/nodes/Entity/*.parquet"
+    ]
+
+    from robosystems.adapters.sec.processors.ingestion.staging import DuckDBStager
+
+    stager = DuckDBStager()
+    result = await stager.stage_incremental_to_duckdb(year=2024, quarter=1)
+
+    # Should fail but temp table should be cleaned up
+    assert result.status == "partial"
+    # delete_table is called at least once for temp cleanup
+    mock_client.delete_table.assert_called()
+
+  @pytest.mark.asyncio
+  @patch("robosystems.adapters.sec.processors.ingestion.staging.asyncio.sleep")
+  @patch("robosystems.adapters.sec.processors.ingestion.staging.s3_get_table_patterns")
+  @patch("robosystems.adapters.sec.processors.ingestion.staging.RoboLedgerContext")
+  @patch("robosystems.adapters.sec.processors.ingestion.staging.get_graph_client")
+  @patch("robosystems.adapters.sec.processors.ingestion.staging.S3Client")
+  @patch("robosystems.adapters.sec.processors.ingestion.staging.env")
+  async def test_non_entity_uses_insert_into_table(
+    self,
+    mock_env,
+    mock_s3_client,
+    mock_get_client,
+    mock_context,
+    mock_patterns,
+    mock_sleep,
+  ):
+    """Non-Entity tables still use insert_into_table (not upsert)."""
+    mock_env.SHARED_PROCESSED_BUCKET = "test-bucket"
+    mock_context.get_all_table_names_for_context.return_value = {"Fact": "nodes"}
+    mock_context.SEC_REPOSITORY = "sec"
+
+    mock_client = AsyncMock()
+    mock_client.list_tables.return_value = [{"table_name": "Fact"}]
+    mock_client.insert_into_table.return_value = {
+      "status": "success",
+      "result": {"row_count": 100},
+      "duration_seconds": 1.0,
+    }
+    mock_get_client.return_value = mock_client
+
+    mock_patterns.return_value = [
+      "s3://test-bucket/sec/processed/filed=2024-Q1/nodes/Fact/*.parquet"
+    ]
+
+    from robosystems.adapters.sec.processors.ingestion.staging import DuckDBStager
+
+    stager = DuckDBStager()
+    result = await stager.stage_incremental_to_duckdb(year=2024, quarter=1)
+
+    assert result.status == "success"
+    assert result.total_rows == 100
+    mock_client.insert_into_table.assert_called_once()
+    mock_client.create_table.assert_not_called()
+
+  @pytest.mark.asyncio
+  @patch("robosystems.adapters.sec.processors.ingestion.staging.asyncio.sleep")
+  @patch("robosystems.adapters.sec.processors.ingestion.staging.s3_get_table_patterns")
+  @patch("robosystems.adapters.sec.processors.ingestion.staging.RoboLedgerContext")
+  @patch("robosystems.adapters.sec.processors.ingestion.staging.get_graph_client")
+  @patch("robosystems.adapters.sec.processors.ingestion.staging.S3Client")
+  @patch("robosystems.adapters.sec.processors.ingestion.staging.env")
+  async def test_entity_retry_does_not_drop_entity_table(
+    self,
+    mock_env,
+    mock_s3_client,
+    mock_get_client,
+    mock_context,
+    mock_patterns,
+    mock_sleep,
+  ):
+    """On retry, Entity table is NOT dropped (drop_on_retry=False)."""
+    mock_env.SHARED_PROCESSED_BUCKET = "test-bucket"
+    mock_context.get_all_table_names_for_context.return_value = {"Entity": "nodes"}
+    mock_context.SEC_REPOSITORY = "sec"
+
+    call_count = 0
+
+    async def create_table_side_effect(**kwargs):
+      nonlocal call_count
+      call_count += 1
+      if call_count == 1:
+        return {"status": "failed", "error": "Timeout error"}
+      return {"status": "success", "result": {"row_count": 50}}
+
+    mock_client = AsyncMock()
+    mock_client.list_tables.return_value = [{"table_name": "Entity"}]
+    mock_client.create_table.side_effect = create_table_side_effect
+    mock_client.query_table.return_value = {"rows": [[50]]}
+    mock_client.delete_table.return_value = None
+    mock_client.boost_memory.return_value = None
+    mock_get_client.return_value = mock_client
+
+    mock_patterns.return_value = [
+      "s3://test-bucket/sec/processed/filed=2024-Q1/nodes/Entity/*.parquet"
+    ]
+
+    from robosystems.adapters.sec.processors.ingestion.staging import DuckDBStager
+
+    stager = DuckDBStager()
+    result = await stager.stage_incremental_to_duckdb(year=2024, quarter=1)
+
+    assert result.status == "success"
+    # delete_table should only be called for temp cleanup, never for "Entity" itself
+    for call in mock_client.delete_table.call_args_list:
+      args, kwargs = call
+      table_arg = args[1] if len(args) > 1 else kwargs.get("table_name")
+      assert table_arg != "Entity", "Entity table should never be dropped on retry"
 
 
 @pytest.mark.unit

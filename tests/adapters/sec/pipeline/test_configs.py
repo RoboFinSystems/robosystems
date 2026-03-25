@@ -12,7 +12,6 @@ from robosystems.adapters.sec.pipeline.configs import (
   SEC_QUARTERS,
   SEC_START_YEAR,
   SECDownloadConfig,
-  SECEntityUpdateConfig,
   SECHistoricalStageConfig,
   SECIncrementalStageConfig,
   SECMaterializeConfig,
@@ -288,21 +287,3 @@ class TestSECMaterializeConfig:
     """Test batch size minimum validation (1,000,000)."""
     with pytest.raises(Exception):
       SECMaterializeConfig(materialization_batch_size=500_000)
-
-
-@pytest.mark.unit
-class TestSECEntityUpdateConfig:
-  """Tests for SECEntityUpdateConfig."""
-
-  def test_default_values(self):
-    """Test default configuration values."""
-    config = SECEntityUpdateConfig()
-    assert config.graph_id == "sec"
-    assert config.year is None
-    assert config.quarter is None
-
-  def test_specific_quarter(self):
-    """Test specific quarter/year."""
-    config = SECEntityUpdateConfig(year=2025, quarter=1)
-    assert config.year == 2025
-    assert config.quarter == 1

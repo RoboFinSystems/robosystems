@@ -22,9 +22,9 @@ Pipeline stages (run independently via separate jobs):
    - sec_historical_materialize job: sec_historical_materialized - Materialize to LadybugDB
 
 4. INCREMENTAL (nightly updates, sec graph only):
-   - sec_duckdb_incremental_staged - Stage current quarter to DuckDB (INSERT with dedup)
+   - sec_duckdb_incremental_staged - Stage current quarter to DuckDB (INSERT with dedup,
+     DELETE+INSERT upsert for Entity)
    - sec_graph_materialized - Full LadybugDB rebuild from DuckDB
-   - sec_entity_incremental_update - Update mutable Entity attributes
 
 5. PUBLISH (post-materialization):
    - sec_lbug_s3_published - Publish raw .lbug to S3 for replica cluster
@@ -65,7 +65,6 @@ from robosystems.adapters.sec.pipeline.configs import (
   SEC_QUARTERS,
   SEC_START_YEAR,
   SECDownloadConfig,
-  SECEntityUpdateConfig,
   SECHistoricalStageConfig,
   SECIncrementalStageConfig,
   SECMaterializeConfig,
@@ -78,25 +77,10 @@ from robosystems.adapters.sec.pipeline.duckdb_s3_publish import (
   sec_duckdb_s3_published,
   sec_historical_duckdb_s3_published,
 )
-
-# Entity sync pipeline (connection-based, per-user graph)
-from robosystems.adapters.sec.pipeline.entity_sync import (
-  get_dagster_components as get_entity_sync_components,
-)
-from robosystems.adapters.sec.pipeline.entity_sync import (
-  sec_entity_extract,
-  sec_entity_load,
-  sec_entity_sync_job,
-  sec_entity_transform,
-)
-from robosystems.adapters.sec.pipeline.entity_update import (
-  sec_entity_incremental_update,
-)
 from robosystems.adapters.sec.pipeline.jobs import (
   sec_artifact_generation_job,
   sec_download_job,
   sec_duckdb_s3_publish_job,
-  sec_entity_update_job,
   sec_historical_duckdb_s3_publish_job,
   sec_historical_lbug_s3_publish_job,
   sec_historical_materialize_job,
@@ -152,17 +136,17 @@ def get_dagster_components():
   Returns a dictionary with keys: assets, jobs, sensors, schedules.
   Used by dagster/definitions.py to collect SEC pipeline components.
   """
-  # Get entity sync components
-  entity_sync = get_entity_sync_components()
-
   return {
+    "shared_replica_deps": [
+      "sec_lbug_s3_published",
+      "sec_historical_lbug_s3_published",
+    ],
     "assets": [
       sec_raw_filings,
       sec_processed_filings,
       sec_duckdb_staged,
       sec_historical_duckdb_staged,
       sec_duckdb_incremental_staged,
-      sec_entity_incremental_update,
       sec_graph_materialized,
       sec_historical_materialized,
       sec_lbug_s3_published,
@@ -172,7 +156,6 @@ def get_dagster_components():
       sec_lbug_r2_published,
       sec_vector_s3_published,
       sec_knowledge_artifacts,
-      *entity_sync["assets"],
       sec_textblocks_indexed,
       sec_narratives_indexed,
       sec_ixbrl_disclosures_indexed,
@@ -187,7 +170,6 @@ def get_dagster_components():
       sec_historical_materialize_job,
       sec_historical_staged_materialize_job,
       sec_incremental_stage_job,
-      sec_entity_update_job,
       sec_lbug_s3_publish_job,
       sec_duckdb_s3_publish_job,
       sec_historical_duckdb_s3_publish_job,
@@ -195,7 +177,6 @@ def get_dagster_components():
       sec_vector_s3_publish_job,
       sec_artifact_generation_job,
       sec_historical_lbug_s3_publish_job,
-      *entity_sync["jobs"],
       sec_textblocks_index_job,
       sec_narratives_index_job,
       sec_ixbrl_index_job,
@@ -204,14 +185,12 @@ def get_dagster_components():
       sec_processing_sensor,
       sec_incremental_pipeline_sensor,
       sec_stage_to_materialize_sensor,
-      *entity_sync["sensors"],
       sec_post_materialize_publish_sensor,
       sec_post_stage_index_sensor,
       sec_index_retry_sensor,
     ],
     "schedules": [
       sec_incremental_download_schedule,
-      *entity_sync["schedules"],
     ],
   }
 
@@ -225,7 +204,6 @@ __all__ = [
   "SEC_START_YEAR",
   "SECArtifactConfig",
   "SECDownloadConfig",
-  "SECEntityUpdateConfig",
   "SECHistoricalStageConfig",
   "SECIncrementalStageConfig",
   "SECMaterializeConfig",
@@ -238,13 +216,6 @@ __all__ = [
   "sec_duckdb_s3_publish_job",
   "sec_duckdb_s3_published",
   "sec_duckdb_staged",
-  # Entity sync pipeline
-  "sec_entity_extract",
-  "sec_entity_incremental_update",
-  "sec_entity_load",
-  "sec_entity_sync_job",
-  "sec_entity_transform",
-  "sec_entity_update_job",
   "sec_graph_materialized",
   "sec_historical_duckdb_s3_publish_job",
   "sec_historical_duckdb_s3_published",

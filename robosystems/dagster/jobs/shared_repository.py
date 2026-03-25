@@ -26,16 +26,14 @@ from dagster import (
 )
 
 from robosystems.config import env
-from robosystems.dagster.assets.shared_repositories.replicas import (
-  shared_replicas_refreshed,
-)
 
 # Asset job: materializes shared_replicas_refreshed asset.
-# Used by sec_post_materialize_publish_sensor to keep asset lineage accurate.
+# Uses AssetSelection.key() because the asset is built dynamically by
+# build_shared_replicas_refreshed() in definitions.py with adapter-specific deps.
 shared_replicas_refresh_job = define_asset_job(
   name="shared_replicas_refresh",
   description="Refresh shared replica fleet (materializes shared_replicas_refreshed asset).",
-  selection=AssetSelection.assets(shared_replicas_refreshed),
+  selection=AssetSelection.keys("shared_replicas_refreshed"),
   tags={
     "pipeline": "shared",
     "phase": "replica_refresh",

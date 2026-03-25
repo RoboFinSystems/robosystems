@@ -577,6 +577,14 @@ class EnvConfig:
     get_parameter_value("LEDGER_ENABLED", "false").lower() == "true",
   )
 
+  # --- Adapter Pipelines (Dagster) ---
+  # Controls whether adapter-specific Dagster assets, jobs, sensors, and schedules
+  # are loaded into the Dagster definitions. Disabling gives a clean Dagster slate.
+  SEC_PIPELINE_ENABLED = get_bool_env(
+    "SEC_PIPELINE_ENABLED",
+    get_parameter_value("SEC_PIPELINE_ENABLED", "true").lower() == "true",
+  )
+
   # ==========================================================================
   # 3. GRAPH DATABASES - MULTI-BACKEND (LADYBUGDB AND NEO4J)
   # ==========================================================================
