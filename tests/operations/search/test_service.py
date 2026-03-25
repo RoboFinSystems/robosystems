@@ -14,16 +14,17 @@ def mock_client():
 
 
 @pytest.fixture
-def mock_enricher():
-  enricher = MagicMock()
-  enricher.embed_batch.return_value = [[0.1] * 384]
-  return enricher
+def mock_embedding_service():
+  svc = MagicMock()
+  svc.embed_single.return_value = [0.1] * 384
+  svc.embed_batch.return_value = [[0.1] * 384]
+  return svc
 
 
 @pytest.fixture
-def service(mock_client, mock_enricher):
+def service(mock_client, mock_embedding_service):
   svc = SearchService(mock_client)
-  svc._enricher = mock_enricher
+  svc._embedding_service = mock_embedding_service
   return svc
 
 
@@ -59,16 +60,16 @@ class TestSearchDocuments:
     assert response.hits[0].snippet == "...tariff risk exposure..."
     assert response.hits[0].entity_ticker == "NVDA"
 
-  def test_always_embeds_query(self, service, mock_client, mock_enricher):
+  def test_always_embeds_query(self, service, mock_client, mock_embedding_service):
     """Hybrid search always generates embeddings."""
     mock_client.search.return_value = {"hits": {"total": {"value": 0}, "hits": []}}
 
     request = SearchRequest(query="supply chain risk")
     service.search_documents("sec", request)
 
-    mock_enricher.embed_batch.assert_called_once_with(["supply chain risk"])
+    mock_embedding_service.embed_single.assert_called_once_with("supply chain risk")
 
-  def test_passes_embedding_to_client(self, service, mock_client, mock_enricher):
+  def test_passes_embedding_to_client(self, service, mock_client):
     mock_client.search.return_value = {"hits": {"total": {"value": 0}, "hits": []}}
 
     request = SearchRequest(query="test")

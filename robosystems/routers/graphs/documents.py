@@ -45,20 +45,24 @@ def _block_shared_repository(graph_id: str) -> None:
     )
 
 
-def _resolve_tier(graph_id: str) -> str | None:
-  """Resolve the subscription tier for a graph."""
-  try:
-    from robosystems.middleware.auth.session import SessionFactory
-    from robosystems.models.iam.graph import Graph
+def _resolve_tier(graph_id: str) -> str:
+  """Resolve the subscription tier for a graph. Raises 500 on failure."""
+  from robosystems.middleware.auth.session import SessionFactory
+  from robosystems.models.iam.graph import Graph
 
-    session = SessionFactory()
-    try:
-      graph = Graph.get_by_id(graph_id, session)
-      return graph.graph_tier if graph else None
-    finally:
-      session.close()
-  except Exception:
-    return None
+  session = SessionFactory()
+  try:
+    graph = Graph.get_by_id(graph_id, session)
+    if graph is None or graph.graph_tier is None:
+      raise HTTPException(500, "Unable to determine subscription tier")
+    return graph.graph_tier
+  except HTTPException:
+    raise
+  except Exception as e:
+    logger.error(f"Tier lookup failed for {graph_id}: {e}")
+    raise HTTPException(500, "Unable to determine subscription tier")
+  finally:
+    session.close()
 
 
 @router.post("", operation_id="upload_document")
