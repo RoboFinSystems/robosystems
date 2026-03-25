@@ -147,7 +147,7 @@ Memories are scoped to the current graph and retrievable via recall-text.""",
   def _resolve_tier(graph_id: str) -> str | None:
     """Resolve subscription tier for a graph."""
     try:
-      from robosystems.middleware.auth.session import SessionFactory
+      from robosystems.database import SessionFactory
       from robosystems.middleware.graph.utils import parse_subgraph_id
       from robosystems.models.iam.graph import Graph
 

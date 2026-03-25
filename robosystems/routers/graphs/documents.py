@@ -47,7 +47,7 @@ def _block_shared_repository(graph_id: str) -> None:
 
 def _resolve_tier(graph_id: str) -> str:
   """Resolve the subscription tier for a graph. Raises 500 on failure."""
-  from robosystems.middleware.auth.session import SessionFactory
+  from robosystems.database import SessionFactory
   from robosystems.models.iam.graph import Graph
 
   session = SessionFactory()
