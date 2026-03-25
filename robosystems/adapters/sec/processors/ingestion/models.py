@@ -117,34 +117,6 @@ class MaterializeResult:
     }
 
 
-@dataclass
-class EntityUpdateResult:
-  """Result from update_entities_from_s3() operation.
-
-  Contains statistics about Entity node updates using MERGE queries.
-  """
-
-  status: str  # "success", "partial", "error", "no_changes"
-  entities_checked: int = 0  # Total entities in latest parquet
-  entities_updated: int = 0  # Entities with actual changes
-  entities_unchanged: int = 0  # Entities with no changes (skipped)
-  entities_failed: int = 0  # Entities that failed to update
-  duration_ms: float = 0.0
-  error: str | None = None
-
-  def to_dict(self) -> dict[str, Any]:
-    """Convert to dictionary for metadata output."""
-    return {
-      "status": self.status,
-      "entities_checked": self.entities_checked,
-      "entities_updated": self.entities_updated,
-      "entities_unchanged": self.entities_unchanged,
-      "entities_failed": self.entities_failed,
-      "duration_ms": self.duration_ms,
-      "error": self.error,
-    }
-
-
 # =============================================================================
 # Progress Callback Type
 # =============================================================================
@@ -177,13 +149,6 @@ CHUNKED_MATERIALIZATION_TIMEOUT = 2400  # 40 min per 20M row batch
 # - Direct S3 → LadybugDB COPY with ignore_errors, ~200K-400K rows/minute
 # - Memory efficient (spill_to_disk), network I/O bound
 INCREMENTAL_COPY_TIMEOUT = 600  # 10 min per table - incremental updates
-#
-# Entity update timeouts:
-# - MERGE queries are 40x slower than COPY (~200ms per entity)
-# - Only runs for entities with actual changes (typically 50-200 per quarter)
-# - 5 min should handle up to ~1500 entity updates (worst case)
-ENTITY_UPDATE_TIMEOUT = 300  # 5 min for batch MERGE operations
-ENTITY_UPDATE_BATCH_SIZE = 100  # Entities per MERGE query batch
 
 # Chunked materialization settings for large tables
 # RE-ENABLED (2026-01-31): Direct COPY of 200M+ row tables causes OOM on r7g.2xlarge

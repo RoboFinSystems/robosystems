@@ -21,12 +21,12 @@ from robosystems.dagster.assets.graphs import (
 )
 from robosystems.dagster.assets.shared_repositories import (
   SharedReplicaRefreshConfig,
-  shared_replicas_refreshed,
+  build_shared_replicas_refreshed,
 )
 
 __all__ = [
   "SharedReplicaRefreshConfig",
-  "shared_replicas_refreshed",
+  "build_shared_replicas_refreshed",
   "user_graph_creation_source",
   "user_graph_file_staging_source",
   "user_graph_materialized_source",

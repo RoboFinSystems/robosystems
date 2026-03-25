@@ -380,21 +380,104 @@ class DuckDBStager:
 
         timeout = get_staging_timeout(table_name)
         table_null_columns = self._get_null_columns(table_name)
-        log_progress(f"[{i}/{total_tables}] INSERT {table_name} (Q{quarter} {year})...")
+        is_entity = table_name == "Entity"
 
-        async def incremental_insert_fn() -> tuple[bool, TableInfo | None, str | None]:
-          try:
-            response = await client.insert_into_table(
-              graph_id=self.graph_id,
-              table_name=table_name,
-              s3_pattern=s3_pattern,
-              timeout=timeout,
-              null_columns=table_null_columns,
-            )
+        if is_entity:
+          # Entity uses DELETE+INSERT (upsert) because its attributes are mutable.
+          # Other tables have immutable data and only need INSERT WHERE NOT EXISTS.
+          log_progress(
+            f"[{i}/{total_tables}] UPSERT {table_name} (Q{quarter} {year})..."
+          )
 
-            if response.get("status") == "failed":
-              error = response.get("error", "Unknown error")
-              if "No files found" in error:
+          async def entity_upsert_fn() -> tuple[bool, TableInfo | None, str | None]:
+            temp_name = f"_entity_upsert_{int(time.monotonic_ns())}"
+            try:
+              create_resp = await client.create_table(
+                graph_id=self.graph_id,
+                table_name=temp_name,
+                s3_pattern=s3_pattern,
+                timeout=timeout,
+              )
+
+              if create_resp.get("status") == "failed":
+                error = create_resp.get("error", "Unknown error")
+                if "No files found" in error:
+                  return (
+                    True,
+                    TableInfo(
+                      name=table_name,
+                      row_count=0,
+                      file_count=0,
+                      staged_at=datetime.now(UTC).isoformat(),
+                      skipped=True,
+                    ),
+                    None,
+                  )
+                try:
+                  await client.delete_table(self.graph_id, temp_name)
+                except Exception as cleanup_err:
+                  logger.debug(f"Could not clean up temp table {temp_name}: {cleanup_err}")
+                return False, None, error
+
+              # DELETE+INSERT is not atomic — if interrupted between steps,
+              # deleted rows are lost but recovered automatically on retry
+              # since the upsert re-creates the temp table from S3.
+              await client.query_table(
+                graph_id=self.graph_id,
+                sql=(
+                  f'DELETE FROM "{table_name}" WHERE identifier IN '
+                  f'(SELECT identifier FROM "{temp_name}")'
+                ),
+                timeout=timeout,
+              )
+
+              # Insert all rows from temp (fresh data replaces deleted rows)
+              await client.query_table(
+                graph_id=self.graph_id,
+                sql=f'INSERT INTO "{table_name}" SELECT * FROM "{temp_name}"',
+                timeout=timeout,
+              )
+
+              # Get row count from temp table
+              count_resp = await client.query_table(
+                graph_id=self.graph_id,
+                sql=f'SELECT COUNT(*) AS cnt FROM "{temp_name}"',
+                timeout=30.0,
+              )
+              row_count = 0
+              rows = count_resp.get("rows", [])
+              if rows:
+                row_count = rows[0][0]
+
+              # Clean up temp table
+              try:
+                await client.delete_table(self.graph_id, temp_name)
+              except Exception as cleanup_err:
+                logger.debug(f"Could not clean up temp table {temp_name}: {cleanup_err}")
+
+              log_progress(
+                f"[{i}/{total_tables}] Upserted {table_name}: "
+                f"{row_count:,} rows (DELETE+INSERT)"
+              )
+
+              return (
+                True,
+                TableInfo(
+                  name=table_name,
+                  row_count=row_count,
+                  file_count=0,
+                  staged_at=datetime.now(UTC).isoformat(),
+                ),
+                None,
+              )
+
+            except Exception as e:
+              try:
+                await client.delete_table(self.graph_id, temp_name)
+              except Exception as cleanup_err:
+                logger.debug(f"Could not clean up temp table {temp_name}: {cleanup_err}")
+              error_str = str(e)
+              if "No files found" in error_str:
                 return (
                   True,
                   TableInfo(
@@ -406,51 +489,88 @@ class DuckDBStager:
                   ),
                   None,
                 )
-              return False, None, error
+              return False, None, error_str
 
-            result_data = response.get("result", {})
-            row_count = result_data.get("row_count", 0)
-            duration = response.get("duration_seconds", 0)
+          stage_fn = entity_upsert_fn
+        else:
+          log_progress(
+            f"[{i}/{total_tables}] INSERT {table_name} (Q{quarter} {year})..."
+          )
 
-            log_progress(
-              f"[{i}/{total_tables}] Inserted {table_name}: "
-              f"{row_count:,} net new rows in {duration:.1f}s"
-            )
+          async def incremental_insert_fn() -> tuple[
+            bool, TableInfo | None, str | None
+          ]:
+            try:
+              response = await client.insert_into_table(
+                graph_id=self.graph_id,
+                table_name=table_name,
+                s3_pattern=s3_pattern,
+                timeout=timeout,
+                null_columns=table_null_columns,
+              )
 
-            return (
-              True,
-              TableInfo(
-                name=table_name,
-                row_count=row_count,
-                file_count=0,
-                staged_at=datetime.now(UTC).isoformat(),
-              ),
-              None,
-            )
+              if response.get("status") == "failed":
+                error = response.get("error", "Unknown error")
+                if "No files found" in error:
+                  return (
+                    True,
+                    TableInfo(
+                      name=table_name,
+                      row_count=0,
+                      file_count=0,
+                      staged_at=datetime.now(UTC).isoformat(),
+                      skipped=True,
+                    ),
+                    None,
+                  )
+                return False, None, error
 
-          except Exception as e:
-            error_str = str(e)
-            if "No files found" in error_str:
+              result_data = response.get("result", {})
+              row_count = result_data.get("row_count", 0)
+              duration = response.get("duration_seconds", 0)
+
+              log_progress(
+                f"[{i}/{total_tables}] Inserted {table_name}: "
+                f"{row_count:,} net new rows in {duration:.1f}s"
+              )
+
               return (
                 True,
                 TableInfo(
                   name=table_name,
-                  row_count=0,
+                  row_count=row_count,
                   file_count=0,
                   staged_at=datetime.now(UTC).isoformat(),
-                  skipped=True,
                 ),
                 None,
               )
-            return False, None, error_str
+
+            except Exception as e:
+              error_str = str(e)
+              if "No files found" in error_str:
+                return (
+                  True,
+                  TableInfo(
+                    name=table_name,
+                    row_count=0,
+                    file_count=0,
+                    staged_at=datetime.now(UTC).isoformat(),
+                    skipped=True,
+                  ),
+                  None,
+                )
+              return False, None, error_str
+
+          stage_fn = incremental_insert_fn
 
         success, table_info, error = await self._stage_table_with_retry(
           table_name=table_name,
-          stage_fn=incremental_insert_fn,
+          stage_fn=stage_fn,
           graph_client=client,
           log_progress=log_progress,
           table_index=i,
           total_tables=total_tables,
+          drop_on_retry=not is_entity,
         )
 
         if success and table_info:
@@ -572,6 +692,7 @@ class DuckDBStager:
     log_progress: ProgressCallback,
     table_index: int,
     total_tables: int,
+    drop_on_retry: bool = True,
   ) -> tuple[bool, TableInfo | None, str | None]:
     """
     Retry wrapper for table staging with exponential backoff.
@@ -585,6 +706,9 @@ class DuckDBStager:
         log_progress: Progress logging callback
         table_index: Current table index for progress display
         total_tables: Total tables for progress display
+        drop_on_retry: Whether to drop the table before retrying (default True).
+            Set to False for tables like Entity where the stage_fn manages its
+            own temp tables and dropping the main table would be destructive.
 
     Returns:
         Tuple of (success, TableInfo or None, error message or None)
@@ -606,12 +730,13 @@ class DuckDBStager:
           f"Retry {attempt + 2}/{STAGING_MAX_RETRIES} in {backoff}s..."
         )
 
-        # Drop partial table before retry
-        try:
-          await graph_client.delete_table(self.graph_id, table_name)
-          logger.debug(f"Dropped partial table {table_name} before retry")
-        except Exception as drop_err:
-          logger.debug(f"Could not drop table {table_name} before retry: {drop_err}")
+        # Drop partial table before retry (skip for tables that manage their own temps)
+        if drop_on_retry:
+          try:
+            await graph_client.delete_table(self.graph_id, table_name)
+            logger.debug(f"Dropped partial table {table_name} before retry")
+          except Exception as drop_err:
+            logger.debug(f"Could not drop table {table_name} before retry: {drop_err}")
 
         # Re-apply DuckDB memory boost before retry. The boost is stored in an
         # in-memory dict on the Graph API — if the container restarted (OOM kill,
