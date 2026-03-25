@@ -258,9 +258,6 @@ class SECTextBlockIndexConfig(Config):
   min_content_length: int = Field(
     default=200, description="Skip text blocks shorter than this after HTML stripping"
   )
-  enable_embeddings: bool = Field(
-    default=True, description="Generate vector embeddings for semantic search"
-  )
   force_reindex: bool = Field(
     default=False, description="Re-index all documents (ignore incremental skip)"
   )
@@ -280,9 +277,6 @@ class SECNarrativeIndexConfig(Config):
   form_types: list[str] = Field(
     default=["10-K", "10-Q"], description="Form types to extract narratives from"
   )
-  enable_embeddings: bool = Field(
-    default=True, description="Generate vector embeddings for semantic search"
-  )
   force_reindex: bool = Field(
     default=False, description="Re-index all documents (ignore incremental skip)"
   )
@@ -301,9 +295,6 @@ class SECiXBRLIndexConfig(Config):
   )
   form_types: list[str] = Field(
     default=["10-K", "10-Q"], description="Form types to extract iXBRL disclosures from"
-  )
-  enable_embeddings: bool = Field(
-    default=True, description="Generate vector embeddings for semantic search"
   )
   force_reindex: bool = Field(
     default=False, description="Re-index all documents (ignore incremental skip)"

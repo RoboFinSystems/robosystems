@@ -522,17 +522,9 @@ class EnvConfig:
     "MCP_VECTOR_SEARCH_ENABLED",
     get_parameter_value("MCP_VECTOR_SEARCH_ENABLED", "false").lower() == "true",
   )
-  TEXT_SEARCH_ENABLED = get_bool_env(
-    "TEXT_SEARCH_ENABLED",
-    get_parameter_value("TEXT_SEARCH_ENABLED", "false").lower() == "true",
-  )
   SEMANTIC_SEARCH_ENABLED = get_bool_env(
     "SEMANTIC_SEARCH_ENABLED",
-    get_parameter_value("SEMANTIC_SEARCH_ENABLED", "true").lower() == "true",
-  )
-  EMBEDDINGS_ENABLED = get_bool_env(
-    "EMBEDDINGS_ENABLED",
-    get_parameter_value("EMBEDDINGS_ENABLED", "true").lower() == "true",
+    get_parameter_value("SEMANTIC_SEARCH_ENABLED", "false").lower() == "true",
   )
 
   # --- OpenSearch ---

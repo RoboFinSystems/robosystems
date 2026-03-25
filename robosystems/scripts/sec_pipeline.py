@@ -219,7 +219,6 @@ class SECPipeline:
         reset_staging: Whether to delete DuckDB file before staging (fresh start)
         rebuild_graph: Whether to rebuild LadybugDB (materialize jobs)
     """
-    from robosystems.config import env
 
     if job_type == "stage":
       # sec_stage job - stages to persistent DuckDB only (Stage 1)
@@ -257,7 +256,6 @@ class SECPipeline:
           "sec_textblocks_indexed": {
             "config": {
               "graph_id": graph_id,
-              "enable_embeddings": env.EMBEDDINGS_ENABLED,
             }
           },
         }
@@ -268,7 +266,6 @@ class SECPipeline:
           "sec_narratives_indexed": {
             "config": {
               "graph_id": graph_id,
-              "enable_embeddings": env.EMBEDDINGS_ENABLED,
             }
           },
         }
@@ -279,7 +276,6 @@ class SECPipeline:
           "sec_ixbrl_disclosures_indexed": {
             "config": {
               "graph_id": graph_id,
-              "enable_embeddings": env.EMBEDDINGS_ENABLED,
             }
           },
         }
