@@ -413,11 +413,15 @@ class DuckDBStager:
                     ),
                     None,
                   )
+                try:
+                  await client.delete_table(self.graph_id, temp_name)
+                except Exception as cleanup_err:
+                  logger.debug(f"Could not clean up temp table {temp_name}: {cleanup_err}")
                 return False, None, error
 
               # DELETE+INSERT is not atomic — if interrupted between steps,
-              # deleted rows are lost until the next full or incremental run.
-              # Acceptable since Entity is small and staging is idempotent.
+              # deleted rows are lost but recovered automatically on retry
+              # since the upsert re-creates the temp table from S3.
               await client.query_table(
                 graph_id=self.graph_id,
                 sql=(
@@ -448,8 +452,8 @@ class DuckDBStager:
               # Clean up temp table
               try:
                 await client.delete_table(self.graph_id, temp_name)
-              except Exception:
-                pass
+              except Exception as cleanup_err:
+                logger.debug(f"Could not clean up temp table {temp_name}: {cleanup_err}")
 
               log_progress(
                 f"[{i}/{total_tables}] Upserted {table_name}: "
@@ -470,8 +474,8 @@ class DuckDBStager:
             except Exception as e:
               try:
                 await client.delete_table(self.graph_id, temp_name)
-              except Exception:
-                pass
+              except Exception as cleanup_err:
+                logger.debug(f"Could not clean up temp table {temp_name}: {cleanup_err}")
               error_str = str(e)
               if "No files found" in error_str:
                 return (

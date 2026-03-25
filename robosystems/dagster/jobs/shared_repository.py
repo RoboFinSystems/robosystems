@@ -33,7 +33,7 @@ from robosystems.config import env
 shared_replicas_refresh_job = define_asset_job(
   name="shared_replicas_refresh",
   description="Refresh shared replica fleet (materializes shared_replicas_refreshed asset).",
-  selection=AssetSelection.key("shared_replicas_refreshed"),
+  selection=AssetSelection.keys("shared_replicas_refreshed"),
   tags={
     "pipeline": "shared",
     "phase": "replica_refresh",
