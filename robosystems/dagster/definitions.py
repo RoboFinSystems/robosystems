@@ -18,12 +18,10 @@ Usage:
 
 from dagster import Definitions
 
-from robosystems.adapters.quickbooks.pipeline import (
-  get_dagster_components as qb_pipeline,
-)
 from robosystems.adapters.sec.pipeline import (
   get_dagster_components as sec_pipeline,
 )
+from robosystems.config import env
 from robosystems.dagster.assets.graphs import (
   user_graph_creation_source,
   user_graph_file_staging_source,
@@ -106,11 +104,22 @@ from robosystems.dagster.sensors.invoice_billing import (
 # from robosystems.adapters.custom_erp.pipeline import get_dagster_components as erp_pipeline
 
 # ============================================================================
-# Adapter Pipeline Components
+# Adapter Pipeline Components (conditionally loaded via feature flags)
 # ============================================================================
 
+_empty_pipeline: dict = {"assets": [], "jobs": [], "schedules": [], "sensors": []}
+
+# SEC pipeline always loaded — handles shared repository infrastructure
 sec = sec_pipeline()
-qb = qb_pipeline()
+
+if env.CONNECTION_QUICKBOOKS_ENABLED:
+  from robosystems.adapters.quickbooks.pipeline import (
+    get_dagster_components as qb_pipeline,
+  )
+
+  qb = qb_pipeline()
+else:
+  qb = _empty_pipeline
 # erp = erp_pipeline()
 
 # ============================================================================

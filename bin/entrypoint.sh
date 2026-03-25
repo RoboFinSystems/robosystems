@@ -76,20 +76,63 @@ ensure_database_exists() {
     fi
 }
 
+# Resolve a feature flag from SSM Parameter Store (staging/prod only).
+# Falls back to the environment variable, then to the provided default.
+resolve_feature_flag() {
+    local flag_name="${1:?flag name required}"
+    local default_value="${2:-false}"
+
+    # Use env var if already set (local dev, CI, explicit override)
+    local env_value="${!flag_name:-}"
+    if [[ -n "$env_value" ]]; then
+        echo "$env_value"
+        return
+    fi
+
+    # In staging/prod, read from SSM Parameter Store
+    if [[ "${ENVIRONMENT:-dev}" != "dev" ]]; then
+        local ssm_path="/robosystems/${ENVIRONMENT}/features/${flag_name}"
+        local ssm_value
+        ssm_value=$(aws ssm get-parameter \
+            --name "$ssm_path" \
+            --query "Parameter.Value" \
+            --output text \
+            --region "${AWS_REGION:-us-east-1}" 2>/dev/null || echo "")
+        if [[ -n "$ssm_value" ]]; then
+            echo "$ssm_value"
+            return
+        fi
+    fi
+
+    echo "$default_value"
+}
+
 # Database initialization function
 run_db_init() {
     echo "Running database initialization..."
 
     sleep 3
     echo "Running database migrations..."
-    # Run migrations
-    if uv run alembic -c migrations/platform.ini upgrade head && \
-       uv run alembic -c migrations/ledger.ini upgrade head; then
-      echo "✓ Migrations completed successfully"
-    else
-        echo "✗ Migration failed"
+    # Run platform migrations (always required)
+    if ! uv run alembic -c migrations/platform.ini upgrade head; then
+        echo "✗ Platform migration failed"
         return 1
     fi
+
+    # Run ledger migrations only if enabled via SSM or env var
+    local ledger_enabled
+    ledger_enabled=$(resolve_feature_flag "LEDGER_ENABLED" "false")
+    if [[ "$ledger_enabled" == "true" ]]; then
+        echo "Ledger enabled — running ledger migrations..."
+        if ! uv run alembic -c migrations/ledger.ini upgrade head; then
+            echo "✗ Ledger migration failed"
+            return 1
+        fi
+    else
+        echo "Ledger disabled — skipping ledger migrations"
+    fi
+
+    echo "✓ Migrations completed successfully"
 
     echo "Database initialization complete"
 }

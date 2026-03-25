@@ -2,25 +2,28 @@
 
 RoboSystems is an enterprise-grade financial intelligence platform that unifies structured data, document search, and AI memory — transforming complex financial and operational data into actionable intelligence.
 
-- **Knowledge Graph**: Leverages graph database technology to model complex financial relationships and structured XBRL facts
+- **Knowledge Graph**: Graph database technology for modeling complex financial relationships and structured XBRL facts
+- **RoboLedger**: Dual-mode accounting engine — OLAP (graph-backed) for analytics and OLTP (PostgreSQL-backed) for read-write general ledger operations
 - **Document Search**: Full-text and semantic search across SEC filings, uploaded documents, and connected sources via OpenSearch
 - **AI-Native Architecture**: Context graphs built with embeddings, semantic enrichment, and confidence scoring for LLM-powered analytics
 - **Model Context Protocol (MCP)**: Standardized server and [client](https://www.npmjs.com/package/@robosystems/mcp) for LLM integration
-- **Multi-Source Data Integration**: SEC XBRL filings, QuickBooks accounting data, and custom financial datasets
+- **Multi-Source Data Integration**: SEC XBRL filings, QuickBooks accounting data via dbt pipelines, and custom financial datasets
 - **Enterprise-Ready Infrastructure**: Multi-tenant architecture with tiered scaling and production-grade query management
 - **Developer-First API**: RESTful API designed for integration with financial applications
 
 ## Core Features
 
 - **LadybugDB Graph Database**: Purpose-built embedded graph database with columnar storage optimized for financial analytics
+- **RoboLedger OLTP**: Schema-per-tenant PostgreSQL ledger with accounts, transactions, journal entries, line items, dimensions, and classification rules
 - **Dedicated Infrastructure**: Tiered graph infrastructure with dedicated instances and configurable memory allocation
 - **Subgraphs (Workspaces)**: AI memory graphs, data workspaces with fork & publish, and isolated environments for development and team collaboration
 - **AI Agent Interface**: Natural language financial analysis with text-to-Cypher via Model Context Protocol (MCP)
 - **Entity & Generic Graphs**: Curated schemas for RoboLedger/RoboInvestor, plus custom schema support
 - **Shared Repositories**: SEC XBRL filings knowledge graph for context mining and benchmarking
-- **QuickBooks Integration**: Complete accounting synchronization with trial balance creation
+- **QuickBooks Integration**: dbt-powered accounting pipeline with extract, transform, and graph materialization via Dagster
+- **Document Management**: Upload, index, and search documents with full-text and semantic search via OpenSearch
 - **DuckDB Staging System**: High-performance data validation and bulk ingestion pipeline
-- **Dagster Orchestration**: Data pipeline orchestration for SEC filings, backups, billing, and scheduled jobs
+- **Dagster Orchestration**: Data pipeline orchestration for SEC filings, QuickBooks sync, backups, billing, and scheduled jobs
 - **Credit-Based Billing**: Flexible credits for AI operations based on token usage
 
 ## Quick Start
@@ -146,7 +149,7 @@ RoboSystems is built on a modern, scalable architecture with:
 
 **Data Layer:**
 
-- PostgreSQL for IAM, graph metadata, and Dagster
+- PostgreSQL for IAM, graph metadata, Dagster, and RoboLedger OLTP (schema-per-tenant)
 - OpenSearch for full-text and semantic document search (BM25 + KNN)
 - Valkey for caching, SSE messaging, and rate limiting
 - AWS S3 for data lake storage and static assets
@@ -167,13 +170,10 @@ RoboSystems is built on a modern, scalable architecture with:
 
 A curated knowledge graph of US public company financial data from SEC EDGAR XBRL filings. Runs on the shared LadybugDB tier, accessible via MCP tools, Cypher queries, and the AI agent.
 
-**Pipeline**: EDGAR → Download → Process (Parquet) → Stage (DuckDB) → Enrich (fastembed) → Materialize (LadybugDB) → Index + Embed (OpenSearch)
-
-**Graph**: 14 node types (`Entity`, `Report`, `Fact`, `Element`, `Structure`, `Association`, ...) and 24 relationship types modeling the full XBRL reporting hierarchy — from company filings down to individual financial facts with their taxonomy relationships and disclosure classifications.
-
-**Document Search**: Full-text and semantic search via OpenSearch across XBRL text blocks, narrative sections (MD&A, Risk Factors, Cybersecurity), and iXBRL disclosures. Hybrid search combines BM25 keyword matching with KNN vector similarity (fastembed bge-small-en-v1.5, 384-dim embeddings) for conceptual query understanding. iXBRL element metadata bridges graph facts and filing context.
-
-**Enrichment**: Every element is mapped to ~50 canonical financial concepts (revenue, net_income, total_assets, etc.) via fastembed cosine similarity. Structures are classified by statement type. Associations are tagged with disclosure types from the [Seattle Method](http://xbrlsite.com/seattlemethod/SeattleMethod.pdf) disclosure-mechanics taxonomy. Offline knowledge artifacts (PageRank, BFS classification, cross-filing consensus) refine confidence scores using an [icebug](https://github.com/Ladybug-Memory/icebug) graph built from the full corpus.
+- **Pipeline**: EDGAR → Download → Process (Parquet) → Stage (DuckDB) → Enrich (fastembed) → Materialize (LadybugDB) → Index + Embed (OpenSearch)
+- **Graph**: 14 node types and 24 relationship types modeling the full XBRL reporting hierarchy
+- **Search**: Hybrid BM25 + KNN vector search across XBRL text blocks, narrative sections, and iXBRL disclosures
+- **Enrichment**: Semantic element mapping, statement classification, and disclosure tagging via the [Seattle Method](http://xbrlsite.com/seattlemethod/SeattleMethod.pdf) taxonomy
 
 ```bash
 just sec-load NVDA 2025  # Load NVIDIA filings for 2025

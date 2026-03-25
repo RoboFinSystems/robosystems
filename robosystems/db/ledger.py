@@ -60,6 +60,11 @@ _session_factory = None
 def _get_engine():
   global _engine
   if _engine is None:
+    if not env.LEDGER_ENABLED:
+      raise RuntimeError(
+        "Ledger database access attempted but LEDGER_ENABLED is false. "
+        "Set LEDGER_ENABLED=true to use RoboLedger OLTP features."
+      )
     _engine = _create_ledger_engine()
   return _engine
 
