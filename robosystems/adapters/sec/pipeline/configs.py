@@ -228,21 +228,6 @@ class SECMaterializeConfig(Config):
 
 
 # =============================================================================
-# Entity Update Configuration
-# =============================================================================
-
-
-class SECEntityUpdateConfig(Config):
-  """Configuration for incremental Entity update asset."""
-
-  graph_id: str = "sec"
-  year: int | None = Field(default=None, description="Year (default: current year)")
-  quarter: int | None = Field(
-    default=None, ge=1, le=4, description="Quarter 1-4 (default: current)"
-  )
-
-
-# =============================================================================
 # Text Search Index Configuration
 # =============================================================================
 

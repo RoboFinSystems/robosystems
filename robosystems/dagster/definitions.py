@@ -18,9 +18,7 @@ Usage:
 
 from dagster import Definitions
 
-from robosystems.adapters.sec.pipeline import (
-  get_dagster_components as sec_pipeline,
-)
+from robosystems.config import env
 from robosystems.dagster.assets.graphs import (
   user_graph_creation_source,
   user_graph_file_staging_source,
@@ -29,7 +27,7 @@ from robosystems.dagster.assets.graphs import (
   user_subgraph_creation_source,
 )
 from robosystems.dagster.assets.shared_repositories import (
-  shared_replicas_refreshed,
+  build_shared_replicas_refreshed,
 )
 from robosystems.dagster.jobs.backup_cleanup import (
   daily_backup_cleanup_job,
@@ -106,8 +104,24 @@ from robosystems.dagster.sensors.invoice_billing import (
 # Adapter Pipeline Components
 # ============================================================================
 
-sec = sec_pipeline()
+_empty_pipeline = {"assets": [], "jobs": [], "sensors": [], "schedules": []}
+
+if env.SEC_PIPELINE_ENABLED:
+  from robosystems.adapters.sec.pipeline import (
+    get_dagster_components as sec_pipeline,
+  )
+
+  sec = sec_pipeline()
+else:
+  sec = _empty_pipeline
 # erp = erp_pipeline()
+
+# Collect shared replica deps from all enabled adapter pipelines
+_shared_replica_deps: list[str] = [
+  *sec.get("shared_replica_deps", []),
+  # *erp.get("shared_replica_deps", []),
+]
+shared_replicas_refreshed = build_shared_replicas_refreshed(deps=_shared_replica_deps)
 
 # ============================================================================
 # Resource Configuration

@@ -13,9 +13,6 @@ Nightly Pipeline (enable all for automated daily updates):
 - Phase 5c (Text Index): sec_post_stage_index_sensor chains
   stage → textblocks index + narratives index (parallel, incremental)
 
-Manual Operations (not in automated chain):
-- sec_entity_update_job: Update mutable Entity attributes (run manually after materialize)
-
 Backfill Processing (enable for bulk/manual processing):
 - sec_processing_sensor: Discovers pending SourceFiles, triggers batch processing per quarter
 

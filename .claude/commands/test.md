@@ -6,10 +6,14 @@ Always use `timeout: 600000` (10 minutes) on Bash calls for `just test-all` and 
 
 ## Strategy
 
-1. **Run full suite first**: `just test-all` to see the full picture
+1. **Run full suite first**: `just test-all 2>&1 | tail -30` to see the summary without truncation
 2. **Fix by module**: When errors exist, use `just test <module>` (e.g., `just test routers`) to iterate faster on that module before re-running the full suite
 3. **Fix in order**: Linting/formatting → Type errors → Test failures
 4. **Stop when done**: Once `just test-all` passes completely, stop immediately
+
+## Output Handling
+
+**Always pipe through `| tail -30`** when running `just test-all` or `just test`. The full test output is thousands of lines and frequently gets truncated, hiding the actual results. The summary at the bottom is all you need to see pass/fail status.
 
 ## Key Commands
 
