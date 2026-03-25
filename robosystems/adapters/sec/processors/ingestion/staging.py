@@ -416,7 +416,9 @@ class DuckDBStager:
                 try:
                   await client.delete_table(self.graph_id, temp_name)
                 except Exception as cleanup_err:
-                  logger.debug(f"Could not clean up temp table {temp_name}: {cleanup_err}")
+                  logger.debug(
+                    f"Could not clean up temp table {temp_name}: {cleanup_err}"
+                  )
                 return False, None, error
 
               # DELETE+INSERT is not atomic — if interrupted between steps,
@@ -453,7 +455,9 @@ class DuckDBStager:
               try:
                 await client.delete_table(self.graph_id, temp_name)
               except Exception as cleanup_err:
-                logger.debug(f"Could not clean up temp table {temp_name}: {cleanup_err}")
+                logger.debug(
+                  f"Could not clean up temp table {temp_name}: {cleanup_err}"
+                )
 
               log_progress(
                 f"[{i}/{total_tables}] Upserted {table_name}: "
@@ -475,7 +479,9 @@ class DuckDBStager:
               try:
                 await client.delete_table(self.graph_id, temp_name)
               except Exception as cleanup_err:
-                logger.debug(f"Could not clean up temp table {temp_name}: {cleanup_err}")
+                logger.debug(
+                  f"Could not clean up temp table {temp_name}: {cleanup_err}"
+                )
               error_str = str(e)
               if "No files found" in error_str:
                 return (
