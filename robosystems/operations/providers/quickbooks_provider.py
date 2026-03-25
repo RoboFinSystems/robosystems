@@ -42,7 +42,7 @@ class QuickBooksOAuthProvider:
 
   @property
   def token_url(self) -> str:
-    return f"{self._auth_base_url}/oauth2/v1/tokens/bearer"
+    return "https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer"
 
   @property
   def scopes(self) -> list[str]:
@@ -61,8 +61,8 @@ class QuickBooksOAuthProvider:
     }
 
   async def get_entity_info(self, access_token: str, realm_id: str) -> dict[str, Any]:
-    """Get QuickBooks entity information."""
-    url = f"{self._base_url}/v3/entity/{realm_id}/entityinfo/{realm_id}"
+    """Get QuickBooks company information."""
+    url = f"{self._base_url}/v3/company/{realm_id}/companyinfo/{realm_id}"
 
     async with httpx.AsyncClient() as client:
       response = await client.get(
@@ -70,14 +70,15 @@ class QuickBooksOAuthProvider:
         headers={
           "Authorization": f"Bearer {access_token}",
           "Accept": "application/json",
+          "Accept-Encoding": "identity",
         },
       )
 
       if response.status_code == 200:
         data = response.json()
-        return data.get("EntityInfo", {})
+        return data.get("CompanyInfo", {})
       else:
-        logger.error(f"Failed to get QuickBooks entity info: {response.text}")
+        logger.error(f"Failed to get QuickBooks company info: {response.status_code}")
         return {}
 
   async def validate_connection(self, access_token: str, realm_id: str) -> bool:
@@ -106,12 +107,12 @@ async def create_quickbooks_connection(
   # Create a pending connection that will be completed after OAuth
   metadata = {
     "status": "pending_oauth",
-    "realm_id": config.realm_id if config.realm_id else None,
+    "realm_id": config.realm_id if config and config.realm_id else None,
   }
 
   connection_data = await ConnectionService.create_connection(
     entity_id=entity_id,
-    provider="QuickBooks",
+    provider="quickbooks",
     user_id=user_id,
     credentials={},  # Will be populated after OAuth
     metadata=metadata,
@@ -124,22 +125,67 @@ async def create_quickbooks_connection(
 async def sync_quickbooks_connection(
   connection: dict[str, Any], sync_options: dict[str, Any] | None, graph_id: str
 ) -> str:
-  """Trigger QuickBooks sync.
+  """Trigger QuickBooks sync via Dagster pipeline.
 
-  TODO: Refactor to use Dagster pipeline.
-  The QuickBooks sync has been migrated to Dagster assets:
-  - See: robosystems/dagster/assets/quickbooks.py
-  - Assets: qb_accounts, qb_transactions, qb_graph_data
+  Submits the qb_sync_job with configuration derived from the
+  connection metadata and sync options.
+
+  Args:
+      connection: Connection dict with metadata (realm_id, etc.)
+      sync_options: Optional dict with full_rebuild, lookback_days
+      graph_id: Target graph database ID
+
+  Returns:
+      Dagster run ID for progress tracking
   """
-  entity_id = connection["entity_id"]
+  from robosystems.middleware.sse.dagster_monitor import submit_dagster_job_sync
 
-  # TODO: Trigger Dagster pipeline
-  # For now, return a placeholder - provider refactoring needed
-  logger.warning(
-    f"QuickBooks sync requested for entity {entity_id}, graph {graph_id} - "
-    "provider needs refactoring to use Dagster pipeline"
+  metadata = connection.get("metadata", {}) or {}
+  options = sync_options or {}
+
+  realm_id = metadata.get("realm_id", "")
+  connection_id = connection.get("connection_id", "")
+  user_id = connection.get("user_id", "")
+  full_rebuild = options.get("full_rebuild", False)
+  lookback_days = options.get("lookback_days", 60)
+
+  if not realm_id:
+    raise ValueError("QuickBooks realm_id not found in connection metadata")
+
+  # Build config for all assets in the pipeline (they share QBSyncConfig)
+  sync_config = {
+    "graph_id": graph_id,
+    "connection_id": connection_id,
+    "user_id": user_id,
+    "realm_id": realm_id,
+    "full_rebuild": full_rebuild,
+    "lookback_days": lookback_days,
+  }
+
+  run_config = {
+    "ops": {
+      "qb_extract": {"config": sync_config},
+      "qb_transform": {"config": sync_config},
+      "qb_load": {"config": sync_config},
+    }
+  }
+
+  run_id = submit_dagster_job_sync(
+    job_name="qb_sync",
+    run_config=run_config,
+    tags={
+      "graph_id": graph_id,
+      "connection_id": connection_id,
+      "pipeline": "quickbooks",
+    },
   )
-  return f"dagster-pending-{entity_id}"
+
+  logger.info(
+    f"QuickBooks sync submitted for graph={graph_id}, "
+    f"connection={connection_id}, run_id={run_id}, "
+    f"full_rebuild={full_rebuild}"
+  )
+  return run_id
 
 
 async def cleanup_quickbooks_connection(

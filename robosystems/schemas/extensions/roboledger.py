@@ -273,31 +273,55 @@ REPORTING_RELATIONSHIPS = [
 TRANSACTION_NODES = [
   Node(
     name="Transaction",
-    description="Financial transactions and journal entries",
+    description="Business event that triggers financial impact (invoice, payment, deposit, etc.). "
+    "Represents what happened in the real world. One transaction can produce multiple "
+    "ledger entries over its lifecycle (posting, payment, reversal, adjustment).",
     properties=[
       Property(name="identifier", type="STRING", is_primary_key=True),
       Property(name="uri", type="STRING"),
-      Property(name="transaction_number", type="STRING"),
+      Property(name="number", type="STRING"),
       Property(name="amount", type="DOUBLE"),
       Property(name="description", type="STRING"),
       Property(name="date", type="DATE"),
-      Property(name="transaction_date", type="DATE"),
       Property(name="reference_number", type="STRING"),
-      Property(name="transaction_type", type="STRING"),  # debit, credit
-      Property(name="type", type="STRING"),
-      Property(name="number", type="STRING"),
-      Property(name="sync_hash", type="STRING"),
-      Property(name="currency", type="STRING"),
-      # Plaid-specific properties
-      Property(name="plaid_merchant_name", type="STRING"),
-      Property(name="plaid_category", type="STRING"),
-      Property(name="plaid_pending", type="BOOLEAN"),
+      Property(
+        name="type", type="STRING"
+      ),  # invoice, payment, bill, expense, deposit, etc.
+      Property(
+        name="currency", type="STRING"
+      ),  # ISO 4217 currency code (USD, EUR, etc.)
+      Property(name="merchant_name", type="STRING"),
+      Property(name="category", type="STRING"),
+      Property(name="pending", type="BOOLEAN"),
+      Property(name="updated_at", type="STRING"),
+    ],
+  ),
+  Node(
+    name="Entry",
+    description="Ledger entry representing the accounting interpretation of a business event. "
+    "This is the journal entry — the translation of a transaction into accounting impact. "
+    "Each entry independently balances (total debits = total credits) and has its own "
+    "posting lifecycle. One transaction can have multiple entries (posting, reversal, adjustment).",
+    properties=[
+      Property(name="identifier", type="STRING", is_primary_key=True),
+      Property(name="uri", type="STRING"),
+      Property(name="number", type="STRING"),  # Journal entry ID
+      Property(name="memo", type="STRING"),  # Accounting description
+      Property(
+        name="posting_date", type="DATE"
+      ),  # When it hits the books (may differ from transaction date)
+      Property(name="type", type="STRING"),  # standard, adjusting, closing, reversing
+      Property(name="status", type="STRING"),  # draft, posted, reversed
+      Property(
+        name="reversal_of", type="STRING"
+      ),  # Entry identifier this reverses (null if not a reversal)
       Property(name="updated_at", type="STRING"),
     ],
   ),
   Node(
     name="LineItem",
-    description="Individual transaction line items for detailed accounting",
+    description="Individual debit or credit within a ledger entry. Each line item hits "
+    "a specific account. The line items within an entry must balance.",
     properties=[
       Property(name="identifier", type="STRING", is_primary_key=True),
       Property(name="uri", type="STRING"),
@@ -320,19 +344,46 @@ TRANSACTION_RELATIONSHIPS = [
     name="ENTITY_HAS_TRANSACTION",
     from_node="Entity",
     to_node="Transaction",
-    description="Entity has financial transactions",
+    description="Entity has financial transactions (business events)",
     properties=[
       Property(name="transaction_context", type="STRING"),
     ],
   ),
+  # Transaction → Entry (one-to-many: a transaction can produce multiple entries)
   Relationship(
-    name="TRANSACTION_HAS_LINE_ITEM",
+    name="TRANSACTION_HAS_ENTRY",
     from_node="Transaction",
+    to_node="Entry",
+    description="Transaction produces ledger entries (posting, reversal, adjustment)",
+    properties=[
+      Property(name="entry_context", type="STRING"),
+    ],
+  ),
+  # Entry → LineItem (one-to-many: each entry has balanced debit/credit lines)
+  Relationship(
+    name="ENTRY_HAS_LINE_ITEM",
+    from_node="Entry",
     to_node="LineItem",
-    description="Transaction contains line items",
+    description="Ledger entry contains line items (debits and credits that must balance)",
     properties=[
       Property(name="line_item_context", type="STRING"),
     ],
+  ),
+  # Entry → Dimension (fund, trust account, product channel, etc.)
+  Relationship(
+    name="ENTRY_HAS_DIMENSION",
+    from_node="Entry",
+    to_node="Dimension",
+    description="Ledger entry has dimensional qualifiers (fund, trust account, product channel)",
+    properties=[],
+  ),
+  # Transaction → Dimension (source system, API endpoint, etc.)
+  Relationship(
+    name="TRANSACTION_HAS_DIMENSION",
+    from_node="Transaction",
+    to_node="Dimension",
+    description="Transaction has dimensional qualifiers (source system, provenance)",
+    properties=[],
   ),
   Relationship(
     name="LINE_ITEM_RELATES_TO_ELEMENT",

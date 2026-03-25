@@ -1,0 +1,20 @@
+version: 2
+
+# Phase 2: External sources for QB API extracts (parquet files)
+# These will replace seed references in staging models when
+# the extract asset writes parquet files per tenant.
+#
+# sources:
+#   - name: quickbooks_raw
+#     description: Raw QuickBooks API extracts (per-tenant parquet files)
+#     meta:
+#       external_location: "{{ var('qb_extract_path') }}/{name}.parquet"
+#     tables:
+#       - name: accounts
+#         description: Chart of accounts from QBClient.get_accounts()
+#       - name: journal_entries
+#         description: Journal entries from QBClient.get_journal_entries()
+#       - name: journal_lines
+#         description: Flattened journal entry lines
+#       - name: company_info
+#         description: Company info from QBClient.get_entity_info()

@@ -20,7 +20,7 @@ class SearchRequest(BaseModel):
   )
   source_type: str | None = Field(
     None,
-    description="Filter by source type (xbrl_textblock, narrative_section, ixbrl_disclosure)",
+    description="Filter by source type (xbrl_textblock, narrative_section, ixbrl_disclosure, uploaded_doc, memory)",
   )
   fiscal_year: int | None = Field(None, description="Filter by fiscal year")
   date_from: str | None = Field(
@@ -42,7 +42,7 @@ class SearchHit(BaseModel):
 
   document_id: str
   score: float
-  source_type: str  # "xbrl_textblock" or "narrative_section"
+  source_type: str
   entity_ticker: str | None = None
   entity_name: str | None = None
   section_label: str | None = None
@@ -51,10 +51,13 @@ class SearchHit(BaseModel):
   filing_date: str | None = None
   fiscal_year: int | None = None
   form_type: str | None = None
-  xbrl_elements: list[str] | None = None  # XBRL element qnames in this section
-  snippet: str  # Highlighted excerpt from content
+  xbrl_elements: list[str] | None = None
+  snippet: str
   content_length: int = 0
   content_url: str | None = None
+  document_title: str | None = None
+  tags: list[str] | None = None
+  folder: str | None = None
 
 
 class SearchResponse(BaseModel):
@@ -87,3 +90,67 @@ class DocumentSection(BaseModel):
   content: str
   content_url: str | None = None
   content_length: int = 0
+  document_title: str | None = None
+  tags: list[str] | None = None
+  folder: str | None = None
+
+
+# --- Document upload models ---
+
+
+class DocumentUploadRequest(BaseModel):
+  """Upload a markdown document for text indexing."""
+
+  title: str = Field(..., description="Document title", max_length=500)
+  content: str = Field(..., description="Markdown content", max_length=500_000)
+  tags: list[str] | None = Field(None, description="Optional tags for filtering")
+  folder: str | None = Field(None, description="Optional folder/category")
+  external_id: str | None = Field(
+    None,
+    description="Optional external identifier for upsert (e.g., Google Drive file ID)",
+  )
+
+
+class DocumentUploadResponse(BaseModel):
+  """Response from document upload."""
+
+  document_id: str
+  sections_indexed: int
+  total_content_length: int
+  section_ids: list[str]
+
+
+class BulkDocumentUploadRequest(BaseModel):
+  """Bulk upload multiple markdown documents."""
+
+  documents: list[DocumentUploadRequest] = Field(
+    ..., max_length=50, description="Documents to upload (max 50)"
+  )
+
+
+class BulkDocumentUploadResponse(BaseModel):
+  """Response from bulk document upload."""
+
+  total_documents: int
+  total_sections_indexed: int
+  results: list[DocumentUploadResponse]
+  errors: list[dict] | None = None
+
+
+class DocumentListItem(BaseModel):
+  """A document in the document list."""
+
+  document_title: str
+  section_count: int
+  source_type: str
+  folder: str | None = None
+  tags: list[str] | None = None
+  last_indexed: str | None = None
+
+
+class DocumentListResponse(BaseModel):
+  """Response from listing indexed documents."""
+
+  total: int
+  documents: list[DocumentListItem]
+  graph_id: str

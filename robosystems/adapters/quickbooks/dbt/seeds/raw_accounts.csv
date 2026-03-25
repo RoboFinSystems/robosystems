@@ -1,0 +1,17 @@
+Id,Name,FullyQualifiedName,AccountType,Classification,ParentRef,Active,CurrentBalance,AccountSubType,AcctNum,SubAccount
+1,Checking,Checking,Bank,Asset,,true,50000.00,Checking,1000,false
+2,Accounts Receivable,Accounts Receivable,Accounts Receivable,Asset,,true,12500.00,AccountsReceivable,1100,false
+3,Prepaid Expenses,Prepaid Expenses,Other Current Asset,Asset,,true,3000.00,PrepaidExpenses,1200,false
+4,Office Equipment,Office Equipment:Office Equipment,Fixed Asset,Asset,16,true,15000.00,FurnitureAndFixtures,1510,true
+5,Accounts Payable,Accounts Payable,Accounts Payable,Liability,,true,8500.00,AccountsPayable,2000,false
+6,Credit Card,Credit Card,Credit Card,Liability,,true,2200.00,CreditCard,2100,false
+7,Loan Payable,Loan Payable,Long Term Liability,Liability,,true,25000.00,NotesPayable,2200,false
+8,Owner Equity,Owner Equity,Equity,Equity,,true,30000.00,OpeningBalanceEquity,3000,false
+9,Retained Earnings,Retained Earnings,Equity,Equity,,true,0.00,RetainedEarnings,3100,false
+10,Consulting Revenue,Consulting Revenue,Income,Revenue,,true,0.00,ConsultingIncome,4000,false
+11,Software Revenue,Software Revenue,Income,Revenue,,true,0.00,SalesOfProductIncome,4100,false
+12,Rent Expense,Rent Expense,Expense,Expense,,true,0.00,Rent,5000,false
+13,Office Supplies,Office Supplies,Expense,Expense,,true,0.00,OfficeGeneralAdministrativeExpenses,5100,false
+14,Interest Income,Interest Income,Other Income,Other Income,,true,0.00,InterestEarned,6000,false
+15,Interest Expense,Interest Expense,Other Expense,Other Expense,,true,0.00,InterestPaid,7000,false
+16,Fixed Assets,Fixed Assets,Fixed Asset,Asset,,true,15000.00,FurnitureAndFixtures,1500,false

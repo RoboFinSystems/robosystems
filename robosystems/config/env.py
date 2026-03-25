@@ -566,9 +566,11 @@ class EnvConfig:
     "CONNECTION_QUICKBOOKS_ENABLED",
     get_parameter_value("CONNECTION_QUICKBOOKS_ENABLED", "true").lower() == "true",
   )
-  CONNECTION_PLAID_ENABLED = get_bool_env(
-    "CONNECTION_PLAID_ENABLED",
-    get_parameter_value("CONNECTION_PLAID_ENABLED", "true").lower() == "true",
+
+  # --- Ledger (RoboLedger OLTP) ---
+  LEDGER_ENABLED = get_bool_env(
+    "LEDGER_ENABLED",
+    get_parameter_value("LEDGER_ENABLED", "false").lower() == "true",
   )
 
   # ==========================================================================
@@ -691,6 +693,13 @@ class EnvConfig:
   )
   DATABASE_ECHO = get_bool_env("DATABASE_ECHO", False)
 
+  # RoboLedger OLTP Database (accounting system of record)
+  ROBOLEDGER_DATABASE_URL = get_str_env("ROBOLEDGER_DATABASE_URL", "") or (
+    f"postgresql://postgres:{get_secret_value('POSTGRES_PASSWORD', 'postgres')}@{get_str_env('DATABASE_ENDPOINT', '')}:{get_str_env('DATABASE_PORT', '5432')}/roboledger?sslmode=require"
+    if get_str_env("DATABASE_ENDPOINT", "")
+    else "postgresql://postgres:postgres@localhost:5432/roboledger"
+  )
+
   # ==========================================================================
   # 5. CACHE AND QUEUE CONFIGURATION (VALKEY/REDIS)
   # ==========================================================================
@@ -778,11 +787,6 @@ class EnvConfig:
     "INTUIT_REDIRECT_URI", "http://localhost:8000/auth/callback"
   )
   INTUIT_ENVIRONMENT = get_secret_value("INTUIT_ENVIRONMENT", "sandbox")
-
-  # Plaid
-  PLAID_CLIENT_ID = get_secret_value("PLAID_CLIENT_ID", "")
-  PLAID_CLIENT_SECRET = get_secret_value("PLAID_CLIENT_SECRET", "")
-  PLAID_ENVIRONMENT = get_secret_value("PLAID_ENVIRONMENT", "sandbox")
 
   # SEC
   # SEC_GOV_USER_AGENT is a secret identity for API access

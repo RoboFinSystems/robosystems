@@ -1,0 +1,70 @@
+version: 2
+
+models:
+  - name: stg_qb_company_info
+    description: Cleaned QuickBooks company info
+    columns:
+      - name: id
+        tests:
+          - unique
+          - not_null
+      - name: company_name
+        tests:
+          - not_null
+
+  - name: stg_qb_accounts
+    description: Cleaned and normalized QuickBooks chart of accounts
+    columns:
+      - name: id
+        tests:
+          - unique
+          - not_null
+      - name: name
+        tests:
+          - not_null
+      - name: classification
+        tests:
+          - not_null
+          - accepted_values:
+              values:
+                - Asset
+                - Liability
+                - Equity
+                - Revenue
+                - Expense
+                - Other Income
+                - Other Expense
+
+  - name: stg_qb_journal_entries
+    description: Cleaned QuickBooks journal entries
+    columns:
+      - name: id
+        tests:
+          - unique
+          - not_null
+      - name: txn_date
+        tests:
+          - not_null
+      - name: total_amount
+        tests:
+          - not_null
+
+  - name: stg_qb_journal_lines
+    description: Cleaned QuickBooks journal entry line items
+    columns:
+      - name: journal_entry_id
+        tests:
+          - not_null
+      - name: line_num
+        tests:
+          - not_null
+      - name: posting_type
+        tests:
+          - not_null
+          - accepted_values:
+              values:
+                - Debit
+                - Credit
+      - name: account_ref_id
+        tests:
+          - not_null

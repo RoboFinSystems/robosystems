@@ -569,7 +569,8 @@ class SchemaInfoResponse(BaseModel):
                 "Unit",
               ],
               "relationship_types": [
-                "TRANSACTION_HAS_LINE_ITEM",
+                "TRANSACTION_HAS_ENTRY",
+                "ENTRY_HAS_LINE_ITEM",
                 "LINE_ITEM_RELATES_TO_ELEMENT",
                 "ENTITY_HAS_REPORT",
                 "REPORT_HAS_FACT",

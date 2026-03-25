@@ -126,7 +126,7 @@ class GraphFile(Base):
     return session.query(cls).filter(cls.graph_id == graph_id).all()
 
   def mark_uploaded(self, session: Session) -> None:
-    self.upload_status = "completed"
+    self.upload_status = "uploaded"
     self.uploaded_at = datetime.now(UTC)
     session.commit()
     session.refresh(self)

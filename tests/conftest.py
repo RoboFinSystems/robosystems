@@ -528,10 +528,12 @@ def setup_database(test_db):
     User,
     UserAPIKey,
   )
+  from robosystems.models.iam.connection import Connection
 
   try:
     # Delete in reverse dependency order to avoid foreign key constraints
     test_db.query(ConnectionCredentials).delete()
+    test_db.query(Connection).delete()
     test_db.query(UserAPIKey).delete()
     test_db.query(GraphCredits).delete()
     test_db.query(GraphUser).delete()
@@ -554,15 +556,6 @@ def mock_sec_client():
     # Ensure get_report_url returns a string
     client_instance.get_report_url.return_value = "http://example.com/report.xml"
     yield client_instance
-
-
-@pytest.fixture
-def mock_xbrl():
-  """Mock XBRL class for testing."""
-  with patch("robosystems.tasks.sec_filings.XBRLGraphProcessor") as mock_xbrl_class:
-    xbrl_instance = Mock()
-    mock_xbrl_class.return_value = xbrl_instance
-    yield mock_xbrl_class
 
 
 @pytest.fixture
@@ -620,17 +613,6 @@ def lbug_repository_with_schema(temp_lbug_db):
         scheme STRING,
         is_parent BOOLEAN,
         parent_entity_id STRING,
-        created_at TIMESTAMP,
-        updated_at TIMESTAMP,
-        PRIMARY KEY (identifier)
-    )
-    """,
-    """
-    CREATE NODE TABLE Connection(
-        identifier STRING,
-        provider STRING,
-        uri STRING,
-        status STRING,
         created_at TIMESTAMP,
         updated_at TIMESTAMP,
         PRIMARY KEY (identifier)
@@ -738,7 +720,6 @@ def lbug_repository_with_schema(temp_lbug_db):
     "CREATE REL TABLE HAS_REPORT(FROM Entity TO Report)",
     "CREATE REL TABLE REPORTED_IN(FROM Report TO Fact)",
     "CREATE REL TABLE HAS_USER(FROM Entity TO User)",
-    "CREATE REL TABLE HAS_CONNECTION(FROM Entity TO Connection)",
     "CREATE REL TABLE HAS_TRANSACTION(FROM Entity TO Transaction)",
     "CREATE REL TABLE HAS_SECURITY(FROM Entity TO Security)",
     "CREATE REL TABLE HAS_ELEMENT(FROM Fact TO Element)",
