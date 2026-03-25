@@ -14,8 +14,17 @@ def mock_client():
 
 
 @pytest.fixture
-def service(mock_client):
-  return SearchService(mock_client)
+def mock_enricher():
+  enricher = MagicMock()
+  enricher.embed_batch.return_value = [[0.1] * 384]
+  return enricher
+
+
+@pytest.fixture
+def service(mock_client, mock_enricher):
+  svc = SearchService(mock_client)
+  svc._enricher = mock_enricher
+  return svc
 
 
 class TestSearchDocuments:
@@ -49,6 +58,24 @@ class TestSearchDocuments:
     assert response.hits[0].document_id == "doc1"
     assert response.hits[0].snippet == "...tariff risk exposure..."
     assert response.hits[0].entity_ticker == "NVDA"
+
+  def test_always_embeds_query(self, service, mock_client, mock_enricher):
+    """Hybrid search always generates embeddings."""
+    mock_client.search.return_value = {"hits": {"total": {"value": 0}, "hits": []}}
+
+    request = SearchRequest(query="supply chain risk")
+    service.search_documents("sec", request)
+
+    mock_enricher.embed_batch.assert_called_once_with(["supply chain risk"])
+
+  def test_passes_embedding_to_client(self, service, mock_client, mock_enricher):
+    mock_client.search.return_value = {"hits": {"total": {"value": 0}, "hits": []}}
+
+    request = SearchRequest(query="test")
+    service.search_documents("sec", request)
+
+    call_kwargs = mock_client.search.call_args.kwargs
+    assert call_kwargs["query_embedding"] == [0.1] * 384
 
   def test_empty_results(self, service, mock_client):
     mock_client.search.return_value = {"hits": {"total": {"value": 0}, "hits": []}}

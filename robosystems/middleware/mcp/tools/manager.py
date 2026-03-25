@@ -160,10 +160,10 @@ class GraphMCPTools:
 
       self.build_fact_grid_tool = BuildFactGridTool(graph_client)
 
-    # Layer 3: Text search tools (gated by TEXT_SEARCH_ENABLED)
+    # Layer 3: Text search tools (gated by SEMANTIC_SEARCH_ENABLED)
     self.search_documents_tool = None
     self.get_document_section_tool = None
-    if env.TEXT_SEARCH_ENABLED:
+    if env.SEMANTIC_SEARCH_ENABLED:
       from .search_tools import GetDocumentSectionTool, SearchDocumentsTool
 
       self.search_documents_tool = SearchDocumentsTool(graph_client)
@@ -278,7 +278,7 @@ class GraphMCPTools:
     Get text search tool definitions.
 
     Returns:
-        List of search tool definitions (empty if TEXT_SEARCH_ENABLED is false)
+        List of search tool definitions (empty if SEMANTIC_SEARCH_ENABLED is false)
     """
     tools = []
     if self.search_documents_tool is not None:
@@ -493,7 +493,7 @@ class GraphMCPTools:
       elif name == "search-documents":
         if self.search_documents_tool is None:
           raise ValueError(
-            self._tool_unavailable_reason("search-documents", "TEXT_SEARCH_ENABLED")
+            self._tool_unavailable_reason("search-documents", "SEMANTIC_SEARCH_ENABLED")
           )
         result = await self.search_documents_tool.execute(arguments)
         return result if return_raw else json.dumps(result, indent=2)
@@ -501,7 +501,9 @@ class GraphMCPTools:
       elif name == "get-document-section":
         if self.get_document_section_tool is None:
           raise ValueError(
-            self._tool_unavailable_reason("get-document-section", "TEXT_SEARCH_ENABLED")
+            self._tool_unavailable_reason(
+              "get-document-section", "SEMANTIC_SEARCH_ENABLED"
+            )
           )
         result = await self.get_document_section_tool.execute(arguments)
         return result if return_raw else json.dumps(result, indent=2)

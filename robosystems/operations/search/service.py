@@ -1,7 +1,7 @@
 """Search service — business logic layer over OpenSearch client.
 
-Provides graph_id-scoped search and retrieval, mapping OpenSearch
-responses to Pydantic models.
+Provides graph_id-scoped hybrid search (BM25 + KNN) and retrieval,
+mapping OpenSearch responses to Pydantic models.
 """
 
 from __future__ import annotations
@@ -31,7 +31,7 @@ SNIPPET_FALLBACK_LENGTH = 300
 
 
 class SearchService:
-  """Full-text search service scoped by graph_id."""
+  """Hybrid search service scoped by graph_id."""
 
   def __init__(self, client: OpenSearchClient) -> None:
     self.client = client
@@ -48,7 +48,7 @@ class SearchService:
     return self._embedding_service
 
   def search_documents(self, graph_id: str, request: SearchRequest) -> SearchResponse:
-    """Search documents with graph_id isolation."""
+    """Hybrid search documents with graph_id isolation."""
     filters: dict[str, Any] = {}
     if request.entity:
       filters["entity"] = request.entity
@@ -67,30 +67,15 @@ class SearchService:
     if request.date_to:
       filters["date_to"] = request.date_to
 
-    use_semantic = env.SEMANTIC_SEARCH_ENABLED and request.semantic
-    logger.info(
-      f"Search mode: use_semantic={use_semantic} "
-      f"(env={env.SEMANTIC_SEARCH_ENABLED}, req={request.semantic})"
+    query_embedding = self.embedding_service.embed_single(request.query)
+    result = self.client.search(
+      query=request.query,
+      query_embedding=query_embedding,
+      graph_id=graph_id,
+      filters=filters if filters else None,
+      size=request.size,
+      offset=request.offset,
     )
-
-    if use_semantic:
-      query_embedding = self.embedding_service.embed_single(request.query)
-      result = self.client.hybrid_search(
-        query=request.query,
-        query_embedding=query_embedding,
-        graph_id=graph_id,
-        filters=filters if filters else None,
-        size=request.size,
-        offset=request.offset,
-      )
-    else:
-      result = self.client.search(
-        query=request.query,
-        graph_id=graph_id,
-        filters=filters if filters else None,
-        size=request.size,
-        offset=request.offset,
-      )
 
     hits = []
     for hit in result.get("hits", {}).get("hits", []):
@@ -118,7 +103,7 @@ class SearchService:
           element_qname=source.get("element_qname"),
           xbrl_elements=source.get("xbrl_elements"),
           filing_date=source.get("filing_date"),
-          fiscal_year=source.get("fiscal_year"),
+          fiscal_year=source.get("fiscal_year") or None,
           form_type=source.get("form_type"),
           snippet=snippet,
           content_length=source.get("content_length", 0),
@@ -158,7 +143,7 @@ class SearchService:
       section_id=doc.get("section_id"),
       element_qname=doc.get("element_qname"),
       filing_date=doc.get("filing_date"),
-      fiscal_year=doc.get("fiscal_year"),
+      fiscal_year=doc.get("fiscal_year") or None,
       fiscal_period=doc.get("fiscal_period"),
       form_type=doc.get("form_type"),
       accession_number=doc.get("accession_number"),
@@ -346,12 +331,12 @@ _service: SearchService | None = None
 
 
 def get_search_service() -> SearchService | None:
-  """Get the search service singleton. Returns None if TEXT_SEARCH_ENABLED is false."""
+  """Get the search service singleton. Returns None if SEMANTIC_SEARCH_ENABLED is false."""
   global _service
   if _service is not None:
     return _service
 
-  if not env.TEXT_SEARCH_ENABLED:
+  if not env.SEMANTIC_SEARCH_ENABLED:
     return None
 
   try:

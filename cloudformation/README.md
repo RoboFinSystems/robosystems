@@ -227,7 +227,7 @@ Templates have cross-stack dependencies that determine deployment order:
 - `{StackName}-OpenSearchEndpoint` - Domain endpoint URL
 - `{StackName}-OpenSearchDomainArn` - Domain ARN
 
-**Feature-flag gated**: Deployed via `deploy-opensearch.yml` workflow, controlled by `OPENSEARCH_ENABLED_{ENV}` GitHub variable. Application access gated by `TEXT_SEARCH_ENABLED` SSM parameter.
+**Feature-flag gated**: Deployed via `deploy-opensearch.yml` workflow, controlled by `OPENSEARCH_ENABLED_{ENV}` GitHub variable. Application access gated by `SEMANTIC_SEARCH_ENABLED` SSM parameter.
 
 ---
 

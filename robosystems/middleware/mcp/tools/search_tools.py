@@ -1,16 +1,15 @@
-"""Full-text search MCP tools for SEC filing document discovery and retrieval.
+"""Hybrid search MCP tools for SEC filing document discovery and retrieval.
 
 Two-tool pattern:
-1. search-documents: Keyword search returning ranked snippets with metadata
+1. search-documents: Hybrid (BM25 + KNN) search returning ranked snippets with metadata
 2. get-document-section: Drill into a specific result for full content
 
-Uses BM25 keyword matching via OpenSearch. When SEMANTIC_SEARCH_ENABLED is true,
-hybrid search combines BM25 with vector similarity for better conceptual matching.
+All searches use hybrid mode combining keyword matching (BM25) with vector
+similarity (KNN) via a normalization pipeline for balanced scoring.
 """
 
 from typing import Any
 
-from robosystems.config import env
 from robosystems.logger import logger
 
 
@@ -47,7 +46,7 @@ class SearchDocumentsTool(_SearchToolMixin):
   def get_tool_definition(self) -> dict[str, Any]:
     return {
       "name": "search-documents",
-      "description": """Search across SEC filing narratives and disclosures. Searches MD&A, risk factors, business descriptions, cybersecurity disclosures, and other qualitative content. Uses keyword matching (BM25) by default; when semantic search is enabled, combines keyword matching with vector similarity for better conceptual results.
+      "description": """Search across SEC filing narratives and disclosures. Searches MD&A, risk factors, business descriptions, cybersecurity disclosures, and other qualitative content. Uses hybrid search combining keyword matching (BM25) with vector similarity (KNN) for both exact and conceptual results.
 
 **WHEN TO USE:**
 - When the user asks about topics, risks, strategies, or disclosures mentioned in filings
@@ -74,8 +73,8 @@ class SearchDocumentsTool(_SearchToolMixin):
 - Use the element filter to go the other direction: find all disclosures containing a specific XBRL fact
 
 **TIPS:**
-- With semantic search, natural language queries work well (e.g., "trade war concerns", "supply chain disruptions")
-- For exact keyword matching, set semantic=false (e.g., searching for a specific term like "LIBOR")
+- Natural language queries work well (e.g., "trade war concerns", "supply chain disruptions")
+- Exact terms also work — BM25 handles keyword precision while KNN captures conceptual similarity
 - Use entity filter to focus on one company's filings
 - Use section filter (item_1a, item_7) to target specific filing sections
 - Results include XBRL text blocks, extracted narrative sections, and iXBRL disclosures""",
@@ -105,10 +104,6 @@ class SearchDocumentsTool(_SearchToolMixin):
           "fiscal_year": {
             "type": "integer",
             "description": "Optional: filter by fiscal year",
-          },
-          "semantic": {
-            "type": "boolean",
-            "description": "Enable semantic (vector) search for better conceptual matching. Defaults to the SEMANTIC_SEARCH_ENABLED feature flag. Set to false for exact keyword matching only.",
           },
           "size": {
             "type": "integer",
@@ -140,14 +135,10 @@ class SearchDocumentsTool(_SearchToolMixin):
       section=arguments.get("section"),
       element=arguments.get("element"),
       fiscal_year=arguments.get("fiscal_year"),
-      semantic=arguments.get("semantic", env.SEMANTIC_SEARCH_ENABLED),
       size=min(arguments.get("size", 10), 50),
     )
 
-    logger.info(
-      f"MCP search-documents: query='{request.query}' graph_id={graph_id} "
-      f"semantic={request.semantic} env_semantic={env.SEMANTIC_SEARCH_ENABLED}"
-    )
+    logger.info(f"MCP search-documents: query='{request.query}' graph_id={graph_id}")
 
     try:
       response = service.search_documents(graph_id, request)

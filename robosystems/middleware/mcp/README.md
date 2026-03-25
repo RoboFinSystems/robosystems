@@ -65,8 +65,8 @@ Tools are organized into three availability layers:
 
 | Tool | Flag | Description |
 |------|------|-------------|
-| `search-documents` | `TEXT_SEARCH_ENABLED` | Full-text keyword search across filing narratives, disclosures, and text blocks |
-| `get-document-section` | `TEXT_SEARCH_ENABLED` | Retrieve full text of a document section by ID |
+| `search-documents` | `SEMANTIC_SEARCH_ENABLED` | Full-text keyword search across filing narratives, disclosures, and text blocks |
+| `get-document-section` | `SEMANTIC_SEARCH_ENABLED` | Retrieve full text of a document section by ID |
 
 `search-documents` returns ranked results with snippets and metadata. iXBRL disclosure results include `xbrl_elements` — the XBRL fact tags in that section — enabling graph cross-reference via `resolve-element` or `read-graph-cypher`.
 
@@ -211,7 +211,7 @@ MCP_ENABLE_VALIDATION=true             # Enable query validation
 MCP_WORKSPACE_ENABLED=false            # Enable workspace tools
 MCP_MEMORY_ENABLED=false               # Enable write/memory tools
 FACT_GRID_ENABLED=false                # Enable build-fact-grid tool
-TEXT_SEARCH_ENABLED=false              # Enable search-documents and get-document-section tools
+SEMANTIC_SEARCH_ENABLED=false              # Enable search-documents and get-document-section tools
 ```
 
 ## Integration Patterns

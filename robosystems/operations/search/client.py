@@ -1,6 +1,7 @@
 """OpenSearch client wrapper with graph_id tenant isolation.
 
 Every query is filtered by graph_id to ensure multi-tenant isolation.
+All searches use hybrid mode (BM25 + KNN) with score normalization.
 This is a platform-level client — not specific to any adapter.
 """
 
@@ -9,7 +10,33 @@ from typing import Any
 
 from robosystems.logger import logger
 
-# Index mapping definition
+# Search pipeline for hybrid (BM25 + KNN) score normalization.
+# Without this, BM25 scores (~10-40) drown out KNN cosine scores (~0-1).
+# The normalization processor maps both to [0,1] before combining.
+HYBRID_PIPELINE_NAME = "hybrid-search-pipeline"
+HYBRID_PIPELINE_BODY: dict[str, Any] = {
+  "description": "Normalizes and combines BM25 + KNN scores for hybrid search",
+  "phase_results_processors": [
+    {
+      "normalization-processor": {
+        "normalization": {
+          "technique": "min_max",
+        },
+        "combination": {
+          "technique": "arithmetic_mean",
+          "parameters": {
+            # [BM25 weight, KNN weight] — slightly favor semantic relevance
+            "weights": [0.4, 0.6],
+          },
+        },
+      }
+    }
+  ],
+}
+
+# Index mapping — faiss engine for better normalized embedding performance.
+# For normalized embeddings (bge-small-en-v1.5), innerproduct is equivalent
+# to cosine similarity and avoids the per-query normalization overhead.
 INDEX_MAPPING = {
   "mappings": {
     "properties": {
@@ -65,15 +92,14 @@ INDEX_MAPPING = {
       "last_modified": {"type": "date"},
       # Timestamps
       "indexed_at": {"type": "date"},
-      # Embedding (populated by future vector search phase; field reserved now
-      # to avoid index recreation later)
+      # Embedding — faiss engine for normalized embedding performance
       "embedding": {
         "type": "knn_vector",
         "dimension": 384,  # fastembed BAAI/bge-small-en-v1.5
         "method": {
           "name": "hnsw",
-          "space_type": "cosinesimil",
-          "engine": "nmslib",
+          "space_type": "innerproduct",
+          "engine": "faiss",
         },
       },
       "embedding_model": {"type": "keyword"},  # "fastembed" or "bedrock"
@@ -105,20 +131,18 @@ class OpenSearchClient:
     if self._client is None:
       from opensearchpy import OpenSearch
 
-      is_aws = ".es.amazonaws.com" in self.url or ".aoss.amazonaws.com" in self.url
+      host = self.url.replace("https://", "").replace("http://", "").split("/")[0]
+      is_aws = host.endswith(".es.amazonaws.com")
 
       if is_aws:
+        import boto3
         from opensearchpy import AWSV4SignerAuth, RequestsHttpConnection
 
         from robosystems.config import env
 
-        session = __import__("boto3").Session()
+        session = boto3.Session()
         credentials = session.get_credentials()
-        service = "aoss" if ".aoss." in self.url else "es"
-        auth = AWSV4SignerAuth(credentials, env.AWS_REGION, service)
-
-        # Parse host from URL (opensearch-py wants host without scheme)
-        host = self.url.replace("https://", "").replace("http://", "").rstrip("/")
+        auth = AWSV4SignerAuth(credentials, env.AWS_REGION, "es")
         self._client = OpenSearch(
           hosts=[{"host": host, "port": 443}],
           http_auth=auth,
@@ -141,7 +165,7 @@ class OpenSearchClient:
     return self._client
 
   def create_index_if_not_exists(self) -> None:
-    """Create the index with mapping if it doesn't exist."""
+    """Create the index with mapping and hybrid search pipeline if needed."""
     try:
       if not self.client.indices.exists(index=self.index_name):
         self.client.indices.create(index=self.index_name, body=INDEX_MAPPING)
@@ -151,6 +175,24 @@ class OpenSearchClient:
     except Exception as e:
       logger.error(f"Failed to create OpenSearch index: {e}")
       raise
+
+    self._create_hybrid_pipeline()
+
+  def _create_hybrid_pipeline(self) -> None:
+    """Create or update the hybrid search pipeline for score normalization.
+
+    This pipeline normalizes BM25 and KNN scores to the same scale before
+    combining them. Without it, BM25 scores (~10-40) dominate KNN cosine
+    similarity scores (~0-1), making the vector component negligible.
+    """
+    try:
+      self.client.http.put(
+        f"/_search/pipeline/{HYBRID_PIPELINE_NAME}",
+        body=HYBRID_PIPELINE_BODY,
+      )
+      logger.info(f"Created/updated hybrid search pipeline: {HYBRID_PIPELINE_NAME}")
+    except Exception as e:
+      logger.warning(f"Failed to create hybrid search pipeline: {e}")
 
   def index_document(self, document: dict[str, Any]) -> None:
     """Index a single document. Requires graph_id field."""
@@ -268,57 +310,6 @@ class OpenSearchClient:
   def search(
     self,
     query: str,
-    graph_id: str,
-    filters: dict[str, Any] | None = None,
-    size: int = 10,
-    offset: int = 0,
-  ) -> dict[str, Any]:
-    """Search documents with mandatory graph_id filtering.
-
-    Args:
-        query: Search query string
-        graph_id: Required tenant filter
-        filters: Optional additional filters (entity, form_type, section, fiscal_year, etc.)
-        size: Max results to return
-        offset: Pagination offset
-
-    Returns:
-        OpenSearch response with hits and highlights
-    """
-    filter_clauses = self._build_filter_clauses(graph_id, filters)
-
-    search_body: dict[str, Any] = {
-      "query": {
-        "bool": {
-          "must": [
-            {
-              "multi_match": {
-                "query": query,
-                "fields": [
-                  "content",
-                  "section_label^2",
-                  "entity_name^1.5",
-                ],
-                "type": "best_fields",
-              }
-            }
-          ],
-          "filter": filter_clauses,
-        }
-      },
-      "highlight": self._highlight_config(),
-      "size": size,
-      "from": offset,
-      "_source": {
-        "excludes": ["content"],
-      },
-    }
-
-    return self.client.search(index=self.index_name, body=search_body)
-
-  def hybrid_search(
-    self,
-    query: str,
     query_embedding: list[float],
     graph_id: str,
     filters: dict[str, Any] | None = None,
@@ -327,14 +318,17 @@ class OpenSearchClient:
   ) -> dict[str, Any]:
     """Hybrid text + vector search with mandatory graph_id filtering.
 
-    Combines BM25 text matching with KNN vector similarity by nesting both
-    inside a bool.should clause. Documents matching either text or vector
-    (or both) are returned, ranked by combined score.
+    Uses OpenSearch's native hybrid query type with a normalization search
+    pipeline. The pipeline normalizes BM25 and KNN scores to [0,1] via
+    min_max, then combines them with weighted arithmetic mean (0.4 BM25,
+    0.6 KNN). This ensures vector similarity actually influences ranking
+    instead of being drowned out by raw BM25 scores.
 
-    Note on pagination: KNN does not support offset-based pagination natively.
-    When offset > 0, we over-fetch (size + offset) results and let OpenSearch
-    handle the windowing. This is fine for typical result sets but becomes
-    inefficient at very high offsets.
+    Tenant isolation: OpenSearch 2.x doesn't support top-level filters on
+    hybrid queries (that's 3.0+). Instead, filters are applied inside each
+    sub-query — BM25 via bool.filter, KNN via knn.filter. This ensures
+    both sub-queries only score documents belonging to the target graph_id,
+    preventing cross-tenant data leakage in KNN results.
 
     Args:
         query: Search query string
@@ -352,19 +346,37 @@ class OpenSearchClient:
     # Over-fetch for KNN to support offset pagination
     knn_k = min(size + offset, 100)  # Cap at 100 to limit KNN cost
 
+    # Build filter body for use inside sub-queries
+    filter_body: dict[str, Any] = {"bool": {"filter": filter_clauses}}
+
+    # The hybrid query's queries array is positional — index 0 maps to
+    # weight 0 (BM25=0.4) and index 1 maps to weight 1 (KNN=0.6) in
+    # the normalization pipeline.
+    #
+    # Filters are applied INSIDE each sub-query (not as post_filter) to
+    # ensure tenant isolation. With post_filter, KNN would search across
+    # all tenants first and filter after — allowing one tenant's documents
+    # to push another tenant's results out of the top-K.
     search_body: dict[str, Any] = {
       "query": {
-        "bool": {
-          "should": [
+        "hybrid": {
+          "queries": [
             {
-              "multi_match": {
-                "query": query,
-                "fields": [
-                  "content",
-                  "section_label^2",
-                  "entity_name^1.5",
+              "bool": {
+                "must": [
+                  {
+                    "multi_match": {
+                      "query": query,
+                      "fields": [
+                        "content",
+                        "section_label^2",
+                        "entity_name^1.5",
+                      ],
+                      "type": "best_fields",
+                    }
+                  }
                 ],
-                "type": "best_fields",
+                "filter": filter_clauses,
               }
             },
             {
@@ -372,11 +384,11 @@ class OpenSearchClient:
                 "embedding": {
                   "vector": query_embedding,
                   "k": knn_k,
+                  "filter": filter_body,
                 }
               }
             },
           ],
-          "filter": filter_clauses,
         }
       },
       "highlight": self._highlight_config(),
@@ -387,7 +399,11 @@ class OpenSearchClient:
       },
     }
 
-    return self.client.search(index=self.index_name, body=search_body)
+    return self.client.search(
+      index=self.index_name,
+      body=search_body,
+      params={"search_pipeline": HYBRID_PIPELINE_NAME},
+    )
 
   def get_document(self, document_id: str, graph_id: str) -> dict[str, Any] | None:
     """Get a document by ID, with graph_id verification for tenant isolation."""
