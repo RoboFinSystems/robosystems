@@ -13,7 +13,16 @@ MODULE = "robosystems.routers.ledger.trial_balance"
 GRAPH_ID = "kg01234567890abcdef"
 
 TBRow = namedtuple(
-  "TBRow", ["id", "code", "name", "classification", "total_debits", "total_credits"]
+  "TBRow",
+  [
+    "id",
+    "code",
+    "name",
+    "classification",
+    "account_type",
+    "total_debits",
+    "total_credits",
+  ],
 )
 
 
@@ -27,8 +36,8 @@ class TestTrialBalance:
   @pytest.mark.asyncio
   async def test_returns_trial_balance(self):
     rows = [
-      TBRow("acct_1", "1000", "Cash", "asset", 100000, 20000),
-      TBRow("acct_2", "4000", "Revenue", "revenue", 0, 80000),
+      TBRow("acct_1", "1000", "Cash", "asset", "bank", 100000, 20000),
+      TBRow("acct_2", "4000", "Revenue", "revenue", "income", 0, 80000),
     ]
 
     mock_session = MagicMock()

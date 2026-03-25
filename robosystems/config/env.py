@@ -518,6 +518,10 @@ class EnvConfig:
     "MCP_MEMORY_ENABLED",
     get_parameter_value("MCP_MEMORY_ENABLED", "true").lower() == "true",
   )
+  MCP_SEMANTIC_MEMORY_ENABLED = get_bool_env(
+    "MCP_SEMANTIC_MEMORY_ENABLED",
+    get_parameter_value("MCP_SEMANTIC_MEMORY_ENABLED", "false").lower() == "true",
+  )
   MCP_VECTOR_SEARCH_ENABLED = get_bool_env(
     "MCP_VECTOR_SEARCH_ENABLED",
     get_parameter_value("MCP_VECTOR_SEARCH_ENABLED", "false").lower() == "true",

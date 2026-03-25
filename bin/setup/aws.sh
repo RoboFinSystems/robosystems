@@ -215,6 +215,7 @@ function create_ssm_feature_flags() {
         "LOAD_SHEDDING_ENABLED=true"
         "MCP_AUTO_LIMIT_ENABLED=true"
         "MCP_MEMORY_ENABLED=false"
+        "MCP_SEMANTIC_MEMORY_ENABLED=false"
         "MCP_WORKSPACE_ENABLED=false"
         "ORG_MEMBER_INVITATIONS_ENABLED=false"
         "OTEL_ENABLED=false"

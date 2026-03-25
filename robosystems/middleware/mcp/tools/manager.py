@@ -169,10 +169,10 @@ class GraphMCPTools:
       self.search_documents_tool = SearchDocumentsTool(graph_client)
       self.get_document_section_tool = GetDocumentSectionTool(graph_client)
 
-    # Layer 3: Semantic memory tools (gated by TEXT_SEARCH_ENABLED + MCP_MEMORY_ENABLED)
+    # Layer 3: Semantic memory tools (gated by MCP_SEMANTIC_MEMORY_ENABLED)
     self.remember_text_tool = None
     self.recall_text_tool = None
-    if env.TEXT_SEARCH_ENABLED and env.MCP_MEMORY_ENABLED:
+    if env.MCP_SEMANTIC_MEMORY_ENABLED:
       from .semantic_memory import RecallTextTool, RememberTextTool
 
       self.recall_text_tool = RecallTextTool(graph_client)
@@ -511,7 +511,9 @@ class GraphMCPTools:
       elif name == "remember-text":
         if self.remember_text_tool is None:
           raise ValueError(
-            self._tool_unavailable_reason("remember-text", "TEXT_SEARCH_ENABLED")
+            self._tool_unavailable_reason(
+              "remember-text", "MCP_SEMANTIC_MEMORY_ENABLED"
+            )
           )
         result = await self.remember_text_tool.execute(arguments)
         return result if return_raw else json.dumps(result, indent=2)
@@ -519,7 +521,7 @@ class GraphMCPTools:
       elif name == "recall-text":
         if self.recall_text_tool is None:
           raise ValueError(
-            self._tool_unavailable_reason("recall-text", "TEXT_SEARCH_ENABLED")
+            self._tool_unavailable_reason("recall-text", "MCP_SEMANTIC_MEMORY_ENABLED")
           )
         result = await self.recall_text_tool.execute(arguments)
         return result if return_raw else json.dumps(result, indent=2)
