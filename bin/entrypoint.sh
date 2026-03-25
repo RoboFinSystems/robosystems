@@ -83,7 +83,8 @@ run_db_init() {
     sleep 3
     echo "Running database migrations..."
     # Run migrations
-    if uv run alembic upgrade head; then
+    if uv run alembic -c migrations/platform.ini upgrade head && \
+       uv run alembic -c migrations/ledger.ini upgrade head; then
       echo "✓ Migrations completed successfully"
     else
         echo "✗ Migration failed"

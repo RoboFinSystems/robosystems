@@ -9,9 +9,9 @@ This is separate from the platform alembic/env.py because:
 
 from logging.config import fileConfig
 
-from alembic import context
 from sqlalchemy import engine_from_config, pool
 
+from alembic import context
 from robosystems.db.ledger import LedgerBase, get_ledger_database_url
 
 # Import all models to register them on LedgerBase.metadata

@@ -1,17 +1,18 @@
 """add connections table
 
 Revision ID: 55d923d0e3be
-Revises: f599c98cf98c
+Revises: 33b3a136ea29
 Create Date: 2026-02-24 21:39:55.533966
 
 """
 
 import sqlalchemy as sa
+
 from alembic import op
 
 # revision identifiers, used by Alembic.
 revision = "55d923d0e3be"
-down_revision = "96997c4da432"
+down_revision = "33b3a136ea29"
 branch_labels = None
 depends_on = None
 
