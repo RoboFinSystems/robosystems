@@ -81,18 +81,39 @@ class TestBulkIndex:
 
 
 class TestSearch:
-  def test_always_filters_by_graph_id(self, client, mock_opensearch):
-    """Critical security test: every search must filter by graph_id."""
+  def test_bm25_filters_by_graph_id(self, client, mock_opensearch):
+    """Critical security test: BM25 sub-query must filter by graph_id."""
     mock_opensearch.search.return_value = {"hits": {"total": {"value": 0}, "hits": []}}
 
     client.search("test query", DUMMY_EMBEDDING, graph_id="sec")
 
     call_args = mock_opensearch.search.call_args
     body = call_args.kwargs["body"]
-    filter_clauses = body["post_filter"]["bool"]["filter"]
-
-    # First filter must be graph_id term
+    bm25_query = body["query"]["hybrid"]["queries"][0]
+    filter_clauses = bm25_query["bool"]["filter"]
     assert filter_clauses[0] == {"term": {"graph_id": "sec"}}
+
+  def test_knn_filters_by_graph_id(self, client, mock_opensearch):
+    """Critical security test: KNN sub-query must filter by graph_id."""
+    mock_opensearch.search.return_value = {"hits": {"total": {"value": 0}, "hits": []}}
+
+    client.search("test query", DUMMY_EMBEDDING, graph_id="sec")
+
+    call_args = mock_opensearch.search.call_args
+    body = call_args.kwargs["body"]
+    knn_query = body["query"]["hybrid"]["queries"][1]
+    knn_filter = knn_query["knn"]["embedding"]["filter"]
+    assert {"term": {"graph_id": "sec"}} in knn_filter["bool"]["filter"]
+
+  def test_no_post_filter(self, client, mock_opensearch):
+    """Tenant isolation must be inside sub-queries, not post_filter."""
+    mock_opensearch.search.return_value = {"hits": {"total": {"value": 0}, "hits": []}}
+
+    client.search("test", DUMMY_EMBEDDING, graph_id="sec")
+
+    call_args = mock_opensearch.search.call_args
+    body = call_args.kwargs["body"]
+    assert "post_filter" not in body
 
   def test_uses_hybrid_query(self, client, mock_opensearch):
     mock_opensearch.search.return_value = {"hits": {"total": {"value": 0}, "hits": []}}
@@ -104,7 +125,7 @@ class TestSearch:
     assert "hybrid" in body["query"]
     queries = body["query"]["hybrid"]["queries"]
     assert len(queries) == 2
-    assert "multi_match" in queries[0]
+    assert "bool" in queries[0]  # BM25 wrapped in bool for filtering
     assert "knn" in queries[1]
 
   def test_uses_search_pipeline(self, client, mock_opensearch):
@@ -115,15 +136,19 @@ class TestSearch:
     call_args = mock_opensearch.search.call_args
     assert call_args.kwargs["params"]["search_pipeline"] == HYBRID_PIPELINE_NAME
 
-  def test_applies_entity_filter(self, client, mock_opensearch):
+  def test_applies_entity_filter_to_both_subqueries(self, client, mock_opensearch):
     mock_opensearch.search.return_value = {"hits": {"total": {"value": 0}, "hits": []}}
 
     client.search("test", DUMMY_EMBEDDING, graph_id="sec", filters={"entity": "NVDA"})
 
     call_args = mock_opensearch.search.call_args
     body = call_args.kwargs["body"]
-    filter_clauses = body["post_filter"]["bool"]["filter"]
-    assert len(filter_clauses) == 2  # graph_id + entity
+    # BM25 sub-query has graph_id + entity filters
+    bm25_filters = body["query"]["hybrid"]["queries"][0]["bool"]["filter"]
+    assert len(bm25_filters) == 2  # graph_id + entity
+    # KNN sub-query also has the filters
+    knn_filter = body["query"]["hybrid"]["queries"][1]["knn"]["embedding"]["filter"]
+    assert len(knn_filter["bool"]["filter"]) == 2
 
   def test_applies_form_type_filter(self, client, mock_opensearch):
     mock_opensearch.search.return_value = {"hits": {"total": {"value": 0}, "hits": []}}
@@ -134,8 +159,8 @@ class TestSearch:
 
     call_args = mock_opensearch.search.call_args
     body = call_args.kwargs["body"]
-    filter_clauses = body["post_filter"]["bool"]["filter"]
-    assert {"term": {"form_type": "10-K"}} in filter_clauses
+    bm25_filters = body["query"]["hybrid"]["queries"][0]["bool"]["filter"]
+    assert {"term": {"form_type": "10-K"}} in bm25_filters
 
   def test_includes_highlights(self, client, mock_opensearch):
     mock_opensearch.search.return_value = {"hits": {"total": {"value": 0}, "hits": []}}

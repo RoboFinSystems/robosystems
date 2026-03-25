@@ -115,7 +115,8 @@ class OpenSearchClient:
     if self._client is None:
       from opensearchpy import OpenSearch
 
-      is_aws = ".es.amazonaws.com" in self.url
+      host = self.url.replace("https://", "").replace("http://", "").split("/")[0]
+      is_aws = host.endswith(".es.amazonaws.com")
 
       if is_aws:
         import boto3
@@ -126,9 +127,6 @@ class OpenSearchClient:
         session = boto3.Session()
         credentials = session.get_credentials()
         auth = AWSV4SignerAuth(credentials, env.AWS_REGION, "es")
-
-        # Parse host from URL (opensearch-py wants host without scheme)
-        host = self.url.replace("https://", "").replace("http://", "").rstrip("/")
         self._client = OpenSearch(
           hosts=[{"host": host, "port": 443}],
           http_auth=auth,
@@ -304,8 +302,11 @@ class OpenSearchClient:
     0.6 KNN). This ensures vector similarity actually influences ranking
     instead of being drowned out by raw BM25 scores.
 
-    Filters are applied via post_filter (OpenSearch 2.x doesn't support
-    filters inside hybrid queries — that's OpenSearch 3.0+).
+    Tenant isolation: OpenSearch 2.x doesn't support top-level filters on
+    hybrid queries (that's 3.0+). Instead, filters are applied inside each
+    sub-query — BM25 via bool.filter, KNN via knn.filter. This ensures
+    both sub-queries only score documents belonging to the target graph_id,
+    preventing cross-tenant data leakage in KNN results.
 
     Args:
         query: Search query string
@@ -323,22 +324,37 @@ class OpenSearchClient:
     # Over-fetch for KNN to support offset pagination
     knn_k = min(size + offset, 100)  # Cap at 100 to limit KNN cost
 
+    # Build filter body for use inside sub-queries
+    filter_body: dict[str, Any] = {"bool": {"filter": filter_clauses}}
+
     # The hybrid query's queries array is positional — index 0 maps to
     # weight 0 (BM25=0.4) and index 1 maps to weight 1 (KNN=0.6) in
     # the normalization pipeline.
+    #
+    # Filters are applied INSIDE each sub-query (not as post_filter) to
+    # ensure tenant isolation. With post_filter, KNN would search across
+    # all tenants first and filter after — allowing one tenant's documents
+    # to push another tenant's results out of the top-K.
     search_body: dict[str, Any] = {
       "query": {
         "hybrid": {
           "queries": [
             {
-              "multi_match": {
-                "query": query,
-                "fields": [
-                  "content",
-                  "section_label^2",
-                  "entity_name^1.5",
+              "bool": {
+                "must": [
+                  {
+                    "multi_match": {
+                      "query": query,
+                      "fields": [
+                        "content",
+                        "section_label^2",
+                        "entity_name^1.5",
+                      ],
+                      "type": "best_fields",
+                    }
+                  }
                 ],
-                "type": "best_fields",
+                "filter": filter_clauses,
               }
             },
             {
@@ -346,16 +362,11 @@ class OpenSearchClient:
                 "embedding": {
                   "vector": query_embedding,
                   "k": knn_k,
+                  "filter": filter_body,
                 }
               }
             },
           ],
-        }
-      },
-      # Filters via post_filter (hybrid.filter is OpenSearch 3.0+ only)
-      "post_filter": {
-        "bool": {
-          "filter": filter_clauses,
         }
       },
       "highlight": self._highlight_config(),
