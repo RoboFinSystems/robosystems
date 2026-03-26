@@ -2,7 +2,6 @@
 
 Covers:
 - _get_indexed_accessions() composite aggregation pagination
-- _derive_section_label() element name cleanup
 """
 
 from unittest.mock import MagicMock
@@ -10,7 +9,6 @@ from unittest.mock import MagicMock
 import pytest
 
 from robosystems.adapters.sec.pipeline.text_index import (
-  _derive_section_label,
   _get_indexed_accessions,
 )
 
@@ -142,29 +140,3 @@ class TestGetIndexedAccessions:
     call_body = os_client.client.search.call_args.kwargs["body"]
     filters = call_body["query"]["bool"]["filter"]
     assert len(filters) == 1  # Only graph_id
-
-
-@pytest.mark.unit
-class TestDeriveSectionLabel:
-  """Tests for _derive_section_label element name cleanup."""
-
-  def test_strips_text_block_suffix(self):
-    assert _derive_section_label("Risk Factors [Text Block]") == "Risk Factors"
-
-  def test_strips_textblock_suffix(self):
-    assert (
-      _derive_section_label("ManagementDiscussionAndAnalysisTextBlock")
-      == "Management Discussion And Analysis"
-    )
-
-  def test_splits_camel_case(self):
-    assert (
-      _derive_section_label("BusinessDescriptionAndBasisOfPresentation")
-      == "Business Description And Basis Of Presentation"
-    )
-
-  def test_preserves_already_clean_label(self):
-    assert _derive_section_label("Revenue") == "Revenue"
-
-  def test_handles_empty_string(self):
-    assert _derive_section_label("") == ""

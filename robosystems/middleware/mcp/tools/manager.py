@@ -172,12 +172,11 @@ class GraphMCPTools:
     # Layer 3: Semantic memory tools (gated by MCP_SEMANTIC_MEMORY_ENABLED)
     self.remember_text_tool = None
     self.recall_text_tool = None
-    if env.MCP_SEMANTIC_MEMORY_ENABLED:
+    if env.MCP_SEMANTIC_MEMORY_ENABLED and not read_only:
       from .semantic_memory import RecallTextTool, RememberTextTool
 
       self.recall_text_tool = RecallTextTool(graph_client)
-      if not read_only:
-        self.remember_text_tool = RememberTextTool(graph_client)
+      self.remember_text_tool = RememberTextTool(graph_client)
 
     # Cache statistics (inherited from schema tool)
     self._cache_hits = 0

@@ -710,10 +710,9 @@ class TestSecPostStageIndexSensor:
 
       result = list(sec_post_stage_index_sensor(context))
 
-    assert len(result) == 3
+    assert len(result) == 2
     job_names = {r.job_name for r in result}
     assert job_names == {
-      "sec_textblocks_index",
       "sec_narratives_index",
       "sec_ixbrl_index",
     }
@@ -769,7 +768,7 @@ class TestSecPostStageIndexSensor:
 
       result = list(sec_post_stage_index_sensor(context))
 
-    config = result[0].run_config["ops"]["sec_textblocks_indexed"]["config"]
+    config = result[0].run_config["ops"]["sec_narratives_indexed"]["config"]
     assert config["graph_id"] == "sec"
 
   @patch("robosystems.adapters.sec.pipeline.sensors.env")

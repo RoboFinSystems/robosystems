@@ -2,6 +2,7 @@
 
 import base64
 import json
+import os
 import subprocess
 import textwrap
 
@@ -56,12 +57,20 @@ def get_signature_key(key, date_stamp, rn, sn):
     return sign(sign(sign(sign(("AWS4" + key).encode("utf-8"), date_stamp), rn), sn), "aws4_request")
 
 
-def query_os(path, body):
-    url = "https://" + host + path
+def query_os(path, body, method="POST"):
+    import urllib.parse
     data = json.dumps(body)
     t = datetime.datetime.utcnow()
     amz_date = t.strftime("%Y%m%dT%H%M%SZ")
     date_stamp = t.strftime("%Y%m%d")
+
+    # Split path and query string for proper SigV4 signing
+    if "?" in path:
+        canonical_uri, qs = path.split("?", 1)
+        canonical_qs = urllib.parse.urlencode(sorted(urllib.parse.parse_qsl(qs)))
+    else:
+        canonical_uri = path
+        canonical_qs = ""
 
     canonical_headers = (
         f"content-type:application/json\\nhost:{{host}}\\n"
@@ -69,7 +78,7 @@ def query_os(path, body):
     )
     signed_headers = "content-type;host;x-amz-date;x-amz-security-token"
     payload_hash = hashlib.sha256(data.encode("utf-8")).hexdigest()
-    canonical_request = f"POST\\n{{path}}\\n\\n{{canonical_headers}}\\n{{signed_headers}}\\n{{payload_hash}}"
+    canonical_request = f"{{method}}\\n{{canonical_uri}}\\n{{canonical_qs}}\\n{{canonical_headers}}\\n{{signed_headers}}\\n{{payload_hash}}"
 
     credential_scope = f"{{date_stamp}}/{{region}}/es/aws4_request"
     string_to_sign = (
@@ -92,13 +101,16 @@ def query_os(path, body):
         "Authorization": auth,
     }}
 
-    req = urllib.request.Request(url, data=data.encode(), headers=headers)
+    url = "https://" + host + path
+    req = urllib.request.Request(url, data=data.encode(), headers=headers, method=method)
     resp = urllib.request.urlopen(req, context=ssl.create_default_context())
     return json.loads(resp.read().decode())
 
 
 action = "{action}"
 graph_id = "{graph_id}"
+source_type = "{source_type}"
+dry_run = "{dry_run}" == "true"
 
 if action == "count":
     total = query_os(f"/{{index_name}}/_count", {{"query": {{"term": {{"graph_id": graph_id}}}}}})
@@ -156,6 +168,25 @@ elif action == "search":
         "total": result["hits"]["total"]["value"],
         "hits": result["hits"]["hits"],
     }}))
+
+elif action == "delete":
+    # Build query: filter by graph_id + optional source_type
+    filters = [{{"term": {{"graph_id": graph_id}}}}]
+    if source_type:
+        filters.append({{"term": {{"source_type": source_type}}}})
+
+    query = {{"query": {{"bool": {{"filter": filters}}}}}}
+
+    # Count matching documents
+    count = query_os(f"/{{index_name}}/_count", query)
+    doc_count = count["count"]
+
+    if doc_count == 0 or dry_run:
+        print(json.dumps({{"count": doc_count, "deleted": 0, "task": None}}))
+    else:
+        # Async delete-by-query
+        result = query_os(f"/{{index_name}}/_delete_by_query?wait_for_completion=false", query)
+        print(json.dumps({{"count": doc_count, "deleted": doc_count, "task": result.get("task")}}))
 """
 
 
@@ -177,7 +208,9 @@ def _get_opensearch_endpoint(environment: str, aws_profile: str) -> str:
     "--region",
     "us-east-1",
   ]
-  result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+  # Strip AWS_ENDPOINT_URL to avoid hitting LocalStack when run locally
+  sub_env = {k: v for k, v in os.environ.items() if k != "AWS_ENDPOINT_URL"}
+  result = subprocess.run(cmd, capture_output=True, text=True, check=True, env=sub_env)
   endpoint = result.stdout.strip()
   if not endpoint or endpoint == "None":
     raise click.ClickException(f"OpenSearch endpoint not found for {environment}")
@@ -191,6 +224,8 @@ def _run_opensearch_script(
   graph_id: str = "sec",
   query_text: str = "",
   size: int = 10,
+  source_type: str = "",
+  dry_run: bool = False,
 ) -> dict:
   """Run OpenSearch query script on bastion via SSM."""
   endpoint = _get_opensearch_endpoint(client.environment, client.aws_profile)
@@ -202,6 +237,8 @@ def _run_opensearch_script(
     action=action,
     graph_id=graph_id,
     size=size,
+    source_type=source_type,
+    dry_run="true" if dry_run else "false",
   )
 
   # Base64 encode script and query text to avoid shell quoting issues.
@@ -337,3 +374,65 @@ def search_query(client, query_text, graph_id, size, json_output):
       snippet = highlights[0].replace("\n", " ")
       console.print(f"     {textwrap.shorten(snippet, width=120, placeholder='...')}")
     console.print()
+
+
+@search.command("delete")
+@click.argument("source_type")
+@click.option("--graph-id", default="sec", help="Graph ID (default: sec)")
+@click.option("--force", is_flag=True, help="Skip confirmation prompt")
+@click.pass_obj
+def search_delete(client, source_type, graph_id, force):
+  """Delete documents by source_type from the index.
+
+  Runs an async delete-by-query on OpenSearch. Use 'search count' to monitor progress.
+
+  Examples:
+
+    just admin prod search delete xbrl_textblock
+
+    just admin prod search delete ixbrl_disclosure --graph-id sec
+
+    just admin prod search delete narrative_section --force
+  """
+  # Dry run to get count
+  data = _run_opensearch_script(
+    client,
+    action="delete",
+    graph_id=graph_id,
+    source_type=source_type,
+    dry_run=True,
+  )
+
+  count = data.get("count", 0)
+  if count == 0:
+    console.print(
+      f"\n[yellow]No documents found with source_type={source_type} in graph_id={graph_id}[/yellow]\n"
+    )
+    return
+
+  if not force:
+    console.print(
+      f"\n[bold red]Will delete {count:,} documents[/bold red] "
+      f"(source_type={source_type}, graph_id={graph_id})"
+    )
+    if not click.confirm("Proceed?"):
+      console.print("[dim]Cancelled.[/dim]")
+      return
+
+  # Execute the delete
+  data = _run_opensearch_script(
+    client,
+    action="delete",
+    graph_id=graph_id,
+    source_type=source_type,
+  )
+
+  task_id = data.get("task")
+  deleted = data.get("deleted", 0)
+
+  console.print(f"\n[green]Delete task started[/green] for {deleted:,} documents")
+  if task_id:
+    console.print(f"[dim]Task ID: {task_id}[/dim]")
+  console.print(
+    f"\nRun [bold]just admin {client.environment} search count --graph-id {graph_id}[/bold] to monitor progress.\n"
+  )
