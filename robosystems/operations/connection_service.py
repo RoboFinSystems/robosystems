@@ -87,8 +87,10 @@ class ConnectionService:
 
       return conn.to_dict()
 
-    except Exception as e:
-      logger.error(f"Failed to create connection for entity {entity_id}: {e}")
+    except Exception:
+      logger.error(
+        "Failed to create connection for entity %s", entity_id, exc_info=True
+      )
       raise
     finally:
       if session_created:
@@ -118,12 +120,12 @@ class ConnectionService:
     try:
       conn = Connection.get_by_id(connection_id, session)
       if not conn:
-        logger.warning(f"Connection not found: {connection_id}")
+        logger.warning("Connection not found: %s", connection_id)
         return None
 
       # Check user access (system user can access any connection)
       if user_id and user_id != SYSTEM_USER_ID and conn.user_id != user_id:
-        logger.warning(f"User {user_id} not authorized for connection {connection_id}")
+        logger.warning("User not authorized for connection %s", connection_id)
         return None
 
       result = conn.to_dict()
@@ -144,8 +146,8 @@ class ConnectionService:
 
       return result
 
-    except Exception as e:
-      logger.error(f"Failed to get connection {connection_id}: {e}")
+    except Exception:
+      logger.error("Failed to get connection %s", connection_id, exc_info=True)
       return None
     finally:
       if session_created:
@@ -201,8 +203,8 @@ class ConnectionService:
 
       return result
 
-    except Exception as e:
-      logger.error(f"Failed to list connections: {e}")
+    except Exception:
+      logger.error("Failed to list connections", exc_info=True)
       return []
     finally:
       if session_created:
@@ -242,8 +244,8 @@ class ConnectionService:
           session=session,
         )
       return True
-    except Exception as e:
-      logger.error(f"Failed to update credentials for {connection_id}: {e}")
+    except Exception:
+      logger.error("Failed to update credentials for %s", connection_id, exc_info=True)
       return False
     finally:
       if session_created:
@@ -276,8 +278,8 @@ class ConnectionService:
         return True
       logger.warning(f"Connection {connection_id} not found for last_sync update")
       return False
-    except Exception as e:
-      logger.error(f"Failed to update last_sync for {connection_id}: {e}")
+    except Exception:
+      logger.error("Failed to update last_sync for %s", connection_id, exc_info=True)
       return False
     finally:
       if session_created:
@@ -320,8 +322,8 @@ class ConnectionService:
       logger.info(f"Deleted connection {connection_id}")
       return True
 
-    except Exception as e:
-      logger.error(f"Failed to delete connection {connection_id}: {e}")
+    except Exception:
+      logger.error("Failed to delete connection %s", connection_id, exc_info=True)
       return False
     finally:
       if session_created:
@@ -344,8 +346,10 @@ class ConnectionService:
         logger.warning(f"Marked connection {connection_id} with error status")
         return True
       return False
-    except Exception as e:
-      logger.error(f"Failed to mark connection error for {connection_id}: {e}")
+    except Exception:
+      logger.error(
+        "Failed to mark connection error for %s", connection_id, exc_info=True
+      )
       return False
     finally:
       if session_created:
@@ -368,8 +372,10 @@ class ConnectionService:
         logger.info(f"Marked connection {connection_id} as connected")
         return True
       return False
-    except Exception as e:
-      logger.error(f"Failed to mark connection connected for {connection_id}: {e}")
+    except Exception:
+      logger.error(
+        "Failed to mark connection connected for %s", connection_id, exc_info=True
+      )
       return False
     finally:
       if session_created:
@@ -446,8 +452,8 @@ class ConnectionService:
       logger.info(f"Updated connection {connection_id}")
       return True
 
-    except Exception as e:
-      logger.error(f"Failed to update connection {connection_id}: {e}")
+    except Exception:
+      logger.error("Failed to update connection %s", connection_id, exc_info=True)
       return False
     finally:
       if session_created:

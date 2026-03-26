@@ -1,30 +1,42 @@
 # RoboSystems
 
-RoboSystems is an enterprise-grade financial intelligence platform that unifies structured data, document search, and AI memory — transforming complex financial and operational data into actionable intelligence.
+RoboSystems is a financial intelligence platform with a base + extensions architecture. Each extension defines a domain ontology that drives dedicated APIs, data pipelines, and AI agent tools.
 
-- **Knowledge Graph**: Graph database technology for modeling complex financial relationships and structured XBRL facts
-- **RoboLedger**: Dual-mode accounting engine — OLAP (graph-backed) for analytics and OLTP (PostgreSQL-backed) for read-write general ledger operations
+- **LadybugDB Graph Database**: Embedded columnar graph database with native DuckDB staging, LanceDB vector search, and tiered infrastructure
+- **Schema Extensions**: Domain schemas that model business domains as graph structures — the foundation for everything built on top
+- **[RoboLedger](https://roboledger.ai)**: Accounting and financial reporting extension with OLTP general ledger, QuickBooks ELT pipeline, SEC XBRL reporting, and chart of accounts
+- **[RoboInvestor](https://roboinvestor.ai)**: Portfolio management and investment tracking extension (schema + frontend, OLTP planned)
 - **Document Search**: Full-text and semantic search across SEC filings, uploaded documents, and connected sources via OpenSearch
-- **AI-Native Architecture**: Context graphs built with embeddings, semantic enrichment, and confidence scoring for LLM-powered analytics
-- **Model Context Protocol (MCP)**: Standardized server and [client](https://www.npmjs.com/package/@robosystems/mcp) for LLM integration
+- **AI-Native Architecture**: Context graphs with embeddings, semantic enrichment, and confidence scoring for LLM-powered analytics
+- **Model Context Protocol (MCP)**: Standardized server and [client](https://www.npmjs.com/package/@robosystems/mcp) for LLM integration with schema-aware tools
 - **Multi-Source Data Integration**: SEC XBRL filings, QuickBooks accounting data via dbt pipelines, and custom financial datasets
 - **Enterprise-Ready Infrastructure**: Multi-tenant architecture with tiered scaling and production-grade query management
 - **Developer-First API**: RESTful API designed for integration with financial applications
 
-## Core Features
+## Platform
 
-- **LadybugDB Graph Database**: Purpose-built embedded graph database with columnar storage optimized for financial analytics
-- **RoboLedger OLTP**: Schema-per-tenant PostgreSQL ledger with accounts, transactions, journal entries, line items, dimensions, and classification rules
+The platform provides the core infrastructure that all extensions build on:
+
 - **Dedicated Infrastructure**: Tiered graph infrastructure with dedicated instances and configurable memory allocation
 - **Subgraphs (Workspaces)**: AI memory graphs, data workspaces with fork & publish, and isolated environments for development and team collaboration
 - **AI Agent Interface**: Natural language financial analysis with text-to-Cypher via Model Context Protocol (MCP)
-- **Entity & Generic Graphs**: Curated schemas for RoboLedger/RoboInvestor, plus custom schema support
 - **Shared Repositories**: SEC XBRL filings knowledge graph for context mining and benchmarking
-- **QuickBooks Integration**: dbt-powered accounting pipeline with extract, transform, and graph materialization via Dagster
 - **Document Management**: Upload, index, and search documents with full-text and semantic search via OpenSearch
 - **DuckDB Staging System**: High-performance data validation and bulk ingestion pipeline
 - **Dagster Orchestration**: Data pipeline orchestration for SEC filings, QuickBooks sync, backups, billing, and scheduled jobs
 - **Credit-Based Billing**: Flexible credits for AI operations based on token usage
+
+## Extensions
+
+Extensions start as graph schemas and grow into full products with OLTP databases, API routes, data pipelines, and dedicated frontend apps. See [Schema Extensions](/robosystems/schemas/README.md) for details.
+
+### [RoboLedger](https://roboledger.ai)
+
+Accounting and financial reporting extension. OLTP general ledger with schema-per-tenant PostgreSQL (accounts, transactions, journal entries, line items, dimensions), QuickBooks ELT pipeline via dbt/Dagster, SEC XBRL financial reporting, and chart of accounts. API routes under `/v1/ledger/*`, feature-flagged via `LEDGER_ENABLED`.
+
+### [RoboInvestor](https://roboinvestor.ai)
+
+Portfolio management and investment tracking extension with securities, positions, trades, benchmarks, market data, and risk. Dedicated frontend app. OLTP database and API routes planned.
 
 ## Quick Start
 
@@ -135,13 +147,15 @@ RoboSystems is built on a modern, scalable architecture with:
 **Application Layer:**
 
 - FastAPI REST API with versioned endpoints
-- MCP Server for AI-powered graph database access
+- Extension API routes feature-flagged by base name (e.g., `LEDGER_ENABLED` → `/v1/ledger/*`)
+- MCP Server for AI-powered graph database access with schema-aware tools
 - Agent Interface for text-to-Cypher natural language queries
 - Dagster for data pipeline orchestration and background jobs
 
 **LadybugDB Graph Database:** ([configuration](/.github/configs/graph.yml))
 
 - Embedded columnar graph database purpose-built for financial analytics
+- Base + extension schema architecture — extensions define domain models
 - Native DuckDB integration for high-performance staging and ingestion
 - LanceDB vector search for semantic element resolution (IVF-PQ indexes, 384-dim embeddings)
 - Tiered infrastructure with configurable memory, rate limits, and subgraph allocations
@@ -149,7 +163,7 @@ RoboSystems is built on a modern, scalable architecture with:
 
 **Data Layer:**
 
-- PostgreSQL for IAM, graph metadata, Dagster, and RoboLedger OLTP (schema-per-tenant)
+- PostgreSQL for IAM, graph metadata, Dagster, and extension OLTP databases (schema-per-tenant)
 - OpenSearch for full-text and semantic document search (BM25 + KNN)
 - Valkey for caching, SSE messaging, and rate limiting
 - AWS S3 for data lake storage and static assets

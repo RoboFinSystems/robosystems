@@ -11,7 +11,7 @@ import re
 from typing import Any
 
 # Heading pattern: # through ###### at start of line
-_HEADING_PATTERN = re.compile(r"^(#{1,6})\s+(.+)$", re.MULTILINE)
+_HEADING_PATTERN = re.compile(r"^(#{1,6}) (\S.*)$", re.MULTILINE)
 
 # Non-alphanumeric characters to strip from section IDs
 _SECTION_ID_STRIP = re.compile(r"[^a-z0-9-]")

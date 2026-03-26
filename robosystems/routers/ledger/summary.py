@@ -1,18 +1,22 @@
 """Ledger summary endpoint."""
 
-from fastapi import APIRouter, Depends, Path
+import logging
+
+from fastapi import APIRouter, Depends, HTTPException, Path
 from sqlalchemy import func, select
+from sqlalchemy.exc import ProgrammingError
 
 from robosystems.db.ledger import oltp_session
 from robosystems.db.platform import get_db_session
 from robosystems.middleware.auth.dependencies import get_current_user_with_graph
 from robosystems.middleware.graph.types import GRAPH_OR_SUBGRAPH_ID_PATTERN
 from robosystems.middleware.rate_limits import subscription_aware_rate_limit_dependency
-from robosystems.models.api.common import create_error_response
 from robosystems.models.api.ledger.summary import LedgerSummaryResponse
 from robosystems.models.iam import User
 from robosystems.models.iam.connection import Connection
 from robosystems.models.ledger import Account, Entry, LineItem, Transaction
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -50,15 +54,15 @@ async def get_summary(
       earliest = date_range[0]
       latest = date_range[1]
   except ValueError:
-    raise create_error_response(
-      404, "Ledger not initialized. Connect a data source first."
+    raise HTTPException(
+      status_code=404,
+      detail="Ledger not initialized. Connect a data source first.",
     )
-  except Exception as e:
-    if "schema" in str(e).lower() or "does not exist" in str(e).lower():
-      raise create_error_response(
-        404, "Ledger not initialized. Connect a data source first."
-      )
-    raise
+  except ProgrammingError:
+    raise HTTPException(
+      status_code=404,
+      detail="Ledger not initialized. Connect a data source first.",
+    )
 
   # Connection info from platform DB
   connection_count = 0
@@ -76,7 +80,9 @@ async def get_summary(
     finally:
       db.close()
   except Exception:
-    pass
+    logger.warning(
+      "Failed to fetch connection metadata for %s", graph_id, exc_info=True
+    )
 
   return LedgerSummaryResponse(
     graph_id=graph_id,

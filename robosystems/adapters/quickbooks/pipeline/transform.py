@@ -5,6 +5,7 @@ OLTP tables in DuckDB for loading into PostgreSQL.
 """
 
 import json
+import os
 import subprocess
 
 from dagster import AssetExecutionContext, MaterializeResult, asset
@@ -71,7 +72,7 @@ def qb_transform(
     text=True,
     cwd=str(DBT_PROJECT_DIR),
     env={
-      **__import__("os").environ,
+      **os.environ,
       "DBT_DUCKDB_PATH": str(duckdb_path),
     },
   )

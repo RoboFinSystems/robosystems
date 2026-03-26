@@ -12,7 +12,7 @@ target-path: "target"
 clean-targets: ["target", "dbt_packages"]
 
 vars:
-  realm_id: "9341452700148642"
+  realm_id: "0000000000000000"
   entity_identifier: ""
   qb_base_uri: "https://quickbooks.intuit.com"
   rs_base_uri: "https://api.robosystems.io"

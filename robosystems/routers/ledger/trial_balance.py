@@ -2,14 +2,14 @@
 
 from datetime import date
 
-from fastapi import APIRouter, Depends, Path, Query
+from fastapi import APIRouter, Depends, HTTPException, Path, Query
 from sqlalchemy import text
+from sqlalchemy.exc import ProgrammingError
 
 from robosystems.db.ledger import oltp_session
 from robosystems.middleware.auth.dependencies import get_current_user_with_graph
 from robosystems.middleware.graph.types import GRAPH_OR_SUBGRAPH_ID_PATTERN
 from robosystems.middleware.rate_limits import subscription_aware_rate_limit_dependency
-from robosystems.models.api.common import create_error_response
 from robosystems.models.api.ledger import cents_to_dollars
 from robosystems.models.api.ledger.trial_balance import (
   TrialBalanceResponse,
@@ -82,12 +82,12 @@ async def get_trial_balance(
         total_credits=grand_credits,
       )
   except ValueError:
-    raise create_error_response(
-      404, "Ledger not initialized. Connect a data source first."
+    raise HTTPException(
+      status_code=404,
+      detail="Ledger not initialized. Connect a data source first.",
     )
-  except Exception as e:
-    if "schema" in str(e).lower() or "does not exist" in str(e).lower():
-      raise create_error_response(
-        404, "Ledger not initialized. Connect a data source first."
-      )
-    raise
+  except ProgrammingError:
+    raise HTTPException(
+      status_code=404,
+      detail="Ledger not initialized. Connect a data source first.",
+    )
