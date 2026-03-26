@@ -3,12 +3,15 @@
 SEC Repository Demo - Query Examples
 
 Provides preset queries and interactive exploration for the SEC shared repository.
+Includes both graph queries (Cypher) and document search (OpenSearch).
 
 Usage:
     uv run query_examples.py                      # Interactive mode
     uv run query_examples.py --all                # Run all preset queries
     uv run query_examples.py --preset entities    # Run a specific preset
     uv run query_examples.py --query "MATCH (n:Entity) RETURN n.name LIMIT 10"
+    uv run query_examples.py --search "tariff risk"          # Text search
+    uv run query_examples.py --search "AI strategy" --entity NVDA
 """
 
 from __future__ import annotations
@@ -255,6 +258,98 @@ LIMIT 25
 }
 
 
+# ── Document Search Presets (OpenSearch) ──────────────────────────────────────
+# These use hybrid search (BM25 + KNN) over indexed filing text content.
+# Three source types are available:
+#   - xbrl_textblock: XBRL text blocks (MD&A, policies, accounting narratives)
+#   - narrative_section: 10-K/10-Q narrative sections (Item 1, 1A, 7, etc.)
+#   - ixbrl_disclosure: iXBRL disclosure sections with XBRL element metadata
+
+SEARCH_PRESETS = {
+  "risk_factors": {
+    "description": "Search for risk factor disclosures across all entities",
+    "params": {
+      "query": "material risks and uncertainties",
+      "form_type": "10-K",
+      "section": "item_1a",
+      "size": 10,
+    },
+  },
+  "ai_strategy": {
+    "description": "Find mentions of AI and machine learning strategy",
+    "params": {
+      "query": "artificial intelligence machine learning strategy",
+      "size": 10,
+    },
+  },
+  "revenue_recognition": {
+    "description": "Search for revenue recognition policy disclosures",
+    "params": {
+      "query": "revenue recognition policy",
+      "source_type": "xbrl_textblock",
+      "size": 10,
+    },
+  },
+  "cybersecurity": {
+    "description": "Find cybersecurity risk and incident disclosures",
+    "params": {
+      "query": "cybersecurity risk management incident",
+      "size": 10,
+    },
+  },
+  "goodwill_impairment": {
+    "description": "Search for goodwill and impairment discussions",
+    "params": {
+      "query": "goodwill impairment testing",
+      "element": "us-gaap:Goodwill",
+      "size": 10,
+    },
+  },
+  "segment_reporting": {
+    "description": "Find operating segment descriptions and breakdowns",
+    "params": {
+      "query": "operating segments reportable segment",
+      "source_type": "ixbrl_disclosure",
+      "size": 10,
+    },
+  },
+  "mda_overview": {
+    "description": "Management discussion and analysis highlights (10-K Item 7)",
+    "params": {
+      "query": "management discussion analysis results operations",
+      "form_type": "10-K",
+      "section": "item_7",
+      "size": 10,
+    },
+  },
+  "mda_quarterly": {
+    "description": "Quarterly MD&A highlights (10-Q Item 2)",
+    "params": {
+      "query": "management discussion analysis results operations",
+      "form_type": "10-Q",
+      "section": "item_2",
+      "size": 10,
+    },
+  },
+  "supply_chain": {
+    "description": "Search for supply chain and sourcing disclosures",
+    "params": {
+      "query": "supply chain sourcing manufacturing concentration",
+      "size": 10,
+    },
+  },
+  "tariff_trade": {
+    "description": "Search for tariff, trade policy, and geopolitical risk mentions (10-K)",
+    "params": {
+      "query": "tariff trade policy geopolitical international",
+      "form_type": "10-K",
+      "section": "item_1a",
+      "size": 10,
+    },
+  },
+}
+
+
 def load_credentials(credentials_path: Path) -> dict:
   if not credentials_path.exists():
     raise FileNotFoundError(
@@ -306,32 +401,108 @@ def run_and_display(
     print_error(f"Query failed: {exc}")
 
 
+def execute_search(
+  client: RoboSystemsExtensions,
+  graph_id: str,
+  query: str,
+  entity: str | None = None,
+  form_type: str | None = None,
+  section: str | None = None,
+  element: str | None = None,
+  source_type: str | None = None,
+  size: int = 10,
+) -> dict:
+  """Execute a document search via OpenSearch."""
+  response = client.documents.search(
+    graph_id,
+    query=query,
+    entity=entity,
+    form_type=form_type,
+    section=section,
+    element=element,
+    source_type=source_type,
+    size=size,
+  )
+  hits = []
+  for hit in getattr(response, "hits", []):
+    hits.append({
+      "score": f"{getattr(hit, 'score', 0):.3f}",
+      "entity": getattr(hit, "entity_ticker", "") or "",
+      "form": getattr(hit, "form_type", "") or "",
+      "section": getattr(hit, "section_label", "") or getattr(hit, "element_qname", "") or "",
+      "source": getattr(hit, "source_type", "") or "",
+      "filing_date": getattr(hit, "filing_date", "") or "",
+      "snippet": (getattr(hit, "snippet", "") or "")[:120],
+    })
+  return {
+    "total": getattr(response, "total", 0),
+    "hits": hits,
+  }
+
+
+def run_search_and_display(
+  client: RoboSystemsExtensions,
+  graph_id: str,
+  name: str,
+  params: dict,
+  description: str | None = None,
+) -> None:
+  """Run a document search and display results."""
+  print_info_section(name, subtitle=description)
+
+  try:
+    result = execute_search(client, graph_id, **params)
+    if not result["hits"]:
+      print_warning("No search results.")
+      return
+    print_table(
+      result["hits"],
+      title=name,
+      row_count_label=f"{result['total']} total matches",
+    )
+  except Exception as exc:
+    print_error(f"Search failed: {exc}")
+
+
 def run_presets(
   client: RoboSystemsExtensions, graph_id: str, presets: list[str]
 ) -> None:
   for preset in presets:
+    # Check graph query presets first, then search presets
     details = PRESET_QUERIES.get(preset)
-    if not details:
-      print_warning(f"Unknown preset: {preset}")
+    if details:
+      run_and_display(
+        client,
+        graph_id,
+        name=f"Preset: {preset}",
+        query=details["query"],
+        description=details.get("description"),
+      )
       continue
-    run_and_display(
-      client,
-      graph_id,
-      name=f"Preset: {preset}",
-      query=details["query"],
-      description=details.get("description"),
-    )
+
+    search_details = SEARCH_PRESETS.get(preset)
+    if search_details:
+      run_search_and_display(
+        client,
+        graph_id,
+        name=f"Search: {preset}",
+        params=search_details["params"],
+        description=search_details.get("description"),
+      )
+      continue
+
+    print_warning(f"Unknown preset: {preset}")
 
 
 def interactive_mode(client: RoboSystemsExtensions, graph_id: str) -> None:
   print_info_section(
     "SEC Repository Interactive Mode",
-    subtitle="Enter Cypher queries, or type 'help', 'presets', or 'quit'.",
+    subtitle="Enter Cypher queries, search commands, or type 'help'.",
   )
 
   while True:
     try:
-      user_input = input("\ncypher> ").strip()
+      user_input = input("\nsec> ").strip()
     except (EOFError, KeyboardInterrupt):
       print("\nExiting interactive mode.")
       break
@@ -343,19 +514,38 @@ def interactive_mode(client: RoboSystemsExtensions, graph_id: str) -> None:
       break
     if user_input.lower() in {"help", "?"}:
       print("Commands:")
-      print("  presets         - list available preset queries")
-      print("  preset <name>   - run a specific preset")
-      print("  quit / exit     - leave interactive mode")
+      print("  presets              - list all presets (graph + search)")
+      print("  preset <name>        - run a specific preset")
+      print("  search <query>       - full-text search across filings")
+      print("  search <query> @NVDA - search filtered by entity")
+      print("  quit / exit          - leave interactive mode")
       print("  Any other input is treated as a Cypher query.")
       continue
     if user_input.lower() == "presets":
-      print("Available presets:")
+      print("\nGraph Query Presets:")
       for preset, details in PRESET_QUERIES.items():
-        print(f"  - {preset}: {details['description']}")
+        print(f"  {preset}: {details['description']}")
+      print("\nDocument Search Presets:")
+      for preset, details in SEARCH_PRESETS.items():
+        print(f"  {preset}: {details['description']}")
       continue
     if user_input.lower().startswith("preset "):
       preset_name = user_input.split(maxsplit=1)[1]
       run_presets(client, graph_id, [preset_name])
+      continue
+    if user_input.lower().startswith("search "):
+      search_text = user_input.split(maxsplit=1)[1]
+      # Parse optional @ENTITY filter (e.g., "tariff risk @NVDA")
+      entity_filter = None
+      if " @" in search_text:
+        search_text, entity_filter = search_text.rsplit(" @", 1)
+        entity_filter = entity_filter.strip()
+      run_search_and_display(
+        client,
+        graph_id,
+        name="Search",
+        params={"query": search_text.strip(), "entity": entity_filter},
+      )
       continue
 
     run_and_display(client, graph_id, "Custom Query", user_input)
@@ -387,6 +577,22 @@ def parse_args() -> argparse.Namespace:
   parser.add_argument(
     "--query",
     help="Run a custom Cypher query and exit",
+  )
+  parser.add_argument(
+    "--search",
+    help="Run a document text search and exit",
+  )
+  parser.add_argument(
+    "--entity",
+    help="Filter search by entity ticker (e.g., NVDA). Used with --search.",
+  )
+  parser.add_argument(
+    "--form-type",
+    help="Filter search by form type (e.g., 10-K). Used with --search.",
+  )
+  parser.add_argument(
+    "--section",
+    help="Filter search by section (e.g., item_1a). Used with --search.",
   )
   parser.add_argument(
     "--credentials-file",
@@ -421,11 +627,29 @@ def main() -> None:
 
   if args.list:
     print_info_section("Available SEC Query Presets")
+    print("\nGraph Queries (Cypher):")
     for name, details in PRESET_QUERIES.items():
-      print(f"- {name}: {details['description']}")
+      print(f"  {name}: {details['description']}")
+    print("\nDocument Search (OpenSearch):")
+    for name, details in SEARCH_PRESETS.items():
+      print(f"  {name}: {details['description']}")
     return
 
   client = build_client(api_key, args.base_url)
+
+  if args.search:
+    run_search_and_display(
+      client,
+      graph_id,
+      name="Search",
+      params={
+        "query": args.search,
+        "entity": args.entity,
+        "form_type": args.form_type,
+        "section": args.section,
+      },
+    )
+    return
 
   if args.query:
     run_and_display(client, graph_id, "Custom Query", args.query)
@@ -437,6 +661,7 @@ def main() -> None:
 
   if args.all:
     run_presets(client, graph_id, list(PRESET_QUERIES))
+    run_presets(client, graph_id, list(SEARCH_PRESETS))
     return
 
   interactive_mode(client, graph_id)
