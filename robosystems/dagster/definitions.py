@@ -123,6 +123,13 @@ if env.CONNECTION_QUICKBOOKS_ENABLED:
   qb = qb_pipeline()
 else:
   qb = _empty_pipeline
+
+if env.LEDGER_ENABLED:
+  from robosystems.dagster.jobs.ledger import ledger_materialize_job as _ledger_mat_job
+
+  _ledger_jobs: list = [_ledger_mat_job]
+else:
+  _ledger_jobs = []
 # erp = erp_pipeline()
 
 # Collect shared replica deps from all enabled adapter pipelines
@@ -200,6 +207,8 @@ all_jobs = [
   *sec["jobs"],
   # Adapter: QuickBooks pipeline
   *qb["jobs"],
+  # Platform: Ledger materialization (OLTP → graph)
+  *_ledger_jobs,
 ]
 
 all_schedules = [

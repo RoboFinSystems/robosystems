@@ -359,6 +359,8 @@ class DuckDBConnectionPool:
       conn.execute("LOAD httpfs")
       conn.execute("INSTALL parquet")
       conn.execute("LOAD parquet")
+      conn.execute("INSTALL postgres_scanner")
+      conn.execute("LOAD postgres_scanner")
 
       # Configure S3 access based on environment
       if env.ENVIRONMENT in ["prod", "staging"]:

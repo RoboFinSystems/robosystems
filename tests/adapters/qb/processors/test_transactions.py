@@ -148,7 +148,7 @@ class TestDbtBuild:
 
       # Verify row counts
       acct_count = con.execute("SELECT count(*) FROM accounts").fetchone()[0]
-      assert acct_count == 15, f"Expected 15 accounts, got {acct_count}"
+      assert acct_count == 16, f"Expected 16 accounts, got {acct_count}"
 
       tx_count = con.execute("SELECT count(*) FROM transactions").fetchone()[0]
       assert tx_count == 15, f"Expected 15 transactions, got {tx_count}"

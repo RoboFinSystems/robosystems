@@ -1,1 +1,1 @@
-"""RoboLedger operations — OLTP loading and ledger business logic."""
+"""RoboLedger operations — OLTP loading, materialization, and ledger business logic."""
