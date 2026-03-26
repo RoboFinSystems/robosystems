@@ -95,7 +95,6 @@ from robosystems.adapters.sec.pipeline.jobs import (
   sec_process_job,
   sec_stage_job,
   sec_staged_materialize_job,
-  sec_textblocks_index_job,
   sec_vector_s3_publish_job,
 )
 from robosystems.adapters.sec.pipeline.materialize import (
@@ -125,7 +124,6 @@ from robosystems.adapters.sec.pipeline.stage import (
 from robosystems.adapters.sec.pipeline.text_index import (
   sec_ixbrl_disclosures_indexed,
   sec_narratives_indexed,
-  sec_textblocks_indexed,
 )
 from robosystems.adapters.sec.pipeline.vector_publish import sec_vector_s3_published
 
@@ -156,7 +154,6 @@ def get_dagster_components():
       sec_lbug_r2_published,
       sec_vector_s3_published,
       sec_knowledge_artifacts,
-      sec_textblocks_indexed,
       sec_narratives_indexed,
       sec_ixbrl_disclosures_indexed,
     ],
@@ -177,7 +174,6 @@ def get_dagster_components():
       sec_vector_s3_publish_job,
       sec_artifact_generation_job,
       sec_historical_lbug_s3_publish_job,
-      sec_textblocks_index_job,
       sec_narratives_index_job,
       sec_ixbrl_index_job,
     ],
@@ -250,8 +246,6 @@ __all__ = [
   "sec_stage_job",
   "sec_stage_to_materialize_sensor",
   "sec_staged_materialize_job",
-  "sec_textblocks_index_job",
-  "sec_textblocks_indexed",
   "sec_vector_s3_publish_job",
   "sec_vector_s3_published",
 ]
