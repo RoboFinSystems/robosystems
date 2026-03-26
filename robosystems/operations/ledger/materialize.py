@@ -41,6 +41,7 @@ class MaterializeResult:
 
 # Node tables in materialization order
 NODE_TABLES = [
+  "Entity",
   "Element",
   "Transaction",
   "Entry",
@@ -68,9 +69,11 @@ RELATIONSHIP_TABLES = [
 def build_postgres_connstr(graph_id: str) -> str:
   """Build a postgres_scanner connection string for the roboledger database.
 
-  Uses ROBOLEDGER_DATABASE_URL if available, otherwise constructs from
-  DATABASE_ENDPOINT + POSTGRES_PASSWORD. Sets search_path to the tenant
-  schema so postgres_scanner reads from the correct graph's data.
+  IMPORTANT: This connection string is used by DuckDB's postgres_scanner
+  running INSIDE the Graph API process. The host must be reachable from
+  that process's network context:
+  - Production: RDS endpoint (via DATABASE_ENDPOINT env var on graph instances)
+  - Local dev: Docker service hostname (via DATABASE_ENDPOINT in container .env)
 
   Args:
       graph_id: Tenant schema name (e.g., "kg0192...")
@@ -89,12 +92,7 @@ def build_postgres_connstr(graph_id: str) -> str:
   password = parsed.password or "postgres"
   dbname = parsed.path.lstrip("/").split("?")[0] or "roboledger"
 
-  # search_path scopes postgres_scanner to the tenant schema
-  connstr = (
-    f"dbname={dbname} user={user} password={password} "
-    f"host={host} port={port} "
-    f"options=-csearch_path={graph_id},public"
-  )
+  connstr = f"dbname={dbname} user={user} password={password} host={host} port={port}"
 
   return connstr
 
@@ -110,10 +108,41 @@ def _staging_sql(graph_id: str, entity_id: str, connstr: str) -> dict[str, str]:
       Dict mapping table name → CREATE TABLE SQL.
   """
   c = connstr  # shorthand for SQL interpolation
+  s = graph_id  # schema name (tenant schema in roboledger database)
 
   tables: dict[str, str] = {}
 
   # ── Node Tables ──────────────────────────────────────────────────────
+
+  # Entity: minimal row so ENTITY_HAS_TRANSACTION relationships can reference it
+  tables["Entity"] = f"""
+    CREATE OR REPLACE TABLE Entity AS
+    SELECT
+      '{entity_id}'                   AS identifier,
+      NULL::VARCHAR                   AS uri,
+      NULL::VARCHAR                   AS scheme,
+      NULL::VARCHAR                   AS cik,
+      NULL::VARCHAR                   AS ticker,
+      NULL::VARCHAR                   AS exchange,
+      NULL::VARCHAR                   AS name,
+      NULL::VARCHAR                   AS legal_name,
+      NULL::VARCHAR                   AS industry,
+      NULL::VARCHAR                   AS entity_type,
+      NULL::VARCHAR                   AS sic,
+      NULL::VARCHAR                   AS sic_description,
+      NULL::VARCHAR                   AS category,
+      NULL::VARCHAR                   AS state_of_incorporation,
+      NULL::VARCHAR                   AS fiscal_year_end,
+      NULL::VARCHAR                   AS tax_id,
+      NULL::VARCHAR                   AS lei,
+      NULL::VARCHAR                   AS phone,
+      NULL::VARCHAR                   AS website,
+      'active'                        AS status,
+      true                            AS is_parent,
+      NULL::VARCHAR                   AS parent_entity_id,
+      NULL::VARCHAR                   AS created_at,
+      NULL::VARCHAR                   AS updated_at
+  """
 
   tables["Element"] = f"""
     CREATE OR REPLACE TABLE Element AS
@@ -141,7 +170,7 @@ def _staging_sql(graph_id: str, entity_id: str, connstr: str) -> dict[str, str]:
       NULL::VARCHAR                   AS canonical_concept,
       NULL::DOUBLE                    AS canonical_confidence,
       NULL::FLOAT[384]                AS embedding
-    FROM postgres_scan('{c}', '', 'accounts')
+    FROM postgres_scan('{c}', '{s}', 'accounts')
     WHERE is_active = true
   """
 
@@ -161,7 +190,7 @@ def _staging_sql(graph_id: str, entity_id: str, connstr: str) -> dict[str, str]:
       category,
       CASE WHEN status = 'pending' THEN true ELSE false END AS pending,
       CAST(updated_at AS VARCHAR)     AS updated_at
-    FROM postgres_scan('{c}', '', 'transactions')
+    FROM postgres_scan('{c}', '{s}', 'transactions')
   """
 
   tables["Entry"] = f"""
@@ -176,7 +205,7 @@ def _staging_sql(graph_id: str, entity_id: str, connstr: str) -> dict[str, str]:
       status,
       reversal_of,
       CAST(updated_at AS VARCHAR)     AS updated_at
-    FROM postgres_scan('{c}', '', 'entries')
+    FROM postgres_scan('{c}', '{s}', 'entries')
   """
 
   tables["LineItem"] = f"""
@@ -190,7 +219,7 @@ def _staging_sql(graph_id: str, entity_id: str, connstr: str) -> dict[str, str]:
       false                                      AS has_dimensions,
       0::BIGINT                                  AS dimension_count,
       CAST(updated_at AS VARCHAR)                AS updated_at
-    FROM postgres_scan('{c}', '', 'line_items')
+    FROM postgres_scan('{c}', '{s}', 'line_items')
   """
 
   tables["Dimension"] = f"""
@@ -205,7 +234,7 @@ def _staging_sql(graph_id: str, entity_id: str, connstr: str) -> dict[str, str]:
       NULL::VARCHAR                   AS type,
       false                           AS is_explicit,
       false                           AS is_typed
-    FROM postgres_scan('{c}', '', 'dimensions')
+    FROM postgres_scan('{c}', '{s}', 'dimensions')
     WHERE is_active = true
   """
 
@@ -238,8 +267,8 @@ def _staging_sql(graph_id: str, entity_id: str, connstr: str) -> dict[str, str]:
       NULL::DOUBLE                    AS weight,
       NULL::VARCHAR                   AS root,
       NULL::VARCHAR                   AS preferred_label
-    FROM postgres_scan('{c}', '', 'accounts') child
-    INNER JOIN postgres_scan('{c}', '', 'accounts') parent
+    FROM postgres_scan('{c}', '{s}', 'accounts') child
+    INNER JOIN postgres_scan('{c}', '{s}', 'accounts') parent
       ON child.parent_id = parent.id
     WHERE child.parent_id IS NOT NULL
       AND child.is_active = true
@@ -253,7 +282,7 @@ def _staging_sql(graph_id: str, entity_id: str, connstr: str) -> dict[str, str]:
       '{entity_id}'                   AS src,
       id                              AS dst,
       NULL::VARCHAR                   AS transaction_context
-    FROM postgres_scan('{c}', '', 'transactions')
+    FROM postgres_scan('{c}', '{s}', 'transactions')
   """
 
   tables["TRANSACTION_HAS_ENTRY"] = f"""
@@ -262,7 +291,7 @@ def _staging_sql(graph_id: str, entity_id: str, connstr: str) -> dict[str, str]:
       transaction_id                  AS src,
       id                              AS dst,
       NULL::VARCHAR                   AS entry_context
-    FROM postgres_scan('{c}', '', 'entries')
+    FROM postgres_scan('{c}', '{s}', 'entries')
     WHERE transaction_id IS NOT NULL
   """
 
@@ -272,7 +301,7 @@ def _staging_sql(graph_id: str, entity_id: str, connstr: str) -> dict[str, str]:
       entry_id                        AS src,
       id                              AS dst,
       NULL::VARCHAR                   AS line_item_context
-    FROM postgres_scan('{c}', '', 'line_items')
+    FROM postgres_scan('{c}', '{s}', 'line_items')
   """
 
   tables["LINE_ITEM_RELATES_TO_ELEMENT"] = f"""
@@ -281,7 +310,7 @@ def _staging_sql(graph_id: str, entity_id: str, connstr: str) -> dict[str, str]:
       id                              AS src,
       account_id                      AS dst,
       NULL::VARCHAR                   AS mapping_context
-    FROM postgres_scan('{c}', '', 'line_items')
+    FROM postgres_scan('{c}', '{s}', 'line_items')
   """
 
   tables["STRUCTURE_HAS_ASSOCIATION"] = f"""
@@ -290,7 +319,7 @@ def _staging_sql(graph_id: str, entity_id: str, connstr: str) -> dict[str, str]:
       '{graph_id}_coa'                AS src,
       child.id || '_assoc'            AS dst,
       NULL::VARCHAR                   AS association_context
-    FROM postgres_scan('{c}', '', 'accounts') child
+    FROM postgres_scan('{c}', '{s}', 'accounts') child
     WHERE child.parent_id IS NOT NULL
       AND child.is_active = true
   """
@@ -300,7 +329,7 @@ def _staging_sql(graph_id: str, entity_id: str, connstr: str) -> dict[str, str]:
     SELECT
       child.id || '_assoc'            AS src,
       child.parent_id                 AS dst
-    FROM postgres_scan('{c}', '', 'accounts') child
+    FROM postgres_scan('{c}', '{s}', 'accounts') child
     WHERE child.parent_id IS NOT NULL
       AND child.is_active = true
   """
@@ -310,7 +339,7 @@ def _staging_sql(graph_id: str, entity_id: str, connstr: str) -> dict[str, str]:
     SELECT
       child.id || '_assoc'            AS src,
       child.id                        AS dst
-    FROM postgres_scan('{c}', '', 'accounts') child
+    FROM postgres_scan('{c}', '{s}', 'accounts') child
     WHERE child.parent_id IS NOT NULL
       AND child.is_active = true
   """
@@ -321,7 +350,7 @@ def _staging_sql(graph_id: str, entity_id: str, connstr: str) -> dict[str, str]:
     SELECT
       transaction_id                  AS src,
       dimension_id                    AS dst
-    FROM postgres_scan('{c}', '', 'transaction_dimensions')
+    FROM postgres_scan('{c}', '{s}', 'transaction_dimensions')
   """
 
   tables["ENTRY_HAS_DIMENSION"] = f"""
@@ -329,7 +358,7 @@ def _staging_sql(graph_id: str, entity_id: str, connstr: str) -> dict[str, str]:
     SELECT
       entry_id                        AS src,
       dimension_id                    AS dst
-    FROM postgres_scan('{c}', '', 'entry_dimensions')
+    FROM postgres_scan('{c}', '{s}', 'entry_dimensions')
   """
 
   tables["LINE_ITEM_HAS_DIMENSION"] = f"""
@@ -337,7 +366,7 @@ def _staging_sql(graph_id: str, entity_id: str, connstr: str) -> dict[str, str]:
     SELECT
       line_item_id                    AS src,
       dimension_id                    AS dst
-    FROM postgres_scan('{c}', '', 'line_item_dimensions')
+    FROM postgres_scan('{c}', '{s}', 'line_item_dimensions')
   """
 
   return tables
@@ -439,7 +468,13 @@ class LedgerMaterializer:
 
       # Install roboledger schema (full accounting: reporting + transaction nodes)
       loader = get_contextual_schema_loader("application", "roboledger")
-      schema_ddl = loader.schema.to_cypher()
+      # Build DDL from loader's nodes and relationships
+      ddl_parts = []
+      for node in loader.nodes.values():
+        ddl_parts.append(node.to_cypher() + ";")
+      for rel in loader.relationships.values():
+        ddl_parts.append(rel.to_cypher() + ";")
+      schema_ddl = "\n".join(ddl_parts)
       await client.install_schema(graph_id=graph_id, custom_ddl=schema_ddl)
       logger.info(f"Installed roboledger schema on {graph_id}")
 
