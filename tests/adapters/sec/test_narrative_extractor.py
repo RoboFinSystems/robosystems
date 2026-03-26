@@ -5,7 +5,6 @@ from robosystems.adapters.sec.narrative_extractor import (
   _clean_text,
   _html_to_text,
 )
-from robosystems.adapters.sec.pipeline.text_index import _derive_section_label
 
 
 class TestHtmlToText:
@@ -51,19 +50,6 @@ class TestCleanText:
     text = "us-gaap:EquitySecuritiesMember some text"
     result = _clean_text(text)
     assert "Member" not in result
-
-
-class TestDeriveSectionLabel:
-  def test_strips_text_block_suffix(self):
-    assert _derive_section_label("Risk Factors [Text Block]") == "Risk Factors"
-
-  def test_strips_textblock_suffix(self):
-    assert _derive_section_label("Risk Factors Text Block") == "Risk Factors"
-
-  def test_splits_camel_case(self):
-    result = _derive_section_label("ManagementDiscussionAndAnalysis")
-    assert "Management" in result
-    assert "Discussion" in result
 
 
 # Build a realistic sample with enough content between sections
