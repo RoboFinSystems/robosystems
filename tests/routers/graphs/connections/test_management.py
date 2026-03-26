@@ -751,7 +751,7 @@ class TestDeleteConnection:
     """Happy path: deletes connection and returns SuccessResponse."""
     mock_user = _make_mock_user()
     mock_db = MagicMock()
-    mock_request = MagicMock()
+
     connection_dict = _make_connection_dict()
 
     with (
@@ -771,7 +771,6 @@ class TestDeleteConnection:
       mock_registry.cleanup_connection = AsyncMock()
 
       result = await delete_connection(
-        request=mock_request,
         graph_id=GRAPH_ID,
         connection_id=CONNECTION_ID,
         current_user=mock_user,
@@ -788,7 +787,6 @@ class TestDeleteConnection:
     """Connection not found on initial get → 404 Not Found."""
     mock_user = _make_mock_user()
     mock_db = MagicMock()
-    mock_request = MagicMock()
 
     with patch(
       f"{MANAGEMENT_MODULE}.ConnectionService.get_connection",
@@ -797,7 +795,6 @@ class TestDeleteConnection:
     ):
       with pytest.raises(HTTPException) as exc_info:
         await delete_connection(
-          request=mock_request,
           graph_id=GRAPH_ID,
           connection_id=CONNECTION_ID,
           current_user=mock_user,
@@ -809,11 +806,11 @@ class TestDeleteConnection:
 
   @pytest.mark.unit
   @pytest.mark.asyncio
-  async def test_delete_connection_delete_returns_false_raises_404(self):
-    """Service.delete_connection returns False → 404."""
+  async def test_delete_connection_delete_returns_false_raises_500(self):
+    """Service.delete_connection returns False → 500 (connection existed but delete failed)."""
     mock_user = _make_mock_user()
     mock_db = MagicMock()
-    mock_request = MagicMock()
+
     connection_dict = _make_connection_dict()
 
     with (
@@ -830,7 +827,6 @@ class TestDeleteConnection:
     ):
       with pytest.raises(HTTPException) as exc_info:
         await delete_connection(
-          request=mock_request,
           graph_id=GRAPH_ID,
           connection_id=CONNECTION_ID,
           current_user=mock_user,
@@ -838,15 +834,15 @@ class TestDeleteConnection:
           _rate_limit=None,
         )
 
-    assert exc_info.value.status_code == 404
+    assert exc_info.value.status_code == 500
 
   @pytest.mark.unit
   @pytest.mark.asyncio
-  async def test_delete_connection_provider_disabled_raises_403(self):
-    """Provider disabled during cleanup raises 403 Forbidden."""
+  async def test_delete_connection_provider_disabled_still_deletes(self):
+    """Provider disabled during cleanup skips cleanup but still deletes."""
     mock_user = _make_mock_user()
     mock_db = MagicMock()
-    mock_request = MagicMock()
+
     connection_dict = _make_connection_dict()
 
     with (
@@ -859,24 +855,23 @@ class TestDeleteConnection:
         f"{MANAGEMENT_MODULE}.ConnectionService.delete_connection",
         new_callable=AsyncMock,
         return_value=True,
-      ),
+      ) as mock_delete,
       patch(f"{MANAGEMENT_MODULE}.provider_registry") as mock_registry,
     ):
       mock_registry.get_provider = MagicMock(
         side_effect=ValueError("Provider is disabled")
       )
 
-      with pytest.raises(HTTPException) as exc_info:
-        await delete_connection(
-          request=mock_request,
-          graph_id=GRAPH_ID,
-          connection_id=CONNECTION_ID,
-          current_user=mock_user,
-          db=mock_db,
-          _rate_limit=None,
-        )
+      result = await delete_connection(
+        graph_id=GRAPH_ID,
+        connection_id=CONNECTION_ID,
+        current_user=mock_user,
+        db=mock_db,
+        _rate_limit=None,
+      )
 
-    assert exc_info.value.status_code == 403
+    assert result.success is True
+    mock_delete.assert_called_once()
 
   @pytest.mark.unit
   @pytest.mark.asyncio
@@ -884,7 +879,7 @@ class TestDeleteConnection:
     """Unexpected exception from service raises 500."""
     mock_user = _make_mock_user()
     mock_db = MagicMock()
-    mock_request = MagicMock()
+
     connection_dict = _make_connection_dict()
 
     with (
@@ -901,7 +896,6 @@ class TestDeleteConnection:
     ):
       with pytest.raises(HTTPException) as exc_info:
         await delete_connection(
-          request=mock_request,
           graph_id=GRAPH_ID,
           connection_id=CONNECTION_ID,
           current_user=mock_user,
@@ -917,7 +911,7 @@ class TestDeleteConnection:
     """Cleanup is invoked on the correct provider after deletion."""
     mock_user = _make_mock_user()
     mock_db = MagicMock()
-    mock_request = MagicMock()
+
     connection_dict = _make_connection_dict(provider="sec")
 
     with (
@@ -937,7 +931,6 @@ class TestDeleteConnection:
       mock_registry.cleanup_connection = AsyncMock()
 
       await delete_connection(
-        request=mock_request,
         graph_id=GRAPH_ID,
         connection_id=CONNECTION_ID,
         current_user=mock_user,
@@ -955,7 +948,7 @@ class TestDeleteConnection:
     """SuccessResponse data includes connection_id and provider fields."""
     mock_user = _make_mock_user()
     mock_db = MagicMock()
-    mock_request = MagicMock()
+
     connection_dict = _make_connection_dict(provider="quickbooks")
 
     with (
@@ -975,7 +968,6 @@ class TestDeleteConnection:
       mock_registry.cleanup_connection = AsyncMock()
 
       result = await delete_connection(
-        request=mock_request,
         graph_id=GRAPH_ID,
         connection_id=CONNECTION_ID,
         current_user=mock_user,
@@ -993,7 +985,7 @@ class TestDeleteConnection:
     """HTTPException raised internally is re-raised unchanged."""
     mock_user = _make_mock_user()
     mock_db = MagicMock()
-    mock_request = MagicMock()
+
     original_exc = HTTPException(status_code=403, detail="Forbidden")
 
     with patch(
@@ -1003,7 +995,6 @@ class TestDeleteConnection:
     ):
       with pytest.raises(HTTPException) as exc_info:
         await delete_connection(
-          request=mock_request,
           graph_id=GRAPH_ID,
           connection_id=CONNECTION_ID,
           current_user=mock_user,

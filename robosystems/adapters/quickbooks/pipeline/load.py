@@ -79,15 +79,26 @@ def qb_load(
 
 
 def _update_last_sync(context: AssetExecutionContext, config: QBSyncConfig) -> None:
-  """Update the connection's last_sync timestamp."""
-  import asyncio
+  """Update the connection's last_sync timestamp.
 
-  from robosystems.operations.connection_service import ConnectionService
+  Uses sync DB access directly to avoid asyncio.run() issues in Dagster workers
+  where an event loop may already be running.
+  """
+  from robosystems.database import SessionFactory
+  from robosystems.models.iam.connection import Connection
 
   try:
-    asyncio.run(
-      ConnectionService.update_last_sync(config.connection_id, config.graph_id)
-    )
-    context.log.info("Updated connection last_sync timestamp")
+    session = SessionFactory()
+    try:
+      conn = Connection.get_by_id(config.connection_id, session)
+      if conn:
+        conn.update_last_sync(session)
+        context.log.info("Updated connection last_sync timestamp")
+      else:
+        context.log.warning(
+          "Connection %s not found for last_sync update", config.connection_id
+        )
+    finally:
+      session.close()
   except Exception as e:
     context.log.warning(f"Failed to update last_sync (non-fatal): {e}")

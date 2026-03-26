@@ -132,11 +132,9 @@ class TestDisabledProviderHandling:
             headers=auth_headers,
           )
 
-          # Should return 403 Forbidden, not 500
-          assert response.status_code == status.HTTP_403_FORBIDDEN
-          response_json = response.json()
-          # The error response has a nested structure
-          assert "not available" in response_json["detail"]["detail"].lower()
+          # Disabled provider skips cleanup but still deletes successfully
+          assert response.status_code == status.HTTP_200_OK
+          mock_delete.assert_called_once()
 
   def test_invalid_provider_returns_422(self, client: TestClient, auth_headers):
     """Test that invalid provider values return 422 validation error."""

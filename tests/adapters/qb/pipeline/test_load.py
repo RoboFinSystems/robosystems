@@ -202,20 +202,27 @@ class TestUpdateLastSync:
   """Tests for the _update_last_sync helper."""
 
   def test_update_last_sync_calls_connection_service(self):
-    """Test that ConnectionService.update_last_sync is called."""
+    """Test that Connection.update_last_sync is called via sync DB access."""
     from robosystems.adapters.quickbooks.pipeline.load import _update_last_sync
 
     context = Mock()
     config = _make_config(connection_id="conn_sync")
 
+    mock_conn = Mock()
+    mock_session = Mock()
+
     with (
-      patch(_PATCH_CONN_SVC) as MockConnSvc,
-      patch("asyncio.run") as mock_run,
+      patch(
+        "robosystems.database.SessionFactory",
+        return_value=mock_session,
+      ),
+      patch("robosystems.models.iam.connection.Connection") as MockConnection,
     ):
-      MockConnSvc.update_last_sync = Mock(return_value=None)
-      mock_run.return_value = None
+      MockConnection.get_by_id.return_value = mock_conn
       _update_last_sync(context, config)
 
+    MockConnection.get_by_id.assert_called_once_with("conn_sync", mock_session)
+    mock_conn.update_last_sync.assert_called_once_with(mock_session)
     context.log.info.assert_called()
 
   def test_update_last_sync_failure_is_non_fatal(self):
@@ -226,7 +233,7 @@ class TestUpdateLastSync:
     config = _make_config()
 
     with patch(
-      "asyncio.run",
+      "robosystems.database.SessionFactory",
       side_effect=Exception("DB unavailable"),
     ):
       # Should NOT raise

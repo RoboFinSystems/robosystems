@@ -233,9 +233,9 @@ async def sync_connection(
       error_message=str(e),
     )
 
-    logger.error(f"Failed to sync connection {connection_id}: {e}")
+    logger.error("Failed to sync connection %s", connection_id, exc_info=True)
     raise create_error_response(
       status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-      detail=f"Failed to sync connection: {e!s}",
+      detail="Failed to sync connection",
       code=ErrorCode.INTERNAL_ERROR,
     )

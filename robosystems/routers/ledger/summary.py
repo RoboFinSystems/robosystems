@@ -67,22 +67,24 @@ async def get_summary(
   # Connection info from platform DB
   connection_count = 0
   last_sync_at = None
+  gen = None
   try:
-    db = next(get_db_session())
-    try:
-      conn_result = db.execute(
-        select(func.count(), func.max(Connection.last_sync)).where(
-          Connection.graph_id == graph_id
-        )
-      ).one()
-      connection_count = conn_result[0] or 0
-      last_sync_at = conn_result[1]
-    finally:
-      db.close()
+    gen = get_db_session()
+    db = next(gen)
+    conn_result = db.execute(
+      select(func.count(), func.max(Connection.last_sync)).where(
+        Connection.graph_id == graph_id
+      )
+    ).one()
+    connection_count = conn_result[0] or 0
+    last_sync_at = conn_result[1]
   except Exception:
     logger.warning(
       "Failed to fetch connection metadata for %s", graph_id, exc_info=True
     )
+  finally:
+    if gen is not None and hasattr(gen, "close"):
+      gen.close()
 
   return LedgerSummaryResponse(
     graph_id=graph_id,

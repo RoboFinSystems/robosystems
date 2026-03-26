@@ -4,7 +4,7 @@ Connection management endpoints (create, list, get, delete).
 
 import asyncio
 
-from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
 from sqlalchemy.orm import Session
 
 from robosystems.database import get_db_session
@@ -251,10 +251,10 @@ async def create_connection(
       error_message=str(e),
     )
 
-    logger.error(f"Failed to create connection: {e}")
+    logger.error("Failed to create connection", exc_info=True)
     raise create_error_response(
       status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-      detail=f"Failed to create connection: {e!s}",
+      detail="Failed to create connection",
       code=ErrorCode.INTERNAL_ERROR,
     )
 
@@ -342,11 +342,11 @@ async def list_connections(
 
     return response_connections
 
-  except Exception as e:
-    logger.error(f"Failed to list connections: {e}")
+  except Exception:
+    logger.error("Failed to list connections", exc_info=True)
     raise create_error_response(
       status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-      detail=f"Failed to list connections: {e!s}",
+      detail="Failed to list connections",
       code=ErrorCode.INTERNAL_ERROR,
     )
 
@@ -425,11 +425,11 @@ async def get_connection(
 
   except HTTPException:
     raise
-  except Exception as e:
-    logger.error(f"Failed to get connection: {e}")
+  except Exception:
+    logger.error("Failed to get connection", exc_info=True)
     raise create_error_response(
       status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-      detail=f"Failed to get connection: {e!s}",
+      detail="Failed to get connection",
       code=ErrorCode.INTERNAL_ERROR,
     )
 
@@ -459,7 +459,6 @@ Only users with admin role can delete connections.""",
   },
 )
 async def delete_connection(
-  request: Request,
   graph_id: str = Path(
     ..., description="Graph database identifier", pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN
   ),
@@ -484,6 +483,19 @@ async def delete_connection(
         code=ErrorCode.NOT_FOUND,
       )
 
+    # Provider-specific cleanup BEFORE deletion (e.g., revoke OAuth tokens)
+    provider = connection["provider"].lower()
+    try:
+      provider_registry.get_provider(provider)
+      await provider_registry.cleanup_connection(provider, connection, graph_id)
+    except ValueError:
+      # Provider disabled — skip cleanup, still allow deletion
+      logger.warning(
+        "Provider %s disabled, skipping cleanup for connection %s",
+        provider,
+        connection_id,
+      )
+
     # Delete the connection
     success = await ConnectionService.delete_connection(
       connection_id, current_user.id, graph_id
@@ -491,18 +503,10 @@ async def delete_connection(
 
     if not success:
       raise create_error_response(
-        status_code=status.HTTP_404_NOT_FOUND,
-        detail="Connection not found or access denied",
-        code=ErrorCode.NOT_FOUND,
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        detail="Failed to delete connection",
+        code=ErrorCode.INTERNAL_ERROR,
       )
-
-    # Provider-specific cleanup
-    provider = connection["provider"].lower()
-
-    # Validate provider is enabled before cleanup operations
-    provider_registry.get_provider(provider)
-
-    await provider_registry.cleanup_connection(provider, connection, graph_id)
 
     logger.info(f"Connection {connection_id} deleted successfully")
 

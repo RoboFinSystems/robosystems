@@ -173,7 +173,6 @@ class ConnectionCredentials(Model):
     """Get all active credentials for a user and provider."""
     return (
       session.query(cls)
-      .filter(cls.user_id == user_id, cls.provider == provider)
       .filter(
         cls.user_id == user_id,
         cls.provider == provider,

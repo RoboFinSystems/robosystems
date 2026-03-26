@@ -805,8 +805,6 @@ class EnvConfig:
   SEC_GOV_USER_AGENT = get_secret_value(
     "SEC_GOV_USER_AGENT", "RoboSystems hello@robosystems.ai"
   )
-  # Parallel processing concurrency (for local sec-process-parallel command)
-  SEC_PARALLEL_CONCURRENCY = get_int_env("SEC_PARALLEL_CONCURRENCY", 2)
 
   # OpenFIGI (financial identifiers)
   OPENFIGI_API_KEY = get_secret_value("OPENFIGI_API_KEY", "")

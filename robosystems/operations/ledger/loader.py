@@ -150,6 +150,9 @@ class OLTPLoader:
         Transaction.connection_id == connection_id,
       ).delete(synchronize_session=False)
 
+      # TODO: Account lacks connection_id column — if a graph has multiple
+      # connections of the same source type, this deletes accounts from all of them.
+      # Add Account.connection_id in a future migration to scope correctly.
       session.query(Account).filter(
         Account.external_source == source,
       ).delete(synchronize_session=False)
