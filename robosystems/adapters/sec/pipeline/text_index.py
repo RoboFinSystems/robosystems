@@ -808,8 +808,9 @@ def sec_ixbrl_disclosures_indexed(
     df = table.to_pandas()
     mask = df["to"].isin(textblock_element_ids)
     matched = df.loc[mask]
-    for _, row in matched.iterrows():
-      textblock_fact_to_qname[row["from"]] = element_id_to_qname[row["to"]]
+    textblock_fact_to_qname.update(
+      dict(zip(matched["from"], matched["to"].map(element_id_to_qname), strict=False))
+    )
     del df, table, matched
   context.log.info(f"Found {len(textblock_fact_to_qname)} textblock facts")
   del element_id_to_qname, textblock_element_ids

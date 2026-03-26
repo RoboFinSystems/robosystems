@@ -209,7 +209,11 @@ class SSMExecutor:
 
     try:
       wait_result = subprocess.run(
-        wait_cmd, capture_output=True, check=False, timeout=self.timeout, env=_clean_env
+        wait_cmd,
+        capture_output=True,
+        check=False,
+        timeout=self.timeout,
+        env=_clean_env(),
       )
 
       if wait_result.returncode != 0:
