@@ -232,22 +232,6 @@ class SECMaterializeConfig(Config):
 # =============================================================================
 
 
-class SECTextBlockIndexConfig(Config):
-  """Configuration for XBRL text block OpenSearch indexing.
-
-  Partitioned by quarter (e.g. 2026-Q1). Each run indexes one quarter's
-  textblocks, making backfills trivial and memory bounded.
-  """
-
-  graph_id: str = "sec"
-  min_content_length: int = Field(
-    default=200, description="Skip text blocks shorter than this after HTML stripping"
-  )
-  force_reindex: bool = Field(
-    default=False, description="Re-index all documents (ignore incremental skip)"
-  )
-
-
 class SECNarrativeIndexConfig(Config):
   """Configuration for narrative section extraction and OpenSearch indexing.
 

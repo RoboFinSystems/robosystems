@@ -1,12 +1,18 @@
 """SSM executor for running commands on bastion host via AWS Systems Manager."""
 
 import json
+import os
 import subprocess
 import time
 
 from rich.console import Console
 
 console = Console()
+
+
+def _clean_env() -> dict[str, str]:
+  """Strip AWS_ENDPOINT_URL to avoid hitting LocalStack when run locally."""
+  return {k: v for k, v in os.environ.items() if k != "AWS_ENDPOINT_URL"}
 
 
 class SSMExecutor:
@@ -62,7 +68,9 @@ class SSMExecutor:
       self.region,
     ]
 
-    result = subprocess.run(cmd, capture_output=True, text=True, check=False)
+    result = subprocess.run(
+      cmd, capture_output=True, text=True, check=False, env=_clean_env()
+    )
 
     if (
       result.returncode != 0
@@ -98,7 +106,9 @@ class SSMExecutor:
       self.region,
     ]
 
-    result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+    result = subprocess.run(
+      cmd, capture_output=True, text=True, check=True, env=_clean_env()
+    )
     state = result.stdout.strip()
 
     if state == "stopped":
@@ -115,7 +125,7 @@ class SSMExecutor:
         "--region",
         self.region,
       ]
-      subprocess.run(start_cmd, capture_output=True, check=True)
+      subprocess.run(start_cmd, capture_output=True, check=True, env=_clean_env())
 
       wait_cmd = [
         "aws",
@@ -129,7 +139,7 @@ class SSMExecutor:
         "--region",
         self.region,
       ]
-      subprocess.run(wait_cmd, check=True)
+      subprocess.run(wait_cmd, check=True, env=_clean_env())
 
       console.print("[green]✓ Bastion instance started[/green]")
       time.sleep(10)
@@ -172,7 +182,9 @@ class SSMExecutor:
       self.region,
     ]
 
-    result = subprocess.run(send_cmd, capture_output=True, text=True, check=True)
+    result = subprocess.run(
+      send_cmd, capture_output=True, text=True, check=True, env=_clean_env()
+    )
     command_id = result.stdout.strip()
 
     console.print(f"[dim]📋 Command ID: {command_id}[/dim]")
@@ -197,7 +209,7 @@ class SSMExecutor:
 
     try:
       wait_result = subprocess.run(
-        wait_cmd, capture_output=True, check=False, timeout=self.timeout
+        wait_cmd, capture_output=True, check=False, timeout=self.timeout, env=_clean_env
       )
 
       if wait_result.returncode != 0:
@@ -223,7 +235,9 @@ class SSMExecutor:
       self.region,
     ]
 
-    result = subprocess.run(get_cmd, capture_output=True, text=True, check=True)
+    result = subprocess.run(
+      get_cmd, capture_output=True, text=True, check=True, env=_clean_env()
+    )
     data = json.loads(result.stdout)
 
     stdout = data.get("StandardOutputContent", "")

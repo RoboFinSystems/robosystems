@@ -250,16 +250,6 @@ class SECPipeline:
           },
         }
       }
-    elif job_type == "textblocks_index":
-      config = {
-        "ops": {
-          "sec_textblocks_indexed": {
-            "config": {
-              "graph_id": graph_id,
-            }
-          },
-        }
-      }
     elif job_type == "narratives_index":
       config = {
         "ops": {
@@ -492,24 +482,6 @@ class SECPipeline:
       logger.info(f"{'=' * 60}")
 
       for quarter in quarters:
-        logger.info(f"\n[INDEX {quarter}] Text blocks...")
-        tb_config_path = self._create_job_config(
-          tickers=self.tickers,
-          year=None,
-          job_type="textblocks_index",
-        )
-        tb_result = self.run_stage(
-          job_name="sec_textblocks_index",
-          config_path=tb_config_path,
-          year=quarter,
-          timeout=self.materialize_timeout,
-        )
-        all_results.append(tb_result)
-        if tb_result.success:
-          logger.info(f"  Text blocks indexed ({tb_result.duration_seconds:.1f}s)")
-        else:
-          logger.warning(f"  Text block indexing issues: {tb_result.error}")
-
         logger.info(f"\n[INDEX {quarter}] Narratives...")
         narr_config_path = self._create_job_config(
           tickers=self.tickers,
@@ -1295,10 +1267,9 @@ def cmd_process(args):
 def cmd_index(args):
   """Index text content into OpenSearch (Phase 4).
 
-  Runs all three indexing jobs (partitioned by quarter):
-  1. sec_textblocks_indexed — reads processed parquets, fetches externalized HTML, indexes
-  2. sec_narratives_indexed — reads raw ZIPs, extracts sections, externalizes, indexes
-  3. sec_ixbrl_disclosures_indexed — parses iXBRL disclosure sections with XBRL element metadata
+  Runs two indexing jobs (partitioned by quarter):
+  1. sec_narratives_indexed — reads raw ZIPs, extracts sections, externalizes, indexes
+  2. sec_ixbrl_disclosures_indexed — parses iXBRL disclosure sections with XBRL element metadata + CDN URLs
 
   Requires processed parquets to exist in S3 (run after processing completes).
   """
@@ -1321,26 +1292,6 @@ def cmd_index(args):
 
   results = []
   start_time = time.time()
-
-  # Text blocks
-  logger.info("\n[TEXT BLOCKS] Indexing XBRL text blocks...")
-  tb_config = pipeline._create_job_config(
-    tickers=[],
-    year=None,
-    job_type="textblocks_index",
-    graph_id=args.graph_id,
-  )
-  tb_result = pipeline.run_stage(
-    job_name="sec_textblocks_index",
-    config_path=tb_config,
-    year=quarter,
-    timeout=args.timeout,
-  )
-  results.append(tb_result)
-  if tb_result.success:
-    logger.info(f"  Text blocks indexed ({tb_result.duration_seconds:.1f}s)")
-  else:
-    logger.error(f"  Text block indexing failed: {tb_result.error}")
 
   # Narratives
   logger.info("\n[NARRATIVES] Extracting and indexing narrative sections...")
@@ -1398,10 +1349,6 @@ def cmd_index(args):
         {
           "status": "success" if failed == 0 else "failure",
           "graph_id": args.graph_id,
-          "textblocks": {
-            "success": tb_result.success,
-            "duration": tb_result.duration_seconds,
-          },
           "narratives": {
             "success": narr_result.success,
             "duration": narr_result.duration_seconds,

@@ -53,7 +53,6 @@ from .jobs import (
   sec_narratives_index_job,
   sec_process_job,
   sec_stage_job,
-  sec_textblocks_index_job,
   sec_vector_s3_publish_job,
 )
 
@@ -658,13 +657,12 @@ def sec_post_materialize_publish_sensor(context: RunStatusSensorContext):
     sec_stage_job,
   ],
   request_jobs=[
-    sec_textblocks_index_job,
     sec_narratives_index_job,
     sec_ixbrl_index_job,
   ],
   default_status=DefaultSensorStatus.STOPPED,
   minimum_interval_seconds=60,
-  description="Chain: stage → text search indexing (textblocks + narratives + iXBRL disclosures)",
+  description="Chain: stage → text search indexing (narratives + iXBRL disclosures)",
 )
 def sec_post_stage_index_sensor(context: RunStatusSensorContext):
   """Trigger text search indexing after staging completes.
@@ -699,7 +697,6 @@ def sec_post_stage_index_sensor(context: RunStatusSensorContext):
 
   # Job name → asset op name mapping
   index_jobs = {
-    "sec_textblocks_index": "sec_textblocks_indexed",
     "sec_narratives_index": "sec_narratives_indexed",
     "sec_ixbrl_index": "sec_ixbrl_disclosures_indexed",
   }
@@ -751,12 +748,10 @@ _INDEX_RETRY_MAX = 3
 @run_status_sensor(
   run_status=DagsterRunStatus.FAILURE,
   monitored_jobs=[
-    sec_textblocks_index_job,
     sec_narratives_index_job,
     sec_ixbrl_index_job,
   ],
   request_jobs=[
-    sec_textblocks_index_job,
     sec_narratives_index_job,
     sec_ixbrl_index_job,
   ],

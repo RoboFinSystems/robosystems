@@ -1,19 +1,16 @@
 """SEC Text Search Indexing Assets.
 
-Three assets for indexing SEC filing text content into OpenSearch:
+Two assets for indexing SEC filing text content into OpenSearch:
 
-1. sec_textblocks_indexed — Index XBRL text blocks (already externalized to S3)
-   Reads processed parquets (Fact + Entity + Report + Element), fetches externalized
-   HTML from S3, strips to plain text, indexes into OpenSearch.
-
-2. sec_narratives_indexed — Extract and index narrative sections from raw filings
+1. sec_narratives_indexed — Extract and index narrative sections from raw filings
    Reads raw ZIP files, extracts 10-K/10-Q HTML, detects Item sections,
    externalizes clean text to S3/CDN, indexes into OpenSearch.
 
-3. sec_ixbrl_disclosures_indexed — Extract iXBRL disclosure sections with XBRL element metadata
+2. sec_ixbrl_disclosures_indexed — Extract iXBRL disclosure sections with XBRL element metadata
    Reads raw ZIP files, parses iXBRL text blocks (ix:nonNumeric TextBlock elements),
    extracts nested XBRL element qnames, indexes with element metadata for
    bidirectional navigation between knowledge graph and document search.
+   Also resolves CDN content_url from externalized Fact data for full HTML retrieval.
 
 All depend on sec_processed_filings (need Entity/Report metadata from parquets).
 All run parallel to the DuckDB staging branch.
@@ -41,7 +38,6 @@ from robosystems.logger import logger
 from .configs import (
   SECiXBRLIndexConfig,
   SECNarrativeIndexConfig,
-  SECTextBlockIndexConfig,
   sec_quarter_partitions,
 )
 
@@ -227,30 +223,6 @@ def _read_parquets_from_s3(
   return pa.concat_tables(tables)
 
 
-def _fetch_s3_text(s3, bucket: str, key: str) -> str | None:
-  """Fetch text content from S3."""
-  try:
-    response = s3.get_object(Bucket=bucket, Key=key)
-    content = response["Body"].read()
-    return content.decode("utf-8", errors="replace")
-  except Exception as e:
-    logger.debug(f"Failed to fetch {key}: {e}")
-    return None
-
-
-def _strip_html(html: str) -> str:
-  """Simple HTML stripping for text block content."""
-  from robosystems.utils.html_parser import extract_structured_content
-
-  try:
-    return extract_structured_content(html)
-  except Exception:
-    # Fallback: regex strip
-    text = re.sub(r"<[^>]+>", " ", html)
-    text = re.sub(r"\s+", " ", text)
-    return text.strip()
-
-
 def _extract_html_from_zip(zip_bytes: bytes) -> str | None:
   """Extract the main filing HTML from a ZIP file.
 
@@ -334,424 +306,6 @@ def _extract_ixbrl_doc_type(html: str) -> str | None:
     if value:
       return value
   return None
-
-
-def _url_to_s3_key(url: str) -> tuple[str, str] | None:
-  """Parse an externalized text block URL back to bucket + key.
-
-  Handles both CDN URLs and direct S3 URLs:
-    https://cdn.example.com/2026/0000005513/... → key from CDN prefix
-    https://bucket.s3.amazonaws.com/key → bucket + key
-  """
-  cdn_url = _get_public_data_cdn_url()
-  if cdn_url and url.startswith(cdn_url):
-    key = url[len(cdn_url) :].lstrip("/")
-    return (_get_public_data_bucket(), key)
-
-  # Handle direct S3 URL: https://bucket.s3.amazonaws.com/key
-  # or https://bucket.s3.region.amazonaws.com/key
-  if ".s3." in url and "amazonaws.com/" in url:
-    parts = url.split(".s3.", 1)
-    bucket = parts[0].split("//", 1)[1]
-    key = parts[1].split("amazonaws.com/", 1)[1]
-    return (bucket, key)
-
-  return None
-
-
-@asset(
-  group_name="sec_pipeline",
-  description="Index XBRL text blocks into OpenSearch for full-text search",
-  kinds={"opensearch"},
-  deps=["sec_processed_filings"],
-  partitions_def=sec_quarter_partitions,
-  backfill_policy=BackfillPolicy.single_run(),
-  metadata={
-    "pipeline": "sec",
-    "stage": "text_index",
-    "source": "xbrl_textblocks",
-  },
-)
-def sec_textblocks_indexed(
-  context: AssetExecutionContext,
-  config: SECTextBlockIndexConfig,
-) -> MaterializeResult:
-  """Index externalized XBRL text blocks into OpenSearch.
-
-  Partitioned by quarter (e.g. 2026-Q1). Each run processes one quarter's
-  parquets, making backfills trivial and memory bounded.
-
-  Joins Fact (value_type=external) + Element (is_textblock=true) + Entity + Report.
-  """
-  from robosystems.operations.search.client import OpenSearchClient
-
-  s3 = _get_s3_client()
-  processed_bucket = _get_processed_bucket()
-
-  os_client = OpenSearchClient(env.OPENSEARCH_URL, env.OPENSEARCH_INDEX)
-  os_client.create_index_if_not_exists()
-
-  # Load fastembed for embedding generation (required for hybrid search)
-  from robosystems.adapters.sec.enrichment import SemanticEnricher
-
-  enricher = SemanticEnricher()
-  context.log.info("Loaded SemanticEnricher for embedding generation")
-
-  # Get already-indexed accessions for incremental skip (scoped to this source type)
-  if config.force_reindex:
-    indexed_accessions: set[str] = set()
-    context.log.info("Force reindex enabled — will re-index all documents")
-  else:
-    indexed_accessions = _get_indexed_accessions(
-      os_client, config.graph_id, source_type="xbrl_textblock"
-    )
-  if indexed_accessions:
-    context.log.info(
-      f"Found {len(indexed_accessions)} already-indexed accessions, will skip"
-    )
-
-  # Use partition key to scope to a single quarter
-  partition_key = context.partition_key  # e.g. "2026-Q1"
-  prefix_base = get_processed_key(DataSourceType.SEC, "processed")
-  partition_prefix = f"{prefix_base}/filed={partition_key}"
-
-  context.log.info(
-    f"Scanning parquets from s3://{processed_bucket}/{partition_prefix}/"
-  )
-
-  all_parquet_keys = _list_s3_parquet_keys(s3, processed_bucket, partition_prefix)
-  context.log.info(f"Found {len(all_parquet_keys)} parquets for {partition_key}")
-  node_keys = {
-    "Entity": [k for k in all_parquet_keys if "/nodes/Entity/" in k],
-    "Report": [k for k in all_parquet_keys if "/nodes/Report/" in k],
-    "Element": [k for k in all_parquet_keys if "/nodes/Element/" in k],
-    "Fact": [k for k in all_parquet_keys if "/nodes/Fact/" in k],
-  }
-
-  for table, keys in node_keys.items():
-    context.log.info(f"Found {len(keys)} parquet files for {table}")
-
-  if not node_keys["Fact"]:
-    context.log.warning("No Fact parquet files found")
-    return MaterializeResult(
-      metadata={"status": "no_data", "graph_id": config.graph_id}
-    )
-
-  # --- Phase 1: Load small lookup tables (Entity, Report, Element) ---
-  # Entity and Report are small (~5K rows). Element is large (~1M rows) but
-  # we only need 4 small columns (no embeddings) so it's manageable.
-
-  context.log.info("Reading Entity table...")
-  entity_table = _read_parquets_from_s3(
-    s3,
-    processed_bucket,
-    node_keys["Entity"],
-    columns=["identifier", "ticker", "name", "cik"],
-  )
-  context.log.info("Reading Report table...")
-  report_table = _read_parquets_from_s3(
-    s3,
-    processed_bucket,
-    node_keys["Report"],
-    columns=[
-      "identifier",
-      "accession_number",
-      "form",
-      "filing_date",
-      "fiscal_year_focus",
-      "fiscal_period_focus",
-    ],
-  )
-  context.log.info("Reading Element table...")
-  element_table = _read_parquets_from_s3(
-    s3,
-    processed_bucket,
-    node_keys["Element"],
-    columns=["identifier", "qname", "name", "is_textblock"],
-  )
-
-  if any(t is None for t in [entity_table, report_table, element_table]):
-    context.log.warning("Failed to read one or more lookup tables")
-    return MaterializeResult(
-      metadata={"status": "read_error", "graph_id": config.graph_id}
-    )
-
-  # Build lookup dicts
-  entities_df = entity_table.to_pandas()
-  reports_df = report_table.to_pandas()
-  elements_df = element_table.to_pandas()
-
-  context.log.info(
-    f"Loaded {len(entities_df)} entities, "
-    f"{len(reports_df)} reports, {len(elements_df)} elements"
-  )
-
-  entities_df = entities_df.fillna("")
-  entities_df["cik"] = entities_df["cik"].astype(str)
-  entities_df = entities_df.drop_duplicates(subset=["identifier"], keep="first")
-  entity_lookup: dict[str, dict[str, str]] = entities_df.set_index("identifier")[
-    ["ticker", "name", "cik"]
-  ].to_dict("index")
-  del entities_df, entity_table
-
-  reports_df["filing_date"] = reports_df["filing_date"].astype(str)
-  reports_df["fiscal_year"] = reports_df["fiscal_year_focus"].apply(
-    lambda fy: (
-      int(fy)
-      if fy is not None and not (isinstance(fy, float) and math.isnan(fy))
-      else None
-    )
-  )
-  reports_df = reports_df.rename(columns={"fiscal_period_focus": "fiscal_period"})
-  reports_df = reports_df.fillna("")
-  reports_df = reports_df.drop_duplicates(subset=["identifier"], keep="first")
-  report_lookup: dict[str, dict[str, Any]] = reports_df.set_index("identifier")[
-    ["filing_date", "form", "fiscal_year", "fiscal_period", "accession_number"]
-  ].to_dict("index")
-  del reports_df, report_table
-
-  # Build element lookup and extract textblock element IDs for early filtering
-  elements_df = elements_df.fillna({"qname": "", "name": "", "is_textblock": False})
-  elements_df = elements_df.drop_duplicates(subset=["identifier"], keep="first")
-  element_lookup: dict[str, dict[str, Any]] = elements_df.set_index("identifier")[
-    ["qname", "name", "is_textblock"]
-  ].to_dict("index")
-  textblock_element_ids: set[str] = set(
-    elements_df.loc[elements_df["is_textblock"], "identifier"]
-  )
-  del elements_df, element_table
-
-  context.log.info(f"Found {len(textblock_element_ids)} textblock element types")
-
-  if not textblock_element_ids:
-    context.log.info("No textblock elements found")
-    return MaterializeResult(
-      metadata={
-        "graph_id": config.graph_id,
-        "source_type": "xbrl_textblock",
-        "documents_indexed": 0,
-      }
-    )
-
-  # --- Phase 2: Stream relationship parquets with early filtering ---
-  # Instead of loading all 7M+ edges, stream one file at a time and
-  # filter to only the edges we need (textblock facts).
-
-  rel_keys = [k for k in all_parquet_keys if "/relationships/" in k]
-  fhe_keys = [k for k in rel_keys if "/FACT_HAS_ELEMENT/" in k]
-  rhf_keys = [k for k in rel_keys if "/REPORT_HAS_FACT/" in k]
-  ehr_keys = [k for k in rel_keys if "/ENTITY_HAS_REPORT/" in k]
-
-  # Step 2a: Stream FACT_HAS_ELEMENT to find fact_ids that map to textblock elements
-  context.log.info(
-    f"Streaming {len(fhe_keys)} FACT_HAS_ELEMENT parquets "
-    f"(filtering to {len(textblock_element_ids)} textblock elements)..."
-  )
-  fact_to_element: dict[str, str] = {}
-  textblock_fact_ids: set[str] = set()
-  for key in fhe_keys:
-    table = _read_parquets_from_s3(s3, processed_bucket, [key])
-    if table is None:
-      continue
-    df = table.to_pandas()
-    # Filter to only edges pointing at textblock elements
-    mask = df["to"].isin(textblock_element_ids)
-    matched = df.loc[mask]
-    fact_to_element.update(dict(zip(matched["from"], matched["to"], strict=False)))
-    textblock_fact_ids.update(matched["from"])
-    del df, table, matched
-
-  context.log.info(
-    f"Found {len(textblock_fact_ids)} facts linked to textblock elements"
-  )
-
-  if not textblock_fact_ids:
-    context.log.info("No textblock facts found")
-    return MaterializeResult(
-      metadata={
-        "graph_id": config.graph_id,
-        "source_type": "xbrl_textblock",
-        "documents_indexed": 0,
-      }
-    )
-
-  # Step 2b: Stream Fact parquets to get external textblock facts only
-  context.log.info(
-    f"Streaming {len(node_keys['Fact'])} Fact parquets "
-    f"(filtering to {len(textblock_fact_ids)} textblock facts)..."
-  )
-  external_textblock_facts: list[dict[str, str]] = []
-  for key in node_keys["Fact"]:
-    table = _read_parquets_from_s3(
-      s3, processed_bucket, [key], columns=["identifier", "value", "value_type"]
-    )
-    if table is None:
-      continue
-    df = table.to_pandas()
-    mask = df["identifier"].isin(textblock_fact_ids) & (df["value_type"] == "external")
-    matched = df.loc[mask, ["identifier", "value"]].fillna("")
-    external_textblock_facts.extend(matched.to_dict("records"))
-    del df, table, matched
-
-  context.log.info(f"Found {len(external_textblock_facts)} external textblock facts")
-
-  if not external_textblock_facts:
-    context.log.info("No externalized textblock facts to index")
-    return MaterializeResult(
-      metadata={
-        "graph_id": config.graph_id,
-        "source_type": "xbrl_textblock",
-        "documents_indexed": 0,
-      }
-    )
-
-  # Step 2c: Stream REPORT_HAS_FACT to map textblock facts to reports
-  context.log.info(
-    f"Streaming {len(rhf_keys)} REPORT_HAS_FACT parquets "
-    f"(filtering to {len(textblock_fact_ids)} textblock facts)..."
-  )
-  fact_to_report: dict[str, str] = {}
-  for key in rhf_keys:
-    table = _read_parquets_from_s3(s3, processed_bucket, [key])
-    if table is None:
-      continue
-    df = table.to_pandas()
-    mask = df["to"].isin(textblock_fact_ids)
-    matched = df.loc[mask]
-    fact_to_report.update(dict(zip(matched["to"], matched["from"], strict=False)))
-    del df, table, matched
-
-  context.log.info(f"Mapped {len(fact_to_report)} textblock facts to reports")
-
-  # Step 2d: ENTITY_HAS_REPORT is small (~5K edges), load normally
-  context.log.info(f"Reading {len(ehr_keys)} ENTITY_HAS_REPORT parquets...")
-  report_to_entity: dict[str, str] = {}
-  ehr_table = _read_parquets_from_s3(s3, processed_bucket, ehr_keys)
-  if ehr_table is not None:
-    ehr_df = ehr_table.to_pandas()
-    report_to_entity = dict(zip(ehr_df["to"], ehr_df["from"], strict=False))
-    del ehr_df, ehr_table
-
-  context.log.info(f"Mapped {len(report_to_entity)} reports to entities")
-
-  # --- Phase 3: Build and index OpenSearch documents ---
-  # Free intermediate data no longer needed to reduce memory before
-  # potentially loading the fastembed model (~500MB with ONNX runtime).
-  del textblock_fact_ids, textblock_element_ids
-  del all_parquet_keys, node_keys, rel_keys, fhe_keys, rhf_keys, ehr_keys
-  gc.collect()
-
-  # Textblocks are individual XBRL elements (typically 1-5KB each), unlike
-  # narrative/iXBRL sections (up to 50KB). 1000 x 5KB = 5MB, safely under
-  # OpenSearch's 10MB bulk request limit.
-  batch_size = _EMBEDDING_BATCH_SIZE
-  documents: list[dict[str, Any]] = []
-  total_indexed = 0
-  errors = 0
-  skipped = 0
-
-  for fact in external_textblock_facts:
-    fact_id = fact["identifier"]
-    value_url = fact["value"]
-
-    # Resolve report for accession check
-    report_id = fact_to_report.get(fact_id)
-    report_info = report_lookup.get(report_id, {}) if report_id else {}
-
-    # Skip already-indexed accessions (incremental)
-    accession = report_info.get("accession_number", "")
-    if accession and accession in indexed_accessions:
-      skipped += 1
-      continue
-
-    # Resolve element
-    element_id = fact_to_element.get(fact_id)
-    element_info = element_lookup.get(element_id, {}) if element_id else {}
-
-    entity_id = report_to_entity.get(report_id) if report_id else None
-    entity_info = entity_lookup.get(entity_id, {}) if entity_id else {}
-
-    # Fetch content from S3
-    s3_info = _url_to_s3_key(str(value_url))
-    if not s3_info:
-      skipped += 1
-      continue
-
-    content_bucket, content_key = s3_info
-    html_content = _fetch_s3_text(s3, content_bucket, content_key)
-    if not html_content:
-      errors += 1
-      continue
-
-    # Strip HTML
-    plain_text = _strip_html(html_content)
-    if len(plain_text) < config.min_content_length:
-      skipped += 1
-      continue
-
-    section_label = _derive_section_label(element_info.get("name", ""))
-    doc_id = hashlib.sha256(f"{config.graph_id}:tb:{fact_id}".encode()).hexdigest()[:16]
-
-    documents.append(
-      {
-        "graph_id": config.graph_id,
-        "document_id": doc_id,
-        "source_type": "xbrl_textblock",
-        "entity_ticker": entity_info.get("ticker"),
-        "entity_name": entity_info.get("name"),
-        "entity_cik": entity_info.get("cik"),
-        "element_qname": element_info.get("qname"),
-        "section_label": section_label,
-        "content": plain_text,
-        "content_url": str(value_url),
-        "content_length": len(plain_text),
-        "filing_date": report_info.get("filing_date"),
-        "fiscal_year": report_info.get("fiscal_year"),
-        "fiscal_period": report_info.get("fiscal_period"),
-        "form_type": report_info.get("form"),
-        "accession_number": report_info.get("accession_number"),
-      }
-    )
-
-    # Bulk index in batches to limit memory from accumulated documents
-    if len(documents) >= batch_size:
-      _embed_document_batch(enricher, documents)
-      batch_result = os_client.bulk_index(documents)
-      total_indexed += batch_result["indexed"]
-      errors += batch_result["errors"]
-      context.log.info(
-        f"Batch indexed {batch_result['indexed']} docs "
-        f"({batch_result['errors']} errors, {total_indexed} total)"
-      )
-      documents.clear()
-
-  context.log.info(f"Processing complete ({skipped} skipped, {errors} errors so far)")
-
-  # Index remaining documents
-  if documents:
-    _embed_document_batch(enricher, documents)
-    batch_result = os_client.bulk_index(documents)
-    total_indexed += batch_result["indexed"]
-    errors += batch_result["errors"]
-    context.log.info(
-      f"Final batch indexed {batch_result['indexed']} docs "
-      f"({batch_result['errors']} errors)"
-    )
-
-  # Release enricher memory
-  del enricher
-  gc.collect()
-
-  return MaterializeResult(
-    metadata={
-      "graph_id": config.graph_id,
-      "source_type": "xbrl_textblock",
-      "documents_indexed": total_indexed,
-      "documents_skipped": skipped,
-      "errors": errors,
-      "total_textblock_facts": len(external_textblock_facts),
-    }
-  )
 
 
 @asset(
@@ -1104,7 +658,8 @@ def sec_ixbrl_disclosures_indexed(
   2. Verify document type via dei:DocumentType iXBRL tag
   3. Parse ix:nonNumeric TextBlock elements as disclosure sections
   4. Extract nested ix:nonFraction element qnames per section
-  5. Index into OpenSearch with source_type="ixbrl_disclosure" + xbrl_elements metadata
+  5. Resolve CDN content_url from externalized Fact data (value_type=external)
+  6. Index into OpenSearch with source_type="ixbrl_disclosure" + xbrl_elements metadata
 
   Enables bidirectional navigation: search → graph (find facts in a disclosure)
   and graph → search (find the disclosure discussing a fact).
@@ -1155,6 +710,10 @@ def sec_ixbrl_disclosures_indexed(
   report_keys = [k for k in all_parquet_keys if "/nodes/Report/" in k]
   entity_keys = [k for k in all_parquet_keys if "/nodes/Entity/" in k]
   ehr_keys = [k for k in all_parquet_keys if "/relationships/ENTITY_HAS_REPORT/" in k]
+  element_keys = [k for k in all_parquet_keys if "/nodes/Element/" in k]
+  fact_keys = [k for k in all_parquet_keys if "/nodes/Fact/" in k]
+  fhe_keys = [k for k in all_parquet_keys if "/relationships/FACT_HAS_ELEMENT/" in k]
+  rhf_keys = [k for k in all_parquet_keys if "/relationships/REPORT_HAS_FACT/" in k]
 
   context.log.info(f"Reading {len(report_keys)} Report parquets for metadata...")
   report_table = _read_parquets_from_s3(
@@ -1189,6 +748,14 @@ def sec_ixbrl_disclosures_indexed(
   target_reports = reports_df[
     reports_df["form"].str.upper().isin(form_types_upper)
   ].copy()
+
+  # Build report_id → accession lookup before target_reports is deleted
+  report_id_to_accession: dict[str, str] = {}
+  for _, report in target_reports.iterrows():
+    rid = report.get("identifier", "")
+    acc = report.get("accession_number", "")
+    if rid and acc:
+      report_id_to_accession[rid] = acc
 
   # Build entity lookup
   entity_lookup: dict[str, dict[str, str]] = {}
@@ -1227,9 +794,100 @@ def sec_ixbrl_disclosures_indexed(
 
   context.log.info(f"Built metadata for {len(accession_metadata)} accessions")
 
+  # Build CDN URL lookup: (accession_number, element_qname) → content_url
+  # Resolves externalized Fact URLs by joining Element, Fact, FACT_HAS_ELEMENT,
+  # and REPORT_HAS_FACT parquets. Streams one file at a time to limit memory.
+  cdn_url_lookup: dict[tuple[str, str], str] = {}
+
+  # Step 1: Read Element parquets, filter to textblocks, build element_id → qname
+  context.log.info(
+    f"Reading {len(element_keys)} Element parquets for textblock qnames..."
+  )
+  element_id_to_qname: dict[str, str] = {}
+  element_table = _read_parquets_from_s3(
+    s3,
+    processed_bucket,
+    element_keys,
+    columns=["identifier", "qname", "is_textblock"],
+  )
+  if element_table is not None:
+    elements_df = element_table.to_pandas()
+    elements_df = elements_df.fillna({"qname": "", "is_textblock": False})
+    tb_df = elements_df[elements_df["is_textblock"].astype(bool)]
+    element_id_to_qname = dict(zip(tb_df["identifier"], tb_df["qname"], strict=False))
+    del elements_df, tb_df, element_table
+  context.log.info(f"Found {len(element_id_to_qname)} textblock elements")
+
+  # Step 2: Stream FACT_HAS_ELEMENT to find textblock fact IDs and their element qnames
+  textblock_fact_to_qname: dict[str, str] = {}
+  textblock_element_ids = set(element_id_to_qname.keys())
+  context.log.info(f"Streaming {len(fhe_keys)} FACT_HAS_ELEMENT parquets...")
+  for key in fhe_keys:
+    table = _read_parquets_from_s3(s3, processed_bucket, [key])
+    if table is None:
+      continue
+    df = table.to_pandas()
+    mask = df["to"].isin(textblock_element_ids)
+    matched = df.loc[mask]
+    for _, row in matched.iterrows():
+      textblock_fact_to_qname[row["from"]] = element_id_to_qname[row["to"]]
+    del df, table, matched
+  context.log.info(f"Found {len(textblock_fact_to_qname)} textblock facts")
+  del element_id_to_qname, textblock_element_ids
+
+  # Step 3: Stream Fact parquets for value_type=external to get fact_id → URL
+  textblock_fact_ids = set(textblock_fact_to_qname.keys())
+  fact_id_to_url: dict[str, str] = {}
+  context.log.info(f"Streaming {len(fact_keys)} Fact parquets for external URLs...")
+  for key in fact_keys:
+    table = _read_parquets_from_s3(
+      s3, processed_bucket, [key], columns=["identifier", "value", "value_type"]
+    )
+    if table is None:
+      continue
+    df = table.to_pandas()
+    mask = df["identifier"].isin(textblock_fact_ids) & (df["value_type"] == "external")
+    matched = df.loc[mask, ["identifier", "value"]].fillna("")
+    fact_id_to_url.update(
+      dict(zip(matched["identifier"], matched["value"], strict=False))
+    )
+    del df, table, matched
+  context.log.info(f"Found {len(fact_id_to_url)} external textblock fact URLs")
+
+  # Step 4: Stream REPORT_HAS_FACT to map fact_id → report_id
+  fact_id_to_report: dict[str, str] = {}
+  context.log.info(f"Streaming {len(rhf_keys)} REPORT_HAS_FACT parquets...")
+  for key in rhf_keys:
+    table = _read_parquets_from_s3(s3, processed_bucket, [key])
+    if table is None:
+      continue
+    df = table.to_pandas()
+    mask = df["to"].isin(textblock_fact_ids)
+    matched = df.loc[mask]
+    fact_id_to_report.update(dict(zip(matched["to"], matched["from"], strict=False)))
+    del df, table, matched
+  context.log.info(f"Mapped {len(fact_id_to_report)} facts to reports")
+
+  # Step 5: Combine — for each fact, resolve accession and qname, store URL
+  for fact_id, url in fact_id_to_url.items():
+    report_id = fact_id_to_report.get(fact_id)
+    if not report_id:
+      continue
+    accession = report_id_to_accession.get(report_id)
+    if not accession:
+      continue
+    qname = textblock_fact_to_qname.get(fact_id)
+    if qname:
+      cdn_url_lookup[(accession, qname)] = url
+
+  context.log.info(f"Built CDN URL lookup with {len(cdn_url_lookup)} entries")
+  del fact_id_to_url, fact_id_to_report, textblock_fact_to_qname, textblock_fact_ids
+
   # Free intermediate data before potentially loading fastembed model
   del reports_df, report_table, target_reports, entity_lookup, report_to_entity
+  del report_id_to_accession
   del all_parquet_keys, report_keys, entity_keys, ehr_keys
+  del element_keys, fact_keys, fhe_keys, rhf_keys
   gc.collect()
 
   # Scan raw ZIPs
@@ -1311,6 +969,8 @@ def sec_ixbrl_disclosures_indexed(
             "section_id": section.section_id,
             "section_label": section.section_label,
             "content": section.content,
+            "content_url": cdn_url_lookup.get((accession, section.section_id), ""),
+            "element_qname": section.section_id,
             "content_length": len(section.content),
             "xbrl_elements": section.xbrl_elements,
             "xbrl_element_count": section.element_count,
@@ -1349,8 +1009,8 @@ def sec_ixbrl_disclosures_indexed(
       f"({batch_result['errors']} errors)"
     )
 
-  # Release enricher memory
-  del enricher
+  # Release enricher and lookup memory
+  del enricher, cdn_url_lookup
   gc.collect()
 
   context.log.info(

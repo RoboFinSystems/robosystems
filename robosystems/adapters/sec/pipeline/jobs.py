@@ -64,7 +64,6 @@ from .stage import (
 from .text_index import (
   sec_ixbrl_disclosures_indexed,
   sec_narratives_indexed,
-  sec_textblocks_indexed,
 )
 from .vector_publish import sec_vector_s3_published
 
@@ -476,18 +475,6 @@ SEC_INDEX_ECS_TAGS = {
     ],
   },
 }
-
-sec_textblocks_index_job = define_asset_job(
-  name="sec_textblocks_index",
-  description="Index XBRL text blocks into OpenSearch (partitioned by quarter).",
-  selection=AssetSelection.assets(sec_textblocks_indexed),
-  partitions_def=sec_quarter_partitions,
-  tags={
-    "pipeline": "sec",
-    "phase": "text_index",
-    **SEC_INDEX_ECS_TAGS,
-  },
-)
 
 sec_narratives_index_job = define_asset_job(
   name="sec_narratives_index",
