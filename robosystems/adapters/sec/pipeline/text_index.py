@@ -103,27 +103,6 @@ def _get_public_data_cdn_url() -> str:
   return env.PUBLIC_DATA_CDN_URL
 
 
-def _derive_section_label(element_name: str) -> str:
-  """Derive a human-readable section label from an XBRL element name.
-
-  Examples:
-      'Risk Factors [Text Block]' → 'Risk Factors'
-      'ManagementDiscussionAndAnalysisTextBlock' → 'Management Discussion And Analysis'
-  """
-  label = element_name
-  for suffix in ["[Text Block]", "Text Block", "TextBlock", "[text Block]"]:
-    if label.endswith(suffix):
-      label = label[: -len(suffix)].strip()
-      break
-
-  # If it's camelCase, add spaces
-  if " " not in label and any(c.isupper() for c in label[1:]):
-    label = re.sub(r"([a-z])([A-Z])", r"\1 \2", label)
-    label = re.sub(r"([A-Z]+)([A-Z][a-z])", r"\1 \2", label)
-
-  return label.strip()
-
-
 def _get_indexed_accessions(
   os_client, graph_id: str, source_type: str | None = None
 ) -> set[str]:
@@ -970,7 +949,6 @@ def sec_ixbrl_disclosures_indexed(
             "section_label": section.section_label,
             "content": section.content,
             "content_url": cdn_url_lookup.get((accession, section.section_id), ""),
-            "element_qname": section.section_id,
             "content_length": len(section.content),
             "xbrl_elements": section.xbrl_elements,
             "xbrl_element_count": section.element_count,
