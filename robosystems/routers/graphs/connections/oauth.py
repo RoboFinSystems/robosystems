@@ -90,11 +90,11 @@ async def init_oauth(
 
   except HTTPException:
     raise
-  except Exception as e:
-    logger.error(f"OAuth initialization failed: {e}")
+  except Exception:
+    logger.error("OAuth initialization failed", exc_info=True)
     raise create_error_response(
       status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-      detail=f"OAuth initialization failed: {e!s}",
+      detail="OAuth initialization failed",
       code=ErrorCode.INTERNAL_ERROR,
     )
 
@@ -289,10 +289,10 @@ async def oauth_callback(
 
   except HTTPException:
     raise
-  except Exception as e:
-    logger.error(f"OAuth callback failed: {e}")
+  except Exception:
+    logger.error("OAuth callback failed", exc_info=True)
     raise create_error_response(
       status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-      detail=f"OAuth callback failed: {e!s}",
+      detail="OAuth callback failed",
       code=ErrorCode.INTERNAL_ERROR,
     )

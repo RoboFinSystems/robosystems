@@ -286,6 +286,10 @@ class OLTPLoader:
           ext_txn_id = str(row.get("external_transaction_id", ext_id))
           txn_oltp_id = transaction_lookup.get(ext_txn_id)
 
+          if not txn_oltp_id:
+            result.errors.append(f"Entry references unknown transaction: {ext_txn_id}")
+            continue
+
           entry_objects.append(
             Entry(
               id=oltp_id,
