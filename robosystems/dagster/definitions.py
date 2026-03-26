@@ -101,10 +101,10 @@ from robosystems.dagster.sensors.invoice_billing import (
 # from robosystems.adapters.custom_erp.pipeline import get_dagster_components as erp_pipeline
 
 # ============================================================================
-# Adapter Pipeline Components
+# Adapter Pipeline Components (conditionally loaded via feature flags)
 # ============================================================================
 
-_empty_pipeline = {"assets": [], "jobs": [], "sensors": [], "schedules": []}
+_empty_pipeline: dict = {"assets": [], "jobs": [], "schedules": [], "sensors": []}
 
 if env.SEC_PIPELINE_ENABLED:
   from robosystems.adapters.sec.pipeline import (
@@ -114,6 +114,15 @@ if env.SEC_PIPELINE_ENABLED:
   sec = sec_pipeline()
 else:
   sec = _empty_pipeline
+
+if env.CONNECTION_QUICKBOOKS_ENABLED:
+  from robosystems.adapters.quickbooks.pipeline import (
+    get_dagster_components as qb_pipeline,
+  )
+
+  qb = qb_pipeline()
+else:
+  qb = _empty_pipeline
 # erp = erp_pipeline()
 
 # Collect shared replica deps from all enabled adapter pipelines
@@ -151,6 +160,8 @@ all_assets = [
   shared_replicas_refreshed,
   # Adapter: SEC pipeline (includes sec_lbug_s3_published)
   *sec["assets"],
+  # Adapter: QuickBooks pipeline
+  *qb["assets"],
 ]
 
 all_jobs = [
@@ -187,6 +198,8 @@ all_jobs = [
   send_email_job,
   # Adapter: SEC pipeline
   *sec["jobs"],
+  # Adapter: QuickBooks pipeline
+  *qb["jobs"],
 ]
 
 all_schedules = [

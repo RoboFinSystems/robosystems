@@ -9,8 +9,9 @@ Generates:
 NODE FILES:
 - Entity.parquet (business entity)
 - Element.parquet (chart of accounts)
-- Transaction.parquet (financial transactions)
-- LineItem.parquet (journal entry lines)
+- Transaction.parquet (business events)
+- Entry.parquet (ledger entries / journal entries)
+- LineItem.parquet (debits and credits)
 - Dimension.parquet (dimensional qualifiers: department, project, location)
 - Report.parquet (monthly financial reports)
 - Fact.parquet (aggregated financial metrics)
@@ -19,7 +20,8 @@ NODE FILES:
 
 RELATIONSHIP FILES:
 - ENTITY_HAS_TRANSACTION.parquet
-- TRANSACTION_HAS_LINE_ITEM.parquet
+- TRANSACTION_HAS_ENTRY.parquet
+- ENTRY_HAS_LINE_ITEM.parquet
 - LINE_ITEM_RELATES_TO_ELEMENT.parquet
 - LINE_ITEM_HAS_DIMENSION.parquet
 - ENTITY_HAS_REPORT.parquet
@@ -96,20 +98,31 @@ class AccountingDataGenerator:
     return {
       "identifier": identifier,
       "uri": f"https://example.com/transaction/{identifier}",
-      "transaction_number": identifier,
+      "number": identifier,
       "amount": amount,
       "description": description,
       "date": date,
-      "transaction_date": date,
       "reference_number": identifier,
-      "transaction_type": transaction_type,
       "type": transaction_type,
-      "number": identifier,
-      "sync_hash": None,
       "currency": "USD",
-      "plaid_merchant_name": None,
-      "plaid_category": None,
-      "plaid_pending": False,
+      "merchant_name": None,
+      "category": None,
+      "pending": False,
+      "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+    }
+
+  def _create_entry(self, transaction_id, date, memo):
+    """Create a ledger entry (1:1 with transaction for demo data)."""
+    entry_id = f"EN{transaction_id[2:]}"  # TX0001 -> EN0001
+    return {
+      "identifier": entry_id,
+      "uri": f"https://example.com/entry/{entry_id}",
+      "number": entry_id,
+      "memo": memo,
+      "posting_date": date,
+      "type": "standard",
+      "status": "posted",
+      "reversal_of": None,
       "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
     }
 
@@ -302,10 +315,11 @@ class AccountingDataGenerator:
     return df
 
   def generate_transactions(self):
-    """Generate transactions and line items."""
+    """Generate transactions, entries, and line items."""
     print(f"\n💰 Generating {self.num_months} months of transactions...")
 
     transactions = []
+    entries = []
     line_items = []
     tx_id = 1
     li_id = 1
@@ -334,20 +348,24 @@ class AccountingDataGenerator:
       # Other expenses → contextual department
 
       tx_date = month_start + timedelta(days=1)
+      tx_ident = f"TX{tx_id:04d}"
       transactions.append(
         self._create_transaction(
-          f"TX{tx_id:04d}",
+          tx_ident,
           tx_date.strftime("%Y-%m-%d"),
           f"Monthly rent payment - {tx_date.strftime('%B %Y')}",
           "Expense",
           2500.00,
         )
       )
+      entries.append(
+        self._create_entry(tx_ident, tx_date.strftime("%Y-%m-%d"), f"Monthly rent - {tx_date.strftime('%B %Y')}")
+      )
       line_items.extend(
         [
           {
             **self._create_line_item(f"LI{li_id:04d}", 2500.00, 0.0, "Office rent"),
-            "transaction_id": f"TX{tx_id:04d}",
+            "transaction_id": tx_ident,
             "account_name": "Expenses:Rent",
             "account_element": f"element_{account_lookup['Expenses:Rent']}",
             "dimensions": [("department", "Operations"), ("location", "San Francisco")],
@@ -356,7 +374,7 @@ class AccountingDataGenerator:
             **self._create_line_item(
               f"LI{li_id + 1:04d}", 0.0, 2500.00, "Cash payment"
             ),
-            "transaction_id": f"TX{tx_id:04d}",
+            "transaction_id": tx_ident,
             "account_name": "Assets:Cash",
             "account_element": f"element_{account_lookup['Assets:Cash']}",
             "dimensions": [],
@@ -372,14 +390,18 @@ class AccountingDataGenerator:
         project = random.choice(self._projects)
         location = random.choice(self._locations)
 
+        tx_ident = f"TX{tx_id:04d}"
         transactions.append(
           self._create_transaction(
-            f"TX{tx_id:04d}",
+            tx_ident,
             tx_date.strftime("%Y-%m-%d"),
             f"Consulting services - Week {week + 1}",
             "Revenue",
             revenue_amount,
           )
+        )
+        entries.append(
+          self._create_entry(tx_ident, tx_date.strftime("%Y-%m-%d"), f"Consulting revenue - Week {week + 1}")
         )
         line_items.extend(
           [
@@ -387,7 +409,7 @@ class AccountingDataGenerator:
               **self._create_line_item(
                 f"LI{li_id:04d}", revenue_amount, 0.0, "Cash received"
               ),
-              "transaction_id": f"TX{tx_id:04d}",
+              "transaction_id": tx_ident,
               "account_name": "Assets:Cash",
               "account_element": f"element_{account_lookup['Assets:Cash']}",
               "dimensions": [],
@@ -396,7 +418,7 @@ class AccountingDataGenerator:
               **self._create_line_item(
                 f"LI{li_id + 1:04d}", 0.0, revenue_amount, "Consulting revenue earned"
               ),
-              "transaction_id": f"TX{tx_id:04d}",
+              "transaction_id": tx_ident,
               "account_name": "Revenue:ConsultingRevenue",
               "account_element": f"element_{account_lookup['Revenue:ConsultingRevenue']}",
               "dimensions": [
@@ -414,14 +436,18 @@ class AccountingDataGenerator:
       salary_amount = round(random.uniform(8000, 12000), 2)
       salary_dept = random.choice(self._departments)
       salary_location = random.choice(self._locations)
+      tx_ident = f"TX{tx_id:04d}"
       transactions.append(
         self._create_transaction(
-          f"TX{tx_id:04d}",
+          tx_ident,
           tx_date.strftime("%Y-%m-%d"),
           f"Salary payment - {tx_date.strftime('%B %Y')}",
           "Expense",
           salary_amount,
         )
+      )
+      entries.append(
+        self._create_entry(tx_ident, tx_date.strftime("%Y-%m-%d"), f"Salary - {tx_date.strftime('%B %Y')}")
       )
       line_items.extend(
         [
@@ -429,7 +455,7 @@ class AccountingDataGenerator:
             **self._create_line_item(
               f"LI{li_id:04d}", salary_amount, 0.0, "Employee salaries"
             ),
-            "transaction_id": f"TX{tx_id:04d}",
+            "transaction_id": tx_ident,
             "account_name": "Expenses:Salaries",
             "account_element": f"element_{account_lookup['Expenses:Salaries']}",
             "dimensions": [
@@ -441,7 +467,7 @@ class AccountingDataGenerator:
             **self._create_line_item(
               f"LI{li_id + 1:04d}", 0.0, salary_amount, "Cash payment"
             ),
-            "transaction_id": f"TX{tx_id:04d}",
+            "transaction_id": tx_ident,
             "account_name": "Assets:Cash",
             "account_element": f"element_{account_lookup['Assets:Cash']}",
             "dimensions": [],
@@ -462,16 +488,20 @@ class AccountingDataGenerator:
         tx_date = month_start + timedelta(days=random.randint(10, 25))
         amount = round(random.uniform(min_amt, max_amt), 2)
 
+        tx_ident = f"TX{tx_id:04d}"
         transactions.append(
           self._create_transaction(
-            f"TX{tx_id:04d}", tx_date.strftime("%Y-%m-%d"), desc, "Expense", amount
+            tx_ident, tx_date.strftime("%Y-%m-%d"), desc, "Expense", amount
           )
+        )
+        entries.append(
+          self._create_entry(tx_ident, tx_date.strftime("%Y-%m-%d"), desc)
         )
         line_items.extend(
           [
             {
               **self._create_line_item(f"LI{li_id:04d}", amount, 0.0, desc),
-              "transaction_id": f"TX{tx_id:04d}",
+              "transaction_id": tx_ident,
               "account_name": expense_account,
               "account_element": f"element_{account_lookup[expense_account]}",
               "dimensions": [("department", dept)],
@@ -480,7 +510,7 @@ class AccountingDataGenerator:
               **self._create_line_item(
                 f"LI{li_id + 1:04d}", 0.0, amount, "Cash payment"
               ),
-              "transaction_id": f"TX{tx_id:04d}",
+              "transaction_id": tx_ident,
               "account_name": "Assets:Cash",
               "account_element": f"element_{account_lookup['Assets:Cash']}",
               "dimensions": [],
@@ -491,10 +521,14 @@ class AccountingDataGenerator:
         tx_id += 1
 
     tx_df = pd.DataFrame(transactions)
+    entry_df = pd.DataFrame(entries)
     li_df = pd.DataFrame(line_items)
 
     tx_output = self.nodes_dir / "Transaction.parquet"
     self._write_parquet(tx_df, tx_output, "Transaction")
+
+    entry_output = self.nodes_dir / "Entry.parquet"
+    self._write_parquet(entry_df, entry_output, "Entry")
 
     li_output = self.nodes_dir / "LineItem.parquet"
     li_df_clean = li_df.drop(
@@ -502,7 +536,7 @@ class AccountingDataGenerator:
     )
     self._write_parquet(li_df_clean, li_output, "LineItem")
 
-    return tx_df, li_df
+    return tx_df, entry_df, li_df
 
   def generate_reports_and_facts(self, tx_df, li_df):
     """Generate monthly financial reports with aggregated facts."""
@@ -683,12 +717,13 @@ class AccountingDataGenerator:
 
     return reports_df, facts_df, periods_df, units_df
 
-  def generate_relationships(self, tx_df, li_df, reports_df=None, facts_df=None):
+  def generate_relationships(self, tx_df, entry_df, li_df, reports_df=None, facts_df=None):
     """Generate relationship parquet files."""
     print("\n🔗 Generating relationship files...")
 
     entity_id = self.entity_identifier
 
+    # Entity → Transaction
     entity_tx_rels = []
     for _, row in tx_df.iterrows():
       entity_tx_rels.append(
@@ -702,18 +737,37 @@ class AccountingDataGenerator:
     entity_tx_path = self.relationships_dir / "ENTITY_HAS_TRANSACTION.parquet"
     self._write_parquet(entity_tx_df, entity_tx_path, "ENTITY_HAS_TRANSACTION")
 
-    tx_li_rels = []
-    for _, row in li_df.iterrows():
-      tx_li_rels.append(
+    # Transaction → Entry (1:1 for demo data)
+    tx_entry_rels = []
+    for _, row in entry_df.iterrows():
+      # EN0001 -> TX0001
+      tx_ident = f"TX{row['identifier'][2:]}"
+      tx_entry_rels.append(
         {
-          "from": row["transaction_id"],
+          "from": tx_ident,
           "to": row["identifier"],
-          "line_item_context": "accounting_transaction",
+          "entry_context": "general_ledger",
         }
       )
-    tx_li_df = pd.DataFrame(tx_li_rels)
-    tx_li_path = self.relationships_dir / "TRANSACTION_HAS_LINE_ITEM.parquet"
-    self._write_parquet(tx_li_df, tx_li_path, "TRANSACTION_HAS_LINE_ITEM")
+    tx_entry_df = pd.DataFrame(tx_entry_rels)
+    tx_entry_path = self.relationships_dir / "TRANSACTION_HAS_ENTRY.parquet"
+    self._write_parquet(tx_entry_df, tx_entry_path, "TRANSACTION_HAS_ENTRY")
+
+    # Entry → LineItem
+    entry_li_rels = []
+    for _, row in li_df.iterrows():
+      # TX0001 -> EN0001
+      entry_ident = f"EN{row['transaction_id'][2:]}"
+      entry_li_rels.append(
+        {
+          "from": entry_ident,
+          "to": row["identifier"],
+          "line_item_context": "journal_entry",
+        }
+      )
+    entry_li_df = pd.DataFrame(entry_li_rels)
+    entry_li_path = self.relationships_dir / "ENTRY_HAS_LINE_ITEM.parquet"
+    self._write_parquet(entry_li_df, entry_li_path, "ENTRY_HAS_LINE_ITEM")
 
     li_element_rels = []
     for _, row in li_df.iterrows():
@@ -857,17 +911,18 @@ class AccountingDataGenerator:
     self.generate_entity()
     self.generate_chart_of_accounts()
     self.generate_dimensions()
-    tx_df, li_df = self.generate_transactions()
+    tx_df, entry_df, li_df = self.generate_transactions()
     reports_df, facts_df, periods_df, units_df = self.generate_reports_and_facts(
       tx_df, li_df
     )
-    self.generate_relationships(tx_df, li_df, reports_df, facts_df)
+    self.generate_relationships(tx_df, entry_df, li_df, reports_df, facts_df)
 
     print("\n" + "=" * 70)
     print("✅ Data Generation Complete!")
     print("=" * 70)
     print(f"\nData files saved to: {self.data_dir}")
     print(f"  - {len(tx_df)} transactions")
+    print(f"  - {len(entry_df)} entries")
     print(f"  - {len(li_df)} line items")
     print(
       f"  - {len(self._dimension_lookup)} dimensions (departments, projects, locations)"
@@ -884,6 +939,7 @@ class AccountingDataGenerator:
       "Element.parquet",
       "Dimension.parquet",
       "Transaction.parquet",
+      "Entry.parquet",
       "LineItem.parquet",
       "Report.parquet",
       "Fact.parquet",
@@ -892,7 +948,8 @@ class AccountingDataGenerator:
     ]
     relationship_files = [
       "ENTITY_HAS_TRANSACTION.parquet",
-      "TRANSACTION_HAS_LINE_ITEM.parquet",
+      "TRANSACTION_HAS_ENTRY.parquet",
+      "ENTRY_HAS_LINE_ITEM.parquet",
       "LINE_ITEM_RELATES_TO_ELEMENT.parquet",
       "LINE_ITEM_HAS_DIMENSION.parquet",
       "ENTITY_HAS_REPORT.parquet",

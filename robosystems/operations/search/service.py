@@ -11,7 +11,11 @@ from typing import TYPE_CHECKING, Any
 from robosystems.config import env
 from robosystems.logger import logger
 from robosystems.models.api.search import (
+  DocumentListItem,
+  DocumentListResponse,
   DocumentSection,
+  DocumentUploadRequest,
+  DocumentUploadResponse,
   SearchHit,
   SearchRequest,
   SearchResponse,
@@ -20,7 +24,7 @@ from robosystems.models.api.search import (
 from .client import OpenSearchClient
 
 if TYPE_CHECKING:
-  from robosystems.adapters.sec.enrichment import SemanticEnricher
+  from .embeddings import EmbeddingService
 
 # Snippet fallback length when no highlights available
 SNIPPET_FALLBACK_LENGTH = 300
@@ -31,17 +35,17 @@ class SearchService:
 
   def __init__(self, client: OpenSearchClient) -> None:
     self.client = client
-    self._enricher: SemanticEnricher | None = None
+    self._embedding_service: EmbeddingService | None = None
 
   @property
-  def enricher(self) -> SemanticEnricher:
-    """Lazy-load fastembed model for query embedding."""
-    if self._enricher is None:
-      from robosystems.adapters.sec.enrichment import SemanticEnricher
+  def embedding_service(self) -> EmbeddingService:
+    """Lazy-load the platform embedding service."""
+    if self._embedding_service is None:
+      from .embeddings import get_embedding_service
 
-      self._enricher = SemanticEnricher()
-      logger.info("Loaded SemanticEnricher for query embedding")
-    return self._enricher
+      self._embedding_service = get_embedding_service()
+      logger.info("Loaded EmbeddingService for search")
+    return self._embedding_service
 
   def search_documents(self, graph_id: str, request: SearchRequest) -> SearchResponse:
     """Hybrid search documents with graph_id isolation."""
@@ -63,7 +67,7 @@ class SearchService:
     if request.date_to:
       filters["date_to"] = request.date_to
 
-    query_embedding = self.enricher.embed_batch([request.query])[0]
+    query_embedding = self.embedding_service.embed_single(request.query)
     result = self.client.search(
       query=request.query,
       query_embedding=query_embedding,
@@ -104,6 +108,9 @@ class SearchService:
           snippet=snippet,
           content_length=source.get("content_length", 0),
           content_url=source.get("content_url"),
+          document_title=source.get("document_title"),
+          tags=source.get("tags"),
+          folder=source.get("folder"),
         )
       )
 
@@ -143,12 +150,173 @@ class SearchService:
       content=doc.get("content", ""),
       content_url=doc.get("content_url"),
       content_length=doc.get("content_length", 0),
+      document_title=doc.get("document_title"),
+      tags=doc.get("tags"),
+      folder=doc.get("folder"),
+    )
+
+  def upload_document(
+    self,
+    graph_id: str,
+    request: DocumentUploadRequest,
+    tier: str | None = None,
+  ) -> DocumentUploadResponse:
+    """Upload a markdown document: parse, section, embed, and index.
+
+    Args:
+        graph_id: Target graph for tenant isolation.
+        request: Document upload request with title, content, etc.
+        tier: Subscription tier for limit enforcement (None = no limit check).
+
+    Returns:
+        DocumentUploadResponse with section IDs and counts.
+
+    Raises:
+        ValueError: If document section limit exceeded for the tier.
+    """
+    from .embeddings import EMBEDDING_MODEL_ID
+    from .markdown_parser import content_hash, parse_document
+
+    # Check tier limits if tier provided
+    if tier:
+      from robosystems.config.billing.core import get_tier_max_document_sections
+
+      max_sections = get_tier_max_document_sections(tier)
+      if max_sections is not None:
+        current_count = self.client.count_by_source_type(graph_id, "uploaded_doc")
+        if current_count >= max_sections:
+          raise ValueError(
+            f"Document section limit reached ({current_count}/{max_sections}). "
+            f"Upgrade your plan for more capacity."
+          )
+
+    # Parse markdown
+    metadata, sections = parse_document(request.content, request.title)
+    if not sections:
+      raise ValueError("Document produced no indexable sections")
+
+    # Generate base document ID
+    if request.external_id:
+      base_id = f"doc_{graph_id}_{request.external_id}"
+    else:
+      base_id = f"doc_{graph_id}_{content_hash(request.content)}"
+
+    # Remove old sections if re-uploading
+    self.client.delete_by_document_prefix(graph_id, base_id)
+
+    # Use frontmatter values, falling back to request fields
+    doc_title = metadata.get("title", request.title)
+    doc_tags = metadata.get("tags", request.tags)
+    doc_folder = metadata.get("folder", request.folder)
+
+    # Embed all section contents
+    section_texts = [s["content"] for s in sections]
+    embeddings = self.embedding_service.embed_batch(section_texts)
+
+    # Build OpenSearch documents
+    os_docs: list[dict[str, Any]] = []
+    section_ids: list[str] = []
+    total_length = 0
+
+    for idx, (section, embedding) in enumerate(zip(sections, embeddings, strict=True)):
+      doc_id = f"{base_id}_{idx}"
+      section_ids.append(doc_id)
+      total_length += len(section["content"])
+
+      os_docs.append(
+        {
+          "graph_id": graph_id,
+          "document_id": doc_id,
+          "source_type": "uploaded_doc",
+          "document_title": doc_title,
+          "section_id": section["section_id"],
+          "section_label": section["section_label"],
+          "content": section["content"],
+          "content_length": len(section["content"]),
+          "tags": doc_tags,
+          "folder": doc_folder,
+          "embedding": embedding,
+          "embedding_model": EMBEDDING_MODEL_ID,
+        }
+      )
+
+    self.client.bulk_index(os_docs)
+
+    return DocumentUploadResponse(
+      document_id=base_id,
+      sections_indexed=len(sections),
+      total_content_length=total_length,
+      section_ids=section_ids,
+    )
+
+  def upload_documents_bulk(
+    self,
+    graph_id: str,
+    requests: list[DocumentUploadRequest],
+    tier: str | None = None,
+  ) -> tuple[list[DocumentUploadResponse], list[dict]]:
+    """Upload multiple documents. Returns (results, errors)."""
+    results: list[DocumentUploadResponse] = []
+    errors: list[dict] = []
+
+    for i, request in enumerate(requests):
+      try:
+        result = self.upload_document(graph_id, request, tier)
+        results.append(result)
+      except Exception as e:
+        errors.append({"index": i, "title": request.title, "error": str(e)})
+
+    return results, errors
+
+  def delete_document(self, graph_id: str, document_id: str) -> bool:
+    """Delete a document and all its sections."""
+    # Try exact match first
+    if self.client.delete_document(document_id, graph_id):
+      return True
+    # Try prefix match (delete all sections of a multi-section doc)
+    deleted = self.client.delete_by_document_prefix(graph_id, document_id)
+    return deleted > 0
+
+  def list_documents(
+    self, graph_id: str, source_type: str | None = None
+  ) -> DocumentListResponse:
+    """List indexed documents grouped by title."""
+    result = self.client.list_documents(graph_id, source_type)
+    aggs = result.get("aggregations", {})
+    doc_buckets = aggs.get("documents", {}).get("buckets", [])
+
+    documents: list[DocumentListItem] = []
+    for bucket in doc_buckets:
+      # Extract nested aggregation values
+      source_types = bucket.get("source_type", {}).get("buckets", [])
+      st = source_types[0]["key"] if source_types else "uploaded_doc"
+      folders = bucket.get("folder", {}).get("buckets", [])
+      folder = folders[0]["key"] if folders else None
+      tags_buckets = bucket.get("tags", {}).get("buckets", [])
+      tags = [t["key"] for t in tags_buckets] if tags_buckets else None
+      last_indexed = bucket.get("last_indexed", {}).get("value_as_string")
+
+      documents.append(
+        DocumentListItem(
+          document_title=bucket["key"],
+          section_count=bucket["doc_count"],
+          source_type=st,
+          folder=folder,
+          tags=tags,
+          last_indexed=last_indexed,
+        )
+      )
+
+    return DocumentListResponse(
+      total=len(documents),
+      documents=documents,
+      graph_id=graph_id,
     )
 
   def index_documents(
     self, graph_id: str, documents: list[dict[str, Any]]
   ) -> dict[str, int]:
-    """Index documents for a graph_id."""
+    """Index documents for a graph_id (used by SEC pipeline)."""
     for doc in documents:
       doc["graph_id"] = graph_id
     return self.client.bulk_index(documents)

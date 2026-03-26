@@ -89,6 +89,13 @@
       "problemMatcher": []
     },
     {
+      "label": "Local SDK",
+      "type": "shell",
+      "command": "just",
+      "args": ["sdk-local"],
+      "problemMatcher": []
+    },
+    {
       "label": "Test",
       "type": "shell",
       "command": "just",

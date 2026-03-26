@@ -50,11 +50,6 @@ Initiates data sync based on provider type:
 - Generates fresh trial balance
 - Duration depends on data volume
 
-**Plaid Sync**:
-- Retrieves recent bank transactions
-- Updates account balances
-- Categorizes new transactions
-
 Note:
 This operation is included - no credit consumption required.
 
@@ -195,7 +190,7 @@ async def sync_connection(
     raise create_error_response(
       status_code=status.HTTP_504_GATEWAY_TIMEOUT,
       detail="Connection sync timed out",
-      code=ErrorCode.TIMEOUT,
+      code=ErrorCode.OPERATION_FAILED,
     )
   except HTTPException:
     # Record circuit breaker failure for HTTP exceptions
@@ -238,9 +233,9 @@ async def sync_connection(
       error_message=str(e),
     )
 
-    logger.error(f"Failed to sync connection {connection_id}: {e}")
+    logger.error("Failed to sync connection %s", connection_id, exc_info=True)
     raise create_error_response(
       status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-      detail=f"Failed to sync connection: {e!s}",
+      detail="Failed to sync connection",
       code=ErrorCode.INTERNAL_ERROR,
     )

@@ -184,9 +184,8 @@ COPY main.py ./
 COPY bin/ /app/bin/
 # Copy static files for serving directly from container
 COPY static/ /app/static/
-# Copy alembic configuration and migrations
-COPY alembic.ini /app/
-COPY alembic/ /app/alembic/
+# Copy database migrations (platform + ledger)
+COPY migrations/ /app/migrations/
 # Copy configuration files
 COPY .github/configs/graph.yml /app/configs/graph.yml
 COPY .github/configs/stacks.yml /app/configs/stacks.yml

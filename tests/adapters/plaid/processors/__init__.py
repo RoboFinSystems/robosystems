@@ -1,1 +1,0 @@
-"""Plaid processors tests."""

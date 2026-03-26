@@ -79,7 +79,7 @@ The test suite is organized by component, mirroring the application structure:
 ### Background Tasks
 
 - **`dagster/`** - Dagster pipeline tests
-  - `assets/` - Asset tests (SEC, Plaid, etc.)
+  - `assets/` - Asset tests (SEC, etc.)
   - `jobs/` - Job tests (billing, infrastructure)
 
 ### Infrastructure
@@ -270,7 +270,6 @@ Tests mock external services by default:
 
 - SEC EDGAR API
 - QuickBooks API
-- Plaid API
 - Anthropic/Claude API
 - OpenFIGI API
 

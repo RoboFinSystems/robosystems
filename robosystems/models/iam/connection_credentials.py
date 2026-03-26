@@ -30,7 +30,7 @@ class ConnectionCredentials(Model):
   connection_id = Column(
     String, nullable=False, index=True
   )  # References Graph Connection.connection_id
-  provider = Column(String, nullable=False, index=True)  # QuickBooks, Plaid, SEC
+  provider = Column(String, nullable=False, index=True)  # QuickBooks, SEC
   user_id = Column(String, nullable=False, index=True)  # References User.id
 
   # Encrypted credential storage
@@ -173,7 +173,6 @@ class ConnectionCredentials(Model):
     """Get all active credentials for a user and provider."""
     return (
       session.query(cls)
-      .filter(cls.user_id == user_id, cls.provider == provider)
       .filter(
         cls.user_id == user_id,
         cls.provider == provider,

@@ -1,0 +1,16 @@
+Id,TxnDate,DocNumber,TotalAmt,PrivateNote,Adjustment
+1,2024-01-15,JE-001,5000.00,Client payment received,false
+2,2024-01-20,JE-002,3500.00,Monthly rent payment,false
+3,2024-01-25,JE-003,8000.00,Consulting project alpha,false
+4,2024-02-01,JE-004,250.00,Office supplies purchase,false
+5,2024-02-10,JE-005,4500.00,Software license sale,false
+6,2024-02-15,JE-006,3500.00,Monthly rent payment,false
+7,2024-02-28,JE-007,150.00,Bank interest earned,false
+8,2024-03-01,JE-008,500.00,Loan interest payment,false
+9,2024-03-10,JE-009,12000.00,Consulting project beta,false
+10,2024-03-15,JE-010,3500.00,Monthly rent payment,false
+11,2024-03-20,JE-011,1200.00,Office equipment purchase,false
+12,2024-03-25,JE-012,6000.00,Software development sale,false
+13,2024-03-31,JE-013,2000.00,Accounts payable payment,false
+14,2024-03-31,JE-014,800.00,Credit card payment,false
+15,2024-03-31,JE-015,5000.00,Owner equity contribution,false

@@ -160,12 +160,19 @@ def main():
     step5_args = ["--all", "--base-url", args.base_url]
     run_script("05_query_graph.py", step5_args)
 
+  # Step 6: Upload policy documents (if documents/ directory exists)
+  docs_dir = DEMO_DIR / "documents"
+  if docs_dir.exists() and list(docs_dir.glob("*.md")):
+    step6_args = ["--base-url", args.base_url]
+    run_script("06_upload_documents.py", step6_args)
+
   print("\n" + "=" * 70)
   print("✅ Accounting Demo - Complete!")
   print("=" * 70)
   print("\n💡 Next steps:")
   print("   - Run custom queries: uv run 05_query_graph.py")
   print("   - Interactive mode: uv run 05_query_graph.py")
+  print("   - Search documents: uv run 06_upload_documents.py")
   print("   - Create another graph: uv run main.py --new-graph")
   print("=" * 70 + "\n")
 

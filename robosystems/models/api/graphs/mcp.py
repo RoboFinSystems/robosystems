@@ -53,7 +53,7 @@ class MCPToolCall(BaseModel):
           "value": {
             "name": "read-graph-cypher",
             "arguments": {
-              "query": "MATCH (t:Transaction)-[:TRANSACTION_HAS_LINE_ITEM]->(li:LineItem)-[:LINE_ITEM_RELATES_TO_ELEMENT]->(e:Element) WHERE e.classification = $classification AND substring(t.date, 1, 7) = $month RETURN sum(li.credit_amount) AS total_revenue",
+              "query": "MATCH (t:Transaction)-[:TRANSACTION_HAS_ENTRY]->(en:Entry)-[:ENTRY_HAS_LINE_ITEM]->(li:LineItem)-[:LINE_ITEM_RELATES_TO_ELEMENT]->(e:Element) WHERE e.classification = $classification AND substring(t.date, 1, 7) = $month RETURN sum(li.credit_amount) AS total_revenue",
               "parameters": {"classification": "revenue", "month": "2025-09"},
               "timeout_override": 60,
             },
@@ -95,7 +95,7 @@ class MCPQueryRequest(BaseModel):
           "summary": "Cash flow transactions",
           "description": "Retrieve recent cash transactions with date ordering and limit",
           "value": {
-            "query": "MATCH (t:Transaction)-[:TRANSACTION_HAS_LINE_ITEM]->(li:LineItem)-[:LINE_ITEM_RELATES_TO_ELEMENT]->(e:Element) WHERE e.name = $account_name RETURN t.date AS date, t.description AS description, li.debit_amount AS cash_in, li.credit_amount AS cash_out ORDER BY t.date DESC LIMIT $limit",
+            "query": "MATCH (t:Transaction)-[:TRANSACTION_HAS_ENTRY]->(en:Entry)-[:ENTRY_HAS_LINE_ITEM]->(li:LineItem)-[:LINE_ITEM_RELATES_TO_ELEMENT]->(e:Element) WHERE e.name = $account_name RETURN t.date AS date, t.description AS description, li.debit_amount AS cash_in, li.credit_amount AS cash_out ORDER BY t.date DESC LIMIT $limit",
             "params": {"account_name": "Cash", "limit": 20},
             "timeout_override": 60,
           },
@@ -104,7 +104,7 @@ class MCPQueryRequest(BaseModel):
           "summary": "Profitability by month",
           "description": "Complex aggregation query calculating monthly profit from revenue and expenses",
           "value": {
-            "query": "MATCH (t:Transaction)-[:TRANSACTION_HAS_LINE_ITEM]->(li:LineItem)-[:LINE_ITEM_RELATES_TO_ELEMENT]->(e:Element) WHERE e.classification IN ['revenue', 'expense'] WITH substring(t.date, 1, 7) AS month, e.classification AS type, li.credit_amount AS credit, li.debit_amount AS debit WITH month, sum(CASE WHEN type = 'revenue' THEN credit ELSE 0 END) AS revenue, sum(CASE WHEN type = 'expense' THEN debit ELSE 0 END) AS expenses RETURN month, revenue, expenses, revenue - expenses AS profit ORDER BY month",
+            "query": "MATCH (t:Transaction)-[:TRANSACTION_HAS_ENTRY]->(en:Entry)-[:ENTRY_HAS_LINE_ITEM]->(li:LineItem)-[:LINE_ITEM_RELATES_TO_ELEMENT]->(e:Element) WHERE e.classification IN ['revenue', 'expense'] WITH substring(t.date, 1, 7) AS month, e.classification AS type, li.credit_amount AS credit, li.debit_amount AS debit WITH month, sum(CASE WHEN type = 'revenue' THEN credit ELSE 0 END) AS revenue, sum(CASE WHEN type = 'expense' THEN debit ELSE 0 END) AS expenses RETURN month, revenue, expenses, revenue - expenses AS profit ORDER BY month",
             "params": {},
             "timeout_override": 120,
           },
@@ -113,7 +113,7 @@ class MCPQueryRequest(BaseModel):
           "summary": "Report lineage analysis",
           "description": "Data lineage query connecting transactions to financial reports for specific period",
           "value": {
-            "query": "MATCH (t:Transaction)-[:TRANSACTION_HAS_LINE_ITEM]->(li:LineItem)-[:LINE_ITEM_RELATES_TO_ELEMENT]->(e:Element) MATCH (r:Report)-[:REPORT_HAS_FACT]->(f:Fact)-[:FACT_HAS_ELEMENT]->(e) WHERE substring(t.date, 1, 7) = $period WITH e.name AS account, count(DISTINCT t) AS transactions, count(DISTINCT li) AS line_items, count(DISTINCT f) AS facts RETURN account, transactions, line_items, facts ORDER BY transactions DESC LIMIT $limit",
+            "query": "MATCH (t:Transaction)-[:TRANSACTION_HAS_ENTRY]->(en:Entry)-[:ENTRY_HAS_LINE_ITEM]->(li:LineItem)-[:LINE_ITEM_RELATES_TO_ELEMENT]->(e:Element) MATCH (r:Report)-[:REPORT_HAS_FACT]->(f:Fact)-[:FACT_HAS_ELEMENT]->(e) WHERE substring(t.date, 1, 7) = $period WITH e.name AS account, count(DISTINCT t) AS transactions, count(DISTINCT li) AS line_items, count(DISTINCT f) AS facts RETURN account, transactions, line_items, facts ORDER BY transactions DESC LIMIT $limit",
             "params": {"period": "2025-09", "limit": 10},
             "timeout_override": 90,
           },
@@ -353,9 +353,17 @@ class MCPToolResult(BaseModel):
           "value": {
             "result": {
               "schema": {
-                "nodes": ["Transaction", "LineItem", "Element", "Report", "Entity"],
+                "nodes": [
+                  "Transaction",
+                  "Entry",
+                  "LineItem",
+                  "Element",
+                  "Report",
+                  "Entity",
+                ],
                 "relationships": [
-                  "TRANSACTION_HAS_LINE_ITEM",
+                  "TRANSACTION_HAS_ENTRY",
+                  "ENTRY_HAS_LINE_ITEM",
                   "LINE_ITEM_RELATES_TO_ELEMENT",
                   "ENTITY_HAS_REPORT",
                 ],

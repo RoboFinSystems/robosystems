@@ -28,7 +28,7 @@ echo ""
 #
 # SECRETS MANAGER (robosystems/{env}):
 # - Encryption keys: JWT_SECRET_KEY, CONNECTION_CREDENTIALS_KEY, GRAPH_BACKUP_ENCRYPTION_KEY
-# - External API keys: INTUIT_*, PLAID_*, STRIPE_*, OPENFIGI_*, TURNSTILE_*
+# - External API keys: INTUIT_*, STRIPE_*, OPENFIGI_*, TURNSTILE_*
 # - Internal credentials: SEC_GOV_USER_AGENT
 #
 # SSM PARAMETER STORE (/robosystems/{env}/features/*):
@@ -107,9 +107,6 @@ function create_production_secret() {
         "INTUIT_CLIENT_SECRET": "your_quickbooks_client_secret_here",
         "INTUIT_ENVIRONMENT": "production",
         "INTUIT_REDIRECT_URI": "https://your-api-domain.example.com/auth/callback",
-        "PLAID_CLIENT_ID": "your_plaid_client_id_here",
-        "PLAID_CLIENT_SECRET": "your_plaid_client_secret_here",
-        "PLAID_ENVIRONMENT": "production",
         "SEC_GOV_USER_AGENT": "YourCompany/1.0 (your-email@example.com)",
         "OPENFIGI_API_KEY": "your_openfigi_api_key_here",
         "STRIPE_SECRET_KEY": "sk_live_your_stripe_secret_key_here",
@@ -168,9 +165,6 @@ function create_staging_secret() {
         "INTUIT_CLIENT_SECRET": "your_quickbooks_sandbox_client_secret_here",
         "INTUIT_ENVIRONMENT": "sandbox",
         "INTUIT_REDIRECT_URI": "https://your-staging-api-domain.example.com/auth/callback",
-        "PLAID_CLIENT_ID": "your_plaid_sandbox_client_id_here",
-        "PLAID_CLIENT_SECRET": "your_plaid_sandbox_client_secret_here",
-        "PLAID_ENVIRONMENT": "sandbox",
         "SEC_GOV_USER_AGENT": "YourCompany-Staging/1.0 (your-email@example.com)",
         "OPENFIGI_API_KEY": "your_openfigi_api_key_here",
         "STRIPE_SECRET_KEY": "sk_test_your_stripe_test_secret_key_here",
@@ -205,7 +199,7 @@ function create_ssm_feature_flags() {
         "BILLING_ENABLED=false"
         "CAPTCHA_ENABLED=false"
         "CONNECTIONS_ENABLED=false"
-        "CONNECTION_PLAID_ENABLED=false"
+
         "CONNECTION_QUICKBOOKS_ENABLED=false"
         "CONNECTION_SEC_ENABLED=false"
         "SEC_PIPELINE_ENABLED=false"
@@ -213,9 +207,11 @@ function create_ssm_feature_flags() {
         "GRAPH_PROVISION_QUEUE_ENABLED=false"
         "EMAIL_VERIFICATION_ENABLED=false"
         "FACT_GRID_ENABLED=false"
+        "LEDGER_ENABLED=false"
         "LOAD_SHEDDING_ENABLED=true"
         "MCP_AUTO_LIMIT_ENABLED=true"
         "MCP_MEMORY_ENABLED=false"
+        "MCP_SEMANTIC_MEMORY_ENABLED=false"
         "MCP_WORKSPACE_ENABLED=false"
         "ORG_MEMBER_INVITATIONS_ENABLED=false"
         "OTEL_ENABLED=false"

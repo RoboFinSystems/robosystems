@@ -316,6 +316,12 @@ def create_app() -> FastAPI:
   app.include_router(operations_router_v1)  # Unified SSE operations monitoring
   app.include_router(billing_router_v1)
 
+  # Ledger routes (separate top-level prefix)
+  if env.LEDGER_ENABLED:
+    from robosystems.routers import ledger_router_v1
+
+    app.include_router(ledger_router_v1)
+
   # Include admin routers (hidden from public docs)
   # The admin routers will not appear in the auto-generated docs
   app.include_router(admin_cache_router, include_in_schema=False)

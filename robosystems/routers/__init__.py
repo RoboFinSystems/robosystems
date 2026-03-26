@@ -104,9 +104,10 @@ if env.FACT_GRID_ENABLED:
 
 # Conditionally include search router based on feature flag
 if env.SEMANTIC_SEARCH_ENABLED:
-  from .graphs import search_router
+  from .graphs import documents_router, search_router
 
   router.include_router(search_router)  # No prefix - handles /search internally
+  router.include_router(documents_router)  # No prefix - handles /documents internally
 
 router.include_router(materialize_router)  # No prefix - handles /materialize endpoint
 router.include_router(files_router)  # No prefix - handles /files endpoint
@@ -152,6 +153,13 @@ admin_router_v1.include_router(admin_credits_router)
 admin_router_v1.include_router(admin_graphs_router)
 admin_router_v1.include_router(admin_users_router)
 admin_router_v1.include_router(admin_orgs_router)
+
+# Ledger routes (separate top-level prefix, not under /v1/graphs)
+if env.LEDGER_ENABLED:
+  from .ledger import router as ledger_router
+
+  ledger_router_v1 = APIRouter(prefix="/v1/ledger/{graph_id}", tags=["Ledger"])
+  ledger_router_v1.include_router(ledger_router)
 
 # Export routers for main application
 __all__ = [

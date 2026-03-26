@@ -546,7 +546,10 @@ class GraphMCPClient:
       "LINE_ITEM_HAS_DIMENSION": "Links line items to dimensional qualifiers (department, class, etc.)",
       # RoboLedger extension relationships - Transaction section (entity graphs only)
       "ENTITY_HAS_TRANSACTION": "Links entities to their financial transactions",
-      "TRANSACTION_HAS_LINE_ITEM": "Links transactions to their line items",
+      "TRANSACTION_HAS_ENTRY": "Links transactions to their ledger entries",
+      "ENTRY_HAS_LINE_ITEM": "Links ledger entries to their line items (debits/credits)",
+      "TRANSACTION_HAS_DIMENSION": "Links transactions to dimensional qualifiers (source system, provenance)",
+      "ENTRY_HAS_DIMENSION": "Links entries to dimensional qualifiers (fund, trust account, product channel)",
       "LINE_ITEM_RELATES_TO_ELEMENT": "Maps line items to XBRL elements for reporting",
     }
     return descriptions.get(rel_name, f"{rel_name} relationship in the graph")
@@ -582,7 +585,10 @@ class GraphMCPClient:
       "ASSOCIATION_HAS_TO_ELEMENT": ("Association", "Element"),
       # RoboLedger extension - Transaction section
       "ENTITY_HAS_TRANSACTION": ("Entity", "Transaction"),
-      "TRANSACTION_HAS_LINE_ITEM": ("Transaction", "LineItem"),
+      "TRANSACTION_HAS_ENTRY": ("Transaction", "Entry"),
+      "ENTRY_HAS_LINE_ITEM": ("Entry", "LineItem"),
+      "TRANSACTION_HAS_DIMENSION": ("Transaction", "Dimension"),
+      "ENTRY_HAS_DIMENSION": ("Entry", "Dimension"),
       "LINE_ITEM_RELATES_TO_ELEMENT": ("LineItem", "Element"),
       "LINE_ITEM_HAS_DIMENSION": ("LineItem", "Dimension"),
     }

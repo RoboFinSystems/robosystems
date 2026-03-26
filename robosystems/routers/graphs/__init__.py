@@ -48,8 +48,10 @@ if env.FACT_GRID_ENABLED:
 
   __all__.append("views_router")
 
-# Conditionally export search_router based on feature flag
+# Conditionally export search and documents routers based on feature flag
 if env.SEMANTIC_SEARCH_ENABLED:
+  from .documents import router as documents_router  # noqa: F401
   from .search import router as search_router  # noqa: F401
 
   __all__.append("search_router")
+  __all__.append("documents_router")

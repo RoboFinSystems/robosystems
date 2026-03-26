@@ -1,6 +1,6 @@
 """Test error handling for disabled providers."""
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from fastapi import status
@@ -20,7 +20,6 @@ class TestDisabledProviderHandling:
       # Configure mock env with SEC disabled
       mock_env.CONNECTION_SEC_ENABLED = False
       mock_env.CONNECTION_QUICKBOOKS_ENABLED = True
-      mock_env.CONNECTION_PLAID_ENABLED = True
 
       # Re-initialize the provider registry with SEC disabled
       import robosystems.routers.graphs.connections.management as management
@@ -35,43 +34,6 @@ class TestDisabledProviderHandling:
         "provider": "sec",
         "entity_id": "entity_123",
         "sec_config": {"cik": "0000320193"},
-      }
-
-      response = client.post(
-        f"/v1/graphs/{VALID_TEST_GRAPH_ID}/connections",
-        json=request_data,
-        headers=auth_headers,
-      )
-
-      # Should return 403 Forbidden, not 500
-      assert response.status_code == status.HTTP_403_FORBIDDEN
-      response_json = response.json()
-      # Check the error message (response_json is the full error object with detail, code, timestamp)
-      assert "not available" in str(response_json).lower()
-
-  def test_create_connection_disabled_plaid_provider(
-    self, client: TestClient, auth_headers
-  ):
-    """Test creating a connection for disabled Plaid provider returns 403."""
-    with patch("robosystems.operations.providers.registry.env") as mock_env:
-      # Configure mock env with Plaid disabled
-      mock_env.CONNECTION_SEC_ENABLED = True
-      mock_env.CONNECTION_QUICKBOOKS_ENABLED = True
-      mock_env.CONNECTION_PLAID_ENABLED = False
-
-      # Re-initialize the provider registry with Plaid disabled
-      import robosystems.routers.graphs.connections.management as management
-      from robosystems.operations.providers.registry import ProviderRegistry
-      from robosystems.routers.graphs.connections import utils
-
-      new_registry = ProviderRegistry()
-      utils.provider_registry = new_registry
-      management.provider_registry = new_registry
-
-      request_data = {
-        "provider": "plaid",
-        "entity_id": "entity_123",
-        "plaid_config": {"link_token": "test_token"},
       }
 
       response = client.post(
@@ -105,7 +67,6 @@ class TestDisabledProviderHandling:
         # Configure mock env with SEC disabled
         mock_env.CONNECTION_SEC_ENABLED = False
         mock_env.CONNECTION_QUICKBOOKS_ENABLED = True
-        mock_env.CONNECTION_PLAID_ENABLED = True
 
         # Re-initialize the provider registry
         import robosystems.routers.graphs.connections.sync as sync_module
@@ -129,57 +90,6 @@ class TestDisabledProviderHandling:
         response_json = response.json()
         # The error response has a nested structure
         assert "not available" in response_json["detail"]["detail"].lower()
-
-  def test_create_link_token_disabled_plaid(self, client: TestClient, auth_headers):
-    """Test creating a link token for disabled Plaid provider returns 403."""
-
-    # Mock the graph repository to return a coroutine
-    async def mock_get_repo(*args, **kwargs):
-      mock_repo = MagicMock()
-      mock_repo.execute_single.return_value = {
-        "identifier": "entity_123",
-        "name": "Test Entity",
-      }
-      return mock_repo
-
-    with (
-      patch(
-        "robosystems.routers.graphs.connections.link_token.get_graph_repository",
-        new=mock_get_repo,
-      ),
-      patch("robosystems.operations.providers.registry.env") as mock_env,
-    ):
-      # Configure mock env with Plaid disabled
-      mock_env.CONNECTION_SEC_ENABLED = True
-      mock_env.CONNECTION_QUICKBOOKS_ENABLED = True
-      mock_env.CONNECTION_PLAID_ENABLED = False
-
-      # Re-initialize the provider registry
-      import robosystems.routers.graphs.connections.link_token as link_token_module
-      from robosystems.operations.providers.registry import ProviderRegistry
-      from robosystems.routers.graphs.connections import utils
-
-      new_registry = ProviderRegistry()
-      utils.provider_registry = new_registry
-      link_token_module.provider_registry = new_registry
-
-      request_data = {
-        "entity_id": "entity_123",
-        "user_id": "user_123",
-        "provider": "plaid",
-      }
-
-      response = client.post(
-        f"/v1/graphs/{VALID_TEST_GRAPH_ID}/connections/link/token",
-        json=request_data,
-        headers=auth_headers,
-      )
-
-      # Should return 403 Forbidden, not 500
-      assert response.status_code == status.HTTP_403_FORBIDDEN
-      response_json = response.json()
-      # The error response has a nested structure
-      assert "not available" in response_json["detail"]["detail"].lower()
 
   def test_delete_connection_disabled_provider(self, client: TestClient, auth_headers):
     """Test deleting a connection for disabled provider returns 403."""
@@ -207,7 +117,6 @@ class TestDisabledProviderHandling:
           # Configure mock env with QuickBooks disabled
           mock_env.CONNECTION_SEC_ENABLED = True
           mock_env.CONNECTION_QUICKBOOKS_ENABLED = False
-          mock_env.CONNECTION_PLAID_ENABLED = True
 
           # Re-initialize the provider registry
           import robosystems.routers.graphs.connections.management as management
@@ -223,11 +132,9 @@ class TestDisabledProviderHandling:
             headers=auth_headers,
           )
 
-          # Should return 403 Forbidden, not 500
-          assert response.status_code == status.HTTP_403_FORBIDDEN
-          response_json = response.json()
-          # The error response has a nested structure
-          assert "not available" in response_json["detail"]["detail"].lower()
+          # Disabled provider skips cleanup but still deletes successfully
+          assert response.status_code == status.HTTP_200_OK
+          mock_delete.assert_called_once()
 
   def test_invalid_provider_returns_422(self, client: TestClient, auth_headers):
     """Test that invalid provider values return 422 validation error."""

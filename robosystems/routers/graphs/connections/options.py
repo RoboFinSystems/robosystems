@@ -36,11 +36,6 @@ This endpoint returns comprehensive information about each supported provider:
 - Chart of accounts, transactions, trial balance
 - Real-time sync capabilities
 
-**Plaid**: Bank account connections
-- Secure bank authentication via Plaid Link
-- Transaction history and balances
-- Multi-account support
-
 No credits are consumed for viewing connection options.""",
   operation_id="getConnectionOptions",
   responses={
@@ -125,35 +120,6 @@ async def get_connection_options(
         ],
         setup_instructions="Click 'Connect' to authorize access to your QuickBooks Online entity. You'll need QuickBooks admin permissions.",
         documentation_url="https://developer.intuit.com/app/developer/qbo/docs/get-started",
-      )
-    )
-
-  # Plaid provider
-  if env.CONNECTION_PLAID_ENABLED:
-    providers.append(
-      ConnectionProviderInfo(
-        provider="plaid",
-        display_name="Bank Connections (Plaid)",
-        description="Connect to bank accounts for transaction data via Plaid",
-        auth_type="link",
-        auth_flow="Plaid Link - Secure bank authentication flow",
-        required_config=["entity_id"],
-        optional_config=["account_ids", "start_date"],
-        features=[
-          "bank_transactions",
-          "account_balances",
-          "transaction_categorization",
-          "multiple_accounts",
-        ],
-        sync_frequency="Daily automatic updates",
-        data_types=[
-          "Bank Transactions",
-          "Account Balances",
-          "Transaction Categories",
-          "Merchant Data",
-        ],
-        setup_instructions="Click 'Connect' to open Plaid Link and securely connect your bank accounts.",
-        documentation_url="https://plaid.com/docs/",
       )
     )
 

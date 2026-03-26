@@ -1,5 +1,6 @@
 """Identity and Access Management (IAM) models package."""
 
+from .connection import Connection, ConnectionStatus
 from .connection_credentials import ConnectionCredentials
 from .graph import Graph, GraphStatus
 from .graph_backup import BackupStatus, BackupType, GraphBackup
@@ -36,7 +37,9 @@ from .user_token import UserToken
 __all__ = [
   "BackupStatus",
   "BackupType",
+  "Connection",
   "ConnectionCredentials",
+  "ConnectionStatus",
   "CreditTransactionType",
   "Graph",
   "GraphBackup",

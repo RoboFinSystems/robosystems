@@ -4,7 +4,7 @@ Connection management endpoints (create, list, get, delete).
 
 import asyncio
 
-from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
 from sqlalchemy.orm import Session
 
 from robosystems.database import get_db_session
@@ -57,11 +57,6 @@ This endpoint initiates connections to external data sources:
 - Requires admin permissions in QuickBooks
 - Complete with OAuth callback
 
-**Plaid Connections**:
-- Returns Plaid Link token
-- User completes bank authentication
-- Exchange public token for access
-
 Note:
 This operation is included - no credit consumption required.""",
   responses={
@@ -90,7 +85,6 @@ async def create_connection(
   Supports multiple providers:
   - SEC: Requires CIK for public entity filings
   - QuickBooks: Requires OAuth authentication (separate flow)
-  - Plaid: Requires Link token flow for bank connections
   """
   # Initialize robustness components
   components = create_robustness_components()
@@ -103,7 +97,7 @@ async def create_connection(
     user_id=current_user.id,
     metadata={
       "provider": request.provider,
-      "entity_id": request.entity_id,
+      "entity_id": request.entity_id or "",
     },
   )
 
@@ -135,7 +129,7 @@ async def create_connection(
       user_id=current_user.id,
       metadata={
         "provider": request.provider,
-        "entity_id": request.entity_id,
+        "entity_id": request.entity_id or "",
       },
     )
 
@@ -145,16 +139,18 @@ async def create_connection(
       config = request.sec_config
     elif request.provider == "quickbooks":
       config = request.quickbooks_config
-    elif request.provider == "plaid":
-      config = request.plaid_config
-
     # Validate provider is enabled before any database operations
     provider_registry.get_provider(request.provider)
 
     # Create connection using provider registry with timeout coordination
     connection_id = await asyncio.wait_for(
       provider_registry.create_connection(
-        request.provider, request.entity_id, config, current_user.id, graph_id, db
+        request.provider,
+        request.entity_id or "",
+        config,
+        current_user.id,
+        graph_id,
+        db,
       ),
       timeout=operation_timeout,
     )
@@ -178,7 +174,7 @@ async def create_connection(
       user_id=current_user.id,
       metadata={
         "provider": request.provider,
-        "entity_id": request.entity_id,
+        "entity_id": request.entity_id or "",
         "connection_id": connection_id,
       },
     )
@@ -186,7 +182,7 @@ async def create_connection(
     return ConnectionResponse(
       connection_id=connection["connection_id"],
       provider=connection["provider"].lower(),
-      entity_id=connection["entity_id"],
+      entity_id=connection.get("entity_id"),
       status=connection["status"],
       created_at=connection["created_at"],
       updated_at=connection.get("updated_at"),
@@ -212,7 +208,7 @@ async def create_connection(
     raise create_error_response(
       status_code=status.HTTP_504_GATEWAY_TIMEOUT,
       detail="Connection creation timed out",
-      code=ErrorCode.TIMEOUT,
+      code=ErrorCode.OPERATION_FAILED,
     )
   except HTTPException:
     # Record circuit breaker failure for HTTP exceptions
@@ -255,10 +251,10 @@ async def create_connection(
       error_message=str(e),
     )
 
-    logger.error(f"Failed to create connection: {e}")
+    logger.error("Failed to create connection", exc_info=True)
     raise create_error_response(
       status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-      detail=f"Failed to create connection: {e!s}",
+      detail="Failed to create connection",
       code=ErrorCode.INTERNAL_ERROR,
     )
 
@@ -272,7 +268,7 @@ async def create_connection(
 Returns active and inactive connections with their current status.
 Connections can be filtered by:
 - **Entity**: Show connections for a specific entity
-- **Provider**: Filter by connection type (sec, quickbooks, plaid)
+- **Provider**: Filter by connection type (sec, quickbooks)
 
 Each connection shows:
 - Current sync status and health
@@ -321,9 +317,9 @@ async def list_connections(
   """
   try:
     # Get connections from service
-    connections = ConnectionService.list_connections(
-      entity_id=entity_id or "",
-      provider=provider.upper() if provider else "",
+    connections = await ConnectionService.list_connections(
+      entity_id=entity_id or None,
+      provider=provider or None,
       user_id=current_user.id,
       graph_id=graph_id,
     )
@@ -335,7 +331,7 @@ async def list_connections(
         ConnectionResponse(
           connection_id=conn["connection_id"],
           provider=conn["provider"].lower(),
-          entity_id=conn["entity_id"],
+          entity_id=conn.get("entity_id"),
           status=conn["status"],
           created_at=conn["created_at"],
           updated_at=conn.get("updated_at"),
@@ -346,11 +342,11 @@ async def list_connections(
 
     return response_connections
 
-  except Exception as e:
-    logger.error(f"Failed to list connections: {e}")
+  except Exception:
+    logger.error("Failed to list connections", exc_info=True)
     raise create_error_response(
       status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-      detail=f"Failed to list connections: {e!s}",
+      detail="Failed to list connections",
       code=ErrorCode.INTERNAL_ERROR,
     )
 
@@ -419,7 +415,7 @@ async def get_connection(
     return ConnectionResponse(
       connection_id=connection["connection_id"],
       provider=connection["provider"].lower(),
-      entity_id=connection["entity_id"],
+      entity_id=connection.get("entity_id"),
       status=connection["status"],
       created_at=connection["created_at"],
       updated_at=connection.get("updated_at"),
@@ -429,11 +425,11 @@ async def get_connection(
 
   except HTTPException:
     raise
-  except Exception as e:
-    logger.error(f"Failed to get connection: {e}")
+  except Exception:
+    logger.error("Failed to get connection", exc_info=True)
     raise create_error_response(
       status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-      detail=f"Failed to get connection: {e!s}",
+      detail="Failed to get connection",
       code=ErrorCode.INTERNAL_ERROR,
     )
 
@@ -463,7 +459,6 @@ Only users with admin role can delete connections.""",
   },
 )
 async def delete_connection(
-  request: Request,
   graph_id: str = Path(
     ..., description="Graph database identifier", pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN
   ),
@@ -488,6 +483,19 @@ async def delete_connection(
         code=ErrorCode.NOT_FOUND,
       )
 
+    # Provider-specific cleanup BEFORE deletion (e.g., revoke OAuth tokens)
+    provider = connection["provider"].lower()
+    try:
+      provider_registry.get_provider(provider)
+      await provider_registry.cleanup_connection(provider, connection, graph_id)
+    except ValueError:
+      # Provider disabled — skip cleanup, still allow deletion
+      logger.warning(
+        "Provider %s disabled, skipping cleanup for connection %s",
+        provider,
+        connection_id,
+      )
+
     # Delete the connection
     success = await ConnectionService.delete_connection(
       connection_id, current_user.id, graph_id
@@ -495,18 +503,10 @@ async def delete_connection(
 
     if not success:
       raise create_error_response(
-        status_code=status.HTTP_404_NOT_FOUND,
-        detail="Connection not found or access denied",
-        code=ErrorCode.NOT_FOUND,
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        detail="Failed to delete connection",
+        code=ErrorCode.INTERNAL_ERROR,
       )
-
-    # Provider-specific cleanup
-    provider = connection["provider"].lower()
-
-    # Validate provider is enabled before cleanup operations
-    provider_registry.get_provider(provider)
-
-    await provider_registry.cleanup_connection(provider, connection, graph_id)
 
     logger.info(f"Connection {connection_id} deleted successfully")
 

@@ -106,6 +106,8 @@ sec_process_job = define_asset_job(
   tags={
     "pipeline": "sec",
     "phase": "process",
+    # Retry on Spot reclaim: S3 cache means retries skip already-processed filings.
+    "dagster/max_retries": 5,
     # Enhanced profile: 4 vCPU, 16 GB, 50 GB storage - embedding enrichment is memory-intensive
     "ecs/cpu": "4096",
     "ecs/memory": "16384",
@@ -457,6 +459,8 @@ sec_lbug_r2_publish_job = define_asset_job(
 # Two assets: XBRL text blocks (already externalized) + narrative sections (extracted from raw HTML).
 
 SEC_INDEX_ECS_TAGS = {
+  # Retry on Spot reclaim: OpenSearch incremental skip means retries only index remaining batches.
+  "dagster/max_retries": 5,
   # Default: 4 vCPU, 16 GB sized for embeddings (fastembed ONNX runtime +
   # model weights + lookup data). Override down to 1 vCPU/4 GB for
   # text-only runs via Launchpad tags.

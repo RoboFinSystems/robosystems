@@ -1,16 +1,75 @@
-# RoboSystems LadybugDB Graph Schema System
+# RoboSystems Schema Extensions
 
 ## Overview
 
-The RoboSystems schema system provides a comprehensive, extensible framework for defining graph database structures in LadybugDB. It implements a **base + extensions** architecture that enables modular, domain-specific data modeling while maintaining consistency and compatibility across different application contexts.
+The RoboSystems schema system implements a **base + extensions** architecture for defining graph database structures in LadybugDB. Each extension defines a domain schema — the node types, relationships, and properties that model a specific business domain. This schema is the foundation that drives everything built on top of it: OLTP databases, API routes, data pipelines, and frontend applications.
 
-**Key Features:**
+**Key Concepts:**
 
-- **Modular Architecture**: Base schema + pluggable extensions for different domains
-- **Context-Aware Loading**: Different views of the same schema based on use case
-- **Type-Safe Validation**: Strong typing with LadybugDB-native data types
-- **Custom Schema Support**: JSON/YAML-based custom schema definitions
-- **Production-Ready**: Used in multi-tenant enterprise deployments
+- **Base Schema**: Core nodes shared by all graphs (Entity, User, Period, Unit, Element, Taxonomy)
+- **Extensions**: Domain schemas that extend the base schema with domain-specific node types and relationships
+- **Context-Aware Loading**: Different views of the same extension based on use case (e.g., SEC reporting vs full accounting)
+- **Product Extensions**: Extensions like RoboLedger and RoboInvestor that grow beyond the graph schema into full product verticals with dedicated databases, API surfaces, data pipelines, and frontend applications
+
+## How Extensions Work
+
+Each extension defines the domain model for its application — the node types, relationships, and properties that the application understands. The extension schema is the single source of truth that drives:
+
+1. **Graph Database Structure**: Node tables and relationship tables in LadybugDB
+2. **OLTP Database Schema**: PostgreSQL tables that mirror the schema for transactional workloads
+3. **API Surface**: Endpoints that expose and operate on the domain model
+4. **Data Pipelines**: ETL/ELT jobs that transform external data into the schema
+5. **AI Agent Context**: MCP tools use the schema to understand what queries are valid
+6. **Frontend Applications**: UI components are built around the domain model
+
+Not every extension has all of these layers today. Some are schema-only (graph schema). Others — RoboLedger and RoboInvestor — have grown into full product extensions with dedicated infrastructure.
+
+### Product Extensions vs Schema Extensions
+
+| Layer | Schema Extension | Product Extension |
+|-------|-----------------|-------------------|
+| Graph schema | Yes | Yes |
+| OLTP database | No | Yes (schema-per-tenant PostgreSQL) |
+| API routes | No | Yes (feature-flagged, base name) |
+| Data pipelines | No | Yes (Dagster assets, dbt models) |
+| Frontend app | No | Yes (dedicated app, own domain) |
+| Trademark / brand | No | Yes |
+
+**Current product extensions:**
+
+| Extension | Product | App | Domain |
+|-----------|---------|-----|--------|
+| `roboledger` | RoboLedger | [roboledger.ai](https://roboledger.ai) | Accounting, financial reporting, general ledger |
+| `roboinvestor` | RoboInvestor | [roboinvestor.ai](https://roboinvestor.ai) | Portfolio management, investment tracking |
+
+**Current schema-only extensions:**
+
+| Extension | Domain |
+|-----------|--------|
+| `roboscm` | Supply chain management |
+| `robofo` | Front office & CRM |
+| `roboepm` | Enterprise performance management |
+| `robohrm` | Human resources management |
+| `roboreport` | Regulatory compliance |
+| `memory` | AI memory (concepts, observations, sessions) |
+
+### Naming Convention
+
+The extension name (e.g., `roboledger`) is the product domain. API routes and feature flags use the **base name** (e.g., `ledger`) because a product extension can contain multiple functional surfaces:
+
+```
+roboledger (extension / product)
+├── /v1/ledger/*         → LEDGER_ENABLED
+├── /v1/reports/*        → REPORTS_ENABLED        (future)
+├── /v1/classification/* → CLASSIFICATION_ENABLED  (future)
+└── /v1/bank-feeds/*     → BANK_FEEDS_ENABLED      (future)
+
+roboinvestor (extension / product)
+├── /v1/investor/*       → INVESTOR_ENABLED        (future)
+└── /v1/market-data/*    → MARKET_DATA_ENABLED     (future)
+```
+
+The extension groups them. The base names stay functional.
 
 ## Architecture
 
@@ -33,7 +92,8 @@ robosystems/schemas/
     ├── robofo.py      # Front office & CRM
     ├── roboepm.py     # Enterprise performance management
     ├── robohrm.py     # Human resources management
-    └── roboreport.py  # Regulatory compliance
+    ├── roboreport.py  # Regulatory compliance
+    └── memory.py      # AI memory schema
 ```
 
 ### Schema Hierarchy
@@ -53,9 +113,13 @@ graph TD
     I --> L[RoboSCM]
 
     J --> M[Report/Fact]
-    J --> N[Transaction/LineItem]
+    J --> N[Transaction/Entry/LineItem]
     K --> O[Portfolio/Security]
     L --> P[Supplier/Product]
+
+    style J fill:#e1f5fe
+    style K fill:#e1f5fe
+    style L fill:#f5f5f5
 ```
 
 ## Base Schema
@@ -71,7 +135,6 @@ The base schema (`base.py`) provides foundational nodes and relationships that a
 | **Entity**        | Organizations, companies, subsidiaries | identifier, cik, ticker, name, entity_type     |
 | **Period**        | Time periods for data                  | start_date, end_date, fiscal_year, period_type |
 | **Unit**          | Measurement units                      | measure, value, numerator_uri                  |
-| **Connection**    | External system integrations           | provider, connection_id, status                |
 | **Element**       | XBRL taxonomy elements                 | qname, period_type, is_numeric                 |
 | **Label**         | Human-readable element labels          | value, type, language                          |
 | **Reference**     | Authoritative element references       | value, type                                    |
@@ -79,17 +142,17 @@ The base schema (`base.py`) provides foundational nodes and relationships that a
 
 ### Core Relationships
 
-- **USER_HAS_ACCESS** → Entity: Access control and permissions
-- **ENTITY_HAS_CONNECTION** → Connection: External integrations
 - **ENTITY_OWNS_ENTITY** → Entity: Hierarchical ownership
 - **ELEMENT_HAS_LABEL** → Label: Human-readable descriptions
 - **ELEMENT_IN_TAXONOMY** → Taxonomy: Taxonomy membership
 
 ## Extension Schemas
 
-### RoboLedger - Financial Reporting & Accounting
+### RoboLedger — Financial Reporting & Accounting
 
-**Unified schema with context-aware loading:**
+The RoboLedger extension models the full accounting domain: financial reporting (XBRL/SEC), general ledger (transactions, journal entries), and chart of accounts (via Element/Association patterns). It uses context-aware loading to present different views depending on the use case.
+
+**Full product extension** with OLTP database (`roboledger`), API routes (`/v1/ledger/*`), QuickBooks ELT pipeline, and dedicated frontend app.
 
 #### Reporting Section (SEC/XBRL)
 
@@ -99,24 +162,24 @@ The base schema (`base.py`) provides foundational nodes and relationships that a
 
 #### Transaction Section (General Ledger)
 
-- **Nodes**: Transaction, LineItem
+- **Nodes**: Transaction, Entry, LineItem
 - **Use Cases**: Entity accounting, journal entries, trial balances
-- **Key Features**: Transaction tracking, line item details, dimensional tagging (department, class, location)
-- **Note**: Chart of accounts is represented via Structure/Association/Element pattern (from Reporting Section)
+- **Key Features**: Three-level model (Transaction → Entry → LineItem), dimensional tagging (department, class, location)
+- **Note**: Chart of accounts is represented via Element/Association pattern (shared with Reporting Section)
 
 #### Context-Aware Loading
 
 ```python
-# SEC Repository - Reporting only
+# SEC Repository — reporting only (hides transaction tables from AI agents)
 loader = get_contextual_schema_loader("repository", "sec")
 
-# Entity Database - Full accounting
+# Entity Database — full accounting
 loader = get_contextual_schema_loader("application", "roboledger")
 ```
 
-### RoboInvestor - Portfolio Management
+### RoboInvestor — Portfolio Management
 
-**Investment tracking and analysis:**
+The RoboInvestor extension models portfolio management, securities, trading, and risk analysis. Currently a schema extension with a dedicated frontend app; OLTP database and API routes are planned.
 
 - **Nodes**: Portfolio, Security, Position, Trade, Benchmark, MarketData, Dividend, Risk
 - **Relationships**: Portfolio positions, trade history, security pricing
@@ -126,62 +189,36 @@ loader = get_contextual_schema_loader("application", "roboledger")
   - Performance benchmarking
   - Risk assessment
 
-### RoboSCM - Supply Chain Management
-
-**End-to-end supply chain operations:**
+### RoboSCM — Supply Chain Management
 
 - **Nodes**: Supplier, Product, Warehouse, Inventory, PurchaseOrder, Contract, Shipment, Demand
 - **Supporting Nodes**: Contact, Address
-- **Key Features**:
-  - Supplier relationship management
-  - Inventory optimization
-  - Purchase order workflow
-  - Demand forecasting
-  - Logistics tracking
+- **Key Features**: Supplier management, inventory optimization, purchase order workflow, demand forecasting, logistics tracking
 
-### RoboFO - Front Office & CRM
-
-**Sales and marketing operations:**
+### RoboFO — Front Office & CRM
 
 - **Nodes**: Lead, Customer, Contact, Opportunity, Campaign, Activity, Quote
-- **Key Features**:
-  - Lead scoring and conversion
-  - Opportunity pipeline management
-  - Campaign effectiveness tracking
-  - Customer segmentation
+- **Key Features**: Lead scoring and conversion, opportunity pipeline, campaign tracking, customer segmentation
 
-### RoboEPM - Enterprise Performance Management
-
-**Strategic planning and performance:**
+### RoboEPM — Enterprise Performance Management
 
 - **Nodes**: KPI, Budget, Forecast, Scorecard, Initiative
-- **Key Features**:
-  - KPI tracking and dashboards
-  - Budget vs. actual analysis
-  - Rolling forecasts
-  - Strategic initiative management
+- **Key Features**: KPI dashboards, budget vs. actual analysis, rolling forecasts, strategic initiative management
 
-### RoboHRM - Human Resources Management
-
-**Workforce and talent management:**
+### RoboHRM — Human Resources Management
 
 - **Nodes**: Employee, Department, Position, Payroll, Benefit, TimeOff
-- **Key Features**:
-  - Organizational hierarchy
-  - Compensation management
-  - Benefits administration
-  - Time and attendance
+- **Key Features**: Organizational hierarchy, compensation, benefits administration, time and attendance
 
-### RoboReport - Regulatory Compliance
-
-**Compliance and filing management:**
+### RoboReport — Regulatory Compliance
 
 - **Nodes**: Regulation, Filing, Submission, Audit, Control
-- **Key Features**:
-  - Regulatory requirement tracking
-  - Filing deadline management
-  - Compliance audit trails
-  - Control effectiveness
+- **Key Features**: Regulatory requirement tracking, filing deadline management, compliance audit trails, control effectiveness
+
+### Memory — AI Memory Schema
+
+- **Nodes**: Concept, Observation, Session
+- **Key Features**: AI knowledge graph for storing concepts and observations across agent sessions
 
 ## Schema Management
 
@@ -331,13 +368,13 @@ else:
 ### Multi-Tenant Deployment
 
 ```python
-# Standard tier - Multiple databases per instance
+# Standard tier — single product extension
 config_standard = {
-    "extensions": ["roboledger"],  # Minimal extensions
+    "extensions": ["roboledger"],
     "tier": "standard"
 }
 
-# Large tier - Isolated instances with subgraph support
+# Large tier — multiple product extensions with subgraph support
 config_large = {
     "extensions": ["roboledger", "roboinvestor", "roboepm"],
     "tier": "large"
@@ -361,7 +398,7 @@ loader = get_contextual_schema_loader("repository", "sec")
 # Full enterprise accounting system
 loader = get_contextual_schema_loader("application", "roboledger")
 
-# Multi-application deployment
+# Multi-product deployment
 config = {
     "name": "XLarge Suite",
     "extensions": ["roboledger", "roboinvestor", "roboscm"]
@@ -396,7 +433,7 @@ ALTER TABLE Entity ADD COLUMN new_field STRING
 
 ### 1. Extension Selection
 
-- **Start Minimal**: Begin with base + essential extensions
+- **Start Minimal**: Begin with base + the product extension you need
 - **Add Incrementally**: Add extensions as features are needed
 - **Consider Performance**: More extensions = larger schema overhead
 

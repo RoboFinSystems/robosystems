@@ -1,399 +1,348 @@
-"""Comprehensive test suite for connection service operations.
+"""Test suite for ConnectionService (PostgreSQL-only).
 
-Tests connection management across graph database and PostgreSQL.
+Tests connection CRUD operations using mocked SQLAlchemy models.
+No graph database dependencies.
 """
 
 from datetime import UTC, datetime
-from unittest.mock import AsyncMock, MagicMock, Mock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
-from robosystems.operations.connection_service import (
-  ConnectionService,
-  CredentialsNotFoundError,
-  UserAccessDeniedError,
-  _safe_datetime_conversion,
-)
+from robosystems.operations.connection_service import SYSTEM_USER_ID, ConnectionService
 
 MODULE = "robosystems.operations.connection_service"
 
 
-class TestSafeDatetimeConversion:
-  """Test the _safe_datetime_conversion utility function."""
-
-  def test_none_returns_none(self):
-    """Test that None input returns None."""
-    assert _safe_datetime_conversion(None) is None
-
-  def test_datetime_passthrough(self):
-    """Test that datetime objects are returned as-is."""
-    dt = datetime.now(UTC)
-    assert _safe_datetime_conversion(dt) == dt
-
-  def test_datetime_attribute_extraction(self):
-    """Test extraction of datetime from objects with datetime attribute."""
-    mock_obj = Mock()
-    dt = datetime.now(UTC)
-    mock_obj.datetime = dt
-    assert _safe_datetime_conversion(mock_obj) == dt
-
-  def test_iso_string_parsing(self):
-    """Test parsing of ISO format strings."""
-    iso_string = "2024-01-01T12:00:00Z"
-    result = _safe_datetime_conversion(iso_string)
-    assert isinstance(result, datetime)
-    assert result.year == 2024
-    assert result.month == 1
-    assert result.day == 1
-    assert result.hour == 12
-
-  def test_iso_string_with_timezone(self):
-    """Test parsing of ISO strings with timezone info."""
-    iso_string = "2024-01-01T12:00:00+05:00"
-    result = _safe_datetime_conversion(iso_string)
-    assert isinstance(result, datetime)
-    assert result.tzinfo is not None
-
-  def test_invalid_string_returns_none(self):
-    """Test that invalid date strings return None."""
-    assert _safe_datetime_conversion("not a date") is None
-
-  def test_unix_timestamp_float(self):
-    """Test conversion of Unix timestamp as float."""
-    timestamp = 1704110400.0  # 2024-01-01 12:00:00 UTC
-    result = _safe_datetime_conversion(timestamp)
-    assert isinstance(result, datetime)
-    assert result.year == 2024
-
-  def test_unix_timestamp_int(self):
-    """Test conversion of Unix timestamp as integer."""
-    timestamp = 1704110400  # 2024-01-01 12:00:00 UTC
-    result = _safe_datetime_conversion(timestamp)
-    assert isinstance(result, datetime)
-    assert result.year == 2024
-
-  def test_invalid_timestamp_returns_none(self):
-    """Test that invalid timestamps return None."""
-    assert _safe_datetime_conversion(-99999999999999) is None
-
-  def test_unsupported_type_returns_none(self):
-    """Test that unsupported types return None."""
-    assert _safe_datetime_conversion([1, 2, 3]) is None
-    assert _safe_datetime_conversion({"key": "value"}) is None
-
-  def test_isoformat_object(self):
-    """Test objects with isoformat method are handled."""
-    mock_obj = Mock()
-    mock_obj.isoformat = Mock(return_value="2024-01-01T12:00:00Z")
-    # Ensure datetime attribute doesn't exist to test isoformat path
-    mock_obj.datetime = None
-
-    # First check if it has datetime attribute (which is None)
-    # Then check if it has isoformat
-    result = _safe_datetime_conversion(mock_obj)
-    # Since datetime attribute exists but is None, it returns None
-    assert result is None
-
-    # Now test without datetime attribute at all
-    mock_obj2 = Mock(spec=["isoformat"])
-    mock_obj2.isoformat = Mock(return_value="2024-01-01T12:00:00Z")
-    result2 = _safe_datetime_conversion(mock_obj2)
-    assert result2 == mock_obj2
+def _make_mock_connection(**overrides):
+  """Create a mock Connection model instance."""
+  conn = MagicMock()
+  conn.id = overrides.get("id", "conn_test123")
+  conn.graph_id = overrides.get("graph_id", "kg_test")
+  conn.user_id = overrides.get("user_id", "usr_123")
+  conn.provider = overrides.get("provider", "quickbooks")
+  conn.status = overrides.get("status", "connected")
+  conn.realm_id = overrides.get("realm_id", "9341452700148642")
+  conn.item_id = overrides.get("item_id")
+  conn.cik = overrides.get("cik")
+  conn.entity_name = overrides.get("entity_name")
+  conn.institution_name = overrides.get("institution_name")
+  conn.auto_sync_enabled = overrides.get("auto_sync_enabled", True)
+  conn.last_sync = overrides.get("last_sync")
+  conn.created_at = overrides.get("created_at", datetime.now(UTC))
+  conn.updated_at = overrides.get("updated_at", datetime.now(UTC))
+  conn.to_dict.return_value = {
+    "connection_id": conn.id,
+    "provider": conn.provider,
+    "status": conn.status,
+    "entity_id": conn.graph_id,
+    "graph_id": conn.graph_id,
+    "user_id": conn.user_id,
+    "metadata": {
+      "realm_id": conn.realm_id,
+      "item_id": conn.item_id,
+      "cik": conn.cik,
+      "entity_name": conn.entity_name,
+      "institution_name": conn.institution_name,
+      "auto_sync_enabled": conn.auto_sync_enabled,
+      "last_sync": None,
+    },
+    "created_at": conn.created_at,
+    "updated_at": conn.updated_at,
+  }
+  return conn
 
 
-class TestConnectionServiceAsync:
-  """Test async ConnectionService methods with proper mocking."""
-
-  @pytest.mark.asyncio
-  async def test_list_connections_mock(self):
-    """Test that we can mock ConnectionService list_connections."""
-
-    # Create a mock that returns an async result
-    mock_service = Mock(spec=ConnectionService)
-    mock_service.list_connections = AsyncMock(
-      return_value=[{"id": "conn1", "provider": "quickbooks", "status": "active"}]
-    )
-
-    # Call the mocked method
-    result = await mock_service.list_connections("entity123")
-
-    # Verify the result
-    assert len(result) == 1
-    assert result[0]["id"] == "conn1"
-    assert result[0]["provider"] == "quickbooks"
-
-  @pytest.mark.asyncio
-  async def test_get_connection_mock(self):
-    """Test that we can mock ConnectionService get_connection."""
-
-    mock_service = Mock(spec=ConnectionService)
-    mock_service.get_connection = AsyncMock(
-      return_value={
-        "id": "conn1",
-        "provider": "quickbooks",
-        "status": "active",
-        "metadata": {"company": "Test Corp"},
-      }
-    )
-
-    result = await mock_service.get_connection("conn1", "user123")
-
-    assert result["id"] == "conn1"
-    assert result["metadata"]["company"] == "Test Corp"
-
-  @pytest.mark.asyncio
-  async def test_create_connection_mock(self):
-    """Test that we can mock ConnectionService create_connection."""
-
-    mock_service = Mock(spec=ConnectionService)
-    mock_service.create_connection = AsyncMock(
-      return_value={"id": "new_conn", "provider": "plaid", "status": "pending"}
-    )
-
-    result = await mock_service.create_connection(
-      entity_id="entity123", provider="plaid", credentials={"client_id": "test"}
-    )
-
-    assert result["id"] == "new_conn"
-    assert result["status"] == "pending"
+def _make_mock_credentials(**overrides):
+  """Create a mock ConnectionCredentials instance."""
+  cred = MagicMock()
+  cred.connection_id = overrides.get("connection_id", "conn_test123")
+  cred.user_id = overrides.get("user_id", "usr_123")
+  cred.provider = overrides.get("provider", "quickbooks")
+  cred.get_credentials.return_value = overrides.get(
+    "credentials", {"access_token": "tok_123", "refresh_token": "ref_456"}
+  )
+  cred.is_expired.return_value = overrides.get("is_expired", False)
+  cred.expires_at = overrides.get("expires_at")
+  return cred
 
 
-def _make_graph_repo_mock(**execute_single_kwargs):
-  """Helper to create a mock graph repository with context manager support."""
-  repo = MagicMock()
-  repo.__enter__ = MagicMock(return_value=repo)
-  repo.__exit__ = MagicMock(return_value=False)
-  if execute_single_kwargs:
-    repo.execute_single = MagicMock(**execute_single_kwargs)
-  return repo
-
-
-class TestCreateConnectionActual:
+class TestCreateConnection:
   @pytest.mark.asyncio
   @pytest.mark.unit
-  async def test_happy_path(self):
-    mock_repo = _make_graph_repo_mock(
-      return_value={"identifier": "NVDA", "name": "NVIDIA"}
-    )
-    mock_repo.execute_query.return_value = None
-    mock_pg_session = MagicMock()
+  async def test_creates_connection_in_postgres(self):
+    mock_session = MagicMock()
+    mock_conn = _make_mock_connection()
 
     with (
-      patch(f"{MODULE}.MultiTenantUtils") as mock_mt,
-      patch(
-        f"{MODULE}.get_graph_repository",
-        new_callable=AsyncMock,
-        return_value=mock_repo,
-      ),
+      patch(f"{MODULE}.Connection") as MockConn,
       patch(f"{MODULE}.ConnectionCredentials") as MockCreds,
     ):
-      mock_mt.is_multitenant_mode.return_value = False
-      mock_mt.get_database_name.return_value = "test_db"
-      MockCreds.get_by_connection_id.return_value = None
+      MockConn.create.return_value = mock_conn
 
       result = await ConnectionService.create_connection(
-        entity_id="NVDA",
-        provider="SEC",
+        entity_id="kg_test",
+        provider="quickbooks",
         user_id="usr_123",
-        credentials={"api_key": "test"},
-        db_session=mock_pg_session,
+        credentials={"access_token": "tok"},
+        metadata={"realm_id": "9341452700148642", "status": "pending_oauth"},
+        db_session=mock_session,
       )
 
-    assert result["provider"] == "SEC"
-    assert result["status"] == "connected"
-    assert result["entity_id"] == "NVDA"
-    assert result["connection_id"] == "sec_NVDA_usr_123"
+    assert result["connection_id"] == "conn_test123"
+    assert result["provider"] == "quickbooks"
+    MockConn.create.assert_called_once()
     MockCreds.create.assert_called_once()
 
   @pytest.mark.asyncio
   @pytest.mark.unit
-  async def test_entity_not_found_raises(self):
-    mock_repo = _make_graph_repo_mock(return_value=None)
-    mock_pg_session = MagicMock()
+  async def test_creates_without_credentials(self):
+    mock_session = MagicMock()
+    mock_conn = _make_mock_connection(status="pending_oauth")
 
     with (
-      patch(f"{MODULE}.MultiTenantUtils") as mock_mt,
-      patch(
-        f"{MODULE}.get_graph_repository",
-        new_callable=AsyncMock,
-        return_value=mock_repo,
-      ),
+      patch(f"{MODULE}.Connection") as MockConn,
+      patch(f"{MODULE}.ConnectionCredentials") as MockCreds,
     ):
-      mock_mt.is_multitenant_mode.return_value = False
-      mock_mt.get_database_name.return_value = "test_db"
+      MockConn.create.return_value = mock_conn
 
-      with pytest.raises(ValueError, match=r"Entity .* not found"):
-        await ConnectionService.create_connection(
-          entity_id="INVALID",
-          provider="SEC",
-          user_id="usr_123",
-          credentials={"api_key": "test"},
-          db_session=mock_pg_session,
-        )
+      result = await ConnectionService.create_connection(
+        entity_id="kg_test",
+        provider="quickbooks",
+        user_id="usr_123",
+        db_session=mock_session,
+      )
+
+    assert result["connection_id"] == "conn_test123"
+    MockConn.create.assert_called_once()
+    MockCreds.create.assert_not_called()
 
   @pytest.mark.asyncio
   @pytest.mark.unit
-  async def test_deactivates_existing_credentials(self):
-    mock_repo = _make_graph_repo_mock(
-      return_value={"identifier": "NVDA", "name": "NVIDIA"}
-    )
-    mock_repo.execute_query.return_value = None
-    mock_pg_session = MagicMock()
-    mock_existing_cred = MagicMock()
+  async def test_uses_graph_id_over_entity_id(self):
+    mock_session = MagicMock()
+    mock_conn = _make_mock_connection(graph_id="kg_explicit")
 
-    with (
-      patch(f"{MODULE}.MultiTenantUtils") as mock_mt,
-      patch(
-        f"{MODULE}.get_graph_repository",
-        new_callable=AsyncMock,
-        return_value=mock_repo,
-      ),
-      patch(f"{MODULE}.ConnectionCredentials") as MockCreds,
-    ):
-      mock_mt.is_multitenant_mode.return_value = False
-      mock_mt.get_database_name.return_value = "test_db"
-      MockCreds.get_by_connection_id.return_value = mock_existing_cred
+    with patch(f"{MODULE}.Connection") as MockConn:
+      MockConn.create.return_value = mock_conn
 
       await ConnectionService.create_connection(
-        entity_id="NVDA",
-        provider="SEC",
+        entity_id="kg_fallback",
+        provider="quickbooks",
         user_id="usr_123",
-        credentials={"api_key": "test"},
-        db_session=mock_pg_session,
+        graph_id="kg_explicit",
+        db_session=mock_session,
       )
 
-    mock_existing_cred.deactivate.assert_called_once()
+    call_kwargs = MockConn.create.call_args
+    assert call_kwargs.kwargs["graph_id"] == "kg_explicit"
 
 
-class TestGetConnectionActual:
+class TestGetConnection:
   @pytest.mark.asyncio
   @pytest.mark.unit
-  async def test_happy_path(self):
-    conn_props = {
-      "provider": "SEC",
-      "status": "connected",
-      "realm_id": None,
-      "item_id": None,
-      "cik": "0001045810",
-      "entity_name": "NVIDIA",
-      "institution_name": None,
-      "auto_sync_enabled": True,
-      "last_sync": None,
-      "created_at": None,
-    }
-    mock_repo = _make_graph_repo_mock(return_value={"conn": conn_props})
-    mock_pg_session = MagicMock()
-
-    mock_pg_cred = MagicMock()
-    mock_pg_cred.user_id = "usr_123"
-    mock_pg_cred.get_credentials.return_value = {"api_key": "secret"}
-    mock_pg_cred.expires_at = None
-    mock_pg_cred.is_expired.return_value = False
+  async def test_returns_connection_with_credentials(self):
+    mock_session = MagicMock()
+    mock_conn = _make_mock_connection()
+    mock_cred = _make_mock_credentials()
 
     with (
-      patch(f"{MODULE}.MultiTenantUtils") as mock_mt,
-      patch(
-        f"{MODULE}.get_graph_repository",
-        new_callable=AsyncMock,
-        return_value=mock_repo,
-      ),
+      patch(f"{MODULE}.Connection") as MockConn,
       patch(f"{MODULE}.ConnectionCredentials") as MockCreds,
     ):
-      mock_mt.get_database_name.return_value = "test_db"
-      MockCreds.get_by_connection_id.return_value = mock_pg_cred
+      MockConn.get_by_id.return_value = mock_conn
+      MockCreds.get_by_connection_id.return_value = mock_cred
 
       result = await ConnectionService.get_connection(
-        connection_id="sec_NVDA_usr_123",
+        connection_id="conn_test123",
         user_id="usr_123",
-        db_session=mock_pg_session,
+        db_session=mock_session,
       )
 
-    assert result["provider"] == "SEC"
-    assert result["credentials"] == {"api_key": "secret"}
+    assert result["connection_id"] == "conn_test123"
+    assert result["credentials"] == {
+      "access_token": "tok_123",
+      "refresh_token": "ref_456",
+    }
     assert result["is_expired"] is False
 
   @pytest.mark.asyncio
   @pytest.mark.unit
   async def test_not_found_returns_none(self):
-    mock_repo = _make_graph_repo_mock(return_value=None)
-    mock_repo.execute_query.return_value = []
+    mock_session = MagicMock()
 
-    with (
-      patch(f"{MODULE}.MultiTenantUtils") as mock_mt,
-      patch(
-        f"{MODULE}.get_graph_repository",
-        new_callable=AsyncMock,
-        return_value=mock_repo,
-      ),
-    ):
-      mock_mt.get_database_name.return_value = "test_db"
+    with patch(f"{MODULE}.Connection") as MockConn:
+      MockConn.get_by_id.return_value = None
 
       result = await ConnectionService.get_connection(
         connection_id="nonexistent",
         user_id="usr_123",
+        db_session=mock_session,
       )
 
     assert result is None
 
   @pytest.mark.asyncio
   @pytest.mark.unit
-  async def test_credentials_not_found_raises(self):
-    mock_repo = _make_graph_repo_mock(return_value={"conn": {"provider": "SEC"}})
-    mock_pg_session = MagicMock()
+  async def test_wrong_user_returns_none(self):
+    mock_session = MagicMock()
+    mock_conn = _make_mock_connection(user_id="usr_other")
 
-    with (
-      patch(f"{MODULE}.MultiTenantUtils") as mock_mt,
-      patch(
-        f"{MODULE}.get_graph_repository",
-        new_callable=AsyncMock,
-        return_value=mock_repo,
-      ),
-      patch(f"{MODULE}.ConnectionCredentials") as MockCreds,
-    ):
-      mock_mt.get_database_name.return_value = "test_db"
-      MockCreds.get_by_connection_id.return_value = None
+    with patch(f"{MODULE}.Connection") as MockConn:
+      MockConn.get_by_id.return_value = mock_conn
 
-      with pytest.raises(CredentialsNotFoundError):
-        await ConnectionService.get_connection(
-          connection_id="sec_NVDA_usr_123",
-          user_id="usr_123",
-          db_session=mock_pg_session,
-        )
+      result = await ConnectionService.get_connection(
+        connection_id="conn_test123",
+        user_id="usr_123",
+        db_session=mock_session,
+      )
+
+    assert result is None
 
   @pytest.mark.asyncio
   @pytest.mark.unit
-  async def test_access_denied_raises(self):
-    mock_repo = _make_graph_repo_mock(return_value={"conn": {"provider": "SEC"}})
-    mock_pg_session = MagicMock()
-    mock_pg_cred = MagicMock()
-    mock_pg_cred.user_id = "usr_other"
+  async def test_system_user_bypasses_access_check(self):
+    mock_session = MagicMock()
+    mock_conn = _make_mock_connection(user_id="usr_other")
+    mock_cred = _make_mock_credentials()
 
     with (
-      patch(f"{MODULE}.MultiTenantUtils") as mock_mt,
-      patch(
-        f"{MODULE}.get_graph_repository",
-        new_callable=AsyncMock,
-        return_value=mock_repo,
-      ),
+      patch(f"{MODULE}.Connection") as MockConn,
       patch(f"{MODULE}.ConnectionCredentials") as MockCreds,
     ):
-      mock_mt.get_database_name.return_value = "test_db"
-      MockCreds.get_by_connection_id.return_value = mock_pg_cred
+      MockConn.get_by_id.return_value = mock_conn
+      MockCreds.get_by_connection_id.return_value = mock_cred
 
-      with pytest.raises(UserAccessDeniedError):
-        await ConnectionService.get_connection(
-          connection_id="sec_NVDA_usr_123",
-          user_id="usr_123",
-          db_session=mock_pg_session,
-        )
+      result = await ConnectionService.get_connection(
+        connection_id="conn_test123",
+        user_id=SYSTEM_USER_ID,
+        db_session=mock_session,
+      )
+
+    assert result is not None
+    assert result["connection_id"] == "conn_test123"
+
+  @pytest.mark.asyncio
+  @pytest.mark.unit
+  async def test_no_credentials_returns_empty_dict(self):
+    mock_session = MagicMock()
+    mock_conn = _make_mock_connection()
+
+    with (
+      patch(f"{MODULE}.Connection") as MockConn,
+      patch(f"{MODULE}.ConnectionCredentials") as MockCreds,
+    ):
+      MockConn.get_by_id.return_value = mock_conn
+      MockCreds.get_by_connection_id.return_value = None
+
+      result = await ConnectionService.get_connection(
+        connection_id="conn_test123",
+        user_id="usr_123",
+        db_session=mock_session,
+      )
+
+    assert result["credentials"] == {}
+    assert result["is_expired"] is False
+
+
+class TestListConnections:
+  @pytest.mark.asyncio
+  @pytest.mark.unit
+  async def test_returns_all_for_graph(self):
+    mock_session = MagicMock()
+    mock_conns = [
+      _make_mock_connection(id="conn_1", provider="quickbooks"),
+      _make_mock_connection(id="conn_2", provider="sec"),
+    ]
+
+    with (
+      patch(f"{MODULE}.Connection") as MockConn,
+      patch(f"{MODULE}.ConnectionCredentials") as MockCreds,
+    ):
+      MockConn.list_filtered.return_value = mock_conns
+      MockCreds.get_by_connection_id.return_value = None
+
+      result = await ConnectionService.list_connections(
+        graph_id="kg_test",
+        db_session=mock_session,
+      )
+
+    assert len(result) == 2
+    MockConn.list_filtered.assert_called_once_with(
+      session=mock_session,
+      graph_id="kg_test",
+      user_id=None,
+      provider=None,
+    )
+
+  @pytest.mark.asyncio
+  @pytest.mark.unit
+  async def test_filters_by_provider(self):
+    mock_session = MagicMock()
+
+    with (
+      patch(f"{MODULE}.Connection") as MockConn,
+      patch(f"{MODULE}.ConnectionCredentials"),
+    ):
+      MockConn.list_filtered.return_value = []
+
+      await ConnectionService.list_connections(
+        graph_id="kg_test",
+        provider="quickbooks",
+        db_session=mock_session,
+      )
+
+    MockConn.list_filtered.assert_called_once_with(
+      session=mock_session,
+      graph_id="kg_test",
+      user_id=None,
+      provider="quickbooks",
+    )
+
+  @pytest.mark.asyncio
+  @pytest.mark.unit
+  async def test_system_user_sees_all(self):
+    mock_session = MagicMock()
+
+    with (
+      patch(f"{MODULE}.Connection") as MockConn,
+      patch(f"{MODULE}.ConnectionCredentials"),
+    ):
+      MockConn.list_filtered.return_value = []
+
+      await ConnectionService.list_connections(
+        graph_id="kg_test",
+        user_id=SYSTEM_USER_ID,
+        db_session=mock_session,
+      )
+
+    call_kwargs = MockConn.list_filtered.call_args.kwargs
+    assert call_kwargs["user_id"] is None
+
+  @pytest.mark.asyncio
+  @pytest.mark.unit
+  async def test_empty_graph_returns_empty(self):
+    mock_session = MagicMock()
+
+    with (
+      patch(f"{MODULE}.Connection") as MockConn,
+      patch(f"{MODULE}.ConnectionCredentials"),
+    ):
+      MockConn.list_filtered.return_value = []
+
+      result = await ConnectionService.list_connections(
+        graph_id="kg_empty",
+        db_session=mock_session,
+      )
+
+    assert result == []
 
 
 class TestUpdateConnectionCredentials:
   @pytest.mark.unit
-  def test_happy_path(self):
-    mock_pg_session = MagicMock()
-    mock_cred = MagicMock()
-    mock_cred.user_id = "usr_123"
+  def test_updates_existing_credentials(self):
+    mock_session = MagicMock()
+    mock_cred = _make_mock_credentials()
 
     with patch(f"{MODULE}.ConnectionCredentials") as MockCreds:
       MockCreds.get_by_connection_id.return_value = mock_cred
@@ -402,15 +351,15 @@ class TestUpdateConnectionCredentials:
         connection_id="conn_1",
         user_id="usr_123",
         credentials={"new_token": "abc"},
-        db_session=mock_pg_session,
+        db_session=mock_session,
       )
 
     assert result is True
     mock_cred.update_credentials.assert_called_once()
 
   @pytest.mark.unit
-  def test_not_found_returns_false(self):
-    mock_pg_session = MagicMock()
+  def test_creates_if_not_exists(self):
+    mock_session = MagicMock()
 
     with patch(f"{MODULE}.ConnectionCredentials") as MockCreds:
       MockCreds.get_by_connection_id.return_value = None
@@ -419,74 +368,50 @@ class TestUpdateConnectionCredentials:
         connection_id="conn_1",
         user_id="usr_123",
         credentials={"new_token": "abc"},
-        db_session=mock_pg_session,
+        db_session=mock_session,
       )
 
-    assert result is False
-
-  @pytest.mark.unit
-  def test_wrong_user_returns_false(self):
-    mock_pg_session = MagicMock()
-    mock_cred = MagicMock()
-    mock_cred.user_id = "usr_other"
-
-    with patch(f"{MODULE}.ConnectionCredentials") as MockCreds:
-      MockCreds.get_by_connection_id.return_value = mock_cred
-
-      result = ConnectionService.update_connection_credentials(
-        connection_id="conn_1",
-        user_id="usr_123",
-        credentials={"new_token": "abc"},
-        db_session=mock_pg_session,
-      )
-
-    assert result is False
+    assert result is True
+    MockCreds.create.assert_called_once()
 
 
 class TestDeleteConnection:
   @pytest.mark.asyncio
   @pytest.mark.unit
-  async def test_happy_path(self):
-    mock_repo = _make_graph_repo_mock()
-    mock_pg_session = MagicMock()
-    mock_cred = MagicMock()
-    mock_cred.user_id = "usr_123"
+  async def test_deletes_connection_and_deactivates_creds(self):
+    mock_session = MagicMock()
+    mock_conn = _make_mock_connection()
+    mock_cred = _make_mock_credentials()
 
     with (
-      patch(f"{MODULE}.MultiTenantUtils") as mock_mt,
-      patch(
-        f"{MODULE}.get_graph_repository",
-        new_callable=AsyncMock,
-        return_value=mock_repo,
-      ),
+      patch(f"{MODULE}.Connection") as MockConn,
       patch(f"{MODULE}.ConnectionCredentials") as MockCreds,
     ):
-      mock_mt.get_database_name.return_value = "test_db"
+      MockConn.get_by_id.return_value = mock_conn
       MockCreds.get_by_connection_id.return_value = mock_cred
 
       result = await ConnectionService.delete_connection(
         connection_id="conn_1",
         user_id="usr_123",
-        db_session=mock_pg_session,
+        db_session=mock_session,
       )
 
     assert result is True
     mock_cred.deactivate.assert_called_once()
+    mock_conn.delete.assert_called_once()
 
   @pytest.mark.asyncio
   @pytest.mark.unit
-  async def test_wrong_user_returns_false(self):
-    mock_pg_session = MagicMock()
-    mock_cred = MagicMock()
-    mock_cred.user_id = "usr_other"
+  async def test_not_found_returns_false(self):
+    mock_session = MagicMock()
 
-    with patch(f"{MODULE}.ConnectionCredentials") as MockCreds:
-      MockCreds.get_by_connection_id.return_value = mock_cred
+    with patch(f"{MODULE}.Connection") as MockConn:
+      MockConn.get_by_id.return_value = None
 
       result = await ConnectionService.delete_connection(
-        connection_id="conn_1",
+        connection_id="nonexistent",
         user_id="usr_123",
-        db_session=mock_pg_session,
+        db_session=mock_session,
       )
 
     assert result is False
@@ -496,54 +421,49 @@ class TestMarkConnectionStatus:
   @pytest.mark.asyncio
   @pytest.mark.unit
   async def test_mark_error(self):
-    mock_repo = _make_graph_repo_mock(return_value={"conn": {}})
+    mock_session = MagicMock()
+    mock_conn = _make_mock_connection()
 
-    with (
-      patch(f"{MODULE}.MultiTenantUtils") as mock_mt,
-      patch(
-        f"{MODULE}.get_graph_repository",
-        new_callable=AsyncMock,
-        return_value=mock_repo,
-      ),
-    ):
-      mock_mt.get_database_name.return_value = "test_db"
-      result = await ConnectionService.mark_connection_error("conn_1")
+    with patch(f"{MODULE}.Connection") as MockConn:
+      MockConn.get_by_id.return_value = mock_conn
+
+      result = await ConnectionService.mark_connection_error(
+        connection_id="conn_1",
+        db_session=mock_session,
+      )
 
     assert result is True
+    mock_conn.update_status.assert_called_once_with("error", mock_session)
 
   @pytest.mark.asyncio
   @pytest.mark.unit
   async def test_mark_connected(self):
-    mock_repo = _make_graph_repo_mock(return_value={"conn": {}})
+    mock_session = MagicMock()
+    mock_conn = _make_mock_connection()
 
-    with (
-      patch(f"{MODULE}.MultiTenantUtils") as mock_mt,
-      patch(
-        f"{MODULE}.get_graph_repository",
-        new_callable=AsyncMock,
-        return_value=mock_repo,
-      ),
-    ):
-      mock_mt.get_database_name.return_value = "test_db"
-      result = await ConnectionService.mark_connection_connected("conn_1")
+    with patch(f"{MODULE}.Connection") as MockConn:
+      MockConn.get_by_id.return_value = mock_conn
+
+      result = await ConnectionService.mark_connection_connected(
+        connection_id="conn_1",
+        db_session=mock_session,
+      )
 
     assert result is True
+    mock_conn.update_status.assert_called_once_with("connected", mock_session)
 
   @pytest.mark.asyncio
   @pytest.mark.unit
-  async def test_mark_error_not_found(self):
-    mock_repo = _make_graph_repo_mock(return_value=None)
+  async def test_not_found_returns_false(self):
+    mock_session = MagicMock()
 
-    with (
-      patch(f"{MODULE}.MultiTenantUtils") as mock_mt,
-      patch(
-        f"{MODULE}.get_graph_repository",
-        new_callable=AsyncMock,
-        return_value=mock_repo,
-      ),
-    ):
-      mock_mt.get_database_name.return_value = "test_db"
-      result = await ConnectionService.mark_connection_error("conn_1")
+    with patch(f"{MODULE}.Connection") as MockConn:
+      MockConn.get_by_id.return_value = None
+
+      result = await ConnectionService.mark_connection_error(
+        connection_id="nonexistent",
+        db_session=mock_session,
+      )
 
     assert result is False
 
@@ -552,36 +472,32 @@ class TestUpdateLastSync:
   @pytest.mark.asyncio
   @pytest.mark.unit
   async def test_success(self):
-    mock_repo = _make_graph_repo_mock(return_value={"conn": {}})
+    mock_session = MagicMock()
+    mock_conn = _make_mock_connection()
 
-    with (
-      patch(f"{MODULE}.MultiTenantUtils") as mock_mt,
-      patch(
-        f"{MODULE}.get_graph_repository",
-        new_callable=AsyncMock,
-        return_value=mock_repo,
-      ),
-    ):
-      mock_mt.get_database_name.return_value = "test_db"
-      result = await ConnectionService.update_last_sync("conn_1")
+    with patch(f"{MODULE}.Connection") as MockConn:
+      MockConn.get_by_id.return_value = mock_conn
+
+      result = await ConnectionService.update_last_sync(
+        connection_id="conn_1",
+        db_session=mock_session,
+      )
 
     assert result is True
+    mock_conn.update_last_sync.assert_called_once()
 
   @pytest.mark.asyncio
   @pytest.mark.unit
   async def test_not_found_returns_false(self):
-    mock_repo = _make_graph_repo_mock(return_value=None)
+    mock_session = MagicMock()
 
-    with (
-      patch(f"{MODULE}.MultiTenantUtils") as mock_mt,
-      patch(
-        f"{MODULE}.get_graph_repository",
-        new_callable=AsyncMock,
-        return_value=mock_repo,
-      ),
-    ):
-      mock_mt.get_database_name.return_value = "test_db"
-      result = await ConnectionService.update_last_sync("conn_1")
+    with patch(f"{MODULE}.Connection") as MockConn:
+      MockConn.get_by_id.return_value = None
+
+      result = await ConnectionService.update_last_sync(
+        connection_id="nonexistent",
+        db_session=mock_session,
+      )
 
     assert result is False
 
@@ -589,56 +505,424 @@ class TestUpdateLastSync:
 class TestUpdateConnection:
   @pytest.mark.asyncio
   @pytest.mark.unit
-  async def test_with_credentials_and_metadata(self):
-    mock_repo = _make_graph_repo_mock(return_value={"conn": {}})
+  async def test_updates_metadata_and_credentials(self):
+    mock_session = MagicMock()
+    mock_conn = _make_mock_connection()
+    mock_cred = _make_mock_credentials()
 
     with (
-      patch(f"{MODULE}.MultiTenantUtils") as mock_mt,
-      patch(
-        f"{MODULE}.get_graph_repository",
-        new_callable=AsyncMock,
-        return_value=mock_repo,
-      ),
-      patch.object(
-        ConnectionService,
-        "update_connection_credentials",
-        return_value=True,
-      ),
+      patch(f"{MODULE}.Connection") as MockConn,
+      patch(f"{MODULE}.ConnectionCredentials") as MockCreds,
     ):
-      mock_mt.get_database_name.return_value = "test_db"
+      MockConn.get_by_id.return_value = mock_conn
+      MockCreds.get_by_connection_id.return_value = mock_cred
 
       result = await ConnectionService.update(
         connection_id="conn_1",
         user_id="usr_123",
-        credentials={"token": "new"},
-        metadata={"entity_name": "Updated Corp"},
+        metadata={"realm_id": "new_realm", "entity_name": "Updated Corp"},
+        credentials={"token": "new_tok"},
         status="connected",
+        db_session=mock_session,
       )
 
     assert result is True
+    mock_conn.update_metadata.assert_called_once()
+    mock_cred.update_credentials.assert_called_once()
 
   @pytest.mark.asyncio
   @pytest.mark.unit
-  async def test_credential_update_failure_returns_false(self):
-    with patch.object(
-      ConnectionService,
-      "update_connection_credentials",
-      return_value=False,
-    ):
+  async def test_not_found_returns_false(self):
+    mock_session = MagicMock()
+
+    with patch(f"{MODULE}.Connection") as MockConn:
+      MockConn.get_by_id.return_value = None
+
       result = await ConnectionService.update(
-        connection_id="conn_1",
+        connection_id="nonexistent",
         user_id="usr_123",
-        credentials={"token": "new"},
+        status="error",
+        db_session=mock_session,
       )
 
     assert result is False
 
   @pytest.mark.asyncio
   @pytest.mark.unit
-  async def test_no_changes_returns_true(self):
-    result = await ConnectionService.update(
-      connection_id="conn_1",
-      user_id="usr_123",
-    )
+  async def test_status_only_update(self):
+    mock_session = MagicMock()
+    mock_conn = _make_mock_connection()
+
+    with patch(f"{MODULE}.Connection") as MockConn:
+      MockConn.get_by_id.return_value = mock_conn
+
+      result = await ConnectionService.update(
+        connection_id="conn_1",
+        user_id="usr_123",
+        status="error",
+        db_session=mock_session,
+      )
 
     assert result is True
+    mock_conn.update_metadata.assert_called_once_with(mock_session, status="error")
+
+  @pytest.mark.asyncio
+  @pytest.mark.unit
+  async def test_creates_credentials_when_none_exist(self):
+    mock_session = MagicMock()
+    mock_conn = _make_mock_connection(provider="quickbooks")
+
+    with (
+      patch(f"{MODULE}.Connection") as MockConn,
+      patch(f"{MODULE}.ConnectionCredentials") as MockCreds,
+    ):
+      MockConn.get_by_id.return_value = mock_conn
+      MockCreds.get_by_connection_id.return_value = None
+
+      result = await ConnectionService.update(
+        connection_id="conn_1",
+        user_id="usr_123",
+        credentials={"token": "new_tok"},
+        db_session=mock_session,
+      )
+
+    assert result is True
+    MockCreds.create.assert_called_once()
+
+  @pytest.mark.asyncio
+  @pytest.mark.unit
+  async def test_no_metadata_no_status_skips_update_metadata(self):
+    mock_session = MagicMock()
+    mock_conn = _make_mock_connection()
+
+    with patch(f"{MODULE}.Connection") as MockConn:
+      MockConn.get_by_id.return_value = mock_conn
+
+      result = await ConnectionService.update(
+        connection_id="conn_1",
+        user_id="usr_123",
+        db_session=mock_session,
+      )
+
+    assert result is True
+    mock_conn.update_metadata.assert_not_called()
+
+  @pytest.mark.asyncio
+  @pytest.mark.unit
+  async def test_all_metadata_fields(self):
+    mock_session = MagicMock()
+    mock_conn = _make_mock_connection()
+
+    with patch(f"{MODULE}.Connection") as MockConn:
+      MockConn.get_by_id.return_value = mock_conn
+
+      result = await ConnectionService.update(
+        connection_id="conn_1",
+        user_id="usr_123",
+        metadata={
+          "realm_id": "r1",
+          "item_id": "i1",
+          "cik": "0001234567",
+          "entity_name": "Acme",
+          "institution_name": "Chase",
+          "auto_sync_enabled": False,
+        },
+        db_session=mock_session,
+      )
+
+    assert result is True
+    call_kwargs = mock_conn.update_metadata.call_args.kwargs
+    assert call_kwargs["realm_id"] == "r1"
+    assert call_kwargs["item_id"] == "i1"
+    assert call_kwargs["cik"] == "0001234567"
+    assert call_kwargs["entity_name"] == "Acme"
+    assert call_kwargs["institution_name"] == "Chase"
+    assert call_kwargs["auto_sync_enabled"] is False
+
+  @pytest.mark.asyncio
+  @pytest.mark.unit
+  async def test_exception_returns_false(self):
+    mock_session = MagicMock()
+
+    with patch(f"{MODULE}.Connection") as MockConn:
+      MockConn.get_by_id.side_effect = Exception("db error")
+
+      result = await ConnectionService.update(
+        connection_id="conn_1",
+        user_id="usr_123",
+        status="error",
+        db_session=mock_session,
+      )
+
+    assert result is False
+
+
+class TestConnectionServiceErrorHandling:
+  """Test error paths and session management across all methods."""
+
+  @pytest.mark.asyncio
+  @pytest.mark.unit
+  async def test_create_connection_exception(self):
+    mock_session = MagicMock()
+
+    with patch(f"{MODULE}.Connection") as MockConn:
+      MockConn.create.side_effect = Exception("create failed")
+
+      with pytest.raises(Exception, match="create failed"):
+        await ConnectionService.create_connection(
+          entity_id="kg_test",
+          provider="quickbooks",
+          user_id="usr_123",
+          db_session=mock_session,
+        )
+
+  @pytest.mark.asyncio
+  @pytest.mark.unit
+  async def test_get_connection_exception_returns_none(self):
+    mock_session = MagicMock()
+
+    with patch(f"{MODULE}.Connection") as MockConn:
+      MockConn.get_by_id.side_effect = Exception("db error")
+
+      result = await ConnectionService.get_connection(
+        connection_id="conn_1",
+        user_id="usr_123",
+        db_session=mock_session,
+      )
+
+    assert result is None
+
+  @pytest.mark.asyncio
+  @pytest.mark.unit
+  async def test_get_connection_expired_credential(self):
+    mock_session = MagicMock()
+    mock_conn = _make_mock_connection()
+    mock_cred = _make_mock_credentials()
+    mock_cred.is_expired.side_effect = Exception("timezone mismatch")
+
+    with (
+      patch(f"{MODULE}.Connection") as MockConn,
+      patch(f"{MODULE}.ConnectionCredentials") as MockCreds,
+    ):
+      MockConn.get_by_id.return_value = mock_conn
+      MockCreds.get_by_connection_id.return_value = mock_cred
+
+      result = await ConnectionService.get_connection(
+        connection_id="conn_1",
+        user_id="usr_123",
+        db_session=mock_session,
+      )
+
+    assert result["is_expired"] is False
+
+  @pytest.mark.asyncio
+  @pytest.mark.unit
+  async def test_list_connections_exception_returns_empty(self):
+    mock_session = MagicMock()
+
+    with patch(f"{MODULE}.Connection") as MockConn:
+      MockConn.list_filtered.side_effect = Exception("db error")
+
+      result = await ConnectionService.list_connections(
+        graph_id="kg_test",
+        db_session=mock_session,
+      )
+
+    assert result == []
+
+  @pytest.mark.asyncio
+  @pytest.mark.unit
+  async def test_list_connections_entity_id_fallback(self):
+    mock_session = MagicMock()
+
+    with (
+      patch(f"{MODULE}.Connection") as MockConn,
+      patch(f"{MODULE}.ConnectionCredentials"),
+    ):
+      MockConn.list_filtered.return_value = []
+
+      await ConnectionService.list_connections(
+        entity_id="kg_via_entity",
+        db_session=mock_session,
+      )
+
+    call_kwargs = MockConn.list_filtered.call_args.kwargs
+    assert call_kwargs["graph_id"] == "kg_via_entity"
+
+  @pytest.mark.asyncio
+  @pytest.mark.unit
+  async def test_list_connections_credential_expiry_exception(self):
+    mock_session = MagicMock()
+    mock_conn = _make_mock_connection()
+    mock_cred = _make_mock_credentials()
+    mock_cred.is_expired.side_effect = Exception("tz mismatch")
+
+    with (
+      patch(f"{MODULE}.Connection") as MockConn,
+      patch(f"{MODULE}.ConnectionCredentials") as MockCreds,
+    ):
+      MockConn.list_filtered.return_value = [mock_conn]
+      MockCreds.get_by_connection_id.return_value = mock_cred
+
+      result = await ConnectionService.list_connections(
+        graph_id="kg_test",
+        db_session=mock_session,
+      )
+
+    assert len(result) == 1
+    assert result[0]["is_expired"] is False
+
+  @pytest.mark.unit
+  def test_update_credentials_exception_returns_false(self):
+    mock_session = MagicMock()
+
+    with patch(f"{MODULE}.ConnectionCredentials") as MockCreds:
+      MockCreds.get_by_connection_id.side_effect = Exception("db error")
+
+      result = ConnectionService.update_connection_credentials(
+        connection_id="conn_1",
+        user_id="usr_123",
+        credentials={"token": "tok"},
+        db_session=mock_session,
+      )
+
+    assert result is False
+
+  @pytest.mark.asyncio
+  @pytest.mark.unit
+  async def test_update_last_sync_exception_returns_false(self):
+    mock_session = MagicMock()
+
+    with patch(f"{MODULE}.Connection") as MockConn:
+      MockConn.get_by_id.side_effect = Exception("db error")
+
+      result = await ConnectionService.update_last_sync(
+        connection_id="conn_1",
+        db_session=mock_session,
+      )
+
+    assert result is False
+
+  @pytest.mark.asyncio
+  @pytest.mark.unit
+  async def test_delete_connection_exception_returns_false(self):
+    mock_session = MagicMock()
+
+    with patch(f"{MODULE}.Connection") as MockConn:
+      MockConn.get_by_id.side_effect = Exception("db error")
+
+      result = await ConnectionService.delete_connection(
+        connection_id="conn_1",
+        user_id="usr_123",
+        db_session=mock_session,
+      )
+
+    assert result is False
+
+  @pytest.mark.asyncio
+  @pytest.mark.unit
+  async def test_delete_connection_without_credentials(self):
+    mock_session = MagicMock()
+    mock_conn = _make_mock_connection()
+
+    with (
+      patch(f"{MODULE}.Connection") as MockConn,
+      patch(f"{MODULE}.ConnectionCredentials") as MockCreds,
+    ):
+      MockConn.get_by_id.return_value = mock_conn
+      MockCreds.get_by_connection_id.return_value = None
+
+      result = await ConnectionService.delete_connection(
+        connection_id="conn_1",
+        user_id="usr_123",
+        db_session=mock_session,
+      )
+
+    assert result is True
+    mock_conn.delete.assert_called_once()
+
+  @pytest.mark.asyncio
+  @pytest.mark.unit
+  async def test_mark_error_exception_returns_false(self):
+    mock_session = MagicMock()
+
+    with patch(f"{MODULE}.Connection") as MockConn:
+      MockConn.get_by_id.side_effect = Exception("db error")
+
+      result = await ConnectionService.mark_connection_error(
+        connection_id="conn_1",
+        db_session=mock_session,
+      )
+
+    assert result is False
+
+  @pytest.mark.asyncio
+  @pytest.mark.unit
+  async def test_mark_connected_exception_returns_false(self):
+    mock_session = MagicMock()
+
+    with patch(f"{MODULE}.Connection") as MockConn:
+      MockConn.get_by_id.side_effect = Exception("db error")
+
+      result = await ConnectionService.mark_connection_connected(
+        connection_id="conn_1",
+        db_session=mock_session,
+      )
+
+    assert result is False
+
+  @pytest.mark.asyncio
+  @pytest.mark.unit
+  async def test_mark_connected_not_found(self):
+    mock_session = MagicMock()
+
+    with patch(f"{MODULE}.Connection") as MockConn:
+      MockConn.get_by_id.return_value = None
+
+      result = await ConnectionService.mark_connection_connected(
+        connection_id="nonexistent",
+        db_session=mock_session,
+      )
+
+    assert result is False
+
+
+class TestConnectionServiceSessionManagement:
+  """Test that sessions are created/closed properly when not provided."""
+
+  @pytest.mark.asyncio
+  @pytest.mark.unit
+  async def test_creates_session_when_none_provided(self):
+    mock_session = MagicMock()
+
+    with (
+      patch(f"{MODULE}.SessionFactory", return_value=mock_session),
+      patch(f"{MODULE}.Connection") as MockConn,
+      patch(f"{MODULE}.ConnectionCredentials"),
+    ):
+      MockConn.get_by_id.return_value = None
+
+      await ConnectionService.get_connection(
+        connection_id="conn_1",
+        user_id="usr_123",
+      )
+
+    mock_session.close.assert_called_once()
+
+  @pytest.mark.unit
+  def test_update_credentials_creates_session(self):
+    mock_session = MagicMock()
+
+    with (
+      patch(f"{MODULE}.SessionFactory", return_value=mock_session),
+      patch(f"{MODULE}.ConnectionCredentials") as MockCreds,
+    ):
+      MockCreds.get_by_connection_id.return_value = None
+
+      ConnectionService.update_connection_credentials(
+        connection_id="conn_1",
+        user_id="usr_123",
+        credentials={"token": "tok"},
+      )
+
+    mock_session.close.assert_called_once()

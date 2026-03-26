@@ -78,6 +78,7 @@ class TestGetDagsterComponents:
       "sec_graph_materialized",
       "sec_lbug_s3_published",
       "sec_lbug_r2_published",
+      "sec_vector_s3_published",
       "sec_knowledge_artifacts",
     }
 
@@ -95,6 +96,7 @@ class TestGetDagsterComponents:
       "sec_stage",
       "sec_materialize",
       "sec_staged_materialize",
+      "sec_vector_s3_publish",
       "sec_lbug_r2_publish",
     }
 

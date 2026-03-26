@@ -113,7 +113,6 @@ from .graphs import (
   MCPToolCall,
   MCPToolResult,
   MCPToolsResponse,
-  PlaidConnectionConfig,
   ProviderType,
   QuickBooksConnectionConfig,
   SECConnectionConfig,
@@ -240,7 +239,6 @@ __all__ = [
   "PasswordCheckRequest",
   "PasswordCheckResponse",
   "PasswordPolicyResponse",
-  "PlaidConnectionConfig",
   # Connection models
   "ProviderType",
   "QuickBooksConnectionConfig",
