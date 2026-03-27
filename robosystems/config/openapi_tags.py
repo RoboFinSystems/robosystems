@@ -39,6 +39,10 @@ MAIN_API_TAGS = [
     "description": "👁️ Views - Create and manage multi-dimensional fact grids with XBRL-style hypercubes",
   },
   {
+    "name": "Documents",
+    "description": "📑 Documents - Upload, list, and manage documents for search and analysis",
+  },
+  {
     "name": "Search",
     "description": "🔎 Search - Full-text search across filing narratives, disclosures, and XBRL text content",
   },
