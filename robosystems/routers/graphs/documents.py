@@ -65,6 +65,17 @@ def _resolve_tier(graph_id: str) -> str:
     session.close()
 
 
+@router.get("", operation_id="list_documents")
+async def list_documents(
+  graph_id: str,
+  source_type: str | None = None,
+  current_user: User = Depends(get_current_user_with_graph),
+) -> DocumentListResponse:
+  """List indexed documents for a graph."""
+  service = _require_search_service()
+  return service.list_documents(graph_id, source_type)
+
+
 @router.post("", operation_id="upload_document")
 async def upload_document(
   graph_id: str,
@@ -104,17 +115,6 @@ async def upload_documents_bulk(
     results=results,
     errors=errors if errors else None,
   )
-
-
-@router.get("", operation_id="list_documents")
-async def list_documents(
-  graph_id: str,
-  source_type: str | None = None,
-  current_user: User = Depends(get_current_user_with_graph),
-) -> DocumentListResponse:
-  """List indexed documents for a graph."""
-  service = _require_search_service()
-  return service.list_documents(graph_id, source_type)
 
 
 @router.delete(
