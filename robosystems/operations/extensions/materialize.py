@@ -149,7 +149,12 @@ def _staging_sql(graph_id: str, entity_id: str, connstr: str) -> dict[str, str]:
     CREATE OR REPLACE TABLE Element AS
     SELECT
       id                              AS identifier,
-      'roboledger:' || code           AS qname,
+      CASE
+        WHEN external_source = 'quickbooks' THEN 'qb:'
+        WHEN external_source = 'xero' THEN 'xero:'
+        WHEN external_source = 'plaid' THEN 'plaid:'
+        ELSE 'rl:'
+      END || code                     AS qname,
       name,
       description,
       classification,
