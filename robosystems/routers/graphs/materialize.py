@@ -73,6 +73,40 @@ router = APIRouter(
 circuit_breaker = CircuitBreakerManager()
 
 
+def resolve_materialization_source(source: str | None, graph_type: str) -> str:
+  """Infer and validate the materialization source based on graph type.
+
+  Args:
+      source: Explicit source ("staged" or "extensions"), or None to auto-detect.
+      graph_type: The graph's type ("entity", "generic", "repository").
+
+  Returns:
+      Resolved source string.
+
+  Raises:
+      HTTPException: If source is incompatible with graph type.
+  """
+  if source is None:
+    return "extensions" if graph_type == "entity" else "staged"
+
+  if graph_type == "entity" and source == "staged":
+    raise HTTPException(
+      status_code=status.HTTP_400_BAD_REQUEST,
+      detail="Entity graphs cannot use source='staged'. "
+      "Entity graph data comes from the extensions OLTP pipeline. "
+      "Use source='extensions' or omit the source field.",
+    )
+  if graph_type == "generic" and source == "extensions":
+    raise HTTPException(
+      status_code=status.HTTP_400_BAD_REQUEST,
+      detail="Generic graphs cannot use source='extensions'. "
+      "Generic graphs use uploaded files as their data source. "
+      "Use source='staged' or omit the source field.",
+    )
+
+  return source
+
+
 class MaterializeRequest(BaseModel):
   force: bool = Field(
     default=False,
@@ -431,25 +465,7 @@ async def materialize_graph(
 
   graph = require_graph_access(graph_id, db, require_write=True)
 
-  # Auto-infer source from graph type if not explicitly provided
-  if request.source is None:
-    request.source = "extensions" if graph.graph_type == "entity" else "staged"
-
-  # Validate source matches graph type
-  if graph.graph_type == "entity" and request.source == "staged":
-    raise HTTPException(
-      status_code=status.HTTP_400_BAD_REQUEST,
-      detail="Entity graphs cannot use source='staged'. "
-      "Entity graph data comes from the extensions OLTP pipeline. "
-      "Use source='extensions' or omit the source field.",
-    )
-  if graph.graph_type == "generic" and request.source == "extensions":
-    raise HTTPException(
-      status_code=status.HTTP_400_BAD_REQUEST,
-      detail="Generic graphs cannot use source='extensions'. "
-      "Generic graphs use uploaded files as their data source. "
-      "Use source='staged' or omit the source field.",
-    )
+  request.source = resolve_materialization_source(request.source, graph.graph_type)
 
   circuit_breaker.check_circuit(graph_id, "graph_materialization")
 
