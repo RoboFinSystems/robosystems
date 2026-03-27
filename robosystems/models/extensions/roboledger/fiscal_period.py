@@ -1,6 +1,6 @@
 """FiscalPeriod model — shared across tenants.
 
-Lives in the public schema of the roboledger database. Used for
+Lives in the public schema of the extensions database. Used for
 period close controls (prevent posting to closed periods).
 """
 

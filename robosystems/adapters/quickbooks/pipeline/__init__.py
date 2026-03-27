@@ -17,7 +17,7 @@ Pipeline stages:
 3. LOAD (qb_load):
    - Read OLTP tables from DuckDB via OLTPLoader
    - Delete existing data for this source + connection
-   - Insert into roboledger PostgreSQL tenant schema
+   - Insert into extensions PostgreSQL tenant schema
    - Resolve foreign keys using external_id lookups
    - Update connection last_sync timestamp
 

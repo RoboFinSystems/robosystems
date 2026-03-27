@@ -1,7 +1,7 @@
 """QuickBooks Load Asset.
 
 Reads OLTP-shaped tables from the dbt DuckDB output and inserts
-them into the roboledger PostgreSQL database via OLTPLoader.
+them into the extensions PostgreSQL database via OLTPLoader.
 """
 
 from dagster import AssetExecutionContext, MaterializeResult, asset
@@ -12,7 +12,7 @@ from .utils import get_pipeline_work_dir
 
 @asset(
   group_name="qb_pipeline",
-  description="Load QB OLTP tables from DuckDB into roboledger PostgreSQL",
+  description="Load QB OLTP tables from DuckDB into extensions PostgreSQL",
   deps=["qb_transform"],
   kinds={"postgres"},
   metadata={
@@ -24,7 +24,7 @@ def qb_load(
   context: AssetExecutionContext,
   config: QBSyncConfig,
 ) -> MaterializeResult:
-  """Load QB data from dbt DuckDB into roboledger OLTP tables.
+  """Load QB data from dbt DuckDB into extensions OLTP tables.
 
   Uses the generic OLTPLoader which:
   1. Provisions the tenant schema if needed

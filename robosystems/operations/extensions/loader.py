@@ -54,7 +54,7 @@ class LoadResult:
 
 
 class OLTPLoader:
-  """Loads dbt OLTP output tables into the roboledger PostgreSQL database.
+  """Loads dbt OLTP output tables into the extensions PostgreSQL database.
 
   Generic for all connectors — reads from DuckDB, resolves foreign keys,
   inserts into tenant schema. Same code for QB, Xero, NetSuite.
@@ -71,7 +71,7 @@ class OLTPLoader:
     duckdb_path: str | Path,
     created_by: str,
   ) -> LoadResult:
-    """Load dbt OLTP output into the roboledger tenant schema.
+    """Load dbt OLTP output into the extensions tenant schema.
 
     Args:
         graph_id: The graph ID (maps to a PostgreSQL schema).
@@ -413,7 +413,7 @@ class OLTPLoader:
     """Update the entity row with CompanyInfo from the connector.
 
     Reads from the dbt staging table (stg_qb_company_info or similar)
-    and updates the existing entity in the roboledger OLTP schema.
+    and updates the existing entity in the extensions OLTP schema.
     Only updates if entity exists and company info is available.
     """
     import duckdb

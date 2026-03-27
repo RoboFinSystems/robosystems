@@ -4,7 +4,7 @@ from pydantic import BaseModel
 
 
 class LedgerEntityResponse(BaseModel):
-  """Entity details from the roboledger OLTP database."""
+  """Entity details from the extensions OLTP database."""
 
   id: str
   name: str
