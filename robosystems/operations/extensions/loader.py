@@ -54,7 +54,7 @@ class LoadResult:
 
 
 class OLTPLoader:
-  """Loads dbt OLTP output tables into the roboledger PostgreSQL database.
+  """Loads dbt OLTP output tables into the extensions PostgreSQL database.
 
   Generic for all connectors — reads from DuckDB, resolves foreign keys,
   inserts into tenant schema. Same code for QB, Xero, NetSuite.
@@ -71,7 +71,7 @@ class OLTPLoader:
     duckdb_path: str | Path,
     created_by: str,
   ) -> LoadResult:
-    """Load dbt OLTP output into the roboledger tenant schema.
+    """Load dbt OLTP output into the extensions tenant schema.
 
     Args:
         graph_id: The graph ID (maps to a PostgreSQL schema).
@@ -85,8 +85,8 @@ class OLTPLoader:
     """
     import duckdb
 
-    from robosystems.db.ledger import oltp_session, provision_tenant_schema
-    from robosystems.models.ledger import (
+    from robosystems.db.extensions import extensions_session, provision_tenant_schema
+    from robosystems.models.extensions import (
       Account,
       Dimension,
       Entry,
@@ -121,7 +121,7 @@ class OLTPLoader:
 
     now = datetime.now(UTC)
 
-    with oltp_session(graph_id) as session:
+    with extensions_session(graph_id) as session:
       # Delete existing data for this source + connection_id (reverse FK order)
       session.query(LineItem).filter(
         LineItem.entry_id.in_(
@@ -389,8 +389,95 @@ class OLTPLoader:
         result.dimensions = len(rows)
         logger.info(f"Inserted {result.dimensions} dimensions")
 
+    # Update entity with connector CompanyInfo (if available)
+    self._update_entity_from_company_info(
+      graph_id=graph_id,
+      source=source,
+      connection_id=connection_id,
+      duckdb_path=duckdb_path,
+    )
+
     logger.info(
       f"OLTP load complete for graph={graph_id}, source={source}: "
       f"{result.total_rows} total rows"
     )
     return result
+
+  def _update_entity_from_company_info(
+    self,
+    graph_id: str,
+    source: str,
+    connection_id: str,
+    duckdb_path: str | Path,
+  ) -> None:
+    """Update the entity row with CompanyInfo from the connector.
+
+    Reads from the dbt staging table (stg_qb_company_info or similar)
+    and updates the existing entity in the extensions OLTP schema.
+    Only updates if entity exists and company info is available.
+    """
+    import duckdb
+
+    from robosystems.db.extensions import extensions_session
+    from robosystems.models.extensions.entity import Entity
+
+    try:
+      con = duckdb.connect(str(duckdb_path), read_only=True)
+      try:
+        tables = {row[0] for row in con.execute("SHOW TABLES").fetchall()}
+
+        # Look for company info staging table
+        company_table = None
+        for candidate in [
+          "stg_qb_company_info",
+          "stg_xero_organisation",
+          "company_info",
+        ]:
+          if candidate in tables:
+            company_table = candidate
+            break
+
+        if not company_table:
+          logger.debug(
+            "No company info table found in dbt output, skipping entity update"
+          )
+          return
+
+        result_set = con.execute(f"SELECT * FROM {company_table} LIMIT 1")
+        columns = [desc[0] for desc in result_set.description]
+        row = result_set.fetchone()
+        if not row:
+          return
+        company = dict(zip(columns, row, strict=True))
+      finally:
+        con.close()
+
+      with extensions_session(graph_id) as session:
+        entity = session.query(Entity).first()
+        if not entity:
+          logger.warning(
+            f"No entity found in graph {graph_id}, skipping CompanyInfo update"
+          )
+          return
+
+        # Update entity fields from company info
+        entity.name = company.get("company_name") or entity.name
+        entity.legal_name = company.get("legal_name") or entity.legal_name
+        entity.address_line1 = company.get("address_line1")
+        entity.address_city = company.get("city")
+        entity.address_state = company.get("state")
+        entity.address_postal_code = company.get("postal_code")
+        entity.address_country = company.get("country", "US")
+        entity.source = source
+        entity.connection_id = connection_id
+        entity.source_id = company.get("id", "")
+        entity.updated_at = datetime.now(UTC)
+        session.commit()
+
+        logger.info(
+          f"Updated entity for graph {graph_id} with {source} CompanyInfo: "
+          f"name='{entity.name}'"
+        )
+
+    except Exception as e:
+      logger.warning(f"Could not update entity from CompanyInfo: {e}")

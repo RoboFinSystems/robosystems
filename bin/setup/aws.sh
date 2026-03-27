@@ -207,6 +207,7 @@ function create_ssm_feature_flags() {
         "GRAPH_PROVISION_QUEUE_ENABLED=false"
         "EMAIL_VERIFICATION_ENABLED=false"
         "FACT_GRID_ENABLED=false"
+        "EXTENSIONS_ENABLED=false"
         "LEDGER_ENABLED=false"
         "LOAD_SHEDDING_ENABLED=true"
         "MCP_AUTO_LIMIT_ENABLED=true"

@@ -291,7 +291,7 @@ admin environment="dev" *args="":
 
 
 ## Database Operations ##
-# Usage: just migrate-up [db] — db is "platform" (default) or "ledger"
+# Usage: just migrate-up [db] — db is "platform" (default) or "extensions"
 
 # Create new migration
 migrate-create message db="platform" env=_local_env:
@@ -323,7 +323,6 @@ migrate-reset db="platform" env=_local_env:
 
 # Run all demos
 demo-all:
-    @just demo-accounting
     @just demo-custom-graph
     @just demo-sec
 
@@ -345,13 +344,6 @@ demo-sec-subscribe plan="sec-starter":
 # Run SEC demo preset queries (pass any args: --all, --preset NAME, --search "query", --list)
 demo-sec-query *args:
     uv run examples/sec_demo/query_examples.py {{ args }}
-
-# Run accounting demo end-to-end (flags: new-user,new-graph,skip-queries)
-demo-accounting flags="new-graph" real_s3="false" base_url="http://localhost:8000":
-    uv run examples/accounting_demo/main.py \
-        --base-url {{base_url}} \
-        {{ if flags != "" { "--flags " + flags } else { "" } }} \
-        {{ if real_s3 == "true" { "--real-s3" } else { "" } }}
 
 # Run custom graph demo end-to-end (flags: new-user,new-graph,skip-queries)
 demo-custom-graph flags="new-graph" real_s3="false" base_url="http://localhost:8000":

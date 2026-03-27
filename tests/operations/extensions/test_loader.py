@@ -153,24 +153,24 @@ def _make_duckdb_mock(tables: dict[str, list[dict]]):
 class TestOLTPLoader:
   """Test the OLTPLoader class."""
 
-  @patch("robosystems.db.ledger.provision_tenant_schema")
-  @patch("robosystems.db.ledger.oltp_session")
+  @patch("robosystems.db.extensions.provision_tenant_schema")
+  @patch("robosystems.db.extensions.extensions_session")
   @patch("duckdb.connect")
   def test_load_calls_provision_tenant_schema(
     self,
     mock_duckdb_connect,
-    mock_oltp_session,
+    mock_ext_session,
     mock_provision,
     mock_duckdb_data,
   ):
     """Loader provisions the tenant schema before inserting."""
-    from robosystems.operations.ledger.loader import OLTPLoader
+    from robosystems.operations.extensions.loader import OLTPLoader
 
     mock_duckdb_connect.return_value = _make_duckdb_mock({})
 
     mock_session = MagicMock()
-    mock_oltp_session.return_value.__enter__ = MagicMock(return_value=mock_session)
-    mock_oltp_session.return_value.__exit__ = MagicMock(return_value=False)
+    mock_ext_session.return_value.__enter__ = MagicMock(return_value=mock_session)
+    mock_ext_session.return_value.__exit__ = MagicMock(return_value=False)
 
     loader = OLTPLoader()
     loader.load(
@@ -183,24 +183,24 @@ class TestOLTPLoader:
 
     mock_provision.assert_called_once_with("kg0123456789abcdef")
 
-  @patch("robosystems.db.ledger.provision_tenant_schema")
-  @patch("robosystems.db.ledger.oltp_session")
+  @patch("robosystems.db.extensions.provision_tenant_schema")
+  @patch("robosystems.db.extensions.extensions_session")
   @patch("duckdb.connect")
   def test_load_reads_all_tables(
     self,
     mock_duckdb_connect,
-    mock_oltp_session,
+    mock_ext_session,
     mock_provision,
     mock_duckdb_data,
   ):
     """Loader reads all OLTP tables from DuckDB and reports counts."""
-    from robosystems.operations.ledger.loader import OLTPLoader
+    from robosystems.operations.extensions.loader import OLTPLoader
 
     mock_duckdb_connect.return_value = _make_duckdb_mock(mock_duckdb_data)
 
     mock_session = MagicMock()
-    mock_oltp_session.return_value.__enter__ = MagicMock(return_value=mock_session)
-    mock_oltp_session.return_value.__exit__ = MagicMock(return_value=False)
+    mock_ext_session.return_value.__enter__ = MagicMock(return_value=mock_session)
+    mock_ext_session.return_value.__exit__ = MagicMock(return_value=False)
 
     loader = OLTPLoader()
     result = loader.load(
@@ -218,23 +218,23 @@ class TestOLTPLoader:
     assert result.dimensions == 1
     assert result.total_rows == 7
 
-  @patch("robosystems.db.ledger.provision_tenant_schema")
-  @patch("robosystems.db.ledger.oltp_session")
+  @patch("robosystems.db.extensions.provision_tenant_schema")
+  @patch("robosystems.db.extensions.extensions_session")
   @patch("duckdb.connect")
   def test_load_deletes_before_insert(
     self,
     mock_duckdb_connect,
-    mock_oltp_session,
+    mock_ext_session,
     mock_provision,
   ):
     """Loader deletes existing data for source + connection_id."""
-    from robosystems.operations.ledger.loader import OLTPLoader
+    from robosystems.operations.extensions.loader import OLTPLoader
 
     mock_duckdb_connect.return_value = _make_duckdb_mock({})
 
     mock_session = MagicMock()
-    mock_oltp_session.return_value.__enter__ = MagicMock(return_value=mock_session)
-    mock_oltp_session.return_value.__exit__ = MagicMock(return_value=False)
+    mock_ext_session.return_value.__enter__ = MagicMock(return_value=mock_session)
+    mock_ext_session.return_value.__exit__ = MagicMock(return_value=False)
 
     loader = OLTPLoader()
     loader.load(
@@ -248,17 +248,17 @@ class TestOLTPLoader:
     assert mock_session.query.called
     assert mock_session.flush.called
 
-  @patch("robosystems.db.ledger.provision_tenant_schema")
-  @patch("robosystems.db.ledger.oltp_session")
+  @patch("robosystems.db.extensions.provision_tenant_schema")
+  @patch("robosystems.db.extensions.extensions_session")
   @patch("duckdb.connect")
   def test_load_handles_missing_tables(
     self,
     mock_duckdb_connect,
-    mock_oltp_session,
+    mock_ext_session,
     mock_provision,
   ):
     """Loader gracefully handles missing tables in DuckDB."""
-    from robosystems.operations.ledger.loader import OLTPLoader
+    from robosystems.operations.extensions.loader import OLTPLoader
 
     only_accounts = [
       {
@@ -283,8 +283,8 @@ class TestOLTPLoader:
     mock_duckdb_connect.return_value = _make_duckdb_mock({"accounts": only_accounts})
 
     mock_session = MagicMock()
-    mock_oltp_session.return_value.__enter__ = MagicMock(return_value=mock_session)
-    mock_oltp_session.return_value.__exit__ = MagicMock(return_value=False)
+    mock_ext_session.return_value.__enter__ = MagicMock(return_value=mock_session)
+    mock_ext_session.return_value.__exit__ = MagicMock(return_value=False)
 
     loader = OLTPLoader()
     result = loader.load(
@@ -300,17 +300,17 @@ class TestOLTPLoader:
     assert result.entries == 0
     assert result.line_items == 0
 
-  @patch("robosystems.db.ledger.provision_tenant_schema")
-  @patch("robosystems.db.ledger.oltp_session")
+  @patch("robosystems.db.extensions.provision_tenant_schema")
+  @patch("robosystems.db.extensions.extensions_session")
   @patch("duckdb.connect")
   def test_load_reports_unresolved_fk_errors(
     self,
     mock_duckdb_connect,
-    mock_oltp_session,
+    mock_ext_session,
     mock_provision,
   ):
     """Loader reports errors for unresolved foreign key references."""
-    from robosystems.operations.ledger.loader import OLTPLoader
+    from robosystems.operations.extensions.loader import OLTPLoader
 
     orphan_lines = [
       {
@@ -327,8 +327,8 @@ class TestOLTPLoader:
     mock_duckdb_connect.return_value = _make_duckdb_mock({"line_items": orphan_lines})
 
     mock_session = MagicMock()
-    mock_oltp_session.return_value.__enter__ = MagicMock(return_value=mock_session)
-    mock_oltp_session.return_value.__exit__ = MagicMock(return_value=False)
+    mock_ext_session.return_value.__enter__ = MagicMock(return_value=mock_session)
+    mock_ext_session.return_value.__exit__ = MagicMock(return_value=False)
 
     loader = OLTPLoader()
     result = loader.load(
@@ -345,7 +345,7 @@ class TestOLTPLoader:
 
   def test_load_result_total_rows(self):
     """LoadResult.total_rows sums all table counts."""
-    from robosystems.operations.ledger.loader import LoadResult
+    from robosystems.operations.extensions.loader import LoadResult
 
     result = LoadResult(
       graph_id="kg123",

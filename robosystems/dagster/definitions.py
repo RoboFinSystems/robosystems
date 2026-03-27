@@ -123,6 +123,15 @@ if env.CONNECTION_QUICKBOOKS_ENABLED:
   qb = qb_pipeline()
 else:
   qb = _empty_pipeline
+
+if env.EXTENSIONS_ENABLED:
+  from robosystems.dagster.jobs.extensions import (
+    extensions_materialize_job as _ext_mat_job,
+  )
+
+  _extensions_jobs: list = [_ext_mat_job]
+else:
+  _extensions_jobs = []
 # erp = erp_pipeline()
 
 # Collect shared replica deps from all enabled adapter pipelines
@@ -200,6 +209,8 @@ all_jobs = [
   *sec["jobs"],
   # Adapter: QuickBooks pipeline
   *qb["jobs"],
+  # Platform: Extensions materialization (OLTP → graph)
+  *_extensions_jobs,
 ]
 
 all_schedules = [

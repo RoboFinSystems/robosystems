@@ -8,7 +8,7 @@ from dagster import build_asset_context
 _PATCH_LOAD_WORK_DIR = (
   "robosystems.adapters.quickbooks.pipeline.load.get_pipeline_work_dir"
 )
-_PATCH_OLTP_LOADER = "robosystems.operations.ledger.loader.OLTPLoader"
+_PATCH_OLTP_LOADER = "robosystems.operations.extensions.loader.OLTPLoader"
 _PATCH_CONN_SVC = "robosystems.operations.connection_service.ConnectionService"
 
 
@@ -44,7 +44,7 @@ def _make_load_result(
   dimensions=2,
 ):
   """Create a LoadResult for tests."""
-  from robosystems.operations.ledger.loader import LoadResult
+  from robosystems.operations.extensions.loader import LoadResult
 
   return LoadResult(
     graph_id=graph_id,

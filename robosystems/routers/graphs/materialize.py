@@ -73,6 +73,40 @@ router = APIRouter(
 circuit_breaker = CircuitBreakerManager()
 
 
+def resolve_materialization_source(source: str | None, graph_type: str) -> str:
+  """Infer and validate the materialization source based on graph type.
+
+  Args:
+      source: Explicit source ("staged" or "extensions"), or None to auto-detect.
+      graph_type: The graph's type ("entity", "generic", "repository").
+
+  Returns:
+      Resolved source string.
+
+  Raises:
+      HTTPException: If source is incompatible with graph type.
+  """
+  if source is None:
+    return "extensions" if graph_type == "entity" else "staged"
+
+  if graph_type == "entity" and source == "staged":
+    raise HTTPException(
+      status_code=status.HTTP_400_BAD_REQUEST,
+      detail="Entity graphs cannot use source='staged'. "
+      "Entity graph data comes from the extensions OLTP pipeline. "
+      "Use source='extensions' or omit the source field.",
+    )
+  if graph_type == "generic" and source == "extensions":
+    raise HTTPException(
+      status_code=status.HTTP_400_BAD_REQUEST,
+      detail="Generic graphs cannot use source='extensions'. "
+      "Generic graphs use uploaded files as their data source. "
+      "Use source='staged' or omit the source field.",
+    )
+
+  return source
+
+
 class MaterializeRequest(BaseModel):
   force: bool = Field(
     default=False,
@@ -89,6 +123,14 @@ class MaterializeRequest(BaseModel):
   dry_run: bool = Field(
     default=False,
     description="Validate limits without executing materialization. Returns usage, limits, and warnings.",
+  )
+  source: str | None = Field(
+    default=None,
+    description="Data source for materialization. "
+    "Auto-detected from graph type if not specified. "
+    "'staged' materializes from uploaded files (generic graphs). "
+    "'extensions' materializes from the extensions OLTP database (entity graphs).",
+    pattern="^(staged|extensions)$",
   )
 
   class Config:
@@ -423,6 +465,8 @@ async def materialize_graph(
 
   graph = require_graph_access(graph_id, db, require_write=True)
 
+  request.source = resolve_materialization_source(request.source, graph.graph_type)
+
   circuit_breaker.check_circuit(graph_id, "graph_materialization")
 
   # Check for shared repository access
@@ -525,9 +569,6 @@ async def materialize_graph(
       graph_id=graph_id,
     )
 
-    # Decide materialization method: direct (fast) vs Dagster (reliable for large data)
-    use_direct = _should_use_direct_materialization(db, graph_id)
-
     api_logger.info(
       "Materialization job queued",
       extra={
@@ -536,12 +577,46 @@ async def materialize_graph(
         "user_id": str(current_user.id),
         "graph_id": graph_id,
         "operation_id": operation_id,
+        "source": request.source,
         "force": request.force,
         "rebuild": request.rebuild,
         "ignore_errors": request.ignore_errors,
-        "method": "direct" if use_direct else "dagster",
       },
     )
+
+    if request.source == "extensions":
+      # Extensions path: PostgreSQL OLTP → postgres_scanner → DuckDB → LadybugDB
+      # Always uses Dagster since it runs inside the Graph API container
+      run_config = {
+        "ops": {
+          "materialize_extensions_to_graph": {
+            "config": {
+              "graph_id": graph_id,
+              "rebuild": request.rebuild,
+            }
+          }
+        }
+      }
+
+      background_tasks.add_task(
+        _run_dagster_materialization,
+        job_name="extensions_materialize_job",
+        operation_id=operation_id,
+        run_config=run_config,
+        lock=lock,
+      )
+
+      return MaterializeResponse(
+        status="queued",
+        graph_id=graph_id,
+        operation_id=operation_id,
+        message="Extensions materialization queued. Monitor progress via SSE stream at "
+        f"/v1/operations/{operation_id}/stream",
+      )
+
+    # Staged path: uploaded parquet files → DuckDB → LadybugDB
+    # Decide materialization method: direct (fast) vs Dagster (reliable for large data)
+    use_direct = _should_use_direct_materialization(db, graph_id)
 
     if use_direct:
       # Direct materialization fast path

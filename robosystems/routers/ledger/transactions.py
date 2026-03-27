@@ -6,21 +6,21 @@ from fastapi import APIRouter, Depends, HTTPException, Path, Query
 from sqlalchemy import func, select
 from sqlalchemy.exc import ProgrammingError
 
-from robosystems.db.ledger import oltp_session
+from robosystems.db.extensions import extensions_session
 from robosystems.middleware.auth.dependencies import get_current_user_with_graph
 from robosystems.middleware.graph.types import GRAPH_OR_SUBGRAPH_ID_PATTERN
 from robosystems.middleware.rate_limits import subscription_aware_rate_limit_dependency
 from robosystems.models.api.common import create_error_response, create_pagination_info
-from robosystems.models.api.ledger import cents_to_dollars
-from robosystems.models.api.ledger.transactions import (
+from robosystems.models.api.extensions import cents_to_dollars
+from robosystems.models.api.extensions.transactions import (
   LedgerEntryResponse,
   LedgerLineItemResponse,
   LedgerTransactionDetailResponse,
   LedgerTransactionListResponse,
   LedgerTransactionSummaryResponse,
 )
+from robosystems.models.extensions import Account, Entry, LineItem, Transaction
 from robosystems.models.iam import User
-from robosystems.models.ledger import Account, Entry, LineItem, Transaction
 
 router = APIRouter()
 
@@ -61,7 +61,7 @@ async def list_transactions(
   _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
 ):
   try:
-    with oltp_session(graph_id) as session:
+    with extensions_session(graph_id) as session:
       query = select(Transaction)
       count_query = select(func.count()).select_from(Transaction)
 
@@ -116,7 +116,7 @@ async def get_transaction(
   _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
 ):
   try:
-    with oltp_session(graph_id) as session:
+    with extensions_session(graph_id) as session:
       txn = session.execute(
         select(Transaction).where(Transaction.id == transaction_id)
       ).scalar_one_or_none()

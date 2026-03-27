@@ -1,4 +1,4 @@
-"""Ledger API response models."""
+"""Extensions API response models (ledger, investor, etc.)."""
 
 from .accounts import (
   AccountListResponse,

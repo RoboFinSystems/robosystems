@@ -1,8 +1,4 @@
-"""RoboLedger OLTP models.
-
-These models use LedgerBase (not the platform Base/Model) and live
-in the separate 'roboledger' database with schema-per-graph-id tenancy.
-"""
+"""RoboLedger-specific OLTP models (accounting domain)."""
 
 from .account import Account
 from .classification_rule import ClassificationRule

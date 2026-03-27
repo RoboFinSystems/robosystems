@@ -11,11 +11,11 @@ from datetime import UTC, datetime
 from sqlalchemy import Boolean, Column, DateTime, Float, Index, String
 from sqlalchemy.dialects.postgresql import JSONB
 
-from robosystems.db.ledger import LedgerBase
+from robosystems.db.extensions import ExtensionsBase
 from robosystems.utils.ulid import generate_prefixed_ulid
 
 
-class ReportDefinition(LedgerBase):
+class ReportDefinition(ExtensionsBase):
   __tablename__ = "report_definitions"
   __table_args__ = (
     Index("idx_report_defs_type", "report_type"),

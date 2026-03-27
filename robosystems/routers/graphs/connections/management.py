@@ -142,6 +142,24 @@ async def create_connection(
     # Validate provider is enabled before any database operations
     provider_registry.get_provider(request.provider)
 
+    # Prevent duplicate connections: only one connection per provider per graph
+    existing_connections = await ConnectionService.list_connections(
+      user_id=str(current_user.id),
+      graph_id=graph_id,
+      provider=request.provider,
+    )
+    if existing_connections:
+      existing = existing_connections[0]
+      return ConnectionResponse(
+        id=existing["id"],
+        provider=existing["provider"],
+        status=existing["status"],
+        metadata=existing.get("metadata", {}),
+        graph_id=graph_id,
+        entity_id=existing.get("entity_id"),
+        created_at=existing["created_at"],
+      )
+
     # Create connection using provider registry with timeout coordination
     connection_id = await asyncio.wait_for(
       provider_registry.create_connection(

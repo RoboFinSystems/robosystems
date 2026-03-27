@@ -1,11 +1,9 @@
 # RoboSystems
 
-RoboSystems is a financial intelligence platform with a base + extensions architecture. Each extension defines a domain ontology that drives dedicated APIs, data pipelines, and AI agent tools.
+RoboSystems is a financial intelligence platform that connects disparate data sources, builds domain ontologies as knowledge graphs, and provides AI-powered tools for accounting, financial reporting, investment management, and analysis. It powers [RoboLedger](https://roboledger.ai) and [RoboInvestor](https://roboinvestor.ai).
 
 - **LadybugDB Graph Database**: Embedded columnar graph database with native DuckDB staging, LanceDB vector search, and tiered infrastructure
-- **Schema Extensions**: Domain schemas that model business domains as graph structures — the foundation for everything built on top
-- **[RoboLedger](https://roboledger.ai)**: Accounting and financial reporting extension with OLTP general ledger, QuickBooks ELT pipeline, SEC XBRL reporting, and chart of accounts
-- **[RoboInvestor](https://roboinvestor.ai)**: Portfolio management and investment tracking extension (schema + frontend, OLTP planned)
+- **Extensions**: Domain schemas that drive OLTP tables, API routes, data pipelines, and dedicated frontend apps. Extensions share a single database with schema-per-tenant isolation and materialize to the graph
 - **Document Search**: Full-text and semantic search across SEC filings, uploaded documents, and connected sources via OpenSearch
 - **AI-Native Architecture**: Context graphs with embeddings, semantic enrichment, and confidence scoring for LLM-powered analytics
 - **Model Context Protocol (MCP)**: Standardized server and [client](https://www.npmjs.com/package/@robosystems/mcp) for LLM integration with schema-aware tools
@@ -28,11 +26,11 @@ The platform provides the core infrastructure that all extensions build on:
 
 ## Extensions
 
-Extensions start as graph schemas and grow into full products with OLTP databases, API routes, data pipelines, and dedicated frontend apps. See [Schema Extensions](/robosystems/schemas/README.md) for details.
+Each extension defines a domain schema and provides OLTP tables, API routes, data pipelines, and a dedicated frontend app. All extensions share a single PostgreSQL database with schema-per-tenant isolation and materialize to the graph. See [Schema Extensions](/robosystems/schemas/README.md) for details.
 
 ### [RoboLedger](https://roboledger.ai)
 
-Accounting and financial reporting extension. OLTP general ledger with schema-per-tenant PostgreSQL (accounts, transactions, journal entries, line items, dimensions), QuickBooks ELT pipeline via dbt/Dagster, SEC XBRL financial reporting, and chart of accounts. API routes under `/v1/ledger/*`, feature-flagged via `LEDGER_ENABLED`.
+Accounting and financial reporting extension. OLTP general ledger with schema-per-tenant PostgreSQL (accounts, transactions, journal entries, line items, dimensions), QuickBooks ELT pipeline via dbt/Dagster, SEC XBRL financial reporting, and chart of accounts.
 
 ### [RoboInvestor](https://roboinvestor.ai)
 
@@ -147,7 +145,7 @@ RoboSystems is built on a modern, scalable architecture with:
 **Application Layer:**
 
 - FastAPI REST API with versioned endpoints
-- Extension API routes feature-flagged by base name (e.g., `LEDGER_ENABLED` → `/v1/ledger/*`)
+- Extension API routes feature-flagged per module
 - MCP Server for AI-powered graph database access with schema-aware tools
 - Agent Interface for text-to-Cypher natural language queries
 - Dagster for data pipeline orchestration and background jobs
@@ -267,7 +265,6 @@ pip install robosystems-client
 - **[Architecture Overview](https://github.com/RoboFinSystems/robosystems/wiki/Architecture-Overview)** - System design and components
 - **[Data Pipeline Guide](https://github.com/RoboFinSystems/robosystems/wiki/Pipeline-Guide)** - Dagster data orchestration and custom integrations
 - **[SEC XBRL Pipeline](https://github.com/RoboFinSystems/robosystems/wiki/SEC-XBRL-Pipeline)** - Working with SEC financial data
-- **[Accounting Demo](https://github.com/RoboFinSystems/robosystems/wiki/Accounting-Demo)** - Complete guide to graph-based accounting demo
 - **[Custom Graph Demo](https://github.com/RoboFinSystems/robosystems/wiki/Custom-Graph-Schema)** - Guide for creating a custom schema graph demo
 
 ### Developer Documentation (Codebase)

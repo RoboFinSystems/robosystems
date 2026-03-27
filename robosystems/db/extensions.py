@@ -1,12 +1,13 @@
-"""RoboLedger OLTP database engine and session management.
+"""Extensions OLTP database engine and session management.
 
 Separate from the platform database (database.py) because:
-- Different DeclarativeBase (LedgerBase vs Base/Model)
+- Different DeclarativeBase (ExtensionsBase vs Base/Model)
 - Schema-per-graph-id multi-tenancy (SET search_path per request)
 - Independent connection pool and lifecycle
 
-The roboledger database stores accounting data (accounts, transactions,
-entries, line_items) that is the system of record for RoboLedger.
+The extensions database stores domain data (entities, accounts, transactions,
+positions, trades, etc.) shared across all extension modules (roboledger,
+roboinvestor, robofo, robohrm, roboepm) with schema-per-graph tenancy.
 """
 
 import re
@@ -22,9 +23,9 @@ from robosystems.config import env
 _VALID_SCHEMA_PATTERN = re.compile(r"^kg[0-9a-f]{16,}$")
 
 
-def get_ledger_database_url() -> str:
-  """Get roboledger database URL with SSL for staging/prod."""
-  database_url = env.ROBOLEDGER_DATABASE_URL
+def get_extensions_database_url() -> str:
+  """Get extensions database URL with SSL for staging/prod."""
+  database_url = env.EXTENSIONS_DATABASE_URL
 
   if (env.is_staging() or env.is_production()) and database_url:
     if "?" not in database_url:
@@ -35,14 +36,14 @@ def get_ledger_database_url() -> str:
   return database_url
 
 
-def _create_ledger_engine():
-  """Create the ledger database engine.
+def _create_extensions_engine():
+  """Create the extensions database engine.
 
   Lazy creation to avoid connection attempts during import
-  in contexts that don't need the ledger database (e.g., graph instances).
+  in contexts that don't need the extensions database (e.g., graph instances).
   """
   return create_engine(
-    get_ledger_database_url(),
+    get_extensions_database_url(),
     pool_size=3,
     max_overflow=5,
     pool_timeout=30,
@@ -60,12 +61,13 @@ _session_factory = None
 def _get_engine():
   global _engine
   if _engine is None:
-    if not env.LEDGER_ENABLED:
+    if not env.EXTENSIONS_ENABLED:
       raise RuntimeError(
-        "Ledger database access attempted but LEDGER_ENABLED is false. "
-        "Set LEDGER_ENABLED=true to use RoboLedger OLTP features."
+        "Extensions database access attempted but EXTENSIONS_ENABLED is false. "
+        "Set EXTENSIONS_ENABLED=true to enable the extensions OLTP database "
+        "(required for RoboLedger, RoboInvestor, and other extension modules)."
       )
-    _engine = _create_ledger_engine()
+    _engine = _create_extensions_engine()
   return _engine
 
 
@@ -78,8 +80,8 @@ def _get_session_factory():
   return _session_factory
 
 
-class LedgerBase(DeclarativeBase):
-  """Base class for all roboledger OLTP models."""
+class ExtensionsBase(DeclarativeBase):
+  """Base class for all extension OLTP models."""
 
   pass
 
@@ -99,7 +101,7 @@ def _sanitize_schema(graph_id: str) -> str:
 
 
 @contextmanager
-def oltp_session(graph_id: str):
+def extensions_session(graph_id: str):
   """Context manager providing a schema-scoped session for a tenant.
 
   Sets search_path to '{graph_id}, public' so tenant tables resolve
@@ -107,7 +109,7 @@ def oltp_session(graph_id: str):
   from public.
 
   Usage:
-      with oltp_session("kg0123456789abcdef") as session:
+      with extensions_session("kg0123456789abcdef") as session:
           accounts = session.execute(select(Account)).scalars().all()
 
   Args:
@@ -132,9 +134,9 @@ def oltp_session(graph_id: str):
 def provision_tenant_schema(graph_id: str) -> None:
   """Create all tenant tables in a new PostgreSQL schema for this graph_id.
 
-  Called lazily on first ledger API access for a graph. Creates the schema
+  Called lazily on first extension access for a graph. Creates the schema
   and all tenant-scoped tables (accounts, transactions, entries, etc.)
-  using LedgerBase metadata.
+  using ExtensionsBase metadata.
 
   The public schema tables (fiscal_periods, generate_prefixed_id function)
   are managed by Alembic migrations, not this function.
@@ -145,12 +147,12 @@ def provision_tenant_schema(graph_id: str) -> None:
   schema = _sanitize_schema(graph_id)
   engine = _get_engine()
 
-  # Import models to ensure they're registered on LedgerBase.metadata
-  import robosystems.models.ledger  # noqa: F401
+  # Import models to ensure they're registered on ExtensionsBase.metadata
+  import robosystems.models.extensions  # noqa: F401
 
   # Collect tenant tables (those without an explicit schema = public schema objects)
   tenant_tables = [
-    table for table in LedgerBase.metadata.sorted_tables if table.schema is None
+    table for table in ExtensionsBase.metadata.sorted_tables if table.schema is None
   ]
 
   with engine.connect() as conn:
@@ -159,6 +161,6 @@ def provision_tenant_schema(graph_id: str) -> None:
     # Use schema_translate_map to create tables in the tenant schema.
     # Without this, create_all finds existing tables in public and skips them.
     tenant_conn = conn.execution_options(schema_translate_map={None: schema})
-    LedgerBase.metadata.create_all(bind=tenant_conn, tables=tenant_tables)
+    ExtensionsBase.metadata.create_all(bind=tenant_conn, tables=tenant_tables)
 
     conn.commit()
