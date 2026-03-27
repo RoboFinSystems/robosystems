@@ -850,7 +850,6 @@ See individual app repositories for specific deployment workflows.
 - **[Bootstrap Guide](Bootstrap-Guide)** - Set up a fresh fork with AWS OIDC authentication
 - **[Data Pipeline Guide](Pipeline-Guide)** - Dagster data orchestration and custom integrations
 - **[SEC XBRL Pipeline](SEC-XBRL-Pipeline)** - Load and query SEC financial filings
-- **[Accounting Demo](Accounting-Demo)** - Interactive demo of graph-based accounting
 - **[Custom Graph Schema](Custom-Graph-Schema)** - Design and build custom graph databases
 
 **Codebase Documentation:**

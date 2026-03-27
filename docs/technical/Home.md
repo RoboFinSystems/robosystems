@@ -22,7 +22,6 @@ New to RoboSystems? Start here:
 ### User Guides
 
 - **[SEC XBRL Pipeline](SEC-XBRL-Pipeline)** - Working with SEC financial data
-- **[Accounting Demo](Accounting-Demo)** - Complete accounting workflow demonstration
 - **[Custom Graph Schema](Custom-Graph-Schema)** - Design and build custom graph databases
 
 ### Reference
