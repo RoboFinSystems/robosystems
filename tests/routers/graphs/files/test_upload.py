@@ -1,6 +1,6 @@
 """Comprehensive unit tests for the file upload router."""
 
-from unittest.mock import AsyncMock, Mock, patch
+from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
 import pytest
 from fastapi import HTTPException
@@ -31,9 +31,11 @@ def _make_upload_request(
 
 
 def _patch_require_graph_access():
+  mock_graph = MagicMock()
+  mock_graph.graph_type = "generic"
   return patch(
     "robosystems.middleware.billing.enforcement.require_graph_access",
-    lambda *args, **kwargs: None,
+    lambda *args, **kwargs: mock_graph,
   )
 
 

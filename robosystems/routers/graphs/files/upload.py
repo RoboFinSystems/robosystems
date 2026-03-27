@@ -181,7 +181,15 @@ async def create_file_upload(
   # Enforce graph lifecycle and subscription status (write operation)
   from robosystems.middleware.billing.enforcement import require_graph_access
 
-  require_graph_access(graph_id, db, require_write=True)
+  graph = require_graph_access(graph_id, db, require_write=True)
+
+  if getattr(graph, "graph_type", None) == "entity":
+    raise HTTPException(
+      status_code=status.HTTP_400_BAD_REQUEST,
+      detail="Entity graphs do not support file uploads. "
+      "Entity graph data is managed through the extensions pipeline "
+      "(connectors and OLTP APIs). Use POST /materialize with source='extensions' instead.",
+    )
 
   table_name = getattr(request, "table_name", None)
   if not table_name:

@@ -90,11 +90,12 @@ class MaterializeRequest(BaseModel):
     default=False,
     description="Validate limits without executing materialization. Returns usage, limits, and warnings.",
   )
-  source: str = Field(
-    default="staged",
+  source: str | None = Field(
+    default=None,
     description="Data source for materialization. "
-    "'staged' materializes from uploaded and staged files (parquet upload path). "
-    "'extensions' materializes from the extensions OLTP database (connector sync / native data).",
+    "Auto-detected from graph type if not specified. "
+    "'staged' materializes from uploaded files (generic graphs). "
+    "'extensions' materializes from the extensions OLTP database (entity graphs).",
     pattern="^(staged|extensions)$",
   )
 
@@ -429,6 +430,26 @@ async def materialize_graph(
   from robosystems.middleware.sse.event_storage import get_event_storage
 
   graph = require_graph_access(graph_id, db, require_write=True)
+
+  # Auto-infer source from graph type if not explicitly provided
+  if request.source is None:
+    request.source = "extensions" if graph.graph_type == "entity" else "staged"
+
+  # Validate source matches graph type
+  if graph.graph_type == "entity" and request.source == "staged":
+    raise HTTPException(
+      status_code=status.HTTP_400_BAD_REQUEST,
+      detail="Entity graphs cannot use source='staged'. "
+      "Entity graph data comes from the extensions OLTP pipeline. "
+      "Use source='extensions' or omit the source field.",
+    )
+  if graph.graph_type == "generic" and request.source == "extensions":
+    raise HTTPException(
+      status_code=status.HTTP_400_BAD_REQUEST,
+      detail="Generic graphs cannot use source='extensions'. "
+      "Generic graphs use uploaded files as their data source. "
+      "Use source='staged' or omit the source field.",
+    )
 
   circuit_breaker.check_circuit(graph_id, "graph_materialization")
 
