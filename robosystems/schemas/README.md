@@ -152,7 +152,7 @@ The base schema (`base.py`) provides foundational nodes and relationships that a
 
 The RoboLedger extension models the full accounting domain: financial reporting (XBRL/SEC), general ledger (transactions, journal entries), and chart of accounts (via Element/Association patterns). It uses context-aware loading to present different views depending on the use case.
 
-**Full product extension** with OLTP database (`roboledger`), API routes (`/v1/ledger/*`), QuickBooks ELT pipeline, and dedicated frontend app.
+**Full product extension** with OLTP tables in the `extensions` database (schema-per-tenant), API routes (`/v1/ledger/*`), QuickBooks ELT pipeline, and dedicated frontend app.
 
 #### Reporting Section (SEC/XBRL)
 
