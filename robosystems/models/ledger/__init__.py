@@ -12,6 +12,7 @@ from .dimension import (
   line_item_dimensions,
   transaction_dimensions,
 )
+from .entity import Entity
 from .entry import Entry
 from .fiscal_period import FiscalPeriod
 from .line_item import LineItem
@@ -22,6 +23,7 @@ __all__ = [
   "Account",
   "ClassificationRule",
   "Dimension",
+  "Entity",
   "Entry",
   "FiscalPeriod",
   "LineItem",

@@ -124,33 +124,21 @@ class TestEntityGraphService:
     mock_lbug_client.get_database.side_effect = mock_404_error
     mock_lbug_client.create_database.return_value = {"success": True}
 
-    # Mock S3 client for file upload (imported locally in the method)
-    mock_s3_client = mocker.MagicMock()
+    # Mock ledger OLTP database access for entity creation
     mocker.patch(
-      "robosystems.operations.aws.s3.S3Client",
-      return_value=mock_s3_client,
+      "robosystems.db.ledger.provision_tenant_schema",
     )
-
-    # Mock GraphTable for Entity table (imported locally in the method)
-    mock_entity_table = mocker.MagicMock()
-    mock_entity_table.id = "table-123"
-    mock_entity_table.file_count = 0
+    mock_oltp_session = mocker.MagicMock()
+    mock_oltp_session.__enter__ = mocker.MagicMock(return_value=mocker.MagicMock())
+    mock_oltp_session.__exit__ = mocker.MagicMock(return_value=False)
     mocker.patch(
-      "robosystems.models.iam.GraphTable.get_by_name",
-      return_value=mock_entity_table,
-    )
-
-    # Mock GraphFile creation (imported locally in the method)
-    mock_graph_file = mocker.MagicMock()
-    mock_graph_file.id = "file-123"
-    mocker.patch(
-      "robosystems.models.iam.GraphFile.create",
-      return_value=mock_graph_file,
+      "robosystems.db.ledger.oltp_session",
+      return_value=mock_oltp_session,
     )
 
     # Mock TableService for auto-creating DuckDB tables (imported locally)
     mock_table_service = mocker.MagicMock()
-    mock_table_service.create_tables_from_schema.return_value = [mock_entity_table]
+    mock_table_service.create_tables_from_schema.return_value = [mocker.MagicMock()]
     mocker.patch(
       "robosystems.operations.graph.table_service.TableService",
       return_value=mock_table_service,
@@ -198,12 +186,9 @@ class TestEntityGraphService:
     assert result["entity"]["name"] == "Test Company"
     assert result["entity"]["cik"] == "0001234567"
 
-    # Verify controlled materialization flow was used
+    # Verify OLTP entity creation flow was used
     mock_allocation_manager.allocate_database.assert_called_once()
     mock_lbug_client.create_database.assert_called_once()
-    mock_s3_client.s3_client.upload_fileobj.assert_called_once()
-    mock_lbug_client.create_table.assert_called()
-    mock_lbug_client.materialize_table.assert_called_once()
 
   @pytest.mark.asyncio
   async def test_create_entity_allocation_failure(self, mocker):

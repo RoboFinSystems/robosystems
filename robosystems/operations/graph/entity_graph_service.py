@@ -546,163 +546,72 @@ class EntityGraphService:
     org_id: str,
   ) -> EntityResponse:
     """
-    Create entity node using the controlled table → file → ingest pattern.
+    Create entity in the roboledger OLTP database (PostgreSQL).
 
-    This method follows the controlled ingestion workflow:
-    1. Generate entity data
-    2. Convert to Parquet
-    3. Upload to S3
-    4. Create GraphFile record
-    5. Trigger ingestion
+    The entity row will be materialized to the LadybugDB graph via the
+    ledger materialization pipeline (postgres_scanner → DuckDB → LadybugDB)
+    rather than the old parquet → S3 → DuckDB → LadybugDB path.
     """
-    logger.info(
-      f"Creating entity node in graph {graph_id} using controlled ingestion pattern"
-    )
+    import datetime
 
-    import uuid
+    from robosystems.db.ledger import oltp_session, provision_tenant_schema
+    from robosystems.models.ledger.entity import Entity as LedgerEntity
+
+    logger.info(f"Creating entity in roboledger OLTP for graph {graph_id}")
 
     try:
-      # Step 1: Generate entity data
-      entity_row = self._generate_entity_data_for_upload(entity_data, graph_id)
-      logger.info(f"Generated entity data for {entity_row['identifier']}")
+      # Ensure roboledger tenant schema exists
+      provision_tenant_schema(graph_id)
 
-      # Step 2: Convert to Parquet in-memory
-      import io
+      entity_identifier = f"entity_{graph_id}"
+      current_time = datetime.datetime.now(datetime.UTC)
+      entity_uri = entity_data.uri or f"https://robosystems.ai/entities#{graph_id}"
 
-      import pyarrow as pa
-      import pyarrow.parquet as pq
-
-      schema_fields = [
-        ("identifier", pa.string()),
-        ("uri", pa.string()),
-        ("scheme", pa.string()),
-        ("cik", pa.string()),
-        ("ticker", pa.string()),
-        ("exchange", pa.string()),
-        ("name", pa.string()),
-        ("legal_name", pa.string()),
-        ("industry", pa.string()),
-        ("entity_type", pa.string()),
-        ("sic", pa.string()),
-        ("sic_description", pa.string()),
-        ("category", pa.string()),
-        ("state_of_incorporation", pa.string()),
-        ("fiscal_year_end", pa.string()),
-        ("tax_id", pa.string()),
-        ("lei", pa.string()),
-        ("phone", pa.string()),
-        ("website", pa.string()),
-        ("status", pa.string()),
-        ("is_parent", pa.bool_()),
-        ("parent_entity_id", pa.string()),
-        ("created_at", pa.string()),
-        ("updated_at", pa.string()),
-      ]
-      schema = pa.schema(pa.field(name, type_) for name, type_ in schema_fields)
-      table_data = {name: [entity_row.get(name)] for name, _ in schema_fields}
-      table = pa.Table.from_pydict(table_data, schema=schema)
-      parquet_buffer = io.BytesIO()
-      pq.write_table(table, parquet_buffer)
-      parquet_bytes = parquet_buffer.getvalue()
-      parquet_buffer.seek(0)
-
-      logger.info(f"Converted entity data to Parquet ({len(parquet_bytes)} bytes)")
-
-      # Step 3: Upload to S3
-      from robosystems.operations.aws.s3 import S3Client
-
-      from ...models.iam import GraphFile, GraphTable
-
-      s3_client = S3Client()
-      file_id = str(uuid.uuid4())
-      s3_key = f"user-staging/{user_id}/{graph_id}/Entity/{file_id}/entity.parquet"
-
-      s3_client.s3_client.upload_fileobj(parquet_buffer, env.USER_DATA_BUCKET, s3_key)
-
-      logger.info(f"Uploaded entity Parquet to S3: {s3_key}")
-
-      # Step 4: Create GraphFile record
-      entity_table = GraphTable.get_by_name(graph_id, "Entity", self.session)
-      if not entity_table:
-        raise RuntimeError(
-          f"Entity table not found for graph {graph_id}. "
-          "Ensure create_tables_from_schema was called."
+      with oltp_session(graph_id) as session:
+        entity = LedgerEntity(
+          id=entity_identifier,
+          name=entity_data.name,
+          legal_name=entity_data.name,
+          uri=entity_uri,
+          cik=entity_data.cik,
+          sic=entity_data.sic,
+          sic_description=entity_data.sic_description,
+          category=entity_data.category,
+          state_of_incorporation=entity_data.state_of_incorporation,
+          fiscal_year_end=entity_data.fiscal_year_end,
+          tax_id=entity_data.ein,
+          website=entity_data.uri,
+          status="active",
+          is_parent=True,
+          source="native",
+          created_by=user_id,
+          created_at=current_time,
+          updated_at=current_time,
         )
+        session.add(entity)
+        session.commit()
 
-      graph_file = GraphFile.create(
-        graph_id=graph_id,
-        table_id=entity_table.id,
-        file_name="entity.parquet",
-        s3_key=s3_key,
-        file_format="parquet",
-        file_size_bytes=len(parquet_bytes),
-        upload_method="direct",
-        upload_status="completed",
-        row_count=1,
-        session=self.session,
-        commit=False,
-      )
+      logger.info(f"Entity {entity_identifier} created in roboledger OLTP")
 
-      # Step 5: Update table stats (row_count, file_count, total_size_bytes)
-      entity_table.update_stats(
-        session=self.session,
-        file_count=(entity_table.file_count or 0) + 1,
-        row_count=(entity_table.row_count or 0) + 1,
-        total_size_bytes=(entity_table.total_size_bytes or 0) + len(parquet_bytes),
-      )
-
-      logger.info(f"Created GraphFile record {graph_file.id}")
-
-      # Step 6: Trigger ingestion via Graph API
-      s3_pattern = f"s3://{env.USER_DATA_BUCKET}/user-staging/{user_id}/{graph_id}/Entity/**/*.parquet"
-
-      logger.info(f"Creating DuckDB staging table with pattern: {s3_pattern}")
-      await graph_client.create_table(
-        graph_id=graph_id, table_name="Entity", s3_pattern=s3_pattern
-      )
-
-      # Mark file as staged in DuckDB
-      graph_file.mark_duckdb_staged(session=self.session, row_count=1)
-
-      logger.info("Materializing Entity table to LadybugDB graph database")
-      ingest_response = await graph_client.materialize_table(
-        graph_id=graph_id,
-        table_name="Entity",
-        ignore_errors=False,
-      )
-
-      rows_ingested = ingest_response.get("rows_ingested", 0)
-      logger.info(
-        f"Entity node created via controlled materialization: {rows_ingested} rows"
-      )
-
-      # Mark file as fully ingested
-      graph_file.mark_graph_ingested(session=self.session)
-
-      # Step 7: Return EntityResponse
       return EntityResponse(
-        id=entity_row["identifier"],
-        name=entity_row["name"],
-        uri=entity_row["website"],
-        cik=entity_row["cik"],
+        id=entity_identifier,
+        name=entity_data.name,
+        uri=entity_uri,
+        cik=entity_data.cik,
         database=graph_id,
-        sic=entity_row["sic"],
-        sic_description=entity_row["sic_description"],
-        category=entity_row["category"],
-        state_of_incorporation=entity_row["state_of_incorporation"],
-        fiscal_year_end=entity_row["fiscal_year_end"],
-        ein=entity_row["tax_id"],  # tax_id is the EIN for US entities
-        created_at=entity_row["created_at"],
-        updated_at=entity_row["updated_at"],
+        sic=entity_data.sic,
+        sic_description=entity_data.sic_description,
+        category=entity_data.category,
+        state_of_incorporation=entity_data.state_of_incorporation,
+        fiscal_year_end=entity_data.fiscal_year_end,
+        ein=entity_data.ein,
+        created_at=current_time.isoformat(),
+        updated_at=current_time.isoformat(),
       )
 
     except Exception as e:
-      logger.error(
-        f"Failed to create entity node via controlled ingestion: {type(e).__name__}: {e!s}"
-      )
-      raise RuntimeError(
-        f"Failed to create entity node via controlled ingestion: {e!s}"
-      )
+      logger.error(f"Failed to create entity in OLTP: {type(e).__name__}: {e!s}")
+      raise RuntimeError(f"Failed to create entity in OLTP: {e!s}")
 
   def _create_user_graph_relationship(
     self,
