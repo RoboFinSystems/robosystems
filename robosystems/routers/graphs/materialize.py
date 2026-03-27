@@ -90,6 +90,13 @@ class MaterializeRequest(BaseModel):
     default=False,
     description="Validate limits without executing materialization. Returns usage, limits, and warnings.",
   )
+  source: str = Field(
+    default="staged",
+    description="Data source for materialization. "
+    "'staged' materializes from uploaded and staged files (parquet upload path). "
+    "'extensions' materializes from the extensions OLTP database (connector sync / native data).",
+    pattern="^(staged|extensions)$",
+  )
 
   class Config:
     extra = "forbid"
@@ -525,9 +532,6 @@ async def materialize_graph(
       graph_id=graph_id,
     )
 
-    # Decide materialization method: direct (fast) vs Dagster (reliable for large data)
-    use_direct = _should_use_direct_materialization(db, graph_id)
-
     api_logger.info(
       "Materialization job queued",
       extra={
@@ -536,12 +540,46 @@ async def materialize_graph(
         "user_id": str(current_user.id),
         "graph_id": graph_id,
         "operation_id": operation_id,
+        "source": request.source,
         "force": request.force,
         "rebuild": request.rebuild,
         "ignore_errors": request.ignore_errors,
-        "method": "direct" if use_direct else "dagster",
       },
     )
+
+    if request.source == "extensions":
+      # Extensions path: PostgreSQL OLTP → postgres_scanner → DuckDB → LadybugDB
+      # Always uses Dagster since it runs inside the Graph API container
+      run_config = {
+        "ops": {
+          "materialize_extensions_to_graph": {
+            "config": {
+              "graph_id": graph_id,
+              "rebuild": request.rebuild,
+            }
+          }
+        }
+      }
+
+      background_tasks.add_task(
+        _run_dagster_materialization,
+        job_name="extensions_materialize_job",
+        operation_id=operation_id,
+        run_config=run_config,
+        lock=lock,
+      )
+
+      return MaterializeResponse(
+        status="queued",
+        graph_id=graph_id,
+        operation_id=operation_id,
+        message="Extensions materialization queued. Monitor progress via SSE stream at "
+        f"/v1/operations/{operation_id}/stream",
+      )
+
+    # Staged path: uploaded parquet files → DuckDB → LadybugDB
+    # Decide materialization method: direct (fast) vs Dagster (reliable for large data)
+    use_direct = _should_use_direct_materialization(db, graph_id)
 
     if use_direct:
       # Direct materialization fast path

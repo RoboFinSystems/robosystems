@@ -6,7 +6,8 @@ populated the OLTP tables.
 
 Can be triggered:
 - After any connector sync (e.g., chained after qb_load)
-- On-demand via API or Dagster UI
+- On-demand via API (POST /v1/graphs/{graph_id}/materialize with source=extensions)
+- On-demand via Dagster UI
 - On a schedule (future)
 """
 
@@ -25,8 +26,8 @@ from dagster import (
 from robosystems.dagster.resources import DatabaseResource, GraphResource
 
 
-class LedgerMaterializeConfig(Config):
-  """Configuration for ledger materialization."""
+class ExtensionsMaterializeConfig(Config):
+  """Configuration for extensions materialization."""
 
   graph_id: str
   entity_id: str = ""
@@ -34,11 +35,11 @@ class LedgerMaterializeConfig(Config):
 
 
 @op(out={"materialize_result": Out(dict)})
-def materialize_ledger_to_graph(
+def materialize_extensions_to_graph(
   context: OpExecutionContext,
   db: DatabaseResource,
   graph: GraphResource,
-  config: LedgerMaterializeConfig,
+  config: ExtensionsMaterializeConfig,
 ) -> dict[str, Any]:
   """Materialize extensions OLTP data to LadybugDB graph.
 
@@ -53,7 +54,7 @@ def materialize_ledger_to_graph(
   graph_id = config.graph_id
   entity_id = config.entity_id or None
   context.log.info(
-    f"Starting ledger materialization for {graph_id} (rebuild={config.rebuild})"
+    f"Starting extensions materialization for {graph_id} (rebuild={config.rebuild})"
   )
 
   loop = asyncio.new_event_loop()
@@ -72,9 +73,9 @@ def materialize_ledger_to_graph(
     loop.close()
 
   if result.status == "error":
-    context.log.error(f"Ledger materialization failed: {result.errors}")
+    context.log.error(f"Extensions materialization failed: {result.errors}")
     raise Failure(
-      description=f"Ledger materialization failed for {graph_id}",
+      description=f"Extensions materialization failed for {graph_id}",
       metadata={
         "graph_id": MetadataValue.text(graph_id),
         "errors": MetadataValue.text("; ".join(result.errors)),
@@ -83,7 +84,7 @@ def materialize_ledger_to_graph(
     )
 
   context.log.info(
-    f"Ledger materialization complete: "
+    f"Extensions materialization complete: "
     f"{len(result.tables_materialized)} tables, "
     f"{result.total_rows} rows, "
     f"{result.duration_ms:.0f}ms"
@@ -101,9 +102,9 @@ def materialize_ledger_to_graph(
 
 
 @job(
-  tags={"dagster/priority": "1", "pipeline": "ledger"},
+  tags={"dagster/priority": "1", "pipeline": "extensions"},
   description="Materialize extensions OLTP data to LadybugDB graph",
 )
-def ledger_materialize_job():
-  """Standalone job for ledger materialization."""
-  materialize_ledger_to_graph()
+def extensions_materialize_job():
+  """Materialize all extension data from PostgreSQL OLTP to LadybugDB graph."""
+  materialize_extensions_to_graph()
