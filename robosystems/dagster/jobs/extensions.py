@@ -1,6 +1,6 @@
-"""Dagster ledger materialization job.
+"""Dagster extensions materialization job.
 
-Materializes roboledger OLTP data (PostgreSQL) to the LadybugDB graph database.
+Materializes extensions OLTP data (PostgreSQL) to the LadybugDB graph database.
 Connector-agnostic — works regardless of which connector (QB, Xero, Plaid, native)
 populated the OLTP tables.
 
@@ -40,15 +40,15 @@ def materialize_ledger_to_graph(
   graph: GraphResource,
   config: LedgerMaterializeConfig,
 ) -> dict[str, Any]:
-  """Materialize roboledger OLTP data to LadybugDB graph.
+  """Materialize extensions OLTP data to LadybugDB graph.
 
-  Uses postgres_scanner to read from the roboledger tenant schema,
+  Uses postgres_scanner to read from the extensions tenant schema,
   stages into DuckDB, then materializes to LadybugDB via the existing
   ATTACH + COPY FROM pipeline.
   """
   import asyncio
 
-  from robosystems.operations.ledger.materialize import LedgerMaterializer
+  from robosystems.operations.extensions.materialize import LedgerMaterializer
 
   graph_id = config.graph_id
   entity_id = config.entity_id or None
@@ -102,7 +102,7 @@ def materialize_ledger_to_graph(
 
 @job(
   tags={"dagster/priority": "1", "pipeline": "ledger"},
-  description="Materialize roboledger OLTP data to LadybugDB graph",
+  description="Materialize extensions OLTP data to LadybugDB graph",
 )
 def ledger_materialize_job():
   """Standalone job for ledger materialization."""

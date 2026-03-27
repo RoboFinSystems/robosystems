@@ -35,11 +35,11 @@ class TestSummary:
     mock_db.execute.return_value.one.return_value = (2, datetime(2025, 6, 15))
 
     with (
-      patch(f"{MODULE}.oltp_session") as mock_oltp,
+      patch(f"{MODULE}.extensions_session") as mock_ext_session,
       patch(f"{MODULE}.get_db_session") as mock_get_db,
     ):
-      mock_oltp.return_value.__enter__ = MagicMock(return_value=mock_session)
-      mock_oltp.return_value.__exit__ = MagicMock(return_value=False)
+      mock_ext_session.return_value.__enter__ = MagicMock(return_value=mock_session)
+      mock_ext_session.return_value.__exit__ = MagicMock(return_value=False)
       mock_get_db.return_value = iter([mock_db])
 
       result = await get_summary(
@@ -72,11 +72,11 @@ class TestSummary:
     mock_db.execute.return_value.one.return_value = (0, None)
 
     with (
-      patch(f"{MODULE}.oltp_session") as mock_oltp,
+      patch(f"{MODULE}.extensions_session") as mock_ext_session,
       patch(f"{MODULE}.get_db_session") as mock_get_db,
     ):
-      mock_oltp.return_value.__enter__ = MagicMock(return_value=mock_session)
-      mock_oltp.return_value.__exit__ = MagicMock(return_value=False)
+      mock_ext_session.return_value.__enter__ = MagicMock(return_value=mock_session)
+      mock_ext_session.return_value.__exit__ = MagicMock(return_value=False)
       mock_get_db.return_value = iter([mock_db])
 
       result = await get_summary(
@@ -92,8 +92,8 @@ class TestSummary:
 
   @pytest.mark.asyncio
   async def test_schema_not_found_returns_404(self):
-    with patch(f"{MODULE}.oltp_session") as mock_oltp:
-      mock_oltp.side_effect = ValueError("Invalid graph_id")
+    with patch(f"{MODULE}.extensions_session") as mock_ext_session:
+      mock_ext_session.side_effect = ValueError("Invalid graph_id")
 
       with pytest.raises(HTTPException) as exc_info:
         await get_summary(
@@ -116,11 +116,11 @@ class TestSummary:
     ]
 
     with (
-      patch(f"{MODULE}.oltp_session") as mock_oltp,
+      patch(f"{MODULE}.extensions_session") as mock_ext_session,
       patch(f"{MODULE}.get_db_session") as mock_get_db,
     ):
-      mock_oltp.return_value.__enter__ = MagicMock(return_value=mock_session)
-      mock_oltp.return_value.__exit__ = MagicMock(return_value=False)
+      mock_ext_session.return_value.__enter__ = MagicMock(return_value=mock_session)
+      mock_ext_session.return_value.__exit__ = MagicMock(return_value=False)
       mock_get_db.side_effect = Exception("Platform DB down")
 
       result = await get_summary(

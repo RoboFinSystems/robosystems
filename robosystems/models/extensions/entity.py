@@ -24,11 +24,11 @@ from sqlalchemy import (
 )
 from sqlalchemy.dialects.postgresql import JSONB
 
-from robosystems.db.ledger import LedgerBase
+from robosystems.db.extensions import ExtensionsBase
 from robosystems.utils.ulid import generate_prefixed_ulid
 
 
-class Entity(LedgerBase):
+class Entity(ExtensionsBase):
   __tablename__ = "entities"
   __table_args__ = (
     Index("idx_entities_source", "source"),

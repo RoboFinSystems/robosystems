@@ -1,10 +1,10 @@
 """
 Ledger Materialization — PostgreSQL OLTP → DuckDB staging → LadybugDB graph.
 
-Connector-agnostic: materializes whatever is in the roboledger tenant schema,
+Connector-agnostic: materializes whatever is in the extensions tenant schema,
 regardless of which connector (QuickBooks, Xero, Plaid, native) put it there.
 
-Uses DuckDB's postgres_scanner extension to read directly from the roboledger
+Uses DuckDB's postgres_scanner extension to read directly from the extensions
 database, transform OLTP rows into graph-shaped staging tables, then materialize
 via the existing ATTACH + COPY FROM pipeline.
 
@@ -67,7 +67,7 @@ RELATIONSHIP_TABLES = [
 
 
 def build_postgres_connstr(graph_id: str) -> str:
-  """Build a postgres_scanner connection string for the roboledger database.
+  """Build a postgres_scanner connection string for the extensions database.
 
   IMPORTANT: This connection string is used by DuckDB's postgres_scanner
   running INSIDE the Graph API process. The host must be reachable from
@@ -83,14 +83,14 @@ def build_postgres_connstr(graph_id: str) -> str:
   """
   from robosystems.config import env
 
-  url = env.ROBOLEDGER_DATABASE_URL
+  url = env.EXTENSIONS_DATABASE_URL
   parsed = urlparse(url)
 
   host = parsed.hostname or "localhost"
   port = parsed.port or 5432
   user = parsed.username or "postgres"
   password = parsed.password or "postgres"
-  dbname = parsed.path.lstrip("/").split("?")[0] or "roboledger"
+  dbname = parsed.path.lstrip("/").split("?")[0] or "extensions"
 
   connstr = f"dbname={dbname} user={user} password={password} host={host} port={port}"
 
@@ -108,7 +108,7 @@ def _staging_sql(graph_id: str, entity_id: str, connstr: str) -> dict[str, str]:
       Dict mapping table name → CREATE TABLE SQL.
   """
   c = connstr  # shorthand for SQL interpolation
-  s = graph_id  # schema name (tenant schema in roboledger database)
+  s = graph_id  # schema name (tenant schema in extensions database)
 
   tables: dict[str, str] = {}
 
@@ -374,9 +374,9 @@ def _staging_sql(graph_id: str, entity_id: str, connstr: str) -> dict[str, str]:
 
 
 class LedgerMaterializer:
-  """Materializes roboledger OLTP data to the LadybugDB graph.
+  """Materializes extensions OLTP data to the LadybugDB graph.
 
-  Connector-agnostic — reads whatever is in the roboledger tenant schema
+  Connector-agnostic — reads whatever is in the extensions tenant schema
   and materializes it to graph nodes and relationships. The OLTPLoader
   is the reverse operation (load into OLTP); this is the forward path
   (OLTP → graph).
@@ -453,7 +453,7 @@ class LedgerMaterializer:
     graph_id: str,
     rebuild: bool,
   ) -> None:
-    """Ensure the LadybugDB database exists with the roboledger schema."""
+    """Ensure the LadybugDB database exists with the graph schema."""
     from robosystems.schemas.loader import get_contextual_schema_loader
 
     db_exists = await client.database_exists(graph_id)

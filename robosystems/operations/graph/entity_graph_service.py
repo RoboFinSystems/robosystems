@@ -546,7 +546,7 @@ class EntityGraphService:
     org_id: str,
   ) -> EntityResponse:
     """
-    Create entity in the roboledger OLTP database (PostgreSQL).
+    Create entity in the extensions OLTP database (PostgreSQL).
 
     The entity row will be materialized to the LadybugDB graph via the
     ledger materialization pipeline (postgres_scanner → DuckDB → LadybugDB)
@@ -554,20 +554,20 @@ class EntityGraphService:
     """
     import datetime
 
-    from robosystems.db.ledger import oltp_session, provision_tenant_schema
-    from robosystems.models.ledger.entity import Entity as LedgerEntity
+    from robosystems.db.extensions import extensions_session, provision_tenant_schema
+    from robosystems.models.extensions.entity import Entity as LedgerEntity
 
-    logger.info(f"Creating entity in roboledger OLTP for graph {graph_id}")
+    logger.info(f"Creating entity in extensions OLTP for graph {graph_id}")
 
     try:
-      # Ensure roboledger tenant schema exists
+      # Ensure extensions tenant schema exists
       provision_tenant_schema(graph_id)
 
       entity_identifier = f"entity_{graph_id}"
       current_time = datetime.datetime.now(datetime.UTC)
       entity_uri = entity_data.uri or f"https://robosystems.ai/entities#{graph_id}"
 
-      with oltp_session(graph_id) as session:
+      with extensions_session(graph_id) as session:
         entity = LedgerEntity(
           id=entity_identifier,
           name=entity_data.name,
@@ -591,7 +591,7 @@ class EntityGraphService:
         session.add(entity)
         session.commit()
 
-      logger.info(f"Entity {entity_identifier} created in roboledger OLTP")
+      logger.info(f"Entity {entity_identifier} created in extensions OLTP")
 
       return EntityResponse(
         id=entity_identifier,

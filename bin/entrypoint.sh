@@ -119,17 +119,17 @@ run_db_init() {
         return 1
     fi
 
-    # Run ledger migrations only if enabled via SSM or env var
+    # Run extensions migrations only if enabled via SSM or env var
     local ledger_enabled
     ledger_enabled=$(resolve_feature_flag "LEDGER_ENABLED" "false")
     if [[ "$ledger_enabled" == "true" ]]; then
-        echo "Ledger enabled — running ledger migrations..."
-        if ! uv run alembic -c migrations/ledger.ini upgrade head; then
-            echo "✗ Ledger migration failed"
+        echo "Extensions enabled — running extensions migrations..."
+        if ! uv run alembic -c migrations/extensions.ini upgrade head; then
+            echo "✗ Extensions migration failed"
             return 1
         fi
     else
-        echo "Ledger disabled — skipping ledger migrations"
+        echo "Extensions disabled — skipping extensions migrations"
     fi
 
     echo "✓ Migrations completed successfully"

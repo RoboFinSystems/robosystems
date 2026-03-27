@@ -104,9 +104,9 @@ class TestListTransactions:
       _make_txn(id="txn_2", amount=20000),
     ]
 
-    with patch(f"{MODULE}.oltp_session") as mock_oltp:
-      mock_oltp.return_value.__enter__ = MagicMock(return_value=mock_session)
-      mock_oltp.return_value.__exit__ = MagicMock(return_value=False)
+    with patch(f"{MODULE}.extensions_session") as mock_ext_session:
+      mock_ext_session.return_value.__enter__ = MagicMock(return_value=mock_session)
+      mock_ext_session.return_value.__exit__ = MagicMock(return_value=False)
 
       result = await list_transactions(
         graph_id=GRAPH_ID,
@@ -128,9 +128,9 @@ class TestListTransactions:
       _make_txn(amount=12345),
     ]
 
-    with patch(f"{MODULE}.oltp_session") as mock_oltp:
-      mock_oltp.return_value.__enter__ = MagicMock(return_value=mock_session)
-      mock_oltp.return_value.__exit__ = MagicMock(return_value=False)
+    with patch(f"{MODULE}.extensions_session") as mock_ext_session:
+      mock_ext_session.return_value.__enter__ = MagicMock(return_value=mock_session)
+      mock_ext_session.return_value.__exit__ = MagicMock(return_value=False)
 
       result = await list_transactions(
         graph_id=GRAPH_ID,
@@ -150,9 +150,9 @@ class TestListTransactions:
       _make_txn(),
     ]
 
-    with patch(f"{MODULE}.oltp_session") as mock_oltp:
-      mock_oltp.return_value.__enter__ = MagicMock(return_value=mock_session)
-      mock_oltp.return_value.__exit__ = MagicMock(return_value=False)
+    with patch(f"{MODULE}.extensions_session") as mock_ext_session:
+      mock_ext_session.return_value.__enter__ = MagicMock(return_value=mock_session)
+      mock_ext_session.return_value.__exit__ = MagicMock(return_value=False)
 
       result = await list_transactions(
         graph_id=GRAPH_ID,
@@ -168,8 +168,8 @@ class TestListTransactions:
 
   @pytest.mark.asyncio
   async def test_schema_not_found_returns_404(self):
-    with patch(f"{MODULE}.oltp_session") as mock_oltp:
-      mock_oltp.side_effect = ValueError("Invalid graph_id")
+    with patch(f"{MODULE}.extensions_session") as mock_ext_session:
+      mock_ext_session.side_effect = ValueError("Invalid graph_id")
 
       with pytest.raises(HTTPException) as exc_info:
         await list_transactions(
@@ -209,9 +209,9 @@ class TestGetTransaction:
       MagicMock(all=MagicMock(return_value=li_rows)),
     ]
 
-    with patch(f"{MODULE}.oltp_session") as mock_oltp:
-      mock_oltp.return_value.__enter__ = MagicMock(return_value=mock_session)
-      mock_oltp.return_value.__exit__ = MagicMock(return_value=False)
+    with patch(f"{MODULE}.extensions_session") as mock_ext_session:
+      mock_ext_session.return_value.__enter__ = MagicMock(return_value=mock_session)
+      mock_ext_session.return_value.__exit__ = MagicMock(return_value=False)
 
       result = await get_transaction(
         graph_id=GRAPH_ID,
@@ -232,9 +232,9 @@ class TestGetTransaction:
     mock_session = MagicMock()
     mock_session.execute.return_value.scalar_one_or_none.return_value = None
 
-    with patch(f"{MODULE}.oltp_session") as mock_oltp:
-      mock_oltp.return_value.__enter__ = MagicMock(return_value=mock_session)
-      mock_oltp.return_value.__exit__ = MagicMock(return_value=False)
+    with patch(f"{MODULE}.extensions_session") as mock_ext_session:
+      mock_ext_session.return_value.__enter__ = MagicMock(return_value=mock_session)
+      mock_ext_session.return_value.__exit__ = MagicMock(return_value=False)
 
       with pytest.raises(HTTPException) as exc_info:
         await get_transaction(

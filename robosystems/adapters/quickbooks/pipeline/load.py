@@ -35,7 +35,7 @@ def qb_load(
   Returns:
       MaterializeResult with load statistics
   """
-  from robosystems.operations.ledger.loader import OLTPLoader
+  from robosystems.operations.extensions.loader import OLTPLoader
 
   work_dir = get_pipeline_work_dir(config.graph_id)
   duckdb_path = work_dir / "quickbooks.duckdb"

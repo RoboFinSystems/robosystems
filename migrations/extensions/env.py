@@ -1,8 +1,8 @@
-"""Alembic environment configuration for the roboledger OLTP database.
+"""Alembic environment configuration for the extensions OLTP database.
 
 This is separate from the platform alembic/env.py because:
-- Different database (roboledger vs robosystems)
-- Different DeclarativeBase (LedgerBase vs Base)
+- Different database (extensions vs robosystems)
+- Different DeclarativeBase (ExtensionsBase vs Base)
 - Schema-per-graph-id tenancy (public schema managed by Alembic,
   tenant schemas created at runtime by schema_provisioner)
 """
@@ -12,10 +12,10 @@ from logging.config import fileConfig
 from alembic import context
 from sqlalchemy import engine_from_config, pool
 
-from robosystems.db.ledger import LedgerBase, get_ledger_database_url
+from robosystems.db.extensions import ExtensionsBase, get_extensions_database_url
 
-# Import all models to register them on LedgerBase.metadata
-from robosystems.models.ledger import *  # noqa: F403
+# Import all models to register them on ExtensionsBase.metadata
+from robosystems.models.extensions import *  # noqa: F403
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
@@ -26,12 +26,12 @@ if config.config_file_name is not None:
   fileConfig(config.config_file_name)
 
 # Set the database URL from environment variable
-database_url = get_ledger_database_url()
+database_url = get_extensions_database_url()
 if database_url:
   config.set_main_option("sqlalchemy.url", database_url)
 
 # Target metadata for autogenerate
-target_metadata = LedgerBase.metadata
+target_metadata = ExtensionsBase.metadata
 
 
 def run_migrations_offline() -> None:

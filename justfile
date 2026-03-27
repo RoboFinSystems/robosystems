@@ -291,7 +291,7 @@ admin environment="dev" *args="":
 
 
 ## Database Operations ##
-# Usage: just migrate-up [db] — db is "platform" (default) or "ledger"
+# Usage: just migrate-up [db] — db is "platform" (default) or "extensions"
 
 # Create new migration
 migrate-create message db="platform" env=_local_env:

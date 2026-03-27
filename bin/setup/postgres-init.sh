@@ -11,13 +11,13 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-E
     SELECT 'CREATE DATABASE dagster'
     WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'dagster')\gexec
 
-    -- RoboLedger OLTP database (accounting system of record)
-    SELECT 'CREATE DATABASE roboledger'
-    WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'roboledger')\gexec
+    -- Extensions OLTP database (domain data for all extensions: roboledger, roboinvestor, etc.)
+    SELECT 'CREATE DATABASE extensions'
+    WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'extensions')\gexec
 
-    -- RoboLedger test database
-    SELECT 'CREATE DATABASE roboledger_test'
-    WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'roboledger_test')\gexec
+    -- Extensions test database
+    SELECT 'CREATE DATABASE extensions_test'
+    WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'extensions_test')\gexec
 EOSQL
 
-echo "Database initialization complete. Created databases: robosystems, robosystems_test, dagster, roboledger, roboledger_test"
+echo "Database initialization complete. Created databases: robosystems, robosystems_test, dagster, extensions, extensions_test"

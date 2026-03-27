@@ -125,7 +125,9 @@ else:
   qb = _empty_pipeline
 
 if env.LEDGER_ENABLED:
-  from robosystems.dagster.jobs.ledger import ledger_materialize_job as _ledger_mat_job
+  from robosystems.dagster.jobs.extensions import (
+    ledger_materialize_job as _ledger_mat_job,
+  )
 
   _ledger_jobs: list = [_ledger_mat_job]
 else:

@@ -126,14 +126,14 @@ class TestEntityGraphService:
 
     # Mock ledger OLTP database access for entity creation
     mocker.patch(
-      "robosystems.db.ledger.provision_tenant_schema",
+      "robosystems.db.extensions.provision_tenant_schema",
     )
-    mock_oltp_session = mocker.MagicMock()
-    mock_oltp_session.__enter__ = mocker.MagicMock(return_value=mocker.MagicMock())
-    mock_oltp_session.__exit__ = mocker.MagicMock(return_value=False)
+    mock_ext_session = mocker.MagicMock()
+    mock_ext_session.__enter__ = mocker.MagicMock(return_value=mocker.MagicMock())
+    mock_ext_session.__exit__ = mocker.MagicMock(return_value=False)
     mocker.patch(
-      "robosystems.db.ledger.oltp_session",
-      return_value=mock_oltp_session,
+      "robosystems.db.extensions.extensions_session",
+      return_value=mock_ext_session,
     )
 
     # Mock TableService for auto-creating DuckDB tables (imported locally)

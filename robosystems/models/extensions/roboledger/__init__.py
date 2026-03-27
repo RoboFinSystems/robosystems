@@ -1,8 +1,4 @@
-"""RoboLedger OLTP models.
-
-These models use LedgerBase (not the platform Base/Model) and live
-in the separate 'roboledger' database with schema-per-graph-id tenancy.
-"""
+"""RoboLedger-specific OLTP models (accounting domain)."""
 
 from .account import Account
 from .classification_rule import ClassificationRule
@@ -12,7 +8,6 @@ from .dimension import (
   line_item_dimensions,
   transaction_dimensions,
 )
-from .entity import Entity
 from .entry import Entry
 from .fiscal_period import FiscalPeriod
 from .line_item import LineItem
@@ -23,7 +18,6 @@ __all__ = [
   "Account",
   "ClassificationRule",
   "Dimension",
-  "Entity",
   "Entry",
   "FiscalPeriod",
   "LineItem",

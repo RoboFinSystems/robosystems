@@ -18,14 +18,14 @@ from sqlalchemy import (
 )
 from sqlalchemy.dialects.postgresql import JSONB
 
-from robosystems.db.ledger import LedgerBase
+from robosystems.db.extensions import ExtensionsBase
 from robosystems.utils.ulid import generate_prefixed_ulid
 
 # Junction tables — pure join tables, no additional columns
 
 transaction_dimensions = Table(
   "transaction_dimensions",
-  LedgerBase.metadata,
+  ExtensionsBase.metadata,
   Column(
     "transaction_id",
     String,
@@ -42,7 +42,7 @@ transaction_dimensions = Table(
 
 entry_dimensions = Table(
   "entry_dimensions",
-  LedgerBase.metadata,
+  ExtensionsBase.metadata,
   Column(
     "entry_id",
     String,
@@ -59,7 +59,7 @@ entry_dimensions = Table(
 
 line_item_dimensions = Table(
   "line_item_dimensions",
-  LedgerBase.metadata,
+  ExtensionsBase.metadata,
   Column(
     "line_item_id",
     String,
@@ -75,7 +75,7 @@ line_item_dimensions = Table(
 )
 
 
-class Dimension(LedgerBase):
+class Dimension(ExtensionsBase):
   __tablename__ = "dimensions"
   __table_args__ = (
     UniqueConstraint("dimension_type", "value", name="uq_dimension_type_value"),

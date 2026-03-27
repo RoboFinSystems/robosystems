@@ -20,11 +20,11 @@ from sqlalchemy import (
 )
 from sqlalchemy.dialects.postgresql import JSONB
 
-from robosystems.db.ledger import LedgerBase
+from robosystems.db.extensions import ExtensionsBase
 from robosystems.utils.ulid import generate_prefixed_ulid
 
 
-class ClassificationRule(LedgerBase):
+class ClassificationRule(ExtensionsBase):
   __tablename__ = "classification_rules"
   __table_args__ = (
     Index(

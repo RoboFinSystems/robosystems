@@ -6,15 +6,15 @@ from fastapi import APIRouter, Depends, HTTPException, Path
 from sqlalchemy import func, select
 from sqlalchemy.exc import ProgrammingError
 
-from robosystems.db.ledger import oltp_session
+from robosystems.db.extensions import extensions_session
 from robosystems.db.platform import get_db_session
 from robosystems.middleware.auth.dependencies import get_current_user_with_graph
 from robosystems.middleware.graph.types import GRAPH_OR_SUBGRAPH_ID_PATTERN
 from robosystems.middleware.rate_limits import subscription_aware_rate_limit_dependency
-from robosystems.models.api.ledger.summary import LedgerSummaryResponse
+from robosystems.models.api.extensions.summary import LedgerSummaryResponse
+from robosystems.models.extensions import Account, Entry, LineItem, Transaction
 from robosystems.models.iam import User
 from robosystems.models.iam.connection import Connection
-from robosystems.models.ledger import Account, Entry, LineItem, Transaction
 
 logger = logging.getLogger(__name__)
 
@@ -34,7 +34,7 @@ async def get_summary(
   _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
 ):
   try:
-    with oltp_session(graph_id) as session:
+    with extensions_session(graph_id) as session:
       account_count = (
         session.execute(select(func.count()).select_from(Account)).scalar() or 0
       )

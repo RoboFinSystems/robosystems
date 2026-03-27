@@ -705,11 +705,11 @@ class EnvConfig:
   )
   DATABASE_ECHO = get_bool_env("DATABASE_ECHO", False)
 
-  # RoboLedger OLTP Database (accounting system of record)
-  ROBOLEDGER_DATABASE_URL = get_str_env("ROBOLEDGER_DATABASE_URL", "") or (
-    f"postgresql://postgres:{get_secret_value('POSTGRES_PASSWORD', 'postgres')}@{get_str_env('DATABASE_ENDPOINT', '')}:{get_str_env('DATABASE_PORT', '5432')}/roboledger?sslmode=require"
+  # Extensions OLTP Database (domain data for all extensions: roboledger, roboinvestor, etc.)
+  EXTENSIONS_DATABASE_URL = get_str_env("EXTENSIONS_DATABASE_URL", "") or (
+    f"postgresql://postgres:{get_secret_value('POSTGRES_PASSWORD', 'postgres')}@{get_str_env('DATABASE_ENDPOINT', '')}:{get_str_env('DATABASE_PORT', '5432')}/extensions?sslmode=require"
     if get_str_env("DATABASE_ENDPOINT", "")
-    else "postgresql://postgres:postgres@localhost:5432/roboledger"
+    else "postgresql://postgres:postgres@localhost:5432/extensions"
   )
 
   # ==========================================================================

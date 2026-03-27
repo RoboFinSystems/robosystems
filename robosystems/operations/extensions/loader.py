@@ -85,8 +85,8 @@ class OLTPLoader:
     """
     import duckdb
 
-    from robosystems.db.ledger import oltp_session, provision_tenant_schema
-    from robosystems.models.ledger import (
+    from robosystems.db.extensions import extensions_session, provision_tenant_schema
+    from robosystems.models.extensions import (
       Account,
       Dimension,
       Entry,
@@ -121,7 +121,7 @@ class OLTPLoader:
 
     now = datetime.now(UTC)
 
-    with oltp_session(graph_id) as session:
+    with extensions_session(graph_id) as session:
       # Delete existing data for this source + connection_id (reverse FK order)
       session.query(LineItem).filter(
         LineItem.entry_id.in_(
@@ -418,8 +418,8 @@ class OLTPLoader:
     """
     import duckdb
 
-    from robosystems.db.ledger import oltp_session
-    from robosystems.models.ledger.entity import Entity
+    from robosystems.db.extensions import extensions_session
+    from robosystems.models.extensions.entity import Entity
 
     try:
       con = duckdb.connect(str(duckdb_path), read_only=True)
@@ -452,7 +452,7 @@ class OLTPLoader:
       finally:
         con.close()
 
-      with oltp_session(graph_id) as session:
+      with extensions_session(graph_id) as session:
         entity = session.query(Entity).first()
         if not entity:
           logger.warning(
