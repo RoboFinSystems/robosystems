@@ -72,7 +72,7 @@ async def get_entity(
   """Get the entity for this ledger graph."""
   try:
     with extensions_session(graph_id) as session:
-      entity = session.query(Entity).first()
+      entity = session.query(Entity).filter(Entity.is_parent.is_(True)).first()
       if not entity:
         raise HTTPException(
           status_code=404,
@@ -106,7 +106,7 @@ async def update_entity(
   """Update entity details. Only provided (non-null) fields are updated."""
   try:
     with extensions_session(graph_id) as session:
-      entity = session.query(Entity).first()
+      entity = session.query(Entity).filter(Entity.is_parent.is_(True)).first()
       if not entity:
         raise HTTPException(
           status_code=404,

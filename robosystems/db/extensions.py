@@ -64,7 +64,8 @@ def _get_engine():
     if not env.LEDGER_ENABLED:
       raise RuntimeError(
         "Extensions database access attempted but LEDGER_ENABLED is false. "
-        "Set LEDGER_ENABLED=true to use extension OLTP features."
+        "Set LEDGER_ENABLED=true to enable the extensions OLTP database "
+        "(required for RoboLedger, RoboInvestor, and other extension modules)."
       )
     _engine = _create_extensions_engine()
   return _engine

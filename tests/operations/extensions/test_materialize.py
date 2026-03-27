@@ -31,7 +31,7 @@ class TestBuildPostgresConnstr:
       "EXTENSIONS_DATABASE_URL",
       "postgresql://myuser:mypass@myhost:5433/extensions",
     ):
-      result = build_postgres_connstr(GRAPH_ID)
+      result = build_postgres_connstr()
 
     assert "dbname=extensions" in result
     assert "user=myuser" in result
@@ -45,7 +45,7 @@ class TestBuildPostgresConnstr:
       "EXTENSIONS_DATABASE_URL",
       "postgresql://localhost/",
     ):
-      result = build_postgres_connstr(GRAPH_ID)
+      result = build_postgres_connstr()
 
     assert "host=localhost" in result
     assert "port=5432" in result
@@ -56,7 +56,7 @@ class TestBuildPostgresConnstr:
       "EXTENSIONS_DATABASE_URL",
       "postgresql://postgres:postgres@pg:5432/extensions",
     ):
-      result = build_postgres_connstr(GRAPH_ID)
+      result = build_postgres_connstr()
 
     assert "dbname=extensions" in result
 

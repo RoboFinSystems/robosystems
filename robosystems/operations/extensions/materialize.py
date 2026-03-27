@@ -66,7 +66,7 @@ RELATIONSHIP_TABLES = [
 ]
 
 
-def build_postgres_connstr(graph_id: str) -> str:
+def build_postgres_connstr() -> str:
   """Build a postgres_scanner connection string for the extensions database.
 
   IMPORTANT: This connection string is used by DuckDB's postgres_scanner
@@ -74,9 +74,6 @@ def build_postgres_connstr(graph_id: str) -> str:
   that process's network context:
   - Production: RDS endpoint (via DATABASE_ENDPOINT env var on graph instances)
   - Local dev: Docker service hostname (via DATABASE_ENDPOINT in container .env)
-
-  Args:
-      graph_id: Tenant schema name (e.g., "kg0192...")
 
   Returns:
       Connection string for DuckDB's postgres_scan() function.
@@ -426,7 +423,7 @@ class LedgerMaterializer:
         await self._ensure_database(client, graph_id, rebuild)
 
         # Step 2: Build connection string for postgres_scanner
-        connstr = build_postgres_connstr(graph_id)
+        connstr = build_postgres_connstr()
 
         # Step 3: Stage all tables from PostgreSQL → DuckDB
         staging_sql = _staging_sql(graph_id, entity_id, connstr)
@@ -511,6 +508,7 @@ class LedgerMaterializer:
         if table_name in RELATIONSHIP_TABLES and "DIMENSION" in table_name:
           logger.info(f"Skipping {table_name} (no dimension data)")
         else:
+          result.status = "error"
           result.errors.append(error_msg)
 
   async def _materialize_tables(

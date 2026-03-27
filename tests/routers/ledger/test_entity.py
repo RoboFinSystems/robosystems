@@ -64,7 +64,9 @@ class TestGetEntity:
   @pytest.mark.asyncio
   async def test_returns_entity(self):
     mock_session = MagicMock()
-    mock_session.query.return_value.first.return_value = _make_entity()
+    mock_session.query.return_value.filter.return_value.first.return_value = (
+      _make_entity()
+    )
 
     with patch(f"{MODULE}.extensions_session") as mock_ext:
       mock_ext.return_value.__enter__ = MagicMock(return_value=mock_session)
@@ -80,7 +82,7 @@ class TestGetEntity:
   @pytest.mark.asyncio
   async def test_not_found_when_no_entity(self):
     mock_session = MagicMock()
-    mock_session.query.return_value.first.return_value = None
+    mock_session.query.return_value.filter.return_value.first.return_value = None
 
     with patch(f"{MODULE}.extensions_session") as mock_ext:
       mock_ext.return_value.__enter__ = MagicMock(return_value=mock_session)
@@ -123,7 +125,7 @@ class TestUpdateEntity:
   async def test_updates_provided_fields(self):
     entity = _make_entity()
     mock_session = MagicMock()
-    mock_session.query.return_value.first.return_value = entity
+    mock_session.query.return_value.filter.return_value.first.return_value = entity
 
     with patch(f"{MODULE}.extensions_session") as mock_ext:
       mock_ext.return_value.__enter__ = MagicMock(return_value=mock_session)
@@ -143,7 +145,7 @@ class TestUpdateEntity:
   async def test_rejects_empty_update(self):
     entity = _make_entity()
     mock_session = MagicMock()
-    mock_session.query.return_value.first.return_value = entity
+    mock_session.query.return_value.filter.return_value.first.return_value = entity
 
     with patch(f"{MODULE}.extensions_session") as mock_ext:
       mock_ext.return_value.__enter__ = MagicMock(return_value=mock_session)
@@ -161,7 +163,7 @@ class TestUpdateEntity:
   @pytest.mark.asyncio
   async def test_not_found_when_no_entity(self):
     mock_session = MagicMock()
-    mock_session.query.return_value.first.return_value = None
+    mock_session.query.return_value.filter.return_value.first.return_value = None
 
     with patch(f"{MODULE}.extensions_session") as mock_ext:
       mock_ext.return_value.__enter__ = MagicMock(return_value=mock_session)
@@ -180,7 +182,7 @@ class TestUpdateEntity:
     entity = _make_entity()
     original_updated = entity.updated_at
     mock_session = MagicMock()
-    mock_session.query.return_value.first.return_value = entity
+    mock_session.query.return_value.filter.return_value.first.return_value = entity
 
     with patch(f"{MODULE}.extensions_session") as mock_ext:
       mock_ext.return_value.__enter__ = MagicMock(return_value=mock_session)
