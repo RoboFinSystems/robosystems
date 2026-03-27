@@ -30,7 +30,7 @@ Each extension defines a domain schema and provides OLTP tables, API routes, dat
 
 ### [RoboLedger](https://roboledger.ai)
 
-Accounting and financial reporting extension. OLTP general ledger with schema-per-tenant PostgreSQL (accounts, transactions, journal entries, line items, dimensions), QuickBooks ELT pipeline via dbt/Dagster, SEC XBRL financial reporting, and chart of accounts. API routes under `/v1/ledger/*`, feature-flagged via `LEDGER_ENABLED`.
+Accounting and financial reporting extension. OLTP general ledger with schema-per-tenant PostgreSQL (accounts, transactions, journal entries, line items, dimensions), QuickBooks ELT pipeline via dbt/Dagster, SEC XBRL financial reporting, and chart of accounts.
 
 ### [RoboInvestor](https://roboinvestor.ai)
 
@@ -145,7 +145,7 @@ RoboSystems is built on a modern, scalable architecture with:
 **Application Layer:**
 
 - FastAPI REST API with versioned endpoints
-- Extension API routes feature-flagged by base name (e.g., `LEDGER_ENABLED` → `/v1/ledger/*`)
+- Extension API routes feature-flagged per module
 - MCP Server for AI-powered graph database access with schema-aware tools
 - Agent Interface for text-to-Cypher natural language queries
 - Dagster for data pipeline orchestration and background jobs

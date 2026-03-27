@@ -124,7 +124,7 @@ if env.CONNECTION_QUICKBOOKS_ENABLED:
 else:
   qb = _empty_pipeline
 
-if env.LEDGER_ENABLED:
+if env.EXTENSIONS_ENABLED:
   from robosystems.dagster.jobs.extensions import (
     extensions_materialize_job as _ext_mat_job,
   )

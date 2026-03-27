@@ -571,7 +571,16 @@ class EnvConfig:
     get_parameter_value("CONNECTION_QUICKBOOKS_ENABLED", "true").lower() == "true",
   )
 
-  # --- Ledger (RoboLedger OLTP) ---
+  # --- Extensions OLTP Database ---
+  # Controls the extensions PostgreSQL database (engine, migrations, Dagster jobs).
+  # Required for any extension module (RoboLedger, RoboInvestor, etc.).
+  EXTENSIONS_ENABLED = get_bool_env(
+    "EXTENSIONS_ENABLED",
+    get_parameter_value("EXTENSIONS_ENABLED", "false").lower() == "true",
+  )
+
+  # --- Ledger API Endpoints ---
+  # Controls the /v1/ledger/* API routes. Requires EXTENSIONS_ENABLED=true.
   LEDGER_ENABLED = get_bool_env(
     "LEDGER_ENABLED",
     get_parameter_value("LEDGER_ENABLED", "false").lower() == "true",
