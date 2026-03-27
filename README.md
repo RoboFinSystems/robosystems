@@ -1,11 +1,9 @@
 # RoboSystems
 
-RoboSystems is a financial intelligence platform with a base + extensions architecture. Each extension defines a domain ontology that drives dedicated APIs, data pipelines, and AI agent tools.
+RoboSystems is a financial intelligence platform that connects disparate data sources, builds domain ontologies as knowledge graphs, and provides AI-powered tools for accounting, financial reporting, investment management, and analysis. It powers [RoboLedger](https://roboledger.ai) and [RoboInvestor](https://roboinvestor.ai).
 
 - **LadybugDB Graph Database**: Embedded columnar graph database with native DuckDB staging, LanceDB vector search, and tiered infrastructure
-- **Schema Extensions**: Domain schemas that model business domains as graph structures — the foundation for everything built on top
-- **[RoboLedger](https://roboledger.ai)**: Accounting and financial reporting extension with OLTP general ledger, QuickBooks ELT pipeline, SEC XBRL reporting, and chart of accounts
-- **[RoboInvestor](https://roboinvestor.ai)**: Portfolio management and investment tracking extension (schema + frontend, OLTP planned)
+- **Extensions**: Domain schemas that drive OLTP tables, API routes, data pipelines, and dedicated frontend apps. Extensions share a single database with schema-per-tenant isolation and materialize to the graph
 - **Document Search**: Full-text and semantic search across SEC filings, uploaded documents, and connected sources via OpenSearch
 - **AI-Native Architecture**: Context graphs with embeddings, semantic enrichment, and confidence scoring for LLM-powered analytics
 - **Model Context Protocol (MCP)**: Standardized server and [client](https://www.npmjs.com/package/@robosystems/mcp) for LLM integration with schema-aware tools
@@ -28,7 +26,7 @@ The platform provides the core infrastructure that all extensions build on:
 
 ## Extensions
 
-Extensions start as graph schemas and grow into full products with OLTP databases, API routes, data pipelines, and dedicated frontend apps. See [Schema Extensions](/robosystems/schemas/README.md) for details.
+Each extension defines a domain schema and provides OLTP tables, API routes, data pipelines, and a dedicated frontend app. All extensions share a single PostgreSQL database with schema-per-tenant isolation and materialize to the graph. See [Schema Extensions](/robosystems/schemas/README.md) for details.
 
 ### [RoboLedger](https://roboledger.ai)
 
