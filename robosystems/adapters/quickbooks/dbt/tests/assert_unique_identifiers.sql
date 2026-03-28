@@ -4,7 +4,7 @@
 #}
 
 with account_ids as (
-  select external_id, 'accounts' as table_name from {{ ref('accounts') }}
+  select external_id, 'accounts' as table_name from {{ ref('elements') }}
 ),
 
 transaction_ids as (

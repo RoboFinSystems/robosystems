@@ -59,7 +59,7 @@ def qb_load(
       context.log.warning(f"Load warning: {error}")
 
   context.log.info(
-    f"Load complete: {result.elements} accounts, {result.transactions} transactions, "
+    f"Load complete: {result.elements} elements, {result.transactions} transactions, "
     f"{result.entries} entries, {result.line_items} line items, "
     f"{result.dimensions} dimensions ({result.total_rows} total)"
   )

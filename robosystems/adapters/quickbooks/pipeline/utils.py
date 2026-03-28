@@ -25,7 +25,7 @@ def get_pipeline_work_dir(graph_id: str) -> Path:
 
 
 # Ledger output tables from dbt (dependency order for FK resolution)
-QB_LEDGER_TABLES = ["accounts", "transactions", "entries", "line_items", "dimensions"]
+QB_LEDGER_TABLES = ["elements", "transactions", "entries", "line_items", "dimensions"]
 
 # dbt project location (relative to repo root)
 DBT_PROJECT_DIR = Path(__file__).resolve().parents[1] / "dbt"

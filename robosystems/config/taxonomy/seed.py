@@ -872,6 +872,93 @@ def seed_reporting_taxonomy(connection) -> None:
     )
 
 
+def seed_tenant_reporting_taxonomy(connection, schema: str) -> None:
+  """Copy the standard reporting taxonomy from public schema into a tenant schema.
+
+  Called by provision_tenant_schema() so that each tenant can see the shared
+  reporting taxonomy via its own tables (avoiding search_path shadowing).
+
+  Idempotent: skips if taxonomy already exists in the tenant schema.
+
+  Args:
+      connection: A SQLAlchemy connection.
+      schema: The tenant schema name (e.g., 'kg19d355cfe0460db38a').
+  """
+  result = connection.execute(
+    text(f"SELECT id FROM {schema}.taxonomies WHERE id = :id"),
+    {"id": TAXONOMY_ID},
+  )
+  if result.fetchone():
+    return
+
+  # Check that public seed data exists
+  result = connection.execute(
+    text("SELECT id FROM public.taxonomies WHERE id = :id"),
+    {"id": TAXONOMY_ID},
+  )
+  if not result.fetchone():
+    return
+
+  # Use explicit column lists to handle different column ordering
+  # between public schema (migration-managed) and tenant schemas (create_all).
+
+  tax_cols = (
+    "id, name, description, taxonomy_type, version, standard, namespace_uri, "
+    "is_shared, source_taxonomy_id, target_taxonomy_id, is_active, is_locked, "
+    "metadata, created_at, updated_at, created_by"
+  )
+  connection.execute(
+    text(f"""
+      INSERT INTO {schema}.taxonomies ({tax_cols})
+        SELECT {tax_cols} FROM public.taxonomies WHERE id = :id
+    """),
+    {"id": TAXONOMY_ID},
+  )
+
+  struct_cols = (
+    "id, name, description, structure_type, taxonomy_id, graph_structure_id, "
+    "is_active, metadata, created_at, updated_at, created_by"
+  )
+  connection.execute(
+    text(f"""
+      INSERT INTO {schema}.structures ({struct_cols})
+        SELECT {struct_cols} FROM public.structures WHERE taxonomy_id = :id
+    """),
+    {"id": TAXONOMY_ID},
+  )
+
+  elem_cols = (
+    "id, code, name, description, qname, namespace, uri, classification, "
+    "sub_classification, balance_type, period_type, is_abstract, is_monetary, "
+    "element_type, parent_id, depth, path, taxonomy_id, source, currency, "
+    "is_active, is_placeholder, external_id, external_source, metadata, "
+    "version, created_at, updated_at, created_by"
+  )
+  connection.execute(
+    text(f"""
+      INSERT INTO {schema}.elements ({elem_cols})
+        SELECT {elem_cols} FROM public.elements WHERE taxonomy_id = :id
+    """),
+    {"id": TAXONOMY_ID},
+  )
+
+  assoc_cols = (
+    "id, structure_id, from_element_id, to_element_id, association_type, "
+    "arcrole, order_value, weight, confidence, suggested_by, approved_by, "
+    "approved_at, metadata, created_at, updated_at, created_by"
+  )
+  connection.execute(
+    text(f"""
+      INSERT INTO {schema}.element_associations ({assoc_cols})
+        SELECT {assoc_cols} FROM public.element_associations
+        WHERE structure_id IN (
+          SELECT id FROM public.structures WHERE taxonomy_id = :id
+        )
+    """),
+    {"id": TAXONOMY_ID},
+  )
+
+
 def _insert_element(connection, e: dict) -> None:
   """Insert a single element into public.elements."""
   connection.execute(

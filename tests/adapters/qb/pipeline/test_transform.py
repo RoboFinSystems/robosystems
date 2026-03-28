@@ -72,7 +72,7 @@ class TestQbTransformSuccess:
       stderr="",
     )
 
-    mock_con = _make_duckdb_mock({"accounts": 5, "transactions": 12, "entries": 3})
+    mock_con = _make_duckdb_mock({"elements": 5, "transactions": 12, "entries": 3})
 
     with (
       patch(
@@ -92,7 +92,7 @@ class TestQbTransformSuccess:
     assert result.metadata["graph_id"] == config.graph_id
     assert result.metadata["tables"] == 3
     assert result.metadata["total_rows"] == 20
-    assert result.metadata["rows_accounts"] == 5
+    assert result.metadata["rows_elements"] == 5
     assert result.metadata["rows_transactions"] == 12
     assert result.metadata["rows_entries"] == 3
 
@@ -114,7 +114,7 @@ class TestQbTransformSuccess:
       stderr="",
     )
 
-    mock_con = _make_duckdb_mock({"accounts": 10})
+    mock_con = _make_duckdb_mock({"elements": 10})
 
     with (
       patch(

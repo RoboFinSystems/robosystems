@@ -107,7 +107,7 @@ class OLTPLoader:
     try:
       existing_tables = {row[0] for row in con.execute("SHOW TABLES").fetchall()}
       dbt_data: dict[str, list[dict]] = {}
-      for table in ["accounts", "transactions", "entries", "line_items", "dimensions"]:
+      for table in ["elements", "transactions", "entries", "line_items", "dimensions"]:
         if table in existing_tables:
           result_set = con.execute(f"SELECT * FROM {table}")
           columns = [desc[0] for desc in result_set.description]
@@ -166,12 +166,12 @@ class OLTPLoader:
         f"Deleted existing data for source={source}, connection_id={connection_id}"
       )
 
-      # --- INSERT elements (from dbt "accounts" table) ---
+      # --- INSERT elements (from dbt "elements" table) ---
       element_lookup: dict[str, str] = {}  # external_id → oltp_id
       external_parent_map: dict[str, str] = {}  # oltp_id → external_parent_id
 
-      if "accounts" in dbt_data:
-        rows = dbt_data["accounts"]
+      if "elements" in dbt_data:
+        rows = dbt_data["elements"]
         element_objects = []
         for row in rows:
           oltp_id = generate_prefixed_ulid("elem")
@@ -328,7 +328,7 @@ class OLTPLoader:
 
           # Resolve FKs
           entry_ext_id = str(row["entry_external_id"])
-          element_ext_id = str(row["account_external_id"])
+          element_ext_id = str(row["element_external_id"])
           entry_oltp_id = entry_lookup.get(entry_ext_id)
           element_oltp_id = element_lookup.get(element_ext_id)
 

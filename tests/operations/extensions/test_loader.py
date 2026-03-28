@@ -84,7 +84,7 @@ def mock_duckdb_data():
   line_items = [
     {
       "entry_external_id": "JournalEntry_100",
-      "account_external_id": "1",
+      "element_external_id": "1",
       "debit_amount": 50000,
       "credit_amount": 0,
       "description": "Cash received",
@@ -93,7 +93,7 @@ def mock_duckdb_data():
     },
     {
       "entry_external_id": "JournalEntry_100",
-      "account_external_id": "2",
+      "element_external_id": "2",
       "debit_amount": 0,
       "credit_amount": 50000,
       "description": "Revenue earned",
@@ -112,7 +112,7 @@ def mock_duckdb_data():
   ]
 
   return {
-    "accounts": accounts,
+    "elements": accounts,
     "transactions": transactions,
     "entries": entries,
     "line_items": line_items,
@@ -280,7 +280,7 @@ class TestOLTPLoader:
       }
     ]
 
-    mock_duckdb_connect.return_value = _make_duckdb_mock({"accounts": only_accounts})
+    mock_duckdb_connect.return_value = _make_duckdb_mock({"elements": only_accounts})
 
     mock_session = MagicMock()
     mock_ext_session.return_value.__enter__ = MagicMock(return_value=mock_session)
@@ -315,7 +315,7 @@ class TestOLTPLoader:
     orphan_lines = [
       {
         "entry_external_id": "nonexistent_entry",
-        "account_external_id": "nonexistent_account",
+        "element_external_id": "nonexistent_account",
         "debit_amount": 10000,
         "credit_amount": 0,
         "description": "Test",

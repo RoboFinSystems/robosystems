@@ -163,4 +163,10 @@ def provision_tenant_schema(graph_id: str) -> None:
     tenant_conn = conn.execution_options(schema_translate_map={None: schema})
     ExtensionsBase.metadata.create_all(bind=tenant_conn, tables=tenant_tables)
 
+    # Seed the shared reporting taxonomy into the tenant schema so that
+    # search_path queries see it (tenant tables shadow public tables).
+    from robosystems.config.taxonomy.seed import seed_tenant_reporting_taxonomy
+
+    seed_tenant_reporting_taxonomy(conn, schema)
+
     conn.commit()
