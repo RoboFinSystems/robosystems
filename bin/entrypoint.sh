@@ -221,6 +221,10 @@ case $DOCKER_PROFILE in
       --base-path ${LBUG_DATABASE_PATH:-/app/data/lbug-dbs} \
       ${READONLY_FLAG}
     ;;
+  "worker")
+    echo "Starting Background Worker..."
+    exec uv run python -m robosystems.worker
+    ;;
   "neo4j-writer")
     echo "Starting Neo4j Graph API..."
     # Graph API with Neo4j backend

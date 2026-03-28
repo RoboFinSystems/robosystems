@@ -313,6 +313,18 @@ function setup_full_config() {
         gh variable set DAGSTER_CONTAINER_INSIGHTS_STAGING --body "disabled"
     fi
 
+    # Background Worker Configuration
+    gh variable set WORKER_ENABLED_PROD --body "false"
+    gh variable set WORKER_CPU_PROD --body "512"
+    gh variable set WORKER_MEMORY_PROD --body "1024"
+    gh variable set WORKER_DESIRED_COUNT_PROD --body "1"
+    if $setup_staging; then
+        gh variable set WORKER_ENABLED_STAGING --body "false"
+        gh variable set WORKER_CPU_STAGING --body "512"
+        gh variable set WORKER_MEMORY_STAGING --body "1024"
+        gh variable set WORKER_DESIRED_COUNT_STAGING --body "1"
+    fi
+
     # Database Configuration
     gh variable set DATABASE_ENGINE_PROD --body "postgres"
     gh variable set DATABASE_INSTANCE_SIZE_PROD --body "db.t4g.small"
