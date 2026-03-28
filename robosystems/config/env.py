@@ -612,6 +612,10 @@ class EnvConfig:
   GRAPH_API_URL = get_str_env("GRAPH_API_URL", "http://localhost:8001")
   GRAPH_API_KEY = get_secret_value("GRAPH_API_KEY", "")
 
+  # Worker API Access (worker → API through ALB/container network)
+  WORKER_API_BASE_URL = get_str_env("WORKER_API_BASE_URL", "http://localhost:8000")
+  WORKER_API_KEY = get_secret_value("WORKER_API_KEY", "")
+
   # Shared repository backend selection (dev/local only)
   # In AWS environments, backend is determined by graph.yml tier configuration
   # Values: "ladybug" or "neo4j"

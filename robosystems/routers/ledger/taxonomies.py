@@ -749,6 +749,40 @@ async def get_mapped_trial_balance(
     raise _ledger_404()
 
 
+@router.post(
+  "/mappings/{mapping_id}/auto-map",
+  status_code=202,
+  operation_id="autoMapElements",
+  summary="Auto-Map Elements via AI",
+  tags=["Ledger"],
+)
+async def auto_map(
+  graph_id: str = Path(..., pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN),
+  mapping_id: str = Path(..., description="Mapping structure ID"),
+  current_user: User = Depends(get_current_user_with_graph),
+  _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
+):
+  """Trigger autonomous CoA → GAAP mapping via background worker.
+
+  Uses Bedrock AI to classify and map unmapped Chart of Accounts elements
+  to US GAAP reporting concepts. Returns a 202 with operation_id for
+  SSE progress tracking.
+
+  Confidence thresholds:
+  - ≥0.90: auto-approved mapping
+  - 0.70-0.89: flagged for review
+  - <0.70: skipped (left unmapped)
+  """
+  from robosystems.worker.client import enqueue_task
+
+  return await enqueue_task(
+    task_type="agent_mapping",
+    graph_id=graph_id,
+    user_id=current_user.id,
+    params={"mapping_id": mapping_id},
+  )
+
+
 # ── Helpers ───────────────────────────────────────────────────────────────
 
 

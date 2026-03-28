@@ -5,7 +5,7 @@ Provides multiagent system with dynamic routing, RAG, and specialized agents.
 """
 
 # Import concrete agents to register them
-from . import cypher_agent, financial
+from . import cypher_agent
 from .ai_client import AIClient
 from .base import (
   AgentCapability,
@@ -61,5 +61,4 @@ __all__ = [
   "SearchResult",
   # Modules (for registration)
   "cypher_agent",
-  "financial",
 ]

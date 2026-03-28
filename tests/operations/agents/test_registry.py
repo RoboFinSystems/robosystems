@@ -385,11 +385,11 @@ class TestAgentRegistry:
     """Test lazy loading of agents."""
     # Register agent class path instead of class itself
     registry.register_lazy(
-      "financial", "robosystems.operations.agents.financial.FinancialAgent"
+      "cypher", "robosystems.operations.agents.cypher_agent.CypherAgent"
     )
 
     # Agent should be registered but not loaded
-    assert "financial" in registry._lazy_imports
+    assert "cypher" in registry._lazy_imports
     # When getting the agent, it should be imported and instantiated
     # (This would require the actual implementation)
 
