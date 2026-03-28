@@ -143,7 +143,7 @@ class FinancialAgent(BaseAgent):
       logger.error(f"Financial agent error: {e!s}")
 
       error_metadata: dict[str, Any] = {}
-      if self._last_credit_consumption:
+      if getattr(self, "_last_credit_consumption", None):
         error_metadata["credits_consumed"] = self._last_credit_consumption.get(
           "credits_consumed", 0
         )

@@ -36,6 +36,7 @@ from ...models.iam.user_repository import UserRepository
 from ...models.iam.user_repository_credits import (
   UserRepositoryCredits,
   UserRepositoryCreditTransaction,
+  UserRepositoryCreditTransactionType,
 )
 
 logger = logging.getLogger(__name__)
@@ -337,7 +338,8 @@ class CreditService:
         "transaction_count": self.session.query(UserRepositoryCreditTransaction.id)
         .filter(
           UserRepositoryCreditTransaction.credit_pool_id == user_repo_credits.id,
-          UserRepositoryCreditTransaction.transaction_type == "consumption",
+          UserRepositoryCreditTransaction.transaction_type
+          == UserRepositoryCreditTransactionType.CONSUMPTION.value,
         )
         .count(),
         "usage_percentage": repo_summary["usage_percentage"],
