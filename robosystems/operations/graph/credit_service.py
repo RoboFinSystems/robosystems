@@ -334,9 +334,7 @@ class CreditService:
         "current_balance": repo_summary["current_balance"],
         "monthly_allocation": repo_summary["monthly_allocation"],
         "consumed_this_month": repo_summary["consumed_this_month"],
-        "transaction_count": self.session.query(
-          UserRepositoryCreditTransaction.id
-        )
+        "transaction_count": self.session.query(UserRepositoryCreditTransaction.id)
         .filter(
           UserRepositoryCreditTransaction.credit_pool_id == user_repo_credits.id,
           UserRepositoryCreditTransaction.transaction_type == "consumption",
