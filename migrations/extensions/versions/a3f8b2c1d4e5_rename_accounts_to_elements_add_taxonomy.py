@@ -514,7 +514,38 @@ def _upgrade_tenant_schema(conn, schema: str) -> None:
     )
   )
 
-  # Create tenant structures and element_associations tables
+  # Create tenant taxonomies, structures, and element_associations tables
+  conn.execute(
+    sa.text(f"""
+            CREATE TABLE IF NOT EXISTS "{s}".taxonomies (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                description TEXT,
+                taxonomy_type TEXT NOT NULL,
+                version TEXT,
+                standard TEXT,
+                namespace_uri TEXT,
+                is_shared BOOLEAN NOT NULL DEFAULT false,
+                source_taxonomy_id TEXT,
+                target_taxonomy_id TEXT,
+                is_active BOOLEAN NOT NULL DEFAULT true,
+                is_locked BOOLEAN NOT NULL DEFAULT false,
+                metadata JSONB NOT NULL DEFAULT '{{}}'::jsonb,
+                created_at TIMESTAMP NOT NULL DEFAULT now(),
+                updated_at TIMESTAMP NOT NULL DEFAULT now(),
+                created_by TEXT NOT NULL DEFAULT 'system',
+                CONSTRAINT check_taxonomy_type CHECK (
+                    taxonomy_type IN ('chart_of_accounts', 'reporting', 'mapping')
+                )
+            )
+        """)
+  )
+  conn.execute(
+    sa.text(
+      f'CREATE INDEX IF NOT EXISTS idx_taxonomies_type ON "{s}".taxonomies (taxonomy_type)'
+    )
+  )
+
   conn.execute(
     sa.text(f"""
             CREATE TABLE IF NOT EXISTS "{s}".structures (
@@ -719,9 +750,10 @@ def _downgrade_tenant_schema(conn, schema: str) -> None:
   """Reverse the migration for a tenant schema."""
   s = schema
 
-  # Drop new tables
+  # Drop new tables (reverse dependency order)
   conn.execute(sa.text(f'DROP TABLE IF EXISTS "{s}".element_associations'))
   conn.execute(sa.text(f'DROP TABLE IF EXISTS "{s}".structures'))
+  conn.execute(sa.text(f'DROP TABLE IF EXISTS "{s}".taxonomies'))
 
   # Rename FK columns back
   conn.execute(

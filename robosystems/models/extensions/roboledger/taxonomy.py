@@ -34,7 +34,10 @@ class Taxonomy(ExtensionsBase):
       "taxonomy_type IN ('chart_of_accounts', 'reporting', 'mapping')",
       name="check_taxonomy_type",
     ),
-    {"schema": "public"},
+    # No schema= specified — tenant table, created per-graph by provision_tenant_schema.
+    # Shared taxonomies (US GAAP, SFAC 6) live in the public schema copy, visible
+    # to all tenants via search_path = '{graph_id}, public'.
+    # Tenant-specific taxonomies (CoA, mappings) live in the tenant schema.
   )
 
   # Identity

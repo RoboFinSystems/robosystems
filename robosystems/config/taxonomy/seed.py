@@ -880,12 +880,12 @@ def _insert_element(connection, e: dict) -> None:
                 (id, qname, namespace, name, classification, balance_type, period_type,
                  is_abstract, is_monetary, element_type, source, parent_id, depth,
                  path, taxonomy_id, currency, is_active, is_placeholder, metadata,
-                 version, created_by)
+                 version, created_by, created_at, updated_at)
             VALUES
                 (:id, :qname, :ns, :name, :cls, :bal, :period,
                  :abstract, true, :etype, :source, :parent, :depth,
                  '', :tax_id, 'USD', true, false, '{}'::jsonb,
-                 1, 'system')
+                 1, 'system', now(), now())
         """),
     {
       "id": e["id"],
