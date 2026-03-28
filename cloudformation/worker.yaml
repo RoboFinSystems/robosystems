@@ -45,6 +45,12 @@ Parameters:
     Default: "1024"
     Description: Memory in MiB for worker
     AllowedValues: ["1024", "2048", "4096"]
+  WorkerDesiredCount:
+    Type: Number
+    Default: 1
+    MinValue: 0
+    MaxValue: 5
+    Description: Number of worker tasks (0 to pause, 1 for singleton, 2+ for parallel processing)
 
   # Database Configuration (from Postgres stack outputs)
   DatabaseEndpoint:
@@ -164,6 +170,7 @@ Resources:
                 Resource:
                   - !Sub "arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:robosystems/${Environment}-*"
                   - !Sub "arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:robosystems/${Environment}/*"
+              # ListSecrets doesn't support resource-level permissions (AWS API constraint)
               - Effect: Allow
                 Action:
                   - secretsmanager:ListSecrets
@@ -378,7 +385,7 @@ Resources:
     Properties:
       ServiceName: !Sub robosystems-worker-${Environment}
       Cluster: !Ref DagsterClusterArn
-      DesiredCount: 1
+      DesiredCount: !Ref WorkerDesiredCount
       LaunchType: FARGATE
       NetworkConfiguration:
         AwsvpcConfiguration:

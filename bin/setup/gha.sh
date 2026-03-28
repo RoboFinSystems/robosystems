@@ -317,10 +317,12 @@ function setup_full_config() {
     gh variable set WORKER_ENABLED_PROD --body "false"
     gh variable set WORKER_CPU_PROD --body "512"
     gh variable set WORKER_MEMORY_PROD --body "1024"
+    gh variable set WORKER_DESIRED_COUNT_PROD --body "1"
     if $setup_staging; then
         gh variable set WORKER_ENABLED_STAGING --body "false"
         gh variable set WORKER_CPU_STAGING --body "512"
         gh variable set WORKER_MEMORY_STAGING --body "1024"
+        gh variable set WORKER_DESIRED_COUNT_STAGING --body "1"
     fi
 
     # Database Configuration

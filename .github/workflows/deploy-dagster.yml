@@ -113,6 +113,11 @@ on:
         required: false
         type: string
         default: "1024"
+      worker_desired_count:
+        description: "Number of worker tasks (0 to pause, 1 for singleton, 2+ for parallel)"
+        required: false
+        type: string
+        default: "1"
 
       # Cache Configuration
       valkey_url:
@@ -402,6 +407,7 @@ jobs:
                 ParameterKey=ECRImageTag,ParameterValue=${{ inputs.ecr_image_tag }} \
                 ParameterKey=WorkerCpu,ParameterValue=${{ inputs.worker_cpu }} \
                 ParameterKey=WorkerMemory,ParameterValue=${{ inputs.worker_memory }} \
+                ParameterKey=WorkerDesiredCount,ParameterValue=${{ inputs.worker_desired_count }} \
                 ParameterKey=DatabaseEndpoint,ParameterValue=${{ inputs.database_endpoint }} \
                 ParameterKey=DatabasePort,ParameterValue=${{ inputs.database_port }} \
                 ParameterKey=DatabaseSecurityGroupId,ParameterValue=${{ inputs.database_sg_id }} \

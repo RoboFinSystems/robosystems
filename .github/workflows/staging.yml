@@ -623,6 +623,7 @@ jobs:
       worker_enabled: ${{ vars.WORKER_ENABLED_STAGING || 'false' }}
       worker_cpu: ${{ vars.WORKER_CPU_STAGING || '512' }}
       worker_memory: ${{ vars.WORKER_MEMORY_STAGING || '1024' }}
+      worker_desired_count: ${{ vars.WORKER_DESIRED_COUNT_STAGING || '1' }}
       # Capacity Provider Configuration (Spot vs On-Demand)
       daemon_fargate_spot_weight: ${{ vars.DAGSTER_DAEMON_FARGATE_SPOT_WEIGHT_STAGING || '80' }}
       webserver_fargate_spot_weight: ${{ vars.DAGSTER_WEBSERVER_FARGATE_SPOT_WEIGHT_STAGING || '80' }}

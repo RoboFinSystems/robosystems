@@ -29,7 +29,11 @@ logger = logging.getLogger(__name__)
 
 async def run() -> None:
   """Main worker loop. Blocks until SIGTERM/SIGINT."""
-  queue = create_async_redis_client(ValkeyDatabase.WORKER_QUEUE, decode_responses=True)
+  # socket_timeout must exceed BRPOP timeout (5s) to avoid spurious TimeoutError.
+  # Default socket_timeout is 5s from get_redis_connection_params(), which races with BRPOP.
+  queue = create_async_redis_client(
+    ValkeyDatabase.WORKER_QUEUE, decode_responses=True, socket_timeout=30
+  )
   manager = get_operation_manager()
   shutdown = asyncio.Event()
 
@@ -60,11 +64,15 @@ async def _process_task(
   worker_id: str,
 ) -> None:
   """Process a single task with full lifecycle management."""
-  task_id = task_data["task_id"]
-  task_type = task_data["task_type"]
-  graph_id = task_data["graph_id"]
-  user_id = task_data["user_id"]
-  params = task_data.get("params", {})
+  try:
+    task_id = task_data["task_id"]
+    task_type = task_data["task_type"]
+    graph_id = task_data["graph_id"]
+    user_id = task_data["user_id"]
+    params = task_data.get("params", {})
+  except KeyError as e:
+    logger.error(f"Malformed task payload, missing key {e}: {task_data}")
+    return
 
   handler_cls = get_task_handler(task_type)
   if handler_cls is None:

@@ -34,7 +34,7 @@ class BaseTask(ABC):
   @abstractmethod
   async def execute(self) -> dict[str, Any]:
     """Execute the task. Must return a result dict."""
-    ...
+    raise NotImplementedError
 
   async def report_progress(
     self,
