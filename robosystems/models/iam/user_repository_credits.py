@@ -98,13 +98,13 @@ class UserRepositoryCredits(Base):
 
   # Metadata
   created_at = Column(
-    DateTime(timezone=True), nullable=False, default=datetime.now(UTC)
+    DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC)
   )
   updated_at = Column(
     DateTime(timezone=True),
     nullable=False,
-    default=datetime.now(UTC),
-    onupdate=datetime.now(UTC),
+    default=lambda: datetime.now(UTC),
+    onupdate=lambda: datetime.now(UTC),
   )
 
   # Relationships
@@ -754,7 +754,7 @@ class UserRepositoryCreditTransaction(Base):
   # Metadata
   transaction_metadata = Column("metadata", Text, nullable=True)  # JSON
   created_at = Column(
-    DateTime(timezone=True), nullable=False, default=datetime.now(UTC)
+    DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC)
   )
 
   # Relationships

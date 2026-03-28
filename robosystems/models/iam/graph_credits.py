@@ -92,13 +92,13 @@ class GraphCredits(Base):
 
   # Tracking
   created_at = Column(
-    DateTime(timezone=True), nullable=False, default=datetime.now(UTC)
+    DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC)
   )
   updated_at = Column(
     DateTime(timezone=True),
     nullable=False,
-    default=datetime.now(UTC),
-    onupdate=datetime.now(UTC),
+    default=lambda: datetime.now(UTC),
+    onupdate=lambda: datetime.now(UTC),
   )
 
   # Relationships
@@ -500,7 +500,7 @@ class GraphCreditTransaction(Base):
 
   # Tracking
   created_at = Column(
-    DateTime(timezone=True), nullable=False, default=datetime.now(UTC)
+    DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC)
   )
 
   # Relationships

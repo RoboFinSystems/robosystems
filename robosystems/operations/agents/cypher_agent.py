@@ -150,10 +150,21 @@ class CypherAgent(BaseAgent):
 
       logger.error(f"Cypher agent error: {e!s}")
       logger.error(f"Full traceback:\n{traceback.format_exc()}")
+
+      error_metadata: dict[str, Any] = {}
+      if self._last_credit_consumption:
+        error_metadata["credits_consumed"] = self._last_credit_consumption.get(
+          "credits_consumed", 0
+        )
+        error_metadata["credits_remaining"] = self._last_credit_consumption.get(
+          "remaining_balance", 0
+        )
+
       return AgentResponse(
         content=f"Query processing failed: {e!s}",
         agent_name=self.metadata.name,
         mode_used=mode,
+        metadata=error_metadata,
         tokens_used=self.total_tokens_used,
         error_details={
           "code": "QUERY_GENERATION_ERROR",
@@ -357,9 +368,9 @@ Please explain these results in a clear, natural way.""",
           "remaining_balance": 0,
         }
 
-      self._last_credit_consumption["credits_consumed"] = int(
+      self._last_credit_consumption["credits_consumed"] = float(
         self._last_credit_consumption.get("credits_consumed", 0) or 0
-      ) + int(credit_result.get("credits_consumed", 0) or 0)
+      ) + float(credit_result.get("credits_consumed", 0) or 0)
 
       # Keep the latest remaining balance, if provided.
       if "remaining_balance" in credit_result:
