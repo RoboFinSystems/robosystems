@@ -33,7 +33,10 @@ from ...models.iam import (
 )
 from ...models.iam.graph_credits import CreditTransactionType
 from ...models.iam.user_repository import UserRepository
-from ...models.iam.user_repository_credits import UserRepositoryCredits
+from ...models.iam.user_repository_credits import (
+  UserRepositoryCredits,
+  UserRepositoryCreditTransaction,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -331,11 +334,14 @@ class CreditService:
         "current_balance": repo_summary["current_balance"],
         "monthly_allocation": repo_summary["monthly_allocation"],
         "consumed_this_month": repo_summary["consumed_this_month"],
-        "transaction_count": sum(
-          1
-          for t in user_repo_credits.transactions
-          if t.transaction_type == "consumption"
-        ),
+        "transaction_count": self.session.query(
+          UserRepositoryCreditTransaction.id
+        )
+        .filter(
+          UserRepositoryCreditTransaction.credit_pool_id == user_repo_credits.id,
+          UserRepositoryCreditTransaction.transaction_type == "consumption",
+        )
+        .count(),
         "usage_percentage": repo_summary["usage_percentage"],
         "last_allocation_date": repo_summary["last_allocation_date"],
       }
