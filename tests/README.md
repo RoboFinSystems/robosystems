@@ -20,10 +20,6 @@ just test-all
 For complete end-to-end workflow validation, use the **examples** directory instead of traditional e2e tests:
 
 ```bash
-# Run complete accounting workflow
-cd examples/accounting_demo
-uv run main.py
-
 # Run custom graph workflow
 cd examples/custom_graph_demo
 uv run main.py

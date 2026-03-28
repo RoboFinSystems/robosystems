@@ -404,7 +404,7 @@ class MCPSchemaResponse(BaseModel):
       "examples": [
         {
           "summary": "Accounting graph schema",
-          "description": "Schema for accounting demo with transactions, elements, and reports",
+          "description": "Schema for accounting graph with transactions, elements, and reports",
           "value": {
             "schema": [
               {

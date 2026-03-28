@@ -83,7 +83,6 @@ just sec-reset             # Reset SEC database
 
 ```bash
 just demo-user             # Create/reuse demo user credentials
-just demo-accounting       # Run accounting demo
 just demo-custom-graph     # Run custom graph demo
 just demo-sec NVDA 2025    # Run SEC demo
 ```
