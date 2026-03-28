@@ -129,7 +129,8 @@ Resources:
   # ========================================
   WorkerLogGroup:
     Type: AWS::Logs::LogGroup
-    DeletionPolicy: Delete
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
     Properties:
       LogGroupName: !Sub /robosystems/${Environment}/worker
       RetentionInDays: !Ref LogRetentionDays

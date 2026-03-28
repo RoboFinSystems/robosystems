@@ -51,7 +51,11 @@ async def run() -> None:
         continue
 
       _, task_json = result
-      task_data = json.loads(task_json)
+      try:
+        task_data = json.loads(task_json)
+      except json.JSONDecodeError:
+        logger.error(f"Malformed JSON in task queue: {task_json!r}")
+        continue
       await _process_task(task_data, manager, worker_id)
   finally:
     logger.info(f"Worker shutting down: {worker_id}")
