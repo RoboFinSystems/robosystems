@@ -146,6 +146,37 @@ services:
           cpus: "0.5"
     profiles: ["dagster", "robosystems", "all"]
 
+  # Background Task Worker
+  worker:
+    container_name: robosystems-worker
+    image: ${ROBOSYSTEMS_IMAGE:-robosystems-local}
+    pull_policy: ${ROBOSYSTEMS_PULL_POLICY:-never}
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: /app/bin/entrypoint.sh
+    environment:
+      - DOCKER_PROFILE=worker
+    env_file:
+      - .env
+    volumes:
+      - ./robosystems:/app/robosystems
+    depends_on:
+      valkey:
+        condition: service_healthy
+      pg:
+        condition: service_healthy
+    restart: always
+    deploy:
+      resources:
+        limits:
+          memory: 1g
+          cpus: "1"
+        reservations:
+          memory: 512m
+          cpus: "0.5"
+    profiles: ["worker", "robosystems", "all"]
+
   # Postgres - Database for RoboSystems
   pg:
     container_name: robosystems-pg

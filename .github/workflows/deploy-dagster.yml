@@ -97,6 +97,18 @@ on:
         type: string
         default: "0"
 
+      # Worker Configuration
+      worker_cpu:
+        description: "CPU units for background worker"
+        required: false
+        type: string
+        default: "512"
+      worker_memory:
+        description: "Memory in MiB for background worker"
+        required: false
+        type: string
+        default: "1024"
+
       # Cache Configuration
       valkey_url:
         description: "Valkey ElastiCache endpoint URL"
@@ -342,4 +354,97 @@ jobs:
         with:
           stack-name: ${{ inputs.stack_name }}
           timeout: "1800"
+          interval: "10"
+
+      # ========================================
+      # WORKER STACK (separate stack, same cluster)
+      # ========================================
+      - name: Get Dagster Stack Outputs
+        id: dagster-outputs
+        run: |
+          CLUSTER_ARN=$(aws cloudformation describe-stacks \
+            --stack-name ${{ inputs.stack_name }} \
+            --query "Stacks[0].Outputs[?OutputKey=='ClusterArn'].OutputValue" \
+            --output text)
+          SG_ID=$(aws cloudformation describe-stacks \
+            --stack-name ${{ inputs.stack_name }} \
+            --query "Stacks[0].Outputs[?OutputKey=='DagsterSecurityGroupId'].OutputValue" \
+            --output text)
+          echo "cluster_arn=$CLUSTER_ARN" >> $GITHUB_OUTPUT
+          echo "sg_id=$SG_ID" >> $GITHUB_OUTPUT
+
+      - name: Deploy Worker CloudFormation Stack
+        id: deploy-worker
+        run: |
+          WORKER_STACK="robosystems-worker-${{ inputs.environment }}"
+
+          if aws cloudformation describe-stacks --stack-name $WORKER_STACK 2>&1 | grep -q "does not exist"; then
+            STACK_ACTION="create-stack"
+            echo "Creating new worker stack $WORKER_STACK"
+          else
+            STACK_ACTION="update-stack"
+            echo "Updating existing worker stack $WORKER_STACK"
+          fi
+
+          WORKER_PARAMS="ParameterKey=Environment,ParameterValue=${{ inputs.environment }} \
+                ParameterKey=SubnetIds,ParameterValue=\"${{ inputs.subnet_ids }}\" \
+                ParameterKey=DagsterClusterArn,ParameterValue=${{ steps.dagster-outputs.outputs.cluster_arn }} \
+                ParameterKey=DagsterSecurityGroupId,ParameterValue=${{ steps.dagster-outputs.outputs.sg_id }} \
+                ParameterKey=ECRRepositoryUrl,ParameterValue=${{ inputs.ecr_repository_url }} \
+                ParameterKey=ECRImageTag,ParameterValue=${{ inputs.ecr_image_tag }} \
+                ParameterKey=WorkerCpu,ParameterValue=${{ inputs.worker_cpu }} \
+                ParameterKey=WorkerMemory,ParameterValue=${{ inputs.worker_memory }} \
+                ParameterKey=DatabaseEndpoint,ParameterValue=${{ inputs.database_endpoint }} \
+                ParameterKey=DatabasePort,ParameterValue=${{ inputs.database_port }} \
+                ParameterKey=DatabaseSecurityGroupId,ParameterValue=${{ inputs.database_sg_id }} \
+                ParameterKey=ValkeyUrl,ParameterValue=${{ inputs.valkey_url }} \
+                ParameterKey=ValkeyClientSecurityGroupId,ParameterValue=${{ inputs.valkey_sg_id }} \
+                ParameterKey=OpenSearchEndpoint,ParameterValue=\"${{ inputs.opensearch_endpoint }}\" \
+                ParameterKey=OpenSearchClientSecurityGroupId,ParameterValue=\"${{ inputs.opensearch_sg_id }}\" \
+                ParameterKey=SharedRawBucketArn,ParameterValue=\"${{ inputs.shared_raw_bucket_arn }}\" \
+                ParameterKey=SharedProcessedBucketArn,ParameterValue=\"${{ inputs.shared_processed_bucket_arn }}\" \
+                ParameterKey=UserDataBucketArn,ParameterValue=\"${{ inputs.user_data_bucket_arn }}\" \
+                ParameterKey=DeploymentBucketArn,ParameterValue=\"${{ inputs.deployment_bucket_arn }}\" \
+                ParameterKey=LogsBucketArn,ParameterValue=\"${{ inputs.logs_bucket_arn }}\""
+
+          if [ "$STACK_ACTION" = "create-stack" ]; then
+            aws cloudformation $STACK_ACTION \
+              --stack-name $WORKER_STACK \
+              --template-body file://cloudformation/worker.yaml \
+              --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM \
+              --parameters $WORKER_PARAMS \
+              --tags \
+                Key=Environment,Value=${{ inputs.environment }} \
+                Key=Service,Value=RoboSystems \
+                Key=Component,Value=Worker \
+                Key=Repository,Value=${{ github.repository }} \
+                Key=CreatedBy,Value=GitHubActions
+          else
+            UPDATE_OUTPUT=$(aws cloudformation $STACK_ACTION \
+              --stack-name $WORKER_STACK \
+              --template-body file://cloudformation/worker.yaml \
+              --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM \
+              --parameters $WORKER_PARAMS \
+              --tags \
+                Key=Environment,Value=${{ inputs.environment }} \
+                Key=Service,Value=RoboSystems \
+                Key=Component,Value=Worker \
+                Key=Repository,Value=${{ github.repository }} \
+                Key=CreatedBy,Value=GitHubActions 2>&1) || true
+
+            if echo "$UPDATE_OUTPUT" | grep -q "No updates are to be performed"; then
+              echo "Worker stack is already up to date"
+            elif echo "$UPDATE_OUTPUT" | grep -q "error"; then
+              echo "Error updating worker stack: $UPDATE_OUTPUT"
+              exit 1
+            else
+              echo "Worker stack update initiated"
+            fi
+          fi
+
+      - name: Monitor Worker Stack Deployment
+        uses: ./.github/actions/monitor-stack-deployment
+        with:
+          stack-name: robosystems-worker-${{ inputs.environment }}
+          timeout: "600"
           interval: "10"
