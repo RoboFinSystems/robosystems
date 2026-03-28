@@ -554,7 +554,7 @@ class SchemaInfoResponse(BaseModel):
         },
         {
           "summary": "Accounting graph schema",
-          "description": "Runtime schema from accounting demo showing double-entry bookkeeping structure",
+          "description": "Runtime schema for accounting graph showing double-entry bookkeeping structure",
           "value": {
             "graph_id": "kg1a2b3c4d5",
             "schema": {

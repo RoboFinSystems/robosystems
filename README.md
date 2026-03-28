@@ -89,7 +89,6 @@ See RoboSystems in action with runnable demos that create graphs, load data, and
 
 ```bash
 just demo-sec               # Loads NVIDIA's SEC XBRL data via Dagster pipeline
-just demo-accounting        # Creates chart of accounts with 6 months of transactions
 just demo-custom-graph      # Builds custom graph schema with relationship networks
 ```
 

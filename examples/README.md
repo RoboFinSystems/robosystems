@@ -12,7 +12,6 @@ just start
 just demo-all
 
 # Or run individual demos
-just demo-accounting
 just demo-custom-graph
 just demo-sec NVDA 2025
 ```
@@ -57,52 +56,7 @@ Any publicly traded US company with SEC filings (e.g., AAPL, MSFT, GOOGL, TSLA, 
 
 **Documentation:** See [README.md](sec_demo/README.md) for detailed guide and query examples
 
-### 2. Accounting Demo - Double-Entry Bookkeeping
-
-Complete accounting system with chart of accounts, transactions, and financial statements.
-
-**Features:**
-- Chart of accounts (Assets, Liabilities, Equity, Revenue, Expenses)
-- Double-entry transactions with journal entries
-- Multi-month transaction history
-- Trial balance and financial statement queries
-
-**Usage:**
-```bash
-# Run with new graph (default)
-just demo-accounting
-
-# Create new user and graph
-just demo-accounting new-user,new-graph
-
-# Skip verification queries
-just demo-accounting skip-queries
-```
-
-**What It Creates:**
-- 1 Entity (Acme Consulting LLC - fictional consulting company)
-- 20 Accounts (complete chart of accounts)
-- ~180 Transactions (6 months of business activity)
-- ~360 Line Items (double-entry journal entries)
-
-**Example Data:**
-- Monthly rent payments ($3,000)
-- Consulting revenue ($15,000-25,000/month)
-- Salary expenses ($8,000/month)
-- Operating expenses (utilities, supplies, marketing)
-
-**What It Does:**
-1. Sets up user credentials (or reuses existing)
-2. Creates graph database with accounting schema
-3. Generates realistic accounting data
-4. Uploads and ingests data via staging tables
-5. Runs example queries (trial balance, income statement)
-
-**Location:** `/examples/accounting_demo/`
-
-**Documentation:** See [README.md](accounting_demo/README.md) for step-by-step guide
-
-### 3. Custom Graph Demo - Generic Graph Structure
+### 2. Custom Graph Demo - Generic Graph Structure
 
 Demonstrates custom schema creation with people, companies, and projects.
 
@@ -177,13 +131,13 @@ Most demos accept comma-separated flags to control behavior. Default behavior re
 **Examples:**
 ```bash
 # Default: reuse existing user and graph, regenerate data
-just demo-accounting
+just demo-custom-graph
 
 # Create new graph for existing user
-just demo-accounting new-graph
+just demo-custom-graph new-graph
 
 # Create new user and graph
-just demo-accounting new-user,new-graph
+just demo-custom-graph new-user,new-graph
 
 # Skip queries
 just demo-custom-graph skip-queries
@@ -192,16 +146,6 @@ just demo-custom-graph skip-queries
 ## Running Individual Steps
 
 Each demo has a `main.py` that runs all steps automatically. For manual control, you can run individual numbered scripts:
-
-**Accounting Demo:**
-```bash
-cd examples/accounting_demo
-uv run 01_setup_credentials.py
-uv run 02_create_graph.py
-uv run 03_generate_data.py
-uv run 04_upload_ingest.py
-uv run 05_query_graph.py --all
-```
 
 **Custom Graph Demo:**
 ```bash
