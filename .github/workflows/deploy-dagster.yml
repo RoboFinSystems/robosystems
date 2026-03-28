@@ -98,6 +98,11 @@ on:
         default: "0"
 
       # Worker Configuration
+      worker_enabled:
+        description: "Enable background worker deployment (true/false)"
+        required: false
+        type: string
+        default: "false"
       worker_cpu:
         description: "CPU units for background worker"
         required: false
@@ -358,8 +363,10 @@ jobs:
 
       # ========================================
       # WORKER STACK (separate stack, same cluster)
+      # Controlled by worker_enabled flag — set to "true" when ready to deploy
       # ========================================
       - name: Get Dagster Stack Outputs
+        if: inputs.worker_enabled == 'true'
         id: dagster-outputs
         run: |
           CLUSTER_ARN=$(aws cloudformation describe-stacks \
@@ -374,6 +381,7 @@ jobs:
           echo "sg_id=$SG_ID" >> $GITHUB_OUTPUT
 
       - name: Deploy Worker CloudFormation Stack
+        if: inputs.worker_enabled == 'true'
         id: deploy-worker
         run: |
           WORKER_STACK="robosystems-worker-${{ inputs.environment }}"
@@ -443,6 +451,7 @@ jobs:
           fi
 
       - name: Monitor Worker Stack Deployment
+        if: inputs.worker_enabled == 'true'
         uses: ./.github/actions/monitor-stack-deployment
         with:
           stack-name: robosystems-worker-${{ inputs.environment }}
