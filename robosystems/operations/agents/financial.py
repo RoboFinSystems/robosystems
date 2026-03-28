@@ -141,10 +141,21 @@ class FinancialAgent(BaseAgent):
 
     except Exception as e:
       logger.error(f"Financial agent error: {e!s}")
+
+      error_metadata: dict[str, Any] = {}
+      if getattr(self, "_last_credit_consumption", None):
+        error_metadata["credits_consumed"] = self._last_credit_consumption.get(
+          "credits_consumed", 0
+        )
+        error_metadata["credits_remaining"] = self._last_credit_consumption.get(
+          "remaining_balance", 0
+        )
+
       return AgentResponse(
         content=f"Financial analysis failed: {e!s}",
         agent_name=self.metadata.name,
         mode_used=mode,
+        metadata=error_metadata,
         tokens_used=self.total_tokens_used,
         error_details={
           "code": "ANALYSIS_ERROR",
