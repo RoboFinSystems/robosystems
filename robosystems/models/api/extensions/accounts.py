@@ -1,4 +1,4 @@
-"""Account response models."""
+"""Account/Element response models."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from robosystems.models.api.common import PaginationInfo
 
 class AccountResponse(BaseModel):
   id: str
-  code: str
+  code: str | None = None
   name: str
   description: str | None = None
   classification: str
@@ -32,7 +32,7 @@ class AccountListResponse(BaseModel):
 
 class AccountTreeNode(BaseModel):
   id: str
-  code: str
+  code: str | None = None
   name: str
   classification: str
   account_type: str | None = None

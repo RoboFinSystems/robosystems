@@ -35,7 +35,7 @@ class LoadResult:
   graph_id: str
   source: str
   connection_id: str
-  accounts: int = 0
+  elements: int = 0
   transactions: int = 0
   entries: int = 0
   line_items: int = 0
@@ -45,7 +45,7 @@ class LoadResult:
   @property
   def total_rows(self) -> int:
     return (
-      self.accounts
+      self.elements
       + self.transactions
       + self.entries
       + self.line_items
@@ -87,8 +87,8 @@ class OLTPLoader:
 
     from robosystems.db.extensions import extensions_session, provision_tenant_schema
     from robosystems.models.extensions import (
-      Account,
       Dimension,
+      Element,
       Entry,
       LineItem,
       Transaction,
@@ -150,11 +150,11 @@ class OLTPLoader:
         Transaction.connection_id == connection_id,
       ).delete(synchronize_session=False)
 
-      # TODO: Account lacks connection_id column — if a graph has multiple
-      # connections of the same source type, this deletes accounts from all of them.
-      # Add Account.connection_id in a future migration to scope correctly.
-      session.query(Account).filter(
-        Account.external_source == source,
+      # TODO: Element lacks connection_id column — if a graph has multiple
+      # connections of the same source type, this deletes elements from all of them.
+      # Add Element.connection_id in a future migration to scope correctly.
+      session.query(Element).filter(
+        Element.external_source == source,
       ).delete(synchronize_session=False)
 
       session.query(Dimension).filter(
@@ -166,24 +166,24 @@ class OLTPLoader:
         f"Deleted existing data for source={source}, connection_id={connection_id}"
       )
 
-      # --- INSERT accounts ---
-      account_lookup: dict[str, str] = {}  # external_id → oltp_id
+      # --- INSERT elements (from dbt "accounts" table) ---
+      element_lookup: dict[str, str] = {}  # external_id → oltp_id
       external_parent_map: dict[str, str] = {}  # oltp_id → external_parent_id
 
       if "accounts" in dbt_data:
         rows = dbt_data["accounts"]
-        account_objects = []
+        element_objects = []
         for row in rows:
-          oltp_id = generate_prefixed_ulid("acct")
+          oltp_id = generate_prefixed_ulid("elem")
           ext_id = str(row["external_id"])
-          account_lookup[ext_id] = oltp_id
+          element_lookup[ext_id] = oltp_id
 
           ext_parent = row.get("external_parent_id")
           if ext_parent and str(ext_parent) not in ("", "None", "nan"):
             external_parent_map[oltp_id] = str(ext_parent)
 
-          account_objects.append(
-            Account(
+          element_objects.append(
+            Element(
               id=oltp_id,
               code=str(row["code"]),
               name=str(row["name"]),
@@ -199,6 +199,11 @@ class OLTPLoader:
               currency=str(row.get("currency", "USD")),
               is_active=bool(row.get("is_active", True)),
               is_placeholder=bool(row.get("is_placeholder", False)),
+              source=source,
+              period_type="duration",
+              element_type="concept",
+              is_abstract=False,
+              is_monetary=True,
               external_id=ext_id,
               external_source=str(row["external_source"]),
               metadata_=_parse_metadata(row.get("metadata")),
@@ -209,20 +214,20 @@ class OLTPLoader:
             )
           )
 
-        session.add_all(account_objects)
+        session.add_all(element_objects)
         session.flush()
 
         # Second pass: resolve parent_id
         for oltp_id, ext_parent_id in external_parent_map.items():
-          parent_oltp_id = account_lookup.get(ext_parent_id)
+          parent_oltp_id = element_lookup.get(ext_parent_id)
           if parent_oltp_id:
-            session.query(Account).filter(Account.id == oltp_id).update(
+            session.query(Element).filter(Element.id == oltp_id).update(
               {"parent_id": parent_oltp_id}, synchronize_session=False
             )
 
         session.flush()
-        result.accounts = len(rows)
-        logger.info(f"Inserted {result.accounts} accounts")
+        result.elements = len(rows)
+        logger.info(f"Inserted {result.elements} elements")
 
       # --- INSERT transactions ---
       transaction_lookup: dict[str, str] = {}  # external_id → oltp_id
@@ -323,9 +328,9 @@ class OLTPLoader:
 
           # Resolve FKs
           entry_ext_id = str(row["entry_external_id"])
-          account_ext_id = str(row["account_external_id"])
+          element_ext_id = str(row["account_external_id"])
           entry_oltp_id = entry_lookup.get(entry_ext_id)
-          account_oltp_id = account_lookup.get(account_ext_id)
+          element_oltp_id = element_lookup.get(element_ext_id)
 
           # Skip zero-amount lines (QB tax/memo lines)
           debit = int(row["debit_amount"])
@@ -336,9 +341,9 @@ class OLTPLoader:
           if not entry_oltp_id:
             result.errors.append(f"LineItem references unknown entry: {entry_ext_id}")
             continue
-          if not account_oltp_id:
+          if not element_oltp_id:
             result.errors.append(
-              f"LineItem references unknown account: {account_ext_id}"
+              f"LineItem references unknown element: {element_ext_id}"
             )
             continue
 
@@ -346,7 +351,7 @@ class OLTPLoader:
             LineItem(
               id=oltp_id,
               entry_id=entry_oltp_id,
-              account_id=account_oltp_id,
+              element_id=element_oltp_id,
               debit_amount=debit,
               credit_amount=credit,
               description=str(row["description"]) if row.get("description") else None,

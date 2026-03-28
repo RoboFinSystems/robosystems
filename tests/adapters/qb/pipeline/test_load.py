@@ -37,7 +37,7 @@ def _make_load_result(
   graph_id="kg_test123",
   source="quickbooks",
   connection_id="conn_abc",
-  accounts=5,
+  elements=5,
   transactions=10,
   entries=10,
   line_items=25,
@@ -50,7 +50,7 @@ def _make_load_result(
     graph_id=graph_id,
     source=source,
     connection_id=connection_id,
-    accounts=accounts,
+    elements=elements,
     transactions=transactions,
     entries=entries,
     line_items=line_items,
@@ -104,7 +104,7 @@ class TestQbLoadAsset:
 
     mock_loader = MagicMock()
     mock_loader.load.return_value = _make_load_result(
-      accounts=3, transactions=7, entries=7, line_items=15, dimensions=1
+      elements=3, transactions=7, entries=7, line_items=15, dimensions=1
     )
 
     with (
@@ -117,7 +117,7 @@ class TestQbLoadAsset:
       context = build_asset_context()
       result = qb_load(context, config)
 
-    assert result.metadata["accounts"] == 3
+    assert result.metadata["elements"] == 3
     assert result.metadata["transactions"] == 7
     assert result.metadata["entries"] == 7
     assert result.metadata["line_items"] == 15

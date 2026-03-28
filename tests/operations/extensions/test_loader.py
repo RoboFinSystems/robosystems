@@ -211,7 +211,7 @@ class TestOLTPLoader:
       created_by="user_123",
     )
 
-    assert result.accounts == 2
+    assert result.elements == 2
     assert result.transactions == 1
     assert result.entries == 1
     assert result.line_items == 2
@@ -295,7 +295,7 @@ class TestOLTPLoader:
       created_by="user_123",
     )
 
-    assert result.accounts == 1
+    assert result.elements == 1
     assert result.transactions == 0
     assert result.entries == 0
     assert result.line_items == 0
@@ -351,7 +351,7 @@ class TestOLTPLoader:
       graph_id="kg123",
       source="quickbooks",
       connection_id="conn_1",
-      accounts=10,
+      elements=10,
       transactions=5,
       entries=5,
       line_items=20,

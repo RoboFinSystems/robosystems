@@ -86,9 +86,9 @@ class TestStagingSql:
     assert "'qb:'" in sql
     assert "'rl:'" in sql
 
-  def test_element_reads_from_accounts(self):
+  def test_element_reads_from_elements(self):
     tables = _staging_sql(GRAPH_ID, ENTITY_ID, CONNSTR)
-    assert "'accounts'" in tables["Element"]
+    assert "'elements'" in tables["Element"]
 
   def test_amounts_converted_to_dollars(self):
     tables = _staging_sql(GRAPH_ID, ENTITY_ID, CONNSTR)

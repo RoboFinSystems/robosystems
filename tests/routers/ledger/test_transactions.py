@@ -76,7 +76,7 @@ def _make_entry(
 
 def _make_line_item_row(
   li_id="li_1",
-  account_id="acct_1",
+  element_id="elem_1",
   debit=5000,
   credit=0,
   description=None,
@@ -86,7 +86,7 @@ def _make_line_item_row(
 ):
   li = MagicMock()
   li.id = li_id
-  li.account_id = account_id
+  li.element_id = element_id
   li.debit_amount = debit
   li.credit_amount = credit
   li.description = description

@@ -173,7 +173,7 @@ def _staging_sql(graph_id: str, entity_id: str, connstr: str) -> dict[str, str]:
       NULL::VARCHAR                   AS canonical_concept,
       NULL::DOUBLE                    AS canonical_confidence,
       NULL::FLOAT[384]                AS embedding
-    FROM postgres_scan('{c}', '{s}', 'accounts')
+    FROM postgres_scan('{c}', '{s}', 'elements')
     WHERE is_active = true
   """
 
@@ -270,8 +270,8 @@ def _staging_sql(graph_id: str, entity_id: str, connstr: str) -> dict[str, str]:
       NULL::DOUBLE                    AS weight,
       NULL::VARCHAR                   AS root,
       NULL::VARCHAR                   AS preferred_label
-    FROM postgres_scan('{c}', '{s}', 'accounts') child
-    INNER JOIN postgres_scan('{c}', '{s}', 'accounts') parent
+    FROM postgres_scan('{c}', '{s}', 'elements') child
+    INNER JOIN postgres_scan('{c}', '{s}', 'elements') parent
       ON child.parent_id = parent.id
     WHERE child.parent_id IS NOT NULL
       AND child.is_active = true
@@ -311,7 +311,7 @@ def _staging_sql(graph_id: str, entity_id: str, connstr: str) -> dict[str, str]:
     CREATE OR REPLACE TABLE LINE_ITEM_RELATES_TO_ELEMENT AS
     SELECT
       id                              AS src,
-      account_id                      AS dst,
+      element_id                      AS dst,
       NULL::VARCHAR                   AS mapping_context
     FROM postgres_scan('{c}', '{s}', 'line_items')
   """
@@ -322,7 +322,7 @@ def _staging_sql(graph_id: str, entity_id: str, connstr: str) -> dict[str, str]:
       '{graph_id}_coa'                AS src,
       child.id || '_assoc'            AS dst,
       NULL::VARCHAR                   AS association_context
-    FROM postgres_scan('{c}', '{s}', 'accounts') child
+    FROM postgres_scan('{c}', '{s}', 'elements') child
     WHERE child.parent_id IS NOT NULL
       AND child.is_active = true
   """
@@ -332,7 +332,7 @@ def _staging_sql(graph_id: str, entity_id: str, connstr: str) -> dict[str, str]:
     SELECT
       child.id || '_assoc'            AS src,
       child.parent_id                 AS dst
-    FROM postgres_scan('{c}', '{s}', 'accounts') child
+    FROM postgres_scan('{c}', '{s}', 'elements') child
     WHERE child.parent_id IS NOT NULL
       AND child.is_active = true
   """
@@ -342,7 +342,7 @@ def _staging_sql(graph_id: str, entity_id: str, connstr: str) -> dict[str, str]:
     SELECT
       child.id || '_assoc'            AS src,
       child.id                        AS dst
-    FROM postgres_scan('{c}', '{s}', 'accounts') child
+    FROM postgres_scan('{c}', '{s}', 'elements') child
     WHERE child.parent_id IS NOT NULL
       AND child.is_active = true
   """

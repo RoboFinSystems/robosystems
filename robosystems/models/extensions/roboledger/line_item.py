@@ -1,7 +1,7 @@
 """LineItem model — individual debits and credits.
 
 Maps to LineItem nodes in the graph. Each line item belongs to an entry
-and references an account. Exactly one of debit_amount/credit_amount
+and references an element. Exactly one of debit_amount/credit_amount
 must be positive; the other must be zero.
 """
 
@@ -27,7 +27,7 @@ class LineItem(ExtensionsBase):
   __tablename__ = "line_items"
   __table_args__ = (
     Index("idx_line_items_entry", "entry_id"),
-    Index("idx_line_items_account", "account_id"),
+    Index("idx_line_items_element", "element_id"),
     CheckConstraint("debit_amount >= 0", name="check_debit_positive"),
     CheckConstraint("credit_amount >= 0", name="check_credit_positive"),
     CheckConstraint(
@@ -47,7 +47,7 @@ class LineItem(ExtensionsBase):
   entry_id = Column(
     String, ForeignKey("entries.id", ondelete="CASCADE"), nullable=False
   )
-  account_id = Column(String, ForeignKey("accounts.id"), nullable=False)
+  element_id = Column(String, ForeignKey("elements.id"), nullable=False)
 
   # Financial (minor currency units — cents)
   debit_amount = Column(BigInteger, nullable=False, default=0)

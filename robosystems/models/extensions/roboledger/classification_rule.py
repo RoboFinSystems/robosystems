@@ -1,6 +1,6 @@
 """ClassificationRule model — AI-informed transaction classification.
 
-Rules that automatically map bank feed transactions to accounts.
+Rules that automatically map bank feed transactions to elements.
 Inspired by Modern Treasury's Ledger Event Handlers and SoftLedger's
 Bank Rules.
 """
@@ -50,12 +50,12 @@ class ClassificationRule(ExtensionsBase):
   match_max_amount = Column(BigInteger, nullable=True)
 
   # Result
-  target_account_id = Column(String, ForeignKey("accounts.id"), nullable=False)
+  target_element_id = Column(String, ForeignKey("elements.id"), nullable=False)
 
   # Entry template
   entry_type = Column(String, nullable=False, default="standard")
-  debit_account_id = Column(String, ForeignKey("accounts.id"), nullable=False)
-  credit_account_id = Column(String, ForeignKey("accounts.id"), nullable=False)
+  debit_element_id = Column(String, ForeignKey("elements.id"), nullable=False)
+  credit_element_id = Column(String, ForeignKey("elements.id"), nullable=False)
 
   # Dimension assignments
   dimensions = Column(JSONB, nullable=False, default=list)
