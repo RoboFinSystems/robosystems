@@ -102,7 +102,7 @@ class UserRepository(Model):
   # Status and lifecycle
   is_active = Column(Boolean, nullable=False, default=True)
   activated_at = Column(
-    DateTime(timezone=True), nullable=False, default=datetime.now(UTC)
+    DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC)
   )
   expires_at = Column(DateTime(timezone=True), nullable=True)  # None = no expiration
 
@@ -130,13 +130,13 @@ class UserRepository(Model):
 
   # Timestamps
   created_at = Column(
-    DateTime(timezone=True), nullable=False, default=datetime.now(UTC)
+    DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC)
   )
   updated_at = Column(
     DateTime(timezone=True),
     nullable=False,
-    default=datetime.now(UTC),
-    onupdate=datetime.now(UTC),
+    default=lambda: datetime.now(UTC),
+    onupdate=lambda: datetime.now(UTC),
   )
 
   # Relationships

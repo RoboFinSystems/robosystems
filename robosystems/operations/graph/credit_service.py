@@ -331,7 +331,11 @@ class CreditService:
         "current_balance": repo_summary["current_balance"],
         "monthly_allocation": repo_summary["monthly_allocation"],
         "consumed_this_month": repo_summary["consumed_this_month"],
-        "transaction_count": 0,  # Repository transactions tracked separately
+        "transaction_count": sum(
+          1
+          for t in user_repo_credits.transactions
+          if t.transaction_type == "consumption"
+        ),
         "usage_percentage": repo_summary["usage_percentage"],
         "last_allocation_date": repo_summary["last_allocation_date"],
       }
