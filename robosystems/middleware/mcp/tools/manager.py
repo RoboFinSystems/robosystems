@@ -160,6 +160,24 @@ class GraphMCPTools:
 
       self.build_fact_grid_tool = BuildFactGridTool(graph_client)
 
+    # Layer 2: Taxonomy mapping tools (gated by roboledger extension + EXTENSIONS_ENABLED)
+    self.get_unmapped_elements_tool = None
+    self.suggest_mapping_tool = None
+    self.create_mapping_association_tool = None
+    self.get_mapping_summary_tool = None
+    if self._has_extension("roboledger") and env.EXTENSIONS_ENABLED and not read_only:
+      from .taxonomy_tools import (
+        CreateMappingAssociationTool,
+        GetMappingSummaryTool,
+        GetUnmappedElementsTool,
+        SuggestMappingTool,
+      )
+
+      self.get_unmapped_elements_tool = GetUnmappedElementsTool(graph_client)
+      self.suggest_mapping_tool = SuggestMappingTool(graph_client)
+      self.create_mapping_association_tool = CreateMappingAssociationTool(graph_client)
+      self.get_mapping_summary_tool = GetMappingSummaryTool(graph_client)
+
     # Layer 3: Text search tools (gated by SEMANTIC_SEARCH_ENABLED)
     self.search_documents_tool = None
     self.get_document_section_tool = None
@@ -272,6 +290,19 @@ class GraphMCPTools:
       tools.append(self.build_fact_grid_tool.get_tool_definition())
     return tools
 
+  def _get_taxonomy_tool_definitions(self) -> list[dict[str, Any]]:
+    """Get taxonomy mapping tool definitions (CoA → GAAP workflow)."""
+    tools = []
+    if self.get_unmapped_elements_tool is not None:
+      tools.append(self.get_unmapped_elements_tool.get_tool_definition())
+    if self.suggest_mapping_tool is not None:
+      tools.append(self.suggest_mapping_tool.get_tool_definition())
+    if self.create_mapping_association_tool is not None:
+      tools.append(self.create_mapping_association_tool.get_tool_definition())
+    if self.get_mapping_summary_tool is not None:
+      tools.append(self.get_mapping_summary_tool.get_tool_definition())
+    return tools
+
   def _get_search_tool_definitions(self) -> list[dict[str, Any]]:
     """
     Get text search tool definitions.
@@ -330,6 +361,9 @@ class GraphMCPTools:
 
       # Fact grid tool (custom element/period/entity queries)
       tools.extend(self._get_data_tool_definitions())
+
+      # Taxonomy mapping tools (CoA → GAAP workflow)
+      tools.extend(self._get_taxonomy_tool_definitions())
 
     # Layer 3: Infrastructure tools (feature-flag gated)
     tools.extend(self._get_workspace_tool_definitions())
@@ -487,6 +521,43 @@ class GraphMCPTools:
             "Set FACT_GRID_ENABLED=true to enable this feature."
           )
         result = await self.build_fact_grid_tool.execute(arguments)
+        return result if return_raw else json.dumps(result, indent=2)
+
+      # Taxonomy mapping tools
+      elif name == "get-unmapped-elements":
+        if self.get_unmapped_elements_tool is None:
+          raise ValueError(
+            "get-unmapped-elements tool is not available. "
+            "Requires roboledger extension and EXTENSIONS_ENABLED=true."
+          )
+        result = await self.get_unmapped_elements_tool.execute(arguments)
+        return result if return_raw else json.dumps(result, indent=2)
+
+      elif name == "suggest-mapping":
+        if self.suggest_mapping_tool is None:
+          raise ValueError(
+            "suggest-mapping tool is not available. "
+            "Requires roboledger extension and EXTENSIONS_ENABLED=true."
+          )
+        result = await self.suggest_mapping_tool.execute(arguments)
+        return result if return_raw else json.dumps(result, indent=2)
+
+      elif name == "create-mapping-association":
+        if self.create_mapping_association_tool is None:
+          raise ValueError(
+            "create-mapping-association tool is not available. "
+            "Requires roboledger extension and EXTENSIONS_ENABLED=true."
+          )
+        result = await self.create_mapping_association_tool.execute(arguments)
+        return result if return_raw else json.dumps(result, indent=2)
+
+      elif name == "get-mapping-summary":
+        if self.get_mapping_summary_tool is None:
+          raise ValueError(
+            "get-mapping-summary tool is not available. "
+            "Requires roboledger extension and EXTENSIONS_ENABLED=true."
+          )
+        result = await self.get_mapping_summary_tool.execute(arguments)
         return result if return_raw else json.dumps(result, indent=2)
 
       elif name == "search-documents":

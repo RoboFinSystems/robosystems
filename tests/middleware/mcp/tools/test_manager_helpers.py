@@ -350,3 +350,110 @@ class TestResolveSchemaExtensions:
     ):
       result = resolve_schema_extensions("sec")
       assert result == []
+
+
+# ── Taxonomy Tool Registration Tests ─────────────────────────────────────
+
+
+class TestTaxonomyToolRegistration:
+  """Test that taxonomy tools are registered and dispatchable."""
+
+  @pytest.fixture
+  def tools_with_taxonomy(self, mock_client):
+    """GraphMCPTools with roboledger + EXTENSIONS_ENABLED."""
+    with (
+      patch.object(GraphMCPTools, "_should_include_semantic_tools", return_value=False),
+      patch("robosystems.middleware.mcp.tools.manager.env") as mock_env,
+    ):
+      mock_env.MCP_WORKSPACE_ENABLED = False
+      mock_env.MCP_MEMORY_ENABLED = False
+      mock_env.FACT_GRID_ENABLED = False
+      mock_env.EXTENSIONS_ENABLED = True
+      mock_env.SEMANTIC_SEARCH_ENABLED = False
+      mock_env.MCP_SEMANTIC_MEMORY_ENABLED = False
+      return GraphMCPTools(
+        mock_client, schema_extensions=["roboledger"], read_only=False
+      )
+
+  def test_taxonomy_tools_in_definitions(self, tools_with_taxonomy):
+    """All 4 taxonomy tools should appear in tool definitions."""
+    definitions = tools_with_taxonomy.get_tool_definitions_as_dict()
+    tool_names = {d["name"] for d in definitions}
+    assert "get-unmapped-elements" in tool_names
+    assert "suggest-mapping" in tool_names
+    assert "create-mapping-association" in tool_names
+    assert "get-mapping-summary" in tool_names
+
+  def test_taxonomy_tools_not_in_readonly(self, mock_client):
+    """Taxonomy tools should NOT appear for read-only graphs."""
+    with (
+      patch.object(GraphMCPTools, "_should_include_semantic_tools", return_value=False),
+      patch("robosystems.middleware.mcp.tools.manager.env") as mock_env,
+    ):
+      mock_env.MCP_WORKSPACE_ENABLED = False
+      mock_env.MCP_MEMORY_ENABLED = False
+      mock_env.FACT_GRID_ENABLED = False
+      mock_env.EXTENSIONS_ENABLED = True
+      mock_env.SEMANTIC_SEARCH_ENABLED = False
+      mock_env.MCP_SEMANTIC_MEMORY_ENABLED = False
+      tools = GraphMCPTools(
+        mock_client, schema_extensions=["roboledger"], read_only=True
+      )
+
+    definitions = tools.get_tool_definitions_as_dict()
+    tool_names = {d["name"] for d in definitions}
+    assert "get-unmapped-elements" not in tool_names
+    assert "create-mapping-association" not in tool_names
+
+  def test_taxonomy_tools_not_without_extension(self, mock_client):
+    """Taxonomy tools should NOT appear without roboledger extension."""
+    with (
+      patch.object(GraphMCPTools, "_should_include_semantic_tools", return_value=False),
+      patch("robosystems.middleware.mcp.tools.manager.env") as mock_env,
+    ):
+      mock_env.MCP_WORKSPACE_ENABLED = False
+      mock_env.MCP_MEMORY_ENABLED = False
+      mock_env.FACT_GRID_ENABLED = False
+      mock_env.EXTENSIONS_ENABLED = True
+      mock_env.SEMANTIC_SEARCH_ENABLED = False
+      mock_env.MCP_SEMANTIC_MEMORY_ENABLED = False
+      tools = GraphMCPTools(mock_client, schema_extensions=[])
+
+    definitions = tools.get_tool_definitions_as_dict()
+    tool_names = {d["name"] for d in definitions}
+    assert "get-unmapped-elements" not in tool_names
+
+  @pytest.mark.asyncio
+  async def test_call_tool_dispatches_taxonomy_tools(self, tools_with_taxonomy):
+    """call_tool should dispatch to taxonomy tools by name."""
+    # Tool executes but returns error dict (no real DB) — proves dispatch routing works
+    result = await tools_with_taxonomy.call_tool(
+      "get-unmapped-elements", {}, return_raw=True
+    )
+    assert "error" in result  # DB not available, but tool was dispatched
+
+  @pytest.mark.asyncio
+  async def test_call_tool_returns_error_for_unavailable_taxonomy_tools(
+    self, mock_client
+  ):
+    """call_tool should return error for taxonomy tools when not available."""
+    with (
+      patch.object(GraphMCPTools, "_should_include_semantic_tools", return_value=False),
+      patch("robosystems.middleware.mcp.tools.manager.env") as mock_env,
+    ):
+      mock_env.MCP_WORKSPACE_ENABLED = False
+      mock_env.MCP_MEMORY_ENABLED = False
+      mock_env.FACT_GRID_ENABLED = False
+      mock_env.EXTENSIONS_ENABLED = False
+      mock_env.SEMANTIC_SEARCH_ENABLED = False
+      mock_env.MCP_SEMANTIC_MEMORY_ENABLED = False
+      tools = GraphMCPTools(mock_client, schema_extensions=[])
+
+    for tool_name in [
+      "get-unmapped-elements",
+      "suggest-mapping",
+      "create-mapping-association",
+      "get-mapping-summary",
+    ]:
+      result = await tools.call_tool(tool_name, {"element_id": "x", "mapping_id": "x"})
+      assert "not available" in result
