@@ -602,6 +602,11 @@ jobs:
       webserver_memory: ${{ vars.DAGSTER_WEBSERVER_MEMORY_PROD || '1024' }}
       # Run Job Profiles: hardcoded in deploy-dagster.yml (Light/Standard/Compute/Heavy)
       max_concurrent_runs: ${{ vars.DAGSTER_MAX_CONCURRENT_RUNS_PROD || '20' }}
+      # Worker Configuration
+      worker_enabled: ${{ vars.WORKER_ENABLED_PROD || 'false' }}
+      worker_cpu: ${{ vars.WORKER_CPU_PROD || '512' }}
+      worker_memory: ${{ vars.WORKER_MEMORY_PROD || '1024' }}
+      worker_desired_count: ${{ vars.WORKER_DESIRED_COUNT_PROD || '1' }}
       # Capacity Provider Configuration (Spot vs On-Demand)
       daemon_fargate_spot_weight: ${{ vars.DAGSTER_DAEMON_FARGATE_SPOT_WEIGHT_PROD || '0' }}
       webserver_fargate_spot_weight: ${{ vars.DAGSTER_WEBSERVER_FARGATE_SPOT_WEIGHT_PROD || '0' }}
