@@ -64,72 +64,18 @@ Resources:
   # ========================================
 
   # ========================================
-  # EBS SNAPSHOT LIFECYCLE (DLM)
+  # EBS SNAPSHOT LIFECYCLE
   # ========================================
-  # AWS Data Lifecycle Manager for automated EBS snapshots
-  # Short retention (3 days) for quick disaster recovery
-  # Longer-term backups use S3 (tier-based retention)
-
-  DLMLifecycleRole:
-    Type: AWS::IAM::Role
-    Properties:
-      RoleName: !Sub "${AWS::StackName}-dlm-role"
-      AssumeRolePolicyDocument:
-        Version: "2012-10-17"
-        Statement:
-          - Effect: Allow
-            Principal:
-              Service: dlm.amazonaws.com
-            Action: sts:AssumeRole
-      ManagedPolicyArns:
-        - !Sub "arn:${AWS::Partition}:iam::aws:policy/service-role/AWSDataLifecycleManagerServiceRole"
-      Tags:
-        - Key: Environment
-          Value: !Ref Environment
-        - Key: Service
-          Value: !Ref ServiceTag
-        - Key: Component
-          Value: !Ref ComponentTag
-
-  EBSSnapshotLifecyclePolicy:
-    Type: AWS::DLM::LifecyclePolicy
-    Properties:
-      Description: !Sub "EBS snapshot lifecycle for LadybugDB volumes - ${Environment}"
-      State: ENABLED
-      ExecutionRoleArn: !GetAtt DLMLifecycleRole.Arn
-      PolicyDetails:
-        PolicyType: EBS_SNAPSHOT_MANAGEMENT
-        ResourceTypes:
-          - VOLUME
-        TargetTags:
-          - Key: ManagedBy
-            Value: GraphVolumeManager
-          - Key: Environment
-            Value: !Ref Environment
-          - Key: NodeType
-            Value: writer
-        Schedules:
-          - Name: DailySnapshots
-            CopyTags: true
-            CreateRule:
-              Interval: 24
-              IntervalUnit: HOURS
-              Times:
-                - "03:00" # 3 AM UTC - after nightly jobs complete
-            RetainRule:
-              Count: 3 # Keep 3 daily snapshots for quick recovery
-            TagsToAdd:
-              - Key: DLMManaged
-                Value: "true"
-              - Key: AutoDelete
-                Value: "true"
-      Tags:
-        - Key: Environment
-          Value: !Ref Environment
-        - Key: Service
-          Value: !Ref ServiceTag
-        - Key: Component
-          Value: !Ref ComponentTag
+  # DLM (Data Lifecycle Manager) was removed because its TargetTags filtering
+  # proved unreliable — it snapshotted ALL volumes in the account regardless of
+  # tag filters, including shared replica root volumes and bastion volumes.
+  # This persisted across 4 fix attempts (Jan-Mar 2026).
+  #
+  # Snapshot strategy without DLM:
+  # - Writer data volumes: Final snapshot on termination (graph-lifecycle.sh)
+  # - Shared master data: S3-based backups (tier-based retention)
+  # - Shared replicas: No snapshots needed (rebuilt from S3 on boot)
+  # - Restore capability: Lambda restore_from_snapshot() still available
 
   # ========================================
   # SNS TOPICS
