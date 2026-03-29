@@ -80,22 +80,40 @@ Model Context Protocol server for AI integration:
 
 **See**: [MCP Middleware Documentation](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/middleware/mcp/README.md) in codebase
 
-### Agent Interface
+### Agent System
 
-**Location**: `/robosystems/routers/graphs/agent/`
+**Location**: `/robosystems/operations/agents/`
 
-AI agent execution system for natural language graph interactions:
+Unified agent architecture for autonomous financial operations:
 
-- **Text-to-Cypher**: Convert natural language queries to Cypher
-- **Automatic Strategy Selection**: Choose optimal execution approach based on query intent
-- **Streaming Responses**: SSE support for real-time progress monitoring
-- **Background Processing**: Queue integration for extended analysis operations
+- **Three-Layer Design**: Agent (domain logic), AgentContext (services), Adapters (execution lifecycle)
+- **Stateless Agents**: Declare capabilities via `AgentSpec`, receive services via `AgentContext` — no graph_id or user in constructor
+- **Automatic Credit Tracking**: `TrackedAIClient` wraps every Bedrock call with token counting and credit consumption
+- **Dual Execution**: API adapter (sync/SSE) and worker adapter (Valkey queue + SSE progress)
+- **Protocol-Based Services**: `ToolAccess`, `ProgressReporter`, `CreditConsumer` — swap implementations per context
+- **MCP Tool Integration**: Agents access graph queries, taxonomy operations, and document search via MCP tools
+
+**See**: [Agent README](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/operations/agents/README.md) in codebase
+
+### Background Worker
+
+**Location**: `/robosystems/worker/`
+
+Always-on ECS service for long-running agent tasks and background operations:
+
+- **Valkey Queue**: BRPOP consumer loop on DB 6 with graceful shutdown
+- **Task Registry**: `@register_task` decorator for handler discovery
+- **SSE Progress**: Real-time streaming via OperationManager (Valkey DB 3)
+- **Dagster Reporting**: Fire-and-forget AssetMaterialization events for observability
+- **Tenant Isolation**: Connection pool disposal between tasks prevents cross-tenant leaks
+
+**See**: [Worker README](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/worker/README.md) in codebase
 
 ### Dagster Orchestration
 
 **Location**: `/robosystems/dagster/`
 
-Dagster is the **sole orchestration system** for all scheduled tasks, event-driven triggers, and data pipelines. There is no separate task queue - everything runs through Dagster.
+Dagster is the orchestration system for scheduled tasks, event-driven triggers, and data pipelines. The background worker (Valkey queue) handles user-initiated agent tasks with real-time progress streaming.
 
 **Architecture:**
 
@@ -127,7 +145,7 @@ adapters/custom_*/pipeline/ # Fork-friendly custom adapter pipelines
 | **Event Triggers** | Subscription provisioning, repository sync, adapter sensors |
 
 **Key Features:**
-- **Single System**: All orchestration in one place - no separate task queues
+- **Pipeline Orchestration**: Scheduled and event-driven data pipelines
 - **Asset Dependencies**: Declarative data lineage with automatic orchestration
 - **Year Partitioning**: Process historical data by year
 - **Observability**: Built-in UI at `localhost:8002` for monitoring
@@ -516,8 +534,9 @@ This enables `git pull upstream main` without merge conflicts on your custom ada
 - Authentication tokens and sessions (DB 0)
 - Rate limiting counters (DB 1)
 - Graph client routing cache (DB 2)
-- Server-sent events pub/sub and task state tracking (DB 3)
+- Server-sent events pub/sub and operation state tracking (DB 3)
 - Distributed locks (DB 4)
+- Background worker task queue (DB 6)
 
 Database allocations are managed in [valkey_registry.py](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/config/valkey_registry.py).
 
@@ -799,13 +818,13 @@ See individual app repositories for specific deployment workflows.
 
 ### Anthropic Claude (via AWS Bedrock)
 
-**Purpose**: AI-powered financial analysis
+**Purpose**: AI-powered financial operations
 
-- AWS Bedrock as the interface to Claude models
-- Natural language queries
-- GraphRAG-enabled responses
-- Token-based billing
-- Multi-agent architecture
+- AWS Bedrock for Claude model access (Sonnet 4.5/4)
+- Unified agent system: stateless agents with automatic credit tracking per call
+- CypherAgent for natural language graph queries, MappingAgent for autonomous CoA→GAAP taxonomy mapping
+- MCP tools provide agents with graph queries, taxonomy operations, SEC structure discovery, and document search
+- Dual execution: API (sync/SSE) for interactive queries, background worker for long-running tasks
 
 ## Key Design Principles
 
@@ -821,7 +840,7 @@ See individual app repositories for specific deployment workflows.
 - **Vertical Scaling**: Tiered instance types (large → xlarge)
 - **Caching**: Valkey for hot data
 - **Pipeline Orchestration**: Dagster for data pipelines and batch operations
-- **Real-time Operations**: FastAPI background tasks for SSE-enabled interactions
+- **Real-time Operations**: Background worker with Valkey queue for SSE-enabled agent tasks
 
 ### Reliability
 
