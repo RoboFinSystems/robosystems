@@ -145,7 +145,7 @@ class TestEntityGraphService:
     )
 
     # Mock GraphSchema (imported locally)
-    mocker.patch("robosystems.models.iam.GraphSchema.create")
+    mocker.patch("robosystems.models.core.GraphSchema.create")
 
     # Mock CreditService (imported locally)
     mock_credit_service = mocker.MagicMock()
@@ -155,8 +155,8 @@ class TestEntityGraphService:
     )
 
     # Mock Graph and GraphUser for PostgreSQL metadata
-    mocker.patch("robosystems.models.iam.graph.Graph.create")
-    mocker.patch("robosystems.models.iam.graph_user.GraphUser.create")
+    mocker.patch("robosystems.models.core.graph.Graph.create")
+    mocker.patch("robosystems.models.core.graph.graph_user.GraphUser.create")
 
     # Mock controlled materialization responses
     mock_lbug_client.create_table.return_value = {"success": True}

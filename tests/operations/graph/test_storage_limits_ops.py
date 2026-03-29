@@ -13,8 +13,8 @@ from decimal import Decimal
 import pytest
 
 from robosystems.config.graph_tier import GraphTier
-from robosystems.models.iam.graph_credits import GraphCredits
-from robosystems.models.iam.graph_usage import (
+from robosystems.models.core.graph.graph_credits import GraphCredits
+from robosystems.models.core.graph.graph_usage import (
   GraphUsage,
   UsageEventType,
 )
@@ -169,7 +169,7 @@ class TestStorageOverride:
     )
 
     # Check that a transaction was created
-    from robosystems.models.iam.graph_credits import GraphCreditTransaction
+    from robosystems.models.core.graph.graph_credits import GraphCreditTransaction
 
     transaction = (
       db_session.query(GraphCreditTransaction)
@@ -227,7 +227,7 @@ class TestStorageViolationDetection:
     import uuid
 
     # First create organization and add user to it
-    from robosystems.models.iam import Graph, Org, OrgType, OrgUser
+    from robosystems.models.core import Graph, Org, OrgType, OrgUser
 
     org = Org.create(
       name="Test Organization",
@@ -301,7 +301,7 @@ class TestStorageViolationDetection:
     import uuid
 
     # First create organization and add user to it
-    from robosystems.models.iam import Graph, Org, OrgType, OrgUser
+    from robosystems.models.core import Graph, Org, OrgType, OrgUser
 
     org = Org.create(
       name="Test Organization",
@@ -374,7 +374,7 @@ def sample_graph_credits(db_session, sample_user):
   import uuid
 
   # First create organization and add user to it
-  from robosystems.models.iam import Graph, Org, OrgType, OrgUser
+  from robosystems.models.core import Graph, Org, OrgType, OrgUser
 
   org = Org.create(
     name="Test Organization",
@@ -415,7 +415,7 @@ def sample_user(db_session):
   """Create sample user for testing."""
   import uuid
 
-  from robosystems.models.iam import User
+  from robosystems.models.core import User
 
   user = User(
     id=f"test_user_{uuid.uuid4().hex[:8]}",

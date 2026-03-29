@@ -6,13 +6,13 @@ from sqlalchemy.orm import Session
 
 from ...config import BillingConfig, env
 from ...config.graph_tier import GraphTier
-from ...models.billing import (
+from ...models.core.billing import (
   BillingAuditLog,
   BillingCustomer,
   BillingInvoice,
   BillingSubscription,
 )
-from ...models.billing.audit_log import BillingEventType
+from ...models.core.billing.audit_log import BillingEventType
 
 logger = logging.getLogger(__name__)
 
@@ -137,7 +137,7 @@ class GraphSubscriptionService:
     Returns:
         BillingSubscription instance
     """
-    from ...models.iam import OrgUser
+    from ...models.core import OrgUser
 
     available_plans = get_available_plans()
     if plan_name not in available_plans:

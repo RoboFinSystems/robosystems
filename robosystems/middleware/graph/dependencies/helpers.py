@@ -8,7 +8,7 @@ from fastapi import Depends, HTTPException, status
 
 from robosystems.middleware.auth.dependencies import get_current_user_with_graph
 from robosystems.middleware.graph.utils import MultiTenantUtils
-from robosystems.models.iam import User
+from robosystems.models.core import User
 
 
 def require_entity(

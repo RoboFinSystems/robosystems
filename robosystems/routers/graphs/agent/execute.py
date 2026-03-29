@@ -40,7 +40,7 @@ from robosystems.models.api.graphs.agent import (
   BatchAgentRequest,
   BatchAgentResponse,
 )
-from robosystems.models.iam import User
+from robosystems.models.core import User
 from robosystems.operations.agents.agent_registry import get_agent, list_agents
 from robosystems.operations.agents.base import (
   AgentMode as BaseAgentMode,

@@ -12,7 +12,7 @@ from sse_starlette.sse import EventSourceResponse
 from robosystems.logger import logger
 from robosystems.middleware.sse.operation_manager import create_operation_response
 from robosystems.models.api.graphs.agent import AgentMode, AgentResponse
-from robosystems.models.iam import User
+from robosystems.models.core import User
 from robosystems.operations.agents.base import AgentMode as BaseAgentMode
 from robosystems.operations.agents.orchestrator import (
   AgentOrchestrator,
@@ -179,7 +179,7 @@ async def _run_agent_analysis_background(
 
     db = next(get_db_session())
     try:
-      from robosystems.models.iam import User
+      from robosystems.models.core import User
 
       user = db.query(User).filter(User.id == user_id).first()
       if not user:

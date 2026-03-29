@@ -6,8 +6,8 @@ from ...database import get_db_session
 from ...logger import get_logger
 from ...middleware.auth.admin import require_admin
 from ...models.api.admin import InvoiceLineItemResponse, InvoiceResponse
-from ...models.billing import BillingInvoice, BillingInvoiceLineItem
-from ...models.iam import User
+from ...models.core import User
+from ...models.core.billing import BillingInvoice, BillingInvoiceLineItem
 
 logger = get_logger(__name__)
 
@@ -32,7 +32,7 @@ async def list_invoices(
       query = query.filter(BillingInvoice.status == status)
 
     if user_id:
-      from ...models.iam import OrgUser
+      from ...models.core import OrgUser
 
       query = query.join(OrgUser, BillingInvoice.org_id == OrgUser.org_id)
       query = query.filter(OrgUser.user_id == user_id)
@@ -44,7 +44,7 @@ async def list_invoices(
 
     results = []
     for invoice in invoices:
-      from ...models.iam import OrgUser
+      from ...models.core import OrgUser
 
       owner = (
         session.query(OrgUser)
@@ -131,7 +131,7 @@ async def get_invoice(
     if not invoice:
       raise HTTPException(status_code=404, detail="Invoice not found")
 
-    from ...models.iam import OrgUser
+    from ...models.core import OrgUser
 
     owner = (
       session.query(OrgUser)
@@ -233,7 +233,7 @@ async def mark_invoice_paid(
       },
     )
 
-    from ...models.iam import OrgUser
+    from ...models.core import OrgUser
 
     owner = (
       session.query(OrgUser)

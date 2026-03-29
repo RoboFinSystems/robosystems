@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING, Any
 from robosystems.logger import logger
 
 if TYPE_CHECKING:
-  from robosystems.models.iam import User
+  from robosystems.models.core import User
   from robosystems.operations.agents.agent_context import AgentContext
 
 

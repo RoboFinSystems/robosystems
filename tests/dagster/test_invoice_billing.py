@@ -129,7 +129,7 @@ class TestRenewSubscriptions:
 
     with (
       patch(
-        "robosystems.models.billing.customer.BillingCustomer.get_by_org_id",
+        "robosystems.models.core.billing.customer.BillingCustomer.get_by_org_id",
         return_value=mock_customer,
       ),
       patch(
@@ -137,7 +137,7 @@ class TestRenewSubscriptions:
         return_value=mock_invoice,
       ),
       patch(
-        "robosystems.models.billing.audit_log.BillingAuditLog.log_event",
+        "robosystems.models.core.billing.audit_log.BillingAuditLog.log_event",
         return_value=MagicMock(),
       ) as mock_audit_log,
     ):
@@ -171,7 +171,7 @@ class TestRenewSubscriptions:
     log = logging.getLogger("test")
 
     with patch(
-      "robosystems.models.billing.customer.BillingCustomer.get_by_org_id",
+      "robosystems.models.core.billing.customer.BillingCustomer.get_by_org_id",
       return_value=mock_customer,
     ):
       result = _renew_subscriptions(["bsub_test1"], mock_session, log)
@@ -189,7 +189,7 @@ class TestRenewSubscriptions:
     log = logging.getLogger("test")
 
     with patch(
-      "robosystems.models.billing.customer.BillingCustomer.get_by_org_id",
+      "robosystems.models.core.billing.customer.BillingCustomer.get_by_org_id",
       return_value=mock_customer,
     ):
       result = _renew_subscriptions(["bsub_test1"], mock_session, log)
@@ -207,7 +207,7 @@ class TestRenewSubscriptions:
     log = logging.getLogger("test")
 
     with patch(
-      "robosystems.models.billing.customer.BillingCustomer.get_by_org_id",
+      "robosystems.models.core.billing.customer.BillingCustomer.get_by_org_id",
       return_value=mock_customer,
     ):
       result = _renew_subscriptions(["bsub_test1"], mock_session, log)
@@ -224,7 +224,7 @@ class TestRenewSubscriptions:
     log = logging.getLogger("test")
 
     with patch(
-      "robosystems.models.billing.customer.BillingCustomer.get_by_org_id",
+      "robosystems.models.core.billing.customer.BillingCustomer.get_by_org_id",
       return_value=None,
     ):
       result = _renew_subscriptions(["bsub_test1"], mock_session, log)
@@ -243,7 +243,7 @@ class TestRenewSubscriptions:
     log = logging.getLogger("test")
 
     with patch(
-      "robosystems.models.billing.customer.BillingCustomer.get_by_org_id",
+      "robosystems.models.core.billing.customer.BillingCustomer.get_by_org_id",
       return_value=mock_customer,
     ):
       result = _renew_subscriptions(["bsub_test1"], mock_session, log)
@@ -263,7 +263,7 @@ class TestRenewSubscriptions:
     log = logging.getLogger("test")
 
     with patch(
-      "robosystems.models.billing.customer.BillingCustomer.get_by_org_id",
+      "robosystems.models.core.billing.customer.BillingCustomer.get_by_org_id",
       return_value=mock_customer,
     ):
       result = _renew_subscriptions(["bsub_test1"], mock_session, log)

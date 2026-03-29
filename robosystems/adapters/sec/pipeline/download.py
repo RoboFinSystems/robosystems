@@ -14,7 +14,7 @@ from dagster import (
 from robosystems.config import env
 from robosystems.config.storage.shared import DataSourceType, get_raw_key
 from robosystems.dagster.resources import DatabaseResource, S3Resource
-from robosystems.models.iam import Graph, SourceFile
+from robosystems.models.core import Graph, SourceFile
 
 from .configs import (
   SEC_FORM_TYPE_BATCHES,

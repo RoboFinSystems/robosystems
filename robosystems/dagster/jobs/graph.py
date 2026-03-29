@@ -196,7 +196,7 @@ def create_backup(
   import asyncio
 
   from robosystems.middleware.graph.utils import MultiTenantUtils
-  from robosystems.models.iam import GraphBackup
+  from robosystems.models.core import GraphBackup
   from robosystems.operations.aws.s3 import S3BackupAdapter
   from robosystems.operations.lbug.backup_manager import (
     BackupFormat,
@@ -338,7 +338,7 @@ def restore_backup(
   import asyncio
 
   from robosystems.graph_api.client.factory import GraphClientFactory
-  from robosystems.models.iam import GraphBackup
+  from robosystems.models.core import GraphBackup
   from robosystems.operations.lbug.backup_manager import (
     BackupFormat,
     BackupJob,
@@ -475,7 +475,7 @@ def _fail_graph_provisioning(graph_id: str, session_factory, context) -> None:
   if not graph_id:
     return
   try:
-    from robosystems.models.iam.graph import Graph, GraphStatus
+    from robosystems.models.core.graph import Graph, GraphStatus
 
     db = session_factory()
     try:
@@ -745,7 +745,7 @@ def stage_file_in_duckdb(
 
   from robosystems.config import env
   from robosystems.graph_api.client.factory import GraphClientFactory
-  from robosystems.models.iam import GraphFile, GraphTable
+  from robosystems.models.core import GraphFile, GraphTable
 
   context.log.info(
     f"Staging file {config.file_id} in graph {config.graph_id}, table {config.table_id}"
@@ -834,7 +834,7 @@ def materialize_file_to_graph(
   import asyncio
 
   from robosystems.graph_api.client.factory import GraphClientFactory
-  from robosystems.models.iam import GraphFile
+  from robosystems.models.core import GraphFile
 
   file_id = staging_result["file_id"]
   graph_id = staging_result["graph_id"]
@@ -907,7 +907,7 @@ def materialize_staged_file(
   import asyncio
 
   from robosystems.graph_api.client.factory import GraphClientFactory
-  from robosystems.models.iam import GraphFile
+  from robosystems.models.core import GraphFile
 
   context.log.info(f"Materializing file {config.file_id} to graph {config.graph_id}")
 
@@ -996,7 +996,7 @@ def _restage_stale_files_sync(
   """Re-stage stale files synchronously for Dagster op context."""
   import asyncio
 
-  from robosystems.models.iam import GraphFile
+  from robosystems.models.core import GraphFile
   from robosystems.operations.lbug.direct_staging import stage_file_directly
 
   loop = asyncio.new_event_loop()
@@ -1048,7 +1048,7 @@ def materialize_graph_tables(
   import asyncio
   import time
 
-  from robosystems.models.iam import Graph, GraphFile, GraphSchema, GraphTable
+  from robosystems.models.core import Graph, GraphFile, GraphSchema, GraphTable
   from robosystems.operations.lbug.chunked_materialization import (
     materialize_table_chunked,
   )

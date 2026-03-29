@@ -24,7 +24,7 @@ from robosystems.operations.agents.tracked_ai import TrackedAIClient
 if TYPE_CHECKING:
   from collections.abc import Callable
 
-  from robosystems.models.iam import User
+  from robosystems.models.core import User
   from robosystems.operations.agents.base import Agent
 
 

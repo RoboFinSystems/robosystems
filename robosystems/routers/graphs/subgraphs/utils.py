@@ -17,9 +17,9 @@ from robosystems.middleware.graph.utils import (
   validate_subgraph_name,
 )
 from robosystems.middleware.robustness import CircuitBreakerManager
-from robosystems.models.iam.graph import Graph
-from robosystems.models.iam.graph_user import GraphUser
-from robosystems.models.iam.user import User
+from robosystems.models.core.graph import Graph
+from robosystems.models.core.graph.graph_user import GraphUser
+from robosystems.models.core.user import User
 from robosystems.operations.graph.subgraph_service import SubgraphService
 
 # Initialize shared circuit breaker for subgraph operations

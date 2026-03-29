@@ -6,8 +6,8 @@ from unittest.mock import Mock, patch
 import pytest
 from fastapi import HTTPException
 
-from robosystems.models.billing import BillingSubscription
-from robosystems.models.iam import User
+from robosystems.models.core import User
+from robosystems.models.core.billing import BillingSubscription
 from robosystems.routers.billing.subscriptions import (
   cancel_subscription,
   get_subscription,
@@ -30,10 +30,10 @@ class TestListSubscriptions:
     return db
 
   @pytest.mark.asyncio
-  @patch("robosystems.models.iam.OrgUser.get_by_org_and_user")
+  @patch("robosystems.models.core.OrgUser.get_by_org_and_user")
   async def test_list_subscriptions_empty(self, mock_get_org_user, mock_user, mock_db):
     """Test listing subscriptions when org has none."""
-    from robosystems.models.iam import OrgRole
+    from robosystems.models.core import OrgRole
 
     mock_org_user = Mock()
     mock_org_user.role = OrgRole.OWNER
@@ -47,12 +47,12 @@ class TestListSubscriptions:
     assert result == []
 
   @pytest.mark.asyncio
-  @patch("robosystems.models.iam.OrgUser.get_by_org_and_user")
+  @patch("robosystems.models.core.OrgUser.get_by_org_and_user")
   async def test_list_subscriptions_success(
     self, mock_get_org_user, mock_user, mock_db
   ):
     """Test successful subscription listing."""
-    from robosystems.models.iam import OrgRole
+    from robosystems.models.core import OrgRole
 
     mock_org_user = Mock()
     mock_org_user.role = OrgRole.OWNER
@@ -110,7 +110,7 @@ class TestListSubscriptions:
     assert result[1].canceled_at is not None
 
   @pytest.mark.asyncio
-  @patch("robosystems.models.iam.OrgUser.get_by_org_and_user")
+  @patch("robosystems.models.core.OrgUser.get_by_org_and_user")
   async def test_list_subscriptions_error_handling(
     self, mock_get_org_user, mock_user, mock_db
   ):
@@ -124,7 +124,7 @@ class TestListSubscriptions:
     assert "Failed to retrieve subscriptions" in exc.value.detail
 
   @pytest.mark.asyncio
-  @patch("robosystems.models.iam.OrgUser.get_by_org_and_user")
+  @patch("robosystems.models.core.OrgUser.get_by_org_and_user")
   async def test_list_subscriptions_requires_membership(
     self, mock_get_org_user, mock_user, mock_db
   ):
@@ -152,10 +152,10 @@ class TestGetSubscription:
     return Mock()
 
   @pytest.mark.asyncio
-  @patch("robosystems.models.iam.OrgUser.get_by_org_and_user")
+  @patch("robosystems.models.core.OrgUser.get_by_org_and_user")
   async def test_get_subscription_success(self, mock_get_org_user, mock_user, mock_db):
     """Test successful subscription retrieval."""
-    from robosystems.models.iam import OrgRole
+    from robosystems.models.core import OrgRole
 
     mock_org_user = Mock()
     mock_org_user.role = OrgRole.OWNER
@@ -188,12 +188,12 @@ class TestGetSubscription:
     assert result.status == "active"
 
   @pytest.mark.asyncio
-  @patch("robosystems.models.iam.OrgUser.get_by_org_and_user")
+  @patch("robosystems.models.core.OrgUser.get_by_org_and_user")
   async def test_get_subscription_not_found(
     self, mock_get_org_user, mock_user, mock_db
   ):
     """Test getting subscription that doesn't exist."""
-    from robosystems.models.iam import OrgRole
+    from robosystems.models.core import OrgRole
 
     mock_org_user = Mock()
     mock_org_user.role = OrgRole.OWNER
@@ -209,12 +209,12 @@ class TestGetSubscription:
     assert "Subscription not found" in exc.value.detail
 
   @pytest.mark.asyncio
-  @patch("robosystems.models.iam.OrgUser.get_by_org_and_user")
+  @patch("robosystems.models.core.OrgUser.get_by_org_and_user")
   async def test_get_subscription_null_resource_id(
     self, mock_get_org_user, mock_user, mock_db
   ):
     """Test getting subscription with null resource_id."""
-    from robosystems.models.iam import OrgRole
+    from robosystems.models.core import OrgRole
 
     mock_org_user = Mock()
     mock_org_user.role = OrgRole.OWNER
@@ -244,7 +244,7 @@ class TestGetSubscription:
     assert result.status == "pending_provisioning"
 
   @pytest.mark.asyncio
-  @patch("robosystems.models.iam.OrgUser.get_by_org_and_user")
+  @patch("robosystems.models.core.OrgUser.get_by_org_and_user")
   async def test_get_subscription_error_handling(
     self, mock_get_org_user, mock_user, mock_db
   ):
@@ -258,7 +258,7 @@ class TestGetSubscription:
     assert "Failed to retrieve subscription" in exc.value.detail
 
   @pytest.mark.asyncio
-  @patch("robosystems.models.iam.OrgUser.get_by_org_and_user")
+  @patch("robosystems.models.core.OrgUser.get_by_org_and_user")
   async def test_get_subscription_requires_membership(
     self, mock_get_org_user, mock_user, mock_db
   ):
@@ -286,12 +286,12 @@ class TestCancelSubscription:
     return Mock()
 
   @pytest.mark.asyncio
-  @patch("robosystems.models.iam.OrgUser.get_by_org_and_user")
+  @patch("robosystems.models.core.OrgUser.get_by_org_and_user")
   async def test_cancel_subscription_success(
     self, mock_get_org_user, mock_user, mock_db
   ):
     """Test successful subscription cancellation."""
-    from robosystems.models.iam import OrgRole
+    from robosystems.models.core import OrgRole
 
     mock_org_user = Mock()
     mock_org_user.role = OrgRole.OWNER
@@ -321,12 +321,12 @@ class TestCancelSubscription:
     assert result.id == "sub_123"
 
   @pytest.mark.asyncio
-  @patch("robosystems.models.iam.OrgUser.get_by_org_and_user")
+  @patch("robosystems.models.core.OrgUser.get_by_org_and_user")
   async def test_cancel_subscription_not_found(
     self, mock_get_org_user, mock_user, mock_db
   ):
     """Test canceling subscription that doesn't exist."""
-    from robosystems.models.iam import OrgRole
+    from robosystems.models.core import OrgRole
 
     mock_org_user = Mock()
     mock_org_user.role = OrgRole.OWNER
@@ -342,12 +342,12 @@ class TestCancelSubscription:
     assert "Subscription not found" in exc.value.detail
 
   @pytest.mark.asyncio
-  @patch("robosystems.models.iam.OrgUser.get_by_org_and_user")
+  @patch("robosystems.models.core.OrgUser.get_by_org_and_user")
   async def test_cancel_subscription_already_canceled(
     self, mock_get_org_user, mock_user, mock_db
   ):
     """Test canceling already canceled subscription."""
-    from robosystems.models.iam import OrgRole
+    from robosystems.models.core import OrgRole
 
     mock_org_user = Mock()
     mock_org_user.role = OrgRole.OWNER
@@ -366,12 +366,12 @@ class TestCancelSubscription:
     assert "already canceled" in exc.value.detail.lower()
 
   @pytest.mark.asyncio
-  @patch("robosystems.models.iam.OrgUser.get_by_org_and_user")
+  @patch("robosystems.models.core.OrgUser.get_by_org_and_user")
   async def test_cancel_subscription_canceling_status(
     self, mock_get_org_user, mock_user, mock_db
   ):
     """Test canceling subscription in canceling status."""
-    from robosystems.models.iam import OrgRole
+    from robosystems.models.core import OrgRole
 
     mock_org_user = Mock()
     mock_org_user.role = OrgRole.OWNER
@@ -390,7 +390,7 @@ class TestCancelSubscription:
     assert "already canceled" in exc.value.detail.lower()
 
   @pytest.mark.asyncio
-  @patch("robosystems.models.iam.OrgUser.get_by_org_and_user")
+  @patch("robosystems.models.core.OrgUser.get_by_org_and_user")
   async def test_cancel_subscription_error_handling(
     self, mock_get_org_user, mock_user, mock_db
   ):
@@ -404,12 +404,12 @@ class TestCancelSubscription:
     assert "Failed to cancel subscription" in exc.value.detail
 
   @pytest.mark.asyncio
-  @patch("robosystems.models.iam.OrgUser.get_by_org_and_user")
+  @patch("robosystems.models.core.OrgUser.get_by_org_and_user")
   async def test_cancel_subscription_requires_owner_role(
     self, mock_get_org_user, mock_user, mock_db
   ):
     """Admins should not be able to cancel subscriptions."""
-    from robosystems.models.iam import OrgRole
+    from robosystems.models.core import OrgRole
 
     mock_membership = Mock()
     mock_membership.role = OrgRole.ADMIN

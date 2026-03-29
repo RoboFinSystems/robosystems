@@ -44,7 +44,7 @@ def cleanup_tracked_backups(
   Covers both customer API backups and SEC pipeline backups,
   since both create GraphBackup records with expires_at.
   """
-  from robosystems.models.iam import GraphBackup
+  from robosystems.models.core import GraphBackup
 
   expired_count = 0
   error_count = 0

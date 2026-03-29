@@ -73,8 +73,8 @@ async def _load_tables(
   from robosystems.config.storage.graph import get_staging_key
   from robosystems.database import SessionFactory
   from robosystems.graph_api.client.factory import get_graph_client
-  from robosystems.models.iam.graph_file import GraphFile
-  from robosystems.models.iam.graph_table import GraphTable
+  from robosystems.models.core.graph.graph_file import GraphFile
+  from robosystems.models.core.graph.graph_table import GraphTable
   from robosystems.operations.aws.s3 import S3Client
   from robosystems.operations.connection_service import ConnectionService
 

@@ -19,7 +19,7 @@ from dagster import (
 
 from robosystems.config import env
 from robosystems.dagster.resources import DatabaseResource
-from robosystems.models.iam import UserAPIKey
+from robosystems.models.core import UserAPIKey
 
 # ============================================================================
 # Environment-based Schedule Status
@@ -87,7 +87,7 @@ def check_shared_credit_allocation_health(
   context: OpExecutionContext, db: DatabaseResource
 ) -> dict:
   """Check health of shared credit allocation system."""
-  from robosystems.models.iam import UserRepositoryCredits
+  from robosystems.models.core import UserRepositoryCredits
 
   issues = []
 
@@ -133,7 +133,7 @@ def check_graph_credit_health(
   context: OpExecutionContext, db: DatabaseResource
 ) -> dict:
   """Check health of graph credit system."""
-  from robosystems.models.iam import GraphCredits
+  from robosystems.models.core import GraphCredits
 
   issues = []
 

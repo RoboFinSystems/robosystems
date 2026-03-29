@@ -4,7 +4,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field
 
-from ...billing import SubscriptionStatus
+from robosystems.models.core.billing import SubscriptionStatus
 
 
 class SubscriptionCreateRequest(BaseModel):

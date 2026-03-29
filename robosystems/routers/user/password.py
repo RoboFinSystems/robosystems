@@ -21,7 +21,7 @@ from ...models.api.common import (
   create_error_response,
 )
 from ...models.api.user import UpdatePasswordRequest
-from ...models.iam import User
+from ...models.core import User
 from ...security.password import PasswordSecurity
 
 router = APIRouter(tags=["User"])

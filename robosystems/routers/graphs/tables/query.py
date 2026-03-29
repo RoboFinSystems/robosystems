@@ -43,7 +43,7 @@ from robosystems.middleware.rate_limits import subscription_aware_rate_limit_dep
 from robosystems.middleware.robustness import CircuitBreakerManager
 from robosystems.models.api.common import ErrorResponse
 from robosystems.models.api.graphs.tables import TableQueryRequest, TableQueryResponse
-from robosystems.models.iam import User
+from robosystems.models.core import User
 
 router = APIRouter()
 

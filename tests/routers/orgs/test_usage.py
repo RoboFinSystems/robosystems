@@ -13,7 +13,7 @@ from uuid import uuid4
 
 import pytest
 
-from robosystems.models.iam import (
+from robosystems.models.core import (
   Graph,
   GraphUsage,
   GraphUser,
@@ -197,7 +197,7 @@ class TestOrgUsageEndpoints:
       monthly_allocation = 120.0
 
     with patch(
-      "robosystems.models.iam.graph_credits.GraphCredits.get_by_graph_id",
+      "robosystems.models.core.graph.graph_credits.GraphCredits.get_by_graph_id",
       return_value=FakeGraphCredits(),
     ):
       response = await async_client.get(f"/v1/orgs/{org.id}/usage", params={"days": 2})

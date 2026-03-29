@@ -13,7 +13,7 @@ from ...models.api.orgs import (
   OrgResponse,
   UpdateOrgRequest,
 )
-from ...models.iam import Graph, OrgRole, OrgUser, User
+from ...models.core import Graph, OrgRole, OrgUser, User
 
 logger = get_logger(__name__)
 
@@ -111,7 +111,7 @@ async def get_org(
       )
 
     # Get org limits
-    from ...models.iam import OrgLimits
+    from ...models.core import OrgLimits
 
     limits = OrgLimits.get_by_org_id(org_id, db)
 
@@ -239,7 +239,7 @@ async def list_org_graphs(
     result = []
     for graph in graphs:
       # Get graph credits info
-      from ...models.iam import GraphCredits
+      from ...models.core import GraphCredits
 
       credits = GraphCredits.get_by_graph_id(graph.graph_id, db)
 

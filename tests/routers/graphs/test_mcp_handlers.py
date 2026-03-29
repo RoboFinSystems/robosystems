@@ -271,8 +271,8 @@ class TestMCPAccessValidation:
     """Test access validation for shared repositories."""
     import uuid
 
-    from robosystems.models.iam.graph import Graph
-    from robosystems.models.iam.user_repository import (
+    from robosystems.models.core.graph import Graph
+    from robosystems.models.core.user.user_repository import (
       RepositoryAccessLevel,
       RepositoryType,
       UserRepository,

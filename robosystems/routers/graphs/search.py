@@ -11,7 +11,7 @@ from robosystems.models.api.search import (
   SearchRequest,
   SearchResponse,
 )
-from robosystems.models.iam import User
+from robosystems.models.core import User
 from robosystems.operations.search import get_search_service
 
 logger = logging.getLogger(__name__)
@@ -54,7 +54,7 @@ async def _check_search_rate_limit(
   # Check user has access to the shared repo (subscriptions are on the parent)
   from robosystems.database import SessionFactory
   from robosystems.middleware.rate_limits import DualLayerRateLimiter
-  from robosystems.models.iam.user_repository import UserRepository
+  from robosystems.models.core.user.user_repository import UserRepository
 
   parent_repo_id = resolve_shared_repository_parent(graph_id)
   session = SessionFactory()

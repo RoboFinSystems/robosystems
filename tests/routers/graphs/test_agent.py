@@ -27,7 +27,7 @@ async def test_agent_router_basic(
       "robosystems.routers.graphs.agent.handlers.AgentOrchestrator"
     ) as mock_orchestrator_class,
     patch(
-      "robosystems.models.iam.graph_credits.GraphCredits.get_by_graph_id"
+      "robosystems.models.core.graph.graph_credits.GraphCredits.get_by_graph_id"
     ) as mock_get_credits,
   ):
     # Mock GraphCredits to return a credit pool
@@ -82,7 +82,7 @@ async def test_agent_endpoint_with_history(
       "robosystems.routers.graphs.agent.handlers.AgentOrchestrator"
     ) as mock_orchestrator_class,
     patch(
-      "robosystems.models.iam.graph_credits.GraphCredits.get_by_graph_id"
+      "robosystems.models.core.graph.graph_credits.GraphCredits.get_by_graph_id"
     ) as mock_get_credits,
   ):
     # Mock GraphCredits to return a credit pool
@@ -135,7 +135,7 @@ async def test_agent_endpoint_with_context(
       "robosystems.routers.graphs.agent.handlers.AgentOrchestrator"
     ) as mock_orchestrator_class,
     patch(
-      "robosystems.models.iam.graph_credits.GraphCredits.get_by_graph_id"
+      "robosystems.models.core.graph.graph_credits.GraphCredits.get_by_graph_id"
     ) as mock_get_credits,
   ):
     # Mock GraphCredits to return a credit pool
@@ -188,7 +188,7 @@ async def test_agent_error_handling(
       "robosystems.routers.graphs.agent.handlers.AgentOrchestrator"
     ) as mock_orchestrator_class,
     patch(
-      "robosystems.models.iam.graph_credits.GraphCredits.get_by_graph_id"
+      "robosystems.models.core.graph.graph_credits.GraphCredits.get_by_graph_id"
     ) as mock_get_credits,
   ):
     # Mock GraphCredits to return a credit pool
@@ -273,7 +273,7 @@ class TestGraphIdValidation:
         "robosystems.routers.graphs.agent.handlers.AgentOrchestrator"
       ) as mock_orchestrator_class,
       patch(
-        "robosystems.models.iam.graph_credits.GraphCredits.get_by_graph_id"
+        "robosystems.models.core.graph.graph_credits.GraphCredits.get_by_graph_id"
       ) as mock_get_credits,
     ):
       # Mock GraphCredits to return a credit pool

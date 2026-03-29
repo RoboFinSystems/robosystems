@@ -25,15 +25,15 @@ from ...config.shared_repositories import (
   is_shared_repository as _is_shared_repository,
 )
 from ...middleware.graph.types import parse_graph_id
-from ...models.iam import (
+from ...models.core import (
   Graph,
   GraphCredits,
   GraphCreditTransaction,
   GraphUser,
 )
-from ...models.iam.graph_credits import CreditTransactionType
-from ...models.iam.user_repository import UserRepository
-from ...models.iam.user_repository_credits import (
+from ...models.core.graph.graph_credits import CreditTransactionType
+from ...models.core.user.user_repository import UserRepository
+from ...models.core.user.user_repository_credits import (
   UserRepositoryCredits,
   UserRepositoryCreditTransaction,
   UserRepositoryCreditTransactionType,
@@ -944,7 +944,7 @@ class CreditService:
       # Try to get latest storage usage from tracking
       from sqlalchemy import desc
 
-      from ...models.iam.graph_usage import GraphUsage, UsageEventType
+      from ...models.core.graph.graph_usage import GraphUsage, UsageEventType
 
       latest_usage = (
         self.session.query(GraphUsage)
@@ -1034,7 +1034,7 @@ class CreditService:
     """Get all graphs that are exceeding their storage limits."""
     from sqlalchemy import func
 
-    from ...models.iam.graph_usage import GraphUsage, UsageEventType
+    from ...models.core.graph.graph_usage import GraphUsage, UsageEventType
 
     # Get latest storage usage for each graph
     latest_usage_subquery = (

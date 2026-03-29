@@ -18,7 +18,7 @@ from robosystems.models.api.common import (
   create_error_response,
 )
 from robosystems.models.api.graphs.connections import SyncConnectionRequest
-from robosystems.models.iam import User
+from robosystems.models.core import User
 from robosystems.operations.connection_service import ConnectionService
 
 from .utils import (

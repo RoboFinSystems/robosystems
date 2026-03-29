@@ -149,7 +149,7 @@ Memories are scoped to the current graph and retrievable via recall-text.""",
     try:
       from robosystems.database import SessionFactory
       from robosystems.middleware.graph.utils import parse_subgraph_id
-      from robosystems.models.iam.graph import Graph
+      from robosystems.models.core.graph import Graph
 
       # Use parent graph ID for tier lookup
       sub_info = parse_subgraph_id(graph_id)

@@ -11,7 +11,7 @@ from unittest.mock import patch
 import bcrypt
 from fastapi.testclient import TestClient
 
-from robosystems.models.iam import User
+from robosystems.models.core import User
 
 
 class TestAuthRegistration:

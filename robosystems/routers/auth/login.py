@@ -19,7 +19,7 @@ from ...models.api.auth import AuthResponse, LoginRequest
 from ...models.api.common import ErrorResponse
 
 # Local imports
-from ...models.iam import User
+from ...models.core import User
 from ...security import SecurityAuditLogger, SecurityEventType
 from ...security.auth_protection import AdvancedAuthProtection
 from ...security.device_fingerprinting import extract_device_fingerprint

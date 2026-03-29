@@ -377,7 +377,7 @@ def test_user(test_db):
 
   import bcrypt
 
-  from robosystems.models.iam import Org, OrgRole, OrgType, OrgUser, User
+  from robosystems.models.core import Org, OrgRole, OrgType, OrgUser, User
 
   unique_id = str(uuid.uuid4())[:8]
   password = "T3stP@ssw0rd!"
@@ -414,7 +414,7 @@ def test_user(test_db):
 @pytest.fixture
 def test_org(test_db, test_user):
   """Get the org for the test user."""
-  from robosystems.models.iam import OrgUser
+  from robosystems.models.core import OrgUser
 
   org_users = OrgUser.get_user_orgs(test_user.id, test_db)
   if not org_users:
@@ -428,7 +428,7 @@ def sample_graph(test_db, test_org):
   import uuid
 
   from robosystems.config.graph_tier import GraphTier
-  from robosystems.models.iam import Graph
+  from robosystems.models.core import Graph
 
   unique_id = str(uuid.uuid4().hex)[:8]
   graph = Graph.create(
@@ -452,7 +452,7 @@ def sample_graph(test_db, test_org):
 @pytest.fixture
 def test_user_graph(test_db, test_user, sample_graph):
   """Create a test user-graph relationship."""
-  from robosystems.models.iam import GraphUser
+  from robosystems.models.core import GraphUser
 
   # Create GraphUser relationship
   user_graph = GraphUser.create(
@@ -472,7 +472,7 @@ def test_graph_with_credits(test_db, test_user, sample_graph):
   from datetime import datetime
   from decimal import Decimal
 
-  from robosystems.models.iam import GraphCredits, GraphUser
+  from robosystems.models.core import GraphCredits, GraphUser
 
   # Create GraphUser relationship
   user_graph = GraphUser.create(
@@ -518,7 +518,7 @@ def setup_database(test_db):
   # Clean up all data after each test
   test_db.rollback()
   # Also clean any committed data by truncating tables
-  from robosystems.models.iam import (
+  from robosystems.models.core import (
     ConnectionCredentials,
     Graph,
     GraphCredits,
@@ -528,7 +528,7 @@ def setup_database(test_db):
     User,
     UserAPIKey,
   )
-  from robosystems.models.iam.connection import Connection
+  from robosystems.models.core.connection.connection import Connection
 
   try:
     # Delete in reverse dependency order to avoid foreign key constraints
@@ -840,7 +840,7 @@ def other_user(test_db):
 
   import bcrypt
 
-  from robosystems.models.iam import User
+  from robosystems.models.core import User
 
   unique_id = str(uuid.uuid4())[:8]
   password = "0th3rP@ssw0rd!"
@@ -862,7 +862,7 @@ def other_user(test_db):
 def test_user_token(test_user, sample_graph, test_db):
   """Create a JWT token for test_user with access to sample_graph."""
   from robosystems.middleware.auth.jwt import create_jwt_token
-  from robosystems.models.iam import GraphUser
+  from robosystems.models.core import GraphUser
 
   # Ensure test_user has access to sample_graph
   existing_access = (

@@ -232,8 +232,8 @@ async def run_graph_creation(
 
     from robosystems.config.graph_tier import GraphTier
     from robosystems.database import session as db_session_factory
-    from robosystems.models.iam.graph import Graph
-    from robosystems.models.iam.org_user import OrgUser
+    from robosystems.models.core.graph import Graph
+    from robosystems.models.core.org.org_user import OrgUser
     from robosystems.utils.ulid import generate_ulid_hex
 
     # Pre-generate graph_id
@@ -455,8 +455,8 @@ async def run_entity_graph_creation(
 
     from robosystems.config.graph_tier import GraphTier
     from robosystems.database import session as db_session_factory
-    from robosystems.models.iam.graph import Graph
-    from robosystems.models.iam.org_user import OrgUser
+    from robosystems.models.core.graph import Graph
+    from robosystems.models.core.org.org_user import OrgUser
     from robosystems.utils.ulid import generate_ulid_hex
 
     # Pre-generate graph_id
@@ -550,7 +550,7 @@ async def run_subgraph_creation(
       Subgraph creation result with graph_id
   """
   from robosystems.database import get_db_session
-  from robosystems.models.iam import Graph, User
+  from robosystems.models.core import Graph, User
   from robosystems.operations.graph.subgraph_service import SubgraphService
 
   manager = get_operation_manager()
@@ -743,7 +743,7 @@ async def run_graph_provisioning(
       Provisioning result with graph_id and status
   """
   from robosystems.database import get_db_session
-  from robosystems.models.billing import (
+  from robosystems.models.core.billing import (
     BillingAuditLog,
     BillingCustomer,
     BillingEventType,
@@ -1011,13 +1011,13 @@ async def run_user_repository_provisioning(
       Provisioning result with access status
   """
   from robosystems.database import get_db_session
-  from robosystems.models.billing import (
+  from robosystems.models.core import RepositoryType
+  from robosystems.models.core.billing import (
     BillingAuditLog,
     BillingCustomer,
     BillingEventType,
     BillingSubscription,
   )
-  from robosystems.models.iam import RepositoryType
   from robosystems.operations.graph.repository_subscription_service import (
     RepositorySubscriptionService,
   )

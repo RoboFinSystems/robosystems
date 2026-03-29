@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 from robosystems.models.api.graphs.connections import (
   SECConnectionConfig,
 )
-from robosystems.models.iam import User
+from robosystems.models.core import User
 from robosystems.operations.providers.registry import ProviderRegistry
 
 

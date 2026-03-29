@@ -23,7 +23,7 @@ from robosystems.models.api.graphs.core import (
 from robosystems.models.api.graphs.schema import (
   CustomSchemaDefinition,
 )
-from robosystems.models.iam import OrgLimits
+from robosystems.models.core import OrgLimits
 from robosystems.routers.graphs.main import (
   CreateGraphRequest,
   _create_error_response,
@@ -87,7 +87,7 @@ class TestGraphCreationEndpoint:
   ):
     """Test successful graph creation."""
     with patch("robosystems.database.get_db_session") as mock_get_db:
-      with patch("robosystems.models.iam.OrgUser.get_user_orgs") as mock_get_user_orgs:
+      with patch("robosystems.models.core.OrgUser.get_user_orgs") as mock_get_user_orgs:
         with patch.object(
           OrgLimits, "get_or_create_for_org", return_value=mock_user_limits
         ):
@@ -140,7 +140,7 @@ class TestGraphCreationEndpoint:
   ):
     """Test successful entity graph creation."""
     with patch("robosystems.database.get_db_session") as mock_get_db:
-      with patch("robosystems.models.iam.OrgUser.get_user_orgs") as mock_get_user_orgs:
+      with patch("robosystems.models.core.OrgUser.get_user_orgs") as mock_get_user_orgs:
         with patch.object(
           OrgLimits, "get_or_create_for_org", return_value=mock_user_limits
         ):
@@ -227,7 +227,7 @@ class TestGraphCreationEndpoint:
     )
 
     with patch("robosystems.database.get_db_session") as mock_get_db:
-      with patch("robosystems.models.iam.OrgUser.get_user_orgs") as mock_get_user_orgs:
+      with patch("robosystems.models.core.OrgUser.get_user_orgs") as mock_get_user_orgs:
         with patch.object(
           OrgLimits, "get_or_create_for_org", return_value=mock_user_limits
         ):
@@ -272,7 +272,7 @@ class TestGraphCreationEndpoint:
   ):
     """Test graph creation when user has no organization."""
     with patch("robosystems.database.get_db_session") as mock_get_db:
-      with patch("robosystems.models.iam.OrgUser.get_user_orgs") as mock_get_user_orgs:
+      with patch("robosystems.models.core.OrgUser.get_user_orgs") as mock_get_user_orgs:
         mock_db = Mock()
         mock_get_db.return_value = iter([mock_db])
 
@@ -294,7 +294,7 @@ class TestGraphCreationEndpoint:
   ):
     """Test graph creation when user has reached their limit."""
     with patch("robosystems.database.get_db_session") as mock_get_db:
-      with patch("robosystems.models.iam.OrgUser.get_user_orgs") as mock_get_user_orgs:
+      with patch("robosystems.models.core.OrgUser.get_user_orgs") as mock_get_user_orgs:
         mock_limits = Mock(spec=OrgLimits)
         mock_limits.can_create_graph.return_value = (
           False,
@@ -383,7 +383,7 @@ class TestGraphCreationEndpoint:
   ):
     """Test handling of operation creation failure."""
     with patch("robosystems.database.get_db_session") as mock_get_db:
-      with patch("robosystems.models.iam.OrgUser.get_user_orgs") as mock_get_user_orgs:
+      with patch("robosystems.models.core.OrgUser.get_user_orgs") as mock_get_user_orgs:
         with patch.object(
           OrgLimits, "get_or_create_for_org", return_value=mock_user_limits
         ):
@@ -799,7 +799,7 @@ class TestTierMapping:
     )
 
     with patch("robosystems.database.get_db_session") as mock_get_db:
-      with patch("robosystems.models.iam.OrgUser.get_user_orgs") as mock_get_user_orgs:
+      with patch("robosystems.models.core.OrgUser.get_user_orgs") as mock_get_user_orgs:
         with patch.object(
           OrgLimits, "get_or_create_for_org", return_value=mock_user_limits
         ):
@@ -859,7 +859,7 @@ class TestTierMapping:
     )
 
     with patch("robosystems.database.get_db_session") as mock_get_db:
-      with patch("robosystems.models.iam.OrgUser.get_user_orgs") as mock_get_user_orgs:
+      with patch("robosystems.models.core.OrgUser.get_user_orgs") as mock_get_user_orgs:
         with patch.object(
           OrgLimits, "get_or_create_for_org", return_value=mock_user_limits
         ):

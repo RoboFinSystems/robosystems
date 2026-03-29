@@ -14,13 +14,13 @@ from ...models.api.admin import (
   SubscriptionResponse,
   SubscriptionUpdateRequest,
 )
-from ...models.billing import (
+from ...models.core import Graph, User
+from ...models.core.billing import (
   BillingAuditLog,
   BillingCustomer,
   BillingSubscription,
   SubscriptionStatus,
 )
-from ...models.iam import Graph, User
 
 logger = get_logger(__name__)
 
@@ -41,7 +41,7 @@ async def list_subscriptions(
   """List all subscriptions with optional filters."""
   session = next(get_db_session())
   try:
-    from ...models.iam import OrgUser
+    from ...models.core import OrgUser
 
     query = session.query(BillingSubscription)
 
@@ -67,7 +67,7 @@ async def list_subscriptions(
 
     results = []
     for sub in subscriptions:
-      from ...models.iam import Org
+      from ...models.core import Org
 
       org = session.query(Org).filter(Org.id == sub.org_id).first()
 
@@ -153,7 +153,7 @@ async def get_subscription(request: Request, subscription_id: str):
         detail=f"Subscription {subscription_id} not found",
       )
 
-    from ...models.iam import Org, OrgUser
+    from ...models.core import Org, OrgUser
 
     org = session.query(Org).filter(Org.id == subscription.org_id).first()
 
@@ -218,7 +218,7 @@ async def create_subscription(request: Request, data: SubscriptionCreateRequest)
   """Create a new subscription for any resource type."""
   session = next(get_db_session())
   try:
-    from ...models.iam import Org
+    from ...models.core import Org
 
     org = Org.get_by_id(data.org_id, session)
     if not org:
@@ -265,7 +265,7 @@ async def create_subscription(request: Request, data: SubscriptionCreateRequest)
 
     subscription.activate(session)
 
-    from ...models.iam import OrgUser
+    from ...models.core import OrgUser
 
     owner = (
       session.query(OrgUser)
@@ -411,7 +411,7 @@ async def update_subscription(
         },
       )
 
-    from ...models.iam import Org, OrgUser
+    from ...models.core import Org, OrgUser
 
     org = session.query(Org).filter(Org.id == subscription.org_id).first()
 

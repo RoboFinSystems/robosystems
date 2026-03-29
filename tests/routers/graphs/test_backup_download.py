@@ -88,7 +88,7 @@ class TestBackupDownloadEndpoint:
   @patch(
     "robosystems.routers.graphs.backups.download.MultiTenantUtils.is_shared_repository"
   )
-  @patch("robosystems.models.iam.GraphUser.get_by_user_id")
+  @patch("robosystems.models.core.GraphUser.get_by_user_id")
   def test_download_requires_subscription_for_shared_repo(
     self,
     mock_get_by_user_id,
@@ -151,7 +151,7 @@ class TestBackupDownloadEndpoint:
   @patch(
     "robosystems.routers.graphs.backups.download.MultiTenantUtils.is_shared_repository"
   )
-  @patch("robosystems.models.iam.GraphUser.get_by_user_id")
+  @patch("robosystems.models.core.GraphUser.get_by_user_id")
   def test_download_returns_403_for_starter_plan(
     self,
     mock_get_by_user_id,
@@ -223,7 +223,7 @@ class TestBackupDownloadEndpoint:
   @patch(
     "robosystems.routers.graphs.backups.download.MultiTenantUtils.is_shared_repository"
   )
-  @patch("robosystems.models.iam.GraphUser.get_by_user_id")
+  @patch("robosystems.models.core.GraphUser.get_by_user_id")
   def test_download_rate_limit_exceeded_returns_429(
     self,
     mock_get_by_user_id,
@@ -297,7 +297,7 @@ class TestBackupDownloadEndpoint:
   @patch(
     "robosystems.routers.graphs.backups.download.MultiTenantUtils.is_shared_repository"
   )
-  @patch("robosystems.models.iam.GraphUser.get_by_user_id")
+  @patch("robosystems.models.core.GraphUser.get_by_user_id")
   def test_download_allowed_when_under_rate_limit(
     self,
     mock_get_by_user_id,
@@ -376,7 +376,7 @@ class TestBackupDownloadEndpoint:
   )
   @patch("robosystems.routers.graphs.backups.download.Graph.get_by_id")
   @patch("robosystems.middleware.graph.utils.MultiTenantUtils.is_shared_repository")
-  @patch("robosystems.models.iam.GraphUser.get_by_user_id")
+  @patch("robosystems.models.core.GraphUser.get_by_user_id")
   def test_download_allowed_for_user_graph_under_limit(
     self,
     mock_get_by_user_id,
@@ -442,7 +442,7 @@ class TestBackupDownloadEndpoint:
   )
   @patch("robosystems.routers.graphs.backups.download.Graph.get_by_id")
   @patch("robosystems.middleware.graph.utils.MultiTenantUtils.is_shared_repository")
-  @patch("robosystems.models.iam.GraphUser.get_by_user_id")
+  @patch("robosystems.models.core.GraphUser.get_by_user_id")
   def test_download_rate_limit_exceeded_for_user_graph(
     self,
     mock_get_by_user_id,
@@ -502,7 +502,7 @@ class TestBackupDownloadEndpoint:
   )
   @patch("robosystems.routers.graphs.backups.download.Graph.get_by_id")
   @patch("robosystems.middleware.graph.utils.MultiTenantUtils.is_shared_repository")
-  @patch("robosystems.models.iam.GraphUser.get_by_user_id")
+  @patch("robosystems.models.core.GraphUser.get_by_user_id")
   def test_download_allowed_for_xlarge_tier(
     self,
     mock_get_by_user_id,
@@ -566,7 +566,7 @@ class TestBackupDownloadEndpoint:
   )
   @patch("robosystems.routers.graphs.backups.download.Graph.get_by_id")
   @patch("robosystems.middleware.graph.utils.MultiTenantUtils.is_shared_repository")
-  @patch("robosystems.models.iam.GraphUser.get_by_user_id")
+  @patch("robosystems.models.core.GraphUser.get_by_user_id")
   def test_download_returns_404_when_backup_not_found(
     self,
     mock_get_by_user_id,

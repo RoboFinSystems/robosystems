@@ -22,7 +22,7 @@ from robosystems.models.api.oauth import (
   OAuthInitRequest,
   OAuthInitResponse,
 )
-from robosystems.models.iam import User
+from robosystems.models.core import User
 from robosystems.operations.connection_service import ConnectionService
 
 from .utils import provider_registry

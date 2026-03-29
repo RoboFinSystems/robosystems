@@ -11,8 +11,12 @@ from ...config import env
 from ...config.defaults import CacheDefaults
 from ...config.graph_tier import GraphTier
 from ...logger import get_logger
-from ...models.billing import BillingCustomer, BillingSubscription, SubscriptionStatus
-from ...models.iam import Graph, GraphStatus, OrgUser
+from ...models.core import Graph, GraphStatus, OrgUser
+from ...models.core.billing import (
+  BillingCustomer,
+  BillingSubscription,
+  SubscriptionStatus,
+)
 
 logger = get_logger(__name__)
 

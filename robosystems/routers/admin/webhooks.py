@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 
 from ...database import SessionFactory, get_db_session
 from ...logger import get_logger
-from ...models.billing import BillingAuditLog
+from ...models.core.billing import BillingAuditLog
 from ...operations.providers.payment_provider import get_payment_provider
 from ...security.audit_logger import SecurityAuditLogger, SecurityEventType
 

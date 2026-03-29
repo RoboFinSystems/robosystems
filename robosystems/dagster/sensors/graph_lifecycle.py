@@ -39,8 +39,8 @@ def expired_graph_subscription_sensor(context: SensorEvaluationContext):
   from datetime import UTC, datetime
 
   from robosystems.database import session as db_session_factory
-  from robosystems.models.billing.subscription import BillingSubscription
-  from robosystems.models.iam.graph import Graph, GraphStatus
+  from robosystems.models.core.billing.subscription import BillingSubscription
+  from robosystems.models.core.graph import Graph, GraphStatus
 
   db = db_session_factory()
   try:
@@ -102,8 +102,8 @@ def suspended_graph_deprovisioning_sensor(context: SensorEvaluationContext):
 
   from robosystems.config.deprovisioning import get_deprovisioning_config
   from robosystems.database import session as db_session_factory
-  from robosystems.models.billing.subscription import BillingSubscription
-  from robosystems.models.iam.graph import Graph, GraphStatus
+  from robosystems.models.core.billing.subscription import BillingSubscription
+  from robosystems.models.core.graph import Graph, GraphStatus
 
   config = get_deprovisioning_config()
   db = db_session_factory()

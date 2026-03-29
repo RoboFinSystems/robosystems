@@ -25,7 +25,7 @@ from robosystems.middleware.otel.metrics import (
 from robosystems.middleware.rate_limits import subscription_aware_rate_limit_dependency
 from robosystems.models.api.common import ErrorResponse
 from robosystems.models.api.graphs.backups import BackupRestoreRequest
-from robosystems.models.iam import User
+from robosystems.models.core import User
 from robosystems.security import SecurityAuditLogger, SecurityEventType
 
 from .utils import verify_admin_access
@@ -157,7 +157,7 @@ async def restore_backup(
       )
 
     # Verify backup exists and belongs to this graph
-    from robosystems.models.iam import GraphBackup
+    from robosystems.models.core import GraphBackup
 
     backup_record = GraphBackup.get_by_id(backup_id, db)
     if not backup_record:

@@ -118,7 +118,7 @@ class SharedRepositoryService:
         logger.info(f"Schema installed: {result}")
 
       from ...database import get_db_session
-      from ...models.iam.graph import Graph
+      from ...models.core.graph import Graph
 
       db_gen = get_db_session()
       db = next(db_gen)
@@ -140,7 +140,7 @@ class SharedRepositoryService:
         logger.info(f"Graph metadata created/verified: {repository_graph.graph_id}")
 
         if schema_ddl:
-          from ...models.iam import GraphSchema
+          from ...models.core import GraphSchema
 
           existing_schema = GraphSchema.get_active_schema(graph_id, db)
           if not existing_schema:
@@ -265,7 +265,7 @@ async def ensure_shared_subgraph_exists(
   postgres_exists = False
   try:
     from ...database import get_db_session
-    from ...models.iam.graph import Graph
+    from ...models.core.graph import Graph
 
     db_gen = get_db_session()
     db = next(db_gen)
@@ -303,7 +303,7 @@ async def ensure_shared_subgraph_exists(
   if postgres_exists:
     try:
       from ...database import get_db_session
-      from ...models.iam import GraphSchema
+      from ...models.core import GraphSchema
 
       db_gen = get_db_session()
       db = next(db_gen)
@@ -366,7 +366,7 @@ async def ensure_shared_subgraph_exists(
     from datetime import UTC, datetime
 
     from ...database import get_db_session
-    from ...models.iam.graph import Graph
+    from ...models.core.graph import Graph
 
     db_gen = get_db_session()
     db = next(db_gen)
@@ -419,7 +419,7 @@ async def ensure_shared_subgraph_exists(
       db.flush()
 
       # Create GraphSchema record for subgraph (inheriting from parent)
-      from ...models.iam import GraphSchema
+      from ...models.core import GraphSchema
 
       existing_schema = GraphSchema.get_active_schema(subgraph_id, db)
       if not existing_schema:
@@ -484,7 +484,7 @@ async def ensure_shared_repository_exists(
   postgres_exists = False
   try:
     from ...database import get_db_session
-    from ...models.iam import Graph, GraphSchema
+    from ...models.core import Graph, GraphSchema
 
     db_gen = get_db_session()
     db = next(db_gen)

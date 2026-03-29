@@ -829,8 +829,8 @@ class DuckDBTableManager:
     import time
 
     from robosystems.database import SessionFactory
-    from robosystems.models.iam.graph_file import GraphFile
-    from robosystems.models.iam.graph_table import GraphTable
+    from robosystems.models.core.graph.graph_file import GraphFile
+    from robosystems.models.core.graph.graph_table import GraphTable
 
     validate_table_name(table_name)
 

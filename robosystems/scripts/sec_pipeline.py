@@ -663,7 +663,7 @@ class SECPipeline:
     Without this, stale SourceFile records would prevent reprocessing.
     """
     from robosystems.database import SessionFactory
-    from robosystems.models.iam import SourceFile
+    from robosystems.models.core import SourceFile
 
     logger.info("  Clearing SEC SourceFile records...")
     try:
@@ -786,7 +786,7 @@ class SECPipeline:
       "-c",
       """
 from robosystems.database import session as SessionLocal
-from robosystems.models.iam import SourceFile
+from robosystems.models.core import SourceFile
 session = SessionLocal()
 try:
     # Get all partition keys for pending files
@@ -832,7 +832,7 @@ finally:
       "-c",
       """
 from robosystems.database import session as SessionLocal
-from robosystems.models.iam import SourceFile
+from robosystems.models.core import SourceFile
 session = SessionLocal()
 try:
     pending = session.query(SourceFile).filter(
@@ -871,7 +871,7 @@ finally:
       "-c",
       """
 from robosystems.database import session as SessionLocal
-from robosystems.models.iam import SourceFile
+from robosystems.models.core import SourceFile
 session = SessionLocal()
 try:
     updated = session.query(SourceFile).filter(

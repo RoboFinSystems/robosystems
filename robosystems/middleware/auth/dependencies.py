@@ -11,7 +11,7 @@ from fastapi import Header, HTTPException, Query, Request, Security, status
 from fastapi.security import APIKeyHeader
 
 from ...logger import logger
-from ...models.iam import User
+from ...models.core import User
 from ...security import SecurityAuditLogger, SecurityEventType
 from .cache import api_key_cache
 
@@ -99,7 +99,7 @@ def _db_check_graph_access(user_id: str, graph_id: str) -> bool:
   connection for the entire request duration.
   """
   from ...database import SessionFactory
-  from ...models.iam import GraphUser
+  from ...models.core import GraphUser
 
   sess = SessionFactory()
   try:

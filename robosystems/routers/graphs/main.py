@@ -43,7 +43,7 @@ from robosystems.models.api.user import (
   GraphInfo,
   UserGraphsResponse,
 )
-from robosystems.models.iam import GraphUser, OrgLimits, OrgUser, User
+from robosystems.models.core import GraphUser, OrgLimits, OrgUser, User
 
 # Create router for unified graph creation
 router = APIRouter(prefix="/v1/graphs", tags=["Graphs"])
@@ -203,7 +203,7 @@ async def get_graphs(
     user_graphs = GraphUser.get_by_user_id(current_user.id, session)
 
     # Get all user-repository relationships (shared repositories)
-    from robosystems.models.iam.user_repository import UserRepository
+    from robosystems.models.core.user.user_repository import UserRepository
 
     user_repositories = UserRepository.get_user_repositories(
       current_user.id, session, active_only=True

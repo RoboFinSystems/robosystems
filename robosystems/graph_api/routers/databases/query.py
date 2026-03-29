@@ -20,7 +20,7 @@ from robosystems.graph_api.core.admission_control import (
 from robosystems.graph_api.core.ladybug import get_ladybug_service
 from robosystems.graph_api.models.database import QueryRequest
 from robosystems.logger import logger
-from robosystems.models.iam import Graph
+from robosystems.models.core import Graph
 
 router = APIRouter(prefix="/databases", tags=["Graph Query"])
 

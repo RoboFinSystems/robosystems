@@ -14,7 +14,7 @@ from ...models.api.orgs import (
   OrgMemberResponse,
   UpdateMemberRoleRequest,
 )
-from ...models.iam import OrgRole, OrgUser, User
+from ...models.core import OrgRole, OrgUser, User
 from ..auth.utils import hash_password
 
 logger = get_logger(__name__)

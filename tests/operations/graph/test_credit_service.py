@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, Mock, patch
 import pytest
 
 from robosystems.config.graph_tier import GraphTier
-from robosystems.models.iam import (
+from robosystems.models.core import (
   GraphCredits,
   User,
 )

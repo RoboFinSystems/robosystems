@@ -13,8 +13,8 @@ from ...models.api.billing.checkout import (
   CheckoutStatusResponse,
   CreateCheckoutRequest,
 )
-from ...models.billing import BillingCustomer, BillingSubscription
-from ...models.iam import User
+from ...models.core import User
+from ...models.core.billing import BillingCustomer, BillingSubscription
 from ...operations.providers.payment_provider import get_payment_provider
 
 logger = get_logger(__name__)
@@ -63,7 +63,7 @@ async def create_checkout_session(
     )
 
   try:
-    from ...models.iam import OrgRole, OrgUser
+    from ...models.core import OrgRole, OrgUser
 
     # Get user's org - they must be an OWNER
     user_orgs = OrgUser.get_user_orgs(current_user.id, db)
@@ -252,7 +252,7 @@ async def get_checkout_status(
 ):
   """Get status of a checkout session."""
   try:
-    from ...models.iam import OrgUser
+    from ...models.core import OrgUser
 
     subscription = BillingSubscription.get_by_provider_subscription_id(session_id, db)
 

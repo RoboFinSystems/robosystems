@@ -16,7 +16,7 @@ from ...config.graph_tier import GraphTier
 from ...database import get_db_session
 from ...logger import logger
 from ...middleware.graph.allocation_manager import LadybugAllocationManager
-from ...models.iam import GraphUser
+from ...models.core import GraphUser
 
 
 class GenericGraphService:
@@ -75,7 +75,7 @@ class GenericGraphService:
     if progress_callback:
       progress_callback("Checking organization limits and permissions...", 10)
 
-    from ...models.iam import OrgLimits, OrgUser
+    from ...models.core import OrgLimits, OrgUser
 
     db_gen = get_db_session()
     db = next(db_gen)
@@ -284,7 +284,7 @@ class GenericGraphService:
       db = next(db_gen)
       try:
         # Create or update Graph entry to store metadata
-        from ...models.iam.graph import Graph, GraphStatus
+        from ...models.core.graph import Graph, GraphStatus
 
         existing_graph = Graph.get_by_id(graph_id, db, include_deprovisioned=True)
 
@@ -360,7 +360,7 @@ class GenericGraphService:
         db.flush()
 
         if schema_persistence:
-          from ...models.iam import GraphSchema
+          from ...models.core import GraphSchema
 
           graph_schema = GraphSchema.create(
             graph_id=graph_id,

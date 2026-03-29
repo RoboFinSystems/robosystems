@@ -16,7 +16,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from robosystems.config.graph_tier import GraphTierConfig
-from robosystems.models.iam import GraphFile, GraphTable
+from robosystems.models.core import GraphFile, GraphTable
 
 logger = logging.getLogger(__name__)
 

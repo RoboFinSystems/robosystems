@@ -13,9 +13,9 @@ from robosystems.graph_api.core.ladybug import Repository
 from robosystems.logger import logger
 from robosystems.middleware.auth.dependencies import get_current_user
 from robosystems.middleware.graph.utils import MultiTenantUtils
-from robosystems.models.iam import User
-from robosystems.models.iam.graph_user import GraphUser
-from robosystems.models.iam.user_repository import UserRepository
+from robosystems.models.core import User
+from robosystems.models.core.graph.graph_user import GraphUser
+from robosystems.models.core.user.user_repository import UserRepository
 from robosystems.security import SecurityAuditLogger
 
 from ..router import get_graph_repository

@@ -16,14 +16,14 @@ from ...models.api.admin import (
   CreditPoolResponse,
   RepositoryCreditPoolResponse,
 )
-from ...models.iam import Graph, User
-from ...models.iam.graph_credits import (
+from ...models.core import Graph, User
+from ...models.core.graph.graph_credits import (
   CreditTransactionType,
   GraphCredits,
   GraphCreditTransaction,
 )
-from ...models.iam.user_repository import UserRepository
-from ...models.iam.user_repository_credits import (
+from ...models.core.user.user_repository import UserRepository
+from ...models.core.user.user_repository_credits import (
   UserRepositoryCredits,
   UserRepositoryCreditTransaction,
   UserRepositoryCreditTransactionType,

@@ -86,7 +86,7 @@ class CreateWorkspaceTool:
 
       # Get parent graph from database
       from robosystems.database import get_db_session
-      from robosystems.models.iam.graph import Graph
+      from robosystems.models.core.graph import Graph
 
       db_gen = get_db_session()
       db = next(db_gen)
@@ -221,8 +221,8 @@ class DeleteWorkspaceTool:
 
     # Verify user has admin access to parent graph
     from robosystems.database import get_db_session
-    from robosystems.models.iam.graph import Graph
-    from robosystems.models.iam.graph_user import GraphUser
+    from robosystems.models.core.graph import Graph
+    from robosystems.models.core.graph.graph_user import GraphUser
 
     db_gen = get_db_session()
     db = next(db_gen)
@@ -322,7 +322,7 @@ class ListWorkspacesTool:
     """
     try:
       from robosystems.database import get_db_session
-      from robosystems.models.iam.graph import Graph
+      from robosystems.models.core.graph import Graph
 
       parent_graph_id = self.client.graph_id
 

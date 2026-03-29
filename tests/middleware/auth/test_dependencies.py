@@ -24,7 +24,7 @@ from robosystems.middleware.auth.dependencies import (
   get_repository_user_dependency,
   verify_jwt_token,
 )
-from robosystems.models.iam import User
+from robosystems.models.core import User
 
 
 class TestCachedUserDataValidation:
@@ -753,7 +753,7 @@ class TestGetCurrentUserWithGraph:
 
     # Mock GraphUser access check (patched at the models level since
     # _db_check_graph_access imports it internally)
-    with patch("robosystems.models.iam.GraphUser") as mock_user_graph:
+    with patch("robosystems.models.core.GraphUser") as mock_user_graph:
       mock_user_graph.user_has_access.return_value = True
 
       result = await get_current_user_with_graph(

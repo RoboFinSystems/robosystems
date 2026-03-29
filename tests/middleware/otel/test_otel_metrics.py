@@ -423,7 +423,7 @@ class TestMetricsIntegration:
   def authenticated_user(self, client: TestClient):
     """Create authenticated user for integration tests."""
     from robosystems.database import session
-    from robosystems.models.iam import UserAPIKey
+    from robosystems.models.core import UserAPIKey
 
     # Patch environment to ensure CAPTCHA is disabled and registration is enabled
     with (

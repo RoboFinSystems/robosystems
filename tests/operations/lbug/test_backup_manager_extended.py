@@ -298,7 +298,7 @@ class TestGetBackupDownloadUrl:
 
     with (
       patch("robosystems.database.session") as mock_sl,
-      patch("robosystems.models.iam.graph_backup.GraphBackup") as mock_gb,
+      patch("robosystems.models.core.graph.graph_backup.GraphBackup") as mock_gb,
     ):
       mock_session = MagicMock()
       mock_sl.return_value = mock_session
@@ -312,7 +312,7 @@ class TestGetBackupDownloadUrl:
   async def test_returns_none_for_missing_backup(self, manager):
     with (
       patch("robosystems.database.session") as mock_sl,
-      patch("robosystems.models.iam.graph_backup.GraphBackup") as mock_gb,
+      patch("robosystems.models.core.graph.graph_backup.GraphBackup") as mock_gb,
     ):
       mock_session = MagicMock()
       mock_sl.return_value = mock_session
@@ -330,7 +330,7 @@ class TestGetBackupDownloadUrl:
 
     with (
       patch("robosystems.database.session") as mock_sl,
-      patch("robosystems.models.iam.graph_backup.GraphBackup") as mock_gb,
+      patch("robosystems.models.core.graph.graph_backup.GraphBackup") as mock_gb,
     ):
       mock_session = MagicMock()
       mock_sl.return_value = mock_session
@@ -348,7 +348,7 @@ class TestGetBackupDownloadUrl:
 
     with (
       patch("robosystems.database.session") as mock_sl,
-      patch("robosystems.models.iam.graph_backup.GraphBackup") as mock_gb,
+      patch("robosystems.models.core.graph.graph_backup.GraphBackup") as mock_gb,
     ):
       mock_session = MagicMock()
       mock_sl.return_value = mock_session
@@ -376,7 +376,7 @@ class TestGetBackupDownloadUrl:
 
     with (
       patch("robosystems.database.session") as mock_sl,
-      patch("robosystems.models.iam.graph_backup.GraphBackup") as mock_gb,
+      patch("robosystems.models.core.graph.graph_backup.GraphBackup") as mock_gb,
     ):
       mock_session = MagicMock()
       mock_sl.return_value = mock_session

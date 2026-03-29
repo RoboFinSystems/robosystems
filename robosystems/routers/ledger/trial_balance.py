@@ -15,7 +15,7 @@ from robosystems.models.api.extensions.trial_balance import (
   TrialBalanceResponse,
   TrialBalanceRow,
 )
-from robosystems.models.iam import User
+from robosystems.models.core import User
 
 router = APIRouter()
 

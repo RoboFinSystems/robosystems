@@ -175,8 +175,8 @@ class TestRunGraphCreation:
             return_value="1234567890abcdef",
           ),
           patch("robosystems.database.session") as mock_session_factory,
-          patch("robosystems.models.iam.graph.Graph") as mock_graph_cls,
-          patch("robosystems.models.iam.org_user.OrgUser"),
+          patch("robosystems.models.core.graph.Graph") as mock_graph_cls,
+          patch("robosystems.models.core.org.org_user.OrgUser"),
           patch.object(
             type(env_config),
             "GRAPH_PROVISION_QUEUE_ENABLED",
@@ -746,7 +746,7 @@ class TestRunUserRepositoryProvisioning:
         )
 
         with patch(
-          "robosystems.models.billing.BillingCustomer"
+          "robosystems.models.core.billing.BillingCustomer"
         ) as mock_billing_customer:
           mock_billing_customer.get_by_user_id.return_value = mock_customer
 
@@ -758,7 +758,7 @@ class TestRunUserRepositoryProvisioning:
             mock_repo_service.allocate_credits.return_value = 10000
             mock_repo_service_class.return_value = mock_repo_service
 
-            with patch("robosystems.models.billing.BillingAuditLog"):
+            with patch("robosystems.models.core.billing.BillingAuditLog"):
               with patch(
                 "robosystems.operations.graph.subscription_service.generate_subscription_invoice"
               ):
@@ -804,7 +804,7 @@ class TestRunUserRepositoryProvisioning:
         )
 
         with patch(
-          "robosystems.models.billing.BillingCustomer"
+          "robosystems.models.core.billing.BillingCustomer"
         ) as mock_billing_customer:
           mock_billing_customer.get_by_user_id.return_value = mock_customer
 
@@ -844,7 +844,7 @@ class TestRunUserRepositoryProvisioning:
         )
 
         with patch(
-          "robosystems.models.billing.BillingCustomer"
+          "robosystems.models.core.billing.BillingCustomer"
         ) as mock_billing_customer:
           mock_billing_customer.get_by_user_id.return_value = mock_customer
 

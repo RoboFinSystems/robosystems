@@ -23,7 +23,7 @@ from robosystems.middleware.robustness import (
   record_operation_metric,
 )
 from robosystems.models.api.graphs.schema import SchemaInfoResponse
-from robosystems.models.iam import User
+from robosystems.models.core import User
 
 from .utils import circuit_breaker, get_schema_info, timeout_coordinator
 

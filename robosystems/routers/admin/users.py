@@ -15,11 +15,14 @@ from ...models.api.admin import (
   UserRepositoryAccessResponse,
   UserResponse,
 )
-from ...models.iam import Graph, GraphUser, OrgUser, User
-from ...models.iam.graph_credits import CreditTransactionType, GraphCreditTransaction
-from ...models.iam.graph_usage import GraphUsage, UsageEventType
-from ...models.iam.user_api_key import UserAPIKey
-from ...models.iam.user_repository import UserRepository
+from ...models.core import Graph, GraphUser, OrgUser, User
+from ...models.core.graph.graph_credits import (
+  CreditTransactionType,
+  GraphCreditTransaction,
+)
+from ...models.core.graph.graph_usage import GraphUsage, UsageEventType
+from ...models.core.user.user_api_key import UserAPIKey
+from ...models.core.user.user_repository import UserRepository
 
 logger = get_logger(__name__)
 

@@ -64,7 +64,7 @@ def resolve_schema_extensions(graph_id: str) -> list[str]:
   # User graph: query PostgreSQL
   try:
     from robosystems.database import get_db_session
-    from robosystems.models.iam import Graph
+    from robosystems.models.core import Graph
 
     db_gen = get_db_session()
     db = next(db_gen)
