@@ -16,13 +16,14 @@ RoboSystems is a financial intelligence platform that connects disparate data so
 The platform provides the core infrastructure that all extensions build on:
 
 - **Dedicated Infrastructure**: Tiered graph infrastructure with dedicated instances and configurable memory allocation
-- **Subgraphs (Workspaces)**: AI memory graphs, data workspaces with fork & publish, and isolated environments for development and team collaboration
-- **AI Agent Interface**: Natural language financial analysis with text-to-Cypher via Model Context Protocol (MCP)
+
+- **AI Agent System**: Autonomous financial operations — graph queries, taxonomy mapping, report generation — with automatic credit tracking and SSE progress streaming
 - **Shared Repositories**: SEC XBRL filings knowledge graph for context mining and benchmarking
 - **Document Management**: Upload, index, and search documents with full-text and semantic search via OpenSearch
 - **DuckDB Staging System**: High-performance data validation and bulk ingestion pipeline
 - **Dagster Orchestration**: Data pipeline orchestration for SEC filings, QuickBooks sync, backups, billing, and scheduled jobs
 - **Credit-Based Billing**: Flexible credits for AI operations based on token usage
+- **Subgraphs (Workspaces)**: AI memory graphs, data workspaces with fork & publish, and isolated environments for development and team collaboration
 
 ## Extensions
 
@@ -146,7 +147,7 @@ RoboSystems is built on a modern, scalable architecture with:
 - FastAPI REST API with versioned endpoints
 - Extension API routes feature-flagged per module
 - MCP Server for AI-powered graph database access with schema-aware tools
-- Agent Interface for text-to-Cypher natural language queries
+- AI Agent System for autonomous financial operations with automatic credit tracking
 - Dagster for data pipeline orchestration and background jobs
 
 **LadybugDB Graph Database:** ([configuration](/.github/configs/graph.yml))
@@ -204,16 +205,17 @@ See [SEC Adapter](/robosystems/adapters/sec/README.md) and [SEC Pipeline](/robos
 
 ### Agent System
 
-- Multi-agent architecture with intelligent routing
-- Dynamic agent selection based on query context
-- Parallel query processing with context-aware responses
-- Extensible framework for custom domain expertise
+- Unified architecture: stateless agents with protocol-based service injection
+- Dual execution: API (sync/SSE) and background worker (Valkey queue + SSE progress)
+- Automatic credit tracking per AI call — agents cannot forget billing
+- Extensible: new agents implement `run(ctx)` and register with a decorator
+- See [Agent README](/robosystems/operations/agents/README.md) for details
 
 ### Credit System
 
 - **AI Operations Only**: Credits are consumed exclusively by AI agent calls (Anthropic Claude via AWS Bedrock)
-- **Token-Based Billing**: ~1-2 credits per text-to-Cypher call based on actual token usage and cost
-- **MCP Tool Access**: No credits consumed for external MCP calls not using agent-based tools
+- **Token-Based Billing**: Credits based on actual token usage and model cost
+- **MCP Tool Access**: No credits consumed for MCP calls or database operations
 
 ## Client Libraries
 
