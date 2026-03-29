@@ -7,6 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import ProgrammingError
 
 from robosystems.db.extensions import extensions_session
+from robosystems.logger import logger
 from robosystems.middleware.auth.dependencies import get_current_user_with_graph
 from robosystems.middleware.graph.types import GRAPH_OR_SUBGRAPH_ID_PATTERN
 from robosystems.middleware.rate_limits import subscription_aware_rate_limit_dependency
@@ -166,8 +167,13 @@ async def create_report(
 
       return _fact_grid_to_response(grid, report_def)
 
-  except (ValueError, ProgrammingError):
+  except ValueError:
     raise _ledger_404()
+  except ProgrammingError as e:
+    if "does not exist" in str(e) and ("schema" in str(e) or "relation" in str(e)):
+      raise _ledger_404()
+    logger.error(f"Report creation failed: {e}")
+    raise
 
 
 @router.get(
@@ -212,8 +218,13 @@ async def list_reports(
           for r in rows
         ]
       )
-  except (ValueError, ProgrammingError):
+  except ValueError:
     raise _ledger_404()
+  except ProgrammingError as e:
+    if "does not exist" in str(e) and ("schema" in str(e) or "relation" in str(e)):
+      raise _ledger_404()
+    logger.error(f"Report listing failed: {e}")
+    raise
 
 
 @router.get(
@@ -271,8 +282,13 @@ async def get_report(
 
       return _fact_grid_to_response(grid, report_def)
 
-  except (ValueError, ProgrammingError):
+  except ValueError:
     raise _ledger_404()
+  except ProgrammingError as e:
+    if "does not exist" in str(e) and ("schema" in str(e) or "relation" in str(e)):
+      raise _ledger_404()
+    logger.error(f"Report retrieval failed: {e}")
+    raise
 
 
 @router.post(
@@ -327,8 +343,13 @@ async def regenerate_report(
 
       return _fact_grid_to_response(grid, report_def)
 
-  except (ValueError, ProgrammingError):
+  except ValueError:
     raise _ledger_404()
+  except ProgrammingError as e:
+    if "does not exist" in str(e) and ("schema" in str(e) or "relation" in str(e)):
+      raise _ledger_404()
+    logger.error(f"Report regeneration failed: {e}")
+    raise
 
 
 @router.delete(
@@ -354,5 +375,10 @@ async def delete_report(
       session.delete(report_def)
       session.commit()
 
-  except (ValueError, ProgrammingError):
+  except ValueError:
     raise _ledger_404()
+  except ProgrammingError as e:
+    if "does not exist" in str(e) and ("schema" in str(e) or "relation" in str(e)):
+      raise _ledger_404()
+    logger.error(f"Report deletion failed: {e}")
+    raise

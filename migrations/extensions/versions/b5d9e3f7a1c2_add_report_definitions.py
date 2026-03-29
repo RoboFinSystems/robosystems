@@ -80,6 +80,19 @@ def _create_report_definitions(conn, schema: str) -> None:
     """)
   )
 
+  # If the table already exists (created by provision_tenant_schema before
+  # period_start/period_end were added to the model), add the missing columns.
+  conn.execute(
+    sa.text(
+      f'ALTER TABLE "{s}".report_definitions ADD COLUMN IF NOT EXISTS period_start DATE'
+    )
+  )
+  conn.execute(
+    sa.text(
+      f'ALTER TABLE "{s}".report_definitions ADD COLUMN IF NOT EXISTS period_end DATE'
+    )
+  )
+
   conn.execute(
     sa.text(
       f'CREATE INDEX IF NOT EXISTS idx_report_defs_type ON "{s}".report_definitions (report_type)'
