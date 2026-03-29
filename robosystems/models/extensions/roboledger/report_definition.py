@@ -8,7 +8,7 @@ after materialization.
 
 from datetime import UTC, datetime
 
-from sqlalchemy import Boolean, Column, DateTime, Float, Index, String
+from sqlalchemy import Boolean, Column, Date, DateTime, Float, Index, String
 from sqlalchemy.dialects.postgresql import JSONB
 
 from robosystems.db.extensions import ExtensionsBase
@@ -33,6 +33,8 @@ class ReportDefinition(ExtensionsBase):
   # Configuration
   mapping_id = Column(String, nullable=True)
   period_type = Column(String, nullable=False, default="monthly")
+  period_start = Column(Date, nullable=True)
+  period_end = Column(Date, nullable=True)
   comparative = Column(Boolean, nullable=False, default=True)
 
   # Generated output references
