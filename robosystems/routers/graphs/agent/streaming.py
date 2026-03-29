@@ -1,5 +1,4 @@
-"""
-SSE streaming support for API-based agent operations.
+"""SSE streaming support for API-based agent operations.
 
 Provides real-time progress updates for medium-duration agent operations
 (5-30s) that run on the API but benefit from progress feedback.
@@ -14,8 +13,9 @@ from sse_starlette.sse import EventSourceResponse
 
 from robosystems.logger import logger
 from robosystems.models.iam import User
+from robosystems.operations.agents.adapters.api import run_agent_api
+from robosystems.operations.agents.agent_registry import get_agent
 from robosystems.operations.agents.base import AgentMode
-from robosystems.operations.agents.registry import AgentRegistry
 
 
 async def stream_agent_execution(
@@ -25,27 +25,10 @@ async def stream_agent_execution(
   current_user: User,
   db_session: Any,
 ) -> EventSourceResponse:
-  """
-  Stream agent execution with SSE progress updates.
-
-  This function runs the agent on the API and provides
-  real-time progress updates via SSE for operations expected to take 5-30s.
-
-  Args:
-      agent_type: Type of agent to execute
-      graph_id: Graph database identifier
-      request_data: Agent request data
-      current_user: Authenticated user
-      db_session: Database session
-
-  Returns:
-      EventSourceResponse with SSE stream
-  """
+  """Stream agent execution with SSE progress updates."""
 
   async def event_generator():
-    """Generate SSE events during agent execution."""
     try:
-      # Send initialization event
       yield {
         "event": "agent_started",
         "data": json.dumps(
@@ -57,32 +40,18 @@ async def stream_agent_execution(
         ),
       }
 
-      # Get agent instance
-      registry = AgentRegistry()
-      agent = registry.get_agent(
-        agent_type=agent_type,
-        graph_id=graph_id,
-        user=current_user,
-        db_session=db_session,
-      )
-      if not agent:
-        yield {
-          "event": "error",
-          "data": json.dumps({"error": f"Agent type '{agent_type}' not found"}),
-        }
-        return
+      agent = get_agent(agent_type)
 
       yield {
         "event": "agent_initialized",
         "data": json.dumps(
           {
-            "agent_name": agent.metadata.name,
-            "description": agent.metadata.description,
+            "agent_name": agent.spec.name,
+            "description": agent.spec.description,
           }
         ),
       }
 
-      # Convert mode
       mode_str = request_data.get("mode", "standard")
       mode_map = {
         "quick": AgentMode.QUICK,
@@ -92,14 +61,9 @@ async def stream_agent_execution(
       }
       mode = mode_map.get(mode_str.lower(), AgentMode.STANDARD)
 
-      # Convert history
-      history = request_data.get("history", [])
-
-      # Create progress callback
       progress_events = []
 
       def progress_callback(stage: str, percentage: int, message: str):
-        """Collect progress events."""
         progress_events.append(
           {
             "stage": stage,
@@ -109,34 +73,35 @@ async def stream_agent_execution(
           }
         )
 
-      # Execute agent analysis
       try:
-        response = await agent.analyze(
+        result = await run_agent_api(
+          agent=agent,
+          graph_id=graph_id,
+          user=current_user,
           query=request_data["message"],
           mode=mode,
-          history=history,
+          db_session=db_session,
+          history=request_data.get("history", []),
           context=request_data.get("context"),
           callback=progress_callback,
         )
 
-        # Send any accumulated progress events
         for event in progress_events:
           yield {"event": "progress", "data": json.dumps(event)}
-          await asyncio.sleep(0)  # Allow other tasks to run
+          await asyncio.sleep(0)
 
-        # Send completion event with result
         yield {
           "event": "agent_completed",
           "data": json.dumps(
             {
-              "content": response.content,
-              "agent_used": response.agent_name,
-              "mode_used": response.mode_used.value,
-              "metadata": response.metadata,
-              "tokens_used": response.tokens_used,
-              "confidence_score": response.confidence_score,
-              "execution_time": response.execution_time,
-              "tools_called": response.tools_called,
+              "content": result.content,
+              "agent_used": agent.spec.name,
+              "mode_used": mode.value,
+              "metadata": result.metadata,
+              "tokens_used": result.metadata.get("tokens_used"),
+              "confidence_score": result.confidence_score,
+              "execution_time": result.metadata.get("execution_time"),
+              "tools_called": result.tools_called,
               "timestamp": datetime.now(UTC).isoformat(),
             }
           ),
@@ -160,17 +125,11 @@ async def stream_agent_execution(
       yield {
         "event": "error",
         "data": json.dumps(
-          {
-            "error": f"Stream error: {e!s}",
-            "error_type": type(e).__name__,
-          }
+          {"error": f"Stream error: {e!s}", "error_type": type(e).__name__}
         ),
       }
 
   return EventSourceResponse(
     event_generator(),
-    headers={
-      "Cache-Control": "no-cache",
-      "X-Accel-Buffering": "no",
-    },
+    headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
   )

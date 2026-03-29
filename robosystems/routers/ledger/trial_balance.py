@@ -42,8 +42,8 @@ async def get_trial_balance(
                  a.metadata->>'account_type' AS account_type,
                  COALESCE(SUM(li.debit_amount), 0) AS total_debits,
                  COALESCE(SUM(li.credit_amount), 0) AS total_credits
-          FROM accounts a
-          JOIN line_items li ON li.account_id = a.id
+          FROM elements a
+          JOIN line_items li ON li.element_id = a.id
           JOIN entries e ON e.id = li.entry_id
           WHERE e.status = 'posted'
             AND (e.posting_date >= :start_date OR :start_date IS NULL)

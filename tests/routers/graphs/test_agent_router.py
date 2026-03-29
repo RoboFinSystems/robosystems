@@ -54,46 +54,46 @@ def mock_orchestrator():
 
 @pytest.fixture
 def mock_registry():
-  """Create a mock agent registry."""
-  with patch("robosystems.routers.graphs.agent.execute.AgentRegistry") as mock:
-    registry = Mock()
+  """Mock agent registry functions for router tests."""
+  agents_metadata = {
+    "financial": {
+      "name": "Financial Agent",
+      "description": "Financial analysis",
+      "version": "1.0.0",
+      "capabilities": ["financial_analysis"],
+      "supported_modes": ["standard", "extended"],
+      "requires_credits": True,
+    },
+    "research": {
+      "name": "Research Agent",
+      "description": "Deep research",
+      "version": "1.0.0",
+      "capabilities": ["deep_research"],
+      "supported_modes": ["standard", "extended"],
+      "requires_credits": True,
+    },
+  }
 
-    # Agent metadata dictionary
-    agents_metadata = {
-      "financial": {
-        "name": "Financial Agent",
-        "description": "Financial analysis",
-        "version": "1.0.0",
-        "capabilities": ["financial_analysis"],
-        "supported_modes": ["standard", "extended"],
-        "requires_credits": True,
-        "author": "RoboSystems",
-        "tags": ["financial", "analysis"],
-      },
-      "research": {
-        "name": "Research Agent",
-        "description": "Deep research",
-        "version": "1.0.0",
-        "capabilities": ["deep_research"],
-        "supported_modes": ["standard", "extended"],
-        "requires_credits": True,
-        "author": "RoboSystems",
-        "tags": ["research", "analysis"],
-      },
-    }
+  # Mock a lightweight agent for the specific_agent endpoint
+  mock_agent = Mock()
+  mock_agent.spec = Mock()
+  mock_agent.spec.name = "Research Agent"
+  mock_agent.spec.execution_profile = {
+    AgentMode.STANDARD: Mock(min_time=1, max_time=5, avg_time=3, tool_calls=5),
+    AgentMode.EXTENDED: Mock(min_time=1, max_time=5, avg_time=3, tool_calls=12),
+  }
 
-    registry.list_agents = Mock(return_value=agents_metadata)
-
-    # Mock get_agent_metadata to return specific agent metadata
-    def get_agent_metadata(agent_type):
-      if agent_type in agents_metadata:
-        return agents_metadata[agent_type]
-      return None
-
-    registry.get_agent_metadata = Mock(side_effect=get_agent_metadata)
-
-    mock.return_value = registry
-    yield registry
+  with (
+    patch(
+      "robosystems.routers.graphs.agent.execute.list_agents",
+      return_value=agents_metadata,
+    ),
+    patch(
+      "robosystems.routers.graphs.agent.execute.get_agent",
+      return_value=mock_agent,
+    ),
+  ):
+    yield mock_agent
 
 
 @pytest.fixture
@@ -160,16 +160,6 @@ class TestAgentEndpoints:
 
   def test_specific_agent_endpoint(self, client, mock_orchestrator, mock_registry):
     """Test specific agent type endpoint."""
-    # Mock registry to return a valid agent with metadata
-    mock_agent = Mock()
-    mock_metadata = Mock()
-    mock_metadata.execution_profile = {
-      AgentMode.STANDARD: Mock(min_time=1, max_time=5, avg_time=3, tool_calls=5),
-      AgentMode.EXTENDED: Mock(min_time=1, max_time=5, avg_time=3, tool_calls=12),
-    }
-    mock_agent.metadata = mock_metadata
-    mock_registry.get_agent.return_value = mock_agent
-
     request_data = {
       "message": "Research this topic",
       "mode": "extended",

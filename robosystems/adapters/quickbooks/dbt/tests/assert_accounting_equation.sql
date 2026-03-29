@@ -20,7 +20,7 @@ with line_items as (
 ),
 
 accounts as (
-  select * from {{ ref('accounts') }}
+  select * from {{ ref('elements') }}
 ),
 
 classified_lines as (
@@ -29,7 +29,7 @@ classified_lines as (
     li.credit_amount,
     a.classification
   from line_items li
-  inner join accounts a on li.account_external_id = a.external_id
+  inner join accounts a on li.element_external_id = a.external_id
 ),
 
 balances as (

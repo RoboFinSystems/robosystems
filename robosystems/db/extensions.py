@@ -5,7 +5,7 @@ Separate from the platform database (database.py) because:
 - Schema-per-graph-id multi-tenancy (SET search_path per request)
 - Independent connection pool and lifecycle
 
-The extensions database stores domain data (entities, accounts, transactions,
+The extensions database stores domain data (entities, elements, transactions,
 positions, trades, etc.) shared across all extension modules (roboledger,
 roboinvestor, robofo, robohrm, roboepm) with schema-per-graph tenancy.
 """
@@ -135,7 +135,7 @@ def provision_tenant_schema(graph_id: str) -> None:
   """Create all tenant tables in a new PostgreSQL schema for this graph_id.
 
   Called lazily on first extension access for a graph. Creates the schema
-  and all tenant-scoped tables (accounts, transactions, entries, etc.)
+  and all tenant-scoped tables (elements, transactions, entries, etc.)
   using ExtensionsBase metadata.
 
   The public schema tables (fiscal_periods, generate_prefixed_id function)
@@ -162,5 +162,11 @@ def provision_tenant_schema(graph_id: str) -> None:
     # Without this, create_all finds existing tables in public and skips them.
     tenant_conn = conn.execution_options(schema_translate_map={None: schema})
     ExtensionsBase.metadata.create_all(bind=tenant_conn, tables=tenant_tables)
+
+    # Seed the shared reporting taxonomy into the tenant schema so that
+    # search_path queries see it (tenant tables shadow public tables).
+    from robosystems.config.taxonomy.seed import seed_tenant_reporting_taxonomy
+
+    seed_tenant_reporting_taxonomy(conn, schema)
 
     conn.commit()

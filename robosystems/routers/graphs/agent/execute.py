@@ -41,6 +41,7 @@ from robosystems.models.api.graphs.agent import (
   BatchAgentResponse,
 )
 from robosystems.models.iam import User
+from robosystems.operations.agents.agent_registry import get_agent, list_agents
 from robosystems.operations.agents.base import (
   AgentMode as BaseAgentMode,
 )
@@ -51,7 +52,6 @@ from robosystems.operations.agents.orchestrator import (
   AgentOrchestrator,
   AgentSelectionCriteria,
 )
-from robosystems.operations.agents.registry import AgentRegistry
 
 from .handlers import (
   handle_background_queue,
@@ -114,7 +114,7 @@ Use the optional `capability` filter to find agents with specific capabilities."
 @endpoint_metrics_decorator(
   "/v1/graphs/{graph_id}/agent", business_event_type="agent_list"
 )
-async def list_agents(
+async def list_agents_endpoint(
   graph_id: str = Path(
     ...,
     description="Graph database identifier",
@@ -128,10 +128,8 @@ async def list_agents(
   _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
 ) -> AgentListResponse:
   """List all available agents."""
-  registry = AgentRegistry()
-  agents = registry.list_agents()
+  agents = list_agents()
 
-  # Filter by capability if requested
   if capability:
     agents = {
       k: v for k, v in agents.items() if capability in v.get("capabilities", [])
@@ -366,8 +364,8 @@ async def get_agent_metadata(
   _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
 ) -> AgentMetadataResponse:
   """Get metadata for a specific agent."""
-  registry = AgentRegistry()
-  metadata = registry.get_agent_metadata(agent_type)
+  agents = list_agents()
+  metadata = agents.get(agent_type)
 
   if not metadata:
     raise HTTPException(status_code=404, detail=f"Agent '{agent_type}' not found")
@@ -431,21 +429,17 @@ async def specific_agent(
   _check_agent_post_enabled()
 
   try:
-    # Get agent instance to access execution profile
-    registry = AgentRegistry()
-    temp_agent = registry.get_agent(
-      agent_type=agent_type, graph_id=graph_id, user=current_user, db_session=db
-    )
-    if not temp_agent:
+    # Get agent to access execution profile (agents are lightweight, no graph/user needed)
+    try:
+      agent = get_agent(agent_type)
+    except KeyError:
       raise HTTPException(
         status_code=404, detail=f"Agent type '{agent_type}' not found"
       )
 
-    agent_metadata = temp_agent.metadata
-
     # Get execution profile for requested mode
     base_mode = _convert_agent_mode(request.mode)
-    execution_profile = agent_metadata.execution_profile.get(base_mode)
+    execution_profile = agent.spec.execution_profile.get(base_mode)
 
     # Detect client capabilities
     headers = dict(full_request.headers)

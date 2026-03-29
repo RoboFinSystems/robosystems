@@ -2,16 +2,28 @@
 Base agent abstract class and core structures.
 
 Provides the foundation for all agent implementations in the multiagent system.
+
+This module contains both the new unified Agent protocol (Agent, AgentSpec, AgentResult)
+and the legacy BaseAgent/AgentMetadata/AgentResponse classes. The legacy classes are
+used by the existing orchestrator and routers during migration.
 """
+
+from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 from enum import Enum
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from robosystems.logger import logger
-from robosystems.models.iam import User
+
+if TYPE_CHECKING:
+  from robosystems.models.iam import User
+  from robosystems.operations.agents.agent_context import AgentContext
+
+
+# ── Shared enums and primitives ──────────────────────────────────────────────
 
 
 class AgentCapability(Enum):
@@ -45,9 +57,118 @@ class ExecutionProfile:
   tool_calls: int = 0
 
 
+# ── New unified Agent protocol ───────────────────────────────────────────────
+
+
+@dataclass
+class AgentSpec:
+  """Declarative agent metadata. Set as a class attribute on Agent subclasses.
+
+  Unlike the legacy AgentMetadata, this is readable without instantiation,
+  which enables routing decisions without constructing agent objects.
+  """
+
+  name: str
+  description: str
+  capabilities: list[AgentCapability]
+  version: str = "1.0.0"
+  supported_modes: list[AgentMode] = field(
+    default_factory=lambda: [
+      AgentMode.QUICK,
+      AgentMode.STANDARD,
+      AgentMode.EXTENDED,
+    ]
+  )
+  max_tokens: dict[str, int] = field(
+    default_factory=lambda: {"input": 150000, "output": 8000}
+  )
+  requires_credits: bool = True
+  execution_profile: dict[AgentMode, ExecutionProfile] = field(
+    default_factory=lambda: {
+      AgentMode.QUICK: ExecutionProfile(
+        min_time=2, max_time=5, avg_time=3, tool_calls=2
+      ),
+      AgentMode.STANDARD: ExecutionProfile(
+        min_time=5, max_time=15, avg_time=10, tool_calls=5
+      ),
+      AgentMode.EXTENDED: ExecutionProfile(
+        min_time=30, max_time=120, avg_time=60, tool_calls=20
+      ),
+    }
+  )
+
+
+@dataclass
+class AgentResult:
+  """What an agent returns. Contains domain results only — no runtime metadata.
+
+  Runtime metadata (tokens used, credits consumed, execution time) is tracked
+  by the AgentContext and attached by the execution adapter.
+  """
+
+  content: str
+  metadata: dict[str, Any] = field(default_factory=dict)
+  tools_called: list[str] = field(default_factory=list)
+  confidence_score: float | None = None
+  requires_followup: bool = False
+
+
+class Agent(ABC):
+  """Base class for all agents in the unified agent system.
+
+  Agents are stateless domain logic containers. They declare their capabilities
+  via `spec` (a class attribute) and implement `run()` which receives an
+  `AgentContext` providing AI, tools, credits, and progress reporting.
+
+  Example::
+
+      class MyCoolAgent(Agent):
+          spec = AgentSpec(
+              name="Cool Agent",
+              description="Does cool things",
+              capabilities=[AgentCapability.CUSTOM],
+          )
+
+          async def run(self, ctx: AgentContext) -> AgentResult:
+              response = await ctx.ai.create_message(...)
+              return AgentResult(content=response.content)
+  """
+
+  spec: AgentSpec  # Must be set by subclass as a class attribute
+
+  @abstractmethod
+  async def run(self, ctx: AgentContext) -> AgentResult:
+    """Execute the agent's logic.
+
+    All services (AI, tools, progress, credits) are accessed through `ctx`.
+    Credit consumption is automatic — every `ctx.ai.create_message()` call
+    tracks tokens and deducts credits.
+
+    Args:
+        ctx: Agent context with identity, services, and task parameters.
+
+    Returns:
+        AgentResult with domain-specific content and metadata.
+    """
+
+  def can_handle(self, query: str, context: dict[str, Any] | None = None) -> float:
+    """Return confidence score (0-1) for handling this query.
+
+    Used by the orchestrator for routing. Override for custom logic.
+    Default returns 0.5 (neutral confidence).
+    """
+    return 0.5
+
+
+# ── Legacy classes (used by orchestrator/routers during migration) ───────────
+
+
 @dataclass
 class AgentMetadata:
-  """Metadata describing an agent's capabilities and configuration."""
+  """Metadata describing an agent's capabilities and configuration.
+
+  Legacy: Used by the old BaseAgent protocol. New agents use AgentSpec instead.
+  """
 
   name: str
   description: str
@@ -83,7 +204,10 @@ class AgentMetadata:
 
 @dataclass
 class AgentResponse:
-  """Standard response structure from agent analysis."""
+  """Standard response structure from agent analysis.
+
+  Legacy: Used by the old BaseAgent protocol. New agents return AgentResult.
+  """
 
   content: str
   agent_name: str
@@ -95,14 +219,14 @@ class AgentResponse:
   requires_followup: bool = False
   error_details: dict[str, Any] | None = None
   execution_time: float | None = None
-  timestamp: datetime = field(default_factory=datetime.utcnow)
+  timestamp: datetime = field(default_factory=lambda: datetime.now(UTC))
 
 
 class BaseAgent(ABC):
-  """
-  Abstract base class for all agents in the system.
+  """Abstract base class for agents using the legacy protocol.
 
-  Provides common functionality and enforces the agent interface.
+  Legacy: New agents should inherit from Agent instead.
+  This class is used by CypherAgent and the orchestrator during migration.
   """
 
   def __init__(
@@ -328,7 +452,7 @@ class BaseAgent(ABC):
         "graph_id": self.graph_id,
         "user_id": str(self.user.id),
         "agent_name": self.metadata.name,
-        "timestamp": datetime.utcnow().isoformat(),
+        "timestamp": datetime.now(UTC).isoformat(),
         "capabilities": [c.value for c in self.metadata.capabilities],
       }
     )

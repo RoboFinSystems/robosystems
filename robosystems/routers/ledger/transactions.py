@@ -19,7 +19,7 @@ from robosystems.models.api.extensions.transactions import (
   LedgerTransactionListResponse,
   LedgerTransactionSummaryResponse,
 )
-from robosystems.models.extensions import Account, Entry, LineItem, Transaction
+from robosystems.models.extensions import Element, Entry, LineItem, Transaction
 from robosystems.models.iam import User
 
 router = APIRouter()
@@ -137,8 +137,8 @@ async def get_transaction(
       entry_responses = []
       for entry in entries:
         line_items = session.execute(
-          select(LineItem, Account.name, Account.code)
-          .join(Account, LineItem.account_id == Account.id)
+          select(LineItem, Element.name, Element.code)
+          .join(Element, LineItem.element_id == Element.id)
           .where(LineItem.entry_id == entry.id)
           .order_by(LineItem.line_order)
         ).all()
@@ -146,7 +146,7 @@ async def get_transaction(
         li_responses = [
           LedgerLineItemResponse(
             id=li.id,
-            account_id=li.account_id,
+            account_id=li.element_id,
             account_name=acct_name,
             account_code=acct_code,
             debit_amount=cents_to_dollars(li.debit_amount),

@@ -47,7 +47,7 @@ class TestDbtProject:
   def test_oltp_models_exist(self):
     """Verify OLTP output model SQL files exist."""
     oltp_dir = DBT_PROJECT_DIR / "models" / "ledger"
-    assert (oltp_dir / "accounts.sql").exists()
+    assert (oltp_dir / "elements.sql").exists()
     assert (oltp_dir / "transactions.sql").exists()
     assert (oltp_dir / "entries.sql").exists()
     assert (oltp_dir / "line_items.sql").exists()
@@ -140,15 +140,15 @@ class TestDbtBuild:
       tables = {row[0] for row in con.execute("SHOW TABLES").fetchall()}
 
       # Verify OLTP output tables exist
-      assert "accounts" in tables
+      assert "elements" in tables
       assert "transactions" in tables
       assert "entries" in tables
       assert "line_items" in tables
       assert "dimensions" in tables
 
       # Verify row counts
-      acct_count = con.execute("SELECT count(*) FROM accounts").fetchone()[0]
-      assert acct_count == 16, f"Expected 16 accounts, got {acct_count}"
+      acct_count = con.execute("SELECT count(*) FROM elements").fetchone()[0]
+      assert acct_count == 16, f"Expected 16 elements, got {acct_count}"
 
       tx_count = con.execute("SELECT count(*) FROM transactions").fetchone()[0]
       assert tx_count == 15, f"Expected 15 transactions, got {tx_count}"

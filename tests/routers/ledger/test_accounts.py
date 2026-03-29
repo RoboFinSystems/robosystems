@@ -1,4 +1,4 @@
-"""Unit tests for ledger account endpoints."""
+"""Unit tests for ledger element (account) endpoints."""
 
 from unittest.mock import MagicMock, patch
 

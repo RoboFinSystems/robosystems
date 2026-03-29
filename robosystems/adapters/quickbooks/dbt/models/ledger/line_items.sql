@@ -10,7 +10,7 @@ with lines as (
 
 select
     journal_entry_id                            as entry_external_id,
-    account_ref_id                              as account_external_id,
+    account_ref_id                              as element_external_id,
     cast(round(debit_amount * 100, 0) as bigint)   as debit_amount,
     cast(round(credit_amount * 100, 0) as bigint)  as credit_amount,
     description,

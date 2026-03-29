@@ -12,7 +12,7 @@ from robosystems.middleware.auth.dependencies import get_current_user_with_graph
 from robosystems.middleware.graph.types import GRAPH_OR_SUBGRAPH_ID_PATTERN
 from robosystems.middleware.rate_limits import subscription_aware_rate_limit_dependency
 from robosystems.models.api.extensions.summary import LedgerSummaryResponse
-from robosystems.models.extensions import Account, Entry, LineItem, Transaction
+from robosystems.models.extensions import Element, Entry, LineItem, Transaction
 from robosystems.models.iam import User
 from robosystems.models.iam.connection import Connection
 
@@ -36,7 +36,7 @@ async def get_summary(
   try:
     with extensions_session(graph_id) as session:
       account_count = (
-        session.execute(select(func.count()).select_from(Account)).scalar() or 0
+        session.execute(select(func.count()).select_from(Element)).scalar() or 0
       )
       transaction_count = (
         session.execute(select(func.count()).select_from(Transaction)).scalar() or 0

@@ -1,5 +1,4 @@
-"""
-Agent execution handlers for different strategies.
+"""Agent execution handlers for different strategies.
 
 Provides handler functions for sync, SSE, and background queue execution paths.
 """
@@ -34,21 +33,7 @@ async def handle_sync_execution(
   selection_criteria: AgentSelectionCriteria = None,
   agent_type: str | None = None,
 ) -> AgentResponse:
-  """
-  Handle synchronous agent execution.
-
-  Args:
-      graph_id: Graph database identifier
-      request_data: Agent request data
-      base_mode: Agent execution mode
-      current_user: Authenticated user
-      db: Database session
-      selection_criteria: Optional agent selection criteria
-      agent_type: Optional specific agent type
-
-  Returns:
-      AgentResponse with result
-  """
+  """Handle synchronous agent execution."""
   config = OrchestratorConfig(
     routing_strategy=RoutingStrategy.BEST_MATCH,
     enable_rag=request_data.get("enable_rag", False),
@@ -86,28 +71,13 @@ async def handle_sse_streaming(
   db: Session,
   agent_type: str | None = None,
 ) -> EventSourceResponse:
-  """
-  Handle SSE streaming execution.
-
-  Args:
-      graph_id: Graph database identifier
-      request_data: Agent request data
-      current_user: Authenticated user
-      db: Database session
-      agent_type: Optional specific agent type (if None, will auto-select)
-
-  Returns:
-      EventSourceResponse with SSE stream
-  """
-  # If no agent_type specified, select one
+  """Handle SSE streaming execution."""
   if not agent_type:
     config = OrchestratorConfig(
       routing_strategy=RoutingStrategy.BEST_MATCH,
       enable_rag=request_data.get("enable_rag", False),
     )
     orchestrator = AgentOrchestrator(graph_id, current_user, db, config)
-
-    # Get agent recommendations to select best agent
     recommendations = orchestrator.get_agent_recommendations(
       request_data["message"], request_data.get("context")
     )
@@ -115,10 +85,8 @@ async def handle_sse_streaming(
       from fastapi import HTTPException
 
       raise HTTPException(status_code=500, detail="No suitable agent found for query")
-
     agent_type = recommendations[0]["agent_type"]
 
-  # Stream execution with selected agent
   return await stream_agent_execution(
     agent_type=agent_type,
     graph_id=graph_id,
@@ -141,32 +109,13 @@ async def handle_background_queue(
   background_tasks,
   agent_type: str | None = None,
 ) -> JSONResponse:
-  """
-  Handle async background execution.
-
-  Uses FastAPI background tasks to run agent analysis asynchronously
-  while providing SSE progress updates.
-
-  Args:
-      graph_id: Graph database identifier
-      request_data: Agent request data
-      current_user: Authenticated user
-      db: Database session
-      background_tasks: FastAPI BackgroundTasks instance
-      agent_type: Optional specific agent type (if None, will auto-select)
-
-  Returns:
-      JSONResponse with 202 status and operation details
-  """
-  # If no agent_type specified, select one
+  """Handle async background execution."""
   if not agent_type:
     config = OrchestratorConfig(
       routing_strategy=RoutingStrategy.BEST_MATCH,
       enable_rag=request_data.get("enable_rag", False),
     )
     orchestrator = AgentOrchestrator(graph_id, current_user, db, config)
-
-    # Get agent recommendations to select best agent
     recommendations = orchestrator.get_agent_recommendations(
       request_data["message"], request_data.get("context")
     )
@@ -174,19 +123,15 @@ async def handle_background_queue(
       from fastapi import HTTPException
 
       raise HTTPException(status_code=500, detail="No suitable agent found for query")
-
     agent_type = recommendations[0]["agent_type"]
 
-  # Create SSE operation
   sse_response = await create_operation_response(
     operation_type="agent_analysis",
     user_id=current_user.id,
     graph_id=graph_id,
   )
-
   operation_id = sse_response["operation_id"]
 
-  # Queue background task for agent analysis
   background_tasks.add_task(
     _run_agent_analysis_background,
     agent_type=agent_type,
@@ -202,7 +147,6 @@ async def handle_background_queue(
   )
 
   logger.info(f"Queued background agent analysis for operation {operation_id}")
-
   return JSONResponse(status_code=202, content=sse_response)
 
 
@@ -213,20 +157,18 @@ async def _run_agent_analysis_background(
   operation_id: str,
   user_id: str,
 ) -> dict[str, Any]:
-  """
-  Run agent analysis in background with SSE progress updates.
-  """
+  """Run agent analysis in background with SSE progress updates."""
   import time
 
   from robosystems.database import get_db_session
   from robosystems.middleware.sse.event_storage import OperationStatus
   from robosystems.middleware.sse.operation_manager import emit_sse_event
-  from robosystems.operations.agents.registry import AgentRegistry
+  from robosystems.operations.agents.adapters.api import run_agent_api
+  from robosystems.operations.agents.agent_registry import get_agent
 
   start_time = time.time()
 
   try:
-    # Emit started event
     emit_sse_event(
       operation_id=operation_id,
       status=OperationStatus.RUNNING,
@@ -235,34 +177,24 @@ async def _run_agent_analysis_background(
       progress_percentage=0,
     )
 
-    # Get database session
     db = next(get_db_session())
     try:
-      # Get user
       from robosystems.models.iam import User
 
       user = db.query(User).filter(User.id == user_id).first()
       if not user:
         raise ValueError(f"User {user_id} not found")
 
-      # Get agent instance
-      registry = AgentRegistry()
-      agent = registry.get_agent(
-        agent_type=agent_type, graph_id=graph_id, user=user, db_session=db
-      )
-      if not agent:
-        raise ValueError(f"Agent type '{agent_type}' not found")
+      agent = get_agent(agent_type)
 
-      # Emit initialization complete
       emit_sse_event(
         operation_id=operation_id,
         status=OperationStatus.RUNNING,
-        data={"agent_name": agent.metadata.name},
+        data={"agent_name": agent.spec.name},
         message="Agent initialized, starting analysis",
         progress_percentage=10,
       )
 
-      # Convert mode
       mode_str = request_data.get("mode", "standard")
       mode_map = {
         "quick": BaseAgentMode.QUICK,
@@ -272,12 +204,7 @@ async def _run_agent_analysis_background(
       }
       mode = mode_map.get(mode_str.lower(), BaseAgentMode.STANDARD)
 
-      # Convert history
-      history = request_data.get("history", [])
-
-      # Create progress callback
       def progress_callback(stage: str, percentage: int, message: str):
-        """Emit progress events during analysis."""
         emit_sse_event(
           operation_id=operation_id,
           status=OperationStatus.RUNNING,
@@ -286,36 +213,35 @@ async def _run_agent_analysis_background(
           progress_percentage=min(10 + int(percentage * 0.8), 90),
         )
 
-      # Execute agent analysis (already async)
-      response = await agent.analyze(
+      result = await run_agent_api(
+        agent=agent,
+        graph_id=graph_id,
+        user=user,
         query=request_data["message"],
         mode=mode,
-        history=history,
+        db_session=db,
+        history=request_data.get("history", []),
         context=request_data.get("context"),
         callback=progress_callback,
       )
 
-      # Calculate execution time
       execution_time = time.time() - start_time
 
-      # Prepare result
-      result = {
-        "content": response.content,
-        "agent_used": response.agent_name,
-        "mode_used": response.mode_used.value,
-        "metadata": response.metadata,
-        "tokens_used": response.tokens_used,
-        "confidence_score": response.confidence_score,
-        "error_details": response.error_details,
+      result_data = {
+        "content": result.content,
+        "agent_used": agent.spec.name,
+        "mode_used": mode.value,
+        "metadata": result.metadata,
+        "tokens_used": result.metadata.get("tokens_used"),
+        "confidence_score": result.confidence_score,
         "execution_time": execution_time,
-        "tools_called": response.tools_called,
+        "tools_called": result.tools_called,
       }
 
-      # Emit completion event
       emit_sse_event(
         operation_id=operation_id,
         status=OperationStatus.COMPLETED,
-        data=result,
+        data=result_data,
         message="Agent analysis completed successfully",
         progress_percentage=100,
       )
@@ -323,21 +249,17 @@ async def _run_agent_analysis_background(
       logger.info(
         f"Agent analysis completed: {agent_type} for graph {graph_id} in {execution_time:.2f}s"
       )
-
-      return result
+      return result_data
 
     finally:
       db.close()
 
   except Exception as e:
     logger.error(f"Background agent analysis failed: {e!s}", exc_info=True)
-
-    # Emit error event
     emit_sse_event(
       operation_id=operation_id,
       status=OperationStatus.FAILED,
       data={"error": str(e), "error_type": type(e).__name__},
       message=f"Agent analysis failed: {e!s}",
     )
-
     raise

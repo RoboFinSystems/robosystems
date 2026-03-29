@@ -17,7 +17,7 @@ from robosystems.models.api.extensions.accounts import (
   AccountTreeNode,
   AccountTreeResponse,
 )
-from robosystems.models.extensions import Account
+from robosystems.models.extensions import Element
 from robosystems.models.iam import User
 
 router = APIRouter()
@@ -34,7 +34,7 @@ def _parse_meta(raw) -> dict:
   return {}
 
 
-def _account_to_response(row: Account) -> AccountResponse:
+def _account_to_response(row: Element) -> AccountResponse:
   meta = _parse_meta(row.metadata_)
   return AccountResponse(
     id=row.id,
@@ -73,19 +73,19 @@ async def list_accounts(
 ):
   try:
     with extensions_session(graph_id) as session:
-      query = select(Account)
-      count_query = select(func.count()).select_from(Account)
+      query = select(Element)
+      count_query = select(func.count()).select_from(Element)
 
       if classification is not None:
-        query = query.where(Account.classification == classification)
-        count_query = count_query.where(Account.classification == classification)
+        query = query.where(Element.classification == classification)
+        count_query = count_query.where(Element.classification == classification)
       if is_active is not None:
-        query = query.where(Account.is_active == is_active)
-        count_query = count_query.where(Account.is_active == is_active)
+        query = query.where(Element.is_active == is_active)
+        count_query = count_query.where(Element.is_active == is_active)
 
       total = session.execute(count_query).scalar() or 0
       rows = (
-        session.execute(query.order_by(Account.code).offset(offset).limit(limit))
+        session.execute(query.order_by(Element.code).offset(offset).limit(limit))
         .scalars()
         .all()
       )
@@ -120,7 +120,7 @@ async def get_account_tree(
 ):
   try:
     with extensions_session(graph_id) as session:
-      rows = session.execute(select(Account).order_by(Account.code)).scalars().all()
+      rows = session.execute(select(Element).order_by(Element.code)).scalars().all()
 
       nodes: dict[str, AccountTreeNode] = {}
       roots: list[AccountTreeNode] = []
