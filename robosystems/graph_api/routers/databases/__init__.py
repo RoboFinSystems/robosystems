@@ -4,7 +4,6 @@ Database management routers.
 
 from . import (
   backup,
-  copy,
   management,
   memory,
   metrics,
@@ -17,7 +16,6 @@ from . import (
 
 __all__ = [
   "backup",
-  "copy",
   "management",
   "memory",
   "metrics",

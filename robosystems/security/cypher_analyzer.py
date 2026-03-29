@@ -574,7 +574,7 @@ def is_bulk_operation(query: str) -> bool:
   """
   Determine if a Cypher query contains bulk operations (COPY, LOAD, IMPORT).
 
-  These operations should be performed through the dedicated /copy endpoint
+  These operations should be performed through DuckDB staging and materialization
   rather than the general /query endpoint.
 
   Args:

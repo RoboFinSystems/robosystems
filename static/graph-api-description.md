@@ -1,13 +1,13 @@
-High-performance REST API for graph database operations with pluggable backend support. Provides multi-tenant database management with isolated instances, OpenCypher query execution, DuckDB-powered data ingestion from S3 and Parquet sources, and comprehensive backup/restore capabilities. Features tiered infrastructure with dedicated instances and subgraph support, plus shared repositories for public datasets (SEC filings). Built-in health monitoring, streaming query results, and flexible deployment with LadybugDB (primary) or optional Neo4j backends.
+High-performance REST API for LadybugDB graph database operations. Provides multi-tenant database management with isolated instances, OpenCypher query execution, DuckDB-powered data ingestion from S3 and Parquet sources, and comprehensive backup/restore capabilities. Features tiered infrastructure with dedicated instances and subgraph support, plus shared repositories for public datasets (SEC filings). Built-in health monitoring, streaming query results, and vector search.
 
 ## Core Features
 
 - **Multi-Tenant Architecture**: Isolated database instances per graph with API key authentication
 - **Cypher Query Execution**: Run graph queries with streaming results and batching support
-- **Data Ingestion**: Direct Parquet imports from S3, DuckDB ingestion from queries and tables
+- **Data Ingestion**: DuckDB staging from S3 Parquet, PostgreSQL (postgres_scanner), and queries
 - **Backup & Restore**: Full database backups with encryption and point-in-time recovery
 - **Health & Monitoring**: Real-time health checks, metrics, and task tracking
-- **Pluggable Backends**: LadybugDB (primary) with optional Neo4j support
+- **Vector Search**: LanceDB-powered semantic search across graph data
 
 ## API Operations
 
@@ -27,9 +27,8 @@ High-performance REST API for graph database operations with pluggable backend s
 
 ### Data Operations
 
-- **COPY FROM**: Direct Parquet ingestion from S3
 - **DuckDB Staging**: Validate and transform data before graph import
-- **DuckDB Ingestion**: Direct ingestion from DuckDB queries and tables
+- **Materialization**: Stage DuckDB tables into LadybugDB graph
 - **Batch Processing**: Chunked operations for large datasets
 - **Schema Validation**: Ensure data conforms to graph schema
 
@@ -46,10 +45,7 @@ High-performance REST API for graph database operations with pluggable backend s
 
 **Writer Nodes**: Full read/write access for user databases and shared repositories (port 8001)
 
-**Backend Support**:
-
-- **LadybugDB** (default): Embedded graph database, optimal for most workloads
-- **Neo4j** (optional): Available on port 8002, disabled by default
+**Backend**: LadybugDB — embedded columnar graph database
 
 ### Multi-Tenancy
 

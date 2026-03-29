@@ -42,7 +42,7 @@ for script in "${REPO_ROOT}"/bin/userdata/*.sh; do
     aws s3 cp "$script" "s3://${BUCKET_NAME}/userdata/${script_name}" --region "$REGION"
 done
 
-# Upload common userdata scripts (shared between LadybugDB and Neo4j)
+# Upload common userdata scripts shared across graph instance types
 echo "Uploading common userdata scripts to S3..."
 for script in "${REPO_ROOT}"/bin/userdata/common/*.sh; do
     if [ -f "$script" ]; then

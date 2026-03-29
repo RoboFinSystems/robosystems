@@ -34,7 +34,7 @@ class GraphSubscriptionTier(BaseModel):
   max_queries_per_hour: int | None = Field(None, description="Maximum queries per hour")
   max_subgraphs: int = Field(0, description="Maximum subgraphs supported")
   api_rate_multiplier: float = Field(..., description="API rate multiplier")
-  backend: str = Field(..., description="Database backend (ladybug or neo4j)")
+  backend: str = Field(..., description="Database backend identifier")
   instance_type: str | None = Field(None, description="Instance type")
 
 

@@ -16,8 +16,9 @@ class TestMain:
   @patch("robosystems.graph_api.main.uvicorn.run")
   @patch("robosystems.graph_api.main.create_app")
   @patch("robosystems.graph_api.main.init_cluster_service")
+  @patch("robosystems.config.validation.EnvValidator.validate_required_vars")
   def test_main_basic_configuration(
-    self, mock_init_cluster, mock_create_app, mock_uvicorn
+    self, _mock_validate, mock_init_cluster, mock_create_app, mock_uvicorn
   ):
     """Test main with basic configuration."""
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -72,7 +73,10 @@ class TestMain:
   @patch("robosystems.graph_api.main.uvicorn.run")
   @patch("robosystems.graph_api.main.create_app")
   @patch("robosystems.graph_api.main.init_cluster_service")
-  def test_main_read_only_mode(self, mock_init_cluster, mock_create_app, mock_uvicorn):
+  @patch("robosystems.config.validation.EnvValidator.validate_required_vars")
+  def test_main_read_only_mode(
+    self, _mock_validate, mock_init_cluster, mock_create_app, mock_uvicorn
+  ):
     """Test main with read-only mode."""
     with tempfile.TemporaryDirectory() as tmpdir:
       test_args = [
@@ -103,8 +107,9 @@ class TestMain:
   @patch("robosystems.graph_api.main.uvicorn.run")
   @patch("robosystems.graph_api.main.create_app")
   @patch("robosystems.graph_api.main.init_cluster_service")
+  @patch("robosystems.config.validation.EnvValidator.validate_required_vars")
   def test_main_shared_master_node(
-    self, mock_init_cluster, mock_create_app, mock_uvicorn
+    self, _mock_validate, mock_init_cluster, mock_create_app, mock_uvicorn
   ):
     """Test main with shared master node configuration."""
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -145,8 +150,9 @@ class TestMain:
   @patch("robosystems.graph_api.main.uvicorn.run")
   @patch("robosystems.graph_api.main.create_app")
   @patch("robosystems.graph_api.main.init_cluster_service")
+  @patch("robosystems.config.validation.EnvValidator.validate_required_vars")
   def test_main_with_tier_config(
-    self, mock_init_cluster, mock_create_app, mock_uvicorn
+    self, _mock_validate, mock_init_cluster, mock_create_app, mock_uvicorn
   ):
     """Test main with tier configuration from environment."""
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -223,7 +229,10 @@ class TestMain:
   @patch("robosystems.graph_api.main.uvicorn.run")
   @patch("robosystems.graph_api.main.create_app")
   @patch("robosystems.graph_api.main.init_cluster_service")
-  def test_main_with_workers(self, mock_init_cluster, mock_create_app, mock_uvicorn):
+  @patch("robosystems.config.validation.EnvValidator.validate_required_vars")
+  def test_main_with_workers(
+    self, _mock_validate, mock_init_cluster, mock_create_app, mock_uvicorn
+  ):
     """Test main with multiple workers."""
     with tempfile.TemporaryDirectory() as tmpdir:
       test_args = [
@@ -254,7 +263,10 @@ class TestMain:
   @patch("robosystems.graph_api.main.uvicorn.run")
   @patch("robosystems.graph_api.main.create_app")
   @patch("robosystems.graph_api.main.init_cluster_service")
-  def test_main_with_log_level(self, mock_init_cluster, mock_create_app, mock_uvicorn):
+  @patch("robosystems.config.validation.EnvValidator.validate_required_vars")
+  def test_main_with_log_level(
+    self, _mock_validate, mock_init_cluster, mock_create_app, mock_uvicorn
+  ):
     """Test main with custom log level."""
     with tempfile.TemporaryDirectory() as tmpdir:
       test_args = [
@@ -285,8 +297,9 @@ class TestMain:
   @patch("robosystems.graph_api.main.uvicorn.run")
   @patch("robosystems.graph_api.main.create_app")
   @patch("robosystems.graph_api.main.init_cluster_service")
+  @patch("robosystems.config.validation.EnvValidator.validate_required_vars")
   def test_main_base_path_creation(
-    self, mock_init_cluster, mock_create_app, mock_uvicorn
+    self, _mock_validate, mock_init_cluster, mock_create_app, mock_uvicorn
   ):
     """Test that main creates base path if it doesn't exist."""
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -316,8 +329,9 @@ class TestMain:
   @patch("robosystems.graph_api.main.uvicorn.run")
   @patch("robosystems.graph_api.main.create_app")
   @patch("robosystems.graph_api.main.init_cluster_service")
+  @patch("robosystems.config.validation.EnvValidator.validate_required_vars")
   def test_main_tier_config_exception_handling(
-    self, mock_init_cluster, mock_create_app, mock_uvicorn
+    self, _mock_validate, mock_init_cluster, mock_create_app, mock_uvicorn
   ):
     """Test main handles tier config loading exceptions gracefully."""
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -351,8 +365,9 @@ class TestMain:
   @patch("robosystems.graph_api.main.uvicorn.run")
   @patch("robosystems.graph_api.main.create_app")
   @patch("robosystems.graph_api.main.init_cluster_service")
+  @patch("robosystems.config.validation.EnvValidator.validate_required_vars")
   def test_main_shared_replica_node(
-    self, mock_init_cluster, mock_create_app, mock_uvicorn
+    self, _mock_validate, mock_init_cluster, mock_create_app, mock_uvicorn
   ):
     """Test main with shared replica node configuration."""
     with tempfile.TemporaryDirectory() as tmpdir:

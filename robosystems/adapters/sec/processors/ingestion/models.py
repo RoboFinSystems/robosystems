@@ -87,7 +87,7 @@ class StagingResult:
 
 @dataclass
 class MaterializeResult:
-  """Result from materialize_from_duckdb() or copy_incremental_to_ladybug() operation.
+  """Result from materialize_from_duckdb() operation.
 
   Contains statistics about the materialization (ingestion) operation.
   """
@@ -145,11 +145,6 @@ DEFAULT_MATERIALIZATION_TIMEOUT = 600  # 10 min - small/medium tables
 LARGE_MATERIALIZATION_TIMEOUT = 3600  # 60 min - direct COPY of 200M+ row tables
 CHUNKED_MATERIALIZATION_TIMEOUT = 2400  # 40 min per 20M row batch
 #
-# Incremental COPY timeouts:
-# - Direct S3 → LadybugDB COPY with ignore_errors, ~200K-400K rows/minute
-# - Memory efficient (spill_to_disk), network I/O bound
-INCREMENTAL_COPY_TIMEOUT = 600  # 10 min per table - incremental updates
-
 # Chunked materialization settings for large tables
 # RE-ENABLED (2026-01-31): Direct COPY of 200M+ row tables causes OOM on r7g.2xlarge
 # with 64GB RAM when LadybugDB buffer pool is boosted. Batching prevents memory

@@ -1,11 +1,11 @@
 #!/bin/bash
-# Universal Graph Database Instance Registration in DynamoDB
-# Supports both LadybugDB and Neo4j with backend_type tracking
+# Graph Database Instance Registration in DynamoDB
+# Registers LadybugDB graph instances with runtime metadata
 
 set -e
 
 # Validate required environment variables
-: ${DATABASE_TYPE:?"DATABASE_TYPE must be set (ladybug|neo4j)"}
+: ${DATABASE_TYPE:?"DATABASE_TYPE must be set (ladybug)"}
 : ${NODE_TYPE:?"NODE_TYPE must be set"}
 : ${ENVIRONMENT:?"ENVIRONMENT must be set"}
 : ${INSTANCE_ID:?"INSTANCE_ID must be set"}
@@ -22,6 +22,11 @@ REGISTRY_TABLE="${REGISTRY_TABLE:-robosystems-graph-${ENVIRONMENT}-instance-regi
 GRAPH_REGISTRY_TABLE="${GRAPH_REGISTRY_TABLE:-robosystems-graph-${ENVIRONMENT}-graph-registry}"
 MAX_DATABASES="${MAX_DATABASES:-1}"
 
+if [ "${DATABASE_TYPE}" != "ladybug" ]; then
+  echo "ERROR: Unsupported DATABASE_TYPE: ${DATABASE_TYPE}"
+  exit 1
+fi
+
 # Get VPC ID
 VPC_ID=$(curl -s http://169.254.169.254/latest/meta-data/network/interfaces/macs/$(curl -s http://169.254.169.254/latest/meta-data/mac)/vpc-id)
 
@@ -31,10 +36,10 @@ ASG_NAME=$(aws ec2 describe-instances \
   --query 'Reservations[0].Instances[0].Tags[?Key==`aws:autoscaling:groupName`].Value' \
   --output text --region ${AWS_REGION} || echo "unknown")
 
-echo "=== Registering ${DATABASE_TYPE} Instance in DynamoDB ==="
+echo "=== Registering graph instance in DynamoDB ==="
 echo "Instance ID: ${INSTANCE_ID}"
 echo "Node type: ${NODE_TYPE}"
-echo "Backend type: ${DATABASE_TYPE}"
+echo "Runtime type: ${DATABASE_TYPE}"
 echo "Cluster tier: ${CLUSTER_TIER}"
 
 # Build the base item JSON
@@ -153,7 +158,7 @@ elif [ "${NODE_TYPE}" = "shared_master" ] || [ "${NODE_TYPE}" = "shared_replica"
 fi
 
 if [ $? -eq 0 ]; then
-  echo "✅ Successfully registered ${DATABASE_TYPE} instance in DynamoDB"
+  echo "✅ Successfully registered graph instance in DynamoDB"
 else
   echo "WARNING: Failed to register instance in DynamoDB"
   # Continue anyway - instance can still function

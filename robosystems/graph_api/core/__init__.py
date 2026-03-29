@@ -16,6 +16,7 @@ from .ladybug import (
 from .metrics_collector import LadybugMetricsCollector
 from .utils import validate_database_name, validate_query_parameters
 
+# Legacy naming alias — do not rename (used by main.py and tests)
 init_cluster_service = init_ladybug_service
 
 __all__ = [

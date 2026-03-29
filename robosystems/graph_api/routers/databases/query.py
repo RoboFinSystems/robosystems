@@ -13,7 +13,6 @@ from contextlib import contextmanager
 from fastapi import APIRouter, Depends, HTTPException, Path, status
 from fastapi.responses import StreamingResponse
 
-from robosystems.config import env
 from robosystems.graph_api.core.admission_control import (
   AdmissionDecision,
   get_admission_controller,
@@ -81,22 +80,13 @@ def track_connection(admission_controller, database_name):
     admission_controller.release_connection(database_name)
 
 
-def _get_service_for_request():
-  backend_type = env.GRAPH_BACKEND_TYPE
-  if backend_type in ["neo4j_community", "neo4j_enterprise"]:
-    from robosystems.graph_api.core.neo4j import Neo4jService
-
-    return Neo4jService()
-  return get_ladybug_service()
-
-
 @router.post("/{graph_id}/query")
 async def execute_query(
   request: QueryRequest,
   graph_id: str = Path(..., description="Graph database identifier"),
   streaming: bool = False,
   database: str | None = None,
-  service=Depends(_get_service_for_request),
+  service=Depends(get_ladybug_service),
 ):
   """
   Execute a Cypher query against a specific database with admission control.
@@ -154,30 +144,16 @@ async def execute_query(
       database=graph_id, cypher=request.cypher, parameters=request.parameters
     )
 
-    backend_type = env.GRAPH_BACKEND_TYPE
+    if not streaming:
+      return service.execute_query(query_request)
 
-    if backend_type in ["neo4j_community", "neo4j_enterprise"]:
-      # Use async backend service
-      if not streaming:
-        return await service.execute_query(query_request)
-      else:
-        # Streaming not yet implemented for Neo4j backend
-        raise HTTPException(
-          status_code=status.HTTP_501_NOT_IMPLEMENTED,
-          detail="Streaming not yet implemented for Neo4j backend",
-        )
-    else:
-      # Use existing LadybugDB service (sync)
-      if not streaming:
-        return service.execute_query(query_request)
+    # Streaming response for large result sets
+    def generate_stream():
+      for chunk in service.execute_query_streaming(query_request, chunk_size=1000):
+        yield json.dumps(chunk) + "\n"
 
-      # Streaming response for large result sets
-      def generate_stream():
-        for chunk in service.execute_query_streaming(query_request, chunk_size=1000):
-          yield json.dumps(chunk) + "\n"
-
-      return StreamingResponse(
-        generate_stream(),
-        media_type="application/x-ndjson",
-        headers={"X-Streaming": "true", "Cache-Control": "no-cache"},
-      )
+    return StreamingResponse(
+      generate_stream(),
+      media_type="application/x-ndjson",
+      headers={"X-Streaming": "true", "Cache-Control": "no-cache"},
+    )

@@ -69,8 +69,8 @@ async def get_schema_info(repository: Any) -> dict[str, Any]:
     schema_info["node_labels"] = node_tables
     schema_info["relationship_types"] = rel_tables
 
-    # For node properties, we need to query each table individually
-    # This is a limitation of LadybugDB compared to Neo4j
+    # For node properties, we query each table individually because
+    # LadybugDB exposes schema details through per-table catalog lookups.
     # CALL TABLE_INFO is a catalog query (metadata only), so it's fast even for many tables
     for node_label in node_tables:
       try:

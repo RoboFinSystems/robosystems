@@ -343,9 +343,6 @@ def create_app() -> FastAPI:
   app.include_router(databases.schema.router)
   app.include_router(databases.backup.router)
   app.include_router(databases.restore.router)
-  app.include_router(
-    databases.copy.router
-  )  # Direct S3 → LadybugDB copy (legacy/internal for SEC workers)
   app.include_router(databases.metrics.router)
   app.include_router(
     databases.memory.router

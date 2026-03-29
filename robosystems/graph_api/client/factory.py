@@ -301,7 +301,7 @@ class GraphClientFactory:
         tier: Instance tier for user graphs (Standard/Large/XLarge)
 
     Returns:
-        Configured GraphClient instance (works with all backends via Graph API)
+        Configured GraphClient instance for the routed Graph API endpoint
 
     Raises:
         ValueError: If graph not found or invalid configuration
@@ -880,7 +880,7 @@ async def get_graph_client(
       tier: Instance tier for user graphs (Standard/Large/XLarge)
 
   Returns:
-      Configured GraphClient instance (works with all backends via Graph API)
+      Configured GraphClient instance for the routed Graph API endpoint
 
   Example:
       async with await get_graph_client("sec", "read") as client:
@@ -910,7 +910,7 @@ def get_graph_client_sync(
       tier: Instance tier for user graphs (Standard/Large/XLarge)
 
   Returns:
-      Configured GraphClient instance (works with all backends via Graph API)
+      Configured GraphClient instance for the routed Graph API endpoint
 
   Example:
       with get_graph_client_sync("kg1a2b3c") as client:
@@ -935,7 +935,7 @@ async def get_graph_client_for_instance(
       api_key: API key (defaults to env.GRAPH_API_KEY)
 
   Returns:
-      Configured GraphClient instance for direct access (works with all backends)
+      Configured GraphClient instance for direct instance access
 
   Example:
       client = await get_graph_client_for_instance("10.0.1.123")

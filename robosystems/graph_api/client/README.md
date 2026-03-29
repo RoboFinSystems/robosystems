@@ -4,10 +4,9 @@
 
 The Graph Client and Factory system provides the critical interface between the RoboSystems application (API and workers) and the Graph API running on infrastructure. This layer handles intelligent routing, connection pooling, circuit breaking, and automatic failover to ensure reliable graph database operations at scale.
 
-**Backend Support:**
+**Backend:**
 
 - **LadybugDB**: EC2-based instances with DynamoDB registry discovery
-- **Neo4j**: EC2-based instances with Graph API HTTP interface
 
 ## Architecture
 
@@ -22,16 +21,13 @@ The Graph Client and Factory system provides the critical interface between the 
 │                      GraphClient                                │
 │         (Async/Sync HTTP Client with Retry Logic)               │
 ├─────────────────────────────────────────────────────────────────┤
-│              Backend-Specific Infrastructure                    │
-│                                                                 │
-│  LadybugDB Backend:     │  Neo4j Backend:                       │
-│  ┌──────────────────┐   │  ┌──────────────────┐                 │
-│  │ EC2 Instances    │   │  │ EC2 Instances    │                 │
-│  │ - Multi-Tenant   │   │  │ - Dedicated      │                 │
-│  │ - Dedicated      │   │  │ - High-Perf      │                 │
-│  │ - High-Perf      │   │  │ (Graph API HTTP) │                 │
-│  │ - Shared Master  │   │  └──────────────────┘                 │
-│  └──────────────────┘   │                                       │
+│                    LadybugDB Infrastructure                     │
+│  ┌──────────────────────────────────────────────────────────┐   │
+│  │ EC2 Instances                                            │   │
+│  │ - Multi-Tenant Writers (ladybug-standard)                │   │
+│  │ - Dedicated Writers (ladybug-large, ladybug-xlarge)      │   │
+│  │ - Shared Master                                          │   │
+│  └──────────────────────────────────────────────────────────┘   │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
@@ -45,11 +41,8 @@ The factory is responsible for intelligent routing decisions based on:
 - **Operation Type**: Read vs Write operations
 - **Environment**: Development, Staging, Production
 - **Tier**: ladybug-standard, ladybug-large, ladybug-xlarge for user graphs
-- **Backend Type**: LadybugDB or Neo4j
 
 #### Routing Logic
-
-##### LadybugDB Backend
 
 ```python
 # Shared Repositories
@@ -65,16 +58,6 @@ The factory is responsible for intelligent routing decisions based on:
 └── Route to appropriate tier writer instance
 ```
 
-##### Neo4j Backend
-
-```python
-# All Operations (User and Shared)
-├── Development → Local Graph API (http://localhost:8002)
-└── Production/Staging → Graph API on EC2 instances
-    └── Community → Single database support
-    # Note: Enterprise edition with clustering is TODO
-```
-
 #### Key Features
 
 - **Dynamic Discovery**: Automatically discovers instances via DynamoDB registry
@@ -87,7 +70,7 @@ The factory is responsible for intelligent routing decisions based on:
 
 ### 2. GraphClient (`client.py`)
 
-Asynchronous HTTP client for interacting with Graph API endpoints (backend-agnostic).
+Asynchronous HTTP client for interacting with Graph API endpoints.
 
 #### Core Operations
 
@@ -231,16 +214,9 @@ except ServiceUnavailableError as e:
 ### Core Configuration
 
 ```bash
-# Backend Selection
-GRAPH_BACKEND_TYPE=ladybug                       # ladybug|neo4j_community|neo4j_enterprise
-
-# API Endpoints (LadybugDB Backend)
+# API Configuration
 GRAPH_API_URL=http://localhost:8001          # Default API URL (dev/fallback)
 GRAPH_API_KEY=graph_api_64chars...           # Authentication key
-
-# API Endpoints (Neo4j Backend)
-GRAPH_API_PORT=8002                           # Graph API port for Neo4j
-# Note: NEO4J_URI is used internally by Graph API backend, not by client
 
 # Feature Flags
 GRAPH_RETRY_LOGIC_ENABLED=true               # Enable automatic retries
@@ -258,15 +234,13 @@ LBUG_CIRCUIT_BREAKER_TIMEOUT=60              # Seconds before reset
 ### DynamoDB Configuration
 
 ```bash
-# For instance discovery (both LadybugDB and Neo4j backends)
+# For instance discovery
 INSTANCE_REGISTRY_TABLE=robosystems-graph-{env}-instance-registry
 GRAPH_REGISTRY_TABLE=robosystems-graph-{env}-graph-registry
 VOLUME_REGISTRY_TABLE=robosystems-graph-{env}-volume-registry
 ```
 
 ## Instance Discovery Flow
-
-### LadybugDB Backend
 
 1. **Check Cache**: Redis cache with 5-minute TTL
 2. **Query DynamoDB**: Find instance hosting the graph
@@ -281,24 +255,6 @@ VOLUME_REGISTRY_TABLE=robosystems-graph-{env}-volume-registry
 3. → Query DynamoDB: GraphRegistry[graph_id=kg1a2b3c4d5]
 4. → Get instance: i-1234567890 at 10.0.1.100
 5. → Create client: http://10.0.1.100:8001
-6. → Cache location for 300 seconds
-```
-
-### Neo4j Backend
-
-1. **Check Cache**: Redis cache with 5-minute TTL
-2. **Query DynamoDB**: Find instance hosting the graph
-3. **Health Check**: Verify instance is healthy
-4. **Create Client**: Initialize HTTP client with discovered endpoint
-5. **Cache Result**: Store for future requests
-
-```python
-# Internal discovery flow (handled automatically)
-1. GraphClientFactory.create_client("kg1a2b3c4d5")
-2. → Check Redis: neo4j:prod:location:kg1a2b3c4d5
-3. → Query DynamoDB: GraphRegistry[graph_id=kg1a2b3c4d5]
-4. → Get instance: i-1234567890 at 10.0.1.100
-5. → Create client: http://10.0.1.100:8002
 6. → Cache location for 300 seconds
 ```
 

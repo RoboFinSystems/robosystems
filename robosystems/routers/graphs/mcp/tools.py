@@ -63,7 +63,7 @@ This endpoint returns a comprehensive list of MCP tools optimized for AI agents:
 The tool list is customized based on:
 - Graph type (shared repository vs user graph)
 - User permissions and subscription tier
-- Backend capabilities (LadybugDB, Neo4j, etc.)
+- Available graph capabilities for the selected graph
 
 **Subgraph Support:**
 This endpoint accepts both parent graph IDs and subgraph IDs.

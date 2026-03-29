@@ -1,6 +1,6 @@
 #!/bin/bash
-# Universal Graph Database Lifecycle Management Script
-# Handles graceful shutdown and database migration for both LadybugDB and Neo4j
+# Graph Database Lifecycle Management Script
+# Handles graceful shutdown and database migration for LadybugDB
 # Supports: instance termination, database migration, volume snapshots
 
 set -e
@@ -8,7 +8,7 @@ set -e
 # ==================================================================================
 # ENVIRONMENT VALIDATION
 # ==================================================================================
-: ${DATABASE_TYPE:?"DATABASE_TYPE must be set (ladybug|neo4j)"}
+: ${DATABASE_TYPE:?"DATABASE_TYPE must be set (ladybug)"}
 : ${NODE_TYPE:?"NODE_TYPE must be set"}
 
 INSTANCE_ID=$(ec2-metadata --instance-id | cut -d " " -f 2)
@@ -20,34 +20,14 @@ INSTANCE_REGISTRY_TABLE="${INSTANCE_REGISTRY_TABLE:-robosystems-graph-${ENVIRONM
 # ==================================================================================
 # DATABASE-SPECIFIC CONFIGURATION
 # ==================================================================================
-case "${DATABASE_TYPE}" in
-    ladybug)
-        if [ "${NODE_TYPE}" = "shared_master" ] || [ "${NODE_TYPE}" = "shared_replica" ]; then
-            CONTAINER_NAME="graph-api-shared"
-        else
-            CONTAINER_NAME="graph-api"
-        fi
-        GRAPH_API_PORT="8001"
-        DRAIN_ENDPOINT="http://localhost:${GRAPH_API_PORT}/admin/drain"
-        CONNECTIONS_ENDPOINT="http://localhost:${GRAPH_API_PORT}/admin/connections"
-        ;;
-    neo4j)
-        if [ "${NODE_TYPE}" = "shared_master" ] || [ "${NODE_TYPE}" = "shared_replica" ]; then
-            CONTAINER_NAME="graph-api-shared"
-        else
-            CONTAINER_NAME="graph-api"
-        fi
-        GRAPH_API_PORT="8001"
-        NEO4J_HTTP_PORT="7474"
-        NEO4J_BOLT_PORT="7687"
-        DRAIN_ENDPOINT="http://localhost:${GRAPH_API_PORT}/admin/drain"
-        CONNECTIONS_ENDPOINT="http://localhost:${GRAPH_API_PORT}/admin/connections"
-        ;;
-    *)
-        echo "ERROR: Unsupported DATABASE_TYPE: ${DATABASE_TYPE}"
-        exit 1
-        ;;
-esac
+if [ "${NODE_TYPE}" = "shared_master" ] || [ "${NODE_TYPE}" = "shared_replica" ]; then
+    CONTAINER_NAME="graph-api-shared"
+else
+    CONTAINER_NAME="graph-api"
+fi
+GRAPH_API_PORT="8001"
+DRAIN_ENDPOINT="http://localhost:${GRAPH_API_PORT}/admin/drain"
+CONNECTIONS_ENDPOINT="http://localhost:${GRAPH_API_PORT}/admin/connections"
 
 # ==================================================================================
 # LOGGING
@@ -76,19 +56,7 @@ handle_termination() {
     # 2. Stop accepting new connections through Graph API
     log "Draining connections via Graph API..."
     docker exec ${CONTAINER_NAME} curl -X POST ${DRAIN_ENDPOINT} 2>/dev/null || {
-        log "WARNING: Failed to drain connections via Graph API, attempting direct container drain..."
-
-        # Database-specific fallback drain commands
-        case "${DATABASE_TYPE}" in
-            neo4j)
-                # Neo4j: Set database to read-only mode
-                docker exec ${CONTAINER_NAME} cypher-shell -u neo4j -p "${NEO4J_PASSWORD}" \
-                    "CALL dbms.setConfigValue('dbms.read_only', 'true')" 2>/dev/null || true
-                ;;
-            ladybug)
-                # LadybugDB: No specific drain command needed, Graph API handles it
-                ;;
-        esac
+        log "WARNING: Failed to drain connections via Graph API"
     }
 
     # 3. Get all databases on this instance
@@ -139,22 +107,8 @@ handle_termination() {
         log "WARNING: Timeout waiting for connections to close, forcing shutdown"
     fi
 
-    # 6. Database-specific graceful shutdown
-    case "${DATABASE_TYPE}" in
-        neo4j)
-            log "Performing Neo4j graceful shutdown..."
-            # Use Cypher to stop database gracefully
-            docker exec ${CONTAINER_NAME} cypher-shell -u neo4j -p "${NEO4J_PASSWORD}" \
-                "CALL dbms.shutdown()" 2>/dev/null || {
-                log "WARNING: Neo4j graceful shutdown failed, will force stop"
-            }
-            sleep 5
-            ;;
-        ladybug)
-            log "Performing LadybugDB graceful shutdown..."
-            # LadybugDB embedded database - just ensure connections are closed (done above)
-            ;;
-    esac
+    # 6. LadybugDB graceful shutdown (connections already closed above)
+    log "Performing LadybugDB graceful shutdown..."
 
     # 7. Create final EBS snapshot
     log "Creating final volume snapshot..."

@@ -1,12 +1,10 @@
 # Graph API
 
-High-performance HTTP API server for graph database cluster management with pluggable backend support. FastAPI-based microservice that provides REST endpoints for multi-tenant graph operations with enterprise-grade reliability and security.
+High-performance HTTP API server for graph database cluster management. FastAPI-based microservice that provides REST endpoints for multi-tenant graph operations with enterprise-grade reliability and security.
 
-**Supported Backends:**
+**Backend:**
 
-- **LadybugDB** (Default): High-performance embedded graph database based on columnar storage
-- **Neo4j Community**: Client-server architecture with advanced features
-- **Neo4j Enterprise**: TODO - Multi-database support and clustering not yet implemented
+- **LadybugDB**: High-performance embedded graph database based on columnar storage
 
 ## Table of Contents
 
@@ -37,13 +35,10 @@ High-performance HTTP API server for graph database cluster management with plug
 │              (Circuit Breakers, Retry Logic)                │
 ├─────────────────────────────────────────────────────────────┤
 │                      Graph API Layer                        │
-│          (FastAPI on Port 8001/8002 depending on backend)   │
-├─────────────────────────────────────────────────────────────┤
-│                Backend Abstraction Layer                    │
-│         (Pluggable: LadybugDB, Neo4j Community/Enterprise)       │
+│                    (FastAPI on Port 8001)                   │
 ├─────────────────────────────────────────────────────────────┤
 │                   Graph Database Engine                     │
-│              (LadybugDB Embedded or Neo4j Bolt)                  │
+│                    (LadybugDB Embedded)                     │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -54,12 +49,6 @@ graph_api/
 ├── app.py                      # FastAPI application factory
 ├── main.py                     # Server entry point
 ├── __main__.py                 # Module entry point
-│
-├── backends/                   # Backend implementations
-│   ├── base.py                # Abstract backend interface
-│   ├── lbug.py                # LadybugDB backend implementation
-│   ├── neo4j.py               # Neo4j backend implementation
-│   └── __init__.py            # Backend factory
 │
 ├── client/                     # Python clients
 │   ├── client.py              # Async client implementation
@@ -81,7 +70,6 @@ graph_api/
 │   ├── databases/
 │   │   ├── management.py     # Create/delete databases
 │   │   ├── query.py          # Cypher query execution
-│   │   ├── copy.py           # S3 bulk copy operations
 │   │   ├── tables/           # DuckDB staging table management
 │   │   │   ├── management.py # Create/list staging tables
 │   │   │   ├── materialize.py # DuckDB → LadybugDB materialization
@@ -95,7 +83,7 @@ graph_api/
 │   └── tasks.py              # Background task tracking
 │
 ├── middleware/
-│   ├── auth.py               # API key authentication (backend-agnostic)
+│   ├── auth.py               # API key authentication
 │   └── request_limits.py     # Rate limiting
 │
 └── models/                    # Pydantic models
@@ -105,29 +93,18 @@ graph_api/
     └── cluster.py            # Cluster configuration
 ```
 
-### Node Types (LadybugDB Backend)
+### Node Types
 
-When using the LadybugDB backend, the system deploys different node types:
+The system deploys different node types:
 
 - **Writer Nodes** (`writer`): Entity database read/write operations on EC2
 - **Shared Master** (`shared_master`): Shared repository ingestion and writes on EC2
-
-### Backend Selection (Neo4j)
-
-When using Neo4j backend:
-
-- **Community Edition**: Single database instance with core graph features (currently implemented)
-- **Enterprise Edition**: TODO - Multi-database support with clustering not yet implemented
 
 ## Deployment Infrastructure
 
 ### CloudFormation Stack Architecture
 
-The Graph API deployment architecture varies by backend:
-
-#### LadybugDB Backend Infrastructure
-
-For LadybugDB deployments, the system uses a sophisticated multi-stack CloudFormation architecture:
+The system uses a multi-stack CloudFormation architecture:
 
 ```
 1. Infrastructure Stack (ladybug-infra.yaml)
@@ -147,23 +124,6 @@ For LadybugDB deployments, the system uses a sophisticated multi-stack CloudForm
    ├─ Dedicated Writers (single database per instance)
    ├─ High-Performance Writers (larger instances for demanding workloads)
    └─ Shared Master (shared repository infrastructure)
-```
-
-#### Neo4j Backend Infrastructure
-
-For Neo4j deployments:
-
-```
-1. Neo4j Database Stack (neo4j-db.yaml)
-   ├─ ECS Fargate Service or EC2 instances
-   ├─ EBS volumes for data persistence
-   ├─ Application Load Balancer
-   └─ Multi-AZ deployment for Enterprise
-
-2. Neo4j API Stack (neo4j-api.yaml)
-   ├─ ECS Fargate Service (Graph API)
-   ├─ Bolt connection to Neo4j database
-   └─ Health checks and auto-scaling
 ```
 
 ### Infrastructure Configuration
@@ -301,36 +261,6 @@ Content-Type: application/json
   "parameters": {},
   "timeout": 30
 }
-```
-
-#### Data Ingestion
-
-**S3 Bulk Copy:**
-
-```http
-POST /databases/{graph_id}/copy
-Authorization: X-Graph-API-Key: {api_key}
-Content-Type: application/json
-
-{
-  "s3_pattern": "s3://robosystems-data/path/*.parquet",
-  "table_name": "Entity",
-  "ignore_errors": true,
-  "s3_credentials": {
-    "aws_access_key_id": "AKIA...",
-    "aws_secret_access_key": "...",
-    "region": "us-east-1"
-  }
-}
-
-Note: S3 bulk copy is LadybugDB-specific. Neo4j uses alternative data loading methods.
-```
-
-This returns a task ID that can be monitored via Server-Sent Events:
-
-```http
-GET /tasks/{task_id}/monitor
-Authorization: X-Graph-API-Key: {api_key}
 ```
 
 #### Table Operations
@@ -505,17 +435,6 @@ async with AsyncGraphClient(
         graph_id="kg1a2b3c4d5",
         cypher="MATCH (n) RETURN count(n) as count"
     )
-
-    # Bulk copy from S3
-    task = await client.copy_from_s3(
-        graph_id="kg1a2b3c4d5",
-        s3_pattern="s3://data-bucket/path/*.parquet",
-        table_name="Entity",
-        ignore_errors=True
-    )
-
-    # Monitor task
-    status = await client.get_task_status(task.task_id)
 ```
 
 ### Sync Client
@@ -554,34 +473,23 @@ client = await get_graph_client(
 ### Environment Variables
 
 ```bash
-# Backend Configuration
-GRAPH_BACKEND_TYPE=ladybug                 # ladybug|neo4j_community|neo4j_enterprise
-
-# Node Configuration (LadybugDB Backend)
+# Node Configuration
 LBUG_NODE_TYPE=writer                    # writer|shared_master
 CLUSTER_TIER=ladybug-standard            # ladybug-standard|ladybug-large|ladybug-xlarge|ladybug-shared
 LBUG_DATABASE_PATH=/data/lbug-dbs       # Storage location
-LBUG_PORT=8001                           # API port (8001 for LadybugDB, 8002 for Neo4j)
-
-# Neo4j Configuration (Neo4j Backend)
-NEO4J_URI=bolt://neo4j-db:7687          # Neo4j Bolt connection
-NEO4J_USERNAME=neo4j                     # Neo4j username
-NEO4J_PASSWORD=                          # Retrieved from Secrets Manager
-NEO4J_ENTERPRISE=false                   # Enable multi-database support
-GRAPH_API_PORT=8002                      # API port for Neo4j backend
+LBUG_PORT=8001                           # API port
 
 # Performance Settings
-LBUG_MAX_DATABASES_PER_NODE=10          # Configuration-based limit (LadybugDB)
-LBUG_MAX_MEMORY_MB=14336                # Total memory allocation (LadybugDB)
-LBUG_MEMORY_PER_DB_MB=2048              # Per-database memory (LadybugDB)
+LBUG_MAX_DATABASES_PER_NODE=10          # Configuration-based limit
+LBUG_MAX_MEMORY_MB=14336                # Total memory allocation
+LBUG_MEMORY_PER_DB_MB=2048              # Per-database memory
 LBUG_CHUNK_SIZE=1000                    # Streaming chunk size
 LBUG_QUERY_TIMEOUT=30                   # Query timeout seconds
 LBUG_MAX_QUERY_LENGTH=10000             # Max query characters
 LBUG_CONNECTION_POOL_SIZE=10            # Connections per database
-NEO4J_MAX_CONNECTION_POOL_SIZE=50       # Neo4j connection pool size
 
 # Authentication
-GRAPH_API_KEY=                           # Unified API key (both backends)
+GRAPH_API_KEY=                           # API key
 
 # AWS Configuration
 AWS_DEFAULT_REGION=us-east-1
@@ -623,7 +531,7 @@ X-Graph-API-Key: graph_api_64_character_random_string
 ### Network Security
 
 - **VPC Isolation**: All instances in private subnets
-- **Security Groups**: Port 8001/8002 restricted to VPC CIDR
+- **Security Groups**: Port 8001 restricted to VPC CIDR
 - **No Public Access**: API only accessible within VPC
 - **TLS Termination**: At ALB for replica traffic
 
@@ -869,20 +777,11 @@ aws autoscaling start-instance-refresh \
 
 ## Known Limitations
 
-### LadybugDB Backend
-
 1. **Sequential Ingestion**: Files processed one at a time per database (LadybugDB constraint)
 2. **Connection Limit**: Maximum 3 concurrent connections per database
 3. **Single Writer**: Only one write operation per database at a time
 4. **No Cross-Database Queries**: Each query scoped to single database
 5. **Volume Attachment**: One EBS volume per database (no striping)
-
-### Neo4j Backend
-
-1. **Single Database**: Community edition supports single database only
-2. **Connection Pooling**: Managed by Neo4j driver within Graph API
-3. **Bolt Protocol**: Internal connection between Graph API and Neo4j
-4. **Multi-Database**: TODO - Enterprise edition with clustering not yet implemented
 
 ## Contributing
 

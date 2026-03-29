@@ -56,7 +56,7 @@ class GraphTierInfo(BaseModel):
   name: str = Field(..., description="Tier name")
   display_name: str = Field(..., description="Display name for UI")
   description: str = Field(..., description="Tier description")
-  backend: str = Field(..., description="Database backend (ladybug or neo4j)")
+  backend: str = Field(..., description="Database backend identifier")
   enabled: bool = Field(..., description="Whether tier is available")
   max_subgraphs: int | None = Field(..., description="Maximum subgraphs allowed")
   monthly_credits: int = Field(..., description="Monthly AI credits")

@@ -3,7 +3,7 @@
 Graph Database Query Tool
 
 Generic command-line tool to execute queries against graph databases through the Graph API.
-Works with any backend (LadybugDB, Neo4j, etc.) that implements the Graph API.
+Targets the LadybugDB-backed Graph API.
 
 Usage:
     # Health check
@@ -281,7 +281,7 @@ Examples:
   # JSON output
   python graph_query.py --url http://localhost:8001 --graph-id sec --query "MATCH (c:Entity) RETURN c.name" --format json
 
-  # Query Neo4j (change URL to Neo4j API)
+  # Query the local Graph API
   python graph_query.py --url http://localhost:8001 --graph-id sec --query "MATCH (n) RETURN label(n) as label, count(n) as count"
         """,
   )
@@ -289,7 +289,7 @@ Examples:
   parser.add_argument(
     "--url",
     default="http://localhost:8001",
-    help="Graph API URL (default: http://localhost:8001 for LadybugDB, use http://localhost:8001 for Neo4j)",
+    help="Graph API URL (default: http://localhost:8001)",
   )
 
   parser.add_argument("--graph-id", help="Graph database identifier (e.g., 'sec')")

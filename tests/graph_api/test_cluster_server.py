@@ -738,38 +738,6 @@ class TestFastAPIEndpoints:
     assert data["is_healthy"] is True
     assert "database_path" in data
 
-  def test_ingest_data_endpoint_read_only(self):
-    """Test data ingestion endpoint on read-only node."""
-    # Mock cluster service as read-only
-    self.mock_service.read_only = True
-
-    # Patch connection pool at module level before creating app
-    with patch("robosystems.graph_api.core.ladybug.pool._connection_pool", MagicMock()):
-      app = create_app()
-      client = TestClient(app)
-
-      # Test async ingestion on read-only node (use /copy endpoint)
-      copy_data = {
-        "s3_pattern": "s3://test-bucket/test/*.parquet",
-        "table_name": "TestTable",
-        "ignore_errors": True,
-      }
-
-      response = client.post("/databases/sec/copy", json=copy_data)
-      assert response.status_code == 403
-      assert "read-only" in response.json()["detail"]
-
-      # Test with different parameters
-      copy_data2 = {
-        "s3_pattern": "s3://test-bucket/test2/*.parquet",
-        "table_name": "TestTable2",
-        "ignore_errors": True,
-      }
-
-      response = client.post("/databases/sec/copy", json=copy_data2)
-      assert response.status_code == 403
-      assert "read-only" in response.json()["detail"]
-
   def test_query_request_validation(self):
     """Test QueryRequest model validation."""
     from pydantic import ValidationError

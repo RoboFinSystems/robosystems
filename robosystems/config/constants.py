@@ -82,9 +82,8 @@ AUTH_RATE_LIMIT_WINDOW_LOGIN = 300  # 5 minutes for login rate limiting
 AUTH_RATE_LIMIT_WINDOW_REGISTER = 3600  # 1 hour for registration rate limiting
 
 # =============================================================================
-# GRAPH API CONFIGURATION (Backend-Agnostic)
+# GRAPH API CONFIGURATION
 # =============================================================================
-# Configuration that applies to all graph database backends (LadybugDB, Neo4j, etc.)
 
 # Graph API Fixed Limits
 GRAPH_MAX_REQUEST_SIZE = 10 * 1024 * 1024  # 10MB
@@ -119,15 +118,6 @@ LBUG_CONNECTION_TTL_MINUTES = 30.0  # Connection time-to-live
 
 # Distributed Lock TTL
 INGESTION_LOCK_TTL = 3600  # 1 hour - for graph materialization locks
-
-# =============================================================================
-# NEO4J CONFIGURATION (when using Neo4j backend)
-# =============================================================================
-
-# Neo4j Connection Pool (fixed infrastructure settings)
-NEO4J_MAX_CONNECTION_POOL_SIZE = 50
-NEO4J_CONNECTION_ACQUISITION_TIMEOUT = 60  # seconds
-NEO4J_MAX_CONNECTION_LIFETIME = 3600  # seconds (1 hour)
 
 # =============================================================================
 # AWS CONFIGURATION

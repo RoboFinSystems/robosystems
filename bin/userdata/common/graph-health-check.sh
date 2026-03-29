@@ -1,11 +1,11 @@
 #!/bin/bash
-# Universal Graph Database Health Check
-# Supports both LadybugDB and Neo4j with ingestion-aware checking
+# Graph Database Health Check
+# Ingestion-aware health checks for LadybugDB graph API instances
 
 set -e
 
 # Validate required environment variables
-: ${DATABASE_TYPE:?"DATABASE_TYPE must be set (ladybug|neo4j)"}
+: ${DATABASE_TYPE:?"DATABASE_TYPE must be set (ladybug)"}
 : ${NODE_TYPE:?"NODE_TYPE must be set"}
 : ${CONTAINER_PORT:?"CONTAINER_PORT must be set"}
 : ${ENVIRONMENT:?"ENVIRONMENT must be set"}
@@ -17,27 +17,17 @@ set -e
 TOKEN=$(curl -s -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 21600")
 INSTANCE_ID=$(curl -s -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/latest/meta-data/instance-id)
 
-# Determine container name based on database type and node type
-case "${DATABASE_TYPE}" in
-    ladybug)
-        if [ "${NODE_TYPE}" = "shared_master" ] || [ "${NODE_TYPE}" = "shared_replica" ]; then
-            CONTAINER_NAME="graph-api-shared"
-        else
-            CONTAINER_NAME="graph-api"
-        fi
-        ;;
-    neo4j)
-        if [ "${NODE_TYPE}" = "shared_master" ] || [ "${NODE_TYPE}" = "shared_replica" ]; then
-            CONTAINER_NAME="graph-api-shared"
-        else
-            CONTAINER_NAME="graph-api"
-        fi
-        ;;
-    *)
-        echo "ERROR: Unsupported DATABASE_TYPE: ${DATABASE_TYPE}"
-        exit 1
-        ;;
-esac
+# Validate the runtime type and derive the container name from the instance role
+if [ "${DATABASE_TYPE}" != "ladybug" ]; then
+  echo "ERROR: Unsupported DATABASE_TYPE: ${DATABASE_TYPE}"
+  exit 1
+fi
+
+if [ "${NODE_TYPE}" = "shared_master" ] || [ "${NODE_TYPE}" = "shared_replica" ]; then
+  CONTAINER_NAME="graph-api-shared"
+else
+  CONTAINER_NAME="graph-api"
+fi
 
 # Check if active ingestion is happening (via Redis flag)
 # If ingestion is active, ALWAYS mark as healthy regardless of other checks

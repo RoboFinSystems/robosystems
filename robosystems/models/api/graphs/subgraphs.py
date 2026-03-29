@@ -180,7 +180,7 @@ class ListSubgraphsResponse(BaseModel):
 
   subgraphs_enabled: bool = Field(
     ...,
-    description="Whether subgraphs are enabled for this tier (requires LadybugDB Large/XLarge or Neo4j Enterprise XLarge)",
+    description="Whether subgraphs are enabled for this tier (requires LadybugDB Large/XLarge)",
   )
 
   subgraph_count: int = Field(..., description="Total number of subgraphs", ge=0)

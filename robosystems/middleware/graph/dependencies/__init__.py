@@ -1,7 +1,5 @@
 """
 FastAPI dependency functions for multi-tenant graph database resolution.
-
-Simplified for graph databases-only architecture with multi-backend support.
 """
 
 from .auth import (

@@ -283,7 +283,6 @@ pip install robosystems-client
 **Graph Database System:**
 
 - **[Graph API](/robosystems/graph_api/README.md)** - Graph API overview
-- **[Backends](/robosystems/graph_api/backends/README.md)** - Backend abstraction layer
 - **[Client Factory](/robosystems/graph_api/client/README.md)** - Client factory system
 - **[Core Services](/robosystems/graph_api/core/README.md)** - Core services layer
 

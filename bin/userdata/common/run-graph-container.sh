@@ -1,11 +1,11 @@
 #!/bin/bash
-# Universal Graph Database Container Runner
-# Supports both LadybugDB and Neo4j with shared infrastructure patterns
+# Graph Database Container Runner
+# Runs LadybugDB graph API containers with shared infrastructure patterns
 
 set -e
 
 # Validate required environment variables
-: ${DATABASE_TYPE:?"DATABASE_TYPE must be set (ladybug|neo4j)"}
+: ${DATABASE_TYPE:?"DATABASE_TYPE must be set (ladybug)"}
 : ${NODE_TYPE:?"NODE_TYPE must be set"}
 : ${CONTAINER_PORT:?"CONTAINER_PORT must be set"}
 : ${ECR_IMAGE:?"ECR_IMAGE must be set"}
@@ -26,9 +26,7 @@ STAGING_MOUNT_SOURCE="${STAGING_MOUNT_SOURCE:-}"
 STAGING_MOUNT_TARGET="${STAGING_MOUNT_TARGET:-}"
 DOCKER_PROFILE="${DOCKER_PROFILE:-${DATABASE_TYPE}-writer}"
 
-# Determine container name - backend-agnostic
-# Container name represents the service (graph-api), not the implementation (ladybug/neo4j)
-# Backend type is determined by DOCKER_PROFILE and environment variables
+# Determine container name based on node type
 determine_container_name() {
     if [ "${NODE_TYPE}" = "shared_master" ] || [ "${NODE_TYPE}" = "shared_replica" ]; then
         echo "graph-api-shared"
@@ -82,36 +80,15 @@ if [ -n "${MEMORY_LIMIT}" ]; then
   echo "Setting container memory limits: ${MEMORY_LIMIT} (reservation: ${MEMORY_RESERVATION})"
 fi
 
-# Build database-specific environment variables
-case "${DATABASE_TYPE}" in
-    ladybug)
-        EXTRA_ENV_VARS="-e LBUG_NODE_TYPE=${NODE_TYPE} \
-            -e REPOSITORY_TYPE=${REPOSITORY_TYPE:-shared} \
-            -e SHARED_REPOSITORIES=${SHARED_REPOSITORIES:-} \
-            -e LBUG_DATABASE_PATH=${DATA_MOUNT_TARGET}/lbug-dbs \
-            -e LBUG_PORT=${CONTAINER_PORT} \
-            -e LBUG_ROLE=$(if [ "${NODE_TYPE}" = "shared_replica" ]; then echo "replica"; else echo "master"; fi) \
-            -e LBUG_ACCESS_PATTERN=api_writer"
-        HEALTH_CMD="timeout 10 curl -s -o /dev/null http://localhost:${CONTAINER_PORT}/health || exit 1"
-        ;;
-    neo4j)
-        # Neo4j requires special environment variables
-        EXTRA_ENV_VARS="-e NEO4J_AUTH=${NEO4J_AUTH:?"NEO4J_AUTH must be set for Neo4j"} \
-            -e NEO4J_server_bolt_listen__address=0.0.0.0:7687 \
-            -e NEO4J_server_http_listen__address=0.0.0.0:7474 \
-            -e NEO4J_server_memory_heap_initial__size=512m \
-            -e NEO4J_server_memory_heap_max__size=${MEMORY_LIMIT:-2g} \
-            -e NEO4J_server_memory_pagecache_size=512m \
-            -e NEO4J_dbms_connector_bolt_enabled=true \
-            -e NEO4J_dbms_connector_http_enabled=true"
-        HEALTH_CMD="timeout 10 curl -f http://localhost:7474 || exit 1"
-        CONTAINER_PORT="7474"  # Override for Neo4j HTTP port
-        ;;
-    *)
-        echo "ERROR: Unsupported DATABASE_TYPE: ${DATABASE_TYPE}"
-        exit 1
-        ;;
-esac
+# Build LadybugDB environment variables
+EXTRA_ENV_VARS="-e LBUG_NODE_TYPE=${NODE_TYPE} \
+    -e REPOSITORY_TYPE=${REPOSITORY_TYPE:-shared} \
+    -e SHARED_REPOSITORIES=${SHARED_REPOSITORIES:-} \
+    -e LBUG_DATABASE_PATH=${DATA_MOUNT_TARGET}/lbug-dbs \
+    -e LBUG_PORT=${CONTAINER_PORT} \
+    -e LBUG_ROLE=$(if [ "${NODE_TYPE}" = "shared_replica" ]; then echo "replica"; else echo "master"; fi) \
+    -e LBUG_ACCESS_PATTERN=api_writer"
+HEALTH_CMD="timeout 10 curl -s -o /dev/null http://localhost:${CONTAINER_PORT}/health || exit 1"
 
 # Build optional volume mounts
 VOLUME_MOUNTS="-v ${DATA_MOUNT_SOURCE}:${DATA_MOUNT_TARGET} -v ${LOGS_MOUNT_SOURCE}:${LOGS_MOUNT_TARGET}"

@@ -1,7 +1,7 @@
 """
 Graph API Client Configuration.
 
-Centralized configuration for Graph API clients with multi-backend support.
+Centralized configuration for Graph API clients.
 """
 
 import os

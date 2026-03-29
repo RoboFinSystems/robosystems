@@ -165,7 +165,7 @@ robosystems/
 1. **Operations orchestrate, adapters integrate**: Operations coordinate business logic; adapters handle external service integration and data transformation
 2. **Multi-tenant by design**: All graph operations are scoped to `graph_id`
 3. **Credit-based AI billing**: Only AI operations (Anthropic/OpenAI) consume credits; database operations are free
-4. **Pluggable graph backend**: LadybugDB (default) or Neo4j via `GRAPH_BACKEND_TYPE`
+4. **Graph backend**: LadybugDB (`GRAPH_BACKEND_TYPE=ladybug`)
 
 ## Testing
 
@@ -230,7 +230,7 @@ VALKEY_URL=redis://...
 
 # Graph API
 GRAPH_API_URL=http://localhost:8001
-GRAPH_BACKEND_TYPE=ladybug|neo4j_community
+GRAPH_BACKEND_TYPE=ladybug
 LBUG_DATABASE_PATH=/data/lbug-dbs
 
 # Feature Flags
@@ -257,10 +257,9 @@ All configuration is centralized in `/robosystems/config/`. See `config/README.m
 
 ## Graph API
 
-### Backends
+### Backend
 
-- **LadybugDB** (default): Embedded columnar graph database
-- **Neo4j Community**: Client-server with Bolt protocol
+- **LadybugDB**: Embedded columnar graph database
 
 ### Key Endpoints
 

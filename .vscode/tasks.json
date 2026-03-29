@@ -310,7 +310,6 @@
         "valkey",
         "lbug",
         "graph-api",
-        "neo4j",
         "localstack",
         "api",
         "observability",
@@ -328,14 +327,12 @@
         "api",
         "worker",
         "graph-api",
-        "graph-api-neo4j",
         "pg",
         "valkey",
         "grafana",
         "prometheus",
         "otel-collector",
         "localstack",
-        "neo4j-db",
         "dagster-webserver",
         "dagster-daemon"
       ]

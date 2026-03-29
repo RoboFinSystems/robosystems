@@ -54,7 +54,7 @@ prod:
       alb_dns: ApiAlbDnsName
       service_arn: ApiServiceArn
 
-  # Graph Infrastructure (Multi-Backend: LadybugDB and Neo4j)
+  # Graph Infrastructure (LadybugDB)
   graph:
     infra:
       stack_name: RoboSystemsGraphInfraProd
@@ -90,18 +90,6 @@ prod:
 
       ladybug_shared:
         stack_name: RoboSystemsGraphLadybugSharedProd
-        outputs:
-          asg_name: WriterAutoScalingGroupName
-          instance_ids: InstanceIds
-
-      neo4j_community_large:
-        stack_name: RoboSystemsGraphNeo4jCommunityLargeProd
-        outputs:
-          asg_name: WriterAutoScalingGroupName
-          instance_ids: InstanceIds
-
-      neo4j_enterprise_xlarge:
-        stack_name: RoboSystemsGraphNeo4jEnterpriseXlargeProd
         outputs:
           asg_name: WriterAutoScalingGroupName
           instance_ids: InstanceIds
@@ -206,7 +194,7 @@ staging:
       alb_dns: ApiAlbDnsName
       service_arn: ApiServiceArn
 
-  # Graph Infrastructure (Multi-Backend: LadybugDB and Neo4j)
+  # Graph Infrastructure (LadybugDB)
   graph:
     infra:
       stack_name: RoboSystemsGraphInfraStaging
@@ -242,18 +230,6 @@ staging:
 
       ladybug_shared:
         stack_name: RoboSystemsGraphLadybugSharedStaging
-        outputs:
-          asg_name: WriterAutoScalingGroupName
-          instance_ids: InstanceIds
-
-      neo4j_community_large:
-        stack_name: RoboSystemsGraphNeo4jCommunityLargeStaging
-        outputs:
-          asg_name: WriterAutoScalingGroupName
-          instance_ids: InstanceIds
-
-      neo4j_enterprise_xlarge:
-        stack_name: RoboSystemsGraphNeo4jEnterpriseXlargeStaging
         outputs:
           asg_name: WriterAutoScalingGroupName
           instance_ids: InstanceIds
@@ -316,9 +292,8 @@ staging:
 
 # Common patterns for dynamic stack name generation
 patterns:
-  # Pattern for graph database writer stacks: RoboSystemsGraph{Backend}{Tier}{Environment}
-  # Both LadybugDB and Neo4j use unified Graph prefix
-  graph_writer: "RoboSystemsGraph{backend}{tier}{environment}"
+  # Pattern for graph database writer stacks: RoboSystemsGraphLadybug{Tier}{Environment}
+  graph_writer: "RoboSystemsGraphLadybug{tier}{environment}"
 
   # Pattern for general stacks: RoboSystems{Component}{Environment}
   general: "RoboSystems{component}{environment}"

@@ -189,7 +189,7 @@ def test_restore_initiates_task_with_metadata(restore_client):
 async def test_download_backup_returns_zip_for_file_db(monkeypatch, tmp_path):
   cluster = FakeClusterService(read_only=False, databases=["graph1"])
   db_file = tmp_path / "graph1.lbug"
-  db_file.write_bytes(b"neo4j-data")
+  db_file.write_bytes(b"lbug-data")
 
   monkeypatch.setattr(
     "robosystems.middleware.graph.utils.MultiTenantUtils.get_database_path_for_graph",
@@ -212,7 +212,7 @@ async def test_download_backup_returns_zip_for_file_db(monkeypatch, tmp_path):
     namelist = zf.namelist()
     assert namelist == ["graph1.lbug"]
     extracted = zf.read("graph1.lbug")
-    assert extracted == b"neo4j-data"
+    assert extracted == b"lbug-data"
 
 
 @pytest.mark.asyncio

@@ -15,7 +15,6 @@ import threading
 from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
 
-from robosystems.config import env
 from robosystems.graph_api.core.ladybug import get_ladybug_service
 from robosystems.logger import logger
 
@@ -43,20 +42,9 @@ def is_warming_up() -> bool:
   return os.getenv("LBUG_ROLE") == "replica" and not _replica_ready
 
 
-def _get_service_for_health():
-  """Get the appropriate service based on backend configuration."""
-  backend_type = env.GRAPH_BACKEND_TYPE
-  if backend_type in ["neo4j_community", "neo4j_enterprise"]:
-    from robosystems.graph_api.core.neo4j import Neo4jService
-
-    return Neo4jService()
-  else:
-    return get_ladybug_service()
-
-
 @router.get("/health")
 async def health_check(
-  service=Depends(_get_service_for_health),
+  service=Depends(get_ladybug_service),
 ) -> JSONResponse:
   """
   Simple health check endpoint for load balancers and monitoring.
@@ -101,19 +89,7 @@ async def health_check(
     # Basic check that service is accessible
     uptime = service.get_uptime()
 
-    # Get database count (different for LadybugDB vs Neo4j)
-    database_count = 0
-    if hasattr(service, "db_manager"):
-      # LadybugDB service
-      database_count = len(service.db_manager.list_databases())
-    elif hasattr(service, "backend"):
-      # Neo4j service - get databases from backend
-      try:
-        databases = await service.backend.list_databases()
-        database_count = len(databases)
-      except Exception:
-        # If listing databases fails, just continue with 0
-        pass
+    database_count = len(service.db_manager.list_databases())
 
     # Include memory usage if psutil is available
     memory_info = {}

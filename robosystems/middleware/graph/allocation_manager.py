@@ -149,9 +149,8 @@ class LadybugAllocationManager:
       else MultiTenantUtils.get_max_databases_per_node()
     )
 
-    # Tier-based configuration for backend selection and database allocation
-    # Note: Backend-specific settings (LadybugDB buffer pools, Neo4j JVM heap) are
-    # configured in their respective userdata scripts, not here.
+    # Tier-based configuration for database allocation.
+    # Runtime-specific settings are configured in the corresponding userdata scripts.
     # Memory and chunk size settings are loaded from graph.yml via GraphTierConfig.
     self.tier_configs = {
       GraphTier.LADYBUG_STANDARD: {

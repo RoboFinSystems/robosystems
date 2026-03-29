@@ -35,6 +35,14 @@ class EnvValidator:
     errors = []
     warnings = []
 
+    # Fail fast on unsupported graph backend
+    backend_type = getattr(env_config, "GRAPH_BACKEND_TYPE", "ladybug")
+    if backend_type != "ladybug":
+      errors.append(
+        f"GRAPH_BACKEND_TYPE='{backend_type}' is not supported. "
+        f"Only 'ladybug' is supported."
+      )
+
     # Critical variables that must be set in production
     if env_config.ENVIRONMENT == "prod":
       required_prod_vars = {

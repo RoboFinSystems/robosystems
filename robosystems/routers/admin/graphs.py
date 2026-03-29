@@ -34,7 +34,7 @@ def _get_graph_backend(graph: Graph) -> str:
       graph: The graph model instance
 
   Returns:
-      Backend type (e.g., "ladybug", "neo4j")
+      Backend type (currently "ladybug")
   """
   tier_config = GraphTierConfig.get_tier_config(graph.graph_tier)
   return tier_config.get("backend", "ladybug")

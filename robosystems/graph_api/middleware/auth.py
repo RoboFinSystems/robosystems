@@ -3,7 +3,6 @@ Authentication middleware for Graph API with environment-based security.
 
 Provides API key authentication for production/staging environments while
 allowing unrestricted access in development and from bastion hosts.
-Supports both LadybugDB and Neo4j backends.
 """
 
 import time
@@ -28,7 +27,6 @@ class GraphAuthMiddleware(BaseHTTPMiddleware):
   - Bypassed for requests from bastion hosts
   - Bypassed for health check endpoints
   - Rate limiting for failed auth attempts
-  - Works with both LadybugDB and Neo4j backends
   """
 
   # Endpoints that don't require authentication
@@ -186,7 +184,7 @@ def get_api_key_from_secrets_manager(
   """
   Retrieve API key from AWS Secrets Manager using centralized secrets manager.
 
-  Secret Naming: robosystems/{env}/graph-api (unified for all graph backends)
+  Secret Naming: robosystems/{env}/graph-api
 
   Args:
       key_type: Type of key to retrieve ("writer", "shared_writer", "shared_master", "shared_replica")

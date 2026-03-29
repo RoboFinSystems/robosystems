@@ -459,8 +459,8 @@ function setup_full_config() {
         gh variable set SHARED_REPLICAS_SPOT_WEIGHT_STAGING --body "0"
     fi
 
-    # Note: Neo4j variables removed - Neo4j backend is disabled by default in graph.yml
-    # If Neo4j support is needed in future, add NEO4J_*_ENABLED_* variables here
+    # Note: legacy graph backend variables were removed with the Ladybug-only deployment path
+    # If another backend is introduced in future, add its *_ENABLED_* variables here
 
     # Graph AMI: Auto-initialized by get-graph-ami action on first deploy
     # Stored in SSM: /robosystems/{env}/graph/ami-id
