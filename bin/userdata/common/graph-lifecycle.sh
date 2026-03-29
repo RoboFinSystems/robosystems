@@ -123,7 +123,7 @@ handle_termination() {
         SNAPSHOT_ID=$(aws ec2 create-snapshot \
             --volume-id "$VOLUME_ID" \
             --description "Final snapshot before termination of $INSTANCE_ID (${DATABASE_TYPE})" \
-            --tag-specifications "ResourceType=snapshot,Tags=[{Key=Name,Value=${ENVIRONMENT}-${DATABASE_TYPE}-final-${INSTANCE_ID}},{Key=InstanceId,Value=$INSTANCE_ID},{Key=DatabaseType,Value=${DATABASE_TYPE}},{Key=Type,Value=final}]" \
+            --tag-specifications "ResourceType=snapshot,Tags=[{Key=Name,Value=${ENVIRONMENT}-${DATABASE_TYPE}-final-${INSTANCE_ID}},{Key=InstanceId,Value=$INSTANCE_ID},{Key=DatabaseType,Value=${DATABASE_TYPE}},{Key=Type,Value=final},{Key=Environment,Value=${ENVIRONMENT}},{Key=AutoDelete,Value=true},{Key=NodeType,Value=${NODE_TYPE}}]" \
             --query 'SnapshotId' \
             --output text \
             --region "$REGION")
