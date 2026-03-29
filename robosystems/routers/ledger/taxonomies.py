@@ -776,10 +776,10 @@ async def auto_map(
   from robosystems.worker.client import enqueue_task
 
   return await enqueue_task(
-    task_type="agent_mapping",
+    task_type="agent",
     graph_id=graph_id,
     user_id=current_user.id,
-    params={"mapping_id": mapping_id},
+    params={"agent_type": "mapping", "mapping_id": mapping_id},
   )
 
 

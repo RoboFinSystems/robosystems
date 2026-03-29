@@ -1,25 +1,27 @@
+"""Agent operations module.
+
+Provides the unified agent system with dynamic routing, execution adapters,
+and automatic credit tracking.
+
+## Agent Protocol
+
+New agents inherit from `Agent` and implement `run(ctx: AgentContext) -> AgentResult`.
+Credit tracking is automatic via `TrackedAIClient`. Register with `@register_agent("name")`.
+
+## Execution Adapters
+
+- `run_agent_api()`: Runs agents in API request context (sync/SSE)
+- `run_agent_worker()`: Runs agents in worker context (background tasks)
+
+## Legacy
+
+AgentResponse is kept for API response compatibility. The orchestrator converts
+AgentResult → AgentResponse at the boundary.
 """
-Agent operations module.
 
-Provides multiagent system with dynamic routing, RAG, and specialized agents.
-
-## New Unified Agent System
-
-The new Agent protocol (Agent, AgentSpec, AgentResult, AgentContext) provides
-a single way to define agents that work in any execution context (API, worker).
-Use the new protocol for all new agents.
-
-## Legacy System
-
-The legacy classes (BaseAgent, AgentMetadata, AgentResponse) are used by the
-existing orchestrator and routers. They will be removed once the orchestrator
-is migrated to the new protocol.
-"""
-
-# ── New unified agent system ─────────────────────────────────────────────────
-
-# Register agent implementations
+# Register agent implementations (must import before anything uses the registry)
 from robosystems.operations.agents import implementations  # noqa: F401
+from robosystems.operations.agents.adapters import run_agent_api, run_agent_worker
 from robosystems.operations.agents.agent_context import (
   AgentContext,
   ProgressReporter,
@@ -33,16 +35,29 @@ from robosystems.operations.agents.agent_registry import (
 from robosystems.operations.agents.agent_registry import (
   list_agents as list_v2_agents,
 )
+from robosystems.operations.agents.ai_client import AIClient
 from robosystems.operations.agents.base import (
   Agent,
+  AgentCapability,
+  AgentMetadata,
+  AgentMode,
+  AgentResponse,
   AgentResult,
   AgentSpec,
+  BaseAgent,
+  ExecutionProfile,
 )
 from robosystems.operations.agents.credit_consumer import (
   CreditConsumer,
   FactoryCreditConsumer,
   NoOpCreditConsumer,
   SessionCreditConsumer,
+)
+from robosystems.operations.agents.orchestrator import (
+  AgentOrchestrator,
+  AgentSelectionCriteria,
+  OrchestratorConfig,
+  RoutingStrategy,
 )
 from robosystems.operations.agents.progress import (
   CallbackProgress,
@@ -55,64 +70,27 @@ from robosystems.operations.agents.tool_access import (
 )
 from robosystems.operations.agents.tracked_ai import TrackedAIClient
 
-# ── Legacy system (orchestrator + routers use these during migration) ────────
-# Import concrete agents to register them in legacy registry
-from . import cypher_agent
-from .ai_client import AIClient
-from .base import (
-  AgentCapability,
-  AgentMetadata,
-  AgentMode,
-  AgentResponse,
-  BaseAgent,
-  ExecutionProfile,
-)
-from .context import (
-  ContextEnricher,
-  DocumentChunk,
-  EmbeddingProvider,
-  RAGConfig,
-  SearchResult,
-)
-from .orchestrator import (
-  AgentOrchestrator,
-  AgentSelectionCriteria,
-  OrchestratorConfig,
-  RoutingStrategy,
-)
-from .registry import (
-  AgentNotFoundError,
-  AgentRegistrationError,
-  AgentRegistry,
-  DuplicateAgentError,
-)
-
 __all__ = [
-  # ── Legacy (to be removed) ──
+  # Runtime services
   "AIClient",
-  # ── New unified system ──
+  # Agent protocol
   "Agent",
-  # ── Shared enums ──
+  # Shared enums
   "AgentCapability",
   "AgentContext",
+  # Legacy (API compat)
   "AgentMetadata",
   "AgentMode",
-  "AgentNotFoundError",
+  # Orchestrator
   "AgentOrchestrator",
-  "AgentRegistrationError",
-  "AgentRegistry",
   "AgentResponse",
   "AgentResult",
   "AgentSelectionCriteria",
   "AgentSpec",
   "BaseAgent",
   "CallbackProgress",
-  "ContextEnricher",
   "CreditConsumer",
   "DirectToolAccess",
-  "DocumentChunk",
-  "DuplicateAgentError",
-  "EmbeddingProvider",
   "ExecutionProfile",
   "FactoryCreditConsumer",
   "HttpToolAccess",
@@ -121,15 +99,16 @@ __all__ = [
   "OperationManagerProgress",
   "OrchestratorConfig",
   "ProgressReporter",
-  "RAGConfig",
   "RoutingStrategy",
-  "SearchResult",
   "SessionCreditConsumer",
   "ToolAccess",
   "TrackedAIClient",
-  "cypher_agent",
+  # Registry
   "get_agent",
   "get_agent_class",
   "list_v2_agents",
   "register_agent",
+  # Adapters
+  "run_agent_api",
+  "run_agent_worker",
 ]
