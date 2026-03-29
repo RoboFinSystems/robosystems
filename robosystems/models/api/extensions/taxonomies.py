@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import BaseModel, Field
 
 from robosystems.models.api.common import PaginationInfo
@@ -31,7 +33,7 @@ class TaxonomyListResponse(BaseModel):
 class CreateTaxonomyRequest(BaseModel):
   name: str
   description: str | None = None
-  taxonomy_type: str  # chart_of_accounts, reporting, mapping
+  taxonomy_type: Literal["chart_of_accounts", "reporting", "mapping"]
   version: str | None = None
   source_taxonomy_id: str | None = None
   target_taxonomy_id: str | None = None
@@ -56,7 +58,15 @@ class StructureListResponse(BaseModel):
 class CreateStructureRequest(BaseModel):
   name: str
   description: str | None = None
-  structure_type: str
+  structure_type: Literal[
+    "chart_of_accounts",
+    "income_statement",
+    "balance_sheet",
+    "cash_flow_statement",
+    "equity_statement",
+    "coa_mapping",
+    "custom",
+  ]
   taxonomy_id: str
 
 
@@ -83,7 +93,7 @@ class ElementAssociationResponse(BaseModel):
 class CreateAssociationRequest(BaseModel):
   from_element_id: str
   to_element_id: str
-  association_type: str = "mapping"
+  association_type: Literal["presentation", "calculation", "mapping"] = "mapping"
   order_value: float | None = None
   weight: float | None = None
   confidence: float | None = None
