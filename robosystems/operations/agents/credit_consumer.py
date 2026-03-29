@@ -99,7 +99,14 @@ class FactoryCreditConsumer:
         operation_description=operation_description,
         user_id=user_id,
       )
-      return float(result.get("credits_consumed", 0))
+
+      if result.get("success"):
+        return float(result.get("credits_consumed", 0))
+
+      logger.warning(
+        f"Credit consumption failed (worker): {result.get('error', 'Unknown')}"
+      )
+      return 0.0
     except Exception as e:
       logger.warning(f"Credit consumption failed (worker): {e}")
       return 0.0
