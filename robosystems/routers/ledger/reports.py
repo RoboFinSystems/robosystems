@@ -19,8 +19,8 @@ from robosystems.models.api.extensions.reports import (
   ReportWithDataResponse,
   ValidationCheckResponse,
 )
+from robosystems.models.core import User
 from robosystems.models.extensions import ReportDefinition
-from robosystems.models.iam import User
 from robosystems.operations.reports.fact_grid import build_fact_grid
 from robosystems.operations.reports.guard_rails import validate_report
 
