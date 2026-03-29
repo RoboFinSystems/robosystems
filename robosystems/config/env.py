@@ -8,7 +8,7 @@ Organization (mirrors .env file section order):
 - Helper functions for type-safe env var access
 - Core application configuration (env, encryption, service URLs, JWT, email, CAPTCHA)
 - Feature flags (security, graph ops, connections, shared repos, org, platform)
-- Graph databases (backend selection, API config, resiliency, tiers, LadybugDB, Neo4j)
+- Graph databases (API config, resiliency, tiers, LadybugDB)
 - PostgreSQL
 - Valkey/Redis
 - Dagster configuration
@@ -595,18 +595,14 @@ class EnvConfig:
   )
 
   # ==========================================================================
-  # 3. GRAPH DATABASES - MULTI-BACKEND (LADYBUGDB AND NEO4J)
+  # 3. GRAPH DATABASES (LADYBUGDB)
   # ==========================================================================
 
-  # --- Backend Selection ---
-  GRAPH_BACKEND_TYPE = get_str_env(
-    "GRAPH_BACKEND_TYPE", "ladybug"
-  )  # Options: ladybug (neo4j_community and neo4j_enterprise available but not deployed)
+  GRAPH_BACKEND_TYPE = get_str_env("GRAPH_BACKEND_TYPE", "ladybug")
 
   # ===========================================================================
-  # GRAPH API CONFIGURATION (Backend-Agnostic)
+  # GRAPH API CONFIGURATION
   # ===========================================================================
-  # Configuration that applies to all graph database backends (LadybugDB, Neo4j)
 
   # Graph API Endpoint
   GRAPH_API_URL = get_str_env("GRAPH_API_URL", "http://localhost:8001")
@@ -614,10 +610,9 @@ class EnvConfig:
 
   # Shared repository backend selection (dev/local only)
   # In AWS environments, backend is determined by graph.yml tier configuration
-  # Values: "ladybug" or "neo4j"
   GRAPH_SHARED_REPOSITORY_BACKEND = get_str_env("GRAPH_SHARED_REPOSITORY_BACKEND", "")
 
-  # Graph Registry Tables (DynamoDB - applies to all backends)
+  # Graph Registry Tables (DynamoDB)
   # These tables track graph allocations, instance health, and volume management
   GRAPH_REGISTRY_TABLE = get_str_env(
     "GRAPH_REGISTRY_TABLE", f"robosystems-graph-{ENVIRONMENT}-graph-registry"
@@ -629,7 +624,7 @@ class EnvConfig:
     "VOLUME_REGISTRY_TABLE", f"robosystems-graph-{ENVIRONMENT}-volume-registry"
   )
 
-  # Instance Metadata (applies to all backends)
+  # Instance Metadata
   EC2_INSTANCE_ID = get_str_env("INSTANCE_ID", "")
   INSTANCE_ID = get_str_env("INSTANCE_ID", "")
   CLUSTER_TIER = get_str_env("CLUSTER_TIER", "")
@@ -660,10 +655,8 @@ class EnvConfig:
   )
 
   # ===========================================================================
-  # BACKEND-SPECIFIC CONFIGURATION
+  # LADYBUGDB CONFIGURATION
   # ===========================================================================
-
-  # --- LadybugDB-Specific Configuration (when GRAPH_BACKEND_TYPE=ladybug) ---
   LBUG_DATABASE_PATH = get_str_env("LBUG_DATABASE_PATH", "./data/lbug-dbs")
   LBUG_ACCESS_PATTERN = get_str_env("LBUG_ACCESS_PATTERN", "api_auto")
   LBUG_NODE_TYPE = get_str_env("LBUG_NODE_TYPE", "writer")
@@ -690,11 +683,6 @@ class EnvConfig:
     "lbug_admission/CPU_THRESHOLD",
     AdmissionDefaults.CPU_THRESHOLD,
   )
-
-  # --- Neo4j-Specific Configuration (when GRAPH_BACKEND_TYPE=neo4j_*) ---
-  NEO4J_URI = get_str_env("NEO4J_URI", "bolt://localhost:7687")
-  NEO4J_USERNAME = get_str_env("NEO4J_USERNAME", "neo4j")
-  NEO4J_PASSWORD = get_secret_value("NEO4J_PASSWORD", "")
 
   # ==========================================================================
   # 4. DATABASE CONFIGURATION - POSTGRESQL

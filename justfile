@@ -533,7 +533,6 @@ clean-data:
     rm -rf ./data/lbug-dbs
     rm -rf ./data/staging
     rm -rf ./data/lance
-    rm -rf ./data/neo4j
     rm -rf ./data/localstack
     rm -rf ./data/opensearch
     rm -rf ./data/postgres

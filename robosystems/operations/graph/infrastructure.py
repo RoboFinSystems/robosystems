@@ -1,7 +1,7 @@
 """Graph infrastructure operations.
 
 This module provides infrastructure-level operations for Graph instances
-(LadybugDB and Neo4j), migrated from Lambda functions:
+running on the current graph platform, migrated from Lambda functions:
 - Instance health checks and registry maintenance
 - CloudWatch metrics collection
 - Volume registry cleanup

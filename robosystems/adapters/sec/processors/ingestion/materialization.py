@@ -7,7 +7,6 @@ from DuckDB staging tables into the LadybugDB graph database.
 Key features:
 - Schema-driven: Table names come from RoboLedgerContext
 - Batch materialization: Large tables are materialized in batches to prevent OOM
-- Direct S3 copy: Incremental updates can bypass DuckDB staging
 - Entity updates: MERGE-based updates for mutable Entity attributes
 
 Classes:
@@ -15,7 +14,6 @@ Classes:
 """
 
 import time
-from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -29,14 +27,12 @@ from robosystems.schemas.extensions.roboledger import RoboLedgerContext
 
 from .models import (
   CHUNKED_MATERIALIZATION_TIMEOUT,
-  INCREMENTAL_COPY_TIMEOUT,
   LARGE_STAGING_TABLES,
   MATERIALIZATION_BATCH_SIZE,
   MaterializeResult,
   ProgressCallback,
   get_materialization_timeout,
   make_progress_logger,
-  s3_get_table_patterns,
 )
 
 
@@ -47,7 +43,7 @@ class LadybugMaterializer:
   This class handles Stage 2 of the ingestion pipeline - materializing
   data from DuckDB staging tables into the LadybugDB graph database.
 
-  Also supports direct S3→LadybugDB copy for incremental updates.
+  All data flows through DuckDB staging before materialization.
   """
 
   def __init__(self, graph_id: str = "sec", source_prefix: str | None = None):
@@ -185,194 +181,6 @@ class LadybugMaterializer:
       return MaterializeResult(
         status="error",
         error=str(e),
-      )
-
-  async def copy_incremental_to_ladybug(
-    self,
-    year: int | None = None,
-    quarter: int | None = None,
-    copy_timeout: int = INCREMENTAL_COPY_TIMEOUT,
-    progress_callback: ProgressCallback | None = None,
-  ) -> MaterializeResult:
-    """
-    Copy current quarter's files directly to LadybugDB (bypasses DuckDB staging).
-
-    This is the preferred approach for incremental updates because:
-    - LadybugDB's COPY with ignore_errors=true handles duplicates automatically
-    - No need to diff what's new in DuckDB vs LadybugDB
-    - Simpler and faster for daily updates
-
-    Uses overlap logic at quarter boundaries to catch late-indexed filings.
-
-    Safe to run daily - duplicates are rejected by LadybugDB constraints.
-
-    Precondition: LadybugDB database must already exist with SEC schema.
-
-    Args:
-        year: Year to copy (default: current year)
-        quarter: Quarter to copy 1-4 (default: current quarter)
-        copy_timeout: Timeout per table (default: 10 min)
-        progress_callback: Optional callback for Dagster logging
-
-    Returns:
-        MaterializeResult with tables copied and row counts
-    """
-    from robosystems.adapters.sec import (
-      get_current_quarter,
-      get_previous_quarter,
-      is_in_quarter_overlap_window,
-    )
-
-    start_time = time.time()
-    log_progress = make_progress_logger(progress_callback)
-
-    # Default to current year/quarter
-    now = datetime.now(UTC)
-    if year is None or quarter is None:
-      year, quarter = get_current_quarter(now)
-
-    # Build list of quarters to scan (current + previous during overlap period)
-    quarters_to_scan: list[tuple[int, int]] = [(year, quarter)]
-
-    if is_in_quarter_overlap_window(now):
-      prev_year, prev_quarter = get_previous_quarter(year, quarter)
-      quarters_to_scan.append((prev_year, prev_quarter))
-
-    quarters_str = ", ".join(f"{y}-Q{q}" for y, q in quarters_to_scan)
-    logger.info(
-      f"Starting incremental LadybugDB COPY for graph {self.graph_id} "
-      f"(quarters: {quarters_str})"
-    )
-
-    try:
-      client = await get_graph_client(graph_id=self.graph_id, operation_type="write")
-
-      # Get schema-defined tables
-      tables_by_type = RoboLedgerContext.get_all_table_names_for_context(
-        RoboLedgerContext.SEC_REPOSITORY
-      )
-
-      # Sort: nodes first, then relationships
-      node_tables = [
-        (name, etype) for name, etype in tables_by_type.items() if not name.isupper()
-      ]
-      rel_tables = [
-        (name, etype) for name, etype in tables_by_type.items() if name.isupper()
-      ]
-      ordered_tables = node_tables + rel_tables
-
-      log_progress(
-        f"Copying {len(ordered_tables)} tables ({len(node_tables)} nodes, "
-        f"{len(rel_tables)} relationships)"
-      )
-
-      # Copy each table with ignore_errors=true for duplicate handling
-      successful_tables: list[str] = []
-      table_rows: dict[str, int] = {}
-      failed_tables: list[tuple[str, str]] = []
-
-      total_tables = len(ordered_tables)
-      for i, (table_name, entity_type) in enumerate(ordered_tables, 1):
-        # Build S3 paths for all quarters, only including formats that exist.
-        # s3_get_table_patterns checks each format individually to avoid DuckDB
-        # errors from literal paths (no wildcards) that don't exist on S3.
-        s3_paths: list[str] = []
-        for y, q in quarters_to_scan:
-          filed_pattern = f"filed={y}-Q{q}"
-          s3_paths.extend(
-            s3_get_table_patterns(
-              self.s3_client,
-              self.bucket,
-              self.source_prefix,
-              filed_pattern,
-              entity_type,
-              table_name,
-            )
-          )
-
-        if not s3_paths:
-          log_progress(
-            f"[{i}/{total_tables}] Skipped {table_name}: no files for any quarter"
-          )
-          successful_tables.append(table_name)
-          table_rows[table_name] = 0
-          continue
-
-        s3_pattern: str | list[str] = s3_paths[0] if len(s3_paths) == 1 else s3_paths
-
-        log_progress(f"[{i}/{total_tables}] COPY {table_name} (Q{quarter} {year})...")
-
-        try:
-          copy_result = await client.copy_from_s3(
-            graph_id=self.graph_id,
-            table_name=table_name,
-            s3_pattern=s3_pattern,
-            ignore_errors=True,
-            timeout=copy_timeout,
-            wait_for_completion=True,
-          )
-
-          if copy_result.get("status") == "completed":
-            records = copy_result.get("records_loaded", 0)
-            duration = copy_result.get("duration_seconds", 0)
-            log_progress(
-              f"[{i}/{total_tables}] Copied {table_name}: "
-              f"{records:,} records in {duration:.1f}s"
-            )
-            successful_tables.append(table_name)
-            table_rows[table_name] = records
-          elif "No files found" in copy_result.get("error", ""):
-            log_progress(
-              f"[{i}/{total_tables}] Skipped {table_name}: no files for Q{quarter}"
-            )
-            successful_tables.append(table_name)
-            table_rows[table_name] = 0
-          else:
-            error = copy_result.get("error", "Unknown error")
-            log_progress(f"[{i}/{total_tables}] FAILED {table_name}: {error}")
-            failed_tables.append((table_name, error))
-
-        except Exception as e:
-          error_str = str(e)
-          if "No files found" in error_str:
-            log_progress(
-              f"[{i}/{total_tables}] Skipped {table_name}: no files for Q{quarter}"
-            )
-            successful_tables.append(table_name)
-            table_rows[table_name] = 0
-          else:
-            log_progress(f"[{i}/{total_tables}] FAILED {table_name}: {error_str}")
-            failed_tables.append((table_name, error_str))
-
-      status = "success" if len(successful_tables) == total_tables else "partial"
-      total_rows = sum(table_rows.values())
-      duration = time.time() - start_time
-
-      if failed_tables:
-        logger.warning(f"Failed tables: {failed_tables}")
-
-      logger.info(
-        f"Incremental COPY complete in {duration:.2f}s: "
-        f"{len(successful_tables)}/{total_tables} tables, {total_rows:,} records"
-      )
-
-      return MaterializeResult(
-        status=status,
-        table_names=successful_tables,
-        failed_tables=[
-          {"table": name, "error": error} for name, error in failed_tables
-        ],
-        total_rows=total_rows,
-        duration_ms=duration * 1000,
-      )
-
-    except Exception as e:
-      logger.error(f"Incremental COPY failed: {e}", exc_info=True)
-      return MaterializeResult(
-        status="error",
-        table_names=[],
-        error=str(e),
-        duration_ms=(time.time() - start_time) * 1000,
       )
 
   # =========================================================================

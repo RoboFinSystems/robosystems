@@ -1,16 +1,12 @@
 """
-Multi-Backend Graph Router
+Graph Router
 
-This router provides graph database access with pluggable backend support,
-using the enhanced client factory for all routing decisions.
-
-Supported backends:
-- LadybugDB: Embedded graph database (ladybug-standard, ladybug-large, ladybug-xlarge tiers)
+This router provides graph database access using the enhanced client factory
+for all routing decisions.
 
 Key features:
-- Backend-agnostic routing based on tier and allocation
-- Delegates routing to the enhanced client factory
-- Supports direct file access for development (LadybugDB only)
+- Tier-based routing via the enhanced client factory
+- Supports direct file access for development
 - Maintains backward compatibility with existing code
 """
 
@@ -26,22 +22,18 @@ from .types import GraphTier
 
 class GraphRouter:
   """
-  Multi-backend router for graph database access.
+  Router for graph database access.
 
-  This router now delegates all routing decisions to the enhanced
-  client factory which handles:
+  Delegates all routing decisions to the enhanced client factory which handles:
   - Entity graphs: Private databases for individual companies
   - Shared repositories: SEC, industry, economic data
-  - Dev environment: Single local backend instance
+  - Dev environment: Single local instance
   - Production: Distributed instances with tier-based routing
-  - Backend selection: Automatic based on tier (LadybugDB/Neo4j)
   """
 
   def __init__(self):
     """Initialize the graph router."""
-    logger.info(
-      f"Initialized multi-backend graph router (backend: {env.GRAPH_BACKEND_TYPE})"
-    )
+    logger.info(f"Initialized graph router (backend: {env.GRAPH_BACKEND_TYPE})")
 
   async def get_repository(
     self,

@@ -1,31 +1,26 @@
 # Graph Middleware
 
-This middleware layer provides the core graph database abstraction and routing logic for the RoboSystems platform with support for multiple backend types.
+This middleware layer provides the core graph database abstraction and routing logic for the RoboSystems platform.
 
 ## Overview
 
 The graph middleware:
 
-- Routes graph operations to appropriate clusters (LadybugDB or Neo4j)
-- Provides backend-agnostic database abstraction
+- Routes graph operations to appropriate LadybugDB clusters
 - Manages database connections and pooling
 - Handles query execution with caching and queuing
 - Provides admission control and backpressure management
 - Integrates with the credit system for usage tracking
 
-**Supported Backends:**
+**Backend:**
 
-- **LadybugDB**: Embedded graph database (primary backend for all main subscription tiers)
+- **LadybugDB**: Embedded graph database (all subscription tiers)
   - Multi-tenant shared instances (ladybug-standard)
   - Dedicated instances (ladybug-large, ladybug-xlarge)
   - Subgraph support on dedicated tiers
   - Core services: `/robosystems/graph_api/core/ladybug/`
 
-- **Neo4j** (optional, available on request):
-  - External graph database for enterprise requirements
-  - Core services: `/robosystems/graph_api/core/neo4j/`
-
-- **DuckDB Staging**: Data transformation layer for all backends
+- **DuckDB Staging**: Data transformation layer
   - Parquet file reading from S3
   - Data validation and transformation
   - Core services: `/robosystems/graph_api/core/duckdb/`
@@ -60,8 +55,6 @@ graph_api/core/                          # Core services layer (database access)
 │   ├── pool.py                         # Connection pooling
 │   ├── manager.py                      # Database lifecycle
 │   └── service.py                      # Service orchestration
-├── neo4j/                               # Neo4j backend (optional)
-│   └── service.py                      # Neo4j service layer
 └── duckdb/                              # DuckDB staging layer
     ├── pool.py                          # Connection pooling
     └── manager.py                       # Table management
@@ -143,10 +136,6 @@ The middleware integrates with the core services layer for database access.
 - Database lifecycle via `LadybugDatabaseManager`
 - Query execution via `LadybugService`
 - Direct engine access via `Engine` (for low-level operations)
-
-**Neo4j Service** (`graph_api/core/neo4j/`):
-- Backend abstraction integration
-- Query execution and health monitoring
 
 **DuckDB Staging** (`graph_api/core/duckdb/`):
 - Staging table management via `DuckDBTableManager`
@@ -390,20 +379,12 @@ location = await manager.find_database_location("kg1234567890abcdef_dev")
 Key environment variables:
 
 ```bash
-# Backend Configuration
-GRAPH_BACKEND_TYPE=ladybug             # ladybug (primary) | neo4j (optional)
-
 # LadybugDB Configuration (core/ladybug/)
 LBUG_DATABASE_DIR=/data/lbug-dbs       # Database directory
 LBUG_MAX_DATABASES_PER_NODE=100        # Instance capacity
 LBUG_MAX_CONNECTIONS_PER_DB=10         # Connection pool size
 LBUG_ACCESS_PATTERN=api_writer         # Access pattern for routing
 GRAPH_API_URL=                         # Graph API endpoint (dynamic in prod)
-
-# Neo4j Configuration (core/neo4j/ - optional)
-NEO4J_URI=bolt://neo4j-db:7687         # Neo4j Bolt connection
-NEO4J_USER=neo4j                       # Neo4j username
-NEO4J_PASSWORD=password                # Neo4j password
 
 # DuckDB Staging Configuration (core/duckdb/)
 DUCKDB_STAGING_DIR=/data/duckdb-staging  # Staging database directory
@@ -553,7 +534,6 @@ Common issues and solutions:
 
 - **[Core Services Overview](/robosystems/graph_api/core/README.md)** - Complete overview of the core services architecture
 - **[LadybugDB Service](/robosystems/graph_api/core/ladybug/README.md)** - Embedded database services (Engine, Pool, Manager, Service)
-- **[Neo4j Service](/robosystems/graph_api/core/neo4j/README.md)** - Optional Neo4j backend integration
 - **[DuckDB Staging](/robosystems/graph_api/core/duckdb/README.md)** - Data staging and transformation layer
 
 ### Middleware Components

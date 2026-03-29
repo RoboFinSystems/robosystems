@@ -80,7 +80,7 @@ The test suite is organized by component, mirroring the application structure:
 
 ### Infrastructure
 
-- **`graph_api/`** - Graph API cluster services (multi-backend support)
+- **`graph_api/`** - Graph API services and routing
   - `client/` - Graph API client functionality
   - `routers/` - Graph API HTTP endpoints
 - **`schemas/`** - Dynamic schema management

@@ -1,7 +1,7 @@
 """
 Graph API Client Exceptions.
 
-Defines exception hierarchy for Graph API operations across all backends.
+Defines exception hierarchy for Graph API operations.
 """
 
 from typing import Any

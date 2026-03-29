@@ -18,7 +18,6 @@ Infrastructure as Code for deploying RoboSystems to AWS. All templates are deplo
 | `graph-volumes.yaml` | EBS management | VPC, graph-infra | ~$1 (Lambda) |
 | `graph-ladybug.yaml` | LadybugDB writers | VPC, S3, Valkey, graph-infra | ~$50+ (EC2) |
 | `graph-ladybug-replicas.yaml` | LadybugDB readers | VPC, S3 | ~$30+ (EC2) |
-| `graph-neo4j.yaml` | Neo4j (alternative) | VPC, graph-infra | ~$50+ (EC2) |
 | `opensearch.yaml` | Document search | VPC | ~$30 (t3.medium.search) |
 | `prometheus.yaml` | Metrics collection | None | ~$0.03/metric-series |
 | `grafana.yaml` | Dashboards | None | ~$9/user/month |
@@ -67,8 +66,6 @@ Templates have cross-stack dependencies that determine deployment order:
 │  bastion.yaml ◄──────── SSM bastion host (depends on VPC)                  │
 │  graph-ladybug.yaml ◄── LadybugDB writers (depends on VPC, S3, Valkey,     │
 │                         graph-infra, uses SSM params from graph-volumes)   │
-│  graph-neo4j.yaml ◄──── Neo4j Community (depends on VPC, graph-infra,      │
-│                         graph-volumes) - Alternative to LadybugDB          │
 └─────────────────────────────────────────────────────────────────────────────┘
                                       │
                                       ▼
@@ -475,30 +472,6 @@ The graph database system uses a modular architecture with separate templates fo
 - `{StackName}-ReplicaAlbDnsName` - ALB DNS for read queries
 - `{StackName}-ReplicaAlbArn` - ALB ARN
 - `{StackName}-AutoScalingGroupArn` - Reader ASG ARN
-
----
-
-#### `graph-neo4j.yaml`
-**Purpose**: Neo4j Community Edition as alternative graph backend to LadybugDB.
-
-**Dependencies**: VPC, graph-infra, graph-volumes
-
-**Key Resources**:
-- `AWS::AutoScaling::AutoScalingGroup` - Neo4j instance ASG
-- `AWS::EC2::LaunchTemplate` - Neo4j configuration
-- `AWS::IAM::Role` - Instance role
-
-**Parameters**:
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `Environment` | `prod` | Environment name |
-| `InstanceType` | `r7g.medium` | EC2 instance type |
-| `Neo4jVersion` | `5.15.0` | Neo4j version |
-| `VpcStackName` | Required | VPC stack name |
-
-**Exports**:
-- `{StackName}-AutoScalingGroupArn` - ASG ARN
-- `{StackName}-InstanceSecurityGroup` - Security group ID
 
 ---
 

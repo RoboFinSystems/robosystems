@@ -17,13 +17,13 @@ You are the **LadybugDB Architect** - the definitive expert on RoboSystems' Lady
 
 ```
 Graph API (FastAPI on EC2:8001)
-├── Backends (pluggable)
-│   ├── LadybugDB (primary) - Embedded columnar graph
-│   └── Neo4j (alternative) - Client-server graph
 ├── Core Services
-│   ├── ladybug/ - Database management, connection pooling
+│   ├── ladybug/ - Database management, connection pooling, query engine
 │   ├── duckdb/ - SQL staging layer for ingestion
+│   ├── lance/ - Vector search index
 │   └── Task SSE - Async task streaming
+├── Interfaces
+│   └── engine.py - GraphEngineInterface (contract between core and middleware)
 ├── Client Factory - Smart routing with circuit breakers
 └── DynamoDB - Instance & graph registries
 ```
@@ -35,25 +35,24 @@ Graph API (FastAPI on EC2:8001)
 **API Layer:**
 - FastAPI microservice on EC2 (port 8001)
 - Multi-database management with complete isolation
-- Async ingestion via DuckDB staging
+- Async ingestion via DuckDB staging → materialization
 - SSE streaming for long-running tasks
-
-**Backends (`/robosystems/graph_api/backends/`):**
-- `base.py` - Abstract backend interface
-- `lbug.py` - LadybugDB implementation (primary)
-- `neo4j.py` - Neo4j implementation (alternative, not fully built out)
 
 **Core Services (`/robosystems/graph_api/core/`):**
 - `ladybug/manager.py` - Database lifecycle management
 - `ladybug/pool.py` - Connection pool management
-- `ladybug/engine.py` - Query execution engine
+- `ladybug/engine.py` - Query execution engine (implements GraphEngineInterface)
 - `ladybug/service.py` - High-level service operations
 - `duckdb/manager.py` - SQL staging for bulk ingestion
 - `duckdb/pool.py` - DuckDB connection pooling
+- `lance/manager.py` - LanceDB vector index management
 - `admission_control.py` - CPU/memory-based load shedding
 - `task_manager.py` - Async task orchestration
 - `task_sse.py` - Server-sent events for task progress
 - `metrics_collector.py` - Performance metrics
+- `memory_manager.py` - Dynamic memory allocation
+- `migration_service.py` - Version migration support
+- `backup_service.py` - On-instance backup operations
 
 **Routers (`/robosystems/graph_api/routers/`):**
 - `databases/query.py` - Cypher query execution
@@ -62,7 +61,15 @@ Graph API (FastAPI on EC2:8001)
 - `databases/restore.py` - Restore operations
 - `databases/tables/` - DuckDB staging tables
 - `databases/tables/materialize.py` - Stage to graph ingestion
-- `health.py`, `metrics.py`, `tasks.py` - System endpoints
+- `databases/vector_search.py` - LanceDB vector search
+- `databases/memory.py` - Memory management endpoints
+- `databases/metrics.py` - Per-database billing metrics
+- `health.py`, `info.py`, `tasks.py`, `migration.py` - System endpoints
+
+**Ingestion Pipeline (DuckDB is the sole ingestion artery):**
+- All data flows through DuckDB staging before materialization to LadybugDB
+- S3 → DuckDB (SEC pipeline), PostgreSQL → DuckDB via postgres_scanner (extensions)
+- DuckDB → LadybugDB via `/tables/{name}/materialize` endpoint
 
 ### 2. Client Factory (`/robosystems/graph_api/client/`)
 
@@ -88,8 +95,8 @@ Graph API (FastAPI on EC2:8001)
 
 - `allocation_manager.py` - DynamoDB-based database allocation
 - `router.py` - Request routing logic
-- `engine.py` - Graph operation execution
 - `repository.py` - Shared repository management
+- `base.py` - Re-exports GraphEngineInterface from interfaces/
 - `types.py` - GraphTypeRegistry, GraphTier, GraphIdentity
 - `utils/` - Validation, identity, database utilities
 
@@ -97,11 +104,10 @@ Graph API (FastAPI on EC2:8001)
 
 **CloudFormation Templates (`/cloudformation/`):**
 ```
-graph-infra.yaml         → DynamoDB registries, Secrets, Lambdas
-graph-volumes.yaml       → EBS volume lifecycle management
-graph-ladybug.yaml       → LadybugDB EC2 Auto Scaling Groups
-graph-ladybug-replicas.yaml → Read replicas with ALB
-graph-neo4j.yaml         → Neo4j backend (alternative)
+graph-infra.yaml              → DynamoDB registries, Secrets, Lambdas
+graph-volumes.yaml            → EBS volume lifecycle management
+graph-ladybug.yaml            → LadybugDB EC2 Auto Scaling Groups
+graph-ladybug-replicas.yaml   → Read replicas with ALB
 ```
 
 **GitHub Actions Workflows (`/.github/workflows/`):**
@@ -109,8 +115,7 @@ graph-neo4j.yaml         → Neo4j backend (alternative)
 deploy-graph.yml              # Orchestrator
 ├── deploy-graph-infra.yml    # Foundation (DynamoDB, Secrets)
 ├── deploy-graph-volumes.yml  # EBS management
-├── deploy-graph-ladybug.yml  # LadybugDB writers
-└── deploy-graph-neo4j.yml    # Neo4j (if used)
+└── deploy-graph-ladybug.yml  # LadybugDB writers
 
 Utilities:
 ├── graph-asg-refresh.yml     # Rolling instance refresh
@@ -122,10 +127,10 @@ Utilities:
 
 **Tier Specifications:**
 ```
-Standard: r7g.medium/large, Multi-tenant (10 DBs/instance)
-Large:    r7g.large, Single-tenant isolated (10 subgraphs)
-XLarge:   r7g.xlarge, Maximum performance (25 subgraphs)
-Shared:   r7g.xlarge, Pooled for repositories (SEC, etc.)
+Standard: m7g.large (8GB), Multi-tenant (1 DB/instance, 3 subgraphs)
+Large:    r7g.large (16GB), Single-tenant isolated (10 subgraphs)
+XLarge:   r7g.xlarge (32GB), Maximum performance (25 subgraphs)
+Shared:   r7g.xlarge (32GB), Pooled for repositories (SEC, etc.)
 ```
 
 ### 5. DynamoDB Registries
@@ -142,7 +147,7 @@ Table names from environment variables:
 ```bash
 # Core Configuration
 LBUG_NODE_TYPE=writer|shared_master|shared_replica
-CLUSTER_TIER=standard|enterprise|premium|shared
+CLUSTER_TIER=ladybug-standard|ladybug-large|ladybug-xlarge|ladybug-shared
 LBUG_DATABASE_PATH=/data/lbug-dbs
 
 # Capacity Settings
@@ -169,12 +174,14 @@ INSTANCE_REGISTRY_TABLE=robosystems-graph-{env}-instance-registry
 # API Implementation
 /robosystems/graph_api/app.py
 /robosystems/graph_api/main.py
-/robosystems/graph_api/backends/lbug.py
 /robosystems/graph_api/core/ladybug/manager.py
 /robosystems/graph_api/core/ladybug/pool.py
+/robosystems/graph_api/core/ladybug/engine.py
+/robosystems/graph_api/core/ladybug/service.py
 /robosystems/graph_api/core/duckdb/manager.py
 /robosystems/graph_api/core/admission_control.py
 /robosystems/graph_api/core/task_manager.py
+/robosystems/graph_api/interfaces/engine.py
 
 # Client System
 /robosystems/graph_api/client/factory.py
@@ -202,12 +209,10 @@ INSTANCE_REGISTRY_TABLE=robosystems-graph-{env}-instance-registry
 
 ```bash
 # Log groups
-/robosystems/{env}/graph-writer-standard
-/robosystems/{env}/graph-writer-enterprise
-/robosystems/{env}/graph-shared-master
+/robosystems/{env}/graph-api  # Unified log group for all instances
 
 # View recent errors
-aws logs tail /robosystems/prod/graph-writer-standard \
+aws logs tail /robosystems/prod/graph-api \
   --follow --filter-pattern ERROR
 ```
 

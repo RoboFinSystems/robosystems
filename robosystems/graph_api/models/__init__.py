@@ -37,13 +37,11 @@ from .tables import (
   TableQueryResponse,
 )
 from .tasks import (
-  BackgroundIngestRequest,
   TaskStatus,
   TaskType,
 )
 
 __all__ = [
-  "BackgroundIngestRequest",
   "BackupRequest",
   "BackupResponse",
   # Cluster models

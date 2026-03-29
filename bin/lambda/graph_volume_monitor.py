@@ -1,7 +1,7 @@
 """
 Graph Volume Monitor and Auto-Expansion Lambda Function
 
-This Lambda handles proactive volume monitoring and expansion for Graph instances (LadybugDB and Neo4j):
+This Lambda handles proactive volume monitoring and expansion for graph instances:
 - Monitors disk usage across all instances
 - Automatically expands volumes when thresholds are exceeded
 - Grows filesystems after EBS expansion

@@ -7,7 +7,6 @@ Core services layer for Graph API operations, providing database management, con
 The `core/` directory contains the foundational services that power the Graph API, organized by database technology:
 
 - **LadybugDB Services** - Embedded graph database management, connection pooling, and service orchestration
-- **Neo4j Services** - Backend Neo4j cluster management (optional)
 - **DuckDB Services** - High-performance data staging via intermediate tables
 - **Shared Services** - Admission control, task management, and metrics collection
 
@@ -25,10 +24,6 @@ core/
 │   ├── manager.py                # Database lifecycle and schema (35KB)
 │   └── service.py                # Service orchestration (35KB)
 │
-├── neo4j/                         # Neo4j backend (optional)
-│   ├── __init__.py               # Neo4j exports
-│   └── service.py                # Neo4j cluster management (4KB)
-│
 ├── duckdb/                        # DuckDB data staging
 │   ├── __init__.py               # DuckDB exports
 │   ├── pool.py                   # DuckDB connection pooling (21KB)
@@ -44,7 +39,7 @@ core/
 
 ## Technology Stack
 
-### LadybugDB (Primary Backend)
+### LadybugDB
 
 **Location**: `core/ladybug/`
 
@@ -83,28 +78,6 @@ response = service.execute_query(QueryRequest(
 # Low-level engine access (for advanced use cases)
 engine = Engine("/data/lbug-dbs/kg123.lbug")
 result = engine.execute_query("MATCH (n:Entity) RETURN n.name")
-```
-
-### Neo4j (Optional Backend)
-
-**Location**: `core/neo4j/`
-
-Optional Neo4j backend support for clusters requiring distributed graph capabilities:
-
-**Primary Class**: `Neo4jService`
-
-**Key Features**:
-- **Backend Abstraction** - Unified interface for Neo4j clusters
-- **Health Monitoring** - Continuous health checks
-- **Cluster Topology** - Discover and route to cluster members
-
-**Usage**:
-```python
-from robosystems.graph_api.core.neo4j import Neo4jService
-
-service = Neo4jService()
-health = service.get_cluster_health()
-info = service.get_cluster_info()
 ```
 
 ### DuckDB (Data Staging)
@@ -591,9 +564,7 @@ TASK_TTL_SECONDS=3600
 
 - **[Graph API README](/robosystems/graph_api/README.md)** - Complete Graph API overview
 - **[LadybugDB README](ladybug/README.md)** - Detailed LadybugDB documentation
-- **[Neo4j Backend README](neo4j/README.md)** - Neo4j backend documentation
 - **[DuckDB Staging README](duckdb/README.md)** - DuckDB staging system documentation
-- **[Backends](/robosystems/graph_api/backends/README.md)** - Backend abstraction layer
 - **[Client Factory](/robosystems/graph_api/client/README.md)** - Client routing system
 
 ## Support

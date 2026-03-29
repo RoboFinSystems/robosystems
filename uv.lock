@@ -2036,18 +2036,6 @@ wheels = [
 ]
 
 [[package]]
-name = "neo4j"
-version = "5.28.3"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "pytz" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/83/f2/9e386c8e7243c285768ecd2b71e6796009d3f6f3b202310e9ef972acf526/neo4j-5.28.3.tar.gz", hash = "sha256:0625aaaf0963bc99a7231e946952f579792c3be22687192b20e0b74aa1233a2b", size = 232122, upload-time = "2026-01-12T10:42:43.842Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/64/83/15b4ee7c081322ba3095e58bfa2c4214452fda9accaece68e25fc86a9bb4/neo4j-5.28.3-py3-none-any.whl", hash = "sha256:dbf6d9211b861bc3dd62dccbf8a74d1e33e0c602084dd123b753edf46e1fdfad", size = 313351, upload-time = "2026-01-12T10:42:40.507Z" },
-]
-
-[[package]]
 name = "networkx"
 version = "3.6.1"
 source = { registry = "https://pypi.org/simple" }
@@ -3353,7 +3341,6 @@ dev = [
     { name = "basedpyright" },
     { name = "cfn-lint" },
     { name = "moto", extra = ["s3"] },
-    { name = "neo4j" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
     { name = "pytest-cov" },
@@ -3362,9 +3349,6 @@ dev = [
     { name = "rich" },
     { name = "robosystems-client" },
     { name = "ruff" },
-]
-neo4j = [
-    { name = "neo4j" },
 ]
 
 [package.dev-dependencies]
@@ -3406,8 +3390,6 @@ requires-dist = [
     { name = "lancedb", specifier = ">=0.30.0,<1.0" },
     { name = "lxml", specifier = ">=5.4.0,<6.0" },
     { name = "moto", extras = ["s3"], marker = "extra == 'dev'", specifier = ">=5.1.6,<6.0" },
-    { name = "neo4j", marker = "extra == 'dev'", specifier = ">=5.15.0,<6.0" },
-    { name = "neo4j", marker = "extra == 'neo4j'", specifier = ">=5.15.0,<6.0" },
     { name = "numpy", specifier = ">=1.26.0,<3.0" },
     { name = "opensearch-py", specifier = ">=2.4.0,<3.0" },
     { name = "opentelemetry-api", specifier = ">=1.35.0,<2.0" },
@@ -3447,7 +3429,7 @@ requires-dist = [
     { name = "uvicorn", specifier = ">=0.35.0,<1.0" },
     { name = "uvloop", specifier = ">=0.21.0,<1.0" },
 ]
-provides-extras = ["neo4j", "dev"]
+provides-extras = ["dev"]
 
 [package.metadata.requires-dev]
 lambda = [

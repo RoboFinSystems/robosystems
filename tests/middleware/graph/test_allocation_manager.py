@@ -100,7 +100,7 @@ class TestAllocationManagerBasic:
 
 
 class TestMultiBackendSupport:
-  """Test multi-backend support (LadybugDB, Neo4j Community, Neo4j Enterprise)."""
+  """Test backend configuration for LadybugDB tiers."""
 
   @pytest.fixture
   def allocation_manager(self):
@@ -130,13 +130,12 @@ class TestMultiBackendSupport:
     assert config["backend"] == "ladybug"
     assert config["backend_type"] == "ladybug"
     assert config["databases_per_instance"] == 1
-    assert "neo4j_edition" not in config
 
   def test_all_tiers_have_backend_type(self, allocation_manager):
     """Test that all tiers have backend_type attribute for DynamoDB."""
     for tier, config in allocation_manager.tier_configs.items():
       assert "backend_type" in config, f"Tier {tier} missing backend_type"
-      assert config["backend_type"] in ["ladybug", "neo4j"], (
+      assert config["backend_type"] == "ladybug", (
         f"Invalid backend_type for tier {tier}"
       )
 
@@ -146,7 +145,6 @@ class TestMultiBackendSupport:
       backend = config["backend"]
       backend_type = config["backend_type"]
 
-      # Both should match (both "ladybug" or both "neo4j")
       assert backend == backend_type, (
         f"Tier {tier} has inconsistent backend ({backend}) and backend_type ({backend_type})"
       )

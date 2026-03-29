@@ -290,22 +290,22 @@ class GraphClientFactory:
     tier: GraphTier | None = None,
   ) -> GraphClient:
     """
-    Create a graph database client with intelligent routing.
+      Create a graph database client with intelligent routing.
 
-    Routes to the appropriate LadybugDB instance based on tier.
+      Routes to the appropriate LadybugDB instance based on tier.
 
-    Args:
-        graph_id: Graph database identifier
-        operation_type: "read" or "write"
-        environment: Environment (defaults to env.ENVIRONMENT)
-        tier: Instance tier for user graphs (Standard/Large/XLarge)
+      Args:
+          graph_id: Graph database identifier
+          operation_type: "read" or "write"
+          environment: Environment (defaults to env.ENVIRONMENT)
+          tier: Instance tier for user graphs (Standard/Large/XLarge)
 
     Returns:
-        Configured GraphClient instance (works with all backends via Graph API)
+          Configured GraphClient instance for the routed Graph API endpoint
 
-    Raises:
-        ValueError: If graph not found or invalid configuration
-        ServiceUnavailableError: If required services are unavailable
+      Raises:
+          ValueError: If graph not found or invalid configuration
+          ServiceUnavailableError: If required services are unavailable
     """
     if environment is None:
       environment = env.ENVIRONMENT or "dev"
@@ -880,7 +880,7 @@ async def get_graph_client(
       tier: Instance tier for user graphs (Standard/Large/XLarge)
 
   Returns:
-      Configured GraphClient instance (works with all backends via Graph API)
+      Configured GraphClient instance for the routed Graph API endpoint
 
   Example:
       async with await get_graph_client("sec", "read") as client:
@@ -910,7 +910,7 @@ def get_graph_client_sync(
       tier: Instance tier for user graphs (Standard/Large/XLarge)
 
   Returns:
-      Configured GraphClient instance (works with all backends via Graph API)
+      Configured GraphClient instance for the routed Graph API endpoint
 
   Example:
       with get_graph_client_sync("kg1a2b3c") as client:
@@ -935,7 +935,7 @@ async def get_graph_client_for_instance(
       api_key: API key (defaults to env.GRAPH_API_KEY)
 
   Returns:
-      Configured GraphClient instance for direct access (works with all backends)
+      Configured GraphClient instance for direct instance access
 
   Example:
       client = await get_graph_client_for_instance("10.0.1.123")

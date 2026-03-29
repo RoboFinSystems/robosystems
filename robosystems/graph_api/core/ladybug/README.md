@@ -515,7 +515,6 @@ metrics = {
 ## Related Documentation
 
 - **[Core Services README](../README.md)** - Overview of all core services
-- **[Neo4j Backend](../neo4j/README.md)** - Neo4j backend documentation
 - **[DuckDB Staging](../duckdb/README.md)** - DuckDB staging system
 - **[Graph API README](/robosystems/graph_api/README.md)** - Complete API overview
 

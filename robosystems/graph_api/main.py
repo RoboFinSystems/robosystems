@@ -105,6 +105,11 @@ def main():
   except Exception as e:
     logger.warning(f"Could not load tier config, using default: {e}")
 
+  # Validate configuration before starting
+  from robosystems.config.validation import EnvValidator
+
+  EnvValidator.validate_required_vars(env)
+
   # Initialize the cluster service
   init_cluster_service(
     base_path=str(base_path),

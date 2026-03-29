@@ -1,7 +1,7 @@
 """
 Base Graph API Client.
 
-Shared functionality for sync and async clients with multi-backend support.
+Shared functionality for sync and async clients.
 """
 
 import random
@@ -23,7 +23,7 @@ T = TypeVar("T")
 
 
 class BaseGraphClient:
-  """Base class for Graph API clients with shared functionality (works with all backends)."""
+  """Base class for Graph API clients with shared functionality."""
 
   def __init__(
     self,

@@ -20,9 +20,6 @@ from robosystems.graph_api.core.task_manager import (
   restore_task_manager,
 )
 from robosystems.graph_api.core.task_sse import TaskType, generate_task_sse_events
-from robosystems.graph_api.routers.databases.copy import (
-  task_manager as ingestion_task_manager,
-)
 from robosystems.graph_api.routers.databases.tables.management import (
   staging_task_manager,
 )
@@ -38,10 +35,8 @@ class UnifiedTaskManager:
     self._redis_url = None
     # Map of task prefixes to their managers
     self.managers = {
-      "ingest": ingestion_task_manager,
       "backup": backup_task_manager,
       "restore": restore_task_manager,
-      "copy": ingestion_task_manager,  # Copy uses ingestion manager
       "staging": staging_task_manager,  # DuckDB table creation from S3
       "migration": migration_task_manager,  # Version migration export/import
     }

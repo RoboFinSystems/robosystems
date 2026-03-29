@@ -22,7 +22,7 @@ Secrets are organized in AWS Secrets Manager with the following structure:
   - `/postgres`: POSTGRES_USER, POSTGRES_PASSWORD
   - `/valkey`: VALKEY_AUTH_TOKEN
   - `/admin`: ADMIN_API_KEY
-  - `/graph-api`: GRAPH_API_KEY, NEO4J_PASSWORD
+  - `/graph-api`: GRAPH_API_KEY
 
 ## Feature Flags (Moved to SSM Parameter Store)
 
@@ -246,7 +246,6 @@ SECRET_MAPPINGS = {
   "TURNSTILE_SITE_KEY": (None, "TURNSTILE_SITE_KEY"),
   # --- Graph Databases ---
   "GRAPH_API_KEY": ("graph-api", "GRAPH_API_KEY"),
-  "NEO4J_PASSWORD": ("graph-api", "NEO4J_PASSWORD"),
   # --- PostgreSQL ---
   # ECS: DATABASE_URL set via task definition env var (CF params + secret resolve)
   # EC2: DATABASE_URL constructed at runtime from DATABASE_ENDPOINT + POSTGRES_PASSWORD (fetched here)

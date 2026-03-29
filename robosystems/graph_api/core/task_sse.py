@@ -26,7 +26,6 @@ async def generate_task_sse_events(
   Generate SSE events for any background task with progress monitoring.
 
   This is a generic implementation that can be used for:
-  - Data ingestion/copy operations
   - Database backups
   - Database restores
   - Any other long-running task
