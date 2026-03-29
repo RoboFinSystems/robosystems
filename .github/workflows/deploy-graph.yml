@@ -401,9 +401,7 @@ jobs:
                 query_timeout: .instance.query_timeout,
                 max_query_length: .instance.max_query_length,
                 ingestion_batch_size: .instance.ingestion_batch_size,
-                connection_pool_size: .instance.connection_pool_size,
-                neo4j_version: .instance.neo4j_version,
-                neo4j_edition: .instance.neo4j_edition
+                connection_pool_size: .instance.connection_pool_size
               }')
 
               LBUG_FILTERED=$(echo "$LBUG_FILTERED" | jq --argjson entry "$MATRIX_ENTRY" '. + [$entry]')

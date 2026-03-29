@@ -1,7 +1,6 @@
 """Tests for LadybugDB materialization operations.
 
-Tests LadybugMaterializer initialization, materialize_from_duckdb,
-and copy_incremental_to_ladybug.
+Tests LadybugMaterializer initialization and materialize_from_duckdb.
 """
 
 from unittest.mock import AsyncMock, patch

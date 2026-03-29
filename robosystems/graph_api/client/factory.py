@@ -290,22 +290,22 @@ class GraphClientFactory:
     tier: GraphTier | None = None,
   ) -> GraphClient:
     """
-      Create a graph database client with intelligent routing.
+    Create a graph database client with intelligent routing.
 
-      Routes to the appropriate LadybugDB instance based on tier.
+    Routes to the appropriate LadybugDB instance based on tier.
 
-      Args:
-          graph_id: Graph database identifier
-          operation_type: "read" or "write"
-          environment: Environment (defaults to env.ENVIRONMENT)
-          tier: Instance tier for user graphs (Standard/Large/XLarge)
+    Args:
+        graph_id: Graph database identifier
+        operation_type: "read" or "write"
+        environment: Environment (defaults to env.ENVIRONMENT)
+        tier: Instance tier for user graphs (Standard/Large/XLarge)
 
     Returns:
-          Configured GraphClient instance for the routed Graph API endpoint
+        Configured GraphClient instance for the routed Graph API endpoint
 
-      Raises:
-          ValueError: If graph not found or invalid configuration
-          ServiceUnavailableError: If required services are unavailable
+    Raises:
+        ValueError: If graph not found or invalid configuration
+        ServiceUnavailableError: If required services are unavailable
     """
     if environment is None:
       environment = env.ENVIRONMENT or "dev"

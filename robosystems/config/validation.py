@@ -40,7 +40,7 @@ class EnvValidator:
     if backend_type != "ladybug":
       errors.append(
         f"GRAPH_BACKEND_TYPE='{backend_type}' is not supported. "
-        f"Only 'ladybug' is supported (Neo4j support has been removed)."
+        f"Only 'ladybug' is supported."
       )
 
     # Critical variables that must be set in production

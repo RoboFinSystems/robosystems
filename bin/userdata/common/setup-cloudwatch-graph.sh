@@ -1,6 +1,6 @@
 #!/bin/bash
-# Universal CloudWatch Agent Setup for Graph Databases
-# Supports both LadybugDB and Neo4j with standardized monitoring
+# CloudWatch Agent Setup for Graph Databases
+# Standardized monitoring for LadybugDB graph API instances
 #
 # Note: Environment is included in the namespace (e.g., RoboSystems/Graph/prod)
 # rather than as a dimension, since CloudWatch Agent's append_dimensions
@@ -9,9 +9,14 @@
 set -e
 
 # Validate required environment variables
-: ${DATABASE_TYPE:?"DATABASE_TYPE must be set (ladybug|neo4j)"}
+: ${DATABASE_TYPE:?"DATABASE_TYPE must be set (ladybug)"}
 : ${CLOUDWATCH_NAMESPACE:?"CLOUDWATCH_NAMESPACE must be set"}
 : ${DATA_DIR:?"DATA_DIR must be set"}
+
+if [ "${DATABASE_TYPE}" != "ladybug" ]; then
+  echo "ERROR: Unsupported DATABASE_TYPE: ${DATABASE_TYPE}"
+  exit 1
+fi
 
 # Determine setup log path and disk monitoring path (writer or replica)
 # NODE_TYPE is set by the userdata script (e.g., shared_replica, standard, large)

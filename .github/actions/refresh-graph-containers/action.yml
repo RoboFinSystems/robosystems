@@ -1,5 +1,5 @@
 name: Refresh Graph Container
-description: Refreshes a single graph database container in-place without replacing the instance (supports LadybugDB and Neo4j)
+description: Refreshes a single graph API container in-place without replacing the instance
 
 inputs:
   environment:
@@ -12,7 +12,7 @@ inputs:
     description: 'Node type (writer, shared-writer, shared-replica)'
     required: true
   backend:
-    description: 'Graph backend (ladybug, neo4j)'
+    description: 'Graph runtime (ladybug)'
     required: true
   aws-region:
     description: 'AWS region'
@@ -40,10 +40,10 @@ runs:
     - name: Validate Inputs
       shell: bash
       run: |
-        VALID_BACKENDS="ladybug|neo4j"
-        if [[ ! "${{ inputs.backend }}" =~ ^($VALID_BACKENDS)$ ]]; then
-          echo "❌ Invalid backend: ${{ inputs.backend }}"
-          echo "Must be one of: ladybug, neo4j"
+        VALID_RUNTIMES="ladybug"
+        if [[ ! "${{ inputs.backend }}" =~ ^($VALID_RUNTIMES)$ ]]; then
+          echo "❌ Invalid graph runtime: ${{ inputs.backend }}"
+          echo "Must be: ladybug"
           exit 1
         fi
 
@@ -65,31 +65,25 @@ runs:
       id: update
       shell: bash
       run: |
-        echo "🔄 Updating ${{ inputs.backend }} container on instance ${{ inputs.instance-id }} - ${{ inputs.node-type }}"
+        echo "🔄 Updating graph container on instance ${{ inputs.instance-id }} - ${{ inputs.node-type }}"
 
         # Get ECR URI
         ECR_URI="${{ inputs.aws-account-id }}.dkr.ecr.${{ inputs.aws-region }}.amazonaws.com/robosystems"
 
-        # Backend-agnostic container naming
-        # Container name represents the service (graph-api), not the backend implementation
-        # Backend is tracked via inputs.backend for metadata/logging only
+        # Container name represents the service role, not the storage engine
         if [ "${{ inputs.node-type }}" == "shared-writer" ] || [ "${{ inputs.node-type }}" == "shared-replica" ]; then
           CONTAINER_NAME="graph-api-shared"
         else
           CONTAINER_NAME="graph-api"
         fi
 
-        # Determine health check port based on backend
-        if [ "${{ inputs.backend }}" == "neo4j" ]; then
-          HEALTH_PORT="7474"
-        else
-          HEALTH_PORT="8001"
-        fi
+        # Graph API health endpoint
+        HEALTH_PORT="8001"
 
         # Use universal startup script
         STARTUP_SCRIPT="/usr/local/bin/run-graph-container.sh"
 
-        echo "📦 Pulling and updating container: $CONTAINER_NAME (backend: ${{ inputs.backend }}, health port: $HEALTH_PORT)"
+        echo "📦 Pulling and updating container: $CONTAINER_NAME (runtime: ${{ inputs.backend }}, health port: $HEALTH_PORT)"
 
         # Send update command
         COMMAND_ID=$(aws ssm send-command \

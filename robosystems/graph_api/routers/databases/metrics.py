@@ -73,6 +73,7 @@ async def get_database_metrics(
 
     # Get modification time
     last_modified = None
+    # Safe: validated_graph_id has been sanitized by validate_database_name() (alphanumeric + hyphens only)
     db_path = Path(service.db_manager.base_path) / f"{validated_graph_id}.lbug"
     if db_path.exists():
       mtime = os.path.getmtime(db_path)

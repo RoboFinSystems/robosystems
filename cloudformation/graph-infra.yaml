@@ -36,7 +36,7 @@ Parameters:
 
 Resources:
   # ===== DynamoDB Tables =====
-  # Single instance registry for all graph database instances (LadybugDB and Neo4j)
+  # Single instance registry for all graph database instances
   InstanceRegistry:
     Type: AWS::DynamoDB::Table
     DeletionPolicy: Delete
@@ -134,7 +134,7 @@ Resources:
         - Key: CreatedBy
           Value: CloudFormation
 
-  # Volume registry for tracking graph database volumes (LadybugDB and Neo4j)
+  # Volume registry for tracking graph database volumes
   VolumeRegistry:
     Type: AWS::DynamoDB::Table
     DeletionPolicy: Delete
@@ -190,14 +190,14 @@ Resources:
           Value: CloudFormation
 
   # ===== Authentication Infrastructure =====
-  # Graph API authentication secret (used by all backends on port 8001)
+  # Graph API authentication secret for Graph API clients on port 8001
   GraphApiSecret:
     Type: AWS::SecretsManager::Secret
     DeletionPolicy: Delete
     UpdateReplacePolicy: Retain
     Properties:
       Name: !Sub robosystems/${Environment}/graph-api
-      Description: !Sub Graph API authentication key for ${Environment} (used by all backends)
+      Description: !Sub Graph API authentication key for ${Environment}
       SecretString: !Sub
         - |
           {
@@ -525,13 +525,12 @@ Resources:
         - !Ref InfraAlertTopic
 
   # ===== CloudWatch Log Groups =====
-  # Unified log group for ALL Graph API instances (LadybugDB and Neo4j backends)
+  # Unified log group for all Graph API instances
   # Log streams are partitioned by: {cluster_tier}/{instance_id}/{node_type}
   # Examples:
   #   - standard/i-1234567890abcdef0/writer
   #   - large/i-0987654321fedcba0/writer
   #   - shared/i-abcdef1234567890/shared_master
-  #   - neo4j-community-large/i-fedcba0987654321/writer
   GraphUnifiedLogGroup:
     Type: AWS::Logs::LogGroup
     DeletionPolicy: Delete
