@@ -26,11 +26,9 @@ class ProgressReporter(Protocol):
     details: dict[str, Any] | None = None,
   ) -> None:
     """Emit a progress update."""
-    ...
 
   async def is_cancelled(self) -> bool:
     """Check if the operation has been cancelled."""
-    ...
 
 
 @runtime_checkable
@@ -40,7 +38,6 @@ class ToolAccess(Protocol):
   @property
   def graph_id(self) -> str:
     """The graph ID this tool access is bound to."""
-    ...
 
   async def call_tool(
     self,
@@ -49,7 +46,6 @@ class ToolAccess(Protocol):
     return_raw: bool = False,
   ) -> Any:
     """Call an MCP tool by name."""
-    ...
 
 
 @dataclass

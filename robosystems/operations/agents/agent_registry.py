@@ -1,10 +1,7 @@
-"""New agent registry for the unified Agent protocol.
+"""Agent registry for the unified Agent protocol.
 
 Simple registration and lookup. Agents register via the @register_agent
 decorator and are looked up by type string.
-
-Separate from the legacy AgentRegistry (registry.py) which manages
-BaseAgent subclasses. The two registries coexist during migration.
 """
 
 from __future__ import annotations

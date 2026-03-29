@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 from enum import Enum
 from typing import TYPE_CHECKING, Any
 
@@ -150,7 +150,6 @@ class Agent(ABC):
     Returns:
         AgentResult with domain-specific content and metadata.
     """
-    ...
 
   def can_handle(self, query: str, context: dict[str, Any] | None = None) -> float:
     """Return confidence score (0-1) for handling this query.
@@ -220,7 +219,7 @@ class AgentResponse:
   requires_followup: bool = False
   error_details: dict[str, Any] | None = None
   execution_time: float | None = None
-  timestamp: datetime = field(default_factory=datetime.utcnow)
+  timestamp: datetime = field(default_factory=lambda: datetime.now(UTC))
 
 
 class BaseAgent(ABC):
@@ -453,7 +452,7 @@ class BaseAgent(ABC):
         "graph_id": self.graph_id,
         "user_id": str(self.user.id),
         "agent_name": self.metadata.name,
-        "timestamp": datetime.utcnow().isoformat(),
+        "timestamp": datetime.now(UTC).isoformat(),
         "capabilities": [c.value for c in self.metadata.capabilities],
       }
     )

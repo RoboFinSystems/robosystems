@@ -29,7 +29,6 @@ class CreditConsumer(Protocol):
     operation_description: str,
   ) -> float:
     """Consume credits for an AI call. Returns credits consumed."""
-    ...
 
 
 class SessionCreditConsumer:

@@ -294,7 +294,7 @@ class CreateMappingAssociationTool:
           to_element_id=arguments["to_element_id"],
           association_type="mapping",
           confidence=arguments.get("confidence"),
-          suggested_by="cowork",
+          suggested_by="ai",
           created_by="mcp",
         )
         session.add(assoc)

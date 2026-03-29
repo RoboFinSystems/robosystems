@@ -87,10 +87,7 @@ async def run_agent_api(
 
     # Attach runtime metadata
     result.metadata["credits_consumed"] = tracked_ai.total_credits
-    result.metadata["credits_remaining"] = (
-      tracked_ai._credit_consumer is not None
-      and getattr(tracked_ai, "_last_remaining", None)
-    )
+    result.metadata["has_credit_tracking"] = tracked_ai._credit_consumer is not None
     result.metadata["tokens_used"] = tracked_ai.total_tokens.copy()
     result.metadata["call_count"] = tracked_ai.call_count
 

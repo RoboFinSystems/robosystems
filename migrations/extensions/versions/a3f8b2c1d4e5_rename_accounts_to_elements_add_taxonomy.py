@@ -301,6 +301,13 @@ def upgrade() -> None:
     ["association_type"],
     schema="public",
   )
+  op.create_index(
+    "idx_associations_unapproved",
+    "element_associations",
+    ["approved_by"],
+    schema="public",
+    postgresql_where=sa.text("approved_by IS NULL AND suggested_by = 'ai'"),
+  )
 
   # ──────────────────────────────────────────────────────────────────────
   # 5. Rename FK columns on dependent tables
@@ -622,6 +629,12 @@ def _upgrade_tenant_schema(conn, schema: str) -> None:
   conn.execute(
     sa.text(
       f'CREATE INDEX IF NOT EXISTS idx_associations_type ON "{s}".element_associations (association_type)'
+    )
+  )
+  conn.execute(
+    sa.text(
+      f'CREATE INDEX IF NOT EXISTS idx_associations_unapproved ON "{s}".element_associations (approved_by) '
+      f"WHERE approved_by IS NULL AND suggested_by = 'ai'"
     )
   )
 

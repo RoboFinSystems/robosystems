@@ -27,7 +27,7 @@ class TrackedAIClient:
     ai_client: AIClient,
     graph_id: str,
     user_id: str,
-    credit_consumer: CreditConsumer,
+    credit_consumer: CreditConsumer | None = None,
   ) -> None:
     self._ai = ai_client
     self._graph_id = graph_id
@@ -77,22 +77,23 @@ class TrackedAIClient:
     self.total_tokens["output"] += response.output_tokens
     self.call_count += 1
 
-    # Consume credits automatically
-    try:
-      credits = await self._credit_consumer.consume(
-        graph_id=self._graph_id,
-        user_id=self._user_id,
-        input_tokens=response.input_tokens,
-        output_tokens=response.output_tokens,
-        model=response.model,
-        operation_description=operation_description,
-      )
-      self.total_credits += credits
-    except Exception as e:
-      logger.warning(
-        f"Credit consumption failed for graph={self._graph_id} "
-        f"tokens=({response.input_tokens}/{response.output_tokens}): {e}"
-      )
+    # Consume credits automatically (skip if no consumer — e.g. tests)
+    if self._credit_consumer is not None:
+      try:
+        credits = await self._credit_consumer.consume(
+          graph_id=self._graph_id,
+          user_id=self._user_id,
+          input_tokens=response.input_tokens,
+          output_tokens=response.output_tokens,
+          model=response.model,
+          operation_description=operation_description,
+        )
+        self.total_credits += credits
+      except Exception as e:
+        logger.warning(
+          f"Credit consumption failed for graph={self._graph_id} "
+          f"tokens=({response.input_tokens}/{response.output_tokens}): {e}"
+        )
 
     return response
 
