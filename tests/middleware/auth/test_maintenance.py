@@ -12,7 +12,7 @@ from robosystems.middleware.auth.maintenance import (
   cleanup_inactive_api_keys,
   cleanup_jwt_cache_expired,
 )
-from robosystems.models.iam import UserAPIKey
+from robosystems.models.core import UserAPIKey
 
 
 class TestCleanupExpiredAPIKeys:

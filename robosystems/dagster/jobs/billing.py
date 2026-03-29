@@ -17,12 +17,12 @@ from dagster import (
 
 from robosystems.config import env
 from robosystems.dagster.resources import DatabaseResource
-from robosystems.models.iam import (
+from robosystems.models.core import (
   Graph,
   GraphCredits,
   GraphCreditTransaction,
 )
-from robosystems.models.iam.graph_credits import CreditTransactionType
+from robosystems.models.core.graph.graph_credits import CreditTransactionType
 from robosystems.operations.graph.credit_service import CreditService
 
 # ============================================================================
@@ -47,7 +47,7 @@ async def _handle_checkout_completed(
   session_data: dict, db_session: Any, context: OpExecutionContext
 ) -> None:
   """Handle checkout.session.completed event."""
-  from robosystems.models.billing import BillingCustomer, BillingSubscription
+  from robosystems.models.core.billing import BillingCustomer, BillingSubscription
 
   session_id = session_data.get("id")
   customer_id = session_data.get("customer")
@@ -169,7 +169,7 @@ def _resolve_subscription(event_data: dict, db_session: Any, context: Any) -> An
 
   Raises SubscriptionNotFoundError if the subscription cannot be found.
   """
-  from robosystems.models.billing import BillingCustomer, BillingSubscription
+  from robosystems.models.core.billing import BillingCustomer, BillingSubscription
 
   # --- Try by subscription ID (multiple locations) ---
   stripe_sub_id = _extract_stripe_subscription_id(event_data)
@@ -233,7 +233,7 @@ def _create_invoice_from_stripe(
 
   Returns the invoice (newly created or existing).
   """
-  from robosystems.models.billing import BillingInvoice, BillingInvoiceLineItem
+  from robosystems.models.core.billing import BillingInvoice, BillingInvoiceLineItem
 
   stripe_invoice_id: str = invoice_data.get("id", "")
   now_ts = int(datetime.now(UTC).timestamp())
@@ -331,7 +331,7 @@ async def _handle_payment_succeeded(
   fires before checkout.session.completed updates the subscription's
   provider_subscription_id), this handler creates it.
   """
-  from robosystems.models.billing import (
+  from robosystems.models.core.billing import (
     BillingCustomer,
     BillingInvoice,
   )
@@ -415,7 +415,7 @@ async def _handle_invoice_updated(
   Updates mutable fields on an existing invoice: status, PDF URL, hosted URL.
   If the invoice transitioned to paid, sets paid_at and payment_method.
   """
-  from robosystems.models.billing import BillingInvoice
+  from robosystems.models.core.billing import BillingInvoice
 
   stripe_invoice_id = invoice_data.get("id")
 
@@ -457,7 +457,7 @@ async def _handle_invoice_voided(
   invoice_data: dict, db_session: Any, context: OpExecutionContext
 ) -> None:
   """Handle invoice.voided event from Stripe."""
-  from robosystems.models.billing import BillingInvoice
+  from robosystems.models.core.billing import BillingInvoice
 
   stripe_invoice_id = invoice_data.get("id")
 
@@ -484,7 +484,7 @@ async def _handle_charge_refunded(
   Adds a negative line item to the invoice for the refunded amount,
   which naturally reduces the invoice total via _recalculate_totals.
   """
-  from robosystems.models.billing import (
+  from robosystems.models.core.billing import (
     BillingAuditLog,
     BillingEventType,
     BillingInvoice,
@@ -607,7 +607,7 @@ async def _handle_subscription_updated(
 
     # Restore graph if it was suspended
     if subscription.resource_type == "graph" and subscription.resource_id:
-      from robosystems.models.iam.graph import Graph, GraphStatus
+      from robosystems.models.core.graph import Graph, GraphStatus
 
       graph = Graph.get_by_id(
         subscription.resource_id, db_session, include_deprovisioned=True
@@ -702,7 +702,7 @@ async def _handle_setup_intent_succeeded(
   Updates has_payment_method on the BillingCustomer so direct subscription
   creation knows they can be charged.
   """
-  from robosystems.models.billing import BillingCustomer
+  from robosystems.models.core.billing import BillingCustomer
 
   customer_id = setup_intent_data.get("customer")
   if not customer_id:
@@ -732,7 +732,7 @@ async def _trigger_resource_provisioning(
   Directly provisions the resource, eliminating sensor polling delay and
   ECS cold start.
   """
-  from robosystems.models.iam import OrgRole, OrgUser
+  from robosystems.models.core import OrgRole, OrgUser
 
   resource_config = subscription.subscription_metadata.get("resource_config", {})
   resource_type = subscription.resource_type

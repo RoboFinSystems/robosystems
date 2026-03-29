@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 
-from robosystems.models.iam import User
+from robosystems.models.core import User
 from robosystems.operations.agents.base import (
   AgentCapability,
   AgentMetadata,

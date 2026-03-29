@@ -36,9 +36,9 @@ class TestMaterializeGraphDirectly:
       patch(
         "robosystems.middleware.sse.operation_manager.get_operation_manager"
       ) as mock_get_manager,
-      patch("robosystems.models.iam.Graph") as mock_graph_class,
-      patch("robosystems.models.iam.GraphFile") as mock_file_class,
-      patch("robosystems.models.iam.GraphTable"),
+      patch("robosystems.models.core.Graph") as mock_graph_class,
+      patch("robosystems.models.core.GraphFile") as mock_file_class,
+      patch("robosystems.models.core.GraphTable"),
       patch(
         "robosystems.operations.lbug.direct_materialization._report_materialization"
       ),
@@ -98,7 +98,7 @@ class TestMaterializeGraphDirectly:
       patch(
         "robosystems.middleware.sse.operation_manager.get_operation_manager"
       ) as mock_get_manager,
-      patch("robosystems.models.iam.Graph") as mock_graph_class,
+      patch("robosystems.models.core.Graph") as mock_graph_class,
     ):
       mock_graph_class.get_by_id.return_value = None
 
@@ -127,9 +127,9 @@ class TestMaterializeGraphDirectly:
       patch(
         "robosystems.middleware.sse.operation_manager.get_operation_manager"
       ) as mock_get_manager,
-      patch("robosystems.models.iam.Graph") as mock_graph_class,
-      patch("robosystems.models.iam.GraphFile") as mock_file_class,
-      patch("robosystems.models.iam.GraphTable"),
+      patch("robosystems.models.core.Graph") as mock_graph_class,
+      patch("robosystems.models.core.GraphFile") as mock_file_class,
+      patch("robosystems.models.core.GraphTable"),
     ):
       mock_graph = Mock()
       mock_graph.graph_stale = False
@@ -168,9 +168,9 @@ class TestMaterializeGraphDirectly:
       patch(
         "robosystems.middleware.sse.operation_manager.get_operation_manager"
       ) as mock_get_manager,
-      patch("robosystems.models.iam.Graph") as mock_graph_class,
-      patch("robosystems.models.iam.GraphFile") as mock_file_class,
-      patch("robosystems.models.iam.GraphTable"),
+      patch("robosystems.models.core.Graph") as mock_graph_class,
+      patch("robosystems.models.core.GraphFile") as mock_file_class,
+      patch("robosystems.models.core.GraphTable"),
       patch(
         "robosystems.operations.lbug.direct_materialization._report_materialization"
       ),
@@ -221,10 +221,10 @@ class TestMaterializeGraphDirectly:
       patch(
         "robosystems.middleware.sse.operation_manager.get_operation_manager"
       ) as mock_get_manager,
-      patch("robosystems.models.iam.Graph") as mock_graph_class,
-      patch("robosystems.models.iam.GraphFile") as mock_file_class,
-      patch("robosystems.models.iam.GraphTable"),
-      patch("robosystems.models.iam.GraphSchema") as mock_schema_class,
+      patch("robosystems.models.core.Graph") as mock_graph_class,
+      patch("robosystems.models.core.GraphFile") as mock_file_class,
+      patch("robosystems.models.core.GraphTable"),
+      patch("robosystems.models.core.GraphSchema") as mock_schema_class,
       patch(
         "robosystems.operations.lbug.direct_materialization._report_materialization"
       ),
@@ -281,9 +281,9 @@ class TestMaterializeGraphDirectly:
       patch(
         "robosystems.middleware.sse.operation_manager.get_operation_manager"
       ) as mock_get_manager,
-      patch("robosystems.models.iam.Graph") as mock_graph_class,
-      patch("robosystems.models.iam.GraphFile") as mock_file_class,
-      patch("robosystems.models.iam.GraphTable"),
+      patch("robosystems.models.core.Graph") as mock_graph_class,
+      patch("robosystems.models.core.GraphFile") as mock_file_class,
+      patch("robosystems.models.core.GraphTable"),
       patch(
         "robosystems.operations.lbug.direct_materialization._report_materialization"
       ),
@@ -343,9 +343,9 @@ class TestMaterializeGraphDirectly:
       patch(
         "robosystems.middleware.sse.operation_manager.get_operation_manager"
       ) as mock_get_manager,
-      patch("robosystems.models.iam.Graph") as mock_graph_class,
-      patch("robosystems.models.iam.GraphFile") as mock_file_class,
-      patch("robosystems.models.iam.GraphTable"),
+      patch("robosystems.models.core.Graph") as mock_graph_class,
+      patch("robosystems.models.core.GraphFile") as mock_file_class,
+      patch("robosystems.models.core.GraphTable"),
       patch(
         "robosystems.operations.lbug.direct_materialization._report_materialization"
       ),
@@ -406,9 +406,9 @@ class TestMaterializeGraphDirectly:
       patch(
         "robosystems.middleware.sse.operation_manager.get_operation_manager"
       ) as mock_get_manager,
-      patch("robosystems.models.iam.Graph") as mock_graph_class,
-      patch("robosystems.models.iam.GraphFile") as mock_file_class,
-      patch("robosystems.models.iam.GraphTable"),
+      patch("robosystems.models.core.Graph") as mock_graph_class,
+      patch("robosystems.models.core.GraphFile") as mock_file_class,
+      patch("robosystems.models.core.GraphTable"),
     ):
       mock_graph = Mock()
       mock_graph.graph_stale = True
@@ -465,7 +465,7 @@ class TestRestageStaleFiles:
       patch(
         "robosystems.operations.lbug.direct_staging.stage_file_directly"
       ) as mock_stage,
-      patch("robosystems.models.iam.GraphFile") as mock_file_class,
+      patch("robosystems.models.core.GraphFile") as mock_file_class,
     ):
       mock_file1 = Mock()
       mock_file1.file_name = "data1.csv"
@@ -498,7 +498,7 @@ class TestRestageStaleFiles:
       patch(
         "robosystems.operations.lbug.direct_staging.stage_file_directly"
       ) as mock_stage,
-      patch("robosystems.models.iam.GraphFile") as mock_file_class,
+      patch("robosystems.models.core.GraphFile") as mock_file_class,
     ):
       mock_file = Mock()
       mock_file.file_name = "data.csv"
@@ -525,7 +525,7 @@ class TestRestageStaleFiles:
       patch(
         "robosystems.operations.lbug.direct_staging.stage_file_directly"
       ) as mock_stage,
-      patch("robosystems.models.iam.GraphFile") as mock_file_class,
+      patch("robosystems.models.core.GraphFile") as mock_file_class,
     ):
       mock_file = Mock()
       mock_file.file_name = "data.csv"
@@ -639,9 +639,9 @@ class TestProgressTracking:
       patch(
         "robosystems.middleware.sse.operation_manager.get_operation_manager"
       ) as mock_get_manager,
-      patch("robosystems.models.iam.Graph") as mock_graph_class,
-      patch("robosystems.models.iam.GraphFile") as mock_file_class,
-      patch("robosystems.models.iam.GraphTable"),
+      patch("robosystems.models.core.Graph") as mock_graph_class,
+      patch("robosystems.models.core.GraphFile") as mock_file_class,
+      patch("robosystems.models.core.GraphTable"),
       patch(
         "robosystems.operations.lbug.direct_materialization._report_materialization"
       ),
@@ -691,7 +691,7 @@ class TestProgressTracking:
       patch(
         "robosystems.middleware.sse.operation_manager.get_operation_manager"
       ) as mock_get_manager,
-      patch("robosystems.models.iam.Graph") as mock_graph_class,
+      patch("robosystems.models.core.Graph") as mock_graph_class,
     ):
       mock_graph_class.get_by_id.return_value = None
 

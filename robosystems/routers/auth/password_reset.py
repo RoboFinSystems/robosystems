@@ -32,7 +32,7 @@ from ...models.api.auth import (
   ResetPasswordValidateResponse,
 )
 from ...models.api.common import ErrorResponse
-from ...models.iam import User, UserToken
+from ...models.core import User, UserToken
 from ...security import SecurityAuditLogger, SecurityEventType
 from ...security.input_validation import (
   sanitize_string,

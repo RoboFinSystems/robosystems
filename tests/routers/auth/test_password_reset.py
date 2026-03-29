@@ -4,7 +4,7 @@ from unittest.mock import Mock, patch
 
 import pytest
 
-from robosystems.models.iam import User, UserToken
+from robosystems.models.core import User, UserToken
 
 
 class TestPasswordResetEndpoints:

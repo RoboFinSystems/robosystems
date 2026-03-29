@@ -11,7 +11,7 @@ from httpx import AsyncClient
 from sqlalchemy.orm import Session
 
 from robosystems.middleware.auth.jwt import create_jwt_token
-from robosystems.models.iam import User
+from robosystems.models.core import User
 
 
 class TestMCPEndpoints:
@@ -375,8 +375,8 @@ class TestMCPAccessControl:
     """Test MCP access for shared repositories."""
     import uuid
 
-    from robosystems.models.iam import Graph
-    from robosystems.models.iam.user_repository import (
+    from robosystems.models.core import Graph
+    from robosystems.models.core.user.user_repository import (
       RepositoryAccessLevel,
       RepositoryType,
       UserRepository,

@@ -54,7 +54,7 @@ async def materialize_graph_directly(
   """
   from robosystems.graph_api.client.factory import GraphClientFactory
   from robosystems.middleware.sse.operation_manager import get_operation_manager
-  from robosystems.models.iam import Graph, GraphFile, GraphSchema, GraphTable
+  from robosystems.models.core import Graph, GraphFile, GraphSchema, GraphTable
 
   from .chunked_materialization import materialize_table_chunked
 
@@ -373,7 +373,7 @@ async def _restage_stale_files(
       graph_id: Graph database identifier
       file_ids: List of file IDs to re-stage
   """
-  from robosystems.models.iam import GraphFile
+  from robosystems.models.core import GraphFile
 
   from .direct_staging import stage_file_directly
 

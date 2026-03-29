@@ -6,8 +6,8 @@ from unittest.mock import Mock, patch
 import pytest
 from fastapi import HTTPException
 
-from robosystems.models.billing import BillingCustomer
-from robosystems.models.iam import User
+from robosystems.models.core import User
+from robosystems.models.core.billing import BillingCustomer
 from robosystems.routers.billing.invoices import (
   get_upcoming_invoice,
   list_invoices,
@@ -66,10 +66,10 @@ class TestListInvoices:
     return inv
 
   @pytest.mark.asyncio
-  @patch("robosystems.models.iam.OrgUser.get_by_org_and_user")
+  @patch("robosystems.models.core.OrgUser.get_by_org_and_user")
   async def test_list_invoices_empty(self, mock_get_org_user, mock_user, mock_db):
     """Test listing invoices when none exist."""
-    from robosystems.models.iam import OrgRole
+    from robosystems.models.core import OrgRole
 
     mock_org_user = Mock()
     mock_org_user.role = OrgRole.OWNER
@@ -90,10 +90,10 @@ class TestListInvoices:
     assert result.has_more is False
 
   @pytest.mark.asyncio
-  @patch("robosystems.models.iam.OrgUser.get_by_org_and_user")
+  @patch("robosystems.models.core.OrgUser.get_by_org_and_user")
   async def test_list_invoices_success(self, mock_get_org_user, mock_user, mock_db):
     """Test successful invoice listing from database."""
-    from robosystems.models.iam import OrgRole
+    from robosystems.models.core import OrgRole
 
     mock_org_user = Mock()
     mock_org_user.role = OrgRole.OWNER
@@ -134,10 +134,10 @@ class TestListInvoices:
     assert result.invoices[1].amount_paid == 0
 
   @pytest.mark.asyncio
-  @patch("robosystems.models.iam.OrgUser.get_by_org_and_user")
+  @patch("robosystems.models.core.OrgUser.get_by_org_and_user")
   async def test_list_invoices_has_more(self, mock_get_org_user, mock_user, mock_db):
     """Test has_more flag when more invoices exist than limit."""
-    from robosystems.models.iam import OrgRole
+    from robosystems.models.core import OrgRole
 
     mock_org_user = Mock()
     mock_org_user.role = OrgRole.OWNER
@@ -159,12 +159,12 @@ class TestListInvoices:
     assert result.has_more is True
 
   @pytest.mark.asyncio
-  @patch("robosystems.models.iam.OrgUser.get_by_org_and_user")
+  @patch("robosystems.models.core.OrgUser.get_by_org_and_user")
   async def test_list_invoices_error_handling(
     self, mock_get_org_user, mock_user, mock_db
   ):
     """Test error handling in invoice listing."""
-    from robosystems.models.iam import OrgRole
+    from robosystems.models.core import OrgRole
 
     mock_org_user = Mock()
     mock_org_user.role = OrgRole.OWNER
@@ -179,7 +179,7 @@ class TestListInvoices:
     assert "Failed to retrieve invoices" in exc.value.detail
 
   @pytest.mark.asyncio
-  @patch("robosystems.models.iam.OrgUser.get_by_org_and_user")
+  @patch("robosystems.models.core.OrgUser.get_by_org_and_user")
   async def test_list_invoices_requires_membership(
     self, mock_get_org_user, mock_user, mock_db
   ):
@@ -193,12 +193,12 @@ class TestListInvoices:
     assert exc.value.detail == "You are not a member of this organization"
 
   @pytest.mark.asyncio
-  @patch("robosystems.models.iam.OrgUser.get_by_org_and_user")
+  @patch("robosystems.models.core.OrgUser.get_by_org_and_user")
   async def test_list_invoices_requires_admin_or_owner(
     self, mock_get_org_user, mock_user, mock_db
   ):
     """Members without elevated roles should be blocked."""
-    from robosystems.models.iam import OrgRole
+    from robosystems.models.core import OrgRole
 
     membership = Mock()
     membership.role = OrgRole.MEMBER
@@ -225,13 +225,13 @@ class TestGetUpcomingInvoice:
     return Mock()
 
   @pytest.mark.asyncio
-  @patch("robosystems.models.iam.OrgUser.get_by_org_and_user")
+  @patch("robosystems.models.core.OrgUser.get_by_org_and_user")
   @patch("robosystems.routers.billing.invoices.BillingCustomer.get_or_create")
   async def test_get_upcoming_invoice_no_stripe_customer(
     self, mock_get_customer, mock_get_org_user, mock_user, mock_db
   ):
     """Test getting upcoming invoice when no Stripe customer exists."""
-    from robosystems.models.iam import OrgRole
+    from robosystems.models.core import OrgRole
 
     mock_org_user = Mock()
     mock_org_user.role = OrgRole.OWNER
@@ -246,14 +246,14 @@ class TestGetUpcomingInvoice:
     assert result is None
 
   @pytest.mark.asyncio
-  @patch("robosystems.models.iam.OrgUser.get_by_org_and_user")
+  @patch("robosystems.models.core.OrgUser.get_by_org_and_user")
   @patch("robosystems.routers.billing.invoices.BillingCustomer.get_or_create")
   @patch("robosystems.routers.billing.invoices.get_payment_provider")
   async def test_get_upcoming_invoice_none(
     self, mock_get_provider, mock_get_customer, mock_get_org_user, mock_user, mock_db
   ):
     """Test getting upcoming invoice when none exists."""
-    from robosystems.models.iam import OrgRole
+    from robosystems.models.core import OrgRole
 
     mock_org_user = Mock()
     mock_org_user.role = OrgRole.OWNER
@@ -272,14 +272,14 @@ class TestGetUpcomingInvoice:
     assert result is None
 
   @pytest.mark.asyncio
-  @patch("robosystems.models.iam.OrgUser.get_by_org_and_user")
+  @patch("robosystems.models.core.OrgUser.get_by_org_and_user")
   @patch("robosystems.routers.billing.invoices.BillingCustomer.get_or_create")
   @patch("robosystems.routers.billing.invoices.get_payment_provider")
   async def test_get_upcoming_invoice_success(
     self, mock_get_provider, mock_get_customer, mock_get_org_user, mock_user, mock_db
   ):
     """Test successful upcoming invoice retrieval."""
-    from robosystems.models.iam import OrgRole
+    from robosystems.models.core import OrgRole
 
     mock_org_user = Mock()
     mock_org_user.role = OrgRole.OWNER
@@ -320,14 +320,14 @@ class TestGetUpcomingInvoice:
     assert result.subscription_id == "sub_123"
 
   @pytest.mark.asyncio
-  @patch("robosystems.models.iam.OrgUser.get_by_org_and_user")
+  @patch("robosystems.models.core.OrgUser.get_by_org_and_user")
   @patch("robosystems.routers.billing.invoices.BillingCustomer.get_or_create")
   @patch("robosystems.routers.billing.invoices.get_payment_provider")
   async def test_get_upcoming_invoice_with_multiple_line_items(
     self, mock_get_provider, mock_get_customer, mock_get_org_user, mock_user, mock_db
   ):
     """Test upcoming invoice with multiple line items."""
-    from robosystems.models.iam import OrgRole
+    from robosystems.models.core import OrgRole
 
     mock_org_user = Mock()
     mock_org_user.role = OrgRole.OWNER
@@ -373,14 +373,14 @@ class TestGetUpcomingInvoice:
     assert result.line_items[1].quantity == 100
 
   @pytest.mark.asyncio
-  @patch("robosystems.models.iam.OrgUser.get_by_org_and_user")
+  @patch("robosystems.models.core.OrgUser.get_by_org_and_user")
   @patch("robosystems.routers.billing.invoices.BillingCustomer.get_or_create")
   @patch("robosystems.routers.billing.invoices.get_payment_provider")
   async def test_get_upcoming_invoice_error_handling(
     self, mock_get_provider, mock_get_customer, mock_get_org_user, mock_user, mock_db
   ):
     """Test error handling in upcoming invoice retrieval."""
-    from robosystems.models.iam import OrgRole
+    from robosystems.models.core import OrgRole
 
     mock_org_user = Mock()
     mock_org_user.role = OrgRole.OWNER
@@ -401,7 +401,7 @@ class TestGetUpcomingInvoice:
     assert "Failed to retrieve upcoming invoice" in exc.value.detail
 
   @pytest.mark.asyncio
-  @patch("robosystems.models.iam.OrgUser.get_by_org_and_user")
+  @patch("robosystems.models.core.OrgUser.get_by_org_and_user")
   async def test_get_upcoming_invoice_requires_membership(
     self, mock_get_org_user, mock_user, mock_db
   ):
@@ -415,12 +415,12 @@ class TestGetUpcomingInvoice:
     assert exc.value.detail == "You are not a member of this organization"
 
   @pytest.mark.asyncio
-  @patch("robosystems.models.iam.OrgUser.get_by_org_and_user")
+  @patch("robosystems.models.core.OrgUser.get_by_org_and_user")
   async def test_get_upcoming_invoice_requires_admin_or_owner(
     self, mock_get_org_user, mock_user, mock_db
   ):
     """Members without admin role should be denied."""
-    from robosystems.models.iam import OrgRole
+    from robosystems.models.core import OrgRole
 
     membership = Mock()
     membership.role = OrgRole.MEMBER

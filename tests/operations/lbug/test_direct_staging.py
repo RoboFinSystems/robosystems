@@ -21,8 +21,8 @@ MODULE = "robosystems.operations.lbug.direct_staging"
 
 # Patch targets for lazy imports (patched at their source modules)
 FACTORY_PATH = "robosystems.graph_api.client.factory.GraphClientFactory"
-GRAPH_FILE_PATH = "robosystems.models.iam.GraphFile"
-GRAPH_TABLE_PATH = "robosystems.models.iam.GraphTable"
+GRAPH_FILE_PATH = "robosystems.models.core.GraphFile"
+GRAPH_TABLE_PATH = "robosystems.models.core.GraphTable"
 
 
 class TestStageFileDirectly:

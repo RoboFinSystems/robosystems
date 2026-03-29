@@ -12,8 +12,8 @@ from ...models.api.billing.customer import (
   PaymentMethod,
   PortalSessionResponse,
 )
-from ...models.billing import BillingCustomer as BillingCustomerModel
-from ...models.iam import User
+from ...models.core import User
+from ...models.core.billing import BillingCustomer as BillingCustomerModel
 from ...operations.providers.payment_provider import get_payment_provider
 
 logger = get_logger(__name__)
@@ -42,7 +42,7 @@ async def get_customer(
 ):
   """Get billing customer information for an organization."""
   try:
-    from ...models.iam import OrgRole, OrgUser
+    from ...models.core import OrgRole, OrgUser
 
     # Verify user is a member of the org
     membership = OrgUser.get_by_org_and_user(org_id, current_user.id, db)
@@ -127,7 +127,7 @@ async def create_portal_session(
   """Create Stripe Customer Portal session for payment management."""
   try:
     from ...config import env
-    from ...models.iam import OrgRole, OrgUser
+    from ...models.core import OrgRole, OrgUser
 
     membership = OrgUser.get_by_org_and_user(org_id, current_user.id, db)
     if not membership:

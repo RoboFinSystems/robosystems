@@ -30,7 +30,7 @@ from ...exceptions import (
 from ...graph_api.client import GraphClient, get_graph_client_for_instance
 from ...middleware.graph.allocation_manager import LadybugAllocationManager
 from ...models.api import EntityCreate, EntityResponse
-from ...models.iam import GraphUser, OrgLimits, OrgUser
+from ...models.core import GraphUser, OrgLimits, OrgUser
 
 logger = logging.getLogger(__name__)
 
@@ -198,7 +198,7 @@ class EntityGraphService:
 
       # Create Graph record FIRST before any dependent records
       # This must happen before GraphSchema and GraphTable creation
-      from ...models.iam.graph import Graph
+      from ...models.core.graph import Graph
 
       graph_tier_str = entity_data_dict.get("graph_tier", "ladybug-standard")
       graph_tier = SUBSCRIPTION_TO_GRAPH_TIER.get(
@@ -234,7 +234,7 @@ class EntityGraphService:
       )
 
       # Persist schema DDL to PostgreSQL for validation and versioning
-      from ...models.iam import GraphSchema
+      from ...models.core import GraphSchema
 
       GraphSchema.create(
         graph_id=graph_id,
@@ -290,7 +290,7 @@ class EntityGraphService:
       if progress_callback:
         progress_callback("Setting up user access...", 80)
 
-      from ...models.iam.graph_user import GraphUser
+      from ...models.core.graph.graph_user import GraphUser
 
       user_graph = GraphUser(
         user_id=user_id,
@@ -629,7 +629,7 @@ class EntityGraphService:
     try:
       # First, create Graph entry to store metadata
       from ...config.graph_tier import GraphTier
-      from ...models.iam.graph import Graph
+      from ...models.core.graph import Graph
 
       # Use the provided extensions or default to empty list
       schema_extensions = extensions or []

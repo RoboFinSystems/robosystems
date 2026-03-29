@@ -100,7 +100,7 @@ def sec_processing_sensor(context: SensorEvaluationContext):
   from sqlalchemy import func
 
   from robosystems.database import session as SessionLocal
-  from robosystems.models.iam import SourceFile
+  from robosystems.models.core import SourceFile
 
   # Regex pattern for robust partition key parsing
   # Format: "2024-Q1_cik_accession" -> captures "2024-Q1"
@@ -318,7 +318,7 @@ def sec_incremental_pipeline_sensor(context: RunStatusSensorContext):
   import re
 
   from robosystems.database import session as SessionLocal
-  from robosystems.models.iam import SourceFile
+  from robosystems.models.core import SourceFile
 
   if env.ENVIRONMENT == "dev":
     context.log.info("Skipping chain sensor in dev environment")

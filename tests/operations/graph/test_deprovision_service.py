@@ -7,8 +7,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from robosystems.config.graph_tier import GraphTier
-from robosystems.models.iam import Graph, Org, OrgType, OrgUser, User
-from robosystems.models.iam.graph import GraphStatus
+from robosystems.models.core import Graph, Org, OrgType, OrgUser, User
+from robosystems.models.core.graph import GraphStatus
 from robosystems.operations.graph.deprovision_service import (
   GraphDeprovisionService,
 )
@@ -362,8 +362,8 @@ class TestDeprovisionService:
     self, service, db_session, test_graph, test_user
   ):
     """Verify PG records are cleaned up."""
-    from robosystems.models.iam.graph_credits import GraphCredits
-    from robosystems.models.iam.graph_user import GraphUser
+    from robosystems.models.core.graph.graph_credits import GraphCredits
+    from robosystems.models.core.graph.graph_user import GraphUser
 
     # Create associated records
     graph_user = GraphUser(
@@ -422,7 +422,7 @@ class TestDeprovisionService:
     self, service, db_session, test_graph, test_org
   ):
     """Verify subscription metadata is updated with deprovisioning info."""
-    from robosystems.models.billing.subscription import BillingSubscription
+    from robosystems.models.core.billing.subscription import BillingSubscription
 
     sub = BillingSubscription(
       org_id=test_org.id,

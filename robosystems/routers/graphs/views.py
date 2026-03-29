@@ -9,7 +9,7 @@ from robosystems.models.api.views import (
   CreateViewRequest,
   ViewMetadata,
 )
-from robosystems.models.iam import User
+from robosystems.models.core import User
 from robosystems.operations.views import (
   FactGridBuilder,
   query_fact_grid,

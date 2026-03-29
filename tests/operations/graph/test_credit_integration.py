@@ -7,12 +7,12 @@ from unittest.mock import MagicMock, Mock, patch
 import pytest
 
 from robosystems.config.graph_tier import GraphTier
-from robosystems.models.iam import (
+from robosystems.models.core import (
   GraphCredits,
   GraphCreditTransaction,
   User,
 )
-from robosystems.models.iam.graph_credits import CreditTransactionType
+from robosystems.models.core.graph.graph_credits import CreditTransactionType
 from robosystems.operations.graph.credit_service import CreditService
 
 

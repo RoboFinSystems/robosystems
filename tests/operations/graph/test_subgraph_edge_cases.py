@@ -10,7 +10,7 @@ from robosystems.middleware.graph.types import (
   parse_graph_id,
 )
 from robosystems.middleware.graph.utils import MultiTenantUtils
-from robosystems.models.iam import GraphCredits, User
+from robosystems.models.core import GraphCredits, User
 from robosystems.operations.graph.credit_service import CreditService
 
 

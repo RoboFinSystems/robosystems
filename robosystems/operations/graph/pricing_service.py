@@ -12,8 +12,8 @@ from decimal import ROUND_HALF_UP, Decimal
 from sqlalchemy.orm import Session
 
 from ...config import BillingConfig
-from ...models.billing import BillingSubscription
-from ...models.iam import GraphUsage
+from ...models.core import GraphUsage
+from ...models.core.billing import BillingSubscription
 
 logger = logging.getLogger(__name__)
 
@@ -27,7 +27,7 @@ class GraphPricingService:
 
   def get_subscription_plan(self, user_id: str, graph_id: str) -> dict | None:
     """Get the billing plan for a graph subscription."""
-    from ...models.billing import BillingCustomer
+    from ...models.core.billing import BillingCustomer
 
     customer = BillingCustomer.get_by_user_id(user_id, self.session)
     if not customer:

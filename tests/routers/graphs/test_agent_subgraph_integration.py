@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from robosystems.config.graph_tier import GraphTier
 from robosystems.models.api.graphs.agent import AgentMessage
-from robosystems.models.iam import Graph, GraphCredits, User
+from robosystems.models.core import Graph, GraphCredits, User
 
 
 @pytest.fixture

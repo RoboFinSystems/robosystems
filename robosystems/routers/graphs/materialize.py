@@ -59,7 +59,7 @@ from robosystems.middleware.otel.metrics import endpoint_metrics_decorator
 from robosystems.middleware.rate_limits import subscription_aware_rate_limit_dependency
 from robosystems.middleware.robustness import CircuitBreakerManager
 from robosystems.models.api.common import ErrorResponse
-from robosystems.models.iam import Graph, User
+from robosystems.models.core import Graph, User
 
 router = APIRouter(
   tags=["Materialize"],
@@ -691,7 +691,7 @@ def _should_use_direct_materialization(db: Session, graph_id: str) -> bool:
 
   from robosystems.config import env
   from robosystems.config.constants import GRAPH_MATERIALIZATION_THRESHOLD_MB
-  from robosystems.models.iam import GraphFile, GraphTable
+  from robosystems.models.core import GraphFile, GraphTable
 
   if not env.DIRECT_GRAPH_MATERIALIZATION_ENABLED:
     return False

@@ -5,7 +5,7 @@ from datetime import UTC, datetime
 from sqlalchemy import and_
 from sqlalchemy.orm import Session
 
-from ...models.iam import UserAPIKey
+from ...models.core import UserAPIKey
 
 
 def cleanup_expired_api_keys(session: Session) -> dict:

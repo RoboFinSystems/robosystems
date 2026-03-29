@@ -45,7 +45,9 @@ def qb_extract(
 
   from robosystems.adapters.quickbooks.client import QBClient
   from robosystems.database import SessionFactory
-  from robosystems.models.iam.connection_credentials import ConnectionCredentials
+  from robosystems.models.core.connection.connection_credentials import (
+    ConnectionCredentials,
+  )
 
   context.log.info(
     f"Extracting QB data for graph={config.graph_id}, "

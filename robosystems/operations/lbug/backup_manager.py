@@ -160,7 +160,7 @@ class BackupManager:
     """
     try:
       from robosystems.database import session as SessionLocal
-      from robosystems.models.iam.graph_backup import GraphBackup
+      from robosystems.models.core.graph.graph_backup import GraphBackup
 
       # Get backup record from database
       db_session = SessionLocal()

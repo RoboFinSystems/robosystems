@@ -26,7 +26,7 @@ from robosystems.models.api.graphs.schema import (
   SchemaValidationRequest,
   SchemaValidationResponse,
 )
-from robosystems.models.iam import User
+from robosystems.models.core import User
 from robosystems.schemas.custom import (
   CustomSchemaManager,
   SchemaFormat,

@@ -492,7 +492,9 @@ class TestBackupManager:
 
     with (
       patch("robosystems.database.session") as mock_session_local,
-      patch("robosystems.models.iam.graph_backup.GraphBackup") as mock_graph_backup,
+      patch(
+        "robosystems.models.core.graph.graph_backup.GraphBackup"
+      ) as mock_graph_backup,
     ):
       mock_session = MagicMock()
       mock_session_local.return_value = mock_session

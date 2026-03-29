@@ -5,7 +5,7 @@ import pytest
 from sqlalchemy.orm import Session
 
 from robosystems.config.graph_tier import GraphTier
-from robosystems.models.iam import Graph, GraphCredits, User
+from robosystems.models.core import Graph, GraphCredits, User
 from robosystems.operations.graph.credit_service import CreditService
 
 

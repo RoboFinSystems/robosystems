@@ -3,7 +3,7 @@ from unittest.mock import Mock
 import pytest
 from sqlalchemy.orm import Session
 
-from robosystems.models.iam import GraphTable
+from robosystems.models.core import GraphTable
 from robosystems.operations.graph.table_service import TableService, infer_table_type
 
 

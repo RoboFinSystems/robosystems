@@ -9,9 +9,9 @@ from ...database import get_db_session
 from ...logger import get_logger
 from ...middleware.auth.admin import require_admin
 from ...models.api.admin import OrgGraphInfo, OrgResponse, OrgUserInfo
-from ...models.billing import BillingAuditLog, BillingCustomer
-from ...models.iam import Graph, Org, OrgUser, User
-from ...models.iam.graph_credits import GraphCredits
+from ...models.core import Graph, Org, OrgUser, User
+from ...models.core.billing import BillingAuditLog, BillingCustomer
+from ...models.core.graph.graph_credits import GraphCredits
 
 logger = get_logger(__name__)
 

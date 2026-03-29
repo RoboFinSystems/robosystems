@@ -204,7 +204,7 @@ class LadybugMaterializer:
       is_subgraph,
       parse_subgraph_id,
     )
-    from robosystems.models.iam import GraphSchema
+    from robosystems.models.core import GraphSchema
 
     logger.info(
       f"Rebuild requested - regenerating entire LadybugDB database for {self.graph_id}"

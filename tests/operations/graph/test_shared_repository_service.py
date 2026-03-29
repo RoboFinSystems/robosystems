@@ -69,7 +69,7 @@ class TestSharedRepositoryService:
       with patch("robosystems.database.get_db_session") as mock_db:
         mock_db.return_value = iter([mock_db_session])
 
-        with patch("robosystems.models.iam.graph.Graph") as mock_graph_cls:
+        with patch("robosystems.models.core.graph.Graph") as mock_graph_cls:
           mock_graph = MagicMock()
           mock_graph.graph_id = "sec"
           mock_graph_cls.find_or_create_repository.return_value = mock_graph
@@ -126,8 +126,8 @@ class TestEnsureSharedRepositoryExists:
         "robosystems.graph_api.client.factory.GraphClientFactory.create_client"
       ) as mock_factory,
       patch("robosystems.database.get_db_session") as mock_db_session,
-      patch("robosystems.models.iam.Graph"),
-      patch("robosystems.models.iam.GraphSchema") as mock_schema_model,
+      patch("robosystems.models.core.Graph"),
+      patch("robosystems.models.core.GraphSchema") as mock_schema_model,
     ):
       mock_factory.return_value = mock_client
 

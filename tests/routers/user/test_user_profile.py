@@ -221,8 +221,8 @@ class TestUserProfile:
     # Handle structured error response
     assert "no fields provided" in data["detail"]["detail"].lower()
 
-  @patch("robosystems.models.iam.User.get_by_id")
-  @patch("robosystems.models.iam.User.get_by_email")
+  @patch("robosystems.models.core.User.get_by_id")
+  @patch("robosystems.models.core.User.get_by_email")
   def test_update_user_profile_email_conflict(
     self, mock_get_by_email, mock_get_by_id, client_with_user: TestClient
   ):
@@ -378,7 +378,7 @@ class TestUserGraphs:
     # Cleanup
     app.dependency_overrides = {}
 
-  @patch("robosystems.models.iam.GraphUser.get_by_user_id")
+  @patch("robosystems.models.core.GraphUser.get_by_user_id")
   def test_get_user_graphs_success(
     self, mock_get_by_user_id, client_with_graphs: TestClient
   ):
@@ -407,8 +407,8 @@ class TestUserGraphs:
     assert "isSelected" in graph
     assert "createdAt" in graph
 
-  @patch("robosystems.models.iam.GraphUser.set_selected_graph")
-  @patch("robosystems.models.iam.GraphUser.get_by_user_id")
+  @patch("robosystems.models.core.GraphUser.set_selected_graph")
+  @patch("robosystems.models.core.GraphUser.get_by_user_id")
   def test_select_user_graph_success(
     self, mock_get_by_user_id, mock_set_selected, client_with_graphs: TestClient
   ):
@@ -432,7 +432,7 @@ class TestUserGraphs:
     # Verify the method was called with correct parameters
     mock_set_selected.assert_called_once()
 
-  @patch("robosystems.models.iam.GraphUser.get_by_user_id")
+  @patch("robosystems.models.core.GraphUser.get_by_user_id")
   def test_select_user_graph_access_denied(
     self, mock_get_by_user_id, client_with_graphs: TestClient
   ):
@@ -448,8 +448,8 @@ class TestUserGraphs:
     # Handle structured error response
     assert "access denied" in data["detail"]["detail"].lower()
 
-  @patch("robosystems.models.iam.GraphUser.set_selected_graph")
-  @patch("robosystems.models.iam.GraphUser.get_by_user_id")
+  @patch("robosystems.models.core.GraphUser.set_selected_graph")
+  @patch("robosystems.models.core.GraphUser.get_by_user_id")
   def test_select_user_graph_not_found(
     self, mock_get_by_user_id, mock_set_selected, client_with_graphs: TestClient
   ):
@@ -559,7 +559,7 @@ class TestUserAPIKeys:
     # Cleanup
     app.dependency_overrides = {}
 
-  @patch("robosystems.models.iam.UserAPIKey.get_by_user_id")
+  @patch("robosystems.models.core.UserAPIKey.get_by_user_id")
   def test_list_api_keys_success(
     self, mock_get_by_user_id, client_with_api_keys: TestClient
   ):
@@ -586,7 +586,7 @@ class TestUserAPIKeys:
     assert "created_at" in api_key
     assert "last_used_at" in api_key
 
-  @patch("robosystems.models.iam.UserAPIKey.create")
+  @patch("robosystems.models.core.UserAPIKey.create")
   def test_create_api_key_success(self, mock_create, client_with_api_keys: TestClient):
     """Test successful API key creation."""
     # Mock API key creation
@@ -638,7 +638,7 @@ class TestUserAPIKeys:
     response = client_with_api_keys.post("/v1/user/api-keys", json={"name": "x" * 200})
     assert response.status_code == 422
 
-  @patch("robosystems.models.iam.UserAPIKey.get_by_user_id")
+  @patch("robosystems.models.core.UserAPIKey.get_by_user_id")
   def test_update_api_key_success(
     self, mock_get_by_user_id, client_with_api_keys: TestClient
   ):
@@ -683,7 +683,7 @@ class TestUserAPIKeys:
     assert data["name"] == update_data["name"]
     assert data["description"] == update_data["description"]
 
-  @patch("robosystems.models.iam.UserAPIKey.get_by_user_id")
+  @patch("robosystems.models.core.UserAPIKey.get_by_user_id")
   def test_update_api_key_not_found(
     self, mock_get_by_user_id, client_with_api_keys: TestClient
   ):
@@ -702,7 +702,7 @@ class TestUserAPIKeys:
     # Handle structured error response
     assert "not found" in data["detail"]["detail"].lower()
 
-  @patch("robosystems.models.iam.UserAPIKey.get_by_user_id")
+  @patch("robosystems.models.core.UserAPIKey.get_by_user_id")
   def test_revoke_api_key_success(
     self, mock_get_by_user_id, client_with_api_keys: TestClient
   ):
@@ -726,7 +726,7 @@ class TestUserAPIKeys:
       # Verify deactivate method was called
       mock_deactivate.assert_called_once()
 
-  @patch("robosystems.models.iam.UserAPIKey.get_by_user_id")
+  @patch("robosystems.models.core.UserAPIKey.get_by_user_id")
   def test_revoke_api_key_not_found(
     self, mock_get_by_user_id, client_with_api_keys: TestClient
   ):
@@ -801,7 +801,7 @@ class TestUserPasswordUpdate:
     # Cleanup
     app.dependency_overrides = {}
 
-  @patch("robosystems.models.iam.User.get_by_id")
+  @patch("robosystems.models.core.User.get_by_id")
   def test_update_password_success(
     self, mock_get_by_id, client_with_password_user: TestClient
   ):
@@ -847,7 +847,7 @@ class TestUserPasswordUpdate:
     # Verify session operations were called
     mock_db.commit.assert_called_once()
 
-  @patch("robosystems.models.iam.User.get_by_id")
+  @patch("robosystems.models.core.User.get_by_id")
   def test_update_password_wrong_current(
     self, mock_get_by_id, client_with_password_user: TestClient
   ):
@@ -868,7 +868,7 @@ class TestUserPasswordUpdate:
     # Handle structured error response
     assert "incorrect" in data["detail"]["detail"].lower()
 
-  @patch("robosystems.models.iam.User.get_by_id")
+  @patch("robosystems.models.core.User.get_by_id")
   def test_update_password_mismatch(
     self, mock_get_by_id, client_with_password_user: TestClient
   ):
@@ -887,7 +887,7 @@ class TestUserPasswordUpdate:
     # Handle structured error response
     assert "do not match" in data["detail"]["detail"].lower()
 
-  @patch("robosystems.models.iam.User.get_by_id")
+  @patch("robosystems.models.core.User.get_by_id")
   def test_update_password_weak_password(
     self, mock_get_by_id, client_with_password_user: TestClient
   ):
@@ -1006,7 +1006,7 @@ class TestUserEndpointsMetrics:
     assert call_args[1]["event_type"] == "user_info_accessed"
 
   @patch("robosystems.middleware.otel.metrics.get_endpoint_metrics")
-  @patch("robosystems.models.iam.UserAPIKey.create")
+  @patch("robosystems.models.core.UserAPIKey.create")
   def test_api_key_creation_metrics_recorded(
     self, mock_create, mock_get_metrics, client_with_metrics_user: TestClient
   ):

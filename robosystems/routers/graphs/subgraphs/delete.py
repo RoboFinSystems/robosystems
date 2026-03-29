@@ -17,8 +17,8 @@ from robosystems.models.api.graphs.subgraphs import (
   DeleteSubgraphRequest,
   DeleteSubgraphResponse,
 )
-from robosystems.models.iam.graph_user import GraphUser
-from robosystems.models.iam.user import User
+from robosystems.models.core.graph.graph_user import GraphUser
+from robosystems.models.core.user import User
 from robosystems.security import SecurityAuditLogger, SecurityEventType
 
 from .utils import (

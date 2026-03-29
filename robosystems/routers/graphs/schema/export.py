@@ -13,7 +13,7 @@ from robosystems.middleware.rate_limits import (
   subscription_aware_rate_limit_dependency,
 )
 from robosystems.models.api.graphs.schema import SchemaExportResponse
-from robosystems.models.iam import User
+from robosystems.models.core import User
 
 router = APIRouter()
 
@@ -143,7 +143,7 @@ async def export_graph_schema(
 
   try:
     # Get declared schema from PostgreSQL GraphSchema table
-    from robosystems.models.iam import Graph, GraphSchema
+    from robosystems.models.core import Graph, GraphSchema
 
     schema_record = GraphSchema.get_active_schema(graph_id, db)
 

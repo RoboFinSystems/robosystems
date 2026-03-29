@@ -34,7 +34,7 @@ from robosystems.config.storage.shared import (
   get_processed_key,
 )
 from robosystems.dagster.resources import DatabaseResource, S3Resource
-from robosystems.models.iam import SourceFile
+from robosystems.models.core import SourceFile
 
 from .configs import SECProcessConfig, sec_quarter_partitions
 

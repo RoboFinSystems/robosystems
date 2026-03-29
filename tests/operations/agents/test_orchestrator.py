@@ -10,7 +10,7 @@ from unittest.mock import Mock, patch
 
 import pytest
 
-from robosystems.models.iam import User
+from robosystems.models.core import User
 from robosystems.operations.agents.agent_context import AgentContext
 from robosystems.operations.agents.base import (
   Agent,

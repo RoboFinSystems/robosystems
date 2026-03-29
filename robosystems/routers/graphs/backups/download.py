@@ -28,7 +28,7 @@ from robosystems.middleware.rate_limits import (
   subscription_aware_rate_limit_dependency,
 )
 from robosystems.models.api.graphs.backups import BackupDownloadUrlResponse
-from robosystems.models.iam import Graph, User, UserRepository
+from robosystems.models.core import Graph, User, UserRepository
 
 from .utils import get_backup_manager
 

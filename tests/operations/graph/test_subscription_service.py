@@ -5,8 +5,8 @@ from unittest.mock import MagicMock, Mock, patch
 import pytest
 from sqlalchemy.exc import SQLAlchemyError
 
-from robosystems.models.billing import BillingSubscription, SubscriptionStatus
-from robosystems.models.iam import OrgLimits
+from robosystems.models.core import OrgLimits
+from robosystems.models.core.billing import BillingSubscription, SubscriptionStatus
 from robosystems.operations.graph.subscription_service import (
   GraphSubscriptionService,
 )

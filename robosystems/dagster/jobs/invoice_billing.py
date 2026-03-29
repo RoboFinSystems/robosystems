@@ -34,12 +34,12 @@ def _renew_subscriptions(
   4. Generate a renewal invoice
   5. Log an audit event
   """
-  from robosystems.models.billing import (
+  from robosystems.models.core.billing import (
     BillingAuditLog,
     BillingCustomer,
     BillingSubscription,
   )
-  from robosystems.models.billing.audit_log import BillingEventType
+  from robosystems.models.core.billing.audit_log import BillingEventType
   from robosystems.operations.graph.subscription_service import (
     generate_subscription_invoice,
   )

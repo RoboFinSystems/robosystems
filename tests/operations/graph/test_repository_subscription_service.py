@@ -2,7 +2,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from robosystems.models.iam.user_repository import RepositoryType
+from robosystems.models.core.user.user_repository import RepositoryType
 from robosystems.operations.graph.repository_subscription_service import (
   RepositorySubscriptionService,
   get_available_plans_for_repository,
@@ -78,7 +78,7 @@ class TestEnsureRepositoryGraphExists:
   def test_graph_already_exists(self, service, mock_session):
     mock_session.query.return_value.filter.return_value.first.return_value = MagicMock()
 
-    with patch("robosystems.models.iam.graph.Graph"):
+    with patch("robosystems.models.core.graph.Graph"):
       service.ensure_repository_graph_exists(RepositoryType("sec"))
 
     mock_session.add.assert_not_called()
@@ -88,7 +88,7 @@ class TestEnsureRepositoryGraphExists:
     mock_session.query.return_value.filter.return_value.first.return_value = None
 
     with (
-      patch("robosystems.models.iam.graph.Graph"),
+      patch("robosystems.models.core.graph.Graph"),
       patch(
         f"{MODULE}._get_repository_metadata",
         return_value={
@@ -111,7 +111,7 @@ class TestEnsureRepositoryGraphExists:
     mock_session.query.return_value.filter.return_value.first.return_value = None
 
     with (
-      patch("robosystems.models.iam.graph.Graph"),
+      patch("robosystems.models.core.graph.Graph"),
       patch(f"{MODULE}._get_repository_metadata", return_value=None),
     ):
       with pytest.raises(ValueError, match="No configuration found"):

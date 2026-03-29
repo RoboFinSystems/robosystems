@@ -50,7 +50,7 @@ def graph_creation_queue_sensor(context: SensorEvaluationContext):
     return
 
   from robosystems.database import session as db_session_factory
-  from robosystems.models.iam.graph import Graph, GraphStatus
+  from robosystems.models.core.graph import Graph, GraphStatus
 
   db = db_session_factory()
   try:

@@ -21,7 +21,7 @@ from robosystems.middleware.graph.types import GRAPH_OR_SUBGRAPH_ID_PATTERN
 from robosystems.middleware.otel.metrics import endpoint_metrics_decorator
 from robosystems.middleware.rate_limits import subscription_aware_rate_limit_dependency
 from robosystems.models.api.graphs.backups import BackupStatsResponse
-from robosystems.models.iam import User
+from robosystems.models.core import User
 
 # Constants
 PERCENTAGE_MULTIPLIER = 100.0
@@ -63,7 +63,7 @@ async def get_backup_stats(
     )
 
     # Query database for backups instead of S3
-    from robosystems.models.iam import BackupStatus, GraphBackup
+    from robosystems.models.core import BackupStatus, GraphBackup
 
     backup_records = (
       db.query(GraphBackup).filter(GraphBackup.graph_id == graph_id).all()

@@ -26,7 +26,7 @@ from ...models.api.user import (
   CreateAPIKeyResponse,
   UpdateAPIKeyRequest,
 )
-from ...models.iam import User, UserAPIKey
+from ...models.core import User, UserAPIKey
 from ...security.input_validation import sanitize_string
 
 router = APIRouter(tags=["User"])

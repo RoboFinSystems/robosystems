@@ -35,11 +35,11 @@ class TestUploadRouterAutoTableCreation:
 
       with (
         patch(
-          "robosystems.models.iam.graph_table.GraphTable.get_by_name",
+          "robosystems.models.core.graph.graph_table.GraphTable.get_by_name",
           return_value=None,
         ),
         patch(
-          "robosystems.models.iam.graph_table.GraphTable.create",
+          "robosystems.models.core.graph.graph_table.GraphTable.create",
           return_value=mock_created_table,
         ) as mock_create,
       ):
@@ -49,7 +49,7 @@ class TestUploadRouterAutoTableCreation:
           mock_s3_client_class.return_value = mock_s3
 
           with patch(
-            "robosystems.models.iam.graph_file.GraphFile.create"
+            "robosystems.models.core.graph.graph_file.GraphFile.create"
           ) as mock_file_create:
             mock_file = Mock()
             mock_file.id = "file_123"
@@ -94,11 +94,11 @@ class TestUploadRouterAutoTableCreation:
 
       with (
         patch(
-          "robosystems.models.iam.graph_table.GraphTable.get_by_name",
+          "robosystems.models.core.graph.graph_table.GraphTable.get_by_name",
           return_value=None,
         ),
         patch(
-          "robosystems.models.iam.graph_table.GraphTable.create",
+          "robosystems.models.core.graph.graph_table.GraphTable.create",
           return_value=mock_created_table,
         ) as mock_create,
       ):
@@ -108,7 +108,7 @@ class TestUploadRouterAutoTableCreation:
           mock_s3_client_class.return_value = mock_s3
 
           with patch(
-            "robosystems.models.iam.graph_file.GraphFile.create"
+            "robosystems.models.core.graph.graph_file.GraphFile.create"
           ) as mock_file_create:
             mock_file = Mock()
             mock_file.id = "file_456"
@@ -153,10 +153,12 @@ class TestUploadRouterAutoTableCreation:
 
       with (
         patch(
-          "robosystems.models.iam.graph_table.GraphTable.get_by_name",
+          "robosystems.models.core.graph.graph_table.GraphTable.get_by_name",
           return_value=existing_table,
         ),
-        patch("robosystems.models.iam.graph_table.GraphTable.create") as mock_create,
+        patch(
+          "robosystems.models.core.graph.graph_table.GraphTable.create"
+        ) as mock_create,
       ):
         with patch("robosystems.operations.aws.s3.S3Client") as mock_s3_client_class:
           mock_s3 = Mock()
@@ -164,7 +166,7 @@ class TestUploadRouterAutoTableCreation:
           mock_s3_client_class.return_value = mock_s3
 
           with patch(
-            "robosystems.models.iam.graph_file.GraphFile.create"
+            "robosystems.models.core.graph.graph_file.GraphFile.create"
           ) as mock_file_create:
             mock_file = Mock()
             mock_file.id = "file_789"

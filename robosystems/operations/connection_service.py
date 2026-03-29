@@ -11,8 +11,10 @@ from sqlalchemy.orm import Session
 
 from robosystems.database import SessionFactory
 from robosystems.logger import logger
-from robosystems.models.iam.connection import Connection
-from robosystems.models.iam.connection_credentials import ConnectionCredentials
+from robosystems.models.core.connection.connection import Connection
+from robosystems.models.core.connection.connection_credentials import (
+  ConnectionCredentials,
+)
 
 # System user ID for internal operations (Dagster, background tasks)
 SYSTEM_USER_ID = "system"

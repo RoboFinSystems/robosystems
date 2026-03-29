@@ -8,8 +8,8 @@ from robosystems.middleware.graph.types import (
   GraphCategory,
   GraphTypeRegistry,
 )
-from robosystems.models.iam import Graph, Org
-from robosystems.models.iam.org import OrgType
+from robosystems.models.core import Graph, Org
+from robosystems.models.core.org import OrgType
 
 
 class TestGraphTypeRegistry:

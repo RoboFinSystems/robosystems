@@ -16,7 +16,7 @@ from ...config import env
 
 # Local imports
 from ...logger import logger
-from ...models.iam import ConnectionCredentials
+from ...models.core import ConnectionCredentials
 
 
 class OAuthProviderProtocol(Protocol):

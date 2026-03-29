@@ -17,10 +17,10 @@ from ...models.api.admin import (
   GraphResponse,
   GraphStorageResponse,
 )
-from ...models.iam import Graph, User
-from ...models.iam.graph_backup import GraphBackup
-from ...models.iam.graph_credits import GraphCredits
-from ...models.iam.graph_usage import GraphUsage, UsageEventType
+from ...models.core import Graph, User
+from ...models.core.graph.graph_backup import GraphBackup
+from ...models.core.graph.graph_credits import GraphCredits
+from ...models.core.graph.graph_usage import GraphUsage, UsageEventType
 
 logger = get_logger(__name__)
 
@@ -100,7 +100,7 @@ async def list_graphs(
       query = query.filter(Graph.status == status_filter)
 
     if user_email:
-      from ...models.iam import OrgUser
+      from ...models.core import OrgUser
 
       query = query.join(OrgUser, Graph.org_id == OrgUser.org_id)
       query = query.join(User, OrgUser.user_id == User.id)
