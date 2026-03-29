@@ -443,8 +443,6 @@ def create_and_attach_volume(
     "ladybug-large": {"size": 50, "iops": 3000},
     "ladybug-xlarge": {"size": 50, "iops": 3000},
     "ladybug-shared": {"size": 200, "iops": 3000},
-    "neo4j-community-large": {"size": 50, "iops": 3000},
-    "neo4j-enterprise-xlarge": {"size": 50, "iops": 3000},
   }
 
   config = tier_config.get(tier, {"size": DEFAULT_SIZE, "iops": DEFAULT_IOPS})
