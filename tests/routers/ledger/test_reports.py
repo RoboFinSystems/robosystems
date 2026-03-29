@@ -100,11 +100,13 @@ class TestCreateReport:
     mock_session.commit = MagicMock()
 
     grid = _make_fact_grid()
+    mock_rd = _make_report_def(generation_status="generating")
 
     with (
       patch(f"{MODULE}.extensions_session") as mock_ext,
       patch(f"{MODULE}.build_fact_grid", return_value=grid),
       patch(f"{MODULE}.validate_report", return_value=grid.validation),
+      patch(f"{MODULE}.ReportDefinition", return_value=mock_rd),
     ):
       mock_ext.return_value = _mock_session_context(mock_session)
 
