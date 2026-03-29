@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from robosystems.worker.tasks.agent_mapping import (
+from robosystems.worker.tasks.agent_mapping.task import (
   CONFIDENCE_AUTO_APPROVE,
   CONFIDENCE_MIN_MAP,
   AgentMappingTask,
@@ -18,12 +18,6 @@ def mock_manager():
   manager.emit_progress = AsyncMock()
   manager.get_operation_status = AsyncMock(return_value=None)
   return manager
-
-
-@pytest.fixture
-def mock_api():
-  api = AsyncMock()
-  return api
 
 
 @pytest.fixture
@@ -71,91 +65,145 @@ def _make_task(mock_manager, params=None) -> AgentMappingTask:
   )
 
 
-UNMAPPED_ELEMENTS = [
-  {
-    "id": "elem_cash",
-    "name": "Cash",
-    "classification": "asset",
-    "balance_type": "debit",
-  },
-  {
-    "id": "elem_ar",
-    "name": "Accounts Receivable",
-    "classification": "asset",
-    "balance_type": "debit",
-  },
-  {
-    "id": "elem_misc",
-    "name": "Miscellaneous",
-    "classification": "expense",
-    "balance_type": "debit",
-  },
-]
+UNMAPPED_RESULT = {
+  "unmapped_count": 3,
+  "total_coa_elements": 10,
+  "elements": [
+    {
+      "id": "elem_cash",
+      "name": "Cash",
+      "classification": "asset",
+      "balance_type": "debit",
+    },
+    {
+      "id": "elem_ar",
+      "name": "Accounts Receivable",
+      "classification": "asset",
+      "balance_type": "debit",
+    },
+    {
+      "id": "elem_misc",
+      "name": "Miscellaneous",
+      "classification": "expense",
+      "balance_type": "debit",
+    },
+  ],
+}
 
-GAAP_CANDIDATES = [
-  {
-    "id": "elem_gaap_cash",
-    "qname": "us-gaap:CashAndCashEquivalents",
-    "name": "Cash and Cash Equivalents",
-    "classification": "asset",
-    "depth": 1,
-    "is_abstract": False,
-  },
-  {
-    "id": "elem_gaap_ar",
-    "qname": "us-gaap:AccountsReceivableNet",
-    "name": "Accounts Receivable, Net",
-    "classification": "asset",
-    "depth": 1,
-    "is_abstract": False,
-  },
-]
+SUGGEST_RESULT_ASSET = {
+  "source_element": {"id": "elem_cash", "name": "Cash"},
+  "candidates": [
+    {
+      "id": "elem_gaap_cash",
+      "qname": "us-gaap:CashAndCashEquivalents",
+      "name": "Cash and Cash Equivalents",
+      "classification": "asset",
+      "depth": 1,
+      "is_abstract": False,
+    },
+    {
+      "id": "elem_gaap_ar",
+      "qname": "us-gaap:AccountsReceivableNet",
+      "name": "Accounts Receivable, Net",
+      "classification": "asset",
+      "depth": 1,
+      "is_abstract": False,
+    },
+  ],
+}
+
+SUGGEST_RESULT_EXPENSE = {
+  "source_element": {"id": "elem_misc", "name": "Miscellaneous"},
+  "candidates": [],
+}
+
+SUMMARY_RESULT = {
+  "total_coa_elements": 10,
+  "mapped_count": 7,
+  "unmapped_count": 3,
+  "coverage_percent": 70.0,
+}
 
 
 @pytest.mark.asyncio
-@patch("robosystems.worker.tasks.agent_mapping.WorkerAPIClient")
-@patch("robosystems.worker.tasks.agent_mapping.AIClient")
-async def test_happy_path(MockAIClient, MockAPIClient, mock_manager, mock_ai_response):
-  mock_api = AsyncMock()
-  MockAPIClient.return_value = mock_api
-
-  # First call: unmapped elements
-  mock_api.get.side_effect = [
-    UNMAPPED_ELEMENTS,  # unmapped
-    GAAP_CANDIDATES,  # asset candidates
-    [],  # expense candidates
-    {"coverage_percent": 66.7},  # coverage
-  ]
-  mock_api.post.return_value = {"created": True}
-
+@patch("robosystems.worker.tasks.agent_mapping.task.AIClient")
+async def test_happy_path(MockAIClient, mock_manager, mock_ai_response):
   mock_ai = AsyncMock()
   MockAIClient.return_value = mock_ai
   mock_ai.create_message.return_value = mock_ai_response
 
+  # Mock MCP tools
+  mock_unmapped = AsyncMock()
+  mock_unmapped.execute.return_value = UNMAPPED_RESULT
+
+  mock_suggest = AsyncMock()
+  mock_suggest.execute.side_effect = lambda args: (
+    SUGGEST_RESULT_EXPENSE
+    if args.get("classification") == "expense"
+    else SUGGEST_RESULT_ASSET
+  )
+
+  mock_create = AsyncMock()
+  mock_create.execute.return_value = {"created": True, "association_id": "assoc_01"}
+
+  mock_summary = AsyncMock()
+  mock_summary.execute.return_value = SUMMARY_RESULT
+
   task = _make_task(mock_manager)
 
-  with patch.object(task, "_consume_credits", new_callable=AsyncMock, return_value=0.5):
+  with (
+    patch(
+      "robosystems.middleware.mcp.tools.taxonomy_tools.GetUnmappedElementsTool",
+      return_value=mock_unmapped,
+    ),
+    patch(
+      "robosystems.middleware.mcp.tools.taxonomy_tools.SuggestMappingTool",
+      return_value=mock_suggest,
+    ),
+    patch(
+      "robosystems.middleware.mcp.tools.taxonomy_tools.CreateMappingAssociationTool",
+      return_value=mock_create,
+    ),
+    patch(
+      "robosystems.middleware.mcp.tools.taxonomy_tools.GetMappingSummaryTool",
+      return_value=mock_summary,
+    ),
+    patch.object(task, "_consume_credits", new_callable=AsyncMock, return_value=0.5),
+  ):
     result = await task.execute()
 
   assert result["mapped"] == 1  # cash (>= 0.90)
   assert result["flagged"] == 1  # AR (0.85, >= 0.70 but < 0.90)
-  assert result["skipped"] >= 1  # misc (0.40, < 0.70)
+  assert result["skipped"] >= 1  # misc (0.40 or no candidates)
   assert "coverage_percent" in result
+
+  # MCP tools were called
+  mock_unmapped.execute.assert_called_once()
+  assert mock_suggest.execute.call_count >= 1
+  assert mock_create.execute.call_count >= 1
+  mock_summary.execute.assert_called_once()
 
   # Progress reported
   assert mock_manager.emit_progress.call_count >= 2
 
 
 @pytest.mark.asyncio
-@patch("robosystems.worker.tasks.agent_mapping.WorkerAPIClient")
-@patch("robosystems.worker.tasks.agent_mapping.AIClient")
-async def test_all_mapped(MockAIClient, MockAPIClient, mock_manager):
-  mock_api = AsyncMock()
-  MockAPIClient.return_value = mock_api
-  mock_api.get.return_value = []  # no unmapped elements
+@patch("robosystems.worker.tasks.agent_mapping.task.AIClient")
+async def test_all_mapped(MockAIClient, mock_manager):
+  mock_unmapped = AsyncMock()
+  mock_unmapped.execute.return_value = {
+    "unmapped_count": 0,
+    "total_coa_elements": 10,
+    "elements": [],
+  }
 
   task = _make_task(mock_manager)
-  result = await task.execute()
+
+  with patch(
+    "robosystems.middleware.mcp.tools.taxonomy_tools.GetUnmappedElementsTool",
+    return_value=mock_unmapped,
+  ):
+    result = await task.execute()
 
   assert result["mapped"] == 0
   assert result["coverage_percent"] == 100.0

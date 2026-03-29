@@ -157,14 +157,11 @@ services:
     command: /app/bin/entrypoint.sh
     environment:
       - DOCKER_PROFILE=worker
-      - WORKER_API_BASE_URL=http://robosystems-api:8000
     env_file:
       - .env
     volumes:
       - ./robosystems:/app/robosystems
     depends_on:
-      api:
-        condition: service_healthy
       valkey:
         condition: service_healthy
       pg:

@@ -2,10 +2,11 @@
 
 Iterates through unmapped Chart of Accounts elements, calls Bedrock to
 classify and match each to a US GAAP reporting concept, and writes
-confirmed mappings via the API. Progress is streamed via SSE.
+confirmed mappings via MCP tool classes (direct instantiation).
 
-Uses the same REST API endpoints as the frontend — the worker is just
-another API client, calling through the internal ALB.
+Uses the same MCP tool classes as cowork (Claude Desktop) — instantiated
+in-process with the validated graph_id. Auth was checked at the API
+boundary (POST /auto-map) before the task was enqueued.
 """
 
 import json
@@ -14,13 +15,12 @@ from collections import defaultdict
 from typing import Any
 
 from robosystems.operations.agents.ai_client import AIClient, AIMessage
-from robosystems.worker.api_client import WorkerAPIClient
 from robosystems.worker.tasks import register_task
-from robosystems.worker.tasks.base import BaseTask
-from robosystems.worker.tasks.mapping_prompt import (
+from robosystems.worker.tasks.agent_mapping.prompt import (
   MAPPING_SYSTEM_PROMPT,
   build_mapping_prompt,
 )
+from robosystems.worker.tasks.base import BaseTask
 
 logger = logging.getLogger(__name__)
 
@@ -32,22 +32,52 @@ CONFIDENCE_MIN_MAP = 0.70
 BATCH_SIZE = 10
 
 
+class _ToolClient:
+  """Minimal adapter to satisfy MCP tool constructors in worker context.
+
+  MCP tool classes expect a graph_client with a .graph_id attribute.
+  This provides exactly that — no HTTP, no auth, just the graph_id
+  that was already validated at the API boundary.
+  """
+
+  def __init__(self, graph_id: str) -> None:
+    self.graph_id = graph_id
+
+
 @register_task("agent_mapping")
 class AgentMappingTask(BaseTask):
-  """Autonomous CoA → GAAP mapping via Bedrock AI."""
+  """Autonomous CoA → GAAP mapping via Bedrock AI and MCP tools."""
 
   async def execute(self) -> dict[str, Any]:
     mapping_id = self.params["mapping_id"]
-    api = WorkerAPIClient(self.graph_id)
+    tool_client = _ToolClient(self.graph_id)
     ai_client = AIClient()
 
-    # 1. Get unmapped elements via API
-    unmapped_response = await api.get(
-      f"/v1/ledger/{self.graph_id}/elements/unmapped",
-      params={"mapping_id": mapping_id},
+    # Import MCP tool classes (same ones cowork uses)
+    from robosystems.middleware.mcp.tools.taxonomy_tools import (
+      CreateMappingAssociationTool,
+      GetMappingSummaryTool,
+      GetUnmappedElementsTool,
+      SuggestMappingTool,
     )
-    elements = unmapped_response if isinstance(unmapped_response, list) else []
-    total = len(elements)
+
+    unmapped_tool = GetUnmappedElementsTool(tool_client)
+    suggest_tool = SuggestMappingTool(tool_client)
+    create_tool = CreateMappingAssociationTool(tool_client)
+    summary_tool = GetMappingSummaryTool(tool_client)
+
+    # 1. Get unmapped elements
+    unmapped_result = await unmapped_tool.execute({"mapping_id": mapping_id})
+    if "error" in unmapped_result:
+      return {
+        "error": unmapped_result["error"],
+        "mapped": 0,
+        "flagged": 0,
+        "skipped": 0,
+      }
+
+    elements = unmapped_result.get("elements", [])
+    total = unmapped_result.get("unmapped_count", len(elements))
 
     if total == 0:
       await self.report_progress("All elements already mapped", percent=100)
@@ -67,21 +97,13 @@ class AgentMappingTask(BaseTask):
       cls = elem.get("classification", "expense")
       by_classification[cls].append(elem)
 
-    # 3. Get reporting taxonomy candidates per classification via API
+    # 3. Get candidates per classification via suggest-mapping tool
     candidates_by_cls: dict[str, list[dict]] = {}
-    for cls in by_classification:
-      candidates_response = await api.get(
-        f"/v1/ledger/{self.graph_id}/elements",
-        params={
-          "source": "us-gaap,sfac6",
-          "classification": cls,
-          "is_abstract": "false",
-          "limit": "200",
-        },
+    for cls, cls_elements in by_classification.items():
+      suggest_result = await suggest_tool.execute(
+        {"element_id": cls_elements[0]["id"], "classification": cls}
       )
-      candidates_by_cls[cls] = (
-        candidates_response if isinstance(candidates_response, list) else []
-      )
+      candidates_by_cls[cls] = suggest_result.get("candidates", [])
 
     # 4. Process elements in batches per classification
     mapped, flagged, skipped = 0, 0, 0
@@ -95,17 +117,15 @@ class AgentMappingTask(BaseTask):
         processed += len(cls_elements)
         continue
 
-      # Process in batches
       for batch_start in range(0, len(cls_elements), BATCH_SIZE):
         if await self.is_cancelled():
           break
 
         batch = cls_elements[batch_start : batch_start + BATCH_SIZE]
 
-        # Call Bedrock to map this batch
         try:
           mappings, credits = await self._map_batch(
-            ai_client, batch, candidates, mapping_id, api
+            ai_client, batch, candidates, mapping_id, create_tool
           )
           total_credits += credits
 
@@ -127,12 +147,10 @@ class AgentMappingTask(BaseTask):
           percent=(processed / total) * 100,
         )
 
-    # 5. Get final coverage via API
+    # 5. Get final coverage
     try:
-      coverage = await api.get(
-        f"/v1/ledger/{self.graph_id}/mappings/{mapping_id}/coverage"
-      )
-      coverage_percent = coverage.get("coverage_percent", 0)
+      summary = await summary_tool.execute({"mapping_id": mapping_id})
+      coverage_percent = summary.get("coverage_percent", 0)
     except Exception:
       coverage_percent = ((mapped + flagged) / total * 100) if total > 0 else 0
 
@@ -150,7 +168,7 @@ class AgentMappingTask(BaseTask):
     elements: list[dict],
     candidates: list[dict],
     mapping_id: str,
-    api: WorkerAPIClient,
+    create_tool: Any,
   ) -> tuple[list[dict], float]:
     """Map a batch of elements via Bedrock and write results.
 
@@ -166,29 +184,25 @@ class AgentMappingTask(BaseTask):
       agent_type="mapping",
     )
 
-    # Track credits
     credits = await self._consume_credits(
       response.input_tokens,
       response.output_tokens,
       response.model,
     )
 
-    # Parse AI response
     mappings = self._parse_response(response.content, elements)
 
-    # Write confirmed mappings via API
+    # Write confirmed mappings via MCP tool
     for m in mappings:
       if m.get("target_id") and m["confidence"] >= CONFIDENCE_MIN_MAP:
         try:
-          await api.post(
-            f"/v1/ledger/{self.graph_id}/mappings/{mapping_id}/associations",
-            json={
+          await create_tool.execute(
+            {
+              "mapping_id": mapping_id,
               "from_element_id": m["element_id"],
               "to_element_id": m["target_id"],
-              "association_type": "mapping",
               "confidence": m["confidence"],
-              "suggested_by": "bedrock",
-            },
+            }
           )
         except Exception as e:
           logger.warning(f"Failed to create association for {m['element_id']}: {e}")
@@ -226,11 +240,9 @@ class AgentMappingTask(BaseTask):
   def _parse_response(self, content: str, elements: list[dict]) -> list[dict]:
     """Parse Bedrock JSON response into mapping results.
 
-    Returns list of dicts with element_id, target_id, target_qname, confidence.
     Falls back gracefully on malformed responses.
     """
     try:
-      # Strip markdown code fences if present
       text = content.strip()
       if text.startswith("```"):
         text = text.split("\n", 1)[1] if "\n" in text else text[3:]
@@ -242,7 +254,6 @@ class AgentMappingTask(BaseTask):
       if not isinstance(mappings, list):
         mappings = [mappings]
 
-      # Validate each mapping has required fields
       valid = []
       for m in mappings:
         valid.append(
@@ -258,7 +269,6 @@ class AgentMappingTask(BaseTask):
 
     except (json.JSONDecodeError, KeyError, TypeError) as e:
       logger.warning(f"Failed to parse Bedrock response: {e}")
-      # Return all elements as skipped
       return [
         {
           "element_id": elem.get("id", ""),

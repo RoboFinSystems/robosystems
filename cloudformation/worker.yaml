@@ -374,9 +374,6 @@ Resources:
               - !Ref "AWS::NoValue"
             - Name: AWS_REGION
               Value: !Ref AWS::Region
-            # Worker → API access (via service discovery within VPC)
-            - Name: WORKER_API_BASE_URL
-              Value: !Sub "http://api.${Environment}.robosystems.local:8000"
           Secrets:
             - Name: POSTGRES_PASSWORD
               ValueFrom: !Sub "arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:robosystems/${Environment}/postgres:POSTGRES_PASSWORD::"
