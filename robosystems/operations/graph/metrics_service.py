@@ -8,7 +8,7 @@ from ...database import session
 from ...middleware.graph.router import get_universal_repository
 from ...middleware.graph.utils import MultiTenantUtils
 from ...middleware.otel.metrics import get_endpoint_metrics
-from ...models.iam import GraphUser
+from ...models.core import GraphUser
 
 logger = logging.getLogger(__name__)
 

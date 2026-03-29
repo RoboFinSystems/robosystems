@@ -12,7 +12,7 @@ from fastapi import status
 
 from robosystems.database import session
 from robosystems.middleware.auth.dependencies import get_current_user_with_graph
-from robosystems.models.iam import GraphUser
+from robosystems.models.core import GraphUser
 
 
 @pytest.fixture

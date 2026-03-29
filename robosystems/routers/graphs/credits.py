@@ -32,8 +32,8 @@ from robosystems.models.api.common import (
   ErrorResponse,
   create_error_response,
 )
-from robosystems.models.iam import GraphUser, User
-from robosystems.models.iam.graph_credits import CreditTransactionType
+from robosystems.models.core import GraphUser, User
+from robosystems.models.core.graph.graph_credits import CreditTransactionType
 from robosystems.operations.graph.credit_service import (
   CreditService,
   get_operation_cost,
@@ -51,7 +51,7 @@ def get_graph_access(
 ) -> GraphUser:
   """Get user's access to a graph with proper authorization validation."""
   from robosystems.middleware.graph.utils import MultiTenantUtils
-  from robosystems.models.iam.user_repository import UserRepository
+  from robosystems.models.core.user.user_repository import UserRepository
 
   # Determine graph type and validate access accordingly
   identity = MultiTenantUtils.get_graph_identity(graph_id)
@@ -274,8 +274,8 @@ async def get_credit_transactions(
   from sqlalchemy import func
 
   from ...middleware.graph.utils import MultiTenantUtils
-  from ...models.iam.graph_credits import GraphCreditTransaction
-  from ...models.iam.user_repository_credits import (
+  from ...models.core.graph.graph_credits import GraphCreditTransaction
+  from ...models.core.user.user_repository_credits import (
     UserRepositoryCredits,
     UserRepositoryCreditTransaction,
   )
@@ -361,7 +361,7 @@ async def get_credit_transactions(
 
     if identity.is_shared_repository:
       # For repositories, use repository credit transactions
-      from ...models.iam.user_repository_credits import (
+      from ...models.core.user.user_repository_credits import (
         UserRepositoryCreditTransactionType,
       )
 
@@ -662,7 +662,7 @@ async def get_storage_usage(
 
     from sqlalchemy import func
 
-    from ...models.iam.graph_usage import GraphUsage, UsageEventType
+    from ...models.core.graph.graph_usage import GraphUsage, UsageEventType
 
     # Get storage usage records for the period
     end_date = datetime.now()
@@ -686,7 +686,7 @@ async def get_storage_usage(
     )
 
     # Calculate credit costs
-    from robosystems.models.iam import GraphCredits
+    from robosystems.models.core import GraphCredits
     from robosystems.operations.graph.credit_service import get_operation_cost
 
     credits = GraphCredits.get_by_graph_id(graph_id, db)

@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
   from ...graph_api.client.client import GraphClient
-  from ...models.iam import Graph, User
+  from ...models.core import Graph, User
 
 from ...config import env
 from ...config.shared_repositories import is_shared_repository
@@ -103,7 +103,7 @@ class SubgraphService:
     # Check subgraph limit for parent's tier
     from ...config.graph_tier import GraphTierConfig
     from ...database import get_db_session
-    from ...models.iam.graph import Graph
+    from ...models.core.graph import Graph
 
     db = next(get_db_session())
     try:
@@ -146,7 +146,7 @@ class SubgraphService:
       # For local dev graphs, use PostgreSQL instance_id directly
       from robosystems.config import env
       from robosystems.database import get_db_session
-      from robosystems.models.iam.graph import Graph
+      from robosystems.models.core.graph import Graph
 
       session = next(get_db_session())
       parent_graph_record = (
@@ -314,8 +314,8 @@ class SubgraphService:
         Dictionary with created subgraph details
     """
     from ...database import get_db_session
-    from ...models.iam.graph import Graph
-    from ...models.iam.graph_user import GraphUser
+    from ...models.core.graph import Graph
+    from ...models.core.graph.graph_user import GraphUser
 
     subgraph_id = construct_subgraph_id(parent_graph.graph_id, name)
 

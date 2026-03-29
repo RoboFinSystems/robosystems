@@ -26,7 +26,7 @@ from ...middleware.rate_limits import (
 from ...middleware.rate_limits.rate_limiting import jwt_refresh_rate_limit_dependency
 from ...models.api.auth import AuthResponse
 from ...models.api.common import ErrorResponse
-from ...models.iam import User
+from ...models.core import User
 from ...security.device_fingerprinting import extract_device_fingerprint
 
 # Create router for session endpoints

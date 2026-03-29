@@ -15,8 +15,8 @@ from ...models.api.billing.invoice import (
   InvoicesResponse,
   UpcomingInvoice,
 )
-from ...models.billing import BillingCustomer, BillingInvoice
-from ...models.iam import User
+from ...models.core import User
+from ...models.core.billing import BillingCustomer, BillingInvoice
 from ...operations.providers.payment_provider import get_payment_provider
 
 logger = get_logger(__name__)
@@ -46,7 +46,7 @@ async def list_invoices(
 ):
   """List invoices for the organization."""
   try:
-    from ...models.iam import OrgRole, OrgUser
+    from ...models.core import OrgRole, OrgUser
 
     # Verify user is a member of the org
     membership = OrgUser.get_by_org_and_user(org_id, current_user.id, db)
@@ -139,7 +139,7 @@ async def get_upcoming_invoice(
 ):
   """Get upcoming invoice preview for organization."""
   try:
-    from ...models.iam import OrgRole, OrgUser
+    from ...models.core import OrgRole, OrgUser
 
     # Verify user is a member of the org
     membership = OrgUser.get_by_org_and_user(org_id, current_user.id, db)

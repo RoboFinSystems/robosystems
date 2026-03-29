@@ -5,8 +5,8 @@ from unittest.mock import Mock, patch
 import pytest
 from fastapi import HTTPException
 
-from robosystems.models.billing import BillingCustomer as BillingCustomerModel
-from robosystems.models.iam import User
+from robosystems.models.core import User
+from robosystems.models.core.billing import BillingCustomer as BillingCustomerModel
 from robosystems.routers.billing.customer import get_customer
 
 
@@ -24,13 +24,13 @@ class TestGetCustomer:
     return Mock()
 
   @pytest.mark.asyncio
-  @patch("robosystems.models.iam.OrgUser.get_by_org_and_user")
+  @patch("robosystems.models.core.OrgUser.get_by_org_and_user")
   @patch("robosystems.routers.billing.customer.BillingCustomerModel.get_or_create")
   async def test_get_customer_no_payment_methods(
     self, mock_get_customer, mock_get_org_user, mock_user, mock_db
   ):
     """Test getting customer with no payment methods."""
-    from robosystems.models.iam import OrgRole
+    from robosystems.models.core import OrgRole
 
     mock_org_user = Mock()
     mock_org_user.role = OrgRole.OWNER
@@ -53,14 +53,14 @@ class TestGetCustomer:
     assert len(result.payment_methods) == 0
 
   @pytest.mark.asyncio
-  @patch("robosystems.models.iam.OrgUser.get_by_org_and_user")
+  @patch("robosystems.models.core.OrgUser.get_by_org_and_user")
   @patch("robosystems.routers.billing.customer.BillingCustomerModel.get_or_create")
   @patch("robosystems.routers.billing.customer.get_payment_provider")
   async def test_get_customer_with_payment_methods(
     self, mock_get_provider, mock_get_customer, mock_get_org_user, mock_user, mock_db
   ):
     """Test getting customer with payment methods."""
-    from robosystems.models.iam import OrgRole
+    from robosystems.models.core import OrgRole
 
     mock_org_user = Mock()
     mock_org_user.role = OrgRole.OWNER
@@ -110,13 +110,13 @@ class TestGetCustomer:
     assert result.payment_methods[1].brand == "mastercard"
 
   @pytest.mark.asyncio
-  @patch("robosystems.models.iam.OrgUser.get_by_org_and_user")
+  @patch("robosystems.models.core.OrgUser.get_by_org_and_user")
   @patch("robosystems.routers.billing.customer.BillingCustomerModel.get_or_create")
   async def test_get_customer_invoice_billing_enabled(
     self, mock_get_customer, mock_get_org_user, mock_user, mock_db
   ):
     """Test getting enterprise customer with invoice billing."""
-    from robosystems.models.iam import OrgRole
+    from robosystems.models.core import OrgRole
 
     mock_org_user = Mock()
     mock_org_user.role = OrgRole.OWNER
@@ -137,14 +137,14 @@ class TestGetCustomer:
     assert len(result.payment_methods) == 0
 
   @pytest.mark.asyncio
-  @patch("robosystems.models.iam.OrgUser.get_by_org_and_user")
+  @patch("robosystems.models.core.OrgUser.get_by_org_and_user")
   @patch("robosystems.routers.billing.customer.BillingCustomerModel.get_or_create")
   @patch("robosystems.routers.billing.customer.get_payment_provider")
   async def test_get_customer_payment_method_fetch_error(
     self, mock_get_provider, mock_get_customer, mock_get_org_user, mock_user, mock_db
   ):
     """Test that payment method fetch errors are handled gracefully."""
-    from robosystems.models.iam import OrgRole
+    from robosystems.models.core import OrgRole
 
     mock_org_user = Mock()
     mock_org_user.role = OrgRole.OWNER
@@ -170,7 +170,7 @@ class TestGetCustomer:
     assert len(result.payment_methods) == 0
 
   @pytest.mark.asyncio
-  @patch("robosystems.models.iam.OrgUser.get_by_org_and_user")
+  @patch("robosystems.models.core.OrgUser.get_by_org_and_user")
   async def test_get_customer_unexpected_error(
     self, mock_get_org_user, mock_user, mock_db
   ):
@@ -184,7 +184,7 @@ class TestGetCustomer:
     assert "Failed to retrieve customer information" in exc.value.detail
 
   @pytest.mark.asyncio
-  @patch("robosystems.models.iam.OrgUser.get_by_org_and_user")
+  @patch("robosystems.models.core.OrgUser.get_by_org_and_user")
   async def test_get_customer_requires_membership(
     self, mock_get_org_user, mock_user, mock_db
   ):
@@ -198,14 +198,14 @@ class TestGetCustomer:
     assert exc.value.detail == "You are not a member of this organization"
 
   @pytest.mark.asyncio
-  @patch("robosystems.models.iam.OrgUser.get_by_org_and_user")
+  @patch("robosystems.models.core.OrgUser.get_by_org_and_user")
   @patch("robosystems.routers.billing.customer.BillingCustomerModel.get_or_create")
   @patch("robosystems.routers.billing.customer.get_payment_provider")
   async def test_get_customer_non_owner_hides_payment_details(
     self, mock_get_provider, mock_get_customer, mock_get_org_user, mock_user, mock_db
   ):
     """Admins should see limited data with payment methods hidden."""
-    from robosystems.models.iam import OrgRole
+    from robosystems.models.core import OrgRole
 
     membership = Mock()
     membership.role = OrgRole.ADMIN

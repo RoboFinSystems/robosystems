@@ -33,7 +33,7 @@ from robosystems.models.api.graphs.limits import (
   RateLimits,
   StorageLimits,
 )
-from robosystems.models.iam import User
+from robosystems.models.core import User
 
 # Create router
 router = APIRouter(tags=["Graph Limits"])
@@ -130,8 +130,8 @@ async def get_graph_limits(
       get_tier_copy_operation_limits,
     )
     from robosystems.middleware.graph.utils import MultiTenantUtils
-    from robosystems.models.iam.graph import Graph
-    from robosystems.models.iam.graph_credits import GraphCredits
+    from robosystems.models.core.graph import Graph
+    from robosystems.models.core.graph.graph_credits import GraphCredits
 
     # Get user's subscription tier
     user_tier = getattr(current_user, "subscription_tier", "ladybug-standard")

@@ -49,7 +49,7 @@ from robosystems.middleware.otel.metrics import (
 from robosystems.middleware.rate_limits import subscription_aware_rate_limit_dependency
 from robosystems.models.api.common import ErrorResponse
 from robosystems.models.api.graphs.tables import TableInfo, TableListResponse
-from robosystems.models.iam import GraphTable, User
+from robosystems.models.core import GraphTable, User
 
 router = APIRouter()
 
@@ -169,7 +169,7 @@ async def list_tables(
     # Get all tables for graph
     db_tables = GraphTable.get_all_for_graph(graph_id, db)
 
-    from robosystems.models.iam import GraphUser
+    from robosystems.models.core import GraphUser
     from robosystems.operations.graph.table_service import TableService
 
     table_service = TableService(db)

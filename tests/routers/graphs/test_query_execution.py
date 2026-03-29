@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 
 from robosystems.middleware.auth.jwt import create_jwt_token
 from robosystems.middleware.graph.query_queue import QueryStatus
-from robosystems.models.iam import User
+from robosystems.models.core import User
 from robosystems.routers.graphs.query.strategies import (
   ExecutionStrategy,
   StrategySelector,

@@ -26,7 +26,7 @@ from robosystems.middleware.rate_limits import (
 )
 from robosystems.middleware.sse.event_storage import OperationStatus, get_event_storage
 from robosystems.middleware.sse.streaming import create_sse_response_starlette
-from robosystems.models.iam import User
+from robosystems.models.core import User
 
 # Create router
 router = APIRouter()

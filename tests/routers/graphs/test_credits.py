@@ -39,7 +39,7 @@ class TestGetGraphAccess:
         return_value=identity,
       ),
       patch(
-        "robosystems.models.iam.user_repository.UserRepository.user_has_access",
+        "robosystems.models.core.user.user_repository.UserRepository.user_has_access",
         return_value=True,
       ),
     ):
@@ -61,7 +61,7 @@ class TestGetGraphAccess:
         return_value=identity,
       ),
       patch(
-        "robosystems.models.iam.user_repository.UserRepository.user_has_access",
+        "robosystems.models.core.user.user_repository.UserRepository.user_has_access",
         return_value=False,
       ),
     ):
@@ -92,7 +92,7 @@ class TestGetGraphAccess:
         return_value=identity,
       ),
       patch(
-        "robosystems.models.iam.graph_user.GraphUser.user_has_access",
+        "robosystems.models.core.graph.graph_user.GraphUser.user_has_access",
         return_value=True,
       ),
     ):
@@ -113,7 +113,7 @@ class TestGetGraphAccess:
         return_value=identity,
       ),
       patch(
-        "robosystems.models.iam.graph_user.GraphUser.user_has_access",
+        "robosystems.models.core.graph.graph_user.GraphUser.user_has_access",
         return_value=False,
       ),
     ):
@@ -157,7 +157,7 @@ class TestGetGraphAccess:
         return_value=identity,
       ),
       patch(
-        "robosystems.models.iam.graph_user.GraphUser.user_has_access",
+        "robosystems.models.core.graph.graph_user.GraphUser.user_has_access",
         return_value=True,
       ),
     ):
@@ -412,7 +412,7 @@ class TestGetStorageUsage:
 
     with (
       patch(
-        "robosystems.models.iam.GraphCredits.get_by_graph_id",
+        "robosystems.models.core.GraphCredits.get_by_graph_id",
         return_value=mock_credits,
       ),
       patch(
@@ -450,7 +450,7 @@ class TestGetStorageUsage:
 
     with (
       patch(
-        "robosystems.models.iam.GraphCredits.get_by_graph_id",
+        "robosystems.models.core.GraphCredits.get_by_graph_id",
         return_value=mock_credits,
       ),
       patch(

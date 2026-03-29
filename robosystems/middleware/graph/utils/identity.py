@@ -166,10 +166,10 @@ def validate_repository_access(
   if not is_shared_repository_or_subgraph(graph_id):
     return False
   from robosystems.database import SessionFactory
-  from robosystems.models.iam import (
+  from robosystems.models.core import (
     UserRepository,
   )
-  from robosystems.models.iam import (
+  from robosystems.models.core import (
     UserRepositoryAccessLevel as RepositoryAccessLevel,
   )
 

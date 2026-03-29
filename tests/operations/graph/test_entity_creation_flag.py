@@ -35,7 +35,7 @@ class TestEntityCreationFlag:
 
     with patch.object(entity_service, "_generate_graph_id", return_value="kg_test_123"):
       with patch(
-        "robosystems.models.iam.org_limits.OrgLimits.get_or_create_for_org"
+        "robosystems.models.core.org.org_limits.OrgLimits.get_or_create_for_org"
       ) as mock_user_limits:
         mock_limits = Mock()
         mock_limits.can_create_graph = Mock(
@@ -44,7 +44,7 @@ class TestEntityCreationFlag:
         mock_user_limits.return_value = mock_limits
 
         with patch(
-          "robosystems.models.iam.org_user.OrgUser.get_user_orgs"
+          "robosystems.models.core.org.org_user.OrgUser.get_user_orgs"
         ) as mock_get_user_orgs:
           mock_org_user = Mock()
           mock_org_user.org_id = "org_test_123"
@@ -78,13 +78,15 @@ class TestEntityCreationFlag:
               mock_get_client.return_value = mock_lbug_client
 
               with patch(
-                "robosystems.models.iam.graph.Graph.create"
+                "robosystems.models.core.graph.Graph.create"
               ) as mock_graph_create:
                 mock_graph = Mock()
                 mock_graph.graph_id = "kg_test_123"
                 mock_graph_create.return_value = mock_graph
 
-                with patch("robosystems.models.iam.graph_schema.GraphSchema.create"):
+                with patch(
+                  "robosystems.models.core.graph.graph_schema.GraphSchema.create"
+                ):
                   with patch(
                     "robosystems.operations.graph.table_service.TableService.create_tables_from_schema",
                     return_value=[],
@@ -138,7 +140,7 @@ class TestEntityCreationFlag:
 
     with patch.object(entity_service, "_generate_graph_id", return_value="kg_test_456"):
       with patch(
-        "robosystems.models.iam.org_limits.OrgLimits.get_or_create_for_org"
+        "robosystems.models.core.org.org_limits.OrgLimits.get_or_create_for_org"
       ) as mock_user_limits:
         mock_limits = Mock()
         mock_limits.can_create_graph = Mock(
@@ -147,7 +149,7 @@ class TestEntityCreationFlag:
         mock_user_limits.return_value = mock_limits
 
         with patch(
-          "robosystems.models.iam.org_user.OrgUser.get_user_orgs"
+          "robosystems.models.core.org.org_user.OrgUser.get_user_orgs"
         ) as mock_get_user_orgs:
           mock_org_user = Mock()
           mock_org_user.org_id = "org_test_456"
@@ -181,13 +183,15 @@ class TestEntityCreationFlag:
               mock_get_client.return_value = mock_lbug_client
 
               with patch(
-                "robosystems.models.iam.graph.Graph.create"
+                "robosystems.models.core.graph.Graph.create"
               ) as mock_graph_create:
                 mock_graph = Mock()
                 mock_graph.graph_id = "kg_test_456"
                 mock_graph_create.return_value = mock_graph
 
-                with patch("robosystems.models.iam.graph_schema.GraphSchema.create"):
+                with patch(
+                  "robosystems.models.core.graph.graph_schema.GraphSchema.create"
+                ):
                   with patch(
                     "robosystems.operations.graph.table_service.TableService.create_tables_from_schema",
                     return_value=[],
@@ -229,7 +233,7 @@ class TestEntityCreationFlag:
 
     with patch.object(entity_service, "_generate_graph_id", return_value="kg_test_789"):
       with patch(
-        "robosystems.models.iam.org_limits.OrgLimits.get_or_create_for_org"
+        "robosystems.models.core.org.org_limits.OrgLimits.get_or_create_for_org"
       ) as mock_user_limits:
         mock_limits = Mock()
         mock_limits.can_create_graph = Mock(
@@ -238,7 +242,7 @@ class TestEntityCreationFlag:
         mock_user_limits.return_value = mock_limits
 
         with patch(
-          "robosystems.models.iam.org_user.OrgUser.get_user_orgs"
+          "robosystems.models.core.org.org_user.OrgUser.get_user_orgs"
         ) as mock_get_user_orgs:
           mock_org_user = Mock()
           mock_org_user.org_id = "org_test_789"
@@ -272,13 +276,15 @@ class TestEntityCreationFlag:
               mock_get_client.return_value = mock_lbug_client
 
               with patch(
-                "robosystems.models.iam.graph.Graph.create"
+                "robosystems.models.core.graph.Graph.create"
               ) as mock_graph_create:
                 mock_graph = Mock()
                 mock_graph.graph_id = "kg_test_789"
                 mock_graph_create.return_value = mock_graph
 
-                with patch("robosystems.models.iam.graph_schema.GraphSchema.create"):
+                with patch(
+                  "robosystems.models.core.graph.graph_schema.GraphSchema.create"
+                ):
                   with patch(
                     "robosystems.operations.graph.table_service.TableService.create_tables_from_schema",
                     return_value=[],

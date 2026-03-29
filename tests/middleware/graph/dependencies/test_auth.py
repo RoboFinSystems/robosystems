@@ -16,7 +16,7 @@ from robosystems.middleware.graph.dependencies.auth import (
   get_universal_repository_with_auth,
 )
 from robosystems.middleware.graph.types import AccessPattern
-from robosystems.models.iam.user_repository import RepositoryAccessLevel
+from robosystems.models.core.user.user_repository import RepositoryAccessLevel
 
 
 class TestGetGraphDatabase:

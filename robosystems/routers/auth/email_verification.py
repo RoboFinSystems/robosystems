@@ -19,7 +19,7 @@ from ...middleware.auth.jwt import create_jwt_token, verify_jwt_token
 from ...middleware.rate_limits import auth_rate_limit_dependency
 from ...models.api.auth import AuthResponse, EmailVerificationRequest
 from ...models.api.common import ErrorResponse
-from ...models.iam import User, UserToken
+from ...models.core import User, UserToken
 from ...security import SecurityAuditLogger, SecurityEventType
 from .utils import detect_app_source
 

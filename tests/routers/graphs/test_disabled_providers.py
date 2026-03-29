@@ -161,7 +161,7 @@ class TestDisabledProviderHandling:
   @pytest.fixture
   def auth_headers(self, test_user, test_org, test_db):
     """Create auth headers for test requests."""
-    from robosystems.models.iam import Graph, GraphUser, UserAPIKey
+    from robosystems.models.core import Graph, GraphUser, UserAPIKey
 
     # Create the graph first (only if it doesn't exist)
     existing_graph = (

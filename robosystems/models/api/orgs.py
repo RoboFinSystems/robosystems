@@ -5,7 +5,7 @@ from typing import Any
 
 from pydantic import BaseModel, EmailStr, Field
 
-from ..iam import OrgRole, OrgType
+from robosystems.models.core.org import OrgRole, OrgType
 
 
 # Base models

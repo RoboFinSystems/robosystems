@@ -97,7 +97,7 @@ class TestBackupEndpoints:
         f"Expected auth/not found/unavailable error for {method} {endpoint}"
       )
 
-  @patch("robosystems.models.iam.graph_credits.GraphCredits.get_by_graph_id")
+  @patch("robosystems.models.core.graph.graph_credits.GraphCredits.get_by_graph_id")
   @patch(
     "robosystems.middleware.sse.dagster_monitor.DagsterRunMonitor.monitor_run",
     new_callable=AsyncMock,
@@ -112,7 +112,7 @@ class TestBackupEndpoints:
     "robosystems.middleware.graph.utils.MultiTenantUtils.get_database_path_for_graph"
   )
   @patch("robosystems.middleware.graph.utils.MultiTenantUtils.is_shared_repository")
-  @patch("robosystems.models.iam.GraphUser.get_by_user_id")
+  @patch("robosystems.models.core.GraphUser.get_by_user_id")
   def test_create_backup_endpoint(
     self,
     mock_get_by_user_id,
@@ -198,7 +198,7 @@ class TestBackupEndpoints:
         del app.dependency_overrides[session]
 
   @patch("robosystems.middleware.graph.utils.MultiTenantUtils.is_shared_repository")
-  @patch("robosystems.models.iam.GraphUser.get_by_user_id")
+  @patch("robosystems.models.core.GraphUser.get_by_user_id")
   def test_list_backups_endpoint(
     self, mock_get_by_user_id, mock_is_shared, client, mock_auth_user
   ):
@@ -271,7 +271,7 @@ class TestBackupEndpoints:
         assert "summary" in details, f"Missing summary for {method.upper()} {path}"
 
   @patch("robosystems.middleware.graph.utils.MultiTenantUtils.is_shared_repository")
-  @patch("robosystems.models.iam.GraphUser.get_by_user_id")
+  @patch("robosystems.models.core.GraphUser.get_by_user_id")
   def test_create_backup_blocked_for_shared_repository(
     self, mock_get_by_user_id, mock_is_shared, client, mock_auth_user
   ):

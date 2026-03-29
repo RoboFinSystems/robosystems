@@ -12,7 +12,7 @@ from uuid import uuid4
 
 import pytest
 
-from robosystems.models.iam import (
+from robosystems.models.core import (
   Graph,
   Org,
   OrgLimits,
@@ -219,7 +219,7 @@ class TestOrgRouter:
         self.total_consumed = 25.0
 
     with patch(
-      "robosystems.models.iam.graph_credits.GraphCredits.get_by_graph_id",
+      "robosystems.models.core.graph.graph_credits.GraphCredits.get_by_graph_id",
       return_value=DummyCredits(),
     ):
       response = await async_client.get(f"/v1/orgs/{org.id}/graphs")

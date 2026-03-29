@@ -41,8 +41,8 @@ def invoice_subscription_renewal_sensor(context: SensorEvaluationContext):
   from datetime import UTC, datetime
 
   from robosystems.database import session as db_session_factory
-  from robosystems.models.billing.customer import BillingCustomer
-  from robosystems.models.billing.subscription import BillingSubscription
+  from robosystems.models.core.billing.customer import BillingCustomer
+  from robosystems.models.core.billing.subscription import BillingSubscription
 
   db = db_session_factory()
   try:

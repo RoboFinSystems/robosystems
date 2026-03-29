@@ -23,7 +23,7 @@ from robosystems.models.api.graphs.connections import (
   CreateConnectionRequest,
   ProviderType,
 )
-from robosystems.models.iam import User
+from robosystems.models.core import User
 from robosystems.operations.connection_service import ConnectionService
 
 from .utils import (

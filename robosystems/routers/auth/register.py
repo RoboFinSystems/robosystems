@@ -25,7 +25,7 @@ from ...middleware.rate_limits import auth_rate_limit_dependency
 from ...middleware.sse import build_email_job_config, run_and_monitor_dagster_job
 from ...models.api.auth import AuthResponse, RegisterRequest
 from ...models.api.common import ErrorResponse
-from ...models.iam import Org, OrgLimits, User, UserToken
+from ...models.core import Org, OrgLimits, User, UserToken
 from ...security import SecurityAuditLogger, SecurityEventType
 from ...security.auth_protection import AdvancedAuthProtection
 from ...security.captcha import captcha_service

@@ -6,8 +6,8 @@ import pytest
 from fastapi import HTTPException
 
 from robosystems.models.api.billing.checkout import CreateCheckoutRequest
-from robosystems.models.billing import BillingCustomer, BillingSubscription
-from robosystems.models.iam import User
+from robosystems.models.core import User
+from robosystems.models.core.billing import BillingCustomer, BillingSubscription
 from robosystems.routers.billing.checkout import (
   create_checkout_session,
   get_checkout_status,
@@ -40,7 +40,7 @@ class TestCreateCheckoutSession:
     )
 
   @pytest.mark.asyncio
-  @patch("robosystems.models.iam.OrgUser.get_user_orgs")
+  @patch("robosystems.models.core.OrgUser.get_user_orgs")
   @patch("robosystems.routers.billing.checkout.BillingCustomer.get_or_create")
   @patch("robosystems.routers.billing.checkout.BillingConfig.get_subscription_plan")
   @patch("robosystems.routers.billing.checkout.BillingSubscription.create_subscription")
@@ -57,7 +57,7 @@ class TestCreateCheckoutSession:
     checkout_request,
   ):
     """Test successful checkout session creation."""
-    from robosystems.models.iam import OrgRole
+    from robosystems.models.core import OrgRole
 
     mock_org_user = Mock()
     mock_org_user.org_id = "org_123"
@@ -97,13 +97,13 @@ class TestCreateCheckoutSession:
     assert mock_subscription.payment_provider == "stripe"
 
   @pytest.mark.asyncio
-  @patch("robosystems.models.iam.OrgUser.get_user_orgs")
+  @patch("robosystems.models.core.OrgUser.get_user_orgs")
   @patch("robosystems.routers.billing.checkout.BillingCustomer.get_or_create")
   async def test_create_checkout_session_enterprise_customer_rejected(
     self, mock_get_customer, mock_get_user_orgs, mock_user, mock_db, checkout_request
   ):
     """Test that enterprise customers cannot use checkout."""
-    from robosystems.models.iam import OrgRole
+    from robosystems.models.core import OrgRole
 
     mock_org_user = Mock()
     mock_org_user.org_id = "org_123"
@@ -121,13 +121,13 @@ class TestCreateCheckoutSession:
     assert "enterprise customers" in exc.value.detail.lower()
 
   @pytest.mark.asyncio
-  @patch("robosystems.models.iam.OrgUser.get_user_orgs")
+  @patch("robosystems.models.core.OrgUser.get_user_orgs")
   @patch("robosystems.routers.billing.checkout.BillingCustomer.get_or_create")
   async def test_create_checkout_session_payment_method_already_exists(
     self, mock_get_customer, mock_get_user_orgs, mock_user, mock_db, checkout_request
   ):
     """Test that customers with payment method shouldn't use checkout."""
-    from robosystems.models.iam import OrgRole
+    from robosystems.models.core import OrgRole
 
     mock_org_user = Mock()
     mock_org_user.org_id = "org_123"
@@ -146,7 +146,7 @@ class TestCreateCheckoutSession:
     assert "already on file" in exc.value.detail.lower()
 
   @pytest.mark.asyncio
-  @patch("robosystems.models.iam.OrgUser.get_user_orgs")
+  @patch("robosystems.models.core.OrgUser.get_user_orgs")
   async def test_create_checkout_session_requires_membership(
     self, mock_get_user_orgs, mock_user, mock_db, checkout_request
   ):
@@ -160,12 +160,12 @@ class TestCreateCheckoutSession:
     assert exc.value.detail == "You are not a member of any organization"
 
   @pytest.mark.asyncio
-  @patch("robosystems.models.iam.OrgUser.get_user_orgs")
+  @patch("robosystems.models.core.OrgUser.get_user_orgs")
   async def test_create_checkout_session_requires_owner_role(
     self, mock_get_user_orgs, mock_user, mock_db, checkout_request
   ):
     """Non-owner members should be rejected."""
-    from robosystems.models.iam import OrgRole
+    from robosystems.models.core import OrgRole
 
     membership = Mock()
     membership.role = OrgRole.MEMBER
@@ -179,7 +179,7 @@ class TestCreateCheckoutSession:
     assert exc.value.detail == "Only organization owners can manage billing"
 
   @pytest.mark.asyncio
-  @patch("robosystems.models.iam.OrgUser.get_user_orgs")
+  @patch("robosystems.models.core.OrgUser.get_user_orgs")
   @patch("robosystems.routers.billing.checkout.BillingCustomer.get_or_create")
   @patch("robosystems.routers.billing.checkout.BillingConfig.get_subscription_plan")
   async def test_create_checkout_session_invalid_plan(
@@ -192,7 +192,7 @@ class TestCreateCheckoutSession:
     checkout_request,
   ):
     """Test handling of invalid plan name."""
-    from robosystems.models.iam import OrgRole
+    from robosystems.models.core import OrgRole
 
     mock_org_user = Mock()
     mock_org_user.org_id = "org_123"
@@ -213,7 +213,7 @@ class TestCreateCheckoutSession:
     assert "Invalid plan" in exc.value.detail
 
   @pytest.mark.asyncio
-  @patch("robosystems.models.iam.OrgUser.get_user_orgs")
+  @patch("robosystems.models.core.OrgUser.get_user_orgs")
   @patch("robosystems.routers.billing.checkout.BillingCustomer.get_or_create")
   @patch("robosystems.routers.billing.checkout.BillingConfig.get_subscription_plan")
   @patch("robosystems.routers.billing.checkout.BillingSubscription.create_subscription")
@@ -230,7 +230,7 @@ class TestCreateCheckoutSession:
     checkout_request,
   ):
     """Test that Stripe customer is created if not exists."""
-    from robosystems.models.iam import OrgRole
+    from robosystems.models.core import OrgRole
 
     mock_org_user = Mock()
     mock_org_user.org_id = "org_123"
@@ -265,7 +265,7 @@ class TestCreateCheckoutSession:
     assert mock_customer.stripe_customer_id == "cus_new_123"
 
   @pytest.mark.asyncio
-  @patch("robosystems.models.iam.OrgUser.get_user_orgs")
+  @patch("robosystems.models.core.OrgUser.get_user_orgs")
   @patch("robosystems.routers.billing.checkout.BillingCustomer.get_or_create")
   @patch("robosystems.routers.billing.checkout.BillingConfig.get_subscription_plan")
   @patch("robosystems.routers.billing.checkout.BillingSubscription.create_subscription")
@@ -282,7 +282,7 @@ class TestCreateCheckoutSession:
     checkout_request,
   ):
     """Test handling of price creation errors."""
-    from robosystems.models.iam import OrgRole
+    from robosystems.models.core import OrgRole
 
     mock_org_user = Mock()
     mock_org_user.org_id = "org_123"
@@ -313,7 +313,7 @@ class TestCreateCheckoutSession:
     assert "Payment configuration error" in exc.value.detail
 
   @pytest.mark.asyncio
-  @patch("robosystems.models.iam.OrgUser.get_user_orgs")
+  @patch("robosystems.models.core.OrgUser.get_user_orgs")
   @patch("robosystems.routers.billing.checkout.BillingCustomer.get_or_create")
   @patch("robosystems.routers.billing.checkout.BillingConfig.get_repository_plan")
   @patch("robosystems.routers.billing.checkout.BillingSubscription.create_subscription")
@@ -329,7 +329,7 @@ class TestCreateCheckoutSession:
     mock_db,
   ):
     """Test checkout session for repository subscriptions."""
-    from robosystems.models.iam import OrgRole
+    from robosystems.models.core import OrgRole
 
     mock_org_user = Mock()
     mock_org_user.org_id = "org_123"
@@ -420,7 +420,7 @@ class TestGetCheckoutStatus:
     assert "not found" in exc.value.detail.lower()
 
   @pytest.mark.asyncio
-  @patch("robosystems.models.iam.OrgUser.get_by_org_and_user")
+  @patch("robosystems.models.core.OrgUser.get_by_org_and_user")
   @patch(
     "robosystems.routers.billing.checkout.BillingSubscription.get_by_provider_subscription_id"
   )

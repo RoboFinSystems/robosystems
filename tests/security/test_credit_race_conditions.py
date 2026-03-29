@@ -16,8 +16,8 @@ from unittest.mock import Mock, patch
 import pytest
 
 from robosystems.middleware.graph.utils import MultiTenantUtils
-from robosystems.models.iam import User
-from robosystems.models.iam.user_repository import (
+from robosystems.models.core import User
+from robosystems.models.core.user.user_repository import (
   RepositoryAccessLevel,
   RepositoryType,
   UserRepository,
@@ -32,7 +32,7 @@ class TestCreditRaceConditions:
   async def test_concurrent_credit_consumption_atomic(self, db_session, test_user):
     """Test that concurrent credit consumption is properly atomic."""
     # Create Graph repository (required for foreign key)
-    from robosystems.models.iam import Graph
+    from robosystems.models.core import Graph
 
     Graph.find_or_create_repository(
       graph_id="sec",
@@ -90,7 +90,7 @@ class TestCreditRaceConditions:
   def test_credit_overflow_protection(self, db_session, test_user):
     """Test that credit balances cannot overflow."""
     # Create Graph repository (required for foreign key)
-    from robosystems.models.iam import Graph
+    from robosystems.models.core import Graph
 
     Graph.find_or_create_repository(
       graph_id="sec_overflow",

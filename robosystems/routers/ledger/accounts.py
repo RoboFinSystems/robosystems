@@ -17,8 +17,8 @@ from robosystems.models.api.extensions.accounts import (
   AccountTreeNode,
   AccountTreeResponse,
 )
+from robosystems.models.core import User
 from robosystems.models.extensions import Element
-from robosystems.models.iam import User
 
 router = APIRouter()
 

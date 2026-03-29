@@ -10,7 +10,7 @@ import pytest
 from fastapi import HTTPException, status
 
 from robosystems.models.api.auth import AuthResponse
-from robosystems.models.iam import User
+from robosystems.models.core import User
 from robosystems.routers.auth.session import get_me, refresh_session
 
 

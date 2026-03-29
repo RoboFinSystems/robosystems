@@ -8,8 +8,8 @@ from unittest.mock import MagicMock, Mock, patch
 import pytest
 from sqlalchemy.exc import IntegrityError
 
-from robosystems.models.billing import SubscriptionStatus
-from robosystems.models.iam import GraphUsage
+from robosystems.models.core import GraphUsage
+from robosystems.models.core.billing import SubscriptionStatus
 from robosystems.operations.graph.subscription_service import GraphSubscriptionService
 
 

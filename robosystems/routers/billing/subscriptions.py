@@ -8,8 +8,8 @@ from ...logger import get_logger
 from ...middleware.auth.dependencies import get_current_user
 from ...middleware.rate_limits import billing_rate_limit_dependency
 from ...models.api.billing.subscription import GraphSubscriptionResponse
-from ...models.billing import BillingSubscription
-from ...models.iam import User
+from ...models.core import User
+from ...models.core.billing import BillingSubscription
 from ...operations.providers.payment_provider import get_payment_provider
 
 logger = get_logger(__name__)
@@ -57,7 +57,7 @@ async def list_subscriptions(
 ):
   """List all subscriptions for the organization."""
   try:
-    from ...models.iam import OrgUser
+    from ...models.core import OrgUser
 
     # Verify user is a member of the org
     membership = OrgUser.get_by_org_and_user(org_id, current_user.id, db)
@@ -141,7 +141,7 @@ async def get_subscription(
 ):
   """Get subscription details for organization."""
   try:
-    from ...models.iam import OrgUser
+    from ...models.core import OrgUser
 
     # Verify user is a member of the org
     membership = OrgUser.get_by_org_and_user(org_id, current_user.id, db)
@@ -224,7 +224,7 @@ async def cancel_subscription(
 ):
   """Cancel an organization subscription."""
   try:
-    from ...models.iam import OrgRole, OrgUser
+    from ...models.core import OrgRole, OrgUser
 
     # Verify user is an owner of the org
     membership = OrgUser.get_by_org_and_user(org_id, current_user.id, db)

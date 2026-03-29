@@ -13,8 +13,8 @@ from robosystems.middleware.auth.dependencies import get_current_user_with_graph
 from robosystems.middleware.graph.types import GRAPH_ID_PATTERN
 from robosystems.middleware.otel.metrics import endpoint_metrics_decorator
 from robosystems.models.api.graphs.subgraphs import SubgraphQuotaResponse
-from robosystems.models.iam.graph import Graph
-from robosystems.models.iam.user import User
+from robosystems.models.core.graph import Graph
+from robosystems.models.core.user import User
 
 from .utils import (
   circuit_breaker,

@@ -24,6 +24,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from sqlalchemy.orm import Session
 from sse_starlette.sse import EventSourceResponse
 
+from robosystems.config.graph_tier import GraphTier
 from robosystems.database import get_db_session
 from robosystems.logger import api_logger, log_metric, logger
 from robosystems.middleware.auth.dependencies import get_current_user_with_graph
@@ -45,8 +46,7 @@ from robosystems.models.api.graphs.query import (
   CypherQueryRequest,
   CypherQueryResponse,
 )
-from robosystems.models.iam import User
-from robosystems.models.iam.graph import GraphTier
+from robosystems.models.core import User
 from robosystems.security.cypher_analyzer import (
   is_admin_operation,
   is_bulk_operation,
@@ -904,7 +904,7 @@ async def _check_shared_repository_limits(
     is_shared_repository_or_subgraph,
     resolve_shared_repository_parent,
   )
-  from robosystems.models.iam.user_repository import UserRepository
+  from robosystems.models.core.user.user_repository import UserRepository
 
   # Only apply to shared repositories (including subgraphs like sec_historical)
   if not is_shared_repository_or_subgraph(graph_id):

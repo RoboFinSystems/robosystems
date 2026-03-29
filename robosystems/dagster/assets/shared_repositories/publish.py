@@ -389,7 +389,7 @@ def _upsert_r2_backup_record(
   record if one exists rather than creating a new one each time.
   """
   from robosystems.middleware.graph.utils import MultiTenantUtils
-  from robosystems.models.iam.graph_backup import GraphBackup
+  from robosystems.models.core.graph.graph_backup import GraphBackup
 
   database_name = MultiTenantUtils.get_database_name(graph_id)
   now = datetime.now(UTC)

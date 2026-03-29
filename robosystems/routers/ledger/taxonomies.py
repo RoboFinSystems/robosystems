@@ -28,13 +28,13 @@ from robosystems.models.api.extensions.taxonomies import (
   TaxonomyResponse,
   UnmappedElementResponse,
 )
+from robosystems.models.core import User
 from robosystems.models.extensions import (
   Element,
   ElementAssociation,
   Structure,
   Taxonomy,
 )
-from robosystems.models.iam import User
 from robosystems.utils.ulid import generate_prefixed_ulid
 
 router = APIRouter()

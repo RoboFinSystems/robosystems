@@ -6,7 +6,7 @@ import re
 from sqlalchemy.orm import Session
 
 from ...logger import logger
-from ...models.iam import GraphUser, User, UserAPIKey
+from ...models.core import GraphUser, User, UserAPIKey
 from ...security import SecurityAuditLogger
 from .cache import api_key_cache
 

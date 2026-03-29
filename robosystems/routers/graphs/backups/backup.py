@@ -37,7 +37,7 @@ from robosystems.models.api.graphs.backups import (
   BackupResponse,
   DownloadQuota,
 )
-from robosystems.models.iam import User, UserRepository
+from robosystems.models.core import User, UserRepository
 from robosystems.security import SecurityAuditLogger, SecurityEventType
 
 from .utils import verify_admin_access
@@ -87,7 +87,7 @@ async def list_backups(
     # List backups from database instead of S3
     logger.info(f"Querying database for backups of graph: {graph_id}")
 
-    from robosystems.models.iam import BackupStatus, BackupType, GraphBackup
+    from robosystems.models.core import BackupStatus, BackupType, GraphBackup
 
     # Query database for backups
     backup_records = (
@@ -340,7 +340,7 @@ async def create_backup(
 
     # Cap retention_days to the tier maximum
     from robosystems.config.graph_tier import GraphTierConfig
-    from robosystems.models.iam import Graph
+    from robosystems.models.core import Graph
 
     graph_record = Graph.get_by_id(graph_id, db)
     if graph_record and graph_record.graph_tier:

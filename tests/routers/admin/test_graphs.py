@@ -9,8 +9,8 @@ from sqlalchemy.orm import Session
 
 from main import app
 from robosystems.config.graph_tier import GraphTier
-from robosystems.models.iam import Graph, Org, OrgType, OrgUser, User
-from robosystems.models.iam.graph import GraphStatus
+from robosystems.models.core import Graph, Org, OrgType, OrgUser, User
+from robosystems.models.core.graph import GraphStatus
 
 
 @pytest.fixture

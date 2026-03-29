@@ -29,9 +29,9 @@ from ...models.api.billing.subscription import (
   GraphSubscriptionResponse,
   UpgradeSubscriptionRequest,
 )
-from ...models.billing import BillingAuditLog, BillingCustomer, BillingSubscription
-from ...models.billing.audit_log import BillingEventType
-from ...models.iam import User
+from ...models.core import User
+from ...models.core.billing import BillingAuditLog, BillingCustomer, BillingSubscription
+from ...models.core.billing.audit_log import BillingEventType
 
 logger = logging.getLogger(__name__)
 
@@ -153,7 +153,7 @@ async def get_subscription(
 ) -> GraphSubscriptionResponse:
   """Get subscription for a graph or repository."""
   try:
-    from ...models.iam import OrgUser
+    from ...models.core import OrgUser
 
     customer = BillingCustomer.get_by_user_id(current_user.id, db)
     if not customer:
@@ -266,7 +266,7 @@ async def create_repository_subscription(
         detail=f"Invalid plan '{request.plan_name}' for repository '{graph_id}'",
       )
 
-    from ...models.iam import OrgUser
+    from ...models.core import OrgUser
 
     user_orgs = OrgUser.get_user_orgs(current_user.id, db)
     if not user_orgs:
@@ -488,8 +488,8 @@ async def change_plan(
 ) -> GraphSubscriptionResponse:
   """Change plan on a shared repository subscription (upgrade or downgrade)."""
   try:
-    from ...models.iam import OrgRole, OrgUser
-    from ...models.iam.user_repository import UserRepository
+    from ...models.core import OrgRole, OrgUser
+    from ...models.core.user.user_repository import UserRepository
     from ...operations.providers.payment_provider import get_payment_provider
 
     if not is_shared_repository(graph_id):

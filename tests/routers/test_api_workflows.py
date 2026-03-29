@@ -12,7 +12,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from fastapi.testclient import TestClient
 
-from robosystems.models.iam import GraphUser, UserAPIKey
+from robosystems.models.core import GraphUser, UserAPIKey
 
 
 class TestUserRegistrationWorkflow:
@@ -145,7 +145,7 @@ class TestEntityManagementWorkflow:
     )
 
     # Create graph first
-    from robosystems.models.iam import Graph
+    from robosystems.models.core import Graph
 
     Graph.create(
       graph_id="workflow-graph",
@@ -169,7 +169,7 @@ class TestEntityManagementWorkflow:
     from datetime import datetime
     from decimal import Decimal
 
-    from robosystems.models.iam import GraphCredits
+    from robosystems.models.core import GraphCredits
 
     graph_credits = GraphCredits(
       id="gc_workflow-graph",

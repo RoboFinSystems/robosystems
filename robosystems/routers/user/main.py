@@ -24,7 +24,7 @@ from ...models.api.user import (
   UpdateUserRequest,
   UserResponse,
 )
-from ...models.iam import User, UserToken
+from ...models.core import User, UserToken
 from ...security import SecurityAuditLogger, SecurityEventType
 from ...security.input_validation import (
   sanitize_string,

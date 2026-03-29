@@ -85,7 +85,7 @@ def _update_last_sync(context: AssetExecutionContext, config: QBSyncConfig) -> N
   where an event loop may already be running.
   """
   from robosystems.database import SessionFactory
-  from robosystems.models.iam.connection import Connection
+  from robosystems.models.core.connection.connection import Connection
 
   try:
     session = SessionFactory()

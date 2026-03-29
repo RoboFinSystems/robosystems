@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 from robosystems.middleware.auth.jwt import create_jwt_token
 from robosystems.middleware.mcp.client import GraphMCPClient
 from robosystems.models.api.graphs.mcp import MCPToolCall
-from robosystems.models.iam import User
+from robosystems.models.core import User
 from robosystems.routers.graphs.mcp.handlers import MCPHandler
 from robosystems.routers.graphs.mcp.strategies import (
   MCPClientDetector,
@@ -640,13 +640,15 @@ class TestMCPAccessControl:
     import uuid
     from decimal import Decimal
 
-    from robosystems.models.iam import Graph
-    from robosystems.models.iam.user_repository import (
+    from robosystems.models.core import Graph
+    from robosystems.models.core.user.user_repository import (
       RepositoryAccessLevel,
       RepositoryType,
       UserRepository,
     )
-    from robosystems.models.iam.user_repository_credits import UserRepositoryCredits
+    from robosystems.models.core.user.user_repository_credits import (
+      UserRepositoryCredits,
+    )
 
     # Create SEC repository (required for foreign key)
     Graph.find_or_create_repository(

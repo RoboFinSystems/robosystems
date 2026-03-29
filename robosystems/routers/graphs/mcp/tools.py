@@ -23,7 +23,7 @@ from robosystems.middleware.rate_limits import (
 from robosystems.middleware.robustness import CircuitBreakerManager
 from robosystems.models.api.common import ErrorResponse
 from robosystems.models.api.graphs.mcp import MCPToolsResponse
-from robosystems.models.iam import User
+from robosystems.models.core import User
 from robosystems.routers.graphs.mcp.handlers import MCPHandler
 
 # Import MCP components

@@ -12,8 +12,8 @@ import pytest
 from fastapi.testclient import TestClient
 
 from robosystems.config.graph_tier import GraphTier
-from robosystems.models.iam.graph_credits import GraphCredits
-from robosystems.models.iam.graph_usage import (
+from robosystems.models.core.graph.graph_credits import GraphCredits
+from robosystems.models.core.graph.graph_usage import (
   GraphUsage,
   UsageEventType,
 )
@@ -374,7 +374,7 @@ def sample_graph_credits(db_session, test_user, test_org):
   import uuid
 
   # First create the graph
-  from robosystems.models.iam import Graph, GraphUser
+  from robosystems.models.core import Graph, GraphUser
 
   unique_id = uuid.uuid4().hex[:8]
   graph_id = f"kg{unique_id}{unique_id}"
@@ -418,7 +418,7 @@ def sample_user(db_session):
   """Create sample user for API testing."""
   import uuid
 
-  from robosystems.models.iam import User
+  from robosystems.models.core import User
 
   user = User(
     id=f"api_test_user_{uuid.uuid4().hex[:8]}",

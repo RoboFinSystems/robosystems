@@ -24,7 +24,7 @@ def suspend_expired_graphs(
   config: SuspendGraphsConfig,
 ) -> dict:
   """Suspend graphs whose subscriptions have expired."""
-  from robosystems.models.iam.graph import Graph, GraphStatus
+  from robosystems.models.core.graph import Graph, GraphStatus
 
   suspended_count = 0
 

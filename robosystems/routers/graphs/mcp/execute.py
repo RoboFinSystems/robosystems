@@ -49,7 +49,7 @@ from robosystems.middleware.robustness import (
 from robosystems.middleware.sse.operation_manager import create_operation_response
 from robosystems.models.api.common import ErrorResponse
 from robosystems.models.api.graphs.mcp import MCPToolCall, MCPToolResult
-from robosystems.models.iam import User
+from robosystems.models.core import User
 from robosystems.security.cypher_analyzer import (
   is_admin_operation,
   is_bulk_operation,
@@ -391,7 +391,7 @@ async def call_mcp_tool(
 
       # Look up shared-repo subscription while session is still open
       if MultiTenantUtils.is_shared_repository(graph_id):
-        from robosystems.models.iam.user_repository import UserRepository
+        from robosystems.models.core.user.user_repository import UserRepository
 
         repo_access = UserRepository.get_by_user_and_repository(
           current_user.id, graph_id, sess

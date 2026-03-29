@@ -12,7 +12,7 @@ from enum import Enum
 from typing import Any
 
 from robosystems.logger import logger
-from robosystems.models.iam import User
+from robosystems.models.core import User
 from robosystems.operations.agents.adapters.api import run_agent_api
 from robosystems.operations.agents.agent_registry import get_agent, list_agents
 from robosystems.operations.agents.base import (

@@ -8,7 +8,7 @@ from robosystems.middleware.auth.utils import (
   validate_api_key_with_graph,
   validate_repository_access,
 )
-from robosystems.models.iam import User, UserAPIKey
+from robosystems.models.core import User, UserAPIKey
 
 # Valid format key for tests: "rfs" + 64 hex chars = 67 chars total
 _VALID_TEST_KEY = "rfs" + "a" * 64

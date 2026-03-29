@@ -19,8 +19,8 @@ from robosystems.models.api.extensions.transactions import (
   LedgerTransactionListResponse,
   LedgerTransactionSummaryResponse,
 )
+from robosystems.models.core import User
 from robosystems.models.extensions import Element, Entry, LineItem, Transaction
-from robosystems.models.iam import User
 
 router = APIRouter()
 

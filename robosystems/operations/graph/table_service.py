@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 
 from robosystems.config import env
 from robosystems.logger import logger
-from robosystems.models.iam import GraphTable
+from robosystems.models.core import GraphTable
 from robosystems.schemas.parser import parse_cypher_schema
 
 
@@ -175,7 +175,7 @@ class TableService:
       return
 
     # Delete associated files first
-    from robosystems.models.iam import GraphFile
+    from robosystems.models.core import GraphFile
 
     files = GraphFile.get_all_for_table(table.id, self.session)
     for file in files:

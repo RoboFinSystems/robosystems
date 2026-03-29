@@ -73,7 +73,7 @@ class TestSubgraphService:
   ):
     """Test successful subgraph creation."""
     from robosystems.config.graph_tier import GraphTier
-    from robosystems.models.iam.graph import Graph
+    from robosystems.models.core.graph import Graph
 
     existing_graph = (
       db_session.query(Graph).filter(Graph.graph_id == valid_parent_graph_id).first()
@@ -139,7 +139,7 @@ class TestSubgraphService:
   ):
     """Test creating a subgraph that already exists."""
     from robosystems.config.graph_tier import GraphTier
-    from robosystems.models.iam.graph import Graph
+    from robosystems.models.core.graph import Graph
 
     # Check if parent graph already exists (from previous test)
     existing_graph = (
@@ -186,7 +186,7 @@ class TestSubgraphService:
   ):
     """Test creating a subgraph with schema extensions."""
     from robosystems.config.graph_tier import GraphTier
-    from robosystems.models.iam.graph import Graph
+    from robosystems.models.core.graph import Graph
 
     existing_graph = (
       db_session.query(Graph).filter(Graph.graph_id == valid_parent_graph_id).first()
@@ -280,7 +280,7 @@ class TestSubgraphService:
   ):
     """Test handling of database creation failure."""
     from robosystems.config.graph_tier import GraphTier
-    from robosystems.models.iam.graph import Graph
+    from robosystems.models.core.graph import Graph
 
     existing_graph = (
       db_session.query(Graph).filter(Graph.graph_id == valid_parent_graph_id).first()
@@ -628,7 +628,7 @@ class TestSubgraphServiceIntegration:
   async def test_full_subgraph_lifecycle(self, db_session):
     """Test complete subgraph lifecycle: create, list, get info, delete."""
     from robosystems.config.graph_tier import GraphTier
-    from robosystems.models.iam.graph import Graph
+    from robosystems.models.core.graph import Graph
 
     parent_graph_id = "kg5f2e5e0da65d45d69645"
 

@@ -7,7 +7,9 @@ from dagster import build_asset_context
 
 # These imports happen inside qb_extract's function body, so we patch at the source paths.
 _PATCH_SESSION = "robosystems.database.SessionFactory"
-_PATCH_CREDS = "robosystems.models.iam.connection_credentials.ConnectionCredentials"
+_PATCH_CREDS = (
+  "robosystems.models.core.connection.connection_credentials.ConnectionCredentials"
+)
 _PATCH_QB_CLIENT = "robosystems.adapters.quickbooks.client.QBClient"
 # These are module-level in extract.py, so patch at the extract module
 _PATCH_FLATTEN_CO = (

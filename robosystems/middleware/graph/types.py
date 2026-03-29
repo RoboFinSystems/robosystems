@@ -217,7 +217,7 @@ class GraphTypeRegistry:
     """
     # Try database lookup first if session provided
     if session:
-      from ...models.iam import Graph
+      from ...models.core import Graph
 
       graph = Graph.get_by_id(graph_id, session)
       if graph:

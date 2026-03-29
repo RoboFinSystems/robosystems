@@ -11,7 +11,7 @@ from uuid import uuid4
 
 import pytest
 
-from robosystems.models.iam import Org, OrgRole, OrgType, OrgUser, User
+from robosystems.models.core import Org, OrgRole, OrgType, OrgUser, User
 
 pytestmark = pytest.mark.asyncio
 

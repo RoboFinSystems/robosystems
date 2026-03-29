@@ -100,7 +100,7 @@ class TestSchemaManagementIntegration:
 
       # Configure db.query to return the right mock based on the model
       def mock_query(model):
-        from robosystems.models.iam import GraphUser
+        from robosystems.models.core import GraphUser
 
         if model == GraphUser or (
           hasattr(model, "__name__") and model.__name__ == "GraphUser"
@@ -162,7 +162,7 @@ class TestSchemaManagementIntegration:
         new_callable=AsyncMock,
         return_value={"status": "completed", "run_id": "test-run-123"},
       ),
-      patch("robosystems.models.iam.OrgLimits.get_by_org_id") as mock_get_limits,
+      patch("robosystems.models.core.OrgLimits.get_by_org_id") as mock_get_limits,
       patch(
         "robosystems.middleware.billing.enforcement.check_can_provision_graph",
         return_value=(True, None),
@@ -256,7 +256,7 @@ class TestSchemaManagementIntegration:
 
       # Configure db.query to return the right mock based on the model
       def mock_query(model):
-        from robosystems.models.iam import Graph, GraphSchema, GraphUser
+        from robosystems.models.core import Graph, GraphSchema, GraphUser
 
         if model == GraphUser or (
           hasattr(model, "__name__") and model.__name__ == "GraphUser"
@@ -390,7 +390,7 @@ class TestSchemaManagementIntegration:
 
       # Configure db.query to return the right mock based on the model
       def mock_query(model):
-        from robosystems.models.iam import GraphUser
+        from robosystems.models.core import GraphUser
 
         if model == GraphUser or (
           hasattr(model, "__name__") and model.__name__ == "GraphUser"
@@ -502,7 +502,7 @@ relationships:
 
       # Configure db.query to return the right mock based on the model
       def mock_query(model):
-        from robosystems.models.iam import GraphUser
+        from robosystems.models.core import GraphUser
 
         if model == GraphUser or (
           hasattr(model, "__name__") and model.__name__ == "GraphUser"

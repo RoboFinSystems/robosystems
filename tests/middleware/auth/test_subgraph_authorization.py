@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 
 from robosystems.config.graph_tier import GraphTier
 from robosystems.middleware.graph.types import is_subgraph_id, parse_graph_id
-from robosystems.models.iam import Graph, GraphUser, User
+from robosystems.models.core import Graph, GraphUser, User
 
 
 @pytest.fixture

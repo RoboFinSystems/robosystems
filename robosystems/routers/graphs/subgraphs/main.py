@@ -23,8 +23,8 @@ from robosystems.models.api.graphs.subgraphs import (
   SubgraphSummary,
   SubgraphType,
 )
-from robosystems.models.iam.graph import Graph
-from robosystems.models.iam.user import User
+from robosystems.models.core.graph import Graph
+from robosystems.models.core.user import User
 from robosystems.security import SecurityAuditLogger, SecurityEventType
 
 from .utils import (

@@ -24,7 +24,7 @@ from robosystems.models.api.graphs.query import (
   DEFAULT_QUERY_TIMEOUT,
   CypherQueryRequest,
 )
-from robosystems.models.iam import User
+from robosystems.models.core import User
 
 # Initialize circuit breaker
 circuit_breaker = CircuitBreakerManager()

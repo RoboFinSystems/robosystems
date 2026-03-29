@@ -13,8 +13,8 @@ from robosystems.models.api.extensions.entity import (
   LedgerEntityResponse,
   UpdateEntityRequest,
 )
+from robosystems.models.core import User
 from robosystems.models.extensions import Entity
-from robosystems.models.iam import User
 
 router = APIRouter()
 

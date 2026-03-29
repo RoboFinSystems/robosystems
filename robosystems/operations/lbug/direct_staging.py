@@ -61,7 +61,7 @@ async def stage_file_directly(
   """
   # Lazy imports to avoid circular dependencies
   from robosystems.graph_api.client.factory import GraphClientFactory
-  from robosystems.models.iam import GraphFile, GraphTable
+  from robosystems.models.core import GraphFile, GraphTable
 
   start_time = time.time()
 

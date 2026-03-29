@@ -93,7 +93,7 @@ class GraphDeprovisionService:
     Returns:
         DeprovisionResult with status and details of each step.
     """
-    from ...models.iam.graph import Graph, GraphStatus
+    from ...models.core.graph import Graph, GraphStatus
 
     result = DeprovisionResult(graph_id=graph_id, status="success")
 
@@ -197,7 +197,7 @@ class GraphDeprovisionService:
     self, graph_id: str, session: Session, result: DeprovisionResult
   ) -> None:
     """Delete all subgraph databases and mark their records."""
-    from ...models.iam.graph import Graph, GraphStatus
+    from ...models.core.graph import Graph, GraphStatus
 
     subgraphs = Graph.get_subgraphs(graph_id, session)
     if not subgraphs:
@@ -269,10 +269,13 @@ class GraphDeprovisionService:
     GraphBackup records are intentionally kept for post-deprovisioning hosting.
     """
     try:
-      from ...models.iam.graph_credits import GraphCredits, GraphCreditTransaction
-      from ...models.iam.graph_file import GraphFile
-      from ...models.iam.graph_schema import GraphSchema
-      from ...models.iam.graph_user import GraphUser
+      from ...models.core.graph.graph_credits import (
+        GraphCredits,
+        GraphCreditTransaction,
+      )
+      from ...models.core.graph.graph_file import GraphFile
+      from ...models.core.graph.graph_schema import GraphSchema
+      from ...models.core.graph.graph_user import GraphUser
 
       session.query(GraphCreditTransaction).filter(
         GraphCreditTransaction.graph_id == graph_id
@@ -307,7 +310,7 @@ class GraphDeprovisionService:
   ) -> None:
     """Update the billing subscription with deprovisioning metadata."""
     try:
-      from ...models.billing.subscription import BillingSubscription
+      from ...models.core.billing.subscription import BillingSubscription
 
       config = get_deprovisioning_config()
       sub = BillingSubscription.get_by_resource("graph", graph_id, session)
@@ -315,7 +318,7 @@ class GraphDeprovisionService:
         return
 
       # Get tier for hosting duration
-      from ...models.iam.graph import Graph
+      from ...models.core.graph import Graph
 
       graph = session.query(Graph).filter(Graph.graph_id == graph_id).first()
       tier = graph.graph_tier if graph else "ladybug-standard"

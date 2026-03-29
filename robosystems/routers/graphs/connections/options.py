@@ -13,7 +13,7 @@ from robosystems.models.api.graphs.connections import (
   ConnectionOptionsResponse,
   ConnectionProviderInfo,
 )
-from robosystems.models.iam import User
+from robosystems.models.core import User
 
 router = APIRouter()
 

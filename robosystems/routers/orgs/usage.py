@@ -16,7 +16,7 @@ from ...models.api.orgs import (
   OrgUsageResponse,
   OrgUsageSummary,
 )
-from ...models.iam import (
+from ...models.core import (
   Graph,
   GraphCredits,
   GraphUsage,

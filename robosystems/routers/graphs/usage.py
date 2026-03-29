@@ -34,7 +34,7 @@ from robosystems.models.api.graphs.metrics import (
   PerformanceInsights,
   StorageSummary,
 )
-from robosystems.models.iam import GraphUsage, User
+from robosystems.models.core import GraphUsage, User
 from robosystems.operations.graph.metrics_service import GraphMetricsService
 
 router = APIRouter(tags=["Usage"])

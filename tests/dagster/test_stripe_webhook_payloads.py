@@ -303,8 +303,8 @@ class TestResolveSubscription:
     customer.org_id = org_id
     return customer
 
-  @patch("robosystems.models.billing.BillingCustomer")
-  @patch("robosystems.models.billing.BillingSubscription")
+  @patch("robosystems.models.core.billing.BillingCustomer")
+  @patch("robosystems.models.core.billing.BillingSubscription")
   def test_new_sub_invoice_resolves_by_provider_id(self, MockSub, MockCustomer):
     """New subscription invoice resolves via provider_subscription_id."""
     mock_sub = self._make_mock_subscription()
@@ -319,8 +319,8 @@ class TestResolveSubscription:
       "sub_1T98GkReD8VoQizP4kyPVtC1", db
     )
 
-  @patch("robosystems.models.billing.BillingCustomer")
-  @patch("robosystems.models.billing.BillingSubscription")
+  @patch("robosystems.models.core.billing.BillingCustomer")
+  @patch("robosystems.models.core.billing.BillingSubscription")
   def test_renewal_invoice_resolves_by_provider_id(self, MockSub, MockCustomer):
     """Renewal invoice resolves via parent.subscription_details.subscription."""
     mock_sub = self._make_mock_subscription()
@@ -335,8 +335,8 @@ class TestResolveSubscription:
       "sub_1SzioUReD8VoQizPuBWqzco7", db
     )
 
-  @patch("robosystems.models.billing.BillingCustomer")
-  @patch("robosystems.models.billing.BillingSubscription")
+  @patch("robosystems.models.core.billing.BillingCustomer")
+  @patch("robosystems.models.core.billing.BillingSubscription")
   def test_renewal_payment_resolves_by_provider_id(self, MockSub, MockCustomer):
     """Renewal payment_succeeded resolves via parent.subscription_details."""
     mock_sub = self._make_mock_subscription()
@@ -348,8 +348,8 @@ class TestResolveSubscription:
     result = _resolve_subscription(RENEWAL_INVOICE_PAID, db, ctx)
     assert result == mock_sub
 
-  @patch("robosystems.models.billing.BillingCustomer")
-  @patch("robosystems.models.billing.BillingSubscription")
+  @patch("robosystems.models.core.billing.BillingCustomer")
+  @patch("robosystems.models.core.billing.BillingSubscription")
   def test_subscription_updated_resolves(self, MockSub, MockCustomer):
     """Subscription updated event resolves (items.data[].subscription)."""
     mock_sub = self._make_mock_subscription()
@@ -362,8 +362,8 @@ class TestResolveSubscription:
     result = _resolve_subscription(RENEWAL_SUBSCRIPTION_UPDATED, db, ctx)
     assert result == mock_sub
 
-  @patch("robosystems.models.billing.BillingCustomer")
-  @patch("robosystems.models.billing.BillingSubscription")
+  @patch("robosystems.models.core.billing.BillingCustomer")
+  @patch("robosystems.models.core.billing.BillingSubscription")
   def test_falls_back_to_stripe_subscription_id(self, MockSub, MockCustomer):
     """Falls back to stripe_subscription_id column when provider_id miss."""
     mock_sub = self._make_mock_subscription()
@@ -379,8 +379,8 @@ class TestResolveSubscription:
       "sub_1SzioUReD8VoQizPuBWqzco7", db
     )
 
-  @patch("robosystems.models.billing.BillingCustomer")
-  @patch("robosystems.models.billing.BillingSubscription")
+  @patch("robosystems.models.core.billing.BillingCustomer")
+  @patch("robosystems.models.core.billing.BillingSubscription")
   def test_falls_back_to_customer_lookup(self, MockSub, MockCustomer):
     """Falls back to customer → org → subscription when sub ID lookup fails."""
     mock_sub = self._make_mock_subscription()
@@ -404,8 +404,8 @@ class TestResolveSubscription:
     assert result == mock_sub
     MockCustomer.get_by_stripe_customer_id.assert_called_with("cus_Txe6Gs8nXx6gMj", db)
 
-  @patch("robosystems.models.billing.BillingCustomer")
-  @patch("robosystems.models.billing.BillingSubscription")
+  @patch("robosystems.models.core.billing.BillingCustomer")
+  @patch("robosystems.models.core.billing.BillingSubscription")
   def test_customer_fallback_no_recency_guard(self, MockSub, MockCustomer):
     """Customer fallback works for renewal (no 5-minute recency guard).
 
@@ -439,8 +439,8 @@ class TestResolveSubscription:
         # Ensure no created_at comparison in the filter
         assert "created_at" not in str(arg)
 
-  @patch("robosystems.models.billing.BillingCustomer")
-  @patch("robosystems.models.billing.BillingSubscription")
+  @patch("robosystems.models.core.billing.BillingCustomer")
+  @patch("robosystems.models.core.billing.BillingSubscription")
   def test_raises_value_error_when_not_found(self, MockSub, MockCustomer):
     """Raises SubscriptionNotFoundError when subscription cannot be found."""
     MockSub.get_by_provider_subscription_id.return_value = None
@@ -453,8 +453,8 @@ class TestResolveSubscription:
     with pytest.raises(SubscriptionNotFoundError, match="Subscription not found"):
       _resolve_subscription(RENEWAL_INVOICE_CREATED, db, ctx)
 
-  @patch("robosystems.models.billing.BillingCustomer")
-  @patch("robosystems.models.billing.BillingSubscription")
+  @patch("robosystems.models.core.billing.BillingCustomer")
+  @patch("robosystems.models.core.billing.BillingSubscription")
   def test_raises_when_customer_has_no_subscriptions(self, MockSub, MockCustomer):
     """Raises SubscriptionNotFoundError when customer exists but has no subs."""
     mock_customer = self._make_mock_customer()
@@ -475,8 +475,8 @@ class TestResolveSubscription:
     with pytest.raises(SubscriptionNotFoundError, match="Subscription not found"):
       _resolve_subscription(RENEWAL_INVOICE_CREATED, db, ctx)
 
-  @patch("robosystems.models.billing.BillingCustomer")
-  @patch("robosystems.models.billing.BillingSubscription")
+  @patch("robosystems.models.core.billing.BillingCustomer")
+  @patch("robosystems.models.core.billing.BillingSubscription")
   def test_checkout_session_resolves_by_top_level_subscription(
     self, MockSub, MockCustomer
   ):

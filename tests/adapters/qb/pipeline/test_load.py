@@ -216,7 +216,9 @@ class TestUpdateLastSync:
         "robosystems.database.SessionFactory",
         return_value=mock_session,
       ),
-      patch("robosystems.models.iam.connection.Connection") as MockConnection,
+      patch(
+        "robosystems.models.core.connection.connection.Connection"
+      ) as MockConnection,
     ):
       MockConnection.get_by_id.return_value = mock_conn
       _update_last_sync(context, config)

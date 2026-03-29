@@ -73,7 +73,7 @@ class TestValidateMcpAccess:
         return_value=False,
       ),
       patch(
-        "robosystems.models.iam.GraphUser.user_has_access",
+        "robosystems.models.core.GraphUser.user_has_access",
         return_value=True,
       ),
     ):
@@ -90,7 +90,7 @@ class TestValidateMcpAccess:
         return_value=False,
       ),
       patch(
-        "robosystems.models.iam.GraphUser.user_has_access",
+        "robosystems.models.core.GraphUser.user_has_access",
         return_value=False,
       ),
     ):

@@ -14,7 +14,7 @@ from robosystems.middleware.billing.enforcement import (
   check_can_provision_graph,
   check_graph_subscription_active,
 )
-from robosystems.models.billing import SubscriptionStatus
+from robosystems.models.core.billing import SubscriptionStatus
 
 
 class TestCheckCanProvisionGraph:

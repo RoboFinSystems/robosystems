@@ -49,7 +49,7 @@ from robosystems.models.api.graphs.tables import (
   GetFileInfoResponse,
   ListTableFilesResponse,
 )
-from robosystems.models.iam import Graph, GraphFile, GraphTable, User
+from robosystems.models.core import Graph, GraphFile, GraphTable, User
 from robosystems.operations.aws.s3 import S3Client
 
 router = APIRouter()

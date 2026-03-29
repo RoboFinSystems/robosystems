@@ -24,7 +24,7 @@ from robosystems.middleware.robustness import (
   TimeoutCoordinator,
 )
 from robosystems.models.api.graphs.health import DatabaseInfoResponse
-from robosystems.models.iam import User
+from robosystems.models.core import User
 
 # Create router
 router = APIRouter(tags=["Graph Info"])

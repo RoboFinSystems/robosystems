@@ -22,12 +22,12 @@ from ...config.shared_repositories import (
 from ...config.shared_repositories import (
   is_repository_enabled as _is_repository_enabled,
 )
-from ...models.iam.user_repository import (
+from ...models.core.user.user_repository import (
   RepositoryAccessLevel,
   RepositoryType,
   UserRepository,
 )
-from ...models.iam.user_repository_credits import UserRepositoryCredits
+from ...models.core.user.user_repository_credits import UserRepositoryCredits
 
 logger = logging.getLogger(__name__)
 
@@ -75,7 +75,7 @@ class RepositorySubscriptionService:
     Raises:
         ValueError: If repository type is invalid or not configured
     """
-    from ...models.iam.graph import Graph
+    from ...models.core.graph import Graph
 
     graph_id = repository_type.value
     existing = self.session.query(Graph).filter(Graph.graph_id == graph_id).first()

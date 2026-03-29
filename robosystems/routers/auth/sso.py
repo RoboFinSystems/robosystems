@@ -38,7 +38,7 @@ from ...models.api.auth import (
   SSOTokenResponse,
 )
 from ...models.api.common import ErrorResponse
-from ...models.iam import User
+from ...models.core import User
 from ...security import SecurityAuditLogger, SecurityEventType
 from .utils import (
   AVAILABLE_APPS,

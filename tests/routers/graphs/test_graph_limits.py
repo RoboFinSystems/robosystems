@@ -7,7 +7,7 @@ from fastapi import status
 from httpx import AsyncClient
 
 from robosystems.config import env  # Import to enable patching
-from robosystems.models.iam import OrgLimits
+from robosystems.models.core import OrgLimits
 
 
 @pytest.mark.asyncio
@@ -32,7 +32,7 @@ class TestGraphCreationLimits:
   ):
     """Test that orgs with limit=0 get 403 error when creating graphs."""
     with patch("robosystems.database.get_db_session") as mock_get_db:
-      with patch("robosystems.models.iam.OrgUser.get_user_orgs") as mock_get_user_orgs:
+      with patch("robosystems.models.core.OrgUser.get_user_orgs") as mock_get_user_orgs:
         with patch.object(OrgLimits, "get_or_create_for_org") as mock_get_limits:
           # Create mock limits with zero max
           mock_limits = Mock()
@@ -71,7 +71,7 @@ class TestGraphCreationLimits:
   ):
     """Test that orgs at their limit cannot create more graphs."""
     with patch("robosystems.database.get_db_session") as mock_get_db:
-      with patch("robosystems.models.iam.OrgUser.get_user_orgs") as mock_get_user_orgs:
+      with patch("robosystems.models.core.OrgUser.get_user_orgs") as mock_get_user_orgs:
         with patch.object(OrgLimits, "get_or_create_for_org") as mock_get_limits:
           # Create mock limits at maximum
           mock_limits = Mock()
@@ -118,7 +118,7 @@ class TestGraphCreationLimits:
     with patch.object(env, "ORG_GRAPHS_DEFAULT_LIMIT", 0):
       with patch("robosystems.database.get_db_session") as mock_get_db:
         with patch(
-          "robosystems.models.iam.OrgUser.get_user_orgs"
+          "robosystems.models.core.OrgUser.get_user_orgs"
         ) as mock_get_user_orgs:
           with patch.object(OrgLimits, "get_or_create_for_org") as mock_get_limits:
             # Mock creating new org with env default
@@ -161,7 +161,7 @@ class TestGraphCreationLimits:
     for limit, expected_message_part in test_cases:
       with patch("robosystems.database.get_db_session") as mock_get_db:
         with patch(
-          "robosystems.models.iam.OrgUser.get_user_orgs"
+          "robosystems.models.core.OrgUser.get_user_orgs"
         ) as mock_get_user_orgs:
           with patch.object(OrgLimits, "get_or_create_for_org") as mock_get_limits:
             mock_limits = Mock()

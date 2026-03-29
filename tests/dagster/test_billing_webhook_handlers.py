@@ -6,9 +6,9 @@ without requiring a real database or Stripe connection.
 
 NOTE on patching strategy:
   All billing models are imported *inside* each handler function body via:
-    from robosystems.models.billing import BillingSubscription, ...
+    from robosystems.models.core.billing import BillingSubscription, ...
   This means the names are NOT attributes of the billing module, so we must
-  patch at the source location (e.g., "robosystems.models.billing.BillingSubscription")
+  patch at the source location (e.g., "robosystems.models.core.billing.BillingSubscription")
   rather than "robosystems.dagster.jobs.billing.BillingSubscription".
   Similarly, the SSE provisioning helpers are imported inside
   _trigger_resource_provisioning and must be patched at their source path.
@@ -23,8 +23,8 @@ import pytest
 # Patch target constants (avoids repeating long strings in every test)
 # ---------------------------------------------------------------------------
 
-_BILLING = "robosystems.models.billing"
-_IAM = "robosystems.models.iam"
+_BILLING = "robosystems.models.core.billing"
+_IAM = "robosystems.models.core"
 _SSE = "robosystems.middleware.sse.direct_monitor"
 _BILLING_JOBS = "robosystems.dagster.jobs.billing"
 
@@ -1395,10 +1395,10 @@ class TestHandleSubscriptionUpdated:
 
     with (
       patch(PATCH_BILLING_SUB) as MockSub,
-      patch("robosystems.models.iam.graph.Graph.get_by_id", return_value=mock_graph),
-      patch("robosystems.models.iam.graph.GraphStatus") as MockGraphStatus,
+      patch("robosystems.models.core.graph.Graph.get_by_id", return_value=mock_graph),
+      patch("robosystems.models.core.graph.GraphStatus") as MockGraphStatus,
     ):
-      from robosystems.models.iam.graph import GraphStatus
+      from robosystems.models.core.graph import GraphStatus
 
       mock_graph.status = GraphStatus.SUSPENDED.value
       MockGraphStatus.SUSPENDED = GraphStatus.SUSPENDED

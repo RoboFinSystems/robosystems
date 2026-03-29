@@ -35,7 +35,7 @@ class TestGetSubscriptionPlan:
   def test_no_customer_returns_default_plan(self, pricing_service):
     with (
       patch(
-        "robosystems.models.billing.customer.BillingCustomer.get_by_user_id",
+        "robosystems.models.core.billing.customer.BillingCustomer.get_by_user_id",
         return_value=None,
       ),
       patch(
@@ -62,7 +62,7 @@ class TestGetSubscriptionPlan:
 
     with (
       patch(
-        "robosystems.models.billing.customer.BillingCustomer.get_by_user_id",
+        "robosystems.models.core.billing.customer.BillingCustomer.get_by_user_id",
         return_value=mock_customer,
       ),
       patch(
@@ -84,7 +84,7 @@ class TestGetSubscriptionPlan:
 
     with (
       patch(
-        "robosystems.models.billing.customer.BillingCustomer.get_by_user_id",
+        "robosystems.models.core.billing.customer.BillingCustomer.get_by_user_id",
         return_value=mock_customer,
       ),
       patch(
@@ -113,7 +113,7 @@ class TestGetSubscriptionPlan:
 
     with (
       patch(
-        "robosystems.models.billing.customer.BillingCustomer.get_by_user_id",
+        "robosystems.models.core.billing.customer.BillingCustomer.get_by_user_id",
         return_value=mock_customer,
       ),
       patch(

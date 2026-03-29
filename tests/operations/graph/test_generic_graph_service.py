@@ -91,10 +91,10 @@ class TestGenericGraphService:
         iter([mock_db_session, None]),  # User-graph relationship
       ]
 
-      with patch("robosystems.models.iam.OrgLimits") as mock_limits_class:
+      with patch("robosystems.models.core.OrgLimits") as mock_limits_class:
         mock_limits_class.get_or_create_for_org.return_value = mock_user_limits
 
-        with patch("robosystems.models.iam.OrgUser") as mock_org_user_class:
+        with patch("robosystems.models.core.OrgUser") as mock_org_user_class:
           mock_org_user = Mock()
           mock_org_user.org_id = "org_test_123"
           mock_org_user_class.get_user_orgs.return_value = [mock_org_user]
@@ -111,12 +111,14 @@ class TestGenericGraphService:
             ) as mock_get_client:
               mock_get_client.return_value = mock_lbug_client
 
-              with patch("robosystems.models.iam.graph.Graph") as mock_graph_class:
+              with patch("robosystems.models.core.graph.Graph") as mock_graph_class:
                 mock_graph = Mock()
                 mock_graph_class.create.return_value = mock_graph
 
-                with patch("robosystems.models.iam.GraphUser"):
-                  with patch("robosystems.models.iam.GraphSchema") as mock_schema_class:
+                with patch("robosystems.models.core.GraphUser"):
+                  with patch(
+                    "robosystems.models.core.GraphSchema"
+                  ) as mock_schema_class:
                     mock_schema_class.create.return_value = Mock()
 
                     with patch(
@@ -214,10 +216,10 @@ class TestGenericGraphService:
         iter([mock_db_session, None]),  # User-graph relationship
       ]
 
-      with patch("robosystems.models.iam.OrgLimits") as mock_limits_class:
+      with patch("robosystems.models.core.OrgLimits") as mock_limits_class:
         mock_limits_class.get_or_create_for_org.return_value = mock_user_limits
 
-        with patch("robosystems.models.iam.OrgUser") as mock_org_user_class:
+        with patch("robosystems.models.core.OrgUser") as mock_org_user_class:
           mock_org_user = Mock()
           mock_org_user.org_id = "org_test_123"
           mock_org_user_class.get_user_orgs.return_value = [mock_org_user]
@@ -246,13 +248,13 @@ class TestGenericGraphService:
                 mock_schema_instance.merge_with_base.return_value = mock_parsed_schema
                 mock_schema_mgr.return_value = mock_schema_instance
 
-                with patch("robosystems.models.iam.graph.Graph") as mock_graph_class:
+                with patch("robosystems.models.core.graph.Graph") as mock_graph_class:
                   mock_graph = Mock()
                   mock_graph_class.create.return_value = mock_graph
 
-                  with patch("robosystems.models.iam.GraphUser"):
+                  with patch("robosystems.models.core.GraphUser"):
                     with patch(
-                      "robosystems.models.iam.GraphSchema"
+                      "robosystems.models.core.GraphSchema"
                     ) as mock_schema_class:
                       mock_schema_class.create.return_value = Mock()
 
@@ -324,10 +326,10 @@ class TestGenericGraphService:
     ) as mock_get_db:
       mock_get_db.return_value = iter([mock_db_session, None])
 
-      with patch("robosystems.models.iam.OrgLimits") as mock_limits_class:
+      with patch("robosystems.models.core.OrgLimits") as mock_limits_class:
         mock_limits_class.get_or_create_for_org.return_value = mock_user_limits
 
-        with patch("robosystems.models.iam.OrgUser") as mock_org_user_class:
+        with patch("robosystems.models.core.OrgUser") as mock_org_user_class:
           mock_org_user = Mock()
           mock_org_user.org_id = "org_test_123"
           mock_org_user_class.get_user_orgs.return_value = [mock_org_user]
@@ -354,10 +356,10 @@ class TestGenericGraphService:
     ) as mock_get_db:
       mock_get_db.return_value = iter([mock_db_session, None])
 
-      with patch("robosystems.models.iam.OrgLimits") as mock_limits_class:
+      with patch("robosystems.models.core.OrgLimits") as mock_limits_class:
         mock_limits_class.get_or_create_for_org.return_value = mock_user_limits
 
-        with patch("robosystems.models.iam.OrgUser") as mock_org_user_class:
+        with patch("robosystems.models.core.OrgUser") as mock_org_user_class:
           mock_org_user = Mock()
           mock_org_user.org_id = "org_test_123"
           mock_org_user_class.get_user_orgs.return_value = [mock_org_user]
@@ -398,10 +400,10 @@ class TestGenericGraphService:
     ) as mock_get_db:
       mock_get_db.return_value = iter([mock_db_session, None])
 
-      with patch("robosystems.models.iam.OrgLimits") as mock_limits_class:
+      with patch("robosystems.models.core.OrgLimits") as mock_limits_class:
         mock_limits_class.get_or_create_for_org.return_value = mock_user_limits
 
-        with patch("robosystems.models.iam.OrgUser") as mock_org_user_class:
+        with patch("robosystems.models.core.OrgUser") as mock_org_user_class:
           mock_org_user = Mock()
           mock_org_user.org_id = "org_test_123"
           mock_org_user_class.get_user_orgs.return_value = [mock_org_user]
