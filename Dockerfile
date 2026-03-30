@@ -60,12 +60,12 @@ COPY --from=extensions \
     /ladybug-extension/${LADYBUG_EXT_VERSION}/linux_${TARGETARCH}/vector/libvector.lbug_extension
 
 # Download DuckDB shared library from official release (required by LadybugDB DuckDB extension)
-# DuckDB v1.4.2 changed architecture naming: arm64/amd64 (not aarch64)
-RUN DUCKDB_VERSION=1.4.2 && \
+# DuckDB v1.4.x uses architecture naming: arm64/amd64 (not aarch64)
+RUN DUCKDB_VERSION=1.4.4 && \
     if [ "${TARGETARCH}" = "arm64" ]; then \
-        DUCKDB_SHA256="46c5db4fb425e49834a2a5dd0625a2569e7d38b8b17718af0f97b980acc7e78a"; \
+        DUCKDB_SHA256="c8e20af1e0064bdb7bf79af4d16f17ee8be16803bc98a4df58588bed1301c042"; \
     elif [ "${TARGETARCH}" = "amd64" ]; then \
-        DUCKDB_SHA256="1aaed473524dfd6d2956910409e24dbf968cf23f261c7f361f586cd4bbdd6889"; \
+        DUCKDB_SHA256="1ef33048e12235115ac0d277a0aaccbb560e33248144f488b5ac005cd9ba81b5"; \
     else \
         echo "ERROR: Unsupported architecture: ${TARGETARCH}" && exit 1; \
     fi && \
