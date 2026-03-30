@@ -136,10 +136,10 @@ class TestTableOrdering:
     assert NODE_TABLES[0] == "Entity"
 
   def test_expected_node_count(self):
-    assert len(NODE_TABLES) == 8
+    assert len(NODE_TABLES) == 14  # 8 transaction + 6 reporting
 
   def test_expected_relationship_count(self):
-    assert len(RELATIONSHIP_TABLES) == 10
+    assert len(RELATIONSHIP_TABLES) == 20  # 10 transaction + 10 reporting
 
 
 class TestLedgerMaterializer:

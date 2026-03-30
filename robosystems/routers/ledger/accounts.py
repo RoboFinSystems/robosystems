@@ -73,8 +73,13 @@ async def list_accounts(
 ):
   try:
     with extensions_session(graph_id) as session:
-      query = select(Element)
-      count_query = select(func.count()).select_from(Element)
+      # Only return company CoA elements, not seed taxonomy elements
+      from robosystems.models.extensions.roboledger import COA_SOURCES
+
+      query = select(Element).where(Element.source.in_(COA_SOURCES))
+      count_query = (
+        select(func.count()).select_from(Element).where(Element.source.in_(COA_SOURCES))
+      )
 
       if classification is not None:
         query = query.where(Element.classification == classification)
@@ -120,7 +125,16 @@ async def get_account_tree(
 ):
   try:
     with extensions_session(graph_id) as session:
-      rows = session.execute(select(Element).order_by(Element.code)).scalars().all()
+      # Only return company CoA elements, not seed taxonomy elements
+      from robosystems.models.extensions.roboledger import COA_SOURCES
+
+      rows = (
+        session.execute(
+          select(Element).where(Element.source.in_(COA_SOURCES)).order_by(Element.code)
+        )
+        .scalars()
+        .all()
+      )
 
       nodes: dict[str, AccountTreeNode] = {}
       roots: list[AccountTreeNode] = []

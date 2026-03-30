@@ -1,14 +1,14 @@
 """ReportDefinition model — generated report configurations.
 
-Stores the configuration needed to produce a report. Reusable:
-"regenerate my Income Statement for Q2" re-runs the same definition
-with new dates. References Report/Fact/FactSet nodes in the graph
-after materialization.
+Stores the configuration needed to produce a report. A report is tied to a
+Taxonomy (which contains multiple Structures like IS, BS, CF). Facts are
+generated for all mapped elements across all structures in the taxonomy.
+References Report/Fact/FactSet nodes in the graph after materialization.
 """
 
 from datetime import UTC, datetime
 
-from sqlalchemy import Boolean, Column, DateTime, Float, Index, String
+from sqlalchemy import Boolean, Column, Date, DateTime, Float, Index, String
 from sqlalchemy.dialects.postgresql import JSONB
 
 from robosystems.db.extensions import ExtensionsBase
@@ -18,7 +18,7 @@ from robosystems.utils.ulid import generate_prefixed_ulid
 class ReportDefinition(ExtensionsBase):
   __tablename__ = "report_definitions"
   __table_args__ = (
-    Index("idx_report_defs_type", "report_type"),
+    Index("idx_report_defs_taxonomy", "taxonomy_id"),
     Index("idx_report_defs_status", "generation_status"),
   )
 
@@ -27,12 +27,14 @@ class ReportDefinition(ExtensionsBase):
   name = Column(String, nullable=False)
   description = Column(String, nullable=True)
 
-  # Report type
-  report_type = Column(String, nullable=False)
+  # Taxonomy — determines which structures (IS, BS, CF) are available
+  taxonomy_id = Column(String, nullable=False)
 
   # Configuration
   mapping_id = Column(String, nullable=True)
   period_type = Column(String, nullable=False, default="monthly")
+  period_start = Column(Date, nullable=True)
+  period_end = Column(Date, nullable=True)
   comparative = Column(Boolean, nullable=False, default=True)
 
   # Generated output references
@@ -45,6 +47,11 @@ class ReportDefinition(ExtensionsBase):
   ai_intent = Column(String, nullable=True)
   ai_workspace_id = Column(String, nullable=True)
   ai_confidence = Column(Float, nullable=True)
+
+  # Sharing provenance (populated on received/shared reports, null for local)
+  source_graph_id = Column(String, nullable=True)
+  source_report_id = Column(String, nullable=True)
+  shared_at = Column(DateTime, nullable=True)
 
   # Metadata
   metadata_ = Column("metadata", JSONB, nullable=False, default=dict)
@@ -60,4 +67,4 @@ class ReportDefinition(ExtensionsBase):
   created_by = Column(String, nullable=False)
 
   def __repr__(self) -> str:
-    return f"<ReportDefinition {self.name} {self.report_type}>"
+    return f"<ReportDefinition {self.name} {self.taxonomy_id}>"

@@ -49,6 +49,13 @@ NODE_TABLES = [
   "Dimension",
   "Structure",
   "Association",
+  # Reporting layer
+  "Taxonomy",
+  "Report",
+  "Period",
+  "Unit",
+  "Fact",
+  "FactSet",
 ]
 
 # Relationship tables in materialization order (nodes must exist first)
@@ -63,6 +70,17 @@ RELATIONSHIP_TABLES = [
   "TRANSACTION_HAS_DIMENSION",
   "ENTRY_HAS_DIMENSION",
   "LINE_ITEM_HAS_DIMENSION",
+  # Reporting layer
+  "STRUCTURE_HAS_TAXONOMY",
+  "ENTITY_HAS_REPORT",
+  "REPORT_USES_TAXONOMY",
+  "REPORT_HAS_FACT",
+  "FACT_HAS_ELEMENT",
+  "FACT_HAS_PERIOD",
+  "FACT_HAS_UNIT",
+  "FACT_HAS_ENTITY",
+  "STRUCTURE_HAS_FACT_SET",
+  "FACT_SET_CONTAINS_FACT",
 ]
 
 
@@ -241,9 +259,10 @@ def _staging_sql(graph_id: str, entity_id: str, connstr: str) -> dict[str, str]:
     WHERE is_active = true
   """
 
-  # Structure: one row representing the Chart of Accounts hierarchy
+  # Structure: synthetic CoA + seed reporting structures (IS, BS, CF)
   tables["Structure"] = f"""
     CREATE OR REPLACE TABLE Structure AS
+    -- Synthetic Chart of Accounts structure
     SELECT
       '{graph_id}_coa'                AS identifier,
       NULL::VARCHAR                   AS uri,
@@ -255,11 +274,28 @@ def _staging_sql(graph_id: str, entity_id: str, connstr: str) -> dict[str, str]:
       'ChartOfAccounts'               AS canonical_type,
       1.0::DOUBLE                     AS canonical_confidence,
       NULL::FLOAT[384]                AS embedding
+    UNION ALL
+    -- Seed reporting structures (income_statement, balance_sheet, cash_flow)
+    SELECT
+      id                              AS identifier,
+      NULL::VARCHAR                   AS uri,
+      NULL::VARCHAR                   AS network_uri,
+      description                     AS definition,
+      NULL::VARCHAR                   AS number,
+      structure_type                  AS type,
+      name,
+      structure_type                  AS canonical_type,
+      1.0::DOUBLE                     AS canonical_confidence,
+      NULL::FLOAT[384]                AS embedding
+    FROM postgres_scan('{c}', '{s}', 'structures')
+    WHERE structure_type NOT IN ('chart_of_accounts', 'coa_mapping')
+      AND is_active = true
   """
 
-  # Association: one per parent-child account pair in the CoA tree
+  # Association: CoA parent-child pairs + seed presentation associations
   tables["Association"] = f"""
     CREATE OR REPLACE TABLE Association AS
+    -- CoA parent-child hierarchy
     SELECT
       child.id || '_assoc'            AS identifier,
       'parent-child'                  AS arcrole,
@@ -275,6 +311,18 @@ def _staging_sql(graph_id: str, entity_id: str, connstr: str) -> dict[str, str]:
       ON child.parent_id = parent.id
     WHERE child.parent_id IS NOT NULL
       AND child.is_active = true
+    UNION ALL
+    -- Seed reporting associations (structure hierarchies)
+    SELECT
+      id                              AS identifier,
+      COALESCE(arcrole, 'parent-child') AS arcrole,
+      order_value,
+      association_type,
+      weight,
+      NULL::VARCHAR                   AS root,
+      NULL::VARCHAR                   AS preferred_label
+    FROM postgres_scan('{c}', '{s}', 'element_associations')
+    WHERE association_type = 'presentation'
   """
 
   # ── Relationship Tables ──────────────────────────────────────────────
@@ -318,6 +366,7 @@ def _staging_sql(graph_id: str, entity_id: str, connstr: str) -> dict[str, str]:
 
   tables["STRUCTURE_HAS_ASSOCIATION"] = f"""
     CREATE OR REPLACE TABLE STRUCTURE_HAS_ASSOCIATION AS
+    -- CoA structure → CoA associations
     SELECT
       '{graph_id}_coa'                AS src,
       child.id || '_assoc'            AS dst,
@@ -325,26 +374,50 @@ def _staging_sql(graph_id: str, entity_id: str, connstr: str) -> dict[str, str]:
     FROM postgres_scan('{c}', '{s}', 'elements') child
     WHERE child.parent_id IS NOT NULL
       AND child.is_active = true
+    UNION ALL
+    -- Seed structures → seed associations
+    SELECT
+      structure_id                    AS src,
+      id                              AS dst,
+      NULL::VARCHAR                   AS association_context
+    FROM postgres_scan('{c}', '{s}', 'element_associations')
+    WHERE association_type = 'presentation'
   """
 
   tables["ASSOCIATION_HAS_FROM_ELEMENT"] = f"""
     CREATE OR REPLACE TABLE ASSOCIATION_HAS_FROM_ELEMENT AS
+    -- CoA associations
     SELECT
       child.id || '_assoc'            AS src,
       child.parent_id                 AS dst
     FROM postgres_scan('{c}', '{s}', 'elements') child
     WHERE child.parent_id IS NOT NULL
       AND child.is_active = true
+    UNION ALL
+    -- Seed associations
+    SELECT
+      id                              AS src,
+      from_element_id                 AS dst
+    FROM postgres_scan('{c}', '{s}', 'element_associations')
+    WHERE association_type = 'presentation'
   """
 
   tables["ASSOCIATION_HAS_TO_ELEMENT"] = f"""
     CREATE OR REPLACE TABLE ASSOCIATION_HAS_TO_ELEMENT AS
+    -- CoA associations
     SELECT
       child.id || '_assoc'            AS src,
       child.id                        AS dst
     FROM postgres_scan('{c}', '{s}', 'elements') child
     WHERE child.parent_id IS NOT NULL
       AND child.is_active = true
+    UNION ALL
+    -- Seed associations
+    SELECT
+      id                              AS src,
+      to_element_id                   AS dst
+    FROM postgres_scan('{c}', '{s}', 'element_associations')
+    WHERE association_type = 'presentation'
   """
 
   # Dimension junction tables (may be empty if no dimensions loaded yet)
@@ -370,6 +443,216 @@ def _staging_sql(graph_id: str, entity_id: str, connstr: str) -> dict[str, str]:
       line_item_id                    AS src,
       dimension_id                    AS dst
     FROM postgres_scan('{c}', '{s}', 'line_item_dimensions')
+  """
+
+  # ── Reporting Layer ────────────────────────────────────────────────────
+  # These tables are populated from report_definitions and report_facts
+  # (generated by the report builder). They may be empty if no reports
+  # have been generated yet — that's fine, they'll be populated on next
+  # materialization after report creation.
+
+  tables["Taxonomy"] = f"""
+    CREATE OR REPLACE TABLE Taxonomy AS
+    SELECT
+      id                              AS identifier,
+      namespace_uri                   AS uri,
+      name,
+      version,
+      namespace_uri                   AS namespace,
+      description
+    FROM postgres_scan('{c}', '{s}', 'taxonomies')
+  """
+
+  tables["Report"] = f"""
+    CREATE OR REPLACE TABLE Report AS
+    SELECT
+      id                              AS identifier,
+      NULL::VARCHAR                   AS uri,
+      name,
+      NULL::VARCHAR                   AS accession_number,
+      NULL::VARCHAR                   AS form,
+      CAST(last_generated AS VARCHAR) AS filing_date,
+      CAST(period_end AS VARCHAR)     AS report_date,
+      NULL::VARCHAR                   AS acceptance_date,
+      false                           AS is_inline_xbrl,
+      NULL::VARCHAR                   AS xbrl_processor_version,
+      true                            AS processed,
+      CASE WHEN generation_status = 'failed' THEN true ELSE false END AS failed,
+      CAST(updated_at AS VARCHAR)     AS updated_at,
+      NULL::INT                       AS fiscal_year_focus,
+      NULL::VARCHAR                   AS fiscal_period_focus,
+      NULL::INT                       AS fiscal_year_end_month
+    FROM postgres_scan('{c}', '{s}', 'report_definitions')
+    WHERE generation_status = 'published'
+  """
+
+  tables["Period"] = f"""
+    CREATE OR REPLACE TABLE Period AS
+    SELECT DISTINCT
+      md5(COALESCE(CAST(period_start AS VARCHAR), 'null')
+          || '_' || CAST(period_end AS VARCHAR)
+          || '_' || period_type)
+                                      AS identifier,
+      NULL::VARCHAR                   AS uri,
+      CAST(period_start AS VARCHAR)   AS start_date,
+      CAST(period_end AS VARCHAR)     AS end_date,
+      EXTRACT(YEAR FROM period_end)::INT AS calendar_year,
+      NULL::VARCHAR                   AS calendar_quarter,
+      CASE
+        WHEN period_start IS NOT NULL
+        THEN (period_end - period_start + 1)::INT
+        ELSE 0
+      END                             AS days_in_period,
+      period_type,
+      CASE
+        WHEN period_type = 'instant' THEN NULL
+        WHEN period_start IS NULL THEN NULL
+        WHEN (period_end - period_start) BETWEEN 80 AND 100 THEN 'quarterly'
+        WHEN (period_end - period_start) BETWEEN 170 AND 190 THEN 'semi_annual'
+        WHEN (period_end - period_start) BETWEEN 260 AND 280 THEN 'nine_months'
+        WHEN (period_end - period_start) BETWEEN 350 AND 380 THEN 'annual'
+        ELSE 'other'
+      END                             AS duration_type,
+      NULL::VARCHAR                   AS calendar_period_key
+    FROM postgres_scan('{c}', '{s}', 'report_facts')
+  """
+
+  tables["Unit"] = """
+    CREATE OR REPLACE TABLE Unit AS
+    SELECT
+      'unit_usd'                      AS identifier,
+      'iso4217:USD'                   AS uri,
+      'iso4217:USD'                   AS measure,
+      'USD'                           AS value,
+      NULL::VARCHAR                   AS numerator_uri,
+      NULL::VARCHAR                   AS denominator_uri
+  """
+
+  tables["Fact"] = f"""
+    CREATE OR REPLACE TABLE Fact AS
+    SELECT
+      id                              AS identifier,
+      NULL::VARCHAR                   AS uri,
+      CAST(value AS VARCHAR)          AS value,
+      value                           AS numeric_value,
+      'Numeric'                       AS fact_type,
+      '-2'                            AS decimals,
+      'inline'                        AS value_type,
+      NULL::VARCHAR                   AS content_type,
+      false                           AS has_dimensions,
+      0::BIGINT                       AS dimension_count
+    FROM postgres_scan('{c}', '{s}', 'report_facts')
+  """
+
+  tables["FactSet"] = f"""
+    CREATE OR REPLACE TABLE FactSet AS
+    SELECT DISTINCT
+      fact_set_id                     AS identifier
+    FROM postgres_scan('{c}', '{s}', 'report_facts')
+    WHERE fact_set_id IS NOT NULL
+  """
+
+  # ── Reporting Relationships ────────────────────────────────────────────
+
+  tables["STRUCTURE_HAS_TAXONOMY"] = f"""
+    CREATE OR REPLACE TABLE STRUCTURE_HAS_TAXONOMY AS
+    SELECT
+      id                              AS src,
+      taxonomy_id                     AS dst,
+      NULL::VARCHAR                   AS taxonomy_context
+    FROM postgres_scan('{c}', '{s}', 'structures')
+    WHERE taxonomy_id IS NOT NULL
+      AND structure_type NOT IN ('chart_of_accounts', 'coa_mapping')
+      AND is_active = true
+  """
+
+  tables["ENTITY_HAS_REPORT"] = f"""
+    CREATE OR REPLACE TABLE ENTITY_HAS_REPORT AS
+    SELECT
+      '{entity_id}'                   AS src,
+      id                              AS dst,
+      NULL::VARCHAR                   AS filing_context
+    FROM postgres_scan('{c}', '{s}', 'report_definitions')
+    WHERE generation_status = 'published'
+  """
+
+  tables["REPORT_USES_TAXONOMY"] = f"""
+    CREATE OR REPLACE TABLE REPORT_USES_TAXONOMY AS
+    SELECT
+      id                              AS src,
+      taxonomy_id                     AS dst,
+      NULL::VARCHAR                   AS taxonomy_context
+    FROM postgres_scan('{c}', '{s}', 'report_definitions')
+    WHERE generation_status = 'published'
+  """
+
+  tables["REPORT_HAS_FACT"] = f"""
+    CREATE OR REPLACE TABLE REPORT_HAS_FACT AS
+    SELECT
+      report_id                       AS src,
+      id                              AS dst,
+      NULL::VARCHAR                   AS fact_context
+    FROM postgres_scan('{c}', '{s}', 'report_facts')
+  """
+
+  tables["FACT_HAS_ELEMENT"] = f"""
+    CREATE OR REPLACE TABLE FACT_HAS_ELEMENT AS
+    SELECT
+      id                              AS src,
+      element_id                      AS dst
+    FROM postgres_scan('{c}', '{s}', 'report_facts')
+  """
+
+  tables["FACT_HAS_PERIOD"] = f"""
+    CREATE OR REPLACE TABLE FACT_HAS_PERIOD AS
+    SELECT
+      id                              AS src,
+      md5(COALESCE(CAST(period_start AS VARCHAR), 'null')
+          || '_' || CAST(period_end AS VARCHAR)
+          || '_' || period_type)
+                                      AS dst,
+      NULL::VARCHAR                   AS period_context
+    FROM postgres_scan('{c}', '{s}', 'report_facts')
+  """
+
+  tables["FACT_HAS_UNIT"] = f"""
+    CREATE OR REPLACE TABLE FACT_HAS_UNIT AS
+    SELECT
+      id                              AS src,
+      'unit_usd'                      AS dst,
+      NULL::VARCHAR                   AS unit_context
+    FROM postgres_scan('{c}', '{s}', 'report_facts')
+  """
+
+  tables["FACT_HAS_ENTITY"] = f"""
+    CREATE OR REPLACE TABLE FACT_HAS_ENTITY AS
+    SELECT
+      id                              AS src,
+      entity_id                       AS dst,
+      NULL::VARCHAR                   AS entity_context
+    FROM postgres_scan('{c}', '{s}', 'report_facts')
+  """
+
+  tables["STRUCTURE_HAS_FACT_SET"] = f"""
+    CREATE OR REPLACE TABLE STRUCTURE_HAS_FACT_SET AS
+    SELECT DISTINCT
+      -- Derive structure_id from fact_set_id pattern: 'factset_{{structure_id}}_{{report_id}}'
+      -- For now, join through report_facts to get structure mapping
+      rf.fact_set_id                  AS dst,
+      s.id                            AS src
+    FROM postgres_scan('{c}', '{s}', 'report_facts') rf
+    JOIN postgres_scan('{c}', '{s}', 'structures') s
+      ON rf.fact_set_id LIKE '%' || s.id || '%'
+    WHERE rf.fact_set_id IS NOT NULL
+  """
+
+  tables["FACT_SET_CONTAINS_FACT"] = f"""
+    CREATE OR REPLACE TABLE FACT_SET_CONTAINS_FACT AS
+    SELECT
+      fact_set_id                     AS src,
+      id                              AS dst
+    FROM postgres_scan('{c}', '{s}', 'report_facts')
+    WHERE fact_set_id IS NOT NULL
   """
 
   return tables
