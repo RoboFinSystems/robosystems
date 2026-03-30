@@ -153,24 +153,24 @@ class TestSchemaManagementIntegration:
 
     # Now create a graph with this schema
     with (
-      patch(
-        "robosystems.middleware.sse.dagster_monitor.DagsterRunMonitor.submit_job",
-        return_value="test-run-123",
-      ),
-      patch(
-        "robosystems.middleware.sse.dagster_monitor.DagsterRunMonitor.monitor_run",
-        new_callable=AsyncMock,
-        return_value={"status": "completed", "run_id": "test-run-123"},
-      ),
       patch("robosystems.models.core.OrgLimits.get_by_org_id") as mock_get_limits,
       patch(
         "robosystems.middleware.billing.enforcement.check_can_provision_graph",
         return_value=(True, None),
       ),
       patch(
-        "robosystems.operations.graph.generic_graph_service.GenericGraphService.create_graph",
+        "robosystems.worker.client.enqueue_task",
         new_callable=AsyncMock,
-        return_value={"graph_id": VALID_TEST_GRAPH_ID, "status": "created"},
+        return_value={
+          "operation_id": "task_01TEST",
+          "status": "pending",
+          "operation_type": "graph_creation",
+          "_links": {
+            "stream": "/v1/operations/task_01TEST/stream",
+            "status": "/v1/operations/task_01TEST/status",
+            "cancel": "/v1/operations/task_01TEST",
+          },
+        },
       ),
     ):
       # Mock org limits to allow graph creation

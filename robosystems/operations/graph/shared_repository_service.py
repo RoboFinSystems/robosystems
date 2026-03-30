@@ -5,7 +5,7 @@ This service handles the creation of shared repositories (SEC, industry, economi
 that are accessible across multiple companies. These repositories contain public data
 and are created on dedicated shared instances.
 
-Follows the same pattern as EntityGraphService and GenericGraphService:
+Follows the same pattern as GraphCreationService:
 1. Create LadybugDB database via Graph API client
 2. Install schema with extensions
 3. Create Graph metadata record in PostgreSQL

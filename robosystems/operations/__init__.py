@@ -14,10 +14,13 @@ from .connection_service import (
   ConnectionService,
 )
 from .graph.credit_service import CreditService
-from .graph.entity_graph_service import EntityGraphService, EntityGraphServiceSync
+from .graph.graph_creation_service import (
+  GraphCreationConfig,
+  GraphCreationResult,
+  GraphCreationService,
+)
 
 # Graph operations (high-level business logic)
-from .graph.generic_graph_service import GenericGraphService, GenericGraphServiceSync
 from .graph.metrics_service import GraphMetricsService
 from .graph.pricing_service import GraphPricingService
 from .graph.repository_subscription_service import RepositorySubscriptionService
@@ -45,12 +48,10 @@ __all__ = [
   "CreditService",
   "DatabaseLocation",
   "DatabaseStatus",
-  # Core business services
-  "EntityGraphService",
-  "EntityGraphServiceSync",
   # Graph operations
-  "GenericGraphService",
-  "GenericGraphServiceSync",
+  "GraphCreationConfig",
+  "GraphCreationResult",
+  "GraphCreationService",
   "GraphMetricsService",
   "GraphPricingService",
   "GraphSubscriptionService",

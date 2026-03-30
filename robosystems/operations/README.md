@@ -11,8 +11,7 @@ operations/
 ├── connection_service.py              # External service connection management
 ├── user_limits_service.py             # User limits and quota management
 ├── graph/                             # Graph database business operations
-│   ├── generic_graph_service.py       # Generic graph operations
-│   ├── entity_graph_service.py       # Entity-specific graph operations
+│   ├── graph_creation_service.py      # Unified graph creation pipeline (entity + generic)
 │   ├── subscription_service.py        # Graph subscription management
 │   ├── credit_service.py              # Credit system operations
 │   ├── pricing_service.py             # Pricing and billing logic
@@ -42,8 +41,7 @@ Operations orchestrate complex business workflows by:
 
 High-level business operations for graph database management:
 
-- **`GenericGraphService`** - Core graph CRUD operations
-- **`EntityGraphService`** - Entity-specific graph workflows
+- **`GraphCreationService`** - Unified graph creation pipeline (entity and generic graphs)
 - **`SubgraphService`** - Subgraph lifecycle management (create, list, delete)
 - **`GraphSubscriptionService`** - Billing subscription creation for graphs (uses billing namespace)
 - **`CreditService`** - Credit-based billing and consumption tracking
@@ -108,33 +106,33 @@ Many operations integrate with the credit system:
 ```python
 from robosystems.operations import (
     CreditService,
-    EntityGraphService,
-    ConnectionService
+    GraphCreationService,
+    GraphCreationConfig,
+    ConnectionService,
 )
 
-# Initialize services with context
+# Initialize services
 credit_service = CreditService(user_id="123", graph_id="entity_456")
-graph_service = EntityGraphService(graph_id="entity_456")
+creation_service = GraphCreationService()
 ```
 
 ### Workflow Orchestration
 
 ```python
-# Complex business workflow
-async def create_entity_with_data(user_id: str, entity_data: dict):
-    # 1. Create entity graph
-    graph_service = EntityGraphService()
-    graph_id = await graph_service.create_entity_graph(entity_data)
-
-    # 2. Set up billing subscription (done automatically by Dagster job)
-    # The create_graph Dagster job now handles subscription creation
-    # using GraphSubscriptionService with the billing namespace
-
-    # 3. Initialize credit allocation
-    credit_service = CreditService(user_id, graph_id)
-    await credit_service.allocate_initial_credits()
-
-    return graph_id
+# Graph creation via unified service
+async def create_entity_graph(user_id: str, entity_data: dict):
+    service = GraphCreationService()
+    result = await service.create(GraphCreationConfig(
+        user_id=user_id,
+        tier="ladybug-standard",
+        graph_name=entity_data["name"],
+        graph_type="entity",
+        schema_extensions=["roboledger"],
+        entity_data=entity_data,
+        create_entity=True,
+    ))
+    # Credits and billing are handled by the worker task handler
+    return result.graph_id
 ```
 
 ### Credit-Aware Operations
@@ -229,11 +227,20 @@ When creating new operations:
 ### Graph Operations
 
 ```python
-# Entity graph lifecycle
-service = EntityGraphService(graph_id="kg1a2b3c")
-await service.create_entity(entity_data)
-await service.add_financial_data(filing_data)
-metrics = await service.get_performance_metrics()
+# Graph creation (entity or generic) via unified pipeline
+from robosystems.operations.graph.graph_creation_service import (
+    GraphCreationConfig,
+    GraphCreationService,
+)
+
+service = GraphCreationService()
+result = await service.create(GraphCreationConfig(
+    user_id="user_123",
+    tier="ladybug-standard",
+    graph_name="My Company",
+    graph_type="entity",
+    schema_extensions=["roboledger"],
+))
 ```
 
 ### Subgraph Management
