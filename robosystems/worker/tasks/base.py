@@ -20,7 +20,7 @@ class BaseTask(ABC):
   def __init__(
     self,
     task_id: str,
-    graph_id: str,
+    graph_id: str | None,
     user_id: str,
     params: dict[str, Any],
     manager: OperationManager,

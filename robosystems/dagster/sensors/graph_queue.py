@@ -168,13 +168,12 @@ def _enqueue_graph_creation(
 def _create_sse_operation_sync(task_id: str, graph_id: str, user_id: str) -> None:
   """Create an SSE operation entry for the queued task (sync)."""
 
+  from datetime import UTC, datetime
+
   from robosystems.config.valkey_registry import ValkeyDatabase, create_redis_client
 
   sse = create_redis_client(ValkeyDatabase.SSE, decode_responses=True)
   try:
-    import json
-    from datetime import UTC, datetime
-
     metadata = json.dumps(
       {
         "operation_id": task_id,

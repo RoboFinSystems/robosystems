@@ -60,7 +60,7 @@ async def run() -> None:
       # BLMOVE atomically pops from main queue and pushes to inflight list.
       # If the worker crashes, the task stays in inflight for the reaper.
       task_json = await queue.blmove(
-        "worker:tasks", inflight_key, timeout=5, wherefrom="LEFT", whereto="LEFT"
+        "worker:tasks", inflight_key, timeout=5, src="LEFT", dest="LEFT"
       )
       if task_json is None:
         continue

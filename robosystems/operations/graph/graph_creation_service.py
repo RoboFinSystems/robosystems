@@ -132,11 +132,11 @@ class GraphCreationService:
     graph_client = None
     try:
       self._emit(config, "Creating graph database...", 40)
-      graph_client = await self._create_database(graph_id, location, config)
+      graph_client, custom_ddl = await self._create_database(graph_id, location, config)
 
       self._emit(config, "Installing schema...", 55)
       schema_ddl, schema_info = await self._install_schema(
-        graph_client, graph_id, config
+        graph_client, graph_id, config, custom_ddl=custom_ddl
       )
 
       self._emit(config, "Setting up user access...", 75)
@@ -247,8 +247,12 @@ class GraphCreationService:
     graph_id: str,
     location: DatabaseLocation,
     config: GraphCreationConfig,
-  ):
-    """Create the LadybugDB database via Graph API. Returns graph_client."""
+  ) -> tuple[Any, str | None]:
+    """Create the LadybugDB database via Graph API.
+
+    Returns (graph_client, custom_ddl). custom_ddl is non-None only for
+    custom schema graphs so _install_schema can reuse it without re-parsing.
+    """
     from robosystems.graph_api.client import get_graph_client_for_instance
 
     graph_client = await get_graph_client_for_instance(location.private_ip)
@@ -264,17 +268,22 @@ class GraphCreationService:
       custom_schema_ddl=custom_ddl,
     )
     logger.info(f"Database {graph_id} created on LadybugDB")
-    return graph_client
+    return graph_client, custom_ddl
 
   async def _install_schema(
     self,
-    graph_client,
+    graph_client: Any,
     graph_id: str,
     config: GraphCreationConfig,
+    custom_ddl: str | None = None,
   ) -> tuple[str, dict[str, Any]]:
-    """Resolve and install schema. Returns (ddl, persistence_info)."""
+    """Resolve and install schema. Returns (ddl, persistence_info).
+
+    For custom schemas, pass custom_ddl from _create_database to avoid
+    re-parsing. DDL was already applied during create_database.
+    """
     if config.has_custom_schema:
-      ddl = self._resolve_custom_schema_ddl(config.custom_schema)
+      ddl = custom_ddl or self._resolve_custom_schema_ddl(config.custom_schema)
       info = {
         "schema_type": "custom",
         "schema_ddl": ddl,
@@ -282,7 +291,6 @@ class GraphCreationService:
         "custom_schema_name": config.custom_schema.get("name"),
         "custom_schema_version": config.custom_schema.get("version"),
       }
-      # Custom schema DDL was already applied during create_database
       return ddl, info
 
     # Extensions schema — generate DDL and install
@@ -414,6 +422,9 @@ class GraphCreationService:
 
       db.commit()
 
+    except Exception:
+      db.rollback()
+      raise
     finally:
       try:
         next(db_gen)
