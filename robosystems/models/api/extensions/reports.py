@@ -27,6 +27,12 @@ class RegenerateReportRequest(BaseModel):
   period_end: date = Field(..., description="New period end date")
 
 
+class ShareReportRequest(BaseModel):
+  target_graph_ids: list[str] = Field(
+    ..., description="Graph IDs to share the report to"
+  )
+
+
 # ── Responses ──────────────────────────────────────────────────────────────
 
 
@@ -72,6 +78,22 @@ class ReportResponse(BaseModel):
   created_at: datetime
   last_generated: datetime | None = None
   structures: list[StructureSummary] = Field(default_factory=list)
+  # Sharing provenance (populated for received reports)
+  source_graph_id: str | None = None
+  source_report_id: str | None = None
+  shared_at: datetime | None = None
+
+
+class ShareResultItem(BaseModel):
+  target_graph_id: str
+  status: str  # "shared" or "error"
+  error: str | None = None
+  fact_count: int = 0
+
+
+class ShareReportResponse(BaseModel):
+  report_id: str
+  results: list[ShareResultItem]
 
 
 class StatementResponse(BaseModel):

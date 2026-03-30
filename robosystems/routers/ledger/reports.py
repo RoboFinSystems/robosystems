@@ -17,12 +17,15 @@ from robosystems.models.api.extensions.reports import (
   RegenerateReportRequest,
   ReportListResponse,
   ReportResponse,
+  ShareReportRequest,
+  ShareReportResponse,
+  ShareResultItem,
   StatementResponse,
   StructureSummary,
   ValidationCheckResponse,
 )
 from robosystems.models.core import User
-from robosystems.models.extensions import ReportDefinition, ReportFact
+from robosystems.models.extensions import ReportDefinition, ReportFact, ReportShare
 from robosystems.operations.reports.fact_grid import (
   ReportFact as ReportFactData,
 )
@@ -101,6 +104,9 @@ def _report_to_response(
     created_at=report_def.created_at,
     last_generated=report_def.last_generated,
     structures=structures,
+    source_graph_id=report_def.source_graph_id,
+    source_report_id=report_def.source_report_id,
+    shared_at=report_def.shared_at,
   )
 
 
@@ -536,3 +542,201 @@ async def delete_report(
       raise _ledger_404()
     logger.error(f"Report deletion failed: {e}")
     raise
+
+
+@router.post(
+  "/reports/{report_id}/share",
+  response_model=ShareReportResponse,
+  operation_id="shareReport",
+  summary="Share Report",
+  tags=["Ledger"],
+)
+async def share_report(
+  graph_id: str = Path(..., pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN),
+  report_id: str = Path(..., description="Report definition ID"),
+  body: ShareReportRequest = ...,
+  current_user: User = Depends(get_current_user_with_graph),
+  _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
+):
+  """Share a published report to other graphs.
+
+  Copies the report definition and its generated facts to each target graph's
+  tenant schema. The target graph must have 'roboledger' in its schema_extensions.
+  This is a snapshot — the target gets an immutable copy of the facts at this
+  point in time.
+  """
+  results: list[ShareResultItem] = []
+
+  try:
+    with extensions_session(graph_id) as source_session:
+      # Verify report exists and is published
+      report_def = source_session.get(ReportDefinition, report_id)
+      if not report_def:
+        raise _report_404(report_id)
+
+      if report_def.generation_status != "published":
+        raise HTTPException(
+          status_code=422,
+          detail="Only published reports can be shared.",
+        )
+
+      # Snapshot report fields before session closes (avoid detached instance)
+      report_snapshot = {
+        "id": report_def.id,
+        "name": report_def.name,
+        "description": report_def.description,
+        "taxonomy_id": report_def.taxonomy_id,
+        "mapping_id": report_def.mapping_id,
+        "period_type": report_def.period_type,
+        "period_start": report_def.period_start,
+        "period_end": report_def.period_end,
+        "comparative": report_def.comparative,
+      }
+
+      # Read the source facts
+      fact_rows = source_session.execute(
+        text("SELECT * FROM report_facts WHERE report_id = :report_id"),
+        {"report_id": report_id},
+      ).fetchall()
+
+      fact_columns = [
+        "id",
+        "report_id",
+        "element_id",
+        "value",
+        "period_start",
+        "period_end",
+        "period_type",
+        "unit",
+        "entity_id",
+        "fact_set_id",
+        "created_at",
+      ]
+      source_facts = [dict(zip(fact_columns, row, strict=False)) for row in fact_rows]
+
+    # Now share to each target graph
+    for target_graph_id in body.target_graph_ids:
+      result = _share_to_target(
+        source_graph_id=graph_id,
+        report_snapshot=report_snapshot,
+        source_facts=source_facts,
+        target_graph_id=target_graph_id,
+        shared_by=current_user.id,
+      )
+      results.append(result)
+
+      # Record the share in the source graph
+      if result.status == "shared":
+        with extensions_session(graph_id) as source_session:
+          share_record = ReportShare(
+            report_id=report_id,
+            target_graph_id=target_graph_id,
+            shared_by=current_user.id,
+            fact_count=result.fact_count,
+          )
+          source_session.add(share_record)
+          source_session.commit()
+
+  except ValueError:
+    raise _ledger_404()
+  except ProgrammingError as e:
+    if "does not exist" in str(e) and ("schema" in str(e) or "relation" in str(e)):
+      raise _ledger_404()
+    logger.error(f"Report sharing failed: {e}")
+    raise
+
+  return ShareReportResponse(report_id=report_id, results=results)
+
+
+def _share_to_target(
+  source_graph_id: str,
+  report_snapshot: dict,
+  source_facts: list[dict],
+  target_graph_id: str,
+  shared_by: str,
+) -> ShareResultItem:
+  """Copy report definition + facts to a target graph's tenant schema."""
+  from robosystems.db.platform import SessionFactory
+  from robosystems.models.core import Graph
+
+  # Validate the target graph exists and has roboledger schema
+  try:
+    with SessionFactory() as platform_session:
+      target_graph = platform_session.execute(
+        select(Graph).where(Graph.graph_id == target_graph_id)
+      ).scalar_one_or_none()
+
+      if not target_graph:
+        return ShareResultItem(
+          target_graph_id=target_graph_id,
+          status="error",
+          error=f"Graph '{target_graph_id}' not found.",
+        )
+
+      extensions = target_graph.schema_extensions or []
+      if "roboledger" not in extensions:
+        return ShareResultItem(
+          target_graph_id=target_graph_id,
+          status="error",
+          error="Target graph does not have 'roboledger' schema extension.",
+        )
+  except Exception as e:
+    return ShareResultItem(
+      target_graph_id=target_graph_id,
+      status="error",
+      error=f"Failed to validate target graph: {e!s}",
+    )
+
+  # Copy to the target schema
+  try:
+    now = datetime.now(UTC)
+    with extensions_session(target_graph_id) as target_session:
+      # Create the report definition in the target schema with provenance
+      shared_report = ReportDefinition(
+        name=report_snapshot["name"],
+        description=report_snapshot.get("description"),
+        taxonomy_id=report_snapshot["taxonomy_id"],
+        mapping_id=report_snapshot.get("mapping_id"),
+        period_type=report_snapshot["period_type"],
+        period_start=report_snapshot.get("period_start"),
+        period_end=report_snapshot.get("period_end"),
+        comparative=report_snapshot["comparative"],
+        generation_status="published",
+        created_by=shared_by,
+        source_graph_id=source_graph_id,
+        source_report_id=report_snapshot["id"],
+        shared_at=now,
+      )
+      target_session.add(shared_report)
+      target_session.flush()
+
+      # Copy facts with the new report ID
+      for fact_data in source_facts:
+        rf = ReportFact(
+          report_id=shared_report.id,
+          element_id=fact_data["element_id"],
+          value=fact_data["value"],
+          period_start=fact_data["period_start"],
+          period_end=fact_data["period_end"],
+          period_type=fact_data["period_type"],
+          unit=fact_data["unit"],
+          entity_id=fact_data["entity_id"],
+          fact_set_id=fact_data.get("fact_set_id"),
+        )
+        target_session.add(rf)
+
+      target_session.commit()
+
+      return ShareResultItem(
+        target_graph_id=target_graph_id,
+        status="shared",
+        fact_count=len(source_facts),
+      )
+
+  except Exception as e:
+    logger.error(f"Failed to share report to {target_graph_id}: {e}")
+    return ShareResultItem(
+      target_graph_id=target_graph_id,
+      status="error",
+      error=f"Failed to copy report data: {e!s}",
+    )

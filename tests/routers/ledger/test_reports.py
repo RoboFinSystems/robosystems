@@ -17,6 +17,7 @@ from robosystems.routers.ledger.reports import (
   get_report,
   get_statement,
   list_reports,
+  share_report,
 )
 
 MODULE = "robosystems.routers.ledger.reports"
@@ -47,6 +48,9 @@ def _make_report_def(**overrides):
   rd.ai_confidence = None
   rd.created_at = overrides.get("created_at", datetime(2026, 3, 29, tzinfo=UTC))
   rd.last_generated = overrides.get("last_generated", datetime(2026, 3, 29, tzinfo=UTC))
+  rd.source_graph_id = overrides.get("source_graph_id")
+  rd.source_report_id = overrides.get("source_report_id")
+  rd.shared_at = overrides.get("shared_at")
   rd.created_by = "usr_test123"
   return rd
 
@@ -336,3 +340,91 @@ class TestDeleteReport:
         )
 
     assert exc_info.value.status_code == 404
+
+
+class TestShareReport:
+  @pytest.mark.asyncio
+  async def test_rejects_unpublished_report(self):
+    mock_session = MagicMock()
+    rd = _make_report_def(generation_status="generating")
+    mock_session.get.return_value = rd
+
+    from robosystems.models.api.extensions.reports import ShareReportRequest
+
+    with patch(f"{MODULE}.extensions_session") as mock_ext:
+      mock_ext.return_value = _mock_session_context(mock_session)
+
+      with pytest.raises(HTTPException) as exc_info:
+        await share_report(
+          graph_id=GRAPH_ID,
+          report_id="rpt_01ABC",
+          body=ShareReportRequest(target_graph_ids=["kg_target_123"]),
+          current_user=_make_user(),
+          _rate_limit=None,
+        )
+
+    assert exc_info.value.status_code == 422
+    assert "published" in exc_info.value.detail
+
+  @pytest.mark.asyncio
+  async def test_report_not_found_for_share(self):
+    mock_session = MagicMock()
+    mock_session.get.return_value = None
+
+    from robosystems.models.api.extensions.reports import ShareReportRequest
+
+    with patch(f"{MODULE}.extensions_session") as mock_ext:
+      mock_ext.return_value = _mock_session_context(mock_session)
+
+      with pytest.raises(HTTPException) as exc_info:
+        await share_report(
+          graph_id=GRAPH_ID,
+          report_id="rpt_nonexistent",
+          body=ShareReportRequest(target_graph_ids=["kg_target_123"]),
+          current_user=_make_user(),
+          _rate_limit=None,
+        )
+
+    assert exc_info.value.status_code == 404
+
+  @pytest.mark.asyncio
+  async def test_share_returns_error_for_invalid_target(self):
+    """Target graph without roboledger schema should return error result."""
+    mock_session = MagicMock()
+    rd = _make_report_def(generation_status="published")
+    mock_session.get.return_value = rd
+
+    mock_result = MagicMock()
+    mock_result.fetchall.return_value = []
+    mock_session.execute.return_value = mock_result
+
+    from robosystems.models.api.extensions.reports import (
+      ShareReportRequest,
+      ShareResultItem,
+    )
+
+    with (
+      patch(f"{MODULE}.extensions_session") as mock_ext,
+      patch(
+        f"{MODULE}._share_to_target",
+        return_value=ShareResultItem(
+          target_graph_id="kg_no_ledger",
+          status="error",
+          error="Target graph does not have 'roboledger' schema extension.",
+          fact_count=0,
+        ),
+      ),
+    ):
+      mock_ext.return_value = _mock_session_context(mock_session)
+
+      result = await share_report(
+        graph_id=GRAPH_ID,
+        report_id="rpt_01ABC",
+        body=ShareReportRequest(target_graph_ids=["kg_no_ledger"]),
+        current_user=_make_user(),
+        _rate_limit=None,
+      )
+
+    assert len(result.results) == 1
+    assert result.results[0].status == "error"
+    assert "roboledger" in result.results[0].error

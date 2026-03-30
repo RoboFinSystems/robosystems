@@ -48,6 +48,11 @@ class ReportDefinition(ExtensionsBase):
   ai_workspace_id = Column(String, nullable=True)
   ai_confidence = Column(Float, nullable=True)
 
+  # Sharing provenance (populated on received/shared reports, null for local)
+  source_graph_id = Column(String, nullable=True)
+  source_report_id = Column(String, nullable=True)
+  shared_at = Column(DateTime, nullable=True)
+
   # Metadata
   metadata_ = Column("metadata", JSONB, nullable=False, default=dict)
 
@@ -62,4 +67,4 @@ class ReportDefinition(ExtensionsBase):
   created_by = Column(String, nullable=False)
 
   def __repr__(self) -> str:
-    return f"<ReportDefinition {self.name} {self.report_type}>"
+    return f"<ReportDefinition {self.name} {self.taxonomy_id}>"
