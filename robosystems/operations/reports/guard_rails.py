@@ -24,13 +24,13 @@ class ValidationResult:
   warnings: list[str] = field(default_factory=list)
 
 
-def validate_report(report_type: str, rows: list[FactRow]) -> ValidationResult:
-  """Run structural and semantic validation for a report."""
-  if report_type == "income_statement":
+def validate_report(structure_type: str, rows: list[FactRow]) -> ValidationResult:
+  """Run structural and semantic validation for a rendered structure."""
+  if structure_type == "income_statement":
     return _validate_income_statement(rows)
-  elif report_type == "balance_sheet":
+  elif structure_type == "balance_sheet":
     return _validate_balance_sheet(rows)
-  elif report_type == "cash_flow":
+  elif structure_type in ("cash_flow", "cash_flow_statement"):
     return _validate_cash_flow(rows)
   return ValidationResult(checks=["no_validation_rules"])
 

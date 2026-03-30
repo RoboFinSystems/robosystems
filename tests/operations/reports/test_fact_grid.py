@@ -1,14 +1,17 @@
-"""Tests for FactGridBuilder — hierarchy rollup and fact grid construction."""
+"""Tests for fact generation, structure rendering, and hierarchy rollup."""
 
 from __future__ import annotations
 
 from datetime import date
 
 from robosystems.operations.reports.fact_grid import (
+  ReportFact,
   _Balance,
   _build_rows,
   _compute_prior_period,
+  _facts_to_balance_dict,
   _HierarchyNode,
+  _infer_period_type,
   _natural_sign,
 )
 
@@ -262,3 +265,68 @@ class TestBuildRows:
 
     assert len(rows) == 1
     assert rows[0].prior_value is None
+
+
+class TestInferPeriodType:
+  def test_balance_sheet_items_are_instant(self):
+    assert _infer_period_type("asset") == "instant"
+    assert _infer_period_type("liability") == "instant"
+    assert _infer_period_type("equity") == "instant"
+
+  def test_income_items_are_duration(self):
+    assert _infer_period_type("revenue") == "duration"
+    assert _infer_period_type("expense") == "duration"
+
+
+class TestFactsToBalanceDict:
+  def test_filters_by_period(self):
+    facts = [
+      ReportFact(
+        element_id="rev1",
+        element_qname="us-gaap:Revenue",
+        element_name="Revenue",
+        classification="revenue",
+        balance_type="credit",
+        value=500.0,
+        period_start=date(2026, 1, 1),
+        period_end=date(2026, 3, 31),
+        period_type="duration",
+      ),
+      ReportFact(
+        element_id="rev1",
+        element_qname="us-gaap:Revenue",
+        element_name="Revenue",
+        classification="revenue",
+        balance_type="credit",
+        value=400.0,
+        period_start=date(2025, 10, 3),
+        period_end=date(2025, 12, 31),
+        period_type="duration",
+      ),
+    ]
+
+    current = _facts_to_balance_dict(facts, date(2026, 1, 1), date(2026, 3, 31))
+    assert len(current) == 1
+    assert current["rev1"].net_balance == 500.0
+
+    prior = _facts_to_balance_dict(facts, date(2025, 10, 3), date(2025, 12, 31))
+    assert len(prior) == 1
+    assert prior["rev1"].net_balance == 400.0
+
+  def test_empty_for_no_matching_period(self):
+    facts = [
+      ReportFact(
+        element_id="rev1",
+        element_qname="us-gaap:Revenue",
+        element_name="Revenue",
+        classification="revenue",
+        balance_type="credit",
+        value=500.0,
+        period_start=date(2026, 1, 1),
+        period_end=date(2026, 3, 31),
+        period_type="duration",
+      ),
+    ]
+
+    result = _facts_to_balance_dict(facts, date(2025, 1, 1), date(2025, 3, 31))
+    assert len(result) == 0

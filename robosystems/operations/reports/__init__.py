@@ -1,12 +1,22 @@
-"""Report generation operations — FactGridBuilder, guard rails, report lifecycle."""
+"""Report generation operations — fact generation, structure rendering, guard rails."""
 
-from .fact_grid import FactGrid, FactRow, build_fact_grid
+from .fact_grid import (
+  FactGrid,
+  FactRow,
+  ReportFact,
+  ReportFacts,
+  generate_report_facts,
+  render_structure_view,
+)
 from .guard_rails import ValidationResult, validate_report
 
 __all__ = [
   "FactGrid",
   "FactRow",
+  "ReportFact",
+  "ReportFacts",
   "ValidationResult",
-  "build_fact_grid",
+  "generate_report_facts",
+  "render_structure_view",
   "validate_report",
 ]

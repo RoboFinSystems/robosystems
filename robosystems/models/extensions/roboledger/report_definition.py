@@ -1,9 +1,9 @@
 """ReportDefinition model — generated report configurations.
 
-Stores the configuration needed to produce a report. Reusable:
-"regenerate my Income Statement for Q2" re-runs the same definition
-with new dates. References Report/Fact/FactSet nodes in the graph
-after materialization.
+Stores the configuration needed to produce a report. A report is tied to a
+Taxonomy (which contains multiple Structures like IS, BS, CF). Facts are
+generated for all mapped elements across all structures in the taxonomy.
+References Report/Fact/FactSet nodes in the graph after materialization.
 """
 
 from datetime import UTC, datetime
@@ -18,7 +18,7 @@ from robosystems.utils.ulid import generate_prefixed_ulid
 class ReportDefinition(ExtensionsBase):
   __tablename__ = "report_definitions"
   __table_args__ = (
-    Index("idx_report_defs_type", "report_type"),
+    Index("idx_report_defs_taxonomy", "taxonomy_id"),
     Index("idx_report_defs_status", "generation_status"),
   )
 
@@ -27,8 +27,8 @@ class ReportDefinition(ExtensionsBase):
   name = Column(String, nullable=False)
   description = Column(String, nullable=True)
 
-  # Report type
-  report_type = Column(String, nullable=False)
+  # Taxonomy — determines which structures (IS, BS, CF) are available
+  taxonomy_id = Column(String, nullable=False)
 
   # Configuration
   mapping_id = Column(String, nullable=True)

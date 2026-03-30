@@ -9,9 +9,9 @@ from pydantic import BaseModel, Field
 
 class CreateReportRequest(BaseModel):
   name: str = Field(..., description="Report name")
-  report_type: str = Field(
-    ...,
-    description="Report type: income_statement, balance_sheet, cash_flow",
+  taxonomy_id: str = Field(
+    "tax_usgaap_reporting",
+    description="Taxonomy ID — determines which structures are available",
   )
   mapping_id: str = Field(..., description="Mapping structure ID for CoA→GAAP rollup")
   period_start: date = Field(..., description="Period start date (inclusive)")
@@ -48,28 +48,41 @@ class ValidationCheckResponse(BaseModel):
   warnings: list[str]
 
 
-class ReportResponse(BaseModel):
-  """Report definition summary (for list endpoints)."""
+class StructureSummary(BaseModel):
+  """A structure available within this report's taxonomy."""
 
   id: str
   name: str
-  report_type: str
+  structure_type: str
+
+
+class ReportResponse(BaseModel):
+  """Report definition summary."""
+
+  id: str
+  name: str
+  taxonomy_id: str
   generation_status: str
   period_type: str
-  comparative: bool
-  mapping_id: str | None = None
   period_start: date | None = None
   period_end: date | None = None
+  comparative: bool
+  mapping_id: str | None = None
   ai_generated: bool = False
   created_at: datetime
   last_generated: datetime | None = None
+  structures: list[StructureSummary] = Field(default_factory=list)
 
 
-class ReportWithDataResponse(ReportResponse):
-  """Report definition + generated fact grid data."""
+class StatementResponse(BaseModel):
+  """Rendered financial statement — facts viewed through a structure."""
 
-  structure_id: str | None = None
-  structure_name: str | None = None
+  report_id: str
+  structure_id: str
+  structure_name: str
+  structure_type: str
+  period_start: date
+  period_end: date
   comparative_period_start: date | None = None
   comparative_period_end: date | None = None
   rows: list[FactRowResponse] = Field(default_factory=list)

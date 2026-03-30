@@ -1,9 +1,12 @@
-"""FactGridBuilder — mapped trial balance → structured financial statement.
+"""Report fact generation and structure rendering.
 
-Reads the mapped trial balance (CoA elements rolled up to GAAP concepts via
-mapping associations), loads the reporting structure hierarchy (Income Statement,
-Balance Sheet, Cash Flow from seed data), walks the tree to compute subtotals,
-and returns a structured FactGrid ready for API response or graph materialization.
+Two-phase design:
+1. generate_report_facts() — reads mapped trial balance, produces structure-agnostic
+   ReportFact objects (one per element x period). These get written to the
+   report_facts OLTP table for graph materialization.
+2. render_structure_view() — applies a structure's hierarchy to pre-generated facts,
+   computing subtotals and ordering for display. Same facts, different structure =
+   different view.
 """
 
 from __future__ import annotations
@@ -17,10 +20,39 @@ from sqlalchemy.orm import Session
 
 from robosystems.models.api.extensions import cents_to_dollars
 
+# ── Data classes ──────────────────────────────────────────────────────────
+
+
+@dataclass
+class ReportFact:
+  """A discrete financial data point — structure-agnostic."""
+
+  element_id: str
+  element_qname: str
+  element_name: str
+  classification: str
+  balance_type: str
+  value: float  # natural-sign dollars
+  period_start: date
+  period_end: date
+  period_type: str  # "duration" or "instant"
+
+
+@dataclass
+class ReportFacts:
+  """All facts generated for a report."""
+
+  facts: list[ReportFact]
+  current_period: tuple[date, date]
+  prior_period: tuple[date, date] | None
+  unmapped_count: int
+  taxonomy_id: str
+  mapping_id: str
+
 
 @dataclass
 class FactRow:
-  """One line in a financial statement."""
+  """One line in a rendered financial statement."""
 
   element_id: str
   element_qname: str
@@ -35,11 +67,11 @@ class FactRow:
 
 @dataclass
 class FactGrid:
-  """Complete structured financial statement."""
+  """Rendered financial statement — facts viewed through a structure."""
 
-  report_type: str
   structure_id: str
   structure_name: str
+  structure_type: str
   period_start: date
   period_end: date
   comparative_period_start: date | None = None
@@ -48,64 +80,160 @@ class FactGrid:
   unmapped_count: int = 0
 
 
-# ── Public API ─────────────────────────────────────────────────────────────
+# ── Phase 1: Generate facts (structure-agnostic) ─────────────────────────
 
 
-def build_fact_grid(
+def generate_report_facts(
   session: Session,
-  report_type: str,
+  taxonomy_id: str,
   mapping_id: str,
   period_start: date,
   period_end: date,
   comparative: bool = True,
-) -> FactGrid:
-  """Build a complete fact grid from mapped trial balance data.
+) -> ReportFacts:
+  """Generate facts for all mapped elements across current and prior periods.
+
+  Returns structure-agnostic facts — the raw data points that can be
+  slotted into any structure's hierarchy for rendering.
 
   Args:
-      session: Extensions database session (with search_path set to tenant schema).
-      report_type: income_statement, balance_sheet, or cash_flow.
+      session: Extensions database session (search_path set to tenant schema).
+      taxonomy_id: Taxonomy identifier (e.g., "tax_usgaap_reporting").
       mapping_id: Structure ID for the CoA→GAAP mapping.
       period_start: Start of the reporting period.
       period_end: End of the reporting period.
-      comparative: Whether to include prior period comparison.
+      comparative: Whether to generate prior period facts too.
 
   Returns:
-      FactGrid with structured rows and validation-ready data.
+      ReportFacts with all generated facts and metadata.
   """
-  # 1. Read mapped trial balance for current period
+  # Read mapped trial balance for current period
   current_balances = _read_mapped_balances(
     session, mapping_id, period_start, period_end
   )
 
-  # 2. Read mapped trial balance for prior period
-  prior_balances: dict[str, _Balance] = {}
+  # Convert to ReportFact objects
+  facts: list[ReportFact] = []
+  for balance in current_balances.values():
+    facts.append(
+      ReportFact(
+        element_id=balance.element_id,
+        element_qname=balance.qname,
+        element_name=balance.name,
+        classification=balance.classification,
+        balance_type=balance.balance_type,
+        value=_natural_sign(balance.net_balance, balance.balance_type),
+        period_start=period_start,
+        period_end=period_end,
+        period_type=_infer_period_type(balance.classification),
+      )
+    )
+
+  # Close temporary accounts into retained earnings for the current period.
+  # Net Income = sum(revenue) - sum(expenses), added to retained earnings
+  # so the balance sheet balances (A = L + E).
+  _close_to_retained_earnings(facts, period_start, period_end)
+
+  # Generate prior period facts
   prior_start = None
   prior_end = None
   if comparative:
     prior_start, prior_end = _compute_prior_period(period_start, period_end)
     prior_balances = _read_mapped_balances(session, mapping_id, prior_start, prior_end)
+    for balance in prior_balances.values():
+      facts.append(
+        ReportFact(
+          element_id=balance.element_id,
+          element_qname=balance.qname,
+          element_name=balance.name,
+          classification=balance.classification,
+          balance_type=balance.balance_type,
+          value=_natural_sign(balance.net_balance, balance.balance_type),
+          period_start=prior_start,
+          period_end=prior_end,
+          period_type=_infer_period_type(balance.classification),
+        )
+      )
 
-  # 3. Count unmapped CoA elements (for coverage info)
+    _close_to_retained_earnings(facts, prior_start, prior_end)
+
   unmapped_count = _count_unmapped(session, mapping_id)
 
-  # 4. Load reporting structure hierarchy
-  structure_id, structure_name, hierarchy = _load_reporting_structure(
-    session, report_type
+  return ReportFacts(
+    facts=facts,
+    current_period=(period_start, period_end),
+    prior_period=(prior_start, prior_end) if comparative and prior_start else None,
+    unmapped_count=unmapped_count,
+    taxonomy_id=taxonomy_id,
+    mapping_id=mapping_id,
   )
 
-  # 5. Walk hierarchy depth-first, build rows with rollup
-  rows = _build_rows(hierarchy, current_balances, prior_balances)
+
+# ── Phase 2: Render structure view ───────────────────────────────────────
+
+
+def render_structure_view(
+  session: Session,
+  facts: list[ReportFact],
+  structure_type: str,
+  period_start: date,
+  period_end: date,
+  comparative_period_start: date | None = None,
+  comparative_period_end: date | None = None,
+) -> FactGrid:
+  """Apply a structure's hierarchy to raw facts to produce a rendered view.
+
+  This is the "lens" — same facts, different structure = different view.
+
+  Args:
+      session: Extensions database session.
+      facts: Pre-generated ReportFact objects (from generate_report_facts).
+      structure_type: Structure type to render (income_statement, balance_sheet, etc.).
+      period_start: Current period start.
+      period_end: Current period end.
+      comparative_period_start: Prior period start (None if no comparative).
+      comparative_period_end: Prior period end (None if no comparative).
+
+  Returns:
+      FactGrid with rows ordered per the structure's hierarchy.
+  """
+  # Load structure hierarchy
+  structure_id, structure_name, hierarchy = _load_reporting_structure(
+    session, structure_type
+  )
+
+  if not hierarchy:
+    return FactGrid(
+      structure_id=structure_id or "",
+      structure_name=structure_name or "",
+      structure_type=structure_type,
+      period_start=period_start,
+      period_end=period_end,
+      comparative_period_start=comparative_period_start,
+      comparative_period_end=comparative_period_end,
+    )
+
+  # Build balance dicts from facts (keyed by element_id)
+  current_balances = _facts_to_balance_dict(facts, period_start, period_end)
+  prior_balances: dict[str, _Balance] = {}
+  if comparative_period_start and comparative_period_end:
+    prior_balances = _facts_to_balance_dict(
+      facts, comparative_period_start, comparative_period_end
+    )
+
+  # Walk hierarchy depth-first with rollup
+  # Facts from report_facts are already natural-signed, so skip sign conversion
+  rows = _build_rows(hierarchy, current_balances, prior_balances, pre_signed=True)
 
   return FactGrid(
-    report_type=report_type,
     structure_id=structure_id,
     structure_name=structure_name,
+    structure_type=structure_type,
     period_start=period_start,
     period_end=period_end,
-    comparative_period_start=prior_start,
-    comparative_period_end=prior_end,
+    comparative_period_start=comparative_period_start,
+    comparative_period_end=comparative_period_end,
     rows=rows,
-    unmapped_count=unmapped_count,
   )
 
 
@@ -138,6 +266,35 @@ class _HierarchyNode:
   is_abstract: bool
   depth: int
   children: list[_HierarchyNode] = field(default_factory=list)
+
+
+def _facts_to_balance_dict(
+  facts: list[ReportFact],
+  period_start: date,
+  period_end: date,
+) -> dict[str, _Balance]:
+  """Convert ReportFact list to balance dict for a specific period.
+
+  Facts already have natural-sign values, so we store them directly
+  as net_balance. The _build_rows walker reads current_value from
+  _natural_sign(balance.net_balance, node.balance_type), so we set
+  balance_type to "debit" to pass through the value unchanged (since
+  natural sign was already applied during fact generation).
+  """
+  balances: dict[str, _Balance] = {}
+  for fact in facts:
+    if fact.period_start == period_start and fact.period_end == period_end:
+      balances[fact.element_id] = _Balance(
+        element_id=fact.element_id,
+        qname=fact.element_qname,
+        name=fact.element_name,
+        classification=fact.classification,
+        balance_type="debit",  # natural sign already applied
+        total_debits=0.0,
+        total_credits=0.0,
+        net_balance=fact.value,  # already natural-sign
+      )
+  return balances
 
 
 def _read_mapped_balances(
@@ -224,6 +381,67 @@ def _compute_prior_period(period_start: date, period_end: date) -> tuple[date, d
   prior_end = period_start - timedelta(days=1)
   prior_start = prior_end - timedelta(days=duration - 1)
   return prior_start, prior_end
+
+
+def _close_to_retained_earnings(
+  facts: list[ReportFact],
+  period_start: date,
+  period_end: date,
+) -> None:
+  """Close temporary accounts (revenue/expense) into retained earnings.
+
+  Computes net income = sum(revenue facts) - sum(expense facts) for the
+  given period and adds it to the retained earnings fact. This is the
+  standard period-end closing entry that ensures the balance sheet balances.
+
+  Mutates the facts list in place.
+  """
+  RETAINED_EARNINGS_ID = "elem_gaap_retained_earnings"
+
+  total_revenue = 0.0
+  total_expenses = 0.0
+  retained_earnings_fact: ReportFact | None = None
+
+  for fact in facts:
+    if fact.period_start != period_start or fact.period_end != period_end:
+      continue
+    if fact.classification == "revenue":
+      total_revenue += fact.value
+    elif fact.classification == "expense":
+      total_expenses += fact.value
+    if fact.element_id == RETAINED_EARNINGS_ID:
+      retained_earnings_fact = fact
+
+  net_income = total_revenue - total_expenses
+
+  if retained_earnings_fact is not None:
+    retained_earnings_fact.value += net_income
+  elif net_income != 0.0:
+    # No retained earnings fact yet — create one
+    facts.append(
+      ReportFact(
+        element_id=RETAINED_EARNINGS_ID,
+        element_qname="us-gaap:RetainedEarningsAccumulatedDeficit",
+        element_name="Retained Earnings",
+        classification="equity",
+        balance_type="credit",
+        value=net_income,
+        period_start=period_start,
+        period_end=period_end,
+        period_type="instant",
+      )
+    )
+
+
+def _infer_period_type(classification: str) -> str:
+  """Infer period type from element classification.
+
+  Balance sheet items (asset, liability, equity) are instant (point-in-time).
+  Income statement / cash flow items (revenue, expense) are duration.
+  """
+  if classification in ("asset", "liability", "equity"):
+    return "instant"
+  return "duration"
 
 
 def _load_reporting_structure(
@@ -347,6 +565,7 @@ def _build_rows(
   hierarchy: list[_HierarchyNode],
   current_balances: dict[str, _Balance],
   prior_balances: dict[str, _Balance],
+  pre_signed: bool = False,
 ) -> list[FactRow]:
   """Walk the hierarchy depth-first, building FactRows with rollup subtotals.
 
@@ -372,9 +591,7 @@ def _build_rows(
         if has_prior and p_val is not None:
           child_prior_total = (child_prior_total or 0.0) + p_val
 
-      # Insert subtotal row AFTER children (for display: header first, then children, then total)
-      # Actually, for financial statements: section header first, then detail, then subtotal
-      # We insert the header row at the position before children
+      # Insert subtotal row before children (section header)
       header_row = FactRow(
         element_id=node.element_id,
         element_qname=node.qname,
@@ -390,20 +607,28 @@ def _build_rows(
 
       return child_current_total, child_prior_total
     else:
-      # Leaf node: get value from mapped balances
+      # Leaf node: get value from balances
       balance = current_balances.get(node.element_id)
-      current_val = (
-        _natural_sign(balance.net_balance, node.balance_type) if balance else 0.0
-      )
+      if balance:
+        current_val = (
+          balance.net_balance
+          if pre_signed
+          else _natural_sign(balance.net_balance, node.balance_type)
+        )
+      else:
+        current_val = 0.0
 
       prior_val = None
       if has_prior:
         prior_balance = prior_balances.get(node.element_id)
-        prior_val = (
-          _natural_sign(prior_balance.net_balance, node.balance_type)
-          if prior_balance
-          else 0.0
-        )
+        if prior_balance:
+          prior_val = (
+            prior_balance.net_balance
+            if pre_signed
+            else _natural_sign(prior_balance.net_balance, node.balance_type)
+          )
+        else:
+          prior_val = 0.0
 
       rows.append(
         FactRow(

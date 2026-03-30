@@ -12,7 +12,8 @@ from .reports import (
   RegenerateReportRequest,
   ReportListResponse,
   ReportResponse,
-  ReportWithDataResponse,
+  StatementResponse,
+  StructureSummary,
   ValidationCheckResponse,
 )
 from .summary import LedgerSummaryResponse
@@ -41,7 +42,8 @@ __all__ = [
   "RegenerateReportRequest",
   "ReportListResponse",
   "ReportResponse",
-  "ReportWithDataResponse",
+  "StatementResponse",
+  "StructureSummary",
   "TrialBalanceResponse",
   "TrialBalanceRow",
   "ValidationCheckResponse",

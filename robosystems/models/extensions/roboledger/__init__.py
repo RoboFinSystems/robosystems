@@ -13,6 +13,7 @@ from .entry import Entry
 from .fiscal_period import FiscalPeriod
 from .line_item import LineItem
 from .report_definition import ReportDefinition
+from .report_fact import ReportFact
 from .structure import Structure
 from .taxonomy import Taxonomy
 from .transaction import Transaction
@@ -27,6 +28,7 @@ __all__ = [
   "FiscalPeriod",
   "LineItem",
   "ReportDefinition",
+  "ReportFact",
   "Structure",
   "Taxonomy",
   "Transaction",
