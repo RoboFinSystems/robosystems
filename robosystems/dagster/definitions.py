@@ -96,6 +96,9 @@ from robosystems.dagster.sensors.graph_queue import (
 from robosystems.dagster.sensors.invoice_billing import (
   invoice_subscription_renewal_sensor,
 )
+from robosystems.dagster.sensors.worker_reaper import (
+  worker_inflight_reaper_sensor,
+)
 
 # === FORK: Add your adapter pipelines here ===
 # from robosystems.adapters.custom_erp.pipeline import get_dagster_components as erp_pipeline
@@ -237,6 +240,8 @@ all_sensors = [
   graph_creation_queue_sensor,
   expired_graph_subscription_sensor,
   suspended_graph_deprovisioning_sensor,
+  # Platform: Worker reliability
+  worker_inflight_reaper_sensor,
   # Adapter: SEC pipeline
   *sec["sensors"],
 ]
