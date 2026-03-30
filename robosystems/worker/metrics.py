@@ -9,12 +9,13 @@ The metric powers:
 2. ECS auto-scaling policy for worker replicas
 """
 
-import logging
 import time
 
 from redis.asyncio import Redis
 
-logger = logging.getLogger(__name__)
+from robosystems.logger import get_logger
+
+logger = get_logger(__name__)
 
 # Publish at most once per interval (seconds)
 METRIC_PUBLISH_INTERVAL = 60
@@ -37,7 +38,6 @@ class QueueDepthReporter:
     self.queue = queue
     self.worker_id = worker_id
     self._last_publish_time: float = 0
-    self._is_leader: bool = False
     self._cloudwatch_client = None
 
   async def maybe_publish(self) -> None:
@@ -56,7 +56,6 @@ class QueueDepthReporter:
         return
 
     # We're the leader — refresh lock and publish
-    self._is_leader = True
     await self.queue.set(LEADER_LOCK_KEY, self.worker_id, ex=LEADER_LOCK_TTL)
 
     depth = await self.queue.llen("worker:tasks")

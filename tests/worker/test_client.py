@@ -1,7 +1,7 @@
 """Tests for the worker enqueue client."""
 
 import json
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -25,9 +25,23 @@ def mock_operation_response():
   }
 
 
+def _make_mock_queue(*, dedup_exists: bool = False, dedup_task_id: str = ""):
+  """Create a mock async Redis client with pipeline support."""
+  mock_queue = AsyncMock()
+  mock_queue.get.return_value = dedup_task_id if dedup_exists else None
+
+  # pipeline() is a sync method on redis.asyncio.Redis that returns a Pipeline.
+  # Pipeline.set/rpush are sync, Pipeline.execute() is async.
+  mock_pipe = MagicMock()
+  mock_pipe.execute = AsyncMock(return_value=[True, 1])
+  mock_queue.pipeline = MagicMock(return_value=mock_pipe)
+
+  return mock_queue, mock_pipe
+
+
 @pytest.mark.asyncio
 async def test_enqueue_task_creates_operation_and_pushes(mock_operation_response):
-  mock_queue = AsyncMock()
+  mock_queue, mock_pipe = _make_mock_queue()
 
   with (
     patch(
@@ -59,17 +73,26 @@ async def test_enqueue_task_creates_operation_and_pushes(mock_operation_response
     operation_id="task_01TESTID",
   )
 
-  # Verify task pushed to queue
-  mock_queue.lpush.assert_called_once()
-  pushed_key = mock_queue.lpush.call_args[0][0]
-  pushed_json = mock_queue.lpush.call_args[0][1]
-  assert pushed_key == "worker:tasks"
+  # Verify pipeline used atomically (dedup key + enqueue)
+  mock_queue.pipeline.assert_called_once_with(transaction=True)
+  mock_pipe.set.assert_called_once()
+  mock_pipe.rpush.assert_called_once()
+  mock_pipe.execute.assert_called_once()
 
-  payload = json.loads(pushed_json)
+  # Verify dedup key includes user_id
+  dedup_args = mock_pipe.set.call_args[0]
+  assert dedup_args[0] == "worker:dedup:agent_mapping:kg0123456789abcdef:user_01TEST"
+  assert dedup_args[1] == "task_01TESTID"
+
+  # Verify task payload
+  rpush_args = mock_pipe.rpush.call_args[0]
+  assert rpush_args[0] == "worker:tasks"
+  payload = json.loads(rpush_args[1])
   assert payload["task_id"] == "task_01TESTID"
   assert payload["task_type"] == "agent_mapping"
   assert payload["graph_id"] == "kg0123456789abcdef"
   assert payload["user_id"] == "user_01TEST"
+  assert payload["attempt"] == 1
   assert payload["params"] == {"confidence": 0.7}
 
   # Verify queue closed
@@ -81,7 +104,7 @@ async def test_enqueue_task_creates_operation_and_pushes(mock_operation_response
 
 @pytest.mark.asyncio
 async def test_enqueue_task_default_params(mock_operation_response):
-  mock_queue = AsyncMock()
+  mock_queue, mock_pipe = _make_mock_queue()
 
   with (
     patch(
@@ -104,15 +127,16 @@ async def test_enqueue_task_default_params(mock_operation_response):
       user_id="user_01TEST",
     )
 
-  pushed_json = mock_queue.lpush.call_args[0][1]
-  payload = json.loads(pushed_json)
+  rpush_args = mock_pipe.rpush.call_args[0]
+  payload = json.loads(rpush_args[1])
   assert payload["params"] == {}
+  assert payload["attempt"] == 1
 
 
 @pytest.mark.asyncio
 async def test_enqueue_task_closes_queue_on_error(mock_operation_response):
-  mock_queue = AsyncMock()
-  mock_queue.lpush.side_effect = ConnectionError("Valkey down")
+  mock_queue, mock_pipe = _make_mock_queue()
+  mock_pipe.execute = AsyncMock(side_effect=ConnectionError("Valkey down"))
 
   with (
     patch(
@@ -137,4 +161,29 @@ async def test_enqueue_task_closes_queue_on_error(mock_operation_response):
       )
 
   # Queue should still be closed even on error
+  mock_queue.aclose.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_enqueue_task_dedup_returns_existing():
+  """Duplicate enqueue within dedup window returns existing operation."""
+  mock_queue, _ = _make_mock_queue(dedup_exists=True, dedup_task_id="task_01EXISTING")
+
+  with patch(
+    "robosystems.worker.client.create_async_redis_client",
+    return_value=mock_queue,
+  ):
+    result = await enqueue_task(
+      task_type="graph_materialization",
+      graph_id="kg0123456789abcdef",
+      user_id="user_01TEST",
+    )
+
+  # Should return dedup response, not create a new operation
+  assert result["operation_id"] == "task_01EXISTING"
+  assert result["deduplicated"] is True
+  assert result["_links"]["stream"] == "/v1/operations/task_01EXISTING/stream"
+
+  # Should NOT create pipeline or enqueue
+  mock_queue.pipeline.assert_not_called()
   mock_queue.aclose.assert_called_once()

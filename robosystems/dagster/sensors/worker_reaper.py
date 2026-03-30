@@ -11,6 +11,7 @@ to the DLQ if max retries are exceeded.
 import json
 import time
 from datetime import UTC, datetime
+from typing import Any
 
 from dagster import (
   DefaultSensorStatus,
@@ -20,21 +21,13 @@ from dagster import (
 )
 
 from robosystems.logger import get_logger
+from robosystems.worker.constants import (
+  DEFAULT_TASK_TIMEOUT,
+  MAX_RETRIES,
+  TASK_TIMEOUTS,
+)
 
 logger = get_logger(__name__)
-
-# Must match consumer.py values
-TASK_TIMEOUTS: dict[str, int] = {
-  "agent": 300,
-  "graph_creation": 60,
-  "subgraph_creation": 60,
-  "repository_provisioning": 60,
-  "graph_materialization": 120,
-  "file_staging": 60,
-  "document_indexing": 120,
-}
-DEFAULT_TASK_TIMEOUT = 120
-MAX_RETRIES = 3
 
 # Grace period added to task timeout before considering it stale.
 # Prevents reaping a task that's still legitimately running near its timeout.
@@ -44,17 +37,20 @@ STALE_GRACE_SECONDS = 30
 SSE_META_PREFIX = "sse:operation:meta:"
 
 
-def _get_operation_age(sse_client, task_id: str) -> float | None:
-  """Get operation age in seconds from SSE metadata. Returns None if not found."""
+def _get_operation_metadata(sse_client: Any, task_id: str) -> dict[str, Any] | None:
+  """Fetch and parse SSE operation metadata. Returns None if not found."""
   meta_json = sse_client.get(f"{SSE_META_PREFIX}{task_id}")
   if not meta_json:
     return None
 
   try:
-    meta = json.loads(meta_json)
+    return json.loads(meta_json)
   except json.JSONDecodeError:
     return None
 
+
+def _get_age_from_metadata(meta: dict[str, Any]) -> float | None:
+  """Extract operation age in seconds from parsed metadata."""
   created_at_str = meta.get("created_at")
   if not created_at_str:
     return None
@@ -64,19 +60,6 @@ def _get_operation_age(sse_client, task_id: str) -> float | None:
     created_at = created_at.replace(tzinfo=UTC)
 
   return time.time() - created_at.timestamp()
-
-
-def _get_operation_status(sse_client, task_id: str) -> str | None:
-  """Get operation status from SSE metadata. Returns None if not found."""
-  meta_json = sse_client.get(f"{SSE_META_PREFIX}{task_id}")
-  if not meta_json:
-    return None
-
-  try:
-    meta = json.loads(meta_json)
-    return meta.get("status")
-  except json.JSONDecodeError:
-    return None
 
 
 @sensor(
@@ -117,8 +100,33 @@ def worker_inflight_reaper_sensor(context: SensorEvaluationContext):
         task_type = task_data.get("task_type", "unknown")
         attempt = task_data.get("attempt", 1)
 
+        # Single fetch for both status and age
+        meta = _get_operation_metadata(sse, task_id)
+
+        if meta is None:
+          # No SSE metadata — operation expired from storage. Requeue with
+          # incremented attempt rather than immediately DLQ-ing, since this
+          # could be caused by Valkey memory pressure or short TTL.
+          queue.lrem(inflight_key, 1, task_json)
+          if attempt >= MAX_RETRIES:
+            queue.rpush("worker:dlq", task_json)
+            dlq_count += 1
+            logger.warning(
+              f"Task {task_id} ({task_type}) has no SSE metadata, "
+              f"moved to DLQ after {attempt} attempts"
+            )
+          else:
+            task_data["attempt"] = attempt + 1
+            queue.rpush("worker:tasks", json.dumps(task_data))
+            requeued += 1
+            logger.warning(
+              f"Task {task_id} ({task_type}) has no SSE metadata, "
+              f"requeuing attempt {attempt + 1}"
+            )
+          continue
+
         # If operation already completed/failed, just clean up inflight entry
-        status = _get_operation_status(sse, task_id)
+        status = meta.get("status")
         if status is not None and status not in ("pending", "running"):
           queue.lrem(inflight_key, 1, task_json)
           cleaned += 1
@@ -128,17 +136,9 @@ def worker_inflight_reaper_sensor(context: SensorEvaluationContext):
         timeout = TASK_TIMEOUTS.get(task_type, DEFAULT_TASK_TIMEOUT)
         stale_threshold = timeout + STALE_GRACE_SECONDS
 
-        age = _get_operation_age(sse, task_id)
-        if age is None:
-          # No SSE metadata — operation expired. Move to DLQ.
-          queue.lrem(inflight_key, 1, task_json)
-          queue.rpush("worker:dlq", task_json)
-          dlq_count += 1
-          logger.warning(f"Task {task_id} has no SSE metadata, moved to DLQ")
-          continue
-
-        if age < stale_threshold:
-          # Not stale yet — might still be running
+        age = _get_age_from_metadata(meta)
+        if age is None or age < stale_threshold:
+          # Can't determine age, or not stale yet — skip
           continue
 
         # Task is stale — remove from inflight
@@ -147,10 +147,7 @@ def worker_inflight_reaper_sensor(context: SensorEvaluationContext):
         if attempt >= MAX_RETRIES:
           # Exceeded retries — move to DLQ and mark failed
           queue.rpush("worker:dlq", task_json)
-
-          # Mark SSE operation as failed (write directly to avoid async)
           _fail_operation_sync(sse, task_id, attempt)
-
           dlq_count += 1
           logger.warning(
             f"Task {task_id} ({task_type}) moved to DLQ after {attempt} attempts"
@@ -173,15 +170,16 @@ def worker_inflight_reaper_sensor(context: SensorEvaluationContext):
       context.log.info(
         f"Reaper: requeued={requeued}, dlq={dlq_count}, cleaned={cleaned}"
       )
-    else:
-      return SkipReason("No stale inflight tasks found")
+      return None
+
+    return SkipReason("No stale inflight tasks found")
 
   finally:
     queue.close()
     sse.close()
 
 
-def _fail_operation_sync(sse_client, task_id: str, attempts: int) -> None:
+def _fail_operation_sync(sse_client: Any, task_id: str, attempts: int) -> None:
   """Mark an SSE operation as failed by updating its metadata directly."""
   meta_key = f"{SSE_META_PREFIX}{task_id}"
   meta_json = sse_client.get(meta_key)

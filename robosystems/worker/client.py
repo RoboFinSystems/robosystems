@@ -45,9 +45,9 @@ async def enqueue_task(
   """
   queue = create_async_redis_client(ValkeyDatabase.WORKER_QUEUE, decode_responses=True)
   try:
-    # Check deduplication — if a task for this type+graph was recently enqueued,
-    # return the existing operation instead of creating a duplicate.
-    dedup_key = f"worker:dedup:{task_type}:{graph_id}"
+    # Check deduplication — if a task for this type+graph+user was recently
+    # enqueued, return the existing operation instead of creating a duplicate.
+    dedup_key = f"worker:dedup:{task_type}:{graph_id}:{user_id}"
     existing_task_id = await queue.get(dedup_key)
     if existing_task_id:
       return {
@@ -73,9 +73,6 @@ async def enqueue_task(
       operation_id=task_id,
     )
 
-    # Set dedup key before enqueuing so concurrent requests see it
-    await queue.set(dedup_key, task_id, ex=DEDUP_TTL)
-
     task_payload = json.dumps(
       {
         "task_id": task_id,
@@ -86,7 +83,13 @@ async def enqueue_task(
         "params": params or {},
       }
     )
-    await queue.rpush("worker:tasks", task_payload)
+
+    # Atomic: set dedup key + enqueue in a single round trip.
+    # Prevents ghost dedup keys if the process crashes between the two ops.
+    pipe = queue.pipeline(transaction=True)
+    pipe.set(dedup_key, task_id, ex=DEDUP_TTL)
+    pipe.rpush("worker:tasks", task_payload)
+    await pipe.execute()
 
     return response
   finally:

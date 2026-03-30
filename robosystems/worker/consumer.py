@@ -26,27 +26,12 @@ from robosystems.middleware.sse.operation_manager import (
   get_operation_manager,
 )
 from robosystems.worker.cleanup import cleanup_connections
+from robosystems.worker.constants import DEFAULT_TASK_TIMEOUT, TASK_TIMEOUTS
 from robosystems.worker.dagster import report_task_to_dagster
 from robosystems.worker.metrics import QueueDepthReporter
 from robosystems.worker.tasks import get_task_handler
 
 logger = logging.getLogger(__name__)
-
-# Per-task-type timeouts in seconds. Agent tasks can take 2+ minutes
-# for complex mapping operations. Shorter tasks get tighter limits.
-TASK_TIMEOUTS: dict[str, int] = {
-  "agent": 300,  # 5 minutes
-  "graph_creation": 60,  # 1 minute
-  "subgraph_creation": 60,  # 1 minute
-  "repository_provisioning": 60,  # 1 minute
-  "graph_materialization": 120,  # 2 minutes
-  "file_staging": 60,  # 1 minute
-  "document_indexing": 120,  # 2 minutes
-}
-DEFAULT_TASK_TIMEOUT = 120  # 2 minutes
-
-# Maximum retry attempts before a task is moved to the DLQ
-MAX_RETRIES = 3
 
 
 async def run() -> None:
@@ -75,7 +60,7 @@ async def run() -> None:
       # BLMOVE atomically pops from main queue and pushes to inflight list.
       # If the worker crashes, the task stays in inflight for the reaper.
       task_json = await queue.blmove(
-        "worker:tasks", inflight_key, timeout=5, wherefrom="RIGHT", whereto="LEFT"
+        "worker:tasks", inflight_key, timeout=5, wherefrom="LEFT", whereto="LEFT"
       )
       if task_json is None:
         continue
