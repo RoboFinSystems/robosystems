@@ -50,6 +50,7 @@ from .commands.graphs import graphs
 from .commands.ops import cache, instances, migrations
 from .commands.search import search
 from .commands.users_orgs import orgs, users
+from .commands.worker import worker
 
 logger = get_logger(__name__)
 console = Console()
@@ -359,6 +360,7 @@ cli.add_command(migrations)
 cli.add_command(cache)
 cli.add_command(instances)
 cli.add_command(search)
+cli.add_command(worker)
 
 
 if __name__ == "__main__":
