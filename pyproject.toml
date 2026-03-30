@@ -34,6 +34,7 @@ dependencies = [
     # Web Framework & API
     "fastapi>=0.116.0,<1.0",
     "python-multipart>=0.0.16,<1.0",
+    "starlette>=0.35.0,<1.0",
     "sse-starlette>=3.3.2,<4.0",
     "uvicorn>=0.35.0,<1.0",
     "uvloop>=0.21.0,<1.0",
@@ -41,7 +42,7 @@ dependencies = [
 
     # Graph Databases
     "real-ladybug==0.13.1",
-    "duckdb>=1.1.0,<2.0",
+    "duckdb==1.4.2",
 
     # Relational Database (PostgreSQL)
     "alembic>=1.16.0,<2.0",
@@ -71,6 +72,7 @@ dependencies = [
     "lancedb>=0.30.0,<1.0",
     "numpy>=1.26.0,<3.0",
     "pandas>=2.3.0,<3.0",
+    "pillow>=12.1.1",
     "pyarrow>=20.0.0",
 
     # External API Integrations
