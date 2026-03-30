@@ -74,10 +74,11 @@ async def list_accounts(
   try:
     with extensions_session(graph_id) as session:
       # Only return company CoA elements, not seed taxonomy elements
-      coa_sources = ("quickbooks", "xero", "plaid", "native", "import")
-      query = select(Element).where(Element.source.in_(coa_sources))
+      from robosystems.models.extensions.roboledger import COA_SOURCES
+
+      query = select(Element).where(Element.source.in_(COA_SOURCES))
       count_query = (
-        select(func.count()).select_from(Element).where(Element.source.in_(coa_sources))
+        select(func.count()).select_from(Element).where(Element.source.in_(COA_SOURCES))
       )
 
       if classification is not None:
@@ -125,10 +126,11 @@ async def get_account_tree(
   try:
     with extensions_session(graph_id) as session:
       # Only return company CoA elements, not seed taxonomy elements
-      coa_sources = ("quickbooks", "xero", "plaid", "native", "import")
+      from robosystems.models.extensions.roboledger import COA_SOURCES
+
       rows = (
         session.execute(
-          select(Element).where(Element.source.in_(coa_sources)).order_by(Element.code)
+          select(Element).where(Element.source.in_(COA_SOURCES)).order_by(Element.code)
         )
         .scalars()
         .all()

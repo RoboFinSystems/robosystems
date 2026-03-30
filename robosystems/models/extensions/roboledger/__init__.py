@@ -19,7 +19,12 @@ from .structure import Structure
 from .taxonomy import Taxonomy
 from .transaction import Transaction
 
+# Source types that represent company Chart of Accounts elements
+# (as opposed to seed taxonomy elements like us-gaap, sfac6)
+COA_SOURCES = ("quickbooks", "xero", "plaid", "native", "import")
+
 __all__ = [
+  "COA_SOURCES",
   "Account",
   "ClassificationRule",
   "Dimension",

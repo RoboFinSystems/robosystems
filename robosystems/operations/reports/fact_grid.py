@@ -356,11 +356,15 @@ def _read_mapped_balances(
 
 def _count_unmapped(session: Session, mapping_id: str) -> int:
   """Count CoA elements that have no mapping association."""
+  from robosystems.models.extensions.roboledger import COA_SOURCES
+
+  # Build a safe SQL IN clause from the constant
+  source_list = ", ".join(f"'{s}'" for s in COA_SOURCES)
   result = session.execute(
-    text("""
+    text(f"""
       SELECT COUNT(*) AS cnt
       FROM elements e
-      WHERE e.source IN ('quickbooks', 'xero', 'plaid', 'native', 'import')
+      WHERE e.source IN ({source_list})
         AND e.is_active = true
         AND NOT EXISTS (
           SELECT 1 FROM element_associations ea
@@ -396,6 +400,7 @@ def _close_to_retained_earnings(
 
   Mutates the facts list in place.
   """
+  # Deterministic ID from config/taxonomy/seed.py: _elem("retained_earnings", ...)
   RETAINED_EARNINGS_ID = "elem_gaap_retained_earnings"
 
   total_revenue = 0.0

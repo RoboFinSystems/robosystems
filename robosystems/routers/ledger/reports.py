@@ -133,10 +133,21 @@ def _persist_report_facts(session, report_id: str, report_facts, entity_id: str)
 
 
 def _get_entity_id(session, graph_id: str) -> str:
-  """Get or derive the entity ID for a graph."""
-  result = session.execute(text("SELECT id FROM entities LIMIT 1"))
+  """Get the primary entity ID for a graph.
+
+  Returns the earliest-created entity, which is the primary entity
+  for single-entity graphs (the common case).
+  """
+  result = session.execute(
+    text("SELECT id FROM entities ORDER BY created_at ASC LIMIT 1")
+  )
   row = result.fetchone()
-  return row.id if row else f"entity_{graph_id}"
+  if not row:
+    raise HTTPException(
+      status_code=422,
+      detail="No entity found. Import data before creating reports.",
+    )
+  return row.id
 
 
 # ── Endpoints ──────────────────────────────────────────────────────────────
@@ -469,6 +480,10 @@ async def regenerate_report(
       report_def = session.get(ReportDefinition, report_id)
       if not report_def:
         raise _report_404(report_id)
+      if report_def.created_by != current_user.id:
+        raise HTTPException(
+          status_code=403, detail="Not authorized to modify this report."
+        )
 
       # Update period
       report_def.period_start = body.period_start
@@ -525,6 +540,10 @@ async def delete_report(
       report_def = session.get(ReportDefinition, report_id)
       if not report_def:
         raise _report_404(report_id)
+      if report_def.created_by != current_user.id:
+        raise HTTPException(
+          status_code=403, detail="Not authorized to delete this report."
+        )
 
       # Delete generated facts first
       session.execute(
@@ -574,6 +593,11 @@ async def share_report(
       if not report_def:
         raise _report_404(report_id)
 
+      if report_def.created_by != current_user.id:
+        raise HTTPException(
+          status_code=403, detail="Not authorized to share this report."
+        )
+
       if report_def.generation_status != "published":
         raise HTTPException(
           status_code=422,
@@ -593,26 +617,17 @@ async def share_report(
         "comparative": report_def.comparative,
       }
 
-      # Read the source facts
+      # Read the source facts with explicit columns
       fact_rows = source_session.execute(
-        text("SELECT * FROM report_facts WHERE report_id = :report_id"),
+        text("""
+          SELECT id, report_id, element_id, value, period_start, period_end,
+                 period_type, unit, entity_id, fact_set_id, created_at
+          FROM report_facts WHERE report_id = :report_id
+        """),
         {"report_id": report_id},
       ).fetchall()
 
-      fact_columns = [
-        "id",
-        "report_id",
-        "element_id",
-        "value",
-        "period_start",
-        "period_end",
-        "period_type",
-        "unit",
-        "entity_id",
-        "fact_set_id",
-        "created_at",
-      ]
-      source_facts = [dict(zip(fact_columns, row, strict=False)) for row in fact_rows]
+      source_facts = [row._asdict() for row in fact_rows]
 
     # Now share to each target graph
     for target_graph_id in body.target_graph_ids:
