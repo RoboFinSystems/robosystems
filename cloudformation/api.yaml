@@ -45,12 +45,6 @@ Parameters:
     Description: Port the container listens on
 
   # ECS & Compute Configuration
-  DesiredCount:
-    Type: Number
-    Default: 1
-    MinValue: 1
-    MaxValue: 100
-    Description: Desired number of ECS tasks
   Cpu:
     Type: String
     Default: "512"
@@ -897,7 +891,10 @@ Resources:
     Properties:
       ServiceName: !Sub robosystems-api-${Environment}-service
       Cluster: !Ref ApiCluster
-      DesiredCount: !Ref DesiredCount
+      # DesiredCount intentionally omitted — Application Auto Scaling manages it
+      # via ApiScalingTarget (MinCapacity/MaxCapacity). Setting it here would
+      # reset the autoscaler's count on every CloudFormation stack update.
+      # For new services, CFN defaults to 1; ScalableTarget adjusts to MinCapacity.
       CapacityProviderStrategy:
         - CapacityProvider: FARGATE_SPOT
           Weight: !Ref FargateSpotWeight

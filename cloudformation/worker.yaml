@@ -135,8 +135,15 @@ Parameters:
     Default: Worker
     Description: Component tag for resource identification and billing
 
+  WorkerAutoscalingEnabled:
+    Type: String
+    Default: "false"
+    AllowedValues: ["true", "false"]
+    Description: Enable queue-depth-based autoscaling (when false, uses static WorkerDesiredCount)
+
 Conditions:
   HasOpenSearch: !Not [!Equals [!Ref OpenSearchEndpoint, ""]]
+  AutoscalingEnabled: !Equals [!Ref WorkerAutoscalingEnabled, "true"]
 
 Resources:
   # ========================================
@@ -402,7 +409,10 @@ Resources:
     Properties:
       ServiceName: !Sub robosystems-worker-${Environment}
       Cluster: !Ref DagsterClusterArn
-      DesiredCount: !Ref WorkerDesiredCount
+      DesiredCount: !If
+        - AutoscalingEnabled
+        - !Ref "AWS::NoValue"
+        - !Ref WorkerDesiredCount
       LaunchType: FARGATE
       NetworkConfiguration:
         AwsvpcConfiguration:
@@ -433,6 +443,7 @@ Resources:
   # AUTOSCALING
   # ========================================
   WorkerScalableTarget:
+    Condition: AutoscalingEnabled
     Type: AWS::ApplicationAutoScaling::ScalableTarget
     Properties:
       ServiceNamespace: ecs
@@ -443,6 +454,7 @@ Resources:
       RoleARN: !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:role/aws-service-role/ecs.application-autoscaling.amazonaws.com/AWSServiceRoleForApplicationAutoScaling_ECSService
 
   WorkerScaleOutPolicy:
+    Condition: AutoscalingEnabled
     Type: AWS::ApplicationAutoScaling::ScalingPolicy
     Properties:
       PolicyName: worker-scale-out
@@ -466,6 +478,7 @@ Resources:
             ScalingAdjustment: 3
 
   WorkerScaleOutAlarm:
+    Condition: AutoscalingEnabled
     Type: AWS::CloudWatch::Alarm
     Properties:
       AlarmName: !Sub robosystems-worker-queue-depth-high-${Environment}
@@ -482,6 +495,7 @@ Resources:
         - !Ref WorkerScaleOutPolicy
 
   WorkerScaleInPolicy:
+    Condition: AutoscalingEnabled
     Type: AWS::ApplicationAutoScaling::ScalingPolicy
     Properties:
       PolicyName: worker-scale-in
@@ -497,6 +511,7 @@ Resources:
             ScalingAdjustment: -1
 
   WorkerScaleInAlarm:
+    Condition: AutoscalingEnabled
     Type: AWS::CloudWatch::Alarm
     Properties:
       AlarmName: !Sub robosystems-worker-queue-depth-zero-${Environment}
