@@ -45,7 +45,6 @@ from robosystems.dagster.jobs.graph import (
   materialize_graph_job,
   restore_graph_job,
   stage_file_job,
-  wait_and_create_graph_job,
 )
 from robosystems.dagster.jobs.graph_lifecycle import (
   deprovision_suspended_graphs_job,
@@ -196,7 +195,6 @@ all_jobs = [
   stage_file_job,
   materialize_file_job,
   materialize_graph_job,
-  wait_and_create_graph_job,
   # Platform: Graph lifecycle
   suspend_expired_graphs_job,
   deprovision_suspended_graphs_job,

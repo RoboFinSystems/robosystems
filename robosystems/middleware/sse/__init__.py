@@ -34,8 +34,6 @@ from .dagster_monitor import (
 )
 from .direct_monitor import (
   ProgressEmitter,
-  run_entity_graph_creation,
-  run_graph_creation,
   run_subgraph_creation,
 )
 from .event_storage import (
@@ -79,8 +77,6 @@ __all__ = [
   "get_event_storage",
   "get_operation_manager",
   "run_and_monitor_dagster_job",
-  "run_entity_graph_creation",
-  "run_graph_creation",
   "run_subgraph_creation",
   "submit_dagster_job_sync",
 ]

@@ -1,19 +1,20 @@
-"""Tests for direct execution monitor module."""
+"""Tests for direct execution monitor module.
+
+Note: TestRunGraphCreation and TestRunEntityGraphCreation removed —
+graph creation now handled by worker/tasks/graph_creation.py via
+GraphCreationService.
+"""
 
 import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from robosystems.config import env as env_config
-from robosystems.middleware.graph.allocation_manager import CapacityScalingTriggered
 from robosystems.middleware.sse.direct_monitor import (
   DAGSTER_REPORT_TIMEOUT,
   ProgressEmitter,
   _report_graph_materialization_async,
   _report_graph_materialization_sync,
-  run_entity_graph_creation,
-  run_graph_creation,
   run_graph_provisioning,
   run_subgraph_creation,
   run_user_repository_provisioning,
@@ -68,357 +69,6 @@ class TestProgressEmitter:
       with patch("asyncio.get_running_loop", side_effect=RuntimeError):
         emitter("Test message", 25.0)
         # Should not raise
-
-
-class TestRunGraphCreation:
-  """Test run_graph_creation function."""
-
-  @pytest.mark.asyncio
-  async def test_successful_creation(self):
-    """Test successful graph creation."""
-    mock_result = {
-      "graph_id": "kg123456789",
-      "status": "created",
-    }
-
-    with patch(
-      "robosystems.middleware.sse.direct_monitor.get_operation_manager"
-    ) as mock_get_manager:
-      mock_manager = AsyncMock()
-      mock_get_manager.return_value = mock_manager
-
-      with patch(
-        "robosystems.operations.graph.generic_graph_service.GenericGraphService"
-      ) as mock_service_class:
-        mock_service = AsyncMock()
-        mock_service.create_graph.return_value = mock_result
-        mock_service_class.return_value = mock_service
-
-        with patch(
-          "robosystems.middleware.sse.direct_monitor._report_graph_materialization_async"
-        ) as mock_report:
-          mock_report.return_value = None
-
-          result = await run_graph_creation(
-            operation_id="op123",
-            user_id="user456",
-            graph_name="Test Graph",
-            tier="ladybug-standard",
-            schema_extensions=["roboledger"],
-            description="Test description",
-            tags=["test"],
-          )
-
-          assert result == mock_result
-          mock_manager.emit_progress.assert_called()
-          mock_manager.complete_operation.assert_called_once()
-          mock_report.assert_called_once()
-
-  @pytest.mark.asyncio
-  async def test_creation_failure(self):
-    """Test graph creation failure handling."""
-    with patch(
-      "robosystems.middleware.sse.direct_monitor.get_operation_manager"
-    ) as mock_get_manager:
-      mock_manager = AsyncMock()
-      mock_get_manager.return_value = mock_manager
-
-      with patch(
-        "robosystems.operations.graph.generic_graph_service.GenericGraphService"
-      ) as mock_service_class:
-        mock_service = AsyncMock()
-        mock_service.create_graph.side_effect = Exception("Database error")
-        mock_service_class.return_value = mock_service
-
-        with pytest.raises(Exception, match="Database error"):
-          await run_graph_creation(
-            operation_id="op123",
-            user_id="user456",
-            graph_name="Test Graph",
-            tier="ladybug-standard",
-            schema_extensions=[],
-          )
-
-        mock_manager.fail_operation.assert_called_once()
-        call_args = mock_manager.fail_operation.call_args
-        # Check operation_id and error message
-        assert call_args.args[0] == "op123"
-        assert "Database error" in call_args.kwargs.get(
-          "error", call_args.args[1] if len(call_args.args) > 1 else ""
-        )
-
-  @pytest.mark.asyncio
-  async def test_provisioning_handoff_to_queue(self):
-    """Test that CapacityScalingTriggered creates a queued graph instead of failing."""
-    provisioning_error = CapacityScalingTriggered(
-      "No ladybug-standard capacity currently available. "
-      "A new instance is being provisioned and should be ready in 3-5 minutes. "
-      "Please retry shortly."
-    )
-
-    with patch(
-      "robosystems.middleware.sse.direct_monitor.get_operation_manager"
-    ) as mock_get_manager:
-      mock_manager = AsyncMock()
-      mock_get_manager.return_value = mock_manager
-
-      with patch(
-        "robosystems.operations.graph.generic_graph_service.GenericGraphService"
-      ) as mock_service_class:
-        mock_service = AsyncMock()
-        mock_service.create_graph.side_effect = provisioning_error
-        mock_service_class.return_value = mock_service
-
-        with (
-          patch(
-            "robosystems.utils.ulid.generate_ulid_hex",
-            return_value="1234567890abcdef",
-          ),
-          patch("robosystems.database.session") as mock_session_factory,
-          patch("robosystems.models.core.graph.Graph") as mock_graph_cls,
-          patch("robosystems.models.core.org.org_user.OrgUser"),
-          patch.object(
-            type(env_config),
-            "GRAPH_PROVISION_QUEUE_ENABLED",
-            True,
-          ),
-        ):
-          mock_db = MagicMock()
-          mock_session_factory.return_value = mock_db
-
-          mock_org_user = MagicMock()
-          mock_org_user.org_id = "org123"
-          mock_db.query.return_value.filter.return_value.first.return_value = (
-            mock_org_user
-          )
-
-          result = await run_graph_creation(
-            operation_id="op123",
-            user_id="user456",
-            graph_name="Test Graph",
-            tier="ladybug-standard",
-            schema_extensions=["roboledger"],
-            description="Test description",
-            tags=["test"],
-          )
-
-          # Should NOT have failed the operation
-          mock_manager.fail_operation.assert_not_called()
-
-          # Should have created a queued graph
-          mock_graph_cls.create_queued.assert_called_once()
-
-          # Should return queued status with graph_id
-          assert result["status"] == "queued"
-          assert result["graph_id"] == "kg1234567890abcdef"
-          assert result["operation_id"] == "op123"
-
-  @pytest.mark.asyncio
-  async def test_capacity_scaling_fails_when_queue_disabled(self):
-    """Test that CapacityScalingTriggered fails immediately when queue is disabled."""
-    provisioning_error = CapacityScalingTriggered(
-      "No ladybug-standard capacity currently available."
-    )
-
-    with patch(
-      "robosystems.middleware.sse.direct_monitor.get_operation_manager"
-    ) as mock_get_manager:
-      mock_manager = AsyncMock()
-      mock_get_manager.return_value = mock_manager
-
-      with patch(
-        "robosystems.operations.graph.generic_graph_service.GenericGraphService"
-      ) as mock_service_class:
-        mock_service = AsyncMock()
-        mock_service.create_graph.side_effect = provisioning_error
-        mock_service_class.return_value = mock_service
-
-        with patch.object(
-          type(env_config),
-          "GRAPH_PROVISION_QUEUE_ENABLED",
-          False,
-        ):
-          result = await run_graph_creation(
-            operation_id="op123",
-            user_id="user456",
-            graph_name="Test Graph",
-            tier="ladybug-standard",
-            schema_extensions=[],
-          )
-
-          # Should have failed the operation
-          mock_manager.fail_operation.assert_called_once()
-          call_args = mock_manager.fail_operation.call_args
-          assert call_args.args[0] == "op123"
-          assert "No capacity" in call_args.kwargs.get(
-            "error", call_args.args[1] if len(call_args.args) > 1 else ""
-          )
-
-          # Should return failed status
-          assert result["status"] == "failed"
-          assert result["operation_id"] == "op123"
-
-  @pytest.mark.asyncio
-  async def test_non_provisioning_error_still_fails(self):
-    """Test that non-provisioning errors still fail normally."""
-    with patch(
-      "robosystems.middleware.sse.direct_monitor.get_operation_manager"
-    ) as mock_get_manager:
-      mock_manager = AsyncMock()
-      mock_get_manager.return_value = mock_manager
-
-      with patch(
-        "robosystems.operations.graph.generic_graph_service.GenericGraphService"
-      ) as mock_service_class:
-        mock_service = AsyncMock()
-        mock_service.create_graph.side_effect = Exception(
-          "No ladybug-standard capacity currently available. "
-          "Please contact support or try again later."
-        )
-        mock_service_class.return_value = mock_service
-
-        with pytest.raises(Exception, match="No ladybug-standard capacity"):
-          await run_graph_creation(
-            operation_id="op123",
-            user_id="user456",
-            graph_name="Test Graph",
-            tier="ladybug-standard",
-            schema_extensions=[],
-          )
-
-        mock_manager.fail_operation.assert_called_once()
-
-
-class TestRunEntityGraphCreation:
-  """Test run_entity_graph_creation function."""
-
-  @pytest.mark.asyncio
-  async def test_successful_entity_creation(self):
-    """Test successful entity graph creation."""
-    mock_result = {
-      "graph_id": "kg987654321",
-      "entity_id": "entity123",
-      "status": "created",
-    }
-
-    with patch(
-      "robosystems.middleware.sse.direct_monitor.get_operation_manager"
-    ) as mock_get_manager:
-      mock_manager = AsyncMock()
-      mock_get_manager.return_value = mock_manager
-
-      with patch("robosystems.database.get_db_session") as mock_get_db:
-        mock_db = MagicMock()
-        mock_get_db.return_value = iter([mock_db])
-
-        with patch(
-          "robosystems.operations.graph.entity_graph_service.EntityGraphService"
-        ) as mock_service_class:
-          mock_service = AsyncMock()
-          mock_service.create_entity_with_new_graph.return_value = mock_result
-          mock_service_class.return_value = mock_service
-
-          with patch(
-            "robosystems.middleware.sse.direct_monitor._report_graph_materialization_async"
-          ) as mock_report:
-            mock_report.return_value = None
-
-            result = await run_entity_graph_creation(
-              operation_id="op123",
-              user_id="user456",
-              entity_name="Acme Corp",
-              tier="ladybug-large",
-              schema_extensions=["roboledger"],
-              entity_identifier="12-3456789",
-              entity_identifier_type="ein",
-              description="Test company",
-              tags=["test"],
-              create_entity=True,
-            )
-
-            assert result == mock_result
-            mock_manager.complete_operation.assert_called_once()
-            mock_report.assert_called_once()
-
-  @pytest.mark.asyncio
-  async def test_entity_capacity_scaling_fails_when_queue_disabled(self):
-    """Test that CapacityScalingTriggered fails immediately when queue is disabled."""
-    provisioning_error = CapacityScalingTriggered(
-      "No ladybug-standard capacity currently available."
-    )
-
-    with patch(
-      "robosystems.middleware.sse.direct_monitor.get_operation_manager"
-    ) as mock_get_manager:
-      mock_manager = AsyncMock()
-      mock_get_manager.return_value = mock_manager
-
-      with patch("robosystems.database.get_db_session") as mock_get_db:
-        mock_db = MagicMock()
-        mock_get_db.return_value = iter([mock_db])
-
-        with patch(
-          "robosystems.operations.graph.entity_graph_service.EntityGraphService"
-        ) as mock_service_class:
-          mock_service = AsyncMock()
-          mock_service.create_entity_with_new_graph.side_effect = provisioning_error
-          mock_service_class.return_value = mock_service
-
-          with patch.object(
-            type(env_config),
-            "GRAPH_PROVISION_QUEUE_ENABLED",
-            False,
-          ):
-            result = await run_entity_graph_creation(
-              operation_id="op123",
-              user_id="user456",
-              entity_name="Acme Corp",
-              tier="ladybug-standard",
-            )
-
-            # Should have failed the operation
-            mock_manager.fail_operation.assert_called_once()
-            call_args = mock_manager.fail_operation.call_args
-            assert call_args.args[0] == "op123"
-            assert "No capacity" in call_args.kwargs.get(
-              "error", call_args.args[1] if len(call_args.args) > 1 else ""
-            )
-
-            # Should return failed status
-            assert result["status"] == "failed"
-            assert result["operation_id"] == "op123"
-
-  @pytest.mark.asyncio
-  async def test_entity_creation_failure(self):
-    """Test entity graph creation failure handling."""
-    with patch(
-      "robosystems.middleware.sse.direct_monitor.get_operation_manager"
-    ) as mock_get_manager:
-      mock_manager = AsyncMock()
-      mock_get_manager.return_value = mock_manager
-
-      with patch("robosystems.database.get_db_session") as mock_get_db:
-        mock_db = MagicMock()
-        mock_get_db.return_value = iter([mock_db])
-
-        with patch(
-          "robosystems.operations.graph.entity_graph_service.EntityGraphService"
-        ) as mock_service_class:
-          mock_service = AsyncMock()
-          mock_service.create_entity_with_new_graph.side_effect = Exception(
-            "Allocation failed"
-          )
-          mock_service_class.return_value = mock_service
-
-          with pytest.raises(Exception, match="Allocation failed"):
-            await run_entity_graph_creation(
-              operation_id="op123",
-              user_id="user456",
-              entity_name="Acme Corp",
-              tier="ladybug-standard",
-            )
-
-          mock_manager.fail_operation.assert_called_once()
 
 
 class TestRunSubgraphCreation:
@@ -481,10 +131,9 @@ class TestRunGraphProvisioning:
   @pytest.mark.asyncio
   async def test_successful_graph_provisioning(self):
     """Test successful graph provisioning after payment."""
-    mock_result = {
-      "graph_id": "kg123456789",
-      "status": "created",
-    }
+    mock_result = MagicMock()
+    mock_result.graph_id = "kg123456789"
+    mock_result.to_dict.return_value = {"graph_id": "kg123456789", "status": "created"}
 
     with patch(
       "robosystems.middleware.sse.direct_monitor.get_operation_manager"
@@ -511,10 +160,10 @@ class TestRunGraphProvisioning:
         )
 
         with patch(
-          "robosystems.operations.graph.generic_graph_service.GenericGraphService"
+          "robosystems.operations.graph.graph_creation_service.GraphCreationService"
         ) as mock_service_class:
           mock_service = AsyncMock()
-          mock_service.create_graph.return_value = mock_result
+          mock_service.create.return_value = mock_result
           mock_service_class.return_value = mock_service
 
           with patch(
@@ -537,7 +186,9 @@ class TestRunGraphProvisioning:
   @pytest.mark.asyncio
   async def test_graph_provisioning_without_operation_id(self):
     """Test graph provisioning without SSE operation (webhook-triggered)."""
-    mock_result = {"graph_id": "kg123", "status": "created"}
+    mock_result = MagicMock()
+    mock_result.graph_id = "kg123"
+    mock_result.to_dict.return_value = {"graph_id": "kg123", "status": "created"}
 
     with patch(
       "robosystems.middleware.sse.direct_monitor.get_operation_manager"
@@ -559,10 +210,10 @@ class TestRunGraphProvisioning:
         )
 
         with patch(
-          "robosystems.operations.graph.generic_graph_service.GenericGraphService"
+          "robosystems.operations.graph.graph_creation_service.GraphCreationService"
         ) as mock_service_class:
           mock_service = AsyncMock()
-          mock_service.create_graph.return_value = mock_result
+          mock_service.create.return_value = mock_result
           mock_service_class.return_value = mock_service
 
           with patch(
@@ -603,12 +254,10 @@ class TestRunGraphProvisioning:
         )
 
         with patch(
-          "robosystems.operations.graph.generic_graph_service.GenericGraphService"
+          "robosystems.operations.graph.graph_creation_service.GraphCreationService"
         ) as mock_service_class:
           mock_service = AsyncMock()
-          mock_service.create_graph.side_effect = Exception(
-            "Database allocation failed"
-          )
+          mock_service.create.side_effect = Exception("Database allocation failed")
           mock_service_class.return_value = mock_service
 
           with pytest.raises(Exception, match="Database allocation failed"):
@@ -645,10 +294,10 @@ class TestRunGraphProvisioning:
         )
 
         with patch(
-          "robosystems.operations.graph.generic_graph_service.GenericGraphService"
+          "robosystems.operations.graph.graph_creation_service.GraphCreationService"
         ) as mock_service_class:
           mock_service = AsyncMock()
-          mock_service.create_graph.side_effect = Exception("Provisioning failed")
+          mock_service.create.side_effect = Exception("Provisioning failed")
           mock_service_class.return_value = mock_service
 
           with patch(
@@ -691,10 +340,10 @@ class TestRunGraphProvisioning:
         )
 
         with patch(
-          "robosystems.operations.graph.generic_graph_service.GenericGraphService"
+          "robosystems.operations.graph.graph_creation_service.GraphCreationService"
         ) as mock_service_class:
           mock_service = AsyncMock()
-          mock_service.create_graph.side_effect = Exception("Failed")
+          mock_service.create.side_effect = Exception("Failed")
           mock_service_class.return_value = mock_service
 
           with patch(
@@ -937,42 +586,6 @@ class TestDagsterMaterialization:
       description="Test",
       metadata={"graph_id": "kg123"},
     )
-
-
-class TestFeatureFlagIntegration:
-  """Test feature flag integration scenarios."""
-
-  @pytest.mark.asyncio
-  async def test_direct_execution_enabled(self):
-    """Test that direct execution runs when flag is enabled."""
-    mock_result = {"graph_id": "kg123", "status": "created"}
-
-    with patch(
-      "robosystems.middleware.sse.direct_monitor.get_operation_manager"
-    ) as mock_get_manager:
-      mock_manager = AsyncMock()
-      mock_get_manager.return_value = mock_manager
-
-      with patch(
-        "robosystems.operations.graph.generic_graph_service.GenericGraphService"
-      ) as mock_service_class:
-        mock_service = AsyncMock()
-        mock_service.create_graph.return_value = mock_result
-        mock_service_class.return_value = mock_service
-
-        with patch(
-          "robosystems.middleware.sse.direct_monitor._report_graph_materialization_async"
-        ):
-          result = await run_graph_creation(
-            operation_id="op123",
-            user_id="user456",
-            graph_name="Test",
-            tier="ladybug-standard",
-            schema_extensions=[],
-          )
-
-          assert result["graph_id"] == "kg123"
-          mock_service.create_graph.assert_called_once()
 
 
 class TestConstants:

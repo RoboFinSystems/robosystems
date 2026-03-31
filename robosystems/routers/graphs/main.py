@@ -7,7 +7,7 @@ optionally including initial entities like companies.
 
 from typing import Any
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status
 
 from robosystems.database import session
 from robosystems.logger import logger
@@ -24,7 +24,6 @@ from robosystems.middleware.rate_limits import (
   subscription_aware_rate_limit_dependency,
   user_management_rate_limit_dependency,
 )
-from robosystems.middleware.sse import create_operation_response
 from robosystems.models.api import (
   AvailableExtension,
   AvailableExtensionsResponse,
@@ -377,7 +376,6 @@ eventSource.onmessage = (event) => {
 )
 async def create_graph(
   request: CreateGraphRequest,
-  background_tasks: BackgroundTasks,
   current_user: User = Depends(get_current_user),
   _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
 ):
@@ -390,7 +388,8 @@ async def create_graph(
   3. Apply custom schemas
   4. Configure instance tiers
 
-  Returns operation details for SSE monitoring instead of legacy task polling.
+  Returns operation details for SSE monitoring. The actual creation runs
+  on the background worker via the graph_creation task handler.
   """
   try:
     from robosystems.config.graph_tier import GraphTier
@@ -398,8 +397,8 @@ async def create_graph(
     from robosystems.middleware.billing.enforcement import (
       check_can_provision_graph,
     )
+    from robosystems.worker.client import enqueue_task
 
-    # Get database session for user limits check
     db = next(get_db_session())
 
     try:
@@ -415,7 +414,6 @@ async def create_graph(
       org_id = user_orgs[0].org_id
       org_limits = OrgLimits.get_or_create_for_org(org_id, db)
 
-      # Check if org can create more graphs
       can_create, reason = org_limits.can_create_graph(db)
       if not can_create:
         _raise_http_exception(
@@ -424,7 +422,7 @@ async def create_graph(
           message=reason,
         )
 
-      # Map tier to GraphTier enum
+      # Map tier to GraphTier enum for billing check
       tier_map = {
         "ladybug-standard": GraphTier.LADYBUG_STANDARD,
         "ladybug-large": GraphTier.LADYBUG_LARGE,
@@ -434,7 +432,6 @@ async def create_graph(
         request.instance_tier.lower(), GraphTier.LADYBUG_STANDARD
       )
 
-      # Check billing before allowing graph creation
       can_provision, billing_error = check_can_provision_graph(
         user_id=current_user.id,
         requested_tier=graph_tier,
@@ -446,110 +443,43 @@ async def create_graph(
           error_code="payment_required",
           message=billing_error or "Valid payment method required to create graphs.",
         )
-
-      # Log the request
-      logger.info("=== GRAPH CREATION REQUEST (SSE) ===")
-      logger.info(f"User: {current_user.email} (ID: {current_user.id})")
-      logger.info(f"Graph Name: {request.metadata.graph_name}")
-      logger.info(f"Instance Tier: {request.instance_tier}")
-      logger.info(f"Schema Extensions: {request.metadata.schema_extensions}")
-      logger.info(f"Has Initial Entity: {request.initial_entity is not None}")
-      logger.info(f"Has Custom Schema: {request.custom_schema is not None}")
-
-      # Determine operation type and prepare data
-      if request.initial_entity:
-        # Entity-graph creation operation
-        operation_type = "entity_graph_creation"
-        logger.info("Using entity-graph creation workflow")
-
-        # Prepare entity data with tier information
-        operation_data = {
-          "request_type": "entity_graph",
-          "entity_data": {
-            **request.initial_entity.model_dump(),
-            "graph_tier": graph_tier.value,
-            "subscription_tier": "ladybug-standard",  # Default for tracking
-            "extensions": request.metadata.schema_extensions,  # EntityCreate expects 'extensions' not 'schema_extensions'
-            "graph_name": request.metadata.graph_name,
-            "graph_description": request.metadata.description,
-            "tags": request.tags or [],
-            "create_entity": request.create_entity,
-          },
-        }
-
-      else:
-        # Generic graph creation operation
-        operation_type = "graph_creation"
-        logger.info("Using generic graph creation workflow")
-
-        # Prepare task data
-        operation_data = {
-          "request_type": "generic_graph",
-          "task_data": {
-            "graph_id": None,  # Will be auto-generated with kg prefix
-            "schema_extensions": request.metadata.schema_extensions,
-            "metadata": request.metadata.model_dump(),
-            "tier": request.instance_tier,
-            "graph_tier": graph_tier.value,
-            "initial_data": None,
-            "user_id": str(current_user.id),
-            "custom_schema": request.custom_schema.model_dump()
-            if request.custom_schema
-            else None,
-            "tags": request.tags or [],
-          },
-        }
-
-      # Create SSE operation for async tracking
-      response = await create_operation_response(
-        operation_type=operation_type,
-        user_id=current_user.id,
-        graph_id=None,  # Will be set when graph is created
-      )
-
-      operation_id = response["operation_id"]
-
-      from robosystems.middleware.sse.direct_monitor import (
-        run_entity_graph_creation,
-        run_graph_creation,
-      )
-
-      if request.initial_entity:
-        background_tasks.add_task(
-          run_entity_graph_creation,
-          operation_id=operation_id,
-          user_id=str(current_user.id),
-          entity_name=operation_data["entity_data"]["name"],
-          tier=request.instance_tier,
-          schema_extensions=request.metadata.schema_extensions,
-          entity_identifier=operation_data["entity_data"].get("identifier"),
-          entity_identifier_type=operation_data["entity_data"].get("identifier_type"),
-          description=request.metadata.description,
-          tags=request.tags or [],
-          create_entity=request.create_entity,
-        )
-        logger.info(f"Created SSE operation {operation_id} for entity graph execution")
-      else:
-        background_tasks.add_task(
-          run_graph_creation,
-          operation_id=operation_id,
-          user_id=str(current_user.id),
-          graph_name=request.metadata.graph_name,
-          tier=request.instance_tier,
-          schema_extensions=request.metadata.schema_extensions,
-          description=request.metadata.description,
-          tags=request.tags or [],
-          custom_schema=request.custom_schema.model_dump()
-          if request.custom_schema
-          else None,
-        )
-        logger.info(f"Created SSE operation {operation_id} for graph execution")
-      logger.info("=== END GRAPH CREATION REQUEST (SSE) ===")
-
-      return response
-
     finally:
       db.close()
+
+    # Build unified params for worker task
+    is_entity = request.initial_entity is not None
+    entity_data = None
+    if is_entity:
+      entity_data = {
+        **request.initial_entity.model_dump(),
+        "extensions": request.metadata.schema_extensions,
+      }
+
+    logger.info(
+      f"Enqueuing graph creation: user={current_user.id}, "
+      f"type={'entity' if is_entity else 'generic'}, tier={request.instance_tier}"
+    )
+
+    response = await enqueue_task(
+      task_type="graph_creation",
+      graph_id=None,
+      user_id=str(current_user.id),
+      params={
+        "graph_type": "entity" if is_entity else "generic",
+        "graph_name": request.metadata.graph_name,
+        "tier": request.instance_tier,
+        "schema_extensions": request.metadata.schema_extensions,
+        "custom_schema": request.custom_schema.model_dump()
+        if request.custom_schema
+        else None,
+        "entity_data": entity_data,
+        "create_entity": request.create_entity if is_entity else False,
+        "description": request.metadata.description,
+        "tags": request.tags or [],
+      },
+    )
+
+    return response
 
   except HTTPException:
     raise

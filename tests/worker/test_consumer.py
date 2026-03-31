@@ -47,7 +47,7 @@ def mock_queue():
 
 def _make_task_data(task_type="test_success", **overrides):
   data = {
-    "task_id": "task_01TEST",
+    "task_id": "op_01TEST",
     "task_type": task_type,
     "graph_id": "kg0123456789abcdef",
     "user_id": "user_01TEST",
@@ -84,13 +84,13 @@ async def test_happy_path(
 
   # Progress emitted at start
   mock_manager.emit_progress.assert_called_once_with(
-    "task_01TEST", "Starting...", progress_percent=0
+    "op_01TEST", "Starting...", progress_percent=0
   )
 
   # Operation completed with result
   mock_manager.complete_operation.assert_called_once()
   call_args = mock_manager.complete_operation.call_args
-  assert call_args[0][0] == "task_01TEST"
+  assert call_args[0][0] == "op_01TEST"
   assert call_args[1]["result"] == {"mapped": 10, "coverage": 100}
 
   # Dagster reporting called
@@ -123,7 +123,7 @@ async def test_error_path(
   # fail_operation called with error
   mock_manager.fail_operation.assert_called_once()
   call_args = mock_manager.fail_operation.call_args
-  assert call_args[0][0] == "task_01TEST"
+  assert call_args[0][0] == "op_01TEST"
   assert "Something went wrong" in call_args[1]["error"]
   assert call_args[1]["error_details"]["error_type"] == "ValueError"
 

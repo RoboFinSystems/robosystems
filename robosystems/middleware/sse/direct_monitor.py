@@ -1,40 +1,12 @@
 """Direct operation execution with SSE progress tracking.
 
 This module provides utilities for running operations directly in the API process
-(or via BackgroundTasks) while emitting SSE progress events. It replaces Dagster
-job execution for latency-sensitive user-triggered operations.
+(or via BackgroundTasks) while emitting SSE progress events.
 
-For latency-sensitive operations like graph creation, this approach:
-- Executes operations immediately in the API worker process
-- Emits SSE events for real-time progress tracking
-- Reports AssetMaterializations to Dagster for observability
-- Returns control in ~3 seconds instead of 60+ seconds (Dagster cold start)
-
-Pattern copied from: robosystems/operations/lbug/direct_staging.py
-
-Usage:
-    from robosystems.middleware.sse.direct_monitor import run_graph_creation
-
-    @router.post("/graphs")
-    async def create_graph(request: CreateGraphRequest, background_tasks: BackgroundTasks):
-        operation_id = str(uuid.uuid4())
-
-        # Create operation for SSE tracking
-        await create_operation_response(
-            operation_type="graph_creation",
-            user_id=user_id,
-            operation_id=operation_id,
-        )
-
-        # Run directly with SSE progress (not via Dagster)
-        background_tasks.add_task(
-            run_graph_creation,
-            operation_id=operation_id,
-            user_id=user_id,
-            **request_params,
-        )
-
-        return {"operation_id": operation_id}
+Note: Graph creation (run_graph_creation, run_entity_graph_creation) has been
+migrated to worker/tasks/graph_creation.py via GraphCreationService. The remaining
+functions here handle subgraph creation, graph provisioning (billing-triggered),
+and user repository provisioning.
 """
 
 import asyncio
@@ -43,7 +15,6 @@ import time
 from typing import Any
 
 from robosystems.logger import logger
-from robosystems.middleware.graph.allocation_manager import CapacityScalingTriggered
 from robosystems.middleware.sse.operation_manager import get_operation_manager
 
 # Timeout for Dagster materialization reporting (seconds)
@@ -90,439 +61,6 @@ class ProgressEmitter:
     except Exception as e:
       # Don't fail operation if SSE emit fails
       logger.warning(f"Failed to emit progress event: {e}")
-
-
-async def run_graph_creation(
-  operation_id: str,
-  user_id: str,
-  graph_name: str,
-  tier: str,
-  schema_extensions: list[str],
-  description: str | None = None,
-  tags: list[str] | None = None,
-  custom_schema: dict[str, Any] | None = None,
-) -> dict[str, Any]:
-  """
-  Direct generic graph creation with SSE progress tracking.
-
-  Replaces: run_and_monitor_dagster_job("create_graph_job", ...)
-
-  Args:
-      operation_id: SSE operation ID for progress tracking
-      user_id: User creating the graph
-      graph_name: Name for the new graph
-      tier: Instance tier (ladybug-standard, ladybug-large, ladybug-xlarge)
-      schema_extensions: List of schema extensions to install
-      description: Optional description
-      tags: Optional tags
-      custom_schema: Optional custom schema definition
-
-  Returns:
-      Graph creation result with graph_id
-  """
-  from robosystems.operations.graph.generic_graph_service import GenericGraphService
-
-  manager = get_operation_manager()
-  progress = ProgressEmitter(operation_id)
-
-  start_time = time.time()
-
-  # Emit started event
-  await manager.emit_progress(operation_id, "Initializing graph creation...", 0)
-
-  try:
-    service = GenericGraphService()
-
-    result = await service.create_graph(
-      graph_id=None,  # Auto-generate
-      schema_extensions=schema_extensions,
-      metadata={
-        "name": graph_name,
-        "description": description or "",
-        "tags": tags or [],
-      },
-      tier=tier,
-      initial_data=None,
-      user_id=user_id,
-      custom_schema=custom_schema,
-      progress_callback=progress,
-    )
-
-    graph_id = result.get("graph_id")
-
-    # Create billing subscription — failure here means a graph exists without
-    # a billing record, so we log at error level for operational visibility.
-    try:
-      from robosystems.config.graph_tier import GraphTier
-      from robosystems.database import session
-      from robosystems.operations.graph.subscription_service import (
-        GraphSubscriptionService,
-      )
-
-      db = session()
-      try:
-        subscription_service = GraphSubscriptionService(db)
-        subscription_service.create_graph_subscription(
-          user_id=user_id,
-          graph_id=graph_id,
-          plan_name=tier,
-          tier=GraphTier(tier),
-        )
-        logger.info(f"Created billing subscription for graph {graph_id}")
-      except Exception as sub_error:
-        logger.error(
-          f"Failed to create billing subscription for graph {graph_id}: {sub_error}",
-          exc_info=True,
-        )
-      finally:
-        session.remove()
-    except ImportError:
-      logger.error("Failed to import subscription dependencies")
-
-    duration_ms = (time.time() - start_time) * 1000
-
-    # Emit completion with result
-    await manager.complete_operation(
-      operation_id,
-      result=result,
-      message="Graph created successfully",
-    )
-
-    # Report to Dagster for observability (non-blocking)
-    await _report_graph_materialization_async(
-      asset_key="user_graph_creation",
-      description=f"Direct creation of graph {result.get('graph_id')}",
-      metadata={
-        "graph_id": result.get("graph_id", ""),
-        "graph_name": graph_name,
-        "user_id": user_id,
-        "tier": tier,
-        "provisioning_method": "direct",
-        "duration_ms": duration_ms,
-        "schema_extensions": ",".join(schema_extensions) if schema_extensions else "",
-      },
-    )
-
-    logger.info(
-      f"Graph creation completed in {duration_ms:.0f}ms: {result.get('graph_id')}"
-    )
-    return result
-
-  except CapacityScalingTriggered:
-    from robosystems.config import env as app_env
-
-    if not app_env.GRAPH_PROVISION_QUEUE_ENABLED:
-      # Queue disabled — fail immediately
-      logger.info(f"No capacity available and provision queue disabled: {operation_id}")
-      await manager.fail_operation(
-        operation_id,
-        error="No capacity currently available. Please try again later.",
-        error_details={"error_type": "CapacityUnavailable"},
-      )
-      return {
-        "operation_id": operation_id,
-        "status": "failed",
-        "error": "No capacity currently available. Please try again later.",
-      }
-
-    # ASG scale-up was triggered — queue the graph for the creation queue sensor
-    logger.info(
-      f"Capacity scaling triggered — queuing graph for creation: {operation_id}"
-    )
-
-    from robosystems.config.graph_tier import GraphTier
-    from robosystems.database import session as db_session_factory
-    from robosystems.models.core.graph import Graph
-    from robosystems.models.core.org.org_user import OrgUser
-    from robosystems.utils.ulid import generate_ulid_hex
-
-    # Pre-generate graph_id
-    unique_id = generate_ulid_hex(16)
-    graph_id = f"kg{unique_id}"
-
-    # Get user's org
-    db = db_session_factory()
-    try:
-      org_user = db.query(OrgUser).filter(OrgUser.user_id == user_id).first()
-      org_id = org_user.org_id if org_user else None
-
-      # Create queued graph row + GraphUser in one transaction
-      Graph.create_queued(
-        graph_id=graph_id,
-        org_id=org_id,
-        graph_name=graph_name,
-        graph_type="generic",
-        user_id=user_id,
-        session=db,
-        graph_tier=GraphTier(tier),
-        schema_extensions=schema_extensions,
-        graph_metadata={
-          "created_by": user_id,
-          "operation_id": operation_id,
-          "description": description or "",
-          "tags": tags or [],
-          "custom_schema": custom_schema,
-        },
-      )
-      logger.info(f"Created queued graph {graph_id} for user {user_id}")
-    except Exception as queue_error:
-      logger.error(f"Failed to create queued graph: {queue_error}")
-      await manager.fail_operation(
-        operation_id,
-        error=f"Failed to queue graph for creation: {queue_error}",
-        error_details={"error_type": type(queue_error).__name__},
-      )
-      raise
-    finally:
-      db_session_factory.remove()
-
-    # Emit SSE progress
-    await manager.emit_progress(
-      operation_id,
-      "Queued for provisioning — new infrastructure being started...",
-      5,
-    )
-
-    return {
-      "graph_id": graph_id,
-      "operation_id": operation_id,
-      "status": "queued",
-    }
-
-  except Exception as e:
-    logger.error(f"Graph creation failed: {e}")
-    await manager.fail_operation(
-      operation_id,
-      error=str(e),
-      error_details={"error_type": type(e).__name__},
-    )
-    raise
-
-
-async def run_entity_graph_creation(
-  operation_id: str,
-  user_id: str,
-  entity_name: str,
-  tier: str,
-  schema_extensions: list[str] | None = None,
-  entity_identifier: str | None = None,
-  entity_identifier_type: str | None = None,
-  description: str | None = None,
-  tags: list[str] | None = None,
-  create_entity: bool = True,
-) -> dict[str, Any]:
-  """
-  Direct entity graph creation with SSE progress tracking.
-
-  Replaces: run_and_monitor_dagster_job("create_entity_graph_job", ...)
-
-  Args:
-      operation_id: SSE operation ID for progress tracking
-      user_id: User creating the graph
-      entity_name: Name of the entity
-      tier: Instance tier
-      schema_extensions: Optional schema extensions
-      entity_identifier: Optional identifier (EIN, etc.)
-      entity_identifier_type: Type of identifier
-      description: Optional description
-      tags: Optional tags
-      create_entity: Whether to create the entity node
-
-  Returns:
-      Graph creation result with graph_id and entity info
-  """
-  from robosystems.database import get_db_session
-  from robosystems.operations.graph.entity_graph_service import EntityGraphService
-
-  manager = get_operation_manager()
-  progress = ProgressEmitter(operation_id)
-
-  start_time = time.time()
-
-  # Emit started event
-  await manager.emit_progress(operation_id, "Initializing entity graph creation...", 0)
-
-  try:
-    db_gen = get_db_session()
-    db = next(db_gen)
-
-    try:
-      service = EntityGraphService(session=db)
-
-      # Build entity data dict
-      entity_data_dict = {
-        "name": entity_name,
-        "uri": entity_name.lower().replace(" ", "-"),
-        "extensions": schema_extensions or [],
-        "graph_tier": tier,
-        "description": description,
-        "tags": tags,
-        "create_entity": create_entity,
-      }
-
-      # Add identifier if provided
-      if entity_identifier and entity_identifier_type:
-        if entity_identifier_type == "ein":
-          entity_data_dict["ein"] = entity_identifier
-
-      result = await service.create_entity_with_new_graph(
-        entity_data_dict=entity_data_dict,
-        user_id=user_id,
-        tier=tier,
-        progress_callback=progress,
-      )
-
-      graph_id = result.get("graph_id")
-
-      # Create billing subscription for the entity graph
-      try:
-        from robosystems.config.graph_tier import GraphTier
-        from robosystems.operations.graph.subscription_service import (
-          GraphSubscriptionService,
-        )
-
-        subscription_service = GraphSubscriptionService(db)
-        subscription_service.create_graph_subscription(
-          user_id=user_id,
-          graph_id=graph_id,
-          plan_name=tier,
-          tier=GraphTier(tier),
-        )
-        logger.info(f"Created billing subscription for entity graph {graph_id}")
-      except Exception as sub_error:
-        logger.error(
-          f"Failed to create billing subscription for entity graph {graph_id}: {sub_error}",
-          exc_info=True,
-        )
-
-      duration_ms = (time.time() - start_time) * 1000
-
-      # Emit completion with result
-      await manager.complete_operation(
-        operation_id,
-        result=result,
-        message="Entity graph created successfully",
-      )
-
-      # Report to Dagster for observability (non-blocking)
-      await _report_graph_materialization_async(
-        asset_key="user_graph_creation",
-        description=f"Direct creation of entity graph {result.get('graph_id')}",
-        metadata={
-          "graph_id": result.get("graph_id", ""),
-          "entity_name": entity_name,
-          "user_id": user_id,
-          "tier": tier,
-          "provisioning_method": "direct",
-          "duration_ms": duration_ms,
-          "graph_type": "entity",
-          "create_entity": str(create_entity),
-        },
-      )
-
-      logger.info(
-        f"Entity graph creation completed in {duration_ms:.0f}ms: {result.get('graph_id')}"
-      )
-      return result
-
-    finally:
-      try:
-        next(db_gen)
-      except StopIteration:
-        pass
-
-  except CapacityScalingTriggered:
-    from robosystems.config import env as app_env
-
-    if not app_env.GRAPH_PROVISION_QUEUE_ENABLED:
-      # Queue disabled — fail immediately
-      logger.info(f"No capacity available and provision queue disabled: {operation_id}")
-      await manager.fail_operation(
-        operation_id,
-        error="No capacity currently available. Please try again later.",
-        error_details={"error_type": "CapacityUnavailable"},
-      )
-      return {
-        "operation_id": operation_id,
-        "status": "failed",
-        "error": "No capacity currently available. Please try again later.",
-      }
-
-    # ASG scale-up was triggered — queue the graph for the creation queue sensor
-    logger.info(
-      f"Capacity scaling triggered — queuing entity graph for creation: {operation_id}"
-    )
-
-    from robosystems.config.graph_tier import GraphTier
-    from robosystems.database import session as db_session_factory
-    from robosystems.models.core.graph import Graph
-    from robosystems.models.core.org.org_user import OrgUser
-    from robosystems.utils.ulid import generate_ulid_hex
-
-    # Pre-generate graph_id
-    unique_id = generate_ulid_hex(16)
-    graph_id = f"kg{unique_id}"
-
-    # Get user's org
-    db = db_session_factory()
-    try:
-      org_user = db.query(OrgUser).filter(OrgUser.user_id == user_id).first()
-      org_id = org_user.org_id if org_user else None
-
-      # Create queued graph row + GraphUser in one transaction
-      Graph.create_queued(
-        graph_id=graph_id,
-        org_id=org_id,
-        graph_name=entity_name,
-        graph_type="entity",
-        user_id=user_id,
-        session=db,
-        graph_tier=GraphTier(tier),
-        schema_extensions=schema_extensions,
-        graph_metadata={
-          "created_by": user_id,
-          "operation_id": operation_id,
-          "entity_name": entity_name,
-          "entity_identifier": entity_identifier,
-          "entity_identifier_type": entity_identifier_type,
-          "description": description or "",
-          "tags": tags or [],
-          "create_entity": create_entity,
-        },
-      )
-      logger.info(f"Created queued entity graph {graph_id} for user {user_id}")
-    except Exception as queue_error:
-      logger.error(f"Failed to create queued entity graph: {queue_error}")
-      await manager.fail_operation(
-        operation_id,
-        error=f"Failed to queue entity graph for creation: {queue_error}",
-        error_details={"error_type": type(queue_error).__name__},
-      )
-      raise
-    finally:
-      db_session_factory.remove()
-
-    # Emit SSE progress
-    await manager.emit_progress(
-      operation_id,
-      "Queued for provisioning — new infrastructure being started...",
-      5,
-    )
-
-    return {
-      "graph_id": graph_id,
-      "operation_id": operation_id,
-      "status": "queued",
-    }
-
-  except Exception as e:
-    logger.error(f"Entity graph creation failed: {e}")
-    await manager.fail_operation(
-      operation_id,
-      error=str(e),
-      error_details={"error_type": type(e).__name__},
-    )
-    raise
 
 
 async def run_subgraph_creation(
@@ -749,8 +287,10 @@ async def run_graph_provisioning(
     BillingEventType,
     BillingSubscription,
   )
-  from robosystems.operations.graph.entity_graph_service import EntityGraphService
-  from robosystems.operations.graph.generic_graph_service import GenericGraphService
+  from robosystems.operations.graph.graph_creation_service import (
+    GraphCreationConfig,
+    GraphCreationService,
+  )
   from robosystems.operations.graph.subscription_service import (
     generate_subscription_invoice,
   )
@@ -803,44 +343,30 @@ async def run_graph_provisioning(
         await manager.emit_progress(operation_id, "Creating graph database...", 30)
 
       has_entity = graph_type in ["entity", "company"] and entity_name
-
+      entity_data = None
       if has_entity:
-        # Entity graph
-        entity_service = EntityGraphService(session=db)
-        result = await entity_service.create_entity_with_new_graph(
-          entity_data_dict={
-            "name": entity_name,
-            "uri": entity_name.lower().replace(" ", "-"),
-            "extensions": schema_extensions,
-            "graph_tier": tier,
-            "ein": entity_identifier if entity_identifier_type == "ein" else None,
-            "description": description,
-            "tags": tags,
-            "create_entity": create_entity,
-          },
-          user_id=user_id,
-          tier=tier,
-          progress_callback=None,  # Don't double-emit progress
-        )
-      else:
-        # Generic graph
-        graph_service = GenericGraphService()
-        result = await graph_service.create_graph(
-          graph_id=None,
-          schema_extensions=schema_extensions,
-          metadata={
-            "name": graph_name or f"Graph-{subscription_id[:8]}",
-            "description": description or "",
-            "tags": tags,
-          },
-          tier=tier,
-          initial_data=None,
-          user_id=user_id,
-          custom_schema=None,
-          progress_callback=None,
-        )
+        entity_data = {
+          "name": entity_name,
+          "uri": entity_name.lower().replace(" ", "-"),
+          "extensions": schema_extensions,
+          "ein": entity_identifier if entity_identifier_type == "ein" else None,
+        }
 
-      graph_id = result.get("graph_id")
+      service = GraphCreationService()
+      creation_result = await service.create(
+        GraphCreationConfig(
+          user_id=user_id,
+          tier=tier,
+          graph_name=graph_name or entity_name or f"Graph-{subscription_id[:8]}",
+          graph_type="entity" if has_entity else "generic",
+          schema_extensions=schema_extensions,
+          entity_data=entity_data,
+          create_entity=create_entity if has_entity else False,
+          description=description,
+          tags=tags,
+        )
+      )
+      graph_id = creation_result.graph_id
       logger.info(f"Created graph {graph_id} for subscription {subscription_id}")
 
       # Step 3: Activate the subscription

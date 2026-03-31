@@ -25,7 +25,7 @@ def mock_manager():
 @pytest.fixture
 def task(mock_manager):
   return ConcreteTask(
-    task_id="task_01TEST",
+    task_id="op_01TEST",
     graph_id="kg0123456789abcdef",
     user_id="user_01TEST",
     params={"key": "value"},
@@ -44,7 +44,7 @@ async def test_report_progress(task, mock_manager):
   await task.report_progress("Working...", percent=50, details={"step": 1})
 
   mock_manager.emit_progress.assert_called_once_with(
-    "task_01TEST",
+    "op_01TEST",
     message="Working...",
     progress_percent=50,
     details={"step": 1},
@@ -56,7 +56,7 @@ async def test_report_progress_no_optional_args(task, mock_manager):
   await task.report_progress("Starting...")
 
   mock_manager.emit_progress.assert_called_once_with(
-    "task_01TEST",
+    "op_01TEST",
     message="Starting...",
     progress_percent=None,
     details=None,
@@ -76,7 +76,7 @@ async def test_is_cancelled_true(task, mock_manager):
 
 
 def test_task_attributes(task):
-  assert task.task_id == "task_01TEST"
+  assert task.task_id == "op_01TEST"
   assert task.graph_id == "kg0123456789abcdef"
   assert task.user_id == "user_01TEST"
   assert task.params == {"key": "value"}

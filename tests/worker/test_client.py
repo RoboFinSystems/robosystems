@@ -11,15 +11,15 @@ from robosystems.worker.client import enqueue_task
 @pytest.fixture
 def mock_operation_response():
   return {
-    "operation_id": "task_01TESTID",
+    "operation_id": "op_01TESTID",
     "status": "pending",
     "operation_type": "agent_mapping",
     "created_at": "2026-03-28T12:00:00Z",
     "graph_id": "kg0123456789abcdef",
     "_links": {
-      "stream": "/v1/operations/task_01TESTID/stream",
-      "status": "/v1/operations/task_01TESTID/status",
-      "cancel": "/v1/operations/task_01TESTID",
+      "stream": "/v1/operations/op_01TESTID/stream",
+      "status": "/v1/operations/op_01TESTID/status",
+      "cancel": "/v1/operations/op_01TESTID",
     },
     "message": "Operation agent_mapping queued.",
   }
@@ -55,7 +55,7 @@ async def test_enqueue_task_creates_operation_and_pushes(mock_operation_response
     ),
     patch(
       "robosystems.worker.client.generate_prefixed_ulid",
-      return_value="task_01TESTID",
+      return_value="op_01TESTID",
     ),
   ):
     result = await enqueue_task(
@@ -70,7 +70,7 @@ async def test_enqueue_task_creates_operation_and_pushes(mock_operation_response
     operation_type="agent_mapping",
     user_id="user_01TEST",
     graph_id="kg0123456789abcdef",
-    operation_id="task_01TESTID",
+    operation_id="op_01TESTID",
   )
 
   # Verify pipeline used atomically (dedup key + enqueue)
@@ -82,13 +82,13 @@ async def test_enqueue_task_creates_operation_and_pushes(mock_operation_response
   # Verify dedup key includes user_id
   dedup_args = mock_pipe.set.call_args[0]
   assert dedup_args[0] == "worker:dedup:agent_mapping:kg0123456789abcdef:user_01TEST"
-  assert dedup_args[1] == "task_01TESTID"
+  assert dedup_args[1] == "op_01TESTID"
 
   # Verify task payload
   rpush_args = mock_pipe.rpush.call_args[0]
   assert rpush_args[0] == "worker:tasks"
   payload = json.loads(rpush_args[1])
-  assert payload["task_id"] == "task_01TESTID"
+  assert payload["task_id"] == "op_01TESTID"
   assert payload["task_type"] == "agent_mapping"
   assert payload["graph_id"] == "kg0123456789abcdef"
   assert payload["user_id"] == "user_01TEST"
@@ -118,7 +118,7 @@ async def test_enqueue_task_default_params(mock_operation_response):
     ),
     patch(
       "robosystems.worker.client.generate_prefixed_ulid",
-      return_value="task_01TESTID",
+      return_value="op_01TESTID",
     ),
   ):
     await enqueue_task(
@@ -150,7 +150,7 @@ async def test_enqueue_task_closes_queue_on_error(mock_operation_response):
     ),
     patch(
       "robosystems.worker.client.generate_prefixed_ulid",
-      return_value="task_01TESTID",
+      return_value="op_01TESTID",
     ),
   ):
     with pytest.raises(ConnectionError):
@@ -167,7 +167,7 @@ async def test_enqueue_task_closes_queue_on_error(mock_operation_response):
 @pytest.mark.asyncio
 async def test_enqueue_task_dedup_returns_existing():
   """Duplicate enqueue within dedup window returns existing operation."""
-  mock_queue, _ = _make_mock_queue(dedup_exists=True, dedup_task_id="task_01EXISTING")
+  mock_queue, _ = _make_mock_queue(dedup_exists=True, dedup_task_id="op_01EXISTING")
 
   with patch(
     "robosystems.worker.client.create_async_redis_client",
@@ -180,9 +180,9 @@ async def test_enqueue_task_dedup_returns_existing():
     )
 
   # Should return dedup response, not create a new operation
-  assert result["operation_id"] == "task_01EXISTING"
+  assert result["operation_id"] == "op_01EXISTING"
   assert result["deduplicated"] is True
-  assert result["_links"]["stream"] == "/v1/operations/task_01EXISTING/stream"
+  assert result["_links"]["stream"] == "/v1/operations/op_01EXISTING/stream"
 
   # Should NOT create pipeline or enqueue
   mock_queue.pipeline.assert_not_called()

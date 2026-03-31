@@ -2,21 +2,23 @@
 
 When capacity is unavailable during graph creation, graphs are inserted with
 status='queued'. This sensor processes the queue FIFO, one graph at a time
-per tier, by transitioning to 'provisioning' and launching the
-wait_and_create_graph_job.
+per tier, by transitioning to 'provisioning' and enqueuing a worker task
+to attempt creation.
+
+If the worker task fails (still no capacity), the graph stays queued and
+the sensor will re-enqueue it on the next cycle.
 """
 
 import json
 
 from dagster import (
   DefaultSensorStatus,
-  RunRequest,
   SensorEvaluationContext,
+  SkipReason,
   sensor,
 )
 
 from robosystems.config.graph_tier import GraphTier
-from robosystems.dagster.jobs.graph import wait_and_create_graph_job
 from robosystems.logger import get_logger
 
 logger = get_logger(__name__)
@@ -30,10 +32,9 @@ QUEUE_TIERS = [
 
 
 @sensor(
-  job=wait_and_create_graph_job,
   minimum_interval_seconds=30,
   default_status=DefaultSensorStatus.RUNNING,
-  description="Processes the graph creation queue (FIFO, one at a time per tier). Controlled by GRAPH_PROVISION_QUEUE_ENABLED feature flag.",
+  description="Processes the graph creation queue (FIFO, one at a time per tier). Enqueues worker tasks for queued graphs. Controlled by GRAPH_PROVISION_QUEUE_ENABLED feature flag.",
 )
 def graph_creation_queue_sensor(context: SensorEvaluationContext):
   """Process the graph creation queue.
@@ -42,18 +43,20 @@ def graph_creation_queue_sensor(context: SensorEvaluationContext):
   1. Skip if a graph is already status=provisioning for this tier
   2. Find the oldest status=queued graph (FIFO via created_at)
   3. Transition to status=provisioning
-  4. Yield RunRequest with graph_id + creation params
+  4. Enqueue a worker task to create the graph
   """
   from robosystems.config import env
 
   if not env.GRAPH_PROVISION_QUEUE_ENABLED:
-    return
+    return SkipReason("Graph provision queue disabled")
 
   from robosystems.database import session as db_session_factory
   from robosystems.models.core.graph import Graph, GraphStatus
 
   db = db_session_factory()
   try:
+    enqueued = 0
+
     for tier in QUEUE_TIERS:
       # Guard: one provisioning job at a time per tier
       if Graph.has_provisioning_for_tier(tier, db):
@@ -67,7 +70,6 @@ def graph_creation_queue_sensor(context: SensorEvaluationContext):
 
       graph_id = queued_graph.graph_id
       graph_metadata = queued_graph.graph_metadata or {}
-      operation_id = graph_metadata.get("operation_id", "")
 
       # Transition to provisioning
       queued_graph.transition_status(GraphStatus.PROVISIONING, db)
@@ -75,32 +77,113 @@ def graph_creation_queue_sensor(context: SensorEvaluationContext):
         f"Tier {tier}: transitioning graph {graph_id} from queued to provisioning"
       )
 
-      # Build run config
+      # Build worker task params from stored metadata
       schema_extensions = queued_graph.schema_extensions or []
       custom_schema = graph_metadata.get("custom_schema")
+      entity_data = graph_metadata.get("entity_data")
+      create_entity = graph_metadata.get("create_entity", True)
 
-      yield RunRequest(
-        run_key=f"queue-{graph_id}-{int(queued_graph.updated_at.timestamp())}",
-        run_config={
-          "ops": {
-            "wait_for_capacity_and_create_graph": {
-              "config": {
-                "operation_id": operation_id,
-                "user_id": graph_metadata.get("created_by", ""),
-                "graph_name": queued_graph.graph_name,
-                "graph_id": graph_id,
-                "tier": tier,
-                "schema_extensions": ",".join(schema_extensions),
-                "description": graph_metadata.get("description", ""),
-                "tags": ",".join(graph_metadata.get("tags", [])),
-                "custom_schema_json": json.dumps(custom_schema)
-                if custom_schema
-                else "",
-              }
-            }
-          }
-        },
-        tags={"graph_id": graph_id, "tier": tier},
+      _enqueue_graph_creation(
+        graph_id=graph_id,
+        user_id=graph_metadata.get("created_by", ""),
+        graph_type=queued_graph.graph_type or "entity",
+        graph_name=queued_graph.graph_name,
+        tier=tier,
+        schema_extensions=schema_extensions,
+        custom_schema=custom_schema,
+        entity_data=entity_data,
+        create_entity=create_entity,
+        description=graph_metadata.get("description", ""),
+        tags=graph_metadata.get("tags", []),
       )
+      enqueued += 1
+      context.log.info(f"Enqueued worker task for queued graph {graph_id}")
+
+    if enqueued == 0:
+      return SkipReason("No queued graphs found")
+
+    context.log.info(f"Enqueued {enqueued} graph creation worker tasks")
+    return None
+
   finally:
     db_session_factory.remove()
+
+
+def _enqueue_graph_creation(
+  graph_id: str,
+  user_id: str,
+  graph_type: str,
+  graph_name: str,
+  tier: str,
+  schema_extensions: list[str],
+  custom_schema: dict | None,
+  entity_data: dict | None,
+  create_entity: bool,
+  description: str,
+  tags: list[str],
+) -> None:
+  """Enqueue a graph creation task to the worker via sync Redis.
+
+  Uses sync Redis directly since Dagster sensors run in a sync context.
+  """
+
+  from robosystems.config.valkey_registry import ValkeyDatabase, create_redis_client
+  from robosystems.utils.ulid import generate_prefixed_ulid
+
+  task_id = generate_prefixed_ulid("op")
+  queue = create_redis_client(ValkeyDatabase.WORKER_QUEUE, decode_responses=True)
+
+  try:
+    task_payload = json.dumps(
+      {
+        "task_id": task_id,
+        "task_type": "graph_creation",
+        "graph_id": graph_id,
+        "user_id": user_id,
+        "attempt": 1,
+        "params": {
+          "graph_id": graph_id,
+          "graph_type": graph_type,
+          "graph_name": graph_name,
+          "tier": tier,
+          "schema_extensions": schema_extensions,
+          "custom_schema": custom_schema,
+          "entity_data": entity_data,
+          "create_entity": create_entity,
+          "description": description,
+          "tags": tags,
+        },
+      }
+    )
+    queue.rpush("worker:tasks", task_payload)
+
+    # Create SSE operation for the task so progress is trackable
+    # (the original operation_id from the API request may have expired)
+    _create_sse_operation_sync(task_id, graph_id, user_id)
+
+  finally:
+    queue.close()
+
+
+def _create_sse_operation_sync(task_id: str, graph_id: str, user_id: str) -> None:
+  """Create an SSE operation entry for the queued task (sync)."""
+
+  from datetime import UTC, datetime
+
+  from robosystems.config.valkey_registry import ValkeyDatabase, create_redis_client
+
+  sse = create_redis_client(ValkeyDatabase.SSE, decode_responses=True)
+  try:
+    metadata = json.dumps(
+      {
+        "operation_id": task_id,
+        "operation_type": "graph_creation",
+        "user_id": user_id,
+        "graph_id": graph_id,
+        "status": "pending",
+        "created_at": datetime.now(UTC).isoformat(),
+      }
+    )
+    sse.setex(f"sse:operation:meta:{task_id}", 86400, metadata)
+  finally:
+    sse.close()

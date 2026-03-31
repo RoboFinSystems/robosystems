@@ -105,7 +105,7 @@ async def stream_operation_events(
   operation_id: str = Path(
     ...,
     description="Operation identifier from initial submission",
-    pattern="^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|q_[0-9a-f]{12})$",
+    pattern="^(op_[0-9A-Z]{26}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$",
   ),
   from_sequence: int = Query(
     0,
@@ -284,7 +284,7 @@ async def get_operation_status(
   operation_id: str = Path(
     ...,
     description="Operation identifier",
-    pattern="^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|q_[0-9a-f]{12})$",
+    pattern="^(op_[0-9A-Z]{26}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$",
   ),
   current_user: User = Depends(get_current_user),
   _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
@@ -460,7 +460,7 @@ async def cancel_operation(
   operation_id: str = Path(
     ...,
     description="Operation identifier",
-    pattern="^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+    pattern="^(op_[0-9A-Z]{26}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$",
   ),
   current_user: User = Depends(get_current_user),
   _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),

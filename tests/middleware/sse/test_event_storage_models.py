@@ -144,7 +144,8 @@ class TestSSEEventStorageKeyPrefixes:
     storage = SSEEventStorage.__new__(SSEEventStorage)
     op_id = storage.generate_operation_id()
     assert isinstance(op_id, str)
-    assert len(op_id) == 36  # UUID format
+    assert op_id.startswith("op_")
+    assert len(op_id) == 29  # "op_" + 26-char ULID
 
   def test_unique_ids(self):
     storage = SSEEventStorage.__new__(SSEEventStorage)

@@ -63,7 +63,7 @@ async def enqueue_task(
         },
       }
 
-    task_id = generate_prefixed_ulid("task")
+    task_id = generate_prefixed_ulid("op")
 
     # Create SSE operation (PENDING state, generates _links)
     response = await create_operation_response(
