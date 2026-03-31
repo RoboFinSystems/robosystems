@@ -109,7 +109,10 @@ def worker_inflight_reaper_sensor(context: SensorEvaluationContext):
           # could be caused by Valkey memory pressure or short TTL.
           queue.lrem(inflight_key, 1, task_json)
           if attempt >= MAX_RETRIES:
-            queue.rpush("worker:dlq", task_json)
+            task_data["dlq_reason"] = "no_sse_metadata"
+            task_data["dlq_at"] = datetime.now(UTC).isoformat()
+            task_data["dlq_attempts"] = attempt
+            queue.rpush("worker:dlq", json.dumps(task_data))
             dlq_count += 1
             logger.warning(
               f"Task {task_id} ({task_type}) has no SSE metadata, "
@@ -146,7 +149,10 @@ def worker_inflight_reaper_sensor(context: SensorEvaluationContext):
 
         if attempt >= MAX_RETRIES:
           # Exceeded retries — move to DLQ and mark failed
-          queue.rpush("worker:dlq", task_json)
+          task_data["dlq_reason"] = f"stale_after_{attempt}_attempts"
+          task_data["dlq_at"] = datetime.now(UTC).isoformat()
+          task_data["dlq_attempts"] = attempt
+          queue.rpush("worker:dlq", json.dumps(task_data))
           _fail_operation_sync(sse, task_id, attempt)
           dlq_count += 1
           logger.warning(

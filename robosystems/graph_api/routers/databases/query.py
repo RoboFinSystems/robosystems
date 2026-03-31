@@ -9,6 +9,7 @@ import json
 import os
 import time
 from contextlib import contextmanager
+from datetime import date, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Path, status
 from fastapi.responses import StreamingResponse
@@ -148,9 +149,14 @@ async def execute_query(
       return service.execute_query(query_request)
 
     # Streaming response for large result sets
+    def _json_default(obj: object) -> str:
+      if isinstance(obj, (date, datetime)):
+        return obj.isoformat()
+      raise TypeError(f"Object of type {type(obj).__name__} is not JSON serializable")
+
     def generate_stream():
       for chunk in service.execute_query_streaming(query_request, chunk_size=1000):
-        yield json.dumps(chunk) + "\n"
+        yield json.dumps(chunk, default=_json_default) + "\n"
 
     return StreamingResponse(
       generate_stream(),

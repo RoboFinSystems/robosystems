@@ -4,7 +4,6 @@ Backup restore endpoint.
 
 from fastapi import (
   APIRouter,
-  BackgroundTasks,
   Depends,
   HTTPException,
   Path,
@@ -118,7 +117,6 @@ Returns operation details for SSE monitoring.""",
   business_event_type="backup_restored",
 )
 async def restore_backup(
-  background_tasks: BackgroundTasks,
   request: BackupRestoreRequest,
   fastapi_request: Request,
   backup_id: str = Path(..., description="Backup identifier"),
@@ -187,22 +185,9 @@ async def restore_backup(
         detail="Only full database backups (full_dump) can be restored",
       )
 
-    # Create SSE operation for restore tracking
-    from robosystems.middleware.sse import create_operation_response
+    from robosystems.middleware.sse import build_graph_job_config
+    from robosystems.worker.client import enqueue_task
 
-    sse_response = await create_operation_response(
-      operation_type="backup_restore", user_id=current_user.id, graph_id=graph_id
-    )
-
-    # Execute restore via Dagster with SSE monitoring
-    from robosystems.middleware.sse import (
-      build_graph_job_config,
-      run_and_monitor_dagster_job,
-    )
-
-    operation_id = sse_response["operation_id"]
-
-    # Build Dagster job config
     run_config = build_graph_job_config(
       "restore_graph_job",
       graph_id=graph_id,
@@ -212,16 +197,16 @@ async def restore_backup(
       verify_after_restore=request.verify_after_restore,
     )
 
-    # Run Dagster job with SSE monitoring in background
-    background_tasks.add_task(
-      run_and_monitor_dagster_job,
-      job_name="restore_graph_job",
-      operation_id=operation_id,
-      run_config=run_config,
+    response = await enqueue_task(
+      task_type="dagster_job_monitor",
+      graph_id=graph_id,
+      user_id=str(current_user.id),
+      params={"job_name": "restore_graph_job", "run_config": run_config},
     )
+    operation_id = response["operation_id"]
 
     logger.info(
-      f"Scheduled Dagster restore job for graph {graph_id} with operation {operation_id}"
+      f"Enqueued restore job monitor for graph {graph_id}: operation={operation_id}"
     )
 
     # Record business event
@@ -259,9 +244,8 @@ async def restore_backup(
       risk_level="high",  # Restore is a high-risk operation
     )
 
-    # Return SSE response directly
     return {
-      **sse_response,
+      **response,
       "status": "pending",
       "message": f"graph database restore scheduled for graph '{graph_id}' from encrypted backup",
     }

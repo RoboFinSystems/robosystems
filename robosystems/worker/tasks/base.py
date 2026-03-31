@@ -54,3 +54,22 @@ class BaseTask(ABC):
     """Check if the user has requested cancellation."""
     status = await self.manager.get_operation_status(self.task_id)
     return status == OperationStatus.CANCELLED
+
+  def release_lock(self, lock_key: str | None) -> None:
+    """Release a distributed lock by key. Safe to call with None."""
+    if not lock_key:
+      return
+
+    from robosystems.logger import get_logger
+
+    logger = get_logger(__name__)
+
+    try:
+      from robosystems.config.valkey_registry import ValkeyDatabase, create_redis_client
+
+      redis_client = create_redis_client(ValkeyDatabase.LOCKS)
+      redis_client.delete(f"lock:{lock_key}")
+      redis_client.close()
+      logger.debug(f"Released lock: {lock_key}")
+    except Exception as e:
+      logger.warning(f"Failed to release lock {lock_key}: {e}")

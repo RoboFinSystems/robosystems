@@ -757,7 +757,7 @@ async def _trigger_resource_provisioning(
 
   context.log.info(f"Triggering provisioning for {resource_type}")
 
-  from robosystems.middleware.sse.direct_monitor import (
+  from robosystems.operations.graph.provisioning_service import (
     run_graph_provisioning,
     run_user_repository_provisioning,
   )

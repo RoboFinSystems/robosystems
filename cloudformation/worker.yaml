@@ -49,8 +49,23 @@ Parameters:
     Type: Number
     Default: 1
     MinValue: 0
-    MaxValue: 5
-    Description: Number of worker tasks (0 to pause, 1 for singleton, 2+ for parallel processing)
+    MaxValue: 10
+    Description: Initial desired count (autoscaling takes over after deployment)
+  WorkerMinCount:
+    Type: Number
+    Default: 1
+    MinValue: 1
+    MaxValue: 10
+    Description: Minimum number of worker tasks (always-on baseline)
+  WorkerMaxCount:
+    Type: Number
+    Default: 5
+    MinValue: 1
+    MaxValue: 10
+    Description: Maximum number of worker tasks during burst
+  DagsterClusterName:
+    Type: String
+    Description: Name of the Dagster ECS cluster (last segment of ARN)
 
   # Database Configuration (from Postgres stack outputs)
   DatabaseEndpoint:
@@ -349,6 +364,7 @@ Resources:
         - Name: worker
           Image: !Sub ${ECRRepositoryUrl}:${ECRImageTag}
           Essential: true
+          StopTimeout: 120
           Command: ["/app/bin/entrypoint.sh"]
           LogConfiguration:
             LogDriver: awslogs
@@ -401,8 +417,8 @@ Resources:
       EnableExecuteCommand: true
       PropagateTags: SERVICE
       DeploymentConfiguration:
-        MaximumPercent: 100
-        MinimumHealthyPercent: 0
+        MaximumPercent: 200
+        MinimumHealthyPercent: 100
       Tags:
         - Key: Environment
           Value: !Ref Environment
@@ -412,6 +428,89 @@ Resources:
           Value: !Ref ComponentTag
         - Key: CreatedBy
           Value: CloudFormation
+
+  # ========================================
+  # AUTOSCALING
+  # ========================================
+  WorkerScalableTarget:
+    Type: AWS::ApplicationAutoScaling::ScalableTarget
+    Properties:
+      ServiceNamespace: ecs
+      ScalableDimension: ecs:service:DesiredCount
+      ResourceId: !Sub service/${DagsterClusterName}/robosystems-worker-${Environment}
+      MinCapacity: !Ref WorkerMinCount
+      MaxCapacity: !Ref WorkerMaxCount
+      RoleARN: !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:role/aws-service-role/ecs.application-autoscaling.amazonaws.com/AWSServiceRoleForApplicationAutoScaling_ECSService
+
+  WorkerScaleOutPolicy:
+    Type: AWS::ApplicationAutoScaling::ScalingPolicy
+    Properties:
+      PolicyName: worker-scale-out
+      PolicyType: StepScaling
+      ScalingTargetId: !Ref WorkerScalableTarget
+      StepScalingPolicyConfiguration:
+        AdjustmentType: ChangeInCapacity
+        Cooldown: 60
+        MetricAggregationType: Maximum
+        StepAdjustments:
+          # QueueDepth > 2 and <= 5: add 1
+          - MetricIntervalLowerBound: 0
+            MetricIntervalUpperBound: 3
+            ScalingAdjustment: 1
+          # QueueDepth > 5 and <= 10: add 2
+          - MetricIntervalLowerBound: 3
+            MetricIntervalUpperBound: 8
+            ScalingAdjustment: 2
+          # QueueDepth > 10: add 3
+          - MetricIntervalLowerBound: 8
+            ScalingAdjustment: 3
+
+  WorkerScaleOutAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub robosystems-worker-queue-depth-high-${Environment}
+      AlarmDescription: Worker queue depth exceeds threshold - scale out
+      Namespace: !Sub RoboSystems/Worker/${Environment}
+      MetricName: QueueDepth
+      Statistic: Maximum
+      Period: 60
+      EvaluationPeriods: 1
+      Threshold: 2
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref WorkerScaleOutPolicy
+
+  WorkerScaleInPolicy:
+    Type: AWS::ApplicationAutoScaling::ScalingPolicy
+    Properties:
+      PolicyName: worker-scale-in
+      PolicyType: StepScaling
+      ScalingTargetId: !Ref WorkerScalableTarget
+      StepScalingPolicyConfiguration:
+        AdjustmentType: ChangeInCapacity
+        Cooldown: 300
+        MetricAggregationType: Maximum
+        StepAdjustments:
+          # QueueDepth dropped to 0: remove 1
+          - MetricIntervalUpperBound: 0
+            ScalingAdjustment: -1
+
+  WorkerScaleInAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub robosystems-worker-queue-depth-zero-${Environment}
+      AlarmDescription: Worker queue empty - scale in
+      Namespace: !Sub RoboSystems/Worker/${Environment}
+      MetricName: QueueDepth
+      Statistic: Maximum
+      Period: 60
+      EvaluationPeriods: 5
+      Threshold: 0
+      ComparisonOperator: LessThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref WorkerScaleInPolicy
 
 Outputs:
   WorkerServiceArn:

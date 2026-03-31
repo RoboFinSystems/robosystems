@@ -32,10 +32,6 @@ from .dagster_monitor import (
   run_and_monitor_dagster_job,
   submit_dagster_job_sync,
 )
-from .direct_monitor import (
-  ProgressEmitter,
-  run_subgraph_creation,
-)
 from .event_storage import (
   EventType,
   OperationMetadata,
@@ -63,7 +59,6 @@ __all__ = [
   "OperationManager",
   "OperationMetadata",
   "OperationStatus",
-  "ProgressEmitter",
   "SSEConnectionManager",
   "SSEEvent",
   "SSEEventStorage",
@@ -77,6 +72,5 @@ __all__ = [
   "get_event_storage",
   "get_operation_manager",
   "run_and_monitor_dagster_job",
-  "run_subgraph_creation",
   "submit_dagster_job_sync",
 ]

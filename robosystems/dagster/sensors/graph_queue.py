@@ -83,21 +83,28 @@ def graph_creation_queue_sensor(context: SensorEvaluationContext):
       entity_data = graph_metadata.get("entity_data")
       create_entity = graph_metadata.get("create_entity", True)
 
-      _enqueue_graph_creation(
-        graph_id=graph_id,
-        user_id=graph_metadata.get("created_by", ""),
-        graph_type=queued_graph.graph_type or "entity",
-        graph_name=queued_graph.graph_name,
-        tier=tier,
-        schema_extensions=schema_extensions,
-        custom_schema=custom_schema,
-        entity_data=entity_data,
-        create_entity=create_entity,
-        description=graph_metadata.get("description", ""),
-        tags=graph_metadata.get("tags", []),
-      )
-      enqueued += 1
-      context.log.info(f"Enqueued worker task for queued graph {graph_id}")
+      try:
+        _enqueue_graph_creation(
+          graph_id=graph_id,
+          user_id=graph_metadata.get("created_by", ""),
+          graph_type=queued_graph.graph_type or "entity",
+          graph_name=queued_graph.graph_name,
+          tier=tier,
+          schema_extensions=schema_extensions,
+          custom_schema=custom_schema,
+          entity_data=entity_data,
+          create_entity=create_entity,
+          description=graph_metadata.get("description", ""),
+          tags=graph_metadata.get("tags", []),
+        )
+        enqueued += 1
+        context.log.info(f"Enqueued worker task for queued graph {graph_id}")
+      except Exception as e:
+        # Revert to QUEUED so the sensor retries on the next cycle
+        queued_graph.transition_status(GraphStatus.QUEUED, db)
+        context.log.error(
+          f"Failed to enqueue graph {graph_id}, reverted to QUEUED: {e}"
+        )
 
     if enqueued == 0:
       return SkipReason("No queued graphs found")

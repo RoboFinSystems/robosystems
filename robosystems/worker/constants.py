@@ -11,6 +11,7 @@ TASK_TIMEOUTS: dict[str, int] = {
   "subgraph_creation": 60,  # 1 minute
   "repository_provisioning": 60,  # 1 minute
   "graph_materialization": 120,  # 2 minutes
+  "dagster_job_monitor": 3600,  # 1 hour (backup/restore can be long)
   "file_staging": 60,  # 1 minute
   "document_indexing": 120,  # 2 minutes
 }
