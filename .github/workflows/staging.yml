@@ -536,7 +536,6 @@ jobs:
       ecr_repository_url: ${{ needs.build.outputs.ecr_repository_url }}
       ecr_image_tag: ${{ needs.build.outputs.image_tag }}
       # ECS & Compute Configuration
-      desired_count: ${{ vars.API_MIN_CAPACITY_STAGING || '1' }}
       cpu: ${{ vars.API_CPU_STAGING || '512' }}
       memory: ${{ vars.API_MEMORY_STAGING || '1024' }}
       fargate_spot_weight: ${{ vars.API_FARGATE_SPOT_WEIGHT_STAGING || '90' }}
@@ -624,6 +623,9 @@ jobs:
       worker_cpu: ${{ vars.WORKER_CPU_STAGING || '512' }}
       worker_memory: ${{ vars.WORKER_MEMORY_STAGING || '1024' }}
       worker_desired_count: ${{ vars.WORKER_DESIRED_COUNT_STAGING || '1' }}
+      worker_min_count: ${{ vars.WORKER_MIN_COUNT_STAGING || '1' }}
+      worker_max_count: ${{ vars.WORKER_MAX_COUNT_STAGING || '5' }}
+      worker_autoscaling_enabled: ${{ vars.WORKER_AUTOSCALING_ENABLED_STAGING || 'false' }}
       # Capacity Provider Configuration (Spot vs On-Demand)
       daemon_fargate_spot_weight: ${{ vars.DAGSTER_DAEMON_FARGATE_SPOT_WEIGHT_STAGING || '80' }}
       webserver_fargate_spot_weight: ${{ vars.DAGSTER_WEBSERVER_FARGATE_SPOT_WEIGHT_STAGING || '80' }}

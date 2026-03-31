@@ -318,11 +318,17 @@ function setup_full_config() {
     gh variable set WORKER_CPU_PROD --body "512"
     gh variable set WORKER_MEMORY_PROD --body "1024"
     gh variable set WORKER_DESIRED_COUNT_PROD --body "1"
+    gh variable set WORKER_MIN_COUNT_PROD --body "1"
+    gh variable set WORKER_MAX_COUNT_PROD --body "5"
+    gh variable set WORKER_AUTOSCALING_ENABLED_PROD --body "false"
     if $setup_staging; then
         gh variable set WORKER_ENABLED_STAGING --body "false"
         gh variable set WORKER_CPU_STAGING --body "512"
         gh variable set WORKER_MEMORY_STAGING --body "1024"
         gh variable set WORKER_DESIRED_COUNT_STAGING --body "1"
+        gh variable set WORKER_MIN_COUNT_STAGING --body "1"
+        gh variable set WORKER_MAX_COUNT_STAGING --body "5"
+        gh variable set WORKER_AUTOSCALING_ENABLED_STAGING --body "false"
     fi
 
     # Database Configuration
@@ -375,10 +381,12 @@ function setup_full_config() {
     gh variable set OPENSEARCH_ENABLED_PROD --body "false"
     gh variable set OPENSEARCH_INSTANCE_TYPE_PROD --body "t3.medium.search"
     gh variable set OPENSEARCH_EBS_SIZE_PROD --body "100"
+    gh variable set OPENSEARCH_VERSION_PROD --body "2.19"
     if $setup_staging; then
         gh variable set OPENSEARCH_ENABLED_STAGING --body "false"
         gh variable set OPENSEARCH_INSTANCE_TYPE_STAGING --body "t3.medium.search"
         gh variable set OPENSEARCH_EBS_SIZE_STAGING --body "100"
+        gh variable set OPENSEARCH_VERSION_STAGING --body "2.19"
     fi
 
     # LadybugDB Writer Configuration - Standard Tier

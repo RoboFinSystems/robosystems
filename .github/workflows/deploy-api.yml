@@ -54,10 +54,6 @@ on:
         type: string
 
       # ECS & Compute Configuration
-      desired_count:
-        description: "Number of ECS tasks to run"
-        required: true
-        type: string
       cpu:
         description: "CPU units for ECS task (256 = 0.25 vCPU)"
         required: false
@@ -317,7 +313,6 @@ jobs:
                 ParameterKey=PublicSubnetIds,ParameterValue=\"${{ inputs.public_subnet_ids }}\" \
                 ParameterKey=ECRRepositoryUrl,ParameterValue=${{ inputs.ecr_repository_url }} \
                 ParameterKey=ECRImageTag,ParameterValue=${{ inputs.ecr_image_tag }} \
-                ParameterKey=DesiredCount,ParameterValue=${{ inputs.desired_count }} \
                 ParameterKey=Cpu,ParameterValue=${{ inputs.cpu }} \
                 ParameterKey=Memory,ParameterValue=${{ inputs.memory }} \
                 ParameterKey=ValkeyUrl,ParameterValue=${{ inputs.valkey_url }} \

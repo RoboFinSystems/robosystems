@@ -128,6 +128,11 @@ on:
         required: false
         type: string
         default: "5"
+      worker_autoscaling_enabled:
+        description: "Enable queue-depth-based autoscaling (true/false)"
+        required: false
+        type: string
+        default: "false"
 
       # Cache Configuration
       valkey_url:
@@ -425,6 +430,7 @@ jobs:
                 ParameterKey=WorkerDesiredCount,ParameterValue=${{ inputs.worker_desired_count }} \
                 ParameterKey=WorkerMinCount,ParameterValue=${{ inputs.worker_min_count }} \
                 ParameterKey=WorkerMaxCount,ParameterValue=${{ inputs.worker_max_count }} \
+                ParameterKey=WorkerAutoscalingEnabled,ParameterValue=${{ inputs.worker_autoscaling_enabled }} \
                 ParameterKey=DatabaseEndpoint,ParameterValue=${{ inputs.database_endpoint }} \
                 ParameterKey=DatabasePort,ParameterValue=${{ inputs.database_port }} \
                 ParameterKey=DatabaseSecurityGroupId,ParameterValue=${{ inputs.database_sg_id }} \
