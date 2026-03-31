@@ -891,10 +891,7 @@ Resources:
     Properties:
       ServiceName: !Sub robosystems-api-${Environment}-service
       Cluster: !Ref ApiCluster
-      # DesiredCount intentionally omitted — Application Auto Scaling manages it
-      # via ApiScalingTarget (MinCapacity/MaxCapacity). Setting it here would
-      # reset the autoscaler's count on every CloudFormation stack update.
-      # For new services, CFN defaults to 1; ScalableTarget adjusts to MinCapacity.
+      # DesiredCount omitted — Auto Scaling (ApiScalingTarget) owns it
       CapacityProviderStrategy:
         - CapacityProvider: FARGATE_SPOT
           Weight: !Ref FargateSpotWeight
@@ -908,7 +905,11 @@ Resources:
           SecurityGroups:
             - !Ref ApiSecurityGroup
             - !Ref ValkeyClientSecurityGroupId
-            - !If [HasOpenSearch, !Ref OpenSearchClientSecurityGroupId, !Ref "AWS::NoValue"]
+            - !If [
+                HasOpenSearch,
+                !Ref OpenSearchClientSecurityGroupId,
+                !Ref "AWS::NoValue",
+              ]
       TaskDefinition: !Ref ApiTaskDefinition
       LoadBalancers:
         - ContainerName: api-container
@@ -1090,7 +1091,7 @@ Resources:
           FixedResponseConfig:
             StatusCode: "403"
             ContentType: "application/json"
-            MessageBody: '{"error": "Forbidden", "detail": "Admin API is not accessible via public internet. Use SSM tunnel: ./bin/tools/tunnels.sh <env> api-internal"}'
+            MessageBody: '{"error": "Forbidden"}'
 
   # HTTP Listener - always exists (unconditional)
   # public mode: redirects to HTTPS
