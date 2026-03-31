@@ -388,7 +388,9 @@ async def create_repository_subscription(
     # - Activate subscription
     # - Generate invoice
     # - Report to Dagster
-    from ...middleware.sse.direct_monitor import run_user_repository_provisioning
+    from robosystems.operations.graph.provisioning_service import (
+      run_user_repository_provisioning,
+    )
 
     try:
       result = await run_user_repository_provisioning(

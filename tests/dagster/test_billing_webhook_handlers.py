@@ -25,7 +25,7 @@ import pytest
 
 _BILLING = "robosystems.models.core.billing"
 _IAM = "robosystems.models.core"
-_SSE = "robosystems.middleware.sse.direct_monitor"
+_SSE = "robosystems.operations.graph.provisioning_service"
 _BILLING_JOBS = "robosystems.dagster.jobs.billing"
 
 PATCH_BILLING_SUB = f"{_BILLING}.BillingSubscription"

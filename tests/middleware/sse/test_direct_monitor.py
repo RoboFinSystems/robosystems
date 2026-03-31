@@ -1,8 +1,8 @@
-"""Tests for direct execution monitor module.
+"""Tests for provisioning service (moved from direct_monitor).
 
-Note: TestRunGraphCreation and TestRunEntityGraphCreation removed —
-graph creation now handled by worker/tasks/graph_creation.py via
-GraphCreationService.
+Tests for graph/repository provisioning and Dagster reporting helpers.
+ProgressEmitter and run_subgraph_creation tests removed — subgraph
+creation now handled by worker/tasks/subgraph_creation.py.
 """
 
 import asyncio
@@ -10,119 +10,13 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from robosystems.middleware.sse.direct_monitor import (
+from robosystems.operations.graph.provisioning_service import (
   DAGSTER_REPORT_TIMEOUT,
-  ProgressEmitter,
-  _report_graph_materialization_async,
-  _report_graph_materialization_sync,
+  _report_dagster_materialization,
+  _report_dagster_materialization_sync,
   run_graph_provisioning,
-  run_subgraph_creation,
   run_user_repository_provisioning,
 )
-
-
-class TestProgressEmitter:
-  """Test ProgressEmitter class."""
-
-  def test_initialization(self):
-    """Test emitter initialization."""
-    emitter = ProgressEmitter("op123")
-    assert emitter.operation_id == "op123"
-    assert emitter.manager is not None
-
-  @pytest.mark.asyncio
-  async def test_call_emits_progress(self):
-    """Test that calling emitter emits SSE progress."""
-    with patch(
-      "robosystems.middleware.sse.direct_monitor.get_operation_manager"
-    ) as mock_get_manager:
-      mock_manager = AsyncMock()
-      mock_get_manager.return_value = mock_manager
-
-      emitter = ProgressEmitter("op123")
-
-      # Call the emitter (sync callback)
-      emitter("Creating nodes...", 50.0)
-
-      # Give the async task time to run
-      await asyncio.sleep(0.1)
-
-      # Verify emit_progress was called
-      mock_manager.emit_progress.assert_called_with(
-        "op123",
-        message="Creating nodes...",
-        progress_percent=50.0,
-      )
-
-  def test_call_without_event_loop(self):
-    """Test calling emitter when no event loop is running."""
-    with patch(
-      "robosystems.middleware.sse.direct_monitor.get_operation_manager"
-    ) as mock_get_manager:
-      mock_manager = MagicMock()
-      mock_get_manager.return_value = mock_manager
-
-      emitter = ProgressEmitter("op123")
-
-      # This should not raise even without an event loop
-      # (it will just skip the emit)
-      with patch("asyncio.get_running_loop", side_effect=RuntimeError):
-        emitter("Test message", 25.0)
-        # Should not raise
-
-
-class TestRunSubgraphCreation:
-  """Test run_subgraph_creation function."""
-
-  @pytest.mark.asyncio
-  async def test_successful_subgraph_creation(self):
-    """Test successful subgraph creation."""
-    mock_result = {
-      "graph_id": "kg123_dev",
-      "status": "created",
-    }
-
-    with patch(
-      "robosystems.middleware.sse.direct_monitor.get_operation_manager"
-    ) as mock_get_manager:
-      mock_manager = AsyncMock()
-      mock_get_manager.return_value = mock_manager
-
-      with patch("robosystems.database.get_db_session") as mock_get_db:
-        mock_db = MagicMock()
-        mock_get_db.return_value = iter([mock_db])
-
-        mock_parent = MagicMock()
-        mock_user = MagicMock()
-        # Set up db.query to return different results for Graph and User
-        mock_db.query.return_value.filter.return_value.first.side_effect = [
-          mock_parent,
-          mock_user,
-        ]
-
-        with patch(
-          "robosystems.operations.graph.subgraph_service.SubgraphService"
-        ) as mock_service_class:
-          mock_service = AsyncMock()
-          mock_service.create_subgraph.return_value = mock_result
-          mock_service_class.return_value = mock_service
-
-          with patch(
-            "robosystems.middleware.sse.direct_monitor._report_graph_materialization_async"
-          ) as mock_report:
-            mock_report.return_value = None
-
-            result = await run_subgraph_creation(
-              operation_id="op123",
-              user_id="user456",
-              parent_graph_id="kg123",
-              subgraph_name="dev",
-              description="Development subgraph",
-              fork_data=True,
-            )
-
-            assert result == mock_result
-            mock_manager.complete_operation.assert_called_once()
 
 
 class TestRunGraphProvisioning:
@@ -136,7 +30,7 @@ class TestRunGraphProvisioning:
     mock_result.to_dict.return_value = {"graph_id": "kg123456789", "status": "created"}
 
     with patch(
-      "robosystems.middleware.sse.direct_monitor.get_operation_manager"
+      "robosystems.operations.graph.provisioning_service.get_operation_manager"
     ) as mock_get_manager:
       mock_manager = AsyncMock()
       mock_get_manager.return_value = mock_manager
@@ -145,7 +39,6 @@ class TestRunGraphProvisioning:
         mock_db = MagicMock()
         mock_get_db.return_value = iter([mock_db])
 
-        # Mock subscription
         mock_subscription = MagicMock()
         mock_subscription.id = "sub123"
         mock_subscription.status = "provisioning"
@@ -167,7 +60,7 @@ class TestRunGraphProvisioning:
           mock_service_class.return_value = mock_service
 
           with patch(
-            "robosystems.middleware.sse.direct_monitor._report_graph_materialization_async"
+            "robosystems.operations.graph.provisioning_service._report_dagster_materialization"
           ) as mock_report:
             mock_report.return_value = None
 
@@ -191,7 +84,7 @@ class TestRunGraphProvisioning:
     mock_result.to_dict.return_value = {"graph_id": "kg123", "status": "created"}
 
     with patch(
-      "robosystems.middleware.sse.direct_monitor.get_operation_manager"
+      "robosystems.operations.graph.provisioning_service.get_operation_manager"
     ) as mock_get_manager:
       mock_manager = AsyncMock()
       mock_get_manager.return_value = mock_manager
@@ -217,17 +110,16 @@ class TestRunGraphProvisioning:
           mock_service_class.return_value = mock_service
 
           with patch(
-            "robosystems.middleware.sse.direct_monitor._report_graph_materialization_async"
+            "robosystems.operations.graph.provisioning_service._report_dagster_materialization"
           ):
             result = await run_graph_provisioning(
-              operation_id=None,  # No SSE tracking
+              operation_id=None,
               subscription_id="sub123",
               user_id="user456",
               tier="ladybug-standard",
             )
 
             assert result["graph_id"] == "kg123"
-            # Should not emit progress without operation_id
             mock_manager.emit_progress.assert_not_called()
             mock_manager.complete_operation.assert_not_called()
 
@@ -235,13 +127,12 @@ class TestRunGraphProvisioning:
   async def test_graph_provisioning_failure_marks_subscription_failed(self):
     """Test that provisioning failure marks subscription as failed."""
     with patch(
-      "robosystems.middleware.sse.direct_monitor.get_operation_manager"
+      "robosystems.operations.graph.provisioning_service.get_operation_manager"
     ) as mock_get_manager:
       mock_manager = AsyncMock()
       mock_get_manager.return_value = mock_manager
 
       with patch("robosystems.database.get_db_session") as mock_get_db:
-        # First call for main logic, second for error cleanup
         mock_db = MagicMock()
         mock_get_db.return_value = iter([mock_db])
 
@@ -274,14 +165,13 @@ class TestRunGraphProvisioning:
   async def test_graph_provisioning_failure_cancels_stripe_subscription(self):
     """Test that provisioning failure cancels the Stripe subscription."""
     with patch(
-      "robosystems.middleware.sse.direct_monitor.get_operation_manager"
+      "robosystems.operations.graph.provisioning_service.get_operation_manager"
     ) as mock_get_manager:
       mock_manager = AsyncMock()
       mock_get_manager.return_value = mock_manager
 
       with patch("robosystems.database.get_db_session") as mock_get_db:
         mock_db = MagicMock()
-        # Two calls to get_db_session: one for main logic, one for error cleanup
         mock_get_db.side_effect = [iter([mock_db]), iter([mock_db])]
 
         mock_subscription = MagicMock()
@@ -321,7 +211,7 @@ class TestRunGraphProvisioning:
   async def test_graph_provisioning_failure_skips_cancel_without_stripe(self):
     """Test that failure without Stripe subscription doesn't attempt cancel."""
     with patch(
-      "robosystems.middleware.sse.direct_monitor.get_operation_manager"
+      "robosystems.operations.graph.provisioning_service.get_operation_manager"
     ) as mock_get_manager:
       mock_manager = AsyncMock()
       mock_get_manager.return_value = mock_manager
@@ -367,7 +257,7 @@ class TestRunUserRepositoryProvisioning:
   async def test_successful_user_repository_provisioning(self):
     """Test successful user repository provisioning."""
     with patch(
-      "robosystems.middleware.sse.direct_monitor.get_operation_manager"
+      "robosystems.operations.graph.provisioning_service.get_operation_manager"
     ) as mock_get_manager:
       mock_manager = AsyncMock()
       mock_get_manager.return_value = mock_manager
@@ -376,7 +266,6 @@ class TestRunUserRepositoryProvisioning:
         mock_db = MagicMock()
         mock_get_db.return_value = iter([mock_db])
 
-        # Mock subscription
         mock_subscription = MagicMock()
         mock_subscription.id = "sub123"
         mock_subscription.status = "provisioning"
@@ -386,7 +275,6 @@ class TestRunUserRepositoryProvisioning:
         mock_subscription.current_period_end = MagicMock()
         mock_subscription.current_period_end.isoformat.return_value = "2026-02-01"
 
-        # Mock customer
         mock_customer = MagicMock()
         mock_customer.org_id = "org123"
 
@@ -412,7 +300,7 @@ class TestRunUserRepositoryProvisioning:
                 "robosystems.operations.graph.subscription_service.generate_subscription_invoice"
               ):
                 with patch(
-                  "robosystems.middleware.sse.direct_monitor._report_graph_materialization_async"
+                  "robosystems.operations.graph.provisioning_service._report_dagster_materialization"
                 ):
                   result = await run_user_repository_provisioning(
                     operation_id="op123",
@@ -431,7 +319,7 @@ class TestRunUserRepositoryProvisioning:
   async def test_user_repository_provisioning_invalid_type(self):
     """Test user repository provisioning with invalid repository type."""
     with patch(
-      "robosystems.middleware.sse.direct_monitor.get_operation_manager"
+      "robosystems.operations.graph.provisioning_service.get_operation_manager"
     ) as mock_get_manager:
       mock_manager = AsyncMock()
       mock_get_manager.return_value = mock_manager
@@ -469,7 +357,7 @@ class TestRunUserRepositoryProvisioning:
   async def test_repository_provisioning_failure_cancels_stripe_subscription(self):
     """Test that repository provisioning failure cancels the Stripe subscription."""
     with patch(
-      "robosystems.middleware.sse.direct_monitor.get_operation_manager"
+      "robosystems.operations.graph.provisioning_service.get_operation_manager"
     ) as mock_get_manager:
       mock_manager = AsyncMock()
       mock_get_manager.return_value = mock_manager
@@ -531,9 +419,9 @@ class TestDagsterMaterialization:
   async def test_async_materialization_success(self):
     """Test successful async materialization reporting."""
     with patch(
-      "robosystems.middleware.sse.direct_monitor._report_graph_materialization_sync"
+      "robosystems.operations.graph.provisioning_service._report_dagster_materialization_sync"
     ) as mock_sync:
-      await _report_graph_materialization_async(
+      await _report_dagster_materialization(
         asset_key="user_graph_creation",
         description="Test creation",
         metadata={"graph_id": "kg123"},
@@ -550,14 +438,13 @@ class TestDagsterMaterialization:
     """Test materialization reporting timeout."""
 
     async def slow_operation(*args, **kwargs):
-      await asyncio.sleep(10)  # Longer than DAGSTER_REPORT_TIMEOUT
+      await asyncio.sleep(10)
 
     with patch("asyncio.to_thread", return_value=slow_operation()):
       with patch(
-        "robosystems.middleware.sse.direct_monitor.DAGSTER_REPORT_TIMEOUT", 0.01
+        "robosystems.operations.graph.provisioning_service.DAGSTER_REPORT_TIMEOUT", 0.01
       ):
-        # Should not raise, just log warning
-        await _report_graph_materialization_async(
+        await _report_dagster_materialization(
           asset_key="user_graph_creation",
           description="Test",
           metadata={},
@@ -567,21 +454,15 @@ class TestDagsterMaterialization:
   async def test_async_materialization_failure(self):
     """Test materialization reporting failure handling."""
     with patch("asyncio.to_thread", side_effect=Exception("Dagster unavailable")):
-      # Should not raise, just log warning
-      await _report_graph_materialization_async(
+      await _report_dagster_materialization(
         asset_key="user_graph_creation",
         description="Test",
         metadata={},
       )
 
   def test_sync_materialization_skips_in_test_env(self):
-    """Test that sync materialization skips in test environment.
-
-    Note: The actual test runs in 'test' environment, so the function
-    should return early without calling Dagster.
-    """
-    # This should not raise - it should just log a debug message and return
-    _report_graph_materialization_sync(
+    """Test that sync materialization skips in test environment."""
+    _report_dagster_materialization_sync(
       asset_key="user_graph_creation",
       description="Test",
       metadata={"graph_id": "kg123"},

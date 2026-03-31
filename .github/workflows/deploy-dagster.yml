@@ -114,10 +114,20 @@ on:
         type: string
         default: "1024"
       worker_desired_count:
-        description: "Number of worker tasks (0 to pause, 1 for singleton, 2+ for parallel)"
+        description: "Initial desired count (autoscaling takes over after deployment)"
         required: false
         type: string
         default: "1"
+      worker_min_count:
+        description: "Minimum worker tasks (always-on baseline)"
+        required: false
+        type: string
+        default: "1"
+      worker_max_count:
+        description: "Maximum worker tasks during burst"
+        required: false
+        type: string
+        default: "5"
 
       # Cache Configuration
       valkey_url:
@@ -399,15 +409,22 @@ jobs:
             echo "Updating existing worker stack $WORKER_STACK"
           fi
 
+          # Extract cluster name from ARN (last segment after /)
+          CLUSTER_NAME=$(echo "${{ steps.dagster-outputs.outputs.cluster_arn }}" | awk -F'/' '{print $NF}')
+          echo "Dagster cluster name: $CLUSTER_NAME"
+
           WORKER_PARAMS="ParameterKey=Environment,ParameterValue=${{ inputs.environment }} \
                 ParameterKey=SubnetIds,ParameterValue=\"${{ inputs.subnet_ids }}\" \
                 ParameterKey=DagsterClusterArn,ParameterValue=${{ steps.dagster-outputs.outputs.cluster_arn }} \
+                ParameterKey=DagsterClusterName,ParameterValue=$CLUSTER_NAME \
                 ParameterKey=DagsterSecurityGroupId,ParameterValue=${{ steps.dagster-outputs.outputs.sg_id }} \
                 ParameterKey=ECRRepositoryUrl,ParameterValue=${{ inputs.ecr_repository_url }} \
                 ParameterKey=ECRImageTag,ParameterValue=${{ inputs.ecr_image_tag }} \
                 ParameterKey=WorkerCpu,ParameterValue=${{ inputs.worker_cpu }} \
                 ParameterKey=WorkerMemory,ParameterValue=${{ inputs.worker_memory }} \
                 ParameterKey=WorkerDesiredCount,ParameterValue=${{ inputs.worker_desired_count }} \
+                ParameterKey=WorkerMinCount,ParameterValue=${{ inputs.worker_min_count }} \
+                ParameterKey=WorkerMaxCount,ParameterValue=${{ inputs.worker_max_count }} \
                 ParameterKey=DatabaseEndpoint,ParameterValue=${{ inputs.database_endpoint }} \
                 ParameterKey=DatabasePort,ParameterValue=${{ inputs.database_port }} \
                 ParameterKey=DatabaseSecurityGroupId,ParameterValue=${{ inputs.database_sg_id }} \

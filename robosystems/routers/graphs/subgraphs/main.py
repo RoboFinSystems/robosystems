@@ -3,9 +3,8 @@ Main subgraph routes (list and create operations).
 """
 
 import asyncio
-import json
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Path, status
+from fastapi import APIRouter, Depends, HTTPException, Path, status
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
@@ -277,7 +276,6 @@ When `fork_parent=true`, the operation:
 )
 async def create_subgraph(
   request: CreateSubgraphRequest,
-  background_tasks: BackgroundTasks,
   graph_id: str = Path(
     ...,
     description="Parent graph ID (e.g., 'kg1a2b3c4d5')",
@@ -332,31 +330,25 @@ async def create_subgraph(
       },
     )
 
-    # 6. Check if we need SSE for forking
+    # 6. Fork path: enqueue to worker for background execution
     if request.fork_parent:
-      from robosystems.middleware.sse.operation_manager import create_operation_response
+      from robosystems.worker.client import enqueue_task
 
-      # Create SSE operation
-      operation_response = await create_operation_response(
-        operation_type="subgraph_fork",
-        user_id=str(current_user.id),
+      response = await enqueue_task(
+        task_type="subgraph_creation",
         graph_id=graph_id,
-      )
-
-      operation_id = operation_response["operation_id"]
-
-      from robosystems.middleware.sse.direct_monitor import run_subgraph_creation
-
-      background_tasks.add_task(
-        run_subgraph_creation,
-        operation_id=operation_id,
         user_id=str(current_user.id),
-        parent_graph_id=graph_id,
-        subgraph_name=request.name,
-        description=request.display_name,
-        fork_data=True,
+        params={
+          "parent_graph_id": graph_id,
+          "subgraph_name": request.name,
+          "description": request.display_name,
+          "fork_data": True,
+        },
       )
-      logger.info(f"Created SSE operation {operation_id} for subgraph fork execution")
+      logger.info(
+        f"Enqueued subgraph fork: operation={response['operation_id']}, "
+        f"parent={graph_id}, name={request.name}"
+      )
 
       # Record success metrics
       record_operation_metrics(
@@ -370,14 +362,7 @@ async def create_subgraph(
         },
       )
 
-      # Return operation response for SSE monitoring (202 Accepted)
-      from fastapi import Response
-
-      return Response(
-        content=json.dumps(operation_response),
-        status_code=status.HTTP_202_ACCEPTED,
-        media_type="application/json",
-      )
+      return response
 
     # Non-fork path: Create immediately and return SubgraphResponse
     service = get_subgraph_service()

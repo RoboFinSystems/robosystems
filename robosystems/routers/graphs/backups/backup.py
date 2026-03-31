@@ -6,7 +6,6 @@ from datetime import UTC, datetime
 
 from fastapi import (
   APIRouter,
-  BackgroundTasks,
   Depends,
   HTTPException,
   Path,
@@ -298,7 +297,6 @@ Returns operation details for SSE monitoring.""",
   business_event_type="backup_created",
 )
 async def create_backup(
-  background_tasks: BackgroundTasks,
   request: BackupCreateRequest,
   fastapi_request: Request,
   graph_id: str = Path(
@@ -411,30 +409,9 @@ async def create_backup(
       )
 
     # Queue Dagster job for backup creation with SSE progress tracking
-    import uuid
+    from robosystems.middleware.sse import build_graph_job_config
+    from robosystems.worker.client import enqueue_task
 
-    from robosystems.middleware.sse import (
-      build_graph_job_config,
-      run_and_monitor_dagster_job,
-    )
-    from robosystems.middleware.sse.event_storage import get_event_storage
-
-    operation_id = str(uuid.uuid4())
-
-    logger.info(
-      f"Queueing Dagster backup job for graph {graph_id} with operation_id {operation_id}"
-    )
-
-    # Register operation with SSE before queuing task
-    event_storage = get_event_storage()
-    await event_storage.create_operation(
-      operation_type="backup_creation",
-      user_id=str(current_user.id),
-      graph_id=graph_id,
-      operation_id=operation_id,
-    )
-
-    # Build Dagster job config
     run_config = build_graph_job_config(
       "backup_graph_job",
       graph_id=graph_id,
@@ -446,12 +423,16 @@ async def create_backup(
       encryption=request.encryption,
     )
 
-    # Run Dagster job with SSE monitoring in background
-    background_tasks.add_task(
-      run_and_monitor_dagster_job,
-      job_name="backup_graph_job",
-      operation_id=operation_id,
-      run_config=run_config,
+    response = await enqueue_task(
+      task_type="dagster_job_monitor",
+      graph_id=graph_id,
+      user_id=str(current_user.id),
+      params={"job_name": "backup_graph_job", "run_config": run_config},
+    )
+    operation_id = response["operation_id"]
+
+    logger.info(
+      f"Enqueued backup job monitor for graph {graph_id}: operation={operation_id}"
     )
 
     # Record business event
