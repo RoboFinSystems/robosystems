@@ -50,19 +50,4 @@ class DagsterJobMonitorTask(BaseTask):
       return result
 
     finally:
-      self._release_lock(lock_key)
-
-  def _release_lock(self, lock_key: str | None) -> None:
-    """Release the distributed lock if held (materialization paths)."""
-    if not lock_key:
-      return
-
-    try:
-      from robosystems.config.valkey_registry import ValkeyDatabase, create_redis_client
-
-      redis_client = create_redis_client(ValkeyDatabase.LOCKS)
-      redis_client.delete(f"lock:{lock_key}")
-      redis_client.close()
-      logger.debug(f"Released lock: {lock_key}")
-    except Exception as e:
-      logger.warning(f"Failed to release lock {lock_key}: {e}")
+      self.release_lock(lock_key)

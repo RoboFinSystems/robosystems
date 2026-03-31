@@ -9,15 +9,15 @@ orchestration, not background tasks or SSE monitors.
 """
 
 import asyncio
-import os
 import time
 from typing import Any
 
 from robosystems.logger import logger
 from robosystems.middleware.sse.operation_manager import get_operation_manager
 
-# Timeout for Dagster materialization reporting (seconds)
-DAGSTER_REPORT_TIMEOUT = float(os.getenv("DAGSTER_MATERIALIZATION_TIMEOUT", "15.0"))
+# Timeout for Dagster materialization reporting (seconds).
+# Generous enough for cold Dagster instances under load.
+DAGSTER_REPORT_TIMEOUT = 15.0
 
 
 async def run_graph_provisioning(

@@ -283,7 +283,7 @@ async def create_subgraph(
   ),
   current_user: User = Depends(get_current_user_with_graph),
   db: Session = Depends(get_async_db_session),
-) -> SubgraphResponse:
+):
   """Create a new subgraph within a parent graph."""
   operation_start_time = record_operation_start()
   audit_logger = SecurityAuditLogger()
@@ -348,6 +348,18 @@ async def create_subgraph(
       logger.info(
         f"Enqueued subgraph fork: operation={response['operation_id']}, "
         f"parent={graph_id}, name={request.name}"
+      )
+
+      # Security audit log
+      audit_logger.log_security_event(
+        SecurityEventType.SUBGRAPH_CREATED,
+        user_id=str(current_user.id),
+        details={
+          "operation_id": response["operation_id"],
+          "parent_graph_id": graph_id,
+          "subgraph_name": request.name,
+          "fork": True,
+        },
       )
 
       # Record success metrics

@@ -53,22 +53,4 @@ class GraphMaterializationTask(BaseTask):
         next(db_gen)
       except StopIteration:
         pass
-      self._release_lock(lock_key)
-
-  def _release_lock(self, lock_key: str | None) -> None:
-    """Release the distributed materialization lock if held."""
-    if not lock_key:
-      return
-
-    try:
-      from robosystems.config.valkey_registry import ValkeyDatabase, create_redis_client
-
-      redis_client = create_redis_client(ValkeyDatabase.LOCKS)
-      # Delete the lock key directly — the router acquired it, we just need
-      # to ensure it's released. The lock_id ownership check isn't possible
-      # across processes, but the TTL protects against permanent deadlocks.
-      redis_client.delete(f"lock:{lock_key}")
-      redis_client.close()
-      logger.debug(f"Released materialization lock: {lock_key}")
-    except Exception as e:
-      logger.warning(f"Failed to release materialization lock {lock_key}: {e}")
+      self.release_lock(lock_key)
