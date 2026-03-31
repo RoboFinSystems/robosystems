@@ -31,6 +31,8 @@ class DagsterJobMonitorTask(BaseTask):
   """
 
   async def execute(self) -> dict[str, Any]:
+    import asyncio
+
     from robosystems.middleware.sse.dagster_monitor import DagsterRunMonitor
 
     job_name = self.params["job_name"]
@@ -44,10 +46,42 @@ class DagsterJobMonitorTask(BaseTask):
       run_id = monitor.submit_job(job_name, run_config, tags)
       await self.report_progress(f"Submitted {job_name}", percent=5)
 
-      result = await monitor.monitor_run(run_id, self.task_id)
+      # Poll with cancellation checks between iterations.
+      # DagsterRunMonitor.monitor_run handles SSE progress internally,
+      # but doesn't know about worker cancellation. We wrap the poll
+      # loop so the user can cancel long-running monitors (backup/restore).
+      while True:
+        if await self.is_cancelled():
+          logger.info(f"Dagster job monitor cancelled: {job_name} (run_id={run_id})")
+          return {"status": "cancelled", "run_id": run_id, "job_name": job_name}
 
-      logger.info(f"Dagster job {job_name} completed: run_id={run_id}")
-      return result
+        status_info = monitor.get_run_status(run_id)
+        current_status = status_info["status"]
+
+        if current_status == "completed":
+          await monitor.emit_completion(self.task_id, status_info)
+          logger.info(f"Dagster job {job_name} completed: run_id={run_id}")
+          return status_info
+
+        if current_status == "failed":
+          await monitor.emit_error(
+            self.task_id, f"Dagster job {job_name} failed", status_info
+          )
+          return status_info
+
+        if current_status == "cancelled":
+          await monitor.emit_error(
+            self.task_id, f"Dagster job {job_name} was cancelled", status_info
+          )
+          return status_info
+
+        # Emit progress on status change
+        await self.report_progress(
+          f"{job_name}: {status_info.get('dagster_status', current_status)}",
+          percent=status_info.get("progress_percent"),
+        )
+
+        await asyncio.sleep(monitor.poll_interval)
 
     finally:
       self.release_lock(lock_key)
