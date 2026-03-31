@@ -297,7 +297,8 @@ class TestSSEEventStorage:
     assert isinstance(op_id1, str)
     assert isinstance(op_id2, str)
     assert op_id1 != op_id2
-    assert len(op_id1) > 20  # UUIDs are longer than 20 chars
+    assert op_id1.startswith("op_")
+    assert len(op_id1) > 20
 
   @patch("robosystems.config.valkey_registry.create_async_redis_client")
   async def test_get_default_async_redis(self, mock_create_client):

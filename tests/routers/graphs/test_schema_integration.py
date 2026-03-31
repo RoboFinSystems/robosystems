@@ -162,13 +162,13 @@ class TestSchemaManagementIntegration:
         "robosystems.worker.client.enqueue_task",
         new_callable=AsyncMock,
         return_value={
-          "operation_id": "task_01TEST",
+          "operation_id": "op_01TEST",
           "status": "pending",
           "operation_type": "graph_creation",
           "_links": {
-            "stream": "/v1/operations/task_01TEST/stream",
-            "status": "/v1/operations/task_01TEST/status",
-            "cancel": "/v1/operations/task_01TEST",
+            "stream": "/v1/operations/op_01TEST/stream",
+            "status": "/v1/operations/op_01TEST/status",
+            "cancel": "/v1/operations/op_01TEST",
           },
         },
       ),

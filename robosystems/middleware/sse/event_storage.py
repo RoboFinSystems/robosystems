@@ -6,7 +6,6 @@ enabling event replay for late connections and reliable operation monitoring.
 """
 
 import json
-import uuid
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from enum import Enum
@@ -180,8 +179,10 @@ class SSEEventStorage:
     return self._sync_redis
 
   def generate_operation_id(self) -> str:
-    """Generate a unique operation ID."""
-    return str(uuid.uuid4())
+    """Generate a unique operation ID (prefixed ULID)."""
+    from robosystems.utils.ulid import generate_prefixed_ulid
+
+    return generate_prefixed_ulid("op")
 
   async def create_operation(
     self,

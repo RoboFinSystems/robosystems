@@ -130,7 +130,7 @@ def _enqueue_graph_creation(
   from robosystems.config.valkey_registry import ValkeyDatabase, create_redis_client
   from robosystems.utils.ulid import generate_prefixed_ulid
 
-  task_id = generate_prefixed_ulid("task")
+  task_id = generate_prefixed_ulid("op")
   queue = create_redis_client(ValkeyDatabase.WORKER_QUEUE, decode_responses=True)
 
   try:

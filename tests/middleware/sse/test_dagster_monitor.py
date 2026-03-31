@@ -714,7 +714,6 @@ class TestBuildGraphJobConfig:
       "stage_file_job",
       "materialize_file_job",
       "materialize_graph_job",
-      "wait_and_create_graph_job",
     ]
     with patch("robosystems.middleware.sse.dagster_monitor.env") as mock_env:
       mock_env.ENVIRONMENT = "dev"
