@@ -371,7 +371,7 @@ Resources:
         - Name: worker
           Image: !Sub ${ECRRepositoryUrl}:${ECRImageTag}
           Essential: true
-          StopTimeout: 120
+          StopTimeout: 300
           Command: ["/app/bin/entrypoint.sh"]
           LogConfiguration:
             LogDriver: awslogs
