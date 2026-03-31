@@ -50,7 +50,7 @@ Parameters:
     Default: 1
     MinValue: 0
     MaxValue: 10
-    Description: Initial desired count (autoscaling takes over after deployment)
+    Description: Static desired count when autoscaling is disabled; ignored when autoscaling is enabled
   WorkerMinCount:
     Type: Number
     Default: 1
@@ -444,6 +444,7 @@ Resources:
   # ========================================
   WorkerScalableTarget:
     Condition: AutoscalingEnabled
+    DependsOn: WorkerService
     Type: AWS::ApplicationAutoScaling::ScalableTarget
     Properties:
       ServiceNamespace: ecs

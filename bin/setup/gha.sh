@@ -381,10 +381,12 @@ function setup_full_config() {
     gh variable set OPENSEARCH_ENABLED_PROD --body "false"
     gh variable set OPENSEARCH_INSTANCE_TYPE_PROD --body "t3.medium.search"
     gh variable set OPENSEARCH_EBS_SIZE_PROD --body "100"
+    gh variable set OPENSEARCH_VERSION_PROD --body "2.19"
     if $setup_staging; then
         gh variable set OPENSEARCH_ENABLED_STAGING --body "false"
         gh variable set OPENSEARCH_INSTANCE_TYPE_STAGING --body "t3.medium.search"
         gh variable set OPENSEARCH_EBS_SIZE_STAGING --body "100"
+        gh variable set OPENSEARCH_VERSION_STAGING --body "2.19"
     fi
 
     # LadybugDB Writer Configuration - Standard Tier
