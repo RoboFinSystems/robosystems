@@ -42,7 +42,7 @@ dependencies = [
 
     # Graph Databases
     "real-ladybug==0.13.1",
-    "duckdb==1.4.4",
+    "duckdb==1.5.1",
 
     # Relational Database (PostgreSQL)
     "alembic>=1.16.0,<2.0",
