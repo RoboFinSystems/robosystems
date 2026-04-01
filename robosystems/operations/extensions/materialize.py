@@ -56,6 +56,10 @@ NODE_TABLES = [
   "Unit",
   "Fact",
   "FactSet",
+  # Investor layer (empty tables if roboinvestor not enabled — that's fine)
+  "Portfolio",
+  "Security",
+  "Position",
 ]
 
 # Relationship tables in materialization order (nodes must exist first)
@@ -81,6 +85,10 @@ RELATIONSHIP_TABLES = [
   "FACT_HAS_ENTITY",
   "STRUCTURE_HAS_FACT_SET",
   "FACT_SET_CONTAINS_FACT",
+  # Investor layer
+  "PORTFOLIO_HAS_POSITION",
+  "POSITION_IN_SECURITY",
+  "ENTITY_ISSUES_SECURITY",
 ]
 
 
@@ -568,12 +576,25 @@ def _staging_sql(graph_id: str, entity_id: str, connstr: str) -> dict[str, str]:
 
   tables["ENTITY_HAS_REPORT"] = f"""
     CREATE OR REPLACE TABLE ENTITY_HAS_REPORT AS
+    -- Native reports (no source_graph_id) belong to the graph's own entity
     SELECT
       '{entity_id}'                   AS src,
-      id                              AS dst,
+      rd.id                           AS dst,
       NULL::VARCHAR                   AS filing_context
-    FROM postgres_scan('{c}', '{s}', 'report_definitions')
-    WHERE generation_status = 'published'
+    FROM postgres_scan('{c}', '{s}', 'report_definitions') rd
+    WHERE rd.generation_status = 'published'
+      AND rd.source_graph_id IS NULL
+    UNION ALL
+    -- Shared reports belong to the linked entity matching source_graph_id
+    SELECT
+      e.id                            AS src,
+      rd.id                           AS dst,
+      NULL::VARCHAR                   AS filing_context
+    FROM postgres_scan('{c}', '{s}', 'report_definitions') rd
+    JOIN postgres_scan('{c}', '{s}', 'entities') e
+      ON e.metadata->>'source_graph_id' = rd.source_graph_id
+    WHERE rd.generation_status = 'published'
+      AND rd.source_graph_id IS NOT NULL
   """
 
   tables["REPORT_USES_TAXONOMY"] = f"""
@@ -626,11 +647,27 @@ def _staging_sql(graph_id: str, entity_id: str, connstr: str) -> dict[str, str]:
 
   tables["FACT_HAS_ENTITY"] = f"""
     CREATE OR REPLACE TABLE FACT_HAS_ENTITY AS
+    -- Native facts: entity_id references a local entity directly
     SELECT
-      id                              AS src,
-      entity_id                       AS dst,
+      rf.id                           AS src,
+      rf.entity_id                    AS dst,
       NULL::VARCHAR                   AS entity_context
-    FROM postgres_scan('{c}', '{s}', 'report_facts')
+    FROM postgres_scan('{c}', '{s}', 'report_facts') rf
+    JOIN postgres_scan('{c}', '{s}', 'report_definitions') rd
+      ON rf.report_id = rd.id
+    WHERE rd.source_graph_id IS NULL
+    UNION ALL
+    -- Shared facts: remap entity_id to the linked entity on this graph
+    SELECT
+      rf.id                           AS src,
+      e.id                            AS dst,
+      NULL::VARCHAR                   AS entity_context
+    FROM postgres_scan('{c}', '{s}', 'report_facts') rf
+    JOIN postgres_scan('{c}', '{s}', 'report_definitions') rd
+      ON rf.report_id = rd.id
+    JOIN postgres_scan('{c}', '{s}', 'entities') e
+      ON e.metadata->>'source_graph_id' = rd.source_graph_id
+    WHERE rd.source_graph_id IS NOT NULL
   """
 
   tables["STRUCTURE_HAS_FACT_SET"] = f"""
@@ -653,6 +690,88 @@ def _staging_sql(graph_id: str, entity_id: str, connstr: str) -> dict[str, str]:
       id                              AS dst
     FROM postgres_scan('{c}', '{s}', 'report_facts')
     WHERE fact_set_id IS NOT NULL
+  """
+
+  # ── Investor Layer ─────────────────────────────────────────────────────
+  # These tables are populated from roboinvestor OLTP tables (portfolios,
+  # securities, positions). They produce empty staging tables if the
+  # roboinvestor extension isn't enabled — the materializer handles that
+  # gracefully (0-row tables are still valid).
+
+  tables["Portfolio"] = f"""
+    CREATE OR REPLACE TABLE Portfolio AS
+    SELECT
+      id                              AS identifier,
+      name,
+      description,
+      strategy,
+      inception_date,
+      base_currency
+    FROM postgres_scan('{c}', '{s}', 'portfolios')
+  """
+
+  tables["Security"] = f"""
+    CREATE OR REPLACE TABLE Security AS
+    SELECT
+      sec.id                          AS identifier,
+      sec.name,
+      sec.security_type,
+      sec.security_subtype,
+      sec.is_active,
+      NULL::VARCHAR                   AS ticker,
+      NULL::VARCHAR                   AS figi,
+      e.metadata->>'source_graph_id'  AS source_graph_id
+    FROM postgres_scan('{c}', '{s}', 'securities') sec
+    LEFT JOIN postgres_scan('{c}', '{s}', 'entities') e
+      ON sec.entity_id = e.id
+    WHERE sec.is_active = true
+  """
+
+  tables["Position"] = f"""
+    CREATE OR REPLACE TABLE Position AS
+    SELECT
+      id                              AS identifier,
+      quantity,
+      quantity_type,
+      CAST(cost_basis AS DOUBLE) / 100.0  AS cost_basis,
+      CASE WHEN current_value IS NOT NULL
+        THEN CAST(current_value AS DOUBLE) / 100.0
+        ELSE NULL
+      END                             AS current_value,
+      currency,
+      acquisition_date,
+      status
+    FROM postgres_scan('{c}', '{s}', 'positions')
+    WHERE status = 'active'
+  """
+
+  tables["PORTFOLIO_HAS_POSITION"] = f"""
+    CREATE OR REPLACE TABLE PORTFOLIO_HAS_POSITION AS
+    SELECT
+      portfolio_id                    AS src,
+      id                              AS dst,
+      NULL::DOUBLE                    AS allocation_percentage
+    FROM postgres_scan('{c}', '{s}', 'positions')
+    WHERE status = 'active'
+  """
+
+  tables["POSITION_IN_SECURITY"] = f"""
+    CREATE OR REPLACE TABLE POSITION_IN_SECURITY AS
+    SELECT
+      id                              AS src,
+      security_id                     AS dst
+    FROM postgres_scan('{c}', '{s}', 'positions')
+    WHERE status = 'active'
+  """
+
+  tables["ENTITY_ISSUES_SECURITY"] = f"""
+    CREATE OR REPLACE TABLE ENTITY_ISSUES_SECURITY AS
+    SELECT
+      entity_id                       AS src,
+      id                              AS dst
+    FROM postgres_scan('{c}', '{s}', 'securities')
+    WHERE entity_id IS NOT NULL
+      AND is_active = true
   """
 
   return tables
@@ -752,17 +871,43 @@ class LedgerMaterializer:
       logger.info(f"Creating LadybugDB database for {graph_id}")
       await client.create_database(graph_id, schema_type="entity")
 
-      # Install roboledger schema (full accounting: reporting + transaction nodes)
-      loader = get_contextual_schema_loader("application", "roboledger")
-      # Build DDL from loader's nodes and relationships
+      # Install schemas for all extensions on this graph
+      extensions = await self._get_graph_extensions(graph_id)
       ddl_parts = []
-      for node in loader.nodes.values():
-        ddl_parts.append(node.to_cypher() + ";")
-      for rel in loader.relationships.values():
-        ddl_parts.append(rel.to_cypher() + ";")
-      schema_ddl = "\n".join(ddl_parts)
-      await client.install_schema(graph_id=graph_id, custom_ddl=schema_ddl)
-      logger.info(f"Installed roboledger schema on {graph_id}")
+
+      for ext_name in extensions:
+        try:
+          loader = get_contextual_schema_loader("application", ext_name)
+          for node in loader.nodes.values():
+            ddl_parts.append(node.to_cypher() + ";")
+          for rel in loader.relationships.values():
+            ddl_parts.append(rel.to_cypher() + ";")
+          logger.info(f"Loaded {ext_name} schema for {graph_id}")
+        except Exception as e:
+          logger.warning(f"Could not load schema for extension '{ext_name}': {e}")
+
+      if ddl_parts:
+        schema_ddl = "\n".join(ddl_parts)
+        await client.install_schema(graph_id=graph_id, custom_ddl=schema_ddl)
+        logger.info(f"Installed schema on {graph_id} (extensions: {extensions})")
+
+  async def _get_graph_extensions(self, graph_id: str) -> list[str]:
+    """Look up schema_extensions for a graph from the platform database."""
+    from robosystems.db.platform import SessionFactory
+    from robosystems.models.core import Graph
+
+    try:
+      with SessionFactory() as session:
+        graph = session.execute(
+          __import__("sqlalchemy").select(Graph).where(Graph.graph_id == graph_id)
+        ).scalar_one_or_none()
+        if graph and graph.schema_extensions:
+          return list(graph.schema_extensions)
+    except Exception as e:
+      logger.warning(f"Could not look up extensions for {graph_id}: {e}")
+
+    # Fallback: at minimum assume roboledger
+    return ["roboledger"]
 
   async def _stage_tables(
     self,

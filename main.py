@@ -322,6 +322,12 @@ def create_app() -> FastAPI:
 
     app.include_router(ledger_router_v1)
 
+  # Investor routes (separate top-level prefix)
+  if env.INVESTOR_ENABLED:
+    from robosystems.routers import investor_router_v1
+
+    app.include_router(investor_router_v1)
+
   # Include admin routers (hidden from public docs)
   # The admin routers will not appear in the auto-generated docs
   app.include_router(admin_cache_router, include_in_schema=False)

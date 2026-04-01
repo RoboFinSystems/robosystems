@@ -740,6 +740,10 @@ def _share_to_target(
         )
         target_session.add(rf)
 
+      # Ensure a linked Entity exists on the target graph for the source company.
+      # This is the bridge between the company's graph and the investor's portfolio.
+      _ensure_linked_entity(target_session, source_graph_id, shared_by)
+
       target_session.commit()
 
       return ShareResultItem(
@@ -755,3 +759,74 @@ def _share_to_target(
       status="error",
       error=f"Failed to copy report data: {e!s}",
     )
+
+
+def _ensure_linked_entity(
+  target_session,
+  source_graph_id: str,
+  shared_by: str,
+) -> None:
+  """Create a linked Entity in the target graph if one doesn't exist for the source.
+
+  When a company shares a report to an investor's graph, the investor needs an
+  Entity row representing that company. This function checks for an existing
+  linked entity (by source_graph_id in metadata) and creates one if missing,
+  copying basic info from the source graph's entity.
+  """
+  from robosystems.models.extensions.entity import Entity
+
+  # Check if a linked entity for this source graph already exists
+  existing = target_session.execute(
+    text(
+      "SELECT id FROM entities WHERE metadata->>'source_graph_id' = :source_graph_id LIMIT 1"
+    ),
+    {"source_graph_id": source_graph_id},
+  ).scalar_one_or_none()
+
+  if existing:
+    return
+
+  # Read the source graph's primary entity to copy its details
+  try:
+    with extensions_session(source_graph_id) as source_session:
+      source_entity = source_session.execute(
+        select(Entity).where(Entity.is_parent.is_(True)).limit(1)
+      ).scalar_one_or_none()
+
+      if not source_entity:
+        return
+
+      # Snapshot fields before session closes
+      entity_data = {
+        "name": source_entity.name,
+        "legal_name": source_entity.legal_name,
+        "entity_type": source_entity.entity_type,
+        "industry": source_entity.industry,
+        "cik": source_entity.cik,
+        "ticker": source_entity.ticker,
+        "state_of_incorporation": source_entity.state_of_incorporation,
+      }
+  except Exception:
+    # If we can't read the source entity, create a minimal linked entity
+    entity_data = {"name": f"Entity ({source_graph_id})"}
+
+  from robosystems.utils.ulid import generate_prefixed_ulid
+
+  linked_entity = Entity(
+    id=generate_prefixed_ulid("ent"),
+    name=entity_data["name"],
+    legal_name=entity_data.get("legal_name"),
+    entity_type=entity_data.get("entity_type"),
+    industry=entity_data.get("industry"),
+    cik=entity_data.get("cik"),
+    ticker=entity_data.get("ticker"),
+    state_of_incorporation=entity_data.get("state_of_incorporation"),
+    source="linked",
+    is_parent=True,
+    status="active",
+    address_country="US",
+    metadata_={"source_graph_id": source_graph_id},
+    created_by=shared_by,
+  )
+  target_session.add(linked_entity)
+  target_session.flush()

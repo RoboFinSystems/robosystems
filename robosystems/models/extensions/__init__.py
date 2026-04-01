@@ -8,6 +8,11 @@ Entity is a shared base model; extension-specific models live in subfolders
 """
 
 from .entity import Entity
+from .roboinvestor import (
+  Portfolio,
+  Position,
+  Security,
+)
 from .roboledger import (
   Account,
   ClassificationRule,
@@ -30,6 +35,7 @@ from .roboledger import (
 
 __all__ = [
   "Account",
+  # RoboLedger
   "ClassificationRule",
   "Dimension",
   "Element",
@@ -38,9 +44,13 @@ __all__ = [
   "Entry",
   "FiscalPeriod",
   "LineItem",
+  # RoboInvestor
+  "Portfolio",
+  "Position",
   "ReportDefinition",
   "ReportFact",
   "ReportShare",
+  "Security",
   "Structure",
   "Taxonomy",
   "Transaction",

@@ -402,11 +402,84 @@ class OLTPLoader:
       duckdb_path=duckdb_path,
     )
 
+    # Ensure CoA taxonomy + mapping structure exist (required for report generation)
+    self._ensure_mapping_structure(graph_id, source, created_by)
+
     logger.info(
       f"OLTP load complete for graph={graph_id}, source={source}: "
       f"{result.total_rows} total rows"
     )
     return result
+
+  def _ensure_mapping_structure(
+    self,
+    graph_id: str,
+    source: str,
+    created_by: str,
+  ) -> None:
+    """Ensure a CoA taxonomy and CoA→GAAP mapping structure exist.
+
+    These are prerequisites for the report generation flow. Without them,
+    the Chart of Accounts page won't show the GAAP mapping column or
+    Auto-Map button, and reports can't be generated.
+
+    Idempotent — skips creation if they already exist.
+    """
+    from robosystems.db.extensions import extensions_session
+    from robosystems.models.extensions.roboledger import Structure, Taxonomy
+    from robosystems.utils.ulid import generate_prefixed_ulid
+
+    try:
+      with extensions_session(graph_id) as session:
+        # Check if a CoA taxonomy already exists
+        existing_coa = (
+          session.query(Taxonomy)
+          .filter(
+            Taxonomy.taxonomy_type == "chart_of_accounts", Taxonomy.is_active.is_(True)
+          )
+          .first()
+        )
+
+        if not existing_coa:
+          source_label = source.replace("_", " ").title()
+          existing_coa = Taxonomy(
+            id=generate_prefixed_ulid("tax"),
+            name=f"{source_label} Chart of Accounts",
+            taxonomy_type="chart_of_accounts",
+            is_active=True,
+            created_by=created_by,
+          )
+          session.add(existing_coa)
+          session.flush()
+          logger.info(f"Created CoA taxonomy for {graph_id}: {existing_coa.id}")
+
+        # Check if a mapping structure already exists
+        existing_mapping = (
+          session.query(Structure)
+          .filter(
+            Structure.structure_type == "coa_mapping", Structure.is_active.is_(True)
+          )
+          .first()
+        )
+
+        if not existing_mapping:
+          mapping_structure = Structure(
+            id=generate_prefixed_ulid("struct"),
+            name="CoA to US GAAP Mapping",
+            description="Maps Chart of Accounts to US GAAP reporting concepts",
+            structure_type="coa_mapping",
+            taxonomy_id=existing_coa.id,
+            is_active=True,
+            created_by=created_by,
+          )
+          session.add(mapping_structure)
+          session.flush()
+          logger.info(
+            f"Created mapping structure for {graph_id}: {mapping_structure.id}"
+          )
+
+    except Exception as e:
+      logger.warning(f"Failed to ensure mapping structure for {graph_id}: {e}")
 
   def _update_entity_from_company_info(
     self,

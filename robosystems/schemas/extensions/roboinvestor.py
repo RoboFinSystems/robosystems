@@ -3,66 +3,73 @@ RoboInvestor Schema Extension for LadybugDB
 
 Portfolio management, investment tracking, and securities analysis.
 Extends the base schema with investment-specific entities.
+
+Ontology:
+  Entity -[ENTITY_ISSUES_SECURITY]-> Security
+  Portfolio -[PORTFOLIO_HAS_POSITION]-> Position -[POSITION_IN_SECURITY]-> Security
+  Entity -[ENTITY_HAS_REPORT]-> Report  (from roboledger schema — shared reports)
+
+This ontology works for both private securities (linked entities from company graphs)
+and public securities (entities from SEC shared repo via CIK). The agent traversal
+is identical regardless of entity source.
 """
 
 from ..models import Node, Property, Relationship
 
-# RoboInvestor Extension Nodes
+# ── MVP Nodes (materialized from OLTP) ───────────────────────────────────
+
 EXTENSION_NODES = [
   Node(
     name="Portfolio",
     description="Investment portfolio with strategy and performance tracking",
     properties=[
-      Property(name="id", type="STRING", is_primary_key=True),
+      Property(name="identifier", type="STRING", is_primary_key=True),
       Property(name="name", type="STRING"),
+      Property(name="description", type="STRING"),
       Property(name="strategy", type="STRING"),
-      Property(name="risk_level", type="STRING"),  # conservative, moderate, aggressive
       Property(name="inception_date", type="DATE"),
-      Property(name="total_value", type="DOUBLE"),
+      Property(name="base_currency", type="STRING"),
     ],
   ),
   Node(
     name="Security",
-    description="Financial instruments and securities",
+    description="Ownership instrument issued by an entity (private or public)",
     properties=[
-      Property(name="id", type="STRING", is_primary_key=True),
-      Property(name="identifier", type="STRING"),  # unique
-      Property(name="uri", type="STRING"),  # unique
+      Property(name="identifier", type="STRING", is_primary_key=True),
       Property(name="name", type="STRING"),
+      Property(name="security_type", type="STRING"),
+      Property(name="security_subtype", type="STRING"),
+      Property(name="is_active", type="BOOLEAN"),
+      # Public market identifiers (populated when brokerage connected)
       Property(name="ticker", type="STRING"),
       Property(name="figi", type="STRING"),
-      Property(name="composite_figi", type="STRING"),
-      Property(name="security_type", type="STRING"),
-      Property(name="security_type2", type="STRING"),
-      Property(name="security_description", type="STRING"),
-      Property(name="market_sector", type="STRING"),
-      Property(name="share_class_figi", type="STRING"),
-      Property(name="exchange_code", type="STRING"),
-      Property(name="updated_at", type="STRING"),
+      # Source provenance
+      Property(name="source_graph_id", type="STRING"),
     ],
   ),
   Node(
     name="Position",
-    description="Current holdings of securities within portfolios",
+    description="Holding of a security within a portfolio",
     properties=[
-      Property(name="id", type="STRING", is_primary_key=True),
+      Property(name="identifier", type="STRING", is_primary_key=True),
       Property(name="quantity", type="DOUBLE"),
-      Property(name="avg_cost_basis", type="DOUBLE"),
-      Property(name="current_price", type="DOUBLE"),
-      Property(name="market_value", type="DOUBLE"),
-      Property(name="unrealized_gain_loss", type="DOUBLE"),
-      Property(name="position_date", type="DATE"),
+      Property(name="quantity_type", type="STRING"),
+      Property(name="cost_basis", type="DOUBLE"),
+      Property(name="current_value", type="DOUBLE"),
+      Property(name="currency", type="STRING"),
+      Property(name="acquisition_date", type="DATE"),
+      Property(name="status", type="STRING"),
     ],
   ),
+  # ── Future Nodes (deferred — defined for schema completeness) ──────────
   Node(
     name="Trade",
-    description="Individual trading transactions and activities",
+    description="Trading transaction or capital event",
     properties=[
-      Property(name="id", type="STRING", is_primary_key=True),
-      Property(name="trade_type", type="STRING"),  # buy, sell, dividend, split
+      Property(name="identifier", type="STRING", is_primary_key=True),
+      Property(name="trade_type", type="STRING"),
       Property(name="quantity", type="DOUBLE"),
       Property(name="price", type="DOUBLE"),
-      Property(name="commission", type="DOUBLE"),
       Property(name="total_amount", type="DOUBLE"),
       Property(name="trade_date", type="DATE"),
       Property(name="settlement_date", type="DATE"),
@@ -70,9 +77,9 @@ EXTENSION_NODES = [
   ),
   Node(
     name="Benchmark",
-    description="Market benchmarks for portfolio performance comparison",
+    description="Market benchmark for performance comparison",
     properties=[
-      Property(name="id", type="STRING", is_primary_key=True),
+      Property(name="identifier", type="STRING", is_primary_key=True),
       Property(name="symbol", type="STRING"),
       Property(name="name", type="STRING"),
       Property(name="description", type="STRING"),
@@ -80,9 +87,9 @@ EXTENSION_NODES = [
   ),
   Node(
     name="MarketData",
-    description="Historical and real-time market data for securities",
+    description="Historical market data for securities",
     properties=[
-      Property(name="id", type="STRING", is_primary_key=True),
+      Property(name="identifier", type="STRING", is_primary_key=True),
       Property(name="date", type="DATE"),
       Property(name="open_price", type="DOUBLE"),
       Property(name="high_price", type="DOUBLE"),
@@ -92,57 +99,17 @@ EXTENSION_NODES = [
       Property(name="adjusted_close", type="DOUBLE"),
     ],
   ),
-  Node(
-    name="Dividend",
-    description="Dividend payments and distributions",
-    properties=[
-      Property(name="id", type="STRING", is_primary_key=True),
-      Property(name="ex_date", type="DATE"),
-      Property(name="record_date", type="DATE"),
-      Property(name="payment_date", type="DATE"),
-      Property(name="amount_per_share", type="DOUBLE"),
-      Property(name="dividend_type", type="STRING"),  # regular, special, stock
-      Property(name="currency", type="STRING"),
-    ],
-  ),
-  Node(
-    name="Risk",
-    description="Risk metrics and assessments for portfolios and securities",
-    properties=[
-      Property(name="id", type="STRING", is_primary_key=True),
-      Property(
-        name="risk_type", type="STRING"
-      ),  # market, credit, liquidity, operational
-      Property(name="risk_level", type="STRING"),  # low, medium, high, critical
-      Property(name="beta", type="DOUBLE"),
-      Property(name="volatility", type="DOUBLE"),
-      Property(name="value_at_risk", type="DOUBLE"),
-      Property(name="assessment_date", type="DATE"),
-      Property(name="notes", type="STRING"),
-    ],
-  ),
 ]
 
-# RoboInvestor Extension Relationships
+# ── MVP Relationships ────────────────────────────────────────────────────
+
 EXTENSION_RELATIONSHIPS = [
+  # Core portfolio structure
   Relationship(
     name="ENTITY_ISSUES_SECURITY",
     from_node="Entity",
     to_node="Security",
-    description="Entity issues securities",
-    properties=[
-      Property(name="issue_date", type="STRING"),
-      Property(name="security_context", type="STRING"),
-    ],
-  ),
-  Relationship(
-    name="ENTITY_HAS_PORTFOLIO",
-    from_node="Entity",
-    to_node="Portfolio",
-    description="Entity owns and manages portfolios",
-    properties=[
-      Property(name="portfolio_context", type="STRING"),
-    ],
+    description="Entity issues securities (private or public)",
   ),
   Relationship(
     name="PORTFOLIO_HAS_POSITION",
@@ -150,7 +117,6 @@ EXTENSION_RELATIONSHIPS = [
     to_node="Position",
     description="Portfolio contains security positions",
     properties=[
-      Property(name="position_context", type="STRING"),
       Property(name="allocation_percentage", type="DOUBLE"),
     ],
   ),
@@ -159,26 +125,27 @@ EXTENSION_RELATIONSHIPS = [
     from_node="Position",
     to_node="Security",
     description="Position holds specific security",
-    properties=[
-      Property(name="security_context", type="STRING"),
-    ],
   ),
+  # ── Future Relationships (deferred) ────────────────────────────────────
   Relationship(
     name="PORTFOLIO_HAS_TRADE",
     from_node="Portfolio",
     to_node="Trade",
     description="Portfolio executes trades",
-    properties=[
-      Property(name="trade_context", type="STRING"),
-    ],
   ),
   Relationship(
     name="TRADE_INVOLVES_SECURITY",
     from_node="Trade",
     to_node="Security",
     description="Trade transacts in specific security",
+  ),
+  Relationship(
+    name="TRADE_CREATES_POSITION",
+    from_node="Trade",
+    to_node="Position",
+    description="Trade creates or modifies position",
     properties=[
-      Property(name="security_context", type="STRING"),
+      Property(name="position_impact", type="STRING"),
     ],
   ),
   Relationship(
@@ -197,54 +164,6 @@ EXTENSION_RELATIONSHIPS = [
     description="Security has historical market data",
     properties=[
       Property(name="data_source", type="STRING"),
-    ],
-  ),
-  Relationship(
-    name="SECURITY_PAYS_DIVIDEND",
-    from_node="Security",
-    to_node="Dividend",
-    description="Security pays dividends to holders",
-    properties=[
-      Property(name="payment_context", type="STRING"),
-    ],
-  ),
-  Relationship(
-    name="PORTFOLIO_HAS_RISK",
-    from_node="Portfolio",
-    to_node="Risk",
-    description="Portfolio risk assessment and metrics",
-    properties=[
-      Property(name="risk_context", type="STRING"),
-    ],
-  ),
-  Relationship(
-    name="SECURITY_HAS_RISK",
-    from_node="Security",
-    to_node="Risk",
-    description="Security risk assessment and metrics",
-    properties=[
-      Property(name="risk_context", type="STRING"),
-    ],
-  ),
-  Relationship(
-    name="TRADE_CREATES_POSITION",
-    from_node="Trade",
-    to_node="Position",
-    description="Trade creates or modifies position",
-    properties=[
-      Property(
-        name="position_impact", type="STRING"
-      ),  # create, increase, decrease, close
-    ],
-  ),
-  Relationship(
-    name="USER_MANAGES_PORTFOLIO",
-    from_node="User",
-    to_node="Portfolio",
-    description="User has management access to portfolio",
-    properties=[
-      Property(name="management_role", type="STRING"),  # owner, advisor, viewer
-      Property(name="permission_level", type="STRING"),
     ],
   ),
 ]

@@ -586,6 +586,13 @@ class EnvConfig:
     get_parameter_value("LEDGER_ENABLED", "false").lower() == "true",
   )
 
+  # --- Investor API Endpoints ---
+  # Controls the /v1/investor/* API routes. Requires EXTENSIONS_ENABLED=true.
+  INVESTOR_ENABLED = get_bool_env(
+    "INVESTOR_ENABLED",
+    get_parameter_value("INVESTOR_ENABLED", "false").lower() == "true",
+  )
+
   # --- Adapter Pipelines (Dagster) ---
   # Controls whether adapter-specific Dagster assets, jobs, sensors, and schedules
   # are loaded into the Dagster definitions. Disabling gives a clean Dagster slate.

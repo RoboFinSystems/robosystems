@@ -161,6 +161,13 @@ if env.LEDGER_ENABLED:
   ledger_router_v1 = APIRouter(prefix="/v1/ledger/{graph_id}", tags=["Ledger"])
   ledger_router_v1.include_router(ledger_router)
 
+# Investor routes (separate top-level prefix, not under /v1/graphs)
+if env.INVESTOR_ENABLED:
+  from .investor import router as investor_router
+
+  investor_router_v1 = APIRouter(prefix="/v1/investor/{graph_id}", tags=["Investor"])
+  investor_router_v1.include_router(investor_router)
+
 # Export routers for main application
 __all__ = [
   "admin_router_v1",

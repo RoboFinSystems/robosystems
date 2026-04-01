@@ -40,8 +40,8 @@ just start                 # Start full Docker stack
 just restart               # Quick restart (Python code changes only)
 just rebuild               # Full rebuild (dependency/Dockerfile changes)
 just test                  # Run tests (excludes slow/integration)
-just logs container=api              # View API logs
-just logs container=dagster-daemon   # View Dagster daemon logs
+just logs api              # View API logs
+just logs dagster-daemon   # View Dagster daemon logs
 ```
 
 ### Code Quality
@@ -292,8 +292,8 @@ GET  /health                              # Health check
 ```bash
 just restart               # Code changes not picked up
 just rebuild               # Dependency changes not working
-just logs container=api              # Check API logs
-just logs-grep container=worker pattern=ERROR  # Search worker logs
+just logs api              # Check API logs
+just logs-grep worker ERROR  # Search worker logs
 ```
 
 ### Database Issues
