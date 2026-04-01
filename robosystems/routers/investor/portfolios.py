@@ -174,6 +174,22 @@ async def delete_portfolio(
       ).scalar_one_or_none()
       if not row:
         raise HTTPException(status_code=404, detail="Portfolio not found.")
+
+      # Check for active positions
+      from robosystems.models.extensions.roboinvestor import Position
+
+      active_count = session.execute(
+        select(func.count())
+        .select_from(Position)
+        .where(Position.portfolio_id == portfolio_id)
+        .where(Position.status == "active")
+      ).scalar()
+      if active_count:
+        raise HTTPException(
+          status_code=409,
+          detail=f"Portfolio has {active_count} active position(s). Dispose them first.",
+        )
+
       session.delete(row)
   except ProgrammingError:
     raise HTTPException(status_code=404, detail="Investor module not initialized.")

@@ -23,12 +23,21 @@ router = APIRouter()
 
 
 def _ensure_linked_entity_from_graph(
-  session, source_graph_id: str, created_by: str
+  session, source_graph_id: str, created_by: str, user_id: str
 ) -> tuple[str | None, str | None]:
-  """Find or create a linked entity for a source graph. Returns (entity_id, entity_name)."""
+  """Find or create a linked entity for a source graph. Returns (entity_id, entity_name).
+
+  Raises HTTPException 403 if the user does not have access to the source graph.
+  """
   from sqlalchemy import text
 
+  from robosystems.middleware.auth.dependencies import _db_check_graph_access
   from robosystems.utils.ulid import generate_prefixed_ulid
+
+  if not _db_check_graph_access(user_id, source_graph_id):
+    raise HTTPException(
+      status_code=403, detail="You do not have access to the source graph."
+    )
 
   # Check if a linked entity for this source graph already exists
   existing = session.execute(
@@ -123,7 +132,7 @@ async def create_security(
       # POC: auto-link entity from another graph
       if body.source_graph_id and not entity_id:
         entity_id, entity_name = _ensure_linked_entity_from_graph(
-          session, body.source_graph_id, current_user.id
+          session, body.source_graph_id, current_user.id, str(current_user.id)
         )
       elif entity_id:
         entity = session.execute(
@@ -190,7 +199,7 @@ async def list_securities(
       )
 
       # Batch-load entity names
-      entity_ids = {r.entity_id for r in rows}
+      entity_ids = {r.entity_id for r in rows if r.entity_id}
       entity_map: dict[str, str] = {}
       if entity_ids:
         entities = (

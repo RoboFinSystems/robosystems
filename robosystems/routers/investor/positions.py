@@ -67,7 +67,7 @@ def _enrich_positions(session, rows: list[Position]) -> list[PositionResponse]:
     )
     sec_map = {s.id: s for s in securities}
 
-    entity_ids = {s.entity_id for s in securities}
+    entity_ids = {s.entity_id for s in securities if s.entity_id}
     if entity_ids:
       entities = (
         session.execute(select(Entity).where(Entity.id.in_(entity_ids))).scalars().all()
