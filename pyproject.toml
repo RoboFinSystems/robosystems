@@ -112,7 +112,7 @@ dependencies = [
     "lxml>=5.4.0,<6.0",
 
     # Search
-    "opensearch-py>=2.4.0,<3.0",
+    "opensearch-py>=2.4.0,<4.0",
 
     # Utilities
     "holidays>=0.76.0,<1.0",
