@@ -25,6 +25,22 @@ on:
         required: false
         type: string
         default: "300"
+  workflow_call:
+    inputs:
+      environment:
+        description: "Environment to refresh (staging, prod)"
+        required: true
+        type: string
+      tier:
+        description: "Tier to refresh (empty for all tiers)"
+        required: false
+        type: string
+        default: ""
+      instance_warmup:
+        description: "Seconds to wait for instance warmup"
+        required: false
+        type: string
+        default: "300"
 
 permissions:
   id-token: write

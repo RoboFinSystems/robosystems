@@ -17,17 +17,11 @@ on:
         options:
           - staging
           - prod
-      trigger_deploy:
-        description: "Trigger a deploy after updating AMI (default: just update variable for next release)"
+      trigger_asg_refresh:
+        description: "Trigger ASG instance refresh after updating AMI (default: just update SSM parameter for next deploy)"
         required: false
         type: boolean
         default: false
-      deploy_ref:
-        description: "Git ref to deploy from (defaults to latest release tag, only used if trigger_deploy is true)"
-        required: false
-        type: string
-        default: ""
-
   # Monthly schedule for AMI updates - controlled by GRAPH_AMI_AUTO_UPDATE variable
   # Staging runs first (1st of month), Prod follows next day (2nd of month)
   schedule:
@@ -96,7 +90,7 @@ jobs:
   # Task: update-ami
   # Updates the GRAPH_AMI_ID variable with the latest Amazon Linux 2023 ARM64 AMI.
   # By default, only updates the variable - deploy happens with next release.
-  # If trigger_deploy is true, triggers a full deploy to update Launch Templates.
+  # If trigger_asg_refresh is true, triggers an ASG instance refresh to roll out the new AMI.
   # =============================================================================
   ami-get-latest:
     # always() needed because schedule-gate is skipped for workflow_dispatch
@@ -115,28 +109,25 @@ jobs:
       ami_changed: ${{ steps.compare.outputs.ami_changed }}
       # Pass-through inputs for downstream jobs
       environment: ${{ steps.inputs.outputs.environment }}
-      trigger_deploy: ${{ steps.inputs.outputs.trigger_deploy }}
-      deploy_ref: ${{ steps.inputs.outputs.deploy_ref }}
+      trigger_asg_refresh: ${{ steps.inputs.outputs.trigger_asg_refresh }}
     steps:
       - name: Resolve inputs
         id: inputs
         run: |
           if [ "${{ github.event_name }}" == "schedule" ]; then
             echo "environment=${{ needs.schedule-gate.outputs.environment }}" >> $GITHUB_OUTPUT
-            # GRAPH_AMI_AUTO_DEPLOY controls whether scheduled runs also trigger deploy
-            TRIGGER_DEPLOY="${{ vars.GRAPH_AMI_AUTO_DEPLOY }}"
-            if [ "$TRIGGER_DEPLOY" == "true" ]; then
-              echo "trigger_deploy=true" >> $GITHUB_OUTPUT
-              echo "Scheduled run for ${{ needs.schedule-gate.outputs.environment }} (will deploy if AMI changed)"
+            # GRAPH_AMI_AUTO_DEPLOY controls whether scheduled runs also trigger ASG refresh
+            TRIGGER_REFRESH="${{ vars.GRAPH_AMI_AUTO_DEPLOY }}"
+            if [ "$TRIGGER_REFRESH" == "true" ]; then
+              echo "trigger_asg_refresh=true" >> $GITHUB_OUTPUT
+              echo "Scheduled run for ${{ needs.schedule-gate.outputs.environment }} (will ASG refresh if AMI changed)"
             else
-              echo "trigger_deploy=false" >> $GITHUB_OUTPUT
-              echo "Scheduled run for ${{ needs.schedule-gate.outputs.environment }} (variable update only)"
+              echo "trigger_asg_refresh=false" >> $GITHUB_OUTPUT
+              echo "Scheduled run for ${{ needs.schedule-gate.outputs.environment }} (SSM update only)"
             fi
-            echo "deploy_ref=" >> $GITHUB_OUTPUT
           else
             echo "environment=${{ inputs.environment }}" >> $GITHUB_OUTPUT
-            echo "trigger_deploy=${{ inputs.trigger_deploy }}" >> $GITHUB_OUTPUT
-            echo "deploy_ref=${{ inputs.deploy_ref }}" >> $GITHUB_OUTPUT
+            echo "trigger_asg_refresh=${{ inputs.trigger_asg_refresh }}" >> $GITHUB_OUTPUT
             echo "Manual run for ${{ inputs.environment }}"
           fi
 
@@ -217,26 +208,30 @@ jobs:
 
           echo "✅ SSM parameter updated successfully"
 
-  # Deploy to staging when AMI updated for staging environment
-  ami-deploy-staging:
+  # ASG refresh to pick up new AMI (replaces instances without a full deploy)
+  ami-asg-refresh-staging:
     if: |
       always() &&
       needs.ami-update-ssm.result == 'success' &&
-      needs.ami-get-latest.outputs.trigger_deploy == 'true' &&
+      needs.ami-get-latest.outputs.trigger_asg_refresh == 'true' &&
       needs.ami-get-latest.outputs.environment == 'staging'
     needs: [ami-get-latest, ami-update-ssm]
-    uses: ./.github/workflows/staging.yml
+    uses: ./.github/workflows/graph-asg-refresh.yml
+    with:
+      environment: staging
     secrets: inherit
 
-  # Deploy to prod when AMI updated for prod environment
-  ami-deploy-prod:
+  # ASG refresh to pick up new AMI (replaces instances without a full deploy)
+  ami-asg-refresh-prod:
     if: |
       always() &&
       needs.ami-update-ssm.result == 'success' &&
-      needs.ami-get-latest.outputs.trigger_deploy == 'true' &&
+      needs.ami-get-latest.outputs.trigger_asg_refresh == 'true' &&
       needs.ami-get-latest.outputs.environment == 'prod'
     needs: [ami-get-latest, ami-update-ssm]
-    uses: ./.github/workflows/prod.yml
+    uses: ./.github/workflows/graph-asg-refresh.yml
+    with:
+      environment: prod
     secrets: inherit
 
   # =============================================================================
@@ -372,10 +367,96 @@ jobs:
           echo "EOF" >> $GITHUB_OUTPUT
 
   # =============================================================================
+  # Email Notification (AMI updates only)
+  # =============================================================================
+  notify:
+    needs: [ami-get-latest, ami-update-ssm, ami-asg-refresh-staging, ami-asg-refresh-prod]
+    if: |
+      always() &&
+      needs.ami-get-latest.result != 'skipped'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION || 'us-east-1' }}
+
+      - name: Send SNS Notification
+        run: |
+          ENV="${{ needs.ami-get-latest.outputs.environment }}"
+          REGION="${{ vars.AWS_REGION || 'us-east-1' }}"
+          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+
+          # Gather results
+          AMI_CHANGED="${{ needs.ami-get-latest.outputs.ami_changed }}"
+          SSM_UPDATE="${{ needs.ami-update-ssm.result }}"
+          ASG_STAGING="${{ needs.ami-asg-refresh-staging.result }}"
+          ASG_PROD="${{ needs.ami-asg-refresh-prod.result }}"
+          TRIGGER_REFRESH="${{ needs.ami-get-latest.outputs.trigger_asg_refresh }}"
+
+          # Determine overall status
+          HAS_FAILURE=false
+          if [ "$SSM_UPDATE" == "failure" ] || [ "$ASG_STAGING" == "failure" ] || [ "$ASG_PROD" == "failure" ]; then
+            HAS_FAILURE=true
+          fi
+
+          if [ "$HAS_FAILURE" == "true" ]; then
+            SUBJECT="[ALERT] Graph AMI Update Failed - ${ENV}"
+          elif [ "$AMI_CHANGED" == "true" ]; then
+            SUBJECT="Graph AMI Updated - ${ENV}"
+          else
+            SUBJECT="Graph AMI Check - No Update Needed - ${ENV}"
+          fi
+
+          MESSAGE="RoboSystems Graph AMI Maintenance Report
+          ==========================================
+
+          Environment: ${ENV}
+          Trigger: ${{ github.event_name }}
+          Timestamp: $(date -u +%Y-%m-%dT%H:%M:%SZ)
+          Workflow: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+
+          AMI Details:
+          ------------
+          Previous AMI: ${{ needs.ami-get-latest.outputs.current_ami }}
+          Latest AMI:   ${{ needs.ami-get-latest.outputs.ami_id }}
+          AMI Name:     ${{ needs.ami-get-latest.outputs.ami_name }}
+          AMI Changed:  ${AMI_CHANGED}
+
+          Job Results:
+          ------------
+          Get Latest AMI:     ${{ needs.ami-get-latest.result }}
+          Update SSM:         ${SSM_UPDATE}
+          ASG Refresh Staging: ${ASG_STAGING}
+          ASG Refresh Prod:    ${ASG_PROD}
+          Trigger ASG Refresh: ${TRIGGER_REFRESH}
+
+          ---
+          This notification was sent by GitHub Actions (graph-maintenance workflow).
+          "
+
+          SNS_TOPIC="arn:aws:sns:${REGION}:${ACCOUNT_ID}:robosystems-postgres-${ENV}-alerts"
+
+          if aws sns publish \
+            --topic-arn "${SNS_TOPIC}" \
+            --subject "${SUBJECT}" \
+            --message "${MESSAGE}"; then
+            echo "SNS notification sent to ${SNS_TOPIC}"
+          else
+            echo "Warning: Could not send SNS notification"
+            echo "Topic ${SNS_TOPIC} may not exist"
+          fi
+
+  # =============================================================================
   # Summary (runs for all tasks)
   # =============================================================================
   summary:
-    needs: [ami-get-latest, ami-update-ssm, ami-deploy-staging, ami-deploy-prod, docker-cleanup]
+    needs: [ami-get-latest, ami-update-ssm, ami-asg-refresh-staging, ami-asg-refresh-prod, docker-cleanup, notify]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -423,7 +504,7 @@ jobs:
           echo "| Latest AMI | \`${{ needs.ami-get-latest.outputs.ami_id }}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| AMI Name | ${{ needs.ami-get-latest.outputs.ami_name }} |" >> $GITHUB_STEP_SUMMARY
           echo "| AMI Changed | ${{ needs.ami-get-latest.outputs.ami_changed }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Trigger Deploy | ${{ needs.ami-get-latest.outputs.trigger_deploy }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Trigger ASG Refresh | ${{ needs.ami-get-latest.outputs.trigger_asg_refresh }} |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Job Results" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
@@ -431,8 +512,8 @@ jobs:
           echo "|-----|--------|" >> $GITHUB_STEP_SUMMARY
           echo "| Get Latest AMI | ${{ needs.ami-get-latest.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Update SSM | ${{ needs.ami-update-ssm.result }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Deploy Staging | ${{ needs.ami-deploy-staging.result }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Deploy Prod | ${{ needs.ami-deploy-prod.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| ASG Refresh Staging | ${{ needs.ami-asg-refresh-staging.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| ASG Refresh Prod | ${{ needs.ami-asg-refresh-prod.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "---" >> $GITHUB_STEP_SUMMARY
           echo "Triggered by: **${{ github.actor }}** at $(date -u +%Y-%m-%dT%H:%M:%SZ)" >> $GITHUB_STEP_SUMMARY
