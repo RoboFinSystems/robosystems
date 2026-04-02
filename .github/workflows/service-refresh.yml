@@ -383,7 +383,7 @@ jobs:
   refresh-worker:
     if: ${{ inputs.worker_refresh_enabled == true || inputs.worker_refresh_enabled == 'true' }}
     runs-on: ${{ github.event_name == 'workflow_dispatch' && 'ubuntu-latest' || fromJSON(inputs.runner_config) }}
-    timeout-minutes: 10
+    timeout-minutes: 15
     permissions:
       id-token: write
       contents: read
@@ -429,5 +429,3 @@ jobs:
           cluster-name: robosystems-dagster-${{ inputs.environment }}-cluster
           service-name: robosystems-worker-${{ inputs.environment }}
           service-type: daemon
-          max-wait-time: "180"
-          service-stability-delay: "15"

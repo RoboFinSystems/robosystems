@@ -209,7 +209,7 @@ jobs:
           echo "✅ SSM parameter updated successfully"
 
   # ASG refresh to pick up new AMI (replaces instances without a full deploy)
-  ami-deploy-staging:
+  ami-asg-refresh-staging:
     if: |
       always() &&
       needs.ami-update-ssm.result == 'success' &&
@@ -222,7 +222,7 @@ jobs:
     secrets: inherit
 
   # ASG refresh to pick up new AMI (replaces instances without a full deploy)
-  ami-deploy-prod:
+  ami-asg-refresh-prod:
     if: |
       always() &&
       needs.ami-update-ssm.result == 'success' &&
@@ -370,7 +370,7 @@ jobs:
   # Email Notification (AMI updates only)
   # =============================================================================
   notify:
-    needs: [ami-get-latest, ami-update-ssm, ami-deploy-staging, ami-deploy-prod]
+    needs: [ami-get-latest, ami-update-ssm, ami-asg-refresh-staging, ami-asg-refresh-prod]
     if: |
       always() &&
       needs.ami-get-latest.result != 'skipped'
@@ -395,8 +395,8 @@ jobs:
           # Gather results
           AMI_CHANGED="${{ needs.ami-get-latest.outputs.ami_changed }}"
           SSM_UPDATE="${{ needs.ami-update-ssm.result }}"
-          ASG_STAGING="${{ needs.ami-deploy-staging.result }}"
-          ASG_PROD="${{ needs.ami-deploy-prod.result }}"
+          ASG_STAGING="${{ needs.ami-asg-refresh-staging.result }}"
+          ASG_PROD="${{ needs.ami-asg-refresh-prod.result }}"
           TRIGGER_REFRESH="${{ needs.ami-get-latest.outputs.trigger_asg_refresh }}"
 
           # Determine overall status
@@ -456,7 +456,7 @@ jobs:
   # Summary (runs for all tasks)
   # =============================================================================
   summary:
-    needs: [ami-get-latest, ami-update-ssm, ami-deploy-staging, ami-deploy-prod, docker-cleanup, notify]
+    needs: [ami-get-latest, ami-update-ssm, ami-asg-refresh-staging, ami-asg-refresh-prod, docker-cleanup, notify]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -512,8 +512,8 @@ jobs:
           echo "|-----|--------|" >> $GITHUB_STEP_SUMMARY
           echo "| Get Latest AMI | ${{ needs.ami-get-latest.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Update SSM | ${{ needs.ami-update-ssm.result }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| ASG Refresh Staging | ${{ needs.ami-deploy-staging.result }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| ASG Refresh Prod | ${{ needs.ami-deploy-prod.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| ASG Refresh Staging | ${{ needs.ami-asg-refresh-staging.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| ASG Refresh Prod | ${{ needs.ami-asg-refresh-prod.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "---" >> $GITHUB_STEP_SUMMARY
           echo "Triggered by: **${{ github.actor }}** at $(date -u +%Y-%m-%dT%H:%M:%SZ)" >> $GITHUB_STEP_SUMMARY
