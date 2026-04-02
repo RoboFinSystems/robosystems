@@ -153,3 +153,4 @@ def downgrade() -> None:
   op.drop_index("idx_plm_list", table_name="publish_list_members")
   op.drop_table("publish_list_members")
   op.drop_index("idx_publish_lists_name", table_name="publish_lists")
+  op.drop_table("publish_lists")

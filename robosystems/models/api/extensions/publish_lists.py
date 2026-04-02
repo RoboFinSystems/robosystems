@@ -23,7 +23,7 @@ class UpdatePublishListRequest(BaseModel):
 
 class AddMembersRequest(BaseModel):
   target_graph_ids: list[str] = Field(
-    ..., min_length=1, description="Graph IDs to add to this list"
+    ..., min_length=1, max_length=100, description="Graph IDs to add to this list"
   )
 
 

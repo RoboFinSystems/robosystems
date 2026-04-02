@@ -276,11 +276,16 @@ async def list_reports(
         .all()
       )
 
+      # Deduplicate structure loading by taxonomy_id
+      structure_cache: dict[str, list[StructureSummary]] = {}
       reports = []
       for r in rows:
-        structures = _load_structures(session, r.taxonomy_id)
+        if r.taxonomy_id not in structure_cache:
+          structure_cache[r.taxonomy_id] = _load_structures(session, r.taxonomy_id)
         entity_name = _resolve_entity_name(session, r)
-        reports.append(_report_to_response(r, structures, entity_name))
+        reports.append(
+          _report_to_response(r, structure_cache[r.taxonomy_id], entity_name)
+        )
 
       return ReportListResponse(reports=reports)
   except ValueError:
@@ -689,17 +694,20 @@ async def share_report(
       )
       results.append(result)
 
-      # Record the share in the source graph
-      if result.status == "shared":
-        with extensions_session(graph_id) as source_session:
-          share_record = ReportShare(
-            report_id=report_id,
-            target_graph_id=target_graph_id,
-            shared_by=current_user.id,
-            fact_count=result.fact_count,
+    # Batch-record successful shares in the source graph
+    successful = [r for r in results if r.status == "shared"]
+    if successful:
+      with extensions_session(graph_id) as source_session:
+        for result in successful:
+          source_session.add(
+            ReportShare(
+              report_id=report_id,
+              target_graph_id=result.target_graph_id,
+              shared_by=current_user.id,
+              fact_count=result.fact_count,
+            )
           )
-          source_session.add(share_record)
-          source_session.commit()
+        source_session.commit()
 
   except ValueError:
     raise _ledger_404()

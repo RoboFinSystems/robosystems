@@ -240,6 +240,10 @@ async def update_publish_list(
       ).scalar_one_or_none()
       if not row:
         raise HTTPException(status_code=404, detail="Publish list not found.")
+      if row.created_by != current_user.id:
+        raise HTTPException(
+          status_code=403, detail="Not authorized to modify this publish list."
+        )
 
       updates = body.model_dump(exclude_unset=True)
       for field, value in updates.items():
@@ -250,7 +254,7 @@ async def update_publish_list(
       except IntegrityError:
         raise HTTPException(
           status_code=409,
-          detail=f"A publish list named '{body.name}' already exists.",
+          detail=f"A publish list named '{body.name or row.name}' already exists.",
         )
 
       member_count = (
@@ -287,6 +291,10 @@ async def delete_publish_list(
       ).scalar_one_or_none()
       if not row:
         raise HTTPException(status_code=404, detail="Publish list not found.")
+      if row.created_by != current_user.id:
+        raise HTTPException(
+          status_code=403, detail="Not authorized to delete this publish list."
+        )
       session.delete(row)  # CASCADE deletes members
   except ProgrammingError:
     raise HTTPException(status_code=404, detail="Ledger module not initialized.")
@@ -354,6 +362,23 @@ async def add_members(
           status_code=422, detail="Cannot add your own graph to a publish list."
         )
 
+      # Pre-check for duplicates
+      existing = (
+        session.execute(
+          select(PublishListMember.target_graph_id).where(
+            PublishListMember.publish_list_id == list_id,
+            PublishListMember.target_graph_id.in_(body.target_graph_ids),
+          )
+        )
+        .scalars()
+        .all()
+      )
+      if existing:
+        raise HTTPException(
+          status_code=409,
+          detail=f"Already in this list: {', '.join(existing)}",
+        )
+
       added = []
       for target_id in body.target_graph_ids:
         member = PublishListMember(
@@ -362,15 +387,8 @@ async def add_members(
           added_by=current_user.id,
         )
         session.add(member)
-        try:
-          session.flush()
-          added.append(member)
-        except IntegrityError:
-          session.rollback()
-          raise HTTPException(
-            status_code=409,
-            detail=f"Graph '{target_id}' is already in this publish list.",
-          )
+        added.append(member)
+      session.flush()
 
       return _enrich_members(added)
   except ProgrammingError:
