@@ -2,7 +2,8 @@
 
 from datetime import UTC, datetime
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Path
+from fastapi import APIRouter, Body, Depends, HTTPException, Path, Query
+from sqlalchemy import select
 from sqlalchemy.exc import ProgrammingError
 
 from robosystems.db.extensions import extensions_session
@@ -44,6 +45,7 @@ def _entity_to_response(entity: Entity) -> LedgerEntityResponse:
     parent_entity_id=entity.parent_entity_id,
     source=entity.source,
     source_id=entity.source_id,
+    source_graph_id=(entity.metadata_ or {}).get("source_graph_id"),
     connection_id=entity.connection_id,
     address_line1=entity.address_line1,
     address_city=entity.address_city,
@@ -85,6 +87,37 @@ async def get_entity(
       return _entity_to_response(entity)
   except HTTPException:
     raise
+  except (ValueError, ProgrammingError):
+    raise HTTPException(
+      status_code=404,
+      detail="Ledger not initialized. Connect a data source first.",
+    )
+
+
+@router.get(
+  "/entities",
+  response_model=list[LedgerEntityResponse],
+  operation_id="listLedgerEntities",
+  dependencies=[Depends(subscription_aware_rate_limit_dependency)],
+)
+async def list_entities(
+  graph_id: str = Path(
+    ...,
+    pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN,
+    description="Graph database identifier",
+  ),
+  source: str | None = Query(None, description="Filter by source (e.g., 'linked')"),
+  user: User = Depends(get_current_user_with_graph),
+) -> list[LedgerEntityResponse]:
+  """List entities for this graph, optionally filtered by source."""
+  try:
+    with extensions_session(graph_id) as session:
+      query = select(Entity)
+      if source is not None:
+        query = query.where(Entity.source == source)
+      query = query.order_by(Entity.name)
+      entities = session.execute(query).scalars().all()
+      return [_entity_to_response(e) for e in entities]
   except (ValueError, ProgrammingError):
     raise HTTPException(
       status_code=404,

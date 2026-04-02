@@ -44,6 +44,7 @@ def _make_entity(**overrides):
     "parent_entity_id": None,
     "source": "native",
     "source_id": None,
+    "metadata_": {},
     "connection_id": None,
     "address_line1": None,
     "address_city": None,

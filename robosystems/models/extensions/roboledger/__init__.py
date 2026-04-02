@@ -12,6 +12,7 @@ from .element_association import ElementAssociation
 from .entry import Entry
 from .fiscal_period import FiscalPeriod
 from .line_item import LineItem
+from .publish_list import PublishList, PublishListMember
 from .report_definition import ReportDefinition
 from .report_fact import ReportFact
 from .report_share import ReportShare
@@ -33,6 +34,8 @@ __all__ = [
   "Entry",
   "FiscalPeriod",
   "LineItem",
+  "PublishList",
+  "PublishListMember",
   "ReportDefinition",
   "ReportFact",
   "ReportShare",

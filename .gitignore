@@ -33,6 +33,8 @@ data/input/
 data/output/
 local/
 /scripts/
+.local/
+examples/data/
 
 # PyInstaller
 #  Usually these files are written by a python script from a template
@@ -138,7 +140,3 @@ GEMINI.md
 robosystems/adapters/sec/arelle/EDGAR/
 # Arelle schema cache - downloaded during build
 robosystems/adapters/sec/arelle/cache/
-
-# Local credentials (local development)
-.local/config.json
-examples/data/

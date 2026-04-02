@@ -29,6 +29,7 @@ class Security(ExtensionsBase):
   __tablename__ = "securities"
   __table_args__ = (
     Index("idx_securities_entity", "entity_id"),
+    Index("idx_securities_source_graph", "source_graph_id"),
     Index("idx_securities_type", "security_type"),
     Index(
       "idx_securities_active",
@@ -40,6 +41,7 @@ class Security(ExtensionsBase):
   # Identity
   id = Column(String, primary_key=True, default=lambda: generate_prefixed_ulid("sec"))
   entity_id = Column(String, ForeignKey("entities.id"), nullable=True)
+  source_graph_id = Column(String, nullable=True)  # Pre-association to a company graph
 
   # Description
   name = Column(String, nullable=False)  # "Common Stock Class A", "Preferred Series A"
