@@ -28,9 +28,7 @@ class RegenerateReportRequest(BaseModel):
 
 
 class ShareReportRequest(BaseModel):
-  target_graph_ids: list[str] = Field(
-    ..., description="Graph IDs to share the report to"
-  )
+  publish_list_id: str = Field(..., description="Publish list to share the report to")
 
 
 # ── Responses ──────────────────────────────────────────────────────────────
@@ -78,6 +76,8 @@ class ReportResponse(BaseModel):
   created_at: datetime
   last_generated: datetime | None = None
   structures: list[StructureSummary] = Field(default_factory=list)
+  # Entity context
+  entity_name: str | None = None
   # Sharing provenance (populated for received reports)
   source_graph_id: str | None = None
   source_report_id: str | None = None

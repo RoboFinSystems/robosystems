@@ -22,24 +22,15 @@ from robosystems.models.extensions.roboinvestor import Security
 router = APIRouter()
 
 
-def _ensure_linked_entity_from_graph(
-  session, source_graph_id: str, created_by: str, user_id: str
-) -> tuple[str | None, str | None]:
-  """Find or create a linked entity for a source graph. Returns (entity_id, entity_name).
+def _find_linked_entity(session, source_graph_id: str) -> tuple[str | None, str | None]:
+  """Find an existing linked entity for a source graph. Returns (entity_id, entity_name).
 
-  Raises HTTPException 403 if the user does not have access to the source graph.
+  Linked entities are created when a company shares a report to this graph.
+  This function only looks up existing entities — it does not reach into the
+  source graph to create one.
   """
   from sqlalchemy import text
 
-  from robosystems.middleware.auth.dependencies import _db_check_graph_access
-  from robosystems.utils.ulid import generate_prefixed_ulid
-
-  if not _db_check_graph_access(user_id, source_graph_id):
-    raise HTTPException(
-      status_code=403, detail="You do not have access to the source graph."
-    )
-
-  # Check if a linked entity for this source graph already exists
   existing = session.execute(
     text(
       "SELECT id, name FROM entities WHERE metadata->>'source_graph_id' = :sgid LIMIT 1"
@@ -50,45 +41,7 @@ def _ensure_linked_entity_from_graph(
   if existing:
     return existing.id, existing.name
 
-  # Read the source graph's parent entity
-  try:
-    with extensions_session(source_graph_id) as source_session:
-      source_entity = source_session.execute(
-        select(Entity).where(Entity.is_parent.is_(True)).limit(1)
-      ).scalar_one_or_none()
-
-      if not source_entity:
-        return None, None
-
-      entity_data = {
-        "name": source_entity.name,
-        "legal_name": source_entity.legal_name,
-        "entity_type": source_entity.entity_type,
-        "industry": source_entity.industry,
-        "cik": source_entity.cik,
-        "ticker": source_entity.ticker,
-      }
-  except Exception:
-    entity_data = {"name": f"Entity ({source_graph_id})"}
-
-  linked = Entity(
-    id=generate_prefixed_ulid("ent"),
-    name=entity_data["name"],
-    legal_name=entity_data.get("legal_name"),
-    entity_type=entity_data.get("entity_type"),
-    industry=entity_data.get("industry"),
-    cik=entity_data.get("cik"),
-    ticker=entity_data.get("ticker"),
-    source="linked",
-    is_parent=True,
-    status="active",
-    address_country="US",
-    metadata_={"source_graph_id": source_graph_id},
-    created_by=created_by,
-  )
-  session.add(linked)
-  session.flush()
-  return linked.id, linked.name
+  return None, None
 
 
 def _security_to_response(
@@ -98,6 +51,7 @@ def _security_to_response(
     id=row.id,
     entity_id=row.entity_id,
     entity_name=entity_name,
+    source_graph_id=row.source_graph_id,
     name=row.name,
     security_type=row.security_type,
     security_subtype=row.security_subtype,
@@ -129,11 +83,11 @@ async def create_security(
       entity_id = body.entity_id
       entity_name = None
 
-      # POC: auto-link entity from another graph
+      # If source_graph_id provided, try to link to existing entity
+      # (auto-created by report sharing). If not yet shared, entity_id
+      # stays null — it will be auto-linked when a report arrives.
       if body.source_graph_id and not entity_id:
-        entity_id, entity_name = _ensure_linked_entity_from_graph(
-          session, body.source_graph_id, current_user.id, str(current_user.id)
-        )
+        entity_id, entity_name = _find_linked_entity(session, body.source_graph_id)
       elif entity_id:
         entity = session.execute(
           select(Entity).where(Entity.id == entity_id)
@@ -144,6 +98,7 @@ async def create_security(
 
       security = Security(
         entity_id=entity_id,
+        source_graph_id=body.source_graph_id,
         name=body.name,
         security_type=body.security_type,
         security_subtype=body.security_subtype,

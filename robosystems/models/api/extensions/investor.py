@@ -48,7 +48,7 @@ class PortfolioListResponse(BaseModel):
 
 class CreateSecurityRequest(BaseModel):
   entity_id: str | None = None
-  source_graph_id: str | None = None  # POC: auto-link entity from another graph
+  source_graph_id: str | None = None  # Pre-associate to a company graph
   name: str = Field(..., min_length=1, max_length=200)
   security_type: str  # common_stock, preferred_stock, warrant, convertible_note, etc.
   security_subtype: str | None = None
@@ -58,6 +58,8 @@ class CreateSecurityRequest(BaseModel):
 
 
 class UpdateSecurityRequest(BaseModel):
+  entity_id: str | None = None
+  source_graph_id: str | None = None
   name: str | None = None
   security_type: str | None = None
   security_subtype: str | None = None
@@ -71,6 +73,7 @@ class SecurityResponse(BaseModel):
   id: str
   entity_id: str | None = None
   entity_name: str | None = None
+  source_graph_id: str | None = None
   name: str
   security_type: str
   security_subtype: str | None = None

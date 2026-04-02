@@ -4,6 +4,7 @@ from fastapi import APIRouter
 
 from .accounts import router as accounts_router
 from .entity import router as entity_router
+from .publish_lists import router as publish_lists_router
 from .reports import router as reports_router
 from .summary import router as summary_router
 from .taxonomies import router as taxonomies_router
@@ -18,3 +19,4 @@ router.include_router(transactions_router)
 router.include_router(trial_balance_router)
 router.include_router(summary_router)
 router.include_router(reports_router)
+router.include_router(publish_lists_router)

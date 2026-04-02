@@ -37,6 +37,7 @@ class LedgerEntityResponse(BaseModel):
   # Source provenance
   source: str = "native"
   source_id: str | None = None
+  source_graph_id: str | None = None
   connection_id: str | None = None
 
   # Address

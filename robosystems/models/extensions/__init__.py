@@ -22,6 +22,8 @@ from .roboledger import (
   Entry,
   FiscalPeriod,
   LineItem,
+  PublishList,
+  PublishListMember,
   ReportDefinition,
   ReportFact,
   ReportShare,
@@ -47,6 +49,8 @@ __all__ = [
   # RoboInvestor
   "Portfolio",
   "Position",
+  "PublishList",
+  "PublishListMember",
   "ReportDefinition",
   "ReportFact",
   "ReportShare",

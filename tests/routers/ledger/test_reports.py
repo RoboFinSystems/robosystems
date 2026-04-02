@@ -24,6 +24,12 @@ MODULE = "robosystems.routers.ledger.reports"
 GRAPH_ID = "kg01234567890abcdef"
 
 
+@pytest.fixture(autouse=True)
+def _mock_resolve_entity_name():
+  with patch(f"{MODULE}._resolve_entity_name", return_value="Test Entity"):
+    yield
+
+
 def _make_user():
   user = MagicMock()
   user.id = "usr_test123"
@@ -343,11 +349,36 @@ class TestDeleteReport:
 
 
 class TestShareReport:
+  def _mock_session_with_publish_list(self, mock_session, target_graph_ids=None):
+    """Set up mock session to return a publish list and its members."""
+    from robosystems.models.extensions import PublishList, PublishListMember
+
+    mock_list = MagicMock(spec=PublishList)
+    mock_list.id = "plist_01TEST"
+    mock_list.name = "Test List"
+
+    members = []
+    for gid in target_graph_ids or []:
+      m = MagicMock(spec=PublishListMember)
+      m.target_graph_id = gid
+      members.append(m)
+
+    # Chain: first execute returns publish list, second returns members
+    mock_result_list = MagicMock()
+    mock_result_list.scalar_one_or_none.return_value = mock_list
+
+    mock_result_members = MagicMock()
+    mock_result_members.scalars.return_value.all.return_value = members
+
+    mock_session.execute.side_effect = [mock_result_list, mock_result_members]
+
   @pytest.mark.asyncio
   async def test_rejects_unpublished_report(self):
     mock_session = MagicMock()
     rd = _make_report_def(generation_status="generating")
     mock_session.get.return_value = rd
+
+    self._mock_session_with_publish_list(mock_session, ["kg_target_123"])
 
     from robosystems.models.api.extensions.reports import ShareReportRequest
 
@@ -358,7 +389,7 @@ class TestShareReport:
         await share_report(
           graph_id=GRAPH_ID,
           report_id="rpt_01ABC",
-          body=ShareReportRequest(target_graph_ids=["kg_target_123"]),
+          body=ShareReportRequest(publish_list_id="plist_01TEST"),
           current_user=_make_user(),
           _rate_limit=None,
         )
@@ -371,6 +402,8 @@ class TestShareReport:
     mock_session = MagicMock()
     mock_session.get.return_value = None
 
+    self._mock_session_with_publish_list(mock_session, ["kg_target_123"])
+
     from robosystems.models.api.extensions.reports import ShareReportRequest
 
     with patch(f"{MODULE}.extensions_session") as mock_ext:
@@ -380,12 +413,36 @@ class TestShareReport:
         await share_report(
           graph_id=GRAPH_ID,
           report_id="rpt_nonexistent",
-          body=ShareReportRequest(target_graph_ids=["kg_target_123"]),
+          body=ShareReportRequest(publish_list_id="plist_01TEST"),
           current_user=_make_user(),
           _rate_limit=None,
         )
 
     assert exc_info.value.status_code == 404
+
+  @pytest.mark.asyncio
+  async def test_publish_list_not_found(self):
+    mock_session = MagicMock()
+    mock_result = MagicMock()
+    mock_result.scalar_one_or_none.return_value = None
+    mock_session.execute.return_value = mock_result
+
+    from robosystems.models.api.extensions.reports import ShareReportRequest
+
+    with patch(f"{MODULE}.extensions_session") as mock_ext:
+      mock_ext.return_value = _mock_session_context(mock_session)
+
+      with pytest.raises(HTTPException) as exc_info:
+        await share_report(
+          graph_id=GRAPH_ID,
+          report_id="rpt_01ABC",
+          body=ShareReportRequest(publish_list_id="plist_nonexistent"),
+          current_user=_make_user(),
+          _rate_limit=None,
+        )
+
+    assert exc_info.value.status_code == 404
+    assert "Publish list" in exc_info.value.detail
 
   @pytest.mark.asyncio
   async def test_share_returns_error_for_invalid_target(self):
@@ -394,9 +451,24 @@ class TestShareReport:
     rd = _make_report_def(generation_status="published")
     mock_session.get.return_value = rd
 
-    mock_result = MagicMock()
-    mock_result.fetchall.return_value = []
-    mock_session.execute.return_value = mock_result
+    self._mock_session_with_publish_list(mock_session, ["kg_no_ledger"])
+
+    # After publish list queries, session.execute is used for fact query
+    mock_fact_result = MagicMock()
+    mock_fact_result.fetchall.return_value = []
+    # Reset side_effect so subsequent calls work
+    original_side_effect = mock_session.execute.side_effect
+    call_count = [0]
+    results = list(original_side_effect) if original_side_effect else []
+
+    def execute_handler(*args, **kwargs):
+      idx = call_count[0]
+      call_count[0] += 1
+      if idx < len(results):
+        return results[idx]
+      return mock_fact_result
+
+    mock_session.execute.side_effect = execute_handler
 
     from robosystems.models.api.extensions.reports import (
       ShareReportRequest,
@@ -420,7 +492,7 @@ class TestShareReport:
       result = await share_report(
         graph_id=GRAPH_ID,
         report_id="rpt_01ABC",
-        body=ShareReportRequest(target_graph_ids=["kg_no_ledger"]),
+        body=ShareReportRequest(publish_list_id="plist_01TEST"),
         current_user=_make_user(),
         _rate_limit=None,
       )

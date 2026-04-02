@@ -99,13 +99,18 @@ class TestBackupEndpoints:
 
   @patch("robosystems.models.core.graph.graph_credits.GraphCredits.get_by_graph_id")
   @patch(
-    "robosystems.middleware.sse.dagster_monitor.DagsterRunMonitor.monitor_run",
+    "robosystems.worker.client.enqueue_task",
     new_callable=AsyncMock,
-    return_value={"status": "completed", "run_id": "test-run-123"},
-  )
-  @patch(
-    "robosystems.middleware.sse.dagster_monitor.DagsterRunMonitor.submit_job",
-    return_value="test-run-123",
+    return_value={
+      "operation_id": "op_test-backup-123",
+      "status": "pending",
+      "operation_type": "dagster_job_monitor",
+      "_links": {
+        "stream": "/v1/operations/op_test-backup-123/stream",
+        "status": "/v1/operations/op_test-backup-123/status",
+        "cancel": "/v1/operations/op_test-backup-123",
+      },
+    },
   )
   @patch("os.path.exists")
   @patch(
@@ -119,22 +124,21 @@ class TestBackupEndpoints:
     mock_is_shared,
     mock_get_database_path,
     mock_path_exists,
-    mock_dagster_submit,
-    mock_dagster_monitor,
+    mock_enqueue_task,
     mock_get_graph_credits,
     client,
     mock_auth_user,
   ):
     """Test backup creation endpoint."""
-    from robosystems.database import session
+    from robosystems.database import get_async_db_session
     from robosystems.middleware.auth.dependencies import get_current_user_with_graph
 
     # Create mock session
     mock_session = MagicMock()
 
-    # Override the dependencies
+    # Override the dependencies (endpoint uses get_async_db_session, not session)
     app.dependency_overrides[get_current_user_with_graph] = lambda: mock_auth_user
-    app.dependency_overrides[session] = lambda: mock_session
+    app.dependency_overrides[get_async_db_session] = lambda: mock_session
 
     try:
       # Mock GraphCredits for the reservation pattern
@@ -185,8 +189,8 @@ class TestBackupEndpoints:
       assert data["status"] == "accepted"
       assert "Backup creation started" in data["message"]
 
-      # Note: This endpoint uses background tasks, not the mocked background task
-      # The actual backup is executed as a background FastAPI task
+      # Verify enqueue_task was called (not real Dagster)
+      mock_enqueue_task.assert_called_once()
 
       # Verify authorization checks were called
       mock_get_by_user_id.assert_called_once()
@@ -194,8 +198,8 @@ class TestBackupEndpoints:
       # Reset only the specific overrides we added
       if get_current_user_with_graph in app.dependency_overrides:
         del app.dependency_overrides[get_current_user_with_graph]
-      if session in app.dependency_overrides:
-        del app.dependency_overrides[session]
+      if get_async_db_session in app.dependency_overrides:
+        del app.dependency_overrides[get_async_db_session]
 
   @patch("robosystems.middleware.graph.utils.MultiTenantUtils.is_shared_repository")
   @patch("robosystems.models.core.GraphUser.get_by_user_id")

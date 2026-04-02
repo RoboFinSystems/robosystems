@@ -559,13 +559,18 @@ class TestGraphOperationFeatureFlags:
             patch("os.walk", return_value=[("/tmp/test/path", [], ["file1.lbug"])]),
             patch("os.path.getsize", return_value=1024),
             patch(
-              "robosystems.middleware.sse.dagster_monitor.DagsterRunMonitor.submit_job",
-              return_value="test-run-123",
-            ),
-            patch(
-              "robosystems.middleware.sse.dagster_monitor.DagsterRunMonitor.monitor_run",
+              "robosystems.worker.client.enqueue_task",
               new_callable=AsyncMock,
-              return_value={"status": "completed", "run_id": "test-run-123"},
+              return_value={
+                "operation_id": "op_test-backup-123",
+                "status": "pending",
+                "operation_type": "dagster_job_monitor",
+                "_links": {
+                  "stream": "/v1/operations/op_test-backup-123/stream",
+                  "status": "/v1/operations/op_test-backup-123/status",
+                  "cancel": "/v1/operations/op_test-backup-123",
+                },
+              },
             ),
           ):
             # Mock request data

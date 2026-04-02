@@ -89,6 +89,7 @@ def _load_structures(session, taxonomy_id: str) -> list[StructureSummary]:
 def _report_to_response(
   report_def: ReportDefinition,
   structures: list[StructureSummary],
+  entity_name: str | None = None,
 ) -> ReportResponse:
   return ReportResponse(
     id=report_def.id,
@@ -104,10 +105,31 @@ def _report_to_response(
     created_at=report_def.created_at,
     last_generated=report_def.last_generated,
     structures=structures,
+    entity_name=entity_name,
     source_graph_id=report_def.source_graph_id,
     source_report_id=report_def.source_report_id,
     shared_at=report_def.shared_at,
   )
+
+
+def _resolve_entity_name(session, report_def: ReportDefinition) -> str | None:
+  """Resolve the entity name for a report.
+
+  For shared reports: look up the linked entity by source_graph_id.
+  For native reports: look up the parent entity.
+  """
+  if report_def.source_graph_id:
+    row = session.execute(
+      text(
+        "SELECT name FROM entities WHERE metadata->>'source_graph_id' = :sgid LIMIT 1"
+      ),
+      {"sgid": report_def.source_graph_id},
+    ).first()
+  else:
+    row = session.execute(
+      text("SELECT name FROM entities WHERE is_parent = true LIMIT 1")
+    ).first()
+  return row.name if row else None
 
 
 def _persist_report_facts(session, report_id: str, report_facts, entity_id: str):
@@ -219,7 +241,8 @@ async def create_report(
       session.commit()
 
       structures = _load_structures(session, body.taxonomy_id)
-      return _report_to_response(report_def, structures)
+      entity_name = _resolve_entity_name(session, report_def)
+      return _report_to_response(report_def, structures, entity_name)
 
   except ValueError:
     raise _ledger_404()
@@ -253,10 +276,16 @@ async def list_reports(
         .all()
       )
 
+      # Deduplicate structure loading by taxonomy_id
+      structure_cache: dict[str, list[StructureSummary]] = {}
       reports = []
       for r in rows:
-        structures = _load_structures(session, r.taxonomy_id)
-        reports.append(_report_to_response(r, structures))
+        if r.taxonomy_id not in structure_cache:
+          structure_cache[r.taxonomy_id] = _load_structures(session, r.taxonomy_id)
+        entity_name = _resolve_entity_name(session, r)
+        reports.append(
+          _report_to_response(r, structure_cache[r.taxonomy_id], entity_name)
+        )
 
       return ReportListResponse(reports=reports)
   except ValueError:
@@ -289,7 +318,8 @@ async def get_report(
         raise _report_404(report_id)
 
       structures = _load_structures(session, report_def.taxonomy_id)
-      return _report_to_response(report_def, structures)
+      entity_name = _resolve_entity_name(session, report_def)
+      return _report_to_response(report_def, structures, entity_name)
 
   except ValueError:
     raise _ledger_404()
@@ -510,7 +540,8 @@ async def regenerate_report(
       session.commit()
 
       structures = _load_structures(session, report_def.taxonomy_id)
-      return _report_to_response(report_def, structures)
+      entity_name = _resolve_entity_name(session, report_def)
+      return _report_to_response(report_def, structures, entity_name)
 
   except ValueError:
     raise _ledger_404()
@@ -588,6 +619,29 @@ async def share_report(
 
   try:
     with extensions_session(graph_id) as source_session:
+      # Resolve publish list → target graph IDs
+      from robosystems.models.extensions import PublishList, PublishListMember
+
+      publish_list = source_session.execute(
+        select(PublishList).where(PublishList.id == body.publish_list_id)
+      ).scalar_one_or_none()
+      if not publish_list:
+        raise HTTPException(status_code=404, detail="Publish list not found.")
+
+      members = (
+        source_session.execute(
+          select(PublishListMember).where(
+            PublishListMember.publish_list_id == body.publish_list_id
+          )
+        )
+        .scalars()
+        .all()
+      )
+      if not members:
+        raise HTTPException(status_code=422, detail="Publish list has no members.")
+
+      target_graph_ids = [m.target_graph_id for m in members]
+
       # Verify report exists and is published
       report_def = source_session.get(ReportDefinition, report_id)
       if not report_def:
@@ -630,7 +684,7 @@ async def share_report(
       source_facts = [row._asdict() for row in fact_rows]
 
     # Now share to each target graph
-    for target_graph_id in body.target_graph_ids:
+    for target_graph_id in target_graph_ids:
       result = _share_to_target(
         source_graph_id=graph_id,
         report_snapshot=report_snapshot,
@@ -640,17 +694,20 @@ async def share_report(
       )
       results.append(result)
 
-      # Record the share in the source graph
-      if result.status == "shared":
-        with extensions_session(graph_id) as source_session:
-          share_record = ReportShare(
-            report_id=report_id,
-            target_graph_id=target_graph_id,
-            shared_by=current_user.id,
-            fact_count=result.fact_count,
+    # Batch-record successful shares in the source graph
+    successful = [r for r in results if r.status == "shared"]
+    if successful:
+      with extensions_session(graph_id) as source_session:
+        for result in successful:
+          source_session.add(
+            ReportShare(
+              report_id=report_id,
+              target_graph_id=result.target_graph_id,
+              shared_by=current_user.id,
+              fact_count=result.fact_count,
+            )
           )
-          source_session.add(share_record)
-          source_session.commit()
+        source_session.commit()
 
   except ValueError:
     raise _ledger_404()
@@ -766,27 +823,20 @@ def _ensure_linked_entity(
   source_graph_id: str,
   shared_by: str,
 ) -> None:
-  """Create a linked Entity in the target graph if one doesn't exist for the source.
+  """Create or update a linked Entity in the target graph for the source company.
 
   When a company shares a report to an investor's graph, the investor needs an
-  Entity row representing that company. This function checks for an existing
-  linked entity (by source_graph_id in metadata) and creates one if missing,
-  copying basic info from the source graph's entity.
+  Entity row representing that company. This function:
+  1. Reads the source graph's parent entity for current metadata
+  2. Creates a linked entity if none exists, or updates metadata if one does
+  3. Auto-links any securities with matching source_graph_id
+
+  Entity metadata is refreshed on each share so name/industry/etc. changes
+  propagate with each published report.
   """
   from robosystems.models.extensions.entity import Entity
 
-  # Check if a linked entity for this source graph already exists
-  existing = target_session.execute(
-    text(
-      "SELECT id FROM entities WHERE metadata->>'source_graph_id' = :source_graph_id LIMIT 1"
-    ),
-    {"source_graph_id": source_graph_id},
-  ).scalar_one_or_none()
-
-  if existing:
-    return
-
-  # Read the source graph's primary entity to copy its details
+  # Read the source graph's primary entity for current metadata
   try:
     with extensions_session(source_graph_id) as source_session:
       source_entity = source_session.execute(
@@ -796,7 +846,6 @@ def _ensure_linked_entity(
       if not source_entity:
         return
 
-      # Snapshot fields before session closes
       entity_data = {
         "name": source_entity.name,
         "legal_name": source_entity.legal_name,
@@ -807,26 +856,73 @@ def _ensure_linked_entity(
         "state_of_incorporation": source_entity.state_of_incorporation,
       }
   except Exception:
-    # If we can't read the source entity, create a minimal linked entity
+    logger.warning(f"Could not read source entity from {source_graph_id}")
     entity_data = {"name": f"Entity ({source_graph_id})"}
 
-  from robosystems.utils.ulid import generate_prefixed_ulid
+  # Check if a linked entity for this source graph already exists
+  existing = target_session.execute(
+    text(
+      "SELECT id FROM entities WHERE metadata->>'source_graph_id' = :source_graph_id LIMIT 1"
+    ),
+    {"source_graph_id": source_graph_id},
+  ).scalar_one_or_none()
 
-  linked_entity = Entity(
-    id=generate_prefixed_ulid("ent"),
-    name=entity_data["name"],
-    legal_name=entity_data.get("legal_name"),
-    entity_type=entity_data.get("entity_type"),
-    industry=entity_data.get("industry"),
-    cik=entity_data.get("cik"),
-    ticker=entity_data.get("ticker"),
-    state_of_incorporation=entity_data.get("state_of_incorporation"),
-    source="linked",
-    is_parent=True,
-    status="active",
-    address_country="US",
-    metadata_={"source_graph_id": source_graph_id},
-    created_by=shared_by,
+  if existing:
+    # Update metadata on existing linked entity (living updates)
+    target_session.execute(
+      text("""
+        UPDATE entities SET
+          name = :name,
+          legal_name = :legal_name,
+          entity_type = :entity_type,
+          industry = :industry,
+          cik = :cik,
+          ticker = :ticker,
+          state_of_incorporation = :state_of_incorporation,
+          updated_at = now()
+        WHERE id = :entity_id
+      """),
+      {
+        "entity_id": existing,
+        "name": entity_data["name"],
+        "legal_name": entity_data.get("legal_name"),
+        "entity_type": entity_data.get("entity_type"),
+        "industry": entity_data.get("industry"),
+        "cik": entity_data.get("cik"),
+        "ticker": entity_data.get("ticker"),
+        "state_of_incorporation": entity_data.get("state_of_incorporation"),
+      },
+    )
+    entity_id = existing
+  else:
+    # Create new linked entity
+    from robosystems.utils.ulid import generate_prefixed_ulid
+
+    entity_id = generate_prefixed_ulid("ent")
+    linked_entity = Entity(
+      id=entity_id,
+      name=entity_data["name"],
+      legal_name=entity_data.get("legal_name"),
+      entity_type=entity_data.get("entity_type"),
+      industry=entity_data.get("industry"),
+      cik=entity_data.get("cik"),
+      ticker=entity_data.get("ticker"),
+      state_of_incorporation=entity_data.get("state_of_incorporation"),
+      source="linked",
+      is_parent=False,
+      status="active",
+      address_country="US",
+      metadata_={"source_graph_id": source_graph_id},
+      created_by=shared_by,
+    )
+    target_session.add(linked_entity)
+    target_session.flush()
+
+  # Auto-link securities that reference this source graph
+  target_session.execute(
+    text("""
+      UPDATE securities SET entity_id = :entity_id, updated_at = now()
+      WHERE source_graph_id = :source_graph_id AND entity_id IS NULL
+    """),
+    {"entity_id": entity_id, "source_graph_id": source_graph_id},
   )
-  target_session.add(linked_entity)
-  target_session.flush()
