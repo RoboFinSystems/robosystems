@@ -10,11 +10,11 @@ from .dimension import (
 from .element import Account, Element
 from .element_association import ElementAssociation
 from .entry import Entry
+from .fact import Fact, ReportFact
 from .fiscal_period import FiscalPeriod
 from .line_item import LineItem
 from .publish_list import PublishList, PublishListMember
 from .report_definition import ReportDefinition
-from .report_fact import ReportFact
 from .report_share import ReportShare
 from .structure import Structure
 from .taxonomy import Taxonomy
@@ -32,6 +32,7 @@ __all__ = [
   "Element",
   "ElementAssociation",
   "Entry",
+  "Fact",
   "FiscalPeriod",
   "LineItem",
   "PublishList",

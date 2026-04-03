@@ -152,6 +152,9 @@ BASE_NODES = [
       Property(name="version", type="STRING"),  # 2023, 2024, etc.
       Property(name="namespace", type="STRING"),
       Property(name="description", type="STRING"),
+      Property(
+        name="taxonomy_type", type="STRING"
+      ),  # chart_of_accounts, reporting, mapping, schedule
     ],
   ),
   Node(

@@ -20,6 +20,7 @@ from .roboledger import (
   Element,
   ElementAssociation,
   Entry,
+  Fact,
   FiscalPeriod,
   LineItem,
   PublishList,
@@ -44,6 +45,7 @@ __all__ = [
   "ElementAssociation",
   "Entity",
   "Entry",
+  "Fact",
   "FiscalPeriod",
   "LineItem",
   # RoboInvestor

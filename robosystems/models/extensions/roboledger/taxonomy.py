@@ -31,7 +31,7 @@ class Taxonomy(ExtensionsBase):
       postgresql_where="standard IS NOT NULL",
     ),
     CheckConstraint(
-      "taxonomy_type IN ('chart_of_accounts', 'reporting', 'mapping')",
+      "taxonomy_type IN ('chart_of_accounts', 'reporting', 'mapping', 'schedule')",
       name="check_taxonomy_type",
     ),
     # No schema= specified — tenant table, created per-graph by provision_tenant_schema.

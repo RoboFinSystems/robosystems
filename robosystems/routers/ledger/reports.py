@@ -25,7 +25,7 @@ from robosystems.models.api.extensions.reports import (
   ValidationCheckResponse,
 )
 from robosystems.models.core import User
-from robosystems.models.extensions import ReportDefinition, ReportFact, ReportShare
+from robosystems.models.extensions import Fact, ReportDefinition, ReportShare
 from robosystems.operations.reports.fact_grid import (
   ReportFact as ReportFactData,
 )
@@ -132,16 +132,16 @@ def _resolve_entity_name(session, report_def: ReportDefinition) -> str | None:
   return row.name if row else None
 
 
-def _persist_report_facts(session, report_id: str, report_facts, entity_id: str):
-  """Write generated facts to the report_facts OLTP table."""
+def _persist_report_facts(session, report_id: str, facts, entity_id: str):
+  """Write generated facts to the facts OLTP table."""
   # Clear any existing facts for this report
   session.execute(
-    text("DELETE FROM report_facts WHERE report_id = :report_id"),
+    text("DELETE FROM facts WHERE report_id = :report_id"),
     {"report_id": report_id},
   )
 
-  for fact in report_facts.facts:
-    rf = ReportFact(
+  for fact in facts.facts:
+    rf = Fact(
       report_id=report_id,
       element_id=fact.element_id,
       value=fact.value,
@@ -222,7 +222,7 @@ async def create_report(
       session.flush()
 
       # Generate facts for all mapped elements (structure-agnostic)
-      report_facts = generate_report_facts(
+      facts = generate_report_facts(
         session=session,
         taxonomy_id=body.taxonomy_id,
         mapping_id=body.mapping_id,
@@ -233,7 +233,7 @@ async def create_report(
 
       # Persist facts to OLTP for materialization and rendering
       entity_id = _get_entity_id(session, graph_id)
-      _persist_report_facts(session, report_def.id, report_facts, entity_id)
+      _persist_report_facts(session, report_def.id, facts, entity_id)
 
       # Update status
       report_def.generation_status = "published"
@@ -373,12 +373,12 @@ async def get_statement(
           period_end=report_def.period_end or report_def.period_start,
         )
 
-      # Load persisted facts from report_facts
+      # Load persisted facts from facts
       fact_rows = session.execute(
         text("""
           SELECT rf.element_id, rf.value, rf.period_start, rf.period_end,
                  rf.period_type, e.qname, e.name, e.classification, e.balance_type
-          FROM report_facts rf
+          FROM facts rf
           JOIN elements e ON e.id = rf.element_id
           WHERE rf.report_id = :report_id
         """),
@@ -522,7 +522,7 @@ async def regenerate_report(
       session.flush()
 
       # Re-generate facts
-      report_facts = generate_report_facts(
+      facts = generate_report_facts(
         session=session,
         taxonomy_id=report_def.taxonomy_id,
         mapping_id=report_def.mapping_id or "",
@@ -533,7 +533,7 @@ async def regenerate_report(
 
       # Persist
       entity_id = _get_entity_id(session, graph_id)
-      _persist_report_facts(session, report_def.id, report_facts, entity_id)
+      _persist_report_facts(session, report_def.id, facts, entity_id)
 
       report_def.generation_status = "published"
       report_def.last_generated = datetime.now(UTC)
@@ -578,7 +578,7 @@ async def delete_report(
 
       # Delete generated facts first
       session.execute(
-        text("DELETE FROM report_facts WHERE report_id = :report_id"),
+        text("DELETE FROM facts WHERE report_id = :report_id"),
         {"report_id": report_id},
       )
 
@@ -676,7 +676,7 @@ async def share_report(
         text("""
           SELECT id, report_id, element_id, value, period_start, period_end,
                  period_type, unit, entity_id, fact_set_id, created_at
-          FROM report_facts WHERE report_id = :report_id
+          FROM facts WHERE report_id = :report_id
         """),
         {"report_id": report_id},
       ).fetchall()
@@ -784,7 +784,7 @@ def _share_to_target(
 
       # Copy facts with the new report ID
       for fact_data in source_facts:
-        rf = ReportFact(
+        rf = Fact(
           report_id=shared_report.id,
           element_id=fact_data["element_id"],
           value=fact_data["value"],

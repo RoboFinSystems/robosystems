@@ -31,6 +31,11 @@ class Entry(ExtensionsBase):
     Index("idx_entries_posting_date", "posting_date"),
     Index("idx_entries_status", "status"),
     Index("idx_entries_type", "type"),
+    Index(
+      "idx_entries_source_structure",
+      "source_structure_id",
+      postgresql_where="source_structure_id IS NOT NULL",
+    ),
     CheckConstraint(
       "status IN ('draft', 'posted', 'reversed')",
       name="check_entry_status",
@@ -52,6 +57,9 @@ class Entry(ExtensionsBase):
   # Classification
   type = Column(String, nullable=False, default="standard")
   reversal_of = Column(String, ForeignKey("entries.id"), nullable=True)
+
+  # Provenance — links closing entries back to the schedule structure they came from
+  source_structure_id = Column(String, nullable=True)
 
   # Dates
   posting_date = Column(Date, nullable=False)
