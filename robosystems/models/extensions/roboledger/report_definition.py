@@ -37,6 +37,11 @@ class ReportDefinition(ExtensionsBase):
   period_end = Column(Date, nullable=True)
   comparative = Column(Boolean, nullable=False, default=True)
 
+  # Multi-period support — ordered list of period specs for N-column reports
+  # Each entry: {"start": "2026-01-01", "end": "2026-01-31", "label": "Jan 2026"}
+  # When set, overrides period_start/period_end/comparative for fact generation.
+  periods = Column(JSONB, nullable=True)
+
   # Generated output references
   graph_report_id = Column(String, nullable=True)
   last_generated = Column(DateTime, nullable=True)

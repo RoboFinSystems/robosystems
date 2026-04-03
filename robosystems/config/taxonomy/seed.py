@@ -848,13 +848,17 @@ def seed_reporting_taxonomy(connection) -> None:
     _insert_element(connection, e)
 
   # 5. Create hierarchy associations (parent → child via structures)
-  order = 0
+  # Order per-parent so siblings sort correctly within each section
+  # (global counter caused Revenue/Expenses/Gains/Losses to interleave)
+  order_by_parent: dict[str, int] = {}
+  assoc_seq = 0
   for e in ALL_GAAP_ELEMENTS:
     parent_id = e.get("parent_id")
     if not parent_id:
       continue
     struct_id = _structure_for_element(e)
-    order += 1
+    order_by_parent[parent_id] = order_by_parent.get(parent_id, 0) + 1
+    assoc_seq += 1
     connection.execute(
       text("""
                 INSERT INTO public.element_associations
@@ -863,11 +867,11 @@ def seed_reporting_taxonomy(connection) -> None:
                 VALUES (:id, :struct, :from_id, :to_id, 'presentation', :ord, '{}'::jsonb, 'system')
             """),
       {
-        "id": f"assoc_gaap_{order:04d}",
+        "id": f"assoc_gaap_{assoc_seq:04d}",
         "struct": struct_id,
         "from_id": parent_id,
         "to_id": e["id"],
-        "ord": float(order),
+        "ord": float(order_by_parent[parent_id]),
       },
     )
 

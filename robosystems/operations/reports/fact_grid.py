@@ -3,7 +3,7 @@
 Two-phase design:
 1. generate_report_facts() — reads mapped trial balance, produces structure-agnostic
    ReportFact objects (one per element x period). These get written to the
-   report_facts OLTP table for graph materialization.
+   facts OLTP table for graph materialization.
 2. render_structure_view() — applies a structure's hierarchy to pre-generated facts,
    computing subtotals and ordering for display. Same facts, different structure =
    different view.
@@ -222,7 +222,7 @@ def render_structure_view(
     )
 
   # Walk hierarchy depth-first with rollup
-  # Facts from report_facts are already natural-signed, so skip sign conversion
+  # Facts from the facts table are already natural-signed, so skip sign conversion
   rows = _build_rows(hierarchy, current_balances, prior_balances, pre_signed=True)
 
   return FactGrid(

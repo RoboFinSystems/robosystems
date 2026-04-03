@@ -402,6 +402,14 @@ TRANSACTION_RELATIONSHIPS = [
     description="Line item has dimensional qualifiers (department, class, location, project)",
     properties=[],
   ),
+  # Entry → Structure provenance (closing entries derived from schedules)
+  Relationship(
+    name="ENTRY_FROM_SCHEDULE",
+    from_node="Entry",
+    to_node="Structure",
+    description="Closing entry was derived from a schedule structure",
+    properties=[],
+  ),
 ]
 
 # ============================================================================

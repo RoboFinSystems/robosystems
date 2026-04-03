@@ -132,7 +132,7 @@ class TestCreateReport:
 
     mock_session.execute.side_effect = [
       mock_tax_result,  # taxonomy exists check
-      MagicMock(),  # DELETE from report_facts
+      MagicMock(),  # DELETE from facts
     ]
 
     with (
@@ -326,7 +326,7 @@ class TestDeleteReport:
 
     mock_session.delete.assert_called_once_with(rd)
     mock_session.commit.assert_called_once()
-    # Should also have executed DELETE FROM report_facts
+    # Should also have executed DELETE FROM facts
     mock_session.execute.assert_called()
 
   @pytest.mark.asyncio
