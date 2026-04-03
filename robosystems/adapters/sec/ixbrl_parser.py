@@ -22,6 +22,7 @@ iXBRL continuation pattern:
 import re
 from dataclasses import dataclass
 
+from robosystems.adapters.sec.html_table import html_tables_to_markdown
 from robosystems.logger import logger
 
 
@@ -67,7 +68,13 @@ def _label_from_element_name(name: str) -> str:
 
 
 def _strip_html(html: str) -> str:
-  """Strip HTML tags and normalize whitespace."""
+  """Strip HTML tags and normalize whitespace.
+
+  Tables are converted to markdown pipe tables before tag stripping,
+  preserving column structure for financial data.
+  """
+  if "<table" in html or "<TABLE" in html:
+    html = html_tables_to_markdown(html)
   text = re.sub(
     r"<style[^>]*>.*?</\s*style\s*>", " ", html, flags=re.DOTALL | re.IGNORECASE
   )
@@ -113,6 +120,10 @@ class iXBRLParser:
     ix:continuation chains for split content. Each section includes
     the list of XBRL elements (numeric facts) it contains.
 
+    Uses string-find based tag matching instead of regex with (.*?) to
+    avoid catastrophic memory usage on large filings (the old regex
+    approach caused 7GB+ allocation on 5MB files).
+
     Args:
         html: Raw iXBRL HTML content
 
@@ -122,26 +133,11 @@ class iXBRLParser:
     # Build continuation lookup: id → content
     continuations = self._build_continuation_map(html)
 
-    # Find all TextBlock ix:nonNumeric elements
+    # Find all TextBlock ix:nonNumeric elements using string-find
     sections: list[iXBRLSection] = []
-    seen_ids = set()
+    seen_ids: set[str] = set()
 
-    pattern = re.compile(
-      r"<ix:nonNumeric\b([^>]*?)>(.*?)</ix:nonNumeric>",
-      re.DOTALL | re.IGNORECASE,
-    )
-
-    for match in pattern.finditer(html):
-      attrs = match.group(1)
-      inline_content = match.group(2)
-
-      # Only process TextBlock elements
-      name_match = re.search(r'name="([^"]*TextBlock[^"]*)"', attrs, re.IGNORECASE)
-      if not name_match:
-        continue
-
-      element_name = name_match.group(1)
-
+    for element_name, attrs, inline_content in self._find_textblocks(html):
       # Skip DEI and ECD metadata text blocks
       if element_name.startswith(("dei:", "ecd:")):
         continue
@@ -193,15 +189,131 @@ class iXBRLParser:
     )
     return sections
 
+  def _find_textblocks(self, html: str) -> list[tuple[str, str, str]]:
+    """Find ix:nonNumeric TextBlock elements using string-find matching.
+
+    Uses str.find() with nesting-aware close-tag matching instead of
+    regex (.*?) which causes catastrophic backtracking on large files.
+
+    Returns list of (element_name, attrs_str, inner_html).
+    """
+    results: list[tuple[str, str, str]] = []
+    html_lower = html.lower()
+    open_tag = "<ix:nonnumeric"
+    close_tag = "</ix:nonnumeric"
+
+    pos = 0
+    while True:
+      start = html_lower.find(open_tag, pos)
+      if start == -1:
+        break
+
+      tag_end = html.find(">", start)
+      if tag_end == -1:
+        break
+
+      attrs = html[start + len(open_tag) : tag_end]
+      content_start = tag_end + 1
+
+      # Only care about TextBlock elements
+      if "textblock" not in attrs.lower():
+        pos = content_start
+        continue
+
+      # Find matching close tag, accounting for nesting
+      depth = 1
+      search_pos = content_start
+      found = False
+      while depth > 0:
+        next_open = html_lower.find(open_tag, search_pos)
+        next_close = html_lower.find(close_tag, search_pos)
+
+        if next_close == -1:
+          break
+
+        if next_open != -1 and next_open < next_close:
+          depth += 1
+          search_pos = next_open + len(open_tag)
+        else:
+          depth -= 1
+          if depth == 0:
+            inner = html[content_start:next_close]
+            name_match = re.search(
+              r'name="([^"]*TextBlock[^"]*)"', attrs, re.IGNORECASE
+            )
+            if name_match:
+              results.append((name_match.group(1), attrs, inner))
+            close_end = html.find(">", next_close)
+            pos = close_end + 1 if close_end != -1 else next_close + 1
+            found = True
+            break
+          else:
+            search_pos = next_close + len(close_tag)
+
+      if not found:
+        pos = content_start
+
+    return results
+
   def _build_continuation_map(self, html: str) -> dict[str, str]:
-    """Build a lookup of continuation id → HTML content."""
+    """Build a lookup of continuation id → HTML content.
+
+    Uses string-find matching instead of regex (.*?) to avoid
+    catastrophic memory usage on large filings.
+    """
     continuations: dict[str, str] = {}
-    pattern = re.compile(
-      r'<ix:continuation\b[^>]*id="([^"]+)"[^>]*>(.*?)</ix:continuation>',
-      re.DOTALL | re.IGNORECASE,
-    )
-    for match in pattern.finditer(html):
-      continuations[match.group(1)] = match.group(2)
+    html_lower = html.lower()
+    open_tag = "<ix:continuation"
+    close_tag = "</ix:continuation"
+
+    pos = 0
+    while True:
+      start = html_lower.find(open_tag, pos)
+      if start == -1:
+        break
+
+      tag_end = html.find(">", start)
+      if tag_end == -1:
+        break
+
+      attrs = html[start:tag_end]
+      content_start = tag_end + 1
+
+      id_match = re.search(r'id="([^"]+)"', attrs)
+      if not id_match:
+        pos = content_start
+        continue
+
+      cont_id = id_match.group(1)
+
+      # Find matching close tag, accounting for nesting
+      depth = 1
+      search_pos = content_start
+      found = False
+      while depth > 0:
+        next_open = html_lower.find(open_tag, search_pos)
+        next_close = html_lower.find(close_tag, search_pos)
+
+        if next_close == -1:
+          break
+
+        if next_open != -1 and next_open < next_close:
+          depth += 1
+          search_pos = next_open + len(open_tag)
+        else:
+          depth -= 1
+          if depth == 0:
+            continuations[cont_id] = html[content_start:next_close]
+            close_end = html.find(">", next_close)
+            pos = close_end + 1 if close_end != -1 else next_close + 1
+            found = True
+            break
+          else:
+            search_pos = next_close + len(close_tag)
+
+      if not found:
+        pos = content_start
+
     return continuations
 
   def _resolve_continuation_chain(
