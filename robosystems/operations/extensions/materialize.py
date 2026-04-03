@@ -684,14 +684,11 @@ def _staging_sql(graph_id: str, entity_id: str, connstr: str) -> dict[str, str]:
   tables["STRUCTURE_HAS_FACT_SET"] = f"""
     CREATE OR REPLACE TABLE STRUCTURE_HAS_FACT_SET AS
     SELECT DISTINCT
-      -- Derive structure_id from fact_set_id pattern: 'factset_{{structure_id}}_{{report_id}}'
-      -- For now, join through report_facts to get structure mapping
-      rf.fact_set_id                  AS dst,
-      s.id                            AS src
-    FROM postgres_scan('{c}', '{s}', 'facts') rf
-    JOIN postgres_scan('{c}', '{s}', 'structures') s
-      ON rf.fact_set_id LIKE '%' || s.id || '%'
-    WHERE rf.fact_set_id IS NOT NULL
+      structure_id                    AS src,
+      fact_set_id                     AS dst
+    FROM postgres_scan('{c}', '{s}', 'facts')
+    WHERE fact_set_id IS NOT NULL
+      AND structure_id IS NOT NULL
   """
 
   tables["FACT_SET_CONTAINS_FACT"] = f"""

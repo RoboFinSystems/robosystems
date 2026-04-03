@@ -115,21 +115,21 @@ class TenantOps:
 
   def add_check(self, table: str, name: str, expr: str) -> None:
     """Add a CHECK constraint (no IF NOT EXISTS in PostgreSQL, so drop first)."""
-    self.drop_check(table, name)
+    self.drop_constraint(table, name)
     self.conn.execute(
       text(f"ALTER TABLE {self._q(table)} ADD CONSTRAINT {name} CHECK ({expr})")
     )
 
-  def drop_check(self, table: str, name: str) -> None:
-    """Drop a constraint if it exists."""
+  def drop_constraint(self, table: str, name: str) -> None:
+    """Drop any named constraint (CHECK, UNIQUE, FK) if it exists."""
     self.conn.execute(
       text(f"ALTER TABLE {self._q(table)} DROP CONSTRAINT IF EXISTS {name}")
     )
 
   def add_unique(self, table: str, name: str, columns: list[str]) -> None:
-    """Add a UNIQUE constraint."""
+    """Add a UNIQUE constraint (drops existing constraint with same name first)."""
     cols = ", ".join(columns)
-    self.drop_check(table, name)  # reuse drop — works for any constraint
+    self.drop_constraint(table, name)
     self.conn.execute(
       text(f"ALTER TABLE {self._q(table)} ADD CONSTRAINT {name} UNIQUE ({cols})")
     )
@@ -144,7 +144,8 @@ class TenantOps:
     *,
     on_delete: str | None = None,
   ) -> None:
-    """Add a foreign key constraint."""
+    """Add a foreign key constraint (drops existing constraint with same name first)."""
+    self.drop_constraint(table, name)
     cols = ", ".join(columns)
     refs = ", ".join(ref_columns)
     sql = (

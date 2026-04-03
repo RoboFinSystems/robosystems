@@ -26,6 +26,7 @@ class Fact(ExtensionsBase):
     Index("idx_facts_element", "element_id"),
     Index("idx_facts_period", "period_start", "period_end"),
     Index("idx_facts_fact_set", "fact_set_id"),
+    Index("idx_facts_structure", "structure_id"),
     CheckConstraint(
       "report_id IS NOT NULL OR fact_set_id IS NOT NULL",
       name="check_fact_has_parent",
@@ -43,7 +44,8 @@ class Fact(ExtensionsBase):
   period_type = Column(String, nullable=False)  # duration or instant
   unit = Column(String, nullable=False, default="USD")
   entity_id = Column(String, nullable=False)
-  fact_set_id = Column(String, nullable=True)  # structure's fact set grouping
+  structure_id = Column(String, nullable=True)  # structure this fact belongs to
+  fact_set_id = Column(String, nullable=True)  # fact set grouping within structure
   created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(UTC))
 
   def __repr__(self) -> str:
