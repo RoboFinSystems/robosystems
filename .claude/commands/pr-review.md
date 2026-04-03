@@ -15,21 +15,23 @@ The user may provide a PR URL, number, or nothing:
 Run these `gh` commands to collect all context:
 
 ```bash
-# PR metadata: title, body, author, state, labels, reviewers, checks, mergeable status
-gh pr view <NUMBER> --json title,body,author,state,labels,reviewers,statusCheckRollup,mergeStateStatus,headRefName,baseRefName,additions,deletions,changedFiles,createdAt,updatedAt
+# PR metadata — use only valid fields
+gh pr view <NUMBER> --json title,body,author,state,labels,reviews,reviewRequests,statusCheckRollup,mergeStateStatus,headRefName,baseRefName,additions,deletions,changedFiles,createdAt,updatedAt
 
 # PR diff (the actual code changes)
 gh pr diff <NUMBER>
 
-# All review comments (inline code review comments from Claude, humans, etc.)
-gh api repos/{owner}/{repo}/pulls/<NUMBER>/comments --paginate
+# Inline review comments (gh api needs owner/repo — use gh repo view to get it)
+gh api repos/$(gh repo view --json nameWithOwner -q .nameWithOwner)/pulls/<NUMBER>/comments --paginate
 
-# Issue comments (top-level PR conversation comments — code quality bots, security scanners, general discussion)
-gh api repos/{owner}/{repo}/issues/<NUMBER>/comments --paginate
-
-# Check runs (CI status, security scanners, code quality tools)
-gh api repos/{owner}/{repo}/commits/$(gh pr view <NUMBER> --json headRefOid -q .headRefOid)/check-runs --paginate
+# Top-level PR conversation comments
+gh api repos/$(gh repo view --json nameWithOwner -q .nameWithOwner)/issues/<NUMBER>/comments --paginate
 ```
+
+**Important `gh pr view --json` field reference** (common mistakes to avoid):
+- Use `reviews` not `reviewers` (reviewers is not a valid field)
+- Use `reviewRequests` for pending review requests
+- Use `headRefOid` for the HEAD commit SHA
 
 ### 3. Categorize Review Feedback
 
