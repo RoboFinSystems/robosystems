@@ -77,24 +77,6 @@ class TestDocumentCreate:
 
 
 @pytest.mark.unit
-class TestDocumentGetById:
-  def test_returns_document(self):
-    session = MagicMock()
-    mock_doc = MagicMock(spec=Document)
-    session.query.return_value.filter.return_value.first.return_value = mock_doc
-
-    result = Document.get_by_id("doc_123", session)
-    assert result is mock_doc
-
-  def test_returns_none_when_not_found(self):
-    session = MagicMock()
-    session.query.return_value.filter.return_value.first.return_value = None
-
-    result = Document.get_by_id("doc_missing", session)
-    assert result is None
-
-
-@pytest.mark.unit
 class TestDocumentGetByIdAndGraph:
   def test_returns_document_with_graph_match(self):
     session = MagicMock()

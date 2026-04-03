@@ -57,7 +57,6 @@ class Document(Model):
   updated_at = Column(
     DateTime,
     default=lambda: datetime.now(UTC),
-    onupdate=lambda: datetime.now(UTC),
     nullable=False,
   )
 
@@ -100,11 +99,6 @@ class Document(Model):
       session.rollback()
       raise
     return doc
-
-  @classmethod
-  def get_by_id(cls, document_id: str, session: Session) -> Optional["Document"]:
-    """Get document by ID."""
-    return session.query(cls).filter(cls.id == document_id).first()
 
   @classmethod
   def get_by_id_and_graph(

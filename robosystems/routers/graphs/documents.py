@@ -21,6 +21,7 @@ from robosystems.models.api.search import (
   DocumentUploadResponse,
 )
 from robosystems.models.core import User
+from robosystems.models.core.document import Document
 from robosystems.operations.documents import DocumentService
 
 logger = logging.getLogger(__name__)
@@ -41,11 +42,10 @@ def _block_shared_repository(graph_id: str) -> None:
     )
 
 
-def _resolve_tier(graph_id: str) -> str:
-  """Resolve the subscription tier for a graph."""
+def _resolve_tier(graph_id: str, session) -> str:
+  """Resolve the subscription tier for a graph using an existing session."""
   from robosystems.models.core.graph import Graph
 
-  session = SessionFactory()
   try:
     graph = Graph.get_by_id(graph_id, session)
     if graph is None or graph.graph_tier is None:
@@ -56,11 +56,9 @@ def _resolve_tier(graph_id: str) -> str:
   except Exception as e:
     logger.error(f"Tier lookup failed for {graph_id}: {e}")
     raise HTTPException(500, "Unable to determine subscription tier")
-  finally:
-    session.close()
 
 
-def _document_to_list_item(doc) -> DocumentListItem:
+def _document_to_list_item(doc: Document) -> DocumentListItem:
   """Convert a Document model to a DocumentListItem."""
   return DocumentListItem(
     id=doc.id,
@@ -74,7 +72,7 @@ def _document_to_list_item(doc) -> DocumentListItem:
   )
 
 
-def _document_to_detail(doc) -> DocumentDetailResponse:
+def _document_to_detail(doc: Document) -> DocumentDetailResponse:
   """Convert a Document model to a DocumentDetailResponse."""
   return DocumentDetailResponse(
     id=doc.id,
@@ -141,9 +139,9 @@ async def upload_document(
 ) -> DocumentUploadResponse:
   """Upload a markdown document. Stored in PostgreSQL, synced to OpenSearch."""
   _block_shared_repository(graph_id)
-  tier = _resolve_tier(graph_id)
   session = SessionFactory()
   try:
+    tier = _resolve_tier(graph_id, session)
     service = DocumentService(session)
     _doc, response = service.create_document(
       graph_id=graph_id,
@@ -169,9 +167,9 @@ async def upload_documents_bulk(
 ) -> BulkDocumentUploadResponse:
   """Upload multiple markdown documents (max 50)."""
   _block_shared_repository(graph_id)
-  tier = _resolve_tier(graph_id)
   session = SessionFactory()
   try:
+    tier = _resolve_tier(graph_id, session)
     service = DocumentService(session)
     results: list[DocumentUploadResponse] = []
     errors: list[dict] = []
@@ -226,9 +224,13 @@ async def update_document(
       **kwargs,
     )
     return response
+  except KeyError as e:
+    raise HTTPException(status_code=404, detail=str(e))
   except ValueError as e:
-    status = 404 if "not found" in str(e).lower() else 422
-    raise HTTPException(status_code=status, detail=str(e))
+    raise HTTPException(
+      status_code=http_status.HTTP_422_UNPROCESSABLE_ENTITY,
+      detail=str(e),
+    )
   finally:
     session.close()
 

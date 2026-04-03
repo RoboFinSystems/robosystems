@@ -107,7 +107,7 @@ class TestCreateDocument:
     )
 
     with patch.object(Document, "get_by_id_and_graph", return_value=existing_doc):
-      result_doc, _response = service.create_document("kg_test", "usr_1", request)
+      _doc, _ = service.create_document("kg_test", "usr_1", request)
 
     # Should NOT call create since it upserts
     mock_create.assert_not_called()
@@ -194,7 +194,7 @@ class TestUpdateDocument:
     session = MagicMock()
     service = DocumentService(session)
 
-    with pytest.raises(ValueError, match="not found"):
+    with pytest.raises(KeyError, match="not found"):
       service.update_document("kg_test", "doc_missing", title="New")
 
 

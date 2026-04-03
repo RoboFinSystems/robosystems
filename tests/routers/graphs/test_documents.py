@@ -21,6 +21,7 @@ from robosystems.routers.graphs.documents import (
   list_documents,
   update_document,
   upload_document,
+  upload_documents_bulk,
 )
 
 MODULE = "robosystems.routers.graphs.documents"
@@ -205,6 +206,73 @@ class TestUploadDocument:
 
 
 @pytest.mark.unit
+class TestUploadDocumentsBulk:
+  @pytest.mark.asyncio
+  @patch(f"{MODULE}._resolve_tier", return_value="ladybug-standard")
+  @patch(f"{MODULE}.SessionFactory")
+  @patch(f"{MODULE}._block_shared_repository")
+  async def test_uploads_multiple_documents(self, mock_block, mock_sf, mock_tier):
+    session = MagicMock()
+    mock_sf.return_value = session
+    doc = _mock_document()
+    response = _mock_upload_response()
+
+    with patch(f"{MODULE}.DocumentService") as MockService:
+      MockService.return_value.create_document.return_value = (doc, response)
+
+      from robosystems.models.api.search import BulkDocumentUploadRequest
+
+      result = await upload_documents_bulk(
+        graph_id="kg_test",
+        request=BulkDocumentUploadRequest(
+          documents=[
+            DocumentUploadRequest(title="Doc 1", content="content 1"),
+            DocumentUploadRequest(title="Doc 2", content="content 2"),
+          ]
+        ),
+        current_user=_mock_user(),
+      )
+
+    assert result.total_documents == 2
+    assert result.total_sections_indexed == 4
+    assert result.errors is None
+    session.close.assert_called_once()
+
+  @pytest.mark.asyncio
+  @patch(f"{MODULE}._resolve_tier", return_value="ladybug-standard")
+  @patch(f"{MODULE}.SessionFactory")
+  @patch(f"{MODULE}._block_shared_repository")
+  async def test_returns_partial_errors(self, mock_block, mock_sf, mock_tier):
+    session = MagicMock()
+    mock_sf.return_value = session
+    doc = _mock_document()
+    response = _mock_upload_response()
+
+    with patch(f"{MODULE}.DocumentService") as MockService:
+      MockService.return_value.create_document.side_effect = [
+        (doc, response),
+        ValueError("limit reached"),
+      ]
+
+      from robosystems.models.api.search import BulkDocumentUploadRequest
+
+      result = await upload_documents_bulk(
+        graph_id="kg_test",
+        request=BulkDocumentUploadRequest(
+          documents=[
+            DocumentUploadRequest(title="Doc 1", content="content 1"),
+            DocumentUploadRequest(title="Doc 2", content="content 2"),
+          ]
+        ),
+        current_user=_mock_user(),
+      )
+
+    assert result.total_documents == 1
+    assert len(result.errors) == 1
+    assert result.errors[0]["index"] == 1
+
+
+@pytest.mark.unit
 class TestUpdateDocument:
   @pytest.mark.asyncio
   @patch(f"{MODULE}.SessionFactory")
@@ -238,7 +306,7 @@ class TestUpdateDocument:
     mock_sf.return_value = session
 
     with patch(f"{MODULE}.DocumentService") as MockService:
-      MockService.return_value.update_document.side_effect = ValueError(
+      MockService.return_value.update_document.side_effect = KeyError(
         "Document not found"
       )
 

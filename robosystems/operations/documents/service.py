@@ -120,7 +120,7 @@ class DocumentService:
     """
     doc = Document.get_by_id_and_graph(document_id, graph_id, self.session)
     if doc is None:
-      raise ValueError("Document not found")
+      raise KeyError(f"Document {document_id} not found in graph {graph_id}")
 
     doc.update(
       self.session,
