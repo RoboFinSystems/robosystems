@@ -107,6 +107,71 @@ def _extract_elements_from_block(html_block: str) -> list[str]:
   return sorted(elements)
 
 
+def _find_nested_blocks(
+  html: str, open_tag: str, close_tag: str
+) -> list[tuple[str, str]]:
+  """Find matching open/close tag pairs with nesting-aware matching.
+
+  Uses str.find() instead of regex (.*?) to avoid catastrophic memory
+  usage on large files (the old regex approach caused 7GB+ allocation
+  on 5MB files).
+
+  Args:
+      html: Raw HTML string to search
+      open_tag: Lowercase opening tag prefix (e.g., "<ix:nonnumeric")
+      close_tag: Lowercase closing tag prefix (e.g., "</ix:nonnumeric")
+
+  Returns:
+      List of (attrs_str, inner_html) for each matched block. attrs_str
+      contains the tag attributes (everything between the tag name and ">").
+  """
+  results: list[tuple[str, str]] = []
+  html_lower = html.lower()
+
+  pos = 0
+  while True:
+    start = html_lower.find(open_tag, pos)
+    if start == -1:
+      break
+
+    tag_end = html.find(">", start)
+    if tag_end == -1:
+      break
+
+    attrs = html[start + len(open_tag) : tag_end]
+    content_start = tag_end + 1
+
+    # Find matching close tag, accounting for nesting
+    depth = 1
+    search_pos = content_start
+    found = False
+    while depth > 0:
+      next_open = html_lower.find(open_tag, search_pos)
+      next_close = html_lower.find(close_tag, search_pos)
+
+      if next_close == -1:
+        break
+
+      if next_open != -1 and next_open < next_close:
+        depth += 1
+        search_pos = next_open + len(open_tag)
+      else:
+        depth -= 1
+        if depth == 0:
+          results.append((attrs, html[content_start:next_close]))
+          close_end = html.find(">", next_close)
+          pos = close_end + 1 if close_end != -1 else next_close + 1
+          found = True
+          break
+        else:
+          search_pos = next_close + len(close_tag)
+
+    if not found:
+      pos = content_start
+
+  return results
+
+
 class iXBRLParser:
   """Parse iXBRL HTML to extract disclosure sections with XBRL element metadata."""
 
@@ -137,7 +202,16 @@ class iXBRLParser:
     sections: list[iXBRLSection] = []
     seen_ids: set[str] = set()
 
-    for element_name, attrs, inline_content in self._find_textblocks(html):
+    for attrs, inner_html in _find_nested_blocks(
+      html, "<ix:nonnumeric", "</ix:nonnumeric"
+    ):
+      # Only process TextBlock elements
+      name_match = re.search(r'name="([^"]*TextBlock[^"]*)"', attrs, re.IGNORECASE)
+      if not name_match:
+        continue
+
+      element_name = name_match.group(1)
+
       # Skip DEI and ECD metadata text blocks
       if element_name.startswith(("dei:", "ecd:")):
         continue
@@ -148,13 +222,13 @@ class iXBRLParser:
       seen_ids.add(element_name)
 
       # Resolve continuation chain
-      full_html = inline_content
+      full_html = inner_html
       continued_at = re.search(r'continuedAt="([^"]+)"', attrs)
       if continued_at:
         chain_content = self._resolve_continuation_chain(
           continued_at.group(1), continuations
         )
-        full_html = inline_content + chain_content
+        full_html = inner_html + chain_content
 
       # Extract XBRL elements from the block
       xbrl_elements = _extract_elements_from_block(full_html)
@@ -189,131 +263,15 @@ class iXBRLParser:
     )
     return sections
 
-  def _find_textblocks(self, html: str) -> list[tuple[str, str, str]]:
-    """Find ix:nonNumeric TextBlock elements using string-find matching.
-
-    Uses str.find() with nesting-aware close-tag matching instead of
-    regex (.*?) which causes catastrophic backtracking on large files.
-
-    Returns list of (element_name, attrs_str, inner_html).
-    """
-    results: list[tuple[str, str, str]] = []
-    html_lower = html.lower()
-    open_tag = "<ix:nonnumeric"
-    close_tag = "</ix:nonnumeric"
-
-    pos = 0
-    while True:
-      start = html_lower.find(open_tag, pos)
-      if start == -1:
-        break
-
-      tag_end = html.find(">", start)
-      if tag_end == -1:
-        break
-
-      attrs = html[start + len(open_tag) : tag_end]
-      content_start = tag_end + 1
-
-      # Only care about TextBlock elements
-      if "textblock" not in attrs.lower():
-        pos = content_start
-        continue
-
-      # Find matching close tag, accounting for nesting
-      depth = 1
-      search_pos = content_start
-      found = False
-      while depth > 0:
-        next_open = html_lower.find(open_tag, search_pos)
-        next_close = html_lower.find(close_tag, search_pos)
-
-        if next_close == -1:
-          break
-
-        if next_open != -1 and next_open < next_close:
-          depth += 1
-          search_pos = next_open + len(open_tag)
-        else:
-          depth -= 1
-          if depth == 0:
-            inner = html[content_start:next_close]
-            name_match = re.search(
-              r'name="([^"]*TextBlock[^"]*)"', attrs, re.IGNORECASE
-            )
-            if name_match:
-              results.append((name_match.group(1), attrs, inner))
-            close_end = html.find(">", next_close)
-            pos = close_end + 1 if close_end != -1 else next_close + 1
-            found = True
-            break
-          else:
-            search_pos = next_close + len(close_tag)
-
-      if not found:
-        pos = content_start
-
-    return results
-
   def _build_continuation_map(self, html: str) -> dict[str, str]:
-    """Build a lookup of continuation id → HTML content.
-
-    Uses string-find matching instead of regex (.*?) to avoid
-    catastrophic memory usage on large filings.
-    """
+    """Build a lookup of continuation id → HTML content."""
     continuations: dict[str, str] = {}
-    html_lower = html.lower()
-    open_tag = "<ix:continuation"
-    close_tag = "</ix:continuation"
-
-    pos = 0
-    while True:
-      start = html_lower.find(open_tag, pos)
-      if start == -1:
-        break
-
-      tag_end = html.find(">", start)
-      if tag_end == -1:
-        break
-
-      attrs = html[start:tag_end]
-      content_start = tag_end + 1
-
+    for attrs, inner_html in _find_nested_blocks(
+      html, "<ix:continuation", "</ix:continuation"
+    ):
       id_match = re.search(r'id="([^"]+)"', attrs)
-      if not id_match:
-        pos = content_start
-        continue
-
-      cont_id = id_match.group(1)
-
-      # Find matching close tag, accounting for nesting
-      depth = 1
-      search_pos = content_start
-      found = False
-      while depth > 0:
-        next_open = html_lower.find(open_tag, search_pos)
-        next_close = html_lower.find(close_tag, search_pos)
-
-        if next_close == -1:
-          break
-
-        if next_open != -1 and next_open < next_close:
-          depth += 1
-          search_pos = next_open + len(open_tag)
-        else:
-          depth -= 1
-          if depth == 0:
-            continuations[cont_id] = html[content_start:next_close]
-            close_end = html.find(">", next_close)
-            pos = close_end + 1 if close_end != -1 else next_close + 1
-            found = True
-            break
-          else:
-            search_pos = next_close + len(close_tag)
-
-      if not found:
-        pos = content_start
-
+      if id_match:
+        continuations[id_match.group(1)] = inner_html
     return continuations
 
   def _resolve_continuation_chain(

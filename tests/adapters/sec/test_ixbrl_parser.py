@@ -80,6 +80,20 @@ class TestStripHtml:
     result = _strip_html("<p>A&amp;B&nbsp;C</p>")
     assert "A&B" in result
 
+  def test_converts_tables_to_markdown(self):
+    html = (
+      "<table>"
+      "<tr><th>Period</th><th>Revenue</th></tr>"
+      "<tr><td>Q1</td><td>1000</td></tr>"
+      "<tr><td>Q2</td><td>2000</td></tr>"
+      "</table>"
+    )
+    result = _strip_html(html)
+    assert "Period" in result
+    assert "Revenue" in result
+    assert "1000" in result
+    assert "|" in result
+
 
 @pytest.mark.unit
 class TestExtractElementsFromBlock:
