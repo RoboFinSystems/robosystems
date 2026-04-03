@@ -520,6 +520,7 @@ def setup_database(test_db):
   # Also clean any committed data by truncating tables
   from robosystems.models.core import (
     ConnectionCredentials,
+    Document,
     Graph,
     GraphCredits,
     GraphUser,
@@ -532,6 +533,7 @@ def setup_database(test_db):
 
   try:
     # Delete in reverse dependency order to avoid foreign key constraints
+    test_db.query(Document).delete()
     test_db.query(ConnectionCredentials).delete()
     test_db.query(Connection).delete()
     test_db.query(UserAPIKey).delete()

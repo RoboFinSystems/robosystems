@@ -114,6 +114,7 @@ class DocumentUploadRequest(BaseModel):
 class DocumentUploadResponse(BaseModel):
   """Response from document upload."""
 
+  id: str
   document_id: str
   sections_indexed: int
   total_content_length: int
@@ -140,12 +141,14 @@ class BulkDocumentUploadResponse(BaseModel):
 class DocumentListItem(BaseModel):
   """A document in the document list."""
 
+  id: str
   document_title: str
   section_count: int
   source_type: str
   folder: str | None = None
   tags: list[str] | None = None
-  last_indexed: str | None = None
+  created_at: str
+  updated_at: str
 
 
 class DocumentListResponse(BaseModel):
@@ -154,3 +157,30 @@ class DocumentListResponse(BaseModel):
   total: int
   documents: list[DocumentListItem]
   graph_id: str
+
+
+class DocumentDetailResponse(BaseModel):
+  """Full document detail with raw content."""
+
+  id: str
+  graph_id: str
+  user_id: str
+  title: str
+  content: str
+  tags: list[str] | None = None
+  folder: str | None = None
+  external_id: str | None = None
+  source_type: str
+  source_provider: str | None = None
+  sections_indexed: int
+  created_at: str
+  updated_at: str
+
+
+class DocumentUpdateRequest(BaseModel):
+  """Update a document's metadata and/or content."""
+
+  title: str | None = Field(None, max_length=500)
+  content: str | None = Field(None, max_length=500_000)
+  tags: list[str] | None = None
+  folder: str | None = None

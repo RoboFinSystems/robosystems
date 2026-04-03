@@ -243,6 +243,7 @@ class SearchService:
     self.client.bulk_index(os_docs)
 
     return DocumentUploadResponse(
+      id="",
       document_id=base_id,
       sections_indexed=len(sections),
       total_content_length=total_length,

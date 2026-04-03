@@ -20,6 +20,7 @@ from .billing import (
   SubscriptionStatus,
 )
 from .connection import Connection, ConnectionCredentials, ConnectionStatus
+from .document import Document
 from .graph import (
   BackupStatus,
   BackupType,
@@ -64,6 +65,7 @@ __all__ = [
   "ConnectionCredentials",
   "ConnectionStatus",
   "CreditTransactionType",
+  "Document",
   "Graph",
   "GraphBackup",
   "GraphCreditTransaction",
