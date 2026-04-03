@@ -22,6 +22,8 @@ import re
 from dataclasses import dataclass
 from html.parser import HTMLParser
 
+from robosystems.adapters.sec.html_table import html_tables_to_markdown
+
 
 @dataclass
 class ExtractedSection:
@@ -110,7 +112,13 @@ class _HTMLTextExtractor(HTMLParser):
 
 
 def _html_to_text(html_content: str) -> str:
-  """Convert HTML to clean text using fast parser."""
+  """Convert HTML to clean text using fast parser.
+
+  Tables are converted to markdown pipe tables before tag stripping,
+  preserving column structure for financial data.
+  """
+  if "<table" in html_content or "<TABLE" in html_content:
+    html_content = html_tables_to_markdown(html_content)
   extractor = _HTMLTextExtractor()
   extractor.feed(html_content)
   return extractor.get_text()
