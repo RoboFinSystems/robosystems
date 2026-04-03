@@ -588,6 +588,7 @@ def upgrade() -> None:
     sa.Column("period_type", sa.String(), nullable=False),
     sa.Column("unit", sa.String(), nullable=False),
     sa.Column("entity_id", sa.String(), nullable=False),
+    sa.Column("structure_id", sa.String(), nullable=True),
     sa.Column("fact_set_id", sa.String(), nullable=True),
     sa.Column("created_at", sa.DateTime(), nullable=False),
     sa.CheckConstraint(
@@ -600,6 +601,7 @@ def upgrade() -> None:
   op.create_index("idx_facts_element", "facts", ["element_id"])
   op.create_index("idx_facts_period", "facts", ["period_start", "period_end"])
   op.create_index("idx_facts_fact_set", "facts", ["fact_set_id"])
+  op.create_index("idx_facts_structure", "facts", ["structure_id"])
 
   # -- Report Shares --
   op.create_table(
@@ -792,11 +794,14 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+  # WARNING: This downgrade DESTROYS all tenant data irrecoverably.
+  # Every kg* schema is dropped with CASCADE. Only run this on dev databases.
+  # For staging/prod, prefer a forward migration to undo changes.
   from migrations.extensions.helpers import for_each_tenant_schema
 
   conn = op.get_bind()
 
-  # Drop all tenant schemas
+  # Drop all tenant schemas — CASCADE removes all tables and data within each schema
   for_each_tenant_schema(
     conn,
     lambda conn, schema: conn.execute(
