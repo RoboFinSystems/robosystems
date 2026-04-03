@@ -27,6 +27,7 @@ import re
 import sys
 import time
 import zipfile
+from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.request import Request, urlopen
@@ -40,7 +41,11 @@ SEC_TICKERS_URL = "https://www.sec.gov/files/company_tickers.json"
 
 
 def _resolve_bucket() -> str:
-  """Resolve the shared-raw S3 bucket name from env or AWS account."""
+  """Resolve the shared-raw S3 bucket name from env or AWS account.
+
+  Uses os.environ directly (not robosystems.config.env) because this script
+  runs standalone outside Docker where the config module's env vars aren't set.
+  """
   bucket = os.environ.get("SHARED_RAW_BUCKET")
   if bucket:
     return bucket
@@ -152,24 +157,8 @@ class FilingResult:
   html_size: int = 0
   sections_found: list[str] = field(default_factory=list)
   section_word_counts: dict[str, int] = field(default_factory=dict)
-  section_char_counts: dict[str, int] = field(default_factory=dict)
-  section_previews: dict[str, str] = field(default_factory=dict)
   error: str | None = None
   elapsed_ms: int = 0
-
-  def to_dict(self) -> dict:
-    return {
-      "ticker": self.ticker,
-      "cik": self.cik,
-      "accession": self.accession,
-      "form_type": self.form_type,
-      "html_size": self.html_size,
-      "sections_found": self.sections_found,
-      "section_word_counts": self.section_word_counts,
-      "section_char_counts": self.section_char_counts,
-      "section_previews": self.section_previews,
-      "error": self.error,
-    }
 
 
 def _get_s3_client():
@@ -198,7 +187,6 @@ def _extract_html_from_zip(zip_bytes: bytes) -> tuple[str | None, str]:
           "_def.",
           "_lab.",
           "_pre.",
-          ".xsd",
         ]
       ):
         continue
@@ -399,8 +387,6 @@ def run(args):
 
   # Section coverage stats
   if with_sections:
-    from collections import Counter
-
     section_counts = Counter()
     for r in with_sections:
       for sid in r.sections_found:

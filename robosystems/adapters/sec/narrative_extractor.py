@@ -190,7 +190,7 @@ def _find_section_end(
       continue
     if key != item_upper and key != "PART":
       return pos
-    if key == "PART" and pos > last_same + 100:
+    if key == "PART":
       # Check if there's another same-item boundary after this PART
       has_more_same = any(p > pos and k == item_upper for p, k in boundaries)
       if not has_more_same:
@@ -205,7 +205,9 @@ def _content_length_to_next_boundary(
 
   Used by _find_item_sections to score candidates by content length.
   """
-  end = _find_section_end(start, item_num, boundaries, start)
+  # boundaries[-1] is always (len(text), "END") from _build_boundary_list
+  text_len = boundaries[-1][0] if boundaries else start
+  end = _find_section_end(start, item_num, boundaries, text_len)
   return end - start if end > start else 0
 
 
@@ -359,7 +361,8 @@ class NarrativeExtractor:
     sections = _find_item_sections(text, target_items, boundaries)
 
     # Fallback: if Item-number detection found nothing, try name-based detection.
-    # Only for 10-K-style filings (INTC, Duke Energy, etc. omit "Item X" prefixes).
+    # Only for 10-K/10-KSB (INTC, Duke Energy, etc. omit "Item X" prefixes).
+    # Excluded: 20-F/40-F use different item numbering and section names.
     use_name_fallback = False
     if not sections and form_upper in ("10-K", "10-KSB"):
       sections = _find_sections_by_name(text, boundaries)
