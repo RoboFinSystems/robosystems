@@ -157,6 +157,9 @@ class FilingResult:
   html_size: int = 0
   sections_found: list[str] = field(default_factory=list)
   section_word_counts: dict[str, int] = field(default_factory=dict)
+  table_counts: dict[str, int] = field(
+    default_factory=dict
+  )  # section_id → markdown table count
   error: str | None = None
   elapsed_ms: int = 0
 
@@ -302,6 +305,11 @@ def test_filing(
     sections = extractor.extract(html, form_type)
     result.sections_found = [s.section_id for s in sections]
     result.section_word_counts = {s.section_id: s.word_count for s in sections}
+    # Count markdown tables (| ... | rows following a | --- | separator)
+    for s in sections:
+      table_count = len(re.findall(r"^\| ---", s.content, re.MULTILINE))
+      if table_count:
+        result.table_counts[s.section_id] = table_count
 
   except Exception as e:
     result.error = str(e)
@@ -355,7 +363,9 @@ def run(args):
         section_summary = ", ".join(
           f"{sid}({wc}w)" for sid, wc in result.section_word_counts.items()
         )
-        status = f"{len(result.sections_found)} sections: {section_summary}"
+        total_tables = sum(result.table_counts.values())
+        table_info = f" [{total_tables} tables]" if total_tables else ""
+        status = f"{len(result.sections_found)} sections{table_info}: {section_summary}"
 
       print(
         f"  {ticker:6s} {result.accession:30s} {result.form_type:5s} "
@@ -397,6 +407,15 @@ def run(args):
     print(f"\nSection coverage ({total_10k} 10-Ks, {total_10q} 10-Qs):")
     for sid, count in section_counts.most_common():
       print(f"  {sid:12s}: {count:3d} ({count / len(with_sections) * 100:.0f}%)")
+
+  # Table conversion stats
+  if with_sections:
+    filings_with_tables = [r for r in with_sections if r.table_counts]
+    total_tables = sum(sum(r.table_counts.values()) for r in with_sections)
+    print(
+      f"\nTable conversion: {total_tables} markdown tables across "
+      f"{len(filings_with_tables)}/{len(with_sections)} filings"
+    )
 
   # Dump failures for debugging
   if args.dump_failures and (failures or no_sections):

@@ -139,7 +139,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 2g
+          memory: 4g
           cpus: "2"
         reservations:
           memory: 512m
@@ -290,7 +290,11 @@ services:
     volumes:
       - ./data/opensearch:/usr/share/opensearch/data
     healthcheck:
-      test: ["CMD-SHELL", "curl -sf http://localhost:9200/_cluster/health || exit 1"]
+      test:
+        [
+          "CMD-SHELL",
+          "curl -sf http://localhost:9200/_cluster/health || exit 1",
+        ]
       interval: 10s
       timeout: 5s
       retries: 5
