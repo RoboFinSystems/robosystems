@@ -129,6 +129,9 @@
       "Bash(aws ssm delete-parameter:*)",
       "Bash(aws ec2 terminate-instances:*)",
       "Bash(aws autoscaling update-auto-scaling-group:*)",
+      "Bash(aws s3 cp:*)",
+      "Bash(aws s3 mv:*)",
+      "Bash(aws s3 sync:*)",
       "Bash(just create-*)"
     ],
     "deny": [
@@ -170,10 +173,7 @@
       "Bash(aws cloudformation delete-stack:*)",
       "Bash(aws ecr create-repository:*)",
       "Bash(aws ecr delete-repository:*)",
-      "Bash(aws s3 cp:*)",
       "Bash(aws s3 rm:*)",
-      "Bash(aws s3 mv:*)",
-      "Bash(aws s3 sync:*)",
       "Bash(aws route53 change-resource-record-sets:*)",
       "Bash(aws ses:*)",
       "Bash(aws sesv2:*)",
