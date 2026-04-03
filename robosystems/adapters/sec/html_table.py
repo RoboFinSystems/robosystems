@@ -82,7 +82,6 @@ def html_tables_to_markdown(html: str) -> str:
     else:
       # Couldn't find closing tag — append rest as-is
       result.append(html[table_start:])
-      pos = len(html)
       break
 
   return "".join(result)
@@ -123,7 +122,7 @@ class _CellExtractor(HTMLParser):
         else:
           self.parts.append(chr(int(name)))
       except (ValueError, OverflowError):
-        pass
+        pass  # Skip invalid/out-of-range numeric character references
 
   def get_text(self) -> str:
     text = "".join(self.parts)
