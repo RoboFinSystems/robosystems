@@ -100,7 +100,7 @@ class TestMaterializationLock:
 
   def test_from_token(self):
     redis = MagicMock()
-    lock = MaterializationLock.from_token(redis, "kg123", "my-token-123")
+    lock = MaterializationLock.from_trusted_token(redis, "kg123", "my-token-123")
 
     assert lock.token == "my-token-123"
     assert lock.acquired is True

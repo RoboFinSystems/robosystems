@@ -209,6 +209,7 @@ class GraphClient(BaseGraphClient):
     params: dict[str, Any] | None = None,
     timeout: float | None = None,
     retries: int | None = None,
+    headers: dict[str, str] | None = None,
   ) -> httpx.Response:
     """
     Make HTTP request with optional retry logic.
@@ -221,6 +222,7 @@ class GraphClient(BaseGraphClient):
         timeout: Request timeout
         retries: Number of retries. None uses config default, 0 disables retries.
                  Use retries=0 for non-idempotent operations like materialization.
+        headers: Additional headers to include in the request.
 
     Returns:
         Response object
@@ -237,6 +239,8 @@ class GraphClient(BaseGraphClient):
       request_kwargs["params"] = params
     if timeout is not None:
       request_kwargs["timeout"] = timeout
+    if headers is not None:
+      request_kwargs["headers"] = headers
 
     async def make_request():
       # Debug log the request
@@ -1232,20 +1236,28 @@ class GraphClient(BaseGraphClient):
     if not await self.database_exists(graph_id):
       await self.create_database(graph_id, schema_type)
 
-  async def swap_database(self, graph_id: str) -> dict[str, Any]:
+  async def swap_database(
+    self, graph_id: str, lock_token: str | None = None
+  ) -> dict[str, Any]:
     """Promote a WIP database to active (blue-green swap).
 
     Requires that {graph_id}-wip.lbug exists on the Graph API node.
 
     Args:
         graph_id: Base graph ID (not the -wip variant).
+        lock_token: If the caller already holds the materialization lock,
+            pass the token so the swap endpoint doesn't re-acquire it.
 
     Returns:
         Swap result with status and message.
     """
+    headers: dict[str, str] = {}
+    if lock_token:
+      headers["X-Materialization-Lock-Token"] = lock_token
     response = await self._request(
       "POST",
       f"/databases/{graph_id}/swap",
+      headers=headers or None,
     )
     return response.json()
 

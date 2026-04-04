@@ -950,7 +950,7 @@ class LedgerMaterializer:
       # Step 5: Swap WIP → active (milliseconds of downtime)
       if result.status != "error":
         logger.info(f"Swapping WIP {wip_id} → active {graph_id}")
-        await client.swap_database(graph_id)
+        await client.swap_database(graph_id, lock_token=lock.token if lock else None)
         logger.info(f"Blue-green swap complete for {graph_id}")
       else:
         # Materialization had errors — abandon WIP, active is untouched

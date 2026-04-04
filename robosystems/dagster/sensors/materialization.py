@@ -67,19 +67,18 @@ def stale_graph_materialization_sensor(context: SensorEvaluationContext):
         in_progress = {}
 
     # Expire stale cursor entries
+    from dateutil import parser as date_parser
+
     active_in_progress: dict[str, str] = {}
     for gid, submitted_at_str in in_progress.items():
       try:
-        from dateutil import parser as date_parser
-
         submitted_at = date_parser.isoparse(submitted_at_str)
         if (now - submitted_at).total_seconds() < _CURSOR_EXPIRY_SECONDS:
           active_in_progress[gid] = submitted_at_str
         else:
           logger.info(f"Cursor entry expired for {gid} (submitted {submitted_at_str})")
-      except Exception:
-        # Bad cursor entry — drop it
-        pass
+      except Exception as exc:
+        logger.debug(f"Dropping malformed cursor entry for {gid}: {exc}")
 
     stale_graphs = (
       db.query(Graph)

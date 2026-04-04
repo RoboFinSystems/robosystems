@@ -159,16 +159,18 @@ class MaterializationLock:
       return False
 
   @staticmethod
-  def from_token(
+  def from_trusted_token(
     redis_client: redis_async.Redis,
     graph_id: str,
     token: str,
     ttl_seconds: int = DEFAULT_LOCK_TTL_SECONDS,
   ) -> "MaterializationLock":
-    """Create a lock instance with an existing token (for passthrough).
+    """Create a lock instance that trusts the caller already holds the lock.
 
-    Used when the caller already holds the lock and passes the token
-    via X-Materialization-Lock-Token header.
+    WARNING: Does NOT verify the token against Valkey. The caller is trusted
+    to have acquired the lock themselves and is passing the token through
+    (e.g., via X-Materialization-Lock-Token header) so that downstream
+    endpoints don't re-acquire it. Only use for internal service calls.
     """
     lock = MaterializationLock(redis_client, graph_id, ttl_seconds)
     lock.token = token

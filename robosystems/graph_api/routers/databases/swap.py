@@ -62,7 +62,7 @@ async def swap_database(
 
     if x_materialization_lock_token:
       # Caller already holds the lock — verify by using their token
-      lock = MaterializationLock.from_token(
+      lock = MaterializationLock.from_trusted_token(
         redis_client, graph_id, x_materialization_lock_token
       )
     else:

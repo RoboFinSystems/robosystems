@@ -295,7 +295,7 @@ async def create_report(
       session.commit()
 
       # Mark graph stale (non-blocking — runs in thread to avoid blocking event loop)
-      asyncio.get_event_loop().run_in_executor(
+      asyncio.get_running_loop().run_in_executor(
         None, mark_graph_stale, graph_id, "report_generated"
       )
 
@@ -610,7 +610,7 @@ async def regenerate_report(
       session.commit()
 
       # Mark graph stale (non-blocking — runs in thread to avoid blocking event loop)
-      asyncio.get_event_loop().run_in_executor(
+      asyncio.get_running_loop().run_in_executor(
         None, mark_graph_stale, graph_id, "report_generated"
       )
 

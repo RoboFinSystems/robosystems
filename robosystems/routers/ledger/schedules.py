@@ -115,7 +115,7 @@ async def create_schedule(
       session.commit()
 
       # Mark graph stale (non-blocking — runs in thread to avoid blocking event loop)
-      asyncio.get_event_loop().run_in_executor(
+      asyncio.get_running_loop().run_in_executor(
         None, mark_graph_stale, graph_id, "schedule_created"
       )
 
@@ -293,7 +293,7 @@ async def create_closing_entry(
       session.commit()
 
       # Mark graph stale (non-blocking — runs in thread to avoid blocking event loop)
-      asyncio.get_event_loop().run_in_executor(
+      asyncio.get_running_loop().run_in_executor(
         None, mark_graph_stale, graph_id, "closing_entry_created"
       )
 
