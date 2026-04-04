@@ -1,6 +1,6 @@
 """Report CRUD, fact generation, and structure rendering endpoints."""
 
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Path
 from sqlalchemy import select, text
@@ -101,12 +101,18 @@ def _build_periods(
   Otherwise, build from period_start/period_end/comparative (legacy mode).
   """
   if periods_json:
-    return [
-      FactPeriodSpec(start=p["start"], end=p["end"], label=p["label"])
-      if isinstance(p, dict)
-      else FactPeriodSpec(start=p.start, end=p.end, label=p.label)
-      for p in periods_json
-    ]
+    result = []
+    for p in periods_json:
+      if isinstance(p, dict):
+        # JSONB returns dates as strings — parse them
+        start = (
+          date.fromisoformat(p["start"]) if isinstance(p["start"], str) else p["start"]
+        )
+        end = date.fromisoformat(p["end"]) if isinstance(p["end"], str) else p["end"]
+        result.append(FactPeriodSpec(start=start, end=end, label=p["label"]))
+      else:
+        result.append(FactPeriodSpec(start=p.start, end=p.end, label=p.label))
+    return result
 
   specs = [FactPeriodSpec(start=period_start, end=period_end, label="Current")]
   if comparative:
