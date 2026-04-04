@@ -77,7 +77,7 @@ class TestBuildRows:
     }
 
   def test_simple_hierarchy(self):
-    """Revenue parent with two children should sum correctly."""
+    """Revenue parent with two children — header has no value."""
     hierarchy = [
       _HierarchyNode(
         element_id="root",
@@ -111,18 +111,18 @@ class TestBuildRows:
     ]
 
     balances = self._make_balances({"rev_product": 300.0, "rev_service": 200.0})
-    rows = _build_rows(hierarchy, balances, {}, {})
+    rows = _build_rows(hierarchy, [balances], {})
 
     assert len(rows) == 3
-    # First row: section header (no value — totals come from calculation elements)
+    # First row: section header (no value)
     assert rows[0].is_subtotal is True
     assert rows[0].element_name == "Revenues"
-    assert rows[0].current_value == 0.0
+    assert rows[0].values == [0.0]
     # Children
     assert rows[1].element_name == "Product Revenue"
-    assert rows[1].current_value == 300.0
+    assert rows[1].values == [300.0]
     assert rows[2].element_name == "Service Revenue"
-    assert rows[2].current_value == 200.0
+    assert rows[2].values == [200.0]
 
   def test_nested_hierarchy(self):
     """Two-level nesting: root → abstract parent → leaves."""
@@ -177,22 +177,22 @@ class TestBuildRows:
         "sga", "us-gaap:SGA", "SG&A", "expense", "debit", 120000.0, 0.0, 120000.0
       ),
     }
-    rows = _build_rows(hierarchy, balances, {}, {})
+    rows = _build_rows(hierarchy, [balances], {})
 
     assert len(rows) == 4
     # Root expenses header (no value)
     assert rows[0].element_name == "Expenses"
-    assert rows[0].current_value == 0.0
+    assert rows[0].values == [0.0]
     assert rows[0].depth == 0
     # Operating expenses header (no value)
     assert rows[1].element_name == "Operating Expenses"
-    assert rows[1].current_value == 0.0
+    assert rows[1].values == [0.0]
     assert rows[1].depth == 1
     # Leaves
     assert rows[2].element_name == "R&D"
-    assert rows[2].current_value == 85000.0
+    assert rows[2].values == [85000.0]
     assert rows[3].element_name == "SG&A"
-    assert rows[3].current_value == 120000.0
+    assert rows[3].values == [120000.0]
 
   def test_empty_balances(self):
     """No mapped balances → all zeros."""
@@ -219,13 +219,13 @@ class TestBuildRows:
       )
     ]
 
-    rows = _build_rows(hierarchy, {}, {}, {})
+    rows = _build_rows(hierarchy, [{}], {})
     assert len(rows) == 2
-    assert rows[0].current_value == 0.0
-    assert rows[1].current_value == 0.0
+    assert rows[0].values == [0.0]
+    assert rows[1].values == [0.0]
 
-  def test_comparative_periods(self):
-    """Prior values should be populated when prior_balances provided."""
+  def test_multi_period(self):
+    """Multiple period columns should produce values list per row."""
     hierarchy = [
       _HierarchyNode(
         element_id="rev",
@@ -240,14 +240,13 @@ class TestBuildRows:
 
     current = self._make_balances({"rev": 500.0})
     prior = self._make_balances({"rev": 400.0})
-    rows = _build_rows(hierarchy, current, prior, {})
+    rows = _build_rows(hierarchy, [current, prior], {})
 
     assert len(rows) == 1
-    assert rows[0].current_value == 500.0
-    assert rows[0].prior_value == 400.0
+    assert rows[0].values == [500.0, 400.0]
 
-  def test_no_comparative(self):
-    """When no prior_balances, prior_value should be None."""
+  def test_single_period(self):
+    """Single period produces one-element values list."""
     hierarchy = [
       _HierarchyNode(
         element_id="rev",
@@ -261,10 +260,10 @@ class TestBuildRows:
     ]
 
     current = self._make_balances({"rev": 500.0})
-    rows = _build_rows(hierarchy, current, {}, {})
+    rows = _build_rows(hierarchy, [current], {})
 
     assert len(rows) == 1
-    assert rows[0].prior_value is None
+    assert rows[0].values == [500.0]
 
   def test_calculation_elements(self):
     """Computed elements resolve via calculation associations."""
@@ -319,14 +318,14 @@ class TestBuildRows:
       "gross_profit": [("revenue", 1.0), ("cogs", -1.0)],
     }
 
-    rows = _build_rows(hierarchy, current, {}, calculations)
+    rows = _build_rows(hierarchy, [current], calculations)
 
     assert len(rows) == 4
     assert rows[0].is_subtotal is True  # header
-    assert rows[1].current_value == 1000.0  # Revenue
-    assert rows[2].current_value == 400.0  # COGS
+    assert rows[1].values == [1000.0]  # Revenue
+    assert rows[2].values == [400.0]  # COGS
     assert rows[3].element_name == "Gross Profit"
-    assert rows[3].current_value == 600.0  # 1000 - 400
+    assert rows[3].values == [600.0]  # 1000 - 400
 
   def test_chained_calculations(self):
     """Calculations can reference other calculated elements."""
@@ -399,12 +398,68 @@ class TestBuildRows:
       "total": [("subtotal", 1.0), ("c", -1.0)],
     }
 
-    rows = _build_rows(hierarchy, current, {}, calculations)
+    rows = _build_rows(hierarchy, [current], calculations)
 
     subtotal_row = next(r for r in rows if r.element_id == "subtotal")
     total_row = next(r for r in rows if r.element_id == "total")
-    assert subtotal_row.current_value == 70.0  # 100 - 30
-    assert total_row.current_value == 60.0  # 70 - 10
+    assert subtotal_row.values == [70.0]  # 100 - 30
+    assert total_row.values == [60.0]  # 70 - 10
+
+  def test_calculation_multi_period(self):
+    """Calculations resolve correctly across multiple periods."""
+    hierarchy = [
+      _HierarchyNode(
+        element_id="root",
+        qname="sfac6:Root",
+        name="Root",
+        classification="revenue",
+        balance_type="credit",
+        is_abstract=True,
+        depth=0,
+        children=[
+          _HierarchyNode(
+            element_id="rev",
+            qname="rev",
+            name="Revenue",
+            classification="revenue",
+            balance_type="credit",
+            is_abstract=False,
+            depth=1,
+          ),
+          _HierarchyNode(
+            element_id="cogs",
+            qname="cogs",
+            name="COGS",
+            classification="expense",
+            balance_type="debit",
+            is_abstract=False,
+            depth=1,
+          ),
+          _HierarchyNode(
+            element_id="gp",
+            qname="gp",
+            name="Gross Profit",
+            classification="revenue",
+            balance_type="credit",
+            is_abstract=False,
+            depth=1,
+          ),
+        ],
+      )
+    ]
+
+    p1 = self._make_balances({"rev": 1000.0}, "credit")
+    p1["cogs"] = _Balance("cogs", "cogs", "COGS", "expense", "debit", 400.0, 0.0, 400.0)
+
+    p2 = self._make_balances({"rev": 800.0}, "credit")
+    p2["cogs"] = _Balance("cogs", "cogs", "COGS", "expense", "debit", 350.0, 0.0, 350.0)
+
+    calculations = {"gp": [("rev", 1.0), ("cogs", -1.0)]}
+
+    rows = _build_rows(hierarchy, [p1, p2], calculations)
+
+    gp_row = next(r for r in rows if r.element_id == "gp")
+    assert gp_row.values == [600.0, 450.0]  # 1000-400, 800-350
 
 
 class TestInferPeriodType:

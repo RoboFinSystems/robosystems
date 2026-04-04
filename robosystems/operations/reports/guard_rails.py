@@ -79,12 +79,13 @@ def _validate_balance_sheet(rows: list[FactRow]) -> ValidationResult:
 
   for row in rows:
     if row.is_subtotal and row.depth == 0:
+      val = (row.values[0] or 0.0) if row.values else 0.0
       if row.classification == "asset":
-        total_assets += row.current_value
+        total_assets += val
       elif row.classification == "liability":
-        total_liabilities += row.current_value
+        total_liabilities += val
       elif row.classification == "equity":
-        total_equity += row.current_value
+        total_equity += val
 
   result.checks.append("accounting_equation")
   diff = abs(total_assets - (total_liabilities + total_equity))
@@ -141,12 +142,13 @@ def _check_totals_foot(rows: list[FactRow], result: ValidationResult) -> None:
       # Only sum direct children (depth = subtotal.depth + 1),
       # not grandchildren — grandchildren are already rolled into their parent subtotals
       if child.depth == subtotal.depth + 1:
-        child_sum += child.current_value
+        child_sum += (child.values[0] or 0.0) if child.values else 0.0
 
-    diff = abs(subtotal.current_value - child_sum)
+    subtotal_val = (subtotal.values[0] or 0.0) if subtotal.values else 0.0
+    diff = abs(subtotal_val - child_sum)
     if diff > _TOLERANCE and child_sum != 0.0:
       result.warnings.append(
-        f"Subtotal '{subtotal.element_name}' ({subtotal.current_value:.2f}) "
+        f"Subtotal '{subtotal.element_name}' ({subtotal_val:.2f}) "
         f"does not match sum of children ({child_sum:.2f}), "
         f"difference: {diff:.2f}"
       )
@@ -156,17 +158,22 @@ def _check_zero_subtotals(rows: list[FactRow], result: ValidationResult) -> None
   """Warn about zero-balance subtotal sections."""
   result.checks.append("zero_subtotals")
   for row in rows:
-    if row.is_subtotal and row.current_value == 0.0 and row.depth <= 1:
+    val = (row.values[0] or 0.0) if row.values else 0.0
+    if row.is_subtotal and val == 0.0 and row.depth <= 1:
       result.warnings.append(f"Section '{row.element_name}' has zero balance")
 
 
 def _check_comparative_data(rows: list[FactRow], result: ValidationResult) -> None:
-  """Warn if comparative data was requested but is all zeros."""
+  """Warn if multi-period data has empty columns."""
   result.checks.append("comparative_data")
-  has_prior = any(r.prior_value is not None for r in rows)
-  if has_prior:
-    all_zero = all(r.prior_value == 0.0 for r in rows if r.prior_value is not None)
+  if not rows or not rows[0].values or len(rows[0].values) < 2:
+    return
+  # Check each period column beyond the first for all-zero
+  for col_idx in range(1, len(rows[0].values)):
+    all_zero = all(
+      (r.values[col_idx] if col_idx < len(r.values) else 0.0) == 0.0 for r in rows
+    )
     if all_zero:
       result.warnings.append(
-        "Prior period has no data — comparative column will be empty"
+        f"Period column {col_idx + 1} has no data — column will be empty"
       )
