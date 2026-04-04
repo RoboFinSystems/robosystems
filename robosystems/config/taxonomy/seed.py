@@ -629,10 +629,10 @@ BALANCE_SHEET_ELEMENTS = [
     "liabilities_and_equity",
     "LiabilitiesAndStockholdersEquity",
     "Total Liabilities and Equity",
-    "liability",
+    "equity",
     "credit",
     "instant",
-    _LI,
+    _EQ,
   ),
 ]
 
@@ -847,11 +847,47 @@ def seed_reporting_taxonomy(connection) -> None:
   for e in ALL_GAAP_ELEMENTS:
     _insert_element(connection, e)
 
-  # 5. Create hierarchy associations (parent → child via structures)
-  # Order per-parent so siblings sort correctly within each section
-  # (global counter caused Revenue/Expenses/Gains/Losses to interleave)
-  order_by_parent: dict[str, int] = {}
+  # 5. Create root-ordering associations (structure → SFAC6 root)
+  # These control the order of top-level sections in each statement.
+  # Convention: from_element_id = structure_id, to_element_id = SFAC6 root.
+  ROOT_ORDER: list[tuple[str, str, int]] = [
+    # Balance Sheet: Assets → Liabilities → Equity
+    (STRUCT_BS_ID, "elem_sfac6_assets", 1),
+    (STRUCT_BS_ID, "elem_sfac6_liabilities", 2),
+    (STRUCT_BS_ID, "elem_sfac6_equity", 3),
+    # Income Statement: Revenues → Expenses → Gains → Losses → Comprehensive Income
+    (STRUCT_IS_ID, "elem_sfac6_revenues", 1),
+    (STRUCT_IS_ID, "elem_sfac6_expenses", 2),
+    (STRUCT_IS_ID, "elem_sfac6_gains", 3),
+    (STRUCT_IS_ID, "elem_sfac6_losses", 4),
+    (STRUCT_IS_ID, "elem_sfac6_comprehensive_income", 5),
+    # Cash Flow: Assets (operating/investing) → Equity (financing)
+    (STRUCT_CF_ID, "elem_sfac6_assets", 1),
+    (STRUCT_CF_ID, "elem_sfac6_equity", 2),
+  ]
+
   assoc_seq = 0
+  for struct_id, root_id, order in ROOT_ORDER:
+    assoc_seq += 1
+    connection.execute(
+      text("""
+                INSERT INTO public.associations
+                    (id, structure_id, from_element_id, to_element_id,
+                     association_type, order_value, metadata, created_by)
+                VALUES (:id, :struct, :from_id, :to_id, 'presentation', :ord, '{}'::jsonb, 'system')
+            """),
+      {
+        "id": f"assoc_root_{assoc_seq:04d}",
+        "struct": struct_id,
+        "from_id": struct_id,
+        "to_id": root_id,
+        "ord": float(order),
+      },
+    )
+
+  # 6. Create hierarchy associations (parent → child via structures)
+  # Order per-parent so siblings sort correctly within each section
+  order_by_parent: dict[str, int] = {}
   for e in ALL_GAAP_ELEMENTS:
     parent_id = e.get("parent_id")
     if not parent_id:
@@ -872,6 +908,89 @@ def seed_reporting_taxonomy(connection) -> None:
         "from_id": parent_id,
         "to_id": e["id"],
         "ord": float(order_by_parent[parent_id]),
+      },
+    )
+
+  # 6. Create calculation associations for computed elements.
+  # from_element = the computed total, to_element = the source, weight = multiplier.
+  # The renderer sums (source_value * weight) for each source.
+  CALCULATION_ASSOCIATIONS = [
+    # Balance Sheet
+    # Total Assets = Current Assets + Non-Current Assets
+    (STRUCT_BS_ID, "elem_gaap_total_assets", "elem_gaap_assets_current", 1.0),
+    (STRUCT_BS_ID, "elem_gaap_total_assets", "elem_gaap_assets_noncurrent", 1.0),
+    # Total Liabilities = Current Liabilities + Non-Current Liabilities
+    (STRUCT_BS_ID, "elem_gaap_total_liabilities", "elem_gaap_liabilities_current", 1.0),
+    (
+      STRUCT_BS_ID,
+      "elem_gaap_total_liabilities",
+      "elem_gaap_liabilities_noncurrent",
+      1.0,
+    ),
+    # Total Stockholders' Equity = Common Stock + APIC + Retained Earnings - Treasury Stock + AOCI
+    (STRUCT_BS_ID, "elem_gaap_stockholders_equity", "elem_gaap_common_stock", 1.0),
+    (
+      STRUCT_BS_ID,
+      "elem_gaap_stockholders_equity",
+      "elem_gaap_additional_paid_in_capital",
+      1.0,
+    ),
+    (STRUCT_BS_ID, "elem_gaap_stockholders_equity", "elem_gaap_retained_earnings", 1.0),
+    (STRUCT_BS_ID, "elem_gaap_stockholders_equity", "elem_gaap_treasury_stock", -1.0),
+    (STRUCT_BS_ID, "elem_gaap_stockholders_equity", "elem_gaap_aoci", 1.0),
+    # Total Liabilities and Equity = Total Liabilities + Total Stockholders' Equity
+    (
+      STRUCT_BS_ID,
+      "elem_gaap_liabilities_and_equity",
+      "elem_gaap_total_liabilities",
+      1.0,
+    ),
+    (
+      STRUCT_BS_ID,
+      "elem_gaap_liabilities_and_equity",
+      "elem_gaap_stockholders_equity",
+      1.0,
+    ),
+    # Income Statement
+    # Gross Profit = Revenue - Cost of Revenue
+    (STRUCT_IS_ID, "elem_gaap_gross_profit", "elem_gaap_revenues", 1.0),
+    (STRUCT_IS_ID, "elem_gaap_gross_profit", "elem_gaap_cost_of_revenue", -1.0),
+    # Operating Income = Gross Profit - Operating Expenses
+    (STRUCT_IS_ID, "elem_gaap_operating_income", "elem_gaap_gross_profit", 1.0),
+    (STRUCT_IS_ID, "elem_gaap_operating_income", "elem_gaap_operating_expenses", -1.0),
+    # Pretax Income = Operating Income + Gains - Losses
+    (STRUCT_IS_ID, "elem_gaap_pretax_income", "elem_gaap_operating_income", 1.0),
+    (STRUCT_IS_ID, "elem_gaap_pretax_income", "elem_sfac6_gains", 1.0),
+    (STRUCT_IS_ID, "elem_gaap_pretax_income", "elem_sfac6_losses", -1.0),
+    # Net Income = Pretax Income - Income Tax Expense
+    (STRUCT_IS_ID, "elem_gaap_net_income", "elem_gaap_pretax_income", 1.0),
+    (STRUCT_IS_ID, "elem_gaap_net_income", "elem_gaap_income_tax_expense", -1.0),
+    # Comprehensive Income = Net Income + Other Comprehensive Income
+    (STRUCT_IS_ID, "elem_gaap_total_comprehensive_income", "elem_gaap_net_income", 1.0),
+    (
+      STRUCT_IS_ID,
+      "elem_gaap_total_comprehensive_income",
+      "elem_gaap_other_comprehensive_income",
+      1.0,
+    ),
+  ]
+
+  for i, (struct_id, from_id, to_id, weight) in enumerate(CALCULATION_ASSOCIATIONS, 1):
+    assoc_seq += 1
+    connection.execute(
+      text("""
+                INSERT INTO public.associations
+                    (id, structure_id, from_element_id, to_element_id,
+                     association_type, order_value, weight, metadata, created_by)
+                VALUES (:id, :struct, :from_id, :to_id, 'calculation', :ord, :weight, '{}'::jsonb, 'system')
+            """),
+      {
+        "id": f"assoc_calc_{i:04d}",
+        "struct": struct_id,
+        "from_id": from_id,
+        "to_id": to_id,
+        "ord": float(i),
+        "weight": weight,
       },
     )
 

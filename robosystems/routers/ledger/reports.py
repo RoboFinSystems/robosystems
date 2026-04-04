@@ -41,7 +41,6 @@ router = APIRouter()
 VALID_STRUCTURE_TYPES = {
   "income_statement",
   "balance_sheet",
-  "cash_flow_statement",
   "equity_statement",
   "custom",
 }

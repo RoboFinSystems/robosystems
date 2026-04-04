@@ -111,13 +111,13 @@ class TestBuildRows:
     ]
 
     balances = self._make_balances({"rev_product": 300.0, "rev_service": 200.0})
-    rows = _build_rows(hierarchy, balances, {})
+    rows = _build_rows(hierarchy, balances, {}, {})
 
     assert len(rows) == 3
-    # First row: subtotal header
+    # First row: section header (no value — totals come from calculation elements)
     assert rows[0].is_subtotal is True
     assert rows[0].element_name == "Revenues"
-    assert rows[0].current_value == 500.0
+    assert rows[0].current_value == 0.0
     # Children
     assert rows[1].element_name == "Product Revenue"
     assert rows[1].current_value == 300.0
@@ -177,16 +177,16 @@ class TestBuildRows:
         "sga", "us-gaap:SGA", "SG&A", "expense", "debit", 120000.0, 0.0, 120000.0
       ),
     }
-    rows = _build_rows(hierarchy, balances, {})
+    rows = _build_rows(hierarchy, balances, {}, {})
 
     assert len(rows) == 4
-    # Root expenses subtotal
+    # Root expenses header (no value)
     assert rows[0].element_name == "Expenses"
-    assert rows[0].current_value == 205000.0
+    assert rows[0].current_value == 0.0
     assert rows[0].depth == 0
-    # Operating expenses subtotal
+    # Operating expenses header (no value)
     assert rows[1].element_name == "Operating Expenses"
-    assert rows[1].current_value == 205000.0
+    assert rows[1].current_value == 0.0
     assert rows[1].depth == 1
     # Leaves
     assert rows[2].element_name == "R&D"
@@ -219,7 +219,7 @@ class TestBuildRows:
       )
     ]
 
-    rows = _build_rows(hierarchy, {}, {})
+    rows = _build_rows(hierarchy, {}, {}, {})
     assert len(rows) == 2
     assert rows[0].current_value == 0.0
     assert rows[1].current_value == 0.0
@@ -240,7 +240,7 @@ class TestBuildRows:
 
     current = self._make_balances({"rev": 500.0})
     prior = self._make_balances({"rev": 400.0})
-    rows = _build_rows(hierarchy, current, prior)
+    rows = _build_rows(hierarchy, current, prior, {})
 
     assert len(rows) == 1
     assert rows[0].current_value == 500.0
@@ -261,10 +261,150 @@ class TestBuildRows:
     ]
 
     current = self._make_balances({"rev": 500.0})
-    rows = _build_rows(hierarchy, current, {})
+    rows = _build_rows(hierarchy, current, {}, {})
 
     assert len(rows) == 1
     assert rows[0].prior_value is None
+
+  def test_calculation_elements(self):
+    """Computed elements resolve via calculation associations."""
+    hierarchy = [
+      _HierarchyNode(
+        element_id="root",
+        qname="sfac6:Revenues",
+        name="Revenues",
+        classification="revenue",
+        balance_type="credit",
+        is_abstract=True,
+        depth=0,
+        children=[
+          _HierarchyNode(
+            element_id="revenue",
+            qname="us-gaap:Revenue",
+            name="Revenue",
+            classification="revenue",
+            balance_type="credit",
+            is_abstract=False,
+            depth=1,
+          ),
+          _HierarchyNode(
+            element_id="cogs",
+            qname="us-gaap:COGS",
+            name="Cost of Revenue",
+            classification="expense",
+            balance_type="debit",
+            is_abstract=False,
+            depth=1,
+          ),
+          _HierarchyNode(
+            element_id="gross_profit",
+            qname="us-gaap:GrossProfit",
+            name="Gross Profit",
+            classification="revenue",
+            balance_type="credit",
+            is_abstract=False,
+            depth=1,
+          ),
+        ],
+      )
+    ]
+
+    current = self._make_balances({"revenue": 1000.0, "cogs": 400.0}, "credit")
+    # COGS is debit-normal, set it separately
+    current["cogs"] = _Balance(
+      "cogs", "us-gaap:COGS", "COGS", "expense", "debit", 400.0, 0.0, 400.0
+    )
+
+    calculations = {
+      "gross_profit": [("revenue", 1.0), ("cogs", -1.0)],
+    }
+
+    rows = _build_rows(hierarchy, current, {}, calculations)
+
+    assert len(rows) == 4
+    assert rows[0].is_subtotal is True  # header
+    assert rows[1].current_value == 1000.0  # Revenue
+    assert rows[2].current_value == 400.0  # COGS
+    assert rows[3].element_name == "Gross Profit"
+    assert rows[3].current_value == 600.0  # 1000 - 400
+
+  def test_chained_calculations(self):
+    """Calculations can reference other calculated elements."""
+    hierarchy = [
+      _HierarchyNode(
+        element_id="root",
+        qname="sfac6:Root",
+        name="Root",
+        classification="revenue",
+        balance_type="credit",
+        is_abstract=True,
+        depth=0,
+        children=[
+          _HierarchyNode(
+            element_id="a",
+            qname="a",
+            name="A",
+            classification="revenue",
+            balance_type="credit",
+            is_abstract=False,
+            depth=1,
+          ),
+          _HierarchyNode(
+            element_id="b",
+            qname="b",
+            name="B",
+            classification="expense",
+            balance_type="debit",
+            is_abstract=False,
+            depth=1,
+          ),
+          _HierarchyNode(
+            element_id="subtotal",
+            qname="subtotal",
+            name="Subtotal",
+            classification="revenue",
+            balance_type="credit",
+            is_abstract=False,
+            depth=1,
+          ),
+          _HierarchyNode(
+            element_id="c",
+            qname="c",
+            name="C",
+            classification="expense",
+            balance_type="debit",
+            is_abstract=False,
+            depth=1,
+          ),
+          _HierarchyNode(
+            element_id="total",
+            qname="total",
+            name="Total",
+            classification="revenue",
+            balance_type="credit",
+            is_abstract=False,
+            depth=1,
+          ),
+        ],
+      )
+    ]
+
+    current = self._make_balances({"a": 100.0}, "credit")
+    current["b"] = _Balance("b", "b", "B", "expense", "debit", 30.0, 0.0, 30.0)
+    current["c"] = _Balance("c", "c", "C", "expense", "debit", 10.0, 0.0, 10.0)
+
+    # subtotal = a - b, total = subtotal - c (chained)
+    calculations = {
+      "subtotal": [("a", 1.0), ("b", -1.0)],
+      "total": [("subtotal", 1.0), ("c", -1.0)],
+    }
+
+    rows = _build_rows(hierarchy, current, {}, calculations)
+
+    subtotal_row = next(r for r in rows if r.element_id == "subtotal")
+    total_row = next(r for r in rows if r.element_id == "total")
+    assert subtotal_row.current_value == 70.0  # 100 - 30
+    assert total_row.current_value == 60.0  # 70 - 10
 
 
 class TestInferPeriodType:

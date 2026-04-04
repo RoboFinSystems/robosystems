@@ -221,9 +221,14 @@ def render_structure_view(
       facts, comparative_period_start, comparative_period_end
     )
 
-  # Walk hierarchy depth-first with rollup
+  # Load calculation associations for computed elements (Total Assets, Net Income, etc.)
+  calculations = _load_calculations(session, structure_id)
+
+  # Walk hierarchy depth-first
   # Facts from the facts table are already natural-signed, so skip sign conversion
-  rows = _build_rows(hierarchy, current_balances, prior_balances, pre_signed=True)
+  rows = _build_rows(
+    hierarchy, current_balances, prior_balances, calculations, pre_signed=True
+  )
 
   return FactGrid(
     structure_id=structure_id,
@@ -491,6 +496,7 @@ def _load_reporting_structure(
       JOIN elements e ON e.id = ea.to_element_id
       WHERE ea.structure_id = :structure_id
         AND ea.association_type = 'presentation'
+        AND ea.from_element_id != :structure_id
       ORDER BY ea.order_value
     """),
     {"structure_id": structure_id},
@@ -558,83 +564,175 @@ def _load_reporting_structure(
       node.children.append(child_node)
     return node
 
-  # Build trees from roots
+  # Build trees from roots, ordered by the root-ordering associations
+  # seeded as (structure → SFAC6 root) presentation associations.
+  # Roots that have an explicit order_value sort by that; others sort last.
+  root_order = _load_root_order(session, structure_id)
+
   roots = []
-  for root_id in sorted(root_parent_ids):
+  for root_id in sorted(
+    root_parent_ids,
+    key=lambda rid: root_order.get(rid, float("inf")),
+  ):
     roots.append(_build_tree(root_id, 0))
 
   return structure_id, structure_name, roots
+
+
+def _load_root_order(
+  session: Session,
+  structure_id: str,
+) -> dict[str, float]:
+  """Load root-level ordering for SFAC6 roots within a structure.
+
+  Root ordering is stored as presentation associations where from_element_id
+  equals the structure_id (a convention for root-level ordering).
+  """
+  result = session.execute(
+    text("""
+      SELECT to_element_id, order_value
+      FROM associations
+      WHERE structure_id = :structure_id
+        AND from_element_id = :structure_id
+        AND association_type = 'presentation'
+      ORDER BY order_value
+    """),
+    {"structure_id": structure_id},
+  )
+  return {row.to_element_id: row.order_value for row in result}
+
+
+def _load_calculations(
+  session: Session,
+  structure_id: str,
+) -> dict[str, list[tuple[str, float]]]:
+  """Load calculation associations for a structure.
+
+  Returns a dict mapping computed element ID → list of (source_element_id, weight).
+  For example, Total Assets might map to [(Current Assets, 1.0), (Non-Current Assets, 1.0)].
+  """
+  result = session.execute(
+    text("""
+      SELECT from_element_id, to_element_id, weight
+      FROM associations
+      WHERE structure_id = :structure_id
+        AND association_type = 'calculation'
+      ORDER BY from_element_id, order_value
+    """),
+    {"structure_id": structure_id},
+  )
+
+  calculations: dict[str, list[tuple[str, float]]] = {}
+  for row in result:
+    weight = row.weight if row.weight is not None else 1.0
+    calculations.setdefault(row.from_element_id, []).append((row.to_element_id, weight))
+  return calculations
+
+
+def _balance_value(
+  balances: dict[str, _Balance],
+  element_id: str,
+  pre_signed: bool,
+  balance_type: str,
+) -> float:
+  """Look up a balance value for an element, applying sign convention if needed."""
+  balance = balances.get(element_id)
+  if not balance:
+    return 0.0
+  if pre_signed:
+    return balance.net_balance
+  return _natural_sign(balance.net_balance, balance_type)
 
 
 def _build_rows(
   hierarchy: list[_HierarchyNode],
   current_balances: dict[str, _Balance],
   prior_balances: dict[str, _Balance],
+  calculations: dict[str, list[tuple[str, float]]],
   pre_signed: bool = False,
 ) -> list[FactRow]:
-  """Walk the hierarchy depth-first, building FactRows with rollup subtotals.
+  """Walk the hierarchy depth-first, building FactRows.
 
-  Returns rows in presentation order (top-to-bottom as they'd appear
-  on a financial statement).
+  Two-pass approach:
+  1. Walk all nodes to collect leaf balances and abstract rollups into `computed`.
+  2. Resolve calculation elements using the fully-populated `computed` dict,
+     then build the final row list in presentation order.
+
+  Abstract/parent nodes render as section headers with no dollar value.
+  Leaf nodes get values from the balance dict, or from calculation
+  associations for computed elements (Total Assets, Net Income, etc.).
   """
+  has_prior = bool(prior_balances)
+
+  # Pass 1: collect all values (leaf balances + abstract rollups)
+  computed: dict[str, float] = {}
+  computed_prior: dict[str, float] = {}
+
+  def _collect(node: _HierarchyNode) -> tuple[float, float | None]:
+    if node.children:
+      child_current = 0.0
+      child_prior = 0.0 if has_prior else None
+      for child in node.children:
+        c, p = _collect(child)
+        child_current += c
+        if has_prior and p is not None:
+          child_prior = (child_prior or 0.0) + p
+      computed[node.element_id] = child_current
+      if has_prior:
+        computed_prior[node.element_id] = child_prior or 0.0
+      return child_current, child_prior
+    else:
+      c = _balance_value(
+        current_balances, node.element_id, pre_signed, node.balance_type
+      )
+      p = (
+        _balance_value(prior_balances, node.element_id, pre_signed, node.balance_type)
+        if has_prior
+        else None
+      )
+      computed[node.element_id] = c
+      if has_prior and p is not None:
+        computed_prior[node.element_id] = p
+      return c, p
+
+  for root in hierarchy:
+    _collect(root)
+
+  # Resolve calculations (may chain: Gross Profit → Operating Income → Net Income).
+  # Iterate in definition order; each resolved value is stored in computed so
+  # downstream calculations can reference it.
+  for elem_id, sources in calculations.items():
+    computed[elem_id] = sum(
+      computed.get(src_id, 0.0) * weight for src_id, weight in sources
+    )
+    if has_prior:
+      computed_prior[elem_id] = sum(
+        computed_prior.get(src_id, 0.0) * weight for src_id, weight in sources
+      )
+
+  # Pass 2: build rows in presentation order
   rows: list[FactRow] = []
 
-  def _walk(node: _HierarchyNode) -> tuple[float, float | None]:
-    """Walk a node, return (current_total, prior_total) for rollup."""
-    has_prior = bool(prior_balances)
-
+  def _emit(node: _HierarchyNode) -> None:
     if node.children:
-      # Abstract/parent node: sum children
-      child_current_total = 0.0
-      child_prior_total = 0.0 if has_prior else None
-
-      # First, walk children to get their values
-      child_rows_start = len(rows)
-      for child in node.children:
-        c_val, p_val = _walk(child)
-        child_current_total += c_val
-        if has_prior and p_val is not None:
-          child_prior_total = (child_prior_total or 0.0) + p_val
-
-      # Insert subtotal row before children (section header)
-      header_row = FactRow(
-        element_id=node.element_id,
-        element_qname=node.qname,
-        element_name=node.name,
-        classification=node.classification,
-        balance_type=node.balance_type,
-        current_value=child_current_total,
-        prior_value=child_prior_total,
-        is_subtotal=True,
-        depth=node.depth,
-      )
-      rows.insert(child_rows_start, header_row)
-
-      return child_current_total, child_prior_total
-    else:
-      # Leaf node: get value from balances
-      balance = current_balances.get(node.element_id)
-      if balance:
-        current_val = (
-          balance.net_balance
-          if pre_signed
-          else _natural_sign(balance.net_balance, node.balance_type)
+      rows.append(
+        FactRow(
+          element_id=node.element_id,
+          element_qname=node.qname,
+          element_name=node.name,
+          classification=node.classification,
+          balance_type=node.balance_type,
+          current_value=0.0,
+          prior_value=0.0 if has_prior else None,
+          is_subtotal=True,
+          depth=node.depth,
         )
-      else:
-        current_val = 0.0
-
-      prior_val = None
-      if has_prior:
-        prior_balance = prior_balances.get(node.element_id)
-        if prior_balance:
-          prior_val = (
-            prior_balance.net_balance
-            if pre_signed
-            else _natural_sign(prior_balance.net_balance, node.balance_type)
-          )
-        else:
-          prior_val = 0.0
-
+      )
+      for child in node.children:
+        _emit(child)
+    else:
+      current_val = computed.get(node.element_id, 0.0)
+      prior_val = computed_prior.get(node.element_id, 0.0) if has_prior else None
       rows.append(
         FactRow(
           element_id=node.element_id,
@@ -649,10 +747,8 @@ def _build_rows(
         )
       )
 
-      return current_val, prior_val
-
   for root in hierarchy:
-    _walk(root)
+    _emit(root)
 
   return rows
 
