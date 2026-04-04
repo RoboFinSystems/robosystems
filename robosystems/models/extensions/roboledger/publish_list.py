@@ -5,7 +5,7 @@ reports to. When a ledger user shares a report, they select a publish list and
 all members receive a copy.
 
 These tables live in each tenant's extensions schema alongside report_shares,
-report_definitions, etc.
+reports, etc.
 """
 
 from datetime import UTC, datetime

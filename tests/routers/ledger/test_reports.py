@@ -37,7 +37,7 @@ def _make_user():
 
 
 def _make_report_def(**overrides):
-  """Create a mock ReportDefinition."""
+  """Create a mock Report."""
   rd = MagicMock()
   rd.id = overrides.get("id", "rpt_01ABC")
   rd.name = overrides.get("name", "Q1 Financial Statements")
@@ -138,7 +138,7 @@ class TestCreateReport:
     with (
       patch(f"{MODULE}.extensions_session") as mock_ext,
       patch(f"{MODULE}.generate_report_facts", return_value=report_facts),
-      patch(f"{MODULE}.ReportDefinition", return_value=mock_rd),
+      patch(f"{MODULE}.Report", return_value=mock_rd),
       patch(f"{MODULE}._get_entity_id", return_value="entity_123"),
       patch(f"{MODULE}._load_structures", return_value=_make_structures()),
     ):

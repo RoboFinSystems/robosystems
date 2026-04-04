@@ -861,7 +861,7 @@ def seed_reporting_taxonomy(connection) -> None:
     assoc_seq += 1
     connection.execute(
       text("""
-                INSERT INTO public.element_associations
+                INSERT INTO public.associations
                     (id, structure_id, from_element_id, to_element_id,
                      association_type, order_value, metadata, created_by)
                 VALUES (:id, :struct, :from_id, :to_id, 'presentation', :ord, '{}'::jsonb, 'system')
@@ -953,8 +953,8 @@ def seed_tenant_reporting_taxonomy(connection, schema: str) -> None:
   )
   connection.execute(
     text(f"""
-      INSERT INTO {schema}.element_associations ({assoc_cols})
-        SELECT {assoc_cols} FROM public.element_associations
+      INSERT INTO {schema}.associations ({assoc_cols})
+        SELECT {assoc_cols} FROM public.associations
         WHERE structure_id IN (
           SELECT id FROM public.structures WHERE taxonomy_id = :id
         )

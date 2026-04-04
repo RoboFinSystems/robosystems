@@ -70,10 +70,10 @@ class CreateStructureRequest(BaseModel):
   taxonomy_id: str
 
 
-# ── Element Association ───────────────────────────────────────────────────
+# ── Association ───────────────────────────────────────────────────────────
 
 
-class ElementAssociationResponse(BaseModel):
+class AssociationResponse(BaseModel):
   id: str
   structure_id: str
   from_element_id: str
@@ -110,7 +110,7 @@ class MappingDetailResponse(BaseModel):
   name: str
   structure_type: str
   taxonomy_id: str
-  associations: list[ElementAssociationResponse]
+  associations: list[AssociationResponse]
   total_associations: int
 
 

@@ -25,7 +25,7 @@ from robosystems.models.api.extensions.reports import (
   ValidationCheckResponse,
 )
 from robosystems.models.core import User
-from robosystems.models.extensions import Fact, ReportDefinition, ReportShare
+from robosystems.models.extensions import Fact, Report, ReportShare
 from robosystems.operations.reports.fact_grid import (
   ReportFact as ReportFactData,
 )
@@ -87,7 +87,7 @@ def _load_structures(session, taxonomy_id: str) -> list[StructureSummary]:
 
 
 def _report_to_response(
-  report_def: ReportDefinition,
+  report_def: Report,
   structures: list[StructureSummary],
   entity_name: str | None = None,
 ) -> ReportResponse:
@@ -112,7 +112,7 @@ def _report_to_response(
   )
 
 
-def _resolve_entity_name(session, report_def: ReportDefinition) -> str | None:
+def _resolve_entity_name(session, report_def: Report) -> str | None:
   """Resolve the entity name for a report.
 
   For shared reports: look up the linked entity by source_graph_id.
@@ -207,7 +207,7 @@ async def create_report(
         )
 
       # Create the report definition
-      report_def = ReportDefinition(
+      report_def = Report(
         name=body.name,
         taxonomy_id=body.taxonomy_id,
         mapping_id=body.mapping_id,
@@ -269,9 +269,7 @@ async def list_reports(
   try:
     with extensions_session(graph_id) as session:
       rows = (
-        session.execute(
-          select(ReportDefinition).order_by(ReportDefinition.created_at.desc())
-        )
+        session.execute(select(Report).order_by(Report.created_at.desc()))
         .scalars()
         .all()
       )
@@ -313,7 +311,7 @@ async def get_report(
   """Get a report definition with its available structures."""
   try:
     with extensions_session(graph_id) as session:
-      report_def = session.get(ReportDefinition, report_id)
+      report_def = session.get(Report, report_id)
       if not report_def:
         raise _report_404(report_id)
 
@@ -359,7 +357,7 @@ async def get_statement(
 
   try:
     with extensions_session(graph_id) as session:
-      report_def = session.get(ReportDefinition, report_id)
+      report_def = session.get(Report, report_id)
       if not report_def:
         raise _report_404(report_id)
 
@@ -507,7 +505,7 @@ async def regenerate_report(
 
   try:
     with extensions_session(graph_id) as session:
-      report_def = session.get(ReportDefinition, report_id)
+      report_def = session.get(Report, report_id)
       if not report_def:
         raise _report_404(report_id)
       if report_def.created_by != current_user.id:
@@ -568,7 +566,7 @@ async def delete_report(
   """Delete a report definition and its generated facts."""
   try:
     with extensions_session(graph_id) as session:
-      report_def = session.get(ReportDefinition, report_id)
+      report_def = session.get(Report, report_id)
       if not report_def:
         raise _report_404(report_id)
       if report_def.created_by != current_user.id:
@@ -643,7 +641,7 @@ async def share_report(
       target_graph_ids = [m.target_graph_id for m in members]
 
       # Verify report exists and is published
-      report_def = source_session.get(ReportDefinition, report_id)
+      report_def = source_session.get(Report, report_id)
       if not report_def:
         raise _report_404(report_id)
 
@@ -764,7 +762,7 @@ def _share_to_target(
     now = datetime.now(UTC)
     with extensions_session(target_graph_id) as target_session:
       # Create the report definition in the target schema with provenance
-      shared_report = ReportDefinition(
+      shared_report = Report(
         name=report_snapshot["name"],
         description=report_snapshot.get("description"),
         taxonomy_id=report_snapshot["taxonomy_id"],

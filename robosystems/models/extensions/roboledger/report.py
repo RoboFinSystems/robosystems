@@ -1,4 +1,4 @@
-"""ReportDefinition model — generated report configurations.
+"""Report model — generated report configurations.
 
 Stores the configuration needed to produce a report. A report is tied to a
 Taxonomy (which contains multiple Structures like IS, BS, CF). Facts are
@@ -15,11 +15,11 @@ from robosystems.db.extensions import ExtensionsBase
 from robosystems.utils.ulid import generate_prefixed_ulid
 
 
-class ReportDefinition(ExtensionsBase):
-  __tablename__ = "report_definitions"
+class Report(ExtensionsBase):
+  __tablename__ = "reports"
   __table_args__ = (
-    Index("idx_report_defs_taxonomy", "taxonomy_id"),
-    Index("idx_report_defs_status", "generation_status"),
+    Index("idx_reports_taxonomy", "taxonomy_id"),
+    Index("idx_reports_status", "generation_status"),
   )
 
   # Identity
@@ -72,4 +72,4 @@ class ReportDefinition(ExtensionsBase):
   created_by = Column(String, nullable=False)
 
   def __repr__(self) -> str:
-    return f"<ReportDefinition {self.name} {self.taxonomy_id}>"
+    return f"<Report {self.name} {self.taxonomy_id}>"

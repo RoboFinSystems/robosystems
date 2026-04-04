@@ -15,18 +15,17 @@ from .roboinvestor import (
 )
 from .roboledger import (
   Account,
+  Association,
   ClassificationRule,
   Dimension,
   Element,
-  ElementAssociation,
   Entry,
   Fact,
   FiscalPeriod,
   LineItem,
   PublishList,
   PublishListMember,
-  ReportDefinition,
-  ReportFact,
+  Report,
   ReportShare,
   Structure,
   Taxonomy,
@@ -38,11 +37,11 @@ from .roboledger import (
 
 __all__ = [
   "Account",
+  "Association",
   # RoboLedger
   "ClassificationRule",
   "Dimension",
   "Element",
-  "ElementAssociation",
   "Entity",
   "Entry",
   "Fact",
@@ -53,8 +52,7 @@ __all__ = [
   "Position",
   "PublishList",
   "PublishListMember",
-  "ReportDefinition",
-  "ReportFact",
+  "Report",
   "ReportShare",
   "Security",
   "Structure",

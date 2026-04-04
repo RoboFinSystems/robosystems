@@ -4,12 +4,12 @@ Squashed migration representing the complete extensions database schema.
 Includes all RoboLedger, RoboInvestor, and schedule support tables.
 
 Public-schema tables (shared across tenants):
-  - fiscal_periods, taxonomies, structures, element_associations
+  - fiscal_periods, taxonomies, structures, associations
 
 Tenant-template tables (created here in public, then per-tenant via
 provision_tenant_schema() using schema_translate_map):
   - elements, transactions, entries, line_items, dimensions,
-    junction tables, classification_rules, report_definitions,
+    junction tables, classification_rules, reports,
     facts, report_shares, entities, portfolios, securities,
     positions, publish_lists, publish_list_members
 
@@ -269,7 +269,7 @@ def upgrade() -> None:
 
   # -- Element Associations (public schema — shared seed data) --
   op.create_table(
-    "element_associations",
+    "associations",
     sa.Column("id", sa.String(), nullable=False),
     sa.Column("structure_id", sa.String(), nullable=False),
     sa.Column("from_element_id", sa.String(), nullable=False),
@@ -311,31 +311,31 @@ def upgrade() -> None:
   )
   op.create_index(
     "idx_associations_structure",
-    "element_associations",
+    "associations",
     ["structure_id"],
     schema="public",
   )
   op.create_index(
     "idx_associations_from",
-    "element_associations",
+    "associations",
     ["from_element_id"],
     schema="public",
   )
   op.create_index(
     "idx_associations_to",
-    "element_associations",
+    "associations",
     ["to_element_id"],
     schema="public",
   )
   op.create_index(
     "idx_associations_type",
-    "element_associations",
+    "associations",
     ["association_type"],
     schema="public",
   )
   op.create_index(
     "idx_associations_unapproved",
-    "element_associations",
+    "associations",
     ["approved_by"],
     schema="public",
     postgresql_where=sa.text("approved_by IS NULL AND suggested_by = 'ai'"),
@@ -544,9 +544,9 @@ def upgrade() -> None:
   )
   op.create_index("idx_rules_source", "classification_rules", ["match_source"])
 
-  # -- Report Definitions --
+  # -- Reports --
   op.create_table(
-    "report_definitions",
+    "reports",
     sa.Column("id", sa.String(), nullable=False),
     sa.Column("name", sa.String(), nullable=False),
     sa.Column("description", sa.String(), nullable=True),
@@ -573,8 +573,8 @@ def upgrade() -> None:
     sa.Column("created_by", sa.String(), nullable=False),
     sa.PrimaryKeyConstraint("id"),
   )
-  op.create_index("idx_report_defs_taxonomy", "report_definitions", ["taxonomy_id"])
-  op.create_index("idx_report_defs_status", "report_definitions", ["generation_status"])
+  op.create_index("idx_reports_taxonomy", "reports", ["taxonomy_id"])
+  op.create_index("idx_reports_status", "reports", ["generation_status"])
 
   # -- Facts (generalized from report_facts — serves reports + schedules) --
   op.create_table(
@@ -818,7 +818,7 @@ def downgrade() -> None:
   op.drop_table("entities")
   op.drop_table("report_shares")
   op.drop_table("facts")
-  op.drop_table("report_definitions")
+  op.drop_table("reports")
   op.drop_table("classification_rules")
   op.drop_table("line_item_dimensions")
   op.drop_table("entry_dimensions")
@@ -829,7 +829,7 @@ def downgrade() -> None:
   op.drop_table("dimensions")
 
   # Drop public-schema shared tables (reverse dependency order)
-  op.drop_table("element_associations", schema="public")
+  op.drop_table("associations", schema="public")
   op.drop_table("elements")
   op.drop_table("structures", schema="public")
   op.drop_table("taxonomies", schema="public")

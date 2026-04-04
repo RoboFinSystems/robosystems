@@ -317,7 +317,7 @@ def _read_mapped_balances(
       FROM elements source_elem
       JOIN line_items li ON li.element_id = source_elem.id
       JOIN entries e ON e.id = li.entry_id
-      JOIN element_associations mapping
+      JOIN associations mapping
         ON mapping.from_element_id = source_elem.id
         AND mapping.association_type = 'mapping'
         AND mapping.structure_id = :mapping_id
@@ -367,7 +367,7 @@ def _count_unmapped(session: Session, mapping_id: str) -> int:
       WHERE e.source IN ({source_list})
         AND e.is_active = true
         AND NOT EXISTS (
-          SELECT 1 FROM element_associations ea
+          SELECT 1 FROM associations ea
           WHERE ea.from_element_id = e.id
             AND ea.association_type = 'mapping'
             AND ea.structure_id = :mapping_id
@@ -487,7 +487,7 @@ def _load_reporting_structure(
         e.is_abstract,
         e.depth,
         ea.order_value
-      FROM element_associations ea
+      FROM associations ea
       JOIN elements e ON e.id = ea.to_element_id
       WHERE ea.structure_id = :structure_id
         AND ea.association_type = 'presentation'
