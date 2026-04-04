@@ -46,38 +46,39 @@ class SearchDocumentsTool(_SearchToolMixin):
   def get_tool_definition(self) -> dict[str, Any]:
     return {
       "name": "search-documents",
-      "description": """Search across SEC filing narratives and disclosures. Searches MD&A, risk factors, business descriptions, cybersecurity disclosures, and other qualitative content. Uses hybrid search combining keyword matching (BM25) with vector similarity (KNN) for both exact and conceptual results.
+      "description": """Search across documents using hybrid BM25 + KNN search. Covers SEC filing narratives, user-uploaded documents (policies, procedures, notes), and any other indexed content.
 
 **WHEN TO USE:**
-- When the user asks about topics, risks, strategies, or disclosures mentioned in filings
-- To find qualitative context that structured financial data (numbers) cannot provide
-- For cross-company topic search (e.g., "which companies mention tariff risk?")
-- To discover narrative content before drilling into specific sections
+- To find accounting policies, close procedures, or reference documents
+- To search SEC filing narratives (MD&A, risk factors, disclosures)
+- To discover any document content by topic or keyword
+- For cross-company topic search on shared repositories (e.g., "which companies mention tariff risk?")
 
-**HOW IT DIFFERS FROM read-graph-cypher:**
-- read-graph-cypher queries structured data (numbers, relationships, metadata)
-- search-documents finds unstructured text content (narratives, descriptions, disclosures)
+**DOCUMENT TYPES SEARCHED:**
+- User-uploaded documents (policies, procedures, notes) — created via create-document
+- SEC filing text blocks and narrative sections
+- iXBRL disclosure sections with embedded XBRL facts
+
+**HOW IT DIFFERS FROM other tools:**
+- read-graph-cypher: queries structured data (numbers, relationships)
+- list-documents: browses documents by metadata (no content search)
+- search-documents: finds content by meaning using hybrid search
 
 **RETURNS:**
-- Ranked results with relevance scores and text snippets showing matched content
-- Each result includes entity, filing date, form type, section label, and a document_id
-- Use get-document-section with the document_id to read the full section text
-- iXBRL disclosure results include xbrl_elements — the XBRL fact tags found within that section
+- Ranked results with relevance scores and text snippets
+- Each result includes a document_id — use get-document-section for the full section text
+- For user docs, use get-document to retrieve the complete document
+- iXBRL results include xbrl_elements for graph cross-reference
 
 **GRAPH CROSS-REFERENCE (iXBRL disclosures):**
-- iXBRL disclosure results contain xbrl_elements (e.g., us-gaap:Goodwill, us-gaap:Revenues)
-- These are the same element qnames used in the knowledge graph
-- Use resolve-element to look up element details, then read-graph-cypher or build-fact-grid to get the structured financial data for those elements
-- This bridges unstructured narrative context ↔ structured financial facts
-- Example flow: search "goodwill impairment" → find disclosure with us-gaap:Goodwill → query graph for actual goodwill values across periods
-- Use the element filter to go the other direction: find all disclosures containing a specific XBRL fact
+- iXBRL results contain xbrl_elements (e.g., us-gaap:Goodwill, us-gaap:Revenues)
+- Use resolve-element to look up details, then read-graph-cypher for structured values
+- Bridges unstructured narrative context ↔ structured financial facts
 
 **TIPS:**
-- Natural language queries work well (e.g., "trade war concerns", "supply chain disruptions")
-- Exact terms also work — BM25 handles keyword precision while KNN captures conceptual similarity
+- Natural language queries work well ("depreciation policy", "month end close procedures")
 - Use entity filter to focus on one company's filings
-- Use section filter (item_1a, item_7) to target specific filing sections
-- Results include XBRL text blocks, extracted narrative sections, and iXBRL disclosures""",
+- Use section filter (item_1a, item_7) to target specific filing sections""",
       "inputSchema": {
         "type": "object",
         "properties": {

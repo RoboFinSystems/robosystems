@@ -205,14 +205,30 @@ class GraphMCPTools:
       self.search_documents_tool = SearchDocumentsTool(graph_client)
       self.get_document_section_tool = GetDocumentSectionTool(graph_client)
 
-    # Layer 3: Semantic memory tools (gated by MCP_SEMANTIC_MEMORY_ENABLED)
-    self.remember_text_tool = None
-    self.recall_text_tool = None
-    if env.MCP_SEMANTIC_MEMORY_ENABLED and not read_only:
-      from .semantic_memory import RecallTextTool, RememberTextTool
+    # Layer 3: Document management tools (user graphs only, not shared repos)
+    # Shared repos (SEC) use OpenSearch directly — no PG document rows.
+    # Read tools (list/get) are available on read-only user graphs.
+    # Write tools (create/update) require writable user graphs.
+    self.create_document_tool = None
+    self.update_document_tool = None
+    self.get_document_tool = None
+    self.list_documents_tool = None
+    if env.SEMANTIC_SEARCH_ENABLED and not self._is_shared_repository():
+      from .document_tools import (
+        CreateDocumentTool,
+        GetDocumentTool,
+        ListDocumentsTool,
+        UpdateDocumentTool,
+      )
 
-      self.recall_text_tool = RecallTextTool(graph_client)
-      self.remember_text_tool = RememberTextTool(graph_client)
+      # Read tools — available on all user graphs (including read-only)
+      self.get_document_tool = GetDocumentTool(graph_client)
+      self.list_documents_tool = ListDocumentsTool(graph_client)
+
+      # Write tools — only on writable graphs
+      if not read_only:
+        self.create_document_tool = CreateDocumentTool(graph_client)
+        self.update_document_tool = UpdateDocumentTool(graph_client)
 
     # Cache statistics (inherited from schema tool)
     self._cache_hits = 0
@@ -225,6 +241,17 @@ class GraphMCPTools:
   def _has_extension(self, extension: str) -> bool:
     """Check if the graph has a specific schema extension."""
     return extension in self.schema_extensions
+
+  def _is_shared_repository(self) -> bool:
+    """Check if the graph is a shared repository (e.g., SEC)."""
+    try:
+      from robosystems.config.shared_repositories import (
+        is_shared_repository_or_subgraph,
+      )
+
+      return is_shared_repository_or_subgraph(self.client.graph_id)
+    except Exception:
+      return False
 
   def _should_include_semantic_tools(self) -> bool:
     """Check if semantic enrichment tools should be included.
@@ -403,17 +430,21 @@ class GraphMCPTools:
     tools.extend(self._get_workspace_tool_definitions())
     tools.extend(self._get_memory_tool_definitions())
     tools.extend(self._get_search_tool_definitions())
-    tools.extend(self._get_semantic_memory_tool_definitions())
+    tools.extend(self._get_document_tool_definitions())
 
     return tools
 
-  def _get_semantic_memory_tool_definitions(self) -> list[dict[str, Any]]:
-    """Get semantic memory tool definitions (remember-text, recall-text)."""
+  def _get_document_tool_definitions(self) -> list[dict[str, Any]]:
+    """Get document management tool definitions (create, update, get, list)."""
     tools = []
-    if self.recall_text_tool is not None:
-      tools.append(self.recall_text_tool.get_tool_definition())
-    if self.remember_text_tool is not None:
-      tools.append(self.remember_text_tool.get_tool_definition())
+    if self.create_document_tool is not None:
+      tools.append(self.create_document_tool.get_tool_definition())
+    if self.update_document_tool is not None:
+      tools.append(self.update_document_tool.get_tool_definition())
+    if self.get_document_tool is not None:
+      tools.append(self.get_document_tool.get_tool_definition())
+    if self.list_documents_tool is not None:
+      tools.append(self.list_documents_tool.get_tool_definition())
     return tools
 
   async def call_tool(
@@ -649,22 +680,37 @@ class GraphMCPTools:
         result = await self.get_document_section_tool.execute(arguments)
         return result if return_raw else json.dumps(result, indent=2)
 
-      elif name == "remember-text":
-        if self.remember_text_tool is None:
+      # Document management tools
+      elif name == "create-document":
+        if self.create_document_tool is None:
           raise ValueError(
-            self._tool_unavailable_reason(
-              "remember-text", "MCP_SEMANTIC_MEMORY_ENABLED"
-            )
+            self._tool_unavailable_reason("create-document", "SEMANTIC_SEARCH_ENABLED")
           )
-        result = await self.remember_text_tool.execute(arguments)
+        result = await self.create_document_tool.execute(arguments)
         return result if return_raw else json.dumps(result, indent=2)
 
-      elif name == "recall-text":
-        if self.recall_text_tool is None:
+      elif name == "update-document":
+        if self.update_document_tool is None:
           raise ValueError(
-            self._tool_unavailable_reason("recall-text", "MCP_SEMANTIC_MEMORY_ENABLED")
+            self._tool_unavailable_reason("update-document", "SEMANTIC_SEARCH_ENABLED")
           )
-        result = await self.recall_text_tool.execute(arguments)
+        result = await self.update_document_tool.execute(arguments)
+        return result if return_raw else json.dumps(result, indent=2)
+
+      elif name == "get-document":
+        if self.get_document_tool is None:
+          raise ValueError(
+            self._tool_unavailable_reason("get-document", "SEMANTIC_SEARCH_ENABLED")
+          )
+        result = await self.get_document_tool.execute(arguments)
+        return result if return_raw else json.dumps(result, indent=2)
+
+      elif name == "list-documents":
+        if self.list_documents_tool is None:
+          raise ValueError(
+            self._tool_unavailable_reason("list-documents", "SEMANTIC_SEARCH_ENABLED")
+          )
+        result = await self.list_documents_tool.execute(arguments)
         return result if return_raw else json.dumps(result, indent=2)
 
       else:
