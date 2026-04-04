@@ -107,16 +107,20 @@ MAIN_API_TAGS = [
     "description": "⏱️ Operation monitoring - Track SSE stream status and progress",
   },
   {
+    "name": "Ledger",
+    "description": "📒 Ledger - Accounting data: chart of accounts, transactions, trial balance, reports, taxonomies, schedules, and publish lists",
+  },
+  {
+    "name": "Investor",
+    "description": "📈 Investor - Portfolio management: portfolios, securities, positions, and holdings aggregation",
+  },
+  {
     "name": "Auth",
     "description": "🔐 Authentication - Login, register, and access token management",
   },
   {
     "name": "Service Offerings",
     "description": "🛍️ Service offerings - View available offers and pricing",
-  },
-  {
-    "name": "Ledger",
-    "description": "Ledger - Accounting data: accounts, transactions, trial balance, and summaries",
   },
   {
     "name": "Status",
