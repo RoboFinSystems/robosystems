@@ -802,11 +802,17 @@ class LedgerMaterializer:
   ) -> MaterializeResult:
     """Run full materialization: stage from PostgreSQL, then materialize to LadybugDB.
 
+    Uses blue-green swap when the database already exists: builds a WIP copy
+    alongside the active graph, swaps on success. The active graph serves
+    queries throughout the rebuild — downtime is milliseconds.
+
+    For first-time creation, uses direct creation (no swap needed).
+
     Args:
         graph_id: Graph database identifier (also the tenant schema name).
         entity_id: Entity node identifier in the graph. Defaults to "entity_{graph_id}".
-        rebuild: If True, delete and recreate the LadybugDB database before materializing.
-                 For SMB-sized data this takes seconds and ensures a clean state.
+        rebuild: If True, rebuild the graph. Blue-green swap when database exists,
+                 direct creation when it doesn't.
 
     Returns:
         MaterializeResult with staging and materialization statistics.
@@ -829,18 +835,14 @@ class LedgerMaterializer:
 
     try:
       async with client:
-        # Step 1: Ensure LadybugDB database exists with schema
-        await self._ensure_database(client, graph_id, rebuild)
+        db_exists = await client.database_exists(graph_id)
 
-        # Step 2: Build connection string for postgres_scanner
-        connstr = build_postgres_connstr()
-
-        # Step 3: Stage all tables from PostgreSQL → DuckDB
-        staging_sql = _staging_sql(graph_id, entity_id, connstr)
-        await self._stage_tables(client, graph_id, staging_sql, result)
-
-        # Step 4: Materialize all tables from DuckDB → LadybugDB
-        await self._materialize_tables(client, graph_id, result)
+        if db_exists and rebuild:
+          # Blue-green path: build WIP, swap on success
+          await self._materialize_blue_green(client, graph_id, entity_id, result)
+        else:
+          # Direct path: first-time creation or non-rebuild
+          await self._materialize_direct(client, graph_id, entity_id, rebuild, result)
 
     except Exception as e:
       logger.error(f"Ledger materialization failed for {graph_id}: {e}", exc_info=True)
@@ -858,6 +860,125 @@ class LedgerMaterializer:
       )
 
     return result
+
+  async def _materialize_direct(
+    self,
+    client: "GraphClient",
+    graph_id: str,
+    entity_id: str,
+    rebuild: bool,
+    result: MaterializeResult,
+  ) -> None:
+    """Direct materialization path (first-time creation or non-rebuild)."""
+    # Step 1: Ensure LadybugDB database exists with schema
+    await self._ensure_database(client, graph_id, rebuild)
+
+    # Step 2: Build connection string for postgres_scanner
+    connstr = build_postgres_connstr()
+
+    # Step 3: Stage all tables from PostgreSQL → DuckDB
+    staging_sql = _staging_sql(graph_id, entity_id, connstr)
+    await self._stage_tables(client, graph_id, staging_sql, result)
+
+    # Step 4: Materialize all tables from DuckDB → LadybugDB
+    await self._materialize_tables(client, graph_id, result)
+
+  async def _materialize_blue_green(
+    self,
+    client: "GraphClient",
+    graph_id: str,
+    entity_id: str,
+    result: MaterializeResult,
+  ) -> None:
+    """Blue-green materialization: build WIP alongside active, swap on success.
+
+    The active graph serves queries throughout. Downtime is only the
+    milliseconds of the file rename swap.
+
+    Acquires a per-graph materialization lock to prevent concurrent rebuilds.
+    """
+    from robosystems.graph_api.core.ladybug.materialization_lock import (
+      MaterializationLock,
+    )
+
+    wip_id = f"{graph_id}-wip"
+    lock: MaterializationLock | None = None
+
+    logger.info(f"Blue-green materialization: building WIP {wip_id}")
+
+    try:
+      # Step 0: Acquire per-graph materialization lock
+      try:
+        from robosystems.config.valkey_registry import (
+          ValkeyDatabase,
+          create_async_redis_client,
+        )
+
+        redis_client = create_async_redis_client(ValkeyDatabase.LOCKS)
+        lock = MaterializationLock(redis_client, graph_id)
+        acquired = await lock.acquire(timeout_seconds=5)
+        if not acquired:
+          raise RuntimeError(
+            f"Could not acquire materialization lock for {graph_id} "
+            "(another materialization may be in progress)"
+          )
+      except ImportError:
+        logger.warning("Valkey not available — proceeding without materialization lock")
+      except RuntimeError:
+        raise
+      except Exception as e:
+        logger.warning(f"Could not acquire materialization lock: {e}")
+
+      # Step 1: Clean up any leftover WIP from a previous failed run
+      wip_exists = await client.database_exists(wip_id)
+      if wip_exists:
+        logger.info(f"Cleaning up leftover WIP database {wip_id}")
+        await client.delete_database(wip_id, preserve_duckdb=True)
+
+      # Step 2: Create fresh WIP database with schema
+      await self._ensure_database(client, wip_id, rebuild=False)
+
+      # Step 3: Stage from PostgreSQL → DuckDB (writes to graph_id's DuckDB)
+      connstr = build_postgres_connstr()
+      staging_sql = _staging_sql(graph_id, entity_id, connstr)
+      await self._stage_tables(client, graph_id, staging_sql, result)
+
+      # Step 4: Materialize from DuckDB → WIP LadybugDB
+      # Use source_graph_id so the WIP reads from the original graph's DuckDB
+      await self._materialize_tables(client, wip_id, result, source_graph_id=graph_id)
+
+      # Step 5: Swap WIP → active (milliseconds of downtime)
+      if result.status != "error":
+        logger.info(f"Swapping WIP {wip_id} → active {graph_id}")
+        await client.swap_database(graph_id, lock_token=lock.token if lock else None)
+        logger.info(f"Blue-green swap complete for {graph_id}")
+      else:
+        # Materialization had errors — abandon WIP, active is untouched
+        logger.warning(
+          f"Blue-green materialization had errors for {graph_id}, "
+          f"abandoning WIP (active graph untouched)"
+        )
+        try:
+          await client.delete_database(wip_id, preserve_duckdb=True)
+        except Exception as cleanup_err:
+          logger.warning(f"Failed to clean up WIP {wip_id} after errors: {cleanup_err}")
+
+    except Exception as e:
+      # Clean up WIP on failure — active graph is untouched
+      logger.error(f"Blue-green materialization failed for {graph_id}: {e}")
+      try:
+        wip_exists = await client.database_exists(wip_id)
+        if wip_exists:
+          await client.delete_database(wip_id, preserve_duckdb=True)
+      except Exception as cleanup_err:
+        logger.warning(
+          f"Failed to clean up WIP {wip_id} after blue-green failure: {cleanup_err}"
+        )
+      raise
+    finally:
+      # Always release the lock
+      if lock is not None and lock.acquired:
+        await lock.release()
 
   async def _ensure_database(
     self,
@@ -952,17 +1073,27 @@ class LedgerMaterializer:
     client: "GraphClient",
     graph_id: str,
     result: MaterializeResult,
+    source_graph_id: str | None = None,
   ) -> None:
-    """Materialize staged DuckDB tables into LadybugDB graph."""
+    """Materialize staged DuckDB tables into LadybugDB graph.
+
+    Args:
+        client: Graph API client.
+        graph_id: Target LadybugDB database (may be a WIP database).
+        result: MaterializeResult to populate.
+        source_graph_id: If set, read DuckDB staging from this graph instead
+            of graph_id. Used by blue-green: WIP reads from the original graph's DuckDB.
+    """
     # Materialize nodes first, then relationships
     for table_name in result.tables_staged:
       try:
-        logger.info(f"Materializing {table_name} → LadybugDB")
+        logger.info(f"Materializing {table_name} → LadybugDB ({graph_id})")
         response = await client.materialize_table(
           graph_id=graph_id,
           table_name=table_name,
           ignore_errors=True,
           timeout=300.0,
+          source_graph_id=source_graph_id,
         )
         rows = response.get("rows_ingested", 0)
         result.total_rows += rows

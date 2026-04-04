@@ -123,6 +123,11 @@ class TableMaterializationRequest(BaseModel):
     default=None,
     description="Optional list of file IDs to materialize. If None, materializes all files (full materialization).",
   )
+  source_graph_id: str | None = Field(
+    default=None,
+    description="Read DuckDB staging from this graph instead of the target graph. "
+    "Used by blue-green materialization: WIP database reads from the original graph's DuckDB.",
+  )
 
   @field_validator("file_ids")
   @classmethod

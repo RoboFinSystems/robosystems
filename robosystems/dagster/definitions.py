@@ -95,6 +95,9 @@ from robosystems.dagster.sensors.graph_queue import (
 from robosystems.dagster.sensors.invoice_billing import (
   invoice_subscription_renewal_sensor,
 )
+from robosystems.dagster.sensors.materialization import (
+  stale_graph_materialization_sensor,
+)
 from robosystems.dagster.sensors.worker_reaper import (
   worker_inflight_reaper_sensor,
 )
@@ -238,6 +241,8 @@ all_sensors = [
   graph_creation_queue_sensor,
   expired_graph_subscription_sensor,
   suspended_graph_deprovisioning_sensor,
+  # Platform: Materialization (auto-rematerialize stale graphs)
+  stale_graph_materialization_sensor,
   # Platform: Worker reliability
   worker_inflight_reaper_sensor,
   # Adapter: SEC pipeline

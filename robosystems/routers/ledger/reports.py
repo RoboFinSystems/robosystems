@@ -1,5 +1,6 @@
 """Report CRUD, fact generation, and structure rendering endpoints."""
 
+import asyncio
 from datetime import UTC, date, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Path
@@ -27,6 +28,7 @@ from robosystems.models.api.extensions.reports import (
 )
 from robosystems.models.core import User
 from robosystems.models.extensions import Fact, Report, ReportShare
+from robosystems.operations.extensions.staleness import mark_graph_stale
 from robosystems.operations.reports.fact_grid import (
   PeriodSpec as FactPeriodSpec,
 )
@@ -291,6 +293,11 @@ async def create_report(
       report_def.generation_status = "published"
       report_def.last_generated = datetime.now(UTC)
       session.commit()
+
+      # Mark graph stale (non-blocking — runs in thread to avoid blocking event loop)
+      asyncio.get_running_loop().run_in_executor(
+        None, mark_graph_stale, graph_id, "report_generated"
+      )
 
       structures = _load_structures(session, body.taxonomy_id)
       entity_name = _resolve_entity_name(session, report_def)
@@ -601,6 +608,11 @@ async def regenerate_report(
       report_def.generation_status = "published"
       report_def.last_generated = datetime.now(UTC)
       session.commit()
+
+      # Mark graph stale (non-blocking — runs in thread to avoid blocking event loop)
+      asyncio.get_running_loop().run_in_executor(
+        None, mark_graph_stale, graph_id, "report_generated"
+      )
 
       structures = _load_structures(session, report_def.taxonomy_id)
       entity_name = _resolve_entity_name(session, report_def)

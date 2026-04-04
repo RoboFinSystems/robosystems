@@ -165,7 +165,9 @@ async def materialize_table(
     )
 
   try:
-    duck_path = f"{env.DUCKDB_STAGING_PATH}/{graph_id}.duckdb"
+    # Blue-green: read DuckDB from source graph if specified, otherwise from target
+    duckdb_graph_id = request.source_graph_id or graph_id
+    duck_path = f"{env.DUCKDB_STAGING_PATH}/{duckdb_graph_id}.duckdb"
 
     # CRITICAL: Checkpoint DuckDB to flush WAL to main database BEFORE LadybugDB attaches
     # LadybugDB's DuckDB extension creates a new session that won't see uncommitted WAL data
@@ -186,8 +188,8 @@ async def materialize_table(
     # Check if table exists, create temp copy without file_id
     temp_table_created = False
     try:
-      with duckdb_pool.get_connection(graph_id) as duck_conn:
-        checkpoint_with_retry(duck_conn, graph_id, context="DuckDB")
+      with duckdb_pool.get_connection(duckdb_graph_id) as duck_conn:
+        checkpoint_with_retry(duck_conn, duckdb_graph_id, context="DuckDB")
 
         # Check if table exists
         result = duck_conn.execute(
@@ -460,7 +462,7 @@ async def materialize_table(
       if temp_table_created:
         # Drop temp table
         try:
-          with duckdb_pool.get_connection(graph_id) as duck_conn:
+          with duckdb_pool.get_connection(duckdb_graph_id) as duck_conn:
             duck_conn.execute(f"DROP TABLE IF EXISTS {temp_table_name}")
             logger.debug(f"Cleaned up temp DuckDB table: {temp_table_name}")
         except Exception as drop_err:
@@ -468,10 +470,10 @@ async def materialize_table(
 
         # Checkpoint and release connections (always attempt even if drop failed)
         try:
-          with duckdb_pool.get_connection(graph_id) as duck_conn:
+          with duckdb_pool.get_connection(duckdb_graph_id) as duck_conn:
             duck_conn.execute("CHECKPOINT")
-          duckdb_pool.close_database_connections(graph_id)
-          logger.debug(f"Released DuckDB connections for {graph_id}")
+          duckdb_pool.close_database_connections(duckdb_graph_id)
+          logger.debug(f"Released DuckDB connections for {duckdb_graph_id}")
         except Exception as release_err:
           logger.warning(f"Failed to release DuckDB connections: {release_err}")
 

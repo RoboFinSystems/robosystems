@@ -160,6 +160,21 @@ class GraphMCPTools:
 
       self.build_fact_grid_tool = BuildFactGridTool(graph_client)
 
+    # Layer 2: Materialization tools (user entity graphs only, not shared repos)
+    # Shared repos (SEC) use their own pipeline and don't track staleness.
+    self.get_graph_sync_status_tool = None
+    self.materialize_graph_tool = None
+    if (
+      self._has_extension("roboledger")
+      and env.EXTENSIONS_ENABLED
+      and not self._is_shared_repository()
+      and not read_only
+    ):
+      from .materialization_tools import GetGraphSyncStatusTool, MaterializeGraphTool
+
+      self.get_graph_sync_status_tool = GetGraphSyncStatusTool(graph_client)
+      self.materialize_graph_tool = MaterializeGraphTool(graph_client)
+
     # Layer 2: Schedule tools (gated by roboledger extension + EXTENSIONS_ENABLED)
     self.create_schedule_tool = None
     self.list_schedule_structures_tool = None
@@ -338,6 +353,15 @@ class GraphMCPTools:
       tools.append(self.build_fact_grid_tool.get_tool_definition())
     return tools
 
+  def _get_materialization_tool_definitions(self) -> list[dict[str, Any]]:
+    """Get materialization awareness tool definitions (sync status + trigger)."""
+    tools = []
+    if self.get_graph_sync_status_tool is not None:
+      tools.append(self.get_graph_sync_status_tool.get_tool_definition())
+    if self.materialize_graph_tool is not None:
+      tools.append(self.materialize_graph_tool.get_tool_definition())
+    return tools
+
   def _get_schedule_tool_definitions(self) -> list[dict[str, Any]]:
     """Get schedule management tool definitions (close workflow)."""
     tools = []
@@ -424,6 +448,9 @@ class GraphMCPTools:
 
       # Fact grid tool (custom element/period/entity queries)
       tools.extend(self._get_data_tool_definitions())
+
+      # Materialization tools (sync status + trigger)
+      tools.extend(self._get_materialization_tool_definitions())
 
       # Schedule tools (close workflow)
       tools.extend(self._get_schedule_tool_definitions())
@@ -591,6 +618,24 @@ class GraphMCPTools:
             "Set FACT_GRID_ENABLED=true to enable this feature."
           )
         result = await self.build_fact_grid_tool.execute(arguments)
+        return result if return_raw else json.dumps(result, indent=2)
+
+      # Materialization tools
+      elif name == "get-graph-sync-status":
+        if self.get_graph_sync_status_tool is None:
+          raise ValueError(
+            "get-graph-sync-status tool is not available. "
+            "Requires roboledger extension and EXTENSIONS_ENABLED=true."
+          )
+        result = await self.get_graph_sync_status_tool.execute(arguments)
+        return result if return_raw else json.dumps(result, indent=2)
+
+      elif name == "materialize-graph":
+        if self.materialize_graph_tool is None:
+          raise ValueError(
+            self._tool_unavailable_reason("materialize-graph", "EXTENSIONS_ENABLED")
+          )
+        result = await self.materialize_graph_tool.execute(arguments)
         return result if return_raw else json.dumps(result, indent=2)
 
       # Schedule tools

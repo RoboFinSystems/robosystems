@@ -359,6 +359,120 @@ class LadybugDatabaseManager:
         detail=f"Database deletion failed: {e!s}",
       )
 
+  def database_exists(self, graph_id: str) -> bool:
+    """Check if a LadybugDB database file exists on disk."""
+    db_path = self.base_path / f"{graph_id}.lbug"
+    return db_path.exists()
+
+  def swap_database(self, graph_id: str) -> dict[str, Any]:
+    """Promote a WIP database to active (one-way swap).
+
+    The old active is temporarily renamed to -prev during the swap for
+    crash safety, then deleted on success. This is NOT a rollback
+    mechanism — the goal is zero-downtime replacement.
+
+    Steps:
+    1. Checkpoint WIP to flush any WAL entries
+    2. Close connections for both active and WIP databases
+    3. Rename active -> -prev (crash safety)
+    4. Rename WIP -> active
+    5. Delete -prev (swap succeeded)
+
+    On failure between steps 3-4, automatic recovery restores active from -prev.
+
+    Args:
+        graph_id: The base graph ID (not the -wip variant).
+
+    Returns:
+        Status dict with swap result.
+    """
+    wip_id = f"{graph_id}-wip"
+    prev_id = f"{graph_id}-prev"
+
+    active_path = self.base_path / f"{graph_id}.lbug"
+    wip_path = self.base_path / f"{wip_id}.lbug"
+    prev_path = self.base_path / f"{prev_id}.lbug"
+
+    if not wip_path.exists():
+      raise HTTPException(
+        status_code=status.HTTP_404_NOT_FOUND,
+        detail=f"WIP database {wip_id} not found — nothing to swap",
+      )
+
+    try:
+      # Step 1: Checkpoint WIP to ensure all WAL data is flushed
+      try:
+        with self.connection_pool.get_connection(wip_id) as conn:
+          conn.execute("CHECKPOINT")
+        logger.info(f"Checkpointed WIP database {wip_id} before swap")
+      except Exception as e:
+        logger.warning(f"Could not checkpoint WIP database {wip_id}: {e}")
+
+      # Step 2: Close all connections for both databases
+      self.connection_pool.close_database_connections(graph_id)
+      self.connection_pool.close_database_connections(wip_id)
+
+      # Step 3: Clean up any prior -prev
+      if prev_path.exists():
+        prev_wal = self.base_path / f"{prev_id}.lbug.wal"
+        prev_path.unlink()
+        if prev_wal.exists():
+          prev_wal.unlink()
+        logger.debug(f"Cleaned up prior -prev database for {graph_id}")
+
+      # Step 4: Rename active -> -prev (if active exists)
+      if active_path.exists():
+        active_path.rename(prev_path)
+        # Move WAL too
+        active_wal = self.base_path / f"{graph_id}.lbug.wal"
+        if active_wal.exists():
+          active_wal.rename(self.base_path / f"{prev_id}.lbug.wal")
+        logger.info(f"Moved active {graph_id} to {prev_id}")
+
+      # Step 5: Rename WIP -> active
+      wip_path.rename(active_path)
+      # Move WAL too
+      wip_wal = self.base_path / f"{wip_id}.lbug.wal"
+      if wip_wal.exists():
+        wip_wal.rename(self.base_path / f"{graph_id}.lbug.wal")
+      logger.info(f"Promoted WIP {wip_id} to active {graph_id}")
+
+      # Step 6: Clean up -prev (swap succeeded, no need for rollback)
+      if prev_path.exists():
+        prev_wal = self.base_path / f"{prev_id}.lbug.wal"
+        prev_path.unlink()
+        if prev_wal.exists():
+          prev_wal.unlink()
+        logger.debug(f"Deleted -prev database for {graph_id}")
+
+      return {
+        "status": "success",
+        "graph_id": graph_id,
+        "message": "WIP database promoted to active",
+      }
+
+    except Exception as e:
+      # Rollback: restore active from -prev if the swap failed midway
+      logger.error(f"Swap failed for {graph_id}: {e}, attempting rollback")
+      try:
+        if prev_path.exists() and not active_path.exists():
+          prev_path.rename(active_path)
+          prev_wal = self.base_path / f"{prev_id}.lbug.wal"
+          if prev_wal.exists():
+            prev_wal.rename(self.base_path / f"{graph_id}.lbug.wal")
+          logger.info(f"Rollback successful: restored {graph_id} from {prev_id}")
+      except Exception as rollback_err:
+        logger.error(f"Rollback FAILED for {graph_id}: {rollback_err}")
+        raise HTTPException(
+          status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+          detail=f"Swap failed and rollback failed: {e!s} / {rollback_err!s}",
+        )
+
+      raise HTTPException(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        detail=f"Swap failed (rolled back): {e!s}",
+      )
+
   def get_connection(self, graph_id: str, read_only: bool = False):
     """
     Get a connection for a database from the connection pool.
@@ -376,8 +490,11 @@ class LadybugDatabaseManager:
     """
     List all databases on this node by scanning for .lbug files on disk.
 
+    Excludes blue-green temporary databases (-wip, -prev) from the listing
+    so they don't count toward capacity limits.
+
     Returns:
-        List of database names
+        List of database names (excludes -wip and -prev suffixes)
     """
     databases = []
 
@@ -385,6 +502,9 @@ class LadybugDatabaseManager:
       for item in self.base_path.iterdir():
         if item.is_file() and item.name.endswith(".lbug"):
           db_name = item.name[:-5]  # Remove .lbug extension
+          # Filter out blue-green temporary databases
+          if db_name.endswith("-wip") or db_name.endswith("-prev"):
+            continue
           databases.append(db_name)
 
       return sorted(databases)

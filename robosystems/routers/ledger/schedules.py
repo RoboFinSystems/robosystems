@@ -1,5 +1,6 @@
 """Schedule CRUD and closing entry endpoints."""
 
+import asyncio
 from datetime import date
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query
@@ -23,6 +24,7 @@ from robosystems.models.api.extensions.schedules import (
   ScheduleSummaryResponse,
 )
 from robosystems.models.core import User
+from robosystems.operations.extensions.staleness import mark_graph_stale
 from robosystems.operations.schedules import ScheduleService
 
 router = APIRouter()
@@ -111,6 +113,11 @@ async def create_schedule(
       ).fetchone()
 
       session.commit()
+
+      # Mark graph stale (non-blocking — runs in thread to avoid blocking event loop)
+      asyncio.get_running_loop().run_in_executor(
+        None, mark_graph_stale, graph_id, "schedule_created"
+      )
 
       return ScheduleCreatedResponse(
         structure_id=structure.id,
@@ -284,6 +291,11 @@ async def create_closing_entry(
         memo=body.memo,
       )
       session.commit()
+
+      # Mark graph stale (non-blocking — runs in thread to avoid blocking event loop)
+      asyncio.get_running_loop().run_in_executor(
+        None, mark_graph_stale, graph_id, "closing_entry_created"
+      )
 
       return ClosingEntryResponse(
         entry_id=result.entry_id,
