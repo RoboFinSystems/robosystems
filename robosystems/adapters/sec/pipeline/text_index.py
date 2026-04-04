@@ -199,7 +199,7 @@ def _read_parquets_from_s3(
 
   import pyarrow as pa
 
-  return pa.concat_tables(tables)
+  return pa.concat_tables(tables, promote_options="default")
 
 
 def _extract_html_from_zip(zip_bytes: bytes) -> str | None:
