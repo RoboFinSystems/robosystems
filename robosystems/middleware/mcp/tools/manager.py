@@ -161,6 +161,7 @@ class GraphMCPTools:
       self.build_fact_grid_tool = BuildFactGridTool(graph_client)
 
     # Layer 2: Schedule tools (gated by roboledger extension + EXTENSIONS_ENABLED)
+    self.create_schedule_tool = None
     self.list_schedule_structures_tool = None
     self.get_schedule_facts_tool = None
     self.get_period_close_status_tool = None
@@ -168,11 +169,13 @@ class GraphMCPTools:
     if self._has_extension("roboledger") and env.EXTENSIONS_ENABLED and not read_only:
       from .schedule_tools import (
         CreateClosingEntryTool,
+        CreateScheduleTool,
         GetPeriodCloseStatusTool,
         GetScheduleFactsTool,
         ListScheduleStructuresTool,
       )
 
+      self.create_schedule_tool = CreateScheduleTool(graph_client)
       self.list_schedule_structures_tool = ListScheduleStructuresTool(graph_client)
       self.get_schedule_facts_tool = GetScheduleFactsTool(graph_client)
       self.get_period_close_status_tool = GetPeriodCloseStatusTool(graph_client)
@@ -338,6 +341,8 @@ class GraphMCPTools:
   def _get_schedule_tool_definitions(self) -> list[dict[str, Any]]:
     """Get schedule management tool definitions (close workflow)."""
     tools = []
+    if self.create_schedule_tool is not None:
+      tools.append(self.create_schedule_tool.get_tool_definition())
     if self.list_schedule_structures_tool is not None:
       tools.append(self.list_schedule_structures_tool.get_tool_definition())
     if self.get_schedule_facts_tool is not None:
@@ -589,6 +594,15 @@ class GraphMCPTools:
         return result if return_raw else json.dumps(result, indent=2)
 
       # Schedule tools
+      elif name == "create-schedule":
+        if self.create_schedule_tool is None:
+          raise ValueError(
+            "create-schedule tool is not available. "
+            "Requires roboledger extension and EXTENSIONS_ENABLED=true."
+          )
+        result = await self.create_schedule_tool.execute(arguments)
+        return result if return_raw else json.dumps(result, indent=2)
+
       elif name == "list-schedule-structures":
         if self.list_schedule_structures_tool is None:
           raise ValueError(

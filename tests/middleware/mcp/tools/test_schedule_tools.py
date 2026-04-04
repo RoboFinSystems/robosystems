@@ -9,6 +9,7 @@ import pytest
 
 from robosystems.middleware.mcp.tools.schedule_tools import (
   CreateClosingEntryTool,
+  CreateScheduleTool,
   GetPeriodCloseStatusTool,
   GetScheduleFactsTool,
   ListScheduleStructuresTool,
@@ -24,6 +25,115 @@ def mock_graph_client():
 
 SVC_PATH = "robosystems.operations.schedules.ScheduleService"
 SESSION_PATH = "robosystems.db.extensions.extensions_session"
+
+
+class TestCreateScheduleTool:
+  def test_tool_definition(self, mock_graph_client):
+    tool = CreateScheduleTool(mock_graph_client)
+    defn = tool.get_tool_definition()
+    assert defn["name"] == "create-schedule"
+    assert "name" in defn["inputSchema"]["required"]
+    assert "element_ids" in defn["inputSchema"]["required"]
+    assert "monthly_amount" in defn["inputSchema"]["required"]
+
+  @pytest.mark.asyncio
+  async def test_creates_schedule(self, mock_graph_client):
+    mock_session = MagicMock()
+    mock_session.__enter__ = MagicMock(return_value=mock_session)
+    mock_session.__exit__ = MagicMock(return_value=False)
+
+    mock_structure = MagicMock()
+    mock_structure.id = "struct_sched_01"
+    mock_structure.name = "Office Furniture Depreciation"
+    mock_structure.taxonomy_id = "tax_sched_01"
+
+    mock_svc = MagicMock()
+    mock_svc.create_schedule.return_value = mock_structure
+
+    tool = CreateScheduleTool(mock_graph_client)
+    with (
+      patch(SESSION_PATH, return_value=mock_session),
+      patch(SVC_PATH, return_value=mock_svc),
+    ):
+      result = await tool.execute(
+        {
+          "name": "Office Furniture Depreciation",
+          "element_ids": ["elem_depr", "elem_accum"],
+          "period_start": "2026-01-01",
+          "period_end": "2032-12-31",
+          "monthly_amount": 41667,
+          "debit_element_id": "elem_depr",
+          "credit_element_id": "elem_accum",
+        }
+      )
+
+    assert result["success"] is True
+    assert result["structure_id"] == "struct_sched_01"
+    mock_svc.create_schedule.assert_called_once()
+    mock_session.commit.assert_called_once()
+
+  @pytest.mark.asyncio
+  async def test_creates_with_metadata(self, mock_graph_client):
+    mock_session = MagicMock()
+    mock_session.__enter__ = MagicMock(return_value=mock_session)
+    mock_session.__exit__ = MagicMock(return_value=False)
+
+    mock_structure = MagicMock()
+    mock_structure.id = "struct_sched_02"
+    mock_structure.name = "Test"
+    mock_structure.taxonomy_id = "tax_01"
+
+    mock_svc = MagicMock()
+    mock_svc.create_schedule.return_value = mock_structure
+
+    tool = CreateScheduleTool(mock_graph_client)
+    with (
+      patch(SESSION_PATH, return_value=mock_session),
+      patch(SVC_PATH, return_value=mock_svc),
+    ):
+      result = await tool.execute(
+        {
+          "name": "Test",
+          "element_ids": ["elem_a", "elem_b"],
+          "period_start": "2026-01-01",
+          "period_end": "2026-12-31",
+          "monthly_amount": 10000,
+          "debit_element_id": "elem_a",
+          "credit_element_id": "elem_b",
+          "method": "straight_line",
+          "original_amount": 3500000,
+          "useful_life_months": 84,
+        }
+      )
+
+    assert result["success"] is True
+    mock_session.commit.assert_called_once()
+    # Verify schedule_metadata was passed
+    call_kwargs = mock_svc.create_schedule.call_args[1]
+    assert call_kwargs["schedule_metadata"] is not None
+    assert call_kwargs["schedule_metadata"].original_amount == 3500000
+
+  @pytest.mark.asyncio
+  async def test_handles_error(self, mock_graph_client):
+    mock_session = MagicMock()
+    mock_session.__enter__ = MagicMock(side_effect=Exception("db error"))
+    mock_session.__exit__ = MagicMock(return_value=False)
+
+    tool = CreateScheduleTool(mock_graph_client)
+    with patch(SESSION_PATH, return_value=mock_session):
+      result = await tool.execute(
+        {
+          "name": "Test",
+          "element_ids": ["elem_a"],
+          "period_start": "2026-01-01",
+          "period_end": "2026-12-31",
+          "monthly_amount": 10000,
+          "debit_element_id": "elem_a",
+          "credit_element_id": "elem_b",
+        }
+      )
+
+    assert "error" in result
 
 
 class TestListScheduleStructuresTool:
