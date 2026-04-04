@@ -79,8 +79,10 @@ class TestSwapDatabase:
     result = manager.swap_database("kg123")
 
     assert result["status"] == "success"
-    # WIP WAL should have become the active WAL
+    # WIP WAL should have become the active WAL, then -prev cleaned up
     assert not (db_dir / "kg123-wip.lbug.wal").exists()
+    assert (db_dir / "kg123.lbug").read_text() == "wip"
+    assert not (db_dir / "kg123-prev.lbug.wal").exists()
 
   def test_swap_404_when_no_wip(self, manager, db_dir):
     """Swap fails with 404 if no WIP database exists."""
@@ -103,31 +105,18 @@ class TestSwapDatabase:
     assert any("kg123-wip" in c for c in calls)
 
 
-class TestRollbackDatabase:
-  def test_rollback_restores_prev_to_active(self, manager, db_dir):
-    """Rollback restores -prev to active."""
-    (db_dir / "kg123.lbug").write_text("bad-active")
-    (db_dir / "kg123-prev.lbug").write_text("good-prev")
-
-    result = manager.rollback_database("kg123")
-
-    assert result["status"] == "success"
-    assert (db_dir / "kg123.lbug").read_text() == "good-prev"
-    assert not (db_dir / "kg123-prev.lbug").exists()
-
-  def test_rollback_404_when_no_prev(self, manager, db_dir):
-    """Rollback fails with 404 if no -prev database exists."""
+class TestListDatabasesFiltering:
+  def test_excludes_wip_and_prev(self, manager, db_dir):
+    """list_databases() should not include -wip or -prev databases."""
     (db_dir / "kg123.lbug").touch()
+    (db_dir / "kg123-wip.lbug").touch()
+    (db_dir / "kg123-prev.lbug").touch()
+    (db_dir / "kg456.lbug").touch()
 
-    with pytest.raises(HTTPException) as exc_info:
-      manager.rollback_database("kg123")
-    assert exc_info.value.status_code == 404
+    result = manager.list_databases()
 
-  def test_rollback_works_without_active(self, manager, db_dir):
-    """-prev can be restored even if active was deleted."""
-    (db_dir / "kg123-prev.lbug").write_text("good-prev")
-
-    result = manager.rollback_database("kg123")
-
-    assert result["status"] == "success"
-    assert (db_dir / "kg123.lbug").read_text() == "good-prev"
+    assert "kg123" in result
+    assert "kg456" in result
+    assert "kg123-wip" not in result
+    assert "kg123-prev" not in result
+    assert len(result) == 2

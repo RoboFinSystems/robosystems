@@ -1249,21 +1249,6 @@ class GraphClient(BaseGraphClient):
     )
     return response.json()
 
-  async def rollback_database(self, graph_id: str) -> dict[str, Any]:
-    """Restore the -prev database to active (manual rollback).
-
-    Args:
-        graph_id: Base graph ID.
-
-    Returns:
-        Rollback result with status and message.
-    """
-    response = await self._request(
-      "POST",
-      f"/databases/{graph_id}/rollback",
-    )
-    return response.json()
-
   async def execute_ddl(self, ddl: str, graph_id: str | None = None) -> dict[str, Any]:
     """
     Execute DDL (Data Definition Language) statements.

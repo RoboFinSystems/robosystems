@@ -365,25 +365,26 @@ class LadybugDatabaseManager:
     return db_path.exists()
 
   def swap_database(self, graph_id: str) -> dict[str, Any]:
-    """Atomically swap a WIP database to become the active database.
+    """Promote a WIP database to active (one-way swap).
 
+    The old active is temporarily renamed to -prev during the swap for
+    crash safety, then deleted on success. This is NOT a rollback
+    mechanism — the goal is zero-downtime replacement.
+
+    Steps:
     1. Checkpoint WIP to flush any WAL entries
     2. Close connections for both active and WIP databases
-    3. Rename active -> -prev (rollback safety)
+    3. Rename active -> -prev (crash safety)
     4. Rename WIP -> active
-    5. Clean up WAL files
-    6. Remove WIP from pool locks
+    5. Delete -prev (swap succeeded)
 
-    On failure, automatic rollback restores the active database from -prev.
+    On failure between steps 3-4, automatic recovery restores active from -prev.
 
     Args:
         graph_id: The base graph ID (not the -wip variant).
 
     Returns:
         Status dict with swap result.
-
-    Raises:
-        HTTPException: If swap fails and rollback also fails.
     """
     wip_id = f"{graph_id}-wip"
     prev_id = f"{graph_id}-prev"
@@ -472,49 +473,6 @@ class LadybugDatabaseManager:
         detail=f"Swap failed (rolled back): {e!s}",
       )
 
-  def rollback_database(self, graph_id: str) -> dict[str, Any]:
-    """Restore the -prev database to active (manual rollback).
-
-    Args:
-        graph_id: The base graph ID.
-
-    Returns:
-        Status dict with rollback result.
-    """
-    prev_id = f"{graph_id}-prev"
-    active_path = self.base_path / f"{graph_id}.lbug"
-    prev_path = self.base_path / f"{prev_id}.lbug"
-
-    if not prev_path.exists():
-      raise HTTPException(
-        status_code=status.HTTP_404_NOT_FOUND,
-        detail=f"No previous database {prev_id} found — nothing to rollback",
-      )
-
-    # Close active connections
-    self.connection_pool.close_database_connections(graph_id)
-
-    # Remove current active (it's the bad one)
-    if active_path.exists():
-      active_wal = self.base_path / f"{graph_id}.lbug.wal"
-      active_path.unlink()
-      if active_wal.exists():
-        active_wal.unlink()
-
-    # Restore prev -> active
-    prev_path.rename(active_path)
-    prev_wal = self.base_path / f"{prev_id}.lbug.wal"
-    if prev_wal.exists():
-      prev_wal.rename(self.base_path / f"{graph_id}.lbug.wal")
-
-    logger.info(f"Rolled back {graph_id}: restored from {prev_id}")
-
-    return {
-      "status": "success",
-      "graph_id": graph_id,
-      "message": "Previous database restored to active",
-    }
-
   def get_connection(self, graph_id: str, read_only: bool = False):
     """
     Get a connection for a database from the connection pool.
@@ -532,8 +490,11 @@ class LadybugDatabaseManager:
     """
     List all databases on this node by scanning for .lbug files on disk.
 
+    Excludes blue-green temporary databases (-wip, -prev) from the listing
+    so they don't count toward capacity limits.
+
     Returns:
-        List of database names
+        List of database names (excludes -wip and -prev suffixes)
     """
     databases = []
 
@@ -541,6 +502,9 @@ class LadybugDatabaseManager:
       for item in self.base_path.iterdir():
         if item.is_file() and item.name.endswith(".lbug"):
           db_name = item.name[:-5]  # Remove .lbug extension
+          # Filter out blue-green temporary databases
+          if db_name.endswith("-wip") or db_name.endswith("-prev"):
+            continue
           databases.append(db_name)
 
       return sorted(databases)

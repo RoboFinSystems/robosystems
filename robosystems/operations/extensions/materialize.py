@@ -894,12 +894,41 @@ class LedgerMaterializer:
 
     The active graph serves queries throughout. Downtime is only the
     milliseconds of the file rename swap.
+
+    Acquires a per-graph materialization lock to prevent concurrent rebuilds.
     """
+    from robosystems.graph_api.core.ladybug.materialization_lock import (
+      MaterializationLock,
+    )
+
     wip_id = f"{graph_id}-wip"
+    lock: MaterializationLock | None = None
 
     logger.info(f"Blue-green materialization: building WIP {wip_id}")
 
     try:
+      # Step 0: Acquire per-graph materialization lock
+      try:
+        from robosystems.config.valkey_registry import (
+          ValkeyDatabase,
+          create_async_redis_client,
+        )
+
+        redis_client = create_async_redis_client(ValkeyDatabase.LOCKS)
+        lock = MaterializationLock(redis_client, graph_id)
+        acquired = await lock.acquire(timeout_seconds=5)
+        if not acquired:
+          raise RuntimeError(
+            f"Could not acquire materialization lock for {graph_id} "
+            "(another materialization may be in progress)"
+          )
+      except ImportError:
+        logger.warning("Valkey not available — proceeding without materialization lock")
+      except RuntimeError:
+        raise
+      except Exception as e:
+        logger.warning(f"Could not acquire materialization lock: {e}")
+
       # Step 1: Clean up any leftover WIP from a previous failed run
       wip_exists = await client.database_exists(wip_id)
       if wip_exists:
@@ -931,8 +960,8 @@ class LedgerMaterializer:
         )
         try:
           await client.delete_database(wip_id, preserve_duckdb=True)
-        except Exception:
-          pass
+        except Exception as cleanup_err:
+          logger.warning(f"Failed to clean up WIP {wip_id} after errors: {cleanup_err}")
 
     except Exception as e:
       # Clean up WIP on failure — active graph is untouched
@@ -941,9 +970,15 @@ class LedgerMaterializer:
         wip_exists = await client.database_exists(wip_id)
         if wip_exists:
           await client.delete_database(wip_id, preserve_duckdb=True)
-      except Exception:
-        pass
+      except Exception as cleanup_err:
+        logger.warning(
+          f"Failed to clean up WIP {wip_id} after blue-green failure: {cleanup_err}"
+        )
       raise
+    finally:
+      # Always release the lock
+      if lock is not None and lock.acquired:
+        await lock.release()
 
   async def _ensure_database(
     self,

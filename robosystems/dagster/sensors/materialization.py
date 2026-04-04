@@ -5,6 +5,8 @@ Batches writes within a window to avoid excessive rebuilds
 (e.g., 5 OLTP writes in 10 seconds don't trigger 5 materializations).
 """
 
+import json
+
 from dagster import (
   DefaultSensorStatus,
   RunRequest,
@@ -21,6 +23,11 @@ logger = get_logger(__name__)
 # Minimum staleness age before triggering (seconds).
 # Prevents materializing immediately after every single OLTP write.
 _MIN_STALE_AGE_SECONDS = 30
+
+# How long a graph stays in the "in-progress" cursor before being eligible
+# for re-submission (seconds). Prevents permanent blocking if a Dagster job
+# fails without calling mark_fresh().
+_CURSOR_EXPIRY_SECONDS = 7200  # 2 hours
 
 
 @sensor(
@@ -39,7 +46,7 @@ def stale_graph_materialization_sensor(context: SensorEvaluationContext):
   - status = 'active'
   - is_repository = false (shared repos use their own pipeline)
 
-  Skips graphs that are already materializing (checked via cursor).
+  Skips graphs that are already materializing (checked via cursor with expiry).
   """
   from datetime import UTC, datetime, timedelta
 
@@ -50,11 +57,29 @@ def stale_graph_materialization_sensor(context: SensorEvaluationContext):
     now = datetime.now(UTC)
     cutoff = now - timedelta(seconds=_MIN_STALE_AGE_SECONDS)
 
-    # Track which graphs we've already submitted in this tick
-    # (cursor stores graph_ids of in-progress materializations)
-    in_progress: set[str] = set()
+    # Cursor stores {graph_id: submitted_at_iso} for in-progress materializations.
+    # Entries expire after _CURSOR_EXPIRY_SECONDS to prevent permanent blocking.
+    in_progress: dict[str, str] = {}
     if context.cursor:
-      in_progress = set(context.cursor.split(","))
+      try:
+        in_progress = json.loads(context.cursor)
+      except (json.JSONDecodeError, TypeError):
+        in_progress = {}
+
+    # Expire stale cursor entries
+    active_in_progress: dict[str, str] = {}
+    for gid, submitted_at_str in in_progress.items():
+      try:
+        from dateutil import parser as date_parser
+
+        submitted_at = date_parser.isoparse(submitted_at_str)
+        if (now - submitted_at).total_seconds() < _CURSOR_EXPIRY_SECONDS:
+          active_in_progress[gid] = submitted_at_str
+        else:
+          logger.info(f"Cursor entry expired for {gid} (submitted {submitted_at_str})")
+      except Exception:
+        # Bad cursor entry — drop it
+        pass
 
     stale_graphs = (
       db.query(Graph)
@@ -70,22 +95,28 @@ def stale_graph_materialization_sensor(context: SensorEvaluationContext):
     )
 
     run_requests = []
-    submitted_ids = set(in_progress)
+    new_cursor = dict(active_in_progress)
 
     for graph in stale_graphs:
       graph_id = str(graph.graph_id)
-      if graph_id in in_progress:
+      if graph_id in active_in_progress:
         logger.debug(f"Skipping {graph_id}: materialization already in progress")
         continue
 
+      # Use graph_stale_at as run_key so Dagster deduplicates on the same
+      # staleness event (not on sensor tick time).
+      stale_at_str = (
+        graph.graph_stale_at.isoformat() if graph.graph_stale_at else "unknown"
+      )
+
       logger.info(
         f"Submitting materialization for stale graph {graph_id} "
-        f"(stale since {graph.graph_stale_at}, reason: {graph.graph_stale_reason})"
+        f"(stale since {stale_at_str}, reason: {graph.graph_stale_reason})"
       )
 
       run_requests.append(
         RunRequest(
-          run_key=f"stale_materialize_{graph_id}_{now.isoformat()}",
+          run_key=f"stale_materialize_{graph_id}_{stale_at_str}",
           run_config={
             "ops": {
               "materialize_extensions_to_graph": {
@@ -99,13 +130,13 @@ def stale_graph_materialization_sensor(context: SensorEvaluationContext):
           tags={"graph_id": graph_id, "trigger": "stale_sensor"},
         )
       )
-      submitted_ids.add(graph_id)
+      new_cursor[graph_id] = now.isoformat()
 
-    # Update cursor with currently-in-progress graph IDs
-    # Remove graph IDs that are no longer stale (materialization completed)
+    # Remove cursor entries for graphs that are no longer stale
     still_stale = {str(g.graph_id) for g in stale_graphs}
-    active_ids = submitted_ids & still_stale
-    context.update_cursor(",".join(sorted(active_ids)) if active_ids else "")
+    new_cursor = {gid: ts for gid, ts in new_cursor.items() if gid in still_stale}
+
+    context.update_cursor(json.dumps(new_cursor) if new_cursor else "")
 
     if run_requests:
       logger.info(

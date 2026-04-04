@@ -141,6 +141,16 @@ class MaterializationLock:
       self._acquired = False
       return False
 
+  async def __aenter__(self) -> "MaterializationLock":
+    """Async context manager: acquire the lock."""
+    if not await self.acquire():
+      raise RuntimeError(f"Could not acquire materialization lock: {self.lock_key}")
+    return self
+
+  async def __aexit__(self, *args: object) -> None:
+    """Async context manager: release the lock."""
+    await self.release()
+
   async def is_locked(self) -> bool:
     """Check if the lock is currently held (by anyone)."""
     try:

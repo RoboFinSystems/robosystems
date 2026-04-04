@@ -1,5 +1,6 @@
 """Tests for the stale graph materialization sensor."""
 
+import json
 from datetime import UTC, datetime, timedelta
 from unittest.mock import MagicMock, patch
 
@@ -53,10 +54,15 @@ class TestStaleGraphSensor:
 
     assert len(result) == 1
     assert "kg123" in result[0].run_key
+    # run_key uses graph_stale_at, not now — enables Dagster deduplication
+    assert stale_at.isoformat() in result[0].run_key
 
   def test_skips_in_progress_graph(self):
     stale_at = datetime.now(UTC) - timedelta(seconds=60)
     graphs = [_make_graph("kg123", stale_at=stale_at)]
+
+    # JSON cursor with recent timestamp (not expired)
+    cursor = json.dumps({"kg123": datetime.now(UTC).isoformat()})
 
     with patch(
       "robosystems.dagster.sensors.materialization.db_session_factory"
@@ -65,10 +71,31 @@ class TestStaleGraphSensor:
       mock_db.return_value = mock_session
       mock_session.query.return_value.filter.return_value.all.return_value = graphs
 
-      context = build_sensor_context(cursor="kg123")
+      context = build_sensor_context(cursor=cursor)
       result = list(stale_graph_materialization_sensor(context))
 
     assert result == []
+
+  def test_retries_after_cursor_expiry(self):
+    """Graphs whose cursor entry has expired should be re-submitted."""
+    stale_at = datetime.now(UTC) - timedelta(seconds=60)
+    graphs = [_make_graph("kg123", stale_at=stale_at)]
+
+    # Cursor entry from 3 hours ago (past 2-hour expiry)
+    old_time = (datetime.now(UTC) - timedelta(hours=3)).isoformat()
+    cursor = json.dumps({"kg123": old_time})
+
+    with patch(
+      "robosystems.dagster.sensors.materialization.db_session_factory"
+    ) as mock_db:
+      mock_session = MagicMock()
+      mock_db.return_value = mock_session
+      mock_session.query.return_value.filter.return_value.all.return_value = graphs
+
+      context = build_sensor_context(cursor=cursor)
+      result = list(stale_graph_materialization_sensor(context))
+
+    assert len(result) == 1
 
   def test_handles_multiple_stale_graphs(self):
     stale_at = datetime.now(UTC) - timedelta(seconds=120)

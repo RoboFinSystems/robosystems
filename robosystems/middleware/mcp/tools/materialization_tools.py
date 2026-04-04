@@ -28,7 +28,7 @@ class GetGraphSyncStatusTool:
 - When the user asks about data freshness
 
 **RETURNS:**
-- sync_status: "fresh" | "stale" | "materializing" | "failed"
+- sync_status: "fresh" | "stale"
 - stale_since: ISO timestamp (null if fresh)
 - stale_duration_minutes: how long it's been stale
 - stale_reason: what caused the staleness
@@ -80,8 +80,10 @@ class GetGraphSyncStatusTool:
             last_mat_dt = date_parser.isoparse(last_materialized_at)
             delta = datetime.now(UTC) - last_mat_dt
             hours_since_materialization = round(delta.total_seconds() / 3600, 1)
-          except Exception:
-            pass
+          except Exception as exc:
+            logger.warning(
+              f"Could not parse last_materialized_at '{last_materialized_at}': {exc}"
+            )
 
         # Determine sync status
         if is_stale:
@@ -152,9 +154,7 @@ class MaterializeGraphTool:
     force = arguments.get("force", False)
 
     # Call the materialize endpoint internally
-    api_base = (
-      env.API_BASE_URL if hasattr(env, "API_BASE_URL") else "http://localhost:8000"
-    )
+    api_base = env.ROBOSYSTEMS_API_URL
     url = f"{api_base}/v1/graphs/{graph_id}/materialize"
 
     try:
