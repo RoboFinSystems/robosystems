@@ -205,12 +205,15 @@ class GraphMCPTools:
       self.search_documents_tool = SearchDocumentsTool(graph_client)
       self.get_document_section_tool = GetDocumentSectionTool(graph_client)
 
-    # Layer 3: Document management tools (gated by SEMANTIC_SEARCH_ENABLED)
+    # Layer 3: Document management tools (user graphs only, not shared repos)
+    # Shared repos (SEC) use OpenSearch directly — no PG document rows.
+    # Read tools (list/get) are available on read-only user graphs.
+    # Write tools (create/update) require writable user graphs.
     self.create_document_tool = None
     self.update_document_tool = None
     self.get_document_tool = None
     self.list_documents_tool = None
-    if env.SEMANTIC_SEARCH_ENABLED and not read_only:
+    if env.SEMANTIC_SEARCH_ENABLED and not self._is_shared_repository():
       from .document_tools import (
         CreateDocumentTool,
         GetDocumentTool,
@@ -218,10 +221,14 @@ class GraphMCPTools:
         UpdateDocumentTool,
       )
 
-      self.create_document_tool = CreateDocumentTool(graph_client)
-      self.update_document_tool = UpdateDocumentTool(graph_client)
+      # Read tools — available on all user graphs (including read-only)
       self.get_document_tool = GetDocumentTool(graph_client)
       self.list_documents_tool = ListDocumentsTool(graph_client)
+
+      # Write tools — only on writable graphs
+      if not read_only:
+        self.create_document_tool = CreateDocumentTool(graph_client)
+        self.update_document_tool = UpdateDocumentTool(graph_client)
 
     # Cache statistics (inherited from schema tool)
     self._cache_hits = 0
@@ -234,6 +241,17 @@ class GraphMCPTools:
   def _has_extension(self, extension: str) -> bool:
     """Check if the graph has a specific schema extension."""
     return extension in self.schema_extensions
+
+  def _is_shared_repository(self) -> bool:
+    """Check if the graph is a shared repository (e.g., SEC)."""
+    try:
+      from robosystems.config.shared_repositories import (
+        is_shared_repository_or_subgraph,
+      )
+
+      return is_shared_repository_or_subgraph(self.client.graph_id)
+    except Exception:
+      return False
 
   def _should_include_semantic_tools(self) -> bool:
     """Check if semantic enrichment tools should be included.
