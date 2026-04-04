@@ -31,6 +31,24 @@ RoboSystems is a knowledge graph platform for enterprise financial and operation
 - **QuickBooks**: Sync transactions, accounts, and financial reports
 
 
+### Ledger Extension
+
+- **Chart of Accounts**: View accounts and hierarchical account trees synced from connected systems
+- **Transactions**: List and inspect transactions with entries and line items
+- **Trial Balance**: Generate trial balances with optional date filtering
+- **Taxonomies**: US GAAP reporting taxonomy with structures, elements, and associations
+- **Mappings**: Map chart of accounts to GAAP reporting concepts with AI auto-mapping
+- **Reports**: Create, view, and share multi-period financial statements (income statement, balance sheet)
+- **Schedules**: Depreciation, amortization, and accrual schedules with monthly fact generation and period close workflow
+- **Publish Lists**: Share reports to other graphs via managed distribution lists
+
+### Investor Extension
+
+- **Portfolios**: Create and manage investment portfolios with metadata and classification
+- **Securities**: Track securities with optional entity linking for cross-graph research
+- **Positions**: Record holdings with cost basis, quantity, and date tracking
+- **Holdings**: Aggregate portfolio holdings with current valuations
+
 ### User & Access
 
 - **Authentication**: JWT tokens and API key management
