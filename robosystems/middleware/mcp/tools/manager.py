@@ -160,6 +160,24 @@ class GraphMCPTools:
 
       self.build_fact_grid_tool = BuildFactGridTool(graph_client)
 
+    # Layer 2: Schedule tools (gated by roboledger extension + EXTENSIONS_ENABLED)
+    self.list_schedule_structures_tool = None
+    self.get_schedule_facts_tool = None
+    self.get_period_close_status_tool = None
+    self.create_closing_entry_tool = None
+    if self._has_extension("roboledger") and env.EXTENSIONS_ENABLED and not read_only:
+      from .schedule_tools import (
+        CreateClosingEntryTool,
+        GetPeriodCloseStatusTool,
+        GetScheduleFactsTool,
+        ListScheduleStructuresTool,
+      )
+
+      self.list_schedule_structures_tool = ListScheduleStructuresTool(graph_client)
+      self.get_schedule_facts_tool = GetScheduleFactsTool(graph_client)
+      self.get_period_close_status_tool = GetPeriodCloseStatusTool(graph_client)
+      self.create_closing_entry_tool = CreateClosingEntryTool(graph_client)
+
     # Layer 2: Taxonomy mapping tools (gated by roboledger extension + EXTENSIONS_ENABLED)
     self.get_unmapped_elements_tool = None
     self.suggest_mapping_tool = None
@@ -290,6 +308,19 @@ class GraphMCPTools:
       tools.append(self.build_fact_grid_tool.get_tool_definition())
     return tools
 
+  def _get_schedule_tool_definitions(self) -> list[dict[str, Any]]:
+    """Get schedule management tool definitions (close workflow)."""
+    tools = []
+    if self.list_schedule_structures_tool is not None:
+      tools.append(self.list_schedule_structures_tool.get_tool_definition())
+    if self.get_schedule_facts_tool is not None:
+      tools.append(self.get_schedule_facts_tool.get_tool_definition())
+    if self.get_period_close_status_tool is not None:
+      tools.append(self.get_period_close_status_tool.get_tool_definition())
+    if self.create_closing_entry_tool is not None:
+      tools.append(self.create_closing_entry_tool.get_tool_definition())
+    return tools
+
   def _get_taxonomy_tool_definitions(self) -> list[dict[str, Any]]:
     """Get taxonomy mapping tool definitions (CoA → GAAP workflow)."""
     tools = []
@@ -361,6 +392,9 @@ class GraphMCPTools:
 
       # Fact grid tool (custom element/period/entity queries)
       tools.extend(self._get_data_tool_definitions())
+
+      # Schedule tools (close workflow)
+      tools.extend(self._get_schedule_tool_definitions())
 
       # Taxonomy mapping tools (CoA → GAAP workflow)
       tools.extend(self._get_taxonomy_tool_definitions())
@@ -521,6 +555,43 @@ class GraphMCPTools:
             "Set FACT_GRID_ENABLED=true to enable this feature."
           )
         result = await self.build_fact_grid_tool.execute(arguments)
+        return result if return_raw else json.dumps(result, indent=2)
+
+      # Schedule tools
+      elif name == "list-schedule-structures":
+        if self.list_schedule_structures_tool is None:
+          raise ValueError(
+            "list-schedule-structures tool is not available. "
+            "Requires roboledger extension and EXTENSIONS_ENABLED=true."
+          )
+        result = await self.list_schedule_structures_tool.execute(arguments)
+        return result if return_raw else json.dumps(result, indent=2)
+
+      elif name == "get-schedule-facts":
+        if self.get_schedule_facts_tool is None:
+          raise ValueError(
+            "get-schedule-facts tool is not available. "
+            "Requires roboledger extension and EXTENSIONS_ENABLED=true."
+          )
+        result = await self.get_schedule_facts_tool.execute(arguments)
+        return result if return_raw else json.dumps(result, indent=2)
+
+      elif name == "get-period-close-status":
+        if self.get_period_close_status_tool is None:
+          raise ValueError(
+            "get-period-close-status tool is not available. "
+            "Requires roboledger extension and EXTENSIONS_ENABLED=true."
+          )
+        result = await self.get_period_close_status_tool.execute(arguments)
+        return result if return_raw else json.dumps(result, indent=2)
+
+      elif name == "create-closing-entry":
+        if self.create_closing_entry_tool is None:
+          raise ValueError(
+            "create-closing-entry tool is not available. "
+            "Requires roboledger extension and EXTENSIONS_ENABLED=true."
+          )
+        result = await self.create_closing_entry_tool.execute(arguments)
         return result if return_raw else json.dumps(result, indent=2)
 
       # Taxonomy mapping tools
