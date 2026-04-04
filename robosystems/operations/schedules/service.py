@@ -207,11 +207,11 @@ class ScheduleService:
     entity_id = self._get_entity_id(session)
 
     periods = _generate_monthly_periods(period_start, period_end)
-    amount_dollars = monthly_amount / 100.0
+    amount_dollars = round(monthly_amount / 100.0, 2)
     accumulated = 0.0
 
     for p_start, p_end in periods:
-      accumulated += amount_dollars
+      accumulated = round(accumulated + amount_dollars, 2)
 
       # Fact for the periodic amount (expense/amortization)
       session.add(
@@ -245,11 +245,11 @@ class ScheduleService:
 
       # Net book value if we have asset element info
       if schedule_metadata and schedule_metadata.asset_element_id:
-        original = schedule_metadata.original_amount / 100.0
+        original = round(schedule_metadata.original_amount / 100.0, 2)
         session.add(
           Fact(
             element_id=schedule_metadata.asset_element_id,
-            value=original - accumulated,
+            value=round(original - accumulated, 2),
             period_start=p_start,
             period_end=p_end,
             period_type="instant",
@@ -309,6 +309,11 @@ class ScheduleService:
     period_end: date | None = None,
   ) -> list[ScheduleFact]:
     """Get facts for a schedule, optionally filtered by period."""
+    # Validate schedule exists
+    struct = session.get(Structure, structure_id)
+    if not struct or struct.structure_type != "schedule":
+      raise ValueError(f"Schedule structure '{structure_id}' not found")
+
     params: dict = {"structure_id": structure_id}
     period_filter = ""
 
@@ -350,24 +355,36 @@ class ScheduleService:
     period_end: date,
   ) -> PeriodCloseStatus:
     """Get close status for all schedules in a fiscal period."""
-    # Get all schedule structures with their facts for this period
+    # Get all schedule structures with their facts and best entry status for this period.
+    # The best_entry CTE picks the most-advanced entry per structure
+    # (posted > draft > reversed, via CASE ordering).
     result = session.execute(
       text("""
+        WITH best_entry AS (
+          SELECT DISTINCT ON (source_structure_id)
+            source_structure_id,
+            id AS entry_id,
+            status AS entry_status
+          FROM entries
+          WHERE posting_date >= :period_start
+            AND posting_date <= :period_end
+            AND source_structure_id IS NOT NULL
+          ORDER BY source_structure_id,
+            CASE status WHEN 'posted' THEN 1 WHEN 'draft' THEN 2 ELSE 3 END
+        )
         SELECT
           s.id AS structure_id,
           s.name AS structure_name,
           s.metadata AS metadata,
           f.value AS amount,
-          e.id AS entry_id,
-          e.status AS entry_status
+          be.entry_id,
+          be.entry_status
         FROM structures s
         LEFT JOIN facts f ON f.structure_id = s.id
           AND f.period_start >= :period_start
           AND f.period_end <= :period_end
           AND f.element_id = (s.metadata->'entry_template'->>'debit_element_id')
-        LEFT JOIN entries e ON e.source_structure_id = s.id
-          AND e.posting_date >= :period_start
-          AND e.posting_date <= :period_end
+        LEFT JOIN best_entry be ON be.source_structure_id = s.id
         WHERE s.structure_type = 'schedule'
           AND s.is_active = true
         ORDER BY s.name
@@ -390,13 +407,8 @@ class ScheduleService:
     items: list[PeriodCloseItem] = []
     total_draft = 0
     total_posted = 0
-    seen: set[str] = set()
 
     for row in result:
-      if row.structure_id in seen:
-        continue
-      seen.add(row.structure_id)
-
       if row.entry_status == "posted":
         status = "posted"
         total_posted += 1
@@ -558,7 +570,12 @@ class ScheduleService:
   # ── Private helpers ──────────────────────────────────────────────────
 
   def _ensure_schedule_taxonomy(self, session: Session, created_by: str) -> str:
-    """Get or create the default schedule taxonomy."""
+    """Get or create the default schedule taxonomy.
+
+    Each tenant schema gets at most one schedule taxonomy. The race window
+    is narrow (single-tenant sessions) and a duplicate is harmless — the
+    LIMIT 1 query will always pick one consistently.
+    """
     row = session.execute(
       text("""
         SELECT id FROM taxonomies
