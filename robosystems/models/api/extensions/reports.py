@@ -4,6 +4,17 @@ from datetime import date, datetime
 
 from pydantic import BaseModel, Field
 
+# ── Period specification ───────────────────────────────────��──────────────
+
+
+class PeriodSpec(BaseModel):
+  """A reporting period column."""
+
+  start: date
+  end: date
+  label: str
+
+
 # ── Requests ───────────────────────────────────────────────────────────────
 
 
@@ -20,11 +31,18 @@ class CreateReportRequest(BaseModel):
     "quarterly", description="Period type: monthly, quarterly, annual"
   )
   comparative: bool = Field(True, description="Include prior period comparison")
+  periods: list[PeriodSpec] | None = Field(
+    None,
+    description="Multi-period columns. Overrides period_start/period_end/comparative when set.",
+  )
 
 
 class RegenerateReportRequest(BaseModel):
-  period_start: date = Field(..., description="New period start date")
-  period_end: date = Field(..., description="New period end date")
+  period_start: date | None = Field(None, description="New period start date")
+  period_end: date | None = Field(None, description="New period end date")
+  periods: list[PeriodSpec] | None = Field(
+    None, description="New period columns. Overrides period_start/period_end."
+  )
 
 
 class ShareReportRequest(BaseModel):
@@ -39,8 +57,7 @@ class FactRowResponse(BaseModel):
   element_qname: str
   element_name: str
   classification: str
-  current_value: float
-  prior_value: float | None = None
+  values: list[float | None] = Field(default_factory=list)
   is_subtotal: bool = False
   depth: int = 0
 
@@ -71,6 +88,7 @@ class ReportResponse(BaseModel):
   period_start: date | None = None
   period_end: date | None = None
   comparative: bool
+  periods: list[PeriodSpec] | None = None
   mapping_id: str | None = None
   ai_generated: bool = False
   created_at: datetime
@@ -103,10 +121,7 @@ class StatementResponse(BaseModel):
   structure_id: str
   structure_name: str
   structure_type: str
-  period_start: date
-  period_end: date
-  comparative_period_start: date | None = None
-  comparative_period_end: date | None = None
+  periods: list[PeriodSpec] = Field(default_factory=list)
   rows: list[FactRowResponse] = Field(default_factory=list)
   validation: ValidationCheckResponse | None = None
   unmapped_count: int = 0

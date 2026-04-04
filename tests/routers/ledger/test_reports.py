@@ -63,7 +63,11 @@ def _make_report_def(**overrides):
 
 def _make_report_facts():
   """Create mock ReportFacts."""
-  from robosystems.operations.reports.fact_grid import ReportFact, ReportFacts
+  from robosystems.operations.reports.fact_grid import (
+    PeriodSpec,
+    ReportFact,
+    ReportFacts,
+  )
 
   return ReportFacts(
     facts=[
@@ -79,8 +83,10 @@ def _make_report_facts():
         period_type="duration",
       ),
     ],
-    current_period=(date(2026, 1, 1), date(2026, 3, 31)),
-    prior_period=(date(2025, 10, 3), date(2025, 12, 31)),
+    periods=[
+      PeriodSpec(start=date(2026, 1, 1), end=date(2026, 3, 31), label="Current"),
+      PeriodSpec(start=date(2025, 10, 3), end=date(2025, 12, 31), label="Prior"),
+    ],
     unmapped_count=0,
     taxonomy_id="tax_usgaap_reporting",
     mapping_id="struct_coa_mapping",

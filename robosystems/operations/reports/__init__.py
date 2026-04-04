@@ -3,6 +3,7 @@
 from .fact_grid import (
   FactGrid,
   FactRow,
+  PeriodSpec,
   ReportFact,
   ReportFacts,
   generate_report_facts,
@@ -13,6 +14,7 @@ from .guard_rails import ValidationResult, validate_report
 __all__ = [
   "FactGrid",
   "FactRow",
+  "PeriodSpec",
   "ReportFact",
   "ReportFacts",
   "ValidationResult",

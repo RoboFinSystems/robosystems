@@ -1,6 +1,6 @@
 """Report CRUD, fact generation, and structure rendering endpoints."""
 
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Path
 from sqlalchemy import select, text
@@ -14,6 +14,7 @@ from robosystems.middleware.rate_limits import subscription_aware_rate_limit_dep
 from robosystems.models.api.extensions.reports import (
   CreateReportRequest,
   FactRowResponse,
+  PeriodSpec,
   RegenerateReportRequest,
   ReportListResponse,
   ReportResponse,
@@ -26,6 +27,9 @@ from robosystems.models.api.extensions.reports import (
 )
 from robosystems.models.core import User
 from robosystems.models.extensions import Fact, Report, ReportShare
+from robosystems.operations.reports.fact_grid import (
+  PeriodSpec as FactPeriodSpec,
+)
 from robosystems.operations.reports.fact_grid import (
   ReportFact as ReportFactData,
 )
@@ -85,11 +89,55 @@ def _load_structures(session, taxonomy_id: str) -> list[StructureSummary]:
   ]
 
 
+def _build_periods(
+  period_start,
+  period_end,
+  comparative: bool,
+  periods_json: list | None = None,
+) -> list[FactPeriodSpec]:
+  """Build period specs from request data.
+
+  If periods_json is provided (multi-period mode), use it directly.
+  Otherwise, build from period_start/period_end/comparative (legacy mode).
+  """
+  if periods_json:
+    result = []
+    for p in periods_json:
+      if isinstance(p, dict):
+        # JSONB returns dates as strings — parse them
+        start = (
+          date.fromisoformat(p["start"]) if isinstance(p["start"], str) else p["start"]
+        )
+        end = date.fromisoformat(p["end"]) if isinstance(p["end"], str) else p["end"]
+        result.append(FactPeriodSpec(start=start, end=end, label=p["label"]))
+      else:
+        result.append(FactPeriodSpec(start=p.start, end=p.end, label=p.label))
+    return result
+
+  specs = [FactPeriodSpec(start=period_start, end=period_end, label="Current")]
+  if comparative:
+    prior_start, prior_end = _compute_prior_period(period_start, period_end)
+    specs.append(FactPeriodSpec(start=prior_start, end=prior_end, label="Prior"))
+  return specs
+
+
+def _periods_to_json(periods: list[FactPeriodSpec]) -> list[dict]:
+  """Serialize period specs for JSONB storage."""
+  return [{"start": str(p.start), "end": str(p.end), "label": p.label} for p in periods]
+
+
 def _report_to_response(
   report_def: Report,
   structures: list[StructureSummary],
   entity_name: str | None = None,
 ) -> ReportResponse:
+  periods = None
+  if report_def.periods:
+    periods = [
+      PeriodSpec(start=p["start"], end=p["end"], label=p["label"])
+      for p in report_def.periods
+    ]
+
   return ReportResponse(
     id=report_def.id,
     name=report_def.name,
@@ -99,6 +147,7 @@ def _report_to_response(
     period_start=report_def.period_start,
     period_end=report_def.period_end,
     comparative=report_def.comparative,
+    periods=periods,
     mapping_id=report_def.mapping_id,
     ai_generated=report_def.ai_generated,
     created_at=report_def.created_at,
@@ -205,6 +254,11 @@ async def create_report(
           detail=f"Taxonomy '{body.taxonomy_id}' not found.",
         )
 
+      # Build period specs
+      periods = _build_periods(
+        body.period_start, body.period_end, body.comparative, body.periods
+      )
+
       # Create the report definition
       report_def = Report(
         name=body.name,
@@ -214,6 +268,7 @@ async def create_report(
         period_start=body.period_start,
         period_end=body.period_end,
         comparative=body.comparative,
+        periods=_periods_to_json(periods),
         generation_status="generating",
         created_by=current_user.id,
       )
@@ -225,9 +280,7 @@ async def create_report(
         session=session,
         taxonomy_id=body.taxonomy_id,
         mapping_id=body.mapping_id,
-        period_start=body.period_start,
-        period_end=body.period_end,
-        comparative=body.comparative,
+        periods=periods,
       )
 
       # Persist facts to OLTP for materialization and rendering
@@ -360,14 +413,20 @@ async def get_statement(
       if not report_def:
         raise _report_404(report_id)
 
-      if not report_def.period_start or not report_def.period_end:
+      # Resolve periods from the report definition
+      periods = _build_periods(
+        report_def.period_start,
+        report_def.period_end,
+        report_def.comparative,
+        report_def.periods,
+      )
+
+      if not periods:
         return StatementResponse(
           report_id=report_def.id,
           structure_id="",
           structure_name="",
           structure_type=structure_type,
-          period_start=report_def.period_start or report_def.period_end,
-          period_end=report_def.period_end or report_def.period_start,
         )
 
       # Load persisted facts from facts
@@ -403,16 +462,9 @@ async def get_statement(
           structure_id="",
           structure_name="",
           structure_type=structure_type,
-          period_start=report_def.period_start,
-          period_end=report_def.period_end,
-        )
-
-      # Compute prior period dates
-      comp_start = None
-      comp_end = None
-      if report_def.comparative:
-        comp_start, comp_end = _compute_prior_period(
-          report_def.period_start, report_def.period_end
+          periods=[
+            PeriodSpec(start=p.start, end=p.end, label=p.label) for p in periods
+          ],
         )
 
       # Render the structure view
@@ -420,10 +472,7 @@ async def get_statement(
         session=session,
         facts=facts,
         structure_type=structure_type,
-        period_start=report_def.period_start,
-        period_end=report_def.period_end,
-        comparative_period_start=comp_start,
-        comparative_period_end=comp_end,
+        periods=periods,
       )
 
       if not grid.structure_id:
@@ -438,8 +487,7 @@ async def get_statement(
           element_qname=r.element_qname,
           element_name=r.element_name,
           classification=r.classification,
-          current_value=r.current_value,
-          prior_value=r.prior_value,
+          values=r.values,
           is_subtotal=r.is_subtotal,
           depth=r.depth,
         )
@@ -462,10 +510,9 @@ async def get_statement(
         structure_id=grid.structure_id,
         structure_name=grid.structure_name,
         structure_type=structure_type,
-        period_start=grid.period_start,
-        period_end=grid.period_end,
-        comparative_period_start=grid.comparative_period_start,
-        comparative_period_end=grid.comparative_period_end,
+        periods=[
+          PeriodSpec(start=p.start, end=p.end, label=p.label) for p in grid.periods
+        ],
         rows=rows,
         validation=validation_resp,
         unmapped_count=grid.unmapped_count,
@@ -499,9 +546,6 @@ async def regenerate_report(
   Same report configuration (taxonomy, mapping, settings), new dates.
   Re-generates facts for all elements.
   """
-  if body.period_end < body.period_start:
-    raise HTTPException(status_code=422, detail="period_end must be >= period_start")
-
   try:
     with extensions_session(graph_id) as session:
       report_def = session.get(Report, report_id)
@@ -512,9 +556,33 @@ async def regenerate_report(
           status_code=403, detail="Not authorized to modify this report."
         )
 
-      # Update period
-      report_def.period_start = body.period_start
-      report_def.period_end = body.period_end
+      # Update period(s)
+      if body.periods:
+        periods = _build_periods(None, None, False, body.periods)
+        report_def.periods = _periods_to_json(periods)
+        # Update legacy fields from first period for backward compat
+        report_def.period_start = body.periods[0].start
+        report_def.period_end = body.periods[0].end
+      elif body.period_start and body.period_end:
+        if body.period_end < body.period_start:
+          raise HTTPException(
+            status_code=422, detail="period_end must be >= period_start"
+          )
+        report_def.period_start = body.period_start
+        report_def.period_end = body.period_end
+        periods = _build_periods(
+          body.period_start, body.period_end, report_def.comparative
+        )
+        report_def.periods = _periods_to_json(periods)
+      else:
+        # Re-use existing periods
+        periods = _build_periods(
+          report_def.period_start,
+          report_def.period_end,
+          report_def.comparative,
+          report_def.periods,
+        )
+
       report_def.generation_status = "generating"
       session.flush()
 
@@ -523,9 +591,7 @@ async def regenerate_report(
         session=session,
         taxonomy_id=report_def.taxonomy_id,
         mapping_id=report_def.mapping_id or "",
-        period_start=body.period_start,
-        period_end=body.period_end,
-        comparative=report_def.comparative,
+        periods=periods,
       )
 
       # Persist
@@ -666,6 +732,7 @@ async def share_report(
         "period_start": report_def.period_start,
         "period_end": report_def.period_end,
         "comparative": report_def.comparative,
+        "periods": report_def.periods,
       }
 
       # Read the source facts with explicit columns
@@ -770,6 +837,7 @@ def _share_to_target(
         period_start=report_snapshot.get("period_start"),
         period_end=report_snapshot.get("period_end"),
         comparative=report_snapshot["comparative"],
+        periods=report_snapshot.get("periods"),
         generation_status="published",
         created_by=shared_by,
         source_graph_id=source_graph_id,

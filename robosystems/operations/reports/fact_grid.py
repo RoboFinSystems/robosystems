@@ -39,12 +39,20 @@ class ReportFact:
 
 
 @dataclass
+class PeriodSpec:
+  """A reporting period column specification."""
+
+  start: date
+  end: date
+  label: str
+
+
+@dataclass
 class ReportFacts:
   """All facts generated for a report."""
 
   facts: list[ReportFact]
-  current_period: tuple[date, date]
-  prior_period: tuple[date, date] | None
+  periods: list[PeriodSpec]
   unmapped_count: int
   taxonomy_id: str
   mapping_id: str
@@ -59,8 +67,7 @@ class FactRow:
   element_name: str
   classification: str
   balance_type: str
-  current_value: float
-  prior_value: float | None = None
+  values: list[float | None]  # one per period column
   is_subtotal: bool = False
   depth: int = 0
 
@@ -72,10 +79,7 @@ class FactGrid:
   structure_id: str
   structure_name: str
   structure_type: str
-  period_start: date
-  period_end: date
-  comparative_period_start: date | None = None
-  comparative_period_end: date | None = None
+  periods: list[PeriodSpec]
   rows: list[FactRow] = field(default_factory=list)
   unmapped_count: int = 0
 
@@ -87,11 +91,9 @@ def generate_report_facts(
   session: Session,
   taxonomy_id: str,
   mapping_id: str,
-  period_start: date,
-  period_end: date,
-  comparative: bool = True,
+  periods: list[PeriodSpec],
 ) -> ReportFacts:
-  """Generate facts for all mapped elements across current and prior periods.
+  """Generate facts for all mapped elements across N periods.
 
   Returns structure-agnostic facts — the raw data points that can be
   slotted into any structure's hierarchy for rendering.
@@ -100,47 +102,16 @@ def generate_report_facts(
       session: Extensions database session (search_path set to tenant schema).
       taxonomy_id: Taxonomy identifier (e.g., "tax_usgaap_reporting").
       mapping_id: Structure ID for the CoA→GAAP mapping.
-      period_start: Start of the reporting period.
-      period_end: End of the reporting period.
-      comparative: Whether to generate prior period facts too.
+      periods: Ordered list of period specifications.
 
   Returns:
       ReportFacts with all generated facts and metadata.
   """
-  # Read mapped trial balance for current period
-  current_balances = _read_mapped_balances(
-    session, mapping_id, period_start, period_end
-  )
-
-  # Convert to ReportFact objects
   facts: list[ReportFact] = []
-  for balance in current_balances.values():
-    facts.append(
-      ReportFact(
-        element_id=balance.element_id,
-        element_qname=balance.qname,
-        element_name=balance.name,
-        classification=balance.classification,
-        balance_type=balance.balance_type,
-        value=_natural_sign(balance.net_balance, balance.balance_type),
-        period_start=period_start,
-        period_end=period_end,
-        period_type=_infer_period_type(balance.classification),
-      )
-    )
 
-  # Close temporary accounts into retained earnings for the current period.
-  # Net Income = sum(revenue) - sum(expenses), added to retained earnings
-  # so the balance sheet balances (A = L + E).
-  _close_to_retained_earnings(facts, period_start, period_end)
-
-  # Generate prior period facts
-  prior_start = None
-  prior_end = None
-  if comparative:
-    prior_start, prior_end = _compute_prior_period(period_start, period_end)
-    prior_balances = _read_mapped_balances(session, mapping_id, prior_start, prior_end)
-    for balance in prior_balances.values():
+  for period in periods:
+    balances = _read_mapped_balances(session, mapping_id, period.start, period.end)
+    for balance in balances.values():
       facts.append(
         ReportFact(
           element_id=balance.element_id,
@@ -149,20 +120,20 @@ def generate_report_facts(
           classification=balance.classification,
           balance_type=balance.balance_type,
           value=_natural_sign(balance.net_balance, balance.balance_type),
-          period_start=prior_start,
-          period_end=prior_end,
+          period_start=period.start,
+          period_end=period.end,
           period_type=_infer_period_type(balance.classification),
         )
       )
 
-    _close_to_retained_earnings(facts, prior_start, prior_end)
+    # Close temporary accounts into retained earnings per period
+    _close_to_retained_earnings(facts, period.start, period.end)
 
   unmapped_count = _count_unmapped(session, mapping_id)
 
   return ReportFacts(
     facts=facts,
-    current_period=(period_start, period_end),
-    prior_period=(prior_start, prior_end) if comparative and prior_start else None,
+    periods=periods,
     unmapped_count=unmapped_count,
     taxonomy_id=taxonomy_id,
     mapping_id=mapping_id,
@@ -176,10 +147,7 @@ def render_structure_view(
   session: Session,
   facts: list[ReportFact],
   structure_type: str,
-  period_start: date,
-  period_end: date,
-  comparative_period_start: date | None = None,
-  comparative_period_end: date | None = None,
+  periods: list[PeriodSpec],
 ) -> FactGrid:
   """Apply a structure's hierarchy to raw facts to produce a rendered view.
 
@@ -189,10 +157,7 @@ def render_structure_view(
       session: Extensions database session.
       facts: Pre-generated ReportFact objects (from generate_report_facts).
       structure_type: Structure type to render (income_statement, balance_sheet, etc.).
-      period_start: Current period start.
-      period_end: Current period end.
-      comparative_period_start: Prior period start (None if no comparative).
-      comparative_period_end: Prior period end (None if no comparative).
+      periods: Ordered list of period specifications for columns.
 
   Returns:
       FactGrid with rows ordered per the structure's hierarchy.
@@ -207,37 +172,24 @@ def render_structure_view(
       structure_id=structure_id or "",
       structure_name=structure_name or "",
       structure_type=structure_type,
-      period_start=period_start,
-      period_end=period_end,
-      comparative_period_start=comparative_period_start,
-      comparative_period_end=comparative_period_end,
+      periods=periods,
     )
 
-  # Build balance dicts from facts (keyed by element_id)
-  current_balances = _facts_to_balance_dict(facts, period_start, period_end)
-  prior_balances: dict[str, _Balance] = {}
-  if comparative_period_start and comparative_period_end:
-    prior_balances = _facts_to_balance_dict(
-      facts, comparative_period_start, comparative_period_end
-    )
+  # Build balance dicts per period (keyed by element_id)
+  period_balances = [_facts_to_balance_dict(facts, p.start, p.end) for p in periods]
 
   # Load calculation associations for computed elements (Total Assets, Net Income, etc.)
   calculations = _load_calculations(session, structure_id)
 
   # Walk hierarchy depth-first
   # Facts from the facts table are already natural-signed, so skip sign conversion
-  rows = _build_rows(
-    hierarchy, current_balances, prior_balances, calculations, pre_signed=True
-  )
+  rows = _build_rows(hierarchy, period_balances, calculations, pre_signed=True)
 
   return FactGrid(
     structure_id=structure_id,
     structure_name=structure_name,
     structure_type=structure_type,
-    period_start=period_start,
-    period_end=period_end,
-    comparative_period_start=comparative_period_start,
-    comparative_period_end=comparative_period_end,
+    periods=periods,
     rows=rows,
   )
 
@@ -646,68 +598,58 @@ def _balance_value(
 
 def _build_rows(
   hierarchy: list[_HierarchyNode],
-  current_balances: dict[str, _Balance],
-  prior_balances: dict[str, _Balance],
+  period_balances: list[dict[str, _Balance]],
   calculations: dict[str, list[tuple[str, float]]],
   pre_signed: bool = False,
 ) -> list[FactRow]:
-  """Walk the hierarchy depth-first, building FactRows.
+  """Walk the hierarchy depth-first, building FactRows with N period columns.
 
   Two-pass approach:
-  1. Walk all nodes to collect leaf balances and abstract rollups into `computed`.
-  2. Resolve calculation elements using the fully-populated `computed` dict,
+  1. Walk all nodes to collect leaf balances and abstract rollups per period.
+  2. Resolve calculation elements using the fully-populated computed dicts,
      then build the final row list in presentation order.
 
   Abstract/parent nodes render as section headers with no dollar value.
   Leaf nodes get values from the balance dict, or from calculation
   associations for computed elements (Total Assets, Net Income, etc.).
   """
-  has_prior = bool(prior_balances)
+  n_periods = len(period_balances)
 
-  # Pass 1: collect all values (leaf balances + abstract rollups)
-  computed: dict[str, float] = {}
-  computed_prior: dict[str, float] = {}
+  # Pass 1: collect all values per period (leaf balances + abstract rollups)
+  # computed_per_period[period_idx][element_id] = value
+  computed_per_period: list[dict[str, float]] = [{} for _ in range(n_periods)]
 
-  def _collect(node: _HierarchyNode) -> tuple[float, float | None]:
+  def _collect(node: _HierarchyNode) -> list[float]:
+    """Walk a node, return list of values (one per period) for rollup."""
     if node.children:
-      child_current = 0.0
-      child_prior = 0.0 if has_prior else None
+      child_totals = [0.0] * n_periods
       for child in node.children:
-        c, p = _collect(child)
-        child_current += c
-        if has_prior and p is not None:
-          child_prior = (child_prior or 0.0) + p
-      computed[node.element_id] = child_current
-      if has_prior:
-        computed_prior[node.element_id] = child_prior or 0.0
-      return child_current, child_prior
+        child_vals = _collect(child)
+        for i in range(n_periods):
+          child_totals[i] += child_vals[i]
+      for i in range(n_periods):
+        computed_per_period[i][node.element_id] = child_totals[i]
+      return child_totals
     else:
-      c = _balance_value(
-        current_balances, node.element_id, pre_signed, node.balance_type
-      )
-      p = (
-        _balance_value(prior_balances, node.element_id, pre_signed, node.balance_type)
-        if has_prior
-        else None
-      )
-      computed[node.element_id] = c
-      if has_prior and p is not None:
-        computed_prior[node.element_id] = p
-      return c, p
+      vals = []
+      for i in range(n_periods):
+        v = _balance_value(
+          period_balances[i], node.element_id, pre_signed, node.balance_type
+        )
+        computed_per_period[i][node.element_id] = v
+        vals.append(v)
+      return vals
 
   for root in hierarchy:
     _collect(root)
 
   # Resolve calculations (may chain: Gross Profit → Operating Income → Net Income).
-  # Iterate in definition order; each resolved value is stored in computed so
+  # Iterate in definition order; each resolved value is stored so
   # downstream calculations can reference it.
   for elem_id, sources in calculations.items():
-    computed[elem_id] = sum(
-      computed.get(src_id, 0.0) * weight for src_id, weight in sources
-    )
-    if has_prior:
-      computed_prior[elem_id] = sum(
-        computed_prior.get(src_id, 0.0) * weight for src_id, weight in sources
+    for i in range(n_periods):
+      computed_per_period[i][elem_id] = sum(
+        computed_per_period[i].get(src_id, 0.0) * weight for src_id, weight in sources
       )
 
   # Pass 2: build rows in presentation order
@@ -722,8 +664,7 @@ def _build_rows(
           element_name=node.name,
           classification=node.classification,
           balance_type=node.balance_type,
-          current_value=0.0,
-          prior_value=0.0 if has_prior else None,
+          values=[0.0] * n_periods,
           is_subtotal=True,
           depth=node.depth,
         )
@@ -731,8 +672,9 @@ def _build_rows(
       for child in node.children:
         _emit(child)
     else:
-      current_val = computed.get(node.element_id, 0.0)
-      prior_val = computed_prior.get(node.element_id, 0.0) if has_prior else None
+      vals = [
+        computed_per_period[i].get(node.element_id, 0.0) for i in range(n_periods)
+      ]
       rows.append(
         FactRow(
           element_id=node.element_id,
@@ -740,8 +682,7 @@ def _build_rows(
           element_name=node.name,
           classification=node.classification,
           balance_type=node.balance_type,
-          current_value=current_val,
-          prior_value=prior_val,
+          values=vals,
           is_subtotal=False,
           depth=node.depth,
         )

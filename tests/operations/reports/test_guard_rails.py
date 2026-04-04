@@ -15,6 +15,9 @@ def _row(
   qname: str = "",
   prior: float | None = None,
 ) -> FactRow:
+  vals = [value]
+  if prior is not None:
+    vals.append(prior)
   return FactRow(
     element_id=f"elem_{name.lower().replace(' ', '_')}",
     element_qname=qname or f"us-gaap:{name.replace(' ', '')}",
@@ -23,8 +26,7 @@ def _row(
     balance_type="credit"
     if classification in ("revenue", "liability", "equity")
     else "debit",
-    current_value=value,
-    prior_value=prior,
+    values=vals,
     is_subtotal=is_subtotal,
     depth=depth,
   )
@@ -149,7 +151,7 @@ class TestSemanticChecks:
       _row("Revenue", 500.0, depth=0, prior=0.0, qname="us-gaap:Revenues"),
     ]
     result = validate_report("income_statement", rows)
-    assert any("Prior period" in w for w in result.warnings)
+    assert any("no data" in w for w in result.warnings)
 
   def test_unknown_report_type(self):
     result = validate_report("unknown_type", [])
