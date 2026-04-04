@@ -70,7 +70,7 @@ class CreateStructureRequest(BaseModel):
   taxonomy_id: str
 
 
-# ── Element Association ───────────────────────────────────────────────────
+# ── Association ───────────────────────────────────────────────────────────
 
 
 class AssociationResponse(BaseModel):
