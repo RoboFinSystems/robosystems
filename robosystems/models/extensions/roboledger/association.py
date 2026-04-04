@@ -1,4 +1,4 @@
-"""ElementAssociation model — relationships between elements across taxonomies.
+"""Association model — relationships between elements across taxonomies.
 
 Tenant-scoped table. Defines parent-child hierarchies within taxonomies
 and mapping associations between taxonomies (CoA → GAAP).
@@ -23,8 +23,8 @@ from robosystems.db.extensions import ExtensionsBase
 from robosystems.utils.ulid import generate_prefixed_ulid
 
 
-class ElementAssociation(ExtensionsBase):
-  __tablename__ = "element_associations"
+class Association(ExtensionsBase):
+  __tablename__ = "associations"
   __table_args__ = (
     UniqueConstraint(
       "structure_id",
@@ -84,4 +84,4 @@ class ElementAssociation(ExtensionsBase):
   created_by = Column(String, nullable=False, default="system")
 
   def __repr__(self) -> str:
-    return f"<ElementAssociation {self.from_element_id} → {self.to_element_id} ({self.association_type})>"
+    return f"<Association {self.from_element_id} → {self.to_element_id} ({self.association_type})>"

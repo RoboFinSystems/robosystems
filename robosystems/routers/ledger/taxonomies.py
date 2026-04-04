@@ -14,10 +14,10 @@ from robosystems.middleware.graph.types import GRAPH_OR_SUBGRAPH_ID_PATTERN
 from robosystems.middleware.rate_limits import subscription_aware_rate_limit_dependency
 from robosystems.models.api.common import create_pagination_info
 from robosystems.models.api.extensions.taxonomies import (
+  AssociationResponse,
   CreateAssociationRequest,
   CreateStructureRequest,
   CreateTaxonomyRequest,
-  ElementAssociationResponse,
   ElementListResponse,
   ElementResponse,
   MappingCoverageResponse,
@@ -30,8 +30,8 @@ from robosystems.models.api.extensions.taxonomies import (
 )
 from robosystems.models.core import User
 from robosystems.models.extensions import (
+  Association,
   Element,
-  ElementAssociation,
   Structure,
   Taxonomy,
 )
@@ -270,15 +270,15 @@ async def list_unmapped_elements(
       # Get mapped element IDs (from_element_id in mapping associations)
       mapped_ids: set[str] = set()
       if mapping_id:
-        mapped_query = select(ElementAssociation.from_element_id).where(
-          ElementAssociation.structure_id == mapping_id,
-          ElementAssociation.association_type == "mapping",
+        mapped_query = select(Association.from_element_id).where(
+          Association.structure_id == mapping_id,
+          Association.association_type == "mapping",
         )
         mapped_ids = set(session.execute(mapped_query).scalars().all())
       else:
         # Check all mapping structures
-        mapped_query = select(ElementAssociation.from_element_id).where(
-          ElementAssociation.association_type == "mapping",
+        mapped_query = select(Association.from_element_id).where(
+          Association.association_type == "mapping",
         )
         mapped_ids = set(session.execute(mapped_query).scalars().all())
 
@@ -454,20 +454,20 @@ async def get_mapping_detail(
 
       assoc_rows = session.execute(
         select(
-          ElementAssociation,
+          Association,
           from_elem.c.name.label("from_name"),
           from_elem.c.qname.label("from_qname"),
           to_elem.c.name.label("to_name"),
           to_elem.c.qname.label("to_qname"),
         )
-        .join(from_elem, ElementAssociation.from_element_id == from_elem.c.id)
-        .join(to_elem, ElementAssociation.to_element_id == to_elem.c.id)
-        .where(ElementAssociation.structure_id == mapping_id)
-        .order_by(ElementAssociation.order_value)
+        .join(from_elem, Association.from_element_id == from_elem.c.id)
+        .join(to_elem, Association.to_element_id == to_elem.c.id)
+        .where(Association.structure_id == mapping_id)
+        .order_by(Association.order_value)
       ).all()
 
       associations = [
-        ElementAssociationResponse(
+        AssociationResponse(
           id=a.id,
           structure_id=a.structure_id,
           from_element_id=a.from_element_id,
@@ -500,7 +500,7 @@ async def get_mapping_detail(
 
 @router.post(
   "/mappings/{mapping_id}/associations",
-  response_model=ElementAssociationResponse,
+  response_model=AssociationResponse,
   status_code=201,
   operation_id="createMappingAssociation",
   summary="Create Mapping Association",
@@ -536,7 +536,7 @@ async def create_mapping_association(
       if not to_elem:
         raise HTTPException(status_code=400, detail="Target element not found")
 
-      assoc = ElementAssociation(
+      assoc = Association(
         id=generate_prefixed_ulid("assoc"),
         structure_id=mapping_id,
         from_element_id=body.from_element_id,
@@ -551,7 +551,7 @@ async def create_mapping_association(
       session.add(assoc)
       session.flush()
 
-      return ElementAssociationResponse(
+      return AssociationResponse(
         id=assoc.id,
         structure_id=assoc.structure_id,
         from_element_id=assoc.from_element_id,
@@ -589,10 +589,10 @@ async def delete_mapping_association(
   try:
     with extensions_session(graph_id) as session:
       deleted = (
-        session.query(ElementAssociation)
+        session.query(Association)
         .filter(
-          ElementAssociation.id == association_id,
-          ElementAssociation.structure_id == mapping_id,
+          Association.id == association_id,
+          Association.structure_id == mapping_id,
         )
         .delete(synchronize_session=False)
       )
@@ -636,9 +636,9 @@ async def get_mapping_coverage(
       # Count mapped elements
       mapping_assocs = (
         session.execute(
-          select(ElementAssociation).where(
-            ElementAssociation.structure_id == mapping_id,
-            ElementAssociation.association_type == "mapping",
+          select(Association).where(
+            Association.structure_id == mapping_id,
+            Association.association_type == "mapping",
           )
         )
         .scalars()
@@ -708,7 +708,7 @@ async def get_mapped_trial_balance(
                     FROM elements source_elem
                     JOIN line_items li ON li.element_id = source_elem.id
                     JOIN entries e ON e.id = li.entry_id
-                    JOIN element_associations mapping
+                    JOIN associations mapping
                         ON mapping.from_element_id = source_elem.id
                         AND mapping.association_type = 'mapping'
                         AND mapping.structure_id = :mapping_id

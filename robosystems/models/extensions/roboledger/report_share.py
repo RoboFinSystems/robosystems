@@ -2,9 +2,9 @@
 
 When a CFO publishes a report and shares it with another graph (e.g., a
 shareholder's portfolio), this record lives in the SOURCE graph's tenant
-schema. The target graph receives a copy of report_definitions + report_facts
-with provenance fields (source_graph_id, source_report_id) so the data
-survives rebuilds and materializations.
+schema. The target graph receives a copy of reports + facts
+with provenance fields (source_graph_id, source_report_id) so the data survives
+rebuilds and materializations.
 """
 
 from datetime import UTC, datetime

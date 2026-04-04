@@ -50,7 +50,3 @@ class Fact(ExtensionsBase):
 
   def __repr__(self) -> str:
     return f"<Fact {self.element_id} = {self.value}>"
-
-
-# Backward compatibility alias
-ReportFact = Fact

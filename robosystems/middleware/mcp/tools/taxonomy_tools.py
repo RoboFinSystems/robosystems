@@ -51,7 +51,7 @@ class GetUnmappedElementsTool:
 
   async def execute(self, arguments: dict[str, Any]) -> Any:
     from robosystems.db.extensions import extensions_session
-    from robosystems.models.extensions import Element, ElementAssociation
+    from robosystems.models.extensions import Association, Element
 
     graph_id = self.client.graph_id
     mapping_id = arguments.get("mapping_id")
@@ -74,13 +74,13 @@ class GetUnmappedElementsTool:
         )
 
         if mapping_id:
-          mapped_query = select(ElementAssociation.from_element_id).where(
-            ElementAssociation.structure_id == mapping_id,
-            ElementAssociation.association_type == "mapping",
+          mapped_query = select(Association.from_element_id).where(
+            Association.structure_id == mapping_id,
+            Association.association_type == "mapping",
           )
         else:
-          mapped_query = select(ElementAssociation.from_element_id).where(
-            ElementAssociation.association_type == "mapping",
+          mapped_query = select(Association.from_element_id).where(
+            Association.association_type == "mapping",
           )
         mapped_ids = set(session.execute(mapped_query).scalars().all())
 
@@ -266,7 +266,7 @@ class CreateMappingAssociationTool:
 
   async def execute(self, arguments: dict[str, Any]) -> Any:
     from robosystems.db.extensions import extensions_session
-    from robosystems.models.extensions import Element, ElementAssociation
+    from robosystems.models.extensions import Association, Element
     from robosystems.utils.ulid import generate_prefixed_ulid
 
     graph_id = self.client.graph_id
@@ -287,7 +287,7 @@ class CreateMappingAssociationTool:
         if not to_elem:
           return {"error": "Target element not found"}
 
-        assoc = ElementAssociation(
+        assoc = Association(
           id=generate_prefixed_ulid("assoc"),
           structure_id=arguments["mapping_id"],
           from_element_id=arguments["from_element_id"],
@@ -346,7 +346,7 @@ class GetMappingSummaryTool:
 
   async def execute(self, arguments: dict[str, Any]) -> Any:
     from robosystems.db.extensions import extensions_session
-    from robosystems.models.extensions import Element, ElementAssociation
+    from robosystems.models.extensions import Association, Element
 
     graph_id = self.client.graph_id
     mapping_id = arguments["mapping_id"]
@@ -371,9 +371,9 @@ class GetMappingSummaryTool:
 
         assocs = (
           session.execute(
-            select(ElementAssociation).where(
-              ElementAssociation.structure_id == mapping_id,
-              ElementAssociation.association_type == "mapping",
+            select(Association).where(
+              Association.structure_id == mapping_id,
+              Association.association_type == "mapping",
             )
           )
           .scalars()
