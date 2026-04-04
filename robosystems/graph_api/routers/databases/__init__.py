@@ -10,6 +10,7 @@ from . import (
   query,
   restore,
   schema,
+  swap,
   tables,
   vector_search,
 )
@@ -22,6 +23,7 @@ __all__ = [
   "query",
   "restore",
   "schema",
+  "swap",
   "tables",
   "vector_search",
 ]

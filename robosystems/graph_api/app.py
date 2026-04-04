@@ -350,6 +350,7 @@ def create_app() -> FastAPI:
   app.include_router(
     databases.vector_search.router
   )  # LanceDB vector index (build/export on writers, search on all)
+  app.include_router(databases.swap.router)  # Blue-green swap and rollback
 
   # Task management (generic for all task types)
   app.include_router(tasks.router)

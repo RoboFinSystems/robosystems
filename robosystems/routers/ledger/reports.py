@@ -292,6 +292,11 @@ async def create_report(
       report_def.last_generated = datetime.now(UTC)
       session.commit()
 
+      # Mark graph stale so AI/UI knows the graph is out of date
+      from robosystems.operations.extensions.staleness import mark_graph_stale
+
+      mark_graph_stale(graph_id, "report_generated")
+
       structures = _load_structures(session, body.taxonomy_id)
       entity_name = _resolve_entity_name(session, report_def)
       return _report_to_response(report_def, structures, entity_name)
@@ -601,6 +606,11 @@ async def regenerate_report(
       report_def.generation_status = "published"
       report_def.last_generated = datetime.now(UTC)
       session.commit()
+
+      # Mark graph stale so AI/UI knows the graph is out of date
+      from robosystems.operations.extensions.staleness import mark_graph_stale
+
+      mark_graph_stale(graph_id, "report_generated")
 
       structures = _load_structures(session, report_def.taxonomy_id)
       entity_name = _resolve_entity_name(session, report_def)

@@ -1232,6 +1232,38 @@ class GraphClient(BaseGraphClient):
     if not await self.database_exists(graph_id):
       await self.create_database(graph_id, schema_type)
 
+  async def swap_database(self, graph_id: str) -> dict[str, Any]:
+    """Promote a WIP database to active (blue-green swap).
+
+    Requires that {graph_id}-wip.lbug exists on the Graph API node.
+
+    Args:
+        graph_id: Base graph ID (not the -wip variant).
+
+    Returns:
+        Swap result with status and message.
+    """
+    response = await self._request(
+      "POST",
+      f"/databases/{graph_id}/swap",
+    )
+    return response.json()
+
+  async def rollback_database(self, graph_id: str) -> dict[str, Any]:
+    """Restore the -prev database to active (manual rollback).
+
+    Args:
+        graph_id: Base graph ID.
+
+    Returns:
+        Rollback result with status and message.
+    """
+    response = await self._request(
+      "POST",
+      f"/databases/{graph_id}/rollback",
+    )
+    return response.json()
+
   async def execute_ddl(self, ddl: str, graph_id: str | None = None) -> dict[str, Any]:
     """
     Execute DDL (Data Definition Language) statements.
@@ -1772,6 +1804,7 @@ class GraphClient(BaseGraphClient):
     num_batches: int | None = None,
     materialize_embeddings: bool = False,
     timeout: float = 600.0,
+    source_graph_id: str | None = None,
   ) -> dict[str, Any]:
     """
     Materialize a DuckDB staging table into the graph database.
@@ -1789,6 +1822,8 @@ class GraphClient(BaseGraphClient):
         num_batches: Total number of batches. Each row goes to one batch based on hash(key) % num_batches.
         materialize_embeddings: Include embedding columns in materialization. Default false.
         timeout: Request timeout in seconds. Default 600s (10 min) for large bulk operations.
+        source_graph_id: Read DuckDB staging from this graph instead of graph_id.
+            Used by blue-green materialization.
 
     Returns:
         Materialization response with rows materialized and timing
@@ -1804,6 +1839,9 @@ class GraphClient(BaseGraphClient):
 
     if materialize_embeddings:
       json_data["materialize_embeddings"] = True
+
+    if source_graph_id is not None:
+      json_data["source_graph_id"] = source_graph_id
 
     response = await self._request(
       "POST",

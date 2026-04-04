@@ -112,6 +112,11 @@ async def create_schedule(
 
       session.commit()
 
+      # Mark graph stale so AI/UI knows the graph is out of date
+      from robosystems.operations.extensions.staleness import mark_graph_stale
+
+      mark_graph_stale(graph_id, "schedule_created")
+
       return ScheduleCreatedResponse(
         structure_id=structure.id,
         name=structure.name,
@@ -284,6 +289,11 @@ async def create_closing_entry(
         memo=body.memo,
       )
       session.commit()
+
+      # Mark graph stale so AI/UI knows the graph is out of date
+      from robosystems.operations.extensions.staleness import mark_graph_stale
+
+      mark_graph_stale(graph_id, "closing_entry_created")
 
       return ClosingEntryResponse(
         entry_id=result.entry_id,

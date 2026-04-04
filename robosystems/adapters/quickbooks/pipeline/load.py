@@ -54,6 +54,15 @@ def qb_load(
   # Update last sync timestamp
   _update_last_sync(context, config)
 
+  # Mark graph stale so materialization pipeline knows OLTP data changed
+  try:
+    from robosystems.operations.extensions.staleness import mark_graph_stale
+
+    mark_graph_stale(config.graph_id, "connector_sync")
+    context.log.info("Marked graph stale after QB sync")
+  except Exception as e:
+    context.log.warning(f"Failed to mark graph stale (non-fatal): {e}")
+
   if result.errors:
     for error in result.errors[:10]:
       context.log.warning(f"Load warning: {error}")
