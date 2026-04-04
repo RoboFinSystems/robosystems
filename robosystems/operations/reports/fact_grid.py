@@ -617,7 +617,7 @@ def _load_calculations(
       FROM associations
       WHERE structure_id = :structure_id
         AND association_type = 'calculation'
-      ORDER BY from_element_id, order_value
+      ORDER BY order_value
     """),
     {"structure_id": structure_id},
   )

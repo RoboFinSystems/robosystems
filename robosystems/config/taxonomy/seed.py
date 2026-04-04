@@ -911,7 +911,7 @@ def seed_reporting_taxonomy(connection) -> None:
       },
     )
 
-  # 6. Create calculation associations for computed elements.
+  # 7. Create calculation associations for computed elements.
   # from_element = the computed total, to_element = the source, weight = multiplier.
   # The renderer sums (source_value * weight) for each source.
   CALCULATION_ASSOCIATIONS = [
