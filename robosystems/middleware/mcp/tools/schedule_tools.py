@@ -1,15 +1,189 @@
 """Schedule MCP tools for AI accounting close workflows.
 
-Four tools for schedule management:
-1. list-schedule-structures: List active schedules with entry templates
-2. get-schedule-facts: Get fact values for a schedule by period
-3. get-period-close-status: Overview of what's done vs pending for a period
-4. create-closing-entry: Draft a closing entry from schedule facts
+Five tools for schedule management:
+1. create-schedule: Create a new schedule with pre-generated monthly facts
+2. list-schedule-structures: List active schedules with entry templates
+3. get-schedule-facts: Get fact values for a schedule by period
+4. get-period-close-status: Overview of what's done vs pending for a period
+5. create-closing-entry: Draft a closing entry from schedule facts
 """
 
 from typing import Any
 
 from robosystems.logger import logger
+
+
+class CreateScheduleTool:
+  """Create a new depreciation/amortization/accrual schedule."""
+
+  def __init__(self, graph_client):
+    self.client = graph_client
+
+  def get_tool_definition(self) -> dict[str, Any]:
+    return {
+      "name": "create-schedule",
+      "description": """Create a new schedule with pre-generated monthly facts.
+
+**WHEN TO USE:**
+- When the user asks to set up depreciation for an asset
+- When the user wants to create an amortization or accrual schedule
+- When setting up recurring monthly entries that follow a straight-line pattern
+
+**WORKFLOW:**
+1. Identify the relevant elements (e.g., Depreciation Expense and Accumulated Depreciation)
+   - Use resolve-element to find the correct element IDs
+2. Determine the schedule parameters from the user (amount, start/end dates, useful life)
+3. Call this tool to create the schedule
+4. The schedule pre-generates facts for each monthly period
+5. Use create-closing-entry each month to draft journal entries from the schedule
+
+**PARAMETERS:**
+- name: Descriptive name (e.g., "Office Furniture Depreciation")
+- element_ids: The element IDs involved (debit + credit elements)
+- period_start / period_end: Date range for the schedule
+- monthly_amount: Amount per month in cents (e.g., 41667 for $416.67)
+- debit_element_id / credit_element_id: Elements for the closing entry template
+- entry_type: Usually "closing" (default)
+- memo_template: Template with {structure_name} placeholder
+- Optional metadata: method, original_amount, residual_value, useful_life_months, asset_element_id
+
+**RETURNS:**
+- structure_id, name, total_periods, total_facts""",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Schedule name (e.g., 'Office Furniture Depreciation')",
+          },
+          "element_ids": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": "Element IDs to include (debit + credit elements)",
+          },
+          "period_start": {
+            "type": "string",
+            "description": "First period start date (YYYY-MM-DD)",
+          },
+          "period_end": {
+            "type": "string",
+            "description": "Last period end date (YYYY-MM-DD)",
+          },
+          "monthly_amount": {
+            "type": "integer",
+            "description": "Monthly amount in cents (e.g., 41667 for $416.67)",
+          },
+          "debit_element_id": {
+            "type": "string",
+            "description": "Element to debit (e.g., Depreciation Expense)",
+          },
+          "credit_element_id": {
+            "type": "string",
+            "description": "Element to credit (e.g., Accumulated Depreciation)",
+          },
+          "entry_type": {
+            "type": "string",
+            "description": "Entry type for generated entries (default: 'closing')",
+          },
+          "memo_template": {
+            "type": "string",
+            "description": "Memo template — {structure_name} is replaced with schedule name",
+          },
+          "method": {
+            "type": "string",
+            "description": "Calculation method (default: 'straight_line')",
+          },
+          "original_amount": {
+            "type": "integer",
+            "description": "Cost basis in cents",
+          },
+          "residual_value": {
+            "type": "integer",
+            "description": "Salvage value in cents (default: 0)",
+          },
+          "useful_life_months": {
+            "type": "integer",
+            "description": "Useful life in months",
+          },
+          "asset_element_id": {
+            "type": "string",
+            "description": "BS asset element for net book value tracking",
+          },
+        },
+        "required": [
+          "name",
+          "element_ids",
+          "period_start",
+          "period_end",
+          "monthly_amount",
+          "debit_element_id",
+          "credit_element_id",
+        ],
+      },
+    }
+
+  async def execute(self, arguments: dict[str, Any]) -> Any:
+    from datetime import date
+
+    from robosystems.db.extensions import extensions_session
+    from robosystems.operations.schedules import ScheduleService
+    from robosystems.operations.schedules.service import EntryTemplate, ScheduleMetadata
+
+    graph_id = self.client.graph_id
+    svc = ScheduleService()
+
+    entry_template = EntryTemplate(
+      debit_element_id=arguments["debit_element_id"],
+      credit_element_id=arguments["credit_element_id"],
+      entry_type=arguments.get("entry_type", "closing"),
+      memo_template=arguments.get("memo_template", "Monthly {structure_name}"),
+    )
+
+    schedule_metadata = None
+    if any(
+      arguments.get(k)
+      for k in (
+        "method",
+        "original_amount",
+        "residual_value",
+        "useful_life_months",
+        "asset_element_id",
+      )
+    ):
+      schedule_metadata = ScheduleMetadata(
+        method=arguments.get("method", "straight_line"),
+        original_amount=arguments.get("original_amount", 0),
+        residual_value=arguments.get("residual_value", 0),
+        useful_life_months=arguments.get("useful_life_months", 0),
+        asset_element_id=arguments.get("asset_element_id"),
+      )
+
+    try:
+      with extensions_session(graph_id) as session:
+        structure = svc.create_schedule(
+          session,
+          name=arguments["name"],
+          taxonomy_id=None,
+          element_ids=arguments["element_ids"],
+          period_start=date.fromisoformat(arguments["period_start"]),
+          period_end=date.fromisoformat(arguments["period_end"]),
+          monthly_amount=arguments["monthly_amount"],
+          entry_template=entry_template,
+          schedule_metadata=schedule_metadata,
+          created_by=f"mcp:{graph_id}",
+        )
+        session.commit()
+
+        return {
+          "success": True,
+          "structure_id": structure.id,
+          "name": structure.name,
+          "taxonomy_id": structure.taxonomy_id,
+          "message": f"Schedule '{arguments['name']}' created successfully.",
+        }
+    except Exception as exc:
+      logger.warning(f"create-schedule failed: {exc}")
+      return {"error": str(exc)}
 
 
 class ListScheduleStructuresTool:
