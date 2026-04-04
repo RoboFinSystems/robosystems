@@ -70,6 +70,7 @@ class TestCreateScheduleTool:
     assert result["success"] is True
     assert result["structure_id"] == "struct_sched_01"
     mock_svc.create_schedule.assert_called_once()
+    mock_session.commit.assert_called_once()
 
   @pytest.mark.asyncio
   async def test_creates_with_metadata(self, mock_graph_client):
@@ -106,6 +107,7 @@ class TestCreateScheduleTool:
       )
 
     assert result["success"] is True
+    mock_session.commit.assert_called_once()
     # Verify schedule_metadata was passed
     call_kwargs = mock_svc.create_schedule.call_args[1]
     assert call_kwargs["schedule_metadata"] is not None

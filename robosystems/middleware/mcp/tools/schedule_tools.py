@@ -48,7 +48,7 @@ class CreateScheduleTool:
 - Optional metadata: method, original_amount, residual_value, useful_life_months, asset_element_id
 
 **RETURNS:**
-- structure_id, name, total_periods, total_facts""",
+- structure_id, name, taxonomy_id, message""",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -141,7 +141,7 @@ class CreateScheduleTool:
 
     schedule_metadata = None
     if any(
-      arguments.get(k)
+      arguments.get(k) is not None
       for k in (
         "method",
         "original_amount",
@@ -182,7 +182,7 @@ class CreateScheduleTool:
           "message": f"Schedule '{arguments['name']}' created successfully.",
         }
     except Exception as exc:
-      logger.warning(f"create-schedule failed: {exc}")
+      logger.warning("create-schedule failed: %s", exc)
       return {"error": str(exc)}
 
 
