@@ -69,12 +69,9 @@ async def _call_process_task(
 
 
 @pytest.mark.asyncio
-@patch("robosystems.worker.consumer.report_task_to_dagster", new_callable=AsyncMock)
 @patch("robosystems.worker.consumer.cleanup_connections")
 @patch("robosystems.worker.consumer.get_tracer")
-async def test_happy_path(
-  mock_tracer, mock_cleanup, mock_dagster, mock_manager, mock_queue
-):
+async def test_happy_path(mock_tracer, mock_cleanup, mock_manager, mock_queue):
   mock_tracer.return_value = MagicMock()
   mock_tracer.return_value.start_as_current_span.return_value.__enter__ = MagicMock()
   mock_tracer.return_value.start_as_current_span.return_value.__exit__ = MagicMock()
@@ -93,9 +90,6 @@ async def test_happy_path(
   assert call_args[0][0] == "op_01TEST"
   assert call_args[1]["result"] == {"mapped": 10, "coverage": 100}
 
-  # Dagster reporting called
-  mock_dagster.assert_called_once()
-
   # Cleanup always called
   mock_cleanup.assert_called_once()
 
@@ -107,12 +101,9 @@ async def test_happy_path(
 
 
 @pytest.mark.asyncio
-@patch("robosystems.worker.consumer.report_task_to_dagster", new_callable=AsyncMock)
 @patch("robosystems.worker.consumer.cleanup_connections")
 @patch("robosystems.worker.consumer.get_tracer")
-async def test_error_path(
-  mock_tracer, mock_cleanup, mock_dagster, mock_manager, mock_queue
-):
+async def test_error_path(mock_tracer, mock_cleanup, mock_manager, mock_queue):
   mock_tracer.return_value = MagicMock()
   mock_tracer.return_value.start_as_current_span.return_value.__enter__ = MagicMock()
   mock_tracer.return_value.start_as_current_span.return_value.__exit__ = MagicMock()
@@ -130,9 +121,6 @@ async def test_error_path(
   # complete_operation NOT called
   mock_manager.complete_operation.assert_not_called()
 
-  # Dagster NOT called on failure
-  mock_dagster.assert_not_called()
-
   # Cleanup STILL called
   mock_cleanup.assert_called_once()
 
@@ -141,9 +129,8 @@ async def test_error_path(
 
 
 @pytest.mark.asyncio
-@patch("robosystems.worker.consumer.report_task_to_dagster", new_callable=AsyncMock)
 @patch("robosystems.worker.consumer.cleanup_connections")
-async def test_unknown_task_type(mock_cleanup, mock_dagster, mock_manager, mock_queue):
+async def test_unknown_task_type(mock_cleanup, mock_manager, mock_queue):
   task_data = _make_task_data(task_type="nonexistent_type")
   await _call_process_task(task_data, mock_queue, mock_manager)
 
@@ -157,16 +144,12 @@ async def test_unknown_task_type(mock_cleanup, mock_dagster, mock_manager, mock_
   # No cleanup needed (handler never ran)
   mock_cleanup.assert_not_called()
 
-  # No Dagster reporting
-  mock_dagster.assert_not_called()
-
 
 @pytest.mark.asyncio
-@patch("robosystems.worker.consumer.report_task_to_dagster", new_callable=AsyncMock)
 @patch("robosystems.worker.consumer.cleanup_connections")
 @patch("robosystems.worker.consumer.get_tracer")
 async def test_timeout_marks_failed(
-  mock_tracer, mock_cleanup, mock_dagster, mock_manager, mock_queue
+  mock_tracer, mock_cleanup, mock_manager, mock_queue
 ):
   """Task that exceeds its timeout is marked as failed."""
   import asyncio

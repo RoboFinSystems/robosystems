@@ -59,7 +59,7 @@ class GraphCreationTask(BaseTask):
     # Billing subscription (non-blocking)
     self._create_billing_subscription(result.graph_id, config)
 
-    # Report to Dagster observable asset (non-blocking)
+    # Report to Dagster observable asset
     from robosystems.dagster.reporting import report_asset_materialization
 
     await report_asset_materialization(
