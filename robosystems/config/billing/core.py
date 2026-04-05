@@ -39,8 +39,7 @@ DEFAULT_GRAPH_BILLING_PLANS: list[dict[str, Any]] = [
     "infrastructure": "Dedicated m7g.large (2 vCPU, 8 GB RAM)",
     "backup_retention_days": 7,
     "backup_downloads_per_month": 10,  # R2 zero-egress
-    "max_document_sections": 500,
-    "max_document_connections": 2,
+    "max_documents": 100,
     "priority_support": True,
   },
   {
@@ -53,8 +52,7 @@ DEFAULT_GRAPH_BILLING_PLANS: list[dict[str, Any]] = [
     "infrastructure": "Dedicated r7g.large (2 vCPU, 16 GB RAM)",
     "backup_retention_days": 30,
     "backup_downloads_per_month": 20,  # R2 zero-egress
-    "max_document_sections": 5000,
-    "max_document_connections": 10,
+    "max_documents": 1000,
     "priority_support": True,
   },
   {
@@ -67,8 +65,7 @@ DEFAULT_GRAPH_BILLING_PLANS: list[dict[str, Any]] = [
     "infrastructure": "Dedicated r7g.xlarge (4 vCPU, 32 GB RAM)",
     "backup_retention_days": 90,
     "backup_downloads_per_month": 999,  # Effectively unlimited (R2 zero-egress)
-    "max_document_sections": 50000,
-    "max_document_connections": 25,
+    "max_documents": 10000,
     "priority_support": True,
   },
 ]
@@ -98,19 +95,11 @@ def get_tier_backup_downloads_per_month(tier: str) -> int | None:
   return None
 
 
-def get_tier_max_document_sections(tier: str) -> int | None:
-  """Get max document sections (uploaded docs) for a tier."""
+def get_tier_max_documents(tier: str) -> int | None:
+  """Get max documents (uploaded docs) for a tier."""
   for plan in DEFAULT_GRAPH_BILLING_PLANS:
     if plan["name"] == tier:
-      return plan.get("max_document_sections")
-  return None
-
-
-def get_tier_max_document_connections(tier: str) -> int | None:
-  """Get max document connections (Google Drive, etc.) for a tier."""
-  for plan in DEFAULT_GRAPH_BILLING_PLANS:
-    if plan["name"] == tier:
-      return plan.get("max_document_connections")
+      return plan.get("max_documents")
   return None
 
 

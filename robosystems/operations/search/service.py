@@ -159,36 +159,18 @@ class SearchService:
     self,
     graph_id: str,
     request: DocumentUploadRequest,
-    tier: str | None = None,
   ) -> DocumentUploadResponse:
     """Upload a markdown document: parse, section, embed, and index.
 
     Args:
         graph_id: Target graph for tenant isolation.
         request: Document upload request with title, content, etc.
-        tier: Subscription tier for limit enforcement (None = no limit check).
 
     Returns:
         DocumentUploadResponse with section IDs and counts.
-
-    Raises:
-        ValueError: If document section limit exceeded for the tier.
     """
     from .embeddings import EMBEDDING_MODEL_ID
     from .markdown_parser import content_hash, parse_document
-
-    # Check tier limits if tier provided
-    if tier:
-      from robosystems.config.billing.core import get_tier_max_document_sections
-
-      max_sections = get_tier_max_document_sections(tier)
-      if max_sections is not None:
-        current_count = self.client.count_by_source_type(graph_id, "uploaded_doc")
-        if current_count >= max_sections:
-          raise ValueError(
-            f"Document section limit reached ({current_count}/{max_sections}). "
-            f"Upgrade your plan for more capacity."
-          )
 
     # Parse markdown
     metadata, sections = parse_document(request.content, request.title)
@@ -254,7 +236,6 @@ class SearchService:
     self,
     graph_id: str,
     requests: list[DocumentUploadRequest],
-    tier: str | None = None,
   ) -> tuple[list[DocumentUploadResponse], list[dict]]:
     """Upload multiple documents. Returns (results, errors)."""
     results: list[DocumentUploadResponse] = []
@@ -262,8 +243,7 @@ class SearchService:
 
     for i, request in enumerate(requests):
       try:
-        result = self.upload_document(graph_id, request, tier)
-        results.append(result)
+        self.upload_document(graph_id, request)
       except Exception as e:
         errors.append({"index": i, "title": request.title, "error": str(e)})
 

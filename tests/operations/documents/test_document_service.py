@@ -113,9 +113,7 @@ class TestCreateDocument:
     mock_create.assert_not_called()
     existing_doc.update.assert_called()
 
-  @patch(
-    "robosystems.config.billing.core.get_tier_max_document_sections", return_value=5
-  )
+  @patch("robosystems.config.billing.core.get_tier_max_documents", return_value=5)
   @patch.object(Document, "count_by_graph", return_value=5)
   def test_raises_on_tier_limit(self, mock_count, mock_max):
     session = MagicMock()
