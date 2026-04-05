@@ -37,11 +37,16 @@ def graph_usage_monitor_sensor(context: SensorEvaluationContext):
   - is_repository = false (skip shared repos)
   - parent_graph_id IS NULL (only parent graphs, not subgraphs)
   - status = 'active'
+  - graph_tier IS NOT NULL (skip untiered internal/test graphs)
 
   For each graph over threshold:
   - Check Valkey dedup key to avoid repeat alerts
   - Look up graph owner's email
   - Send capacity warning email via SES
+
+  Note: This sensor makes async Graph API calls per graph (1 + N subgraphs).
+  With many active graphs, consider the cumulative latency. The 6-hour
+  interval keeps this manageable.
   """
   from robosystems.config.valkey_registry import ValkeyDatabase, create_redis_client
   from robosystems.database import session as db_session_factory
@@ -52,13 +57,14 @@ def graph_usage_monitor_sensor(context: SensorEvaluationContext):
 
   db = db_session_factory()
   try:
-    # Find all active parent user graphs
+    # Find all active parent user graphs with a tier assigned
     parent_graphs = (
       db.query(Graph)
       .filter(
         Graph.is_repository.is_(False),
         Graph.parent_graph_id.is_(None),
         Graph.status == "active",
+        Graph.graph_tier.isnot(None),
       )
       .all()
     )
@@ -68,11 +74,12 @@ def graph_usage_monitor_sensor(context: SensorEvaluationContext):
 
     context.log.info(f"Checking storage usage for {len(parent_graphs)} graphs")
 
-    redis_client = create_redis_client(ValkeyDatabase.LOCKS)
+    # Use MCP_CACHE for dedup keys (TTL-based cache, not LOCKS which is for short-lived mutexes)
+    redis_client = create_redis_client(ValkeyDatabase.MCP_CACHE)
     alerts_sent = 0
 
     for graph in parent_graphs:
-      graph_tier = graph.graph_tier or "ladybug-standard"
+      graph_tier = graph.graph_tier
 
       try:
         storage_check = asyncio.run(
@@ -152,7 +159,7 @@ def graph_usage_monitor_sensor(context: SensorEvaluationContext):
       f"sent {alerts_sent} alerts"
     )
 
-    return None
+    return SkipReason(f"Checked {len(parent_graphs)} graphs, sent {alerts_sent} alerts")
 
   finally:
     db.close()

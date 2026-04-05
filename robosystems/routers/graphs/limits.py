@@ -228,7 +228,10 @@ async def get_graph_limits(
       except Exception:
         pass
 
-    # Get content limits and instance usage for non-shared graphs
+    # Get content limits and instance usage for non-shared graphs.
+    # Note: check_instance_storage issues parallel Graph API calls for the parent
+    # + each subgraph (N+1 calls). For graphs with many subgraphs this adds
+    # latency. Consider adding a short-TTL Valkey cache if this becomes an issue.
     content_limits = None
     instance_usage = None
     if not is_shared:
