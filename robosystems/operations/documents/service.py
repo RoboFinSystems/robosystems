@@ -151,9 +151,9 @@ class DocumentService:
 
   def _check_tier_limit(self, graph_id: str, tier: str) -> None:
     """Check if document count is within tier limit."""
-    from robosystems.config.billing.core import get_tier_max_document_sections
+    from robosystems.config.billing.core import get_tier_max_documents
 
-    max_docs = get_tier_max_document_sections(tier)
+    max_docs = get_tier_max_documents(tier)
     if max_docs is not None:
       current_count = Document.count_by_graph(
         graph_id, self.session, source_type="uploaded_doc"
@@ -186,7 +186,7 @@ class DocumentService:
       folder=doc.folder,
       external_id=doc.id,
     )
-    response = service.upload_document(doc.graph_id, request, tier=None)
+    response = service.upload_document(doc.graph_id, request)
     return DocumentUploadResponse(
       id=doc.id,
       document_id=response.document_id,

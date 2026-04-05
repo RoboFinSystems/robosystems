@@ -608,6 +608,10 @@ class CreditService:
 
     plan_config = BillingConfig.get_subscription_plan(subscription_tier)
 
+    from robosystems.config.graph_tier import GraphTierConfig
+
+    backup_limits = GraphTierConfig.get_backup_limits(subscription_tier)
+
     return {
       "subscription_tier": subscription_tier,
       "monthly_price": plan_config["base_price_cents"] / 100 if plan_config else 0,
@@ -616,9 +620,7 @@ class CreditService:
         tier.value for tier in allowed_tiers.get(subscription_tier, [])
       ],
       "features": {
-        "backup_retention_days": plan_config["backup_retention_days"]
-        if plan_config
-        else 0,
+        "backup_retention_days": backup_limits.get("backup_retention_days", 0),
         "priority_support": plan_config["priority_support"] if plan_config else False,
         "storage_included": True,
       },

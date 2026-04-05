@@ -57,6 +57,42 @@ class ExecutionProfile:
   tool_calls: int = 0
 
 
+@dataclass
+class GraphScope:
+  """Declares which graphs an agent is allowed to run on.
+
+  None fields mean no restriction on that axis.
+  If both fields are set, both conditions must be satisfied.
+  """
+
+  shared_repo: str | None = None
+  schema_extension: str | None = None
+
+
+def matches_graph_scope(
+  scope: GraphScope | None,
+  graph_id: str,
+  schema_extensions: list[str],
+) -> bool:
+  """Check if a graph matches the given scope. None scope = matches everything."""
+  if scope is None:
+    return True
+  if scope.shared_repo is not None:
+    from robosystems.config.shared_repositories import (
+      is_shared_repository_or_subgraph,
+      resolve_shared_repository_parent,
+    )
+
+    if not is_shared_repository_or_subgraph(graph_id):
+      return False
+    if resolve_shared_repository_parent(graph_id) != scope.shared_repo:
+      return False
+  if scope.schema_extension is not None:
+    if scope.schema_extension not in schema_extensions:
+      return False
+  return True
+
+
 # ── New unified Agent protocol ───────────────────────────────────────────────
 
 
@@ -96,6 +132,7 @@ class AgentSpec:
       ),
     }
   )
+  graph_scope: GraphScope | None = None
 
 
 @dataclass

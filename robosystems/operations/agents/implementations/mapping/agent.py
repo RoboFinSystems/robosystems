@@ -25,6 +25,7 @@ from robosystems.operations.agents.base import (
   AgentResult,
   AgentSpec,
   ExecutionProfile,
+  GraphScope,
 )
 from robosystems.operations.agents.implementations.mapping.prompt import (
   MAPPING_SYSTEM_PROMPT,
@@ -52,6 +53,7 @@ class MappingAgent(Agent):
     version="1.0.0",
     requires_credits=True,
     supported_modes=[AgentMode.EXTENDED],
+    graph_scope=GraphScope(schema_extension="roboledger"),
     execution_profile={
       AgentMode.EXTENDED: ExecutionProfile(
         min_time=30, max_time=600, avg_time=120, tool_calls=50

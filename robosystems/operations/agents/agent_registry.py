@@ -67,9 +67,22 @@ def list_agents() -> dict[str, dict[str, Any]]:
       "supported_modes": [m.value for m in cls.spec.supported_modes],
       "requires_credits": cls.spec.requires_credits,
       "version": cls.spec.version,
+      "graph_scope": _serialize_scope(cls.spec.graph_scope),
     }
     for agent_type, cls in _AGENTS.items()
   }
+
+
+def _serialize_scope(scope: Any) -> dict[str, str] | None:
+  """Serialize a GraphScope for API responses."""
+  if scope is None:
+    return None
+  result: dict[str, str] = {}
+  if scope.shared_repo is not None:
+    result["shared_repo"] = scope.shared_repo
+  if scope.schema_extension is not None:
+    result["schema_extension"] = scope.schema_extension
+  return result or None
 
 
 def is_registered(agent_type: str) -> bool:
