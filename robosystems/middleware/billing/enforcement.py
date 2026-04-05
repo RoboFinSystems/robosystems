@@ -176,12 +176,6 @@ def require_graph_access(
       detail="Graph not found.",
     )
 
-  if graph_status in (GraphStatus.QUEUED.value, GraphStatus.PROVISIONING.value):
-    raise HTTPException(
-      status_code=status.HTTP_409_CONFLICT,
-      detail="Graph is being provisioned. Please wait.",
-    )
-
   if graph_status == GraphStatus.SUSPENDED.value:
     raise HTTPException(
       status_code=status.HTTP_403_FORBIDDEN,

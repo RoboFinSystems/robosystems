@@ -453,11 +453,6 @@ class EnvConfig:
     "OTEL_ENABLED",
     get_parameter_value("OTEL_ENABLED", "false").lower() == "true",
   )
-  GRAPH_PROVISION_QUEUE_ENABLED = get_bool_env(
-    "GRAPH_PROVISION_QUEUE_ENABLED",
-    get_parameter_value("GRAPH_PROVISION_QUEUE_ENABLED", "false").lower() == "true",
-  )
-
   # --- Security & Authentication ---
   SECURITY_AUDIT_ENABLED = get_bool_env(
     "SECURITY_AUDIT_ENABLED",

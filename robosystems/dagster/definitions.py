@@ -89,9 +89,6 @@ from robosystems.dagster.sensors.graph_lifecycle import (
   expired_graph_subscription_sensor,
   suspended_graph_deprovisioning_sensor,
 )
-from robosystems.dagster.sensors.graph_queue import (
-  graph_creation_queue_sensor,
-)
 from robosystems.dagster.sensors.invoice_billing import (
   invoice_subscription_renewal_sensor,
 )
@@ -241,7 +238,6 @@ all_sensors = [
   # Platform: Billing
   invoice_subscription_renewal_sensor,
   # Platform: Graph lifecycle
-  graph_creation_queue_sensor,
   expired_graph_subscription_sensor,
   suspended_graph_deprovisioning_sensor,
   # Platform: Materialization (auto-rematerialize stale graphs)

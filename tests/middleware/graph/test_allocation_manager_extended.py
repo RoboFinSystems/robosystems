@@ -10,7 +10,6 @@ from botocore.exceptions import ClientError
 from robosystems.middleware.graph.allocation_manager import (
   VALID_ENTITY_ID_PATTERN,
   VALID_INSTANCE_ID_PATTERN,
-  CapacityScalingTriggered,
   DatabaseLocation,
   DatabaseStatus,
   InstanceInfo,
@@ -894,16 +893,6 @@ class TestFindBestInstance:
 
     result = await manager._find_best_instance(GraphTier.LADYBUG_STANDARD)
     assert result is None
-
-
-@pytest.mark.unit
-class TestCapacityScalingTriggered:
-  """Tests for CapacityScalingTriggered exception."""
-
-  def test_exception_message(self):
-    exc = CapacityScalingTriggered("No capacity available")
-    assert str(exc) == "No capacity available"
-    assert isinstance(exc, Exception)
 
 
 @pytest.mark.unit

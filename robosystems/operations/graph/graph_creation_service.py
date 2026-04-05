@@ -223,10 +223,7 @@ class GraphCreationService:
     graph_id: str,
     config: GraphCreationConfig,
   ) -> DatabaseLocation:
-    """Allocate database on a LadybugDB instance.
-
-    Raises CapacityScalingTriggered if no capacity and ASG scale-up triggered.
-    """
+    """Allocate database on a LadybugDB instance."""
     manager = LadybugAllocationManager(environment=env.ENVIRONMENT)
     location = await manager.allocate_database(
       entity_id=config.user_id,
@@ -329,73 +326,47 @@ class GraphCreationService:
     """Persist Graph, GraphSchema, staging tables, and GraphUser in one transaction."""
     from robosystems.database import get_db_session
     from robosystems.models.core import GraphSchema, GraphUser
-    from robosystems.models.core.graph import Graph, GraphStatus
+    from robosystems.models.core.graph import Graph
 
     from .table_service import TableService
 
     db_gen = get_db_session()
     db = next(db_gen)
     try:
-      existing = Graph.get_by_id(graph_id, db, include_deprovisioned=True)
+      # Create new Graph + GraphUser
+      Graph.create(
+        graph_id=graph_id,
+        graph_name=config.graph_name,
+        graph_type=config.graph_type,
+        org_id=org_id,
+        session=db,
+        base_schema=None if config.has_custom_schema else "base",
+        schema_extensions=config.schema_extensions
+        if not config.has_custom_schema
+        else [],
+        graph_instance_id=location.instance_id,
+        graph_tier=config.graph_tier,
+        graph_metadata={
+          "created_by": config.user_id,
+          "description": config.description or "",
+          "type": config.graph_type,
+          "tags": config.tags,
+        },
+        commit=False,
+      )
 
-      if existing and existing.status in (
-        GraphStatus.QUEUED.value,
-        GraphStatus.PROVISIONING.value,
-      ):
-        # Update queued/provisioning row
-        existing.graph_instance_id = location.instance_id
-        existing.base_schema = None if config.has_custom_schema else "base"
-        existing.schema_extensions = (
-          config.schema_extensions if not config.has_custom_schema else []
-        )
-        metadata = {**(existing.graph_metadata or {})}
-        metadata.update(
-          {
-            "description": config.description or "",
-            "type": config.graph_type,
-            "tags": config.tags,
-          }
-        )
-        if config.has_custom_schema:
-          metadata["custom_schema_name"] = config.custom_schema.get("name")
-        existing.graph_metadata = metadata
-        existing.transition_status(GraphStatus.ACTIVE, db)
-        logger.info(f"Updated queued graph to active: {graph_id}")
-      else:
-        # Create new Graph + GraphUser
-        Graph.create(
-          graph_id=graph_id,
-          graph_name=config.graph_name,
-          graph_type=config.graph_type,
-          org_id=org_id,
-          session=db,
-          base_schema=None if config.has_custom_schema else "base",
-          schema_extensions=config.schema_extensions
-          if not config.has_custom_schema
-          else [],
-          graph_instance_id=location.instance_id,
-          graph_tier=config.graph_tier,
-          graph_metadata={
-            "created_by": config.user_id,
-            "description": config.description or "",
-            "type": config.graph_type,
-            "tags": config.tags,
-          },
-          commit=False,
-        )
+      user_graph = GraphUser(
+        user_id=config.user_id,
+        graph_id=graph_id,
+        role="admin",
+        is_selected=True,
+      )
+      db.add(user_graph)
 
-        user_graph = GraphUser(
-          user_id=config.user_id,
-          graph_id=graph_id,
-          role="admin",
-          is_selected=True,
-        )
-        db.add(user_graph)
-
-        # Deselect other graphs for this user
-        db.query(GraphUser).filter(
-          GraphUser.user_id == config.user_id, GraphUser.graph_id != graph_id
-        ).update({"is_selected": False})
+      # Deselect other graphs for this user
+      db.query(GraphUser).filter(
+        GraphUser.user_id == config.user_id, GraphUser.graph_id != graph_id
+      ).update({"is_selected": False})
 
       db.flush()
 

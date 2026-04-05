@@ -1,6 +1,6 @@
 """Simple working tests for allocation manager."""
 
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -1006,100 +1006,6 @@ class TestFindBestInstance:
     # Verify the scan used ladybug-standard
     call_kwargs = manager.instance_table.scan.call_args
     assert call_kwargs[1]["ExpressionAttributeValues"][":tier"] == "ladybug-standard"
-
-
-# ===========================================================================
-# _trigger_scale_up
-# ===========================================================================
-
-
-class TestTriggerScaleUp:
-  """Tests for LadybugAllocationManager._trigger_scale_up."""
-
-  @pytest.mark.unit
-  @pytest.mark.asyncio
-  async def test_scale_up_increments_desired_capacity(self):
-    """Successfully increments ASG desired capacity by 1."""
-    manager = _make_manager()
-    manager.autoscaling.describe_auto_scaling_groups.return_value = {
-      "AutoScalingGroups": [{"DesiredCapacity": 2, "MaxSize": 5}]
-    }
-    manager.autoscaling.set_desired_capacity.return_value = {}
-
-    result = await manager._trigger_scale_up(GraphTier.LADYBUG_STANDARD)
-    assert result is True
-    manager.autoscaling.set_desired_capacity.assert_called_once()
-    call_kwargs = manager.autoscaling.set_desired_capacity.call_args[1]
-    assert call_kwargs["DesiredCapacity"] == 3
-
-  @pytest.mark.unit
-  @pytest.mark.asyncio
-  async def test_scale_up_returns_false_at_max_capacity(self):
-    """Already at max returns False without calling set_desired_capacity."""
-    manager = _make_manager()
-    manager.autoscaling.describe_auto_scaling_groups.return_value = {
-      "AutoScalingGroups": [{"DesiredCapacity": 5, "MaxSize": 5}]
-    }
-
-    result = await manager._trigger_scale_up(GraphTier.LADYBUG_STANDARD)
-    assert result is False
-    manager.autoscaling.set_desired_capacity.assert_not_called()
-
-  @pytest.mark.unit
-  @pytest.mark.asyncio
-  async def test_scale_up_rate_limited_within_5_minutes(self):
-    """Second call within 5 minutes is rate-limited and returns False."""
-    manager = _make_manager()
-    # Set timestamp to recent (within 5 min)
-    manager._scale_up_timestamps["ladybug-standard"] = datetime.now(UTC) - timedelta(
-      seconds=60
-    )
-
-    result = await manager._trigger_scale_up(GraphTier.LADYBUG_STANDARD)
-    assert result is False
-    # describe_auto_scaling_groups should NOT be called when rate-limited
-    manager.autoscaling.describe_auto_scaling_groups.assert_not_called()
-
-  @pytest.mark.unit
-  @pytest.mark.asyncio
-  async def test_scale_up_allowed_after_cooldown(self):
-    """Call after 5-minute cooldown is allowed."""
-    manager = _make_manager()
-    # Set timestamp to 6 minutes ago
-    manager._scale_up_timestamps["ladybug-standard"] = datetime.now(UTC) - timedelta(
-      seconds=360
-    )
-    manager.autoscaling.describe_auto_scaling_groups.return_value = {
-      "AutoScalingGroups": [{"DesiredCapacity": 2, "MaxSize": 5}]
-    }
-    manager.autoscaling.set_desired_capacity.return_value = {}
-
-    result = await manager._trigger_scale_up(GraphTier.LADYBUG_STANDARD)
-    assert result is True
-
-  @pytest.mark.unit
-  @pytest.mark.asyncio
-  async def test_scale_up_returns_false_when_asg_not_found(self):
-    """ASG not found returns False."""
-    manager = _make_manager()
-    manager.autoscaling.describe_auto_scaling_groups.return_value = {
-      "AutoScalingGroups": []
-    }
-
-    result = await manager._trigger_scale_up(GraphTier.LADYBUG_STANDARD)
-    assert result is False
-
-  @pytest.mark.unit
-  @pytest.mark.asyncio
-  async def test_scale_up_returns_false_on_client_error(self):
-    """ClientError returns False."""
-    manager = _make_manager()
-    manager.autoscaling.describe_auto_scaling_groups.side_effect = _client_error(
-      "AutoScalingGroupNotFound", "not found"
-    )
-
-    result = await manager._trigger_scale_up(GraphTier.LADYBUG_STANDARD)
-    assert result is False
 
 
 # ===========================================================================
