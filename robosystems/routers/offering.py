@@ -161,9 +161,9 @@ async def get_service_offerings(
 
           graph_limits = GraphTierConfig.get_graph_limits(tier_name)
         if graph_limits:
-          max_nodes = graph_limits.get("max_nodes", 0)
-          if max_nodes >= 1_000_000:
-            features.append(f"{max_nodes // 1_000_000}M node limit")
+          storage_limit = graph_limits.get("instance_storage_limit_gb", 0)
+          if storage_limit > 0:
+            features.append(f"{int(storage_limit)} GB instance storage")
 
       tier_info = {
         "name": tier_name,

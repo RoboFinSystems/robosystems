@@ -355,26 +355,45 @@ class GraphTierConfig:
   @classmethod
   def get_graph_limits(
     cls, tier: str, environment: str | None = None
-  ) -> dict[str, int]:
-    """Get graph content limits (nodes, relationships, rows) for a tier.
+  ) -> dict[str, Any]:
+    """Get graph content limits for a tier.
 
     Args:
         tier: The tier name (ladybug-standard, ladybug-large, ladybug-xlarge)
         environment: Environment (defaults to current env)
 
     Returns:
-        Graph limits dictionary with max_nodes, max_relationships, etc.
+        Graph limits dictionary with instance_storage_limit_gb, row limits, etc.
     """
     tier_config = cls.get_tier_config(tier, environment)
-    defaults = {
-      "max_nodes": 5_000_000,
-      "max_relationships": 10_000_000,
+    defaults: dict[str, Any] = {
+      "instance_storage_limit_gb": 20,
       "max_rows_per_copy": 2_000_000,
       "max_single_table_rows": 5_000_000,
       "chunk_size_rows": 1_000_000,
       "warn_at_percentage": 80,
     }
     return tier_config.get("graph_limits", defaults)
+
+  @classmethod
+  def get_instance_storage_limit_gb(
+    cls, tier: str, environment: str | None = None
+  ) -> float:
+    """Get the soft instance storage limit in GB for a tier.
+
+    This is the total storage budget for the entire dedicated instance,
+    covering the parent graph, all subgraphs, DuckDB staging, and
+    future LanceDB vector indexes.
+
+    Args:
+        tier: The tier name (ladybug-standard, ladybug-large, ladybug-xlarge)
+        environment: Environment (defaults to current env)
+
+    Returns:
+        Storage limit in GB (soft cap — used for reporting, not enforcement)
+    """
+    graph_limits = cls.get_graph_limits(tier, environment)
+    return float(graph_limits.get("instance_storage_limit_gb", 20))
 
   @classmethod
   def get_memory_config(
@@ -426,14 +445,11 @@ class GraphTierConfig:
     """
     features = []
 
-    # Add content limits
+    # Add storage limit
     graph_limits = tier_config.get("graph_limits", {})
-    max_nodes = graph_limits.get("max_nodes")
-    if max_nodes is not None and max_nodes > 0:
-      if max_nodes >= 1_000_000:
-        features.append(f"{max_nodes // 1_000_000}M node limit")
-      else:
-        features.append(f"{max_nodes:,} node limit")
+    storage_limit = graph_limits.get("instance_storage_limit_gb")
+    if storage_limit is not None and storage_limit > 0:
+      features.append(f"{int(storage_limit)} GB instance storage")
 
     # Add AI credits allocation
     monthly_credits = tier_config.get("monthly_credits")

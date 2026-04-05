@@ -28,7 +28,9 @@ from robosystems.models.api.graphs.limits import (
   ContentLimits,
   CopyOperationLimits,
   CreditLimits,
+  DatabaseStorageEntry,
   GraphLimitsResponse,
+  InstanceUsage,
   QueryLimits,
   RateLimits,
   StorageLimits,
@@ -76,9 +78,8 @@ Returns all operational limits that apply to this graph including:
 - **Backup Limits**: Frequency, retention, size limits
 - **Rate Limits**: Requests per minute/hour based on tier
 - **Credit Limits**: AI operation credits (if applicable)
-- **Content Limits**: Node, relationship, and row limits (if applicable)
-
-This unified endpoint provides all limits in one place for easier client integration.
+- **Content Limits**: Per-operation materialization limits (if applicable)
+- **Instance Usage**: Aggregate storage across parent + subgraphs (user graphs only)
 
 **Note**: Limits vary based on subscription tier (ladybug-standard, ladybug-large, ladybug-xlarge).""",
   operation_id="getGraphLimits",
@@ -227,53 +228,60 @@ async def get_graph_limits(
       except Exception:
         pass
 
-    # Get content limits for non-shared graphs
+    # Get content limits and instance usage for non-shared graphs.
+    # Note: check_instance_storage issues parallel Graph API calls for the parent
+    # + each subgraph (N+1 calls). For graphs with many subgraphs this adds
+    # latency. Consider adding a short-TTL Valkey cache if this becomes an issue.
     content_limits = None
+    instance_usage = None
     if not is_shared:
       graph_limits_config = GraphTierConfig.get_graph_limits(graph_tier)
 
-      # Try to get current counts from Graph API
-      current_nodes = None
-      current_rels = None
+      # Get node count (informational only — fast, internally tracked by LadybugDB)
+      node_count = None
       try:
         graph_client = await _get_graph_client(graph_id)
         db_info = await asyncio.wait_for(
           graph_client.get_database_info(graph_id), timeout=10
         )
         await graph_client.close()
-        current_nodes = db_info.get("node_count")
-        current_rels = db_info.get("relationship_count")
+        node_count = db_info.get("node_count")
       except Exception as e:
-        logger.debug(f"Could not fetch graph content counts for {graph_id}: {e}")
-
-      # Determine warnings
-      approaching = []
-      warn_pct = graph_limits_config.get("warn_at_percentage", 80) / 100
-      if (
-        current_nodes is not None
-        and current_nodes > graph_limits_config["max_nodes"] * warn_pct
-      ):
-        approaching.append(
-          f"nodes ({current_nodes:,} / {graph_limits_config['max_nodes']:,})"
-        )
-      if (
-        current_rels is not None
-        and current_rels > graph_limits_config["max_relationships"] * warn_pct
-      ):
-        approaching.append(
-          f"relationships ({current_rels:,} / {graph_limits_config['max_relationships']:,})"
-        )
+        logger.debug(f"Could not fetch node count for {graph_id}: {e}")
 
       content_limits = ContentLimits(
-        max_nodes=graph_limits_config["max_nodes"],
-        current_nodes=current_nodes,
-        max_relationships=graph_limits_config["max_relationships"],
-        current_relationships=current_rels,
         max_rows_per_copy=graph_limits_config["max_rows_per_copy"],
         max_single_table_rows=graph_limits_config["max_single_table_rows"],
         chunk_size_rows=graph_limits_config["chunk_size_rows"],
-        approaching_limits=approaching,
       )
+
+      # Get aggregate instance storage usage (parent + subgraphs)
+      try:
+        from robosystems.middleware.graph.ingestion_limits import IngestionLimitChecker
+
+        # Use parent graph_id for instance-level aggregation
+        parent_graph_id = graph_id
+        if graph and graph.parent_graph_id:
+          parent_graph_id = graph.parent_graph_id
+
+        storage_check = await IngestionLimitChecker.check_instance_storage(
+          db=session,
+          graph_id=parent_graph_id,
+          tier=graph_tier,
+        )
+
+        instance_usage = InstanceUsage(
+          node_count=node_count,
+          total_storage_gb=storage_check["total_storage_gb"],
+          limit_gb=storage_check["limit_gb"],
+          usage_percentage=storage_check["usage_percentage"],
+          status=storage_check["status"],
+          databases=[
+            DatabaseStorageEntry(**db_entry) for db_entry in storage_check["databases"]
+          ],
+        )
+      except Exception as e:
+        logger.warning(f"Could not get instance usage for {graph_id}: {e}")
 
     # Build comprehensive response using typed models
     response = GraphLimitsResponse(
@@ -295,6 +303,7 @@ async def get_graph_limits(
       rate_limits=RateLimits(**rate_limits),
       credits=CreditLimits(**credit_limits) if credit_limits else None,
       content=content_limits,
+      instance=instance_usage,
     )
 
     # Record success

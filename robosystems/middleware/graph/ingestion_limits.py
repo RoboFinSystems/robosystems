@@ -1,14 +1,16 @@
 """Graph content limit checking for materialization operations.
 
-Enforces tier-based limits on nodes, relationships, and rows before
-materialization to prevent graphs from exceeding their tier capacity.
+Enforces per-operation safety limits (rows per copy, rows per table) to prevent
+OOM during materialization. Instance storage is tracked as a soft limit for
+reporting and alerting — it does not block operations.
 
 Data sources:
 - Row counts: GraphFile.duckdb_row_count (tracked at upload time)
-- Current graph counts: Graph API get_database_info() -> node_count, relationship_count
+- Storage: Graph API get_database_info() -> size_bytes (file stat, instant)
 - Tier limits: GraphTierConfig.get_graph_limits(tier)
 """
 
+import asyncio
 import logging
 from typing import Any
 
@@ -36,7 +38,11 @@ class IngestionLimitChecker:
     tier: str,
     table_name: str | None = None,
   ) -> dict[str, Any]:
-    """Check if materialization would exceed tier limits.
+    """Check if materialization would exceed per-operation safety limits.
+
+    Only enforces max_rows_per_copy and max_single_table_rows — these are
+    hard limits to prevent OOM during a single materialization operation.
+    Instance storage capacity is tracked separately as a soft limit.
 
     Args:
         db: Database session
@@ -55,14 +61,14 @@ class IngestionLimitChecker:
     pending_rows = cls._get_pending_row_counts(db, graph_id)
     total_pending_rows = sum(pending_rows.values())
 
-    # Check max_rows_per_copy
+    # Check max_rows_per_copy (hard limit — prevents OOM during materialization)
     max_rows_per_copy = limits.get("max_rows_per_copy", 2_000_000)
     if total_pending_rows > max_rows_per_copy:
       errors.append(
         f"Total rows ({total_pending_rows:,}) exceeds max_rows_per_copy limit ({max_rows_per_copy:,})"
       )
 
-    # Check individual table row limits
+    # Check individual table row limits (hard limit)
     max_single_table = limits.get("max_single_table_rows", 5_000_000)
     for tbl_name, row_count in pending_rows.items():
       if row_count > max_single_table:
@@ -70,68 +76,14 @@ class IngestionLimitChecker:
           f"Table '{tbl_name}' has {row_count:,} rows, exceeding max_single_table_rows limit ({max_single_table:,})"
         )
 
-    # Try to get current graph counts for node/relationship limit checks
-    current_nodes = None
-    current_rels = None
-    try:
-      current_nodes, current_rels = await cls._get_current_graph_counts(graph_id)
-    except Exception as e:
-      logger.warning(f"Could not get current graph counts for {graph_id}: {e}")
-
-    # Estimate how many new nodes/rels this materialization would add
-    node_rows = sum(
-      count
-      for name, count in pending_rows.items()
-      if not cls._is_relationship_table(name)
-    )
-    rel_rows = sum(
-      count for name, count in pending_rows.items() if cls._is_relationship_table(name)
-    )
-
-    max_nodes = limits.get("max_nodes", 5_000_000)
-    max_rels = limits.get("max_relationships", 10_000_000)
-    warn_pct = limits.get("warn_at_percentage", 80) / 100
-
-    # Check node limits (current + pending vs max)
-    if current_nodes is not None:
-      projected_nodes = current_nodes + node_rows
-      if projected_nodes > max_nodes:
-        errors.append(
-          f"Projected nodes ({projected_nodes:,}) would exceed limit ({max_nodes:,}). "
-          f"Current: {current_nodes:,}, pending: {node_rows:,}"
-        )
-      elif projected_nodes > max_nodes * warn_pct:
-        warnings.append(
-          f"Approaching node limit: {projected_nodes:,} / {max_nodes:,} ({projected_nodes / max_nodes * 100:.0f}%)"
-        )
-
-    # Check relationship limits
-    if current_rels is not None:
-      projected_rels = current_rels + rel_rows
-      if projected_rels > max_rels:
-        errors.append(
-          f"Projected relationships ({projected_rels:,}) would exceed limit ({max_rels:,}). "
-          f"Current: {current_rels:,}, pending: {rel_rows:,}"
-        )
-      elif projected_rels > max_rels * warn_pct:
-        warnings.append(
-          f"Approaching relationship limit: {projected_rels:,} / {max_rels:,} ({projected_rels / max_rels * 100:.0f}%)"
-        )
-
     return {
       "allowed": len(errors) == 0,
       "errors": errors,
       "warnings": warnings,
       "current_usage": {
-        "current_nodes": current_nodes,
-        "current_relationships": current_rels,
-        "pending_node_rows": node_rows,
-        "pending_relationship_rows": rel_rows,
         "total_pending_rows": total_pending_rows,
       },
       "limits": {
-        "max_nodes": max_nodes,
-        "max_relationships": max_rels,
         "max_rows_per_copy": max_rows_per_copy,
         "max_single_table_rows": max_single_table,
         "chunk_size_rows": limits.get("chunk_size_rows", 1_000_000),
@@ -140,55 +92,76 @@ class IngestionLimitChecker:
     }
 
   @classmethod
-  async def check_graph_usage(
+  async def check_instance_storage(
     cls,
+    db: Session,
     graph_id: str,
     tier: str,
   ) -> dict[str, Any]:
-    """Check current graph against tier limits (for /limits endpoint).
+    """Check aggregate storage usage across the entire dedicated instance.
+
+    Sums storage for the parent graph and all subgraphs. This is a soft
+    limit — used for reporting and email alerts, not enforcement.
 
     Args:
-        graph_id: Graph database identifier
+        db: Database session
+        graph_id: Parent graph database identifier
         tier: Graph tier
 
     Returns:
-        Dict with: within_limits, warnings, current_usage, limits
+        Dict with: total_storage_gb, limit_gb, usage_percentage, status, databases
     """
-    limits = GraphTierConfig.get_graph_limits(tier)
-    warnings: list[str] = []
+    from robosystems.models.core.graph import Graph
 
-    current_nodes = None
-    current_rels = None
-    try:
-      current_nodes, current_rels = await cls._get_current_graph_counts(graph_id)
-    except Exception as e:
-      logger.warning(f"Could not get graph counts for {graph_id}: {e}")
+    limit_gb = GraphTierConfig.get_instance_storage_limit_gb(tier)
+    warn_pct = (
+      GraphTierConfig.get_graph_limits(tier).get("warn_at_percentage", 80) / 100
+    )
 
-    max_nodes = limits.get("max_nodes", 5_000_000)
-    max_rels = limits.get("max_relationships", 10_000_000)
-    warn_pct = limits.get("warn_at_percentage", 80) / 100
+    # Collect all database IDs on this instance (parent + subgraphs)
+    database_ids = [(graph_id, True)]
+    subgraphs = Graph.get_subgraphs(graph_id, db)
+    for sg in subgraphs:
+      database_ids.append((sg.graph_id, False))
 
-    within_limits = True
-    if current_nodes is not None:
-      if current_nodes > max_nodes:
-        within_limits = False
-      elif current_nodes > max_nodes * warn_pct:
-        warnings.append(f"nodes ({current_nodes:,} / {max_nodes:,})")
+    # Fetch storage for all databases in parallel
+    size_tasks = [cls._get_database_size_bytes(gid) for gid, _ in database_ids]
+    sizes = await asyncio.gather(*size_tasks)
 
-    if current_rels is not None:
-      if current_rels > max_rels:
-        within_limits = False
-      elif current_rels > max_rels * warn_pct:
-        warnings.append(f"relationships ({current_rels:,} / {max_rels:,})")
+    # Build breakdown and total
+    databases: list[dict[str, Any]] = []
+    total_bytes = 0
+    for (gid, is_parent), size_bytes in zip(database_ids, sizes, strict=True):
+      size_mb = round(size_bytes / (1024**2), 2) if size_bytes is not None else None
+      databases.append(
+        {
+          "graph_id": gid,
+          "is_parent": is_parent,
+          "size_mb": size_mb,
+        }
+      )
+      if size_bytes is not None:
+        total_bytes += size_bytes
+
+    total_storage_gb = round(total_bytes / (1024**3), 2)
+    usage_percentage = (
+      round((total_storage_gb / limit_gb) * 100, 1) if limit_gb > 0 else 0
+    )
+
+    # Determine status
+    if usage_percentage > 100:
+      instance_status = "over_limit"
+    elif usage_percentage >= warn_pct * 100:
+      instance_status = "approaching"
+    else:
+      instance_status = "healthy"
 
     return {
-      "within_limits": within_limits,
-      "warnings": warnings,
-      "current_usage": {
-        "nodes": current_nodes,
-        "relationships": current_rels,
-      },
-      "limits": limits,
+      "total_storage_gb": total_storage_gb,
+      "limit_gb": limit_gb,
+      "usage_percentage": usage_percentage,
+      "status": instance_status,
+      "databases": databases,
     }
 
   @classmethod
@@ -215,16 +188,12 @@ class IngestionLimitChecker:
     return {r.table_name: int(r.total_rows) for r in results if r.table_name}
 
   @classmethod
-  async def _get_current_graph_counts(
-    cls, graph_id: str
-  ) -> tuple[int | None, int | None]:
-    """Get current node and relationship counts from Graph API.
+  async def _get_database_size_bytes(cls, graph_id: str) -> int | None:
+    """Get database size in bytes from Graph API (file stat, instant).
 
     Returns:
-        Tuple of (node_count, relationship_count), either may be None if unavailable
+        Size in bytes, or None if unavailable
     """
-    import asyncio
-
     from robosystems.graph_api.client.factory import GraphClientFactory
 
     try:
@@ -233,32 +202,7 @@ class IngestionLimitChecker:
       )
       db_info = await asyncio.wait_for(client.get_database_info(graph_id), timeout=10)
       await client.close()
-
-      return db_info.get("node_count"), db_info.get("relationship_count")
+      return db_info.get("size_bytes")
     except Exception as e:
-      logger.debug(f"Could not get graph counts for {graph_id}: {e}")
-      return None, None
-
-  @classmethod
-  def _is_relationship_table(cls, table_name: str) -> bool:
-    """Detect relationship tables by naming convention.
-
-    Relationship tables use UPPERCASE names or contain _HAS_, _IN_, _OF_ patterns.
-    Node tables use PascalCase (e.g., Entity, Fact, Person).
-    """
-    if not table_name:
-      return False
-    # All uppercase = relationship table (e.g., ENTITY_HAS_FACT, PERSON_WORKS_AT)
-    if table_name == table_name.upper() and "_" in table_name:
-      return True
-    # Contains common relationship patterns
-    rel_patterns = [
-      "_HAS_",
-      "_IN_",
-      "_OF_",
-      "_TO_",
-      "_FROM_",
-      "_BELONGS_",
-      "_CONTAINS_",
-    ]
-    return any(pattern in table_name for pattern in rel_patterns)
+      logger.debug(f"Could not get database size for {graph_id}: {e}")
+      return None

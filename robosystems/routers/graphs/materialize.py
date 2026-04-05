@@ -539,21 +539,18 @@ async def materialize_graph(
     )
 
     if not limit_check["allowed"]:
+      # Only row-per-copy and single-table-row limits block materialization
+      # (operational safety to prevent OOM, not capacity limits)
       raise HTTPException(
         status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
         detail={
-          "error": "Graph content limit exceeded",
+          "error": "Materialization operation limit exceeded",
           "errors": limit_check["errors"],
-          "warnings": limit_check["warnings"],
           "current_usage": limit_check["current_usage"],
           "limits": limit_check["limits"],
           "tier": graph_tier,
-          "upgrade_suggestion": "Consider upgrading to a higher tier for larger data volumes",
         },
       )
-
-    if limit_check["warnings"]:
-      logger.info(f"Materialization warnings for {graph_id}: {limit_check['warnings']}")
 
     api_logger.info(
       "Materialization job queued",
