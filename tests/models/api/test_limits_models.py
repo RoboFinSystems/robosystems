@@ -96,16 +96,7 @@ class TestContentLimits:
       max_single_table_rows=5000000,
       chunk_size_rows=1000000,
     )
-    assert model.node_count is None
-
-  def test_with_node_count(self):
-    model = ContentLimits(
-      max_rows_per_copy=2000000,
-      max_single_table_rows=5000000,
-      chunk_size_rows=1000000,
-      node_count=150000,
-    )
-    assert model.node_count == 150000
+    assert model.max_rows_per_copy == 2000000
 
 
 @pytest.mark.unit

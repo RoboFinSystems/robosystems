@@ -250,7 +250,6 @@ async def get_graph_limits(
         max_rows_per_copy=graph_limits_config["max_rows_per_copy"],
         max_single_table_rows=graph_limits_config["max_single_table_rows"],
         chunk_size_rows=graph_limits_config["chunk_size_rows"],
-        node_count=node_count,
       )
 
       # Get aggregate instance storage usage (parent + subgraphs)
@@ -269,6 +268,7 @@ async def get_graph_limits(
         )
 
         instance_usage = InstanceUsage(
+          node_count=node_count,
           total_storage_gb=storage_check["total_storage_gb"],
           limit_gb=storage_check["limit_gb"],
           usage_percentage=storage_check["usage_percentage"],

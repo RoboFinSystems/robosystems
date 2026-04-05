@@ -131,7 +131,7 @@ class IngestionLimitChecker:
     # Build breakdown and total
     databases: list[dict[str, Any]] = []
     total_bytes = 0
-    for (gid, is_parent), size_bytes in zip(database_ids, sizes, strict=False):
+    for (gid, is_parent), size_bytes in zip(database_ids, sizes, strict=True):
       size_mb = round(size_bytes / (1024**2), 2) if size_bytes is not None else None
       databases.append(
         {
@@ -162,43 +162,6 @@ class IngestionLimitChecker:
       "usage_percentage": usage_percentage,
       "status": instance_status,
       "databases": databases,
-    }
-
-  @classmethod
-  async def check_graph_usage(
-    cls,
-    db: Session,
-    graph_id: str,
-    tier: str,
-  ) -> dict[str, Any]:
-    """Check current graph storage usage against tier limits (for /limits endpoint).
-
-    Args:
-        db: Database session
-        graph_id: Graph database identifier
-        tier: Graph tier
-
-    Returns:
-        Dict with: within_limits, warnings, instance_usage
-    """
-    instance_usage = await cls.check_instance_storage(db, graph_id, tier)
-    warnings: list[str] = []
-
-    within_limits = instance_usage["status"] != "over_limit"
-    if instance_usage["status"] == "approaching":
-      warnings.append(
-        f"storage ({instance_usage['total_storage_gb']} GB / {instance_usage['limit_gb']} GB)"
-      )
-    elif instance_usage["status"] == "over_limit":
-      warnings.append(
-        f"storage over limit ({instance_usage['total_storage_gb']} GB / {instance_usage['limit_gb']} GB, "
-        f"{instance_usage['usage_percentage']}%)"
-      )
-
-    return {
-      "within_limits": within_limits,
-      "warnings": warnings,
-      "instance_usage": instance_usage,
     }
 
   @classmethod

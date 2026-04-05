@@ -75,17 +75,13 @@ def graph_usage_monitor_sensor(context: SensorEvaluationContext):
       graph_tier = graph.graph_tier or "ladybug-standard"
 
       try:
-        loop = asyncio.new_event_loop()
-        try:
-          storage_check = loop.run_until_complete(
-            IngestionLimitChecker.check_instance_storage(
-              db=db,
-              graph_id=graph.graph_id,
-              tier=graph_tier,
-            )
+        storage_check = asyncio.run(
+          IngestionLimitChecker.check_instance_storage(
+            db=db,
+            graph_id=graph.graph_id,
+            tier=graph_tier,
           )
-        finally:
-          loop.close()
+        )
       except Exception as e:
         context.log.warning(f"Could not check storage for {graph.graph_id}: {e}")
         continue
@@ -124,23 +120,19 @@ def graph_usage_monitor_sensor(context: SensorEvaluationContext):
       try:
         from robosystems.operations.aws.ses import ses_service
 
-        loop = asyncio.new_event_loop()
-        try:
-          sent = loop.run_until_complete(
-            ses_service.send_capacity_warning_email(
-              user_email=user.email,
-              user_name=user.name or "there",
-              graph_id=graph.graph_id,
-              tier=graph_tier,
-              usage_percentage=storage_check["usage_percentage"],
-              used_gb=storage_check["total_storage_gb"],
-              limit_gb=storage_check["limit_gb"],
-              instance_status=instance_status,
-              databases=storage_check["databases"],
-            )
+        sent = asyncio.run(
+          ses_service.send_capacity_warning_email(
+            user_email=user.email,
+            user_name=user.name or "there",
+            graph_id=graph.graph_id,
+            tier=graph_tier,
+            usage_percentage=storage_check["usage_percentage"],
+            used_gb=storage_check["total_storage_gb"],
+            limit_gb=storage_check["limit_gb"],
+            instance_status=instance_status,
+            databases=storage_check["databases"],
           )
-        finally:
-          loop.close()
+        )
 
         if sent:
           # Set dedup key with TTL
@@ -159,6 +151,8 @@ def graph_usage_monitor_sensor(context: SensorEvaluationContext):
       f"Usage monitor complete: checked {len(parent_graphs)} graphs, "
       f"sent {alerts_sent} alerts"
     )
+
+    return None
 
   finally:
     db.close()

@@ -308,13 +308,15 @@ Visit your dashboard: {url}
       )
       + f'<div style="margin:20px 0;padding:20px;background:{_BRAND_LIGHT};'
       f'border:1px solid {_BRAND_BORDER};border-radius:8px;">'
-      f'<div style="display:flex;justify-content:space-between;align-items:center;">'
-      f'<div><span style="font-size:28px;font-weight:700;color:{status_color};">'
+      f'<table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>'
+      f'<td style="vertical-align:middle;">'
+      f'<span style="font-size:28px;font-weight:700;color:{status_color};">'
       f"{used_gb:.1f} GB</span>"
-      f'<span style="font-size:14px;color:{_BRAND_MUTED};"> / {limit_gb:.0f} GB</span></div>'
-      f'<div style="display:inline-block;padding:4px 12px;border-radius:4px;'
+      f'<span style="font-size:14px;color:{_BRAND_MUTED};"> / {limit_gb:.0f} GB</span></td>'
+      f'<td style="vertical-align:middle;text-align:right;">'
+      f'<span style="display:inline-block;padding:4px 12px;border-radius:4px;'
       f'background-color:{status_color};color:#fff;font-size:12px;font-weight:600;">'
-      f"{status_label}</div></div></div>"
+      f"{status_label}</span></td></tr></table></div>"
       + db_table
       + perf_warning
       + _button(url, "View Usage Details")

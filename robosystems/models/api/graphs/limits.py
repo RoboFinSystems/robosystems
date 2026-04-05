@@ -66,9 +66,6 @@ class ContentLimits(BaseModel):
   )
   max_single_table_rows: int = Field(..., description="Maximum rows per staging table")
   chunk_size_rows: int = Field(..., description="Rows per materialization chunk")
-  node_count: int | None = Field(
-    None, description="Current node count (informational, no limit enforced)"
-  )
 
 
 class DatabaseStorageEntry(BaseModel):
@@ -86,6 +83,9 @@ class InstanceUsage(BaseModel):
   future LanceDB vector indexes.
   """
 
+  node_count: int | None = Field(
+    None, description="Current node count (informational, no limit enforced)"
+  )
   total_storage_gb: float | None = Field(
     None, description="Total storage used across all databases in GB"
   )
@@ -154,9 +154,9 @@ class GraphLimitsResponse(BaseModel):
               "max_rows_per_copy": 2000000,
               "max_single_table_rows": 5000000,
               "chunk_size_rows": 1000000,
-              "node_count": 150000,
             },
             "instance": {
+              "node_count": 150000,
               "total_storage_gb": 2.45,
               "limit_gb": 20,
               "usage_percentage": 12.3,
