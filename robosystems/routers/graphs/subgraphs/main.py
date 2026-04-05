@@ -331,6 +331,7 @@ async def create_subgraph(
     )
 
     # 6. Fork path: enqueue to worker for background execution
+    #    Dagster reporting happens in the worker task (tasks/subgraph_creation.py)
     if request.fork_parent:
       from robosystems.worker.client import enqueue_task
 
@@ -414,6 +415,28 @@ async def create_subgraph(
         "tier": parent_graph.graph_tier,
       },
     )
+
+    # Report to Dagster observable asset
+    try:
+      from robosystems.dagster.reporting import report_asset_materialization
+
+      await report_asset_materialization(
+        asset_key="user_subgraph_creation",
+        description=f"Subgraph {subgraph_result['graph_id']} created from {graph_id}",
+        metadata={
+          "graph_id": subgraph_result["graph_id"],
+          "parent_graph_id": graph_id,
+          "subgraph_name": request.name,
+          "subgraph_type": request.subgraph_type.value
+          if request.subgraph_type
+          else "static",
+          "user_id": str(current_user.id),
+          "tier": parent_graph.graph_tier,
+          "provisioning_method": "direct",
+        },
+      )
+    except Exception as e:
+      logger.warning(f"Failed to report subgraph creation to Dagster: {e}")
 
     # Record success metrics
     record_operation_metrics(

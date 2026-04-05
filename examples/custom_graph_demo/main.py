@@ -169,6 +169,15 @@ def main():
     step6_args = ["--base-url", args.base_url]
     run_script("06_upload_documents.py", step6_args)
 
+  # Step 7: Create memory subgraph
+  step7_args = [
+    "--base-url",
+    args.base_url,
+    "--credentials-file",
+    str(credentials_path),
+  ]
+  run_script("07_memory_subgraph.py", step7_args)
+
   print("\n" + "=" * 70)
   print("✅ Custom Graph Demo - Complete!")
   print("=" * 70)
@@ -176,6 +185,7 @@ def main():
   print("   - Run custom queries: uv run 05_query_graph.py")
   print("   - Interactive mode: uv run 05_query_graph.py")
   print("   - Search documents: uv run 06_upload_documents.py")
+  print("   - Memory subgraph: uv run 07_memory_subgraph.py")
   print("   - Create another graph: uv run main.py --new-graph")
   print("=" * 70 + "\n")
 

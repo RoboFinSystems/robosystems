@@ -44,6 +44,9 @@ class SecurityEventType(Enum):
   PASSWORD_RESET_COMPLETED = "password_reset_completed"
   # Token management events
   TOKEN_REFRESH = "token_refresh"
+  # Subgraph events
+  SUBGRAPH_CREATED = "subgraph_created"
+  SUBGRAPH_DELETED = "subgraph_deleted"
 
 
 class SecurityAuditLogger:
