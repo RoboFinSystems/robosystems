@@ -38,7 +38,7 @@ class GraphCreationConfig:
   user_id: str
   tier: str
   graph_name: str
-  graph_id: str | None = None  # Pre-set for queued graphs
+  graph_id: str | None = None
   graph_type: str = "entity"  # "entity" or "generic"
   schema_extensions: list[str] = field(default_factory=list)
   custom_schema: dict[str, Any] | None = None  # Only for generic
@@ -107,7 +107,7 @@ class GraphCreationService:
 
   Pipeline steps:
     1. validate_org      — check org limits
-    2. generate_graph_id — ULID-based if not pre-set (queued graphs)
+    2. generate_graph_id — ULID-based
     3. allocate          — DynamoDB allocation via LadybugAllocationManager
     4. create_database   — Graph API create_database call
     5. install_schema    — resolve DDL + install via Graph API

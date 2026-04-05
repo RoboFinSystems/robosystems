@@ -10,11 +10,9 @@ Graph Ownership:
 - Only users within the organization can be granted access
 
 Graph Lifecycle:
-- queued: Waiting for infrastructure capacity (creation queue)
-- provisioning: Infrastructure being set up (one at a time per tier)
 - active: Fully operational
 - suspended: Subscription ended, access blocked
-- deprovisioned: Infrastructure torn down (future)
+- deprovisioned: Infrastructure torn down
 """
 
 from collections.abc import Sequence

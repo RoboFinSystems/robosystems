@@ -913,7 +913,6 @@ class TestGraphCapacityEndpoint:
 
   async def test_capacity_mixed_statuses(self, async_client: AsyncClient):
     """Test capacity endpoint with different statuses per tier."""
-    from robosystems.config import env as env_config
 
     async def mock_check(tier):
       from robosystems.middleware.graph.types import GraphTier
@@ -925,12 +924,9 @@ class TestGraphCapacityEndpoint:
       else:
         return "ready"
 
-    with (
-      patch(
-        "robosystems.middleware.graph.allocation_manager.LadybugAllocationManager"
-      ) as MockManager,
-      patch.object(type(env_config), "GRAPH_PROVISION_QUEUE_ENABLED", True),
-    ):
+    with patch(
+      "robosystems.middleware.graph.allocation_manager.LadybugAllocationManager"
+    ) as MockManager:
       mock_instance = MockManager.return_value
       mock_instance.check_tier_capacity = AsyncMock(side_effect=mock_check)
 
@@ -947,10 +943,11 @@ class TestGraphCapacityEndpoint:
         == "Currently at capacity — contact us for access"
       )
 
-      assert status_map["ladybug-large"]["status"] == "scalable"
+      # "scalable" is downgraded to "at_capacity" (no auto-scaling queue)
+      assert status_map["ladybug-large"]["status"] == "at_capacity"
       assert (
         status_map["ladybug-large"]["message"]
-        == "Available — provisioning takes 3-5 minutes"
+        == "Currently at capacity — contact us for access"
       )
 
       assert status_map["ladybug-xlarge"]["status"] == "ready"

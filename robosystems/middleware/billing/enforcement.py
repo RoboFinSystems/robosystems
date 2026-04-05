@@ -145,7 +145,7 @@ def require_graph_access(
   """Validate graph is accessible for the requested operation type.
 
   Checks two layers:
-  1. Graph status (queued/provisioning -> 409, suspended -> 403, deprovisioned -> 404)
+  1. Graph status (suspended -> 403, deprovisioned -> 404)
   2. Subscription status (grace period: reads OK, writes blocked)
 
   Args:

@@ -129,8 +129,8 @@ class GraphInfo(BaseModel):
   )
   status: str = Field(
     default="active",
-    description="Graph lifecycle status: queued, provisioning, active, suspended",
-    examples=["active", "queued", "provisioning"],
+    description="Graph lifecycle status: active, suspended, deprovisioned",
+    examples=["active", "suspended"],
   )
 
   class Config:

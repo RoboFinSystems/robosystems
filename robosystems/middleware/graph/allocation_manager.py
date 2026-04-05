@@ -184,9 +184,6 @@ class LadybugAllocationManager:
     # Get DynamoDB resource with proper endpoint
     dynamodb = cast(Any, get_dynamodb_resource())
 
-    # Rate limiting for scale-up triggers (one per 5 minutes per tier)
-    self._scale_up_timestamps: dict[str, datetime] = {}
-
     # DynamoDB tables - use centralized configuration
     self.graph_table = dynamodb.Table(env.GRAPH_REGISTRY_TABLE)
     self.instance_table = dynamodb.Table(env.INSTANCE_REGISTRY_TABLE)
