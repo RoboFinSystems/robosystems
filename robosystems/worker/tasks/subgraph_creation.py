@@ -66,22 +66,6 @@ class SubgraphCreationTask(BaseTask):
         f"Subgraph created: {subgraph_id} (parent={parent_graph_id}, fork={fork_data})"
       )
 
-      # Report to Dagster observable asset (non-blocking)
-      from robosystems.dagster.reporting import report_asset_materialization
-
-      await report_asset_materialization(
-        asset_key="user_subgraph_creation",
-        description=f"Subgraph {subgraph_id} created from {parent_graph_id}",
-        metadata={
-          "graph_id": subgraph_id,
-          "parent_graph_id": parent_graph_id,
-          "user_id": self.user_id,
-          "fork_data": fork_data,
-          "provisioning_method": "worker",
-          "operation_id": self.task_id,
-        },
-      )
-
       return result
 
     finally:
