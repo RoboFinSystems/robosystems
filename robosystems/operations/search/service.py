@@ -243,7 +243,8 @@ class SearchService:
 
     for i, request in enumerate(requests):
       try:
-        self.upload_document(graph_id, request)
+        result = self.upload_document(graph_id, request)
+        results.append(result)
       except Exception as e:
         errors.append({"index": i, "title": request.title, "error": str(e)})
 

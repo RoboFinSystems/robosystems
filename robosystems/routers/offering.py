@@ -146,8 +146,9 @@ async def get_service_offerings(
       instance_config = GraphTierConfig.get_instance_config(tier_name)
       instance_type = instance_config.get("type", "")
       max_memory_mb = instance_config.get("max_memory_mb", 0)
+      vcpus = instance_config.get("duckdb_max_threads", 0)
       infrastructure = (
-        f"Dedicated {instance_type} ({max_memory_mb // 1024} GB RAM)"
+        f"Dedicated {instance_type} ({vcpus} vCPU, {max_memory_mb // 1024} GB RAM)"
         if instance_type
         else "Managed infrastructure"
       )
