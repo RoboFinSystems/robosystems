@@ -13,8 +13,12 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from robosystems.logger import get_logger
+
 if TYPE_CHECKING:
   from robosystems.worker.tasks.base import BaseTask
+
+logger = get_logger(__name__)
 
 TASK_REGISTRY: dict[str, type[BaseTask]] = {}
 _adapters_loaded = False
@@ -24,6 +28,11 @@ def register_task(task_type: str):
   """Decorator to register a task handler class."""
 
   def decorator(cls: type[BaseTask]) -> type[BaseTask]:
+    if task_type in TASK_REGISTRY:
+      logger.warning(
+        f"Overriding existing task registration '{task_type}': "
+        f"{TASK_REGISTRY[task_type].__name__} -> {cls.__name__}"
+      )
     TASK_REGISTRY[task_type] = cls
     return cls
 
@@ -56,3 +65,10 @@ def load_adapter_tasks() -> None:
   # if env.SEC_PIPELINE_ENABLED:
   #   from robosystems.adapters.sec.tasks import get_worker_components
   #   get_worker_components()  # triggers @register_task side effects
+
+
+def clear_registry() -> None:
+  """Clear all registrations. For testing only."""
+  global _adapters_loaded
+  TASK_REGISTRY.clear()
+  _adapters_loaded = False

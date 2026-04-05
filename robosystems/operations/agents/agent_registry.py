@@ -102,4 +102,6 @@ def load_adapter_agents() -> None:
 
 def clear_registry() -> None:
   """Clear all registrations. For testing only."""
+  global _adapters_loaded
   _AGENTS.clear()
+  _adapters_loaded = False
