@@ -79,6 +79,45 @@ class TestBulkIndex:
     assert result["indexed"] == 5
     assert result["errors"] == 0
 
+  @patch("opensearchpy.helpers.bulk")
+  def test_bulk_index_disables_per_request_refresh(self, mock_bulk, client):
+    mock_bulk.return_value = (1, [])
+    docs = [{"graph_id": "sec", "document_id": "doc1", "content": "test"}]
+    client.bulk_index(docs)
+    assert mock_bulk.call_args.kwargs["refresh"] is False
+
+
+class TestBulkWriteMode:
+  def test_sets_slow_refresh_during_writes(self, client, mock_opensearch):
+    with client.bulk_write_mode():
+      mock_opensearch.indices.put_settings.assert_called_once_with(
+        index="test-documents",
+        body={"index": {"refresh_interval": "60s"}},
+      )
+
+  def test_restores_refresh_and_forces_refresh_on_exit(self, client, mock_opensearch):
+    with client.bulk_write_mode():
+      pass
+    mock_opensearch.indices.refresh.assert_called_once_with(index="test-documents")
+    # Second put_settings call restores steady interval
+    restore_call = mock_opensearch.indices.put_settings.call_args_list[-1]
+    assert restore_call.kwargs["body"] == {"index": {"refresh_interval": "30s"}}
+
+  def test_restores_on_exception(self, client, mock_opensearch):
+    with pytest.raises(RuntimeError):
+      with client.bulk_write_mode():
+        raise RuntimeError("ingestion failed")
+    mock_opensearch.indices.refresh.assert_called_once()
+    assert mock_opensearch.indices.put_settings.call_count == 2
+
+  def test_custom_intervals(self, client, mock_opensearch):
+    with client.bulk_write_mode(write_interval="120s", steady_interval="10s"):
+      pass
+    first_call = mock_opensearch.indices.put_settings.call_args_list[0]
+    assert first_call.kwargs["body"] == {"index": {"refresh_interval": "120s"}}
+    last_call = mock_opensearch.indices.put_settings.call_args_list[-1]
+    assert last_call.kwargs["body"] == {"index": {"refresh_interval": "10s"}}
+
 
 class TestSearch:
   def test_bm25_filters_by_graph_id(self, client, mock_opensearch):

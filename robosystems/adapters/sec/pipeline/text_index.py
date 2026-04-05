@@ -468,129 +468,130 @@ def sec_narratives_indexed(
 
   context.log.info(f"Found {len(zip_keys)} raw ZIP files for year={partition_year}")
 
-  for zip_key in zip_keys:
-    # Extract accession from key: sec/year=2026/CIK/ACCESSION.zip
-    filename = zip_key.rsplit("/", 1)[-1]
-    accession = filename.replace(".zip", "")
+  with os_client.bulk_write_mode():
+    for zip_key in zip_keys:
+      # Extract accession from key: sec/year=2026/CIK/ACCESSION.zip
+      filename = zip_key.rsplit("/", 1)[-1]
+      accession = filename.replace(".zip", "")
 
-    # Skip if not in our target metadata
-    if accession not in accession_metadata:
-      continue
+      # Skip if not in our target metadata
+      if accession not in accession_metadata:
+        continue
 
-    # Skip already-indexed accessions (incremental)
-    if accession in indexed_accessions:
-      continue
+      # Skip already-indexed accessions (incremental)
+      if accession in indexed_accessions:
+        continue
 
-    meta = accession_metadata[accession]
+      meta = accession_metadata[accession]
 
-    # Extract CIK and year from key path
-    parts = zip_key.split("/")
-    year_part = next((p for p in parts if p.startswith("year=")), "")
-    year = year_part.replace("year=", "") if year_part else ""
-    cik = meta.get("cik", "")
+      # Extract CIK and year from key path
+      parts = zip_key.split("/")
+      year_part = next((p for p in parts if p.startswith("year=")), "")
+      year = year_part.replace("year=", "") if year_part else ""
+      cik = meta.get("cik", "")
 
-    try:
-      response = s3.get_object(Bucket=raw_bucket, Key=zip_key)
-      zip_bytes = response["Body"].read()
+      try:
+        response = s3.get_object(Bucket=raw_bucket, Key=zip_key)
+        zip_bytes = response["Body"].read()
 
-      html_content = _extract_html_from_zip(zip_bytes)
-      if not html_content:
-        context.log.debug(f"No HTML found in {zip_key}")
+        html_content = _extract_html_from_zip(zip_bytes)
+        if not html_content:
+          context.log.debug(f"No HTML found in {zip_key}")
+          errors += 1
+          continue
+
+        # Verify actual document type via iXBRL tag (catches proxy statements
+        # that are larger than the actual filing in the same accession ZIP)
+        ixbrl_doc_type = _extract_ixbrl_doc_type(html_content)
+        if ixbrl_doc_type and ixbrl_doc_type.upper() not in form_types_upper:
+          context.log.debug(
+            f"Skipping {accession}: iXBRL doc type '{ixbrl_doc_type}' "
+            f"not in {form_types_upper}"
+          )
+          continue
+
+        # Extract narrative sections
+        sections = extractor.extract(html_content, ixbrl_doc_type or meta["form_type"])
+        filings_processed += 1
+
+        if not sections:
+          continue
+
+        for section in sections:
+          sections_extracted += 1
+
+          # Externalize clean text to public S3 bucket
+          narrative_key = f"{year}/{cik}/{accession}/narrative_{section.section_id}.txt"
+          content_url_value = ""
+
+          if public_bucket:
+            try:
+              s3.put_object(
+                Bucket=public_bucket,
+                Key=narrative_key,
+                Body=section.content.encode("utf-8"),
+                ContentType="text/plain; charset=utf-8",
+              )
+              if cdn_url:
+                content_url_value = f"{cdn_url}/{narrative_key}"
+              else:
+                content_url_value = (
+                  f"https://{public_bucket}.s3.amazonaws.com/{narrative_key}"
+                )
+            except Exception as e:
+              context.log.debug(f"Failed to externalize {narrative_key}: {e}")
+
+          doc_id = hashlib.sha256(
+            f"{config.graph_id}:narr:{accession}:{section.section_id}".encode()
+          ).hexdigest()[:16]
+
+          documents.append(
+            {
+              "graph_id": config.graph_id,
+              "document_id": doc_id,
+              "source_type": "narrative_section",
+              "entity_ticker": meta.get("ticker"),
+              "entity_name": meta.get("entity_name"),
+              "entity_cik": cik,
+              "section_id": section.section_id,
+              "section_label": section.section_label,
+              "content": section.content,
+              "content_url": content_url_value,
+              "content_length": len(section.content),
+              "filing_date": meta.get("filing_date"),
+              "fiscal_year": meta.get("fiscal_year"),
+              "fiscal_period": meta.get("fiscal_period"),
+              "form_type": meta.get("form_type"),
+              "accession_number": accession,
+            }
+          )
+
+      except Exception as e:
+        context.log.warning(f"Error processing {zip_key}: {e}")
         errors += 1
         continue
 
-      # Verify actual document type via iXBRL tag (catches proxy statements
-      # that are larger than the actual filing in the same accession ZIP)
-      ixbrl_doc_type = _extract_ixbrl_doc_type(html_content)
-      if ixbrl_doc_type and ixbrl_doc_type.upper() not in form_types_upper:
-        context.log.debug(
-          f"Skipping {accession}: iXBRL doc type '{ixbrl_doc_type}' "
-          f"not in {form_types_upper}"
+      # Batch index to limit memory
+      if len(documents) >= batch_size:
+        _embed_document_batch(enricher, documents)
+        batch_result = os_client.bulk_index(documents)
+        total_indexed += batch_result["indexed"]
+        errors += batch_result["errors"]
+        context.log.info(
+          f"Batch indexed {batch_result['indexed']} sections ({total_indexed} total)"
         )
-        continue
+        documents.clear()
 
-      # Extract narrative sections
-      sections = extractor.extract(html_content, ixbrl_doc_type or meta["form_type"])
-      filings_processed += 1
-
-      if not sections:
-        continue
-
-      for section in sections:
-        sections_extracted += 1
-
-        # Externalize clean text to public S3 bucket
-        narrative_key = f"{year}/{cik}/{accession}/narrative_{section.section_id}.txt"
-        content_url_value = ""
-
-        if public_bucket:
-          try:
-            s3.put_object(
-              Bucket=public_bucket,
-              Key=narrative_key,
-              Body=section.content.encode("utf-8"),
-              ContentType="text/plain; charset=utf-8",
-            )
-            if cdn_url:
-              content_url_value = f"{cdn_url}/{narrative_key}"
-            else:
-              content_url_value = (
-                f"https://{public_bucket}.s3.amazonaws.com/{narrative_key}"
-              )
-          except Exception as e:
-            context.log.debug(f"Failed to externalize {narrative_key}: {e}")
-
-        doc_id = hashlib.sha256(
-          f"{config.graph_id}:narr:{accession}:{section.section_id}".encode()
-        ).hexdigest()[:16]
-
-        documents.append(
-          {
-            "graph_id": config.graph_id,
-            "document_id": doc_id,
-            "source_type": "narrative_section",
-            "entity_ticker": meta.get("ticker"),
-            "entity_name": meta.get("entity_name"),
-            "entity_cik": cik,
-            "section_id": section.section_id,
-            "section_label": section.section_label,
-            "content": section.content,
-            "content_url": content_url_value,
-            "content_length": len(section.content),
-            "filing_date": meta.get("filing_date"),
-            "fiscal_year": meta.get("fiscal_year"),
-            "fiscal_period": meta.get("fiscal_period"),
-            "form_type": meta.get("form_type"),
-            "accession_number": accession,
-          }
-        )
-
-    except Exception as e:
-      context.log.warning(f"Error processing {zip_key}: {e}")
-      errors += 1
-      continue
-
-    # Batch index to limit memory
-    if len(documents) >= batch_size:
+    # Index remaining documents
+    if documents:
       _embed_document_batch(enricher, documents)
       batch_result = os_client.bulk_index(documents)
       total_indexed += batch_result["indexed"]
       errors += batch_result["errors"]
       context.log.info(
-        f"Batch indexed {batch_result['indexed']} sections ({total_indexed} total)"
+        f"Final batch indexed {batch_result['indexed']} sections "
+        f"({batch_result['errors']} errors)"
       )
-      documents.clear()
-
-  # Index remaining documents
-  if documents:
-    _embed_document_batch(enricher, documents)
-    batch_result = os_client.bulk_index(documents)
-    total_indexed += batch_result["indexed"]
-    errors += batch_result["errors"]
-    context.log.info(
-      f"Final batch indexed {batch_result['indexed']} sections "
-      f"({batch_result['errors']} errors)"
-    )
 
   # Release enricher memory
   del enricher
@@ -896,97 +897,98 @@ def sec_ixbrl_disclosures_indexed(
 
   context.log.info(f"Found {len(zip_keys)} raw ZIP files for year={partition_year}")
 
-  for zip_key in zip_keys:
-    filename = zip_key.rsplit("/", 1)[-1]
-    accession = filename.replace(".zip", "")
+  with os_client.bulk_write_mode():
+    for zip_key in zip_keys:
+      filename = zip_key.rsplit("/", 1)[-1]
+      accession = filename.replace(".zip", "")
 
-    if accession not in accession_metadata:
-      continue
+      if accession not in accession_metadata:
+        continue
 
-    if accession in indexed_accessions:
-      continue
+      if accession in indexed_accessions:
+        continue
 
-    meta = accession_metadata[accession]
-    cik = meta.get("cik", "")
+      meta = accession_metadata[accession]
+      cik = meta.get("cik", "")
 
-    try:
-      response = s3.get_object(Bucket=raw_bucket, Key=zip_key)
-      zip_bytes = response["Body"].read()
+      try:
+        response = s3.get_object(Bucket=raw_bucket, Key=zip_key)
+        zip_bytes = response["Body"].read()
 
-      html_content = _extract_html_from_zip(zip_bytes)
-      if not html_content:
+        html_content = _extract_html_from_zip(zip_bytes)
+        if not html_content:
+          errors += 1
+          continue
+
+        # Verify document type via iXBRL tag
+        ixbrl_doc_type = _extract_ixbrl_doc_type(html_content)
+        if ixbrl_doc_type and ixbrl_doc_type.upper() not in form_types_upper:
+          continue
+
+        # Parse iXBRL disclosure sections
+        sections = parser.parse(html_content)
+        filings_processed += 1
+
+        if not sections:
+          continue
+
+        for section in sections:
+          sections_extracted += 1
+          total_elements += section.element_count
+
+          doc_id = hashlib.sha256(
+            f"{config.graph_id}:ixbrl:{accession}:{section.section_id}".encode()
+          ).hexdigest()[:16]
+
+          documents.append(
+            {
+              "graph_id": config.graph_id,
+              "document_id": doc_id,
+              "source_type": "ixbrl_disclosure",
+              "entity_ticker": meta.get("ticker"),
+              "entity_name": meta.get("entity_name"),
+              "entity_cik": cik,
+              "section_id": section.section_id,
+              "section_label": section.section_label,
+              "content": section.content,
+              "content_url": cdn_url_lookup.get((accession, section.section_id), ""),
+              "content_length": len(section.content),
+              "xbrl_elements": section.xbrl_elements,
+              "xbrl_element_count": section.element_count,
+              "filing_date": meta.get("filing_date"),
+              "fiscal_year": meta.get("fiscal_year"),
+              "fiscal_period": meta.get("fiscal_period"),
+              "form_type": meta.get("form_type"),
+              "accession_number": accession,
+            }
+          )
+
+      except Exception as e:
+        context.log.warning(f"Error processing {zip_key}: {e}")
         errors += 1
         continue
 
-      # Verify document type via iXBRL tag
-      ixbrl_doc_type = _extract_ixbrl_doc_type(html_content)
-      if ixbrl_doc_type and ixbrl_doc_type.upper() not in form_types_upper:
-        continue
-
-      # Parse iXBRL disclosure sections
-      sections = parser.parse(html_content)
-      filings_processed += 1
-
-      if not sections:
-        continue
-
-      for section in sections:
-        sections_extracted += 1
-        total_elements += section.element_count
-
-        doc_id = hashlib.sha256(
-          f"{config.graph_id}:ixbrl:{accession}:{section.section_id}".encode()
-        ).hexdigest()[:16]
-
-        documents.append(
-          {
-            "graph_id": config.graph_id,
-            "document_id": doc_id,
-            "source_type": "ixbrl_disclosure",
-            "entity_ticker": meta.get("ticker"),
-            "entity_name": meta.get("entity_name"),
-            "entity_cik": cik,
-            "section_id": section.section_id,
-            "section_label": section.section_label,
-            "content": section.content,
-            "content_url": cdn_url_lookup.get((accession, section.section_id), ""),
-            "content_length": len(section.content),
-            "xbrl_elements": section.xbrl_elements,
-            "xbrl_element_count": section.element_count,
-            "filing_date": meta.get("filing_date"),
-            "fiscal_year": meta.get("fiscal_year"),
-            "fiscal_period": meta.get("fiscal_period"),
-            "form_type": meta.get("form_type"),
-            "accession_number": accession,
-          }
+      # Batch index to limit memory
+      if len(documents) >= batch_size:
+        _embed_document_batch(enricher, documents)
+        batch_result = os_client.bulk_index(documents)
+        total_indexed += batch_result["indexed"]
+        errors += batch_result["errors"]
+        context.log.info(
+          f"Batch indexed {batch_result['indexed']} disclosures ({total_indexed} total)"
         )
+        documents.clear()
 
-    except Exception as e:
-      context.log.warning(f"Error processing {zip_key}: {e}")
-      errors += 1
-      continue
-
-    # Batch index to limit memory
-    if len(documents) >= batch_size:
+    # Index remaining
+    if documents:
       _embed_document_batch(enricher, documents)
       batch_result = os_client.bulk_index(documents)
       total_indexed += batch_result["indexed"]
       errors += batch_result["errors"]
       context.log.info(
-        f"Batch indexed {batch_result['indexed']} disclosures ({total_indexed} total)"
+        f"Final batch indexed {batch_result['indexed']} disclosures "
+        f"({batch_result['errors']} errors)"
       )
-      documents.clear()
-
-  # Index remaining
-  if documents:
-    _embed_document_batch(enricher, documents)
-    batch_result = os_client.bulk_index(documents)
-    total_indexed += batch_result["indexed"]
-    errors += batch_result["errors"]
-    context.log.info(
-      f"Final batch indexed {batch_result['indexed']} disclosures "
-      f"({batch_result['errors']} errors)"
-    )
 
   # Release enricher and lookup memory
   del enricher, cdn_url_lookup

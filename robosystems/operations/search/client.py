@@ -5,6 +5,7 @@ All searches use hybrid mode (BM25 + KNN) with score normalization.
 This is a platform-level client — not specific to any adapter.
 """
 
+from contextlib import contextmanager
 from datetime import UTC, datetime
 from typing import Any
 
@@ -109,6 +110,7 @@ INDEX_MAPPING = {
     "number_of_shards": 1,
     "number_of_replicas": 0,  # Single node for dev; production will differ
     "index.knn": True,
+    "index.refresh_interval": "30s",
   },
 }
 
@@ -194,6 +196,40 @@ class OpenSearchClient:
     except Exception as e:
       logger.warning(f"Failed to create hybrid search pipeline: {e}")
 
+  @contextmanager
+  def bulk_write_mode(self, write_interval: str = "60s", steady_interval: str = "30s"):
+    """Slow refresh during bulk writes, restore normal interval on exit.
+
+    During bulk ingestion, frequent refreshes create new Lucene segments and
+    trigger FAISS KNN graph rebuilds every second, degrading search latency.
+    This slows refresh to write_interval during the load, then restores
+    steady_interval for normal operations.
+
+    Args:
+      write_interval: Refresh interval during bulk writes (default "60s").
+      steady_interval: Refresh interval restored after writes (default "30s").
+    """
+    try:
+      self.client.indices.put_settings(
+        index=self.index_name,
+        body={"index": {"refresh_interval": write_interval}},
+      )
+      logger.info(
+        f"Bulk write mode: refresh_interval set to {write_interval} "
+        f"on {self.index_name}"
+      )
+      yield
+    finally:
+      self.client.indices.refresh(index=self.index_name)
+      self.client.indices.put_settings(
+        index=self.index_name,
+        body={"index": {"refresh_interval": steady_interval}},
+      )
+      logger.info(
+        f"Bulk write mode ended: refresh_interval restored to {steady_interval} "
+        f"on {self.index_name}"
+      )
+
   def index_document(self, document: dict[str, Any]) -> None:
     """Index a single document. Requires graph_id field."""
     if "graph_id" not in document:
@@ -234,7 +270,9 @@ class OpenSearchClient:
 
     for i in range(0, len(actions), chunk_size):
       chunk = actions[i : i + chunk_size]
-      success_count, errors = bulk(self.client, chunk, raise_on_error=False)
+      success_count, errors = bulk(
+        self.client, chunk, raise_on_error=False, refresh=False
+      )
       total_indexed += success_count
       if errors:
         total_errors += len(errors)
