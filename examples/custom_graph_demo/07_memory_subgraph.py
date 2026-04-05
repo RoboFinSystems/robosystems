@@ -22,29 +22,29 @@ import sys
 import time
 from pathlib import Path
 
-from robosystems_client.client import AuthenticatedClient
+from robosystems_client.api.query.execute_cypher_query import (
+  sync_detailed as api_execute_query,
+)
 from robosystems_client.api.subgraphs.create_subgraph import (
   sync_detailed as api_create_subgraph,
 )
 from robosystems_client.api.subgraphs.list_subgraphs import (
   sync_detailed as api_list_subgraphs,
 )
-from robosystems_client.api.query.execute_cypher_query import (
-  sync_detailed as api_execute_query,
-)
+from robosystems_client.client import AuthenticatedClient
 from robosystems_client.models.create_subgraph_request import CreateSubgraphRequest
-from robosystems_client.models.subgraph_type import SubgraphType
 from robosystems_client.models.cypher_query_request import CypherQueryRequest
 from robosystems_client.models.cypher_query_request_parameters_type_0 import (
   CypherQueryRequestParametersType0,
 )
+from robosystems_client.models.subgraph_type import SubgraphType
 from robosystems_client.types import UNSET
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
   sys.path.insert(0, str(PROJECT_ROOT))
 
-from examples.credentials.utils import get_graph_id
+from examples.credentials.utils import get_graph_id  # noqa: E402
 
 CREDENTIALS_FILE = PROJECT_ROOT / ".local" / "config.json"
 DEMO_NAME = "custom_graph_demo"
@@ -58,11 +58,11 @@ def make_params(params: dict) -> CypherQueryRequestParametersType0:
   return obj
 
 
-def load_credentials() -> dict:
-  if not CREDENTIALS_FILE.exists():
-    print("❌ Credentials not found. Run 01_setup_credentials.py first.")
+def load_credentials(path: Path = CREDENTIALS_FILE) -> dict:
+  if not path.exists():
+    print(f"❌ Credentials not found at {path}. Run 01_setup_credentials.py first.")
     sys.exit(1)
-  with CREDENTIALS_FILE.open() as f:
+  with path.open() as f:
     return json.load(f)
 
 
@@ -92,6 +92,13 @@ def create_memory_subgraph(
   response = api_create_subgraph(graph_id=graph_id, client=client, body=request)
 
   if response.status_code not in (200, 201):
+    # Handle duplicate subgraph (already exists) — reuse it
+    if response.status_code in (400, 409):
+      content = response.content.decode() if response.content else ""
+      if "unique" in content.lower() or "already exists" in content.lower() or "duplicate" in content.lower():
+        existing_id = f"{graph_id}_{name}"
+        print(f"   ⚠️  Subgraph '{name}' already exists, reusing: {existing_id}")
+        return existing_id
     print(f"❌ Failed to create subgraph: {response.status_code}")
     if response.content:
       print(f"   {response.content.decode()}")
@@ -164,8 +171,8 @@ def execute_query(
           rows = chunk["data"]
         if "columns" in chunk:
           columns = chunk["columns"]
-    except (json.JSONDecodeError, TypeError):
-      pass
+    except (json.JSONDecodeError, TypeError) as e:
+      print(f"      ⚠️  Could not parse response: {e}")
   elif isinstance(parsed, dict):
     rows = parsed.get("data", parsed.get("rows", []))
     columns = parsed.get("columns", [])
@@ -499,7 +506,7 @@ def main():
   args = parser.parse_args()
   credentials_path = Path(args.credentials_file).expanduser()
 
-  credentials = load_credentials()
+  credentials = load_credentials(credentials_path)
   api_key = credentials.get("api_key")
   graph_id = get_graph_id(credentials_path, DEMO_NAME)
 
@@ -533,8 +540,8 @@ def main():
   print("=" * 70)
   print(f"\nParent Graph: {graph_id}")
   print(f"Memory Subgraph: {subgraph_id}")
-  print(f"\n💡 The memory subgraph ID can be used with all /v1/graphs/{{graph_id}}/* endpoints")
-  print(f"   Example: uv run 05_query_graph.py --query \"MATCH (c:Concept) RETURN c.name\"")
+  print("\n💡 The memory subgraph ID can be used with all /v1/graphs/{graph_id}/* endpoints")
+  print("   Example: uv run 05_query_graph.py --query \"MATCH (c:Concept) RETURN c.name\"")
   print("=" * 70 + "\n")
 
 

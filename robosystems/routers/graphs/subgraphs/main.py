@@ -331,6 +331,7 @@ async def create_subgraph(
     )
 
     # 6. Fork path: enqueue to worker for background execution
+    #    Dagster reporting happens in the worker task (tasks/subgraph_creation.py)
     if request.fork_parent:
       from robosystems.worker.client import enqueue_task
 
