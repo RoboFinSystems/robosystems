@@ -308,3 +308,104 @@ class TestSESEmailService:
     log_call = mock_logger.error.call_args[0][0]
     assert "password_reset" in log_call or "SES rejected" in log_call
     assert "fail@example.com" in log_call
+
+
+class TestCapacityWarningEmail:
+  """Tests for capacity warning email template."""
+
+  @pytest.mark.asyncio
+  async def test_approaching_template(self, ses_service, mock_ses_client):
+    """Test approaching capacity email renders correctly."""
+    mock_ses_client.send_email.return_value = {"MessageId": "msg-cap"}
+
+    result = await ses_service.send_capacity_warning_email(
+      user_email="user@example.com",
+      user_name="Test User",
+      graph_id="kg_test123",
+      tier="ladybug-standard",
+      usage_percentage=85.0,
+      used_gb=17.0,
+      limit_gb=20.0,
+      instance_status="approaching",
+      databases=[
+        {"graph_id": "kg_test123", "is_parent": True, "size_mb": 15000.0},
+        {"graph_id": "kg_test123_dev", "is_parent": False, "size_mb": 2000.0},
+      ],
+    )
+
+    assert result is True
+
+    call_args = mock_ses_client.send_email.call_args
+    message = call_args.kwargs["Message"]
+
+    # Check subject
+    assert "85%" in message["Subject"]["Data"]
+    assert "storage capacity" in message["Subject"]["Data"]
+
+    # Check HTML body
+    html = message["Body"]["Html"]["Data"]
+    assert "kg_test123" in html
+    assert "17.0 GB" in html
+    assert "20 GB" in html
+    assert "Approaching Limit" in html
+    assert "kg_test123_dev" in html
+
+    # Check plain text
+    text = message["Body"]["Text"]["Data"]
+    assert "85%" in text
+    assert "kg_test123" in text
+
+  @pytest.mark.asyncio
+  async def test_over_limit_template(self, ses_service, mock_ses_client):
+    """Test over limit email includes performance warning."""
+    mock_ses_client.send_email.return_value = {"MessageId": "msg-over"}
+
+    result = await ses_service.send_capacity_warning_email(
+      user_email="user@example.com",
+      user_name="Test User",
+      graph_id="kg_over",
+      tier="ladybug-standard",
+      usage_percentage=110.0,
+      used_gb=22.0,
+      limit_gb=20.0,
+      instance_status="over_limit",
+      databases=[
+        {"graph_id": "kg_over", "is_parent": True, "size_mb": 22000.0},
+      ],
+    )
+
+    assert result is True
+
+    call_args = mock_ses_client.send_email.call_args
+    message = call_args.kwargs["Message"]
+    html = message["Body"]["Html"]["Data"]
+
+    assert "Over Limit" in html
+    assert "performance may degrade" in html
+    assert "110%" in message["Subject"]["Data"]
+
+    text = message["Body"]["Text"]["Data"]
+    assert "WARNING" in text
+
+  @pytest.mark.asyncio
+  async def test_capacity_email_tags(self, ses_service, mock_ses_client):
+    """Test that capacity warning emails have correct SES tags."""
+    mock_ses_client.send_email.return_value = {"MessageId": "msg-tags"}
+
+    await ses_service.send_capacity_warning_email(
+      user_email="user@example.com",
+      user_name="Test User",
+      graph_id="kg_tags",
+      tier="ladybug-standard",
+      usage_percentage=85.0,
+      used_gb=17.0,
+      limit_gb=20.0,
+      instance_status="approaching",
+      databases=[],
+    )
+
+    call_args = mock_ses_client.send_email.call_args
+    tags = call_args.kwargs["Tags"]
+    assert any(
+      tag["Name"] == "EmailType" and tag["Value"] == "capacity_warning" for tag in tags
+    )

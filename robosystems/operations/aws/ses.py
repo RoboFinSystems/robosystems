@@ -133,6 +133,9 @@ class SESEmailService:
         app_name, user_name, template_data
       ),
       "welcome": self._welcome_template(app_name, user_name, template_data),
+      "capacity_warning": self._capacity_warning_template(
+        app_name, user_name, template_data
+      ),
     }
 
     return templates.get(
@@ -240,6 +243,112 @@ If you didn't request this, no action is needed. Your password will not change.
 Your email has been verified and your account is ready to go.
 
 Visit your dashboard: {url}
+
+{app_name}""",
+    }
+
+  @staticmethod
+  def _capacity_warning_template(
+    app_name: str, user_name: str, data: dict[str, Any]
+  ) -> dict[str, str]:
+    url = data.get("dashboard_url", "#")
+    usage_pct = data.get("usage_percentage", 0)
+    used_gb = data.get("used_gb", 0)
+    limit_gb = data.get("limit_gb", 0)
+    graph_id = data.get("graph_id", "")
+    tier = data.get("tier", "")
+    instance_status = data.get("status", "approaching")
+    databases: list[dict[str, Any]] = data.get("databases", [])
+
+    is_over = instance_status == "over_limit"
+    status_color = _BRAND_DANGER if is_over else "#d97706"  # red or amber
+    status_label = "Over Limit" if is_over else "Approaching Limit"
+
+    # Build database breakdown rows
+    db_rows = ""
+    for db in databases:
+      db_id = db.get("graph_id", "")
+      size = db.get("size_mb")
+      label = "parent" if db.get("is_parent") else "subgraph"
+      size_str = f"{size:,.1f} MB" if size is not None else "N/A"
+      db_rows += (
+        f'<tr><td style="padding:6px 12px;border-bottom:1px solid #e2e8f0;font-size:13px;color:{_BRAND_DARK};">'
+        f"{db_id} ({label})</td>"
+        f'<td style="padding:6px 12px;border-bottom:1px solid #e2e8f0;font-size:13px;color:{_BRAND_DARK};text-align:right;">'
+        f"{size_str}</td></tr>"
+      )
+
+    db_table = ""
+    if db_rows:
+      db_table = (
+        '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" '
+        f'style="margin:16px 0;border:1px solid #e2e8f0;border-radius:8px;border-collapse:collapse;">'
+        f'<tr><th style="padding:8px 12px;text-align:left;font-size:12px;color:{_BRAND_MUTED};'
+        f'border-bottom:2px solid #e2e8f0;background:{_BRAND_LIGHT};">Database</th>'
+        f'<th style="padding:8px 12px;text-align:right;font-size:12px;color:{_BRAND_MUTED};'
+        f'border-bottom:2px solid #e2e8f0;background:{_BRAND_LIGHT};">Size</th></tr>'
+        f"{db_rows}</table>"
+      )
+
+    perf_warning = ""
+    if is_over:
+      perf_warning = (
+        '<div style="margin:16px 0;padding:16px;background-color:#fef2f2;'
+        'border:1px solid #fecaca;border-radius:8px;">'
+        '<p style="margin:0;font-size:13px;line-height:1.5;color:#991b1b;">'
+        "Your instance is over its storage limit. Query performance may degrade "
+        "and operations may become unreliable. Consider upgrading your tier.</p></div>"
+      )
+
+    content = (
+      _paragraph(f"Hi {user_name},")
+      + _paragraph(
+        f"Your graph instance <strong>{graph_id}</strong> ({tier}) is at "
+        f"<strong style='color:{status_color}'>{usage_pct:.0f}%</strong> storage capacity."
+      )
+      + f'<div style="margin:20px 0;padding:20px;background:{_BRAND_LIGHT};'
+      f'border:1px solid {_BRAND_BORDER};border-radius:8px;">'
+      f'<div style="display:flex;justify-content:space-between;align-items:center;">'
+      f'<div><span style="font-size:28px;font-weight:700;color:{status_color};">'
+      f"{used_gb:.1f} GB</span>"
+      f'<span style="font-size:14px;color:{_BRAND_MUTED};"> / {limit_gb:.0f} GB</span></div>'
+      f'<div style="display:inline-block;padding:4px 12px;border-radius:4px;'
+      f'background-color:{status_color};color:#fff;font-size:12px;font-weight:600;">'
+      f"{status_label}</div></div></div>"
+      + db_table
+      + perf_warning
+      + _button(url, "View Usage Details")
+    )
+
+    # Plain text version
+    db_lines = ""
+    for db in databases:
+      db_id = db.get("graph_id", "")
+      size = db.get("size_mb")
+      label = "parent" if db.get("is_parent") else "subgraph"
+      size_str = f"{size:,.1f} MB" if size is not None else "N/A"
+      db_lines += f"  - {db_id} ({label}): {size_str}\n"
+
+    perf_text = ""
+    if is_over:
+      perf_text = (
+        "\nWARNING: Your instance is over its storage limit. "
+        "Query performance may degrade. Consider upgrading your tier.\n"
+      )
+
+    return {
+      "subject": f"{app_name} — Your graph instance is at {usage_pct:.0f}% storage capacity",
+      "html": _base_template(app_name, content),
+      "text": f"""Hi {user_name},
+
+Your graph instance {graph_id} ({tier}) is at {usage_pct:.0f}% storage capacity.
+
+Storage: {used_gb:.1f} GB / {limit_gb:.0f} GB
+Status: {status_label}
+
+Databases:
+{db_lines}{perf_text}
+View usage details: {url}
 
 {app_name}""",
     }
@@ -401,6 +510,54 @@ Visit your dashboard: {url}
     }
 
     return await self.send_email("welcome", user_email, template_data)
+
+  async def send_capacity_warning_email(
+    self,
+    user_email: str,
+    user_name: str,
+    graph_id: str,
+    tier: str,
+    usage_percentage: float,
+    used_gb: float,
+    limit_gb: float,
+    instance_status: str,
+    databases: list[dict[str, Any]],
+    app: str = "robosystems",
+  ) -> bool:
+    """
+    Send capacity warning email when instance storage approaches or exceeds limits.
+
+    Args:
+        user_email: User's email address
+        user_name: User's name
+        graph_id: Parent graph identifier
+        tier: Graph tier name
+        usage_percentage: Current usage as percentage (e.g. 85.3)
+        used_gb: Current storage used in GB
+        limit_gb: Storage limit in GB
+        instance_status: "approaching" or "over_limit"
+        databases: Per-database breakdown list
+        app: App identifier
+
+    Returns:
+        True if email was sent successfully, False otherwise
+    """
+    base_url = self.app_urls.get(app, self.app_urls[_DEFAULT_APP])
+
+    template_data = {
+      "user_name": user_name,
+      "app_name": _APP_DISPLAY_NAMES.get(app, _APP_DISPLAY_NAMES[_DEFAULT_APP]),
+      "dashboard_url": f"{base_url}/home",
+      "graph_id": graph_id,
+      "tier": tier,
+      "usage_percentage": usage_percentage,
+      "used_gb": used_gb,
+      "limit_gb": limit_gb,
+      "status": instance_status,
+      "databases": databases,
+    }
+
+    return await self.send_email("capacity_warning", user_email, template_data)
 
 
 # Create a singleton instance

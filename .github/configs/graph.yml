@@ -44,14 +44,13 @@ production:
         backup_retention_days: 7 # Backup retention period
         max_backups_per_day: 2 # Daily backup limit
 
-      # Graph content limits (enforced at materialization time)
+      # Graph content limits
       graph_limits:
-        max_nodes: 5000000           # 5M nodes
-        max_relationships: 10000000  # 10M relationships
-        max_rows_per_copy: 2000000   # 2M rows per copy operation
+        instance_storage_limit_gb: 20 # Soft storage cap for entire instance (parent + subgraphs + staging)
+        max_rows_per_copy: 2000000   # 2M rows per copy operation (hard limit, prevents OOM during materialization)
         max_single_table_rows: 5000000 # 5M rows per staging table
         chunk_size_rows: 500000      # 500K rows per materialization chunk (conservative for 2GB buffer pool)
-        warn_at_percentage: 80       # Warn when approaching limits
+        warn_at_percentage: 80       # Warn when approaching storage limit
 
       # Memory boost configuration
       memory:
@@ -113,14 +112,13 @@ production:
         backup_retention_days: 30 # Extended retention for team collaboration
         max_backups_per_day: 10 # More frequent backups for active development
 
-      # Graph content limits (enforced at materialization time)
+      # Graph content limits
       graph_limits:
-        max_nodes: 50000000          # 50M nodes
-        max_relationships: 100000000 # 100M relationships
-        max_rows_per_copy: 10000000  # 10M rows per copy operation
+        instance_storage_limit_gb: 50 # Soft storage cap for entire instance (parent + subgraphs + staging)
+        max_rows_per_copy: 10000000  # 10M rows per copy operation (hard limit, prevents OOM during materialization)
         max_single_table_rows: 25000000 # 25M rows per staging table
         chunk_size_rows: 1000000     # 1M rows per materialization chunk (conservative for 1.3GB buffer pool)
-        warn_at_percentage: 80       # Warn when approaching limits
+        warn_at_percentage: 80       # Warn when approaching storage limit
 
       # Memory boost configuration
       memory:
@@ -184,14 +182,13 @@ production:
         backup_retention_days: 90 # Extended retention for compliance
         max_backups_per_day: -1 # Unlimited backups for enterprise (no daily limit)
 
-      # Graph content limits (enforced at materialization time)
+      # Graph content limits
       graph_limits:
-        max_nodes: 200000000         # 200M nodes
-        max_relationships: 500000000 # 500M relationships
-        max_rows_per_copy: 50000000  # 50M rows per copy operation
+        instance_storage_limit_gb: 100 # Soft storage cap for entire instance (parent + subgraphs + staging)
+        max_rows_per_copy: 50000000  # 50M rows per copy operation (hard limit, prevents OOM during materialization)
         max_single_table_rows: 100000000 # 100M rows per staging table
         chunk_size_rows: 5000000     # 5M rows per materialization chunk
-        warn_at_percentage: 80       # Warn when approaching limits
+        warn_at_percentage: 80       # Warn when approaching storage limit
 
       # Memory boost configuration
       memory:

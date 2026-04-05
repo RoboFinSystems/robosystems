@@ -1,4 +1,4 @@
-"""Graph query API models."""
+"""Graph limits API models."""
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -59,22 +59,47 @@ class CreditLimits(BaseModel):
 
 
 class ContentLimits(BaseModel):
-  """Graph content limits (nodes, relationships, rows)."""
+  """Per-operation materialization limits."""
 
-  max_nodes: int = Field(..., description="Maximum nodes allowed")
-  current_nodes: int | None = Field(None, description="Current node count")
-  max_relationships: int = Field(..., description="Maximum relationships allowed")
-  current_relationships: int | None = Field(
-    None, description="Current relationship count"
-  )
   max_rows_per_copy: int = Field(
     ..., description="Maximum rows per copy/materialization operation"
   )
   max_single_table_rows: int = Field(..., description="Maximum rows per staging table")
   chunk_size_rows: int = Field(..., description="Rows per materialization chunk")
-  approaching_limits: list[str] = Field(
+  node_count: int | None = Field(
+    None, description="Current node count (informational, no limit enforced)"
+  )
+
+
+class DatabaseStorageEntry(BaseModel):
+  """Storage for a single database on the instance."""
+
+  graph_id: str = Field(..., description="Database identifier")
+  is_parent: bool = Field(False, description="Whether this is the parent graph")
+  size_mb: float | None = Field(None, description="Database size in MB")
+
+
+class InstanceUsage(BaseModel):
+  """Aggregate storage usage across the dedicated instance.
+
+  Covers the parent graph, all subgraphs, DuckDB staging, and
+  future LanceDB vector indexes.
+  """
+
+  total_storage_gb: float | None = Field(
+    None, description="Total storage used across all databases in GB"
+  )
+  limit_gb: float = Field(..., description="Soft storage limit for this tier in GB")
+  usage_percentage: float | None = Field(
+    None, description="Storage usage as percentage of limit (e.g. 105.2)"
+  )
+  status: str = Field(
+    ...,
+    description="Instance status: 'healthy' (<80%), 'approaching' (80-100%), 'over_limit' (>100%)",
+  )
+  databases: list[DatabaseStorageEntry] = Field(
     default_factory=list,
-    description="List of limits being approached (>80%)",
+    description="Per-database storage breakdown",
   )
 
 
@@ -86,7 +111,7 @@ class GraphLimitsResponse(BaseModel):
       "examples": [
         {
           "summary": "Standard tier user graph limits",
-          "description": "Operational limits for a ladybug-standard tier user graph with full details",
+          "description": "Operational limits for a ladybug-standard tier user graph",
           "value": {
             "graph_id": "kg1a2b3c4d5",
             "subscription_tier": "ladybug-standard",
@@ -126,20 +151,26 @@ class GraphLimitsResponse(BaseModel):
               "current_balance": 7500,
             },
             "content": {
-              "max_nodes": 5000000,
-              "current_nodes": 150000,
-              "max_relationships": 10000000,
-              "current_relationships": 400000,
               "max_rows_per_copy": 2000000,
               "max_single_table_rows": 5000000,
               "chunk_size_rows": 1000000,
-              "approaching_limits": [],
+              "node_count": 150000,
+            },
+            "instance": {
+              "total_storage_gb": 2.45,
+              "limit_gb": 20,
+              "usage_percentage": 12.3,
+              "status": "healthy",
+              "databases": [
+                {"graph_id": "kg1a2b3c4d5", "is_parent": True, "size_mb": 2150.0},
+                {"graph_id": "kg1a2b3c4d5_dev", "is_parent": False, "size_mb": 360.0},
+              ],
             },
           },
         },
         {
           "summary": "Shared repository limits (SEC)",
-          "description": "Operational limits for SEC shared repository (read-only, no credits or content limits)",
+          "description": "Operational limits for SEC shared repository (no instance usage tracking)",
           "value": {
             "graph_id": "sec",
             "subscription_tier": "ladybug-standard",
@@ -197,5 +228,8 @@ class GraphLimitsResponse(BaseModel):
     None, description="AI credit limits (if applicable)"
   )
   content: ContentLimits | None = Field(
-    None, description="Graph content limits (if applicable)"
+    None, description="Per-operation materialization limits (if applicable)"
+  )
+  instance: InstanceUsage | None = Field(
+    None, description="Aggregate instance storage usage (user graphs only)"
   )

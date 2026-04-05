@@ -92,28 +92,20 @@ class TestCreditLimits:
 class TestContentLimits:
   def test_valid_limits(self):
     model = ContentLimits(
-      max_nodes=5000000,
-      max_relationships=10000000,
       max_rows_per_copy=2000000,
       max_single_table_rows=5000000,
       chunk_size_rows=1000000,
     )
-    assert model.current_nodes is None
-    assert model.approaching_limits == []
+    assert model.node_count is None
 
-  def test_with_current_counts(self):
+  def test_with_node_count(self):
     model = ContentLimits(
-      max_nodes=5000000,
-      current_nodes=150000,
-      max_relationships=10000000,
-      current_relationships=400000,
       max_rows_per_copy=2000000,
       max_single_table_rows=5000000,
       chunk_size_rows=1000000,
-      approaching_limits=["nodes"],
+      node_count=150000,
     )
-    assert model.current_nodes == 150000
-    assert model.approaching_limits == ["nodes"]
+    assert model.node_count == 150000
 
 
 @pytest.mark.unit
