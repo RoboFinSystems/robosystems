@@ -638,7 +638,7 @@ class AgentOrchestrator:
 
       pricing = AIBillingConfig.TOKEN_PRICING.get(
         "anthropic_claude_4_sonnet",
-        {"input": Decimal("0.003"), "output": Decimal("0.015")},
+        {"input": Decimal("3"), "output": Decimal("15")},
       )
 
       input_cost = (Decimal(estimated_tokens["input"]) / 1000) * pricing["input"]

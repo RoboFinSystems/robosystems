@@ -3,32 +3,17 @@ Credit system configuration - operation costs and alerts.
 
 This module defines credit costs for operations and alert thresholds.
 Tier credit allocations are defined in billing/core.py (single source of truth).
+Token pricing is defined in billing/ai.py (AIBillingConfig.TOKEN_PRICING).
 
-CREDIT MODEL:
-=============
-Credits are consumed by AI operations using token-based pricing.
-All database operations are included with the subscription.
-Storage is included in each tier (no metering/overage).
-
-AI CREDITS (Token-Based Pricing):
----------------------------------
+TOKEN PRICING:
+==============
 AI agent calls consume credits based on actual token usage:
-- Input tokens: 3 credits per 1K tokens
-- Output tokens: 15 credits per 1K tokens
-- Typical agent call (~5K input, ~1.5K output): ~38 credits
+  - 3 credits per 1K input tokens
+  - 15 credits per 1K output tokens
+  - Typical agent call (~5K input, ~1.5K output): ~38 credits
 
-NOTE: MCP tool access is unlimited and does not consume credits.
-Credits only apply to in-house AI agent operations.
-
-INCLUDED OPERATIONS (No credit consumption):
---------------------------------------------
-- All database queries (Cypher, analytics)
-- All API calls (non-AI)
-- MCP protocol calls (graph queries, schema info)
-- Data imports/exports
-- Backups and restores
-- Schema operations
-- Connection management
+Only AI agent operations consume credits. All other operations
+(database, MCP, API, backup, sync) are included with the subscription.
 """
 
 from decimal import Decimal
@@ -37,9 +22,8 @@ from decimal import Decimal
 class CreditConfig:
   """Centralized credit system configuration - AI operations only."""
 
-  # Credit cost per operation type (in credits)
-  # AI operations use TOKEN-BASED pricing (see AIBillingConfig.TOKEN_PRICING)
-  # Storage is included in each tier (no metering/overage)
+  # Non-AI operation costs (all included with subscription)
+  # AI operations use token-based pricing — see billing/ai.py
   OPERATION_COSTS = {
     # Connection sync operations - included (not an AI operation)
     "connection_sync": Decimal("0"),  # Sync external data - included

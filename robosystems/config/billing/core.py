@@ -19,14 +19,15 @@ logger = logging.getLogger(__name__)
 # All tier-related settings are defined here in one place.
 # NOTE: Stripe prices are auto-created from this config on first checkout
 #
-# Credit allocations with token-based pricing (~38 credits per agent call):
+# Typical agent call (~5K input, ~1.5K output): ~38 credits
+#
+# Credit allocations (included with subscription):
 # - 8,000 credits = ~200 agent calls/month (~7/day)
 # - 32,000 credits = ~800 agent calls/month (~27/day)
 # - 100,000 credits = ~2,600 agent calls/month (~87/day)
-# NOTE: MCP tool access is unlimited - credits only apply to in-house AI agents
 #
-# Storage is included in the tier (no metering/overage). Graph content limits
-# (nodes, relationships, rows) naturally cap storage usage per tier.
+# Only AI agent operations consume credits. MCP tools, database queries,
+# and all other operations are unlimited.
 DEFAULT_GRAPH_BILLING_PLANS: list[dict[str, Any]] = [
   {
     "name": "ladybug-standard",

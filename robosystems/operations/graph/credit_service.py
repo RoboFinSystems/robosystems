@@ -1107,7 +1107,7 @@ class CreditService:
         graph_id: Graph identifier
         input_tokens: Actual input tokens used
         output_tokens: Actual output tokens generated
-        model: AI model used (e.g., 'claude-3-opus', 'gpt-4')
+        model: AI model used (e.g., 'us.anthropic.claude-sonnet-4-6')
         operation_description: Description of the AI operation
         metadata: Optional metadata for the transaction
         user_id: User ID for tracking
@@ -1117,39 +1117,24 @@ class CreditService:
     """
     from ...config import AIBillingConfig
 
-    # Map model names to pricing
+    # Map model identifiers to TOKEN_PRICING keys
+    # All active models are Sonnet via AWS Bedrock
     model_pricing_map = {
-      # Claude 4/4.1 models (current)
-      "claude-4-opus": "anthropic_claude_4_opus",
-      "claude-4.1-opus": "anthropic_claude_4.1_opus",
-      "claude-opus-4.1-20250805": "anthropic_claude_4.1_opus",  # Full model ID
-      "claude-4-sonnet": "anthropic_claude_4_sonnet",
-      "claude-4.1-sonnet": "anthropic_claude_4_sonnet",
-      # AWS Bedrock model IDs
+      # AWS Bedrock model IDs (actual values from AIClient responses)
       "us.anthropic.claude-sonnet-4-6": "anthropic_claude_4_sonnet",
       "us.anthropic.claude-sonnet-4-5-20250929-v1:0": "anthropic_claude_4_sonnet",
       "us.anthropic.claude-sonnet-4-20250514-v1:0": "anthropic_claude_4_sonnet",
-      # Legacy Claude 3 models
-      "claude-3-opus": "anthropic_claude_3_opus",
-      "claude-3-sonnet": "anthropic_claude_3_sonnet",
-      "claude-3.5-sonnet": "anthropic_claude_3_sonnet",
-      # OpenAI models
-      "gpt-4": "openai_gpt4",
-      "gpt-3.5-turbo": "openai_gpt35",
+      # Short-form model names
+      "claude-4-sonnet": "anthropic_claude_4_sonnet",
+      "claude-4.1-sonnet": "anthropic_claude_4_sonnet",
     }
 
-    # Get pricing for the model
     pricing_key = model_pricing_map.get(model.lower(), "anthropic_claude_4_sonnet")
     pricing = AIBillingConfig.TOKEN_PRICING.get(pricing_key)
 
     if not pricing:
-      logger.warning(
-        f"No pricing found for model {model}, using default Sonnet pricing"
-      )
-      pricing = {
-        "input": Decimal("3"),  # Default to Sonnet: 3 credits per 1K input tokens
-        "output": Decimal("15"),  # Default to Sonnet: 15 credits per 1K output tokens
-      }
+      logger.warning(f"No pricing found for model {model}, using Sonnet pricing")
+      pricing = {"input": Decimal("3"), "output": Decimal("15")}
 
     # Calculate actual cost based on tokens
     input_cost = (Decimal(input_tokens) / 1000) * pricing["input"]
