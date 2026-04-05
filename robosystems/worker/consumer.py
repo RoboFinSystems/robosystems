@@ -27,7 +27,6 @@ from robosystems.middleware.sse.operation_manager import (
 )
 from robosystems.worker.cleanup import cleanup_connections
 from robosystems.worker.constants import DEFAULT_TASK_TIMEOUT, TASK_TIMEOUTS
-from robosystems.worker.dagster import report_task_to_dagster
 from robosystems.worker.metrics import QueueDepthReporter
 from robosystems.worker.tasks import get_task_handler
 
@@ -140,8 +139,6 @@ async def _process_task(
           "duration_ms": duration_ms,
         },
       )
-
-      await report_task_to_dagster(task_type, task_id, graph_id, duration_ms, result)
 
     except TimeoutError:
       duration_ms = (time.time() - start_time) * 1000
