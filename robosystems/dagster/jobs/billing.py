@@ -21,6 +21,7 @@ from robosystems.models.core import (
   Graph,
   GraphCredits,
   GraphCreditTransaction,
+  UserRepositoryCredits,
 )
 from robosystems.models.core.graph.graph_credits import CreditTransactionType
 from robosystems.operations.graph.credit_service import CreditService
@@ -986,8 +987,6 @@ def allocate_user_repository_credits(
   allocation_result: dict[str, Any],
 ) -> dict[str, Any]:
   """Allocate monthly credits for user repository subscriptions that are due."""
-  from robosystems.models.core import UserRepositoryCredits
-
   now = datetime.now(UTC)
   allocated_count = 0
   total_credits = Decimal("0")
@@ -1014,6 +1013,7 @@ def allocate_user_repository_credits(
           allocated_count += 1
           total_credits += pool.monthly_allocation
       except Exception as e:
+        session.expire(pool)
         errors.append(
           {
             "pool_id": pool.id,
@@ -1022,8 +1022,6 @@ def allocate_user_repository_credits(
           }
         )
         context.log.error(f"Failed to allocate credits for pool {pool.id}: {e}")
-
-    session.commit()
 
   if errors:
     context.log.warning(
