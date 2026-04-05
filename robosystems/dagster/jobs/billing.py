@@ -979,13 +979,78 @@ def cleanup_old_credit_transactions(
     }
 
 
+@op
+def allocate_user_repository_credits(
+  context: OpExecutionContext,
+  db: DatabaseResource,
+  allocation_result: dict[str, Any],
+) -> dict[str, Any]:
+  """Allocate monthly credits for user repository subscriptions that are due."""
+  from robosystems.models.core import UserRepositoryCredits
+
+  now = datetime.now(UTC)
+  allocated_count = 0
+  total_credits = Decimal("0")
+  errors = []
+
+  with db.get_session() as session:
+    due_pools = (
+      session.query(UserRepositoryCredits)
+      .filter(
+        UserRepositoryCredits.is_active.is_(True),
+        (UserRepositoryCredits.next_allocation_date.is_(None))
+        | (UserRepositoryCredits.next_allocation_date <= now),
+      )
+      .all()
+    )
+
+    context.log.info(
+      f"Found {len(due_pools)} user repository credit pools due for allocation"
+    )
+
+    for pool in due_pools:
+      try:
+        if pool.allocate_monthly_credits(session):
+          allocated_count += 1
+          total_credits += pool.monthly_allocation
+      except Exception as e:
+        errors.append(
+          {
+            "pool_id": pool.id,
+            "user_repository_id": pool.user_repository_id,
+            "error": str(e),
+          }
+        )
+        context.log.error(f"Failed to allocate credits for pool {pool.id}: {e}")
+
+    session.commit()
+
+  if errors:
+    context.log.warning(
+      f"User repository credit allocation completed with {len(errors)} errors"
+    )
+
+  context.log.info(
+    f"Allocated {total_credits} user repository credits to {allocated_count} pools"
+  )
+
+  return {
+    "allocated_pools": allocated_count,
+    "total_credits_allocated": float(total_credits),
+    "errors": errors,
+    "graph_allocation_result": allocation_result,
+    "timestamp": now.isoformat(),
+  }
+
+
 @job(tags={"dagster/priority": "1", "dagster/max_retries": 3})
 def monthly_credit_allocation_job():
   """Monthly credit allocation and overage processing job."""
   graphs = get_graphs_with_negative_balance()
   invoices = process_overage_invoices(graphs)
   result = allocate_monthly_credits(invoices)
-  cleanup_old_credit_transactions(result)
+  repo_result = allocate_user_repository_credits(result)
+  cleanup_old_credit_transactions(repo_result)
 
 
 @op
