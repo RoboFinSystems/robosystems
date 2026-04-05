@@ -15,7 +15,6 @@ For large files, the regular Dagster job should be used for:
 - Retry logic for unreliable operations
 """
 
-import asyncio
 import time
 from typing import Any
 
@@ -23,10 +22,6 @@ from sqlalchemy.orm import Session
 
 from robosystems.config import env
 from robosystems.logger import logger
-
-# Timeout for Dagster materialization reporting (seconds)
-# This prevents the API from hanging if Dagster is unreachable
-DAGSTER_REPORT_TIMEOUT = 5.0
 
 
 async def stage_file_directly(
@@ -149,14 +144,21 @@ async def stage_file_directly(
     logger.info(f"Direct staging completed for file {file_id} in {duration_ms:.2f}ms")
 
     # Report AssetMaterialization to Dagster for observability (fire-and-forget with timeout)
-    await _report_staging_materialization(
-      file_id=file_id,
-      graph_id=graph_id,
-      table_name=table.table_name,
-      file_size_bytes=file_size_bytes,
-      row_count=row_count,
-      duration_ms=duration_ms,
-      files_staged=len(s3_files),
+    from robosystems.dagster.reporting import report_asset_materialization
+
+    await report_asset_materialization(
+      asset_key="user_graph_file_staging",
+      description=f"Direct staging of {len(s3_files)} file(s) to table {table.table_name}",
+      metadata={
+        "file_id": file_id,
+        "graph_id": graph_id,
+        "table_name": table.table_name,
+        "file_size_bytes": file_size_bytes,
+        "row_count": row_count or 0,
+        "duration_ms": duration_ms,
+        "files_staged": len(s3_files),
+        "staging_method": "direct",
+      },
     )
 
     return {
@@ -180,86 +182,3 @@ async def stage_file_directly(
       "duration_ms": duration_ms,
       "method": "direct",
     }
-
-
-async def _report_staging_materialization(
-  file_id: str,
-  graph_id: str,
-  table_name: str,
-  file_size_bytes: int,
-  row_count: int | None,
-  duration_ms: float,
-  files_staged: int,
-) -> None:
-  """
-  Report an AssetMaterialization to Dagster for observability.
-
-  This allows direct-staged files to appear in the Dagster UI alongside
-  files staged via Dagster jobs, providing a unified view of all staging events.
-
-  Uses a timeout to prevent blocking if Dagster is unreachable.
-  """
-  try:
-    # Run the blocking Dagster operations in a thread with timeout
-    await asyncio.wait_for(
-      asyncio.to_thread(
-        _report_staging_materialization_sync,
-        file_id,
-        graph_id,
-        table_name,
-        file_size_bytes,
-        row_count,
-        duration_ms,
-        files_staged,
-      ),
-      timeout=DAGSTER_REPORT_TIMEOUT,
-    )
-    logger.info(f"Reported AssetMaterialization for file {file_id} to Dagster")
-
-  except TimeoutError:
-    logger.warning(
-      f"Dagster materialization reporting timed out for file {file_id} after {DAGSTER_REPORT_TIMEOUT}s. "
-      "Staging succeeded but won't appear in Dagster UI."
-    )
-  except Exception as e:
-    # Don't fail staging if Dagster reporting fails - it's just observability
-    logger.warning(
-      f"Failed to report AssetMaterialization to Dagster for file {file_id}: {e}. "
-      "Staging succeeded but won't appear in Dagster UI."
-    )
-
-
-def _report_staging_materialization_sync(
-  file_id: str,
-  graph_id: str,
-  table_name: str,
-  file_size_bytes: int,
-  row_count: int | None,
-  duration_ms: float,
-  files_staged: int,
-) -> None:
-  """Synchronous version of materialization reporting (runs in thread)."""
-  from dagster import AssetKey, AssetMaterialization, DagsterInstance, MetadataValue
-
-  # Get the Dagster instance - this may block if config is unavailable
-  instance = DagsterInstance.get()
-
-  # Create the materialization event
-  # Use static asset key so it appears in Dagster UI (graph_id in metadata)
-  materialization = AssetMaterialization(
-    asset_key=AssetKey("user_graph_file_staging"),
-    description=f"Direct staging of {files_staged} file(s) to table {table_name}",
-    metadata={
-      "file_id": MetadataValue.text(file_id),
-      "graph_id": MetadataValue.text(graph_id),
-      "table_name": MetadataValue.text(table_name),
-      "file_size_bytes": MetadataValue.int(file_size_bytes),
-      "row_count": MetadataValue.int(row_count or 0),
-      "duration_ms": MetadataValue.float(duration_ms),
-      "files_staged": MetadataValue.int(files_staged),
-      "staging_method": MetadataValue.text("direct"),
-    },
-  )
-
-  # Report the materialization
-  instance.report_runless_asset_event(materialization)

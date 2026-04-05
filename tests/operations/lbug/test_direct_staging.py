@@ -11,9 +11,6 @@ from unittest.mock import AsyncMock, Mock, patch
 import pytest
 
 from robosystems.operations.lbug.direct_staging import (
-  DAGSTER_REPORT_TIMEOUT,
-  _report_staging_materialization,
-  _report_staging_materialization_sync,
   stage_file_directly,
 )
 
@@ -83,7 +80,10 @@ class TestStageFileDirectly:
       patch(FACTORY_PATH) as mock_factory,
       patch(GRAPH_FILE_PATH) as mock_file_class,
       patch(GRAPH_TABLE_PATH) as mock_table_class,
-      patch(f"{MODULE}._report_staging_materialization", new_callable=AsyncMock),
+      patch(
+        "robosystems.dagster.reporting.report_asset_materialization",
+        new_callable=AsyncMock,
+      ),
       patch(f"{MODULE}.env") as mock_env,
     ):
       mock_env.USER_DATA_BUCKET = "robosystems-local"
@@ -128,7 +128,10 @@ class TestStageFileDirectly:
       patch(FACTORY_PATH) as mock_factory,
       patch(GRAPH_FILE_PATH) as mock_file_class,
       patch(GRAPH_TABLE_PATH) as mock_table_class,
-      patch(f"{MODULE}._report_staging_materialization", new_callable=AsyncMock),
+      patch(
+        "robosystems.dagster.reporting.report_asset_materialization",
+        new_callable=AsyncMock,
+      ),
       patch(f"{MODULE}.env") as mock_env,
     ):
       mock_env.USER_DATA_BUCKET = "robosystems-local"
@@ -256,7 +259,10 @@ class TestStageFileDirectly:
       patch(FACTORY_PATH) as mock_factory,
       patch(GRAPH_FILE_PATH) as mock_file_class,
       patch(GRAPH_TABLE_PATH) as mock_table_class,
-      patch(f"{MODULE}._report_staging_materialization", new_callable=AsyncMock),
+      patch(
+        "robosystems.dagster.reporting.report_asset_materialization",
+        new_callable=AsyncMock,
+      ),
       patch(f"{MODULE}.env") as mock_env,
     ):
       mock_env.USER_DATA_BUCKET = "robosystems-local"
@@ -409,7 +415,10 @@ class TestStageFileDirectly:
       patch(FACTORY_PATH) as mock_factory,
       patch(GRAPH_FILE_PATH) as mock_file_class,
       patch(GRAPH_TABLE_PATH) as mock_table_class,
-      patch(f"{MODULE}._report_staging_materialization", new_callable=AsyncMock),
+      patch(
+        "robosystems.dagster.reporting.report_asset_materialization",
+        new_callable=AsyncMock,
+      ),
       patch(f"{MODULE}.env") as mock_env,
     ):
       mock_env.USER_DATA_BUCKET = "robosystems-local"
@@ -443,7 +452,10 @@ class TestStageFileDirectly:
       patch(FACTORY_PATH) as mock_factory,
       patch(GRAPH_FILE_PATH) as mock_file_class,
       patch(GRAPH_TABLE_PATH) as mock_table_class,
-      patch(f"{MODULE}._report_staging_materialization", new_callable=AsyncMock),
+      patch(
+        "robosystems.dagster.reporting.report_asset_materialization",
+        new_callable=AsyncMock,
+      ),
       patch(f"{MODULE}.env") as mock_env,
     ):
       mock_env.USER_DATA_BUCKET = "my-custom-bucket"
@@ -493,7 +505,10 @@ class TestStageFileDirectly:
       patch(FACTORY_PATH) as mock_factory,
       patch(GRAPH_FILE_PATH) as mock_file_class,
       patch(GRAPH_TABLE_PATH) as mock_table_class,
-      patch(f"{MODULE}._report_staging_materialization", new_callable=AsyncMock),
+      patch(
+        "robosystems.dagster.reporting.report_asset_materialization",
+        new_callable=AsyncMock,
+      ),
       patch(f"{MODULE}.env") as mock_env,
     ):
       mock_env.USER_DATA_BUCKET = "test-bucket"
@@ -527,7 +542,10 @@ class TestStageFileDirectly:
       patch(FACTORY_PATH) as mock_factory,
       patch(GRAPH_FILE_PATH) as mock_file_class,
       patch(GRAPH_TABLE_PATH) as mock_table_class,
-      patch(f"{MODULE}._report_staging_materialization", new_callable=AsyncMock),
+      patch(
+        "robosystems.dagster.reporting.report_asset_materialization",
+        new_callable=AsyncMock,
+      ),
       patch(f"{MODULE}.env") as mock_env,
     ):
       mock_env.USER_DATA_BUCKET = "robosystems-local"
@@ -609,7 +627,10 @@ class TestStageFileDirectly:
       patch(FACTORY_PATH) as mock_factory,
       patch(GRAPH_FILE_PATH) as mock_file_class,
       patch(GRAPH_TABLE_PATH) as mock_table_class,
-      patch(f"{MODULE}._report_staging_materialization", new_callable=AsyncMock),
+      patch(
+        "robosystems.dagster.reporting.report_asset_materialization",
+        new_callable=AsyncMock,
+      ),
       patch(f"{MODULE}.env") as mock_env,
     ):
       mock_env.USER_DATA_BUCKET = "robosystems-local"
@@ -648,7 +669,10 @@ class TestStageFileDirectly:
       patch(FACTORY_PATH) as mock_factory,
       patch(GRAPH_FILE_PATH) as mock_file_class,
       patch(GRAPH_TABLE_PATH) as mock_table_class,
-      patch(f"{MODULE}._report_staging_materialization", new_callable=AsyncMock),
+      patch(
+        "robosystems.dagster.reporting.report_asset_materialization",
+        new_callable=AsyncMock,
+      ),
       patch(f"{MODULE}.env") as mock_env,
     ):
       mock_env.USER_DATA_BUCKET = "robosystems-local"
@@ -681,7 +705,8 @@ class TestStageFileDirectly:
       patch(GRAPH_FILE_PATH) as mock_file_class,
       patch(GRAPH_TABLE_PATH) as mock_table_class,
       patch(
-        f"{MODULE}._report_staging_materialization", new_callable=AsyncMock
+        "robosystems.dagster.reporting.report_asset_materialization",
+        new_callable=AsyncMock,
       ) as mock_report,
       patch(f"{MODULE}.env") as mock_env,
     ):
@@ -703,12 +728,14 @@ class TestStageFileDirectly:
 
       mock_report.assert_called_once()
       call_kwargs = mock_report.call_args.kwargs
-      assert call_kwargs["file_id"] == "gf_file1"
-      assert call_kwargs["graph_id"] == "kg1234567890abcdef"
-      assert call_kwargs["table_name"] == "Entity"
-      assert call_kwargs["file_size_bytes"] == 2048
-      assert call_kwargs["row_count"] == 75
-      assert call_kwargs["files_staged"] == 1
+      assert call_kwargs["asset_key"] == "user_graph_file_staging"
+      metadata = call_kwargs["metadata"]
+      assert metadata["file_id"] == "gf_file1"
+      assert metadata["graph_id"] == "kg1234567890abcdef"
+      assert metadata["table_name"] == "Entity"
+      assert metadata["file_size_bytes"] == 2048
+      assert metadata["row_count"] == 75
+      assert metadata["files_staged"] == 1
 
 
 class TestStageFileDirectlyDeduplicate:
@@ -756,7 +783,10 @@ class TestStageFileDirectlyDeduplicate:
       patch(FACTORY_PATH) as mock_factory,
       patch(GRAPH_FILE_PATH) as mock_file_class,
       patch(GRAPH_TABLE_PATH) as mock_table_class,
-      patch(f"{MODULE}._report_staging_materialization", new_callable=AsyncMock),
+      patch(
+        "robosystems.dagster.reporting.report_asset_materialization",
+        new_callable=AsyncMock,
+      ),
       patch(f"{MODULE}.env") as mock_env,
     ):
       mock_env.USER_DATA_BUCKET = "robosystems-local"
@@ -781,174 +811,6 @@ class TestStageFileDirectlyDeduplicate:
         s3_pattern=["s3://robosystems-local/graphs/kg1234/tables/entity/file1.parquet"],
         deduplicate=True,
       )
-
-
-class TestReportStagingMaterialization:
-  """Test _report_staging_materialization async function."""
-
-  @pytest.mark.unit
-  @pytest.mark.asyncio
-  async def test_successful_reporting(self):
-    """Test successful Dagster materialization reporting."""
-    with patch(f"{MODULE}._report_staging_materialization_sync") as mock_sync:
-      await _report_staging_materialization(
-        file_id="gf_file1",
-        graph_id="kg1234567890abcdef",
-        table_name="Entity",
-        file_size_bytes=1024,
-        row_count=50,
-        duration_ms=100.5,
-        files_staged=1,
-      )
-
-      mock_sync.assert_called_once_with(
-        "gf_file1",
-        "kg1234567890abcdef",
-        "Entity",
-        1024,
-        50,
-        100.5,
-        1,
-      )
-
-  @pytest.mark.unit
-  @pytest.mark.asyncio
-  async def test_timeout_does_not_raise(self):
-    """Test that a Dagster reporting timeout does not raise an exception."""
-    with patch(
-      f"{MODULE}._report_staging_materialization_sync",
-      side_effect=lambda *args: __import__("time").sleep(10),
-    ):
-      with patch(f"{MODULE}.DAGSTER_REPORT_TIMEOUT", 0.01):
-        # Should not raise, just log a warning
-        await _report_staging_materialization(
-          file_id="gf_file1",
-          graph_id="kg1234567890abcdef",
-          table_name="Entity",
-          file_size_bytes=1024,
-          row_count=50,
-          duration_ms=100.5,
-          files_staged=1,
-        )
-
-  @pytest.mark.unit
-  @pytest.mark.asyncio
-  async def test_exception_does_not_raise(self):
-    """Test that a Dagster reporting error does not raise an exception."""
-    with patch(
-      f"{MODULE}._report_staging_materialization_sync",
-      side_effect=RuntimeError("Dagster instance unavailable"),
-    ):
-      # Should not raise, just log a warning
-      await _report_staging_materialization(
-        file_id="gf_file1",
-        graph_id="kg1234567890abcdef",
-        table_name="Entity",
-        file_size_bytes=1024,
-        row_count=50,
-        duration_ms=100.5,
-        files_staged=1,
-      )
-
-
-class TestReportStagingMaterializationSync:
-  """Test _report_staging_materialization_sync function."""
-
-  @pytest.mark.unit
-  def test_creates_and_reports_materialization(self):
-    """Test that materialization is created with correct metadata and reported."""
-    with (
-      patch("dagster.DagsterInstance") as mock_instance_class,
-      patch("dagster.AssetMaterialization") as mock_mat_class,
-      patch("dagster.AssetKey") as mock_key_class,
-      patch("dagster.MetadataValue") as mock_meta_class,
-    ):
-      mock_instance = Mock()
-      mock_instance_class.get.return_value = mock_instance
-
-      mock_meta_class.text.side_effect = lambda x: f"text:{x}"
-      mock_meta_class.int.side_effect = lambda x: f"int:{x}"
-      mock_meta_class.float.side_effect = lambda x: f"float:{x}"
-
-      _report_staging_materialization_sync(
-        file_id="gf_file1",
-        graph_id="kg1234567890abcdef",
-        table_name="Entity",
-        file_size_bytes=2048,
-        row_count=100,
-        duration_ms=50.5,
-        files_staged=3,
-      )
-
-      # Verify DagsterInstance was obtained
-      mock_instance_class.get.assert_called_once()
-
-      # Verify AssetKey was created
-      mock_key_class.assert_called_once_with("user_graph_file_staging")
-
-      # Verify AssetMaterialization was created
-      mock_mat_class.assert_called_once()
-      mat_kwargs = mock_mat_class.call_args.kwargs
-      assert "description" in mat_kwargs
-      assert "Entity" in mat_kwargs["description"]
-      assert "3" in mat_kwargs["description"]
-
-      # Verify metadata values
-      metadata = mat_kwargs["metadata"]
-      assert metadata["file_id"] == "text:gf_file1"
-      assert metadata["graph_id"] == "text:kg1234567890abcdef"
-      assert metadata["table_name"] == "text:Entity"
-      assert metadata["file_size_bytes"] == "int:2048"
-      assert metadata["row_count"] == "int:100"
-      assert metadata["duration_ms"] == "float:50.5"
-      assert metadata["files_staged"] == "int:3"
-      assert metadata["staging_method"] == "text:direct"
-
-      # Verify materialization was reported
-      mock_instance.report_runless_asset_event.assert_called_once()
-
-  @pytest.mark.unit
-  def test_row_count_none_defaults_to_zero(self):
-    """Test that row_count=None is reported as 0 in metadata."""
-    with (
-      patch("dagster.DagsterInstance") as mock_instance_class,
-      patch("dagster.AssetMaterialization"),
-      patch("dagster.AssetKey"),
-      patch("dagster.MetadataValue") as mock_meta_class,
-    ):
-      mock_instance = Mock()
-      mock_instance_class.get.return_value = mock_instance
-
-      mock_meta_class.text.side_effect = lambda x: f"text:{x}"
-      mock_meta_class.int.side_effect = lambda x: f"int:{x}"
-      mock_meta_class.float.side_effect = lambda x: f"float:{x}"
-
-      _report_staging_materialization_sync(
-        file_id="gf_file1",
-        graph_id="kg1234567890abcdef",
-        table_name="Entity",
-        file_size_bytes=1024,
-        row_count=None,
-        duration_ms=10.0,
-        files_staged=1,
-      )
-
-      # row_count should be 0 when None
-      mock_meta_class.int.assert_any_call(0)
-
-
-class TestDagsterReportTimeout:
-  """Test the DAGSTER_REPORT_TIMEOUT constant and timeout behavior."""
-
-  @pytest.mark.unit
-  def test_timeout_constant_is_positive(self):
-    """Test that the Dagster report timeout is a positive number."""
-    assert DAGSTER_REPORT_TIMEOUT > 0
-
-  @pytest.mark.unit
-  def test_timeout_constant_is_reasonable(self):
-    """Test that the timeout is within a reasonable range (1-30 seconds)."""
-    assert 1.0 <= DAGSTER_REPORT_TIMEOUT <= 30.0
 
 
 class TestStageFileDirectlyEdgeCases:
@@ -1045,7 +907,10 @@ class TestStageFileDirectlyEdgeCases:
       patch(FACTORY_PATH) as mock_factory,
       patch(GRAPH_FILE_PATH) as mock_file_class,
       patch(GRAPH_TABLE_PATH) as mock_table_class,
-      patch(f"{MODULE}._report_staging_materialization", new_callable=AsyncMock),
+      patch(
+        "robosystems.dagster.reporting.report_asset_materialization",
+        new_callable=AsyncMock,
+      ),
       patch(f"{MODULE}.env") as mock_env,
     ):
       mock_env.USER_DATA_BUCKET = "test-bucket"
@@ -1086,7 +951,10 @@ class TestStageFileDirectlyEdgeCases:
       patch(FACTORY_PATH) as mock_factory,
       patch(GRAPH_FILE_PATH) as mock_file_class,
       patch(GRAPH_TABLE_PATH) as mock_table_class,
-      patch(f"{MODULE}._report_staging_materialization", new_callable=AsyncMock),
+      patch(
+        "robosystems.dagster.reporting.report_asset_materialization",
+        new_callable=AsyncMock,
+      ),
       patch(f"{MODULE}.env") as mock_env,
     ):
       mock_env.USER_DATA_BUCKET = "test-bucket"

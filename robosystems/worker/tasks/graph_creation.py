@@ -59,6 +59,22 @@ class GraphCreationTask(BaseTask):
     # Billing subscription (non-blocking)
     self._create_billing_subscription(result.graph_id, config)
 
+    # Report to Dagster observable asset (non-blocking)
+    from robosystems.dagster.reporting import report_asset_materialization
+
+    await report_asset_materialization(
+      asset_key="user_graph_creation",
+      description=f"Graph {result.graph_id} created via worker",
+      metadata={
+        "graph_id": result.graph_id,
+        "user_id": self.user_id,
+        "graph_type": config.graph_type,
+        "tier": config.tier,
+        "provisioning_method": "worker",
+        "operation_id": self.task_id,
+      },
+    )
+
     return result.to_dict()
 
   def _progress_adapter(self, message: str, percent: float) -> None:
