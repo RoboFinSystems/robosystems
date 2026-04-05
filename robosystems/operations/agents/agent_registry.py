@@ -12,6 +12,7 @@ from robosystems.logger import logger
 from robosystems.operations.agents.base import Agent
 
 _AGENTS: dict[str, type[Agent]] = {}
+_adapters_loaded = False
 
 
 def register_agent(agent_type: str):
@@ -74,6 +75,29 @@ def list_agents() -> dict[str, dict[str, Any]]:
 def is_registered(agent_type: str) -> bool:
   """Check if an agent type is registered."""
   return agent_type in _AGENTS
+
+
+def load_adapter_agents() -> None:
+  """Load agents from enabled adapters.
+
+  Each adapter can expose a get_agent_components() function that
+  returns {"agent_types": [...]} after importing its agent modules
+  (which triggers @register_agent side effects).
+
+  Called once from operations/agents/__init__.py.
+  """
+  global _adapters_loaded
+  if _adapters_loaded:
+    return
+  _adapters_loaded = True
+
+  # Future adapters register agents here:
+  #
+  # from robosystems.config import env
+  #
+  # if env.SEC_PIPELINE_ENABLED:
+  #   from robosystems.adapters.sec.agents import get_agent_components
+  #   get_agent_components()  # triggers @register_agent side effects
 
 
 def clear_registry() -> None:
