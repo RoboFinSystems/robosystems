@@ -30,6 +30,7 @@ from robosystems.operations.agents.agent_context import (
 from robosystems.operations.agents.agent_registry import (
   get_agent,
   get_agent_class,
+  load_adapter_agents,
   register_agent,
 )
 from robosystems.operations.agents.agent_registry import (
@@ -70,6 +71,9 @@ from robosystems.operations.agents.tool_access import (
 )
 from robosystems.operations.agents.tracked_ai import TrackedAIClient
 
+# Load adapter-contributed agents (empty for now — extension point)
+load_adapter_agents()
+
 __all__ = [
   # Runtime services
   "AIClient",
@@ -107,6 +111,7 @@ __all__ = [
   "get_agent",
   "get_agent_class",
   "list_v2_agents",
+  "load_adapter_agents",
   "register_agent",
   # Adapters
   "run_agent_api",
