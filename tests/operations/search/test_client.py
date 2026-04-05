@@ -86,6 +86,17 @@ class TestBulkIndex:
     client.bulk_index(docs)
     assert mock_bulk.call_args.kwargs["refresh"] is False
 
+  @patch("opensearchpy.helpers.bulk")
+  def test_bulk_index_chunks_large_batches(self, mock_bulk, client):
+    mock_bulk.return_value = (500, [])
+    docs = [
+      {"graph_id": "sec", "document_id": f"doc{i}", "content": f"text {i}"}
+      for i in range(1100)
+    ]
+    result = client.bulk_index(docs, chunk_size=500)
+    assert mock_bulk.call_count == 3  # 500 + 500 + 100
+    assert result["indexed"] == 1500
+
 
 class TestBulkWriteMode:
   def test_sets_slow_refresh_during_writes(self, client, mock_opensearch):
@@ -109,6 +120,15 @@ class TestBulkWriteMode:
         raise RuntimeError("ingestion failed")
     mock_opensearch.indices.refresh.assert_called_once()
     assert mock_opensearch.indices.put_settings.call_count == 2
+
+  def test_cleanup_failure_does_not_mask_original_exception(
+    self, client, mock_opensearch
+  ):
+    """If cleanup fails, the original ingestion error must still propagate."""
+    mock_opensearch.indices.refresh.side_effect = ConnectionError("cluster down")
+    with pytest.raises(RuntimeError, match="ingestion failed"):
+      with client.bulk_write_mode():
+        raise RuntimeError("ingestion failed")
 
   def test_custom_intervals(self, client, mock_opensearch):
     with client.bulk_write_mode(write_interval="120s", steady_interval="10s"):

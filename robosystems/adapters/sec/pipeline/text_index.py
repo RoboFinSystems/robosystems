@@ -917,12 +917,17 @@ def sec_ixbrl_disclosures_indexed(
 
         html_content = _extract_html_from_zip(zip_bytes)
         if not html_content:
+          context.log.debug(f"No HTML found in {zip_key}")
           errors += 1
           continue
 
         # Verify document type via iXBRL tag
         ixbrl_doc_type = _extract_ixbrl_doc_type(html_content)
         if ixbrl_doc_type and ixbrl_doc_type.upper() not in form_types_upper:
+          context.log.debug(
+            f"Skipping {accession}: iXBRL doc type '{ixbrl_doc_type}' "
+            f"not in {form_types_upper}"
+          )
           continue
 
         # Parse iXBRL disclosure sections

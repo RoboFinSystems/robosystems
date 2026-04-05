@@ -220,15 +220,18 @@ class OpenSearchClient:
       )
       yield
     finally:
-      self.client.indices.refresh(index=self.index_name)
-      self.client.indices.put_settings(
-        index=self.index_name,
-        body={"index": {"refresh_interval": steady_interval}},
-      )
-      logger.info(
-        f"Bulk write mode ended: refresh_interval restored to {steady_interval} "
-        f"on {self.index_name}"
-      )
+      try:
+        self.client.indices.refresh(index=self.index_name)
+        self.client.indices.put_settings(
+          index=self.index_name,
+          body={"index": {"refresh_interval": steady_interval}},
+        )
+        logger.info(
+          f"Bulk write mode ended: refresh_interval restored to {steady_interval} "
+          f"on {self.index_name}"
+        )
+      except Exception as e:
+        logger.warning(f"Failed to restore index settings after bulk write: {e}")
 
   def index_document(self, document: dict[str, Any]) -> None:
     """Index a single document. Requires graph_id field."""
