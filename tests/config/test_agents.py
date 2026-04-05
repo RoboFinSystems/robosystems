@@ -137,7 +137,7 @@ class TestValidateConfiguration:
     assert summary["models"] == len(AgentConfig.BEDROCK_MODELS)
     assert summary["execution_profiles"] == len(AgentConfig.EXECUTION_PROFILES)
     assert summary["agent_capabilities"] == len(AgentConfig.AGENT_CAPABILITIES)
-    assert "agent_capabilities" in summary
+    assert "token_cost_models" not in summary
 
 
 class TestGetAllConfig:
