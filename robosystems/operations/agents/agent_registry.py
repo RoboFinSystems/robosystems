@@ -12,7 +12,7 @@ from robosystems.logger import logger
 from robosystems.operations.agents.base import Agent
 
 _AGENTS: dict[str, type[Agent]] = {}
-_adapters_loaded = False
+_adapter_agents_loaded: list[bool] = []
 
 
 def register_agent(agent_type: str):
@@ -86,10 +86,9 @@ def load_adapter_agents() -> None:
 
   Called once from operations/agents/__init__.py.
   """
-  global _adapters_loaded
-  if _adapters_loaded:
+  if _adapter_agents_loaded:
     return
-  _adapters_loaded = True
+  _adapter_agents_loaded.append(True)
 
   # Future adapters register agents here:
   #
@@ -102,6 +101,5 @@ def load_adapter_agents() -> None:
 
 def clear_registry() -> None:
   """Clear all registrations. For testing only."""
-  global _adapters_loaded
   _AGENTS.clear()
-  _adapters_loaded = False
+  _adapter_agents_loaded.clear()

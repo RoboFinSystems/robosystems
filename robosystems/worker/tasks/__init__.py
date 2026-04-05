@@ -21,7 +21,7 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 TASK_REGISTRY: dict[str, type[BaseTask]] = {}
-_adapters_loaded = False
+_adapter_tasks_loaded: list[bool] = []
 
 
 def register_task(task_type: str):
@@ -53,10 +53,9 @@ def load_adapter_tasks() -> None:
 
   Called once at worker startup from worker/__init__.py.
   """
-  global _adapters_loaded
-  if _adapters_loaded:
+  if _adapter_tasks_loaded:
     return
-  _adapters_loaded = True
+  _adapter_tasks_loaded.append(True)
 
   # Future adapters register tasks here:
   #
@@ -69,6 +68,5 @@ def load_adapter_tasks() -> None:
 
 def clear_registry() -> None:
   """Clear all registrations. For testing only."""
-  global _adapters_loaded
   TASK_REGISTRY.clear()
-  _adapters_loaded = False
+  _adapter_tasks_loaded.clear()
