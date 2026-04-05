@@ -148,44 +148,24 @@ ENABLE_RATE_LIMITING # Rate limiting toggle
 ENABLE_CREDITS       # Credit system toggle
 ```
 
-### 2. Billing Configuration (`billing.py`)
+### 2. Billing Configuration (`billing/`)
 
-Defines all subscription plans and pricing.
+Defines subscription plans, credit allocations, and AI token pricing.
 
 **Features:**
 
 - **Config-as-Code**: All plans defined in code
-- **Unified Pricing**: Single source for all tiers
+- **Single Source of Truth**: `billing/core.py` for tiers, `billing/ai.py` for token pricing
 - **Plan Validation**: Ensures plan consistency
-- **Marketing Info**: Display names and descriptions
+- **Stripe Integration**: Prices auto-created from config on first checkout
 
-**Subscription Tiers:**
+**Subscription Tiers** (per-graph):
 
-```python
-SUBSCRIPTION_PLANS = {
-    "standard": {
-        "display_name": "Standard",
-        "credits_per_month": 100_000,
-        "base_price_cents": 4999,  # $49.99
-        "max_graphs": 5,
-        "api_rate_multiplier": 2.0,
-    },
-    "large": {
-        "display_name": "Large",
-        "credits_per_month": 1_000_000,
-        "base_price_cents": 19999,  # $199.99
-        "max_graphs": 25,
-        "api_rate_multiplier": 5.0,
-    },
-    "xlarge": {
-        "display_name": "XLarge",
-        "credits_per_month": 3_000_000,
-        "base_price_cents": 49999,  # $499.99
-        "max_graphs": 100,
-        "api_rate_multiplier": 10.0,
-    }
-}
-```
+| Tier | Price | Monthly Credits | ~Agent Calls |
+|------|-------|----------------|-------------|
+| ladybug-standard | $99/mo | 8,000 | ~200/mo |
+| ladybug-large | $299/mo | 32,000 | ~800/mo |
+| ladybug-xlarge | $699/mo | 100,000 | ~2,600/mo |
 
 **Usage:**
 
@@ -196,12 +176,8 @@ from robosystems.config.billing import BillingConfig
 pricing = BillingConfig.get_all_pricing_info()
 
 # Get specific plan
-plan = BillingConfig.get_subscription_plan("large")
+plan = BillingConfig.get_subscription_plan("ladybug-large")
 print(f"{plan['display_name']}: ${plan['base_price_cents']/100}/month")
-
-# Check plan features
-if plan['max_graphs'] >= 10:
-    enable_advanced_features()
 ```
 
 ### 3. Rate Limiting (`rate_limits.py`)
@@ -259,49 +235,30 @@ limit, period = get_rate_limit_for_tier("large", EndpointCategory.GRAPH_QUERY)
 )
 ```
 
-### 4. Credit Configuration (`credits.py`)
+### 4. Credit Configuration (`credits.py` + `billing/ai.py`)
 
-Defines credit costs for all operations.
+Defines what consumes credits and token-based pricing for AI operations.
 
-**Features:**
+**Credit Model:**
 
-- **Operation Costs**: Fixed costs per operation type
-- **AI-Only Billing**: Only AI operations (Anthropic/OpenAI) consume credits
-- **Database Operations**: All database operations are included (no credits consumed)
-- **Storage Costs**: Optional separate billing at 0.05 credits per GB per day
+- Only AI agent operations consume credits (token-based pricing)
+- All database operations are included with the subscription (no credits)
+- MCP tool access is unlimited (no credits)
+- Storage is included in each tier (no metering)
 
-**Operation Costs:**
-
-```python
-BASE_COSTS = {
-    "api_call": 1,          # Standard API calls
-    "query": 10,            # Base query cost
-    "analytics": 25,        # Analytics queries
-    "backup": 50,           # Backup operations
-    "ai_operation": 100,    # AI/MCP operations
-}
-
-# Dynamic costs
-QUERY_RESULT_COST = 0.01   # Per result row
-STORAGE_COST_PER_GB_HOUR = 0.1
-```
-
-**Usage:**
+**Token Pricing** (`billing/ai.py`):
 
 ```python
-from robosystems.config.credits import CreditConfig
+from robosystems.config.billing.ai import AIBillingConfig
 
-# Calculate query cost
-cost = CreditConfig.get_query_cost(result_count=1000)
-# Base: 10 + (1000 * 0.01) = 20 credits
-
-# Calculate storage cost
-storage_cost = CreditConfig.get_storage_cost(gb_hours=24)
-# 24 * 0.1 = 2.4 credits
-
-# Apply tier discount
-large_tier_cost = cost * 0.8  # 20% discount
+# Single pricing tier for all Sonnet models
+pricing = AIBillingConfig.TOKEN_PRICING["anthropic_claude_4_sonnet"]
+# {"input": Decimal("3"), "output": Decimal("15")}  # credits per 1K tokens
 ```
+
+**Operation Costs** (`credits.py`):
+
+All non-AI operations return `Decimal("0")` — they are included with the subscription.
 
 ### 5. Configuration Validation (`validation.py`)
 
@@ -352,7 +309,6 @@ Centralized configuration for the multi-agent AI system.
 - **Model Selection**: AWS Bedrock Claude model configuration
 - **Execution Profiles**: Time/token limits per agent mode
 - **Orchestrator Config**: Routing strategy and fallback settings
-- **Token Costs**: Credit billing for AI operations
 - **Agent-Specific Overrides**: Per-agent model customization
 
 **Available Models:**
@@ -360,22 +316,19 @@ Centralized configuration for the multi-agent AI system.
 ```python
 from robosystems.config import BedrockModel
 
-# Claude 4.5 (latest/default) - Regional inference profile
+# Sonnet 4.6 (default) - Regional inference profile
+BedrockModel.SONNET_4_6  # us.anthropic.claude-sonnet-4-6
+
+# Sonnet 4.5 (fallback) - Regional inference profile
 BedrockModel.SONNET_4_5  # us.anthropic.claude-sonnet-4-5-20250929-v1:0
 
-# Claude 4 (fallback) - Regional inference profile
+# Sonnet 4 (last resort) - Regional inference profile
 BedrockModel.SONNET_4    # us.anthropic.claude-sonnet-4-20250514-v1:0
-
-# Claude 3.5 v2 (last resort) - Regional inference profile
-BedrockModel.SONNET_3_5_V2  # us.anthropic.claude-3-5-sonnet-20241022-v2:0
 ```
 
 **Note:** All models use regional inference profiles (`us.*`) for on-demand access without marketplace subscriptions.
 
-**Pricing:** All Sonnet models use the same pricing tier:
-
-- Input: $3 per million tokens ($0.003 per 1k tokens = 3.0 credits)
-- Output: $15 per million tokens ($0.015 per 1k tokens = 15.0 credits)
+**Token Pricing:** All Sonnet models use the same credit rates (3/15 credits per 1K tokens). See `billing/ai.py` for details.
 
 **Execution Modes:**
 
@@ -420,13 +373,6 @@ profile = AgentConfig.get_execution_profile(AgentExecutionMode.STANDARD)
 limits = AgentConfig.get_mode_limits("standard")
 # limits = {"max_tools": 5, "timeout": 60, ...}
 
-# Calculate token cost
-cost = AgentConfig.get_token_cost(
-    model=BedrockModel.SONNET_3_5_V2,
-    input_tokens=1000,
-    output_tokens=500
-)
-
 # Get orchestrator config
 fallback_agent = AgentConfig.ORCHESTRATOR_CONFIG["fallback_agent"]  # "cypher"
 enable_rag = AgentConfig.ORCHESTRATOR_CONFIG["enable_rag"]  # False
@@ -456,8 +402,8 @@ To change the default model globally:
 ```python
 # In robosystems/config/agents.py
 DEFAULT_MODEL_CONFIG = ModelConfig(
-    default_model=BedrockModel.SONNET_4_5,  # Current default: Sonnet 4.5
-    fallback_model=BedrockModel.SONNET_4,   # Current fallback: Sonnet 4
+    default_model=BedrockModel.SONNET_4_6,  # Current default: Sonnet 4.6
+    fallback_model=BedrockModel.SONNET_4_5, # Current fallback: Sonnet 4.5
     region=env.AWS_BEDROCK_REGION,
     temperature=0.7,
 )
@@ -531,16 +477,15 @@ All business configuration lives in code, not database:
 
 **Credit Costs** (Billing):
 
-- Only AI operations (Anthropic/OpenAI API calls) consume credits
-- All database operations are completely FREE (queries, imports, backups, etc.)
-- No multipliers applied to credit costs - same price for all tiers
-- Billing is based on actual AI token usage (input + output tokens)
-- Storage has separate optional billing (0.05 credits per GB per day)
+- Only AI agent operations consume credits (token-based pricing)
+- All database operations are included (queries, imports, backups, etc.)
+- No multipliers applied to credit costs — same rate for all tiers
+- Credits are billed based on actual AI token usage (input + output tokens)
 
 **Example:**
 
-- A xlarge tier customer gets 5.0x more API requests per minute
-- But pays the same credit cost per AI operation as a standard tier customer
+- An xlarge tier customer gets 5.0x more API requests per minute
+- But pays the same credit rate per AI operation as a standard tier customer
 - Database queries don't consume any credits regardless of tier
 
 ### Environment-Aware
@@ -573,8 +518,8 @@ assert env.DATABASE_URL == "postgresql://test"
 
 # Test billing config
 from robosystems.config.billing import BillingConfig
-plan = BillingConfig.get_subscription_plan("standard")
-assert plan["credits_per_month"] == 100_000
+plan = BillingConfig.get_subscription_plan("ladybug-standard")
+assert plan["monthly_credit_allocation"] == 8000
 ```
 
 ## Troubleshooting

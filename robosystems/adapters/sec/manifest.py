@@ -111,6 +111,5 @@ SEC_MANIFEST = SharedRepositoryManifest(
     "filing_fetch": Decimal("0.0"),  # Included (rate-limited only)
     "analytics": Decimal("0.0"),  # Included (rate-limited only)
     "ai_tokens": None,  # Dynamic — calculated from actual token usage
-    "bulk_export": Decimal("50.0"),  # Bulk data export
   },
 )

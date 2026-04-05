@@ -35,11 +35,7 @@ def test_tier_credit_allocations_matches_plans():
 
 
 def test_get_monthly_credits_returns_from_plans():
-  """Test that get_monthly_credits returns values from plans.
-
-  Credit anchor: 1 credit = 1 GB/day storage = ~$0.00333
-  ~38 credits per typical agent call
-  """
+  """Test that get_monthly_credits returns values from plans."""
   assert BillingConfig.get_monthly_credits("ladybug-standard") == 8000  # ~200 calls
   assert BillingConfig.get_monthly_credits("ladybug-large") == 32000  # ~800 calls
   assert BillingConfig.get_monthly_credits("ladybug-xlarge") == 100000  # ~2,600 calls

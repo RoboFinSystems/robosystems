@@ -9,7 +9,6 @@ This module defines all configuration for the multi-agent system including:
 """
 
 from dataclasses import dataclass
-from decimal import Decimal
 from enum import Enum
 from typing import Any
 
@@ -139,25 +138,6 @@ class AgentConfig:
     "routing_strategy": "best_match",
   }
 
-  # Token Cost Configuration (for credit billing)
-  # Cost in credits per 1000 tokens
-  # AWS Pricing: $3 per MTok input, $15 per MTok output (all Sonnet models)
-  # Credit conversion: 1 credit = $0.001 USD
-  TOKEN_COSTS = {
-    BedrockModel.SONNET_4_6: {
-      "input_per_1k": Decimal("3.0"),  # $0.003 per 1k tokens
-      "output_per_1k": Decimal("15.0"),  # $0.015 per 1k tokens
-    },
-    BedrockModel.SONNET_4_5: {
-      "input_per_1k": Decimal("3.0"),  # $0.003 per 1k tokens
-      "output_per_1k": Decimal("15.0"),  # $0.015 per 1k tokens
-    },
-    BedrockModel.SONNET_4: {
-      "input_per_1k": Decimal("3.0"),  # $0.003 per 1k tokens
-      "output_per_1k": Decimal("15.0"),  # $0.015 per 1k tokens
-    },
-  }
-
   # Agent Capabilities Configuration
   AGENT_CAPABILITIES = {
     "cypher": {
@@ -229,28 +209,6 @@ class AgentConfig:
     }
 
   @classmethod
-  def get_token_cost(
-    cls, model: BedrockModel, input_tokens: int, output_tokens: int
-  ) -> Decimal:
-    """
-    Calculate total credit cost for token usage.
-
-    Args:
-        model: The model used
-        input_tokens: Number of input tokens
-        output_tokens: Number of output tokens
-
-    Returns:
-        Total cost in credits
-    """
-    costs = cls.TOKEN_COSTS.get(model, cls.TOKEN_COSTS[BedrockModel.SONNET_4])
-
-    input_cost = (Decimal(input_tokens) / 1000) * costs["input_per_1k"]
-    output_cost = (Decimal(output_tokens) / 1000) * costs["output_per_1k"]
-
-    return input_cost + output_cost
-
-  @classmethod
   def get_agent_capabilities(cls, agent_type: str) -> dict[str, Any]:
     """Get capabilities configuration for an agent type."""
     return cls.AGENT_CAPABILITIES.get(
@@ -293,11 +251,6 @@ class AgentConfig:
       if mode not in cls.EXECUTION_PROFILES:
         issues.append(f"Missing execution profile for mode: {mode.value}")
 
-    # Validate all models have token costs
-    for model in cls.BEDROCK_MODELS:
-      if model not in cls.TOKEN_COSTS:
-        issues.append(f"Missing token costs for model: {model.value}")
-
     return {
       "valid": len(issues) == 0,
       "issues": issues,
@@ -305,7 +258,6 @@ class AgentConfig:
         "models": len(cls.BEDROCK_MODELS),
         "execution_profiles": len(cls.EXECUTION_PROFILES),
         "agent_capabilities": len(cls.AGENT_CAPABILITIES),
-        "token_cost_models": len(cls.TOKEN_COSTS),
       },
     }
 

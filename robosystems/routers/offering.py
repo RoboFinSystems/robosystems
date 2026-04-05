@@ -71,13 +71,13 @@ No authentication required - this is public service information.""",
                 {
                   "name": "ladybug-standard",
                   "display_name": "LadybugDB Standard",
-                  "monthly_price": 50.00,
+                  "monthly_price": 99.00,
                   "monthly_credits": 8000,
-                  "infrastructure": "Multi-tenant (shared r7g.large/xlarge)",
+                  "infrastructure": "Dedicated m7g.large (2 vCPU, 8 GB RAM)",
                   "features": [
                     "8,000 AI credits per graph",
-                    "5M node limit",
                     "7-day backup retention",
+                    "Priority support",
                   ],
                 }
               ]
@@ -282,7 +282,7 @@ async def get_service_offerings(
         "included_operations": no_credit_ops,
         "notes": [
           "Credits are allocated per graph based on its infrastructure tier",
-          "Only AI operations (agent calls, MCP AI tools, AI analysis) consume credits",
+          "Only AI agent operations consume credits",
           "All database operations are included (queries, imports, backups, exports, etc.)",
           "Token-based pricing applies for actual AI API usage",
           "Credits do not roll over between billing periods",

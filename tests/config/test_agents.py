@@ -1,7 +1,5 @@
 """Agent system configuration tests."""
 
-from decimal import Decimal
-
 from robosystems.config.agents import (
   AgentConfig,
   AgentExecutionMode,
@@ -106,31 +104,6 @@ class TestGetModeLimits:
     assert upper == lower
 
 
-class TestGetTokenCost:
-  """Tests for AgentConfig.get_token_cost."""
-
-  def test_zero_tokens_zero_cost(self):
-    cost = AgentConfig.get_token_cost(BedrockModel.SONNET_4_6, 0, 0)
-    assert cost == Decimal("0")
-
-  def test_input_tokens_only(self):
-    cost = AgentConfig.get_token_cost(BedrockModel.SONNET_4_6, 1000, 0)
-    assert cost == Decimal("3.0")
-
-  def test_output_tokens_only(self):
-    cost = AgentConfig.get_token_cost(BedrockModel.SONNET_4_6, 0, 1000)
-    assert cost == Decimal("15.0")
-
-  def test_both_input_and_output(self):
-    cost = AgentConfig.get_token_cost(BedrockModel.SONNET_4_6, 1000, 1000)
-    assert cost == Decimal("18.0")
-
-  def test_proportional_cost(self):
-    cost_small = AgentConfig.get_token_cost(BedrockModel.SONNET_4_6, 500, 500)
-    cost_large = AgentConfig.get_token_cost(BedrockModel.SONNET_4_6, 1000, 1000)
-    assert cost_large == cost_small * 2
-
-
 class TestGetAgentCapabilities:
   """Tests for AgentConfig.get_agent_capabilities."""
 
@@ -164,7 +137,7 @@ class TestValidateConfiguration:
     assert summary["models"] == len(AgentConfig.BEDROCK_MODELS)
     assert summary["execution_profiles"] == len(AgentConfig.EXECUTION_PROFILES)
     assert summary["agent_capabilities"] == len(AgentConfig.AGENT_CAPABILITIES)
-    assert summary["token_cost_models"] == len(AgentConfig.TOKEN_COSTS)
+    assert "token_cost_models" not in summary
 
 
 class TestGetAllConfig:
