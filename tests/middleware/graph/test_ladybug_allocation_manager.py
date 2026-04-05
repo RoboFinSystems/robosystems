@@ -108,13 +108,8 @@ class TestLadybugAllocationManager:
     self.mock_graph_table.put_item.assert_called_once()
     self.mock_instance_table.update_item.assert_called_once()
 
-  @patch(
-    "robosystems.middleware.graph.allocation_manager.LadybugAllocationManager._trigger_scale_up"
-  )
-  async def test_allocate_database_no_capacity(self, mock_trigger_scale_up):
+  async def test_allocate_database_no_capacity(self):
     """Test database allocation when no instances have capacity."""
-    mock_trigger_scale_up.return_value = None
-
     # Mock no available instances (FilterExpression would filter these out)
     self.mock_instance_table.scan.return_value = {
       "Items": []  # No instances with capacity available
@@ -126,13 +121,8 @@ class TestLadybugAllocationManager:
     # Should not create any database records
     self.mock_graph_table.put_item.assert_not_called()
 
-  @patch(
-    "robosystems.middleware.graph.allocation_manager.LadybugAllocationManager._trigger_scale_up"
-  )
-  async def test_allocate_database_no_instances(self, mock_trigger_scale_up):
+  async def test_allocate_database_no_instances(self):
     """Test database allocation when no instances exist."""
-    mock_trigger_scale_up.return_value = None
-
     # Mock no instances
     self.mock_instance_table.scan.return_value = {"Items": []}
 

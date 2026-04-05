@@ -10,7 +10,6 @@ from botocore.exceptions import ClientError
 from robosystems.middleware.graph.allocation_manager import (
   VALID_ENTITY_ID_PATTERN,
   VALID_INSTANCE_ID_PATTERN,
-  CapacityScalingTriggered,
   DatabaseLocation,
   DatabaseStatus,
   InstanceInfo,
@@ -594,72 +593,6 @@ class TestCheckTierCapacity:
 
 
 @pytest.mark.unit
-class TestTriggerScaleUp:
-  """Tests for _trigger_scale_up method."""
-
-  @pytest.mark.asyncio
-  async def test_scale_up_success(self):
-    manager = _create_manager()
-    manager.autoscaling.describe_auto_scaling_groups.return_value = {
-      "AutoScalingGroups": [
-        {"DesiredCapacity": 2, "MaxSize": 5},
-      ]
-    }
-
-    result = await manager._trigger_scale_up(GraphTier.LADYBUG_STANDARD)
-    assert result is True
-    manager.autoscaling.set_desired_capacity.assert_called_once()
-
-  @pytest.mark.asyncio
-  async def test_scale_up_at_max(self):
-    manager = _create_manager()
-    manager.autoscaling.describe_auto_scaling_groups.return_value = {
-      "AutoScalingGroups": [
-        {"DesiredCapacity": 5, "MaxSize": 5},
-      ]
-    }
-
-    result = await manager._trigger_scale_up(GraphTier.LADYBUG_STANDARD)
-    assert result is False
-
-  @pytest.mark.asyncio
-  async def test_scale_up_asg_not_found(self):
-    manager = _create_manager()
-    manager.autoscaling.describe_auto_scaling_groups.return_value = {
-      "AutoScalingGroups": []
-    }
-
-    result = await manager._trigger_scale_up(GraphTier.LADYBUG_STANDARD)
-    assert result is False
-
-  @pytest.mark.asyncio
-  async def test_scale_up_rate_limited(self):
-    """Test that scale-up is rate-limited to once per 5 minutes."""
-    manager = _create_manager()
-    manager.autoscaling.describe_auto_scaling_groups.return_value = {
-      "AutoScalingGroups": [
-        {"DesiredCapacity": 2, "MaxSize": 5},
-      ]
-    }
-
-    # First call should succeed
-    result1 = await manager._trigger_scale_up(GraphTier.LADYBUG_STANDARD)
-    assert result1 is True
-
-    # Second call within 5 minutes should be rate-limited
-    result2 = await manager._trigger_scale_up(GraphTier.LADYBUG_STANDARD)
-    assert result2 is False
-
-  @pytest.mark.asyncio
-  async def test_scale_up_client_error(self):
-    manager = _create_manager()
-    manager.autoscaling.describe_auto_scaling_groups.side_effect = _make_client_error()
-
-    result = await manager._trigger_scale_up(GraphTier.LADYBUG_STANDARD)
-    assert result is False
-
-
-@pytest.mark.unit
 class TestGetStackNameForTier:
   """Tests for _get_stack_name_for_tier method."""
 
@@ -894,16 +827,6 @@ class TestFindBestInstance:
 
     result = await manager._find_best_instance(GraphTier.LADYBUG_STANDARD)
     assert result is None
-
-
-@pytest.mark.unit
-class TestCapacityScalingTriggered:
-  """Tests for CapacityScalingTriggered exception."""
-
-  def test_exception_message(self):
-    exc = CapacityScalingTriggered("No capacity available")
-    assert str(exc) == "No capacity available"
-    assert isinstance(exc, Exception)
 
 
 @pytest.mark.unit

@@ -145,7 +145,7 @@ def require_graph_access(
   """Validate graph is accessible for the requested operation type.
 
   Checks two layers:
-  1. Graph status (queued/provisioning -> 409, suspended -> 403, deprovisioned -> 404)
+  1. Graph status (suspended -> 403, deprovisioned -> 404)
   2. Subscription status (grace period: reads OK, writes blocked)
 
   Args:
@@ -174,12 +174,6 @@ def require_graph_access(
     raise HTTPException(
       status_code=status.HTTP_404_NOT_FOUND,
       detail="Graph not found.",
-    )
-
-  if graph_status in (GraphStatus.QUEUED.value, GraphStatus.PROVISIONING.value):
-    raise HTTPException(
-      status_code=status.HTTP_409_CONFLICT,
-      detail="Graph is being provisioned. Please wait.",
     )
 
   if graph_status == GraphStatus.SUSPENDED.value:

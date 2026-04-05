@@ -10,11 +10,9 @@ Graph Ownership:
 - Only users within the organization can be granted access
 
 Graph Lifecycle:
-- queued: Waiting for infrastructure capacity (creation queue)
-- provisioning: Infrastructure being set up (one at a time per tier)
 - active: Fully operational
 - suspended: Subscription ended, access blocked
-- deprovisioned: Infrastructure torn down (future)
+- deprovisioned: Infrastructure torn down
 """
 
 from collections.abc import Sequence
@@ -44,8 +42,6 @@ from robosystems.database import Model
 class GraphStatus(str, Enum):
   """Graph lifecycle status states."""
 
-  QUEUED = "queued"
-  PROVISIONING = "provisioning"
   ACTIVE = "active"
   SUSPENDED = "suspended"
   DEPROVISIONED = "deprovisioned"
@@ -310,14 +306,9 @@ class Graph(Model):
     return self.status == GraphStatus.ACTIVE.value
 
   @property
-  def is_queued(self) -> bool:
-    """Check if graph is queued for provisioning."""
-    return self.status == GraphStatus.QUEUED.value
-
-  @property
   def is_operational(self) -> bool:
-    """Check if graph is in an operational state (active or provisioning)."""
-    return self.status in (GraphStatus.ACTIVE.value, GraphStatus.PROVISIONING.value)
+    """Check if graph is in an operational state."""
+    return self.status == GraphStatus.ACTIVE.value
 
   @classmethod
   def get_by_id(
@@ -347,28 +338,7 @@ class Graph(Model):
       .first()
     )
 
-  @classmethod
-  def get_oldest_queued_by_tier(cls, tier: str, session: Session) -> Optional["Graph"]:
-    """Get the oldest queued graph for a given tier (FIFO)."""
-    return (
-      session.query(cls)
-      .filter(cls.status == GraphStatus.QUEUED.value, cls.graph_tier == tier)
-      .order_by(cls.created_at.asc())
-      .first()
-    )
-
-  @classmethod
-  def has_provisioning_for_tier(cls, tier: str, session: Session) -> bool:
-    """Check if there's already a graph being provisioned for this tier."""
-    return (
-      session.query(cls)
-      .filter(cls.status == GraphStatus.PROVISIONING.value, cls.graph_tier == tier)
-      .first()
-    ) is not None
-
   _VALID_TRANSITIONS: dict[str, list[str]] = {
-    "queued": ["provisioning", "deprovisioned"],
-    "provisioning": ["active", "queued", "deprovisioned"],
     "active": ["suspended", "deprovisioned"],
     "suspended": ["active", "deprovisioned"],
     "deprovisioned": [],
@@ -391,55 +361,6 @@ class Graph(Model):
     except SQLAlchemyError:
       session.rollback()
       raise
-
-  @classmethod
-  def create_queued(
-    cls,
-    graph_id: str,
-    org_id: str | None,
-    graph_name: str,
-    graph_type: str,
-    user_id: str,
-    session: Session,
-    graph_tier: GraphTier = GraphTier.LADYBUG_STANDARD,
-    schema_extensions: list[str] | None = None,
-    graph_metadata: dict[str, Any] | None = None,
-  ) -> "Graph":
-    """Create a graph row with status='queued' and its GraphUser in one transaction.
-
-    Used when capacity is unavailable and the graph enters the creation queue.
-    """
-    from .graph_user import GraphUser
-
-    graph = cls(
-      graph_id=graph_id,
-      org_id=org_id,
-      graph_name=graph_name,
-      graph_type=graph_type,
-      schema_extensions=schema_extensions or [],
-      graph_tier=graph_tier.value if isinstance(graph_tier, GraphTier) else graph_tier,
-      graph_metadata=graph_metadata,
-      status=GraphStatus.QUEUED.value,
-      graph_instance_id="pending",
-    )
-    session.add(graph)
-
-    user_graph = GraphUser(
-      user_id=user_id,
-      graph_id=graph_id,
-      role="admin",
-      is_selected=True,
-    )
-    session.add(user_graph)
-
-    try:
-      session.commit()
-      session.refresh(graph)
-    except SQLAlchemyError:
-      session.rollback()
-      raise
-
-    return graph
 
   @classmethod
   def get_by_extension(cls, extension: str, session: Session) -> Sequence["Graph"]:
