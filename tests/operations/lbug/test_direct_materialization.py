@@ -5,14 +5,11 @@ These tests cover the fast path for materializing DuckDB staging tables
 to the graph database, bypassing Dagster job overhead.
 """
 
-import time
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 
 from robosystems.operations.lbug.direct_materialization import (
-  _report_materialization,
-  _report_materialization_sync,
   _restage_stale_files,
   materialize_graph_directly,
 )
@@ -39,9 +36,7 @@ class TestMaterializeGraphDirectly:
       patch("robosystems.models.core.Graph") as mock_graph_class,
       patch("robosystems.models.core.GraphFile") as mock_file_class,
       patch("robosystems.models.core.GraphTable"),
-      patch(
-        "robosystems.operations.lbug.direct_materialization._report_materialization"
-      ),
+      patch("robosystems.dagster.reporting.report_asset_materialization"),
     ):
       # Mock graph record
       mock_graph = Mock()
@@ -171,9 +166,7 @@ class TestMaterializeGraphDirectly:
       patch("robosystems.models.core.Graph") as mock_graph_class,
       patch("robosystems.models.core.GraphFile") as mock_file_class,
       patch("robosystems.models.core.GraphTable"),
-      patch(
-        "robosystems.operations.lbug.direct_materialization._report_materialization"
-      ),
+      patch("robosystems.dagster.reporting.report_asset_materialization"),
     ):
       mock_graph = Mock()
       mock_graph.graph_stale = False
@@ -225,9 +218,7 @@ class TestMaterializeGraphDirectly:
       patch("robosystems.models.core.GraphFile") as mock_file_class,
       patch("robosystems.models.core.GraphTable"),
       patch("robosystems.models.core.GraphSchema") as mock_schema_class,
-      patch(
-        "robosystems.operations.lbug.direct_materialization._report_materialization"
-      ),
+      patch("robosystems.dagster.reporting.report_asset_materialization"),
     ):
       mock_graph = Mock()
       mock_graph.graph_stale = True
@@ -284,9 +275,7 @@ class TestMaterializeGraphDirectly:
       patch("robosystems.models.core.Graph") as mock_graph_class,
       patch("robosystems.models.core.GraphFile") as mock_file_class,
       patch("robosystems.models.core.GraphTable"),
-      patch(
-        "robosystems.operations.lbug.direct_materialization._report_materialization"
-      ),
+      patch("robosystems.dagster.reporting.report_asset_materialization"),
     ):
       mock_graph = Mock()
       mock_graph.graph_stale = True
@@ -346,9 +335,7 @@ class TestMaterializeGraphDirectly:
       patch("robosystems.models.core.Graph") as mock_graph_class,
       patch("robosystems.models.core.GraphFile") as mock_file_class,
       patch("robosystems.models.core.GraphTable"),
-      patch(
-        "robosystems.operations.lbug.direct_materialization._report_materialization"
-      ),
+      patch("robosystems.dagster.reporting.report_asset_materialization"),
     ):
       mock_graph = Mock()
       mock_graph.graph_stale = True
@@ -543,83 +530,6 @@ class TestRestageStaleFiles:
       assert mock_stage.call_count == 2
 
 
-class TestReportMaterialization:
-  """Test Dagster materialization reporting."""
-
-  @pytest.mark.asyncio
-  async def test_report_materialization_success(self):
-    """Test successful materialization reporting to Dagster."""
-    with patch(
-      "robosystems.operations.lbug.direct_materialization._report_materialization_sync"
-    ) as mock_sync_report:
-      await _report_materialization(
-        graph_id="kg123",
-        tables_materialized=5,
-        total_rows=1000,
-        duration_ms=500.0,
-        rebuild=False,
-      )
-
-      mock_sync_report.assert_called_once_with("kg123", 5, 1000, 500.0, False)
-
-  @pytest.mark.asyncio
-  async def test_report_materialization_timeout(self):
-    """Test timeout handling during materialization reporting."""
-    with patch(
-      "robosystems.operations.lbug.direct_materialization._report_materialization_sync"
-    ) as mock_sync_report:
-      mock_sync_report.side_effect = lambda *args: time.sleep(0.1)
-
-      # Should not raise, just log warning
-      await _report_materialization(
-        graph_id="kg123",
-        tables_materialized=5,
-        total_rows=1000,
-        duration_ms=500.0,
-        rebuild=False,
-      )
-
-  @pytest.mark.asyncio
-  async def test_report_materialization_error(self):
-    """Test error handling during materialization reporting."""
-    with patch(
-      "robosystems.operations.lbug.direct_materialization._report_materialization_sync"
-    ) as mock_sync_report:
-      mock_sync_report.side_effect = Exception("Dagster connection failed")
-
-      # Should not raise, just log warning
-      await _report_materialization(
-        graph_id="kg123",
-        tables_materialized=5,
-        total_rows=1000,
-        duration_ms=500.0,
-        rebuild=False,
-      )
-
-
-class TestReportMaterializationSync:
-  """Test synchronous materialization reporting."""
-
-  def test_skip_in_test_environment(self):
-    """Test that reporting is skipped in test environment.
-
-    Note: This test runs in the test environment by default,
-    so the function should return early without importing Dagster.
-    """
-    # The function checks env.ENVIRONMENT at import time,
-    # and since we're running tests, it should be "test" already
-    # This should complete without any exceptions
-    _report_materialization_sync(
-      graph_id="kg123",
-      tables_materialized=5,
-      total_rows=1000,
-      duration_ms=500.0,
-      rebuild=False,
-    )
-    # If we reach here without error, the test passes
-    # (function returns early without trying to connect to Dagster)
-
-
 class TestProgressTracking:
   """Test SSE progress tracking during materialization."""
 
@@ -642,9 +552,7 @@ class TestProgressTracking:
       patch("robosystems.models.core.Graph") as mock_graph_class,
       patch("robosystems.models.core.GraphFile") as mock_file_class,
       patch("robosystems.models.core.GraphTable"),
-      patch(
-        "robosystems.operations.lbug.direct_materialization._report_materialization"
-      ),
+      patch("robosystems.dagster.reporting.report_asset_materialization"),
     ):
       mock_graph = Mock()
       mock_graph.graph_stale = True

@@ -10,10 +10,12 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from robosystems.operations.graph.provisioning_service import (
+from robosystems.dagster.reporting import (
   DAGSTER_REPORT_TIMEOUT,
-  _report_dagster_materialization,
-  _report_dagster_materialization_sync,
+  report_asset_materialization,
+  report_asset_materialization_sync,
+)
+from robosystems.operations.graph.provisioning_service import (
   run_graph_provisioning,
   run_user_repository_provisioning,
 )
@@ -60,7 +62,7 @@ class TestRunGraphProvisioning:
           mock_service_class.return_value = mock_service
 
           with patch(
-            "robosystems.operations.graph.provisioning_service._report_dagster_materialization"
+            "robosystems.operations.graph.provisioning_service.report_asset_materialization"
           ) as mock_report:
             mock_report.return_value = None
 
@@ -110,7 +112,7 @@ class TestRunGraphProvisioning:
           mock_service_class.return_value = mock_service
 
           with patch(
-            "robosystems.operations.graph.provisioning_service._report_dagster_materialization"
+            "robosystems.operations.graph.provisioning_service.report_asset_materialization"
           ):
             result = await run_graph_provisioning(
               operation_id=None,
@@ -300,7 +302,7 @@ class TestRunUserRepositoryProvisioning:
                 "robosystems.operations.graph.subscription_service.generate_subscription_invoice"
               ):
                 with patch(
-                  "robosystems.operations.graph.provisioning_service._report_dagster_materialization"
+                  "robosystems.operations.graph.provisioning_service.report_asset_materialization"
                 ):
                   result = await run_user_repository_provisioning(
                     operation_id="op123",
@@ -419,9 +421,9 @@ class TestDagsterMaterialization:
   async def test_async_materialization_success(self):
     """Test successful async materialization reporting."""
     with patch(
-      "robosystems.operations.graph.provisioning_service._report_dagster_materialization_sync"
+      "robosystems.dagster.reporting.report_asset_materialization_sync"
     ) as mock_sync:
-      await _report_dagster_materialization(
+      await report_asset_materialization(
         asset_key="user_graph_creation",
         description="Test creation",
         metadata={"graph_id": "kg123"},
@@ -441,10 +443,8 @@ class TestDagsterMaterialization:
       await asyncio.sleep(10)
 
     with patch("asyncio.to_thread", return_value=slow_operation()):
-      with patch(
-        "robosystems.operations.graph.provisioning_service.DAGSTER_REPORT_TIMEOUT", 0.01
-      ):
-        await _report_dagster_materialization(
+      with patch("robosystems.dagster.reporting.DAGSTER_REPORT_TIMEOUT", 0.01):
+        await report_asset_materialization(
           asset_key="user_graph_creation",
           description="Test",
           metadata={},
@@ -454,7 +454,7 @@ class TestDagsterMaterialization:
   async def test_async_materialization_failure(self):
     """Test materialization reporting failure handling."""
     with patch("asyncio.to_thread", side_effect=Exception("Dagster unavailable")):
-      await _report_dagster_materialization(
+      await report_asset_materialization(
         asset_key="user_graph_creation",
         description="Test",
         metadata={},
@@ -462,7 +462,7 @@ class TestDagsterMaterialization:
 
   def test_sync_materialization_skips_in_test_env(self):
     """Test that sync materialization skips in test environment."""
-    _report_dagster_materialization_sync(
+    report_asset_materialization_sync(
       asset_key="user_graph_creation",
       description="Test",
       metadata={"graph_id": "kg123"},

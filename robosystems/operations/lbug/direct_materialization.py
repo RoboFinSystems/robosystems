@@ -16,16 +16,12 @@ used as a fallback by disabling DIRECT_GRAPH_MATERIALIZATION_ENABLED.
 Pattern follows: robosystems/middleware/sse/direct_monitor.py
 """
 
-import asyncio
 import time
 from typing import Any
 
 from sqlalchemy.orm import Session
 
 from robosystems.logger import logger
-
-# Timeout for Dagster materialization reporting (seconds)
-DAGSTER_REPORT_TIMEOUT = 15.0
 
 
 async def materialize_graph_directly(
@@ -325,12 +321,19 @@ async def materialize_graph_directly(
         )
 
       # Report AssetMaterialization to Dagster (fire-and-forget)
-      await _report_materialization(
-        graph_id=graph_id,
-        tables_materialized=len(tables_materialized),
-        total_rows=total_rows,
-        duration_ms=execution_time_ms,
-        rebuild=rebuild,
+      from robosystems.dagster.reporting import report_asset_materialization
+
+      await report_asset_materialization(
+        asset_key="user_graph_materialized",
+        description=f"Direct materialization of {len(tables_materialized)} tables to graph {graph_id}",
+        metadata={
+          "graph_id": graph_id,
+          "tables_materialized": len(tables_materialized),
+          "total_rows": total_rows,
+          "duration_ms": execution_time_ms,
+          "rebuild": rebuild,
+          "materialization_method": "direct",
+        },
       )
 
       return result
@@ -402,70 +405,3 @@ async def _restage_stale_files(
         )
     except Exception as e:
       logger.error(f"Failed to re-stage stale file {file_id}: {e}")
-
-
-async def _report_materialization(
-  graph_id: str,
-  tables_materialized: int,
-  total_rows: int,
-  duration_ms: float,
-  rebuild: bool,
-) -> None:
-  """Report an AssetMaterialization to Dagster for observability (fire-and-forget)."""
-  try:
-    await asyncio.wait_for(
-      asyncio.to_thread(
-        _report_materialization_sync,
-        graph_id,
-        tables_materialized,
-        total_rows,
-        duration_ms,
-        rebuild,
-      ),
-      timeout=DAGSTER_REPORT_TIMEOUT,
-    )
-    logger.info(f"Reported materialization for graph {graph_id} to Dagster")
-
-  except TimeoutError:
-    logger.warning(
-      f"Dagster materialization reporting timed out after {DAGSTER_REPORT_TIMEOUT}s. "
-      "Materialization succeeded but won't appear in Dagster UI."
-    )
-  except Exception as e:
-    logger.warning(
-      f"Failed to report AssetMaterialization to Dagster for graph {graph_id}: {e}. "
-      "Materialization succeeded but won't appear in Dagster UI."
-    )
-
-
-def _report_materialization_sync(
-  graph_id: str,
-  tables_materialized: int,
-  total_rows: int,
-  duration_ms: float,
-  rebuild: bool,
-) -> None:
-  """Synchronous version of materialization reporting (runs in thread)."""
-  from robosystems.config import env
-
-  if env.ENVIRONMENT == "test":
-    return
-
-  from dagster import AssetKey, AssetMaterialization, DagsterInstance, MetadataValue
-
-  instance = DagsterInstance.get()
-
-  materialization = AssetMaterialization(
-    asset_key=AssetKey("user_graph_materialized"),
-    description=f"Direct materialization of {tables_materialized} tables to graph {graph_id}",
-    metadata={
-      "graph_id": MetadataValue.text(graph_id),
-      "tables_materialized": MetadataValue.int(tables_materialized),
-      "total_rows": MetadataValue.int(total_rows),
-      "duration_ms": MetadataValue.float(duration_ms),
-      "rebuild": MetadataValue.bool(rebuild),
-      "materialization_method": MetadataValue.text("direct"),
-    },
-  )
-
-  instance.report_runless_asset_event(materialization)

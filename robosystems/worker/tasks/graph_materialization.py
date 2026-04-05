@@ -46,6 +46,21 @@ class GraphMaterializationTask(BaseTask):
         ignore_errors=ignore_errors,
         operation_id=self.task_id,
       )
+
+      # Report to Dagster observable asset (non-blocking)
+      from robosystems.dagster.reporting import report_asset_materialization
+
+      await report_asset_materialization(
+        asset_key="user_graph_materialized",
+        description=f"Graph {self.graph_id} materialized via worker",
+        metadata={
+          "graph_id": self.graph_id,
+          "user_id": self.user_id,
+          "provisioning_method": "worker",
+          "operation_id": self.task_id,
+        },
+      )
+
       return result
 
     finally:

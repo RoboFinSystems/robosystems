@@ -85,11 +85,7 @@ class GetGraphSyncStatusTool:
               f"Could not parse last_materialized_at '{last_materialized_at}': {exc}"
             )
 
-        # Determine sync status
-        if is_stale:
-          sync_status = "stale"
-        else:
-          sync_status = "fresh"
+        sync_status = "stale" if is_stale else "fresh"
 
         return {
           "sync_status": sync_status,
@@ -126,7 +122,7 @@ class MaterializeGraphTool:
 **IMPORTANT:**
 - Returns an operation_id for progress tracking via SSE
 - Fails with 409 if another materialization is already running
-- The graph remains queryable during the rebuild (blue-green swap)
+- The graph remains queryable during the rebuild
 - Wait for completion before querying fresh data
 
 **PARAMETERS:**
@@ -145,57 +141,92 @@ class MaterializeGraphTool:
     }
 
   async def execute(self, arguments: dict[str, Any]) -> dict[str, Any]:
-    """Trigger materialization via the internal API endpoint."""
-    import httpx
-
-    from robosystems.config import env
+    """Trigger materialization by enqueuing a worker task directly."""
+    from robosystems.config.constants import INGESTION_LOCK_TTL
+    from robosystems.config.valkey_registry import ValkeyDatabase, create_redis_client
+    from robosystems.database import SessionFactory
+    from robosystems.middleware.auth.distributed_lock import DistributedLock
+    from robosystems.models.core import Graph
+    from robosystems.worker.client import enqueue_task
 
     graph_id = self.client.graph_id
     force = arguments.get("force", False)
 
-    # Call the materialize endpoint internally
-    api_base = env.ROBOSYSTEMS_API_URL
-    url = f"{api_base}/v1/graphs/{graph_id}/materialize"
+    # Check staleness (skip if force=True)
+    if not force:
+      try:
+        session = SessionFactory()
+        try:
+          graph = Graph.get_by_id(graph_id, session)
+          if graph and not graph.graph_stale:
+            return {
+              "status": "not_stale",
+              "message": "Graph is already fresh. Use force=true to rebuild anyway.",
+            }
+        finally:
+          session.close()
+      except Exception as e:
+        logger.warning(f"Could not check staleness for {graph_id}: {e}")
 
+    # Acquire distributed lock to prevent concurrent materialization
+    lock = None
     try:
-      async with httpx.AsyncClient(timeout=30.0) as client:
-        response = await client.post(
-          url,
-          json={"force": force, "source": "extensions"},
-          headers={
-            "X-Internal-Service": "mcp-tools",
-            "Content-Type": "application/json",
-          },
-        )
-
-        if response.status_code == 409:
-          return {
-            "status": "conflict",
-            "message": "Another materialization is already in progress for this graph. Wait for it to complete.",
-          }
-        elif response.status_code == 400:
-          return {
-            "status": "not_stale",
-            "message": "Graph is already fresh. Use force=true to rebuild anyway.",
-          }
-        elif response.status_code >= 400:
-          return {
-            "status": "error",
-            "message": f"Materialization request failed: {response.text}",
-          }
-
-        data = response.json()
+      redis_client = create_redis_client(ValkeyDatabase.LOCKS)
+      lock = DistributedLock(
+        redis_client, f"graph_materialize:{graph_id}", ttl_seconds=INGESTION_LOCK_TTL
+      )
+      lock_result = lock.acquire(blocking=False)
+      if not lock_result.acquired:
         return {
-          "status": data.get("status", "queued"),
-          "operation_id": data.get("operation_id"),
-          "message": data.get(
-            "message",
-            "Materialization started. Monitor via SSE stream.",
-          ),
+          "status": "conflict",
+          "message": "Another materialization is already in progress for this graph. "
+          "Wait for it to complete.",
         }
+    except Exception as e:
+      logger.warning(f"Could not acquire distributed lock for {graph_id}: {e}")
+      # Proceed without lock if Valkey is unavailable (degraded mode)
+      lock = None
+
+    # Enqueue the materialization task
+    try:
+      run_config = {
+        "ops": {
+          "materialize_extensions_to_graph": {
+            "config": {
+              "graph_id": graph_id,
+              "rebuild": False,
+            }
+          }
+        }
+      }
+
+      lock_key = f"graph_materialize:{graph_id}" if lock else None
+      response = await enqueue_task(
+        task_type="dagster_job_monitor",
+        graph_id=graph_id,
+        user_id=f"mcp:{graph_id}",
+        params={
+          "job_name": "extensions_materialize_job",
+          "run_config": run_config,
+          "lock_key": lock_key,
+        },
+      )
+
+      return {
+        "status": "queued",
+        "operation_id": response["operation_id"],
+        "message": f"Materialization queued. Monitor progress via SSE stream at "
+        f"/v1/operations/{response['operation_id']}/stream",
+      }
 
     except Exception as e:
-      logger.error(f"Failed to trigger materialization for {graph_id}: {e}")
+      # Release lock since the background task was never dispatched
+      if lock is not None:
+        try:
+          lock.release()
+        except Exception:
+          pass
+      logger.error(f"Failed to enqueue materialization for {graph_id}: {e}")
       return {
         "status": "error",
         "message": f"Failed to trigger materialization: {e!s}",
