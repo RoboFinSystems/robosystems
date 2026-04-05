@@ -20,6 +20,7 @@ from robosystems.operations.agents.base import (
   AgentCapability,
   AgentMode,
   AgentResult,
+  matches_graph_scope,
 )
 
 
@@ -104,16 +105,34 @@ class AgentOrchestrator:
       {} if config and config.enable_caching else None
     )
     self._round_robin_index = 0
+    self._schema_extensions: list[str] | None = None
+
+  def _get_schema_extensions(self) -> list[str]:
+    """Resolve schema extensions for the current graph (cached per instance)."""
+    if self._schema_extensions is None:
+      from robosystems.middleware.mcp.tools.manager import resolve_schema_extensions
+
+      self._schema_extensions = resolve_schema_extensions(self.graph_id)
+    return self._schema_extensions
+
+  def _filter_by_scope(self, agents: dict[str, Agent]) -> dict[str, Agent]:
+    """Remove agents whose graph_scope excludes the current graph."""
+    extensions = self._get_schema_extensions()
+    return {
+      agent_type: agent
+      for agent_type, agent in agents.items()
+      if matches_graph_scope(agent.spec.graph_scope, self.graph_id, extensions)
+    }
 
   def _get_all_agents(self) -> dict[str, Agent]:
-    """Get all registered agent instances."""
+    """Get all registered agent instances eligible for the current graph."""
     agents = {}
     for agent_type in list_agents():
       try:
         agents[agent_type] = get_agent(agent_type)
       except Exception as e:
         logger.warning(f"Could not instantiate agent '{agent_type}': {e}")
-    return agents
+    return self._filter_by_scope(agents)
 
   def _result_to_response(
     self,
@@ -250,6 +269,13 @@ class AgentOrchestrator:
       agent = get_agent(agent_type)
     except KeyError:
       raise ValueError(f"Unknown agent type: {agent_type}")
+
+    extensions = self._get_schema_extensions()
+    if not matches_graph_scope(agent.spec.graph_scope, self.graph_id, extensions):
+      raise ValueError(
+        f"Agent '{agent_type}' is not available for graph '{self.graph_id}'"
+      )
+
     return await self._execute_agent(
       agent, query, mode, history, context, stream_callback
     )

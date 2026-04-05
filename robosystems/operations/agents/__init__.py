@@ -47,6 +47,8 @@ from robosystems.operations.agents.base import (
   AgentSpec,
   BaseAgent,
   ExecutionProfile,
+  GraphScope,
+  matches_graph_scope,
 )
 from robosystems.operations.agents.credit_consumer import (
   CreditConsumer,
@@ -97,6 +99,7 @@ __all__ = [
   "DirectToolAccess",
   "ExecutionProfile",
   "FactoryCreditConsumer",
+  "GraphScope",
   "HttpToolAccess",
   "NoOpCreditConsumer",
   "NoOpProgress",
@@ -112,6 +115,7 @@ __all__ = [
   "get_agent_class",
   "list_v2_agents",
   "load_adapter_agents",
+  "matches_graph_scope",
   "register_agent",
   # Adapters
   "run_agent_api",
