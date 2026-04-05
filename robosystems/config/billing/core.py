@@ -35,10 +35,7 @@ DEFAULT_GRAPH_BILLING_PLANS: list[dict[str, Any]] = [
     "description": "Dedicated m7g.large LadybugDB infrastructure with subgraph support",
     "base_price_cents": 9900,  # $99/month
     "monthly_credit_allocation": 8000,  # ~200 agent calls/month
-    "max_queries_per_hour": 10000,
-    "infrastructure": "Dedicated m7g.large (2 vCPU, 8 GB RAM)",
-    "backup_retention_days": 7,
-    "backup_downloads_per_month": 10,  # R2 zero-egress
+    "backup_downloads_per_month": 10,
     "max_documents": 100,
     "priority_support": True,
   },
@@ -48,10 +45,7 @@ DEFAULT_GRAPH_BILLING_PLANS: list[dict[str, Any]] = [
     "description": "Dedicated r7g.large instance - enhanced performance with subgraph support",
     "base_price_cents": 29900,  # $299/month
     "monthly_credit_allocation": 32000,  # ~800 agent calls/month
-    "max_queries_per_hour": 50000,
-    "infrastructure": "Dedicated r7g.large (2 vCPU, 16 GB RAM)",
-    "backup_retention_days": 30,
-    "backup_downloads_per_month": 20,  # R2 zero-egress
+    "backup_downloads_per_month": 20,
     "max_documents": 1000,
     "priority_support": True,
   },
@@ -61,10 +55,7 @@ DEFAULT_GRAPH_BILLING_PLANS: list[dict[str, Any]] = [
     "description": "Dedicated r7g.xlarge instance - maximum performance and scale",
     "base_price_cents": 69900,  # $699/month
     "monthly_credit_allocation": 100000,  # ~2,600 agent calls/month
-    "max_queries_per_hour": None,  # Unlimited
-    "infrastructure": "Dedicated r7g.xlarge (4 vCPU, 32 GB RAM)",
-    "backup_retention_days": 90,
-    "backup_downloads_per_month": 999,  # Effectively unlimited (R2 zero-egress)
+    "backup_downloads_per_month": 40,
     "max_documents": 10000,
     "priority_support": True,
   },

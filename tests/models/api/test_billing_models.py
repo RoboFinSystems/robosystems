@@ -441,7 +441,6 @@ class TestOfferingModels:
       api_rate_multiplier=1.0,
       backend="ladybug",
     )
-    assert model.max_queries_per_hour is None
     assert model.max_subgraphs == 0
 
   def test_token_pricing(self):

@@ -31,7 +31,6 @@ class GraphSubscriptionTier(BaseModel):
   priority_support: bool = Field(
     ..., description="Whether priority support is included"
   )
-  max_queries_per_hour: int | None = Field(None, description="Maximum queries per hour")
   max_subgraphs: int = Field(0, description="Maximum subgraphs supported")
   api_rate_multiplier: float = Field(..., description="API rate multiplier")
   backend: str = Field(..., description="Database backend identifier")

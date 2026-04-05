@@ -138,11 +138,25 @@ async def get_service_offerings(
       # Find the corresponding tier config for technical specs
       tier_config = next((t for t in tier_configs if t.get("tier") == tier_name), None)
 
+      # Get backup retention from graph.yml (single source of truth for infra limits)
+      backup_limits = GraphTierConfig.get_backup_limits(tier_name)
+      backup_retention_days = backup_limits.get("backup_retention_days", 0)
+
+      # Get instance type from graph.yml
+      instance_config = GraphTierConfig.get_instance_config(tier_name)
+      instance_type = instance_config.get("type", "")
+      max_memory_mb = instance_config.get("max_memory_mb", 0)
+      infrastructure = (
+        f"Dedicated {instance_type} ({max_memory_mb // 1024} GB RAM)"
+        if instance_type
+        else "Managed infrastructure"
+      )
+
       # Build features list
       features = [
         f"{plan_data.get('monthly_credit_allocation', 0):,} AI credits per graph",
-        plan_data.get("infrastructure", "Managed infrastructure"),
-        f"{plan_data.get('backup_retention_days', 0)}-day backup retention",
+        infrastructure,
+        f"{backup_retention_days}-day backup retention",
         "Priority support"
         if plan_data.get("priority_support", False)
         else "Standard support",
@@ -171,19 +185,16 @@ async def get_service_offerings(
         "description": plan_data.get("description", ""),
         "monthly_price_per_graph": plan_data.get("base_price_cents", 0) / 100.0,
         "monthly_credits_per_graph": plan_data.get("monthly_credit_allocation", 0),
-        "infrastructure": plan_data.get("infrastructure", "Managed"),
+        "infrastructure": infrastructure,
         "features": features,
-        "backup_retention_days": plan_data.get("backup_retention_days", 0),
+        "backup_retention_days": backup_retention_days,
         "priority_support": plan_data.get("priority_support", False),
-        "max_queries_per_hour": plan_data.get("max_queries_per_hour"),
         "max_subgraphs": tier_config.get("max_subgraphs", 0) if tier_config else 0,
         "api_rate_multiplier": tier_config.get("api_rate_multiplier", 1.0)
         if tier_config
         else 1.0,
         "backend": tier_config.get("backend", "ladybug") if tier_config else "ladybug",
-        "instance_type": tier_config.get("instance", {}).get("type")
-        if tier_config
-        else None,
+        "instance_type": instance_type or None,
       }
       graph_tiers.append(tier_info)
 
