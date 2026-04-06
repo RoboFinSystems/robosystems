@@ -101,6 +101,11 @@ class TestSearchDocuments:
     with patch(f"{MODULE}._check_search_rate_limit", return_value=None):
       yield
 
+  @pytest.fixture(autouse=True)
+  def _skip_enforcement(self):
+    with patch("robosystems.middleware.billing.enforcement.require_graph_access"):
+      yield
+
   @pytest.mark.unit
   async def test_returns_search_response(self):
     mock_service = MagicMock()
@@ -182,6 +187,11 @@ class TestGetDocumentSection:
   @pytest.fixture(autouse=True)
   def _skip_rate_limit(self):
     with patch(f"{MODULE}._check_search_rate_limit", return_value=None):
+      yield
+
+  @pytest.fixture(autouse=True)
+  def _skip_enforcement(self):
+    with patch("robosystems.middleware.billing.enforcement.require_graph_access"):
       yield
 
   @pytest.mark.unit
