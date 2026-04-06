@@ -1,8 +1,10 @@
 """OpenSearch client wrapper with graph_id tenant isolation.
 
 Every query is filtered by graph_id to ensure multi-tenant isolation.
-All searches use hybrid mode (BM25 + KNN) with score normalization.
-This is a platform-level client — not specific to any adapter.
+Default search mode is BM25-only for fast keyword matching. Hybrid
+BM25 + KNN search is available via search_hybrid() for semantic
+similarity when opted in. This is a platform-level client — not
+specific to any adapter.
 """
 
 from contextlib import contextmanager
@@ -423,6 +425,10 @@ class OpenSearchClient:
     Slower than BM25-only due to HNSW graph traversal, especially on
     large corpora without narrow filters. Best used with entity or
     section filters that reduce the KNN candidate set.
+
+    Pagination note: KNN candidates are capped at 100 to limit cost.
+    Deep pagination (offset + size > 100) may return fewer results
+    than expected. Prefer narrow filters over deep pagination.
 
     Tenant isolation: OpenSearch 2.x doesn't support top-level filters on
     hybrid queries (that's 3.0+). Instead, filters are applied inside each
