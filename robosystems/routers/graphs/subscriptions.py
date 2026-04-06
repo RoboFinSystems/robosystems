@@ -61,6 +61,7 @@ def _get_plan_display_name(plan_name: str, resource_type: str, resource_id: str)
 
 def subscription_to_response(
   subscription: BillingSubscription,
+  operation_id: str | None = None,
 ) -> GraphSubscriptionResponse:
   """Convert subscription model to API response."""
   return GraphSubscriptionResponse(
@@ -90,13 +91,14 @@ def subscription_to_response(
     ),
     ends_at=subscription.ends_at.isoformat() if subscription.ends_at else None,
     created_at=subscription.created_at.isoformat(),
+    operation_id=operation_id,
   )
 
 
 @router.get(
   "",
   response_model=GraphSubscriptionResponse,
-  summary="Get Subscription",
+  summary="Get Graph and Shared Repository Subscription",
   description="""Get subscription details for a graph or shared repository.
 
 For user graphs (kg*): Returns the graph's subscription (owned by graph creator)
@@ -457,30 +459,36 @@ async def create_repository_subscription(
 @router.patch(
   "",
   response_model=GraphSubscriptionResponse,
-  summary="Change Repository Plan",
-  description="""Upgrade or downgrade a shared repository subscription plan.
+  summary="Change Subscription Plan",
+  description="""Change the plan on an existing subscription.
 
-Changes the plan on an existing subscription (e.g., SEC starter -> advanced).
-Stripe handles proration automatically.
+**For shared repositories** (sec, industry, etc.): Changes access tier (e.g., starter -> advanced).
+Synchronous — takes effect immediately.
 
-**Only for shared repositories** - graph subscriptions do not support plan changes
-(cancel and re-subscribe instead).
+**For user graphs** (kg*): Changes infrastructure tier (e.g., ladybug-standard -> ladybug-large).
+Asynchronous — returns an `operation_id` for tracking the EBS volume migration via SSE.
+
+Stripe handles proration automatically for both types.
 
 **Requirements:**
 - User must be an OWNER of their organization
 - Subscription must be active
-- New plan must exist in the repository's manifest""",
-  operation_id="changeRepositoryPlan",
+- New plan must be valid for the resource type
+
+**Downgrade restrictions (graphs only):**
+- Subgraph count must fit the target tier's limit
+- Storage usage must fit the target tier's limit""",
+  operation_id="changeSubscriptionPlan",
   responses={
     200: {"description": "Plan changed successfully"},
-    400: {"description": "Invalid plan or not a repository subscription"},
+    400: {"description": "Invalid plan, validation failure, or status conflict"},
     404: {"description": "No subscription found"},
   },
 )
 async def change_plan(
   graph_id: str = Path(
     ...,
-    description="Repository name (e.g., 'sec')",
+    description="Graph ID or repository name",
     pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN,
   ),
   request: UpgradeSubscriptionRequest = ...,
@@ -488,149 +496,339 @@ async def change_plan(
   db: Session = Depends(get_db_session),
   _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
 ) -> GraphSubscriptionResponse:
-  """Change plan on a shared repository subscription (upgrade or downgrade)."""
+  """Change plan on a subscription (repository plan change or graph tier change)."""
   try:
-    from ...models.core import OrgRole, OrgUser
-    from ...models.core.user.user_repository import UserRepository
-    from ...operations.providers.payment_provider import get_payment_provider
+    if is_shared_repository(graph_id):
+      return await _change_repository_plan(graph_id, request, current_user, db)
+    else:
+      return await _change_graph_tier(graph_id, request, current_user, db)
+  except HTTPException:
+    raise
+  except Exception as e:
+    logger.error(f"Failed to change subscription plan: {e}")
+    raise HTTPException(status_code=500, detail="Failed to change subscription plan")
 
-    if not is_shared_repository(graph_id):
-      raise HTTPException(
-        status_code=400,
-        detail="Plan changes are only supported for shared repository subscriptions.",
-      )
 
-    # Verify user is an org owner
-    user_orgs = OrgUser.get_user_orgs(current_user.id, db)
-    if not user_orgs:
-      raise HTTPException(
-        status_code=403, detail="You are not a member of any organization"
-      )
-    if user_orgs[0].role != OrgRole.OWNER:
-      raise HTTPException(
-        status_code=403,
-        detail="Only organization owners can change subscription plans",
-      )
+async def _change_repository_plan(
+  graph_id: str,
+  request: UpgradeSubscriptionRequest,
+  current_user: User,
+  db: Session,
+) -> GraphSubscriptionResponse:
+  """Change plan on a shared repository subscription (sync)."""
+  from ...models.core import OrgRole, OrgUser
+  from ...models.core.user.user_repository import UserRepository
+  from ...operations.providers.payment_provider import get_payment_provider
 
-    # Find existing subscription (subscriptions are on the parent repo)
-    parent_repo_id = resolve_shared_repository_parent(graph_id)
-    subscription = BillingSubscription.get_by_resource_and_user(
+  # Verify user is an org owner
+  user_orgs = OrgUser.get_user_orgs(current_user.id, db)
+  if not user_orgs:
+    raise HTTPException(
+      status_code=403, detail="You are not a member of any organization"
+    )
+  if user_orgs[0].role != OrgRole.OWNER:
+    raise HTTPException(
+      status_code=403,
+      detail="Only organization owners can change subscription plans",
+    )
+
+  # Find existing subscription (subscriptions are on the parent repo)
+  parent_repo_id = resolve_shared_repository_parent(graph_id)
+  subscription = BillingSubscription.get_by_resource_and_user(
+    resource_type="repository",
+    resource_id=parent_repo_id,
+    user_id=current_user.id,
+    session=db,
+  )
+  if not subscription:
+    raise HTTPException(
+      status_code=404,
+      detail=f"No subscription found for {graph_id}",
+    )
+
+  if subscription.status != "active":
+    raise HTTPException(
+      status_code=400,
+      detail=f"Cannot change plan on a {subscription.status} subscription",
+    )
+
+  new_plan_name = request.new_plan_name
+
+  # Validate the new plan exists
+  plan_config = BillingConfig.get_repository_plan(parent_repo_id, new_plan_name)
+  if not plan_config:
+    raise HTTPException(
+      status_code=400,
+      detail=f"Invalid plan '{new_plan_name}' for repository '{graph_id}'",
+    )
+
+  new_plan_tier = plan_config["name"]
+  if new_plan_tier == subscription.plan_name:
+    raise HTTPException(status_code=400, detail="Already on this plan")
+
+  new_price_cents = plan_config["price_cents"]
+  new_credits = plan_config.get("monthly_credits", 0)
+  old_plan = subscription.plan_name
+  is_upgrade = new_price_cents > subscription.base_price_cents
+
+  # Update DB first — if this fails, Stripe stays consistent
+  subscription.update_plan(new_plan_tier, new_price_cents, db)
+
+  # Update UserRepository access (credits, rate limits)
+  user_repo = UserRepository.get_by_user_and_repository(current_user.id, graph_id, db)
+  if not user_repo:
+    logger.error(
+      f"No UserRepository record for user {current_user.id} on {graph_id} "
+      f"during plan change — credits and rate limits were NOT updated",
+      extra={"user_id": current_user.id, "repository_id": graph_id},
+    )
+    raise HTTPException(
+      status_code=500,
+      detail="Repository access record not found. Please contact support.",
+    )
+
+  user_repo.upgrade_tier(
+    new_plan=new_plan_tier,
+    session=db,
+    new_price_cents=new_price_cents,
+    new_credits=new_credits,
+  )
+
+  # Update Stripe subscription if linked
+  stripe_sub_id = subscription.stripe_subscription_id
+  if stripe_sub_id:
+    provider = get_payment_provider("stripe")
+    new_stripe_price_id = provider.get_or_create_price(
+      plan_name=new_plan_name,
       resource_type="repository",
-      resource_id=parent_repo_id,
-      user_id=current_user.id,
-      session=db,
+      repository_id=graph_id,
     )
-    if not subscription:
-      raise HTTPException(
-        status_code=404,
-        detail=f"No subscription found for {graph_id}",
-      )
-
-    if subscription.status != "active":
-      raise HTTPException(
-        status_code=400,
-        detail=f"Cannot change plan on a {subscription.status} subscription",
-      )
-
-    new_plan_name = request.new_plan_name
-
-    # Validate the new plan exists — BillingConfig handles tier extraction internally
-    plan_config = BillingConfig.get_repository_plan(parent_repo_id, new_plan_name)
-    if not plan_config:
-      raise HTTPException(
-        status_code=400,
-        detail=f"Invalid plan '{new_plan_name}' for repository '{graph_id}'",
-      )
-
-    # Use the canonical plan name from config (not string splitting)
-    new_plan_tier = plan_config["name"]
-    if new_plan_tier == subscription.plan_name:
-      raise HTTPException(status_code=400, detail="Already on this plan")
-
-    new_price_cents = plan_config["price_cents"]
-    new_credits = plan_config.get("monthly_credits", 0)
-    old_plan = subscription.plan_name
-    is_upgrade = new_price_cents > subscription.base_price_cents
-
-    # Update DB first — if this fails, Stripe stays consistent
-    subscription.update_plan(new_plan_tier, new_price_cents, db)
-
-    # Update UserRepository access (credits, rate limits)
-    user_repo = UserRepository.get_by_user_and_repository(current_user.id, graph_id, db)
-    if not user_repo:
-      logger.error(
-        f"No UserRepository record for user {current_user.id} on {graph_id} "
-        f"during plan change — credits and rate limits were NOT updated",
-        extra={"user_id": current_user.id, "repository_id": graph_id},
-      )
-      raise HTTPException(
-        status_code=500,
-        detail="Repository access record not found. Please contact support.",
-      )
-
-    user_repo.upgrade_tier(
-      new_plan=new_plan_tier,
-      session=db,
-      new_price_cents=new_price_cents,
-      new_credits=new_credits,
+    provider.change_subscription_price(
+      subscription_id=stripe_sub_id,
+      new_price_id=new_stripe_price_id,
     )
 
-    # Update Stripe subscription if linked
-    stripe_sub_id = subscription.stripe_subscription_id
-    if stripe_sub_id:
+  # Audit log
+  org_id = user_orgs[0].org_id
+  BillingAuditLog.log_event(
+    session=db,
+    event_type=(
+      BillingEventType.PLAN_UPGRADED if is_upgrade else BillingEventType.PLAN_DOWNGRADED
+    ),
+    org_id=org_id,
+    subscription_id=subscription.id,
+    description=(
+      f"Changed {graph_id} plan from {old_plan} to {new_plan_tier} "
+      f"(${subscription.base_price_cents / 100:.0f}/mo)"
+    ),
+    actor_type="user",
+    actor_user_id=current_user.id,
+    event_data={
+      "resource_type": "repository",
+      "resource_id": graph_id,
+      "old_plan": old_plan,
+      "new_plan": new_plan_tier,
+      "old_price_cents": subscription.base_price_cents,
+      "new_price_cents": new_price_cents,
+      "new_credits": new_credits,
+    },
+  )
+
+  logger.info(
+    f"Changed repository {graph_id} plan: {old_plan} -> {new_plan_tier}",
+    extra={
+      "user_id": current_user.id,
+      "repository_id": graph_id,
+      "old_plan": old_plan,
+      "new_plan": new_plan_tier,
+    },
+  )
+
+  return subscription_to_response(subscription)
+
+
+async def _change_graph_tier(
+  graph_id: str,
+  request: UpgradeSubscriptionRequest,
+  current_user: User,
+  db: Session,
+) -> GraphSubscriptionResponse:
+  """Change infrastructure tier on a graph subscription (async).
+
+  Updates billing immediately, then enqueues a worker task for the
+  EBS volume migration. Returns an operation_id for SSE tracking.
+  """
+  from datetime import UTC, datetime
+
+  from ...config.billing import BillingConfig as BillingCfg
+  from ...config.billing import get_tier_credit_allocation
+  from ...models.core import OrgRole, OrgUser
+  from ...models.core.graph import Graph
+  from ...models.core.graph.graph_credits import GraphCredits
+  from ...operations.providers.payment_provider import get_payment_provider
+  from ...worker.client import enqueue_task
+
+  # Verify user is an org owner
+  user_orgs = OrgUser.get_user_orgs(current_user.id, db)
+  if not user_orgs:
+    raise HTTPException(
+      status_code=403, detail="You are not a member of any organization"
+    )
+  if user_orgs[0].role != OrgRole.OWNER:
+    raise HTTPException(
+      status_code=403,
+      detail="Only organization owners can change subscription plans",
+    )
+
+  # Look up graph and subscription
+  graph = Graph.get_by_id(graph_id, db)
+  if not graph:
+    raise HTTPException(status_code=404, detail=f"Graph {graph_id} not found")
+
+  subscription = BillingSubscription.get_by_resource(
+    resource_type="graph", resource_id=graph_id, session=db
+  )
+  if not subscription:
+    raise HTTPException(status_code=404, detail=f"No subscription found for {graph_id}")
+
+  # Verify subscription belongs to user's org
+  org_id = user_orgs[0].org_id
+  if subscription.org_id != org_id:
+    raise HTTPException(
+      status_code=403,
+      detail="You do not have access to this graph subscription",
+    )
+
+  if subscription.status != "active":
+    raise HTTPException(
+      status_code=400,
+      detail=f"Cannot change tier on a {subscription.status} subscription",
+    )
+
+  new_tier = request.new_plan_name
+
+  # Validate new tier exists in billing plans
+  plan_config = BillingCfg.get_subscription_plan(new_tier)
+  if not plan_config:
+    raise HTTPException(
+      status_code=400,
+      detail=f"Invalid tier '{new_tier}'. Valid tiers: ladybug-standard, ladybug-large, ladybug-xlarge",
+    )
+
+  old_tier = graph.graph_tier
+  if new_tier == old_tier:
+    raise HTTPException(status_code=400, detail="Already on this tier")
+
+  new_price_cents = plan_config["base_price_cents"]
+  old_price_cents = subscription.base_price_cents
+  is_upgrade = new_price_cents > old_price_cents
+
+  # Downgrade validation
+  if not is_upgrade:
+    from ...operations.graph.tier_validation import (
+      validate_storage_capacity,
+      validate_subgraph_count,
+    )
+
+    validate_subgraph_count(graph_id, new_tier, db)
+    await validate_storage_capacity(graph_id, old_tier, new_tier, db)
+
+  # Update PG atomically — billing committed before Stripe
+  now = datetime.now(UTC)
+  old_plan_name = subscription.plan_name
+  subscription.plan_name = new_tier
+  subscription.base_price_cents = new_price_cents
+  subscription.status = "upgrading"
+  subscription.updated_at = now
+  graph.graph_tier = new_tier
+  graph.updated_at = now
+
+  new_credits = get_tier_credit_allocation(new_tier)
+  graph_credits = GraphCredits.get_by_graph_id(graph_id, db)
+  if graph_credits:
+    graph_credits.monthly_allocation = new_credits
+
+  db.commit()
+
+  # Update Stripe — if this fails, roll back PG
+  stripe_sub_id = subscription.stripe_subscription_id
+  if stripe_sub_id and env.BILLING_ENABLED:
+    try:
       provider = get_payment_provider("stripe")
       new_stripe_price_id = provider.get_or_create_price(
-        plan_name=new_plan_name,
-        resource_type="repository",
-        repository_id=graph_id,
+        plan_name=new_tier,
+        resource_type="graph",
       )
       provider.change_subscription_price(
         subscription_id=stripe_sub_id,
         new_price_id=new_stripe_price_id,
       )
+    except Exception as stripe_error:
+      logger.error(
+        f"Stripe price change failed for {graph_id}, rolling back: {stripe_error}",
+        exc_info=True,
+      )
+      subscription.plan_name = old_plan_name
+      subscription.base_price_cents = old_price_cents
+      subscription.status = "active"
+      subscription.updated_at = datetime.now(UTC)
+      graph.graph_tier = old_tier
+      graph.updated_at = datetime.now(UTC)
+      if graph_credits:
+        graph_credits.monthly_allocation = get_tier_credit_allocation(old_tier)
+      db.commit()
+      raise HTTPException(
+        status_code=500,
+        detail="Failed to update payment. Tier change has been rolled back.",
+      )
 
-    # Audit log
-    org_id = user_orgs[0].org_id
-    BillingAuditLog.log_event(
-      session=db,
-      event_type=(
-        BillingEventType.PLAN_UPGRADED
-        if is_upgrade
-        else BillingEventType.PLAN_DOWNGRADED
-      ),
-      org_id=org_id,
-      subscription_id=subscription.id,
-      description=(
-        f"Changed {graph_id} plan from {old_plan} to {new_plan_tier} "
-        f"(${subscription.base_price_cents / 100:.0f}/mo)"
-      ),
-      actor_type="user",
-      actor_user_id=current_user.id,
-      event_data={
-        "resource_type": "repository",
-        "resource_id": graph_id,
-        "old_plan": old_plan,
-        "new_plan": new_plan_tier,
-        "old_price_cents": subscription.base_price_cents,
-        "new_price_cents": new_price_cents,
-        "new_credits": new_credits,
-      },
-    )
+  # Enqueue async worker task for infrastructure migration
+  result = await enqueue_task(
+    task_type="graph_tier_upgrade",
+    graph_id=graph_id,
+    user_id=str(current_user.id),
+    params={
+      "old_tier": old_tier,
+      "new_tier": new_tier,
+      "subscription_id": subscription.id,
+    },
+  )
+  operation_id = result["operation_id"]
 
-    logger.info(
-      f"Changed repository {graph_id} plan: {old_plan} -> {new_plan_tier}",
-      extra={
-        "user_id": current_user.id,
-        "repository_id": graph_id,
-        "old_plan": old_plan,
-        "new_plan": new_plan_tier,
-      },
-    )
+  # Audit log
+  BillingAuditLog.log_event(
+    session=db,
+    event_type=(
+      BillingEventType.PLAN_UPGRADED if is_upgrade else BillingEventType.PLAN_DOWNGRADED
+    ),
+    org_id=org_id,
+    subscription_id=subscription.id,
+    description=(
+      f"Tier change: {old_tier} -> {new_tier} for {graph_id} "
+      f"(${new_price_cents / 100:.0f}/mo)"
+    ),
+    actor_type="user",
+    actor_user_id=current_user.id,
+    event_data={
+      "resource_type": "graph",
+      "resource_id": graph_id,
+      "old_tier": old_tier,
+      "new_tier": new_tier,
+      "old_price_cents": old_price_cents,
+      "new_price_cents": new_price_cents,
+      "operation_id": operation_id,
+    },
+  )
 
-    return subscription_to_response(subscription)
+  logger.info(
+    f"Graph {graph_id} tier change initiated: {old_tier} -> {new_tier}",
+    extra={
+      "user_id": current_user.id,
+      "graph_id": graph_id,
+      "old_tier": old_tier,
+      "new_tier": new_tier,
+      "operation_id": operation_id,
+    },
+  )
 
-  except HTTPException:
-    raise
-  except Exception as e:
-    logger.error(f"Failed to change repository plan: {e}")
-    raise HTTPException(status_code=500, detail="Failed to change repository plan")
+  return subscription_to_response(subscription, operation_id=operation_id)

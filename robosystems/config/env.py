@@ -280,6 +280,62 @@ def get_list_env(key: str, default: str = "", separator: str = ",") -> list[str]
 _cloudformation_cache: dict[str, str | None] = {}
 
 
+def _get_cf_stack_output(stack_name: str, output_key: str) -> str:
+  """Look up a CloudFormation stack output by key, with caching.
+
+  Args:
+      stack_name: Full CloudFormation stack name
+      output_key: The OutputKey to find
+
+  Returns:
+      Output value or empty string if not found
+  """
+  cache_key = f"{stack_name}:{output_key}"
+  if cache_key in _cloudformation_cache:
+    return _cloudformation_cache[cache_key] or ""
+
+  try:
+    import boto3
+
+    region = os.getenv("AWS_REGION", "us-east-1")
+    cf_client = boto3.client("cloudformation", region_name=region)
+    response = cf_client.describe_stacks(StackName=stack_name)
+
+    if "Stacks" in response and len(response["Stacks"]) > 0:
+      stack = response["Stacks"][0]
+      for output in stack.get("Outputs", []):
+        if output.get("OutputKey") == output_key:
+          value = output.get("OutputValue", "")
+          _cloudformation_cache[cache_key] = value
+          return value
+
+    _cloudformation_cache[cache_key] = None
+    return ""
+
+  except ImportError:
+    _cloudformation_cache[cache_key] = None
+    return ""
+  except Exception as e:
+    print(f"CloudFormation lookup failed for {stack_name}:{output_key}: {e}")
+    _cloudformation_cache[cache_key] = None
+    return ""
+
+
+def get_volume_manager_function_arn() -> str:
+  """Look up the Volume Manager Lambda ARN from CloudFormation exports.
+
+  Stack: RoboSystemsGraphVolumes{Prod|Staging}
+  Output: VolumeManagerFunctionArn
+  """
+  environment = os.getenv("ENVIRONMENT", "dev")
+  if environment not in ["prod", "staging"]:
+    return ""
+
+  env_suffix = "Prod" if environment == "prod" else "Staging"
+  stack_name = f"RoboSystemsGraphVolumes{env_suffix}"
+  return _get_cf_stack_output(stack_name, "VolumeManagerFunctionArn")
+
+
 def _get_shared_replica_alb_url_from_cloudformation() -> str:
   """
   Auto-discover shared replica ALB URL from CloudFormation.

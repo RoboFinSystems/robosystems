@@ -36,10 +36,8 @@ from .subscription import (
   SubscriptionRequest,
   SubscriptionResponse,
   TierUpgradeRequest,
-  UserSubscriptionsResponse,
-)
-from .upgrade import (
   UpgradeSubscriptionRequest,
+  UserSubscriptionsResponse,
 )
 
 __all__ = [

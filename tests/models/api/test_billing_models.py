@@ -36,9 +36,9 @@ from robosystems.models.api.billing.subscription import (
   RepositoryPlanInfo,
   SubscriptionInfo,
   TierUpgradeRequest,
+  UpgradeSubscriptionRequest,
   UserSubscriptionsResponse,
 )
-from robosystems.models.api.billing.upgrade import UpgradeSubscriptionRequest
 
 
 @pytest.mark.unit
@@ -262,8 +262,8 @@ class TestCheckoutStatusResponse:
 @pytest.mark.unit
 class TestUpgradeSubscriptionRequest:
   def test_valid_request(self):
-    model = UpgradeSubscriptionRequest(plan_name="ladybug-large")
-    assert model.plan_name == "ladybug-large"
+    model = UpgradeSubscriptionRequest(new_plan_name="ladybug-large")
+    assert model.new_plan_name == "ladybug-large"
 
 
 @pytest.mark.unit

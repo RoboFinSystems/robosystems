@@ -75,6 +75,8 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
       return restore_from_snapshot(event)
     elif action == "register_volume":
       return register_volume(event)
+    elif action == "snapshot_for_upgrade":
+      return snapshot_for_upgrade(event)
     elif action == "sync_registry":
       # NEW: Synchronize registry with actual EC2 volumes
       return sync_registry_with_ec2(event)
@@ -594,6 +596,62 @@ def expand_volume(event: dict[str, Any]) -> dict[str, Any]:
   return {
     "statusCode": 200,
     "modification_state": response["VolumeModification"]["ModificationState"],
+  }
+
+
+def snapshot_for_upgrade(event: dict[str, Any]) -> dict[str, Any]:
+  """Create an EBS snapshot before a tier upgrade and wait for completion.
+
+  This provides a safety net for the upgrade process. If the volume migration
+  fails, the snapshot can be used to restore the data.
+  """
+  volume_id = event["volume_id"]
+  graph_id = event["graph_id"]
+  old_tier = event["old_tier"]
+  new_tier = event["new_tier"]
+
+  logger.info(
+    f"Creating upgrade snapshot for volume {volume_id} "
+    f"(graph={graph_id}, {old_tier} -> {new_tier})"
+  )
+
+  snapshot = ec2.create_snapshot(
+    VolumeId=volume_id,
+    Description=f"Tier upgrade: {old_tier} -> {new_tier} for {graph_id}",
+    TagSpecifications=[
+      {
+        "ResourceType": "snapshot",
+        "Tags": [
+          {
+            "Key": "Name",
+            "Value": f"upgrade-{graph_id}-{old_tier}-to-{new_tier}",
+          },
+          {"Key": "Environment", "Value": ENVIRONMENT},
+          {"Key": "Type", "Value": "tier_upgrade"},
+          {"Key": "GraphId", "Value": graph_id},
+          {"Key": "UpgradeFrom", "Value": old_tier},
+          {"Key": "UpgradeTo", "Value": new_tier},
+          {"Key": "AutoDelete", "Value": "true"},
+        ],
+      }
+    ],
+  )
+
+  snapshot_id = snapshot["SnapshotId"]
+  logger.info(f"Snapshot {snapshot_id} created, waiting for completion...")
+
+  waiter = ec2.get_waiter("snapshot_completed")
+  waiter.wait(
+    SnapshotIds=[snapshot_id],
+    WaiterConfig={"Delay": 15, "MaxAttempts": 40},  # 10 min max
+  )
+
+  logger.info(f"Snapshot {snapshot_id} completed for upgrade {old_tier} -> {new_tier}")
+
+  return {
+    "statusCode": 200,
+    "snapshot_id": snapshot_id,
+    "volume_id": volume_id,
   }
 
 

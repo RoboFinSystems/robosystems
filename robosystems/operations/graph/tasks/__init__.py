@@ -13,6 +13,9 @@ from robosystems.operations.graph.tasks import graph_creation as graph_creation
 from robosystems.operations.graph.tasks import (
   graph_materialization as graph_materialization,
 )
+from robosystems.operations.graph.tasks import (
+  graph_tier_upgrade as graph_tier_upgrade,
+)
 from robosystems.operations.graph.tasks import subgraph_creation as subgraph_creation
 
 
@@ -27,6 +30,7 @@ def get_worker_components() -> dict[str, list[str]]:
     "task_types": [
       "graph_creation",
       "graph_materialization",
+      "graph_tier_upgrade",
       "subgraph_creation",
     ],
   }

@@ -577,6 +577,18 @@ async def _handle_subscription_updated(
   if period_end:
     subscription.current_period_end = datetime.fromtimestamp(period_end, tz=UTC)
 
+  # --- Tier upgrade in progress ---
+  # When a graph tier upgrade changes the Stripe price, Stripe fires
+  # subscription.updated with status=active. Don't overwrite "upgrading"
+  # — the worker task manages the upgrading → active transition.
+  if subscription.status == "upgrading" and status == "active":
+    context.log.info(
+      f"Subscription {subscription.id} upgrading (infra migration), "
+      f"ignoring Stripe active status"
+    )
+    db_session.commit()
+    return
+
   # --- Portal cancellation (cancel_at_period_end) ---
   # Mirrors the UI cancel: mark canceled, keep access until period end
   if cancel_at_period_end:

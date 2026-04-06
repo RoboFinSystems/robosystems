@@ -255,6 +255,12 @@ async def cancel_subscription(
     if subscription.status in ["canceled", "canceling"]:
       raise HTTPException(status_code=400, detail="Subscription is already canceled")
 
+    if subscription.status == "upgrading":
+      raise HTTPException(
+        status_code=400,
+        detail="Cannot cancel during tier upgrade. Please wait for upgrade to complete.",
+      )
+
     # Cancel in Stripe if there's a linked Stripe subscription
     if subscription.stripe_subscription_id:
       try:

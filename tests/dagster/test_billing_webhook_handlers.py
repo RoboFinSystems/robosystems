@@ -1596,6 +1596,31 @@ class TestHandleSubscriptionUpdated:
     # Falls through to status mapping; "canceled"→"canceled" so no change
     mock_subscription.cancel.assert_not_called()
 
+  async def test_upgrading_status_not_overwritten_by_stripe_active(
+    self, mock_db_session, mock_context, mock_subscription
+  ):
+    """Does not overwrite 'upgrading' status when Stripe reports 'active'.
+
+    During a graph tier upgrade, the Stripe price change fires
+    subscription.updated with status=active. The worker task manages
+    the upgrading -> active transition, so the webhook must not interfere.
+    """
+    mock_subscription.status = "upgrading"
+    sub_data = make_subscription_data(status="active", cancel_at_period_end=False)
+
+    with patch(PATCH_BILLING_SUB) as MockSub:
+      MockSub.get_by_provider_subscription_id.return_value = mock_subscription
+
+      from robosystems.dagster.jobs.billing import _handle_subscription_updated
+
+      await _handle_subscription_updated(sub_data, mock_db_session, mock_context)
+
+    # Status should remain "upgrading", not overwritten to "active"
+    assert mock_subscription.status == "upgrading"
+    mock_subscription.cancel.assert_not_called()
+    # Period dates should still be synced
+    mock_db_session.commit.assert_called()
+
 
 # ---------------------------------------------------------------------------
 # _handle_subscription_deleted
