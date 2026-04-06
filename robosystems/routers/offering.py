@@ -192,9 +192,9 @@ async def get_service_offerings(
         "backup_retention_days": backup_retention_days,
         "priority_support": plan_data.get("priority_support", False),
         "max_subgraphs": tier_config.get("max_subgraphs", 0) if tier_config else 0,
-        "instance_storage_limit_gb": graph_limits.get("instance_storage_limit_gb", 20)
-        if graph_limits
-        else 20,
+        "instance_storage_limit_gb": GraphTierConfig.get_instance_storage_limit_gb(
+          tier_name
+        ),
         "api_rate_multiplier": tier_config.get("api_rate_multiplier", 1.0)
         if tier_config
         else 1.0,

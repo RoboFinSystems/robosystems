@@ -9,7 +9,6 @@ from .credits import (
   CreditTransactionResponse,
   DetailedTransactionsResponse,
   EnhancedCreditTransactionResponse,
-  StorageLimitResponse,
   TransactionSummaryResponse,
 )
 from .offering import (
@@ -69,7 +68,6 @@ __all__ = [
   "RepositorySubscriptions",
   "ServiceOfferingSummary",
   "ServiceOfferingsResponse",
-  "StorageLimitResponse",
   "SubscriptionInfo",
   "SubscriptionRequest",
   "SubscriptionResponse",
