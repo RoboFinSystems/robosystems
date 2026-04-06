@@ -243,6 +243,22 @@ class BillingSubscription(Base):
       .first()
     )
 
+  def _invalidate_access_cache(self) -> None:
+    """Invalidate the subscription access cache for this resource.
+
+    Called on any status change so require_graph_access() re-checks the DB
+    instead of serving a stale cached result for up to 300s.
+    """
+    if self.resource_type == "graph" and self.resource_id:
+      try:
+        from robosystems.middleware.billing.enforcement import (
+          invalidate_subscription_cache,
+        )
+
+        invalidate_subscription_cache(self.resource_id)
+      except Exception:
+        pass  # Cache invalidation is best-effort
+
   def activate(self, session: Session) -> None:
     """Activate the subscription."""
     now = datetime.now(UTC)
@@ -254,6 +270,7 @@ class BillingSubscription(Base):
 
     session.commit()
     session.refresh(self)
+    self._invalidate_access_cache()
 
     logger.info(f"Activated subscription {self.id}")
 
@@ -264,6 +281,7 @@ class BillingSubscription(Base):
 
     session.commit()
     session.refresh(self)
+    self._invalidate_access_cache()
 
     logger.info(f"Paused subscription {self.id}")
 
@@ -282,6 +300,7 @@ class BillingSubscription(Base):
 
     session.commit()
     session.refresh(self)
+    self._invalidate_access_cache()
 
     logger.info(f"Canceled subscription {self.id} (ends: {self.ends_at})")
 
@@ -296,6 +315,7 @@ class BillingSubscription(Base):
 
     session.commit()
     session.refresh(self)
+    self._invalidate_access_cache()
 
     logger.info(f"Updated subscription {self.id} plan: {old_plan} -> {new_plan_name}")
 

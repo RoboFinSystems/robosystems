@@ -42,6 +42,21 @@ def _block_shared_repository(graph_id: str) -> None:
     )
 
 
+def _enforce_graph_access(graph_id: str, require_write: bool = False) -> None:
+  """Check graph lifecycle and subscription status.
+
+  Wraps require_graph_access with a fresh session. Raises HTTPException
+  if the graph is suspended, deprovisioned, or subscription is non-active.
+  """
+  from robosystems.middleware.billing.enforcement import require_graph_access
+
+  session = SessionFactory()
+  try:
+    require_graph_access(graph_id, session, require_write=require_write)
+  finally:
+    session.close()
+
+
 def _resolve_tier(graph_id: str, session) -> str:
   """Resolve the subscription tier for a graph using an existing session."""
   from robosystems.models.core.graph import Graph
@@ -99,6 +114,7 @@ async def list_documents(
 ) -> DocumentListResponse:
   """List documents for a graph from PostgreSQL."""
   _block_shared_repository(graph_id)
+  _enforce_graph_access(graph_id)
   session = SessionFactory()
   try:
     service = DocumentService(session)
@@ -120,6 +136,7 @@ async def get_document(
 ) -> DocumentDetailResponse:
   """Get a document with full content from PostgreSQL."""
   _block_shared_repository(graph_id)
+  _enforce_graph_access(graph_id)
   session = SessionFactory()
   try:
     service = DocumentService(session)
@@ -139,6 +156,7 @@ async def upload_document(
 ) -> DocumentUploadResponse:
   """Upload a markdown document. Stored in PostgreSQL, synced to OpenSearch."""
   _block_shared_repository(graph_id)
+  _enforce_graph_access(graph_id, require_write=True)
   session = SessionFactory()
   try:
     tier = _resolve_tier(graph_id, session)
@@ -167,6 +185,7 @@ async def upload_documents_bulk(
 ) -> BulkDocumentUploadResponse:
   """Upload multiple markdown documents (max 50)."""
   _block_shared_repository(graph_id)
+  _enforce_graph_access(graph_id, require_write=True)
   session = SessionFactory()
   try:
     tier = _resolve_tier(graph_id, session)
@@ -205,6 +224,7 @@ async def update_document(
 ) -> DocumentUploadResponse:
   """Update a document's content and/or metadata. Re-syncs to OpenSearch."""
   _block_shared_repository(graph_id)
+  _enforce_graph_access(graph_id, require_write=True)
   session = SessionFactory()
   try:
     service = DocumentService(session)
@@ -247,6 +267,7 @@ async def delete_document(
 ) -> None:
   """Delete a document from PostgreSQL and OpenSearch."""
   _block_shared_repository(graph_id)
+  _enforce_graph_access(graph_id, require_write=True)
   session = SessionFactory()
   try:
     service = DocumentService(session)

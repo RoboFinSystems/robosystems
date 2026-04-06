@@ -114,6 +114,14 @@ async def search_documents(
   current_user: User = Depends(get_current_user_with_graph),
 ) -> SearchResponse:
   """Search filing narratives and text content within a graph."""
+  from robosystems.database import SessionFactory
+  from robosystems.middleware.billing.enforcement import require_graph_access
+
+  session = SessionFactory()
+  try:
+    require_graph_access(graph_id, session)
+  finally:
+    session.close()
   await _check_search_rate_limit(graph_id, current_user, "search")
   service = _require_search_service()
   return service.search_documents(graph_id, request)
@@ -126,6 +134,14 @@ async def get_document_section(
   current_user: User = Depends(get_current_user_with_graph),
 ) -> DocumentSection:
   """Retrieve the full text of a document section by ID."""
+  from robosystems.database import SessionFactory
+  from robosystems.middleware.billing.enforcement import require_graph_access
+
+  session = SessionFactory()
+  try:
+    require_graph_access(graph_id, session)
+  finally:
+    session.close()
   await _check_search_rate_limit(graph_id, current_user, "search")
   service = _require_search_service()
   result = service.get_document_section(graph_id, document_id)

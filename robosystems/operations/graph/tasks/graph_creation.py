@@ -47,8 +47,43 @@ class GraphCreationTask(BaseTask):
     service = GraphCreationService()
     result = await service.create(config)
 
-    # Billing subscription (non-blocking)
-    self._create_billing_subscription(result.graph_id, config)
+    # Billing subscription — must succeed for the graph to be accessible.
+    # If this fails, clean up the provisioned graph to avoid leaked resources.
+    try:
+      self._create_billing_subscription(result.graph_id, config)
+    except Exception as billing_error:
+      logger.error(
+        f"Billing subscription failed for {result.graph_id}, "
+        f"running full deprovision: {billing_error}"
+      )
+      try:
+        from robosystems.database import get_db_session
+        from robosystems.operations.graph.deprovision_service import (
+          DeprovisionService,
+        )
+
+        db_gen = get_db_session()
+        db = next(db_gen)
+        try:
+          deprovision = DeprovisionService()
+          deprovision_result = await deprovision.deprovision_graph(
+            graph_id=result.graph_id,
+            session=db,
+            create_backup=False,
+            skip_backup_check=True,
+          )
+          logger.info(
+            f"Deprovisioned graph {result.graph_id} after billing failure: "
+            f"{deprovision_result.status}"
+          )
+        finally:
+          try:
+            next(db_gen)
+          except StopIteration:
+            pass
+      except Exception as cleanup_error:
+        logger.error(f"Failed to clean up graph {result.graph_id}: {cleanup_error}")
+      raise
 
     # Report to Dagster observable asset
     from robosystems.dagster.reporting import report_asset_materialization
@@ -85,29 +120,26 @@ class GraphCreationTask(BaseTask):
   def _create_billing_subscription(
     self, graph_id: str, config: GraphCreationConfig
   ) -> None:
-    """Create billing subscription. Non-blocking — failures logged."""
-    try:
-      from robosystems.config.graph_tier import GraphTier
-      from robosystems.database import get_db_session
-      from robosystems.operations.graph.subscription_service import (
-        GraphSubscriptionService,
-      )
+    """Create billing subscription. Raises on failure — graph is inaccessible without one."""
+    from robosystems.config.graph_tier import GraphTier
+    from robosystems.database import get_db_session
+    from robosystems.operations.graph.subscription_service import (
+      GraphSubscriptionService,
+    )
 
-      db_gen = get_db_session()
-      db = next(db_gen)
+    db_gen = get_db_session()
+    db = next(db_gen)
+    try:
+      service = GraphSubscriptionService(db)
+      service.create_graph_subscription(
+        user_id=config.user_id,
+        graph_id=graph_id,
+        plan_name=config.tier,
+        tier=GraphTier(config.tier),
+      )
+      logger.info(f"Billing subscription created for {graph_id}")
+    finally:
       try:
-        service = GraphSubscriptionService(db)
-        service.create_graph_subscription(
-          user_id=config.user_id,
-          graph_id=graph_id,
-          plan_name=config.tier,
-          tier=GraphTier(config.tier),
-        )
-        logger.info(f"Billing subscription created for {graph_id}")
-      finally:
-        try:
-          next(db_gen)
-        except StopIteration:
-          pass
-    except Exception as e:
-      logger.error(f"Failed to create billing subscription for {graph_id}: {e}")
+        next(db_gen)
+      except StopIteration:
+        pass

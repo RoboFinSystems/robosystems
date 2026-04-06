@@ -37,7 +37,28 @@ def _resolve_tier(graph_id: str) -> str | None:
     session = SessionFactory()
     try:
       graph = session.query(Graph).filter(Graph.graph_id == parent_id).first()
-      return graph.tier if graph else None
+      return graph.graph_tier if graph else None
+    finally:
+      session.close()
+  except Exception:
+    return None
+
+
+def _resolve_graph_owner(graph_id: str) -> str | None:
+  """Resolve the owner user_id for a graph (first admin, or any member)."""
+  try:
+    from robosystems.database import SessionFactory
+    from robosystems.models.core.graph.graph_user import GraphUser
+
+    session = SessionFactory()
+    try:
+      graph_user = (
+        session.query(GraphUser)
+        .filter(GraphUser.graph_id == graph_id)
+        .order_by(GraphUser.created_at.asc())
+        .first()
+      )
+      return graph_user.user_id if graph_user else None
     finally:
       session.close()
   except Exception:
@@ -56,6 +77,23 @@ def _block_shared_repository(graph_id: str) -> dict | None:
       }
   except Exception:
     pass
+  return None
+
+
+def _check_graph_access(graph_id: str, require_write: bool = False) -> dict | None:
+  """Check graph lifecycle and subscription status. Returns error dict or None."""
+  try:
+    from robosystems.database import SessionFactory
+    from robosystems.middleware.billing.enforcement import require_graph_access
+
+    session = SessionFactory()
+    try:
+      require_graph_access(graph_id, session, require_write=require_write)
+    finally:
+      session.close()
+  except Exception as e:
+    detail = getattr(e, "detail", str(e))
+    return {"error": "access_denied", "message": detail}
   return None
 
 
@@ -125,6 +163,10 @@ class CreateDocumentTool:
     if blocked:
       return blocked
 
+    access_error = _check_graph_access(graph_id, require_write=True)
+    if access_error:
+      return access_error
+
     title = arguments["title"]
     content = arguments["content"]
     folder = arguments.get("folder")
@@ -148,9 +190,16 @@ class CreateDocumentTool:
         tags=tags,
         folder=folder,
       )
+      owner_id = _resolve_graph_owner(graph_id)
+      if not owner_id:
+        return {
+          "success": False,
+          "error": f"No user found with access to graph {graph_id}",
+        }
+
       doc, response = service.create_document(
         graph_id=graph_id,
-        user_id=f"mcp:{graph_id}",
+        user_id=owner_id,
         request=request,
         tier=tier,
       )
@@ -228,6 +277,10 @@ Content changes are automatically re-indexed in OpenSearch.""",
     blocked = _block_shared_repository(graph_id)
     if blocked:
       return blocked
+
+    access_error = _check_graph_access(graph_id, require_write=True)
+    if access_error:
+      return access_error
 
     document_id = arguments["document_id"]
 
@@ -313,6 +366,10 @@ class GetDocumentTool:
     if blocked:
       return blocked
 
+    access_error = _check_graph_access(graph_id)
+    if access_error:
+      return access_error
+
     session = _get_platform_session()
     try:
       service = DocumentService(session)
@@ -383,6 +440,10 @@ class ListDocumentsTool:
     blocked = _block_shared_repository(graph_id)
     if blocked:
       return blocked
+
+    access_error = _check_graph_access(graph_id)
+    if access_error:
+      return access_error
 
     folder = arguments.get("folder")
     source_type = arguments.get("source_type")

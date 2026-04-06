@@ -452,3 +452,51 @@ class TestChangeGraphTier:
     assert subscription.status == "active"
     assert subscription.plan_name == "ladybug-standard"
     assert graph.graph_tier == "ladybug-standard"
+
+  async def test_enqueue_failure_rolls_back(self, mock_db, mock_user):
+    """Worker queue failure rolls back all PostgreSQL and Stripe changes."""
+    subscription = _make_mock_subscription()
+    graph = _make_mock_graph()
+    graph_credits = MagicMock()
+    graph_credits.monthly_allocation = Decimal("8000")
+    request = _make_request("ladybug-large")
+
+    org_user_patch, org_role_patch = _patch_org_owner()
+
+    with (
+      org_user_patch,
+      org_role_patch,
+      patch(f"{_GRAPH}.Graph.get_by_id", return_value=graph),
+      patch(
+        f"{_SUBSCRIPTIONS}.BillingSubscription.get_by_resource",
+        return_value=subscription,
+      ),
+      patch(
+        f"{_GRAPH_CREDITS}.GraphCredits.get_by_graph_id", return_value=graph_credits
+      ),
+      patch(
+        f"{_BILLING_CFG}.BillingConfig.get_subscription_plan",
+        return_value={"name": "ladybug-large", "base_price_cents": 29900},
+      ),
+      patch(f"{_BILLING_CFG}.get_tier_credit_allocation", side_effect=[32000, 8000]),
+      patch(f"{_PROVIDERS}.get_payment_provider"),
+      patch(
+        f"{_WORKER}.enqueue_task",
+        new_callable=AsyncMock,
+        side_effect=RuntimeError("queue down"),
+      ),
+      patch(f"{_SUBSCRIPTIONS}.env") as mock_env,
+    ):
+      mock_env.BILLING_ENABLED = False
+
+      from robosystems.routers.graphs.subscriptions import _change_graph_tier
+
+      with pytest.raises(HTTPException) as exc_info:
+        await _change_graph_tier("kg1a2b3c4d5e6f78", request, mock_user, mock_db)
+
+    assert exc_info.value.status_code == 500
+    assert "rolled back" in exc_info.value.detail.lower()
+    assert subscription.status == "active"
+    assert subscription.plan_name == "ladybug-standard"
+    assert subscription.base_price_cents == 9900
+    assert graph.graph_tier == "ladybug-standard"

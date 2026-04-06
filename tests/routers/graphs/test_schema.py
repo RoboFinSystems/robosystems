@@ -14,6 +14,7 @@ def mock_database_session(test_user_graph, schema_record=None):
   """Context manager for database session mocking."""
   from main import app
   from robosystems.database import get_db_session
+  from robosystems.middleware.billing import enforcement
 
   # Create a proper mock database session
   mock_db = MagicMock()
@@ -59,11 +60,20 @@ def mock_database_session(test_user_graph, schema_record=None):
 
   app.dependency_overrides[get_db_session] = override_get_db
 
+  # Mock require_graph_access to skip subscription enforcement in unit tests
+  original_require = enforcement.require_graph_access
+
+  def mock_require_graph_access(graph_id, session, require_write=False):
+    return test_graph
+
+  enforcement.require_graph_access = mock_require_graph_access
+
   try:
     yield mock_db
   finally:
-    # Clean up the dependency override
+    # Clean up overrides
     app.dependency_overrides.pop(get_db_session, None)
+    enforcement.require_graph_access = original_require
 
 
 class TestSchemaValidationEndpoint:

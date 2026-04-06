@@ -42,11 +42,7 @@ class DocumentService:
     Raises:
         ValueError: If tier limit exceeded or no indexable sections.
     """
-    # Check tier limits in PG
-    if tier:
-      self._check_tier_limit(graph_id, tier)
-
-    # Upsert: if external_id exists, update instead
+    # Upsert: if external_id exists, update instead (check before tier limit)
     if request.external_id:
       existing = Document.get_by_external_id(
         graph_id, request.external_id, self.session
@@ -60,6 +56,10 @@ class DocumentService:
           tags=request.tags,
           folder=request.folder,
         )
+
+    # Check tier limits in PG (only for new documents, not upserts)
+    if tier:
+      self._check_tier_limit(graph_id, tier)
 
     # Create PG record
     doc = Document.create(

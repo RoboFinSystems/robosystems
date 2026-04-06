@@ -71,7 +71,8 @@ def _strip_html(html: str) -> str:
   """Strip HTML tags and normalize whitespace.
 
   Tables are converted to markdown pipe tables before tag stripping,
-  preserving column structure for financial data.
+  preserving column structure for financial data. Block-level tags are
+  replaced with newlines to maintain paragraph structure.
   """
   if "<table" in html or "<TABLE" in html:
     html = html_tables_to_markdown(html)
@@ -81,11 +82,22 @@ def _strip_html(html: str) -> str:
   text = re.sub(
     r"<script[^>]*>.*?</\s*script\s*>", " ", text, flags=re.DOTALL | re.IGNORECASE
   )
+  # Replace block-level tags with newlines to preserve paragraph structure
+  text = re.sub(
+    r"</?(?:p|div|br|tr|li|h[1-6]|ul|ol|blockquote)[^>]*>",
+    "\n",
+    text,
+    flags=re.IGNORECASE,
+  )
+  # Replace remaining inline tags with spaces
   text = re.sub(r"<[^>]+>", " ", text)
   text = re.sub(r"&nbsp;?", " ", text)
   text = re.sub(r"&amp;?", "&", text)
   text = re.sub(r"&#\d+;", " ", text)
-  text = re.sub(r"\s+", " ", text)
+  # Collapse horizontal whitespace only (preserve newlines for tables/paragraphs)
+  text = re.sub(r"[^\S\n]+", " ", text)
+  # Collapse multiple blank lines
+  text = re.sub(r"\n\s*\n\s*\n+", "\n\n", text)
   return text.strip()
 
 

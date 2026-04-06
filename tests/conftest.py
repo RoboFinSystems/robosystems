@@ -494,12 +494,30 @@ def test_graph_with_credits(test_db, test_user, sample_graph):
     last_allocation_date=datetime.now(UTC),
   )
   test_db.add(graph_credits)
+
+  # Create billing subscription (required for access enforcement)
+  from robosystems.models.core import OrgUser
+  from robosystems.models.core.billing import BillingSubscription
+
+  org_users = OrgUser.get_user_orgs(test_user.id, test_db)
+  org_id = org_users[0].org_id if org_users else "org_test"
+
+  subscription = BillingSubscription.create_subscription(
+    org_id=org_id,
+    resource_type="graph",
+    resource_id=sample_graph.graph_id,
+    plan_name=sample_graph.graph_tier,
+    base_price_cents=9900,
+    session=test_db,
+  )
+  subscription.status = "active"
   test_db.commit()
 
   return {
     "graph": sample_graph,
     "user_graph": user_graph,
     "credits": graph_credits,
+    "subscription": subscription,
   }
 
 

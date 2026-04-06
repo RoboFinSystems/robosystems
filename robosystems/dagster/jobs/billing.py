@@ -404,6 +404,7 @@ async def _handle_payment_failed(
     subscription.subscription_metadata = metadata
 
     db_session.commit()
+    subscription._invalidate_access_cache()
 
   context.log.warning(f"Payment failed for subscription {subscription.id}")
 
@@ -632,6 +633,7 @@ async def _handle_subscription_updated(
         )
 
     db_session.commit()
+    subscription._invalidate_access_cache()
     context.log.info(f"Subscription {subscription.id} reactivated via Stripe portal")
     return
 
@@ -652,11 +654,13 @@ async def _handle_subscription_updated(
     old_status = subscription.status
     if new_status == "canceled":
       # Use cancel() to properly set canceled_at and ends_at
+      # cancel() calls _invalidate_access_cache() internally
       subscription.cancel(db_session, immediate=True)
     else:
       subscription.status = new_status
       subscription.updated_at = datetime.now(UTC)
       db_session.commit()
+      subscription._invalidate_access_cache()
 
     context.log.info(
       f"Subscription {subscription.id} status: {old_status} -> {new_status}"

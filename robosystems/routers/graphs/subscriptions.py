@@ -750,6 +750,11 @@ async def _change_graph_tier(
 
   db.commit()
 
+  # Invalidate the subscription cache so require_graph_access() sees "upgrading"
+  from ...middleware.billing.enforcement import invalidate_subscription_cache
+
+  invalidate_subscription_cache(graph_id)
+
   # Update Stripe — if this fails, roll back PG
   stripe_sub_id = subscription.stripe_subscription_id
   if stripe_sub_id and env.BILLING_ENABLED:
@@ -783,16 +788,51 @@ async def _change_graph_tier(
       )
 
   # Enqueue async worker task for infrastructure migration
-  result = await enqueue_task(
-    task_type="graph_tier_upgrade",
-    graph_id=graph_id,
-    user_id=str(current_user.id),
-    params={
-      "old_tier": old_tier,
-      "new_tier": new_tier,
-      "subscription_id": subscription.id,
-    },
-  )
+  try:
+    result = await enqueue_task(
+      task_type="graph_tier_upgrade",
+      graph_id=graph_id,
+      user_id=str(current_user.id),
+      params={
+        "old_tier": old_tier,
+        "new_tier": new_tier,
+        "subscription_id": subscription.id,
+      },
+    )
+  except Exception as enqueue_error:
+    logger.error(
+      f"Failed to enqueue tier upgrade for {graph_id}, rolling back: {enqueue_error}",
+      exc_info=True,
+    )
+    subscription.plan_name = old_plan_name
+    subscription.base_price_cents = old_price_cents
+    subscription.status = "active"
+    subscription.updated_at = datetime.now(UTC)
+    graph.graph_tier = old_tier
+    graph.updated_at = datetime.now(UTC)
+    if graph_credits:
+      graph_credits.monthly_allocation = get_tier_credit_allocation(old_tier)
+    db.commit()
+    # Revert Stripe pricing
+    if stripe_sub_id and env.BILLING_ENABLED:
+      try:
+        provider = get_payment_provider("stripe")
+        old_stripe_price_id = provider.get_or_create_price(
+          plan_name=old_tier, resource_type="graph"
+        )
+        provider.change_subscription_price(
+          subscription_id=stripe_sub_id, new_price_id=old_stripe_price_id
+        )
+      except Exception as stripe_revert_error:
+        logger.error(
+          f"Failed to revert Stripe pricing for {graph_id}: {stripe_revert_error}. "
+          f"Manual Stripe intervention required.",
+          exc_info=True,
+        )
+    raise HTTPException(
+      status_code=500,
+      detail="Failed to start tier migration. Changes have been rolled back.",
+    )
   operation_id = result["operation_id"]
 
   # Audit log

@@ -59,7 +59,10 @@ class TestCreateDocumentTool:
     with (
       patch(f"{DOC_MODULE}._get_platform_session", return_value=mock_session),
       patch(f"{DOC_MODULE}._resolve_tier", return_value="ladybug-standard"),
+      patch(f"{DOC_MODULE}._resolve_graph_owner", return_value="user_123"),
       patch(f"{DOC_MODULE}._block_shared_repository", return_value=None),
+      patch(f"{DOC_MODULE}._check_graph_access", return_value=None),
+      patch(f"{DOC_MODULE}._check_graph_access", return_value=None),
       patch(DOC_SVC, return_value=mock_service),
     ):
       result = await tool.execute(
@@ -94,7 +97,10 @@ class TestCreateDocumentTool:
   @pytest.mark.asyncio
   async def test_rejects_empty_content(self, mock_graph_client):
     tool = CreateDocumentTool(mock_graph_client)
-    with patch(f"{DOC_MODULE}._block_shared_repository", return_value=None):
+    with (
+      patch(f"{DOC_MODULE}._block_shared_repository", return_value=None),
+      patch(f"{DOC_MODULE}._check_graph_access", return_value=None),
+    ):
       result = await tool.execute(
         {
           "title": "Empty",
@@ -107,7 +113,10 @@ class TestCreateDocumentTool:
   @pytest.mark.asyncio
   async def test_rejects_oversized_content(self, mock_graph_client):
     tool = CreateDocumentTool(mock_graph_client)
-    with patch(f"{DOC_MODULE}._block_shared_repository", return_value=None):
+    with (
+      patch(f"{DOC_MODULE}._block_shared_repository", return_value=None),
+      patch(f"{DOC_MODULE}._check_graph_access", return_value=None),
+    ):
       result = await tool.execute(
         {
           "title": "Huge",
@@ -143,6 +152,7 @@ class TestUpdateDocumentTool:
     with (
       patch(f"{DOC_MODULE}._get_platform_session", return_value=mock_session),
       patch(f"{DOC_MODULE}._block_shared_repository", return_value=None),
+      patch(f"{DOC_MODULE}._check_graph_access", return_value=None),
       patch(DOC_SVC, return_value=mock_service),
     ):
       result = await tool.execute(
@@ -162,6 +172,7 @@ class TestUpdateDocumentTool:
     with (
       patch(f"{DOC_MODULE}._get_platform_session", return_value=mock_session),
       patch(f"{DOC_MODULE}._block_shared_repository", return_value=None),
+      patch(f"{DOC_MODULE}._check_graph_access", return_value=None),
     ):
       result = await tool.execute({"document_id": "doc_01ABC"})
 
@@ -178,6 +189,7 @@ class TestUpdateDocumentTool:
     with (
       patch(f"{DOC_MODULE}._get_platform_session", return_value=mock_session),
       patch(f"{DOC_MODULE}._block_shared_repository", return_value=None),
+      patch(f"{DOC_MODULE}._check_graph_access", return_value=None),
       patch(DOC_SVC, return_value=mock_service),
     ):
       result = await tool.execute(
@@ -219,6 +231,7 @@ class TestGetDocumentTool:
     with (
       patch(f"{DOC_MODULE}._get_platform_session", return_value=mock_session),
       patch(f"{DOC_MODULE}._block_shared_repository", return_value=None),
+      patch(f"{DOC_MODULE}._check_graph_access", return_value=None),
       patch(DOC_SVC, return_value=mock_service),
     ):
       result = await tool.execute({"document_id": "doc_01ABC"})
@@ -238,6 +251,7 @@ class TestGetDocumentTool:
     with (
       patch(f"{DOC_MODULE}._get_platform_session", return_value=mock_session),
       patch(f"{DOC_MODULE}._block_shared_repository", return_value=None),
+      patch(f"{DOC_MODULE}._check_graph_access", return_value=None),
       patch(DOC_SVC, return_value=mock_service),
     ):
       result = await tool.execute({"document_id": "doc_missing"})
@@ -282,6 +296,7 @@ class TestListDocumentsTool:
     with (
       patch(f"{DOC_MODULE}._get_platform_session", return_value=mock_session),
       patch(f"{DOC_MODULE}._block_shared_repository", return_value=None),
+      patch(f"{DOC_MODULE}._check_graph_access", return_value=None),
       patch(DOC_SVC, return_value=mock_service),
     ):
       result = await tool.execute({})
@@ -319,6 +334,7 @@ class TestListDocumentsTool:
     with (
       patch(f"{DOC_MODULE}._get_platform_session", return_value=mock_session),
       patch(f"{DOC_MODULE}._block_shared_repository", return_value=None),
+      patch(f"{DOC_MODULE}._check_graph_access", return_value=None),
       patch(DOC_SVC, return_value=mock_service),
     ):
       result = await tool.execute({"folder": "policies"})

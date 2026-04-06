@@ -153,9 +153,8 @@ async def get_graph_limits(
 
     is_shared = MultiTenantUtils.is_shared_repository(graph_id)
 
-    # Get storage information (safety cap from backup limits)
-    backup_limits_config = get_tier_backup_limits(graph_tier)
-    max_storage_gb = backup_limits_config.get("max_backup_size_gb", 10)
+    # Get storage information (instance storage limit from graph.yml)
+    max_storage_gb = GraphTierConfig.get_instance_storage_limit_gb(graph_tier)
     storage_limits = {}
     try:
       graph_client = await _get_graph_client(graph_id)
