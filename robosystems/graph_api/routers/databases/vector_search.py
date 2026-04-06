@@ -187,6 +187,46 @@ def _require_writer():
 # ---------------------------------------------------------------------------
 
 
+@router.get(
+  "/{graph_id}/tables/{table_name}/vector",
+  response_model=VectorIndexInfo | None,
+  summary="Get vector index metadata",
+)
+async def vector_info(
+  graph_id: str,
+  table_name: str,
+) -> VectorIndexInfo | None:
+  """Get metadata about an existing vector index (row count, size, etc.)."""
+  manager = _get_lance_manager()
+  info = manager.get_index_info(graph_id, table_name)
+  if info is None:
+    return None
+
+  return VectorIndexInfo(
+    graph_id=info["graph_id"],
+    table_name=info["table_name"],
+    row_count=info["row_count"],
+    size_mb=info["size_mb"],
+    path=info["path"],
+  )
+
+
+@router.delete(
+  "/{graph_id}/tables/{table_name}/vector",
+  summary="Delete vector index",
+)
+async def vector_delete(
+  graph_id: str,
+  table_name: str,
+) -> dict:
+  """Delete the lance index for a specific table."""
+  _require_writer()
+
+  manager = _get_lance_manager()
+  result = manager.delete(graph_id=graph_id, table_name=table_name)
+  return result
+
+
 @router.post(
   "/{graph_id}/tables/{table_name}/vector/build",
   response_model=VectorBuildResponse,
@@ -331,43 +371,3 @@ async def vector_export(
     duration_ms=result["duration_ms"],
     s3_uri=result.get("s3_uri"),
   )
-
-
-@router.get(
-  "/{graph_id}/tables/{table_name}/vector",
-  response_model=VectorIndexInfo | None,
-  summary="Get vector index metadata",
-)
-async def vector_info(
-  graph_id: str,
-  table_name: str,
-) -> VectorIndexInfo | None:
-  """Get metadata about an existing vector index (row count, size, etc.)."""
-  manager = _get_lance_manager()
-  info = manager.get_index_info(graph_id, table_name)
-  if info is None:
-    return None
-
-  return VectorIndexInfo(
-    graph_id=info["graph_id"],
-    table_name=info["table_name"],
-    row_count=info["row_count"],
-    size_mb=info["size_mb"],
-    path=info["path"],
-  )
-
-
-@router.delete(
-  "/{graph_id}/tables/{table_name}/vector",
-  summary="Delete vector index",
-)
-async def vector_delete(
-  graph_id: str,
-  table_name: str,
-) -> dict:
-  """Delete the lance index for a specific table."""
-  _require_writer()
-
-  manager = _get_lance_manager()
-  result = manager.delete(graph_id=graph_id, table_name=table_name)
-  return result

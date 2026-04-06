@@ -180,7 +180,7 @@ class MaterializeStatusResponse(BaseModel):
 
 
 @router.get(
-  "/materialize/status",
+  "/materialize",
   response_model=MaterializeStatusResponse,
   operation_id="getMaterializationStatus",
   summary="Get Materialization Status",
@@ -237,7 +237,7 @@ when it was last materialized, and how long since last materialization.
   },
 )
 @endpoint_metrics_decorator(
-  "/v1/graphs/{graph_id}/materialize/status",
+  "/v1/graphs/{graph_id}/materialize",
   business_event_type="materialization_status_retrieved",
 )
 async def get_materialization_status(
