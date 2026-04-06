@@ -351,6 +351,61 @@ class OpenSearchClient:
   def search(
     self,
     query: str,
+    graph_id: str,
+    filters: dict[str, Any] | None = None,
+    size: int = 10,
+    offset: int = 0,
+  ) -> dict[str, Any]:
+    """BM25 text search with mandatory graph_id filtering.
+
+    Fast keyword search using OpenSearch's inverted index. This is the
+    default search mode — performant regardless of corpus size because
+    BM25 scoring only touches matching postings lists.
+
+    Args:
+        query: Search query string
+        graph_id: Required tenant filter
+        filters: Optional additional filters
+        size: Max results to return
+        offset: Pagination offset
+
+    Returns:
+        OpenSearch response with hits and highlights
+    """
+    filter_clauses = self._build_filter_clauses(graph_id, filters)
+
+    search_body: dict[str, Any] = {
+      "query": {
+        "bool": {
+          "must": [
+            {
+              "multi_match": {
+                "query": query,
+                "fields": [
+                  "content",
+                  "section_label^2",
+                  "entity_name^1.5",
+                ],
+                "type": "best_fields",
+              }
+            }
+          ],
+          "filter": filter_clauses,
+        }
+      },
+      "highlight": self._highlight_config(),
+      "size": size,
+      "from": offset,
+      "_source": {
+        "excludes": ["content", "embedding"],
+      },
+    }
+
+    return self.client.search(index=self.index_name, body=search_body)
+
+  def search_hybrid(
+    self,
+    query: str,
     query_embedding: list[float],
     graph_id: str,
     filters: dict[str, Any] | None = None,
@@ -364,6 +419,10 @@ class OpenSearchClient:
     min_max, then combines them with weighted arithmetic mean (0.4 BM25,
     0.6 KNN). This ensures vector similarity actually influences ranking
     instead of being drowned out by raw BM25 scores.
+
+    Slower than BM25-only due to HNSW graph traversal, especially on
+    large corpora without narrow filters. Best used with entity or
+    section filters that reduce the KNN candidate set.
 
     Tenant isolation: OpenSearch 2.x doesn't support top-level filters on
     hybrid queries (that's 3.0+). Instead, filters are applied inside each
