@@ -813,6 +813,7 @@ async def _change_graph_tier(
     if graph_credits:
       graph_credits.monthly_allocation = get_tier_credit_allocation(old_tier)
     db.commit()
+    invalidate_subscription_cache(graph_id)
     # Revert Stripe pricing
     if stripe_sub_id and env.BILLING_ENABLED:
       try:

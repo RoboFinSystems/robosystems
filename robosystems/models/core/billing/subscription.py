@@ -256,8 +256,8 @@ class BillingSubscription(Base):
         )
 
         invalidate_subscription_cache(self.resource_id)
-      except Exception:
-        pass  # Cache invalidation is best-effort
+      except Exception as e:
+        logger.warning(f"Cache invalidation failed for graph {self.resource_id}: {e}")
 
   def activate(self, session: Session) -> None:
     """Activate the subscription."""
