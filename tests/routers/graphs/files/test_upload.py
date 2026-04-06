@@ -845,8 +845,8 @@ class TestUpdateFileFileSizeValidation:
       patch.object(upload_module.Graph, "get_by_id", return_value=mock_graph),
       patch.object(
         upload_module.GraphTierConfig,
-        "get_backup_limits",
-        return_value={"max_backup_size_gb": 10},
+        "get_instance_storage_limit_gb",
+        return_value=10.0,
       ),
       patch.object(
         upload_module.GraphTable,

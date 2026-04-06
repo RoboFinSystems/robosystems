@@ -42,20 +42,6 @@ class CreditCheckRequest(BaseModel):
   )
 
 
-class StorageLimitResponse(BaseModel):
-  """Storage limit information response."""
-
-  graph_id: str
-  current_storage_gb: float
-  effective_limit_gb: float
-  usage_percentage: float
-  within_limit: bool
-  approaching_limit: bool
-  needs_warning: bool
-  has_override: bool
-  recommendations: list[str] | None = None
-
-
 class EnhancedCreditTransactionResponse(BaseModel):
   """Enhanced credit transaction response with more details."""
 

@@ -16,7 +16,6 @@ from robosystems.models.api.billing.credits import (
   DetailedTransactionsResponse,
   EnhancedCreditTransactionResponse,
   StandardizedCreditError,
-  StorageLimitResponse,
   create_access_denied_error,
   create_insufficient_credits_error,
 )
@@ -86,37 +85,6 @@ class TestCreditTransactionResponse:
       created_at="2024-01-15T10:00:00Z",
     )
     assert model.amount == -5.0
-
-
-@pytest.mark.unit
-class TestStorageLimitResponse:
-  def test_valid_response(self):
-    model = StorageLimitResponse(
-      graph_id="kg123",
-      current_storage_gb=2.5,
-      effective_limit_gb=10.0,
-      usage_percentage=25.0,
-      within_limit=True,
-      approaching_limit=False,
-      needs_warning=False,
-      has_override=False,
-    )
-    assert model.within_limit is True
-    assert model.recommendations is None
-
-  def test_with_recommendations(self):
-    model = StorageLimitResponse(
-      graph_id="kg123",
-      current_storage_gb=9.0,
-      effective_limit_gb=10.0,
-      usage_percentage=90.0,
-      within_limit=True,
-      approaching_limit=True,
-      needs_warning=True,
-      has_override=False,
-      recommendations=["Consider upgrading", "Archive old data"],
-    )
-    assert len(model.recommendations) == 2
 
 
 @pytest.mark.unit

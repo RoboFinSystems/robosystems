@@ -168,6 +168,7 @@ async def get_service_offerings(
         features.append(f"Up to {tier_config.get('max_subgraphs')} subgraphs")
 
       # Add content limits if available
+      graph_limits: dict = {}
       if tier_config:
         graph_limits = tier_config.get("limits", {}).get("graph_limits", {})
         if not graph_limits:
@@ -191,6 +192,9 @@ async def get_service_offerings(
         "backup_retention_days": backup_retention_days,
         "priority_support": plan_data.get("priority_support", False),
         "max_subgraphs": tier_config.get("max_subgraphs", 0) if tier_config else 0,
+        "instance_storage_limit_gb": GraphTierConfig.get_instance_storage_limit_gb(
+          tier_name
+        ),
         "api_rate_multiplier": tier_config.get("api_rate_multiplier", 1.0)
         if tier_config
         else 1.0,

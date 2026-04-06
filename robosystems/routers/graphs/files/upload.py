@@ -627,8 +627,9 @@ async def update_file(
 
     graph = Graph.get_by_id(graph_id, db)
     if graph:
-      backup_limits = GraphTierConfig.get_backup_limits(str(graph.graph_tier))
-      storage_limit_gb = backup_limits.get("max_backup_size_gb", 10)
+      storage_limit_gb = GraphTierConfig.get_instance_storage_limit_gb(
+        str(graph.graph_tier)
+      )
       storage_limit_bytes = storage_limit_gb * 1024 * 1024 * 1024
 
       all_tables = GraphTable.get_all_for_graph(graph_id, db)
