@@ -132,6 +132,7 @@ def check_graph_subscription_active(
       SubscriptionStatus.CANCELED.value: "Subscription has been canceled.",
       SubscriptionStatus.PAST_DUE.value: "Subscription is past due. Please update payment.",
       SubscriptionStatus.UNPAID.value: "Subscription is unpaid. Please make payment.",
+      SubscriptionStatus.UPGRADING.value: "Graph tier upgrade in progress. Read access available, writes blocked until upgrade completes.",
     }
     error_message = error_messages.get(status, f"Subscription status is {status}.")  # type: ignore
     return (False, error_message)

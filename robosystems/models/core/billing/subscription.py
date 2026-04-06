@@ -22,6 +22,7 @@ class SubscriptionStatus(str, Enum):
   PENDING_PAYMENT = "pending_payment"
   PROVISIONING = "provisioning"
   ACTIVE = "active"
+  UPGRADING = "upgrading"
   PAUSED = "paused"
   CANCELED = "canceled"
   PAST_DUE = "past_due"

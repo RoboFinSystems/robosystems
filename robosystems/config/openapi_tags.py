@@ -64,7 +64,7 @@ MAIN_API_TAGS = [
   },
   {
     "name": "Subscriptions",
-    "description": "💳 Subscriptions - Manage graph database subscriptions and billing",
+    "description": "💳 Subscriptions - Manage graph & shared repository subscriptions",
   },
   {
     "name": "Connections",

@@ -253,15 +253,41 @@ Resources:
                   - bedrock:ListFoundationModels
                   - bedrock:ListInferenceProfiles
                 Resource: "*"
-              # DynamoDB for graph registries
+              # DynamoDB for graph registries (read + write for allocation, tier upgrades)
               - Effect: Allow
                 Action:
-                  - dynamodb:Scan
-                  - dynamodb:Query
                   - dynamodb:GetItem
+                  - dynamodb:PutItem
+                  - dynamodb:UpdateItem
+                  - dynamodb:DeleteItem
+                  - dynamodb:Query
+                  - dynamodb:Scan
                 Resource:
                   - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/robosystems-graph-${Environment}-*"
                   - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/robosystems-graph-${Environment}-*/index/*"
+              # Lambda invocation (Volume Manager for tier upgrades)
+              - Effect: Allow
+                Action:
+                  - lambda:InvokeFunction
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:RoboSystemsGraphVolumes*-volume-manager"
+              # Auto Scaling (graph instance allocation, tier upgrades)
+              - Effect: Allow
+                Action:
+                  - autoscaling:DescribeAutoScalingGroups
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - autoscaling:SetDesiredCapacity
+                  - autoscaling:SetInstanceProtection
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:autoscaling:${AWS::Region}:${AWS::AccountId}:autoScalingGroup:*:autoScalingGroupName/robosystems-*-writers-${Environment}-asg"
+              # CloudFormation (lookup infrastructure outputs like Lambda ARNs)
+              - Effect: Allow
+                Action:
+                  - cloudformation:DescribeStacks
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/RoboSystemsGraph*/*"
               # CloudWatch Logs
               - Effect: Allow
                 Action:

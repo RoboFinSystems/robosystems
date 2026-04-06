@@ -196,6 +196,10 @@ class GraphSubscriptionResponse(BaseModel):
     description="Subscription end date (when access will be revoked, especially relevant for cancelled subscriptions)",
   )
   created_at: str = Field(..., description="Creation timestamp")
+  operation_id: str | None = Field(
+    None,
+    description="Operation ID for tracking async tier changes via SSE",
+  )
 
 
 class CreateRepositorySubscriptionRequest(BaseModel):
