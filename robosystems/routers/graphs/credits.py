@@ -9,7 +9,6 @@ Provides endpoints for:
 """
 
 import logging
-from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
 from sqlalchemy.orm import Session
@@ -33,10 +32,7 @@ from robosystems.models.api.common import (
 )
 from robosystems.models.core import GraphUser, User
 from robosystems.models.core.graph.graph_credits import CreditTransactionType
-from robosystems.operations.graph.credit_service import (
-  CreditService,
-  get_operation_cost,
-)
+from robosystems.operations.graph.credit_service import CreditService
 
 logger = logging.getLogger(__name__)
 
@@ -118,7 +114,7 @@ router = APIRouter(
 
 
 @router.get(
-  "/summary",
+  "",
   response_model=CreditSummaryResponse,
   summary="Get Credit Summary",
   description="""Retrieve comprehensive credit usage summary for the specified graph.
@@ -481,102 +477,5 @@ async def get_credit_transactions(
     raise create_error_response(
       status_code=500,
       detail="Failed to retrieve credit transactions",
-      code=ErrorCode.INTERNAL_ERROR,
-    )
-
-
-@router.get(
-  "/balance/check",
-  summary="Check Credit Balance",
-  description="""Check if the graph has sufficient credits for a planned operation.
-
-This endpoint allows you to verify credit availability before performing
-an operation, helping prevent failed operations due to insufficient credits.
-
-The check considers:
-- Base operation cost
-- Graph tier multiplier
-- Current credit balance
-
-No credits are consumed for checking availability.""",
-  operation_id="checkCreditBalance",
-  responses={
-    200: {
-      "description": "Credit check completed",
-      "content": {
-        "application/json": {
-          "example": {
-            "has_sufficient_credits": True,
-            "required_credits": 1.5,
-            "available_credits": 1000.0,
-            "base_cost": 1.0,
-            "multiplier": 1.5,
-            "cached": False,
-          }
-        }
-      },
-    },
-    403: {"description": "Access denied to graph", "model": ErrorResponse},
-    404: {"description": "Credit pool not found", "model": ErrorResponse},
-    500: {"description": "Credit check failed", "model": ErrorResponse},
-  },
-)
-async def check_credit_balance(
-  graph_id: str = Path(
-    ..., description="Graph database identifier", pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN
-  ),
-  operation_type: str = Query(..., description="Type of operation to check"),
-  base_cost: Decimal | None = Query(
-    None, description="Custom base cost (uses default if not provided)"
-  ),
-  current_user: User = Depends(get_current_user_with_graph),
-  user_graph: GraphUser = Depends(get_graph_access),
-  db: Session = Depends(get_db_session),
-  _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
-) -> dict:
-  """
-  Check if graph has sufficient credits for an operation.
-
-  This endpoint performs a pre-flight check to verify credit availability
-  without consuming any credits.
-
-  Args:
-      request: Operation details to check credits for
-      graph_id: The graph to check credits for
-      current_user: The authenticated user
-      user_graph: User's access to the graph
-      db: Database session
-
-  Returns:
-      Dict with credit availability information
-
-  Raises:
-      HTTPException: If credit pool not found or access denied
-  """
-  try:
-    credit_service = CreditService(db)
-
-    # Determine the cost
-    if base_cost is None:
-      base_cost = get_operation_cost(operation_type)
-
-    result = credit_service.check_credit_balance(
-      graph_id=graph_id, required_credits=base_cost
-    )
-
-    if "error" in result:
-      raise create_error_response(
-        status_code=404, detail=result["error"], code=ErrorCode.NOT_FOUND
-      )
-
-    return result
-
-  except HTTPException:
-    raise
-  except Exception as e:
-    logger.error(f"Failed to check credit balance for graph {graph_id}: {e}")
-    raise create_error_response(
-      status_code=500,
-      detail="Failed to check credit balance",
       code=ErrorCode.INTERNAL_ERROR,
     )

@@ -35,10 +35,6 @@ MAIN_API_TAGS = [
     "description": "🔄 Materialize graph - Rebuild graph from DuckDB staging tables",
   },
   {
-    "name": "Views",
-    "description": "👁️ Views - Create and manage multi-dimensional fact grids with XBRL-style hypercubes",
-  },
-  {
     "name": "Documents",
     "description": "📑 Documents - Upload, list, and manage documents for search and analysis",
   },
@@ -53,6 +49,10 @@ MAIN_API_TAGS = [
   {
     "name": "Schema",
     "description": "📐 Schema management - Validate and manage custom graph schemas",
+  },
+  {
+    "name": "Views",
+    "description": "👁️ Views - Create and manage multi-dimensional fact grids with XBRL-style hypercubes",
   },
   {
     "name": "Usage",
@@ -72,7 +72,7 @@ MAIN_API_TAGS = [
   },
   {
     "name": "Graph Limits",
-    "description": "🚧 Graph limits - Retrieve operational limits and tier-based constraints",
+    "description": "📏 Graph limits - Instance storage usage, per-operation limits, and tier configuration",
   },
   {
     "name": "Graph Health",
@@ -107,14 +107,6 @@ MAIN_API_TAGS = [
     "description": "⏱️ Operation monitoring - Track SSE stream status and progress",
   },
   {
-    "name": "Ledger",
-    "description": "📒 Ledger - Accounting data: chart of accounts, transactions, trial balance, reports, taxonomies, schedules, and publish lists",
-  },
-  {
-    "name": "Investor",
-    "description": "📈 Investor - Portfolio management: portfolios, securities, positions, and holdings aggregation",
-  },
-  {
     "name": "Auth",
     "description": "🔐 Authentication - Login, register, and access token management",
   },
@@ -125,6 +117,14 @@ MAIN_API_TAGS = [
   {
     "name": "Status",
     "description": "❤️ Service status - API status and monitoring",
+  },
+  {
+    "name": "Ledger",
+    "description": "📒 Ledger - Accounting data: chart of accounts, transactions, trial balance, reports, taxonomies, schedules, and publish lists",
+  },
+  {
+    "name": "Investor",
+    "description": "📈 Investor - Portfolio management: portfolios, securities, positions, and holdings aggregation",
   },
 ]
 
@@ -147,12 +147,16 @@ GRAPH_API_TAGS = [
     "description": "🗃️ Staging Tables - Create and query DuckDB staging tables, ingest to graph",
   },
   {
+    "name": "Vector Index",
+    "description": "🔮 Vector index - Build, search, and manage LanceDB vector indexes for similarity search",
+  },
+  {
     "name": "Backup",
     "description": "💽 Graph Backup - Create production-ready graph backups with multiple formats",
   },
   {
-    "name": "Copy",
-    "description": "📥 Graph Copy - Copy data from S3, URLs, and other sources into graph databases",
+    "name": "Migration",
+    "description": "🔄 Migration - Export and import databases for LadybugDB version upgrades",
   },
   {
     "name": "Memory",
