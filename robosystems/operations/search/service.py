@@ -1,7 +1,8 @@
 """Search service — business logic layer over OpenSearch client.
 
-Provides graph_id-scoped hybrid search (BM25 + KNN) and retrieval,
-mapping OpenSearch responses to Pydantic models.
+Provides graph_id-scoped search and retrieval, mapping OpenSearch
+responses to Pydantic models. Default mode is BM25-only (fast);
+hybrid BM25 + KNN is opt-in via semantic=True on SearchRequest.
 """
 
 from __future__ import annotations
@@ -31,7 +32,7 @@ SNIPPET_FALLBACK_LENGTH = 300
 
 
 class SearchService:
-  """Hybrid search service scoped by graph_id."""
+  """Search service scoped by graph_id. BM25 default, hybrid opt-in."""
 
   def __init__(self, client: OpenSearchClient) -> None:
     self.client = client
