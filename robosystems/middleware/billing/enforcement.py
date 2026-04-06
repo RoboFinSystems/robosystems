@@ -195,6 +195,13 @@ def require_graph_access(
   cached = _get_cached_subscription(graph_id)
   if cached == "active":
     return graph
+  elif cached == "upgrading":
+    if require_write:
+      raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="Graph tier upgrade in progress. Write operations are temporarily disabled.",
+      )
+    return graph
   elif cached == "canceled_grace":
     if require_write:
       raise HTTPException(
@@ -218,6 +225,16 @@ def require_graph_access(
   if not subscription:
     logger.warning(f"No subscription found for graph {graph_id}")
     _cache_subscription(graph_id, "no_subscription")
+    return graph
+
+  if subscription.status == "upgrading":
+    # Tier migration in progress: reads OK, writes blocked
+    _cache_subscription(graph_id, "upgrading")
+    if require_write:
+      raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="Graph tier upgrade in progress. Write operations are temporarily disabled.",
+      )
     return graph
 
   if subscription.status == "canceled":

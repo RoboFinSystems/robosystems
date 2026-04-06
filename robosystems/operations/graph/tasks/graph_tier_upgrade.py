@@ -101,9 +101,11 @@ class GraphTierUpgradeTask(BaseTask):
       old_instance_id = graph_item["instance_id"]
       old_private_ip = graph_item.get("private_ip", "")
 
-      # Find volume for this instance
-      volume_response = volume_table.scan(
-        FilterExpression="instance_id = :iid AND #status = :status",
+      # Find volume for this instance (query GSI instead of full table scan)
+      volume_response = volume_table.query(
+        IndexName="instance-index",
+        KeyConditionExpression="instance_id = :iid",
+        FilterExpression="#status = :status",
         ExpressionAttributeNames={"#status": "status"},
         ExpressionAttributeValues={":iid": old_instance_id, ":status": "attached"},
       )
@@ -322,7 +324,7 @@ class GraphTierUpgradeTask(BaseTask):
               logger.info("All connections drained")
               return
         except httpx.HTTPError:
-          pass
+          pass  # Instance may be shutting down — keep polling until timeout
 
         await asyncio.sleep(DRAIN_POLL_INTERVAL_SECONDS)
         elapsed += DRAIN_POLL_INTERVAL_SECONDS
@@ -408,7 +410,7 @@ class GraphTierUpgradeTask(BaseTask):
             logger.info(f"Graph API healthy on {private_ip}")
             return
         except httpx.HTTPError:
-          pass
+          pass  # New instance may still be booting — retry
 
         if attempt < max_retries - 1:
           await asyncio.sleep(5)

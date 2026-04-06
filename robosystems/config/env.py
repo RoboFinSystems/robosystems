@@ -315,7 +315,8 @@ def _get_cf_stack_output(stack_name: str, output_key: str) -> str:
   except ImportError:
     _cloudformation_cache[cache_key] = None
     return ""
-  except Exception:
+  except Exception as e:
+    print(f"CloudFormation lookup failed for {stack_name}:{output_key}: {e}")
     _cloudformation_cache[cache_key] = None
     return ""
 

@@ -58,8 +58,8 @@ def _make_dynamodb_mocks():
     }
   }
 
-  # Volume registry scan
-  volume_table.scan.return_value = {
+  # Volume registry query (via instance-index GSI)
+  volume_table.query.return_value = {
     "Items": [
       {
         "volume_id": "vol-abc123",
@@ -423,7 +423,7 @@ class TestGraphTierUpgradeTask:
   async def test_no_volume_found_raises_error(self, mock_dynamodb):
     """Raises error when no attached volume found for instance."""
     graph_table, volume_table, instance_table = mock_dynamodb
-    volume_table.scan.return_value = {"Items": []}
+    volume_table.query.return_value = {"Items": []}
 
     dynamodb_resource = MagicMock()
     dynamodb_resource.Table.side_effect = [graph_table, volume_table, instance_table]
