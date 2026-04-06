@@ -84,6 +84,14 @@ class GraphTierUpgradeTask(BaseTask):
     asg_client = _get_autoscaling_client()
     volume_manager_arn = get_volume_manager_function_arn()
 
+    # Volume manager is required in staging/prod — without it we can't
+    # snapshot, detach, or reattach the EBS volume
+    if not volume_manager_arn and not env.is_development():
+      raise ValueError(
+        "Volume Manager Lambda ARN not found. Cannot perform tier upgrade "
+        "without volume management infrastructure."
+      )
+
     # Track state for rollback
     old_instance_id = None
     old_private_ip = None
@@ -204,7 +212,9 @@ class GraphTierUpgradeTask(BaseTask):
 
       # Step 7: Poll for volume reattachment
       await self.report_progress("Waiting for volume reattachment...", percent=70)
-      new_instance_id = await self._wait_for_reattachment(volume_table, volume_id)
+      new_instance_id = await self._wait_for_reattachment(
+        volume_table, volume_id, old_instance_id
+      )
 
       # Step 8: Verify graph is accessible on new instance
       await self.report_progress("Verifying graph...", percent=90)
@@ -369,8 +379,10 @@ class GraphTierUpgradeTask(BaseTask):
     except ClientError as e:
       logger.warning(f"Failed to check/update ASG capacity: {e}")
 
-  async def _wait_for_reattachment(self, volume_table: Any, volume_id: str) -> str:
-    """Poll DynamoDB volume registry until volume is reattached."""
+  async def _wait_for_reattachment(
+    self, volume_table: Any, volume_id: str, old_instance_id: str | None = None
+  ) -> str:
+    """Poll DynamoDB volume registry until volume is reattached to a new instance."""
     elapsed = 0
     while elapsed < REATTACH_TIMEOUT_SECONDS:
       if await self.is_cancelled():
@@ -381,8 +393,15 @@ class GraphTierUpgradeTask(BaseTask):
 
       if item.get("status") == "attached":
         new_instance_id = item.get("instance_id", "unknown")
-        logger.info(f"Volume {volume_id} reattached to {new_instance_id}")
-        return new_instance_id
+        # Verify volume actually moved to a different instance
+        if old_instance_id and new_instance_id == old_instance_id:
+          logger.warning(
+            f"Volume {volume_id} reattached to same instance {old_instance_id}, "
+            f"waiting for new instance..."
+          )
+        else:
+          logger.info(f"Volume {volume_id} reattached to {new_instance_id}")
+          return new_instance_id
 
       await asyncio.sleep(REATTACH_POLL_INTERVAL_SECONDS)
       elapsed += REATTACH_POLL_INTERVAL_SECONDS
@@ -415,8 +434,9 @@ class GraphTierUpgradeTask(BaseTask):
         if attempt < max_retries - 1:
           await asyncio.sleep(5)
 
-    logger.warning(
-      f"Graph API health check failed on {private_ip} after {max_retries} attempts"
+    raise RuntimeError(
+      f"Graph API health check failed on {private_ip} after {max_retries} attempts. "
+      f"New instance may not have started correctly."
     )
 
   def _finalize_subscription(self, subscription_id: str) -> None:
@@ -507,13 +527,16 @@ class GraphTierUpgradeTask(BaseTask):
     except ClientError as e:
       logger.error(f"Failed to revert graph registry: {e}")
 
-    # Revert PostgreSQL (subscription + graph tier)
+    # Revert PostgreSQL (subscription + graph tier + price)
     try:
-      from robosystems.config.billing import get_tier_credit_allocation
+      from robosystems.config.billing import BillingConfig, get_tier_credit_allocation
       from robosystems.database import get_db_session
       from robosystems.models.core.billing import BillingSubscription
       from robosystems.models.core.graph import Graph
       from robosystems.models.core.graph.graph_credits import GraphCredits
+
+      old_plan_config = BillingConfig.get_subscription_plan(old_tier)
+      old_price_cents = old_plan_config["base_price_cents"] if old_plan_config else 0
 
       db_gen = get_db_session()
       db = next(db_gen)
@@ -525,8 +548,32 @@ class GraphTierUpgradeTask(BaseTask):
 
         if subscription and subscription.status == "upgrading":
           subscription.plan_name = old_tier
+          subscription.base_price_cents = old_price_cents
           subscription.status = "active"
           subscription.updated_at = datetime.now(UTC)
+
+          # Revert Stripe pricing if linked
+          if subscription.stripe_subscription_id:
+            try:
+              from robosystems.operations.providers.payment_provider import (
+                get_payment_provider,
+              )
+
+              provider = get_payment_provider("stripe")
+              old_stripe_price_id = provider.get_or_create_price(
+                plan_name=old_tier,
+                resource_type="graph",
+              )
+              provider.change_subscription_price(
+                subscription_id=subscription.stripe_subscription_id,
+                new_price_id=old_stripe_price_id,
+              )
+              logger.info(f"Reverted Stripe pricing to {old_tier} for {graph_id}")
+            except Exception as stripe_err:
+              logger.error(
+                f"Failed to revert Stripe pricing for {graph_id}: {stripe_err}. "
+                f"Manual Stripe intervention may be required."
+              )
 
         if graph:
           graph.graph_tier = old_tier

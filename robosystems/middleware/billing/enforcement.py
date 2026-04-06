@@ -215,7 +215,10 @@ def require_graph_access(
       detail="Subscription has ended. Resubscribe to access this graph.",
     )
   elif cached == "no_subscription":
-    return graph
+    raise HTTPException(
+      status_code=status.HTTP_403_FORBIDDEN,
+      detail="No active subscription for this graph.",
+    )
 
   # Cache miss — query DB
   subscription = BillingSubscription.get_by_resource(
@@ -225,7 +228,10 @@ def require_graph_access(
   if not subscription:
     logger.warning(f"No subscription found for graph {graph_id}")
     _cache_subscription(graph_id, "no_subscription")
-    return graph
+    raise HTTPException(
+      status_code=status.HTTP_403_FORBIDDEN,
+      detail="No active subscription for this graph.",
+    )
 
   if subscription.status == "upgrading":
     # Tier migration in progress: reads OK, writes blocked
@@ -258,5 +264,22 @@ def require_graph_access(
       detail="Subscription has ended. Resubscribe to access this graph.",
     )
 
-  _cache_subscription(graph_id, "active")
-  return graph
+  # Only explicitly active subscriptions get full access
+  if subscription.status == SubscriptionStatus.ACTIVE.value:
+    _cache_subscription(graph_id, "active")
+    return graph
+
+  # All other statuses (past_due, unpaid, paused, pending, etc.) are blocked
+  error_messages: dict[str, str] = {
+    SubscriptionStatus.PENDING.value: "Subscription is pending activation.",
+    SubscriptionStatus.PAUSED.value: "Subscription is paused. Please reactivate.",
+    SubscriptionStatus.PAST_DUE.value: "Subscription is past due. Please update payment.",
+    SubscriptionStatus.UNPAID.value: "Subscription is unpaid. Please make payment.",
+  }
+  detail = error_messages.get(
+    subscription.status, f"Subscription status is {subscription.status}."
+  )
+  raise HTTPException(
+    status_code=status.HTTP_403_FORBIDDEN,
+    detail=detail,
+  )

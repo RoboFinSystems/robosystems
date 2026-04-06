@@ -214,7 +214,7 @@ Resources:
       PackageType: Image
       Architectures:
         - arm64
-      Timeout: 300
+      Timeout: 900  # 15 min — snapshot_for_upgrade waiter needs up to 10 min
       MemorySize: 256
       Role: !GetAtt VolumeManagerRole.Arn
       Environment:

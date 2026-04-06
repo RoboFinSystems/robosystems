@@ -214,6 +214,7 @@ class TestSchemaManagementIntegration:
     # Mock the export functionality
     with (
       patch("robosystems.middleware.graph.get_graph_repository") as mock_get_repo,
+      patch("robosystems.middleware.billing.enforcement.require_graph_access"),
     ):
       # Setup database mock
       from main import app

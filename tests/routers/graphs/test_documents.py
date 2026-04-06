@@ -74,8 +74,9 @@ def _mock_upload_response(**overrides):
 class TestListDocuments:
   @pytest.mark.asyncio
   @patch(f"{MODULE}.SessionFactory")
+  @patch(f"{MODULE}._enforce_graph_access")
   @patch(f"{MODULE}._block_shared_repository")
-  async def test_lists_documents(self, mock_block, mock_sf):
+  async def test_lists_documents(self, mock_block, mock_enforce, mock_sf):
     session = MagicMock()
     mock_sf.return_value = session
     docs = [_mock_document(), _mock_document(id="doc_def456", title="Doc 2")]
@@ -92,8 +93,9 @@ class TestListDocuments:
 
   @pytest.mark.asyncio
   @patch(f"{MODULE}.SessionFactory")
+  @patch(f"{MODULE}._enforce_graph_access")
   @patch(f"{MODULE}._block_shared_repository")
-  async def test_filters_by_source_type(self, mock_block, mock_sf):
+  async def test_filters_by_source_type(self, mock_block, mock_enforce, mock_sf):
     session = MagicMock()
     mock_sf.return_value = session
 
@@ -109,8 +111,9 @@ class TestListDocuments:
     MockService.return_value.list_documents.assert_called_once_with("kg_test", "memory")
 
   @pytest.mark.asyncio
+  @patch(f"{MODULE}._enforce_graph_access")
   @patch(f"{MODULE}._block_shared_repository")
-  async def test_blocks_shared_repository(self, mock_block):
+  async def test_blocks_shared_repository(self, mock_block, mock_enforce):
     mock_block.side_effect = HTTPException(403, "not allowed")
     with pytest.raises(HTTPException) as exc_info:
       await list_documents(graph_id="sec", current_user=_mock_user())
@@ -121,8 +124,9 @@ class TestListDocuments:
 class TestGetDocument:
   @pytest.mark.asyncio
   @patch(f"{MODULE}.SessionFactory")
+  @patch(f"{MODULE}._enforce_graph_access")
   @patch(f"{MODULE}._block_shared_repository")
-  async def test_returns_document_detail(self, mock_block, mock_sf):
+  async def test_returns_document_detail(self, mock_block, mock_enforce, mock_sf):
     session = MagicMock()
     mock_sf.return_value = session
     doc = _mock_document()
@@ -142,8 +146,9 @@ class TestGetDocument:
 
   @pytest.mark.asyncio
   @patch(f"{MODULE}.SessionFactory")
+  @patch(f"{MODULE}._enforce_graph_access")
   @patch(f"{MODULE}._block_shared_repository")
-  async def test_returns_404_when_not_found(self, mock_block, mock_sf):
+  async def test_returns_404_when_not_found(self, mock_block, mock_enforce, mock_sf):
     session = MagicMock()
     mock_sf.return_value = session
 
@@ -164,8 +169,9 @@ class TestUploadDocument:
   @pytest.mark.asyncio
   @patch(f"{MODULE}._resolve_tier", return_value="ladybug-standard")
   @patch(f"{MODULE}.SessionFactory")
+  @patch(f"{MODULE}._enforce_graph_access")
   @patch(f"{MODULE}._block_shared_repository")
-  async def test_uploads_document(self, mock_block, mock_sf, mock_tier):
+  async def test_uploads_document(self, mock_block, mock_enforce, mock_sf, mock_tier):
     session = MagicMock()
     mock_sf.return_value = session
     doc = _mock_document()
@@ -186,8 +192,11 @@ class TestUploadDocument:
   @pytest.mark.asyncio
   @patch(f"{MODULE}._resolve_tier", return_value="ladybug-standard")
   @patch(f"{MODULE}.SessionFactory")
+  @patch(f"{MODULE}._enforce_graph_access")
   @patch(f"{MODULE}._block_shared_repository")
-  async def test_returns_422_on_value_error(self, mock_block, mock_sf, mock_tier):
+  async def test_returns_422_on_value_error(
+    self, mock_block, mock_enforce, mock_sf, mock_tier
+  ):
     session = MagicMock()
     mock_sf.return_value = session
 
@@ -210,8 +219,11 @@ class TestUploadDocumentsBulk:
   @pytest.mark.asyncio
   @patch(f"{MODULE}._resolve_tier", return_value="ladybug-standard")
   @patch(f"{MODULE}.SessionFactory")
+  @patch(f"{MODULE}._enforce_graph_access")
   @patch(f"{MODULE}._block_shared_repository")
-  async def test_uploads_multiple_documents(self, mock_block, mock_sf, mock_tier):
+  async def test_uploads_multiple_documents(
+    self, mock_block, mock_enforce, mock_sf, mock_tier
+  ):
     session = MagicMock()
     mock_sf.return_value = session
     doc = _mock_document()
@@ -241,8 +253,11 @@ class TestUploadDocumentsBulk:
   @pytest.mark.asyncio
   @patch(f"{MODULE}._resolve_tier", return_value="ladybug-standard")
   @patch(f"{MODULE}.SessionFactory")
+  @patch(f"{MODULE}._enforce_graph_access")
   @patch(f"{MODULE}._block_shared_repository")
-  async def test_returns_partial_errors(self, mock_block, mock_sf, mock_tier):
+  async def test_returns_partial_errors(
+    self, mock_block, mock_enforce, mock_sf, mock_tier
+  ):
     session = MagicMock()
     mock_sf.return_value = session
     doc = _mock_document()
@@ -276,8 +291,9 @@ class TestUploadDocumentsBulk:
 class TestUpdateDocument:
   @pytest.mark.asyncio
   @patch(f"{MODULE}.SessionFactory")
+  @patch(f"{MODULE}._enforce_graph_access")
   @patch(f"{MODULE}._block_shared_repository")
-  async def test_updates_document(self, mock_block, mock_sf):
+  async def test_updates_document(self, mock_block, mock_enforce, mock_sf):
     session = MagicMock()
     mock_sf.return_value = session
     doc = _mock_document(title="Updated")
@@ -300,8 +316,9 @@ class TestUpdateDocument:
 
   @pytest.mark.asyncio
   @patch(f"{MODULE}.SessionFactory")
+  @patch(f"{MODULE}._enforce_graph_access")
   @patch(f"{MODULE}._block_shared_repository")
-  async def test_returns_404_when_not_found(self, mock_block, mock_sf):
+  async def test_returns_404_when_not_found(self, mock_block, mock_enforce, mock_sf):
     session = MagicMock()
     mock_sf.return_value = session
 
@@ -327,8 +344,9 @@ class TestUpdateDocument:
 class TestDeleteDocument:
   @pytest.mark.asyncio
   @patch(f"{MODULE}.SessionFactory")
+  @patch(f"{MODULE}._enforce_graph_access")
   @patch(f"{MODULE}._block_shared_repository")
-  async def test_deletes_document(self, mock_block, mock_sf):
+  async def test_deletes_document(self, mock_block, mock_enforce, mock_sf):
     session = MagicMock()
     mock_sf.return_value = session
 
@@ -345,8 +363,9 @@ class TestDeleteDocument:
 
   @pytest.mark.asyncio
   @patch(f"{MODULE}.SessionFactory")
+  @patch(f"{MODULE}._enforce_graph_access")
   @patch(f"{MODULE}._block_shared_repository")
-  async def test_returns_404_when_not_found(self, mock_block, mock_sf):
+  async def test_returns_404_when_not_found(self, mock_block, mock_enforce, mock_sf):
     session = MagicMock()
     mock_sf.return_value = session
 
