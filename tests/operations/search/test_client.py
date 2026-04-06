@@ -140,11 +140,91 @@ class TestBulkWriteMode:
 
 
 class TestSearch:
+  """Tests for BM25-only search (default mode)."""
+
+  def test_filters_by_graph_id(self, client, mock_opensearch):
+    """Critical security test: query must filter by graph_id."""
+    mock_opensearch.search.return_value = {"hits": {"total": {"value": 0}, "hits": []}}
+
+    client.search("test query", graph_id="sec")
+
+    call_args = mock_opensearch.search.call_args
+    body = call_args.kwargs["body"]
+    filter_clauses = body["query"]["bool"]["filter"]
+    assert filter_clauses[0] == {"term": {"graph_id": "sec"}}
+
+  def test_uses_bm25_not_hybrid(self, client, mock_opensearch):
+    mock_opensearch.search.return_value = {"hits": {"total": {"value": 0}, "hits": []}}
+
+    client.search("test", graph_id="sec")
+
+    call_args = mock_opensearch.search.call_args
+    body = call_args.kwargs["body"]
+    assert "bool" in body["query"]
+    assert "hybrid" not in body["query"]
+    # No search pipeline needed for BM25-only
+    assert (
+      "params" not in call_args.kwargs
+      or "search_pipeline" not in call_args.kwargs.get("params", {})
+    )
+
+  def test_no_post_filter(self, client, mock_opensearch):
+    mock_opensearch.search.return_value = {"hits": {"total": {"value": 0}, "hits": []}}
+
+    client.search("test", graph_id="sec")
+
+    call_args = mock_opensearch.search.call_args
+    body = call_args.kwargs["body"]
+    assert "post_filter" not in body
+
+  def test_applies_entity_filter(self, client, mock_opensearch):
+    mock_opensearch.search.return_value = {"hits": {"total": {"value": 0}, "hits": []}}
+
+    client.search("test", graph_id="sec", filters={"entity": "NVDA"})
+
+    call_args = mock_opensearch.search.call_args
+    body = call_args.kwargs["body"]
+    filter_clauses = body["query"]["bool"]["filter"]
+    assert len(filter_clauses) == 2  # graph_id + entity
+
+  def test_applies_form_type_filter(self, client, mock_opensearch):
+    mock_opensearch.search.return_value = {"hits": {"total": {"value": 0}, "hits": []}}
+
+    client.search("test", graph_id="sec", filters={"form_type": "10-K"})
+
+    call_args = mock_opensearch.search.call_args
+    body = call_args.kwargs["body"]
+    filter_clauses = body["query"]["bool"]["filter"]
+    assert {"term": {"form_type": "10-K"}} in filter_clauses
+
+  def test_includes_highlights(self, client, mock_opensearch):
+    mock_opensearch.search.return_value = {"hits": {"total": {"value": 0}, "hits": []}}
+
+    client.search("test", graph_id="sec")
+
+    call_args = mock_opensearch.search.call_args
+    body = call_args.kwargs["body"]
+    assert "highlight" in body
+    assert "content" in body["highlight"]["fields"]
+
+  def test_excludes_embedding_from_source(self, client, mock_opensearch):
+    mock_opensearch.search.return_value = {"hits": {"total": {"value": 0}, "hits": []}}
+
+    client.search("test", graph_id="sec")
+
+    call_args = mock_opensearch.search.call_args
+    body = call_args.kwargs["body"]
+    assert "embedding" in body["_source"]["excludes"]
+
+
+class TestSearchHybrid:
+  """Tests for hybrid BM25 + KNN search (opt-in mode)."""
+
   def test_bm25_filters_by_graph_id(self, client, mock_opensearch):
     """Critical security test: BM25 sub-query must filter by graph_id."""
     mock_opensearch.search.return_value = {"hits": {"total": {"value": 0}, "hits": []}}
 
-    client.search("test query", DUMMY_EMBEDDING, graph_id="sec")
+    client.search_hybrid("test query", DUMMY_EMBEDDING, graph_id="sec")
 
     call_args = mock_opensearch.search.call_args
     body = call_args.kwargs["body"]
@@ -156,7 +236,7 @@ class TestSearch:
     """Critical security test: KNN sub-query must filter by graph_id."""
     mock_opensearch.search.return_value = {"hits": {"total": {"value": 0}, "hits": []}}
 
-    client.search("test query", DUMMY_EMBEDDING, graph_id="sec")
+    client.search_hybrid("test query", DUMMY_EMBEDDING, graph_id="sec")
 
     call_args = mock_opensearch.search.call_args
     body = call_args.kwargs["body"]
@@ -168,7 +248,7 @@ class TestSearch:
     """Tenant isolation must be inside sub-queries, not post_filter."""
     mock_opensearch.search.return_value = {"hits": {"total": {"value": 0}, "hits": []}}
 
-    client.search("test", DUMMY_EMBEDDING, graph_id="sec")
+    client.search_hybrid("test", DUMMY_EMBEDDING, graph_id="sec")
 
     call_args = mock_opensearch.search.call_args
     body = call_args.kwargs["body"]
@@ -177,7 +257,7 @@ class TestSearch:
   def test_uses_hybrid_query(self, client, mock_opensearch):
     mock_opensearch.search.return_value = {"hits": {"total": {"value": 0}, "hits": []}}
 
-    client.search("test", DUMMY_EMBEDDING, graph_id="sec")
+    client.search_hybrid("test", DUMMY_EMBEDDING, graph_id="sec")
 
     call_args = mock_opensearch.search.call_args
     body = call_args.kwargs["body"]
@@ -190,7 +270,7 @@ class TestSearch:
   def test_uses_search_pipeline(self, client, mock_opensearch):
     mock_opensearch.search.return_value = {"hits": {"total": {"value": 0}, "hits": []}}
 
-    client.search("test", DUMMY_EMBEDDING, graph_id="sec")
+    client.search_hybrid("test", DUMMY_EMBEDDING, graph_id="sec")
 
     call_args = mock_opensearch.search.call_args
     assert call_args.kwargs["params"]["search_pipeline"] == HYBRID_PIPELINE_NAME
@@ -198,7 +278,9 @@ class TestSearch:
   def test_applies_entity_filter_to_both_subqueries(self, client, mock_opensearch):
     mock_opensearch.search.return_value = {"hits": {"total": {"value": 0}, "hits": []}}
 
-    client.search("test", DUMMY_EMBEDDING, graph_id="sec", filters={"entity": "NVDA"})
+    client.search_hybrid(
+      "test", DUMMY_EMBEDDING, graph_id="sec", filters={"entity": "NVDA"}
+    )
 
     call_args = mock_opensearch.search.call_args
     body = call_args.kwargs["body"]
@@ -212,7 +294,7 @@ class TestSearch:
   def test_applies_form_type_filter(self, client, mock_opensearch):
     mock_opensearch.search.return_value = {"hits": {"total": {"value": 0}, "hits": []}}
 
-    client.search(
+    client.search_hybrid(
       "test", DUMMY_EMBEDDING, graph_id="sec", filters={"form_type": "10-K"}
     )
 
@@ -224,7 +306,7 @@ class TestSearch:
   def test_includes_highlights(self, client, mock_opensearch):
     mock_opensearch.search.return_value = {"hits": {"total": {"value": 0}, "hits": []}}
 
-    client.search("test", DUMMY_EMBEDDING, graph_id="sec")
+    client.search_hybrid("test", DUMMY_EMBEDDING, graph_id="sec")
 
     call_args = mock_opensearch.search.call_args
     body = call_args.kwargs["body"]
@@ -234,7 +316,7 @@ class TestSearch:
   def test_excludes_embedding_from_source(self, client, mock_opensearch):
     mock_opensearch.search.return_value = {"hits": {"total": {"value": 0}, "hits": []}}
 
-    client.search("test", DUMMY_EMBEDDING, graph_id="sec")
+    client.search_hybrid("test", DUMMY_EMBEDDING, graph_id="sec")
 
     call_args = mock_opensearch.search.call_args
     body = call_args.kwargs["body"]

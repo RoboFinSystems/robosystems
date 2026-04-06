@@ -1,7 +1,8 @@
 """Search service — business logic layer over OpenSearch client.
 
-Provides graph_id-scoped hybrid search (BM25 + KNN) and retrieval,
-mapping OpenSearch responses to Pydantic models.
+Provides graph_id-scoped search and retrieval, mapping OpenSearch
+responses to Pydantic models. Default mode is BM25-only (fast);
+hybrid BM25 + KNN is opt-in via semantic=True on SearchRequest.
 """
 
 from __future__ import annotations
@@ -31,7 +32,7 @@ SNIPPET_FALLBACK_LENGTH = 300
 
 
 class SearchService:
-  """Hybrid search service scoped by graph_id."""
+  """Search service scoped by graph_id. BM25 default, hybrid opt-in."""
 
   def __init__(self, client: OpenSearchClient) -> None:
     self.client = client
@@ -48,7 +49,12 @@ class SearchService:
     return self._embedding_service
 
   def search_documents(self, graph_id: str, request: SearchRequest) -> SearchResponse:
-    """Hybrid search documents with graph_id isolation."""
+    """Search documents with graph_id isolation.
+
+    Default mode is BM25-only (fast keyword search). When request.semantic
+    is True, uses hybrid BM25 + KNN search which adds vector similarity
+    scoring at the cost of higher latency on large corpora.
+    """
     filters: dict[str, Any] = {}
     if request.entity:
       filters["entity"] = request.entity
@@ -67,15 +73,24 @@ class SearchService:
     if request.date_to:
       filters["date_to"] = request.date_to
 
-    query_embedding = self.embedding_service.embed_single(request.query)
-    result = self.client.search(
-      query=request.query,
-      query_embedding=query_embedding,
-      graph_id=graph_id,
-      filters=filters if filters else None,
-      size=request.size,
-      offset=request.offset,
-    )
+    if request.semantic:
+      query_embedding = self.embedding_service.embed_single(request.query)
+      result = self.client.search_hybrid(
+        query=request.query,
+        query_embedding=query_embedding,
+        graph_id=graph_id,
+        filters=filters if filters else None,
+        size=request.size,
+        offset=request.offset,
+      )
+    else:
+      result = self.client.search(
+        query=request.query,
+        graph_id=graph_id,
+        filters=filters if filters else None,
+        size=request.size,
+        offset=request.offset,
+      )
 
     hits = []
     for hit in result.get("hits", {}).get("hits", []):

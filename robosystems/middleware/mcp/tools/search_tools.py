@@ -106,6 +106,11 @@ class SearchDocumentsTool(_SearchToolMixin):
             "type": "integer",
             "description": "Optional: filter by fiscal year",
           },
+          "semantic": {
+            "type": "boolean",
+            "description": "Enable hybrid semantic search (BM25 + KNN vector similarity). Default is BM25-only which is faster. Use semantic=true for meaning-based search when keyword matching is insufficient.",
+            "default": False,
+          },
           "size": {
             "type": "integer",
             "description": "Max results (default 10, max 50)",
@@ -136,6 +141,7 @@ class SearchDocumentsTool(_SearchToolMixin):
       section=arguments.get("section"),
       element=arguments.get("element"),
       fiscal_year=arguments.get("fiscal_year"),
+      semantic=arguments.get("semantic", False),
       size=min(arguments.get("size", 10), 50),
     )
 

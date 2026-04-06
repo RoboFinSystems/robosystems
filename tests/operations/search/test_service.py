@@ -60,22 +60,31 @@ class TestSearchDocuments:
     assert response.hits[0].snippet == "...tariff risk exposure..."
     assert response.hits[0].entity_ticker == "NVDA"
 
-  def test_always_embeds_query(self, service, mock_client, mock_embedding_service):
-    """Hybrid search always generates embeddings."""
+  def test_default_uses_bm25(self, service, mock_client, mock_embedding_service):
+    """Default search uses BM25-only (no embedding)."""
     mock_client.search.return_value = {"hits": {"total": {"value": 0}, "hits": []}}
 
     request = SearchRequest(query="supply chain risk")
     service.search_documents("sec", request)
 
-    mock_embedding_service.embed_single.assert_called_once_with("supply chain risk")
+    mock_embedding_service.embed_single.assert_not_called()
+    mock_client.search.assert_called_once()
+    mock_client.search_hybrid.assert_not_called()
 
-  def test_passes_embedding_to_client(self, service, mock_client):
-    mock_client.search.return_value = {"hits": {"total": {"value": 0}, "hits": []}}
+  def test_semantic_flag_uses_hybrid(
+    self, service, mock_client, mock_embedding_service
+  ):
+    """semantic=True uses hybrid search with embedding."""
+    mock_client.search_hybrid.return_value = {
+      "hits": {"total": {"value": 0}, "hits": []}
+    }
 
-    request = SearchRequest(query="test")
+    request = SearchRequest(query="supply chain risk", semantic=True)
     service.search_documents("sec", request)
 
-    call_kwargs = mock_client.search.call_args.kwargs
+    mock_embedding_service.embed_single.assert_called_once_with("supply chain risk")
+    mock_client.search_hybrid.assert_called_once()
+    call_kwargs = mock_client.search_hybrid.call_args.kwargs
     assert call_kwargs["query_embedding"] == [0.1] * 384
 
   def test_empty_results(self, service, mock_client):
