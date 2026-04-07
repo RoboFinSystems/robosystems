@@ -520,6 +520,30 @@ class DuckDBTableManager:
           parquet_columns = [col[0] for col in parquet_probe]
           parquet_has_from_to = "from" in parquet_columns and "to" in parquet_columns
 
+          # Schema evolution: add any new parquet columns missing from the table.
+          # This handles cases where a new property was added to the schema after
+          # the table was initially created by a full rebuild.
+          table_col_set = set(column_names)
+          # Build a map of parquet column name → DuckDB type from the probe
+          parquet_type_map = {col[0]: col[1] for col in parquet_probe}
+          # Account for from/to → src/dst rename done during initial CREATE TABLE
+          rename_map = {"from": "src", "to": "dst"}
+          new_cols = [
+            c
+            for c in parquet_columns
+            if c not in table_col_set and rename_map.get(c, c) not in table_col_set
+          ]
+          if new_cols:
+            for col_name in new_cols:
+              col_type = parquet_type_map.get(col_name, "VARCHAR")
+              conn.execute(
+                f'ALTER TABLE {quoted_table} ADD COLUMN "{col_name}" {col_type}'
+              )
+              logger.info(
+                f"Schema evolution: added column {col_name} ({col_type}) "
+                f"to {request.table_name}"
+              )
+
           # Build dedup: first deduplicate within the incoming batch (intra-batch),
           # then filter out rows already in the target table (inter-batch).
           # Intra-batch dedup is needed when multiple parquet files (e.g., from
@@ -587,11 +611,29 @@ class DuckDBTableManager:
             sql = f"INSERT INTO {quoted_table} SELECT {select_expr} FROM {parquet_read} t {inter_dedup}"
         else:
           # Simple append — no dedup
+          # Schema evolution: add any new parquet columns missing from the table
+          append_parquet_probe = conn.execute(
+            f"SELECT * FROM {parquet_read} LIMIT 0"
+          ).description
+          append_columns = [col[0] for col in append_parquet_probe]
+          table_probe = conn.execute(
+            f"SELECT * FROM {quoted_table} LIMIT 0"
+          ).description
+          table_col_set = {col[0] for col in table_probe}
+          append_type_map = {col[0]: col[1] for col in append_parquet_probe}
+          new_append_cols = [c for c in append_columns if c not in table_col_set]
+          if new_append_cols:
+            for col_name in new_append_cols:
+              col_type = append_type_map.get(col_name, "VARCHAR")
+              conn.execute(
+                f'ALTER TABLE {quoted_table} ADD COLUMN "{col_name}" {col_type}'
+              )
+              logger.info(
+                f"Schema evolution: added column {col_name} ({col_type}) "
+                f"to {request.table_name}"
+              )
+
           if null_cols:
-            probe_result = conn.execute(
-              f"SELECT * FROM {parquet_read} LIMIT 0"
-            ).description
-            append_columns = [col[0] for col in probe_result]
             append_expr = ", ".join(
               f'NULL AS "{c}"' if c in null_cols else f'"{c}"' for c in append_columns
             )

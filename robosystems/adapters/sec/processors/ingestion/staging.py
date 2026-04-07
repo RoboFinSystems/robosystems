@@ -576,7 +576,7 @@ class DuckDBStager:
           log_progress=log_progress,
           table_index=i,
           total_tables=total_tables,
-          drop_on_retry=not is_entity,
+          drop_on_retry=False,
         )
 
         if success and table_info:
