@@ -119,6 +119,7 @@ def query_os(path, body=None, method="POST"):
 action = "{action}"
 graph_id = "{graph_id}"
 source_type = "{source_type}"
+before_date = "{before_date}"
 dry_run = "{dry_run}" == "true"
 
 if action == "count":
@@ -179,10 +180,12 @@ elif action == "search":
     }}))
 
 elif action == "delete":
-    # Build query: filter by graph_id + optional source_type
+    # Build query: filter by graph_id + optional source_type + optional date range
     filters = [{{"term": {{"graph_id": graph_id}}}}]
     if source_type:
         filters.append({{"term": {{"source_type": source_type}}}})
+    if before_date:
+        filters.append({{"range": {{"filing_date": {{"lt": before_date}}}}}})
 
     query = {{"query": {{"bool": {{"filter": filters}}}}}}
 
@@ -239,6 +242,7 @@ def _run_opensearch_script(
   query_text: str = "",
   size: int = 10,
   source_type: str = "",
+  before_date: str = "",
   dry_run: bool = False,
 ) -> dict:
   """Run OpenSearch query script on bastion via SSM."""
@@ -252,6 +256,7 @@ def _run_opensearch_script(
     graph_id=graph_id,
     size=size,
     source_type=source_type,
+    before_date=before_date,
     dry_run="true" if dry_run else "false",
   )
 
@@ -393,9 +398,14 @@ def search_query(client, query_text, graph_id, size, json_output):
 @search.command("delete")
 @click.argument("source_type")
 @click.option("--graph-id", default="sec", help="Graph ID (default: sec)")
+@click.option(
+  "--before",
+  default="",
+  help="Delete docs with filing_date before this date (e.g. 2025-01-01)",
+)
 @click.option("--force", is_flag=True, help="Skip confirmation prompt")
 @click.pass_obj
-def search_delete(client, source_type, graph_id, force):
+def search_delete(client, source_type, graph_id, before, force):
   """Delete documents by source_type from the index.
 
   Runs an async delete-by-query on OpenSearch. Use 'search count' to monitor progress.
@@ -406,6 +416,8 @@ def search_delete(client, source_type, graph_id, force):
 
     just admin prod search delete ixbrl_disclosure --graph-id sec
 
+    just admin prod search delete narrative_section --before 2025-01-01
+
     just admin prod search delete narrative_section --force
   """
   # Dry run to get count
@@ -414,20 +426,25 @@ def search_delete(client, source_type, graph_id, force):
     action="delete",
     graph_id=graph_id,
     source_type=source_type,
+    before_date=before,
     dry_run=True,
   )
 
   count = data.get("count", 0)
   if count == 0:
-    console.print(
-      f"\n[yellow]No documents found with source_type={source_type} in graph_id={graph_id}[/yellow]\n"
-    )
+    filter_desc = f"source_type={source_type}, graph_id={graph_id}"
+    if before:
+      filter_desc += f", filing_date < {before}"
+    console.print(f"\n[yellow]No documents found with {filter_desc}[/yellow]\n")
     return
+
+  filter_desc = f"source_type={source_type}, graph_id={graph_id}"
+  if before:
+    filter_desc += f", filing_date < {before}"
 
   if not force:
     console.print(
-      f"\n[bold red]Will delete {count:,} documents[/bold red] "
-      f"(source_type={source_type}, graph_id={graph_id})"
+      f"\n[bold red]Will delete {count:,} documents[/bold red] ({filter_desc})"
     )
     if not click.confirm("Proceed?"):
       console.print("[dim]Cancelled.[/dim]")
@@ -439,6 +456,7 @@ def search_delete(client, source_type, graph_id, force):
     action="delete",
     graph_id=graph_id,
     source_type=source_type,
+    before_date=before,
   )
 
   task_id = data.get("task")
