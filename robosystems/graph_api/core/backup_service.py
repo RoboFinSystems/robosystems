@@ -10,7 +10,7 @@ Supports five backup types:
 - replica: Raw .lbug upload to S3 (downloaded by replica fleet at startup)
 - shared_repository: Compressed tar.gz to S3 (legacy, prefer r2_download)
 - duckdb_staging: Raw .duckdb upload to S3 (for local dev / analytics)
-- r2_download: Raw .lbug upload to Cloudflare R2 (zero-egress subscriber downloads)
+- r2_download: zstd-compressed .lbug.zst upload to Cloudflare R2 (zero-egress subscriber downloads)
 - standard: ZIP + optional encrypt to S3 (existing user backup flow)
 """
 
@@ -336,12 +336,16 @@ class OnInstanceBackupService:
 
       # zstd -T0 (all cores), --long (128MB window), -12 (high compression)
       compress_start = datetime.now(UTC)
-      subprocess.run(
-        ["zstd", "-T0", "--long", "-12", str(db_path), "-o", str(compressed_file)],
-        check=True,
-        capture_output=True,
-        text=True,
-      )
+      try:
+        subprocess.run(
+          ["zstd", "-T0", "--long", "-12", str(db_path), "-o", str(compressed_file)],
+          check=True,
+          capture_output=True,
+          text=True,
+        )
+      except subprocess.CalledProcessError as e:
+        logger.error(f"[Task {task_id}] zstd compression failed: {e.stderr}")
+        raise
       compress_time = (datetime.now(UTC) - compress_start).total_seconds()
 
       compressed_size = compressed_file.stat().st_size
