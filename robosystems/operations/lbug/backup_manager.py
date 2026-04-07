@@ -192,8 +192,11 @@ class BackupManager:
           and isinstance(backup.backup_metadata, dict)
           and backup.backup_metadata.get("storage") == "r2"
         )
-        # R2 backups are raw .lbug files, S3 backups are .zip
-        extension = ".lbug" if is_r2 else ".zip"
+        if is_r2:
+          fmt = backup.backup_metadata.get("format", "raw")
+          extension = ".lbug.zst" if fmt == "zstd" else ".lbug"
+        else:
+          extension = ".zip"
         filename = f"{graph_id}_{timestamp_str}{extension}"
 
         # Choose S3 or R2 client based on backup storage type
