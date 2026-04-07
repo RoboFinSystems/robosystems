@@ -249,6 +249,10 @@ class SECNarrativeIndexConfig(Config):
   force_reindex: bool = Field(
     default=False, description="Re-index all documents (ignore incremental skip)"
   )
+  skip_embeddings: bool = Field(
+    default=False,
+    description="Index without embeddings (BM25 only). Reduces memory pressure on OpenSearch.",
+  )
 
 
 class SECiXBRLIndexConfig(Config):
@@ -267,4 +271,8 @@ class SECiXBRLIndexConfig(Config):
   )
   force_reindex: bool = Field(
     default=False, description="Re-index all documents (ignore incremental skip)"
+  )
+  skip_embeddings: bool = Field(
+    default=False,
+    description="Index without embeddings (BM25 only). Reduces memory pressure on OpenSearch.",
   )

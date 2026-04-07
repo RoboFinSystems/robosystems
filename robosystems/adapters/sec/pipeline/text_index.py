@@ -573,7 +573,8 @@ def sec_narratives_indexed(
 
       # Batch index to limit memory
       if len(documents) >= batch_size:
-        _embed_document_batch(enricher, documents)
+        if not config.skip_embeddings:
+          _embed_document_batch(enricher, documents)
         batch_result = os_client.bulk_index(documents)
         total_indexed += batch_result["indexed"]
         errors += batch_result["errors"]
@@ -584,7 +585,8 @@ def sec_narratives_indexed(
 
     # Index remaining documents
     if documents:
-      _embed_document_batch(enricher, documents)
+      if not config.skip_embeddings:
+        _embed_document_batch(enricher, documents)
       batch_result = os_client.bulk_index(documents)
       total_indexed += batch_result["indexed"]
       errors += batch_result["errors"]
@@ -975,7 +977,8 @@ def sec_ixbrl_disclosures_indexed(
 
       # Batch index to limit memory
       if len(documents) >= batch_size:
-        _embed_document_batch(enricher, documents)
+        if not config.skip_embeddings:
+          _embed_document_batch(enricher, documents)
         batch_result = os_client.bulk_index(documents)
         total_indexed += batch_result["indexed"]
         errors += batch_result["errors"]
@@ -986,7 +989,8 @@ def sec_ixbrl_disclosures_indexed(
 
     # Index remaining
     if documents:
-      _embed_document_batch(enricher, documents)
+      if not config.skip_embeddings:
+        _embed_document_batch(enricher, documents)
       batch_result = os_client.bulk_index(documents)
       total_indexed += batch_result["indexed"]
       errors += batch_result["errors"]
