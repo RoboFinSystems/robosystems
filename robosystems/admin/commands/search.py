@@ -57,9 +57,10 @@ def get_signature_key(key, date_stamp, rn, sn):
     return sign(sign(sign(sign(("AWS4" + key).encode("utf-8"), date_stamp), rn), sn), "aws4_request")
 
 
-def query_os(path, body, method="POST"):
+def query_os(path, body=None, method="POST"):
     import urllib.parse
-    data = json.dumps(body)
+    has_body = body is not None
+    data = json.dumps(body) if has_body else ""
     t = datetime.datetime.utcnow()
     amz_date = t.strftime("%Y%m%dT%H%M%SZ")
     date_stamp = t.strftime("%Y%m%d")
@@ -72,11 +73,18 @@ def query_os(path, body, method="POST"):
         canonical_uri = path
         canonical_qs = ""
 
-    canonical_headers = (
-        f"content-type:application/json\\nhost:{{host}}\\n"
-        f"x-amz-date:{{amz_date}}\\nx-amz-security-token:{{session_token}}\\n"
-    )
-    signed_headers = "content-type;host;x-amz-date;x-amz-security-token"
+    if has_body:
+        canonical_headers = (
+            f"content-type:application/json\\nhost:{{host}}\\n"
+            f"x-amz-date:{{amz_date}}\\nx-amz-security-token:{{session_token}}\\n"
+        )
+        signed_headers = "content-type;host;x-amz-date;x-amz-security-token"
+    else:
+        canonical_headers = (
+            f"host:{{host}}\\n"
+            f"x-amz-date:{{amz_date}}\\nx-amz-security-token:{{session_token}}\\n"
+        )
+        signed_headers = "host;x-amz-date;x-amz-security-token"
     payload_hash = hashlib.sha256(data.encode("utf-8")).hexdigest()
     canonical_request = f"{{method}}\\n{{canonical_uri}}\\n{{canonical_qs}}\\n{{canonical_headers}}\\n{{signed_headers}}\\n{{payload_hash}}"
 
@@ -95,14 +103,15 @@ def query_os(path, body, method="POST"):
     )
 
     headers = {{
-        "Content-Type": "application/json",
         "X-Amz-Date": amz_date,
         "X-Amz-Security-Token": session_token,
         "Authorization": auth,
     }}
+    if has_body:
+        headers["Content-Type"] = "application/json"
 
     url = "https://" + host + path
-    req = urllib.request.Request(url, data=data.encode(), headers=headers, method=method)
+    req = urllib.request.Request(url, data=data.encode() if has_body else None, headers=headers, method=method)
     resp = urllib.request.urlopen(req, context=ssl.create_default_context())
     return json.loads(resp.read().decode())
 
@@ -187,6 +196,11 @@ elif action == "delete":
         # Async delete-by-query
         result = query_os(f"/{{index_name}}/_delete_by_query?wait_for_completion=false", query)
         print(json.dumps({{"count": doc_count, "deleted": doc_count, "task": result.get("task")}}))
+
+elif action == "drop-index":
+    # Force merge to 1 segment purges deleted doc tombstones and frees HNSW memory
+    result = query_os(f"/{{index_name}}/_forcemerge?max_num_segments=1", {{}})
+    print(json.dumps(result))
 """
 
 
@@ -436,3 +450,37 @@ def search_delete(client, source_type, graph_id, force):
   console.print(
     f"\nRun [bold]just admin {client.environment} search count --graph-id {graph_id}[/bold] to monitor progress.\n"
   )
+
+
+@search.command("drop-index")
+@click.option("--force", is_flag=True, help="Skip confirmation prompt")
+@click.pass_obj
+def search_drop_index(client, force):
+  """Drop and recreate the entire OpenSearch index.
+
+  Frees all memory including deleted segment tombstones. The index is
+  automatically recreated with the correct mapping on the next indexing run.
+
+  Examples:
+
+    just admin prod search drop-index
+
+    just admin prod search drop-index --force
+  """
+  if not force:
+    console.print(
+      "\n[bold red]This will DELETE the entire 'documents' index[/bold red] "
+      f"on {client.environment}, including all source types."
+    )
+    if not click.confirm("Proceed?"):
+      console.print("[dim]Cancelled.[/dim]")
+      return
+
+  data = _run_opensearch_script(client, action="drop-index")
+  acknowledged = data.get("acknowledged", False)
+
+  if acknowledged:
+    console.print("\n[green]Index dropped successfully.[/green]")
+    console.print("It will be recreated automatically on the next indexing run.\n")
+  else:
+    console.print(f"\n[red]Unexpected response:[/red] {data}\n")
