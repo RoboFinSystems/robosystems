@@ -10,11 +10,12 @@ Supports five backup types:
 - replica: Raw .lbug upload to S3 (downloaded by replica fleet at startup)
 - shared_repository: Compressed tar.gz to S3 (legacy, prefer r2_download)
 - duckdb_staging: Raw .duckdb upload to S3 (for local dev / analytics)
-- r2_download: Raw .lbug upload to Cloudflare R2 (zero-egress subscriber downloads)
+- r2_download: zstd-compressed .lbug.zst upload to Cloudflare R2 (zero-egress subscriber downloads)
 - standard: ZIP + optional encrypt to S3 (existing user backup flow)
 """
 
 import hashlib
+import subprocess
 import tarfile
 import tempfile
 from datetime import UTC, datetime
@@ -139,13 +140,12 @@ class OnInstanceBackupService:
           db_path, bucket, key, task_id, db_size, backup_type=backup_type
         )
       elif backup_type == "r2_download":
-        result = self._upload_replica(
+        result = self._compress_and_upload_replica(
           db_path,
           bucket,
           key,
           task_id,
           db_size,
-          backup_type=backup_type,
           s3_client=self._get_r2_client(),
         )
       elif backup_type == "shared_repository":
@@ -299,6 +299,112 @@ class OnInstanceBackupService:
       "s3_key": key,
       "original_size_bytes": db_size,
       "uploaded_size_bytes": uploaded_size,
+      "uploaded_at": datetime.now(UTC).isoformat(),
+    }
+
+  def _compress_and_upload_replica(
+    self,
+    db_path: Path,
+    bucket: str,
+    key: str,
+    task_id: str,
+    db_size: int,
+    s3_client=None,
+  ) -> dict[str, Any]:
+    """Compress database with zstd and upload to R2.
+
+    Uses the system zstd binary (pre-installed on Amazon Linux 2023) with
+    multithreading for maximum throughput on ARM64 (r7g) instances.
+    Temp file is written to EBS-backed directory, not /tmp (RAM-backed).
+
+    Compression level 12 with --long (128MB window) is chosen because
+    CPU time is cheap relative to data transfer costs ($0.135/GB through NAT).
+    """
+    logger.info(f"[Task {task_id}] Compressing {db_path.name} with zstd before upload")
+
+    if s3_client is None:
+      s3_client = self._get_r2_client()
+
+    # Use EBS-backed temp dir (same pattern as _upload_shared_repository)
+    ebs_temp_dir = Path(env.LBUG_DATABASE_PATH).parent / "backup-tmp"
+    ebs_temp_dir.mkdir(parents=True, exist_ok=True)
+    self._cleanup_stale_temp_dirs(ebs_temp_dir, max_age_hours=24)
+
+    with tempfile.TemporaryDirectory(dir=ebs_temp_dir) as temp_dir:
+      temp_path = Path(temp_dir)
+      compressed_file = temp_path / f"{db_path.stem}.lbug.zst"
+
+      # zstd -T0 (all cores), --long (128MB window), -12 (high compression)
+      compress_start = datetime.now(UTC)
+      try:
+        subprocess.run(
+          ["zstd", "-T0", "--long", "-12", str(db_path), "-o", str(compressed_file)],
+          check=True,
+          capture_output=True,
+          text=True,
+        )
+      except subprocess.CalledProcessError as e:
+        logger.error(f"[Task {task_id}] zstd compression failed: {e.stderr}")
+        raise
+      compress_time = (datetime.now(UTC) - compress_start).total_seconds()
+
+      compressed_size = compressed_file.stat().st_size
+      compression_ratio = compressed_size / max(db_size, 1)
+
+      logger.info(
+        f"[Task {task_id}] zstd compression complete: "
+        f"{db_size / (1024**3):.2f}GB -> {compressed_size / (1024**3):.2f}GB "
+        f"({compression_ratio:.1%}) in {compress_time:.1f}s"
+      )
+
+      # Upload compressed file with multipart
+      transfer_config = TransferConfig(
+        multipart_chunksize=S3_MULTIPART_CHUNKSIZE,
+        multipart_threshold=S3_MULTIPART_THRESHOLD,
+        max_concurrency=S3_MAX_CONCURRENCY,
+      )
+
+      uploaded_bytes = 0
+
+      def progress_callback(bytes_transferred):
+        nonlocal uploaded_bytes
+        uploaded_bytes += bytes_transferred
+        percent = min(10 + int((uploaded_bytes / max(compressed_size, 1)) * 85), 95)
+        logger.debug(
+          f"[Task {task_id}] Upload progress: {uploaded_bytes / (1024**3):.2f} GB "
+          f"({percent}%)"
+        )
+
+      s3_client.upload_file(
+        str(compressed_file),
+        bucket,
+        key,
+        Config=transfer_config,
+        Callback=progress_callback,
+        ExtraArgs={
+          "Metadata": {
+            "backup_type": "r2_download",
+            "created_at": datetime.now(UTC).isoformat(),
+            "original_size": str(db_size),
+            "compression": "zstd",
+            "compression_level": "12",
+          },
+        },
+      )
+
+    # Verify upload (after temp dir cleanup)
+    head = s3_client.head_object(Bucket=bucket, Key=key)
+    uploaded_size = head["ContentLength"]
+
+    return {
+      "status": "success",
+      "s3_uri": f"s3://{bucket}/{key}",
+      "s3_bucket": bucket,
+      "s3_key": key,
+      "original_size_bytes": db_size,
+      "compressed_size_bytes": uploaded_size,
+      "compression_ratio": round(compression_ratio, 3),
+      "compress_time_seconds": round(compress_time, 1),
       "uploaded_at": datetime.now(UTC).isoformat(),
     }
 

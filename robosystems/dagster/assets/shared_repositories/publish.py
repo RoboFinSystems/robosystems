@@ -310,12 +310,19 @@ def publish_to_r2(
   r2_config = env.get_r2_config()
   r2_client = boto3.client("s3", **r2_config)
   head = r2_client.head_object(Bucket=bucket, Key=r2_key)
-  file_size = head["ContentLength"]
+  compressed_size = head["ContentLength"]
   last_modified = head["LastModified"]
+
+  # Extract original (uncompressed) size from backup service result
+  backup_result = result.get("result", {})
+  original_size = backup_result.get("original_size_bytes", compressed_size)
+  compression_ratio = backup_result.get("compression_ratio", 1.0)
 
   context.log.info(
     f"Database published to R2: {r2_uri} "
-    f"(size: {file_size / (1024**3):.2f}GB, modified: {last_modified})"
+    f"(original: {original_size / (1024**3):.2f}GB, "
+    f"compressed: {compressed_size / (1024**3):.2f}GB, "
+    f"ratio: {compression_ratio:.1%}, modified: {last_modified})"
   )
 
   # Create/update GraphBackup record
@@ -323,7 +330,8 @@ def publish_to_r2(
     graph_id=graph_id,
     bucket=bucket,
     key=r2_key,
-    file_size=file_size,
+    original_size=original_size,
+    compressed_size=compressed_size,
     backup_type="r2_download",
     db_resource=db_resource,
     dagster_run_id=context.run_id,
@@ -334,8 +342,10 @@ def publish_to_r2(
       "r2_uri": r2_uri,
       "r2_bucket": bucket,
       "r2_key": r2_key,
-      "file_size_bytes": file_size,
-      "file_size_gb": round(file_size / (1024**3), 2),
+      "original_size_bytes": original_size,
+      "compressed_size_bytes": compressed_size,
+      "compression_ratio": round(compression_ratio, 3),
+      "file_size_gb": round(compressed_size / (1024**3), 2),
       "last_modified": last_modified.isoformat(),
       "graph_id": graph_id,
       "published_at": datetime.now(UTC).isoformat(),
@@ -348,7 +358,7 @@ def _build_r2_destination(graph_id: str) -> dict[str, str]:
   bucket = env.R2_BUCKET_NAME
   if not bucket:
     raise RuntimeError("R2_BUCKET_NAME not configured")
-  r2_key = get_r2_download_key(graph_id, ".lbug")
+  r2_key = get_r2_download_key(graph_id, ".lbug.zst")
   r2_uri = f"r2://{bucket}/{r2_key}"
   return {"bucket": bucket, "r2_key": r2_key, "r2_uri": r2_uri}
 
@@ -364,7 +374,7 @@ def _run_r2_backup(graph_id: str, bucket: str, r2_key: str) -> dict[str, Any]:
         graph_id=graph_id,
         backup_type="r2_download",
         s3_destination={"bucket": bucket, "key": r2_key},
-        compression=False,
+        compression=True,
         checkpoint=True,
         timeout=TASK_TIME_LIMIT,
       )
@@ -378,7 +388,8 @@ def _upsert_r2_backup_record(
   graph_id: str,
   bucket: str,
   key: str,
-  file_size: int,
+  original_size: int,
+  compressed_size: int,
   backup_type: str,
   db_resource,
   dagster_run_id: str = "",
@@ -400,14 +411,14 @@ def _upsert_r2_backup_record(
     if existing:
       # Update existing record with new timestamp and size
       existing.completed_at = now
-      existing.original_size_bytes = file_size
-      existing.compressed_size_bytes = file_size  # Uncompressed
-      existing.encrypted_size_bytes = file_size
+      existing.original_size_bytes = original_size
+      existing.compressed_size_bytes = compressed_size
+      existing.encrypted_size_bytes = compressed_size
       existing.s3_bucket = bucket
       existing.s3_key = key
       existing.backup_metadata = {
         "storage": "r2",
-        "format": "raw",
+        "format": "zstd",
         "dagster_run_id": dagster_run_id,
       }
       existing.updated_at = now
@@ -421,18 +432,18 @@ def _upsert_r2_backup_record(
         s3_bucket=bucket,
         s3_key=key,
         session=session,
-        compression_enabled=False,
+        compression_enabled=True,
         encryption_enabled=False,
       )
       backup.complete_backup(
         session=session,
-        original_size=file_size,
-        compressed_size=file_size,
-        encrypted_size=file_size,
+        original_size=original_size,
+        compressed_size=compressed_size,
+        encrypted_size=compressed_size,
         checksum="",
         metadata={
           "storage": "r2",
-          "format": "raw",
+          "format": "zstd",
           "dagster_run_id": dagster_run_id,
         },
       )
