@@ -543,11 +543,6 @@ class DuckDBTableManager:
                 f"Schema evolution: added column {col_name} ({col_type}) "
                 f"to {request.table_name}"
               )
-            # Refresh column_names after ALTER
-            probe_result = conn.execute(
-              f"SELECT * FROM {quoted_table} LIMIT 0"
-            ).description
-            column_names = [col[0] for col in probe_result]
 
           # Build dedup: first deduplicate within the incoming batch (intra-batch),
           # then filter out rows already in the target table (inter-batch).
