@@ -145,7 +145,6 @@
       "Bash(uv run python -m robosystems.admin.cli * cache delete-keys:*)",
       "Bash(uv run python -m robosystems.admin.cli * instances scale:*)",
       "Bash(uv run python -m robosystems.admin.cli * instances cleanup:*)",
-      "Bash(aws ssm send-command:*)",
       "Bash(git push:*)",
       "Bash(git reset:*)",
       "Bash(git clean:*)",

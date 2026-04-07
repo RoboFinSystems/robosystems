@@ -57,9 +57,10 @@ def get_signature_key(key, date_stamp, rn, sn):
     return sign(sign(sign(sign(("AWS4" + key).encode("utf-8"), date_stamp), rn), sn), "aws4_request")
 
 
-def query_os(path, body, method="POST"):
+def query_os(path, body=None, method="POST"):
     import urllib.parse
-    data = json.dumps(body)
+    has_body = body is not None
+    data = json.dumps(body) if has_body else ""
     t = datetime.datetime.utcnow()
     amz_date = t.strftime("%Y%m%dT%H%M%SZ")
     date_stamp = t.strftime("%Y%m%d")
@@ -72,11 +73,18 @@ def query_os(path, body, method="POST"):
         canonical_uri = path
         canonical_qs = ""
 
-    canonical_headers = (
-        f"content-type:application/json\\nhost:{{host}}\\n"
-        f"x-amz-date:{{amz_date}}\\nx-amz-security-token:{{session_token}}\\n"
-    )
-    signed_headers = "content-type;host;x-amz-date;x-amz-security-token"
+    if has_body:
+        canonical_headers = (
+            f"content-type:application/json\\nhost:{{host}}\\n"
+            f"x-amz-date:{{amz_date}}\\nx-amz-security-token:{{session_token}}\\n"
+        )
+        signed_headers = "content-type;host;x-amz-date;x-amz-security-token"
+    else:
+        canonical_headers = (
+            f"host:{{host}}\\n"
+            f"x-amz-date:{{amz_date}}\\nx-amz-security-token:{{session_token}}\\n"
+        )
+        signed_headers = "host;x-amz-date;x-amz-security-token"
     payload_hash = hashlib.sha256(data.encode("utf-8")).hexdigest()
     canonical_request = f"{{method}}\\n{{canonical_uri}}\\n{{canonical_qs}}\\n{{canonical_headers}}\\n{{signed_headers}}\\n{{payload_hash}}"
 
@@ -95,14 +103,15 @@ def query_os(path, body, method="POST"):
     )
 
     headers = {{
-        "Content-Type": "application/json",
         "X-Amz-Date": amz_date,
         "X-Amz-Security-Token": session_token,
         "Authorization": auth,
     }}
+    if has_body:
+        headers["Content-Type"] = "application/json"
 
     url = "https://" + host + path
-    req = urllib.request.Request(url, data=data.encode(), headers=headers, method=method)
+    req = urllib.request.Request(url, data=data.encode() if has_body else None, headers=headers, method=method)
     resp = urllib.request.urlopen(req, context=ssl.create_default_context())
     return json.loads(resp.read().decode())
 
@@ -110,6 +119,7 @@ def query_os(path, body, method="POST"):
 action = "{action}"
 graph_id = "{graph_id}"
 source_type = "{source_type}"
+before_date = "{before_date}"
 dry_run = "{dry_run}" == "true"
 
 if action == "count":
@@ -170,10 +180,12 @@ elif action == "search":
     }}))
 
 elif action == "delete":
-    # Build query: filter by graph_id + optional source_type
+    # Build query: filter by graph_id + optional source_type + optional date range
     filters = [{{"term": {{"graph_id": graph_id}}}}]
     if source_type:
         filters.append({{"term": {{"source_type": source_type}}}})
+    if before_date:
+        filters.append({{"range": {{"filing_date": {{"lt": before_date}}}}}})
 
     query = {{"query": {{"bool": {{"filter": filters}}}}}}
 
@@ -187,6 +199,11 @@ elif action == "delete":
         # Async delete-by-query
         result = query_os(f"/{{index_name}}/_delete_by_query?wait_for_completion=false", query)
         print(json.dumps({{"count": doc_count, "deleted": doc_count, "task": result.get("task")}}))
+
+elif action == "force-merge":
+    # Force merge to 1 segment purges deleted doc tombstones and frees HNSW memory
+    result = query_os(f"/{{index_name}}/_forcemerge?max_num_segments=1")
+    print(json.dumps(result))
 """
 
 
@@ -225,6 +242,7 @@ def _run_opensearch_script(
   query_text: str = "",
   size: int = 10,
   source_type: str = "",
+  before_date: str = "",
   dry_run: bool = False,
 ) -> dict:
   """Run OpenSearch query script on bastion via SSM."""
@@ -238,6 +256,7 @@ def _run_opensearch_script(
     graph_id=graph_id,
     size=size,
     source_type=source_type,
+    before_date=before_date,
     dry_run="true" if dry_run else "false",
   )
 
@@ -379,9 +398,14 @@ def search_query(client, query_text, graph_id, size, json_output):
 @search.command("delete")
 @click.argument("source_type")
 @click.option("--graph-id", default="sec", help="Graph ID (default: sec)")
+@click.option(
+  "--before",
+  default="",
+  help="Delete docs with filing_date before this date (e.g. 2025-01-01)",
+)
 @click.option("--force", is_flag=True, help="Skip confirmation prompt")
 @click.pass_obj
-def search_delete(client, source_type, graph_id, force):
+def search_delete(client, source_type, graph_id, before, force):
   """Delete documents by source_type from the index.
 
   Runs an async delete-by-query on OpenSearch. Use 'search count' to monitor progress.
@@ -392,6 +416,8 @@ def search_delete(client, source_type, graph_id, force):
 
     just admin prod search delete ixbrl_disclosure --graph-id sec
 
+    just admin prod search delete narrative_section --before 2025-01-01
+
     just admin prod search delete narrative_section --force
   """
   # Dry run to get count
@@ -400,20 +426,25 @@ def search_delete(client, source_type, graph_id, force):
     action="delete",
     graph_id=graph_id,
     source_type=source_type,
+    before_date=before,
     dry_run=True,
   )
 
   count = data.get("count", 0)
   if count == 0:
-    console.print(
-      f"\n[yellow]No documents found with source_type={source_type} in graph_id={graph_id}[/yellow]\n"
-    )
+    filter_desc = f"source_type={source_type}, graph_id={graph_id}"
+    if before:
+      filter_desc += f", filing_date < {before}"
+    console.print(f"\n[yellow]No documents found with {filter_desc}[/yellow]\n")
     return
+
+  filter_desc = f"source_type={source_type}, graph_id={graph_id}"
+  if before:
+    filter_desc += f", filing_date < {before}"
 
   if not force:
     console.print(
-      f"\n[bold red]Will delete {count:,} documents[/bold red] "
-      f"(source_type={source_type}, graph_id={graph_id})"
+      f"\n[bold red]Will delete {count:,} documents[/bold red] ({filter_desc})"
     )
     if not click.confirm("Proceed?"):
       console.print("[dim]Cancelled.[/dim]")
@@ -425,6 +456,7 @@ def search_delete(client, source_type, graph_id, force):
     action="delete",
     graph_id=graph_id,
     source_type=source_type,
+    before_date=before,
   )
 
   task_id = data.get("task")
@@ -436,3 +468,43 @@ def search_delete(client, source_type, graph_id, force):
   console.print(
     f"\nRun [bold]just admin {client.environment} search count --graph-id {graph_id}[/bold] to monitor progress.\n"
   )
+
+
+@search.command("force-merge")
+@click.option("--force", is_flag=True, help="Skip confirmation prompt")
+@click.pass_obj
+def search_force_merge(client, force):
+  """Compact index segments and purge deleted document tombstones.
+
+  Runs _forcemerge with max_num_segments=1 to reclaim memory from
+  deleted documents (e.g., after 'search delete'). This is a heavy
+  operation and may take several minutes on large indices.
+
+  Examples:
+
+    just admin prod search force-merge
+
+    just admin prod search force-merge --force
+  """
+  if not force:
+    console.print(
+      f"\n[bold yellow]Force merge the 'documents' index on {client.environment}?[/bold yellow]\n"
+      "This compacts all segments and purges deleted doc tombstones to free memory.\n"
+      "The operation is IO-intensive and may take several minutes."
+    )
+    if not click.confirm("Proceed?"):
+      console.print("[dim]Cancelled.[/dim]")
+      return
+
+  console.print("Running force merge (this may take a while)...")
+  data = _run_opensearch_script(client, action="force-merge")
+  shards = data.get("_shards", {})
+  failed = shards.get("failed", 0)
+
+  if failed == 0:
+    console.print(
+      f"\n[green]Force merge complete.[/green] "
+      f"({shards.get('successful', 0)}/{shards.get('total', 0)} shards merged)\n"
+    )
+  else:
+    console.print(f"\n[red]Force merge had {failed} failed shards:[/red] {data}\n")
