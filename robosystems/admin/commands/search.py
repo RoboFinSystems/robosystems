@@ -200,9 +200,9 @@ elif action == "delete":
         result = query_os(f"/{{index_name}}/_delete_by_query?wait_for_completion=false", query)
         print(json.dumps({{"count": doc_count, "deleted": doc_count, "task": result.get("task")}}))
 
-elif action == "drop-index":
+elif action == "force-merge":
     # Force merge to 1 segment purges deleted doc tombstones and frees HNSW memory
-    result = query_os(f"/{{index_name}}/_forcemerge?max_num_segments=1", {{}})
+    result = query_os(f"/{{index_name}}/_forcemerge?max_num_segments=1")
     print(json.dumps(result))
 """
 
@@ -470,35 +470,41 @@ def search_delete(client, source_type, graph_id, before, force):
   )
 
 
-@search.command("drop-index")
+@search.command("force-merge")
 @click.option("--force", is_flag=True, help="Skip confirmation prompt")
 @click.pass_obj
-def search_drop_index(client, force):
-  """Drop and recreate the entire OpenSearch index.
+def search_force_merge(client, force):
+  """Compact index segments and purge deleted document tombstones.
 
-  Frees all memory including deleted segment tombstones. The index is
-  automatically recreated with the correct mapping on the next indexing run.
+  Runs _forcemerge with max_num_segments=1 to reclaim memory from
+  deleted documents (e.g., after 'search delete'). This is a heavy
+  operation and may take several minutes on large indices.
 
   Examples:
 
-    just admin prod search drop-index
+    just admin prod search force-merge
 
-    just admin prod search drop-index --force
+    just admin prod search force-merge --force
   """
   if not force:
     console.print(
-      "\n[bold red]This will DELETE the entire 'documents' index[/bold red] "
-      f"on {client.environment}, including all source types."
+      f"\n[bold yellow]Force merge the 'documents' index on {client.environment}?[/bold yellow]\n"
+      "This compacts all segments and purges deleted doc tombstones to free memory.\n"
+      "The operation is IO-intensive and may take several minutes."
     )
     if not click.confirm("Proceed?"):
       console.print("[dim]Cancelled.[/dim]")
       return
 
-  data = _run_opensearch_script(client, action="drop-index")
-  acknowledged = data.get("acknowledged", False)
+  console.print("Running force merge (this may take a while)...")
+  data = _run_opensearch_script(client, action="force-merge")
+  shards = data.get("_shards", {})
+  failed = shards.get("failed", 0)
 
-  if acknowledged:
-    console.print("\n[green]Index dropped successfully.[/green]")
-    console.print("It will be recreated automatically on the next indexing run.\n")
+  if failed == 0:
+    console.print(
+      f"\n[green]Force merge complete.[/green] "
+      f"({shards.get('successful', 0)}/{shards.get('total', 0)} shards merged)\n"
+    )
   else:
-    console.print(f"\n[red]Unexpected response:[/red] {data}\n")
+    console.print(f"\n[red]Force merge had {failed} failed shards:[/red] {data}\n")
