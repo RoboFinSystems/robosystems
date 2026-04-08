@@ -220,6 +220,19 @@ def _require_writer():
 
 
 # ---------------------------------------------------------------------------
+# Identifier validation
+# ---------------------------------------------------------------------------
+
+_SAFE_IDENTIFIER = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
+
+
+def _validate_identifier(value: str, label: str = "identifier") -> None:
+  """Validate a value is a safe identifier before Cypher interpolation."""
+  if not _SAFE_IDENTIFIER.match(value):
+    raise ValueError(f"Invalid {label}: {value!r}")
+
+
+# ---------------------------------------------------------------------------
 # HNSW backend operations
 # ---------------------------------------------------------------------------
 
@@ -228,6 +241,8 @@ def _build_hnsw_index(
   graph_id: str, table_name: str, column: str = "embedding"
 ) -> dict:
   """Build/rebuild HNSW vector index on a materialized LadybugDB table."""
+  _validate_identifier(table_name, "table_name")
+  _validate_identifier(column, "column")
   ladybug_service = _get_ladybug_service()
   start = time.time()
 
@@ -259,16 +274,6 @@ def _build_hnsw_index(
   }
 
 
-_SAFE_IDENTIFIER = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
-
-
-def _validate_column_names(columns: list[str]) -> None:
-  """Validate column names are safe identifiers (no Cypher injection)."""
-  for col in columns:
-    if not _SAFE_IDENTIFIER.match(col):
-      raise ValueError(f"Invalid column name: {col!r}")
-
-
 def _search_hnsw_index(
   graph_id: str,
   table_name: str,
@@ -278,8 +283,10 @@ def _search_hnsw_index(
   select_columns: list[str] | None = None,
 ) -> dict:
   """Search HNSW vector index via LadybugDB QUERY_VECTOR_INDEX."""
+  _validate_identifier(table_name, "table_name")
   if select_columns:
-    _validate_column_names(select_columns)
+    for col in select_columns:
+      _validate_identifier(col, "column")
 
   ladybug_service = _get_ladybug_service()
   index_name = f"{table_name.lower()}_vec_index"
@@ -357,7 +364,7 @@ async def vector_info(
 ) -> VectorIndexInfo | None:
   """Get metadata about an existing vector index (row count, size, etc.)."""
   if backend == "hnsw":
-    # HNSW indexes don't have standalone metadata — check if the index exists
+    _validate_identifier(table_name, "table_name")
     try:
       ladybug_service = _get_ladybug_service()
       index_name = f"{table_name.lower()}_vec_index"
@@ -368,21 +375,30 @@ async def vector_info(
           conn.execute("INSTALL vector")
           conn.execute("LOAD EXTENSION vector")
 
-        # Verify the HNSW index actually exists by probing it
-        # A zero-length probe is cheaper than counting all nodes
+        # Verify the HNSW index exists by attempting to drop/recreate check.
+        # We can't probe with a vector without knowing the dimension, so
+        # instead check the index catalog directly.
         try:
-          probe_vec = [0.0] * 384  # standard embedding dimension
-          conn.execute(
-            f"CALL QUERY_VECTOR_INDEX('{table_name}', '{index_name}', {probe_vec}, 1) "
-            f"RETURN node, distance"
+          # TABLE_INFO lists columns; if embedding column exists the index
+          # may exist. The definitive check is to try DROP — if it fails
+          # with "doesn't have an index", the index doesn't exist.
+          # But DROP is destructive, so instead just check the column exists
+          # and trust that the index was built (build is always explicit).
+          info_result = conn.execute(f"CALL TABLE_INFO('{table_name}') RETURN *")
+          info_rows = (
+            info_result.get_as_list()
+            if hasattr(info_result, "get_as_list")
+            else list(info_result)
           )
-        except Exception as probe_err:
-          if (
-            "doesn't have an index" in str(probe_err)
-            or "not found" in str(probe_err).lower()
-          ):
+          col_names = set()
+          for row in info_rows:
+            r = list(row) if not isinstance(row, (list, tuple)) else row
+            if len(r) >= 2:
+              col_names.add(r[1])
+          if "embedding" not in col_names:
             return None
-          raise
+        except Exception:
+          return None
 
         result = conn.execute(f"MATCH (n:{table_name}) RETURN COUNT(n)")
         rows = result.get_as_list() if hasattr(result, "get_as_list") else list(result)
@@ -428,6 +444,7 @@ async def vector_delete(
   _require_writer()
 
   if backend == "hnsw":
+    _validate_identifier(table_name, "table_name")
     ladybug_service = _get_ladybug_service()
     index_name = f"{table_name.lower()}_vec_index"
     try:
@@ -492,7 +509,11 @@ async def vector_build(
     )
 
   # Lance backend
-  assert request.query is not None  # validated by model
+  if request.query is None:
+    raise HTTPException(
+      status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+      detail="'query' is required when backend='lance'",
+    )
   manager = _get_lance_manager()
 
   try:
