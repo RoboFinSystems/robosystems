@@ -847,9 +847,55 @@ def seed_reporting_taxonomy(connection) -> None:
   for e in ALL_GAAP_ELEMENTS:
     _insert_element(connection, e)
 
-  # 5. Create root-ordering associations (structure → SFAC6 root)
+  # 5. Create structure-root elements so they can be referenced in associations.
+  # The associations FK requires both from/to to be valid element IDs.
+  # These abstract elements represent the root of each financial statement.
+  STRUCTURE_ROOT_ELEMENTS = [
+    {
+      "id": STRUCT_BS_ID,
+      "qname": "report:BalanceSheet",
+      "namespace": "report",
+      "name": "Balance Sheet",
+      "classification": "asset",
+      "balance_type": "debit",
+      "period_type": "instant",
+      "is_abstract": True,
+      "element_type": "abstract",
+      "source": "native",
+      "depth": 0,
+    },
+    {
+      "id": STRUCT_IS_ID,
+      "qname": "report:IncomeStatement",
+      "namespace": "report",
+      "name": "Income Statement",
+      "classification": "revenue",
+      "balance_type": "credit",
+      "period_type": "duration",
+      "is_abstract": True,
+      "element_type": "abstract",
+      "source": "native",
+      "depth": 0,
+    },
+    {
+      "id": STRUCT_CF_ID,
+      "qname": "report:CashFlowStatement",
+      "namespace": "report",
+      "name": "Cash Flow Statement",
+      "classification": "asset",
+      "balance_type": "debit",
+      "period_type": "duration",
+      "is_abstract": True,
+      "element_type": "abstract",
+      "source": "native",
+      "depth": 0,
+    },
+  ]
+  for e in STRUCTURE_ROOT_ELEMENTS:
+    _insert_element(connection, e)
+
+  # 6. Create root-ordering associations (structure root → SFAC6 root)
   # These control the order of top-level sections in each statement.
-  # Convention: from_element_id = structure_id, to_element_id = SFAC6 root.
   ROOT_ORDER: list[tuple[str, str, int]] = [
     # Balance Sheet: Assets → Liabilities → Equity
     (STRUCT_BS_ID, "elem_sfac6_assets", 1),
@@ -885,7 +931,7 @@ def seed_reporting_taxonomy(connection) -> None:
       },
     )
 
-  # 6. Create hierarchy associations (parent → child via structures)
+  # 7. Create hierarchy associations (parent → child via structures)
   # Order per-parent so siblings sort correctly within each section
   order_by_parent: dict[str, int] = {}
   for e in ALL_GAAP_ELEMENTS:
@@ -911,7 +957,7 @@ def seed_reporting_taxonomy(connection) -> None:
       },
     )
 
-  # 7. Create calculation associations for computed elements.
+  # 8. Create calculation associations for computed elements.
   # from_element = the computed total, to_element = the source, weight = multiplier.
   # The renderer sums (source_value * weight) for each source.
   CALCULATION_ASSOCIATIONS = [

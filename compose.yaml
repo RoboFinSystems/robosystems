@@ -100,16 +100,16 @@ services:
     depends_on:
       pg:
         condition: service_healthy
-    # Runs sec_process job locally via `dagster job execute`
-    # Needs headroom for fastembed model + embedding computation (matches prod 16GB)
+    # Runs dagster job execute locally (SEC processing, materialization, etc.)
+    # Needs headroom for fastembed model + DuckDB + XBRL processing
     restart: always
     deploy:
       resources:
         limits:
-          memory: 16g
-          cpus: "8"
+          memory: 8g
+          cpus: "4"
         reservations:
-          memory: 4g
+          memory: 1g
           cpus: "2"
     profiles: ["dagster", "robosystems", "all"]
 
