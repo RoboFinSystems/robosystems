@@ -428,8 +428,11 @@ async def materialize_table(
           conn.execute("CHECKPOINT")
           logger.debug(f"Checkpointed LadybugDB after {table_name} materialization")
 
-          # Build vector index when embeddings are materialized.
-          if request.materialize_embeddings:
+          # Build vector index when embeddings are materialized (single-pass only).
+          # For batched requests, the caller rebuilds the index after all batches
+          # complete — creating it on batch 1 would only index partial data.
+          is_batched = request.batch_num is not None
+          if request.materialize_embeddings and not is_batched:
             ladybug_service.db_manager.create_vector_index(conn, table_name)
             conn.execute("CHECKPOINT")
 

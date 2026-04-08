@@ -164,6 +164,7 @@ class MaterializeGraphConfig(Config):
   force: bool = False
   rebuild: bool = False
   ignore_errors: bool = True
+  materialize_embeddings: bool = False
   operation_id: str | None = None  # For SSE result updates
 
 
@@ -869,7 +870,9 @@ def materialize_graph_tables(
 
         try:
           context.log.info(f"[20%] Deleting graph database for {graph_id}")
-          loop.run_until_complete(client.delete_database(graph_id))
+          loop.run_until_complete(
+            client.delete_database(graph_id, preserve_duckdb=True)
+          )
 
           schema = GraphSchema.get_active_schema(graph_id, session)
           if not schema:
@@ -961,6 +964,7 @@ def materialize_graph_tables(
               table_name=table_name,
               tier=graph_record.graph_tier or "ladybug-standard",
               ignore_errors=config.ignore_errors,
+              materialize_embeddings=config.materialize_embeddings,
               file_ids=None,
             )
           )

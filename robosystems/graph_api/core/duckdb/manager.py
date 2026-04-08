@@ -501,6 +501,16 @@ class DuckDBTableManager:
 
         null_cols = set(request.null_columns) if request.null_columns else None
 
+        # Resolve file_id for provenance tracking.
+        # When file_id_map is provided, inject file_id into the SELECT so the
+        # INSERT matches the table schema (which includes file_id from CREATE).
+        file_id_value: str | None = None
+        if request.file_id_map and is_list:
+          # Single-file INSERT: grab the file_id for the one file
+          for s3_key, fid in request.file_id_map.items():
+            file_id_value = fid.replace("'", "''")
+            break
+
         if request.deduplicate:
           # Detect table type from existing schema for dedup key
           probe_result = conn.execute(
@@ -562,6 +572,10 @@ class DuckDBTableManager:
             select_expr = ", ".join(_col_expr(c) for c in parquet_columns)
           else:
             select_expr = "t.*"
+
+          # Inject file_id for provenance tracking when file_id_map is provided
+          if file_id_value:
+            select_expr += f", '{file_id_value}' AS file_id"
 
           if has_identifier:
             intra_dedup = 'QUALIFY ROW_NUMBER() OVER (PARTITION BY "identifier") = 1'
@@ -633,13 +647,18 @@ class DuckDBTableManager:
                 f"to {request.table_name}"
               )
 
+          # Build select expression with optional file_id injection
+          file_id_suffix = f", '{file_id_value}' AS file_id" if file_id_value else ""
+
           if null_cols:
             append_expr = ", ".join(
               f'NULL AS "{c}"' if c in null_cols else f'"{c}"' for c in append_columns
             )
-            sql = f"INSERT INTO {quoted_table} SELECT {append_expr} FROM {parquet_read}"
+            sql = f"INSERT INTO {quoted_table} SELECT {append_expr}{file_id_suffix} FROM {parquet_read}"
           else:
-            sql = f"INSERT INTO {quoted_table} SELECT * FROM {parquet_read}"
+            sql = (
+              f"INSERT INTO {quoted_table} SELECT *{file_id_suffix} FROM {parquet_read}"
+            )
 
         conn.execute(sql)
 

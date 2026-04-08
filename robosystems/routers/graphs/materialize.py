@@ -130,6 +130,12 @@ class MaterializeRequest(BaseModel):
     "'extensions' materializes from the extensions OLTP database (entity graphs).",
     pattern="^(staged|extensions)$",
   )
+  materialize_embeddings: bool = Field(
+    default=False,
+    description="Include embedding columns in materialization and build HNSW vector "
+    "indexes in the graph database. When false (default), embedding columns are NULLed "
+    "out to save space. Set to true for graphs that need vector search.",
+  )
 
   class Config:
     extra = "forbid"
@@ -619,6 +625,7 @@ async def materialize_graph(
           "force": request.force,
           "rebuild": request.rebuild,
           "ignore_errors": request.ignore_errors,
+          "materialize_embeddings": request.materialize_embeddings,
           "lock_key": lock_key,
         },
       )
@@ -643,6 +650,7 @@ async def materialize_graph(
         force=request.force,
         rebuild=request.rebuild,
         ignore_errors=request.ignore_errors,
+        materialize_embeddings=request.materialize_embeddings,
       )
 
       lock_key = f"graph_materialize:{graph_id}" if lock else None

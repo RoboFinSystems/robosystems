@@ -1,33 +1,40 @@
 """
 Vector index management endpoints for Graph API.
 
-Provides per-graph, per-table vector index operations backed by LanceDB:
+Supports two backends via explicit `backend` field:
+
+  - **lance** (default): LanceDB IVF-PQ indexes built from DuckDB staging queries.
+    Used for shared repositories (SEC) where replicas need exported indexes.
+
+  - **hnsw**: LadybugDB native HNSW indexes on materialized graph data.
+    Used for user/custom graphs where vector search runs via Cypher
+    (CALL QUERY_VECTOR_INDEX).
+
+Endpoints:
 
   POST /databases/{graph_id}/tables/{table_name}/vector/build
-    Build IVF-PQ index from DuckDB staging table (master only)
+    Build vector index (lance: from DuckDB query, hnsw: on materialized table)
 
   POST /databases/{graph_id}/tables/{table_name}/vector/search
-    Query the lance index by embedding similarity (master + replicas)
+    Query by embedding similarity
 
   POST /databases/{graph_id}/tables/{table_name}/vector/export
-    Package lance index as tar.gz for S3 publish (master only)
+    Package lance index as tar.gz for S3 publish (lance only)
 
   DELETE /databases/{graph_id}/tables/{table_name}/vector
-    Delete the lance index for a table
+    Delete the vector index
 
   GET /databases/{graph_id}/tables/{table_name}/vector
-    Get index metadata (row count, size, etc.)
-
-Build and export require DuckDB staging access (master/writer instances).
-Search works on any instance that has the lance index on disk — masters
-build it locally, replicas download it from S3 at boot.
+    Get index metadata
 """
 
 import asyncio
 import os
 import re
+import time
+from typing import Literal
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, Query, status
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from robosystems.logger import logger
@@ -41,19 +48,27 @@ router = APIRouter(prefix="/databases", tags=["Vector Index"])
 
 
 class VectorBuildRequest(BaseModel):
-  """Request to build a vector index from DuckDB staging."""
+  """Request to build a vector index."""
 
-  query: str = Field(
-    ...,
-    description='DuckDB SQL query that selects rows to index. Must return a "vector" '
+  backend: Literal["lance", "hnsw"] = Field(
+    default="lance",
+    description="Vector backend. 'lance' builds IVF-PQ from a DuckDB query. "
+    "'hnsw' builds a LadybugDB HNSW index on the materialized table.",
+  )
+  query: str | None = Field(
+    default=None,
+    description='DuckDB SQL query that selects rows to index (lance only). Must return a "vector" '
     "column (e.g., embedding::FLOAT[384] AS vector). All other columns are "
-    "stored as searchable metadata. Domain-specific filtering, dedup, and "
-    "column selection are the caller's responsibility.",
+    "stored as searchable metadata.",
     max_length=10000,
+  )
+  column: str = Field(
+    default="embedding",
+    description="Embedding column name (hnsw only).",
   )
   memory_limit: str = Field(
     default="8GB",
-    description="DuckDB memory limit for the extraction query.",
+    description="DuckDB memory limit for the extraction query (lance only).",
   )
 
   @field_validator("memory_limit")
@@ -65,6 +80,12 @@ class VectorBuildRequest(BaseModel):
       )
     return v
 
+  @model_validator(mode="after")
+  def validate_backend_fields(self):
+    if self.backend == "lance" and not self.query:
+      raise ValueError("'query' is required when backend='lance'")
+    return self
+
   class Config:
     extra = "forbid"
 
@@ -75,14 +96,19 @@ class VectorBuildResponse(BaseModel):
   graph_id: str
   table_name: str
   row_count: int
-  num_partitions: int
-  index_size_mb: float
+  num_partitions: int = 0
+  index_size_mb: float = 0.0
   duration_ms: float
+  backend: str = "lance"
 
 
 class VectorSearchRequest(BaseModel):
   """Request to search the vector index."""
 
+  backend: Literal["lance", "hnsw"] = Field(
+    default="lance",
+    description="Vector backend to search.",
+  )
   embedding: list[float] = Field(
     ...,
     description="Query embedding vector",
@@ -97,6 +123,10 @@ class VectorSearchRequest(BaseModel):
   select: list[str] | None = Field(
     default=None,
     description="Columns to include in results. If omitted, returns all non-vector columns.",
+  )
+  column: str = Field(
+    default="embedding",
+    description="Embedding column name (hnsw only).",
   )
 
   class Config:
@@ -173,6 +203,13 @@ def _get_lance_manager():
   return _lance_manager
 
 
+def _get_ladybug_service():
+  """Lazy-load the LadybugDB service."""
+  from robosystems.graph_api.core.ladybug import get_ladybug_service
+
+  return get_ladybug_service()
+
+
 def _require_writer():
   """Raise 501 if called on a read-only replica."""
   if os.getenv("LBUG_ROLE") == "replica":
@@ -180,6 +217,132 @@ def _require_writer():
       status_code=status.HTTP_501_NOT_IMPLEMENTED,
       detail="Vector build/export not available on read-only replicas",
     )
+
+
+# ---------------------------------------------------------------------------
+# Identifier validation
+# ---------------------------------------------------------------------------
+
+_SAFE_IDENTIFIER = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
+
+
+def _validate_identifier(value: str, label: str = "identifier") -> None:
+  """Validate a value is a safe identifier before Cypher interpolation."""
+  if not _SAFE_IDENTIFIER.match(value):
+    raise ValueError(f"Invalid {label}: {value!r}")
+
+
+# ---------------------------------------------------------------------------
+# HNSW backend operations
+# ---------------------------------------------------------------------------
+
+
+def _build_hnsw_index(
+  graph_id: str, table_name: str, column: str = "embedding"
+) -> dict:
+  """Build/rebuild HNSW vector index on a materialized LadybugDB table."""
+  _validate_identifier(table_name, "table_name")
+  _validate_identifier(column, "column")
+  ladybug_service = _get_ladybug_service()
+  start = time.time()
+
+  with ladybug_service.db_manager.connection_pool.get_connection(graph_id) as conn:
+    success = ladybug_service.db_manager.rebuild_vector_index(conn, table_name, column)
+    if not success:
+      raise RuntimeError(
+        f"Failed to build HNSW index on {table_name}.{column} — "
+        f"table may not exist or have no embedding column"
+      )
+
+    # Get row count for the response
+    try:
+      result = conn.execute(f"MATCH (n:{table_name}) RETURN COUNT(n)")
+      rows = result.get_as_list() if hasattr(result, "get_as_list") else list(result)
+      first = list(rows[0]) if rows else []
+      row_count = int(first[0]) if first else 0
+    except Exception:
+      row_count = 0
+
+    conn.execute("CHECKPOINT")
+
+  duration_ms = (time.time() - start) * 1000
+  return {
+    "graph_id": graph_id,
+    "table_name": table_name,
+    "row_count": row_count,
+    "duration_ms": duration_ms,
+  }
+
+
+def _search_hnsw_index(
+  graph_id: str,
+  table_name: str,
+  embedding: list[float],
+  limit: int,
+  column: str = "embedding",
+  select_columns: list[str] | None = None,
+) -> dict:
+  """Search HNSW vector index via LadybugDB QUERY_VECTOR_INDEX."""
+  _validate_identifier(table_name, "table_name")
+  if select_columns:
+    for col in select_columns:
+      _validate_identifier(col, "column")
+
+  ladybug_service = _get_ladybug_service()
+  index_name = f"{table_name.lower()}_vec_index"
+  start = time.time()
+
+  vec_str = str(embedding)
+
+  # Build RETURN clause from select columns
+  if select_columns:
+    return_parts = [f"node.{col} AS {col}" for col in select_columns]
+  else:
+    return_parts = ["node"]
+  return_parts.append("distance")
+  return_clause = ", ".join(return_parts)
+
+  # Over-fetch then limit (HNSW returns approximate results)
+  fetch_limit = min(limit * 2, 200)
+
+  query = (
+    f"CALL QUERY_VECTOR_INDEX('{table_name}', '{index_name}', {vec_str}, {fetch_limit}) "
+    f"WITH node, distance "
+    f"RETURN {return_clause} "
+    f"ORDER BY distance LIMIT {limit}"
+  )
+
+  with ladybug_service.db_manager.connection_pool.get_connection(graph_id) as conn:
+    try:
+      conn.execute("LOAD EXTENSION vector")
+    except Exception:
+      conn.execute("INSTALL vector")
+      conn.execute("LOAD EXTENSION vector")
+
+    result = conn.execute(query)
+
+    # Parse results
+    results = []
+    if hasattr(result, "get_as_list"):
+      rows = result.get_as_list()
+      if select_columns:
+        col_names = [*select_columns, "distance"]
+        for row in rows:
+          results.append(dict(zip(col_names, row, strict=False)))
+      else:
+        for row in rows:
+          if isinstance(row[0], dict):
+            entry = {**row[0], "distance": row[1]}
+          else:
+            entry = {"node": row[0], "distance": row[1]}
+          results.append(entry)
+
+  execution_time_ms = (time.time() - start) * 1000
+  return {
+    "results": results,
+    "total": len(results),
+    "execution_time_ms": execution_time_ms,
+  }
 
 
 # ---------------------------------------------------------------------------
@@ -195,8 +358,63 @@ def _require_writer():
 async def vector_info(
   graph_id: str,
   table_name: str,
+  backend: Literal["lance", "hnsw"] = Query(
+    default="lance", description="Vector backend"
+  ),
 ) -> VectorIndexInfo | None:
   """Get metadata about an existing vector index (row count, size, etc.)."""
+  if backend == "hnsw":
+    _validate_identifier(table_name, "table_name")
+    try:
+      ladybug_service = _get_ladybug_service()
+      index_name = f"{table_name.lower()}_vec_index"
+      with ladybug_service.db_manager.connection_pool.get_connection(graph_id) as conn:
+        try:
+          conn.execute("LOAD EXTENSION vector")
+        except Exception:
+          conn.execute("INSTALL vector")
+          conn.execute("LOAD EXTENSION vector")
+
+        # Verify the HNSW index exists by attempting to drop/recreate check.
+        # We can't probe with a vector without knowing the dimension, so
+        # instead check the index catalog directly.
+        try:
+          # TABLE_INFO lists columns; if embedding column exists the index
+          # may exist. The definitive check is to try DROP — if it fails
+          # with "doesn't have an index", the index doesn't exist.
+          # But DROP is destructive, so instead just check the column exists
+          # and trust that the index was built (build is always explicit).
+          info_result = conn.execute(f"CALL TABLE_INFO('{table_name}') RETURN *")
+          info_rows = (
+            info_result.get_as_list()
+            if hasattr(info_result, "get_as_list")
+            else list(info_result)
+          )
+          col_names = set()
+          for row in info_rows:
+            r = list(row) if not isinstance(row, (list, tuple)) else row
+            if len(r) >= 2:
+              col_names.add(r[1])
+          if "embedding" not in col_names:
+            return None
+        except Exception:
+          return None
+
+        result = conn.execute(f"MATCH (n:{table_name}) RETURN COUNT(n)")
+        rows = result.get_as_list() if hasattr(result, "get_as_list") else list(result)
+        first = list(rows[0]) if rows else []
+        row_count = int(first[0]) if first else 0
+
+      return VectorIndexInfo(
+        graph_id=graph_id,
+        table_name=table_name,
+        row_count=row_count,
+        size_mb=0.0,
+        path=f"hnsw://{graph_id}/{index_name}",
+      )
+    except Exception:
+      return None
+
   manager = _get_lance_manager()
   info = manager.get_index_info(graph_id, table_name)
   if info is None:
@@ -218,9 +436,34 @@ async def vector_info(
 async def vector_delete(
   graph_id: str,
   table_name: str,
+  backend: Literal["lance", "hnsw"] = Query(
+    default="lance", description="Vector backend"
+  ),
 ) -> dict:
-  """Delete the lance index for a specific table."""
+  """Delete the vector index for a specific table."""
   _require_writer()
+
+  if backend == "hnsw":
+    _validate_identifier(table_name, "table_name")
+    ladybug_service = _get_ladybug_service()
+    index_name = f"{table_name.lower()}_vec_index"
+    try:
+      with ladybug_service.db_manager.connection_pool.get_connection(graph_id) as conn:
+        try:
+          conn.execute("LOAD EXTENSION vector")
+        except Exception:
+          conn.execute("INSTALL vector")
+          conn.execute("LOAD EXTENSION vector")
+        conn.execute(f"CALL DROP_VECTOR_INDEX('{table_name}', '{index_name}')")
+        conn.execute("CHECKPOINT")
+      return {"status": "deleted", "graph_id": graph_id, "table_name": table_name}
+    except Exception as e:
+      if "doesn't have an index" in str(e):
+        return {"status": "not_found", "graph_id": graph_id, "table_name": table_name}
+      raise HTTPException(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        detail=f"Failed to delete HNSW index: {e}",
+      ) from e
 
   manager = _get_lance_manager()
   result = manager.delete(graph_id=graph_id, table_name=table_name)
@@ -230,26 +473,47 @@ async def vector_delete(
 @router.post(
   "/{graph_id}/tables/{table_name}/vector/build",
   response_model=VectorBuildResponse,
-  summary="Build vector index from DuckDB staging table",
+  summary="Build vector index",
 )
 async def vector_build(
   graph_id: str,
   table_name: str,
   request: VectorBuildRequest,
 ) -> VectorBuildResponse:
-  """Build an IVF-PQ vector index from a DuckDB query.
+  """Build a vector index.
 
-  Runs the provided SQL query against the local DuckDB staging database and
-  builds a LanceDB IVF-PQ index from the results. The query must return a
-  "vector" column — all other columns become searchable metadata.
+  With backend='lance': runs a DuckDB SQL query and builds a LanceDB IVF-PQ index.
+  With backend='hnsw': builds/rebuilds a LadybugDB HNSW index on the materialized table.
 
-  Domain-specific filtering (e.g., only numeric elements with facts) and
-  deduplication are the caller's responsibility via the query.
-
-  Only available on writer/master instances (requires DuckDB staging access).
+  Only available on writer/master instances.
   """
   _require_writer()
 
+  if request.backend == "hnsw":
+    try:
+      result = await asyncio.to_thread(
+        _build_hnsw_index,
+        graph_id=graph_id,
+        table_name=table_name,
+        column=request.column,
+      )
+    except RuntimeError as e:
+      raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
+
+    return VectorBuildResponse(
+      graph_id=result["graph_id"],
+      table_name=result["table_name"],
+      row_count=result["row_count"],
+      duration_ms=result["duration_ms"],
+      backend="hnsw",
+    )
+
+  # Lance backend
+  if request.query is None:
+    raise HTTPException(
+      status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+      detail="'query' is required when backend='lance'",
+    )
   manager = _get_lance_manager()
 
   try:
@@ -274,6 +538,7 @@ async def vector_build(
     num_partitions=result["num_partitions"],
     index_size_mb=result["index_size_mb"],
     duration_ms=result["duration_ms"],
+    backend="lance",
   )
 
 
@@ -289,13 +554,39 @@ async def vector_search(
 ) -> VectorSearchResponse:
   """Search for similar rows by embedding vector.
 
-  Queries the LanceDB IVF-PQ index for the specified table using approximate
-  nearest neighbor search (~5ms latency). Returns matching rows with cosine
-  distance scores.
-
-  Available on both master and replica instances — masters build the index
-  locally, replicas download it from S3 at boot.
+  With backend='lance': queries LanceDB IVF-PQ index (~5ms latency).
+  With backend='hnsw': queries LadybugDB HNSW index via QUERY_VECTOR_INDEX.
   """
+  if request.backend == "hnsw":
+    try:
+      result = await asyncio.to_thread(
+        _search_hnsw_index,
+        graph_id=graph_id,
+        table_name=table_name,
+        embedding=request.embedding,
+        limit=request.limit,
+        column=request.column,
+        select_columns=request.select,
+      )
+    except Exception as e:
+      if "doesn't have an index" in str(e) or "not found" in str(e).lower():
+        raise HTTPException(
+          status_code=status.HTTP_404_NOT_FOUND,
+          detail=f"No HNSW index found for {table_name}",
+        ) from e
+      logger.error(f"HNSW vector search failed: {e}", exc_info=True)
+      raise HTTPException(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        detail=f"Vector search failed: {e}",
+      ) from e
+
+    return VectorSearchResponse(
+      results=result["results"],
+      total=result["total"],
+      execution_time_ms=result["execution_time_ms"],
+    )
+
+  # Lance backend
   manager = _get_lance_manager()
 
   try:
@@ -334,10 +625,8 @@ async def vector_export(
 ) -> VectorExportResponse:
   """Package the lance index as tar.gz and optionally upload to S3.
 
-  When s3_bucket and s3_key are provided in the request body, the tar.gz
-  is uploaded directly from this instance to S3. This is required because
-  the Dagster worker calling this endpoint runs on Fargate and cannot
-  access this instance's filesystem.
+  Only available for lance backend. HNSW indexes live inside LadybugDB
+  and don't need separate export.
 
   Only available on writer/master instances.
   """

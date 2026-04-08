@@ -160,6 +160,9 @@ class TestStageFileDirectly:
         table_name="Entity",
         s3_pattern=["s3://robosystems-local/graphs/kg1234/tables/entity/file1.parquet"],
         deduplicate=True,
+        file_id_map={
+          "s3://robosystems-local/graphs/kg1234/tables/entity/file1.parquet": "gf_file1"
+        },
       )
       mock_graph_client.create_table.assert_not_called()
       mock_graph_client.close.assert_called_once()
@@ -810,6 +813,9 @@ class TestStageFileDirectlyDeduplicate:
         table_name="Entity",
         s3_pattern=["s3://robosystems-local/graphs/kg1234/tables/entity/file1.parquet"],
         deduplicate=True,
+        file_id_map={
+          "s3://robosystems-local/graphs/kg1234/tables/entity/file1.parquet": "gf_file1"
+        },
       )
 
 
