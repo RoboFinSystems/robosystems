@@ -258,7 +258,9 @@ class TestMaterializeGraphDirectly:
 
       assert result["status"] == "success"
       assert result["rebuild"] is True
-      mock_client.delete_database.assert_called_once_with(graph_id)
+      mock_client.delete_database.assert_called_once_with(
+        graph_id, preserve_duckdb=True
+      )
       mock_client.create_database.assert_called_once()
       mock_client.materialize_table.assert_called_once()
 
