@@ -36,6 +36,7 @@ class TestMaterializeTableChunked:
       graph_id="kg123",
       table_name="Entity",
       ignore_errors=True,
+      materialize_embeddings=False,
       file_ids=None,
       timeout=CHUNK_TIMEOUT,
     )
