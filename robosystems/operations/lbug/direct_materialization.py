@@ -30,6 +30,7 @@ async def materialize_graph_directly(
   force: bool = False,
   rebuild: bool = False,
   ignore_errors: bool = True,
+  materialize_embeddings: bool = False,
   operation_id: str | None = None,
 ) -> dict[str, Any]:
   """
@@ -43,6 +44,7 @@ async def materialize_graph_directly(
       force: Force materialization even if graph is not stale
       rebuild: Delete and recreate graph database before materialization
       ignore_errors: Continue ingestion on row errors
+      materialize_embeddings: Include embedding columns and build HNSW vector indexes
       operation_id: Optional SSE operation ID for progress tracking
 
   Returns:
@@ -152,7 +154,7 @@ async def materialize_graph_directly(
           logger.info(f"[20%] Deleting graph database for {graph_id}")
           if operation_id:
             await manager.emit_progress(operation_id, "Deleting graph database...", 20)
-          await client.delete_database(graph_id)
+          await client.delete_database(graph_id, preserve_duckdb=True)
 
           schema = GraphSchema.get_active_schema(graph_id, db)
           if not schema:
@@ -259,6 +261,7 @@ async def materialize_graph_directly(
             table_name=table_name,
             tier=graph_record.graph_tier or "ladybug-standard",
             ignore_errors=ignore_errors,
+            materialize_embeddings=materialize_embeddings,
             file_ids=None,
           )
 

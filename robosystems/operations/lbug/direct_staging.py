@@ -123,6 +123,7 @@ async def stage_file_directly(
           table_name=table.table_name,
           s3_pattern=[new_file_s3],
           deduplicate=True,
+          file_id_map={new_file_s3: file_id},
         )
       else:
         # Table does not exist - create with all files (first-file path)

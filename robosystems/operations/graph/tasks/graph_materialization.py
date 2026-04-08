@@ -32,6 +32,7 @@ class GraphMaterializationTask(BaseTask):
     force = self.params.get("force", False)
     rebuild = self.params.get("rebuild", False)
     ignore_errors = self.params.get("ignore_errors", True)
+    materialize_embeddings = self.params.get("materialize_embeddings", False)
     lock_key = self.params.get("lock_key")
 
     db_gen = get_db_session()
@@ -44,6 +45,7 @@ class GraphMaterializationTask(BaseTask):
         force=force,
         rebuild=rebuild,
         ignore_errors=ignore_errors,
+        materialize_embeddings=materialize_embeddings,
         operation_id=self.task_id,
       )
 

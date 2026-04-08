@@ -1643,6 +1643,7 @@ class GraphClient(BaseGraphClient):
     timeout: int = 1800,  # 30 minutes default for large file sets
     deduplicate: bool = True,
     null_columns: list[str] | None = None,
+    file_id_map: dict[str, str] | None = None,
   ) -> dict[str, Any]:
     """
     Insert data into an existing DuckDB staging table with SSE monitoring.
@@ -1687,6 +1688,8 @@ class GraphClient(BaseGraphClient):
       }
       if null_columns is not None:
         json_data["null_columns"] = null_columns
+      if file_id_map is not None:
+        json_data["file_id_map"] = file_id_map
 
       start_response = await self._request(
         "POST",
@@ -1846,6 +1849,42 @@ class GraphClient(BaseGraphClient):
       json_data=json_data,
       timeout=timeout,
       retries=0,  # Non-idempotent: retries cause duplicate data
+    )
+    return response.json()
+
+  async def build_vector_index(
+    self,
+    graph_id: str,
+    table_name: str,
+    backend: str = "hnsw",
+    column: str = "embedding",
+    query: str | None = None,
+    timeout: float = 600.0,
+  ) -> dict[str, Any]:
+    """Build or rebuild a vector index on a table.
+
+    Args:
+        graph_id: Graph database identifier
+        table_name: Table to index
+        backend: "hnsw" for LadybugDB HNSW, "lance" for LanceDB IVF-PQ
+        column: Embedding column name (hnsw only)
+        query: DuckDB SQL query (required for lance, ignored for hnsw)
+        timeout: Request timeout in seconds
+
+    Returns:
+        Build response with row_count, duration_ms, backend
+    """
+    json_data: dict[str, Any] = {"backend": backend}
+    if backend == "hnsw":
+      json_data["column"] = column
+    elif query:
+      json_data["query"] = query
+
+    response = await self._request(
+      "POST",
+      f"/databases/{graph_id}/tables/{table_name}/vector/build",
+      json_data=json_data,
+      timeout=timeout,
     )
     return response.json()
 

@@ -29,6 +29,7 @@ async def materialize_table_chunked(
   table_name: str,
   tier: str,
   ignore_errors: bool = True,
+  materialize_embeddings: bool = False,
   file_ids: list[str] | None = None,
 ) -> dict[str, Any]:
   """Materialize a staging table, chunking large tables into hash-based batches.
@@ -43,6 +44,7 @@ async def materialize_table_chunked(
       table_name: DuckDB staging table to materialize.
       tier: Graph tier name (e.g. "ladybug-standard").
       ignore_errors: Continue on row errors (passed through to each chunk).
+      materialize_embeddings: Include embedding columns and build HNSW vector indexes.
       file_ids: Optional file ID filter (passed through; chunking still applies).
 
   Returns:
@@ -61,6 +63,7 @@ async def materialize_table_chunked(
       row_count=row_count,
       chunk_size=chunk_size,
       ignore_errors=ignore_errors,
+      materialize_embeddings=materialize_embeddings,
       file_ids=file_ids,
     )
 
@@ -69,6 +72,7 @@ async def materialize_table_chunked(
     graph_id=graph_id,
     table_name=table_name,
     ignore_errors=ignore_errors,
+    materialize_embeddings=materialize_embeddings,
     file_ids=file_ids,
     timeout=CHUNK_TIMEOUT,
   )
@@ -120,6 +124,7 @@ async def _materialize_batched(
   row_count: int,
   chunk_size: int,
   ignore_errors: bool,
+  materialize_embeddings: bool,
   file_ids: list[str] | None,
 ) -> dict[str, Any]:
   """Run hash-based batched materialization for a large table."""
@@ -138,6 +143,7 @@ async def _materialize_batched(
         graph_id=graph_id,
         table_name=table_name,
         ignore_errors=ignore_errors,
+        materialize_embeddings=materialize_embeddings,
         file_ids=file_ids,
         batch_num=batch_num,
         num_batches=num_batches,
@@ -162,6 +168,25 @@ async def _materialize_batched(
     f"Chunked materialization complete for {table_name}: "
     f"{total_rows:,} rows across {num_batches} batches"
   )
+
+  # Rebuild HNSW vector index after all batches complete.
+  # Per-batch index creation is skipped (would only cover partial data),
+  # so we rebuild once over the full table.
+  if materialize_embeddings and total_rows > 0:
+    try:
+      logger.info(
+        f"Rebuilding HNSW vector index for {table_name} after batched materialization"
+      )
+      await client.build_vector_index(
+        graph_id=graph_id,
+        table_name=table_name,
+        backend="hnsw",
+      )
+      logger.info(f"HNSW vector index rebuilt for {table_name}")
+    except Exception as exc:
+      logger.warning(
+        f"HNSW vector index rebuild failed for {table_name} (non-fatal): {exc}"
+      )
 
   return {
     "rows_ingested": total_rows,
