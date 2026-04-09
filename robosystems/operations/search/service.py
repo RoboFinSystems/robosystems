@@ -110,7 +110,7 @@ class SearchService:
       doc_id = hit.get("_id", source.get("document_id", ""))
       parent_doc_id = None
       if doc_id.startswith("udoc_"):
-        parent_doc_id = doc_id.rsplit("_", 1)[0].removeprefix("udoc_")
+        parent_doc_id = doc_id.rsplit("_", 1)[0].removeprefix("udoc_") or None
 
       hits.append(
         SearchHit(

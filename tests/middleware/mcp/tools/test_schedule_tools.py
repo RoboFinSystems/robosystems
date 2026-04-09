@@ -114,6 +114,76 @@ class TestCreateScheduleTool:
     assert call_kwargs["schedule_metadata"].original_amount == 3500000
 
   @pytest.mark.asyncio
+  async def test_passes_auto_reverse(self, mock_graph_client):
+    mock_session = MagicMock()
+    mock_session.__enter__ = MagicMock(return_value=mock_session)
+    mock_session.__exit__ = MagicMock(return_value=False)
+
+    mock_structure = MagicMock()
+    mock_structure.id = "struct_sched_03"
+    mock_structure.name = "Payroll Accrual"
+    mock_structure.taxonomy_id = "tax_01"
+
+    mock_svc = MagicMock()
+    mock_svc.create_schedule.return_value = mock_structure
+
+    tool = CreateScheduleTool(mock_graph_client)
+    with (
+      patch(SESSION_PATH, return_value=mock_session),
+      patch(SVC_PATH, return_value=mock_svc),
+    ):
+      result = await tool.execute(
+        {
+          "name": "Payroll Accrual",
+          "element_ids": ["elem_salary", "elem_accrued"],
+          "period_start": "2026-01-01",
+          "period_end": "2026-12-31",
+          "monthly_amount": 320000,
+          "debit_element_id": "elem_salary",
+          "credit_element_id": "elem_accrued",
+          "auto_reverse": True,
+        }
+      )
+
+    assert result["success"] is True
+    call_kwargs = mock_svc.create_schedule.call_args[1]
+    assert call_kwargs["entry_template"].auto_reverse is True
+
+  @pytest.mark.asyncio
+  async def test_auto_reverse_defaults_false(self, mock_graph_client):
+    mock_session = MagicMock()
+    mock_session.__enter__ = MagicMock(return_value=mock_session)
+    mock_session.__exit__ = MagicMock(return_value=False)
+
+    mock_structure = MagicMock()
+    mock_structure.id = "struct_sched_04"
+    mock_structure.name = "Depreciation"
+    mock_structure.taxonomy_id = "tax_01"
+
+    mock_svc = MagicMock()
+    mock_svc.create_schedule.return_value = mock_structure
+
+    tool = CreateScheduleTool(mock_graph_client)
+    with (
+      patch(SESSION_PATH, return_value=mock_session),
+      patch(SVC_PATH, return_value=mock_svc),
+    ):
+      await tool.execute(
+        {
+          "name": "Depreciation",
+          "element_ids": ["elem_depr", "elem_accum"],
+          "period_start": "2026-01-01",
+          "period_end": "2026-12-31",
+          "monthly_amount": 41667,
+          "debit_element_id": "elem_depr",
+          "credit_element_id": "elem_accum",
+        }
+      )
+
+    call_kwargs = mock_svc.create_schedule.call_args[1]
+    assert call_kwargs["entry_template"].auto_reverse is False
+
+  @pytest.mark.asyncio
   async def test_handles_error(self, mock_graph_client):
     mock_session = MagicMock()
     mock_session.__enter__ = MagicMock(side_effect=Exception("db error"))
@@ -304,6 +374,61 @@ class TestGetPeriodCloseStatusTool:
     assert result["schedules"]["total"] == 1
     assert result["schedules"]["pending"] == 1
 
+  @pytest.mark.asyncio
+  async def test_includes_reversal_fields(self, mock_graph_client):
+    from robosystems.operations.schedules.service import (
+      PeriodCloseItem,
+      PeriodCloseStatus,
+    )
+
+    mock_session = MagicMock()
+    mock_session.__enter__ = MagicMock(return_value=mock_session)
+    mock_session.__exit__ = MagicMock(return_value=False)
+
+    mock_svc = MagicMock()
+    mock_svc.get_period_close_status.return_value = PeriodCloseStatus(
+      fiscal_period_start=date(2026, 4, 1),
+      fiscal_period_end=date(2026, 4, 30),
+      period_status="open",
+      schedules=[
+        PeriodCloseItem(
+          structure_id="struct_accrual",
+          structure_name="Payroll Accrual",
+          amount=3200.00,
+          status="drafted",
+          entry_id="je_01ABC",
+          reversal_entry_id="je_01DEF",
+          reversal_status="draft",
+        ),
+        PeriodCloseItem(
+          structure_id="struct_depr",
+          structure_name="Depreciation",
+          amount=212.00,
+          status="pending",
+          entry_id=None,
+        ),
+      ],
+      total_draft=1,
+      total_posted=0,
+    )
+
+    tool = GetPeriodCloseStatusTool(mock_graph_client)
+    with (
+      patch(SESSION_PATH, return_value=mock_session),
+      patch(SVC_PATH, return_value=mock_svc),
+    ):
+      result = await tool.execute(
+        {"period_start": "2026-04-01", "period_end": "2026-04-30"}
+      )
+
+    details = result["schedules"]["details"]
+    # Accrual has reversal
+    assert details[0]["reversal_entry_id"] == "je_01DEF"
+    assert details[0]["reversal_status"] == "draft"
+    # Depreciation has no reversal
+    assert details[1]["reversal_entry_id"] is None
+    assert details[1]["reversal_status"] is None
+
 
 class TestCreateClosingEntryTool:
   def test_tool_definition(self, mock_graph_client):
@@ -349,6 +474,61 @@ class TestCreateClosingEntryTool:
     assert result["entry_id"] == "je_01ABC"
     assert result["status"] == "draft"
     assert len(result["line_items"]) == 2
+    assert "reversal" not in result
+
+  @pytest.mark.asyncio
+  async def test_creates_entry_with_reversal(self, mock_graph_client):
+    from robosystems.operations.schedules.service import ClosingEntryResult
+
+    mock_session = MagicMock()
+    mock_session.__enter__ = MagicMock(return_value=mock_session)
+    mock_session.__exit__ = MagicMock(return_value=False)
+
+    mock_svc = MagicMock()
+    mock_svc.create_closing_entry.return_value = ClosingEntryResult(
+      entry_id="je_01ABC",
+      status="draft",
+      posting_date=date(2026, 1, 31),
+      memo="Accrue payroll",
+      debit_element_id="elem_salary",
+      credit_element_id="elem_accrued",
+      amount=3200.00,
+      reversal=ClosingEntryResult(
+        entry_id="je_01DEF",
+        status="draft",
+        posting_date=date(2026, 2, 1),
+        memo="Reverse: Accrue payroll",
+        debit_element_id="elem_accrued",
+        credit_element_id="elem_salary",
+        amount=3200.00,
+      ),
+    )
+
+    tool = CreateClosingEntryTool(mock_graph_client)
+    with (
+      patch(SESSION_PATH, return_value=mock_session),
+      patch(SVC_PATH, return_value=mock_svc),
+    ):
+      result = await tool.execute(
+        {
+          "structure_id": "struct_01",
+          "posting_date": "2026-01-31",
+          "period_start": "2026-01-01",
+          "period_end": "2026-01-31",
+        }
+      )
+
+    assert result["entry_id"] == "je_01ABC"
+    assert "reversal" in result
+    rev = result["reversal"]
+    assert rev["entry_id"] == "je_01DEF"
+    assert rev["posting_date"] == "2026-02-01"
+    assert rev["memo"] == "Reverse: Accrue payroll"
+    # Verify DR/CR are flipped
+    assert rev["line_items"][0]["element_id"] == "elem_accrued"
+    assert rev["line_items"][0]["debit"] == 3200.00
+    assert rev["line_items"][1]["element_id"] == "elem_salary"
+    assert rev["line_items"][1]["credit"] == 3200.00
 
   @pytest.mark.asyncio
   async def test_returns_error_for_duplicate(self, mock_graph_client):
