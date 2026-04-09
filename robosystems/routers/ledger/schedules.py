@@ -71,6 +71,7 @@ async def create_schedule(
         credit_element_id=body.entry_template.credit_element_id,
         entry_type=body.entry_template.entry_type,
         memo_template=body.entry_template.memo_template,
+        auto_reverse=body.entry_template.auto_reverse,
       )
 
       sm = None
@@ -247,6 +248,8 @@ async def get_period_close_status(
             amount=s.amount,
             status=s.status,
             entry_id=s.entry_id,
+            reversal_entry_id=s.reversal_entry_id,
+            reversal_status=s.reversal_status,
           )
           for s in status.schedules
         ],
@@ -297,6 +300,18 @@ async def create_closing_entry(
         None, mark_graph_stale, graph_id, "closing_entry_created"
       )
 
+      reversal_resp = None
+      if result.reversal:
+        reversal_resp = ClosingEntryResponse(
+          entry_id=result.reversal.entry_id,
+          status=result.reversal.status,
+          posting_date=result.reversal.posting_date,
+          memo=result.reversal.memo,
+          debit_element_id=result.reversal.debit_element_id,
+          credit_element_id=result.reversal.credit_element_id,
+          amount=result.reversal.amount,
+        )
+
       return ClosingEntryResponse(
         entry_id=result.entry_id,
         status=result.status,
@@ -305,6 +320,7 @@ async def create_closing_entry(
         debit_element_id=result.debit_element_id,
         credit_element_id=result.credit_element_id,
         amount=result.amount,
+        reversal=reversal_resp,
       )
 
   except ValueError as e:

@@ -173,7 +173,7 @@ class DocumentService:
       logger.warning(f"Search service unavailable, skipping sync for {doc.id}")
       return DocumentUploadResponse(
         id=doc.id,
-        document_id=f"doc_{doc.graph_id}_{doc.id}",
+        document_id=f"udoc_{doc.id}",
         sections_indexed=0,
         total_content_length=len(doc.content),
         section_ids=[],
@@ -203,6 +203,6 @@ class DocumentService:
     if service is None:
       return
 
-    # The OpenSearch document_id prefix uses the PG document id as external_id
-    os_doc_id = f"doc_{graph_id}_{document_id}"
+    # The OpenSearch document_id prefix uses "udoc_" + PG document id
+    os_doc_id = f"udoc_{document_id}"
     service.delete_document(graph_id, os_doc_id)

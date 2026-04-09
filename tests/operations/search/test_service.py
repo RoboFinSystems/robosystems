@@ -119,6 +119,59 @@ class TestSearchDocuments:
     # Fallback uses section_label
     assert response.hits[0].snippet == "Business Description"
 
+  def test_user_doc_includes_parent_document_id(self, service, mock_client):
+    """User docs (udoc_ prefix) should have parent_document_id extracted."""
+    mock_client.search.return_value = {
+      "hits": {
+        "total": {"value": 1},
+        "hits": [
+          {
+            "_id": "udoc_doc_01ABC123_3",
+            "_score": 0.8,
+            "_source": {
+              "source_type": "uploaded_doc",
+              "document_title": "Depreciation Policy",
+              "section_label": "Method",
+              "folder": "policies",
+              "tags": ["depreciation"],
+            },
+            "highlight": {"content": ["...straight-line depreciation..."]},
+          }
+        ],
+      }
+    }
+
+    request = SearchRequest(query="depreciation")
+    response = service.search_documents("kg_test", request)
+
+    assert response.hits[0].parent_document_id == "doc_01ABC123"
+    assert response.hits[0].document_id == "udoc_doc_01ABC123_3"
+
+  def test_sec_doc_has_no_parent_document_id(self, service, mock_client):
+    """SEC docs (doc_ prefix) should have parent_document_id=None."""
+    mock_client.search.return_value = {
+      "hits": {
+        "total": {"value": 1},
+        "hits": [
+          {
+            "_id": "doc_sec_nvda_10k_2024_5",
+            "_score": 0.9,
+            "_source": {
+              "source_type": "narrative_section",
+              "entity_ticker": "NVDA",
+              "section_label": "Risk Factors",
+            },
+            "highlight": {"content": ["...risk..."]},
+          }
+        ],
+      }
+    }
+
+    request = SearchRequest(query="risk")
+    response = service.search_documents("sec", request)
+
+    assert response.hits[0].parent_document_id is None
+
   def test_passes_filters(self, service, mock_client):
     mock_client.search.return_value = {"hits": {"total": {"value": 0}, "hits": []}}
 
