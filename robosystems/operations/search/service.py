@@ -106,11 +106,18 @@ class SearchService:
         # so use section_label as minimal context
         snippet = source.get("section_label", "")
 
+      # Extract PG document ID for user docs: "udoc_{pg_doc_id}_{idx}" → pg_doc_id
+      doc_id = hit.get("_id", source.get("document_id", ""))
+      parent_doc_id = None
+      if doc_id.startswith("udoc_"):
+        parent_doc_id = doc_id.rsplit("_", 1)[0].removeprefix("udoc_")
+
       hits.append(
         SearchHit(
-          document_id=hit.get("_id", source.get("document_id", "")),
+          document_id=doc_id,
           score=hit.get("_score", 0.0),
           source_type=source.get("source_type", ""),
+          parent_document_id=parent_doc_id,
           entity_ticker=source.get("entity_ticker"),
           entity_name=source.get("entity_name"),
           section_label=source.get("section_label"),
@@ -193,10 +200,13 @@ class SearchService:
       raise ValueError("Document produced no indexable sections")
 
     # Generate base document ID
+    # User docs use "udoc_" prefix so the PG document ID is trivially extractable
+    # from search results: "udoc_{pg_doc_id}_{section_idx}" → rsplit("_", 1)[0][5:]
+    # SEC/pipeline docs use "doc_" prefix (no PG document table).
     if request.external_id:
-      base_id = f"doc_{graph_id}_{request.external_id}"
+      base_id = f"udoc_{request.external_id}"
     else:
-      base_id = f"doc_{graph_id}_{content_hash(request.content)}"
+      base_id = f"udoc_{content_hash(request.content)}"
 
     # Remove old sections if re-uploading
     self.client.delete_by_document_prefix(graph_id, base_id)

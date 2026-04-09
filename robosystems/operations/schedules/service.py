@@ -37,6 +37,7 @@ class EntryTemplate:
   credit_element_id: str
   entry_type: str = "closing"
   memo_template: str = ""
+  auto_reverse: bool = False
 
 
 @dataclass
@@ -83,6 +84,8 @@ class PeriodCloseItem:
   amount: float  # dollars
   status: str  # "pending", "drafted", "posted"
   entry_id: str | None
+  reversal_entry_id: str | None = None
+  reversal_status: str | None = None
 
 
 @dataclass
@@ -108,6 +111,7 @@ class ClosingEntryResult:
   debit_element_id: str
   credit_element_id: str
   amount: float  # dollars
+  reversal: ClosingEntryResult | None = None
 
 
 # ── Service ──────────────────────────────────────────────────────────────
@@ -169,6 +173,7 @@ class ScheduleService:
         "credit_element_id": entry_template.credit_element_id,
         "entry_type": entry_template.entry_type,
         "memo_template": entry_template.memo_template or f"Monthly schedule - {name}",
+        "auto_reverse": entry_template.auto_reverse,
       },
     }
     if schedule_metadata:
@@ -191,10 +196,13 @@ class ScheduleService:
     session.flush()
 
     # Create associations to elements
+    # For schedules, from_element_id is the first element (debit) to anchor
+    # the presentation chain. to_element_id is the element being associated.
+    anchor_element_id = element_ids[0] if element_ids else None
     for i, element_id in enumerate(element_ids, 1):
       assoc = Association(
         structure_id=structure.id,
-        from_element_id=structure.id,
+        from_element_id=anchor_element_id,
         to_element_id=element_id,
         association_type="presentation",
         order_value=float(i),
@@ -369,7 +377,19 @@ class ScheduleService:
           WHERE posting_date >= :period_start
             AND posting_date <= :period_end
             AND source_structure_id IS NOT NULL
+            AND type != 'reversing'
           ORDER BY source_structure_id,
+            CASE status WHEN 'posted' THEN 1 WHEN 'draft' THEN 2 ELSE 3 END
+        ),
+        reversal AS (
+          SELECT DISTINCT ON (reversal_of)
+            reversal_of,
+            id AS reversal_entry_id,
+            status AS reversal_status
+          FROM entries
+          WHERE type = 'reversing'
+            AND reversal_of IS NOT NULL
+          ORDER BY reversal_of,
             CASE status WHEN 'posted' THEN 1 WHEN 'draft' THEN 2 ELSE 3 END
         )
         SELECT
@@ -378,13 +398,16 @@ class ScheduleService:
           s.metadata AS metadata,
           f.value AS amount,
           be.entry_id,
-          be.entry_status
+          be.entry_status,
+          r.reversal_entry_id,
+          r.reversal_status
         FROM structures s
         LEFT JOIN facts f ON f.structure_id = s.id
           AND f.period_start >= :period_start
           AND f.period_end <= :period_end
           AND f.element_id = (s.metadata->'entry_template'->>'debit_element_id')
         LEFT JOIN best_entry be ON be.source_structure_id = s.id
+        LEFT JOIN reversal r ON r.reversal_of = be.entry_id
         WHERE s.structure_type = 'schedule'
           AND s.is_active = true
         ORDER BY s.name
@@ -425,6 +448,8 @@ class ScheduleService:
           amount=row.amount or 0.0,
           status=status,
           entry_id=row.entry_id,
+          reversal_entry_id=row.reversal_entry_id,
+          reversal_status=row.reversal_status,
         )
       )
 
@@ -557,6 +582,59 @@ class ScheduleService:
 
     session.flush()
 
+    # Auto-reverse: create a reversing entry on the first day of the next period
+    reversal_result = None
+    if template.get("auto_reverse", False):
+      if period_end.month == 12:
+        reversal_date = date(period_end.year + 1, 1, 1)
+      else:
+        reversal_date = date(period_end.year, period_end.month + 1, 1)
+
+      reversal_memo = f"Reverse: {entry_memo}"
+
+      reversal_entry = Entry(
+        type="reversing",
+        status="draft",
+        posting_date=reversal_date,
+        memo=reversal_memo,
+        source_structure_id=structure_id,
+        reversal_of=entry.id,
+        created_by=created_by,
+      )
+      session.add(reversal_entry)
+      session.flush()
+
+      # Flipped DR/CR: debit element becomes credit, credit becomes debit
+      session.add(
+        LineItem(
+          entry_id=reversal_entry.id,
+          element_id=credit_element_id,
+          debit_amount=amount_cents,
+          credit_amount=0,
+          line_order=1,
+        )
+      )
+      session.add(
+        LineItem(
+          entry_id=reversal_entry.id,
+          element_id=debit_element_id,
+          debit_amount=0,
+          credit_amount=amount_cents,
+          line_order=2,
+        )
+      )
+      session.flush()
+
+      reversal_result = ClosingEntryResult(
+        entry_id=reversal_entry.id,
+        status="draft",
+        posting_date=reversal_date,
+        memo=reversal_memo,
+        debit_element_id=credit_element_id,
+        credit_element_id=debit_element_id,
+        amount=amount_dollars,
+      )
+
     return ClosingEntryResult(
       entry_id=entry.id,
       status="draft",
@@ -565,6 +643,7 @@ class ScheduleService:
       debit_element_id=debit_element_id,
       credit_element_id=credit_element_id,
       amount=amount_dollars,
+      reversal=reversal_result,
     )
 
   # ── Private helpers ──────────────────────────────────────────────────

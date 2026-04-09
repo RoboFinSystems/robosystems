@@ -47,6 +47,7 @@ class SearchHit(BaseModel):
   document_id: str
   score: float
   source_type: str
+  parent_document_id: str | None = None
   entity_ticker: str | None = None
   entity_name: str | None = None
   section_label: str | None = None

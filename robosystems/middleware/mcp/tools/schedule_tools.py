@@ -109,6 +109,10 @@ class CreateScheduleTool:
             "type": "string",
             "description": "BS asset element for net book value tracking",
           },
+          "auto_reverse": {
+            "type": "boolean",
+            "description": "If true, closing entries auto-generate a reversing entry on the first day of the next period (default: false). Use for accruals that need to reverse.",
+          },
         },
         "required": [
           "name",
@@ -137,6 +141,7 @@ class CreateScheduleTool:
       credit_element_id=arguments["credit_element_id"],
       entry_type=arguments.get("entry_type", "closing"),
       memo_template=arguments.get("memo_template", "Monthly {structure_name}"),
+      auto_reverse=arguments.get("auto_reverse", False),
     )
 
     schedule_metadata = None
@@ -397,6 +402,8 @@ class GetPeriodCloseStatusTool:
                 "amount": s.amount,
                 "status": s.status,
                 "entry_id": s.entry_id,
+                "reversal_entry_id": s.reversal_entry_id,
+                "reversal_status": s.reversal_status,
               }
               for s in status.schedules
             ],
@@ -494,7 +501,7 @@ class CreateClosingEntryTool:
         )
         session.commit()
 
-        return {
+        response = {
           "entry_id": result.entry_id,
           "status": result.status,
           "posting_date": str(result.posting_date),
@@ -512,6 +519,28 @@ class CreateClosingEntryTool:
             },
           ],
         }
+
+        if result.reversal:
+          response["reversal"] = {
+            "entry_id": result.reversal.entry_id,
+            "status": result.reversal.status,
+            "posting_date": str(result.reversal.posting_date),
+            "memo": result.reversal.memo,
+            "line_items": [
+              {
+                "element_id": result.reversal.debit_element_id,
+                "debit": result.reversal.amount,
+                "credit": 0,
+              },
+              {
+                "element_id": result.reversal.credit_element_id,
+                "debit": 0,
+                "credit": result.reversal.amount,
+              },
+            ],
+          }
+
+        return response
     except ValueError as exc:
       return {"error": str(exc)}
     except Exception as exc:

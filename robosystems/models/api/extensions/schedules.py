@@ -1,5 +1,7 @@
 """Schedule request and response models."""
 
+from __future__ import annotations
+
 from datetime import date
 
 from pydantic import BaseModel, Field
@@ -17,6 +19,10 @@ class EntryTemplateRequest(BaseModel):
   entry_type: str = Field("closing", description="Entry type for generated entries")
   memo_template: str = Field(
     "", description="Memo template ({structure_name} is replaced)"
+  )
+  auto_reverse: bool = Field(
+    False,
+    description="Auto-generate a reversing entry on the first day of the next period",
   )
 
 
@@ -86,6 +92,8 @@ class PeriodCloseItemResponse(BaseModel):
   amount: float
   status: str
   entry_id: str | None = None
+  reversal_entry_id: str | None = None
+  reversal_status: str | None = None
 
 
 class PeriodCloseStatusResponse(BaseModel):
@@ -105,6 +113,10 @@ class ClosingEntryResponse(BaseModel):
   debit_element_id: str
   credit_element_id: str
   amount: float
+  reversal: ClosingEntryResponse | None = None
+
+
+ClosingEntryResponse.model_rebuild()
 
 
 class ScheduleCreatedResponse(BaseModel):
