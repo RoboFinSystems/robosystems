@@ -100,7 +100,7 @@ class TestLadybugAllocationManager:
     assert result is not None
     # Graph ID should now be kg prefix with UUID
     assert result.graph_id.startswith("kg")
-    assert len(result.graph_id) == 18  # kg + 16 hex chars
+    assert len(result.graph_id) == 22  # kg + 20 hex chars (ULID-based)
     assert result.instance_id == "i-123456"
     assert result.private_ip == "10.0.1.100"
 

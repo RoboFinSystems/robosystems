@@ -257,11 +257,11 @@ class LadybugAllocationManager:
       )
 
     # Generate graph_id if not provided
-    # All user graphs must use kg prefix with UUID for security
+    # All user graphs must use kg prefix with ULID for time-ordering
     if not graph_id:
-      import uuid
+      from robosystems.utils.ulid import generate_ulid_hex
 
-      graph_id = f"kg{uuid.uuid4().hex[:16]}"
+      graph_id = f"kg{generate_ulid_hex(20)}"
 
     if not _get_valid_graph_id_regex().match(graph_id):
       # Check if this looks like a subgraph ID - provide helpful error
@@ -438,23 +438,35 @@ class LadybugAllocationManager:
 
         except ClientError as e:
           if e.response["Error"]["Code"] == "ConditionalCheckFailedException":
-            # Database already exists - check if we can return existing allocation
+            # Database already exists - this is a graph_id collision
             try:
               response = self.graph_table.get_item(Key={"graph_id": graph_id})
               if "Item" in response:
                 item = response["Item"]
-                logger.info(
-                  f"Database {graph_id} already exists on instance {item['instance_id']} (concurrent allocation detected)"
-                )
-                return DatabaseLocation(
-                  graph_id=graph_id,
-                  instance_id=item["instance_id"],
-                  private_ip=item["private_ip"],
-                  availability_zone=item.get("availability_zone", "unknown"),
-                  created_at=datetime.fromisoformat(item["created_at"]),
-                  status=DatabaseStatus(item.get("status", "active")),
-                  backend_type=item.get("backend_type", "ladybug"),
-                )
+                existing_entity = item.get("entity_id", "unknown")
+                if existing_entity == entity_id:
+                  # Same entity retrying - safe to return existing allocation
+                  logger.info(
+                    f"Database {graph_id} already allocated to same entity {entity_id} (idempotent retry)"
+                  )
+                  return DatabaseLocation(
+                    graph_id=graph_id,
+                    instance_id=item["instance_id"],
+                    private_ip=item["private_ip"],
+                    availability_zone=item.get("availability_zone", "unknown"),
+                    created_at=datetime.fromisoformat(item["created_at"]),
+                    status=DatabaseStatus(item.get("status", "active")),
+                    backend_type=item.get("backend_type", "ladybug"),
+                  )
+                else:
+                  # Different entity - graph_id collision, must not share allocation
+                  logger.error(
+                    f"Graph ID collision: {graph_id} already belongs to entity {existing_entity}, "
+                    f"requested by entity {entity_id}"
+                  )
+                  raise Exception(
+                    f"Graph ID {graph_id} already exists. Please retry to generate a new ID."
+                  )
               else:
                 # Shouldn't happen - conditional check failed but item doesn't exist
                 logger.error(
