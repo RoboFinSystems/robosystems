@@ -214,7 +214,7 @@ class GraphCreationService:
     """Generate a ULID-based graph ID."""
     from robosystems.utils.ulid import generate_ulid_hex
 
-    graph_id = f"kg{generate_ulid_hex(16)}"
+    graph_id = f"kg{generate_ulid_hex(20)}"
     logger.info(f"Generated graph ID: {graph_id}")
     return graph_id
 

@@ -1,11 +1,17 @@
 """Tests for the worker enqueue client."""
 
+import hashlib
 import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from robosystems.worker.client import enqueue_task
+
+
+def _params_hash(params: dict | None = None) -> str:
+  """Compute the same params hash the client uses."""
+  return hashlib.md5(json.dumps(params or {}, sort_keys=True).encode()).hexdigest()[:8]
 
 
 @pytest.fixture
@@ -79,9 +85,13 @@ async def test_enqueue_task_creates_operation_and_pushes(mock_operation_response
   mock_pipe.rpush.assert_called_once()
   mock_pipe.execute.assert_called_once()
 
-  # Verify dedup key includes user_id
+  # Verify dedup key includes user_id and params hash
   dedup_args = mock_pipe.set.call_args[0]
-  assert dedup_args[0] == "worker:dedup:agent_mapping:kg0123456789abcdef:user_01TEST"
+  expected_hash = _params_hash({"confidence": 0.7})
+  assert (
+    dedup_args[0]
+    == f"worker:dedup:agent_mapping:kg0123456789abcdef:user_01TEST:{expected_hash}"
+  )
   assert dedup_args[1] == "op_01TESTID"
 
   # Verify task payload
@@ -187,3 +197,73 @@ async def test_enqueue_task_dedup_returns_existing():
   # Should NOT create pipeline or enqueue
   mock_queue.pipeline.assert_not_called()
   mock_queue.aclose.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_enqueue_task_different_params_bypass_dedup(mock_operation_response):
+  """Same task_type+graph_id+user but different params should NOT dedup."""
+  mock_queue, mock_pipe = _make_mock_queue()
+
+  # queue.get returns None because the dedup key (with params hash) won't match
+  with (
+    patch(
+      "robosystems.worker.client.create_operation_response",
+      new_callable=AsyncMock,
+      return_value=mock_operation_response,
+    ),
+    patch(
+      "robosystems.worker.client.create_async_redis_client",
+      return_value=mock_queue,
+    ),
+    patch(
+      "robosystems.worker.client.generate_prefixed_ulid",
+      return_value="op_01TESTID",
+    ),
+  ):
+    result = await enqueue_task(
+      task_type="agent",
+      graph_id="kg0123456789abcdef",
+      user_id="user_01TEST",
+      params={"agent_type": "mapping", "mapping_id": "struct_abc"},
+    )
+
+  # Should create a new operation, not dedup
+  assert result["operation_id"] == "op_01TESTID"
+  assert "deduplicated" not in result
+  mock_queue.pipeline.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_enqueue_task_none_graph_id_skips_dedup(mock_operation_response):
+  """graph_id=None (new graph creation) should never dedup."""
+  mock_queue, mock_pipe = _make_mock_queue()
+
+  with (
+    patch(
+      "robosystems.worker.client.create_operation_response",
+      new_callable=AsyncMock,
+      return_value=mock_operation_response,
+    ),
+    patch(
+      "robosystems.worker.client.create_async_redis_client",
+      return_value=mock_queue,
+    ),
+    patch(
+      "robosystems.worker.client.generate_prefixed_ulid",
+      return_value="op_01TESTID",
+    ),
+  ):
+    result = await enqueue_task(
+      task_type="graph_creation",
+      graph_id=None,
+      user_id="user_01TEST",
+      params={"tier": "ladybug-standard"},
+    )
+
+  # Should not even check dedup
+  mock_queue.get.assert_not_called()
+
+  # Should still enqueue but NOT set a dedup key
+  assert result["operation_id"] == "op_01TESTID"
+  mock_pipe.rpush.assert_called_once()
+  mock_pipe.set.assert_not_called()
