@@ -20,7 +20,7 @@ DEDUP_TTL = 30
 
 async def enqueue_task(
   task_type: str,
-  graph_id: str,
+  graph_id: str | None,
   user_id: str,
   params: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
@@ -30,13 +30,14 @@ async def enqueue_task(
   for stream/status/cancel endpoints, then RPUSH the task payload to
   the worker queue (Valkey DB 6). RPUSH + BLMOVE = FIFO ordering.
 
-  Deduplication: A task_type + graph_id combination is rejected within
-  DEDUP_TTL seconds of the previous enqueue, returning the existing
-  operation response instead.
+  Deduplication: A task_type + graph_id + user_id + params combination
+  is rejected within DEDUP_TTL seconds of the previous enqueue,
+  returning the existing operation response instead. Dedup is skipped
+  entirely when graph_id is None (e.g. new graph creation).
 
   Args:
       task_type: Registered task type (e.g. "agent_mapping").
-      graph_id: The graph this task operates on.
+      graph_id: The graph this task operates on, or None for creation tasks.
       user_id: The user who initiated the task.
       params: Optional task-specific parameters.
 
@@ -94,7 +95,8 @@ async def enqueue_task(
     # Atomic: set dedup key + enqueue in a single round trip.
     # Prevents ghost dedup keys if the process crashes between the two ops.
     pipe = queue.pipeline(transaction=True)
-    pipe.set(dedup_key, task_id, ex=DEDUP_TTL)
+    if graph_id:
+      pipe.set(dedup_key, task_id, ex=DEDUP_TTL)
     pipe.rpush("worker:tasks", task_payload)
     await pipe.execute()
 

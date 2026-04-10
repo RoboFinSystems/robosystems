@@ -263,6 +263,7 @@ async def test_enqueue_task_none_graph_id_skips_dedup(mock_operation_response):
   # Should not even check dedup
   mock_queue.get.assert_not_called()
 
-  # Should still enqueue
+  # Should still enqueue but NOT set a dedup key
   assert result["operation_id"] == "op_01TESTID"
   mock_pipe.rpush.assert_called_once()
+  mock_pipe.set.assert_not_called()

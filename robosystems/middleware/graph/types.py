@@ -177,11 +177,9 @@ class GraphTypeRegistry:
     """
     Build graph ID validation pattern for API endpoints.
 
-    Format: kg + 16+ hex characters (lowercase hex from ULID generation)
+    Format: kg + 20 hex characters (lowercase hex from ULID generation)
     Special cases: Shared repository names from registry
-    Current generation:
-      - Generic graphs: kg + 16 chars (ULID) = 16 chars after prefix
-      - Entity graphs: kg + 14 chars (ULID) + 4 chars (entity hash) = 18 chars after prefix
+    Regex accepts 16+ chars to remain compatible with older graph IDs.
 
     Returns:
         Regex pattern string for validating graph IDs
@@ -194,7 +192,7 @@ class GraphTypeRegistry:
     (
       re.compile(r"^kg[a-f0-9]{16,}$"),
       None,  # Type determined by metadata, not ID pattern
-    ),  # All user graphs use kg prefix with UUID
+    ),  # All user graphs use kg prefix with ULID hex
   ]
 
   @classmethod

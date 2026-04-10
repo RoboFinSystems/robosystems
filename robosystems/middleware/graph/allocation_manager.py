@@ -33,6 +33,15 @@ from robosystems.security import SecurityAuditLogger, SecurityEventType
 
 from .utils import MultiTenantUtils, parse_subgraph_id
 
+
+class GraphIDCollisionError(Exception):
+  """Raised when a generated graph ID collides with an existing one owned by a different entity."""
+
+
+class AllocationRaceConditionError(Exception):
+  """Raised when DynamoDB conditional write fails and the existing item cannot be resolved."""
+
+
 # Valid identifier patterns for security with length limits
 VALID_ENTITY_ID_PATTERN = re.compile(
   r"^[a-zA-Z0-9_-]{1,128}$"
@@ -464,20 +473,24 @@ class LadybugAllocationManager:
                     f"Graph ID collision: {graph_id} already belongs to entity {existing_entity}, "
                     f"requested by entity {entity_id}"
                   )
-                  raise Exception(
-                    f"Graph ID {graph_id} already exists. Please retry to generate a new ID."
+                  raise GraphIDCollisionError(
+                    f"Graph ID {graph_id} already exists (owned by a different entity)."
                   )
               else:
                 # Shouldn't happen - conditional check failed but item doesn't exist
                 logger.error(
                   f"Conditional check failed but database {graph_id} not found"
                 )
-                raise Exception("Database allocation failed due to race condition")
+                raise AllocationRaceConditionError(
+                  f"Conditional check failed but database {graph_id} not found"
+                )
             except ClientError as lookup_error:
               logger.error(
                 f"Failed to lookup existing database after conditional check failure: {lookup_error}"
               )
-              raise Exception("Database allocation failed and lookup failed")
+              raise AllocationRaceConditionError(
+                f"Database allocation failed for {graph_id} and lookup failed"
+              )
           else:
             # Different DynamoDB error
             raise e
