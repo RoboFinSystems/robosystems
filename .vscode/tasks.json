@@ -2,7 +2,7 @@
   "version": "2.0.0",
   "tasks": [
     {
-      "label": "RoboSystems Bootstrap Dev",
+      "label": "RoboSystems Brew",
       "type": "shell",
       "command": "bash",
       "args": [

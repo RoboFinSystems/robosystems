@@ -5,6 +5,7 @@ Creates an SSE operation (PENDING) on Valkey DB 3, then pushes
 the task payload to the worker queue on Valkey DB 6.
 """
 
+import hashlib
 import json
 from typing import Any
 
@@ -45,10 +46,16 @@ async def enqueue_task(
   """
   queue = create_async_redis_client(ValkeyDatabase.WORKER_QUEUE, decode_responses=True)
   try:
-    # Check deduplication — if a task for this type+graph+user was recently
-    # enqueued, return the existing operation instead of creating a duplicate.
-    dedup_key = f"worker:dedup:{task_type}:{graph_id}:{user_id}"
-    existing_task_id = await queue.get(dedup_key)
+    # Check deduplication — if an identical task was recently enqueued,
+    # return the existing operation instead of creating a duplicate.
+    # The key includes a params hash so that different params (e.g. two
+    # different subgraph names or mapping IDs) get separate dedup slots.
+    # Skip dedup entirely when graph_id is None (new graph creation).
+    params_hash = hashlib.md5(
+      json.dumps(params or {}, sort_keys=True).encode()
+    ).hexdigest()[:8]
+    dedup_key = f"worker:dedup:{task_type}:{graph_id}:{user_id}:{params_hash}"
+    existing_task_id = await queue.get(dedup_key) if graph_id else None
     if existing_task_id:
       return {
         "operation_id": existing_task_id,
