@@ -299,6 +299,34 @@ class TestCreateClosingEntry:
     # Entry + 2 LineItems = 3 adds
     assert session.add.call_count >= 3
 
+  def test_closing_entry_has_provenance(self):
+    """Closing entries from schedules must have provenance='schedule_derived'."""
+    session = _mock_session()
+    session.get.return_value = self._mock_schedule_structure()
+    session.execute.return_value.fetchone.side_effect = [
+      None,
+      MagicMock(value=416.67),
+    ]
+    svc = ScheduleService()
+
+    svc.create_closing_entry(
+      session,
+      structure_id="struct_01",
+      posting_date=date(2026, 1, 31),
+      period_start=date(2026, 1, 1),
+      period_end=date(2026, 1, 31),
+      created_by="usr_test",
+    )
+
+    # Find the Entry object that was added to the session
+    from robosystems.operations.schedules.service import Entry
+
+    entries = [
+      call[0][0] for call in session.add.call_args_list if isinstance(call[0][0], Entry)
+    ]
+    assert len(entries) >= 1
+    assert entries[0].provenance == "schedule_derived"
+
   def test_memo_override(self):
     session = _mock_session()
     session.get.return_value = self._mock_schedule_structure()

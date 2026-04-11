@@ -61,6 +61,11 @@ class Entry(ExtensionsBase):
   # Provenance — links closing entries back to the schedule structure they came from
   source_structure_id = Column(String, nullable=True)
 
+  # Origin tracking — where this entry came from
+  provenance = Column(
+    String, nullable=True
+  )  # source_sync, ai_generated, manual_entry, schedule_derived, system_computed
+
   # Dates
   posting_date = Column(Date, nullable=False)
 

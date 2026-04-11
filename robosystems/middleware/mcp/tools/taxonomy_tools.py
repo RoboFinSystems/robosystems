@@ -322,10 +322,11 @@ class GetMappingSummaryTool:
   def get_tool_definition(self) -> dict[str, Any]:
     return {
       "name": "get-mapping-summary",
-      "description": """Get coverage statistics for a CoA → GAAP mapping.
+      "description": """Get coverage statistics for account rollups (CoA → GAAP mapping).
 
 **WHEN TO USE:**
 - To check progress during a mapping session
+- To verify account rollups are complete before closing the books
 - To see how many accounts are mapped vs unmapped
 - To review confidence distribution of AI-suggested mappings
 
