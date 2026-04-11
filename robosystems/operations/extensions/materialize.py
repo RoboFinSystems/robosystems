@@ -234,6 +234,7 @@ def _staging_sql(graph_id: str, entity_id: str, connstr: str) -> dict[str, str]:
       type,
       status,
       reversal_of,
+      provenance,
       CAST(updated_at AS VARCHAR)     AS updated_at
     FROM postgres_scan('{c}', '{s}', 'entries')
   """

@@ -305,6 +305,7 @@ class OLTPLoader:
               posting_date=row["posting_date"],
               memo=str(row["memo"]) if row.get("memo") else None,
               status=str(row.get("status", "posted")),
+              provenance="source_sync",
               posted_at=now,
               metadata_={},
               version=1,

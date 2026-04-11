@@ -16,14 +16,13 @@ RoboSystems is a financial intelligence platform that connects disparate data so
 The platform provides the core infrastructure that all extensions build on:
 
 - **Dedicated Infrastructure**: Tiered graph infrastructure with dedicated instances and configurable memory allocation
-
 - **AI Agent System**: Autonomous financial operations — graph queries, taxonomy mapping, report generation — with automatic credit tracking and SSE progress streaming
 - **Shared Repositories**: SEC XBRL filings knowledge graph for context mining and benchmarking
 - **Document Management**: Upload, index, and search documents with full-text and semantic search via OpenSearch
 - **DuckDB Staging System**: High-performance data validation and bulk ingestion pipeline
 - **Dagster Orchestration**: Data pipeline orchestration for SEC filings, QuickBooks sync, backups, billing, and scheduled jobs
 - **Credit-Based Billing**: Flexible credits for AI operations based on token usage
-- **Subgraphs (Workspaces)**: AI memory graphs, data workspaces with fork & publish, and isolated environments for development and team collaboration
+- **Subgraphs (Workspaces)**: AI memory graphs and isolated environments for development and team collaboration
 
 ## Extensions
 

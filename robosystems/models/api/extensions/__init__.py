@@ -1,10 +1,20 @@
 """Extensions API response models (ledger, investor, etc.)."""
 
+from .account_rollups import (
+  AccountRollupGroup,
+  AccountRollupRow,
+  AccountRollupsResponse,
+)
 from .accounts import (
   AccountListResponse,
   AccountResponse,
   AccountTreeNode,
   AccountTreeResponse,
+)
+from .closing_book import (
+  ClosingBookCategory,
+  ClosingBookItem,
+  ClosingBookStructuresResponse,
 )
 from .investor import (
   CreatePortfolioRequest,
@@ -47,12 +57,16 @@ from .transactions import (
 from .trial_balance import TrialBalanceResponse, TrialBalanceRow
 
 __all__ = [
-  # RoboLedger
   "AccountListResponse",
   "AccountResponse",
+  "AccountRollupGroup",
+  "AccountRollupRow",
+  "AccountRollupsResponse",
   "AccountTreeNode",
   "AccountTreeResponse",
-  # RoboInvestor
+  "ClosingBookCategory",
+  "ClosingBookItem",
+  "ClosingBookStructuresResponse",
   "CreatePortfolioRequest",
   "CreatePositionRequest",
   "CreateReportRequest",

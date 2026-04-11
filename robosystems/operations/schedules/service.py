@@ -555,6 +555,7 @@ class ScheduleService:
       posting_date=posting_date,
       memo=entry_memo,
       source_structure_id=structure_id,
+      provenance="schedule_derived",
       created_by=created_by,
     )
     session.add(entry)
@@ -598,6 +599,7 @@ class ScheduleService:
         posting_date=reversal_date,
         memo=reversal_memo,
         source_structure_id=structure_id,
+        provenance="schedule_derived",
         reversal_of=entry.id,
         created_by=created_by,
       )
