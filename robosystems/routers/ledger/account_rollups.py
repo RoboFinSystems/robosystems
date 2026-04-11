@@ -23,16 +23,10 @@ from robosystems.models.api.extensions.account_rollups import (
   AccountRollupsResponse,
 )
 from robosystems.models.core import User
-from robosystems.models.extensions.roboledger import Structure
+from robosystems.models.extensions.roboledger import COA_SOURCES, Structure
+from robosystems.routers.ledger._errors import ledger_not_found
 
 router = APIRouter()
-
-
-def _ledger_404():
-  return HTTPException(
-    status_code=404,
-    detail="Ledger not initialized. Connect a data source first.",
-  )
 
 
 def _natural_sign(net_balance: float, balance_type: str) -> float:
@@ -74,6 +68,16 @@ async def get_account_rollups(
   Shows how company-specific accounts roll up to standardized reporting
   line items. Auto-discovers the mapping structure if mapping_id is not provided.
   """
+  if (
+    isinstance(start_date, date)
+    and isinstance(end_date, date)
+    and start_date > end_date
+  ):
+    raise HTTPException(
+      status_code=422,
+      detail="start_date must be before or equal to end_date",
+    )
+
   try:
     with extensions_session(graph_id) as session:
       # Auto-discover mapping if not provided
@@ -178,15 +182,12 @@ async def get_account_rollups(
         ),
       )
 
-      # Count unmapped
-      from robosystems.models.extensions.roboledger import COA_SOURCES
-
-      source_list = ", ".join(f"'{s}'" for s in COA_SOURCES)
+      # Count unmapped CoA elements
       unmapped_result = session.execute(
-        text(f"""
+        text("""
           SELECT COUNT(*) AS cnt
           FROM elements e
-          WHERE e.source IN ({source_list})
+          WHERE e.source = ANY(:sources)
             AND e.is_active = true
             AND e.is_abstract = false
             AND NOT EXISTS (
@@ -196,7 +197,7 @@ async def get_account_rollups(
                 AND a.structure_id = :mapping_id
             )
         """),
-        {"mapping_id": mapping_id},
+        {"mapping_id": mapping_id, "sources": list(COA_SOURCES)},
       )
       unmapped_row = unmapped_result.fetchone()
       total_unmapped = unmapped_row.cnt if unmapped_row else 0
@@ -212,9 +213,9 @@ async def get_account_rollups(
       )
 
   except ValueError:
-    raise _ledger_404()
+    raise ledger_not_found()
   except ProgrammingError as e:
     if "does not exist" in str(e) and ("schema" in str(e) or "relation" in str(e)):
-      raise _ledger_404()
+      raise ledger_not_found()
     logger.error(f"Account rollups failed: {e}")
     raise

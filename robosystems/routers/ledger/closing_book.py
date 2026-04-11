@@ -4,7 +4,7 @@ Provides the structure overview for the digital closing book viewer —
 all structure categories in one call for the sidebar navigation.
 """
 
-from fastapi import APIRouter, Depends, HTTPException, Path
+from fastapi import APIRouter, Depends, Path
 from sqlalchemy import select, text
 from sqlalchemy.exc import ProgrammingError
 
@@ -20,15 +20,9 @@ from robosystems.models.api.extensions.closing_book import (
 )
 from robosystems.models.core import User
 from robosystems.models.extensions.roboledger import Report, Structure
+from robosystems.routers.ledger._errors import ledger_not_found
 
 router = APIRouter()
-
-
-def _ledger_404():
-  return HTTPException(
-    status_code=404,
-    detail="Ledger not initialized. Connect a data source first.",
-  )
 
 
 # Structure types that represent financial statements
@@ -79,12 +73,12 @@ async def get_closing_book_structures(
       ).scalar_one_or_none()
 
       if latest_report:
+        types_list = ", ".join(f"'{t}'" for t in _STATEMENT_TYPES)
         stmt_result = session.execute(
-          text("""
+          text(f"""
             SELECT id, name, structure_type FROM structures
             WHERE taxonomy_id = :taxonomy_id
-              AND structure_type IN ('income_statement', 'balance_sheet',
-                                     'cash_flow_statement', 'equity_statement')
+              AND structure_type IN ({types_list})
               AND is_active = true
             ORDER BY structure_type
           """),
@@ -162,7 +156,7 @@ async def get_closing_book_structures(
 
       # 4. Trial Balance — always present if there are posted entries
       has_posted = session.execute(
-        text("SELECT EXISTS(SELECT 1 FROM entries WHERE status = 'posted' LIMIT 1)")
+        text("SELECT EXISTS(SELECT 1 FROM entries WHERE status = 'posted')")
       ).scalar()
 
       if has_posted:
@@ -199,9 +193,9 @@ async def get_closing_book_structures(
       )
 
   except ValueError:
-    raise _ledger_404()
+    raise ledger_not_found()
   except ProgrammingError as e:
     if "does not exist" in str(e) and ("schema" in str(e) or "relation" in str(e)):
-      raise _ledger_404()
+      raise ledger_not_found()
     logger.error(f"Closing book structures failed: {e}")
     raise
