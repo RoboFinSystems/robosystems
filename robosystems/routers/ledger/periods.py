@@ -33,7 +33,7 @@ from robosystems.models.api.extensions.fiscal_calendar import (
 )
 from robosystems.models.core import User
 from robosystems.models.extensions.roboledger.fiscal_period import FiscalPeriod
-from robosystems.operations.fiscal_calendar import (
+from robosystems.operations.roboledger.fiscal_calendar import (
   CloseGateFailed,
   FiscalCalendarService,
   PeriodCloseService,
@@ -42,7 +42,9 @@ from robosystems.operations.fiscal_calendar import (
   parse_period,
   period_date_range,
 )
-from robosystems.operations.fiscal_calendar.service import FiscalCalendarError
+from robosystems.operations.roboledger.fiscal_calendar.service import (
+  FiscalCalendarError,
+)
 from robosystems.routers.ledger._common import ledger_404 as _ledger_404
 
 # Reuse the response builder + sync state helper to avoid duplication

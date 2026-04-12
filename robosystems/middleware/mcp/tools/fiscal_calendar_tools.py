@@ -28,7 +28,7 @@ def _build_response_payload(session, graph_id: str, calendar) -> dict[str, Any]:
   so Claude sees the same fields whether it called via MCP or REST.
   """
   from robosystems.models.extensions.roboledger.fiscal_period import FiscalPeriod
-  from robosystems.operations.fiscal_calendar import FiscalCalendarService
+  from robosystems.operations.roboledger.fiscal_calendar import FiscalCalendarService
 
   svc = FiscalCalendarService()
   periods = (
@@ -161,7 +161,7 @@ class GetFiscalCalendarTool:
 
   async def execute(self, arguments: dict[str, Any]) -> Any:
     from robosystems.db.extensions import extensions_session
-    from robosystems.operations.fiscal_calendar import FiscalCalendarService
+    from robosystems.operations.roboledger.fiscal_calendar import FiscalCalendarService
 
     graph_id = self.client.graph_id
     svc = FiscalCalendarService()
@@ -260,13 +260,15 @@ class ClosePeriodTool:
 
   async def execute(self, arguments: dict[str, Any]) -> Any:
     from robosystems.db.extensions import extensions_session
-    from robosystems.operations.fiscal_calendar import (
+    from robosystems.operations.roboledger.fiscal_calendar import (
       CloseGateFailed,
       PeriodCloseService,
       PeriodNotFoundError,
       UnbalancedLedgerError,
     )
-    from robosystems.operations.fiscal_calendar.service import FiscalCalendarError
+    from robosystems.operations.roboledger.fiscal_calendar.service import (
+      FiscalCalendarError,
+    )
 
     graph_id = self.client.graph_id
     period = arguments["period"]
@@ -402,8 +404,10 @@ class ReopenPeriodTool:
   async def execute(self, arguments: dict[str, Any]) -> Any:
     from robosystems.db.extensions import extensions_session
     from robosystems.models.extensions.roboledger.fiscal_period import FiscalPeriod
-    from robosystems.operations.fiscal_calendar import FiscalCalendarService
-    from robosystems.operations.fiscal_calendar.service import FiscalCalendarError
+    from robosystems.operations.roboledger.fiscal_calendar import FiscalCalendarService
+    from robosystems.operations.roboledger.fiscal_calendar.service import (
+      FiscalCalendarError,
+    )
 
     graph_id = self.client.graph_id
     period = arguments["period"]

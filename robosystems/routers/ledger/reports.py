@@ -29,18 +29,18 @@ from robosystems.models.api.extensions.reports import (
 from robosystems.models.core import User
 from robosystems.models.extensions import Fact, Report, ReportShare
 from robosystems.operations.extensions.staleness import mark_graph_stale
-from robosystems.operations.reports.fact_grid import (
+from robosystems.operations.roboledger.reports.fact_grid import (
   PeriodSpec as FactPeriodSpec,
 )
-from robosystems.operations.reports.fact_grid import (
+from robosystems.operations.roboledger.reports.fact_grid import (
   ReportFact as ReportFactData,
 )
-from robosystems.operations.reports.fact_grid import (
+from robosystems.operations.roboledger.reports.fact_grid import (
   _compute_prior_period,
   generate_report_facts,
   render_structure_view,
 )
-from robosystems.operations.reports.guard_rails import validate_report
+from robosystems.operations.roboledger.reports.guard_rails import validate_report
 from robosystems.routers.ledger._common import ledger_404 as _ledger_404
 
 router = APIRouter()
@@ -62,7 +62,7 @@ def _resolve_closed_through(session) -> date | None:
   retained-earnings adjustment so that real RE balances aren't double-counted.
   """
   from robosystems.models.extensions.roboledger.fiscal_calendar import FiscalCalendar
-  from robosystems.operations.fiscal_calendar import period_date_range
+  from robosystems.operations.roboledger.fiscal_calendar import period_date_range
 
   try:
     cal = session.query(FiscalCalendar).first()

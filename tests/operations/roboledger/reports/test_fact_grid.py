@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import date
 from unittest.mock import MagicMock
 
-from robosystems.operations.reports.fact_grid import (
+from robosystems.operations.roboledger.reports.fact_grid import (
   ReportFact,
   _Balance,
   _build_rows,

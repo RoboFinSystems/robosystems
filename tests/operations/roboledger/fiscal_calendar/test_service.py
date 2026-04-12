@@ -17,7 +17,7 @@ from robosystems.models.extensions.roboledger.fiscal_calendar import (
   FiscalCalendarEvent,
 )
 from robosystems.models.extensions.roboledger.fiscal_period import FiscalPeriod
-from robosystems.operations.fiscal_calendar.service import (
+from robosystems.operations.roboledger.fiscal_calendar.service import (
   AdvanceSequenceError,
   CalendarAlreadyInitializedError,
   CloseableGateResult,

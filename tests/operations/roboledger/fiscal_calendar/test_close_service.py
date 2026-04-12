@@ -18,14 +18,16 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from robosystems.operations.fiscal_calendar import (
+from robosystems.operations.roboledger.fiscal_calendar import (
   CloseGateFailed,
   FiscalCalendarService,
   PeriodCloseService,
   PeriodNotFoundError,
   UnbalancedLedgerError,
 )
-from robosystems.operations.fiscal_calendar.service import CloseableGateResult
+from robosystems.operations.roboledger.fiscal_calendar.service import (
+  CloseableGateResult,
+)
 
 GRAPH_ID = "kg01234567890abcdef"
 

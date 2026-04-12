@@ -16,13 +16,15 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from robosystems.middleware.mcp.tools.fiscal_calendar_tools import ClosePeriodTool
-from robosystems.operations.fiscal_calendar import (
+from robosystems.operations.roboledger.fiscal_calendar import (
   CloseGateFailed,
   PeriodCloseResult,
   PeriodNotFoundError,
   UnbalancedLedgerError,
 )
-from robosystems.operations.fiscal_calendar.service import CloseableGateResult
+from robosystems.operations.roboledger.fiscal_calendar.service import (
+  CloseableGateResult,
+)
 
 MODULE = "robosystems.middleware.mcp.tools.fiscal_calendar_tools"
 GRAPH_ID = "kg01234567890abcdef"
@@ -80,7 +82,7 @@ class TestClosePeriodToolHappyPath:
         return_value=(False, None),
       ),
       patch(
-        "robosystems.operations.fiscal_calendar.PeriodCloseService",
+        "robosystems.operations.roboledger.fiscal_calendar.PeriodCloseService",
         return_value=svc_instance,
       ),
       patch(f"{MODULE}._build_response_payload", return_value={"graph_id": GRAPH_ID}),
@@ -110,7 +112,7 @@ class TestClosePeriodToolHappyPath:
       ),
       patch(f"{MODULE}._get_qb_sync_state", return_value=(False, None)),
       patch(
-        "robosystems.operations.fiscal_calendar.PeriodCloseService",
+        "robosystems.operations.roboledger.fiscal_calendar.PeriodCloseService",
         return_value=svc_instance,
       ),
       patch(f"{MODULE}._build_response_payload", return_value={}),
@@ -133,7 +135,7 @@ class TestClosePeriodToolHappyPath:
       ),
       patch(f"{MODULE}._get_qb_sync_state", return_value=(True, None)),
       patch(
-        "robosystems.operations.fiscal_calendar.PeriodCloseService",
+        "robosystems.operations.roboledger.fiscal_calendar.PeriodCloseService",
         return_value=svc_instance,
       ),
       patch(f"{MODULE}._build_response_payload", return_value={}),
@@ -162,7 +164,7 @@ class TestClosePeriodToolErrors:
       ),
       patch(f"{MODULE}._get_qb_sync_state", return_value=(False, None)),
       patch(
-        "robosystems.operations.fiscal_calendar.PeriodCloseService",
+        "robosystems.operations.roboledger.fiscal_calendar.PeriodCloseService",
         return_value=svc_instance,
       ),
     ):
@@ -220,7 +222,7 @@ class TestClosePeriodToolRecloseRouting:
       ),
       patch(f"{MODULE}._get_qb_sync_state", return_value=(False, None)),
       patch(
-        "robosystems.operations.fiscal_calendar.PeriodCloseService",
+        "robosystems.operations.roboledger.fiscal_calendar.PeriodCloseService",
         return_value=svc_instance,
       ),
       patch(f"{MODULE}._build_response_payload", return_value={}),

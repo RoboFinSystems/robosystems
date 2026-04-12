@@ -283,7 +283,7 @@ For balance sheets, only instant-period facts are returned. For other statements
       from robosystems.models.extensions.roboledger.fiscal_calendar import (
         FiscalCalendar,
       )
-      from robosystems.operations.fiscal_calendar import period_date_range
+      from robosystems.operations.roboledger.fiscal_calendar import period_date_range
 
       cal = session.query(FiscalCalendar).first()
       if cal is None or not cal.closed_through_period:
@@ -341,7 +341,7 @@ For balance sheets, only instant-period facts are returned. For other statements
     """
     from robosystems.db.extensions import extensions_session
     from robosystems.models.extensions.roboledger import Structure
-    from robosystems.operations.reports.fact_grid import (
+    from robosystems.operations.roboledger.reports.fact_grid import (
       PeriodSpec,
       generate_report_facts,
       render_structure_view,

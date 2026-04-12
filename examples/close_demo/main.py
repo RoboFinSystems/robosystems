@@ -320,7 +320,7 @@ def initialize_fiscal_calendar(graph_id: str) -> str:
   Returns the `close_target` period string for use in the next-steps output.
   """
   from robosystems.db.extensions import extensions_session
-  from robosystems.operations.fiscal_calendar import (
+  from robosystems.operations.roboledger.fiscal_calendar import (
     FiscalCalendarService,
     add_months,
     current_month_period,
@@ -393,12 +393,12 @@ def create_schedules(graph_id: str, element_lookup: dict[str, str]) -> int:
     Structure,
     Taxonomy,
   )
-  from robosystems.operations.fiscal_calendar import (
+  from robosystems.operations.roboledger.fiscal_calendar import (
     FiscalCalendarService,
     parse_period,
   )
-  from robosystems.operations.schedules import ScheduleService
-  from robosystems.operations.schedules.service import (
+  from robosystems.operations.roboledger.schedules import ScheduleService
+  from robosystems.operations.roboledger.schedules.service import (
     EntryTemplate,
     ScheduleMetadata,
   )
@@ -728,7 +728,7 @@ def main() -> None:
   # Human-readable label for the close target period
   from datetime import date
 
-  from robosystems.operations.fiscal_calendar import parse_period
+  from robosystems.operations.roboledger.fiscal_calendar import parse_period
 
   year, month = parse_period(close_target)
   close_label = date(year, month, 1).strftime("%B %Y")

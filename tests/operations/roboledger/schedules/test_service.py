@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from robosystems.operations.schedules.service import (
+from robosystems.operations.roboledger.schedules.service import (
   EntryTemplate,
   ScheduleMetadata,
   ScheduleService,
@@ -62,7 +62,7 @@ class TestGenerateMonthlyPeriods:
 # ── Service tests (mocked DB) ───────────────────────────────────────────
 
 
-SVC_MODULE = "robosystems.operations.schedules.service"
+SVC_MODULE = "robosystems.operations.roboledger.schedules.service"
 
 
 def _mock_session():
@@ -447,7 +447,7 @@ class TestCreateClosingEntry:
     assert result.outcome == "unchanged"
     assert result.entry_id == "je_existing"
     # No entries were added (no create path)
-    from robosystems.operations.schedules.service import Entry
+    from robosystems.operations.roboledger.schedules.service import Entry
 
     entries_added = [
       c[0][0] for c in session.add.call_args_list if isinstance(c[0][0], Entry)
@@ -484,7 +484,7 @@ class TestCreateClosingEntry:
     assert result.outcome == "regenerated"
     assert result.amount == 500.00
     # A new entry was added to replace the old one
-    from robosystems.operations.schedules.service import Entry
+    from robosystems.operations.roboledger.schedules.service import Entry
 
     entries_added = [
       c[0][0] for c in session.add.call_args_list if isinstance(c[0][0], Entry)
@@ -529,7 +529,7 @@ class TestCreateClosingEntry:
       created_by="usr_test",
     )
 
-    from robosystems.operations.schedules.service import Entry
+    from robosystems.operations.roboledger.schedules.service import Entry
 
     entries = [
       c[0][0] for c in session.add.call_args_list if isinstance(c[0][0], Entry)
@@ -584,7 +584,7 @@ class TestCreateManualClosingEntry:
     assert result.amount == 4866.62  # total DR in dollars
     assert result.memo == "Sold computer to Vendor X"
     # 1 entry + 4 line items = 5 session.add calls
-    from robosystems.operations.schedules.service import Entry, LineItem
+    from robosystems.operations.roboledger.schedules.service import Entry, LineItem
 
     entries = [
       c[0][0] for c in session.add.call_args_list if isinstance(c[0][0], Entry)

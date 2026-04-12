@@ -6,7 +6,7 @@ from datetime import date
 
 import pytest
 
-from robosystems.operations.fiscal_calendar.periods import (
+from robosystems.operations.roboledger.fiscal_calendar.periods import (
   add_months,
   current_month_period,
   last_completed_period,

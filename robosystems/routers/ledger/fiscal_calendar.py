@@ -30,12 +30,12 @@ from robosystems.models.core import User
 from robosystems.models.core.connection.connection import Connection
 from robosystems.models.extensions.roboledger.fiscal_calendar import FiscalCalendar
 from robosystems.models.extensions.roboledger.fiscal_period import FiscalPeriod
-from robosystems.operations.fiscal_calendar import (
+from robosystems.operations.roboledger.fiscal_calendar import (
   FiscalCalendarService,
   add_months,
   current_month_period,
 )
-from robosystems.operations.fiscal_calendar.service import (
+from robosystems.operations.roboledger.fiscal_calendar.service import (
   CalendarAlreadyInitializedError,
   FiscalCalendarError,
   InvalidCloseTargetError,

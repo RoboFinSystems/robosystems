@@ -134,8 +134,11 @@ class CreateScheduleTool:
     from datetime import date
 
     from robosystems.db.extensions import extensions_session
-    from robosystems.operations.schedules import ScheduleService
-    from robosystems.operations.schedules.service import EntryTemplate, ScheduleMetadata
+    from robosystems.operations.roboledger.schedules import ScheduleService
+    from robosystems.operations.roboledger.schedules.service import (
+      EntryTemplate,
+      ScheduleMetadata,
+    )
 
     graph_id = self.client.graph_id
     svc = ScheduleService()
@@ -234,7 +237,7 @@ class ListScheduleStructuresTool:
 
   async def execute(self, arguments: dict[str, Any]) -> Any:
     from robosystems.db.extensions import extensions_session
-    from robosystems.operations.schedules import ScheduleService
+    from robosystems.operations.roboledger.schedules import ScheduleService
 
     graph_id = self.client.graph_id
     svc = ScheduleService()
@@ -314,7 +317,7 @@ reflected in the ledger and shouldn't generate new closing entries.
     from datetime import date
 
     from robosystems.db.extensions import extensions_session
-    from robosystems.operations.schedules import ScheduleService
+    from robosystems.operations.roboledger.schedules import ScheduleService
 
     graph_id = self.client.graph_id
     svc = ScheduleService()
@@ -392,7 +395,7 @@ class GetPeriodCloseStatusTool:
     from datetime import date
 
     from robosystems.db.extensions import extensions_session
-    from robosystems.operations.schedules import ScheduleService
+    from robosystems.operations.roboledger.schedules import ScheduleService
 
     graph_id = self.client.graph_id
     svc = ScheduleService()
@@ -493,7 +496,7 @@ class CreateClosingEntryTool:
     from datetime import date
 
     from robosystems.db.extensions import extensions_session
-    from robosystems.operations.schedules import ScheduleService
+    from robosystems.operations.roboledger.schedules import ScheduleService
 
     graph_id = self.client.graph_id
     svc = ScheduleService()
@@ -668,7 +671,7 @@ line_items = [
     from datetime import date
 
     from robosystems.db.extensions import extensions_session
-    from robosystems.operations.schedules import ScheduleService
+    from robosystems.operations.roboledger.schedules import ScheduleService
 
     graph_id = self.client.graph_id
     svc = ScheduleService()
@@ -781,7 +784,7 @@ Then book any prorated adjustment as a manual closing entry if needed.
     from datetime import date
 
     from robosystems.db.extensions import extensions_session
-    from robosystems.operations.schedules import ScheduleService
+    from robosystems.operations.roboledger.schedules import ScheduleService
 
     graph_id = self.client.graph_id
     svc = ScheduleService()

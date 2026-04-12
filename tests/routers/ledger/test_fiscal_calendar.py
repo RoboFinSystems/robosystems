@@ -18,7 +18,7 @@ from robosystems.models.api.extensions.fiscal_calendar import (
   SetCloseTargetRequest,
 )
 from robosystems.models.extensions.roboledger.fiscal_calendar import FiscalCalendar
-from robosystems.operations.fiscal_calendar.service import (
+from robosystems.operations.roboledger.fiscal_calendar.service import (
   CalendarAlreadyInitializedError,
   CloseableGateResult,
   FiscalCalendarError,

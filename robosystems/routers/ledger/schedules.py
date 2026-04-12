@@ -28,7 +28,7 @@ from robosystems.models.api.extensions.schedules import (
 )
 from robosystems.models.core import User
 from robosystems.operations.extensions.staleness import mark_graph_stale
-from robosystems.operations.schedules import ScheduleService
+from robosystems.operations.roboledger.schedules import ScheduleService
 from robosystems.routers.ledger._common import ledger_404 as _ledger_404
 
 router = APIRouter()
@@ -58,7 +58,7 @@ async def create_schedule(
 
   try:
     with extensions_session(graph_id) as session:
-      from robosystems.operations.schedules.service import (
+      from robosystems.operations.roboledger.schedules.service import (
         EntryTemplate,
         ScheduleMetadata,
       )

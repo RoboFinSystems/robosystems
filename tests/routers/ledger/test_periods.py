@@ -14,13 +14,15 @@ from robosystems.models.api.extensions.fiscal_calendar import (
   ReopenPeriodRequest,
 )
 from robosystems.models.extensions.roboledger.fiscal_calendar import FiscalCalendar
-from robosystems.operations.fiscal_calendar import (
+from robosystems.operations.roboledger.fiscal_calendar import (
   CloseGateFailed,
   PeriodCloseResult,
   PeriodNotFoundError,
   UnbalancedLedgerError,
 )
-from robosystems.operations.fiscal_calendar.service import CloseableGateResult
+from robosystems.operations.roboledger.fiscal_calendar.service import (
+  CloseableGateResult,
+)
 from robosystems.routers.ledger.periods import (
   close_period,
   list_period_drafts,
