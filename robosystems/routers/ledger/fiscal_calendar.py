@@ -40,19 +40,13 @@ from robosystems.operations.fiscal_calendar.service import (
   FiscalCalendarError,
   InvalidCloseTargetError,
 )
+from robosystems.routers.ledger._common import ledger_404 as _ledger_404
 
 router = APIRouter()
 _svc = FiscalCalendarService()
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────
-
-
-def _ledger_404():
-  return HTTPException(
-    status_code=404,
-    detail="Ledger not initialized. Connect a data source first.",
-  )
 
 
 def _get_qb_sync_state(

@@ -1,23 +1,15 @@
 """Period close / reopen endpoints.
 
 `POST /periods/{period}/close` is the **final commit action** of the
-month-end close workflow. In v1 (no QB writeback) it is synchronous:
+month-end close workflow. All the actual close logic lives in
+`PeriodCloseService` so the REST and MCP entry points stay in sync.
 
-  1. Validate closeable gates (sequence, period_complete, sync_current)
-  2. Bulk-transition all draft entries with posting_date in the period
-     to status='posted'
-  3. Validate the BS equation balances for the period
-  4. Transition FiscalPeriod → closed
-  5. Advance closed_through; auto-advance close_target if reached
-  6. Emit 'period_closed' audit event
-
-When QB writeback lands, a writeback phase runs between (2) and (3), and the
-entire operation becomes async.
+When QB writeback lands, the service will gain a writeback phase and
+become async; this module stays sync and just translates domain errors
+into HTTP responses.
 """
 
 from __future__ import annotations
-
-from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Path
 from sqlalchemy import text
@@ -40,19 +32,18 @@ from robosystems.models.api.extensions.fiscal_calendar import (
   ReopenPeriodRequest,
 )
 from robosystems.models.core import User
-from robosystems.models.extensions.roboledger.entry import Entry
 from robosystems.models.extensions.roboledger.fiscal_period import FiscalPeriod
 from robosystems.operations.fiscal_calendar import (
+  CloseGateFailed,
   FiscalCalendarService,
-  next_period,
+  PeriodCloseService,
+  PeriodNotFoundError,
+  UnbalancedLedgerError,
   parse_period,
   period_date_range,
 )
-from robosystems.operations.fiscal_calendar.service import (
-  AdvanceSequenceError,
-  CloseableGateResult,
-  FiscalCalendarError,
-)
+from robosystems.operations.fiscal_calendar.service import FiscalCalendarError
+from robosystems.routers.ledger._common import ledger_404 as _ledger_404
 
 # Reuse the response builder + sync state helper to avoid duplication
 from robosystems.routers.ledger.fiscal_calendar import (
@@ -62,59 +53,13 @@ from robosystems.routers.ledger.fiscal_calendar import (
 
 router = APIRouter()
 _svc = FiscalCalendarService()
+_close_svc = PeriodCloseService(_svc)
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────
 
 
 PERIOD_PATH_PATTERN = r"^\d{4}-(0[1-9]|1[0-2])$"
-
-
-def _ledger_404():
-  return HTTPException(
-    status_code=404,
-    detail="Ledger not initialized. Connect a data source first.",
-  )
-
-
-# _get_qb_sync_state is imported from fiscal_calendar.py — it returns
-# (has_connection, last_sync_at) so we can distinguish "no QB" from
-# "QB connection exists but has never synced" (a blocking condition).
-
-
-def _validate_bs_equation(session, graph_id: str, period_start, period_end) -> None:
-  """Check that debits equal credits for all line items in the period.
-
-  Raises HTTPException(422) if out of balance.
-  """
-  # Query total debits and credits across all line items whose parent entry
-  # has a posting_date in the period. Works on the tenant schema.
-  result = session.execute(
-    text("""
-      SELECT
-        COALESCE(SUM(li.debit_amount), 0)  AS total_debit,
-        COALESCE(SUM(li.credit_amount), 0) AS total_credit
-      FROM line_items li
-      JOIN entries e ON e.id = li.entry_id
-      WHERE e.posting_date >= :period_start
-        AND e.posting_date <= :period_end
-        AND e.status = 'posted'
-    """),
-    {"period_start": period_start, "period_end": period_end},
-  ).fetchone()
-
-  total_debit = int(result.total_debit) if result else 0
-  total_credit = int(result.total_credit) if result else 0
-  if total_debit != total_credit:
-    raise HTTPException(
-      status_code=422,
-      detail=(
-        f"Balance sheet equation broken for this period: "
-        f"total debits={total_debit} total credits={total_credit}. "
-        f"Difference={total_debit - total_credit}. "
-        f"Review the ledger before closing."
-      ),
-    )
 
 
 # ── Endpoints ──────────────────────────────────────────────────────────────
@@ -139,14 +84,9 @@ async def close_period(
 ):
   """Close a fiscal period — the final commit action.
 
-  In a single transaction:
-  1. Validates closeable gates
-  2. Transitions all draft entries in the period to 'posted'
-  3. Verifies BS equation balances
-  4. Transitions the FiscalPeriod to 'closed'
-  5. Advances closed_through; auto-advances close_target if reached
-
-  This is synchronous in v1. With QB writeback (future) it will become async.
+  All mechanics live in `PeriodCloseService.close()`. This endpoint just
+  resolves auth + QB sync state, invokes the service, and translates
+  domain exceptions into HTTP responses.
   """
   try:
     parse_period(period)  # validate shape early (redundant with path regex)
@@ -155,135 +95,57 @@ async def close_period(
 
   try:
     with extensions_session(graph_id) as session:
-      # Gate check
       has_sync, last_sync_at = _get_qb_sync_state(platform_db, graph_id)
-      gate = _svc.closeable_gate(
+      result = _close_svc.close(
         session,
         graph_id,
         period,
+        actor_id=current_user.id,
+        actor_type="user",
         has_sync_connection=has_sync,
         last_sync_at=last_sync_at,
         allow_stale_sync=body.allow_stale_sync,
+        note=body.note,
       )
-      if not gate.is_closeable:
-        if CloseableGateResult.NO_CALENDAR in gate.blockers:
-          raise HTTPException(
-            status_code=404,
-            detail=(
-              "Fiscal calendar not initialized. "
-              "Call POST /v1/ledger/{graph_id}/initialize first."
-            ),
-          )
-        raise HTTPException(
-          status_code=422,
-          detail={
-            "message": f"Cannot close period {period!r}.",
-            "blockers": gate.blockers,
-          },
-        )
-
-      period_start, period_end = period_date_range(period)
-
-      # Detect re-close of a previously reopened period BEFORE mutating state,
-      # so we know whether to advance the closed_through cursor at the end.
-      fp = (
-        session.query(FiscalPeriod)
-        .filter(FiscalPeriod.graph_id == graph_id, FiscalPeriod.name == period)
-        .one_or_none()
-      )
-      if fp is None:
-        raise HTTPException(
-          status_code=404, detail=f"Fiscal period {period!r} not found."
-        )
-      is_reclose = fp.status == "closing"
-
-      # Transition drafts to posted
-      now = datetime.now(UTC)
-      updated = (
-        session.query(Entry)
-        .filter(
-          Entry.posting_date >= period_start,
-          Entry.posting_date <= period_end,
-          Entry.status == "draft",
-        )
-        .update(
-          {Entry.status: "posted", Entry.posted_at: now},
-          synchronize_session=False,
-        )
-      )
-      session.flush()
-
-      # Balance check on the now-posted ledger for this period
-      _validate_bs_equation(session, graph_id, period_start, period_end)
-
-      # Transition the FiscalPeriod itself
-      fp.status = "closed"
-      fp.closed_at = now
-      fp.closed_by = current_user.id
-      session.flush()
-
-      cal_before = _svc.get(session, graph_id)
-      target_before = cal_before.close_target_period  # type: ignore[union-attr]
-
-      # Re-close routing:
-      # - "Latest reopen" → reopen retreated closed_through, so this re-close
-      #   must advance the pointer back to `period` exactly as a normal close
-      #   does. Detection: period == next_period(current closed_through).
-      # - "Older reopen" → reopen did NOT touch closed_through, so this
-      #   re-close must NOT touch it either. We just record the close event
-      #   without moving the cursor.
-      if is_reclose:
-        latest_reopen = (
-          cal_before.closed_through_period is not None  # type: ignore[union-attr]
-          and next_period(cal_before.closed_through_period) == period  # type: ignore[union-attr]
-        ) or (
-          cal_before.closed_through_period is None  # type: ignore[union-attr]
-          and _svc._earliest_open_period(session, graph_id) == period
-        )
-      else:
-        latest_reopen = False
-
-      if is_reclose and not latest_reopen:
-        # Older reopen — pointer unchanged, just audit the re-close.
-        calendar = _svc.record_reclose(
-          session,
-          graph_id,
-          period,
-          actor_id=current_user.id,
-          actor_type="user",
-          note=body.note,
-        )
-      else:
-        # Normal advance path — also handles latest-reopen re-close.
-        calendar = _svc.advance_closed_through(
-          session,
-          graph_id,
-          period,
-          actor_id=current_user.id,
-          actor_type="user",
-          note=body.note,
-        )
-      target_auto_advanced = (
-        target_before != calendar.close_target_period
-        and calendar.close_target_period is not None
-      )
-
       session.commit()
 
       return ClosePeriodResponse(
         fiscal_calendar=_build_response(
-          session, graph_id, calendar, has_sync, last_sync_at
+          session, graph_id, result.calendar, has_sync, last_sync_at
         ),
-        period=period,
-        entries_posted=updated,
-        target_auto_advanced=target_auto_advanced,
+        period=result.period,
+        entries_posted=result.entries_posted,
+        target_auto_advanced=result.target_auto_advanced,
       )
 
-  except HTTPException:
-    raise
-  except AdvanceSequenceError as e:
-    # Shouldn't normally reach here (gate check catches it) but just in case
-    raise HTTPException(status_code=422, detail=str(e))
+  except CloseGateFailed as e:
+    if e.no_calendar:
+      raise HTTPException(
+        status_code=404,
+        detail=(
+          "Fiscal calendar not initialized. "
+          "Call POST /v1/ledger/{graph_id}/initialize first."
+        ),
+      )
+    raise HTTPException(
+      status_code=422,
+      detail={
+        "message": f"Cannot close period {period!r}.",
+        "blockers": e.blockers,
+      },
+    )
+  except PeriodNotFoundError as e:
+    raise HTTPException(status_code=404, detail=str(e))
+  except UnbalancedLedgerError as e:
+    raise HTTPException(
+      status_code=422,
+      detail=(
+        f"Balance sheet equation broken for this period: "
+        f"total debits={e.total_debit} total credits={e.total_credit}. "
+        f"Difference={e.total_debit - e.total_credit}. "
+        f"Review the ledger before closing."
+      ),
+    )
   except FiscalCalendarError as e:
     raise HTTPException(status_code=404, detail=str(e))
   except ProgrammingError as e:

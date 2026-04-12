@@ -41,6 +41,7 @@ from robosystems.operations.reports.fact_grid import (
   render_structure_view,
 )
 from robosystems.operations.reports.guard_rails import validate_report
+from robosystems.routers.ledger._common import ledger_404 as _ledger_404
 
 router = APIRouter()
 
@@ -50,13 +51,6 @@ VALID_STRUCTURE_TYPES = {
   "equity_statement",
   "custom",
 }
-
-
-def _ledger_404():
-  return HTTPException(
-    status_code=404,
-    detail="Ledger not initialized. Connect a data source first.",
-  )
 
 
 def _resolve_closed_through(session) -> date | None:

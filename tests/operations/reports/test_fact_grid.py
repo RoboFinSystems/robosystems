@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 from datetime import date
+from unittest.mock import MagicMock
 
 from robosystems.operations.reports.fact_grid import (
   ReportFact,
   _Balance,
   _build_rows,
   _compute_prior_period,
+  _derive_closed_through_from_ledger,
   _facts_to_balance_dict,
   _HierarchyNode,
   _infer_period_type,
@@ -525,3 +527,52 @@ class TestFactsToBalanceDict:
 
     result = _facts_to_balance_dict(facts, date(2025, 1, 1), date(2025, 3, 31))
     assert len(result) == 0
+
+
+class TestDeriveClosedThroughFromLedger:
+  """The retained-earnings safeguard for ledgers without a FiscalCalendar.
+
+  When the ledger already carries real RE postings (QB opening balance,
+  prior-year close from another system), we derive an effective
+  closed_through from the latest such posting so the synthetic
+  prior-period adjustment only covers the un-closed window.
+  """
+
+  def _mock_session(self, posting_date: date | None):
+    """Build a session whose BS query returns the given max posting date."""
+    session = MagicMock()
+    row = MagicMock()
+    row.last_re_posting = posting_date
+    exec_result = MagicMock()
+    exec_result.fetchone.return_value = row
+    session.execute.return_value = exec_result
+    return session
+
+  def test_returns_last_re_posting_date_when_present(self):
+    session = self._mock_session(date(2025, 12, 31))
+    result = _derive_closed_through_from_ledger(session, "mapping_1")
+    assert result == date(2025, 12, 31)
+
+  def test_returns_none_when_no_re_postings(self):
+    session = self._mock_session(None)
+    result = _derive_closed_through_from_ledger(session, "mapping_1")
+    assert result is None
+
+  def test_returns_none_when_fetchone_returns_none(self):
+    """Empty result set (no line items at all) → fall back to None."""
+    session = MagicMock()
+    exec_result = MagicMock()
+    exec_result.fetchone.return_value = None
+    session.execute.return_value = exec_result
+    result = _derive_closed_through_from_ledger(session, "mapping_1")
+    assert result is None
+
+  def test_query_filters_on_mapping_id_and_re_element(self):
+    """Verify the query parameters include the mapping_id and the
+    canonical retained_earnings element id."""
+    session = self._mock_session(date(2026, 1, 31))
+    _derive_closed_through_from_ledger(session, "my_mapping")
+    call = session.execute.call_args
+    params = call[0][1]
+    assert params["mapping_id"] == "my_mapping"
+    assert params["re_id"] == "elem_gaap_retained_earnings"

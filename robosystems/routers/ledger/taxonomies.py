@@ -35,16 +35,10 @@ from robosystems.models.extensions import (
   Structure,
   Taxonomy,
 )
+from robosystems.routers.ledger._common import ledger_404 as _ledger_404
 from robosystems.utils.ulid import generate_prefixed_ulid
 
 router = APIRouter()
-
-
-def _ledger_404():
-  return HTTPException(
-    status_code=404,
-    detail="Ledger not initialized. Connect a data source first.",
-  )
 
 
 # ── Taxonomies ────────────────────────────────────────────────────────────

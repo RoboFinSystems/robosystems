@@ -14,6 +14,12 @@ from robosystems.models.api.extensions.fiscal_calendar import (
   ReopenPeriodRequest,
 )
 from robosystems.models.extensions.roboledger.fiscal_calendar import FiscalCalendar
+from robosystems.operations.fiscal_calendar import (
+  CloseGateFailed,
+  PeriodCloseResult,
+  PeriodNotFoundError,
+  UnbalancedLedgerError,
+)
 from robosystems.operations.fiscal_calendar.service import CloseableGateResult
 from robosystems.routers.ledger.periods import (
   close_period,
@@ -103,32 +109,33 @@ def _fake_response(close_target: str | None = "2026-03") -> FiscalCalendarRespon
 
 
 class TestClosePeriod:
+  """Router tests — verify the endpoint translates `PeriodCloseService`
+  outcomes into HTTP responses. Close-flow mechanics (gate, BS check,
+  reclose routing) are tested directly against the service in
+  `tests/operations/fiscal_calendar/test_close_service.py`.
+  """
+
+  def _result(self, *, entries_posted: int = 0, target_auto_advanced: bool = False):
+    return PeriodCloseResult(
+      period="2026-01",
+      entries_posted=entries_posted,
+      target_auto_advanced=target_auto_advanced,
+      calendar=_mock_calendar(closed_through="2026-01", close_target="2026-03"),
+      was_reclose=False,
+    )
+
   @pytest.mark.asyncio
-  async def test_happy_path_no_drafts(self):
-    """A clean close with no pending drafts just flips the period state."""
-    closed_calendar = _mock_calendar(closed_through="2026-01", close_target="2026-03")
-    mock_svc = MagicMock()
-    mock_svc.closeable_gate.return_value = CloseableGateResult(
-      is_closeable=True, blockers=[]
-    )
-    mock_svc.advance_closed_through.return_value = closed_calendar
-    mock_svc.get.return_value = _mock_calendar(
-      closed_through="2025-12", close_target="2026-03"
-    )
-    mock_svc.catch_up_sequence.return_value = ["2026-02", "2026-03"]
-    mock_svc.gap_periods.return_value = 2
+  async def test_happy_path_calls_service(self):
+    mock_close_svc = MagicMock()
+    mock_close_svc.close.return_value = self._result(entries_posted=3)
 
     session = _mock_session()
-    fp = _mock_period(name="2026-01", status="open")
-    _wire_period_query(session, fp)
-    _wire_bs_equation(session, total_debit=0, total_credit=0)
-
     platform_db = MagicMock()
-    platform_db.query.return_value.filter.return_value.one_or_none.return_value = None
+    platform_db.query.return_value.filter.return_value.order_by.return_value.first.return_value = None
 
     with (
       patch(f"{MODULE}.extensions_session", return_value=session),
-      patch(f"{MODULE}._svc", mock_svc),
+      patch(f"{MODULE}._close_svc", mock_close_svc),
       patch(f"{MODULE}._build_response") as mock_build,
     ):
       mock_build.return_value = _fake_response(close_target="2026-03")
@@ -142,26 +149,53 @@ class TestClosePeriod:
       )
 
     assert result.period == "2026-01"
-    assert result.entries_posted == 0
-    mock_svc.advance_closed_through.assert_called_once()
-    assert fp.status == "closed"
-    assert fp.closed_by == "usr_test123"
+    assert result.entries_posted == 3
+    mock_close_svc.close.assert_called_once()
+    # Verify the router passed the authenticated user ID as actor
+    call = mock_close_svc.close.call_args
+    assert call.kwargs["actor_id"] == "usr_test123"
+    assert call.kwargs["actor_type"] == "user"
 
   @pytest.mark.asyncio
-  async def test_blocked_by_sequence_violation(self):
-    mock_svc = MagicMock()
-    mock_svc.closeable_gate.return_value = CloseableGateResult(
-      is_closeable=False,
-      blockers=[CloseableGateResult.SEQUENCE],
+  async def test_allow_stale_sync_propagates_to_service(self):
+    mock_close_svc = MagicMock()
+    mock_close_svc.close.return_value = self._result()
+
+    session = _mock_session()
+    platform_db = MagicMock()
+    platform_db.query.return_value.filter.return_value.order_by.return_value.first.return_value = None
+
+    with (
+      patch(f"{MODULE}.extensions_session", return_value=session),
+      patch(f"{MODULE}._close_svc", mock_close_svc),
+      patch(f"{MODULE}._build_response") as mock_build,
+    ):
+      mock_build.return_value = _fake_response(close_target="2026-03")
+      await close_period(
+        graph_id=GRAPH_ID,
+        period="2026-01",
+        body=ClosePeriodRequest(allow_stale_sync=True),
+        current_user=_make_user(),
+        _rate_limit=None,
+        platform_db=platform_db,
+      )
+
+    call = mock_close_svc.close.call_args
+    assert call.kwargs["allow_stale_sync"] is True
+
+  @pytest.mark.asyncio
+  async def test_gate_failure_translates_to_422(self):
+    mock_close_svc = MagicMock()
+    mock_close_svc.close.side_effect = CloseGateFailed(
+      blockers=[CloseableGateResult.SEQUENCE]
     )
 
     session = _mock_session()
     platform_db = MagicMock()
-    platform_db.query.return_value.filter.return_value.one_or_none.return_value = None
 
     with (
       patch(f"{MODULE}.extensions_session", return_value=session),
-      patch(f"{MODULE}._svc", mock_svc),
+      patch(f"{MODULE}._close_svc", mock_close_svc),
       pytest.raises(HTTPException) as exc_info,
     ):
       await close_period(
@@ -176,11 +210,10 @@ class TestClosePeriod:
     assert CloseableGateResult.SEQUENCE in exc_info.value.detail["blockers"]
 
   @pytest.mark.asyncio
-  async def test_blocked_by_sync_stale(self):
-    mock_svc = MagicMock()
-    mock_svc.closeable_gate.return_value = CloseableGateResult(
-      is_closeable=False,
-      blockers=[CloseableGateResult.SYNC_STALE],
+  async def test_no_calendar_gate_translates_to_404(self):
+    mock_close_svc = MagicMock()
+    mock_close_svc.close.side_effect = CloseGateFailed(
+      blockers=[CloseableGateResult.NO_CALENDAR]
     )
 
     session = _mock_session()
@@ -188,7 +221,32 @@ class TestClosePeriod:
 
     with (
       patch(f"{MODULE}.extensions_session", return_value=session),
-      patch(f"{MODULE}._svc", mock_svc),
+      patch(f"{MODULE}._close_svc", mock_close_svc),
+      pytest.raises(HTTPException) as exc_info,
+    ):
+      await close_period(
+        graph_id=GRAPH_ID,
+        period="2026-01",
+        body=ClosePeriodRequest(),
+        current_user=_make_user(),
+        _rate_limit=None,
+        platform_db=platform_db,
+      )
+    assert exc_info.value.status_code == 404
+
+  @pytest.mark.asyncio
+  async def test_unbalanced_ledger_translates_to_422(self):
+    mock_close_svc = MagicMock()
+    mock_close_svc.close.side_effect = UnbalancedLedgerError(
+      total_debit=1000, total_credit=900
+    )
+
+    session = _mock_session()
+    platform_db = MagicMock()
+
+    with (
+      patch(f"{MODULE}.extensions_session", return_value=session),
+      patch(f"{MODULE}._close_svc", mock_close_svc),
       pytest.raises(HTTPException) as exc_info,
     ):
       await close_period(
@@ -200,194 +258,20 @@ class TestClosePeriod:
         platform_db=platform_db,
       )
     assert exc_info.value.status_code == 422
+    assert "debits=1000" in exc_info.value.detail
+    assert "credits=900" in exc_info.value.detail
 
   @pytest.mark.asyncio
-  async def test_allow_stale_sync_override_propagates(self):
-    """The `allow_stale_sync` flag on the request should reach the gate."""
-    closed_calendar = _mock_calendar(closed_through="2026-01", close_target="2026-03")
-    mock_svc = MagicMock()
-    mock_svc.closeable_gate.return_value = CloseableGateResult(
-      is_closeable=True, blockers=[]
-    )
-    mock_svc.advance_closed_through.return_value = closed_calendar
-    mock_svc.get.return_value = _mock_calendar(closed_through="2025-12")
-    mock_svc.catch_up_sequence.return_value = []
-    mock_svc.gap_periods.return_value = 0
-
-    session = _mock_session()
-    fp = _mock_period(name="2026-01", status="open")
-    _wire_period_query(session, fp)
-    _wire_bs_equation(session)
-
-    platform_db = MagicMock()
-    platform_db.query.return_value.filter.return_value.one_or_none.return_value = None
-
-    with (
-      patch(f"{MODULE}.extensions_session", return_value=session),
-      patch(f"{MODULE}._svc", mock_svc),
-      patch(f"{MODULE}._build_response") as mock_build,
-    ):
-      mock_build.return_value = _fake_response(close_target="2026-03")
-      await close_period(
-        graph_id=GRAPH_ID,
-        period="2026-01",
-        body=ClosePeriodRequest(allow_stale_sync=True),
-        current_user=_make_user(),
-        _rate_limit=None,
-        platform_db=platform_db,
-      )
-
-    # Verify the gate was called with allow_stale_sync=True
-    call = mock_svc.closeable_gate.call_args
-    assert call.kwargs["allow_stale_sync"] is True
-
-  @pytest.mark.asyncio
-  async def test_bs_equation_imbalanced_rejects(self):
-    mock_svc = MagicMock()
-    mock_svc.closeable_gate.return_value = CloseableGateResult(is_closeable=True)
-
-    session = _mock_session()
-    fp = _mock_period(name="2026-01", status="open")
-    _wire_period_query(session, fp)
-    _wire_bs_equation(session, total_debit=1000, total_credit=900)  # out of balance
-
-    platform_db = MagicMock()
-    platform_db.query.return_value.filter.return_value.one_or_none.return_value = None
-
-    with (
-      patch(f"{MODULE}.extensions_session", return_value=session),
-      patch(f"{MODULE}._svc", mock_svc),
-      pytest.raises(HTTPException) as exc_info,
-    ):
-      await close_period(
-        graph_id=GRAPH_ID,
-        period="2026-01",
-        body=ClosePeriodRequest(),
-        current_user=_make_user(),
-        _rate_limit=None,
-        platform_db=platform_db,
-      )
-    assert exc_info.value.status_code == 422
-    assert "debits" in exc_info.value.detail.lower()
-
-  @pytest.mark.asyncio
-  async def test_reclose_latest_reopen_advances_pointer(self):
-    """Re-closing a reopened LATEST period should call advance_closed_through.
-
-    When the latest closed month is reopened, retreat_closed_through() rolls
-    closed_through back by one. Re-closing it must advance the pointer back
-    to the period — otherwise closed_through stays stuck one month behind.
-    Detection: `period == next_period(current closed_through)`.
-    """
-    closed_calendar = _mock_calendar(closed_through="2026-01", close_target="2026-03")
-    mock_svc = MagicMock()
-    mock_svc.closeable_gate.return_value = CloseableGateResult(
-      is_closeable=True, blockers=[]
-    )
-    mock_svc.advance_closed_through.return_value = closed_calendar
-    # closed_through retreated to 2025-12 by the prior reopen
-    mock_svc.get.return_value = _mock_calendar(
-      closed_through="2025-12", close_target="2026-03"
-    )
-    mock_svc.catch_up_sequence.return_value = ["2026-02", "2026-03"]
-
-    session = _mock_session()
-    # Reopened period carries status='closing'
-    fp = _mock_period(name="2026-01", status="closing")
-    _wire_period_query(session, fp)
-    _wire_bs_equation(session)
-
-    platform_db = MagicMock()
-    platform_db.query.return_value.filter.return_value.order_by.return_value.first.return_value = None
-
-    with (
-      patch(f"{MODULE}.extensions_session", return_value=session),
-      patch(f"{MODULE}._svc", mock_svc),
-      patch(f"{MODULE}._build_response") as mock_build,
-    ):
-      mock_build.return_value = _fake_response(close_target="2026-03")
-      await close_period(
-        graph_id=GRAPH_ID,
-        period="2026-01",
-        body=ClosePeriodRequest(),
-        current_user=_make_user(),
-        _rate_limit=None,
-        platform_db=platform_db,
-      )
-
-    # Latest-reopen reclose routes through advance_closed_through,
-    # NOT record_reclose
-    mock_svc.advance_closed_through.assert_called_once()
-    mock_svc.record_reclose.assert_not_called()
-    assert fp.status == "closed"
-
-  @pytest.mark.asyncio
-  async def test_reclose_older_reopen_records_without_advancing(self):
-    """Re-closing an OLDER reopened period must not move the pointer.
-
-    When a mid-range month (e.g., 2025-06) is reopened while closed_through
-    is 2025-12, retreat_closed_through() does NOT retreat the pointer. The
-    re-close must likewise leave closed_through alone — only emit an audit
-    event via record_reclose().
-    """
-    unchanged_calendar = _mock_calendar(
-      closed_through="2025-12", close_target="2026-03"
-    )
-    mock_svc = MagicMock()
-    mock_svc.closeable_gate.return_value = CloseableGateResult(
-      is_closeable=True, blockers=[]
-    )
-    mock_svc.record_reclose.return_value = unchanged_calendar
-    mock_svc.get.return_value = unchanged_calendar
-    mock_svc.catch_up_sequence.return_value = ["2026-01", "2026-02", "2026-03"]
-
-    session = _mock_session()
-    # Older reopened period: status='closing', but it's in the middle of the
-    # already-closed range. closed_through (2025-12) is unchanged.
-    fp = _mock_period(name="2025-06", status="closing")
-    fp.start_date = date(2025, 6, 1)
-    fp.end_date = date(2025, 6, 30)
-    _wire_period_query(session, fp)
-    _wire_bs_equation(session)
-
-    platform_db = MagicMock()
-    platform_db.query.return_value.filter.return_value.order_by.return_value.first.return_value = None
-
-    with (
-      patch(f"{MODULE}.extensions_session", return_value=session),
-      patch(f"{MODULE}._svc", mock_svc),
-      patch(f"{MODULE}._build_response") as mock_build,
-    ):
-      mock_build.return_value = _fake_response()
-      await close_period(
-        graph_id=GRAPH_ID,
-        period="2025-06",
-        body=ClosePeriodRequest(),
-        current_user=_make_user(),
-        _rate_limit=None,
-        platform_db=platform_db,
-      )
-
-    # Older reopen reclose routes through record_reclose,
-    # NOT advance_closed_through
-    mock_svc.record_reclose.assert_called_once()
-    mock_svc.advance_closed_through.assert_not_called()
-    assert fp.status == "closed"
-
-  @pytest.mark.asyncio
-  async def test_404_when_calendar_missing(self):
-    mock_svc = MagicMock()
-    mock_svc.closeable_gate.return_value = CloseableGateResult(
-      is_closeable=False,
-      blockers=[CloseableGateResult.NO_CALENDAR],
-    )
+  async def test_period_not_found_translates_to_404(self):
+    mock_close_svc = MagicMock()
+    mock_close_svc.close.side_effect = PeriodNotFoundError("2026-01")
 
     session = _mock_session()
     platform_db = MagicMock()
 
     with (
       patch(f"{MODULE}.extensions_session", return_value=session),
-      patch(f"{MODULE}._svc", mock_svc),
+      patch(f"{MODULE}._close_svc", mock_close_svc),
       pytest.raises(HTTPException) as exc_info,
     ):
       await close_period(

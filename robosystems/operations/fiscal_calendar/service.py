@@ -328,6 +328,35 @@ class FiscalCalendarService:
     )
     return row[0] if row else None
 
+  def is_latest_sequential_close(
+    self,
+    session: Session,
+    graph_id: str,
+    calendar: FiscalCalendar,
+    period: str,
+  ) -> bool:
+    """Whether `period` is the "next sequential close" for this calendar.
+
+    This is the public version of the comparison used by the close flow to
+    route a re-close of a reopened FiscalPeriod:
+
+    - ``True``  → the period IS the sequential next close (either because
+      ``next_period(closed_through) == period`` when the pointer is set, or
+      because ``period`` equals the earliest open FiscalPeriod when it is
+      ``None``). The close flow should advance ``closed_through``.
+    - ``False`` → anything else. For a reopened period that does not match,
+      the close flow should just record a reclose event without moving the
+      pointer.
+
+    Callers should use this helper rather than reaching into
+    ``_earliest_open_period`` directly.
+    """
+    if calendar is None:
+      return False
+    if calendar.closed_through_period is not None:
+      return next_period(calendar.closed_through_period) == period
+    return self._earliest_open_period(session, graph_id) == period
+
   def advance_closed_through(
     self,
     session: Session,
@@ -591,6 +620,14 @@ class FiscalCalendarService:
       blockers.append(CloseableGateResult.ALREADY_CLOSED)
 
     # Gate 2: period complete
+    #
+    # Use strict `>=` not `>`: a period cannot be closed until the day
+    # AFTER its last calendar day. Example: January cannot be closed on
+    # Jan 31 — you must wait until Feb 1. The reason is that intraday
+    # transactions (bank feeds, QB polling) can still post on the last
+    # day of the month, and closing before EOD risks missing them. This
+    # is stricter than some accounting systems that allow "close on
+    # last day," and it's intentional.
     period_start, period_end = period_date_range(period)
     if period_end >= today:
       blockers.append(CloseableGateResult.PERIOD_INCOMPLETE)

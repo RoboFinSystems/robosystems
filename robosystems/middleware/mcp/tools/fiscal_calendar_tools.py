@@ -259,168 +259,73 @@ class ClosePeriodTool:
     }
 
   async def execute(self, arguments: dict[str, Any]) -> Any:
-    from calendar import monthrange
-    from datetime import UTC, date, datetime
-
-    from sqlalchemy import text
-
     from robosystems.db.extensions import extensions_session
-    from robosystems.models.extensions.roboledger.entry import Entry
-    from robosystems.models.extensions.roboledger.fiscal_period import FiscalPeriod
-    from robosystems.operations.fiscal_calendar import FiscalCalendarService
-    from robosystems.operations.fiscal_calendar.service import (
-      AdvanceSequenceError,
-      CloseableGateResult,
-      FiscalCalendarError,
+    from robosystems.operations.fiscal_calendar import (
+      CloseGateFailed,
+      PeriodCloseService,
+      PeriodNotFoundError,
+      UnbalancedLedgerError,
     )
+    from robosystems.operations.fiscal_calendar.service import FiscalCalendarError
 
     graph_id = self.client.graph_id
     period = arguments["period"]
     allow_stale_sync = bool(arguments.get("allow_stale_sync", False))
     note = arguments.get("note")
-    svc = FiscalCalendarService()
+
+    # Best-effort user identity from the graph client context; fall back to
+    # a graph-scoped sentinel so audit logs stay traceable to the tenant.
+    # Matches the format used by `ReopenPeriodTool` below.
+    actor_id = getattr(self.client, "user_id", None) or f"mcp:{graph_id}"
+
+    close_svc = PeriodCloseService()
 
     try:
-      year, month = int(period[:4]), int(period[5:7])
-      period_start = date(year, month, 1)
-      period_end = date(year, month, monthrange(year, month)[1])
-
       with extensions_session(graph_id) as session:
-        # Gate check
         has_sync, last_sync_at = _get_qb_sync_state(graph_id)
-        gate = svc.closeable_gate(
+        result = close_svc.close(
           session,
           graph_id,
           period,
+          actor_id=actor_id,
+          actor_type="agent",
           has_sync_connection=has_sync,
           last_sync_at=last_sync_at,
           allow_stale_sync=allow_stale_sync,
+          note=note,
         )
-        if not gate.is_closeable:
-          if CloseableGateResult.NO_CALENDAR in gate.blockers:
-            return {
-              "error": "calendar_not_initialized",
-              "message": "Fiscal calendar not initialized for this graph.",
-            }
-          return {
-            "error": "not_closeable",
-            "message": f"Cannot close period {period!r}.",
-            "blockers": gate.blockers,
-          }
-
-        # Transition drafts to posted
-        now = datetime.now(UTC)
-        updated = (
-          session.query(Entry)
-          .filter(
-            Entry.posting_date >= period_start,
-            Entry.posting_date <= period_end,
-            Entry.status == "draft",
-          )
-          .update(
-            {Entry.status: "posted", Entry.posted_at: now},
-            synchronize_session=False,
-          )
-        )
-        session.flush()
-
-        # BS equation check
-        bs = session.execute(
-          text("""
-            SELECT
-              COALESCE(SUM(li.debit_amount), 0)  AS total_debit,
-              COALESCE(SUM(li.credit_amount), 0) AS total_credit
-            FROM line_items li
-            JOIN entries e ON e.id = li.entry_id
-            WHERE e.posting_date >= :period_start
-              AND e.posting_date <= :period_end
-              AND e.status = 'posted'
-          """),
-          {"period_start": period_start, "period_end": period_end},
-        ).fetchone()
-        if bs and int(bs.total_debit) != int(bs.total_credit):
-          session.rollback()
-          return {
-            "error": "unbalanced",
-            "message": (
-              f"Balance sheet equation broken for period {period!r}: "
-              f"debits={int(bs.total_debit)} credits={int(bs.total_credit)}. "
-              "Review the ledger before closing."
-            ),
-          }
-
-        # Transition FiscalPeriod — capture pre-transition status so we can
-        # distinguish a first-close from a re-close of a reopened period.
-        fp = (
-          session.query(FiscalPeriod)
-          .filter(FiscalPeriod.graph_id == graph_id, FiscalPeriod.name == period)
-          .one_or_none()
-        )
-        if fp is None:
-          return {
-            "error": "period_not_found",
-            "message": f"Fiscal period {period!r} not found.",
-          }
-        is_reclose = fp.status == "closing"
-        fp.status = "closed"
-        fp.closed_at = now
-        fp.closed_by = f"mcp:{graph_id}"
-        session.flush()
-
-        calendar_before = svc.get(session, graph_id)
-        target_before = calendar_before.close_target_period if calendar_before else None
-
-        # Re-close routing (mirrors REST close endpoint):
-        # - "Latest reopen" retreated closed_through → advance_closed_through
-        #   restores it exactly.
-        # - "Older reopen" left closed_through untouched → record_reclose just
-        #   audits the event without moving the cursor.
-        if is_reclose and calendar_before is not None:
-          from robosystems.operations.fiscal_calendar import next_period as _next
-
-          latest_reopen = (
-            calendar_before.closed_through_period is not None
-            and _next(calendar_before.closed_through_period) == period
-          ) or (
-            calendar_before.closed_through_period is None
-            and svc._earliest_open_period(session, graph_id) == period
-          )
-        else:
-          latest_reopen = False
-
-        if is_reclose and not latest_reopen:
-          calendar = svc.record_reclose(
-            session,
-            graph_id,
-            period,
-            actor_id=f"mcp:{graph_id}",
-            actor_type="agent",
-            note=note,
-          )
-        else:
-          calendar = svc.advance_closed_through(
-            session,
-            graph_id,
-            period,
-            actor_id=f"mcp:{graph_id}",
-            actor_type="agent",
-            note=note,
-          )
-        target_auto_advanced = (
-          target_before != calendar.close_target_period
-          and calendar.close_target_period is not None
-        )
-
         session.commit()
 
         return {
-          "period": period,
-          "entries_posted": updated,
-          "target_auto_advanced": target_auto_advanced,
-          "fiscal_calendar": _build_response_payload(session, graph_id, calendar),
+          "period": result.period,
+          "entries_posted": result.entries_posted,
+          "target_auto_advanced": result.target_auto_advanced,
+          "fiscal_calendar": _build_response_payload(
+            session, graph_id, result.calendar
+          ),
         }
-    except AdvanceSequenceError as exc:
-      return {"error": "sequence_violation", "message": str(exc)}
+    except CloseGateFailed as exc:
+      if exc.no_calendar:
+        return {
+          "error": "calendar_not_initialized",
+          "message": "Fiscal calendar not initialized for this graph.",
+        }
+      return {
+        "error": "not_closeable",
+        "message": f"Cannot close period {period!r}.",
+        "blockers": exc.blockers,
+      }
+    except PeriodNotFoundError as exc:
+      return {"error": "period_not_found", "message": str(exc)}
+    except UnbalancedLedgerError as exc:
+      return {
+        "error": "unbalanced",
+        "message": (
+          f"Balance sheet equation broken for period {period!r}: "
+          f"debits={exc.total_debit} credits={exc.total_credit}. "
+          "Review the ledger before closing."
+        ),
+      }
     except FiscalCalendarError as exc:
       return {"error": "calendar_error", "message": str(exc)}
     except Exception as exc:

@@ -722,10 +722,9 @@ def main() -> None:
   print("\n" + "=" * 60)
   print(f"  Graph ID: {graph_id}")
   if CREDENTIALS_FILE.exists():
-    creds = json.loads(CREDENTIALS_FILE.read_text())
-    api_key = creds.get("api_key", "")
-    if api_key:
-      print(f"  API Key:  {api_key[:30]}...")
+    # Don't print the API key — even a prefix is sensitive. Point the user
+    # at the credentials file so they can pick it up locally if needed.
+    print(f"  API Key:  (saved to {CREDENTIALS_FILE})")
   # Human-readable label for the close target period
   from datetime import date
 
