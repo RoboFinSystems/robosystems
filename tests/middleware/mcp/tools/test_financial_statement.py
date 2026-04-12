@@ -31,7 +31,10 @@ class TestGetFinancialStatementDefinition:
     assert "fiscal_year" in defn["inputSchema"]["properties"]
     assert "period_type" in defn["inputSchema"]["properties"]
     assert "limit" in defn["inputSchema"]["properties"]
-    assert set(defn["inputSchema"]["required"]) == {"ticker", "statement_type"}
+    # Only statement_type is structurally required. Ticker is conditionally
+    # required based on graph type (required in SEC shared repo, optional in
+    # user graphs), but that's enforced at execute time, not in the schema.
+    assert set(defn["inputSchema"]["required"]) == {"statement_type"}
 
   def test_statement_type_enum(self, tool):
     defn = tool.get_tool_definition()
@@ -44,10 +47,12 @@ class TestGetFinancialStatementDefinition:
 
 class TestGetFinancialStatementExecution:
   @pytest.mark.asyncio
-  async def test_missing_ticker(self, tool):
+  async def test_sec_repo_requires_ticker(self, tool):
+    """In the SEC shared repository, ticker is required (no local OLTP)."""
+    # Fixture sets graph_id='sec' which is the shared SEC repository.
     result = await tool.execute({"ticker": "", "statement_type": "income_statement"})
     assert "error" in result
-    assert "ticker" in result["error"]
+    assert "ticker is required" in result["error"].lower()
 
   @pytest.mark.asyncio
   async def test_missing_statement_type(self, tool):

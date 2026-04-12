@@ -77,6 +77,12 @@ class InitialEntityData(BaseModel):
 
   name: str = Field(..., min_length=1, max_length=255, description="Entity name")
   uri: str = Field(..., min_length=1, description="Entity website or URI")
+  ticker: str | None = Field(
+    None,
+    min_length=1,
+    max_length=10,
+    description="Entity symbol/ticker (e.g., 'HARB', 'NVDA'). Auto-generated from name if not provided.",
+  )
   cik: str | None = Field(None, description="CIK number for SEC filings")
   sic: str | None = Field(None, description="SIC code")
   sic_description: str | None = Field(None, description="SIC description")

@@ -92,6 +92,7 @@ def generate_report_facts(
   taxonomy_id: str,
   mapping_id: str,
   periods: list[PeriodSpec],
+  closed_through: date | None = None,
 ) -> ReportFacts:
   """Generate facts for all mapped elements across N periods.
 
@@ -103,11 +104,28 @@ def generate_report_facts(
       taxonomy_id: Taxonomy identifier (e.g., "tax_usgaap_reporting").
       mapping_id: Structure ID for the CoA→GAAP mapping.
       periods: Ordered list of period specifications.
+      closed_through: Last calendar day that has been real-closed in the
+          ledger (derived from FiscalCalendar.closed_through_period). When
+          set, the synthetic retained-earnings adjustments are bounded so
+          that periods ≤ closed_through are trusted as-is and cumulative
+          P&L is only computed for the range (closed_through, period_end].
+          This prevents double-counting prior earnings on books that
+          already carry a real RE balance.
 
   Returns:
       ReportFacts with all generated facts and metadata.
   """
   facts: list[ReportFact] = []
+
+  # Safety detection for ledgers without an initialized FiscalCalendar.
+  # If the ledger already carries real postings to Retained Earnings (QB
+  # opening-balance entry, prior-year close from another system, etc.) we
+  # derive an effective closed_through from the latest such posting. This
+  # bounds the synthetic prior-period adjustment so it only covers the
+  # un-closed window — preventing double-count while still allowing
+  # current-period net income to flow into RE for open-period BS accuracy.
+  if closed_through is None:
+    closed_through = _derive_closed_through_from_ledger(session, mapping_id)
 
   for period in periods:
     balances = _read_mapped_balances(session, mapping_id, period.start, period.end)
@@ -126,8 +144,28 @@ def generate_report_facts(
         )
       )
 
+    # If the period is entirely within the closed range, trust the ledger's
+    # existing RE balance — real closing entries have already moved NI into
+    # equity and the cumulative query would double-count them.
+    if closed_through is not None and period.end <= closed_through:
+      continue
+
     # Close temporary accounts into retained earnings per period
     _close_to_retained_earnings(facts, period.start, period.end)
+
+    # For balance sheet accuracy: close prior-period net income into RE.
+    # QB only formally closes to RE at year-end, so cumulative BS accounts
+    # are missing prior periods' net income. Compute cumulative IS for the
+    # un-closed window (from day after closed_through, or from inception
+    # when no marker is set) and add the difference to RE.
+    _close_prior_periods_to_retained_earnings(
+      session,
+      mapping_id,
+      facts,
+      period.start,
+      period.end,
+      closed_through=closed_through,
+    )
 
   unmapped_count = _count_unmapped(session, mapping_id)
 
@@ -280,8 +318,12 @@ def _read_mapped_balances(
         AND mapping.structure_id = :mapping_id
       JOIN elements target ON target.id = mapping.to_element_id
       WHERE e.status = 'posted'
-        AND (e.posting_date >= :start_date OR :start_date IS NULL)
         AND (e.posting_date <= :end_date OR :end_date IS NULL)
+        AND (
+          target.classification IN ('asset', 'liability', 'equity')
+          OR e.posting_date >= :start_date
+          OR :start_date IS NULL
+        )
       GROUP BY target.id, target.qname, target.name,
                target.classification, target.balance_type
       ORDER BY target.qname
@@ -388,6 +430,147 @@ def _close_to_retained_earnings(
         classification="equity",
         balance_type="credit",
         value=net_income,
+        period_start=period_start,
+        period_end=period_end,
+        period_type="instant",
+      )
+    )
+
+
+def _derive_closed_through_from_ledger(
+  session: Session,
+  mapping_id: str,
+) -> date | None:
+  """Infer an effective closed_through date from real Retained Earnings postings.
+
+  When no FiscalCalendar exists, we still want to avoid double-counting
+  prior earnings on books that already carry a real RE balance. The
+  latest posting_date of any entry that flows (via the CoA→GAAP mapping)
+  into retained_earnings gives a safe lower bound — periods ≤ that date
+  are trusted as-is, while later periods still run the synthetic close
+  so current-period open balance sheets reflect fresh net income.
+
+  Returns None when the ledger has no real RE postings; callers should
+  fall back to the legacy "from inception" behavior in that case.
+  """
+  RETAINED_EARNINGS_ID = "elem_gaap_retained_earnings"
+  row = session.execute(
+    text("""
+      SELECT MAX(e.posting_date) AS last_re_posting
+      FROM line_items li
+      JOIN entries e ON e.id = li.entry_id
+      JOIN associations mapping
+        ON mapping.from_element_id = li.element_id
+        AND mapping.association_type = 'mapping'
+        AND mapping.structure_id = :mapping_id
+      WHERE e.status = 'posted'
+        AND mapping.to_element_id = :re_id
+        AND (li.debit_amount > 0 OR li.credit_amount > 0)
+    """),
+    {"mapping_id": mapping_id, "re_id": RETAINED_EARNINGS_ID},
+  ).fetchone()
+  return row.last_re_posting if row and row.last_re_posting else None
+
+
+def _close_prior_periods_to_retained_earnings(
+  session: Session,
+  mapping_id: str,
+  facts: list[ReportFact],
+  period_start: date,
+  period_end: date,
+  closed_through: date | None = None,
+) -> None:
+  """Close un-closed prior-period net income into retained earnings.
+
+  Balance sheet accounts are loaded cumulatively, but the existing
+  _close_to_retained_earnings() only closes the current period's
+  revenue/expense. This function computes cumulative net income from
+  (day after closed_through) through period_end — or from inception
+  when no closed_through marker is provided — subtracts the current
+  period's net income (already closed), and adds the remainder to RE.
+
+  The `closed_through` lower bound is critical: without it, books that
+  already carry a real RE balance (e.g., a QuickBooks opening-balance
+  entry plus historical P&L transactions) would double-count all prior
+  earnings because the ledger's RE value already reflects them.
+  """
+  RETAINED_EARNINGS_ID = "elem_gaap_retained_earnings"
+
+  # Compute cumulative net income for the un-closed window.
+  # If closed_through is set, lower bound is the day after it; otherwise
+  # start from inception (start_date IS NULL).
+  lower_bound = closed_through + timedelta(days=1) if closed_through else None
+  result = session.execute(
+    text("""
+      SELECT
+        target.classification,
+        target.balance_type,
+        COALESCE(SUM(li.debit_amount), 0) AS total_debits,
+        COALESCE(SUM(li.credit_amount), 0) AS total_credits
+      FROM elements source_elem
+      JOIN line_items li ON li.element_id = source_elem.id
+      JOIN entries e ON e.id = li.entry_id
+      JOIN associations mapping
+        ON mapping.from_element_id = source_elem.id
+        AND mapping.association_type = 'mapping'
+        AND mapping.structure_id = :mapping_id
+      JOIN elements target ON target.id = mapping.to_element_id
+      WHERE e.status = 'posted'
+        AND e.posting_date <= :end_date
+        AND (:start_date IS NULL OR e.posting_date >= :start_date)
+        AND target.classification IN ('revenue', 'expense')
+      GROUP BY target.classification, target.balance_type
+    """),
+    {
+      "mapping_id": mapping_id,
+      "end_date": period_end,
+      "start_date": lower_bound,
+    },
+  )
+
+  cumulative_revenue = 0.0
+  cumulative_expenses = 0.0
+  for row in result:
+    net = cents_to_dollars(row.total_debits - row.total_credits)
+    natural = _natural_sign(net, row.balance_type)
+    if row.classification == "revenue":
+      cumulative_revenue += natural
+    else:
+      cumulative_expenses += natural
+
+  cumulative_net_income = cumulative_revenue - cumulative_expenses
+
+  # Current period net income was already closed — compute it from facts
+  current_revenue = 0.0
+  current_expenses = 0.0
+  retained_earnings_fact: ReportFact | None = None
+  for fact in facts:
+    if fact.period_start != period_start or fact.period_end != period_end:
+      continue
+    if fact.classification == "revenue":
+      current_revenue += fact.value
+    elif fact.classification == "expense":
+      current_expenses += fact.value
+    if fact.element_id == RETAINED_EARNINGS_ID:
+      retained_earnings_fact = fact
+
+  current_net_income = current_revenue - current_expenses
+  prior_periods_net_income = cumulative_net_income - current_net_income
+
+  if prior_periods_net_income == 0.0:
+    return
+
+  if retained_earnings_fact is not None:
+    retained_earnings_fact.value += prior_periods_net_income
+  else:
+    facts.append(
+      ReportFact(
+        element_id=RETAINED_EARNINGS_ID,
+        element_qname="us-gaap:RetainedEarningsAccumulatedDeficit",
+        element_name="Retained Earnings",
+        classification="equity",
+        balance_type="credit",
+        value=prior_periods_net_income,
         period_start=period_start,
         period_end=period_end,
         period_type="instant",

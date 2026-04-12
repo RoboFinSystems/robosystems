@@ -1,17 +1,26 @@
 """initial extensions schema
 
 Squashed migration representing the complete extensions database schema.
-Includes all RoboLedger, RoboInvestor, and schedule support tables.
+Includes RoboLedger (ledger + schedules + fiscal calendar + close workflow),
+RoboInvestor (portfolios), and the shared XBRL taxonomy system.
 
-Public-schema tables (shared across tenants):
-  - fiscal_periods, taxonomies, structures, associations
+This consolidates what was previously spread across three migrations:
+  - 0001 initial schema
+  - 0002 add entry provenance column
+  - 0003 add fiscal_calendar tables + facts.fact_scope column
 
-Tenant-template tables (created here in public, then per-tenant via
-provision_tenant_schema() using schema_translate_map):
+All three are now a single initial state since none had shipped to production.
+
+Public-schema shared tables (US GAAP / SFAC 6 seeds, shared across tenants):
+  - taxonomies, structures, associations
+
+Tenant-template tables (created here in public, copied into each kg* schema
+on first tenant access by provision_tenant_schema() via schema_translate_map):
+  - fiscal_periods, fiscal_calendar, fiscal_calendar_events
   - elements, transactions, entries, line_items, dimensions,
     junction tables, classification_rules, reports,
-    facts, report_shares, entities, portfolios, securities,
-    positions, publish_lists, publish_list_members
+    facts (with fact_scope column), report_shares, entities,
+    portfolios, securities, positions, publish_lists, publish_list_members
 
 Future migrations should use the helpers module for tenant DDL::
 
@@ -27,7 +36,7 @@ Future migrations should use the helpers module for tenant DDL::
 
 Revision ID: 0001
 Revises:
-Create Date: 2026-04-02
+Create Date: 2026-04-12
 """
 
 import sqlalchemy as sa
@@ -54,7 +63,10 @@ def upgrade() -> None:
   """)
 
   # ──────────────────────────────────────────────────────────────────────
-  # Public-schema shared tables
+  # Tenant-template tables (no schema arg → created in public as template,
+  # provision_tenant_schema() copies them into each kg* tenant schema on
+  # first access). fiscal_periods is per-graph data — it belongs in the
+  # tenant schema, not shared public.
   # ──────────────────────────────────────────────────────────────────────
 
   op.create_table(
@@ -77,20 +89,100 @@ def upgrade() -> None:
     sa.CheckConstraint("start_date < end_date", name="check_fiscal_period_dates"),
     sa.PrimaryKeyConstraint("id"),
     sa.UniqueConstraint("graph_id", "name", name="uq_fiscal_period_graph_name"),
-    schema="public",
   )
   op.create_index(
     "idx_fiscal_periods_graph",
     "fiscal_periods",
     ["graph_id"],
-    schema="public",
   )
   op.create_index(
     "idx_fiscal_periods_dates",
     "fiscal_periods",
     ["graph_id", "start_date", "end_date"],
-    schema="public",
   )
+
+  # -- Fiscal Calendar (tenant-scoped; see specs/ledger-close-workflow.md) --
+  # Per-graph rolling close state: closed_through_period (system-maintained)
+  # and close_target_period (user-settable). One row per tenant.
+  op.create_table(
+    "fiscal_calendar",
+    sa.Column("id", sa.String(), nullable=False),
+    sa.Column("graph_id", sa.String(), nullable=False),
+    sa.Column(
+      "fiscal_year_start_month", sa.Integer(), nullable=False, server_default="1"
+    ),
+    sa.Column("closed_through_period", sa.String(), nullable=True),
+    sa.Column("close_target_period", sa.String(), nullable=True),
+    sa.Column("initialized_at", sa.DateTime(), nullable=True),
+    sa.Column("last_close_at", sa.DateTime(), nullable=True),
+    sa.Column(
+      "created_at", sa.DateTime(), nullable=False, server_default=sa.text("now()")
+    ),
+    sa.Column(
+      "updated_at", sa.DateTime(), nullable=False, server_default=sa.text("now()")
+    ),
+    sa.Column("created_by", sa.String(), nullable=True),
+    sa.Column("updated_by", sa.String(), nullable=True),
+    sa.CheckConstraint(
+      "fiscal_year_start_month BETWEEN 1 AND 12",
+      name="ck_fiscal_calendar_year_start_month",
+    ),
+    sa.CheckConstraint(
+      "close_target_period IS NULL "
+      "OR closed_through_period IS NULL "
+      "OR close_target_period >= closed_through_period",
+      name="ck_fiscal_calendar_target_ge_through",
+    ),
+    sa.PrimaryKeyConstraint("id"),
+    sa.UniqueConstraint("graph_id", name="uq_fiscal_calendar_graph"),
+  )
+  op.create_index("idx_fiscal_calendar_graph", "fiscal_calendar", ["graph_id"])
+
+  # -- Fiscal Calendar Events (append-only audit log of calendar mutations) --
+  op.create_table(
+    "fiscal_calendar_events",
+    sa.Column("id", sa.String(), nullable=False),
+    sa.Column("fiscal_calendar_id", sa.String(), nullable=False),
+    sa.Column("graph_id", sa.String(), nullable=False),
+    sa.Column("event_type", sa.String(), nullable=False),
+    sa.Column("period", sa.String(), nullable=True),
+    sa.Column("from_value", sa.String(), nullable=True),
+    sa.Column("to_value", sa.String(), nullable=True),
+    sa.Column("actor_id", sa.String(), nullable=True),
+    sa.Column("actor_type", sa.String(), nullable=False, server_default="user"),
+    sa.Column("note", sa.Text(), nullable=True),
+    sa.Column("reason", sa.Text(), nullable=True),
+    sa.Column(
+      "created_at", sa.DateTime(), nullable=False, server_default=sa.text("now()")
+    ),
+    sa.CheckConstraint(
+      "event_type IN ("
+      "'initialized', 'target_changed', 'period_closed', 'period_reopened', "
+      "'target_advanced_auto'"
+      ")",
+      name="ck_fiscal_calendar_events_event_type",
+    ),
+    sa.CheckConstraint(
+      "actor_type IN ('user', 'agent', 'system')",
+      name="ck_fiscal_calendar_events_actor_type",
+    ),
+    sa.ForeignKeyConstraint(
+      ["fiscal_calendar_id"],
+      ["fiscal_calendar.id"],
+      name="fk_fiscal_calendar_events_calendar",
+      ondelete="CASCADE",
+    ),
+    sa.PrimaryKeyConstraint("id"),
+  )
+  op.create_index(
+    "idx_fiscal_calendar_events_graph_time",
+    "fiscal_calendar_events",
+    ["graph_id", "created_at"],
+  )
+
+  # ──────────────────────────────────────────────────────────────────────
+  # Public-schema shared tables
+  # ──────────────────────────────────────────────────────────────────────
 
   op.create_table(
     "taxonomies",
@@ -407,6 +499,7 @@ def upgrade() -> None:
     sa.Column("type", sa.String(), nullable=False),
     sa.Column("reversal_of", sa.String(), nullable=True),
     sa.Column("source_structure_id", sa.String(), nullable=True),
+    sa.Column("provenance", sa.String(), nullable=True),
     sa.Column("posting_date", sa.Date(), nullable=False),
     sa.Column("memo", sa.String(), nullable=True),
     sa.Column("status", sa.String(), nullable=False),
@@ -423,6 +516,13 @@ def upgrade() -> None:
     sa.CheckConstraint(
       "type IN ('standard', 'adjusting', 'closing', 'reversing')",
       name="check_entry_type",
+    ),
+    sa.CheckConstraint(
+      "provenance IN ("
+      "'source_sync', 'ai_generated', 'manual_entry', "
+      "'schedule_derived', 'system_computed'"
+      ") OR provenance IS NULL",
+      name="ck_entries_provenance",
     ),
     sa.ForeignKeyConstraint(["reversal_of"], ["entries.id"]),
     sa.ForeignKeyConstraint(["transaction_id"], ["transactions.id"]),
@@ -590,10 +690,15 @@ def upgrade() -> None:
     sa.Column("entity_id", sa.String(), nullable=False),
     sa.Column("structure_id", sa.String(), nullable=True),
     sa.Column("fact_set_id", sa.String(), nullable=True),
+    sa.Column("fact_scope", sa.String(), nullable=False, server_default="in_scope"),
     sa.Column("created_at", sa.DateTime(), nullable=False),
     sa.CheckConstraint(
       "report_id IS NOT NULL OR fact_set_id IS NOT NULL",
       name="check_fact_has_parent",
+    ),
+    sa.CheckConstraint(
+      "fact_scope IN ('historical', 'in_scope')",
+      name="ck_facts_scope",
     ),
     sa.PrimaryKeyConstraint("id"),
   )
@@ -602,6 +707,12 @@ def upgrade() -> None:
   op.create_index("idx_facts_period", "facts", ["period_start", "period_end"])
   op.create_index("idx_facts_fact_set", "facts", ["fact_set_id"])
   op.create_index("idx_facts_structure", "facts", ["structure_id"])
+  op.create_index(
+    "idx_facts_scope_in_scope",
+    "facts",
+    ["structure_id", "period_start"],
+    postgresql_where=sa.text("fact_scope = 'in_scope'"),
+  )
 
   # -- Report Shares --
   op.create_table(
@@ -827,12 +938,14 @@ def downgrade() -> None:
   op.drop_table("entries")
   op.drop_table("transactions")
   op.drop_table("dimensions")
+  op.drop_table("fiscal_calendar_events")
+  op.drop_table("fiscal_calendar")
 
   # Drop public-schema shared tables (reverse dependency order)
   op.drop_table("associations", schema="public")
   op.drop_table("elements")
   op.drop_table("structures", schema="public")
   op.drop_table("taxonomies", schema="public")
-  op.drop_table("fiscal_periods", schema="public")
+  op.drop_table("fiscal_periods")
 
   op.execute("DROP FUNCTION IF EXISTS public.generate_prefixed_id(TEXT)")

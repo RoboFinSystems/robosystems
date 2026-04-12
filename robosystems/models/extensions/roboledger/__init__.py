@@ -11,6 +11,7 @@ from .dimension import (
 from .element import Account, Element
 from .entry import Entry
 from .fact import Fact
+from .fiscal_calendar import FiscalCalendar, FiscalCalendarEvent
 from .fiscal_period import FiscalPeriod
 from .line_item import LineItem
 from .publish_list import PublishList, PublishListMember
@@ -33,6 +34,8 @@ __all__ = [
   "Element",
   "Entry",
   "Fact",
+  "FiscalCalendar",
+  "FiscalCalendarEvent",
   "FiscalPeriod",
   "LineItem",
   "PublishList",

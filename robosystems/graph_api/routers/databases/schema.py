@@ -118,11 +118,12 @@ async def install_schema(
       detail="Schema installation not allowed on read-only nodes",
     )
 
-  # Validate database exists
-  if graph_id not in ladybug_service.db_manager.list_databases():
+  # Validate database exists (check file directly — list_databases() excludes -wip/-prev)
+  db_path = ladybug_service.db_manager.base_path / f"{graph_id}.lbug"
+  if not db_path.exists():
     raise HTTPException(
       status_code=http_status.HTTP_404_NOT_FOUND,
-      detail=f"Database {graph_id} not found",
+      detail=f"Database '{graph_id}' not found",
     )
 
   # Validate request

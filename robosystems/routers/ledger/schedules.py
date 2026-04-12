@@ -14,6 +14,7 @@ from robosystems.middleware.rate_limits import subscription_aware_rate_limit_dep
 from robosystems.models.api.extensions.schedules import (
   ClosingEntryResponse,
   CreateClosingEntryRequest,
+  CreateManualClosingEntryRequest,
   CreateScheduleRequest,
   PeriodCloseItemResponse,
   PeriodCloseStatusResponse,
@@ -22,6 +23,8 @@ from robosystems.models.api.extensions.schedules import (
   ScheduleFactsResponse,
   ScheduleListResponse,
   ScheduleSummaryResponse,
+  TruncateScheduleRequest,
+  TruncateScheduleResponse,
 )
 from robosystems.models.core import User
 from robosystems.operations.extensions.staleness import mark_graph_stale
@@ -95,6 +98,7 @@ async def create_schedule(
         entry_template=et,
         schedule_metadata=sm,
         created_by=current_user.id,
+        closed_through=body.closed_through,
       )
 
       # Count generated facts and periods
@@ -303,6 +307,7 @@ async def create_closing_entry(
       reversal_resp = None
       if result.reversal:
         reversal_resp = ClosingEntryResponse(
+          outcome=result.reversal.outcome,
           entry_id=result.reversal.entry_id,
           status=result.reversal.status,
           posting_date=result.reversal.posting_date,
@@ -310,9 +315,11 @@ async def create_closing_entry(
           debit_element_id=result.reversal.debit_element_id,
           credit_element_id=result.reversal.credit_element_id,
           amount=result.reversal.amount,
+          reason=result.reversal.reason,
         )
 
       return ClosingEntryResponse(
+        outcome=result.outcome,
         entry_id=result.entry_id,
         status=result.status,
         posting_date=result.posting_date,
@@ -320,6 +327,7 @@ async def create_closing_entry(
         debit_element_id=result.debit_element_id,
         credit_element_id=result.credit_element_id,
         amount=result.amount,
+        reason=result.reason,
         reversal=reversal_resp,
       )
 
@@ -329,4 +337,132 @@ async def create_closing_entry(
     if "does not exist" in str(e) and ("schema" in str(e) or "relation" in str(e)):
       raise _ledger_404()
     logger.error(f"Closing entry creation failed: {e}")
+    raise
+
+
+@router.patch(
+  "/schedules/{structure_id}/truncate",
+  response_model=TruncateScheduleResponse,
+  operation_id="truncateSchedule",
+  summary="Truncate Schedule (End Early)",
+  tags=["Ledger"],
+)
+async def truncate_schedule(
+  graph_id: str = Path(..., pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN),
+  structure_id: str = Path(..., description="Schedule structure ID"),
+  body: TruncateScheduleRequest = ...,
+  current_user: User = Depends(get_current_user_with_graph),
+  _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
+):
+  """End a schedule early.
+
+  Used for events that cut a schedule's lifespan short — an asset is sold,
+  a prepaid is cancelled, a contract is terminated. Deletes all facts with
+  `period_start > new_end_date` and any stale draft entries that were
+  produced from them.
+
+  Posted entries are preserved — if any period after `new_end_date` has a
+  posted closing entry, the truncate fails with 422 and the caller must
+  reopen that period first.
+
+  The truncation is logged to the schedule's metadata for audit.
+  """
+  try:
+    with extensions_session(graph_id) as session:
+      result = _svc.truncate_schedule(
+        session,
+        structure_id=structure_id,
+        new_end_date=body.new_end_date,
+        reason=body.reason,
+        updated_by=current_user.id,
+      )
+      session.commit()
+
+      asyncio.get_running_loop().run_in_executor(
+        None, mark_graph_stale, graph_id, "schedule_truncated"
+      )
+
+      return TruncateScheduleResponse(
+        structure_id=result["structure_id"],
+        new_end_date=result["new_end_date"],
+        facts_deleted=result["facts_deleted"],
+        reason=result["reason"],
+      )
+  except ValueError as e:
+    raise HTTPException(status_code=422, detail=str(e))
+  except ProgrammingError as e:
+    if "does not exist" in str(e) and ("schema" in str(e) or "relation" in str(e)):
+      raise _ledger_404()
+    logger.error(f"Schedule truncation failed: {e}")
+    raise
+
+
+@router.post(
+  "/manual-closing-entry",
+  response_model=ClosingEntryResponse,
+  status_code=201,
+  operation_id="createManualClosingEntry",
+  summary="Create Manual Closing Entry",
+  tags=["Ledger"],
+)
+async def create_manual_closing_entry(
+  graph_id: str = Path(..., pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN),
+  body: CreateManualClosingEntryRequest = ...,
+  current_user: User = Depends(get_current_user_with_graph),
+  _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
+):
+  """Create a manual (non-schedule) draft closing entry.
+
+  Used for one-off adjustments that aren't derived from a schedule: asset
+  disposals, impairments, reclassifications, correcting entries.
+
+  The entry is drafted like any schedule-derived entry and flows through
+  the same review and close pipeline — `list-period-drafts` shows it,
+  `close-period` commits it along with the rest.
+
+  Line items can be any count (not just 2 like schedule entries). Total
+  debits must equal total credits. `provenance` is set to 'manual_entry'
+  and `source_structure_id` is null.
+  """
+  try:
+    with extensions_session(graph_id) as session:
+      result = _svc.create_manual_closing_entry(
+        session,
+        posting_date=body.posting_date,
+        line_items=[
+          {
+            "element_id": li.element_id,
+            "debit_amount": li.debit_amount,
+            "credit_amount": li.credit_amount,
+            "description": li.description,
+          }
+          for li in body.line_items
+        ],
+        memo=body.memo,
+        created_by=current_user.id,
+        entry_type=body.entry_type,
+      )
+      session.commit()
+
+      asyncio.get_running_loop().run_in_executor(
+        None, mark_graph_stale, graph_id, "manual_entry_created"
+      )
+
+      return ClosingEntryResponse(
+        outcome=result.outcome,
+        entry_id=result.entry_id,
+        status=result.status,
+        posting_date=result.posting_date,
+        memo=result.memo,
+        debit_element_id=result.debit_element_id,
+        credit_element_id=result.credit_element_id,
+        amount=result.amount,
+        reason=result.reason,
+      )
+  except ValueError as e:
+    raise HTTPException(status_code=422, detail=str(e))
+  except ProgrammingError as e:
+    if "does not exist" in str(e) and ("schema" in str(e) or "relation" in str(e)):
+      raise _ledger_404()
+    logger.error(f"Manual closing entry creation failed: {e}")
     raise

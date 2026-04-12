@@ -256,6 +256,7 @@ class TestCreateClosingEntry:
 
     mock_svc = MagicMock()
     mock_svc.create_closing_entry.return_value = ClosingEntryResult(
+      outcome="created",
       entry_id="je_01ABC",
       status="draft",
       posting_date=date(2026, 1, 31),

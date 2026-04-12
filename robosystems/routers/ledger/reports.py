@@ -59,6 +59,31 @@ def _ledger_404():
   )
 
 
+def _resolve_closed_through(session) -> date | None:
+  """Look up the fiscal calendar's closed_through date for RE adjustments.
+
+  Returns the last calendar day covered by a real close (from
+  FiscalCalendar.closed_through_period), or None if there is no calendar
+  or no close has happened yet. Used as the lower-bound for the synthetic
+  retained-earnings adjustment so that real RE balances aren't double-counted.
+  """
+  from robosystems.models.extensions.roboledger.fiscal_calendar import FiscalCalendar
+  from robosystems.operations.fiscal_calendar import period_date_range
+
+  try:
+    cal = session.query(FiscalCalendar).first()
+    if cal is None:
+      return None
+    period = getattr(cal, "closed_through_period", None)
+    if not isinstance(period, str) or not period:
+      return None
+    _, end = period_date_range(period)
+    return end
+  except Exception as e:
+    logger.debug(f"closed_through lookup failed: {e}")
+    return None
+
+
 def _report_404(report_id: str):
   return HTTPException(
     status_code=404,
@@ -283,6 +308,7 @@ async def create_report(
         taxonomy_id=body.taxonomy_id,
         mapping_id=body.mapping_id,
         periods=periods,
+        closed_through=_resolve_closed_through(session),
       )
 
       # Persist facts to OLTP for materialization and rendering
@@ -599,6 +625,7 @@ async def regenerate_report(
         taxonomy_id=report_def.taxonomy_id,
         mapping_id=report_def.mapping_id or "",
         periods=periods,
+        closed_through=_resolve_closed_through(session),
       )
 
       # Persist

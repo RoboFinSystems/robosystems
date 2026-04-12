@@ -10,6 +10,7 @@ class EntityCreate(BaseModel):
     min_length=1,
     description="Entity URI. If not provided, will be auto-generated as an RDF-style URI based on the graph ID.",
   )
+  ticker: str | None = None
   cik: str | None = None
   database: str | None = None
   sic: str | None = None

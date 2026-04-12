@@ -1,7 +1,9 @@
-"""FiscalPeriod model — shared across tenants.
+"""FiscalPeriod model — per-tenant fiscal period records.
 
-Lives in the public schema of the extensions database. Used for
-period close controls (prevent posting to closed periods).
+Tenant-scoped: lives in each `kg*` schema, not in public. Used for
+period close controls (prevent posting to closed periods). The `graph_id`
+column is retained as a defensive discriminator but the primary tenant
+isolation comes from the schema boundary.
 """
 
 from datetime import UTC, datetime
@@ -34,7 +36,6 @@ class FiscalPeriod(ExtensionsBase):
       "start_date < end_date",
       name="check_fiscal_period_dates",
     ),
-    {"schema": "public"},
   )
 
   # Identity
