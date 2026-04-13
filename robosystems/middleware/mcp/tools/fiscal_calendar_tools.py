@@ -262,12 +262,10 @@ class ClosePeriodTool:
     from robosystems.db.extensions import extensions_session
     from robosystems.operations.roboledger.fiscal_calendar import (
       CloseGateFailed,
+      FiscalCalendarError,
       PeriodCloseService,
       PeriodNotFoundError,
       UnbalancedLedgerError,
-    )
-    from robosystems.operations.roboledger.fiscal_calendar.service import (
-      FiscalCalendarError,
     )
 
     graph_id = self.client.graph_id
@@ -404,9 +402,9 @@ class ReopenPeriodTool:
   async def execute(self, arguments: dict[str, Any]) -> Any:
     from robosystems.db.extensions import extensions_session
     from robosystems.models.extensions.roboledger.fiscal_period import FiscalPeriod
-    from robosystems.operations.roboledger.fiscal_calendar import FiscalCalendarService
-    from robosystems.operations.roboledger.fiscal_calendar.service import (
+    from robosystems.operations.roboledger.fiscal_calendar import (
       FiscalCalendarError,
+      FiscalCalendarService,
     )
 
     graph_id = self.client.graph_id

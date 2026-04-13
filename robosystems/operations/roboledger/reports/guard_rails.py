@@ -109,11 +109,14 @@ def _validate_balance_sheet(rows: list[FactRow]) -> ValidationResult:
   return result
 
 
-def _validate_cash_flow(rows: list[FactRow]) -> ValidationResult:
+def _validate_cash_flow(  # pyright: ignore[reportUnusedFunction]
+  rows: list[FactRow],
+) -> ValidationResult:
   """Cash flow validation — retained for when the renderer is implemented.
 
   Currently unreferenced; `validate_report` does not dispatch to this
-  function. Remove the dead-code silencer when the renderer lands.
+  function. Wire it back into `validate_report` when the CF renderer
+  lands in fact_grid and drop the `reportUnusedFunction` ignore above.
   """
   result = ValidationResult()
 
@@ -122,12 +125,6 @@ def _validate_cash_flow(rows: list[FactRow]) -> ValidationResult:
   _check_comparative_data(rows, result)
 
   return result
-
-
-# Keep `_validate_cash_flow` alive for the linter — it's a placeholder
-# for the future CF renderer. Remove along with the function when the
-# renderer is wired up in validate_report().
-_ = _validate_cash_flow
 
 
 # ── Shared check helpers ──────────────────────────────────────────────────

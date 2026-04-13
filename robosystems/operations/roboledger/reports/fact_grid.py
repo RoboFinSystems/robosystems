@@ -118,24 +118,27 @@ def generate_report_facts(
   facts: list[ReportFact] = []
 
   # Safety detection for ledgers without an initialized FiscalCalendar.
-  # If the ledger already carries real postings to Retained Earnings (QB
-  # opening-balance entry, prior-year close from another system, etc.) we
-  # derive an effective closed_through from the latest such posting. This
-  # bounds the synthetic prior-period adjustment so it only covers the
-  # un-closed window — preventing double-count while still allowing
-  # current-period net income to flow into RE for open-period BS accuracy.
+  #
+  # Two mutually-exclusive paths depending on where `closed_through` comes from:
+  #
+  # 1. Not supplied by caller → derive from the ledger's latest RE posting.
+  #    If postings exist, the returned date is authoritative; if none, we
+  #    stay None and synthesize from inception. (QB opening-balance entries,
+  #    prior-year closes from other systems, etc. land here.)
+  #
+  # 2. Supplied by caller (from FiscalCalendar.closed_through_period) →
+  #    validate against the ledger. If the calendar says "closed through X"
+  #    but no real RE postings back that claim, the calendar is aspirational
+  #    (the demo case: `initialize_ledger(closed_through=...)` without any
+  #    actual closing entries). Drop the marker so the synthetic close runs
+  #    from inception and the balance sheet actually balances.
+  #
+  # The `elif` is intentional — we never need to re-check "has RE postings"
+  # on the derived path because `_derive_closed_through_from_ledger` already
+  # proved postings exist by returning a date.
   if closed_through is None:
     closed_through = _derive_closed_through_from_ledger(session, mapping_id)
-
-  # If the fiscal calendar declares "closed through X" but the ledger has
-  # NO actual RE postings backing that claim, the calendar is aspirational
-  # — a user set close state without posting real closing entries. Drop
-  # the marker so the synthetic close runs from inception and the balance
-  # sheet actually balances. This is the demo case: an evergreen seed
-  # with initialize_ledger(closed_through=...) but no historical close
-  # entries. Real tenants with posted closes (QB or roboledger) won't hit
-  # this branch because _derive_closed_through_from_ledger returns a date.
-  if closed_through is not None and not _ledger_has_re_postings(session, mapping_id):
+  elif not _ledger_has_re_postings(session, mapping_id):
     closed_through = None
 
   for period in periods:

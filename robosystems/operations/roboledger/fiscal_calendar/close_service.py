@@ -25,7 +25,6 @@ from robosystems.models.extensions.roboledger.fiscal_period import FiscalPeriod
 from .periods import period_date_range
 from .service import (
   CloseableGateResult,
-  FiscalCalendarError,
   FiscalCalendarService,
 )
 
@@ -295,8 +294,6 @@ class PeriodCloseService:
 
 __all__ = [
   "CloseGateFailed",
-  # Re-export for caller convenience
-  "FiscalCalendarError",
   "PeriodCloseError",
   "PeriodCloseResult",
   "PeriodCloseService",

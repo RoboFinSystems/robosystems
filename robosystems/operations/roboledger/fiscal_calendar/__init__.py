@@ -27,12 +27,13 @@ from .periods import (
   period_name,
   previous_period,
 )
-from .service import CloseableGateResult, FiscalCalendarService
+from .service import CloseableGateResult, FiscalCalendarError, FiscalCalendarService
 
 __all__ = [
   "PERIOD_PATTERN",
   "CloseGateFailed",
   "CloseableGateResult",
+  "FiscalCalendarError",
   "FiscalCalendarService",
   "PeriodCloseError",
   "PeriodCloseResult",
