@@ -420,6 +420,11 @@ class ReopenPeriodTool:
         "message": "Reopen requires a non-empty reason.",
       }
 
+    # Best-effort user identity from the graph client context; fall back to
+    # a graph-scoped sentinel so audit logs stay traceable to the tenant.
+    # Matches the pattern used by `ClosePeriodTool` above.
+    actor_id = getattr(self.client, "user_id", None) or f"mcp:{graph_id}"
+
     svc = FiscalCalendarService()
 
     try:
@@ -450,7 +455,7 @@ class ReopenPeriodTool:
           graph_id,
           period,
           reason=reason,
-          actor_id=f"mcp:{graph_id}",
+          actor_id=actor_id,
           actor_type="agent",
           note=note,
         )

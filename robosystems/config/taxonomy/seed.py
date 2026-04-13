@@ -1,9 +1,14 @@
 """Seed data for the standard US GAAP reporting taxonomy.
 
-Defines SFAC 6 root elements, US GAAP reporting concepts, reporting
-structures (Income Statement, Balance Sheet, Cash Flow), and their
+Defines SFAC 6 root elements, US GAAP reporting concepts, and the
+Income Statement and Balance Sheet reporting structures with their
 hierarchy associations. Derived from the existing CanonicalConcept
 definitions in adapters/sec/taxonomy/.
+
+Cash Flow Statement is intentionally omitted — the generator that
+renders it isn't implemented yet. SEC XBRL cash flow parsing (for
+externally-filed 10-K/10-Q data) lives in adapters/sec/ and is
+separate from this seed.
 
 The seed function uses raw SQL (not ORM) for use in Alembic migrations.
 All data goes into the public schema (shared across tenants).
@@ -18,7 +23,12 @@ from sqlalchemy import text
 TAXONOMY_ID = "tax_usgaap_reporting"
 STRUCT_IS_ID = "struct_income_statement"
 STRUCT_BS_ID = "struct_balance_sheet"
-STRUCT_CF_ID = "struct_cash_flow"
+# Cash Flow Statement is intentionally NOT seeded. A functional
+# CF generator is not yet implemented for roboledger — when it is,
+# re-introduce STRUCT_CF_ID, the CASH_FLOW_ELEMENTS list, and the
+# corresponding entries in STRUCTURES / STRUCTURE_ROOT_ELEMENTS /
+# ROOT_ORDER. SEC XBRL CF parsing lives in adapters/sec/ and is
+# unaffected.
 
 # ──────────────────────────────────────────────────────────────────────────────
 # SFAC 6 Root Elements (depth 0, all abstract)
@@ -636,83 +646,9 @@ BALANCE_SHEET_ELEMENTS = [
   ),
 ]
 
-# -- Cash Flow elements --
-CASH_FLOW_ELEMENTS = [
-  # Operating
-  _elem(
-    "operating_cash_flow",
-    "NetCashProvidedByUsedInOperatingActivities",
-    "Cash from Operating Activities",
-    "asset",
-    "debit",
-    "duration",
-    _AS,
-    abstract=True,
-  ),
-  # Investing
-  _elem(
-    "capex",
-    "PaymentsToAcquirePropertyPlantAndEquipment",
-    "Capital Expenditures",
-    "asset",
-    "credit",
-    "duration",
-    _AS,
-  ),
-  _elem(
-    "investing_cash_flow",
-    "NetCashProvidedByUsedInInvestingActivities",
-    "Cash from Investing Activities",
-    "asset",
-    "debit",
-    "duration",
-    _AS,
-    abstract=True,
-  ),
-  # Financing
-  _elem(
-    "dividends_paid",
-    "PaymentsOfDividends",
-    "Dividends Paid",
-    "equity",
-    "debit",
-    "duration",
-    _EQ,
-  ),
-  _elem(
-    "share_repurchases",
-    "PaymentsForRepurchaseOfCommonStock",
-    "Share Repurchases",
-    "equity",
-    "debit",
-    "duration",
-    _EQ,
-  ),
-  _elem(
-    "financing_cash_flow",
-    "NetCashProvidedByUsedInFinancingActivities",
-    "Cash from Financing Activities",
-    "asset",
-    "debit",
-    "duration",
-    _AS,
-    abstract=True,
-  ),
-  # Net Change
-  _elem(
-    "net_change_in_cash",
-    "CashCashEquivalentsRestrictedCashAndRestrictedCashEquivalentsPeriodIncreaseDecreaseIncludingExchangeRateEffect",
-    "Net Change in Cash",
-    "asset",
-    "debit",
-    "duration",
-    _AS,
-  ),
-]
+# Cash Flow elements are intentionally not seeded — see module docstring.
 
-ALL_GAAP_ELEMENTS = (
-  INCOME_STATEMENT_ELEMENTS + BALANCE_SHEET_ELEMENTS + CASH_FLOW_ELEMENTS
-)
+ALL_GAAP_ELEMENTS = INCOME_STATEMENT_ELEMENTS + BALANCE_SHEET_ELEMENTS
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Structures
@@ -731,34 +667,12 @@ STRUCTURES = [
     "structure_type": "balance_sheet",
     "taxonomy_id": TAXONOMY_ID,
   },
-  {
-    "id": STRUCT_CF_ID,
-    "name": "US GAAP Cash Flow Statement",
-    "structure_type": "cash_flow_statement",
-    "taxonomy_id": TAXONOMY_ID,
-  },
 ]
 
 
 def _structure_for_element(elem: dict) -> str:
   """Determine which structure an element belongs to based on its parent chain."""
   parent = elem.get("parent_id", "")
-  eid = elem["id"]
-
-  # Cash flow elements
-  if eid.startswith("elem_gaap_") and any(
-    k in eid
-    for k in (
-      "operating_cash_flow",
-      "capex",
-      "investing_cash_flow",
-      "dividends_paid",
-      "share_repurchases",
-      "financing_cash_flow",
-      "net_change_in_cash",
-    )
-  ):
-    return STRUCT_CF_ID
 
   # Balance sheet elements
   if parent in (_AS, _LI, _EQ) or any(
@@ -850,6 +764,10 @@ def seed_reporting_taxonomy(connection) -> None:
   # 5. Create structure-root elements so they can be referenced in associations.
   # The associations FK requires both from/to to be valid element IDs.
   # These abstract elements represent the root of each financial statement.
+  #
+  # NOTE: source="system" (NOT in COA_SOURCES) so they are never returned by
+  # the /accounts/tree endpoint or any Chart of Accounts lookup. They are
+  # internal FK anchors, not user-facing accounts.
   STRUCTURE_ROOT_ELEMENTS = [
     {
       "id": STRUCT_BS_ID,
@@ -861,7 +779,7 @@ def seed_reporting_taxonomy(connection) -> None:
       "period_type": "instant",
       "is_abstract": True,
       "element_type": "abstract",
-      "source": "native",
+      "source": "system",
       "depth": 0,
     },
     {
@@ -874,20 +792,7 @@ def seed_reporting_taxonomy(connection) -> None:
       "period_type": "duration",
       "is_abstract": True,
       "element_type": "abstract",
-      "source": "native",
-      "depth": 0,
-    },
-    {
-      "id": STRUCT_CF_ID,
-      "qname": "report:CashFlowStatement",
-      "namespace": "report",
-      "name": "Cash Flow Statement",
-      "classification": "asset",
-      "balance_type": "debit",
-      "period_type": "duration",
-      "is_abstract": True,
-      "element_type": "abstract",
-      "source": "native",
+      "source": "system",
       "depth": 0,
     },
   ]
@@ -907,9 +812,6 @@ def seed_reporting_taxonomy(connection) -> None:
     (STRUCT_IS_ID, "elem_sfac6_gains", 3),
     (STRUCT_IS_ID, "elem_sfac6_losses", 4),
     (STRUCT_IS_ID, "elem_sfac6_comprehensive_income", 5),
-    # Cash Flow: Assets (operating/investing) → Equity (financing)
-    (STRUCT_CF_ID, "elem_sfac6_assets", 1),
-    (STRUCT_CF_ID, "elem_sfac6_equity", 2),
   ]
 
   assoc_seq = 0

@@ -62,7 +62,9 @@ class CreateStructureRequest(BaseModel):
     "chart_of_accounts",
     "income_statement",
     "balance_sheet",
-    "cash_flow_statement",
+    # cash_flow_statement is intentionally omitted — the roboledger
+    # renderer isn't implemented yet. SEC XBRL cash flow parsing is
+    # separate and unaffected.
     "equity_statement",
     "coa_mapping",
     "schedule",

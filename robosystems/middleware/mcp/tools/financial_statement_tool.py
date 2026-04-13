@@ -184,6 +184,20 @@ For balance sheets, only instant-period facts are returned. For other statements
 
     # User graph with roboledger → OLTP path. Ticker (if provided) is
     # informational only — we generate from the current graph's ledger.
+    #
+    # NOTE: cash_flow_statement is valid for SEC shared-repo queries (we
+    # parse it from XBRL filings) but NOT yet supported for the private
+    # OLTP path — the generator hasn't been built. Reject cleanly so the
+    # caller gets an actionable message instead of an empty statement.
+    if statement_type == "cash_flow_statement":
+      return {
+        "error": (
+          "cash_flow_statement is not yet supported for private company "
+          "ledgers. Only the SEC shared repository returns cash flow data. "
+          "Try income_statement, balance_sheet, or equity_statement for "
+          "roboledger books."
+        ),
+      }
     period_start = arguments.get("period_start")
     period_end = arguments.get("period_end")
     return self._get_private_statement(

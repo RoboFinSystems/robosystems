@@ -26,10 +26,11 @@ router = APIRouter()
 
 
 # Structure types that represent financial statements
+# NOTE: `cash_flow_statement` is not listed — the renderer is not yet
+# implemented for roboledger. SEC XBRL cash-flow parsing is unaffected.
 _STATEMENT_TYPES = {
   "income_statement",
   "balance_sheet",
-  "cash_flow_statement",
   "equity_statement",
 }
 
@@ -37,7 +38,6 @@ _STATEMENT_TYPES = {
 _STATEMENT_LABELS = {
   "income_statement": "Income Statement",
   "balance_sheet": "Balance Sheet",
-  "cash_flow_statement": "Cash Flow Statement",
   "equity_statement": "Statement of Changes in Equity",
 }
 
@@ -64,7 +64,22 @@ async def get_closing_book_structures(
     with extensions_session(graph_id) as session:
       categories: list[ClosingBookCategory] = []
 
-      # 1. Statements — from the most recent report's taxonomy structures
+      # 1. Period Close hub — always first so it's the operational home
+      # for the close workflow. Frontend defaults to this item on load.
+      categories.append(
+        ClosingBookCategory(
+          label="Period Close",
+          items=[
+            ClosingBookItem(
+              id="period_close",
+              name="Current Period Status",
+              item_type="period_close",
+            ),
+          ],
+        )
+      )
+
+      # 2. Statements — from the most recent report's taxonomy structures
       latest_report = session.execute(
         select(Report)
         .where(Report.generation_status.in_(["complete", "published", "generating"]))
@@ -101,7 +116,7 @@ async def get_closing_book_structures(
             ClosingBookCategory(label="Statements", items=statement_items)
           )
 
-      # 2. Account Rollups — from mapping structures
+      # 3. Account Rollups — from mapping structures
       mappings = (
         session.execute(
           select(Structure)
@@ -128,7 +143,7 @@ async def get_closing_book_structures(
           ClosingBookCategory(label="Account Rollups", items=rollup_items)
         )
 
-      # 3. Schedules — active schedule structures
+      # 4. Schedules — active schedule structures
       schedules = (
         session.execute(
           select(Structure)
@@ -154,7 +169,7 @@ async def get_closing_book_structures(
         ]
         categories.append(ClosingBookCategory(label="Schedules", items=schedule_items))
 
-      # 4. Trial Balance — always present if there are posted entries
+      # 5. Trial Balance — always present if there are posted entries
       has_posted = session.execute(
         text("SELECT EXISTS(SELECT 1 FROM entries WHERE status = 'posted')")
       ).scalar()
@@ -172,20 +187,6 @@ async def get_closing_book_structures(
             ],
           )
         )
-
-      # 5. Period Close — always present
-      categories.append(
-        ClosingBookCategory(
-          label="Period Close",
-          items=[
-            ClosingBookItem(
-              id="period_close",
-              name="Current Period Status",
-              item_type="period_close",
-            ),
-          ],
-        )
-      )
 
       return ClosingBookStructuresResponse(
         categories=categories,

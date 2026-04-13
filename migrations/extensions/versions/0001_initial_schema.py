@@ -325,7 +325,7 @@ def upgrade() -> None:
     ),
     sa.CheckConstraint(
       "source IN ('sfac6', 'us-gaap', 'ifrs', 'quickbooks', 'xero', "
-      "'plaid', 'native', 'import')",
+      "'plaid', 'native', 'import', 'system')",
       name="check_element_source",
     ),
     sa.ForeignKeyConstraint(["parent_id"], ["elements.id"]),

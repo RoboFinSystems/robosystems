@@ -127,6 +127,17 @@ def generate_report_facts(
   if closed_through is None:
     closed_through = _derive_closed_through_from_ledger(session, mapping_id)
 
+  # If the fiscal calendar declares "closed through X" but the ledger has
+  # NO actual RE postings backing that claim, the calendar is aspirational
+  # — a user set close state without posting real closing entries. Drop
+  # the marker so the synthetic close runs from inception and the balance
+  # sheet actually balances. This is the demo case: an evergreen seed
+  # with initialize_ledger(closed_through=...) but no historical close
+  # entries. Real tenants with posted closes (QB or roboledger) won't hit
+  # this branch because _derive_closed_through_from_ledger returns a date.
+  if closed_through is not None and not _ledger_has_re_postings(session, mapping_id):
+    closed_through = None
+
   for period in periods:
     balances = _read_mapped_balances(session, mapping_id, period.start, period.end)
     for balance in balances.values():
@@ -435,6 +446,37 @@ def _close_to_retained_earnings(
         period_type="instant",
       )
     )
+
+
+def _ledger_has_re_postings(
+  session: Session,
+  mapping_id: str,
+) -> bool:
+  """True if any posted line item flows (via the mapping) into Retained Earnings.
+
+  Used by `generate_report_facts` to detect aspirational-vs-real calendar
+  state: if the fiscal calendar says "closed through X" but the ledger has
+  no postings hitting RE, the calendar is unbacked and we fall back to
+  synthesizing prior-period net income from inception.
+  """
+  RETAINED_EARNINGS_ID = "elem_gaap_retained_earnings"
+  row = session.execute(
+    text("""
+      SELECT 1
+      FROM line_items li
+      JOIN entries e ON e.id = li.entry_id
+      JOIN associations mapping
+        ON mapping.from_element_id = li.element_id
+        AND mapping.association_type = 'mapping'
+        AND mapping.structure_id = :mapping_id
+      WHERE e.status = 'posted'
+        AND mapping.to_element_id = :re_id
+        AND (li.debit_amount > 0 OR li.credit_amount > 0)
+      LIMIT 1
+    """),
+    {"mapping_id": mapping_id, "re_id": RETAINED_EARNINGS_ID},
+  ).fetchone()
+  return row is not None
 
 
 def _derive_closed_through_from_ledger(
@@ -792,8 +834,8 @@ def _build_rows(
   2. Resolve calculation elements using the fully-populated computed dicts,
      then build the final row list in presentation order.
 
-  Abstract/parent nodes render as section headers with no dollar value.
-  Leaf nodes get values from the balance dict, or from calculation
+  Abstract/parent nodes render with the rollup sum of their children (not
+  zero). Leaf nodes get values from the balance dict, or from calculation
   associations for computed elements (Total Assets, Net Income, etc.).
   """
   n_periods = len(period_balances)
@@ -839,37 +881,25 @@ def _build_rows(
   rows: list[FactRow] = []
 
   def _emit(node: _HierarchyNode) -> None:
-    if node.children:
-      rows.append(
-        FactRow(
-          element_id=node.element_id,
-          element_qname=node.qname,
-          element_name=node.name,
-          classification=node.classification,
-          balance_type=node.balance_type,
-          values=[0.0] * n_periods,
-          is_subtotal=True,
-          depth=node.depth,
-        )
+    # Both subtotal (has children) and leaf rows read the precomputed
+    # value from `computed_per_period`. Pass 1 populated it with the
+    # rolled-up sum of all descendants for parent nodes, so subtotal
+    # rows get the correct aggregate instead of zeros.
+    vals = [computed_per_period[i].get(node.element_id, 0.0) for i in range(n_periods)]
+    rows.append(
+      FactRow(
+        element_id=node.element_id,
+        element_qname=node.qname,
+        element_name=node.name,
+        classification=node.classification,
+        balance_type=node.balance_type,
+        values=vals,
+        is_subtotal=bool(node.children),
+        depth=node.depth,
       )
-      for child in node.children:
-        _emit(child)
-    else:
-      vals = [
-        computed_per_period[i].get(node.element_id, 0.0) for i in range(n_periods)
-      ]
-      rows.append(
-        FactRow(
-          element_id=node.element_id,
-          element_qname=node.qname,
-          element_name=node.name,
-          classification=node.classification,
-          balance_type=node.balance_type,
-          values=vals,
-          is_subtotal=False,
-          depth=node.depth,
-        )
-      )
+    )
+    for child in node.children or []:
+      _emit(child)
 
   for root in hierarchy:
     _emit(root)

@@ -116,10 +116,11 @@ class TestBuildRows:
     rows = _build_rows(hierarchy, [balances], {})
 
     assert len(rows) == 3
-    # First row: section header (no value)
+    # First row: section header now rolls up its children (500.0),
+    # not zero. Abstract/parent rows show the sum of their descendants.
     assert rows[0].is_subtotal is True
     assert rows[0].element_name == "Revenues"
-    assert rows[0].values == [0.0]
+    assert rows[0].values == [500.0]
     # Children
     assert rows[1].element_name == "Product Revenue"
     assert rows[1].values == [300.0]
@@ -182,13 +183,13 @@ class TestBuildRows:
     rows = _build_rows(hierarchy, [balances], {})
 
     assert len(rows) == 4
-    # Root expenses header (no value)
+    # Root expenses header now rolls up (85k + 120k = 205k)
     assert rows[0].element_name == "Expenses"
-    assert rows[0].values == [0.0]
+    assert rows[0].values == [205000.0]
     assert rows[0].depth == 0
-    # Operating expenses header (no value)
+    # Operating expenses header rolls up its descendants too
     assert rows[1].element_name == "Operating Expenses"
-    assert rows[1].values == [0.0]
+    assert rows[1].values == [205000.0]
     assert rows[1].depth == 1
     # Leaves
     assert rows[2].element_name == "R&D"

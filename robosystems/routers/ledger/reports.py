@@ -419,7 +419,7 @@ async def get_statement(
   report_id: str = Path(..., description="Report definition ID"),
   structure_type: str = Path(
     ...,
-    description="Structure type: income_statement, balance_sheet, cash_flow_statement",
+    description="Structure type: income_statement, balance_sheet, equity_statement",
   ),
   current_user: User = Depends(get_current_user_with_graph),
   _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
