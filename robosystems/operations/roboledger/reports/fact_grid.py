@@ -92,7 +92,6 @@ def generate_report_facts(
   taxonomy_id: str,
   mapping_id: str,
   periods: list[PeriodSpec],
-  closed_through: date | None = None,
 ) -> ReportFacts:
   """Generate facts for all mapped elements across N periods.
 
@@ -104,42 +103,11 @@ def generate_report_facts(
       taxonomy_id: Taxonomy identifier (e.g., "tax_usgaap_reporting").
       mapping_id: Structure ID for the CoA→GAAP mapping.
       periods: Ordered list of period specifications.
-      closed_through: Last calendar day that has been real-closed in the
-          ledger (derived from FiscalCalendar.closed_through_period). When
-          set, the synthetic retained-earnings adjustments are bounded so
-          that periods ≤ closed_through are trusted as-is and cumulative
-          P&L is only computed for the range (closed_through, period_end].
-          This prevents double-counting prior earnings on books that
-          already carry a real RE balance.
 
   Returns:
       ReportFacts with all generated facts and metadata.
   """
   facts: list[ReportFact] = []
-
-  # Safety detection for ledgers without an initialized FiscalCalendar.
-  #
-  # Two mutually-exclusive paths depending on where `closed_through` comes from:
-  #
-  # 1. Not supplied by caller → derive from the ledger's latest RE posting.
-  #    If postings exist, the returned date is authoritative; if none, we
-  #    stay None and synthesize from inception. (QB opening-balance entries,
-  #    prior-year closes from other systems, etc. land here.)
-  #
-  # 2. Supplied by caller (from FiscalCalendar.closed_through_period) →
-  #    validate against the ledger. If the calendar says "closed through X"
-  #    but no real RE postings back that claim, the calendar is aspirational
-  #    (the demo case: `initialize_ledger(closed_through=...)` without any
-  #    actual closing entries). Drop the marker so the synthetic close runs
-  #    from inception and the balance sheet actually balances.
-  #
-  # The `elif` is intentional — we never need to re-check "has RE postings"
-  # on the derived path because `_derive_closed_through_from_ledger` already
-  # proved postings exist by returning a date.
-  if closed_through is None:
-    closed_through = _derive_closed_through_from_ledger(session, mapping_id)
-  elif not _ledger_has_re_postings(session, mapping_id):
-    closed_through = None
 
   for period in periods:
     balances = _read_mapped_balances(session, mapping_id, period.start, period.end)
@@ -158,27 +126,19 @@ def generate_report_facts(
         )
       )
 
-    # If the period is entirely within the closed range, trust the ledger's
-    # existing RE balance — real closing entries have already moved NI into
-    # equity and the cumulative query would double-count them.
-    if closed_through is not None and period.end <= closed_through:
-      continue
-
-    # Close temporary accounts into retained earnings per period
+    # Close the current period's temporary accounts (revenue/expense)
+    # into retained earnings. For periods where real closing entries
+    # have already zeroed the rev/exp accounts, this is a no-op (sum=0).
     _close_to_retained_earnings(facts, period.start, period.end)
 
-    # For balance sheet accuracy: close prior-period net income into RE.
-    # QB only formally closes to RE at year-end, so cumulative BS accounts
-    # are missing prior periods' net income. Compute cumulative IS for the
-    # un-closed window (from day after closed_through, or from inception
-    # when no marker is set) and add the difference to RE.
+    # For balance sheet accuracy: add cumulative prior-period net income
+    # to RE. This always runs from inception — real closing entries
+    # (from QB year-end closes, roboledger close_period, etc.) already
+    # zero out the rev/exp accounts they close, so cumulative rev - exp
+    # returns only the still-unclosed portion. Adding that to whatever
+    # RE balance the ledger already carries is always correct.
     _close_prior_periods_to_retained_earnings(
-      session,
-      mapping_id,
-      facts,
-      period.start,
-      period.end,
-      closed_through=closed_through,
+      session, mapping_id, facts, period.start, period.end
     )
 
   unmapped_count = _count_unmapped(session, mapping_id)
@@ -451,100 +411,40 @@ def _close_to_retained_earnings(
     )
 
 
-def _ledger_has_re_postings(
-  session: Session,
-  mapping_id: str,
-) -> bool:
-  """True if any posted line item flows (via the mapping) into Retained Earnings.
-
-  Used by `generate_report_facts` to detect aspirational-vs-real calendar
-  state: if the fiscal calendar says "closed through X" but the ledger has
-  no postings hitting RE, the calendar is unbacked and we fall back to
-  synthesizing prior-period net income from inception.
-  """
-  RETAINED_EARNINGS_ID = "elem_gaap_retained_earnings"
-  row = session.execute(
-    text("""
-      SELECT 1
-      FROM line_items li
-      JOIN entries e ON e.id = li.entry_id
-      JOIN associations mapping
-        ON mapping.from_element_id = li.element_id
-        AND mapping.association_type = 'mapping'
-        AND mapping.structure_id = :mapping_id
-      WHERE e.status = 'posted'
-        AND mapping.to_element_id = :re_id
-        AND (li.debit_amount > 0 OR li.credit_amount > 0)
-      LIMIT 1
-    """),
-    {"mapping_id": mapping_id, "re_id": RETAINED_EARNINGS_ID},
-  ).fetchone()
-  return row is not None
-
-
-def _derive_closed_through_from_ledger(
-  session: Session,
-  mapping_id: str,
-) -> date | None:
-  """Infer an effective closed_through date from real Retained Earnings postings.
-
-  When no FiscalCalendar exists, we still want to avoid double-counting
-  prior earnings on books that already carry a real RE balance. The
-  latest posting_date of any entry that flows (via the CoA→GAAP mapping)
-  into retained_earnings gives a safe lower bound — periods ≤ that date
-  are trusted as-is, while later periods still run the synthetic close
-  so current-period open balance sheets reflect fresh net income.
-
-  Returns None when the ledger has no real RE postings; callers should
-  fall back to the legacy "from inception" behavior in that case.
-  """
-  RETAINED_EARNINGS_ID = "elem_gaap_retained_earnings"
-  row = session.execute(
-    text("""
-      SELECT MAX(e.posting_date) AS last_re_posting
-      FROM line_items li
-      JOIN entries e ON e.id = li.entry_id
-      JOIN associations mapping
-        ON mapping.from_element_id = li.element_id
-        AND mapping.association_type = 'mapping'
-        AND mapping.structure_id = :mapping_id
-      WHERE e.status = 'posted'
-        AND mapping.to_element_id = :re_id
-        AND (li.debit_amount > 0 OR li.credit_amount > 0)
-    """),
-    {"mapping_id": mapping_id, "re_id": RETAINED_EARNINGS_ID},
-  ).fetchone()
-  return row.last_re_posting if row and row.last_re_posting else None
-
-
 def _close_prior_periods_to_retained_earnings(
   session: Session,
   mapping_id: str,
   facts: list[ReportFact],
   period_start: date,
   period_end: date,
-  closed_through: date | None = None,
 ) -> None:
-  """Close un-closed prior-period net income into retained earnings.
+  """Close un-closed cumulative net income into retained earnings.
 
-  Balance sheet accounts are loaded cumulatively, but the existing
-  _close_to_retained_earnings() only closes the current period's
-  revenue/expense. This function computes cumulative net income from
-  (day after closed_through) through period_end — or from inception
-  when no closed_through marker is provided — subtracts the current
-  period's net income (already closed), and adds the remainder to RE.
+  Balance sheet accounts are loaded cumulatively, but
+  `_close_to_retained_earnings` only closes the current period's
+  revenue/expense. This function computes cumulative net income **from
+  inception** through `period_end`, subtracts the current period's net
+  income (already closed by `_close_to_retained_earnings`), and adds
+  the remainder to retained earnings.
 
-  The `closed_through` lower bound is critical: without it, books that
-  already carry a real RE balance (e.g., a QuickBooks opening-balance
-  entry plus historical P&L transactions) would double-count all prior
-  earnings because the ledger's RE value already reflects them.
+  ## Why "from inception" is always correct
+
+  A real closing entry (QB year-end, roboledger `close_period`, etc.)
+  zeroes out the revenue/expense accounts it closes:
+
+      DR Revenue 100k
+      CR Expense  60k
+      CR RE       40k
+
+  After this entry, the revenue and expense accounts have net_balance=0,
+  so the `cumulative rev - exp` query returns only the **still-unclosed**
+  portion of P&L activity. Adding that to whatever RE the ledger already
+  carries (real closed amount + any manual adjustments) always produces
+  the right total on the balance sheet. There is no double-count risk.
   """
   RETAINED_EARNINGS_ID = "elem_gaap_retained_earnings"
 
-  # Compute cumulative net income for the un-closed window.
-  # If closed_through is set, lower bound is the day after it; otherwise
-  # start from inception (start_date IS NULL).
-  lower_bound = closed_through + timedelta(days=1) if closed_through else None
+  # Cumulative net income from inception through period_end.
   result = session.execute(
     text("""
       SELECT
@@ -562,14 +462,12 @@ def _close_prior_periods_to_retained_earnings(
       JOIN elements target ON target.id = mapping.to_element_id
       WHERE e.status = 'posted'
         AND e.posting_date <= :end_date
-        AND (:start_date IS NULL OR e.posting_date >= :start_date)
         AND target.classification IN ('revenue', 'expense')
       GROUP BY target.classification, target.balance_type
     """),
     {
       "mapping_id": mapping_id,
       "end_date": period_end,
-      "start_date": lower_bound,
     },
   )
 

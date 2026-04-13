@@ -291,23 +291,6 @@ For balance sheets, only instant-period facts are returned. For other statements
       logger.debug(f"Fiscal year start month lookup failed for {graph_id}: {e}")
     return 1
 
-  def _resolve_private_closed_through(self, session) -> date | None:
-    """Resolve the graph's closed_through date for the RE-adjustment lower bound."""
-    try:
-      from robosystems.models.extensions.roboledger.fiscal_calendar import (
-        FiscalCalendar,
-      )
-      from robosystems.operations.roboledger.fiscal_calendar import period_date_range
-
-      cal = session.query(FiscalCalendar).first()
-      if cal is None or not cal.closed_through_period:
-        return None
-      _, end = period_date_range(cal.closed_through_period)
-      return end
-    except Exception as e:
-      logger.debug(f"closed_through lookup failed: {e}")
-      return None
-
   def _is_shared_repository(self) -> bool:
     """Check whether the current graph is a shared repository (e.g., SEC).
 
@@ -398,16 +381,14 @@ For balance sheets, only instant-period facts are returned. For other statements
             "statement_type": statement_type,
           }
 
-        # Generate facts from OLTP. Bound the synthetic retained-earnings
-        # adjustment to (closed_through, period_end] so real RE balances
-        # aren't double-counted.
-        closed_through = self._resolve_private_closed_through(session)
+        # Generate facts from OLTP. The synthetic retained-earnings
+        # adjustment always runs from inception; it's safe because real
+        # closing entries zero out the rev/exp accounts they close.
         facts = generate_report_facts(
           session=session,
           taxonomy_id="tax_usgaap_reporting",
           mapping_id=mapping.id,
           periods=periods,
-          closed_through=closed_through,
         )
 
         # Render through the structure hierarchy
