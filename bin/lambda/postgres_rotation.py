@@ -18,6 +18,7 @@ from typing import Any
 
 import boto3
 import psycopg2
+from psycopg2 import sql
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
@@ -211,14 +212,16 @@ def set_secret(arn: str, token: str, environment: str) -> None:
     conn.autocommit = True
 
     with conn.cursor() as cursor:
-      # Use quote_ident equivalent for username and password
       username = pending_dict.get("POSTGRES_USER", "postgres")
       new_password = pending_dict["POSTGRES_PASSWORD"]
 
-      # PostgreSQL requires special handling for password changes
+      # Quote the identifier (user name) safely via psycopg2.sql.Identifier
+      # so a hostile username in the secret can't inject SQL.
       cursor.execute(
-        "ALTER USER %s WITH PASSWORD %s",
-        (psycopg2.extensions.AsIs(username), new_password),
+        sql.SQL("ALTER USER {username} WITH PASSWORD %s").format(
+          username=sql.Identifier(username)
+        ),
+        (new_password,),
       )
 
     logger.info(
@@ -268,7 +271,7 @@ def test_secret(arn: str, token: str, environment: str) -> None:
       cursor.fetchone()
 
     logger.info(
-      f"testSecret: Successfully tested secret for user {pending_dict.get('username', 'postgres')}"
+      f"testSecret: Successfully tested secret for user {pending_dict.get('POSTGRES_USER', 'postgres')}"
     )
 
   except Exception as e:
@@ -306,7 +309,11 @@ def finish_secret(arn: str, token: str) -> None:
     return
 
   if current_version is None:
-    logger.warning(f"finishSecret: No version with AWSCURRENT found for secret {arn}")
+    # Calling update_secret_version_stage with RemoveFromVersionId=None would
+    # raise a boto3 error AFTER the new password has already been set in the DB,
+    # leaving credentials half-rotated. Fail loudly instead so the rotation can
+    # be retried cleanly by Secrets Manager.
+    raise ValueError(f"finishSecret: No AWSCURRENT version found for secret {arn}")
 
   # Move AWSCURRENT to the new version
   secrets_client.update_secret_version_stage(

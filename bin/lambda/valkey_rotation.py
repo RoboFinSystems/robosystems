@@ -309,8 +309,12 @@ def finish_secret(secret_arn: str, token: str) -> None:
     return
 
   if current_version is None:
-    logger.warning(
-      f"finishSecret: No version with AWSCURRENT found for secret {secret_arn}"
+    # Calling update_secret_version_stage with RemoveFromVersionId=None would
+    # raise a boto3 error AFTER the new token has already been applied to
+    # ElastiCache, leaving the secret in a half-rotated state. Fail loudly
+    # instead so the rotation can be retried cleanly by Secrets Manager.
+    raise ValueError(
+      f"finishSecret: No AWSCURRENT version found for secret {secret_arn}"
     )
 
   # Move AWSCURRENT to the new version
