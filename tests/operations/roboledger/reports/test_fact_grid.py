@@ -3,11 +3,15 @@
 from __future__ import annotations
 
 from datetime import date
+from types import SimpleNamespace
+from unittest.mock import MagicMock
 
-from robosystems.operations.reports.fact_grid import (
+from robosystems.operations.roboledger.reports.fact_grid import (
   ReportFact,
   _Balance,
   _build_rows,
+  _close_prior_periods_to_retained_earnings,
+  _close_to_retained_earnings,
   _compute_prior_period,
   _facts_to_balance_dict,
   _HierarchyNode,
@@ -114,10 +118,11 @@ class TestBuildRows:
     rows = _build_rows(hierarchy, [balances], {})
 
     assert len(rows) == 3
-    # First row: section header (no value)
+    # First row: section header now rolls up its children (500.0),
+    # not zero. Abstract/parent rows show the sum of their descendants.
     assert rows[0].is_subtotal is True
     assert rows[0].element_name == "Revenues"
-    assert rows[0].values == [0.0]
+    assert rows[0].values == [500.0]
     # Children
     assert rows[1].element_name == "Product Revenue"
     assert rows[1].values == [300.0]
@@ -180,13 +185,13 @@ class TestBuildRows:
     rows = _build_rows(hierarchy, [balances], {})
 
     assert len(rows) == 4
-    # Root expenses header (no value)
+    # Root expenses header now rolls up (85k + 120k = 205k)
     assert rows[0].element_name == "Expenses"
-    assert rows[0].values == [0.0]
+    assert rows[0].values == [205000.0]
     assert rows[0].depth == 0
-    # Operating expenses header (no value)
+    # Operating expenses header rolls up its descendants too
     assert rows[1].element_name == "Operating Expenses"
-    assert rows[1].values == [0.0]
+    assert rows[1].values == [205000.0]
     assert rows[1].depth == 1
     # Leaves
     assert rows[2].element_name == "R&D"
@@ -525,3 +530,234 @@ class TestFactsToBalanceDict:
 
     result = _facts_to_balance_dict(facts, date(2025, 1, 1), date(2025, 3, 31))
     assert len(result) == 0
+
+
+# TestDeriveClosedThroughFromLedger removed — the helper it tested
+# (`_derive_closed_through_from_ledger`) was deleted along with
+# `_ledger_has_re_postings`. The synthetic retained-earnings close now
+# always runs from inception, because real closing entries zero out the
+# rev/exp accounts they close so the cumulative sum naturally returns
+# only the still-unclosed portion. See the module docstring of
+# `_close_prior_periods_to_retained_earnings` for the full argument.
+
+
+class TestClosePriorPeriodsToRetainedEarnings:
+  """Pins the retained-earnings math for the three data shapes the
+  private OLTP path can produce.
+
+  The SQL query itself is trivial (SUM aggregation); the risk surface
+  is the Python arithmetic that subtracts current-period NI from the
+  cumulative total and adds the remainder to retained earnings. These
+  tests mock `session.execute` with canned rows representing each
+  scenario and assert the resulting RE fact value.
+  """
+
+  MAPPING_ID = "struct_coa_mapping"
+  PERIOD_START = date(2026, 1, 1)
+  PERIOD_END = date(2026, 1, 31)
+
+  def _mock_session(self, revenue_cents: int, expense_cents: int) -> MagicMock:
+    """Mock an extensions_session that returns cumulative rev/exp rows.
+
+    Amounts are in cents (minor currency units) because that's what the
+    line_items table stores. `cents_to_dollars` converts during read.
+    """
+    rows = []
+    if revenue_cents:
+      rows.append(
+        SimpleNamespace(
+          classification="revenue",
+          balance_type="credit",
+          total_debits=0,
+          total_credits=revenue_cents,
+        )
+      )
+    if expense_cents:
+      rows.append(
+        SimpleNamespace(
+          classification="expense",
+          balance_type="debit",
+          total_debits=expense_cents,
+          total_credits=0,
+        )
+      )
+    session = MagicMock()
+    session.execute.return_value = iter(rows)
+    return session
+
+  def _current_period_facts(self, revenue: float, expense: float) -> list[ReportFact]:
+    """Build a minimal facts list for the current period after
+    `_close_to_retained_earnings` has already run.
+
+    Matches what `generate_report_facts` passes into
+    `_close_prior_periods_to_retained_earnings` — revenue and expense
+    facts for the current period plus the RE fact created by the
+    current-period close.
+    """
+    facts = [
+      ReportFact(
+        element_id="elem_gaap_revenues",
+        element_qname="us-gaap:Revenues",
+        element_name="Revenue",
+        classification="revenue",
+        balance_type="credit",
+        value=revenue,
+        period_start=self.PERIOD_START,
+        period_end=self.PERIOD_END,
+        period_type="duration",
+      ),
+      ReportFact(
+        element_id="elem_gaap_operating_expenses",
+        element_qname="us-gaap:OperatingExpenses",
+        element_name="Operating Expenses",
+        classification="expense",
+        balance_type="debit",
+        value=expense,
+        period_start=self.PERIOD_START,
+        period_end=self.PERIOD_END,
+        period_type="duration",
+      ),
+    ]
+    _close_to_retained_earnings(facts, self.PERIOD_START, self.PERIOD_END)
+    return facts
+
+  def _get_re_fact(self, facts: list[ReportFact]) -> ReportFact:
+    return next(f for f in facts if f.element_id == "elem_gaap_retained_earnings")
+
+  def test_qb_history_no_closes(self):
+    """QuickBooks shape: 12 months of history with no closing entries.
+
+    QB soft-closes — it never posts year-end journal entries. A 3-year
+    history means the cumulative rev/exp query returns everything from
+    inception, and RE must roll up all of that prior-period NI.
+
+    Scenario: 12 prior months at $10k rev / $6k exp = $4k NI each,
+    plus a current month at $10k rev / $6k exp = $4k NI.
+    Cumulative: 13 * $10k rev, 13 * $6k exp → cumulative NI = $52k.
+    Current period NI is $4k (already added to RE by
+    `_close_to_retained_earnings`), so prior-period NI = $48k rolled
+    into the existing RE fact. Final RE = $4k + $48k = $52k.
+    """
+    facts = self._current_period_facts(revenue=10_000.0, expense=6_000.0)
+    # Sanity check: current-period close set RE = $4k
+    assert self._get_re_fact(facts).value == 4_000.0
+
+    session = self._mock_session(
+      revenue_cents=13_000_000,  # 13 * $10k
+      expense_cents=7_800_000,  # 13 * $6k
+    )
+    _close_prior_periods_to_retained_earnings(
+      session, self.MAPPING_ID, facts, self.PERIOD_START, self.PERIOD_END
+    )
+
+    re = self._get_re_fact(facts)
+    assert re.value == 52_000.0, (
+      "RE should contain cumulative NI from inception; this is the "
+      "exact QB-history shape Risk 1 flagged as untested."
+    )
+
+  def test_post_real_close_is_noop(self):
+    """After a well-formed closing entry, cumulative rev/exp are zero.
+
+    Real closing entries (roboledger `close_period`, manual year-end
+    JEs) zero out the rev/exp accounts they close:
+        DR Revenue 100k / CR Expense 60k / CR RE 40k
+    After this, `SUM(debits) - SUM(credits)` on rev/exp accounts for
+    closed periods is zero, so the cumulative query returns only
+    still-unclosed activity. If *everything* is closed, the query
+    returns 0 rows or only the current period's activity.
+
+    Scenario: all prior periods real-closed (zeroed). Cumulative query
+    returns only the current month's $10k rev / $6k exp. Current NI =
+    prior_NI, so prior_NI = 0 and the function early-returns.
+    """
+    facts = self._current_period_facts(revenue=10_000.0, expense=6_000.0)
+    re_before = self._get_re_fact(facts).value
+
+    session = self._mock_session(
+      revenue_cents=1_000_000,  # current period only
+      expense_cents=600_000,
+    )
+    _close_prior_periods_to_retained_earnings(
+      session, self.MAPPING_ID, facts, self.PERIOD_START, self.PERIOD_END
+    )
+
+    assert self._get_re_fact(facts).value == re_before, (
+      "Real closing entries zero out rev/exp; cumulative NI equals "
+      "current NI so prior-period NI is zero — function must be a no-op."
+    )
+
+  def test_partial_close_rolls_only_unclosed(self):
+    """Only some periods are real-closed; unclosed ones roll into RE.
+
+    Scenario: 6 months were real-closed (zeroed out), 6 months plus
+    the current month are unclosed. Cumulative query returns the
+    7 months of unclosed activity: $70k rev, $42k exp → $28k NI.
+    Current month is $4k (already in RE). Prior periods to roll:
+    $28k - $4k = $24k.
+
+    This is the "mixed" scenario that the old
+    `_derive_closed_through_from_ledger` code path tried to handle
+    with a lower-bound filter on posting_date. The simpler "from
+    inception" approach gets the same answer naturally because the
+    closed periods contribute zero to the sum.
+    """
+    facts = self._current_period_facts(revenue=10_000.0, expense=6_000.0)
+
+    session = self._mock_session(
+      revenue_cents=7_000_000,  # 7 unclosed months at $10k
+      expense_cents=4_200_000,  # 7 unclosed months at $6k
+    )
+    _close_prior_periods_to_retained_earnings(
+      session, self.MAPPING_ID, facts, self.PERIOD_START, self.PERIOD_END
+    )
+
+    re = self._get_re_fact(facts)
+    assert re.value == 28_000.0, (
+      "Partial close: RE = current-period NI ($4k already posted) + "
+      "unclosed prior-period NI ($24k) = $28k total."
+    )
+
+  def test_creates_re_fact_when_none_exists(self):
+    """If the current period has no rev/exp activity, the current-period
+    close is a no-op and no RE fact is created. The prior-period close
+    must still create an RE fact from the cumulative query.
+    """
+    # No revenue/expense facts — current period is empty
+    facts: list[ReportFact] = []
+    _close_to_retained_earnings(facts, self.PERIOD_START, self.PERIOD_END)
+    assert facts == [], "No RE fact yet — current period had no activity"
+
+    session = self._mock_session(
+      revenue_cents=13_000_000,
+      expense_cents=7_800_000,
+    )
+    _close_prior_periods_to_retained_earnings(
+      session, self.MAPPING_ID, facts, self.PERIOD_START, self.PERIOD_END
+    )
+
+    re = self._get_re_fact(facts)
+    assert re.value == 52_000.0
+    assert re.period_start == self.PERIOD_START
+    assert re.period_end == self.PERIOD_END
+    assert re.period_type == "instant"
+    assert re.classification == "equity"
+
+  def test_loss_position_reduces_re(self):
+    """Cumulative expenses exceed revenue — prior-period NI is negative
+    and reduces RE. Verifies sign handling.
+    """
+    facts = self._current_period_facts(revenue=10_000.0, expense=6_000.0)
+
+    # 13 months total: $130k rev, $156k exp → cumulative NI = -$26k
+    # Current period NI = $4k, so prior_NI = -$30k
+    # RE = $4k + (-$30k) = -$26k
+    session = self._mock_session(
+      revenue_cents=13_000_000,
+      expense_cents=15_600_000,
+    )
+    _close_prior_periods_to_retained_earnings(
+      session, self.MAPPING_ID, facts, self.PERIOD_START, self.PERIOD_END
+    )
+
+    assert self._get_re_fact(facts).value == -26_000.0

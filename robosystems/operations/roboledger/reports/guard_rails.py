@@ -25,13 +25,16 @@ class ValidationResult:
 
 
 def validate_report(structure_type: str, rows: list[FactRow]) -> ValidationResult:
-  """Run structural and semantic validation for a rendered structure."""
+  """Run structural and semantic validation for a rendered structure.
+
+  Note: `cash_flow_statement` is intentionally not handled — the
+  roboledger renderer isn't implemented yet. When it is, re-wire the
+  `_validate_cash_flow` helper below.
+  """
   if structure_type == "income_statement":
     return _validate_income_statement(rows)
   elif structure_type == "balance_sheet":
     return _validate_balance_sheet(rows)
-  elif structure_type in ("cash_flow", "cash_flow_statement"):
-    return _validate_cash_flow(rows)
   return ValidationResult(checks=["no_validation_rules"])
 
 
@@ -106,7 +109,15 @@ def _validate_balance_sheet(rows: list[FactRow]) -> ValidationResult:
   return result
 
 
-def _validate_cash_flow(rows: list[FactRow]) -> ValidationResult:
+def _validate_cash_flow(  # pyright: ignore[reportUnusedFunction]
+  rows: list[FactRow],
+) -> ValidationResult:
+  """Cash flow validation — retained for when the renderer is implemented.
+
+  Currently unreferenced; `validate_report` does not dispatch to this
+  function. Wire it back into `validate_report` when the CF renderer
+  lands in fact_grid and drop the `reportUnusedFunction` ignore above.
+  """
   result = ValidationResult()
 
   _check_totals_foot(rows, result)

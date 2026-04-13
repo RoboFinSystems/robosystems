@@ -8,11 +8,9 @@ constraint compliance, and uniqueness before any SQL is executed.
 from robosystems.config.taxonomy.seed import (
   ALL_GAAP_ELEMENTS,
   BALANCE_SHEET_ELEMENTS,
-  CASH_FLOW_ELEMENTS,
   INCOME_STATEMENT_ELEMENTS,
   SFAC6_ELEMENTS,
   STRUCT_BS_ID,
-  STRUCT_CF_ID,
   STRUCT_IS_ID,
   STRUCTURES,
   TAXONOMY_ID,
@@ -180,37 +178,27 @@ class TestStatementElements:
     names = {e["name"] for e in BALANCE_SHEET_ELEMENTS}
     assert "Total Stockholders' Equity" in names
 
-  def test_cash_flow_has_operating(self):
-    names = {e["name"] for e in CASH_FLOW_ELEMENTS}
-    assert "Cash from Operating Activities" in names
-
-  def test_cash_flow_has_net_change(self):
-    names = {e["name"] for e in CASH_FLOW_ELEMENTS}
-    assert "Net Change in Cash" in names
-
   def test_no_overlap_between_statements(self):
     is_ids = {e["id"] for e in INCOME_STATEMENT_ELEMENTS}
     bs_ids = {e["id"] for e in BALANCE_SHEET_ELEMENTS}
-    cf_ids = {e["id"] for e in CASH_FLOW_ELEMENTS}
     assert not is_ids & bs_ids, "IS and BS overlap"
-    assert not is_ids & cf_ids, "IS and CF overlap"
-    assert not bs_ids & cf_ids, "BS and CF overlap"
 
   def test_all_gaap_is_union_of_statements(self):
     union = set()
-    for lst in [INCOME_STATEMENT_ELEMENTS, BALANCE_SHEET_ELEMENTS, CASH_FLOW_ELEMENTS]:
+    for lst in [INCOME_STATEMENT_ELEMENTS, BALANCE_SHEET_ELEMENTS]:
       union.update(e["id"] for e in lst)
     all_ids = {e["id"] for e in ALL_GAAP_ELEMENTS}
     assert union == all_ids
 
 
 class TestStructures:
-  def test_has_three_structures(self):
-    assert len(STRUCTURES) == 3
+  def test_has_two_structures(self):
+    # Cash Flow Statement is intentionally not seeded — see seed.py.
+    assert len(STRUCTURES) == 2
 
   def test_structure_types(self):
     types = {s["structure_type"] for s in STRUCTURES}
-    assert types == {"income_statement", "balance_sheet", "cash_flow_statement"}
+    assert types == {"income_statement", "balance_sheet"}
 
   def test_all_reference_taxonomy(self):
     for s in STRUCTURES:
@@ -219,7 +207,6 @@ class TestStructures:
   def test_structure_ids_are_stable(self):
     assert STRUCT_IS_ID == "struct_income_statement"
     assert STRUCT_BS_ID == "struct_balance_sheet"
-    assert STRUCT_CF_ID == "struct_cash_flow"
 
 
 class TestStructureAssignment:
@@ -232,11 +219,6 @@ class TestStructureAssignment:
     for e in BALANCE_SHEET_ELEMENTS:
       struct = _structure_for_element(e)
       assert struct == STRUCT_BS_ID, f"{e['name']} should be BS, got {struct}"
-
-  def test_cash_flow_elements_assigned_correctly(self):
-    for e in CASH_FLOW_ELEMENTS:
-      struct = _structure_for_element(e)
-      assert struct == STRUCT_CF_ID, f"{e['name']} should be CF, got {struct}"
 
 
 class TestAssociationGeneration:

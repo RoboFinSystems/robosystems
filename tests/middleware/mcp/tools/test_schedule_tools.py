@@ -23,7 +23,7 @@ def mock_graph_client():
   return client
 
 
-SVC_PATH = "robosystems.operations.schedules.ScheduleService"
+SVC_PATH = "robosystems.operations.roboledger.schedules.ScheduleService"
 SESSION_PATH = "robosystems.db.extensions.extensions_session"
 
 
@@ -215,7 +215,7 @@ class TestListScheduleStructuresTool:
 
   @pytest.mark.asyncio
   async def test_returns_schedules(self, mock_graph_client):
-    from robosystems.operations.schedules.service import ScheduleSummary
+    from robosystems.operations.roboledger.schedules.service import ScheduleSummary
 
     mock_session = MagicMock()
     mock_session.__enter__ = MagicMock(return_value=mock_session)
@@ -266,7 +266,7 @@ class TestGetScheduleFactsTool:
 
   @pytest.mark.asyncio
   async def test_returns_facts(self, mock_graph_client):
-    from robosystems.operations.schedules.service import ScheduleFact
+    from robosystems.operations.roboledger.schedules.service import ScheduleFact
 
     mock_session = MagicMock()
     mock_session.__enter__ = MagicMock(return_value=mock_session)
@@ -331,7 +331,7 @@ class TestGetPeriodCloseStatusTool:
 
   @pytest.mark.asyncio
   async def test_returns_status(self, mock_graph_client):
-    from robosystems.operations.schedules.service import (
+    from robosystems.operations.roboledger.schedules.service import (
       PeriodCloseItem,
       PeriodCloseStatus,
     )
@@ -376,7 +376,7 @@ class TestGetPeriodCloseStatusTool:
 
   @pytest.mark.asyncio
   async def test_includes_reversal_fields(self, mock_graph_client):
-    from robosystems.operations.schedules.service import (
+    from robosystems.operations.roboledger.schedules.service import (
       PeriodCloseItem,
       PeriodCloseStatus,
     )
@@ -440,7 +440,7 @@ class TestCreateClosingEntryTool:
 
   @pytest.mark.asyncio
   async def test_creates_entry(self, mock_graph_client):
-    from robosystems.operations.schedules.service import ClosingEntryResult
+    from robosystems.operations.roboledger.schedules.service import ClosingEntryResult
 
     mock_session = MagicMock()
     mock_session.__enter__ = MagicMock(return_value=mock_session)
@@ -448,6 +448,7 @@ class TestCreateClosingEntryTool:
 
     mock_svc = MagicMock()
     mock_svc.create_closing_entry.return_value = ClosingEntryResult(
+      outcome="created",
       entry_id="je_01ABC",
       status="draft",
       posting_date=date(2026, 1, 31),
@@ -478,7 +479,7 @@ class TestCreateClosingEntryTool:
 
   @pytest.mark.asyncio
   async def test_creates_entry_with_reversal(self, mock_graph_client):
-    from robosystems.operations.schedules.service import ClosingEntryResult
+    from robosystems.operations.roboledger.schedules.service import ClosingEntryResult
 
     mock_session = MagicMock()
     mock_session.__enter__ = MagicMock(return_value=mock_session)
@@ -486,6 +487,7 @@ class TestCreateClosingEntryTool:
 
     mock_svc = MagicMock()
     mock_svc.create_closing_entry.return_value = ClosingEntryResult(
+      outcome="created",
       entry_id="je_01ABC",
       status="draft",
       posting_date=date(2026, 1, 31),
@@ -494,6 +496,7 @@ class TestCreateClosingEntryTool:
       credit_element_id="elem_accrued",
       amount=3200.00,
       reversal=ClosingEntryResult(
+        outcome="created",
         entry_id="je_01DEF",
         status="draft",
         posting_date=date(2026, 2, 1),

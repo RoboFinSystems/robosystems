@@ -1,11 +1,21 @@
 """
-Get Financial Statement Tool — Returns structured financial data via FactSets.
+Get Financial Statement Tool — Returns structured financial data.
 
-Uses Structure → FactSet → Fact traversal (one-hop from FactSet) instead of
-the 6-hop taxonomy crawl. Requires that the graph has been enriched with
-Structure-level FactSets and canonical_type classification.
+Routing is determined by graph type, not by ticker presence:
+
+1. Shared repository (e.g., SEC): query the SEC graph via Structure → FactSet
+   → Fact traversal. Ticker is REQUIRED — it identifies which public company's
+   filings to pull.
+
+2. User graph with roboledger extension: generate the statement from the
+   current graph's OLTP ledger data, rendered through the same structure
+   hierarchy. Ticker is OPTIONAL — it's a universal entity symbol (like a
+   JIRA project key) used as a label, but routing is based on graph type.
 """
 
+from __future__ import annotations
+
+from datetime import date, timedelta
 from typing import Any
 
 from robosystems.logger import logger
@@ -31,25 +41,27 @@ class GetFinancialStatementTool(BaseTool):
   def get_tool_definition(self) -> dict[str, Any]:
     return {
       "name": "get-financial-statement",
-      "description": """Return a structured financial statement (income statement, balance sheet, etc.) for a company.
+      "description": """Return a structured financial statement (income statement, balance sheet, etc.) for the current graph.
+
+**ROUTING — determined by graph type, NOT by ticker:**
+
+1. **Shared repository (e.g., SEC)**: queries public filings for the given ticker.
+   Ticker is REQUIRED in this mode.
+
+2. **User graph with roboledger extension** (RoboLedger tenants): generates the
+   statement from the graph's OLTP ledger data using the CoA→GAAP mapping.
+   Ticker is OPTIONAL — in a user graph it's a symbol/label for the entity,
+   not a route selector. The data always comes from the current graph's books.
 
 **WHEN TO USE:**
-- When the user asks for a financial statement by name (e.g. "show me NVDA's income statement")
-- To get all line items for a specific statement type and company
-- When you need structured financial data without writing Cypher
+- In SEC shared repo: "show me NVDA's latest income statement"
+- In a RoboLedger user graph: "show me my income statement" or "show me this month's balance sheet"
 
 **STATEMENT TYPES:**
 - income_statement — Revenue, expenses, net income
 - balance_sheet — Assets, liabilities, equity (instant periods)
 - cash_flow_statement — Operating, investing, financing activities
 - equity_statement — Equity components and changes
-
-**AUTO-RESOLVE BEHAVIOR:**
-When no report_id is provided, the tool automatically finds the most recent
-relevant filing based on period_type:
-- annual → latest 10-K, 20-F, or 40-F
-- quarterly → latest 10-Q (or 10-K/20-F/40-F for international filers)
-- Use fiscal_year to target a specific year
 
 **RETURNS:**
 - Facts with element names, values, periods, and period types
@@ -64,7 +76,11 @@ For balance sheets, only instant-period facts are returned. For other statements
         "properties": {
           "ticker": {
             "type": "string",
-            "description": "Company ticker symbol (e.g. 'NVDA', 'AAPL')",
+            "description": (
+              "Company ticker symbol. REQUIRED in SEC shared repository "
+              "(e.g. 'NVDA'). OPTIONAL in RoboLedger user graphs — "
+              "informational label only; the data always comes from the current graph."
+            ),
           },
           "statement_type": {
             "type": "string",
@@ -95,13 +111,27 @@ For balance sheets, only instant-period facts are returned. For other statements
             ),
             "enum": ["annual", "quarterly", "instant"],
           },
+          "period_start": {
+            "type": "string",
+            "description": (
+              "Start date for private company reports (YYYY-MM-DD). "
+              "Defaults to first day of current month."
+            ),
+          },
+          "period_end": {
+            "type": "string",
+            "description": (
+              "End date for private company reports (YYYY-MM-DD). "
+              "Defaults to last day of current month."
+            ),
+          },
           "limit": {
             "type": "integer",
             "description": "Maximum number of facts to return (default: 50)",
             "default": 50,
           },
         },
-        "required": ["ticker", "statement_type"],
+        "required": ["statement_type"],
         "additionalProperties": False,
       },
     }
@@ -109,7 +139,7 @@ For balance sheets, only instant-period facts are returned. For other statements
   async def execute(self, arguments: dict[str, Any]) -> dict[str, Any]:
     self._log_tool_execution("get-financial-statement", arguments)
 
-    ticker = arguments.get("ticker", "").strip().upper()
+    ticker = (arguments.get("ticker", "") or "").strip().upper()
     statement_type = arguments.get("statement_type", "").strip()
     report_id = (
       arguments.get("report_id", "").strip() if arguments.get("report_id") else None
@@ -118,8 +148,6 @@ For balance sheets, only instant-period facts are returned. For other statements
     period_type = arguments.get("period_type")
     limit = max(1, min(int(arguments.get("limit", 50)), 1000))
 
-    if not ticker:
-      return {"error": "ticker is required"}
     if not statement_type:
       return {"error": "statement_type is required"}
     if statement_type not in VALID_STATEMENT_TYPES:
@@ -128,9 +156,297 @@ For balance sheets, only instant-period facts are returned. For other statements
         f"Valid types: {', '.join(VALID_STATEMENT_TYPES)}"
       }
 
-    return await self._get_statement(
-      ticker, statement_type, report_id, fiscal_year, period_type, limit
+    # Routing is determined by graph type, not by ticker presence.
+    #
+    # - Shared repository (e.g., SEC): query the SEC graph for filings.
+    #   Ticker is REQUIRED — it identifies which public company's filings
+    #   to return.
+    #
+    # - User graph (with roboledger extension): generate the statement from
+    #   the current graph's OLTP ledger data. Ticker is OPTIONAL — it's a
+    #   universal entity identifier (like a JIRA project key) used as a
+    #   label, but the data comes from the current graph regardless.
+    #
+    # The tool is only registered when roboledger extension is present, so
+    # we don't need to check for that. We only need to distinguish shared
+    # repos from user graphs.
+    if self._is_shared_repository():
+      if not ticker:
+        return {
+          "error": (
+            "ticker is required in the SEC shared repository. "
+            "Provide a ticker symbol (e.g. 'NVDA') to query public filings."
+          )
+        }
+      return await self._get_public_statement(
+        ticker, statement_type, report_id, fiscal_year, period_type, limit
+      )
+
+    # User graph with roboledger → OLTP path. Ticker (if provided) is
+    # informational only — we generate from the current graph's ledger.
+    #
+    # NOTE: cash_flow_statement is valid for SEC shared-repo queries (we
+    # parse it from XBRL filings) but NOT yet supported for the private
+    # OLTP path — the generator hasn't been built. Reject cleanly so the
+    # caller gets an actionable message instead of an empty statement.
+    if statement_type == "cash_flow_statement":
+      return {
+        "error": (
+          "cash_flow_statement is not yet supported for private company "
+          "ledgers. Only the SEC shared repository returns cash flow data. "
+          "Try income_statement, balance_sheet, or equity_statement for "
+          "roboledger books."
+        ),
+      }
+    period_start = arguments.get("period_start")
+    period_end = arguments.get("period_end")
+    return self._get_private_statement(
+      statement_type,
+      period_start,
+      period_end,
+      period_type=period_type,
+      fiscal_year=fiscal_year,
+      limit=limit,
     )
+
+  def _resolve_private_window(
+    self,
+    *,
+    period_start_str: str | None,
+    period_end_str: str | None,
+    period_type: str | None,
+    fiscal_year: int | None,
+    graph_id: str,
+  ) -> tuple[date, date]:
+    """Choose a reporting window for the private OLTP path.
+
+    Explicit period_start / period_end take priority. Otherwise:
+
+    - ``annual`` → fiscal year aligned to FiscalCalendar.fiscal_year_start_month
+      (falls back to January when no calendar exists). ``fiscal_year`` selects
+      which year; defaults to the year containing today.
+    - ``quarterly`` → current calendar quarter (3 months).
+    - anything else → current month (legacy default).
+    """
+    today = date.today()
+
+    if period_end_str or period_start_str:
+      if period_end_str:
+        period_end = date.fromisoformat(period_end_str)
+      else:
+        if today.month == 12:
+          period_end = date(today.year, 12, 31)
+        else:
+          period_end = date(today.year, today.month + 1, 1) - timedelta(days=1)
+      if period_start_str:
+        period_start = date.fromisoformat(period_start_str)
+      else:
+        period_start = period_end.replace(day=1)
+      return period_start, period_end
+
+    if period_type == "annual":
+      fy_start_month = self._fiscal_year_start_month(graph_id)
+      year = fiscal_year if fiscal_year is not None else today.year
+      period_start = date(year, fy_start_month, 1)
+      end_year = year if fy_start_month == 1 else year + 1
+      end_month = fy_start_month - 1 if fy_start_month > 1 else 12
+      if end_month == 12:
+        period_end = date(end_year, 12, 31)
+      else:
+        period_end = date(end_year, end_month + 1, 1) - timedelta(days=1)
+      return period_start, period_end
+
+    if period_type == "quarterly":
+      quarter = (today.month - 1) // 3
+      q_start_month = quarter * 3 + 1
+      period_start = date(today.year, q_start_month, 1)
+      q_end_month = q_start_month + 2
+      if q_end_month == 12:
+        period_end = date(today.year, 12, 31)
+      else:
+        period_end = date(today.year, q_end_month + 1, 1) - timedelta(days=1)
+      return period_start, period_end
+
+    # instant / None → current month
+    if today.month == 12:
+      period_end = date(today.year, 12, 31)
+    else:
+      period_end = date(today.year, today.month + 1, 1) - timedelta(days=1)
+    period_start = period_end.replace(day=1)
+    return period_start, period_end
+
+  def _fiscal_year_start_month(self, graph_id: str) -> int:
+    """Look up the graph's fiscal year start month, defaulting to January."""
+    try:
+      from robosystems.db.extensions import extensions_session
+      from robosystems.models.extensions.roboledger.fiscal_calendar import (
+        FiscalCalendar,
+      )
+
+      with extensions_session(graph_id) as session:
+        cal = session.query(FiscalCalendar).first()
+        if cal and cal.fiscal_year_start_month:
+          return int(cal.fiscal_year_start_month)
+    except Exception as e:
+      logger.debug(f"Fiscal year start month lookup failed for {graph_id}: {e}")
+    return 1
+
+  def _is_shared_repository(self) -> bool:
+    """Check whether the current graph is a shared repository (e.g., SEC).
+
+    Matches the logic in the MCP manager — uses the shared_repositories
+    config to distinguish managed SEC-style repos from per-user graphs.
+    """
+    try:
+      from robosystems.config.shared_repositories import (
+        is_shared_repository_or_subgraph,
+      )
+
+      return is_shared_repository_or_subgraph(self.client.graph_id)
+    except Exception as e:
+      logger.debug(f"Shared repository check failed for {self.client.graph_id}: {e}")
+      return False
+
+  # ── Private company path (OLTP) ──────────────────────────────────────────
+
+  def _get_private_statement(
+    self,
+    statement_type: str,
+    period_start_str: str | None,
+    period_end_str: str | None,
+    period_type: str | None = None,
+    fiscal_year: int | None = None,
+    limit: int = 50,
+  ) -> dict[str, Any]:
+    """Generate a financial statement from OLTP ledger data.
+
+    Creates a report on the fly using the CoA→GAAP mapping, renders
+    through the reporting structure hierarchy, and returns facts in the
+    same format as the public company graph query path.
+
+    `period_type` controls how the reporting window is chosen when explicit
+    start/end dates are not supplied:
+
+    - ``annual`` — fiscal year anchored on the graph's ``fiscal_year_start_month``
+      (from FiscalCalendar). ``fiscal_year`` selects which year; defaults to
+      the year containing today.
+    - ``quarterly`` — current calendar quarter + prior quarter.
+    - ``instant`` / unset — current month + prior month (the legacy default).
+
+    ``limit`` caps the number of fact rows returned, mirroring the public
+    company path.
+    """
+    from robosystems.db.extensions import extensions_session
+    from robosystems.models.extensions.roboledger import Structure
+    from robosystems.operations.roboledger.reports.fact_grid import (
+      PeriodSpec,
+      generate_report_facts,
+      render_structure_view,
+    )
+
+    graph_id = self.client.graph_id
+
+    # Resolve window: explicit dates win over period_type defaults.
+    period_start, period_end = self._resolve_private_window(
+      period_start_str=period_start_str,
+      period_end_str=period_end_str,
+      period_type=period_type,
+      fiscal_year=fiscal_year,
+      graph_id=graph_id,
+    )
+
+    # Build periods: current + prior of the same length
+    duration = (period_end - period_start).days + 1
+    prior_end = period_start - timedelta(days=1)
+    prior_start = prior_end - timedelta(days=duration - 1)
+
+    periods = [
+      PeriodSpec(start=period_start, end=period_end, label="Current"),
+      PeriodSpec(start=prior_start, end=prior_end, label="Prior"),
+    ]
+
+    try:
+      with extensions_session(graph_id) as session:
+        # Find the mapping structure (type is "coa_mapping")
+        mapping = (
+          session.query(Structure)
+          .filter(
+            Structure.structure_type == "coa_mapping",
+          )
+          .first()
+        )
+        if not mapping:
+          return {
+            "error": "No CoA→GAAP mapping found. Run the mapping workflow first.",
+            "statement_type": statement_type,
+          }
+
+        # Generate facts from OLTP. The synthetic retained-earnings
+        # adjustment always runs from inception; it's safe because real
+        # closing entries zero out the rev/exp accounts they close.
+        facts = generate_report_facts(
+          session=session,
+          taxonomy_id="tax_usgaap_reporting",
+          mapping_id=mapping.id,
+          periods=periods,
+        )
+
+        # Render through the structure hierarchy
+        grid = render_structure_view(
+          session=session,
+          facts=facts.facts,
+          structure_type=statement_type,
+          periods=periods,
+        )
+
+      # Format output to match the public company response shape
+      result: dict[str, Any] = {
+        "graph_id": graph_id,
+        "statement_type": statement_type,
+        "source": "oltp",
+        "periods": [
+          {"start": str(p.start), "end": str(p.end), "label": p.label} for p in periods
+        ],
+        "facts": [],
+        "fact_count": 0,
+        "unmapped_count": facts.unmapped_count,
+      }
+
+      for row in grid.rows:
+        if row.is_subtotal:
+          continue  # Skip abstract section headers
+        # Only include rows with at least one non-zero value
+        if any(v != 0.0 for v in row.values):
+          result["facts"].append(
+            {
+              "qname": row.element_qname,
+              "name": row.element_name,
+              "classification": row.classification,
+              "values": row.values,
+              "depth": row.depth,
+              "is_subtotal": row.is_subtotal,
+            }
+          )
+
+      # Cap at the caller's requested limit (mirrors public path)
+      if len(result["facts"]) > limit:
+        result["facts"] = result["facts"][:limit]
+        result["truncated"] = True
+      result["fact_count"] = len(result["facts"])
+
+      if not result["facts"]:
+        result["tip"] = (
+          f"No facts found for {statement_type}. "
+          "Check that ledger data is loaded and CoA→GAAP mappings are complete."
+        )
+
+      return result
+
+    except Exception as e:
+      logger.error(f"Private company statement generation failed: {e}", exc_info=True)
+      return {"error": f"Statement generation failed: {e}"}
+
+  # ── Public company path (graph) ──────────────────────────────────────────
 
   async def _resolve_report(
     self,
@@ -178,7 +494,7 @@ For balance sheets, only instant-period facts are returned. For other statements
     # includes annual forms.
     return None
 
-  async def _get_statement(
+  async def _get_public_statement(
     self,
     ticker: str,
     statement_type: str,

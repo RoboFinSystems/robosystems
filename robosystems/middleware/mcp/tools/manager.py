@@ -181,13 +181,28 @@ class GraphMCPTools:
     self.get_schedule_facts_tool = None
     self.get_period_close_status_tool = None
     self.create_closing_entry_tool = None
+    self.list_period_drafts_tool = None
+    self.truncate_schedule_tool = None
+    self.create_manual_closing_entry_tool = None
+    # Fiscal calendar tools (same gate as schedule tools)
+    self.get_fiscal_calendar_tool = None
+    self.close_period_tool = None
+    self.reopen_period_tool = None
     if self._has_extension("roboledger") and env.EXTENSIONS_ENABLED and not read_only:
+      from .fiscal_calendar_tools import (
+        ClosePeriodTool,
+        GetFiscalCalendarTool,
+        ReopenPeriodTool,
+      )
       from .schedule_tools import (
         CreateClosingEntryTool,
+        CreateManualClosingEntryTool,
         CreateScheduleTool,
         GetPeriodCloseStatusTool,
         GetScheduleFactsTool,
+        ListPeriodDraftsTool,
         ListScheduleStructuresTool,
+        TruncateScheduleTool,
       )
 
       self.create_schedule_tool = CreateScheduleTool(graph_client)
@@ -195,6 +210,12 @@ class GraphMCPTools:
       self.get_schedule_facts_tool = GetScheduleFactsTool(graph_client)
       self.get_period_close_status_tool = GetPeriodCloseStatusTool(graph_client)
       self.create_closing_entry_tool = CreateClosingEntryTool(graph_client)
+      self.list_period_drafts_tool = ListPeriodDraftsTool(graph_client)
+      self.truncate_schedule_tool = TruncateScheduleTool(graph_client)
+      self.create_manual_closing_entry_tool = CreateManualClosingEntryTool(graph_client)
+      self.get_fiscal_calendar_tool = GetFiscalCalendarTool(graph_client)
+      self.close_period_tool = ClosePeriodTool(graph_client)
+      self.reopen_period_tool = ReopenPeriodTool(graph_client)
 
     # Layer 2: Taxonomy mapping tools (gated by roboledger extension + EXTENSIONS_ENABLED)
     self.get_unmapped_elements_tool = None
@@ -375,6 +396,18 @@ class GraphMCPTools:
       tools.append(self.get_period_close_status_tool.get_tool_definition())
     if self.create_closing_entry_tool is not None:
       tools.append(self.create_closing_entry_tool.get_tool_definition())
+    if self.list_period_drafts_tool is not None:
+      tools.append(self.list_period_drafts_tool.get_tool_definition())
+    if self.truncate_schedule_tool is not None:
+      tools.append(self.truncate_schedule_tool.get_tool_definition())
+    if self.create_manual_closing_entry_tool is not None:
+      tools.append(self.create_manual_closing_entry_tool.get_tool_definition())
+    if self.get_fiscal_calendar_tool is not None:
+      tools.append(self.get_fiscal_calendar_tool.get_tool_definition())
+    if self.close_period_tool is not None:
+      tools.append(self.close_period_tool.get_tool_definition())
+    if self.reopen_period_tool is not None:
+      tools.append(self.reopen_period_tool.get_tool_definition())
     return tools
 
   def _get_taxonomy_tool_definitions(self) -> list[dict[str, Any]]:
@@ -682,6 +715,61 @@ class GraphMCPTools:
             "Requires roboledger extension and EXTENSIONS_ENABLED=true."
           )
         result = await self.create_closing_entry_tool.execute(arguments)
+        return result if return_raw else json.dumps(result, indent=2)
+
+      elif name == "list-period-drafts":
+        if self.list_period_drafts_tool is None:
+          raise ValueError(
+            "list-period-drafts tool is not available. "
+            "Requires roboledger extension and EXTENSIONS_ENABLED=true."
+          )
+        result = await self.list_period_drafts_tool.execute(arguments)
+        return result if return_raw else json.dumps(result, indent=2)
+
+      elif name == "truncate-schedule":
+        if self.truncate_schedule_tool is None:
+          raise ValueError(
+            "truncate-schedule tool is not available. "
+            "Requires roboledger extension and EXTENSIONS_ENABLED=true."
+          )
+        result = await self.truncate_schedule_tool.execute(arguments)
+        return result if return_raw else json.dumps(result, indent=2)
+
+      elif name == "create-manual-closing-entry":
+        if self.create_manual_closing_entry_tool is None:
+          raise ValueError(
+            "create-manual-closing-entry tool is not available. "
+            "Requires roboledger extension and EXTENSIONS_ENABLED=true."
+          )
+        result = await self.create_manual_closing_entry_tool.execute(arguments)
+        return result if return_raw else json.dumps(result, indent=2)
+
+      # Fiscal calendar tools
+      elif name == "get-fiscal-calendar":
+        if self.get_fiscal_calendar_tool is None:
+          raise ValueError(
+            "get-fiscal-calendar tool is not available. "
+            "Requires roboledger extension and EXTENSIONS_ENABLED=true."
+          )
+        result = await self.get_fiscal_calendar_tool.execute(arguments)
+        return result if return_raw else json.dumps(result, indent=2)
+
+      elif name == "close-period":
+        if self.close_period_tool is None:
+          raise ValueError(
+            "close-period tool is not available. "
+            "Requires roboledger extension and EXTENSIONS_ENABLED=true."
+          )
+        result = await self.close_period_tool.execute(arguments)
+        return result if return_raw else json.dumps(result, indent=2)
+
+      elif name == "reopen-period":
+        if self.reopen_period_tool is None:
+          raise ValueError(
+            "reopen-period tool is not available. "
+            "Requires roboledger extension and EXTENSIONS_ENABLED=true."
+          )
+        result = await self.reopen_period_tool.execute(arguments)
         return result if return_raw else json.dumps(result, indent=2)
 
       # Taxonomy mapping tools

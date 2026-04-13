@@ -6,6 +6,8 @@ from .account_rollups import router as account_rollups_router
 from .accounts import router as accounts_router
 from .closing_book import router as closing_book_router
 from .entity import router as entity_router
+from .fiscal_calendar import router as fiscal_calendar_router
+from .periods import router as periods_router
 from .publish_lists import router as publish_lists_router
 from .reports import router as reports_router
 from .schedules import router as schedules_router
@@ -26,3 +28,5 @@ router.include_router(schedules_router)
 router.include_router(publish_lists_router)
 router.include_router(account_rollups_router)
 router.include_router(closing_book_router)
+router.include_router(fiscal_calendar_router)
+router.include_router(periods_router)

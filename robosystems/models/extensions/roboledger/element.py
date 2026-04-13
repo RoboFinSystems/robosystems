@@ -65,8 +65,11 @@ class Element(ExtensionsBase):
       name="check_element_type",
     ),
     CheckConstraint(
+      # 'system' is reserved for internal FK-anchor elements created by the
+      # taxonomy seed (e.g., struct_balance_sheet) and is intentionally NOT
+      # in COA_SOURCES so those rows never appear in the Chart of Accounts.
       "source IN ('sfac6', 'us-gaap', 'ifrs', 'quickbooks', 'xero', "
-      "'plaid', 'native', 'import')",
+      "'plaid', 'native', 'import', 'system')",
       name="check_element_source",
     ),
   )

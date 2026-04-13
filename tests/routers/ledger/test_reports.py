@@ -63,7 +63,7 @@ def _make_report_def(**overrides):
 
 def _make_report_facts():
   """Create mock ReportFacts."""
-  from robosystems.operations.reports.fact_grid import (
+  from robosystems.operations.roboledger.reports.fact_grid import (
     PeriodSpec,
     ReportFact,
     ReportFacts,

@@ -423,12 +423,25 @@ class GraphCreationService:
     entity_identifier = f"entity_{graph_id}"
     entity_uri = entity_data.uri or f"https://robosystems.ai/entities#{graph_id}"
 
+    # Auto-generate ticker from entity name if not provided
+    ticker = getattr(entity_data, "ticker", None)
+    if not ticker:
+      import re
+
+      # Extract uppercase letters/first chars of words, max 6 chars
+      words = re.sub(r"[^a-zA-Z0-9\s]", "", entity_data.name).split()
+      if len(words) >= 2:
+        ticker = "".join(w[0].upper() for w in words if w)[:6]
+      else:
+        ticker = entity_data.name[:4].upper().replace(" ", "")
+
     with extensions_session(graph_id) as session:
       entity = LedgerEntity(
         id=entity_identifier,
         name=entity_data.name,
         legal_name=entity_data.name,
         uri=entity_uri,
+        ticker=ticker,
         cik=entity_data.cik,
         sic=entity_data.sic,
         sic_description=entity_data.sic_description,
@@ -453,6 +466,7 @@ class GraphCreationService:
       "id": entity_identifier,
       "name": entity_data.name,
       "uri": entity_uri,
+      "ticker": ticker,
       "database": graph_id,
     }
 

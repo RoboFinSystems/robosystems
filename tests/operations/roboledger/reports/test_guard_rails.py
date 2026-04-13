@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from robosystems.operations.reports.fact_grid import FactRow
-from robosystems.operations.reports.guard_rails import validate_report
+from robosystems.operations.roboledger.reports.fact_grid import FactRow
+from robosystems.operations.roboledger.reports.guard_rails import validate_report
 
 
 def _row(

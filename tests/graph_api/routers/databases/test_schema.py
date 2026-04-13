@@ -1,5 +1,7 @@
 """Tests for database schema router endpoints."""
 
+import tempfile
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -47,11 +49,18 @@ class FakeConnectionManager:
 
 
 class FakeDBManager:
-  """Fake database manager for testing."""
+  """Fake database manager for testing.
+
+  Creates a temp directory as `base_path` and touches an empty `.lbug` file
+  for each database name so the production `db_path.exists()` check passes.
+  """
 
   def __init__(self, databases=None, connection=None):
     self._databases = databases or []
     self._connection = connection
+    self.base_path = Path(tempfile.mkdtemp(prefix="fake_lbug_"))
+    for db in self._databases:
+      (self.base_path / f"{db}.lbug").touch()
 
   def list_databases(self):
     return list(self._databases)

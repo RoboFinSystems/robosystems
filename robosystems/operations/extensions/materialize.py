@@ -285,7 +285,7 @@ def _staging_sql(graph_id: str, entity_id: str, connstr: str) -> dict[str, str]:
       1.0::DOUBLE                     AS canonical_confidence,
       NULL::FLOAT[384]                AS embedding
     UNION ALL
-    -- Seed reporting structures (income_statement, balance_sheet, cash_flow)
+    -- Seed reporting structures (income_statement, balance_sheet)
     SELECT
       id                              AS identifier,
       NULL::VARCHAR                   AS uri,

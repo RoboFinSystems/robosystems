@@ -107,7 +107,7 @@ class TestCreateSchedule:
 class TestListSchedules:
   @pytest.mark.asyncio
   async def test_lists_schedules(self):
-    from robosystems.operations.schedules.service import ScheduleSummary
+    from robosystems.operations.roboledger.schedules.service import ScheduleSummary
 
     mock_svc = MagicMock()
     mock_svc.list_schedules.return_value = [
@@ -144,7 +144,7 @@ class TestListSchedules:
 class TestGetScheduleFacts:
   @pytest.mark.asyncio
   async def test_returns_facts(self):
-    from robosystems.operations.schedules.service import ScheduleFact
+    from robosystems.operations.roboledger.schedules.service import ScheduleFact
 
     mock_svc = MagicMock()
     mock_svc.get_schedule_facts.return_value = [
@@ -205,7 +205,7 @@ class TestGetScheduleFacts:
 class TestGetPeriodCloseStatus:
   @pytest.mark.asyncio
   async def test_returns_status(self):
-    from robosystems.operations.schedules.service import (
+    from robosystems.operations.roboledger.schedules.service import (
       PeriodCloseItem,
       PeriodCloseStatus,
     )
@@ -252,10 +252,11 @@ class TestGetPeriodCloseStatus:
 class TestCreateClosingEntry:
   @pytest.mark.asyncio
   async def test_creates_entry(self):
-    from robosystems.operations.schedules.service import ClosingEntryResult
+    from robosystems.operations.roboledger.schedules.service import ClosingEntryResult
 
     mock_svc = MagicMock()
     mock_svc.create_closing_entry.return_value = ClosingEntryResult(
+      outcome="created",
       entry_id="je_01ABC",
       status="draft",
       posting_date=date(2026, 1, 31),

@@ -11,11 +11,12 @@ and MCP tools.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date
+from datetime import UTC, date, datetime
 
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from robosystems.logger import logger
 from robosystems.models.extensions.roboledger import (
   Association,
   Entry,
@@ -102,15 +103,35 @@ class PeriodCloseStatus:
 
 @dataclass
 class ClosingEntryResult:
-  """Result of creating a closing entry from a schedule."""
+  """Result of a create_closing_entry call.
 
-  entry_id: str
-  status: str
-  posting_date: date
-  memo: str
-  debit_element_id: str
-  credit_element_id: str
-  amount: float  # dollars
+  The `outcome` field describes what the call did:
+
+  - **created**: no prior draft existed and a fact exists → new draft created
+  - **unchanged**: prior draft exists and still matches the current schedule
+    fact → no-op, returning the existing entry unchanged
+  - **regenerated**: prior draft exists but is stale (amount or template
+    changed on the schedule) → prior deleted, fresh draft created
+  - **removed**: prior draft exists but schedule no longer produces an
+    in-scope fact for this period (e.g., schedule truncated) → prior deleted,
+    no new draft, `entry_id` is None
+  - **skipped**: no prior draft, no in-scope fact for this period → nothing
+    to do, `entry_id` is None
+
+  Entry metadata fields (entry_id, status, amount, etc.) are populated
+  when `outcome` is created/unchanged/regenerated; they are None when
+  `outcome` is removed/skipped.
+  """
+
+  outcome: str  # created | unchanged | regenerated | removed | skipped
+  entry_id: str | None = None
+  status: str | None = None
+  posting_date: date | None = None
+  memo: str | None = None
+  debit_element_id: str | None = None
+  credit_element_id: str | None = None
+  amount: float | None = None  # dollars
+  reason: str | None = None
   reversal: ClosingEntryResult | None = None
 
 
@@ -138,6 +159,7 @@ class ScheduleService:
     entry_template: EntryTemplate,
     schedule_metadata: ScheduleMetadata | None = None,
     created_by: str,
+    closed_through: date | None = None,
   ) -> Structure:
     """Create a schedule with pre-generated facts.
 
@@ -158,6 +180,12 @@ class ScheduleService:
         entry_template: Template for generating closing entries.
         schedule_metadata: Informational metadata about the schedule.
         created_by: User ID.
+        closed_through: If provided, facts with period_end ≤ this date are
+            tagged `fact_scope='historical'` (already reflected in opening
+            balances, ignored by the close workflow). Facts with period_end
+            > closed_through are tagged `in_scope`. None means all facts
+            are in_scope — backward compatible with callers that haven't
+            adopted the fiscal calendar yet.
 
     Returns:
         The created Structure.
@@ -221,6 +249,12 @@ class ScheduleService:
     for p_start, p_end in periods:
       accumulated = round(accumulated + amount_dollars, 2)
 
+      # Scope: facts in periods already closed are historical (not acted on
+      # by the close workflow). Only periods > closed_through are in_scope.
+      fact_scope = (
+        "historical" if closed_through and p_end <= closed_through else "in_scope"
+      )
+
       # Fact for the periodic amount (expense/amortization)
       session.add(
         Fact(
@@ -233,6 +267,7 @@ class ScheduleService:
           entity_id=entity_id,
           structure_id=structure.id,
           fact_set_id=fact_set_id,
+          fact_scope=fact_scope,
         )
       )
 
@@ -248,6 +283,7 @@ class ScheduleService:
           entity_id=entity_id,
           structure_id=structure.id,
           fact_set_id=fact_set_id,
+          fact_scope=fact_scope,
         )
       )
 
@@ -265,6 +301,7 @@ class ScheduleService:
             entity_id=entity_id,
             structure_id=structure.id,
             fact_set_id=fact_set_id,
+            fact_scope=fact_scope,
           )
         )
 
@@ -339,6 +376,7 @@ class ScheduleService:
         FROM facts f
         JOIN elements e ON e.id = f.element_id
         WHERE f.structure_id = :structure_id
+          AND f.fact_scope = 'in_scope'
           {period_filter}
         ORDER BY f.period_start, f.period_end, e.name
       """),
@@ -406,6 +444,7 @@ class ScheduleService:
           AND f.period_start >= :period_start
           AND f.period_end <= :period_end
           AND f.element_id = (s.metadata->'entry_template'->>'debit_element_id')
+          AND f.fact_scope = 'in_scope'
         LEFT JOIN best_entry be ON be.source_structure_id = s.id
         LEFT JOIN reversal r ON r.reversal_of = be.entry_id
         WHERE s.structure_type = 'schedule'
@@ -473,15 +512,30 @@ class ScheduleService:
     created_by: str,
     memo: str | None = None,
   ) -> ClosingEntryResult:
-    """Create a draft closing entry from a schedule's facts for a period.
+    """Idempotently create (or refresh) a draft closing entry from a schedule.
 
-    Reads the structure's entry template metadata, finds the fact for
-    the debit element in the specified period, and creates a balanced
-    draft entry.
+    This method is safe to call repeatedly — it reconciles the draft state
+    with the current schedule, regenerating or removing the draft when the
+    schedule has been edited since the prior call.
+
+    Five outcomes:
+
+    - **created** — no prior draft, fact exists → new draft created
+    - **unchanged** — prior draft matches current schedule fact → no-op
+    - **regenerated** — prior draft is stale (schedule amount or template
+      changed) → old deleted, fresh draft created
+    - **removed** — prior draft exists but schedule no longer produces an
+      in-scope fact for this period → old deleted, nothing created
+    - **skipped** — no prior draft, no in-scope fact → nothing to do
+
+    The `ValueError` path is reserved for invalid inputs (structure not
+    found, no entry template). Stale or non-existent drafts produce
+    structured outcomes, not errors.
 
     Raises:
-        ValueError: If schedule not found, no template, no fact, or
-            entry already exists for this structure+period.
+        ValueError: If the structure is not found or has no entry template.
+            Also raised if the existing entry for this period has already
+            been posted (cannot regenerate a posted entry — use reopen flow).
     """
     # Load structure with entry template
     structure = session.get(Structure, structure_id)
@@ -495,13 +549,15 @@ class ScheduleService:
     debit_element_id = template["debit_element_id"]
     credit_element_id = template["credit_element_id"]
 
-    # Check for existing entry (idempotent guard)
-    existing = session.execute(
+    # ── Look up the existing entry (if any) for this structure + period ──
+    existing_row = session.execute(
       text("""
-        SELECT id FROM entries
+        SELECT id, status
+        FROM entries
         WHERE source_structure_id = :structure_id
           AND posting_date >= :period_start
           AND posting_date <= :period_end
+        ORDER BY created_at DESC
         LIMIT 1
       """),
       {
@@ -511,13 +567,15 @@ class ScheduleService:
       },
     ).fetchone()
 
-    if existing:
+    existing_entry_id: str | None = existing_row.id if existing_row else None
+    if existing_row and existing_row.status == "posted":
       raise ValueError(
-        f"Entry already exists for schedule '{structure_id}' "
-        f"in period {period_start} to {period_end}"
+        f"Closing entry for schedule '{structure_id}' in period "
+        f"{period_start} to {period_end} has already been posted. "
+        "Use the reopen flow to modify it."
       )
 
-    # Find the debit fact for this period
+    # ── Find the current in_scope fact for this period ──
     fact_row = session.execute(
       text("""
         SELECT value FROM facts
@@ -525,6 +583,7 @@ class ScheduleService:
           AND element_id = :element_id
           AND period_start >= :period_start
           AND period_end <= :period_end
+          AND fact_scope = 'in_scope'
         LIMIT 1
       """),
       {
@@ -535,18 +594,77 @@ class ScheduleService:
       },
     ).fetchone()
 
+    # ── Cases where no fact exists ──
     if not fact_row:
-      raise ValueError(
-        f"No fact found for element '{debit_element_id}' "
-        f"in period {period_start} to {period_end}"
+      if existing_entry_id:
+        # Schedule no longer covers this period — remove the stale draft
+        self._delete_draft_entry(session, existing_entry_id)
+        return ClosingEntryResult(
+          outcome="removed",
+          reason=(
+            "Schedule no longer produces an in-scope fact for this period. "
+            "The stale draft has been deleted."
+          ),
+        )
+      return ClosingEntryResult(
+        outcome="skipped",
+        reason=f"No in-scope fact for element '{debit_element_id}' in this period.",
       )
 
     amount_dollars = fact_row.value
     amount_cents = round(amount_dollars * 100)
 
-    # Build memo
+    # Build the memo first so we can detect memo staleness too.
     memo_template = template.get("memo_template", "")
     entry_memo = memo or memo_template.replace("{structure_name}", structure.name)
+
+    # ── Cases where an existing draft exists ──
+    if existing_entry_id:
+      # Load current line items + memo for staleness comparison
+      current = session.execute(
+        text("""
+          SELECT
+            e.memo            AS memo,
+            li_dr.element_id  AS dr_element,
+            li_dr.debit_amount AS dr_amount,
+            li_cr.element_id  AS cr_element,
+            li_cr.credit_amount AS cr_amount
+          FROM entries e
+          LEFT JOIN line_items li_dr ON li_dr.entry_id = e.id AND li_dr.debit_amount > 0
+          LEFT JOIN line_items li_cr ON li_cr.entry_id = e.id AND li_cr.credit_amount > 0
+          WHERE e.id = :entry_id
+          LIMIT 1
+        """),
+        {"entry_id": existing_entry_id},
+      ).fetchone()
+
+      is_stale = (
+        current is None
+        or current.dr_element != debit_element_id
+        or current.cr_element != credit_element_id
+        or int(current.dr_amount or 0) != amount_cents
+        or int(current.cr_amount or 0) != amount_cents
+        or (current.memo or "") != (entry_memo or "")
+      )
+
+      if not is_stale:
+        # Unchanged — return existing draft without touching the DB
+        return ClosingEntryResult(
+          outcome="unchanged",
+          entry_id=existing_entry_id,
+          status="draft",
+          posting_date=posting_date,
+          memo=current.memo,
+          debit_element_id=debit_element_id,
+          credit_element_id=credit_element_id,
+          amount=amount_dollars,
+        )
+
+      # Stale — delete and fall through to create fresh
+      self._delete_draft_entry(session, existing_entry_id)
+      regenerated = True
+    else:
+      regenerated = False
 
     # Create draft entry
     entry = Entry(
@@ -628,6 +746,7 @@ class ScheduleService:
       session.flush()
 
       reversal_result = ClosingEntryResult(
+        outcome="created",
         entry_id=reversal_entry.id,
         status="draft",
         posting_date=reversal_date,
@@ -638,6 +757,7 @@ class ScheduleService:
       )
 
     return ClosingEntryResult(
+      outcome="regenerated" if regenerated else "created",
       entry_id=entry.id,
       status="draft",
       posting_date=posting_date,
@@ -647,6 +767,374 @@ class ScheduleService:
       amount=amount_dollars,
       reversal=reversal_result,
     )
+
+  def create_manual_closing_entry(
+    self,
+    session: Session,
+    *,
+    posting_date: date,
+    line_items: list[dict],
+    memo: str,
+    created_by: str,
+    entry_type: str = "closing",
+  ) -> ClosingEntryResult:
+    """Create a manual (non-schedule) draft closing entry.
+
+    Used for one-off adjustments that aren't derived from a schedule:
+    asset disposals, impairments, reclassifications, correcting entries.
+
+    The resulting entry has:
+    - `source_structure_id = None` (not tied to any schedule)
+    - `provenance = 'manual_entry'`
+    - `status = 'draft'` (posted by close-period like any other draft)
+
+    Unlike schedule-derived entries which have exactly 2 line items (DR/CR
+    from the template), manual entries can have any number of line items as
+    long as total_debit == total_credit. This supports 4-sided disposal
+    entries (DR Cash, DR Accum Depr, CR Asset, CR Gain).
+
+    Args:
+        posting_date: Date the entry is posted on.
+        line_items: List of dicts with keys:
+            - element_id (required)
+            - debit_amount (cents, default 0)
+            - credit_amount (cents, default 0)
+            - description (optional)
+            Exactly one of debit_amount/credit_amount must be > 0 per line.
+        memo: Required free-form memo. Usually cites the business event.
+        created_by: User ID.
+        entry_type: Defaults to 'closing'. Other valid values: 'adjusting',
+            'standard'.
+
+    Returns:
+        ClosingEntryResult with outcome='created'.
+
+    Raises:
+        ValueError: If line_items is empty, doesn't balance, has invalid
+            debit/credit combinations, or memo is empty.
+    """
+    if not memo or not memo.strip():
+      raise ValueError("Manual entry requires a non-empty memo")
+    if not line_items:
+      raise ValueError("Manual entry requires at least one line item")
+
+    # Normalize + validate each line
+    total_debit = 0
+    total_credit = 0
+    normalized: list[dict] = []
+    for i, li in enumerate(line_items):
+      if "element_id" not in li or not li["element_id"]:
+        raise ValueError(f"Line item {i}: missing element_id")
+      debit = int(li.get("debit_amount") or 0)
+      credit = int(li.get("credit_amount") or 0)
+      if debit < 0 or credit < 0:
+        raise ValueError(f"Line item {i}: amounts must be non-negative")
+      if debit == 0 and credit == 0:
+        raise ValueError(f"Line item {i}: must have a non-zero debit or credit amount")
+      if debit > 0 and credit > 0:
+        raise ValueError(f"Line item {i}: cannot have both debit and credit amounts")
+      total_debit += debit
+      total_credit += credit
+      normalized.append(
+        {
+          "element_id": li["element_id"],
+          "debit_amount": debit,
+          "credit_amount": credit,
+          "description": li.get("description"),
+        }
+      )
+
+    if total_debit != total_credit:
+      raise ValueError(
+        f"Manual entry does not balance: "
+        f"total_debit={total_debit} total_credit={total_credit}"
+      )
+
+    # Reject drafts with posting_date in an already-closed fiscal period.
+    # Without this check, the draft would be inserted but close-period would
+    # later refuse to transition it to posted (period is closed), leaving an
+    # orphaned draft inside a locked month. To make an adjustment to a closed
+    # period, the caller must reopen it first.
+    self._assert_period_not_closed(session, posting_date)
+
+    # Create the draft entry
+    entry = Entry(
+      type=entry_type,
+      status="draft",
+      posting_date=posting_date,
+      memo=memo,
+      source_structure_id=None,
+      provenance="manual_entry",
+      created_by=created_by,
+    )
+    session.add(entry)
+    session.flush()
+
+    for order, li in enumerate(normalized, 1):
+      session.add(
+        LineItem(
+          entry_id=entry.id,
+          element_id=li["element_id"],
+          debit_amount=li["debit_amount"],
+          credit_amount=li["credit_amount"],
+          description=li["description"],
+          line_order=order,
+        )
+      )
+    session.flush()
+
+    # For the result, report the first DR/CR element as a summary signal.
+    # The caller has full line items on hand so they don't need to re-inspect.
+    first_debit = next(
+      (li["element_id"] for li in normalized if li["debit_amount"] > 0), None
+    )
+    first_credit = next(
+      (li["element_id"] for li in normalized if li["credit_amount"] > 0), None
+    )
+
+    logger.info(
+      f"Created manual closing entry {entry.id} "
+      f"with {len(normalized)} line items, total={total_debit}"
+    )
+    return ClosingEntryResult(
+      outcome="created",
+      entry_id=entry.id,
+      status="draft",
+      posting_date=posting_date,
+      memo=memo,
+      debit_element_id=first_debit,
+      credit_element_id=first_credit,
+      amount=round(total_debit / 100.0, 2),
+    )
+
+  def truncate_schedule(
+    self,
+    session: Session,
+    *,
+    structure_id: str,
+    new_end_date: date,
+    reason: str,
+    updated_by: str,
+  ) -> dict:
+    """End a schedule early — delete facts with period_start > new_end_date.
+
+    Used for events that cut a schedule's lifespan short: an asset is sold,
+    a prepaid is cancelled, a contract is terminated. The schedule stays
+    (preserving its audit trail and remaining in-scope facts), but all facts
+    after the new end date are hard-deleted so they never produce future
+    closing entries.
+
+    Historical facts (periods ≤ closed_through) are unaffected — they
+    remain as the record of what was recognized before the truncation.
+
+    Args:
+        structure_id: The schedule to truncate.
+        new_end_date: Last date covered by the schedule. Facts with
+            period_start > this date are deleted. Cannot be earlier than
+            the schedule's earliest existing fact (that would be a delete,
+            not a truncate).
+        reason: Required — captured in metadata for audit.
+        updated_by: User ID.
+
+    Returns:
+        Dict with `facts_deleted`, `new_end_date`, `reason`.
+
+    Raises:
+        ValueError: If structure not found or not a schedule, or if
+            new_end_date is earlier than the schedule's first fact, or if
+            any matching fact is linked to a posted entry.
+    """
+    if not reason or not reason.strip():
+      raise ValueError("truncate_schedule requires a non-empty reason")
+
+    # new_end_date must be the last day of its month. Schedule facts are
+    # stored as full-month rows (period_start is day 1, period_end is the
+    # last day). A mid-month end (e.g., 2026-03-15) would leave March's
+    # fact in place because period_start=2026-03-01 is NOT > 2026-03-15,
+    # meaning full-month depreciation still draws for a partial month. If
+    # the user needs to split March, they should truncate to 2026-02-28
+    # (drop March entirely) or 2026-03-31 (keep full March) — and book a
+    # prorated manual adjustment for any difference.
+    from calendar import monthrange
+
+    last_day = monthrange(new_end_date.year, new_end_date.month)[1]
+    if new_end_date.day != last_day:
+      raise ValueError(
+        f"new_end_date ({new_end_date}) must be the last day of the month "
+        f"({new_end_date.year:04d}-{new_end_date.month:02d}-{last_day:02d}). "
+        "Schedule facts are whole-month; mid-month truncation is ambiguous. "
+        "Use the prior month-end to drop the period entirely, or this "
+        "month-end to keep the full-month recognition, and book any "
+        "prorated difference as a manual closing entry."
+      )
+
+    structure = session.get(Structure, structure_id)
+    if not structure or structure.structure_type != "schedule":
+      raise ValueError(f"Schedule structure '{structure_id}' not found")
+
+    # Check there are any facts, and that new_end_date is within range
+    bounds = session.execute(
+      text("""
+        SELECT
+          MIN(period_start) AS first_start,
+          MAX(period_end)   AS last_end
+        FROM facts
+        WHERE structure_id = :sid
+      """),
+      {"sid": structure_id},
+    ).fetchone()
+
+    if bounds is None or bounds.first_start is None:
+      raise ValueError(f"Schedule '{structure_id}' has no facts; nothing to truncate")
+
+    if new_end_date < bounds.first_start:
+      raise ValueError(
+        f"new_end_date ({new_end_date}) is before the schedule's earliest "
+        f"fact ({bounds.first_start}). Deactivate the schedule instead."
+      )
+
+    # Refuse to delete facts whose period overlaps a posted (non-draft) entry.
+    # A posted entry carries the record of that period's recognition — truncating
+    # underneath it would orphan the audit trail.
+    overlap = session.execute(
+      text("""
+        SELECT COUNT(*) AS c
+        FROM entries
+        WHERE source_structure_id = :sid
+          AND status = 'posted'
+          AND posting_date > :new_end
+      """),
+      {"sid": structure_id, "new_end": new_end_date},
+    ).fetchone()
+    if overlap and overlap.c:
+      raise ValueError(
+        f"Cannot truncate: {overlap.c} posted entries exist for periods "
+        f"after {new_end_date}. Reopen those periods first."
+      )
+
+    # Delete any draft entries that fall past the new end date (they're now stale)
+    session.execute(
+      text("""
+        DELETE FROM line_items
+        WHERE entry_id IN (
+          SELECT id FROM entries
+          WHERE source_structure_id = :sid
+            AND status = 'draft'
+            AND posting_date > :new_end
+        )
+      """),
+      {"sid": structure_id, "new_end": new_end_date},
+    )
+    session.execute(
+      text("""
+        DELETE FROM entries
+        WHERE source_structure_id = :sid
+          AND status = 'draft'
+          AND posting_date > :new_end
+      """),
+      {"sid": structure_id, "new_end": new_end_date},
+    )
+
+    # Delete facts beyond the new end date
+    del_result = session.execute(
+      text("""
+        DELETE FROM facts
+        WHERE structure_id = :sid
+          AND period_start > :new_end
+      """),
+      {"sid": structure_id, "new_end": new_end_date},
+    )
+    facts_deleted = del_result.rowcount or 0
+
+    # Update schedule metadata to record the truncation event for audit
+    now = datetime.now(UTC)
+    metadata = dict(structure.metadata_ or {})
+    schedule_meta = dict(metadata.get("schedule_metadata", {}))
+    truncation_log = list(metadata.get("truncations", []))
+    truncation_log.append(
+      {
+        "new_end_date": new_end_date.isoformat(),
+        "reason": reason,
+        "updated_by": updated_by,
+        "updated_at": now.isoformat(),
+        "facts_deleted": facts_deleted,
+      }
+    )
+    schedule_meta["end_date"] = new_end_date.isoformat()
+    metadata["schedule_metadata"] = schedule_meta
+    metadata["truncations"] = truncation_log
+    structure.metadata_ = metadata
+
+    # Force SQLAlchemy to detect the JSONB change
+    from sqlalchemy.orm.attributes import flag_modified
+
+    flag_modified(structure, "metadata_")
+    session.flush()
+
+    logger.info(
+      f"Truncated schedule {structure_id} to {new_end_date} "
+      f"(deleted {facts_deleted} facts, reason: {reason})"
+    )
+    return {
+      "structure_id": structure_id,
+      "new_end_date": new_end_date,
+      "facts_deleted": facts_deleted,
+      "reason": reason,
+    }
+
+  def _assert_period_not_closed(self, session: Session, posting_date: date) -> None:
+    """Raise ValueError if a FiscalPeriod containing `posting_date` is closed.
+
+    Used to prevent manual entries from being drafted into closed periods —
+    such drafts would be orphaned because close-period refuses to re-close a
+    closed month. If an adjustment is needed in a closed period, the user
+    must explicitly reopen the period first.
+
+    If no FiscalPeriod row covers the posting_date (e.g., demo or fresh
+    tenant without period rows seeded), this is a no-op: the caller's free
+    to create the entry and the period-state machine will handle it later.
+    """
+    row = session.execute(
+      text("""
+        SELECT name, status
+        FROM fiscal_periods
+        WHERE start_date <= :posting_date AND end_date >= :posting_date
+        LIMIT 1
+      """),
+      {"posting_date": posting_date},
+    ).fetchone()
+
+    if row is not None and row.status == "closed":
+      raise ValueError(
+        f"Cannot draft manual entry in closed period {row.name!r} "
+        f"(posting_date={posting_date}). "
+        "Reopen the period first if the adjustment is needed there."
+      )
+
+  def _delete_draft_entry(self, session: Session, entry_id: str) -> None:
+    """Delete an entry and its line items (must be status='draft')."""
+    # Line items first (FK cascade not guaranteed at the model layer)
+    session.execute(
+      text("DELETE FROM line_items WHERE entry_id = :eid"),
+      {"eid": entry_id},
+    )
+    # Reversal entry, if one exists
+    session.execute(
+      text("""
+        DELETE FROM line_items
+        WHERE entry_id IN (SELECT id FROM entries WHERE reversal_of = :eid)
+      """),
+      {"eid": entry_id},
+    )
+    session.execute(
+      text("DELETE FROM entries WHERE reversal_of = :eid"),
+      {"eid": entry_id},
+    )
+    session.execute(
+      text("DELETE FROM entries WHERE id = :eid"),
+      {"eid": entry_id},
+    )
+    session.flush()
 
   # ── Private helpers ──────────────────────────────────────────────────
 

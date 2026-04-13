@@ -126,8 +126,20 @@ def generate_report_facts(
         )
       )
 
-    # Close temporary accounts into retained earnings per period
+    # Close the current period's temporary accounts (revenue/expense)
+    # into retained earnings. For periods where real closing entries
+    # have already zeroed the rev/exp accounts, this is a no-op (sum=0).
     _close_to_retained_earnings(facts, period.start, period.end)
+
+    # For balance sheet accuracy: add cumulative prior-period net income
+    # to RE. This always runs from inception — real closing entries
+    # (from QB year-end closes, roboledger close_period, etc.) already
+    # zero out the rev/exp accounts they close, so cumulative rev - exp
+    # returns only the still-unclosed portion. Adding that to whatever
+    # RE balance the ledger already carries is always correct.
+    _close_prior_periods_to_retained_earnings(
+      session, mapping_id, facts, period.start, period.end
+    )
 
   unmapped_count = _count_unmapped(session, mapping_id)
 
@@ -280,8 +292,12 @@ def _read_mapped_balances(
         AND mapping.structure_id = :mapping_id
       JOIN elements target ON target.id = mapping.to_element_id
       WHERE e.status = 'posted'
-        AND (e.posting_date >= :start_date OR :start_date IS NULL)
         AND (e.posting_date <= :end_date OR :end_date IS NULL)
+        AND (
+          target.classification IN ('asset', 'liability', 'equity')
+          OR e.posting_date >= :start_date
+          OR :start_date IS NULL
+        )
       GROUP BY target.id, target.qname, target.name,
                target.classification, target.balance_type
       ORDER BY target.qname
@@ -388,6 +404,116 @@ def _close_to_retained_earnings(
         classification="equity",
         balance_type="credit",
         value=net_income,
+        period_start=period_start,
+        period_end=period_end,
+        period_type="instant",
+      )
+    )
+
+
+def _close_prior_periods_to_retained_earnings(
+  session: Session,
+  mapping_id: str,
+  facts: list[ReportFact],
+  period_start: date,
+  period_end: date,
+) -> None:
+  """Close un-closed cumulative net income into retained earnings.
+
+  Balance sheet accounts are loaded cumulatively, but
+  `_close_to_retained_earnings` only closes the current period's
+  revenue/expense. This function computes cumulative net income **from
+  inception** through `period_end`, subtracts the current period's net
+  income (already closed by `_close_to_retained_earnings`), and adds
+  the remainder to retained earnings.
+
+  ## Why "from inception" is always correct
+
+  A real closing entry (QB year-end, roboledger `close_period`, etc.)
+  zeroes out the revenue/expense accounts it closes:
+
+      DR Revenue 100k
+      CR Expense  60k
+      CR RE       40k
+
+  After this entry, the revenue and expense accounts have net_balance=0,
+  so the `cumulative rev - exp` query returns only the **still-unclosed**
+  portion of P&L activity. Adding that to whatever RE the ledger already
+  carries (real closed amount + any manual adjustments) always produces
+  the right total on the balance sheet. There is no double-count risk.
+  """
+  RETAINED_EARNINGS_ID = "elem_gaap_retained_earnings"
+
+  # Cumulative net income from inception through period_end.
+  result = session.execute(
+    text("""
+      SELECT
+        target.classification,
+        target.balance_type,
+        COALESCE(SUM(li.debit_amount), 0) AS total_debits,
+        COALESCE(SUM(li.credit_amount), 0) AS total_credits
+      FROM elements source_elem
+      JOIN line_items li ON li.element_id = source_elem.id
+      JOIN entries e ON e.id = li.entry_id
+      JOIN associations mapping
+        ON mapping.from_element_id = source_elem.id
+        AND mapping.association_type = 'mapping'
+        AND mapping.structure_id = :mapping_id
+      JOIN elements target ON target.id = mapping.to_element_id
+      WHERE e.status = 'posted'
+        AND e.posting_date <= :end_date
+        AND target.classification IN ('revenue', 'expense')
+      GROUP BY target.classification, target.balance_type
+    """),
+    {
+      "mapping_id": mapping_id,
+      "end_date": period_end,
+    },
+  )
+
+  cumulative_revenue = 0.0
+  cumulative_expenses = 0.0
+  for row in result:
+    net = cents_to_dollars(row.total_debits - row.total_credits)
+    natural = _natural_sign(net, row.balance_type)
+    if row.classification == "revenue":
+      cumulative_revenue += natural
+    else:
+      cumulative_expenses += natural
+
+  cumulative_net_income = cumulative_revenue - cumulative_expenses
+
+  # Current period net income was already closed — compute it from facts
+  current_revenue = 0.0
+  current_expenses = 0.0
+  retained_earnings_fact: ReportFact | None = None
+  for fact in facts:
+    if fact.period_start != period_start or fact.period_end != period_end:
+      continue
+    if fact.classification == "revenue":
+      current_revenue += fact.value
+    elif fact.classification == "expense":
+      current_expenses += fact.value
+    if fact.element_id == RETAINED_EARNINGS_ID:
+      retained_earnings_fact = fact
+
+  current_net_income = current_revenue - current_expenses
+  prior_periods_net_income = cumulative_net_income - current_net_income
+
+  if prior_periods_net_income == 0.0:
+    return
+
+  if retained_earnings_fact is not None:
+    retained_earnings_fact.value += prior_periods_net_income
+  else:
+    facts.append(
+      ReportFact(
+        element_id=RETAINED_EARNINGS_ID,
+        element_qname="us-gaap:RetainedEarningsAccumulatedDeficit",
+        element_name="Retained Earnings",
+        classification="equity",
+        balance_type="credit",
+        value=prior_periods_net_income,
         period_start=period_start,
         period_end=period_end,
         period_type="instant",
@@ -609,8 +735,8 @@ def _build_rows(
   2. Resolve calculation elements using the fully-populated computed dicts,
      then build the final row list in presentation order.
 
-  Abstract/parent nodes render as section headers with no dollar value.
-  Leaf nodes get values from the balance dict, or from calculation
+  Abstract/parent nodes render with the rollup sum of their children (not
+  zero). Leaf nodes get values from the balance dict, or from calculation
   associations for computed elements (Total Assets, Net Income, etc.).
   """
   n_periods = len(period_balances)
@@ -656,37 +782,25 @@ def _build_rows(
   rows: list[FactRow] = []
 
   def _emit(node: _HierarchyNode) -> None:
-    if node.children:
-      rows.append(
-        FactRow(
-          element_id=node.element_id,
-          element_qname=node.qname,
-          element_name=node.name,
-          classification=node.classification,
-          balance_type=node.balance_type,
-          values=[0.0] * n_periods,
-          is_subtotal=True,
-          depth=node.depth,
-        )
+    # Both subtotal (has children) and leaf rows read the precomputed
+    # value from `computed_per_period`. Pass 1 populated it with the
+    # rolled-up sum of all descendants for parent nodes, so subtotal
+    # rows get the correct aggregate instead of zeros.
+    vals = [computed_per_period[i].get(node.element_id, 0.0) for i in range(n_periods)]
+    rows.append(
+      FactRow(
+        element_id=node.element_id,
+        element_qname=node.qname,
+        element_name=node.name,
+        classification=node.classification,
+        balance_type=node.balance_type,
+        values=vals,
+        is_subtotal=bool(node.children),
+        depth=node.depth,
       )
-      for child in node.children:
-        _emit(child)
-    else:
-      vals = [
-        computed_per_period[i].get(node.element_id, 0.0) for i in range(n_periods)
-      ]
-      rows.append(
-        FactRow(
-          element_id=node.element_id,
-          element_qname=node.qname,
-          element_name=node.name,
-          classification=node.classification,
-          balance_type=node.balance_type,
-          values=vals,
-          is_subtotal=False,
-          depth=node.depth,
-        )
-      )
+    )
+    for child in node.children or []:
+      _emit(child)
 
   for root in hierarchy:
     _emit(root)

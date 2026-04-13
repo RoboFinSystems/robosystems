@@ -29,18 +29,19 @@ from robosystems.models.api.extensions.reports import (
 from robosystems.models.core import User
 from robosystems.models.extensions import Fact, Report, ReportShare
 from robosystems.operations.extensions.staleness import mark_graph_stale
-from robosystems.operations.reports.fact_grid import (
+from robosystems.operations.roboledger.reports.fact_grid import (
   PeriodSpec as FactPeriodSpec,
 )
-from robosystems.operations.reports.fact_grid import (
+from robosystems.operations.roboledger.reports.fact_grid import (
   ReportFact as ReportFactData,
 )
-from robosystems.operations.reports.fact_grid import (
+from robosystems.operations.roboledger.reports.fact_grid import (
   _compute_prior_period,
   generate_report_facts,
   render_structure_view,
 )
-from robosystems.operations.reports.guard_rails import validate_report
+from robosystems.operations.roboledger.reports.guard_rails import validate_report
+from robosystems.routers.ledger._common import ledger_404 as _ledger_404
 
 router = APIRouter()
 
@@ -50,13 +51,6 @@ VALID_STRUCTURE_TYPES = {
   "equity_statement",
   "custom",
 }
-
-
-def _ledger_404():
-  return HTTPException(
-    status_code=404,
-    detail="Ledger not initialized. Connect a data source first.",
-  )
 
 
 def _report_404(report_id: str):
@@ -399,7 +393,7 @@ async def get_statement(
   report_id: str = Path(..., description="Report definition ID"),
   structure_type: str = Path(
     ...,
-    description="Structure type: income_statement, balance_sheet, cash_flow_statement",
+    description="Structure type: income_statement, balance_sheet, equity_statement",
   ),
   current_user: User = Depends(get_current_user_with_graph),
   _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),

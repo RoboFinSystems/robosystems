@@ -31,6 +31,32 @@ database_url = env.DATABASE_URL  # NOT: os.getenv("DATABASE_URL")
 just migrate-create "description"  # NOT: manual alembic revision
 ```
 
+## API Endpoints (local testing)
+
+The API is mounted under `/v1` — there are **no unprefixed health/status routes**. Common mistakes:
+
+| ❌ Wrong                       | ✅ Correct                    | Purpose                       |
+| ------------------------------ | ----------------------------- | ----------------------------- |
+| `GET /health`, `GET /v1/health` | `GET /v1/status`              | API health check              |
+| `GET /ledger/...`              | `GET /v1/ledger/{graph_id}/...` | Ledger endpoints              |
+| `GET /graphs/...`              | `GET /v1/graphs/{graph_id}/...` | Graph endpoints               |
+
+- **Root `/`** serves the Swagger UI (HTML); don't use it for health checks.
+- **`/openapi.json`** is the live OpenAPI spec — useful when SDK generation drifts from the server.
+- **All authenticated endpoints** take `X-API-Key` for local testing (not `Authorization: Bearer`). Read the key from `.local/config.json` after running `just demo-user`.
+- **Frontend-facing auth** (JWT/Bearer) is a frontend concern; backend testing with `curl` should use the API key.
+
+Example:
+
+```bash
+# Health check
+curl http://localhost:8000/v1/status
+
+# Authenticated request
+curl -H "X-API-Key: $(jq -r .api_key .local/config.json)" \
+  http://localhost:8000/v1/ledger/$GRAPH_ID/fiscal-calendar
+```
+
 ## Quick Reference
 
 ### Daily Development
