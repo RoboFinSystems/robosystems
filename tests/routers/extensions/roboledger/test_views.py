@@ -300,10 +300,15 @@ class TestFactGridFlagDecoupling:
 
     Reads main.py source as text to verify the mount block is gated
     on `env.FACT_GRID_ENABLED` independently of `env.ROBOLEDGER_ENABLED`.
+    Derives the path from this test file's location rather than
+    hardcoding it, so it works in CI runners and developer machines.
     """
     from pathlib import Path as _Path
 
-    main_src = _Path("/Users/french/Projects/robosystems/main.py").read_text()
+    # this test file lives at <repo>/tests/routers/extensions/roboledger/test_views.py
+    # → main.py is parents[4] up
+    main_py = _Path(__file__).resolve().parents[4] / "main.py"
+    main_src = main_py.read_text()
     # Find the views router import + mount section
     assert "roboledger_views_router" in main_src
     # The block must be gated on FACT_GRID_ENABLED, not on ROBOLEDGER_ENABLED
