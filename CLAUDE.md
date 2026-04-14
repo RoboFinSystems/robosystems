@@ -35,14 +35,20 @@ just migrate-create "description"  # NOT: manual alembic revision
 
 Core platform APIs are mounted under `/v1` (graphs, billing, auth, etc.).
 Extensions (roboledger, roboinvestor) live under `/extensions` and are
-**graph-scoped at the URL level**:
+**graph-scoped at the URL level**, with three sub-surfaces:
 
-- **Reads** → `POST /extensions/{graph_id}/graphql` (Strawberry + GraphiQL in dev)
-- **Writes** → `POST /extensions/{roboledger|roboinvestor}/{graph_id}/operations/{operation_name}`
+- **Typed reads** → `POST /extensions/{graph_id}/graphql` (Strawberry + GraphiQL in dev)
+- **Command writes** → `POST /extensions/{roboledger|roboinvestor}/{graph_id}/operations/{operation_name}`
+- **Analytical views** → `POST /extensions/roboledger/{graph_id}/operations/build-fact-grid` (graph-backed pivot tables; gated by `FACT_GRID_ENABLED`, mounts independently of `ROBOLEDGER_ENABLED` so SEC-only deployments still get it)
 
-Both surfaces take `graph_id` as a URL path parameter — auth + per-graph
+All three surfaces take `graph_id` as a URL path parameter — auth + per-graph
 access are validated by FastAPI dependencies before the handler runs.
 GraphQL queries do NOT take a `graphId` argument; the URL is the scope.
+
+Per-domain feature flags: `ROBOLEDGER_ENABLED` and `ROBOINVESTOR_ENABLED`
+gate the corresponding GraphQL resolvers and operation routers. The
+schema is built dynamically per flag combo, so a ledger-only deployment
+exposes only ledger fields (no `INVESTOR_NOT_INITIALIZED` runtime errors).
 
 Common mistakes:
 
@@ -51,6 +57,7 @@ Common mistakes:
 | `GET /health`, `GET /v1/health`   | `GET /v1/status`                                                           | API health check     |
 | `GET /v1/ledger/{g}/entity`       | GraphQL `POST /extensions/{g}/graphql` body `{ entity { … } }`             | Ledger read          |
 | `PUT /v1/ledger/{g}/entity`       | `POST /extensions/roboledger/{g}/operations/update-entity`                 | Ledger write         |
+| `POST /v1/graphs/{g}/views`       | `POST /extensions/roboledger/{g}/operations/build-fact-grid`               | Fact grid query      |
 | `{ entity(graphId: "kg_x") }`     | `{ entity { … } }` (graph_id comes from URL)                                | GraphQL query        |
 | `GET /graphs/...`                 | `GET /v1/graphs/{graph_id}/...`                                            | Graph endpoints      |
 
@@ -181,20 +188,22 @@ if await credit_service.has_sufficient_credits("operation"):
 ```
 robosystems/
 ├── routers/                      # API endpoints (thin layer, calls operations)
-│   ├── extensions/               # Extensions command surface
-│   │   ├── roboledger/           # /extensions/roboledger/{g}/operations/*
+│   ├── extensions/               # Extensions command + analytical view surface
+│   │   ├── roboledger/           # operations.py + views.py (build-fact-grid)
+│   │   │                         # /extensions/roboledger/{g}/operations/*
 │   │   └── roboinvestor/         # /extensions/roboinvestor/{g}/operations/*
 │   └── …                         # Core platform routers (graphs, billing, auth, …)
-├── graphql/                      # Strawberry GraphQL schema served at /extensions/graphql
+├── graphql/                      # Strawberry GraphQL served at /extensions/{graph_id}/graphql
 │   ├── types/                    # Strawberry types (wrap Pydantic response models)
 │   ├── resolvers/                # Per-domain resolver classes (ledger, investor)
 │   ├── context.py                # get_context / require_user
 │   ├── auth.py                   # check_graph_access
-│   └── schema.py                 # Query root (composes resolvers)
+│   └── schema.py                 # Query root (composes resolvers per ROBOLEDGER/ROBOINVESTOR flags)
 ├── operations/                   # Business logic kernel — single source of truth
 │   ├── roboledger/
-│   │   ├── reads/                # session + args → Pydantic response
-│   │   ├── commands/             # session + body → Pydantic response
+│   │   ├── reads/                # OLTP reads (PostgreSQL extensions DB)
+│   │   ├── commands/             # OLTP writes (PostgreSQL extensions DB)
+│   │   ├── views/                # Graph reads (LadybugDB XBRL hypercube)
 │   │   ├── fiscal_calendar/      # FiscalCalendarService, PeriodCloseService
 │   │   ├── reports/              # fact_grid, guard_rails
 │   │   └── schedules/            # ScheduleService
@@ -204,8 +213,7 @@ robosystems/
 │   ├── graph/                    # Graph services (credit, entity, subscription)
 │   ├── lbug/                     # LadybugDB operations (backup, ingest)
 │   ├── agents/                   # AI agent operations
-│   ├── providers/                # Provider registry and implementations
-│   └── views/                    # Data view operations
+│   └── providers/                # Provider registry and implementations
 ├── middleware/                   # Cross-cutting concerns
 │   ├── auth/                     # Authentication (JWT, API keys, SSO)
 │   ├── billing/                  # Credit consumption tracking
@@ -304,6 +312,15 @@ LBUG_DATABASE_PATH=/data/lbug-dbs
 # Feature Flags
 RATE_LIMIT_ENABLED=true
 BILLING_ENABLED=true
+
+# Extensions — RoboLedger & RoboInvestor product surfaces
+ROBOLEDGER_ENABLED=true            # gates roboledger ops + GraphQL ledger fields
+ROBOINVESTOR_ENABLED=true          # gates roboinvestor ops + GraphQL investor fields
+EXTENSIONS_GRAPHQL_ENABLED=true    # kill switch for the GraphQL endpoint
+EXTENSIONS_DATABASE_URL=postgresql://...  # extensions OLTP database
+# EXTENSIONS_ENABLED is a derived property (ROBOLEDGER_ENABLED OR ROBOINVESTOR_ENABLED)
+# — no longer a separate env var. The legacy LEDGER_ENABLED / INVESTOR_ENABLED
+# names are honored as backward-compat fallbacks during migration.
 ```
 
 ## Configuration System
@@ -434,14 +451,14 @@ Variables follow the naming convention `COMPONENT_SETTING_ENVIRONMENT` (e.g., `S
 ## SSM Parameters
 
 ```bash
-just ssm-list prod features            # List feature flags
-just ssm-list prod tuning              # List tuning parameters
-just ssm-get prod features/mcp-memory  # Get single parameter
-just ssm-set prod features/mcp-memory true   # Set parameter
-just ssm-delete prod features/old-flag       # Delete parameter
+just ssm-list prod features                          # List feature flags
+just ssm-list prod tuning                            # List tuning parameters
+just ssm-get prod features/MCP_MEMORY_ENABLED        # Get single parameter
+just ssm-set prod features/MCP_MEMORY_ENABLED true   # Set parameter
+just ssm-delete prod features/OLD_FLAG               # Delete parameter
 ```
 
-Parameters are stored at `/robosystems/{env}/{category}/{name}` in SSM Parameter Store. Unlike GitHub variables (which require redeployment), SSM parameters take effect immediately at runtime.
+Parameters are stored at `/robosystems/{env}/{category}/{NAME}` in SSM Parameter Store. The `{NAME}` segment is **UPPER_SNAKE_CASE**, identical to the env var name (e.g., `RATE_LIMIT_ENABLED`, not `rate-limit-enabled`). Unlike GitHub variables (which require redeployment), SSM parameters take effect immediately at runtime.
 
 ## Secret Management
 

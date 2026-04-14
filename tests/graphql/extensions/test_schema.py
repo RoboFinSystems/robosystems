@@ -8,6 +8,8 @@ stray `dict`-typed field, a recursive type that doesn't resolve).
 
 from __future__ import annotations
 
+from unittest.mock import patch
+
 from robosystems.graphql.schema import schema
 
 
@@ -140,3 +142,68 @@ class TestSchemaComposition:
     assert "limit: Int!" in block
     assert "offset: Int!" in block
     assert "hasMore: Boolean!" in block
+
+
+class TestSchemaPerDomainFlagGating:
+  """`_build_query_type` must skip disabled domains entirely.
+
+  Before: `Query(LedgerQuery, InvestorQuery)` was unconditional, so a
+  ledger-only deployment still advertised investor fields and failed
+  them at runtime with `INVESTOR_NOT_INITIALIZED`. Now the schema
+  honestly reflects which domains are enabled, so SDK introspection
+  matches what works at runtime.
+  """
+
+  def _build_sdl_with_flags(self, *, ledger: bool, investor: bool) -> str:
+    """Rebuild the Query type with the given flag combo and return SDL."""
+    import strawberry
+
+    from robosystems.graphql.schema import _build_query_type
+
+    with (
+      patch("robosystems.graphql.schema.env.ROBOLEDGER_ENABLED", ledger),
+      patch("robosystems.graphql.schema.env.ROBOINVESTOR_ENABLED", investor),
+    ):
+      query_type = _build_query_type()
+      built = strawberry.Schema(query=query_type)
+      return str(built)
+
+  def test_ledger_only_deployment_excludes_investor_fields(self) -> None:
+    sdl = self._build_sdl_with_flags(ledger=True, investor=False)
+    start = sdl.find("type Query {")
+    end = sdl.find("}", start)
+    query_block = sdl[start:end]
+
+    # Ledger fields present
+    assert "entity:" in query_block or "entity(" in query_block
+    assert "trialBalance" in query_block
+    # Investor fields absent
+    assert "portfolios" not in query_block
+    assert "holdings" not in query_block
+    # Probe always present
+    assert "hello" in query_block
+
+  def test_investor_only_deployment_excludes_ledger_fields(self) -> None:
+    sdl = self._build_sdl_with_flags(ledger=False, investor=True)
+    start = sdl.find("type Query {")
+    end = sdl.find("}", start)
+    query_block = sdl[start:end]
+
+    # Investor fields present
+    assert "portfolios" in query_block
+    assert "holdings" in query_block
+    # Ledger fields absent
+    assert "trialBalance" not in query_block
+    assert "fiscalCalendar" not in query_block
+    # Probe always present
+    assert "hello" in query_block
+
+  def test_both_disabled_only_exposes_hello_probe(self) -> None:
+    sdl = self._build_sdl_with_flags(ledger=False, investor=False)
+    start = sdl.find("type Query {")
+    end = sdl.find("}", start)
+    query_block = sdl[start:end]
+
+    assert "hello" in query_block
+    assert "trialBalance" not in query_block
+    assert "portfolios" not in query_block

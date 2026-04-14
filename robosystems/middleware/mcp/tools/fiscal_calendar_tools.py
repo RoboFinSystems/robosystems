@@ -19,11 +19,10 @@ fiscal_calendar.py` so MCP, GraphQL, and the REST operation surface
 share one source of truth for both behavior and wire shape.
 """
 
-from contextlib import contextmanager
 from typing import Any
 
-from robosystems.database import get_db_session
 from robosystems.db.extensions import extensions_session
+from robosystems.db.platform import platform_session as _platform_session
 from robosystems.logger import logger
 from robosystems.operations.roboledger.commands.fiscal_calendar import (
   PeriodNotClosedError,
@@ -49,22 +48,6 @@ from robosystems.operations.roboledger.reads.fiscal_calendar import (
   build_fiscal_calendar_response,
   qb_sync_state,
 )
-
-
-@contextmanager
-def _platform_session():
-  """Context-manager wrapper around the FastAPI dependency-style generator.
-
-  `get_db_session()` is a generator so it can act as a FastAPI dependency.
-  MCP tools aren't running inside FastAPI's dependency machinery, so we
-  drive the generator manually here to get standard `with`-block semantics.
-  """
-  gen = get_db_session()
-  db = next(gen)
-  try:
-    yield db
-  finally:
-    gen.close()
 
 
 def _calendar_dict(session, graph_id: str, calendar, service) -> dict[str, Any]:

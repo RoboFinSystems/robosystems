@@ -13,7 +13,13 @@ import strawberry
 from sqlalchemy.exc import ProgrammingError
 from strawberry.types import Info
 
-from robosystems.graphql.context import GraphQLContext, require_graph_id, require_user
+from robosystems.graphql.context import GraphQLContext
+from robosystems.graphql.resolvers._common import (
+  open_extensions_session as _open_session,
+)
+from robosystems.graphql.resolvers._common import (
+  validate_pagination as _validate_pagination,
+)
 from robosystems.graphql.types.investor import (
   HoldingsList,
   Portfolio,
@@ -36,42 +42,6 @@ from robosystems.operations.roboinvestor.reads import (
   securities as reads_securities,
 )
 
-_MIN_LIMIT = 1
-_MAX_LIMIT = 1000
-_MIN_OFFSET = 0
-
-
-def _validate_pagination(limit: int, offset: int) -> None:
-  """Reject out-of-range pagination args at the resolver boundary.
-
-  Mirrors the retired REST `Query(..., ge=N, le=M)` bounds so the new
-  GraphQL surface can't be used to issue unbounded list reads.
-  """
-  if not _MIN_LIMIT <= limit <= _MAX_LIMIT:
-    raise strawberry.exceptions.StrawberryGraphQLError(
-      message=f"limit must be between {_MIN_LIMIT} and {_MAX_LIMIT}",
-      extensions={"code": "INVALID_PAGINATION"},
-    )
-  if offset < _MIN_OFFSET:
-    raise strawberry.exceptions.StrawberryGraphQLError(
-      message=f"offset must be >= {_MIN_OFFSET}",
-      extensions={"code": "INVALID_PAGINATION"},
-    )
-
-
-def _open_session(info: Info[GraphQLContext, None]):
-  """Shared auth + session-open prelude for every investor resolver.
-
-  Auth + graph access were enforced by `get_context` before this is
-  ever reached. `graph_id` is read from the request URL via
-  `require_graph_id`.
-  """
-  require_user(info)
-  graph_id = require_graph_id(info)
-  from robosystems.db.extensions import extensions_session
-
-  return extensions_session(graph_id)
-
 
 def _raise_investor_not_initialized() -> NoReturn:
   """Raise a typed GraphQL error for an uninitialized investor module.
@@ -79,11 +49,18 @@ def _raise_investor_not_initialized() -> NoReturn:
   Replaces the previous "swallow ValueError/ProgrammingError → return
   null" pattern. Frontends and agents see a clear failure with the
   `INVESTOR_NOT_INITIALIZED` error code instead of an empty result.
+
+  Uses `raise ... from None` so that when called from inside an
+  `except (ValueError, ProgrammingError):` block, Python doesn't set
+  `__context__` on the new exception. Strawberry's error serializer
+  can otherwise leak the raw `ProgrammingError` (which contains schema
+  and table names from the failing SQL statement) through the
+  `extensions` field of the GraphQL error response.
   """
   raise strawberry.exceptions.StrawberryGraphQLError(
     message="Investor module not initialized.",
     extensions={"code": "INVESTOR_NOT_INITIALIZED"},
-  )
+  ) from None
 
 
 @strawberry.type

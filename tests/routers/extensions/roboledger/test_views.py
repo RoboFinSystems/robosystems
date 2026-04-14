@@ -1,10 +1,15 @@
 """Tests for the build-fact-grid roboledger operation.
 
 Covers the analytical view operation registered in
-`routers/extensions/roboledger/operations.py`. This is the only
+`routers/extensions/roboledger/views.py`. This is the only
 read-shaped operation in the dispatcher — it queries the LadybugDB
 graph (XBRL hypercube schema) and returns a multi-dimensional pivot
 table wrapped in an `OperationEnvelope`.
+
+The route lives in its own module (separate from `operations.py`) so
+it can be mounted independently of `ROBOLEDGER_ENABLED` — SEC-only
+deployments need fact-grid without enabling roboledger tenants. The
+`TestFactGridFlagDecoupling` class below pins that behavior.
 
 Mocks the underlying graph query (`query_fact_grid`) and the
 `FactGridBuilder` so the tests stay focused on the operation route's
@@ -19,9 +24,9 @@ import pandas as pd
 import pytest
 from fastapi import HTTPException
 
-from robosystems.routers.extensions.roboledger.operations import build_fact_grid_op
+from robosystems.routers.extensions.roboledger.views import build_fact_grid_op
 
-MODULE = "robosystems.routers.extensions.roboledger.operations"
+MODULE = "robosystems.routers.extensions.roboledger.views"
 GRAPH_ID = "kg01234567890abcdef"
 
 
@@ -257,3 +262,63 @@ class TestBuildFactGridOperation:
           idempotency_key=None,
           cache=_FakeCache(),
         )
+
+
+class TestFactGridFlagDecoupling:
+  """Regression: build-fact-grid must NOT depend on ROBOLEDGER_ENABLED.
+
+  The legacy `/v1/graphs/{g}/views` endpoint mounted on
+  `FACT_GRID_ENABLED` alone — SEC-only deployments (no roboledger
+  tenants) used it for cross-entity public-company analysis. Earlier
+  this branch accidentally bundled `build_fact_grid_op` into the same
+  router as the ledger commands, so it was gated by
+  `ROBOLEDGER_ENABLED AND FACT_GRID_ENABLED`. That broke SEC-only
+  deployments.
+
+  These tests pin the contract: the fact-grid router is a separate
+  router file imported from `views.py`, mounted in `main.py` only on
+  `FACT_GRID_ENABLED`, and shares the operations dispatcher contract
+  (envelope, idempotency, audit) without requiring ledger tenants.
+  """
+
+  def test_views_router_is_separate_module(self) -> None:
+    """The fact-grid route lives in views.py, not operations.py."""
+    from robosystems.routers.extensions.roboledger import operations, views
+
+    # Both modules expose a router
+    assert hasattr(views, "router")
+    assert hasattr(operations, "router")
+    # views.router has the build-fact-grid route
+    views_paths = {r.path for r in views.router.routes if hasattr(r, "path")}
+    assert "/build-fact-grid" in views_paths
+    # operations.router does NOT (it was moved out)
+    ops_paths = {r.path for r in operations.router.routes if hasattr(r, "path")}
+    assert "/build-fact-grid" not in ops_paths
+
+  def test_main_py_mounts_views_on_fact_grid_flag_only(self) -> None:
+    """main.py mounts the views router gated on FACT_GRID_ENABLED, not ROBOLEDGER_ENABLED.
+
+    Reads main.py source as text to verify the mount block is gated
+    on `env.FACT_GRID_ENABLED` independently of `env.ROBOLEDGER_ENABLED`.
+    """
+    from pathlib import Path as _Path
+
+    main_src = _Path("/Users/french/Projects/robosystems/main.py").read_text()
+    # Find the views router import + mount section
+    assert "roboledger_views_router" in main_src
+    # The block must be gated on FACT_GRID_ENABLED, not on ROBOLEDGER_ENABLED
+    views_block_start = main_src.find("if env.FACT_GRID_ENABLED:")
+    views_import = main_src.find(
+      "from robosystems.routers.extensions.roboledger.views import"
+    )
+    assert views_block_start >= 0
+    assert views_import > views_block_start
+    # And it must NOT be inside the ROBOLEDGER_ENABLED block — verify by
+    # checking that the import line comes AFTER the ROBOLEDGER_ENABLED block
+    # (which ends with the operations router include).
+    ledger_block_start = main_src.find("if env.ROBOLEDGER_ENABLED:")
+    assert ledger_block_start >= 0
+    assert ledger_block_start < views_block_start, (
+      "FACT_GRID_ENABLED block must come AFTER (and outside) the "
+      "ROBOLEDGER_ENABLED block, otherwise SEC-only deployments lose fact-grid"
+    )

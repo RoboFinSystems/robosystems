@@ -226,6 +226,10 @@ def create_app() -> FastAPI:
       "Authorization",
       "X-API-Key",
       "X-Requested-With",
+      # Operation endpoints under /extensions/{domain}/{graph_id}/operations/*
+      # accept Idempotency-Key for safe retries — must be in allow_headers
+      # or browser preflight will reject it for cross-origin requests.
+      "Idempotency-Key",
     ],
     expose_headers=["X-Request-ID", "X-Rate-Limit-Remaining", "X-Rate-Limit-Reset"],
     max_age=3600,  # Cache preflight requests for 1 hour
@@ -362,7 +366,9 @@ def create_app() -> FastAPI:
   # 4. The wire surface is symmetric with REST writes:
   #    `POST /extensions/{graph_id}/graphql` (reads)
   #    `POST /extensions/{domain}/{graph_id}/operations/{op}` (writes)
-  if env.EXTENSIONS_GRAPHQL_ENABLED and (env.LEDGER_ENABLED or env.INVESTOR_ENABLED):
+  if env.EXTENSIONS_GRAPHQL_ENABLED and (
+    env.ROBOLEDGER_ENABLED or env.ROBOINVESTOR_ENABLED
+  ):
     from fastapi import Depends as _Depends
     from strawberry.fastapi import GraphQLRouter
 
@@ -390,7 +396,7 @@ def create_app() -> FastAPI:
   # Writes live here (reads go through /extensions/graphql). Each route
   # delegates to `operations/{domain}/commands/*` via the shared
   # `execute_operation` dispatcher in `middleware/extensions.py`.
-  if env.LEDGER_ENABLED:
+  if env.ROBOLEDGER_ENABLED:
     from robosystems.routers.extensions.roboledger.operations import (
       router as roboledger_operations_router,
     )
@@ -401,7 +407,25 @@ def create_app() -> FastAPI:
       include_in_schema=True,
     )
 
-  if env.INVESTOR_ENABLED:
+  # `build-fact-grid` lives in its own router so it can be mounted
+  # independently of ROBOLEDGER_ENABLED. The fact-grid queries the LadybugDB
+  # graph schema (XBRL hypercube), which is shared by roboledger tenant
+  # graphs AND the SEC shared repository. SEC-only deployments (no
+  # roboledger tenants) still need this endpoint, so gating only on
+  # FACT_GRID_ENABLED is correct. Same prefix as the operations router
+  # so the wire URL is `POST /extensions/roboledger/{graph_id}/operations/build-fact-grid`.
+  if env.FACT_GRID_ENABLED:
+    from robosystems.routers.extensions.roboledger.views import (
+      router as roboledger_views_router,
+    )
+
+    app.include_router(
+      roboledger_views_router,
+      prefix="/extensions/roboledger/{graph_id}/operations",
+      include_in_schema=True,
+    )
+
+  if env.ROBOINVESTOR_ENABLED:
     from robosystems.routers.extensions.roboinvestor.operations import (
       router as roboinvestor_operations_router,
     )

@@ -3,7 +3,7 @@ from unittest.mock import AsyncMock, patch
 import pandas as pd
 import pytest
 
-from robosystems.operations.views.fact_query import query_fact_grid
+from robosystems.operations.roboledger.views.fact_query import query_fact_grid
 
 MOCK_GRAPH_ID = "kg_test123"
 
@@ -25,7 +25,7 @@ class TestQueryFactGrid:
   @pytest.mark.unit
   async def test_element_qname_filter(self, mock_repository):
     with patch(
-      "robosystems.operations.views.fact_query.get_graph_repository",
+      "robosystems.operations.roboledger.views.fact_query.get_graph_repository",
       return_value=mock_repository,
     ):
       await query_fact_grid(MOCK_GRAPH_ID, elements=["us-gaap:Assets"])
@@ -39,7 +39,7 @@ class TestQueryFactGrid:
   @pytest.mark.unit
   async def test_canonical_concept_filter(self, mock_repository):
     with patch(
-      "robosystems.operations.views.fact_query.get_graph_repository",
+      "robosystems.operations.roboledger.views.fact_query.get_graph_repository",
       return_value=mock_repository,
     ):
       await query_fact_grid(MOCK_GRAPH_ID, canonical_concepts=["revenue"])
@@ -53,7 +53,7 @@ class TestQueryFactGrid:
   @pytest.mark.unit
   async def test_combined_elements_and_concepts(self, mock_repository):
     with patch(
-      "robosystems.operations.views.fact_query.get_graph_repository",
+      "robosystems.operations.roboledger.views.fact_query.get_graph_repository",
       return_value=mock_repository,
     ):
       await query_fact_grid(
@@ -71,7 +71,7 @@ class TestQueryFactGrid:
   @pytest.mark.unit
   async def test_period_type_annual(self, mock_repository):
     with patch(
-      "robosystems.operations.views.fact_query.get_graph_repository",
+      "robosystems.operations.roboledger.views.fact_query.get_graph_repository",
       return_value=mock_repository,
     ):
       await query_fact_grid(
@@ -85,7 +85,7 @@ class TestQueryFactGrid:
   @pytest.mark.unit
   async def test_period_type_instant(self, mock_repository):
     with patch(
-      "robosystems.operations.views.fact_query.get_graph_repository",
+      "robosystems.operations.roboledger.views.fact_query.get_graph_repository",
       return_value=mock_repository,
     ):
       await query_fact_grid(
@@ -99,7 +99,7 @@ class TestQueryFactGrid:
   @pytest.mark.unit
   async def test_entity_ticker_filter(self, mock_repository):
     with patch(
-      "robosystems.operations.views.fact_query.get_graph_repository",
+      "robosystems.operations.roboledger.views.fact_query.get_graph_repository",
       return_value=mock_repository,
     ):
       await query_fact_grid(MOCK_GRAPH_ID, elements=["us-gaap:Assets"], entity="NVDA")
@@ -113,7 +113,7 @@ class TestQueryFactGrid:
   @pytest.mark.unit
   async def test_multi_entity_filter(self, mock_repository):
     with patch(
-      "robosystems.operations.views.fact_query.get_graph_repository",
+      "robosystems.operations.roboledger.views.fact_query.get_graph_repository",
       return_value=mock_repository,
     ):
       await query_fact_grid(
@@ -127,7 +127,7 @@ class TestQueryFactGrid:
   @pytest.mark.unit
   async def test_report_filters(self, mock_repository):
     with patch(
-      "robosystems.operations.views.fact_query.get_graph_repository",
+      "robosystems.operations.roboledger.views.fact_query.get_graph_repository",
       return_value=mock_repository,
     ):
       await query_fact_grid(
@@ -149,7 +149,7 @@ class TestQueryFactGrid:
   @pytest.mark.unit
   async def test_has_dimensions_always_false(self, mock_repository):
     with patch(
-      "robosystems.operations.views.fact_query.get_graph_repository",
+      "robosystems.operations.roboledger.views.fact_query.get_graph_repository",
       return_value=mock_repository,
     ):
       await query_fact_grid(MOCK_GRAPH_ID, elements=["us-gaap:Assets"])
@@ -161,7 +161,7 @@ class TestQueryFactGrid:
   @pytest.mark.unit
   async def test_return_distinct(self, mock_repository):
     with patch(
-      "robosystems.operations.views.fact_query.get_graph_repository",
+      "robosystems.operations.roboledger.views.fact_query.get_graph_repository",
       return_value=mock_repository,
     ):
       await query_fact_grid(MOCK_GRAPH_ID, elements=["us-gaap:Assets"])
@@ -173,7 +173,7 @@ class TestQueryFactGrid:
   @pytest.mark.unit
   async def test_entity_columns_included_when_filtered(self, mock_repository):
     with patch(
-      "robosystems.operations.views.fact_query.get_graph_repository",
+      "robosystems.operations.roboledger.views.fact_query.get_graph_repository",
       return_value=mock_repository,
     ):
       await query_fact_grid(MOCK_GRAPH_ID, elements=["us-gaap:Assets"], entity="NVDA")
@@ -186,7 +186,7 @@ class TestQueryFactGrid:
   @pytest.mark.unit
   async def test_entity_columns_excluded_when_no_filter(self, mock_repository):
     with patch(
-      "robosystems.operations.views.fact_query.get_graph_repository",
+      "robosystems.operations.roboledger.views.fact_query.get_graph_repository",
       return_value=mock_repository,
     ):
       await query_fact_grid(MOCK_GRAPH_ID, elements=["us-gaap:Assets"])
@@ -199,7 +199,7 @@ class TestQueryFactGrid:
   async def test_empty_results_returns_empty_dataframe(self, mock_repository):
     mock_repository.execute_query.return_value = []
     with patch(
-      "robosystems.operations.views.fact_query.get_graph_repository",
+      "robosystems.operations.roboledger.views.fact_query.get_graph_repository",
       return_value=mock_repository,
     ):
       result = await query_fact_grid(MOCK_GRAPH_ID, elements=["us-gaap:Assets"])
@@ -213,7 +213,7 @@ class TestQueryFactGrid:
   @pytest.mark.unit
   async def test_periods_filter(self, mock_repository):
     with patch(
-      "robosystems.operations.views.fact_query.get_graph_repository",
+      "robosystems.operations.roboledger.views.fact_query.get_graph_repository",
       return_value=mock_repository,
     ):
       await query_fact_grid(

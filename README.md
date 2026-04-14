@@ -26,15 +26,23 @@ The platform provides the core infrastructure that all extensions build on:
 
 ## Extensions
 
-Each extension defines a domain schema and provides OLTP tables, API routes, data pipelines, and a dedicated frontend app. All extensions share a single PostgreSQL database with schema-per-tenant isolation and materialize to the graph. See [Schema Extensions](/robosystems/schemas/README.md) for details.
+Extensions are domain-specific subsystems that bring their own schema, OLTP tables, API routes, data pipelines, and dedicated frontend apps. They share a single PostgreSQL database with schema-per-tenant isolation and materialize to the graph for analytical queries. See [Schema Extensions](/robosystems/schemas/README.md) for the authoring contract.
+
+The extensions API surface is **graph-scoped at the URL level** — `graph_id` is always a path parameter, never a query argument — with three sub-surfaces:
+
+- **Typed reads** → `POST /extensions/{graph_id}/graphql` — Strawberry GraphQL endpoint with GraphiQL playground in dev. The schema is composed dynamically from enabled domains, so a ledger-only deployment exposes only ledger fields (no surprise runtime errors from disabled domains).
+- **Command writes** → `POST /extensions/{roboledger|roboinvestor}/{graph_id}/operations/{operation_name}` — named REST commands. Every command returns an `OperationEnvelope` with an `op_<ULID>` operation id, supports `Idempotency-Key` for safe retries, and is audit-logged. Long-running commands return `status: "pending"` and stream progress through `/v1/operations/{operation_id}/stream`.
+- **Analytical views** → `POST /extensions/roboledger/{graph_id}/operations/build-fact-grid` — graph-backed multi-dimensional pivot tables over the XBRL hypercube schema. Works for any graph using the schema, so SEC-only deployments get it without needing roboledger tenants.
+
+Behind the API is a CQRS-style operations kernel (`reads/` + `commands/` per domain) that's the single source of truth for business logic. GraphQL resolvers, REST operation routes, and MCP tools all delegate to the same functions, so wire shapes stay byte-identical across consumers. Per-domain feature flags (`ROBOLEDGER_ENABLED`, `ROBOINVESTOR_ENABLED`) gate both the routers and the GraphQL schema composition.
 
 ### [RoboLedger](https://roboledger.ai)
 
-Accounting and financial reporting extension. OLTP general ledger with schema-per-tenant PostgreSQL (accounts, transactions, journal entries, line items, dimensions), QuickBooks ELT pipeline via dbt/Dagster, SEC XBRL financial reporting, and chart of accounts.
+Accounting and financial reporting extension. OLTP general ledger in schema-per-tenant PostgreSQL (accounts, transactions, journal entries, line items, dimensions); 29 GraphQL read fields covering entities, accounts, trial balance, fiscal calendar, schedules, taxonomies, mappings, reports, and publish lists; 23 named command operations for closing periods, creating schedules and closing entries, managing CoA→GAAP mapping associations, and authoring multi-period reports; analytical fact-grid view over the materialized graph; QuickBooks ELT pipeline via dbt/Dagster; SEC XBRL financial reporting; AI-powered CoA→GAAP mapping via the MappingAgent. Dedicated frontend app.
 
 ### [RoboInvestor](https://roboinvestor.ai)
 
-Portfolio management and investment tracking extension with securities, positions, trades, benchmarks, market data, and risk. Dedicated frontend app. OLTP database and API routes planned.
+Portfolio management and investment tracking extension. OLTP database with portfolios, securities, and positions in schema-per-tenant PostgreSQL; 7 GraphQL read fields (portfolios, securities, positions, holdings) and 9 named command operations for portfolio CRUD and position management. Securities can link to entities for cross-graph research between investor portfolios and SEC public-company data via the shared repository. Dedicated frontend app.
 
 ## Quick Start
 

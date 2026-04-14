@@ -14,5 +14,6 @@ from robosystems.db.platform import (  # noqa: F401
   get_async_db_session,
   get_database_url,
   get_db_session,
+  platform_session,
   session,
 )

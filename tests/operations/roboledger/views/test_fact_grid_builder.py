@@ -2,7 +2,7 @@ import pandas as pd
 import pytest
 
 from robosystems.models.api.views import ViewAxisConfig, ViewConfig
-from robosystems.operations.views.fact_grid_builder import FactGridBuilder
+from robosystems.operations.roboledger.views.fact_grid_builder import FactGridBuilder
 
 
 class TestFactGridBuilder:

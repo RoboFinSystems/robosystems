@@ -166,7 +166,7 @@ class GraphMCPTools:
     self.materialize_graph_tool = None
     if (
       self._has_extension("roboledger")
-      and env.EXTENSIONS_ENABLED
+      and env.ROBOLEDGER_ENABLED
       and not self._is_shared_repository()
       and not read_only
     ):
@@ -175,7 +175,7 @@ class GraphMCPTools:
       self.get_graph_sync_status_tool = GetGraphSyncStatusTool(graph_client)
       self.materialize_graph_tool = MaterializeGraphTool(graph_client)
 
-    # Layer 2: Schedule tools (gated by roboledger extension + EXTENSIONS_ENABLED)
+    # Layer 2: Schedule tools (gated by roboledger extension + ROBOLEDGER_ENABLED)
     self.create_schedule_tool = None
     self.list_schedule_structures_tool = None
     self.get_schedule_facts_tool = None
@@ -188,7 +188,7 @@ class GraphMCPTools:
     self.get_fiscal_calendar_tool = None
     self.close_period_tool = None
     self.reopen_period_tool = None
-    if self._has_extension("roboledger") and env.EXTENSIONS_ENABLED and not read_only:
+    if self._has_extension("roboledger") and env.ROBOLEDGER_ENABLED and not read_only:
       from .fiscal_calendar_tools import (
         ClosePeriodTool,
         GetFiscalCalendarTool,
@@ -217,12 +217,12 @@ class GraphMCPTools:
       self.close_period_tool = ClosePeriodTool(graph_client)
       self.reopen_period_tool = ReopenPeriodTool(graph_client)
 
-    # Layer 2: Taxonomy mapping tools (gated by roboledger extension + EXTENSIONS_ENABLED)
+    # Layer 2: Taxonomy mapping tools (gated by roboledger extension + ROBOLEDGER_ENABLED)
     self.get_unmapped_elements_tool = None
     self.suggest_mapping_tool = None
     self.create_mapping_association_tool = None
     self.get_mapping_summary_tool = None
-    if self._has_extension("roboledger") and env.EXTENSIONS_ENABLED and not read_only:
+    if self._has_extension("roboledger") and env.ROBOLEDGER_ENABLED and not read_only:
       from .taxonomy_tools import (
         CreateMappingAssociationTool,
         GetMappingSummaryTool,
@@ -658,7 +658,7 @@ class GraphMCPTools:
         if self.get_graph_sync_status_tool is None:
           raise ValueError(
             "get-graph-sync-status tool is not available. "
-            "Requires roboledger extension and EXTENSIONS_ENABLED=true."
+            "Requires roboledger extension and ROBOLEDGER_ENABLED=true."
           )
         result = await self.get_graph_sync_status_tool.execute(arguments)
         return result if return_raw else json.dumps(result, indent=2)
@@ -666,7 +666,7 @@ class GraphMCPTools:
       elif name == "materialize-graph":
         if self.materialize_graph_tool is None:
           raise ValueError(
-            self._tool_unavailable_reason("materialize-graph", "EXTENSIONS_ENABLED")
+            self._tool_unavailable_reason("materialize-graph", "ROBOLEDGER_ENABLED")
           )
         result = await self.materialize_graph_tool.execute(arguments)
         return result if return_raw else json.dumps(result, indent=2)
@@ -676,7 +676,7 @@ class GraphMCPTools:
         if self.create_schedule_tool is None:
           raise ValueError(
             "create-schedule tool is not available. "
-            "Requires roboledger extension and EXTENSIONS_ENABLED=true."
+            "Requires roboledger extension and ROBOLEDGER_ENABLED=true."
           )
         result = await self.create_schedule_tool.execute(arguments)
         return result if return_raw else json.dumps(result, indent=2)
@@ -685,7 +685,7 @@ class GraphMCPTools:
         if self.list_schedule_structures_tool is None:
           raise ValueError(
             "list-schedule-structures tool is not available. "
-            "Requires roboledger extension and EXTENSIONS_ENABLED=true."
+            "Requires roboledger extension and ROBOLEDGER_ENABLED=true."
           )
         result = await self.list_schedule_structures_tool.execute(arguments)
         return result if return_raw else json.dumps(result, indent=2)
@@ -694,7 +694,7 @@ class GraphMCPTools:
         if self.get_schedule_facts_tool is None:
           raise ValueError(
             "get-schedule-facts tool is not available. "
-            "Requires roboledger extension and EXTENSIONS_ENABLED=true."
+            "Requires roboledger extension and ROBOLEDGER_ENABLED=true."
           )
         result = await self.get_schedule_facts_tool.execute(arguments)
         return result if return_raw else json.dumps(result, indent=2)
@@ -703,7 +703,7 @@ class GraphMCPTools:
         if self.get_period_close_status_tool is None:
           raise ValueError(
             "get-period-close-status tool is not available. "
-            "Requires roboledger extension and EXTENSIONS_ENABLED=true."
+            "Requires roboledger extension and ROBOLEDGER_ENABLED=true."
           )
         result = await self.get_period_close_status_tool.execute(arguments)
         return result if return_raw else json.dumps(result, indent=2)
@@ -712,7 +712,7 @@ class GraphMCPTools:
         if self.create_closing_entry_tool is None:
           raise ValueError(
             "create-closing-entry tool is not available. "
-            "Requires roboledger extension and EXTENSIONS_ENABLED=true."
+            "Requires roboledger extension and ROBOLEDGER_ENABLED=true."
           )
         result = await self.create_closing_entry_tool.execute(arguments)
         return result if return_raw else json.dumps(result, indent=2)
@@ -721,7 +721,7 @@ class GraphMCPTools:
         if self.list_period_drafts_tool is None:
           raise ValueError(
             "list-period-drafts tool is not available. "
-            "Requires roboledger extension and EXTENSIONS_ENABLED=true."
+            "Requires roboledger extension and ROBOLEDGER_ENABLED=true."
           )
         result = await self.list_period_drafts_tool.execute(arguments)
         return result if return_raw else json.dumps(result, indent=2)
@@ -730,7 +730,7 @@ class GraphMCPTools:
         if self.truncate_schedule_tool is None:
           raise ValueError(
             "truncate-schedule tool is not available. "
-            "Requires roboledger extension and EXTENSIONS_ENABLED=true."
+            "Requires roboledger extension and ROBOLEDGER_ENABLED=true."
           )
         result = await self.truncate_schedule_tool.execute(arguments)
         return result if return_raw else json.dumps(result, indent=2)
@@ -739,7 +739,7 @@ class GraphMCPTools:
         if self.create_manual_closing_entry_tool is None:
           raise ValueError(
             "create-manual-closing-entry tool is not available. "
-            "Requires roboledger extension and EXTENSIONS_ENABLED=true."
+            "Requires roboledger extension and ROBOLEDGER_ENABLED=true."
           )
         result = await self.create_manual_closing_entry_tool.execute(arguments)
         return result if return_raw else json.dumps(result, indent=2)
@@ -749,7 +749,7 @@ class GraphMCPTools:
         if self.get_fiscal_calendar_tool is None:
           raise ValueError(
             "get-fiscal-calendar tool is not available. "
-            "Requires roboledger extension and EXTENSIONS_ENABLED=true."
+            "Requires roboledger extension and ROBOLEDGER_ENABLED=true."
           )
         result = await self.get_fiscal_calendar_tool.execute(arguments)
         return result if return_raw else json.dumps(result, indent=2)
@@ -758,7 +758,7 @@ class GraphMCPTools:
         if self.close_period_tool is None:
           raise ValueError(
             "close-period tool is not available. "
-            "Requires roboledger extension and EXTENSIONS_ENABLED=true."
+            "Requires roboledger extension and ROBOLEDGER_ENABLED=true."
           )
         result = await self.close_period_tool.execute(arguments)
         return result if return_raw else json.dumps(result, indent=2)
@@ -767,7 +767,7 @@ class GraphMCPTools:
         if self.reopen_period_tool is None:
           raise ValueError(
             "reopen-period tool is not available. "
-            "Requires roboledger extension and EXTENSIONS_ENABLED=true."
+            "Requires roboledger extension and ROBOLEDGER_ENABLED=true."
           )
         result = await self.reopen_period_tool.execute(arguments)
         return result if return_raw else json.dumps(result, indent=2)
@@ -777,7 +777,7 @@ class GraphMCPTools:
         if self.get_unmapped_elements_tool is None:
           raise ValueError(
             "get-unmapped-elements tool is not available. "
-            "Requires roboledger extension and EXTENSIONS_ENABLED=true."
+            "Requires roboledger extension and ROBOLEDGER_ENABLED=true."
           )
         result = await self.get_unmapped_elements_tool.execute(arguments)
         return result if return_raw else json.dumps(result, indent=2)
@@ -786,7 +786,7 @@ class GraphMCPTools:
         if self.suggest_mapping_tool is None:
           raise ValueError(
             "suggest-mapping tool is not available. "
-            "Requires roboledger extension and EXTENSIONS_ENABLED=true."
+            "Requires roboledger extension and ROBOLEDGER_ENABLED=true."
           )
         result = await self.suggest_mapping_tool.execute(arguments)
         return result if return_raw else json.dumps(result, indent=2)
@@ -795,7 +795,7 @@ class GraphMCPTools:
         if self.create_mapping_association_tool is None:
           raise ValueError(
             "create-mapping-association tool is not available. "
-            "Requires roboledger extension and EXTENSIONS_ENABLED=true."
+            "Requires roboledger extension and ROBOLEDGER_ENABLED=true."
           )
         result = await self.create_mapping_association_tool.execute(arguments)
         return result if return_raw else json.dumps(result, indent=2)
@@ -804,7 +804,7 @@ class GraphMCPTools:
         if self.get_mapping_summary_tool is None:
           raise ValueError(
             "get-mapping-summary tool is not available. "
-            "Requires roboledger extension and EXTENSIONS_ENABLED=true."
+            "Requires roboledger extension and ROBOLEDGER_ENABLED=true."
           )
         result = await self.get_mapping_summary_tool.execute(arguments)
         return result if return_raw else json.dumps(result, indent=2)

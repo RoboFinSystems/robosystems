@@ -4,11 +4,7 @@
 MAIN_API_TAGS = [
   {
     "name": "Graphs",
-    "description": "🏗️ Graphs - Create and manage graph databases",
-  },
-  {
-    "name": "Subgraphs",
-    "description": "🌳 Subgraphs - Create and manage subgraph databases for workspace and data isolation",
+    "description": "🏗️ Graphs - Create and manage knowledge graph tenants",
   },
   {
     "name": "Query",
@@ -43,20 +39,24 @@ MAIN_API_TAGS = [
     "description": "📈 RoboInvestor operations - Named commands for portfolio management writes and analytical views",
   },
   {
+    "name": "Materialize",
+    "description": "🔄 Materialize graph - Rebuild graph from DuckDB staging tables",
+  },
+  {
     "name": "Tables",
-    "description": "🗃️ Staging tables - File upload, SQL queries, and data ingestion via DuckDB staging layer",
+    "description": "🗃️ Staging tables - SQL queries and data ingestion via DuckDB staging layer",
   },
   {
     "name": "Files",
     "description": "📄 File management - Upload, track, and manage data files with multi-layer status",
   },
   {
-    "name": "Materialize",
-    "description": "🔄 Materialize graph - Rebuild graph from DuckDB staging tables",
+    "name": "Subgraphs",
+    "description": "🌳 Subgraphs - Create and manage subgraph databases for AI memory and data isolation",
   },
   {
     "name": "Backup",
-    "description": "💾 Database backup - Create, restore, and manage graph database backups",
+    "description": "💾 Graph backup - Create, restore, and manage graph database backups",
   },
   {
     "name": "Schema",

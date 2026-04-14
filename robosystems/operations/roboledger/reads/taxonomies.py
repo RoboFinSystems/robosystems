@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import date
+
 from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session
 
@@ -435,10 +437,15 @@ _MAPPED_TRIAL_BALANCE_SQL = text("""
 def get_mapped_trial_balance(
   session: Session,
   mapping_id: str,
-  start_date: str | None = None,
-  end_date: str | None = None,
+  start_date: date | str | None = None,
+  end_date: date | str | None = None,
 ) -> MappedTrialBalanceResponse:
-  """Trial balance rolled up to reporting concepts via mapping associations."""
+  """Trial balance rolled up to reporting concepts via mapping associations.
+
+  Accepts both `date` objects (preferred, used by the GraphQL resolver
+  so the wire schema exposes a `Date` scalar) and ISO-8601 strings (used
+  by older REST callers). SQLAlchemy parameter binding handles either.
+  """
   result = session.execute(
     _MAPPED_TRIAL_BALANCE_SQL,
     {

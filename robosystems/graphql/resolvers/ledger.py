@@ -21,7 +21,13 @@ import strawberry
 from sqlalchemy.exc import ProgrammingError
 from strawberry.types import Info
 
-from robosystems.graphql.context import GraphQLContext, require_graph_id, require_user
+from robosystems.graphql.context import GraphQLContext, require_graph_id
+from robosystems.graphql.resolvers._common import (
+  open_extensions_session as _open_session,
+)
+from robosystems.graphql.resolvers._common import (
+  validate_pagination as _validate_pagination,
+)
 from robosystems.graphql.types.ledger import (
   AccountList,
   AccountRollups,
@@ -99,54 +105,6 @@ from robosystems.operations.roboledger.schedules import ScheduleService
 _fiscal_svc = FiscalCalendarService()
 _schedule_svc = ScheduleService()
 
-# Pagination bounds — mirror the retired REST `Query(..., ge=N, le=M)`.
-_MIN_LIMIT = 1
-_MAX_LIMIT = 1000
-_MIN_OFFSET = 0
-
-
-def _validate_pagination(limit: int, offset: int) -> None:
-  """Reject out-of-range pagination args at the resolver boundary.
-
-  Strawberry doesn't have a `Field(ge=…, le=…)` equivalent, so the
-  bounds that the retired REST endpoints enforced via FastAPI's
-  `Query(..., ge=N, le=M)` are reasserted here. Raising a
-  `StrawberryGraphQLError` surfaces a clean GraphQL error rather than
-  a 500 — same shape as authentication failures.
-  """
-  if not _MIN_LIMIT <= limit <= _MAX_LIMIT:
-    raise strawberry.exceptions.StrawberryGraphQLError(
-      message=f"limit must be between {_MIN_LIMIT} and {_MAX_LIMIT}",
-      extensions={"code": "INVALID_PAGINATION"},
-    )
-  if offset < _MIN_OFFSET:
-    raise strawberry.exceptions.StrawberryGraphQLError(
-      message=f"offset must be >= {_MIN_OFFSET}",
-      extensions={"code": "INVALID_PAGINATION"},
-    )
-
-
-def _open_session(info: Info[GraphQLContext, None]):
-  """Shared auth + session-open prelude for every ledger resolver.
-
-  Auth + graph access were enforced by `get_context` before this is
-  ever reached — `require_user` here only catches the introspection
-  bypass case (no API key supplied at all). `graph_id` is read from
-  the request URL via `require_graph_id`.
-  """
-  require_user(info)
-  graph_id = require_graph_id(info)
-  # Local import keeps this module importable without a running extensions DB.
-  from robosystems.db.extensions import extensions_session
-
-  return extensions_session(graph_id)
-
-
-def _is_schema_missing(exc: ProgrammingError) -> bool:
-  """Detect the 'tenant schema or table does not exist' Postgres error."""
-  msg = str(exc)
-  return "does not exist" in msg and ("schema" in msg or "relation" in msg)
-
 
 def _raise_ledger_not_initialized() -> NoReturn:
   """Raise a typed GraphQL error for an uninitialized ledger.
@@ -157,11 +115,19 @@ def _raise_ledger_not_initialized() -> NoReturn:
   GraphQL equivalent is a structured error with code
   `LEDGER_NOT_INITIALIZED`. Frontends can branch on the code; agents
   see a clear failure instead of an empty result.
+
+  Uses `raise ... from None` so that when called from inside an
+  `except (ValueError, ProgrammingError):` block, Python doesn't set
+  `__context__` on the new exception. Strawberry's error serializer
+  can otherwise leak the raw `ProgrammingError` (which contains schema
+  and table names from the failing SQL statement) through the
+  `extensions` field of the GraphQL error response — a tenant-isolation
+  leak.
   """
   raise strawberry.exceptions.StrawberryGraphQLError(
     message="Ledger not initialized. Connect a data source first.",
     extensions={"code": "LEDGER_NOT_INITIALIZED"},
-  )
+  ) from None
 
 
 @strawberry.type
@@ -216,7 +182,7 @@ class LedgerQuery:
 
     from sqlalchemy import func, select
 
-    from robosystems.database import get_db_session
+    from robosystems.db.platform import platform_session
     from robosystems.models.api.extensions.summary import LedgerSummaryResponse
     from robosystems.models.core.connection.connection import Connection
 
@@ -231,26 +197,21 @@ class LedgerQuery:
     # Connection metadata from platform DB. Failures are non-fatal.
     connection_count = 0
     last_sync_at = None
-    gen = None
     try:
-      gen = get_db_session()
-      platform_db = next(gen)
-      conn_result = platform_db.execute(
-        select(func.count(), func.max(Connection.last_sync)).where(
-          Connection.graph_id == graph_id
-        )
-      ).one()
-      connection_count = conn_result[0] or 0
-      last_sync_at = conn_result[1]
+      with platform_session() as platform_db:
+        conn_result = platform_db.execute(
+          select(func.count(), func.max(Connection.last_sync)).where(
+            Connection.graph_id == graph_id
+          )
+        ).one()
+        connection_count = conn_result[0] or 0
+        last_sync_at = conn_result[1]
     except Exception:
       logging.getLogger(__name__).warning(
         "Failed to fetch connection metadata for %s",
         graph_id,
         exc_info=True,
       )
-    finally:
-      if gen is not None and hasattr(gen, "close"):
-        gen.close()
 
     response = LedgerSummaryResponse(
       graph_id=graph_id,
@@ -530,8 +491,8 @@ class LedgerQuery:
     self,
     info: Info[GraphQLContext, None],
     mapping_id: str,
-    start_date: str | None = None,
-    end_date: str | None = None,
+    start_date: date | None = None,
+    end_date: date | None = None,
   ) -> MappedTrialBalance | None:
     """Trial balance rolled up to reporting concepts via mapping associations."""
     try:
@@ -595,7 +556,7 @@ class LedgerQuery:
   @strawberry.field
   def fiscal_calendar(self, info: Info[GraphQLContext, None]) -> FiscalCalendar | None:
     """Current fiscal calendar state — pointers, gap, closeable status."""
-    from robosystems.database import get_db_session
+    from robosystems.db.platform import platform_session
 
     graph_id = require_graph_id(info)
 
@@ -604,17 +565,10 @@ class LedgerQuery:
         calendar = _fiscal_svc.get(session, graph_id)
         if calendar is None:
           return None
-        # Platform DB lookup for QB sync state. GraphQL resolver doesn't
-        # have a FastAPI dependency to inject a platform session, so pull
-        # one from the existing generator and close it cleanly.
-        gen = get_db_session()
-        try:
-          platform_db = next(gen)
+        with platform_session() as platform_db:
           has_sync, last_sync_at = reads_fiscal_calendar.qb_sync_state(
             platform_db, graph_id
           )
-        finally:
-          gen.close()
         response = reads_fiscal_calendar.build_fiscal_calendar_response(
           session,
           graph_id,

@@ -19,16 +19,25 @@ Every route follows the pattern:
   `create-closing-entry`, `create-manual-closing-entry`
 - Taxonomies: `create-taxonomy`, `create-structure`,
   `create-mapping-association`, `delete-mapping-association`
+- Mappings (async): `auto-map-elements` — the one
+  Dagster-dispatched op, returns `status: "pending"` and streams
+  through `/v1/operations/{operation_id}/stream`
 - Reports: `create-report`, `regenerate-report`, `delete-report`,
   `share-report`
 - Publish lists: `create-publish-list`, `update-publish-list`,
   `delete-publish-list`, `add-publish-list-members`,
   `remove-publish-list-member`
 
-**Still deferred:**
+`build-fact-grid` is registered separately in the sibling `views.py`
+file so it can be mounted independently of `ROBOLEDGER_ENABLED` (it
+needs to work for SEC-only deployments without roboledger tenants).
 
-- `auto-map-elements` — the only async/Dagster-dispatched op,
-  needs the pending envelope path wired up separately
+**URL migration note for SDK consumers:** the legacy
+`POST /v1/ledger/{graph_id}/mappings/{mapping_id}/auto-map`
+endpoint has moved to
+`POST /extensions/roboledger/{graph_id}/operations/auto-map-elements`
+with `mapping_id` now in the request body instead of the path.
+Same async semantics, same SSE stream URL for progress.
 """
 
 from __future__ import annotations
@@ -38,7 +47,6 @@ from pydantic import BaseModel
 from sqlalchemy.exc import ProgrammingError
 from sqlalchemy.orm import Session
 
-from robosystems.config import env
 from robosystems.database import get_db_session
 from robosystems.db.extensions import extensions_session
 from robosystems.middleware.auth.dependencies import get_current_user_with_graph
@@ -83,11 +91,6 @@ from robosystems.models.api.extensions.taxonomies import (
   CreateAssociationRequest,
   CreateStructureRequest,
   CreateTaxonomyRequest,
-)
-from robosystems.models.api.views import (
-  CreateViewRequest,
-  ViewMetadata,
-  ViewResponse,
 )
 from robosystems.models.core import User
 from robosystems.operations.extensions.staleness import mark_graph_stale
@@ -199,10 +202,6 @@ from robosystems.operations.roboledger.fiscal_calendar.service import (
   InvalidCloseTargetError,
 )
 from robosystems.operations.roboledger.schedules import ScheduleService
-from robosystems.operations.roboledger.views import (
-  FactGridBuilder,
-  query_fact_grid,
-)
 
 router = APIRouter()
 
@@ -214,8 +213,6 @@ _RATE_LIMIT = Depends(subscription_aware_rate_limit_dependency)
 _fiscal_svc = FiscalCalendarService()
 _close_svc = PeriodCloseService(_fiscal_svc)
 _schedule_svc = ScheduleService()
-
-_PERIOD_PATTERN = r"^\d{4}-(0[1-9]|1[0-2])$"
 
 
 def _ctx(
@@ -1503,125 +1500,8 @@ async def remove_publish_list_member_op(
   return await _dispatch(ctx, _runner, cache)
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# Analytical view operations (graph-backed, not OLTP)
-# ═══════════════════════════════════════════════════════════════════════════
-#
-# `build-fact-grid` is the one read-shaped operation in the dispatcher.
-# It runs Cypher against the LadybugDB graph (XBRL hypercube schema) and
-# returns a multi-dimensional pivot table — too complex for GraphQL's 1:1
-# typed resolvers and POST-shaped because the request body carries a
-# rich `ViewConfig`. Idempotency keys still work as a deterministic cache
-# for expensive analytical queries; audit logging is genuinely useful for
-# usage tracking.
-#
-# Gated behind `FACT_GRID_ENABLED` because the feature is still maturing
-# (timeouts on broad SEC queries). Off by default in production.
-
-
-if env.FACT_GRID_ENABLED:
-
-  @router.post(
-    "/build-fact-grid",
-    response_model=OperationEnvelope,
-    operation_id="opBuildFactGrid",
-    summary="Build Fact Grid",
-    tags=[_OP_TAG],
-    dependencies=[_RATE_LIMIT],
-  )
-  async def build_fact_grid_op(
-    body: CreateViewRequest,
-    graph_id: str = Path(..., pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN),
-    user: User = Depends(get_current_user_with_graph),
-    idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
-    cache: IdempotencyCache = Depends(get_idempotency_cache),
-  ) -> OperationEnvelope:
-    """Build a multi-dimensional fact grid against the graph schema.
-
-    Queries `Fact` nodes by element qnames or canonical concepts with
-    optional filters for periods, entities, filing form, fiscal context,
-    and period type. Returns a deduplicated pivot table plus optional
-    summary statistics.
-
-    This is a graph-database read — the query runs against LadybugDB,
-    not the extensions OLTP database. The same operation works for
-    roboledger tenant graphs (post-materialization) and the SEC shared
-    repository (which uses the same XBRL hypercube schema).
-    """
-    import time
-    import uuid
-
-    ctx = _ctx(
-      graph_id=graph_id,
-      user_id=str(user.id),
-      op="build-fact-grid",
-      idempotency_key=idempotency_key,
-      body=body,
-    )
-
-    if not body.elements and not body.canonical_concepts:
-      raise HTTPException(
-        status_code=400,
-        detail="Provide elements (qnames) and/or canonical_concepts",
-      )
-    if not body.periods and not body.period_type and body.fiscal_year is None:
-      raise HTTPException(
-        status_code=400,
-        detail="Provide periods, period_type, or fiscal_year to scope the query",
-      )
-
-    async def _runner():
-      start_time = time.time()
-      fact_data = await query_fact_grid(
-        graph_id=graph_id,
-        elements=body.elements or None,
-        canonical_concepts=body.canonical_concepts or None,
-        periods=body.periods or None,
-        entity=body.entity,
-        entities=body.entities or None,
-        form=body.form,
-        fiscal_year=body.fiscal_year,
-        fiscal_period=body.fiscal_period,
-        period_type=body.period_type,
-      )
-
-      builder = FactGridBuilder()
-      fact_grid = builder.build(
-        fact_data=fact_data, view_config=body.view_config, source="fact_grid"
-      )
-      pivot_table = builder.generate_pivot_table(fact_grid, body.view_config)
-
-      construction_time_ms = (time.time() - start_time) * 1000
-      metadata = ViewMetadata(
-        view_id=str(uuid.uuid4()),
-        facts_processed=fact_grid.metadata.fact_count,
-        construction_time_ms=construction_time_ms,
-        source="fact_grid",
-      )
-
-      presentations: dict[str, object] = {"pivot_table": pivot_table}
-
-      # Optional inline summary stats — element-keyed aggregates, only
-      # computed when the caller asks for them.
-      if (
-        body.include_summary
-        and fact_grid.facts_df is not None
-        and not fact_grid.facts_df.empty
-      ):
-        df = fact_grid.facts_df
-        if "element_name" in df.columns and "value" in df.columns:
-          summary: dict[str, dict[str, float]] = {}
-          for element_name in df["element_name"].unique():
-            element_data = df[df["element_name"] == element_name]
-            summary[element_name] = {
-              "count": len(element_data),
-              "total": float(element_data["value"].sum()),
-              "average": float(element_data["value"].mean()),
-              "min": float(element_data["value"].min()),
-              "max": float(element_data["value"].max()),
-            }
-          presentations["summary"] = summary
-
-      return ViewResponse(metadata=metadata, presentations=presentations)
-
-    return await _dispatch(ctx, _runner, cache)
+# NOTE: `build-fact-grid` lives in the sibling `views.py` router.
+# It's mounted at the same `/extensions/roboledger/{graph_id}/operations`
+# prefix in `main.py`, but on its own router so it can be mounted
+# independently of `ROBOLEDGER_ENABLED` — SEC-only deployments still need
+# the fact-grid endpoint without enabling RoboLedger tenants.

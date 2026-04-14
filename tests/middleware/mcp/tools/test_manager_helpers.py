@@ -360,7 +360,7 @@ class TestTaxonomyToolRegistration:
 
   @pytest.fixture
   def tools_with_taxonomy(self, mock_client):
-    """GraphMCPTools with roboledger + EXTENSIONS_ENABLED."""
+    """GraphMCPTools with roboledger + ROBOLEDGER_ENABLED."""
     with (
       patch.object(GraphMCPTools, "_should_include_semantic_tools", return_value=False),
       patch("robosystems.middleware.mcp.tools.manager.env") as mock_env,
@@ -368,6 +368,7 @@ class TestTaxonomyToolRegistration:
       mock_env.MCP_WORKSPACE_ENABLED = False
       mock_env.MCP_MEMORY_ENABLED = False
       mock_env.FACT_GRID_ENABLED = False
+      mock_env.ROBOLEDGER_ENABLED = True
       mock_env.EXTENSIONS_ENABLED = True
       mock_env.SEMANTIC_SEARCH_ENABLED = False
       mock_env.MCP_SEMANTIC_MEMORY_ENABLED = False
@@ -393,6 +394,7 @@ class TestTaxonomyToolRegistration:
       mock_env.MCP_WORKSPACE_ENABLED = False
       mock_env.MCP_MEMORY_ENABLED = False
       mock_env.FACT_GRID_ENABLED = False
+      mock_env.ROBOLEDGER_ENABLED = True
       mock_env.EXTENSIONS_ENABLED = True
       mock_env.SEMANTIC_SEARCH_ENABLED = False
       mock_env.MCP_SEMANTIC_MEMORY_ENABLED = False
@@ -414,6 +416,7 @@ class TestTaxonomyToolRegistration:
       mock_env.MCP_WORKSPACE_ENABLED = False
       mock_env.MCP_MEMORY_ENABLED = False
       mock_env.FACT_GRID_ENABLED = False
+      mock_env.ROBOLEDGER_ENABLED = True
       mock_env.EXTENSIONS_ENABLED = True
       mock_env.SEMANTIC_SEARCH_ENABLED = False
       mock_env.MCP_SEMANTIC_MEMORY_ENABLED = False
@@ -456,6 +459,7 @@ class TestTaxonomyToolRegistration:
       mock_env.MCP_WORKSPACE_ENABLED = False
       mock_env.MCP_MEMORY_ENABLED = False
       mock_env.FACT_GRID_ENABLED = False
+      mock_env.ROBOLEDGER_ENABLED = False
       mock_env.EXTENSIONS_ENABLED = False
       mock_env.SEMANTIC_SEARCH_ENABLED = False
       mock_env.MCP_SEMANTIC_MEMORY_ENABLED = False
