@@ -126,6 +126,10 @@ MAIN_API_TAGS = [
     "name": "Investor",
     "description": "📈 Investor - Portfolio management: portfolios, securities, positions, and holdings aggregation",
   },
+  {
+    "name": "Extensions",
+    "description": "🧩 Extensions GraphQL - Unified GraphQL endpoint for extensions reads (roboledger, roboinvestor)",
+  },
 ]
 
 # Graph API OpenAPI tags

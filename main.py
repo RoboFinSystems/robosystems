@@ -236,8 +236,14 @@ def create_app() -> FastAPI:
     # Path-based CSP - strict for API, relaxed for docs
     path = request.url.path
 
-    if path in ["/", "/docs"] or path.startswith("/static"):
-      # Relaxed CSP for documentation and static assets
+    if (
+      path in ["/", "/docs"]
+      or path.startswith("/static")
+      or path.startswith("/extensions/graphql")
+    ):
+      # Relaxed CSP for documentation, static assets, and the GraphiQL
+      # playground (which loads React/GraphiQL from unpkg.com, mirroring
+      # Swagger UI's pattern).
       csp_directives = [
         "default-src 'self'",
         "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.jsdelivr.net https://unpkg.com https://cdn.redoc.ly",
@@ -327,6 +333,28 @@ def create_app() -> FastAPI:
     from robosystems.routers import investor_router_v1
 
     app.include_router(investor_router_v1)
+
+  # Extensions GraphQL endpoint (Strawberry). Serves read-heavy extensions
+  # queries (roboledger, roboinvestor) at /extensions/graphql. Mutations and
+  # core platform concerns stay on /v1/* REST.
+  if env.EXTENSIONS_GRAPHQL_ENABLED and (env.LEDGER_ENABLED or env.INVESTOR_ENABLED):
+    from strawberry.fastapi import GraphQLRouter
+
+    from robosystems.graphql import schema as extensions_graphql_schema
+    from robosystems.graphql.context import get_context as graphql_context_getter
+
+    graphql_router = GraphQLRouter(
+      extensions_graphql_schema,
+      context_getter=graphql_context_getter,
+      # GraphiQL playground at GET /extensions/graphql (dev only).
+      graphql_ide="graphiql" if env.is_development() else None,
+    )
+    app.include_router(
+      graphql_router,
+      prefix="/extensions/graphql",
+      tags=["Extensions"],
+      include_in_schema=True,
+    )
 
   # Include admin routers (hidden from public docs)
   # The admin routers will not appear in the auto-generated docs
