@@ -168,7 +168,7 @@ wheels = [
 
 [[package]]
 name = "arelle-release"
-version = "2.39.6"
+version = "2.39.5"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "bottle" },
@@ -187,9 +187,9 @@ dependencies = [
     { name = "truststore" },
     { name = "typing-extensions" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/d3/40/92b2f7d1b096e2e29a71d55c456fbad5ef728e3a8378e664f905f9d9faf4/arelle_release-2.39.6.tar.gz", hash = "sha256:3d5528ef6d8f6edc5f3511baeabf7bf811920ce4e08bf61610a78414c1d642da", size = 5350363, upload-time = "2026-04-07T00:42:12.166Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/da/be/3a8decc18b6a8488b680affd613b7a390b82f29a20a1f40478bbda048744/arelle_release-2.39.5.tar.gz", hash = "sha256:324bc21ba15ae6f76eedb16232bd080733525621e9178f40a60233238db05648", size = 5346588, upload-time = "2026-03-25T03:39:24.697Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/e5/01/c2e6566492d07f9a7dc7b35af94ab73a4a8ff23210a083eb93d6e650b300/arelle_release-2.39.6-py3-none-any.whl", hash = "sha256:70b710dfbce18fa59edd018a141fd2543e34eb7c9cceeaf4516f7cbc8a6308bd", size = 5765184, upload-time = "2026-04-07T00:42:09.877Z" },
+    { url = "https://files.pythonhosted.org/packages/e9/a0/22a53949afa12bed0441f30ddfad0baef0247a0a2a71c3e3cb1c5c7efcf2/arelle_release-2.39.5-py3-none-any.whl", hash = "sha256:0725d5eaa018d5bbcf64ab18c21f3d40bfc27fc2adb30e0cd13459c79dddee7f", size = 5756918, upload-time = "2026-03-25T03:39:21.945Z" },
 ]
 
 [[package]]
@@ -3404,7 +3404,7 @@ lambda = [
 requires-dist = [
     { name = "aiohttp", specifier = ">=3.12.0" },
     { name = "alembic", specifier = ">=1.16.0,<2.0" },
-    { name = "arelle-release", specifier = "~=2.39.1" },
+    { name = "arelle-release", specifier = "==2.39.5" },
     { name = "async-timeout", specifier = ">=5.0.0,<6.0" },
     { name = "awscli-local", marker = "extra == 'dev'", specifier = ">=0.22.0,<1.0" },
     { name = "basedpyright", marker = "extra == 'dev'", specifier = ">=1.22.0,<2.0" },
