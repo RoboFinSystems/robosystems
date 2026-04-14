@@ -54,16 +54,13 @@ def _ctx(user: MagicMock | None = None) -> dict:
 
 
 @contextmanager
-def _patch_session_for(module_name: str):
+def _patch_session():
   """Patch `extensions_session` to return a mock session.
 
   Resolver modules import `extensions_session` inside the function
   body (local import), so the patch target is
-  `robosystems.db.extensions.extensions_session`. `module_name` is
-  kept as a parameter for callers that may want to scope additional
-  patches in the future, but isn't currently used.
+  `robosystems.db.extensions.extensions_session`.
   """
-  del module_name  # kept for API compatibility
   mock_session = MagicMock()
   mock_ctx_mgr = MagicMock()
   mock_ctx_mgr.__enter__ = MagicMock(return_value=mock_session)
@@ -100,7 +97,7 @@ class TestEntityResolver:
     )
 
     with (
-      _patch_session_for("ledger"),
+      _patch_session(),
       patch(
         "robosystems.operations.roboledger.reads.entity.get_parent_entity",
         return_value=mock_response,
@@ -119,7 +116,7 @@ class TestEntityResolver:
 
   def test_returns_null_when_entity_missing(self) -> None:
     with (
-      _patch_session_for("ledger"),
+      _patch_session(),
       patch(
         "robosystems.operations.roboledger.reads.entity.get_parent_entity",
         return_value=None,
@@ -143,7 +140,7 @@ class TestEntityResolver:
     branch on the code.
     """
     with (
-      _patch_session_for("ledger"),
+      _patch_session(),
       patch(
         "robosystems.operations.roboledger.reads.entity.get_parent_entity",
         side_effect=ProgrammingError("stmt", {}, Exception("schema missing")),
@@ -168,7 +165,7 @@ class TestEntitiesResolver:
     ]
 
     with (
-      _patch_session_for("ledger"),
+      _patch_session(),
       patch(
         "robosystems.operations.roboledger.reads.entity.list_entities",
         return_value=entities,
@@ -187,7 +184,7 @@ class TestEntitiesResolver:
   def test_raises_typed_error_on_schema_error_for_list(self) -> None:
     """List resolvers also surface schema errors instead of returning []."""
     with (
-      _patch_session_for("ledger"),
+      _patch_session(),
       patch(
         "robosystems.operations.roboledger.reads.entity.list_entities",
         side_effect=ValueError("bad graph_id"),
@@ -243,7 +240,7 @@ class TestAccountTreeResolver:
 
   def test_three_level_tree_serializes(self) -> None:
     with (
-      _patch_session_for("ledger"),
+      _patch_session(),
       patch(
         "robosystems.operations.roboledger.reads.accounts.get_account_tree",
         return_value=self._tree(),
@@ -286,7 +283,7 @@ class TestAccountTreeResolver:
   def test_empty_tree(self) -> None:
     empty = AccountTreeResponse(roots=[], total_accounts=0)
     with (
-      _patch_session_for("ledger"),
+      _patch_session(),
       patch(
         "robosystems.operations.roboledger.reads.accounts.get_account_tree",
         return_value=empty,
@@ -317,7 +314,7 @@ class TestSummaryResolver:
     )
 
     with (
-      _patch_session_for("ledger"),
+      _patch_session(),
       patch(
         "robosystems.operations.roboledger.reads.summary.get_ledger_counts",
         return_value=counts,

@@ -1,13 +1,16 @@
 """GraphQL-side authorization helpers.
 
-The `/extensions/graphql` endpoint authenticates via the existing auth
-dependencies (`get_current_user`) in `context_getter`, but the graph access
-check lives here because the `graph_id` comes from a GraphQL variable, not
-a URL path parameter.
+The extensions GraphQL endpoint is mounted at
+`/extensions/{graph_id}/graphql`, so `graph_id` is a **URL path
+parameter**, not a query argument. `get_context` reads it via FastAPI's
+`Path(...)` dependency before Strawberry parses the query, then calls
+`check_graph_access` eagerly as part of building the context. By the
+time any resolver runs, access has already been enforced — resolvers
+never need to call this helper themselves.
 
 This mirrors the access logic in `get_current_user_with_graph`
-(`robosystems/middleware/auth/dependencies.py`) — specifically the portion
-that runs after the user has already been authenticated.
+(`robosystems/middleware/auth/dependencies.py`) — specifically the
+portion that runs after the user has already been authenticated.
 """
 
 from __future__ import annotations

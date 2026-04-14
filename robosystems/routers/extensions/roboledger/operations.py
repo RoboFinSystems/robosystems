@@ -1322,7 +1322,7 @@ async def create_publish_list_op(
         except PublishListNameConflictError as e:
           raise HTTPException(status_code=409, detail=str(e))
     except ProgrammingError:
-      raise HTTPException(status_code=404, detail="Ledger module not initialized.")
+      raise _ledger_404()
 
   return await _dispatch(ctx, _runner, cache)
 
@@ -1365,7 +1365,7 @@ async def update_publish_list_op(
         except PublishListNameConflictError as e:
           raise HTTPException(status_code=409, detail=str(e))
     except ProgrammingError:
-      raise HTTPException(status_code=404, detail="Ledger module not initialized.")
+      raise _ledger_404()
 
   return await _dispatch(ctx, _runner, cache)
 
@@ -1402,7 +1402,7 @@ async def delete_publish_list_op(
         except PublishListNotAuthorizedError as e:
           raise HTTPException(status_code=403, detail=str(e))
     except ProgrammingError:
-      raise HTTPException(status_code=404, detail="Ledger module not initialized.")
+      raise _ledger_404()
     if not deleted:
       raise HTTPException(status_code=404, detail="Publish list not found.")
     return DeleteResult(deleted=True)
@@ -1458,7 +1458,7 @@ async def add_publish_list_members_op(
         except MembersAlreadyPresentError as e:
           raise HTTPException(status_code=409, detail=str(e))
     except ProgrammingError:
-      raise HTTPException(status_code=404, detail="Ledger module not initialized.")
+      raise _ledger_404()
 
   return await _dispatch(ctx, _runner, cache)
 
@@ -1492,7 +1492,7 @@ async def remove_publish_list_member_op(
       with extensions_session(graph_id) as session:
         deleted = cmd_remove_publish_list_member(session, body.list_id, body.member_id)
     except ProgrammingError:
-      raise HTTPException(status_code=404, detail="Ledger module not initialized.")
+      raise _ledger_404()
     if not deleted:
       raise HTTPException(status_code=404, detail="Member not found in this list.")
     return DeleteResult(deleted=True)
