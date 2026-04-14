@@ -154,19 +154,11 @@ admin_router_v1.include_router(admin_graphs_router)
 admin_router_v1.include_router(admin_users_router)
 admin_router_v1.include_router(admin_orgs_router)
 
-# Ledger routes (separate top-level prefix, not under /v1/graphs)
-if env.LEDGER_ENABLED:
-  from .ledger import router as ledger_router
-
-  ledger_router_v1 = APIRouter(prefix="/v1/ledger/{graph_id}", tags=["Ledger"])
-  ledger_router_v1.include_router(ledger_router)
-
-# Investor routes (separate top-level prefix, not under /v1/graphs)
-if env.INVESTOR_ENABLED:
-  from .investor import router as investor_router
-
-  investor_router_v1 = APIRouter(prefix="/v1/investor/{graph_id}", tags=["Investor"])
-  investor_router_v1.include_router(investor_router)
+# NOTE: The old /v1/ledger/{graph_id} and /v1/investor/{graph_id} REST
+# surfaces were deleted in the extensions cutover. Reads now live at
+# /extensions/graphql; writes live at
+# POST /extensions/{roboledger,roboinvestor}/{graph_id}/operations/{op_name}.
+# Both are mounted directly in main.py (no intermediate router_v1 wrapper).
 
 # Export routers for main application
 __all__ = [

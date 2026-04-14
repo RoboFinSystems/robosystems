@@ -630,15 +630,21 @@ class EnvConfig:
     get_parameter_value("EXTENSIONS_ENABLED", "false").lower() == "true",
   )
 
-  # --- Ledger API Endpoints ---
-  # Controls the /v1/ledger/* API routes. Requires EXTENSIONS_ENABLED=true.
+  # --- RoboLedger Extensions ---
+  # Controls the RoboLedger extensions surface:
+  #   - /extensions/roboledger/{graph_id}/operations/* (REST writes)
+  #   - Ledger resolvers on /extensions/graphql (GraphQL reads)
+  # Requires EXTENSIONS_ENABLED=true.
   LEDGER_ENABLED = get_bool_env(
     "LEDGER_ENABLED",
     get_parameter_value("LEDGER_ENABLED", "false").lower() == "true",
   )
 
-  # --- Investor API Endpoints ---
-  # Controls the /v1/investor/* API routes. Requires EXTENSIONS_ENABLED=true.
+  # --- RoboInvestor Extensions ---
+  # Controls the RoboInvestor extensions surface:
+  #   - /extensions/roboinvestor/{graph_id}/operations/* (REST writes)
+  #   - Investor resolvers on /extensions/graphql (GraphQL reads)
+  # Requires EXTENSIONS_ENABLED=true.
   INVESTOR_ENABLED = get_bool_env(
     "INVESTOR_ENABLED",
     get_parameter_value("INVESTOR_ENABLED", "false").lower() == "true",

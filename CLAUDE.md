@@ -33,13 +33,20 @@ just migrate-create "description"  # NOT: manual alembic revision
 
 ## API Endpoints (local testing)
 
-The API is mounted under `/v1` — there are **no unprefixed health/status routes**. Common mistakes:
+Core platform APIs are mounted under `/v1` (graphs, billing, auth, etc.).
+Extensions (roboledger, roboinvestor) live under `/extensions`:
 
-| ❌ Wrong                       | ✅ Correct                    | Purpose                       |
-| ------------------------------ | ----------------------------- | ----------------------------- |
-| `GET /health`, `GET /v1/health` | `GET /v1/status`              | API health check              |
-| `GET /ledger/...`              | `GET /v1/ledger/{graph_id}/...` | Ledger endpoints              |
-| `GET /graphs/...`              | `GET /v1/graphs/{graph_id}/...` | Graph endpoints               |
+- **Reads** → `POST /extensions/graphql` (Strawberry + GraphiQL in dev)
+- **Writes** → `POST /extensions/{roboledger|roboinvestor}/{graph_id}/operations/{operation_name}`
+
+Common mistakes:
+
+| ❌ Wrong                          | ✅ Correct                                                                | Purpose              |
+| --------------------------------- | ------------------------------------------------------------------------- | -------------------- |
+| `GET /health`, `GET /v1/health`   | `GET /v1/status`                                                           | API health check     |
+| `GET /v1/ledger/{g}/entity`       | GraphQL `{ entity(graphId: "…") { … } }`                                   | Ledger read          |
+| `PUT /v1/ledger/{g}/entity`       | `POST /extensions/roboledger/{g}/operations/update-entity`                 | Ledger write         |
+| `GET /graphs/...`                 | `GET /v1/graphs/{graph_id}/...`                                            | Graph endpoints      |
 
 - **Root `/`** serves the Swagger UI (HTML); don't use it for health checks.
 - **`/openapi.json`** is the live OpenAPI spec — useful when SDK generation drifts from the server.
@@ -52,9 +59,17 @@ Example:
 # Health check
 curl http://localhost:8000/v1/status
 
-# Authenticated request
-curl -H "X-API-Key: $(jq -r .api_key .local/config.json)" \
-  http://localhost:8000/v1/ledger/$GRAPH_ID/fiscal-calendar
+# GraphQL read (fiscal calendar)
+curl -X POST http://localhost:8000/extensions/graphql \
+  -H "X-API-Key: $(jq -r .api_key .local/config.json)" \
+  -H "Content-Type: application/json" \
+  -d '{"query": "{ fiscalCalendar(graphId: \"'$GRAPH_ID'\") { closedThrough closeTarget } }"}'
+
+# REST operation write (close a period)
+curl -X POST "http://localhost:8000/extensions/roboledger/$GRAPH_ID/operations/close-period" \
+  -H "X-API-Key: $(jq -r .api_key .local/config.json)" \
+  -H "Content-Type: application/json" \
+  -d '{"period": "2026-03", "allow_stale_sync": false}'
 ```
 
 ## Quick Reference
@@ -159,31 +174,52 @@ if await credit_service.has_sufficient_credits("operation"):
 
 ```
 robosystems/
-├── routers/           # API endpoints (thin layer, calls operations)
-├── operations/        # Business logic orchestration
-│   ├── graph/         # Graph services (credit, entity, subscription)
-│   ├── lbug/          # LadybugDB operations (backup, ingest)
-│   ├── agents/        # AI agent operations
-│   ├── providers/     # Provider registry and implementations
-│   └── views/         # Data view operations
-├── middleware/        # Cross-cutting concerns
-│   ├── auth/          # Authentication (JWT, API keys, SSO)
-│   ├── billing/       # Credit consumption tracking
-│   ├── graph/         # Graph routing and multi-tenancy
-│   ├── rate_limits/   # Burst protection
-│   ├── sse/           # Server-Sent Events
-│   └── ...            # mcp, otel, robustness
-├── dagster/           # Dagster orchestration (jobs, sensors, assets, resources)
-├── adapters/          # External service integrations (SEC, QuickBooks)
-├── admin/             # Admin CLI and utilities
-├── security/          # Security controls (audit, auth protection, encryption)
+├── routers/                      # API endpoints (thin layer, calls operations)
+│   ├── extensions/               # Extensions command surface
+│   │   ├── roboledger/           # /extensions/roboledger/{g}/operations/*
+│   │   └── roboinvestor/         # /extensions/roboinvestor/{g}/operations/*
+│   └── …                         # Core platform routers (graphs, billing, auth, …)
+├── graphql/                      # Strawberry GraphQL schema served at /extensions/graphql
+│   ├── types/                    # Strawberry types (wrap Pydantic response models)
+│   ├── resolvers/                # Per-domain resolver classes (ledger, investor)
+│   ├── context.py                # get_context / require_user
+│   ├── auth.py                   # check_graph_access
+│   └── schema.py                 # Query root (composes resolvers)
+├── operations/                   # Business logic kernel — single source of truth
+│   ├── roboledger/
+│   │   ├── reads/                # session + args → Pydantic response
+│   │   ├── commands/             # session + body → Pydantic response
+│   │   ├── fiscal_calendar/      # FiscalCalendarService, PeriodCloseService
+│   │   ├── reports/              # fact_grid, guard_rails
+│   │   └── schedules/            # ScheduleService
+│   ├── roboinvestor/
+│   │   ├── reads/                # portfolios, securities, positions, holdings
+│   │   └── commands/             # portfolios, securities, positions
+│   ├── graph/                    # Graph services (credit, entity, subscription)
+│   ├── lbug/                     # LadybugDB operations (backup, ingest)
+│   ├── agents/                   # AI agent operations
+│   ├── providers/                # Provider registry and implementations
+│   └── views/                    # Data view operations
+├── middleware/                   # Cross-cutting concerns
+│   ├── auth/                     # Authentication (JWT, API keys, SSO)
+│   ├── billing/                  # Credit consumption tracking
+│   ├── graph/                    # Graph routing and multi-tenancy
+│   ├── rate_limits/              # Burst protection
+│   ├── sse/                      # Server-Sent Events
+│   ├── extensions.py             # OperationEnvelope, IdempotencyCache, execute_operation, audit
+│   └── …                         # mcp, otel, robustness
+├── dagster/                      # Dagster orchestration (jobs, sensors, assets, resources)
+├── adapters/                     # External service integrations (SEC, QuickBooks)
+├── admin/                        # Admin CLI and utilities
+├── security/                     # Security controls (audit, auth protection, encryption)
 ├── models/
-│   ├── api/           # Pydantic request/response models
-│   ├── billing/       # Billing models
-│   └── iam/           # SQLAlchemy database models
-├── config/            # Centralized configuration (see config/README.md)
-├── schemas/           # Graph schema definitions
-└── graph_api/         # Graph API microservice
+│   ├── api/                      # Pydantic request/response models
+│   │   └── extensions/           # RoboLedger + RoboInvestor API models
+│   ├── billing/                  # Billing models
+│   └── iam/                      # SQLAlchemy database models
+├── config/                       # Centralized configuration (see config/README.md)
+├── schemas/                      # Graph schema definitions
+└── graph_api/                    # Graph API microservice
 ```
 
 ### Key Architectural Patterns

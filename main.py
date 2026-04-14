@@ -322,17 +322,10 @@ def create_app() -> FastAPI:
   app.include_router(operations_router_v1)  # Unified SSE operations monitoring
   app.include_router(billing_router_v1)
 
-  # Ledger routes (separate top-level prefix)
-  if env.LEDGER_ENABLED:
-    from robosystems.routers import ledger_router_v1
-
-    app.include_router(ledger_router_v1)
-
-  # Investor routes (separate top-level prefix)
-  if env.INVESTOR_ENABLED:
-    from robosystems.routers import investor_router_v1
-
-    app.include_router(investor_router_v1)
+  # NOTE: /v1/ledger/{graph_id} and /v1/investor/{graph_id} were removed
+  # in the extensions cutover. Reads are on /extensions/graphql; writes
+  # are on /extensions/{roboledger,roboinvestor}/{graph_id}/operations/*.
+  # Mounts appear further down in this function.
 
   # Extensions GraphQL endpoint (Strawberry). Serves read-heavy extensions
   # queries (roboledger, roboinvestor) at /extensions/graphql. Mutations and
@@ -352,7 +345,33 @@ def create_app() -> FastAPI:
     app.include_router(
       graphql_router,
       prefix="/extensions/graphql",
-      tags=["Extensions"],
+      tags=["Extensions: GraphQL"],
+      include_in_schema=True,
+    )
+
+  # Extensions REST operation surface — `POST /extensions/{domain}/{graph_id}/operations/{op_name}`.
+  # Writes live here (reads go through /extensions/graphql). Each route
+  # delegates to `operations/{domain}/commands/*` via the shared
+  # `execute_operation` dispatcher in `middleware/extensions.py`.
+  if env.LEDGER_ENABLED:
+    from robosystems.routers.extensions.roboledger.operations import (
+      router as roboledger_operations_router,
+    )
+
+    app.include_router(
+      roboledger_operations_router,
+      prefix="/extensions/roboledger/{graph_id}/operations",
+      include_in_schema=True,
+    )
+
+  if env.INVESTOR_ENABLED:
+    from robosystems.routers.extensions.roboinvestor.operations import (
+      router as roboinvestor_operations_router,
+    )
+
+    app.include_router(
+      roboinvestor_operations_router,
+      prefix="/extensions/roboinvestor/{graph_id}/operations",
       include_in_schema=True,
     )
 

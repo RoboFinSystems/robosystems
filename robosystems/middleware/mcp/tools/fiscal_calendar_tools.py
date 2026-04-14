@@ -24,8 +24,9 @@ from robosystems.logger import logger
 def _build_response_payload(session, graph_id: str, calendar) -> dict[str, Any]:
   """Assemble a fiscal-calendar state dict identical to the REST response.
 
-  Keeps the response shape consistent with GET /v1/ledger/{graph_id}/fiscal-calendar
-  so Claude sees the same fields whether it called via MCP or REST.
+  Keeps the response shape consistent with the `fiscalCalendar` GraphQL
+  read so Claude sees the same fields whether it called via MCP or
+  GraphQL.
   """
   from robosystems.models.extensions.roboledger.fiscal_period import FiscalPeriod
   from robosystems.operations.roboledger.fiscal_calendar import FiscalCalendarService

@@ -43,6 +43,18 @@ MAIN_API_TAGS = [
     "description": "🔎 Search - Full-text search across filing narratives, disclosures, and XBRL text content",
   },
   {
+    "name": "Extensions: GraphQL",
+    "description": "🧩 Extensions GraphQL - Unified GraphQL endpoint for extensions reads (roboledger, roboinvestor)",
+  },
+  {
+    "name": "Extensions: RoboLedger Operations",
+    "description": "📒 RoboLedger operations - Named command endpoints for accounting writes (close-period, create-report, etc.)",
+  },
+  {
+    "name": "Extensions: RoboInvestor Operations",
+    "description": "📈 RoboInvestor operations - Named command endpoints for portfolio writes (create-portfolio, update-position, etc.)",
+  },
+  {
     "name": "Backup",
     "description": "💾 Database backup - Create, restore, and manage graph database backups",
   },
@@ -117,18 +129,6 @@ MAIN_API_TAGS = [
   {
     "name": "Status",
     "description": "❤️ Service status - API status and monitoring",
-  },
-  {
-    "name": "Ledger",
-    "description": "📒 Ledger - Accounting data: chart of accounts, transactions, trial balance, reports, taxonomies, schedules, and publish lists",
-  },
-  {
-    "name": "Investor",
-    "description": "📈 Investor - Portfolio management: portfolios, securities, positions, and holdings aggregation",
-  },
-  {
-    "name": "Extensions",
-    "description": "🧩 Extensions GraphQL - Unified GraphQL endpoint for extensions reads (roboledger, roboinvestor)",
   },
 ]
 
