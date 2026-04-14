@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from typing import Any
-
 from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session
 
@@ -12,6 +10,8 @@ from robosystems.models.api.extensions.taxonomies import (
   AssociationResponse,
   ElementListResponse,
   ElementResponse,
+  MappedTrialBalanceResponse,
+  MappedTrialBalanceRow,
   MappingCoverageResponse,
   MappingDetailResponse,
   StructureListResponse,
@@ -387,12 +387,8 @@ def get_mapped_trial_balance(
   mapping_id: str,
   start_date: str | None = None,
   end_date: str | None = None,
-) -> dict[str, Any]:
-  """Trial balance rolled up to reporting concepts via mapping associations.
-
-  The REST endpoint returns a raw dict (no typed response model), so this
-  function matches that contract for now.
-  """
+) -> MappedTrialBalanceResponse:
+  """Trial balance rolled up to reporting concepts via mapping associations."""
   result = session.execute(
     _MAPPED_TRIAL_BALANCE_SQL,
     {
@@ -402,21 +398,21 @@ def get_mapped_trial_balance(
     },
   )
 
-  rows: list[dict[str, Any]] = []
+  rows: list[MappedTrialBalanceRow] = []
   for row in result:
     debits = float(row.total_debits) / 100.0
     credits = float(row.total_credits) / 100.0
     rows.append(
-      {
-        "reporting_element_id": row.reporting_element_id,
-        "qname": row.qname,
-        "reporting_name": row.reporting_name,
-        "classification": row.classification,
-        "balance_type": row.balance_type,
-        "total_debits": debits,
-        "total_credits": credits,
-        "net_balance": debits - credits,
-      }
+      MappedTrialBalanceRow(
+        reporting_element_id=row.reporting_element_id,
+        qname=row.qname,
+        reporting_name=row.reporting_name,
+        classification=row.classification,
+        balance_type=row.balance_type,
+        total_debits=debits,
+        total_credits=credits,
+        net_balance=debits - credits,
+      )
     )
 
-  return {"rows": rows, "mapping_id": mapping_id}
+  return MappedTrialBalanceResponse(mapping_id=mapping_id, rows=rows)

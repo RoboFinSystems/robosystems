@@ -30,6 +30,7 @@ from robosystems.graphql.types.ledger import (
   LedgerSummary,
   LedgerTransactionDetail,
   LedgerTransactionList,
+  MappedTrialBalance,
   MappingCoverage,
   MappingDetail,
   PeriodCloseStatus,
@@ -94,6 +95,32 @@ from robosystems.operations.roboledger.schedules import ScheduleService
 _fiscal_svc = FiscalCalendarService()
 _schedule_svc = ScheduleService()
 
+# Pagination bounds — mirror the retired REST `Query(..., ge=N, le=M)`.
+_MIN_LIMIT = 1
+_MAX_LIMIT = 1000
+_MIN_OFFSET = 0
+
+
+def _validate_pagination(limit: int, offset: int) -> None:
+  """Reject out-of-range pagination args at the resolver boundary.
+
+  Strawberry doesn't have a `Field(ge=…, le=…)` equivalent, so the
+  bounds that the retired REST endpoints enforced via FastAPI's
+  `Query(..., ge=N, le=M)` are reasserted here. Raising a
+  `StrawberryGraphQLError` surfaces a clean GraphQL error rather than
+  a 500 — same shape as authentication failures.
+  """
+  if not _MIN_LIMIT <= limit <= _MAX_LIMIT:
+    raise strawberry.exceptions.StrawberryGraphQLError(
+      message=f"limit must be between {_MIN_LIMIT} and {_MAX_LIMIT}",
+      extensions={"code": "INVALID_PAGINATION"},
+    )
+  if offset < _MIN_OFFSET:
+    raise strawberry.exceptions.StrawberryGraphQLError(
+      message=f"offset must be >= {_MIN_OFFSET}",
+      extensions={"code": "INVALID_PAGINATION"},
+    )
+
 
 def _open_session(info: Info[GraphQLContext, None], graph_id: str):
   """Shared auth + session-open prelude for every ledger resolver."""
@@ -150,8 +177,21 @@ class LedgerQuery:
   def summary(
     self, info: Info[GraphQLContext, None], graph_id: strawberry.ID
   ) -> LedgerSummary | None:
-    """Ledger counts + date range + connection metadata."""
+    """Ledger counts + date range + connection metadata.
+
+    Wire-compatible with the retired `GET /v1/ledger/{g}/summary` REST
+    endpoint — opens both an extensions session (for counts/dates) and
+    a platform DB session (for QB connection metadata) and merges them
+    into a single response. Connection-DB failures degrade gracefully
+    (zero count, null timestamp) rather than aborting the whole field.
+    """
+    import logging
+
+    from sqlalchemy import func, select
+
+    from robosystems.database import get_db_session
     from robosystems.models.api.extensions.summary import LedgerSummaryResponse
+    from robosystems.models.core.connection.connection import Connection
 
     try:
       with _open_session(info, str(graph_id)) as session:
@@ -159,11 +199,30 @@ class LedgerQuery:
     except (ValueError, ProgrammingError):
       return None
 
-    # Note: GraphQL does not return connection metadata from platform DB;
-    # the REST endpoint merges it in, but for the GraphQL read surface we
-    # keep ops-only state and let the frontend fetch connection stats
-    # separately if it needs them. Matches the REST schema shape but
-    # `connection_count` / `last_sync_at` default to 0 / null here.
+    # Connection metadata from platform DB. Failures are non-fatal.
+    connection_count = 0
+    last_sync_at = None
+    gen = None
+    try:
+      gen = get_db_session()
+      platform_db = next(gen)
+      conn_result = platform_db.execute(
+        select(func.count(), func.max(Connection.last_sync)).where(
+          Connection.graph_id == str(graph_id)
+        )
+      ).one()
+      connection_count = conn_result[0] or 0
+      last_sync_at = conn_result[1]
+    except Exception:
+      logging.getLogger(__name__).warning(
+        "Failed to fetch connection metadata for %s",
+        graph_id,
+        exc_info=True,
+      )
+    finally:
+      if gen is not None and hasattr(gen, "close"):
+        gen.close()
+
     response = LedgerSummaryResponse(
       graph_id=str(graph_id),
       account_count=counts.account_count,
@@ -172,6 +231,8 @@ class LedgerQuery:
       line_item_count=counts.line_item_count,
       earliest_transaction_date=counts.earliest_transaction_date,
       latest_transaction_date=counts.latest_transaction_date,
+      connection_count=connection_count,
+      last_sync_at=last_sync_at,
     )
     return LedgerSummary.from_pydantic(response)
 
@@ -188,6 +249,7 @@ class LedgerQuery:
     offset: int = 0,
   ) -> AccountList | None:
     """Paginated Chart of Accounts listing."""
+    _validate_pagination(limit, offset)
     try:
       with _open_session(info, str(graph_id)) as session:
         response = reads_accounts.list_accounts(
@@ -274,6 +336,7 @@ class LedgerQuery:
     offset: int = 0,
   ) -> LedgerTransactionList | None:
     """Paginated list of transactions."""
+    _validate_pagination(limit, offset)
     try:
       with _open_session(info, str(graph_id)) as session:
         response = reads_transactions.list_transactions(
@@ -353,6 +416,7 @@ class LedgerQuery:
     offset: int = 0,
   ) -> ElementList | None:
     """Paginated list of taxonomy elements."""
+    _validate_pagination(limit, offset)
     try:
       with _open_session(info, str(graph_id)) as session:
         response = reads_taxonomies.list_elements(
@@ -448,6 +512,25 @@ class LedgerQuery:
     except (ValueError, ProgrammingError):
       return None
     return MappingCoverage.from_pydantic(response)
+
+  @strawberry.field
+  def mapped_trial_balance(
+    self,
+    info: Info[GraphQLContext, None],
+    graph_id: strawberry.ID,
+    mapping_id: str,
+    start_date: str | None = None,
+    end_date: str | None = None,
+  ) -> MappedTrialBalance | None:
+    """Trial balance rolled up to reporting concepts via mapping associations."""
+    try:
+      with _open_session(info, str(graph_id)) as session:
+        response = reads_taxonomies.get_mapped_trial_balance(
+          session, mapping_id, start_date=start_date, end_date=end_date
+        )
+    except (ValueError, ProgrammingError):
+      return None
+    return MappedTrialBalance.from_pydantic(response)
 
   # ── Schedules ───────────────────────────────────────────────────────────
 
@@ -630,6 +713,7 @@ class LedgerQuery:
     offset: int = 0,
   ) -> PublishListList | None:
     """Paginated list of publish lists for this graph."""
+    _validate_pagination(limit, offset)
     try:
       with _open_session(info, str(graph_id)) as session:
         response = reads_publish_lists.list_publish_lists(

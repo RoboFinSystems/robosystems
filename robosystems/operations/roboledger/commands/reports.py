@@ -160,11 +160,18 @@ def create_report(
 
 def regenerate_report(
   session: Session,
+  graph_id: str,
   report_id: str,
   body: RegenerateReportRequest,
   acting_user_id: str,
 ) -> ReportResponse:
   """Regenerate a report with new period dates.
+
+  `graph_id` is only used by the internal `_get_entity_id` error
+  message — `Report` rows don't store a graph_id column (the tenant
+  graph is the schema, not a field). Passed through explicitly so
+  the route handler's path parameter flows to the ops layer rather
+  than relying on a non-existent model attribute.
 
   Raises:
     ReportNotFoundError: report_id doesn't resolve.
@@ -208,7 +215,7 @@ def regenerate_report(
     periods=periods,
   )
 
-  entity_id = _get_entity_id(session, report_def.graph_id or "")
+  entity_id = _get_entity_id(session, graph_id)
   _persist_report_facts(session, report_def.id, facts, entity_id)
 
   report_def.generation_status = "published"

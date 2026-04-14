@@ -44,15 +44,15 @@ MAIN_API_TAGS = [
   },
   {
     "name": "Extensions: GraphQL",
-    "description": "🧩 Extensions GraphQL - Unified GraphQL endpoint for extensions reads (roboledger, roboinvestor)",
+    "description": "🧩 GraphQL endpoint - Unified GraphQL endpoint for extensions read queries",
   },
   {
-    "name": "Extensions: RoboLedger Operations",
-    "description": "📒 RoboLedger operations - Named command endpoints for accounting writes (close-period, create-report, etc.)",
+    "name": "Extensions: RoboLedger",
+    "description": "📒 RoboLedger operations - Named command endpoints for accounting writes",
   },
   {
-    "name": "Extensions: RoboInvestor Operations",
-    "description": "📈 RoboInvestor operations - Named command endpoints for portfolio writes (create-portfolio, update-position, etc.)",
+    "name": "Extensions: RoboInvestor",
+    "description": "📈 RoboInvestor operations - Named command endpoints for portfolio writes",
   },
   {
     "name": "Backup",

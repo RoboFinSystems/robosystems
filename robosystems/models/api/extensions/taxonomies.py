@@ -188,3 +188,26 @@ class UnmappedElementResponse(BaseModel):
   balance_type: str
   external_source: str | None = None
   suggested_targets: list[SuggestedTarget] = Field(default_factory=list)
+
+
+# ── Mapped Trial Balance ──────────────────────────────────────────────────
+
+
+class MappedTrialBalanceRow(BaseModel):
+  """One reporting-concept row in the mapped trial balance."""
+
+  reporting_element_id: str
+  qname: str
+  reporting_name: str
+  classification: str | None = None
+  balance_type: str | None = None
+  total_debits: float
+  total_credits: float
+  net_balance: float
+
+
+class MappedTrialBalanceResponse(BaseModel):
+  """Trial balance rolled up to reporting concepts via mapping associations."""
+
+  mapping_id: str
+  rows: list[MappedTrialBalanceRow] = Field(default_factory=list)

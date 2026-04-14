@@ -328,13 +328,22 @@ def create_app() -> FastAPI:
   # Mounts appear further down in this function.
 
   # Extensions GraphQL endpoint (Strawberry). Serves read-heavy extensions
-  # queries (roboledger, roboinvestor) at /extensions/graphql. Mutations and
-  # core platform concerns stay on /v1/* REST.
+  # queries (roboledger, roboinvestor) at /extensions/graphql.
+  #
+  # Rate limiting: the same `subscription_aware_rate_limit_dependency` that
+  # protected the retired REST reads is applied at mount time, so every
+  # request to /extensions/graphql counts against the caller's burst
+  # window before Strawberry parses the query. (GraphQL doesn't use
+  # FastAPI dependencies per resolver, so router-level is the right hook.)
   if env.EXTENSIONS_GRAPHQL_ENABLED and (env.LEDGER_ENABLED or env.INVESTOR_ENABLED):
+    from fastapi import Depends as _Depends
     from strawberry.fastapi import GraphQLRouter
 
     from robosystems.graphql import schema as extensions_graphql_schema
     from robosystems.graphql.context import get_context as graphql_context_getter
+    from robosystems.middleware.rate_limits import (
+      subscription_aware_rate_limit_dependency,
+    )
 
     graphql_router = GraphQLRouter(
       extensions_graphql_schema,
@@ -347,6 +356,7 @@ def create_app() -> FastAPI:
       prefix="/extensions/graphql",
       tags=["Extensions: GraphQL"],
       include_in_schema=True,
+      dependencies=[_Depends(subscription_aware_rate_limit_dependency)],
     )
 
   # Extensions REST operation surface — `POST /extensions/{domain}/{graph_id}/operations/{op_name}`.

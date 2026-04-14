@@ -83,7 +83,7 @@ from robosystems.operations.roboinvestor.commands.securities import (
 
 router = APIRouter()
 
-_OP_TAG = "Extensions: RoboInvestor Operations"
+_OP_TAG = "Extensions: RoboInvestor"
 _RATE_LIMIT = Depends(subscription_aware_rate_limit_dependency)
 
 

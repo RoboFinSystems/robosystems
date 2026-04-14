@@ -525,6 +525,54 @@ class TestExecuteOperationFailurePath:
 
     assert cache.store == {}  # failures must not be cached
 
+  @pytest.mark.asyncio
+  async def test_unexpected_exception_audited_and_re_raised(self) -> None:
+    """Non-HTTPException failures must still produce a failed audit line.
+
+    Regression: an earlier version only caught HTTPException, so a bare
+    `RuntimeError` (or `IntegrityError` from SQLAlchemy, or `KeyError`,
+    etc.) would 500 with no audit record at all.
+    """
+    ctx = _make_ctx(operation_name="buggy-op")
+
+    def _runner():
+      raise RuntimeError("kaboom")
+
+    with (
+      patch.object(middleware_module.logger, "error") as error_mock,
+      pytest.raises(RuntimeError) as exc_info,
+    ):
+      await execute_operation(ctx, _runner)
+
+    assert "kaboom" in str(exc_info.value)
+    audit_calls = [
+      c for c in error_mock.call_args_list if c.kwargs.get("extra", {}).get("audit")
+    ]
+    assert len(audit_calls) == 1
+    audit = audit_calls[0].kwargs["extra"]["audit"]
+    assert audit["status"] == "failed"
+    assert audit["operation"] == "buggy-op"
+    # The error string includes the exception type for triage
+    assert "RuntimeError" in audit["error"]
+    assert "kaboom" in audit["error"]
+
+  @pytest.mark.asyncio
+  async def test_unexpected_exception_not_cached(self) -> None:
+    """Bare exceptions must not poison the idempotency cache either."""
+    ctx = _make_ctx(idempotency_key="key-bare-fail")
+    cache = _FakeIdempotencyCache()
+
+    def _runner():
+      raise KeyError("missing")
+
+    with (
+      patch.object(middleware_module.logger, "error"),
+      pytest.raises(KeyError),
+    ):
+      await execute_operation(ctx, _runner, idempotency_cache=cache)
+
+    assert cache.store == {}
+
 
 class TestExecuteOperationIdempotency:
   @pytest.mark.asyncio

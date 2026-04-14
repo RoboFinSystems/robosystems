@@ -47,6 +47,8 @@ from robosystems.middleware.extensions import (
   OperationEnvelope,
   execute_operation,
   get_idempotency_cache,
+  log_operation_audit,
+  wrap_pending,
 )
 from robosystems.middleware.graph.types import GRAPH_OR_SUBGRAPH_ID_PATTERN
 from robosystems.middleware.rate_limits import subscription_aware_rate_limit_dependency
@@ -79,6 +81,7 @@ from robosystems.models.api.extensions.taxonomies import (
   CreateTaxonomyRequest,
 )
 from robosystems.models.core import User
+from robosystems.operations.extensions.staleness import mark_graph_stale
 from robosystems.operations.roboledger.commands.entity import update_parent_entity
 from robosystems.operations.roboledger.commands.fiscal_calendar import (
   PeriodNotClosedError,
@@ -190,7 +193,7 @@ from robosystems.operations.roboledger.schedules import ScheduleService
 
 router = APIRouter()
 
-_OP_TAG = "Extensions: RoboLedger Operations"
+_OP_TAG = "Extensions: RoboLedger"
 _RATE_LIMIT = Depends(subscription_aware_rate_limit_dependency)
 
 # Stateless service singletons reused across requests (same pattern
@@ -624,7 +627,9 @@ async def create_schedule_op(
         raise _ledger_404()
       raise
 
-  return await execute_operation(ctx, _runner, idempotency_cache=cache)
+  envelope = await execute_operation(ctx, _runner, idempotency_cache=cache)
+  mark_graph_stale(graph_id, "schedule_created")
+  return envelope
 
 
 @router.post(
@@ -667,7 +672,9 @@ async def truncate_schedule_op(
         raise _ledger_404()
       raise
 
-  return await execute_operation(ctx, _runner, idempotency_cache=cache)
+  envelope = await execute_operation(ctx, _runner, idempotency_cache=cache)
+  mark_graph_stale(graph_id, "schedule_truncated")
+  return envelope
 
 
 @router.post(
@@ -710,7 +717,9 @@ async def create_closing_entry_op(
         raise _ledger_404()
       raise
 
-  return await execute_operation(ctx, _runner, idempotency_cache=cache)
+  envelope = await execute_operation(ctx, _runner, idempotency_cache=cache)
+  mark_graph_stale(graph_id, "closing_entry_created")
+  return envelope
 
 
 @router.post(
@@ -749,7 +758,9 @@ async def create_manual_closing_entry_op(
         raise _ledger_404()
       raise
 
-  return await execute_operation(ctx, _runner, idempotency_cache=cache)
+  envelope = await execute_operation(ctx, _runner, idempotency_cache=cache)
+  mark_graph_stale(graph_id, "manual_entry_created")
+  return envelope
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -907,6 +918,95 @@ async def delete_mapping_association_op(
   return await execute_operation(ctx, _runner, idempotency_cache=cache)
 
 
+class AutoMapElementsOperation(BaseModel):
+  """Request body for the auto-map-elements async operation."""
+
+  mapping_id: str
+
+
+@router.post(
+  "/auto-map-elements",
+  response_model=OperationEnvelope,
+  status_code=202,
+  operation_id="opAutoMapElements",
+  summary="Auto-Map Elements via AI (async)",
+  tags=[_OP_TAG],
+  dependencies=[_RATE_LIMIT],
+)
+async def auto_map_elements_op(
+  body: AutoMapElementsOperation,
+  graph_id: str = Path(..., pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN),
+  user: User = Depends(get_current_user_with_graph),
+  idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
+  cache: IdempotencyCache = Depends(get_idempotency_cache),
+) -> OperationEnvelope:
+  """Trigger autonomous CoA → US GAAP mapping via background worker.
+
+  This is the only async/Dagster-dispatched ledger operation. Instead
+  of running synchronously, it enqueues a `MappingAgent` task and
+  returns a `pending` envelope with the worker-issued operation_id —
+  callers subscribe via `/v1/operations/{operation_id}/stream` for SSE
+  progress events.
+
+  Confidence thresholds (in the agent):
+  - ≥0.90: auto-approved mapping
+  - 0.70-0.89: flagged for review
+  - <0.70: skipped (left unmapped)
+  """
+  from robosystems.worker.client import enqueue_task
+
+  op_name = "auto-map-elements"
+
+  # Idempotency cache lookup (manual — execute_operation handles it for
+  # sync ops, but pending ops bypass that path because they don't
+  # produce a normal `result` payload).
+  if idempotency_key is not None:
+    cached = await cache.get(graph_id, op_name, idempotency_key)
+    if cached is not None:
+      log_operation_audit(
+        operation_name=op_name,
+        operation_id=cached.operation_id,
+        user_id=str(user.id),
+        graph_id=graph_id,
+        duration_ms=0.0,
+        status=cached.status,
+        idempotency_key=idempotency_key,
+        idempotent_replay=True,
+      )
+      return cached
+
+  task_response = await enqueue_task(
+    task_type="agent",
+    graph_id=graph_id,
+    user_id=str(user.id),
+    params={"agent_type": "mapping", "mapping_id": body.mapping_id},
+  )
+
+  envelope = wrap_pending(
+    op_name,
+    operation_id=task_response["operation_id"],
+    partial_result={
+      "operation_type": task_response.get("operation_type"),
+      "links": task_response.get("_links"),
+      "deduplicated": task_response.get("deduplicated", False),
+    },
+  )
+
+  if idempotency_key is not None:
+    await cache.put(graph_id, op_name, idempotency_key, envelope)
+
+  log_operation_audit(
+    operation_name=op_name,
+    operation_id=envelope.operation_id,
+    user_id=str(user.id),
+    graph_id=graph_id,
+    duration_ms=0.0,
+    status="pending",
+    idempotency_key=idempotency_key,
+  )
+  return envelope
+
+
 # ═══════════════════════════════════════════════════════════════════════════
 # Report operations
 # ═══════════════════════════════════════════════════════════════════════════
@@ -952,7 +1052,9 @@ async def create_report_op(
         raise
       raise _ledger_404()
 
-  return await execute_operation(ctx, _runner, idempotency_cache=cache)
+  envelope = await execute_operation(ctx, _runner, idempotency_cache=cache)
+  mark_graph_stale(graph_id, "report_generated")
+  return envelope
 
 
 @router.post(
@@ -983,7 +1085,7 @@ async def regenerate_report_op(
       with extensions_session(graph_id) as session:
         try:
           return cmd_regenerate_report(
-            session, body.report_id, body, acting_user_id=str(user.id)
+            session, graph_id, body.report_id, body, acting_user_id=str(user.id)
           )
         except ReportNotFoundError:
           raise HTTPException(
@@ -998,7 +1100,9 @@ async def regenerate_report_op(
     except (ValueError, ProgrammingError):
       raise _ledger_404()
 
-  return await execute_operation(ctx, _runner, idempotency_cache=cache)
+  envelope = await execute_operation(ctx, _runner, idempotency_cache=cache)
+  mark_graph_stale(graph_id, "report_generated")
+  return envelope
 
 
 @router.post(

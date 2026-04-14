@@ -36,6 +36,28 @@ from robosystems.operations.roboinvestor.reads import (
   securities as reads_securities,
 )
 
+_MIN_LIMIT = 1
+_MAX_LIMIT = 1000
+_MIN_OFFSET = 0
+
+
+def _validate_pagination(limit: int, offset: int) -> None:
+  """Reject out-of-range pagination args at the resolver boundary.
+
+  Mirrors the retired REST `Query(..., ge=N, le=M)` bounds so the new
+  GraphQL surface can't be used to issue unbounded list reads.
+  """
+  if not _MIN_LIMIT <= limit <= _MAX_LIMIT:
+    raise strawberry.exceptions.StrawberryGraphQLError(
+      message=f"limit must be between {_MIN_LIMIT} and {_MAX_LIMIT}",
+      extensions={"code": "INVALID_PAGINATION"},
+    )
+  if offset < _MIN_OFFSET:
+    raise strawberry.exceptions.StrawberryGraphQLError(
+      message=f"offset must be >= {_MIN_OFFSET}",
+      extensions={"code": "INVALID_PAGINATION"},
+    )
+
 
 def _open_session(info: Info[GraphQLContext, None], graph_id: str):
   """Shared auth + session-open prelude for every investor resolver."""
@@ -64,6 +86,7 @@ class InvestorQuery:
     offset: int = 0,
   ) -> PortfolioList | None:
     """Paginated list of portfolios."""
+    _validate_pagination(limit, offset)
     try:
       with _open_session(info, str(graph_id)) as session:
         response = reads_portfolios.list_portfolios(session, limit=limit, offset=offset)
@@ -102,6 +125,7 @@ class InvestorQuery:
     offset: int = 0,
   ) -> SecurityList | None:
     """Paginated list of securities."""
+    _validate_pagination(limit, offset)
     try:
       with _open_session(info, str(graph_id)) as session:
         response = reads_securities.list_securities(
@@ -147,6 +171,7 @@ class InvestorQuery:
     offset: int = 0,
   ) -> PositionList | None:
     """Paginated list of positions."""
+    _validate_pagination(limit, offset)
     try:
       with _open_session(info, str(graph_id)) as session:
         response = reads_positions.list_positions(

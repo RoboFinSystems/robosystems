@@ -407,7 +407,14 @@ async def execute_operation(
       )
       return cached
 
-  # 2. Run + time + translate HTTPException → failed audit
+  # 2. Run + time + audit any failure (HTTPException OR otherwise)
+  #
+  # We catch HTTPException and bare Exception separately so that:
+  #   - HTTPException still propagates with its original status code +
+  #     detail (FastAPI converts to a JSON error response).
+  #   - Any other exception (RuntimeError, IntegrityError, KeyError, …)
+  #     also produces a failed audit line before re-raising. Without
+  #     this, a buggy command would 500 with no audit record at all.
   start = time.monotonic()
   try:
     maybe_result = runner()
@@ -426,6 +433,19 @@ async def execute_operation(
       status="failed",
       idempotency_key=ctx.idempotency_key,
       error=str(exc.detail),
+    )
+    raise
+  except Exception as exc:
+    duration_ms = (time.monotonic() - start) * 1000
+    log_operation_audit(
+      operation_name=ctx.operation_name,
+      operation_id=generate_operation_id(),
+      user_id=ctx.user_id,
+      graph_id=ctx.graph_id,
+      duration_ms=duration_ms,
+      status="failed",
+      idempotency_key=ctx.idempotency_key,
+      error=f"{type(exc).__name__}: {exc}",
     )
     raise
 

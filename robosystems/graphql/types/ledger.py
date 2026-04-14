@@ -133,6 +133,12 @@ from robosystems.models.api.extensions.taxonomies import (
   ElementResponse as PydanticElementResponse,
 )
 from robosystems.models.api.extensions.taxonomies import (
+  MappedTrialBalanceResponse as PydanticMappedTrialBalanceResponse,
+)
+from robosystems.models.api.extensions.taxonomies import (
+  MappedTrialBalanceRow as PydanticMappedTrialBalanceRow,
+)
+from robosystems.models.api.extensions.taxonomies import (
   MappingCoverageResponse as PydanticMappingCoverageResponse,
 )
 from robosystems.models.api.extensions.taxonomies import (
@@ -606,3 +612,20 @@ class PublishListDetail:
 )
 class PublishListList:
   """Paginated list of publish lists."""
+
+
+# ── Mapped trial balance ──────────────────────────────────────────────────
+
+
+@strawberry.experimental.pydantic.type(
+  model=PydanticMappedTrialBalanceRow, all_fields=True
+)
+class MappedTrialBalanceRow:
+  """Single reporting-concept row in the mapped trial balance."""
+
+
+@strawberry.experimental.pydantic.type(
+  model=PydanticMappedTrialBalanceResponse, all_fields=True
+)
+class MappedTrialBalance:
+  """Trial balance rolled up to reporting concepts via mapping associations."""

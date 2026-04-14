@@ -333,3 +333,44 @@ class TestHelloResolver:
     )
     assert result.errors is None
     assert result.data == {"hello": "hello, alice@example.com"}
+
+
+class TestPaginationBounds:
+  """Mirror the retired REST `Query(..., ge=N, le=M)` validation.
+
+  GraphQL doesn't have native scalar bounds, so resolvers call
+  `_validate_pagination(limit, offset)` and raise a clean GraphQL
+  error rather than passing unbounded values through to SQL.
+  """
+
+  def test_limit_too_small_rejected(self) -> None:
+    result = schema.execute_sync(
+      f'query {{ accounts(graphId: "{GRAPH_ID}", limit: 0) {{ pagination {{ total }} }} }}',
+      context_value=_ctx(),
+    )
+    assert result.errors is not None
+    assert any("limit must be between" in str(e.message) for e in result.errors)
+
+  def test_limit_too_large_rejected(self) -> None:
+    result = schema.execute_sync(
+      f'query {{ accounts(graphId: "{GRAPH_ID}", limit: 5000) {{ pagination {{ total }} }} }}',
+      context_value=_ctx(),
+    )
+    assert result.errors is not None
+    assert any("limit must be between" in str(e.message) for e in result.errors)
+
+  def test_negative_offset_rejected(self) -> None:
+    result = schema.execute_sync(
+      f'query {{ accounts(graphId: "{GRAPH_ID}", offset: -1) {{ pagination {{ total }} }} }}',
+      context_value=_ctx(),
+    )
+    assert result.errors is not None
+    assert any("offset must be" in str(e.message) for e in result.errors)
+
+  def test_bounds_apply_to_transactions_too(self) -> None:
+    result = schema.execute_sync(
+      f'query {{ transactions(graphId: "{GRAPH_ID}", limit: 99999) {{ pagination {{ total }} }} }}',
+      context_value=_ctx(),
+    )
+    assert result.errors is not None
+    assert any("limit must be between" in str(e.message) for e in result.errors)
