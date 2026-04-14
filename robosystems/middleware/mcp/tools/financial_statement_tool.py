@@ -5,12 +5,16 @@ Routing is determined by graph type, not by ticker presence:
 
 1. Shared repository (e.g., SEC): query the SEC graph via Structure → FactSet
    → Fact traversal. Ticker is REQUIRED — it identifies which public company's
-   filings to pull.
+   filings to pull. This path runs raw Cypher against LadybugDB and is the
+   only tool surface where that traversal lives — no ops-layer wrapper.
 
 2. User graph with roboledger extension: generate the statement from the
    current graph's OLTP ledger data, rendered through the same structure
-   hierarchy. Ticker is OPTIONAL — it's a universal entity symbol (like a
-   JIRA project key) used as a label, but routing is based on graph type.
+   hierarchy. Ticker is OPTIONAL — it's a universal entity symbol used as a
+   label, but routing is based on graph type. This path delegates to
+   `operations/roboledger/reads/{reports,fiscal_calendar}.py` so MCP,
+   GraphQL, and any future REST adhoc-statement endpoint share one
+   implementation.
 """
 
 from __future__ import annotations
@@ -18,7 +22,16 @@ from __future__ import annotations
 from datetime import date, timedelta
 from typing import Any
 
+from robosystems.db.extensions import extensions_session
 from robosystems.logger import logger
+from robosystems.operations.roboledger.reads.fiscal_calendar import (
+  get_fiscal_year_start_month,
+)
+from robosystems.operations.roboledger.reads.reports import (
+  CoaMappingNotFoundError,
+  generate_adhoc_private_statement,
+)
+from robosystems.operations.roboledger.reports.fact_grid import PeriodSpec
 
 from .base_tool import BaseTool
 
@@ -278,18 +291,11 @@ For balance sheets, only instant-period facts are returned. For other statements
   def _fiscal_year_start_month(self, graph_id: str) -> int:
     """Look up the graph's fiscal year start month, defaulting to January."""
     try:
-      from robosystems.db.extensions import extensions_session
-      from robosystems.models.extensions.roboledger.fiscal_calendar import (
-        FiscalCalendar,
-      )
-
       with extensions_session(graph_id) as session:
-        cal = session.query(FiscalCalendar).first()
-        if cal and cal.fiscal_year_start_month:
-          return int(cal.fiscal_year_start_month)
+        return get_fiscal_year_start_month(session)
     except Exception as e:
       logger.debug(f"Fiscal year start month lookup failed for {graph_id}: {e}")
-    return 1
+      return 1
 
   def _is_shared_repository(self) -> bool:
     """Check whether the current graph is a shared repository (e.g., SEC).
@@ -336,14 +342,6 @@ For balance sheets, only instant-period facts are returned. For other statements
     ``limit`` caps the number of fact rows returned, mirroring the public
     company path.
     """
-    from robosystems.db.extensions import extensions_session
-    from robosystems.models.extensions.roboledger import Structure
-    from robosystems.operations.roboledger.reports.fact_grid import (
-      PeriodSpec,
-      generate_report_facts,
-      render_structure_view,
-    )
-
     graph_id = self.client.graph_id
 
     # Resolve window: explicit dates win over period_type defaults.
@@ -367,37 +365,17 @@ For balance sheets, only instant-period facts are returned. For other statements
 
     try:
       with extensions_session(graph_id) as session:
-        # Find the mapping structure (type is "coa_mapping")
-        mapping = (
-          session.query(Structure)
-          .filter(
-            Structure.structure_type == "coa_mapping",
+        try:
+          grid, unmapped_count = generate_adhoc_private_statement(
+            session,
+            statement_type=statement_type,
+            periods=periods,
           )
-          .first()
-        )
-        if not mapping:
+        except CoaMappingNotFoundError as exc:
           return {
-            "error": "No CoA→GAAP mapping found. Run the mapping workflow first.",
+            "error": str(exc),
             "statement_type": statement_type,
           }
-
-        # Generate facts from OLTP. The synthetic retained-earnings
-        # adjustment always runs from inception; it's safe because real
-        # closing entries zero out the rev/exp accounts they close.
-        facts = generate_report_facts(
-          session=session,
-          taxonomy_id="tax_usgaap_reporting",
-          mapping_id=mapping.id,
-          periods=periods,
-        )
-
-        # Render through the structure hierarchy
-        grid = render_structure_view(
-          session=session,
-          facts=facts.facts,
-          structure_type=statement_type,
-          periods=periods,
-        )
 
       # Format output to match the public company response shape
       result: dict[str, Any] = {
@@ -409,7 +387,7 @@ For balance sheets, only instant-period facts are returned. For other statements
         ],
         "facts": [],
         "fact_count": 0,
-        "unmapped_count": facts.unmapped_count,
+        "unmapped_count": unmapped_count,
       }
 
       for row in grid.rows:

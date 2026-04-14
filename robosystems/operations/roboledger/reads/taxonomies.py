@@ -153,6 +153,56 @@ def list_elements(
   )
 
 
+def count_coa_elements(session: Session) -> int:
+  """Count active, non-abstract Chart-of-Accounts elements."""
+  return (
+    session.execute(
+      select(func.count())
+      .select_from(Element)
+      .where(
+        Element.source.in_(_COA_SOURCES),
+        Element.is_active.is_(True),
+        Element.is_abstract.is_(False),
+      )
+    ).scalar()
+    or 0
+  )
+
+
+def get_element(session: Session, element_id: str) -> ElementResponse | None:
+  """Return a single element by id, or None if missing."""
+  row = session.execute(
+    select(Element).where(Element.id == element_id)
+  ).scalar_one_or_none()
+  if row is None:
+    return None
+  return element_to_response(row)
+
+
+def suggest_mapping_candidates(
+  session: Session, classification: str
+) -> list[ElementResponse]:
+  """Return reporting-taxonomy elements (us-gaap / sfac6) matching a classification.
+
+  Used by the MCP `suggest-mapping` tool to narrow CoA → reporting concept
+  candidates by the source element's classification.
+  """
+  rows = (
+    session.execute(
+      select(Element)
+      .where(
+        Element.source.in_(("us-gaap", "sfac6")),
+        Element.classification == classification,
+        Element.is_active.is_(True),
+      )
+      .order_by(Element.depth, Element.name)
+    )
+    .scalars()
+    .all()
+  )
+  return [element_to_response(r) for r in rows]
+
+
 def list_unmapped_elements(
   session: Session, mapping_id: str | None = None
 ) -> list[UnmappedElementResponse]:

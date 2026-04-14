@@ -354,7 +354,9 @@ For income statement items (revenue, net income), always specify period_type='an
 
       # Build fact grid using existing FactGridBuilder
       from robosystems.models.api.views import ViewAxisConfig, ViewConfig
-      from robosystems.operations.views.fact_grid_builder import FactGridBuilder
+      from robosystems.operations.roboledger.views.fact_grid_builder import (
+        FactGridBuilder,
+      )
 
       # Create view config
       row_configs = [ViewAxisConfig(**r) for r in rows] if rows else []

@@ -13,105 +13,77 @@ Initialize and set-close-target are deliberately NOT exposed as MCP tools:
 initialize is a one-time onboarding operation done via the UI, and
 set-close-target is a configuration action that normal close workflows
 don't need (auto-advance handles it). Both are still available via REST.
+
+All three tools route through `operations/roboledger/{reads,commands}/
+fiscal_calendar.py` so MCP, GraphQL, and the REST operation surface
+share one source of truth for both behavior and wire shape.
 """
 
-from datetime import datetime
+from contextlib import contextmanager
 from typing import Any
 
+from robosystems.database import get_db_session
+from robosystems.db.extensions import extensions_session
 from robosystems.logger import logger
+from robosystems.operations.roboledger.commands.fiscal_calendar import (
+  PeriodNotClosedError,
+  PeriodNotFoundInLedgerError,
+)
+from robosystems.operations.roboledger.commands.fiscal_calendar import (
+  close_period as ops_close_period,
+)
+from robosystems.operations.roboledger.commands.fiscal_calendar import (
+  reopen_period as ops_reopen_period,
+)
+from robosystems.operations.roboledger.fiscal_calendar import (
+  CloseGateFailed,
+  FiscalCalendarError,
+  FiscalCalendarService,
+  PeriodNotFoundError,
+  UnbalancedLedgerError,
+)
+from robosystems.operations.roboledger.fiscal_calendar.close_service import (
+  PeriodCloseService,
+)
+from robosystems.operations.roboledger.reads.fiscal_calendar import (
+  build_fiscal_calendar_response,
+  qb_sync_state,
+)
 
 
-def _build_response_payload(session, graph_id: str, calendar) -> dict[str, Any]:
-  """Assemble a fiscal-calendar state dict identical to the REST response.
+@contextmanager
+def _platform_session():
+  """Context-manager wrapper around the FastAPI dependency-style generator.
 
-  Keeps the response shape consistent with the `fiscalCalendar` GraphQL
-  read so Claude sees the same fields whether it called via MCP or
-  GraphQL.
+  `get_db_session()` is a generator so it can act as a FastAPI dependency.
+  MCP tools aren't running inside FastAPI's dependency machinery, so we
+  drive the generator manually here to get standard `with`-block semantics.
   """
-  from robosystems.models.extensions.roboledger.fiscal_period import FiscalPeriod
-  from robosystems.operations.roboledger.fiscal_calendar import FiscalCalendarService
-
-  svc = FiscalCalendarService()
-  periods = (
-    session.query(FiscalPeriod)
-    .filter(FiscalPeriod.graph_id == graph_id)
-    .order_by(FiscalPeriod.start_date)
-    .all()
-  )
-
-  catch_up = svc.catch_up_sequence(calendar, session=session, graph_id=graph_id)
-  next_to_close = catch_up[0] if catch_up else None
-  gate = None
-  has_sync, last_sync_at = _get_qb_sync_state(graph_id)
-  if next_to_close is not None:
-    gate = svc.closeable_gate(
-      session,
-      graph_id,
-      next_to_close,
-      has_sync_connection=has_sync,
-      last_sync_at=last_sync_at,
-    )
-
-  return {
-    "graph_id": graph_id,
-    "fiscal_year_start_month": calendar.fiscal_year_start_month,
-    "closed_through": calendar.closed_through_period,
-    "close_target": calendar.close_target_period,
-    "gap_periods": len(catch_up),
-    "catch_up_sequence": catch_up,
-    "closeable_now": gate.is_closeable if gate else False,
-    "blockers": gate.blockers if gate else [],
-    "last_close_at": calendar.last_close_at.isoformat()
-    if calendar.last_close_at
-    else None,
-    "initialized_at": calendar.initialized_at.isoformat()
-    if calendar.initialized_at
-    else None,
-    "has_sync_connection": has_sync,
-    "last_sync_at": last_sync_at.isoformat() if last_sync_at else None,
-    "periods": [
-      {
-        "name": p.name,
-        "start_date": str(p.start_date),
-        "end_date": str(p.end_date),
-        "status": p.status,
-        "closed_at": p.closed_at.isoformat() if p.closed_at else None,
-      }
-      for p in periods
-    ],
-  }
-
-
-def _get_qb_sync_state(graph_id: str) -> tuple[bool, datetime | None]:
-  """Look up QB connection state from the platform DB.
-
-  Returns (has_connection, last_sync_at). A connection that exists but has
-  never synced returns (True, None) — the close gate treats this as stale
-  and blocks. No connection at all returns (False, None) which passes the gate.
-  """
-  from robosystems.database import get_db_session
-  from robosystems.models.core.connection.connection import Connection
-
-  db_gen = get_db_session()
-  db = next(db_gen)
+  gen = get_db_session()
+  db = next(gen)
   try:
-    # A graph can have multiple QB connection rows (disconnected/old/new).
-    # Prefer a currently-connected one; fall back to the most recently updated.
-    # `.first()` (not `.one_or_none()`) avoids a MultipleResultsFound crash.
-    conn = (
-      db.query(Connection)
-      .filter(Connection.graph_id == graph_id, Connection.provider == "quickbooks")
-      .order_by(
-        (Connection.status == "connected").desc(),
-        Connection.updated_at.desc(),
-      )
-      .first()
-    )
-    if conn is None:
-      return (False, None)
-    return (True, conn.last_sync)
+    yield db
   finally:
-    db_gen.close()
+    gen.close()
+
+
+def _calendar_dict(session, graph_id: str, calendar, service) -> dict[str, Any]:
+  """Build the MCP wire shape for the fiscal calendar.
+
+  Wraps `build_fiscal_calendar_response` (the shared ops-layer assembler)
+  and tacks on `has_sync_connection` — the only field the MCP tool
+  surfaced that isn't on the Pydantic response model. Everything else
+  flows through `model_dump(mode="json")` so date/time fields serialize
+  as ISO-8601 strings, matching the original handcrafted shape.
+  """
+  with _platform_session() as platform_db:
+    has_sync, last_sync_at = qb_sync_state(platform_db, graph_id)
+  response = build_fiscal_calendar_response(
+    session, graph_id, calendar, has_sync, last_sync_at, service
+  )
+  payload = response.model_dump(mode="json")
+  payload["has_sync_connection"] = has_sync
+  return payload
 
 
 # ────────────────────────────────────────────────────────────────────────────
@@ -161,9 +133,6 @@ class GetFiscalCalendarTool:
     }
 
   async def execute(self, arguments: dict[str, Any]) -> Any:
-    from robosystems.db.extensions import extensions_session
-    from robosystems.operations.roboledger.fiscal_calendar import FiscalCalendarService
-
     graph_id = self.client.graph_id
     svc = FiscalCalendarService()
 
@@ -178,7 +147,7 @@ class GetFiscalCalendarTool:
               "Use the initialize-ledger REST endpoint or UI to set it up first."
             ),
           }
-        return _build_response_payload(session, graph_id, calendar)
+        return _calendar_dict(session, graph_id, calendar, svc)
     except Exception as exc:
       logger.warning(f"get-fiscal-calendar failed: {exc}")
       return {"error": str(exc)}
@@ -260,15 +229,6 @@ class ClosePeriodTool:
     }
 
   async def execute(self, arguments: dict[str, Any]) -> Any:
-    from robosystems.db.extensions import extensions_session
-    from robosystems.operations.roboledger.fiscal_calendar import (
-      CloseGateFailed,
-      FiscalCalendarError,
-      PeriodCloseService,
-      PeriodNotFoundError,
-      UnbalancedLedgerError,
-    )
-
     graph_id = self.client.graph_id
     period = arguments["period"]
     allow_stale_sync = bool(arguments.get("allow_stale_sync", False))
@@ -276,34 +236,37 @@ class ClosePeriodTool:
 
     # Best-effort user identity from the graph client context; fall back to
     # a graph-scoped sentinel so audit logs stay traceable to the tenant.
-    # Matches the format used by `ReopenPeriodTool` below.
     actor_id = getattr(self.client, "user_id", None) or f"mcp:{graph_id}"
 
+    svc = FiscalCalendarService()
     close_svc = PeriodCloseService()
 
     try:
-      with extensions_session(graph_id) as session:
-        has_sync, last_sync_at = _get_qb_sync_state(graph_id)
-        result = close_svc.close(
+      with extensions_session(graph_id) as session, _platform_session() as platform_db:
+        result = ops_close_period(
           session,
+          platform_db,
           graph_id,
           period,
           actor_id=actor_id,
-          actor_type="agent",
-          has_sync_connection=has_sync,
-          last_sync_at=last_sync_at,
           allow_stale_sync=allow_stale_sync,
           note=note,
+          service=svc,
+          close_service=close_svc,
+          actor_type="agent",
         )
-        session.commit()
-
+        # ops_close_period commits the session internally.
+        fc_payload = result.fiscal_calendar.model_dump(mode="json")
+        # Re-derive `has_sync_connection` so the MCP wire shape stays the
+        # same as before the refactor (the Pydantic response doesn't
+        # carry it).
+        has_sync, _ = qb_sync_state(platform_db, graph_id)
+        fc_payload["has_sync_connection"] = has_sync
         return {
           "period": result.period,
           "entries_posted": result.entries_posted,
           "target_auto_advanced": result.target_auto_advanced,
-          "fiscal_calendar": _build_response_payload(
-            session, graph_id, result.calendar
-          ),
+          "fiscal_calendar": fc_payload,
         }
     except CloseGateFailed as exc:
       if exc.no_calendar:
@@ -401,13 +364,6 @@ class ReopenPeriodTool:
     }
 
   async def execute(self, arguments: dict[str, Any]) -> Any:
-    from robosystems.db.extensions import extensions_session
-    from robosystems.models.extensions.roboledger.fiscal_period import FiscalPeriod
-    from robosystems.operations.roboledger.fiscal_calendar import (
-      FiscalCalendarError,
-      FiscalCalendarService,
-    )
-
     graph_id = self.client.graph_id
     period = arguments["period"]
     reason = arguments.get("reason", "").strip()
@@ -419,51 +375,40 @@ class ReopenPeriodTool:
         "message": "Reopen requires a non-empty reason.",
       }
 
-    # Best-effort user identity from the graph client context; fall back to
-    # a graph-scoped sentinel so audit logs stay traceable to the tenant.
-    # Matches the pattern used by `ClosePeriodTool` above.
     actor_id = getattr(self.client, "user_id", None) or f"mcp:{graph_id}"
-
     svc = FiscalCalendarService()
 
     try:
-      with extensions_session(graph_id) as session:
-        fp = (
-          session.query(FiscalPeriod)
-          .filter(FiscalPeriod.graph_id == graph_id, FiscalPeriod.name == period)
-          .one_or_none()
-        )
-        if fp is None:
+      with extensions_session(graph_id) as session, _platform_session() as platform_db:
+        try:
+          fc_response = ops_reopen_period(
+            session,
+            platform_db,
+            graph_id,
+            period,
+            actor_id=actor_id,
+            reason=reason,
+            note=note,
+            service=svc,
+            actor_type="agent",
+          )
+        except PeriodNotFoundInLedgerError:
           return {
             "error": "period_not_found",
             "message": f"Fiscal period {period!r} not found.",
           }
-        if fp.status != "closed":
+        except PeriodNotClosedError as exc:
           return {
             "error": "not_closed",
-            "message": f"Period {period!r} is not closed (status={fp.status!r}).",
+            "message": f"Period {period!r} is not closed (status={exc.status!r}).",
           }
-
-        fp.status = "closing"
-        fp.closed_at = None
-        fp.closed_by = None
-        session.flush()
-
-        calendar = svc.retreat_closed_through(
-          session,
-          graph_id,
-          period,
-          reason=reason,
-          actor_id=actor_id,
-          actor_type="agent",
-          note=note,
-        )
-        session.commit()
-
+        fc_payload = fc_response.model_dump(mode="json")
+        has_sync, _ = qb_sync_state(platform_db, graph_id)
+        fc_payload["has_sync_connection"] = has_sync
         return {
           "period": period,
           "reason": reason,
-          "fiscal_calendar": _build_response_payload(session, graph_id, calendar),
+          "fiscal_calendar": fc_payload,
         }
     except FiscalCalendarError as exc:
       return {"error": "calendar_error", "message": str(exc)}

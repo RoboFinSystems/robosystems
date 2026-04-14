@@ -19,10 +19,12 @@ from robosystems.middleware import extensions as middleware_module
 from robosystems.middleware.extensions import (
   IDEMPOTENCY_TTL_SECONDS,
   IdempotencyCache,
+  IdempotencyKeyConflictError,
   OperationContext,
   OperationEnvelope,
   compute_idempotency_cache_key,
   execute_operation,
+  fingerprint_body,
   generate_operation_id,
   log_operation_audit,
   wrap_completed,
@@ -163,33 +165,67 @@ class TestWrapFailed:
 
 
 class TestComputeIdempotencyCacheKey:
+  """The cache key is now scoped by (user_id, graph_id, operation, key)."""
+
   def test_shape(self) -> None:
-    key = compute_idempotency_cache_key("kg123", "close-period", "abc-xyz")
+    key = compute_idempotency_cache_key("usr_abc", "kg123", "close-period", "abc-xyz")
     assert key.startswith("idem:kg123:close-period:")
     # 32-char hex suffix
     suffix = key.rsplit(":", 1)[1]
     assert len(suffix) == 32
     assert all(c in "0123456789abcdef" for c in suffix)
 
-  def test_same_triple_produces_same_key(self) -> None:
-    a = compute_idempotency_cache_key("kg1", "op", "k1")
-    b = compute_idempotency_cache_key("kg1", "op", "k1")
+  def test_same_tuple_produces_same_key(self) -> None:
+    a = compute_idempotency_cache_key("usr_a", "kg1", "op", "k1")
+    b = compute_idempotency_cache_key("usr_a", "kg1", "op", "k1")
     assert a == b
 
+  def test_different_user_produces_different_key(self) -> None:
+    """Two users using the same idempotency key must NOT collide."""
+    a = compute_idempotency_cache_key("usr_a", "kg1", "op", "k1")
+    b = compute_idempotency_cache_key("usr_b", "kg1", "op", "k1")
+    assert a != b, "Same idempotency key under different users must not collide"
+
   def test_different_graph_produces_different_key(self) -> None:
-    a = compute_idempotency_cache_key("kg1", "op", "k1")
-    b = compute_idempotency_cache_key("kg2", "op", "k1")
+    a = compute_idempotency_cache_key("usr_a", "kg1", "op", "k1")
+    b = compute_idempotency_cache_key("usr_a", "kg2", "op", "k1")
     assert a != b
 
   def test_different_operation_produces_different_key(self) -> None:
-    a = compute_idempotency_cache_key("kg1", "op-a", "k1")
-    b = compute_idempotency_cache_key("kg1", "op-b", "k1")
+    a = compute_idempotency_cache_key("usr_a", "kg1", "op-a", "k1")
+    b = compute_idempotency_cache_key("usr_a", "kg1", "op-b", "k1")
     assert a != b
 
   def test_different_idempotency_key_produces_different_cache_key(self) -> None:
-    a = compute_idempotency_cache_key("kg1", "op", "k1")
-    b = compute_idempotency_cache_key("kg1", "op", "k2")
+    a = compute_idempotency_cache_key("usr_a", "kg1", "op", "k1")
+    b = compute_idempotency_cache_key("usr_a", "kg1", "op", "k2")
     assert a != b
+
+  def test_user_id_not_in_cleartext(self) -> None:
+    """The user_id is hashed with the key — never appears verbatim."""
+    cache_key = compute_idempotency_cache_key("usr_super_secret", "kg1", "op", "k1")
+    assert "usr_super_secret" not in cache_key
+
+
+class TestFingerprintBody:
+  def test_pydantic_model_stable_across_field_order(self) -> None:
+    a = _SampleResult(id="x", amount=1)
+    b = _SampleResult(amount=1, id="x")
+    assert fingerprint_body(a) == fingerprint_body(b)
+
+  def test_dict_stable_across_key_order(self) -> None:
+    assert fingerprint_body({"a": 1, "b": 2}) == fingerprint_body({"b": 2, "a": 1})
+
+  def test_different_payloads_different_fingerprints(self) -> None:
+    assert fingerprint_body({"a": 1}) != fingerprint_body({"a": 2})
+
+  def test_none_has_stable_fingerprint(self) -> None:
+    assert fingerprint_body(None) == fingerprint_body(None)
+
+  def test_pydantic_vs_dict_match(self) -> None:
+    """A model and its model_dump should fingerprint the same."""
+    model = _SampleResult(id="x", amount=1)
+    assert fingerprint_body(model) == fingerprint_body(model.model_dump(mode="json"))
 
 
 class TestIdempotencyCache:
@@ -219,7 +255,7 @@ class TestIdempotencyCache:
   @pytest.mark.asyncio
   async def test_miss_returns_none(self) -> None:
     cache, _client, _store = self._make_cache()
-    result = await cache.get("kg1", "close-period", "key-1")
+    result = await cache.get("usr_a", "kg1", "close-period", "key-1", "fp1")
     assert result is None
 
   @pytest.mark.asyncio
@@ -231,8 +267,8 @@ class TestIdempotencyCache:
       operation_id="op_01ARZ3NDEKTSV4RRFFQ69G5FAV",
     )
 
-    await cache.put("kg1", "close-period", "key-1", envelope)
-    cached = await cache.get("kg1", "close-period", "key-1")
+    await cache.put("usr_a", "kg1", "close-period", "key-1", envelope, "fp1")
+    cached = await cache.get("usr_a", "kg1", "close-period", "key-1", "fp1")
 
     assert cached is not None
     assert isinstance(cached, OperationEnvelope)
@@ -245,7 +281,7 @@ class TestIdempotencyCache:
   async def test_put_uses_expected_ttl(self) -> None:
     cache, client, _store = self._make_cache()
     envelope = wrap_completed("op", None)
-    await cache.put("kg1", "op", "key-1", envelope)
+    await cache.put("usr_a", "kg1", "op", "key-1", envelope, "fp1")
     client.set.assert_awaited_once()
     _args, kwargs = client.set.call_args
     assert kwargs["ex"] == IDEMPOTENCY_TTL_SECONDS
@@ -257,26 +293,71 @@ class TestIdempotencyCache:
     env_b = wrap_completed("op-b", {"b": 2})
     env_other_graph = wrap_completed("op-a", {"a": 99})
 
-    await cache.put("kg1", "op-a", "same-key", env_a)
-    await cache.put("kg1", "op-b", "same-key", env_b)
-    await cache.put("kg2", "op-a", "same-key", env_other_graph)
+    await cache.put("usr_a", "kg1", "op-a", "same-key", env_a, "fp")
+    await cache.put("usr_a", "kg1", "op-b", "same-key", env_b, "fp")
+    await cache.put("usr_a", "kg2", "op-a", "same-key", env_other_graph, "fp")
 
-    cached_a = await cache.get("kg1", "op-a", "same-key")
-    cached_b = await cache.get("kg1", "op-b", "same-key")
-    cached_other = await cache.get("kg2", "op-a", "same-key")
+    cached_a = await cache.get("usr_a", "kg1", "op-a", "same-key", "fp")
+    cached_b = await cache.get("usr_a", "kg1", "op-b", "same-key", "fp")
+    cached_other = await cache.get("usr_a", "kg2", "op-a", "same-key", "fp")
 
     assert cached_a is not None and cached_a.result == {"a": 1}
     assert cached_b is not None and cached_b.result == {"b": 2}
     assert cached_other is not None and cached_other.result == {"a": 99}
 
   @pytest.mark.asyncio
+  async def test_isolation_by_user(self) -> None:
+    """Two users with the same key must not see each other's envelopes."""
+    cache, _client, _store = self._make_cache()
+    env_a = wrap_completed("create-portfolio", {"id": "pf_a"})
+    env_b = wrap_completed("create-portfolio", {"id": "pf_b"})
+
+    await cache.put("usr_a", "kg1", "create-portfolio", "shared-key", env_a, "fp")
+    await cache.put("usr_b", "kg1", "create-portfolio", "shared-key", env_b, "fp")
+
+    cached_a = await cache.get("usr_a", "kg1", "create-portfolio", "shared-key", "fp")
+    cached_b = await cache.get("usr_b", "kg1", "create-portfolio", "shared-key", "fp")
+
+    assert cached_a is not None and cached_a.result == {"id": "pf_a"}
+    assert cached_b is not None and cached_b.result == {"id": "pf_b"}
+
+  @pytest.mark.asyncio
+  async def test_key_reuse_with_different_body_raises_conflict(self) -> None:
+    """Same idempotency key + different body → IdempotencyKeyConflictError."""
+    cache, _client, _store = self._make_cache()
+    envelope = wrap_completed("create-portfolio", {"id": "pf_1"})
+
+    await cache.put(
+      "usr_a", "kg1", "create-portfolio", "retry-key", envelope, "fp_first"
+    )
+
+    with pytest.raises(IdempotencyKeyConflictError):
+      await cache.get("usr_a", "kg1", "create-portfolio", "retry-key", "fp_DIFFERENT")
+
+  @pytest.mark.asyncio
+  async def test_key_reuse_with_same_body_returns_cached(self) -> None:
+    """Same idempotency key + same body → replay (no error)."""
+    cache, _client, _store = self._make_cache()
+    envelope = wrap_completed("create-portfolio", {"id": "pf_1"})
+
+    await cache.put(
+      "usr_a", "kg1", "create-portfolio", "retry-key", envelope, "fp_same"
+    )
+    replayed = await cache.get(
+      "usr_a", "kg1", "create-portfolio", "retry-key", "fp_same"
+    )
+
+    assert replayed is not None
+    assert replayed.result == {"id": "pf_1"}
+
+  @pytest.mark.asyncio
   async def test_corrupt_payload_is_evicted(self) -> None:
     cache, _client, store = self._make_cache()
     # Pre-seed the store with non-JSON garbage at the canonical key.
-    cache_key = compute_idempotency_cache_key("kg1", "op", "k1")
+    cache_key = compute_idempotency_cache_key("usr_a", "kg1", "op", "k1")
     store[cache_key] = "{not-json"
 
-    result = await cache.get("kg1", "op", "k1")
+    result = await cache.get("usr_a", "kg1", "op", "k1", "fp")
 
     assert result is None
     assert cache_key not in store  # eviction happened
@@ -387,25 +468,46 @@ class TestLogOperationAudit:
 
 
 class _FakeIdempotencyCache:
-  """In-memory cache standing in for the real Valkey-backed one."""
+  """In-memory cache standing in for the real Valkey-backed one.
+
+  Mirrors the real `IdempotencyCache` API so dispatcher tests can
+  exercise the (user, graph, operation, key, fingerprint) tuple
+  without spinning up Redis.
+  """
 
   def __init__(self) -> None:
-    self.store: dict[str, OperationEnvelope] = {}
+    self.store: dict[tuple[str, str, str, str], tuple[OperationEnvelope, str]] = {}
 
   async def get(
-    self, graph_id: str, operation_name: str, idempotency_key: str
+    self,
+    user_id: str,
+    graph_id: str,
+    operation_name: str,
+    idempotency_key: str,
+    body_fingerprint: str,
   ) -> OperationEnvelope | None:
-    return self.store.get(f"{graph_id}:{operation_name}:{idempotency_key}")
+    entry = self.store.get((user_id, graph_id, operation_name, idempotency_key))
+    if entry is None:
+      return None
+    cached_envelope, cached_fingerprint = entry
+    if cached_fingerprint != body_fingerprint:
+      raise IdempotencyKeyConflictError(operation_name)
+    return cached_envelope
 
   async def put(
     self,
+    user_id: str,
     graph_id: str,
     operation_name: str,
     idempotency_key: str,
     envelope: OperationEnvelope,
+    body_fingerprint: str,
     ttl_seconds: int = IDEMPOTENCY_TTL_SECONDS,
   ) -> None:
-    self.store[f"{graph_id}:{operation_name}:{idempotency_key}"] = envelope
+    self.store[(user_id, graph_id, operation_name, idempotency_key)] = (
+      envelope,
+      body_fingerprint,
+    )
 
 
 def _make_ctx(**overrides: Any) -> OperationContext:
@@ -415,6 +517,7 @@ def _make_ctx(**overrides: Any) -> OperationContext:
     "graph_id": "kg1",
     "user_id": "usr_1",
     "idempotency_key": None,
+    "body_fingerprint": None,
   }
   defaults.update(overrides)
   return OperationContext(**defaults)
@@ -456,7 +559,7 @@ class TestExecuteOperationHappyPath:
 
   @pytest.mark.asyncio
   async def test_audit_log_emitted_on_success(self) -> None:
-    ctx = _make_ctx(idempotency_key="key-1")
+    ctx = _make_ctx(idempotency_key="key-1", body_fingerprint="fp1")
     with patch.object(middleware_module.logger, "info") as info_mock:
       await execute_operation(
         ctx, lambda: {"ok": True}, idempotency_cache=_FakeIdempotencyCache()
@@ -514,7 +617,7 @@ class TestExecuteOperationFailurePath:
 
   @pytest.mark.asyncio
   async def test_failed_operation_not_cached(self) -> None:
-    ctx = _make_ctx(idempotency_key="key-fail")
+    ctx = _make_ctx(idempotency_key="key-fail", body_fingerprint="fp")
     cache = _FakeIdempotencyCache()
 
     def _runner():
@@ -559,7 +662,7 @@ class TestExecuteOperationFailurePath:
   @pytest.mark.asyncio
   async def test_unexpected_exception_not_cached(self) -> None:
     """Bare exceptions must not poison the idempotency cache either."""
-    ctx = _make_ctx(idempotency_key="key-bare-fail")
+    ctx = _make_ctx(idempotency_key="key-bare-fail", body_fingerprint="fp")
     cache = _FakeIdempotencyCache()
 
     def _runner():
@@ -577,7 +680,7 @@ class TestExecuteOperationFailurePath:
 class TestExecuteOperationIdempotency:
   @pytest.mark.asyncio
   async def test_idempotent_replay_returns_cached_envelope(self) -> None:
-    ctx = _make_ctx(idempotency_key="key-abc")
+    ctx = _make_ctx(idempotency_key="key-abc", body_fingerprint="fp1")
     cache = _FakeIdempotencyCache()
 
     # First call populates the cache
@@ -586,7 +689,7 @@ class TestExecuteOperationIdempotency:
         ctx, lambda: {"version": 1}, idempotency_cache=cache
       )
 
-    # Second call with same key should hit the cache and NOT re-run
+    # Second call with same key + same fingerprint should hit the cache
     runner_called = [False]
 
     def _should_not_be_called():
@@ -611,8 +714,36 @@ class TestExecuteOperationIdempotency:
     )
 
   @pytest.mark.asyncio
+  async def test_key_reuse_with_different_body_raises_409(self) -> None:
+    """Key reused with a different body must raise IdempotencyKeyConflictError."""
+    cache = _FakeIdempotencyCache()
+
+    # First call: populate with body fingerprint "fp_first"
+    ctx_first = _make_ctx(idempotency_key="retry-key", body_fingerprint="fp_first")
+    with patch.object(middleware_module.logger, "info"):
+      await execute_operation(ctx_first, lambda: {"v": 1}, idempotency_cache=cache)
+
+    # Second call: same key, DIFFERENT body fingerprint
+    ctx_second = _make_ctx(idempotency_key="retry-key", body_fingerprint="fp_DIFFERENT")
+    runner_called = [False]
+
+    def _runner():
+      runner_called[0] = True
+      return {"v": 2}
+
+    with (
+      patch.object(middleware_module.logger, "error"),
+      patch.object(middleware_module.logger, "info"),
+      pytest.raises(IdempotencyKeyConflictError),
+    ):
+      await execute_operation(ctx_second, _runner, idempotency_cache=cache)
+
+    # Conflict short-circuits — the runner never runs
+    assert runner_called[0] is False
+
+  @pytest.mark.asyncio
   async def test_no_idempotency_key_means_no_cache_hit(self) -> None:
-    ctx = _make_ctx()  # no idempotency_key
+    ctx = _make_ctx()  # no idempotency_key, no fingerprint
     cache = _FakeIdempotencyCache()
 
     counter = [0]
@@ -631,9 +762,33 @@ class TestExecuteOperationIdempotency:
     assert r2.result == {"count": 2}
 
   @pytest.mark.asyncio
+  async def test_idempotency_key_without_fingerprint_skips_cache(self) -> None:
+    """Defensive: a key without a fingerprint must not enable caching.
+
+    The dispatcher requires BOTH so a route handler that forgets to
+    set `body_fingerprint` doesn't accidentally enable cross-payload
+    replay. Two calls with the same key but no fingerprint should
+    both execute the runner.
+    """
+    ctx = _make_ctx(idempotency_key="key-no-fp")  # fingerprint=None
+    cache = _FakeIdempotencyCache()
+    counter = [0]
+
+    def _runner():
+      counter[0] += 1
+      return {}
+
+    with patch.object(middleware_module.logger, "info"):
+      await execute_operation(ctx, _runner, idempotency_cache=cache)
+      await execute_operation(ctx, _runner, idempotency_cache=cache)
+
+    assert counter[0] == 2
+    assert cache.store == {}  # nothing was cached
+
+  @pytest.mark.asyncio
   async def test_no_cache_instance_skips_idempotency(self) -> None:
     """Even with a key, if no cache is supplied, the runner still runs."""
-    ctx = _make_ctx(idempotency_key="key-no-cache")
+    ctx = _make_ctx(idempotency_key="key-no-cache", body_fingerprint="fp")
     counter = [0]
 
     def _runner():
@@ -648,8 +803,8 @@ class TestExecuteOperationIdempotency:
 
   @pytest.mark.asyncio
   async def test_different_keys_get_separate_cache_entries(self) -> None:
-    ctx_a = _make_ctx(idempotency_key="key-a")
-    ctx_b = _make_ctx(idempotency_key="key-b")
+    ctx_a = _make_ctx(idempotency_key="key-a", body_fingerprint="fp")
+    ctx_b = _make_ctx(idempotency_key="key-b", body_fingerprint="fp")
     cache = _FakeIdempotencyCache()
 
     with patch.object(middleware_module.logger, "info"):
@@ -659,3 +814,122 @@ class TestExecuteOperationIdempotency:
     assert a.operation_id != b.operation_id
     assert a.result == {"k": "a"}
     assert b.result == {"k": "b"}
+
+  @pytest.mark.asyncio
+  async def test_different_users_with_same_key_isolated(self) -> None:
+    """The cache must scope by user — same key from two users must not collide."""
+    ctx_alice = _make_ctx(
+      user_id="usr_alice", idempotency_key="shared-key", body_fingerprint="fp"
+    )
+    ctx_bob = _make_ctx(
+      user_id="usr_bob", idempotency_key="shared-key", body_fingerprint="fp"
+    )
+    cache = _FakeIdempotencyCache()
+
+    with patch.object(middleware_module.logger, "info"):
+      env_alice = await execute_operation(
+        ctx_alice, lambda: {"who": "alice"}, idempotency_cache=cache
+      )
+      env_bob = await execute_operation(
+        ctx_bob, lambda: {"who": "bob"}, idempotency_cache=cache
+      )
+
+    assert env_alice.result == {"who": "alice"}
+    assert env_bob.result == {"who": "bob"}
+    assert env_alice.operation_id != env_bob.operation_id
+
+
+class TestExecuteOperationFreshSuccessHook:
+  """Verify on_fresh_success runs only on fresh execution, not on replay.
+
+  This is the contract that lets route handlers safely move side
+  effects like `mark_graph_stale` into a hook without firing them on
+  every retry.
+  """
+
+  @pytest.mark.asyncio
+  async def test_hook_runs_on_fresh_success(self) -> None:
+    ctx = _make_ctx(idempotency_key="key-1", body_fingerprint="fp")
+    cache = _FakeIdempotencyCache()
+    fired: list[OperationEnvelope] = []
+
+    with patch.object(middleware_module.logger, "info"):
+      await execute_operation(
+        ctx,
+        lambda: {"ok": True},
+        idempotency_cache=cache,
+        on_fresh_success=lambda env: fired.append(env),
+      )
+
+    assert len(fired) == 1
+    assert fired[0].status == "completed"
+
+  @pytest.mark.asyncio
+  async def test_hook_does_not_run_on_replay(self) -> None:
+    ctx = _make_ctx(idempotency_key="key-replay", body_fingerprint="fp")
+    cache = _FakeIdempotencyCache()
+    fired: list[OperationEnvelope] = []
+
+    # First call — hook fires
+    with patch.object(middleware_module.logger, "info"):
+      await execute_operation(
+        ctx,
+        lambda: {"ok": True},
+        idempotency_cache=cache,
+        on_fresh_success=lambda env: fired.append(env),
+      )
+
+    assert len(fired) == 1
+
+    # Second call (replay) — hook MUST NOT fire
+    with patch.object(middleware_module.logger, "info"):
+      await execute_operation(
+        ctx,
+        lambda: {"ok": True},
+        idempotency_cache=cache,
+        on_fresh_success=lambda env: fired.append(env),
+      )
+
+    assert len(fired) == 1, "on_fresh_success fired on replay — side effect leaked"
+
+  @pytest.mark.asyncio
+  async def test_hook_does_not_run_on_failure(self) -> None:
+    ctx = _make_ctx()
+    fired: list[OperationEnvelope] = []
+
+    def _runner():
+      raise HTTPException(status_code=500, detail="boom")
+
+    with (
+      patch.object(middleware_module.logger, "error"),
+      pytest.raises(HTTPException),
+    ):
+      await execute_operation(
+        ctx,
+        _runner,
+        on_fresh_success=lambda env: fired.append(env),
+      )
+
+    assert fired == []
+
+  @pytest.mark.asyncio
+  async def test_hook_exception_aborts_caching(self) -> None:
+    """If the hook raises, the failure must not leave a stale cache entry."""
+    ctx = _make_ctx(idempotency_key="key-hook-fail", body_fingerprint="fp")
+    cache = _FakeIdempotencyCache()
+
+    def _bad_hook(_env):
+      raise RuntimeError("staleness DB down")
+
+    with (
+      patch.object(middleware_module.logger, "info"),
+      pytest.raises(RuntimeError),
+    ):
+      await execute_operation(
+        ctx,
+        lambda: {"ok": True},
+        idempotency_cache=cache,
+        on_fresh_success=_bad_hook,
+      )
+
+    assert cache.store == {}, "Hook failure should not poison the cache"

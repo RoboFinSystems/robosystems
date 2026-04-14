@@ -155,8 +155,13 @@ def close_period(
   note: str | None,
   service: FiscalCalendarService,
   close_service: PeriodCloseService,
+  actor_type: str = "user",
 ) -> ClosePeriodResponse:
   """Close a fiscal period — the final commit action.
+
+  `actor_type` defaults to `"user"` for REST callers; MCP tools pass
+  `"agent"` so the audit log distinguishes Claude-driven closes from
+  human-driven ones.
 
   Raises `CloseGateFailed`, `PeriodNotFoundError`,
   `UnbalancedLedgerError`, `FiscalCalendarError` — caller translates
@@ -168,7 +173,7 @@ def close_period(
     graph_id,
     period,
     actor_id=actor_id,
-    actor_type="user",
+    actor_type=actor_type,
     has_sync_connection=has_sync,
     last_sync_at=last_sync_at,
     allow_stale_sync=allow_stale_sync,
@@ -196,6 +201,7 @@ def reopen_period(
   reason: str,
   note: str | None,
   service: FiscalCalendarService,
+  actor_type: str = "user",
 ) -> FiscalCalendarResponse:
   """Reopen a closed fiscal period.
 
@@ -224,7 +230,7 @@ def reopen_period(
     period,
     reason=reason,
     actor_id=actor_id,
-    actor_type="user",
+    actor_type=actor_type,
     note=note,
   )
   session.commit()

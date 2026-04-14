@@ -36,7 +36,12 @@ def _make_user() -> MagicMock:
 
 
 def _ctx() -> dict:
-  return {"request": MagicMock(), "user": _make_user()}
+  """Build a fake Strawberry context with the test graph_id pre-set."""
+  return {
+    "request": MagicMock(),
+    "user": _make_user(),
+    "graph_id": GRAPH_ID,
+  }
 
 
 def _page(total: int = 0, limit: int = 100, offset: int = 0) -> PaginationInfo:
@@ -52,12 +57,7 @@ def _patch_session():
   mock_ctx_mgr.__enter__ = MagicMock(return_value=mock_session)
   mock_ctx_mgr.__exit__ = MagicMock(return_value=False)
 
-  with (
-    patch("robosystems.db.extensions.extensions_session", return_value=mock_ctx_mgr),
-    patch(
-      "robosystems.graphql.resolvers.investor.check_graph_access", return_value=None
-    ),
-  ):
+  with patch("robosystems.db.extensions.extensions_session", return_value=mock_ctx_mgr):
     yield mock_session
 
 
@@ -83,13 +83,13 @@ class TestPortfoliosResolver:
       ),
     ):
       result = schema.execute_sync(
-        f"""
-        query {{
-          portfolios(graphId: "{GRAPH_ID}") {{
-            portfolios {{ id name baseCurrency }}
-            pagination {{ total limit offset hasMore }}
-          }}
-        }}
+        """
+        query {
+          portfolios {
+            portfolios { id name baseCurrency }
+            pagination { total limit offset hasMore }
+          }
+        }
         """,
         context_value=_ctx(),
       )
@@ -101,7 +101,8 @@ class TestPortfoliosResolver:
     assert data["pagination"]["total"] == 3
     assert data["pagination"]["hasMore"] is False
 
-  def test_null_on_schema_error(self) -> None:
+  def test_raises_typed_error_on_schema_error(self) -> None:
+    """Investor schema errors raise INVESTOR_NOT_INITIALIZED, not null."""
     from sqlalchemy.exc import ProgrammingError
 
     with (
@@ -112,12 +113,13 @@ class TestPortfoliosResolver:
       ),
     ):
       result = schema.execute_sync(
-        f'query {{ portfolios(graphId: "{GRAPH_ID}") {{ portfolios {{ id }} }} }}',
+        "query { portfolios { portfolios { id } } }",
         context_value=_ctx(),
       )
 
-    assert result.errors is None
-    assert result.data == {"portfolios": None}
+    assert result.errors is not None
+    err = result.errors[0]
+    assert err.extensions == {"code": "INVESTOR_NOT_INITIALIZED"}
 
 
 class TestPortfolioResolver:
@@ -139,7 +141,7 @@ class TestPortfolioResolver:
       ),
     ):
       result = schema.execute_sync(
-        f'query {{ portfolio(graphId: "{GRAPH_ID}", portfolioId: "pf_01") {{ id name strategy }} }}',
+        'query { portfolio(portfolioId: "pf_01") { id name strategy } }',
         context_value=_ctx(),
       )
 
@@ -156,7 +158,7 @@ class TestPortfolioResolver:
       ),
     ):
       result = schema.execute_sync(
-        f'query {{ portfolio(graphId: "{GRAPH_ID}", portfolioId: "pf_x") {{ id }} }}',
+        'query { portfolio(portfolioId: "pf_x") { id } }',
         context_value=_ctx(),
       )
 
@@ -187,16 +189,16 @@ class TestSecurityResolver:
       ),
     ):
       result = schema.execute_sync(
-        f"""
-        query {{
-          security(graphId: "{GRAPH_ID}", securityId: "sec_01") {{
+        """
+        query {
+          security(securityId: "sec_01") {
             id
             name
             securityType
             terms
             isActive
-          }}
-        }}
+          }
+        }
         """,
         context_value=_ctx(),
       )
@@ -232,13 +234,13 @@ class TestSecurityResolver:
       ),
     ):
       result = schema.execute_sync(
-        f"""
-        query {{
-          securities(graphId: "{GRAPH_ID}") {{
-            securities {{ id name terms }}
-            pagination {{ total }}
-          }}
-        }}
+        """
+        query {
+          securities {
+            securities { id name terms }
+            pagination { total }
+          }
+        }
         """,
         context_value=_ctx(),
       )
@@ -278,9 +280,9 @@ class TestPositionResolver:
       ),
     ):
       result = schema.execute_sync(
-        f"""
-        query {{
-          position(graphId: "{GRAPH_ID}", positionId: "pos_01") {{
+        """
+        query {
+          position(positionId: "pos_01") {
             id
             securityName
             entityName
@@ -289,8 +291,8 @@ class TestPositionResolver:
             costBasisDollars
             currentValueDollars
             status
-          }}
-        }}
+          }
+        }
         """,
         context_value=_ctx(),
       )
@@ -312,7 +314,7 @@ class TestHoldingsResolver:
       ),
     ):
       result = schema.execute_sync(
-        f'query {{ holdings(graphId: "{GRAPH_ID}", portfolioId: "pf_missing") {{ totalEntities }} }}',
+        'query { holdings(portfolioId: "pf_missing") { totalEntities } }',
         context_value=_ctx(),
       )
 
@@ -354,25 +356,25 @@ class TestHoldingsResolver:
       ),
     ):
       result = schema.execute_sync(
-        f"""
-        query {{
-          holdings(graphId: "{GRAPH_ID}", portfolioId: "pf_01") {{
+        """
+        query {
+          holdings(portfolioId: "pf_01") {
             totalEntities
             totalPositions
-            holdings {{
+            holdings {
               entityId
               entityName
               sourceGraphId
               positionCount
-              securities {{
+              securities {
                 securityId
                 securityName
                 costBasisDollars
                 currentValueDollars
-              }}
-            }}
-          }}
-        }}
+              }
+            }
+          }
+        }
         """,
         context_value=_ctx(),
       )

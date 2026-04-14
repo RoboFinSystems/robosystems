@@ -23,6 +23,7 @@ from robosystems.models.api.extensions.reports import (
   ValidationCheckResponse,
 )
 from robosystems.models.extensions import Report
+from robosystems.models.extensions.roboledger import Structure
 from robosystems.operations.roboledger.reports.fact_grid import (
   PeriodSpec as FactPeriodSpec,
 )
@@ -31,6 +32,7 @@ from robosystems.operations.roboledger.reports.fact_grid import (
 )
 from robosystems.operations.roboledger.reports.fact_grid import (
   _compute_prior_period,
+  generate_report_facts,
   render_structure_view,
 )
 from robosystems.operations.roboledger.reports.guard_rails import validate_report
@@ -45,6 +47,53 @@ VALID_STRUCTURE_TYPES = {
 
 class StatementStructureNotFoundError(LookupError):
   """Raised when a statement's structure_type isn't in the report's taxonomy."""
+
+
+class CoaMappingNotFoundError(LookupError):
+  """Raised when no CoA→GAAP mapping exists for ad-hoc statement generation."""
+
+
+def generate_adhoc_private_statement(
+  session: Session,
+  *,
+  statement_type: str,
+  periods: list[FactPeriodSpec],
+  taxonomy_id: str = "tax_usgaap_reporting",
+):
+  """Generate an ad-hoc private-company statement directly from OLTP data.
+
+  Unlike `get_statement`, which renders a previously-saved Report, this
+  helper builds a one-shot statement from the current ledger using the
+  active CoA→GAAP mapping. Used by the MCP `get-financial-statement` tool
+  when called against a RoboLedger user graph (no saved Report needed).
+
+  Returns the rendered structure grid plus an `unmapped_count` counter.
+  Raises `CoaMappingNotFoundError` if the tenant hasn't completed the
+  mapping workflow yet — the caller translates to a user-facing tip.
+  """
+  mapping = (
+    session.query(Structure).filter(Structure.structure_type == "coa_mapping").first()
+  )
+  if mapping is None:
+    raise CoaMappingNotFoundError(
+      "No CoA→GAAP mapping found. Run the mapping workflow first."
+    )
+
+  facts = generate_report_facts(
+    session=session,
+    taxonomy_id=taxonomy_id,
+    mapping_id=mapping.id,
+    periods=periods,
+  )
+
+  grid = render_structure_view(
+    session=session,
+    facts=facts.facts,
+    structure_type=statement_type,
+    periods=periods,
+  )
+
+  return grid, facts.unmapped_count
 
 
 def build_periods(

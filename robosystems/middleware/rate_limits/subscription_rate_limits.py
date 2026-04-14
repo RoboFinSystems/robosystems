@@ -46,6 +46,14 @@ def should_use_subscription_limits(path: str) -> bool:
   Returns:
       True if subscription limits should be applied
   """
+  # Extensions surface — both graph-scoped reads (GraphQL) and writes
+  # (REST operation endpoints) are tenant-scoped and must use the
+  # per-tier buckets. Without this branch the new primary read surface
+  # would silently fall back to the generic API limiter and lose its
+  # subscription-tier observability.
+  if path.startswith("/extensions/"):
+    return True
+
   # Always use subscription limits for graph-scoped endpoints
   if path.startswith("/v1/") and len(path.split("/")) >= 4:
     # Check if it's a graph-scoped endpoint (has graph_id)

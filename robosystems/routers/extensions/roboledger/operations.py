@@ -38,14 +38,18 @@ from pydantic import BaseModel
 from sqlalchemy.exc import ProgrammingError
 from sqlalchemy.orm import Session
 
+from robosystems.config import env
 from robosystems.database import get_db_session
 from robosystems.db.extensions import extensions_session
 from robosystems.middleware.auth.dependencies import get_current_user_with_graph
 from robosystems.middleware.extensions import (
   IdempotencyCache,
+  IdempotencyKeyConflictError,
   OperationContext,
   OperationEnvelope,
   execute_operation,
+  fingerprint_body,
+  generate_operation_id,
   get_idempotency_cache,
   log_operation_audit,
   wrap_pending,
@@ -79,6 +83,11 @@ from robosystems.models.api.extensions.taxonomies import (
   CreateAssociationRequest,
   CreateStructureRequest,
   CreateTaxonomyRequest,
+)
+from robosystems.models.api.views import (
+  CreateViewRequest,
+  ViewMetadata,
+  ViewResponse,
 )
 from robosystems.models.core import User
 from robosystems.operations.extensions.staleness import mark_graph_stale
@@ -190,6 +199,10 @@ from robosystems.operations.roboledger.fiscal_calendar.service import (
   InvalidCloseTargetError,
 )
 from robosystems.operations.roboledger.schedules import ScheduleService
+from robosystems.operations.roboledger.views import (
+  FactGridBuilder,
+  query_fact_grid,
+)
 
 router = APIRouter()
 
@@ -206,15 +219,37 @@ _PERIOD_PATTERN = r"^\d{4}-(0[1-9]|1[0-2])$"
 
 
 def _ctx(
-  *, graph_id: str, user_id: str, op: str, idempotency_key: str | None
+  *,
+  graph_id: str,
+  user_id: str,
+  op: str,
+  idempotency_key: str | None,
+  body: object,
 ) -> OperationContext:
+  """Build the per-request operation context with body fingerprint."""
   return OperationContext(
     domain="roboledger",
     operation_name=op,
     graph_id=graph_id,
     user_id=user_id,
     idempotency_key=idempotency_key,
+    body_fingerprint=fingerprint_body(body),
   )
+
+
+async def _dispatch(
+  ctx: OperationContext,
+  runner,
+  cache: IdempotencyCache,
+  on_fresh_success=None,
+) -> OperationEnvelope:
+  """Run `execute_operation` and translate idempotency conflicts to 409."""
+  try:
+    return await execute_operation(
+      ctx, runner, idempotency_cache=cache, on_fresh_success=on_fresh_success
+    )
+  except IdempotencyKeyConflictError as exc:
+    raise HTTPException(status_code=409, detail=str(exc))
 
 
 def _ledger_404() -> HTTPException:
@@ -324,6 +359,7 @@ async def update_entity_op(
     user_id=str(user.id),
     op="update-entity",
     idempotency_key=idempotency_key,
+    body=body,
   )
   updates = body.model_dump(exclude_none=True)
 
@@ -341,7 +377,7 @@ async def update_entity_op(
       )
     return result
 
-  return await execute_operation(ctx, _runner, idempotency_cache=cache)
+  return await _dispatch(ctx, _runner, cache)
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -371,6 +407,7 @@ async def initialize_op(
     user_id=str(user.id),
     op="initialize",
     idempotency_key=idempotency_key,
+    body=body,
   )
 
   def _runner():
@@ -394,7 +431,7 @@ async def initialize_op(
         raise _ledger_404()
       raise
 
-  return await execute_operation(ctx, _runner, idempotency_cache=cache)
+  return await _dispatch(ctx, _runner, cache)
 
 
 @router.post(
@@ -419,6 +456,7 @@ async def set_close_target_op(
     user_id=str(user.id),
     op="set-close-target",
     idempotency_key=idempotency_key,
+    body=body,
   )
 
   def _runner():
@@ -442,7 +480,7 @@ async def set_close_target_op(
         raise _ledger_404()
       raise
 
-  return await execute_operation(ctx, _runner, idempotency_cache=cache)
+  return await _dispatch(ctx, _runner, cache)
 
 
 @router.post(
@@ -467,6 +505,7 @@ async def close_period_op(
     user_id=str(user.id),
     op="close-period",
     idempotency_key=idempotency_key,
+    body=body,
   )
 
   try:
@@ -522,7 +561,7 @@ async def close_period_op(
         raise _ledger_404()
       raise
 
-  return await execute_operation(ctx, _runner, idempotency_cache=cache)
+  return await _dispatch(ctx, _runner, cache)
 
 
 @router.post(
@@ -547,6 +586,7 @@ async def reopen_period_op(
     user_id=str(user.id),
     op="reopen-period",
     idempotency_key=idempotency_key,
+    body=body,
   )
 
   try:
@@ -580,7 +620,7 @@ async def reopen_period_op(
         raise _ledger_404()
       raise
 
-  return await execute_operation(ctx, _runner, idempotency_cache=cache)
+  return await _dispatch(ctx, _runner, cache)
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -609,6 +649,7 @@ async def create_schedule_op(
     user_id=str(user.id),
     op="create-schedule",
     idempotency_key=idempotency_key,
+    body=body,
   )
 
   if body.period_end < body.period_start:
@@ -627,9 +668,12 @@ async def create_schedule_op(
         raise _ledger_404()
       raise
 
-  envelope = await execute_operation(ctx, _runner, idempotency_cache=cache)
-  mark_graph_stale(graph_id, "schedule_created")
-  return envelope
+  return await _dispatch(
+    ctx,
+    _runner,
+    cache,
+    on_fresh_success=lambda _env: mark_graph_stale(graph_id, "schedule_created"),
+  )
 
 
 @router.post(
@@ -653,6 +697,7 @@ async def truncate_schedule_op(
     user_id=str(user.id),
     op="truncate-schedule",
     idempotency_key=idempotency_key,
+    body=body,
   )
 
   def _runner():
@@ -672,9 +717,12 @@ async def truncate_schedule_op(
         raise _ledger_404()
       raise
 
-  envelope = await execute_operation(ctx, _runner, idempotency_cache=cache)
-  mark_graph_stale(graph_id, "schedule_truncated")
-  return envelope
+  return await _dispatch(
+    ctx,
+    _runner,
+    cache,
+    on_fresh_success=lambda _env: mark_graph_stale(graph_id, "schedule_truncated"),
+  )
 
 
 @router.post(
@@ -698,6 +746,7 @@ async def create_closing_entry_op(
     user_id=str(user.id),
     op="create-closing-entry",
     idempotency_key=idempotency_key,
+    body=body,
   )
 
   def _runner():
@@ -717,9 +766,12 @@ async def create_closing_entry_op(
         raise _ledger_404()
       raise
 
-  envelope = await execute_operation(ctx, _runner, idempotency_cache=cache)
-  mark_graph_stale(graph_id, "closing_entry_created")
-  return envelope
+  return await _dispatch(
+    ctx,
+    _runner,
+    cache,
+    on_fresh_success=lambda _env: mark_graph_stale(graph_id, "closing_entry_created"),
+  )
 
 
 @router.post(
@@ -743,6 +795,7 @@ async def create_manual_closing_entry_op(
     user_id=str(user.id),
     op="create-manual-closing-entry",
     idempotency_key=idempotency_key,
+    body=body,
   )
 
   def _runner():
@@ -758,9 +811,12 @@ async def create_manual_closing_entry_op(
         raise _ledger_404()
       raise
 
-  envelope = await execute_operation(ctx, _runner, idempotency_cache=cache)
-  mark_graph_stale(graph_id, "manual_entry_created")
-  return envelope
+  return await _dispatch(
+    ctx,
+    _runner,
+    cache,
+    on_fresh_success=lambda _env: mark_graph_stale(graph_id, "manual_entry_created"),
+  )
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -789,6 +845,7 @@ async def create_taxonomy_op(
     user_id=str(user.id),
     op="create-taxonomy",
     idempotency_key=idempotency_key,
+    body=body,
   )
 
   def _runner():
@@ -798,7 +855,7 @@ async def create_taxonomy_op(
     except (ValueError, ProgrammingError):
       raise _ledger_404()
 
-  return await execute_operation(ctx, _runner, idempotency_cache=cache)
+  return await _dispatch(ctx, _runner, cache)
 
 
 @router.post(
@@ -822,6 +879,7 @@ async def create_structure_op(
     user_id=str(user.id),
     op="create-structure",
     idempotency_key=idempotency_key,
+    body=body,
   )
 
   def _runner():
@@ -831,7 +889,7 @@ async def create_structure_op(
     except (ValueError, ProgrammingError):
       raise _ledger_404()
 
-  return await execute_operation(ctx, _runner, idempotency_cache=cache)
+  return await _dispatch(ctx, _runner, cache)
 
 
 @router.post(
@@ -855,6 +913,7 @@ async def create_mapping_association_op(
     user_id=str(user.id),
     op="create-mapping-association",
     idempotency_key=idempotency_key,
+    body=body,
   )
 
   def _runner():
@@ -877,7 +936,7 @@ async def create_mapping_association_op(
     except (ValueError, ProgrammingError):
       raise _ledger_404()
 
-  return await execute_operation(ctx, _runner, idempotency_cache=cache)
+  return await _dispatch(ctx, _runner, cache)
 
 
 @router.post(
@@ -901,6 +960,7 @@ async def delete_mapping_association_op(
     user_id=str(user.id),
     op="delete-mapping-association",
     idempotency_key=idempotency_key,
+    body=body,
   )
 
   def _runner():
@@ -915,7 +975,7 @@ async def delete_mapping_association_op(
       raise HTTPException(status_code=404, detail="Association not found")
     return DeleteResult(deleted=True)
 
-  return await execute_operation(ctx, _runner, idempotency_cache=cache)
+  return await _dispatch(ctx, _runner, cache)
 
 
 class AutoMapElementsOperation(BaseModel):
@@ -956,17 +1016,35 @@ async def auto_map_elements_op(
   from robosystems.worker.client import enqueue_task
 
   op_name = "auto-map-elements"
+  user_id = str(user.id)
+  body_fingerprint = fingerprint_body(body)
 
   # Idempotency cache lookup (manual — execute_operation handles it for
   # sync ops, but pending ops bypass that path because they don't
-  # produce a normal `result` payload).
+  # produce a normal `result` payload). Same Stripe-style semantics:
+  # replay on (user, graph, key, body) match, conflict on body change.
   if idempotency_key is not None:
-    cached = await cache.get(graph_id, op_name, idempotency_key)
+    try:
+      cached = await cache.get(
+        user_id, graph_id, op_name, idempotency_key, body_fingerprint
+      )
+    except IdempotencyKeyConflictError as exc:
+      log_operation_audit(
+        operation_name=op_name,
+        operation_id=generate_operation_id(),
+        user_id=user_id,
+        graph_id=graph_id,
+        duration_ms=0.0,
+        status="failed",
+        idempotency_key=idempotency_key,
+        error=str(exc),
+      )
+      raise HTTPException(status_code=409, detail=str(exc))
     if cached is not None:
       log_operation_audit(
         operation_name=op_name,
         operation_id=cached.operation_id,
-        user_id=str(user.id),
+        user_id=user_id,
         graph_id=graph_id,
         duration_ms=0.0,
         status=cached.status,
@@ -978,7 +1056,7 @@ async def auto_map_elements_op(
   task_response = await enqueue_task(
     task_type="agent",
     graph_id=graph_id,
-    user_id=str(user.id),
+    user_id=user_id,
     params={"agent_type": "mapping", "mapping_id": body.mapping_id},
   )
 
@@ -993,12 +1071,14 @@ async def auto_map_elements_op(
   )
 
   if idempotency_key is not None:
-    await cache.put(graph_id, op_name, idempotency_key, envelope)
+    await cache.put(
+      user_id, graph_id, op_name, idempotency_key, envelope, body_fingerprint
+    )
 
   log_operation_audit(
     operation_name=op_name,
     operation_id=envelope.operation_id,
-    user_id=str(user.id),
+    user_id=user_id,
     graph_id=graph_id,
     duration_ms=0.0,
     status="pending",
@@ -1033,6 +1113,7 @@ async def create_report_op(
     user_id=str(user.id),
     op="create-report",
     idempotency_key=idempotency_key,
+    body=body,
   )
 
   if body.period_end < body.period_start:
@@ -1052,9 +1133,12 @@ async def create_report_op(
         raise
       raise _ledger_404()
 
-  envelope = await execute_operation(ctx, _runner, idempotency_cache=cache)
-  mark_graph_stale(graph_id, "report_generated")
-  return envelope
+  return await _dispatch(
+    ctx,
+    _runner,
+    cache,
+    on_fresh_success=lambda _env: mark_graph_stale(graph_id, "report_generated"),
+  )
 
 
 @router.post(
@@ -1078,6 +1162,7 @@ async def regenerate_report_op(
     user_id=str(user.id),
     op="regenerate-report",
     idempotency_key=idempotency_key,
+    body=body,
   )
 
   def _runner():
@@ -1100,9 +1185,12 @@ async def regenerate_report_op(
     except (ValueError, ProgrammingError):
       raise _ledger_404()
 
-  envelope = await execute_operation(ctx, _runner, idempotency_cache=cache)
-  mark_graph_stale(graph_id, "report_generated")
-  return envelope
+  return await _dispatch(
+    ctx,
+    _runner,
+    cache,
+    on_fresh_success=lambda _env: mark_graph_stale(graph_id, "report_generated"),
+  )
 
 
 @router.post(
@@ -1126,6 +1214,7 @@ async def delete_report_op(
     user_id=str(user.id),
     op="delete-report",
     idempotency_key=idempotency_key,
+    body=body,
   )
 
   def _runner():
@@ -1145,7 +1234,7 @@ async def delete_report_op(
       )
     return DeleteResult(deleted=True)
 
-  return await execute_operation(ctx, _runner, idempotency_cache=cache)
+  return await _dispatch(ctx, _runner, cache)
 
 
 @router.post(
@@ -1169,6 +1258,7 @@ async def share_report_op(
     user_id=str(user.id),
     op="share-report",
     idempotency_key=idempotency_key,
+    body=body,
   )
 
   def _runner():
@@ -1195,7 +1285,7 @@ async def share_report_op(
     except (ValueError, ProgrammingError):
       raise _ledger_404()
 
-  return await execute_operation(ctx, _runner, idempotency_cache=cache)
+  return await _dispatch(ctx, _runner, cache)
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -1224,6 +1314,7 @@ async def create_publish_list_op(
     user_id=str(user.id),
     op="create-publish-list",
     idempotency_key=idempotency_key,
+    body=body,
   )
 
   def _runner():
@@ -1236,7 +1327,7 @@ async def create_publish_list_op(
     except ProgrammingError:
       raise HTTPException(status_code=404, detail="Ledger module not initialized.")
 
-  return await execute_operation(ctx, _runner, idempotency_cache=cache)
+  return await _dispatch(ctx, _runner, cache)
 
 
 @router.post(
@@ -1260,6 +1351,7 @@ async def update_publish_list_op(
     user_id=str(user.id),
     op="update-publish-list",
     idempotency_key=idempotency_key,
+    body=body,
   )
 
   def _runner():
@@ -1278,7 +1370,7 @@ async def update_publish_list_op(
     except ProgrammingError:
       raise HTTPException(status_code=404, detail="Ledger module not initialized.")
 
-  return await execute_operation(ctx, _runner, idempotency_cache=cache)
+  return await _dispatch(ctx, _runner, cache)
 
 
 @router.post(
@@ -1302,6 +1394,7 @@ async def delete_publish_list_op(
     user_id=str(user.id),
     op="delete-publish-list",
     idempotency_key=idempotency_key,
+    body=body,
   )
 
   def _runner():
@@ -1317,7 +1410,7 @@ async def delete_publish_list_op(
       raise HTTPException(status_code=404, detail="Publish list not found.")
     return DeleteResult(deleted=True)
 
-  return await execute_operation(ctx, _runner, idempotency_cache=cache)
+  return await _dispatch(ctx, _runner, cache)
 
 
 @router.post(
@@ -1341,6 +1434,7 @@ async def add_publish_list_members_op(
     user_id=str(user.id),
     op="add-publish-list-members",
     idempotency_key=idempotency_key,
+    body=body,
   )
 
   # The inherited AddMembersRequest is what the ops function takes; unwrap
@@ -1369,7 +1463,7 @@ async def add_publish_list_members_op(
     except ProgrammingError:
       raise HTTPException(status_code=404, detail="Ledger module not initialized.")
 
-  return await execute_operation(ctx, _runner, idempotency_cache=cache)
+  return await _dispatch(ctx, _runner, cache)
 
 
 @router.post(
@@ -1393,6 +1487,7 @@ async def remove_publish_list_member_op(
     user_id=str(user.id),
     op="remove-publish-list-member",
     idempotency_key=idempotency_key,
+    body=body,
   )
 
   def _runner():
@@ -1405,4 +1500,128 @@ async def remove_publish_list_member_op(
       raise HTTPException(status_code=404, detail="Member not found in this list.")
     return DeleteResult(deleted=True)
 
-  return await execute_operation(ctx, _runner, idempotency_cache=cache)
+  return await _dispatch(ctx, _runner, cache)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Analytical view operations (graph-backed, not OLTP)
+# ═══════════════════════════════════════════════════════════════════════════
+#
+# `build-fact-grid` is the one read-shaped operation in the dispatcher.
+# It runs Cypher against the LadybugDB graph (XBRL hypercube schema) and
+# returns a multi-dimensional pivot table — too complex for GraphQL's 1:1
+# typed resolvers and POST-shaped because the request body carries a
+# rich `ViewConfig`. Idempotency keys still work as a deterministic cache
+# for expensive analytical queries; audit logging is genuinely useful for
+# usage tracking.
+#
+# Gated behind `FACT_GRID_ENABLED` because the feature is still maturing
+# (timeouts on broad SEC queries). Off by default in production.
+
+
+if env.FACT_GRID_ENABLED:
+
+  @router.post(
+    "/build-fact-grid",
+    response_model=OperationEnvelope,
+    operation_id="opBuildFactGrid",
+    summary="Build Fact Grid",
+    tags=[_OP_TAG],
+    dependencies=[_RATE_LIMIT],
+  )
+  async def build_fact_grid_op(
+    body: CreateViewRequest,
+    graph_id: str = Path(..., pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN),
+    user: User = Depends(get_current_user_with_graph),
+    idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
+    cache: IdempotencyCache = Depends(get_idempotency_cache),
+  ) -> OperationEnvelope:
+    """Build a multi-dimensional fact grid against the graph schema.
+
+    Queries `Fact` nodes by element qnames or canonical concepts with
+    optional filters for periods, entities, filing form, fiscal context,
+    and period type. Returns a deduplicated pivot table plus optional
+    summary statistics.
+
+    This is a graph-database read — the query runs against LadybugDB,
+    not the extensions OLTP database. The same operation works for
+    roboledger tenant graphs (post-materialization) and the SEC shared
+    repository (which uses the same XBRL hypercube schema).
+    """
+    import time
+    import uuid
+
+    ctx = _ctx(
+      graph_id=graph_id,
+      user_id=str(user.id),
+      op="build-fact-grid",
+      idempotency_key=idempotency_key,
+      body=body,
+    )
+
+    if not body.elements and not body.canonical_concepts:
+      raise HTTPException(
+        status_code=400,
+        detail="Provide elements (qnames) and/or canonical_concepts",
+      )
+    if not body.periods and not body.period_type and body.fiscal_year is None:
+      raise HTTPException(
+        status_code=400,
+        detail="Provide periods, period_type, or fiscal_year to scope the query",
+      )
+
+    async def _runner():
+      start_time = time.time()
+      fact_data = await query_fact_grid(
+        graph_id=graph_id,
+        elements=body.elements or None,
+        canonical_concepts=body.canonical_concepts or None,
+        periods=body.periods or None,
+        entity=body.entity,
+        entities=body.entities or None,
+        form=body.form,
+        fiscal_year=body.fiscal_year,
+        fiscal_period=body.fiscal_period,
+        period_type=body.period_type,
+      )
+
+      builder = FactGridBuilder()
+      fact_grid = builder.build(
+        fact_data=fact_data, view_config=body.view_config, source="fact_grid"
+      )
+      pivot_table = builder.generate_pivot_table(fact_grid, body.view_config)
+
+      construction_time_ms = (time.time() - start_time) * 1000
+      metadata = ViewMetadata(
+        view_id=str(uuid.uuid4()),
+        facts_processed=fact_grid.metadata.fact_count,
+        construction_time_ms=construction_time_ms,
+        source="fact_grid",
+      )
+
+      presentations: dict[str, object] = {"pivot_table": pivot_table}
+
+      # Optional inline summary stats — element-keyed aggregates, only
+      # computed when the caller asks for them.
+      if (
+        body.include_summary
+        and fact_grid.facts_df is not None
+        and not fact_grid.facts_df.empty
+      ):
+        df = fact_grid.facts_df
+        if "element_name" in df.columns and "value" in df.columns:
+          summary: dict[str, dict[str, float]] = {}
+          for element_name in df["element_name"].unique():
+            element_data = df[df["element_name"] == element_name]
+            summary[element_name] = {
+              "count": len(element_data),
+              "total": float(element_data["value"].sum()),
+              "average": float(element_data["value"].mean()),
+              "min": float(element_data["value"].min()),
+              "max": float(element_data["value"].max()),
+            }
+          presentations["summary"] = summary
+
+      return ViewResponse(metadata=metadata, presentations=presentations)
+
+    return await _dispatch(ctx, _runner, cache)

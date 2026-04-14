@@ -18,48 +18,82 @@ class TestSchemaComposition:
     assert len(sdl) > 1000  # guard against an empty schema regression
 
   def test_all_ledger_queries_are_exposed(self) -> None:
+    """Every ledger query on the Query root.
+
+    The endpoint is graph-scoped at the URL level, so resolvers don't
+    take `graphId` as an argument. Fields with no other args appear as
+    `entity: LedgerEntity` rather than `entity(graphId: ID!): …`.
+    """
     sdl = str(schema)
-    # Sample the core ledger queries — if any are missing, the Query
-    # inheritance from LedgerQuery has regressed.
-    for field in [
-      "entity(",
-      "entities(",
-      "summary(",
-      "accounts(",
-      "accountTree(",
-      "accountRollups(",
-      "trialBalance(",
-      "transactions(",
-      "transaction(",
-      "taxonomies(",
-      "reportingTaxonomy(",
-      "elements(",
-      "unmappedElements(",
-      "structures(",
-      "mappings(",
-      "mapping(",
-      "mappingCoverage(",
-      "schedules(",
-      "scheduleFacts(",
-      "periodCloseStatus(",
-      "fiscalCalendar(",
-      "periodDrafts(",
-      "closingBookStructures(",
+    start = sdl.find("type Query {")
+    assert start >= 0
+    end = sdl.find("}", start)
+    query_block = sdl[start:end]
+    for field_name in [
+      "entity",
+      "entities",
+      "summary",
+      "accounts",
+      "accountTree",
+      "accountRollups",
+      "trialBalance",
+      "transactions",
+      "transaction",
+      "taxonomies",
+      "reportingTaxonomy",
+      "elements",
+      "unmappedElements",
+      "structures",
+      "mappings",
+      "mapping",
+      "mappingCoverage",
+      "mappedTrialBalance",
+      "schedules",
+      "scheduleFacts",
+      "periodCloseStatus",
+      "fiscalCalendar",
+      "periodDrafts",
+      "closingBookStructures",
+      "reports",
+      "report",
+      "statement",
+      "publishLists",
+      "publishList",
     ]:
-      assert field in sdl, f"Missing ledger query: {field}"
+      # Match `fieldName:` (no args) or `fieldName(` (args present).
+      present = f"{field_name}:" in query_block or f"{field_name}(" in query_block
+      assert present, f"Missing ledger query field: {field_name}"
 
   def test_all_investor_queries_are_exposed(self) -> None:
     sdl = str(schema)
-    for field in [
-      "portfolios(",
-      "portfolio(",
-      "securities(",
-      "security(",
-      "positions(",
-      "position(",
-      "holdings(",
+    start = sdl.find("type Query {")
+    assert start >= 0
+    end = sdl.find("}", start)
+    query_block = sdl[start:end]
+    for field_name in [
+      "portfolios",
+      "portfolio",
+      "securities",
+      "security",
+      "positions",
+      "position",
+      "holdings",
     ]:
-      assert field in sdl, f"Missing investor query: {field}"
+      present = f"{field_name}:" in query_block or f"{field_name}(" in query_block
+      assert present, f"Missing investor query field: {field_name}"
+
+  def test_query_root_has_no_graph_id_args(self) -> None:
+    """No Query field should take `graphId` — that's a URL path param now."""
+    sdl = str(schema)
+    start = sdl.find("type Query {")
+    assert start >= 0
+    end = sdl.find("}", start)
+    query_block = sdl[start:end]
+    assert "graphId" not in query_block, (
+      "graphId should not appear as a query argument — it's now a URL path "
+      "parameter (`/extensions/{graph_id}/graphql`). See `graphql/context.py` "
+      "and `graphql/resolvers/*.py`."
+    )
 
   def test_account_tree_node_is_recursive(self) -> None:
     """`children: [AccountTreeNode!]!` must round-trip the self-reference."""

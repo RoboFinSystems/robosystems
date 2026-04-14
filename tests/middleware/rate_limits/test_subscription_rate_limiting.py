@@ -80,6 +80,64 @@ class TestSubscriptionRateLimits:
     assert not should_use_subscription_limits("/v1/health")
     assert not should_use_subscription_limits("/v1/status")
 
+  def test_should_use_subscription_limits_for_extensions(self):
+    """The post-cutover extensions surface must use subscription buckets.
+
+    Regression: an earlier version of `should_use_subscription_limits`
+    only opted in for `/v1/*` paths, which meant the new graph-scoped
+    GraphQL read endpoint and the REST operation endpoints silently
+    fell back to the generic API limiter — losing per-tier
+    observability and the read/write bucket split.
+    """
+    # GraphQL reads (graph-scoped at the URL level)
+    assert should_use_subscription_limits("/extensions/kg1a2b3c/graphql")
+    # RoboLedger operation writes
+    assert should_use_subscription_limits(
+      "/extensions/roboledger/kg1a2b3c/operations/update-entity"
+    )
+    # RoboInvestor operation writes
+    assert should_use_subscription_limits(
+      "/extensions/roboinvestor/kg1a2b3c/operations/create-portfolio"
+    )
+
+  def test_get_endpoint_category_for_extensions(self):
+    """Extensions paths must map to GRAPH_READ / GRAPH_WRITE buckets.
+
+    Without this, `subscription_aware_rate_limit_dependency` would
+    look up `None` and fall through to the generic limiter — the
+    original regression that motivated this fix.
+    """
+    # Graph-scoped GraphQL read → GRAPH_READ
+    assert (
+      get_endpoint_category("/extensions/kg1a2b3c/graphql", "POST")
+      == EndpointCategory.GRAPH_READ
+    )
+    # Subgraph IDs (with underscore) work too
+    assert (
+      get_endpoint_category("/extensions/kg1a2b3c_dev/graphql", "POST")
+      == EndpointCategory.GRAPH_READ
+    )
+    # RoboLedger operations → GRAPH_WRITE
+    assert (
+      get_endpoint_category(
+        "/extensions/roboledger/kg1a2b3c/operations/update-entity", "POST"
+      )
+      == EndpointCategory.GRAPH_WRITE
+    )
+    assert (
+      get_endpoint_category(
+        "/extensions/roboledger/kg1a2b3c/operations/close-period", "POST"
+      )
+      == EndpointCategory.GRAPH_WRITE
+    )
+    # RoboInvestor operations → GRAPH_WRITE
+    assert (
+      get_endpoint_category(
+        "/extensions/roboinvestor/kg1a2b3c/operations/create-portfolio", "POST"
+      )
+      == EndpointCategory.GRAPH_WRITE
+    )
+
   def test_get_subscription_rate_limit(self):
     """Test rate limit retrieval for different tiers."""
     # Base tier

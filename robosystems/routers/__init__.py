@@ -96,11 +96,10 @@ router.include_router(
   tables_router
 )  # No prefix - handles all /tables and /files paths internally
 
-# Conditionally include views router based on feature flag
-if env.FACT_GRID_ENABLED:
-  from .graphs import views_router
-
-  router.include_router(views_router)  # No prefix - handles /views internally
+# NOTE: views router used to live under /v1/graphs/{g}/views. It has been
+# relocated to /extensions/roboledger/{graph_id}/views — see main.py. The
+# fact grid is roboledger-schema-specific (XBRL hypercube), so it never
+# really belonged on the platform graph surface.
 
 # Conditionally include search router based on feature flag
 if env.SEMANTIC_SEARCH_ENABLED:

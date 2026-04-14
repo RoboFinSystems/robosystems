@@ -62,6 +62,31 @@ from robosystems.routers.admin import (
 logger = get_logger("robosystems.api")
 
 
+def is_relaxed_csp_path(path: str) -> bool:
+  """Return True for paths that should receive the relaxed CSP.
+
+  The relaxed CSP allows CDN-hosted scripts/styles needed by the
+  Swagger UI at `/`, the static asset bundle, and the GraphiQL
+  playground. GraphiQL is mounted graph-scoped at
+  `/extensions/{graph_id}/graphql`, so a naive
+  `path.startswith("/extensions/graphql")` check (its pre-cutover
+  shape) no longer matches and would block the React/GraphiQL CDN
+  bundle. We accept any `/extensions/.../graphql` path — covering
+  both the new graph-scoped URL and the legacy shape defensively.
+
+  Extracted from the security-headers middleware so the matcher
+  contract has a unit-testable home; future URL changes that move
+  GraphiQL must update this function and its tests.
+  """
+  if path in ("/", "/docs"):
+    return True
+  if path.startswith("/static"):
+    return True
+  if path.startswith("/extensions/") and path.endswith("/graphql"):
+    return True
+  return False
+
+
 def create_app() -> FastAPI:
   """
   Create the FastAPI app and include the routers.
@@ -233,14 +258,10 @@ def create_app() -> FastAPI:
         "max-age=31536000; includeSubDomains"
       )
 
-    # Path-based CSP - strict for API, relaxed for docs
+    # Path-based CSP - strict for API, relaxed for docs / GraphiQL.
+    # See `is_relaxed_csp_path()` for the matched URL contract.
     path = request.url.path
-
-    if (
-      path in ["/", "/docs"]
-      or path.startswith("/static")
-      or path.startswith("/extensions/graphql")
-    ):
+    if is_relaxed_csp_path(path):
       # Relaxed CSP for documentation, static assets, and the GraphiQL
       # playground (which loads React/GraphiQL from unpkg.com, mirroring
       # Swagger UI's pattern).
@@ -327,14 +348,20 @@ def create_app() -> FastAPI:
   # are on /extensions/{roboledger,roboinvestor}/{graph_id}/operations/*.
   # Mounts appear further down in this function.
 
-  # Extensions GraphQL endpoint (Strawberry). Serves read-heavy extensions
-  # queries (roboledger, roboinvestor) at /extensions/graphql.
+  # Extensions GraphQL endpoint (Strawberry). Graph-scoped at
+  # `/extensions/{graph_id}/graphql` so:
   #
-  # Rate limiting: the same `subscription_aware_rate_limit_dependency` that
-  # protected the retired REST reads is applied at mount time, so every
-  # request to /extensions/graphql counts against the caller's burst
-  # window before Strawberry parses the query. (GraphQL doesn't use
-  # FastAPI dependencies per resolver, so router-level is the right hook.)
+  # 1. Auth + per-graph access are enforced by the FastAPI dependency
+  #    layer (`get_context` reads `graph_id` from the path and runs
+  #    `check_graph_access` before Strawberry parses the query).
+  # 2. Resolvers don't take `graphId` as an argument — they read it
+  #    from `info.context["graph_id"]`. The schema is one-graph-at-a-time.
+  # 3. Rate limiting (`subscription_aware_rate_limit_dependency`)
+  #    becomes per-tenant naturally because the dependency reads
+  #    `graph_id` from `request.path_params`.
+  # 4. The wire surface is symmetric with REST writes:
+  #    `POST /extensions/{graph_id}/graphql` (reads)
+  #    `POST /extensions/{domain}/{graph_id}/operations/{op}` (writes)
   if env.EXTENSIONS_GRAPHQL_ENABLED and (env.LEDGER_ENABLED or env.INVESTOR_ENABLED):
     from fastapi import Depends as _Depends
     from strawberry.fastapi import GraphQLRouter
@@ -348,12 +375,12 @@ def create_app() -> FastAPI:
     graphql_router = GraphQLRouter(
       extensions_graphql_schema,
       context_getter=graphql_context_getter,
-      # GraphiQL playground at GET /extensions/graphql (dev only).
+      # GraphiQL playground (dev only).
       graphql_ide="graphiql" if env.is_development() else None,
     )
     app.include_router(
       graphql_router,
-      prefix="/extensions/graphql",
+      prefix="/extensions/{graph_id}/graphql",
       tags=["Extensions: GraphQL"],
       include_in_schema=True,
       dependencies=[_Depends(subscription_aware_rate_limit_dependency)],

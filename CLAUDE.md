@@ -34,18 +34,24 @@ just migrate-create "description"  # NOT: manual alembic revision
 ## API Endpoints (local testing)
 
 Core platform APIs are mounted under `/v1` (graphs, billing, auth, etc.).
-Extensions (roboledger, roboinvestor) live under `/extensions`:
+Extensions (roboledger, roboinvestor) live under `/extensions` and are
+**graph-scoped at the URL level**:
 
-- **Reads** → `POST /extensions/graphql` (Strawberry + GraphiQL in dev)
+- **Reads** → `POST /extensions/{graph_id}/graphql` (Strawberry + GraphiQL in dev)
 - **Writes** → `POST /extensions/{roboledger|roboinvestor}/{graph_id}/operations/{operation_name}`
+
+Both surfaces take `graph_id` as a URL path parameter — auth + per-graph
+access are validated by FastAPI dependencies before the handler runs.
+GraphQL queries do NOT take a `graphId` argument; the URL is the scope.
 
 Common mistakes:
 
 | ❌ Wrong                          | ✅ Correct                                                                | Purpose              |
 | --------------------------------- | ------------------------------------------------------------------------- | -------------------- |
 | `GET /health`, `GET /v1/health`   | `GET /v1/status`                                                           | API health check     |
-| `GET /v1/ledger/{g}/entity`       | GraphQL `{ entity(graphId: "…") { … } }`                                   | Ledger read          |
+| `GET /v1/ledger/{g}/entity`       | GraphQL `POST /extensions/{g}/graphql` body `{ entity { … } }`             | Ledger read          |
 | `PUT /v1/ledger/{g}/entity`       | `POST /extensions/roboledger/{g}/operations/update-entity`                 | Ledger write         |
+| `{ entity(graphId: "kg_x") }`     | `{ entity { … } }` (graph_id comes from URL)                                | GraphQL query        |
 | `GET /graphs/...`                 | `GET /v1/graphs/{graph_id}/...`                                            | Graph endpoints      |
 
 - **Root `/`** serves the Swagger UI (HTML); don't use it for health checks.
@@ -59,11 +65,11 @@ Example:
 # Health check
 curl http://localhost:8000/v1/status
 
-# GraphQL read (fiscal calendar)
-curl -X POST http://localhost:8000/extensions/graphql \
+# GraphQL read (fiscal calendar) — graph_id is in the URL, not the query
+curl -X POST "http://localhost:8000/extensions/$GRAPH_ID/graphql" \
   -H "X-API-Key: $(jq -r .api_key .local/config.json)" \
   -H "Content-Type: application/json" \
-  -d '{"query": "{ fiscalCalendar(graphId: \"'$GRAPH_ID'\") { closedThrough closeTarget } }"}'
+  -d '{"query": "{ fiscalCalendar { closedThrough closeTarget } }"}'
 
 # REST operation write (close a period)
 curl -X POST "http://localhost:8000/extensions/roboledger/$GRAPH_ID/operations/close-period" \

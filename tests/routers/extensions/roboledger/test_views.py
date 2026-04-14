@@ -1,0 +1,259 @@
+"""Tests for the build-fact-grid roboledger operation.
+
+Covers the analytical view operation registered in
+`routers/extensions/roboledger/operations.py`. This is the only
+read-shaped operation in the dispatcher — it queries the LadybugDB
+graph (XBRL hypercube schema) and returns a multi-dimensional pivot
+table wrapped in an `OperationEnvelope`.
+
+Mocks the underlying graph query (`query_fact_grid`) and the
+`FactGridBuilder` so the tests stay focused on the operation route's
+contract: arg threading, validation, envelope wrapping, and error
+translation. The Cypher and pandas pivot logic have their own unit
+coverage in the ops layer.
+"""
+
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pandas as pd
+import pytest
+from fastapi import HTTPException
+
+from robosystems.routers.extensions.roboledger.operations import build_fact_grid_op
+
+MODULE = "robosystems.routers.extensions.roboledger.operations"
+GRAPH_ID = "kg01234567890abcdef"
+
+
+def _make_create_view_request(
+  elements=None,
+  canonical_concepts=None,
+  periods=None,
+  period_type="annual",
+  entity=None,
+  entities=None,
+  include_summary=False,
+):
+  """Build a duck-typed CreateViewRequest matching the route signature."""
+  mock_request = MagicMock()
+  mock_request.elements = elements if elements is not None else ["us-gaap:Assets"]
+  mock_request.canonical_concepts = (
+    canonical_concepts if canonical_concepts is not None else []
+  )
+  mock_request.periods = periods or []
+  mock_request.period_type = period_type
+  mock_request.entity = entity
+  mock_request.entities = entities or []
+  mock_request.form = None
+  mock_request.fiscal_year = None
+  mock_request.fiscal_period = None
+  mock_request.include_summary = include_summary
+  mock_request.view_config = MagicMock()
+  return mock_request
+
+
+def _make_user(user_id: str = "usr_test"):
+  user = MagicMock()
+  user.id = user_id
+  return user
+
+
+def _make_mock_grid(fact_count: int = 5):
+  grid = MagicMock()
+  grid.metadata.fact_count = fact_count
+  grid.facts_df = None
+  return grid
+
+
+class _FakeCache:
+  """Minimal idempotency cache stub that stores nothing."""
+
+  async def get(self, *args, **kwargs):
+    return None
+
+  async def put(self, *args, **kwargs):
+    return None
+
+
+@pytest.mark.asyncio
+class TestBuildFactGridOperation:
+  """Wire-shape and dispatcher contract for build-fact-grid."""
+
+  @pytest.mark.unit
+  async def test_happy_path_wraps_in_envelope(self):
+    """The operation runs query_fact_grid + FactGridBuilder and wraps result."""
+    mock_grid = _make_mock_grid(fact_count=42)
+    mock_builder = MagicMock()
+    mock_builder.build.return_value = mock_grid
+    mock_builder.generate_pivot_table.return_value = {
+      "index": [["Assets"]],
+      "columns": [["2026-01-31"]],
+      "data": [[1000.0]],
+      "metadata": {"row_count": 1, "column_count": 1},
+    }
+
+    body = _make_create_view_request(elements=["us-gaap:Assets"], period_type="instant")
+
+    with (
+      patch(
+        f"{MODULE}.query_fact_grid",
+        new_callable=AsyncMock,
+        return_value=MagicMock(),
+      ) as mock_query,
+      patch(f"{MODULE}.FactGridBuilder", return_value=mock_builder),
+    ):
+      envelope = await build_fact_grid_op(
+        body=body,
+        graph_id=GRAPH_ID,
+        user=_make_user(),
+        idempotency_key=None,
+        cache=_FakeCache(),
+      )
+
+    assert envelope.operation == "build-fact-grid"
+    assert envelope.operation_id.startswith("op_")
+    assert envelope.status == "completed"
+    assert envelope.result is not None
+    # ViewResponse wraps {metadata, presentations}
+    assert "metadata" in envelope.result
+    assert "presentations" in envelope.result
+    assert envelope.result["metadata"]["facts_processed"] == 42
+    assert "pivot_table" in envelope.result["presentations"]
+    mock_query.assert_called_once()
+    call_kwargs = mock_query.call_args.kwargs
+    assert call_kwargs["graph_id"] == GRAPH_ID
+    assert call_kwargs["elements"] == ["us-gaap:Assets"]
+    assert call_kwargs["period_type"] == "instant"
+
+  @pytest.mark.unit
+  async def test_entity_filter_passed_through(self):
+    """Single-entity ticker filter threads through to query_fact_grid."""
+    mock_builder = MagicMock()
+    mock_builder.build.return_value = _make_mock_grid()
+    mock_builder.generate_pivot_table.return_value = {
+      "index": [],
+      "columns": [],
+      "data": [],
+      "metadata": {},
+    }
+
+    body = _make_create_view_request(entity="NVDA")
+
+    with (
+      patch(
+        f"{MODULE}.query_fact_grid",
+        new_callable=AsyncMock,
+        return_value=MagicMock(),
+      ) as mock_query,
+      patch(f"{MODULE}.FactGridBuilder", return_value=mock_builder),
+    ):
+      await build_fact_grid_op(
+        body=body,
+        graph_id=GRAPH_ID,
+        user=_make_user(),
+        idempotency_key=None,
+        cache=_FakeCache(),
+      )
+
+    assert mock_query.call_args.kwargs["entity"] == "NVDA"
+
+  @pytest.mark.unit
+  async def test_missing_elements_raises_400(self):
+    """Body with neither elements nor canonical_concepts is rejected."""
+    body = _make_create_view_request(elements=[], canonical_concepts=[])
+
+    with pytest.raises(HTTPException) as exc_info:
+      await build_fact_grid_op(
+        body=body,
+        graph_id=GRAPH_ID,
+        user=_make_user(),
+        idempotency_key=None,
+        cache=_FakeCache(),
+      )
+
+    assert exc_info.value.status_code == 400
+    assert "elements" in exc_info.value.detail
+
+  @pytest.mark.unit
+  async def test_missing_period_scope_raises_400(self):
+    """Body without periods, period_type, or fiscal_year is rejected."""
+    body = _make_create_view_request(period_type=None)
+    body.fiscal_year = None
+
+    with pytest.raises(HTTPException) as exc_info:
+      await build_fact_grid_op(
+        body=body,
+        graph_id=GRAPH_ID,
+        user=_make_user(),
+        idempotency_key=None,
+        cache=_FakeCache(),
+      )
+
+    assert exc_info.value.status_code == 400
+    assert "period" in exc_info.value.detail.lower()
+
+  @pytest.mark.unit
+  async def test_include_summary_adds_per_element_stats(self):
+    """include_summary=True adds element-keyed aggregates to presentations."""
+    mock_grid = _make_mock_grid(fact_count=3)
+    mock_grid.facts_df = pd.DataFrame(
+      {
+        "element_name": ["Revenue", "Revenue", "Cost of Revenue"],
+        "value": [1000.0, 2000.0, 500.0],
+      }
+    )
+
+    mock_builder = MagicMock()
+    mock_builder.build.return_value = mock_grid
+    mock_builder.generate_pivot_table.return_value = {
+      "index": [],
+      "columns": [],
+      "data": [],
+      "metadata": {},
+    }
+
+    body = _make_create_view_request(include_summary=True)
+
+    with (
+      patch(
+        f"{MODULE}.query_fact_grid",
+        new_callable=AsyncMock,
+        return_value=MagicMock(),
+      ),
+      patch(f"{MODULE}.FactGridBuilder", return_value=mock_builder),
+    ):
+      envelope = await build_fact_grid_op(
+        body=body,
+        graph_id=GRAPH_ID,
+        user=_make_user(),
+        idempotency_key=None,
+        cache=_FakeCache(),
+      )
+
+    presentations = envelope.result["presentations"]  # type: ignore[index]
+    assert "summary" in presentations
+    assert presentations["summary"]["Revenue"]["count"] == 2
+    assert presentations["summary"]["Revenue"]["total"] == 3000.0
+    assert presentations["summary"]["Cost of Revenue"]["total"] == 500.0
+
+  @pytest.mark.unit
+  async def test_internal_error_audited_and_propagated(self):
+    """Any error from the underlying query bubbles up through the dispatcher."""
+    body = _make_create_view_request()
+
+    with (
+      patch(
+        f"{MODULE}.query_fact_grid",
+        new_callable=AsyncMock,
+        side_effect=RuntimeError("connection lost"),
+      ),
+      patch(f"{MODULE}.FactGridBuilder"),
+    ):
+      with pytest.raises(RuntimeError):
+        await build_fact_grid_op(
+          body=body,
+          graph_id=GRAPH_ID,
+          user=_make_user(),
+          idempotency_key=None,
+          cache=_FakeCache(),
+        )

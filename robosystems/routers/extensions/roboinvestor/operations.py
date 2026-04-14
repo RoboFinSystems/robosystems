@@ -26,9 +26,11 @@ from robosystems.db.extensions import extensions_session
 from robosystems.middleware.auth.dependencies import get_current_user_with_graph
 from robosystems.middleware.extensions import (
   IdempotencyCache,
+  IdempotencyKeyConflictError,
   OperationContext,
   OperationEnvelope,
   execute_operation,
+  fingerprint_body,
   get_idempotency_cache,
 )
 from robosystems.middleware.graph.types import GRAPH_OR_SUBGRAPH_ID_PATTERN
@@ -133,15 +135,42 @@ def _not_initialized_404() -> HTTPException:
 
 
 def _ctx(
-  *, graph_id: str, user_id: str, op: str, idempotency_key: str | None
+  *,
+  graph_id: str,
+  user_id: str,
+  op: str,
+  idempotency_key: str | None,
+  body: object,
 ) -> OperationContext:
+  """Build the per-request operation context.
+
+  Always computes the body fingerprint so the dispatcher can enforce
+  Stripe-style idempotency semantics (replay on key+body match,
+  conflict on key reuse with different body).
+  """
   return OperationContext(
     domain="roboinvestor",
     operation_name=op,
     graph_id=graph_id,
     user_id=user_id,
     idempotency_key=idempotency_key,
+    body_fingerprint=fingerprint_body(body),
   )
+
+
+async def _dispatch(
+  ctx: OperationContext,
+  runner,
+  cache: IdempotencyCache,
+  on_fresh_success=None,
+) -> OperationEnvelope:
+  """Run `execute_operation` and translate idempotency conflicts to 409."""
+  try:
+    return await execute_operation(
+      ctx, runner, idempotency_cache=cache, on_fresh_success=on_fresh_success
+    )
+  except IdempotencyKeyConflictError as exc:
+    raise HTTPException(status_code=409, detail=str(exc))
 
 
 # ───────────────────────────────────────────────────────────────────────────
@@ -169,6 +198,7 @@ async def create_portfolio_op(
     user_id=str(user.id),
     op="create-portfolio",
     idempotency_key=idempotency_key,
+    body=body,
   )
 
   def _runner():
@@ -178,7 +208,7 @@ async def create_portfolio_op(
     except ProgrammingError:
       raise _not_initialized_404()
 
-  return await execute_operation(ctx, _runner, idempotency_cache=cache)
+  return await _dispatch(ctx, _runner, cache)
 
 
 @router.post(
@@ -201,6 +231,7 @@ async def update_portfolio_op(
     user_id=str(user.id),
     op="update-portfolio",
     idempotency_key=idempotency_key,
+    body=body,
   )
   updates = body.model_dump(exclude_unset=True, exclude={"portfolio_id"})
 
@@ -214,7 +245,7 @@ async def update_portfolio_op(
       raise HTTPException(status_code=404, detail="Portfolio not found.")
     return result
 
-  return await execute_operation(ctx, _runner, idempotency_cache=cache)
+  return await _dispatch(ctx, _runner, cache)
 
 
 @router.post(
@@ -237,6 +268,7 @@ async def delete_portfolio_op(
     user_id=str(user.id),
     op="delete-portfolio",
     idempotency_key=idempotency_key,
+    body=body,
   )
 
   def _runner():
@@ -255,7 +287,7 @@ async def delete_portfolio_op(
       raise HTTPException(status_code=404, detail="Portfolio not found.")
     return DeleteResult(deleted=True)
 
-  return await execute_operation(ctx, _runner, idempotency_cache=cache)
+  return await _dispatch(ctx, _runner, cache)
 
 
 # ───────────────────────────────────────────────────────────────────────────
@@ -283,6 +315,7 @@ async def create_security_op(
     user_id=str(user.id),
     op="create-security",
     idempotency_key=idempotency_key,
+    body=body,
   )
 
   def _runner():
@@ -295,7 +328,7 @@ async def create_security_op(
     except ProgrammingError:
       raise _not_initialized_404()
 
-  return await execute_operation(ctx, _runner, idempotency_cache=cache)
+  return await _dispatch(ctx, _runner, cache)
 
 
 @router.post(
@@ -318,6 +351,7 @@ async def update_security_op(
     user_id=str(user.id),
     op="update-security",
     idempotency_key=idempotency_key,
+    body=body,
   )
   updates = body.model_dump(exclude_unset=True, exclude={"security_id"})
 
@@ -331,7 +365,7 @@ async def update_security_op(
       raise HTTPException(status_code=404, detail="Security not found.")
     return result
 
-  return await execute_operation(ctx, _runner, idempotency_cache=cache)
+  return await _dispatch(ctx, _runner, cache)
 
 
 @router.post(
@@ -354,6 +388,7 @@ async def delete_security_op(
     user_id=str(user.id),
     op="delete-security",
     idempotency_key=idempotency_key,
+    body=body,
   )
 
   def _runner():
@@ -366,7 +401,7 @@ async def delete_security_op(
       raise HTTPException(status_code=404, detail="Security not found.")
     return DeleteResult(deleted=True)
 
-  return await execute_operation(ctx, _runner, idempotency_cache=cache)
+  return await _dispatch(ctx, _runner, cache)
 
 
 # ───────────────────────────────────────────────────────────────────────────
@@ -394,6 +429,7 @@ async def create_position_op(
     user_id=str(user.id),
     op="create-position",
     idempotency_key=idempotency_key,
+    body=body,
   )
 
   def _runner():
@@ -410,7 +446,7 @@ async def create_position_op(
     except ProgrammingError:
       raise _not_initialized_404()
 
-  return await execute_operation(ctx, _runner, idempotency_cache=cache)
+  return await _dispatch(ctx, _runner, cache)
 
 
 @router.post(
@@ -433,6 +469,7 @@ async def update_position_op(
     user_id=str(user.id),
     op="update-position",
     idempotency_key=idempotency_key,
+    body=body,
   )
   updates = body.model_dump(exclude_unset=True, exclude={"position_id"})
 
@@ -446,7 +483,7 @@ async def update_position_op(
       raise HTTPException(status_code=404, detail="Position not found.")
     return result
 
-  return await execute_operation(ctx, _runner, idempotency_cache=cache)
+  return await _dispatch(ctx, _runner, cache)
 
 
 @router.post(
@@ -469,6 +506,7 @@ async def delete_position_op(
     user_id=str(user.id),
     op="delete-position",
     idempotency_key=idempotency_key,
+    body=body,
   )
 
   def _runner():
@@ -481,4 +519,4 @@ async def delete_position_op(
       raise HTTPException(status_code=404, detail="Position not found.")
     return DeleteResult(deleted=True)
 
-  return await execute_operation(ctx, _runner, idempotency_cache=cache)
+  return await _dispatch(ctx, _runner, cache)

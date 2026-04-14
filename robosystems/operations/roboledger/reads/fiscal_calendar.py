@@ -20,6 +20,21 @@ from robosystems.models.extensions.roboledger.fiscal_calendar import FiscalCalen
 from robosystems.models.extensions.roboledger.fiscal_period import FiscalPeriod
 
 
+def get_fiscal_year_start_month(session: Session) -> int:
+  """Return the graph's configured fiscal year start month, defaulting to 1.
+
+  Pure helper used by report-window resolvers (e.g. the MCP financial
+  statement tool) when the caller wants to align an annual reporting
+  window to the tenant's fiscal year. Reads the first FiscalCalendar row
+  in the extensions session — there is at most one per graph because
+  the calendar is graph-singleton.
+  """
+  cal = session.query(FiscalCalendar).first()
+  if cal and cal.fiscal_year_start_month:
+    return int(cal.fiscal_year_start_month)
+  return 1
+
+
 def qb_sync_state(platform_db: Session, graph_id: str) -> tuple[bool, datetime | None]:
   """Look up the QB connection state for a graph.
 

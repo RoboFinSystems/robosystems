@@ -1,9 +1,15 @@
 """Extensions GraphQL schema.
 
-Assembles the Strawberry Schema served at `/extensions/graphql`. The
-top-level `Query` root is composed from per-domain resolver classes
-(`LedgerQuery`, `InvestorQuery`) via multiple inheritance, plus a
-`hello` probe for auth smoke-testing.
+Assembles the Strawberry Schema served at
+`/extensions/{graph_id}/graphql`. The top-level `Query` root is
+composed from per-domain resolver classes (`LedgerQuery`,
+`InvestorQuery`) via multiple inheritance, plus a `hello` probe
+for auth smoke-testing.
+
+The endpoint is **graph-scoped at the URL level** — `graph_id` is a
+path parameter, not a query argument. Resolvers read it via
+`info.context["graph_id"]`. Auth + per-graph access are validated by
+`get_context` before any resolver runs.
 
 Strawberry defaults (`auto_camel_case=True`) mean Python snake_case
 fields are exposed as camelCase on the wire, matching what the

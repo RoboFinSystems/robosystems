@@ -270,6 +270,25 @@ class RateLimitConfig:
     Returns:
         The endpoint category or None if not categorized
     """
+    # Extensions surface — both `/extensions/{graph_id}/graphql`
+    # (read) and `/extensions/{domain}/{graph_id}/operations/{op}`
+    # (write) are tenant-scoped, so they map to the same per-tier
+    # buckets as the legacy `/v1/graphs/{graph_id}/...` endpoints did.
+    # Checked BEFORE the `/v1/` prefix strip because the extensions
+    # surface is mounted at the top level, not under `/v1/`.
+    if path.startswith("/extensions/"):
+      ext_parts = path[len("/extensions/") :].split("/")
+      # /extensions/{graph_id}/graphql → GRAPH_READ
+      if len(ext_parts) >= 2 and ext_parts[1] == "graphql":
+        return EndpointCategory.GRAPH_READ
+      # /extensions/{domain}/{graph_id}/operations/{op_name} → GRAPH_WRITE
+      if len(ext_parts) >= 4 and ext_parts[2] == "operations":
+        return EndpointCategory.GRAPH_WRITE
+      # Fall through to the generic graph-write bucket for any future
+      # extensions endpoint that doesn't match the patterns above —
+      # safer than dropping out to the unbounded default.
+      return EndpointCategory.GRAPH_WRITE
+
     # Remove version prefix
     if path.startswith("/v1/"):
       path = path[4:]

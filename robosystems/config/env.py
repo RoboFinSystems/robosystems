@@ -651,11 +651,16 @@ class EnvConfig:
   )
 
   # --- Extensions GraphQL Endpoint ---
-  # Controls the /extensions/graphql endpoint (Strawberry). Requires at least
-  # one of LEDGER_ENABLED or INVESTOR_ENABLED to be useful.
+  # Controls the /extensions/{graph_id}/graphql endpoint (Strawberry).
+  #
+  # Defaults to TRUE post-cutover: GraphQL is the only read surface for the
+  # extensions subsystem now that the legacy /v1/ledger/* and /v1/investor/*
+  # routers have been deleted. A deployment with LEDGER_ENABLED or
+  # INVESTOR_ENABLED set must have GraphQL mounted, otherwise reads are gone.
+  # The env var is preserved as an emergency kill-switch only.
   EXTENSIONS_GRAPHQL_ENABLED = get_bool_env(
     "EXTENSIONS_GRAPHQL_ENABLED",
-    get_parameter_value("EXTENSIONS_GRAPHQL_ENABLED", "false").lower() == "true",
+    get_parameter_value("EXTENSIONS_GRAPHQL_ENABLED", "true").lower() == "true",
   )
 
   # --- Adapter Pipelines (Dagster) ---

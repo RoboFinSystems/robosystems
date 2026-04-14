@@ -45,16 +45,42 @@ def _make_entity_response() -> LedgerEntityResponse:
 
 
 class _FakeCache:
-  """No-op idempotency cache used in tests."""
+  """In-memory idempotency cache matching the real signature.
+
+  Mirrors `IdempotencyCache.get/put` so route-handler tests can
+  exercise the (user, graph, operation, key, fingerprint) tuple.
+  """
 
   def __init__(self) -> None:
     self.store: dict = {}
 
-  async def get(self, graph_id, operation_name, key):
-    return self.store.get((graph_id, operation_name, key))
+  async def get(
+    self, user_id, graph_id, operation_name, idempotency_key, body_fingerprint
+  ):
+    from robosystems.middleware.extensions import IdempotencyKeyConflictError
 
-  async def put(self, graph_id, operation_name, key, envelope, ttl_seconds=86400):
-    self.store[(graph_id, operation_name, key)] = envelope
+    entry = self.store.get((user_id, graph_id, operation_name, idempotency_key))
+    if entry is None:
+      return None
+    cached_envelope, cached_fp = entry
+    if cached_fp != body_fingerprint:
+      raise IdempotencyKeyConflictError(operation_name)
+    return cached_envelope
+
+  async def put(
+    self,
+    user_id,
+    graph_id,
+    operation_name,
+    idempotency_key,
+    envelope,
+    body_fingerprint,
+    ttl_seconds=86400,
+  ):
+    self.store[(user_id, graph_id, operation_name, idempotency_key)] = (
+      envelope,
+      body_fingerprint,
+    )
 
 
 class TestUpdateEntityOp:

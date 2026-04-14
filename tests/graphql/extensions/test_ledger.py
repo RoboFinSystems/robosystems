@@ -39,37 +39,49 @@ def _make_user() -> MagicMock:
 
 
 def _ctx(user: MagicMock | None = None) -> dict:
-  return {"request": MagicMock(), "user": user or _make_user()}
+  """Build a fake Strawberry context.
+
+  Tests using `schema.execute_sync(context_value=...)` bypass
+  `get_context` entirely, so `graph_id` and `user` need to be passed
+  in by hand. Auth + graph access are normally enforced in
+  `get_context` before resolvers run; tests assume they passed.
+  """
+  return {
+    "request": MagicMock(),
+    "user": user or _make_user(),
+    "graph_id": GRAPH_ID,
+  }
 
 
 @contextmanager
 def _patch_session_for(module_name: str):
-  """Patch `extensions_session` inside a resolver module to return a mock session.
+  """Patch `extensions_session` to return a mock session.
 
-  The resolver modules import `extensions_session` inside the function
+  Resolver modules import `extensions_session` inside the function
   body (local import), so the patch target is
-  `robosystems.db.extensions.extensions_session`.
+  `robosystems.db.extensions.extensions_session`. `module_name` is
+  kept as a parameter for callers that may want to scope additional
+  patches in the future, but isn't currently used.
   """
+  del module_name  # kept for API compatibility
   mock_session = MagicMock()
   mock_ctx_mgr = MagicMock()
   mock_ctx_mgr.__enter__ = MagicMock(return_value=mock_session)
   mock_ctx_mgr.__exit__ = MagicMock(return_value=False)
 
-  with (
-    patch("robosystems.db.extensions.extensions_session", return_value=mock_ctx_mgr),
-    patch(
-      f"robosystems.graphql.resolvers.{module_name}.check_graph_access",
-      return_value=None,
-    ),
-  ):
+  with patch("robosystems.db.extensions.extensions_session", return_value=mock_ctx_mgr):
     yield mock_session
 
 
 class TestAuthentication:
   def test_unauthenticated_user_gets_graphql_error(self) -> None:
     result = schema.execute_sync(
-      'query { entity(graphId: "kg_x") { id name } }',
-      context_value={"request": MagicMock(), "user": None},
+      "query { entity { id name } }",
+      context_value={
+        "request": MagicMock(),
+        "user": None,
+        "graph_id": GRAPH_ID,
+      },
     )
     assert result.errors is not None
     assert any("Authentication required" in str(e.message) for e in result.errors)
@@ -95,7 +107,7 @@ class TestEntityResolver:
       ),
     ):
       result = schema.execute_sync(
-        f'query {{ entity(graphId: "{GRAPH_ID}") {{ id name legalName status source }} }}',
+        "query { entity { id name legalName status source } }",
         context_value=_ctx(),
       )
 
@@ -114,14 +126,22 @@ class TestEntityResolver:
       ),
     ):
       result = schema.execute_sync(
-        f'query {{ entity(graphId: "{GRAPH_ID}") {{ id name }} }}',
+        "query { entity { id name } }",
         context_value=_ctx(),
       )
 
     assert result.errors is None
     assert result.data == {"entity": None}
 
-  def test_returns_null_when_schema_not_initialized(self) -> None:
+  def test_raises_typed_error_when_schema_not_initialized(self) -> None:
+    """Schema-missing errors must surface as a typed GraphQL error.
+
+    Regression: an earlier version returned `{entity: null}` here,
+    making "ledger not initialized" indistinguishable from "no
+    parent entity row exists yet" on the client. The new contract
+    raises `LEDGER_NOT_INITIALIZED` so frontends and agents can
+    branch on the code.
+    """
     with (
       _patch_session_for("ledger"),
       patch(
@@ -130,12 +150,14 @@ class TestEntityResolver:
       ),
     ):
       result = schema.execute_sync(
-        f'query {{ entity(graphId: "{GRAPH_ID}") {{ id name }} }}',
+        "query { entity { id name } }",
         context_value=_ctx(),
       )
 
-    assert result.errors is None
-    assert result.data == {"entity": None}
+    assert result.errors is not None
+    err = result.errors[0]
+    assert "Ledger not initialized" in err.message
+    assert err.extensions == {"code": "LEDGER_NOT_INITIALIZED"}
 
 
 class TestEntitiesResolver:
@@ -153,7 +175,7 @@ class TestEntitiesResolver:
       ),
     ):
       result = schema.execute_sync(
-        f'query {{ entities(graphId: "{GRAPH_ID}") {{ id name }} }}',
+        "query { entities { id name } }",
         context_value=_ctx(),
       )
 
@@ -162,7 +184,8 @@ class TestEntitiesResolver:
     assert len(result.data["entities"]) == 3
     assert result.data["entities"][0]["id"] == "ent_0"
 
-  def test_empty_list_on_schema_error(self) -> None:
+  def test_raises_typed_error_on_schema_error_for_list(self) -> None:
+    """List resolvers also surface schema errors instead of returning []."""
     with (
       _patch_session_for("ledger"),
       patch(
@@ -171,12 +194,13 @@ class TestEntitiesResolver:
       ),
     ):
       result = schema.execute_sync(
-        f'query {{ entities(graphId: "{GRAPH_ID}") {{ id }} }}',
+        "query { entities { id } }",
         context_value=_ctx(),
       )
 
-    assert result.errors is None
-    assert result.data == {"entities": []}
+    assert result.errors is not None
+    err = result.errors[0]
+    assert err.extensions == {"code": "LEDGER_NOT_INITIALIZED"}
 
 
 class TestAccountTreeResolver:
@@ -228,7 +252,7 @@ class TestAccountTreeResolver:
       result = schema.execute_sync(
         """
         query {
-          accountTree(graphId: "kg_x") {
+          accountTree {
             totalAccounts
             roots {
               id
@@ -269,7 +293,7 @@ class TestAccountTreeResolver:
       ),
     ):
       result = schema.execute_sync(
-        'query { accountTree(graphId: "kg_x") { totalAccounts roots { id } } }',
+        "query { accountTree { totalAccounts roots { id } } }",
         context_value=_ctx(),
       )
 
@@ -300,9 +324,9 @@ class TestSummaryResolver:
       ),
     ):
       result = schema.execute_sync(
-        f"""
-        query {{
-          summary(graphId: "{GRAPH_ID}") {{
+        """
+        query {
+          summary {
             graphId
             accountCount
             transactionCount
@@ -310,8 +334,8 @@ class TestSummaryResolver:
             lineItemCount
             earliestTransactionDate
             latestTransactionDate
-          }}
-        }}
+          }
+        }
         """,
         context_value=_ctx(),
       )
@@ -329,7 +353,8 @@ class TestHelloResolver:
     user = _make_user()
     user.email = "alice@example.com"
     result = schema.execute_sync(
-      "query { hello }", context_value={"request": MagicMock(), "user": user}
+      "query { hello }",
+      context_value={"request": MagicMock(), "user": user, "graph_id": GRAPH_ID},
     )
     assert result.errors is None
     assert result.data == {"hello": "hello, alice@example.com"}
@@ -345,7 +370,7 @@ class TestPaginationBounds:
 
   def test_limit_too_small_rejected(self) -> None:
     result = schema.execute_sync(
-      f'query {{ accounts(graphId: "{GRAPH_ID}", limit: 0) {{ pagination {{ total }} }} }}',
+      "query { accounts(limit: 0) { pagination { total } } }",
       context_value=_ctx(),
     )
     assert result.errors is not None
@@ -353,7 +378,7 @@ class TestPaginationBounds:
 
   def test_limit_too_large_rejected(self) -> None:
     result = schema.execute_sync(
-      f'query {{ accounts(graphId: "{GRAPH_ID}", limit: 5000) {{ pagination {{ total }} }} }}',
+      "query { accounts(limit: 5000) { pagination { total } } }",
       context_value=_ctx(),
     )
     assert result.errors is not None
@@ -361,7 +386,7 @@ class TestPaginationBounds:
 
   def test_negative_offset_rejected(self) -> None:
     result = schema.execute_sync(
-      f'query {{ accounts(graphId: "{GRAPH_ID}", offset: -1) {{ pagination {{ total }} }} }}',
+      "query { accounts(offset: -1) { pagination { total } } }",
       context_value=_ctx(),
     )
     assert result.errors is not None
@@ -369,7 +394,7 @@ class TestPaginationBounds:
 
   def test_bounds_apply_to_transactions_too(self) -> None:
     result = schema.execute_sync(
-      f'query {{ transactions(graphId: "{GRAPH_ID}", limit: 99999) {{ pagination {{ total }} }} }}',
+      "query { transactions(limit: 99999) { pagination { total } } }",
       context_value=_ctx(),
     )
     assert result.errors is not None

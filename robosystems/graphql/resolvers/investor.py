@@ -1,19 +1,19 @@
 """Investor (roboinvestor) GraphQL resolvers.
 
-Every field is a thin wrapper that:
-1. Authenticates the user and checks graph access
-2. Opens `extensions_session(graph_id)`
-3. Delegates to `operations/roboinvestor/reads/*.py`
+Graph-scoped at `/extensions/{graph_id}/graphql`. Auth + per-graph
+access are validated by `get_context` before any resolver runs;
+`graph_id` is read from `info.context` via `require_graph_id`.
 """
 
 from __future__ import annotations
+
+from typing import NoReturn
 
 import strawberry
 from sqlalchemy.exc import ProgrammingError
 from strawberry.types import Info
 
-from robosystems.graphql.auth import check_graph_access
-from robosystems.graphql.context import GraphQLContext, require_user
+from robosystems.graphql.context import GraphQLContext, require_graph_id, require_user
 from robosystems.graphql.types.investor import (
   HoldingsList,
   Portfolio,
@@ -59,13 +59,31 @@ def _validate_pagination(limit: int, offset: int) -> None:
     )
 
 
-def _open_session(info: Info[GraphQLContext, None], graph_id: str):
-  """Shared auth + session-open prelude for every investor resolver."""
-  user = require_user(info)
-  check_graph_access(user, graph_id)
+def _open_session(info: Info[GraphQLContext, None]):
+  """Shared auth + session-open prelude for every investor resolver.
+
+  Auth + graph access were enforced by `get_context` before this is
+  ever reached. `graph_id` is read from the request URL via
+  `require_graph_id`.
+  """
+  require_user(info)
+  graph_id = require_graph_id(info)
   from robosystems.db.extensions import extensions_session
 
   return extensions_session(graph_id)
+
+
+def _raise_investor_not_initialized() -> NoReturn:
+  """Raise a typed GraphQL error for an uninitialized investor module.
+
+  Replaces the previous "swallow ValueError/ProgrammingError → return
+  null" pattern. Frontends and agents see a clear failure with the
+  `INVESTOR_NOT_INITIALIZED` error code instead of an empty result.
+  """
+  raise strawberry.exceptions.StrawberryGraphQLError(
+    message="Investor module not initialized.",
+    extensions={"code": "INVESTOR_NOT_INITIALIZED"},
+  )
 
 
 @strawberry.type
@@ -81,32 +99,30 @@ class InvestorQuery:
   def portfolios(
     self,
     info: Info[GraphQLContext, None],
-    graph_id: strawberry.ID,
     limit: int = 100,
     offset: int = 0,
   ) -> PortfolioList | None:
     """Paginated list of portfolios."""
     _validate_pagination(limit, offset)
     try:
-      with _open_session(info, str(graph_id)) as session:
+      with _open_session(info) as session:
         response = reads_portfolios.list_portfolios(session, limit=limit, offset=offset)
     except (ValueError, ProgrammingError):
-      return None
+      _raise_investor_not_initialized()
     return PortfolioList.from_pydantic(response)
 
   @strawberry.field
   def portfolio(
     self,
     info: Info[GraphQLContext, None],
-    graph_id: strawberry.ID,
     portfolio_id: str,
   ) -> Portfolio | None:
     """Single portfolio by id."""
     try:
-      with _open_session(info, str(graph_id)) as session:
+      with _open_session(info) as session:
         response = reads_portfolios.get_portfolio(session, portfolio_id)
     except (ValueError, ProgrammingError):
-      return None
+      _raise_investor_not_initialized()
     if response is None:
       return None
     return Portfolio.from_pydantic(response)
@@ -117,7 +133,6 @@ class InvestorQuery:
   def securities(
     self,
     info: Info[GraphQLContext, None],
-    graph_id: strawberry.ID,
     entity_id: str | None = None,
     security_type: str | None = None,
     is_active: bool | None = None,
@@ -127,7 +142,7 @@ class InvestorQuery:
     """Paginated list of securities."""
     _validate_pagination(limit, offset)
     try:
-      with _open_session(info, str(graph_id)) as session:
+      with _open_session(info) as session:
         response = reads_securities.list_securities(
           session,
           entity_id=entity_id,
@@ -137,22 +152,21 @@ class InvestorQuery:
           offset=offset,
         )
     except (ValueError, ProgrammingError):
-      return None
+      _raise_investor_not_initialized()
     return SecurityList.from_pydantic(response)
 
   @strawberry.field
   def security(
     self,
     info: Info[GraphQLContext, None],
-    graph_id: strawberry.ID,
     security_id: str,
   ) -> Security | None:
     """Single security by id."""
     try:
-      with _open_session(info, str(graph_id)) as session:
+      with _open_session(info) as session:
         response = reads_securities.get_security(session, security_id)
     except (ValueError, ProgrammingError):
-      return None
+      _raise_investor_not_initialized()
     if response is None:
       return None
     return Security.from_pydantic(response)
@@ -163,7 +177,6 @@ class InvestorQuery:
   def positions(
     self,
     info: Info[GraphQLContext, None],
-    graph_id: strawberry.ID,
     portfolio_id: str | None = None,
     security_id: str | None = None,
     status: str | None = None,
@@ -173,7 +186,7 @@ class InvestorQuery:
     """Paginated list of positions."""
     _validate_pagination(limit, offset)
     try:
-      with _open_session(info, str(graph_id)) as session:
+      with _open_session(info) as session:
         response = reads_positions.list_positions(
           session,
           portfolio_id=portfolio_id,
@@ -183,22 +196,21 @@ class InvestorQuery:
           offset=offset,
         )
     except (ValueError, ProgrammingError):
-      return None
+      _raise_investor_not_initialized()
     return PositionList.from_pydantic(response)
 
   @strawberry.field
   def position(
     self,
     info: Info[GraphQLContext, None],
-    graph_id: strawberry.ID,
     position_id: str,
   ) -> Position | None:
     """Single enriched position by id."""
     try:
-      with _open_session(info, str(graph_id)) as session:
+      with _open_session(info) as session:
         response = reads_positions.get_position(session, position_id)
     except (ValueError, ProgrammingError):
-      return None
+      _raise_investor_not_initialized()
     if response is None:
       return None
     return Position.from_pydantic(response)
@@ -209,15 +221,14 @@ class InvestorQuery:
   def holdings(
     self,
     info: Info[GraphQLContext, None],
-    graph_id: strawberry.ID,
     portfolio_id: str,
   ) -> HoldingsList | None:
     """Portfolio positions grouped by entity."""
     try:
-      with _open_session(info, str(graph_id)) as session:
+      with _open_session(info) as session:
         response = reads_holdings.list_holdings(session, portfolio_id)
     except reads_holdings.PortfolioNotFoundError:
       return None
     except (ValueError, ProgrammingError):
-      return None
+      _raise_investor_not_initialized()
     return HoldingsList.from_pydantic(response)

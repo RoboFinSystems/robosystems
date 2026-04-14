@@ -23,18 +23,6 @@ MAIN_API_TAGS = [
     "description": "🤖 AI Agents - Intelligent AI agents for analyzing and managing graph data",
   },
   {
-    "name": "Tables",
-    "description": "🗃️ Staging tables - File upload, SQL queries, and data ingestion via DuckDB staging layer",
-  },
-  {
-    "name": "Files",
-    "description": "📄 File management - Upload, track, and manage data files with multi-layer status",
-  },
-  {
-    "name": "Materialize",
-    "description": "🔄 Materialize graph - Rebuild graph from DuckDB staging tables",
-  },
-  {
     "name": "Documents",
     "description": "📑 Documents - Upload, list, and manage documents for search and analysis",
   },
@@ -48,11 +36,23 @@ MAIN_API_TAGS = [
   },
   {
     "name": "Extensions: RoboLedger",
-    "description": "📒 RoboLedger operations - Named command endpoints for accounting writes",
+    "description": "📒 RoboLedger operations - Named commands for accounting & reporting writes and analytical views",
   },
   {
     "name": "Extensions: RoboInvestor",
-    "description": "📈 RoboInvestor operations - Named command endpoints for portfolio writes",
+    "description": "📈 RoboInvestor operations - Named commands for portfolio management writes and analytical views",
+  },
+  {
+    "name": "Tables",
+    "description": "🗃️ Staging tables - File upload, SQL queries, and data ingestion via DuckDB staging layer",
+  },
+  {
+    "name": "Files",
+    "description": "📄 File management - Upload, track, and manage data files with multi-layer status",
+  },
+  {
+    "name": "Materialize",
+    "description": "🔄 Materialize graph - Rebuild graph from DuckDB staging tables",
   },
   {
     "name": "Backup",
@@ -61,10 +61,6 @@ MAIN_API_TAGS = [
   {
     "name": "Schema",
     "description": "📐 Schema management - Validate and manage custom graph schemas",
-  },
-  {
-    "name": "Views",
-    "description": "👁️ Views - Create and manage multi-dimensional fact grids with XBRL-style hypercubes",
   },
   {
     "name": "Usage",

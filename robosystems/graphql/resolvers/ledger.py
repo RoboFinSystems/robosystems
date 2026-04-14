@@ -1,23 +1,27 @@
 """Ledger (roboledger) GraphQL resolvers.
 
-Every field is a thin wrapper that:
-1. Authenticates the user and checks graph access
-2. Opens `extensions_session(graph_id)`
-3. Delegates to `operations/roboledger/reads/*.py`
+The endpoint is graph-scoped at `/extensions/{graph_id}/graphql`, so:
 
-No business logic here — the ops layer is the single source of truth.
+1. Auth + per-graph access are validated by `get_context` before any
+   resolver runs. Resolvers don't need to call `check_graph_access`.
+2. `graph_id` lives on `info.context` — resolvers read it via the
+   `require_graph_id(info)` helper instead of taking it as a query
+   argument.
+3. Each field opens `extensions_session(graph_id)` and delegates to
+   `operations/roboledger/reads/*.py`. No business logic here — the
+   ops layer is the single source of truth.
 """
 
 from __future__ import annotations
 
 from datetime import date
+from typing import NoReturn
 
 import strawberry
 from sqlalchemy.exc import ProgrammingError
 from strawberry.types import Info
 
-from robosystems.graphql.auth import check_graph_access
-from robosystems.graphql.context import GraphQLContext, require_user
+from robosystems.graphql.context import GraphQLContext, require_graph_id, require_user
 from robosystems.graphql.types.ledger import (
   AccountList,
   AccountRollups,
@@ -122,14 +126,42 @@ def _validate_pagination(limit: int, offset: int) -> None:
     )
 
 
-def _open_session(info: Info[GraphQLContext, None], graph_id: str):
-  """Shared auth + session-open prelude for every ledger resolver."""
-  user = require_user(info)
-  check_graph_access(user, graph_id)
+def _open_session(info: Info[GraphQLContext, None]):
+  """Shared auth + session-open prelude for every ledger resolver.
+
+  Auth + graph access were enforced by `get_context` before this is
+  ever reached — `require_user` here only catches the introspection
+  bypass case (no API key supplied at all). `graph_id` is read from
+  the request URL via `require_graph_id`.
+  """
+  require_user(info)
+  graph_id = require_graph_id(info)
   # Local import keeps this module importable without a running extensions DB.
   from robosystems.db.extensions import extensions_session
 
   return extensions_session(graph_id)
+
+
+def _is_schema_missing(exc: ProgrammingError) -> bool:
+  """Detect the 'tenant schema or table does not exist' Postgres error."""
+  msg = str(exc)
+  return "does not exist" in msg and ("schema" in msg or "relation" in msg)
+
+
+def _raise_ledger_not_initialized() -> NoReturn:
+  """Raise a typed GraphQL error for an uninitialized ledger.
+
+  Replaces the previous "swallow ValueError/ProgrammingError → return
+  null" pattern. The retired REST endpoints raised HTTP 404 with
+  `"Ledger not initialized. Connect a data source first."`; the
+  GraphQL equivalent is a structured error with code
+  `LEDGER_NOT_INITIALIZED`. Frontends can branch on the code; agents
+  see a clear failure instead of an empty result.
+  """
+  raise strawberry.exceptions.StrawberryGraphQLError(
+    message="Ledger not initialized. Connect a data source first.",
+    extensions={"code": "LEDGER_NOT_INITIALIZED"},
+  )
 
 
 @strawberry.type
@@ -143,15 +175,13 @@ class LedgerQuery:
   # ── Entity ──────────────────────────────────────────────────────────────
 
   @strawberry.field
-  def entity(
-    self, info: Info[GraphQLContext, None], graph_id: strawberry.ID
-  ) -> LedgerEntity | None:
+  def entity(self, info: Info[GraphQLContext, None]) -> LedgerEntity | None:
     """Return the parent ledger entity (company) for a graph."""
     try:
-      with _open_session(info, str(graph_id)) as session:
+      with _open_session(info) as session:
         response = reads_entity.get_parent_entity(session)
     except (ValueError, ProgrammingError):
-      return None
+      _raise_ledger_not_initialized()
     if response is None:
       return None
     return LedgerEntity.from_pydantic(response)
@@ -160,23 +190,20 @@ class LedgerQuery:
   def entities(
     self,
     info: Info[GraphQLContext, None],
-    graph_id: strawberry.ID,
     source: str | None = None,
   ) -> list[LedgerEntity]:
     """List entities for a graph, optionally filtered by source."""
     try:
-      with _open_session(info, str(graph_id)) as session:
+      with _open_session(info) as session:
         responses = reads_entity.list_entities(session, source=source)
     except (ValueError, ProgrammingError):
-      return []
+      _raise_ledger_not_initialized()
     return [LedgerEntity.from_pydantic(r) for r in responses]
 
   # ── Summary ─────────────────────────────────────────────────────────────
 
   @strawberry.field
-  def summary(
-    self, info: Info[GraphQLContext, None], graph_id: strawberry.ID
-  ) -> LedgerSummary | None:
+  def summary(self, info: Info[GraphQLContext, None]) -> LedgerSummary | None:
     """Ledger counts + date range + connection metadata.
 
     Wire-compatible with the retired `GET /v1/ledger/{g}/summary` REST
@@ -193,11 +220,13 @@ class LedgerQuery:
     from robosystems.models.api.extensions.summary import LedgerSummaryResponse
     from robosystems.models.core.connection.connection import Connection
 
+    graph_id = require_graph_id(info)
+
     try:
-      with _open_session(info, str(graph_id)) as session:
+      with _open_session(info) as session:
         counts = reads_summary.get_ledger_counts(session)
     except (ValueError, ProgrammingError):
-      return None
+      _raise_ledger_not_initialized()
 
     # Connection metadata from platform DB. Failures are non-fatal.
     connection_count = 0
@@ -208,7 +237,7 @@ class LedgerQuery:
       platform_db = next(gen)
       conn_result = platform_db.execute(
         select(func.count(), func.max(Connection.last_sync)).where(
-          Connection.graph_id == str(graph_id)
+          Connection.graph_id == graph_id
         )
       ).one()
       connection_count = conn_result[0] or 0
@@ -224,7 +253,7 @@ class LedgerQuery:
         gen.close()
 
     response = LedgerSummaryResponse(
-      graph_id=str(graph_id),
+      graph_id=graph_id,
       account_count=counts.account_count,
       transaction_count=counts.transaction_count,
       entry_count=counts.entry_count,
@@ -242,7 +271,6 @@ class LedgerQuery:
   def accounts(
     self,
     info: Info[GraphQLContext, None],
-    graph_id: strawberry.ID,
     classification: str | None = None,
     is_active: bool | None = None,
     limit: int = 100,
@@ -251,7 +279,7 @@ class LedgerQuery:
     """Paginated Chart of Accounts listing."""
     _validate_pagination(limit, offset)
     try:
-      with _open_session(info, str(graph_id)) as session:
+      with _open_session(info) as session:
         response = reads_accounts.list_accounts(
           session,
           classification=classification,
@@ -260,19 +288,17 @@ class LedgerQuery:
           offset=offset,
         )
     except (ValueError, ProgrammingError):
-      return None
+      _raise_ledger_not_initialized()
     return AccountList.from_pydantic(response)
 
   @strawberry.field
-  def account_tree(
-    self, info: Info[GraphQLContext, None], graph_id: strawberry.ID
-  ) -> AccountTree | None:
+  def account_tree(self, info: Info[GraphQLContext, None]) -> AccountTree | None:
     """Chart of Accounts as a recursive tree."""
     try:
-      with _open_session(info, str(graph_id)) as session:
+      with _open_session(info) as session:
         response = reads_accounts.get_account_tree(session)
     except (ValueError, ProgrammingError):
-      return None
+      _raise_ledger_not_initialized()
     return AccountTree(
       roots=[AccountTreeNode.from_pydantic(n) for n in response.roots],
       total_accounts=response.total_accounts,
@@ -282,14 +308,13 @@ class LedgerQuery:
   def account_rollups(
     self,
     info: Info[GraphQLContext, None],
-    graph_id: strawberry.ID,
     mapping_id: str | None = None,
     start_date: date | None = None,
     end_date: date | None = None,
   ) -> AccountRollups | None:
     """CoA accounts grouped by reporting element with balances."""
     try:
-      with _open_session(info, str(graph_id)) as session:
+      with _open_session(info) as session:
         response = reads_account_rollups.get_account_rollups(
           session,
           mapping_id=mapping_id,
@@ -299,7 +324,7 @@ class LedgerQuery:
     except reads_account_rollups.MappingNotFoundError:
       return None
     except (ValueError, ProgrammingError):
-      return None
+      _raise_ledger_not_initialized()
     return AccountRollups.from_pydantic(response)
 
   # ── Trial balance ───────────────────────────────────────────────────────
@@ -308,18 +333,17 @@ class LedgerQuery:
   def trial_balance(
     self,
     info: Info[GraphQLContext, None],
-    graph_id: strawberry.ID,
     start_date: date | None = None,
     end_date: date | None = None,
   ) -> TrialBalance | None:
     """Trial balance for posted entries in a date range."""
     try:
-      with _open_session(info, str(graph_id)) as session:
+      with _open_session(info) as session:
         response = reads_trial_balance.get_trial_balance(
           session, start_date=start_date, end_date=end_date
         )
     except (ValueError, ProgrammingError):
-      return None
+      _raise_ledger_not_initialized()
     return TrialBalance.from_pydantic(response)
 
   # ── Transactions ────────────────────────────────────────────────────────
@@ -328,7 +352,6 @@ class LedgerQuery:
   def transactions(
     self,
     info: Info[GraphQLContext, None],
-    graph_id: strawberry.ID,
     type: str | None = None,
     start_date: date | None = None,
     end_date: date | None = None,
@@ -338,7 +361,7 @@ class LedgerQuery:
     """Paginated list of transactions."""
     _validate_pagination(limit, offset)
     try:
-      with _open_session(info, str(graph_id)) as session:
+      with _open_session(info) as session:
         response = reads_transactions.list_transactions(
           session,
           type=type,
@@ -348,22 +371,21 @@ class LedgerQuery:
           offset=offset,
         )
     except (ValueError, ProgrammingError):
-      return None
+      _raise_ledger_not_initialized()
     return LedgerTransactionList.from_pydantic(response)
 
   @strawberry.field
   def transaction(
     self,
     info: Info[GraphQLContext, None],
-    graph_id: strawberry.ID,
     transaction_id: str,
   ) -> LedgerTransactionDetail | None:
     """Single transaction with all entries and line items."""
     try:
-      with _open_session(info, str(graph_id)) as session:
+      with _open_session(info) as session:
         response = reads_transactions.get_transaction(session, transaction_id)
     except (ValueError, ProgrammingError):
-      return None
+      _raise_ledger_not_initialized()
     if response is None:
       return None
     return LedgerTransactionDetail.from_pydantic(response)
@@ -374,29 +396,26 @@ class LedgerQuery:
   def taxonomies(
     self,
     info: Info[GraphQLContext, None],
-    graph_id: strawberry.ID,
     taxonomy_type: str | None = None,
   ) -> TaxonomyList | None:
     """List all active taxonomies, optionally filtered by type."""
     try:
-      with _open_session(info, str(graph_id)) as session:
+      with _open_session(info) as session:
         response = reads_taxonomies.list_taxonomies(
           session, taxonomy_type=taxonomy_type
         )
     except (ValueError, ProgrammingError):
-      return None
+      _raise_ledger_not_initialized()
     return TaxonomyList.from_pydantic(response)
 
   @strawberry.field
-  def reporting_taxonomy(
-    self, info: Info[GraphQLContext, None], graph_id: strawberry.ID
-  ) -> Taxonomy | None:
+  def reporting_taxonomy(self, info: Info[GraphQLContext, None]) -> Taxonomy | None:
     """The locked US GAAP reporting taxonomy, or null."""
     try:
-      with _open_session(info, str(graph_id)) as session:
+      with _open_session(info) as session:
         response = reads_taxonomies.get_reporting_taxonomy(session)
     except (ValueError, ProgrammingError):
-      return None
+      _raise_ledger_not_initialized()
     if response is None:
       return None
     return Taxonomy.from_pydantic(response)
@@ -407,7 +426,6 @@ class LedgerQuery:
   def elements(
     self,
     info: Info[GraphQLContext, None],
-    graph_id: strawberry.ID,
     taxonomy_id: str | None = None,
     source: str | None = None,
     classification: str | None = None,
@@ -418,7 +436,7 @@ class LedgerQuery:
     """Paginated list of taxonomy elements."""
     _validate_pagination(limit, offset)
     try:
-      with _open_session(info, str(graph_id)) as session:
+      with _open_session(info) as session:
         response = reads_taxonomies.list_elements(
           session,
           taxonomy_id=taxonomy_id,
@@ -429,24 +447,23 @@ class LedgerQuery:
           offset=offset,
         )
     except (ValueError, ProgrammingError):
-      return None
+      _raise_ledger_not_initialized()
     return ElementList.from_pydantic(response)
 
   @strawberry.field
   def unmapped_elements(
     self,
     info: Info[GraphQLContext, None],
-    graph_id: strawberry.ID,
     mapping_id: str | None = None,
   ) -> list[UnmappedElement]:
     """CoA elements not yet mapped to the reporting taxonomy."""
     try:
-      with _open_session(info, str(graph_id)) as session:
+      with _open_session(info) as session:
         responses = reads_taxonomies.list_unmapped_elements(
           session, mapping_id=mapping_id
         )
     except (ValueError, ProgrammingError):
-      return []
+      _raise_ledger_not_initialized()
     return [UnmappedElement.from_pydantic(r) for r in responses]
 
   # ── Structures / mappings ──────────────────────────────────────────────
@@ -455,45 +472,41 @@ class LedgerQuery:
   def structures(
     self,
     info: Info[GraphQLContext, None],
-    graph_id: strawberry.ID,
     taxonomy_id: str | None = None,
     structure_type: str | None = None,
   ) -> StructureList | None:
     """List active structures."""
     try:
-      with _open_session(info, str(graph_id)) as session:
+      with _open_session(info) as session:
         response = reads_taxonomies.list_structures(
           session, taxonomy_id=taxonomy_id, structure_type=structure_type
         )
     except (ValueError, ProgrammingError):
-      return None
+      _raise_ledger_not_initialized()
     return StructureList.from_pydantic(response)
 
   @strawberry.field
-  def mappings(
-    self, info: Info[GraphQLContext, None], graph_id: strawberry.ID
-  ) -> StructureList | None:
+  def mappings(self, info: Info[GraphQLContext, None]) -> StructureList | None:
     """List all active mapping structures."""
     try:
-      with _open_session(info, str(graph_id)) as session:
+      with _open_session(info) as session:
         response = reads_taxonomies.list_mappings(session)
     except (ValueError, ProgrammingError):
-      return None
+      _raise_ledger_not_initialized()
     return StructureList.from_pydantic(response)
 
   @strawberry.field
   def mapping(
     self,
     info: Info[GraphQLContext, None],
-    graph_id: strawberry.ID,
     mapping_id: str,
   ) -> MappingDetail | None:
     """Single mapping structure with all associations."""
     try:
-      with _open_session(info, str(graph_id)) as session:
+      with _open_session(info) as session:
         response = reads_taxonomies.get_mapping_detail(session, mapping_id)
     except (ValueError, ProgrammingError):
-      return None
+      _raise_ledger_not_initialized()
     if response is None:
       return None
     return MappingDetail.from_pydantic(response)
@@ -502,99 +515,93 @@ class LedgerQuery:
   def mapping_coverage(
     self,
     info: Info[GraphQLContext, None],
-    graph_id: strawberry.ID,
     mapping_id: str,
   ) -> MappingCoverage | None:
     """Coverage stats for a mapping."""
     try:
-      with _open_session(info, str(graph_id)) as session:
+      with _open_session(info) as session:
         response = reads_taxonomies.get_mapping_coverage(session, mapping_id)
     except (ValueError, ProgrammingError):
-      return None
+      _raise_ledger_not_initialized()
     return MappingCoverage.from_pydantic(response)
 
   @strawberry.field
   def mapped_trial_balance(
     self,
     info: Info[GraphQLContext, None],
-    graph_id: strawberry.ID,
     mapping_id: str,
     start_date: str | None = None,
     end_date: str | None = None,
   ) -> MappedTrialBalance | None:
     """Trial balance rolled up to reporting concepts via mapping associations."""
     try:
-      with _open_session(info, str(graph_id)) as session:
+      with _open_session(info) as session:
         response = reads_taxonomies.get_mapped_trial_balance(
           session, mapping_id, start_date=start_date, end_date=end_date
         )
     except (ValueError, ProgrammingError):
-      return None
+      _raise_ledger_not_initialized()
     return MappedTrialBalance.from_pydantic(response)
 
   # ── Schedules ───────────────────────────────────────────────────────────
 
   @strawberry.field
-  def schedules(
-    self, info: Info[GraphQLContext, None], graph_id: strawberry.ID
-  ) -> ScheduleList | None:
+  def schedules(self, info: Info[GraphQLContext, None]) -> ScheduleList | None:
     """List all active schedules."""
     try:
-      with _open_session(info, str(graph_id)) as session:
+      with _open_session(info) as session:
         response = reads_schedules.list_schedules(session, _schedule_svc)
     except (ValueError, ProgrammingError):
-      return None
+      _raise_ledger_not_initialized()
     return ScheduleList.from_pydantic(response)
 
   @strawberry.field
   def schedule_facts(
     self,
     info: Info[GraphQLContext, None],
-    graph_id: strawberry.ID,
     structure_id: str,
     period_start: date | None = None,
     period_end: date | None = None,
   ) -> ScheduleFacts | None:
     """Facts for a schedule, optionally filtered by period."""
     try:
-      with _open_session(info, str(graph_id)) as session:
+      with _open_session(info) as session:
         response = reads_schedules.get_schedule_facts(
           session, _schedule_svc, structure_id, period_start, period_end
         )
     except (ValueError, ProgrammingError):
-      return None
+      _raise_ledger_not_initialized()
     return ScheduleFacts.from_pydantic(response)
 
   @strawberry.field
   def period_close_status(
     self,
     info: Info[GraphQLContext, None],
-    graph_id: strawberry.ID,
     period_start: date,
     period_end: date,
   ) -> PeriodCloseStatus | None:
     """Close status for all schedules in a fiscal period."""
     try:
-      with _open_session(info, str(graph_id)) as session:
+      with _open_session(info) as session:
         response = reads_schedules.get_period_close_status(
           session, _schedule_svc, period_start, period_end
         )
     except (ValueError, ProgrammingError):
-      return None
+      _raise_ledger_not_initialized()
     return PeriodCloseStatus.from_pydantic(response)
 
   # ── Fiscal calendar ─────────────────────────────────────────────────────
 
   @strawberry.field
-  def fiscal_calendar(
-    self, info: Info[GraphQLContext, None], graph_id: strawberry.ID
-  ) -> FiscalCalendar | None:
+  def fiscal_calendar(self, info: Info[GraphQLContext, None]) -> FiscalCalendar | None:
     """Current fiscal calendar state — pointers, gap, closeable status."""
     from robosystems.database import get_db_session
 
+    graph_id = require_graph_id(info)
+
     try:
-      with _open_session(info, str(graph_id)) as session:
-        calendar = _fiscal_svc.get(session, str(graph_id))
+      with _open_session(info) as session:
+        calendar = _fiscal_svc.get(session, graph_id)
         if calendar is None:
           return None
         # Platform DB lookup for QB sync state. GraphQL resolver doesn't
@@ -604,20 +611,20 @@ class LedgerQuery:
         try:
           platform_db = next(gen)
           has_sync, last_sync_at = reads_fiscal_calendar.qb_sync_state(
-            platform_db, str(graph_id)
+            platform_db, graph_id
           )
         finally:
           gen.close()
         response = reads_fiscal_calendar.build_fiscal_calendar_response(
           session,
-          str(graph_id),
+          graph_id,
           calendar,
           has_sync,
           last_sync_at,
           _fiscal_svc,
         )
     except (ValueError, ProgrammingError):
-      return None
+      _raise_ledger_not_initialized()
     return FiscalCalendar.from_pydantic(response)
 
   # ── Period drafts (close review) ────────────────────────────────────────
@@ -626,58 +633,54 @@ class LedgerQuery:
   def period_drafts(
     self,
     info: Info[GraphQLContext, None],
-    graph_id: strawberry.ID,
     period: str,
   ) -> PeriodDrafts | None:
     """All draft entries for a fiscal period, ready for review before close."""
     try:
-      with _open_session(info, str(graph_id)) as session:
+      with _open_session(info) as session:
         response = reads_period_drafts.list_period_drafts(session, period)
     except (ValueError, ProgrammingError):
-      return None
+      _raise_ledger_not_initialized()
     return PeriodDrafts.from_pydantic(response)
 
   # ── Closing book ────────────────────────────────────────────────────────
 
   @strawberry.field
   def closing_book_structures(
-    self, info: Info[GraphQLContext, None], graph_id: strawberry.ID
+    self, info: Info[GraphQLContext, None]
   ) -> ClosingBookStructures | None:
     """Closing book sidebar navigation (statements, schedules, rollups, etc.)."""
     try:
-      with _open_session(info, str(graph_id)) as session:
+      with _open_session(info) as session:
         response = reads_closing_book.get_closing_book_structures(session)
     except (ValueError, ProgrammingError):
-      return None
+      _raise_ledger_not_initialized()
     return ClosingBookStructures.from_pydantic(response)
 
   # ── Reports ─────────────────────────────────────────────────────────────
 
   @strawberry.field
-  def reports(
-    self, info: Info[GraphQLContext, None], graph_id: strawberry.ID
-  ) -> ReportList | None:
+  def reports(self, info: Info[GraphQLContext, None]) -> ReportList | None:
     """List all report definitions for this graph."""
     try:
-      with _open_session(info, str(graph_id)) as session:
+      with _open_session(info) as session:
         response = reads_reports.list_reports(session)
     except (ValueError, ProgrammingError):
-      return None
+      _raise_ledger_not_initialized()
     return ReportList.from_pydantic(response)
 
   @strawberry.field
   def report(
     self,
     info: Info[GraphQLContext, None],
-    graph_id: strawberry.ID,
     report_id: str,
   ) -> Report | None:
     """Single report definition with structures + entity name."""
     try:
-      with _open_session(info, str(graph_id)) as session:
+      with _open_session(info) as session:
         response = reads_reports.get_report(session, report_id)
     except (ValueError, ProgrammingError):
-      return None
+      _raise_ledger_not_initialized()
     if response is None:
       return None
     return Report.from_pydantic(response)
@@ -686,18 +689,17 @@ class LedgerQuery:
   def statement(
     self,
     info: Info[GraphQLContext, None],
-    graph_id: strawberry.ID,
     report_id: str,
     structure_type: str,
   ) -> Statement | None:
     """Rendered financial statement for a report + structure_type."""
     try:
-      with _open_session(info, str(graph_id)) as session:
+      with _open_session(info) as session:
         response = reads_reports.get_statement(session, report_id, structure_type)
     except reads_reports.StatementStructureNotFoundError:
       return None
     except (ValueError, ProgrammingError):
-      return None
+      _raise_ledger_not_initialized()
     if response is None:
       return None
     return Statement.from_pydantic(response)
@@ -708,34 +710,32 @@ class LedgerQuery:
   def publish_lists(
     self,
     info: Info[GraphQLContext, None],
-    graph_id: strawberry.ID,
     limit: int = 100,
     offset: int = 0,
   ) -> PublishListList | None:
     """Paginated list of publish lists for this graph."""
     _validate_pagination(limit, offset)
     try:
-      with _open_session(info, str(graph_id)) as session:
+      with _open_session(info) as session:
         response = reads_publish_lists.list_publish_lists(
           session, limit=limit, offset=offset
         )
     except (ValueError, ProgrammingError):
-      return None
+      _raise_ledger_not_initialized()
     return PublishListList.from_pydantic(response)
 
   @strawberry.field
   def publish_list(
     self,
     info: Info[GraphQLContext, None],
-    graph_id: strawberry.ID,
     list_id: str,
   ) -> PublishListDetail | None:
     """Single publish list with enriched members, or null."""
     try:
-      with _open_session(info, str(graph_id)) as session:
+      with _open_session(info) as session:
         response = reads_publish_lists.get_publish_list(session, list_id)
     except (ValueError, ProgrammingError):
-      return None
+      _raise_ledger_not_initialized()
     if response is None:
       return None
     return PublishListDetail.from_pydantic(response)
