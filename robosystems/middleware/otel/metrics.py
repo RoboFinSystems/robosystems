@@ -339,13 +339,19 @@ class EndpointMetrics:
     duration: float,
     user_id: str | None = None,
   ):
-    """Record request duration metrics only."""
+    """Record request duration metrics only.
+
+    Note: `status_code` is serialized to `str` to match the attribute
+    shape used by `record_request`. OTel histogram attributes must be
+    type-consistent across recordings of the same instrument, otherwise
+    Prometheus will silently split the series by attribute type.
+    """
     self._ensure_instruments()
 
     attributes = {
       "endpoint": endpoint,
       "method": method,
-      "status_code": status_code,
+      "status_code": str(status_code),
     }
 
     if user_id:
@@ -839,6 +845,7 @@ def endpoint_metrics_decorator(
   endpoint_name: str | None = None,
   extract_user_id: bool = True,
   business_event_type: str | None = None,
+  method: str | None = None,
 ):
   """
   Enhanced decorator to automatically collect standard metrics for FastAPI endpoints.
@@ -847,10 +854,29 @@ def endpoint_metrics_decorator(
       endpoint_name: Override endpoint name (defaults to function name)
       extract_user_id: Whether to attempt user_id extraction from request context
       business_event_type: Optional business event to record on success
+      method: HTTP method label (e.g. "POST"). When supplied, skips the
+          runtime `fastapi.Request` scan and uses the explicit value.
+          Strongly preferred for routes that don't declare `request: Request`
+          in their signature — without it the decorator falls back to
+          `"UNKNOWN"` which silently degrades Prometheus dashboards that
+          filter by method.
+
+  Idempotent replays:
+      If the decorated function returns an object with a truthy
+      `idempotent_replay` attribute (duck-typed — no import of
+      `OperationEnvelope`), the `business_event_type` counter is NOT
+      incremented for that call. The request count and latency histogram
+      still fire because the HTTP call genuinely happened; only the
+      business-event counter is suppressed so "how many times did this
+      operation actually execute" stays meaningful on dashboards.
 
   Usage:
       @router.post("/login")
-      @endpoint_metrics_decorator("/v1/auth/login", business_event_type="user_login")
+      @endpoint_metrics_decorator(
+          "/v1/auth/login",
+          method="POST",
+          business_event_type="user_login",
+      )
       async def login_endpoint(request: LoginRequest):
           # endpoint logic - metrics recorded automatically
           return response
@@ -861,7 +887,10 @@ def endpoint_metrics_decorator(
     async def async_wrapper(*args, **kwargs):
       start_time = time.time()
       endpoint = endpoint_name or f"/{func.__name__}"
-      method = "UNKNOWN"
+      # If the caller supplied an explicit method we trust it; otherwise
+      # fall back to the legacy runtime scan (which only works for routes
+      # that declare `request: Request` in their signature).
+      resolved_method = method or "UNKNOWN"
       status_code = 200
       user_id = None
       error_occurred = False
@@ -877,7 +906,8 @@ def endpoint_metrics_decorator(
         for arg in args:
           if isinstance(arg, Request):
             request_obj = arg
-            method = arg.method
+            if method is None:
+              resolved_method = arg.method
             break
 
         # Try to extract from kwargs if not found in args
@@ -885,7 +915,8 @@ def endpoint_metrics_decorator(
           for key, value in kwargs.items():
             if isinstance(value, Request):
               request_obj = value
-              method = value.method
+              if method is None:
+                resolved_method = value.method
               break
 
         # Extract user_id and graph_id from path parameters or headers
@@ -900,16 +931,27 @@ def endpoint_metrics_decorator(
           # Extract graph_id from path
           graph_id = request_obj.path_params.get("graph_id")
 
+        # Fallback: FastAPI injects path parameters as typed kwargs on the
+        # route handler, so `graph_id` is available even when no `Request`
+        # object is declared. Only use this if we didn't already pull it
+        # from `request_obj.path_params` above.
+        if graph_id is None:
+          kw_graph = kwargs.get("graph_id")
+          if isinstance(kw_graph, str):
+            graph_id = kw_graph
+
         # Execute the endpoint function
         result = await func(*args, **kwargs)
 
-        # Record business event on success if specified
-        if business_event_type:
+        # Record business event on success if specified.
+        # Suppress for idempotent replays so retry traffic doesn't inflate
+        # the counter — the underlying operation did not execute again.
+        if business_event_type and not getattr(result, "idempotent_replay", False):
           metrics_instance = get_endpoint_metrics()
           event_data = {"graph_id": graph_id} if graph_id else {}
           metrics_instance.record_business_event(
             endpoint=endpoint,
-            method=method,
+            method=resolved_method,
             event_type=business_event_type,
             event_data=event_data,
             user_id=user_id,
@@ -924,7 +966,7 @@ def endpoint_metrics_decorator(
         # Record error metrics
         record_error_metrics(
           endpoint=endpoint,
-          method=method,
+          method=resolved_method,
           error_type=type(e).__name__,
           error_code=str(getattr(e, "detail", "Unknown error")),
           user_id=user_id,
@@ -937,7 +979,7 @@ def endpoint_metrics_decorator(
         duration = time.time() - start_time
         record_request_metrics(
           endpoint=endpoint,
-          method=method,
+          method=resolved_method,
           status_code=status_code,
           duration=duration,
           user_id=user_id,
@@ -948,15 +990,16 @@ def endpoint_metrics_decorator(
     def sync_wrapper(*args, **kwargs):
       start_time = time.time()
       endpoint = endpoint_name or func.__name__
-      method = "UNKNOWN"
+      resolved_method = method or "UNKNOWN"
       status_code = 200
       user_id = None
       error_occurred = False
 
       try:
-        # Try to extract request info from FastAPI context
-        if len(args) > 0 and hasattr(args[0], "method"):
-          method = args[0].method
+        # Try to extract request info from FastAPI context (only if the
+        # caller didn't supply an explicit method label).
+        if method is None and len(args) > 0 and hasattr(args[0], "method"):
+          resolved_method = args[0].method
 
         # Execute the endpoint function
         result = func(*args, **kwargs)
@@ -969,7 +1012,7 @@ def endpoint_metrics_decorator(
         # Record error metrics
         record_error_metrics(
           endpoint=endpoint,
-          method=method,
+          method=resolved_method,
           error_type=type(e).__name__,
           error_code=str(getattr(e, "detail", "Unknown error")),
           user_id=user_id,
@@ -982,7 +1025,7 @@ def endpoint_metrics_decorator(
         duration = time.time() - start_time
         record_request_metrics(
           endpoint=endpoint,
-          method=method,
+          method=resolved_method,
           status_code=status_code,
           duration=duration,
           user_id=user_id,

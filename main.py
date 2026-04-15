@@ -375,11 +375,21 @@ def create_app() -> FastAPI:
 
     response.headers["Content-Security-Policy"] = "; ".join(csp_directives)
 
-    # Add cache control for sensitive API responses
-    if path.startswith("/v1/") and any(
-      keyword in str(response.body).lower() if hasattr(response, "body") else False
-      for keyword in ["token", "password", "key"]
-    ):
+    # Add cache control for routes that may return sensitive data in the
+    # response body. We use a path-prefix allowlist rather than scanning
+    # `response.body` — Starlette's `call_next` returns a `StreamingResponse`
+    # that exposes no `.body` attribute, so any content-scanning branch
+    # would silently never fire. The allowlist below covers every surface
+    # that can emit auth tokens, API keys, billing details, or other
+    # per-user secrets; everything else falls back to the default cache
+    # behavior controlled by the route itself.
+    _sensitive_path_prefixes = (
+      "/v1/auth",
+      "/v1/user",
+      "/v1/billing",
+      "/v1/orgs",
+    )
+    if any(path.startswith(p) for p in _sensitive_path_prefixes):
       response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, private"
       response.headers["Pragma"] = "no-cache"
 

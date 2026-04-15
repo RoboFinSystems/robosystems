@@ -115,7 +115,10 @@ class TestWrapCompleted:
     assert "operation_id" not in payload
     assert "createdBy" in payload
     assert "created_by" not in payload
+    assert "idempotentReplay" in payload
+    assert "idempotent_replay" not in payload
     assert payload["createdBy"] == "usr_42"
+    assert payload["idempotentReplay"] is False
     assert payload["status"] == "completed"
     assert set(payload.keys()) == {
       "operation",
@@ -124,6 +127,7 @@ class TestWrapCompleted:
       "result",
       "at",
       "createdBy",
+      "idempotentReplay",
     }
 
 
@@ -711,6 +715,10 @@ class TestExecuteOperationIdempotency:
     assert runner_called[0] is False
     assert second.operation_id == first.operation_id
     assert second.result == {"version": 1}
+    # Fresh execution sets idempotent_replay=False; cache hit flips it to
+    # True so clients and the metrics decorator can distinguish them.
+    assert first.idempotent_replay is False
+    assert second.idempotent_replay is True
 
     # Replay should log with idempotent_replay=True
     audit_calls = [

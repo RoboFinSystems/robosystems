@@ -258,16 +258,22 @@ class TestEndpointMetricsClass:
     )
 
   def test_record_request_duration(self, endpoint_metrics):
-    """Test recording request duration."""
+    """Test recording request duration.
+
+    `status_code` must serialize to `str` to match the shape used by
+    `record_request`. Inconsistent attribute types on the same OTel
+    instrument silently split the Prometheus series — see docstring on
+    `EndpointMetrics.record_request_duration`.
+    """
     metrics, meter, counter, histogram = endpoint_metrics
 
     metrics.record_request_duration(
       endpoint="/api/test", method="GET", status_code=200, duration=0.125
     )
 
-    # Verify histogram was recorded
+    # Verify histogram was recorded with str-typed status_code
     histogram.record.assert_called_with(
-      0.125, {"endpoint": "/api/test", "method": "GET", "status_code": 200}
+      0.125, {"endpoint": "/api/test", "method": "GET", "status_code": "200"}
     )
 
   def test_record_error(self, endpoint_metrics):

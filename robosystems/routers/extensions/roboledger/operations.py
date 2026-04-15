@@ -346,6 +346,7 @@ class DeleteResult(BaseModel):
 )
 @endpoint_metrics_decorator(
   "/extensions/roboledger/{graph_id}/operations/update-entity",
+  method="POST",
   business_event_type="ledger_update_entity",
 )
 async def update_entity_op(
@@ -397,6 +398,7 @@ async def update_entity_op(
 )
 @endpoint_metrics_decorator(
   "/extensions/roboledger/{graph_id}/operations/initialize",
+  method="POST",
   business_event_type="ledger_initialize",
 )
 async def initialize_op(
@@ -450,6 +452,7 @@ async def initialize_op(
 )
 @endpoint_metrics_decorator(
   "/extensions/roboledger/{graph_id}/operations/set-close-target",
+  method="POST",
   business_event_type="ledger_set_close_target",
 )
 async def set_close_target_op(
@@ -503,6 +506,7 @@ async def set_close_target_op(
 )
 @endpoint_metrics_decorator(
   "/extensions/roboledger/{graph_id}/operations/close-period",
+  method="POST",
   business_event_type="ledger_close_period",
 )
 async def close_period_op(
@@ -588,6 +592,7 @@ async def close_period_op(
 )
 @endpoint_metrics_decorator(
   "/extensions/roboledger/{graph_id}/operations/reopen-period",
+  method="POST",
   business_event_type="ledger_reopen_period",
 )
 async def reopen_period_op(
@@ -656,6 +661,7 @@ async def reopen_period_op(
 )
 @endpoint_metrics_decorator(
   "/extensions/roboledger/{graph_id}/operations/create-schedule",
+  method="POST",
   business_event_type="ledger_create_schedule",
 )
 async def create_schedule_op(
@@ -708,6 +714,7 @@ async def create_schedule_op(
 )
 @endpoint_metrics_decorator(
   "/extensions/roboledger/{graph_id}/operations/truncate-schedule",
+  method="POST",
   business_event_type="ledger_truncate_schedule",
 )
 async def truncate_schedule_op(
@@ -761,6 +768,7 @@ async def truncate_schedule_op(
 )
 @endpoint_metrics_decorator(
   "/extensions/roboledger/{graph_id}/operations/create-closing-entry",
+  method="POST",
   business_event_type="ledger_create_closing_entry",
 )
 async def create_closing_entry_op(
@@ -814,6 +822,7 @@ async def create_closing_entry_op(
 )
 @endpoint_metrics_decorator(
   "/extensions/roboledger/{graph_id}/operations/create-manual-closing-entry",
+  method="POST",
   business_event_type="ledger_create_manual_closing_entry",
 )
 async def create_manual_closing_entry_op(
@@ -868,6 +877,7 @@ async def create_manual_closing_entry_op(
 )
 @endpoint_metrics_decorator(
   "/extensions/roboledger/{graph_id}/operations/create-taxonomy",
+  method="POST",
   business_event_type="ledger_create_taxonomy",
 )
 async def create_taxonomy_op(
@@ -906,6 +916,7 @@ async def create_taxonomy_op(
 )
 @endpoint_metrics_decorator(
   "/extensions/roboledger/{graph_id}/operations/create-structure",
+  method="POST",
   business_event_type="ledger_create_structure",
 )
 async def create_structure_op(
@@ -944,6 +955,7 @@ async def create_structure_op(
 )
 @endpoint_metrics_decorator(
   "/extensions/roboledger/{graph_id}/operations/create-mapping-association",
+  method="POST",
   business_event_type="ledger_create_mapping_association",
 )
 async def create_mapping_association_op(
@@ -995,6 +1007,7 @@ async def create_mapping_association_op(
 )
 @endpoint_metrics_decorator(
   "/extensions/roboledger/{graph_id}/operations/delete-mapping-association",
+  method="POST",
   business_event_type="ledger_delete_mapping_association",
 )
 async def delete_mapping_association_op(
@@ -1045,6 +1058,7 @@ class AutoMapElementsOperation(BaseModel):
 )
 @endpoint_metrics_decorator(
   "/extensions/roboledger/{graph_id}/operations/auto-map-elements",
+  method="POST",
   business_event_type="ledger_auto_map_elements",
 )
 async def auto_map_elements_op(
@@ -1157,6 +1171,7 @@ async def auto_map_elements_op(
 )
 @endpoint_metrics_decorator(
   "/extensions/roboledger/{graph_id}/operations/create-report",
+  method="POST",
   business_event_type="ledger_create_report",
 )
 async def create_report_op(
@@ -1210,6 +1225,7 @@ async def create_report_op(
 )
 @endpoint_metrics_decorator(
   "/extensions/roboledger/{graph_id}/operations/regenerate-report",
+  method="POST",
   business_event_type="ledger_regenerate_report",
 )
 async def regenerate_report_op(
@@ -1266,6 +1282,7 @@ async def regenerate_report_op(
 )
 @endpoint_metrics_decorator(
   "/extensions/roboledger/{graph_id}/operations/delete-report",
+  method="POST",
   business_event_type="ledger_delete_report",
 )
 async def delete_report_op(
@@ -1314,6 +1331,7 @@ async def delete_report_op(
 )
 @endpoint_metrics_decorator(
   "/extensions/roboledger/{graph_id}/operations/share-report",
+  method="POST",
   business_event_type="ledger_share_report",
 )
 async def share_report_op(
@@ -1374,6 +1392,7 @@ async def share_report_op(
 )
 @endpoint_metrics_decorator(
   "/extensions/roboledger/{graph_id}/operations/create-publish-list",
+  method="POST",
   business_event_type="ledger_create_publish_list",
 )
 async def create_publish_list_op(
@@ -1415,6 +1434,7 @@ async def create_publish_list_op(
 )
 @endpoint_metrics_decorator(
   "/extensions/roboledger/{graph_id}/operations/update-publish-list",
+  method="POST",
   business_event_type="ledger_update_publish_list",
 )
 async def update_publish_list_op(
@@ -1462,6 +1482,7 @@ async def update_publish_list_op(
 )
 @endpoint_metrics_decorator(
   "/extensions/roboledger/{graph_id}/operations/delete-publish-list",
+  method="POST",
   business_event_type="ledger_delete_publish_list",
 )
 async def delete_publish_list_op(
@@ -1506,6 +1527,7 @@ async def delete_publish_list_op(
 )
 @endpoint_metrics_decorator(
   "/extensions/roboledger/{graph_id}/operations/add-publish-list-members",
+  method="POST",
   business_event_type="ledger_add_publish_list_members",
 )
 async def add_publish_list_members_op(
@@ -1563,6 +1585,7 @@ async def add_publish_list_members_op(
 )
 @endpoint_metrics_decorator(
   "/extensions/roboledger/{graph_id}/operations/remove-publish-list-member",
+  method="POST",
   business_event_type="ledger_remove_publish_list_member",
 )
 async def remove_publish_list_member_op(

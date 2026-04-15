@@ -77,6 +77,7 @@ _RATE_LIMIT = Depends(subscription_aware_rate_limit_dependency)
 )
 @endpoint_metrics_decorator(
   "/extensions/roboledger/{graph_id}/operations/build-fact-grid",
+  method="POST",
   business_event_type="ledger_build_fact_grid",
 )
 async def build_fact_grid_op(

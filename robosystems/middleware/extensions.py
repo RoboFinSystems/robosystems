@@ -105,6 +105,13 @@ class OperationEnvelope(BaseModel):
     audit correlation without having to cross-reference the audit log.
     Always populated for dispatcher-routed calls; may be `None` for legacy
     direct `wrap_completed(...)` callers.
+  - `idempotent_replay`: `True` when the dispatcher returned this envelope
+    from the idempotency cache (the underlying command did NOT execute
+    again). `False` on every fresh execution. Clients can use this to
+    distinguish "my retry succeeded" from "the server re-ran the command"
+    without having to track their own request identity. The metrics
+    decorator also reads this attribute to suppress business-event counter
+    increments on replays so dashboards stay honest.
   """
 
   model_config = ConfigDict(populate_by_name=True)
@@ -123,6 +130,14 @@ class OperationEnvelope(BaseModel):
     default=None,
     alias="createdBy",
     description="User ID that initiated the operation (null for legacy callers)",
+  )
+  idempotent_replay: bool = Field(
+    default=False,
+    alias="idempotentReplay",
+    description=(
+      "True when this envelope came from the idempotency cache — the "
+      "underlying command did not execute again. False on fresh executions."
+    ),
   )
 
 
@@ -564,6 +579,14 @@ async def execute_operation(
       )
       raise
     if cached is not None:
+      # Return a copy with `idempotent_replay=True` rather than mutating
+      # `cached` in place. The production `IdempotencyCache` deserializes
+      # a fresh instance per call (so mutation would be safe), but the
+      # dispatcher contract should not depend on that — a future
+      # in-memory cache implementation that shares object references
+      # across requests would silently corrupt prior envelopes. Pydantic
+      # `model_copy` is O(1) for the envelope's small field set.
+      cached = cached.model_copy(update={"idempotent_replay": True})
       log_operation_audit(
         operation_name=ctx.operation_name,
         operation_id=cached.operation_id,

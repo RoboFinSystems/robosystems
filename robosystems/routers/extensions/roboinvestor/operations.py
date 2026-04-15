@@ -189,6 +189,7 @@ async def _dispatch(
 )
 @endpoint_metrics_decorator(
   "/extensions/roboinvestor/{graph_id}/operations/create-portfolio",
+  method="POST",
   business_event_type="investor_create_portfolio",
 )
 async def create_portfolio_op(
@@ -226,6 +227,7 @@ async def create_portfolio_op(
 )
 @endpoint_metrics_decorator(
   "/extensions/roboinvestor/{graph_id}/operations/update-portfolio",
+  method="POST",
   business_event_type="investor_update_portfolio",
 )
 async def update_portfolio_op(
@@ -267,6 +269,7 @@ async def update_portfolio_op(
 )
 @endpoint_metrics_decorator(
   "/extensions/roboinvestor/{graph_id}/operations/delete-portfolio",
+  method="POST",
   business_event_type="investor_delete_portfolio",
 )
 async def delete_portfolio_op(
@@ -318,6 +321,7 @@ async def delete_portfolio_op(
 )
 @endpoint_metrics_decorator(
   "/extensions/roboinvestor/{graph_id}/operations/create-security",
+  method="POST",
   business_event_type="investor_create_security",
 )
 async def create_security_op(
@@ -358,6 +362,7 @@ async def create_security_op(
 )
 @endpoint_metrics_decorator(
   "/extensions/roboinvestor/{graph_id}/operations/update-security",
+  method="POST",
   business_event_type="investor_update_security",
 )
 async def update_security_op(
@@ -399,6 +404,7 @@ async def update_security_op(
 )
 @endpoint_metrics_decorator(
   "/extensions/roboinvestor/{graph_id}/operations/delete-security",
+  method="POST",
   business_event_type="investor_delete_security",
 )
 async def delete_security_op(
@@ -444,6 +450,7 @@ async def delete_security_op(
 )
 @endpoint_metrics_decorator(
   "/extensions/roboinvestor/{graph_id}/operations/create-position",
+  method="POST",
   business_event_type="investor_create_position",
 )
 async def create_position_op(
@@ -488,6 +495,7 @@ async def create_position_op(
 )
 @endpoint_metrics_decorator(
   "/extensions/roboinvestor/{graph_id}/operations/update-position",
+  method="POST",
   business_event_type="investor_update_position",
 )
 async def update_position_op(
@@ -529,6 +537,7 @@ async def update_position_op(
 )
 @endpoint_metrics_decorator(
   "/extensions/roboinvestor/{graph_id}/operations/delete-position",
+  method="POST",
   business_event_type="investor_delete_position",
 )
 async def delete_position_op(
