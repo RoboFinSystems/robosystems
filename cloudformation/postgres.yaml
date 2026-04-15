@@ -1,4 +1,4 @@
-Description: RoboSystems Postgres Service - RDS Postgres and Aurora Postgres
+Description: RoboSystems Postgres Service - RDS PostgreSQL with optional RDS Proxy
 
 Parameters:
   # Environment
@@ -21,16 +21,6 @@ Parameters:
   SubnetId2:
     Type: AWS::EC2::Subnet::Id
     Description: Second subnet ID for RDS multi-AZ deployment
-
-  # Database Engine Configuration
-  DatabaseEngine:
-    Type: String
-    Description: Database engine type (aurora-postgresql for Aurora, postgres for RDS)
-    Default: postgres
-    AllowedValues:
-      - postgres
-      - aurora-postgresql
-    ConstraintDescription: Must be either postgres (RDS) or aurora-postgresql (Aurora)
 
   # FORK NOTE: Pin version via DATABASE_POSTGRES_VERSION_<ENV> GitHub variable
   PostgresEngineVersion:
@@ -56,14 +46,14 @@ Parameters:
     ConstraintDescription: Must be a valid database instance class
   DBAllocatedStorage:
     Type: Number
-    Description: Initial storage size in GB (ignored by Aurora - uses serverless storage)
+    Description: Initial storage size in GB
     Default: 20
     MinValue: 20
     MaxValue: 1000
     ConstraintDescription: Must be between 20 and 1000 GB
   DBMaxAllocatedStorage:
     Type: Number
-    Description: Maximum storage size in GB (ignored by Aurora - uses serverless storage)
+    Description: Maximum storage size in GB
     Default: 100
     MinValue: 20
     MaxValue: 16384
@@ -109,6 +99,30 @@ Parameters:
       - "false"
     ConstraintDescription: Must be true or false
 
+  # RDS Proxy Configuration (off by default - billed at ~$0.015/vCPU/hour when enabled)
+  # Requires DBPasswordSecret to contain "username" and "password" keys, which the
+  # rotation lambda adds on first rotation after this template is deployed. A freshly
+  # deployed stack with no prior rotation will have only the legacy POSTGRES_USER /
+  # POSTGRES_PASSWORD keys; trigger a manual rotation before setting EnableRDSProxy=true,
+  # or wait for the next scheduled rotation.
+  EnableRDSProxy:
+    Type: String
+    Description: Enable RDS Proxy for connection pooling (off by default - see template
+      comment for enablement prerequisites)
+    Default: "false"
+    AllowedValues:
+      - "true"
+      - "false"
+    ConstraintDescription: Must be true or false
+  RDSProxyMaxConnectionsPercent:
+    Type: Number
+    Description: Maximum percentage of DB max_connections the proxy can use (ignored
+      when EnableRDSProxy=false)
+    Default: 100
+    MinValue: 1
+    MaxValue: 100
+    ConstraintDescription: Must be between 1 and 100
+
   # Monitoring & Observability Configuration
   SNSAlertEmail:
     Type: String
@@ -126,17 +140,9 @@ Parameters:
     Description: Component tag for resource identification and billing
     Default: Postgres
 
-Mappings:
-  # Maps version to parameter group family (add entries when expanding AllowedValues)
-  PostgresVersionToFamily:
-    "16.11":
-      RDS: "postgres16"
-      Aurora: "aurora-postgresql16"
-
 Conditions:
-  IsAurora: !Equals [!Ref DatabaseEngine, "aurora-postgresql"]
-  IsRDS: !Equals [!Ref DatabaseEngine, "postgres"]
   EnableMultiAZCondition: !Equals [!Ref EnableMultiAZ, "true"]
+  RDSProxyEnabledCondition: !Equals [!Ref EnableRDSProxy, "true"]
 
 Resources:
   # Common IAM policy for EC2 instances
@@ -271,7 +277,6 @@ Resources:
               - Effect: Allow
                 Action:
                   - rds:DescribeDBInstances
-                  - rds:DescribeDBClusters
                 Resource: "*"
               # ECR permissions for container-based Lambda
               - Effect: Allow
@@ -350,10 +355,12 @@ Resources:
         - Key: CreatedBy
           Value: CloudFormation
 
-  # Composite alarm for overall PostgreSQL health including rotation (RDS)
+  # Composite alarm for overall PostgreSQL health including rotation.
+  # Logical ID retains the historical "-RDS" suffix to avoid triggering a CFN
+  # rename, which would collide on the shared AlarmName and fail the stack
+  # update. Previously gated on a now-removed IsRDS condition.
   PostgresHealthCompositeAlarmRDS:
     Type: AWS::CloudWatch::CompositeAlarm
-    Condition: IsRDS
     DeletionPolicy: Delete
     UpdateReplacePolicy: Delete
     Properties:
@@ -375,94 +382,19 @@ Resources:
         - Key: CreatedBy
           Value: CloudFormation
 
-  # Composite alarm for overall PostgreSQL health including rotation (Aurora)
-  PostgresHealthCompositeAlarmAurora:
-    Type: AWS::CloudWatch::CompositeAlarm
-    Condition: IsAurora
-    DeletionPolicy: Delete
-    UpdateReplacePolicy: Delete
-    Properties:
-      AlarmName: !Sub robosystems-postgres-${Environment}-health-composite
-      AlarmDescription: Overall PostgreSQL health including rotation status
-      AlarmRule: !Sub 'ALARM("${PostgresRotationFailureAlarm}") OR ALARM("${CloudWatchAlarmAuroraCPU}")'
-      ActionsEnabled: true
-      AlarmActions:
-        - !Ref PostgresAlertTopic
-      Tags:
-        - Key: Name
-          Value: !Sub ${AWS::StackName}-postgres-health-composite
-        - Key: Environment
-          Value: !Ref Environment
-        - Key: Service
-          Value: !Ref ServiceTag
-        - Key: Component
-          Value: !Ref ComponentTag
-        - Key: CreatedBy
-          Value: CloudFormation
-
-  # Database parameter group with SSL enforcement (RDS only)
+  # Database parameter group with SSL enforcement
   RDSDBParameterGroup:
     Type: AWS::RDS::DBParameterGroup
-    Condition: IsRDS
     DeletionPolicy: Delete
     UpdateReplacePolicy: Retain
     Properties:
       Description: !Sub Parameter group for ${DBInstanceName}-${Environment} database
-      Family:
-        !FindInMap [PostgresVersionToFamily, !Ref PostgresEngineVersion, RDS]
+      Family: postgres16
       Parameters:
         rds.force_ssl: "1"
       Tags:
         - Key: Name
           Value: !Sub ${DBInstanceName}-${Environment}-paramgroup
-        - Key: Environment
-          Value: !Ref Environment
-        - Key: Service
-          Value: !Ref ServiceTag
-        - Key: Component
-          Value: !Ref ComponentTag
-        - Key: CreatedBy
-          Value: CloudFormation
-
-  # Aurora DB parameter group with SSL enforcement (Aurora only)
-  AuroraDBParameterGroup:
-    Type: AWS::RDS::DBParameterGroup
-    Condition: IsAurora
-    DeletionPolicy: Delete
-    UpdateReplacePolicy: Retain
-    Properties:
-      Description: !Sub Parameter group for ${DBInstanceName}-${Environment} Aurora database
-      Family:
-        !FindInMap [PostgresVersionToFamily, !Ref PostgresEngineVersion, Aurora]
-      Parameters:
-        rds.force_ssl: "1"
-      Tags:
-        - Key: Name
-          Value: !Sub ${DBInstanceName}-${Environment}-aurora-paramgroup
-        - Key: Environment
-          Value: !Ref Environment
-        - Key: Service
-          Value: !Ref ServiceTag
-        - Key: Component
-          Value: !Ref ComponentTag
-        - Key: CreatedBy
-          Value: CloudFormation
-
-  # Aurora cluster parameter group (Aurora only)
-  AuroraClusterParameterGroup:
-    Type: AWS::RDS::DBClusterParameterGroup
-    Condition: IsAurora
-    DeletionPolicy: Delete
-    UpdateReplacePolicy: Retain
-    Properties:
-      Description: !Sub Cluster parameter group for ${DBInstanceName}-${Environment} Aurora cluster
-      Family:
-        !FindInMap [PostgresVersionToFamily, !Ref PostgresEngineVersion, Aurora]
-      Parameters:
-        rds.force_ssl: "1"
-      Tags:
-        - Key: Name
-          Value: !Sub ${DBInstanceName}-${Environment}-aurora-cluster-paramgroup
         - Key: Environment
           Value: !Ref Environment
         - Key: Service
@@ -519,68 +451,9 @@ Resources:
         - Key: CreatedBy
           Value: CloudFormation
 
-  # Aurora PostgreSQL Cluster (Aurora only)
-  AuroraDBCluster:
-    Type: AWS::RDS::DBCluster
-    Condition: IsAurora
-    DeletionPolicy: Snapshot
-    UpdateReplacePolicy: Snapshot
-    Properties:
-      DBClusterIdentifier: !Sub ${DBInstanceName}-${Environment}
-      DatabaseName: !Ref DBName
-      Engine: aurora-postgresql
-      EngineVersion: !Ref PostgresEngineVersion
-      EngineMode: provisioned
-      MasterUsername: !Ref DBUsername
-      MasterUserPassword: !Sub "{{resolve:secretsmanager:${DBPasswordSecret}:SecretString:POSTGRES_PASSWORD}}"
-      DBSubnetGroupName: !Ref RDSDBSubnetGroup
-      VpcSecurityGroupIds:
-        - !GetAtt RDSSecurityGroup.GroupId
-      BackupRetentionPeriod: 7
-      PreferredBackupWindow: 03:00-04:00
-      PreferredMaintenanceWindow: sun:04:30-sun:05:30
-      DBClusterParameterGroupName: !Ref AuroraClusterParameterGroup
-      StorageEncrypted: true
-      Tags:
-        - Key: Name
-          Value: !Sub ${DBInstanceName}-${Environment}-cluster
-        - Key: Environment
-          Value: !Ref Environment
-        - Key: Service
-          Value: !Ref ServiceTag
-        - Key: Component
-          Value: !Ref ComponentTag
-        - Key: CreatedBy
-          Value: CloudFormation
-
-  # Aurora DB Instance (Aurora only)
-  AuroraDBInstance:
-    Type: AWS::RDS::DBInstance
-    Condition: IsAurora
-    DeletionPolicy: Delete
-    UpdateReplacePolicy: Delete
-    Properties:
-      DBInstanceClass: !Ref DBInstanceClass
-      DBClusterIdentifier: !Ref AuroraDBCluster
-      Engine: aurora-postgresql
-      DBParameterGroupName: !Ref AuroraDBParameterGroup
-      PubliclyAccessible: false
-      Tags:
-        - Key: Name
-          Value: !Sub ${DBInstanceName}-${Environment}-instance
-        - Key: Environment
-          Value: !Ref Environment
-        - Key: Service
-          Value: !Ref ServiceTag
-        - Key: Component
-          Value: !Ref ComponentTag
-        - Key: CreatedBy
-          Value: CloudFormation
-
-  # PostgreSQL RDS instance (RDS only)
+  # PostgreSQL RDS instance
   RDSDBInstance:
     Type: AWS::RDS::DBInstance
-    Condition: IsRDS
     DeletionPolicy: Snapshot
     UpdateReplacePolicy: Snapshot
     Properties:
@@ -619,6 +492,99 @@ Resources:
         - Key: CreatedBy
           Value: CloudFormation
 
+  # RDS Proxy IAM role (only when EnableRDSProxy=true)
+  RDSProxyRole:
+    Type: AWS::IAM::Role
+    Condition: RDSProxyEnabledCondition
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: rds.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: GetDatabaseSecret
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                  - secretsmanager:DescribeSecret
+                Resource: !Ref DBPasswordSecret
+              - Effect: Allow
+                Action:
+                  - kms:Decrypt
+                  - kms:DescribeKey
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:kms:${AWS::Region}:${AWS::AccountId}:alias/aws/secretsmanager"
+                Condition:
+                  StringEquals:
+                    "kms:ViaService":
+                      - !Sub "secretsmanager.${AWS::Region}.amazonaws.com"
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-rds-proxy-role
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: !Ref ServiceTag
+        - Key: Component
+          Value: !Ref ComponentTag
+        - Key: CreatedBy
+          Value: CloudFormation
+
+  # RDS Proxy (only when EnableRDSProxy=true)
+  # Billed at ~$0.015 per vCPU of target DB per hour while enabled.
+  RDSProxy:
+    Type: AWS::RDS::DBProxy
+    Condition: RDSProxyEnabledCondition
+    Properties:
+      DBProxyName: !Sub ${DBInstanceName}-${Environment}-proxy
+      EngineFamily: POSTGRESQL
+      RoleArn: !GetAtt RDSProxyRole.Arn
+      Auth:
+        - AuthScheme: SECRETS
+          SecretArn: !Ref DBPasswordSecret
+          IAMAuth: DISABLED
+          Description: "Password auth via Secrets Manager"
+      VpcSubnetIds:
+        - !Ref SubnetId1
+        - !Ref SubnetId2
+      VpcSecurityGroupIds:
+        - !GetAtt RDSSecurityGroup.GroupId
+      RequireTLS: true
+      IdleClientTimeout: 1800
+      DebugLogging: false
+      Tags:
+        - Key: Name
+          Value: !Sub ${DBInstanceName}-${Environment}-proxy
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: !Ref ServiceTag
+        - Key: Component
+          Value: !Ref ComponentTag
+        - Key: CreatedBy
+          Value: CloudFormation
+
+  # RDS Proxy target group (only when EnableRDSProxy=true)
+  # AWS currently only supports the "default" target group name.
+  RDSProxyTargetGroup:
+    Type: AWS::RDS::DBProxyTargetGroup
+    Condition: RDSProxyEnabledCondition
+    Properties:
+      DBProxyName: !Ref RDSProxy
+      TargetGroupName: default
+      DBInstanceIdentifiers:
+        - !Ref RDSDBInstance
+      ConnectionPoolConfigurationInfo:
+        MaxConnectionsPercent: !Ref RDSProxyMaxConnectionsPercent
+        MaxIdleConnectionsPercent: 50
+        ConnectionBorrowTimeout: 120
+
   # SNS topic for PostgreSQL monitoring alerts
   PostgresAlertTopic:
     Type: AWS::SNS::Topic
@@ -642,10 +608,9 @@ Resources:
         - Key: CreatedBy
           Value: CloudFormation
 
-  # CloudWatch alarm for low storage space (RDS only - Aurora storage is serverless)
+  # CloudWatch alarm for low storage space
   RDSStorageLowAlarm:
     Type: AWS::CloudWatch::Alarm
-    Condition: IsRDS
     DeletionPolicy: Delete
     UpdateReplacePolicy: Delete
     Properties:
@@ -677,58 +642,17 @@ Resources:
         - Key: CreatedBy
           Value: CloudFormation
 
-  # CloudWatch alarm for Aurora CPU utilization
-  CloudWatchAlarmAuroraCPU:
-    Type: AWS::CloudWatch::Alarm
-    Condition: IsAurora
-    DeletionPolicy: Delete
-    UpdateReplacePolicy: Delete
-    Properties:
-      ActionsEnabled: true
-      AlarmName: !Sub robosystems-postgres-${Environment}-aurora-cpu-high
-      Namespace: AWS/RDS
-      MetricName: CPUUtilization
-      Dimensions:
-        - Value: !Sub ${DBInstanceName}-${Environment}
-          Name: DBClusterIdentifier
-      Statistic: Average
-      Period: 300
-      EvaluationPeriods: 2
-      DatapointsToAlarm: 2
-      Threshold: 80
-      ComparisonOperator: GreaterThanThreshold
-      TreatMissingData: notBreaching
-      AlarmActions:
-        - !Ref PostgresAlertTopic
-      Tags:
-        - Key: Name
-          Value: !Sub ${AWS::StackName}-aurora-cpu-high-alarm
-        - Key: Environment
-          Value: !Ref Environment
-        - Key: Service
-          Value: !Ref ServiceTag
-        - Key: Component
-          Value: !Ref ComponentTag
-        - Key: CreatedBy
-          Value: CloudFormation
-
 Outputs:
   DatabaseEndpoint:
-    Description: Endpoint of the PostgreSQL database (Aurora cluster or RDS instance)
-    Value: !If
-      - IsAurora
-      - !GetAtt AuroraDBCluster.Endpoint.Address
-      - !GetAtt RDSDBInstance.Endpoint.Address
+    Description: Endpoint of the PostgreSQL database
+    Value: !GetAtt RDSDBInstance.Endpoint.Address
     Export:
       Name: !Sub ${AWS::StackName}-${Environment}-DatabaseEndpoint
 
   # Legacy output for backwards compatibility
   RDSInstanceEndpoint:
     Description: Endpoint of the PostgreSQL database (legacy name for compatibility)
-    Value: !If
-      - IsAurora
-      - !GetAtt AuroraDBCluster.Endpoint.Address
-      - !GetAtt RDSDBInstance.Endpoint.Address
+    Value: !GetAtt RDSDBInstance.Endpoint.Address
     Export:
       Name: !Sub ${AWS::StackName}-${Environment}-RDSEndpoint
 
@@ -740,45 +664,35 @@ Outputs:
 
   DatabasePort:
     Description: Port of the PostgreSQL database
-    Value: !If
-      - IsAurora
-      - !GetAtt AuroraDBCluster.Endpoint.Port
-      - !GetAtt RDSDBInstance.Endpoint.Port
+    Value: !GetAtt RDSDBInstance.Endpoint.Port
     Export:
       Name: !Sub ${AWS::StackName}-${Environment}-DatabasePort
 
   # Legacy output for backwards compatibility
   RDSPort:
     Description: Port of the PostgreSQL database (legacy name for compatibility)
-    Value: !If
-      - IsAurora
-      - !GetAtt AuroraDBCluster.Endpoint.Port
-      - !GetAtt RDSDBInstance.Endpoint.Port
+    Value: !GetAtt RDSDBInstance.Endpoint.Port
     Export:
       Name: !Sub ${AWS::StackName}-${Environment}-RDSPort
 
   DatabaseIdentifier:
     Description: Identifier of the PostgreSQL database
-    Value: !If
-      - IsAurora
-      - !Ref AuroraDBCluster
-      - !Ref RDSDBInstance
+    Value: !Ref RDSDBInstance
     Export:
       Name: !Sub ${AWS::StackName}-${Environment}-DatabaseIdentifier
 
   # Legacy output for backwards compatibility
   RDSIdentifier:
     Description: Identifier of the PostgreSQL database (legacy name for compatibility)
-    Value: !If
-      - IsAurora
-      - !Ref AuroraDBCluster
-      - !Ref RDSDBInstance
+    Value: !Ref RDSDBInstance
     Export:
       Name: !Sub ${AWS::StackName}-${Environment}-RDSIdentifier
 
+  # Retained as literal for backwards compatibility with any downstream consumer
+  # that conditions on engine type. Aurora support was removed in favor of RDS + RIs.
   DatabaseEngine:
-    Description: Database engine type (aurora-postgresql or postgres)
-    Value: !Ref DatabaseEngine
+    Description: Database engine type
+    Value: postgres
     Export:
       Name: !Sub ${AWS::StackName}-${Environment}-DatabaseEngine
 
@@ -835,9 +749,27 @@ Outputs:
 
   PostgresParameterGroupFamilyConfigured:
     Description: PostgreSQL parameter group family configured for this deployment
-    Value: !If
-      - IsAurora
-      - !FindInMap [PostgresVersionToFamily, !Ref PostgresEngineVersion, Aurora]
-      - !FindInMap [PostgresVersionToFamily, !Ref PostgresEngineVersion, RDS]
+    Value: postgres16
     Export:
       Name: !Sub ${AWS::StackName}-${Environment}-PostgresParameterGroupFamily
+
+  # RDS Proxy outputs (only present when EnableRDSProxy=true)
+  DatabaseProxyEndpoint:
+    Condition: RDSProxyEnabledCondition
+    Description: Read/write endpoint of the RDS Proxy
+    Value: !GetAtt RDSProxy.Endpoint
+    Export:
+      Name: !Sub ${AWS::StackName}-${Environment}-DatabaseProxyEndpoint
+
+  DatabaseProxyArn:
+    Condition: RDSProxyEnabledCondition
+    Description: ARN of the RDS Proxy
+    Value: !GetAtt RDSProxy.DBProxyArn
+    Export:
+      Name: !Sub ${AWS::StackName}-${Environment}-DatabaseProxyArn
+
+  RDSProxyEnabled:
+    Description: Whether RDS Proxy is enabled for this deployment
+    Value: !Ref EnableRDSProxy
+    Export:
+      Name: !Sub ${AWS::StackName}-${Environment}-RDSProxyEnabled

@@ -332,17 +332,20 @@ function setup_full_config() {
     fi
 
     # Database Configuration
-    gh variable set DATABASE_ENGINE_PROD --body "postgres"
     gh variable set DATABASE_INSTANCE_SIZE_PROD --body "db.t4g.small"
     gh variable set DATABASE_ALLOCATED_STORAGE_PROD --body "20"
     gh variable set DATABASE_MAX_ALLOCATED_STORAGE_PROD --body "100"
     gh variable set DATABASE_MULTI_AZ_ENABLED_PROD --body "false"
+    # RDS Proxy (off by default - flip RDS_PROXY_ENABLED_PROD to "true" to turn on)
+    gh variable set RDS_PROXY_ENABLED_PROD --body "false"
+    gh variable set RDS_PROXY_MAX_CONNECTIONS_PERCENT_PROD --body "100"
     if $setup_staging; then
-        gh variable set DATABASE_ENGINE_STAGING --body "postgres"
         gh variable set DATABASE_INSTANCE_SIZE_STAGING --body "db.t4g.small"
         gh variable set DATABASE_ALLOCATED_STORAGE_STAGING --body "20"
         gh variable set DATABASE_MAX_ALLOCATED_STORAGE_STAGING --body "100"
         gh variable set DATABASE_MULTI_AZ_ENABLED_STAGING --body "false"
+        gh variable set RDS_PROXY_ENABLED_STAGING --body "false"
+        gh variable set RDS_PROXY_MAX_CONNECTIONS_PERCENT_STAGING --body "100"
     fi
 
     # VPC Flow Logs Configuration (SOC 2 - VPC-level, not environment-specific)

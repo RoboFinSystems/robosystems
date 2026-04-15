@@ -253,8 +253,6 @@ jobs:
       aws_region: ${{ vars.AWS_REGION || 'us-east-1' }}
       vpc_id: ${{ needs.deploy-vpc.outputs.vpc_id }}
       subnet_ids: ${{ needs.deploy-vpc.outputs.private_subnet_ids }}
-      # Database Engine Configuration
-      engine: ${{ vars.DATABASE_ENGINE_PROD || 'postgres' }}
       # Database Version Configuration
       postgres_version: ${{ vars.DATABASE_POSTGRES_VERSION_PROD || '16.11' }}
       # Instance Configuration
@@ -263,6 +261,9 @@ jobs:
       allocated_max_storage: ${{ vars.DATABASE_MAX_ALLOCATED_STORAGE_PROD || '100' }}
       # High Availability Configuration
       multi_az_enabled: ${{ vars.DATABASE_MULTI_AZ_ENABLED_PROD || 'false' }}
+      # RDS Proxy Configuration (off by default - flip RDS_PROXY_ENABLED_PROD to 'true' to turn on)
+      rds_proxy_enabled: ${{ vars.RDS_PROXY_ENABLED_PROD || 'false' }}
+      rds_proxy_max_connections_percent: ${{ vars.RDS_PROXY_MAX_CONNECTIONS_PERCENT_PROD || '100' }}
       # Lambda Configuration (container-based)
       lambda_image_uri: ${{ needs.build.outputs.lambda_image }}
       # Other Configuration

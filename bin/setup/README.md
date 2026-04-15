@@ -317,14 +317,15 @@ just setup-gha
 
 #### Database Configuration
 
-| Variable                           | Prod Default   | Description          |
-| ---------------------------------- | -------------- | -------------------- |
-| `DATABASE_ENGINE_*`                | `postgres`     | Database engine      |
-| `DATABASE_INSTANCE_SIZE_*`         | `db.t4g.small` | RDS instance type    |
-| `DATABASE_ALLOCATED_STORAGE_*`     | `20`           | Initial storage (GB) |
-| `DATABASE_MAX_ALLOCATED_STORAGE_*` | `100`          | Max storage (GB)     |
-| `DATABASE_MULTI_AZ_ENABLED_*`      | `false`        | Multi-AZ deployment  |
-| `DATABASE_POSTGRES_VERSION_*`      | `16.11`        | PostgreSQL version   |
+| Variable                                | Prod Default   | Description                                  |
+| --------------------------------------- | -------------- | -------------------------------------------- |
+| `DATABASE_INSTANCE_SIZE_*`              | `db.t4g.small` | RDS instance type                            |
+| `DATABASE_ALLOCATED_STORAGE_*`          | `20`           | Initial storage (GB)                         |
+| `DATABASE_MAX_ALLOCATED_STORAGE_*`      | `100`          | Max storage (GB)                             |
+| `DATABASE_MULTI_AZ_ENABLED_*`           | `false`        | Multi-AZ deployment                          |
+| `DATABASE_POSTGRES_VERSION_*`           | `16.11`        | PostgreSQL version                           |
+| `RDS_PROXY_ENABLED_*`                   | `false`        | Enable RDS Proxy for connection pooling      |
+| `RDS_PROXY_MAX_CONNECTIONS_PERCENT_*`   | `100`          | Max % of DB max_connections proxy may use    |
 
 #### Valkey (Redis) Configuration
 
