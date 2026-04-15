@@ -545,7 +545,9 @@ jobs:
       domain_name: ${{ vars.API_DOMAIN_NAME_PROD || '' }}
       domain_name_root: ${{ needs.stack-config.outputs.domain_name_root }}
       # Database Configuration (from Postgres stack outputs)
-      database_endpoint: ${{ needs.deploy-postgres.outputs.database_endpoint }}
+      # Uses RDS Proxy endpoint when RDS_PROXY_ENABLED_PROD=true, direct endpoint otherwise.
+      # The proxy output is an empty string when the flag is off, which GHA's || coalesce treats as falsy.
+      database_endpoint: ${{ needs.deploy-postgres.outputs.database_proxy_endpoint || needs.deploy-postgres.outputs.database_endpoint }}
       database_port: ${{ needs.deploy-postgres.outputs.database_port }}
       # Lambda Configuration (container-based)
       lambda_image_uri: ${{ needs.build.outputs.lambda_image }}
@@ -626,7 +628,10 @@ jobs:
       daemon_fargate_base: ${{ vars.DAGSTER_DAEMON_FARGATE_BASE_PROD || '0' }}
       webserver_fargate_base: ${{ vars.DAGSTER_WEBSERVER_FARGATE_BASE_PROD || '0' }}
       # Database Configuration (from Postgres stack outputs)
-      database_endpoint: ${{ needs.deploy-postgres.outputs.database_endpoint }}
+      # Uses RDS Proxy endpoint when RDS_PROXY_ENABLED_PROD=true, direct endpoint otherwise.
+      # Dagster daemon connections will pin on the proxy (LISTEN/NOTIFY, advisory locks) so
+      # they get no proxy benefit but pinning is neutral. The embedded worker stack benefits.
+      database_endpoint: ${{ needs.deploy-postgres.outputs.database_proxy_endpoint || needs.deploy-postgres.outputs.database_endpoint }}
       database_port: ${{ needs.deploy-postgres.outputs.database_port }}
       # Cache Configuration
       valkey_url: ${{ needs.deploy-valkey.outputs.valkey_url }}
