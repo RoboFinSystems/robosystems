@@ -62,6 +62,31 @@ from robosystems.routers.admin import (
 logger = get_logger("robosystems.api")
 
 
+def is_relaxed_csp_path(path: str) -> bool:
+  """Return True for paths that should receive the relaxed CSP.
+
+  The relaxed CSP allows CDN-hosted scripts/styles needed by the
+  Swagger UI at `/`, the static asset bundle, and the GraphiQL
+  playground. GraphiQL is mounted graph-scoped at
+  `/extensions/{graph_id}/graphql`, so a naive
+  `path.startswith("/extensions/graphql")` check (its pre-cutover
+  shape) no longer matches and would block the React/GraphiQL CDN
+  bundle. We accept any `/extensions/.../graphql` path — covering
+  both the new graph-scoped URL and the legacy shape defensively.
+
+  Extracted from the security-headers middleware so the matcher
+  contract has a unit-testable home; future URL changes that move
+  GraphiQL must update this function and its tests.
+  """
+  if path in ("/", "/docs"):
+    return True
+  if path.startswith("/static"):
+    return True
+  if path.startswith("/extensions/") and path.endswith("/graphql"):
+    return True
+  return False
+
+
 def create_app() -> FastAPI:
   """
   Create the FastAPI app and include the routers.
@@ -201,6 +226,10 @@ def create_app() -> FastAPI:
       "Authorization",
       "X-API-Key",
       "X-Requested-With",
+      # Operation endpoints under /extensions/{domain}/{graph_id}/operations/*
+      # accept Idempotency-Key for safe retries — must be in allow_headers
+      # or browser preflight will reject it for cross-origin requests.
+      "Idempotency-Key",
     ],
     expose_headers=["X-Request-ID", "X-Rate-Limit-Remaining", "X-Rate-Limit-Reset"],
     max_age=3600,  # Cache preflight requests for 1 hour
@@ -233,11 +262,13 @@ def create_app() -> FastAPI:
         "max-age=31536000; includeSubDomains"
       )
 
-    # Path-based CSP - strict for API, relaxed for docs
+    # Path-based CSP - strict for API, relaxed for docs / GraphiQL.
+    # See `is_relaxed_csp_path()` for the matched URL contract.
     path = request.url.path
-
-    if path in ["/", "/docs"] or path.startswith("/static"):
-      # Relaxed CSP for documentation and static assets
+    if is_relaxed_csp_path(path):
+      # Relaxed CSP for documentation, static assets, and the GraphiQL
+      # playground (which loads React/GraphiQL from unpkg.com, mirroring
+      # Swagger UI's pattern).
       csp_directives = [
         "default-src 'self'",
         "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.jsdelivr.net https://unpkg.com https://cdn.redoc.ly",
@@ -316,17 +347,94 @@ def create_app() -> FastAPI:
   app.include_router(operations_router_v1)  # Unified SSE operations monitoring
   app.include_router(billing_router_v1)
 
-  # Ledger routes (separate top-level prefix)
-  if env.LEDGER_ENABLED:
-    from robosystems.routers import ledger_router_v1
+  # NOTE: /v1/ledger/{graph_id} and /v1/investor/{graph_id} were removed
+  # in the extensions cutover. Reads are on /extensions/graphql; writes
+  # are on /extensions/{roboledger,roboinvestor}/{graph_id}/operations/*.
+  # Mounts appear further down in this function.
 
-    app.include_router(ledger_router_v1)
+  # Extensions GraphQL endpoint (Strawberry). Graph-scoped at
+  # `/extensions/{graph_id}/graphql` so:
+  #
+  # 1. Auth + per-graph access are enforced by the FastAPI dependency
+  #    layer (`get_context` reads `graph_id` from the path and runs
+  #    `check_graph_access` before Strawberry parses the query).
+  # 2. Resolvers don't take `graphId` as an argument — they read it
+  #    from `info.context["graph_id"]`. The schema is one-graph-at-a-time.
+  # 3. Rate limiting (`subscription_aware_rate_limit_dependency`)
+  #    becomes per-tenant naturally because the dependency reads
+  #    `graph_id` from `request.path_params`.
+  # 4. The wire surface is symmetric with REST writes:
+  #    `POST /extensions/{graph_id}/graphql` (reads)
+  #    `POST /extensions/{domain}/{graph_id}/operations/{op}` (writes)
+  if env.EXTENSIONS_GRAPHQL_ENABLED and (
+    env.ROBOLEDGER_ENABLED or env.ROBOINVESTOR_ENABLED
+  ):
+    from fastapi import Depends as _Depends
+    from strawberry.fastapi import GraphQLRouter
 
-  # Investor routes (separate top-level prefix)
-  if env.INVESTOR_ENABLED:
-    from robosystems.routers import investor_router_v1
+    from robosystems.graphql import schema as extensions_graphql_schema
+    from robosystems.graphql.context import get_context as graphql_context_getter
+    from robosystems.middleware.rate_limits import (
+      subscription_aware_rate_limit_dependency,
+    )
 
-    app.include_router(investor_router_v1)
+    graphql_router = GraphQLRouter(
+      extensions_graphql_schema,
+      context_getter=graphql_context_getter,
+      # GraphiQL playground (dev only).
+      graphql_ide="graphiql" if env.is_development() else None,
+    )
+    app.include_router(
+      graphql_router,
+      prefix="/extensions/{graph_id}/graphql",
+      tags=["Extensions: GraphQL"],
+      include_in_schema=True,
+      dependencies=[_Depends(subscription_aware_rate_limit_dependency)],
+    )
+
+  # Extensions REST operation surface — `POST /extensions/{domain}/{graph_id}/operations/{op_name}`.
+  # Writes live here (reads go through /extensions/graphql). Each route
+  # delegates to `operations/{domain}/commands/*` via the shared
+  # `execute_operation` dispatcher in `middleware/extensions.py`.
+  if env.ROBOLEDGER_ENABLED:
+    from robosystems.routers.extensions.roboledger.operations import (
+      router as roboledger_operations_router,
+    )
+
+    app.include_router(
+      roboledger_operations_router,
+      prefix="/extensions/roboledger/{graph_id}/operations",
+      include_in_schema=True,
+    )
+
+  # `build-fact-grid` lives in its own router so it can be mounted
+  # independently of ROBOLEDGER_ENABLED. The fact-grid queries the LadybugDB
+  # graph schema (XBRL hypercube), which is shared by roboledger tenant
+  # graphs AND the SEC shared repository. SEC-only deployments (no
+  # roboledger tenants) still need this endpoint, so gating only on
+  # FACT_GRID_ENABLED is correct. Same prefix as the operations router
+  # so the wire URL is `POST /extensions/roboledger/{graph_id}/operations/build-fact-grid`.
+  if env.FACT_GRID_ENABLED:
+    from robosystems.routers.extensions.roboledger.views import (
+      router as roboledger_views_router,
+    )
+
+    app.include_router(
+      roboledger_views_router,
+      prefix="/extensions/roboledger/{graph_id}/operations",
+      include_in_schema=True,
+    )
+
+  if env.ROBOINVESTOR_ENABLED:
+    from robosystems.routers.extensions.roboinvestor.operations import (
+      router as roboinvestor_operations_router,
+    )
+
+    app.include_router(
+      roboinvestor_operations_router,
+      prefix="/extensions/roboinvestor/{graph_id}/operations",
+      include_in_schema=True,
+    )
 
   # Include admin routers (hidden from public docs)
   # The admin routers will not appear in the auto-generated docs

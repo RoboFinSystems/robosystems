@@ -5,11 +5,28 @@ Four tools for taxonomy management:
 2. suggest-mapping: Query reporting taxonomy for matching concepts by classification
 3. create-mapping-association: Write a confirmed CoA → reporting concept mapping
 4. get-mapping-summary: Get mapping coverage stats
+
+All four route through `operations/roboledger/{reads,commands}/taxonomies.py`
+so MCP, GraphQL, and the REST operation surface share one source of truth.
 """
 
 from typing import Any
 
+from robosystems.db.extensions import extensions_session
 from robosystems.logger import logger
+from robosystems.models.api.extensions.taxonomies import CreateAssociationRequest
+from robosystems.operations.roboledger.commands.taxonomies import (
+  ElementNotFoundError,
+  MappingStructureNotFoundError,
+  create_mapping_association,
+)
+from robosystems.operations.roboledger.reads.taxonomies import (
+  count_coa_elements,
+  get_element,
+  get_mapping_coverage,
+  list_unmapped_elements,
+  suggest_mapping_candidates,
+)
 
 
 class GetUnmappedElementsTool:
@@ -50,56 +67,17 @@ class GetUnmappedElementsTool:
     }
 
   async def execute(self, arguments: dict[str, Any]) -> Any:
-    from robosystems.db.extensions import extensions_session
-    from robosystems.models.extensions import Association, Element
-
     graph_id = self.client.graph_id
     mapping_id = arguments.get("mapping_id")
 
     try:
       with extensions_session(graph_id) as session:
-        from sqlalchemy import select
-
-        coa_sources = ("quickbooks", "xero", "plaid", "native", "import")
-        coa_elements = (
-          session.execute(
-            select(Element).where(
-              Element.source.in_(coa_sources),
-              Element.is_active.is_(True),
-              Element.is_abstract.is_(False),
-            )
-          )
-          .scalars()
-          .all()
-        )
-
-        if mapping_id:
-          mapped_query = select(Association.from_element_id).where(
-            Association.structure_id == mapping_id,
-            Association.association_type == "mapping",
-          )
-        else:
-          mapped_query = select(Association.from_element_id).where(
-            Association.association_type == "mapping",
-          )
-        mapped_ids = set(session.execute(mapped_query).scalars().all())
-
-        unmapped = [e for e in coa_elements if e.id not in mapped_ids]
-
+        unmapped = list_unmapped_elements(session, mapping_id=mapping_id)
+        total_coa = count_coa_elements(session)
         return {
           "unmapped_count": len(unmapped),
-          "total_coa_elements": len(coa_elements),
-          "elements": [
-            {
-              "id": e.id,
-              "code": e.code,
-              "name": e.name,
-              "classification": e.classification,
-              "balance_type": e.balance_type,
-              "external_source": e.external_source,
-            }
-            for e in unmapped
-          ],
+          "total_coa_elements": total_coa,
+          "elements": [e.model_dump(mode="json") for e in unmapped],
         }
     except Exception as exc:
       logger.warning(f"get-unmapped-elements failed: {exc}")
@@ -148,50 +126,29 @@ class SuggestMappingTool:
     }
 
   async def execute(self, arguments: dict[str, Any]) -> Any:
-    from robosystems.db.extensions import extensions_session
-    from robosystems.models.extensions import Element
-
     graph_id = self.client.graph_id
     element_id = arguments["element_id"]
     classification_override = arguments.get("classification")
 
     try:
       with extensions_session(graph_id) as session:
-        from sqlalchemy import select
-
-        # Get the source element
-        source = session.execute(
-          select(Element).where(Element.id == element_id)
-        ).scalar_one_or_none()
-        if not source:
+        source = get_element(session, element_id)
+        if source is None:
           return {"error": f"Element {element_id} not found"}
 
         classification = classification_override or source.classification
+        if not classification:
+          return {
+            "source_element": {
+              "id": source.id,
+              "code": source.code,
+              "name": source.name,
+              "classification": source.classification,
+            },
+            "candidates": [],
+          }
 
-        # Map classification to SFAC 6 categories
-        cls_map = {
-          "asset": ["asset"],
-          "liability": ["liability"],
-          "equity": ["equity"],
-          "revenue": ["revenue"],
-          "expense": ["expense"],
-        }
-        target_classifications = cls_map.get(classification, [classification])
-
-        # Get reporting taxonomy candidates
-        candidates = (
-          session.execute(
-            select(Element)
-            .where(
-              Element.source.in_(("us-gaap", "sfac6")),
-              Element.classification.in_(target_classifications),
-              Element.is_active.is_(True),
-            )
-            .order_by(Element.depth, Element.name)
-          )
-          .scalars()
-          .all()
-        )
+        candidates = suggest_mapping_candidates(session, classification)
 
         return {
           "source_element": {
@@ -265,49 +222,40 @@ class CreateMappingAssociationTool:
     }
 
   async def execute(self, arguments: dict[str, Any]) -> Any:
-    from robosystems.db.extensions import extensions_session
-    from robosystems.models.extensions import Association, Element
-    from robosystems.utils.ulid import generate_prefixed_ulid
-
     graph_id = self.client.graph_id
+    mapping_id = arguments["mapping_id"]
+
+    body = CreateAssociationRequest(
+      from_element_id=arguments["from_element_id"],
+      to_element_id=arguments["to_element_id"],
+      association_type="mapping",
+      confidence=arguments.get("confidence"),
+      suggested_by="ai",
+    )
 
     try:
       with extensions_session(graph_id) as session:
-        from sqlalchemy import select
+        try:
+          assoc = create_mapping_association(
+            session, mapping_id, body, created_by="mcp"
+          )
+        except MappingStructureNotFoundError:
+          return {"error": f"Mapping structure {mapping_id} not found"}
+        except ElementNotFoundError as exc:
+          return {"error": f"{exc.side.capitalize()} element not found"}
+        # AssociationResponse doesn't carry the source element's `code`
+        # but the existing MCP wire shape includes it, so fetch it once.
+        from_elem = get_element(session, body.from_element_id)
+        session.commit()
 
-        from_elem = session.execute(
-          select(Element).where(Element.id == arguments["from_element_id"])
-        ).scalar_one_or_none()
-        to_elem = session.execute(
-          select(Element).where(Element.id == arguments["to_element_id"])
-        ).scalar_one_or_none()
-
-        if not from_elem:
-          return {"error": "Source element not found"}
-        if not to_elem:
-          return {"error": "Target element not found"}
-
-        assoc = Association(
-          id=generate_prefixed_ulid("assoc"),
-          structure_id=arguments["mapping_id"],
-          from_element_id=arguments["from_element_id"],
-          to_element_id=arguments["to_element_id"],
-          association_type="mapping",
-          confidence=arguments.get("confidence"),
-          suggested_by="ai",
-          created_by="mcp",
-        )
-        session.add(assoc)
-        session.flush()
-
-        return {
-          "created": True,
-          "association_id": assoc.id,
-          "from_element": from_elem.name,
-          "from_code": from_elem.code,
-          "to_element": to_elem.name,
-          "to_qname": to_elem.qname,
-        }
+      return {
+        "created": True,
+        "association_id": assoc.id,
+        "from_element": assoc.from_element_name,
+        "from_code": from_elem.code if from_elem else None,
+        "to_element": assoc.to_element_name,
+        "to_qname": assoc.to_element_qname,
+      }
     except Exception as exc:
       logger.warning(f"create-mapping-association failed: {exc}")
       return {"error": str(exc)}
@@ -346,60 +294,29 @@ class GetMappingSummaryTool:
     }
 
   async def execute(self, arguments: dict[str, Any]) -> Any:
-    from robosystems.db.extensions import extensions_session
-    from robosystems.models.extensions import Association, Element
-
     graph_id = self.client.graph_id
     mapping_id = arguments["mapping_id"]
 
     try:
       with extensions_session(graph_id) as session:
-        from sqlalchemy import func, select
-
-        coa_sources = ("quickbooks", "xero", "plaid", "native", "import")
-        total_coa = (
-          session.execute(
-            select(func.count())
-            .select_from(Element)
-            .where(
-              Element.source.in_(coa_sources),
-              Element.is_active.is_(True),
-              Element.is_abstract.is_(False),
-            )
-          ).scalar()
-          or 0
-        )
-
-        assocs = (
-          session.execute(
-            select(Association).where(
-              Association.structure_id == mapping_id,
-              Association.association_type == "mapping",
-            )
-          )
-          .scalars()
-          .all()
-        )
-
-        mapped_count = len({a.from_element_id for a in assocs})
-        unmapped_count = total_coa - mapped_count
-        high = sum(1 for a in assocs if a.confidence and a.confidence > 0.90)
-        medium = sum(1 for a in assocs if a.confidence and 0.70 <= a.confidence <= 0.90)
-        low = sum(1 for a in assocs if a.confidence and a.confidence < 0.70)
+        coverage = get_mapping_coverage(session, mapping_id)
 
         return {
-          "mapping_id": mapping_id,
-          "total_coa_elements": total_coa,
-          "mapped_count": mapped_count,
-          "unmapped_count": unmapped_count,
-          "coverage_percent": round(
-            (mapped_count / total_coa * 100) if total_coa > 0 else 0.0, 1
-          ),
+          "mapping_id": coverage.mapping_id,
+          "total_coa_elements": coverage.total_coa_elements,
+          "mapped_count": coverage.mapped_count,
+          "unmapped_count": coverage.unmapped_count,
+          "coverage_percent": round(coverage.coverage_percent, 1),
           "confidence_distribution": {
-            "high": high,
-            "medium": medium,
-            "low": low,
-            "manual": len(assocs) - high - medium - low,
+            "high": coverage.high_confidence,
+            "medium": coverage.medium_confidence,
+            "low": coverage.low_confidence,
+            "manual": (
+              coverage.mapped_count
+              - coverage.high_confidence
+              - coverage.medium_confidence
+              - coverage.low_confidence
+            ),
           },
         }
     except Exception as exc:

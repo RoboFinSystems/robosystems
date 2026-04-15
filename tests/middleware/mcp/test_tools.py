@@ -489,7 +489,7 @@ class TestBuildFactGridTool:
     tool = BuildFactGridTool(mock_graph_client)
 
     with patch(
-      "robosystems.operations.views.fact_grid_builder.FactGridBuilder"
+      "robosystems.operations.roboledger.views.fact_grid_builder.FactGridBuilder"
     ) as mock_builder_class:
       mock_graph_client.execute_query = AsyncMock(
         return_value=[

@@ -42,11 +42,10 @@ __all__ = [
   "usage_router",
 ]
 
-# Conditionally export views_router based on feature flag
-if env.FACT_GRID_ENABLED:
-  from .views import router as views_router  # noqa: F401
-
-  __all__.append("views_router")
+# NOTE: views_router was relocated to
+# routers/extensions/roboledger/views.py — the fact grid is roboledger
+# schema-specific and now lives on the extensions surface. See main.py
+# for the new mount.
 
 # Conditionally export search and documents routers based on feature flag
 if env.SEMANTIC_SEARCH_ENABLED:

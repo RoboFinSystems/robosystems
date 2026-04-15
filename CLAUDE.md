@@ -33,13 +33,33 @@ just migrate-create "description"  # NOT: manual alembic revision
 
 ## API Endpoints (local testing)
 
-The API is mounted under `/v1` — there are **no unprefixed health/status routes**. Common mistakes:
+Core platform APIs are mounted under `/v1` (graphs, billing, auth, etc.).
+Extensions (roboledger, roboinvestor) live under `/extensions` and are
+**graph-scoped at the URL level**, with three sub-surfaces:
 
-| ❌ Wrong                       | ✅ Correct                    | Purpose                       |
-| ------------------------------ | ----------------------------- | ----------------------------- |
-| `GET /health`, `GET /v1/health` | `GET /v1/status`              | API health check              |
-| `GET /ledger/...`              | `GET /v1/ledger/{graph_id}/...` | Ledger endpoints              |
-| `GET /graphs/...`              | `GET /v1/graphs/{graph_id}/...` | Graph endpoints               |
+- **Typed reads** → `POST /extensions/{graph_id}/graphql` (Strawberry + GraphiQL in dev)
+- **Command writes** → `POST /extensions/{roboledger|roboinvestor}/{graph_id}/operations/{operation_name}`
+- **Analytical view operations** → `POST /extensions/{domain}/{graph_id}/operations/{view_name}` — graph-backed operations that query LadybugDB rather than the extensions OLTP database. Read-only, same envelope contract as command writes. `build-fact-grid` is the first one (pivot tables over the XBRL hypercube); gated independently of the OLTP domain flags so deployments without the corresponding tenants can still mount them
+
+All three surfaces take `graph_id` as a URL path parameter — auth + per-graph
+access are validated by FastAPI dependencies before the handler runs.
+GraphQL queries do NOT take a `graphId` argument; the URL is the scope.
+
+Per-domain feature flags: `ROBOLEDGER_ENABLED` and `ROBOINVESTOR_ENABLED`
+gate the corresponding GraphQL resolvers and operation routers. The
+schema is built dynamically per flag combo, so a ledger-only deployment
+exposes only ledger fields (no `INVESTOR_NOT_INITIALIZED` runtime errors).
+
+Common mistakes:
+
+| ❌ Wrong                          | ✅ Correct                                                                | Purpose              |
+| --------------------------------- | ------------------------------------------------------------------------- | -------------------- |
+| `GET /health`, `GET /v1/health`   | `GET /v1/status`                                                           | API health check     |
+| `GET /v1/ledger/{g}/entity`       | GraphQL `POST /extensions/{g}/graphql` body `{ entity { … } }`             | Ledger read          |
+| `PUT /v1/ledger/{g}/entity`       | `POST /extensions/roboledger/{g}/operations/update-entity`                 | Ledger write         |
+| `POST /v1/graphs/{g}/views`       | `POST /extensions/roboledger/{g}/operations/build-fact-grid`               | Fact grid query      |
+| `{ entity(graphId: "kg_x") }`     | `{ entity { … } }` (graph_id comes from URL)                                | GraphQL query        |
+| `GET /graphs/...`                 | `GET /v1/graphs/{graph_id}/...`                                            | Graph endpoints      |
 
 - **Root `/`** serves the Swagger UI (HTML); don't use it for health checks.
 - **`/openapi.json`** is the live OpenAPI spec — useful when SDK generation drifts from the server.
@@ -52,9 +72,17 @@ Example:
 # Health check
 curl http://localhost:8000/v1/status
 
-# Authenticated request
-curl -H "X-API-Key: $(jq -r .api_key .local/config.json)" \
-  http://localhost:8000/v1/ledger/$GRAPH_ID/fiscal-calendar
+# GraphQL read (fiscal calendar) — graph_id is in the URL, not the query
+curl -X POST "http://localhost:8000/extensions/$GRAPH_ID/graphql" \
+  -H "X-API-Key: $(jq -r .api_key .local/config.json)" \
+  -H "Content-Type: application/json" \
+  -d '{"query": "{ fiscalCalendar { closedThrough closeTarget } }"}'
+
+# REST operation write (close a period)
+curl -X POST "http://localhost:8000/extensions/roboledger/$GRAPH_ID/operations/close-period" \
+  -H "X-API-Key: $(jq -r .api_key .local/config.json)" \
+  -H "Content-Type: application/json" \
+  -d '{"period": "2026-03", "allow_stale_sync": false}'
 ```
 
 ## Quick Reference
@@ -151,47 +179,95 @@ if await credit_service.has_sufficient_credits("operation"):
 
 ### Database Migrations
 
-1. Update SQLAlchemy models in `/robosystems/models/iam/`
-2. Generate migration: `just migrate-create "description"`
-3. Review and run: `just migrate-up`
+RoboSystems has **two separate databases** with independent migration histories:
+
+- **Platform DB** (`robosystems`) — users, orgs, graphs, billing, connections, documents. Models in `/robosystems/models/core/`.
+- **Extensions DB** (`extensions`) — per-graph OLTP for RoboLedger and RoboInvestor with schema-per-graph-id tenancy. Models in `/robosystems/models/extensions/`.
+
+Every migration command takes an optional `db` argument that defaults to `platform`:
+
+```bash
+# Platform (default)
+just migrate-create "description"      # autogenerate
+just migrate-up                        # apply
+just migrate-down                      # rollback one
+just migrate-current                   # show revision
+
+# Extensions — pass "extensions" as the second argument
+just migrate-create "description" extensions
+just migrate-up extensions
+just migrate-down extensions
+just migrate-current extensions
+```
+
+Workflow for any change:
+
+1. Update the SQLAlchemy model in `/robosystems/models/core/` or `/robosystems/models/extensions/`
+2. Generate the migration against the correct database — `just migrate-create "msg"` for platform, `just migrate-create "msg" extensions` for extensions
+3. Review the generated file (autogenerate misses enum changes, CHECK constraints, some index changes — fix those by hand)
+4. Apply with `just migrate-up` or `just migrate-up extensions`
 
 ## Architecture Overview
 
 ```
 robosystems/
-├── routers/           # API endpoints (thin layer, calls operations)
-├── operations/        # Business logic orchestration
-│   ├── graph/         # Graph services (credit, entity, subscription)
-│   ├── lbug/          # LadybugDB operations (backup, ingest)
-│   ├── agents/        # AI agent operations
-│   ├── providers/     # Provider registry and implementations
-│   └── views/         # Data view operations
-├── middleware/        # Cross-cutting concerns
-│   ├── auth/          # Authentication (JWT, API keys, SSO)
-│   ├── billing/       # Credit consumption tracking
-│   ├── graph/         # Graph routing and multi-tenancy
-│   ├── rate_limits/   # Burst protection
-│   ├── sse/           # Server-Sent Events
-│   └── ...            # mcp, otel, robustness
-├── dagster/           # Dagster orchestration (jobs, sensors, assets, resources)
-├── adapters/          # External service integrations (SEC, QuickBooks)
-├── admin/             # Admin CLI and utilities
-├── security/          # Security controls (audit, auth protection, encryption)
+├── routers/                      # API endpoints (thin layer, calls operations)
+│   ├── extensions/               # Extensions command + analytical view surface
+│   │   ├── roboledger/           # operations.py + views.py (build-fact-grid)
+│   │   │                         # /extensions/roboledger/{g}/operations/*
+│   │   └── roboinvestor/         # /extensions/roboinvestor/{g}/operations/*
+│   └── …                         # Core platform routers (graphs, billing, auth, …)
+├── graphql/                      # Strawberry GraphQL served at /extensions/{graph_id}/graphql
+│   ├── types/                    # Strawberry types (wrap Pydantic response models)
+│   ├── resolvers/                # Per-domain resolver classes (ledger, investor)
+│   ├── context.py                # get_context / require_user
+│   ├── auth.py                   # check_graph_access
+│   └── schema.py                 # Query root (composes resolvers per ROBOLEDGER/ROBOINVESTOR flags)
+├── operations/                   # Business logic kernel — single source of truth
+│   ├── roboledger/
+│   │   ├── reads/                # OLTP reads (PostgreSQL extensions DB)
+│   │   ├── commands/             # OLTP writes (PostgreSQL extensions DB)
+│   │   ├── views/                # Graph reads (LadybugDB XBRL hypercube)
+│   │   ├── fiscal_calendar/      # FiscalCalendarService, PeriodCloseService
+│   │   ├── reports/              # fact_grid, guard_rails
+│   │   └── schedules/            # ScheduleService
+│   ├── roboinvestor/
+│   │   ├── reads/                # portfolios, securities, positions, holdings
+│   │   └── commands/             # portfolios, securities, positions
+│   ├── graph/                    # Graph services (credit, entity, subscription)
+│   ├── lbug/                     # LadybugDB operations (backup, ingest)
+│   ├── agents/                   # AI agent operations
+│   └── providers/                # Provider registry and implementations
+├── middleware/                   # Cross-cutting concerns
+│   ├── auth/                     # Authentication (JWT, API keys, SSO)
+│   ├── billing/                  # Credit consumption tracking
+│   ├── graph/                    # Graph routing and multi-tenancy
+│   ├── rate_limits/              # Burst protection
+│   ├── sse/                      # Server-Sent Events
+│   ├── extensions.py             # OperationEnvelope, IdempotencyCache, execute_operation, audit
+│   └── …                         # mcp, otel, robustness
+├── dagster/                      # Dagster orchestration (jobs, sensors, assets, resources)
+├── adapters/                     # External service integrations (SEC, QuickBooks)
+├── admin/                        # Admin CLI and utilities
+├── security/                     # Security controls (audit, auth protection, encryption)
 ├── models/
-│   ├── api/           # Pydantic request/response models
-│   ├── billing/       # Billing models
-│   └── iam/           # SQLAlchemy database models
-├── config/            # Centralized configuration (see config/README.md)
-├── schemas/           # Graph schema definitions
-└── graph_api/         # Graph API microservice
+│   ├── api/                      # Pydantic request/response models
+│   │   └── extensions/           # RoboLedger + RoboInvestor API models
+│   ├── core/                     # Platform SQLAlchemy models (users, orgs, graphs, billing, connections, documents)
+│   └── extensions/               # Extensions OLTP SQLAlchemy models (roboledger, roboinvestor); schema-per-graph tenancy
+├── config/                       # Centralized configuration (see config/README.md)
+├── schemas/                      # Graph schema definitions
+└── graph_api/                    # Graph API microservice
 ```
 
 ### Key Architectural Patterns
 
 1. **Operations orchestrate, adapters integrate**: Operations coordinate business logic; adapters handle external service integration and data transformation
-2. **Multi-tenant by design**: All graph operations are scoped to `graph_id`
-3. **Credit-based AI billing**: Only AI operations (Anthropic/OpenAI) consume credits; database operations are free
-4. **Graph backend**: LadybugDB (`GRAPH_BACKEND_TYPE=ladybug`)
+2. **Operations kernel as single source of truth**: `operations/roboledger/{reads,commands,views}/` and `operations/roboinvestor/{reads,commands}/` hold domain logic as pure functions (session-in, Pydantic-out, domain exceptions). GraphQL resolvers, REST command operation routers, analytical view handlers, MCP tools, and agents all delegate to the same functions. Adding business logic in a router, resolver, or MCP tool handler is a mistake — route it through the ops layer.
+3. **Multi-tenant by design**: Core platform operations scoped to `graph_id`; extensions OLTP uses schema-per-graph-id PostgreSQL tenancy with `SET search_path` isolation
+4. **Two-database split**: Platform (`robosystems`) for IAM/billing/metadata; extensions (`extensions`) for per-graph OLTP. Different `DeclarativeBase` classes, independent migration histories, same shared RDS instance
+5. **Credit-based AI billing**: Only AI operations (Anthropic/OpenAI) consume credits; database operations are free
+6. **Graph backend**: LadybugDB (`GRAPH_BACKEND_TYPE=ladybug`)
 
 ## Testing
 
@@ -262,6 +338,15 @@ LBUG_DATABASE_PATH=/data/lbug-dbs
 # Feature Flags
 RATE_LIMIT_ENABLED=true
 BILLING_ENABLED=true
+
+# Extensions — RoboLedger & RoboInvestor product surfaces
+ROBOLEDGER_ENABLED=true            # gates roboledger ops + GraphQL ledger fields
+ROBOINVESTOR_ENABLED=true          # gates roboinvestor ops + GraphQL investor fields
+EXTENSIONS_GRAPHQL_ENABLED=true    # kill switch for the GraphQL endpoint
+EXTENSIONS_DATABASE_URL=postgresql://...  # extensions OLTP database
+# EXTENSIONS_ENABLED is a derived property (ROBOLEDGER_ENABLED OR ROBOINVESTOR_ENABLED)
+# — no longer a separate env var. The legacy LEDGER_ENABLED / INVESTOR_ENABLED
+# names are honored as backward-compat fallbacks during migration.
 ```
 
 ## Configuration System
@@ -392,14 +477,14 @@ Variables follow the naming convention `COMPONENT_SETTING_ENVIRONMENT` (e.g., `S
 ## SSM Parameters
 
 ```bash
-just ssm-list prod features            # List feature flags
-just ssm-list prod tuning              # List tuning parameters
-just ssm-get prod features/mcp-memory  # Get single parameter
-just ssm-set prod features/mcp-memory true   # Set parameter
-just ssm-delete prod features/old-flag       # Delete parameter
+just ssm-list prod features                          # List feature flags
+just ssm-list prod tuning                            # List tuning parameters
+just ssm-get prod features/MCP_MEMORY_ENABLED        # Get single parameter
+just ssm-set prod features/MCP_MEMORY_ENABLED true   # Set parameter
+just ssm-delete prod features/OLD_FLAG               # Delete parameter
 ```
 
-Parameters are stored at `/robosystems/{env}/{category}/{name}` in SSM Parameter Store. Unlike GitHub variables (which require redeployment), SSM parameters take effect immediately at runtime.
+Parameters are stored at `/robosystems/{env}/{category}/{NAME}` in SSM Parameter Store. The `{NAME}` segment is **UPPER_SNAKE_CASE**, identical to the env var name (e.g., `RATE_LIMIT_ENABLED`, not `rate-limit-enabled`). Unlike GitHub variables (which require redeployment), SSM parameters take effect immediately at runtime.
 
 ## Secret Management
 
@@ -415,11 +500,14 @@ Before working in a directory, read its README:
 - `/robosystems/config/README.md` - Configuration patterns
 - `/robosystems/config/storage/README.md` - S3 storage paths
 - `/robosystems/graph_api/README.md` - Graph API details
+- `/robosystems/graphql/README.md` - Strawberry GraphQL extensions surface, Pydantic auto-derivation, resolver patterns
 - `/robosystems/middleware/auth/README.md` - Authentication system
 - `/robosystems/middleware/graph/README.md` - Graph routing
 - `/robosystems/operations/README.md` - Business logic patterns
 - `/robosystems/dagster/README.md` - Dagster orchestration patterns
-- `/robosystems/models/api/README.md` - API models
-- `/robosystems/models/iam/README.md` - Database models
+- `/robosystems/models/api/README.md` - Pydantic request/response models
+- `/robosystems/models/core/README.md` - Platform SQLAlchemy models (users, orgs, graphs, billing, connections, documents)
+- `/robosystems/models/extensions/README.md` - Extensions OLTP SQLAlchemy models (roboledger, roboinvestor) with schema-per-graph tenancy
+- `/robosystems/schemas/README.md` - Graph schema definitions, extension naming conventions, URL/flag topology
 - `/tests/README.md` - Testing guide
 - `/examples/README.md` - Demo scripts

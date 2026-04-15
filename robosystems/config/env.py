@@ -622,27 +622,71 @@ class EnvConfig:
     get_parameter_value("CONNECTION_QUICKBOOKS_ENABLED", "true").lower() == "true",
   )
 
-  # --- Extensions OLTP Database ---
-  # Controls the extensions PostgreSQL database (engine, migrations, Dagster jobs).
-  # Required for any extension module (RoboLedger, RoboInvestor, etc.).
-  EXTENSIONS_ENABLED = get_bool_env(
-    "EXTENSIONS_ENABLED",
-    get_parameter_value("EXTENSIONS_ENABLED", "false").lower() == "true",
+  # ==========================================================================
+  # EXTENSIONS — RoboLedger & RoboInvestor product surfaces
+  # ==========================================================================
+  #
+  # Two per-domain flags gate the extension surfaces:
+  #
+  #   - ROBOLEDGER_ENABLED → mounts the roboledger ops router and exposes
+  #     ledger resolvers on the GraphQL endpoint
+  #   - ROBOINVESTOR_ENABLED → mounts the roboinvestor ops router and
+  #     exposes investor resolvers on the GraphQL endpoint
+  #
+  # `EXTENSIONS_ENABLED` is **derived** (see property below) — it's true
+  # whenever either domain is on. There's no scenario where you'd want
+  # the extensions PostgreSQL connection without at least one domain
+  # enabled, so it's not a separate user-facing flag.
+  #
+  # Backward-compat: the legacy `LEDGER_ENABLED` / `INVESTOR_ENABLED` /
+  # `EXTENSIONS_ENABLED` env names are still honored as fallbacks during
+  # the migration to the prefixed names. Remove the fallbacks once SSM
+  # parameters and GitHub Actions variables have been renamed.
+
+  ROBOLEDGER_ENABLED = get_bool_env(
+    "ROBOLEDGER_ENABLED",
+    get_bool_env(
+      "LEDGER_ENABLED",
+      get_parameter_value(
+        "ROBOLEDGER_ENABLED",
+        get_parameter_value("LEDGER_ENABLED", "false"),
+      ).lower()
+      == "true",
+    ),
   )
 
-  # --- Ledger API Endpoints ---
-  # Controls the /v1/ledger/* API routes. Requires EXTENSIONS_ENABLED=true.
-  LEDGER_ENABLED = get_bool_env(
-    "LEDGER_ENABLED",
-    get_parameter_value("LEDGER_ENABLED", "false").lower() == "true",
+  ROBOINVESTOR_ENABLED = get_bool_env(
+    "ROBOINVESTOR_ENABLED",
+    get_bool_env(
+      "INVESTOR_ENABLED",
+      get_parameter_value(
+        "ROBOINVESTOR_ENABLED",
+        get_parameter_value("INVESTOR_ENABLED", "false"),
+      ).lower()
+      == "true",
+    ),
   )
 
-  # --- Investor API Endpoints ---
-  # Controls the /v1/investor/* API routes. Requires EXTENSIONS_ENABLED=true.
-  INVESTOR_ENABLED = get_bool_env(
-    "INVESTOR_ENABLED",
-    get_parameter_value("INVESTOR_ENABLED", "false").lower() == "true",
+  # --- Extensions GraphQL Endpoint ---
+  # Controls the /extensions/{graph_id}/graphql endpoint (Strawberry).
+  #
+  # Defaults to TRUE: GraphQL is the only read surface for the extensions
+  # subsystem now that the legacy /v1/ledger/* and /v1/investor/* routers
+  # have been deleted. A deployment with either domain enabled must have
+  # GraphQL mounted, otherwise reads are gone. Kept as an explicit kill
+  # switch in case GraphQL needs to be disabled in production for a
+  # specific incident response (e.g. lock down introspection).
+  EXTENSIONS_GRAPHQL_ENABLED = get_bool_env(
+    "EXTENSIONS_GRAPHQL_ENABLED",
+    get_parameter_value("EXTENSIONS_GRAPHQL_ENABLED", "true").lower() == "true",
   )
+
+  # --- Derived: EXTENSIONS_ENABLED ---
+  # Whether the extensions PostgreSQL database should open at all.
+  # Computed at class-body evaluation time from the per-domain flags
+  # above (Python evaluates class bodies sequentially, so the names are
+  # in scope here). Replaces the standalone `EXTENSIONS_ENABLED` env var.
+  EXTENSIONS_ENABLED = ROBOLEDGER_ENABLED or ROBOINVESTOR_ENABLED
 
   # --- Adapter Pipelines (Dagster) ---
   # Controls whether adapter-specific Dagster assets, jobs, sensors, and schedules

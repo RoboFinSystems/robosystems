@@ -4,21 +4,30 @@ Focus is on ClosePeriodTool — it's the thinnest wrapper over
 PeriodCloseService but the one most likely to drift from the REST path.
 We verify:
 
-- Happy path delegates to the service with the expected arguments
+- Happy path delegates to ops `close_period` with the expected arguments
 - All domain errors map to the right MCP error shape
-- actor_id falls back to "mcp_agent" when the client has no user identity
+- actor_id falls back to "mcp:{graph_id}" when the client has no user identity
+
+Mocks live at the **operations layer boundary** (`ops_close_period`) — the
+MCP tool is now a thin shim that translates exceptions and re-shapes the
+response. Tests against mocked SQLAlchemy internals would only re-test what
+`tests/operations/roboledger/fiscal_calendar/` already covers.
 """
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 from robosystems.middleware.mcp.tools.fiscal_calendar_tools import ClosePeriodTool
+from robosystems.models.api.extensions.fiscal_calendar import (
+  ClosePeriodResponse,
+  FiscalCalendarResponse,
+)
 from robosystems.operations.roboledger.fiscal_calendar import (
   CloseGateFailed,
-  PeriodCloseResult,
   PeriodNotFoundError,
   UnbalancedLedgerError,
 )
@@ -41,23 +50,55 @@ def _client(*, user_id: str | None = None):
   return client
 
 
-def _mock_session():
-  session = MagicMock()
-  session.__enter__ = MagicMock(return_value=session)
-  session.__exit__ = MagicMock(return_value=False)
-  return session
+@contextmanager
+def _patch_sessions():
+  """Patch both extensions_session and _platform_session as no-op CMs."""
+  ext_session = MagicMock()
+  ext_cm = MagicMock()
+  ext_cm.__enter__ = MagicMock(return_value=ext_session)
+  ext_cm.__exit__ = MagicMock(return_value=False)
+
+  plat_session = MagicMock()
+  plat_cm = MagicMock()
+  plat_cm.__enter__ = MagicMock(return_value=plat_session)
+  plat_cm.__exit__ = MagicMock(return_value=False)
+
+  with (
+    patch(f"{MODULE}.extensions_session", return_value=ext_cm),
+    patch(f"{MODULE}._platform_session", return_value=plat_cm),
+    patch(f"{MODULE}.qb_sync_state", return_value=(False, None)),
+  ):
+    yield
 
 
-def _close_result(**overrides):
-  defaults = {
+def _fc_response(**overrides) -> FiscalCalendarResponse:
+  defaults: dict = {
+    "graph_id": GRAPH_ID,
+    "fiscal_year_start_month": 1,
+    "closed_through": "2026-01",
+    "close_target": "2026-03",
+    "gap_periods": 2,
+    "catch_up_sequence": ["2026-02", "2026-03"],
+    "closeable_now": True,
+    "blockers": [],
+    "last_close_at": None,
+    "initialized_at": None,
+    "last_sync_at": None,
+    "periods": [],
+  }
+  defaults.update(overrides)
+  return FiscalCalendarResponse(**defaults)
+
+
+def _close_response(**overrides) -> ClosePeriodResponse:
+  defaults: dict = {
+    "fiscal_calendar": _fc_response(),
     "period": "2026-01",
     "entries_posted": 2,
     "target_auto_advanced": False,
-    "calendar": MagicMock(),
-    "was_reclose": False,
   }
   defaults.update(overrides)
-  return PeriodCloseResult(**defaults)
+  return ClosePeriodResponse(**defaults)
 
 
 # ────────────────────────────────────────────────────────────────────────────
@@ -67,82 +108,53 @@ def _close_result(**overrides):
 
 class TestClosePeriodToolHappyPath:
   @pytest.mark.asyncio
-  async def test_delegates_to_service(self):
+  async def test_delegates_to_ops_layer(self):
     tool = ClosePeriodTool(_client(user_id="usr_abc"))
-    svc_instance = MagicMock()
-    svc_instance.close.return_value = _close_result(entries_posted=5)
+    response = _close_response(entries_posted=5)
 
     with (
-      patch(
-        "robosystems.db.extensions.extensions_session",
-        return_value=_mock_session(),
-      ),
-      patch(
-        f"{MODULE}._get_qb_sync_state",
-        return_value=(False, None),
-      ),
-      patch(
-        "robosystems.operations.roboledger.fiscal_calendar.PeriodCloseService",
-        return_value=svc_instance,
-      ),
-      patch(f"{MODULE}._build_response_payload", return_value={"graph_id": GRAPH_ID}),
+      _patch_sessions(),
+      patch(f"{MODULE}.ops_close_period", return_value=response) as ops,
     ):
       result = await tool.execute({"period": "2026-01"})
 
     assert result["period"] == "2026-01"
     assert result["entries_posted"] == 5
     assert result["target_auto_advanced"] is False
-    svc_instance.close.assert_called_once()
-    call = svc_instance.close.call_args
+    assert "fiscal_calendar" in result
+    assert "has_sync_connection" in result["fiscal_calendar"]
+    assert ops.call_count == 1
+    call = ops.call_args
     assert call.kwargs["actor_id"] == "usr_abc"
     assert call.kwargs["actor_type"] == "agent"
+    assert call.kwargs["allow_stale_sync"] is False
 
   @pytest.mark.asyncio
   async def test_actor_id_falls_back_to_graph_scoped_sentinel(self):
     """When the MCP client has no user_id, fall back to mcp:{graph_id}
     so audit logs stay traceable per tenant (matches ReopenPeriodTool)."""
     tool = ClosePeriodTool(_client(user_id=None))
-    svc_instance = MagicMock()
-    svc_instance.close.return_value = _close_result()
 
     with (
-      patch(
-        "robosystems.db.extensions.extensions_session",
-        return_value=_mock_session(),
-      ),
-      patch(f"{MODULE}._get_qb_sync_state", return_value=(False, None)),
-      patch(
-        "robosystems.operations.roboledger.fiscal_calendar.PeriodCloseService",
-        return_value=svc_instance,
-      ),
-      patch(f"{MODULE}._build_response_payload", return_value={}),
+      _patch_sessions(),
+      patch(f"{MODULE}.ops_close_period", return_value=_close_response()) as ops,
     ):
       await tool.execute({"period": "2026-01"})
 
-    call = svc_instance.close.call_args
+    call = ops.call_args
     assert call.kwargs["actor_id"] == f"mcp:{GRAPH_ID}"
 
   @pytest.mark.asyncio
   async def test_allow_stale_sync_flag_propagates(self):
     tool = ClosePeriodTool(_client(user_id="usr_abc"))
-    svc_instance = MagicMock()
-    svc_instance.close.return_value = _close_result()
 
     with (
-      patch(
-        "robosystems.db.extensions.extensions_session",
-        return_value=_mock_session(),
-      ),
-      patch(f"{MODULE}._get_qb_sync_state", return_value=(True, None)),
-      patch(
-        "robosystems.operations.roboledger.fiscal_calendar.PeriodCloseService",
-        return_value=svc_instance,
-      ),
-      patch(f"{MODULE}._build_response_payload", return_value={}),
+      _patch_sessions(),
+      patch(f"{MODULE}.ops_close_period", return_value=_close_response()) as ops,
     ):
       await tool.execute({"period": "2026-01", "allow_stale_sync": True})
 
-    call = svc_instance.close.call_args
+    call = ops.call_args
     assert call.kwargs["allow_stale_sync"] is True
 
 
@@ -154,19 +166,9 @@ class TestClosePeriodToolHappyPath:
 class TestClosePeriodToolErrors:
   async def _run_with_side_effect(self, side_effect):
     tool = ClosePeriodTool(_client(user_id="usr_abc"))
-    svc_instance = MagicMock()
-    svc_instance.close.side_effect = side_effect
-
     with (
-      patch(
-        "robosystems.db.extensions.extensions_session",
-        return_value=_mock_session(),
-      ),
-      patch(f"{MODULE}._get_qb_sync_state", return_value=(False, None)),
-      patch(
-        "robosystems.operations.roboledger.fiscal_calendar.PeriodCloseService",
-        return_value=svc_instance,
-      ),
+      _patch_sessions(),
+      patch(f"{MODULE}.ops_close_period", side_effect=side_effect),
     ):
       return await tool.execute({"period": "2026-03"})
 
@@ -201,35 +203,25 @@ class TestClosePeriodToolErrors:
 
 
 # ────────────────────────────────────────────────────────────────────────────
-# Re-close routing (end-to-end through the service stub)
+# Re-close routing (end-to-end through the ops stub)
 # ────────────────────────────────────────────────────────────────────────────
 
 
 class TestClosePeriodToolRecloseRouting:
-  """These parallel the service-level reclose tests so the MCP path is
-  explicitly covered even though the logic lives in the service."""
+  """The tool doesn't surface `was_reclose` directly, but a successful
+  re-close call must round-trip through the wrapper unchanged."""
 
   @pytest.mark.asyncio
-  async def test_reclose_reported_in_result(self):
+  async def test_reclose_round_trips(self):
     tool = ClosePeriodTool(_client(user_id="usr_abc"))
-    svc_instance = MagicMock()
-    svc_instance.close.return_value = _close_result(was_reclose=True)
-
     with (
+      _patch_sessions(),
       patch(
-        "robosystems.db.extensions.extensions_session",
-        return_value=_mock_session(),
-      ),
-      patch(f"{MODULE}._get_qb_sync_state", return_value=(False, None)),
-      patch(
-        "robosystems.operations.roboledger.fiscal_calendar.PeriodCloseService",
-        return_value=svc_instance,
-      ),
-      patch(f"{MODULE}._build_response_payload", return_value={}),
+        f"{MODULE}.ops_close_period", return_value=_close_response(entries_posted=0)
+      ) as ops,
     ):
       result = await tool.execute({"period": "2026-01"})
 
-    # The MCP response shape doesn't surface `was_reclose` directly but the
-    # underlying service call must succeed and return a result object.
-    svc_instance.close.assert_called_once()
+    ops.assert_called_once()
     assert "period" in result
+    assert result["entries_posted"] == 0

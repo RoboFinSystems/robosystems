@@ -1,5 +1,13 @@
-"""Tests for taxonomy mapping MCP tools."""
+"""Tests for taxonomy mapping MCP tools.
 
+These tests mock at the **operations layer** (`reads/taxonomies.py` and
+`commands/taxonomies.py`), which is the contract the MCP tools now consume.
+That keeps the tests focused on MCP's wire shape and exception translation
+rather than SQLAlchemy internals — those have their own tests under
+`tests/operations/roboledger/`.
+"""
+
+from contextlib import contextmanager
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -9,6 +17,16 @@ from robosystems.middleware.mcp.tools.taxonomy_tools import (
   GetMappingSummaryTool,
   GetUnmappedElementsTool,
   SuggestMappingTool,
+)
+from robosystems.models.api.extensions.taxonomies import (
+  AssociationResponse,
+  ElementResponse,
+  MappingCoverageResponse,
+  UnmappedElementResponse,
+)
+from robosystems.operations.roboledger.commands.taxonomies import (
+  ElementNotFoundError,
+  MappingStructureNotFoundError,
 )
 
 MODULE = "robosystems.middleware.mcp.tools.taxonomy_tools"
@@ -21,59 +39,58 @@ def mock_graph_client():
   return client
 
 
-def _make_element(
+@contextmanager
+def _patch_session():
+  """Patch the extensions_session context manager imported into the tool module."""
+  session = MagicMock()
+  cm = MagicMock()
+  cm.__enter__ = MagicMock(return_value=session)
+  cm.__exit__ = MagicMock(return_value=False)
+  with patch(f"{MODULE}.extensions_session", return_value=cm):
+    yield session
+
+
+def _unmapped(id="elem_1", code="1000", name="Cash", classification="asset"):
+  return UnmappedElementResponse(
+    id=id,
+    code=code,
+    name=name,
+    classification=classification,
+    balance_type="debit",
+    external_source="quickbooks",
+  )
+
+
+def _element(
   id="elem_1",
   code="1000",
   name="Cash",
   classification="asset",
-  balance_type="debit",
-  source="quickbooks",
-  is_active=True,
-  is_abstract=False,
-  external_source="quickbooks",
   qname=None,
-  namespace=None,
+  source="quickbooks",
+  is_abstract=False,
   depth=0,
 ):
-  e = MagicMock()
-  e.id = id
-  e.code = code
-  e.name = name
-  e.classification = classification
-  e.balance_type = balance_type
-  e.source = source
-  e.is_active = is_active
-  e.is_abstract = is_abstract
-  e.external_source = external_source
-  e.qname = qname
-  e.namespace = namespace
-  e.depth = depth
-  return e
-
-
-def _make_association(
-  id="assoc_1",
-  from_element_id="elem_1",
-  confidence=0.95,
-):
-  a = MagicMock()
-  a.id = id
-  a.from_element_id = from_element_id
-  a.confidence = confidence
-  return a
-
-
-def _mock_session():
-  return MagicMock()
-
-
-def _patch_extensions(mock_session):
-  mock_ctx = MagicMock()
-  mock_ctx.__enter__ = MagicMock(return_value=mock_session)
-  mock_ctx.__exit__ = MagicMock(return_value=False)
-  return patch(
-    "robosystems.db.extensions.extensions_session",
-    return_value=mock_ctx,
+  return ElementResponse(
+    id=id,
+    code=code,
+    name=name,
+    description=None,
+    qname=qname,
+    namespace=None,
+    classification=classification,
+    sub_classification=None,
+    balance_type="debit",
+    period_type="instant",
+    is_abstract=is_abstract,
+    element_type="monetary",
+    source=source,
+    taxonomy_id=None,
+    parent_id=None,
+    depth=depth,
+    is_active=True,
+    external_id=None,
+    external_source=source,
   )
 
 
@@ -90,29 +107,17 @@ class TestGetUnmappedElementsTool:
   @pytest.mark.asyncio
   async def test_returns_unmapped_elements(self, mock_graph_client):
     tool = GetUnmappedElementsTool(mock_graph_client)
-    session = _mock_session()
 
-    coa = [
-      _make_element(id="elem_1", name="Cash"),
-      _make_element(id="elem_2", name="Revenue"),
-      _make_element(id="elem_3", name="Rent"),
+    unmapped = [
+      _unmapped(id="elem_2", name="Revenue"),
+      _unmapped(id="elem_3", name="Rent"),
     ]
 
-    call_count = 0
-
-    def mock_execute(query):
-      nonlocal call_count
-      call_count += 1
-      result = MagicMock()
-      if call_count == 1:
-        result.scalars.return_value.all.return_value = coa
-      else:
-        result.scalars.return_value.all.return_value = ["elem_1"]
-      return result
-
-    session.execute.side_effect = mock_execute
-
-    with _patch_extensions(session):
+    with (
+      _patch_session(),
+      patch(f"{MODULE}.list_unmapped_elements", return_value=unmapped),
+      patch(f"{MODULE}.count_coa_elements", return_value=3),
+    ):
       result = await tool.execute({})
 
     assert result["unmapped_count"] == 2
@@ -123,24 +128,12 @@ class TestGetUnmappedElementsTool:
   @pytest.mark.asyncio
   async def test_all_mapped_returns_empty(self, mock_graph_client):
     tool = GetUnmappedElementsTool(mock_graph_client)
-    session = _mock_session()
 
-    coa = [_make_element(id="elem_1")]
-    call_count = 0
-
-    def mock_execute(query):
-      nonlocal call_count
-      call_count += 1
-      result = MagicMock()
-      if call_count == 1:
-        result.scalars.return_value.all.return_value = coa
-      else:
-        result.scalars.return_value.all.return_value = ["elem_1"]
-      return result
-
-    session.execute.side_effect = mock_execute
-
-    with _patch_extensions(session):
+    with (
+      _patch_session(),
+      patch(f"{MODULE}.list_unmapped_elements", return_value=[]),
+      patch(f"{MODULE}.count_coa_elements", return_value=1),
+    ):
       result = await tool.execute({})
 
     assert result["unmapped_count"] == 0
@@ -151,7 +144,7 @@ class TestGetUnmappedElementsTool:
     tool = GetUnmappedElementsTool(mock_graph_client)
 
     with patch(
-      "robosystems.db.extensions.extensions_session",
+      f"{MODULE}.extensions_session",
       side_effect=ValueError("bad graph"),
     ):
       result = await tool.execute({})
@@ -172,22 +165,19 @@ class TestSuggestMappingTool:
   @pytest.mark.asyncio
   async def test_returns_candidates_by_classification(self, mock_graph_client):
     tool = SuggestMappingTool(mock_graph_client)
-    session = _mock_session()
-
-    source_elem = _make_element(
-      id="elem_1", name="Product Revenue", classification="revenue"
+    source = _element(
+      id="elem_1", name="Product Revenue", classification="revenue", source="quickbooks"
     )
     candidates = [
-      _make_element(
+      _element(
         id="gaap_1",
         qname="sfac6:Revenues",
         name="Revenues",
         source="sfac6",
         classification="revenue",
         is_abstract=True,
-        depth=0,
       ),
-      _make_element(
+      _element(
         id="gaap_2",
         qname="us-gaap:Revenues",
         name="Revenue",
@@ -197,21 +187,11 @@ class TestSuggestMappingTool:
       ),
     ]
 
-    call_count = 0
-
-    def mock_execute(query):
-      nonlocal call_count
-      call_count += 1
-      result = MagicMock()
-      if call_count == 1:
-        result.scalar_one_or_none.return_value = source_elem
-      else:
-        result.scalars.return_value.all.return_value = candidates
-      return result
-
-    session.execute.side_effect = mock_execute
-
-    with _patch_extensions(session):
+    with (
+      _patch_session(),
+      patch(f"{MODULE}.get_element", return_value=source),
+      patch(f"{MODULE}.suggest_mapping_candidates", return_value=candidates),
+    ):
       result = await tool.execute({"element_id": "elem_1"})
 
     assert result["source_element"]["name"] == "Product Revenue"
@@ -221,10 +201,7 @@ class TestSuggestMappingTool:
   @pytest.mark.asyncio
   async def test_returns_error_for_missing_element(self, mock_graph_client):
     tool = SuggestMappingTool(mock_graph_client)
-    session = _mock_session()
-    session.execute.return_value.scalar_one_or_none.return_value = None
-
-    with _patch_extensions(session):
+    with _patch_session(), patch(f"{MODULE}.get_element", return_value=None):
       result = await tool.execute({"element_id": "nonexistent"})
 
     assert "error" in result
@@ -245,26 +222,26 @@ class TestCreateMappingAssociationTool:
   @pytest.mark.asyncio
   async def test_creates_association(self, mock_graph_client):
     tool = CreateMappingAssociationTool(mock_graph_client)
-    session = _mock_session()
+    assoc = AssociationResponse(
+      id="assoc_1",
+      structure_id="struct_map_1",
+      from_element_id="elem_1",
+      from_element_name="Cash",
+      from_element_qname=None,
+      to_element_id="gaap_1",
+      to_element_name="Revenue",
+      to_element_qname="us-gaap:Revenues",
+      association_type="mapping",
+      confidence=None,
+      suggested_by="ai",
+    )
+    from_elem = _element(id="elem_1", code="1000", name="Cash")
 
-    from_elem = _make_element(id="elem_1", name="Cash", code="1000")
-    to_elem = _make_element(id="gaap_1", name="Revenue", qname="us-gaap:Revenues")
-
-    call_count = 0
-
-    def mock_execute(query):
-      nonlocal call_count
-      call_count += 1
-      result = MagicMock()
-      if call_count == 1:
-        result.scalar_one_or_none.return_value = from_elem
-      else:
-        result.scalar_one_or_none.return_value = to_elem
-      return result
-
-    session.execute.side_effect = mock_execute
-
-    with _patch_extensions(session):
+    with (
+      _patch_session() as session,
+      patch(f"{MODULE}.create_mapping_association", return_value=assoc),
+      patch(f"{MODULE}.get_element", return_value=from_elem),
+    ):
       result = await tool.execute(
         {
           "mapping_id": "struct_map_1",
@@ -275,16 +252,21 @@ class TestCreateMappingAssociationTool:
 
     assert result["created"] is True
     assert result["from_element"] == "Cash"
+    assert result["from_code"] == "1000"
     assert result["to_element"] == "Revenue"
-    session.add.assert_called_once()
+    assert result["to_qname"] == "us-gaap:Revenues"
+    session.commit.assert_called_once()
 
   @pytest.mark.asyncio
-  async def test_returns_error_for_missing_element(self, mock_graph_client):
+  async def test_returns_error_for_missing_source_element(self, mock_graph_client):
     tool = CreateMappingAssociationTool(mock_graph_client)
-    session = _mock_session()
-    session.execute.return_value.scalar_one_or_none.return_value = None
-
-    with _patch_extensions(session):
+    with (
+      _patch_session(),
+      patch(
+        f"{MODULE}.create_mapping_association",
+        side_effect=ElementNotFoundError("source", "nonexistent"),
+      ),
+    ):
       result = await tool.execute(
         {
           "mapping_id": "struct_map_1",
@@ -294,6 +276,28 @@ class TestCreateMappingAssociationTool:
       )
 
     assert "error" in result
+    assert "Source" in result["error"]
+
+  @pytest.mark.asyncio
+  async def test_returns_error_for_missing_mapping_structure(self, mock_graph_client):
+    tool = CreateMappingAssociationTool(mock_graph_client)
+    with (
+      _patch_session(),
+      patch(
+        f"{MODULE}.create_mapping_association",
+        side_effect=MappingStructureNotFoundError("struct_map_1"),
+      ),
+    ):
+      result = await tool.execute(
+        {
+          "mapping_id": "struct_map_1",
+          "from_element_id": "elem_1",
+          "to_element_id": "gaap_1",
+        }
+      )
+
+    assert "error" in result
+    assert "struct_map_1" in result["error"]
 
 
 # ── GetMappingSummaryTool ────────────────────────────────────────────────
@@ -309,29 +313,21 @@ class TestGetMappingSummaryTool:
   @pytest.mark.asyncio
   async def test_returns_coverage_stats(self, mock_graph_client):
     tool = GetMappingSummaryTool(mock_graph_client)
-    session = _mock_session()
+    coverage = MappingCoverageResponse(
+      mapping_id="struct_map_1",
+      total_coa_elements=5,
+      mapped_count=3,
+      unmapped_count=2,
+      coverage_percent=60.0,
+      high_confidence=1,
+      medium_confidence=1,
+      low_confidence=1,
+    )
 
-    assocs = [
-      _make_association(id="a1", from_element_id="elem_1", confidence=0.95),
-      _make_association(id="a2", from_element_id="elem_2", confidence=0.80),
-      _make_association(id="a3", from_element_id="elem_3", confidence=0.50),
-    ]
-
-    call_count = 0
-
-    def mock_execute(query):
-      nonlocal call_count
-      call_count += 1
-      result = MagicMock()
-      if call_count == 1:
-        result.scalar.return_value = 5
-      else:
-        result.scalars.return_value.all.return_value = assocs
-      return result
-
-    session.execute.side_effect = mock_execute
-
-    with _patch_extensions(session):
+    with (
+      _patch_session(),
+      patch(f"{MODULE}.get_mapping_coverage", return_value=coverage),
+    ):
       result = await tool.execute({"mapping_id": "struct_map_1"})
 
     assert result["total_coa_elements"] == 5
@@ -341,27 +337,27 @@ class TestGetMappingSummaryTool:
     assert result["confidence_distribution"]["high"] == 1
     assert result["confidence_distribution"]["medium"] == 1
     assert result["confidence_distribution"]["low"] == 1
+    # 3 mapped - (1 high + 1 med + 1 low) = 0 manual
+    assert result["confidence_distribution"]["manual"] == 0
 
   @pytest.mark.asyncio
   async def test_handles_zero_coa_elements(self, mock_graph_client):
     tool = GetMappingSummaryTool(mock_graph_client)
-    session = _mock_session()
+    coverage = MappingCoverageResponse(
+      mapping_id="struct_map_1",
+      total_coa_elements=0,
+      mapped_count=0,
+      unmapped_count=0,
+      coverage_percent=0.0,
+      high_confidence=0,
+      medium_confidence=0,
+      low_confidence=0,
+    )
 
-    call_count = 0
-
-    def mock_execute(query):
-      nonlocal call_count
-      call_count += 1
-      result = MagicMock()
-      if call_count == 1:
-        result.scalar.return_value = 0
-      else:
-        result.scalars.return_value.all.return_value = []
-      return result
-
-    session.execute.side_effect = mock_execute
-
-    with _patch_extensions(session):
+    with (
+      _patch_session(),
+      patch(f"{MODULE}.get_mapping_coverage", return_value=coverage),
+    ):
       result = await tool.execute({"mapping_id": "struct_map_1"})
 
     assert result["coverage_percent"] == 0.0

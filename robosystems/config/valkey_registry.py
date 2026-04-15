@@ -42,6 +42,7 @@ class ValkeyDatabase(IntEnum):
   LOCKS = 4  # Distributed locks (SSO, materialize)
   MCP_CACHE = 5  # MCP tool result cache (schema, info)
   WORKER_QUEUE = 6  # Background task queue (BRPOP consumer)
+  OPERATION_IDEMPOTENCY = 7  # Extensions operation idempotency envelope cache
 
   @classmethod
   def get_next_available(cls) -> int:
@@ -414,6 +415,9 @@ def get_database_purpose(database: ValkeyDatabase) -> str:
     ValkeyDatabase.GRAPH_ROUTING: "Graph client factory routing (URLs, health, discovery)",
     ValkeyDatabase.MCP_CACHE: "MCP tool result cache (schema, info)",
     ValkeyDatabase.WORKER_QUEUE: "Background task queue (BRPOP consumer)",
+    ValkeyDatabase.OPERATION_IDEMPOTENCY: (
+      "Extensions operation idempotency envelope cache (24h TTL)"
+    ),
   }
 
   return descriptions.get(

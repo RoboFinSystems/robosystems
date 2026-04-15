@@ -115,7 +115,7 @@ class FiscalCalendarService:
     if calendar is None:
       raise FiscalCalendarError(
         f"Fiscal calendar not initialized for graph {graph_id}. "
-        "Call POST /v1/ledger/{graph_id}/initialize first."
+        "Call POST /extensions/roboledger/{graph_id}/operations/initialize first."
       )
     return calendar
 

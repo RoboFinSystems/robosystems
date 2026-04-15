@@ -4,11 +4,7 @@
 MAIN_API_TAGS = [
   {
     "name": "Graphs",
-    "description": "🏗️ Graphs - Create and manage graph databases",
-  },
-  {
-    "name": "Subgraphs",
-    "description": "🌳 Subgraphs - Create and manage subgraph databases for workspace and data isolation",
+    "description": "🏗️ Graphs - Create and manage knowledge graph tenants",
   },
   {
     "name": "Query",
@@ -23,18 +19,6 @@ MAIN_API_TAGS = [
     "description": "🤖 AI Agents - Intelligent AI agents for analyzing and managing graph data",
   },
   {
-    "name": "Tables",
-    "description": "🗃️ Staging tables - File upload, SQL queries, and data ingestion via DuckDB staging layer",
-  },
-  {
-    "name": "Files",
-    "description": "📄 File management - Upload, track, and manage data files with multi-layer status",
-  },
-  {
-    "name": "Materialize",
-    "description": "🔄 Materialize graph - Rebuild graph from DuckDB staging tables",
-  },
-  {
     "name": "Documents",
     "description": "📑 Documents - Upload, list, and manage documents for search and analysis",
   },
@@ -43,16 +27,40 @@ MAIN_API_TAGS = [
     "description": "🔎 Search - Full-text search across filing narratives, disclosures, and XBRL text content",
   },
   {
+    "name": "Extensions: GraphQL",
+    "description": "🧩 GraphQL endpoint - Unified GraphQL endpoint for extensions read queries",
+  },
+  {
+    "name": "Extensions: RoboLedger",
+    "description": "📒 RoboLedger operations - Named commands for accounting & reporting writes and analytical views",
+  },
+  {
+    "name": "Extensions: RoboInvestor",
+    "description": "📈 RoboInvestor operations - Named commands for portfolio management writes and analytical views",
+  },
+  {
+    "name": "Materialize",
+    "description": "🔄 Materialize graph - Rebuild graph from DuckDB staging tables",
+  },
+  {
+    "name": "Tables",
+    "description": "🗃️ Staging tables - SQL queries and data ingestion via DuckDB staging layer",
+  },
+  {
+    "name": "Files",
+    "description": "📄 File management - Upload, track, and manage data files with multi-layer status",
+  },
+  {
+    "name": "Subgraphs",
+    "description": "🌳 Subgraphs - Create and manage subgraph databases for AI memory and data isolation",
+  },
+  {
     "name": "Backup",
-    "description": "💾 Database backup - Create, restore, and manage graph database backups",
+    "description": "💾 Graph backup - Create, restore, and manage graph database backups",
   },
   {
     "name": "Schema",
     "description": "📐 Schema management - Validate and manage custom graph schemas",
-  },
-  {
-    "name": "Views",
-    "description": "👁️ Views - Create and manage multi-dimensional fact grids with XBRL-style hypercubes",
   },
   {
     "name": "Usage",
@@ -117,14 +125,6 @@ MAIN_API_TAGS = [
   {
     "name": "Status",
     "description": "❤️ Service status - API status and monitoring",
-  },
-  {
-    "name": "Ledger",
-    "description": "📒 Ledger - Accounting data: chart of accounts, transactions, trial balance, reports, taxonomies, schedules, and publish lists",
-  },
-  {
-    "name": "Investor",
-    "description": "📈 Investor - Portfolio management: portfolios, securities, positions, and holdings aggregation",
   },
 ]
 

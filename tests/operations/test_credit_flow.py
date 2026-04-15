@@ -1,6 +1,6 @@
 """Tests for credit consumption flow.
 
-Exercises: routers/graphs/credits.py → operations/graph/credit_service.py → models/iam/graph_credits.py
+Exercises: routers/graphs/credits.py → operations/graph/credit_service.py → models/core/graph/graph_credits.py
 """
 
 from decimal import Decimal

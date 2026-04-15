@@ -1,16 +1,64 @@
 """Schedule MCP tools for AI accounting close workflows.
 
-Five tools for schedule management:
+Eight tools for schedule-driven close workflows:
+
 1. create-schedule: Create a new schedule with pre-generated monthly facts
 2. list-schedule-structures: List active schedules with entry templates
 3. get-schedule-facts: Get fact values for a schedule by period
 4. get-period-close-status: Overview of what's done vs pending for a period
 5. create-closing-entry: Draft a closing entry from schedule facts
+6. create-manual-closing-entry: Draft a one-off (non-schedule) closing entry
+7. truncate-schedule: End a schedule early
+8. list-period-drafts: Review all draft entries for a period before close
+
+All eight tools route through `operations/roboledger/{reads,commands}/
+schedules.py` (and `reads/period_drafts.py`), which themselves wrap
+`ScheduleService`. The ops-layer wrappers return Pydantic responses so
+MCP, GraphQL, and the REST operation surface emit byte-identical wire
+shapes.
 """
 
+from datetime import date
 from typing import Any
 
+from robosystems.db.extensions import extensions_session
 from robosystems.logger import logger
+from robosystems.models.api.extensions.schedules import (
+  CreateClosingEntryRequest,
+  CreateManualClosingEntryRequest,
+  CreateScheduleRequest,
+  EntryTemplateRequest,
+  ManualLineItemRequest,
+  ScheduleMetadataRequest,
+  TruncateScheduleRequest,
+)
+from robosystems.operations.roboledger.commands.schedules import (
+  create_closing_entry as ops_create_closing_entry,
+)
+from robosystems.operations.roboledger.commands.schedules import (
+  create_manual_closing_entry as ops_create_manual_closing_entry,
+)
+from robosystems.operations.roboledger.commands.schedules import (
+  create_schedule as ops_create_schedule,
+)
+from robosystems.operations.roboledger.commands.schedules import (
+  truncate_schedule as ops_truncate_schedule,
+)
+from robosystems.operations.roboledger.reads.period_drafts import list_period_drafts
+from robosystems.operations.roboledger.reads.schedules import (
+  get_period_close_status as ops_get_period_close_status,
+)
+from robosystems.operations.roboledger.reads.schedules import (
+  get_schedule_facts as ops_get_schedule_facts,
+)
+from robosystems.operations.roboledger.reads.schedules import (
+  list_schedules as ops_list_schedules,
+)
+from robosystems.operations.roboledger.schedules import ScheduleService
+
+# ────────────────────────────────────────────────────────────────────────────
+# create-schedule
+# ────────────────────────────────────────────────────────────────────────────
 
 
 class CreateScheduleTool:
@@ -131,19 +179,9 @@ class CreateScheduleTool:
     }
 
   async def execute(self, arguments: dict[str, Any]) -> Any:
-    from datetime import date
-
-    from robosystems.db.extensions import extensions_session
-    from robosystems.operations.roboledger.schedules import ScheduleService
-    from robosystems.operations.roboledger.schedules.service import (
-      EntryTemplate,
-      ScheduleMetadata,
-    )
-
     graph_id = self.client.graph_id
-    svc = ScheduleService()
 
-    entry_template = EntryTemplate(
+    entry_template = EntryTemplateRequest(
       debit_element_id=arguments["debit_element_id"],
       credit_element_id=arguments["credit_element_id"],
       entry_type=arguments.get("entry_type", "closing"),
@@ -162,7 +200,7 @@ class CreateScheduleTool:
         "asset_element_id",
       )
     ):
-      schedule_metadata = ScheduleMetadata(
+      schedule_metadata = ScheduleMetadataRequest(
         method=arguments.get("method", "straight_line"),
         original_amount=arguments.get("original_amount", 0),
         residual_value=arguments.get("residual_value", 0),
@@ -175,33 +213,41 @@ class CreateScheduleTool:
       date.fromisoformat(closed_through_arg) if closed_through_arg else None
     )
 
+    body = CreateScheduleRequest(
+      name=arguments["name"],
+      taxonomy_id=None,
+      element_ids=arguments["element_ids"],
+      period_start=date.fromisoformat(arguments["period_start"]),
+      period_end=date.fromisoformat(arguments["period_end"]),
+      monthly_amount=arguments["monthly_amount"],
+      entry_template=entry_template,
+      schedule_metadata=schedule_metadata,
+      closed_through=closed_through,
+    )
+
     try:
       with extensions_session(graph_id) as session:
-        structure = svc.create_schedule(
-          session,
-          name=arguments["name"],
-          taxonomy_id=None,
-          element_ids=arguments["element_ids"],
-          period_start=date.fromisoformat(arguments["period_start"]),
-          period_end=date.fromisoformat(arguments["period_end"]),
-          monthly_amount=arguments["monthly_amount"],
-          entry_template=entry_template,
-          schedule_metadata=schedule_metadata,
-          created_by=f"mcp:{graph_id}",
-          closed_through=closed_through,
+        response = ops_create_schedule(
+          session, body, created_by=f"mcp:{graph_id}", service=ScheduleService()
         )
-        session.commit()
-
+        # ops_create_schedule commits internally.
         return {
           "success": True,
-          "structure_id": structure.id,
-          "name": structure.name,
-          "taxonomy_id": structure.taxonomy_id,
+          "structure_id": response.structure_id,
+          "name": response.name,
+          "taxonomy_id": response.taxonomy_id,
           "message": f"Schedule '{arguments['name']}' created successfully.",
         }
+    except ValueError as exc:
+      return {"error": str(exc)}
     except Exception as exc:
       logger.warning("create-schedule failed: %s", exc)
       return {"error": str(exc)}
+
+
+# ────────────────────────────────────────────────────────────────────────────
+# list-schedule-structures
+# ────────────────────────────────────────────────────────────────────────────
 
 
 class ListScheduleStructuresTool:
@@ -236,33 +282,23 @@ class ListScheduleStructuresTool:
     }
 
   async def execute(self, arguments: dict[str, Any]) -> Any:
-    from robosystems.db.extensions import extensions_session
-    from robosystems.operations.roboledger.schedules import ScheduleService
-
     graph_id = self.client.graph_id
-    svc = ScheduleService()
 
     try:
       with extensions_session(graph_id) as session:
-        summaries = svc.list_schedules(session)
+        response = ops_list_schedules(session, ScheduleService())
         return {
-          "schedule_count": len(summaries),
-          "schedules": [
-            {
-              "structure_id": s.structure_id,
-              "name": s.name,
-              "taxonomy_name": s.taxonomy_name,
-              "entry_template": s.entry_template,
-              "schedule_metadata": s.schedule_metadata,
-              "total_periods": s.total_periods,
-              "periods_with_entries": s.periods_with_entries,
-            }
-            for s in summaries
-          ],
+          "schedule_count": len(response.schedules),
+          "schedules": [s.model_dump(mode="json") for s in response.schedules],
         }
     except Exception as exc:
       logger.warning(f"list-schedule-structures failed: {exc}")
       return {"error": str(exc)}
+
+
+# ────────────────────────────────────────────────────────────────────────────
+# get-schedule-facts
+# ────────────────────────────────────────────────────────────────────────────
 
 
 class GetScheduleFactsTool:
@@ -314,42 +350,38 @@ reflected in the ledger and shouldn't generate new closing entries.
     }
 
   async def execute(self, arguments: dict[str, Any]) -> Any:
-    from datetime import date
-
-    from robosystems.db.extensions import extensions_session
-    from robosystems.operations.roboledger.schedules import ScheduleService
-
     graph_id = self.client.graph_id
-    svc = ScheduleService()
     structure_id = arguments["structure_id"]
 
-    period_start = None
-    period_end = None
-    if arguments.get("period_start"):
-      period_start = date.fromisoformat(arguments["period_start"])
-    if arguments.get("period_end"):
-      period_end = date.fromisoformat(arguments["period_end"])
+    period_start = (
+      date.fromisoformat(arguments["period_start"])
+      if arguments.get("period_start")
+      else None
+    )
+    period_end = (
+      date.fromisoformat(arguments["period_end"])
+      if arguments.get("period_end")
+      else None
+    )
 
     try:
       with extensions_session(graph_id) as session:
-        facts = svc.get_schedule_facts(session, structure_id, period_start, period_end)
+        response = ops_get_schedule_facts(
+          session, ScheduleService(), structure_id, period_start, period_end
+        )
         return {
-          "structure_id": structure_id,
-          "fact_count": len(facts),
-          "facts": [
-            {
-              "element_id": f.element_id,
-              "element_name": f.element_name,
-              "value": f.value,
-              "period_start": str(f.period_start),
-              "period_end": str(f.period_end),
-            }
-            for f in facts
-          ],
+          "structure_id": response.structure_id,
+          "fact_count": len(response.facts),
+          "facts": [f.model_dump(mode="json") for f in response.facts],
         }
     except Exception as exc:
       logger.warning(f"get-schedule-facts failed: {exc}")
       return {"error": str(exc)}
+
+
+# ────────────────────────────────────────────────────────────────────────────
+# get-period-close-status
+# ────────────────────────────────────────────────────────────────────────────
 
 
 class GetPeriodCloseStatusTool:
@@ -392,45 +424,35 @@ class GetPeriodCloseStatusTool:
     }
 
   async def execute(self, arguments: dict[str, Any]) -> Any:
-    from datetime import date
-
-    from robosystems.db.extensions import extensions_session
-    from robosystems.operations.roboledger.schedules import ScheduleService
-
     graph_id = self.client.graph_id
-    svc = ScheduleService()
     period_start = date.fromisoformat(arguments["period_start"])
     period_end = date.fromisoformat(arguments["period_end"])
 
     try:
       with extensions_session(graph_id) as session:
-        status = svc.get_period_close_status(session, period_start, period_end)
+        response = ops_get_period_close_status(
+          session, ScheduleService(), period_start, period_end
+        )
         return {
-          "fiscal_period_start": str(status.fiscal_period_start),
-          "fiscal_period_end": str(status.fiscal_period_end),
-          "period_status": status.period_status,
+          "fiscal_period_start": response.fiscal_period_start.isoformat(),
+          "fiscal_period_end": response.fiscal_period_end.isoformat(),
+          "period_status": response.period_status,
           "schedules": {
-            "total": len(status.schedules),
-            "pending": sum(1 for s in status.schedules if s.status == "pending"),
-            "drafted": status.total_draft,
-            "posted": status.total_posted,
-            "details": [
-              {
-                "structure_id": s.structure_id,
-                "structure_name": s.structure_name,
-                "amount": s.amount,
-                "status": s.status,
-                "entry_id": s.entry_id,
-                "reversal_entry_id": s.reversal_entry_id,
-                "reversal_status": s.reversal_status,
-              }
-              for s in status.schedules
-            ],
+            "total": len(response.schedules),
+            "pending": sum(1 for s in response.schedules if s.status == "pending"),
+            "drafted": response.total_draft,
+            "posted": response.total_posted,
+            "details": [s.model_dump(mode="json") for s in response.schedules],
           },
         }
     except Exception as exc:
       logger.warning(f"get-period-close-status failed: {exc}")
       return {"error": str(exc)}
+
+
+# ────────────────────────────────────────────────────────────────────────────
+# create-closing-entry
+# ────────────────────────────────────────────────────────────────────────────
 
 
 class CreateClosingEntryTool:
@@ -493,87 +515,96 @@ class CreateClosingEntryTool:
     }
 
   async def execute(self, arguments: dict[str, Any]) -> Any:
-    from datetime import date
-
-    from robosystems.db.extensions import extensions_session
-    from robosystems.operations.roboledger.schedules import ScheduleService
-
     graph_id = self.client.graph_id
-    svc = ScheduleService()
-
     structure_id = arguments["structure_id"]
-    posting_date = date.fromisoformat(arguments["posting_date"])
-    period_start = date.fromisoformat(arguments["period_start"])
-    period_end = date.fromisoformat(arguments["period_end"])
-    memo = arguments.get("memo")
+
+    body = CreateClosingEntryRequest(
+      posting_date=date.fromisoformat(arguments["posting_date"]),
+      period_start=date.fromisoformat(arguments["period_start"]),
+      period_end=date.fromisoformat(arguments["period_end"]),
+      memo=arguments.get("memo"),
+    )
 
     try:
       with extensions_session(graph_id) as session:
-        result = svc.create_closing_entry(
+        result = ops_create_closing_entry(
           session,
-          structure_id=structure_id,
-          posting_date=posting_date,
-          period_start=period_start,
-          period_end=period_end,
+          structure_id,
+          body,
           created_by=f"mcp:{graph_id}",
-          memo=memo,
+          service=ScheduleService(),
         )
-        session.commit()
-
-        response: dict[str, Any] = {
-          "outcome": result.outcome,
-          "entry_id": result.entry_id,
-          "status": result.status,
-          "memo": result.memo,
-          "reason": result.reason,
-        }
-        if result.posting_date is not None:
-          response["posting_date"] = str(result.posting_date)
-        if result.amount is not None:
-          response["line_items"] = [
-            {
-              "element_id": result.debit_element_id,
-              "debit": result.amount,
-              "credit": 0,
-            },
-            {
-              "element_id": result.credit_element_id,
-              "debit": 0,
-              "credit": result.amount,
-            },
-          ]
-
-        if result.reversal:
-          response["reversal"] = {
-            "outcome": result.reversal.outcome,
-            "entry_id": result.reversal.entry_id,
-            "status": result.reversal.status,
-            "posting_date": str(result.reversal.posting_date)
-            if result.reversal.posting_date
-            else None,
-            "memo": result.reversal.memo,
-            "line_items": [
-              {
-                "element_id": result.reversal.debit_element_id,
-                "debit": result.reversal.amount,
-                "credit": 0,
-              },
-              {
-                "element_id": result.reversal.credit_element_id,
-                "debit": 0,
-                "credit": result.reversal.amount,
-              },
-            ]
-            if result.reversal.amount is not None
-            else None,
-          }
-
-        return response
+        # ops_create_closing_entry commits internally.
+        return _shape_closing_entry(result)
     except ValueError as exc:
       return {"error": str(exc)}
     except Exception as exc:
       logger.warning(f"create-closing-entry failed: {exc}")
       return {"error": str(exc)}
+
+
+def _shape_closing_entry(result) -> dict[str, Any]:
+  """Convert a ClosingEntryResponse into the historical MCP wire shape.
+
+  The MCP wire shape splits debit/credit elements into a `line_items` list
+  rather than the flat `debit_element_id`/`credit_element_id` fields the
+  Pydantic model exposes. Preserving the historical shape keeps the
+  MappingAgent prompts working unchanged.
+  """
+  response: dict[str, Any] = {
+    "outcome": result.outcome,
+    "entry_id": result.entry_id,
+    "status": result.status,
+    "memo": result.memo,
+    "reason": result.reason,
+  }
+  if result.posting_date is not None:
+    response["posting_date"] = result.posting_date.isoformat()
+  if result.amount is not None:
+    response["line_items"] = [
+      {
+        "element_id": result.debit_element_id,
+        "debit": result.amount,
+        "credit": 0,
+      },
+      {
+        "element_id": result.credit_element_id,
+        "debit": 0,
+        "credit": result.amount,
+      },
+    ]
+
+  if result.reversal:
+    rev = result.reversal
+    response["reversal"] = {
+      "outcome": rev.outcome,
+      "entry_id": rev.entry_id,
+      "status": rev.status,
+      "posting_date": rev.posting_date.isoformat() if rev.posting_date else None,
+      "memo": rev.memo,
+      "line_items": (
+        [
+          {
+            "element_id": rev.debit_element_id,
+            "debit": rev.amount,
+            "credit": 0,
+          },
+          {
+            "element_id": rev.credit_element_id,
+            "debit": 0,
+            "credit": rev.amount,
+          },
+        ]
+        if rev.amount is not None
+        else None
+      ),
+    }
+  return response
+
+
+# ────────────────────────────────────────────────────────────────────────────
+# create-manual-closing-entry
+# ────────────────────────────────────────────────────────────────────────────
 
 
 class CreateManualClosingEntryTool:
@@ -668,41 +699,50 @@ line_items = [
     }
 
   async def execute(self, arguments: dict[str, Any]) -> Any:
-    from datetime import date
-
-    from robosystems.db.extensions import extensions_session
-    from robosystems.operations.roboledger.schedules import ScheduleService
-
     graph_id = self.client.graph_id
-    svc = ScheduleService()
+    line_items_in = arguments["line_items"]
+
+    body = CreateManualClosingEntryRequest(
+      posting_date=date.fromisoformat(arguments["posting_date"]),
+      memo=arguments["memo"],
+      line_items=[
+        ManualLineItemRequest(
+          element_id=li["element_id"],
+          debit_amount=li.get("debit_amount", 0),
+          credit_amount=li.get("credit_amount", 0),
+          description=li.get("description"),
+        )
+        for li in line_items_in
+      ],
+      entry_type=arguments.get("entry_type", "closing"),
+    )
 
     try:
-      posting_date = date.fromisoformat(arguments["posting_date"])
       with extensions_session(graph_id) as session:
-        result = svc.create_manual_closing_entry(
-          session,
-          posting_date=posting_date,
-          line_items=arguments["line_items"],
-          memo=arguments["memo"],
-          entry_type=arguments.get("entry_type", "closing"),
-          created_by=f"mcp:{graph_id}",
+        result = ops_create_manual_closing_entry(
+          session, body, created_by=f"mcp:{graph_id}", service=ScheduleService()
         )
-        session.commit()
-
         return {
           "outcome": result.outcome,
           "entry_id": result.entry_id,
           "status": result.status,
-          "posting_date": str(result.posting_date) if result.posting_date else None,
+          "posting_date": result.posting_date.isoformat()
+          if result.posting_date
+          else None,
           "memo": result.memo,
           "total_amount": result.amount,
-          "line_items_count": len(arguments["line_items"]),
+          "line_items_count": len(line_items_in),
         }
     except ValueError as exc:
       return {"error": str(exc)}
     except Exception as exc:
       logger.warning(f"create-manual-closing-entry failed: {exc}")
       return {"error": str(exc)}
+
+
+# ────────────────────────────────────────────────────────────────────────────
+# truncate-schedule
+# ────────────────────────────────────────────────────────────────────────────
 
 
 class TruncateScheduleTool:
@@ -781,37 +821,38 @@ Then book any prorated adjustment as a manual closing entry if needed.
     }
 
   async def execute(self, arguments: dict[str, Any]) -> Any:
-    from datetime import date
-
-    from robosystems.db.extensions import extensions_session
-    from robosystems.operations.roboledger.schedules import ScheduleService
-
     graph_id = self.client.graph_id
-    svc = ScheduleService()
+    body = TruncateScheduleRequest(
+      new_end_date=date.fromisoformat(arguments["new_end_date"]),
+      reason=arguments["reason"],
+    )
 
     try:
-      new_end = date.fromisoformat(arguments["new_end_date"])
       with extensions_session(graph_id) as session:
-        result = svc.truncate_schedule(
+        response = ops_truncate_schedule(
           session,
-          structure_id=arguments["structure_id"],
-          new_end_date=new_end,
-          reason=arguments["reason"],
+          arguments["structure_id"],
+          body,
           updated_by=f"mcp:{graph_id}",
+          service=ScheduleService(),
         )
-        session.commit()
         return {
           "success": True,
-          "structure_id": result["structure_id"],
-          "new_end_date": str(result["new_end_date"]),
-          "facts_deleted": result["facts_deleted"],
-          "reason": result["reason"],
+          "structure_id": response.structure_id,
+          "new_end_date": response.new_end_date.isoformat(),
+          "facts_deleted": response.facts_deleted,
+          "reason": response.reason,
         }
     except ValueError as exc:
       return {"error": str(exc)}
     except Exception as exc:
       logger.warning(f"truncate-schedule failed: {exc}")
       return {"error": str(exc)}
+
+
+# ────────────────────────────────────────────────────────────────────────────
+# list-period-drafts
+# ────────────────────────────────────────────────────────────────────────────
 
 
 class ListPeriodDraftsTool:
@@ -861,104 +902,13 @@ class ListPeriodDraftsTool:
     }
 
   async def execute(self, arguments: dict[str, Any]) -> Any:
-    from calendar import monthrange
-    from datetime import date
-
-    from sqlalchemy import text
-
-    from robosystems.db.extensions import extensions_session
-
     graph_id = self.client.graph_id
     period = arguments["period"]
 
     try:
-      year, month = int(period[:4]), int(period[5:7])
-      period_start = date(year, month, 1)
-      period_end = date(year, month, monthrange(year, month)[1])
-
       with extensions_session(graph_id) as session:
-        rows = session.execute(
-          text("""
-            SELECT
-              e.id               AS entry_id,
-              e.posting_date     AS posting_date,
-              e.type             AS entry_type,
-              e.memo             AS memo,
-              e.provenance       AS provenance,
-              e.source_structure_id AS source_structure_id,
-              s.name             AS source_structure_name,
-              li.id              AS line_item_id,
-              li.element_id      AS element_id,
-              el.code            AS element_code,
-              el.name            AS element_name,
-              li.debit_amount    AS debit_amount,
-              li.credit_amount   AS credit_amount,
-              li.description     AS line_description
-            FROM entries e
-            LEFT JOIN structures s ON s.id = e.source_structure_id
-            JOIN line_items li ON li.entry_id = e.id
-            JOIN elements el ON el.id = li.element_id
-            WHERE e.posting_date >= :period_start
-              AND e.posting_date <= :period_end
-              AND e.status = 'draft'
-            ORDER BY e.posting_date, s.name NULLS LAST, e.id, li.line_order, li.id
-          """),
-          {"period_start": period_start, "period_end": period_end},
-        ).fetchall()
-
-        by_entry: dict[str, dict] = {}
-        for row in rows:
-          eid = row.entry_id
-          if eid not in by_entry:
-            by_entry[eid] = {
-              "entry_id": eid,
-              "posting_date": str(row.posting_date),
-              "type": row.entry_type,
-              "memo": row.memo,
-              "provenance": row.provenance,
-              "source_structure_id": row.source_structure_id,
-              "source_structure_name": row.source_structure_name,
-              "line_items": [],
-            }
-          by_entry[eid]["line_items"].append(
-            {
-              "line_item_id": row.line_item_id,
-              "element_id": row.element_id,
-              "element_code": row.element_code,
-              "element_name": row.element_name,
-              "debit_amount": int(row.debit_amount or 0),
-              "credit_amount": int(row.credit_amount or 0),
-              "description": row.line_description,
-            }
-          )
-
-        drafts_out = []
-        total_debit = 0
-        total_credit = 0
-        all_balanced = True
-        for data in by_entry.values():
-          entry_debit = sum(li["debit_amount"] for li in data["line_items"])
-          entry_credit = sum(li["credit_amount"] for li in data["line_items"])
-          balanced = entry_debit == entry_credit
-          if not balanced:
-            all_balanced = False
-          total_debit += entry_debit
-          total_credit += entry_credit
-          data["total_debit"] = entry_debit
-          data["total_credit"] = entry_credit
-          data["balanced"] = balanced
-          drafts_out.append(data)
-
-        return {
-          "period": period,
-          "period_start": str(period_start),
-          "period_end": str(period_end),
-          "draft_count": len(drafts_out),
-          "total_debit": total_debit,
-          "total_credit": total_credit,
-          "all_balanced": all_balanced,
-          "drafts": drafts_out,
-        }
+        response = list_period_drafts(session, period)
+        return response.model_dump(mode="json")
     except Exception as exc:
       logger.warning(f"list-period-drafts failed: {exc}")
       return {"error": str(exc)}

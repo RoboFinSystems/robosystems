@@ -36,6 +36,7 @@ dependencies = [
     "python-multipart>=0.0.16,<1.0",
     "starlette>=0.35.0,<1.0",
     "sse-starlette>=3.3.2,<4.0",
+    "strawberry-graphql[fastapi]>=0.240.0,<1.0",
     "uvicorn>=0.35.0,<1.0",
     "uvloop>=0.21.0,<1.0",
     "httptools>=0.6.0,<1.0",
@@ -66,7 +67,7 @@ dependencies = [
     "boto3>=1.39.0,<2.0",
 
     # Data Processing & Analytics
-    "arelle-release~=2.39.1",
+    "arelle-release==2.39.5",
     "icebug>=12.0,<13.0",
     "fastembed>=0.4.0,<1.0",
     "lancedb>=0.30.0,<1.0",
@@ -124,7 +125,7 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
     # RoboSystems client for demo and testing
-    "robosystems-client==0.2.48",
+    "robosystems-client==0.3.1",
 
     # Testing framework
     "pytest>=8.4.0,<9.0",

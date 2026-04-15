@@ -63,9 +63,10 @@ def _get_engine():
   if _engine is None:
     if not env.EXTENSIONS_ENABLED:
       raise RuntimeError(
-        "Extensions database access attempted but EXTENSIONS_ENABLED is false. "
-        "Set EXTENSIONS_ENABLED=true to enable the extensions OLTP database "
-        "(required for RoboLedger, RoboInvestor, and other extension modules)."
+        "Extensions database access attempted but no extension domain is "
+        "enabled. Set ROBOLEDGER_ENABLED=true or ROBOINVESTOR_ENABLED=true "
+        "to enable the extensions OLTP database (the EXTENSIONS_ENABLED "
+        "value is now derived from the per-domain flags)."
       )
     _engine = _create_extensions_engine()
   return _engine

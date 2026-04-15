@@ -31,7 +31,32 @@ RoboSystems is a knowledge graph platform for enterprise financial and operation
 - **QuickBooks**: Sync transactions, accounts, and financial reports
 
 
-### Ledger Extension
+### Extensions Surface
+
+Domain extensions (RoboLedger, RoboInvestor) are graph-scoped under
+`/extensions/{graph_id}/...` with a clear split between reads, writes,
+and analytical view operations:
+
+- **Reads** → GraphQL at `POST /extensions/{graph_id}/graphql`. The
+  schema is composed dynamically from the domains enabled on a given
+  deployment — a ledger-only deployment exposes only ledger fields,
+  and introspection reflects the actual available shape. GraphiQL
+  playground is served at the same URL in development.
+- **Writes** → named command operations at
+  `POST /extensions/{roboledger|roboinvestor}/{graph_id}/operations/{operation_name}`.
+  Every write returns a typed `OperationEnvelope` with an
+  `operationId`, supports `Idempotency-Key` for safe retries, and is
+  audit-logged. Long-running commands return `status: "pending"` and
+  stream progress via the existing
+  `/v1/operations/{operation_id}/stream` SSE endpoint.
+- **Analytical view operations** → graph-backed read-only operations
+  at `POST /extensions/{domain}/{graph_id}/operations/{view_name}`.
+  These query LadybugDB rather than the extensions OLTP database and
+  share the same envelope contract as command writes. Gated
+  independently so deployments without the corresponding OLTP domain
+  can still use them.
+
+### RoboLedger
 
 - **Chart of Accounts**: View accounts and hierarchical account trees synced from connected systems
 - **Transactions**: List and inspect transactions with entries and line items
@@ -40,14 +65,15 @@ RoboSystems is a knowledge graph platform for enterprise financial and operation
 - **Mappings**: Map chart of accounts to GAAP reporting concepts with AI auto-mapping
 - **Reports**: Create, view, and share multi-period financial statements (income statement, balance sheet)
 - **Schedules**: Depreciation, amortization, and accrual schedules with monthly fact generation and period close workflow
+- **Fiscal Calendar**: Track close cadence with `closed_through` / `close_target` pointers, period close gates, and reopen workflow
 - **Publish Lists**: Share reports to other graphs via managed distribution lists
 
-### Investor Extension
+### RoboInvestor
 
 - **Portfolios**: Create and manage investment portfolios with metadata and classification
 - **Securities**: Track securities with optional entity linking for cross-graph research
 - **Positions**: Record holdings with cost basis, quantity, and date tracking
-- **Holdings**: Aggregate portfolio holdings with current valuations
+- **Holdings**: Aggregate portfolio holdings grouped by entity with current valuations
 
 ### User & Access
 

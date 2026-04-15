@@ -1,8 +1,19 @@
 """
 Unified operations endpoint for Server-Sent Events monitoring.
 
-This module provides endpoints for monitoring all non-immediate operations
-through a unified SSE interface, replacing the fragmented task monitoring system.
+This is the **monitoring** half of the platform's operation lifecycle. It
+streams progress, partial results, and final outcomes for any operation that
+has been issued an `op_<ULID>` operation_id — including operations dispatched
+through the new extensions surface at
+`POST /extensions/{domain}/{graph_id}/operations/{operation_name}` (see
+`robosystems/middleware/extensions.py` for the dispatch kernel and
+`OperationEnvelope` shape).
+
+The same `op_<ULID>` namespace flows through both surfaces: dispatch returns
+an envelope with `operationId`, and that id is the path parameter consumed by
+`/v1/operations/{operation_id}/stream` here. Long-running commands (e.g.
+`auto-map-elements`) return `status: "pending"` from dispatch and stream
+progress through this endpoint until completion.
 """
 
 from typing import Any

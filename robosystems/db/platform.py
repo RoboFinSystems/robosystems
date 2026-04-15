@@ -113,6 +113,38 @@ def get_db_session():
     session.remove()
 
 
+from contextlib import contextmanager  # noqa: E402
+
+
+@contextmanager
+def platform_session():
+  """Context-manager wrapper around the FastAPI dependency-style generator.
+
+  `get_db_session()` is implemented as a generator so it can serve as a
+  FastAPI dependency. Code that runs OUTSIDE FastAPI's dependency
+  machinery — GraphQL resolvers, MCP tools, scripts, Dagster jobs —
+  shouldn't have to drive the generator protocol manually. Wrap the
+  same machinery in a normal `with` block so callers get standard
+  context-manager semantics.
+
+  Usage:
+
+      from robosystems.db.platform import platform_session
+
+      with platform_session() as db:
+          row = db.query(Connection).first()
+
+  This replaces ad-hoc `gen = get_db_session(); next(gen); ...; gen.close()`
+  patterns that used to live in the GraphQL resolvers and MCP tools.
+  """
+  gen = get_db_session()
+  db = next(gen)
+  try:
+    yield db
+  finally:
+    gen.close()
+
+
 async def get_async_db_session():
   """
   Get database session for async FastAPI endpoints.
