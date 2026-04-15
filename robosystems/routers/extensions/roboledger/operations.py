@@ -1119,7 +1119,10 @@ async def auto_map_elements_op(
         idempotency_key=idempotency_key,
         idempotent_replay=True,
       )
-      return cached
+      # Mirror `execute_operation`'s replay marking so the metrics
+      # decorator suppresses the business_event counter and clients
+      # can distinguish "task enqueued" from "task already running".
+      return cached.model_copy(update={"idempotent_replay": True})
 
   task_response = await enqueue_task(
     task_type="agent",

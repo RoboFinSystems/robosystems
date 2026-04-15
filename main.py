@@ -72,6 +72,11 @@ from robosystems.utils.docs_template import (
 
 logger = get_logger("robosystems.api")
 
+# Path prefixes whose responses may contain per-user secrets (tokens,
+# API keys, billing details, org membership). These get `Cache-Control:
+# no-store` applied in the security-headers middleware.
+_SENSITIVE_PATH_PREFIXES = ("/v1/auth", "/v1/user", "/v1/billing", "/v1/orgs")
+
 
 def is_relaxed_csp_path(path: str) -> bool:
   """Paths that need CDN-hosted scripts/styles (Swagger UI, GraphiQL)."""
@@ -317,10 +322,8 @@ def create_app() -> FastAPI:
     response.headers["Content-Security-Policy"] = "; ".join(csp_directives)
 
     # Cache-Control: no-store for routes that may return per-user secrets.
-    # Path-prefix allowlist instead of response-body scanning because
-    # Starlette's call_next returns a StreamingResponse with no .body.
-    _sensitive_path_prefixes = ("/v1/auth", "/v1/user", "/v1/billing", "/v1/orgs")
-    if any(path.startswith(p) for p in _sensitive_path_prefixes):
+    # (Path-prefix allowlist — StreamingResponse has no .body to scan.)
+    if any(path.startswith(p) for p in _SENSITIVE_PATH_PREFIXES):
       response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, private"
       response.headers["Pragma"] = "no-cache"
 
