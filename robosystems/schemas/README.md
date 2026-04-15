@@ -6,10 +6,36 @@ The RoboSystems schema system implements a **base + extensions** architecture fo
 
 **Key Concepts:**
 
-- **Base Schema**: Core nodes shared by all graphs (Entity, User, Period, Unit, Element, Taxonomy)
+- **Base Schema**: Core nodes shared by all graphs (Entity, Period, Unit, Element, Label, Reference, Taxonomy, Dimension, Structure, Association, Classification)
 - **Extensions**: Domain schemas that extend the base schema with domain-specific node types and relationships
 - **Context-Aware Loading**: Different views of the same extension based on use case (e.g., SEC reporting vs full accounting)
 - **Product Extensions**: Extensions like RoboLedger and RoboInvestor that grow beyond the graph schema into full product verticals with dedicated databases, API surfaces, data pipelines, and frontend applications
+
+## Ontology Invariants
+
+Two rules govern how the base schema and extensions are organized. These are load-bearing — future schema changes should be evaluated against them, and breaking them produces the kind of asymmetry that forces painful refactors against materialized data.
+
+### Invariant 1 — Base is aspirational
+
+**Base contains concepts that are universally applicable to the ontology, regardless of current consumer count.**
+
+Period, Unit, Element, Taxonomy, Dimension, Association, Structure are declared in `base.py` even though only roboledger currently populates most of them. This is intentional: roboinvestor, roboscm, robohrm, robofo, roboepm will grow into them, and retrofitting "promote this concept to base when a second consumer shows up" is a breaking schema change against already-materialized databases.
+
+**Rule**: When deciding whether a new concept belongs in base or an extension, ask *"is it universally applicable to the ontology?"* — NOT *"do multiple extensions use it today?"*. Waiting for a second consumer turns every promotion into a migration.
+
+### Invariant 2 — Aspects attach only to measured events
+
+**Period, Unit, and Dimension are aspects that qualify measured observations. They never attach to declarative nodes.**
+
+Measured events (Facts, LineItem dimensional tags, future Trades) carry aspect edges. Declarative nodes (Entity, Report, Taxonomy, Portfolio) do not. Any proposed edge of the form `(Entity | Report | Taxonomy | Portfolio)_HAS_(Period | Unit | Dimension)` is a category error — rewrite as a node property or as a query over the underlying events.
+
+The same conceptual type (currency, time) can legitimately appear as both a static attribute on a declarative node AND as an aspect edge on a measured event. These are distinct roles — *declaration* vs *observation* — and both are legitimate. For example, an Entity may have a static `reporting_currency` property (declaration), while a Fact has a `FACT_HAS_UNIT` edge to a Unit node (observation).
+
+### Before proposing a new edge or node
+
+1. Does it satisfy Invariant 1? If you can't justify the shelving under "universally applicable," it probably belongs in a domain extension, not base.
+2. Does it satisfy Invariant 2? If your new edge hangs an aspect off a declarative node, stop and rewrite as a node property or reroute through the underlying measured events.
+3. Does it exist as a latent concept already? The schema may already model what you need through existing edges — check before adding.
 
 ## How Extensions Work
 
@@ -85,28 +111,45 @@ Legacy env-var names (`LEDGER_ENABLED`, `INVESTOR_ENABLED`, standalone `EXTENSIO
 
 ## Architecture
 
-### Core Components
+### Declaration vs runtime split
+
+The schemas module is organized into two layers:
+
+- **Declaration layer** (`schemas/` top level): pure ontology source of truth. Side-effect free, no database access. `base.py`, `models.py`, `loader.py`, and `extensions/` declare what the ontology IS.
+- **Runtime layer** (`schemas/runtime/`): runtime behavior that consumes the declarations. Builders, validators, parsers, and managers that do work: compile schemas, validate operations, parse Cypher DDL, handle user-supplied custom schemas.
 
 ```
 robosystems/schemas/
-├── models.py           # Data structures (Node, Relationship, Property, Schema)
-├── base.py            # Foundation schema (entities, users, taxonomy)
-├── builder.py         # Schema compilation and DDL generation
-├── manager.py         # Extension management and compatibility
-├── loader.py          # Context-aware schema loading
-├── validator.py       # Schema validation and consistency checks
-├── installer.py       # Database schema installation
-├── custom.py          # Custom schema support (JSON/YAML)
-└── extensions/        # Domain-specific extensions
-    ├── roboledger.py  # Financial reporting & accounting
-    ├── roboinvestor.py # Portfolio & investment management
-    ├── roboscm.py     # Supply chain management
-    ├── robofo.py      # Front office & CRM
-    ├── roboepm.py     # Enterprise performance management
-    ├── robohrm.py     # Human resources management
-    ├── roboreport.py  # Regulatory compliance
-    └── memory.py      # AI memory schema
+├── __init__.py
+├── README.md                # This file
+│
+├── # ── Declaration layer (ontology source of truth) ──────────────────
+├── base.py                  # BASE_NODES + BASE_RELATIONSHIPS (Entity, Period, Unit,
+│                            #   Element, Label, Reference, Taxonomy, Dimension,
+│                            #   Structure, Association, Classification)
+├── models.py                # Node/Property/Relationship dataclasses + to_cypher() DDL
+├── loader.py                # Runtime schema composition + introspection API
+│                            #   (list_node_types, get_node_schema, validate_node_properties)
+├── extensions/              # Per-extension declarations
+│   ├── roboledger.py        #   Financial reporting & accounting
+│   ├── roboinvestor.py      #   Portfolio & investment management
+│   ├── roboscm.py           #   Supply chain management
+│   ├── robofo.py            #   Front office & CRM
+│   ├── roboepm.py           #   Enterprise performance management
+│   ├── robohrm.py           #   Human resources management
+│   ├── roboreport.py        #   Regulatory compliance
+│   └── memory.py            #   AI memory schema
+│
+└── # ── Runtime layer (builders, validators, parsers) ─────────────────
+    └── runtime/
+        ├── manager.py       # SchemaManager / SchemaConfiguration — build + compile
+        ├── builder.py       # LadybugSchemaBuilder — full schema orchestration
+        ├── custom.py        # CustomSchemaManager / Parser — user-supplied JSON/YAML
+        ├── validator.py     # LadybugSchemaValidator — runtime validation
+        └── parser.py        # Cypher DDL → metadata (reverse path)
 ```
+
+Runtime schema **application** (CREATE NODE/REL TABLE against LadybugDB) lives in `graph_api/core/ladybug/manager.py`, not here — the schemas module is purely a declaration + compile layer, not an installer.
 
 ### Schema Hierarchy
 
@@ -252,7 +295,7 @@ loader = get_contextual_schema_loader("repository", "sec")
 ### Building Schemas
 
 ```python
-from robosystems.schemas.builder import LadybugDBSchemaBuilder
+from robosystems.schemas.runtime.builder import LadybugDBSchemaBuilder
 
 config = {
     "name": "My Financial Graph",
@@ -268,7 +311,7 @@ cypher_ddl = builder.generate_cypher()
 ### Schema Validation
 
 ```python
-from robosystems.schemas.validator import LadybugDBSchemaValidator
+from robosystems.schemas.runtime.validator import LadybugDBSchemaValidator
 
 validator = LadybugDBSchemaValidator()
 
@@ -325,7 +368,7 @@ The system supports user-defined schemas through JSON or YAML:
 ### Loading Custom Schemas
 
 ```python
-from robosystems.schemas.custom import CustomSchemaManager
+from robosystems.schemas.runtime.custom import CustomSchemaManager
 
 manager = CustomSchemaManager()
 schema = manager.create_from_json(json_string)
@@ -360,7 +403,7 @@ Property(name="identifier", type="STRING", is_primary_key=True)
 The `SchemaManager` provides compatibility checking for extension combinations:
 
 ```python
-from robosystems.schemas.manager import SchemaManager
+from robosystems.schemas.runtime.manager import SchemaManager
 
 manager = SchemaManager()
 
@@ -497,7 +540,7 @@ print(f"Loaded nodes: {loader.list_node_types()}")
 print(f"Loaded relationships: {loader.list_relationship_types()}")
 
 # Validate schema consistency
-from robosystems.schemas.manager import SchemaManager
+from robosystems.schemas.runtime.manager import SchemaManager
 manager = SchemaManager()
 manager._validate_schema_consistency(schema)
 ```

@@ -418,15 +418,21 @@ class OLTPLoader:
     source: str,
     created_by: str,
   ) -> None:
-    """Ensure a CoA taxonomy and CoA→GAAP mapping structure exist.
+    """Ensure a CoA taxonomy, CoA→GAAP mapping structure, and entity
+    adoption of the CoA taxonomy all exist.
 
     These are prerequisites for the report generation flow. Without them,
     the Chart of Accounts page won't show the GAAP mapping column or
-    Auto-Map button, and reports can't be generated.
+    Auto-Map button, and reports can't be generated. The entity→CoA
+    adoption row is also what materializes the ENTITY_HAS_TAXONOMY graph
+    edge — without it the graph can't answer "what chart of accounts does
+    this entity report under?" via a direct traversal.
 
-    Idempotent — skips creation if they already exist.
+    Idempotent — skips creation of each piece if it already exists.
     """
     from robosystems.db.extensions import extensions_session
+    from robosystems.models.extensions import EntityTaxonomy
+    from robosystems.models.extensions.entity import Entity
     from robosystems.models.extensions.roboledger import Structure, Taxonomy
     from robosystems.utils.ulid import generate_prefixed_ulid
 
@@ -453,6 +459,40 @@ class OLTPLoader:
           session.add(existing_coa)
           session.flush()
           logger.info(f"Created CoA taxonomy for {graph_id}: {existing_coa.id}")
+
+        # Ensure the graph's entity is linked to the CoA taxonomy as its
+        # primary chart_of_accounts basis. This materializes to
+        # ENTITY_HAS_TAXONOMY in the graph.
+        entity = session.query(Entity).first()
+        if entity:
+          existing_adoption = (
+            session.query(EntityTaxonomy)
+            .filter(
+              EntityTaxonomy.entity_id == entity.id,
+              EntityTaxonomy.taxonomy_id == existing_coa.id,
+              EntityTaxonomy.basis == "chart_of_accounts",
+            )
+            .first()
+          )
+
+          if not existing_adoption:
+            adoption = EntityTaxonomy(
+              entity_id=entity.id,
+              taxonomy_id=existing_coa.id,
+              is_primary=True,
+              basis="chart_of_accounts",
+              adoption_context="voluntary",
+            )
+            session.add(adoption)
+            session.flush()
+            logger.info(
+              f"Linked entity {entity.id} → CoA taxonomy {existing_coa.id} "
+              f"(basis=chart_of_accounts, primary=true)"
+            )
+        else:
+          logger.warning(
+            f"No entity found in graph {graph_id}, skipping EntityTaxonomy adoption"
+          )
 
         # Check if a mapping structure already exists
         existing_mapping = (

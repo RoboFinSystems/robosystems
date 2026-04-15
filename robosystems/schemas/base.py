@@ -7,9 +7,32 @@ This serves as the foundation that all application-specific schemas extend.
 
 from .models import Node, Property, Relationship
 
-# Base Schema Definition - Common Foundation
-# NOTE: Platform metadata (users, connections, graph metadata) are stored in PostgreSQL,
-# not in the LadybugDB graph database. This schema contains only business domain concepts.
+# Base Schema Definition — Common Foundation
+#
+# INVARIANT 1 (Aspirational base): Base contains concepts that are universally
+# applicable to the ontology regardless of current consumer count. Period, Unit,
+# Element, Taxonomy, Dimension, Association, Structure are declared here even
+# though only roboledger currently populates most of them, because the other
+# planned extensions (roboinvestor, roboscm, robohrm, robofo, roboepm) will
+# grow into them. The rule for promoting a concept into base is "is it
+# universally applicable" — NOT "do two extensions use it today." Waiting for a
+# second consumer before promoting turns every promotion into a breaking
+# refactor against materialized data.
+#
+# INVARIANT 2 (Aspects attach only to measured events): Period, Unit, and
+# Dimension are aspects that qualify measured observations (Fact in reporting,
+# LineItem dimensional tags in ledger, future Trade in investor). They never
+# attach to declarative nodes like Entity, Report, Taxonomy, Portfolio. Any
+# edge of the form (Entity|Report|Taxonomy|Portfolio)_HAS_(Period|Unit|Dimension)
+# is a category error — rewrite as a node property or as a query over the
+# underlying events. Related: the same conceptual type (currency, time) can
+# appear as a static attribute on a declarative node OR as an aspect edge on
+# a measured event. These are distinct roles — declaration vs observation —
+# and both are legitimate.
+#
+# NOTE: Platform metadata (users, connections, graph metadata) are stored in
+# PostgreSQL, not in the LadybugDB graph database. This schema contains only
+# business domain concepts.
 BASE_NODES = [
   Node(
     name="Entity",
@@ -182,6 +205,49 @@ BASE_NODES = [
       Property(name="is_typed", type="BOOLEAN"),
     ],
   ),
+  # XBRL Taxonomy Infrastructure — Structure, Association, Classification
+  # These are base ontology concepts (taxonomy link networks and pattern metadata),
+  # not roboledger-specific. Any extension that works with a formal taxonomy
+  # (XBRL, RDF, etc.) traverses these nodes.
+  Node(
+    name="Structure",
+    description="XBRL taxonomy structure",
+    properties=[
+      Property(name="identifier", type="STRING", is_primary_key=True),
+      Property(name="uri", type="STRING"),
+      Property(name="network_uri", type="STRING"),
+      Property(name="definition", type="STRING"),
+      Property(name="number", type="STRING"),
+      Property(name="type", type="STRING"),
+      Property(name="name", type="STRING"),
+      Property(name="canonical_type", type="STRING"),
+      Property(name="canonical_confidence", type="DOUBLE"),
+      Property(name="embedding", type="FLOAT[384]"),
+    ],
+  ),
+  Node(
+    name="Association",
+    description="Associations between elements in taxonomies",
+    properties=[
+      Property(name="identifier", type="STRING", is_primary_key=True),
+      Property(name="arcrole", type="STRING"),
+      Property(name="order_value", type="DOUBLE"),
+      Property(name="association_type", type="STRING"),
+      Property(name="weight", type="DOUBLE"),
+      Property(name="root", type="STRING"),
+      Property(name="preferred_label", type="STRING"),
+    ],
+  ),
+  Node(
+    name="Classification",
+    description="Structural pattern classification for associations (RollUp, RollForward, Hierarchy, etc.)",
+    properties=[
+      Property(name="identifier", type="STRING", is_primary_key=True),
+      Property(name="type", type="STRING"),
+      Property(name="source", type="STRING"),
+      Property(name="confidence", type="DOUBLE"),
+    ],
+  ),
 ]
 
 # Base Relationships - Common Foundation
@@ -275,5 +341,89 @@ BASE_RELATIONSHIPS = [
     to_node="Element",
     description="Dimension member element reference (defines the specific slice value)",
     properties=[],
+  ),
+  # Taxonomy Structure / Association / Classification infrastructure
+  # (relocated from roboledger — these are base ontology concepts, not reporting)
+  Relationship(
+    name="STRUCTURE_HAS_TAXONOMY",
+    from_node="Structure",
+    to_node="Taxonomy",
+    description="Structure belongs to taxonomy",
+    properties=[
+      Property(name="taxonomy_context", type="STRING"),
+    ],
+  ),
+  Relationship(
+    name="STRUCTURE_HAS_ASSOCIATION",
+    from_node="Structure",
+    to_node="Association",
+    description="Structure contains element associations",
+    properties=[
+      Property(name="association_context", type="STRING"),
+    ],
+  ),
+  Relationship(
+    name="ASSOCIATION_HAS_FROM_ELEMENT",
+    from_node="Association",
+    to_node="Element",
+    description="Association from element (parent)",
+    properties=[],
+  ),
+  Relationship(
+    name="ASSOCIATION_HAS_TO_ELEMENT",
+    from_node="Association",
+    to_node="Element",
+    description="Association to element (child)",
+    properties=[],
+  ),
+  Relationship(
+    name="ASSOCIATION_HAS_CLASSIFICATION",
+    from_node="Association",
+    to_node="Classification",
+    description="Association has structural pattern classification (many-to-many)",
+    properties=[],
+  ),
+  # Entity ↔ Taxonomy — the core "entity reports under a taxonomy" link
+  Relationship(
+    name="ENTITY_HAS_TAXONOMY",
+    from_node="Entity",
+    to_node="Taxonomy",
+    description="Entity reports under this taxonomy (US GAAP, IFRS, or custom extension). "
+    "Multiple taxonomies may apply across different bases (reporting, "
+    "chart_of_accounts, mapping, schedule). Within each basis, at most one "
+    "edge should have is_primary=true.",
+    properties=[
+      Property(name="is_primary", type="BOOLEAN"),  # Primary taxonomy within its basis
+      Property(
+        name="basis", type="STRING"
+      ),  # reporting | chart_of_accounts | mapping | schedule
+      Property(
+        name="effective_from", type="STRING"
+      ),  # Adoption start (fiscal year boundary)
+      Property(name="effective_to", type="STRING"),  # Adoption end (null = current)
+      Property(
+        name="adoption_context", type="STRING"
+      ),  # required_by_regulation | voluntary | contractual
+    ],
+  ),
+  # Taxonomy extension chain (version upgrades, entity extensions, industry overlays)
+  # NOTE: single-parent by design — a taxonomy has exactly one parent in the
+  # extension chain. Secondary "extends" relationships should be modeled as
+  # mapping taxonomies via source_taxonomy_id / target_taxonomy_id on the
+  # Taxonomy OLTP model, not as additional TAXONOMY_EXTENDS_TAXONOMY edges.
+  Relationship(
+    name="TAXONOMY_EXTENDS_TAXONOMY",
+    from_node="Taxonomy",
+    to_node="Taxonomy",
+    description="Taxonomy derives from a parent (version upgrade, entity extension, "
+    "industry overlay, jurisdiction). Models us-gaap-2024 extending us-gaap-2023, "
+    "or an entity's custom extension taxonomy extending the standard. "
+    "Single-parent only — use mapping taxonomies for secondary relationships.",
+    properties=[
+      Property(
+        name="extension_type", type="STRING"
+      ),  # version | entity_extension | industry | jurisdiction
+      Property(name="effective_date", type="STRING"),
+    ],
   ),
 ]

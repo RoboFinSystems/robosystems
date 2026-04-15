@@ -5,16 +5,24 @@ Portfolio management, investment tracking, and securities analysis.
 Extends the base schema with investment-specific entities.
 
 Ontology:
+  Entity -[ENTITY_HAS_PORTFOLIO]-> Portfolio -[PORTFOLIO_HAS_POSITION]-> Position -[POSITION_IN_SECURITY]-> Security
   Entity -[ENTITY_ISSUES_SECURITY]-> Security
-  Portfolio -[PORTFOLIO_HAS_POSITION]-> Position -[POSITION_IN_SECURITY]-> Security
   Entity -[ENTITY_HAS_REPORT]-> Report  (from roboledger schema — shared reports)
+  Entity -[ENTITY_HAS_TAXONOMY]-> Taxonomy (from base schema — shared ontology)
 
-This ontology works for both private securities (linked entities from company graphs)
-and public securities (entities from SEC shared repo via CIK). The agent traversal
-is identical regardless of entity source.
+The entity-focused pattern holds: an investing entity owns portfolios, an
+issuing entity has securities, and both play equally well for private and
+public (SEC) scenarios. Agent traversal is identical regardless of entity
+source.
 """
 
 from ..models import Node, Property, Relationship
+
+# NOTE: Before adding nodes or edges here, review schemas/base.py invariants.
+# Universally-applicable concepts (Entity, Taxonomy, Element, Dimension,
+# Structure, Association, Classification) belong in base.py, not here.
+# Aspects (Period, Unit, Dimension) never attach to declarative nodes like
+# Entity, Report, Taxonomy, Portfolio — that's a category error.
 
 # ── MVP Nodes (materialized from OLTP) ───────────────────────────────────
 
@@ -104,6 +112,17 @@ EXTENSION_NODES = [
 # ── MVP Relationships ────────────────────────────────────────────────────
 
 EXTENSION_RELATIONSHIPS = [
+  # Entity → Portfolio ownership (the investing entity)
+  Relationship(
+    name="ENTITY_HAS_PORTFOLIO",
+    from_node="Entity",
+    to_node="Portfolio",
+    description="Entity owns or manages this portfolio (the investing entity, not the "
+    "issuing entity of a security)",
+    properties=[
+      Property(name="ownership_type", type="STRING"),  # direct | managed | advised
+    ],
+  ),
   # Core portfolio structure
   Relationship(
     name="ENTITY_ISSUES_SECURITY",

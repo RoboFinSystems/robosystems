@@ -75,6 +75,9 @@ RELATIONSHIP_TABLES = [
   "ENTRY_HAS_DIMENSION",
   "LINE_ITEM_HAS_DIMENSION",
   "ENTRY_FROM_SCHEDULE",
+  # Base ontology — entity ↔ taxonomy
+  "ENTITY_HAS_TAXONOMY",
+  "TAXONOMY_EXTENDS_TAXONOMY",
   # Reporting layer
   "STRUCTURE_HAS_TAXONOMY",
   "ENTITY_HAS_REPORT",
@@ -87,10 +90,211 @@ RELATIONSHIP_TABLES = [
   "STRUCTURE_HAS_FACT_SET",
   "FACT_SET_CONTAINS_FACT",
   # Investor layer
+  "ENTITY_HAS_PORTFOLIO",
   "PORTFOLIO_HAS_POSITION",
   "POSITION_IN_SECURITY",
   "ENTITY_ISSUES_SECURITY",
 ]
+
+# Table → extension mapping. Tables marked "base" are always materialized
+# (their corresponding graph tables come from schemas/base.py and exist on
+# any extensions graph). Tables marked with an extension name are only
+# materialized when that extension is enabled for the target graph —
+# otherwise their graph tables don't exist and materialization would fail
+# with "Table does not exist."
+#
+# For relationships, the rule is "whichever endpoint's extension is more
+# specific." ENTITY_HAS_PORTFOLIO has Entity (base) → Portfolio (investor),
+# so the edge belongs to roboinvestor because Portfolio's node table only
+# exists when roboinvestor is installed.
+TABLE_EXTENSIONS: dict[str, str] = {
+  # ── Nodes ────────────────────────────────────────────────────────────
+  "Entity": "base",
+  "Element": "base",
+  "Dimension": "base",
+  "Structure": "base",
+  "Association": "base",
+  "Taxonomy": "base",
+  "Period": "base",
+  "Unit": "base",
+  # roboledger nodes
+  "Transaction": "roboledger",
+  "Entry": "roboledger",
+  "LineItem": "roboledger",
+  "Report": "roboledger",
+  "Fact": "roboledger",
+  "FactSet": "roboledger",
+  # roboinvestor nodes
+  "Portfolio": "roboinvestor",
+  "Security": "roboinvestor",
+  "Position": "roboinvestor",
+  # ── Relationships ────────────────────────────────────────────────────
+  # Base ontology edges (both endpoints are base nodes)
+  "ENTITY_HAS_TAXONOMY": "base",
+  "TAXONOMY_EXTENDS_TAXONOMY": "base",
+  "STRUCTURE_HAS_TAXONOMY": "base",
+  "STRUCTURE_HAS_ASSOCIATION": "base",
+  "ASSOCIATION_HAS_FROM_ELEMENT": "base",
+  "ASSOCIATION_HAS_TO_ELEMENT": "base",
+  # roboledger edges
+  "ENTITY_HAS_TRANSACTION": "roboledger",
+  "TRANSACTION_HAS_ENTRY": "roboledger",
+  "ENTRY_HAS_LINE_ITEM": "roboledger",
+  "LINE_ITEM_RELATES_TO_ELEMENT": "roboledger",
+  "TRANSACTION_HAS_DIMENSION": "roboledger",
+  "ENTRY_HAS_DIMENSION": "roboledger",
+  "LINE_ITEM_HAS_DIMENSION": "roboledger",
+  "ENTRY_FROM_SCHEDULE": "roboledger",
+  "ENTITY_HAS_REPORT": "roboledger",
+  "REPORT_USES_TAXONOMY": "roboledger",
+  "REPORT_HAS_FACT": "roboledger",
+  "FACT_HAS_ELEMENT": "roboledger",
+  "FACT_HAS_PERIOD": "roboledger",
+  "FACT_HAS_UNIT": "roboledger",
+  "FACT_HAS_ENTITY": "roboledger",
+  "STRUCTURE_HAS_FACT_SET": "roboledger",
+  "FACT_SET_CONTAINS_FACT": "roboledger",
+  # roboinvestor edges
+  "ENTITY_HAS_PORTFOLIO": "roboinvestor",
+  "PORTFOLIO_HAS_POSITION": "roboinvestor",
+  "POSITION_IN_SECURITY": "roboinvestor",
+  "ENTITY_ISSUES_SECURITY": "roboinvestor",
+}
+
+
+def _filter_tables_for_extensions(
+  tables: list[str], enabled_extensions: set[str]
+) -> list[str]:
+  """Return only the tables whose owning extension is enabled.
+
+  Tables mapped to "base" are always included. Tables mapped to a specific
+  extension are included only if that extension is in `enabled_extensions`.
+  Unknown tables (not in TABLE_EXTENSIONS) are included by default — prefer
+  "fail loud with unknown table" over "silently skip a typo."
+  """
+  effective = set(enabled_extensions) | {"base"}
+  return [t for t in tables if TABLE_EXTENSIONS.get(t, "base") in effective]
+
+
+# Schema tables intentionally NOT materialized by the extensions pipeline.
+# Each entry falls into one of two categories:
+#   (1) Populated via SEC XBRL ingestion (adapters/sec/...), not from OLTP.
+#       These live in schemas/base.py or schemas/extensions/roboledger.py but
+#       the extensions materializer correctly skips them — they're written
+#       by the SEC processor when filings are ingested, not from
+#       postgres_scanner.
+#   (2) Declared in schemas/extensions/roboinvestor.py for schema
+#       completeness but not yet backed by OLTP tables or materialization
+#       SQL — deferred Phase 2 work.
+_UNMATERIALIZED_TABLES: frozenset[str] = frozenset(
+  {
+    # Category 1: SEC XBRL-only (not written from extensions OLTP)
+    "Label",
+    "Reference",
+    "Classification",
+    "ELEMENT_HAS_LABEL",
+    "ELEMENT_HAS_REFERENCE",
+    "ELEMENT_IN_TAXONOMY",
+    "TAXONOMY_HAS_LABEL",
+    "TAXONOMY_HAS_REFERENCE",
+    "DIMENSION_HAS_AXIS_ELEMENT",
+    "DIMENSION_HAS_MEMBER_ELEMENT",
+    "ASSOCIATION_HAS_CLASSIFICATION",
+    "FACT_HAS_DIMENSION",
+    "ENTITY_EVOLVED_FROM",
+    "ENTITY_OWNS_ENTITY",
+    # Category 2: roboinvestor Phase 2 — schema-declared, OLTP not yet wired
+    "Trade",
+    "Benchmark",
+    "MarketData",
+    "PORTFOLIO_HAS_TRADE",
+    "TRADE_INVOLVES_SECURITY",
+    "TRADE_CREATES_POSITION",
+    "PORTFOLIO_BENCHMARKED_AGAINST",
+    "SECURITY_HAS_MARKET_DATA",
+  }
+)
+
+
+def _get_all_extension_schema_tables() -> set[str]:
+  """Return the union of node+relationship names across every extension the
+  extensions pipeline is expected to handle.
+
+  Composes schemas for both roboledger and roboinvestor because the
+  extensions materializer serves both products from a shared pipeline.
+  """
+  from robosystems.schemas.loader import get_contextual_schema_loader
+
+  tables: set[str] = set()
+  for ext_name in ("roboledger", "roboinvestor"):
+    loader = get_contextual_schema_loader("application", ext_name)
+    tables |= set(loader.nodes.keys())
+    tables |= set(loader.relationships.keys())
+  return tables
+
+
+def validate_materializer_against_schema() -> None:
+  """Fail loud if the extensions materializer has drifted from the schema.
+
+  Three drift modes to catch:
+
+  1. Schema declares a table the materializer doesn't know about (and it's
+     not in the SEC-only / deferred allow-list). Usually means someone added
+     a node or edge to schemas/ and forgot to wire it into NODE_TABLES,
+     RELATIONSHIP_TABLES, TABLE_EXTENSIONS, and _staging_sql().
+  2. Materializer references a table not declared in any extension schema.
+     Usually means a schema entry was removed but the materializer still has
+     stale references.
+  3. Materializer-registered table has no TABLE_EXTENSIONS entry. Means the
+     extension-filter pass would treat it as "base" by default, which might
+     be wrong.
+
+  Called at test time as a consistency check. When it fails, the message
+  tells you exactly what to fix.
+  """
+  schema_tables = _get_all_extension_schema_tables()
+  materializer_tables = set(NODE_TABLES) | set(RELATIONSHIP_TABLES)
+
+  missing_from_materializer = (
+    schema_tables - materializer_tables - _UNMATERIALIZED_TABLES
+  )
+  stale_in_materializer = materializer_tables - schema_tables
+  missing_extension_mapping = materializer_tables - set(TABLE_EXTENSIONS.keys())
+
+  errors: list[str] = []
+
+  if missing_from_materializer:
+    errors.append(
+      f"Schema declares tables the extensions materializer does not handle: "
+      f"{sorted(missing_from_materializer)}.\n"
+      f"  Fix: add an entry to NODE_TABLES or RELATIONSHIP_TABLES, a mapping "
+      f"in TABLE_EXTENSIONS, and a SQL generator in _staging_sql(). If the "
+      f"table is populated only via SEC XBRL ingestion (not extensions "
+      f"OLTP), add it to _UNMATERIALIZED_TABLES instead."
+    )
+
+  if stale_in_materializer:
+    errors.append(
+      f"Materializer references tables not declared in any extension schema: "
+      f"{sorted(stale_in_materializer)}.\n"
+      f"  Fix: these were probably removed from a schema file — delete them "
+      f"from NODE_TABLES/RELATIONSHIP_TABLES, TABLE_EXTENSIONS, and "
+      f"_staging_sql() too."
+    )
+
+  if missing_extension_mapping:
+    errors.append(
+      f"Materializer tables without TABLE_EXTENSIONS mapping: "
+      f"{sorted(missing_extension_mapping)}.\n"
+      f"  Fix: add each to TABLE_EXTENSIONS with the owning extension name "
+      f"('base', 'roboledger', or 'roboinvestor')."
+    )
+
+  if errors:
+    raise RuntimeError(
+      "Extensions materializer is out of sync with the schema layer:\n\n"
+      + "\n\n".join(errors)
+    )
 
 
 def build_postgres_connstr() -> str:
@@ -572,6 +776,32 @@ def _staging_sql(graph_id: str, entity_id: str, connstr: str) -> dict[str, str]:
     WHERE fact_set_id IS NOT NULL
   """
 
+  # ── Base Ontology Relationships (Entity ↔ Taxonomy) ────────────────────
+
+  tables["ENTITY_HAS_TAXONOMY"] = f"""
+    CREATE OR REPLACE TABLE ENTITY_HAS_TAXONOMY AS
+    SELECT
+      entity_id                       AS src,
+      taxonomy_id                     AS dst,
+      is_primary,
+      basis,
+      COALESCE(CAST(effective_from AS VARCHAR), '')  AS effective_from,
+      COALESCE(CAST(effective_to AS VARCHAR), '')    AS effective_to,
+      COALESCE(adoption_context, '')  AS adoption_context
+    FROM postgres_scan('{c}', '{s}', 'entity_taxonomies')
+  """
+
+  tables["TAXONOMY_EXTENDS_TAXONOMY"] = f"""
+    CREATE OR REPLACE TABLE TAXONOMY_EXTENDS_TAXONOMY AS
+    SELECT
+      id                              AS src,
+      parent_taxonomy_id              AS dst,
+      COALESCE(extension_type, '')    AS extension_type,
+      COALESCE(CAST(effective_date AS VARCHAR), '')  AS effective_date
+    FROM postgres_scan('{c}', '{s}', 'taxonomies')
+    WHERE parent_taxonomy_id IS NOT NULL
+  """
+
   # ── Reporting Relationships ────────────────────────────────────────────
 
   tables["STRUCTURE_HAS_TAXONOMY"] = f"""
@@ -626,6 +856,7 @@ def _staging_sql(graph_id: str, entity_id: str, connstr: str) -> dict[str, str]:
       id                              AS dst,
       NULL::VARCHAR                   AS fact_context
     FROM postgres_scan('{c}', '{s}', 'facts')
+    WHERE report_id IS NOT NULL
   """
 
   tables["FACT_HAS_ELEMENT"] = f"""
@@ -783,6 +1014,16 @@ def _staging_sql(graph_id: str, entity_id: str, connstr: str) -> dict[str, str]:
       AND is_active = true
   """
 
+  tables["ENTITY_HAS_PORTFOLIO"] = f"""
+    CREATE OR REPLACE TABLE ENTITY_HAS_PORTFOLIO AS
+    SELECT
+      entity_id                       AS src,
+      id                              AS dst,
+      COALESCE(ownership_type, '')    AS ownership_type
+    FROM postgres_scan('{c}', '{s}', 'portfolios')
+    WHERE entity_id IS NOT NULL
+  """
+
   return tables
 
 
@@ -892,11 +1133,15 @@ class LedgerMaterializer:
     # Step 2: Build connection string for postgres_scanner
     connstr = build_postgres_connstr()
 
-    # Step 3: Stage all tables from PostgreSQL → DuckDB
-    staging_sql = _staging_sql(graph_id, entity_id, connstr)
-    await self._stage_tables(client, graph_id, staging_sql, result)
+    # Step 3: Look up which extensions are enabled on this graph so we only
+    # stage and materialize tables whose graph node/rel tables actually exist.
+    enabled_extensions = set(await self._get_graph_extensions(graph_id))
 
-    # Step 4: Materialize all tables from DuckDB → LadybugDB
+    # Step 4: Stage the filtered table set from PostgreSQL → DuckDB
+    staging_sql = _staging_sql(graph_id, entity_id, connstr)
+    await self._stage_tables(client, graph_id, staging_sql, result, enabled_extensions)
+
+    # Step 5: Materialize from DuckDB → LadybugDB
     await self._materialize_tables(client, graph_id, result)
 
   async def _materialize_blue_green(
@@ -954,12 +1199,18 @@ class LedgerMaterializer:
       # Step 2: Create fresh WIP database with schema
       await self._ensure_database(client, wip_id, rebuild=False)
 
-      # Step 3: Stage from PostgreSQL → DuckDB (writes to graph_id's DuckDB)
+      # Step 3: Look up which extensions are enabled on this graph so we only
+      # stage and materialize tables whose graph node/rel tables actually exist.
+      enabled_extensions = set(await self._get_graph_extensions(graph_id))
+
+      # Step 4: Stage from PostgreSQL → DuckDB (writes to graph_id's DuckDB)
       connstr = build_postgres_connstr()
       staging_sql = _staging_sql(graph_id, entity_id, connstr)
-      await self._stage_tables(client, graph_id, staging_sql, result)
+      await self._stage_tables(
+        client, graph_id, staging_sql, result, enabled_extensions
+      )
 
-      # Step 4: Materialize from DuckDB → WIP LadybugDB
+      # Step 5: Materialize from DuckDB → WIP LadybugDB
       # Use source_graph_id so the WIP reads from the original graph's DuckDB
       await self._materialize_tables(client, wip_id, result, source_graph_id=graph_id)
 
@@ -1060,9 +1311,18 @@ class LedgerMaterializer:
     graph_id: str,
     staging_sql: dict[str, str],
     result: MaterializeResult,
+    enabled_extensions: set[str],
   ) -> None:
-    """Execute staging SQL to create DuckDB tables from PostgreSQL via postgres_scanner."""
-    all_tables = NODE_TABLES + RELATIONSHIP_TABLES
+    """Execute staging SQL to create DuckDB tables from PostgreSQL via postgres_scanner.
+
+    Only stages tables whose owning extension is enabled on the graph.
+    Tables for non-enabled extensions are skipped entirely — their graph
+    node/rel tables don't exist in LadybugDB, so materializing them would
+    fail with "Table does not exist."
+    """
+    all_tables = _filter_tables_for_extensions(
+      NODE_TABLES + RELATIONSHIP_TABLES, enabled_extensions
+    )
 
     for table_name in all_tables:
       sql = staging_sql.get(table_name)

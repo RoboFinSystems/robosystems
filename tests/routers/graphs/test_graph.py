@@ -411,7 +411,7 @@ class TestGetAvailableExtensions:
 
   async def test_get_available_extensions_success(self, async_client: AsyncClient):
     """Test successful retrieval of available extensions."""
-    with patch("robosystems.schemas.manager.SchemaManager") as MockManager:
+    with patch("robosystems.schemas.runtime.manager.SchemaManager") as MockManager:
       manager_instance = MockManager.return_value
       manager_instance.list_available_extensions.return_value = [
         {
@@ -476,7 +476,7 @@ class TestGetAvailableExtensions:
     self, async_client: AsyncClient
   ):
     """Test fallback response when schema manager fails."""
-    with patch("robosystems.schemas.manager.SchemaManager") as MockManager:
+    with patch("robosystems.schemas.runtime.manager.SchemaManager") as MockManager:
       MockManager.return_value.list_available_extensions.side_effect = Exception(
         "Schema loading failed"
       )
@@ -497,7 +497,7 @@ class TestGetAvailableExtensions:
     self, async_client: AsyncClient
   ):
     """Test handling of schema loader failures."""
-    with patch("robosystems.schemas.manager.SchemaManager") as MockManager:
+    with patch("robosystems.schemas.runtime.manager.SchemaManager") as MockManager:
       manager_instance = MockManager.return_value
       manager_instance.list_available_extensions.return_value = [
         {
@@ -526,7 +526,7 @@ class TestGetAvailableExtensions:
     self, async_client: AsyncClient
   ):
     """Test that extensions endpoint doesn't require authentication."""
-    with patch("robosystems.schemas.manager.SchemaManager") as MockManager:
+    with patch("robosystems.schemas.runtime.manager.SchemaManager") as MockManager:
       manager_instance = MockManager.return_value
       manager_instance.list_available_extensions.return_value = []
 

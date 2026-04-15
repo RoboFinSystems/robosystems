@@ -68,16 +68,30 @@ This is called from the extensions-enabled code path when a graph first needs le
 
 ## Directory layout
 
+The top-level files mirror `schemas/base.py` — they are **base ontology concepts** that are universally applicable to the ontology regardless of which extension consumes them. Extension-specific models live in subdirectories (`roboledger/`, `roboinvestor/`). This layering is governed by the two invariants documented in `schemas/README.md` (aspirational base + aspects-only-on-events).
+
+Concepts were historically shelved under `roboledger/` because roboledger was the first consumer, but `Entity`, `Taxonomy`, `Element`, `Dimension`, `Association`, `ClassificationRule`, `Structure`, and the `EntityTaxonomy` join table are all base concepts — they were relocated to the top level to match `schemas/base.py`. The `roboledger/__init__.py` re-exports them as a permanent affirmation that roboledger depends on base ontology concepts.
+
 ```
 models/extensions/
 ├── __init__.py                  # Re-exports every extension model — flat namespace
-├── entity.py                    # Entity — shared base (single parent entity per graph for now)
-├── roboledger/                  # Accounting OLTP — 15 tables
-│   ├── account.py               # (currently modeled via Element; file present for future CoA split)
-│   ├── association.py           # Association — CoA → GAAP mappings, presentation ordering
-│   ├── classification_rule.py   # ClassificationRule — auto-classification rules for GLiNER-style NER
-│   ├── dimension.py             # Dimension — tags (department, class, location, fund, trust)
-│   ├── element.py               # Element — CoA elements + US GAAP reporting elements (unified)
+│
+├── # ── Base ontology (mirrors schemas/base.py) ──────────────────────────
+├── entity.py                    # Entity — single parent entity per graph for now
+├── taxonomy.py                  # Taxonomy — grouping container (CoA, reporting, mapping, schedule)
+│                                #   + extension chain (parent_taxonomy_id, extension_type, effective_date)
+├── element.py                   # Element — CoA elements + US GAAP reporting elements (unified)
+│                                #   + Account alias for Element (CoA terminology)
+├── dimension.py                 # Dimension — tags (department, class, location, fund, trust)
+├── association.py               # Association — CoA → GAAP mappings, presentation ordering
+├── classification_rule.py       # ClassificationRule — auto-classification rules
+├── structure.py                 # Structure — named element collection (income statement, schedule, ...)
+├── entity_taxonomy.py           # EntityTaxonomy — join table for ENTITY_HAS_TAXONOMY
+│                                #   (multi-basis: reporting, CoA, mapping, schedule)
+│
+├── # ── RoboLedger extension (accounting-specific) ──────────────────────
+├── roboledger/
+│   ├── __init__.py              # Re-exports base concepts + domain-specific models
 │   ├── entry.py                 # Entry — journal entries within a transaction (must balance)
 │   ├── fact.py                  # Fact — element × period × dimension → amount (XBRL-style)
 │   ├── fiscal_calendar.py       # FiscalCalendar — one row per graph, holds close target
@@ -86,14 +100,26 @@ models/extensions/
 │   ├── publish_list.py          # PublishList + PublishListMember — report sharing rings
 │   ├── report.py                # Report — snapshot of facts at creation time (immutable)
 │   ├── report_share.py          # ReportShare — cross-graph report shares (investor access)
-│   ├── structure.py             # Structure — named element collection (income statement, schedule, ...)
-│   ├── taxonomy.py              # Taxonomy — grouping container (CoA, reporting, mapping, schedule)
-│   └── transaction.py           # Transaction — business event (what happened in the real world)
-└── roboinvestor/                # Portfolio OLTP — 3 tables
-    ├── portfolio.py             # Portfolio — an investor's holdings container
-    ├── position.py               # Position — lot-level position within a portfolio
-    └── security.py              # Security — the thing being held, optionally linked to an Entity
+│   ├── transaction.py           # Transaction — business event (what happened in the real world)
+│   └── dimension_junctions.py   # transaction_dimensions, entry_dimensions, line_item_dimensions
+│                                #   (roboledger-specific junctions binding Dimension to ledger tables)
+│
+└── # ── RoboInvestor extension (portfolio-specific) ─────────────────────
+    └── roboinvestor/
+        ├── portfolio.py         # Portfolio — an investor's holdings container
+        │                        #   + entity_id/ownership_type for ENTITY_HAS_PORTFOLIO
+        ├── position.py          # Position — lot-level position within a portfolio
+        └── security.py          # Security — the thing being held, optionally linked to an Entity
 ```
+
+### Base vs extension shelving rule
+
+**Before adding a new OLTP model file, decide where it belongs:**
+
+- **Top-level (base)** if the concept is universally applicable to the ontology — present in `schemas/base.py` or a natural fit for a future extension. Examples: Entity, Taxonomy, Element, Dimension, Association, Structure.
+- **Subfolder (extension)** if the concept is specific to one product vertical's domain model. Examples: Transaction/Entry/LineItem (ledger-specific accounting model), Portfolio/Position/Security (investor-specific).
+
+When in doubt, consult `schemas/base.py` — it is the source of truth for what counts as base. The rule is "aspirational base" (Invariant 1 in `schemas/README.md`): promote to base if the concept is universally applicable, not when two consumers start using it. Waiting for a second consumer turns every promotion into a migration against materialized data.
 
 ### The three-level ledger model
 

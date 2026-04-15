@@ -337,7 +337,9 @@ class TestSchemaManagementIntegration:
   ):
     """Test checking schema compatibility before creating a graph."""
     # First, list available extensions (using global endpoint)
-    with patch("robosystems.schemas.manager.SchemaManager") as mock_schema_manager:
+    with patch(
+      "robosystems.schemas.runtime.manager.SchemaManager"
+    ) as mock_schema_manager:
       mock_manager = mock_schema_manager.return_value
       mock_manager.list_available_extensions.return_value = [
         {

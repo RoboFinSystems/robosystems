@@ -8,7 +8,7 @@ from unittest.mock import Mock, patch
 
 import pytest
 
-from robosystems.schemas.validator import LadybugSchemaValidator
+from robosystems.schemas.runtime.validator import LadybugSchemaValidator
 
 
 @pytest.fixture
@@ -78,7 +78,8 @@ def mock_schema_loader():
 def validator(mock_schema_loader):
   """Create a validator instance with mocked schema loader."""
   with patch(
-    "robosystems.schemas.validator.get_schema_loader", return_value=mock_schema_loader
+    "robosystems.schemas.runtime.validator.get_schema_loader",
+    return_value=mock_schema_loader,
   ):
     return LadybugSchemaValidator()
 
@@ -86,7 +87,7 @@ def validator(mock_schema_loader):
 class TestLadybugSchemaValidatorInit:
   """Test validator initialization."""
 
-  @patch("robosystems.schemas.validator.get_schema_loader")
+  @patch("robosystems.schemas.runtime.validator.get_schema_loader")
   def test_init_creates_schema_loader(self, mock_get_loader):
     """Test that initialization creates schema loader."""
     mock_loader = Mock()
@@ -99,8 +100,8 @@ class TestLadybugSchemaValidatorInit:
     mock_get_loader.assert_called_once()
     assert validator.schema_loader == mock_loader
 
-  @patch("robosystems.schemas.validator.get_schema_loader")
-  @patch("robosystems.schemas.validator.logger")
+  @patch("robosystems.schemas.runtime.validator.get_schema_loader")
+  @patch("robosystems.schemas.runtime.validator.logger")
   def test_init_logs_schema_counts(self, mock_logger, mock_get_loader):
     """Test that initialization logs schema counts."""
     mock_loader = Mock()
@@ -425,7 +426,9 @@ class TestErrorHandling:
 
   def test_validator_handles_schema_loader_exceptions(self, mock_schema_loader):
     """Test that validator handles schema loader initialization exceptions."""
-    with patch("robosystems.schemas.validator.get_schema_loader") as mock_get_loader:
+    with patch(
+      "robosystems.schemas.runtime.validator.get_schema_loader"
+    ) as mock_get_loader:
       mock_get_loader.side_effect = Exception("Schema loader failed")
 
       with pytest.raises(Exception, match="Schema loader failed"):

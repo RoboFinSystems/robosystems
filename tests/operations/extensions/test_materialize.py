@@ -7,9 +7,12 @@ import pytest
 from robosystems.operations.extensions.materialize import (
   NODE_TABLES,
   RELATIONSHIP_TABLES,
+  TABLE_EXTENSIONS,
   MaterializeResult,
+  _filter_tables_for_extensions,
   _staging_sql,
   build_postgres_connstr,
+  validate_materializer_against_schema,
 )
 
 
@@ -139,7 +142,90 @@ class TestTableOrdering:
     assert len(NODE_TABLES) == 17  # 8 transaction + 6 reporting + 3 investor
 
   def test_expected_relationship_count(self):
-    assert len(RELATIONSHIP_TABLES) == 24  # 11 transaction + 10 reporting + 3 investor
+    # 11 transaction + 2 base (ENTITY_HAS_TAXONOMY, TAXONOMY_EXTENDS_TAXONOMY)
+    # + 10 reporting + 4 investor (+ ENTITY_HAS_PORTFOLIO)
+    assert len(RELATIONSHIP_TABLES) == 27
+
+
+class TestSchemaConsistency:
+  """Guardrails that keep materialize.py in sync with the schema layer.
+
+  These tests are the drift detector for option A of the schema-awareness
+  question — they don't make the materializer schema-driven, but they catch
+  the common failure modes (forgotten edge wiring, stale references,
+  missing extension mappings) at test time instead of at runtime.
+  """
+
+  def test_materializer_in_sync_with_schema(self):
+    """Fail loud if any schema table is missing from the materializer (or
+    vice versa), unless explicitly in the SEC-only / deferred allow-list."""
+    # Raises RuntimeError with a clear diff if drift is detected.
+    validate_materializer_against_schema()
+
+  def test_every_materializer_table_has_extension_mapping(self):
+    """Every entry in NODE_TABLES and RELATIONSHIP_TABLES must be in
+    TABLE_EXTENSIONS — otherwise the extension-filter pass would treat it
+    as 'base' by default, which can silently wrong-classify investor
+    tables onto ledger-only graphs."""
+    mapped = set(TABLE_EXTENSIONS.keys())
+    unmapped = (set(NODE_TABLES) | set(RELATIONSHIP_TABLES)) - mapped
+    assert not unmapped, (
+      f"Tables missing from TABLE_EXTENSIONS: {sorted(unmapped)}. "
+      f"Add each with its owning extension name."
+    )
+
+  def test_extension_filter_excludes_investor_from_ledger_only_graph(self):
+    """On a roboledger-only graph, investor node and edge tables must not
+    be staged (they don't exist in the LadybugDB schema and would cause
+    'Table does not exist' errors)."""
+    tables = _filter_tables_for_extensions(
+      NODE_TABLES + RELATIONSHIP_TABLES, {"roboledger"}
+    )
+    investor_leak = {
+      "Portfolio",
+      "Security",
+      "Position",
+      "ENTITY_HAS_PORTFOLIO",
+      "PORTFOLIO_HAS_POSITION",
+      "POSITION_IN_SECURITY",
+      "ENTITY_ISSUES_SECURITY",
+    } & set(tables)
+    assert not investor_leak, (
+      f"Investor tables leaked into ledger-only filter: {sorted(investor_leak)}"
+    )
+
+  def test_extension_filter_excludes_ledger_from_investor_only_graph(self):
+    """Symmetrically — ledger-specific tables must not leak into an
+    investor-only materialization."""
+    tables = _filter_tables_for_extensions(
+      NODE_TABLES + RELATIONSHIP_TABLES, {"roboinvestor"}
+    )
+    ledger_leak = {
+      "Transaction",
+      "Entry",
+      "LineItem",
+      "Report",
+      "Fact",
+      "FactSet",
+      "ENTITY_HAS_TRANSACTION",
+      "REPORT_HAS_FACT",
+    } & set(tables)
+    assert not ledger_leak, (
+      f"Ledger tables leaked into investor-only filter: {sorted(ledger_leak)}"
+    )
+
+  def test_extension_filter_base_always_included(self):
+    """Base tables (Entity, Taxonomy, ENTITY_HAS_TAXONOMY, etc.) must
+    materialize regardless of which extension is enabled."""
+    base_tables = {"Entity", "Element", "Taxonomy", "ENTITY_HAS_TAXONOMY"}
+    for enabled in ({"roboledger"}, {"roboinvestor"}, {"roboledger", "roboinvestor"}):
+      tables = set(
+        _filter_tables_for_extensions(NODE_TABLES + RELATIONSHIP_TABLES, enabled)
+      )
+      missing = base_tables - tables
+      assert not missing, (
+        f"Base tables missing from filter with enabled={enabled}: {sorted(missing)}"
+      )
 
 
 class TestLedgerMaterializer:

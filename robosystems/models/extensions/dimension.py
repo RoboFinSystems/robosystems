@@ -1,7 +1,14 @@
-"""Dimension model and junction tables.
+"""Dimension model — base ontology concept.
 
-Dimensions are entity tags at any level (transaction, entry, line item).
-Maps to Dimension nodes in the graph with *_HAS_DIMENSION relationships.
+Dimensions are entity-tag axes (segment, geography, department, class,
+project, etc.) used by XBRL facts, ledger line items, and any future
+domain that needs dimensional segmentation. Maps to Dimension nodes in
+the graph with `*_HAS_DIMENSION` relationships.
+
+Dimension is a base ontology concept per schemas/base.py INVARIANT 1.
+Junction tables that bind Dimension to roboledger-specific tables
+(transactions, entries, line_items) live in
+`roboledger/dimension_junctions.py` to preserve clean layering.
 """
 
 from datetime import UTC, datetime
@@ -10,69 +17,14 @@ from sqlalchemy import (
   Boolean,
   Column,
   DateTime,
-  ForeignKey,
   Index,
   String,
-  Table,
   UniqueConstraint,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 
 from robosystems.db.extensions import ExtensionsBase
 from robosystems.utils.ulid import generate_prefixed_ulid
-
-# Junction tables — pure join tables, no additional columns
-
-transaction_dimensions = Table(
-  "transaction_dimensions",
-  ExtensionsBase.metadata,
-  Column(
-    "transaction_id",
-    String,
-    ForeignKey("transactions.id", ondelete="CASCADE"),
-    primary_key=True,
-  ),
-  Column(
-    "dimension_id",
-    String,
-    ForeignKey("dimensions.id"),
-    primary_key=True,
-  ),
-)
-
-entry_dimensions = Table(
-  "entry_dimensions",
-  ExtensionsBase.metadata,
-  Column(
-    "entry_id",
-    String,
-    ForeignKey("entries.id", ondelete="CASCADE"),
-    primary_key=True,
-  ),
-  Column(
-    "dimension_id",
-    String,
-    ForeignKey("dimensions.id"),
-    primary_key=True,
-  ),
-)
-
-line_item_dimensions = Table(
-  "line_item_dimensions",
-  ExtensionsBase.metadata,
-  Column(
-    "line_item_id",
-    String,
-    ForeignKey("line_items.id", ondelete="CASCADE"),
-    primary_key=True,
-  ),
-  Column(
-    "dimension_id",
-    String,
-    ForeignKey("dimensions.id"),
-    primary_key=True,
-  ),
-)
 
 
 class Dimension(ExtensionsBase):

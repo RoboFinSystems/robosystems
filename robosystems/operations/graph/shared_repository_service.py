@@ -101,7 +101,7 @@ class SharedRepositoryService:
       extensions = list(manifest.schema_extensions)
       if extensions:
         logger.info(f"Installing schema with extensions: {extensions}")
-        from ...schemas.manager import SchemaManager
+        from ...schemas.runtime.manager import SchemaManager
 
         manager = SchemaManager()
         schema_config = manager.create_schema_configuration(

@@ -291,7 +291,7 @@ class GraphCreationService:
       return ddl, info
 
     # Extensions schema — generate DDL and install
-    from robosystems.schemas.manager import SchemaManager
+    from robosystems.schemas.runtime.manager import SchemaManager
 
     manager = SchemaManager()
     schema_config = manager.create_schema_configuration(
@@ -522,7 +522,7 @@ class GraphCreationService:
 
   def _resolve_custom_schema_ddl(self, custom_schema: dict[str, Any]) -> str:
     """Parse and validate a custom schema definition, returning DDL."""
-    from robosystems.schemas.custom import CustomSchemaManager
+    from robosystems.schemas.runtime.custom import CustomSchemaManager
 
     manager = CustomSchemaManager()
     parsed = manager.create_from_dict(custom_schema)

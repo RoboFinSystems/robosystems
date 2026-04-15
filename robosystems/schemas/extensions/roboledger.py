@@ -33,6 +33,12 @@ For direct context control, use:
 
 from ..models import Node, Property, Relationship
 
+# NOTE: Before adding nodes or edges here, review schemas/base.py invariants.
+# Universally-applicable concepts (Entity, Taxonomy, Element, Dimension,
+# Structure, Association, Classification) belong in base.py, not here.
+# Aspects (Period, Unit, Dimension) never attach to declarative nodes like
+# Entity, Report, Taxonomy, Portfolio — that's a category error.
+
 # ============================================================================
 # REPORTING SECTION (XBRL/Financial Statements)
 # Used by: SEC repositories, Entity graphs
@@ -92,45 +98,10 @@ REPORTING_NODES = [
       ),  # Number of dimensional qualifiers (0=consolidated, 1=single breakdown, 2+=complex)
     ],
   ),
-  Node(
-    name="Structure",
-    description="XBRL taxonomy structure",
-    properties=[
-      Property(name="identifier", type="STRING", is_primary_key=True),
-      Property(name="uri", type="STRING"),
-      Property(name="network_uri", type="STRING"),
-      Property(name="definition", type="STRING"),
-      Property(name="number", type="STRING"),
-      Property(name="type", type="STRING"),
-      Property(name="name", type="STRING"),
-      Property(name="canonical_type", type="STRING"),
-      Property(name="canonical_confidence", type="DOUBLE"),
-      Property(name="embedding", type="FLOAT[384]"),
-    ],
-  ),
-  Node(
-    name="Association",
-    description="Associations between elements in taxonomies",
-    properties=[
-      Property(name="identifier", type="STRING", is_primary_key=True),
-      Property(name="arcrole", type="STRING"),
-      Property(name="order_value", type="DOUBLE"),
-      Property(name="association_type", type="STRING"),
-      Property(name="weight", type="DOUBLE"),
-      Property(name="root", type="STRING"),
-      Property(name="preferred_label", type="STRING"),
-    ],
-  ),
-  Node(
-    name="Classification",
-    description="Structural pattern classification for associations (RollUp, RollForward, Hierarchy, etc.)",
-    properties=[
-      Property(name="identifier", type="STRING", is_primary_key=True),
-      Property(name="type", type="STRING"),
-      Property(name="source", type="STRING"),
-      Property(name="confidence", type="DOUBLE"),
-    ],
-  ),
+  # NOTE: Structure, Association, Classification are now in schemas/base.py
+  # because they're base ontology concepts (XBRL taxonomy link networks and
+  # pattern metadata), not reporting-specific. Any extension that works with
+  # a formal taxonomy traverses these nodes. See INVARIANT 1 in base.py.
   Node(
     name="FactSet",
     description="Logical grouping of related facts",
@@ -193,15 +164,6 @@ REPORTING_RELATIONSHIPS = [
       Property(name="unit_context", type="STRING"),
     ],
   ),
-  Relationship(
-    name="STRUCTURE_HAS_TAXONOMY",
-    from_node="Structure",
-    to_node="Taxonomy",
-    description="Structure belongs to taxonomy",
-    properties=[
-      Property(name="taxonomy_context", type="STRING"),
-    ],
-  ),
   # Fact → Dimension relationship (XBRL dimensional qualifiers)
   Relationship(
     name="FACT_HAS_DIMENSION",
@@ -233,36 +195,10 @@ REPORTING_RELATIONSHIPS = [
       Property(name="taxonomy_context", type="STRING"),
     ],
   ),
-  Relationship(
-    name="STRUCTURE_HAS_ASSOCIATION",
-    from_node="Structure",
-    to_node="Association",
-    description="Structure contains element associations",
-    properties=[
-      Property(name="association_context", type="STRING"),
-    ],
-  ),
-  Relationship(
-    name="ASSOCIATION_HAS_FROM_ELEMENT",
-    from_node="Association",
-    to_node="Element",
-    description="Association from element (parent)",
-    properties=[],
-  ),
-  Relationship(
-    name="ASSOCIATION_HAS_TO_ELEMENT",
-    from_node="Association",
-    to_node="Element",
-    description="Association to element (child)",
-    properties=[],
-  ),
-  Relationship(
-    name="ASSOCIATION_HAS_CLASSIFICATION",
-    from_node="Association",
-    to_node="Classification",
-    description="Association has structural pattern classification (many-to-many)",
-    properties=[],
-  ),
+  # NOTE: STRUCTURE_HAS_ASSOCIATION, ASSOCIATION_HAS_FROM_ELEMENT,
+  # ASSOCIATION_HAS_TO_ELEMENT, ASSOCIATION_HAS_CLASSIFICATION, and
+  # STRUCTURE_HAS_TAXONOMY are now in schemas/base.py alongside the
+  # Structure / Association / Classification nodes they connect.
 ]
 
 # ============================================================================

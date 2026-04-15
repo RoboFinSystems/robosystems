@@ -19,9 +19,9 @@ from typing import Any
 import pandas as pd
 
 from robosystems.logger import logger
-from robosystems.schemas.builder import LadybugSchemaBuilder
-from robosystems.schemas.manager import SchemaConfiguration, SchemaManager
 from robosystems.schemas.models import Node, Relationship
+from robosystems.schemas.runtime.builder import LadybugSchemaBuilder
+from robosystems.schemas.runtime.manager import SchemaConfiguration, SchemaManager
 
 # =============================================================================
 # Data Classes

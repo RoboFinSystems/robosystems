@@ -14,7 +14,7 @@ import yaml
 
 from robosystems.logger import logger
 
-from .models import Node, Property, Relationship, Schema
+from ..models import Node, Property, Relationship, Schema
 
 
 class SchemaFormat(Enum):
@@ -355,8 +355,8 @@ class CustomSchemaManager:
 
     This allows users to extend the base schema with custom nodes and relationships.
     """
-    from .base import BASE_NODES, BASE_RELATIONSHIPS
-    from .models import Schema
+    from ..base import BASE_NODES, BASE_RELATIONSHIPS
+    from ..models import Schema
 
     # Create merged schema
     merged = Schema(
