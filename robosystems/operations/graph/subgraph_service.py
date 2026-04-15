@@ -711,7 +711,7 @@ class SubgraphService:
     Returns:
         str: Generated DDL statements
     """
-    from ...schemas.manager import SchemaManager
+    from ...schemas.runtime.manager import SchemaManager
 
     manager = SchemaManager()
     config = manager.create_schema_configuration(

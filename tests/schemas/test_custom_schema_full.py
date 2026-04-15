@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from robosystems.schemas.custom import (
+from robosystems.schemas.runtime.custom import (
   CustomSchemaManager,
   CustomSchemaParser,
   SchemaFormat,

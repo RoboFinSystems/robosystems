@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 from robosystems.config import env
 from robosystems.logger import logger
 from robosystems.models.core import GraphTable
-from robosystems.schemas.parser import parse_cypher_schema
+from robosystems.schemas.runtime.parser import parse_cypher_schema
 
 
 def infer_table_type(table_name: str) -> Literal["node", "relationship"]:
@@ -55,7 +55,7 @@ class TableService:
     Returns:
         List of created GraphTable objects
     """
-    from robosystems.schemas.parser import parse_relationship_types
+    from robosystems.schemas.runtime.parser import parse_relationship_types
 
     logger.info(f"Auto-creating DuckDB tables from schema for graph {graph_id}")
 

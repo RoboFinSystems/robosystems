@@ -4,11 +4,11 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from robosystems.schemas.builder import (
+from robosystems.schemas.models import Schema
+from robosystems.schemas.runtime.builder import (
   LadybugSchemaBuilder,
   create_schema_from_config,
 )
-from robosystems.schemas.models import Schema
 
 
 @pytest.fixture

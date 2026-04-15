@@ -2,7 +2,7 @@
 
 import pytest
 
-from robosystems.schemas.manager import (
+from robosystems.schemas.runtime.manager import (
   SchemaCompatibility,
   SchemaConfiguration,
   SchemaManager,

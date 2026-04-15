@@ -316,7 +316,7 @@ async def export_graph_schema(
       else:
         # Try to generate from schema_def if it has nodes/relationships
         try:
-          from robosystems.schemas.custom import CustomSchemaManager
+          from robosystems.schemas.runtime.custom import CustomSchemaManager
 
           manager = CustomSchemaManager()
           schema = manager.create_from_dict(schema_def)

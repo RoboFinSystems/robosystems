@@ -12,7 +12,7 @@ from typing import Any
 
 from robosystems.logger import logger
 
-from .models import Schema
+from ..models import Schema
 
 
 class SchemaType(Enum):

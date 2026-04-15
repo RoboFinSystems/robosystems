@@ -196,6 +196,11 @@ def upgrade() -> None:
     sa.Column("is_shared", sa.Boolean(), nullable=False, server_default="false"),
     sa.Column("source_taxonomy_id", sa.String(), nullable=True),
     sa.Column("target_taxonomy_id", sa.String(), nullable=True),
+    # Extension chain (TAXONOMY_EXTENDS_TAXONOMY in graph) — version upgrades,
+    # entity extensions, industry overlays. Distinct from mapping relationships.
+    sa.Column("parent_taxonomy_id", sa.String(), nullable=True),
+    sa.Column("extension_type", sa.String(), nullable=True),
+    sa.Column("effective_date", sa.Date(), nullable=True),
     sa.Column("is_active", sa.Boolean(), nullable=False, server_default="true"),
     sa.Column("is_locked", sa.Boolean(), nullable=False, server_default="false"),
     sa.Column("metadata", postgresql.JSONB(), nullable=False, server_default="{}"),
@@ -209,9 +214,15 @@ def upgrade() -> None:
     sa.PrimaryKeyConstraint("id"),
     sa.ForeignKeyConstraint(["source_taxonomy_id"], ["taxonomies.id"], use_alter=True),
     sa.ForeignKeyConstraint(["target_taxonomy_id"], ["taxonomies.id"], use_alter=True),
+    sa.ForeignKeyConstraint(["parent_taxonomy_id"], ["taxonomies.id"], use_alter=True),
     sa.CheckConstraint(
       "taxonomy_type IN ('chart_of_accounts', 'reporting', 'mapping', 'schedule')",
       name="check_taxonomy_type",
+    ),
+    sa.CheckConstraint(
+      "extension_type IS NULL OR extension_type IN "
+      "('version', 'entity_extension', 'industry', 'jurisdiction')",
+      name="check_taxonomy_extension_type",
     ),
     schema="public",
   )
@@ -227,6 +238,13 @@ def upgrade() -> None:
     ["standard"],
     schema="public",
     postgresql_where=sa.text("standard IS NOT NULL"),
+  )
+  op.create_index(
+    "idx_taxonomies_parent",
+    "taxonomies",
+    ["parent_taxonomy_id"],
+    schema="public",
+    postgresql_where=sa.text("parent_taxonomy_id IS NOT NULL"),
   )
 
   op.create_table(
@@ -571,11 +589,14 @@ def upgrade() -> None:
   op.create_index("idx_line_items_element", "line_items", ["element_id"])
 
   # -- Junction tables --
+  # Parent-side FKs use CASCADE (tags are discarded with their owning ledger
+  # row); dimension-side FKs use RESTRICT (deleting a dimension still in use
+  # by any ledger row should be an explicit operator decision).
   op.create_table(
     "transaction_dimensions",
     sa.Column("transaction_id", sa.String(), nullable=False),
     sa.Column("dimension_id", sa.String(), nullable=False),
-    sa.ForeignKeyConstraint(["dimension_id"], ["dimensions.id"]),
+    sa.ForeignKeyConstraint(["dimension_id"], ["dimensions.id"], ondelete="RESTRICT"),
     sa.ForeignKeyConstraint(
       ["transaction_id"],
       ["transactions.id"],
@@ -587,7 +608,7 @@ def upgrade() -> None:
     "entry_dimensions",
     sa.Column("entry_id", sa.String(), nullable=False),
     sa.Column("dimension_id", sa.String(), nullable=False),
-    sa.ForeignKeyConstraint(["dimension_id"], ["dimensions.id"]),
+    sa.ForeignKeyConstraint(["dimension_id"], ["dimensions.id"], ondelete="RESTRICT"),
     sa.ForeignKeyConstraint(["entry_id"], ["entries.id"], ondelete="CASCADE"),
     sa.PrimaryKeyConstraint("entry_id", "dimension_id"),
   )
@@ -595,7 +616,7 @@ def upgrade() -> None:
     "line_item_dimensions",
     sa.Column("line_item_id", sa.String(), nullable=False),
     sa.Column("dimension_id", sa.String(), nullable=False),
-    sa.ForeignKeyConstraint(["dimension_id"], ["dimensions.id"]),
+    sa.ForeignKeyConstraint(["dimension_id"], ["dimensions.id"], ondelete="RESTRICT"),
     sa.ForeignKeyConstraint(
       ["line_item_id"],
       ["line_items.id"],
@@ -773,12 +794,67 @@ def upgrade() -> None:
   op.create_index("idx_entities_status", "entities", ["status"])
   op.create_index("idx_entities_parent", "entities", ["parent_entity_id"])
 
+  # -- EntityTaxonomy join table (ENTITY_HAS_TAXONOMY in graph) --
+  # Per-tenant template: each tenant has their own entity↔taxonomy adoption
+  # rows. FKs reference per-tenant entities (tenant schema) and shared
+  # public.taxonomies (visible via search_path = '{tenant}, public').
+  op.create_table(
+    "entity_taxonomies",
+    sa.Column("id", sa.String(), nullable=False),
+    sa.Column("entity_id", sa.String(), nullable=False),
+    sa.Column("taxonomy_id", sa.String(), nullable=False),
+    sa.Column("is_primary", sa.Boolean(), nullable=False, server_default="false"),
+    sa.Column("basis", sa.String(), nullable=False),
+    sa.Column("effective_from", sa.Date(), nullable=True),
+    sa.Column("effective_to", sa.Date(), nullable=True),
+    sa.Column("adoption_context", sa.String(), nullable=True),
+    sa.Column(
+      "created_at", sa.DateTime(), nullable=False, server_default=sa.text("now()")
+    ),
+    sa.Column(
+      "updated_at", sa.DateTime(), nullable=False, server_default=sa.text("now()")
+    ),
+    sa.ForeignKeyConstraint(["entity_id"], ["entities.id"], ondelete="CASCADE"),
+    sa.ForeignKeyConstraint(["taxonomy_id"], ["taxonomies.id"], ondelete="RESTRICT"),
+    sa.PrimaryKeyConstraint("id"),
+    sa.UniqueConstraint(
+      "entity_id",
+      "taxonomy_id",
+      "basis",
+      name="uq_entity_taxonomy_combo",
+    ),
+    sa.CheckConstraint(
+      "basis IN ('reporting', 'chart_of_accounts', 'mapping', 'schedule')",
+      name="check_entity_taxonomy_basis",
+    ),
+    sa.CheckConstraint(
+      "adoption_context IS NULL OR adoption_context IN "
+      "('required_by_regulation', 'voluntary', 'contractual')",
+      name="check_entity_taxonomy_adoption_context",
+    ),
+  )
+  op.create_index("idx_entity_taxonomies_entity", "entity_taxonomies", ["entity_id"])
+  op.create_index(
+    "idx_entity_taxonomies_taxonomy", "entity_taxonomies", ["taxonomy_id"]
+  )
+  op.create_index(
+    "idx_entity_taxonomies_primary",
+    "entity_taxonomies",
+    ["entity_id", "basis"],
+    unique=True,
+    postgresql_where=sa.text("is_primary = true"),
+  )
+
   # -- Portfolios (RoboInvestor) --
   op.create_table(
     "portfolios",
     sa.Column("id", sa.String(), nullable=False),
     sa.Column("name", sa.String(), nullable=False),
     sa.Column("description", sa.String(), nullable=True),
+    # Entity linkage (ENTITY_HAS_PORTFOLIO in graph) — the investing entity
+    # that owns or manages this portfolio. Nullable for legacy portfolios.
+    sa.Column("entity_id", sa.String(), nullable=True),
+    sa.Column("ownership_type", sa.String(), nullable=True),
     sa.Column("strategy", sa.String(), nullable=True),
     sa.Column("inception_date", sa.Date(), nullable=True),
     sa.Column("base_currency", sa.String(), nullable=False),
@@ -787,9 +863,20 @@ def upgrade() -> None:
     sa.Column("created_at", sa.DateTime(), nullable=False),
     sa.Column("updated_at", sa.DateTime(), nullable=False),
     sa.Column("created_by", sa.String(), nullable=False),
+    sa.ForeignKeyConstraint(["entity_id"], ["entities.id"], ondelete="RESTRICT"),
     sa.PrimaryKeyConstraint("id"),
+    sa.CheckConstraint(
+      "ownership_type IS NULL OR ownership_type IN ('direct', 'managed', 'advised')",
+      name="check_portfolio_ownership_type",
+    ),
   )
   op.create_index("idx_portfolios_strategy", "portfolios", ["strategy"])
+  op.create_index(
+    "idx_portfolios_entity",
+    "portfolios",
+    ["entity_id"],
+    postgresql_where=sa.text("entity_id IS NOT NULL"),
+  )
 
   # -- Securities (RoboInvestor) --
   op.create_table(
@@ -926,6 +1013,7 @@ def downgrade() -> None:
   op.drop_table("positions")
   op.drop_table("securities")
   op.drop_table("portfolios")
+  op.drop_table("entity_taxonomies")
   op.drop_table("entities")
   op.drop_table("report_shares")
   op.drop_table("facts")

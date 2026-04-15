@@ -27,11 +27,11 @@ from robosystems.models.api.graphs.schema import (
   SchemaValidationResponse,
 )
 from robosystems.models.core import User
-from robosystems.schemas.custom import (
+from robosystems.schemas.runtime.custom import (
   CustomSchemaManager,
   SchemaFormat,
 )
-from robosystems.schemas.manager import SchemaManager
+from robosystems.schemas.runtime.manager import SchemaManager
 
 from .utils import circuit_breaker, timeout_coordinator
 

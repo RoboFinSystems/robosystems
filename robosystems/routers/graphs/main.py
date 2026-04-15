@@ -560,7 +560,7 @@ async def get_available_extensions(
   and recommended combinations for different use cases.
   """
   try:
-    from robosystems.schemas.manager import SchemaManager
+    from robosystems.schemas.runtime.manager import SchemaManager
 
     manager = SchemaManager()
     extensions_info = manager.list_available_extensions()

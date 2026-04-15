@@ -2,7 +2,7 @@
 
 import pytest
 
-from robosystems.schemas.custom import CustomSchemaParser, SchemaFormat
+from robosystems.schemas.runtime.custom import CustomSchemaParser, SchemaFormat
 
 
 @pytest.fixture

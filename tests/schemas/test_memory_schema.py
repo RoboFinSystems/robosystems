@@ -6,7 +6,7 @@ from robosystems.schemas.extensions.memory import (
   EXTENSION_NODES,
   EXTENSION_RELATIONSHIPS,
 )
-from robosystems.schemas.manager import SchemaManager
+from robosystems.schemas.runtime.manager import SchemaManager
 
 
 class TestMemorySchemaExtension:

@@ -8,7 +8,7 @@ using the robosystems.schemas definitions as the source of truth.
 import logging
 from typing import Any
 
-from .loader import get_schema_loader
+from ..loader import get_schema_loader
 
 logger = logging.getLogger(__name__)
 
