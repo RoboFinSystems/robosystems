@@ -99,7 +99,19 @@ class OperationEnvelope(BaseModel):
     or `"failed"` (error responses)
   - `result`: the domain-specific payload (the original Pydantic response)
     or `None` for async/failed cases
-  - `at`: ISO-8601 UTC timestamp of when the envelope was minted
+  - `at`: ISO-8601 UTC timestamp of when the envelope was minted (for sync
+    ops this is the completion time; for async/pending it's the enqueue time)
+  - `created_by`: user ID of the caller who initiated this operation, for
+    audit correlation without having to cross-reference the audit log.
+    Always populated for dispatcher-routed calls; may be `None` for legacy
+    direct `wrap_completed(...)` callers.
+  - `idempotent_replay`: `True` when the dispatcher returned this envelope
+    from the idempotency cache (the underlying command did NOT execute
+    again). `False` on every fresh execution. Clients can use this to
+    distinguish "my retry succeeded" from "the server re-ran the command"
+    without having to track their own request identity. The metrics
+    decorator also reads this attribute to suppress business-event counter
+    increments on replays so dashboards stay honest.
   """
 
   model_config = ConfigDict(populate_by_name=True)
@@ -114,20 +126,40 @@ class OperationEnvelope(BaseModel):
     default=None, description="Command-specific result payload"
   )
   at: str = Field(description="ISO-8601 UTC timestamp")
+  created_by: str | None = Field(
+    default=None,
+    alias="createdBy",
+    description="User ID that initiated the operation (null for legacy callers)",
+  )
+  idempotent_replay: bool = Field(
+    default=False,
+    alias="idempotentReplay",
+    description=(
+      "True when this envelope came from the idempotency cache — the "
+      "underlying command did not execute again. False on fresh executions."
+    ),
+  )
 
 
 def wrap_completed(
   operation_name: str,
   result: BaseModel | dict[str, Any] | list[Any] | None,
   operation_id: str | None = None,
+  created_by: str | None = None,
 ) -> OperationEnvelope:
-  """Build a `status="completed"` envelope for a sync command result."""
+  """Build a `status="completed"` envelope for a sync command result.
+
+  `created_by` is the user ID that initiated the operation; the
+  dispatcher passes it from `ctx.user_id` so clients and audit
+  consumers can correlate envelopes without reading the audit log.
+  """
   return OperationEnvelope(
     operation=operation_name,
     operationId=operation_id or generate_operation_id(),
     status="completed",
     result=_result_to_payload(result),
     at=_utcnow_iso(),
+    createdBy=created_by,
   )
 
 
@@ -135,12 +167,16 @@ def wrap_pending(
   operation_name: str,
   operation_id: str,
   partial_result: BaseModel | dict[str, Any] | list[Any] | None = None,
+  created_by: str | None = None,
 ) -> OperationEnvelope:
   """Build a `status="pending"` envelope for an async-dispatched command.
 
   `operation_id` is required here because the caller already registered
   the operation with the SSE infrastructure (or the Dagster dispatcher)
   and needs the same ID in the response for streaming.
+
+  `created_by` should be the user ID that enqueued the job so the
+  pending envelope carries the same provenance as a completed one.
   """
   return OperationEnvelope(
     operation=operation_name,
@@ -148,6 +184,7 @@ def wrap_pending(
     status="pending",
     result=_result_to_payload(partial_result),
     at=_utcnow_iso(),
+    createdBy=created_by,
   )
 
 
@@ -155,6 +192,7 @@ def wrap_failed(
   operation_name: str,
   error: str | dict[str, Any],
   operation_id: str | None = None,
+  created_by: str | None = None,
 ) -> OperationEnvelope:
   """Build a `status="failed"` envelope.
 
@@ -173,6 +211,7 @@ def wrap_failed(
     status="failed",
     result=payload,
     at=_utcnow_iso(),
+    createdBy=created_by,
   )
 
 
@@ -540,6 +579,14 @@ async def execute_operation(
       )
       raise
     if cached is not None:
+      # Return a copy with `idempotent_replay=True` rather than mutating
+      # `cached` in place. The production `IdempotencyCache` deserializes
+      # a fresh instance per call (so mutation would be safe), but the
+      # dispatcher contract should not depend on that — a future
+      # in-memory cache implementation that shares object references
+      # across requests would silently corrupt prior envelopes. Pydantic
+      # `model_copy` is O(1) for the envelope's small field set.
+      cached = cached.model_copy(update={"idempotent_replay": True})
       log_operation_audit(
         operation_name=ctx.operation_name,
         operation_id=cached.operation_id,
@@ -601,7 +648,7 @@ async def execute_operation(
   # The hook runs BEFORE caching so that if it raises (e.g. database
   # failure marking the graph stale), the failure aborts the request
   # without poisoning the idempotency cache with a stuck envelope.
-  envelope = wrap_completed(ctx.operation_name, result)
+  envelope = wrap_completed(ctx.operation_name, result, created_by=ctx.user_id)
   if on_fresh_success is not None:
     on_fresh_success(envelope)
   if use_idempotency:

@@ -109,10 +109,16 @@ class TestWrapCompleted:
     Downstream SDKs unwrap the envelope via camelCase GraphQL/REST
     conventions; a snake_case leak would break them silently.
     """
-    envelope = wrap_completed("noop", None)
+    envelope = wrap_completed("noop", None, created_by="usr_42")
     payload = json.loads(envelope.model_dump_json(by_alias=True))
     assert "operationId" in payload
     assert "operation_id" not in payload
+    assert "createdBy" in payload
+    assert "created_by" not in payload
+    assert "idempotentReplay" in payload
+    assert "idempotent_replay" not in payload
+    assert payload["createdBy"] == "usr_42"
+    assert payload["idempotentReplay"] is False
     assert payload["status"] == "completed"
     assert set(payload.keys()) == {
       "operation",
@@ -120,6 +126,8 @@ class TestWrapCompleted:
       "status",
       "result",
       "at",
+      "createdBy",
+      "idempotentReplay",
     }
 
 
@@ -536,6 +544,9 @@ class TestExecuteOperationHappyPath:
     assert envelope.status == "completed"
     assert envelope.result == {"id": "pf_1", "amount": 42}
     assert envelope.operation_id.startswith("op_")
+    # created_by propagates from the OperationContext.user_id so the
+    # envelope carries caller provenance without audit-log lookups.
+    assert envelope.created_by == "usr_1"
 
   @pytest.mark.asyncio
   async def test_supports_async_runner(self) -> None:
@@ -704,6 +715,10 @@ class TestExecuteOperationIdempotency:
     assert runner_called[0] is False
     assert second.operation_id == first.operation_id
     assert second.result == {"version": 1}
+    # Fresh execution sets idempotent_replay=False; cache hit flips it to
+    # True so clients and the metrics decorator can distinguish them.
+    assert first.idempotent_replay is False
+    assert second.idempotent_replay is True
 
     # Replay should log with idempotent_replay=True
     audit_calls = [

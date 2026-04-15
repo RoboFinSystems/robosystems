@@ -20,7 +20,11 @@ from robosystems.models.api.extensions.entity import (
   LedgerEntityResponse,
   UpdateEntityRequest,
 )
-from robosystems.routers.extensions.roboledger.operations import update_entity_op
+from robosystems.routers.extensions.roboledger.operations import (
+  AutoMapElementsOperation,
+  auto_map_elements_op,
+  update_entity_op,
+)
 
 GRAPH_ID = "kg01234567890abcdef"
 
@@ -223,3 +227,146 @@ class TestUpdateEntityOp:
     assert mock_cmd.call_count == 1  # ops fn only called once
     assert first.operation_id == second.operation_id
     assert first.result == second.result
+
+
+class TestAutoMapElementsOp:
+  """auto_map_elements_op hand-rolls its own idempotency cache handling
+  because it's async/Dagster-dispatched and can't route through
+  `execute_operation`. That manual path has to mirror the dispatcher's
+  replay-marking contract — if it drifts, retried calls double-count
+  business events and clients can't tell replay from fresh enqueue.
+  """
+
+  @pytest.mark.asyncio
+  async def test_fresh_enqueue_returns_pending_envelope(self) -> None:
+    body = AutoMapElementsOperation(mapping_id="map_abc")
+    cache = _FakeCache()
+    task_response = {
+      "operation_id": "op_01ARZ3NDEKTSV4RRFFQ69G5FAV",
+      "operation_type": "agent",
+      "_links": {"stream": "/v1/operations/op_01ARZ.../stream"},
+      "deduplicated": False,
+    }
+
+    with patch(
+      "robosystems.worker.client.enqueue_task",
+      return_value=task_response,
+    ) as mock_enqueue:
+      envelope = await auto_map_elements_op(
+        body=body,
+        graph_id=GRAPH_ID,
+        user=_make_user(),
+        idempotency_key=None,
+        cache=cache,
+      )
+
+    assert mock_enqueue.call_count == 1
+    assert isinstance(envelope, OperationEnvelope)
+    assert envelope.status == "pending"
+    assert envelope.operation == "auto-map-elements"
+    assert envelope.operation_id == "op_01ARZ3NDEKTSV4RRFFQ69G5FAV"
+    assert envelope.created_by == "usr_test123"
+    # Fresh enqueue — flag is False so the metrics decorator counts
+    # the business event.
+    assert envelope.idempotent_replay is False
+
+  @pytest.mark.asyncio
+  async def test_idempotent_replay_marks_envelope_and_skips_enqueue(self) -> None:
+    """Regression test for the replay-flag bug.
+
+    The cached-hit branch must return a copy with
+    `idempotent_replay=True` so (a) the metrics decorator suppresses
+    the business_event counter and (b) clients can tell "task already
+    enqueued" from "task newly enqueued". Without the `model_copy`,
+    retries inflate the `ledger_auto_map_elements` counter.
+    """
+    body = AutoMapElementsOperation(mapping_id="map_xyz")
+    cache = _FakeCache()
+    task_response = {
+      "operation_id": "op_01REPLAYFLAGTEST0000000000",
+      "operation_type": "agent",
+      "_links": {},
+      "deduplicated": False,
+    }
+
+    with patch(
+      "robosystems.worker.client.enqueue_task",
+      return_value=task_response,
+    ) as mock_enqueue:
+      first = await auto_map_elements_op(
+        body=body,
+        graph_id=GRAPH_ID,
+        user=_make_user(),
+        idempotency_key="retry-key-automap",
+        cache=cache,
+      )
+
+      second = await auto_map_elements_op(
+        body=body,
+        graph_id=GRAPH_ID,
+        user=_make_user(),
+        idempotency_key="retry-key-automap",
+        cache=cache,
+      )
+
+    # The worker must only be enqueued once — the second call is a replay
+    assert mock_enqueue.call_count == 1
+    # Same operation_id on both calls (same underlying task)
+    assert first.operation_id == second.operation_id == "op_01REPLAYFLAGTEST0000000000"
+    # Fresh call: idempotent_replay=False
+    assert first.idempotent_replay is False
+    # Replayed call: idempotent_replay=True (the fix under test)
+    assert second.idempotent_replay is True
+
+  @pytest.mark.asyncio
+  async def test_idempotent_replay_does_not_poison_cached_instance(self) -> None:
+    """The cached envelope must stay `idempotent_replay=False` after a
+    replay so subsequent replays still read a clean copy. Tests that
+    we `model_copy(update=...)` instead of mutating `cached` in place.
+    """
+    body = AutoMapElementsOperation(mapping_id="map_poison")
+    cache = _FakeCache()
+    task_response = {
+      "operation_id": "op_01POISONTEST00000000000000",
+      "operation_type": "agent",
+      "_links": {},
+      "deduplicated": False,
+    }
+
+    with patch(
+      "robosystems.worker.client.enqueue_task",
+      return_value=task_response,
+    ):
+      # Prime cache
+      first = await auto_map_elements_op(
+        body=body,
+        graph_id=GRAPH_ID,
+        user=_make_user(),
+        idempotency_key="poison-key",
+        cache=cache,
+      )
+      # Two replays in a row
+      second = await auto_map_elements_op(
+        body=body,
+        graph_id=GRAPH_ID,
+        user=_make_user(),
+        idempotency_key="poison-key",
+        cache=cache,
+      )
+      third = await auto_map_elements_op(
+        body=body,
+        graph_id=GRAPH_ID,
+        user=_make_user(),
+        idempotency_key="poison-key",
+        cache=cache,
+      )
+
+    assert first.idempotent_replay is False
+    assert second.idempotent_replay is True
+    assert third.idempotent_replay is True
+    # The cached envelope stored in the fake cache should still read
+    # False — we never mutated it. (If we had used `cached.idempotent_replay
+    # = True` instead of model_copy, the stored object would now be True
+    # and this assertion would fail.)
+    stored_envelope, _ = next(iter(cache.store.values()))
+    assert stored_envelope.idempotent_replay is False
