@@ -36,6 +36,7 @@ OP_KIND_DAGSTER_MATERIALIZATION = "dagster_materialization"
 OP_KIND_SEC_STAGING = "sec_staging"
 OP_KIND_EXTENSIONS_MATERIALIZE = "extensions_materialize"
 OP_KIND_BULK_TABLE_CREATE = "bulk_table_create"
+OP_KIND_BULK_TABLE_INSERT = "bulk_table_insert"
 
 
 def _iso_now() -> str:

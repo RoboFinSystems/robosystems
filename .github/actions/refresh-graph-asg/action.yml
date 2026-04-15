@@ -22,10 +22,12 @@ inputs:
   max-wait-minutes:
     description: >-
       Maximum minutes to wait for in-flight destructive operations
-      (materialization, SEC staging, extensions mat, bulk table creates)
-      to complete on ANY instance in the target ASG before starting the
-      refresh. Polls every 60 seconds. Covers shared tiers too — this is
-      specifically the SEC shared-master materialization protection case.
+      (materialization, extensions mat, bulk table creates) to complete
+      on ANY instance in the target WRITER ASG before starting the
+      refresh. Polls every 60 seconds. NOTE: This action skips the
+      shared tier entirely — shared-tier busy protection (which covers
+      SEC staging on the shared-master) runs via refresh-graph-containers,
+      called per-instance from service-refresh.yml.
     required: false
     default: "30"
   force-ignore-busy:
@@ -79,8 +81,9 @@ runs:
         WARMUP="${{ inputs.instance-warmup }}"
         MAX_WAIT_ATTEMPTS="${{ inputs.max-wait-minutes }}"
         FORCE_IGNORE_BUSY="${{ inputs.force-ignore-busy }}"
-        # Stale detection: counter > 0 but heartbeat older than 2h → crashed
-        STALE_WINDOW_SECONDS=7200
+        # Stale detection: counter > 0 but heartbeat older than 6h → crashed.
+        # 6h comfortably covers full SEC backfills; anything longer is likely hung.
+        STALE_WINDOW_SECONDS=21600
 
         # Environment suffix for stack names
         if [ "$ENVIRONMENT" == "prod" ]; then
@@ -207,11 +210,11 @@ runs:
           fi
 
           # Wait for in-flight destructive operations on ANY instance in this
-          # ASG before starting the refresh. Covers materialization, SEC
-          # staging, extensions mat, and bulk table creates. Unlike the
-          # informational database_count check above, this runs for SHARED
-          # tiers too — protecting the SEC shared-master SEC materialization
-          # from mid-flight cycling.
+          # writer ASG before starting the refresh. Covers user materialization,
+          # extensions mat, and bulk table creates. Shared-tier SEC staging
+          # protection runs through refresh-graph-containers (per-instance via
+          # service-refresh.yml) — the ladybug-shared branch of this loop skips
+          # to `continue` above, so this block never executes for shared tiers.
           if [ "$FORCE_IGNORE_BUSY" = "true" ]; then
             echo "  force-ignore-busy=true — skipping destructive-op wait"
           else
@@ -240,7 +243,13 @@ runs:
                 BUSY_LAST_AT=$(echo "$BUSY_ITEM" | jq -r '.last_destructive_op_at.S // ""')
                 BUSY_KIND=$(echo "$BUSY_ITEM" | jq -r '.last_destructive_op_kind.S // "unknown"')
 
-                if [ "$BUSY_COUNT" = "0" ]; then
+                # Integer comparison — a counter that went negative (from a
+                # swallowed increment-failure on the writer side) should be
+                # treated as idle, not "still waiting."
+                if [ "${BUSY_COUNT:-0}" -le 0 ] 2>/dev/null; then
+                  if [ "${BUSY_COUNT:-0}" -lt 0 ] 2>/dev/null; then
+                    echo "    ::warning::Negative busy counter on ${BUSY_INSTANCE_ID} (count=${BUSY_COUNT}); treating as idle."
+                  fi
                   continue
                 fi
 
@@ -259,7 +268,7 @@ runs:
                 TOTAL_BUSY=$((TOTAL_BUSY + BUSY_COUNT))
               done
 
-              if [ "$TOTAL_BUSY" = "0" ]; then
+              if [ "${TOTAL_BUSY:-0}" -le 0 ] 2>/dev/null; then
                 if [ $WAIT_ATTEMPT -eq 1 ]; then
                   echo "  All instances idle — proceeding with refresh"
                 else
@@ -272,7 +281,7 @@ runs:
               sleep 60
             done
 
-            if [ "$TOTAL_BUSY" != "0" ]; then
+            if [ "${TOTAL_BUSY:-0}" -gt 0 ] 2>/dev/null; then
               echo "::error::Timed out after ${MAX_WAIT_ATTEMPTS} minute(s) waiting for ASG $ASG_NAME to become idle. Use force-ignore-busy=true to override."
               HAS_ERRORS=true
               continue

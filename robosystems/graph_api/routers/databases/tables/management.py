@@ -34,6 +34,7 @@ from robosystems.graph_api.models.tasks import TaskStatus
 from robosystems.logger import logger
 from robosystems.middleware.graph.instance_busy import (
   OP_KIND_BULK_TABLE_CREATE,
+  OP_KIND_BULK_TABLE_INSERT,
   instance_busy,
 )
 
@@ -247,7 +248,7 @@ async def perform_table_insert(
   # Import inside function to avoid circular dependency with pool initialization
   from robosystems.graph_api.core.duckdb.pool import get_duckdb_pool
 
-  async with instance_busy(env.INSTANCE_ID, OP_KIND_BULK_TABLE_CREATE):
+  async with instance_busy(env.INSTANCE_ID, OP_KIND_BULK_TABLE_INSERT):
     try:
       # Update task status to running
       await staging_task_manager.update_task(

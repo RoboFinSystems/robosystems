@@ -87,8 +87,10 @@ runs:
         REGION="${{ inputs.aws-region }}"
         MAX_ATTEMPTS=${{ inputs.max-wait-minutes }}
         FORCE_IGNORE="${{ inputs.force-ignore-busy }}"
-        # Stale detection: counter > 0 but no heartbeat for 2h → treat as crashed
-        STALE_WINDOW_SECONDS=7200
+        # Stale detection: counter > 0 but no heartbeat for 6h → treat as crashed.
+        # 6h comfortably covers even full SEC historical backfills (30-120min).
+        # If a single op actually runs longer than this, it's almost certainly hung.
+        STALE_WINDOW_SECONDS=21600
 
         if [ "$FORCE_IGNORE" = "true" ]; then
           echo "⚠️  force-ignore-busy=true — bypassing busy-counter check for ${INSTANCE_ID}"
@@ -120,12 +122,19 @@ runs:
           LAST_AT=$(echo "$ITEM" | jq -r '.last_destructive_op_at.S // ""')
           KIND=$(echo "$ITEM" | jq -r '.last_destructive_op_kind.S // "unknown"')
 
-          if [ "$COUNT" = "0" ]; then
+          # Integer comparison — a counter that went negative (from a
+          # swallowed increment-failure on the writer side) should be
+          # treated as idle, not "still waiting."
+          if [ "${COUNT:-0}" -le 0 ] 2>/dev/null; then
+            if [ "${COUNT:-0}" -lt 0 ] 2>/dev/null; then
+              echo "::warning::Negative busy counter on ${INSTANCE_ID} (count=${COUNT}); treating as idle. May indicate a swallowed increment failure."
+            fi
             if [ $ATTEMPT -eq 1 ]; then
               echo "✅ Instance ${INSTANCE_ID} is idle — proceeding with refresh"
             else
               echo "✅ Instance ${INSTANCE_ID} became idle after ${ATTEMPT} attempt(s)"
             fi
+            COUNT=0
             break
           fi
 
@@ -146,7 +155,7 @@ runs:
           sleep 60
         done
 
-        if [ "$COUNT" != "0" ]; then
+        if [ "${COUNT:-0}" -gt 0 ] 2>/dev/null; then
           echo "::error::Timed out after ${MAX_ATTEMPTS} minute(s) waiting for ${INSTANCE_ID} to become idle (count=${COUNT}, kind=${KIND}). Use force-ignore-busy=true to override."
           echo "status=timeout" >> $GITHUB_OUTPUT
           exit 1

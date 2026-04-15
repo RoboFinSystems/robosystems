@@ -177,6 +177,122 @@ class TestInstanceBusySync:
     assert patched_ddb.update_item.call_count == 0
 
 
+class TestResolveInstanceIdForGraph:
+  """Resolver helper that takes a graph_id and returns the hosting instance_id.
+
+  Used by orchestration-layer callers (SEC stager, Dagster ops, etc.) that
+  have a graph_id but no GraphClient handy.
+  """
+
+  async def test_happy_path_returns_client_instance_id(self):
+    """When the factory returns a client, the resolver reads _instance_id."""
+    mock_client = MagicMock()
+    mock_client._instance_id = "i-happy"
+    mock_client.close = MagicMock(return_value=None)
+
+    async def _fake_close():
+      return None
+
+    mock_client.close = _fake_close
+
+    async def _fake_create_client(**_kwargs):
+      return mock_client
+
+    mock_factory = MagicMock()
+    mock_factory.create_client = _fake_create_client
+
+    with patch.dict(
+      "sys.modules",
+      {
+        "robosystems.graph_api.client.factory": MagicMock(
+          GraphClientFactory=mock_factory
+        )
+      },
+    ):
+      result = await ib.resolve_instance_id_for_graph("kg_test")
+
+    assert result == "i-happy"
+
+  async def test_returns_empty_when_instance_id_missing(self):
+    """If the client has no _instance_id attribute set, return empty string."""
+    mock_client = MagicMock()
+    mock_client._instance_id = None
+
+    async def _fake_close():
+      return None
+
+    mock_client.close = _fake_close
+
+    async def _fake_create_client(**_kwargs):
+      return mock_client
+
+    mock_factory = MagicMock()
+    mock_factory.create_client = _fake_create_client
+
+    with patch.dict(
+      "sys.modules",
+      {
+        "robosystems.graph_api.client.factory": MagicMock(
+          GraphClientFactory=mock_factory
+        )
+      },
+    ):
+      result = await ib.resolve_instance_id_for_graph("kg_test")
+
+    assert result == ""
+
+  async def test_factory_failure_returns_empty_string(self):
+    """Any exception during client creation is swallowed — returns empty."""
+
+    async def _failing_create_client(**_kwargs):
+      raise RuntimeError("allocation manager down")
+
+    mock_factory = MagicMock()
+    mock_factory.create_client = _failing_create_client
+
+    with patch.dict(
+      "sys.modules",
+      {
+        "robosystems.graph_api.client.factory": MagicMock(
+          GraphClientFactory=mock_factory
+        )
+      },
+    ):
+      result = await ib.resolve_instance_id_for_graph("kg_test")
+
+    assert result == ""
+
+  async def test_client_closed_in_finally(self):
+    """The short-lived client must always be closed, even on read error."""
+    close_called = {"n": 0}
+
+    async def _fake_close():
+      close_called["n"] += 1
+
+    mock_client = MagicMock()
+    mock_client._instance_id = "i-close-test"
+    mock_client.close = _fake_close
+
+    async def _fake_create_client(**_kwargs):
+      return mock_client
+
+    mock_factory = MagicMock()
+    mock_factory.create_client = _fake_create_client
+
+    with patch.dict(
+      "sys.modules",
+      {
+        "robosystems.graph_api.client.factory": MagicMock(
+          GraphClientFactory=mock_factory
+        )
+      },
+    ):
+      result = await ib.resolve_instance_id_for_graph("kg_test")
+
+    assert result == "i-close-test"
+    assert close_called["n"] == 1
+
+
 class TestImperativeHelpers:
   """Imperative begin/end helpers for call sites where a context manager
   would require heavy re-indentation."""
@@ -237,6 +353,7 @@ class TestOpKindConstants:
     assert isinstance(ib.OP_KIND_SEC_STAGING, str)
     assert isinstance(ib.OP_KIND_EXTENSIONS_MATERIALIZE, str)
     assert isinstance(ib.OP_KIND_BULK_TABLE_CREATE, str)
+    assert isinstance(ib.OP_KIND_BULK_TABLE_INSERT, str)
 
   def test_op_kinds_are_unique(self):
     kinds = {
@@ -245,5 +362,6 @@ class TestOpKindConstants:
       ib.OP_KIND_SEC_STAGING,
       ib.OP_KIND_EXTENSIONS_MATERIALIZE,
       ib.OP_KIND_BULK_TABLE_CREATE,
+      ib.OP_KIND_BULK_TABLE_INSERT,
     }
-    assert len(kinds) == 5
+    assert len(kinds) == 6
