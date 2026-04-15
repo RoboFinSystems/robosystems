@@ -40,6 +40,16 @@ on:
           - shared
           - shared-replicas
         default: "writer"
+      max_wait_minutes:
+        description: "Minutes to wait for in-flight destructive ops to finish"
+        required: false
+        type: string
+        default: "30"
+      force_ignore_busy:
+        description: "Skip busy-counter check (emergency override)"
+        required: false
+        type: boolean
+        default: false
   workflow_call:
     inputs:
       environment:
@@ -72,6 +82,16 @@ on:
         required: false
         type: string
         default: "30"
+      max_wait_minutes:
+        description: "Minutes to wait for in-flight destructive ops on the target instance"
+        required: false
+        type: string
+        default: "30"
+      force_ignore_busy:
+        description: "Skip busy-counter check (emergency override)"
+        required: false
+        type: string
+        default: "false"
       # API refresh configuration
       api_refresh_enabled:
         description: "Refresh API ECS service"
@@ -260,6 +280,8 @@ jobs:
           aws-region: ${{ github.event_name == 'workflow_dispatch' && (vars.AWS_REGION || 'us-east-1') || inputs.aws_region }}
           aws-account-id: ${{ steps.aws-account.outputs.account_id }}
           health-check-timeout: ${{ inputs.graph_health_check_timeout || '30' }}
+          max-wait-minutes: ${{ inputs.max_wait_minutes || '30' }}
+          force-ignore-busy: ${{ inputs.force_ignore_busy || 'false' }}
 
   # ============================================
   # API ECS Service Refresh

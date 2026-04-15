@@ -848,12 +848,32 @@ def materialize_graph_tables(
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
 
+    # Import busy-counter helpers BEFORE the try so they're always bound in
+    # the finally, regardless of where an exception lands in the work below.
+    from robosystems.middleware.graph.instance_busy import (
+      OP_KIND_DAGSTER_MATERIALIZATION,
+      begin_destructive_op,
+      end_destructive_op,
+    )
+
+    # Initialize busy counter tracking. The actual instance_id is discovered
+    # after client creation below; initializing to "" here keeps the finally
+    # block simple (the primitive treats empty strings as a no-op).
+    busy_instance_id = ""
+
     try:
       # Get graph client - use GraphClientFactory for materialize_table support
       from robosystems.graph_api.client.factory import get_graph_client
 
       client = loop.run_until_complete(
         get_graph_client(graph_id=graph_id, operation_type="write")
+      )
+
+      # Publish busy counter on the target instance for GHA pre-refresh
+      # coordination. See robosystems/middleware/graph/instance_busy.py.
+      busy_instance_id = client._instance_id or ""
+      loop.run_until_complete(
+        begin_destructive_op(busy_instance_id, OP_KIND_DAGSTER_MATERIALIZATION)
       )
 
       # Handle rebuild if requested
@@ -1048,6 +1068,14 @@ def materialize_graph_tables(
       return result
 
     finally:
+      # Decrement busy counter before loop close. Safe even if the begin
+      # call never ran (busy_instance_id == "" → primitive no-op).
+      try:
+        loop.run_until_complete(
+          end_destructive_op(busy_instance_id, OP_KIND_DAGSTER_MATERIALIZATION)
+        )
+      except Exception as cleanup_err:
+        context.log.warning(f"Busy counter cleanup failed (non-fatal): {cleanup_err}")
       loop.close()
 
 

@@ -86,16 +86,32 @@ def sec_duckdb_staged(
     )
     context.log.info(f"SEC repository status: {repo_result.get('status', 'unknown')}")
 
-    # Run full staging from all S3 parquet files
-    result = await processor.stage_to_duckdb(
-      year=config.year,
-      start_year=config.start_year,
-      end_year=config.end_year,
-      reset_staging=config.reset_staging,
-      duckdb_memory_mb=duckdb_memory_mb,
-      progress_callback=dagster_progress,
+    # Publish the busy counter against the shared-tier master that actually
+    # runs the DuckDB writes, so GHA pre-refresh waits before cycling it.
+    # Imports are lazy so an adapter-load-time import chain does not pull
+    # boto3 / GraphClientFactory into every SEC module at startup.
+    from robosystems.middleware.graph.instance_busy import (
+      OP_KIND_SEC_STAGING,
+      begin_destructive_op,
+      end_destructive_op,
+      resolve_instance_id_for_graph,
     )
-    return result
+
+    busy_instance_id = await resolve_instance_id_for_graph(config.graph_id)
+    await begin_destructive_op(busy_instance_id, OP_KIND_SEC_STAGING)
+    try:
+      # Run full staging from all S3 parquet files
+      result = await processor.stage_to_duckdb(
+        year=config.year,
+        start_year=config.start_year,
+        end_year=config.end_year,
+        reset_staging=config.reset_staging,
+        duckdb_memory_mb=duckdb_memory_mb,
+        progress_callback=dagster_progress,
+      )
+      return result
+    finally:
+      await end_destructive_op(busy_instance_id, OP_KIND_SEC_STAGING)
 
   result = asyncio.run(run_staging())
 
@@ -277,15 +293,28 @@ def sec_historical_duckdb_staged(
     )
     context.log.info(f"Subgraph status: {subgraph_result.get('status')}")
 
-    # Run staging with year range filter
-    result = await processor.stage_to_duckdb(
-      start_year=start_year,
-      end_year=end_year,
-      reset_staging=config.reset_staging,
-      duckdb_memory_mb=duckdb_memory_mb,
-      progress_callback=dagster_progress,
+    # See sec_duckdb_staged above for why we publish a busy counter here.
+    from robosystems.middleware.graph.instance_busy import (
+      OP_KIND_SEC_STAGING,
+      begin_destructive_op,
+      end_destructive_op,
+      resolve_instance_id_for_graph,
     )
-    return result
+
+    busy_instance_id = await resolve_instance_id_for_graph(graph_id)
+    await begin_destructive_op(busy_instance_id, OP_KIND_SEC_STAGING)
+    try:
+      # Run staging with year range filter
+      result = await processor.stage_to_duckdb(
+        start_year=start_year,
+        end_year=end_year,
+        reset_staging=config.reset_staging,
+        duckdb_memory_mb=duckdb_memory_mb,
+        progress_callback=dagster_progress,
+      )
+      return result
+    finally:
+      await end_destructive_op(busy_instance_id, OP_KIND_SEC_STAGING)
 
   result = asyncio.run(run_staging())
 
@@ -373,11 +402,24 @@ def sec_duckdb_incremental_staged(
   processor = XBRLDuckDBGraphProcessor(graph_id=config.graph_id)
 
   async def run_incremental():
-    return await processor.stage_incremental_to_duckdb(
-      year=config.year,
-      quarter=config.quarter,
-      progress_callback=context.log.info,
+    # See sec_duckdb_staged above for why we publish a busy counter here.
+    from robosystems.middleware.graph.instance_busy import (
+      OP_KIND_SEC_STAGING,
+      begin_destructive_op,
+      end_destructive_op,
+      resolve_instance_id_for_graph,
     )
+
+    busy_instance_id = await resolve_instance_id_for_graph(config.graph_id)
+    await begin_destructive_op(busy_instance_id, OP_KIND_SEC_STAGING)
+    try:
+      return await processor.stage_incremental_to_duckdb(
+        year=config.year,
+        quarter=config.quarter,
+        progress_callback=context.log.info,
+      )
+    finally:
+      await end_destructive_op(busy_instance_id, OP_KIND_SEC_STAGING)
 
   result = asyncio.run(run_incremental())
 

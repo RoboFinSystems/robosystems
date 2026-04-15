@@ -23,6 +23,7 @@ import redis.asyncio as redis_async
 from fastapi import APIRouter, BackgroundTasks, Body, HTTPException, Path
 from fastapi import status as http_status
 
+from robosystems.config import env
 from robosystems.config.valkey_registry import ValkeyDatabase
 from robosystems.graph_api.core.duckdb.manager import (
   DuckDBTableManager,
@@ -31,6 +32,10 @@ from robosystems.graph_api.core.duckdb.manager import (
 )
 from robosystems.graph_api.models.tasks import TaskStatus
 from robosystems.logger import logger
+from robosystems.middleware.graph.instance_busy import (
+  OP_KIND_BULK_TABLE_CREATE,
+  instance_busy,
+)
 
 router = APIRouter(prefix="/databases/{graph_id}/tables")
 
@@ -151,77 +156,78 @@ async def perform_table_creation(
   # Import inside function to avoid circular dependency with pool initialization
   from robosystems.graph_api.core.duckdb.pool import get_duckdb_pool
 
-  try:
-    # Update task status to running
-    await staging_task_manager.update_task(
-      task_id,
-      status=TaskStatus.RUNNING,
-      started_at=datetime.now(UTC).isoformat(),
-    )
-
-    logger.info(
-      f"[Task {task_id}] Starting table creation: {request.table_name} for graph {request.graph_id}"
-    )
-
-    # Perform the actual table creation with timeout
-    # Run sync function in thread pool and wrap with timeout
-    start_time = time.time()
+  async with instance_busy(env.INSTANCE_ID, OP_KIND_BULK_TABLE_CREATE):
     try:
-      result = await asyncio.wait_for(
-        asyncio.to_thread(table_manager.create_table, request),
-        timeout=timeout_seconds,
+      # Update task status to running
+      await staging_task_manager.update_task(
+        task_id,
+        status=TaskStatus.RUNNING,
+        started_at=datetime.now(UTC).isoformat(),
       )
-    except TimeoutError:
-      # CRITICAL: Interrupt the DuckDB query to prevent zombie threads
-      # asyncio.wait_for() raises TimeoutError but the thread keeps running
-      # We must interrupt the connection to cancel the in-progress query
+
+      logger.info(
+        f"[Task {task_id}] Starting table creation: {request.table_name} for graph {request.graph_id}"
+      )
+
+      # Perform the actual table creation with timeout
+      # Run sync function in thread pool and wrap with timeout
+      start_time = time.time()
       try:
-        pool = get_duckdb_pool()
-        interrupted = pool.interrupt_connections(request.graph_id)
-        logger.warning(
-          f"[Task {task_id}] Timeout - interrupted {interrupted} DuckDB connection(s)"
+        result = await asyncio.wait_for(
+          asyncio.to_thread(table_manager.create_table, request),
+          timeout=timeout_seconds,
         )
-      except Exception as interrupt_err:
-        logger.error(
-          f"[Task {task_id}] Failed to interrupt connections: {interrupt_err}"
-        )
+      except TimeoutError:
+        # CRITICAL: Interrupt the DuckDB query to prevent zombie threads
+        # asyncio.wait_for() raises TimeoutError but the thread keeps running
+        # We must interrupt the connection to cancel the in-progress query
+        try:
+          pool = get_duckdb_pool()
+          interrupted = pool.interrupt_connections(request.graph_id)
+          logger.warning(
+            f"[Task {task_id}] Timeout - interrupted {interrupted} DuckDB connection(s)"
+          )
+        except Exception as interrupt_err:
+          logger.error(
+            f"[Task {task_id}] Failed to interrupt connections: {interrupt_err}"
+          )
 
-      raise TimeoutError(
-        f"Table creation timed out after {timeout_seconds}s "
-        f"({timeout_seconds // 60} minutes)"
+        raise TimeoutError(
+          f"Table creation timed out after {timeout_seconds}s "
+          f"({timeout_seconds // 60} minutes)"
+        )
+      duration = time.time() - start_time
+
+      # Update task as completed
+      await staging_task_manager.update_task(
+        task_id,
+        status=TaskStatus.COMPLETED,
+        completed_at=datetime.now(UTC).isoformat(),
+        progress_percent=100,
+        result={
+          "status": result.status,
+          "table_name": result.table_name,
+          "execution_time_ms": result.execution_time_ms,
+          "row_count": result.row_count,
+          "duration_seconds": duration,
+        },
       )
-    duration = time.time() - start_time
 
-    # Update task as completed
-    await staging_task_manager.update_task(
-      task_id,
-      status=TaskStatus.COMPLETED,
-      completed_at=datetime.now(UTC).isoformat(),
-      progress_percent=100,
-      result={
-        "status": result.status,
-        "table_name": result.table_name,
-        "execution_time_ms": result.execution_time_ms,
-        "row_count": result.row_count,
-        "duration_seconds": duration,
-      },
-    )
+      logger.info(
+        f"[Task {task_id}] Completed: table {request.table_name} created "
+        f"({result.row_count:,} rows) in {duration:.2f}s"
+      )
 
-    logger.info(
-      f"[Task {task_id}] Completed: table {request.table_name} created "
-      f"({result.row_count:,} rows) in {duration:.2f}s"
-    )
+    except Exception as e:
+      logger.error(f"[Task {task_id}] Failed: {e}")
 
-  except Exception as e:
-    logger.error(f"[Task {task_id}] Failed: {e}")
-
-    # Update task as failed
-    await staging_task_manager.update_task(
-      task_id,
-      status=TaskStatus.FAILED,
-      completed_at=datetime.now(UTC).isoformat(),
-      error=str(e),
-    )
+      # Update task as failed
+      await staging_task_manager.update_task(
+        task_id,
+        status=TaskStatus.FAILED,
+        completed_at=datetime.now(UTC).isoformat(),
+        error=str(e),
+      )
 
 
 async def perform_table_insert(
@@ -241,74 +247,75 @@ async def perform_table_insert(
   # Import inside function to avoid circular dependency with pool initialization
   from robosystems.graph_api.core.duckdb.pool import get_duckdb_pool
 
-  try:
-    # Update task status to running
-    await staging_task_manager.update_task(
-      task_id,
-      status=TaskStatus.RUNNING,
-      started_at=datetime.now(UTC).isoformat(),
-    )
-
-    logger.info(
-      f"[Task {task_id}] Starting table insert: {request.table_name} for graph {request.graph_id}"
-    )
-
-    # Perform the actual table insert with timeout
-    start_time = time.time()
+  async with instance_busy(env.INSTANCE_ID, OP_KIND_BULK_TABLE_CREATE):
     try:
-      result = await asyncio.wait_for(
-        asyncio.to_thread(table_manager.insert_into_table, request),
-        timeout=timeout_seconds,
+      # Update task status to running
+      await staging_task_manager.update_task(
+        task_id,
+        status=TaskStatus.RUNNING,
+        started_at=datetime.now(UTC).isoformat(),
       )
-    except TimeoutError:
-      # CRITICAL: Interrupt the DuckDB query to prevent zombie threads
+
+      logger.info(
+        f"[Task {task_id}] Starting table insert: {request.table_name} for graph {request.graph_id}"
+      )
+
+      # Perform the actual table insert with timeout
+      start_time = time.time()
       try:
-        pool = get_duckdb_pool()
-        interrupted = pool.interrupt_connections(request.graph_id)
-        logger.warning(
-          f"[Task {task_id}] Timeout - interrupted {interrupted} DuckDB connection(s)"
+        result = await asyncio.wait_for(
+          asyncio.to_thread(table_manager.insert_into_table, request),
+          timeout=timeout_seconds,
         )
-      except Exception as interrupt_err:
-        logger.error(
-          f"[Task {task_id}] Failed to interrupt connections: {interrupt_err}"
-        )
+      except TimeoutError:
+        # CRITICAL: Interrupt the DuckDB query to prevent zombie threads
+        try:
+          pool = get_duckdb_pool()
+          interrupted = pool.interrupt_connections(request.graph_id)
+          logger.warning(
+            f"[Task {task_id}] Timeout - interrupted {interrupted} DuckDB connection(s)"
+          )
+        except Exception as interrupt_err:
+          logger.error(
+            f"[Task {task_id}] Failed to interrupt connections: {interrupt_err}"
+          )
 
-      raise TimeoutError(
-        f"Table insert timed out after {timeout_seconds}s "
-        f"({timeout_seconds // 60} minutes)"
+        raise TimeoutError(
+          f"Table insert timed out after {timeout_seconds}s "
+          f"({timeout_seconds // 60} minutes)"
+        )
+      duration = time.time() - start_time
+
+      # Update task as completed
+      await staging_task_manager.update_task(
+        task_id,
+        status=TaskStatus.COMPLETED,
+        completed_at=datetime.now(UTC).isoformat(),
+        progress_percent=100,
+        result={
+          "status": result.status,
+          "table_name": result.table_name,
+          "execution_time_ms": result.execution_time_ms,
+          "row_count": result.row_count,
+          "duration_seconds": duration,
+        },
       )
-    duration = time.time() - start_time
 
-    # Update task as completed
-    await staging_task_manager.update_task(
-      task_id,
-      status=TaskStatus.COMPLETED,
-      completed_at=datetime.now(UTC).isoformat(),
-      progress_percent=100,
-      result={
-        "status": result.status,
-        "table_name": result.table_name,
-        "execution_time_ms": result.execution_time_ms,
-        "row_count": result.row_count,
-        "duration_seconds": duration,
-      },
-    )
+      logger.info(
+        f"[Task {task_id}] Completed: inserted into {request.table_name} "
+        f"({result.row_count:,} rows total) in {duration:.2f}s"
+      )
 
-    logger.info(
-      f"[Task {task_id}] Completed: inserted into {request.table_name} "
-      f"({result.row_count:,} rows total) in {duration:.2f}s"
-    )
+    except Exception as e:
+      logger.error(f"[Task {task_id}] Failed: {e}")
 
-  except Exception as e:
-    logger.error(f"[Task {task_id}] Failed: {e}")
-
-    # Update task as failed
-    await staging_task_manager.update_task(
-      task_id,
-      status=TaskStatus.FAILED,
-      completed_at=datetime.now(UTC).isoformat(),
-      error=str(e),
-    )
+      # Update task as failed
+      await staging_task_manager.update_task(
+        task_id,
+        status=TaskStatus.FAILED,
+        completed_at=datetime.now(UTC).isoformat(),
+        error=str(e),
+      )
 
 
 @router.post("")

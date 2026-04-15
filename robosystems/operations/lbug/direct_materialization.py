@@ -22,6 +22,11 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from robosystems.logger import logger
+from robosystems.middleware.graph.instance_busy import (
+  OP_KIND_MATERIALIZATION,
+  begin_destructive_op,
+  end_destructive_op,
+)
 
 
 async def materialize_graph_directly(
@@ -133,6 +138,12 @@ async def materialize_graph_directly(
     client = await GraphClientFactory.create_client(
       graph_id=graph_id, operation_type="write"
     )
+
+    # Publish "destructive op in-flight" on the target instance so GHA
+    # pre-refresh workflows wait before cycling the container. Paired
+    # with end_destructive_op in the finally below. See instance_busy.py.
+    busy_instance_id = client._instance_id or ""
+    await begin_destructive_op(busy_instance_id, OP_KIND_MATERIALIZATION)
 
     try:
       # Handle rebuild if requested
@@ -342,6 +353,9 @@ async def materialize_graph_directly(
       return result
 
     finally:
+      # Decrement busy counter before closing client — primitive swallows
+      # its own errors, so this never masks client.close() failures.
+      await end_destructive_op(busy_instance_id, OP_KIND_MATERIALIZATION)
       await client.close()
 
   except Exception as e:

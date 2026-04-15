@@ -19,6 +19,23 @@ inputs:
     description: "Seconds to wait for instance warmup before considering healthy"
     required: false
     default: "300"
+  max-wait-minutes:
+    description: >-
+      Maximum minutes to wait for in-flight destructive operations
+      (materialization, SEC staging, extensions mat, bulk table creates)
+      to complete on ANY instance in the target ASG before starting the
+      refresh. Polls every 60 seconds. Covers shared tiers too — this is
+      specifically the SEC shared-master materialization protection case.
+    required: false
+    default: "30"
+  force-ignore-busy:
+    description: >-
+      If true, skip the busy-counter pre-check and start instance refresh
+      immediately even if a destructive operation is in flight. Emergency
+      escape hatch — use sparingly, interrupted materializations may
+      require a full graph rebuild.
+    required: false
+    default: "false"
 
 outputs:
   refreshed-asgs:
@@ -60,6 +77,10 @@ runs:
         REGION="${{ inputs.aws-region }}"
         MIN_HEALTHY="50"
         WARMUP="${{ inputs.instance-warmup }}"
+        MAX_WAIT_ATTEMPTS="${{ inputs.max-wait-minutes }}"
+        FORCE_IGNORE_BUSY="${{ inputs.force-ignore-busy }}"
+        # Stale detection: counter > 0 but heartbeat older than 2h → crashed
+        STALE_WINDOW_SECONDS=7200
 
         # Environment suffix for stack names
         if [ "$ENVIRONMENT" == "prod" ]; then
@@ -183,6 +204,79 @@ runs:
           if [ -n "$CURRENT_REFRESH" ] && [ "$CURRENT_REFRESH" != "None" ]; then
             echo "  Refresh already in progress: $CURRENT_REFRESH - skipping"
             continue
+          fi
+
+          # Wait for in-flight destructive operations on ANY instance in this
+          # ASG before starting the refresh. Covers materialization, SEC
+          # staging, extensions mat, and bulk table creates. Unlike the
+          # informational database_count check above, this runs for SHARED
+          # tiers too — protecting the SEC shared-master SEC materialization
+          # from mid-flight cycling.
+          if [ "$FORCE_IGNORE_BUSY" = "true" ]; then
+            echo "  force-ignore-busy=true — skipping destructive-op wait"
+          else
+            echo "  Checking for in-flight destructive operations..."
+            BUSY_INSTANCE_IDS=$(echo "$ASG_INFO" | jq -r '.Instances[]')
+            WAIT_ATTEMPT=0
+            TOTAL_BUSY=0
+
+            while [ $WAIT_ATTEMPT -lt $MAX_WAIT_ATTEMPTS ]; do
+              WAIT_ATTEMPT=$((WAIT_ATTEMPT + 1))
+              TOTAL_BUSY=0
+
+              for BUSY_INSTANCE_ID in $BUSY_INSTANCE_IDS; do
+                BUSY_ITEM=$(aws dynamodb get-item \
+                  --table-name "robosystems-graph-${ENVIRONMENT}-instance-registry" \
+                  --key "{\"instance_id\":{\"S\":\"${BUSY_INSTANCE_ID}\"}}" \
+                  --query "Item" \
+                  --output json \
+                  --region "$REGION" 2>/dev/null || echo "null")
+
+                if [ "$BUSY_ITEM" = "null" ] || [ -z "$BUSY_ITEM" ]; then
+                  continue
+                fi
+
+                BUSY_COUNT=$(echo "$BUSY_ITEM" | jq -r '.active_destructive_ops.N // "0"')
+                BUSY_LAST_AT=$(echo "$BUSY_ITEM" | jq -r '.last_destructive_op_at.S // ""')
+                BUSY_KIND=$(echo "$BUSY_ITEM" | jq -r '.last_destructive_op_kind.S // "unknown"')
+
+                if [ "$BUSY_COUNT" = "0" ]; then
+                  continue
+                fi
+
+                # Stale detection: counter > 0 but no heartbeat for 2h → crashed
+                if [ -n "$BUSY_LAST_AT" ]; then
+                  BUSY_LAST_EPOCH=$(date -u -d "${BUSY_LAST_AT}" +%s 2>/dev/null || echo 0)
+                  BUSY_NOW_EPOCH=$(date -u +%s)
+                  BUSY_AGE=$((BUSY_NOW_EPOCH - BUSY_LAST_EPOCH))
+                  if [ $BUSY_LAST_EPOCH -gt 0 ] && [ $BUSY_AGE -gt $STALE_WINDOW_SECONDS ]; then
+                    echo "    ::warning::Stale busy counter on ${BUSY_INSTANCE_ID}: count=${BUSY_COUNT}, kind=${BUSY_KIND}, last=${BUSY_LAST_AT} (${BUSY_AGE}s ago). Treating as crashed."
+                    continue
+                  fi
+                fi
+
+                echo "    ${BUSY_INSTANCE_ID}: busy (count=${BUSY_COUNT}, kind=${BUSY_KIND}, last=${BUSY_LAST_AT})"
+                TOTAL_BUSY=$((TOTAL_BUSY + BUSY_COUNT))
+              done
+
+              if [ "$TOTAL_BUSY" = "0" ]; then
+                if [ $WAIT_ATTEMPT -eq 1 ]; then
+                  echo "  All instances idle — proceeding with refresh"
+                else
+                  echo "  All instances idle after ${WAIT_ATTEMPT} attempt(s)"
+                fi
+                break
+              fi
+
+              echo "  Attempt ${WAIT_ATTEMPT}/${MAX_WAIT_ATTEMPTS}: ${TOTAL_BUSY} in-flight op(s). Waiting 60s..."
+              sleep 60
+            done
+
+            if [ "$TOTAL_BUSY" != "0" ]; then
+              echo "::error::Timed out after ${MAX_WAIT_ATTEMPTS} minute(s) waiting for ASG $ASG_NAME to become idle. Use force-ignore-busy=true to override."
+              HAS_ERRORS=true
+              continue
+            fi
           fi
 
           # Disable scale-in protection on all instances (required for refresh to proceed)
