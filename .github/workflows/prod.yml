@@ -264,6 +264,7 @@ jobs:
       # RDS Proxy Configuration (off by default - flip RDS_PROXY_ENABLED_PROD to 'true' to turn on)
       rds_proxy_enabled: ${{ vars.RDS_PROXY_ENABLED_PROD || 'false' }}
       rds_proxy_max_connections_percent: ${{ vars.RDS_PROXY_MAX_CONNECTIONS_PERCENT_PROD || '100' }}
+      rds_proxy_connection_borrow_timeout: ${{ vars.RDS_PROXY_CONNECTION_BORROW_TIMEOUT_PROD || '120' }}
       # Lambda Configuration (container-based)
       lambda_image_uri: ${{ needs.build.outputs.lambda_image }}
       # Other Configuration

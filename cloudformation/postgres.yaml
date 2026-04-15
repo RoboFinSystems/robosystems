@@ -122,6 +122,15 @@ Parameters:
     MinValue: 1
     MaxValue: 100
     ConstraintDescription: Must be between 1 and 100
+  RDSProxyConnectionBorrowTimeout:
+    Type: Number
+    Description: Seconds a client waits for a pooled connection before the proxy
+      returns an error. AWS default is 120 (retained here); consider lowering to
+      30 for web workloads to surface overload faster (ignored when EnableRDSProxy=false)
+    Default: 120
+    MinValue: 1
+    MaxValue: 3600
+    ConstraintDescription: Must be between 1 and 3600 seconds
 
   # Monitoring & Observability Configuration
   SNSAlertEmail:
@@ -546,6 +555,13 @@ Resources:
       EngineFamily: POSTGRESQL
       RoleArn: !GetAtt RDSProxyRole.Arn
       Auth:
+        # IAMAuth: DISABLED is intentional. Flipping to REQUIRED would force app-side
+        # IAM token generation (short-lived tokens via rds-db:connect), which this app
+        # does not implement — the app reads POSTGRES_PASSWORD from Secrets Manager
+        # and builds a standard postgres:// URL. The trade-off: DISABLED accepts any
+        # VPC-reachable client with the correct password; REQUIRED would require a
+        # valid IAM identity *plus* the password. Revisit if threat model demands
+        # defense-in-depth against leaked DB credentials alone.
         - AuthScheme: SECRETS
           SecretArn: !Ref DBPasswordSecret
           IAMAuth: DISABLED
@@ -583,7 +599,7 @@ Resources:
       ConnectionPoolConfigurationInfo:
         MaxConnectionsPercent: !Ref RDSProxyMaxConnectionsPercent
         MaxIdleConnectionsPercent: 50
-        ConnectionBorrowTimeout: 120
+        ConnectionBorrowTimeout: !Ref RDSProxyConnectionBorrowTimeout
 
   # SNS topic for PostgreSQL monitoring alerts
   PostgresAlertTopic:

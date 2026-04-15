@@ -59,18 +59,20 @@ def get_database_connection_info(secret_arn: str, environment: str) -> dict[str,
     "instance_id": None,
   }
 
-  # Find the RDS instance
+  # Find the RDS instance. Use a paginator so accounts with >100 RDS instances
+  # aren't silently truncated to the first page of describe_db_instances.
   try:
-    response = rds_client.describe_db_instances()
-    for instance in response["DBInstances"]:
-      if env_from_secret in instance["DBInstanceIdentifier"]:
-        db_info["host"] = instance["Endpoint"]["Address"]
-        db_info["port"] = instance["Endpoint"]["Port"]
-        db_info["instance_id"] = instance["DBInstanceIdentifier"]
-        db_info["engine"] = "postgres"
-        db_info["database"] = instance.get("DBName", "robosystems")
-        logger.info(f"Found RDS instance: {instance['DBInstanceIdentifier']}")
-        return db_info
+    paginator = rds_client.get_paginator("describe_db_instances")
+    for page in paginator.paginate():
+      for instance in page["DBInstances"]:
+        if env_from_secret in instance["DBInstanceIdentifier"]:
+          db_info["host"] = instance["Endpoint"]["Address"]
+          db_info["port"] = instance["Endpoint"]["Port"]
+          db_info["instance_id"] = instance["DBInstanceIdentifier"]
+          db_info["engine"] = "postgres"
+          db_info["database"] = instance.get("DBName", "robosystems")
+          logger.info(f"Found RDS instance: {instance['DBInstanceIdentifier']}")
+          return db_info
   except Exception as e:
     logger.warning(f"Error checking RDS instances: {e!s}")
 

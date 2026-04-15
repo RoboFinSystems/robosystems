@@ -326,6 +326,7 @@ just setup-gha
 | `DATABASE_POSTGRES_VERSION_*`           | `16.11`        | PostgreSQL version                           |
 | `RDS_PROXY_ENABLED_*`                   | `false`        | Enable RDS Proxy for connection pooling      |
 | `RDS_PROXY_MAX_CONNECTIONS_PERCENT_*`   | `100`          | Max % of DB max_connections proxy may use    |
+| `RDS_PROXY_CONNECTION_BORROW_TIMEOUT_*` | `120`          | Seconds client waits for a pooled connection |
 
 #### Valkey (Redis) Configuration
 
