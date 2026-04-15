@@ -16,6 +16,7 @@ import asyncio
 import json
 import time
 import uuid
+from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any
 
@@ -140,24 +141,39 @@ class StagingTaskManager:
 staging_task_manager = StagingTaskManager()
 
 
-async def perform_table_creation(
+async def _run_table_background_op(
   task_id: str,
   request: TableCreateRequest,
-  timeout_seconds: int = 1800,  # 30 minutes default
+  op_kind: str,
+  op_label: str,
+  table_manager_fn: Callable[..., Any],
+  timeout_seconds: int,
 ) -> None:
-  """
-  Perform the actual table creation in the background.
-  Updates task status in Redis for SSE monitoring.
+  """Shared background-task driver for create/insert table operations.
+
+  Runs ``table_manager_fn(request)`` in a worker thread with a hard timeout,
+  interrupts any in-flight DuckDB connections on timeout, publishes task
+  state transitions to Redis for SSE monitoring, and wraps the whole thing
+  in an ``instance_busy`` counter so GHA pre-refresh workflows know the
+  instance is doing destructive work.
 
   Args:
-      task_id: Unique task identifier for SSE tracking
-      request: Table creation request with graph_id, table_name, s3_pattern
-      timeout_seconds: Maximum time allowed for table creation (default 30 min)
+    task_id: SSE task tracking id.
+    request: Table operation request (graph_id, table_name, s3_pattern, ...).
+    op_kind: Busy counter op_kind label (OP_KIND_BULK_TABLE_* constant).
+    op_label: Human-readable label for log and error messages — "creation"
+      or "insert".
+    table_manager_fn: Sync callable — typically ``table_manager.create_table``
+      or ``table_manager.insert_into_table``. Must accept a single
+      ``TableCreateRequest`` argument and return an object with
+      ``status``, ``table_name``, ``execution_time_ms``, and ``row_count``
+      attributes.
+    timeout_seconds: Hard timeout before the DuckDB connection is interrupted.
   """
   # Import inside function to avoid circular dependency with pool initialization
   from robosystems.graph_api.core.duckdb.pool import get_duckdb_pool
 
-  async with instance_busy(env.INSTANCE_ID, OP_KIND_BULK_TABLE_CREATE):
+  async with instance_busy(env.INSTANCE_ID, op_kind):
     try:
       # Update task status to running
       await staging_task_manager.update_task(
@@ -167,21 +183,21 @@ async def perform_table_creation(
       )
 
       logger.info(
-        f"[Task {task_id}] Starting table creation: {request.table_name} for graph {request.graph_id}"
+        f"[Task {task_id}] Starting table {op_label}: {request.table_name} "
+        f"for graph {request.graph_id}"
       )
 
-      # Perform the actual table creation with timeout
-      # Run sync function in thread pool and wrap with timeout
+      # Run the sync function in a thread pool with a hard timeout
       start_time = time.time()
       try:
         result = await asyncio.wait_for(
-          asyncio.to_thread(table_manager.create_table, request),
+          asyncio.to_thread(table_manager_fn, request),
           timeout=timeout_seconds,
         )
       except TimeoutError:
-        # CRITICAL: Interrupt the DuckDB query to prevent zombie threads
-        # asyncio.wait_for() raises TimeoutError but the thread keeps running
-        # We must interrupt the connection to cancel the in-progress query
+        # CRITICAL: Interrupt the DuckDB query to prevent zombie threads.
+        # asyncio.wait_for() raises TimeoutError but the thread keeps running;
+        # we must interrupt the connection to cancel the in-progress query.
         try:
           pool = get_duckdb_pool()
           interrupted = pool.interrupt_connections(request.graph_id)
@@ -194,7 +210,7 @@ async def perform_table_creation(
           )
 
         raise TimeoutError(
-          f"Table creation timed out after {timeout_seconds}s "
+          f"Table {op_label} timed out after {timeout_seconds}s "
           f"({timeout_seconds // 60} minutes)"
         )
       duration = time.time() - start_time
@@ -215,7 +231,7 @@ async def perform_table_creation(
       )
 
       logger.info(
-        f"[Task {task_id}] Completed: table {request.table_name} created "
+        f"[Task {task_id}] Completed table {op_label}: {request.table_name} "
         f"({result.row_count:,} rows) in {duration:.2f}s"
       )
 
@@ -231,92 +247,46 @@ async def perform_table_creation(
       )
 
 
+async def perform_table_creation(
+  task_id: str,
+  request: TableCreateRequest,
+  timeout_seconds: int = 1800,  # 30 minutes default
+) -> None:
+  """Perform table creation in the background.
+
+  Thin wrapper around :func:`_run_table_background_op` — see that helper
+  for the shared lifecycle (busy counter, SSE state transitions, timeout
+  + DuckDB interrupt handling).
+  """
+  await _run_table_background_op(
+    task_id=task_id,
+    request=request,
+    op_kind=OP_KIND_BULK_TABLE_CREATE,
+    op_label="creation",
+    table_manager_fn=table_manager.create_table,
+    timeout_seconds=timeout_seconds,
+  )
+
+
 async def perform_table_insert(
   task_id: str,
   request: TableCreateRequest,
   timeout_seconds: int = 1800,  # 30 minutes default
 ) -> None:
+  """Perform incremental table insert in the background.
+
+  Thin wrapper around :func:`_run_table_background_op` — see that helper
+  for the shared lifecycle (busy counter, SSE state transitions, timeout
+  + DuckDB interrupt handling).
   """
-  Perform incremental table insert in the background.
-  Updates task status in Redis for SSE monitoring.
-
-  Args:
-      task_id: Unique task identifier for SSE tracking
-      request: Table creation request with graph_id, table_name, s3_pattern
-      timeout_seconds: Maximum time allowed for insert (default 30 min)
-  """
-  # Import inside function to avoid circular dependency with pool initialization
-  from robosystems.graph_api.core.duckdb.pool import get_duckdb_pool
-
-  async with instance_busy(env.INSTANCE_ID, OP_KIND_BULK_TABLE_INSERT):
-    try:
-      # Update task status to running
-      await staging_task_manager.update_task(
-        task_id,
-        status=TaskStatus.RUNNING,
-        started_at=datetime.now(UTC).isoformat(),
-      )
-
-      logger.info(
-        f"[Task {task_id}] Starting table insert: {request.table_name} for graph {request.graph_id}"
-      )
-
-      # Perform the actual table insert with timeout
-      start_time = time.time()
-      try:
-        result = await asyncio.wait_for(
-          asyncio.to_thread(table_manager.insert_into_table, request),
-          timeout=timeout_seconds,
-        )
-      except TimeoutError:
-        # CRITICAL: Interrupt the DuckDB query to prevent zombie threads
-        try:
-          pool = get_duckdb_pool()
-          interrupted = pool.interrupt_connections(request.graph_id)
-          logger.warning(
-            f"[Task {task_id}] Timeout - interrupted {interrupted} DuckDB connection(s)"
-          )
-        except Exception as interrupt_err:
-          logger.error(
-            f"[Task {task_id}] Failed to interrupt connections: {interrupt_err}"
-          )
-
-        raise TimeoutError(
-          f"Table insert timed out after {timeout_seconds}s "
-          f"({timeout_seconds // 60} minutes)"
-        )
-      duration = time.time() - start_time
-
-      # Update task as completed
-      await staging_task_manager.update_task(
-        task_id,
-        status=TaskStatus.COMPLETED,
-        completed_at=datetime.now(UTC).isoformat(),
-        progress_percent=100,
-        result={
-          "status": result.status,
-          "table_name": result.table_name,
-          "execution_time_ms": result.execution_time_ms,
-          "row_count": result.row_count,
-          "duration_seconds": duration,
-        },
-      )
-
-      logger.info(
-        f"[Task {task_id}] Completed: inserted into {request.table_name} "
-        f"({result.row_count:,} rows total) in {duration:.2f}s"
-      )
-
-    except Exception as e:
-      logger.error(f"[Task {task_id}] Failed: {e}")
-
-      # Update task as failed
-      await staging_task_manager.update_task(
-        task_id,
-        status=TaskStatus.FAILED,
-        completed_at=datetime.now(UTC).isoformat(),
-        error=str(e),
-      )
+  await _run_table_background_op(
+    task_id=task_id,
+    request=request,
+    op_kind=OP_KIND_BULK_TABLE_INSERT,
+    op_label="insert",
+    table_manager_fn=table_manager.insert_into_table,
+    timeout_seconds=timeout_seconds,
+  )
 
 
 @router.post("")
