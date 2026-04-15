@@ -1,5 +1,7 @@
 """RoboSystems Service API main application module."""
 
+import time
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from importlib.metadata import version as pkg_version
 from pathlib import Path
@@ -20,6 +22,11 @@ from robosystems.middleware.logging import (
   StructuredLoggingMiddleware,
 )
 from robosystems.middleware.otel import setup_telemetry
+from robosystems.middleware.otel.metrics import (
+  get_endpoint_metrics,
+  record_error_metrics,
+  record_request_metrics,
+)
 from robosystems.middleware.rate_limits import RateLimitHeaderMiddleware
 from robosystems.routers import (
   auth_router_v1,
@@ -58,26 +65,16 @@ from robosystems.routers.admin import (
 from robosystems.routers.admin import (
   webhooks_router as admin_webhooks_router,
 )
+from robosystems.utils.docs_template import (
+  generate_robosystems_docs,
+  generate_robosystems_redoc,
+)
 
 logger = get_logger("robosystems.api")
 
 
 def is_relaxed_csp_path(path: str) -> bool:
-  """Return True for paths that should receive the relaxed CSP.
-
-  The relaxed CSP allows CDN-hosted scripts/styles needed by the
-  Swagger UI at `/`, the static asset bundle, and the GraphiQL
-  playground. GraphiQL is mounted graph-scoped at
-  `/extensions/{graph_id}/graphql`, so a naive
-  `path.startswith("/extensions/graphql")` check (its pre-cutover
-  shape) no longer matches and would block the React/GraphiQL CDN
-  bundle. We accept any `/extensions/.../graphql` path — covering
-  both the new graph-scoped URL and the legacy shape defensively.
-
-  Extracted from the security-headers middleware so the matcher
-  contract has a unit-testable home; future URL changes that move
-  GraphiQL must update this function and its tests.
-  """
+  """Paths that need CDN-hosted scripts/styles (Swagger UI, GraphiQL)."""
   if path in ("/", "/docs"):
     return True
   if path.startswith("/static"):
@@ -85,6 +82,57 @@ def is_relaxed_csp_path(path: str) -> bool:
   if path.startswith("/extensions/") and path.endswith("/graphql"):
     return True
   return False
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+  """Startup + shutdown lifecycle. Replaces deprecated @on_event handlers."""
+  logger.info("Starting RoboSystems API...")
+
+  # Validate environment configuration
+  try:
+    EnvValidator.validate_required_vars(env)
+    config_summary = EnvValidator.get_config_summary(env)
+    logger.info(f"Configuration validated successfully: {config_summary}")
+  except Exception as e:
+    logger.error(f"Configuration validation failed: {e}")
+    if env.ENVIRONMENT == "prod":
+      # Fail fast in prod; continue in dev so local iteration isn't blocked.
+      raise
+    logger.warning("Continuing with invalid configuration (development mode)")
+
+  # Initialize query queue executor
+  try:
+    from robosystems.routers.graphs.query.setup import setup_query_executor
+
+    setup_query_executor()
+  except Exception as e:
+    logger.error(f"Failed to initialize query queue: {e}")
+
+  # Start Redis SSE event subscriber for worker → API communication
+  try:
+    from robosystems.middleware.sse.redis_subscriber import start_redis_subscriber
+
+    await start_redis_subscriber()
+    logger.info("Redis SSE event subscriber started successfully")
+  except Exception as e:
+    logger.error(f"Failed to start Redis SSE subscriber: {e}")
+
+  logger.info("RoboSystems API startup complete")
+
+  yield
+
+  logger.info("Shutting down RoboSystems API...")
+
+  try:
+    from robosystems.middleware.sse.redis_subscriber import stop_redis_subscriber
+
+    await stop_redis_subscriber()
+    logger.info("Redis SSE event subscriber stopped successfully")
+  except Exception as e:
+    logger.error(f"Error stopping Redis SSE subscriber: {e}")
+
+  logger.info("RoboSystems API shutdown complete")
 
 
 def create_app() -> FastAPI:
@@ -102,113 +150,31 @@ def create_app() -> FastAPI:
     else "RoboSystems Service API"
   )
 
-  # Create the FastAPI app with custom tag ordering
   app = FastAPI(
     title="RoboSystems API",
     version=pkg_version("robosystems"),
     description=api_description,
-    docs_url=None,  # Disable default docs
-    redoc_url=None,  # Disable default ReDoc to use custom
+    docs_url=None,  # replaced by custom_docs below
+    redoc_url=None,  # replaced by custom_redoc below
     openapi_url="/openapi.json",
     openapi_tags=MAIN_API_TAGS,
+    lifespan=lifespan,
   )
 
-  # Setup OpenTelemetry
   setup_telemetry(app)
-
-  # Initialize app state
   app.state.current_time = datetime.now(UTC)
 
-  # Mount static files (always mount since we're serving directly from container)
   if Path("static").exists():
     app.mount("/static", StaticFiles(directory="static"), name="static")
 
-  # Custom docs route with dark theme
+  # Custom dark-themed Swagger + ReDoc (served inline from docs_template).
   @app.get("/", response_class=HTMLResponse, include_in_schema=False)
   async def custom_docs():
-    """Custom Swagger docs with dark theme."""
-    try:
-      from robosystems.utils.docs_template import generate_robosystems_docs
+    return HTMLResponse(content=generate_robosystems_docs())
 
-      return HTMLResponse(content=generate_robosystems_docs())
-    except ImportError:
-      # Fallback to default FastAPI docs
-      from fastapi.openapi.docs import get_swagger_ui_html
-
-      return get_swagger_ui_html(openapi_url="/openapi.json", title="RoboSystems API")
-
-  # Custom ReDoc route with dark theme
   @app.get("/docs", response_class=HTMLResponse, include_in_schema=False)
   async def custom_redoc():
-    """Custom ReDoc with dark theme."""
-    try:
-      from robosystems.utils.docs_template import generate_robosystems_redoc
-
-      return HTMLResponse(content=generate_robosystems_redoc())
-    except ImportError:
-      # Fallback to default ReDoc
-      from fastapi.openapi.docs import get_redoc_html
-
-      return get_redoc_html(openapi_url="/openapi.json", title="RoboSystems API")
-
-  # Startup event handler for validation
-  @app.on_event("startup")
-  async def startup_event():
-    """Validate configuration on startup."""
-    logger.info("Starting RoboSystems API...")
-
-    # Validate environment configuration
-    try:
-      # Use the existing validator
-      EnvValidator.validate_required_vars(env)
-      config_summary = EnvValidator.get_config_summary(env)
-      logger.info(f"Configuration validated successfully: {config_summary}")
-    except Exception as e:
-      logger.error(f"Configuration validation failed: {e}")
-      if env.ENVIRONMENT == "prod":
-        # In production, fail fast on invalid configuration
-        raise
-      else:
-        # In development, log warning but continue
-        logger.warning("Continuing with invalid configuration (development mode)")
-
-    # Initialize query queue executor
-    try:
-      from robosystems.routers.graphs.query.setup import setup_query_executor
-
-      setup_query_executor()
-    except Exception as e:
-      logger.error(f"Failed to initialize query queue: {e}")
-
-    # Start Redis SSE event subscriber for worker-to-API communication
-    try:
-      from robosystems.middleware.sse.redis_subscriber import start_redis_subscriber
-
-      await start_redis_subscriber()
-      logger.info("Redis SSE event subscriber started successfully")
-    except Exception as e:
-      logger.error(f"Failed to start Redis SSE subscriber: {e}")
-      # Don't fail startup, but SSE events from workers won't work
-      # Continue without queue - queries will execute directly
-
-    logger.info("RoboSystems API startup complete")
-
-  # Shutdown event handler for cleanup
-  @app.on_event("shutdown")
-  async def shutdown_event():
-    """Clean up resources on shutdown."""
-    logger.info("Shutting down RoboSystems API...")
-
-    # Stop Redis SSE event subscriber
-    try:
-      from robosystems.middleware.sse.redis_subscriber import stop_redis_subscriber
-
-      await stop_redis_subscriber()
-      logger.info("Redis SSE event subscriber stopped successfully")
-    except Exception as e:
-      logger.error(f"Error stopping Redis SSE subscriber: {e}")
-
-    logger.info("RoboSystems API shutdown complete")
+    return HTMLResponse(content=generate_robosystems_redoc())
 
   # Configure CORS with specific domains for security
   main_cors_origins = env.get_main_cors_origins()
@@ -245,41 +211,22 @@ def create_app() -> FastAPI:
   # Add rate limit header middleware
   app.add_middleware(RateLimitHeaderMiddleware)
 
-  # Request-level metrics for the extensions GraphQL endpoint.
-  #
-  # Strawberry's `GraphQLRouter` is a single FastAPI route, so the
-  # `endpoint_metrics_decorator` we put on REST operation routes can't
-  # reach individual GraphQL requests. Per-resolver spans come from
-  # `strawberry.extensions.tracing.opentelemetry.OpenTelemetryExtension`
-  # (wired in `graphql/schema.py`); this middleware adds the request-
-  # level counter + latency histogram + business event so GraphQL reads
-  # show up on the same Prometheus dashboards as the REST surface.
-  #
-  # Scoped to `/extensions/{graph_id}/graphql` only — every other path
-  # falls through instantly to keep overhead at zero.
+  # Request-level metrics for /extensions/{graph_id}/graphql.
+  # Per-resolver spans come from Strawberry's OpenTelemetryExtensionSync
+  # (wired in graphql/schema.py); this covers the request envelope.
   @app.middleware("http")
   async def extensions_graphql_metrics_middleware(request: Request, call_next):
     path = request.url.path
     if not (path.startswith("/extensions/") and path.endswith("/graphql")):
       return await call_next(request)
 
-    import time
-
-    from robosystems.middleware.otel.metrics import (
-      get_endpoint_metrics,
-      record_error_metrics,
-      record_request_metrics,
-    )
-
-    # `graph_id` is the second segment: /extensions/{graph_id}/graphql
     try:
       graph_id = path.split("/", 3)[2]
     except IndexError:  # pragma: no cover - path matcher already checked shape
       graph_id = None
 
-    # Normalize the endpoint label so Prometheus cardinality stays bounded
-    # (one time series for the whole GraphQL endpoint, regardless of
-    # tenant). The tenant lives in `event_graph_id` on the business event.
+    # Normalized label keeps Prometheus cardinality bounded; tenant goes
+    # on the business event instead.
     endpoint_label = "/extensions/{graph_id}/graphql"
     start = time.time()
     error_occurred = False
@@ -290,8 +237,6 @@ def create_app() -> FastAPI:
       response = await call_next(request)
       status_code = response.status_code
       user_id = getattr(request.state, "user_id", None)
-      # Fire the business event on 2xx GraphQL POSTs so dashboards can
-      # differentiate "extensions GraphQL reads" from REST operations.
       if request.method == "POST" and 200 <= status_code < 300:
         get_endpoint_metrics().record_business_event(
           endpoint=endpoint_label,
@@ -340,13 +285,9 @@ def create_app() -> FastAPI:
         "max-age=31536000; includeSubDomains"
       )
 
-    # Path-based CSP - strict for API, relaxed for docs / GraphiQL.
-    # See `is_relaxed_csp_path()` for the matched URL contract.
+    # Path-based CSP — strict for API, relaxed for docs / GraphiQL.
     path = request.url.path
     if is_relaxed_csp_path(path):
-      # Relaxed CSP for documentation, static assets, and the GraphiQL
-      # playground (which loads React/GraphiQL from unpkg.com, mirroring
-      # Swagger UI's pattern).
       csp_directives = [
         "default-src 'self'",
         "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.jsdelivr.net https://unpkg.com https://cdn.redoc.ly",
@@ -375,20 +316,10 @@ def create_app() -> FastAPI:
 
     response.headers["Content-Security-Policy"] = "; ".join(csp_directives)
 
-    # Add cache control for routes that may return sensitive data in the
-    # response body. We use a path-prefix allowlist rather than scanning
-    # `response.body` — Starlette's `call_next` returns a `StreamingResponse`
-    # that exposes no `.body` attribute, so any content-scanning branch
-    # would silently never fire. The allowlist below covers every surface
-    # that can emit auth tokens, API keys, billing details, or other
-    # per-user secrets; everything else falls back to the default cache
-    # behavior controlled by the route itself.
-    _sensitive_path_prefixes = (
-      "/v1/auth",
-      "/v1/user",
-      "/v1/billing",
-      "/v1/orgs",
-    )
+    # Cache-Control: no-store for routes that may return per-user secrets.
+    # Path-prefix allowlist instead of response-body scanning because
+    # Starlette's call_next returns a StreamingResponse with no .body.
+    _sensitive_path_prefixes = ("/v1/auth", "/v1/user", "/v1/billing", "/v1/orgs")
     if any(path.startswith(p) for p in _sensitive_path_prefixes):
       response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, private"
       response.headers["Pragma"] = "no-cache"
@@ -422,38 +353,19 @@ def create_app() -> FastAPI:
       content={"detail": "Internal server error", "request_id": request_id},
     )
 
-  # Include all routers
+  # Core platform routers
   app.include_router(auth_router_v1)
   app.include_router(status_router_v1)
   app.include_router(user_router_v1)
   app.include_router(orgs_router_v1)
-  app.include_router(
-    v1_router
-  )  # Now includes sync, agent, and schedule routers as graph-scoped
+  app.include_router(v1_router)
   app.include_router(graph_router)
   app.include_router(offering_router_v1)
-  app.include_router(operations_router_v1)  # Unified SSE operations monitoring
+  app.include_router(operations_router_v1)
   app.include_router(billing_router_v1)
 
-  # NOTE: /v1/ledger/{graph_id} and /v1/investor/{graph_id} were removed
-  # in the extensions cutover. Reads are on /extensions/graphql; writes
-  # are on /extensions/{roboledger,roboinvestor}/{graph_id}/operations/*.
-  # Mounts appear further down in this function.
-
   # Extensions GraphQL endpoint (Strawberry). Graph-scoped at
-  # `/extensions/{graph_id}/graphql` so:
-  #
-  # 1. Auth + per-graph access are enforced by the FastAPI dependency
-  #    layer (`get_context` reads `graph_id` from the path and runs
-  #    `check_graph_access` before Strawberry parses the query).
-  # 2. Resolvers don't take `graphId` as an argument — they read it
-  #    from `info.context["graph_id"]`. The schema is one-graph-at-a-time.
-  # 3. Rate limiting (`subscription_aware_rate_limit_dependency`)
-  #    becomes per-tenant naturally because the dependency reads
-  #    `graph_id` from `request.path_params`.
-  # 4. The wire surface is symmetric with REST writes:
-  #    `POST /extensions/{graph_id}/graphql` (reads)
-  #    `POST /extensions/{domain}/{graph_id}/operations/{op}` (writes)
+  # /extensions/{graph_id}/graphql — see robosystems/graphql/README.md.
   if env.EXTENSIONS_GRAPHQL_ENABLED and (
     env.ROBOLEDGER_ENABLED or env.ROBOINVESTOR_ENABLED
   ):
@@ -480,10 +392,7 @@ def create_app() -> FastAPI:
       dependencies=[_Depends(subscription_aware_rate_limit_dependency)],
     )
 
-  # Extensions REST operation surface — `POST /extensions/{domain}/{graph_id}/operations/{op_name}`.
-  # Writes live here (reads go through /extensions/graphql). Each route
-  # delegates to `operations/{domain}/commands/*` via the shared
-  # `execute_operation` dispatcher in `middleware/extensions.py`.
+  # Extensions REST operation surface: POST /extensions/{domain}/{graph_id}/operations/{op}
   if env.ROBOLEDGER_ENABLED:
     from robosystems.routers.extensions.roboledger.operations import (
       router as roboledger_operations_router,
@@ -495,13 +404,8 @@ def create_app() -> FastAPI:
       include_in_schema=True,
     )
 
-  # `build-fact-grid` lives in its own router so it can be mounted
-  # independently of ROBOLEDGER_ENABLED. The fact-grid queries the LadybugDB
-  # graph schema (XBRL hypercube), which is shared by roboledger tenant
-  # graphs AND the SEC shared repository. SEC-only deployments (no
-  # roboledger tenants) still need this endpoint, so gating only on
-  # FACT_GRID_ENABLED is correct. Same prefix as the operations router
-  # so the wire URL is `POST /extensions/roboledger/{graph_id}/operations/build-fact-grid`.
+  # build-fact-grid mounts independently of ROBOLEDGER_ENABLED so SEC-only
+  # deployments still get it. Rationale in routers/extensions/roboledger/views.py.
   if env.FACT_GRID_ENABLED:
     from robosystems.routers.extensions.roboledger.views import (
       router as roboledger_views_router,
@@ -524,8 +428,7 @@ def create_app() -> FastAPI:
       include_in_schema=True,
     )
 
-  # Include admin routers (hidden from public docs)
-  # The admin routers will not appear in the auto-generated docs
+  # Admin routers — hidden from the public OpenAPI schema.
   app.include_router(admin_cache_router, include_in_schema=False)
   app.include_router(admin_subscription_router, include_in_schema=False)
   app.include_router(admin_invoice_router, include_in_schema=False)
@@ -605,11 +508,9 @@ def create_app() -> FastAPI:
       },
     }
 
-    # Standard error responses injected into every extensions operation
-    # route (and the GraphQL endpoint). Keeping them in one place here —
-    # rather than duplicating `responses={...}` across ~32 @router.post
-    # calls — keeps the router files thin and guarantees a single source
-    # of truth for the error shape the SDKs compile against.
+    # Shared error responses / Idempotency-Key header / rate-limit header
+    # specs, injected below into every extensions operation route so the
+    # router files stay thin and the wire shape stays consistent.
     _op_error_ref = {
       "application/json": {"schema": {"$ref": "#/components/schemas/OperationError"}}
     }
@@ -672,28 +573,20 @@ def create_app() -> FastAPI:
     for _path, _methods in openapi_schema.get("paths", {}).items():
       if _is_operation_path(_path):
         for _method_name, _operation in _methods.items():
-          if _method_name not in ("post",):
+          if _method_name != "post":
             continue
-          # Merge standard error responses without clobbering any the
-          # route already declared explicitly (some ops add domain-
-          # specific 409/422 messaging).
           existing_responses = _operation.setdefault("responses", {})
           for _code, _resp in _shared_operation_responses.items():
             existing_responses.setdefault(_code, _resp)
-          # Attach rate-limit headers to the success response(s) so SDKs
-          # pick them up alongside the envelope.
           for _code, _resp in existing_responses.items():
             if _code.startswith("2") and isinstance(_resp, dict):
               _resp.setdefault("headers", {}).update(_rate_limit_response_headers)
-          # Add the Idempotency-Key header parameter exactly once.
           params = _operation.setdefault("parameters", [])
           if not any(
             p.get("name") == "Idempotency-Key" and p.get("in") == "header"
             for p in params
           ):
             params.append(_idempotency_header_parameter)
-          # Append the idempotency paragraph to the description so it
-          # shows up in Swagger/ReDoc without editing each route.
           if _idempotency_doc_paragraph not in _operation.get("description", ""):
             _operation["description"] = (
               _operation.get("description") or ""
@@ -727,59 +620,37 @@ def create_app() -> FastAPI:
               _operation.get("description") or ""
             ) + _graphql_description_note
 
-    # Add security requirement to all endpoints except explicitly public ones
+    # Declare API key + Bearer as accepted security schemes on every
+    # non-public endpoint.
     public_exact_paths = {"/v1/status"}
     public_prefixes = ("/v1/auth", "/v1/offering")
 
     for path, methods in openapi_schema.get("paths", {}).items():
-      is_public = path in public_exact_paths or any(
-        path.startswith(p) for p in public_prefixes
-      )
-      if is_public:
+      if path in public_exact_paths or any(path.startswith(p) for p in public_prefixes):
         continue
+      for _method_name, operation in methods.items():
+        operation["security"] = [{"APIKeyHeader": []}, {"BearerAuth": []}]
 
-      for method_name, operation in methods.items():
-        # Declare both API key and Bearer as accepted security schemes
-        operation["security"] = [
-          {"APIKeyHeader": []},
-          {"BearerAuth": []},
-        ]
-
-    # Custom tag ordering - extract from openapi_tags to avoid duplication
+    # Apply the custom tag ordering from openapi_tags, only emitting
+    # tags that are actually in use.
     tag_order = [tag_info["name"] for tag_info in app.openapi_tags or []]
-
-    # Extract existing tags from the schema
-    existing_tags = set()
-    for path_info in openapi_schema["paths"].values():
-      for method_info in path_info.values():
-        if "tags" in method_info:
-          existing_tags.update(method_info["tags"])
-
-    # Build ordered tags list - only include tags that actually exist
-    ordered_tags = []
-    for tag in tag_order:
-      if tag in existing_tags:
-        # Find the tag description from our openapi_tags
-        tag_desc = None
-        for tag_info in app.openapi_tags or []:
-          if tag_info["name"] == tag:
-            tag_desc = tag_info["description"]
-            break
-
-        ordered_tags.append(
-          {"name": tag, "description": tag_desc or f"{tag} operations"}
-        )
-
-    # Add any remaining tags not in our predefined order
-    for tag in existing_tags:
-      if tag not in tag_order:
-        ordered_tags.append({"name": tag, "description": f"{tag} operations"})
-
-    # Set the tags in the schema
+    existing_tags = {
+      tag
+      for path_info in openapi_schema["paths"].values()
+      for method_info in path_info.values()
+      for tag in method_info.get("tags", [])
+    }
+    tag_descriptions = {
+      tag_info["name"]: tag_info["description"] for tag_info in app.openapi_tags or []
+    }
+    ordered_tags = [
+      {"name": tag, "description": tag_descriptions.get(tag, f"{tag} operations")}
+      for tag in tag_order
+      if tag in existing_tags
+    ]
+    for tag in existing_tags - set(tag_order):
+      ordered_tags.append({"name": tag, "description": f"{tag} operations"})
     openapi_schema["tags"] = ordered_tags
-
-    # Fix any $ref issues in responses if needed
-    # Special handling for auth-test endpoint has been removed
 
     app.openapi_schema = openapi_schema
     return app.openapi_schema
