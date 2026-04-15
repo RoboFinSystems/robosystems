@@ -14,7 +14,7 @@ from robosystems.middleware.mcp.tools.document_tools import (
 )
 
 DOC_MODULE = "robosystems.middleware.mcp.tools.document_tools"
-DOC_SVC = "robosystems.operations.documents.DocumentService"
+DOC_SVC = "robosystems.operations.document_service.DocumentService"
 
 
 @pytest.fixture

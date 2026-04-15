@@ -155,7 +155,7 @@ class CreateDocumentTool:
 
   async def execute(self, arguments: dict[str, Any]) -> Any:
     from robosystems.models.api.search import DocumentUploadRequest
-    from robosystems.operations.documents import DocumentService
+    from robosystems.operations.document_service import DocumentService
 
     graph_id = self.client.graph_id
 
@@ -270,7 +270,7 @@ Content changes are automatically re-indexed in OpenSearch.""",
     }
 
   async def execute(self, arguments: dict[str, Any]) -> Any:
-    from robosystems.operations.documents import DocumentService
+    from robosystems.operations.document_service import DocumentService
 
     graph_id = self.client.graph_id
 
@@ -357,7 +357,7 @@ class GetDocumentTool:
     }
 
   async def execute(self, arguments: dict[str, Any]) -> Any:
-    from robosystems.operations.documents import DocumentService
+    from robosystems.operations.document_service import DocumentService
 
     graph_id = self.client.graph_id
     document_id = arguments["document_id"]
@@ -433,7 +433,7 @@ class ListDocumentsTool:
     }
 
   async def execute(self, arguments: dict[str, Any]) -> Any:
-    from robosystems.operations.documents import DocumentService
+    from robosystems.operations.document_service import DocumentService
 
     graph_id = self.client.graph_id
 
