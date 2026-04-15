@@ -22,7 +22,7 @@ from robosystems.models.api.search import (
 )
 from robosystems.models.core import User
 from robosystems.models.core.document import Document
-from robosystems.operations.documents import DocumentService
+from robosystems.operations.document_service import DocumentService
 
 logger = logging.getLogger(__name__)
 

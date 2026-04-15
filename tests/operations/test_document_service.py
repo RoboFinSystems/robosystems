@@ -10,9 +10,9 @@ from robosystems.models.api.search import (
   DocumentUploadResponse,
 )
 from robosystems.models.core.document import Document
-from robosystems.operations.documents.service import DocumentService
+from robosystems.operations.document_service import DocumentService
 
-MODULE = "robosystems.operations.documents.service"
+MODULE = "robosystems.operations.document_service"
 NOW = datetime(2026, 4, 1, tzinfo=UTC)
 
 
