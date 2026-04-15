@@ -21,9 +21,9 @@ RoboSystems uses [Dagster](https://dagster.io) for all data orchestration. Data 
 
 ---
 
-## Two Pipeline Patterns
+## Three Pipeline Patterns
 
-RoboSystems uses two distinct patterns based on data source characteristics:
+RoboSystems uses three distinct patterns based on data source characteristics. Patterns A and B ingest from external systems the platform doesn't own; Pattern C materializes the platform's own OLTP writes into the graph for analytical queries.
 
 ### Pattern A: Arelle-Based (SEC)
 
@@ -46,6 +46,19 @@ API JSON → S3 Raw → dbt transforms → S3 Processed → DuckDB Staging → L
 - **Used for**: API-based integrations (QuickBooks, Plaid, custom ERPs)
 - **Why**: Raw JSON needs transformation into graph-compatible node/relationship Parquet
 - **dbt provides**: SQL-based transforms, testing, documentation
+
+### Pattern C: OLTP-Based (Extensions Materialization)
+
+```
+Extensions PostgreSQL → postgres_scanner → DuckDB Staging → LadybugDB
+(schema-per-graph)      (direct scan)      (graph-shaped)
+```
+
+- **Used for**: RoboLedger and RoboInvestor writes — schedules, closing entries, reports, portfolio positions, anything a user or AI writes through the `/extensions/*/operations/*` command surface
+- **Why**: The platform owns this data — it's not derived from an external system, it's transactional state that needs to round-trip into the graph so analytical queries can see it alongside SEC/QuickBooks data
+- **Trigger**: Event-driven rather than scheduled. Writes to the extensions database fire a `mark_graph_stale` signal; a blue/green sensor picks it up and rebuilds the affected graph slice
+- **No Parquet intermediate**: DuckDB's `postgres_scanner` extension reads directly from the extensions schema via `CREATE TABLE ... AS SELECT * FROM postgres_scan(...)`, skipping the S3 round-trip that Patterns A and B need
+- **Not an adapter**: Unlike SEC and QuickBooks, there's no `adapters/extensions/` directory — this pipeline is platform-internal. See `operations/roboledger/views/` and `local/docs/ARCHITECTURE.md` Data Modes section for details
 
 ---
 
@@ -184,22 +197,23 @@ See [Adapters README](https://github.com/RoboFinSystems/robosystems/blob/main/ro
 
 ## Unified Ingestion Pattern
 
-All pipelines use DuckDB staging regardless of source:
+All pipelines use DuckDB staging regardless of source. Patterns A and B enter staging from S3 Parquet; Pattern C enters staging via `postgres_scanner` reading the extensions database directly.
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │              UNIFIED INGESTION (ALL PIPELINES)                  │
 ├─────────────────────────────────────────────────────────────────┤
 │                                                                 │
-│  ANY Pipeline Output (Parquet in S3)                            │
-│           │                                                     │
-│           ▼                                                     │
+│  Pattern A/B: Parquet in S3  ──┐                                │
+│  Pattern C:   Extensions DB  ──┤                                │
+│                                │                                │
+│                                ▼                                │
 │  1. GraphFile.create()                                          │
-│     Register file in PostgreSQL (provenance tracking)           │
+│     Register file/scan in PostgreSQL (provenance tracking)      │
 │           │                                                     │
 │           ▼                                                     │
-│  2. client.create_table(s3_files=[...])                         │
-│     Load parquet → DuckDB staging table (queryable for debug)   │
+│  2. client.create_table(s3_files=[...])  or postgres_scan(...)  │
+│     Load source → DuckDB staging table (queryable for debug)    │
 │           │                                                     │
 │           ▼                                                     │
 │  3. client.materialize_table(file_ids=[...])                    │
@@ -215,8 +229,8 @@ All pipelines use DuckDB staging regardless of source:
 **Why DuckDB:**
 
 - Validation layer before graph ingestion
-- Handles S3 Parquet natively (httpfs extension)
-- Same pattern for SEC, QuickBooks, Plaid, custom
+- Handles S3 Parquet natively (httpfs extension) and PostgreSQL natively (postgres_scanner extension)
+- Same pattern for SEC, QuickBooks, Plaid, custom adapters, and platform-owned OLTP
 - Scale proof: If it handles SEC (1TB+), it handles any company's data
 
 **Graph API endpoints:**

@@ -56,13 +56,27 @@ RoboSystems is built on a modern, scalable architecture designed for enterprise 
 
 **Location**: `/robosystems/main.py`, `/robosystems/routers/`
 
-The FastAPI backend provides a RESTful API with:
+The FastAPI backend serves two distinct API surfaces:
 
-- **Versioned Endpoints**: All routes under `/v1/` for API stability
+**Core Platform API (REST, versioned):**
+
+- **Versioned Endpoints**: Core platform routes under `/v1/` for API stability
 - **Multi-Tenant Routing**: Database-scoped endpoints at `/v1/graphs/{graph_id}/*`
 - **Authentication**: JWT tokens and API keys
 - **OpenAPI Documentation**: Auto-generated at `/docs`
 - **Async Operations**: Non-blocking I/O for high throughput
+
+**Extensions API (GraphQL reads + named command writes):**
+
+RoboLedger and RoboInvestor are product extensions served under a unified `/extensions/*` surface that splits reads from writes by transport:
+
+- **GraphQL Reads**: `POST /extensions/{graph_id}/graphql` — Strawberry GraphQL endpoint with 29 ledger fields and 7 investor fields. The schema is composed dynamically from enabled domains, so a ledger-only deployment exposes only ledger fields (introspection never reveals disabled domains). Types auto-derive from Pydantic response models — adding a field on the backend exposes it on the wire with zero GraphQL-layer boilerplate.
+- **Named Command Operations**: `POST /extensions/{roboledger|roboinvestor}/{graph_id}/operations/{op_name}` — 23 ledger commands (`close-period`, `share-report`, `create-mapping-association`, etc.) and 9 investor commands. Writes are explicit command operations rather than resource CRUD, matching the multi-step domain operations they actually perform. Every response is wrapped in an `OperationEnvelope` with a ULID `operationId` and supports `Idempotency-Key` headers for safe retries. Long-running commands return `status: "pending"` with HTTP 202 and stream progress through `/v1/operations/{operationId}/stream`.
+- **Analytical View Operations**: `POST /extensions/{domain}/{graph_id}/operations/{view_name}` — graph-backed analytical operations that query LadybugDB rather than the extensions OLTP database. Share the same envelope contract as command operations but are read-only and routed to the materialized graph. `build-fact-grid` (multi-dimensional pivot tables over the XBRL hypercube schema) is the first one; this is the seam for any analytical operation that needs columnar/graph query power beyond what a Postgres read can provide. Gated independently from the OLTP domains so deployments without the corresponding roboledger/roboinvestor tenants can still use them.
+
+Feature flags (`ROBOLEDGER_ENABLED`, `ROBOINVESTOR_ENABLED`, `EXTENSIONS_GRAPHQL_ENABLED`, `FACT_GRID_ENABLED`) gate each surface at schema-construction time, not request time — disabled domains are simply absent from the schema rather than throwing runtime errors.
+
+**See**: [GraphQL Extensions Documentation](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/graphql/README.md) in codebase
 
 ### MCP Server
 
@@ -325,7 +339,9 @@ For current tier specifications including instance types, memory allocation, sub
 
 **Location**: `/robosystems/operations/`
 
-Business workflow orchestration and service layer:
+Business workflow orchestration and service layer. Two categories of code live here: platform services (unchanged for years) and extension domain logic (a CQRS-shaped subtree introduced with the GraphQL Extensions surface).
+
+**Platform services** (`operations/graph/`, `operations/lbug/`, `operations/providers/`, top-level modules):
 
 - **Entity Graph Service**: Entity-specific graph creation workflows with curated schemas
 - **Generic Graph Service**: Custom schema graph creation with user-defined node/relationship types
@@ -335,7 +351,41 @@ Business workflow orchestration and service layer:
 - **Search Service**: OpenSearch-backed full-text and semantic document search
 - **Connection Service**: Provider-agnostic connection management (QuickBooks, Plaid, SEC) with encrypted credential storage
 
-**See**: [Operations Documentation](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/operations/README.md) in codebase
+**Extension domain kernels** (`operations/roboledger/`, `operations/roboinvestor/`):
+
+Each product extension keeps its business logic in a CQRS-style subtree with reads and commands as separate pure-function modules:
+
+```
+operations/roboledger/
+├── reads/       # Pure functions: session + args → Pydantic response
+│   └── accounts.py, entity.py, fiscal_calendar.py, reports.py, ...
+├── commands/    # Pure functions: session + request → Pydantic response
+│   └── fiscal_calendar.py, reports.py, schedules.py, taxonomies.py, ...
+├── fiscal_calendar/  # Kept-in-place domain services (PeriodCloseService, ...)
+├── reports/          # fact_grid, guard_rails
+├── schedules/        # ScheduleService
+└── views/            # Graph-backed analytical queries (fact-grid)
+
+operations/roboinvestor/
+├── reads/       # portfolios, securities, positions, holdings
+└── commands/    # portfolios, securities, positions
+```
+
+**Single source of truth.** `reads/*.py` and `commands/*.py` are the only place domain logic lives. Three different transports call into them:
+
+- **GraphQL resolvers** (`graphql/resolvers/*`) delegate reads to `operations/{domain}/reads/*`
+- **Named command operation routers** (`routers/extensions/{domain}/operations.py`) delegate writes to `operations/{domain}/commands/*`
+- **MCP tools** (`middleware/mcp/tools/*`) call the same ops-layer modules directly
+
+This invariant is load-bearing: if a caller hits the GraphQL endpoint, a named operation, or an MCP tool, the same function runs and the same business rules are enforced. Adding logic anywhere else — routers, resolvers, MCP handlers — is a mistake.
+
+**Design contract for reads/commands:**
+
+- Functions take an already-open extensions database session (`session: Session`) — the caller opens it via `extensions_session(graph_id)`
+- Functions return Pydantic response models (or `None`), never raise HTTP errors
+- Domain exceptions (`PeriodNotFoundError`, `MappingStructureNotFoundError`, etc.) raised here; the caller translates for its transport (HTTP 404 for REST, typed GraphQL error code, MCP tool error)
+
+**See**: [Operations Documentation](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/operations/README.md) and [GraphQL Extensions Documentation](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/graphql/README.md) in codebase
 
 ### Adapters
 
