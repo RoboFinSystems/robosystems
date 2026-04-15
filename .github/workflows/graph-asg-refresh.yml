@@ -25,6 +25,16 @@ on:
         required: false
         type: string
         default: "300"
+      max_wait_minutes:
+        description: "Minutes to wait for in-flight destructive ops to finish"
+        required: false
+        type: string
+        default: "30"
+      force_ignore_busy:
+        description: "Skip busy-counter check (emergency override)"
+        required: false
+        type: boolean
+        default: false
   workflow_call:
     inputs:
       environment:
@@ -41,6 +51,16 @@ on:
         required: false
         type: string
         default: "300"
+      max_wait_minutes:
+        description: "Minutes to wait for in-flight destructive ops to finish"
+        required: false
+        type: string
+        default: "30"
+      force_ignore_busy:
+        description: "Skip busy-counter check (emergency override)"
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   id-token: write
@@ -75,6 +95,8 @@ jobs:
           tier: ${{ inputs.tier }}
           aws-region: ${{ vars.AWS_REGION || 'us-east-1' }}
           instance-warmup: ${{ inputs.instance_warmup }}
+          max-wait-minutes: ${{ inputs.max_wait_minutes }}
+          force-ignore-busy: ${{ inputs.force_ignore_busy }}
 
       - name: Summary
         if: always()

@@ -1,6 +1,13 @@
 #!/bin/bash
 # Graph Database Health Check
-# Ingestion-aware health checks for LadybugDB graph API instances
+# Container-state health checks for LadybugDB graph API instances.
+#
+# Note: An earlier version read a `<db>:ingestion:active:<instance>` flag
+# from Valkey to keep the instance marked healthy during heavy writes, but
+# that flag was never set by any writer. It has been removed. In-flight
+# destructive operations are now coordinated via the DynamoDB busy counter
+# (active_destructive_ops on instance-registry) which is read directly by
+# GHA refresh workflows — see robosystems/middleware/graph/instance_busy.py.
 
 set -e
 
@@ -11,7 +18,6 @@ set -e
 : ${ENVIRONMENT:?"ENVIRONMENT must be set"}
 : ${REGISTRY_TABLE:?"REGISTRY_TABLE must be set"}
 : ${AWS_REGION:?"AWS_REGION must be set"}
-: ${VALKEY_URL:-}
 
 # Get instance metadata
 TOKEN=$(curl -s -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 21600")
@@ -29,38 +35,19 @@ else
   CONTAINER_NAME="graph-api"
 fi
 
-# Check if active ingestion is happening (via Redis flag)
-# If ingestion is active, ALWAYS mark as healthy regardless of other checks
-INGESTION_ACTIVE="false"
-if [ -n "${VALKEY_URL}" ] && command -v redis6-cli &> /dev/null; then
-  REDIS_HOST=$(echo $VALKEY_URL | sed 's|redis://||' | cut -d: -f1)
-  REDIS_PORT=$(echo $VALKEY_URL | sed 's|redis://||' | cut -d: -f2 | cut -d/ -f1)
-
-  INGESTION_FLAG=$(redis6-cli -h $REDIS_HOST -p $REDIS_PORT GET "${DATABASE_TYPE}:ingestion:active:${INSTANCE_ID}" 2>/dev/null || echo "")
-  if [ -n "$INGESTION_FLAG" ]; then
-    INGESTION_ACTIVE="true"
-    # Extract table name if possible
-    TABLE_NAME=$(echo "$INGESTION_FLAG" | grep -o '"table_name":"[^"]*"' | cut -d'"' -f4 || echo "unknown")
-    echo "[$(date)] Active ingestion detected for table: $TABLE_NAME - marking as healthy"
-    HEALTH_STATUS="healthy"
-  fi
-fi
-
-# Only check container status if not actively ingesting
-if [ "$INGESTION_ACTIVE" = "false" ]; then
-  if docker ps | grep -q $CONTAINER_NAME; then
-    HEALTH_STATUS="healthy"
-    echo "[$(date)] Container $CONTAINER_NAME is running - marking as healthy"
+# Check container status
+if docker ps | grep -q $CONTAINER_NAME; then
+  HEALTH_STATUS="healthy"
+  echo "[$(date)] Container $CONTAINER_NAME is running - marking as healthy"
+else
+  HEALTH_STATUS="unhealthy"
+  echo "[$(date)] Container $CONTAINER_NAME is NOT running - marking as unhealthy"
+  # Try to restart container once
+  echo "[$(date)] Attempting to restart container..."
+  if [ -f /usr/local/bin/run-graph-container.sh ]; then
+    /usr/local/bin/run-graph-container.sh
   else
-    HEALTH_STATUS="unhealthy"
-    echo "[$(date)] Container $CONTAINER_NAME is NOT running - marking as unhealthy"
-    # Try to restart container once
-    echo "[$(date)] Attempting to restart container..."
-    if [ -f /usr/local/bin/run-graph-container.sh ]; then
-      /usr/local/bin/run-graph-container.sh
-    else
-      echo "[$(date)] ERROR: run-graph-container.sh not found, cannot restart"
-    fi
+    echo "[$(date)] ERROR: run-graph-container.sh not found, cannot restart"
   fi
 fi
 

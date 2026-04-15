@@ -25,6 +25,21 @@ inputs:
     description: 'Seconds to wait for health check after update'
     required: false
     default: '30'
+  max-wait-minutes:
+    description: >-
+      Maximum minutes to wait for in-flight destructive operations
+      (materialization, SEC staging, extensions mat, bulk table creates)
+      to complete before cycling the container. Polls every 60 seconds.
+    required: false
+    default: '30'
+  force-ignore-busy:
+    description: >-
+      If true, skip the busy-counter pre-check and cycle the container
+      immediately even if a destructive operation is in flight. Emergency
+      escape hatch — use sparingly, interrupted materializations may
+      require a full graph rebuild.
+    required: false
+    default: 'false'
 
 outputs:
   status:
@@ -60,6 +75,93 @@ runs:
           echo "Must be one of: staging, prod"
           exit 1
         fi
+
+    - name: Wait for In-Flight Destructive Ops on ${{ inputs.instance-id }}
+      id: wait_for_idle
+      shell: bash
+      run: |
+        set -e
+
+        REGISTRY_TABLE="robosystems-graph-${{ inputs.environment }}-instance-registry"
+        INSTANCE_ID="${{ inputs.instance-id }}"
+        REGION="${{ inputs.aws-region }}"
+        MAX_ATTEMPTS=${{ inputs.max-wait-minutes }}
+        FORCE_IGNORE="${{ inputs.force-ignore-busy }}"
+        # Stale detection: counter > 0 but no heartbeat for 6h → treat as crashed.
+        # 6h comfortably covers even full SEC historical backfills (30-120min).
+        # If a single op actually runs longer than this, it's almost certainly hung.
+        STALE_WINDOW_SECONDS=21600
+
+        if [ "$FORCE_IGNORE" = "true" ]; then
+          echo "⚠️  force-ignore-busy=true — bypassing busy-counter check for ${INSTANCE_ID}"
+          echo "status=bypassed" >> $GITHUB_OUTPUT
+          exit 0
+        fi
+
+        echo "🔍 Checking destructive-op counter on ${INSTANCE_ID} (table: ${REGISTRY_TABLE})"
+
+        ATTEMPT=0
+        COUNT=0
+        while [ $ATTEMPT -lt $MAX_ATTEMPTS ]; do
+          ATTEMPT=$((ATTEMPT + 1))
+
+          ITEM=$(aws dynamodb get-item \
+            --table-name "${REGISTRY_TABLE}" \
+            --key "{\"instance_id\":{\"S\":\"${INSTANCE_ID}\"}}" \
+            --query "Item" \
+            --output json \
+            --region "${REGION}" 2>/dev/null || echo "null")
+
+          if [ "$ITEM" = "null" ] || [ -z "$ITEM" ]; then
+            echo "ℹ️  No registry entry for ${INSTANCE_ID} (not yet registered or unmanaged) — proceeding"
+            COUNT=0
+            break
+          fi
+
+          COUNT=$(echo "$ITEM" | jq -r '.active_destructive_ops.N // "0"')
+          LAST_AT=$(echo "$ITEM" | jq -r '.last_destructive_op_at.S // ""')
+          KIND=$(echo "$ITEM" | jq -r '.last_destructive_op_kind.S // "unknown"')
+
+          # Integer comparison — a counter that went negative (from a
+          # swallowed increment-failure on the writer side) should be
+          # treated as idle, not "still waiting."
+          if [ "${COUNT:-0}" -le 0 ] 2>/dev/null; then
+            if [ "${COUNT:-0}" -lt 0 ] 2>/dev/null; then
+              echo "::warning::Negative busy counter on ${INSTANCE_ID} (count=${COUNT}); treating as idle. May indicate a swallowed increment failure."
+            fi
+            if [ $ATTEMPT -eq 1 ]; then
+              echo "✅ Instance ${INSTANCE_ID} is idle — proceeding with refresh"
+            else
+              echo "✅ Instance ${INSTANCE_ID} became idle after ${ATTEMPT} attempt(s)"
+            fi
+            COUNT=0
+            break
+          fi
+
+          # Stale detection: if the counter is stuck but heartbeat is old,
+          # assume the writer crashed and proceed anyway (GHA log warning).
+          if [ -n "$LAST_AT" ]; then
+            LAST_EPOCH=$(date -u -d "${LAST_AT}" +%s 2>/dev/null || echo 0)
+            NOW_EPOCH=$(date -u +%s)
+            AGE=$((NOW_EPOCH - LAST_EPOCH))
+            if [ $LAST_EPOCH -gt 0 ] && [ $AGE -gt $STALE_WINDOW_SECONDS ]; then
+              echo "::warning::Stale busy counter on ${INSTANCE_ID}: count=${COUNT}, kind=${KIND}, last_update=${LAST_AT} (${AGE}s ago > ${STALE_WINDOW_SECONDS}s). Treating as crashed and proceeding."
+              COUNT=0
+              break
+            fi
+          fi
+
+          echo "⏳ Attempt ${ATTEMPT}/${MAX_ATTEMPTS}: instance ${INSTANCE_ID} busy (count=${COUNT}, kind=${KIND}, last=${LAST_AT}). Waiting 60s..."
+          sleep 60
+        done
+
+        if [ "${COUNT:-0}" -gt 0 ] 2>/dev/null; then
+          echo "::error::Timed out after ${MAX_ATTEMPTS} minute(s) waiting for ${INSTANCE_ID} to become idle (count=${COUNT}, kind=${KIND}). Use force-ignore-busy=true to override."
+          echo "status=timeout" >> $GITHUB_OUTPUT
+          exit 1
+        fi
+
+        echo "status=idle" >> $GITHUB_OUTPUT
 
     - name: Update Container on ${{ inputs.instance-id }}
       id: update

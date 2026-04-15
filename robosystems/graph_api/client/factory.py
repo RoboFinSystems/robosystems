@@ -536,53 +536,14 @@ class GraphClientFactory:
               await cls._master_circuit_breaker.record_success()
             return url
 
-      # No healthy shared master found - check if there's one marked unhealthy due to ingestion
-      logger.warning(
-        "No healthy shared master found in DynamoDB, checking for instances in ingestion state"
-      )
-
-      # Check Redis for any instances with active ingestion flags
-      # These might be marked unhealthy but are actually processing
-      if redis_client:
-        try:
-          # Scan for ingestion flags
-          pattern = "lbug:ingestion:active:*"
-          async for key in redis_client.scan_iter(match=pattern, count=100):
-            # Extract instance ID from key
-            instance_id = (
-              key.decode().split(":")[-1]
-              if isinstance(key, bytes)
-              else key.split(":")[-1]
-            )
-
-            # Check if this is the shared master instance
-            response = dynamodb.get_item(
-              TableName=env.INSTANCE_REGISTRY_TABLE,
-              Key={"instance_id": {"S": instance_id}},
-            )
-
-            if response.get("Item"):
-              item = response["Item"]
-              node_type = item.get("node_type", {}).get("S")
-              private_ip = item.get("private_ip", {}).get("S")
-
-              if node_type == "shared_master" and private_ip:
-                url = f"http://{private_ip}:8001"
-                logger.warning(
-                  f"Found shared master {instance_id} with active ingestion flag, "
-                  f"using despite unhealthy status: {url}"
-                )
-
-                # Cache this discovery with shorter TTL
-                await redis_client.setex(cache_key, 60, url)  # Only 1 minute cache
-
-                if env.GRAPH_CIRCUIT_BREAKERS_ENABLED:
-                  await cls._master_circuit_breaker.record_success()
-                return url
-
-        except Exception as redis_error:
-          logger.warning(f"Could not check Redis for ingestion flags: {redis_error}")
-
+      # No healthy shared master found. An earlier implementation had a
+      # fallback that scanned Valkey for `lbug:ingestion:active:*` flags
+      # to discover masters marked unhealthy during ingestion, but the
+      # flag was never set by any writer and the fallback never fired.
+      # In-flight destructive operations are now tracked via the DynamoDB
+      # busy counter on instance-registry (see instance_busy.py) and GHA
+      # pre-refresh workflows read it directly — no Valkey coordination
+      # path exists or is needed here.
       logger.warning(
         f"No healthy shared master found in DynamoDB after scanning "
         f"{env.ENVIRONMENT} environment"

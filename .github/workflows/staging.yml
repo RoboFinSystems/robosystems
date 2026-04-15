@@ -18,6 +18,16 @@ on:
         required: false
         type: boolean
         default: true
+      graph_refresh_max_wait_minutes:
+        description: "Minutes to wait for in-flight destructive ops (materialization, SEC stage, ext mat) before cycling"
+        required: false
+        type: string
+        default: "30"
+      graph_refresh_force_ignore_busy:
+        description: "Skip busy-counter check and cycle graph containers immediately (emergency override)"
+        required: false
+        type: boolean
+        default: false
   workflow_call: {} # Called from create-release.yml
 
 jobs:
@@ -672,6 +682,10 @@ jobs:
       graph_refresh_enabled: ${{ inputs.graph_container_refresh != false }}
       graph_node_types: "writer"
       graph_health_check_timeout: "30"
+      # Pre-refresh busy-counter wait (protects in-flight materialization
+      # on the shared-tier SEC master from mid-op cycling)
+      max_wait_minutes: ${{ inputs.graph_refresh_max_wait_minutes || '30' }}
+      force_ignore_busy: ${{ (inputs.graph_refresh_force_ignore_busy && 'true') || 'false' }}
       # API/Dagster/Worker refresh disabled - ECS auto-deploys via version tags in task definitions
       api_refresh_enabled: "false"
       api_stack_name: ${{ needs.stack-config.outputs.api_stack }}

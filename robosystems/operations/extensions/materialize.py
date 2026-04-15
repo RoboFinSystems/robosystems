@@ -834,6 +834,19 @@ class LedgerMaterializer:
       result.duration_ms = (time.time() - start_time) * 1000
       return result
 
+    # Publish busy counter on the target instance for GHA pre-refresh
+    # coordination. Per-graph materialization lock is already handled by
+    # _materialize_blue_green below; this is the complementary per-instance
+    # signal that tells GHA refresh workflows to wait.
+    from robosystems.middleware.graph.instance_busy import (
+      OP_KIND_EXTENSIONS_MATERIALIZE,
+      begin_destructive_op,
+      end_destructive_op,
+    )
+
+    busy_instance_id = client._instance_id or ""
+    await begin_destructive_op(busy_instance_id, OP_KIND_EXTENSIONS_MATERIALIZE)
+
     try:
       async with client:
         db_exists = await client.database_exists(graph_id)
@@ -849,6 +862,8 @@ class LedgerMaterializer:
       logger.error(f"Ledger materialization failed for {graph_id}: {e}", exc_info=True)
       result.status = "error"
       result.errors.append(str(e))
+    finally:
+      await end_destructive_op(busy_instance_id, OP_KIND_EXTENSIONS_MATERIALIZE)
 
     result.duration_ms = (time.time() - start_time) * 1000
 
