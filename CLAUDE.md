@@ -39,7 +39,7 @@ Extensions (roboledger, roboinvestor) live under `/extensions` and are
 
 - **Typed reads** → `POST /extensions/{graph_id}/graphql` (Strawberry + GraphiQL in dev)
 - **Command writes** → `POST /extensions/{roboledger|roboinvestor}/{graph_id}/operations/{operation_name}`
-- **Analytical views** → `POST /extensions/roboledger/{graph_id}/operations/build-fact-grid` (graph-backed pivot tables; gated by `FACT_GRID_ENABLED`, mounts independently of `ROBOLEDGER_ENABLED` so SEC-only deployments still get it)
+- **Analytical view operations** → `POST /extensions/{domain}/{graph_id}/operations/{view_name}` — graph-backed operations that query LadybugDB rather than the extensions OLTP database. Read-only, same envelope contract as command writes. `build-fact-grid` is the first one (pivot tables over the XBRL hypercube); gated independently of the OLTP domain flags so deployments without the corresponding tenants can still mount them
 
 All three surfaces take `graph_id` as a URL path parameter — auth + per-graph
 access are validated by FastAPI dependencies before the handler runs.
@@ -179,9 +179,33 @@ if await credit_service.has_sufficient_credits("operation"):
 
 ### Database Migrations
 
-1. Update SQLAlchemy models in `/robosystems/models/iam/`
-2. Generate migration: `just migrate-create "description"`
-3. Review and run: `just migrate-up`
+RoboSystems has **two separate databases** with independent migration histories:
+
+- **Platform DB** (`robosystems`) — users, orgs, graphs, billing, connections, documents. Models in `/robosystems/models/core/`.
+- **Extensions DB** (`extensions`) — per-graph OLTP for RoboLedger and RoboInvestor with schema-per-graph-id tenancy. Models in `/robosystems/models/extensions/`.
+
+Every migration command takes an optional `db` argument that defaults to `platform`:
+
+```bash
+# Platform (default)
+just migrate-create "description"      # autogenerate
+just migrate-up                        # apply
+just migrate-down                      # rollback one
+just migrate-current                   # show revision
+
+# Extensions — pass "extensions" as the second argument
+just migrate-create "description" extensions
+just migrate-up extensions
+just migrate-down extensions
+just migrate-current extensions
+```
+
+Workflow for any change:
+
+1. Update the SQLAlchemy model in `/robosystems/models/core/` or `/robosystems/models/extensions/`
+2. Generate the migration against the correct database — `just migrate-create "msg"` for platform, `just migrate-create "msg" extensions` for extensions
+3. Review the generated file (autogenerate misses enum changes, CHECK constraints, some index changes — fix those by hand)
+4. Apply with `just migrate-up` or `just migrate-up extensions`
 
 ## Architecture Overview
 
@@ -229,8 +253,8 @@ robosystems/
 ├── models/
 │   ├── api/                      # Pydantic request/response models
 │   │   └── extensions/           # RoboLedger + RoboInvestor API models
-│   ├── billing/                  # Billing models
-│   └── iam/                      # SQLAlchemy database models
+│   ├── core/                     # Platform SQLAlchemy models (users, orgs, graphs, billing, connections, documents)
+│   └── extensions/               # Extensions OLTP SQLAlchemy models (roboledger, roboinvestor); schema-per-graph tenancy
 ├── config/                       # Centralized configuration (see config/README.md)
 ├── schemas/                      # Graph schema definitions
 └── graph_api/                    # Graph API microservice
@@ -239,9 +263,11 @@ robosystems/
 ### Key Architectural Patterns
 
 1. **Operations orchestrate, adapters integrate**: Operations coordinate business logic; adapters handle external service integration and data transformation
-2. **Multi-tenant by design**: All graph operations are scoped to `graph_id`
-3. **Credit-based AI billing**: Only AI operations (Anthropic/OpenAI) consume credits; database operations are free
-4. **Graph backend**: LadybugDB (`GRAPH_BACKEND_TYPE=ladybug`)
+2. **Operations kernel as single source of truth**: `operations/roboledger/{reads,commands,views}/` and `operations/roboinvestor/{reads,commands}/` hold domain logic as pure functions (session-in, Pydantic-out, domain exceptions). GraphQL resolvers, REST command operation routers, analytical view handlers, MCP tools, and agents all delegate to the same functions. Adding business logic in a router, resolver, or MCP tool handler is a mistake — route it through the ops layer.
+3. **Multi-tenant by design**: Core platform operations scoped to `graph_id`; extensions OLTP uses schema-per-graph-id PostgreSQL tenancy with `SET search_path` isolation
+4. **Two-database split**: Platform (`robosystems`) for IAM/billing/metadata; extensions (`extensions`) for per-graph OLTP. Different `DeclarativeBase` classes, independent migration histories, same shared RDS instance
+5. **Credit-based AI billing**: Only AI operations (Anthropic/OpenAI) consume credits; database operations are free
+6. **Graph backend**: LadybugDB (`GRAPH_BACKEND_TYPE=ladybug`)
 
 ## Testing
 
@@ -474,11 +500,14 @@ Before working in a directory, read its README:
 - `/robosystems/config/README.md` - Configuration patterns
 - `/robosystems/config/storage/README.md` - S3 storage paths
 - `/robosystems/graph_api/README.md` - Graph API details
+- `/robosystems/graphql/README.md` - Strawberry GraphQL extensions surface, Pydantic auto-derivation, resolver patterns
 - `/robosystems/middleware/auth/README.md` - Authentication system
 - `/robosystems/middleware/graph/README.md` - Graph routing
 - `/robosystems/operations/README.md` - Business logic patterns
 - `/robosystems/dagster/README.md` - Dagster orchestration patterns
-- `/robosystems/models/api/README.md` - API models
-- `/robosystems/models/iam/README.md` - Database models
+- `/robosystems/models/api/README.md` - Pydantic request/response models
+- `/robosystems/models/core/README.md` - Platform SQLAlchemy models (users, orgs, graphs, billing, connections, documents)
+- `/robosystems/models/extensions/README.md` - Extensions OLTP SQLAlchemy models (roboledger, roboinvestor) with schema-per-graph tenancy
+- `/robosystems/schemas/README.md` - Graph schema definitions, extension naming conventions, URL/flag topology
 - `/tests/README.md` - Testing guide
 - `/examples/README.md` - Demo scripts

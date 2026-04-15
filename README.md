@@ -28,17 +28,18 @@ The platform provides the core infrastructure that all extensions build on:
 
 Extensions are domain-specific subsystems that bring their own schema, OLTP tables, API routes, data pipelines, and dedicated frontend apps. They share a single PostgreSQL database with schema-per-tenant isolation and materialize to the graph for analytical queries. See [Schema Extensions](/robosystems/schemas/README.md) for the authoring contract.
 
-The extensions API surface is **graph-scoped at the URL level** — `graph_id` is always a path parameter, never a query argument — with three sub-surfaces:
+The extensions API surface is **graph-scoped at the URL level** — `graph_id` is always a path parameter, never a query argument — and splits reads from writes by transport:
 
 - **Typed reads** → `POST /extensions/{graph_id}/graphql` — Strawberry GraphQL endpoint with GraphiQL playground in dev. The schema is composed dynamically from enabled domains, so a ledger-only deployment exposes only ledger fields (no surprise runtime errors from disabled domains).
 - **Command writes** → `POST /extensions/{roboledger|roboinvestor}/{graph_id}/operations/{operation_name}` — named REST commands. Every command returns an `OperationEnvelope` with an `op_<ULID>` operation id, supports `Idempotency-Key` for safe retries, and is audit-logged. Long-running commands return `status: "pending"` and stream progress through `/v1/operations/{operation_id}/stream`.
-- **Analytical views** → `POST /extensions/roboledger/{graph_id}/operations/build-fact-grid` — graph-backed multi-dimensional pivot tables over the XBRL hypercube schema. Works for any graph using the schema, so SEC-only deployments get it without needing roboledger tenants.
 
 Behind the API is a CQRS-style operations kernel (`reads/` + `commands/` per domain) that's the single source of truth for business logic. GraphQL resolvers, REST operation routes, and MCP tools all delegate to the same functions, so wire shapes stay byte-identical across consumers. Per-domain feature flags (`ROBOLEDGER_ENABLED`, `ROBOINVESTOR_ENABLED`) gate both the routers and the GraphQL schema composition.
 
+See [GraphQL Extensions](/robosystems/graphql/README.md) for the read-path implementation details, the Strawberry-Pydantic auto-derivation pattern, and the walkthrough for adding a new read field.
+
 ### [RoboLedger](https://roboledger.ai)
 
-Accounting and financial reporting extension. OLTP general ledger in schema-per-tenant PostgreSQL (accounts, transactions, journal entries, line items, dimensions); 29 GraphQL read fields covering entities, accounts, trial balance, fiscal calendar, schedules, taxonomies, mappings, reports, and publish lists; 23 named command operations for closing periods, creating schedules and closing entries, managing CoA→GAAP mapping associations, and authoring multi-period reports; analytical fact-grid view over the materialized graph; QuickBooks ELT pipeline via dbt/Dagster; SEC XBRL financial reporting; AI-powered CoA→GAAP mapping via the MappingAgent. Dedicated frontend app.
+Accounting and financial reporting extension. OLTP general ledger in schema-per-tenant PostgreSQL (accounts, transactions, journal entries, line items, dimensions); 29 GraphQL read fields covering entities, accounts, trial balance, fiscal calendar, schedules, taxonomies, mappings, reports, and publish lists; 23 named command operations for closing periods, creating schedules and closing entries, managing CoA→GAAP mapping associations, and authoring multi-period reports; analytical view operations over the materialized graph; QuickBooks ELT pipeline via dbt/Dagster; SEC XBRL financial reporting; AI-powered CoA→GAAP mapping via the MappingAgent. Dedicated frontend app.
 
 ### [RoboInvestor](https://roboinvestor.ai)
 
@@ -280,12 +281,17 @@ pip install robosystems-client
 **Core Services:**
 
 - **[Adapters](/robosystems/adapters/README.md)** - External service integrations
-- **[Operations](/robosystems/operations/README.md)** - Business workflow orchestration
+- **[Operations](/robosystems/operations/README.md)** - Business workflow orchestration, CQRS reads/commands kernels for extensions
 - **[Schemas](/robosystems/schemas/README.md)** - Graph schema definitions
+- **[Extensions GraphQL](/robosystems/graphql/README.md)** - Strawberry GraphQL read surface, Pydantic auto-derivation, resolver patterns
 - **[Configuration](/robosystems/config/README.md)** - Configuration management
 - **[Dagster](/robosystems/dagster/README.md)** - Data pipeline and task orchestration
-- **[IAM Models](/robosystems/models/iam/README.md)** - Database models and migrations
-- **[API Models](/robosystems/models/api/README.md)** - API request/response models
+
+**Database Models:**
+
+- **[Platform Models](/robosystems/models/core/README.md)** - SQLAlchemy models for the platform database (users, orgs, graphs, billing, connections, documents)
+- **[Extensions OLTP Models](/robosystems/models/extensions/README.md)** - SQLAlchemy models for the extensions database (roboledger ledger, roboinvestor portfolios) with schema-per-graph tenancy
+- **[API Models](/robosystems/models/api/README.md)** - Pydantic request/response models for core platform and extensions surfaces
 
 **Graph Database System:**
 

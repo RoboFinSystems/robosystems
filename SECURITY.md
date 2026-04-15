@@ -24,7 +24,7 @@ Security controls implemented at the infrastructure, application, and data level
 
 ### API Key Management
 
-**Implementation:** `robosystems/models/iam/user_api_key.py`
+**Implementation:** `robosystems/models/core/user/user_api_key.py`
 
 - Cryptographically secure generation (`rfs` prefix + 64 hex characters)
 - Bcrypt hashing with cost factor 12 for storage
@@ -64,7 +64,7 @@ Security controls implemented at the infrastructure, application, and data level
 
 ### Multi-Tenant Access Control
 
-**Implementation:** `robosystems/models/iam/graph_user.py`
+**Implementation:** `robosystems/models/core/graph/graph_user.py`
 
 - Roles: admin (full control), member (read/write, default), viewer (read-only)
 - Complete tenant isolation via separate LadybugDB databases
@@ -88,7 +88,7 @@ Security controls implemented at the infrastructure, application, and data level
 
 ### Application-Level Encryption
 
-**Implementation:** `robosystems/security/encryption.py`, `robosystems/models/iam/connection_credentials.py`
+**Implementation:** `robosystems/security/encryption.py`, `robosystems/models/core/connection/connection_credentials.py`
 
 - Fernet (AES-128-CBC + HMAC) for graph backup encryption
 - Fernet encryption for OAuth tokens and connection credentials in PostgreSQL

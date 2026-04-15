@@ -65,8 +65,8 @@ POST /extensions/{graph_id}/graphql          Query { entity { … } fiscalCalend
 POST /extensions/roboledger/{graph_id}/operations/{op}     → ROBOLEDGER_ENABLED
 POST /extensions/roboinvestor/{graph_id}/operations/{op}   → ROBOINVESTOR_ENABLED
 
-# Analytical views (graph-backed, gated independently)
-POST /extensions/roboledger/{graph_id}/operations/build-fact-grid   → FACT_GRID_ENABLED
+# Analytical view operations (graph-backed, read-only, gated independently)
+POST /extensions/{domain}/{graph_id}/operations/{view_name}     → per-view flag (e.g. FACT_GRID_ENABLED)
 ```
 
 **Feature flags:**
@@ -164,7 +164,7 @@ The base schema (`base.py`) provides foundational nodes and relationships that a
 
 The RoboLedger extension models the full accounting domain: financial reporting (XBRL/SEC), general ledger (transactions, journal entries), and chart of accounts (via Element/Association patterns). It uses context-aware loading to present different views depending on the use case.
 
-**Full product extension** with OLTP tables in the `extensions` database (schema-per-tenant), a GraphQL read surface under `/extensions/{graph_id}/graphql` (29 fields), named command operations under `/extensions/roboledger/{graph_id}/operations/*` (23 commands), the graph-backed `build-fact-grid` analytical view, a QuickBooks ELT pipeline, and a dedicated frontend app.
+**Full product extension** with OLTP tables in the `extensions` database (schema-per-tenant), a GraphQL read surface under `/extensions/{graph_id}/graphql` (29 fields), named command operations under `/extensions/roboledger/{graph_id}/operations/*` (23 commands), graph-backed analytical view operations over the materialized data, a QuickBooks ELT pipeline, and a dedicated frontend app.
 
 #### Reporting Section (SEC/XBRL)
 

@@ -73,10 +73,11 @@ All API models are centralized here instead of being scattered across router fil
 
 ### 2. **Separation of Concerns**
 
-- **Models** (this directory): Data structure definitions
+- **Models** (this directory): Pydantic request/response data structures
 - **Routers** (`/routers/`): Business logic and endpoint handlers
 - **Operations** (`/operations/`): Core business operations
-- **Database Models** (`/models/iam/`, `/models/base/`): Database entities
+- **Platform SQLAlchemy Models** (`/models/core/`): Platform database entities (users, orgs, graphs, billing, connections, documents)
+- **Extensions SQLAlchemy Models** (`/models/extensions/`): Per-graph OLTP entities for roboledger and roboinvestor (schema-per-graph tenancy)
 
 ### 3. **Consistency**
 
@@ -153,8 +154,10 @@ When creating new API endpoints:
 ## 📚 Related Documentation
 
 - **Router Implementation**: `/robosystems/routers/` - Business logic and endpoint handlers
-- **Database Models**: `/robosystems/models/iam/` - Database entity definitions
+- **Platform SQLAlchemy Models**: [`/robosystems/models/core/README.md`](../core/README.md) - Platform database entities
+- **Extensions SQLAlchemy Models**: [`/robosystems/models/extensions/README.md`](../extensions/README.md) - Extensions OLTP entities with schema-per-graph tenancy
 - **Operations Layer**: `/robosystems/operations/` - Core business operations
+- **Extensions GraphQL**: [`/robosystems/graphql/README.md`](../../graphql/README.md) - How Pydantic response models in this directory get auto-derived into Strawberry GraphQL types
 - **OpenAPI Schema**: Generated automatically from these models at runtime
 
 ## 🔄 Migration Notes

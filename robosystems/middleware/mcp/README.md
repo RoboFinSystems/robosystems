@@ -15,6 +15,8 @@ The MCP middleware:
 - Enables workspace management for isolated development environments
 - Provides data operation tools for staging, querying, and graph materialization
 
+**Operations kernel integration.** MCP tools are a **transport layer**, not a domain. Tools that touch extension OLTP data (ledger schedules, period close, fiscal calendar, CoA→GAAP mapping, reports) delegate directly to the same `operations/roboledger/{reads,commands}/*` functions that the GraphQL resolvers and the named command operation routers call. A schedule created via `create-schedule` MCP tool goes through the exact same `commands/schedules.py` function as one created via `POST /extensions/roboledger/{g}/operations/create-schedule`. This is the single-source-of-truth contract that makes agent-driven workflows byte-identical to UI-driven workflows. Never add business logic to an MCP tool file — wire it into `operations/` and have the tool delegate.
+
 ## Architecture
 
 ```
@@ -27,21 +29,40 @@ mcp/
 ├── exceptions.py            # MCP-specific exception classes
 └── tools/                   # MCP tool implementations
     ├── base_tool.py         # Base tool interface
-    ├── manager.py           # Tool management and registry
-    ├── cypher_tool.py       # Cypher query execution
-    ├── schema_tool.py       # Schema introspection
-    ├── resolve_element_tool.py   # Concept → XBRL element resolution (canonical matching)
-    ├── example_queries_tool.py   # Query examples and templates
-    ├── financial_statement_tool.py  # Get financial statements (auto-resolve reports)
-    ├── data_tools.py        # Build fact grid (cross-company comparisons)
-    ├── search_tools.py      # Document search and retrieval (OpenSearch)
-    ├── workspace.py         # Workspace/subgraph management
-    └── memory.py            # Write operations (subgraph-only)
+    ├── manager.py           # GraphMCPTools — layered tool registry and dispatcher
+    ├── constants.py         # Tool name constants
+    │
+    │ # Layer 1: Core tools (always available)
+    ├── cypher_tool.py       # read-graph-cypher
+    ├── schema_tool.py       # get-graph-schema
+    │
+    │ # Layer 2a: Schema-extension analytical tools (roboledger gated)
+    ├── example_queries_tool.py     # get-example-queries
+    ├── resolve_element_tool.py     # resolve-element (canonical matching, manifest-gated)
+    ├── financial_statement_tool.py # get-financial-statement (auto-resolve reports)
+    ├── data_tools.py               # build-fact-grid (cross-company comparisons)
+    │
+    │ # Layer 2b: Roboledger OLTP tools (delegate to operations/roboledger/*)
+    ├── fiscal_calendar_tools.py    # get-fiscal-calendar, close-period, reopen-period
+    ├── schedule_tools.py           # create-schedule, list-schedule-structures, get-schedule-facts,
+    │                               # get-period-close-status, create-closing-entry,
+    │                               # list-period-drafts, truncate-schedule, create-manual-closing-entry
+    ├── taxonomy_tools.py           # get-unmapped-elements, suggest-mapping,
+    │                               # create-mapping-association, get-mapping-summary
+    ├── materialization_tools.py    # get-graph-sync-status, materialize-graph
+    │
+    │ # Layer 3: Document search + management (SEMANTIC_SEARCH_ENABLED)
+    ├── search_tools.py      # search-documents, get-document-section
+    ├── document_tools.py    # create-document, update-document, get-document, list-documents
+    │
+    │ # Layer 4: Infrastructure (feature-flag gated)
+    ├── workspace.py         # create/delete/list/switch-workspace (MCP_WORKSPACE_ENABLED)
+    └── memory.py            # write-graph-cypher, add-node-table, add-relationship-table (MCP_MEMORY_ENABLED)
 ```
 
 ## Tool Layers
 
-Tools are organized into three availability layers:
+Tools are organized into four availability layers with conditional gating. `GraphMCPTools.__init__` (in `tools/manager.py`) assembles the tool set at construction time based on `schema_extensions`, `read_only`, the graph type (user vs shared repository), and runtime feature flags.
 
 ### Layer 1: Core (always available)
 
@@ -50,37 +71,114 @@ Tools are organized into three availability layers:
 | `read-graph-cypher` | Execute read-only Cypher queries with validation |
 | `get-graph-schema` | Get complete database schema (cached 60s) |
 
-### Layer 2: Schema Extensions (require `roboledger` in `schema_extensions`)
+### Layer 2a: Schema-extension analytical tools
+
+Require `roboledger` in `schema_extensions`. These tools query the LadybugDB graph (read-only, OLAP).
+
+| Tool | Description | Additional gating |
+|------|-------------|-------------------|
+| `get-example-queries` | Working query patterns tailored to the graph schema | — |
+| `resolve-element` | Map concepts ("revenue") to XBRL element qnames via canonical matching | Manifest flag `has_semantic_enrichment=True` |
+| `get-financial-statement` | Structured statement data with auto-resolve and dedup | — |
+| `build-fact-grid` | Cross-company comparisons via canonical concepts | `FACT_GRID_ENABLED` |
+
+`search-documents` results on iXBRL disclosures include `xbrl_elements` — the XBRL fact tags in that section — enabling graph cross-reference via `resolve-element` or `read-graph-cypher`.
+
+### Layer 2b: Roboledger OLTP tools
+
+Require `roboledger` in `schema_extensions`, `ROBOLEDGER_ENABLED=true`, the graph is not a shared repository, and the graph is not read-only. These tools delegate to `robosystems.operations.roboledger.{reads,commands}.*` — the same functions called by the `/extensions/roboledger/{g}/operations/*` REST endpoints and the GraphQL ledger resolvers.
+
+**Fiscal calendar and period close:**
+
+| Tool | Description | Delegates to |
+|------|-------------|--------------|
+| `get-fiscal-calendar` | Current close pointer, target, period state | `reads/fiscal_calendar.get_fiscal_calendar` |
+| `close-period` | Close a fiscal period with balance + draft gates | `commands/fiscal_calendar.close_period` |
+| `reopen-period` | Reopen a closed period with audit reason | `commands/fiscal_calendar.reopen_period` |
+| `get-period-close-status` | Per-period close state and open drafts | `reads/fiscal_calendar.get_period_close_status` |
+
+**Schedules (depreciation, amortization, accruals):**
+
+| Tool | Description | Delegates to |
+|------|-------------|--------------|
+| `create-schedule` | Create a schedule structure with pre-generated facts | `commands/schedules.create_schedule` |
+| `list-schedule-structures` | List schedule structures for a graph | `reads/schedules.list_schedule_structures` |
+| `get-schedule-facts` | Get the fact rows for a specific schedule | `reads/schedules.get_schedule_facts` |
+| `truncate-schedule` | Cut a schedule short at a given period | `commands/schedules.truncate_schedule` |
+| `list-period-drafts` | List pending draft entries for a period | `reads/period_drafts.list_period_drafts` |
+| `create-closing-entry` | Create a schedule-derived closing entry | `commands/schedules.create_closing_entry` |
+| `create-manual-closing-entry` | Create a manually-authored closing entry | `commands/schedules.create_manual_closing_entry` |
+
+**Taxonomy and CoA→GAAP mapping:**
+
+| Tool | Description | Delegates to |
+|------|-------------|--------------|
+| `get-unmapped-elements` | Find CoA elements without a GAAP mapping | `reads/taxonomies.get_unmapped_elements` |
+| `suggest-mapping` | Get AI-suggested GAAP mapping for a CoA element | `commands/taxonomies.suggest_mapping` |
+| `create-mapping-association` | Persist a CoA → GAAP rollup association | `commands/taxonomies.create_mapping_association` |
+| `get-mapping-summary` | Coverage stats for the mapping taxonomy | `reads/taxonomies.get_mapping_summary` |
+
+**Materialization (user graphs only):**
 
 | Tool | Description |
 |------|-------------|
-| `get-example-queries` | Working query patterns tailored to the graph schema |
-| `resolve-element` | Map concepts ("revenue") to XBRL element qnames via canonical matching |
-| `get-financial-statement` | Structured statement data with auto-resolve and dedup |
-| `build-fact-grid` | Cross-company comparisons via canonical concepts |
+| `get-graph-sync-status` | Check if the graph needs rebuild after OLTP writes |
+| `materialize-graph` | Trigger the `mark_graph_stale` sensor to rebuild |
 
-`resolve-element` additionally requires `has_semantic_enrichment=True` on the manifest.
+### Layer 3: Document search and management
 
-### Layer 3: Search (feature-flag gated)
+Gated by `SEMANTIC_SEARCH_ENABLED`. Document management tools additionally skip shared repositories (SEC uses OpenSearch directly, no Postgres document rows).
 
-| Tool | Flag | Description |
-|------|------|-------------|
-| `search-documents` | `SEMANTIC_SEARCH_ENABLED` | Full-text keyword search across filing narratives, disclosures, and text blocks |
-| `get-document-section` | `SEMANTIC_SEARCH_ENABLED` | Retrieve full text of a document section by ID |
+**Search (available on all graphs including read-only):**
 
-`search-documents` returns ranked results with snippets and metadata. iXBRL disclosure results include `xbrl_elements` — the XBRL fact tags in that section — enabling graph cross-reference via `resolve-element` or `read-graph-cypher`.
+| Tool | Description |
+|------|-------------|
+| `search-documents` | Full-text keyword + semantic search across filing narratives, disclosures, and text blocks |
+| `get-document-section` | Retrieve full text of a document section by ID |
+
+**Document management (user graphs only):**
+
+| Tool | Description | Read-only OK |
+|------|-------------|--------------|
+| `get-document` | Fetch document metadata + body | Yes |
+| `list-documents` | List documents for a graph | Yes |
+| `create-document` | Upload a new document | No |
+| `update-document` | Update an existing document | No |
 
 ### Layer 4: Infrastructure (feature-flag gated)
 
-| Tool | Flag | Description |
-|------|------|-------------|
-| `create-workspace` | `MCP_WORKSPACE_ENABLED` | Create subgraph workspace |
-| `delete-workspace` | `MCP_WORKSPACE_ENABLED` | Delete workspace |
-| `list-workspaces` | `MCP_WORKSPACE_ENABLED` | List available workspaces |
-| `switch-workspace` | `MCP_WORKSPACE_ENABLED` | Switch active workspace context |
-| `write-graph-cypher` | `MCP_MEMORY_ENABLED` | Execute write Cypher (subgraphs only) |
-| `add-node-table` | `MCP_MEMORY_ENABLED` | Create staging table for nodes |
-| `add-relationship-table` | `MCP_MEMORY_ENABLED` | Create staging table for relationships |
+**Workspaces** (`MCP_WORKSPACE_ENABLED`):
+
+| Tool | Description | Read-only OK |
+|------|-------------|--------------|
+| `list-workspaces` | List available workspaces | Yes |
+| `switch-workspace` | Switch active workspace context | Yes |
+| `create-workspace` | Create subgraph workspace | No |
+| `delete-workspace` | Delete workspace | No |
+
+**Memory / write Cypher** (`MCP_MEMORY_ENABLED`, writable graphs only):
+
+| Tool | Description |
+|------|-------------|
+| `write-graph-cypher` | Execute write Cypher (subgraphs / memory graphs) |
+| `add-node-table` | Create staging table for nodes |
+| `add-relationship-table` | Create staging table for relationships |
+
+### Gating rules summary
+
+| Condition | Controls |
+|-----------|----------|
+| `schema_extensions` contains `roboledger` | Enables all Layer 2a and 2b tools |
+| `ROBOLEDGER_ENABLED=true` | Additional gate for all Layer 2b OLTP tools |
+| Graph is **not** a shared repository | Materialization tools, document management write tools |
+| Graph is **not** read-only | All write tools across every layer |
+| Manifest `has_semantic_enrichment=True` | `resolve-element` |
+| `FACT_GRID_ENABLED=true` | `build-fact-grid` |
+| `SEMANTIC_SEARCH_ENABLED=true` | Layer 3 (search + document management) |
+| `MCP_WORKSPACE_ENABLED=true` | Layer 4 workspace tools |
+| `MCP_MEMORY_ENABLED=true` | Layer 4 memory / write-cypher tools |
+
+A tool that would otherwise be unavailable due to any of these gates returns a structured error via `_tool_unavailable_reason` instead of silently no-oping — clients always see a typed reason when a tool isn't mounted in a given context.
 
 ## Key Components
 
@@ -147,14 +245,17 @@ async with acquire_graph_mcp_client(graph_id="kg1a2b3c") as client:
 
 ### 3. MCP Tools (`tools/`)
 
-All tools use `self.client.execute_query()` for consistent routing, auth, and error handling.
+Graph-query tools (Layer 1, Layer 2a, Layer 4 memory) use `self.client.execute_query()` to talk to the Graph API for consistent routing, auth, and error handling. OLTP tools (Layer 2b, Layer 3 document management) open an extensions database session via `extensions_session(graph_id)` and delegate to the ops layer directly.
 
 **Key patterns:**
 
+- **Operations-kernel delegation**: Every roboledger OLTP tool imports from `robosystems.operations.roboledger.{reads,commands}.*` and calls those functions with an open session. Tool files contain no business logic — they're transport shims that: (1) parse MCP arguments into the Pydantic request model, (2) open the session, (3) call the ops function, (4) translate domain exceptions (`PeriodNotFoundError`, `MappingStructureNotFoundError`, etc.) into structured MCP tool errors, (5) return the Pydantic response as an MCP result. The same functions back `/extensions/roboledger/{g}/operations/*` REST endpoints and the GraphQL resolvers — three transports, one domain kernel.
 - **Auto-resolve**: `get-financial-statement` automatically finds the latest relevant report when no `report_id` is provided
 - **Canonical matching**: `resolve-element` uses in-memory embedding match to map concepts to XBRL elements
 - **Deduplication**: Financial tools deduplicate facts that appear in multiple filings (comparative periods)
 - **Parameterized queries**: All tools use `$param` syntax to prevent injection
+
+**Why this matters:** An agent calling `close-period` via MCP and a user closing a period via the UI both go through `operations/roboledger/commands/fiscal_calendar.close_period` — same close gate checks, same draft-entry validation, same idempotency behavior. Business rules cannot drift between transports because there is only one implementation.
 
 ### 4. Query Validation (`query_validator.py`)
 
@@ -204,15 +305,21 @@ MCP_POOL_MAX_CONNECTIONS=10            # Connections per graph
 MCP_POOL_IDLE_TIMEOUT=300              # Idle timeout (seconds)
 MCP_POOL_LIFETIME=3600                 # Connection lifetime (seconds)
 
-# Feature Flags
+# Feature Flags — MCP infrastructure
 MCP_ENABLE_POOLING=true                # Enable connection pooling
 MCP_ENABLE_CACHING=true                # Enable schema caching
 MCP_ENABLE_VALIDATION=true             # Enable query validation
-MCP_WORKSPACE_ENABLED=false            # Enable workspace tools
-MCP_MEMORY_ENABLED=false               # Enable write/memory tools
-FACT_GRID_ENABLED=false                # Enable build-fact-grid tool
-SEMANTIC_SEARCH_ENABLED=false              # Enable search-documents and get-document-section tools
+
+# Feature Flags — tool availability (see Gating rules summary above)
+ROBOLEDGER_ENABLED=true                # Enables all Layer 2b roboledger OLTP tools (schedules, period close, taxonomy mapping, materialization). Requires `roboledger` also in the graph's schema_extensions.
+ROBOINVESTOR_ENABLED=false             # Parallel flag for future roboinvestor OLTP MCP tools (no such tools exist today)
+FACT_GRID_ENABLED=false                # Gates build-fact-grid tool
+SEMANTIC_SEARCH_ENABLED=false          # Gates search-documents, get-document-section, and Layer 3 document management tools
+MCP_WORKSPACE_ENABLED=false            # Gates Layer 4 workspace tools
+MCP_MEMORY_ENABLED=false               # Gates Layer 4 memory / write-cypher tools
 ```
+
+**Note on `schema_extensions` vs env flags:** Layer 2 tool availability is a two-factor check — the graph must declare `roboledger` in its `schema_extensions` (a per-graph property stored on the `Graph` model) **and** the runtime flag (`ROBOLEDGER_ENABLED` for Layer 2b, always-on for Layer 2a) must be true. Shared repositories like SEC have `roboledger` in their schema_extensions so Layer 2a analytical tools work against them, but they're detected as shared repos by `_is_shared_repository()` so Layer 2b OLTP tools are skipped automatically — SEC has no extensions database schema to write to.
 
 ## Integration Patterns
 
@@ -237,17 +344,27 @@ async def execute_mcp_query(
 ### With Agent System
 
 ```python
-from robosystems.middleware.mcp import GraphMCPTools
+from robosystems.middleware.mcp import acquire_graph_mcp_client, GraphMCPTools
 
-# Initialize tools for agent
-tools = GraphMCPTools(graph_id="sec")
+# Acquire a pooled client for the target graph
+async with acquire_graph_mcp_client(graph_id="sec") as client:
+    # Initialize tools — schema_extensions drives Layer 2 gating,
+    # read_only drives write-tool gating. Typically sourced from
+    # the Graph model in the platform database.
+    tools = GraphMCPTools(
+        graph_client=client,
+        schema_extensions=("roboledger",),
+        read_only=False,
+    )
 
-# Agent uses tools for natural language queries
-response = await agent.execute({
-    "prompt": "What were Apple's total assets in 2023?",
-    "tools": tools.get_tool_definitions()
-})
+    # Agent uses tools for natural language queries
+    response = await agent.execute({
+        "prompt": "What were Apple's total assets in 2023?",
+        "tools": tools.get_tool_definitions(),
+    })
 ```
+
+Agents that need both graph queries and OLTP writes (like `CloseAgent`, which calls `create-closing-entry` and `close-period`) initialize `GraphMCPTools` with a writable client and `schema_extensions=("roboledger",)` so both Layer 2a (analytical reads) and Layer 2b (OLTP commands) are available.
 
 ## Troubleshooting
 
@@ -280,6 +397,10 @@ logging.getLogger("robosystems.middleware.mcp").setLevel(logging.DEBUG)
 
 ## Related Documentation
 
+- **[Operations Layer](/robosystems/operations/README.md)** - Business logic kernel that OLTP MCP tools delegate to
+- **[Extensions OLTP Models](/robosystems/models/extensions/README.md)** - SQLAlchemy models backing the roboledger/roboinvestor schemas
+- **[GraphQL Extensions](/robosystems/graphql/README.md)** - GraphQL read surface built on the same ops kernel MCP tools use
+- **[Schemas](/robosystems/schemas/README.md)** - Graph schema definitions and `schema_extensions` naming conventions
 - **[Graph API](/robosystems/graph_api/README.md)** - Underlying Graph API system
 - **[Graph Middleware](/robosystems/middleware/graph/README.md)** - Graph routing layer
 - **[Authentication](/robosystems/middleware/auth/README.md)** - Auth integration
