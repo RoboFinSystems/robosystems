@@ -34,13 +34,6 @@ on:
         required: true
         type: string
 
-      # Database Engine Configuration
-      engine:
-        description: "Database engine type (aurora-postgresql for Aurora, postgres for RDS)"
-        required: false
-        type: string
-        default: "postgres"
-
       # Database Version Configuration
       postgres_version:
         description: "PostgreSQL engine version (e.g., 16.11)"
@@ -50,16 +43,16 @@ on:
 
       # Instance Configuration
       instance_size:
-        description: "Database instance type for PostgreSQL/Aurora"
+        description: "Database instance type for PostgreSQL"
         required: true
         type: string
       allocated_storage:
-        description: "Initial storage size in GB (ignored by Aurora)"
+        description: "Initial storage size in GB"
         required: false
         type: string
         default: "20"
       allocated_max_storage:
-        description: "Maximum storage size in GB (ignored by Aurora)"
+        description: "Maximum storage size in GB"
         required: false
         type: string
         default: "100"
@@ -70,6 +63,23 @@ on:
         required: false
         type: string
         default: "false"
+
+      # RDS Proxy Configuration (off by default)
+      rds_proxy_enabled:
+        description: "Enable RDS Proxy for connection pooling (costs ~$0.015/vCPU/hour when enabled)"
+        required: false
+        type: string
+        default: "false"
+      rds_proxy_max_connections_percent:
+        description: "Maximum percentage of DB max_connections the proxy can use (1-100)"
+        required: false
+        type: string
+        default: "100"
+      rds_proxy_connection_borrow_timeout:
+        description: "Seconds a client waits for a pooled connection before the proxy errors (1-3600)"
+        required: false
+        type: string
+        default: "120"
 
       # Lambda Configuration
       lambda_image_uri:
@@ -96,6 +106,9 @@ on:
       database_port:
         description: "PostgreSQL database port"
         value: ${{ jobs.deploy.outputs.database_port }}
+      database_proxy_endpoint:
+        description: "RDS Proxy endpoint hostname (empty when rds_proxy_enabled=false)"
+        value: ${{ jobs.deploy.outputs.database_proxy_endpoint }}
 
 jobs:
   deploy:
@@ -109,6 +122,7 @@ jobs:
       database_sg_id: ${{ steps.stack-outputs.outputs.database_sg_id }}
       database_endpoint: ${{ steps.stack-outputs.outputs.database_endpoint }}
       database_port: ${{ steps.stack-outputs.outputs.database_port }}
+      database_proxy_endpoint: ${{ steps.stack-outputs.outputs.database_proxy_endpoint }}
 
     steps:
       - name: Checkout
@@ -138,11 +152,13 @@ jobs:
           fi
 
           POSTGRES_STACK_PARAMS="ParameterKey=Environment,ParameterValue=${{ inputs.environment }} \
-                ParameterKey=DatabaseEngine,ParameterValue=${{ inputs.engine }} \
                 ParameterKey=DBInstanceClass,ParameterValue=${{ inputs.instance_size }} \
                 ParameterKey=DBAllocatedStorage,ParameterValue=${{ inputs.allocated_storage }} \
                 ParameterKey=DBMaxAllocatedStorage,ParameterValue=${{ inputs.allocated_max_storage }} \
                 ParameterKey=EnableMultiAZ,ParameterValue=${{ inputs.multi_az_enabled }} \
+                ParameterKey=EnableRDSProxy,ParameterValue=${{ inputs.rds_proxy_enabled }} \
+                ParameterKey=RDSProxyMaxConnectionsPercent,ParameterValue=${{ inputs.rds_proxy_max_connections_percent }} \
+                ParameterKey=RDSProxyConnectionBorrowTimeout,ParameterValue=${{ inputs.rds_proxy_connection_borrow_timeout }} \
                 ParameterKey=VpcId,ParameterValue=${{ inputs.vpc_id }} \
                 ParameterKey=SubnetId1,ParameterValue=$(echo ${{ inputs.subnet_ids }} | cut -d ',' -f1) \
                 ParameterKey=SubnetId2,ParameterValue=$(echo ${{ inputs.subnet_ids }} | cut -d ',' -f2) \
@@ -262,6 +278,20 @@ jobs:
           else
             echo "database_port=5432" >> $GITHUB_OUTPUT
             echo "Database Port defaulting to 5432"
+          fi
+
+          # Get the RDS Proxy Endpoint (only present when rds_proxy_enabled=true)
+          DATABASE_PROXY_ENDPOINT=$(aws cloudformation describe-stacks \
+            --stack-name ${{ inputs.stack_name }} \
+            --query "Stacks[0].Outputs[?OutputKey=='DatabaseProxyEndpoint'].OutputValue" \
+            --output text 2>/dev/null || echo "")
+
+          if [ -n "$DATABASE_PROXY_ENDPOINT" ] && [ "$DATABASE_PROXY_ENDPOINT" != "None" ]; then
+            echo "database_proxy_endpoint=$DATABASE_PROXY_ENDPOINT" >> $GITHUB_OUTPUT
+            echo "RDS Proxy Endpoint: $DATABASE_PROXY_ENDPOINT"
+          else
+            echo "database_proxy_endpoint=" >> $GITHUB_OUTPUT
+            echo "RDS Proxy not enabled - proxy endpoint is empty"
           fi
 
       - name: Update Deployment Status

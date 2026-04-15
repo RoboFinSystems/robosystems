@@ -270,8 +270,6 @@ jobs:
       aws_region: ${{ vars.AWS_REGION || 'us-east-1' }}
       vpc_id: ${{ needs.deploy-vpc.outputs.vpc_id }}
       subnet_ids: ${{ needs.deploy-vpc.outputs.private_subnet_ids }}
-      # Database Engine Configuration
-      engine: ${{ vars.DATABASE_ENGINE_STAGING || 'postgres' }}
       # Database Version Configuration
       postgres_version: ${{ vars.DATABASE_POSTGRES_VERSION_STAGING || '16.11' }}
       # Instance Configuration
@@ -280,6 +278,10 @@ jobs:
       allocated_max_storage: ${{ vars.DATABASE_MAX_ALLOCATED_STORAGE_STAGING || '100' }}
       # High Availability Configuration
       multi_az_enabled: ${{ vars.DATABASE_MULTI_AZ_ENABLED_STAGING || 'false' }}
+      # RDS Proxy Configuration (off by default - flip RDS_PROXY_ENABLED_STAGING to 'true' to turn on)
+      rds_proxy_enabled: ${{ vars.RDS_PROXY_ENABLED_STAGING || 'false' }}
+      rds_proxy_max_connections_percent: ${{ vars.RDS_PROXY_MAX_CONNECTIONS_PERCENT_STAGING || '100' }}
+      rds_proxy_connection_borrow_timeout: ${{ vars.RDS_PROXY_CONNECTION_BORROW_TIMEOUT_STAGING || '120' }}
       # Lambda Configuration (container-based)
       lambda_image_uri: ${{ needs.build.outputs.lambda_image }}
       # Other Configuration
@@ -561,7 +563,9 @@ jobs:
       domain_name: ${{ vars.API_DOMAIN_NAME_STAGING || '' }}
       domain_name_root: ${{ needs.stack-config.outputs.domain_name_root }}
       # Database Configuration (from Postgres stack outputs)
-      database_endpoint: ${{ needs.deploy-postgres.outputs.database_endpoint }}
+      # Uses RDS Proxy endpoint when RDS_PROXY_ENABLED_STAGING=true, direct endpoint otherwise.
+      # The proxy output is an empty string when the flag is off, which GHA's || coalesce treats as falsy.
+      database_endpoint: ${{ needs.deploy-postgres.outputs.database_proxy_endpoint || needs.deploy-postgres.outputs.database_endpoint }}
       database_port: ${{ needs.deploy-postgres.outputs.database_port }}
       # Lambda Configuration (container-based)
       lambda_image_uri: ${{ needs.build.outputs.lambda_image }}
@@ -642,7 +646,10 @@ jobs:
       daemon_fargate_base: ${{ vars.DAGSTER_DAEMON_FARGATE_BASE_STAGING || '0' }}
       webserver_fargate_base: ${{ vars.DAGSTER_WEBSERVER_FARGATE_BASE_STAGING || '0' }}
       # Database Configuration (from Postgres stack outputs)
-      database_endpoint: ${{ needs.deploy-postgres.outputs.database_endpoint }}
+      # Uses RDS Proxy endpoint when RDS_PROXY_ENABLED_STAGING=true, direct endpoint otherwise.
+      # Dagster daemon connections will pin on the proxy (LISTEN/NOTIFY, advisory locks) so
+      # they get no proxy benefit but pinning is neutral. The embedded worker stack benefits.
+      database_endpoint: ${{ needs.deploy-postgres.outputs.database_proxy_endpoint || needs.deploy-postgres.outputs.database_endpoint }}
       database_port: ${{ needs.deploy-postgres.outputs.database_port }}
       # Cache Configuration
       valkey_url: ${{ needs.deploy-valkey.outputs.valkey_url }}

@@ -270,7 +270,7 @@ gha-set name value:
 
 # Delete a single GitHub variable
 gha-delete name:
-    @gh variable delete {{name}} --yes
+    @gh variable delete {{name}}
     @echo "Deleted {{name}}"
 
 # List GitHub organization variables (optionally filter by pattern)

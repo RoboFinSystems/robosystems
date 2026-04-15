@@ -1,14 +1,21 @@
 """
 PostgreSQL Password Rotation Lambda Function
 
-Implements AWS Secrets Manager rotation for PostgreSQL databases.
-Supports both RDS PostgreSQL and Aurora PostgreSQL engines.
+Implements AWS Secrets Manager rotation for RDS PostgreSQL.
 
 This function handles the 4-step rotation process:
 1. createSecret - Generate a new password
 2. setSecret - Set the password in the database
 3. testSecret - Test the new password
 4. finishSecret - Complete the rotation
+
+On each rotation, the secret is written with four keys:
+  POSTGRES_USER / POSTGRES_PASSWORD (legacy keys consumed by api/worker/dagster)
+  username      / password          (standard keys consumed by RDS Proxy SECRETS auth)
+
+Both key sets hold the same value. The proxy-compatible keys are populated on
+every rotation so that EnableRDSProxy can be flipped to true at any time after
+at least one rotation has occurred against a freshly deployed stack.
 """
 
 import json
@@ -52,32 +59,20 @@ def get_database_connection_info(secret_arn: str, environment: str) -> dict[str,
     "instance_id": None,
   }
 
-  # Try Aurora clusters first
+  # Find the RDS instance. Use a paginator so accounts with >100 RDS instances
+  # aren't silently truncated to the first page of describe_db_instances.
   try:
-    response = rds_client.describe_db_clusters()
-    for cluster in response["DBClusters"]:
-      if env_from_secret in cluster["DBClusterIdentifier"]:
-        db_info["host"] = cluster["Endpoint"]
-        db_info["port"] = cluster["Port"]
-        db_info["instance_id"] = cluster["DBClusterIdentifier"]
-        db_info["engine"] = "aurora-postgresql"
-        logger.info(f"Found Aurora cluster: {cluster['DBClusterIdentifier']}")
-        return db_info
-  except Exception as e:
-    logger.warning(f"Error checking Aurora clusters: {e!s}")
-
-  # Try RDS instances
-  try:
-    response = rds_client.describe_db_instances()
-    for instance in response["DBInstances"]:
-      if env_from_secret in instance["DBInstanceIdentifier"]:
-        db_info["host"] = instance["Endpoint"]["Address"]
-        db_info["port"] = instance["Endpoint"]["Port"]
-        db_info["instance_id"] = instance["DBInstanceIdentifier"]
-        db_info["engine"] = "postgres"
-        db_info["database"] = instance.get("DBName", "robosystems")
-        logger.info(f"Found RDS instance: {instance['DBInstanceIdentifier']}")
-        return db_info
+    paginator = rds_client.get_paginator("describe_db_instances")
+    for page in paginator.paginate():
+      for instance in page["DBInstances"]:
+        if env_from_secret in instance["DBInstanceIdentifier"]:
+          db_info["host"] = instance["Endpoint"]["Address"]
+          db_info["port"] = instance["Endpoint"]["Port"]
+          db_info["instance_id"] = instance["DBInstanceIdentifier"]
+          db_info["engine"] = "postgres"
+          db_info["database"] = instance.get("DBName", "robosystems")
+          logger.info(f"Found RDS instance: {instance['DBInstanceIdentifier']}")
+          return db_info
   except Exception as e:
     logger.warning(f"Error checking RDS instances: {e!s}")
 
@@ -153,6 +148,10 @@ def create_secret(arn: str, token: str) -> None:
   Generate a new secret password.
 
   This step generates a new password and stores it as the AWSPENDING version.
+  The pending secret is written with both legacy keys (POSTGRES_USER /
+  POSTGRES_PASSWORD) and RDS Proxy-compatible keys (username / password),
+  both holding the same value. This allows EnableRDSProxy to be flipped on
+  at any time after at least one rotation has occurred.
   """
   # Get the current secret
   current_secret = secrets_client.get_secret_value(
@@ -162,7 +161,21 @@ def create_secret(arn: str, token: str) -> None:
 
   # Generate new password
   new_password = create_new_password()
+
+  # Preserve username across both key conventions. The canonical source of
+  # truth is POSTGRES_USER (set by the CloudFormation SecretStringTemplate);
+  # fall back to an existing "username" key, then to "postgres".
+  username = current_dict.get("POSTGRES_USER") or current_dict.get(
+    "username", "postgres"
+  )
+
+  # Write all four keys so the secret simultaneously satisfies legacy
+  # consumers (POSTGRES_USER/POSTGRES_PASSWORD) and RDS Proxy SECRETS auth
+  # (username/password).
+  current_dict["POSTGRES_USER"] = username
   current_dict["POSTGRES_PASSWORD"] = new_password
+  current_dict["username"] = username
+  current_dict["password"] = new_password
 
   # Put the secret
   secrets_client.put_secret_value(
