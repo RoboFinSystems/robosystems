@@ -69,10 +69,17 @@ class EntityTaxonomy(ExtensionsBase):
   id = Column(String, primary_key=True, default=lambda: generate_prefixed_ulid("et"))
 
   # Foreign keys
+  # entity_id uses CASCADE because an adoption is meaningless without its
+  # entity — deleting the entity should remove its adoption rows with it.
   entity_id = Column(
     String, ForeignKey("entities.id", ondelete="CASCADE"), nullable=False
   )
-  taxonomy_id = Column(String, ForeignKey("taxonomies.id"), nullable=False)
+  # taxonomy_id uses RESTRICT because taxonomies are shared infrastructure —
+  # deleting a taxonomy that is still referenced by entity adoptions should
+  # be an explicit operator decision, not a silent cascade.
+  taxonomy_id = Column(
+    String, ForeignKey("taxonomies.id", ondelete="RESTRICT"), nullable=False
+  )
 
   # Adoption metadata
   is_primary = Column(Boolean, nullable=False, default=False)

@@ -138,13 +138,97 @@ class TestTableOrdering:
   def test_entity_is_first_node(self):
     assert NODE_TABLES[0] == "Entity"
 
-  def test_expected_node_count(self):
-    assert len(NODE_TABLES) == 17  # 8 transaction + 6 reporting + 3 investor
+  def test_node_categories(self):
+    """Verify NODE_TABLES contains the expected per-extension breakdown.
 
-  def test_expected_relationship_count(self):
-    # 11 transaction + 2 base (ENTITY_HAS_TAXONOMY, TAXONOMY_EXTENDS_TAXONOMY)
-    # + 10 reporting + 4 investor (+ ENTITY_HAS_PORTFOLIO)
-    assert len(RELATIONSHIP_TABLES) == 27
+    Category-level checks beat a hardcoded total count because they produce
+    an informative failure message when a new node is added — you can see
+    *which* category grew unexpectedly, not just that the number changed.
+    """
+    by_extension: dict[str, list[str]] = {
+      "base": [],
+      "roboledger": [],
+      "roboinvestor": [],
+    }
+    for name in NODE_TABLES:
+      ext = TABLE_EXTENSIONS.get(name, "base")
+      by_extension[ext].append(name)
+
+    # Base ontology nodes universally applicable to the extensions pipeline
+    assert set(by_extension["base"]) == {
+      "Entity",
+      "Element",
+      "Dimension",
+      "Structure",
+      "Association",
+      "Taxonomy",
+      "Period",
+      "Unit",
+    }
+    # RoboLedger-specific: the three-level ledger + reporting layer nodes
+    assert set(by_extension["roboledger"]) == {
+      "Transaction",
+      "Entry",
+      "LineItem",
+      "Report",
+      "Fact",
+      "FactSet",
+    }
+    # RoboInvestor-specific nodes
+    assert set(by_extension["roboinvestor"]) == {
+      "Portfolio",
+      "Security",
+      "Position",
+    }
+
+  def test_relationship_categories(self):
+    """Same breakdown for RELATIONSHIP_TABLES — fails loud with the missing
+    or extra rel names, not just a count diff."""
+    by_extension: dict[str, list[str]] = {
+      "base": [],
+      "roboledger": [],
+      "roboinvestor": [],
+    }
+    for name in RELATIONSHIP_TABLES:
+      ext = TABLE_EXTENSIONS.get(name, "base")
+      by_extension[ext].append(name)
+
+    # Base ontology edges (taxonomy infrastructure + entity↔taxonomy)
+    assert set(by_extension["base"]) == {
+      "ENTITY_HAS_TAXONOMY",
+      "TAXONOMY_EXTENDS_TAXONOMY",
+      "STRUCTURE_HAS_TAXONOMY",
+      "STRUCTURE_HAS_ASSOCIATION",
+      "ASSOCIATION_HAS_FROM_ELEMENT",
+      "ASSOCIATION_HAS_TO_ELEMENT",
+    }
+    # RoboLedger edges: three-level ledger + dimensional tags + reporting
+    assert set(by_extension["roboledger"]) == {
+      "ENTITY_HAS_TRANSACTION",
+      "TRANSACTION_HAS_ENTRY",
+      "ENTRY_HAS_LINE_ITEM",
+      "LINE_ITEM_RELATES_TO_ELEMENT",
+      "TRANSACTION_HAS_DIMENSION",
+      "ENTRY_HAS_DIMENSION",
+      "LINE_ITEM_HAS_DIMENSION",
+      "ENTRY_FROM_SCHEDULE",
+      "ENTITY_HAS_REPORT",
+      "REPORT_USES_TAXONOMY",
+      "REPORT_HAS_FACT",
+      "FACT_HAS_ELEMENT",
+      "FACT_HAS_PERIOD",
+      "FACT_HAS_UNIT",
+      "FACT_HAS_ENTITY",
+      "STRUCTURE_HAS_FACT_SET",
+      "FACT_SET_CONTAINS_FACT",
+    }
+    # RoboInvestor edges (entity↔portfolio + security issuance + portfolio structure)
+    assert set(by_extension["roboinvestor"]) == {
+      "ENTITY_HAS_PORTFOLIO",
+      "PORTFOLIO_HAS_POSITION",
+      "POSITION_IN_SECURITY",
+      "ENTITY_ISSUES_SECURITY",
+    }
 
 
 class TestSchemaConsistency:

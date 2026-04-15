@@ -589,11 +589,14 @@ def upgrade() -> None:
   op.create_index("idx_line_items_element", "line_items", ["element_id"])
 
   # -- Junction tables --
+  # Parent-side FKs use CASCADE (tags are discarded with their owning ledger
+  # row); dimension-side FKs use RESTRICT (deleting a dimension still in use
+  # by any ledger row should be an explicit operator decision).
   op.create_table(
     "transaction_dimensions",
     sa.Column("transaction_id", sa.String(), nullable=False),
     sa.Column("dimension_id", sa.String(), nullable=False),
-    sa.ForeignKeyConstraint(["dimension_id"], ["dimensions.id"]),
+    sa.ForeignKeyConstraint(["dimension_id"], ["dimensions.id"], ondelete="RESTRICT"),
     sa.ForeignKeyConstraint(
       ["transaction_id"],
       ["transactions.id"],
@@ -605,7 +608,7 @@ def upgrade() -> None:
     "entry_dimensions",
     sa.Column("entry_id", sa.String(), nullable=False),
     sa.Column("dimension_id", sa.String(), nullable=False),
-    sa.ForeignKeyConstraint(["dimension_id"], ["dimensions.id"]),
+    sa.ForeignKeyConstraint(["dimension_id"], ["dimensions.id"], ondelete="RESTRICT"),
     sa.ForeignKeyConstraint(["entry_id"], ["entries.id"], ondelete="CASCADE"),
     sa.PrimaryKeyConstraint("entry_id", "dimension_id"),
   )
@@ -613,7 +616,7 @@ def upgrade() -> None:
     "line_item_dimensions",
     sa.Column("line_item_id", sa.String(), nullable=False),
     sa.Column("dimension_id", sa.String(), nullable=False),
-    sa.ForeignKeyConstraint(["dimension_id"], ["dimensions.id"]),
+    sa.ForeignKeyConstraint(["dimension_id"], ["dimensions.id"], ondelete="RESTRICT"),
     sa.ForeignKeyConstraint(
       ["line_item_id"],
       ["line_items.id"],
@@ -812,7 +815,7 @@ def upgrade() -> None:
       "updated_at", sa.DateTime(), nullable=False, server_default=sa.text("now()")
     ),
     sa.ForeignKeyConstraint(["entity_id"], ["entities.id"], ondelete="CASCADE"),
-    sa.ForeignKeyConstraint(["taxonomy_id"], ["taxonomies.id"]),
+    sa.ForeignKeyConstraint(["taxonomy_id"], ["taxonomies.id"], ondelete="RESTRICT"),
     sa.PrimaryKeyConstraint("id"),
     sa.UniqueConstraint(
       "entity_id",

@@ -1214,7 +1214,7 @@ class LedgerMaterializer:
       # Use source_graph_id so the WIP reads from the original graph's DuckDB
       await self._materialize_tables(client, wip_id, result, source_graph_id=graph_id)
 
-      # Step 5: Swap WIP → active (milliseconds of downtime)
+      # Step 6: Swap WIP → active (milliseconds of downtime)
       if result.status != "error":
         logger.info(f"Swapping WIP {wip_id} → active {graph_id}")
         await client.swap_database(graph_id, lock_token=lock.token if lock else None)

@@ -17,6 +17,15 @@ from sqlalchemy import Column, ForeignKey, String, Table
 
 from robosystems.db.extensions import ExtensionsBase
 
+# Junction FK delete semantics (same in all three tables):
+# - Parent side (transaction_id / entry_id / line_item_id): CASCADE — when
+#   the owning ledger row is deleted, its dimensional tags are discarded
+#   with it (the tag is meaningless without its parent).
+# - Dimension side: RESTRICT — dimensions are shared reference data and
+#   deleting one that is still tagged on ledger rows should be an explicit
+#   operator decision, not a silent cascade that leaves orphaned ledger
+#   rows without their tags.
+
 transaction_dimensions = Table(
   "transaction_dimensions",
   ExtensionsBase.metadata,
@@ -29,7 +38,7 @@ transaction_dimensions = Table(
   Column(
     "dimension_id",
     String,
-    ForeignKey("dimensions.id"),
+    ForeignKey("dimensions.id", ondelete="RESTRICT"),
     primary_key=True,
   ),
 )
@@ -46,7 +55,7 @@ entry_dimensions = Table(
   Column(
     "dimension_id",
     String,
-    ForeignKey("dimensions.id"),
+    ForeignKey("dimensions.id", ondelete="RESTRICT"),
     primary_key=True,
   ),
 )
@@ -63,7 +72,7 @@ line_item_dimensions = Table(
   Column(
     "dimension_id",
     String,
-    ForeignKey("dimensions.id"),
+    ForeignKey("dimensions.id", ondelete="RESTRICT"),
     primary_key=True,
   ),
 )
