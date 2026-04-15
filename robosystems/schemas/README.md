@@ -53,23 +53,35 @@ Not every extension has all of these layers today. Some are schema-only (graph s
 | `roboreport` | Regulatory compliance |
 | `memory` | AI memory (concepts, observations, sessions) |
 
-### Naming Convention
+### URL Shape and Feature Flags
 
-The extension name (e.g., `roboledger`) is the product domain. API routes and feature flags use the **base name** (e.g., `ledger`) because a product extension can contain multiple functional surfaces:
+Product extensions are served under a unified `/extensions/*` surface split between a single GraphQL read endpoint and named command operations for writes. The domain name (`roboledger`, `roboinvestor`) appears in the write URL and in the feature-flag name; read queries are namespaced through the Strawberry schema instead of the URL.
 
 ```
-roboledger (extension / product)
-├── /v1/ledger/*         → LEDGER_ENABLED
-├── /v1/reports/*        → REPORTS_ENABLED        (future)
-├── /v1/classification/* → CLASSIFICATION_ENABLED  (future)
-└── /v1/bank-feeds/*     → BANK_FEEDS_ENABLED      (future)
+# Reads (GraphQL) — schema composed dynamically from enabled domains
+POST /extensions/{graph_id}/graphql          Query { entity { … } fiscalCalendar { … } portfolios { … } }
 
-roboinvestor (extension / product)
-├── /v1/investor/*       → INVESTOR_ENABLED        (future)
-└── /v1/market-data/*    → MARKET_DATA_ENABLED     (future)
+# Writes (named command operations)
+POST /extensions/roboledger/{graph_id}/operations/{op}     → ROBOLEDGER_ENABLED
+POST /extensions/roboinvestor/{graph_id}/operations/{op}   → ROBOINVESTOR_ENABLED
+
+# Analytical views (graph-backed, gated independently)
+POST /extensions/roboledger/{graph_id}/operations/build-fact-grid   → FACT_GRID_ENABLED
 ```
 
-The extension groups them. The base names stay functional.
+**Feature flags:**
+
+| Flag | Effect |
+| --- | --- |
+| `ROBOLEDGER_ENABLED` | Mounts roboledger operations router, adds `LedgerQuery` to GraphQL schema |
+| `ROBOINVESTOR_ENABLED` | Mounts roboinvestor operations router, adds `InvestorQuery` to GraphQL schema |
+| `EXTENSIONS_GRAPHQL_ENABLED` | Kill switch for `/extensions/{graph_id}/graphql` (default `true`) |
+| `FACT_GRID_ENABLED` | Gates the graph-backed fact-grid view, independent of roboledger — lets SEC-only deployments use it |
+| `EXTENSIONS_ENABLED` | **Derived** (`ROBOLEDGER_ENABLED or ROBOINVESTOR_ENABLED`); controls extensions DB engine |
+
+A ledger-only deployment's GraphQL schema exposes only ledger fields — investor types never appear in introspection. The schema is built at class-construction time from whichever domain mixins are enabled, so there are no runtime `*_NOT_INITIALIZED` errors from disabled domains.
+
+Legacy env-var names (`LEDGER_ENABLED`, `INVESTOR_ENABLED`, standalone `EXTENSIONS_ENABLED`) are honored as fallbacks through the current migration window.
 
 ## Architecture
 
@@ -152,7 +164,7 @@ The base schema (`base.py`) provides foundational nodes and relationships that a
 
 The RoboLedger extension models the full accounting domain: financial reporting (XBRL/SEC), general ledger (transactions, journal entries), and chart of accounts (via Element/Association patterns). It uses context-aware loading to present different views depending on the use case.
 
-**Full product extension** with OLTP tables in the `extensions` database (schema-per-tenant), API routes (`/v1/ledger/*`), QuickBooks ELT pipeline, and dedicated frontend app.
+**Full product extension** with OLTP tables in the `extensions` database (schema-per-tenant), a GraphQL read surface under `/extensions/{graph_id}/graphql` (29 fields), named command operations under `/extensions/roboledger/{graph_id}/operations/*` (23 commands), the graph-backed `build-fact-grid` analytical view, a QuickBooks ELT pipeline, and a dedicated frontend app.
 
 #### Reporting Section (SEC/XBRL)
 
