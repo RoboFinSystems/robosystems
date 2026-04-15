@@ -44,6 +44,7 @@ from robosystems.middleware.extensions import (
   get_idempotency_cache,
 )
 from robosystems.middleware.graph.types import GRAPH_OR_SUBGRAPH_ID_PATTERN
+from robosystems.middleware.otel.metrics import endpoint_metrics_decorator
 from robosystems.middleware.rate_limits import subscription_aware_rate_limit_dependency
 from robosystems.models.api.views import (
   CreateViewRequest,
@@ -73,6 +74,10 @@ _RATE_LIMIT = Depends(subscription_aware_rate_limit_dependency)
   summary="Build Fact Grid",
   tags=[_OP_TAG],
   dependencies=[_RATE_LIMIT],
+)
+@endpoint_metrics_decorator(
+  "/extensions/roboledger/{graph_id}/operations/build-fact-grid",
+  business_event_type="ledger_build_fact_grid",
 )
 async def build_fact_grid_op(
   body: CreateViewRequest,

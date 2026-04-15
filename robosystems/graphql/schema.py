@@ -25,6 +25,7 @@ TypeScript and Python SDK facades expect without manual reshape.
 from __future__ import annotations
 
 import strawberry
+from strawberry.extensions.tracing.opentelemetry import OpenTelemetryExtensionSync
 from strawberry.types import Info
 
 from robosystems.config import env
@@ -87,4 +88,22 @@ def _build_query_type() -> type:
 
 
 Query = _build_query_type()
-schema = strawberry.Schema(query=Query)
+
+# OpenTelemetry instrumentation — Strawberry's built-in extension emits
+# one span per GraphQL operation plus one child span per resolved field.
+# Spans surface in the same OTel pipeline as the REST routes (the global
+# tracer provider is set up in `middleware/otel/setup.py`), so GraphQL
+# reads get the same Jaeger/Tempo coverage as `/extensions/*/operations/*`
+# writes without any per-resolver decorator boilerplate.
+#
+# We use the `Sync` variant of the extension because (a) it works in both
+# sync and async execution paths (important: tests run
+# `schema.execute_sync(...)` which can't host async context managers), and
+# (b) the sync path has no meaningful overhead in our mostly-I/O-bound
+# resolvers. The async variant would force every test and every sync
+# introspection call to fail with "GraphQL execution failed to complete
+# synchronously."
+schema = strawberry.Schema(
+  query=Query,
+  extensions=[OpenTelemetryExtensionSync],
+)

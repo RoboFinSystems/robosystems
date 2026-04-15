@@ -34,6 +34,7 @@ from robosystems.middleware.extensions import (
   get_idempotency_cache,
 )
 from robosystems.middleware.graph.types import GRAPH_OR_SUBGRAPH_ID_PATTERN
+from robosystems.middleware.otel.metrics import endpoint_metrics_decorator
 from robosystems.middleware.rate_limits import subscription_aware_rate_limit_dependency
 from robosystems.models.api.extensions.investor import (
   CreatePortfolioRequest,
@@ -186,6 +187,10 @@ async def _dispatch(
   tags=[_OP_TAG],
   dependencies=[_RATE_LIMIT],
 )
+@endpoint_metrics_decorator(
+  "/extensions/roboinvestor/{graph_id}/operations/create-portfolio",
+  business_event_type="investor_create_portfolio",
+)
 async def create_portfolio_op(
   body: CreatePortfolioRequest,
   graph_id: str = Path(..., pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN),
@@ -218,6 +223,10 @@ async def create_portfolio_op(
   summary="Update Portfolio",
   tags=[_OP_TAG],
   dependencies=[_RATE_LIMIT],
+)
+@endpoint_metrics_decorator(
+  "/extensions/roboinvestor/{graph_id}/operations/update-portfolio",
+  business_event_type="investor_update_portfolio",
 )
 async def update_portfolio_op(
   body: UpdatePortfolioOperation,
@@ -255,6 +264,10 @@ async def update_portfolio_op(
   summary="Delete Portfolio",
   tags=[_OP_TAG],
   dependencies=[_RATE_LIMIT],
+)
+@endpoint_metrics_decorator(
+  "/extensions/roboinvestor/{graph_id}/operations/delete-portfolio",
+  business_event_type="investor_delete_portfolio",
 )
 async def delete_portfolio_op(
   body: DeletePortfolioOperation,
@@ -303,6 +316,10 @@ async def delete_portfolio_op(
   tags=[_OP_TAG],
   dependencies=[_RATE_LIMIT],
 )
+@endpoint_metrics_decorator(
+  "/extensions/roboinvestor/{graph_id}/operations/create-security",
+  business_event_type="investor_create_security",
+)
 async def create_security_op(
   body: CreateSecurityRequest,
   graph_id: str = Path(..., pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN),
@@ -338,6 +355,10 @@ async def create_security_op(
   summary="Update Security",
   tags=[_OP_TAG],
   dependencies=[_RATE_LIMIT],
+)
+@endpoint_metrics_decorator(
+  "/extensions/roboinvestor/{graph_id}/operations/update-security",
+  business_event_type="investor_update_security",
 )
 async def update_security_op(
   body: UpdateSecurityOperation,
@@ -375,6 +396,10 @@ async def update_security_op(
   summary="Delete Security",
   tags=[_OP_TAG],
   dependencies=[_RATE_LIMIT],
+)
+@endpoint_metrics_decorator(
+  "/extensions/roboinvestor/{graph_id}/operations/delete-security",
+  business_event_type="investor_delete_security",
 )
 async def delete_security_op(
   body: DeleteSecurityOperation,
@@ -417,6 +442,10 @@ async def delete_security_op(
   tags=[_OP_TAG],
   dependencies=[_RATE_LIMIT],
 )
+@endpoint_metrics_decorator(
+  "/extensions/roboinvestor/{graph_id}/operations/create-position",
+  business_event_type="investor_create_position",
+)
 async def create_position_op(
   body: CreatePositionRequest,
   graph_id: str = Path(..., pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN),
@@ -457,6 +486,10 @@ async def create_position_op(
   tags=[_OP_TAG],
   dependencies=[_RATE_LIMIT],
 )
+@endpoint_metrics_decorator(
+  "/extensions/roboinvestor/{graph_id}/operations/update-position",
+  business_event_type="investor_update_position",
+)
 async def update_position_op(
   body: UpdatePositionOperation,
   graph_id: str = Path(..., pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN),
@@ -493,6 +526,10 @@ async def update_position_op(
   summary="Delete Position",
   tags=[_OP_TAG],
   dependencies=[_RATE_LIMIT],
+)
+@endpoint_metrics_decorator(
+  "/extensions/roboinvestor/{graph_id}/operations/delete-position",
+  business_event_type="investor_delete_position",
 )
 async def delete_position_op(
   body: DeletePositionOperation,

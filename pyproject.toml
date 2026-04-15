@@ -7,7 +7,7 @@ authors = [
     {name = "RFS LLC"},
 ]
 license = {text = "Apache-2.0"}
-keywords = ["robosystems", "financial", "graph", "knowledge graph", "ladybugdb"]
+keywords = ["robosystems", "financial", "graph", "knowledge graph", "intelligence"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Framework :: FastAPI",
@@ -32,94 +32,86 @@ classifiers = [
 ]
 dependencies = [
     # Web Framework & API
-    "fastapi>=0.116.0,<1.0",
-    "python-multipart>=0.0.16,<1.0",
-    "starlette>=0.35.0,<1.0",
-    "sse-starlette>=3.3.2,<4.0",
-    "strawberry-graphql[fastapi]>=0.240.0,<1.0",
-    "uvicorn>=0.35.0,<1.0",
+    "fastapi>=0.135.0,<1.0",
+    "starlette>=0.52.0,<1.0",
+    "sse-starlette>=3.3.0,<4.0",
+    "strawberry-graphql[fastapi]>=0.314.0,<1.0",
+    "uvicorn>=0.44.0,<1.0",
     "uvloop>=0.21.0,<1.0",
-    "httptools>=0.6.0,<1.0",
 
-    # Graph Databases
-    "real-ladybug==0.13.1",
+    # Cloud Service (AWS)
+    "boto3>=1.42.0,<2.0",
+
+    # OLAP Staging/Vector/Graph Databases
     "duckdb==1.4.4",
+    "lancedb>=0.30.0,<1.0",
+    "real-ladybug==0.13.1",
 
-    # Relational Database (PostgreSQL)
-    "alembic>=1.16.0,<2.0",
+    # OLTP Database (Postgres)
+    "alembic>=1.18.0,<2.0",
     "psycopg2-binary>=2.9.0,<3.0",
     "sqlalchemy>=2.0.0,<3.0",
 
-    # Caching
+    # In-Memory Database (Valkey)
     "redis>=7.0.0,<8.0",
 
+    # Document Search (OpenSearch)
+    "opensearch-py>=2.8.0,<3.0",
+
     # Data Orchestration (Dagster)
-    "dagster>=1.9.0,<2.0",
-    "dagster-webserver>=1.9.0,<2.0",
-    "dagster-postgres>=0.25.0,<1.0",
-    "dagster-aws>=0.25.0,<1.0",
+    "dagster>=1.13.0,<2.0",
+    "dagster-webserver>=1.13.0,<2.0",
+    "dagster-postgres>=0.29.0,<1.0",
+    "dagster-aws>=0.29.0,<1.0",
 
     # Data Transformation (dbt)
-    "dbt-core>=1.9.0,<2.0",
-    "dbt-duckdb>=1.9.0,<2.0",
-
-    # Cloud Services (AWS)
-    "boto3>=1.39.0,<2.0",
+    "dbt-core>=1.11.0,<2.0",
+    "dbt-duckdb>=1.10.0,<2.0",
 
     # Data Processing & Analytics
     "arelle-release==2.39.5",
+    "fastembed>=0.8.0,<1.0",
     "icebug>=12.0,<13.0",
-    "fastembed>=0.4.0,<1.0",
-    "lancedb>=0.30.0,<1.0",
-    "numpy>=1.26.0,<3.0",
+    "numpy>=2.4.0,<3.0",
     "pandas>=2.3.0,<3.0",
-    "pillow>=12.2.0",
-    "pyarrow>=20.0.0",
+    "pyarrow>=23.0.0",
 
     # External API Integrations
     "intuit-oauth>=1.2.0,<2.0",
     "python-quickbooks>=0.9.0,<1.0",
     "stripe>=11.1.0,<12.0",
 
-    # HTTP & Async Clients
-    "aiohttp>=3.12.0",
-    "async_timeout>=5.0.0,<6.0",
-    "httpx>=0.28.0",
-    "httpx-sse>=0.4.0",
-    "requests>=2.32.0,<3.0",
-
-    # Observability & Monitoring
-    "opentelemetry-api>=1.35.0,<2.0",
-    "opentelemetry-exporter-otlp>=1.35.0,<2.0",
+    # Observability
+    "opentelemetry-api>=1.41.0,<2.0",
+    "opentelemetry-exporter-otlp>=1.41.0,<2.0",
+    "opentelemetry-sdk>=1.41.0,<2.0",
     "opentelemetry-instrumentation-aiohttp-client>=0.55b0,<1.0",
     "opentelemetry-instrumentation-fastapi>=0.55b0,<1.0",
     "opentelemetry-instrumentation-psycopg2>=0.55b0,<1.0",
     "opentelemetry-instrumentation-requests>=0.55b0,<1.0",
-    "opentelemetry-sdk>=1.35.0,<2.0",
-
-    # Security & Authentication
-    "bcrypt>=4.3.0,<5.0",
-    "email-validator>=2.2.0,<3.0",
-    "pyjwt>=2.10.0,<3.0",
-
-    # Data Serialization & Identifiers
-    "pydantic[email]>=2.11.0,<3.0",
-    "python-ulid>=3.0.0",
-    "pyyaml>=6.0.0,<7.0",
-    "uuid6>=2025.0.0",
-
-    # XML/HTML Processing
-    "beautifulsoup4>=4.13.0,<5.0",
-    "lxml>=5.4.0,<6.0",
-
-    # Search
-    "opensearch-py>=2.4.0,<3.0",
 
     # Utilities
+    "aiohttp>=3.12.0",
+    "async_timeout>=5.0.0,<6.0",
+    "bcrypt>=4.3.0,<5.0",
+    "beautifulsoup4>=4.13.0,<5.0",
+    "email-validator>=2.2.0,<3.0",
     "holidays>=0.76.0,<1.0",
+    "httptools>=0.6.0,<1.0",
+    "httpx-sse>=0.4.0",
+    "httpx>=0.28.0",
+    "lxml>=5.4.0,<6.0",
+    "pillow>=12.2.0",
     "psutil>=7.2.1,<8.0",
+    "pydantic[email]>=2.11.0,<3.0",
+    "pyjwt>=2.10.0,<3.0",
+    "python-multipart>=0.0.16,<1.0",
     "python-slugify>=8.0.0,<9.0",
+    "python-ulid>=3.0.0",
+    "pyyaml>=6.0.0,<7.0",
+    "requests>=2.32.0,<3.0",
     "retrying>=1.4.0,<2.0",
+    "uuid6>=2025.0.0",
 ]
 
 [project.optional-dependencies]

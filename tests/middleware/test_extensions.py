@@ -109,10 +109,13 @@ class TestWrapCompleted:
     Downstream SDKs unwrap the envelope via camelCase GraphQL/REST
     conventions; a snake_case leak would break them silently.
     """
-    envelope = wrap_completed("noop", None)
+    envelope = wrap_completed("noop", None, created_by="usr_42")
     payload = json.loads(envelope.model_dump_json(by_alias=True))
     assert "operationId" in payload
     assert "operation_id" not in payload
+    assert "createdBy" in payload
+    assert "created_by" not in payload
+    assert payload["createdBy"] == "usr_42"
     assert payload["status"] == "completed"
     assert set(payload.keys()) == {
       "operation",
@@ -120,6 +123,7 @@ class TestWrapCompleted:
       "status",
       "result",
       "at",
+      "createdBy",
     }
 
 
@@ -536,6 +540,9 @@ class TestExecuteOperationHappyPath:
     assert envelope.status == "completed"
     assert envelope.result == {"id": "pf_1", "amount": 42}
     assert envelope.operation_id.startswith("op_")
+    # created_by propagates from the OperationContext.user_id so the
+    # envelope carries caller provenance without audit-log lookups.
+    assert envelope.created_by == "usr_1"
 
   @pytest.mark.asyncio
   async def test_supports_async_runner(self) -> None:

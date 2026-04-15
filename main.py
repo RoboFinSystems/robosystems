@@ -245,6 +245,84 @@ def create_app() -> FastAPI:
   # Add rate limit header middleware
   app.add_middleware(RateLimitHeaderMiddleware)
 
+  # Request-level metrics for the extensions GraphQL endpoint.
+  #
+  # Strawberry's `GraphQLRouter` is a single FastAPI route, so the
+  # `endpoint_metrics_decorator` we put on REST operation routes can't
+  # reach individual GraphQL requests. Per-resolver spans come from
+  # `strawberry.extensions.tracing.opentelemetry.OpenTelemetryExtension`
+  # (wired in `graphql/schema.py`); this middleware adds the request-
+  # level counter + latency histogram + business event so GraphQL reads
+  # show up on the same Prometheus dashboards as the REST surface.
+  #
+  # Scoped to `/extensions/{graph_id}/graphql` only — every other path
+  # falls through instantly to keep overhead at zero.
+  @app.middleware("http")
+  async def extensions_graphql_metrics_middleware(request: Request, call_next):
+    path = request.url.path
+    if not (path.startswith("/extensions/") and path.endswith("/graphql")):
+      return await call_next(request)
+
+    import time
+
+    from robosystems.middleware.otel.metrics import (
+      get_endpoint_metrics,
+      record_error_metrics,
+      record_request_metrics,
+    )
+
+    # `graph_id` is the second segment: /extensions/{graph_id}/graphql
+    try:
+      graph_id = path.split("/", 3)[2]
+    except IndexError:  # pragma: no cover - path matcher already checked shape
+      graph_id = None
+
+    # Normalize the endpoint label so Prometheus cardinality stays bounded
+    # (one time series for the whole GraphQL endpoint, regardless of
+    # tenant). The tenant lives in `event_graph_id` on the business event.
+    endpoint_label = "/extensions/{graph_id}/graphql"
+    start = time.time()
+    error_occurred = False
+    status_code = 200
+    user_id: str | None = None
+
+    try:
+      response = await call_next(request)
+      status_code = response.status_code
+      user_id = getattr(request.state, "user_id", None)
+      # Fire the business event on 2xx GraphQL POSTs so dashboards can
+      # differentiate "extensions GraphQL reads" from REST operations.
+      if request.method == "POST" and 200 <= status_code < 300:
+        get_endpoint_metrics().record_business_event(
+          endpoint=endpoint_label,
+          method=request.method,
+          event_type="extensions_graphql_query",
+          event_data={"graph_id": graph_id} if graph_id else {},
+          user_id=user_id,
+        )
+      return response
+    except Exception as exc:
+      error_occurred = True
+      status_code = getattr(exc, "status_code", 500)
+      record_error_metrics(
+        endpoint=endpoint_label,
+        method=request.method,
+        error_type=type(exc).__name__,
+        error_code=str(getattr(exc, "detail", "Unknown error")),
+        user_id=user_id,
+      )
+      raise
+    finally:
+      duration = time.time() - start
+      record_request_metrics(
+        endpoint=endpoint_label,
+        method=request.method,
+        status_code=status_code,
+        duration=duration,
+        user_id=user_id,
+        error_occurred=error_occurred,
+      )
+
   # Add security headers middleware
   @app.middleware("http")
   async def security_headers_middleware(request: Request, call_next):
@@ -488,6 +566,156 @@ def create_app() -> FastAPI:
     # Ensure schemas section exists
     if "schemas" not in openapi_schema["components"]:
       openapi_schema["components"]["schemas"] = {}
+
+    # Shared error shape for every /extensions/*/operations/* route. SDK
+    # codegen tools use this to produce a typed error union so clients
+    # can branch on 409 / 422 / 4xx without unstructured `detail` reads.
+    openapi_schema["components"]["schemas"]["OperationError"] = {
+      "type": "object",
+      "description": (
+        "Error envelope returned by extensions operation endpoints. "
+        "Shape aligns with FastAPI's default error detail plus an optional "
+        "`operation_id` for audit correlation."
+      ),
+      "properties": {
+        "detail": {
+          "oneOf": [
+            {"type": "string"},
+            {"type": "object"},
+          ],
+          "description": "Human-readable error detail or structured payload",
+        },
+        "operation_id": {
+          "type": "string",
+          "description": (
+            "op_-prefixed ULID if the dispatcher minted one before the "
+            "failure (async ops, idempotency conflicts, etc.)"
+          ),
+        },
+      },
+    }
+
+    # Standard error responses injected into every extensions operation
+    # route (and the GraphQL endpoint). Keeping them in one place here —
+    # rather than duplicating `responses={...}` across ~32 @router.post
+    # calls — keeps the router files thin and guarantees a single source
+    # of truth for the error shape the SDKs compile against.
+    _op_error_ref = {
+      "application/json": {"schema": {"$ref": "#/components/schemas/OperationError"}}
+    }
+    _rate_limit_response_headers = {
+      "X-Rate-Limit-Remaining": {
+        "description": "Requests remaining in the current rate-limit window",
+        "schema": {"type": "integer"},
+      },
+      "X-Rate-Limit-Reset": {
+        "description": "Unix epoch seconds at which the current window resets",
+        "schema": {"type": "integer"},
+      },
+    }
+    _shared_operation_responses = {
+      "400": {"description": "Invalid request payload", "content": _op_error_ref},
+      "401": {"description": "Unauthorized — missing or invalid credentials"},
+      "403": {"description": "Forbidden — caller cannot access this graph"},
+      "404": {
+        "description": "Resource not found (graph, ledger, report, etc.)",
+        "content": _op_error_ref,
+      },
+      "409": {
+        "description": (
+          "Idempotency-Key reused with a different request body, or other "
+          "operation-level conflict"
+        ),
+        "content": _op_error_ref,
+      },
+      "422": {
+        "description": "Semantic validation failure (unbalanced ledger, etc.)",
+        "content": _op_error_ref,
+      },
+      "429": {"description": "Rate limit exceeded"},
+      "500": {"description": "Internal error"},
+    }
+    _idempotency_header_parameter = {
+      "name": "Idempotency-Key",
+      "in": "header",
+      "required": False,
+      "description": (
+        "Optional client-supplied key for safe retries. Same key + same "
+        "body within 24 hours replays the cached envelope; same key + "
+        "different body returns HTTP 409 Conflict. Use a fresh key for "
+        "distinct payloads (UUID v4 recommended)."
+      ),
+      "schema": {"type": "string", "maxLength": 255},
+    }
+    _idempotency_doc_paragraph = (
+      "\n\n**Idempotency**: supply an `Idempotency-Key` header to make "
+      "safe retries; replays within 24 hours return the same envelope. "
+      "Reusing the key with a different body returns HTTP 409 Conflict."
+    )
+
+    def _is_operation_path(p: str) -> bool:
+      return "/extensions/" in p and "/operations/" in p
+
+    def _is_graphql_path(p: str) -> bool:
+      return p.startswith("/extensions/") and p.endswith("/graphql")
+
+    for _path, _methods in openapi_schema.get("paths", {}).items():
+      if _is_operation_path(_path):
+        for _method_name, _operation in _methods.items():
+          if _method_name not in ("post",):
+            continue
+          # Merge standard error responses without clobbering any the
+          # route already declared explicitly (some ops add domain-
+          # specific 409/422 messaging).
+          existing_responses = _operation.setdefault("responses", {})
+          for _code, _resp in _shared_operation_responses.items():
+            existing_responses.setdefault(_code, _resp)
+          # Attach rate-limit headers to the success response(s) so SDKs
+          # pick them up alongside the envelope.
+          for _code, _resp in existing_responses.items():
+            if _code.startswith("2") and isinstance(_resp, dict):
+              _resp.setdefault("headers", {}).update(_rate_limit_response_headers)
+          # Add the Idempotency-Key header parameter exactly once.
+          params = _operation.setdefault("parameters", [])
+          if not any(
+            p.get("name") == "Idempotency-Key" and p.get("in") == "header"
+            for p in params
+          ):
+            params.append(_idempotency_header_parameter)
+          # Append the idempotency paragraph to the description so it
+          # shows up in Swagger/ReDoc without editing each route.
+          if _idempotency_doc_paragraph not in _operation.get("description", ""):
+            _operation["description"] = (
+              _operation.get("description") or ""
+            ) + _idempotency_doc_paragraph
+      elif _is_graphql_path(_path):
+        for _method_name, _operation in _methods.items():
+          if _method_name not in ("post", "get"):
+            continue
+          existing_responses = _operation.setdefault("responses", {})
+          existing_responses.setdefault(
+            "401",
+            {"description": "Unauthorized — credentials presented but invalid"},
+          )
+          existing_responses.setdefault(
+            "403",
+            {"description": "Forbidden — caller cannot access this graph"},
+          )
+          existing_responses.setdefault("429", {"description": "Rate limit exceeded"})
+          _graphql_description_note = (
+            "\n\n**Auth**: pass `X-API-Key` (or a JWT `Authorization: "
+            "Bearer` header). Unauthenticated introspection queries are "
+            "deliberately allowed for SDK codegen; data queries require "
+            "credentials and raise `UNAUTHENTICATED`."
+            "\n\n**Error codes**: `LEDGER_NOT_INITIALIZED`, "
+            "`INVESTOR_NOT_INITIALIZED`, and `UNAUTHENTICATED` surface in "
+            "the GraphQL `errors[].extensions.code` field — see "
+            "`graphql/README.md` for the full vocabulary."
+          )
+          if _graphql_description_note not in _operation.get("description", ""):
+            _operation["description"] = (
+              _operation.get("description") or ""
+            ) + _graphql_description_note
 
     # Add security requirement to all endpoints except explicitly public ones
     public_exact_paths = {"/v1/status"}

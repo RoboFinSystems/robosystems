@@ -63,6 +63,7 @@ from robosystems.middleware.extensions import (
   wrap_pending,
 )
 from robosystems.middleware.graph.types import GRAPH_OR_SUBGRAPH_ID_PATTERN
+from robosystems.middleware.otel.metrics import endpoint_metrics_decorator
 from robosystems.middleware.rate_limits import subscription_aware_rate_limit_dependency
 from robosystems.models.api.extensions.entity import UpdateEntityRequest
 from robosystems.models.api.extensions.fiscal_calendar import (
@@ -343,6 +344,10 @@ class DeleteResult(BaseModel):
   tags=[_OP_TAG],
   dependencies=[_RATE_LIMIT],
 )
+@endpoint_metrics_decorator(
+  "/extensions/roboledger/{graph_id}/operations/update-entity",
+  business_event_type="ledger_update_entity",
+)
 async def update_entity_op(
   body: UpdateEntityRequest,
   graph_id: str = Path(..., pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN),
@@ -389,6 +394,10 @@ async def update_entity_op(
   summary="Initialize Ledger",
   tags=[_OP_TAG],
   dependencies=[_RATE_LIMIT],
+)
+@endpoint_metrics_decorator(
+  "/extensions/roboledger/{graph_id}/operations/initialize",
+  business_event_type="ledger_initialize",
 )
 async def initialize_op(
   body: InitializeLedgerRequest,
@@ -439,6 +448,10 @@ async def initialize_op(
   tags=[_OP_TAG],
   dependencies=[_RATE_LIMIT],
 )
+@endpoint_metrics_decorator(
+  "/extensions/roboledger/{graph_id}/operations/set-close-target",
+  business_event_type="ledger_set_close_target",
+)
 async def set_close_target_op(
   body: SetCloseTargetOperation,
   graph_id: str = Path(..., pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN),
@@ -487,6 +500,10 @@ async def set_close_target_op(
   summary="Close Fiscal Period",
   tags=[_OP_TAG],
   dependencies=[_RATE_LIMIT],
+)
+@endpoint_metrics_decorator(
+  "/extensions/roboledger/{graph_id}/operations/close-period",
+  business_event_type="ledger_close_period",
 )
 async def close_period_op(
   body: ClosePeriodOperation,
@@ -569,6 +586,10 @@ async def close_period_op(
   tags=[_OP_TAG],
   dependencies=[_RATE_LIMIT],
 )
+@endpoint_metrics_decorator(
+  "/extensions/roboledger/{graph_id}/operations/reopen-period",
+  business_event_type="ledger_reopen_period",
+)
 async def reopen_period_op(
   body: ReopenPeriodOperation,
   graph_id: str = Path(..., pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN),
@@ -633,6 +654,10 @@ async def reopen_period_op(
   tags=[_OP_TAG],
   dependencies=[_RATE_LIMIT],
 )
+@endpoint_metrics_decorator(
+  "/extensions/roboledger/{graph_id}/operations/create-schedule",
+  business_event_type="ledger_create_schedule",
+)
 async def create_schedule_op(
   body: CreateScheduleRequest,
   graph_id: str = Path(..., pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN),
@@ -680,6 +705,10 @@ async def create_schedule_op(
   summary="Truncate Schedule (End Early)",
   tags=[_OP_TAG],
   dependencies=[_RATE_LIMIT],
+)
+@endpoint_metrics_decorator(
+  "/extensions/roboledger/{graph_id}/operations/truncate-schedule",
+  business_event_type="ledger_truncate_schedule",
 )
 async def truncate_schedule_op(
   body: TruncateScheduleOperation,
@@ -730,6 +759,10 @@ async def truncate_schedule_op(
   tags=[_OP_TAG],
   dependencies=[_RATE_LIMIT],
 )
+@endpoint_metrics_decorator(
+  "/extensions/roboledger/{graph_id}/operations/create-closing-entry",
+  business_event_type="ledger_create_closing_entry",
+)
 async def create_closing_entry_op(
   body: CreateClosingEntryOperation,
   graph_id: str = Path(..., pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN),
@@ -778,6 +811,10 @@ async def create_closing_entry_op(
   summary="Create Manual Closing Entry",
   tags=[_OP_TAG],
   dependencies=[_RATE_LIMIT],
+)
+@endpoint_metrics_decorator(
+  "/extensions/roboledger/{graph_id}/operations/create-manual-closing-entry",
+  business_event_type="ledger_create_manual_closing_entry",
 )
 async def create_manual_closing_entry_op(
   body: CreateManualClosingEntryRequest,
@@ -829,6 +866,10 @@ async def create_manual_closing_entry_op(
   tags=[_OP_TAG],
   dependencies=[_RATE_LIMIT],
 )
+@endpoint_metrics_decorator(
+  "/extensions/roboledger/{graph_id}/operations/create-taxonomy",
+  business_event_type="ledger_create_taxonomy",
+)
 async def create_taxonomy_op(
   body: CreateTaxonomyRequest,
   graph_id: str = Path(..., pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN),
@@ -863,6 +904,10 @@ async def create_taxonomy_op(
   tags=[_OP_TAG],
   dependencies=[_RATE_LIMIT],
 )
+@endpoint_metrics_decorator(
+  "/extensions/roboledger/{graph_id}/operations/create-structure",
+  business_event_type="ledger_create_structure",
+)
 async def create_structure_op(
   body: CreateStructureRequest,
   graph_id: str = Path(..., pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN),
@@ -896,6 +941,10 @@ async def create_structure_op(
   summary="Create Mapping Association",
   tags=[_OP_TAG],
   dependencies=[_RATE_LIMIT],
+)
+@endpoint_metrics_decorator(
+  "/extensions/roboledger/{graph_id}/operations/create-mapping-association",
+  business_event_type="ledger_create_mapping_association",
 )
 async def create_mapping_association_op(
   body: CreateMappingAssociationOperation,
@@ -944,6 +993,10 @@ async def create_mapping_association_op(
   tags=[_OP_TAG],
   dependencies=[_RATE_LIMIT],
 )
+@endpoint_metrics_decorator(
+  "/extensions/roboledger/{graph_id}/operations/delete-mapping-association",
+  business_event_type="ledger_delete_mapping_association",
+)
 async def delete_mapping_association_op(
   body: DeleteMappingAssociationOperation,
   graph_id: str = Path(..., pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN),
@@ -989,6 +1042,10 @@ class AutoMapElementsOperation(BaseModel):
   summary="Auto-Map Elements via AI (async)",
   tags=[_OP_TAG],
   dependencies=[_RATE_LIMIT],
+)
+@endpoint_metrics_decorator(
+  "/extensions/roboledger/{graph_id}/operations/auto-map-elements",
+  business_event_type="ledger_auto_map_elements",
 )
 async def auto_map_elements_op(
   body: AutoMapElementsOperation,
@@ -1065,6 +1122,7 @@ async def auto_map_elements_op(
       "links": task_response.get("_links"),
       "deduplicated": task_response.get("deduplicated", False),
     },
+    created_by=user_id,
   )
 
   if idempotency_key is not None:
@@ -1096,6 +1154,10 @@ async def auto_map_elements_op(
   summary="Create Report",
   tags=[_OP_TAG],
   dependencies=[_RATE_LIMIT],
+)
+@endpoint_metrics_decorator(
+  "/extensions/roboledger/{graph_id}/operations/create-report",
+  business_event_type="ledger_create_report",
 )
 async def create_report_op(
   body: CreateReportRequest,
@@ -1145,6 +1207,10 @@ async def create_report_op(
   summary="Regenerate Report",
   tags=[_OP_TAG],
   dependencies=[_RATE_LIMIT],
+)
+@endpoint_metrics_decorator(
+  "/extensions/roboledger/{graph_id}/operations/regenerate-report",
+  business_event_type="ledger_regenerate_report",
 )
 async def regenerate_report_op(
   body: RegenerateReportOperation,
@@ -1198,6 +1264,10 @@ async def regenerate_report_op(
   tags=[_OP_TAG],
   dependencies=[_RATE_LIMIT],
 )
+@endpoint_metrics_decorator(
+  "/extensions/roboledger/{graph_id}/operations/delete-report",
+  business_event_type="ledger_delete_report",
+)
 async def delete_report_op(
   body: DeleteReportOperation,
   graph_id: str = Path(..., pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN),
@@ -1241,6 +1311,10 @@ async def delete_report_op(
   summary="Share Report",
   tags=[_OP_TAG],
   dependencies=[_RATE_LIMIT],
+)
+@endpoint_metrics_decorator(
+  "/extensions/roboledger/{graph_id}/operations/share-report",
+  business_event_type="ledger_share_report",
 )
 async def share_report_op(
   body: ShareReportOperation,
@@ -1298,6 +1372,10 @@ async def share_report_op(
   tags=[_OP_TAG],
   dependencies=[_RATE_LIMIT],
 )
+@endpoint_metrics_decorator(
+  "/extensions/roboledger/{graph_id}/operations/create-publish-list",
+  business_event_type="ledger_create_publish_list",
+)
 async def create_publish_list_op(
   body: CreatePublishListRequest,
   graph_id: str = Path(..., pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN),
@@ -1334,6 +1412,10 @@ async def create_publish_list_op(
   summary="Update Publish List",
   tags=[_OP_TAG],
   dependencies=[_RATE_LIMIT],
+)
+@endpoint_metrics_decorator(
+  "/extensions/roboledger/{graph_id}/operations/update-publish-list",
+  business_event_type="ledger_update_publish_list",
 )
 async def update_publish_list_op(
   body: UpdatePublishListOperation,
@@ -1378,6 +1460,10 @@ async def update_publish_list_op(
   tags=[_OP_TAG],
   dependencies=[_RATE_LIMIT],
 )
+@endpoint_metrics_decorator(
+  "/extensions/roboledger/{graph_id}/operations/delete-publish-list",
+  business_event_type="ledger_delete_publish_list",
+)
 async def delete_publish_list_op(
   body: DeletePublishListOperation,
   graph_id: str = Path(..., pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN),
@@ -1417,6 +1503,10 @@ async def delete_publish_list_op(
   summary="Add Members to Publish List",
   tags=[_OP_TAG],
   dependencies=[_RATE_LIMIT],
+)
+@endpoint_metrics_decorator(
+  "/extensions/roboledger/{graph_id}/operations/add-publish-list-members",
+  business_event_type="ledger_add_publish_list_members",
 )
 async def add_publish_list_members_op(
   body: AddPublishListMembersOperation,
@@ -1470,6 +1560,10 @@ async def add_publish_list_members_op(
   summary="Remove Member from Publish List",
   tags=[_OP_TAG],
   dependencies=[_RATE_LIMIT],
+)
+@endpoint_metrics_decorator(
+  "/extensions/roboledger/{graph_id}/operations/remove-publish-list-member",
+  business_event_type="ledger_remove_publish_list_member",
 )
 async def remove_publish_list_member_op(
   body: RemovePublishListMemberOperation,
