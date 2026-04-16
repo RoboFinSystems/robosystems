@@ -25,7 +25,7 @@ from ...middleware.rate_limits import (
 )
 from ...middleware.rate_limits.rate_limiting import jwt_refresh_rate_limit_dependency
 from ...models.api.auth import AuthResponse
-from ...models.api.common import ErrorResponse
+from ...models.api.common import COMMON_ERROR_RESPONSES
 from ...models.core import User
 from ...security.device_fingerprinting import extract_device_fingerprint
 
@@ -36,26 +36,14 @@ router = APIRouter()
 @router.get(
   "/me",
   summary="Get Current User",
-  description="Get the currently authenticated user.",
   operation_id="getCurrentAuthUser",
-  responses={
-    401: {"model": ErrorResponse, "description": "Not authenticated"},
-  },
+  responses={**COMMON_ERROR_RESPONSES},
 )
 async def get_me(
   fastapi_request: Request,
   session: Session = Depends(get_async_db_session),
   _rate_limit: None = Depends(auth_status_rate_limit_dependency),
 ) -> dict:
-  """
-  Get current authenticated user from JWT token.
-
-  Returns:
-      User information
-
-  Raises:
-      HTTPException: If not authenticated
-  """
   try:
     # Extract JWT token from Authorization header (doesn't show in OpenAPI params)
     authorization = fastapi_request.headers.get("authorization")
@@ -118,26 +106,15 @@ async def get_me(
   "/refresh",
   response_model=AuthResponse,
   summary="Refresh Session",
-  description="Refresh authentication session with a new JWT token.",
+  description="Revokes the current token and issues a new one. Accepts recently-expired tokens within the grace period.",
   operation_id="refreshAuthSession",
-  responses={
-    401: {"model": ErrorResponse, "description": "Not authenticated"},
-  },
+  responses={**COMMON_ERROR_RESPONSES},
 )
 async def refresh_session(
   fastapi_request: Request,
   session: Session = Depends(get_async_db_session),
   _rate_limit: None = Depends(jwt_refresh_rate_limit_dependency),
 ) -> AuthResponse:
-  """
-  Refresh user session and extend authentication token.
-
-  Returns:
-      AuthResponse: Success response with updated user data
-
-  Raises:
-      HTTPException: If not authenticated or token is invalid
-  """
   # Import jwt at function level to avoid circular imports
   from datetime import datetime, timedelta
 

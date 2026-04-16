@@ -22,6 +22,7 @@ from robosystems.middleware.robustness import (
   get_operation_logger,
   record_operation_metric,
 )
+from robosystems.models.api.common import RESOURCE_ERROR_RESPONSES
 from robosystems.models.api.graphs.schema import SchemaInfoResponse
 from robosystems.models.core import User
 
@@ -34,58 +35,10 @@ router = APIRouter()
   "/schema",
   response_model=SchemaInfoResponse,
   summary="Get Runtime Graph Schema",
-  description="""Get runtime schema information for the specified graph database.
-
-## What This Returns
-
-This endpoint inspects the **actual current state** of the graph database and returns:
-- **Node Labels**: All node types currently in the database
-- **Relationship Types**: All relationship types currently in the database
-- **Node Properties**: Properties discovered from actual data (up to 10 properties per node type)
-
-## Runtime vs Declared Schema
-
-**Use this endpoint** (`/schema`) when you need to know:
-- What data is ACTUALLY in the database right now
-- What properties exist on real nodes
-- What relationships have been created
-- Current database structure for querying
-
-**Use `/schema/export` instead** when you need:
-- The original schema definition used to create the graph
-- Schema in a specific format (JSON, YAML, Cypher DDL)
-- Schema for documentation or version control
-- Schema to replicate in another graph
-
-## Example Use Cases
-
-- **Building queries**: See what node labels and properties exist to write accurate Cypher
-- **Data exploration**: Discover what's in an unfamiliar graph
-- **Schema drift detection**: Compare runtime vs declared schema
-- **API integration**: Dynamically adapt to current graph structure
-
-## Performance Note
-
-Property discovery is limited to 10 properties per node type for performance.
-For complete schema definitions, use `/schema/export`.
-
-## Subgraph Support
-
-This endpoint accepts both parent graph IDs and subgraph IDs.
-- Parent graph: Use `graph_id` like `kg0123456789abcdef`
-- Subgraph: Use full subgraph ID like `kg0123456789abcdef_dev`
-Each subgraph has independent schema and data. The returned schema reflects
-only the specified graph/subgraph's actual structure.
-
-This operation is included - no credit consumption required.""",
+  description="Runtime schema from actual graph data — node labels, relationship types, and up to 10 sample properties per node type. For the original schema definition or structured export formats, use `/schema/export`.",
   operation_id="getGraphSchema",
   responses={
-    200: {
-      "description": "Schema information retrieved successfully",
-      "model": SchemaInfoResponse,
-    },
-    403: {"description": "Access denied to graph"},
-    500: {"description": "Failed to retrieve schema"},
+    **RESOURCE_ERROR_RESPONSES,
     504: {"description": "Schema operation timed out"},
   },
 )
@@ -102,20 +55,6 @@ async def get_graph_schema_info(
   session: Session = Depends(get_async_db_session),
   _: None = Depends(subscription_aware_rate_limit_dependency),
 ) -> SchemaInfoResponse:
-  """
-  Get runtime schema information for the specified graph.
-
-  Returns node labels, relationship types, and property information by inspecting
-  the actual database structure.
-
-  Args:
-      graph_id: The graph to get schema for
-      current_user: The authenticated user
-      session: Database session
-
-  Returns:
-      Dictionary containing schema information
-  """
   # Initialize robustness components
   operation_logger = get_operation_logger()
 

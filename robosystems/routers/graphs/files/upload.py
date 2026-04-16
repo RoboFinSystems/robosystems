@@ -1,48 +1,4 @@
-"""
-File Upload Management Endpoints.
-
-This module provides secure file upload capabilities using presigned S3 URLs
-and comprehensive validation before ingestion.
-
-Key Features:
-- Presigned S3 URLs for secure direct uploads
-- Automatic file validation (size, format, row count)
-- Table statistics recalculation after upload
-- Automatic DuckDB table registration
-- File status lifecycle management
-- Storage limit enforcement per tier
-- Comprehensive error handling and recovery
-
-Upload Workflow:
-1. Request presigned URL: `POST /files`
-2. Upload file directly to S3 using presigned URL
-3. Update status to 'uploaded': `PATCH /files/{file_id}`
-4. Backend validates file, calculates size and row count
-5. Table statistics updated automatically
-6. DuckDB table registered for queries
-7. File ready for ingestion
-
-File Lifecycle States:
-- pending: URL generated, awaiting upload
-- uploaded: Successfully uploaded and validated
-- disabled: Excluded from ingestion
-- archived: Soft deleted
-
-Validation Features:
-- File format validation (parquet, csv, json)
-- Extension matching (e.g., .parquet for application/x-parquet)
-- Size limits per file and tier storage cap
-- Row count calculation or estimation
-- S3 existence verification
-- Path traversal prevention
-
-Performance:
-- Direct S3 uploads (no API bottleneck)
-- Presigned URLs expire in configurable seconds
-- Optimized S3 head operations for validation
-- Concurrent uploads supported
-- Atomic table statistics updates
-"""
+"""File upload via presigned S3 URL and upload status management."""
 
 import uuid
 from datetime import UTC, datetime
@@ -83,7 +39,7 @@ from robosystems.middleware.otel.metrics import (
   get_endpoint_metrics,
 )
 from robosystems.middleware.rate_limits import subscription_aware_rate_limit_dependency
-from robosystems.models.api.common import ErrorResponse
+from robosystems.models.api.common import RESOURCE_ERROR_RESPONSES
 from robosystems.models.api.graphs.tables import (
   FileStatusUpdate,
   FileUploadRequest,
@@ -101,60 +57,8 @@ router = APIRouter()
   response_model=FileUploadResponse,
   operation_id="createFileUpload",
   summary="Create File Upload",
-  description="""Generate presigned S3 URL for file upload.
-
-Initiate file upload by generating a secure, time-limited presigned S3 URL.
-Files are first-class resources uploaded directly to S3.
-
-**Request Body:**
-- `file_name`: Name of the file (1-255 characters)
-- `file_format`: Format (parquet, csv, json)
-- `table_name`: Table to associate file with
-
-**Upload Workflow:**
-1. Call this endpoint to get presigned URL
-2. PUT file directly to S3 URL
-3. Call PATCH /files/{file_id} with status='uploaded'
-4. Backend validates and stages in DuckDB immediately
-5. Background task ingests to graph
-
-**Supported Formats:**
-- Parquet, CSV, JSON
-
-**Auto-Table Creation:**
-Tables are automatically created if they don't exist.
-
-**Important Notes:**
-- Presigned URLs expire (default: 1 hour)
-- Files are graph-scoped, independent resources
-- Upload URL generation is included - no credit consumption""",
-  responses={
-    200: {
-      "description": "Upload URL generated successfully",
-      "content": {
-        "application/json": {
-          "example": {
-            "upload_url": "https://bucket.s3.amazonaws.com/path?signature",
-            "expires_in": 3600,
-            "file_id": "f123",
-            "s3_key": "user-staging/user123/kg123/Entity/data.parquet",
-          }
-        }
-      },
-    },
-    400: {
-      "description": "Invalid file format or parameters",
-      "model": ErrorResponse,
-    },
-    403: {
-      "description": "Access denied - shared repositories or insufficient permissions",
-      "model": ErrorResponse,
-    },
-    404: {
-      "description": "Graph not found",
-      "model": ErrorResponse,
-    },
-  },
+  description="Returns a presigned S3 URL for direct upload. After uploading, call `PATCH /files/{file_id}` with `status=uploaded` to trigger DuckDB staging. Tables are auto-created if missing. Not allowed on entity graphs or shared repositories.",
+  responses={**RESOURCE_ERROR_RESPONSES},
 )
 @endpoint_metrics_decorator(
   "/v1/graphs/{graph_id}/files", business_event_type="file_upload_created"
@@ -170,12 +74,6 @@ async def create_file_upload(
   _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
   db: Session = Depends(get_db_session),
 ) -> FileUploadResponse:
-  """
-  Generate presigned S3 URL for file upload.
-
-  Creates secure upload URL for direct S3 upload. Requires table_name in request body
-  to associate file with table.
-  """
   start_time = datetime.now(UTC)
 
   # Enforce graph lifecycle and subscription status (write operation)
@@ -412,60 +310,8 @@ async def create_file_upload(
   response_model=dict,
   operation_id="updateFile",
   summary="Update File Status",
-  description="""Update file status and trigger processing.
-
-Update file status after upload completion. Setting status='uploaded' triggers
-immediate DuckDB staging and optional graph ingestion.
-
-**Request Body:**
-- `status`: New status (uploaded, disabled, failed)
-- `ingest_to_graph` (optional): If true, auto-ingest to graph after DuckDB staging
-
-**What Happens (status='uploaded'):**
-1. File validated in S3
-2. Row count calculated
-3. DuckDB staging triggered immediately (background task)
-4. If ingest_to_graph=true, graph ingestion queued
-5. File queryable in DuckDB within seconds
-
-**Use Cases:**
-- Signal upload completion
-- Trigger immediate DuckDB staging
-- Enable/disable files
-- Mark failed uploads
-
-**Important:**
-- Files must exist in S3 before marking uploaded
-- DuckDB staging happens asynchronously
-- Graph ingestion is optional (ingest_to_graph flag)""",
-  responses={
-    200: {
-      "description": "File status updated successfully",
-      "content": {
-        "application/json": {
-          "example": {
-            "file_id": "f123",
-            "status": "uploaded",
-            "message": "File uploaded and queued for DuckDB staging",
-            "operation_id": "op_abc123",
-            "monitor_url": "/v1/operations/op_abc123/stream",
-          }
-        }
-      },
-    },
-    400: {
-      "description": "Invalid status or file not in S3",
-      "model": ErrorResponse,
-    },
-    403: {
-      "description": "Access denied",
-      "model": ErrorResponse,
-    },
-    404: {
-      "description": "File not found",
-      "model": ErrorResponse,
-    },
-  },
+  description="Setting `status=uploaded` validates the file in S3, calculates row count, and triggers DuckDB staging. Small files use direct staging; large files use a background Dagster job with an `operation_id` for SSE monitoring. Set `ingest_to_graph=true` to auto-chain graph materialization.",
+  responses={**RESOURCE_ERROR_RESPONSES},
 )
 @endpoint_metrics_decorator(
   "/v1/graphs/{graph_id}/files/{file_id}", business_event_type="file_updated"
@@ -483,9 +329,6 @@ async def update_file(
   _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
   db: Session = Depends(get_db_session),
 ) -> dict:
-  """
-  Update file status and trigger processing.
-  """
   start_time = datetime.now(UTC)
 
   if is_shared_repository_or_subgraph(graph_id.lower()):

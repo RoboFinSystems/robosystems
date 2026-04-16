@@ -1,12 +1,4 @@
-"""
-Graph credit management API endpoints.
-
-Provides endpoints for:
-- Viewing credit balances and usage
-- Managing credit allocations
-- Viewing transaction history
-- Checking credit requirements
-"""
+"""Graph credit management endpoints."""
 
 import logging
 
@@ -26,8 +18,8 @@ from robosystems.models.api.billing.credits import (
   TransactionSummaryResponse,
 )
 from robosystems.models.api.common import (
+  RESOURCE_ERROR_RESPONSES,
   ErrorCode,
-  ErrorResponse,
   create_error_response,
 )
 from robosystems.models.core import GraphUser, User
@@ -44,7 +36,6 @@ def get_graph_access(
   current_user: User = Depends(get_current_user_with_graph),
   db: Session = Depends(get_db_session),
 ) -> GraphUser:
-  """Get user's access to a graph with proper authorization validation."""
   from robosystems.middleware.graph.utils import MultiTenantUtils
   from robosystems.models.core.user.user_repository import UserRepository
 
@@ -110,32 +101,13 @@ router = APIRouter(
   tags=["Credits"],
 )
 
-# Credit API models moved to robosystems.models.api.credits
-
 
 @router.get(
   "",
   response_model=CreditSummaryResponse,
   summary="Get Credit Summary",
-  description="""Retrieve comprehensive credit usage summary for the specified graph.
-
-This endpoint provides:
-- Current credit balance and monthly allocation
-- Credit consumption metrics for the current month
-- Graph tier and credit multiplier information
-- Usage percentage to help monitor credit consumption
-
-No credits are consumed for checking credit status.""",
   operation_id="getCreditSummary",
-  responses={
-    200: {
-      "description": "Credit summary retrieved successfully",
-      "model": CreditSummaryResponse,
-    },
-    403: {"description": "Access denied to graph", "model": ErrorResponse},
-    404: {"description": "Credit pool not found for graph", "model": ErrorResponse},
-    500: {"description": "Failed to retrieve credit summary", "model": ErrorResponse},
-  },
+  responses={**RESOURCE_ERROR_RESPONSES},
 )
 async def get_credit_summary(
   graph_id: str = Path(
@@ -148,24 +120,6 @@ async def get_credit_summary(
   db: Session = Depends(get_db_session),
   _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
 ) -> CreditSummaryResponse:
-  """
-  Get comprehensive credit summary for a graph.
-
-  This endpoint retrieves detailed credit usage information including
-  current balance, monthly allocation, and consumption metrics.
-
-  Args:
-      graph_id: The graph to get credit summary for
-      current_user: The authenticated user
-      user_graph: User's access to the graph
-      db: Database session
-
-  Returns:
-      CreditSummaryResponse: Detailed credit usage information
-
-  Raises:
-      HTTPException: If credit pool not found or access denied
-  """
   try:
     credit_service = CreditService(db)
     summary = credit_service.get_credit_summary(graph_id, user_id=str(current_user.id))
@@ -193,31 +147,8 @@ async def get_credit_summary(
   "/transactions",
   response_model=DetailedTransactionsResponse,
   summary="List Credit Transactions",
-  description="""Retrieve detailed credit transaction history for the specified graph.
-
-This enhanced endpoint provides:
-- Detailed transaction records with idempotency information
-- Summary by operation type to identify high-consumption operations
-- Date range filtering for analysis
-- Metadata search capabilities
-
-Transaction types include:
-- ALLOCATION: Monthly credit allocations
-- CONSUMPTION: Credit usage for operations
-- BONUS: Bonus credits added by admins
-- REFUND: Credit refunds
-
-No credits are consumed for viewing transaction history.""",
   operation_id="listCreditTransactions",
-  responses={
-    200: {
-      "description": "Transaction history retrieved successfully",
-      "model": DetailedTransactionsResponse,
-    },
-    400: {"description": "Invalid transaction type filter", "model": ErrorResponse},
-    403: {"description": "Access denied to graph", "model": ErrorResponse},
-    500: {"description": "Failed to retrieve transactions", "model": ErrorResponse},
-  },
+  responses={**RESOURCE_ERROR_RESPONSES},
 )
 async def get_credit_transactions(
   graph_id: str = Path(
@@ -256,14 +187,6 @@ async def get_credit_transactions(
   db: Session = Depends(get_db_session),
   _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
 ) -> DetailedTransactionsResponse:
-  """
-  Get detailed credit transaction history for a graph or repository.
-
-  Retrieves a comprehensive list of credit transactions with filtering
-  and summary capabilities to help analyze credit consumption patterns.
-
-  Works for both user graphs and shared repositories.
-  """
   from datetime import datetime
 
   from sqlalchemy import func

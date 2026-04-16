@@ -8,6 +8,7 @@ from ...logger import get_logger
 from ...middleware.auth.dependencies import get_current_user
 from ...middleware.rate_limits import billing_rate_limit_dependency
 from ...models.api.billing.subscription import GraphSubscriptionResponse
+from ...models.api.common import RESOURCE_ERROR_RESPONSES
 from ...models.core import User
 from ...models.core.billing import BillingSubscription
 from ...operations.providers.payment_provider import get_payment_provider
@@ -41,13 +42,8 @@ def _get_plan_display_name(plan_name: str, resource_type: str, resource_id: str)
   "/{org_id}",
   response_model=list[GraphSubscriptionResponse],
   summary="List Organization Subscriptions",
-  description="""List all active and past subscriptions for an organization.
-
-Includes both graph and repository subscriptions with their status, pricing, and billing information.
-
-**Requirements:**
-- User must be a member of the organization""",
   operation_id="listOrgSubscriptions",
+  responses={**RESOURCE_ERROR_RESPONSES},
 )
 async def list_subscriptions(
   org_id: str,
@@ -55,7 +51,6 @@ async def list_subscriptions(
   db: Session = Depends(get_db_session),
   _rate_limit: None = Depends(billing_rate_limit_dependency),
 ):
-  """List all subscriptions for the organization."""
   try:
     from ...models.core import OrgUser
 
@@ -126,11 +121,8 @@ async def list_subscriptions(
   "/{org_id}/subscription/{subscription_id}",
   response_model=GraphSubscriptionResponse,
   summary="Get Organization Subscription Details",
-  description="""Get detailed information about a specific subscription.
-
-**Requirements:**
-- User must be a member of the organization""",
   operation_id="getOrgSubscription",
+  responses={**RESOURCE_ERROR_RESPONSES},
 )
 async def get_subscription(
   org_id: str,
@@ -139,7 +131,6 @@ async def get_subscription(
   db: Session = Depends(get_db_session),
   _rate_limit: None = Depends(billing_rate_limit_dependency),
 ):
-  """Get subscription details for organization."""
   try:
     from ...models.core import OrgUser
 
@@ -207,13 +198,9 @@ async def get_subscription(
   "/{org_id}/subscription/{subscription_id}/cancel",
   response_model=GraphSubscriptionResponse,
   summary="Cancel Organization Subscription",
-  description="""Cancel an organization subscription.
-
-The subscription will remain active until the end of the current billing period.
-
-**Requirements:**
-- User must be an OWNER of the organization""",
+  description="Cancels at period end — subscription remains active through the current billing cycle. Requires org owner role.",
   operation_id="cancelOrgSubscription",
+  responses={**RESOURCE_ERROR_RESPONSES},
 )
 async def cancel_subscription(
   org_id: str,
@@ -222,7 +209,6 @@ async def cancel_subscription(
   db: Session = Depends(get_db_session),
   _rate_limit: None = Depends(billing_rate_limit_dependency),
 ):
-  """Cancel an organization subscription."""
   try:
     from ...models.core import OrgRole, OrgUser
 

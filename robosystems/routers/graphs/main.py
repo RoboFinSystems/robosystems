@@ -1,9 +1,4 @@
-"""
-Unified graph creation router.
-
-This module handles creating new graph databases with flexible configurations,
-optionally including initial entities like companies.
-"""
+"""Graph creation and listing endpoints."""
 
 from typing import Any
 
@@ -42,8 +37,10 @@ from robosystems.models.api import (
   TierCapacity,
 )
 from robosystems.models.api.common import (
+  AUTHENTICATED_ERROR_RESPONSES,
+  OPERATION_ERROR_RESPONSES,
+  RESOURCE_ERROR_RESPONSES,
   ErrorCode,
-  ErrorResponse,
   SuccessResponse,
   create_error_response,
 )
@@ -54,7 +51,6 @@ from robosystems.models.api.user import (
 )
 from robosystems.models.core import GraphUser, OrgLimits, OrgUser, User
 
-# Create router for unified graph creation
 router = APIRouter(prefix="/v1/graphs", tags=["Graphs"])
 
 
@@ -64,7 +60,6 @@ def _create_error_response(
   field: str | None = None,
   details: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-  """Create a standardized error response."""
   error_obj = {"code": error_code, "message": message}
   if field:
     error_obj["field"] = field
@@ -80,7 +75,6 @@ def _raise_http_exception(
   field: str | None = None,
   details: dict[str, Any] | None = None,
 ):
-  """Raise an HTTPException with standardized error format."""
   raise HTTPException(
     status_code=status_code,
     detail=_create_error_response(error_code, message, field, details),
@@ -90,101 +84,9 @@ def _raise_http_exception(
 @router.get(
   "",
   response_model=UserGraphsResponse,
-  summary="Get User Graphs and Repositories",
-  description="""List all graph databases and shared repositories accessible to the current user.
-
-Returns a unified list of both user-created graphs and shared repositories (like SEC data)
-that the user has access to, including their role/access level and selection status.
-
-**Returned Information:**
-- Graph/Repository ID and display name
-- User's role/access level (admin/member for graphs, read/write/admin for repositories)
-- Selection status (only user graphs can be selected)
-- Creation timestamp
-- Repository type indicator (isRepository: true for shared repositories)
-
-**User Graphs (isRepository: false):**
-- Collaborative workspaces that can be shared with other users
-- Roles: `admin` (full access, can invite users) or `member` (read/write access)
-- Can be selected as active workspace
-- Graphs you create or have been invited to
-
-**Shared Repositories (isRepository: true):**
-- Read-only data repositories (e.g., SEC filings)
-- Access levels: `read`, `write` (for data contributions), `admin`
-- Cannot be selected (each has separate subscription)
-- Require separate subscriptions (personal, cannot be shared)
-
-**Selected Graph Concept:**
-The "selected" graph is the user's currently active workspace (user graphs only).
-Many API operations default to the selected graph if no graph_id is provided.
-Users can change their selected graph via `POST /v1/graphs/{graph_id}/select`.
-
-**Use Cases:**
-- Display unified graph/repository selector in UI
-- Show all accessible data sources (both owned graphs and subscribed repositories)
-- Identify currently active workspace
-- Filter by type (user graphs vs repositories)
-
-**Empty Response:**
-New users receive an empty list with `selectedGraphId: null`. Users should create
-a graph or subscribe to a repository.
-
-**Note:**
-Graph listing is included - no credit consumption required.""",
-  status_code=status.HTTP_200_OK,
+  summary="List User Graphs and Repositories",
   operation_id="getGraphs",
-  responses={
-    200: {
-      "description": "Graphs retrieved successfully",
-      "content": {
-        "application/json": {
-          "examples": {
-            "with_graphs_and_repositories": {
-              "summary": "User with graphs and repository subscriptions",
-              "value": {
-                "graphs": [
-                  {
-                    "graphId": "kg1a2b3c4d5",
-                    "graphName": "Acme Consulting LLC",
-                    "role": "admin",
-                    "isSelected": True,
-                    "createdAt": "2024-01-15T10:00:00Z",
-                    "isRepository": False,
-                    "repositoryType": None,
-                  },
-                  {
-                    "graphId": "kg9z8y7x6w5",
-                    "graphName": "TechCorp Enterprises",
-                    "role": "member",
-                    "isSelected": False,
-                    "createdAt": "2024-02-20T14:30:00Z",
-                    "isRepository": False,
-                    "repositoryType": None,
-                  },
-                  {
-                    "graphId": "sec",
-                    "graphName": "SEC",
-                    "role": "read",
-                    "isSelected": False,
-                    "createdAt": "2024-03-01T09:00:00Z",
-                    "isRepository": True,
-                    "repositoryType": "sec",
-                  },
-                ],
-                "selectedGraphId": "kg1a2b3c4d5",
-              },
-            },
-            "empty": {
-              "summary": "New user without graphs",
-              "value": {"graphs": [], "selectedGraphId": None},
-            },
-          }
-        }
-      },
-    },
-    500: {"description": "Error retrieving graphs"},
-  },
+  responses={**AUTHENTICATED_ERROR_RESPONSES},
 )
 @endpoint_metrics_decorator(
   endpoint_name="/v1/graphs", business_event_type="user_graphs_accessed"
@@ -193,18 +95,6 @@ async def get_graphs(
   current_user: User = Depends(get_current_user),
   _rate_limit: None = Depends(user_management_rate_limit_dependency),
 ) -> UserGraphsResponse:
-  """
-  Get all graphs accessible to the current user.
-
-  Args:
-      current_user: The authenticated user from the API key
-
-  Returns:
-      UserGraphsResponse: List of graphs with selection status
-
-  Raises:
-      HTTPException: If there's an error retrieving the graphs
-  """
   user_id = getattr(current_user, "id", None) if current_user else None
 
   try:
@@ -316,68 +206,15 @@ async def get_graphs(
   "",
   response_model=OperationEnvelope,
   status_code=status.HTTP_202_ACCEPTED,
-  operation_id="createGraph",
   summary="Create New Graph Database",
-  description="""Create a new graph database with specified schema and an initial entity.
-
-This endpoint starts an asynchronous graph creation operation and returns
-connection details for monitoring progress via Server-Sent Events (SSE).
-
-**Graph Creation Options:**
-
-1. **Entity Graph** (`initial_entity` required, `custom_schema` omitted):
-   - Creates graph structure with entity schema extensions
-   - `initial_entity` is required — entity graphs must have an entity
-   - Set `create_entity=False` to defer entity population (e.g. file-based ingestion)
-   - Example: Creating a company graph with the company pre-populated
-
-2. **Custom Graph** (`custom_schema` provided, no `initial_entity`):
-   - Creates a generic graph with a fully custom schema
-   - `initial_entity` is not used
-   - Example: Analytics graphs, custom data models
-
-**Required Fields:**
-- `metadata.graph_name`: Unique name for the graph
-- `instance_tier`: Resource tier (ladybug-standard, ladybug-large, ladybug-xlarge)
-- `initial_entity`: Entity data — required for entity graphs (omit only when providing `custom_schema`)
-
-**Optional Fields:**
-- `metadata.description`: Human-readable description of the graph's purpose
-- `metadata.schema_extensions`: List of schema extensions (roboledger, roboinvestor, etc.)
-- `tags`: Organizational tags (max 10)
-- `create_entity`: Whether to populate entity data on creation (default: true)
-
-**Monitoring Progress:**
-Use the returned `operation_id` to connect to the SSE stream:
-```javascript
-const eventSource = new EventSource('/v1/operations/{operation_id}/stream');
-eventSource.onmessage = (event) => {
-  const data = JSON.parse(event.data);
-  console.log('Progress:', data.progress_percent + '%');
-};
-```
-
-**SSE Connection Limits:**
-- Maximum 5 concurrent SSE connections per user
-- Rate limited to 10 new connections per minute
-- Automatic circuit breaker for Redis failures
-- Graceful degradation if event system unavailable
-
-**Events Emitted:**
-- `operation_started`: Graph creation begins
-- `operation_progress`: Schema loading, database setup, etc.
-- `operation_completed`: Graph ready with connection details
-- `operation_error`: Creation failed with error details
-
-**Error Handling:**
-- `429 Too Many Requests`: SSE connection limit exceeded
-- `503 Service Unavailable`: SSE system temporarily disabled
-- Clients should implement exponential backoff on errors
-
-**Response includes:**
-- `operation_id`: Unique identifier for monitoring
-- `_links.stream`: SSE endpoint for real-time updates
-- `_links.status`: Point-in-time status check endpoint""",
+  description="Creates a graph asynchronously. Returns an `OperationEnvelope` with `operation_id` for SSE progress at `/v1/operations/{operation_id}/stream`. Entity graphs require `initial_entity`. Supports `Idempotency-Key` header.",
+  operation_id="createGraph",
+  responses={
+    **OPERATION_ERROR_RESPONSES,
+    402: {
+      "description": "Payment required — add a payment method or check org graph limit"
+    },
+  },
 )
 @endpoint_metrics_decorator(
   endpoint_name="/v1/graphs",
@@ -392,7 +229,6 @@ async def create_graph(
   cache: IdempotencyCache = Depends(get_idempotency_cache),
   db: Session = Depends(get_async_db_session),
 ) -> OperationEnvelope:
-  """Create a new graph database asynchronously."""
   from robosystems.config.graph_tier import GraphTier
   from robosystems.middleware.billing.enforcement import check_can_provision_graph
   from robosystems.worker.client import enqueue_task
@@ -523,71 +359,14 @@ async def create_graph(
 @router.get(
   "/extensions",
   response_model=AvailableExtensionsResponse,
-  operation_id="getAvailableExtensions",
   summary="Get Available Schema Extensions",
-  description="""List all available schema extensions for graph creation.
-
-Schema extensions provide pre-built industry-specific data models that extend
-the base graph schema with specialized nodes, relationships, and properties.
-
-**Available Extensions:**
-- **RoboLedger**: Complete accounting system with XBRL reporting, general ledger, and financial statements
-- **RoboInvestor**: Investment portfolio management with securities tracking, trade execution, and risk analysis
-- **RoboSCM**: Supply chain management and logistics
-- **RoboFO**: Front office operations and CRM
-- **RoboHRM**: Human resources management
-- **RoboEPM**: Enterprise performance management
-- **RoboReport**: Business intelligence and reporting
-
-**Extension Information:**
-Each extension includes:
-- Display name and description
-- Node and relationship counts
-- Context-aware capabilities (e.g., SEC repositories get different features than entity graphs)
-
-**Use Cases:**
-- Browse available extensions before creating a graph
-- Understand extension capabilities and data models
-- Plan graph schema based on business requirements
-- Combine multiple extensions for comprehensive data modeling
-
-**Note:**
-Extension listing is included - no credit consumption required.""",
-  responses={
-    200: {
-      "description": "Extensions retrieved successfully",
-      "content": {
-        "application/json": {
-          "example": {
-            "extensions": [
-              {
-                "name": "roboledger",
-                "description": "Complete accounting system with XBRL reporting and GL transactions",
-                "enabled": False,
-              },
-              {
-                "name": "roboinvestor",
-                "description": "Investment portfolio management with securities tracking, trade execution, and risk analysis.",
-                "enabled": False,
-              },
-            ]
-          }
-        }
-      },
-    },
-    500: {"description": "Failed to retrieve extensions"},
-  },
+  operation_id="getAvailableExtensions",
+  responses={**AUTHENTICATED_ERROR_RESPONSES},
 )
 async def get_available_extensions(
   current_user: User = Depends(get_current_user),
   _rate_limit: None = Depends(general_api_rate_limit_dependency),
 ):
-  """
-  Get available schema extensions for graph creation.
-
-  Returns information about all available extensions, their descriptions,
-  and recommended combinations for different use cases.
-  """
   try:
     from robosystems.schemas.runtime.manager import SchemaManager
 
@@ -706,102 +485,14 @@ async def get_available_extensions(
   "/tiers",
   response_model=AvailableGraphTiersResponse,
   summary="Get Available Graph Tiers",
-  description="""List all available graph database tier configurations.
-
-This endpoint provides comprehensive technical specifications for each available
-graph database tier, including instance types, resource limits, and features.
-
-**Tier Information:**
-Each tier includes:
-- Technical specifications (instance type, memory, storage)
-- Resource limits (subgraphs, credits, rate limits)
-- Feature list with capabilities
-- Availability status
-
-**Available Tiers:**
-- **ladybug-standard**: Dedicated entry-level tier
-- **ladybug-large**: Dedicated professional tier with subgraph support
-- **ladybug-xlarge**: Enterprise tier with maximum resources
-
-**Use Cases:**
-- Display tier options in graph creation UI
-- Show technical specifications for tier selection
-- Validate tier availability before graph creation
-- Display feature comparisons
-
-**Note:**
-Tier listing is included - no credit consumption required.""",
   operation_id="getAvailableGraphTiers",
-  responses={
-    200: {
-      "description": "Tiers retrieved successfully",
-      "content": {
-        "application/json": {
-          "example": {
-            "tiers": [
-              {
-                "tier": "ladybug-standard",
-                "name": "ladybug-standard",
-                "display_name": "LadybugDB Standard",
-                "description": "Dedicated m7g.large instance for entry-level workloads",
-                "backend": "ladybug",
-                "enabled": True,
-                "max_subgraphs": 3,
-                "monthly_credits": 8000,
-                "api_rate_multiplier": 1.0,
-                "monthly_price": 100.0,
-                "features": [
-                  "5M node limit",
-                  "8,000 AI credits per month",
-                  "Up to 3 subgraphs",
-                  "Dedicated large instance",
-                  "6GB RAM",
-                  "7-day backup retention",
-                ],
-                "instance": {
-                  "type": "m7g.large",
-                  "memory_mb": 6144,
-                  "is_multitenant": False,
-                },
-                "limits": {
-                  "monthly_credits": 8000,
-                  "max_subgraphs": 3,
-                  "copy_operations": {
-                    "max_file_size_gb": 1.0,
-                    "timeout_seconds": 300,
-                    "concurrent_operations": 1,
-                    "max_files_per_operation": 100,
-                    "daily_copy_operations": 10,
-                  },
-                  "backup": {
-                    "max_backup_size_gb": 10,
-                    "backup_retention_days": 7,
-                    "max_backups_per_day": 2,
-                  },
-                },
-              }
-            ]
-          }
-        }
-      },
-    },
-    500: {"description": "Failed to retrieve tiers"},
-  },
+  responses={**AUTHENTICATED_ERROR_RESPONSES},
 )
 async def get_available_graph_tiers(
   current_user: User = Depends(get_current_user),
   _rate_limit: None = Depends(general_api_rate_limit_dependency),
   include_disabled: bool = False,
 ) -> AvailableGraphTiersResponse:
-  """
-  Get available graph database tiers with technical specifications.
-
-  Returns comprehensive information about all available graph tiers,
-  including technical specifications, resource limits, and features.
-
-  Args:
-      include_disabled: Whether to include disabled/optional tiers (default: False)
-  """
   try:
     from robosystems.config import BillingConfig
     from robosystems.config.graph_tier import GraphTierConfig
@@ -859,70 +550,14 @@ async def get_available_graph_tiers(
   "/capacity",
   response_model=GraphCapacityResponse,
   summary="Get Graph Tier Capacity",
-  description="""Check current infrastructure capacity for each graph database tier.
-
-Returns a status per tier indicating whether instances are immediately available,
-can be provisioned on demand, or are at capacity.
-
-**Status Values:**
-- `ready` — An instance slot is available; graph creation will succeed immediately
-- `scalable` — No slots right now, but a new instance can be provisioned (3-5 min)
-- `at_capacity` — Tier is full and cannot auto-scale; contact support
-
-**Use Cases:**
-- Pre-flight check before entering the graph creation wizard
-- Show availability badges on tier selection cards
-- Gate tier selection and show contact form for at-capacity tiers
-
-**Caching:**
-Results are cached for 60 seconds to avoid excessive infrastructure queries.
-
-**Note:**
-No credit consumption required. Does not expose instance counts or IPs.""",
+  description="Status per tier: `ready` (slot available), `scalable` (can provision, 3-5 min), `at_capacity` (contact support). Cached 60s.",
   operation_id="getGraphCapacity",
-  responses={
-    200: {
-      "description": "Capacity status retrieved successfully",
-      "content": {
-        "application/json": {
-          "example": {
-            "tiers": [
-              {
-                "tier": "ladybug-standard",
-                "display_name": "LadybugDB Standard",
-                "status": "ready",
-                "message": "Available",
-              },
-              {
-                "tier": "ladybug-large",
-                "display_name": "LadybugDB Large",
-                "status": "scalable",
-                "message": "Available — provisioning takes 3-5 minutes",
-              },
-              {
-                "tier": "ladybug-xlarge",
-                "display_name": "LadybugDB XLarge",
-                "status": "at_capacity",
-                "message": "Currently at capacity — contact us for access",
-              },
-            ]
-          }
-        }
-      },
-    },
-    500: {"description": "Failed to check capacity"},
-  },
+  responses={**AUTHENTICATED_ERROR_RESPONSES},
 )
 async def get_graph_capacity(
   current_user: User = Depends(get_current_user),
   _rate_limit: None = Depends(general_api_rate_limit_dependency),
 ) -> GraphCapacityResponse:
-  """
-  Check infrastructure capacity for each customer-facing tier.
-
-  Returns a status and human-readable message per tier so the frontend
-  can gate tier selection and show availability badges.
-  """
   try:
     from robosystems.config import env as app_env
     from robosystems.config.billing.core import DEFAULT_GRAPH_BILLING_PLANS
@@ -985,54 +620,8 @@ async def get_graph_capacity(
   "/{graph_id}/select",
   response_model=SuccessResponse,
   summary="Select Graph",
-  description="""Select a specific graph as the active workspace for the user.
-
-The selected graph becomes the default context for operations in client applications
-and can be used to maintain user workspace preferences across sessions.
-
-**Functionality:**
-- Sets the specified graph as the user's currently selected graph
-- Deselects any previously selected graph (only one can be selected at a time)
-- Persists selection across sessions until changed
-- Returns confirmation with the selected graph ID
-
-**Requirements:**
-- User must have access to the graph (as admin or member)
-- Graph must exist and not be deleted
-- User can only select graphs they have permission to access
-
-**Use Cases:**
-- Switch between multiple graphs in a multi-graph environment
-- Set default workspace after creating a new graph
-- Restore user's preferred workspace on login
-- Support graph context switching in client applications
-
-**Client Integration:**
-Many client operations can default to the selected graph, simplifying API calls
-by eliminating the need to specify graph_id repeatedly. Check the selected
-graph with `GET /v1/graphs` which returns `selectedGraphId`.
-
-**Note:**
-Graph selection is included - no credit consumption required.""",
-  status_code=status.HTTP_200_OK,
   operation_id="selectGraph",
-  responses={
-    200: {
-      "description": "Graph selected successfully",
-      "content": {
-        "application/json": {
-          "example": {
-            "success": True,
-            "message": "Graph selected successfully",
-            "data": {"selectedGraphId": "kg1a2b3c4d5"},
-          }
-        }
-      },
-    },
-    403: {"description": "Access denied to graph", "model": ErrorResponse},
-    404: {"description": "Graph not found", "model": ErrorResponse},
-    500: {"description": "Error selecting graph", "model": ErrorResponse},
-  },
+  responses={**RESOURCE_ERROR_RESPONSES},
 )
 @endpoint_metrics_decorator(
   endpoint_name="/v1/graphs/{graph_id}/select",
@@ -1043,19 +632,6 @@ async def select_graph(
   current_user: User = Depends(get_current_user_with_graph),
   _rate_limit: None = Depends(user_management_rate_limit_dependency),
 ):
-  """
-  Select a specific graph as the active graph for the user.
-
-  Args:
-      graph_id: The graph ID to select
-      current_user: The authenticated user from the API key
-
-  Returns:
-      Success status with selected graph ID
-
-  Raises:
-      HTTPException: If user doesn't have access or graph not found
-  """
   user_id = getattr(current_user, "id", None) if current_user else None
 
   try:

@@ -26,7 +26,7 @@ from robosystems.middleware.robustness import (
   get_operation_logger,
   record_operation_metric,
 )
-from robosystems.models.api.common import ErrorResponse
+from robosystems.models.api.common import RESOURCE_ERROR_RESPONSES
 from robosystems.models.api.graphs.metrics import (
   CreditSummary,
   GraphMetricsResponse,
@@ -46,37 +46,8 @@ graph_metrics_service = GraphMetricsService()
   "",
   response_model=GraphMetricsResponse,
   summary="Get Graph Metrics",
-  description="""Get comprehensive metrics for the graph database.
-
-Provides detailed analytics including:
-- **Node Statistics**: Counts by type (Entity, Report, Account, Transaction)
-- **Relationship Metrics**: Connection counts and patterns
-- **Data Quality**: Completeness scores and validation results
-- **Performance Metrics**: Query response times and database health
-- **Storage Analytics**: Database size and growth trends
-
-This data helps with:
-- Monitoring data completeness
-- Identifying data quality issues
-- Capacity planning
-- Performance optimization
-
-Note:
-This operation is included - no credit consumption required.""",
-  status_code=status.HTTP_200_OK,
   operation_id="getGraphMetrics",
-  responses={
-    200: {
-      "description": "Graph metrics retrieved successfully",
-      "model": GraphMetricsResponse,
-    },
-    403: {"description": "Access denied to graph", "model": ErrorResponse},
-    404: {
-      "description": "Graph not found or metrics unavailable",
-      "model": ErrorResponse,
-    },
-    500: {"description": "Failed to retrieve metrics", "model": ErrorResponse},
-  },
+  responses={**RESOURCE_ERROR_RESPONSES},
 )
 @endpoint_metrics_decorator(
   endpoint_name="/v1/graphs/{graph_id}/analytics",
@@ -92,15 +63,6 @@ async def get_graph_metrics(
   db: Session = Depends(get_db_session),
   _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
 ) -> GraphMetricsResponse:
-  """
-  Get detailed metrics for the specified graph.
-
-  This endpoint provides comprehensive metrics including:
-  - Node counts by label
-  - Relationship counts by type
-  - Database size estimates
-  - Health status
-  """
   circuit_breaker = CircuitBreakerManager()
   timeout_coordinator = TimeoutCoordinator()
   operation_logger = get_operation_logger()
@@ -270,45 +232,9 @@ async def get_graph_metrics(
   "/usage",
   response_model=GraphUsageResponse,
   summary="Get Graph Usage Analytics",
-  description="""Get comprehensive usage analytics tracked by the GraphUsage model.
-
-Provides temporal usage patterns including:
-- **Storage Analytics**: GB-hours for billing, breakdown by type (files, tables, graphs, subgraphs)
-- **Credit Analytics**: Consumption patterns, operation breakdown, cached vs billable
-- **Performance Insights**: Operation stats, slow queries, performance scoring
-- **Recent Events**: Latest usage events with full details
-
-Time ranges available:
-- `24h` - Last 24 hours (hourly breakdown)
-- `7d` - Last 7 days (daily breakdown)
-- `30d` - Last 30 days (daily breakdown)
-- `current_month` - Current billing month
-- `last_month` - Previous billing month
-
-Include options:
-- `storage` - Storage usage summary (GB-hours, averages, peaks)
-- `credits` - Credit consumption analytics
-- `performance` - Performance insights and optimization opportunities
-- `events` - Recent usage events (last 50)
-
-Useful for:
-- Billing and cost analysis
-- Capacity planning
-- Performance optimization
-- Usage trend analysis
-
-Note:
-This operation is included - no credit consumption required.""",
-  status_code=status.HTTP_200_OK,
+  description="Time ranges: 24h, 7d, 30d, current_month, last_month. Toggle storage, credits, performance, and events sections via query params.",
   operation_id="getGraphUsageAnalytics",
-  responses={
-    200: {
-      "description": "Usage analytics retrieved successfully",
-      "model": GraphUsageResponse,
-    },
-    403: {"description": "Access denied to graph", "model": ErrorResponse},
-    500: {"description": "Failed to retrieve usage analytics", "model": ErrorResponse},
-  },
+  responses={**RESOURCE_ERROR_RESPONSES},
 )
 @endpoint_metrics_decorator(
   endpoint_name="/v1/graphs/{graph_id}/usage",
@@ -335,15 +261,6 @@ async def get_graph_usage_analytics(
   db: Session = Depends(get_db_session),
   _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
 ) -> GraphUsageResponse:
-  """
-  Get comprehensive usage analytics from GraphUsage model.
-
-  This endpoint queries the graph_usage table for:
-  - Storage usage summaries (GB-hours, breakdown by type)
-  - Credit consumption analytics (operation breakdown, cached vs billable)
-  - Performance insights (slow queries, optimization opportunities)
-  - Recent usage events (last 50 events)
-  """
   circuit_breaker = CircuitBreakerManager()
   timeout_coordinator = TimeoutCoordinator()
   operation_logger = get_operation_logger()

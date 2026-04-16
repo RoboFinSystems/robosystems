@@ -31,6 +31,7 @@ from robosystems.middleware.rate_limits import (
   DownloadRateLimiter,
   subscription_aware_rate_limit_dependency,
 )
+from robosystems.models.api.common import RESOURCE_ERROR_RESPONSES
 from robosystems.models.api.graphs.backups import (
   BackupListResponse,
   BackupResponse,
@@ -47,8 +48,7 @@ router = APIRouter()
   response_model=BackupListResponse,
   operation_id="listBackups",
   summary="List graph database backups",
-  description="List all backups for the specified graph database",
-  status_code=status.HTTP_200_OK,
+  responses={**RESOURCE_ERROR_RESPONSES},
 )
 @endpoint_metrics_decorator(
   endpoint_name="/v1/graphs/{graph_id}/backups",
@@ -67,12 +67,6 @@ async def list_backups(
   db: Session = Depends(get_async_db_session),
   _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
 ) -> BackupListResponse:
-  """
-  List all backups for the specified graph database.
-
-  Returns backup metadata including format, size, encryption status,
-  and export availability.
-  """
   try:
     logger.info(
       f"Starting list_backups for graph_id: {graph_id}, user: {current_user.id}"

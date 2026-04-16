@@ -24,8 +24,8 @@ from robosystems.middleware.operations import (
 from robosystems.middleware.otel.metrics import endpoint_metrics_decorator
 from robosystems.middleware.rate_limits import subscription_aware_rate_limit_dependency
 from robosystems.models.api.common import (
+  OPERATION_ERROR_RESPONSES,
   ErrorCode,
-  ErrorResponse,
   create_error_response,
 )
 from robosystems.models.api.graphs.connections import SyncConnectionRequest
@@ -46,41 +46,13 @@ router = APIRouter()
 @router.post(
   "/{connection_id}/sync",
   summary="Sync Connection",
-  description="""Trigger a data synchronization for the connection.
-
-Initiates data sync based on provider type:
-
-**SEC Sync**:
-- Downloads latest filings from EDGAR
-- Parses XBRL data and updates graph
-- Typically completes in 5-10 minutes
-
-**QuickBooks Sync**:
-- Fetches latest transactions and balances
-- Updates chart of accounts
-- Generates fresh trial balance
-- Duration depends on data volume
-
-Note:
-This operation is included - no credit consumption required.
-
-Returns an `OperationEnvelope` with an `operationId` for tracking sync progress.
-Supports `Idempotency-Key` header to safely retry without triggering duplicate syncs.""",
+  description="SEC: downloads latest EDGAR filings (5-10 min). QuickBooks: fetches transactions, balances, and chart of accounts. Returns an `OperationEnvelope` — monitor progress via SSE at `/v1/operations/{operation_id}/stream`. Supports `Idempotency-Key`.",
   response_model=OperationEnvelope,
   status_code=status.HTTP_202_ACCEPTED,
   operation_id="syncConnection",
   responses={
-    403: {
-      "description": "Access denied or provider not available",
-      "model": ErrorResponse,
-    },
-    404: {"description": "Connection not found", "model": ErrorResponse},
-    409: {
-      "description": "Idempotency key reused with different request body",
-      "model": ErrorResponse,
-    },
-    500: {"description": "Failed to start sync", "model": ErrorResponse},
-    504: {"description": "Sync request timed out", "model": ErrorResponse},
+    **OPERATION_ERROR_RESPONSES,
+    504: {"description": "Sync request timed out"},
   },
 )
 @endpoint_metrics_decorator(
@@ -100,7 +72,6 @@ async def sync_connection(
   idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
   cache: IdempotencyCache = Depends(get_idempotency_cache),
 ) -> OperationEnvelope:
-  """Trigger a sync operation for a specific connection."""
   op_name = "sync-connection"
   user_id = str(current_user.id)
   body_fp = fingerprint_body(request)

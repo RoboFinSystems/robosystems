@@ -11,6 +11,7 @@ from ...database import get_db_session
 from ...logger import get_logger
 from ...middleware.auth.dependencies import get_current_user
 from ...middleware.rate_limits import general_api_rate_limit_dependency
+from ...models.api.common import RESOURCE_ERROR_RESPONSES
 from ...models.api.orgs import (
   OrgLimitsResponse,
   OrgUsageResponse,
@@ -35,8 +36,8 @@ router = APIRouter(tags=["Org Usage"])
   "/orgs/{org_id}/limits",
   response_model=OrgLimitsResponse,
   summary="Get Organization Limits",
-  description="Get the current limits and quotas for an organization.",
   operation_id="getOrgLimits",
+  responses={**RESOURCE_ERROR_RESPONSES},
 )
 async def get_org_limits(
   org_id: str,
@@ -44,7 +45,6 @@ async def get_org_limits(
   db: Session = Depends(get_db_session),
   _rate_limit: None = Depends(general_api_rate_limit_dependency),
 ) -> OrgLimitsResponse:
-  """Get organization limits and current usage against those limits."""
   try:
     # Check if user is a member of the org
     membership = OrgUser.get_by_org_and_user(org_id, current_user.id, db)
@@ -93,8 +93,9 @@ async def get_org_limits(
   "/orgs/{org_id}/usage",
   response_model=OrgUsageResponse,
   summary="Get Organization Usage",
-  description="Get detailed usage statistics for an organization aggregated across all graphs.",
+  description="Aggregated across all graphs in the org. Use the `days` query param to control the lookback window (default 30).",
   operation_id="getOrgUsage",
+  responses={**RESOURCE_ERROR_RESPONSES},
 )
 async def get_org_usage(
   org_id: str,
@@ -103,7 +104,6 @@ async def get_org_usage(
   db: Session = Depends(get_db_session),
   _rate_limit: None = Depends(general_api_rate_limit_dependency),
 ) -> OrgUsageResponse:
-  """Get organization usage statistics aggregated across all graphs."""
   try:
     # Check if user is a member of the org
     membership = OrgUser.get_by_org_and_user(org_id, current_user.id, db)

@@ -46,6 +46,7 @@ from robosystems.middleware.operations import (
 )
 from robosystems.middleware.otel.metrics import endpoint_metrics_decorator
 from robosystems.middleware.rate_limits import subscription_aware_rate_limit_dependency
+from robosystems.models.api.common import OPERATION_ERROR_RESPONSES
 from robosystems.models.api.views import (
   CreateViewRequest,
   ViewMetadata,
@@ -72,8 +73,10 @@ _RATE_LIMIT = Depends(subscription_aware_rate_limit_dependency)
   response_model=OperationEnvelope,
   operation_id="opBuildFactGrid",
   summary="Build Fact Grid",
+  description="Queries LadybugDB `Fact` nodes by element qnames or canonical concepts, with filters for periods, entities, form, and fiscal context. Returns a deduplicated pivot table. Works on both roboledger tenant graphs (post-materialization) and the SEC shared repository.",
   tags=[_OP_TAG],
   dependencies=[_RATE_LIMIT],
+  responses={**OPERATION_ERROR_RESPONSES},
 )
 @endpoint_metrics_decorator(
   "/extensions/roboledger/{graph_id}/operations/build-fact-grid",
@@ -87,18 +90,6 @@ async def build_fact_grid_op(
   idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
   cache: IdempotencyCache = Depends(get_idempotency_cache),
 ) -> OperationEnvelope:
-  """Build a multi-dimensional fact grid against the graph schema.
-
-  Queries `Fact` nodes by element qnames or canonical concepts with
-  optional filters for periods, entities, filing form, fiscal context,
-  and period type. Returns a deduplicated pivot table plus optional
-  summary statistics.
-
-  This is a graph-database read — the query runs against LadybugDB,
-  not the extensions OLTP database. The same operation works for
-  roboledger tenant graphs (post-materialization) and the SEC shared
-  repository (which uses the same XBRL hypercube schema).
-  """
   ctx = OperationContext(
     domain="roboledger",
     operation_name="build-fact-grid",

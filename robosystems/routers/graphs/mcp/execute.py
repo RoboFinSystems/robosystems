@@ -1,10 +1,4 @@
-"""
-Main MCP tool execution endpoint with intelligent routing and transparent streaming.
-
-This module provides the primary MCP tool execution endpoint that automatically
-selects the optimal execution strategy based on tool characteristics, client
-capabilities, and system load. Designed for seamless AI agent integration.
-"""
+"""MCP tool execution with intelligent strategy selection and streaming."""
 
 import asyncio
 import json
@@ -47,7 +41,7 @@ from robosystems.middleware.robustness import (
   record_operation_metric,
 )
 from robosystems.middleware.sse.operation_manager import create_operation_response
-from robosystems.models.api.common import ErrorResponse
+from robosystems.models.api.common import RESOURCE_ERROR_RESPONSES
 from robosystems.models.api.graphs.mcp import MCPToolCall, MCPToolResult
 from robosystems.models.core import User
 from robosystems.security.cypher_analyzer import (
@@ -191,63 +185,15 @@ async def stream_ndjson_response(events_generator):
 
 @router.post(
   "/call-tool",
-  response_model=None,  # Dynamic response type
+  response_model=None,
   summary="Execute MCP Tool",
-  description="""Execute an MCP tool with intelligent response optimization.
-
-This endpoint automatically selects the best execution strategy based on:
-- Tool type and estimated complexity
-- Client capabilities (AI agent detection)
-- System load and queue status
-- Graph type (shared repository vs user graph)
-
-**Response Formats:**
-- **JSON**: Direct response for small/fast operations
-- **SSE**: Server-Sent Events for progress monitoring
-- **NDJSON**: Newline-delimited JSON for streaming
-- **Queued**: Asynchronous execution with status monitoring
-
-**SSE Streaming Support:**
-- Maximum 5 concurrent SSE connections per user
-- Rate limited to 10 new connections per minute
-- Automatic circuit breaker for Redis failures
-- Graceful degradation to direct response if SSE unavailable
-- Progress events for long-running operations
-
-**AI Agent Optimization:**
-The Node.js MCP client transparently handles all response formats,
-presenting a unified interface to AI agents. Streaming responses are
-automatically aggregated for seamless consumption.
-
-**Error Handling:**
-- `429 Too Many Requests`: Connection limit or rate limit exceeded
-- `503 Service Unavailable`: SSE system temporarily disabled
-- `408 Request Timeout`: Tool execution exceeded timeout
-- Clients should implement exponential backoff on errors
-
-**Subgraph Support:**
-This endpoint accepts both parent graph IDs and subgraph IDs.
-- Parent graph: Use `graph_id` like `kg0123456789abcdef`
-- Subgraph: Use full subgraph ID like `kg0123456789abcdef_dev`
-MCP tools operate on the specified graph/subgraph independently. Each subgraph
-has its own schema, data, and can be queried separately via MCP.
-
-**Credit Model:**
-MCP tool execution is included - no credit consumption required. Database
-operations (queries, schema inspection, analytics) are completely free.
-Only AI operations that invoke Claude or other LLM APIs consume credits,
-which happens at the AI agent layer, not the MCP tool layer.""",
+  description="Strategy auto-selected by tool type and load: JSON for fast tools, SSE for long queries, NDJSON for large results. Database operations (Cypher, schema, info) consume no credits — only AI LLM calls cost credits.",
   operation_id="callMcpTool",
   responses={
-    200: {"description": "Tool executed successfully"},
+    **RESOURCE_ERROR_RESPONSES,
     202: {"description": "Tool queued for execution"},
-    400: {"description": "Invalid tool call", "model": ErrorResponse},
-    402: {"description": "Insufficient credits", "model": ErrorResponse},
-    403: {"description": "Access denied", "model": ErrorResponse},
-    408: {"description": "Execution timeout", "model": ErrorResponse},
-    429: {"description": "Rate limit exceeded", "model": ErrorResponse},
-    500: {"description": "Internal error", "model": ErrorResponse},
-    503: {"description": "Service unavailable", "model": ErrorResponse},
+    408: {"description": "Execution timeout"},
+    503: {"description": "Service unavailable"},
   },
 )
 @endpoint_metrics_decorator(
@@ -303,13 +249,6 @@ async def call_mcp_tool(
   current_user: User = Depends(get_current_user_with_graph),
   _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
 ) -> MCPToolResult | JSONResponse | StreamingResponse | EventSourceResponse:
-  """
-  Execute an MCP tool with intelligent response optimization.
-
-  This endpoint provides transparent execution of MCP tools with automatic
-  strategy selection. For AI agents using the Node.js MCP client, all
-  response formats are handled transparently and presented uniformly.
-  """
   start_time = datetime.now(UTC)
 
   # Import config

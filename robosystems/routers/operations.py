@@ -1,20 +1,4 @@
-"""
-Unified operations endpoint for Server-Sent Events monitoring.
-
-This is the **monitoring** half of the platform's operation lifecycle. It
-streams progress, partial results, and final outcomes for any operation that
-has been issued an `op_<ULID>` operation_id — including operations dispatched
-through the new extensions surface at
-`POST /extensions/{domain}/{graph_id}/operations/{operation_name}` (see
-`robosystems/middleware/extensions.py` for the dispatch kernel and
-`OperationEnvelope` shape).
-
-The same `op_<ULID>` namespace flows through both surfaces: dispatch returns
-an envelope with `operationId`, and that id is the path parameter consumed by
-`/v1/operations/{operation_id}/stream` here. Long-running commands (e.g.
-`auto-map-elements`) return `status: "pending"` from dispatch and stream
-progress through this endpoint until completion.
-"""
+"""Unified operations endpoint for Server-Sent Events monitoring."""
 
 from typing import Any
 
@@ -37,75 +21,20 @@ from robosystems.middleware.rate_limits import (
 )
 from robosystems.middleware.sse.event_storage import OperationStatus, get_event_storage
 from robosystems.middleware.sse.streaming import create_sse_response_starlette
+from robosystems.models.api.common import RESOURCE_ERROR_RESPONSES
 from robosystems.models.core import User
 
-# Create router
 router = APIRouter()
 
 
 @router.get(
   "/operations/{operation_id}/stream",
   summary="Stream Operation Events",
-  description="""Stream real-time events for an operation using Server-Sent Events (SSE).
-
-This endpoint provides real-time monitoring for all non-immediate operations including:
-- Graph creation and management
-- Agent analysis processing
-- Database backups and restores
-- Data synchronization tasks
-
-**Event Types:**
-- `operation_started`: Operation began execution
-- `operation_progress`: Progress update with details
-- `operation_completed`: Operation finished successfully
-- `operation_error`: Operation failed with error details
-- `operation_cancelled`: Operation was cancelled
-
-**Features:**
-- **Event Replay**: Use `from_sequence` parameter to replay missed events
-- **Automatic Reconnection**: Client can reconnect and resume from last seen event
-- **Real-time Updates**: Live progress updates during execution
-- **Timeout Handling**: 30-second keepalive messages prevent connection timeouts
-- **Graceful Degradation**: Automatic fallback if Redis is unavailable
-
-**Connection Limits:**
-- Maximum 5 concurrent SSE connections per user
-- Rate limited to 10 new connections per minute
-- Automatic cleanup of stale connections
-- Circuit breaker protection for Redis failures
-
-**Client Usage:**
-```javascript
-const eventSource = new EventSource('/v1/operations/abc123/stream');
-eventSource.onmessage = (event) => {
-  const data = JSON.parse(event.data);
-  console.log('Progress:', data);
-};
-eventSource.onerror = (error) => {
-  // Handle connection errors or rate limits
-  console.error('SSE Error:', error);
-};
-```
-
-**Error Handling:**
-- `429 Too Many Requests`: Connection limit or rate limit exceeded
-- `503 Service Unavailable`: SSE system temporarily disabled
-- Clients should implement exponential backoff on errors
-
-**No credits are consumed for SSE connections.**""",
+  description="Server-Sent Events stream for real-time operation progress. Use `from_sequence` to replay missed events on reconnect. Max 5 concurrent SSE connections per user. Consumes no credits.",
   operation_id="streamOperationEvents",
   responses={
-    200: {
-      "description": "SSE stream of operation events",
-      "headers": {
-        "Content-Type": {"schema": {"type": "string", "enum": ["text/event-stream"]}},
-        "Cache-Control": {"schema": {"type": "string", "enum": ["no-cache"]}},
-        "Connection": {"schema": {"type": "string", "enum": ["keep-alive"]}},
-      },
-    },
-    403: {"description": "Access denied to operation"},
-    404: {"description": "Operation not found"},
-    500: {"description": "Failed to create event stream"},
+    200: {"description": "SSE stream — Content-Type: text/event-stream"},
+    **RESOURCE_ERROR_RESPONSES,
   },
 )
 @endpoint_metrics_decorator(
@@ -127,24 +56,6 @@ async def stream_operation_events(
   request: Request = None,
   _rate_limit: None = Depends(sse_connection_rate_limit_dependency),
 ) -> EventSourceResponse:
-  """
-  Stream operation events using Server-Sent Events.
-
-  Provides real-time monitoring of operation progress with event replay
-  capability for reliable client connectivity.
-
-  Args:
-      operation_id: Unique operation identifier
-      from_sequence: Sequence number to start from (enables replay)
-      current_user: Authenticated user
-      request: FastAPI request for disconnect detection
-
-  Returns:
-      EventSourceResponse: SSE stream of operation events
-
-  Raises:
-      HTTPException: For access errors or operation not found
-  """
   try:
     # Verify operation exists and user has access
     event_storage = get_event_storage()
@@ -248,44 +159,9 @@ async def stream_operation_events(
 @router.get(
   "/operations/{operation_id}/status",
   summary="Get Operation Status",
-  description="""Get current status and metadata for an operation.
-
-Returns detailed information including:
-- Current status (pending, running, completed, failed, cancelled)
-- Creation and update timestamps
-- Operation type and associated graph
-- Result data (for completed operations)
-- Error details (for failed operations)
-
-This endpoint provides a point-in-time status check, while the `/stream` endpoint
-provides real-time updates. Use this for polling or initial status checks.
-
-**No credits are consumed for status checks.**""",
+  description="Point-in-time status check. Use `/stream` for real-time updates. Consumes no credits.",
   operation_id="getOperationStatus",
-  responses={
-    200: {
-      "description": "Operation status retrieved successfully",
-      "content": {
-        "application/json": {
-          "example": {
-            "operation_id": "abc123",
-            "operation_type": "graph_creation",
-            "status": "running",
-            "created_at": "2024-01-01T12:00:00Z",
-            "updated_at": "2024-01-01T12:01:30Z",
-            "graph_id": "kg1a2b3c4d5e6f7g8",
-            "_links": {
-              "stream": "/v1/operations/abc123/stream",
-              "cancel": "/v1/operations/abc123",
-            },
-          }
-        }
-      },
-    },
-    403: {"description": "Access denied to operation"},
-    404: {"description": "Operation not found"},
-    500: {"description": "Failed to retrieve operation status"},
-  },
+  responses={**RESOURCE_ERROR_RESPONSES},
 )
 @endpoint_metrics_decorator(
   "/v1/operations/{operation_id}/status",
@@ -300,24 +176,7 @@ async def get_operation_status(
   current_user: User = Depends(get_current_user),
   _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
 ) -> dict[str, Any]:
-  """
-  Get current status of an operation.
-
-  Provides point-in-time status information for operation monitoring
-  and client state management.
-
-  Args:
-      operation_id: Unique operation identifier
-      current_user: Authenticated user
-
-  Returns:
-      Dict containing operation status and metadata
-
-  Raises:
-      HTTPException: For access errors or operation not found
-  """
   try:
-    # Get operation metadata
     event_storage = get_event_storage()
     metadata = await event_storage.get_operation_metadata(operation_id)
 
@@ -445,22 +304,11 @@ async def get_operation_status(
 @router.delete(
   "/operations/{operation_id}",
   summary="Cancel Operation",
-  description="""Cancel a pending or running operation.
-
-Cancels the specified operation if it's still in progress. Once cancelled,
-the operation cannot be resumed and will emit a cancellation event to any
-active SSE connections.
-
-**Note**: Completed or already failed operations cannot be cancelled.
-
-**No credits are consumed for cancellation requests.**""",
+  description="Cancels a pending or running operation. Emits a cancellation event to any active SSE connections. Cannot cancel completed or failed operations.",
   operation_id="cancelOperation",
   responses={
-    200: {"description": "Operation cancelled successfully"},
-    403: {"description": "Access denied to operation"},
-    404: {"description": "Operation not found"},
-    409: {"description": "Operation cannot be cancelled (already completed)"},
-    500: {"description": "Failed to cancel operation"},
+    **RESOURCE_ERROR_RESPONSES,
+    409: {"description": "Operation already completed or failed — cannot cancel"},
   },
 )
 @endpoint_metrics_decorator(
@@ -476,21 +324,7 @@ async def cancel_operation(
   current_user: User = Depends(get_current_user),
   _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
 ) -> dict[str, Any]:
-  """
-  Cancel a pending or running operation.
-
-  Args:
-      operation_id: Unique operation identifier
-      current_user: Authenticated user
-
-  Returns:
-      Dict confirming cancellation
-
-  Raises:
-      HTTPException: For access errors, operation not found, or cannot cancel
-  """
   try:
-    # Get operation metadata
     event_storage = get_event_storage()
     metadata = await event_storage.get_operation_metadata(operation_id)
 

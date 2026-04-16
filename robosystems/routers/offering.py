@@ -1,12 +1,4 @@
-"""
-Service offering API endpoint.
-
-Provides comprehensive information about all subscription offerings:
-- Per-graph infrastructure subscriptions (ladybug-standard, ladybug-large, ladybug-xlarge)
-- Shared repository subscriptions
-- Operation costs and credit information
-- Features and capabilities for each infrastructure tier
-"""
+"""Service offerings endpoint — public subscription and pricing information."""
 
 import logging
 
@@ -21,7 +13,11 @@ from ..config.shared_repositories import (
 )
 from ..middleware.rate_limits import public_api_rate_limit_dependency
 from ..models.api import ServiceOfferingsResponse
-from ..models.api.common import ErrorCode, ErrorResponse, create_error_response
+from ..models.api.common import (
+  COMMON_ERROR_RESPONSES,
+  ErrorCode,
+  create_error_response,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -37,85 +33,13 @@ offering_router = APIRouter(
   "",
   response_model=ServiceOfferingsResponse,
   summary="Get Service Offerings",
-  description="""Get comprehensive information about all subscription offerings.
-
-This endpoint provides complete information about both graph database subscriptions
-and shared repository subscriptions. This is the primary endpoint for frontend
-applications to display subscription options.
-
-**Pricing Model:**
-- Graph subscriptions are **per-graph** with infrastructure-based pricing
-- Each graph you create has its own monthly subscription
-- Organizations can have multiple graphs with different infrastructure tiers
-- Credits are allocated per-graph, not shared across organization
-
-Includes:
-- Graph infrastructure tiers (ladybug-standard, ladybug-large, ladybug-xlarge) - per-graph pricing
-- Shared repository subscriptions - org-level
-- Operation costs and credit information
-- Features and capabilities for each tier
-- Enabled/disabled status for repositories
-
-All data comes from the config-based systems to ensure accuracy with backend behavior.
-
-No authentication required - this is public service information.""",
+  description="Returns all subscription tiers, shared repository plans, and AI credit costs. No authentication required.",
   operation_id="getServiceOfferings",
-  responses={
-    200: {
-      "description": "Complete service offerings retrieved successfully",
-      "content": {
-        "application/json": {
-          "example": {
-            "graph_subscriptions": {
-              "tiers": [
-                {
-                  "name": "ladybug-standard",
-                  "display_name": "LadybugDB Standard",
-                  "monthly_price": 99.00,
-                  "monthly_credits": 8000,
-                  "infrastructure": "Dedicated m7g.large (2 vCPU, 8 GB RAM)",
-                  "features": [
-                    "8,000 AI credits per graph",
-                    "7-day backup retention",
-                    "Priority support",
-                  ],
-                }
-              ]
-            },
-            "repository_subscriptions": {
-              "repositories": [
-                {
-                  "type": "sec",
-                  "name": "SEC Data",
-                  "enabled": True,
-                  "plans": [
-                    {"plan": "starter", "monthly_price": 29, "monthly_credits": 5000}
-                  ],
-                }
-              ]
-            },
-            "operation_costs": {
-              "token_pricing": {
-                "claude_4_sonnet": {
-                  "input_per_1k_tokens": 3,
-                  "output_per_1k_tokens": 15,
-                }
-              },
-            },
-          }
-        }
-      },
-    },
-    500: {
-      "description": "Failed to retrieve service offerings",
-      "model": ErrorResponse,
-    },
-  },
+  responses={**COMMON_ERROR_RESPONSES},
 )
 async def get_service_offerings(
   _rate_limit: None = Depends(public_api_rate_limit_dependency),
 ) -> ServiceOfferingsResponse:
-  """Get comprehensive information about all subscription offerings."""
   try:
     # Get graph subscription information from billing config
     graph_pricing = BillingConfig.get_all_pricing_info()

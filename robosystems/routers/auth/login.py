@@ -16,7 +16,7 @@ from ...middleware.auth.jwt import create_jwt_token
 from ...middleware.otel.metrics import endpoint_metrics_decorator, record_auth_metrics
 from ...middleware.rate_limits import auth_rate_limit_dependency
 from ...models.api.auth import AuthResponse, LoginRequest
-from ...models.api.common import ErrorResponse
+from ...models.api.common import COMMON_ERROR_RESPONSES, ErrorResponse
 
 # Local imports
 from ...models.core import User
@@ -33,13 +33,12 @@ router = APIRouter()
 @router.post(
   "/login",
   response_model=AuthResponse,
-  status_code=status.HTTP_200_OK,
   summary="User Login",
-  description="Authenticate user with email and password.",
+  description="Returns a JWT token on success. IP-based progressive delays apply after repeated failures.",
   operation_id="loginUser",
   responses={
+    **COMMON_ERROR_RESPONSES,
     401: {"model": ErrorResponse, "description": "Invalid credentials"},
-    400: {"model": ErrorResponse, "description": "Invalid request data"},
   },
 )
 @endpoint_metrics_decorator("/v1/auth/login", business_event_type="user_login")
@@ -50,19 +49,6 @@ async def login(
   session: Session = Depends(get_async_db_session),
   rate_limit: None = Depends(auth_rate_limit_dependency),
 ) -> AuthResponse:
-  """
-  Authenticate user with email and password.
-
-  Args:
-      request: Login request with email and password
-      response: FastAPI response object for setting cookies
-
-  Returns:
-      AuthResponse: Success response with user data
-
-  Raises:
-      HTTPException: If credentials are invalid
-  """
   # Validate and sanitize input
   if not validate_email(request.email):
     raise HTTPException(

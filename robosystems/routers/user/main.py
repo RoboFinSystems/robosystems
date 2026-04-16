@@ -17,7 +17,9 @@ from ...middleware.otel.metrics import (
 from ...middleware.rate_limits import user_management_rate_limit_dependency
 from ...middleware.sse import build_email_job_config, run_and_monitor_dagster_job
 from ...models.api.common import (
+  AUTHENTICATED_ERROR_RESPONSES,
   ErrorCode,
+  ErrorResponse,
   create_error_response,
 )
 from ...models.api.user import (
@@ -39,9 +41,8 @@ router = APIRouter(tags=["User"])
   "/user",
   response_model=UserResponse,
   summary="Get Current User",
-  description="Returns information about the currently authenticated user.",
-  status_code=status.HTTP_200_OK,
   operation_id="getCurrentUser",
+  responses={**AUTHENTICATED_ERROR_RESPONSES},
 )
 @endpoint_metrics_decorator(
   endpoint_name="/v1/user", business_event_type="user_info_accessed"
@@ -50,18 +51,6 @@ async def get_current_user_info(
   current_user: User = Depends(get_current_user),
   _rate_limit: None = Depends(user_management_rate_limit_dependency),
 ) -> UserResponse:
-  """
-  Get information about the currently authenticated user.
-
-  Args:
-      current_user: The authenticated user from authentication
-
-  Returns:
-      UserResponse: Response with user information
-
-  Raises:
-      HTTPException: If there's an error retrieving the user information
-  """
   user_id = getattr(current_user, "id", None) if current_user else None
 
   try:
@@ -101,9 +90,11 @@ async def get_current_user_info(
   "/user",
   response_model=UserResponse,
   summary="Update User Profile",
-  description="Update the current user's profile information.",
-  status_code=status.HTTP_200_OK,
   operation_id="updateUser",
+  responses={
+    **AUTHENTICATED_ERROR_RESPONSES,
+    409: {"model": ErrorResponse, "description": "Email already in use"},
+  },
 )
 @endpoint_metrics_decorator(
   endpoint_name="/v1/user", business_event_type="user_profile_updated"
@@ -116,19 +107,6 @@ async def update_user_profile(
   db: Session = Depends(get_db_session),
   _rate_limit: None = Depends(user_management_rate_limit_dependency),
 ) -> UserResponse:
-  """
-  Update the current user's profile information.
-
-  Args:
-      request: The update request with new profile data
-      current_user: The authenticated user from authentication
-
-  Returns:
-      UserResponse: Updated user information
-
-  Raises:
-      HTTPException: If there's an error updating the user or email conflict
-  """
   user_id = getattr(current_user, "id", None) if current_user else None
 
   try:

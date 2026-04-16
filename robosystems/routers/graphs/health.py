@@ -1,8 +1,4 @@
-"""
-Graph database health endpoint.
-
-This module provides REST API endpoints for database health monitoring.
-"""
+"""Graph database health endpoint."""
 
 import asyncio
 
@@ -23,10 +19,10 @@ from robosystems.middleware.robustness import (
   CircuitBreakerManager,
   TimeoutCoordinator,
 )
+from robosystems.models.api.common import RESOURCE_ERROR_RESPONSES
 from robosystems.models.api.graphs.health import DatabaseHealthResponse
 from robosystems.models.core import User
 
-# Create router
 router = APIRouter(tags=["Graph Health"])
 
 # Initialize robustness components
@@ -35,7 +31,6 @@ timeout_coordinator = TimeoutCoordinator()
 
 
 async def _get_graph_client(graph_id: str) -> GraphClient:
-  """Get Graph client for the specified graph using factory for endpoint discovery."""
   from robosystems.config.shared_repositories import is_shared_repository_or_subgraph
   from robosystems.graph_api.client.factory import GraphClientFactory
 
@@ -58,40 +53,8 @@ async def _get_graph_client(graph_id: str) -> GraphClient:
   "/health",
   response_model=DatabaseHealthResponse,
   summary="Database Health Check",
-  description="""Get comprehensive health information for the graph database.
-
-Returns detailed health metrics including:
-- **Connection Status**: Database connectivity and responsiveness
-- **Performance Metrics**: Query execution times and throughput
-- **Resource Usage**: Memory and storage utilization
-- **Error Monitoring**: Recent error rates and patterns
-- **Uptime Statistics**: Service availability metrics
-
-Health indicators:
-- **Status**: healthy, degraded, or unhealthy
-- **Query Performance**: Average execution times
-- **Error Rates**: Recent failure percentages
-- **Resource Usage**: Memory and storage consumption
-- **Alerts**: Active warnings or issues
-
-**Subgraph Support:**
-This endpoint accepts both parent graph IDs and subgraph IDs.
-- Parent graph: Use `graph_id` like `kg0123456789abcdef`
-- Subgraph: Use full subgraph ID like `kg0123456789abcdef_dev`
-Health metrics are specific to the requested graph/subgraph. Subgraphs share the
-same physical instance as their parent but have independent health indicators.
-
-This endpoint provides essential monitoring data for operational visibility.""",
   operation_id="getDatabaseHealth",
-  responses={
-    200: {
-      "description": "Database health retrieved successfully",
-      "model": DatabaseHealthResponse,
-    },
-    403: {"description": "Access denied to graph"},
-    404: {"description": "Graph not found"},
-    500: {"description": "Failed to retrieve health information"},
-  },
+  responses={**RESOURCE_ERROR_RESPONSES},
 )
 @endpoint_metrics_decorator(
   endpoint_name="/v1/graphs/{graph_id}/health",
@@ -107,21 +70,6 @@ async def get_database_health(
   session: Session = Depends(get_async_db_session),
   _: None = Depends(subscription_aware_rate_limit_dependency),
 ) -> DatabaseHealthResponse:
-  """
-  Get comprehensive health information for the graph database.
-
-  This endpoint provides real-time health metrics and status information
-  for operational monitoring and troubleshooting.
-
-  Args:
-      graph_id: Graph database identifier
-      current_user: Authenticated user
-      session: Database session
-
-  Returns:
-      DatabaseHealthResponse with comprehensive health metrics
-  """
-  # Check circuit breaker
   circuit_breaker.check_circuit(graph_id, "database_health")
 
   try:

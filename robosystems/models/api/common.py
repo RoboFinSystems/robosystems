@@ -182,6 +182,44 @@ def create_pagination_info(total: int, limit: int, offset: int) -> PaginationInf
   )
 
 
+# Shared OpenAPI response dicts for consistent Swagger documentation.
+#
+# Use by spreading into a per-endpoint `responses=` kwarg:
+#
+#   responses={**RESOURCE_ERROR_RESPONSES, 200: {"model": MyResponse}}
+#
+# Levels are additive — pick the narrowest one that fits the endpoint:
+#   COMMON           → 400, 429, 500 (any endpoint; covers unauthenticated)
+#   AUTHENTICATED    → COMMON + 401, 403 (any endpoint behind auth)
+#   RESOURCE         → AUTHENTICATED + 404 (endpoint resolves a specific resource)
+#   OPERATION        → RESOURCE + 409 (CQRS operations with idempotency-key conflict)
+
+COMMON_ERROR_RESPONSES: dict[int | str, dict[str, Any]] = {
+  400: {"model": ErrorResponse, "description": "Invalid request"},
+  429: {"model": ErrorResponse, "description": "Rate limit exceeded"},
+  500: {"model": ErrorResponse, "description": "Internal server error"},
+}
+
+AUTHENTICATED_ERROR_RESPONSES: dict[int | str, dict[str, Any]] = {
+  **COMMON_ERROR_RESPONSES,
+  401: {"model": ErrorResponse, "description": "Authentication required"},
+  403: {"model": ErrorResponse, "description": "Access denied"},
+}
+
+RESOURCE_ERROR_RESPONSES: dict[int | str, dict[str, Any]] = {
+  **AUTHENTICATED_ERROR_RESPONSES,
+  404: {"model": ErrorResponse, "description": "Resource not found"},
+}
+
+OPERATION_ERROR_RESPONSES: dict[int | str, dict[str, Any]] = {
+  **RESOURCE_ERROR_RESPONSES,
+  409: {
+    "model": ErrorResponse,
+    "description": "Idempotency-Key conflict — key reused with different body",
+  },
+}
+
+
 # Common error codes for consistency
 class ErrorCode:
   """Standard error codes for common scenarios."""

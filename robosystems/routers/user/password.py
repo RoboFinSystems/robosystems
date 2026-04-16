@@ -15,8 +15,8 @@ from ...middleware.otel.metrics import (
 )
 from ...middleware.rate_limits import user_management_rate_limit_dependency
 from ...models.api.common import (
+  AUTHENTICATED_ERROR_RESPONSES,
   ErrorCode,
-  ErrorResponse,
   SuccessResponse,
   create_error_response,
 )
@@ -31,18 +31,9 @@ router = APIRouter(tags=["User"])
   "/user/password",
   response_model=SuccessResponse,
   summary="Update Password",
-  description="Update the current user's password.",
-  status_code=status.HTTP_200_OK,
+  description="Requires current password verification. Not available for SSO-only accounts.",
   operation_id="updateUserPassword",
-  responses={
-    200: {"description": "Password updated successfully", "model": SuccessResponse},
-    400: {
-      "description": "Invalid password or validation error",
-      "model": ErrorResponse,
-    },
-    404: {"description": "User not found", "model": ErrorResponse},
-    500: {"description": "Error updating password", "model": ErrorResponse},
-  },
+  responses={**AUTHENTICATED_ERROR_RESPONSES},
 )
 @endpoint_metrics_decorator(
   endpoint_name="/v1/user/password", business_event_type="password_updated"
@@ -53,19 +44,6 @@ async def update_user_password(
   db: Session = Depends(get_db_session),
   _rate_limit: None = Depends(user_management_rate_limit_dependency),
 ):
-  """
-  Update the current user's password.
-
-  Args:
-      request: The password update request
-      current_user: The authenticated user from authentication
-
-  Returns:
-      Success message
-
-  Raises:
-      HTTPException: If current password is wrong or passwords don't match
-  """
   user_id = getattr(current_user, "id", None) if current_user else None
 
   try:

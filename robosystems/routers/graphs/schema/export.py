@@ -12,6 +12,7 @@ from robosystems.middleware.auth.dependencies import get_current_user_with_graph
 from robosystems.middleware.rate_limits import (
   subscription_aware_rate_limit_dependency,
 )
+from robosystems.models.api.common import RESOURCE_ERROR_RESPONSES
 from robosystems.models.api.graphs.schema import SchemaExportResponse
 from robosystems.models.core import User
 
@@ -23,63 +24,8 @@ router = APIRouter()
   response_model=SchemaExportResponse,
   operation_id="exportGraphSchema",
   summary="Export Declared Graph Schema",
-  description="""Export the declared schema definition of an existing graph.
-
-## What This Returns
-
-This endpoint returns the **original schema definition** that was used to create the graph:
-- The schema as it was **declared** during graph creation
-- Complete node and relationship definitions
-- Property types and constraints
-- Schema metadata (name, version, type)
-
-## Runtime vs Declared Schema
-
-**Use this endpoint** (`/schema/export`) when you need:
-- The original schema definition used to create the graph
-- Schema in a specific format (JSON, YAML, Cypher DDL)
-- Schema for documentation or version control
-- Schema to replicate in another graph
-
-**Use `/schema` instead** when you need:
-- What data is ACTUALLY in the database right now
-- What properties exist on real nodes (discovered from data)
-- Current runtime database structure for querying
-
-## Export Formats
-
-### JSON Format (`format=json`)
-Returns structured JSON with nodes, relationships, and properties.
-Best for programmatic access and API integration.
-
-### YAML Format (`format=yaml`)
-Returns human-readable YAML with comments.
-Best for documentation and configuration management.
-
-### Cypher DDL Format (`format=cypher`)
-Returns Cypher CREATE statements for recreating the schema.
-Best for database migration and replication.
-
-## Data Statistics
-
-Set `include_data_stats=true` to include:
-- Node counts by label
-- Relationship counts by type
-- Total nodes and relationships
-
-This combines declared schema with runtime statistics.
-
-This operation is included - no credit consumption required.""",
-  status_code=status.HTTP_200_OK,
-  responses={
-    200: {
-      "description": "Schema exported successfully",
-      "model": SchemaExportResponse,
-    },
-    403: {"description": "Access denied to graph"},
-    404: {"description": "Schema not found for graph"},
-    500: {"description": "Failed to export schema"},
-  },
+  description="Returns the original schema definition from graph creation, not the runtime state. Set `include_data_stats=true` to add live node/relationship counts. Use `/schema` to inspect what's actually in the database.",
+  responses={**RESOURCE_ERROR_RESPONSES},
 )
 async def export_graph_schema(
   request: Request,
@@ -130,12 +76,6 @@ async def export_graph_schema(
   _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
   db: Session = Depends(get_db_session),
 ):
-  """
-  Export the schema of an existing graph.
-
-  This endpoint retrieves the schema definition from a graph and exports it
-  in the requested format (JSON, YAML, or Cypher DDL).
-  """
   # Enforce graph lifecycle and subscription status (read operation)
   from robosystems.middleware.billing.enforcement import require_graph_access
 

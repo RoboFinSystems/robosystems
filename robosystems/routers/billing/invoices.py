@@ -15,6 +15,7 @@ from ...models.api.billing.invoice import (
   InvoicesResponse,
   UpcomingInvoice,
 )
+from ...models.api.common import RESOURCE_ERROR_RESPONSES
 from ...models.core import User
 from ...models.core.billing import BillingCustomer, BillingInvoice
 from ...operations.providers.payment_provider import get_payment_provider
@@ -28,14 +29,9 @@ router = APIRouter(prefix="/billing/invoices", tags=["Billing"])
   "/{org_id}",
   response_model=InvoicesResponse,
   summary="List Organization Invoices",
-  description="""List payment history and invoices for an organization.
-
-Returns past invoices with payment status, amounts, and line items.
-
-**Requirements:**
-- User must be a member of the organization
-- Full invoice details are only visible to owners and admins""",
+  description="Requires admin or owner role.",
   operation_id="listOrgInvoices",
+  responses={**RESOURCE_ERROR_RESPONSES},
 )
 async def list_invoices(
   org_id: str,
@@ -44,7 +40,6 @@ async def list_invoices(
   db: Session = Depends(get_db_session),
   _rate_limit: None = Depends(billing_rate_limit_dependency),
 ):
-  """List invoices for the organization."""
   try:
     from ...models.core import OrgRole, OrgUser
 
@@ -122,14 +117,9 @@ async def list_invoices(
   "/{org_id}/upcoming",
   response_model=UpcomingInvoice | None,
   summary="Get Organization Upcoming Invoice",
-  description="""Get preview of the next invoice for an organization.
-
-Returns estimated charges for the next billing period.
-
-**Requirements:**
-- User must be a member of the organization
-- Full invoice details are only visible to owners and admins""",
+  description="Requires admin or owner role. Returns null if no billing activity yet.",
   operation_id="getOrgUpcomingInvoice",
+  responses={**RESOURCE_ERROR_RESPONSES},
 )
 async def get_upcoming_invoice(
   org_id: str,
@@ -137,7 +127,6 @@ async def get_upcoming_invoice(
   db: Session = Depends(get_db_session),
   _rate_limit: None = Depends(billing_rate_limit_dependency),
 ):
-  """Get upcoming invoice preview for organization."""
   try:
     from ...models.core import OrgRole, OrgUser
 

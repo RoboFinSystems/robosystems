@@ -5,13 +5,13 @@ from fastapi import (
   Depends,
   Request,
   Response,
-  status,
 )
 
 from ...logger import logger
 from ...middleware.auth.cache import api_key_cache
 from ...middleware.auth.jwt import revoke_jwt_token
 from ...middleware.rate_limits import logout_rate_limit_dependency
+from ...models.api.common import COMMON_ERROR_RESPONSES
 
 # Create router for logout endpoint
 router = APIRouter()
@@ -19,22 +19,15 @@ router = APIRouter()
 
 @router.post(
   "/logout",
-  status_code=status.HTTP_200_OK,
   summary="User Logout",
-  description="Logout user and invalidate session.",
   operation_id="logoutUser",
+  responses={**COMMON_ERROR_RESPONSES},
 )
 async def logout(
   request: Request,
   response: Response,
   _rate_limit: None = Depends(logout_rate_limit_dependency),
 ) -> dict:
-  """
-  Logout user and invalidate JWT token.
-
-  Returns:
-      Success message
-  """
   try:
     # Extract JWT token from Authorization header (doesn't show in OpenAPI params)
     authorization = request.headers.get("authorization")

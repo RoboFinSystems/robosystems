@@ -10,6 +10,7 @@ from starlette import status as http_status
 
 from robosystems.database import SessionFactory
 from robosystems.middleware.auth.dependencies import get_current_user_with_graph
+from robosystems.models.api.common import RESOURCE_ERROR_RESPONSES
 from robosystems.models.api.search import (
   BulkDocumentUploadRequest,
   BulkDocumentUploadResponse,
@@ -106,13 +107,17 @@ def _document_to_detail(doc: Document) -> DocumentDetailResponse:
   )
 
 
-@router.get("", operation_id="list_documents")
+@router.get(
+  "",
+  summary="List Documents",
+  operation_id="list_documents",
+  responses={**RESOURCE_ERROR_RESPONSES},
+)
 async def list_documents(
   graph_id: str,
   source_type: str | None = None,
   current_user: User = Depends(get_current_user_with_graph),
 ) -> DocumentListResponse:
-  """List documents for a graph from PostgreSQL."""
   _block_shared_repository(graph_id)
   _enforce_graph_access(graph_id)
   session = SessionFactory()
@@ -128,13 +133,17 @@ async def list_documents(
     session.close()
 
 
-@router.get("/{document_id}", operation_id="get_document")
+@router.get(
+  "/{document_id}",
+  summary="Get Document",
+  operation_id="get_document",
+  responses={**RESOURCE_ERROR_RESPONSES},
+)
 async def get_document(
   graph_id: str,
   document_id: str,
   current_user: User = Depends(get_current_user_with_graph),
 ) -> DocumentDetailResponse:
-  """Get a document with full content from PostgreSQL."""
   _block_shared_repository(graph_id)
   _enforce_graph_access(graph_id)
   session = SessionFactory()
@@ -148,13 +157,18 @@ async def get_document(
     session.close()
 
 
-@router.post("", operation_id="upload_document")
+@router.post(
+  "",
+  summary="Upload Document",
+  description="Stored in PostgreSQL, synced to OpenSearch for search. Not allowed on shared repositories.",
+  operation_id="upload_document",
+  responses={**RESOURCE_ERROR_RESPONSES},
+)
 async def upload_document(
   graph_id: str,
   request: DocumentUploadRequest,
   current_user: User = Depends(get_current_user_with_graph),
 ) -> DocumentUploadResponse:
-  """Upload a markdown document. Stored in PostgreSQL, synced to OpenSearch."""
   _block_shared_repository(graph_id)
   _enforce_graph_access(graph_id, require_write=True)
   session = SessionFactory()
@@ -177,13 +191,18 @@ async def upload_document(
     session.close()
 
 
-@router.post("/bulk", operation_id="upload_documents_bulk")
+@router.post(
+  "/bulk",
+  summary="Bulk Upload Documents",
+  description="Upload up to 50 documents at once. Partial success is supported — check the errors array in the response.",
+  operation_id="upload_documents_bulk",
+  responses={**RESOURCE_ERROR_RESPONSES},
+)
 async def upload_documents_bulk(
   graph_id: str,
   request: BulkDocumentUploadRequest,
   current_user: User = Depends(get_current_user_with_graph),
 ) -> BulkDocumentUploadResponse:
-  """Upload multiple markdown documents (max 50)."""
   _block_shared_repository(graph_id)
   _enforce_graph_access(graph_id, require_write=True)
   session = SessionFactory()
@@ -215,14 +234,19 @@ async def upload_documents_bulk(
     session.close()
 
 
-@router.put("/{document_id}", operation_id="update_document")
+@router.put(
+  "/{document_id}",
+  summary="Update Document",
+  description="Updates content and/or metadata. Re-syncs to OpenSearch.",
+  operation_id="update_document",
+  responses={**RESOURCE_ERROR_RESPONSES},
+)
 async def update_document(
   graph_id: str,
   document_id: str,
   request: DocumentUpdateRequest,
   current_user: User = Depends(get_current_user_with_graph),
 ) -> DocumentUploadResponse:
-  """Update a document's content and/or metadata. Re-syncs to OpenSearch."""
   _block_shared_repository(graph_id)
   _enforce_graph_access(graph_id, require_write=True)
   session = SessionFactory()
@@ -257,15 +281,16 @@ async def update_document(
 
 @router.delete(
   "/{document_id}",
+  summary="Delete Document",
   operation_id="delete_document",
   status_code=http_status.HTTP_204_NO_CONTENT,
+  responses={**RESOURCE_ERROR_RESPONSES},
 )
 async def delete_document(
   graph_id: str,
   document_id: str,
   current_user: User = Depends(get_current_user_with_graph),
 ) -> None:
-  """Delete a document from PostgreSQL and OpenSearch."""
   _block_shared_repository(graph_id)
   _enforce_graph_access(graph_id, require_write=True)
   session = SessionFactory()

@@ -12,6 +12,7 @@ from ...models.api.billing.customer import (
   PaymentMethod,
   PortalSessionResponse,
 )
+from ...models.api.common import RESOURCE_ERROR_RESPONSES
 from ...models.core import User
 from ...models.core.billing import BillingCustomer as BillingCustomerModel
 from ...operations.providers.payment_provider import get_payment_provider
@@ -25,14 +26,9 @@ router = APIRouter(prefix="/billing/customer", tags=["Billing"])
   "/{org_id}",
   response_model=BillingCustomer,
   summary="Get Organization Customer Info",
-  description="""Get billing customer information for an organization including payment methods on file.
-
-Returns customer details, payment methods, and whether invoice billing is enabled.
-
-**Requirements:**
-- User must be a member of the organization
-- Sensitive payment details are only visible to owners""",
+  description="Payment method details are only visible to org owners.",
   operation_id="getOrgBillingCustomer",
+  responses={**RESOURCE_ERROR_RESPONSES},
 )
 async def get_customer(
   org_id: str,
@@ -40,7 +36,6 @@ async def get_customer(
   db: Session = Depends(get_db_session),
   _rate_limit: None = Depends(billing_rate_limit_dependency),
 ):
-  """Get billing customer information for an organization."""
   try:
     from ...models.core import OrgRole, OrgUser
 
@@ -103,20 +98,9 @@ async def get_customer(
   "/{org_id}/portal",
   response_model=PortalSessionResponse,
   summary="Create Customer Portal Session",
-  description="""Create a Stripe Customer Portal session for managing payment methods.
-
-The portal allows users to:
-- Add new payment methods
-- Remove existing payment methods
-- Update default payment method
-- View billing history
-
-The user will be redirected to Stripe's hosted portal page and returned to the billing page when done.
-
-**Requirements:**
-- User must be an OWNER of the organization
-- Organization must have a Stripe customer ID (i.e., has gone through checkout at least once)""",
+  description="Returns a Stripe Customer Portal URL for managing payment methods and billing history. Requires org owner role.",
   operation_id="createPortalSession",
+  responses={**RESOURCE_ERROR_RESPONSES},
 )
 async def create_portal_session(
   org_id: str,
@@ -124,7 +108,6 @@ async def create_portal_session(
   db: Session = Depends(get_db_session),
   _rate_limit: None = Depends(billing_rate_limit_dependency),
 ):
-  """Create Stripe Customer Portal session for payment management."""
   try:
     from ...config import env
     from ...models.core import OrgRole, OrgUser

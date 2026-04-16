@@ -37,7 +37,7 @@ from ...models.api.auth import (
   SSOExchangeResponse,
   SSOTokenResponse,
 )
-from ...models.api.common import ErrorResponse
+from ...models.api.common import COMMON_ERROR_RESPONSES
 from ...models.core import User
 from ...security import SecurityAuditLogger, SecurityEventType
 from .utils import (
@@ -54,13 +54,10 @@ router = APIRouter()
 @router.post(
   "/sso-token",
   response_model=SSOTokenResponse,
-  status_code=status.HTTP_200_OK,
   summary="Generate SSO Token",
-  description="Generate a temporary SSO token for cross-app authentication.",
+  description="Step 1 of 3 in the cross-app SSO flow. Issues a single-use token (60s TTL) for handoff to a target application.",
   operation_id="generateSSOToken",
-  responses={
-    401: {"model": ErrorResponse, "description": "Not authenticated"},
-  },
+  responses={**COMMON_ERROR_RESPONSES},
 )
 async def generate_sso_token(
   request: Request,
@@ -68,18 +65,6 @@ async def generate_sso_token(
   session: Session = Depends(get_async_db_session),
   _rate_limit: None = Depends(sso_rate_limit_dependency),
 ) -> SSOTokenResponse:
-  """
-  Generate a temporary SSO token for cross-app authentication.
-
-  Args:
-      auth_token: JWT auth token from HTTP-only cookie (deprecated, for backward compatibility)
-
-  Returns:
-      SSOTokenResponse: Temporary token for cross-app authentication
-
-  Raises:
-      HTTPException: If not authenticated or token is invalid
-  """
   try:
     # Extract JWT token from Authorization header (doesn't show in OpenAPI params) or fall back to cookie
     authorization = request.headers.get("authorization")
@@ -196,36 +181,16 @@ async def generate_sso_token(
 @router.post(
   "/sso-exchange",
   response_model=SSOExchangeResponse,
-  status_code=status.HTTP_200_OK,
   summary="SSO Token Exchange",
-  description="Exchange SSO token for secure session handoff to target application.",
+  description="Step 2 of 3. Exchanges the SSO token for a short-lived session ID. Avoids passing tokens in redirect URLs.",
   operation_id="ssoTokenExchange",
-  responses={
-    401: {"model": ErrorResponse, "description": "Invalid SSO token"},
-    400: {"model": ErrorResponse, "description": "Invalid request data"},
-  },
+  responses={**COMMON_ERROR_RESPONSES},
 )
 async def sso_token_exchange(
   request: SSOExchangeRequest,
   session: Session = Depends(get_async_db_session),
   _rate_limit: None = Depends(sso_rate_limit_dependency),
 ) -> SSOExchangeResponse:
-  """
-  Exchange SSO token for secure session handoff.
-
-  This endpoint provides a more secure alternative to URL-based token passing.
-  It exchanges a short-lived SSO token for an even shorter session ID that
-  can be used in a POST-based authentication flow.
-
-  Args:
-      request: SSO exchange request with token and target app
-
-  Returns:
-      SSOExchangeResponse: Session ID and redirect URL for secure handoff
-
-  Raises:
-      HTTPException: If SSO token is invalid or target app is unknown
-  """
   try:
     # Validate token structure
     if not request.token or not isinstance(request.token, str):
@@ -482,13 +447,10 @@ async def sso_token_exchange(
 @router.post(
   "/sso-complete",
   response_model=AuthResponse,
-  status_code=status.HTTP_200_OK,
   summary="Complete SSO Authentication",
-  description="Complete SSO authentication using session ID from secure handoff.",
+  description="Step 3 of 3. Exchanges the session ID for a full JWT token. Called by the target app after redirect.",
   operation_id="completeSSOAuth",
-  responses={
-    401: {"model": ErrorResponse, "description": "Invalid session"},
-  },
+  responses={**COMMON_ERROR_RESPONSES},
 )
 async def sso_complete(
   request: SSOCompleteRequest,
@@ -496,23 +458,6 @@ async def sso_complete(
   session: Session = Depends(get_async_db_session),
   _rate_limit: None = Depends(sso_rate_limit_dependency),
 ) -> AuthResponse:
-  """
-  Complete SSO authentication using session ID.
-
-  This endpoint completes the secure SSO handoff by exchanging a session ID
-  for a full authentication session. It's designed to be called via POST
-  from the frontend after receiving a session ID from sso-exchange.
-
-  Args:
-      session_id: Temporary session ID from secure handoff
-      response: FastAPI response object for setting cookies
-
-  Returns:
-      AuthResponse: Success response with user data
-
-  Raises:
-      HTTPException: If session is invalid or expired
-  """
   try:
     session_id = request.session_id
 

@@ -36,6 +36,7 @@ from robosystems.middleware.operations import (
 )
 from robosystems.middleware.otel.metrics import endpoint_metrics_decorator
 from robosystems.middleware.rate_limits import subscription_aware_rate_limit_dependency
+from robosystems.models.api.common import OPERATION_ERROR_RESPONSES
 from robosystems.models.api.extensions.investor import (
   CreatePortfolioRequest,
   CreatePositionRequest,
@@ -186,6 +187,7 @@ async def _dispatch(
   summary="Create Portfolio",
   tags=[_OP_TAG],
   dependencies=[_RATE_LIMIT],
+  responses={**OPERATION_ERROR_RESPONSES},
 )
 @endpoint_metrics_decorator(
   "/extensions/roboinvestor/{graph_id}/operations/create-portfolio",
@@ -224,6 +226,7 @@ async def create_portfolio_op(
   summary="Update Portfolio",
   tags=[_OP_TAG],
   dependencies=[_RATE_LIMIT],
+  responses={**OPERATION_ERROR_RESPONSES},
 )
 @endpoint_metrics_decorator(
   "/extensions/roboinvestor/{graph_id}/operations/update-portfolio",
@@ -264,8 +267,10 @@ async def update_portfolio_op(
   response_model=OperationEnvelope,
   operation_id="opDeletePortfolio",
   summary="Delete Portfolio",
+  description="Returns 409 if the portfolio has active positions — dispose them first.",
   tags=[_OP_TAG],
   dependencies=[_RATE_LIMIT],
+  responses={**OPERATION_ERROR_RESPONSES},
 )
 @endpoint_metrics_decorator(
   "/extensions/roboinvestor/{graph_id}/operations/delete-portfolio",
@@ -318,6 +323,7 @@ async def delete_portfolio_op(
   summary="Create Security",
   tags=[_OP_TAG],
   dependencies=[_RATE_LIMIT],
+  responses={**OPERATION_ERROR_RESPONSES},
 )
 @endpoint_metrics_decorator(
   "/extensions/roboinvestor/{graph_id}/operations/create-security",
@@ -359,6 +365,7 @@ async def create_security_op(
   summary="Update Security",
   tags=[_OP_TAG],
   dependencies=[_RATE_LIMIT],
+  responses={**OPERATION_ERROR_RESPONSES},
 )
 @endpoint_metrics_decorator(
   "/extensions/roboinvestor/{graph_id}/operations/update-security",
@@ -399,8 +406,10 @@ async def update_security_op(
   response_model=OperationEnvelope,
   operation_id="opDeleteSecurity",
   summary="Delete Security",
+  description="Soft-deletes the security (`is_active=false`). Historical positions referencing it remain valid.",
   tags=[_OP_TAG],
   dependencies=[_RATE_LIMIT],
+  responses={**OPERATION_ERROR_RESPONSES},
 )
 @endpoint_metrics_decorator(
   "/extensions/roboinvestor/{graph_id}/operations/delete-security",
@@ -445,8 +454,10 @@ async def delete_security_op(
   response_model=OperationEnvelope,
   operation_id="opCreatePosition",
   summary="Create Position",
+  description="Returns 409 if an active position for this security already exists in the portfolio.",
   tags=[_OP_TAG],
   dependencies=[_RATE_LIMIT],
+  responses={**OPERATION_ERROR_RESPONSES},
 )
 @endpoint_metrics_decorator(
   "/extensions/roboinvestor/{graph_id}/operations/create-position",
@@ -492,6 +503,7 @@ async def create_position_op(
   summary="Update Position",
   tags=[_OP_TAG],
   dependencies=[_RATE_LIMIT],
+  responses={**OPERATION_ERROR_RESPONSES},
 )
 @endpoint_metrics_decorator(
   "/extensions/roboinvestor/{graph_id}/operations/update-position",
@@ -532,8 +544,10 @@ async def update_position_op(
   response_model=OperationEnvelope,
   operation_id="opDeletePosition",
   summary="Delete Position",
+  description="Soft-deletes the position (`is_active=false`). Historical holding records referencing it remain valid.",
   tags=[_OP_TAG],
   dependencies=[_RATE_LIMIT],
+  responses={**OPERATION_ERROR_RESPONSES},
 )
 @endpoint_metrics_decorator(
   "/extensions/roboinvestor/{graph_id}/operations/delete-position",

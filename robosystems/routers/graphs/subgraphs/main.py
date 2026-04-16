@@ -17,6 +17,7 @@ from robosystems.logger import api_logger, log_metric, logger
 from robosystems.middleware.auth.dependencies import get_current_user_with_graph
 from robosystems.middleware.graph.types import GRAPH_ID_PATTERN
 from robosystems.middleware.otel.metrics import endpoint_metrics_decorator
+from robosystems.models.api.common import RESOURCE_ERROR_RESPONSES
 from robosystems.models.api.graphs.subgraphs import (
   CreateSubgraphRequest,
   ListSubgraphsResponse,
@@ -44,11 +45,7 @@ router = APIRouter()
 
 
 async def get_database_size_mb(graph_id: str) -> float | None:
-  """Get the size of a database in MB from Graph API metrics.
-
-  Returns None if size cannot be determined. This is expected for some graphs
-  and the function gracefully handles errors without failing the listing operation.
-  """
+  """Returns None if Graph API has no size data — expected for empty or new databases."""
   try:
     from robosystems.graph_api.client.factory import GraphClientFactory
 
@@ -75,18 +72,7 @@ async def get_database_size_mb(graph_id: str) -> float | None:
   response_model=ListSubgraphsResponse,
   operation_id="listSubgraphs",
   summary="List Subgraphs",
-  description="""List all subgraphs for a parent graph.
-
-**Requirements:**
-- Valid authentication
-- Parent graph must exist and be accessible to the user
-- User must have at least 'read' permission on the parent graph
-
-**Returns:**
-- List of all subgraphs for the parent graph
-- Each subgraph includes its ID, name, description, type, status, and creation date
-""",
-  status_code=status.HTTP_200_OK,
+  responses={**RESOURCE_ERROR_RESPONSES},
 )
 @endpoint_metrics_decorator(
   endpoint_name="/v1/graphs/{graph_id}/subgraphs",
@@ -101,7 +87,6 @@ async def list_subgraphs(
   current_user: User = Depends(get_current_user_with_graph),
   db: Session = Depends(get_async_db_session),
 ) -> ListSubgraphsResponse:
-  """List all subgraphs for a parent graph."""
   operation_start_time = record_operation_start()
 
   try:
@@ -251,10 +236,6 @@ async def create_subgraph(
   current_user: User,
   db: Session,
 ):
-  """Create a new subgraph within a parent graph.
-
-  Not registered as a route — used by the graph operations router.
-  """
   from robosystems.config import env
 
   operation_start_time = record_operation_start()

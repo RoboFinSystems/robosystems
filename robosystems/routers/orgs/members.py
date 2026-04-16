@@ -8,6 +8,10 @@ from ...database import get_db_session
 from ...logger import get_logger
 from ...middleware.auth.dependencies import get_current_user
 from ...middleware.rate_limits import general_api_rate_limit_dependency
+from ...models.api.common import (
+  RESOURCE_ERROR_RESPONSES,
+  ErrorResponse,
+)
 from ...models.api.orgs import (
   InviteMemberRequest,
   OrgMemberListResponse,
@@ -26,8 +30,8 @@ router = APIRouter(tags=["Org Members"])
   "/orgs/{org_id}/members",
   response_model=OrgMemberListResponse,
   summary="List Organization Members",
-  description="Get all members of an organization with their roles.",
   operation_id="listOrgMembers",
+  responses={**RESOURCE_ERROR_RESPONSES},
 )
 async def list_org_members(
   org_id: str,
@@ -35,7 +39,6 @@ async def list_org_members(
   db: Session = Depends(get_db_session),
   _rate_limit: None = Depends(general_api_rate_limit_dependency),
 ) -> OrgMemberListResponse:
-  """List all members of an organization."""
   try:
     # Check if user is a member of the org
     membership = OrgUser.get_by_org_and_user(org_id, current_user.id, db)
@@ -83,11 +86,12 @@ async def list_org_members(
   response_model=OrgMemberResponse,
   status_code=status.HTTP_201_CREATED,
   summary="Invite Member",
-  description="""Invite a user to join the organization. Requires admin or owner role.
-
-  **⚠️ FEATURE NOT READY**: This endpoint is disabled by default (ORG_MEMBER_INVITATIONS_ENABLED=false).
-  Returns 501 NOT IMPLEMENTED when disabled. See endpoint implementation for TODO list before enabling.""",
+  description="Disabled by default (ORG_MEMBER_INVITATIONS_ENABLED=false). Returns 501 when disabled. Requires admin or owner role.",
   operation_id="inviteOrgMember",
+  responses={
+    **RESOURCE_ERROR_RESPONSES,
+    501: {"model": ErrorResponse, "description": "Feature not enabled"},
+  },
 )
 async def invite_member(
   org_id: str,
@@ -96,17 +100,6 @@ async def invite_member(
   db: Session = Depends(get_db_session),
   _rate_limit: None = Depends(general_api_rate_limit_dependency),
 ) -> OrgMemberResponse:
-  """Invite a member to the organization.
-
-  WARNING: This feature is incomplete and disabled by default (ORG_MEMBER_INVITATIONS_ENABLED=false).
-
-  TODO before enabling:
-  - Implement email invitation system with secure token-based activation
-  - Add invitation expiration (e.g., 7 days)
-  - Add cleanup job for expired/abandoned invitations
-  - Consider whether to support inviting existing users vs current "new users only" model
-  - Add invitation tracking/audit logging
-  """
   if not env.ORG_MEMBER_INVITATIONS_ENABLED:
     raise HTTPException(
       status_code=status.HTTP_501_NOT_IMPLEMENTED,
@@ -215,8 +208,9 @@ async def invite_member(
   "/orgs/{org_id}/members/{user_id}",
   response_model=OrgMemberResponse,
   summary="Update Member Role",
-  description="Update a member's role in the organization. Requires admin or owner role.",
+  description="Requires admin or owner role. Owner promotion/demotion requires a dedicated ownership transfer workflow.",
   operation_id="updateOrgMemberRole",
+  responses={**RESOURCE_ERROR_RESPONSES},
 )
 async def update_member_role(
   org_id: str,
@@ -226,7 +220,6 @@ async def update_member_role(
   db: Session = Depends(get_db_session),
   _rate_limit: None = Depends(general_api_rate_limit_dependency),
 ) -> OrgMemberResponse:
-  """Update a member's role in the organization."""
   try:
     # Check if current user is an admin or owner of the org
     membership = OrgUser.get_by_org_and_user(org_id, current_user.id, db)
@@ -329,8 +322,9 @@ async def update_member_role(
   "/orgs/{org_id}/members/{user_id}",
   status_code=status.HTTP_204_NO_CONTENT,
   summary="Remove Member",
-  description="Remove a member from the organization. Requires admin or owner role.",
+  description="Requires admin or owner role. Members may remove themselves.",
   operation_id="removeOrgMember",
+  responses={**RESOURCE_ERROR_RESPONSES},
 )
 async def remove_member(
   org_id: str,
@@ -339,7 +333,6 @@ async def remove_member(
   db: Session = Depends(get_db_session),
   _rate_limit: None = Depends(general_api_rate_limit_dependency),
 ):
-  """Remove a member from the organization."""
   try:
     # Check if current user is an admin or owner of the org
     membership = OrgUser.get_by_org_and_user(org_id, current_user.id, db)
