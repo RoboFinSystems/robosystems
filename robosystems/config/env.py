@@ -638,33 +638,14 @@ class EnvConfig:
   # the extensions PostgreSQL connection without at least one domain
   # enabled, so it's not a separate user-facing flag.
   #
-  # Backward-compat: the legacy `LEDGER_ENABLED` / `INVESTOR_ENABLED` /
-  # `EXTENSIONS_ENABLED` env names are still honored as fallbacks during
-  # the migration to the prefixed names. Remove the fallbacks once SSM
-  # parameters and GitHub Actions variables have been renamed.
-
   ROBOLEDGER_ENABLED = get_bool_env(
     "ROBOLEDGER_ENABLED",
-    get_bool_env(
-      "LEDGER_ENABLED",
-      get_parameter_value(
-        "ROBOLEDGER_ENABLED",
-        get_parameter_value("LEDGER_ENABLED", "false"),
-      ).lower()
-      == "true",
-    ),
+    get_parameter_value("ROBOLEDGER_ENABLED", "false").lower() == "true",
   )
 
   ROBOINVESTOR_ENABLED = get_bool_env(
     "ROBOINVESTOR_ENABLED",
-    get_bool_env(
-      "INVESTOR_ENABLED",
-      get_parameter_value(
-        "ROBOINVESTOR_ENABLED",
-        get_parameter_value("INVESTOR_ENABLED", "false"),
-      ).lower()
-      == "true",
-    ),
+    get_parameter_value("ROBOINVESTOR_ENABLED", "false").lower() == "true",
   )
 
   # --- Extensions GraphQL Endpoint ---
