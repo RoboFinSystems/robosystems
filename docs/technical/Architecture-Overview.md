@@ -78,6 +78,19 @@ Feature flags (`ROBOLEDGER_ENABLED`, `ROBOINVESTOR_ENABLED`, `EXTENSIONS_GRAPHQL
 
 **See**: [GraphQL Extensions Documentation](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/graphql/README.md) in codebase
 
+**Graph Lifecycle Operations (CQRS command surface):**
+
+Graph lifecycle writes use the same `OperationEnvelope` / idempotency / audit infrastructure as the extensions surface, exposed at `POST /v1/graphs/{graph_id}/operations/{op_name}`:
+
+- **create-subgraph** — Initialize a subgraph with optional fork of parent data (sync without fork, async with fork)
+- **delete-subgraph** — Remove a subgraph database with optional pre-delete backup
+- **create-backup** — Encrypted backup with configurable format and retention (async, returns pending envelope)
+- **restore-backup** — Restore from backup; blocked for entity graphs (OLTP is source of truth — use `materialize` instead)
+- **upgrade-tier** — Change graph infrastructure tier with Stripe billing integration (async)
+- **materialize** — Ingest DuckDB-staged tables into the graph, direct or Dagster-orchestrated (async)
+
+Reads remain as REST GETs at their existing paths (`GET /v1/graphs/{g}/subgraphs`, `GET /v1/graphs/{g}/backups`, `GET /v1/graphs/{g}/health`, etc.). The shared dispatch infrastructure lives in `middleware/operations.py`; the extensions registrar (`middleware/extensions.py`) imports from it so both surfaces share idempotency, audit, and envelope semantics.
+
 ### MCP Server
 
 **Server Location**: `/robosystems/routers/graphs/mcp/`
