@@ -51,6 +51,14 @@ MAIN_API_TAGS = [
     "description": "⚙️ Graph lifecycle — Commands for subgraphs, backups, tier changes, materialization",
   },
   {
+    "name": "Connections",
+    "description": "🔗 Connections - Manage external service integrations and data connections",
+  },
+  {
+    "name": "Subscriptions",
+    "description": "💳 Subscriptions - Shared repository subscription management",
+  },
+  {
     "name": "Subgraphs",
     "description": "🌳 Subgraphs - List and inspect subgraph databases",
   },
@@ -69,14 +77,6 @@ MAIN_API_TAGS = [
   {
     "name": "Credits",
     "description": "🪙 Credits - Manage credit-based usage and allocation",
-  },
-  {
-    "name": "Subscriptions",
-    "description": "💳 Subscriptions - Manage shared repository subscriptions",
-  },
-  {
-    "name": "Connections",
-    "description": "🔗 Connections - Manage external service integrations and data connections",
   },
   {
     "name": "Graph Limits",
