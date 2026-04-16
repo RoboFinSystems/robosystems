@@ -1,0 +1,553 @@
+"""Unit tests for journal entry CRUD commands.
+
+Tests cover:
+- _validate_and_normalize_lines — balance enforcement, per-line validation
+- create_journal_entry — draft/posted status, closed-period gate, session writes
+- update_journal_entry — draft-only gate, scalar updates, line replacement,
+  unbalanced-before-delete safety, period gate on date change
+- delete_journal_entry — draft-only gate, hard delete mechanics
+- reverse_journal_entry — posted-only gate, debit↔credit flip, reversal_of FK,
+  original marked reversed, closed-period gate on reversal date
+"""
+
+from __future__ import annotations
+
+from datetime import date
+from unittest.mock import MagicMock, patch
+
+import pytest
+
+from robosystems.models.api.extensions.journal_entries import (
+  CreateJournalEntryRequest,
+  DeleteJournalEntryRequest,
+  JournalEntryLineItemInput,
+  ReverseJournalEntryRequest,
+  UpdateJournalEntryRequest,
+)
+from robosystems.operations.roboledger.commands._guards import ClosedPeriodError
+from robosystems.operations.roboledger.commands.journal_entries import (
+  JournalEntryNotDraftError,
+  JournalEntryNotFoundError,
+  JournalEntryNotPostedError,
+  UnbalancedJournalEntryError,
+  _validate_and_normalize_lines,
+  create_journal_entry,
+  delete_journal_entry,
+  reverse_journal_entry,
+  update_journal_entry,
+)
+
+MODULE = "robosystems.operations.roboledger.commands.journal_entries"
+
+_DATE = date(2026, 1, 15)
+
+
+# ── Helpers ──────────────────────────────────────────────────────────────
+
+
+def _line(element_id: str = "elem_01", debit: int = 0, credit: int = 0):
+  return JournalEntryLineItemInput(
+    element_id=element_id,
+    debit_amount=debit,
+    credit_amount=credit,
+  )
+
+
+def _balanced_lines():
+  """Minimal balanced DR/CR pair — 1 000 cents each side."""
+  return [
+    _line("elem_cash", debit=1000),
+    _line("elem_revenue", credit=1000),
+  ]
+
+
+def _mock_entry(
+  status: str = "draft",
+  entry_id: str = "entry_01",
+  transaction_id: str | None = None,
+):
+  e = MagicMock()
+  e.id = entry_id
+  e.status = status
+  e.transaction_id = transaction_id
+  e.type = "standard"
+  e.posting_date = _DATE
+  e.memo = "Test entry"
+  e.provenance = "manual_entry"
+  e.reversal_of = None
+  e.posted_at = None
+  return e
+
+
+def _mock_line(element_id: str, debit: int, credit: int, order: int):
+  li = MagicMock()
+  li.id = f"li_{order:02d}"
+  li.element_id = element_id
+  li.debit_amount = debit
+  li.credit_amount = credit
+  li.line_order = order
+  li.description = None
+  return li
+
+
+def _scalar_exec(value):
+  r = MagicMock()
+  r.scalar_one_or_none.return_value = value
+  return r
+
+
+def _scalars_exec(values):
+  r = MagicMock()
+  r.scalars.return_value.all.return_value = values
+  return r
+
+
+# ── _validate_and_normalize_lines ────────────────────────────────────────
+
+
+class TestValidateAndNormalizeLines:
+  def test_empty_list_raises(self):
+    with pytest.raises(ValueError, match="at least one line item"):
+      _validate_and_normalize_lines([])
+
+  def test_missing_element_id_raises(self):
+    with pytest.raises(ValueError, match="missing element_id"):
+      _validate_and_normalize_lines([_line(element_id="", debit=100)])
+
+  def test_negative_debit_raises(self):
+    with pytest.raises(ValueError, match="non-negative"):
+      _validate_and_normalize_lines(
+        [
+          _line("elem_a", debit=-100),
+          _line("elem_b", credit=100),
+        ]
+      )
+
+  def test_negative_credit_raises(self):
+    with pytest.raises(ValueError, match="non-negative"):
+      _validate_and_normalize_lines(
+        [
+          _line("elem_a", debit=100),
+          _line("elem_b", credit=-100),
+        ]
+      )
+
+  def test_both_debit_and_credit_raises(self):
+    with pytest.raises(ValueError, match="cannot have both"):
+      _validate_and_normalize_lines(
+        [
+          _line("elem_a", debit=100, credit=100),
+        ]
+      )
+
+  def test_zero_amounts_raises(self):
+    with pytest.raises(ValueError, match="non-zero"):
+      _validate_and_normalize_lines([_line("elem_a")])  # debit=0, credit=0
+
+  def test_unbalanced_raises_with_amounts(self):
+    with pytest.raises(UnbalancedJournalEntryError) as exc_info:
+      _validate_and_normalize_lines(
+        [
+          _line("elem_a", debit=1000),
+          _line("elem_b", credit=900),
+        ]
+      )
+    assert exc_info.value.total_debit == 1000
+    assert exc_info.value.total_credit == 900
+
+  def test_balanced_returns_correct_totals(self):
+    lines = [
+      _line("elem_a", debit=500),
+      _line("elem_b", debit=500),
+      _line("elem_c", credit=1000),
+    ]
+    normalized, total_dr, total_cr = _validate_and_normalize_lines(lines)
+    assert total_dr == 1000
+    assert total_cr == 1000
+    assert len(normalized) == 3
+
+  def test_normalized_dict_has_expected_keys(self):
+    lines = [_line("elem_a", debit=200), _line("elem_b", credit=200)]
+    normalized, _, _ = _validate_and_normalize_lines(lines)
+    assert normalized[0]["element_id"] == "elem_a"
+    assert normalized[0]["debit_amount"] == 200
+    assert normalized[0]["credit_amount"] == 0
+    assert normalized[1]["debit_amount"] == 0
+    assert normalized[1]["credit_amount"] == 200
+
+  def test_many_lines_balance(self):
+    lines = [_line(f"elem_{i}", debit=100) for i in range(5)]
+    lines += [_line("elem_credit", credit=500)]
+    normalized, dr, cr = _validate_and_normalize_lines(lines)
+    assert dr == cr == 500
+    assert len(normalized) == 6
+
+
+# ── create_journal_entry ──────────────────────────────────────────────────
+
+
+def _captured_entry_adds(session):
+  """Return Entry objects that were passed to session.add()."""
+  from robosystems.models.extensions.roboledger.entry import Entry
+
+  return [
+    call[0][0] for call in session.add.call_args_list if isinstance(call[0][0], Entry)
+  ]
+
+
+class TestCreateJournalEntry:
+  def _body(self, status: str = "draft"):
+    return CreateJournalEntryRequest(
+      posting_date=_DATE,
+      memo="Test entry",
+      line_items=_balanced_lines(),
+      status=status,
+    )
+
+  @patch(f"{MODULE}._entry_to_response")
+  @patch(f"{MODULE}.assert_period_not_closed")
+  def test_draft_entry_has_no_posted_at(self, mock_guard, mock_resp):
+    mock_resp.return_value = MagicMock()
+    session = MagicMock()
+    create_journal_entry(session, self._body(status="draft"), "usr_1")
+    entries = _captured_entry_adds(session)
+    assert len(entries) == 1
+    assert entries[0].status == "draft"
+    assert entries[0].posted_at is None
+
+  @patch(f"{MODULE}._entry_to_response")
+  @patch(f"{MODULE}.assert_period_not_closed")
+  def test_posted_entry_has_posted_at(self, mock_guard, mock_resp):
+    mock_resp.return_value = MagicMock()
+    session = MagicMock()
+    create_journal_entry(session, self._body(status="posted"), "usr_1")
+    entries = _captured_entry_adds(session)
+    assert len(entries) == 1
+    assert entries[0].status == "posted"
+    assert entries[0].posted_at is not None
+
+  @patch(
+    f"{MODULE}.assert_period_not_closed",
+    side_effect=ClosedPeriodError("2026-01", _DATE),
+  )
+  def test_closed_period_raises_before_write(self, mock_guard):
+    session = MagicMock()
+    with pytest.raises(ClosedPeriodError):
+      create_journal_entry(session, self._body(), "usr_1")
+    session.add.assert_not_called()
+
+  @patch(f"{MODULE}._entry_to_response")
+  @patch(f"{MODULE}.assert_period_not_closed")
+  def test_entry_and_line_items_added(self, mock_guard, mock_resp):
+    mock_resp.return_value = MagicMock()
+    session = MagicMock()
+    create_journal_entry(session, self._body(), "usr_1")
+    # 1 Entry + 2 LineItems = 3 session.add calls
+    assert session.add.call_count == 3
+
+  @patch(f"{MODULE}.assert_period_not_closed")
+  def test_unbalanced_lines_raises_before_any_add(self, mock_guard):
+    session = MagicMock()
+    body = CreateJournalEntryRequest(
+      posting_date=_DATE,
+      memo="Unbalanced",
+      line_items=[
+        _line("elem_a", debit=500),
+        _line("elem_b", credit=300),
+      ],
+    )
+    with pytest.raises(UnbalancedJournalEntryError):
+      create_journal_entry(session, body, "usr_1")
+    session.add.assert_not_called()
+
+  @patch(f"{MODULE}._entry_to_response")
+  @patch(f"{MODULE}.assert_period_not_closed")
+  def test_provenance_is_manual_entry(self, mock_guard, mock_resp):
+    mock_resp.return_value = MagicMock()
+    session = MagicMock()
+    create_journal_entry(session, self._body(), "usr_1")
+    entries = _captured_entry_adds(session)
+    assert entries[0].provenance == "manual_entry"
+
+  @patch(f"{MODULE}._entry_to_response")
+  @patch(f"{MODULE}.assert_period_not_closed")
+  def test_period_guard_called_with_posting_date(self, mock_guard, mock_resp):
+    mock_resp.return_value = MagicMock()
+    session = MagicMock()
+    create_journal_entry(session, self._body(), "usr_1")
+    mock_guard.assert_called_once_with(session, _DATE)
+
+
+# ── update_journal_entry ──────────────────────────────────────────────────
+
+
+class TestUpdateJournalEntry:
+  @patch(f"{MODULE}._load_line_items", return_value=[])
+  def test_not_found_raises(self, mock_load):
+    session = MagicMock()
+    session.execute.return_value.scalar_one_or_none.return_value = None
+    with pytest.raises(JournalEntryNotFoundError) as exc_info:
+      update_journal_entry(session, UpdateJournalEntryRequest(entry_id="missing"))
+    assert exc_info.value.entry_id == "missing"
+
+  @patch(f"{MODULE}._load_line_items", return_value=[])
+  def test_posted_entry_raises(self, mock_load):
+    session = MagicMock()
+    session.execute.return_value.scalar_one_or_none.return_value = _mock_entry(
+      status="posted"
+    )
+    with pytest.raises(JournalEntryNotDraftError) as exc_info:
+      update_journal_entry(session, UpdateJournalEntryRequest(entry_id="entry_01"))
+    assert exc_info.value.status == "posted"
+
+  @patch(f"{MODULE}._load_line_items", return_value=[])
+  def test_reversed_entry_raises(self, mock_load):
+    session = MagicMock()
+    session.execute.return_value.scalar_one_or_none.return_value = _mock_entry(
+      status="reversed"
+    )
+    with pytest.raises(JournalEntryNotDraftError) as exc_info:
+      update_journal_entry(session, UpdateJournalEntryRequest(entry_id="entry_01"))
+    assert exc_info.value.status == "reversed"
+
+  @patch(f"{MODULE}._load_line_items", return_value=[])
+  def test_scalar_field_update(self, mock_load):
+    entry = _mock_entry(status="draft")
+    entry.memo = "Old memo"
+    session = MagicMock()
+    session.execute.return_value.scalar_one_or_none.return_value = entry
+    update_journal_entry(
+      session, UpdateJournalEntryRequest(entry_id="entry_01", memo="New memo")
+    )
+    assert entry.memo == "New memo"
+
+  @patch(f"{MODULE}.assert_period_not_closed")
+  @patch(f"{MODULE}._load_line_items", return_value=[])
+  def test_posting_date_change_checks_period_gate(self, mock_load, mock_guard):
+    entry = _mock_entry(status="draft")
+    session = MagicMock()
+    session.execute.return_value.scalar_one_or_none.return_value = entry
+    new_date = date(2026, 2, 1)
+    update_journal_entry(
+      session, UpdateJournalEntryRequest(entry_id="entry_01", posting_date=new_date)
+    )
+    mock_guard.assert_called_once_with(session, new_date)
+
+  @patch(f"{MODULE}._load_line_items", return_value=[])
+  def test_no_posting_date_change_skips_period_gate(self, mock_load):
+    entry = _mock_entry(status="draft")
+    session = MagicMock()
+    session.execute.return_value.scalar_one_or_none.return_value = entry
+    # Updating memo only — no posting_date in body
+    with patch(f"{MODULE}.assert_period_not_closed") as mock_guard:
+      update_journal_entry(
+        session, UpdateJournalEntryRequest(entry_id="entry_01", memo="Updated")
+      )
+      mock_guard.assert_not_called()
+
+  @patch(f"{MODULE}._load_line_items", return_value=[])
+  def test_line_item_replacement_calls_delete(self, mock_load):
+    entry = _mock_entry(status="draft")
+    session = MagicMock()
+    session.execute.return_value.scalar_one_or_none.return_value = entry
+    body = UpdateJournalEntryRequest(
+      entry_id="entry_01",
+      line_items=[
+        JournalEntryLineItemInput(element_id="elem_a", debit_amount=400),
+        JournalEntryLineItemInput(element_id="elem_b", credit_amount=400),
+      ],
+    )
+    update_journal_entry(session, body)
+    # Delete existing line items + add 2 new ones
+    session.query.assert_called()
+    assert session.add.call_count == 2
+
+  @patch(f"{MODULE}._load_line_items", return_value=[])
+  def test_unbalanced_replacement_raises_before_delete(self, mock_load):
+    """Validation must run before the delete so a bad batch cannot clobber existing lines."""
+    entry = _mock_entry(status="draft")
+    session = MagicMock()
+    session.execute.return_value.scalar_one_or_none.return_value = entry
+    body = UpdateJournalEntryRequest(
+      entry_id="entry_01",
+      line_items=[
+        JournalEntryLineItemInput(element_id="elem_a", debit_amount=300),
+        JournalEntryLineItemInput(element_id="elem_b", credit_amount=200),
+      ],
+    )
+    with pytest.raises(UnbalancedJournalEntryError):
+      update_journal_entry(session, body)
+    session.query.assert_not_called()
+
+
+# ── delete_journal_entry ──────────────────────────────────────────────────
+
+
+class TestDeleteJournalEntry:
+  def test_not_found_raises(self):
+    session = MagicMock()
+    session.execute.return_value.scalar_one_or_none.return_value = None
+    with pytest.raises(JournalEntryNotFoundError):
+      delete_journal_entry(session, DeleteJournalEntryRequest(entry_id="missing"))
+
+  def test_posted_entry_cannot_be_deleted(self):
+    session = MagicMock()
+    session.execute.return_value.scalar_one_or_none.return_value = _mock_entry(
+      status="posted"
+    )
+    with pytest.raises(JournalEntryNotDraftError):
+      delete_journal_entry(session, DeleteJournalEntryRequest(entry_id="entry_01"))
+
+  def test_reversed_entry_cannot_be_deleted(self):
+    session = MagicMock()
+    session.execute.return_value.scalar_one_or_none.return_value = _mock_entry(
+      status="reversed"
+    )
+    with pytest.raises(JournalEntryNotDraftError):
+      delete_journal_entry(session, DeleteJournalEntryRequest(entry_id="entry_01"))
+
+  def test_draft_entry_is_deleted(self):
+    entry = _mock_entry(status="draft")
+    session = MagicMock()
+    session.execute.return_value.scalar_one_or_none.return_value = entry
+    result = delete_journal_entry(
+      session, DeleteJournalEntryRequest(entry_id="entry_01")
+    )
+    assert result == {"deleted": True}
+    session.delete.assert_called_once_with(entry)
+    session.flush.assert_called()
+
+
+# ── reverse_journal_entry ─────────────────────────────────────────────────
+
+
+class TestReverseJournalEntry:
+  def _body(self, entry_id: str = "entry_01"):
+    return ReverseJournalEntryRequest(entry_id=entry_id, posting_date=_DATE)
+
+  def test_not_found_raises(self):
+    session = MagicMock()
+    session.execute.return_value.scalar_one_or_none.return_value = None
+    with pytest.raises(JournalEntryNotFoundError):
+      reverse_journal_entry(session, self._body(), "usr_1")
+
+  def test_draft_entry_cannot_be_reversed(self):
+    session = MagicMock()
+    session.execute.return_value.scalar_one_or_none.return_value = _mock_entry(
+      status="draft"
+    )
+    with pytest.raises(JournalEntryNotPostedError) as exc_info:
+      reverse_journal_entry(session, self._body(), "usr_1")
+    assert exc_info.value.status == "draft"
+
+  def test_reversed_entry_cannot_be_reversed_again(self):
+    session = MagicMock()
+    session.execute.return_value.scalar_one_or_none.return_value = _mock_entry(
+      status="reversed"
+    )
+    with pytest.raises(JournalEntryNotPostedError):
+      reverse_journal_entry(session, self._body(), "usr_1")
+
+  @patch(f"{MODULE}._load_line_items", return_value=[])
+  def test_entry_with_no_line_items_raises(self, mock_load):
+    session = MagicMock()
+    session.execute.return_value.scalar_one_or_none.return_value = _mock_entry(
+      status="posted"
+    )
+    with pytest.raises(ValueError, match="no line items"):
+      reverse_journal_entry(session, self._body(), "usr_1")
+
+  @patch(
+    f"{MODULE}.assert_period_not_closed",
+    side_effect=ClosedPeriodError("2026-01", _DATE),
+  )
+  def test_closed_period_on_reversal_date_raises(self, mock_guard):
+    original = _mock_entry(status="posted")
+    line = _mock_line("elem_a", debit=100, credit=0, order=1)
+    line2 = _mock_line("elem_b", debit=0, credit=100, order=2)
+    session = MagicMock()
+    session.execute.side_effect = [
+      _scalar_exec(original),
+      _scalars_exec([line, line2]),
+    ]
+    with pytest.raises(ClosedPeriodError):
+      reverse_journal_entry(session, self._body(), "usr_1")
+
+  @patch(f"{MODULE}._entry_to_response")
+  @patch(f"{MODULE}.assert_period_not_closed")
+  def test_line_items_flipped_debit_to_credit(self, mock_guard, mock_resp):
+    """Original DR=1000/CR=0 becomes DR=0/CR=1000 in the reversing entry."""
+    from robosystems.models.extensions.roboledger.line_item import LineItem
+
+    mock_resp.return_value = MagicMock()
+    original = _mock_entry(status="posted", entry_id="entry_orig")
+    line1 = _mock_line("elem_cash", debit=1000, credit=0, order=1)
+    line2 = _mock_line("elem_revenue", debit=0, credit=1000, order=2)
+
+    added_objects: list = []
+    session = MagicMock()
+    session.execute.side_effect = [
+      _scalar_exec(original),
+      _scalars_exec([line1, line2]),
+      _scalars_exec([]),  # _load_line_items for reversing entry (response build)
+    ]
+    session.add.side_effect = lambda obj: added_objects.append(obj)
+
+    reverse_journal_entry(session, self._body(), "usr_1")
+
+    reversal_lines = [obj for obj in added_objects if isinstance(obj, LineItem)]
+    assert len(reversal_lines) == 2
+    # line1 was DR=1000/CR=0 → becomes DR=0/CR=1000
+    assert reversal_lines[0].debit_amount == 0
+    assert reversal_lines[0].credit_amount == 1000
+    # line2 was DR=0/CR=1000 → becomes DR=1000/CR=0
+    assert reversal_lines[1].debit_amount == 1000
+    assert reversal_lines[1].credit_amount == 0
+
+  @patch(f"{MODULE}._entry_to_response")
+  @patch(f"{MODULE}.assert_period_not_closed")
+  def test_reversing_entry_has_reversal_of_and_type(self, mock_guard, mock_resp):
+    """Reversing Entry has reversal_of=original.id, type='reversing', status='posted'."""
+    from robosystems.models.extensions.roboledger.entry import Entry
+
+    mock_resp.return_value = MagicMock()
+    original = _mock_entry(status="posted", entry_id="entry_orig")
+    line1 = _mock_line("elem_a", debit=500, credit=0, order=1)
+    line2 = _mock_line("elem_b", debit=0, credit=500, order=2)
+
+    added_objects: list = []
+    session = MagicMock()
+    session.execute.side_effect = [
+      _scalar_exec(original),
+      _scalars_exec([line1, line2]),
+      _scalars_exec([]),  # _load_line_items for reversing entry
+    ]
+    session.add.side_effect = lambda obj: added_objects.append(obj)
+
+    reverse_journal_entry(session, self._body(entry_id="entry_orig"), "usr_1")
+
+    entry_adds = [obj for obj in added_objects if isinstance(obj, Entry)]
+    assert len(entry_adds) == 1
+    reversing = entry_adds[0]
+    assert reversing.reversal_of == "entry_orig"
+    assert reversing.type == "reversing"
+    assert reversing.status == "posted"
+    assert reversing.posted_at is not None
+
+  @patch(f"{MODULE}._entry_to_response")
+  @patch(f"{MODULE}.assert_period_not_closed")
+  def test_original_marked_reversed(self, mock_guard, mock_resp):
+    mock_resp.return_value = MagicMock()
+    original = _mock_entry(status="posted", entry_id="entry_orig")
+    line1 = _mock_line("elem_a", debit=200, credit=0, order=1)
+    line2 = _mock_line("elem_b", debit=0, credit=200, order=2)
+
+    session = MagicMock()
+    session.execute.side_effect = [
+      _scalar_exec(original),
+      _scalars_exec([line1, line2]),
+      _scalars_exec([]),  # _load_line_items for reversing entry
+    ]
+    reverse_journal_entry(session, self._body(), "usr_1")
+
+    assert original.status == "reversed"
