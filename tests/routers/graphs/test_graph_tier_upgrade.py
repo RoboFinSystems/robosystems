@@ -1,6 +1,6 @@
 """Tests for the upgrade-tier graph operation endpoint.
 
-Covers the POST /v1/graphs/{graph_id}/operations/upgrade-tier handler
+Covers the POST /v1/graphs/{graph_id}/operations/change-tier handler
 introduced when tier upgrades moved from the subscriptions router to
 the CQRS operations surface.
 """
@@ -17,7 +17,7 @@ CMD_MODULE = "robosystems.operations.graph.commands.tier"
 
 
 class TestUpgradeTierEndpoint:
-  """Tests for POST /v1/graphs/{graph_id}/operations/upgrade-tier."""
+  """Tests for POST /v1/graphs/{graph_id}/operations/change-tier."""
 
   @pytest.fixture
   def client(self):
@@ -68,7 +68,7 @@ class TestUpgradeTierEndpoint:
   def test_requires_authentication(self, client):
     """Unauthenticated requests are rejected."""
     response = client.post(
-      f"/v1/graphs/{VALID_TEST_GRAPH_ID}/operations/upgrade-tier",
+      f"/v1/graphs/{VALID_TEST_GRAPH_ID}/operations/change-tier",
       json={"new_tier": "ladybug-large"},
     )
     assert response.status_code in (401, 403, 422)
@@ -95,13 +95,13 @@ class TestUpgradeTierEndpoint:
         return_value="op_test_abc123",
       ):
         response = client.post(
-          f"/v1/graphs/{VALID_TEST_GRAPH_ID}/operations/upgrade-tier",
+          f"/v1/graphs/{VALID_TEST_GRAPH_ID}/operations/change-tier",
           json={"new_tier": "ladybug-large"},
         )
 
       assert response.status_code == 202
       data = response.json()
-      assert data["operation"] == "upgrade-tier"
+      assert data["operation"] == "change-tier"
       assert data["status"] == "pending"
       assert "operationId" in data
     finally:
@@ -117,7 +117,7 @@ class TestUpgradeTierEndpoint:
     app.dependency_overrides[get_current_user_with_graph] = lambda: mock_user
     try:
       response = client.post(
-        f"/v1/graphs/{VALID_TEST_GRAPH_ID}/operations/upgrade-tier",
+        f"/v1/graphs/{VALID_TEST_GRAPH_ID}/operations/change-tier",
         json={"new_tier": "ladybug-premium"},
       )
       assert response.status_code == 422

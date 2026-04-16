@@ -34,7 +34,7 @@ The core platform surface for querying and managing graphs
 - **delete-subgraph**: Remove a subgraph with optional pre-delete backup
 - **create-backup**: Encrypted backup with configurable format and retention
 - **restore-backup**: Restore from backup (blocked for entity graphs — use `materialize` instead)
-- **upgrade-tier**: Change graph infrastructure tier with Stripe billing integration
+- **change-tier**: Change graph infrastructure tier with Stripe billing integration
 - **materialize**: Ingest DuckDB-staged tables or OLTP data into the graph (direct or Dagster-orchestrated)
 
 ### MCP & Agents

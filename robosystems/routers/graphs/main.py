@@ -318,40 +318,34 @@ async def get_graphs(
   status_code=status.HTTP_202_ACCEPTED,
   operation_id="createGraph",
   summary="Create New Graph Database",
-  description="""Create a new graph database with specified schema and optionally an initial entity.
+  description="""Create a new graph database with specified schema and an initial entity.
 
 This endpoint starts an asynchronous graph creation operation and returns
 connection details for monitoring progress via Server-Sent Events (SSE).
 
 **Graph Creation Options:**
 
-1. **Entity Graph with Initial Entity** (`initial_entity` provided, `create_entity=True`):
+1. **Entity Graph** (`initial_entity` required, `custom_schema` omitted):
    - Creates graph structure with entity schema extensions
-   - Populates an initial entity node with provided data
-   - Useful when you want a pre-configured entity to start with
-   - Example: Creating a company graph with the company already populated
+   - `initial_entity` is required — entity graphs must have an entity
+   - Set `create_entity=False` to defer entity population (e.g. file-based ingestion)
+   - Example: Creating a company graph with the company pre-populated
 
-2. **Entity Graph without Initial Entity** (`initial_entity=None`, `create_entity=False`):
-   - Creates graph structure with entity schema extensions
-   - Graph starts empty, ready for data import
-   - Useful for bulk data imports or custom workflows
-   - Example: Creating a graph structure before importing from CSV/API
-
-3. **Generic Graph** (no `initial_entity` provided):
-   - Creates empty graph with custom schema extensions
-   - General-purpose knowledge graph
+2. **Custom Graph** (`custom_schema` provided, no `initial_entity`):
+   - Creates a generic graph with a fully custom schema
+   - `initial_entity` is not used
    - Example: Analytics graphs, custom data models
 
 **Required Fields:**
 - `metadata.graph_name`: Unique name for the graph
 - `instance_tier`: Resource tier (ladybug-standard, ladybug-large, ladybug-xlarge)
+- `initial_entity`: Entity data — required for entity graphs (omit only when providing `custom_schema`)
 
 **Optional Fields:**
 - `metadata.description`: Human-readable description of the graph's purpose
 - `metadata.schema_extensions`: List of schema extensions (roboledger, roboinvestor, etc.)
 - `tags`: Organizational tags (max 10)
-- `initial_entity`: Entity data (required for entity graphs with initial data)
-- `create_entity`: Whether to populate initial entity (default: true when initial_entity provided)
+- `create_entity`: Whether to populate entity data on creation (default: true)
 
 **Monitoring Progress:**
 Use the returned `operation_id` to connect to the SSE stream:

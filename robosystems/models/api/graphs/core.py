@@ -98,8 +98,8 @@ class CreateGraphRequest(BaseModel):
   """Request model for creating a new graph.
 
   Use this to create either:
-  - **Entity graphs**: Standard graphs with entity schema and optional extensions
-  - **Custom graphs**: Generic graphs with fully custom schema definitions
+  - **Entity graphs**: Standard graphs with entity schema. Requires `initial_entity`.
+  - **Custom graphs**: Generic graphs with a fully custom schema. Requires `custom_schema`; `initial_entity` is not used.
   """
 
   model_config = ConfigDict(
@@ -124,21 +124,6 @@ class CreateGraphRequest(BaseModel):
             },
             "create_entity": True,
             "tags": ["consulting", "professional-services", "production"],
-          },
-        },
-        {
-          "summary": "Entity graph without initial entity",
-          "description": "Create an entity graph structure without populating initial data (useful for bulk data imports)",
-          "value": {
-            "metadata": {
-              "graph_name": "Investment Portfolio Graph",
-              "description": "Knowledge graph for tracking investment portfolios and holdings",
-              "schema_extensions": ["roboinvestor"],
-            },
-            "instance_tier": "ladybug-standard",
-            "initial_entity": None,
-            "create_entity": False,
-            "tags": ["investments", "portfolio-management"],
           },
         },
         {
@@ -233,8 +218,8 @@ class CreateGraphRequest(BaseModel):
           },
         },
         {
-          "summary": "Generic empty graph",
-          "description": "Create an empty graph for general-purpose use without custom schema",
+          "summary": "Minimal custom graph",
+          "description": "Create a generic custom graph with a minimal schema",
           "value": {
             "metadata": {
               "graph_name": "Customer Analytics Graph",
@@ -242,6 +227,12 @@ class CreateGraphRequest(BaseModel):
               "schema_extensions": [],
             },
             "instance_tier": "ladybug-standard",
+            "custom_schema": {
+              "name": "customer_analytics",
+              "version": "1.0.0",
+              "nodes": [],
+              "relationships": [],
+            },
             "tags": ["analytics", "customers", "marketing"],
           },
         },

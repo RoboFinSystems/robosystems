@@ -34,10 +34,10 @@ from robosystems.middleware.otel.metrics import endpoint_metrics_decorator
 from robosystems.middleware.rate_limits import subscription_aware_rate_limit_dependency
 from robosystems.models.api.graphs.backups import BackupCreateRequest
 from robosystems.models.api.graphs.operations import (
+  ChangeTierOp,
   DeleteSubgraphOp,
   MaterializeOp,
   RestoreBackupOp,
-  UpgradeTierOp,
 )
 from robosystems.models.api.graphs.subgraphs import CreateSubgraphRequest
 from robosystems.models.core import User
@@ -505,26 +505,26 @@ async def restore_backup_op(
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# upgrade-tier
+# change-tier
 # ═══════════════════════════════════════════════════════════════════════════
 
 
 @router.post(
-  "/upgrade-tier",
+  "/change-tier",
   response_model=OperationEnvelope,
   status_code=status.HTTP_202_ACCEPTED,
-  operation_id="opUpgradeTier",
-  summary="Upgrade Tier",
+  operation_id="opChangeTier",
+  summary="Change Tier",
   tags=[_OP_TAG],
   dependencies=[_RATE_LIMIT],
 )
 @endpoint_metrics_decorator(
-  f"{_GRAPH_OPS_PATH}/upgrade-tier",
+  f"{_GRAPH_OPS_PATH}/change-tier",
   method="POST",
-  business_event_type="graph_upgrade_tier",
+  business_event_type="graph_change_tier",
 )
-async def upgrade_tier_op(
-  body: UpgradeTierOp,
+async def change_tier_op(
+  body: ChangeTierOp,
   graph_id: str = Path(..., pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN),
   user: User = Depends(get_current_user_with_graph),
   idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
@@ -534,7 +534,7 @@ async def upgrade_tier_op(
   """Change the infrastructure tier on a graph (async EBS migration)."""
   from robosystems.operations.graph.commands.tier import change_graph_tier_cmd
 
-  op_name = "upgrade-tier"
+  op_name = "change-tier"
   user_id = str(user.id)
   body_fp = fingerprint_body(body)
 

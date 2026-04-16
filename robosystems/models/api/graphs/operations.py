@@ -43,8 +43,8 @@ class RestoreBackupOp(BaseModel):
   )
 
 
-class UpgradeTierOp(BaseModel):
-  """Body for the upgrade-tier operation."""
+class ChangeTierOp(BaseModel):
+  """Body for the change-tier operation (supports upgrades and downgrades)."""
 
   new_tier: Literal["ladybug-standard", "ladybug-large", "ladybug-xlarge"] = Field(
     ...,

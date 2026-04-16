@@ -498,14 +498,14 @@ async def change_plan(
 ) -> GraphSubscriptionResponse:
   """Change plan on a repository subscription.
 
-  For graph tier changes, use ``POST /v1/graphs/{graph_id}/operations/upgrade-tier``.
+  For graph tier changes, use ``POST /v1/graphs/{graph_id}/operations/change-tier``.
   """
   try:
     if is_shared_repository(graph_id):
       return await _change_repository_plan(graph_id, request, current_user, db)
     raise HTTPException(
       status_code=400,
-      detail="Graph tier changes use POST /v1/graphs/{graph_id}/operations/upgrade-tier. "
+      detail="Graph tier changes use POST /v1/graphs/{graph_id}/operations/change-tier. "
       "This endpoint is for shared repository plan changes only.",
     )
   except HTTPException:
