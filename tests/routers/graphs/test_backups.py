@@ -5,7 +5,7 @@ This test suite validates REST API endpoints for backup management
 including authentication, request validation, and response formatting.
 """
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
@@ -73,8 +73,8 @@ class TestBackupEndpoints:
     graph_id = VALID_TEST_GRAPH_ID  # Use valid test graph ID
 
     # Test endpoints without authentication
+    # POST /backups removed — create-backup is now at /operations/create-backup
     endpoints = [
-      ("POST", f"/v1/graphs/{graph_id}/backups"),
       ("GET", f"/v1/graphs/{graph_id}/backups"),
       ("GET", f"/v1/graphs/{graph_id}/backups/stats"),
       ("DELETE", f"/v1/graphs/{graph_id}/backups/cleanup"),
@@ -83,9 +83,7 @@ class TestBackupEndpoints:
     ]
 
     for method, endpoint in endpoints:
-      if method == "POST":
-        response = client.post(endpoint, json={})
-      elif method == "GET":
+      if method == "GET":
         response = client.get(endpoint)
       elif method == "DELETE":
         response = client.delete(endpoint)
@@ -93,113 +91,12 @@ class TestBackupEndpoints:
         raise ValueError(f"Unsupported HTTP method: {method}")
 
       # Should require authentication, not exist, or be unavailable
-      assert response.status_code in [401, 403, 404, 422, 503], (
+      assert response.status_code in [401, 403, 404, 405, 422, 503], (
         f"Expected auth/not found/unavailable error for {method} {endpoint}"
       )
 
-  @patch("robosystems.models.core.graph.graph_credits.GraphCredits.get_by_graph_id")
-  @patch(
-    "robosystems.worker.client.enqueue_task",
-    new_callable=AsyncMock,
-    return_value={
-      "operation_id": "op_test-backup-123",
-      "status": "pending",
-      "operation_type": "dagster_job_monitor",
-      "_links": {
-        "stream": "/v1/operations/op_test-backup-123/stream",
-        "status": "/v1/operations/op_test-backup-123/status",
-        "cancel": "/v1/operations/op_test-backup-123",
-      },
-    },
-  )
-  @patch("os.path.exists")
-  @patch(
-    "robosystems.middleware.graph.utils.MultiTenantUtils.get_database_path_for_graph"
-  )
-  @patch("robosystems.middleware.graph.utils.MultiTenantUtils.is_shared_repository")
-  @patch("robosystems.models.core.GraphUser.get_by_user_id")
-  def test_create_backup_endpoint(
-    self,
-    mock_get_by_user_id,
-    mock_is_shared,
-    mock_get_database_path,
-    mock_path_exists,
-    mock_enqueue_task,
-    mock_get_graph_credits,
-    client,
-    mock_auth_user,
-  ):
-    """Test backup creation endpoint."""
-    from robosystems.database import get_async_db_session
-    from robosystems.middleware.auth.dependencies import get_current_user_with_graph
-
-    # Create mock session
-    mock_session = MagicMock()
-
-    # Override the dependencies (endpoint uses get_async_db_session, not session)
-    app.dependency_overrides[get_current_user_with_graph] = lambda: mock_auth_user
-    app.dependency_overrides[get_async_db_session] = lambda: mock_session
-
-    try:
-      # Mock GraphCredits for the reservation pattern
-      mock_graph_credits = MagicMock()
-      mock_graph_credits.available_credits = 1000.0
-      mock_graph_credits.consumed_credits = 0.0
-      mock_graph_credits.reserve_credits = MagicMock(return_value=True)
-      mock_get_graph_credits.return_value = mock_graph_credits
-
-      # Mock authorization checks
-      mock_is_shared.return_value = False  # Not a shared repository
-
-      # Mock database path - returns the database path for the graph
-      mock_get_database_path.return_value = f"/tmp/lbug-dbs/{VALID_TEST_GRAPH_ID}"
-
-      # Mock os.path.exists to return False (database doesn't exist yet, size will be 0)
-      mock_path_exists.return_value = False
-
-      # Mock user graph access - create a mock GraphUser with the test graph_id and admin role
-      mock_user_graph = MagicMock()
-      mock_user_graph.graph_id = VALID_TEST_GRAPH_ID
-      mock_user_graph.role = "admin"  # Admin role required for backup creation
-      mock_get_by_user_id.return_value = [
-        mock_user_graph
-      ]  # User has access to VALID_TEST_GRAPH_ID
-
-      # Set mock user ID
-      mock_auth_user.id = "test-user-123"
-
-      graph_id = VALID_TEST_GRAPH_ID  # Use valid test graph ID
-      response = client.post(
-        f"/v1/graphs/{graph_id}/backups",
-        json={
-          "backup_format": "full_dump",  # Required for encryption
-          "backup_type": "full",
-          "retention_days": 90,
-          "compression": True,
-          "encryption": True,
-        },
-      )
-
-      if response.status_code != 202:
-        print(f"Response status: {response.status_code}")
-        print(f"Response content: {response.text}")
-      assert response.status_code == 202
-      data = response.json()
-      assert "operation_id" in data  # Should have an operation ID
-      assert data["status"] == "accepted"
-      assert "Backup creation started" in data["message"]
-
-      # Verify enqueue_task was called (not real Dagster)
-      mock_enqueue_task.assert_called_once()
-
-      # Verify authorization checks were called
-      mock_get_by_user_id.assert_called_once()
-    finally:
-      # Reset only the specific overrides we added
-      if get_current_user_with_graph in app.dependency_overrides:
-        del app.dependency_overrides[get_current_user_with_graph]
-      if get_async_db_session in app.dependency_overrides:
-        del app.dependency_overrides[get_async_db_session]
+  # test_create_backup_endpoint removed — POST /backups moved to
+  # POST /v1/graphs/{graph_id}/operations/create-backup
 
   @patch("robosystems.middleware.graph.utils.MultiTenantUtils.is_shared_repository")
   @patch("robosystems.models.core.GraphUser.get_by_user_id")
@@ -274,57 +171,8 @@ class TestBackupEndpoints:
         )
         assert "summary" in details, f"Missing summary for {method.upper()} {path}"
 
-  @patch("robosystems.middleware.graph.utils.MultiTenantUtils.is_shared_repository")
-  @patch("robosystems.models.core.GraphUser.get_by_user_id")
-  def test_create_backup_blocked_for_shared_repository(
-    self, mock_get_by_user_id, mock_is_shared, client, mock_auth_user
-  ):
-    """Test that backup creation is blocked for shared repositories with 403."""
-    from robosystems.database import session
-    from robosystems.middleware.auth.dependencies import get_current_user_with_graph
-
-    # Create mock session
-    mock_session = MagicMock()
-
-    # Override the dependencies
-    app.dependency_overrides[get_current_user_with_graph] = lambda: mock_auth_user
-    app.dependency_overrides[session] = lambda: mock_session
-
-    try:
-      # Mock authorization - this IS a shared repository
-      mock_is_shared.return_value = True
-
-      # Mock user graph access with admin role
-      mock_user_graph = MagicMock()
-      mock_user_graph.graph_id = "sec"
-      mock_user_graph.role = "admin"
-      mock_get_by_user_id.return_value = [mock_user_graph]
-
-      # Set mock user ID
-      mock_auth_user.id = "test-user-123"
-
-      # Attempt to create backup on shared repository
-      response = client.post(
-        "/v1/graphs/sec/backups",
-        json={
-          "backup_format": "full_dump",
-          "backup_type": "full",
-          "retention_days": 90,
-          "compression": True,
-          "encryption": False,
-        },
-      )
-
-      # Should be forbidden for shared repositories
-      assert response.status_code == 403
-      data = response.json()
-      assert "shared repository" in data["detail"].lower()
-      assert "sec" in data["detail"]
-    finally:
-      if get_current_user_with_graph in app.dependency_overrides:
-        del app.dependency_overrides[get_current_user_with_graph]
-      if session in app.dependency_overrides:
-        del app.dependency_overrides[session]
+  # test_create_backup_blocked_for_shared_repository removed — POST /backups moved to
+  # POST /v1/graphs/{graph_id}/operations/create-backup
 
   def test_list_backups_response_includes_shared_repo_fields(self, client):
     """Test that BackupListResponse model includes shared repository fields."""
