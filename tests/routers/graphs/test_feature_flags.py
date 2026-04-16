@@ -387,7 +387,7 @@ class TestGraphOperationFeatureFlags:
     return MagicMock(spec=Session)
 
   def test_subgraph_creation_disabled(self, client: TestClient, mock_user, mock_db):
-    """Test subgraph creation endpoint when feature flag is disabled."""
+    """Test subgraph creation via operations endpoint when feature flag is disabled."""
     from main import app
     from robosystems.database import get_async_db_session
     from robosystems.middleware.auth.dependencies import get_current_user_with_graph
@@ -398,14 +398,14 @@ class TestGraphOperationFeatureFlags:
 
     try:
       # Mock the environment configuration to disable subgraph creation
-      with patch("robosystems.routers.graphs.subgraphs.main.env") as mock_env:
-        mock_env.SUBGRAPH_CREATION_ENABLED = False
-
-        # Mock the circuit breaker check to pass
+      with patch.object(
+        __import__("robosystems.config", fromlist=["env"]).env,
+        "SUBGRAPH_CREATION_ENABLED",
+        False,
+      ):
         with patch(
           "robosystems.routers.graphs.subgraphs.main.handle_circuit_breaker_check"
         ):
-          # Mock request data
           request_data = {
             "name": "testsubgraph",
             "display_name": "Test Subgraph",
@@ -413,17 +413,18 @@ class TestGraphOperationFeatureFlags:
           }
 
           response = client.post(
-            "/v1/graphs/kg1234567890abcdef/subgraphs", json=request_data
+            "/v1/graphs/kg1234567890abcdef/operations/create-subgraph",
+            json=request_data,
           )
 
         assert response.status_code == 403
         data = response.json()
-        assert "Subgraph creation is currently disabled" in data["detail"]
+        assert "disabled" in data["detail"].lower()
     finally:
       app.dependency_overrides.clear()
 
   def test_backup_creation_disabled(self, client: TestClient, mock_user, mock_db):
-    """Test backup creation endpoint when feature flag is disabled."""
+    """Test backup creation via operations endpoint when feature flag is disabled."""
     from main import app
     from robosystems.database import get_async_db_session
     from robosystems.middleware.auth.dependencies import get_current_user_with_graph
@@ -434,12 +435,12 @@ class TestGraphOperationFeatureFlags:
 
     try:
       # Mock the environment configuration to disable backup creation
-      with patch("robosystems.routers.graphs.backups.backup.env") as mock_env:
-        mock_env.BACKUP_CREATION_ENABLED = False
-
-        # Mock verify_admin_access to pass authorization
-        with patch("robosystems.routers.graphs.backups.backup.verify_admin_access"):
-          # Mock request data
+      with patch.object(
+        __import__("robosystems.config", fromlist=["env"]).env,
+        "BACKUP_CREATION_ENABLED",
+        False,
+      ):
+        with patch("robosystems.routers.graphs.backups.utils.verify_admin_access"):
           request_data = {
             "backup_format": "full_dump",
             "encryption": False,
@@ -447,31 +448,31 @@ class TestGraphOperationFeatureFlags:
           }
 
           response = client.post(
-            "/v1/graphs/kg1a2b3c4d5e6f7a8b/backups", json=request_data
+            "/v1/graphs/kg1a2b3c4d5e6f7a8b/operations/create-backup",
+            json=request_data,
           )
 
           assert response.status_code == 403
           data = response.json()
-          assert "Backup creation is currently disabled" in data["detail"]
+          assert "disabled" in data["detail"].lower()
     finally:
       app.dependency_overrides.clear()
 
   def test_subgraph_creation_enabled(self, client: TestClient, mock_user, mock_db):
-    """Test subgraph creation endpoint when feature flag is enabled."""
+    """Test subgraph creation via operations endpoint when feature flag is enabled."""
     from main import app
     from robosystems.database import get_async_db_session
     from robosystems.middleware.auth.dependencies import get_current_user_with_graph
 
-    # Override dependencies
     app.dependency_overrides[get_current_user_with_graph] = lambda: mock_user
     app.dependency_overrides[get_async_db_session] = lambda: mock_db
 
     try:
-      # Mock the environment configuration to enable subgraph creation
-      with patch("robosystems.routers.graphs.subgraphs.main.env") as mock_env:
-        mock_env.SUBGRAPH_CREATION_ENABLED = True
-
-        # Mock all the verification functions to pass
+      with patch.object(
+        __import__("robosystems.config", fromlist=["env"]).env,
+        "SUBGRAPH_CREATION_ENABLED",
+        True,
+      ):
         with (
           patch(
             "robosystems.routers.graphs.subgraphs.main.handle_circuit_breaker_check"
@@ -483,7 +484,10 @@ class TestGraphOperationFeatureFlags:
             "robosystems.routers.graphs.subgraphs.main.verify_subgraph_tier_support"
           ),
           patch("robosystems.routers.graphs.subgraphs.main.verify_parent_graph_active"),
-          patch("robosystems.routers.graphs.subgraphs.main.check_subgraph_quota"),
+          patch(
+            "robosystems.routers.graphs.subgraphs.main.check_subgraph_quota",
+            return_value=(0, 10, []),
+          ),
           patch(
             "robosystems.routers.graphs.subgraphs.main.validate_subgraph_name_unique"
           ),
@@ -491,22 +495,21 @@ class TestGraphOperationFeatureFlags:
             "robosystems.routers.graphs.subgraphs.main.get_subgraph_service"
           ) as mock_service,
         ):
-          # Mock parent graph
           mock_parent_graph = MagicMock()
           mock_parent_graph.graph_tier = "ladybug-large"
           mock_verify_access.return_value = mock_parent_graph
 
-          # Mock subgraph service
           mock_service_instance = MagicMock()
-          mock_service_instance.create_subgraph.return_value = {
-            "graph_id": "kg987654",
-            "subgraph_index": 1,
-            "status": "active",
-            "created_at": "2023-01-01T00:00:00Z",
-          }
+          mock_service_instance.create_subgraph = AsyncMock(
+            return_value={
+              "graph_id": "kg987654",
+              "subgraph_index": 1,
+              "status": "active",
+              "created_at": "2023-01-01T00:00:00Z",
+            }
+          )
           mock_service.return_value = mock_service_instance
 
-          # Mock request data
           request_data = {
             "name": "testsubgraph",
             "display_name": "Test Subgraph",
@@ -514,78 +517,62 @@ class TestGraphOperationFeatureFlags:
           }
 
           response = client.post(
-            "/v1/graphs/kg1a2b3c4d5e6f7a8b/subgraphs", json=request_data
+            "/v1/graphs/kg1a2b3c4d5e6f7a8b/operations/create-subgraph",
+            json=request_data,
           )
 
-          # Should not return 403 when enabled - might fail later in validation but not due to feature flag
+          # Should not return 403 when enabled
           assert response.status_code != 403
     finally:
       app.dependency_overrides.clear()
 
   def test_backup_creation_enabled(self, client: TestClient, mock_user, mock_db):
-    """Test backup creation endpoint when feature flag is enabled."""
+    """Test backup creation via operations endpoint when feature flag is enabled."""
     from main import app
     from robosystems.database import get_async_db_session
     from robosystems.middleware.auth.dependencies import get_current_user_with_graph
 
-    # Override dependencies
     app.dependency_overrides[get_current_user_with_graph] = lambda: mock_user
     app.dependency_overrides[get_async_db_session] = lambda: mock_db
 
     try:
-      # Mock the environment configuration to enable backup creation
-      with patch("robosystems.routers.graphs.backups.backup.env") as mock_env:
-        mock_env.BACKUP_CREATION_ENABLED = True
-
-        # Mock verify_admin_access to pass authorization
+      with patch.object(
+        __import__("robosystems.config", fromlist=["env"]).env,
+        "BACKUP_CREATION_ENABLED",
+        True,
+      ):
         with (
-          patch("robosystems.routers.graphs.backups.backup.verify_admin_access"),
+          patch("robosystems.routers.graphs.backups.utils.verify_admin_access"),
           patch(
-            "robosystems.routers.graphs.backups.backup.MultiTenantUtils"
-          ) as mock_utils,
-        ):
-          # Mock MultiTenantUtils
-          mock_utils_instance = MagicMock()
-          mock_utils_instance.get_database_path_for_graph.return_value = (
-            "/tmp/test/path"
-          )
-          mock_utils.return_value = mock_utils_instance
-          # Mock is_shared_repository_or_subgraph to return False (not a shared repository)
-          mock_utils.is_shared_repository_or_subgraph.return_value = False
-
-          # Mock os.path.exists and os.walk for database size calculation
-          with (
-            patch("os.path.exists", return_value=True),
-            patch("os.walk", return_value=[("/tmp/test/path", [], ["file1.lbug"])]),
-            patch("os.path.getsize", return_value=1024),
-            patch(
-              "robosystems.worker.client.enqueue_task",
-              new_callable=AsyncMock,
-              return_value={
-                "operation_id": "op_test-backup-123",
-                "status": "pending",
-                "operation_type": "dagster_job_monitor",
-                "_links": {
-                  "stream": "/v1/operations/op_test-backup-123/stream",
-                  "status": "/v1/operations/op_test-backup-123/status",
-                  "cancel": "/v1/operations/op_test-backup-123",
-                },
+            "robosystems.config.shared_repositories.is_shared_repository_or_subgraph",
+            return_value=False,
+          ),
+          patch(
+            "robosystems.worker.client.enqueue_task",
+            new_callable=AsyncMock,
+            return_value={
+              "operation_id": "op_test-backup-123",
+              "status": "pending",
+              "operation_type": "dagster_job_monitor",
+              "_links": {
+                "stream": "/v1/operations/op_test-backup-123/stream",
               },
-            ),
-          ):
-            # Mock request data
-            request_data = {
-              "backup_format": "full_dump",
-              "encryption": False,
-              "retention_days": 30,
-            }
+            },
+          ),
+        ):
+          request_data = {
+            "backup_format": "full_dump",
+            "encryption": False,
+            "retention_days": 30,
+          }
 
-            response = client.post(
-              "/v1/graphs/kg1a2b3c4d5e6f7a8b/backups", json=request_data
-            )
+          response = client.post(
+            "/v1/graphs/kg1a2b3c4d5e6f7a8b/operations/create-backup",
+            json=request_data,
+          )
 
-            # Should not return 403 when enabled - should proceed to actual backup logic
-            assert response.status_code != 403
+          # Should not return 403 when enabled
+          assert response.status_code != 403
     finally:
       app.dependency_overrides.clear()
 

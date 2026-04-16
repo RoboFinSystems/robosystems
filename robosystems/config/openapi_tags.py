@@ -7,6 +7,14 @@ MAIN_API_TAGS = [
     "description": "🏗️ Graphs - Create and manage knowledge graph tenants",
   },
   {
+    "name": "MCP",
+    "description": "🔌 MCP - Model Context Protocol for AI interactions with graph data",
+  },
+  {
+    "name": "Agent",
+    "description": "🤖 AI Agents - Intelligent AI agents for analyzing and managing graph data",
+  },
+  {
     "name": "Query",
     "description": "🔍 Graph queries - Execute Cypher queries against graph databases",
   },
@@ -15,12 +23,16 @@ MAIN_API_TAGS = [
     "description": "🔎 Search - Full-text and semantic search on documents, narratives and disclosures",
   },
   {
-    "name": "MCP",
-    "description": "🔌 MCP - Model Context Protocol for AI interactions with graph data",
+    "name": "Documents",
+    "description": "📑 Documents - Upload, list, and manage documents for search and analysis",
   },
   {
-    "name": "Agent",
-    "description": "🤖 AI Agents - Intelligent AI agents for analyzing and managing graph data",
+    "name": "Tables",
+    "description": "🗃️ Staging tables - Table metadata and SQL queries on the staging layer",
+  },
+  {
+    "name": "Files",
+    "description": "📄 File management - Upload, track, and manage data files for generic graphs",
   },
   {
     "name": "Extensions: GraphQL",
@@ -37,18 +49,6 @@ MAIN_API_TAGS = [
   {
     "name": "Graph Operations",
     "description": "⚙️ Graph lifecycle commands — subgraphs, backups, tier changes, materialization",
-  },
-  {
-    "name": "Documents",
-    "description": "📑 Documents - Upload, list, and manage documents for search and analysis",
-  },
-  {
-    "name": "Tables",
-    "description": "🗃️ Staging tables - SQL queries and data ingestion via DuckDB staging layer",
-  },
-  {
-    "name": "Files",
-    "description": "📄 File management - Upload, track, and manage data files in custom graphs",
   },
   {
     "name": "Subgraphs",
@@ -72,7 +72,7 @@ MAIN_API_TAGS = [
   },
   {
     "name": "Subscriptions",
-    "description": "💳 Subscriptions - Manage graph & shared repository subscriptions",
+    "description": "💳 Subscriptions - Manage shared repository subscriptions",
   },
   {
     "name": "Connections",
@@ -91,8 +91,16 @@ MAIN_API_TAGS = [
     "description": "ℹ️ Graph info - Get graph database information, statistics, and metadata",
   },
   {
+    "name": "Operations",
+    "description": "⏱️ Operation monitoring - Track SSE stream status and progress",
+  },
+  {
     "name": "User",
     "description": "👤 User management - Profile, settings, and account information",
+  },
+  {
+    "name": "Auth",
+    "description": "🔐 Authentication - Login, register, and access token management",
   },
   {
     "name": "Org",
@@ -109,14 +117,6 @@ MAIN_API_TAGS = [
   {
     "name": "Billing",
     "description": "🛒 Billing - Create and manage billing checkout sessions",
-  },
-  {
-    "name": "Operations",
-    "description": "⏱️ Operation monitoring - Track SSE stream status and progress",
-  },
-  {
-    "name": "Auth",
-    "description": "🔐 Authentication - Login, register, and access token management",
   },
   {
     "name": "Service Offerings",
