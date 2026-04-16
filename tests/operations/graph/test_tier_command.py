@@ -20,7 +20,6 @@ _CORE = "robosystems.models.core"
 _GRAPH = "robosystems.models.core.graph.Graph"
 _GRAPH_CREDITS = "robosystems.models.core.graph.graph_credits.GraphCredits"
 _BILLING_CFG = "robosystems.config.billing"
-_VALIDATION = "robosystems.operations.graph.tier_validation"
 _PAYMENT = "robosystems.operations.providers.payment_provider.get_payment_provider"
 _WORKER = "robosystems.worker.client.enqueue_task"
 _CACHE_INVALIDATE = (

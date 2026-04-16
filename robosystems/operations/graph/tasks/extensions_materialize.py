@@ -47,6 +47,7 @@ class ExtensionsMaterializeTask(BaseTask):
         logger.error(
           f"Extensions materialization failed for {self.graph_id}: {result.errors}"
         )
+        await self.report_progress("Materialization failed.", percent=100)
         return {
           "graph_id": self.graph_id,
           "status": "error",
