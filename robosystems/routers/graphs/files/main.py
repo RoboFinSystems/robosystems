@@ -1,24 +1,4 @@
-"""
-File Management - Main Endpoints.
-
-This module provides core file operations at the graph level, treating files as
-first-class citizens with their own namespace.
-
-Key Features:
-- List files across graph with filtering
-- Get detailed file information with multi-layer status
-- Delete files with cascade support
-- Independent file lifecycle management
-
-Multi-Layer Status Tracking:
-- S3 layer: Immutable source with upload status
-- DuckDB layer: Mutable staging with immediate queryability
-- Graph layer: Immutable materialized view
-
-Architecture:
-Files are first-class resources queried by file_id, independent of table context.
-This enables clean REST semantics and file-centric operations.
-"""
+"""Graph file listing, retrieval, and deletion endpoints."""
 
 from datetime import UTC, datetime
 
@@ -40,7 +20,7 @@ from robosystems.middleware.otel.metrics import (
   get_endpoint_metrics,
 )
 from robosystems.middleware.rate_limits import subscription_aware_rate_limit_dependency
-from robosystems.models.api.common import ErrorResponse
+from robosystems.models.api.common import RESOURCE_ERROR_RESPONSES
 from robosystems.models.api.graphs.tables import (
   DeleteFileResponse,
   EnhancedFileStatusLayers,
@@ -60,73 +40,8 @@ router = APIRouter()
   response_model=ListTableFilesResponse,
   operation_id="listFiles",
   summary="List Files in Graph",
-  description="""List all files in the graph with optional filtering.
-
-Get a complete inventory of files across all tables or filtered by table name,
-status, or other criteria. Files are first-class resources with independent lifecycle.
-
-**Query Parameters:**
-- `table_name` (optional): Filter by table name
-- `status` (optional): Filter by upload status (uploaded, pending, failed, etc.)
-
-**Use Cases:**
-- Monitor file upload progress across all tables
-- Verify files are ready for ingestion
-- Check file metadata and sizes
-- Track storage usage per graph
-- Identify failed or incomplete uploads
-- Audit file provenance
-
-**Returned Metadata:**
-- File ID, name, and format (parquet, csv, json)
-- Size in bytes and row count (if available)
-- Upload status and timestamps
-- DuckDB and graph ingestion status
-- Table association
-
-**File Lifecycle Tracking:**
-Multi-layer status across S3 → DuckDB → Graph pipeline
-
-**Important Notes:**
-- Files are graph-scoped, not table-scoped
-- Use table_name parameter to filter by table
-- File listing is included - no credit consumption""",
-  responses={
-    200: {
-      "description": "Files retrieved successfully",
-      "content": {
-        "application/json": {
-          "example": {
-            "graph_id": "kg123",
-            "table_name": None,
-            "files": [
-              {
-                "file_id": "f123",
-                "file_name": "data.parquet",
-                "file_format": "parquet",
-                "size_bytes": 1048576,
-                "row_count": 5000,
-                "upload_status": "uploaded",
-                "table_name": "Entity",
-                "created_at": "2025-10-28T10:00:00Z",
-                "uploaded_at": "2025-10-28T10:01:30Z",
-              }
-            ],
-            "total_files": 1,
-            "total_size_bytes": 1048576,
-          }
-        }
-      },
-    },
-    403: {
-      "description": "Access denied - insufficient permissions",
-      "model": ErrorResponse,
-    },
-    404: {
-      "description": "Graph not found",
-      "model": ErrorResponse,
-    },
-  },
+  description="Filter by `table_name` or upload `status`. Files are graph-scoped resources with S3 → DuckDB → Graph lifecycle tracking.",
+  responses={**RESOURCE_ERROR_RESPONSES},
 )
 @endpoint_metrics_decorator(
   "/v1/graphs/{graph_id}/files", business_event_type="files_listed"
@@ -147,12 +62,6 @@ async def list_files(
   _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
   db: Session = Depends(get_db_session),
 ) -> ListTableFilesResponse:
-  """
-  List all files in the graph with optional filtering.
-
-  Files are first-class resources queried at graph level, with optional
-  filtering by table or status.
-  """
   start_time = datetime.now(UTC)
 
   # Enforce graph lifecycle and subscription status (read operation)
@@ -280,91 +189,8 @@ async def list_files(
   response_model=GetFileInfoResponse,
   operation_id="getFile",
   summary="Get File Information",
-  description="""Get detailed information about a specific file.
-
-Retrieve comprehensive metadata for a single file by file_id, independent of
-table context. Files are first-class resources with complete lifecycle tracking.
-
-**Returned Information:**
-- File ID, name, format, size
-- Upload status and timestamps
-- **Enhanced Multi-Layer Status** (new in this version):
-  - S3 layer: upload_status, uploaded_at, size_bytes, row_count
-  - DuckDB layer: duckdb_status, duckdb_staged_at, duckdb_row_count
-  - Graph layer: graph_status, graph_ingested_at
-- Table association
-- S3 location
-
-**Multi-Layer Pipeline Visibility:**
-The `layers` object provides independent status tracking across the three-tier
-data pipeline:
-- **S3 (Immutable Source)**: File upload and validation
-- **DuckDB (Mutable Staging)**: Immediate queryability with file provenance
-- **Graph (Immutable View)**: Optional graph database materialization
-
-Each layer shows its own status, timestamp, and row count (where applicable),
-enabling precise debugging and monitoring of the data ingestion flow.
-
-**Use Cases:**
-- Validate file upload completion
-- Monitor multi-layer ingestion progress in real-time
-- Debug upload or staging issues at specific layers
-- Verify file metadata and row counts
-- Track file provenance through the pipeline
-- Identify bottlenecks in the ingestion process
-
-**Note:**
-File info retrieval is included - no credit consumption""",
-  responses={
-    200: {
-      "description": "File information retrieved successfully",
-      "content": {
-        "application/json": {
-          "example": {
-            "file_id": "f123",
-            "graph_id": "kg123",
-            "table_id": "t456",
-            "table_name": "Entity",
-            "file_name": "data.parquet",
-            "file_format": "parquet",
-            "size_bytes": 1048576,
-            "row_count": 5000,
-            "upload_status": "uploaded",
-            "created_at": "2025-10-28T10:00:00Z",
-            "uploaded_at": "2025-10-28T10:01:30Z",
-            "layers": {
-              "s3": {
-                "status": "uploaded",
-                "timestamp": "2025-10-28T10:01:30Z",
-                "row_count": 5000,
-                "size_bytes": 1048576,
-              },
-              "duckdb": {
-                "status": "staged",
-                "timestamp": "2025-10-28T10:02:15Z",
-                "row_count": 5000,
-                "size_bytes": None,
-              },
-              "graph": {
-                "status": "ingested",
-                "timestamp": "2025-10-28T10:05:45Z",
-                "row_count": None,
-                "size_bytes": None,
-              },
-            },
-          }
-        }
-      },
-    },
-    403: {
-      "description": "Access denied - insufficient permissions",
-      "model": ErrorResponse,
-    },
-    404: {
-      "description": "File not found",
-      "model": ErrorResponse,
-    },
-  },
+  description="Returns per-layer status (`layers.s3`, `layers.duckdb`, `layers.graph`) for pipeline debugging.",
+  responses={**RESOURCE_ERROR_RESPONSES},
 )
 @endpoint_metrics_decorator(
   "/v1/graphs/{graph_id}/files/{file_id}", business_event_type="file_retrieved"
@@ -380,11 +206,6 @@ async def get_file(
   _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
   db: Session = Depends(get_db_session),
 ) -> GetFileInfoResponse:
-  """
-  Get detailed information about a specific file.
-
-  Returns comprehensive file metadata by file_id, independent of table context.
-  """
   start_time = datetime.now(UTC)
 
   try:
@@ -493,67 +314,8 @@ async def get_file(
   response_model=DeleteFileResponse,
   operation_id="deleteFile",
   summary="Delete File",
-  description="""Delete file from all layers.
-
-Remove file from S3, database tracking, and optionally from DuckDB and graph.
-Files are deleted by file_id, independent of table context.
-
-**Query Parameters:**
-- `cascade` (optional, default=false): Delete from all layers including DuckDB
-
-**What Happens (cascade=false):**
-1. File deleted from S3
-2. Database record removed
-3. Table statistics updated
-
-**What Happens (cascade=true):**
-1. File data deleted from all DuckDB tables (by file_id)
-2. Graph marked as stale
-3. File deleted from S3
-4. Database record removed
-5. Table statistics updated
-
-**Use Cases:**
-- Remove incorrect or duplicate files
-- Clean up failed uploads
-- Delete files before graph ingestion
-- Surgical data removal with cascade
-
-**Security:**
-- Write access required
-- Shared repositories block deletions
-- Full audit trail
-
-**Important:**
-- Use cascade=true for immediate DuckDB cleanup
-- Graph rebuild recommended after cascade deletion
-- File deletion is included - no credit consumption""",
-  responses={
-    200: {
-      "description": "File deleted successfully",
-      "content": {
-        "application/json": {
-          "example": {
-            "status": "deleted",
-            "file_id": "f123",
-            "file_name": "data.parquet",
-            "message": "File deleted successfully. Removed data from 2 DuckDB table(s). Graph marked as stale - rebuild recommended.",
-            "cascade_deleted": True,
-            "tables_affected": ["Fact", "Element"],
-            "graph_marked_stale": True,
-          }
-        }
-      },
-    },
-    403: {
-      "description": "Access denied - shared repositories or insufficient permissions",
-      "model": ErrorResponse,
-    },
-    404: {
-      "description": "File not found",
-      "model": ErrorResponse,
-    },
-  },
+  description="Removes from S3 and database. `cascade=true` also deletes data from DuckDB tables and marks the graph stale (rebuild recommended). Not allowed on shared repositories.",
+  responses={**RESOURCE_ERROR_RESPONSES},
 )
 @endpoint_metrics_decorator(
   "/v1/graphs/{graph_id}/files/{file_id}", business_event_type="file_deleted"
@@ -573,12 +335,6 @@ async def delete_file(
   _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
   db: Session = Depends(get_db_session),
 ) -> DeleteFileResponse:
-  """
-  Delete file from all layers.
-
-  Removes file by file_id, independent of table context. Supports cascade
-  deletion across S3, DuckDB, and graph layers.
-  """
   start_time = datetime.now(UTC)
 
   # Enforce graph lifecycle and subscription status (write operation)

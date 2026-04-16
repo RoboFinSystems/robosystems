@@ -18,7 +18,7 @@ from ...logger import logger
 from ...middleware.auth.jwt import create_jwt_token, verify_jwt_token
 from ...middleware.rate_limits import auth_rate_limit_dependency
 from ...models.api.auth import AuthResponse, EmailVerificationRequest
-from ...models.api.common import ErrorResponse
+from ...models.api.common import COMMON_ERROR_RESPONSES, ErrorResponse
 from ...models.core import User, UserToken
 from ...security import SecurityAuditLogger, SecurityEventType
 from .utils import detect_app_source
@@ -88,13 +88,11 @@ async def get_current_user_for_email_verification(
 
 @router.post(
   "/email/resend",
-  status_code=status.HTTP_200_OK,
   summary="Resend Email Verification",
   description="Resend verification email to the authenticated user. Rate limited to 3 per hour.",
   operation_id="resendVerificationEmail",
   responses={
-    400: {"model": ErrorResponse, "description": "Email already verified"},
-    429: {"model": ErrorResponse, "description": "Rate limit exceeded"},
+    **COMMON_ERROR_RESPONSES,
     503: {"model": ErrorResponse, "description": "Email service unavailable"},
   },
 )
@@ -105,22 +103,6 @@ async def resend_verification_email(
   session: Session = Depends(get_async_db_session),
   _rate_limit: None = Depends(auth_rate_limit_dependency),
 ) -> dict:
-  """
-  Resend email verification link to the authenticated user.
-
-  Args:
-      request: FastAPI request object
-      background_tasks: FastAPI background tasks for async email
-      current_user: Currently authenticated user
-      session: Database session
-      _rate_limit: Rate limiting dependency
-
-  Returns:
-      Success message
-
-  Raises:
-      HTTPException: If email is already verified
-  """
   # Check if already verified
   if current_user.email_verified:
     raise HTTPException(
@@ -181,13 +163,10 @@ async def resend_verification_email(
 @router.post(
   "/email/verify",
   response_model=AuthResponse,
-  status_code=status.HTTP_200_OK,
   summary="Verify Email",
   description="Verify email address with token from email link. Returns JWT for auto-login.",
   operation_id="verifyEmail",
-  responses={
-    400: {"model": ErrorResponse, "description": "Invalid or expired token"},
-  },
+  responses={**COMMON_ERROR_RESPONSES},
 )
 async def verify_email(
   request: EmailVerificationRequest,
@@ -195,21 +174,6 @@ async def verify_email(
   background_tasks: BackgroundTasks,
   session: Session = Depends(get_async_db_session),
 ) -> AuthResponse:
-  """
-  Verify email address with token.
-
-  Args:
-      request: Email verification request with token
-      fastapi_request: FastAPI request object
-      background_tasks: FastAPI background tasks for async email
-      session: Database session
-
-  Returns:
-      Auth response with JWT token for auto-login
-
-  Raises:
-      HTTPException: If token is invalid or expired
-  """
   # Verify token and get user
   user_id = UserToken.verify_token(
     raw_token=request.token,

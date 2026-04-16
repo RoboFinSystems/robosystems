@@ -13,6 +13,7 @@ from ...models.api.billing.checkout import (
   CheckoutStatusResponse,
   CreateCheckoutRequest,
 )
+from ...models.api.common import AUTHENTICATED_ERROR_RESPONSES, RESOURCE_ERROR_RESPONSES
 from ...models.core import User
 from ...models.core.billing import BillingCustomer, BillingSubscription
 from ...operations.providers.payment_provider import get_payment_provider
@@ -27,24 +28,12 @@ router = APIRouter(prefix="/billing", tags=["Billing"])
   response_model=CheckoutResponse,
   status_code=status.HTTP_201_CREATED,
   summary="Create Payment Checkout Session",
-  description="""Create a Stripe checkout session for collecting payment method.
-
-This endpoint is used when an organization owner needs to add a payment method before
-provisioning resources. It creates a pending subscription and redirects
-to Stripe Checkout to collect payment details.
-
-**Flow:**
-1. Owner tries to create a graph but org has no payment method
-2. Frontend calls this endpoint with graph configuration
-3. Backend creates a subscription in PENDING_PAYMENT status for the user's org
-4. Returns Stripe Checkout URL
-5. User completes payment on Stripe
-6. Webhook activates subscription and provisions resource
-
-**Requirements:**
-- User must be an OWNER of their organization
-- Enterprise customers (with invoice_billing_enabled) should not call this endpoint.""",
+  description="Initiates a Stripe checkout session for payment collection. Creates a pending subscription; the webhook activates it and provisions the resource after payment completes. Returns billing_disabled=true with no URL when billing is off. Requires org owner role.",
   operation_id="createCheckoutSession",
+  responses={
+    **AUTHENTICATED_ERROR_RESPONSES,
+    402: {"description": "Payment required"},
+  },
 )
 async def create_checkout_session(
   request: CreateCheckoutRequest,
@@ -52,7 +41,6 @@ async def create_checkout_session(
   db: Session = Depends(get_db_session),
   _rate_limit: None = Depends(billing_rate_limit_dependency),
 ):
-  """Create Stripe checkout session for payment collection."""
   if not env.BILLING_ENABLED:
     return CheckoutResponse(
       checkout_url=None,
@@ -227,22 +215,9 @@ async def create_checkout_session(
   "/checkout/{session_id}/status",
   response_model=CheckoutStatusResponse,
   summary="Get Checkout Session Status",
-  description="""Poll the status of a checkout session.
-
-Frontend should poll this endpoint after user returns from Stripe Checkout
-to determine when the resource is ready.
-
-**Status Values:**
-- `pending_payment`: Waiting for payment to complete
-- `provisioning`: Payment confirmed, resource being created
-- `active`: Resource is ready (resource_id will be set)
-- `failed`: Something went wrong (error field will be set)
-- `canceled`: Payment was canceled
-
-**When status is 'active':**
-- For graphs: `resource_id` will be the graph_id, and `operation_id` can be used to monitor SSE progress
-- For repositories: `resource_id` will be the repository name and access is immediately available""",
+  description="Poll after returning from Stripe Checkout. Status progresses: pending_payment → provisioning → active. When active, resource_id is populated; for graphs, operation_id tracks SSE provisioning progress.",
   operation_id="getCheckoutStatus",
+  responses={**RESOURCE_ERROR_RESPONSES},
 )
 async def get_checkout_status(
   session_id: str,
@@ -250,7 +225,6 @@ async def get_checkout_status(
   db: Session = Depends(get_db_session),
   _rate_limit: None = Depends(billing_rate_limit_dependency),
 ):
-  """Get status of a checkout session."""
   try:
     from ...models.core import OrgUser
 

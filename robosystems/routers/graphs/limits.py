@@ -1,8 +1,4 @@
-"""
-Graph database operational limits endpoint.
-
-This module provides REST API endpoints for retrieving operational limits.
-"""
+"""Graph database operational limits endpoint."""
 
 import asyncio
 
@@ -23,6 +19,7 @@ from robosystems.middleware.robustness import (
   CircuitBreakerManager,
   TimeoutCoordinator,
 )
+from robosystems.models.api.common import RESOURCE_ERROR_RESPONSES
 from robosystems.models.api.graphs.limits import (
   BackupLimits,
   ContentLimits,
@@ -37,7 +34,6 @@ from robosystems.models.api.graphs.limits import (
 )
 from robosystems.models.core import User
 
-# Create router
 router = APIRouter(tags=["Graph Limits"])
 
 # Initialize robustness components
@@ -46,7 +42,6 @@ timeout_coordinator = TimeoutCoordinator()
 
 
 async def _get_graph_client(graph_id: str) -> GraphClient:
-  """Get Graph client for the specified graph using factory for endpoint discovery."""
   from robosystems.config.shared_repositories import is_shared_repository_or_subgraph
   from robosystems.graph_api.client.factory import GraphClientFactory
 
@@ -69,26 +64,9 @@ async def _get_graph_client(graph_id: str) -> GraphClient:
   "/limits",
   response_model=GraphLimitsResponse,
   summary="Get Graph Operational Limits",
-  description="""Get comprehensive operational limits for the graph database.
-
-Returns all operational limits that apply to this graph including:
-- **Storage Limits**: Maximum storage size and current usage
-- **Query Limits**: Timeouts, complexity, row limits
-- **Copy/Ingestion Limits**: File sizes, timeouts, concurrent operations
-- **Backup Limits**: Frequency, retention, size limits
-- **Rate Limits**: Requests per minute/hour based on tier
-- **Credit Limits**: AI operation credits (if applicable)
-- **Content Limits**: Per-operation materialization limits (if applicable)
-- **Instance Usage**: Aggregate storage across parent + subgraphs (user graphs only)
-
-**Note**: Limits vary based on subscription tier (ladybug-standard, ladybug-large, ladybug-xlarge).""",
+  description="Limits vary by subscription tier (ladybug-standard, ladybug-large, ladybug-xlarge). Includes storage, query, backup, rate, credit, and instance usage limits.",
   operation_id="getGraphLimits",
-  responses={
-    200: {"description": "Limits retrieved successfully"},
-    403: {"description": "Access denied to graph"},
-    404: {"description": "Graph not found"},
-    500: {"description": "Failed to retrieve limits"},
-  },
+  responses={**RESOURCE_ERROR_RESPONSES},
 )
 @endpoint_metrics_decorator(
   endpoint_name="/v1/graphs/{graph_id}/limits",
@@ -104,21 +82,6 @@ async def get_graph_limits(
   session: Session = Depends(get_async_db_session),
   _: None = Depends(subscription_aware_rate_limit_dependency),
 ) -> GraphLimitsResponse:
-  """
-  Get comprehensive operational limits for the graph database.
-
-  This endpoint consolidates all operational limits into a single response,
-  making it easier for clients to understand their constraints.
-
-  Args:
-      graph_id: Graph database identifier
-      current_user: Authenticated user
-      session: Database session
-
-  Returns:
-      Dictionary containing all operational limits for the graph
-  """
-  # Check circuit breaker
   circuit_breaker.check_circuit(graph_id, "graph_limits")
 
   try:

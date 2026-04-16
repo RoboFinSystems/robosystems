@@ -270,19 +270,9 @@ class StrategySelector(BaseStrategySelector):
         return ExecutionStrategy.SSE_STREAMING, metadata
       elif client_info["capabilities"]["ndjson"]:
         return ExecutionStrategy.NDJSON_STREAMING, metadata
-      elif (
-        query_analysis["has_limit"]
-        and query_analysis["limit_value"] <= QueryAnalyzer.MEDIUM_RESULT
-      ):
-        # Has reasonable limit, can return as JSON
-        return ExecutionStrategy.JSON_COMPLETE, metadata
       else:
-        # Client doesn't support streaming but result is large
-        # Try NDJSON anyway (some clients might handle it)
-        logger.warning(
-          f"Large result ({estimated_rows} rows) without streaming support, using NDJSON"
-        )
-        return ExecutionStrategy.NDJSON_STREAMING, metadata
+        # Client doesn't support streaming — return as JSON regardless of size
+        return ExecutionStrategy.JSON_COMPLETE, metadata
 
 
 class QueryTimeoutCoordinator(TimeoutCoordinator):

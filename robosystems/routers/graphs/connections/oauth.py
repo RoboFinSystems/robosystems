@@ -13,8 +13,8 @@ from robosystems.middleware.auth.dependencies import get_current_user_with_graph
 from robosystems.middleware.graph.types import GRAPH_OR_SUBGRAPH_ID_PATTERN
 from robosystems.middleware.rate_limits import subscription_aware_rate_limit_dependency
 from robosystems.models.api.common import (
+  RESOURCE_ERROR_RESPONSES,
   ErrorCode,
-  ErrorResponse,
   create_error_response,
 )
 from robosystems.models.api.oauth import (
@@ -30,7 +30,13 @@ from .utils import provider_registry
 router = APIRouter()
 
 
-@router.post("/oauth/init", operation_id="initOAuth", response_model=OAuthInitResponse)
+@router.post(
+  "/oauth/init",
+  operation_id="initOAuth",
+  summary="Initialize OAuth Flow",
+  response_model=OAuthInitResponse,
+  responses={**RESOURCE_ERROR_RESPONSES},
+)
 async def init_oauth(
   graph_id: str = Path(
     ..., description="Graph database identifier", pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN
@@ -40,12 +46,6 @@ async def init_oauth(
   db: Session = Depends(get_db_session),
   _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
 ) -> OAuthInitResponse:
-  """
-  Initialize OAuth flow for a connection.
-
-  This generates an authorization URL that the frontend should redirect the user to.
-  Currently supports: QuickBooks
-  """
   try:
     # Get connection to verify it exists and get provider
     connection = await ConnectionService.get_connection(
@@ -102,45 +102,9 @@ async def init_oauth(
 @router.post(
   "/oauth/callback/{provider}",
   summary="OAuth Callback",
-  description="""Handle OAuth callback from provider after user authorization.
-
-This endpoint completes the OAuth flow:
-1. Validates the OAuth state parameter
-2. Exchanges authorization code for access tokens
-3. Stores tokens securely
-4. Updates connection status
-5. Optionally triggers initial sync
-
-Supported providers:
-- **QuickBooks**: Accounting data integration
-
-Security measures:
-- State validation prevents session hijacking
-- User context is verified
-- Tokens are encrypted before storage
-- Full audit trail is maintained
-
-No credits are consumed for OAuth callbacks.""",
+  description="Completes the OAuth authorization flow after provider redirect. Exchanges the authorization code for tokens, stores them, and triggers an initial sync. This is a redirect target — not typically called directly.",
   operation_id="oauthCallback",
-  responses={
-    200: {
-      "description": "OAuth flow completed successfully",
-      "content": {
-        "application/json": {
-          "example": {
-            "success": True,
-            "message": "QuickBooks connection established successfully",
-            "connection_id": "conn_123456",
-            "auto_sync_task_id": "task_789012",
-          }
-        }
-      },
-    },
-    400: {"description": "OAuth error or invalid state", "model": ErrorResponse},
-    403: {"description": "State does not match user", "model": ErrorResponse},
-    404: {"description": "Connection not found", "model": ErrorResponse},
-    500: {"description": "OAuth callback processing failed", "model": ErrorResponse},
-  },
+  responses={**RESOURCE_ERROR_RESPONSES},
 )
 async def oauth_callback(
   provider: str = Path(..., description="OAuth provider name"),
@@ -152,12 +116,6 @@ async def oauth_callback(
   db: Session = Depends(get_db_session),
   _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
 ):
-  """
-  Handle OAuth callback from provider.
-
-  This endpoint is called by the OAuth provider after user authorization.
-  It exchanges the authorization code for tokens and updates the connection.
-  """
   try:
     # Handle OAuth errors
     if request.error:

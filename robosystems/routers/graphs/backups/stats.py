@@ -20,6 +20,7 @@ from robosystems.middleware.auth.dependencies import get_current_user_with_graph
 from robosystems.middleware.graph.types import GRAPH_OR_SUBGRAPH_ID_PATTERN
 from robosystems.middleware.otel.metrics import endpoint_metrics_decorator
 from robosystems.middleware.rate_limits import subscription_aware_rate_limit_dependency
+from robosystems.models.api.common import RESOURCE_ERROR_RESPONSES
 from robosystems.models.api.graphs.backups import BackupStatsResponse
 from robosystems.models.core import User
 
@@ -35,8 +36,7 @@ router = APIRouter()
   response_model=BackupStatsResponse,
   operation_id="getBackupStats",
   summary="Get backup statistics",
-  description="Get comprehensive backup statistics for the specified graph database",
-  status_code=status.HTTP_200_OK,
+  responses={**RESOURCE_ERROR_RESPONSES},
 )
 @endpoint_metrics_decorator(
   endpoint_name="/v1/graphs/{graph_id}/backup/stats",
@@ -51,12 +51,6 @@ async def get_backup_stats(
   db: Session = Depends(get_async_db_session),
   _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
 ) -> BackupStatsResponse:
-  """
-  Get comprehensive backup statistics for the specified graph database.
-
-  Returns aggregated statistics including success rates, storage metrics,
-  compression ratios, and backup format distribution.
-  """
   try:
     logger.info(
       f"Starting get_backup_stats for graph_id: {graph_id}, user: {current_user.id}"

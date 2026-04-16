@@ -24,7 +24,7 @@ from ...middleware.otel.metrics import endpoint_metrics_decorator, record_auth_m
 from ...middleware.rate_limits import auth_rate_limit_dependency
 from ...middleware.sse import build_email_job_config, run_and_monitor_dagster_job
 from ...models.api.auth import AuthResponse, RegisterRequest
-from ...models.api.common import ErrorResponse
+from ...models.api.common import COMMON_ERROR_RESPONSES, ErrorResponse
 from ...models.core import Org, OrgLimits, User, UserToken
 from ...security import SecurityAuditLogger, SecurityEventType
 from ...security.auth_protection import AdvancedAuthProtection
@@ -46,18 +46,11 @@ router = APIRouter()
   response_model=AuthResponse,
   status_code=status.HTTP_201_CREATED,
   summary="Register New User",
-  description="""Register a new user account with email and password.
-
-**Organization Creation**: RoboSystems is an org-centric platform. When you register, a personal organization is automatically created for you. All resources (graphs, subscriptions, billing) belong to organizations, not individual users. You can later upgrade your personal org to a team or enterprise organization.
-
-**Security Controls**: CAPTCHA and email verification are disabled in development for API testing, but required in production.""",
+  description="Creates the user and a personal organization. CAPTCHA required in production. Sends verification email when email verification is enabled.",
   operation_id="registerUser",
   responses={
+    **COMMON_ERROR_RESPONSES,
     409: {"model": ErrorResponse, "description": "Email already registered"},
-    400: {
-      "model": ErrorResponse,
-      "description": "Invalid request data or missing CAPTCHA token (production only)",
-    },
     503: {"model": ErrorResponse, "description": "Registration temporarily disabled"},
   },
 )
@@ -70,31 +63,6 @@ async def register(
   session: Session = Depends(get_async_db_session),
   rate_limit: None = Depends(auth_rate_limit_dependency),
 ) -> AuthResponse:
-  """
-  Register a new user account with environment-based security controls.
-
-  RoboSystems is an org-centric platform where all resources belong to organizations.
-  During registration, a personal organization is automatically created for the user,
-  providing a foundation for resource management. Users can later upgrade their
-  personal org to a team or enterprise organization.
-
-  Security controls vary by environment:
-  - Development: CAPTCHA and email verification disabled for API testing convenience
-  - Production: CAPTCHA and email verification required for security
-
-  Args:
-      request: Registration request with name, email, password, and optional CAPTCHA token
-      response: FastAPI response object for setting cookies
-      fastapi_request: FastAPI request object for security logging
-      session: Database session
-      rate_limit: Rate limiting dependency
-
-  Returns:
-      AuthResponse: Success response with user data and environment-appropriate message
-
-  Raises:
-      HTTPException: If email is already registered, missing CAPTCHA token (production), or other validation errors
-  """
   # Check if registration is enabled
   if not env.USER_REGISTRATION_ENABLED:
     # Get client details for security logging

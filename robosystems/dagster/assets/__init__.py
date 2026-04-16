@@ -14,6 +14,7 @@ and are collected via get_dagster_components() in definitions.py.
 
 from robosystems.dagster.assets.graphs import (
   user_graph_creation_source,
+  user_graph_extensions_materialized_source,
   user_graph_file_staging_source,
   user_graph_materialized_source,
   user_repository_provisioning_source,
@@ -28,6 +29,7 @@ __all__ = [
   "SharedReplicaRefreshConfig",
   "build_shared_replicas_refreshed",
   "user_graph_creation_source",
+  "user_graph_extensions_materialized_source",
   "user_graph_file_staging_source",
   "user_graph_materialized_source",
   "user_repository_provisioning_source",

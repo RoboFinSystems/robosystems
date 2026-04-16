@@ -14,8 +14,9 @@ from ...middleware.otel.metrics import (
 )
 from ...middleware.rate_limits import user_management_rate_limit_dependency
 from ...models.api.common import (
+  AUTHENTICATED_ERROR_RESPONSES,
+  RESOURCE_ERROR_RESPONSES,
   ErrorCode,
-  ErrorResponse,
   SuccessResponse,
   create_error_response,
 )
@@ -36,9 +37,8 @@ router = APIRouter(tags=["User"])
   "/user/api-keys",
   response_model=APIKeysResponse,
   summary="List API Keys",
-  description="Get all API keys for the current user.",
-  status_code=status.HTTP_200_OK,
   operation_id="listUserAPIKeys",
+  responses={**AUTHENTICATED_ERROR_RESPONSES},
 )
 @endpoint_metrics_decorator(
   endpoint_name="/v1/user/api-keys", business_event_type="api_keys_listed"
@@ -48,18 +48,6 @@ async def list_api_keys(
   db: Session = Depends(get_db_session),
   _rate_limit: None = Depends(user_management_rate_limit_dependency),
 ) -> APIKeysResponse:
-  """
-  Get all API keys for the current user.
-
-  Args:
-      current_user: The authenticated user
-
-  Returns:
-      APIKeysResponse: List of user's API keys
-
-  Raises:
-      HTTPException: If there's an error retrieving the API keys
-  """
   user_id = getattr(current_user, "id", None) if current_user else None
 
   try:
@@ -121,9 +109,10 @@ async def list_api_keys(
   "/user/api-keys",
   response_model=CreateAPIKeyResponse,
   summary="Create API Key",
-  description="Create a new API key for the current user.",
+  description="The raw key value is only returned once at creation time and cannot be retrieved again.",
   status_code=status.HTTP_201_CREATED,
   operation_id="createUserAPIKey",
+  responses={**AUTHENTICATED_ERROR_RESPONSES},
 )
 @endpoint_metrics_decorator(
   endpoint_name="/v1/user/api-keys", business_event_type="api_key_created"
@@ -134,19 +123,6 @@ async def create_api_key(
   db: Session = Depends(get_db_session),
   _rate_limit: None = Depends(user_management_rate_limit_dependency),
 ) -> CreateAPIKeyResponse:
-  """
-  Create a new API key for the current user.
-
-  Args:
-      request: API key creation request
-      current_user: The authenticated user
-
-  Returns:
-      CreateAPIKeyResponse: Created API key information with the actual key
-
-  Raises:
-      HTTPException: If there's an error creating the API key
-  """
   user_id = getattr(current_user, "id", None) if current_user else None
 
   try:
@@ -222,9 +198,8 @@ async def create_api_key(
   "/user/api-keys/{api_key_id}",
   response_model=APIKeyInfo,
   summary="Update API Key",
-  description="Update an API key's name or description.",
-  status_code=status.HTTP_200_OK,
   operation_id="updateUserAPIKey",
+  responses={**RESOURCE_ERROR_RESPONSES},
 )
 @endpoint_metrics_decorator(
   endpoint_name="/v1/user/api-keys/{api_key_id}", business_event_type="api_key_updated"
@@ -236,20 +211,6 @@ async def update_api_key(
   db: Session = Depends(get_db_session),
   _rate_limit: None = Depends(user_management_rate_limit_dependency),
 ) -> APIKeyInfo:
-  """
-  Update an API key's name or description.
-
-  Args:
-      api_key_id: The API key ID to update
-      request: Update request with new values
-      current_user: The authenticated user
-
-  Returns:
-      APIKeyInfo: Updated API key information
-
-  Raises:
-      HTTPException: If API key not found or access denied
-  """
   user_id = getattr(current_user, "id", None) if current_user else None
 
   try:
@@ -325,14 +286,9 @@ async def update_api_key(
   "/user/api-keys/{api_key_id}",
   response_model=SuccessResponse,
   summary="Revoke API Key",
-  description="Revoke (deactivate) an API key.",
-  status_code=status.HTTP_200_OK,
+  description="Deactivates the key immediately. Requests using the revoked key will fail with 401.",
   operation_id="revokeUserAPIKey",
-  responses={
-    200: {"description": "API key revoked successfully", "model": SuccessResponse},
-    404: {"description": "API key not found", "model": ErrorResponse},
-    500: {"description": "Error revoking API key", "model": ErrorResponse},
-  },
+  responses={**RESOURCE_ERROR_RESPONSES},
 )
 @endpoint_metrics_decorator(
   endpoint_name="/v1/user/api-keys/{api_key_id}", business_event_type="api_key_revoked"
@@ -343,19 +299,6 @@ async def revoke_api_key(
   db: Session = Depends(get_db_session),
   _rate_limit: None = Depends(user_management_rate_limit_dependency),
 ):
-  """
-  Revoke (deactivate) an API key.
-
-  Args:
-      api_key_id: The API key ID to revoke
-      current_user: The authenticated user
-
-  Returns:
-      Success status
-
-  Raises:
-      HTTPException: If API key not found or access denied
-  """
   user_id = getattr(current_user, "id", None) if current_user else None
 
   try:

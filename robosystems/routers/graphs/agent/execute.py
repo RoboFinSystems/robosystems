@@ -1,9 +1,4 @@
-"""
-Agent execution endpoints.
-
-Provides the main agent execution endpoints with intelligent strategy selection,
-similar to MCP tool execution.
-"""
+"""Agent execution endpoints with intelligent strategy selection."""
 
 import asyncio
 
@@ -27,7 +22,7 @@ from robosystems.middleware.auth.dependencies import get_current_user_with_graph
 from robosystems.middleware.graph.types import GRAPH_OR_SUBGRAPH_ID_PATTERN
 from robosystems.middleware.otel.metrics import endpoint_metrics_decorator
 from robosystems.middleware.rate_limits import subscription_aware_rate_limit_dependency
-from robosystems.models.api.common import ErrorResponse
+from robosystems.models.api.common import RESOURCE_ERROR_RESPONSES
 from robosystems.models.api.graphs.agent import (
   AgentListResponse,
   AgentMetadataResponse,
@@ -95,21 +90,10 @@ def _convert_agent_mode(mode: AgentMode | None) -> BaseAgentMode:
 @router.get(
   "/agent",
   response_model=AgentListResponse,
-  summary="List available agents",
-  description="""Get a comprehensive list of all available agents with their metadata.
-
-**Returns:**
-- Agent types and names
-- Capabilities and supported modes
-- Version information
-- Credit requirements
-
-Use the optional `capability` filter to find agents with specific capabilities.""",
+  summary="List Available Agents",
+  description="Filter by capability using the `capability` query param (e.g., `financial_analysis`, `rag_search`).",
   operation_id="listAgents",
-  responses={
-    200: {"description": "List of agents retrieved successfully"},
-    401: {"description": "Unauthorized - Invalid or missing authentication"},
-  },
+  responses={**RESOURCE_ERROR_RESPONSES},
 )
 @endpoint_metrics_decorator(
   "/v1/graphs/{graph_id}/agent", business_event_type="agent_list"
@@ -127,7 +111,6 @@ async def list_agents_endpoint(
   _current_user: User = Depends(get_current_user_with_graph),
   _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
 ) -> AgentListResponse:
-  """List all available agents."""
   agents = list_agents()
 
   if capability:
@@ -141,74 +124,13 @@ async def list_agents_endpoint(
 @router.post(
   "/agent",
   response_model=AgentResponse,
-  summary="Auto-select agent for query",
-  description="""Automatically select the best agent for your query with intelligent execution strategy.
-
-**Agent Selection Process:**
-
-The orchestrator intelligently routes your query by:
-1. Analyzing query intent and complexity
-2. Enriching context with RAG if enabled
-3. Evaluating all available agents against selection criteria
-4. Selecting the best match based on confidence scores
-5. Choosing execution strategy (sync/SSE/async) based on expected time
-6. Executing the query with the selected agent
-
-**Available Agent Types:**
-- `financial`: Financial analysis, SEC filings, company metrics
-- `research`: General research, data exploration, trend analysis
-- `rag`: Knowledge base search using RAG enrichment
-
-**Execution Modes:**
-- `quick`: Fast responses (~2-5s), suitable for simple queries
-- `standard`: Balanced approach (~5-15s), default mode
-- `extended`: Comprehensive analysis (~15-60s), deep research
-- `streaming`: Real-time response streaming
-
-**Execution Strategies (automatic):**
-- Fast operations (<5s): Immediate synchronous response
-- Medium operations (5-30s): SSE streaming with progress updates
-- Long operations (>30s): Background queue with operation tracking
-
-**Response Mode Override:**
-Use query parameter `?mode=sync|async` to override automatic strategy selection.
-
-**Confidence Score Interpretation:**
-- `0.9-1.0`: High confidence, agent is ideal match
-- `0.7-0.9`: Good confidence, agent is suitable
-- `0.5-0.7`: Moderate confidence, agent can handle but may not be optimal
-- `0.3-0.5`: Low confidence, fallback agent used
-- `<0.3`: Very low confidence, consider using specific agent endpoint
-
-**Credit Costs:**
-- Quick mode: 5-10 credits per query
-- Standard mode: 15-25 credits per query
-- Extended mode: 30-75 credits per query
-- RAG enrichment: +5-15 credits (if enabled)
-
-**Use Cases:**
-- Ask questions without specifying agent type
-- Get intelligent routing for complex multi-domain queries
-- Leverage conversation history for contextual understanding
-- Enable RAG for knowledge base enrichment
-
-**Subgraph Support:**
-This endpoint accepts both parent graph IDs and subgraph IDs.
-- Parent graph: Use `graph_id` like `kg0123456789abcdef`
-- Subgraph: Use full subgraph ID like `kg0123456789abcdef_dev`
-Agents operate on the specified graph/subgraph's data independently. RAG enrichment
-and knowledge base search are scoped to the specific graph/subgraph.
-
-See request/response examples in the "Examples" dropdown below.""",
+  summary="Auto-select Agent for Query",
+  description="Routes to the best agent for your query. Agents: `financial` (SEC, accounting), `research` (deep analysis), `rag` (knowledge base, free). Credit cost by mode: `quick` 5-10, `standard` 15-25, `extended` 30-75. Execution strategy (sync/SSE/async) auto-selected; override with `?mode=sync|async`.",
   operation_id="autoSelectAgent",
-  status_code=200,
   responses={
-    200: {"description": "Query successfully processed by selected agent"},
-    202: {"description": "Query queued for async processing with operation tracking"},
-    400: {"description": "Invalid request parameters"},
-    402: {"description": "Insufficient credits for selected agent"},
-    429: {"description": "Rate limit exceeded"},
-    500: {"description": "Internal server error", "model": ErrorResponse},
+    **RESOURCE_ERROR_RESPONSES,
+    202: {"description": "Query queued for async processing"},
+    402: {"description": "Insufficient credits"},
   },
 )
 @endpoint_metrics_decorator(
@@ -230,7 +152,6 @@ async def auto_agent(
   db: Session = Depends(get_db_session),
   _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
 ) -> AgentResponse | JSONResponse | EventSourceResponse:
-  """Automatically select the best agent for the query with intelligent execution strategy."""
   _check_agent_post_enabled()
 
   try:
@@ -327,23 +248,9 @@ async def auto_agent(
 @router.get(
   "/agent/{agent_type}",
   response_model=AgentMetadataResponse,
-  summary="Get agent metadata",
-  description="""Get comprehensive metadata for a specific agent type.
-
-**Returns:**
-- Agent name and description
-- Version information
-- Supported capabilities and modes
-- Credit requirements
-- Author and tags
-- Configuration options
-
-Use this to understand agent capabilities before execution.""",
+  summary="Get Agent Metadata",
   operation_id="getAgentMetadata",
-  responses={
-    200: {"description": "Agent metadata retrieved successfully"},
-    404: {"description": "Agent type not found"},
-  },
+  responses={**RESOURCE_ERROR_RESPONSES},
 )
 @endpoint_metrics_decorator(
   "/v1/graphs/{graph_id}/agent/{agent_type}",
@@ -363,7 +270,6 @@ async def get_agent_metadata(
   _current_user: User = Depends(get_current_user_with_graph),
   _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
 ) -> AgentMetadataResponse:
-  """Get metadata for a specific agent."""
   agents = list_agents()
   metadata = agents.get(agent_type)
 
@@ -376,33 +282,13 @@ async def get_agent_metadata(
 @router.post(
   "/agent/{agent_type}",
   response_model=AgentResponse,
-  summary="Execute specific agent",
-  description="""Execute a specific agent type directly with intelligent execution strategy.
-
-Available agents:
-- **financial**: Financial analysis, SEC filings, accounting data
-- **research**: Deep research and comprehensive analysis
-- **rag**: Fast retrieval without AI (no credits required)
-
-**Execution Strategies (automatic):**
-- Fast operations (<5s): Immediate synchronous response
-- Medium operations (5-30s): SSE streaming with progress updates
-- Long operations (>30s): Background queue with operation tracking
-
-**Response Mode Override:**
-Use query parameter `?mode=sync|async` to override automatic strategy selection.
-
-Use this endpoint when you know which agent you want to use.""",
+  summary="Execute Specific Agent",
+  description="Available: `financial` (SEC filings, accounting), `research` (deep analysis), `rag` (retrieval, no credits). Execution strategy auto-selected; override with `?mode=sync|async`.",
   operation_id="executeSpecificAgent",
-  status_code=200,
   responses={
-    200: {"description": "Query successfully processed by specified agent"},
-    202: {"description": "Query queued for async processing with operation tracking"},
-    400: {"description": "Invalid agent type or request parameters"},
-    402: {"description": "Insufficient credits for specified agent"},
-    404: {"description": "Agent type not found"},
-    429: {"description": "Rate limit exceeded"},
-    500: {"description": "Internal server error", "model": ErrorResponse},
+    **RESOURCE_ERROR_RESPONSES,
+    202: {"description": "Query queued for async processing"},
+    402: {"description": "Insufficient credits"},
   },
 )
 @endpoint_metrics_decorator(
@@ -425,7 +311,6 @@ async def specific_agent(
   db: Session = Depends(get_db_session),
   _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
 ) -> AgentResponse | JSONResponse | EventSourceResponse:
-  """Execute a specific agent type with intelligent execution strategy."""
   _check_agent_post_enabled()
 
   try:
@@ -513,27 +398,12 @@ async def specific_agent(
 @router.post(
   "/agent/batch",
   response_model=BatchAgentResponse,
-  summary="Batch process multiple queries",
-  description="""Process multiple queries either sequentially or in parallel.
-
-**Features:**
-- Process up to 10 queries in a single request
-- Sequential or parallel execution modes
-- Automatic error handling per query
-- Credit checking before execution
-
-**Use Cases:**
-- Bulk analysis of multiple entities
-- Comparative analysis across queries
-- Automated report generation
-
-Returns individual results for each query with execution metrics.""",
+  summary="Batch Process Queries",
+  description="Process up to 10 queries sequentially or in parallel. Partial failure is supported — each result has individual error handling.",
   operation_id="batchProcessQueries",
   responses={
-    200: {"description": "Batch processing completed successfully"},
-    400: {"description": "Invalid batch request or too many queries"},
-    402: {"description": "Insufficient credits for batch processing"},
-    500: {"description": "Internal server error during batch processing"},
+    **RESOURCE_ERROR_RESPONSES,
+    402: {"description": "Insufficient credits"},
   },
 )
 @endpoint_metrics_decorator(
@@ -550,7 +420,6 @@ async def batch_agent(
   db: Session = Depends(get_db_session),
   _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
 ) -> BatchAgentResponse:
-  """Process multiple queries in batch."""
   _check_agent_post_enabled()
 
   import time
@@ -648,26 +517,10 @@ async def batch_agent(
 @router.post(
   "/agent/recommend",
   response_model=AgentRecommendationResponse,
-  summary="Get agent recommendations",
-  description="""Get intelligent agent recommendations for a specific query.
-
-**How it works:**
-1. Analyzes query content and structure
-2. Evaluates agent capabilities
-3. Calculates confidence scores
-4. Returns ranked recommendations
-
-**Use this when:**
-- Unsure which agent to use
-- Need to understand agent suitability
-- Want confidence scores for decision making
-
-Returns top agents ranked by confidence with explanations.""",
+  summary="Get Agent Recommendations",
+  description="Returns agents ranked by confidence score for a query, with explanations. Use before execution when unsure which agent to pick.",
   operation_id="recommendAgent",
-  responses={
-    200: {"description": "Recommendations generated successfully"},
-    400: {"description": "Invalid recommendation request"},
-  },
+  responses={**RESOURCE_ERROR_RESPONSES},
 )
 @endpoint_metrics_decorator(
   "/v1/graphs/{graph_id}/agent/recommend", business_event_type="agent_recommend"
@@ -683,7 +536,6 @@ async def recommend_agent(
   db: Session = Depends(get_db_session),
   _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
 ) -> AgentRecommendationResponse:
-  """Get agent recommendations for a query."""
   _check_agent_post_enabled()
 
   orchestrator = AgentOrchestrator(graph_id, current_user, db)

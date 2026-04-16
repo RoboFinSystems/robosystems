@@ -99,6 +99,11 @@ update:
 sdk-local:
     uv pip install -e ../robosystems-python-client
 
+# Update Python SDK
+sdk-update:
+    uv pip install --upgrade robosystems-client
+    @just install
+
 
 ## Testing ##
 

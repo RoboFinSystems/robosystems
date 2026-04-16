@@ -12,6 +12,7 @@ from robosystems.logger import api_logger, log_metric, logger
 from robosystems.middleware.auth.dependencies import get_current_user_with_graph
 from robosystems.middleware.graph.types import GRAPH_ID_PATTERN
 from robosystems.middleware.otel.metrics import endpoint_metrics_decorator
+from robosystems.models.api.common import RESOURCE_ERROR_RESPONSES
 from robosystems.models.api.graphs.subgraphs import SubgraphQuotaResponse
 from robosystems.models.core.graph import Graph
 from robosystems.models.core.user import User
@@ -32,29 +33,8 @@ router = APIRouter()
   response_model=SubgraphQuotaResponse,
   operation_id="getSubgraphQuota",
   summary="Get Subgraph Quota",
-  description="""Get subgraph quota and usage information for a parent graph.
-
-**Shows:**
-- Current subgraph count
-- Maximum allowed subgraphs per tier
-- Remaining capacity
-- Total size usage across all subgraphs
-
-**Tier Limits:**
-- Standard: Up to 3 subgraphs (dedicated m7g.large instance)
-- Large: Up to 10 subgraphs (dedicated r7g.large instance)
-- XLarge: Up to 25 subgraphs (dedicated r7g.xlarge instance)
-- Limits are defined in graph.yml deployment configuration
-
-**Size Tracking:**
-Provides aggregate size metrics when available.
-Individual subgraph sizes shown in list endpoint.""",
-  responses={
-    200: {"description": "Quota information retrieved"},
-    403: {"description": "Access denied to parent graph"},
-    404: {"description": "Parent graph not found"},
-    500: {"description": "Internal server error"},
-  },
+  description="Tier capacity: Standard 3, Large 10, XLarge 25 subgraphs. Use the list endpoint for per-subgraph sizes.",
+  responses={**RESOURCE_ERROR_RESPONSES},
 )
 @endpoint_metrics_decorator(
   "/v1/graphs/{graph_id}/subgraphs/quota", business_event_type="subgraph_quota_checked"
@@ -66,10 +46,6 @@ async def get_subgraph_quota(
   current_user: User = Depends(get_current_user_with_graph),
   session: Session = Depends(get_async_db_session),
 ) -> SubgraphQuotaResponse:
-  """Get subgraph quota information for a parent graph.
-
-  Shows current usage and limits for subgraphs.
-  """
   start_time = record_operation_start()
 
   # Check circuit breaker

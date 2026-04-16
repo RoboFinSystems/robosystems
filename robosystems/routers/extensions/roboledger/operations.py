@@ -77,6 +77,7 @@ from robosystems.middleware.operations import (
 )
 from robosystems.middleware.otel.metrics import endpoint_metrics_decorator
 from robosystems.middleware.rate_limits import subscription_aware_rate_limit_dependency
+from robosystems.models.api.common import OPERATION_ERROR_RESPONSES
 from robosystems.models.api.extensions.entity import UpdateEntityRequest
 from robosystems.models.api.extensions.fiscal_calendar import (
   ClosePeriodRequest,
@@ -475,8 +476,10 @@ class DeleteResult(BaseModel):
   response_model=OperationEnvelope,
   operation_id="opUpdateEntity",
   summary="Update Entity",
+  description="Only provided (non-null) fields are updated.",
   tags=[_OP_TAG],
   dependencies=[_RATE_LIMIT],
+  responses={**OPERATION_ERROR_RESPONSES},
 )
 @endpoint_metrics_decorator(
   "/extensions/roboledger/{graph_id}/operations/update-entity",
@@ -490,7 +493,6 @@ async def update_entity_op(
   idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
   cache: IdempotencyCache = Depends(get_idempotency_cache),
 ) -> OperationEnvelope:
-  """Update entity details. Only provided (non-null) fields are updated."""
   ctx = _ctx(
     graph_id=graph_id,
     user_id=str(user.id),
@@ -527,8 +529,10 @@ async def update_entity_op(
   response_model=OperationEnvelope,
   operation_id="opInitializeLedger",
   summary="Initialize Ledger",
+  description="One-time setup: creates the fiscal calendar and seeds periods. Returns 409 if already initialized.",
   tags=[_OP_TAG],
   dependencies=[_RATE_LIMIT],
+  responses={**OPERATION_ERROR_RESPONSES},
 )
 @endpoint_metrics_decorator(
   "/extensions/roboledger/{graph_id}/operations/initialize",
@@ -543,7 +547,6 @@ async def initialize_op(
   cache: IdempotencyCache = Depends(get_idempotency_cache),
   platform_db: Session = Depends(get_db_session),
 ) -> OperationEnvelope:
-  """One-time ledger initialization — create fiscal calendar + seed periods."""
   ctx = _ctx(
     graph_id=graph_id,
     user_id=str(user.id),
@@ -581,8 +584,10 @@ async def initialize_op(
   response_model=OperationEnvelope,
   operation_id="opSetCloseTarget",
   summary="Set Close Target",
+  description="Period format: YYYY-MM. The close target is the user-controlled goal date, distinct from `closed_through` (what's actually closed).",
   tags=[_OP_TAG],
   dependencies=[_RATE_LIMIT],
+  responses={**OPERATION_ERROR_RESPONSES},
 )
 @endpoint_metrics_decorator(
   "/extensions/roboledger/{graph_id}/operations/set-close-target",
@@ -597,7 +602,6 @@ async def set_close_target_op(
   cache: IdempotencyCache = Depends(get_idempotency_cache),
   platform_db: Session = Depends(get_db_session),
 ) -> OperationEnvelope:
-  """Set the user-controlled close target (YYYY-MM)."""
   ctx = _ctx(
     graph_id=graph_id,
     user_id=str(user.id),
@@ -637,6 +641,7 @@ async def set_close_target_op(
   summary="Close Fiscal Period",
   tags=[_OP_TAG],
   dependencies=[_RATE_LIMIT],
+  responses={**OPERATION_ERROR_RESPONSES},
 )
 @endpoint_metrics_decorator(
   "/extensions/roboledger/{graph_id}/operations/close-period",
@@ -651,7 +656,6 @@ async def close_period_op(
   cache: IdempotencyCache = Depends(get_idempotency_cache),
   platform_db: Session = Depends(get_db_session),
 ) -> OperationEnvelope:
-  """Close a fiscal period — the final commit action."""
   ctx = _ctx(
     graph_id=graph_id,
     user_id=str(user.id),
@@ -721,8 +725,10 @@ async def close_period_op(
   response_model=OperationEnvelope,
   operation_id="opReopenPeriod",
   summary="Reopen Fiscal Period",
+  description="Decrements `closed_through` by one — only the most recently closed period can be reopened.",
   tags=[_OP_TAG],
   dependencies=[_RATE_LIMIT],
+  responses={**OPERATION_ERROR_RESPONSES},
 )
 @endpoint_metrics_decorator(
   "/extensions/roboledger/{graph_id}/operations/reopen-period",
@@ -737,7 +743,6 @@ async def reopen_period_op(
   cache: IdempotencyCache = Depends(get_idempotency_cache),
   platform_db: Session = Depends(get_db_session),
 ) -> OperationEnvelope:
-  """Reopen a closed fiscal period — decrements `closed_through`."""
   ctx = _ctx(
     graph_id=graph_id,
     user_id=str(user.id),
@@ -790,8 +795,10 @@ async def reopen_period_op(
   response_model=OperationEnvelope,
   operation_id="opCreateSchedule",
   summary="Create Schedule",
+  description="Creates a schedule and pre-generates monthly amortization facts spanning the period range.",
   tags=[_OP_TAG],
   dependencies=[_RATE_LIMIT],
+  responses={**OPERATION_ERROR_RESPONSES},
 )
 @endpoint_metrics_decorator(
   "/extensions/roboledger/{graph_id}/operations/create-schedule",
@@ -805,7 +812,6 @@ async def create_schedule_op(
   idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
   cache: IdempotencyCache = Depends(get_idempotency_cache),
 ) -> OperationEnvelope:
-  """Create a schedule with pre-generated monthly facts."""
   ctx = _ctx(
     graph_id=graph_id,
     user_id=str(user.id),
@@ -843,8 +849,10 @@ async def create_schedule_op(
   response_model=OperationEnvelope,
   operation_id="opTruncateSchedule",
   summary="Truncate Schedule (End Early)",
+  description="Ends a schedule early by deleting forward facts and any stale draft closing entries past the cutoff.",
   tags=[_OP_TAG],
   dependencies=[_RATE_LIMIT],
+  responses={**OPERATION_ERROR_RESPONSES},
 )
 @endpoint_metrics_decorator(
   "/extensions/roboledger/{graph_id}/operations/truncate-schedule",
@@ -858,7 +866,6 @@ async def truncate_schedule_op(
   idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
   cache: IdempotencyCache = Depends(get_idempotency_cache),
 ) -> OperationEnvelope:
-  """End a schedule early — delete forward facts + stale drafts."""
   ctx = _ctx(
     graph_id=graph_id,
     user_id=str(user.id),
@@ -897,8 +904,10 @@ async def truncate_schedule_op(
   response_model=OperationEnvelope,
   operation_id="opCreateClosingEntry",
   summary="Create Closing Entry",
+  description="Creates a draft closing entry pre-populated from a schedule's facts for the given period.",
   tags=[_OP_TAG],
   dependencies=[_RATE_LIMIT],
+  responses={**OPERATION_ERROR_RESPONSES},
 )
 @endpoint_metrics_decorator(
   "/extensions/roboledger/{graph_id}/operations/create-closing-entry",
@@ -912,7 +921,6 @@ async def create_closing_entry_op(
   idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
   cache: IdempotencyCache = Depends(get_idempotency_cache),
 ) -> OperationEnvelope:
-  """Create a draft closing entry from a schedule's facts for a period."""
   ctx = _ctx(
     graph_id=graph_id,
     user_id=str(user.id),
@@ -951,8 +959,10 @@ async def create_closing_entry_op(
   response_model=OperationEnvelope,
   operation_id="opCreateManualClosingEntry",
   summary="Create Manual Closing Entry",
+  description="Creates a draft closing entry with manually specified amounts — not tied to a schedule.",
   tags=[_OP_TAG],
   dependencies=[_RATE_LIMIT],
+  responses={**OPERATION_ERROR_RESPONSES},
 )
 @endpoint_metrics_decorator(
   "/extensions/roboledger/{graph_id}/operations/create-manual-closing-entry",
@@ -966,7 +976,6 @@ async def create_manual_closing_entry_op(
   idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
   cache: IdempotencyCache = Depends(get_idempotency_cache),
 ) -> OperationEnvelope:
-  """Create a manual (non-schedule) draft closing entry."""
   ctx = _ctx(
     graph_id=graph_id,
     user_id=str(user.id),
@@ -1008,6 +1017,7 @@ async def create_manual_closing_entry_op(
   summary="Create Taxonomy",
   tags=[_OP_TAG],
   dependencies=[_RATE_LIMIT],
+  responses={**OPERATION_ERROR_RESPONSES},
 )
 @endpoint_metrics_decorator(
   "/extensions/roboledger/{graph_id}/operations/create-taxonomy",
@@ -1021,7 +1031,6 @@ async def create_taxonomy_op(
   idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
   cache: IdempotencyCache = Depends(get_idempotency_cache),
 ) -> OperationEnvelope:
-  """Create a new taxonomy definition."""
   ctx = _ctx(
     graph_id=graph_id,
     user_id=str(user.id),
@@ -1045,8 +1054,10 @@ async def create_taxonomy_op(
   response_model=OperationEnvelope,
   operation_id="opCreateStructure",
   summary="Create Structure",
+  description="Structures organize elements within a taxonomy. Types: `statement`, `mapping`, `schedule`, `presentation`, `calculation`.",
   tags=[_OP_TAG],
   dependencies=[_RATE_LIMIT],
+  responses={**OPERATION_ERROR_RESPONSES},
 )
 @endpoint_metrics_decorator(
   "/extensions/roboledger/{graph_id}/operations/create-structure",
@@ -1060,7 +1071,6 @@ async def create_structure_op(
   idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
   cache: IdempotencyCache = Depends(get_idempotency_cache),
 ) -> OperationEnvelope:
-  """Create a new structure (statement, mapping, schedule, etc.)."""
   ctx = _ctx(
     graph_id=graph_id,
     user_id=str(user.id),
@@ -1084,8 +1094,10 @@ async def create_structure_op(
   response_model=OperationEnvelope,
   operation_id="opCreateMappingAssociation",
   summary="Create Mapping Association",
+  description="Links a chart-of-accounts element to a reporting concept (CoA element → US GAAP concept).",
   tags=[_OP_TAG],
   dependencies=[_RATE_LIMIT],
+  responses={**OPERATION_ERROR_RESPONSES},
 )
 @endpoint_metrics_decorator(
   "/extensions/roboledger/{graph_id}/operations/create-mapping-association",
@@ -1099,7 +1111,6 @@ async def create_mapping_association_op(
   idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
   cache: IdempotencyCache = Depends(get_idempotency_cache),
 ) -> OperationEnvelope:
-  """Add a mapping association (CoA element → reporting concept)."""
   ctx = _ctx(
     graph_id=graph_id,
     user_id=str(user.id),
@@ -1138,6 +1149,7 @@ async def create_mapping_association_op(
   summary="Delete Mapping Association",
   tags=[_OP_TAG],
   dependencies=[_RATE_LIMIT],
+  responses={**OPERATION_ERROR_RESPONSES},
 )
 @endpoint_metrics_decorator(
   "/extensions/roboledger/{graph_id}/operations/delete-mapping-association",
@@ -1151,7 +1163,6 @@ async def delete_mapping_association_op(
   idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
   cache: IdempotencyCache = Depends(get_idempotency_cache),
 ) -> OperationEnvelope:
-  """Remove a mapping association."""
   ctx = _ctx(
     graph_id=graph_id,
     user_id=str(user.id),
@@ -1530,8 +1541,10 @@ class AutoMapElementsOperation(BaseModel):
   status_code=202,
   operation_id="opAutoMapElements",
   summary="Auto-Map Elements via AI (async)",
+  description="Dispatches to the background worker — returns a `pending` envelope immediately. Monitor via SSE at `/v1/operations/{operation_id}/stream`. Confidence thresholds: ≥0.90 auto-approved, 0.70–0.89 flagged for review, <0.70 skipped.",
   tags=[_OP_TAG],
   dependencies=[_RATE_LIMIT],
+  responses={**OPERATION_ERROR_RESPONSES},
 )
 @endpoint_metrics_decorator(
   "/extensions/roboledger/{graph_id}/operations/auto-map-elements",
@@ -1545,19 +1558,6 @@ async def auto_map_elements_op(
   idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
   cache: IdempotencyCache = Depends(get_idempotency_cache),
 ) -> OperationEnvelope:
-  """Trigger autonomous CoA → US GAAP mapping via background worker.
-
-  This is the only async/Dagster-dispatched ledger operation. Instead
-  of running synchronously, it enqueues a `MappingAgent` task and
-  returns a `pending` envelope with the worker-issued operation_id —
-  callers subscribe via `/v1/operations/{operation_id}/stream` for SSE
-  progress events.
-
-  Confidence thresholds (in the agent):
-  - ≥0.90: auto-approved mapping
-  - 0.70-0.89: flagged for review
-  - <0.70: skipped (left unmapped)
-  """
   from robosystems.worker.client import enqueue_task
 
   op_name = "auto-map-elements"
@@ -1621,8 +1621,10 @@ async def auto_map_elements_op(
   response_model=OperationEnvelope,
   operation_id="opCreateReport",
   summary="Create Report",
+  description="Generates report facts from the ledger and marks the report as published.",
   tags=[_OP_TAG],
   dependencies=[_RATE_LIMIT],
+  responses={**OPERATION_ERROR_RESPONSES},
 )
 @endpoint_metrics_decorator(
   "/extensions/roboledger/{graph_id}/operations/create-report",
@@ -1636,7 +1638,6 @@ async def create_report_op(
   idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
   cache: IdempotencyCache = Depends(get_idempotency_cache),
 ) -> OperationEnvelope:
-  """Create a report definition, generate facts, and mark as published."""
   ctx = _ctx(
     graph_id=graph_id,
     user_id=str(user.id),
@@ -1677,6 +1678,7 @@ async def create_report_op(
   summary="Regenerate Report",
   tags=[_OP_TAG],
   dependencies=[_RATE_LIMIT],
+  responses={**OPERATION_ERROR_RESPONSES},
 )
 @endpoint_metrics_decorator(
   "/extensions/roboledger/{graph_id}/operations/regenerate-report",
@@ -1690,7 +1692,6 @@ async def regenerate_report_op(
   idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
   cache: IdempotencyCache = Depends(get_idempotency_cache),
 ) -> OperationEnvelope:
-  """Regenerate a report with new period dates."""
   ctx = _ctx(
     graph_id=graph_id,
     user_id=str(user.id),
@@ -1732,8 +1733,10 @@ async def regenerate_report_op(
   response_model=OperationEnvelope,
   operation_id="opDeleteReport",
   summary="Delete Report",
+  description="Deletes the report definition and all generated facts.",
   tags=[_OP_TAG],
   dependencies=[_RATE_LIMIT],
+  responses={**OPERATION_ERROR_RESPONSES},
 )
 @endpoint_metrics_decorator(
   "/extensions/roboledger/{graph_id}/operations/delete-report",
@@ -1747,7 +1750,6 @@ async def delete_report_op(
   idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
   cache: IdempotencyCache = Depends(get_idempotency_cache),
 ) -> OperationEnvelope:
-  """Delete a report definition and its facts."""
   ctx = _ctx(
     graph_id=graph_id,
     user_id=str(user.id),
@@ -1781,8 +1783,10 @@ async def delete_report_op(
   response_model=OperationEnvelope,
   operation_id="opShareReport",
   summary="Share Report",
+  description="Only published reports can be shared. Sends the report to all members of the target publish list.",
   tags=[_OP_TAG],
   dependencies=[_RATE_LIMIT],
+  responses={**OPERATION_ERROR_RESPONSES},
 )
 @endpoint_metrics_decorator(
   "/extensions/roboledger/{graph_id}/operations/share-report",
@@ -1796,7 +1800,6 @@ async def share_report_op(
   idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
   cache: IdempotencyCache = Depends(get_idempotency_cache),
 ) -> OperationEnvelope:
-  """Share a published report to a publish list's members."""
   ctx = _ctx(
     graph_id=graph_id,
     user_id=str(user.id),
@@ -1844,6 +1847,7 @@ async def share_report_op(
   summary="Create Publish List",
   tags=[_OP_TAG],
   dependencies=[_RATE_LIMIT],
+  responses={**OPERATION_ERROR_RESPONSES},
 )
 @endpoint_metrics_decorator(
   "/extensions/roboledger/{graph_id}/operations/create-publish-list",
@@ -1857,7 +1861,6 @@ async def create_publish_list_op(
   idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
   cache: IdempotencyCache = Depends(get_idempotency_cache),
 ) -> OperationEnvelope:
-  """Create a new publish list."""
   ctx = _ctx(
     graph_id=graph_id,
     user_id=str(user.id),
@@ -1884,8 +1887,10 @@ async def create_publish_list_op(
   response_model=OperationEnvelope,
   operation_id="opUpdatePublishList",
   summary="Update Publish List",
+  description="Updates the publish list's `name` and/or `description`. Membership is managed via add/remove-member operations.",
   tags=[_OP_TAG],
   dependencies=[_RATE_LIMIT],
+  responses={**OPERATION_ERROR_RESPONSES},
 )
 @endpoint_metrics_decorator(
   "/extensions/roboledger/{graph_id}/operations/update-publish-list",
@@ -1899,7 +1904,6 @@ async def update_publish_list_op(
   idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
   cache: IdempotencyCache = Depends(get_idempotency_cache),
 ) -> OperationEnvelope:
-  """Update a publish list's name / description."""
   ctx = _ctx(
     graph_id=graph_id,
     user_id=str(user.id),
@@ -1934,6 +1938,7 @@ async def update_publish_list_op(
   summary="Delete Publish List",
   tags=[_OP_TAG],
   dependencies=[_RATE_LIMIT],
+  responses={**OPERATION_ERROR_RESPONSES},
 )
 @endpoint_metrics_decorator(
   "/extensions/roboledger/{graph_id}/operations/delete-publish-list",
@@ -1947,7 +1952,6 @@ async def delete_publish_list_op(
   idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
   cache: IdempotencyCache = Depends(get_idempotency_cache),
 ) -> OperationEnvelope:
-  """Delete a publish list."""
   ctx = _ctx(
     graph_id=graph_id,
     user_id=str(user.id),
@@ -1979,6 +1983,7 @@ async def delete_publish_list_op(
   summary="Add Members to Publish List",
   tags=[_OP_TAG],
   dependencies=[_RATE_LIMIT],
+  responses={**OPERATION_ERROR_RESPONSES},
 )
 @endpoint_metrics_decorator(
   "/extensions/roboledger/{graph_id}/operations/add-publish-list-members",
@@ -1992,7 +1997,6 @@ async def add_publish_list_members_op(
   idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
   cache: IdempotencyCache = Depends(get_idempotency_cache),
 ) -> OperationEnvelope:
-  """Add target graphs as members of a publish list."""
   ctx = _ctx(
     graph_id=graph_id,
     user_id=str(user.id),
@@ -2037,6 +2041,7 @@ async def add_publish_list_members_op(
   summary="Remove Member from Publish List",
   tags=[_OP_TAG],
   dependencies=[_RATE_LIMIT],
+  responses={**OPERATION_ERROR_RESPONSES},
 )
 @endpoint_metrics_decorator(
   "/extensions/roboledger/{graph_id}/operations/remove-publish-list-member",
@@ -2050,7 +2055,6 @@ async def remove_publish_list_member_op(
   idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
   cache: IdempotencyCache = Depends(get_idempotency_cache),
 ) -> OperationEnvelope:
-  """Remove a target graph from a publish list."""
   ctx = _ctx(
     graph_id=graph_id,
     user_id=str(user.id),

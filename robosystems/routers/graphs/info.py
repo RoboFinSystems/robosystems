@@ -1,8 +1,4 @@
-"""
-Graph database information endpoint.
-
-This module provides REST API endpoints for database information and statistics.
-"""
+"""Graph database information endpoint."""
 
 import asyncio
 from datetime import UTC, datetime
@@ -23,10 +19,10 @@ from robosystems.middleware.robustness import (
   CircuitBreakerManager,
   TimeoutCoordinator,
 )
+from robosystems.models.api.common import RESOURCE_ERROR_RESPONSES
 from robosystems.models.api.graphs.health import DatabaseInfoResponse
 from robosystems.models.core import User
 
-# Create router
 router = APIRouter(tags=["Graph Info"])
 
 # Initialize robustness components
@@ -35,7 +31,6 @@ timeout_coordinator = TimeoutCoordinator()
 
 
 async def _get_graph_client(graph_id: str) -> GraphClient:
-  """Get Graph client for the specified graph using factory for endpoint discovery."""
   from robosystems.config.shared_repositories import is_shared_repository_or_subgraph
   from robosystems.graph_api.client.factory import GraphClientFactory
 
@@ -58,41 +53,8 @@ async def _get_graph_client(graph_id: str) -> GraphClient:
   "/info",
   response_model=DatabaseInfoResponse,
   summary="Database Information",
-  description="""Get comprehensive database information and statistics.
-
-Returns detailed database metrics including:
-- **Database Metadata**: Name, path, size, and timestamps
-- **Schema Information**: Node labels, relationship types, and counts
-- **Storage Statistics**: Database size and usage metrics
-- **Data Composition**: Node and relationship counts
-- **Backup Information**: Available backups and last backup date
-- **Configuration**: Read-only status and schema version
-
-Database statistics:
-- **Size**: Storage usage in bytes and MB
-- **Content**: Node and relationship counts
-- **Schema**: Available labels and relationship types
-- **Backup Status**: Backup availability and recency
-- **Timestamps**: Creation and modification dates
-
-**Subgraph Support:**
-This endpoint accepts both parent graph IDs and subgraph IDs.
-- Parent graph: Use `graph_id` like `kg0123456789abcdef`
-- Subgraph: Use full subgraph ID like `kg0123456789abcdef_dev`
-Returned metrics are specific to the requested graph/subgraph. Subgraphs have
-independent size, node/relationship counts, and backup status.
-
-This endpoint provides essential database information for capacity planning and monitoring.""",
   operation_id="getDatabaseInfo",
-  responses={
-    200: {
-      "description": "Database information retrieved successfully",
-      "model": DatabaseInfoResponse,
-    },
-    403: {"description": "Access denied to graph"},
-    404: {"description": "Graph not found"},
-    500: {"description": "Failed to retrieve database information"},
-  },
+  responses={**RESOURCE_ERROR_RESPONSES},
 )
 @endpoint_metrics_decorator(
   endpoint_name="/v1/graphs/{graph_id}/info",
@@ -108,21 +70,6 @@ async def get_database_info(
   session: Session = Depends(get_async_db_session),
   _: None = Depends(subscription_aware_rate_limit_dependency),
 ) -> DatabaseInfoResponse:
-  """
-  Get comprehensive database information and statistics.
-
-  This endpoint provides detailed database metadata, schema information,
-  and statistics for capacity planning and monitoring.
-
-  Args:
-      graph_id: Graph database identifier
-      current_user: Authenticated user
-      session: Database session
-
-  Returns:
-      DatabaseInfoResponse with comprehensive database information
-  """
-  # Check circuit breaker
   circuit_breaker.check_circuit(graph_id, "database_info")
 
   try:

@@ -1,10 +1,4 @@
-"""
-Main query execution endpoint with intelligent routing and streaming.
-
-This module provides the primary query execution endpoint that automatically
-selects the optimal execution strategy based on query characteristics,
-client capabilities, and system load.
-"""
+"""Cypher query execution with intelligent strategy selection and streaming."""
 
 import hashlib
 from datetime import UTC, datetime
@@ -41,6 +35,7 @@ from robosystems.middleware.rate_limits import (
 )
 from robosystems.middleware.robustness import CircuitBreakerManager
 from robosystems.middleware.sse.operation_manager import create_operation_response
+from robosystems.models.api.common import RESOURCE_ERROR_RESPONSES
 from robosystems.models.api.graphs.query import (
   DEFAULT_QUERY_TIMEOUT,
   CypherQueryRequest,
@@ -89,116 +84,17 @@ router = APIRouter()
 
 
 @router.post(
-  "/query",  # Full path without trailing slash
-  response_model=None,  # Dynamic response type
+  "/query",
+  response_model=None,
   summary="Execute Cypher Query",
-  description="""Execute a Cypher query with intelligent response optimization.
-
-**IMPORTANT: Write operations depend on graph type:**
-- **Main Graphs**: READ-ONLY. Write operations (CREATE, MERGE, SET, DELETE) are not allowed.
-- **Subgraphs**: WRITE-ENABLED. Full Cypher write operations are supported for development and report creation.
-
-To load data into main graphs, use the staging pipeline:
-1. Create file upload: `POST /v1/graphs/{graph_id}/tables/{table_name}/files`
-2. Ingest to graph: `POST /v1/graphs/{graph_id}/tables/ingest`
-
-**Security Best Practice - Use Parameterized Queries:**
-ALWAYS use query parameters instead of string interpolation to prevent injection attacks:
-- ✅ SAFE: `MATCH (n:Entity {type: $entity_type}) RETURN n` with `parameters: {"entity_type": "Company"}`
-- ❌ UNSAFE: `MATCH (n:Entity {type: "Company"}) RETURN n` with user input concatenated into query string
-
-Query parameters provide automatic escaping and type safety. All examples in this API use parameterized queries.
-
-This endpoint automatically selects the best execution strategy based on:
-- Query characteristics (size, complexity)
-- Client capabilities (SSE, NDJSON, JSON)
-- System load (queue status, concurrent queries)
-- User preferences (mode parameter, headers)
-
-**Response Modes:**
-- `auto` (default): Intelligent automatic selection
-- `sync`: Force synchronous JSON response (best for testing)
-- `async`: Force queued response with SSE monitoring endpoints (no polling needed)
-- `stream`: Force streaming response (SSE or NDJSON)
-
-**Client Detection:**
-- Automatically detects testing tools (Postman, Swagger UI)
-- Adjusts behavior for better interactive experience
-- Respects Accept and Prefer headers for capabilities
-
-**Streaming Support (SSE):**
-- Real-time events with progress updates
-- Maximum 5 concurrent SSE connections per user
-- Rate limited to 10 new connections per minute
-- Automatic circuit breaker for Redis failures
-- Graceful degradation if event system unavailable
-- 30-second keepalive to prevent timeouts
-
-**Streaming Support (NDJSON):**
-- Efficient line-delimited JSON for large results
-- Automatic chunking (configurable 10-10000 rows)
-- No connection limits (stateless streaming)
-
-**Queue Management:**
-- Automatic queuing under high load
-- Real-time monitoring via SSE events (no polling needed)
-- Priority based on subscription tier
-- Queue position and progress updates pushed via SSE
-- Connect to returned `/v1/operations/{id}/stream` endpoint for updates
-
-**Error Handling:**
-- `429 Too Many Requests`: Rate limit or connection limit exceeded
-- `503 Service Unavailable`: Circuit breaker open or SSE disabled
-- Clients should implement exponential backoff
-
-**Subgraph Support:**
-This endpoint accepts both parent graph IDs and subgraph IDs.
-- Parent graph: Use `graph_id` like `kg0123456789abcdef`
-- Subgraph: Use full subgraph ID like `kg0123456789abcdef_dev`
-Subgraphs share the same instance as their parent graph and have independent data.
-
-**Note:**
-Query operations are included - no credit consumption required.
-Queue position is based on subscription tier for priority.""",
+  description='Main graphs are **read-only** — use the staging pipeline to ingest data. Subgraphs support full writes. Always use parameterized queries (`parameters: {"key": "val"}`) to prevent injection. Response modes: `auto` (default), `sync`, `async`, `stream`. Under load, queries are queued and emit an `operation_id` for SSE monitoring at `/v1/operations/{id}/stream`.',
   operation_id="executeCypherQuery",
   responses={
-    200: {
-      "description": "Query executed successfully",
-      "content": {
-        "application/json": {
-          "schema": {
-            "type": "object",
-            "properties": {
-              "success": {"type": "boolean"},
-              "data": {"type": "array", "items": {"type": "object"}},
-              "columns": {"type": "array", "items": {"type": "string"}},
-              "row_count": {"type": "integer"},
-              "execution_time_ms": {"type": "number"},
-              "graph_id": {"type": "string"},
-              "timestamp": {"type": "string"},
-            },
-          }
-        },
-        "application/x-ndjson": {
-          "schema": {
-            "type": "string",
-            "description": "Newline-delimited JSON chunks with streaming results",
-          }
-        },
-        "text/event-stream": {
-          "schema": {
-            "type": "string",
-            "description": "Server-Sent Events stream with real-time progress updates",
-          }
-        },
-      },
+    **RESOURCE_ERROR_RESPONSES,
+    202: {
+      "description": "Query queued — monitor via SSE at /v1/operations/{operation_id}/stream"
     },
-    202: {"description": "Query queued for execution"},
-    400: {"description": "Invalid query or parameters"},
-    403: {"description": "Access denied"},
     408: {"description": "Query timeout"},
-    429: {"description": "Rate limit exceeded"},
-    500: {"description": "Internal error"},
     503: {"description": "Service unavailable"},
   },
 )
@@ -224,12 +120,6 @@ async def execute_cypher_query(
   session: Session = Depends(get_db_session),
   _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
 ) -> CypherQueryResponse | JSONResponse | StreamingResponse | EventSourceResponse:
-  """
-  Execute a Cypher query with intelligent response optimization.
-
-  This endpoint automatically detects the best way to respond based on
-  the query, client capabilities, and system state.
-  """
   start_time = datetime.now(UTC)
 
   # Enforce graph lifecycle and subscription status (reads allowed)
@@ -884,21 +774,6 @@ async def execute_cypher_query(
 async def _check_shared_repository_limits(
   graph_id: str, user: User, session: Session, endpoint: str = "query"
 ) -> None:
-  """
-  Check access and rate limits for shared repositories.
-
-  Access control is ALWAYS checked (user must have UserRepository record).
-  Rate limiting is only applied when RATE_LIMIT_ENABLED is True.
-
-  Args:
-      graph_id: The graph/repository ID
-      user: Current user
-      session: Database session
-      endpoint: The endpoint being called
-
-  Raises:
-      HTTPException: If access is denied or rate limits are exceeded
-  """
   from robosystems.config import env
   from robosystems.config.shared_repositories import (
     is_shared_repository_or_subgraph,

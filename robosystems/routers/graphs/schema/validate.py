@@ -21,7 +21,7 @@ from robosystems.middleware.robustness import (
   get_operation_logger,
   record_operation_metric,
 )
-from robosystems.models.api.common import ErrorResponse
+from robosystems.models.api.common import RESOURCE_ERROR_RESPONSES
 from robosystems.models.api.graphs.schema import (
   SchemaValidationRequest,
   SchemaValidationResponse,
@@ -42,46 +42,12 @@ router = APIRouter()
   "/schema/validate",
   response_model=SchemaValidationResponse,
   summary="Validate Schema",
-  description="""Validate a custom schema definition before deployment.
-
-This endpoint performs comprehensive validation including:
-- **Structure Validation**: Ensures proper JSON/YAML format
-- **Type Checking**: Validates data types (STRING, INT, DOUBLE, etc.)
-- **Constraint Verification**: Checks primary keys and unique constraints
-- **Relationship Integrity**: Validates node references in relationships
-- **Naming Conventions**: Ensures valid identifiers
-- **Compatibility**: Checks against existing extensions if specified
-
-Supported formats:
-- JSON schema definitions
-- YAML schema definitions
-- Direct dictionary format
-
-Validation helps prevent:
-- Schema deployment failures
-- Data integrity issues
-- Performance problems
-- Naming conflicts
-
-**Subgraph Support:**
-This endpoint accepts both parent graph IDs and subgraph IDs.
-- Parent graph: Use `graph_id` like `kg0123456789abcdef`
-- Subgraph: Use full subgraph ID like `kg0123456789abcdef_dev`
-Schema validation is performed against the specified graph/subgraph's current
-schema and data structure.
-
-This operation is included - no credit consumption required.""",
-  status_code=status.HTTP_200_OK,
+  description="Validates a custom schema definition before deployment — checks structure, types, constraints, and relationship references. Returns errors and warnings without applying changes. Supports JSON, YAML, and dict formats.",
   operation_id="validateSchema",
   responses={
-    200: {
-      "description": "Schema validation completed",
-      "model": SchemaValidationResponse,
-    },
-    400: {"description": "Invalid schema format", "model": ErrorResponse},
-    403: {"description": "Access denied to graph", "model": ErrorResponse},
-    422: {"description": "Schema validation failed", "model": ErrorResponse},
-    500: {"description": "Validation error", "model": ErrorResponse},
+    **RESOURCE_ERROR_RESPONSES,
+    422: {"description": "Schema fails validation rules"},
+    504: {"description": "Validation timed out"},
   },
 )
 async def validate_schema(
@@ -230,16 +196,6 @@ relationships:
   _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
   db: Session = Depends(get_db_session),
 ) -> SchemaValidationResponse:
-  """
-  Validate a custom schema definition.
-
-  This endpoint checks:
-  - Schema structure validity
-  - Data type correctness
-  - Primary key requirements
-  - Node/relationship consistency
-  - Optional compatibility with existing extensions
-  """
   # Initialize robustness components
   operation_logger = get_operation_logger()
 

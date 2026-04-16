@@ -31,7 +31,7 @@ from ...models.api.auth import (
   ResetPasswordRequest,
   ResetPasswordValidateResponse,
 )
-from ...models.api.common import ErrorResponse
+from ...models.api.common import COMMON_ERROR_RESPONSES
 from ...models.core import User, UserToken
 from ...security import SecurityAuditLogger, SecurityEventType
 from ...security.input_validation import (
@@ -47,13 +47,10 @@ router = APIRouter()
 
 @router.post(
   "/password/forgot",
-  status_code=status.HTTP_200_OK,
   summary="Forgot Password",
   description="Request password reset email. Always returns success to prevent email enumeration.",
   operation_id="forgotPassword",
-  responses={
-    429: {"model": ErrorResponse, "description": "Rate limit exceeded"},
-  },
+  responses={**COMMON_ERROR_RESPONSES},
 )
 async def forgot_password(
   request: ForgotPasswordRequest,
@@ -62,19 +59,6 @@ async def forgot_password(
   session: Session = Depends(get_async_db_session),
   _rate_limit: None = Depends(auth_rate_limit_dependency),
 ) -> dict:
-  """
-  Request password reset email.
-
-  Args:
-      request: Forgot password request with email
-      fastapi_request: FastAPI request object
-      background_tasks: FastAPI background tasks for async email
-      session: Database session
-      _rate_limit: Rate limiting dependency
-
-  Returns:
-      Success message (always, for security)
-  """
   # Validate and sanitize email
   if not validate_email(request.email):
     # For security, still return success to prevent enumeration
@@ -161,25 +145,15 @@ async def forgot_password(
 @router.get(
   "/password/reset/validate",
   response_model=ResetPasswordValidateResponse,
-  status_code=status.HTTP_200_OK,
   summary="Validate Reset Token",
-  description="Check if a password reset token is valid without consuming it.",
+  description="Check if a password reset token is valid without consuming it. Returns masked email on success.",
   operation_id="validateResetToken",
+  responses={**COMMON_ERROR_RESPONSES},
 )
 async def validate_reset_token(
   token: str = Query(..., description="Password reset token"),
   session: Session = Depends(get_async_db_session),
 ) -> ResetPasswordValidateResponse:
-  """
-  Validate a password reset token without consuming it.
-
-  Args:
-      token: Reset token from query parameter
-      session: Database session
-
-  Returns:
-      Validation response with masked email if valid
-  """
   # Validate token without consuming it
   user_id = UserToken.validate_token(
     raw_token=token,
@@ -213,33 +187,16 @@ async def validate_reset_token(
 @router.post(
   "/password/reset",
   response_model=AuthResponse,
-  status_code=status.HTTP_200_OK,
   summary="Reset Password",
-  description="Reset password with token from email. Returns JWT for auto-login.",
+  description="Reset password with token from email. Invalidates all existing sessions. Returns JWT for auto-login.",
   operation_id="resetPassword",
-  responses={
-    400: {"model": ErrorResponse, "description": "Invalid token or password"},
-  },
+  responses={**COMMON_ERROR_RESPONSES},
 )
 async def reset_password(
   request: ResetPasswordRequest,
   fastapi_request: Request,
   session: Session = Depends(get_async_db_session),
 ) -> AuthResponse:
-  """
-  Reset password with token.
-
-  Args:
-      request: Reset password request with token and new password
-      fastapi_request: FastAPI request object
-      session: Database session
-
-  Returns:
-      Auth response with JWT token for auto-login
-
-  Raises:
-      HTTPException: If token is invalid or password doesn't meet requirements
-  """
   # Verify token and get user
   user_id = UserToken.verify_token(
     raw_token=request.token,

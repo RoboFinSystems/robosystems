@@ -1,8 +1,4 @@
-"""
-MCP tools listing endpoint.
-
-This module provides the tool discovery endpoint for MCP clients.
-"""
+"""MCP tool discovery endpoint."""
 
 from fastapi import APIRouter, Depends, Path
 from sqlalchemy.orm import Session
@@ -21,7 +17,7 @@ from robosystems.middleware.rate_limits import (
   subscription_aware_rate_limit_dependency,
 )
 from robosystems.middleware.robustness import CircuitBreakerManager
-from robosystems.models.api.common import ErrorResponse
+from robosystems.models.api.common import RESOURCE_ERROR_RESPONSES
 from robosystems.models.api.graphs.mcp import MCPToolsResponse
 from robosystems.models.core import User
 from robosystems.routers.graphs.mcp.handlers import MCPHandler
@@ -36,13 +32,7 @@ circuit_breaker = CircuitBreakerManager()
 
 
 def _get_mcp_operation_type(graph_id: str) -> str:
-  """
-  Determine the correct operation type for MCP operations based on graph type.
-
-  For consistency with distributed LadybugDB architecture:
-  - User graphs: Always use 'write' to ensure writer cluster routing
-  - Shared repositories: Use 'read' for reader cluster routing
-  """
+  # Shared repos route to reader cluster; user graphs always use writer for consistency
   if MultiTenantUtils.is_shared_repository(graph_id):
     return "read"
   else:
@@ -53,33 +43,9 @@ def _get_mcp_operation_type(graph_id: str) -> str:
   "/tools",
   response_model=MCPToolsResponse,
   summary="List MCP Tools",
-  description="""Get available Model Context Protocol tools for graph analysis.
-
-This endpoint returns a comprehensive list of MCP tools optimized for AI agents:
-- Tool schemas with detailed parameter documentation
-- Context-aware descriptions based on graph type
-- Capability indicators for streaming and progress
-
-The tool list is customized based on:
-- Graph type (shared repository vs user graph)
-- User permissions and subscription tier
-- Available graph capabilities for the selected graph
-
-**Subgraph Support:**
-This endpoint accepts both parent graph IDs and subgraph IDs.
-- Parent graph: Use `graph_id` like `kg0123456789abcdef`
-- Subgraph: Use full subgraph ID like `kg0123456789abcdef_dev`
-The returned tool list is identical for parent graphs and subgraphs, as all
-MCP tools work uniformly across graph boundaries.
-
-**Note:**
-MCP tool listing is included - no credit consumption required.""",
+  description="Returns tool schemas with capability hints (streaming, caching, timeouts) per tool. Tool list is context-aware by graph type; identical for parent graphs and subgraphs.",
   operation_id="listMcpTools",
-  responses={
-    200: {"description": "MCP tools retrieved successfully", "model": MCPToolsResponse},
-    403: {"description": "Access denied to graph", "model": ErrorResponse},
-    500: {"description": "Failed to retrieve MCP tools", "model": ErrorResponse},
-  },
+  responses={**RESOURCE_ERROR_RESPONSES},
 )
 @endpoint_metrics_decorator(
   "/v1/graphs/{graph_id}/mcp/tools", business_event_type="mcp_tools_listed"
@@ -94,29 +60,6 @@ async def list_mcp_tools(
   db: Session = Depends(get_db_session),
   _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
 ) -> MCPToolsResponse:
-  """
-  List all available Model Context Protocol (MCP) tools.
-
-  This endpoint provides tool discovery for AI agents, returning detailed
-  schemas and capabilities for each available tool. The tool list is
-  dynamically generated based on graph type and user permissions.
-
-  **Tool Categories:**
-  - **Query Tools**: Execute Cypher queries with streaming support
-  - **Schema Tools**: Retrieve and explore graph structure
-  - **Info Tools**: Get statistics and metadata
-  - **Analysis Tools**: Specialized financial and graph analysis
-
-  **AI Agent Integration:**
-  The returned tool definitions are designed for seamless integration
-  with AI agents through the MCP protocol. Each tool includes:
-  - Complete input schema for parameter validation
-  - Capability hints (streaming, caching, progress)
-  - Context-aware descriptions
-
-  **Returns:**
-  Complete list of available tools with schemas and metadata.
-  """
   # Validate access based on graph type
   await validate_mcp_access(graph_id, current_user, db, "read")
 

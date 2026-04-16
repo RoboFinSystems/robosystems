@@ -11,6 +11,7 @@ from robosystems.logger import api_logger, log_metric, logger
 from robosystems.middleware.auth.dependencies import get_current_user_with_graph
 from robosystems.middleware.graph.types import GRAPH_ID_PATTERN, SUBGRAPH_NAME_PATTERN
 from robosystems.middleware.otel.metrics import endpoint_metrics_decorator
+from robosystems.models.api.common import RESOURCE_ERROR_RESPONSES
 from robosystems.models.api.graphs.subgraphs import SubgraphResponse, SubgraphType
 from robosystems.models.core.user import User
 
@@ -30,37 +31,8 @@ router = APIRouter()
   response_model=SubgraphResponse,
   operation_id="getSubgraphInfo",
   summary="Get Subgraph Details",
-  description="""Get detailed information about a specific subgraph.
-
-**Requirements:**
-- User must have read access to parent graph
-- Subgraph name must be alphanumeric (1-20 characters)
-
-**Response includes:**
-- Full subgraph metadata
-- Database statistics (nodes, edges)
-- Size information
-- Schema configuration
-- Creation/modification timestamps
-- Last access time (when available)
-
-**Statistics:**
-Real-time statistics queried from LadybugDB:
-- Node count
-- Edge count
-- Database size on disk
-- Schema information
-
-**Note:**
-Use the subgraph name (e.g., 'dev', 'staging') not the full subgraph ID.
-The full ID is returned in the response (e.g., 'kg0123456789abcdef_dev').""",
-  responses={
-    200: {"description": "Subgraph information retrieved"},
-    400: {"description": "Not a valid subgraph"},
-    403: {"description": "Access denied"},
-    404: {"description": "Subgraph not found"},
-    500: {"description": "Internal server error"},
-  },
+  description="Pass the subgraph name (e.g., `dev`) not the full subgraph ID (e.g., `kg0123_dev`).",
+  responses={**RESOURCE_ERROR_RESPONSES},
 )
 @endpoint_metrics_decorator(
   "/v1/graphs/{graph_id}/subgraphs/{subgraph_id}/info",
@@ -78,10 +50,6 @@ async def get_subgraph_info(
   current_user: User = Depends(get_current_user_with_graph),
   session: Session = Depends(get_async_db_session),
 ) -> SubgraphResponse:
-  """Get detailed information about a specific subgraph.
-
-  Works for both parent graphs and subgraphs.
-  """
   start_time = record_operation_start()
 
   # Check circuit breaker

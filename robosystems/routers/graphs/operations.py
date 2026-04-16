@@ -32,6 +32,7 @@ from robosystems.middleware.operations import (
 )
 from robosystems.middleware.otel.metrics import endpoint_metrics_decorator
 from robosystems.middleware.rate_limits import subscription_aware_rate_limit_dependency
+from robosystems.models.api.common import OPERATION_ERROR_RESPONSES
 from robosystems.models.api.graphs.backups import BackupCreateRequest
 from robosystems.models.api.graphs.operations import (
   ChangeTierOp,
@@ -87,8 +88,10 @@ async def _dispatch(ctx, runner, cache, on_fresh_success=None):
   response_model=OperationEnvelope,
   operation_id="opCreateSubgraph",
   summary="Create Subgraph",
+  description="Set `fork_parent=true` to clone parent graph data into the new subgraph (async, returns a pending `OperationEnvelope`). Without `fork_parent`, creates an empty subgraph synchronously.",
   tags=[_OP_TAG],
   dependencies=[_RATE_LIMIT],
+  responses={**OPERATION_ERROR_RESPONSES},
 )
 @endpoint_metrics_decorator(
   f"{_GRAPH_OPS_PATH}/create-subgraph",
@@ -103,7 +106,6 @@ async def create_subgraph_op(
   cache: IdempotencyCache = Depends(get_idempotency_cache),
   db: Session = Depends(get_async_db_session),
 ) -> OperationEnvelope:
-  """Create a new subgraph, optionally forking parent data."""
   from robosystems.routers.graphs.subgraphs.main import create_subgraph
 
   op_name = "create-subgraph"
@@ -173,8 +175,10 @@ async def create_subgraph_op(
   response_model=OperationEnvelope,
   operation_id="opDeleteSubgraph",
   summary="Delete Subgraph",
+  description="Set `backup_first=true` to create a safety backup before deletion. Requires admin role on the parent graph.",
   tags=[_OP_TAG],
   dependencies=[_RATE_LIMIT],
+  responses={**OPERATION_ERROR_RESPONSES},
 )
 @endpoint_metrics_decorator(
   f"{_GRAPH_OPS_PATH}/delete-subgraph",
@@ -189,7 +193,6 @@ async def delete_subgraph_op(
   cache: IdempotencyCache = Depends(get_idempotency_cache),
   db: Session = Depends(get_async_db_session),
 ) -> OperationEnvelope:
-  """Delete a subgraph database."""
   from robosystems.models.core.graph.graph_user import GraphUser
   from robosystems.routers.graphs.subgraphs.utils import (
     get_subgraph_by_name,
@@ -264,8 +267,10 @@ async def delete_subgraph_op(
   status_code=status.HTTP_202_ACCEPTED,
   operation_id="opCreateBackup",
   summary="Create Backup",
+  description="Not allowed on shared repositories. Only `full_dump` format supported. Retention capped at tier maximum. Monitor progress via SSE at `/v1/operations/{operation_id}/stream`.",
   tags=[_OP_TAG],
   dependencies=[_RATE_LIMIT],
+  responses={**OPERATION_ERROR_RESPONSES},
 )
 @endpoint_metrics_decorator(
   f"{_GRAPH_OPS_PATH}/create-backup",
@@ -280,7 +285,6 @@ async def create_backup_op(
   cache: IdempotencyCache = Depends(get_idempotency_cache),
   db: Session = Depends(get_async_db_session),
 ) -> OperationEnvelope:
-  """Create a backup of the graph database (async)."""
   from robosystems.config import env
   from robosystems.config.graph_tier import GraphTierConfig
   from robosystems.config.shared_repositories import is_shared_repository_or_subgraph
@@ -388,8 +392,10 @@ async def create_backup_op(
   status_code=status.HTTP_202_ACCEPTED,
   operation_id="opRestoreBackup",
   summary="Restore Backup",
+  description="Only encrypted backups can be restored. Not allowed on entity graphs (use `materialize` instead) or shared repositories.",
   tags=[_OP_TAG],
   dependencies=[_RATE_LIMIT],
+  responses={**OPERATION_ERROR_RESPONSES},
 )
 @endpoint_metrics_decorator(
   f"{_GRAPH_OPS_PATH}/restore-backup",
@@ -404,11 +410,6 @@ async def restore_backup_op(
   cache: IdempotencyCache = Depends(get_idempotency_cache),
   db: Session = Depends(get_async_db_session),
 ) -> OperationEnvelope:
-  """Restore a graph database from an encrypted backup.
-
-  Blocked for entity graphs — OLTP is the source of truth, use
-  the materialize operation instead.
-  """
   from robosystems.config.shared_repositories import is_shared_repository_or_subgraph
   from robosystems.middleware.sse import build_graph_job_config
   from robosystems.models.core import Graph, GraphBackup
@@ -515,8 +516,10 @@ async def restore_backup_op(
   status_code=status.HTTP_202_ACCEPTED,
   operation_id="opChangeTier",
   summary="Change Tier",
+  description="Async EBS migration (3-5 min). Valid tiers: `ladybug-standard`, `ladybug-large`, `ladybug-xlarge`.",
   tags=[_OP_TAG],
   dependencies=[_RATE_LIMIT],
+  responses={**OPERATION_ERROR_RESPONSES},
 )
 @endpoint_metrics_decorator(
   f"{_GRAPH_OPS_PATH}/change-tier",
@@ -531,7 +534,6 @@ async def change_tier_op(
   cache: IdempotencyCache = Depends(get_idempotency_cache),
   db: Session = Depends(get_async_db_session),
 ) -> OperationEnvelope:
-  """Change the infrastructure tier on a graph (async EBS migration)."""
   from robosystems.operations.graph.commands.tier import change_graph_tier_cmd
 
   op_name = "change-tier"
@@ -582,8 +584,10 @@ async def change_tier_op(
   status_code=status.HTTP_202_ACCEPTED,
   operation_id="opMaterialize",
   summary="Materialize Graph",
+  description="Rebuilds LadybugDB from staging tables (file uploads) or extensions OLTP data. Set `dry_run=true` to preview without changes.",
   tags=[_OP_TAG],
   dependencies=[_RATE_LIMIT],
+  responses={**OPERATION_ERROR_RESPONSES},
 )
 @endpoint_metrics_decorator(
   f"{_GRAPH_OPS_PATH}/materialize",
@@ -598,7 +602,6 @@ async def materialize_op(
   cache: IdempotencyCache = Depends(get_idempotency_cache),
   db: Session = Depends(get_async_db_session),
 ) -> OperationEnvelope:
-  """Materialize graph from staging tables or extensions OLTP."""
   from robosystems.operations.graph.commands.materialize import materialize_cmd
 
   op_name = "materialize"

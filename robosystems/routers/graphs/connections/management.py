@@ -13,8 +13,8 @@ from robosystems.middleware.auth.dependencies import get_current_user_with_graph
 from robosystems.middleware.graph.types import GRAPH_OR_SUBGRAPH_ID_PATTERN
 from robosystems.middleware.rate_limits import subscription_aware_rate_limit_dependency
 from robosystems.models.api.common import (
+  RESOURCE_ERROR_RESPONSES,
   ErrorCode,
-  ErrorResponse,
   SuccessResponse,
   create_error_response,
 )
@@ -43,31 +43,10 @@ router = APIRouter()
   status_code=status.HTTP_201_CREATED,
   operation_id="createConnection",
   summary="Create Connection",
-  description="""Create a new data connection for external system integration.
-
-This endpoint initiates connections to external data sources:
-
-**SEC Connections**:
-- Provide entity CIK for automatic filing retrieval
-- No authentication needed
-- Begins immediate data sync
-
-**QuickBooks Connections**:
-- Returns OAuth URL for authorization
-- Requires admin permissions in QuickBooks
-- Complete with OAuth callback
-
-Note:
-This operation is included - no credit consumption required.""",
+  description="SEC: provide entity CIK, no auth needed. QuickBooks: returns an OAuth URL — complete the flow to activate. One connection allowed per provider per graph.",
   responses={
-    201: {
-      "description": "Connection created successfully",
-      "model": ConnectionResponse,
-    },
-    400: {"description": "Invalid connection configuration", "model": ErrorResponse},
-    403: {"description": "Access denied - admin role required", "model": ErrorResponse},
-    409: {"description": "Connection already exists", "model": ErrorResponse},
-    500: {"description": "Failed to create connection", "model": ErrorResponse},
+    **RESOURCE_ERROR_RESPONSES,
+    409: {"description": "Connection already exists for this provider"},
   },
 )
 async def create_connection(
@@ -79,13 +58,6 @@ async def create_connection(
   db: Session = Depends(get_db_session),
   _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
 ) -> ConnectionResponse:
-  """
-  Create a new connection for data synchronization.
-
-  Supports multiple providers:
-  - SEC: Requires CIK for public entity filings
-  - QuickBooks: Requires OAuth authentication (separate flow)
-  """
   # Initialize robustness components
   components = create_robustness_components()
 
@@ -281,42 +253,8 @@ async def create_connection(
   "",
   response_model=list[ConnectionResponse],
   summary="List Connections",
-  description="""List all data connections in the graph.
-
-Returns active and inactive connections with their current status.
-Connections can be filtered by:
-- **Entity**: Show connections for a specific entity
-- **Provider**: Filter by connection type (sec, quickbooks)
-
-Each connection shows:
-- Current sync status and health
-- Last successful sync timestamp
-- Configuration metadata
-- Error messages if any
-
-No credits are consumed for listing connections.""",
   operation_id="listConnections",
-  responses={
-    200: {
-      "description": "Connections retrieved successfully",
-      "content": {
-        "application/json": {
-          "example": [
-            {
-              "connection_id": "conn_123",
-              "provider": "quickbooks",
-              "entity_id": "entity_456",
-              "status": "active",
-              "created_at": "2024-01-01T00:00:00Z",
-              "last_sync": "2024-01-02T00:00:00Z",
-            }
-          ]
-        }
-      },
-    },
-    403: {"description": "Access denied to graph", "model": ErrorResponse},
-    500: {"description": "Failed to list connections", "model": ErrorResponse},
-  },
+  responses={**RESOURCE_ERROR_RESPONSES},
 )
 async def list_connections(
   graph_id: str = Path(
@@ -328,11 +266,6 @@ async def list_connections(
   db: Session = Depends(get_db_session),
   _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
 ) -> list[ConnectionResponse]:
-  """
-  List all connections accessible to the current user.
-
-  Can be filtered by entity_id and/or provider type.
-  """
   try:
     # Get connections from service
     connections = await ConnectionService.list_connections(
@@ -373,26 +306,8 @@ async def list_connections(
   "/{connection_id}",
   response_model=ConnectionResponse,
   summary="Get Connection",
-  description="""Get detailed information about a specific connection.
-
-Returns comprehensive connection details including:
-- Current status and health indicators
-- Authentication state
-- Sync history and statistics
-- Error details if any
-- Provider-specific metadata
-
-No credits are consumed for viewing connection details.""",
   operation_id="getConnection",
-  responses={
-    200: {
-      "description": "Connection details retrieved successfully",
-      "model": ConnectionResponse,
-    },
-    403: {"description": "Access denied to connection", "model": ErrorResponse},
-    404: {"description": "Connection not found", "model": ErrorResponse},
-    500: {"description": "Failed to retrieve connection", "model": ErrorResponse},
-  },
+  responses={**RESOURCE_ERROR_RESPONSES},
 )
 async def get_connection(
   graph_id: str = Path(
@@ -403,23 +318,6 @@ async def get_connection(
   db: Session = Depends(get_db_session),
   _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
 ) -> ConnectionResponse:
-  """
-  Get details of a specific connection.
-
-  Retrieves comprehensive information about a data connection.
-
-  Args:
-      graph_id: The graph containing the connection
-      connection_id: The connection to retrieve
-      current_user: The authenticated user
-      db: Database session
-
-  Returns:
-      ConnectionResponse: Detailed connection information
-
-  Raises:
-      HTTPException: If connection not found or access denied
-  """
   try:
     connection = await ConnectionService.get_connection(connection_id, current_user.id)
 
@@ -456,25 +354,9 @@ async def get_connection(
   "/{connection_id}",
   response_model=SuccessResponse,
   summary="Delete Connection",
-  description="""Delete a data connection and clean up related resources.
-
-This operation:
-- Removes the connection configuration
-- Preserves any imported data in the graph
-- Performs provider-specific cleanup
-- Revokes stored credentials
-
-Note:
-This operation is included - no credit consumption required.
-
-Only users with admin role can delete connections.""",
+  description="Removes the connection and revokes credentials. Imported data is preserved in the graph. Requires admin role.",
   operation_id="deleteConnection",
-  responses={
-    200: {"description": "Connection deleted successfully", "model": SuccessResponse},
-    403: {"description": "Access denied - admin role required", "model": ErrorResponse},
-    404: {"description": "Connection not found", "model": ErrorResponse},
-    500: {"description": "Failed to delete connection", "model": ErrorResponse},
-  },
+  responses={**RESOURCE_ERROR_RESPONSES},
 )
 async def delete_connection(
   graph_id: str = Path(
@@ -485,11 +367,6 @@ async def delete_connection(
   db: Session = Depends(get_db_session),
   _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
 ):
-  """
-  Delete a connection and optionally clean up related data.
-
-  This will remove the connection configuration but preserve any imported data.
-  """
   try:
     # Get connection before deletion for cleanup
     connection = await ConnectionService.get_connection(connection_id, current_user.id)

@@ -1,12 +1,4 @@
-"""
-Unified subscription management endpoints for graphs and repositories.
-
-This endpoint handles subscriptions for both:
-- User Graphs: Per-graph billing (resource_type="graph", resource_id=graph_id)
-- Shared Repositories: Per-user billing (resource_type="repository", resource_id=repo_name)
-
-The same endpoint structure works for both, with automatic detection of the resource type.
-"""
+"""Unified subscription management endpoints for graphs and repositories."""
 
 import logging
 
@@ -29,6 +21,7 @@ from ...models.api.billing.subscription import (
   GraphSubscriptionResponse,
   UpgradeSubscriptionRequest,
 )
+from ...models.api.common import RESOURCE_ERROR_RESPONSES
 from ...models.core import User
 from ...models.core.billing import BillingAuditLog, BillingCustomer, BillingSubscription
 from ...models.core.billing.audit_log import BillingEventType
@@ -42,12 +35,10 @@ router = APIRouter(
 
 
 def is_shared_repository(graph_id: str) -> bool:
-  """Check if a graph_id refers to a shared repository or subgraph of one."""
   return _is_shared_repo_or_sub(graph_id)
 
 
 def _get_plan_display_name(plan_name: str, resource_type: str, resource_id: str) -> str:
-  """Resolve a plan's internal name to its human-readable display name."""
   if resource_type == "graph":
     plan = BillingConfig.get_subscription_plan(plan_name)
     if plan:
@@ -98,52 +89,10 @@ def subscription_to_response(
 @router.get(
   "",
   response_model=GraphSubscriptionResponse,
-  summary="Get Graph and Shared Repository Subscription",
-  description="""Get subscription details for a graph or shared repository.
-
-For user graphs (kg*): Returns the graph's subscription (owned by graph creator)
-For shared repositories (sec, industry, etc.): Returns user's personal subscription to that repository
-
-This unified endpoint automatically detects the resource type and returns the appropriate subscription.""",
+  summary="Get Graph Subscription",
+  description="Detects resource type automatically: user graphs (kg*) return the graph's subscription; shared repositories return the user's personal subscription to that repo.",
   operation_id="getGraphSubscription",
-  responses={
-    200: {
-      "description": "Subscription retrieved successfully",
-      "content": {
-        "application/json": {
-          "examples": {
-            "user_graph": {
-              "summary": "User Graph Subscription",
-              "value": {
-                "id": "bsub_abc123",
-                "resource_type": "graph",
-                "resource_id": "kg1a2b3c",
-                "plan_name": "ladybug-standard",
-                "billing_interval": "monthly",
-                "status": "active",
-                "base_price_cents": 4999,
-                "started_at": "2024-01-15T10:30:00Z",
-              },
-            },
-            "repository": {
-              "summary": "Repository Subscription",
-              "value": {
-                "id": "bsub_xyz789",
-                "resource_type": "repository",
-                "resource_id": "sec",
-                "plan_name": "sec-advanced",
-                "billing_interval": "monthly",
-                "status": "active",
-                "base_price_cents": 9999,
-                "started_at": "2024-01-15T10:30:00Z",
-              },
-            },
-          }
-        }
-      },
-    },
-    404: {"description": "No subscription found"},
-  },
+  responses={**RESOURCE_ERROR_RESPONSES},
 )
 async def get_subscription(
   graph_id: str = Path(
@@ -153,7 +102,6 @@ async def get_subscription(
   db: Session = Depends(get_db_session),
   _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
 ) -> GraphSubscriptionResponse:
-  """Get subscription for a graph or repository."""
   try:
     from ...models.core import OrgUser
 
@@ -210,19 +158,12 @@ async def get_subscription(
   response_model=GraphSubscriptionResponse,
   status_code=status.HTTP_201_CREATED,
   summary="Create Repository Subscription",
-  description="""Create a new subscription to a shared repository.
-
-This endpoint is ONLY for shared repositories (sec, industry, economic).
-User graph subscriptions are created automatically when the graph is provisioned.
-
-The subscription will be created in ACTIVE status immediately and credits will be allocated.""",
+  description="For shared repositories only (sec, industry, etc.). User graph subscriptions are created automatically during provisioning.",
   operation_id="createRepositorySubscription",
   responses={
-    201: {"description": "Repository subscription created successfully"},
-    400: {
-      "description": "Invalid request - cannot create subscription for user graphs"
-    },
-    409: {"description": "User already has a subscription to this repository"},
+    **RESOURCE_ERROR_RESPONSES,
+    402: {"description": "Payment required — add a payment method first"},
+    409: {"description": "Already subscribed to this repository"},
   },
 )
 async def create_repository_subscription(
@@ -236,7 +177,6 @@ async def create_repository_subscription(
   db: Session = Depends(get_db_session),
   _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
 ) -> GraphSubscriptionResponse:
-  """Create a new subscription to a shared repository."""
   try:
     if not is_shared_repository(graph_id):
       raise HTTPException(
@@ -460,30 +400,9 @@ async def create_repository_subscription(
   "",
   response_model=GraphSubscriptionResponse,
   summary="Change Subscription Plan",
-  description="""Change the plan on an existing subscription.
-
-**For shared repositories** (sec, industry, etc.): Changes access tier (e.g., starter -> advanced).
-Synchronous — takes effect immediately.
-
-**For user graphs** (kg*): Changes infrastructure tier (e.g., ladybug-standard -> ladybug-large).
-Asynchronous — returns an `operation_id` for tracking the EBS volume migration via SSE.
-
-Stripe handles proration automatically for both types.
-
-**Requirements:**
-- User must be an OWNER of their organization
-- Subscription must be active
-- New plan must be valid for the resource type
-
-**Downgrade restrictions (graphs only):**
-- Subgraph count must fit the target tier's limit
-- Storage usage must fit the target tier's limit""",
+  description="For repositories: synchronous tier change. For user graphs: use `POST /v1/graphs/{graph_id}/operations/change-tier` instead — this endpoint rejects graph tier changes. Requires org owner role.",
   operation_id="changeSubscriptionPlan",
-  responses={
-    200: {"description": "Plan changed successfully"},
-    400: {"description": "Invalid plan, validation failure, or status conflict"},
-    404: {"description": "No subscription found"},
-  },
+  responses={**RESOURCE_ERROR_RESPONSES},
 )
 async def change_plan(
   graph_id: str = Path(
@@ -496,10 +415,6 @@ async def change_plan(
   db: Session = Depends(get_db_session),
   _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
 ) -> GraphSubscriptionResponse:
-  """Change plan on a repository subscription.
-
-  For graph tier changes, use ``POST /v1/graphs/{graph_id}/operations/change-tier``.
-  """
   try:
     if is_shared_repository(graph_id):
       return await _change_repository_plan(graph_id, request, current_user, db)
@@ -521,7 +436,6 @@ async def _change_repository_plan(
   current_user: User,
   db: Session,
 ) -> GraphSubscriptionResponse:
-  """Change plan on a shared repository subscription (sync)."""
   from ...models.core import OrgRole, OrgUser
   from ...models.core.user.user_repository import UserRepository
   from ...operations.providers.payment_provider import get_payment_provider

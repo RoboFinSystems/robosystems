@@ -7,6 +7,7 @@ from ...database import get_db_session
 from ...logger import get_logger
 from ...middleware.auth.dependencies import get_current_user
 from ...middleware.rate_limits import general_api_rate_limit_dependency
+from ...models.api.common import AUTHENTICATED_ERROR_RESPONSES, RESOURCE_ERROR_RESPONSES
 from ...models.api.orgs import (
   OrgDetailResponse,
   OrgListResponse,
@@ -24,15 +25,14 @@ router = APIRouter(tags=["Org"])
   "/orgs",
   response_model=OrgListResponse,
   summary="List User's Organizations",
-  description="Get all organizations the current user belongs to, with their role in each.",
   operation_id="listUserOrgs",
+  responses={**AUTHENTICATED_ERROR_RESPONSES},
 )
 async def list_user_orgs(
   current_user: User = Depends(get_current_user),
   db: Session = Depends(get_db_session),
   _rate_limit: None = Depends(general_api_rate_limit_dependency),
 ) -> OrgListResponse:
-  """List all organizations the user belongs to."""
   try:
     # Get all org memberships for the user
     org_memberships = OrgUser.get_user_orgs(current_user.id, db)
@@ -74,8 +74,8 @@ async def list_user_orgs(
   "/orgs/{org_id}",
   response_model=OrgDetailResponse,
   summary="Get Organization",
-  description="Get detailed information about an organization.",
   operation_id="getOrg",
+  responses={**RESOURCE_ERROR_RESPONSES},
 )
 async def get_org(
   org_id: str,
@@ -83,7 +83,6 @@ async def get_org(
   db: Session = Depends(get_db_session),
   _rate_limit: None = Depends(general_api_rate_limit_dependency),
 ) -> OrgDetailResponse:
-  """Get organization details."""
   try:
     # Check if user is a member of the org
     membership = OrgUser.get_by_org_and_user(org_id, current_user.id, db)
@@ -158,8 +157,9 @@ async def get_org(
   "/orgs/{org_id}",
   response_model=OrgDetailResponse,
   summary="Update Organization",
-  description="Update organization information. Requires admin or owner role.",
+  description="Requires admin or owner role. Only owners can change the org type.",
   operation_id="updateOrg",
+  responses={**RESOURCE_ERROR_RESPONSES},
 )
 async def update_org(
   org_id: str,
@@ -168,7 +168,6 @@ async def update_org(
   db: Session = Depends(get_db_session),
   _rate_limit: None = Depends(general_api_rate_limit_dependency),
 ) -> OrgDetailResponse:
-  """Update organization details."""
   try:
     # Check if user is an admin or owner of the org
     membership = OrgUser.get_by_org_and_user(org_id, current_user.id, db)
@@ -214,8 +213,8 @@ async def update_org(
   "/orgs/{org_id}/graphs",
   response_model=list[dict],
   summary="List Organization Graphs",
-  description="Get all graphs belonging to an organization.",
   operation_id="listOrgGraphs",
+  responses={**RESOURCE_ERROR_RESPONSES},
 )
 async def list_org_graphs(
   org_id: str,
@@ -223,7 +222,6 @@ async def list_org_graphs(
   db: Session = Depends(get_db_session),
   _rate_limit: None = Depends(general_api_rate_limit_dependency),
 ) -> list[dict]:
-  """List all graphs in an organization."""
   try:
     # Check if user is a member of the org
     membership = OrgUser.get_by_org_and_user(org_id, current_user.id, db)

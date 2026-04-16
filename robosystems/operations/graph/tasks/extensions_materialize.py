@@ -73,7 +73,7 @@ class ExtensionsMaterializeTask(BaseTask):
       from robosystems.dagster.reporting import report_asset_materialization
 
       await report_asset_materialization(
-        asset_key="extensions_materialize",
+        asset_key="user_graph_extensions_materialized",
         description=f"Extensions materialized for {self.graph_id}",
         metadata={
           "graph_id": self.graph_id,
