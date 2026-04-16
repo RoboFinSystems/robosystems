@@ -13,12 +13,26 @@ RoboSystems is a knowledge graph platform for enterprise financial and operation
 
 ### Graph Operations
 
-- **Create**: Initialize knowledge graphs with customizable schemas and extensions
+Graph lifecycle follows the same CQRS pattern as the extensions surface:
+reads are REST GETs, writes are named command operations returning
+`OperationEnvelope` with idempotency and audit logging.
+
+**Reads** (REST GETs at `/v1/graphs/{graph_id}/...`):
 - **Query**: Execute Cypher queries with NDJSON streaming for large results
 - **Tables**: DuckDB staging tables for data ingestion with file upload, query, and import workflows
 - **Schema**: View and analyze node types, relationship types, and property definitions
-- **Backup**: Encrypted backups with retention policies and download support
+- **Subgraphs**: List subgraphs with quota, storage, and status information
+- **Backups**: List backups, download URLs, and storage statistics
+- **Health**: Database health, staleness indicators, and materialization status
 - **Analytics**: Graph analytics for understanding contents and usage
+
+**Writes** (named operations at `POST /v1/graphs/{graph_id}/operations/{op_name}`):
+- **create-subgraph**: Initialize a subgraph with optional fork of parent data
+- **delete-subgraph**: Remove a subgraph with optional pre-delete backup
+- **create-backup**: Encrypted backup with configurable format and retention
+- **restore-backup**: Restore from backup (blocked for entity graphs — use `materialize` instead)
+- **upgrade-tier**: Change graph infrastructure tier with Stripe billing integration
+- **materialize**: Ingest DuckDB-staged tables into the graph (direct or Dagster-orchestrated)
 
 ### MCP & Agents
 
