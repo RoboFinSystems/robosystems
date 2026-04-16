@@ -21,9 +21,9 @@ import time
 from pathlib import Path
 from typing import Iterable
 
-from robosystems_client.extensions import (
-  RoboSystemsExtensions,
-  RoboSystemsExtensionConfig,
+from robosystems_client.clients import (
+  RoboSystemsClients,
+  RoboSystemsClientConfig,
   MaterializationOptions,
 )
 
@@ -74,7 +74,7 @@ def _list_parquet_files(directory: Path, expected: Iterable[str]) -> list[Path]:
 
 
 def upload_tables(
-  extensions: RoboSystemsExtensions,
+  clients: RoboSystemsClients,
   graph_id: str,
   files: list[Path],
   phase_name: str,
@@ -92,7 +92,7 @@ def upload_tables(
     print(f"   Size: {file_size:,} bytes")
 
     try:
-      result = extensions.files.upload(
+      result = clients.files.upload(
         graph_id,
         table_name,
         str(file_path),
@@ -111,7 +111,7 @@ def upload_tables(
 
 
 def wait_for_staging(
-  extensions: RoboSystemsExtensions, graph_id: str, timeout_seconds: int = 600
+  clients: RoboSystemsClients, graph_id: str, timeout_seconds: int = 600
 ) -> bool:
   """Wait for all uploaded files to be staged in DuckDB."""
   print(f"\n{'=' * 70}")
@@ -130,7 +130,7 @@ def wait_for_staging(
       return False
 
     # Get all files for the graph
-    files = extensions.files.list(graph_id)
+    files = clients.files.list(graph_id)
     if not files:
       print("   No files found")
       return True
@@ -142,7 +142,7 @@ def wait_for_staging(
 
     for f in files:
       # Get detailed file info with layers
-      file_info = extensions.files.get(graph_id, f.file_id)
+      file_info = clients.files.get(graph_id, f.file_id)
       if file_info and file_info.layers:
         # layers is a Pydantic model with duckdb attribute
         duckdb_layer = getattr(file_info.layers, "duckdb", None)
@@ -175,14 +175,14 @@ def wait_for_staging(
     time.sleep(poll_interval)
 
 
-def materialize_graph_data(extensions: RoboSystemsExtensions, graph_id: str) -> None:
+def materialize_graph_data(clients: RoboSystemsClients, graph_id: str) -> None:
   """Materialize all uploaded tables into the graph."""
   print(f"\n{'=' * 70}")
   print("🔄 Materializing graph from DuckDB")
   print("=" * 70)
 
   try:
-    result = extensions.materialization.materialize(
+    result = clients.materialization.materialize(
       graph_id,
       MaterializationOptions(ignore_errors=True, rebuild=False),
     )
@@ -199,7 +199,7 @@ def materialize_graph_data(extensions: RoboSystemsExtensions, graph_id: str) -> 
     raise
 
 
-def run_post_ingest_checks(extensions: RoboSystemsExtensions, graph_id: str) -> None:
+def run_post_ingest_checks(clients: RoboSystemsClients, graph_id: str) -> None:
   """Run a small set of sanity-check queries after materialization."""
   print(f"\n{'=' * 70}")
   print("🔍 Verification queries")
@@ -209,7 +209,7 @@ def run_post_ingest_checks(extensions: RoboSystemsExtensions, graph_id: str) -> 
   for label in EXPECTED_NODE_TABLES:
     query = f"MATCH (n:{label}) RETURN count(n) AS count"
     try:
-      result = extensions.query.query(graph_id, query)
+      result = clients.query.query(graph_id, query)
       count = 0
       if getattr(result, "data", None):
         first_row = result.data[0]
@@ -222,7 +222,7 @@ def run_post_ingest_checks(extensions: RoboSystemsExtensions, graph_id: str) -> 
   for rel in EXPECTED_REL_TABLES:
     query = f"MATCH ()-[r:{rel}]->() RETURN count(r) AS count"
     try:
-      result = extensions.query.query(graph_id, query)
+      result = clients.query.query(graph_id, query)
       count = 0
       if getattr(result, "data", None):
         first_row = result.data[0]
@@ -287,24 +287,24 @@ def main() -> None:
   print(f"Credentials: {credentials_path}")
   print("=" * 70)
 
-  config = RoboSystemsExtensionConfig(
+  config = RoboSystemsClientConfig(
     base_url=args.base_url,
     headers={"X-API-Key": api_key},
     s3_endpoint_url=s3_endpoint,
   )
-  extensions = RoboSystemsExtensions(config)
+  clients = RoboSystemsClients(config)
 
   try:
-    upload_tables(extensions, graph_id, node_files, "Phase 1 - Node Tables")
+    upload_tables(clients, graph_id, node_files, "Phase 1 - Node Tables")
     upload_tables(
-      extensions, graph_id, relationship_files, "Phase 2 - Relationship Tables"
+      clients, graph_id, relationship_files, "Phase 2 - Relationship Tables"
     )
     # Wait for DuckDB staging to complete before materializing
-    staging_ok = wait_for_staging(extensions, graph_id, timeout_seconds=600)
+    staging_ok = wait_for_staging(clients, graph_id, timeout_seconds=600)
     if not staging_ok:
       print("\n⚠️  Continuing with materialization despite staging issues...")
-    materialize_graph_data(extensions, graph_id)
-    run_post_ingest_checks(extensions, graph_id)
+    materialize_graph_data(clients, graph_id)
+    run_post_ingest_checks(clients, graph_id)
   except Exception:
     print("\n❌ Upload & ingest process failed.")
     sys.exit(1)

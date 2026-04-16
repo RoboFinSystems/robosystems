@@ -16,9 +16,9 @@ import json
 import sys
 from pathlib import Path
 
-from robosystems_client.extensions import (
-  RoboSystemsExtensions,
-  RoboSystemsExtensionConfig,
+from robosystems_client.clients import (
+  RoboSystemsClients,
+  RoboSystemsClientConfig,
 )
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -46,7 +46,7 @@ def load_credentials() -> dict:
     return json.load(f)
 
 
-def upload_documents(extensions, graph_id: str) -> None:
+def upload_documents(clients, graph_id: str) -> None:
   """Upload all markdown documents from the documents/ directory."""
   if not DOCUMENTS_DIR.exists():
     print(f"❌ Documents directory not found: {DOCUMENTS_DIR}")
@@ -62,7 +62,7 @@ def upload_documents(extensions, graph_id: str) -> None:
   total_sections = 0
   for md_file in md_files:
     try:
-      result = extensions.documents.upload_file(graph_id=graph_id, file_path=md_file)
+      result = clients.documents.upload_file(graph_id=graph_id, file_path=md_file)
       total_sections += result.sections_indexed
       print(f"   ✅ {md_file.name}: {result.sections_indexed} sections indexed")
     except Exception as e:
@@ -71,18 +71,18 @@ def upload_documents(extensions, graph_id: str) -> None:
   print(f"\n📊 Total: {total_sections} sections indexed across {len(md_files)} documents")
 
   # Verify via list endpoint
-  doc_list = extensions.documents.list(graph_id)
+  doc_list = clients.documents.list(graph_id)
   print(f"📋 Documents in index: {doc_list.total}")
   for doc in doc_list.documents:
     print(f"   • {doc.document_title} ({doc.section_count} sections, {doc.source_type})")
 
 
-def run_sample_searches(extensions, graph_id: str) -> None:
+def run_sample_searches(clients, graph_id: str) -> None:
   """Run sample searches to demonstrate document discovery."""
   print("\n🔍 Running sample searches...")
 
   for query in SAMPLE_SEARCHES:
-    result = extensions.documents.search(graph_id=graph_id, query=query, size=3)
+    result = clients.documents.search(graph_id=graph_id, query=query, size=3)
 
     print(f'\n   Query: "{query}"')
     print(f"   Results: {result.total} total")
@@ -113,14 +113,14 @@ def main():
     print("❌ Missing API key or graph ID. Run previous demo steps first.")
     sys.exit(1)
 
-  config = RoboSystemsExtensionConfig(
+  config = RoboSystemsClientConfig(
     base_url=args.base_url,
     headers={"X-API-Key": api_key},
   )
-  extensions = RoboSystemsExtensions(config)
+  clients = RoboSystemsClients(config)
 
-  upload_documents(extensions, graph_id)
-  run_sample_searches(extensions, graph_id)
+  upload_documents(clients, graph_id)
+  run_sample_searches(clients, graph_id)
 
   print("\n✅ Document upload complete!")
   print("💡 Search these documents alongside your graph data using the search API")

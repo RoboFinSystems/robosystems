@@ -20,12 +20,12 @@ import time
 from pathlib import Path
 from typing import Callable
 
-from robosystems_client.extensions import (
-  RoboSystemsExtensions,
-  RoboSystemsExtensionConfig,
+from robosystems_client.clients import (
+  RoboSystemsClients,
+  RoboSystemsClientConfig,
   GraphMetadata,
 )
-from robosystems_client.extensions.graph_client import GraphClient
+from robosystems_client.clients.graph_client import GraphClient
 from robosystems_client.client import AuthenticatedClient
 from robosystems_client.api.graphs.create_graph import sync_detailed as api_create_graph
 from robosystems_client.api.operations.get_operation_status import (
@@ -214,11 +214,11 @@ def create_custom_graph(
   print("📊 Custom Graph Demo - Graph Creation")
   print("=" * 70)
 
-  config = RoboSystemsExtensionConfig(
+  config = RoboSystemsClientConfig(
     base_url=base_url,
     headers={"X-API-Key": api_key},
   )
-  extensions = RoboSystemsExtensions(config)
+  clients = RoboSystemsClients(config)
 
   metadata = GraphMetadata(
     graph_name=graph_name,
@@ -231,7 +231,7 @@ def create_custom_graph(
 
   try:
     graph_id = create_graph_with_custom_schema(
-      graph_client=extensions.graphs,
+      graph_client=clients.graphs,
       metadata=metadata,
       custom_schema=custom_schema,
       timeout=60,

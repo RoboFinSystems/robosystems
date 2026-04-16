@@ -56,7 +56,7 @@ COMPANY_NAME = "Cascade Advisory Group LLC"
 
 def _get_ledger_client():
   """Construct a LedgerClient from saved credentials."""
-  from robosystems_client.extensions.ledger_client import LedgerClient
+  from robosystems_client.clients.ledger_client import LedgerClient
 
   if not CREDENTIALS_FILE.exists():
     print("  ERROR: No credentials file. Run `just demo-user` first.")
