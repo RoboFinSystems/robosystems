@@ -96,6 +96,13 @@
       "problemMatcher": []
     },
     {
+      "label": "Update SDK",
+      "type": "shell",
+      "command": "just",
+      "args": ["sdk-update"],
+      "problemMatcher": []
+    },
+    {
       "label": "Test",
       "type": "shell",
       "command": "just",
