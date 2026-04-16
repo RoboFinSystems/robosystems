@@ -16,7 +16,7 @@ MAIN_API_TAGS = [
   },
   {
     "name": "Query",
-    "description": "🔍 Graph queries - Execute Cypher queries against graph databases",
+    "description": "🔍 Graph queries - Execute Cypher queries on the knowledge graph",
   },
   {
     "name": "Search",
@@ -52,11 +52,11 @@ MAIN_API_TAGS = [
   },
   {
     "name": "Subgraphs",
-    "description": "🌳 Subgraphs - Create and manage subgraph databases for AI memory and data isolation",
+    "description": "🌳 Subgraphs - List and inspect subgraph databases",
   },
   {
     "name": "Backup",
-    "description": "💾 Graph backup - Create, restore, and manage graph database backups",
+    "description": "💾 Backup - List, download, and inspect graph backups",
   },
   {
     "name": "Schema",
@@ -80,27 +80,19 @@ MAIN_API_TAGS = [
   },
   {
     "name": "Graph Limits",
-    "description": "📏 Graph limits - Instance storage usage, per-operation limits, and tier configuration",
+    "description": "📏 Graph limits - Storage usage, operation limits, and tier configuration",
   },
   {
     "name": "Graph Health",
-    "description": "🩺 Graph health - Monitor graph database health and performance metrics",
+    "description": "🩺 Graph health - Database health and performance metrics",
   },
   {
     "name": "Graph Info",
-    "description": "ℹ️ Graph info - Get graph database information, statistics, and metadata",
+    "description": "ℹ️ Graph info - Database metadata and statistics",
   },
   {
     "name": "Operations",
     "description": "⏱️ Operation monitoring - Track SSE stream status and progress",
-  },
-  {
-    "name": "User",
-    "description": "👤 User management - Profile, settings, and account information",
-  },
-  {
-    "name": "Auth",
-    "description": "🔐 Authentication - Login, register, and access token management",
   },
   {
     "name": "Org",
@@ -117,6 +109,14 @@ MAIN_API_TAGS = [
   {
     "name": "Billing",
     "description": "🛒 Billing - Create and manage billing checkout sessions",
+  },
+  {
+    "name": "User",
+    "description": "👤 User management - Profile, settings, and account information",
+  },
+  {
+    "name": "Auth",
+    "description": "🔐 Authentication - Login, register, and access token management",
   },
   {
     "name": "Service Offerings",
