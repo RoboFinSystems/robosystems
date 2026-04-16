@@ -14,7 +14,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from fastapi import HTTPException
 
-from robosystems.middleware.extensions import OperationEnvelope
+from robosystems.middleware.operations import OperationEnvelope
 from robosystems.models.api.extensions.investor import (
   CreatePortfolioRequest,
   CreatePositionRequest,
@@ -68,7 +68,7 @@ class _FakeCache:
   async def get(
     self, user_id, graph_id, operation_name, idempotency_key, body_fingerprint
   ):
-    from robosystems.middleware.extensions import IdempotencyKeyConflictError
+    from robosystems.middleware.operations import IdempotencyKeyConflictError
 
     entry = self.store.get((user_id, graph_id, operation_name, idempotency_key))
     if entry is None:

@@ -1,5 +1,8 @@
 """
-Main subgraph routes (list and create operations).
+Subgraph read routes (list).
+
+Write operations (create, delete) live at
+``POST /v1/graphs/{graph_id}/operations/{create-subgraph,delete-subgraph}``.
 """
 
 import asyncio
@@ -8,7 +11,6 @@ from fastapi import APIRouter, Depends, HTTPException, Path, status
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
-from robosystems.config import env
 from robosystems.config.graph_tier import get_tier_max_subgraphs
 from robosystems.database import get_async_db_session
 from robosystems.logger import api_logger, log_metric, logger
@@ -237,265 +239,134 @@ async def list_subgraphs(
     )
 
 
-@router.post(
-  "",
-  operation_id="createSubgraph",
-  summary="Create Subgraph",
-  description="""Create a new subgraph within a parent graph, with optional data forking.
+# ---------------------------------------------------------------------------
+# create_subgraph — not routed here; called by the graph operations router
+# at POST /v1/graphs/{graph_id}/operations/create-subgraph
+# ---------------------------------------------------------------------------
 
-**Requirements:**
-- Valid authentication
-- Parent graph must exist and be accessible to the user
-- User must have 'admin' permission on the parent graph
-- Parent graph tier must support subgraphs (LadybugDB Large/XLarge)
-- Must be within subgraph quota limits
-- Subgraph name must be unique within the parent graph
 
-**Fork Mode:**
-When `fork_parent=true`, the operation:
-- Returns immediately with an operation_id for SSE monitoring
-- Copies data from parent graph to the new subgraph
-- Supports selective forking via metadata.fork_options
-- Tracks progress in real-time via SSE
-
-**Returns:**
-- Without fork: Immediate SubgraphResponse with created subgraph details
-- With fork: Operation response with SSE monitoring endpoint
-
-**Subgraph ID format:** `{parent_id}_{subgraph_name}` (e.g., kg1234567890abcdef_dev)
-
-**Usage:**
-- Subgraphs share parent's credit pool
-- Subgraph ID can be used in all standard `/v1/graphs/{graph_id}/*` endpoints
-- Permissions inherited from parent graph
-""",
-)
-@endpoint_metrics_decorator(
-  endpoint_name="/v1/graphs/{graph_id}/subgraphs",
-  business_event_type="subgraph_create",
-)
 async def create_subgraph(
   request: CreateSubgraphRequest,
-  graph_id: str = Path(
-    ...,
-    description="Parent graph ID (e.g., 'kg1a2b3c4d5')",
-    pattern=GRAPH_ID_PATTERN,
-  ),
-  current_user: User = Depends(get_current_user_with_graph),
-  db: Session = Depends(get_async_db_session),
+  graph_id: str,
+  current_user: User,
+  db: Session,
 ):
-  """Create a new subgraph within a parent graph."""
+  """Create a new subgraph within a parent graph.
+
+  Not registered as a route — used by the graph operations router.
+  """
+  from robosystems.config import env
+
   operation_start_time = record_operation_start()
   audit_logger = SecurityAuditLogger()
 
-  try:
-    # Circuit breaker check
-    handle_circuit_breaker_check(graph_id, "create_subgraph")
+  # Circuit breaker check
+  handle_circuit_breaker_check(graph_id, "create_subgraph")
 
-    # Check if subgraph creation is enabled
-    if not env.SUBGRAPH_CREATION_ENABLED:
-      logger.warning(
-        f"Subgraph creation blocked by feature flag for user {current_user.id} on graph {graph_id}"
-      )
-      raise HTTPException(
-        status_code=status.HTTP_403_FORBIDDEN,
-        detail="Subgraph creation is currently disabled. Please contact support if you need assistance.",
-      )
-
-    # 1. Verify parent graph access (requires admin)
-    parent_graph = verify_parent_graph_access(graph_id, current_user, db, "admin")
-
-    # 2. Verify tier supports subgraphs
-    verify_subgraph_tier_support(parent_graph)
-
-    # 3. Verify parent graph is active
-    verify_parent_graph_active(parent_graph)
-
-    # 4. Check subgraph quota
-    current_count, max_subgraphs, existing_subgraphs = check_subgraph_quota(
-      parent_graph, db
+  # Check if subgraph creation is enabled
+  if not env.SUBGRAPH_CREATION_ENABLED:
+    raise HTTPException(
+      status_code=status.HTTP_403_FORBIDDEN,
+      detail="Subgraph creation is currently disabled.",
     )
 
-    # 5. Validate name uniqueness
-    validate_subgraph_name_unique(request.name, existing_subgraphs, graph_id)
+  # 1. Verify parent graph access (requires admin)
+  parent_graph = verify_parent_graph_access(graph_id, current_user, db, "admin")
 
-    # Log creation attempt
-    api_logger.info(
-      f"User {current_user.id} creating subgraph '{request.name}' for graph {graph_id}",
-      extra={
-        "user_id": current_user.id,
-        "graph_id": graph_id,
+  # 2. Verify tier supports subgraphs
+  verify_subgraph_tier_support(parent_graph)
+
+  # 3. Verify parent graph is active
+  verify_parent_graph_active(parent_graph)
+
+  # 4. Check subgraph quota
+  current_count, max_subgraphs, existing_subgraphs = check_subgraph_quota(
+    parent_graph, db
+  )
+
+  # 5. Validate name uniqueness
+  validate_subgraph_name_unique(request.name, existing_subgraphs, graph_id)
+
+  # 6. Fork path: enqueue to worker for background execution
+  if request.fork_parent:
+    from robosystems.worker.client import enqueue_task
+
+    response = await enqueue_task(
+      task_type="subgraph_creation",
+      graph_id=graph_id,
+      user_id=str(current_user.id),
+      params={
+        "parent_graph_id": graph_id,
         "subgraph_name": request.name,
-        "operation": "create_subgraph",
+        "description": request.display_name,
+        "fork_data": True,
       },
     )
 
-    # 6. Fork path: enqueue to worker for background execution
-    #    Dagster reporting happens in the worker task (tasks/subgraph_creation.py)
-    if request.fork_parent:
-      from robosystems.worker.client import enqueue_task
-
-      response = await enqueue_task(
-        task_type="subgraph_creation",
-        graph_id=graph_id,
-        user_id=str(current_user.id),
-        params={
-          "parent_graph_id": graph_id,
-          "subgraph_name": request.name,
-          "description": request.display_name,
-          "fork_data": True,
-        },
-      )
-      logger.info(
-        f"Enqueued subgraph fork: operation={response['operation_id']}, "
-        f"parent={graph_id}, name={request.name}"
-      )
-
-      # Security audit log
-      audit_logger.log_security_event(
-        SecurityEventType.SUBGRAPH_CREATED,
-        user_id=str(current_user.id),
-        details={
-          "operation_id": response["operation_id"],
-          "parent_graph_id": graph_id,
-          "subgraph_name": request.name,
-          "fork": True,
-        },
-      )
-
-      # Record success metrics
-      record_operation_metrics(
-        start_time=operation_start_time,
-        operation_name="create_subgraph",
-        parent_graph_id=graph_id,
-        additional_tags={
-          "success": True,
-          "entity_count": 1,
-          "fork": True,
-        },
-      )
-
-      return response
-
-    # Non-fork path: Create immediately and return SubgraphResponse
-    service = get_subgraph_service()
-    subgraph_result = await service.create_subgraph(
-      parent_graph=parent_graph,
-      user=current_user,
-      name=request.name,
-      description=request.display_name,
-      subgraph_type=request.subgraph_type.value if request.subgraph_type else "static",
-      metadata=request.metadata,
-      fork_parent=False,  # Immediate creation doesn't fork
-      fork_options=None,
-    )
-
-    # Log security event
     audit_logger.log_security_event(
       SecurityEventType.SUBGRAPH_CREATED,
       user_id=str(current_user.id),
       details={
-        "resource_id": subgraph_result["graph_id"],
+        "operation_id": response["operation_id"],
         "parent_graph_id": graph_id,
         "subgraph_name": request.name,
-        "subgraph_type": request.subgraph_type.value
-        if request.subgraph_type
-        else "static",
+        "fork": True,
       },
     )
 
-    # Log metrics
-    log_metric(
-      "subgraph_created",
-      1,
-      {
-        "graph_id": graph_id,
-        "subgraph_id": subgraph_result["graph_id"],
-        "user_id": str(current_user.id),
-        "tier": parent_graph.graph_tier,
-      },
-    )
-
-    # Report to Dagster observable asset
-    try:
-      from robosystems.dagster.reporting import report_asset_materialization
-
-      await report_asset_materialization(
-        asset_key="user_subgraph_creation",
-        description=f"Subgraph {subgraph_result['graph_id']} created from {graph_id}",
-        metadata={
-          "graph_id": subgraph_result["graph_id"],
-          "parent_graph_id": graph_id,
-          "subgraph_name": request.name,
-          "subgraph_type": request.subgraph_type.value
-          if request.subgraph_type
-          else "static",
-          "user_id": str(current_user.id),
-          "tier": parent_graph.graph_tier,
-          "provisioning_method": "direct",
-        },
-      )
-    except Exception as e:
-      logger.warning(f"Failed to report subgraph creation to Dagster: {e}")
-
-    # Record success metrics
     record_operation_metrics(
       start_time=operation_start_time,
       operation_name="create_subgraph",
       parent_graph_id=graph_id,
-      additional_tags={
-        "success": True,
-        "entity_count": 1,
-      },
+      additional_tags={"success": True, "fork": True},
     )
 
-    return SubgraphResponse(
-      graph_id=subgraph_result["graph_id"],
-      parent_graph_id=graph_id,
-      subgraph_index=subgraph_result.get("subgraph_index", 1),
-      subgraph_name=request.name,
-      display_name=request.display_name,
-      description=request.description,
-      subgraph_type=request.subgraph_type or SubgraphType.STATIC,
-      status=subgraph_result.get("status", "active"),
-      created_at=subgraph_result.get("created_at"),
-      updated_at=subgraph_result.get("updated_at", subgraph_result.get("created_at")),
-      size_mb=None,
-      node_count=None,
-      edge_count=None,
-      last_accessed=None,
-      metadata=request.metadata,
-    )
+    return response
 
-  except HTTPException:
-    record_operation_metrics(
-      start_time=operation_start_time,
-      operation_name="create_subgraph",
-      parent_graph_id=graph_id,
-      additional_tags={"success": False},
-    )
-    raise
-  except SQLAlchemyError as e:
-    record_operation_metrics(
-      start_time=operation_start_time,
-      operation_name="create_subgraph",
-      parent_graph_id=graph_id,
-      additional_tags={"success": False, "error_type": "db"},
-    )
-    logger.error(f"Database error creating subgraph: {e}")
-    raise HTTPException(
-      status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-      detail="Failed to create subgraph due to database error",
-    )
-  except Exception as e:
-    record_operation_metrics(
-      start_time=operation_start_time,
-      operation_name="create_subgraph",
-      parent_graph_id=graph_id,
-      additional_tags={"success": False, "error_type": "unexpected"},
-    )
-    logger.error(f"Unexpected error creating subgraph: {e}")
-    raise HTTPException(
-      status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-      detail="An unexpected error occurred while creating the subgraph",
-    )
+  # Non-fork path: Create immediately
+  service = get_subgraph_service()
+  subgraph_result = await service.create_subgraph(
+    parent_graph=parent_graph,
+    user=current_user,
+    name=request.name,
+    description=request.display_name,
+    subgraph_type=request.subgraph_type.value if request.subgraph_type else "static",
+    metadata=request.metadata,
+    fork_parent=False,
+    fork_options=None,
+  )
+
+  audit_logger.log_security_event(
+    SecurityEventType.SUBGRAPH_CREATED,
+    user_id=str(current_user.id),
+    details={
+      "resource_id": subgraph_result["graph_id"],
+      "parent_graph_id": graph_id,
+      "subgraph_name": request.name,
+    },
+  )
+
+  record_operation_metrics(
+    start_time=operation_start_time,
+    operation_name="create_subgraph",
+    parent_graph_id=graph_id,
+    additional_tags={"success": True},
+  )
+
+  return SubgraphResponse(
+    graph_id=subgraph_result["graph_id"],
+    parent_graph_id=graph_id,
+    subgraph_index=subgraph_result.get("subgraph_index", 1),
+    subgraph_name=request.name,
+    display_name=request.display_name,
+    description=request.description,
+    subgraph_type=request.subgraph_type or SubgraphType.STATIC,
+    status=subgraph_result.get("status", "active"),
+    created_at=subgraph_result.get("created_at"),
+    updated_at=subgraph_result.get("updated_at", subgraph_result.get("created_at")),
+    size_mb=None,
+    node_count=None,
+    edge_count=None,
+    last_accessed=None,
+    metadata=request.metadata,
+  )

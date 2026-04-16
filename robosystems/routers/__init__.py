@@ -46,7 +46,6 @@ from .graphs import (
   health_router,
   info_router,
   limits_router,
-  materialize_router,
   query_router,
   schema_router,
   subgraphs_router,
@@ -61,6 +60,7 @@ from .graphs import (
 )
 from .graphs.agent import router as agent_router  # Agent module with modular structure
 from .graphs.mcp import router as mcp_router
+from .graphs.operations import router as graph_operations_router
 from .offering import offering_router
 from .operations import router as operations_router
 from .orgs import router as orgs_router
@@ -108,7 +108,7 @@ if env.SEMANTIC_SEARCH_ENABLED:
   router.include_router(search_router)  # No prefix - handles /search internally
   router.include_router(documents_router)  # No prefix - handles /documents internally
 
-router.include_router(materialize_router)  # No prefix - handles /materialize endpoint
+router.include_router(graph_operations_router, prefix="/operations")
 router.include_router(files_router)  # No prefix - handles /files endpoint
 
 # Non-graph-scoped routes that don't require a graph_id

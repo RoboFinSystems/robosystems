@@ -11,20 +11,16 @@ MAIN_API_TAGS = [
     "description": "🔍 Graph queries - Execute Cypher queries against graph databases",
   },
   {
+    "name": "Search",
+    "description": "🔎 Search - Full-text and semantic search on documents, narratives and disclosures",
+  },
+  {
     "name": "MCP",
     "description": "🔌 MCP - Model Context Protocol for AI interactions with graph data",
   },
   {
     "name": "Agent",
     "description": "🤖 AI Agents - Intelligent AI agents for analyzing and managing graph data",
-  },
-  {
-    "name": "Documents",
-    "description": "📑 Documents - Upload, list, and manage documents for search and analysis",
-  },
-  {
-    "name": "Search",
-    "description": "🔎 Search - Full-text search across filing narratives, disclosures, and XBRL text content",
   },
   {
     "name": "Extensions: GraphQL",
@@ -39,8 +35,12 @@ MAIN_API_TAGS = [
     "description": "📈 RoboInvestor operations - Named commands for portfolio management writes and analytical views",
   },
   {
-    "name": "Materialize",
-    "description": "🔄 Materialize graph - Rebuild graph from DuckDB staging tables",
+    "name": "Graph Operations",
+    "description": "⚙️ Graph lifecycle commands — subgraphs, backups, tier changes, materialization",
+  },
+  {
+    "name": "Documents",
+    "description": "📑 Documents - Upload, list, and manage documents for search and analysis",
   },
   {
     "name": "Tables",
@@ -48,7 +48,7 @@ MAIN_API_TAGS = [
   },
   {
     "name": "Files",
-    "description": "📄 File management - Upload, track, and manage data files with multi-layer status",
+    "description": "📄 File management - Upload, track, and manage data files in custom graphs",
   },
   {
     "name": "Subgraphs",

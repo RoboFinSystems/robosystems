@@ -26,7 +26,7 @@ router = APIRouter()
 
 
 @router.get(
-  "/{subgraph_name}/info",
+  "/{subgraph_name}",
   response_model=SubgraphResponse,
   operation_id="getSubgraphInfo",
   summary="Get Subgraph Details",

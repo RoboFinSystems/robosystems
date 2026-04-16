@@ -1,5 +1,8 @@
 """
-Main backup routes (list and create operations).
+Backup read routes (list).
+
+Write operations (create, restore) live at
+``POST /v1/graphs/{graph_id}/operations/{create-backup,restore-backup}``.
 """
 
 from datetime import UTC, datetime
@@ -15,7 +18,6 @@ from fastapi import (
 )
 from sqlalchemy.orm import Session
 
-from robosystems.config import env
 from robosystems.database import get_async_db_session
 from robosystems.logger import logger
 from robosystems.middleware.auth.dependencies import get_current_user_with_graph
@@ -29,17 +31,12 @@ from robosystems.middleware.rate_limits import (
   DownloadRateLimiter,
   subscription_aware_rate_limit_dependency,
 )
-from robosystems.models.api.common import ErrorResponse
 from robosystems.models.api.graphs.backups import (
-  BackupCreateRequest,
   BackupListResponse,
   BackupResponse,
   DownloadQuota,
 )
 from robosystems.models.core import User, UserRepository
-from robosystems.security import SecurityAuditLogger, SecurityEventType
-
-from .utils import verify_admin_access
 
 # Create router
 router = APIRouter()
@@ -215,275 +212,4 @@ async def list_backups(
     raise HTTPException(
       status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
       detail="Failed to list backups",
-    )
-
-
-@router.post(
-  "",
-  response_model=None,
-  status_code=status.HTTP_202_ACCEPTED,
-  operation_id="createBackup",
-  summary="Create Backup",
-  description="""Create a backup of the graph database.
-
-Creates a complete backup of the graph database (.lbug file) with:
-- **Format**: Full database backup only (complete .lbug file)
-- **Compression**: Always enabled for optimal storage
-- **Encryption**: Optional AES-256 encryption for security
-- **Retention**: Configurable retention period (1-2555 days)
-
-**Backup Features:**
-- **Complete Backup**: Full database file backup
-- **Consistency**: Point-in-time consistent snapshot
-- **Download Support**: Unencrypted backups can be downloaded
-- **Restore Support**: Future support for encrypted backup restoration
-
-**Operation State Machine:**
-```
-pending → processing → completed
-                    ↘ failed
-```
-- **pending**: Backup queued, waiting to start
-- **processing**: Actively backing up database
-- **completed**: Backup successfully created and stored
-- **failed**: Backup failed (check error message)
-
-**Expected Durations:**
-Operation times vary by database size:
-- **Small** (<1GB): 30 seconds - 2 minutes
-- **Medium** (1-10GB): 2-10 minutes
-- **Large** (10-100GB): 10-30 minutes
-- **Very Large** (>100GB): 30+ minutes
-
-**Progress Monitoring:**
-Use the returned operation_id to connect to the SSE stream:
-```javascript
-const eventSource = new EventSource('/v1/operations/{operation_id}/stream');
-eventSource.addEventListener('operation_progress', (event) => {
-  const data = JSON.parse(event.data);
-  console.log('Backup progress:', data.progress_percent + '%');
-  console.log('Status:', data.status); // pending, processing, completed, failed
-});
-```
-
-**SSE Connection Limits:**
-- Maximum 5 concurrent SSE connections per user
-- Rate limited to 10 new connections per minute
-- Automatic circuit breaker for Redis failures
-- Graceful degradation if event system unavailable
-
-**Important Notes:**
-- Only full_dump format is supported (no CSV/JSON exports)
-- Compression is always enabled
-- Encrypted backups cannot be downloaded (security measure)
-- All backups are stored securely in cloud storage
-
-**Credit Consumption:**
-- Base cost: 25.0 credits
-- Large databases (>10GB): 50.0 credits
-- Multiplied by graph tier
-
-Returns operation details for SSE monitoring.""",
-  responses={
-    202: {"description": "Backup creation started"},
-    400: {"description": "Invalid backup configuration", "model": ErrorResponse},
-    403: {"description": "Access denied - admin role required", "model": ErrorResponse},
-    404: {"description": "Graph not found", "model": ErrorResponse},
-    500: {"description": "Failed to initiate backup", "model": ErrorResponse},
-  },
-)
-@endpoint_metrics_decorator(
-  endpoint_name="/v1/graphs/{graph_id}/backups",
-  business_event_type="backup_created",
-)
-async def create_backup(
-  request: BackupCreateRequest,
-  fastapi_request: Request,
-  graph_id: str = Path(
-    ..., description="Graph database identifier", pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN
-  ),
-  current_user: User = Depends(get_current_user_with_graph),
-  db: Session = Depends(get_async_db_session),
-  _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
-) -> dict:
-  """
-  Create a new backup of the graph database.
-
-  Initiates an asynchronous backup operation that runs in the background.
-  Use the returned operation_id to monitor progress via SSE.
-  """
-  try:
-    verify_admin_access(current_user, graph_id, db)
-
-    # Block backup creation for shared repositories
-    if MultiTenantUtils.is_shared_repository_or_subgraph(graph_id):
-      logger.warning(
-        f"User {current_user.id} attempted backup creation on shared repository {graph_id}"
-      )
-      raise HTTPException(
-        status_code=status.HTTP_403_FORBIDDEN,
-        detail=f"Creating backups is not allowed on shared repository '{graph_id}'. "
-        f"System-generated backups are available for download.",
-      )
-
-    # Check if backup creation is enabled
-    if not env.BACKUP_CREATION_ENABLED:
-      logger.warning(
-        f"Backup creation blocked by feature flag for user {current_user.id} on graph {graph_id}"
-      )
-      raise HTTPException(
-        status_code=status.HTTP_403_FORBIDDEN,
-        detail="Backup creation is currently disabled. Please contact support if you need assistance.",
-      )
-
-    # Cap retention_days to the tier maximum
-    from robosystems.config.graph_tier import GraphTierConfig
-    from robosystems.models.core import Graph
-
-    graph_record = Graph.get_by_id(graph_id, db)
-    if graph_record and graph_record.graph_tier:
-      backup_limits = GraphTierConfig.get_backup_limits(graph_record.graph_tier)
-      tier_max_retention = backup_limits.get("backup_retention_days", 90)
-      if request.retention_days > tier_max_retention:
-        logger.info(
-          f"Capping retention_days from {request.retention_days} to {tier_max_retention} "
-          f"(tier: {graph_record.graph_tier}) for graph {graph_id}"
-        )
-        request.retention_days = tier_max_retention
-
-    # Log operation for security audit
-    client_ip = fastapi_request.client.host if fastapi_request.client else "unknown"
-    user_agent = fastapi_request.headers.get("user-agent", "unknown")
-
-    logger.info(
-      f"Creating backup for graph {graph_id}, user: {current_user.id}, "
-      f"format: {request.backup_format}, encrypted: {request.encryption}"
-    )
-
-    # Validate backup format (only full_dump is supported now)
-    if request.backup_format != "full_dump":
-      raise HTTPException(
-        status_code=status.HTTP_400_BAD_REQUEST,
-        detail="Only 'full_dump' backup format is currently supported",
-      )
-
-    # Get database information
-    utils = MultiTenantUtils()
-    try:
-      # Get database path
-      db_path = utils.get_database_path_for_graph(graph_id)
-
-      # Check if database exists and get size
-      import os
-
-      if os.path.exists(db_path):
-        # Get database size recursively
-        def get_dir_size(path):
-          total_size = 0
-          try:
-            for dirpath, dirnames, filenames in os.walk(path):
-              for f in filenames:
-                fp = os.path.join(dirpath, f)
-                if os.path.exists(fp):
-                  total_size += os.path.getsize(fp)
-          except Exception:
-            pass
-          return total_size
-
-        db_size_bytes = get_dir_size(db_path)
-      else:
-        # Database doesn't exist yet
-        db_size_bytes = 0
-
-      # Note: db_info would normally be used for BackupJob, but that's not implemented yet
-      _ = {
-        "db_path": db_path,
-        "size_bytes": db_size_bytes,
-      }
-
-    except Exception as e:
-      logger.error(f"Failed to get database info for {graph_id}: {e}")
-      raise HTTPException(
-        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-        detail="Database service temporarily unavailable",
-      )
-
-    # Queue Dagster job for backup creation with SSE progress tracking
-    from robosystems.middleware.sse import build_graph_job_config
-    from robosystems.worker.client import enqueue_task
-
-    run_config = build_graph_job_config(
-      "backup_graph_job",
-      graph_id=graph_id,
-      user_id=str(current_user.id),
-      backup_type="full",
-      backup_format=request.backup_format,
-      retention_days=request.retention_days,
-      compression=True,
-      encryption=request.encryption,
-    )
-
-    response = await enqueue_task(
-      task_type="dagster_job_monitor",
-      graph_id=graph_id,
-      user_id=str(current_user.id),
-      params={"job_name": "backup_graph_job", "run_config": run_config},
-    )
-    operation_id = response["operation_id"]
-
-    logger.info(
-      f"Enqueued backup job monitor for graph {graph_id}: operation={operation_id}"
-    )
-
-    # Record business event
-    metrics_instance = get_endpoint_metrics()
-    metrics_instance.record_business_event(
-      endpoint="/v1/graph/backups",
-      method="POST",
-      event_type="backup_requested",
-      event_data={
-        "user_id": current_user.id,
-        "graph_id": graph_id,
-        "backup_format": request.backup_format,
-        "encryption_enabled": request.encryption,
-        "retention_days": request.retention_days,
-        "operation_id": operation_id,
-      },
-      user_id=current_user.id,
-    )
-
-    # Security audit log
-    SecurityAuditLogger.log_security_event(
-      event_type=SecurityEventType.AUTH_SUCCESS,
-      user_id=str(current_user.id),
-      ip_address=client_ip,
-      user_agent=user_agent,
-      endpoint=f"/v1/graphs/{graph_id}/backups",
-      details={
-        "action": "backup_queued",
-        "graph_id": graph_id,
-        "backup_format": request.backup_format,
-        "encryption_enabled": request.encryption,
-        "operation_id": operation_id,
-      },
-      risk_level="low",
-    )
-
-    return {
-      "operation_id": operation_id,
-      "status": "accepted",
-      "message": "Backup creation started",
-      "monitoring": {
-        "sse_endpoint": f"/v1/operations/{operation_id}/stream",
-        "status_endpoint": f"/v1/operations/{operation_id}/status",
-      },
-    }
-
-  except HTTPException:
-    raise
-  except Exception as e:
-    logger.error(f"Failed to create backup for graph {graph_id}: {e!s}", exc_info=True)
-    raise HTTPException(
-      status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-      detail="Failed to initiate backup.",
     )

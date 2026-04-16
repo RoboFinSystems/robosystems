@@ -496,12 +496,18 @@ async def change_plan(
   db: Session = Depends(get_db_session),
   _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
 ) -> GraphSubscriptionResponse:
-  """Change plan on a subscription (repository plan change or graph tier change)."""
+  """Change plan on a repository subscription.
+
+  For graph tier changes, use ``POST /v1/graphs/{graph_id}/operations/upgrade-tier``.
+  """
   try:
     if is_shared_repository(graph_id):
       return await _change_repository_plan(graph_id, request, current_user, db)
-    else:
-      return await _change_graph_tier(graph_id, request, current_user, db)
+    raise HTTPException(
+      status_code=400,
+      detail="Graph tier changes use POST /v1/graphs/{graph_id}/operations/upgrade-tier. "
+      "This endpoint is for shared repository plan changes only.",
+    )
   except HTTPException:
     raise
   except Exception as e:
