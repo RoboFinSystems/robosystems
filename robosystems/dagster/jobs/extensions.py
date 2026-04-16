@@ -14,6 +14,8 @@ Can be triggered:
 from typing import Any
 
 from dagster import (
+  AssetKey,
+  AssetMaterialization,
   Config,
   Failure,
   MetadataValue,
@@ -104,6 +106,20 @@ def materialize_extensions_to_graph(
     f"{len(result.tables_materialized)} tables, "
     f"{result.total_rows} rows, "
     f"{result.duration_ms:.0f}ms"
+  )
+
+  context.log_event(
+    AssetMaterialization(
+      asset_key=AssetKey("user_graph_extensions_materialized"),
+      description=f"Materialized {len(result.tables_materialized)} extension tables to graph {graph_id}",
+      metadata={
+        "graph_id": MetadataValue.text(graph_id),
+        "tables_materialized": MetadataValue.int(len(result.tables_materialized)),
+        "total_rows": MetadataValue.int(result.total_rows),
+        "duration_ms": MetadataValue.float(result.duration_ms),
+        "rebuild": MetadataValue.bool(config.rebuild),
+      },
+    )
   )
 
   return {

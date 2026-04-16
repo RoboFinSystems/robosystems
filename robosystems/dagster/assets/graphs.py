@@ -103,3 +103,19 @@ user_graph_materialized_source = AssetSpec(
   },
   kinds={"ladybug"},
 )
+
+# External asset for extensions materialization (PostgreSQL OLTP → LadybugDB)
+# Materializations reported from extensions_materialize_job
+user_graph_extensions_materialized_source = AssetSpec(
+  key="user_graph_extensions_materialized",
+  description=(
+    "Extensions OLTP data materialized from PostgreSQL to LadybugDB. "
+    "Triggered after connector syncs or on-demand via API."
+  ),
+  group_name="graphs",
+  metadata={
+    "pipeline": "extensions",
+    "stage": "materialization",
+  },
+  kinds={"ladybug"},
+)

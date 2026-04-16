@@ -21,6 +21,7 @@ from dagster import Definitions
 from robosystems.config import env
 from robosystems.dagster.assets.graphs import (
   user_graph_creation_source,
+  user_graph_extensions_materialized_source,
   user_graph_file_staging_source,
   user_graph_materialized_source,
   user_repository_provisioning_source,
@@ -167,6 +168,7 @@ all_assets = [
   # Platform: User graph operations
   user_graph_file_staging_source,
   user_graph_materialized_source,
+  user_graph_extensions_materialized_source,
   user_graph_creation_source,
   user_subgraph_creation_source,
   user_repository_provisioning_source,
