@@ -231,8 +231,12 @@ async def delete_subgraph_op(
   db: Session = Depends(get_async_db_session),
 ) -> OperationEnvelope:
   """Delete a subgraph database."""
-  from robosystems.models.api.graphs.subgraphs import DeleteSubgraphRequest
-  from robosystems.routers.graphs.subgraphs.delete import delete_subgraph
+  from robosystems.models.core.graph.graph_user import GraphUser
+  from robosystems.routers.graphs.subgraphs.utils import (
+    get_subgraph_by_name,
+    get_subgraph_service,
+  )
+  from robosystems.security import SecurityAuditLogger, SecurityEventType
 
   ctx = _ctx(
     graph_id=graph_id,
@@ -243,18 +247,45 @@ async def delete_subgraph_op(
   )
 
   async def _runner():
-    # Adapt body to match existing handler's expected model
-    delete_request = DeleteSubgraphRequest(
-      force=body.force, backup_first=body.backup_first
+    subgraph = get_subgraph_by_name(graph_id, body.subgraph_name, db, user)
+
+    user_graph = (
+      db.query(GraphUser)
+      .filter(
+        GraphUser.user_id == user.id,
+        GraphUser.graph_id == subgraph.parent_graph_id,
+      )
+      .first()
     )
-    result = await delete_subgraph(
-      graph_id=graph_id,
-      subgraph_name=body.subgraph_name,
-      request=delete_request,
-      current_user=user,
-      session=db,
+    if not user_graph or user_graph.role != "admin":
+      raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="Admin access to parent graph required to delete subgraphs",
+      )
+
+    subgraph_id = subgraph.graph_id
+    subgraph_service = get_subgraph_service()
+    deletion_result = await subgraph_service.delete_subgraph_database(
+      subgraph_id=subgraph_id, force=body.force, create_backup=body.backup_first
     )
-    return result
+    backup_location = deletion_result.get("backup_location")
+
+    subgraph.delete(db)
+
+    SecurityAuditLogger.log_security_event(
+      event_type=SecurityEventType.AUTH_SUCCESS,
+      details={
+        "action": "subgraph_deleted",
+        "subgraph_id": subgraph_id,
+        "parent_graph_id": subgraph.parent_graph_id,
+        "user_id": user.id,
+        "forced": body.force,
+        "backup_created": body.backup_first,
+      },
+      risk_level="medium",
+    )
+
+    return {"graph_id": subgraph_id, "status": "deleted", "backup_location": backup_location}
 
   return await _dispatch(ctx, _runner, cache)
 
