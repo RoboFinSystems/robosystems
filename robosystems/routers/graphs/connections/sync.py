@@ -4,13 +4,24 @@ Connection sync endpoint.
 
 import asyncio
 
-from fastapi import APIRouter, Depends, HTTPException, Path, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Path, status
 from sqlalchemy.orm import Session
 
 from robosystems.database import get_db_session
 from robosystems.logger import logger
 from robosystems.middleware.auth.dependencies import get_current_user_with_graph
 from robosystems.middleware.graph.types import GRAPH_OR_SUBGRAPH_ID_PATTERN
+from robosystems.middleware.operations import (
+  IdempotencyCache,
+  OperationEnvelope,
+  check_idempotency,
+  fingerprint_body,
+  generate_operation_id,
+  get_idempotency_cache,
+  log_operation_audit,
+  wrap_pending,
+)
+from robosystems.middleware.otel.metrics import endpoint_metrics_decorator
 from robosystems.middleware.rate_limits import subscription_aware_rate_limit_dependency
 from robosystems.models.api.common import (
   ErrorCode,
@@ -53,25 +64,29 @@ Initiates data sync based on provider type:
 Note:
 This operation is included - no credit consumption required.
 
-Returns a task ID for monitoring sync progress.""",
+Returns an `OperationEnvelope` with an `operationId` for tracking sync progress.
+Supports `Idempotency-Key` header to safely retry without triggering duplicate syncs.""",
+  response_model=OperationEnvelope,
+  status_code=status.HTTP_202_ACCEPTED,
   operation_id="syncConnection",
   responses={
-    200: {
-      "description": "Sync started successfully",
-      "content": {
-        "application/json": {
-          "example": {
-            "task_id": "task_123456",
-            "status": "queued",
-            "message": "Sync operation queued for processing",
-          }
-        }
-      },
+    403: {
+      "description": "Access denied or provider not available",
+      "model": ErrorResponse,
     },
-    403: {"description": "Access denied - admin role required", "model": ErrorResponse},
     404: {"description": "Connection not found", "model": ErrorResponse},
+    409: {
+      "description": "Idempotency key reused with different request body",
+      "model": ErrorResponse,
+    },
     500: {"description": "Failed to start sync", "model": ErrorResponse},
+    504: {"description": "Sync request timed out", "model": ErrorResponse},
   },
+)
+@endpoint_metrics_decorator(
+  endpoint_name="/v1/graphs/{graph_id}/connections/{connection_id}/sync",
+  method="POST",
+  business_event_type="connection_synced",
 )
 async def sync_connection(
   graph_id: str = Path(
@@ -82,12 +97,20 @@ async def sync_connection(
   current_user: User = Depends(get_current_user_with_graph),
   db: Session = Depends(get_db_session),
   _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
-) -> dict:
-  """
-  Trigger a sync operation for a specific connection.
+  idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
+  cache: IdempotencyCache = Depends(get_idempotency_cache),
+) -> OperationEnvelope:
+  """Trigger a sync operation for a specific connection."""
+  op_name = "sync-connection"
+  user_id = str(current_user.id)
+  body_fp = fingerprint_body(request)
 
-  This will queue the appropriate sync task based on the connection provider.
-  """
+  replay = await check_idempotency(
+    cache, user_id, graph_id, op_name, idempotency_key, body_fp
+  )
+  if replay is not None:
+    return replay
+
   # Initialize robustness components
   components = create_robustness_components()
   operation_timeout = None
@@ -166,12 +189,32 @@ async def sync_connection(
       },
     )
 
-    return {
-      "message": f"{provider.upper()} sync started",
-      "connection_id": connection_id,
-      "task_id": task_id,
-      "status": "pending",
-    }
+    operation_id = generate_operation_id()
+    envelope = wrap_pending(
+      op_name,
+      operation_id=operation_id,
+      partial_result={
+        "message": f"{provider.upper()} sync started",
+        "connection_id": connection_id,
+        "task_id": task_id,
+      },
+      created_by=user_id,
+    )
+
+    if idempotency_key is not None:
+      await cache.put(user_id, graph_id, op_name, idempotency_key, envelope, body_fp)
+
+    log_operation_audit(
+      operation_name=op_name,
+      operation_id=operation_id,
+      user_id=user_id,
+      graph_id=graph_id,
+      duration_ms=0.0,
+      status="pending",
+      idempotency_key=idempotency_key,
+      event="graph.operation",
+    )
+    return envelope
 
   except TimeoutError:
     # Record circuit breaker failure and timeout metrics

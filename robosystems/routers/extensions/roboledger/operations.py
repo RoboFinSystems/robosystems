@@ -67,9 +67,9 @@ from robosystems.middleware.operations import (
   IdempotencyKeyConflictError,
   OperationContext,
   OperationEnvelope,
+  check_idempotency,
   execute_operation,
   fingerprint_body,
-  generate_operation_id,
   get_idempotency_cache,
   log_operation_audit,
   wrap_pending,
@@ -1542,42 +1542,17 @@ async def auto_map_elements_op(
   user_id = str(user.id)
   body_fingerprint = fingerprint_body(body)
 
-  # Idempotency cache lookup (manual — execute_operation handles it for
-  # sync ops, but pending ops bypass that path because they don't
-  # produce a normal `result` payload). Same Stripe-style semantics:
-  # replay on (user, graph, key, body) match, conflict on body change.
-  if idempotency_key is not None:
-    try:
-      cached = await cache.get(
-        user_id, graph_id, op_name, idempotency_key, body_fingerprint
-      )
-    except IdempotencyKeyConflictError as exc:
-      log_operation_audit(
-        operation_name=op_name,
-        operation_id=generate_operation_id(),
-        user_id=user_id,
-        graph_id=graph_id,
-        duration_ms=0.0,
-        status="failed",
-        idempotency_key=idempotency_key,
-        error=str(exc),
-      )
-      raise HTTPException(status_code=409, detail=str(exc))
-    if cached is not None:
-      log_operation_audit(
-        operation_name=op_name,
-        operation_id=cached.operation_id,
-        user_id=user_id,
-        graph_id=graph_id,
-        duration_ms=0.0,
-        status=cached.status,
-        idempotency_key=idempotency_key,
-        idempotent_replay=True,
-      )
-      # Mirror `execute_operation`'s replay marking so the metrics
-      # decorator suppresses the business_event counter and clients
-      # can distinguish "task enqueued" from "task already running".
-      return cached.model_copy(update={"idempotent_replay": True})
+  replay = await check_idempotency(
+    cache,
+    user_id,
+    graph_id,
+    op_name,
+    idempotency_key,
+    body_fingerprint,
+    event="extensions.operation",
+  )
+  if replay is not None:
+    return replay
 
   task_response = await enqueue_task(
     task_type="agent",

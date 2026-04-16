@@ -21,12 +21,13 @@ from robosystems.middleware.operations import (
   IdempotencyKeyConflictError,
   OperationContext,
   OperationEnvelope,
-  _utcnow_iso,
+  check_idempotency,
   execute_operation,
   fingerprint_body,
   generate_operation_id,
   get_idempotency_cache,
   log_operation_audit,
+  wrap_completed,
   wrap_pending,
 )
 from robosystems.middleware.otel.metrics import endpoint_metrics_decorator
@@ -76,50 +77,6 @@ async def _dispatch(ctx, runner, cache, on_fresh_success=None):
     raise HTTPException(status_code=409, detail=str(exc))
 
 
-async def _idempotency_check(
-  cache: IdempotencyCache,
-  user_id: str,
-  graph_id: str,
-  op_name: str,
-  idempotency_key: str | None,
-  body_fingerprint: str,
-) -> OperationEnvelope | None:
-  """Manual idempotency lookup for async (pending) operations."""
-  if idempotency_key is None:
-    return None
-  try:
-    cached = await cache.get(
-      user_id, graph_id, op_name, idempotency_key, body_fingerprint
-    )
-  except IdempotencyKeyConflictError as exc:
-    log_operation_audit(
-      operation_name=op_name,
-      operation_id=generate_operation_id(),
-      user_id=user_id,
-      graph_id=graph_id,
-      duration_ms=0.0,
-      status="failed",
-      idempotency_key=idempotency_key,
-      error=str(exc),
-      event=_AUDIT_EVENT,
-    )
-    raise HTTPException(status_code=409, detail=str(exc))
-  if cached is not None:
-    log_operation_audit(
-      operation_name=op_name,
-      operation_id=cached.operation_id,
-      user_id=user_id,
-      graph_id=graph_id,
-      duration_ms=0.0,
-      status=cached.status,
-      idempotency_key=idempotency_key,
-      idempotent_replay=True,
-      event=_AUDIT_EVENT,
-    )
-    return cached.model_copy(update={"idempotent_replay": True})
-  return None
-
-
 # ═══════════════════════════════════════════════════════════════════════════
 # create-subgraph
 # ═══════════════════════════════════════════════════════════════════════════
@@ -154,7 +111,7 @@ async def create_subgraph_op(
 
   if body.fork_parent:
     # Async path — enqueue worker task, return pending envelope
-    replay = await _idempotency_check(
+    replay = await check_idempotency(
       cache, user_id, graph_id, op_name, idempotency_key, fingerprint_body(body)
     )
     if replay is not None:
@@ -336,7 +293,7 @@ async def create_backup_op(
   user_id = str(user.id)
   body_fp = fingerprint_body(body)
 
-  replay = await _idempotency_check(
+  replay = await check_idempotency(
     cache, user_id, graph_id, op_name, idempotency_key, body_fp
   )
   if replay is not None:
@@ -462,7 +419,7 @@ async def restore_backup_op(
   user_id = str(user.id)
   body_fp = fingerprint_body(body)
 
-  replay = await _idempotency_check(
+  replay = await check_idempotency(
     cache, user_id, graph_id, op_name, idempotency_key, body_fp
   )
   if replay is not None:
@@ -581,7 +538,7 @@ async def upgrade_tier_op(
   user_id = str(user.id)
   body_fp = fingerprint_body(body)
 
-  replay = await _idempotency_check(
+  replay = await check_idempotency(
     cache, user_id, graph_id, op_name, idempotency_key, body_fp
   )
   if replay is not None:
@@ -648,7 +605,7 @@ async def materialize_op(
   user_id = str(user.id)
   body_fp = fingerprint_body(body)
 
-  replay = await _idempotency_check(
+  replay = await check_idempotency(
     cache, user_id, graph_id, op_name, idempotency_key, body_fp
   )
   if replay is not None:
@@ -656,17 +613,8 @@ async def materialize_op(
 
   result = await materialize_cmd(graph_id, body, user, db)
 
-  # The existing handler returns different shapes for dry_run vs normal
   if body.dry_run:
-    # Dry run returns immediately — sync envelope
-    envelope = OperationEnvelope(
-      operation=op_name,
-      operationId=generate_operation_id(),
-      status="completed",
-      result=result if isinstance(result, dict) else result.model_dump(mode="json"),
-      at=_utcnow_iso(),
-      createdBy=user_id,
-    )
+    envelope = wrap_completed(op_name, result=result, created_by=user_id)
   else:
     operation_id = (
       result.operation_id
