@@ -13,12 +13,29 @@ RoboSystems is a knowledge graph platform for enterprise financial and operation
 
 ### Graph Operations
 
-- **Create**: Initialize knowledge graphs with customizable schemas and extensions
+The core platform surface for querying and managing graphs
+
+**Query and data access:**
+
 - **Query**: Execute Cypher queries with NDJSON streaming for large results
-- **Tables**: DuckDB staging tables for data ingestion with file upload, query, and import workflows
-- **Schema**: View and analyze node types, relationship types, and property definitions
-- **Backup**: Encrypted backups with retention policies and download support
-- **Analytics**: Graph analytics for understanding contents and usage
+- **Schema**: View node types, relationship types, and property definitions
+- **Tables**: DuckDB staging tables — file upload, SQL query, and import workflows
+- **Health**: Database connectivity, staleness indicators, and materialization status
+
+**Graph and infrastructure state:**
+
+- **Subgraphs**: List subgraphs, quota, and storage information
+- **Backups**: List backups, download URLs, and storage statistics
+- **Analytics**: Usage and content analytics
+
+**Lifecycle commands** (`/operations/{op_name}`):
+
+- **create-subgraph**: Initialize a subgraph with optional fork of parent data
+- **delete-subgraph**: Remove a subgraph with optional pre-delete backup
+- **create-backup**: Encrypted backup with configurable format and retention
+- **restore-backup**: Restore from backup (blocked for entity graphs — use `materialize` instead)
+- **upgrade-tier**: Change graph infrastructure tier with Stripe billing integration
+- **materialize**: Ingest DuckDB-staged tables or OLTP data into the graph (direct or Dagster-orchestrated)
 
 ### MCP & Agents
 
@@ -30,31 +47,13 @@ RoboSystems is a knowledge graph platform for enterprise financial and operation
 - **SEC Filings**: Process XBRL documents and build filing knowledge graphs
 - **QuickBooks**: Sync transactions, accounts, and financial reports
 
-
 ### Extensions Surface
 
-Domain extensions (RoboLedger, RoboInvestor) are graph-scoped under
-`/extensions/{graph_id}/...` with a clear split between reads, writes,
-and analytical view operations:
+Domain extensions (RoboLedger, RoboInvestor) are graph-scoped with a clear split between reads, writes, and view operations:
 
-- **Reads** → GraphQL at `POST /extensions/{graph_id}/graphql`. The
-  schema is composed dynamically from the domains enabled on a given
-  deployment — a ledger-only deployment exposes only ledger fields,
-  and introspection reflects the actual available shape. GraphiQL
-  playground is served at the same URL in development.
-- **Writes** → named command operations at
-  `POST /extensions/{roboledger|roboinvestor}/{graph_id}/operations/{operation_name}`.
-  Every write returns a typed `OperationEnvelope` with an
-  `operationId`, supports `Idempotency-Key` for safe retries, and is
-  audit-logged. Long-running commands return `status: "pending"` and
-  stream progress via the existing
-  `/v1/operations/{operation_id}/stream` SSE endpoint.
-- **Analytical view operations** → graph-backed read-only operations
-  at `POST /extensions/{domain}/{graph_id}/operations/{view_name}`.
-  These query LadybugDB rather than the extensions OLTP database and
-  share the same envelope contract as command writes. Gated
-  independently so deployments without the corresponding OLTP domain
-  can still use them.
+- **Reads** → GraphQL at `POST /extensions/{graph_id}/graphql` with a schema composed dynamically from enabled domains
+- **Writes** → named command operations at `POST /extensions/{domain}/{graph_id}/operations/{operation_name}`
+- **Views** → graph-backed read-only analytics views at `POST /extensions/{domain}/{graph_id}/operations/{view_name}`
 
 ### RoboLedger
 

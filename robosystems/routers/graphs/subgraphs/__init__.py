@@ -1,18 +1,18 @@
 """
 Subgraph management routers.
 
-This module contains routers for subgraph operations including creation,
-listing, deletion, quota management, and detailed information.
+Read endpoints: list, info, quota.
+Write operations (create, delete) live at
+``POST /v1/graphs/{graph_id}/operations/{create-subgraph,delete-subgraph}``.
 """
 
 from fastapi import APIRouter
 
-from .delete import router as delete_router
 from .info import router as info_router
 from .main import router as subgraph_router
 from .quota import router as quota_router
 
-# Create main subgraphs router
+# Create main subgraphs router — reads only
 router = APIRouter(
   tags=["Subgraphs"],
   responses={
@@ -28,8 +28,8 @@ for route in subgraph_router.routes:
     route.tags = ["Subgraphs"]
   router.routes.append(route)
 
-# Include other sub-routers (tags already set on parent router)
-router.include_router(delete_router)
+# Include other sub-routers
+# Note: delete_router removed — delete lives at POST .../operations/delete-subgraph
 router.include_router(info_router)
 router.include_router(quota_router)
 

@@ -7,10 +7,6 @@ MAIN_API_TAGS = [
     "description": "🏗️ Graphs - Create and manage knowledge graph tenants",
   },
   {
-    "name": "Query",
-    "description": "🔍 Graph queries - Execute Cypher queries against graph databases",
-  },
-  {
     "name": "MCP",
     "description": "🔌 MCP - Model Context Protocol for AI interactions with graph data",
   },
@@ -19,12 +15,24 @@ MAIN_API_TAGS = [
     "description": "🤖 AI Agents - Intelligent AI agents for analyzing and managing graph data",
   },
   {
+    "name": "Query",
+    "description": "🕸️ Graph queries - Execute Cypher queries on the knowledge graph",
+  },
+  {
+    "name": "Search",
+    "description": "🔎 Search - Full-text and semantic search on documents, narratives and disclosures",
+  },
+  {
     "name": "Documents",
     "description": "📑 Documents - Upload, list, and manage documents for search and analysis",
   },
   {
-    "name": "Search",
-    "description": "🔎 Search - Full-text search across filing narratives, disclosures, and XBRL text content",
+    "name": "Tables",
+    "description": "🗃️ Staging tables - Table metadata and SQL queries on the staging layer",
+  },
+  {
+    "name": "Files",
+    "description": "📄 File management - Upload, track, and manage data files for generic graphs",
   },
   {
     "name": "Extensions: GraphQL",
@@ -39,24 +47,24 @@ MAIN_API_TAGS = [
     "description": "📈 RoboInvestor operations - Named commands for portfolio management writes and analytical views",
   },
   {
-    "name": "Materialize",
-    "description": "🔄 Materialize graph - Rebuild graph from DuckDB staging tables",
+    "name": "Graph Operations",
+    "description": "⚙️ Graph lifecycle — Commands for subgraphs, backups, tier changes, materialization",
   },
   {
-    "name": "Tables",
-    "description": "🗃️ Staging tables - SQL queries and data ingestion via DuckDB staging layer",
+    "name": "Connections",
+    "description": "🔗 Connections - Manage external service integrations and data connections",
   },
   {
-    "name": "Files",
-    "description": "📄 File management - Upload, track, and manage data files with multi-layer status",
+    "name": "Subscriptions",
+    "description": "💳 Subscriptions - Shared repository subscription management",
   },
   {
     "name": "Subgraphs",
-    "description": "🌳 Subgraphs - Create and manage subgraph databases for AI memory and data isolation",
+    "description": "🌳 Subgraphs - List and inspect subgraph databases",
   },
   {
     "name": "Backup",
-    "description": "💾 Graph backup - Create, restore, and manage graph database backups",
+    "description": "💾 Backup - List, download, and inspect graph backups",
   },
   {
     "name": "Schema",
@@ -71,28 +79,20 @@ MAIN_API_TAGS = [
     "description": "🪙 Credits - Manage credit-based usage and allocation",
   },
   {
-    "name": "Subscriptions",
-    "description": "💳 Subscriptions - Manage graph & shared repository subscriptions",
-  },
-  {
-    "name": "Connections",
-    "description": "🔗 Connections - Manage external service integrations and data connections",
-  },
-  {
     "name": "Graph Limits",
-    "description": "📏 Graph limits - Instance storage usage, per-operation limits, and tier configuration",
+    "description": "📏 Graph limits - Storage usage, operation limits, and tier configuration",
   },
   {
     "name": "Graph Health",
-    "description": "🩺 Graph health - Monitor graph database health and performance metrics",
+    "description": "🩺 Graph health - Database health and performance metrics",
   },
   {
     "name": "Graph Info",
-    "description": "ℹ️ Graph info - Get graph database information, statistics, and metadata",
+    "description": "ℹ️ Graph info - Database metadata and statistics",
   },
   {
-    "name": "User",
-    "description": "👤 User management - Profile, settings, and account information",
+    "name": "Operations",
+    "description": "⏱️ Operation monitoring - Track SSE stream status and progress",
   },
   {
     "name": "Org",
@@ -111,8 +111,8 @@ MAIN_API_TAGS = [
     "description": "🛒 Billing - Create and manage billing checkout sessions",
   },
   {
-    "name": "Operations",
-    "description": "⏱️ Operation monitoring - Track SSE stream status and progress",
+    "name": "User",
+    "description": "👤 User management - Profile, settings, and account information",
   },
   {
     "name": "Auth",

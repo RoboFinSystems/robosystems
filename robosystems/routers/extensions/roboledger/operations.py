@@ -58,6 +58,11 @@ from robosystems.database import get_db_session
 from robosystems.db.extensions import extensions_session
 from robosystems.middleware.auth.dependencies import get_current_user_with_graph
 from robosystems.middleware.extensions import (
+  OperationRegistrar,
+  OperationSpec,
+)
+from robosystems.middleware.graph.types import GRAPH_OR_SUBGRAPH_ID_PATTERN
+from robosystems.middleware.operations import (
   IdempotencyCache,
   IdempotencyKeyConflictError,
   OperationContext,
@@ -69,11 +74,6 @@ from robosystems.middleware.extensions import (
   log_operation_audit,
   wrap_pending,
 )
-from robosystems.middleware.extensions.registry import (
-  OperationRegistrar,
-  OperationSpec,
-)
-from robosystems.middleware.graph.types import GRAPH_OR_SUBGRAPH_ID_PATTERN
 from robosystems.middleware.otel.metrics import endpoint_metrics_decorator
 from robosystems.middleware.rate_limits import subscription_aware_rate_limit_dependency
 from robosystems.models.api.extensions.entity import UpdateEntityRequest

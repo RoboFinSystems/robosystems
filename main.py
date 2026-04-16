@@ -568,7 +568,9 @@ def create_app() -> FastAPI:
     )
 
     def _is_operation_path(p: str) -> bool:
-      return "/extensions/" in p and "/operations/" in p
+      return ("/extensions/" in p and "/operations/" in p) or (
+        "/graphs/" in p and "/operations/" in p
+      )
 
     def _is_graphql_path(p: str) -> bool:
       return p.startswith("/extensions/") and p.endswith("/graphql")

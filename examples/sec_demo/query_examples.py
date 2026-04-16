@@ -21,9 +21,9 @@ import json
 import sys
 from pathlib import Path
 
-from robosystems_client.extensions import (
-  RoboSystemsExtensions,
-  RoboSystemsExtensionConfig,
+from robosystems_client.clients import (
+  RoboSystemsClients,
+  RoboSystemsClientConfig,
 )
 from robosystems.utils.query_output import (
   print_error,
@@ -360,15 +360,15 @@ def load_credentials(credentials_path: Path) -> dict:
     return json.load(fh)
 
 
-def build_client(api_key: str, base_url: str) -> RoboSystemsExtensions:
-  config = RoboSystemsExtensionConfig(
+def build_client(api_key: str, base_url: str) -> RoboSystemsClients:
+  config = RoboSystemsClientConfig(
     base_url=base_url,
     headers={"X-API-Key": api_key},
   )
-  return RoboSystemsExtensions(config)
+  return RoboSystemsClients(config)
 
 
-def execute_query(client: RoboSystemsExtensions, graph_id: str, cypher: str) -> dict:
+def execute_query(client: RoboSystemsClients, graph_id: str, cypher: str) -> dict:
   response = client.query.query(graph_id, cypher)
   return {
     "columns": getattr(response, "columns", []),
@@ -379,7 +379,7 @@ def execute_query(client: RoboSystemsExtensions, graph_id: str, cypher: str) -> 
 
 
 def run_and_display(
-  client: RoboSystemsExtensions,
+  client: RoboSystemsClients,
   graph_id: str,
   name: str,
   query: str,
@@ -402,7 +402,7 @@ def run_and_display(
 
 
 def execute_search(
-  client: RoboSystemsExtensions,
+  client: RoboSystemsClients,
   graph_id: str,
   query: str,
   entity: str | None = None,
@@ -441,7 +441,7 @@ def execute_search(
 
 
 def run_search_and_display(
-  client: RoboSystemsExtensions,
+  client: RoboSystemsClients,
   graph_id: str,
   name: str,
   params: dict,
@@ -465,7 +465,7 @@ def run_search_and_display(
 
 
 def run_presets(
-  client: RoboSystemsExtensions, graph_id: str, presets: list[str]
+  client: RoboSystemsClients, graph_id: str, presets: list[str]
 ) -> None:
   for preset in presets:
     # Check graph query presets first, then search presets
@@ -494,7 +494,7 @@ def run_presets(
     print_warning(f"Unknown preset: {preset}")
 
 
-def interactive_mode(client: RoboSystemsExtensions, graph_id: str) -> None:
+def interactive_mode(client: RoboSystemsClients, graph_id: str) -> None:
   print_info_section(
     "SEC Repository Interactive Mode",
     subtitle="Enter Cypher queries, search commands, or type 'help'.",

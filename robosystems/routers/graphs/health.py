@@ -150,18 +150,61 @@ async def get_database_health(
 
       logger.debug(f"Database health retrieved for graph {graph_id}")
 
+      # Pull staleness data from the platform DB (Graph model)
+      from datetime import UTC, datetime
+
+      from robosystems.models.core import Graph
+
+      graph_record = Graph.get_by_id(graph_id.split("_")[0], session)
+      is_stale = False
+      stale_reason = None
+      stale_since = None
+      last_materialized_at = None
+      hours_since_materialization = None
+      staleness_alert: list[str] = []
+
+      if graph_record:
+        is_stale = graph_record.graph_stale or False
+        stale_reason = graph_record.graph_stale_reason
+        stale_since = (
+          graph_record.graph_stale_at.isoformat()
+          if graph_record.graph_stale_at
+          else None
+        )
+        metadata = graph_record.graph_metadata or {}
+        last_materialized_at = metadata.get("last_materialized_at")
+        if last_materialized_at:
+          try:
+            from dateutil import parser as date_parser
+
+            last_mat_dt = date_parser.isoparse(last_materialized_at)
+            hours_since_materialization = (
+              datetime.now(UTC) - last_mat_dt
+            ).total_seconds() / 3600
+          except Exception:
+            logger.debug(
+              f"Could not parse last_materialized_at for graph {graph_id}: {last_materialized_at!r}"
+            )
+        if is_stale:
+          staleness_alert = ["Graph is stale — materialization recommended"]
+
       return DatabaseHealthResponse(
         graph_id=graph_id,
-        status="healthy" if db_metrics else "unknown",
+        status="degraded" if is_stale else ("healthy" if db_metrics else "unknown"),
         connection_status="connected",
         uptime_seconds=cluster_health.get("uptime_seconds", 0.0),
         last_query_time=db_metrics.get("last_modified"),
-        query_count_24h=0,  # Not available in current metrics
-        avg_query_time_ms=0.0,  # Not available in current metrics
-        error_rate_24h=0.0,  # Not available in current metrics
-        memory_usage_mb=None,  # Could calculate from size_bytes
+        query_count_24h=0,
+        avg_query_time_ms=0.0,
+        error_rate_24h=0.0,
+        memory_usage_mb=None,
         storage_usage_mb=db_metrics.get("size_mb"),
-        alerts=[],
+        alerts=staleness_alert,
+        is_stale=is_stale,
+        stale_reason=stale_reason,
+        stale_since=stale_since,
+        last_materialized_at=last_materialized_at,
+        hours_since_materialization=hours_since_materialization,
       )
 
     except TimeoutError:

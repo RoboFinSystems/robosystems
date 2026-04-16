@@ -9,7 +9,7 @@ RoboSystems is a financial intelligence platform that connects disparate data so
 - **Model Context Protocol (MCP)**: Standardized server and [client](https://www.npmjs.com/package/@robosystems/mcp) for LLM integration with schema-aware tools
 - **Multi-Source Data Integration**: SEC XBRL filings, QuickBooks accounting data via dbt pipelines, and custom financial datasets
 - **Enterprise-Ready Infrastructure**: Multi-tenant architecture with tiered scaling and production-grade query management
-- **Developer-First API**: RESTful API designed for integration with financial applications
+- **Developer-First API**: CQRS command surface — reads as REST GETs, writes as named `OperationEnvelope` operations with idempotency, audit logging, and SSE progress streaming
 
 ## Platform
 
@@ -34,6 +34,8 @@ The extensions API surface is **graph-scoped at the URL level** — `graph_id` i
 - **Command writes** → `POST /extensions/{roboledger|roboinvestor}/{graph_id}/operations/{operation_name}` — named REST commands. Every command returns an `OperationEnvelope` with an `op_<ULID>` operation id, supports `Idempotency-Key` for safe retries, and is audit-logged. Long-running commands return `status: "pending"` and stream progress through `/v1/operations/{operation_id}/stream`.
 
 Behind the API is a CQRS-style operations kernel (`reads/` + `commands/` per domain) that's the single source of truth for business logic. GraphQL resolvers, REST operation routes, and MCP tools all delegate to the same functions, so wire shapes stay byte-identical across consumers. Per-domain feature flags (`ROBOLEDGER_ENABLED`, `ROBOINVESTOR_ENABLED`) gate both the routers and the GraphQL schema composition.
+
+The same `OperationEnvelope` / idempotency / audit infrastructure backs **graph lifecycle writes** at `POST /v1/graphs/{graph_id}/operations/{op_name}` — subgraph creation and deletion, backups, restore, tier upgrades, and materialization. Reads (list subgraphs, list backups, health) stay as REST GETs.
 
 See [GraphQL Extensions](/robosystems/graphql/README.md) for the read-path implementation details, the Strawberry-Pydantic auto-derivation pattern, and the walkthrough for adding a new read field.
 

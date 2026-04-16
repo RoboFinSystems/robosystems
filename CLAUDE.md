@@ -50,16 +50,34 @@ gate the corresponding GraphQL resolvers and operation routers. The
 schema is built dynamically per flag combo, so a ledger-only deployment
 exposes only ledger fields (no `INVESTOR_NOT_INITIALIZED` runtime errors).
 
+**Graph lifecycle writes** follow the same CQRS pattern at
+`POST /v1/graphs/{graph_id}/operations/{op_name}`:
+
+| Operation | Path |
+| --------- | ---- |
+| Create subgraph | `POST /v1/graphs/{g}/operations/create-subgraph` |
+| Delete subgraph | `POST /v1/graphs/{g}/operations/delete-subgraph` |
+| Create backup | `POST /v1/graphs/{g}/operations/create-backup` |
+| Restore backup | `POST /v1/graphs/{g}/operations/restore-backup` |
+| Upgrade tier | `POST /v1/graphs/{g}/operations/upgrade-tier` |
+| Materialize | `POST /v1/graphs/{g}/operations/materialize` |
+
+All graph operation responses are `OperationEnvelope` and support `Idempotency-Key`. Reads (list subgraphs, list backups, health, etc.) remain REST GETs at their existing paths.
+
 Common mistakes:
 
-| ❌ Wrong                          | ✅ Correct                                                                | Purpose              |
-| --------------------------------- | ------------------------------------------------------------------------- | -------------------- |
-| `GET /health`, `GET /v1/health`   | `GET /v1/status`                                                           | API health check     |
-| `GET /v1/ledger/{g}/entity`       | GraphQL `POST /extensions/{g}/graphql` body `{ entity { … } }`             | Ledger read          |
-| `PUT /v1/ledger/{g}/entity`       | `POST /extensions/roboledger/{g}/operations/update-entity`                 | Ledger write         |
-| `POST /v1/graphs/{g}/views`       | `POST /extensions/roboledger/{g}/operations/build-fact-grid`               | Fact grid query      |
-| `{ entity(graphId: "kg_x") }`     | `{ entity { … } }` (graph_id comes from URL)                                | GraphQL query        |
-| `GET /graphs/...`                 | `GET /v1/graphs/{graph_id}/...`                                            | Graph endpoints      |
+| ❌ Wrong                              | ✅ Correct                                                                | Purpose              |
+| ------------------------------------- | ------------------------------------------------------------------------- | -------------------- |
+| `GET /health`, `GET /v1/health`       | `GET /v1/status`                                                           | API health check     |
+| `GET /v1/ledger/{g}/entity`           | GraphQL `POST /extensions/{g}/graphql` body `{ entity { … } }`             | Ledger read          |
+| `PUT /v1/ledger/{g}/entity`           | `POST /extensions/roboledger/{g}/operations/update-entity`                 | Ledger write         |
+| `POST /v1/graphs/{g}/views`           | `POST /extensions/roboledger/{g}/operations/build-fact-grid`               | Fact grid query      |
+| `{ entity(graphId: "kg_x") }`         | `{ entity { … } }` (graph_id comes from URL)                                | GraphQL query        |
+| `GET /graphs/...`                     | `GET /v1/graphs/{graph_id}/...`                                            | Graph endpoints      |
+| `POST /v1/graphs/{g}/subgraphs`       | `POST /v1/graphs/{g}/operations/create-subgraph`                           | Create subgraph      |
+| `DELETE /v1/graphs/{g}/subgraphs/{n}` | `POST /v1/graphs/{g}/operations/delete-subgraph`                           | Delete subgraph      |
+| `POST /v1/graphs/{g}/backups`         | `POST /v1/graphs/{g}/operations/create-backup`                             | Create backup        |
+| `POST /v1/graphs/{g}/materialize`     | `POST /v1/graphs/{g}/operations/materialize`                               | Materialize graph    |
 
 - **Root `/`** serves the Swagger UI (HTML); don't use it for health checks.
 - **`/openapi.json`** is the live OpenAPI spec — useful when SDK generation drifts from the server.
@@ -78,11 +96,17 @@ curl -X POST "http://localhost:8000/extensions/$GRAPH_ID/graphql" \
   -H "Content-Type: application/json" \
   -d '{"query": "{ fiscalCalendar { closedThrough closeTarget } }"}'
 
-# REST operation write (close a period)
+# Extensions operation write (close a period)
 curl -X POST "http://localhost:8000/extensions/roboledger/$GRAPH_ID/operations/close-period" \
   -H "X-API-Key: $(jq -r .api_key .local/config.json)" \
   -H "Content-Type: application/json" \
   -d '{"period": "2026-03", "allow_stale_sync": false}'
+
+# Graph operation write (materialize)
+curl -X POST "http://localhost:8000/v1/graphs/$GRAPH_ID/operations/materialize" \
+  -H "X-API-Key: $(jq -r .api_key .local/config.json)" \
+  -H "Idempotency-Key: $(date +%s)" \
+  -H "Content-Type: application/json"
 ```
 
 ## Quick Reference

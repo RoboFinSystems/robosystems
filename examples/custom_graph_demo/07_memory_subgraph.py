@@ -25,7 +25,7 @@ from pathlib import Path
 from robosystems_client.api.query.execute_cypher_query import (
   sync_detailed as api_execute_query,
 )
-from robosystems_client.api.subgraphs.create_subgraph import (
+from robosystems_client.api.graph_operations.op_create_subgraph import (
   sync_detailed as api_create_subgraph,
 )
 from robosystems_client.api.subgraphs.list_subgraphs import (
@@ -91,7 +91,7 @@ def create_memory_subgraph(
 
   response = api_create_subgraph(graph_id=graph_id, client=client, body=request)
 
-  if response.status_code not in (200, 201):
+  if response.status_code not in (200, 202):
     # Handle duplicate subgraph (already exists) — reuse it
     if response.status_code in (400, 409):
       content = response.content.decode() if response.content else ""
@@ -104,15 +104,17 @@ def create_memory_subgraph(
       print(f"   {response.content.decode()}")
     sys.exit(1)
 
-  parsed = response.parsed
-  if isinstance(parsed, dict):
-    subgraph_id = parsed.get("graph_id")
+  # Response is an OperationEnvelope — extract graph_id from result
+  envelope = response.parsed
+  result = getattr(envelope, "result", None) or {}
+  if isinstance(result, dict):
+    subgraph_id = result.get("graph_id")
   else:
-    subgraph_id = getattr(parsed, "graph_id", None)
+    subgraph_id = getattr(result, "graph_id", None)
 
   if not subgraph_id:
-    print("❌ No graph_id in create response")
-    sys.exit(1)
+    # Fallback: construct from convention
+    subgraph_id = f"{graph_id}_{name}"
 
   print(f"   ✅ Memory subgraph created: {subgraph_id}")
   return subgraph_id

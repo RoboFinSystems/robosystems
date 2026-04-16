@@ -1,15 +1,15 @@
 """
 Backup management routers.
 
-This module contains routers for backup operations including creation,
-restoration, listing, and statistics.
+Read endpoints: list, download, stats.
+Write operations (create, restore) live at
+``POST /v1/graphs/{graph_id}/operations/{create-backup,restore-backup}``.
 """
 
 from fastapi import APIRouter
 
 from .backup import router as backup_router
 from .download import router as download_router
-from .restore import router as restore_router
 from .stats import router as stats_router
 
 # Create main backup router
@@ -23,7 +23,6 @@ for route in backup_router.routes:
 
 # Include other sub-routers normally (they have prefixes)
 router.include_router(download_router)
-router.include_router(restore_router)
 router.include_router(stats_router)
 
 __all__ = ["router"]

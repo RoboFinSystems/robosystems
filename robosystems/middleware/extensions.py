@@ -35,7 +35,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Path
 from pydantic import BaseModel
 from sqlalchemy.exc import ProgrammingError
 
-from robosystems.middleware.extensions.core import (
+from robosystems.middleware.operations import (
   IdempotencyCache,
   OperationContext,
   OperationEnvelope,

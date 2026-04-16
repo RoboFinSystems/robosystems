@@ -1,19 +1,19 @@
-"""Operation envelope, idempotency cache, and audit helpers for extensions.
+"""Operation envelope, idempotency cache, and audit helpers.
 
-Every `POST /extensions/{domain}/{graph_id}/operations/{operation_name}`
-endpoint shares the `OperationEnvelope` response shape built here. Three
-concerns live in this module so the per-domain routers stay thin:
+Shared dispatch infrastructure for any operation surface — extensions,
+graph lifecycle ops, or future command surfaces.  Three concerns live
+in this module so per-domain routers stay thin:
 
 1. **Envelope** — wrap a command's Pydantic result in a uniform payload.
 2. **Idempotency** — cache completed envelopes in Valkey keyed by the
-   caller's `Idempotency-Key` header so retries are safe for 24 hours.
+   caller's ``Idempotency-Key`` header so retries are safe for 24 hours.
 3. **Audit** — structured log per operation call with the durations and
    identifiers a SOC-2-style audit trail needs.
 
-Operation IDs reuse `robosystems.utils.ulid.generate_prefixed_ulid("op")`
-so the existing `/v1/operations/{operation_id}/stream` SSE endpoint (which
-already matches `^op_[0-9A-Z]{26}$`) accepts async operation IDs without
-any regex changes.
+Operation IDs reuse ``robosystems.utils.ulid.generate_prefixed_ulid("op")``
+so the existing ``/v1/operations/{operation_id}/stream`` SSE endpoint
+(which already matches ``^op_[0-9A-Z]{26}$``) accepts async operation
+IDs without any regex changes.
 """
 
 from __future__ import annotations
@@ -78,40 +78,33 @@ def _result_to_payload(
 
 
 class OperationEnvelope(BaseModel):
-  """Uniform response shape for every extensions operation endpoint.
+  """Uniform response shape for every operation endpoint.
 
-  Every dispatch through `/extensions/{domain}/{graph_id}/operations/{op}`
-  returns an envelope carrying an `op_<ULID>` operation_id. That id is the
-  bridge to the platform's monitoring surface: pass it to
-  `GET /v1/operations/{operation_id}/stream` (see `routers/operations.py`)
-  to subscribe to SSE progress events. Sync commands complete in the
-  envelope itself; async commands (`status: "pending"`, HTTP 202) hand off
-  to a background worker and stream their tail through the same SSE
-  endpoint until completion. Failed dispatches still mint an `operation_id`
-  so the audit log and any partial SSE events stay correlatable.
+  Every dispatch through an operation surface returns an envelope carrying
+  an ``op_<ULID>`` operation_id.  That id is the bridge to the platform's
+  monitoring surface: pass it to
+  ``GET /v1/operations/{operation_id}/stream`` (see ``routers/operations.py``)
+  to subscribe to SSE progress events.  Sync commands complete in the
+  envelope itself; async commands (``status: "pending"``, HTTP 202) hand
+  off to a background worker and stream their tail through the same SSE
+  endpoint until completion.  Failed dispatches still mint an
+  ``operation_id`` so the audit log and any partial SSE events stay
+  correlatable.
 
   Fields:
-  - `operation`: kebab-case command name (e.g. `close-period`)
-  - `operation_id`: `op_`-prefixed ULID; always present, usable for audit
-    correlation and — for async commands — SSE subscription via
-    `/v1/operations/{operation_id}/stream`
-  - `status`: `"completed"` (sync, HTTP 200), `"pending"` (async, HTTP 202),
-    or `"failed"` (error responses)
-  - `result`: the domain-specific payload (the original Pydantic response)
-    or `None` for async/failed cases
-  - `at`: ISO-8601 UTC timestamp of when the envelope was minted (for sync
-    ops this is the completion time; for async/pending it's the enqueue time)
-  - `created_by`: user ID of the caller who initiated this operation, for
-    audit correlation without having to cross-reference the audit log.
-    Always populated for dispatcher-routed calls; may be `None` for legacy
-    direct `wrap_completed(...)` callers.
-  - `idempotent_replay`: `True` when the dispatcher returned this envelope
-    from the idempotency cache (the underlying command did NOT execute
-    again). `False` on every fresh execution. Clients can use this to
-    distinguish "my retry succeeded" from "the server re-ran the command"
-    without having to track their own request identity. The metrics
-    decorator also reads this attribute to suppress business-event counter
-    increments on replays so dashboards stay honest.
+  - ``operation``: kebab-case command name (e.g. ``close-period``)
+  - ``operation_id``: ``op_``-prefixed ULID; always present, usable for
+    audit correlation and — for async commands — SSE subscription via
+    ``/v1/operations/{operation_id}/stream``
+  - ``status``: ``"completed"`` (sync, HTTP 200), ``"pending"``
+    (async, HTTP 202), or ``"failed"`` (error responses)
+  - ``result``: the domain-specific payload (the original Pydantic
+    response) or ``None`` for async/failed cases
+  - ``at``: ISO-8601 UTC timestamp of when the envelope was minted
+  - ``created_by``: user ID of the caller who initiated this operation
+  - ``idempotent_replay``: ``True`` when the dispatcher returned this
+    envelope from the idempotency cache (the underlying command did NOT
+    execute again)
   """
 
   model_config = ConfigDict(populate_by_name=True)
@@ -420,15 +413,20 @@ def log_operation_audit(
   idempotency_key: str | None = None,
   idempotent_replay: bool = False,
   error: str | None = None,
+  event: str = "extensions.operation",
 ) -> None:
   """Emit one structured audit-log line per operation call.
 
   The audit stream is consumed by the standard logging pipeline (CloudWatch
   in prod, stdout in dev). Fields are picked to satisfy a SOC-2-style
   "who did what, to which tenant, when, with what result" review.
+
+  The ``event`` parameter controls the event name in the audit payload
+  and log message.  Defaults to ``"extensions.operation"`` for backward
+  compatibility; graph ops pass ``"graph.operation"``.
   """
   payload: dict[str, Any] = {
-    "event": "extensions.operation",
+    "event": event,
     "operation": operation_name,
     "operation_id": operation_id,
     "user_id": user_id,
@@ -446,14 +444,14 @@ def log_operation_audit(
     payload["error"] = error
 
   if status == "failed":
-    logger.error("extensions.operation", extra={"audit": payload})
+    logger.error(event, extra={"audit": payload})
   else:
-    logger.info("extensions.operation", extra={"audit": payload})
+    logger.info(event, extra={"audit": payload})
 
 
 # ---------------------------------------------------------------------------
 # Operation dispatcher — generic execute_operation() helper used by every
-# `POST /extensions/{domain}/{graph_id}/operations/{operation_name}` route.
+# operation surface (extensions, graph ops, etc.).
 # ---------------------------------------------------------------------------
 
 
@@ -466,7 +464,7 @@ class OperationContext:
   async Dagster dispatch that needs user + graph provenance.
 
   `body_fingerprint` is computed by the route layer from the typed
-  request body via `_fingerprint_body(body)` and pinned to the cached
+  request body via `fingerprint_body(body)` and pinned to the cached
   envelope so that reusing an `Idempotency-Key` with a different body
   raises a `409 Conflict` instead of silently replaying.
   """
@@ -535,7 +533,7 @@ async def execute_operation(
      fingerprint) so retries within the TTL return it unchanged.
 
   The `runner` callable is responsible for:
-  - Opening `extensions_session(graph_id)`
+  - Opening its own database session
   - Validating inputs (body already parsed by FastAPI; further
     business validation like "no fields to update" goes here)
   - Calling the ops layer

@@ -172,10 +172,11 @@ class TestGraphEndpointAccessControl:
   async def test_graph_backups_endpoint_denies_unauthorized_user(
     self, auth_integration_client, test_user_token, other_user_token, sample_graph
   ):
-    """Test /v1/graphs/{graph_id}/backups denies unauthorized users."""
+    """Test /v1/graphs/{graph_id}/operations/create-backup denies unauthorized users."""
     response = await auth_integration_client.post(
-      f"/v1/graphs/{sample_graph.graph_id}/backups",
+      f"/v1/graphs/{sample_graph.graph_id}/operations/create-backup",
       headers={"Authorization": f"Bearer {other_user_token}"},
+      json={"backup_format": "full_dump"},
     )
 
     assert response.status_code == status.HTTP_403_FORBIDDEN
