@@ -9,6 +9,9 @@ where business logic lives in operations/ and the worker provides infrastructure
 """
 
 # Side-effect imports: trigger @register_task decorators
+from robosystems.operations.graph.tasks import (
+  extensions_materialize as extensions_materialize,
+)
 from robosystems.operations.graph.tasks import graph_creation as graph_creation
 from robosystems.operations.graph.tasks import (
   graph_materialization as graph_materialization,
@@ -28,6 +31,7 @@ def get_worker_components() -> dict[str, list[str]]:
   """
   return {
     "task_types": [
+      "extensions_materialize",
       "graph_creation",
       "graph_materialization",
       "graph_tier_upgrade",

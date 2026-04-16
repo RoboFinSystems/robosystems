@@ -353,6 +353,20 @@ async def create_subgraph(
     additional_tags={"success": True},
   )
 
+  from robosystems.dagster.reporting import report_asset_materialization
+
+  await report_asset_materialization(
+    asset_key="user_subgraph_creation",
+    description=f"Subgraph {subgraph_result['graph_id']} created from {graph_id}",
+    metadata={
+      "graph_id": subgraph_result["graph_id"],
+      "parent_graph_id": graph_id,
+      "user_id": str(current_user.id),
+      "provisioning_method": "direct",
+      "subgraph_name": request.name,
+    },
+  )
+
   return SubgraphResponse(
     graph_id=subgraph_result["graph_id"],
     parent_graph_id=graph_id,

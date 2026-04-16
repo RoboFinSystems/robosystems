@@ -7,6 +7,7 @@ Used by both the consumer loop and the Dagster reaper sensor.
 # for complex mapping operations. Shorter tasks get tighter limits.
 TASK_TIMEOUTS: dict[str, int] = {
   "agent": 300,  # 5 minutes
+  "extensions_materialize": 1800,  # 30 minutes
   "graph_creation": 60,  # 1 minute
   "subgraph_creation": 60,  # 1 minute
   "repository_provisioning": 60,  # 1 minute
