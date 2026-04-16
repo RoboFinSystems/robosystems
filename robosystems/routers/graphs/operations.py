@@ -21,6 +21,7 @@ from robosystems.middleware.operations import (
   IdempotencyKeyConflictError,
   OperationContext,
   OperationEnvelope,
+  _utcnow_iso,
   execute_operation,
   fingerprint_body,
   generate_operation_id,
@@ -33,6 +34,7 @@ from robosystems.middleware.rate_limits import subscription_aware_rate_limit_dep
 from robosystems.models.api.graphs.backups import BackupCreateRequest
 from robosystems.models.api.graphs.operations import (
   DeleteSubgraphOp,
+  MaterializeOp,
   RestoreBackupOp,
   UpgradeTierOp,
 )
@@ -273,7 +275,7 @@ async def delete_subgraph_op(
     subgraph.delete(db)
 
     SecurityAuditLogger.log_security_event(
-      event_type=SecurityEventType.AUTH_SUCCESS,
+      event_type=SecurityEventType.SUBGRAPH_DELETED,
       details={
         "action": "subgraph_deleted",
         "subgraph_id": subgraph_id,
@@ -573,8 +575,7 @@ async def upgrade_tier_op(
   db: Session = Depends(get_async_db_session),
 ) -> OperationEnvelope:
   """Change the infrastructure tier on a graph (async EBS migration)."""
-  from robosystems.models.api.billing.subscription import UpgradeSubscriptionRequest
-  from robosystems.routers.graphs.subscriptions import _change_graph_tier
+  from robosystems.operations.graph.commands.tier import change_graph_tier_cmd
 
   op_name = "upgrade-tier"
   user_id = str(user.id)
@@ -586,20 +587,13 @@ async def upgrade_tier_op(
   if replay is not None:
     return replay
 
-  # Delegate to existing tier change logic
-  upgrade_request = UpgradeSubscriptionRequest(new_plan_name=body.new_tier)
-  sub_response = await _change_graph_tier(graph_id, upgrade_request, user, db)
-
-  # The existing function returns GraphSubscriptionResponse with operation_id
-  operation_id = sub_response.operation_id or generate_operation_id()
+  operation_id = await change_graph_tier_cmd(graph_id, body.new_tier, user, db)
 
   envelope = wrap_pending(
     op_name,
     operation_id=operation_id,
     partial_result={
-      "old_tier": None,  # Available in sub_response context
       "new_tier": body.new_tier,
-      "subscription_status": sub_response.status,
     },
     created_by=user_id,
   )
@@ -640,36 +634,15 @@ async def upgrade_tier_op(
   business_event_type="graph_materialize",
 )
 async def materialize_op(
+  body: MaterializeOp,
   graph_id: str = Path(..., pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN),
   user: User = Depends(get_current_user_with_graph),
   idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
   cache: IdempotencyCache = Depends(get_idempotency_cache),
   db: Session = Depends(get_async_db_session),
-  force: bool = False,
-  rebuild: bool = False,
-  ignore_errors: bool = True,
-  dry_run: bool = False,
-  source: str | None = None,
-  materialize_embeddings: bool = False,
 ) -> OperationEnvelope:
-  """Materialize graph from staging tables or extensions OLTP.
-
-  Delegates to the existing materialize_graph handler which handles
-  distributed locking, source routing, and Dagster/direct dispatch.
-  """
-  from robosystems.routers.graphs.materialize import (
-    MaterializeRequest,
-    materialize_graph,
-  )
-
-  body = MaterializeRequest(
-    force=force,
-    rebuild=rebuild,
-    ignore_errors=ignore_errors,
-    dry_run=dry_run,
-    source=source,
-    materialize_embeddings=materialize_embeddings,
-  )
+  """Materialize graph from staging tables or extensions OLTP."""
+  from robosystems.operations.graph.commands.materialize import materialize_cmd
 
   op_name = "materialize"
   user_id = str(user.id)
@@ -681,22 +654,17 @@ async def materialize_op(
   if replay is not None:
     return replay
 
-  # Delegate to existing materialize handler
-  result = await materialize_graph(
-    body=body, graph_id=graph_id, current_user=user, db=db
-  )
+  result = await materialize_cmd(graph_id, body, user, db)
 
   # The existing handler returns different shapes for dry_run vs normal
-  if dry_run:
+  if body.dry_run:
     # Dry run returns immediately — sync envelope
     envelope = OperationEnvelope(
       operation=op_name,
       operationId=generate_operation_id(),
       status="completed",
       result=result if isinstance(result, dict) else result.model_dump(mode="json"),
-      at=__import__(
-        "robosystems.middleware.operations.core", fromlist=["_utcnow_iso"]
-      )._utcnow_iso(),
+      at=_utcnow_iso(),
       createdBy=user_id,
     )
   else:

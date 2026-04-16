@@ -1,5 +1,7 @@
 """Request models for graph operations (POST /v1/graphs/{graph_id}/operations/)."""
 
+from typing import Literal
+
 from pydantic import BaseModel, Field
 
 
@@ -28,6 +30,7 @@ class RestoreBackupOp(BaseModel):
 
   backup_id: str = Field(
     ...,
+    min_length=1,
     description="Backup identifier to restore from",
   )
   create_system_backup: bool = Field(
@@ -43,7 +46,32 @@ class RestoreBackupOp(BaseModel):
 class UpgradeTierOp(BaseModel):
   """Body for the upgrade-tier operation."""
 
-  new_tier: str = Field(
+  new_tier: Literal["ladybug-standard", "ladybug-large", "ladybug-xlarge"] = Field(
     ...,
-    description="Target tier: ladybug-standard, ladybug-large, ladybug-xlarge",
+    description="Target infrastructure tier",
+  )
+
+
+class MaterializeOp(BaseModel):
+  """Body for the materialize operation."""
+
+  force: bool = Field(
+    default=False, description="Force materialization even if already up to date"
+  )
+  rebuild: bool = Field(
+    default=False, description="Rebuild the graph from scratch, dropping existing data"
+  )
+  ignore_errors: bool = Field(
+    default=True, description="Continue past non-fatal row errors"
+  )
+  dry_run: bool = Field(
+    default=False, description="Validate tables without writing to the graph"
+  )
+  source: str | None = Field(
+    default=None,
+    pattern="^(staged|extensions)$",
+    description="Materialization source: 'extensions' for OLTP, omit for DuckDB staging tables",
+  )
+  materialize_embeddings: bool = Field(
+    default=False, description="Generate vector embeddings during materialization"
   )

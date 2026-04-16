@@ -603,7 +603,7 @@ def materialize_graph(graph_id: str) -> None:
     resp = httpx.post(
       f"{BASE_URL}/v1/graphs/{graph_id}/operations/materialize",
       headers={"X-API-Key": api_key, "Content-Type": "application/json"},
-      params={"force": True, "rebuild": True, "source": "extensions"},
+      json={"force": True, "rebuild": True, "source": "extensions"},
       timeout=30,
     )
     if resp.status_code not in (200, 201, 202):

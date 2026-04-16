@@ -41,6 +41,27 @@ class DatabaseHealthResponse(BaseModel):
     description="Active alerts or warnings",
     examples=[["High memory usage detected"]],
   )
+  # Materialization staleness
+  is_stale: bool = Field(
+    default=False,
+    description="Whether the graph has staged changes not yet materialized",
+  )
+  stale_reason: str | None = Field(
+    None,
+    description="Reason the graph was marked stale (e.g. 'file_deleted: data.parquet')",
+  )
+  stale_since: str | None = Field(
+    None,
+    description="ISO timestamp when the graph became stale",
+  )
+  last_materialized_at: str | None = Field(
+    None,
+    description="ISO timestamp of the last successful materialization",
+  )
+  hours_since_materialization: float | None = Field(
+    None,
+    description="Hours elapsed since last materialization",
+  )
 
 
 class DatabaseInfoResponse(BaseModel):
