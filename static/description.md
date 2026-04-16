@@ -13,7 +13,7 @@ RoboSystems is a knowledge graph platform for enterprise financial and operation
 
 ### Graph Operations
 
-The core platform surface for querying and managing graphs. REST GETs return resource state; graph lifecycle commands (`POST /v1/graphs/{graph_id}/operations/{op_name}`) return `OperationEnvelope` with idempotency and audit logging.
+The core platform surface for querying and managing graphs
 
 **Query and data access:**
 
@@ -51,9 +51,9 @@ The core platform surface for querying and managing graphs. REST GETs return res
 
 Domain extensions (RoboLedger, RoboInvestor) are graph-scoped with a clear split between reads, writes, and view operations:
 
-- **Reads** → GraphQL at `POST /extensions/{graph_id}/graphql` with a schema composed dynamically from enabled domains.
-- **Writes** → named command operations at `POST /extensions/{domain}/{graph_id}/operations/{operation_name}`.
-- **Views** → graph-backed read-only analytics views at `POST /extensions/{domain}/{graph_id}/operations/{view_name}`.
+- **Reads** → GraphQL at `POST /extensions/{graph_id}/graphql` with a schema composed dynamically from enabled domains
+- **Writes** → named command operations at `POST /extensions/{domain}/{graph_id}/operations/{operation_name}`
+- **Views** → graph-backed read-only analytics views at `POST /extensions/{domain}/{graph_id}/operations/{view_name}`
 
 ### RoboLedger
 
