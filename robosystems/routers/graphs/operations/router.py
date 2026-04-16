@@ -285,7 +285,11 @@ async def delete_subgraph_op(
       risk_level="medium",
     )
 
-    return {"graph_id": subgraph_id, "status": "deleted", "backup_location": backup_location}
+    return {
+      "graph_id": subgraph_id,
+      "status": "deleted",
+      "backup_location": backup_location,
+    }
 
   return await _dispatch(ctx, _runner, cache)
 
