@@ -16,7 +16,7 @@ MAIN_API_TAGS = [
   },
   {
     "name": "Query",
-    "description": "🔍 Graph queries - Execute Cypher queries on the knowledge graph",
+    "description": "🕸️ Graph queries - Execute Cypher queries on the knowledge graph",
   },
   {
     "name": "Search",
