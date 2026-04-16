@@ -1,5 +1,5 @@
 """
-Ledger Materialization — PostgreSQL OLTP → DuckDB staging → LadybugDB graph.
+Extensions Materialization — PostgreSQL OLTP → DuckDB staging → LadybugDB graph.
 
 Connector-agnostic: materializes whatever is in the extensions tenant schema,
 regardless of which connector (QuickBooks, Xero, Plaid, native) put it there.
@@ -9,7 +9,7 @@ database, transform OLTP rows into graph-shaped staging tables, then materialize
 via the existing ATTACH + COPY FROM pipeline.
 
 Architecture:
-  Dagster/API → LedgerMaterializer.materialize(graph_id, entity_id)
+  Dagster sensor / worker task → ExtensionsMaterializer.materialize(graph_id, entity_id)
     → get_graph_client(graph_id, operation_type="write")  # routes to correct EC2
     → client.query_table(sql)  # DuckDB postgres_scan → staging tables
     → client.materialize_table(table_name)  # DuckDB → LadybugDB
@@ -1027,7 +1027,7 @@ def _staging_sql(graph_id: str, entity_id: str, connstr: str) -> dict[str, str]:
   return tables
 
 
-class LedgerMaterializer:
+class ExtensionsMaterializer:
   """Materializes extensions OLTP data to the LadybugDB graph.
 
   Connector-agnostic — reads whatever is in the extensions tenant schema

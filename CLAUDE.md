@@ -59,7 +59,7 @@ exposes only ledger fields (no `INVESTOR_NOT_INITIALIZED` runtime errors).
 | Delete subgraph | `POST /v1/graphs/{g}/operations/delete-subgraph` |
 | Create backup | `POST /v1/graphs/{g}/operations/create-backup` |
 | Restore backup | `POST /v1/graphs/{g}/operations/restore-backup` |
-| Upgrade tier | `POST /v1/graphs/{g}/operations/upgrade-tier` |
+|  Change tier | `POST /v1/graphs/{g}/operations/change-tier` |
 | Materialize | `POST /v1/graphs/{g}/operations/materialize` |
 
 All graph operation responses are `OperationEnvelope` and support `Idempotency-Key`. Reads (list subgraphs, list backups, health, etc.) remain REST GETs at their existing paths.

@@ -1,6 +1,8 @@
 """Graph core API models - graph creation and metadata."""
 
-from pydantic import BaseModel, ConfigDict, Field
+from typing import Self
+
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from .schema import CustomSchemaDefinition
 
@@ -96,8 +98,8 @@ class CreateGraphRequest(BaseModel):
   """Request model for creating a new graph.
 
   Use this to create either:
-  - **Entity graphs**: Standard graphs with entity schema and optional extensions
-  - **Custom graphs**: Generic graphs with fully custom schema definitions
+  - **Entity graphs**: Standard graphs with entity schema. Requires `initial_entity`.
+  - **Custom graphs**: Generic graphs with a fully custom schema. Requires `custom_schema`; `initial_entity` is not used.
   """
 
   model_config = ConfigDict(
@@ -122,21 +124,6 @@ class CreateGraphRequest(BaseModel):
             },
             "create_entity": True,
             "tags": ["consulting", "professional-services", "production"],
-          },
-        },
-        {
-          "summary": "Entity graph without initial entity",
-          "description": "Create an entity graph structure without populating initial data (useful for bulk data imports)",
-          "value": {
-            "metadata": {
-              "graph_name": "Investment Portfolio Graph",
-              "description": "Knowledge graph for tracking investment portfolios and holdings",
-              "schema_extensions": ["roboinvestor"],
-            },
-            "instance_tier": "ladybug-standard",
-            "initial_entity": None,
-            "create_entity": False,
-            "tags": ["investments", "portfolio-management"],
           },
         },
         {
@@ -231,8 +218,8 @@ class CreateGraphRequest(BaseModel):
           },
         },
         {
-          "summary": "Generic empty graph",
-          "description": "Create an empty graph for general-purpose use without custom schema",
+          "summary": "Minimal custom graph",
+          "description": "Create a generic custom graph with a minimal schema",
           "value": {
             "metadata": {
               "graph_name": "Customer Analytics Graph",
@@ -240,6 +227,12 @@ class CreateGraphRequest(BaseModel):
               "schema_extensions": [],
             },
             "instance_tier": "ladybug-standard",
+            "custom_schema": {
+              "name": "customer_analytics",
+              "version": "1.0.0",
+              "nodes": [],
+              "relationships": [],
+            },
             "tags": ["analytics", "customers", "marketing"],
           },
         },
@@ -261,7 +254,7 @@ class CreateGraphRequest(BaseModel):
   )
   initial_entity: InitialEntityData | None = Field(
     None,
-    description="Optional initial entity to create in the graph. If provided with entity graph, populates the first entity node.",
+    description="Initial entity for the graph. Required for entity graphs (when custom_schema is omitted). Omit only when providing custom_schema for a generic graph.",
   )
   create_entity: bool = Field(
     default=True,
@@ -272,6 +265,15 @@ class CreateGraphRequest(BaseModel):
     description="Optional tags for organization",
     max_length=10,
   )
+
+  @model_validator(mode="after")
+  def require_entity_for_entity_graphs(self) -> Self:
+    if self.custom_schema is None and self.initial_entity is None:
+      raise ValueError(
+        "initial_entity is required when creating an entity graph. "
+        "Provide initial_entity, or provide custom_schema to create a generic graph instead."
+      )
+    return self
 
 
 class CreateGraphResponse(BaseModel):

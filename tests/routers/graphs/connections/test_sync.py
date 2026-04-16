@@ -27,6 +27,14 @@ def _make_mock_user(user_id: str = USER_ID):
   return user
 
 
+def _make_mock_cache():
+  """Return an AsyncMock IdempotencyCache that always misses (no replay)."""
+  cache = AsyncMock()
+  cache.get = AsyncMock(return_value=None)
+  cache.put = AsyncMock(return_value=None)
+  return cache
+
+
 def _make_connection_dict(
   connection_id: str = CONNECTION_ID,
   provider: str = "quickbooks",
@@ -87,7 +95,7 @@ class TestSyncConnection:
   @pytest.mark.unit
   @pytest.mark.asyncio
   async def test_sync_connection_success_quickbooks(self):
-    """Happy path: QuickBooks sync returns task_id and status pending."""
+    """Happy path: QuickBooks sync returns OperationEnvelope with task_id in result."""
     mock_user = _make_mock_user()
     mock_db = MagicMock()
     request = _make_sync_request()
@@ -118,17 +126,19 @@ class TestSyncConnection:
         current_user=mock_user,
         db=mock_db,
         _rate_limit=None,
+        idempotency_key=None,
+        cache=_make_mock_cache(),
       )
 
-    assert result["task_id"] == "task_qb_001"
-    assert result["status"] == "pending"
-    assert result["connection_id"] == CONNECTION_ID
-    assert "QUICKBOOKS" in result["message"]
+    assert result.result["task_id"] == "task_qb_001"
+    assert result.status == "pending"
+    assert result.result["connection_id"] == CONNECTION_ID
+    assert "QUICKBOOKS" in result.result["message"]
 
   @pytest.mark.unit
   @pytest.mark.asyncio
   async def test_sync_connection_success_sec(self):
-    """Happy path: SEC sync returns task_id."""
+    """Happy path: SEC sync returns OperationEnvelope with task_id in result."""
     mock_user = _make_mock_user()
     mock_db = MagicMock()
     request = _make_sync_request()
@@ -159,10 +169,12 @@ class TestSyncConnection:
         current_user=mock_user,
         db=mock_db,
         _rate_limit=None,
+        idempotency_key=None,
+        cache=_make_mock_cache(),
       )
 
-    assert result["task_id"] == "task_sec_001"
-    assert "SEC" in result["message"]
+    assert result.result["task_id"] == "task_sec_001"
+    assert "SEC" in result.result["message"]
 
   @pytest.mark.unit
   @pytest.mark.asyncio
@@ -194,6 +206,8 @@ class TestSyncConnection:
           current_user=mock_user,
           db=mock_db,
           _rate_limit=None,
+          idempotency_key=None,
+          cache=_make_mock_cache(),
         )
 
     assert exc_info.value.status_code == 404
@@ -234,6 +248,8 @@ class TestSyncConnection:
           current_user=mock_user,
           db=mock_db,
           _rate_limit=None,
+          idempotency_key=None,
+          cache=_make_mock_cache(),
         )
 
     assert exc_info.value.status_code == 403
@@ -273,6 +289,8 @@ class TestSyncConnection:
           current_user=mock_user,
           db=mock_db,
           _rate_limit=None,
+          idempotency_key=None,
+          cache=_make_mock_cache(),
         )
 
     assert exc_info.value.status_code == 504
@@ -314,6 +332,8 @@ class TestSyncConnection:
           current_user=mock_user,
           db=mock_db,
           _rate_limit=None,
+          idempotency_key=None,
+          cache=_make_mock_cache(),
         )
 
     assert exc_info.value.status_code == 500
@@ -349,6 +369,8 @@ class TestSyncConnection:
           current_user=mock_user,
           db=mock_db,
           _rate_limit=None,
+          idempotency_key=None,
+          cache=_make_mock_cache(),
         )
 
     assert exc_info.value.status_code == 402
@@ -389,6 +411,8 @@ class TestSyncConnection:
         current_user=mock_user,
         db=mock_db,
         _rate_limit=None,
+        idempotency_key=None,
+        cache=_make_mock_cache(),
       )
 
     # sync_connection is called inside wait_for; check the call indirectly
@@ -431,6 +455,8 @@ class TestSyncConnection:
         current_user=mock_user,
         db=mock_db,
         _rate_limit=None,
+        idempotency_key=None,
+        cache=_make_mock_cache(),
       )
 
     components["circuit_breaker"].check_circuit.assert_called_once_with(
@@ -473,6 +499,8 @@ class TestSyncConnection:
           current_user=mock_user,
           db=mock_db,
           _rate_limit=None,
+          idempotency_key=None,
+          cache=_make_mock_cache(),
         )
 
     mock_record_failure.assert_called_once()
@@ -513,6 +541,8 @@ class TestSyncConnection:
         current_user=mock_user,
         db=mock_db,
         _rate_limit=None,
+        idempotency_key=None,
+        cache=_make_mock_cache(),
       )
 
     mock_record_success.assert_called_once()
@@ -551,9 +581,11 @@ class TestSyncConnection:
         current_user=mock_user,
         db=mock_db,
         _rate_limit=None,
+        idempotency_key=None,
+        cache=_make_mock_cache(),
       )
 
-    assert "QUICKBOOKS" in result["message"]
+    assert "QUICKBOOKS" in result.result["message"]
 
   @pytest.mark.unit
   @pytest.mark.asyncio
@@ -590,6 +622,8 @@ class TestSyncConnection:
         current_user=mock_user,
         db=mock_db,
         _rate_limit=None,
+        idempotency_key=None,
+        cache=_make_mock_cache(),
       )
 
     mock_registry.get_provider.assert_called_once_with("quickbooks")

@@ -7,7 +7,7 @@ data point: an element's aggregated balance for a specific period.
 Facts serve both reports (report_id set) and schedules (fact_set_id set).
 At least one of report_id or fact_set_id must be populated.
 
-Written by generate_report_facts(), read by LedgerMaterializer and
+Written by generate_report_facts(), read by ExtensionsMaterializer and
 render_structure_view().
 """
 

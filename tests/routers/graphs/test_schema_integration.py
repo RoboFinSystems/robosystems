@@ -200,11 +200,11 @@ class TestSchemaManagementIntegration:
 
       assert create_response.status_code == 202
       create_result = create_response.json()
-      assert "operation_id" in create_result
+      assert "operationId" in create_result
       assert create_result["status"] == "pending"
-      assert "_links" in create_result
-      assert "stream" in create_result["_links"]
-      assert "status" in create_result["_links"]
+      assert "_links" in create_result["result"]
+      assert "stream" in create_result["result"]["_links"]
+      assert "status" in create_result["result"]["_links"]
 
   @pytest.mark.asyncio
   async def test_export_and_reimport_schema(

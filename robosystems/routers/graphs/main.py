@@ -7,13 +7,23 @@ optionally including initial entities like companies.
 
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, Header, HTTPException, status
+from sqlalchemy.orm import Session
 
-from robosystems.database import session
+from robosystems.database import get_async_db_session, session
 from robosystems.logger import logger
 from robosystems.middleware.auth.dependencies import (
   get_current_user,
   get_current_user_with_graph,
+)
+from robosystems.middleware.operations import (
+  IdempotencyCache,
+  OperationEnvelope,
+  check_idempotency,
+  fingerprint_body,
+  get_idempotency_cache,
+  log_operation_audit,
+  wrap_pending,
 )
 from robosystems.middleware.otel.metrics import (
   endpoint_metrics_decorator,
@@ -304,43 +314,38 @@ async def get_graphs(
 
 @router.post(
   "",
+  response_model=OperationEnvelope,
   status_code=status.HTTP_202_ACCEPTED,
   operation_id="createGraph",
   summary="Create New Graph Database",
-  description="""Create a new graph database with specified schema and optionally an initial entity.
+  description="""Create a new graph database with specified schema and an initial entity.
 
 This endpoint starts an asynchronous graph creation operation and returns
 connection details for monitoring progress via Server-Sent Events (SSE).
 
 **Graph Creation Options:**
 
-1. **Entity Graph with Initial Entity** (`initial_entity` provided, `create_entity=True`):
+1. **Entity Graph** (`initial_entity` required, `custom_schema` omitted):
    - Creates graph structure with entity schema extensions
-   - Populates an initial entity node with provided data
-   - Useful when you want a pre-configured entity to start with
-   - Example: Creating a company graph with the company already populated
+   - `initial_entity` is required — entity graphs must have an entity
+   - Set `create_entity=False` to defer entity population (e.g. file-based ingestion)
+   - Example: Creating a company graph with the company pre-populated
 
-2. **Entity Graph without Initial Entity** (`initial_entity=None`, `create_entity=False`):
-   - Creates graph structure with entity schema extensions
-   - Graph starts empty, ready for data import
-   - Useful for bulk data imports or custom workflows
-   - Example: Creating a graph structure before importing from CSV/API
-
-3. **Generic Graph** (no `initial_entity` provided):
-   - Creates empty graph with custom schema extensions
-   - General-purpose knowledge graph
+2. **Custom Graph** (`custom_schema` provided, no `initial_entity`):
+   - Creates a generic graph with a fully custom schema
+   - `initial_entity` is not used
    - Example: Analytics graphs, custom data models
 
 **Required Fields:**
 - `metadata.graph_name`: Unique name for the graph
 - `instance_tier`: Resource tier (ladybug-standard, ladybug-large, ladybug-xlarge)
+- `initial_entity`: Entity data — required for entity graphs (omit only when providing `custom_schema`)
 
 **Optional Fields:**
 - `metadata.description`: Human-readable description of the graph's purpose
 - `metadata.schema_extensions`: List of schema extensions (roboledger, roboinvestor, etc.)
 - `tags`: Organizational tags (max 10)
-- `initial_entity`: Entity data (required for entity graphs with initial data)
-- `create_entity`: Whether to populate initial entity (default: true when initial_entity provided)
+- `create_entity`: Whether to populate entity data on creation (default: true)
 
 **Monitoring Progress:**
 Use the returned `operation_id` to connect to the SSE stream:
@@ -374,79 +379,78 @@ eventSource.onmessage = (event) => {
 - `_links.stream`: SSE endpoint for real-time updates
 - `_links.status`: Point-in-time status check endpoint""",
 )
+@endpoint_metrics_decorator(
+  endpoint_name="/v1/graphs",
+  method="POST",
+  business_event_type="graph_created",
+)
 async def create_graph(
   request: CreateGraphRequest,
   current_user: User = Depends(get_current_user),
   _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
-):
-  """
-  Create a new graph database asynchronously using SSE monitoring.
+  idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
+  cache: IdempotencyCache = Depends(get_idempotency_cache),
+  db: Session = Depends(get_async_db_session),
+) -> OperationEnvelope:
+  """Create a new graph database asynchronously."""
+  from robosystems.config.graph_tier import GraphTier
+  from robosystems.middleware.billing.enforcement import check_can_provision_graph
+  from robosystems.worker.client import enqueue_task
 
-  This unified endpoint can:
-  1. Create an empty graph with just schema (generic use case)
-  2. Create a graph with an initial entity (entity-graph use case)
-  3. Apply custom schemas
-  4. Configure instance tiers
+  op_name = "create-graph"
+  user_id = str(current_user.id)
+  # No graph_id exists yet — use sentinel for idempotency scoping.
+  # The cache key is (user_id, "new", op_name, idempotency_key, fingerprint),
+  # which is unique enough to prevent duplicate graph creation retries.
+  _graph_id = "new"
+  body_fp = fingerprint_body(request)
 
-  Returns operation details for SSE monitoring. The actual creation runs
-  on the background worker via the graph_creation task handler.
-  """
+  replay = await check_idempotency(
+    cache, user_id, _graph_id, op_name, idempotency_key, body_fp
+  )
+  if replay is not None:
+    return replay
+
   try:
-    from robosystems.config.graph_tier import GraphTier
-    from robosystems.database import get_db_session
-    from robosystems.middleware.billing.enforcement import (
-      check_can_provision_graph,
+    # Check org's graph limits
+    user_orgs = OrgUser.get_user_orgs(current_user.id, db)
+    if not user_orgs:
+      _raise_http_exception(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        error_code="org_not_found",
+        message="User organization not found. Please contact support.",
+      )
+
+    org_id = user_orgs[0].org_id
+    org_limits = OrgLimits.get_or_create_for_org(org_id, db)
+
+    can_create, reason = org_limits.can_create_graph(db)
+    if not can_create:
+      _raise_http_exception(
+        status_code=status.HTTP_403_FORBIDDEN,
+        error_code="graph_limit_reached",
+        message=reason,
+      )
+
+    tier_map = {
+      "ladybug-standard": GraphTier.LADYBUG_STANDARD,
+      "ladybug-large": GraphTier.LADYBUG_LARGE,
+      "ladybug-xlarge": GraphTier.LADYBUG_XLARGE,
+    }
+    graph_tier = tier_map.get(request.instance_tier.lower(), GraphTier.LADYBUG_STANDARD)
+
+    can_provision, billing_error = check_can_provision_graph(
+      user_id=current_user.id,
+      requested_tier=graph_tier,
+      session=db,
     )
-    from robosystems.worker.client import enqueue_task
-
-    db = next(get_db_session())
-
-    try:
-      # Check org's graph limits
-      user_orgs = OrgUser.get_user_orgs(current_user.id, db)
-      if not user_orgs:
-        _raise_http_exception(
-          status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-          error_code="org_not_found",
-          message="User organization not found. Please contact support.",
-        )
-
-      org_id = user_orgs[0].org_id
-      org_limits = OrgLimits.get_or_create_for_org(org_id, db)
-
-      can_create, reason = org_limits.can_create_graph(db)
-      if not can_create:
-        _raise_http_exception(
-          status_code=status.HTTP_403_FORBIDDEN,
-          error_code="graph_limit_reached",
-          message=reason,
-        )
-
-      # Map tier to GraphTier enum for billing check
-      tier_map = {
-        "ladybug-standard": GraphTier.LADYBUG_STANDARD,
-        "ladybug-large": GraphTier.LADYBUG_LARGE,
-        "ladybug-xlarge": GraphTier.LADYBUG_XLARGE,
-      }
-      graph_tier = tier_map.get(
-        request.instance_tier.lower(), GraphTier.LADYBUG_STANDARD
+    if not can_provision:
+      _raise_http_exception(
+        status_code=status.HTTP_402_PAYMENT_REQUIRED,
+        error_code="payment_required",
+        message=billing_error or "Valid payment method required to create graphs.",
       )
 
-      can_provision, billing_error = check_can_provision_graph(
-        user_id=current_user.id,
-        requested_tier=graph_tier,
-        session=db,
-      )
-      if not can_provision:
-        _raise_http_exception(
-          status_code=status.HTTP_402_PAYMENT_REQUIRED,
-          error_code="payment_required",
-          message=billing_error or "Valid payment method required to create graphs.",
-        )
-    finally:
-      db.close()
-
-    # Build unified params for worker task
     is_entity = request.initial_entity is not None
     entity_data = None
     if is_entity:
@@ -463,7 +467,7 @@ async def create_graph(
     response = await enqueue_task(
       task_type="graph_creation",
       graph_id=None,
-      user_id=str(current_user.id),
+      user_id=user_id,
       params={
         "graph_type": "entity" if is_entity else "generic",
         "graph_name": request.metadata.graph_name,
@@ -479,7 +483,32 @@ async def create_graph(
       },
     )
 
-    return response
+    operation_id = response["operation_id"]
+    envelope = wrap_pending(
+      op_name,
+      operation_id=operation_id,
+      partial_result=response,
+      created_by=user_id,
+    )
+
+    # Known limitation: cache.put is after enqueue_task. A Valkey failure here
+    # leaves the task dispatched without idempotency protection — the next retry
+    # would dispatch again. Fixing requires a two-phase write (placeholder before
+    # dispatch, update after), which is a systemic change tracked separately.
+    if idempotency_key is not None:
+      await cache.put(user_id, _graph_id, op_name, idempotency_key, envelope, body_fp)
+
+    log_operation_audit(
+      operation_name=op_name,
+      operation_id=operation_id,
+      user_id=user_id,
+      graph_id=_graph_id,
+      duration_ms=0.0,
+      status="pending",
+      idempotency_key=idempotency_key,
+      event="graph.operation",
+    )
+    return envelope
 
   except HTTPException:
     raise

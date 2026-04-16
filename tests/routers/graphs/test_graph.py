@@ -53,7 +53,7 @@ class TestGraphCreationEndpoint:
       ),
       instance_tier="ladybug-standard",
       custom_schema=None,
-      initial_entity=None,
+      initial_entity=InitialEntityData(name="Test Corp", uri="https://testcorp.com"),
       tags=["test", "production"],
     )
 
@@ -126,9 +126,9 @@ class TestGraphCreationEndpoint:
 
               assert response.status_code == 202
               data = response.json()
-              assert data["operation_id"] == operation_id
+              assert data["operationId"] == operation_id
               assert data["status"] == "pending"
-              assert "_links" in data
+              assert "_links" in data["result"]
 
   async def test_create_entity_graph_success(
     self, async_client: AsyncClient, sample_entity_graph_request, mock_user_limits
@@ -174,8 +174,8 @@ class TestGraphCreationEndpoint:
 
               assert response.status_code == 202
               data = response.json()
-              assert data["operation_id"] == operation_id
-              assert data["operation_type"] == "entity_graph_creation"
+              assert data["operationId"] == operation_id
+              assert data["result"]["operation_type"] == "entity_graph_creation"
 
   async def test_create_graph_with_custom_schema(
     self, async_client: AsyncClient, mock_user_limits
@@ -672,7 +672,20 @@ class TestDataModels:
 
   def test_create_graph_request_validation(self):
     """Test CreateGraphRequest model validation."""
-    # Valid request with minimal data
+    from pydantic import ValidationError
+
+    # Entity graph without initial_entity is rejected
+    with pytest.raises(ValidationError) as exc_info:
+      CreateGraphRequest(
+        metadata=GraphMetadata(graph_name="Test", schema_extensions=["roboledger"]),
+        instance_tier="ladybug-standard",
+        custom_schema=None,
+        initial_entity=None,
+        tags=[],
+      )
+    assert "initial_entity" in str(exc_info.value)
+
+    # Valid entity graph request
     request = CreateGraphRequest(
       metadata=GraphMetadata(
         graph_name="Test",
@@ -681,12 +694,12 @@ class TestDataModels:
       ),
       instance_tier="ladybug-standard",
       custom_schema=None,
-      initial_entity=None,
+      initial_entity=InitialEntityData(name="Test Corp", uri="https://testcorp.com"),
       tags=[],
     )
-    assert request.instance_tier == "ladybug-standard"  # Default
-    assert request.tags == []  # Default
-    assert request.initial_entity is None
+    assert request.instance_tier == "ladybug-standard"
+    assert request.tags == []
+    assert request.initial_entity is not None
     assert request.custom_schema is None
 
     # Valid request with all fields
@@ -725,7 +738,6 @@ class TestDataModels:
     """Test CreateGraphRequest tier validation."""
     from pydantic import ValidationError
 
-    # Invalid tier
     with pytest.raises(ValidationError) as exc_info:
       CreateGraphRequest(
         metadata=GraphMetadata(
@@ -734,8 +746,7 @@ class TestDataModels:
           schema_extensions=["roboledger"],
         ),
         instance_tier="ultra",  # Invalid
-        custom_schema=None,
-        initial_entity=None,
+        initial_entity=InitialEntityData(name="Test Corp", uri="https://testcorp.com"),
         tags=[],
       )
     assert "pattern" in str(exc_info.value).lower()
@@ -744,7 +755,6 @@ class TestDataModels:
     """Test CreateGraphRequest tags limit."""
     from pydantic import ValidationError
 
-    # Too many tags
     with pytest.raises(ValidationError) as exc_info:
       CreateGraphRequest(
         metadata=GraphMetadata(
@@ -753,8 +763,7 @@ class TestDataModels:
           schema_extensions=["roboledger"],
         ),
         instance_tier="ladybug-standard",
-        custom_schema=None,
-        initial_entity=None,
+        initial_entity=InitialEntityData(name="Test Corp", uri="https://testcorp.com"),
         tags=[f"tag_{i}" for i in range(11)],  # 11 tags, max is 10
       )
     assert "at most 10 item" in str(exc_info.value).lower()
@@ -783,7 +792,7 @@ class TestTierMapping:
       ),
       instance_tier="ladybug-standard",
       custom_schema=None,
-      initial_entity=None,
+      initial_entity=InitialEntityData(name="Test Corp", uri="https://testcorp.com"),
       tags=[],
     )
 
@@ -838,7 +847,7 @@ class TestTierMapping:
       ),
       instance_tier="ladybug-xlarge",
       custom_schema=None,
-      initial_entity=None,
+      initial_entity=InitialEntityData(name="Test Corp", uri="https://testcorp.com"),
       tags=[],
     )
 

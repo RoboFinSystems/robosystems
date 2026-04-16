@@ -10,7 +10,7 @@ Every route follows the pattern:
 4. `execute_operation(ctx, runner, cache)` handles envelope +
    idempotency + audit
 
-**Registered (40):**
+**Registered (41):**
 
 - Entity: `update-entity`
 - Fiscal calendar / periods: `initialize`, `set-close-target`,
@@ -24,6 +24,7 @@ Every route follows the pattern:
   `delete-element`
 - Associations (bulk, generalized): `create-associations`,
   `update-association`, `delete-association`
+- Transactions (standalone business events): `create-transaction`
 - Journal entries (native accounting writes): `create-journal-entry`,
   `update-journal-entry`, `delete-journal-entry`, `reverse-journal-entry`
 - Mappings (async): `auto-map-elements` — the one
@@ -67,9 +68,9 @@ from robosystems.middleware.operations import (
   IdempotencyKeyConflictError,
   OperationContext,
   OperationEnvelope,
+  check_idempotency,
   execute_operation,
   fingerprint_body,
-  generate_operation_id,
   get_idempotency_cache,
   log_operation_audit,
   wrap_pending,
@@ -123,6 +124,7 @@ from robosystems.models.api.extensions.taxonomies import (
   UpdateStructureRequest,
   UpdateTaxonomyRequest,
 )
+from robosystems.models.api.extensions.transactions import CreateTransactionRequest
 from robosystems.models.core import User
 from robosystems.operations.extensions.staleness import mark_graph_stale
 from robosystems.operations.roboledger.commands._guards import (
@@ -168,6 +170,9 @@ from robosystems.operations.roboledger.commands.journal_entries import (
 )
 from robosystems.operations.roboledger.commands.journal_entries import (
   create_journal_entry as cmd_create_journal_entry,
+)
+from robosystems.operations.roboledger.commands.journal_entries import (
+  create_transaction as cmd_create_transaction,
 )
 from robosystems.operations.roboledger.commands.journal_entries import (
   delete_journal_entry as cmd_delete_journal_entry,
@@ -1377,7 +1382,24 @@ delete_association_op = _registrar.register(
   )
 )
 
-# ── Journal entry CRUD ────────────────────────────────────────────────────
+# ── Transaction + Journal entry CRUD ────────────────────────────────────
+
+create_transaction_op = _registrar.register(
+  OperationSpec(
+    name="create-transaction",
+    summary="Create Transaction",
+    description=(
+      "Create a standalone business-event Transaction without entries. "
+      "Returns a transaction_id that can be passed to create-journal-entry "
+      "to attach one or more journal entries to this event. Use this when "
+      "a single event (invoice, payment, deposit) produces multiple entries "
+      "over its lifecycle."
+    ),
+    command=cmd_create_transaction,
+    request_model=CreateTransactionRequest,
+    error_map={ValueError: 422},
+  )
+)
 
 create_journal_entry_op = _registrar.register(
   OperationSpec(
@@ -1542,42 +1564,17 @@ async def auto_map_elements_op(
   user_id = str(user.id)
   body_fingerprint = fingerprint_body(body)
 
-  # Idempotency cache lookup (manual — execute_operation handles it for
-  # sync ops, but pending ops bypass that path because they don't
-  # produce a normal `result` payload). Same Stripe-style semantics:
-  # replay on (user, graph, key, body) match, conflict on body change.
-  if idempotency_key is not None:
-    try:
-      cached = await cache.get(
-        user_id, graph_id, op_name, idempotency_key, body_fingerprint
-      )
-    except IdempotencyKeyConflictError as exc:
-      log_operation_audit(
-        operation_name=op_name,
-        operation_id=generate_operation_id(),
-        user_id=user_id,
-        graph_id=graph_id,
-        duration_ms=0.0,
-        status="failed",
-        idempotency_key=idempotency_key,
-        error=str(exc),
-      )
-      raise HTTPException(status_code=409, detail=str(exc))
-    if cached is not None:
-      log_operation_audit(
-        operation_name=op_name,
-        operation_id=cached.operation_id,
-        user_id=user_id,
-        graph_id=graph_id,
-        duration_ms=0.0,
-        status=cached.status,
-        idempotency_key=idempotency_key,
-        idempotent_replay=True,
-      )
-      # Mirror `execute_operation`'s replay marking so the metrics
-      # decorator suppresses the business_event counter and clients
-      # can distinguish "task enqueued" from "task already running".
-      return cached.model_copy(update={"idempotent_replay": True})
+  replay = await check_idempotency(
+    cache,
+    user_id,
+    graph_id,
+    op_name,
+    idempotency_key,
+    body_fingerprint,
+    event="extensions.operation",
+  )
+  if replay is not None:
+    return replay
 
   task_response = await enqueue_task(
     task_type="agent",

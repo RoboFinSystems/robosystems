@@ -25,6 +25,7 @@ class TestGraphCreationLimits:
     return {
       "metadata": {"graph_name": "Test Graph", "description": "Testing graph limits"},
       "instance_tier": "ladybug-standard",
+      "initial_entity": {"name": "Test Corp", "uri": "https://testcorp.com"},
     }
 
   async def test_create_graph_with_zero_limit_blocked(

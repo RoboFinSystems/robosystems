@@ -122,15 +122,11 @@ run_db_init() {
     # Run extensions migrations if either product domain is enabled.
     # EXTENSIONS_ENABLED is a derived Python property (true when either
     # ROBOLEDGER_ENABLED or ROBOINVESTOR_ENABLED is true), so the shell
-    # must check the underlying domain flags directly. Legacy
-    # LEDGER_ENABLED / INVESTOR_ENABLED names are honored as fallbacks.
-    local roboledger_enabled roboinvestor_enabled ledger_legacy investor_legacy
+    # must check the underlying domain flags directly.
+    local roboledger_enabled roboinvestor_enabled
     roboledger_enabled=$(resolve_feature_flag "ROBOLEDGER_ENABLED" "false")
     roboinvestor_enabled=$(resolve_feature_flag "ROBOINVESTOR_ENABLED" "false")
-    ledger_legacy=$(resolve_feature_flag "LEDGER_ENABLED" "false")
-    investor_legacy=$(resolve_feature_flag "INVESTOR_ENABLED" "false")
-    if [[ "$roboledger_enabled" == "true" || "$roboinvestor_enabled" == "true" \
-          || "$ledger_legacy" == "true" || "$investor_legacy" == "true" ]]; then
+    if [[ "$roboledger_enabled" == "true" || "$roboinvestor_enabled" == "true" ]]; then
         echo "Extensions enabled — running extensions migrations..."
         if ! uv run alembic -c migrations/extensions.ini upgrade head; then
             echo "✗ Extensions migration failed"

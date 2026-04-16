@@ -312,17 +312,17 @@ class TestSchemaConsistency:
       )
 
 
-class TestLedgerMaterializer:
+class TestExtensionsMaterializer:
   @pytest.mark.asyncio
   async def test_materialize_success(self):
-    from robosystems.operations.extensions.materialize import LedgerMaterializer
+    from robosystems.operations.extensions.materialize import ExtensionsMaterializer
 
     mock_client = AsyncMock()
     mock_client.database_exists.return_value = True
     mock_client.query_table.return_value = {"success": True}
     mock_client.materialize_table.return_value = {"rows_ingested": 10}
 
-    materializer = LedgerMaterializer()
+    materializer = ExtensionsMaterializer()
 
     with (
       patch(
@@ -347,9 +347,9 @@ class TestLedgerMaterializer:
 
   @pytest.mark.asyncio
   async def test_materialize_client_failure(self):
-    from robosystems.operations.extensions.materialize import LedgerMaterializer
+    from robosystems.operations.extensions.materialize import ExtensionsMaterializer
 
-    materializer = LedgerMaterializer()
+    materializer = ExtensionsMaterializer()
 
     with patch(
       "robosystems.graph_api.client.factory.get_graph_client",
@@ -363,7 +363,7 @@ class TestLedgerMaterializer:
 
   @pytest.mark.asyncio
   async def test_default_entity_id(self):
-    from robosystems.operations.extensions.materialize import LedgerMaterializer
+    from robosystems.operations.extensions.materialize import ExtensionsMaterializer
 
     mock_client = AsyncMock()
     mock_client.database_exists.return_value = False
@@ -372,7 +372,7 @@ class TestLedgerMaterializer:
     mock_client.query_table.return_value = {"success": True}
     mock_client.materialize_table.return_value = {"rows_ingested": 0}
 
-    materializer = LedgerMaterializer()
+    materializer = ExtensionsMaterializer()
 
     with (
       patch(

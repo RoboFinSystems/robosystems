@@ -49,7 +49,7 @@ def materialize_extensions_to_graph(
   """
   import asyncio
 
-  from robosystems.operations.extensions.materialize import LedgerMaterializer
+  from robosystems.operations.extensions.materialize import ExtensionsMaterializer
 
   graph_id = config.graph_id
   entity_id = config.entity_id or None
@@ -61,7 +61,7 @@ def materialize_extensions_to_graph(
   asyncio.set_event_loop(loop)
 
   try:
-    materializer = LedgerMaterializer()
+    materializer = ExtensionsMaterializer()
     result = loop.run_until_complete(
       materializer.materialize(
         graph_id=graph_id,
@@ -82,6 +82,22 @@ def materialize_extensions_to_graph(
         "duration_ms": MetadataValue.float(result.duration_ms),
       },
     )
+
+  # Clear staleness so the Dagster sensor does not re-submit for this event
+  from robosystems.database import get_db_session
+  from robosystems.models.core.graph.graph import Graph
+
+  db_gen = get_db_session()
+  db_session = next(db_gen)
+  try:
+    graph_row = db_session.query(Graph).filter(Graph.graph_id == graph_id).first()
+    if graph_row:
+      graph_row.mark_fresh(session=db_session)
+  finally:
+    try:
+      next(db_gen)
+    except StopIteration:
+      pass
 
   context.log.info(
     f"Extensions materialization complete: "

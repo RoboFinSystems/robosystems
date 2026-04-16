@@ -98,19 +98,46 @@ class TestInitialEntityData:
 
 @pytest.mark.unit
 class TestCreateGraphRequest:
-  def test_minimal_request(self):
-    model = CreateGraphRequest(metadata=GraphMetadata(graph_name="Test Graph"))
+  def test_minimal_entity_graph(self):
+    model = CreateGraphRequest(
+      metadata=GraphMetadata(graph_name="Test Graph"),
+      initial_entity=InitialEntityData(name="Test Corp", uri="https://testcorp.com"),
+    )
     assert model.instance_tier == "ladybug-standard"
     assert model.custom_schema is None
-    assert model.initial_entity is None
+    assert model.initial_entity is not None
     assert model.create_entity is True
     assert model.tags == []
+
+  def test_entity_graph_requires_initial_entity(self):
+    with pytest.raises(ValidationError) as exc_info:
+      CreateGraphRequest(metadata=GraphMetadata(graph_name="Test Graph"))
+    errors = exc_info.value.errors()
+    assert any("initial_entity" in str(e["msg"]) for e in errors)
+
+  def test_generic_graph_allows_no_initial_entity(self):
+    from robosystems.models.api.graphs.schema import CustomSchemaDefinition
+
+    model = CreateGraphRequest(
+      metadata=GraphMetadata(graph_name="Custom Graph"),
+      custom_schema=CustomSchemaDefinition(
+        name="test",
+        version="1.0.0",
+        description=None,
+        extends=None,
+        nodes=[],
+        relationships=[],
+      ),
+    )
+    assert model.initial_entity is None
+    assert model.custom_schema is not None
 
   def test_all_valid_tiers(self):
     for tier in ["ladybug-standard", "ladybug-large", "ladybug-xlarge"]:
       model = CreateGraphRequest(
         metadata=GraphMetadata(graph_name="Test"),
         instance_tier=tier,
+        initial_entity=InitialEntityData(name="Test Corp", uri="https://testcorp.com"),
       )
       assert model.instance_tier == tier
 
@@ -119,6 +146,7 @@ class TestCreateGraphRequest:
       CreateGraphRequest(
         metadata=GraphMetadata(graph_name="Test"),
         instance_tier="invalid-tier",
+        initial_entity=InitialEntityData(name="Test Corp", uri="https://testcorp.com"),
       )
     errors = exc_info.value.errors()
     assert any(e["loc"] == ("instance_tier",) for e in errors)
@@ -132,12 +160,16 @@ class TestCreateGraphRequest:
     assert model.initial_entity.name == "Acme Corp"
 
   def test_create_entity_default_true(self):
-    model = CreateGraphRequest(metadata=GraphMetadata(graph_name="Test"))
+    model = CreateGraphRequest(
+      metadata=GraphMetadata(graph_name="Test"),
+      initial_entity=InitialEntityData(name="Test Corp", uri="https://testcorp.com"),
+    )
     assert model.create_entity is True
 
   def test_create_entity_false(self):
     model = CreateGraphRequest(
       metadata=GraphMetadata(graph_name="Test"),
+      initial_entity=InitialEntityData(name="Test Corp", uri="https://testcorp.com"),
       create_entity=False,
     )
     assert model.create_entity is False
@@ -145,6 +177,7 @@ class TestCreateGraphRequest:
   def test_tags_max_length(self):
     model = CreateGraphRequest(
       metadata=GraphMetadata(graph_name="Test"),
+      initial_entity=InitialEntityData(name="Test Corp", uri="https://testcorp.com"),
       tags=["t1", "t2", "t3", "t4", "t5", "t6", "t7", "t8", "t9", "t10"],
     )
     assert len(model.tags) == 10
@@ -156,6 +189,7 @@ class TestCreateGraphRequest:
         schema_extensions=["roboledger"],
       ),
       instance_tier="ladybug-large",
+      initial_entity=InitialEntityData(name="Test Corp", uri="https://testcorp.com"),
       tags=["test"],
     )
     json_str = model.model_dump_json()

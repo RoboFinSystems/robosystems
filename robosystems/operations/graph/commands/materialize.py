@@ -148,21 +148,13 @@ async def materialize_cmd(
     if source == "extensions":
       from robosystems.worker.client import enqueue_task
 
-      run_config = {
-        "ops": {
-          "materialize_extensions_to_graph": {
-            "config": {"graph_id": graph_id, "rebuild": body.rebuild}
-          }
-        }
-      }
       lock_key = f"graph_materialize:{graph_id}" if lock else None
       response = await enqueue_task(
-        task_type="dagster_job_monitor",
+        task_type="extensions_materialize",
         graph_id=graph_id,
         user_id=str(current_user.id),
         params={
-          "job_name": "extensions_materialize_job",
-          "run_config": run_config,
+          "rebuild": body.rebuild,
           "lock_key": lock_key,
         },
       )

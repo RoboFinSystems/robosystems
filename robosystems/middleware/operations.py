@@ -505,6 +505,61 @@ def get_idempotency_cache() -> IdempotencyCache:
   return _idempotency_cache_singleton
 
 
+async def check_idempotency(
+  cache: IdempotencyCache,
+  user_id: str,
+  graph_id: str,
+  op_name: str,
+  idempotency_key: str | None,
+  body_fingerprint: str,
+  event: str = "graph.operation",
+) -> OperationEnvelope | None:
+  """Check idempotency cache for async (pending) operations.
+
+  Returns a cached envelope (with ``idempotent_replay=True``) on a cache hit,
+  ``None`` on a miss. Raises ``HTTPException 409`` when the key is reused with
+  a different body.
+
+  Use this before enqueueing any async operation that cannot go through
+  ``execute_operation`` — i.e. ops that return ``wrap_pending`` rather than
+  ``wrap_completed``. The ``event`` parameter is forwarded to
+  ``log_operation_audit``; pass ``"extensions.operation"`` for extension ops.
+  """
+  if idempotency_key is None:
+    return None
+  try:
+    cached = await cache.get(
+      user_id, graph_id, op_name, idempotency_key, body_fingerprint
+    )
+  except IdempotencyKeyConflictError as exc:
+    log_operation_audit(
+      operation_name=op_name,
+      operation_id=generate_operation_id(),
+      user_id=user_id,
+      graph_id=graph_id,
+      duration_ms=0.0,
+      status="failed",
+      idempotency_key=idempotency_key,
+      error=str(exc),
+      event=event,
+    )
+    raise HTTPException(status_code=409, detail=str(exc))
+  if cached is not None:
+    log_operation_audit(
+      operation_name=op_name,
+      operation_id=cached.operation_id,
+      user_id=user_id,
+      graph_id=graph_id,
+      duration_ms=0.0,
+      status=cached.status,
+      idempotency_key=idempotency_key,
+      idempotent_replay=True,
+      event=event,
+    )
+    return cached.model_copy(update={"idempotent_replay": True})
+  return None
+
+
 async def execute_operation(
   ctx: OperationContext,
   runner: OperationRunner | AsyncOperationRunner,
@@ -679,6 +734,7 @@ __all__ = [
   "OperationEnvelope",
   "OperationRunner",
   "OperationStatus",
+  "check_idempotency",
   "compute_idempotency_cache_key",
   "execute_operation",
   "fingerprint_body",
