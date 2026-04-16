@@ -262,17 +262,23 @@ class OperationRegistrar:
     op_name = spec.name
     ctx_builder = self.ctx_builder
     dispatcher = self.dispatcher
-    session_factory = self.session_factory
     schema_missing_404 = self.schema_missing_404
     graph_id_pattern = self.graph_id_pattern
     user_dep = self.user_dep
-    # Late-bind the command via its source module and name so
-    # `unittest.mock.patch` on the source works as expected.
+    # Late-bind the command and the session factory via sys.modules so
+    # `unittest.mock.patch` on the source location works as expected.
+    # A direct closure capture would hold the original function object,
+    # making any patch applied after import invisible at call time.
     cmd_module_name = spec.command.__module__
     cmd_func_name = spec.command.__name__
+    sf_module_name = self.session_factory.__module__
+    sf_func_name = self.session_factory.__qualname__
 
     def _resolve_command() -> Callable:
       return getattr(sys.modules[cmd_module_name], cmd_func_name)
+
+    def _resolve_session_factory() -> Callable:
+      return getattr(sys.modules[sf_module_name], sf_func_name)
 
     async def handler(
       body: BaseModel,
@@ -297,13 +303,14 @@ class OperationRegistrar:
       def _runner():
         command = _resolve_command()
         try:
-          with session_factory(graph_id) as session:
+          with _resolve_session_factory()(graph_id) as session:
             try:
               if requires_created_by:
                 return command(session, body, created_by=str(user.id))
               return command(session, body)
             except tuple(error_map.keys()) as exc:
               _raise_mapped(exc, error_map)
+              raise AssertionError("unreachable: _raise_mapped always raises")
         except (ValueError, ProgrammingError):
           raise schema_missing_404()
 

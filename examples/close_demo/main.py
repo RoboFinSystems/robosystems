@@ -394,7 +394,7 @@ def initialize_fiscal_calendar(graph_id: str) -> str:
     previous_period,
   )
 
-  from .data import DEMO_MONTHS, get_demo_start_date
+  from .data import get_demo_start_date
 
   # closed_through = month before last completed month
   # → close_target = last completed month (one period ready to close)
@@ -455,16 +455,6 @@ def create_schedules(graph_id: str, element_lookup: dict[str, str]) -> int:
   ]
 
   client = _get_ledger_client()
-
-  # Get closed_through from the fiscal calendar (set during Step 4a)
-  fc = client.get_fiscal_calendar(graph_id) or {}
-  closed_through_str = fc.get("closed_through_period")
-  closed_through_date = None
-  if closed_through_str:
-    from calendar import monthrange
-
-    year, month = int(closed_through_str[:4]), int(closed_through_str[5:7])
-    closed_through_date = date(year, month, monthrange(year, month)[1])
 
   # Find or create schedule taxonomy
   existing_taxonomies = client.list_taxonomies(graph_id, taxonomy_type="schedule")

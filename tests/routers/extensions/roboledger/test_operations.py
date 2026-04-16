@@ -489,12 +489,17 @@ def _make_association_response(
 
 
 def _mock_session_ctx():
-  """Return a patched `extensions_session` context manager mock."""
+  """Return a patched `extensions_session` context manager mock.
+
+  Patches at the source module (`robosystems.db.extensions`) so the
+  late-binding in `OperationRegistrar._build_handler` picks up the mock
+  at call time. Patching `...operations.extensions_session` would not
+  work because the registry captures the factory by late-binding via
+  sys.modules, resolving the name against the source module.
+  """
   from unittest.mock import patch
 
-  return patch(
-    "robosystems.routers.extensions.roboledger.operations.extensions_session"
-  )
+  return patch("robosystems.db.extensions.extensions_session")
 
 
 class TestUpdateTaxonomyOp:

@@ -34,7 +34,7 @@ Design notes:
 
 from __future__ import annotations
 
-from datetime import UTC, date, datetime
+from datetime import UTC, datetime
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -235,7 +235,7 @@ def create_journal_entry(
     body.line_items
   )
 
-  status = body.status if hasattr(body, "status") and body.status else "draft"
+  status = body.status
   now = datetime.now(UTC) if status == "posted" else None
 
   entry = Entry(
@@ -390,7 +390,7 @@ def reverse_journal_entry(
   if not original_lines:
     raise ValueError(f"Journal entry {original.id} has no line items to reverse")
 
-  posting_date = body.posting_date or date.today()
+  posting_date = body.posting_date or datetime.now(UTC).date()
   assert_period_not_closed(session, posting_date)
   memo = body.memo or f"Reversal of journal entry {original.id}"
   now = datetime.now(UTC)

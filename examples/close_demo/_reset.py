@@ -13,9 +13,8 @@ For production use cases:
 from __future__ import annotations
 
 from sqlalchemy import select, text
-from sqlalchemy.orm import Session
 
-from robosystems.models.extensions import Element, EntityTaxonomy, Entry, LineItem
+from robosystems.models.extensions import Element, EntityTaxonomy
 from robosystems.models.extensions.roboledger import (
   Association,
   Fact,

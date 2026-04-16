@@ -254,7 +254,7 @@ from robosystems.operations.roboledger.commands.taxonomies import (
   StructureNotFoundError,
 )
 from robosystems.operations.roboledger.commands.taxonomies import (
-  TaxonomyNotFoundError as TaxonomyMissingError,
+  TaxonomyNotFoundError as TaxonomyMissingError,  # alias: avoids collision with commands.reports.TaxonomyNotFoundError
 )
 from robosystems.operations.roboledger.commands.taxonomies import (
   bulk_create_associations as cmd_bulk_create_associations,
