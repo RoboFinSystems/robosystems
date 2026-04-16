@@ -601,16 +601,17 @@ def materialize_graph(graph_id: str) -> None:
 
   try:
     resp = httpx.post(
-      f"{BASE_URL}/v1/graphs/{graph_id}/materialize",
+      f"{BASE_URL}/v1/graphs/{graph_id}/operations/materialize",
       headers={"X-API-Key": api_key, "Content-Type": "application/json"},
-      json={"force": True, "rebuild": True, "source": "extensions"},
+      params={"force": True, "rebuild": True, "source": "extensions"},
       timeout=30,
     )
     if resp.status_code not in (200, 201, 202):
       print(f"  WARNING: Trigger failed: {resp.status_code}")
       return
 
-    op_id = resp.json().get("operation_id", "")
+    data = resp.json()
+    op_id = data.get("operationId", data.get("operation_id", ""))
     print(f"  Triggered (operation: {op_id})")
     print("  Polling operation status...")
 

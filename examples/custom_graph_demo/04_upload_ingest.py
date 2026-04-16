@@ -182,7 +182,7 @@ def materialize_graph_data(clients: RoboSystemsClients, graph_id: str) -> None:
   print("=" * 70)
 
   try:
-    result = clients.materialization.materialize(
+    result = clients.graphs.materialize(
       graph_id,
       MaterializationOptions(ignore_errors=True, rebuild=False),
     )
