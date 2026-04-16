@@ -1,9 +1,13 @@
 """Write operations for taxonomies, structures, and mappings.
 
-These commands mirror the POST/DELETE bodies in the old
-`routers/ledger/taxonomies.py` but with business logic extracted so
-the REST operation surface, MCP tools, and agents all call into one
-source of truth.
+These commands are pure functions: take an open extensions `Session`
+and validated Pydantic request bodies, return Pydantic response models.
+Callers own session lifetime and translate domain exceptions into
+transport errors.
+
+They are the single source of truth for taxonomy-layer writes. The
+REST operation surface, MCP tools, agents, and seeders (close_demo)
+all delegate here.
 """
 
 from __future__ import annotations
@@ -13,23 +17,59 @@ from sqlalchemy.orm import Session
 
 from robosystems.models.api.extensions.taxonomies import (
   AssociationResponse,
+  BulkCreateAssociationsRequest,
+  BulkCreateAssociationsResponse,
   CreateAssociationRequest,
   CreateStructureRequest,
   CreateTaxonomyRequest,
+  DeleteAssociationRequest,
+  DeleteStructureRequest,
+  DeleteTaxonomyRequest,
+  EntityTaxonomyResponse,
+  LinkEntityTaxonomyRequest,
   StructureResponse,
   TaxonomyResponse,
+  UpdateAssociationRequest,
+  UpdateStructureRequest,
+  UpdateTaxonomyRequest,
 )
 from robosystems.models.extensions import (
   Association,
   Element,
+  EntityTaxonomy,
   Structure,
   Taxonomy,
 )
+from robosystems.models.extensions.entity import Entity
 from robosystems.utils.ulid import generate_prefixed_ulid
 
 
 class MappingStructureNotFoundError(LookupError):
   """Raised when a referenced mapping structure does not exist."""
+
+
+class TaxonomyNotFoundError(LookupError):
+  """Raised when a taxonomy is not found by id."""
+
+  def __init__(self, taxonomy_id: str) -> None:
+    super().__init__(f"Taxonomy not found: {taxonomy_id}")
+    self.taxonomy_id = taxonomy_id
+
+
+class StructureNotFoundError(LookupError):
+  """Raised when a structure is not found by id."""
+
+  def __init__(self, structure_id: str) -> None:
+    super().__init__(f"Structure not found: {structure_id}")
+    self.structure_id = structure_id
+
+
+class AssociationNotFoundError(LookupError):
+  """Raised when an association is not found by id."""
+
+  def __init__(self, association_id: str) -> None:
+    super().__init__(f"Association not found: {association_id}")
+    self.association_id = association_id
 
 
 class ElementNotFoundError(LookupError):
@@ -182,3 +222,315 @@ def delete_mapping_association(
     .delete(synchronize_session=False)
   )
   return bool(deleted)
+
+
+# ─── Taxonomy update / delete ─────────────────────────────────────────────
+
+
+def update_taxonomy(session: Session, body: UpdateTaxonomyRequest) -> TaxonomyResponse:
+  """Update mutable fields on a taxonomy.
+
+  Uses `model_dump(exclude_unset=True)` — omitted fields are left
+  unchanged, explicit nulls are applied. `taxonomy_type` is immutable
+  and is not in the request model.
+
+  Raises `TaxonomyNotFoundError` if the taxonomy does not exist.
+  """
+  taxonomy = session.execute(
+    select(Taxonomy).where(Taxonomy.id == body.taxonomy_id)
+  ).scalar_one_or_none()
+  if taxonomy is None:
+    raise TaxonomyNotFoundError(body.taxonomy_id)
+
+  updates = body.model_dump(exclude_unset=True)
+  updates.pop("taxonomy_id", None)
+  for key, value in updates.items():
+    setattr(taxonomy, key, value)
+  session.flush()
+  return _taxonomy_to_response(taxonomy)
+
+
+def delete_taxonomy(session: Session, body: DeleteTaxonomyRequest) -> TaxonomyResponse:
+  """Soft delete — sets `is_active=false`.
+
+  Historical references (structures, elements, associations) remain
+  valid. The taxonomy is simply no longer offered for new writes.
+
+  Raises `TaxonomyNotFoundError` if the taxonomy does not exist.
+  """
+  taxonomy = session.execute(
+    select(Taxonomy).where(Taxonomy.id == body.taxonomy_id)
+  ).scalar_one_or_none()
+  if taxonomy is None:
+    raise TaxonomyNotFoundError(body.taxonomy_id)
+  taxonomy.is_active = False
+  session.flush()
+  return _taxonomy_to_response(taxonomy)
+
+
+# ─── Structure update / delete ────────────────────────────────────────────
+
+
+def update_structure(
+  session: Session, body: UpdateStructureRequest
+) -> StructureResponse:
+  """Update mutable fields on a structure. `structure_type` and
+  `taxonomy_id` are immutable.
+
+  Raises `StructureNotFoundError` if the structure does not exist.
+  """
+  structure = session.execute(
+    select(Structure).where(Structure.id == body.structure_id)
+  ).scalar_one_or_none()
+  if structure is None:
+    raise StructureNotFoundError(body.structure_id)
+
+  updates = body.model_dump(exclude_unset=True)
+  updates.pop("structure_id", None)
+  for key, value in updates.items():
+    setattr(structure, key, value)
+  session.flush()
+  return _structure_to_response(structure)
+
+
+def delete_structure(
+  session: Session, body: DeleteStructureRequest
+) -> StructureResponse:
+  """Soft delete — sets `is_active=false`.
+
+  Associations referencing the structure stay on disk but are
+  effectively orphaned. If you need to fully wipe a structure and its
+  contents, call `delete_structure` then separately hard-delete the
+  associations.
+
+  Raises `StructureNotFoundError` if the structure does not exist.
+  """
+  structure = session.execute(
+    select(Structure).where(Structure.id == body.structure_id)
+  ).scalar_one_or_none()
+  if structure is None:
+    raise StructureNotFoundError(body.structure_id)
+  structure.is_active = False
+  session.flush()
+  return _structure_to_response(structure)
+
+
+# ─── Association bulk create / update / delete ───────────────────────────
+
+
+def _association_to_response(
+  row: Association,
+  from_elem: Element | None = None,
+  to_elem: Element | None = None,
+) -> AssociationResponse:
+  return AssociationResponse(
+    id=row.id,
+    structure_id=row.structure_id,
+    from_element_id=row.from_element_id,
+    from_element_name=from_elem.name if from_elem else None,
+    from_element_qname=from_elem.qname if from_elem else None,
+    to_element_id=row.to_element_id,
+    to_element_name=to_elem.name if to_elem else None,
+    to_element_qname=to_elem.qname if to_elem else None,
+    association_type=row.association_type,
+    order_value=row.order_value,
+    weight=row.weight,
+    confidence=row.confidence,
+    suggested_by=row.suggested_by,
+    approved_by=row.approved_by,
+  )
+
+
+def bulk_create_associations(
+  session: Session,
+  body: BulkCreateAssociationsRequest,
+  created_by: str,
+) -> BulkCreateAssociationsResponse:
+  """Create N associations within a single structure, atomically.
+
+  Validates once: structure exists, all referenced elements exist.
+  Then bulk-inserts via a single `session.add_all` + `flush`. Any
+  unique-constraint violation rolls back the whole batch.
+
+  Raises `StructureNotFoundError` if the structure is missing, or
+  `ElementNotFoundError` if any referenced element does not exist.
+  """
+  structure = session.execute(
+    select(Structure).where(Structure.id == body.structure_id)
+  ).scalar_one_or_none()
+  if structure is None:
+    raise StructureNotFoundError(body.structure_id)
+
+  # Collect all distinct element IDs across the batch and verify in
+  # one query so 500 associations ≠ 1000 lookups.
+  referenced_ids: set[str] = set()
+  for item in body.associations:
+    referenced_ids.add(item.from_element_id)
+    referenced_ids.add(item.to_element_id)
+
+  existing_ids = {
+    row[0]
+    for row in session.execute(
+      select(Element.id).where(Element.id.in_(referenced_ids))
+    ).all()
+  }
+  missing = referenced_ids - existing_ids
+  if missing:
+    # Find which side the first missing element is on so the error is
+    # specific. Iterate in input order to make the error deterministic.
+    for item in body.associations:
+      if item.from_element_id in missing:
+        raise ElementNotFoundError("source", item.from_element_id)
+      if item.to_element_id in missing:
+        raise ElementNotFoundError("target", item.to_element_id)
+
+  association_rows: list[Association] = []
+  for item in body.associations:
+    association_rows.append(
+      Association(
+        id=generate_prefixed_ulid("assoc"),
+        structure_id=body.structure_id,
+        from_element_id=item.from_element_id,
+        to_element_id=item.to_element_id,
+        association_type=item.association_type,
+        arcrole=item.arcrole,
+        order_value=item.order_value,
+        weight=item.weight,
+        confidence=item.confidence,
+        suggested_by=item.suggested_by,
+        created_by=created_by,
+      )
+    )
+
+  session.add_all(association_rows)
+  session.flush()
+
+  return BulkCreateAssociationsResponse(
+    structure_id=body.structure_id,
+    created=len(association_rows),
+    association_ids=[row.id for row in association_rows],
+  )
+
+
+def update_association(
+  session: Session, body: UpdateAssociationRequest
+) -> AssociationResponse:
+  """Update mutable fields on an association. `from_element_id`,
+  `to_element_id`, `association_type`, and `structure_id` are
+  immutable — delete and recreate instead.
+
+  Raises `AssociationNotFoundError` if the association does not exist.
+  """
+  assoc = session.execute(
+    select(Association).where(Association.id == body.association_id)
+  ).scalar_one_or_none()
+  if assoc is None:
+    raise AssociationNotFoundError(body.association_id)
+
+  updates = body.model_dump(exclude_unset=True)
+  updates.pop("association_id", None)
+  for key, value in updates.items():
+    setattr(assoc, key, value)
+  session.flush()
+
+  from_elem = session.get(Element, assoc.from_element_id)
+  to_elem = session.get(Element, assoc.to_element_id)
+  return _association_to_response(assoc, from_elem, to_elem)
+
+
+def delete_association(session: Session, body: DeleteAssociationRequest) -> dict:
+  """Hard delete an association.
+
+  Associations are cheap edges; we don't soft-delete them. If you need
+  to remove many at once (e.g., wipe a whole linkbase), call
+  `delete_structure` (soft) and add fresh ones via
+  `bulk_create_associations`.
+
+  Raises `AssociationNotFoundError` if the association does not exist.
+  Returns `{"deleted": True}` on success so the route layer has a
+  consistent response shape with other delete ops.
+  """
+  deleted = (
+    session.query(Association)
+    .filter(Association.id == body.association_id)
+    .delete(synchronize_session=False)
+  )
+  if not deleted:
+    raise AssociationNotFoundError(body.association_id)
+  return {"deleted": True}
+
+
+# ─── Entity ↔ Taxonomy linkage ────────────────────────────────────────────
+
+
+class EntityNotFoundError(LookupError):
+  """Raised when no entity exists in the graph."""
+
+
+def link_entity_taxonomy(
+  session: Session, body: LinkEntityTaxonomyRequest
+) -> EntityTaxonomyResponse:
+  """Link the graph's entity to a taxonomy (creates ENTITY_HAS_TAXONOMY edge).
+
+  Idempotent: if the exact (entity, taxonomy, basis) combination already
+  exists, returns the existing row without error.
+
+  Raises `EntityNotFoundError` if no entity exists in the graph, or
+  `TaxonomyNotFoundError` if the taxonomy doesn't exist.
+  """
+  entity = session.execute(select(Entity).limit(1)).scalar_one_or_none()
+  if entity is None:
+    raise EntityNotFoundError("No entity found in this graph")
+
+  taxonomy = session.execute(
+    select(Taxonomy).where(Taxonomy.id == body.taxonomy_id)
+  ).scalar_one_or_none()
+  if taxonomy is None:
+    raise TaxonomyNotFoundError(body.taxonomy_id)
+
+  # Check for existing adoption at this (entity, taxonomy, basis) combo
+  existing = session.execute(
+    select(EntityTaxonomy).where(
+      EntityTaxonomy.entity_id == entity.id,
+      EntityTaxonomy.taxonomy_id == body.taxonomy_id,
+      EntityTaxonomy.basis == body.basis,
+    )
+  ).scalar_one_or_none()
+
+  if existing:
+    return EntityTaxonomyResponse(
+      entity_id=existing.entity_id,
+      taxonomy_id=existing.taxonomy_id,
+      basis=existing.basis,
+      is_primary=existing.is_primary,
+      adoption_context=existing.adoption_context,
+    )
+
+  # If requesting is_primary=true, clear any existing primary for this
+  # (entity, basis) pair. The partial unique index
+  # idx_entity_taxonomies_primary enforces at most one primary per basis.
+  if body.is_primary:
+    session.query(EntityTaxonomy).filter(
+      EntityTaxonomy.entity_id == entity.id,
+      EntityTaxonomy.basis == body.basis,
+      EntityTaxonomy.is_primary.is_(True),
+    ).update({"is_primary": False}, synchronize_session=False)
+    session.flush()
+
+  adoption = EntityTaxonomy(
+    entity_id=entity.id,
+    taxonomy_id=body.taxonomy_id,
+    is_primary=body.is_primary,
+    basis=body.basis,
+    adoption_context=body.adoption_context,
+  )
+  session.add(adoption)
+  session.flush()
+
+  return EntityTaxonomyResponse(
+    entity_id=adoption.entity_id,
+    taxonomy_id=adoption.taxonomy_id,
+    basis=adoption.basis,
+    is_primary=adoption.is_primary,
+    adoption_context=adoption.adoption_context,
+  )

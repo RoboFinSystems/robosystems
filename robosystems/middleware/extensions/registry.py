@@ -1,0 +1,351 @@
+"""Declarative operation registrar for extensions endpoints.
+
+One `OperationSpec` describes a write operation; one `OperationRegistrar`
+mounts it as a FastAPI POST handler. The descriptor is adapter-neutral —
+the same `OperationSpec` is designed to also drive:
+
+- **REST routes** via `OperationRegistrar.register` (implemented here)
+- **MCP tools** via a future `MCPRegistrar` (the spec's `command`,
+  `request_model`, and `description` fields give MCP everything it needs)
+- **Agent tools** via a future `AgentToolRegistrar` (same reasoning)
+
+This is the scaling surface for capabilities: a new op is **one
+`OperationSpec` + one command function + one Pydantic request model**,
+and all three adapter surfaces light up from the same declaration.
+
+The factory replaces ~50 lines of per-route boilerplate (route decorator
++ metrics decorator + context builder + runner closure + error
+translation + dispatcher) with a single declarative call. It is NOT a
+wholesale router replacement — operations with unusual needs (async
+Dagster dispatch, platform-DB dependencies, bespoke pre-validation
+beyond a simple hook) should still use hand-written `@router.post`
+handlers.
+
+Migration policy: new operations should prefer the factory. Existing
+hand-written routes can stay hand-written; migrating them is a
+cosmetic cleanup, not a correctness requirement.
+"""
+
+import sys
+from collections.abc import Callable
+from dataclasses import dataclass, field
+from typing import Any
+
+from fastapi import APIRouter, Depends, Header, HTTPException, Path
+from pydantic import BaseModel
+from sqlalchemy.exc import ProgrammingError
+
+from robosystems.middleware.extensions.core import (
+  IdempotencyCache,
+  OperationContext,
+  OperationEnvelope,
+  get_idempotency_cache,
+)
+from robosystems.middleware.otel.metrics import endpoint_metrics_decorator
+
+# ── Error-map types ──────────────────────────────────────────────────────
+
+# Detail factory: given an exception, return the HTTP detail string. Used
+# when the status code is fixed but the detail needs fields from the
+# exception instance (e.g., `f"Element not found: {e.element_id}"`).
+ErrorDetailFactory = Callable[[Exception], str]
+
+# One entry in an error map: either a bare int (status code; detail comes
+# from `str(exc)`) or a (status_code, detail_factory) tuple.
+ErrorMapEntry = int | tuple[int, ErrorDetailFactory]
+
+# Full error map: exception class → translation. Ordering within the map
+# matters: the registrar iterates in insertion order and matches with
+# `isinstance`, so subclass entries should come before superclass
+# entries (Python dicts preserve insertion order).
+ErrorMap = dict[type[Exception], ErrorMapEntry]
+
+
+# ── OperationSpec ────────────────────────────────────────────────────────
+
+
+@dataclass
+class OperationSpec:
+  """Declarative description of a single extensions operation.
+
+  Instantiate one of these per operation and hand it to
+  `OperationRegistrar.register` to mount the REST route.
+
+  Required fields:
+    name: kebab-case operation name (e.g., "create-element"). Used for
+      the URL path, OpenAPI operationId, audit log, and metrics label.
+    summary: short human-readable title for OpenAPI + MCP tool lists.
+    command: the pure-function command to invoke. Signature:
+      `(session, body, /, **kwargs) -> Response`. The registrar passes
+      `created_by=str(user.id)` by default; set
+      `requires_created_by=False` to suppress that kwarg.
+    request_model: Pydantic request model type. The registrar hoists
+      this into the FastAPI handler's signature so request validation
+      happens at the API boundary.
+    error_map: mapping of exception classes raised by the command to
+      HTTP translations. Each value is either a bare status code (uses
+      `str(exc)` as detail) or a `(status, detail_factory)` tuple.
+
+  Optional fields:
+    description: longer OpenAPI description (defaults to the command's
+      docstring if empty).
+    path: URL path override (defaults to `/{name}`).
+    business_event_type: metrics event key (defaults to
+      `ledger_{snake_name}`).
+    requires_created_by: pass `created_by=str(user.id)` to the command.
+      True by default.
+    pre_validate: optional sync validator called before the command.
+      Receives the parsed body; may raise `HTTPException` to abort
+      with a 4xx response. Use for parse/format checks that don't
+      require a DB session (e.g., `parse_period(body.period)`).
+    on_fresh_success: optional callback invoked on a non-replayed
+      success from `execute_operation`. Common use is
+      `lambda _env: mark_graph_stale(graph_id, "<reason>")`. Signature
+      takes the envelope.
+  """
+
+  name: str
+  summary: str
+  command: Callable
+  request_model: type[BaseModel]
+  error_map: ErrorMap = field(default_factory=dict)
+  description: str | None = None
+  path: str | None = None
+  business_event_type: str | None = None
+  requires_created_by: bool = True
+  pre_validate: Callable[[BaseModel], None] | None = None
+  on_fresh_success: Callable | None = None
+
+  @property
+  def resolved_path(self) -> str:
+    return self.path or f"/{self.name}"
+
+  @property
+  def resolved_business_event_type(self) -> str:
+    if self.business_event_type:
+      return self.business_event_type
+    snake = self.name.replace("-", "_")
+    return f"ledger_{snake}"
+
+  @property
+  def openapi_operation_id(self) -> str:
+    """OpenAPI operationId in camelCase — `op` + CamelCase(name)."""
+    parts = self.name.split("-")
+    return "op" + "".join(p.capitalize() for p in parts)
+
+
+# ── Registrar ────────────────────────────────────────────────────────────
+
+
+class OperationRegistrar:
+  """Binds domain-specific plumbing and mounts `OperationSpec`s as
+  FastAPI routes.
+
+  Create one per-domain at router setup time, passing the domain's
+  context builder, dispatcher, session factory, and schema-missing
+  404 helper. Then call `.register(spec)` for each operation. The
+  registrar takes care of the decorator chain, the runner closure,
+  and the error-translation tree.
+
+  Example:
+      _registrar = OperationRegistrar(
+          router=router,
+          domain="roboledger",
+          tag=_OP_TAG,
+          rate_limit_dep=_RATE_LIMIT,
+          ctx_builder=_ctx,
+          dispatcher=_dispatch,
+          session_factory=extensions_session,
+          schema_missing_404=_ledger_404,
+          user_dep=get_current_user_with_graph,
+          graph_id_pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN,
+      )
+
+      _registrar.register(OperationSpec(
+          name="create-element",
+          summary="Create Element",
+          command=cmd_create_element,
+          request_model=CreateElementRequest,
+          error_map={
+              TaxonomyMissingError: 404,
+              ElementMissingError: (
+                  400,
+                  lambda e: f"Parent element not found: {e.element_id}",
+              ),
+          },
+      ))
+  """
+
+  def __init__(
+    self,
+    *,
+    router: APIRouter,
+    domain: str,
+    tag: str,
+    rate_limit_dep: Any,
+    ctx_builder: Callable[..., OperationContext],
+    dispatcher: Callable,
+    session_factory: Callable,
+    schema_missing_404: Callable[[], HTTPException],
+    user_dep: Callable,
+    graph_id_pattern: str,
+  ) -> None:
+    self.router = router
+    self.domain = domain
+    self.tag = tag
+    self.rate_limit_dep = rate_limit_dep
+    self.ctx_builder = ctx_builder
+    self.dispatcher = dispatcher
+    self.session_factory = session_factory
+    self.schema_missing_404 = schema_missing_404
+    self.user_dep = user_dep
+    self.graph_id_pattern = graph_id_pattern
+    self.full_path_template = f"/extensions/{domain}/{{graph_id}}/operations"
+    # Track registered specs for future MCP/agent adapter enumeration.
+    self._registered: list[OperationSpec] = []
+
+  def register(self, spec: OperationSpec) -> Callable:
+    """Mount a FastAPI POST handler for `spec`.
+
+    Returns the metrics-wrapped handler, matching what a hand-written
+    `@router.post` + `@endpoint_metrics_decorator` stack would leave
+    at module scope. Callers typically bind this to a module-level
+    name so tests and other importers can reference the route handler
+    directly:
+
+        create_element_op = _registrar.register(OperationSpec(...))
+    """
+    handler = self._build_handler(spec)
+    metrics_wrapped = endpoint_metrics_decorator(
+      f"{self.full_path_template}{spec.resolved_path}",
+      method="POST",
+      business_event_type=spec.resolved_business_event_type,
+    )(handler)
+    self.router.post(
+      spec.resolved_path,
+      response_model=OperationEnvelope,
+      operation_id=spec.openapi_operation_id,
+      summary=spec.summary,
+      description=spec.description,
+      tags=[self.tag],
+      dependencies=[self.rate_limit_dep],
+    )(metrics_wrapped)
+    self._registered.append(spec)
+    return metrics_wrapped
+
+  @property
+  def registered_specs(self) -> list[OperationSpec]:
+    """All `OperationSpec`s registered through this registrar. Useful
+    for building MCP tool lists or agent tool manifests from the same
+    source of truth."""
+    return list(self._registered)
+
+  def _build_handler(self, spec: OperationSpec) -> Callable:
+    """Construct the async route handler for a spec.
+
+    Late-binds the command via `getattr(source_module, command_name)`
+    at call time so tests can patch the command at its source location
+    (e.g., `patch("commands.taxonomies.update_taxonomy", ...)`) and
+    the handler sees the patched version. A closure capture of the
+    function reference would make patching impossible because the
+    closure holds the original object, not a name lookup.
+
+    The `body` parameter's annotation is set via `__annotations__`
+    post-creation so FastAPI's signature introspection sees the
+    concrete Pydantic class, not the generic `BaseModel`.
+    """
+    request_model = spec.request_model
+    error_map = spec.error_map
+    pre_validate = spec.pre_validate
+    on_fresh_success = spec.on_fresh_success
+    requires_created_by = spec.requires_created_by
+    op_name = spec.name
+    ctx_builder = self.ctx_builder
+    dispatcher = self.dispatcher
+    schema_missing_404 = self.schema_missing_404
+    graph_id_pattern = self.graph_id_pattern
+    user_dep = self.user_dep
+    # Late-bind the command and the session factory via sys.modules so
+    # `unittest.mock.patch` on the source location works as expected.
+    # A direct closure capture would hold the original function object,
+    # making any patch applied after import invisible at call time.
+    cmd_module_name = spec.command.__module__
+    cmd_func_name = spec.command.__name__
+    sf_module_name = self.session_factory.__module__
+    sf_func_name = self.session_factory.__qualname__
+
+    def _resolve_command() -> Callable:
+      return getattr(sys.modules[cmd_module_name], cmd_func_name)
+
+    def _resolve_session_factory() -> Callable:
+      return getattr(sys.modules[sf_module_name], sf_func_name)
+
+    async def handler(
+      body: BaseModel,
+      graph_id: str = Path(..., pattern=graph_id_pattern),
+      user=Depends(user_dep),
+      idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
+      cache: IdempotencyCache = Depends(get_idempotency_cache),
+    ) -> OperationEnvelope:
+      # Optional pre-validation hook — lets specs do lightweight
+      # parse/format checks before we open a DB session.
+      if pre_validate is not None:
+        pre_validate(body)
+
+      ctx = ctx_builder(
+        graph_id=graph_id,
+        user_id=str(user.id),
+        op=op_name,
+        idempotency_key=idempotency_key,
+        body=body,
+      )
+
+      def _runner():
+        command = _resolve_command()
+        try:
+          with _resolve_session_factory()(graph_id) as session:
+            try:
+              if requires_created_by:
+                return command(session, body, created_by=str(user.id))
+              return command(session, body)
+            except tuple(error_map.keys()) as exc:
+              _raise_mapped(exc, error_map)
+              raise AssertionError("unreachable: _raise_mapped always raises")
+        except (ValueError, ProgrammingError):
+          raise schema_missing_404()
+
+      return await dispatcher(ctx, _runner, cache, on_fresh_success=on_fresh_success)
+
+    handler.__name__ = f"{op_name.replace('-', '_')}_op"
+    handler.__qualname__ = handler.__name__
+    # Hoist the concrete request model into the signature so FastAPI's
+    # signature introspection picks it up for request-body validation.
+    handler.__annotations__ = {
+      **handler.__annotations__,
+      "body": request_model,
+    }
+    return handler
+
+
+def _raise_mapped(exc: Exception, error_map: ErrorMap) -> None:
+  """Look up `exc` in `error_map` and raise the corresponding
+  `HTTPException`. Matches by `isinstance` in insertion order so
+  subclass entries can precede superclass entries.
+  """
+  for exc_type, mapping in error_map.items():
+    if isinstance(exc, exc_type):
+      if isinstance(mapping, int):
+        raise HTTPException(status_code=mapping, detail=str(exc))
+      status_code, detail_factory = mapping
+      raise HTTPException(status_code=status_code, detail=detail_factory(exc))
+  # Shouldn't happen — the except clause already filtered on these types.
+  raise exc
+
+
+__all__ = [
+  "ErrorDetailFactory",
+  "ErrorMap",
+  "ErrorMapEntry",
+  "OperationRegistrar",
+  "OperationSpec",
+]

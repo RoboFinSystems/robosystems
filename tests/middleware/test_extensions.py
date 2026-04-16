@@ -15,7 +15,6 @@ import pytest
 from fastapi import HTTPException
 from pydantic import BaseModel
 
-from robosystems.middleware import extensions as middleware_module
 from robosystems.middleware.extensions import (
   IDEMPOTENCY_TTL_SECONDS,
   IdempotencyCache,
@@ -31,6 +30,7 @@ from robosystems.middleware.extensions import (
   wrap_failed,
   wrap_pending,
 )
+from robosystems.middleware.extensions import core as middleware_module
 
 
 class _SampleResult(BaseModel):

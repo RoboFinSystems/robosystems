@@ -207,3 +207,37 @@ class ScheduleCreatedResponse(BaseModel):
   taxonomy_id: str
   total_periods: int
   total_facts: int
+
+
+# ── Update / delete ──────────────────────────────────────────────────────
+
+
+class UpdateScheduleRequest(BaseModel):
+  """Update mutable fields on a schedule.
+
+  Editable: name, entry_template, schedule_metadata (all live on the
+  Structure row / its metadata_ JSONB column).
+
+  NOT editable via this op: period_start, period_end, monthly_amount.
+  Those require fact regeneration — use truncate-schedule (end early)
+  and create-schedule (start new) instead.
+
+  Omitted fields are left unchanged.
+  """
+
+  structure_id: str
+  name: str | None = None
+  entry_template: EntryTemplateRequest | None = None
+  schedule_metadata: ScheduleMetadataRequest | None = None
+
+
+class DeleteScheduleRequest(BaseModel):
+  """Delete a schedule — cascades through facts and associations.
+
+  Hard deletes the Structure, all Facts tied to it, and all
+  Associations tied to it. This is a permanent, irreversible
+  operation. For ending a schedule early without removing history,
+  use truncate-schedule instead.
+  """
+
+  structure_id: str

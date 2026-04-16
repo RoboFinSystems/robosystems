@@ -10,15 +10,22 @@ Every route follows the pattern:
 4. `execute_operation(ctx, runner, cache)` handles envelope +
    idempotency + audit
 
-**Registered (23):**
+**Registered (40):**
 
 - Entity: `update-entity`
 - Fiscal calendar / periods: `initialize`, `set-close-target`,
   `close-period`, `reopen-period`
-- Schedules: `create-schedule`, `truncate-schedule`,
-  `create-closing-entry`, `create-manual-closing-entry`
-- Taxonomies: `create-taxonomy`, `create-structure`,
+- Schedules: `create-schedule`, `update-schedule`, `delete-schedule`,
+  `truncate-schedule`, `create-closing-entry`, `create-manual-closing-entry`
+- Taxonomies: `create-taxonomy`, `update-taxonomy`, `delete-taxonomy`,
+  `create-structure`, `update-structure`, `delete-structure`,
   `create-mapping-association`, `delete-mapping-association`
+- Elements (native CoA writes): `create-element`, `update-element`,
+  `delete-element`
+- Associations (bulk, generalized): `create-associations`,
+  `update-association`, `delete-association`
+- Journal entries (native accounting writes): `create-journal-entry`,
+  `update-journal-entry`, `delete-journal-entry`, `reverse-journal-entry`
 - Mappings (async): `auto-map-elements` — the one
   Dagster-dispatched op, returns `status: "pending"` and streams
   through `/v1/operations/{operation_id}/stream`
@@ -62,6 +69,10 @@ from robosystems.middleware.extensions import (
   log_operation_audit,
   wrap_pending,
 )
+from robosystems.middleware.extensions.registry import (
+  OperationRegistrar,
+  OperationSpec,
+)
 from robosystems.middleware.graph.types import GRAPH_OR_SUBGRAPH_ID_PATTERN
 from robosystems.middleware.otel.metrics import endpoint_metrics_decorator
 from robosystems.middleware.rate_limits import subscription_aware_rate_limit_dependency
@@ -71,6 +82,12 @@ from robosystems.models.api.extensions.fiscal_calendar import (
   InitializeLedgerRequest,
   ReopenPeriodRequest,
   SetCloseTargetRequest,
+)
+from robosystems.models.api.extensions.journal_entries import (
+  CreateJournalEntryRequest,
+  DeleteJournalEntryRequest,
+  ReverseJournalEntryRequest,
+  UpdateJournalEntryRequest,
 )
 from robosystems.models.api.extensions.publish_lists import (
   AddMembersRequest,
@@ -86,15 +103,46 @@ from robosystems.models.api.extensions.schedules import (
   CreateClosingEntryRequest,
   CreateManualClosingEntryRequest,
   CreateScheduleRequest,
+  DeleteScheduleRequest,
   TruncateScheduleRequest,
+  UpdateScheduleRequest,
 )
 from robosystems.models.api.extensions.taxonomies import (
+  BulkCreateAssociationsRequest,
   CreateAssociationRequest,
+  CreateElementRequest,
   CreateStructureRequest,
   CreateTaxonomyRequest,
+  DeleteAssociationRequest,
+  DeleteElementRequest,
+  DeleteStructureRequest,
+  DeleteTaxonomyRequest,
+  LinkEntityTaxonomyRequest,
+  UpdateAssociationRequest,
+  UpdateElementRequest,
+  UpdateStructureRequest,
+  UpdateTaxonomyRequest,
 )
 from robosystems.models.core import User
 from robosystems.operations.extensions.staleness import mark_graph_stale
+from robosystems.operations.roboledger.commands._guards import (
+  ClosedPeriodError,
+)
+from robosystems.operations.roboledger.commands.elements import (
+  ElementCycleError,
+)
+from robosystems.operations.roboledger.commands.elements import (
+  ElementNotFoundError as ElementMissingError,
+)
+from robosystems.operations.roboledger.commands.elements import (
+  create_element as cmd_create_element,
+)
+from robosystems.operations.roboledger.commands.elements import (
+  delete_element as cmd_delete_element,
+)
+from robosystems.operations.roboledger.commands.elements import (
+  update_element as cmd_update_element,
+)
 from robosystems.operations.roboledger.commands.entity import update_parent_entity
 from robosystems.operations.roboledger.commands.fiscal_calendar import (
   PeriodNotClosedError,
@@ -111,6 +159,24 @@ from robosystems.operations.roboledger.commands.fiscal_calendar import (
 )
 from robosystems.operations.roboledger.commands.fiscal_calendar import (
   set_close_target as cmd_set_close_target,
+)
+from robosystems.operations.roboledger.commands.journal_entries import (
+  JournalEntryNotDraftError,
+  JournalEntryNotFoundError,
+  JournalEntryNotPostedError,
+  UnbalancedJournalEntryError,
+)
+from robosystems.operations.roboledger.commands.journal_entries import (
+  create_journal_entry as cmd_create_journal_entry,
+)
+from robosystems.operations.roboledger.commands.journal_entries import (
+  delete_journal_entry as cmd_delete_journal_entry,
+)
+from robosystems.operations.roboledger.commands.journal_entries import (
+  reverse_journal_entry as cmd_reverse_journal_entry,
+)
+from robosystems.operations.roboledger.commands.journal_entries import (
+  update_journal_entry as cmd_update_journal_entry,
 )
 from robosystems.operations.roboledger.commands.publish_lists import (
   MembersAlreadyPresentError,
@@ -160,6 +226,9 @@ from robosystems.operations.roboledger.commands.reports import (
   share_report as cmd_share_report,
 )
 from robosystems.operations.roboledger.commands.schedules import (
+  ScheduleNotFoundError,
+)
+from robosystems.operations.roboledger.commands.schedules import (
   create_closing_entry as cmd_create_closing_entry,
 )
 from robosystems.operations.roboledger.commands.schedules import (
@@ -169,11 +238,26 @@ from robosystems.operations.roboledger.commands.schedules import (
   create_schedule as cmd_create_schedule,
 )
 from robosystems.operations.roboledger.commands.schedules import (
+  delete_schedule as cmd_delete_schedule,
+)
+from robosystems.operations.roboledger.commands.schedules import (
   truncate_schedule as cmd_truncate_schedule,
 )
+from robosystems.operations.roboledger.commands.schedules import (
+  update_schedule as cmd_update_schedule,
+)
 from robosystems.operations.roboledger.commands.taxonomies import (
+  AssociationNotFoundError,
   ElementNotFoundError,
+  EntityNotFoundError,
   MappingStructureNotFoundError,
+  StructureNotFoundError,
+)
+from robosystems.operations.roboledger.commands.taxonomies import (
+  TaxonomyNotFoundError as TaxonomyMissingError,  # alias: avoids collision with commands.reports.TaxonomyNotFoundError
+)
+from robosystems.operations.roboledger.commands.taxonomies import (
+  bulk_create_associations as cmd_bulk_create_associations,
 )
 from robosystems.operations.roboledger.commands.taxonomies import (
   create_mapping_association as cmd_create_mapping_association,
@@ -185,7 +269,28 @@ from robosystems.operations.roboledger.commands.taxonomies import (
   create_taxonomy as cmd_create_taxonomy,
 )
 from robosystems.operations.roboledger.commands.taxonomies import (
+  delete_association as cmd_delete_association,
+)
+from robosystems.operations.roboledger.commands.taxonomies import (
   delete_mapping_association as cmd_delete_mapping_association,
+)
+from robosystems.operations.roboledger.commands.taxonomies import (
+  delete_structure as cmd_delete_structure,
+)
+from robosystems.operations.roboledger.commands.taxonomies import (
+  delete_taxonomy as cmd_delete_taxonomy,
+)
+from robosystems.operations.roboledger.commands.taxonomies import (
+  link_entity_taxonomy as cmd_link_entity_taxonomy,
+)
+from robosystems.operations.roboledger.commands.taxonomies import (
+  update_association as cmd_update_association,
+)
+from robosystems.operations.roboledger.commands.taxonomies import (
+  update_structure as cmd_update_structure,
+)
+from robosystems.operations.roboledger.commands.taxonomies import (
+  update_taxonomy as cmd_update_taxonomy,
 )
 from robosystems.operations.roboledger.fiscal_calendar import (
   CloseGateFailed,
@@ -260,6 +365,30 @@ def _ledger_404() -> HTTPException:
 def _is_schema_missing(exc: ProgrammingError) -> bool:
   msg = str(exc)
   return "does not exist" in msg and ("schema" in msg or "relation" in msg)
+
+
+# ───────────────────────────────────────────────────────────────────────────
+# Operation registrar — declarative registration for simple operations.
+#
+# New write ops should land as `_registrar.register(OperationSpec(...))`
+# calls instead of hand-written `@router.post` blocks. Operations with
+# unusual needs (async Dagster dispatch, platform-DB dependencies,
+# custom multi-stage error trees) still use the hand-written pattern
+# further down in this file.
+# ───────────────────────────────────────────────────────────────────────────
+
+_registrar = OperationRegistrar(
+  router=router,
+  domain="roboledger",
+  tag=_OP_TAG,
+  rate_limit_dep=_RATE_LIMIT,
+  ctx_builder=_ctx,
+  dispatcher=_dispatch,
+  session_factory=extensions_session,
+  schema_missing_404=_ledger_404,
+  user_dep=get_current_user_with_graph,
+  graph_id_pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN,
+)
 
 
 # ───────────────────────────────────────────────────────────────────────────
@@ -1039,6 +1168,332 @@ async def delete_mapping_association_op(
     return DeleteResult(deleted=True)
 
   return await _dispatch(ctx, _runner, cache)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Native-accounting CRUD surface — registered via the factory.
+#
+# Each operation below is a declarative OperationSpec. The registrar
+# builds the FastAPI route, wraps it with metrics + idempotency, and
+# translates domain exceptions via the error_map. Adding a new op is
+# a single OperationSpec block — not 50 lines of route boilerplate.
+#
+# These module-level names (`update_taxonomy_op`, etc.) exist so tests
+# can import the handler functions directly; the registrar returns the
+# metrics-wrapped handler, matching what a hand-written decorator stack
+# would leave at module scope.
+# ═══════════════════════════════════════════════════════════════════════════
+
+# ── Taxonomy update + delete ──────────────────────────────────────────────
+
+update_taxonomy_op = _registrar.register(
+  OperationSpec(
+    name="update-taxonomy",
+    summary="Update Taxonomy",
+    description="Update mutable fields on a taxonomy. `taxonomy_type` is immutable.",
+    command=cmd_update_taxonomy,
+    request_model=UpdateTaxonomyRequest,
+    error_map={TaxonomyMissingError: 404},
+    requires_created_by=False,
+  )
+)
+
+delete_taxonomy_op = _registrar.register(
+  OperationSpec(
+    name="delete-taxonomy",
+    summary="Delete Taxonomy",
+    description=(
+      "Soft-delete a taxonomy (sets `is_active=false`). Historical "
+      "references remain valid."
+    ),
+    command=cmd_delete_taxonomy,
+    request_model=DeleteTaxonomyRequest,
+    error_map={TaxonomyMissingError: 404},
+    requires_created_by=False,
+  )
+)
+
+link_entity_taxonomy_op = _registrar.register(
+  OperationSpec(
+    name="link-entity-taxonomy",
+    summary="Link Entity to Taxonomy",
+    description=(
+      "Link the graph's entity to a taxonomy (creates the "
+      "ENTITY_HAS_TAXONOMY edge). Idempotent — returns existing "
+      "linkage if it already exists. Required after creating a CoA "
+      "taxonomy so the platform knows which chart of accounts the "
+      "entity reports under."
+    ),
+    command=cmd_link_entity_taxonomy,
+    request_model=LinkEntityTaxonomyRequest,
+    error_map={
+      EntityNotFoundError: 404,
+      TaxonomyMissingError: 404,
+    },
+    requires_created_by=False,
+  )
+)
+
+# ── Structure update + delete ─────────────────────────────────────────────
+
+update_structure_op = _registrar.register(
+  OperationSpec(
+    name="update-structure",
+    summary="Update Structure",
+    description=(
+      "Update mutable fields on a structure. `structure_type` and "
+      "`taxonomy_id` are immutable."
+    ),
+    command=cmd_update_structure,
+    request_model=UpdateStructureRequest,
+    error_map={StructureNotFoundError: 404},
+    requires_created_by=False,
+  )
+)
+
+delete_structure_op = _registrar.register(
+  OperationSpec(
+    name="delete-structure",
+    summary="Delete Structure",
+    description=(
+      "Soft-delete a structure (sets `is_active=false`). Associations "
+      "referencing it are effectively orphaned."
+    ),
+    command=cmd_delete_structure,
+    request_model=DeleteStructureRequest,
+    error_map={StructureNotFoundError: 404},
+    requires_created_by=False,
+  )
+)
+
+# ── Element CRUD ──────────────────────────────────────────────────────────
+
+create_element_op = _registrar.register(
+  OperationSpec(
+    name="create-element",
+    summary="Create Element",
+    description=(
+      "Create an element within a taxonomy. For chart-of-accounts "
+      "taxonomies this is how native accounts are added."
+    ),
+    command=cmd_create_element,
+    request_model=CreateElementRequest,
+    error_map={
+      TaxonomyMissingError: 404,
+      ElementMissingError: (
+        400,
+        lambda e: f"Parent element not found: {e.element_id}",  # type: ignore[attr-defined]
+      ),
+    },
+  )
+)
+
+update_element_op = _registrar.register(
+  OperationSpec(
+    name="update-element",
+    summary="Update Element",
+    description=(
+      "Update mutable fields on an element. `taxonomy_id` and `source` "
+      "are immutable. Reparenting cascades path/depth to descendants."
+    ),
+    command=cmd_update_element,
+    request_model=UpdateElementRequest,
+    error_map={
+      ElementMissingError: 404,
+      ElementCycleError: 422,
+    },
+    requires_created_by=False,
+  )
+)
+
+delete_element_op = _registrar.register(
+  OperationSpec(
+    name="delete-element",
+    summary="Delete Element",
+    description=(
+      "Soft-delete an element (sets `is_active=false`). Historical "
+      "line items referencing it remain valid."
+    ),
+    command=cmd_delete_element,
+    request_model=DeleteElementRequest,
+    error_map={ElementMissingError: 404},
+    requires_created_by=False,
+  )
+)
+
+# ── Association bulk + update + delete ───────────────────────────────────
+
+create_associations_op = _registrar.register(
+  OperationSpec(
+    name="create-associations",
+    summary="Create Associations (Bulk)",
+    description=(
+      "Create N associations in a single structure, atomically. Handles "
+      "50+ presentation arcs, 25+ calculation arcs, or a full table "
+      "linkbase in one call. Any failed row rolls back the batch."
+    ),
+    command=cmd_bulk_create_associations,
+    request_model=BulkCreateAssociationsRequest,
+    error_map={
+      StructureNotFoundError: 404,
+      ElementNotFoundError: (
+        400,
+        lambda e: (  # type: ignore[attr-defined]
+          f"{e.side.capitalize()} element not found: {e.element_id}"
+        ),
+      ),
+    },
+  )
+)
+
+update_association_op = _registrar.register(
+  OperationSpec(
+    name="update-association",
+    summary="Update Association",
+    description=(
+      "Update mutable fields on an association. `from_element_id`, "
+      "`to_element_id`, `association_type`, and `structure_id` are "
+      "immutable — delete and recreate instead."
+    ),
+    command=cmd_update_association,
+    request_model=UpdateAssociationRequest,
+    error_map={AssociationNotFoundError: 404},
+    requires_created_by=False,
+  )
+)
+
+delete_association_op = _registrar.register(
+  OperationSpec(
+    name="delete-association",
+    summary="Delete Association",
+    description=(
+      "Hard-delete an association. Generalizes delete-mapping-association "
+      "to all association types (presentation, calculation, mapping)."
+    ),
+    command=cmd_delete_association,
+    request_model=DeleteAssociationRequest,
+    error_map={AssociationNotFoundError: 404},
+    requires_created_by=False,
+  )
+)
+
+# ── Journal entry CRUD ────────────────────────────────────────────────────
+
+create_journal_entry_op = _registrar.register(
+  OperationSpec(
+    name="create-journal-entry",
+    summary="Create Journal Entry",
+    description=(
+      "Create a new draft journal entry with balanced line items. "
+      "Enforces DR=CR at the validation layer. Entries are always "
+      "created as drafts; posting happens via close-period or a "
+      "future per-entry post op."
+    ),
+    command=cmd_create_journal_entry,
+    request_model=CreateJournalEntryRequest,
+    error_map={
+      ClosedPeriodError: 422,
+      UnbalancedJournalEntryError: 422,
+      ValueError: 422,
+    },
+  )
+)
+
+update_journal_entry_op = _registrar.register(
+  OperationSpec(
+    name="update-journal-entry",
+    summary="Update Journal Entry",
+    description=(
+      "Update a draft journal entry. Posted entries are immutable and "
+      "must be corrected via reverse-journal-entry. If line_items is "
+      "provided, existing line items are replaced atomically and the "
+      "new set must balance."
+    ),
+    command=cmd_update_journal_entry,
+    request_model=UpdateJournalEntryRequest,
+    error_map={
+      JournalEntryNotFoundError: 404,
+      JournalEntryNotDraftError: 422,
+      ClosedPeriodError: 422,
+      UnbalancedJournalEntryError: 422,
+      ValueError: 422,
+    },
+    requires_created_by=False,
+  )
+)
+
+delete_journal_entry_op = _registrar.register(
+  OperationSpec(
+    name="delete-journal-entry",
+    summary="Delete Journal Entry",
+    description=(
+      "Hard-delete a draft journal entry. Posted entries are immutable "
+      "and must be reversed instead."
+    ),
+    command=cmd_delete_journal_entry,
+    request_model=DeleteJournalEntryRequest,
+    error_map={
+      JournalEntryNotFoundError: 404,
+      JournalEntryNotDraftError: 422,
+    },
+    requires_created_by=False,
+  )
+)
+
+reverse_journal_entry_op = _registrar.register(
+  OperationSpec(
+    name="reverse-journal-entry",
+    summary="Reverse Journal Entry",
+    description=(
+      "Reverse a posted journal entry by creating a new offsetting "
+      "entry (debits ↔ credits) and marking the original as "
+      "status='reversed'. Both entries stay in the ledger — the audit "
+      "trail shows original + reversal side by side."
+    ),
+    command=cmd_reverse_journal_entry,
+    request_model=ReverseJournalEntryRequest,
+    error_map={
+      JournalEntryNotFoundError: 404,
+      JournalEntryNotPostedError: 422,
+      ClosedPeriodError: 422,
+      ValueError: 422,
+    },
+  )
+)
+
+# ── Schedule update + delete ─────────────────────────────────────────────
+
+update_schedule_op = _registrar.register(
+  OperationSpec(
+    name="update-schedule",
+    summary="Update Schedule",
+    description=(
+      "Update mutable fields on a schedule: name, entry_template, "
+      "schedule_metadata. Period range and monthly_amount are NOT "
+      "editable — use truncate-schedule + create-schedule instead."
+    ),
+    command=cmd_update_schedule,
+    request_model=UpdateScheduleRequest,
+    error_map={ScheduleNotFoundError: 404},
+    requires_created_by=False,
+  )
+)
+
+delete_schedule_op = _registrar.register(
+  OperationSpec(
+    name="delete-schedule",
+    summary="Delete Schedule",
+    description=(
+      "Permanently delete a schedule, cascading through facts and "
+      "associations. For ending a schedule early without removing "
+      "history, use truncate-schedule instead."
+    ),
+    command=cmd_delete_schedule,
+    request_model=DeleteScheduleRequest,
+    error_map={ScheduleNotFoundError: 404},
+    requires_created_by=False,
+  )
+)
 
 
 class AutoMapElementsOperation(BaseModel):
