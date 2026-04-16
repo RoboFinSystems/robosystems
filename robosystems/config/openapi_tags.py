@@ -48,7 +48,7 @@ MAIN_API_TAGS = [
   },
   {
     "name": "Graph Operations",
-    "description": "⚙️ Graph lifecycle commands — subgraphs, backups, tier changes, materialization",
+    "description": "⚙️ Graph lifecycle — Commands for subgraphs, backups, tier changes, materialization",
   },
   {
     "name": "Subgraphs",
