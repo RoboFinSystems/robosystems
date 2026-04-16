@@ -405,7 +405,9 @@ async def create_graph(
 
   op_name = "create-graph"
   user_id = str(current_user.id)
-  # No graph_id exists yet — use sentinel for idempotency scoping
+  # No graph_id exists yet — use sentinel for idempotency scoping.
+  # The cache key is (user_id, "new", op_name, idempotency_key, fingerprint),
+  # which is unique enough to prevent duplicate graph creation retries.
   _graph_id = "new"
   body_fp = fingerprint_body(request)
 
@@ -495,6 +497,10 @@ async def create_graph(
       created_by=user_id,
     )
 
+    # Known limitation: cache.put is after enqueue_task. A Valkey failure here
+    # leaves the task dispatched without idempotency protection — the next retry
+    # would dispatch again. Fixing requires a two-phase write (placeholder before
+    # dispatch, update after), which is a systemic change tracked separately.
     if idempotency_key is not None:
       await cache.put(user_id, _graph_id, op_name, idempotency_key, envelope, body_fp)
 

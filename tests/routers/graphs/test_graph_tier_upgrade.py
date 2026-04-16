@@ -78,7 +78,7 @@ class TestUpgradeTierEndpoint:
     """Authenticated request dispatches the tier change and returns 202."""
     from robosystems.database import get_async_db_session
     from robosystems.middleware.auth.dependencies import get_current_user_with_graph
-    from robosystems.middleware.extensions import get_idempotency_cache
+    from robosystems.middleware.operations import get_idempotency_cache
 
     mock_cache = AsyncMock()
     mock_cache.get = AsyncMock(return_value=None)

@@ -201,6 +201,7 @@ async def sync_connection(
       created_by=user_id,
     )
 
+    # Known limitation: cache.put is after task dispatch. See create_graph for details.
     if idempotency_key is not None:
       await cache.put(user_id, graph_id, op_name, idempotency_key, envelope, body_fp)
 
