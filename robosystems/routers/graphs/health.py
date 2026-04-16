@@ -182,7 +182,9 @@ async def get_database_health(
               datetime.now(UTC) - last_mat_dt
             ).total_seconds() / 3600
           except Exception:
-            pass
+            logger.debug(
+              f"Could not parse last_materialized_at for graph {graph_id}: {last_materialized_at!r}"
+            )
         if is_stale:
           staleness_alert = ["Graph is stale — materialization recommended"]
 
