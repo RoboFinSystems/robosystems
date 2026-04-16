@@ -242,8 +242,46 @@ class TestCreateJournalEntry:
     mock_resp.return_value = MagicMock()
     session = MagicMock()
     create_journal_entry(session, self._body(), "usr_1")
-    # 1 Entry + 2 LineItems = 3 session.add calls
-    assert session.add.call_count == 3
+    # 1 Transaction (auto-created) + 1 Entry + 2 LineItems = 4 session.add calls
+    assert session.add.call_count == 4
+
+  @patch(f"{MODULE}._entry_to_response")
+  @patch(f"{MODULE}.assert_period_not_closed")
+  def test_auto_creates_transaction_when_none_provided(self, mock_guard, mock_resp):
+    from robosystems.models.extensions.roboledger.transaction import Transaction
+
+    mock_resp.return_value = MagicMock()
+    session = MagicMock()
+    create_journal_entry(session, self._body(), "usr_1")
+    txn_adds = [
+      call[0][0]
+      for call in session.add.call_args_list
+      if isinstance(call[0][0], Transaction)
+    ]
+    assert len(txn_adds) == 1
+    assert txn_adds[0].type == "journal_entry"
+    assert txn_adds[0].source == "native"
+
+  @patch(f"{MODULE}._entry_to_response")
+  @patch(f"{MODULE}.assert_period_not_closed")
+  def test_skips_transaction_creation_when_provided(self, mock_guard, mock_resp):
+    from robosystems.models.extensions.roboledger.transaction import Transaction
+
+    mock_resp.return_value = MagicMock()
+    session = MagicMock()
+    body = CreateJournalEntryRequest(
+      posting_date=_DATE,
+      memo="Pre-existing txn",
+      line_items=_balanced_lines(),
+      transaction_id="txn_existing",
+    )
+    create_journal_entry(session, body, "usr_1")
+    txn_adds = [
+      call[0][0]
+      for call in session.add.call_args_list
+      if isinstance(call[0][0], Transaction)
+    ]
+    assert len(txn_adds) == 0
 
   @patch(f"{MODULE}.assert_period_not_closed")
   def test_unbalanced_lines_raises_before_any_add(self, mock_guard):

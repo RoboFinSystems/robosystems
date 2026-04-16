@@ -10,7 +10,7 @@ Every route follows the pattern:
 4. `execute_operation(ctx, runner, cache)` handles envelope +
    idempotency + audit
 
-**Registered (40):**
+**Registered (41):**
 
 - Entity: `update-entity`
 - Fiscal calendar / periods: `initialize`, `set-close-target`,
@@ -24,6 +24,7 @@ Every route follows the pattern:
   `delete-element`
 - Associations (bulk, generalized): `create-associations`,
   `update-association`, `delete-association`
+- Transactions (standalone business events): `create-transaction`
 - Journal entries (native accounting writes): `create-journal-entry`,
   `update-journal-entry`, `delete-journal-entry`, `reverse-journal-entry`
 - Mappings (async): `auto-map-elements` — the one
@@ -123,6 +124,7 @@ from robosystems.models.api.extensions.taxonomies import (
   UpdateStructureRequest,
   UpdateTaxonomyRequest,
 )
+from robosystems.models.api.extensions.transactions import CreateTransactionRequest
 from robosystems.models.core import User
 from robosystems.operations.extensions.staleness import mark_graph_stale
 from robosystems.operations.roboledger.commands._guards import (
@@ -168,6 +170,9 @@ from robosystems.operations.roboledger.commands.journal_entries import (
 )
 from robosystems.operations.roboledger.commands.journal_entries import (
   create_journal_entry as cmd_create_journal_entry,
+)
+from robosystems.operations.roboledger.commands.journal_entries import (
+  create_transaction as cmd_create_transaction,
 )
 from robosystems.operations.roboledger.commands.journal_entries import (
   delete_journal_entry as cmd_delete_journal_entry,
@@ -1377,7 +1382,24 @@ delete_association_op = _registrar.register(
   )
 )
 
-# ── Journal entry CRUD ────────────────────────────────────────────────────
+# ── Transaction + Journal entry CRUD ────────────────────────────────────
+
+create_transaction_op = _registrar.register(
+  OperationSpec(
+    name="create-transaction",
+    summary="Create Transaction",
+    description=(
+      "Create a standalone business-event Transaction without entries. "
+      "Returns a transaction_id that can be passed to create-journal-entry "
+      "to attach one or more journal entries to this event. Use this when "
+      "a single event (invoice, payment, deposit) produces multiple entries "
+      "over its lifecycle."
+    ),
+    command=cmd_create_transaction,
+    request_model=CreateTransactionRequest,
+    error_map={ValueError: 422},
+  )
+)
 
 create_journal_entry_op = _registrar.register(
   OperationSpec(

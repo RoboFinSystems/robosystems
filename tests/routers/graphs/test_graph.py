@@ -126,9 +126,9 @@ class TestGraphCreationEndpoint:
 
               assert response.status_code == 202
               data = response.json()
-              assert data["operation_id"] == operation_id
+              assert data["operationId"] == operation_id
               assert data["status"] == "pending"
-              assert "_links" in data
+              assert "_links" in data["result"]
 
   async def test_create_entity_graph_success(
     self, async_client: AsyncClient, sample_entity_graph_request, mock_user_limits
@@ -174,8 +174,8 @@ class TestGraphCreationEndpoint:
 
               assert response.status_code == 202
               data = response.json()
-              assert data["operation_id"] == operation_id
-              assert data["operation_type"] == "entity_graph_creation"
+              assert data["operationId"] == operation_id
+              assert data["result"]["operation_type"] == "entity_graph_creation"
 
   async def test_create_graph_with_custom_schema(
     self, async_client: AsyncClient, mock_user_limits

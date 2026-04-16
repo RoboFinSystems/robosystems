@@ -6,13 +6,12 @@ entry writes; REST routes, MCP tools, and agents all delegate here.
 
 Design notes:
 
-- **No Transaction required.** A journal entry (Entry + LineItems) can
-  exist without a parent Transaction. This matches the existing
-  `create_manual_closing_entry` pattern in `commands/schedules.py`.
-  When a Transaction is legitimately needed (e.g., recording an actual
-  business event like a payment with downstream reconciliation), the
-  caller can pre-create it and pass `transaction_id` on the create
-  request.
+- **Transaction auto-created.** Every journal entry needs a parent
+  Transaction so the graph has a traversal path (Entity → Transaction →
+  Entry → LineItem). When the caller does not supply a `transaction_id`,
+  a synthetic Transaction of type "journal_entry" is created in the same
+  flush. Callers that already hold a Transaction (e.g., the QB pipeline)
+  pass it explicitly and no synthetic row is written.
 
 - **Draft-only edits.** `update_journal_entry` and `delete_journal_entry`
   only operate on entries with `status='draft'`. Posted entries are
@@ -48,8 +47,13 @@ from robosystems.models.api.extensions.journal_entries import (
   ReverseJournalEntryRequest,
   UpdateJournalEntryRequest,
 )
+from robosystems.models.api.extensions.transactions import (
+  CreateTransactionRequest,
+  TransactionResponse,
+)
 from robosystems.models.extensions.roboledger.entry import Entry
 from robosystems.models.extensions.roboledger.line_item import LineItem
+from robosystems.models.extensions.roboledger.transaction import Transaction
 from robosystems.operations.roboledger.commands._guards import (
   assert_period_not_closed,
 )
@@ -231,15 +235,31 @@ def create_journal_entry(
   """
   assert_period_not_closed(session, body.posting_date)
 
-  normalized, _total_debit, _total_credit = _validate_and_normalize_lines(
+  normalized, total_debit, _total_credit = _validate_and_normalize_lines(
     body.line_items
   )
 
   status = body.status
   now = datetime.now(UTC) if status == "posted" else None
 
+  transaction_id = body.transaction_id
+  if not transaction_id:
+    txn = Transaction(
+      type="journal_entry",
+      amount=total_debit,
+      date=body.posting_date,
+      description=body.memo,
+      source="native",
+      status="posted" if status == "posted" else "pending",
+      posted_at=now,
+      created_by=created_by,
+    )
+    session.add(txn)
+    session.flush()
+    transaction_id = txn.id
+
   entry = Entry(
-    transaction_id=body.transaction_id,
+    transaction_id=transaction_id,
     type=body.type,
     status=status,
     posting_date=body.posting_date,
@@ -266,6 +286,61 @@ def create_journal_entry(
 
   line_items = _load_line_items(session, entry.id)
   return _entry_to_response(entry, line_items)
+
+
+# ── Create Transaction ────────────────────────────────────────────────────
+
+
+def create_transaction(
+  session: Session,
+  body: CreateTransactionRequest,
+  created_by: str,
+) -> TransactionResponse:
+  """Create a standalone Transaction (business event) without entries.
+
+  Use this to record an event first, then attach entries via
+  `create_journal_entry` with the returned `id` as `transaction_id`.
+  Useful when a single business event (e.g. a vendor payment) produces
+  multiple journal entries over its lifecycle.
+
+  Raises:
+    `ValueError` (422) for invalid field values.
+  """
+  now = datetime.now(UTC)
+  txn = Transaction(
+    type=body.type,
+    amount=body.amount,
+    currency=body.currency,
+    date=body.date,
+    due_date=body.due_date,
+    description=body.description,
+    merchant_name=body.merchant_name,
+    reference_number=body.reference_number,
+    number=body.number,
+    category=body.category,
+    source="native",
+    status=body.status,
+    posted_at=now if body.status == "posted" else None,
+    created_by=created_by,
+  )
+  session.add(txn)
+  session.flush()
+
+  return TransactionResponse(
+    id=txn.id,
+    type=txn.type,
+    date=txn.date,
+    amount=txn.amount,
+    currency=txn.currency,
+    description=txn.description,
+    merchant_name=txn.merchant_name,
+    reference_number=txn.reference_number,
+    number=txn.number,
+    category=txn.category,
+    due_date=txn.due_date,
+    status=txn.status,
+    source=txn.source,
+  )
 
 
 # ── Update ───────────────────────────────────────────────────────────────

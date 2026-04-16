@@ -1,12 +1,61 @@
-"""Transaction response models."""
+"""Transaction write and read models."""
 
 from __future__ import annotations
 
 from datetime import date, datetime
+from typing import Literal
 
 from pydantic import BaseModel
 
 from robosystems.models.api.common import PaginationInfo
+
+# ── Create ────────────────────────────────────────────────────────────────
+
+
+class CreateTransactionRequest(BaseModel):
+  """Create a standalone business-event Transaction.
+
+  Use this when you want to record a real-world event (invoice, payment,
+  deposit, expense) first and then attach one or more journal entries to
+  it via `create-journal-entry` with the returned `transaction_id`.
+
+  `amount` is in minor currency units (cents). `type` is free-form but
+  common values are: invoice, payment, bill, expense, deposit, transfer,
+  journal_entry.
+  """
+
+  type: str
+  date: date
+  amount: int
+  currency: str = "USD"
+  description: str | None = None
+  merchant_name: str | None = None
+  reference_number: str | None = None
+  number: str | None = None
+  category: str | None = None
+  due_date: date | None = None
+  status: Literal["pending", "posted"] = "pending"
+
+
+class TransactionResponse(BaseModel):
+  """Response returned by create-transaction."""
+
+  id: str
+  type: str
+  date: date
+  amount: int
+  currency: str
+  description: str | None = None
+  merchant_name: str | None = None
+  reference_number: str | None = None
+  number: str | None = None
+  category: str | None = None
+  due_date: date | None = None
+  status: Literal["pending", "posted", "void"]
+  source: str
+
+
+# ── Read ──────────────────────────────────────────────────────────────────
 
 
 class LedgerTransactionSummaryResponse(BaseModel):
