@@ -7,7 +7,7 @@ translate request bodies to service calls and assemble responses.
 
 from __future__ import annotations
 
-from sqlalchemy import text
+from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
 from robosystems.models.api.extensions.schedules import (
@@ -15,15 +15,27 @@ from robosystems.models.api.extensions.schedules import (
   CreateClosingEntryRequest,
   CreateManualClosingEntryRequest,
   CreateScheduleRequest,
+  DeleteScheduleRequest,
   ScheduleCreatedResponse,
   TruncateScheduleRequest,
   TruncateScheduleResponse,
+  UpdateScheduleRequest,
 )
+from robosystems.models.extensions import Association, Structure
+from robosystems.models.extensions.roboledger import Fact
 from robosystems.operations.roboledger.schedules import ScheduleService
 from robosystems.operations.roboledger.schedules.service import (
   EntryTemplate,
   ScheduleMetadata,
 )
+
+
+class ScheduleNotFoundError(LookupError):
+  """Raised when a schedule structure is not found by id."""
+
+  def __init__(self, structure_id: str) -> None:
+    super().__init__(f"Schedule not found: {structure_id}")
+    self.structure_id = structure_id
 
 
 def _build_closing_entry_response(result) -> ClosingEntryResponse:
@@ -203,3 +215,106 @@ def create_manual_closing_entry(
   )
   session.commit()
   return _build_closing_entry_response(result)
+
+
+# ─── Schedule update / delete ─────────────────────────────────────────────
+
+
+def _load_schedule_or_404(session: Session, structure_id: str) -> Structure:
+  """Load a schedule Structure row by id, raising ScheduleNotFoundError."""
+  structure = session.execute(
+    select(Structure).where(
+      Structure.id == structure_id,
+      Structure.structure_type == "schedule",
+    )
+  ).scalar_one_or_none()
+  if structure is None:
+    raise ScheduleNotFoundError(structure_id)
+  return structure
+
+
+def update_schedule(
+  session: Session, body: UpdateScheduleRequest
+) -> ScheduleCreatedResponse:
+  """Update mutable fields on a schedule.
+
+  Editable: `name`, `entry_template`, `schedule_metadata`. These live
+  on the Structure row and its `metadata_` JSONB column.
+
+  Period range and monthly amount are NOT editable — they define the
+  fact grid. Use truncate-schedule + create-schedule for those changes.
+
+  Raises `ScheduleNotFoundError` if the schedule does not exist.
+  """
+  structure = _load_schedule_or_404(session, body.structure_id)
+
+  if body.name is not None:
+    structure.name = body.name
+
+  metadata = dict(structure.metadata_) if structure.metadata_ else {}
+
+  if body.entry_template is not None:
+    metadata["entry_template"] = {
+      "debit_element_id": body.entry_template.debit_element_id,
+      "credit_element_id": body.entry_template.credit_element_id,
+      "entry_type": body.entry_template.entry_type,
+      "memo_template": body.entry_template.memo_template,
+      "auto_reverse": body.entry_template.auto_reverse,
+    }
+
+  if body.schedule_metadata is not None:
+    metadata["schedule_metadata"] = {
+      "method": body.schedule_metadata.method,
+      "original_amount": body.schedule_metadata.original_amount,
+      "residual_value": body.schedule_metadata.residual_value,
+      "useful_life_months": body.schedule_metadata.useful_life_months,
+      "asset_element_id": body.schedule_metadata.asset_element_id,
+    }
+
+  structure.metadata_ = metadata
+  session.flush()
+
+  # Recount for response (same as create_schedule response shape)
+  count_row = session.execute(
+    text("SELECT COUNT(*) AS cnt FROM facts WHERE structure_id = :sid"),
+    {"sid": structure.id},
+  ).fetchone()
+  period_row = session.execute(
+    text(
+      "SELECT COUNT(DISTINCT (period_start, period_end)) AS cnt "
+      "FROM facts WHERE structure_id = :sid"
+    ),
+    {"sid": structure.id},
+  ).fetchone()
+
+  return ScheduleCreatedResponse(
+    structure_id=structure.id,
+    name=structure.name,
+    taxonomy_id=structure.taxonomy_id,
+    total_periods=period_row.cnt if period_row else 0,
+    total_facts=count_row.cnt if count_row else 0,
+  )
+
+
+def delete_schedule(session: Session, body: DeleteScheduleRequest) -> dict:
+  """Delete a schedule — cascades through facts and associations.
+
+  Deletion order respects FK constraints:
+  1. Facts (referencing structure_id)
+  2. Associations (referencing structure_id)
+  3. Structure row itself
+
+  Raises `ScheduleNotFoundError` if the schedule does not exist.
+  """
+  structure = _load_schedule_or_404(session, body.structure_id)
+
+  session.query(Fact).filter(Fact.structure_id == structure.id).delete(
+    synchronize_session=False
+  )
+  session.query(Association).filter(Association.structure_id == structure.id).delete(
+    synchronize_session=False
+  )
+  session.delete(structure)
+  session.flush()
+
+  return {"deleted": True}

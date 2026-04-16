@@ -10,6 +10,16 @@ Data is generated for a rolling 16-month window ending at the current month,
 so the demo stays evergreen. OLTP load goes through the same `OLTPLoader`
 path that the QuickBooks pipeline uses in production.
 
+**Transport split:**
+- **Bulk historical data** (elements, transactions, entries, line items)
+  goes through `OLTPLoader` — the same bulk-import pipeline QuickBooks
+  uses. This is the honest "migration/import" path.
+- **Additive setup** (mappings, schedules, fiscal calendar) goes through
+  the HTTP API via `LedgerClient` — the same path the frontend UI and
+  MCP tools use. This exercises the native-accounting operations surface.
+- **Reset** (demo-only cleanup for re-runs) goes through direct DB
+  access in `_reset.py` — this is intentionally NOT a product operation.
+
 Usage:
     uv run python -m examples.close_demo.main              # Create new graph + load
     uv run python -m examples.close_demo.main <graph_id>   # Load into existing graph
@@ -23,7 +33,7 @@ from __future__ import annotations
 import json
 import sys
 import time
-from datetime import UTC, datetime
+from datetime import date, timedelta
 from pathlib import Path
 
 # ---------------------------------------------------------------------------
@@ -37,6 +47,28 @@ CREDENTIALS_FILE = Path(".local/config.json")
 DEMO_NAME = "cascade_demo"
 BASE_URL = "http://localhost:8000"
 COMPANY_NAME = "Cascade Advisory Group LLC"
+
+
+# ---------------------------------------------------------------------------
+# LedgerClient helper
+# ---------------------------------------------------------------------------
+
+
+def _get_ledger_client():
+  """Construct a LedgerClient from saved credentials."""
+  from robosystems_client.extensions.ledger_client import LedgerClient
+
+  if not CREDENTIALS_FILE.exists():
+    print("  ERROR: No credentials file. Run `just demo-user` first.")
+    sys.exit(1)
+
+  creds = json.loads(CREDENTIALS_FILE.read_text())
+  return LedgerClient(
+    {
+      "base_url": BASE_URL,
+      "token": creds.get("api_key", ""),
+    }
+  )
 
 
 # ---------------------------------------------------------------------------
@@ -160,250 +192,247 @@ def create_demo_graph() -> str:
 
 
 # ---------------------------------------------------------------------------
-# Step 2: Load OLTP data
+# Step 2a: Reset (DB-only — demo cleanup for re-runs)
 # ---------------------------------------------------------------------------
 
 
-def load_oltp_data(graph_id: str, txns: list) -> tuple[dict[str, str], dict[str, int]]:
-  """Load accounts and transactions into the extensions OLTP database.
+def reset_demo(graph_id: str) -> None:
+  """Wipe prior demo state so re-runs are idempotent.
 
-  Writes synthetic data to a DuckDB file (same shape as QB's dbt output)
-  then calls OLTPLoader — the same load path QuickBooks uses in production.
-
-  Idempotent: prior demo state (closing entries, fiscal calendar, schedule
-  facts, associations) is wiped before reload. Each `just demo-close` lands
-  in an identical "one period ready to close" state regardless of prior runs.
+  This is the ONLY direct-DB operation in the demo. Everything else
+  goes through the HTTP API. Drops the tenant schema and re-provisions
+  it with the shared taxonomy seed data.
   """
-  from robosystems.db.extensions import extensions_session
-  from robosystems.models.extensions import Element, Entry, LineItem
-  from robosystems.models.extensions.roboledger import Association, Fact, Structure
-  from robosystems.models.extensions.roboledger.fiscal_calendar import (
-    FiscalCalendar,
-    FiscalCalendarEvent,
-  )
-  from robosystems.models.extensions.roboledger.fiscal_period import FiscalPeriod
-  from robosystems.operations.extensions.loader import OLTPLoader
+  from ._reset import reset_demo_state
 
-  from .data import ACCOUNTS
-  from .oltp_writer import default_duckdb_path, write_demo_duckdb
-
-  # Pre-cleanup: wipe all demo-generated state so the re-run lands in a
-  # clean "fresh demo" state regardless of what was left behind. We do this
-  # in one transaction in FK-safe order.
-  with extensions_session(graph_id) as session:
-    # 1. Close workflow artifacts (schedule-derived + manual drafts + posts)
-    close_provenances = ("schedule_derived", "ai_generated", "manual_entry")
-    stale_entry_ids = (
-      session.query(Entry.id).filter(Entry.provenance.in_(close_provenances)).subquery()
-    )
-    session.query(LineItem).filter(LineItem.entry_id.in_(stale_entry_ids)).delete(
-      synchronize_session=False
-    )
-    session.query(Entry).filter(Entry.provenance.in_(close_provenances)).delete(
-      synchronize_session=False
-    )
-
-    # 2. Schedule structures → facts + associations (referencing demo elements)
-    elem_ids_sub = (
-      session.query(Element.id).filter(Element.external_source == SOURCE).subquery()
-    )
-    session.query(Association).filter(
-      Association.from_element_id.in_(elem_ids_sub)
-    ).delete(synchronize_session=False)
-    schedule_struct_ids = (
-      session.query(Structure.id)
-      .filter(Structure.structure_type == "schedule")
-      .subquery()
-    )
-    session.query(Fact).filter(Fact.structure_id.in_(schedule_struct_ids)).delete(
-      synchronize_session=False
-    )
-
-    # 3. Fiscal calendar state — wiped so initialize_fiscal_calendar() starts fresh
-    session.query(FiscalCalendarEvent).delete(synchronize_session=False)
-    session.query(FiscalCalendar).delete(synchronize_session=False)
-    session.query(FiscalPeriod).delete(synchronize_session=False)
-
-    session.flush()
-
-  duckdb_path = default_duckdb_path()
-  write_demo_duckdb(duckdb_path, ACCOUNTS, txns, source=SOURCE)
-
-  result = OLTPLoader().load(
-    graph_id=graph_id,
-    source=SOURCE,
-    connection_id=CONNECTION_ID,
-    duckdb_path=duckdb_path,
-    created_by=CREATED_BY,
-  )
-
-  if result.errors:
-    for err in result.errors:
-      print(f"  WARNING: {err}")
-
-  # Rebuild the code → oltp_id lookup for downstream steps (mappings, schedules)
-  element_lookup: dict[str, str] = {}
-  with extensions_session(graph_id) as session:
-    for elem in session.query(Element).filter(Element.external_source == SOURCE).all():
-      element_lookup[elem.code] = elem.id
-
-  counts = {
-    "elements": result.elements,
-    "transactions": result.transactions,
-    "entries": result.entries,
-    "line_items": result.line_items,
-  }
-  return element_lookup, counts
+  reset_demo_state(graph_id)
 
 
 # ---------------------------------------------------------------------------
-# Step 3: Create CoA → GAAP mappings
+# Step 2b: Create chart of accounts (via HTTP API)
+# ---------------------------------------------------------------------------
+
+
+def create_chart_of_accounts(graph_id: str) -> tuple[dict[str, str], str, int]:
+  """Create the CoA taxonomy, its elements, and link to the entity.
+
+  Returns (element_lookup, coa_taxonomy_id, count).
+  element_lookup maps account code → element ID for downstream use.
+  """
+  from .data import ACCOUNTS
+
+  client = _get_ledger_client()
+
+  # 1. Create CoA taxonomy
+  tax_result = client.create_taxonomy(
+    graph_id,
+    {
+      "name": "Native Chart of Accounts",
+      "taxonomy_type": "chart_of_accounts",
+    },
+  )
+  coa_taxonomy_id = tax_result["id"]
+
+  # 2. Link entity → CoA taxonomy (ENTITY_HAS_TAXONOMY edge)
+  client.link_entity_taxonomy(
+    graph_id, coa_taxonomy_id, basis="chart_of_accounts", is_primary=True
+  )
+
+  # 3. Create mapping structure (coa_mapping) in the CoA taxonomy
+  client.create_structure(
+    graph_id,
+    {
+      "name": "CoA to US GAAP Mapping",
+      "description": "Maps Chart of Accounts to US GAAP reporting concepts",
+      "structure_type": "coa_mapping",
+      "taxonomy_id": coa_taxonomy_id,
+    },
+  )
+
+  # 4. Create elements (flat CoA — no parent hierarchy)
+  element_lookup: dict[str, str] = {}
+  for code, name, classification, sub_class, balance_type, description in ACCOUNTS:
+    result = client.create_element(
+      graph_id,
+      {
+        "taxonomy_id": coa_taxonomy_id,
+        "code": code,
+        "name": name,
+        "classification": classification,
+        "sub_classification": sub_class,
+        "balance_type": balance_type,
+        "description": description,
+        "source": SOURCE,
+        "external_id": code,
+        "external_source": SOURCE,
+      },
+    )
+    element_lookup[code] = result["id"]
+
+  return element_lookup, coa_taxonomy_id, len(ACCOUNTS)
+
+
+# ---------------------------------------------------------------------------
+# Step 2c: Create journal entries (via HTTP API)
+# ---------------------------------------------------------------------------
+
+
+def create_journal_entries(
+  graph_id: str, txns: list, element_lookup: dict[str, str]
+) -> dict[str, int]:
+  """Create historical journal entries via the HTTP API.
+
+  Each transaction becomes one journal entry with balanced line items,
+  created with status='posted' (historical data, not drafts).
+  """
+  client = _get_ledger_client()
+
+  entry_count = 0
+  line_item_count = 0
+  skipped = 0
+
+  for txn_date, txn_type, description, _amount, lines in txns:
+    # Build line items, mapping codes → element IDs
+    li_list = []
+    for elem_code, debit, credit in lines:
+      elem_id = element_lookup.get(elem_code)
+      if not elem_id:
+        skipped += 1
+        continue
+      li_list.append(
+        {
+          "element_id": elem_id,
+          "debit_amount": debit,
+          "credit_amount": credit,
+        }
+      )
+
+    if len(li_list) < 2:
+      skipped += 1
+      continue
+
+    memo = description or f"{txn_type} on {txn_date}"
+    client.create_journal_entry(
+      graph_id,
+      posting_date=txn_date.isoformat(),
+      memo=memo,
+      line_items=li_list,
+      type="standard",
+      status="posted",
+    )
+    entry_count += 1
+    line_item_count += len(li_list)
+
+  if skipped:
+    print(f"  WARNING: Skipped {skipped} entries (missing elements)")
+
+  return {"entries": entry_count, "line_items": line_item_count}
+
+
+# ---------------------------------------------------------------------------
+# Step 3: Create CoA → GAAP mappings (via HTTP API)
 # ---------------------------------------------------------------------------
 
 
 def create_mappings(graph_id: str, element_lookup: dict[str, str]) -> int:
-  """Create mapping associations between CoA elements and GAAP reporting concepts."""
-  from robosystems.db.extensions import extensions_session
-  from robosystems.models.extensions.roboledger import Association, Structure
-  from robosystems.utils.ulid import generate_prefixed_ulid
+  """Create mapping associations between CoA elements and GAAP reporting concepts.
 
+  Uses `LedgerClient.create_associations()` — the bulk HTTP API — to
+  exercise the same path the frontend UI and MCP tools use.
+  """
   from .mappings import MAPPINGS
 
-  now = datetime.now(UTC)
+  client = _get_ledger_client()
 
-  with extensions_session(graph_id) as session:
-    mapping_struct = (
-      session.query(Structure).filter(Structure.structure_type == "coa_mapping").first()
+  # Find the coa_mapping structure (created by OLTPLoader during taxonomy seed)
+  structures = client.list_structures(graph_id, structure_type="coa_mapping")
+  if not structures:
+    print("  ERROR: No mapping structure found")
+    return 0
+  mapping_id = structures[0]["id"]
+
+  # Build the associations list, skipping any CoA codes not in the element lookup
+  associations = []
+  for coa_code, gaap_id in MAPPINGS:
+    coa_id = element_lookup.get(coa_code)
+    if not coa_id:
+      print(f"  WARNING: CoA code {coa_code} not in element_lookup")
+      continue
+    associations.append(
+      {
+        "from_element_id": coa_id,
+        "to_element_id": gaap_id,
+        "association_type": "mapping",
+        "order_value": 0.0,
+      }
     )
-    if not mapping_struct:
-      print("  ERROR: No mapping structure found")
-      return 0
 
-    created = 0
-    for coa_code, gaap_id in MAPPINGS:
-      coa_id = element_lookup.get(coa_code)
-      if not coa_id:
-        print(f"  WARNING: CoA code {coa_code} not in element_lookup")
-        continue
+  if not associations:
+    return 0
 
-      session.add(
-        Association(
-          id=generate_prefixed_ulid("assoc"),
-          structure_id=mapping_struct.id,
-          from_element_id=coa_id,
-          to_element_id=gaap_id,
-          association_type="mapping",
-          order_value=0.0,
-          created_at=now,
-          updated_at=now,
-        )
-      )
-      created += 1
-
-    session.flush()
-
-  return created
+  result = client.create_associations(graph_id, mapping_id, associations)
+  return result.get("created", 0)
 
 
 # ---------------------------------------------------------------------------
-# Step 4a: Initialize fiscal calendar
+# Step 4a: Initialize fiscal calendar (via HTTP API)
 # ---------------------------------------------------------------------------
 
 
 def initialize_fiscal_calendar(graph_id: str) -> str:
   """Initialize the fiscal calendar with closed_through = month before last.
 
-  This sets up the demo so that the user has exactly one period ready to
-  close (the most recent completed month). Assumes `load_oltp_data()` has
-  already wiped any prior fiscal state so this is always a fresh init.
+  Uses `LedgerClient.initialize_ledger()` — the HTTP API — which creates
+  the fiscal calendar, seeds FiscalPeriod rows from `earliest_data_period`
+  to the current month, and marks periods as closed/open based on
+  `closed_through`.
 
   Returns the `close_target` period string for use in the next-steps output.
   """
-  from robosystems.db.extensions import extensions_session
   from robosystems.operations.roboledger.fiscal_calendar import (
-    FiscalCalendarService,
-    add_months,
     current_month_period,
     previous_period,
   )
 
-  svc = FiscalCalendarService()
+  from .data import DEMO_MONTHS, get_demo_start_date
 
   # closed_through = month before last completed month
   # → close_target = last completed month (one period ready to close)
   last_completed = previous_period(current_month_period())
   closed_through = previous_period(last_completed)
+  demo_start = get_demo_start_date()
+  demo_start_period = f"{demo_start.year:04d}-{demo_start.month:02d}"
 
-  with extensions_session(graph_id) as session:
-    # Fresh initialization — walls off prior data as historical.
-    # load_oltp_data() wipes any prior fiscal state so this never collides.
-    calendar = svc.initialize(
-      session,
-      graph_id,
-      closed_through=closed_through,
-      actor_id=CREATED_BY,
-      actor_type="user",
-      note="close_demo initialization",
-    )
+  client = _get_ledger_client()
+  result = client.initialize_ledger(
+    graph_id,
+    closed_through=closed_through,
+    earliest_data_period=demo_start_period,
+    note="close_demo initialization",
+  )
 
-    # Seed FiscalPeriod rows spanning the demo's data window
-    from .data import DEMO_MONTHS, get_demo_start_date
+  fc = result.get("fiscal_calendar", {})
+  close_target = fc.get("close_target_period", last_completed)
 
-    demo_start = get_demo_start_date()
-    demo_start_period = f"{demo_start.year:04d}-{demo_start.month:02d}"
-    demo_end_period = add_months(demo_start_period, DEMO_MONTHS - 1)
-
-    periods_created = svc.ensure_fiscal_periods(
-      session,
-      graph_id,
-      start_period=demo_start_period,
-      end_period=demo_end_period,
-      closed_through=closed_through,
-    )
-
-    session.commit()
-
-    print(f"  closed_through: {closed_through}")
-    print(f"  close_target:   {calendar.close_target_period}")
-    print(f"  periods seeded: {periods_created}")
-    return calendar.close_target_period or last_completed
+  print(f"  closed_through: {closed_through}")
+  print(f"  close_target:   {close_target}")
+  print(f"  periods seeded: {result.get('periods_created', 0)}")
+  return close_target
 
 
 # ---------------------------------------------------------------------------
-# Step 4b: Create schedules
+# Step 4b: Create schedules (via HTTP API)
 # ---------------------------------------------------------------------------
 
 
 def create_schedules(graph_id: str, element_lookup: dict[str, str]) -> int:
-  """Create depreciation and prepaid amortization schedules via ScheduleService.
+  """Create depreciation and prepaid amortization schedules.
 
-  Routes through the service so schedule facts inherit the fiscal calendar's
-  `closed_through` boundary — facts in periods ≤ closed_through are flagged
-  `historical` (skipped by the close workflow); later facts are `in_scope`.
-
-  Prior-run schedules in the "Cascade Schedules" taxonomy are cleaned up
-  before re-seeding so the demo is idempotent across runs.
+  Uses `LedgerClient.create_schedule()` — the HTTP API — so schedule
+  facts inherit the fiscal calendar's `closed_through` boundary
+  automatically. Prior-run schedules are cleaned up via
+  `LedgerClient.delete_schedule()`.
   """
-  from datetime import date, timedelta
-
-  from robosystems.db.extensions import extensions_session
-  from robosystems.models.extensions.roboledger import (
-    Association,
-    Fact,
-    Structure,
-    Taxonomy,
-  )
-  from robosystems.operations.roboledger.fiscal_calendar import (
-    FiscalCalendarService,
-    parse_period,
-  )
-  from robosystems.operations.roboledger.schedules import ScheduleService
-  from robosystems.operations.roboledger.schedules.service import (
-    EntryTemplate,
-    ScheduleMetadata,
-  )
-  from robosystems.utils.ulid import generate_prefixed_ulid
-
   from .data import add_months as demo_add_months
   from .data import get_demo_start_date
 
@@ -417,107 +446,79 @@ def create_schedules(graph_id: str, element_lookup: dict[str, str]) -> int:
 
   schedules = [
     # (name, dr_code, cr_code, monthly_cents, original_cents, useful_months, start_offset)
-    # Depreciation — staggered purchase dates
     ("Computer Equipment Depreciation", "7000", "1350", 13_333, 480_000, 36, 0),
     ("Office Furniture Depreciation", "7000", "1350", 2_500, 150_000, 60, 2),
-    # Prepaids — staggered renewal dates throughout the year
     ("Business Insurance", "6400", "1200", 10_000, 120_000, 12, 2),
     ("Business Insurance (Year 2 Renewal)", "6400", "1200", 10_000, 120_000, 12, 14),
     ("Software Subscription", "6100", "1210", 2_500, 30_000, 12, 5),
     ("Cloud Hosting (AWS Savings Plan)", "6200", "1220", 5_000, 60_000, 12, 8),
   ]
 
-  schedule_svc = ScheduleService()
-  calendar_svc = FiscalCalendarService()
+  client = _get_ledger_client()
+
+  # Get closed_through from the fiscal calendar (set during Step 4a)
+  fc = client.get_fiscal_calendar(graph_id) or {}
+  closed_through_str = fc.get("closed_through_period")
+  closed_through_date = None
+  if closed_through_str:
+    from calendar import monthrange
+
+    year, month = int(closed_through_str[:4]), int(closed_through_str[5:7])
+    closed_through_date = date(year, month, monthrange(year, month)[1])
+
+  # Find or create schedule taxonomy
+  existing_taxonomies = client.list_taxonomies(graph_id, taxonomy_type="schedule")
+  cascade_tax = next(
+    (t for t in existing_taxonomies if t["name"] == "Cascade Schedules"), None
+  )
+  if cascade_tax:
+    taxonomy_id = cascade_tax["id"]
+    # Clean up prior-run schedules for idempotency
+    existing_schedules = client.list_schedules(graph_id)
+    for sched in existing_schedules:
+      if sched.get("taxonomy_name") == "Cascade Schedules":
+        client.delete_schedule(graph_id, sched["structure_id"])
+  else:
+    result = client.create_taxonomy(
+      graph_id,
+      {
+        "name": "Cascade Schedules",
+        "taxonomy_type": "schedule",
+      },
+    )
+    taxonomy_id = result["id"]
+
   created = 0
+  for (
+    name,
+    dr_code,
+    cr_code,
+    monthly_cents,
+    original_cents,
+    life_months,
+    start_offset,
+  ) in schedules:
+    dr_elem_id = element_lookup[dr_code]
+    cr_elem_id = element_lookup[cr_code]
+    start, end = _schedule_window(start_offset, life_months)
 
-  with extensions_session(graph_id) as session:
-    # Pull closed_through from the fiscal calendar (set during Step 4a).
-    # Facts in periods ≤ closed_through become 'historical' automatically.
-    calendar = calendar_svc.get(session, graph_id)
-    closed_through_date: date | None = None
-    if calendar and calendar.closed_through_period:
-      year, month = parse_period(calendar.closed_through_period)
-      # End-of-month so that any fact with period_end ≤ this is historical
-      from calendar import monthrange
-
-      closed_through_date = date(year, month, monthrange(year, month)[1])
-
-    # Find or create schedule taxonomy
-    schedule_tax = (
-      session.query(Taxonomy)
-      .filter(
-        Taxonomy.taxonomy_type == "schedule", Taxonomy.name == "Cascade Schedules"
-      )
-      .first()
+    client.create_schedule(
+      graph_id,
+      name=name,
+      element_ids=[dr_elem_id, cr_elem_id],
+      period_start=start.isoformat(),
+      period_end=end.isoformat(),
+      monthly_amount=monthly_cents,
+      debit_element_id=dr_elem_id,
+      credit_element_id=cr_elem_id,
+      entry_type="closing",
+      memo_template=f"Monthly amortization - {name}",
+      taxonomy_id=taxonomy_id,
+      method="straight_line",
+      original_amount=original_cents,
+      useful_life_months=life_months,
     )
-    if not schedule_tax:
-      now = datetime.now(UTC)
-      schedule_tax = Taxonomy(
-        id=generate_prefixed_ulid("tax"),
-        name="Cascade Schedules",
-        taxonomy_type="schedule",
-        is_active=True,
-        created_by=CREATED_BY,
-        created_at=now,
-        updated_at=now,
-      )
-      session.add(schedule_tax)
-      session.flush()
-
-    # Clean up any schedules from a prior demo run so re-running is idempotent
-    existing = (
-      session.query(Structure).filter(Structure.taxonomy_id == schedule_tax.id).all()
-    )
-    for struct in existing:
-      session.query(Fact).filter(Fact.structure_id == struct.id).delete(
-        synchronize_session=False
-      )
-      session.query(Association).filter(Association.structure_id == struct.id).delete(
-        synchronize_session=False
-      )
-      session.delete(struct)
-    if existing:
-      session.flush()
-
-    for (
-      name,
-      dr_code,
-      cr_code,
-      monthly_cents,
-      original_cents,
-      life_months,
-      start_offset,
-    ) in schedules:
-      dr_elem_id = element_lookup[dr_code]
-      cr_elem_id = element_lookup[cr_code]
-      start, end = _schedule_window(start_offset, life_months)
-
-      schedule_svc.create_schedule(
-        session,
-        name=name,
-        taxonomy_id=schedule_tax.id,
-        element_ids=[dr_elem_id, cr_elem_id],
-        period_start=start,
-        period_end=end,
-        monthly_amount=monthly_cents,
-        entry_template=EntryTemplate(
-          debit_element_id=dr_elem_id,
-          credit_element_id=cr_elem_id,
-          entry_type="closing",
-          memo_template="Monthly amortization - {structure_name}",
-        ),
-        schedule_metadata=ScheduleMetadata(
-          method="straight_line",
-          original_amount=original_cents,
-          useful_life_months=life_months,
-        ),
-        created_by=CREATED_BY,
-        closed_through=closed_through_date,
-      )
-      created += 1
-
-    session.commit()
+    created += 1
 
   return created
 
@@ -575,11 +576,7 @@ def _poll_operation(
   timeout_seconds: int = 120,
   interval_seconds: float = 2.0,
 ) -> tuple[str, dict]:
-  """Poll /v1/operations/{id}/status until it terminates or times out.
-
-  Returns (status, result_dict). status is one of: "completed", "failed",
-  "timeout", or "error".
-  """
+  """Poll /v1/operations/{id}/status until it terminates or times out."""
   import httpx
 
   deadline = time.time() + timeout_seconds
@@ -602,11 +599,7 @@ def _poll_operation(
 
 
 def materialize_graph(graph_id: str) -> None:
-  """Materialize OLTP data into LadybugDB graph.
-
-  Uses source=extensions to trigger the OLTP → DuckDB → LadybugDB pipeline
-  (not the S3-based staged pipeline).
-  """
+  """Materialize OLTP data into LadybugDB graph."""
   import httpx
 
   if not CREDENTIALS_FILE.exists():
@@ -674,7 +667,6 @@ def main() -> None:
   print("  Validation:   All entries balance")
 
   if dry_run:
-    # Print summary
     total_dr = sum(sum(dr for _, dr, _ in lines) for _, _, _, _, lines in txns)
     print(f"  Total debits: ${total_dr / 100:,.2f}")
     print("\nDry run complete. No data written.")
@@ -686,25 +678,33 @@ def main() -> None:
   else:
     graph_id = create_demo_graph()
 
-  # Load OLTP data
-  print(f"\nLoading OLTP data for graph {graph_id}...")
-  element_lookup, counts = load_oltp_data(graph_id, txns)
-  print(f"  Elements:     {counts['elements']}")
-  print(f"  Transactions: {counts['transactions']}")
-  print(f"  Entries:      {counts['entries']}")
-  print(f"  Line Items:   {counts['line_items']}")
+  # Reset prior demo state (the ONLY direct-DB operation)
+  print(f"\nResetting demo state for graph {graph_id}...")
+  reset_demo(graph_id)
+  print("  Done")
 
-  # Create mappings
+  # Create chart of accounts (via HTTP API — exercises create-element op)
+  print("\nCreating chart of accounts...")
+  element_lookup, coa_taxonomy_id, elem_count = create_chart_of_accounts(graph_id)
+  print(f"  Taxonomy:     {coa_taxonomy_id}")
+  print(f"  Elements:     {elem_count}")
+
+  # Create journal entries (via HTTP API — exercises create-journal-entry op)
+  print(f"\nCreating {len(txns)} journal entries...")
+  entry_counts = create_journal_entries(graph_id, txns, element_lookup)
+  print(f"  Entries:      {entry_counts['entries']}")
+  print(f"  Line Items:   {entry_counts['line_items']}")
+
+  # Create mappings (via HTTP API — exercises create-associations op)
   print("\nCreating CoA → GAAP mappings...")
   mapping_count = create_mappings(graph_id, element_lookup)
   print(f"  Mappings:     {mapping_count}")
 
-  # Initialize fiscal calendar (must happen before create_schedules so that
-  # schedule facts can be scoped against closed_through)
+  # Initialize fiscal calendar (via HTTP API — exercises initialize op)
   print("\nInitializing fiscal calendar...")
   close_target = initialize_fiscal_calendar(graph_id)
 
-  # Create schedules (scoped against the calendar's closed_through)
+  # Create schedules (via HTTP API — exercises create-schedule op)
   print("\nCreating schedules...")
   schedule_count = create_schedules(graph_id, element_lookup)
   print(f"  Schedules:    {schedule_count}")
@@ -722,11 +722,7 @@ def main() -> None:
   print("\n" + "=" * 60)
   print(f"  Graph ID: {graph_id}")
   if CREDENTIALS_FILE.exists():
-    # Don't print the API key — even a prefix is sensitive. Point the user
-    # at the credentials file so they can pick it up locally if needed.
     print(f"  API Key:  (saved to {CREDENTIALS_FILE})")
-  # Human-readable label for the close target period
-  from datetime import date
 
   from robosystems.operations.roboledger.fiscal_calendar import parse_period
 
