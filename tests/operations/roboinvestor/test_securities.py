@@ -246,6 +246,8 @@ class TestCreateSecurity:
 
 class TestUpdateSecurity:
   def test_applies_updates_and_returns_with_entity(self) -> None:
+    from robosystems.models.api.extensions.investor import UpdateSecurityOperation
+
     row = _make_security()
     ent = _make_entity()
     session = MagicMock()
@@ -255,32 +257,53 @@ class TestUpdateSecurity:
     ent_result.scalar_one_or_none.return_value = ent
     session.execute.side_effect = [sec_result, ent_result]
 
-    result = update_security(session, "sec_01", {"name": "Renamed"})
+    result = update_security(
+      session, UpdateSecurityOperation(security_id="sec_01", name="Renamed")
+    )
 
     assert row.name == "Renamed"
-    assert result is not None and result.name == "Renamed"
+    assert result.name == "Renamed"
     assert result.entity_name == "Acme Corp"
 
-  def test_returns_none_when_missing(self) -> None:
+  def test_raises_when_missing(self) -> None:
+    from robosystems.models.api.extensions.investor import UpdateSecurityOperation
+    from robosystems.operations.roboinvestor.commands.securities import (
+      SecurityNotFoundError,
+    )
+
     session = MagicMock()
     miss = MagicMock()
     miss.scalar_one_or_none.return_value = None
     session.execute.side_effect = [miss]
 
-    assert update_security(session, "sec_missing", {"name": "X"}) is None
+    with pytest.raises(SecurityNotFoundError):
+      update_security(
+        session, UpdateSecurityOperation(security_id="sec_missing", name="X")
+      )
 
 
 class TestSoftDeleteSecurity:
   def test_sets_is_active_false(self) -> None:
+    from robosystems.models.api.extensions.investor import DeleteSecurityOperation
+
     row = _make_security(is_active=True)
     session = MagicMock()
     session.execute.return_value.scalar_one_or_none.return_value = row
 
-    assert soft_delete_security(session, "sec_01") is True
+    result = soft_delete_security(
+      session, DeleteSecurityOperation(security_id="sec_01")
+    )
+    assert result.deleted is True
     assert row.is_active is False
 
-  def test_returns_false_when_missing(self) -> None:
+  def test_raises_when_missing(self) -> None:
+    from robosystems.models.api.extensions.investor import DeleteSecurityOperation
+    from robosystems.operations.roboinvestor.commands.securities import (
+      SecurityNotFoundError,
+    )
+
     session = MagicMock()
     session.execute.return_value.scalar_one_or_none.return_value = None
 
-    assert soft_delete_security(session, "sec_missing") is False
+    with pytest.raises(SecurityNotFoundError):
+      soft_delete_security(session, DeleteSecurityOperation(security_id="sec_missing"))

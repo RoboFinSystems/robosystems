@@ -27,6 +27,22 @@ class UpdatePortfolioRequest(BaseModel):
   base_currency: str | None = None
 
 
+class UpdatePortfolioOperation(UpdatePortfolioRequest):
+  """CQRS body for `POST /operations/update-portfolio`.
+
+  Folds `portfolio_id` into the payload so REST + MCP share one body
+  type via the registrar. Unset fields are ignored (partial update).
+  """
+
+  portfolio_id: str = Field(..., description="Target portfolio ID.")
+
+
+class DeletePortfolioOperation(BaseModel):
+  """CQRS body for `POST /operations/delete-portfolio`."""
+
+  portfolio_id: str = Field(..., description="Target portfolio ID.")
+
+
 class PortfolioResponse(BaseModel):
   id: str
   name: str
@@ -67,6 +83,18 @@ class UpdateSecurityRequest(BaseModel):
   is_active: bool | None = None
   authorized_shares: int | None = None
   outstanding_shares: int | None = None
+
+
+class UpdateSecurityOperation(UpdateSecurityRequest):
+  """CQRS body for `POST /operations/update-security`."""
+
+  security_id: str = Field(..., description="Target security ID.")
+
+
+class DeleteSecurityOperation(BaseModel):
+  """CQRS body for `POST /operations/delete-security` (soft delete)."""
+
+  security_id: str = Field(..., description="Target security ID.")
 
 
 class SecurityResponse(BaseModel):
@@ -118,6 +146,26 @@ class UpdatePositionRequest(BaseModel):
   disposition_date: date | None = None
   status: str | None = None
   notes: str | None = None
+
+
+class UpdatePositionOperation(UpdatePositionRequest):
+  """CQRS body for `POST /operations/update-position`."""
+
+  position_id: str = Field(..., description="Target position ID.")
+
+
+class DeletePositionOperation(BaseModel):
+  """CQRS body for `POST /operations/delete-position` (soft delete)."""
+
+  position_id: str = Field(..., description="Target position ID.")
+
+
+class DeleteResult(BaseModel):
+  """Shared response shape for soft-delete operations (`delete-portfolio`,
+  `delete-security`, `delete-position`). `deleted=true` means a row was
+  flipped; 404 is raised by the handler when no row existed."""
+
+  deleted: bool
 
 
 class PositionResponse(BaseModel):

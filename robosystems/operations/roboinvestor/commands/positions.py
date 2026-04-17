@@ -1,8 +1,13 @@
-"""Position write operations."""
+"""Position write operations.
+
+Registrar-compatible signatures `(session, body, created_by=...)`;
+update/delete declare `requires_created_by=False`. Missing rows raise
+`PositionNotFoundError` so the registrar error map can surface 404.
+`PortfolioNotFoundError` / `SecurityNotFoundError` are re-used from
+their owning command modules to keep FK-miss translations unified.
+"""
 
 from __future__ import annotations
-
-from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -10,22 +15,39 @@ from sqlalchemy.orm import Session
 
 from robosystems.models.api.extensions.investor import (
   CreatePositionRequest,
+  DeletePositionOperation,
+  DeleteResult,
   PositionResponse,
+  UpdatePositionOperation,
 )
 from robosystems.models.extensions import Entity
 from robosystems.models.extensions.roboinvestor import Portfolio, Position, Security
+from robosystems.operations.roboinvestor.commands.portfolios import (
+  PortfolioNotFoundError,
+)
+from robosystems.operations.roboinvestor.commands.securities import (
+  SecurityNotFoundError,
+)
 from robosystems.operations.roboinvestor.reads.positions import (
   enrich_positions,
   position_to_response,
 )
 
+# Re-export FK-miss errors so callers (router, tests) can import them
+# from a single location even though the types live on the owning module.
+__all__ = [
+  "DuplicateActivePositionError",
+  "PortfolioNotFoundError",
+  "PositionNotFoundError",
+  "SecurityNotFoundError",
+  "create_position",
+  "soft_delete_position",
+  "update_position",
+]
 
-class PortfolioNotFoundError(LookupError):
-  """Raised when the position's target portfolio does not exist."""
 
-
-class SecurityNotFoundError(LookupError):
-  """Raised when the position's target security does not exist."""
+class PositionNotFoundError(LookupError):
+  """Raised when a referenced position does not exist."""
 
 
 class DuplicateActivePositionError(Exception):
@@ -86,16 +108,18 @@ def create_position(
 
 
 def update_position(
-  session: Session, position_id: str, updates: dict[str, Any]
-) -> PositionResponse | None:
-  """Apply updates to a position. Returns None if the position does not exist."""
+  session: Session, body: UpdatePositionOperation
+) -> PositionResponse:
+  """Apply updates to a position. Raises `PositionNotFoundError` if missing."""
   row = session.execute(
-    select(Position).where(Position.id == position_id)
+    select(Position).where(Position.id == body.position_id)
   ).scalar_one_or_none()
   if row is None:
-    return None
+    raise PositionNotFoundError(body.position_id)
 
-  for field, value in updates.items():
+  for field, value in body.model_dump(
+    exclude_unset=True, exclude={"position_id"}
+  ).items():
     setattr(row, field, value)
 
   session.flush()
@@ -103,16 +127,19 @@ def update_position(
   return enriched[0]
 
 
-def soft_delete_position(session: Session, position_id: str) -> bool:
-  """Soft-delete a position by setting its `status` to `"disposed"`.
+def soft_delete_position(
+  session: Session, body: DeletePositionOperation
+) -> DeleteResult:
+  """Soft-delete a position (`status='disposed'`).
 
-  Returns `True` if the position existed, `False` otherwise.
+  Raises `PositionNotFoundError` if the row doesn't exist (registrar → 404).
+  Historical holding records referencing it remain valid.
   """
   row = session.execute(
-    select(Position).where(Position.id == position_id)
+    select(Position).where(Position.id == body.position_id)
   ).scalar_one_or_none()
   if row is None:
-    return False
+    raise PositionNotFoundError(body.position_id)
   row.status = "disposed"
   session.flush()
-  return True
+  return DeleteResult(deleted=True)

@@ -135,28 +135,40 @@ class TestCreatePortfolio:
 
 class TestUpdatePortfolio:
   def test_applies_updates_and_flushes(self) -> None:
+    from robosystems.models.api.extensions.investor import UpdatePortfolioOperation
+
     row = _make_portfolio(name="Original")
     session = MagicMock()
     session.execute.return_value.scalar_one_or_none.return_value = row
 
-    result = update_portfolio(session, "pf_01", {"name": "Renamed"})
+    result = update_portfolio(
+      session, UpdatePortfolioOperation(portfolio_id="pf_01", name="Renamed")
+    )
 
     assert row.name == "Renamed"
     session.flush.assert_called_once()
-    assert result is not None and result.name == "Renamed"
+    assert result.name == "Renamed"
 
-  def test_returns_none_when_missing(self) -> None:
+  def test_raises_when_missing(self) -> None:
+    from robosystems.models.api.extensions.investor import UpdatePortfolioOperation
+    from robosystems.operations.roboinvestor.commands.portfolios import (
+      PortfolioNotFoundError,
+    )
+
     session = MagicMock()
     session.execute.return_value.scalar_one_or_none.return_value = None
 
-    result = update_portfolio(session, "pf_missing", {"name": "X"})
-
-    assert result is None
+    with pytest.raises(PortfolioNotFoundError):
+      update_portfolio(
+        session, UpdatePortfolioOperation(portfolio_id="pf_missing", name="X")
+      )
     session.flush.assert_not_called()
 
 
 class TestDeletePortfolio:
   def test_deletes_when_no_active_positions(self) -> None:
+    from robosystems.models.api.extensions.investor import DeletePortfolioOperation
+
     row = _make_portfolio()
     session = MagicMock()
     # First execute: portfolio lookup. Second execute: active count.
@@ -166,19 +178,28 @@ class TestDeletePortfolio:
     count_result.scalar.return_value = 0
     session.execute.side_effect = [pf_result, count_result]
 
-    assert delete_portfolio(session, "pf_01") is True
+    result = delete_portfolio(session, DeletePortfolioOperation(portfolio_id="pf_01"))
+    assert result.deleted is True
     session.delete.assert_called_once_with(row)
 
-  def test_returns_false_when_missing(self) -> None:
+  def test_raises_when_missing(self) -> None:
+    from robosystems.models.api.extensions.investor import DeletePortfolioOperation
+    from robosystems.operations.roboinvestor.commands.portfolios import (
+      PortfolioNotFoundError,
+    )
+
     session = MagicMock()
     pf_result = MagicMock()
     pf_result.scalar_one_or_none.return_value = None
     session.execute.side_effect = [pf_result]
 
-    assert delete_portfolio(session, "pf_missing") is False
+    with pytest.raises(PortfolioNotFoundError):
+      delete_portfolio(session, DeletePortfolioOperation(portfolio_id="pf_missing"))
     session.delete.assert_not_called()
 
   def test_raises_when_has_active_positions(self) -> None:
+    from robosystems.models.api.extensions.investor import DeletePortfolioOperation
+
     row = _make_portfolio()
     session = MagicMock()
     pf_result = MagicMock()
@@ -188,7 +209,7 @@ class TestDeletePortfolio:
     session.execute.side_effect = [pf_result, count_result]
 
     with pytest.raises(PortfolioHasActivePositionsError) as exc_info:
-      delete_portfolio(session, "pf_01")
+      delete_portfolio(session, DeletePortfolioOperation(portfolio_id="pf_01"))
 
     assert exc_info.value.active_count == 3
     session.delete.assert_not_called()
