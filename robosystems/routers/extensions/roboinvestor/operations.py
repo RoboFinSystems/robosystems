@@ -263,7 +263,7 @@ create_position_op = _registrar.register(
     error_map={
       PortfolioNotFoundError: (404, lambda _e: "Portfolio not found."),
       SecurityNotFoundError: (404, lambda _e: "Security not found."),
-      DuplicateActivePositionError: (409, lambda e: str(e)),
+      DuplicateActivePositionError: (409, str),
     },
   )
 )

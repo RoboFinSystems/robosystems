@@ -233,7 +233,9 @@ class TestCreatePosition:
     ent_result = MagicMock()
     ent_result.scalar_one_or_none.return_value = _make_entity()
     session.execute.side_effect = [pf_result, sec_result, ent_result]
-    session.flush.side_effect = IntegrityError("stmt", {}, Exception("duplicate"))
+    orig = Exception("unique violation")
+    orig.pgcode = "23505"  # type: ignore[attr-defined]
+    session.flush.side_effect = IntegrityError("stmt", {}, orig)
 
     with (
       patch(
@@ -241,6 +243,28 @@ class TestCreatePosition:
         return_value=_make_position(),
       ),
       pytest.raises(DuplicateActivePositionError),
+    ):
+      create_position(session, self._base_body(), created_by="usr_1")
+
+  def test_reraises_non_unique_integrity_error(self) -> None:
+    session = MagicMock()
+    pf_result = MagicMock()
+    pf_result.scalar_one_or_none.return_value = _make_portfolio()
+    sec_result = MagicMock()
+    sec_result.scalar_one_or_none.return_value = _make_security()
+    ent_result = MagicMock()
+    ent_result.scalar_one_or_none.return_value = _make_entity()
+    session.execute.side_effect = [pf_result, sec_result, ent_result]
+    orig = Exception("fk violation")
+    orig.pgcode = "23503"  # type: ignore[attr-defined]  # foreign_key_violation
+    session.flush.side_effect = IntegrityError("stmt", {}, orig)
+
+    with (
+      patch(
+        "robosystems.operations.roboinvestor.commands.positions.Position",
+        return_value=_make_position(),
+      ),
+      pytest.raises(IntegrityError),
     ):
       create_position(session, self._base_body(), created_by="usr_1")
 

@@ -96,9 +96,11 @@ def create_position(
   try:
     session.flush()
   except IntegrityError as exc:
-    raise DuplicateActivePositionError(
-      "An active position already exists for this security in this portfolio."
-    ) from exc
+    if getattr(getattr(exc, "orig", None), "pgcode", None) == "23505":
+      raise DuplicateActivePositionError(
+        "An active position already exists for this security in this portfolio."
+      ) from exc
+    raise
 
   return position_to_response(
     position,

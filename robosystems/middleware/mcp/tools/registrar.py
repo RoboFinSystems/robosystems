@@ -128,11 +128,11 @@ def translate_error(exc: Exception, error_map: ErrorMap) -> dict[str, Any]:
 
 
 def _exception_code(exc_type: type[Exception]) -> str:
-  """Derive a kebab-case error code from an exception class name."""
+  """Derive a snake_case error code from an exception class name."""
   name = exc_type.__name__
   if name.endswith("Error"):
     name = name[:-5]
-  # Convert CamelCase → kebab-case.
+  # Convert CamelCase → snake_case.
   out: list[str] = []
   for i, ch in enumerate(name):
     if ch.isupper() and i > 0 and not name[i - 1].isupper():
