@@ -20,6 +20,7 @@ from dagster import Definitions
 
 from robosystems.config import env
 from robosystems.dagster.assets.graphs import (
+  user_graph_backup_source,
   user_graph_creation_source,
   user_graph_extensions_materialized_source,
   user_graph_file_staging_source,
@@ -172,6 +173,7 @@ all_assets = [
   user_graph_creation_source,
   user_subgraph_creation_source,
   user_repository_provisioning_source,
+  user_graph_backup_source,
   # Platform: Shared repository infrastructure
   shared_replicas_refreshed,
   # Adapter: SEC pipeline (includes sec_lbug_s3_published)

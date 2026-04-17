@@ -119,3 +119,23 @@ user_graph_extensions_materialized_source = AssetSpec(
   },
   kinds={"ladybug"},
 )
+
+# ============================================================================
+# Lifecycle Assets (backup)
+# ============================================================================
+
+# External asset for user graph backup
+# Materializations reported from backup_graph_job (create_backup op)
+user_graph_backup_source = AssetSpec(
+  key="user_graph_backup",
+  description=(
+    "User graph databases backed up to S3. "
+    "Triggered on-demand via the create-backup operation."
+  ),
+  group_name="graphs",
+  metadata={
+    "pipeline": "graphs",
+    "stage": "backup",
+  },
+  kinds={"s3"},
+)
