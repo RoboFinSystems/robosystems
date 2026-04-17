@@ -1,0 +1,758 @@
+"""Graph lifecycle MCP tools.
+
+Five tools that mirror a subset of the REST graph lifecycle surface at
+`POST /v1/graphs/{graph_id}/operations/*`:
+
+1. `create-subgraph` — isolated workspace within the parent graph
+2. `delete-subgraph` — hard-delete a subgraph (admin on parent)
+3. `list-subgraphs` — enumerate subgraphs for the current parent graph
+4. `materialize` — rebuild LadybugDB from OLTP (extensions) or staging
+5. `create-backup` — enqueue a full-dump backup (admin)
+
+**Deliberately NOT exposed on MCP:**
+
+- `change-tier` — destructive 3-5 minute EBS migration with billing
+  implications and fail-on-downgrade semantics. Humans execute.
+- `restore-backup` — overwrites live graph data with a historical
+  snapshot; mistakes are very expensive to recover from. Humans execute.
+
+Both still live on the REST surface for human-driven operations.
+
+Tools stay hand-written rather than registrar-generated because:
+- Each targets the **platform DB** (not extensions), different session
+- Auth rules differ per op: admin-on-parent, entity-graph checks
+- Several dispatch async Dagster jobs and return an operation_id that
+  the agent can poll via `/v1/operations/{operation_id}/stream`
+
+Descriptions emphasize the workspace / agent-friendly framing the
+user asked for — what a subgraph *is*, when to use a backup, etc. —
+not just the bare operation name.
+"""
+
+from __future__ import annotations
+
+from datetime import UTC, datetime
+from typing import Any
+
+from robosystems.logger import logger
+
+# ══════════════════════════════════════════════════════════════════════════
+# Shared helpers
+# ══════════════════════════════════════════════════════════════════════════
+
+
+def _open_platform_session():
+  """Open a short-lived platform-DB session.
+
+  MCP tools don't receive a FastAPI-injected session, so each helper
+  opens its own generator-backed session and closes it on exit.
+  """
+  from robosystems.database import get_db_session
+
+  gen = get_db_session()
+  session = next(gen)
+
+  def close():
+    try:
+      next(gen)
+    except StopIteration:
+      pass
+
+  return session, close
+
+
+def _require_user(client) -> Any | None:
+  """Fetch `client.user` or return an auth-missing error dict."""
+  user = getattr(client, "user", None)
+  if user is None:
+    return None
+  return user
+
+
+def _user_missing_err() -> dict[str, Any]:
+  return {
+    "error": "authentication_required",
+    "message": "User context required for this operation.",
+  }
+
+
+def _block_shared_repo(graph_id: str) -> dict[str, Any] | None:
+  """Return an error envelope if the target is a shared repository."""
+  from robosystems.config.shared_repositories import is_shared_repository_or_subgraph
+
+  if is_shared_repository_or_subgraph(graph_id):
+    return {
+      "error": "not_allowed_on_shared_repo",
+      "message": (
+        f"This operation is not available on shared repository graphs ({graph_id})."
+      ),
+    }
+  return None
+
+
+def _verify_admin_on_graph(user, graph_id: str, session) -> dict[str, Any] | None:
+  """Check that `user` has an `admin` role on `graph_id`."""
+  from robosystems.models.core.graph.graph_user import GraphUser
+
+  gu = (
+    session.query(GraphUser)
+    .filter(GraphUser.user_id == user.id, GraphUser.graph_id == graph_id)
+    .first()
+  )
+  if gu is None or gu.role != "admin":
+    return {
+      "error": "insufficient_permissions",
+      "message": f"Admin access to graph '{graph_id}' required for this operation.",
+    }
+  return None
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# create-subgraph
+# ══════════════════════════════════════════════════════════════════════════
+
+
+class CreateSubgraphTool:
+  """Create an isolated subgraph (workspace) under the current parent graph."""
+
+  def __init__(self, graph_client):
+    self.client = graph_client
+
+  def get_tool_definition(self) -> dict[str, Any]:
+    return {
+      "name": "create-subgraph",
+      "description": (
+        "Create an isolated subgraph under this parent graph — think of it "
+        "as a sandbox or workspace that inherits the schema but keeps data "
+        "separate. Use for experiments, scratch work, staging data, or "
+        "agent memory contexts without affecting the main graph.\n\n"
+        "**WHEN TO USE:**\n"
+        "- Creating an experimentation sandbox that won't pollute the main graph\n"
+        "- Staging data before promoting to the primary graph\n"
+        "- Isolating agent scratch/memory work in a separate namespace\n\n"
+        "**PARAMETERS:**\n"
+        "- name: Alphanumeric only, 1-20 chars (no hyphens or underscores)\n"
+        "- fork_parent: Copy all parent data into the new subgraph\n"
+        "- subgraph_type: `static` (default) or `memory` (auto-includes memory schema)\n\n"
+        "**RETURNS:** `subgraph_id` (format: `{parent_graph_id}_{name}`) — use it "
+        "as the `graph_id` in future tool calls to target the new subgraph."
+      ),
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Subgraph name (alphanumeric, 1-20 chars).",
+          },
+          "description": {
+            "type": "string",
+            "description": "Optional description.",
+          },
+          "fork_parent": {
+            "type": "boolean",
+            "description": "Copy data from the parent graph (default false).",
+            "default": False,
+          },
+          "subgraph_type": {
+            "type": "string",
+            "enum": ["static", "memory"],
+            "default": "static",
+          },
+        },
+        "required": ["name"],
+        "additionalProperties": False,
+      },
+    }
+
+  async def execute(self, arguments: dict[str, Any]) -> dict[str, Any]:
+    from robosystems.models.core.graph import Graph
+    from robosystems.operations.graph.subgraph_service import SubgraphService
+
+    name = arguments.get("name") or ""
+    description = arguments.get("description") or f"MCP subgraph: {name}"
+    fork_parent = bool(arguments.get("fork_parent", False))
+    subgraph_type = arguments.get("subgraph_type", "static")
+
+    if not name.isalnum() or not (1 <= len(name) <= 20):
+      return {
+        "error": "invalid_name",
+        "message": (
+          "Subgraph name must be alphanumeric only, 1-20 characters "
+          "(no hyphens or underscores)."
+        ),
+        "valid_examples": ["dev", "staging", "test1"],
+      }
+
+    user = _require_user(self.client)
+    if user is None:
+      return _user_missing_err()
+
+    parent_graph_id = self.client.graph_id
+    repo_err = _block_shared_repo(parent_graph_id)
+    if repo_err:
+      return repo_err
+
+    session, close = _open_platform_session()
+    try:
+      parent = session.query(Graph).filter(Graph.graph_id == parent_graph_id).first()
+      if not parent:
+        return {
+          "error": "parent_not_found",
+          "message": f"Parent graph {parent_graph_id} not found.",
+        }
+
+      service = SubgraphService()
+      try:
+        result = await service.create_subgraph(
+          parent_graph=parent,
+          user=user,
+          name=name,
+          description=description,
+          subgraph_type=subgraph_type,
+          metadata={},
+          fork_parent=fork_parent,
+          fork_options=None,
+        )
+      except Exception as exc:
+        logger.error("create-subgraph failed for %s: %s", parent_graph_id, exc)
+        return {"error": "create_failed", "message": str(exc)}
+
+      return {
+        "subgraph_id": result.get("graph_id"),
+        "name": name,
+        "parent_graph_id": parent_graph_id,
+        "description": description,
+        "forked_from_parent": fork_parent,
+        "subgraph_type": subgraph_type,
+        "operation_id": result.get("operation_id"),
+      }
+    finally:
+      close()
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# delete-subgraph
+# ══════════════════════════════════════════════════════════════════════════
+
+
+class DeleteSubgraphTool:
+  """Delete a subgraph (admin on parent)."""
+
+  def __init__(self, graph_client):
+    self.client = graph_client
+
+  def get_tool_definition(self) -> dict[str, Any]:
+    return {
+      "name": "delete-subgraph",
+      "description": (
+        "Hard-delete a subgraph and all its data. Cannot target the parent "
+        "graph. Requires admin role on the parent. Use `backup_first=true` "
+        "to create a safety snapshot before deletion.\n\n"
+        "**PARAMETERS:**\n"
+        "- subgraph_id: Full id like `{parent_id}_{name}`\n"
+        "- force: Delete even if the subgraph contains data (default false)\n"
+        "- backup_first: Create a backup before deletion (default true)"
+      ),
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "subgraph_id": {
+            "type": "string",
+            "description": "Subgraph id, e.g. `kg123_dev`.",
+          },
+          "force": {"type": "boolean", "default": False},
+          "backup_first": {"type": "boolean", "default": True},
+        },
+        "required": ["subgraph_id"],
+        "additionalProperties": False,
+      },
+    }
+
+  async def execute(self, arguments: dict[str, Any]) -> dict[str, Any]:
+    from robosystems.middleware.graph.utils import parse_subgraph_id
+    from robosystems.models.core.graph import Graph
+    from robosystems.operations.graph.subgraph_service import SubgraphService
+
+    subgraph_id = arguments.get("subgraph_id") or ""
+    force = bool(arguments.get("force", False))
+    backup_first = bool(arguments.get("backup_first", True))
+
+    info = parse_subgraph_id(subgraph_id)
+    if info is None:
+      return {
+        "error": "invalid_subgraph_id",
+        "message": f"{subgraph_id!r} is not a valid subgraph identifier.",
+      }
+
+    # The client's current graph must be the subgraph's parent — prevents
+    # cross-tenant delete via a mismatched `graph_id`/`subgraph_id`.
+    current_parent = self.client.graph_id
+    if info.parent_graph_id != current_parent:
+      return {
+        "error": "authorization_failed",
+        "message": (
+          f"Subgraph {subgraph_id} does not belong to graph {current_parent}."
+        ),
+      }
+
+    # Shared-repo subgraphs (e.g., `sec_historical`) are platform-managed.
+    # The manager normally skips write-tool registration for shared repos
+    # (read_only=True), so this is defense-in-depth against a mistake in
+    # that gating — and makes the error message specific.
+    repo_err = _block_shared_repo(current_parent)
+    if repo_err:
+      return repo_err
+
+    user = _require_user(self.client)
+    if user is None:
+      return _user_missing_err()
+
+    session, close = _open_platform_session()
+    try:
+      subgraph = session.query(Graph).filter(Graph.graph_id == subgraph_id).first()
+      if subgraph is None or not subgraph.is_subgraph:
+        return {
+          "error": "subgraph_not_found",
+          "message": f"Subgraph {subgraph_id} not found.",
+        }
+
+      admin_err = _verify_admin_on_graph(user, info.parent_graph_id, session)
+      if admin_err:
+        return admin_err
+
+      service = SubgraphService()
+      try:
+        await service.delete_subgraph_database(
+          subgraph_id=subgraph_id,
+          force=force,
+          create_backup=backup_first,
+        )
+      except Exception as exc:
+        logger.error("delete-subgraph failed for %s: %s", subgraph_id, exc)
+        hint = None
+        if "contains data" in str(exc).lower():
+          hint = "Subgraph contains data. Set force=true to delete anyway."
+        return {
+          "error": "deletion_failed",
+          "message": str(exc),
+          "hint": hint,
+        }
+
+      session.delete(subgraph)
+      session.commit()
+      return {
+        "deleted": True,
+        "subgraph_id": subgraph_id,
+        "backup_created": backup_first,
+      }
+    finally:
+      close()
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# list-subgraphs
+# ══════════════════════════════════════════════════════════════════════════
+
+
+class ListSubgraphsTool:
+  """List subgraphs attached to the current parent graph."""
+
+  def __init__(self, graph_client):
+    self.client = graph_client
+
+  def get_tool_definition(self) -> dict[str, Any]:
+    return {
+      "name": "list-subgraphs",
+      "description": (
+        "List every subgraph (workspace) under this parent graph, plus the "
+        "parent itself as the `primary` entry. Use the returned "
+        "`subgraph_id` with `switch-workspace` or as the `graph_id` in "
+        "future tool calls."
+      ),
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": False,
+      },
+    }
+
+  async def execute(self, arguments: dict[str, Any]) -> dict[str, Any]:
+    from robosystems.models.core.graph import Graph
+
+    parent_id = self.client.graph_id
+    session, close = _open_platform_session()
+    try:
+      subgraphs = (
+        session.query(Graph)
+        .filter(Graph.parent_graph_id == parent_id)
+        .order_by(Graph.created_at.desc())
+        .all()
+      )
+
+      out: list[dict[str, Any]] = []
+      parent = session.query(Graph).filter(Graph.graph_id == parent_id).first()
+      out.append(
+        {
+          "subgraph_id": parent_id,
+          "name": "main",
+          "description": parent.graph_name if parent else "Primary graph",
+          "type": "primary",
+          "parent_graph_id": None,
+        }
+      )
+      for sg in subgraphs:
+        out.append(
+          {
+            "subgraph_id": sg.graph_id,
+            "name": sg.subgraph_name or sg.graph_name,
+            "description": sg.graph_name,
+            "type": "subgraph",
+            "parent_graph_id": parent_id,
+            "created_at": sg.created_at.isoformat() if sg.created_at else None,
+          }
+        )
+
+      return {
+        "primary_graph_id": parent_id,
+        "total_subgraphs": len(out) - 1,
+        "subgraphs": out,
+      }
+    finally:
+      close()
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# materialize
+# ══════════════════════════════════════════════════════════════════════════
+
+
+class MaterializeTool:
+  """Rebuild the graph database (LadybugDB) from OLTP or staging tables."""
+
+  def __init__(self, graph_client):
+    self.client = graph_client
+
+  def get_tool_definition(self) -> dict[str, Any]:
+    return {
+      "name": "materialize",
+      "description": (
+        "Rebuild LadybugDB for this graph from its source data — either "
+        "staged DuckDB tables (for file uploads) or the extensions OLTP "
+        "database (roboledger / roboinvestor writes).\n\n"
+        "**WHEN TO USE:**\n"
+        "- After significant OLTP writes, to refresh the queryable graph\n"
+        "- After uploading and staging new files\n"
+        "- When `get-graph-sync-status` reports `stale`\n"
+        "- When the user asks to rebuild or refresh the graph\n\n"
+        "**PARAMETERS:**\n"
+        "- source: `extensions` (OLTP) or `staged` (DuckDB). Auto-detected from\n"
+        "  graph_type if omitted.\n"
+        "- dry_run: Validate without writing (returns a preview synchronously).\n"
+        "- rebuild: Drop existing data and rebuild from scratch.\n"
+        "- ignore_errors: Continue past non-fatal row errors (default true).\n"
+        "- force: Materialize even if the graph is already up-to-date.\n"
+        "- materialize_embeddings: Generate vector embeddings during rebuild.\n\n"
+        "**RETURNS:** `operation_id` — subscribe to "
+        "`/v1/operations/{operation_id}/stream` for progress events. For "
+        "`dry_run`, returns a synchronous preview."
+      ),
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "source": {"type": "string", "enum": ["staged", "extensions"]},
+          "dry_run": {"type": "boolean", "default": False},
+          "rebuild": {"type": "boolean", "default": False},
+          "ignore_errors": {"type": "boolean", "default": True},
+          "force": {"type": "boolean", "default": False},
+          "materialize_embeddings": {"type": "boolean", "default": False},
+        },
+        "additionalProperties": False,
+      },
+    }
+
+  async def execute(self, arguments: dict[str, Any]) -> dict[str, Any]:
+    from robosystems.models.api.graphs.operations import MaterializeOp
+    from robosystems.operations.graph.commands.materialize import materialize_cmd
+
+    user = _require_user(self.client)
+    if user is None:
+      return _user_missing_err()
+
+    graph_id = self.client.graph_id
+    repo_err = _block_shared_repo(graph_id)
+    if repo_err:
+      return repo_err
+
+    try:
+      body = MaterializeOp.model_validate(arguments)
+    except Exception as exc:
+      return {"error": "invalid_arguments", "message": str(exc)}
+
+    session, close = _open_platform_session()
+    try:
+      try:
+        result = await materialize_cmd(graph_id, body, user, session)
+      except Exception as exc:
+        # Re-raise HTTPException details through the envelope; other
+        # failures become a generic command_failed.
+        detail = getattr(exc, "detail", None) or str(exc)
+        status_code = getattr(exc, "status_code", None)
+        if status_code:
+          return {
+            "error": "materialize_rejected",
+            "status": status_code,
+            "message": str(detail),
+          }
+        logger.error("materialize failed for %s: %s", graph_id, exc)
+        return {"error": "command_failed", "message": str(detail)}
+
+      if isinstance(result, dict):
+        return result
+      return result.model_dump(mode="json")
+    finally:
+      close()
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# create-backup
+# ══════════════════════════════════════════════════════════════════════════
+
+
+class CreateBackupTool:
+  """Enqueue a full-dump backup of the graph (admin)."""
+
+  def __init__(self, graph_client):
+    self.client = graph_client
+
+  def get_tool_definition(self) -> dict[str, Any]:
+    return {
+      "name": "create-backup",
+      "description": (
+        "Enqueue a full-dump backup of this graph. Async — returns an "
+        "`operation_id`; subscribe to the SSE endpoint for progress.\n\n"
+        "**WHEN TO USE:**\n"
+        "- Before a destructive operation (tier change, restore, schema wipe)\n"
+        "- On a scheduled basis for disaster-recovery hygiene\n"
+        "- Before running large agent-driven workflows\n\n"
+        "**PARAMETERS:**\n"
+        "- retention_days: How long to keep the backup (default 30, capped at tier max).\n"
+        "- encryption: Enable encryption (required for restore later)."
+      ),
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "retention_days": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 2555,
+            "default": 30,
+          },
+          "encryption": {"type": "boolean", "default": False},
+        },
+        "additionalProperties": False,
+      },
+    }
+
+  async def execute(self, arguments: dict[str, Any]) -> dict[str, Any]:
+    from robosystems.config import env
+    from robosystems.config.graph_tier import GraphTierConfig
+    from robosystems.middleware.sse import build_graph_job_config
+    from robosystems.models.core import Graph
+    from robosystems.worker.client import enqueue_task
+
+    user = _require_user(self.client)
+    if user is None:
+      return _user_missing_err()
+
+    graph_id = self.client.graph_id
+    repo_err = _block_shared_repo(graph_id)
+    if repo_err:
+      return repo_err
+
+    if not env.BACKUP_CREATION_ENABLED:
+      return {
+        "error": "backup_disabled",
+        "message": "Backup creation is currently disabled.",
+      }
+
+    retention_days = int(arguments.get("retention_days", 30))
+    encryption = bool(arguments.get("encryption", False))
+
+    session, close = _open_platform_session()
+    try:
+      admin_err = _verify_admin_on_graph(user, graph_id, session)
+      if admin_err:
+        return admin_err
+
+      # Cap retention to the tier max.
+      graph_record = Graph.get_by_id(graph_id, session)
+      if graph_record and graph_record.graph_tier:
+        tier_max = GraphTierConfig.get_backup_limits(graph_record.graph_tier).get(
+          "backup_retention_days", 90
+        )
+        retention_days = min(retention_days, tier_max)
+
+      run_config = build_graph_job_config(
+        "backup_graph_job",
+        graph_id=graph_id,
+        user_id=str(user.id),
+        backup_type="full",
+        backup_format="full_dump",
+        retention_days=retention_days,
+        compression=True,
+        encryption=encryption,
+      )
+      response = await enqueue_task(
+        task_type="dagster_job_monitor",
+        graph_id=graph_id,
+        user_id=str(user.id),
+        params={"job_name": "backup_graph_job", "run_config": run_config},
+      )
+      operation_id = response["operation_id"]
+      return {
+        "status": "accepted",
+        "operation_id": operation_id,
+        "retention_days": retention_days,
+        "encryption": encryption,
+        "message": (
+          f"Backup started. Monitor via /v1/operations/{operation_id}/stream"
+        ),
+      }
+    finally:
+      close()
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# get-graph-sync-status (moved from materialization_tools.py)
+# ══════════════════════════════════════════════════════════════════════════
+
+
+class GetGraphSyncStatusTool:
+  """Check whether the LadybugDB graph is stale vs its OLTP source."""
+
+  def __init__(self, graph_client):
+    self.client = graph_client
+
+  def get_tool_definition(self) -> dict[str, Any]:
+    return {
+      "name": "get-graph-sync-status",
+      "description": (
+        "Check if the LadybugDB graph is in sync with its source OLTP data.\n\n"
+        "**WHEN TO USE:**\n"
+        "- Before querying financial data, to verify the graph is current\n"
+        "- After OLTP writes, to check if rematerialization is needed\n"
+        "- When the user asks about data freshness\n\n"
+        "**RETURNS:** sync_status (`fresh`/`stale`), stale_since, "
+        "stale_reason, stale_duration_minutes, last_materialized_at, "
+        "hours_since_materialization, materialization_count."
+      ),
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": False,
+      },
+    }
+
+  async def execute(self, arguments: dict[str, Any]) -> dict[str, Any]:
+    from robosystems.models.core import Graph
+
+    graph_id = self.client.graph_id
+    session, close = _open_platform_session()
+    try:
+      graph = Graph.get_by_id(graph_id, session)
+      if graph is None:
+        return {"error": "graph_not_found", "message": f"Graph {graph_id} not found."}
+
+      is_stale = bool(graph.graph_stale)
+      stale_reason = graph.graph_stale_reason
+      stale_at = graph.graph_stale_at
+
+      metadata = graph.graph_metadata or {}
+      last_materialized_at = metadata.get("last_materialized_at")
+      materialization_count = metadata.get("materialization_count", 0)
+
+      stale_duration_minutes = None
+      if is_stale and stale_at:
+        stale_dt = stale_at
+        if stale_dt.tzinfo is None:
+          stale_dt = stale_dt.replace(tzinfo=UTC)
+        stale_duration_minutes = round(
+          (datetime.now(UTC) - stale_dt).total_seconds() / 60, 1
+        )
+
+      hours_since_materialization = None
+      if last_materialized_at:
+        try:
+          from dateutil import parser as date_parser
+
+          last_mat = date_parser.isoparse(last_materialized_at)
+          hours_since_materialization = round(
+            (datetime.now(UTC) - last_mat).total_seconds() / 3600, 1
+          )
+        except Exception as exc:
+          logger.warning(
+            "Could not parse last_materialized_at %r: %s", last_materialized_at, exc
+          )
+
+      return {
+        "sync_status": "stale" if is_stale else "fresh",
+        "stale_since": stale_at.isoformat() if stale_at else None,
+        "stale_duration_minutes": stale_duration_minutes,
+        "stale_reason": stale_reason,
+        "last_materialized_at": last_materialized_at,
+        "hours_since_materialization": hours_since_materialization,
+        "materialization_count": materialization_count,
+      }
+    finally:
+      close()
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# switch-workspace (kept name for backwards compat — client-side only)
+# ══════════════════════════════════════════════════════════════════════════
+
+
+class SwitchWorkspaceTool:
+  """Client-side workspace switcher.
+
+  The MCP client intercepts `switch-workspace` before sending; the
+  server-side execute is a no-op error. Kept as-is (name + behavior)
+  because the client already treats it as a sentinel.
+  """
+
+  def __init__(self, graph_client):
+    self.client = graph_client
+
+  def get_tool_definition(self) -> dict[str, Any]:
+    return {
+      "name": "switch-workspace",
+      "description": (
+        "Switch the active graph context to a different subgraph (or "
+        "`primary` to return to the parent). **Client-side tool** — the "
+        "MCP client should intercept this locally rather than calling the "
+        "server. Server-side invocation returns an error."
+      ),
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "workspace_id": {
+            "type": "string",
+            "description": (
+              "Target subgraph id (e.g. `kg123_dev`), or `primary` to "
+              "switch to the parent graph."
+            ),
+          },
+        },
+        "required": ["workspace_id"],
+        "additionalProperties": False,
+      },
+    }
+
+  async def execute(self, arguments: dict[str, Any]) -> dict[str, Any]:
+    return {
+      "error": "client_side_tool",
+      "message": (
+        "switch-workspace is a client-side tool. The MCP client should "
+        "intercept it locally rather than calling the server."
+      ),
+    }

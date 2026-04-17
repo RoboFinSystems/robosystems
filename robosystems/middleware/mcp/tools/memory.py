@@ -65,7 +65,7 @@ def _validate_subgraph_context(graph_id: str) -> dict[str, Any] | None:
     return {
       "error": "subgraph_required",
       "message": "This tool only works on subgraphs, not the parent graph. "
-      "Use create-workspace to create a memory subgraph first, "
+      "Use create-subgraph to create a memory subgraph first, "
       "then switch-workspace to activate it.",
     }
 

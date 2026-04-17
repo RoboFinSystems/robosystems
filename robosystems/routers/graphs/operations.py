@@ -193,12 +193,23 @@ async def delete_subgraph_op(
   cache: IdempotencyCache = Depends(get_idempotency_cache),
   db: Session = Depends(get_async_db_session),
 ) -> OperationEnvelope:
+  from robosystems.config.shared_repositories import is_shared_repository_or_subgraph
   from robosystems.models.core.graph.graph_user import GraphUser
   from robosystems.routers.graphs.subgraphs.utils import (
     get_subgraph_by_name,
     get_subgraph_service,
   )
   from robosystems.security import SecurityAuditLogger, SecurityEventType
+
+  # Shared-repo subgraphs (e.g. `sec_historical`) are platform-managed.
+  # The admin-role check further down would implicitly block this too,
+  # but keep the explicit guard so a future change to how repo access is
+  # granted can't silently expose this path.
+  if is_shared_repository_or_subgraph(graph_id):
+    raise HTTPException(
+      status_code=status.HTTP_403_FORBIDDEN,
+      detail=(f"Deleting subgraphs is not allowed on shared repository '{graph_id}'."),
+    )
 
   ctx = _ctx(
     graph_id=graph_id,
@@ -534,7 +545,18 @@ async def change_tier_op(
   cache: IdempotencyCache = Depends(get_idempotency_cache),
   db: Session = Depends(get_async_db_session),
 ) -> OperationEnvelope:
+  from robosystems.config.shared_repositories import is_shared_repository_or_subgraph
   from robosystems.operations.graph.commands.tier import change_graph_tier_cmd
+
+  # Shared repositories (SEC, etc.) run on platform-managed infrastructure —
+  # they have no user-owned subscription, so `change_graph_tier_cmd` would
+  # fail at the subscription lookup anyway. Reject up-front so the error
+  # message points at the real reason instead of "subscription not found".
+  if is_shared_repository_or_subgraph(graph_id):
+    raise HTTPException(
+      status_code=status.HTTP_403_FORBIDDEN,
+      detail=(f"Tier changes are not allowed on shared repository '{graph_id}'."),
+    )
 
   op_name = "change-tier"
   user_id = str(user.id)

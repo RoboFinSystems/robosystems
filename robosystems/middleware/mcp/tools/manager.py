@@ -32,14 +32,17 @@ from ..exceptions import (
 )
 from .cypher_tool import CypherTool
 from .example_queries_tool import ExampleQueriesTool
-from .memory import AddNodeTableTool, AddRelationshipTableTool, WriteCypherTool
-from .schema_tool import SchemaTool
-from .workspace import (
-  CreateWorkspaceTool,
-  DeleteWorkspaceTool,
-  ListWorkspacesTool,
+from .graph_tools import (
+  CreateBackupTool,
+  CreateSubgraphTool,
+  DeleteSubgraphTool,
+  GetGraphSyncStatusTool,
+  ListSubgraphsTool,
+  MaterializeTool,
   SwitchWorkspaceTool,
 )
+from .memory import AddNodeTableTool, AddRelationshipTableTool, WriteCypherTool
+from .schema_tool import SchemaTool
 
 if TYPE_CHECKING:
   from robosystems.middleware.extensions import GraphExtensionContext
@@ -144,19 +147,32 @@ class GraphMCPTools:
 
         self.resolve_element_tool = ResolveElementTool(graph_client)
 
-    # Layer 3: Infrastructure tools (gated by feature flags + read_only)
-    self.create_workspace_tool = None
-    self.delete_workspace_tool = None
-    self.list_workspaces_tool = None
+    # Layer 3: Graph lifecycle tools — subgraph navigation + lifecycle ops
+    # mirroring a subset of the REST `/v1/graphs/{g}/operations/*` surface.
+    # Writes are gated by `read_only`; `switch-workspace` is a client-side
+    # sentinel so it stays always-available when the workspace feature
+    # flag is set.
+    #
+    # Deliberately **not exposed on MCP** — both still live on REST for
+    # humans:
+    # - `change-tier`: 3-5 minute destructive EBS migration with billing
+    #   implications and fail-on-downgrade semantics.
+    # - `restore-backup`: overwrites live graph data with a historical
+    #   snapshot; recovery from a mis-fired restore is very expensive.
+    self.create_subgraph_tool = None
+    self.delete_subgraph_tool = None
+    self.list_subgraphs_tool = None
     self.switch_workspace_tool = None
+    self.create_backup_tool = None
     if env.MCP_WORKSPACE_ENABLED:
-      # Navigation tools (switch/list) are always available
-      self.list_workspaces_tool = ListWorkspacesTool(graph_client)
+      # Navigation tools (list / switch) — always available.
+      self.list_subgraphs_tool = ListSubgraphsTool(graph_client)
       self.switch_workspace_tool = SwitchWorkspaceTool(graph_client)
-      # Mutation tools (create/delete) are blocked for read-only graphs
+      # Write tools — blocked on shared-repo or read-only graphs.
       if not read_only:
-        self.create_workspace_tool = CreateWorkspaceTool(graph_client)
-        self.delete_workspace_tool = DeleteWorkspaceTool(graph_client)
+        self.create_subgraph_tool = CreateSubgraphTool(graph_client)
+        self.delete_subgraph_tool = DeleteSubgraphTool(graph_client)
+        self.create_backup_tool = CreateBackupTool(graph_client)
 
     self.write_cypher_tool = None
     self.add_node_table_tool = None
@@ -172,20 +188,20 @@ class GraphMCPTools:
 
       self.build_fact_grid_tool = BuildFactGridTool(graph_client)
 
-    # Layer 2: Materialization tools (user entity graphs only, not shared repos)
-    # Shared repos (SEC) use their own pipeline and don't track staleness.
+    # Layer 2: Materialization — `materialize` + `get-graph-sync-status`.
+    # User entity graphs only (shared repos use their own pipeline and
+    # don't track staleness). `materialize` replaces the legacy
+    # `materialize-graph` tool and mirrors the REST body shape.
     self.get_graph_sync_status_tool = None
-    self.materialize_graph_tool = None
+    self.materialize_tool = None
     if (
       self._has_extension("roboledger")
       and env.ROBOLEDGER_ENABLED
       and not self._is_shared_repository()
       and not read_only
     ):
-      from .materialization_tools import GetGraphSyncStatusTool, MaterializeGraphTool
-
       self.get_graph_sync_status_tool = GetGraphSyncStatusTool(graph_client)
-      self.materialize_graph_tool = MaterializeGraphTool(graph_client)
+      self.materialize_tool = MaterializeTool(graph_client)
 
     # Layer 2: Schedule read tools (gated by roboledger extension +
     # ROBOLEDGER_ENABLED). Writes are registrar-generated.
@@ -386,21 +402,24 @@ class GraphMCPTools:
 
   def _get_workspace_tool_definitions(self) -> list[dict[str, Any]]:
     """
-    Get workspace management tool definitions from actual tool implementations.
+    Get graph-lifecycle tool definitions (navigation + write ops).
 
     Returns:
-        List of workspace tool definitions (empty if MCP_WORKSPACE_ENABLED is false).
-        For read-only graphs, only navigation tools (switch/list) are included.
+        List of lifecycle tool definitions (empty if MCP_WORKSPACE_ENABLED is false).
+        For read-only graphs, only navigation tools (switch / list-subgraphs)
+        are included.
     """
     tools = []
     if self.switch_workspace_tool is not None:
       tools.append(self.switch_workspace_tool.get_tool_definition())
-    if self.list_workspaces_tool is not None:
-      tools.append(self.list_workspaces_tool.get_tool_definition())
-    if self.create_workspace_tool is not None:
-      tools.append(self.create_workspace_tool.get_tool_definition())
-    if self.delete_workspace_tool is not None:
-      tools.append(self.delete_workspace_tool.get_tool_definition())
+    if self.list_subgraphs_tool is not None:
+      tools.append(self.list_subgraphs_tool.get_tool_definition())
+    if self.create_subgraph_tool is not None:
+      tools.append(self.create_subgraph_tool.get_tool_definition())
+    if self.delete_subgraph_tool is not None:
+      tools.append(self.delete_subgraph_tool.get_tool_definition())
+    if self.create_backup_tool is not None:
+      tools.append(self.create_backup_tool.get_tool_definition())
     return tools
 
   def _get_memory_tool_definitions(self) -> list[dict[str, Any]]:
@@ -435,8 +454,8 @@ class GraphMCPTools:
     tools = []
     if self.get_graph_sync_status_tool is not None:
       tools.append(self.get_graph_sync_status_tool.get_tool_definition())
-    if self.materialize_graph_tool is not None:
-      tools.append(self.materialize_graph_tool.get_tool_definition())
+    if self.materialize_tool is not None:
+      tools.append(self.materialize_tool.get_tool_definition())
     return tools
 
   def _get_schedule_tool_definitions(self) -> list[dict[str, Any]]:
@@ -643,40 +662,48 @@ class GraphMCPTools:
         result = await self.financial_statement_tool.execute(arguments)
         return result if return_raw else json.dumps(result, indent=2)
 
-      # Layer 3: Infrastructure tools (feature-flag gated)
-      elif name == "create-workspace":
-        if self.create_workspace_tool is None:
+      # Layer 3: Graph lifecycle tools (MCP_WORKSPACE_ENABLED, read_only gates)
+      elif name == "create-subgraph":
+        if self.create_subgraph_tool is None:
           raise ValueError(
-            self._tool_unavailable_reason("create-workspace", "MCP_WORKSPACE_ENABLED")
+            self._tool_unavailable_reason("create-subgraph", "MCP_WORKSPACE_ENABLED")
           )
-        result = await self.create_workspace_tool.execute(arguments)
+        result = await self.create_subgraph_tool.execute(arguments)
         return result if return_raw else json.dumps(result, indent=2)
 
-      elif name == "delete-workspace":
-        if self.delete_workspace_tool is None:
+      elif name == "delete-subgraph":
+        if self.delete_subgraph_tool is None:
           raise ValueError(
-            self._tool_unavailable_reason("delete-workspace", "MCP_WORKSPACE_ENABLED")
+            self._tool_unavailable_reason("delete-subgraph", "MCP_WORKSPACE_ENABLED")
           )
-        result = await self.delete_workspace_tool.execute(arguments)
+        result = await self.delete_subgraph_tool.execute(arguments)
         return result if return_raw else json.dumps(result, indent=2)
 
-      elif name == "list-workspaces":
-        if self.list_workspaces_tool is None:
+      elif name == "list-subgraphs":
+        if self.list_subgraphs_tool is None:
           raise ValueError(
-            "list-workspaces tool is not available. "
+            "list-subgraphs tool is not available. "
             "Set MCP_WORKSPACE_ENABLED=true to enable this feature."
           )
-        result = await self.list_workspaces_tool.execute(arguments)
+        result = await self.list_subgraphs_tool.execute(arguments)
         return result if return_raw else json.dumps(result, indent=2)
 
       elif name == "switch-workspace":
-        # This is client-side only - should be intercepted by client
+        # Client-side sentinel — the MCP client should intercept locally.
         if self.switch_workspace_tool is None:
           raise ValueError(
             "switch-workspace tool is not available. "
             "Set MCP_WORKSPACE_ENABLED=true to enable this feature."
           )
         result = await self.switch_workspace_tool.execute(arguments)
+        return result if return_raw else json.dumps(result, indent=2)
+
+      elif name == "create-backup":
+        if self.create_backup_tool is None:
+          raise ValueError(
+            self._tool_unavailable_reason("create-backup", "MCP_WORKSPACE_ENABLED")
+          )
+        result = await self.create_backup_tool.execute(arguments)
         return result if return_raw else json.dumps(result, indent=2)
 
       elif name == "write-graph-cypher":
@@ -724,12 +751,12 @@ class GraphMCPTools:
         result = await self.get_graph_sync_status_tool.execute(arguments)
         return result if return_raw else json.dumps(result, indent=2)
 
-      elif name == "materialize-graph":
-        if self.materialize_graph_tool is None:
+      elif name == "materialize":
+        if self.materialize_tool is None:
           raise ValueError(
-            self._tool_unavailable_reason("materialize-graph", "ROBOLEDGER_ENABLED")
+            self._tool_unavailable_reason("materialize", "ROBOLEDGER_ENABLED")
           )
-        result = await self.materialize_graph_tool.execute(arguments)
+        result = await self.materialize_tool.execute(arguments)
         return result if return_raw else json.dumps(result, indent=2)
 
       # Schedule read tools (writes are registrar-generated, handled at Layer 0)

@@ -99,7 +99,7 @@ class TestCallToolErrors:
 
   @pytest.mark.asyncio
   async def test_disabled_workspace_raises(self, tools):
-    result = await tools.call_tool("create-workspace", {})
+    result = await tools.call_tool("create-subgraph", {})
     assert "not available" in result or "Error" in result
 
   @pytest.mark.asyncio
@@ -124,12 +124,12 @@ class TestCallToolErrors:
 
   @pytest.mark.asyncio
   async def test_disabled_delete_workspace_raises(self, tools):
-    result = await tools.call_tool("delete-workspace", {})
+    result = await tools.call_tool("delete-subgraph", {})
     assert "not available" in result or "Error" in result
 
   @pytest.mark.asyncio
   async def test_disabled_list_workspaces_raises(self, tools):
-    result = await tools.call_tool("list-workspaces", {})
+    result = await tools.call_tool("list-subgraphs", {})
     assert "not available" in result or "Error" in result
 
   @pytest.mark.asyncio

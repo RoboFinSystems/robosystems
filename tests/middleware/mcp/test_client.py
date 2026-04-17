@@ -435,16 +435,17 @@ class TestGraphMCPTools:
       mock_filter.first.return_value = mock_graph
       mock_order_by.all.return_value = []
 
-      result = await tools.call_tool("list-workspaces", {}, return_raw=True)
+      result = await tools.call_tool("list-subgraphs", {}, return_raw=True)
 
     # Check that the tool was called and returned a result
     assert result is not None
     assert isinstance(result, dict)
-    # List workspaces returns workspaces array or error
-    assert "workspaces" in result or "error" in result
-    if "workspaces" in result:
-      assert result["total_workspaces"] == 1
-      assert len(result["workspaces"]) == 1
+    # list-subgraphs returns subgraphs array or error
+    assert "subgraphs" in result or "error" in result
+    if "subgraphs" in result:
+      # Primary graph + any subgraphs
+      assert result["total_subgraphs"] == 0
+      assert len(result["subgraphs"]) == 1  # primary entry only
 
   @pytest.mark.asyncio
   @pytest.mark.unit
@@ -495,7 +496,7 @@ class TestGraphMCPTools:
     tools = GraphMCPTools(mock_graph_client)
 
     result = await tools.call_tool(
-      "create-workspace", {"name": "invalid-name"}, return_raw=True
+      "create-subgraph", {"name": "invalid-name"}, return_raw=True
     )
 
     assert result["error"] == "invalid_name"
@@ -527,9 +528,9 @@ class TestGraphMCPTools:
     mock_graph_client.graph_id = "kg1234567890abcdef"
     tools = GraphMCPTools(mock_graph_client)
 
-    # Calling workspace tool when disabled should return error message
+    # Calling a subgraph write tool when disabled returns an error envelope.
     result = await tools.call_tool(
-      "create-workspace", {"name": "test"}, return_raw=False
+      "create-subgraph", {"name": "test"}, return_raw=False
     )
 
     assert "not available" in result
