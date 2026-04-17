@@ -34,7 +34,10 @@ from typing import Any
 from fastapi import APIRouter, Depends, Header, HTTPException, Path
 from pydantic import BaseModel
 from sqlalchemy.exc import ProgrammingError
+from sqlalchemy.orm import Session
 
+from robosystems.database import get_db_session
+from robosystems.middleware.graph.types import GRAPH_OR_SUBGRAPH_ID_PATTERN
 from robosystems.middleware.operations import (
   IdempotencyCache,
   OperationContext,
@@ -42,6 +45,7 @@ from robosystems.middleware.operations import (
   get_idempotency_cache,
 )
 from robosystems.middleware.otel.metrics import endpoint_metrics_decorator
+from robosystems.models.core import Graph
 
 # ── Error-map types ──────────────────────────────────────────────────────
 
@@ -91,7 +95,8 @@ class OperationSpec:
       docstring if empty).
     path: URL path override (defaults to `/{name}`).
     business_event_type: metrics event key (defaults to
-      `ledger_{snake_name}`).
+      `{domain}_{snake_name}`, where `domain` is supplied by the
+      `OperationRegistrar` at mount time).
     requires_created_by: pass `created_by=str(user.id)` to the command.
       True by default.
     pre_validate: optional sync validator called before the command.
@@ -120,18 +125,98 @@ class OperationSpec:
   def resolved_path(self) -> str:
     return self.path or f"/{self.name}"
 
-  @property
-  def resolved_business_event_type(self) -> str:
+  def resolve_business_event_type(self, domain: str) -> str:
+    """Metrics event key for this op.
+
+    If the spec set `business_event_type` explicitly, that wins.
+    Otherwise default to `{domain}_{snake_name}` — the registrar
+    provides the domain, so adding a new `OperationRegistrar` for a
+    different domain (e.g., roboinvestor) gets the right prefix
+    automatically instead of silently emitting `ledger_*` events.
+    """
     if self.business_event_type:
       return self.business_event_type
     snake = self.name.replace("-", "_")
-    return f"ledger_{snake}"
+    return f"{domain}_{snake}"
 
   @property
   def openapi_operation_id(self) -> str:
     """OpenAPI operationId in camelCase — `op` + CamelCase(name)."""
     parts = self.name.split("-")
     return "op" + "".join(p.capitalize() for p in parts)
+
+
+# ── Extension feature gate ───────────────────────────────────────────────
+
+
+@dataclass(frozen=True, slots=True)
+class GraphExtensionContext:
+  """Per-request snapshot of the graph fields the extension gate cares about.
+
+  Returned by `require_graph_extension(...)` so callers that already need
+  the graph type or extension list don't reload the row.
+  """
+
+  graph_type: str
+  schema_extensions: tuple[str, ...]
+  is_repository: bool
+
+
+def load_graph_metadata(graph_id: str, session: Session) -> GraphExtensionContext:
+  """Load the Graph row and return only the fields relevant to the gate.
+
+  Raises a 403 (not 404) on miss to match `check_graph_access`'s
+  enumeration-safe posture — don't let an unauthenticated probe
+  distinguish "graph doesn't exist" from "you lack access."
+  """
+  graph = Graph.get_by_id(graph_id, session)
+  if graph is None:
+    raise HTTPException(
+      status_code=403,
+      detail=f"Access denied to graph: {graph_id}",
+    )
+  return GraphExtensionContext(
+    graph_type=graph.graph_type or "",
+    schema_extensions=tuple(graph.schema_extensions or []),
+    is_repository=bool(graph.is_repository),
+  )
+
+
+def require_graph_extension(extension: str) -> Callable[..., GraphExtensionContext]:
+  """FastAPI dependency factory for extensions **command** endpoints.
+
+  Assumes `get_current_user_with_graph` has already run and validated
+  user + graph access. This dependency adds the feature-level check:
+
+  - Repository graphs (shared repos like SEC) are rejected outright.
+    Command writes never land in a shared tenant schema; ingestion
+    pipelines are the only legitimate write path into those.
+  - Graphs whose `schema_extensions` doesn't list `extension` are
+    rejected with an explicit 403 instead of falling through to the
+    DB layer and surfacing a confusing "schema missing" 404.
+
+  Returns a `GraphExtensionContext` so hand-written handlers that need
+  the metadata don't pay for a second DB lookup.
+  """
+
+  def _dep(
+    graph_id: str = Path(..., pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN),
+    session: Session = Depends(get_db_session),
+  ) -> GraphExtensionContext:
+    meta = load_graph_metadata(graph_id, session)
+    if meta.is_repository or meta.graph_type == "repository":
+      raise HTTPException(
+        status_code=403,
+        detail=f"{extension} commands are not available on repository graphs",
+      )
+    if extension not in meta.schema_extensions:
+      raise HTTPException(
+        status_code=403,
+        detail=f"{extension} is not provisioned for this graph",
+      )
+    return meta
+
+  return _dep
 
 
 # ── Registrar ────────────────────────────────────────────────────────────
@@ -189,6 +274,7 @@ class OperationRegistrar:
     schema_missing_404: Callable[[], HTTPException],
     user_dep: Callable,
     graph_id_pattern: str,
+    extension: str,
   ) -> None:
     self.router = router
     self.domain = domain
@@ -200,6 +286,10 @@ class OperationRegistrar:
     self.schema_missing_404 = schema_missing_404
     self.user_dep = user_dep
     self.graph_id_pattern = graph_id_pattern
+    self.extension = extension
+    # Build the extension-gate dependency once; every handler reuses it
+    # so FastAPI's dependency resolution can cache across routes.
+    self._extension_dep = require_graph_extension(extension)
     self.full_path_template = f"/extensions/{domain}/{{graph_id}}/operations"
     # Track registered specs for future MCP/agent adapter enumeration.
     self._registered: list[OperationSpec] = []
@@ -219,7 +309,7 @@ class OperationRegistrar:
     metrics_wrapped = endpoint_metrics_decorator(
       f"{self.full_path_template}{spec.resolved_path}",
       method="POST",
-      business_event_type=spec.resolved_business_event_type,
+      business_event_type=spec.resolve_business_event_type(self.domain),
     )(handler)
     self.router.post(
       spec.resolved_path,
@@ -265,6 +355,7 @@ class OperationRegistrar:
     schema_missing_404 = self.schema_missing_404
     graph_id_pattern = self.graph_id_pattern
     user_dep = self.user_dep
+    extension_dep = self._extension_dep
     # Late-bind the command and the session factory via sys.modules so
     # `unittest.mock.patch` on the source location works as expected.
     # A direct closure capture would hold the original function object,
@@ -284,6 +375,7 @@ class OperationRegistrar:
       body: BaseModel,
       graph_id: str = Path(..., pattern=graph_id_pattern),
       user=Depends(user_dep),
+      _ext: GraphExtensionContext = Depends(extension_dep),
       idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
       cache: IdempotencyCache = Depends(get_idempotency_cache),
     ) -> OperationEnvelope:
@@ -346,6 +438,9 @@ __all__ = [
   "ErrorDetailFactory",
   "ErrorMap",
   "ErrorMapEntry",
+  "GraphExtensionContext",
   "OperationRegistrar",
   "OperationSpec",
+  "load_graph_metadata",
+  "require_graph_extension",
 ]

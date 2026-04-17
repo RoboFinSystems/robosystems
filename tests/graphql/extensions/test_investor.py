@@ -35,12 +35,22 @@ def _make_user() -> MagicMock:
   return user
 
 
-def _ctx() -> dict:
-  """Build a fake Strawberry context with the test graph_id pre-set."""
+def _ctx(
+  *,
+  schema_extensions: tuple[str, ...] = ("roboinvestor",),
+  graph_type: str = "entity",
+) -> dict:
+  """Build a fake Strawberry context with the test graph_id pre-set.
+
+  `schema_extensions` defaults to `("roboinvestor",)` so the per-domain
+  feature gate (`require_extension`) passes for investor resolvers.
+  """
   return {
     "request": MagicMock(),
     "user": _make_user(),
     "graph_id": GRAPH_ID,
+    "schema_extensions": schema_extensions,
+    "graph_type": graph_type,
   }
 
 
@@ -59,6 +69,36 @@ def _patch_session():
 
   with patch("robosystems.db.extensions.extensions_session", return_value=mock_ctx_mgr):
     yield mock_session
+
+
+class TestExtensionGate:
+  """Resolver-level `require_extension` check for the investor domain.
+
+  A graph whose `schema_extensions` doesn't include `"roboinvestor"`
+  must surface a clean `EXTENSION_NOT_PROVISIONED` error instead of
+  falling through to the DB layer with a schema-missing failure.
+  """
+
+  def test_entity_graph_without_roboinvestor_extension(self) -> None:
+    result = schema.execute_sync(
+      "query { portfolios { pagination { total } } }",
+      context_value=_ctx(schema_extensions=()),
+    )
+    assert result.errors is not None
+    assert any(
+      "roboinvestor is not provisioned" in str(e.message) for e in result.errors
+    )
+
+  def test_ledger_only_graph_rejects_investor_queries(self) -> None:
+    result = schema.execute_sync(
+      "query { portfolios { pagination { total } } }",
+      context_value=_ctx(schema_extensions=("roboledger",)),
+    )
+    assert result.errors is not None
+    assert any(
+      "EXTENSION_NOT_PROVISIONED" in str((e.extensions or {}).get("code", ""))
+      for e in result.errors
+    )
 
 
 class TestPortfoliosResolver:

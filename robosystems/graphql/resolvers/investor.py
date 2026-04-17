@@ -82,7 +82,7 @@ class InvestorQuery:
     """Paginated list of portfolios."""
     _validate_pagination(limit, offset)
     try:
-      with _open_session(info) as session:
+      with _open_session(info, "roboinvestor") as session:
         response = reads_portfolios.list_portfolios(session, limit=limit, offset=offset)
     except (ValueError, ProgrammingError):
       _raise_investor_not_initialized()
@@ -96,7 +96,7 @@ class InvestorQuery:
   ) -> Portfolio | None:
     """Single portfolio by id."""
     try:
-      with _open_session(info) as session:
+      with _open_session(info, "roboinvestor") as session:
         response = reads_portfolios.get_portfolio(session, portfolio_id)
     except (ValueError, ProgrammingError):
       _raise_investor_not_initialized()
@@ -119,7 +119,7 @@ class InvestorQuery:
     """Paginated list of securities."""
     _validate_pagination(limit, offset)
     try:
-      with _open_session(info) as session:
+      with _open_session(info, "roboinvestor") as session:
         response = reads_securities.list_securities(
           session,
           entity_id=entity_id,
@@ -140,7 +140,7 @@ class InvestorQuery:
   ) -> Security | None:
     """Single security by id."""
     try:
-      with _open_session(info) as session:
+      with _open_session(info, "roboinvestor") as session:
         response = reads_securities.get_security(session, security_id)
     except (ValueError, ProgrammingError):
       _raise_investor_not_initialized()
@@ -163,7 +163,7 @@ class InvestorQuery:
     """Paginated list of positions."""
     _validate_pagination(limit, offset)
     try:
-      with _open_session(info) as session:
+      with _open_session(info, "roboinvestor") as session:
         response = reads_positions.list_positions(
           session,
           portfolio_id=portfolio_id,
@@ -184,7 +184,7 @@ class InvestorQuery:
   ) -> Position | None:
     """Single enriched position by id."""
     try:
-      with _open_session(info) as session:
+      with _open_session(info, "roboinvestor") as session:
         response = reads_positions.get_position(session, position_id)
     except (ValueError, ProgrammingError):
       _raise_investor_not_initialized()
@@ -202,7 +202,7 @@ class InvestorQuery:
   ) -> HoldingsList | None:
     """Portfolio positions grouped by entity."""
     try:
-      with _open_session(info) as session:
+      with _open_session(info, "roboinvestor") as session:
         response = reads_holdings.list_holdings(session, portfolio_id)
     except reads_holdings.PortfolioNotFoundError:
       return None

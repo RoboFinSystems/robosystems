@@ -144,7 +144,7 @@ class LedgerQuery:
   def entity(self, info: Info[GraphQLContext, None]) -> LedgerEntity | None:
     """Return the parent ledger entity (company) for a graph."""
     try:
-      with _open_session(info) as session:
+      with _open_session(info, "roboledger") as session:
         response = reads_entity.get_parent_entity(session)
     except (ValueError, ProgrammingError):
       _raise_ledger_not_initialized()
@@ -160,7 +160,7 @@ class LedgerQuery:
   ) -> list[LedgerEntity]:
     """List entities for a graph, optionally filtered by source."""
     try:
-      with _open_session(info) as session:
+      with _open_session(info, "roboledger") as session:
         responses = reads_entity.list_entities(session, source=source)
     except (ValueError, ProgrammingError):
       _raise_ledger_not_initialized()
@@ -189,7 +189,7 @@ class LedgerQuery:
     graph_id = require_graph_id(info)
 
     try:
-      with _open_session(info) as session:
+      with _open_session(info, "roboledger") as session:
         counts = reads_summary.get_ledger_counts(session)
     except (ValueError, ProgrammingError):
       _raise_ledger_not_initialized()
@@ -240,7 +240,7 @@ class LedgerQuery:
     """Paginated Chart of Accounts listing."""
     _validate_pagination(limit, offset)
     try:
-      with _open_session(info) as session:
+      with _open_session(info, "roboledger") as session:
         response = reads_accounts.list_accounts(
           session,
           classification=classification,
@@ -256,7 +256,7 @@ class LedgerQuery:
   def account_tree(self, info: Info[GraphQLContext, None]) -> AccountTree | None:
     """Chart of Accounts as a recursive tree."""
     try:
-      with _open_session(info) as session:
+      with _open_session(info, "roboledger") as session:
         response = reads_accounts.get_account_tree(session)
     except (ValueError, ProgrammingError):
       _raise_ledger_not_initialized()
@@ -275,7 +275,7 @@ class LedgerQuery:
   ) -> AccountRollups | None:
     """CoA accounts grouped by reporting element with balances."""
     try:
-      with _open_session(info) as session:
+      with _open_session(info, "roboledger") as session:
         response = reads_account_rollups.get_account_rollups(
           session,
           mapping_id=mapping_id,
@@ -299,7 +299,7 @@ class LedgerQuery:
   ) -> TrialBalance | None:
     """Trial balance for posted entries in a date range."""
     try:
-      with _open_session(info) as session:
+      with _open_session(info, "roboledger") as session:
         response = reads_trial_balance.get_trial_balance(
           session, start_date=start_date, end_date=end_date
         )
@@ -322,7 +322,7 @@ class LedgerQuery:
     """Paginated list of transactions."""
     _validate_pagination(limit, offset)
     try:
-      with _open_session(info) as session:
+      with _open_session(info, "roboledger") as session:
         response = reads_transactions.list_transactions(
           session,
           type=type,
@@ -343,7 +343,7 @@ class LedgerQuery:
   ) -> LedgerTransactionDetail | None:
     """Single transaction with all entries and line items."""
     try:
-      with _open_session(info) as session:
+      with _open_session(info, "roboledger") as session:
         response = reads_transactions.get_transaction(session, transaction_id)
     except (ValueError, ProgrammingError):
       _raise_ledger_not_initialized()
@@ -361,7 +361,7 @@ class LedgerQuery:
   ) -> TaxonomyList | None:
     """List all active taxonomies, optionally filtered by type."""
     try:
-      with _open_session(info) as session:
+      with _open_session(info, "roboledger") as session:
         response = reads_taxonomies.list_taxonomies(
           session, taxonomy_type=taxonomy_type
         )
@@ -373,7 +373,7 @@ class LedgerQuery:
   def reporting_taxonomy(self, info: Info[GraphQLContext, None]) -> Taxonomy | None:
     """The locked US GAAP reporting taxonomy, or null."""
     try:
-      with _open_session(info) as session:
+      with _open_session(info, "roboledger") as session:
         response = reads_taxonomies.get_reporting_taxonomy(session)
     except (ValueError, ProgrammingError):
       _raise_ledger_not_initialized()
@@ -397,7 +397,7 @@ class LedgerQuery:
     """Paginated list of taxonomy elements."""
     _validate_pagination(limit, offset)
     try:
-      with _open_session(info) as session:
+      with _open_session(info, "roboledger") as session:
         response = reads_taxonomies.list_elements(
           session,
           taxonomy_id=taxonomy_id,
@@ -419,7 +419,7 @@ class LedgerQuery:
   ) -> list[UnmappedElement]:
     """CoA elements not yet mapped to the reporting taxonomy."""
     try:
-      with _open_session(info) as session:
+      with _open_session(info, "roboledger") as session:
         responses = reads_taxonomies.list_unmapped_elements(
           session, mapping_id=mapping_id
         )
@@ -438,7 +438,7 @@ class LedgerQuery:
   ) -> StructureList | None:
     """List active structures."""
     try:
-      with _open_session(info) as session:
+      with _open_session(info, "roboledger") as session:
         response = reads_taxonomies.list_structures(
           session, taxonomy_id=taxonomy_id, structure_type=structure_type
         )
@@ -450,7 +450,7 @@ class LedgerQuery:
   def mappings(self, info: Info[GraphQLContext, None]) -> StructureList | None:
     """List all active mapping structures."""
     try:
-      with _open_session(info) as session:
+      with _open_session(info, "roboledger") as session:
         response = reads_taxonomies.list_mappings(session)
     except (ValueError, ProgrammingError):
       _raise_ledger_not_initialized()
@@ -464,7 +464,7 @@ class LedgerQuery:
   ) -> MappingDetail | None:
     """Single mapping structure with all associations."""
     try:
-      with _open_session(info) as session:
+      with _open_session(info, "roboledger") as session:
         response = reads_taxonomies.get_mapping_detail(session, mapping_id)
     except (ValueError, ProgrammingError):
       _raise_ledger_not_initialized()
@@ -480,7 +480,7 @@ class LedgerQuery:
   ) -> MappingCoverage | None:
     """Coverage stats for a mapping."""
     try:
-      with _open_session(info) as session:
+      with _open_session(info, "roboledger") as session:
         response = reads_taxonomies.get_mapping_coverage(session, mapping_id)
     except (ValueError, ProgrammingError):
       _raise_ledger_not_initialized()
@@ -496,7 +496,7 @@ class LedgerQuery:
   ) -> MappedTrialBalance | None:
     """Trial balance rolled up to reporting concepts via mapping associations."""
     try:
-      with _open_session(info) as session:
+      with _open_session(info, "roboledger") as session:
         response = reads_taxonomies.get_mapped_trial_balance(
           session, mapping_id, start_date=start_date, end_date=end_date
         )
@@ -510,7 +510,7 @@ class LedgerQuery:
   def schedules(self, info: Info[GraphQLContext, None]) -> ScheduleList | None:
     """List all active schedules."""
     try:
-      with _open_session(info) as session:
+      with _open_session(info, "roboledger") as session:
         response = reads_schedules.list_schedules(session, _schedule_svc)
     except (ValueError, ProgrammingError):
       _raise_ledger_not_initialized()
@@ -526,7 +526,7 @@ class LedgerQuery:
   ) -> ScheduleFacts | None:
     """Facts for a schedule, optionally filtered by period."""
     try:
-      with _open_session(info) as session:
+      with _open_session(info, "roboledger") as session:
         response = reads_schedules.get_schedule_facts(
           session, _schedule_svc, structure_id, period_start, period_end
         )
@@ -543,7 +543,7 @@ class LedgerQuery:
   ) -> PeriodCloseStatus | None:
     """Close status for all schedules in a fiscal period."""
     try:
-      with _open_session(info) as session:
+      with _open_session(info, "roboledger") as session:
         response = reads_schedules.get_period_close_status(
           session, _schedule_svc, period_start, period_end
         )
@@ -561,7 +561,7 @@ class LedgerQuery:
     graph_id = require_graph_id(info)
 
     try:
-      with _open_session(info) as session:
+      with _open_session(info, "roboledger") as session:
         calendar = _fiscal_svc.get(session, graph_id)
         if calendar is None:
           return None
@@ -591,7 +591,7 @@ class LedgerQuery:
   ) -> PeriodDrafts | None:
     """All draft entries for a fiscal period, ready for review before close."""
     try:
-      with _open_session(info) as session:
+      with _open_session(info, "roboledger") as session:
         response = reads_period_drafts.list_period_drafts(session, period)
     except (ValueError, ProgrammingError):
       _raise_ledger_not_initialized()
@@ -605,7 +605,7 @@ class LedgerQuery:
   ) -> ClosingBookStructures | None:
     """Closing book sidebar navigation (statements, schedules, rollups, etc.)."""
     try:
-      with _open_session(info) as session:
+      with _open_session(info, "roboledger") as session:
         response = reads_closing_book.get_closing_book_structures(session)
     except (ValueError, ProgrammingError):
       _raise_ledger_not_initialized()
@@ -617,7 +617,7 @@ class LedgerQuery:
   def reports(self, info: Info[GraphQLContext, None]) -> ReportList | None:
     """List all report definitions for this graph."""
     try:
-      with _open_session(info) as session:
+      with _open_session(info, "roboledger") as session:
         response = reads_reports.list_reports(session)
     except (ValueError, ProgrammingError):
       _raise_ledger_not_initialized()
@@ -631,7 +631,7 @@ class LedgerQuery:
   ) -> Report | None:
     """Single report definition with structures + entity name."""
     try:
-      with _open_session(info) as session:
+      with _open_session(info, "roboledger") as session:
         response = reads_reports.get_report(session, report_id)
     except (ValueError, ProgrammingError):
       _raise_ledger_not_initialized()
@@ -648,7 +648,7 @@ class LedgerQuery:
   ) -> Statement | None:
     """Rendered financial statement for a report + structure_type."""
     try:
-      with _open_session(info) as session:
+      with _open_session(info, "roboledger") as session:
         response = reads_reports.get_statement(session, report_id, structure_type)
     except reads_reports.StatementStructureNotFoundError:
       return None
@@ -670,7 +670,7 @@ class LedgerQuery:
     """Paginated list of publish lists for this graph."""
     _validate_pagination(limit, offset)
     try:
-      with _open_session(info) as session:
+      with _open_session(info, "roboledger") as session:
         response = reads_publish_lists.list_publish_lists(
           session, limit=limit, offset=offset
         )
@@ -686,7 +686,7 @@ class LedgerQuery:
   ) -> PublishListDetail | None:
     """Single publish list with enriched members, or null."""
     try:
-      with _open_session(info) as session:
+      with _open_session(info, "roboledger") as session:
         response = reads_publish_lists.get_publish_list(session, list_id)
     except (ValueError, ProgrammingError):
       _raise_ledger_not_initialized()
