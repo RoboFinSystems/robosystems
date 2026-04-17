@@ -38,18 +38,27 @@ def _make_user() -> MagicMock:
   return user
 
 
-def _ctx(user: MagicMock | None = None) -> dict:
+def _ctx(
+  user: MagicMock | None = None,
+  *,
+  schema_extensions: tuple[str, ...] = ("roboledger",),
+  graph_type: str = "entity",
+) -> dict:
   """Build a fake Strawberry context.
 
   Tests using `schema.execute_sync(context_value=...)` bypass
   `get_context` entirely, so `graph_id` and `user` need to be passed
   in by hand. Auth + graph access are normally enforced in
   `get_context` before resolvers run; tests assume they passed.
+  `schema_extensions` defaults to `("roboledger",)` so the per-domain
+  feature gate (`require_extension`) passes for ledger resolvers.
   """
   return {
     "request": MagicMock(),
     "user": user or _make_user(),
     "graph_id": GRAPH_ID,
+    "schema_extensions": schema_extensions,
+    "graph_type": graph_type,
   }
 
 
@@ -78,11 +87,54 @@ class TestAuthentication:
         "request": MagicMock(),
         "user": None,
         "graph_id": GRAPH_ID,
+        "schema_extensions": (),
+        "graph_type": "",
       },
     )
     assert result.errors is not None
     assert any("Authentication required" in str(e.message) for e in result.errors)
     assert result.data == {"entity": None}
+
+
+class TestExtensionGate:
+  """Resolver-level `require_extension` check.
+
+  `get_context` populates `schema_extensions` from the platform DB;
+  data resolvers call `require_extension(info, "roboledger")` via the
+  shared `_open_session` opener. A graph without roboledger must get a
+  clean `EXTENSION_NOT_PROVISIONED` error, not a schema-missing 500.
+  """
+
+  def test_entity_graph_without_roboledger_extension(self) -> None:
+    result = schema.execute_sync(
+      "query { entity { id name } }",
+      context_value=_ctx(schema_extensions=()),
+    )
+    assert result.errors is not None
+    assert any("roboledger is not provisioned" in str(e.message) for e in result.errors)
+
+  def test_graph_with_only_roboinvestor_rejects_ledger_queries(self) -> None:
+    result = schema.execute_sync(
+      "query { entity { id name } }",
+      context_value=_ctx(schema_extensions=("roboinvestor",)),
+    )
+    assert result.errors is not None
+    assert any(
+      "EXTENSION_NOT_PROVISIONED" in str((e.extensions or {}).get("code", ""))
+      for e in result.errors
+    )
+
+  def test_hello_probe_still_works_without_extension(self) -> None:
+    """The liveness probe must stay reachable even on graphs without
+    extensions — it never calls `require_extension`."""
+    user = _make_user()
+    user.email = "probe@example.com"
+    result = schema.execute_sync(
+      "query { hello }",
+      context_value=_ctx(user=user, schema_extensions=()),
+    )
+    assert result.errors is None
+    assert result.data == {"hello": "hello, probe@example.com"}
 
 
 class TestEntityResolver:
@@ -351,7 +403,13 @@ class TestHelloResolver:
     user.email = "alice@example.com"
     result = schema.execute_sync(
       "query { hello }",
-      context_value={"request": MagicMock(), "user": user, "graph_id": GRAPH_ID},
+      context_value={
+        "request": MagicMock(),
+        "user": user,
+        "graph_id": GRAPH_ID,
+        "schema_extensions": ("roboledger",),
+        "graph_type": "entity",
+      },
     )
     assert result.errors is None
     assert result.data == {"hello": "hello, alice@example.com"}

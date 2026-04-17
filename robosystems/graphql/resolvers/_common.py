@@ -57,15 +57,41 @@ def validate_pagination(limit: int, offset: int) -> None:
     )
 
 
-def open_extensions_session(info: Info[GraphQLContext, None]):
-  """Shared auth + extensions-session prelude for every data resolver.
+def require_extension(info: Info[GraphQLContext, None], extension: str) -> None:
+  """Raise a GraphQL error if the graph hasn't been provisioned for this extension.
+
+  Complements `require_user`: `get_context` has already validated auth
+  and graph access, but it does NOT 403 graphs that lack a given
+  extension (doing so would break the `hello` probe and schema
+  introspection on under-provisioned graphs). Domain resolvers call
+  this at the top of their shared session opener so the first data
+  field surfaces a clean `EXTENSION_NOT_PROVISIONED` error instead of
+  a confusing schema-missing fallthrough.
+
+  The context's `schema_extensions` is an empty tuple for
+  unauthenticated introspection traffic; combined with `require_user`
+  running first, this branch only fires for authenticated calls on
+  graphs where the extension genuinely isn't enabled.
+  """
+  if extension not in info.context["schema_extensions"]:
+    raise strawberry.exceptions.StrawberryGraphQLError(
+      message=f"{extension} is not provisioned for this graph",
+      extensions={"code": "EXTENSION_NOT_PROVISIONED"},
+    )
+
+
+def open_extensions_session(info: Info[GraphQLContext, None], extension: str):
+  """Shared auth + extension-gate + extensions-session prelude.
 
   Auth + graph access were enforced by `get_context` before this is
   ever reached — `require_user` here only catches the introspection
-  bypass case (no API key supplied at all). `graph_id` is read from
-  the request URL via `require_graph_id`.
+  bypass case (no API key supplied at all). `require_extension`
+  enforces the per-domain feature gate so resolvers never open a
+  session on a graph that lacks the extension. `graph_id` is read
+  from the request URL via `require_graph_id`.
   """
   require_user(info)
+  require_extension(info, extension)
   graph_id = require_graph_id(info)
   # Local import keeps this module importable without a running extensions DB.
   from robosystems.db.extensions import extensions_session

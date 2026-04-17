@@ -24,6 +24,10 @@ from sqlalchemy.exc import ProgrammingError
 
 from robosystems.db.extensions import extensions_session
 from robosystems.middleware.auth.dependencies import get_current_user_with_graph
+from robosystems.middleware.extensions import (
+  GraphExtensionContext,
+  require_graph_extension,
+)
 from robosystems.middleware.graph.types import GRAPH_OR_SUBGRAPH_ID_PATTERN
 from robosystems.middleware.operations import (
   IdempotencyCache,
@@ -89,6 +93,11 @@ router = APIRouter()
 
 _OP_TAG = "Extensions: RoboInvestor"
 _RATE_LIMIT = Depends(subscription_aware_rate_limit_dependency)
+
+# Feature-gate dep: rejects repository graphs and graphs that don't
+# list "roboinvestor" in their schema_extensions. Shared across every
+# hand-written endpoint below so FastAPI can cache the resolution.
+_require_roboinvestor = require_graph_extension("roboinvestor")
 
 
 # ───────────────────────────────────────────────────────────────────────────
@@ -198,6 +207,7 @@ async def create_portfolio_op(
   body: CreatePortfolioRequest,
   graph_id: str = Path(..., pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN),
   user: User = Depends(get_current_user_with_graph),
+  _ext: GraphExtensionContext = Depends(_require_roboinvestor),
   idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
   cache: IdempotencyCache = Depends(get_idempotency_cache),
 ) -> OperationEnvelope:
@@ -237,6 +247,7 @@ async def update_portfolio_op(
   body: UpdatePortfolioOperation,
   graph_id: str = Path(..., pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN),
   user: User = Depends(get_current_user_with_graph),
+  _ext: GraphExtensionContext = Depends(_require_roboinvestor),
   idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
   cache: IdempotencyCache = Depends(get_idempotency_cache),
 ) -> OperationEnvelope:
@@ -281,6 +292,7 @@ async def delete_portfolio_op(
   body: DeletePortfolioOperation,
   graph_id: str = Path(..., pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN),
   user: User = Depends(get_current_user_with_graph),
+  _ext: GraphExtensionContext = Depends(_require_roboinvestor),
   idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
   cache: IdempotencyCache = Depends(get_idempotency_cache),
 ) -> OperationEnvelope:
@@ -334,6 +346,7 @@ async def create_security_op(
   body: CreateSecurityRequest,
   graph_id: str = Path(..., pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN),
   user: User = Depends(get_current_user_with_graph),
+  _ext: GraphExtensionContext = Depends(_require_roboinvestor),
   idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
   cache: IdempotencyCache = Depends(get_idempotency_cache),
 ) -> OperationEnvelope:
@@ -376,6 +389,7 @@ async def update_security_op(
   body: UpdateSecurityOperation,
   graph_id: str = Path(..., pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN),
   user: User = Depends(get_current_user_with_graph),
+  _ext: GraphExtensionContext = Depends(_require_roboinvestor),
   idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
   cache: IdempotencyCache = Depends(get_idempotency_cache),
 ) -> OperationEnvelope:
@@ -420,6 +434,7 @@ async def delete_security_op(
   body: DeleteSecurityOperation,
   graph_id: str = Path(..., pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN),
   user: User = Depends(get_current_user_with_graph),
+  _ext: GraphExtensionContext = Depends(_require_roboinvestor),
   idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
   cache: IdempotencyCache = Depends(get_idempotency_cache),
 ) -> OperationEnvelope:
@@ -468,6 +483,7 @@ async def create_position_op(
   body: CreatePositionRequest,
   graph_id: str = Path(..., pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN),
   user: User = Depends(get_current_user_with_graph),
+  _ext: GraphExtensionContext = Depends(_require_roboinvestor),
   idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
   cache: IdempotencyCache = Depends(get_idempotency_cache),
 ) -> OperationEnvelope:
@@ -514,6 +530,7 @@ async def update_position_op(
   body: UpdatePositionOperation,
   graph_id: str = Path(..., pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN),
   user: User = Depends(get_current_user_with_graph),
+  _ext: GraphExtensionContext = Depends(_require_roboinvestor),
   idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
   cache: IdempotencyCache = Depends(get_idempotency_cache),
 ) -> OperationEnvelope:
@@ -558,6 +575,7 @@ async def delete_position_op(
   body: DeletePositionOperation,
   graph_id: str = Path(..., pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN),
   user: User = Depends(get_current_user_with_graph),
+  _ext: GraphExtensionContext = Depends(_require_roboinvestor),
   idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
   cache: IdempotencyCache = Depends(get_idempotency_cache),
 ) -> OperationEnvelope:

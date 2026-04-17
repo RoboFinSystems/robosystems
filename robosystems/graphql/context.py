@@ -65,14 +65,17 @@ from __future__ import annotations
 from typing import TypedDict
 
 import strawberry
-from fastapi import HTTPException, Path, Request, Security
+from fastapi import Depends, HTTPException, Path, Request, Security
+from sqlalchemy.orm import Session
 from strawberry.types import Info
 
+from robosystems.database import get_db_session
 from robosystems.graphql.auth import check_graph_access
 from robosystems.middleware.auth.dependencies import (
   API_KEY_HEADER,
   get_current_user,
 )
+from robosystems.middleware.extensions import load_graph_metadata
 from robosystems.middleware.graph.types import GRAPH_OR_SUBGRAPH_ID_PATTERN
 from robosystems.models.core import User
 
@@ -85,17 +88,27 @@ class GraphQLContext(TypedDict):
   before reading it. `graph_id` always matches the URL path
   parameter — auth+access are enforced before the context is built,
   so resolvers can trust it.
+
+  `schema_extensions` and `graph_type` are populated from the platform
+  DB once per request, after auth passes. They remain empty for
+  unauthenticated introspection traffic — data resolvers that call
+  `require_extension(info, ...)` will short-circuit with a clear
+  `EXTENSION_NOT_PROVISIONED` error in that case via the authenticated
+  path.
   """
 
   request: Request
   user: User | None
   graph_id: str
+  schema_extensions: tuple[str, ...]
+  graph_type: str
 
 
 async def get_context(
   request: Request,
   api_key: str | None = Security(API_KEY_HEADER),
   graph_id: str = Path(..., pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN),
+  db: Session = Depends(get_db_session),
 ) -> GraphQLContext:
   """Strawberry `context_getter`. Passed directly to `GraphQLRouter`.
 
@@ -115,8 +128,10 @@ async def get_context(
        work — a security regression vs. the REST endpoints.
 
     3. **Valid credentials** → `user` populated, `check_graph_access`
-       enforced immediately (403 short-circuit), then the request
-       reaches Strawberry.
+       enforced immediately (403 short-circuit). The graph row is
+       then loaded once and its `schema_extensions` + `graph_type` are
+       placed on the context so resolvers can enforce the per-domain
+       feature gate via `require_extension` without a second lookup.
   """
   has_credentials = bool(api_key) or bool(request.headers.get("Authorization"))
 
@@ -129,10 +144,24 @@ async def get_context(
     # No credentials at all → anonymous fallthrough for introspection.
     user = None
 
+  schema_extensions: tuple[str, ...] = ()
+  graph_type: str = ""
   if user is not None:
     check_graph_access(user, graph_id)
+    # Load once per request; resolvers read from context, never re-hit the DB.
+    # Same 403 semantics as check_graph_access: missing graph rows
+    # surface as "access denied" to avoid enumeration.
+    meta = load_graph_metadata(graph_id, db)
+    schema_extensions = meta.schema_extensions
+    graph_type = meta.graph_type
 
-  return {"request": request, "user": user, "graph_id": graph_id}
+  return {
+    "request": request,
+    "user": user,
+    "graph_id": graph_id,
+    "schema_extensions": schema_extensions,
+    "graph_type": graph_type,
+  }
 
 
 def require_user(info: Info[GraphQLContext, None]) -> User:
