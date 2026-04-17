@@ -632,7 +632,7 @@ class BackupManager:
 
       async with repository:
         # For LadybugDB, we need to get schema from our schema loader
-        from ...schemas.loader import LadybugSchemaLoader
+        from ....schemas.loader import LadybugSchemaLoader
 
         try:
           # Get schema information
@@ -748,7 +748,7 @@ class BackupManager:
 
       async with repository:
         # For LadybugDB, we need to get schema from our schema loader
-        from ...schemas.loader import LadybugSchemaLoader
+        from ....schemas.loader import LadybugSchemaLoader
 
         try:
           # Get schema information
@@ -866,7 +866,7 @@ class BackupManager:
 
       async with repository:
         # For LadybugDB, we need to get schema from our schema loader
-        from ...schemas.loader import LadybugSchemaLoader
+        from ....schemas.loader import LadybugSchemaLoader
 
         try:
           # Get schema information
@@ -1477,7 +1477,7 @@ class BackupManager:
     # Test graph database connectivity via repository
     try:
       # Use default graph for health check
-      from ...middleware.graph import get_universal_repository
+      from ....middleware.graph import get_universal_repository
 
       async def test_connection():
         repository = await get_universal_repository("default", operation_type="read")

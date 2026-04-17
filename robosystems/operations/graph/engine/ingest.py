@@ -607,7 +607,7 @@ def _is_global_relationship_schema_driven(relationship_name: str) -> bool:
       bool: True if this relationship involves global entities requiring IGNORE_ERRORS
   """
   try:
-    from ...schemas.base import BASE_RELATIONSHIPS
+    from ....schemas.base import BASE_RELATIONSHIPS
 
     # Check if the relationship is defined in the base schema
     base_relationship_names = {rel.name for rel in BASE_RELATIONSHIPS}
@@ -644,7 +644,7 @@ def _is_global_entity_schema_driven(table_name: str) -> bool:
       bool: True if this is a global entity requiring IGNORE_ERRORS
   """
   try:
-    from ...schemas.base import BASE_NODES
+    from ....schemas.base import BASE_NODES
 
     # Base schema nodes are always global
     base_node_names = {node.name for node in BASE_NODES}
