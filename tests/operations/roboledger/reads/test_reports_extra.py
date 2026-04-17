@@ -78,7 +78,7 @@ class TestResolveReportingWindow:
     with patch("robosystems.operations.roboledger.reads.reports.date") as mock_date:
       # Force "today" to Feb 15, 2026 -> Q1 = Jan-Mar.
       mock_date.today.return_value = date(2026, 2, 15)
-      mock_date.side_effect = lambda *a, **kw: date(*a, **kw)
+      mock_date.side_effect = date
       start, end = resolve_reporting_window(
         session,
         period_start=None,
@@ -94,7 +94,7 @@ class TestResolveReportingWindow:
     session = MagicMock()
     with patch("robosystems.operations.roboledger.reads.reports.date") as mock_date:
       mock_date.today.return_value = date(2026, 4, 15)
-      mock_date.side_effect = lambda *a, **kw: date(*a, **kw)
+      mock_date.side_effect = date
       start, end = resolve_reporting_window(
         session,
         period_start=None,

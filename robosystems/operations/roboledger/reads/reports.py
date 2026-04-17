@@ -49,6 +49,24 @@ VALID_STRUCTURE_TYPES = {
   "custom",
 }
 
+# Statement types accepted by the live (OLTP) path — cash_flow_statement is
+# not yet supported on OLTP (no generator). Shared across REST router and
+# MCP tool so they stay in sync.
+LIVE_STATEMENT_TYPES: tuple[str, ...] = (
+  "income_statement",
+  "balance_sheet",
+  "equity_statement",
+)
+
+# Statement types accepted by the graph-backed analysis path. The graph
+# hypercube carries cash-flow facts from XBRL filings, so it's valid here.
+ANALYSIS_STATEMENT_TYPES: tuple[str, ...] = (
+  "income_statement",
+  "balance_sheet",
+  "cash_flow_statement",
+  "equity_statement",
+)
+
 
 class StatementStructureNotFoundError(LookupError):
   """Raised when a statement's structure_type isn't in the report's taxonomy."""

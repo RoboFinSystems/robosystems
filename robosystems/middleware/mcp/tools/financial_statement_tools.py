@@ -21,8 +21,9 @@ from typing import Any
 
 from robosystems.config.shared_repositories import is_shared_repository_or_subgraph
 from robosystems.db.extensions import extensions_session
-from robosystems.logger import logger
 from robosystems.operations.roboledger.reads.reports import (
+  ANALYSIS_STATEMENT_TYPES,
+  LIVE_STATEMENT_TYPES,
   CoaMappingNotFoundError,
   get_live_financial_statement,
   resolve_reporting_window,
@@ -33,14 +34,6 @@ from robosystems.operations.roboledger.views import (
 )
 
 from .base_tool import BaseTool
-
-_LIVE_STATEMENT_TYPES = ("income_statement", "balance_sheet", "equity_statement")
-_ANALYSIS_STATEMENT_TYPES = (
-  "income_statement",
-  "balance_sheet",
-  "cash_flow_statement",
-  "equity_statement",
-)
 
 
 class LiveFinancialStatementTool(BaseTool):
@@ -76,7 +69,7 @@ Facts with element qnames, names, classifications, values across current + prior
           "statement_type": {
             "type": "string",
             "description": "Type of financial statement to generate",
-            "enum": list(_LIVE_STATEMENT_TYPES),
+            "enum": list(LIVE_STATEMENT_TYPES),
           },
           "period_start": {
             "type": "string",
@@ -112,11 +105,11 @@ Facts with element qnames, names, classifications, values across current + prior
     statement_type = (arguments.get("statement_type") or "").strip()
     if not statement_type:
       return {"error": "statement_type is required"}
-    if statement_type not in _LIVE_STATEMENT_TYPES:
+    if statement_type not in LIVE_STATEMENT_TYPES:
       return {
         "error": (
           f"Unknown statement_type '{statement_type}'. "
-          f"Valid types: {', '.join(_LIVE_STATEMENT_TYPES)}. "
+          f"Valid types: {', '.join(LIVE_STATEMENT_TYPES)}. "
           "Use financial-statement-analysis for cash_flow_statement."
         ),
       }
@@ -129,41 +122,36 @@ Facts with element qnames, names, classifications, values across current + prior
 
     graph_id = self.client.graph_id
 
-    try:
-      with extensions_session(graph_id) as session:
-        start, end = resolve_reporting_window(
+    with extensions_session(graph_id) as session:
+      start, end = resolve_reporting_window(
+        session,
+        period_start=period_start,
+        period_end=period_end,
+        period_type=period_type,
+        fiscal_year=fiscal_year,
+      )
+      try:
+        response = get_live_financial_statement(
           session,
-          period_start=period_start,
-          period_end=period_end,
-          period_type=period_type,
-          fiscal_year=fiscal_year,
+          graph_id=graph_id,
+          statement_type=statement_type,
+          period_start=start,
+          period_end=end,
+          limit=limit,
         )
-        try:
-          response = get_live_financial_statement(
-            session,
-            graph_id=graph_id,
-            statement_type=statement_type,
-            period_start=start,
-            period_end=end,
-            limit=limit,
-          )
-        except CoaMappingNotFoundError as exc:
-          return {
-            "error": str(exc),
-            "statement_type": statement_type,
-          }
+      except CoaMappingNotFoundError as exc:
+        return {
+          "error": str(exc),
+          "statement_type": statement_type,
+        }
 
-      result = response.model_dump(mode="json")
-      if not result["facts"]:
-        result["tip"] = (
-          f"No facts found for {statement_type}. "
-          "Check that ledger data is loaded and CoA→GAAP mappings are complete."
-        )
-      return result
-
-    except Exception as e:
-      logger.error(f"Live financial statement generation failed: {e}", exc_info=True)
-      return {"error": f"Statement generation failed: {e}"}
+    result = response.model_dump(mode="json")
+    if not result["facts"]:
+      result["tip"] = (
+        f"No facts found for {statement_type}. "
+        "Check that ledger data is loaded and CoA→GAAP mappings are complete."
+      )
+    return result
 
 
 class FinancialStatementAnalysisTool(BaseTool):
@@ -206,7 +194,7 @@ class FinancialStatementAnalysisTool(BaseTool):
           "statement_type": {
             "type": "string",
             "description": "Type of financial statement",
-            "enum": list(_ANALYSIS_STATEMENT_TYPES),
+            "enum": list(ANALYSIS_STATEMENT_TYPES),
           },
           "ticker": {
             "type": "string",
@@ -242,11 +230,11 @@ class FinancialStatementAnalysisTool(BaseTool):
     statement_type = (arguments.get("statement_type") or "").strip()
     if not statement_type:
       return {"error": "statement_type is required"}
-    if statement_type not in _ANALYSIS_STATEMENT_TYPES:
+    if statement_type not in ANALYSIS_STATEMENT_TYPES:
       return {
         "error": (
           f"Unknown statement_type '{statement_type}'. "
-          f"Valid types: {', '.join(_ANALYSIS_STATEMENT_TYPES)}"
+          f"Valid types: {', '.join(ANALYSIS_STATEMENT_TYPES)}"
         ),
       }
 
@@ -275,73 +263,68 @@ class FinancialStatementAnalysisTool(BaseTool):
       }
 
     resolved: dict[str, Any] | None = None
-    try:
-      if is_shared and not report_id and ticker:
-        from robosystems.adapters.sec.mcp import resolve_sec_report
+    if is_shared and not report_id and ticker:
+      from robosystems.adapters.sec.mcp import resolve_sec_report
 
-        resolved = await resolve_sec_report(
-          graph_id,
-          ticker=ticker,
-          period_type=period_type,
-          fiscal_year=fiscal_year,
-        )
-        report_id = resolved["identifier"] if resolved else None
+      resolved = await resolve_sec_report(
+        graph_id,
+        ticker=ticker,
+        period_type=period_type,
+        fiscal_year=fiscal_year,
+      )
+      report_id = resolved.get("identifier") if resolved else None
 
-      rows: list[dict] = []
-      if report_id or ticker:
-        rows = await query_financial_statement(
-          graph_id,
-          statement_type=statement_type,
-          report_id=report_id,
-          ticker=ticker,
-          period_type=period_type,
-          limit=limit,
-        )
+    rows: list[dict] = []
+    if report_id or ticker:
+      rows = await query_financial_statement(
+        graph_id,
+        statement_type=statement_type,
+        report_id=report_id,
+        ticker=ticker,
+        period_type=period_type,
+        limit=limit,
+      )
 
-      deduped = deduplicate_facts(rows)[:limit]
-      facts = [
-        {
-          "canonical_concept": row.get("canonical_concept"),
-          "qname": row.get("qname"),
-          "name": row.get("name"),
-          "value": row.get("value"),
-          "end_date": row.get("end_date"),
-          "period_type": row.get("period_type"),
-          "duration_type": row.get("duration_type"),
-        }
-        for row in deduped
-      ]
+    deduped = deduplicate_facts(rows)[:limit]
+    facts = [
+      {
+        "canonical_concept": row.get("canonical_concept"),
+        "qname": row.get("qname"),
+        "name": row.get("name"),
+        "value": row.get("value"),
+        "end_date": row.get("end_date"),
+        "period_type": row.get("period_type"),
+        "duration_type": row.get("duration_type"),
+      }
+      for row in deduped
+    ]
 
-      result: dict[str, Any] = {
-        "graph_id": graph_id,
-        "statement_type": statement_type,
-        "ticker": ticker,
-        "report_id": report_id,
-        "facts": facts,
-        "fact_count": len(facts),
+    result: dict[str, Any] = {
+      "graph_id": graph_id,
+      "statement_type": statement_type,
+      "ticker": ticker,
+      "report_id": report_id,
+      "facts": facts,
+      "fact_count": len(facts),
+    }
+
+    if resolved:
+      result["resolved_report"] = {
+        "report_id": resolved.get("identifier"),
+        "form": resolved.get("form"),
+        "filing_date": resolved.get("filing_date"),
+        "fiscal_year": resolved.get("fiscal_year"),
+        "fiscal_period": resolved.get("fiscal_period"),
       }
 
-      if resolved:
-        result["resolved_report"] = {
-          "report_id": resolved.get("identifier"),
-          "form": resolved.get("form"),
-          "filing_date": resolved.get("filing_date"),
-          "fiscal_year": resolved.get("fiscal_year"),
-          "fiscal_period": resolved.get("fiscal_period"),
-        }
+    if not facts:
+      hint_target = ticker or report_id or "this filter"
+      result["tip"] = (
+        f"No facts found for {hint_target} {statement_type}. "
+        "Try a different statement_type, period_type, or report_id."
+      )
 
-      if not facts:
-        hint_target = ticker or report_id or "this filter"
-        result["tip"] = (
-          f"No facts found for {hint_target} {statement_type}. "
-          "Try a different statement_type, period_type, or report_id."
-        )
-
-      return result
-
-    except Exception as e:
-      logger.error(f"Financial statement analysis query failed: {e}", exc_info=True)
-      return {"error": f"Query failed: {e}"}
+    return result
 
 
 def _parse_date(value: Any) -> date | None:

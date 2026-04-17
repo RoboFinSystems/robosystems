@@ -88,6 +88,43 @@ class TestGetToolDefinitionHelpers:
     assert "financial-statement-analysis" in names
     assert "live-financial-statement" in names
 
+  def test_live_statement_tool_absent_on_shared_repo(self, mock_client):
+    """Shared-repo graphs (SEC) must NOT get the OLTP live-statement tool
+    because they have no OLTP tenant schema."""
+    mock_client.graph_id = "sec"
+    with (
+      patch.object(GraphMCPTools, "_should_include_semantic_tools", return_value=False),
+      patch.object(GraphMCPTools, "_is_shared_repository", return_value=True),
+      patch("robosystems.middleware.mcp.tools.manager.env") as mock_env,
+    ):
+      mock_env.MCP_WORKSPACE_ENABLED = False
+      mock_env.MCP_MEMORY_ENABLED = False
+      mock_env.FACT_GRID_ENABLED = False
+      tools = GraphMCPTools(mock_client, schema_extensions=["roboledger"])
+
+    assert tools.financial_statement_analysis_tool is not None
+    assert tools.live_financial_statement_tool is None
+    names = {d["name"] for d in tools._get_curated_tool_definitions()}
+    assert "financial-statement-analysis" in names
+    assert "live-financial-statement" not in names
+
+  def test_live_statement_tool_absent_on_read_only(self, mock_client):
+    """Read-only graphs must NOT get the OLTP live-statement tool."""
+    with (
+      patch.object(GraphMCPTools, "_should_include_semantic_tools", return_value=False),
+      patch("robosystems.middleware.mcp.tools.manager.env") as mock_env,
+    ):
+      mock_env.MCP_WORKSPACE_ENABLED = False
+      mock_env.MCP_MEMORY_ENABLED = False
+      mock_env.FACT_GRID_ENABLED = False
+      tools = GraphMCPTools(
+        mock_client, schema_extensions=["roboledger"], read_only=True
+      )
+
+    # Analysis tool stays (read-only is fine for graph-backed reads)
+    assert tools.financial_statement_analysis_tool is not None
+    assert tools.live_financial_statement_tool is None
+
 
 class TestCallToolErrors:
   @pytest.mark.asyncio

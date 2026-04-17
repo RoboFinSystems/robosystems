@@ -60,6 +60,9 @@ from robosystems.models.api.views import (
   ViewResponse,
 )
 from robosystems.models.core import User
+from robosystems.operations.roboledger.reads.reports import (
+  ANALYSIS_STATEMENT_TYPES,
+)
 from robosystems.operations.roboledger.views import (
   FactGridBuilder,
   deduplicate_facts,
@@ -175,14 +178,6 @@ async def build_fact_grid_op(
   return await _dispatch(ctx, _runner, cache)
 
 
-_VALID_ANALYSIS_STATEMENT_TYPES = (
-  "income_statement",
-  "balance_sheet",
-  "cash_flow_statement",
-  "equity_statement",
-)
-
-
 @router.post(
   "/financial-statement-analysis",
   response_model=OperationEnvelope,
@@ -221,12 +216,12 @@ async def financial_statement_analysis_op(
     body_fingerprint=fingerprint_body(body),
   )
 
-  if body.statement_type not in _VALID_ANALYSIS_STATEMENT_TYPES:
+  if body.statement_type not in ANALYSIS_STATEMENT_TYPES:
     raise HTTPException(
       status_code=400,
       detail=(
         f"Unknown statement_type '{body.statement_type}'. "
-        f"Valid types: {', '.join(_VALID_ANALYSIS_STATEMENT_TYPES)}"
+        f"Valid types: {', '.join(ANALYSIS_STATEMENT_TYPES)}"
       ),
     )
 
@@ -257,7 +252,7 @@ async def financial_statement_analysis_op(
         period_type=body.period_type,
         fiscal_year=body.fiscal_year,
       )
-      report_id = resolved["identifier"] if resolved else None
+      report_id = resolved.get("identifier") if resolved else None
 
     rows: list[dict] = []
     if report_id or body.ticker:

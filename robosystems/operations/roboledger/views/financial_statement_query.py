@@ -68,11 +68,15 @@ async def query_financial_statement(
   if report_id:
     # Fast path: anchor on Report, intersect with FactSet.
     match_parts = [
-      "(s:Structure {canonical_type: $statement_type})"
-      "-[:STRUCTURE_HAS_FACT_SET]->(fs:FactSet)",
-      "(r:Report {identifier: $report_id})"
-      "-[:REPORT_HAS_FACT]->(f:Fact {has_dimensions: false})"
-      "-[:FACT_HAS_ELEMENT]->(e:Element)",
+      (
+        "(s:Structure {canonical_type: $statement_type})"
+        + "-[:STRUCTURE_HAS_FACT_SET]->(fs:FactSet)"
+      ),
+      (
+        "(r:Report {identifier: $report_id})"
+        + "-[:REPORT_HAS_FACT]->(f:Fact {has_dimensions: false})"
+        + "-[:FACT_HAS_ELEMENT]->(e:Element)"
+      ),
       "(fs)-[:FACT_SET_CONTAINS_FACT]->(f)",
       period_match,
     ]
@@ -80,10 +84,12 @@ async def query_financial_statement(
   else:
     # Ticker path: Structure-first traversal, anchor on Entity.
     match_parts = [
-      "(s:Structure {canonical_type: $statement_type})"
-      "-[:STRUCTURE_HAS_FACT_SET]->(fs:FactSet)"
-      "-[:FACT_SET_CONTAINS_FACT]->(f:Fact {has_dimensions: false})"
-      "-[:FACT_HAS_ELEMENT]->(e:Element)",
+      (
+        "(s:Structure {canonical_type: $statement_type})"
+        + "-[:STRUCTURE_HAS_FACT_SET]->(fs:FactSet)"
+        + "-[:FACT_SET_CONTAINS_FACT]->(f:Fact {has_dimensions: false})"
+        + "-[:FACT_HAS_ELEMENT]->(e:Element)"
+      ),
       period_match,
       "(f)-[:FACT_HAS_ENTITY]->(ent:Entity {ticker: $ticker})",
     ]

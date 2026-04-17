@@ -36,6 +36,7 @@ from robosystems.models.api.extensions.reports import (
 )
 from robosystems.models.core import User
 from robosystems.operations.roboledger.reads.reports import (
+  LIVE_STATEMENT_TYPES,
   CoaMappingNotFoundError,
   get_live_financial_statement,
   resolve_reporting_window,
@@ -50,12 +51,6 @@ router = APIRouter()
 
 _OP_TAG = "Extensions: RoboLedger"
 _RATE_LIMIT = Depends(subscription_aware_rate_limit_dependency)
-
-_VALID_STATEMENT_TYPES = (
-  "income_statement",
-  "balance_sheet",
-  "equity_statement",
-)
 
 _require_roboledger = require_graph_extension("roboledger")
 
@@ -97,12 +92,12 @@ async def live_financial_statement_op(
     body=body,
   )
 
-  if body.statement_type not in _VALID_STATEMENT_TYPES:
+  if body.statement_type not in LIVE_STATEMENT_TYPES:
     raise HTTPException(
       status_code=400,
       detail=(
         f"Unknown statement_type '{body.statement_type}'. "
-        f"Valid types: {', '.join(_VALID_STATEMENT_TYPES)}. "
+        f"Valid types: {', '.join(LIVE_STATEMENT_TYPES)}. "
         "Note: cash_flow_statement is not yet supported for OLTP ledgers; "
         "use financial-statement-analysis against SEC for cash flow data."
       ),
