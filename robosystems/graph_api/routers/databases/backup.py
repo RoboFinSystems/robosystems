@@ -20,7 +20,7 @@ from robosystems.graph_api.core.ladybug import get_ladybug_service
 from robosystems.graph_api.core.task_manager import backup_task_manager
 from robosystems.graph_api.models.database import BackupRequest, BackupResponse
 from robosystems.logger import logger
-from robosystems.operations.lbug.backup_manager import (
+from robosystems.operations.graph.engine.backup_manager import (
   BackupFormat,
   BackupJob,
   BackupType,

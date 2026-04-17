@@ -17,9 +17,9 @@ from robosystems.adapters.sec.processors.schema import (
   create_roboledger_ingestion_processor,
 )
 
-from ...config import env
-from ...logger import logger
-from ...security import SecurityAuditLogger
+from ....config import env
+from ....logger import logger
+from ....security import SecurityAuditLogger
 
 # Cache schema adapters to avoid recompilation
 _schema_adapter_cache: dict[str, XBRLSchemaConfigGenerator] = {}

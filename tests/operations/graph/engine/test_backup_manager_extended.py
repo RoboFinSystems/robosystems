@@ -15,7 +15,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from robosystems.operations.aws.s3 import BackupMetadata, S3BackupAdapter
-from robosystems.operations.lbug.backup_manager import (
+from robosystems.operations.graph.engine.backup_manager import (
   BackupFormat,
   BackupJob,
   BackupManager,
@@ -955,7 +955,7 @@ class TestGetDatabaseStats:
     mock_repo.execute_single = AsyncMock(side_effect=side_effect)
 
     with patch(
-      "robosystems.operations.lbug.backup_manager.get_universal_repository",
+      "robosystems.operations.graph.engine.backup_manager.get_universal_repository",
       new_callable=AsyncMock,
     ) as mock_get_repo:
       mock_get_repo.return_value = mock_repo
@@ -970,7 +970,7 @@ class TestGetDatabaseStats:
     mock_repo.execute_single = AsyncMock(return_value=None)
 
     with patch(
-      "robosystems.operations.lbug.backup_manager.get_universal_repository",
+      "robosystems.operations.graph.engine.backup_manager.get_universal_repository",
       new_callable=AsyncMock,
     ) as mock_get_repo:
       mock_get_repo.return_value = mock_repo
@@ -984,7 +984,7 @@ class TestGetDatabaseStats:
     mock_repo = _mock_repository()
 
     with patch(
-      "robosystems.operations.lbug.backup_manager.get_universal_repository",
+      "robosystems.operations.graph.engine.backup_manager.get_universal_repository",
       new_callable=AsyncMock,
     ) as mock_get_repo:
       mock_get_repo.return_value = mock_repo
@@ -1256,7 +1256,9 @@ class TestDropDatabaseIfExists:
   @pytest.mark.asyncio
   async def test_removes_file_database(self, manager):
     with (
-      patch("robosystems.operations.lbug.backup_manager.MultiTenantUtils") as mock_mt,
+      patch(
+        "robosystems.operations.graph.engine.backup_manager.MultiTenantUtils"
+      ) as mock_mt,
       patch("os.path.exists", return_value=True),
       patch("os.path.isfile", return_value=True),
       patch("os.remove") as mock_remove,
@@ -1270,7 +1272,9 @@ class TestDropDatabaseIfExists:
   @pytest.mark.asyncio
   async def test_removes_directory_database(self, manager):
     with (
-      patch("robosystems.operations.lbug.backup_manager.MultiTenantUtils") as mock_mt,
+      patch(
+        "robosystems.operations.graph.engine.backup_manager.MultiTenantUtils"
+      ) as mock_mt,
       patch("os.path.exists", return_value=True),
       patch("os.path.isfile", return_value=False),
       patch("shutil.rmtree") as mock_rmtree,
@@ -1284,7 +1288,9 @@ class TestDropDatabaseIfExists:
   @pytest.mark.asyncio
   async def test_noop_when_path_not_exists(self, manager):
     with (
-      patch("robosystems.operations.lbug.backup_manager.MultiTenantUtils") as mock_mt,
+      patch(
+        "robosystems.operations.graph.engine.backup_manager.MultiTenantUtils"
+      ) as mock_mt,
       patch("os.path.exists", return_value=False),
       patch("os.remove") as mock_remove,
       patch("shutil.rmtree") as mock_rmtree,
@@ -1309,7 +1315,7 @@ class TestEnsureDatabaseExists:
     mock_repo = _mock_repository()
 
     with patch(
-      "robosystems.operations.lbug.backup_manager.get_universal_repository",
+      "robosystems.operations.graph.engine.backup_manager.get_universal_repository",
       new_callable=AsyncMock,
     ) as mock_get_repo:
       mock_get_repo.return_value = mock_repo
@@ -1413,7 +1419,7 @@ class TestBackupManagerProperties:
   def test_s3_adapter_lazy_init(self):
     manager = BackupManager(s3_adapter=None)
     with patch(
-      "robosystems.operations.lbug.backup_manager.S3BackupAdapter"
+      "robosystems.operations.graph.engine.backup_manager.S3BackupAdapter"
     ) as mock_cls:
       mock_instance = MagicMock()
       mock_cls.return_value = mock_instance
@@ -1701,9 +1707,11 @@ class TestHealthCheck:
 @pytest.mark.unit
 class TestCreateBackupManagerFactory:
   def test_factory_returns_backup_manager(self):
-    from robosystems.operations.lbug.backup_manager import create_backup_manager
+    from robosystems.operations.graph.engine.backup_manager import create_backup_manager
 
-    with patch("robosystems.operations.lbug.backup_manager.S3BackupAdapter") as mock_s3:
+    with patch(
+      "robosystems.operations.graph.engine.backup_manager.S3BackupAdapter"
+    ) as mock_s3:
       mock_s3.return_value = MagicMock()
       mgr = create_backup_manager()
 

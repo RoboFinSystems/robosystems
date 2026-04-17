@@ -16,7 +16,7 @@ import pytest
 from botocore.exceptions import ClientError
 from moto import mock_aws
 
-from robosystems.operations.lbug.backup import (
+from robosystems.operations.graph.engine.backup import (
   DEFAULT_RETENTION_DAYS,
   MAX_BACKUP_SIZE_GB,
   LadybugGraphBackupService,
@@ -86,19 +86,19 @@ def backup_service(
   mock_allocation_manager, mock_s3_client, mock_cloudwatch_client, temp_db_dir
 ):
   """Create backup service instance for testing."""
-  with patch("robosystems.operations.lbug.backup.boto3.client") as mock_boto:
+  with patch("robosystems.operations.graph.engine.backup.boto3.client") as mock_boto:
     mock_boto.side_effect = lambda service, **kwargs: {
       "s3": mock_s3_client,
       "cloudwatch": mock_cloudwatch_client,
     }.get(service)
 
     with patch(
-      "robosystems.operations.lbug.backup.LadybugAllocationManager"
+      "robosystems.operations.graph.engine.backup.LadybugAllocationManager"
     ) as mock_alloc_class:
       mock_alloc_class.return_value = mock_allocation_manager
 
       with patch(
-        "robosystems.operations.lbug.backup.env.get_s3_config"
+        "robosystems.operations.graph.engine.backup.env.get_s3_config"
       ) as mock_s3_config:
         mock_s3_config.return_value = {
           "aws_access_key_id": "test-key",
@@ -361,10 +361,14 @@ class TestBackupServiceFactory:
   def test_create_graph_backup_service_defaults(self):
     """Test factory with default parameters."""
     with patch(
-      "robosystems.operations.lbug.backup.LadybugAllocationManager"
+      "robosystems.operations.graph.engine.backup.LadybugAllocationManager"
     ) as mock_manager:
-      with patch("robosystems.operations.lbug.backup.boto3.client") as mock_boto:
-        with patch("robosystems.operations.lbug.backup.env.get_s3_config") as mock_s3:
+      with patch(
+        "robosystems.operations.graph.engine.backup.boto3.client"
+      ) as mock_boto:
+        with patch(
+          "robosystems.operations.graph.engine.backup.env.get_s3_config"
+        ) as mock_s3:
           mock_s3.return_value = {
             "aws_access_key_id": "test",
             "aws_secret_access_key": "test",
@@ -380,16 +384,20 @@ class TestBackupServiceFactory:
 
   def test_create_graph_backup_service_custom_params(self):
     """Test factory with custom parameters."""
-    with patch("robosystems.operations.lbug.backup.LadybugAllocationManager"):
+    with patch("robosystems.operations.graph.engine.backup.LadybugAllocationManager"):
       custom_path = "/custom/path"
 
-      with patch("robosystems.operations.lbug.backup.env.get_s3_config") as mock_s3:
+      with patch(
+        "robosystems.operations.graph.engine.backup.env.get_s3_config"
+      ) as mock_s3:
         mock_s3.return_value = {
           "aws_access_key_id": "test",
           "aws_secret_access_key": "test",
           "region_name": "us-east-1",
         }
-        with patch("robosystems.operations.lbug.backup.boto3.client") as mock_boto:
+        with patch(
+          "robosystems.operations.graph.engine.backup.boto3.client"
+        ) as mock_boto:
           mock_boto.return_value = Mock()
           with patch("requests.get") as mock_req:
             mock_req.return_value.text = "test-instance"

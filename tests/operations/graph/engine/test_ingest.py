@@ -3,7 +3,7 @@
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-from robosystems.operations.lbug.ingest import (
+from robosystems.operations.graph.engine.ingest import (
   _categorize_files_schema_driven,
   _get_cached_schema_adapter,
   _ingest_node_schema_driven,
@@ -23,8 +23,10 @@ from robosystems.operations.lbug.ingest import (
 class TestSchemaAdapterCache:
   """Test cases for schema adapter caching."""
 
-  @patch("robosystems.operations.lbug.ingest.XBRLSchemaConfigGenerator")
-  @patch("robosystems.operations.lbug.ingest.create_roboledger_ingestion_processor")
+  @patch("robosystems.operations.graph.engine.ingest.XBRLSchemaConfigGenerator")
+  @patch(
+    "robosystems.operations.graph.engine.ingest.create_roboledger_ingestion_processor"
+  )
   def test_get_cached_schema_adapter_default(
     self, mock_create_roboledger, mock_processor_class
   ):
@@ -46,7 +48,7 @@ class TestSchemaAdapterCache:
     assert adapter2 == mock_adapter
     mock_create_roboledger.assert_called_once()  # Still only called once
 
-  @patch("robosystems.operations.lbug.ingest.XBRLSchemaConfigGenerator")
+  @patch("robosystems.operations.graph.engine.ingest.XBRLSchemaConfigGenerator")
   def test_get_cached_schema_adapter_custom(self, mock_processor_class):
     """Test getting custom schema adapter with caching."""
     # Clear cache first
@@ -87,8 +89,8 @@ class TestSchemaAdapterCache:
 class TestIngestFromS3:
   """Test cases for S3 ingestion."""
 
-  @patch("robosystems.operations.lbug.ingest.ingest_from_local_files")
-  @patch("robosystems.operations.lbug.ingest.tempfile.mkdtemp")
+  @patch("robosystems.operations.graph.engine.ingest.ingest_from_local_files")
+  @patch("robosystems.operations.graph.engine.ingest.tempfile.mkdtemp")
   @patch("boto3.client")
   def test_ingest_from_s3_success(
     self, mock_boto3_client, mock_mkdtemp, mock_ingest_local
@@ -145,7 +147,7 @@ class TestIngestFromS3:
     assert result is True
 
   @patch("boto3.client")
-  @patch("robosystems.operations.lbug.ingest.tempfile.mkdtemp")
+  @patch("robosystems.operations.graph.engine.ingest.tempfile.mkdtemp")
   def test_ingest_from_s3_download_error(self, mock_mkdtemp, mock_boto3_client):
     """Test ingestion from S3 with download error."""
     # Setup mocks
@@ -175,12 +177,12 @@ class TestIngestFromLocalFiles:
   """Test cases for local file ingestion."""
 
   @patch("robosystems.graph_api.core.ladybug.engine.Engine")
-  @patch("robosystems.operations.lbug.schema_setup.ensure_schema")
-  @patch("robosystems.operations.lbug.path_utils.get_lbug_database_path")
-  @patch("robosystems.operations.lbug.ingest._get_cached_schema_adapter")
-  @patch("robosystems.operations.lbug.ingest._categorize_files_schema_driven")
-  @patch("robosystems.operations.lbug.ingest._parse_filename_schema_driven")
-  @patch("robosystems.operations.lbug.ingest._ingest_node_schema_driven")
+  @patch("robosystems.operations.graph.engine.schema_setup.ensure_schema")
+  @patch("robosystems.operations.graph.engine.path_utils.get_lbug_database_path")
+  @patch("robosystems.operations.graph.engine.ingest._get_cached_schema_adapter")
+  @patch("robosystems.operations.graph.engine.ingest._categorize_files_schema_driven")
+  @patch("robosystems.operations.graph.engine.ingest._parse_filename_schema_driven")
+  @patch("robosystems.operations.graph.engine.ingest._ingest_node_schema_driven")
   def test_ingest_from_local_files_success(
     self,
     mock_ingest_node,
@@ -222,8 +224,8 @@ class TestIngestFromLocalFiles:
     assert mock_ingest_node.call_count == 2
 
   @patch("robosystems.graph_api.core.ladybug.engine.Engine")
-  @patch("robosystems.operations.lbug.schema_setup.ensure_schema")
-  @patch("robosystems.operations.lbug.path_utils.get_lbug_database_path")
+  @patch("robosystems.operations.graph.engine.schema_setup.ensure_schema")
+  @patch("robosystems.operations.graph.engine.path_utils.get_lbug_database_path")
   def test_ingest_from_local_files_empty_list(
     self, mock_get_path, mock_ensure_schema, mock_engine_class
   ):
@@ -239,8 +241,8 @@ class TestIngestFromLocalFiles:
     assert result is False
 
   @patch("robosystems.graph_api.core.ladybug.engine.Engine")
-  @patch("robosystems.operations.lbug.schema_setup.ensure_schema")
-  @patch("robosystems.operations.lbug.path_utils.get_lbug_database_path")
+  @patch("robosystems.operations.graph.engine.schema_setup.ensure_schema")
+  @patch("robosystems.operations.graph.engine.path_utils.get_lbug_database_path")
   def test_ingest_from_local_files_exception(
     self, mock_get_path, mock_ensure_schema, mock_engine_class
   ):
@@ -334,7 +336,7 @@ class TestUtilityFunctions:
 class TestSchemaDrivenIngestion:
   """Test schema-driven ingestion functions."""
 
-  @patch("robosystems.operations.lbug.ingest._get_cached_schema_adapter")
+  @patch("robosystems.operations.graph.engine.ingest._get_cached_schema_adapter")
   def test_categorize_files_schema_driven(self, mock_get_adapter):
     """Test file categorization."""
     # Setup mock adapter
@@ -360,7 +362,7 @@ class TestSchemaDrivenIngestion:
     assert len(relationship_files) == 1  # EMPLOYS
     assert any("EMPLOYS.parquet" in f for f in relationship_files)
 
-  @patch("robosystems.operations.lbug.ingest._get_cached_schema_adapter")
+  @patch("robosystems.operations.graph.engine.ingest._get_cached_schema_adapter")
   def test_parse_filename_schema_driven(self, mock_get_adapter):
     """Test filename parsing."""
     # Setup mock adapter
@@ -383,8 +385,8 @@ class TestSchemaDrivenIngestion:
     mock_adapter.get_table_name_from_file.assert_called_once_with("Entity_2024.parquet")
     mock_adapter.get_table_info.assert_called_once_with("Entity")
 
-  @patch("robosystems.operations.lbug.ingest._get_cached_schema_adapter")
-  @patch("robosystems.operations.lbug.ingest._copy_node_data_schema_driven")
+  @patch("robosystems.operations.graph.engine.ingest._get_cached_schema_adapter")
+  @patch("robosystems.operations.graph.engine.ingest._copy_node_data_schema_driven")
   def test_ingest_node_schema_driven(self, mock_copy_data, mock_get_adapter):
     """Test node ingestion."""
     # Setup mocks
@@ -403,7 +405,8 @@ class TestSchemaDrivenIngestion:
 
     # Mock table creation
     with patch(
-      "robosystems.operations.lbug.ingest._create_table_from_schema", return_value=True
+      "robosystems.operations.graph.engine.ingest._create_table_from_schema",
+      return_value=True,
     ) as mock_create_table:
       result = _ingest_node_schema_driven(
         mock_engine, "/tmp/Entity.parquet", mock_table_info, mock_adapter
@@ -414,8 +417,10 @@ class TestSchemaDrivenIngestion:
       mock_create_table.assert_called_once()
       mock_copy_data.assert_called_once()
 
-  @patch("robosystems.operations.lbug.ingest._get_cached_schema_adapter")
-  @patch("robosystems.operations.lbug.ingest._copy_relationship_data_schema_driven")
+  @patch("robosystems.operations.graph.engine.ingest._get_cached_schema_adapter")
+  @patch(
+    "robosystems.operations.graph.engine.ingest._copy_relationship_data_schema_driven"
+  )
   def test_ingest_relationship_schema_driven(self, mock_copy_data, mock_get_adapter):
     """Test relationship ingestion."""
     # Setup mocks
@@ -431,7 +436,7 @@ class TestSchemaDrivenIngestion:
 
     # Mock table creation
     with patch(
-      "robosystems.operations.lbug.ingest._create_relationship_table_from_schema",
+      "robosystems.operations.graph.engine.ingest._create_relationship_table_from_schema",
       return_value=True,
     ) as mock_create_table:
       result = _ingest_relationship_schema_driven(
@@ -457,7 +462,7 @@ class TestS3IngestionEdgeCases:
     assert result is False
 
   @patch("boto3.client")
-  @patch("robosystems.operations.lbug.ingest.tempfile.mkdtemp")
+  @patch("robosystems.operations.graph.engine.ingest.tempfile.mkdtemp")
   def test_ingest_from_s3_partial_download_failure(
     self, mock_mkdtemp, mock_boto3_client
   ):
@@ -496,8 +501,8 @@ class TestIngestionErrorHandling:
   """Test error handling in ingestion operations."""
 
   @patch("robosystems.graph_api.core.ladybug.engine.Engine")
-  @patch("robosystems.operations.lbug.schema_setup.ensure_schema")
-  @patch("robosystems.operations.lbug.path_utils.get_lbug_database_path")
+  @patch("robosystems.operations.graph.engine.schema_setup.ensure_schema")
+  @patch("robosystems.operations.graph.engine.path_utils.get_lbug_database_path")
   def test_ingest_from_local_files_schema_error(
     self, mock_get_path, mock_ensure_schema, mock_engine_class
   ):
@@ -509,7 +514,7 @@ class TestIngestionErrorHandling:
     mock_engine_class.return_value = mock_engine
 
     with patch(
-      "robosystems.operations.lbug.ingest._get_cached_schema_adapter",
+      "robosystems.operations.graph.engine.ingest._get_cached_schema_adapter",
       side_effect=Exception("Schema error"),
     ):
       result = ingest_from_local_files(
@@ -519,9 +524,9 @@ class TestIngestionErrorHandling:
       assert result is False
 
   @patch("robosystems.graph_api.core.ladybug.engine.Engine")
-  @patch("robosystems.operations.lbug.schema_setup.ensure_schema")
-  @patch("robosystems.operations.lbug.path_utils.get_lbug_database_path")
-  @patch("robosystems.operations.lbug.ingest._get_cached_schema_adapter")
+  @patch("robosystems.operations.graph.engine.schema_setup.ensure_schema")
+  @patch("robosystems.operations.graph.engine.path_utils.get_lbug_database_path")
+  @patch("robosystems.operations.graph.engine.ingest._get_cached_schema_adapter")
   def test_ingest_from_local_files_table_creation_failure(
     self, mock_get_adapter, mock_get_path, mock_ensure_schema, mock_engine_class
   ):
@@ -538,14 +543,14 @@ class TestIngestionErrorHandling:
     # Mock categorization and parsing
     with (
       patch(
-        "robosystems.operations.lbug.ingest._categorize_files_schema_driven",
+        "robosystems.operations.graph.engine.ingest._categorize_files_schema_driven",
         return_value=(["/tmp/test.parquet"], []),
       ),
       patch(
-        "robosystems.operations.lbug.ingest._parse_filename_schema_driven"
+        "robosystems.operations.graph.engine.ingest._parse_filename_schema_driven"
       ) as mock_parse,
       patch(
-        "robosystems.operations.lbug.ingest._create_table_from_schema",
+        "robosystems.operations.graph.engine.ingest._create_table_from_schema",
         side_effect=Exception("Table creation failed"),
       ),
     ):

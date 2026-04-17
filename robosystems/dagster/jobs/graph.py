@@ -187,7 +187,7 @@ def create_backup(
   from robosystems.middleware.graph.utils import MultiTenantUtils
   from robosystems.models.core import GraphBackup
   from robosystems.operations.aws.s3 import S3BackupAdapter
-  from robosystems.operations.lbug.backup_manager import (
+  from robosystems.operations.graph.engine.backup_manager import (
     BackupFormat,
     BackupJob,
     BackupType,
@@ -328,7 +328,7 @@ def restore_backup(
 
   from robosystems.graph_api.client.factory import GraphClientFactory
   from robosystems.models.core import GraphBackup
-  from robosystems.operations.lbug.backup_manager import (
+  from robosystems.operations.graph.engine.backup_manager import (
     BackupFormat,
     BackupJob,
     BackupType,
@@ -726,7 +726,7 @@ def _restage_stale_files_sync(
   import asyncio
 
   from robosystems.models.core import GraphFile
-  from robosystems.operations.lbug.direct_staging import stage_file_directly
+  from robosystems.operations.graph.engine.direct_staging import stage_file_directly
 
   loop = asyncio.new_event_loop()
   try:
@@ -778,7 +778,7 @@ def materialize_graph_tables(
   import time
 
   from robosystems.models.core import Graph, GraphFile, GraphSchema, GraphTable
-  from robosystems.operations.lbug.chunked_materialization import (
+  from robosystems.operations.graph.engine.chunked_materialization import (
     materialize_table_chunked,
   )
 

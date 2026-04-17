@@ -7,7 +7,7 @@ using the LadybugDB single-file format with .lbug extension.
 
 from pathlib import Path
 
-from ...config import env
+from ....config import env
 
 
 def get_lbug_database_path(db_name: str, base_path: str | None = None) -> Path:

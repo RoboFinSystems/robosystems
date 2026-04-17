@@ -91,7 +91,7 @@ class TestDeprovisionService:
         "robosystems.middleware.graph.allocation_manager.LadybugAllocationManager"
       ) as mock_alloc_cls,
       patch(
-        "robosystems.operations.lbug.backup_manager.BackupManager"
+        "robosystems.operations.graph.engine.backup_manager.BackupManager"
       ) as mock_backup_cls,
     ):
       mock_client = AsyncMock()
@@ -200,7 +200,7 @@ class TestDeprovisionService:
         "robosystems.middleware.graph.allocation_manager.LadybugAllocationManager"
       ) as mock_alloc_cls,
       patch(
-        "robosystems.operations.lbug.backup_manager.BackupManager"
+        "robosystems.operations.graph.engine.backup_manager.BackupManager"
       ) as mock_backup_cls,
     ):
       mock_client = AsyncMock()

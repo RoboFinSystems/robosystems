@@ -4,7 +4,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from robosystems.operations.lbug.schema_setup import (
+from robosystems.operations.graph.engine.schema_setup import (
   LadybugSchemaManager,
   ensure_schema,
 )
@@ -87,7 +87,7 @@ class TestLadybugSchemaManager:
     assert len(existing["relationships"]) == 0
 
   @patch(
-    "robosystems.operations.lbug.schema_setup.create_roboledger_ingestion_processor"
+    "robosystems.operations.graph.engine.schema_setup.create_roboledger_ingestion_processor"
   )
   def test_initialize_schema_already_exists(self, mock_create_processor):
     """Test schema initialization when it already exists."""
@@ -101,7 +101,7 @@ class TestLadybugSchemaManager:
     mock_create_processor.assert_not_called()
 
   @patch(
-    "robosystems.operations.lbug.schema_setup.create_roboledger_ingestion_processor"
+    "robosystems.operations.graph.engine.schema_setup.create_roboledger_ingestion_processor"
   )
   def test_initialize_schema_first_time(self, mock_create_processor):
     """Test schema initialization for the first time."""
@@ -226,8 +226,8 @@ class TestLadybugSchemaManager:
 class TestLadybugSchemaManagerAdditional:
   """Additional test cases for LadybugSchemaManager to improve coverage."""
 
-  @patch("robosystems.operations.lbug.schema_setup.XBRLSchemaConfigGenerator")
-  @patch("robosystems.operations.lbug.schema_setup.logger")
+  @patch("robosystems.operations.graph.engine.schema_setup.XBRLSchemaConfigGenerator")
+  @patch("robosystems.operations.graph.engine.schema_setup.logger")
   def test_initialize_schema_with_custom_config(
     self, mock_logger, mock_processor_class
   ):
@@ -268,7 +268,7 @@ class TestLadybugSchemaManagerAdditional:
 
     # Create schema processor mock
     with patch(
-      "robosystems.operations.lbug.schema_setup.create_roboledger_ingestion_processor"
+      "robosystems.operations.graph.engine.schema_setup.create_roboledger_ingestion_processor"
     ) as mock_processor_creator:
       mock_processor = MagicMock()
       mock_processor.ingest_config.node_tables = {
@@ -318,7 +318,7 @@ class TestEnsureSchema:
   """Test cases for ensure_schema function."""
 
   @patch("robosystems.graph_api.core.ladybug.engine.Engine")
-  @patch("robosystems.operations.lbug.path_utils.ensure_lbug_directory")
+  @patch("robosystems.operations.graph.engine.path_utils.ensure_lbug_directory")
   def test_ensure_schema_success(self, mock_ensure_dir, mock_engine_class):
     """Test successful schema creation."""
     # Setup mocks
@@ -328,7 +328,7 @@ class TestEnsureSchema:
 
     # Run ensure_schema
     with patch(
-      "robosystems.operations.lbug.schema_setup.LadybugSchemaManager"
+      "robosystems.operations.graph.engine.schema_setup.LadybugSchemaManager"
     ) as mock_manager_class:
       mock_manager = MagicMock()
       mock_manager.initialize_schema.return_value = True
@@ -340,9 +340,9 @@ class TestEnsureSchema:
     mock_ensure_dir.assert_called_once()
     mock_manager.initialize_schema.assert_called_once()
 
-  @patch("robosystems.operations.lbug.schema_setup.LadybugSchemaManager")
+  @patch("robosystems.operations.graph.engine.schema_setup.LadybugSchemaManager")
   @patch("robosystems.graph_api.core.ladybug.engine.Engine")
-  @patch("robosystems.operations.lbug.path_utils.ensure_lbug_directory")
+  @patch("robosystems.operations.graph.engine.path_utils.ensure_lbug_directory")
   def test_ensure_schema_error(
     self, mock_ensure_dir, mock_engine_class, mock_manager_class
   ):

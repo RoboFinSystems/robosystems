@@ -12,7 +12,7 @@ import pytest
 
 from robosystems.middleware.graph.utils import MultiTenantUtils
 from robosystems.operations.aws.s3 import S3BackupAdapter
-from robosystems.operations.lbug.backup_manager import (
+from robosystems.operations.graph.engine.backup_manager import (
   BackupFormat,
   BackupJob,
   BackupManager,
@@ -88,7 +88,7 @@ class TestBackupManager:
     # Mock graph repository operations and file operations
     with (
       patch(
-        "robosystems.operations.lbug.backup_manager.get_universal_repository"
+        "robosystems.operations.graph.engine.backup_manager.get_universal_repository"
       ) as mock_get_repo,
       patch("os.path.exists", return_value=True),
       patch("os.unlink"),
@@ -189,7 +189,7 @@ class TestBackupManager:
 
     # Test database connection failure
     with patch(
-      "robosystems.operations.lbug.backup_manager.get_universal_repository"
+      "robosystems.operations.graph.engine.backup_manager.get_universal_repository"
     ) as mock_get_repo:
       mock_get_repo.side_effect = Exception("Database connection failed")
 
@@ -207,7 +207,7 @@ class TestBackupManager:
     # Test S3 upload failure
     with (
       patch(
-        "robosystems.operations.lbug.backup_manager.get_universal_repository"
+        "robosystems.operations.graph.engine.backup_manager.get_universal_repository"
       ) as mock_get_repo,
       patch("builtins.open", create=True),
       patch.object(
@@ -254,7 +254,7 @@ class TestBackupManager:
     for backup_format in [BackupFormat.CSV, BackupFormat.JSON, BackupFormat.PARQUET]:
       with (
         patch(
-          "robosystems.operations.lbug.backup_manager.get_universal_repository"
+          "robosystems.operations.graph.engine.backup_manager.get_universal_repository"
         ) as mock_get_repo,
         patch.object(
           backup_manager, "_export_database", new_callable=AsyncMock
@@ -621,7 +621,7 @@ class TestBackupManager:
 
     with (
       patch(
-        "robosystems.operations.lbug.backup_manager.get_universal_repository"
+        "robosystems.operations.graph.engine.backup_manager.get_universal_repository"
       ) as mock_get_repo,
       patch("os.path.exists", return_value=True),
       patch("os.path.isfile", return_value=True),

@@ -25,7 +25,7 @@ class GraphMaterializationTask(BaseTask):
 
   async def execute(self) -> dict[str, Any]:
     from robosystems.database import get_db_session
-    from robosystems.operations.lbug.direct_materialization import (
+    from robosystems.operations.graph.engine.direct_materialization import (
       materialize_graph_directly,
     )
 

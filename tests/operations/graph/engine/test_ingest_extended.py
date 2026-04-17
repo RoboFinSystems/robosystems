@@ -18,7 +18,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from robosystems.operations.lbug.ingest import (
+from robosystems.operations.graph.engine.ingest import (
   _categorize_files_schema_driven,
   _copy_node_data_schema_driven,
   _copy_relationship_data_schema_driven,
@@ -195,8 +195,8 @@ class TestParseFilenameSchemaDrivern:
 class TestIngestNodeSchemaDrivern:
   """Test node ingestion error handling paths."""
 
-  @patch("robosystems.operations.lbug.ingest._copy_node_data_schema_driven")
-  @patch("robosystems.operations.lbug.ingest._create_table_from_schema")
+  @patch("robosystems.operations.graph.engine.ingest._copy_node_data_schema_driven")
+  @patch("robosystems.operations.graph.engine.ingest._create_table_from_schema")
   def test_success_path(self, mock_create, mock_copy):
     """Successful node ingestion returns True."""
     mock_create.return_value = True
@@ -212,7 +212,7 @@ class TestIngestNodeSchemaDrivern:
     mock_create.assert_called_once_with(engine, "Entity", info, "/f.parquet")
     mock_copy.assert_called_once()
 
-  @patch("robosystems.operations.lbug.ingest._create_table_from_schema")
+  @patch("robosystems.operations.graph.engine.ingest._create_table_from_schema")
   def test_table_creation_fails(self, mock_create):
     """Returns False when table creation fails."""
     mock_create.return_value = False
@@ -240,8 +240,12 @@ class TestIngestNodeSchemaDrivern:
 class TestIngestRelationshipSchemaDrivern:
   """Test relationship ingestion error handling paths."""
 
-  @patch("robosystems.operations.lbug.ingest._copy_relationship_data_schema_driven")
-  @patch("robosystems.operations.lbug.ingest._create_relationship_table_from_schema")
+  @patch(
+    "robosystems.operations.graph.engine.ingest._copy_relationship_data_schema_driven"
+  )
+  @patch(
+    "robosystems.operations.graph.engine.ingest._create_relationship_table_from_schema"
+  )
   def test_success_path(self, mock_create, mock_copy):
     """Successful relationship ingestion returns True."""
     mock_create.return_value = True
@@ -257,7 +261,9 @@ class TestIngestRelationshipSchemaDrivern:
 
     assert result is True
 
-  @patch("robosystems.operations.lbug.ingest._create_relationship_table_from_schema")
+  @patch(
+    "robosystems.operations.graph.engine.ingest._create_relationship_table_from_schema"
+  )
   def test_table_creation_fails(self, mock_create):
     """Returns False when relationship table creation fails."""
     mock_create.return_value = False
@@ -774,8 +780,8 @@ class TestGlobalDetection:
 class TestCopyNodeDataSchemaDrivern:
   """Test COPY FROM operations for node data."""
 
-  @patch("robosystems.operations.lbug.ingest._is_global_entity_schema_driven")
-  @patch("robosystems.operations.lbug.ingest._is_valid_identifier")
+  @patch("robosystems.operations.graph.engine.ingest._is_global_entity_schema_driven")
+  @patch("robosystems.operations.graph.engine.ingest._is_valid_identifier")
   @patch(PQ_PARQUET_FILE)
   def test_global_entity_uses_ignore_errors(self, mock_pq_cls, mock_valid, mock_global):
     """Global entities use COPY with IGNORE_ERRORS=true."""
@@ -792,8 +798,8 @@ class TestCopyNodeDataSchemaDrivern:
     copy_sql = engine.execute_query.call_args[0][0]
     assert "IGNORE_ERRORS=true" in copy_sql
 
-  @patch("robosystems.operations.lbug.ingest._is_global_entity_schema_driven")
-  @patch("robosystems.operations.lbug.ingest._is_valid_identifier")
+  @patch("robosystems.operations.graph.engine.ingest._is_global_entity_schema_driven")
+  @patch("robosystems.operations.graph.engine.ingest._is_valid_identifier")
   @patch(PQ_PARQUET_FILE)
   def test_non_global_entity_standard_copy(self, mock_pq_cls, mock_valid, mock_global):
     """Non-global entities use standard COPY without IGNORE_ERRORS."""
@@ -812,7 +818,7 @@ class TestCopyNodeDataSchemaDrivern:
     copy_sql = engine.execute_query.call_args[0][0]
     assert "IGNORE_ERRORS" not in copy_sql
 
-  @patch("robosystems.operations.lbug.ingest._is_valid_identifier")
+  @patch("robosystems.operations.graph.engine.ingest._is_valid_identifier")
   def test_invalid_table_name_rejected(self, mock_valid):
     """Returns False for invalid table names (SQL injection prevention)."""
     mock_valid.return_value = False
@@ -825,8 +831,8 @@ class TestCopyNodeDataSchemaDrivern:
 
     assert result is False
 
-  @patch("robosystems.operations.lbug.ingest._is_global_entity_schema_driven")
-  @patch("robosystems.operations.lbug.ingest._is_valid_identifier")
+  @patch("robosystems.operations.graph.engine.ingest._is_global_entity_schema_driven")
+  @patch("robosystems.operations.graph.engine.ingest._is_valid_identifier")
   @patch(PQ_PARQUET_FILE)
   def test_copy_failure_returns_false(self, mock_pq_cls, mock_valid, mock_global):
     """Returns False when COPY FROM fails."""
@@ -842,8 +848,8 @@ class TestCopyNodeDataSchemaDrivern:
 
     assert result is False
 
-  @patch("robosystems.operations.lbug.ingest._is_global_entity_schema_driven")
-  @patch("robosystems.operations.lbug.ingest._is_valid_identifier")
+  @patch("robosystems.operations.graph.engine.ingest._is_global_entity_schema_driven")
+  @patch("robosystems.operations.graph.engine.ingest._is_valid_identifier")
   @patch(PQ_PARQUET_FILE)
   def test_timeout_set_and_reset(self, mock_pq_cls, mock_valid, mock_global):
     """Engine query timeout is set before COPY and reset after."""
@@ -863,8 +869,8 @@ class TestCopyNodeDataSchemaDrivern:
     assert calls[0][0][0] == 1800000  # 30 minutes
     assert calls[1][0][0] == 120000  # 2 minutes
 
-  @patch("robosystems.operations.lbug.ingest._is_global_entity_schema_driven")
-  @patch("robosystems.operations.lbug.ingest._is_valid_identifier")
+  @patch("robosystems.operations.graph.engine.ingest._is_global_entity_schema_driven")
+  @patch("robosystems.operations.graph.engine.ingest._is_valid_identifier")
   @patch(PQ_PARQUET_FILE)
   def test_timeout_reset_on_failure(self, mock_pq_cls, mock_valid, mock_global):
     """Timeout is reset even when COPY fails."""
@@ -884,8 +890,8 @@ class TestCopyNodeDataSchemaDrivern:
     assert len(calls) == 2
     assert calls[1][0][0] == 120000
 
-  @patch("robosystems.operations.lbug.ingest._is_global_entity_schema_driven")
-  @patch("robosystems.operations.lbug.ingest._is_valid_identifier")
+  @patch("robosystems.operations.graph.engine.ingest._is_global_entity_schema_driven")
+  @patch("robosystems.operations.graph.engine.ingest._is_valid_identifier")
   @patch(PQ_PARQUET_FILE)
   def test_column_mismatch_error_logging(self, mock_pq_cls, mock_valid, mock_global):
     """Column mismatch errors log parquet columns for debugging."""
@@ -908,8 +914,8 @@ class TestCopyNodeDataSchemaDrivern:
 
     assert result is False
 
-  @patch("robosystems.operations.lbug.ingest._is_global_entity_schema_driven")
-  @patch("robosystems.operations.lbug.ingest._is_valid_identifier")
+  @patch("robosystems.operations.graph.engine.ingest._is_global_entity_schema_driven")
+  @patch("robosystems.operations.graph.engine.ingest._is_valid_identifier")
   @patch(PQ_PARQUET_FILE)
   def test_no_timeout_support(self, mock_pq_cls, mock_valid, mock_global):
     """Engine without set_query_timeout still works."""
@@ -937,8 +943,10 @@ class TestCopyNodeDataSchemaDrivern:
 class TestCopyRelationshipDataSchemaDrivern:
   """Test COPY FROM operations for relationship data."""
 
-  @patch("robosystems.operations.lbug.ingest._is_global_relationship_schema_driven")
-  @patch("robosystems.operations.lbug.ingest._is_valid_identifier")
+  @patch(
+    "robosystems.operations.graph.engine.ingest._is_global_relationship_schema_driven"
+  )
+  @patch("robosystems.operations.graph.engine.ingest._is_valid_identifier")
   @patch(PQ_PARQUET_FILE)
   def test_global_relationship_uses_ignore_errors(
     self, mock_pq_cls, mock_valid, mock_global
@@ -959,8 +967,10 @@ class TestCopyRelationshipDataSchemaDrivern:
     copy_sql = engine.execute_query.call_args[0][0]
     assert "IGNORE_ERRORS=true" in copy_sql
 
-  @patch("robosystems.operations.lbug.ingest._is_global_relationship_schema_driven")
-  @patch("robosystems.operations.lbug.ingest._is_valid_identifier")
+  @patch(
+    "robosystems.operations.graph.engine.ingest._is_global_relationship_schema_driven"
+  )
+  @patch("robosystems.operations.graph.engine.ingest._is_valid_identifier")
   @patch(PQ_PARQUET_FILE)
   def test_non_global_relationship_standard_copy(
     self, mock_pq_cls, mock_valid, mock_global
@@ -981,7 +991,7 @@ class TestCopyRelationshipDataSchemaDrivern:
     copy_sql = engine.execute_query.call_args[0][0]
     assert "IGNORE_ERRORS" not in copy_sql
 
-  @patch("robosystems.operations.lbug.ingest._is_valid_identifier")
+  @patch("robosystems.operations.graph.engine.ingest._is_valid_identifier")
   def test_invalid_table_name_rejected(self, mock_valid):
     """Invalid table names are rejected."""
     mock_valid.return_value = False
@@ -995,8 +1005,10 @@ class TestCopyRelationshipDataSchemaDrivern:
 
     assert result is False
 
-  @patch("robosystems.operations.lbug.ingest._is_global_relationship_schema_driven")
-  @patch("robosystems.operations.lbug.ingest._is_valid_identifier")
+  @patch(
+    "robosystems.operations.graph.engine.ingest._is_global_relationship_schema_driven"
+  )
+  @patch("robosystems.operations.graph.engine.ingest._is_valid_identifier")
   @patch(PQ_PARQUET_FILE)
   def test_copy_failure_returns_false(self, mock_pq_cls, mock_valid, mock_global):
     """Returns False when COPY FROM fails."""
@@ -1023,8 +1035,10 @@ class TestCopyRelationshipDataSchemaDrivern:
 
     assert result is False
 
-  @patch("robosystems.operations.lbug.ingest._is_global_relationship_schema_driven")
-  @patch("robosystems.operations.lbug.ingest._is_valid_identifier")
+  @patch(
+    "robosystems.operations.graph.engine.ingest._is_global_relationship_schema_driven"
+  )
+  @patch("robosystems.operations.graph.engine.ingest._is_valid_identifier")
   @patch(PQ_PARQUET_FILE)
   def test_timeout_set_and_reset(self, mock_pq_cls, mock_valid, mock_global):
     """Engine query timeout is set before COPY and reset after."""
@@ -1045,8 +1059,10 @@ class TestCopyRelationshipDataSchemaDrivern:
     assert calls[0][0][0] == 1800000
     assert calls[1][0][0] == 120000
 
-  @patch("robosystems.operations.lbug.ingest._is_global_relationship_schema_driven")
-  @patch("robosystems.operations.lbug.ingest._is_valid_identifier")
+  @patch(
+    "robosystems.operations.graph.engine.ingest._is_global_relationship_schema_driven"
+  )
+  @patch("robosystems.operations.graph.engine.ingest._is_valid_identifier")
   @patch(PQ_PARQUET_FILE)
   def test_timeout_reset_on_failure(self, mock_pq_cls, mock_valid, mock_global):
     """Timeout is reset even when COPY fails."""
@@ -1076,8 +1092,10 @@ class TestCopyRelationshipDataSchemaDrivern:
     assert len(calls) == 2
     assert calls[1][0][0] == 120000
 
-  @patch("robosystems.operations.lbug.ingest._is_global_relationship_schema_driven")
-  @patch("robosystems.operations.lbug.ingest._is_valid_identifier")
+  @patch(
+    "robosystems.operations.graph.engine.ingest._is_global_relationship_schema_driven"
+  )
+  @patch("robosystems.operations.graph.engine.ingest._is_valid_identifier")
   @patch(PQ_PARQUET_FILE)
   def test_no_timeout_support(self, mock_pq_cls, mock_valid, mock_global):
     """Engine without set_query_timeout still works."""

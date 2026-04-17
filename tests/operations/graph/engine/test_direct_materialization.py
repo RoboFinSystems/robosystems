@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 
-from robosystems.operations.lbug.direct_materialization import (
+from robosystems.operations.graph.engine.direct_materialization import (
   _restage_stale_files,
   materialize_graph_directly,
 )
@@ -452,7 +452,7 @@ class TestRestageStaleFiles:
 
     with (
       patch(
-        "robosystems.operations.lbug.direct_staging.stage_file_directly"
+        "robosystems.operations.graph.engine.direct_staging.stage_file_directly"
       ) as mock_stage,
       patch("robosystems.models.core.GraphFile") as mock_file_class,
     ):
@@ -485,7 +485,7 @@ class TestRestageStaleFiles:
 
     with (
       patch(
-        "robosystems.operations.lbug.direct_staging.stage_file_directly"
+        "robosystems.operations.graph.engine.direct_staging.stage_file_directly"
       ) as mock_stage,
       patch("robosystems.models.core.GraphFile") as mock_file_class,
     ):
@@ -512,7 +512,7 @@ class TestRestageStaleFiles:
 
     with (
       patch(
-        "robosystems.operations.lbug.direct_staging.stage_file_directly"
+        "robosystems.operations.graph.engine.direct_staging.stage_file_directly"
       ) as mock_stage,
       patch("robosystems.models.core.GraphFile") as mock_file_class,
     ):

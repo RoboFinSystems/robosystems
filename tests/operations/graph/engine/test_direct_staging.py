@@ -10,11 +10,11 @@ from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 
-from robosystems.operations.lbug.direct_staging import (
+from robosystems.operations.graph.engine.direct_staging import (
   stage_file_directly,
 )
 
-MODULE = "robosystems.operations.lbug.direct_staging"
+MODULE = "robosystems.operations.graph.engine.direct_staging"
 
 # Patch targets for lazy imports (patched at their source modules)
 FACTORY_PATH = "robosystems.graph_api.client.factory.GraphClientFactory"

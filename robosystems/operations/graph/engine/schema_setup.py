@@ -15,7 +15,7 @@ from robosystems.adapters.sec.processors.schema import (
 )
 from robosystems.graph_api.core.ladybug import Engine
 
-from ...logger import logger
+from ....logger import logger
 
 
 class LadybugSchemaManager:
@@ -267,7 +267,7 @@ def ensure_schema(
       True if schema was created, False if already existed
   """
   try:
-    from ...operations.lbug.path_utils import (
+    from .path_utils import (
       ensure_lbug_directory,
     )
 

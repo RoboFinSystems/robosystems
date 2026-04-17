@@ -4,7 +4,7 @@ import tempfile
 from pathlib import Path
 from unittest.mock import patch
 
-from robosystems.operations.lbug.path_utils import (
+from robosystems.operations.graph.engine.path_utils import (
   ensure_lbug_directory,
   get_lbug_database_path,
 )
@@ -14,7 +14,8 @@ class TestGetLadybugDatabasePath:
   """Test cases for get_lbug_database_path function."""
 
   @patch(
-    "robosystems.operations.lbug.path_utils.env.LBUG_DATABASE_PATH", "/data/lbug-dbs"
+    "robosystems.operations.graph.engine.path_utils.env.LBUG_DATABASE_PATH",
+    "/data/lbug-dbs",
   )
   def test_get_lbug_database_path_default(self):
     """Test getting database path with default base path."""
@@ -31,7 +32,7 @@ class TestGetLadybugDatabasePath:
     assert str(result) == "/custom/path/custom_db.lbug"
 
   @patch(
-    "robosystems.operations.lbug.path_utils.env.LBUG_DATABASE_PATH",
+    "robosystems.operations.graph.engine.path_utils.env.LBUG_DATABASE_PATH",
     "/var/lbug-dbs/databases",
   )
   def test_get_lbug_database_path_sec_repository(self):
@@ -50,7 +51,8 @@ class TestGetLadybugDatabasePath:
     assert str(result) == "/tmp/kg-123_test.lbug"
 
   @patch(
-    "robosystems.operations.lbug.path_utils.env.LBUG_DATABASE_PATH", "/prod/lbug-dbs"
+    "robosystems.operations.graph.engine.path_utils.env.LBUG_DATABASE_PATH",
+    "/prod/lbug-dbs",
   )
   def test_get_lbug_database_path_multiple_calls(self):
     """Test multiple calls with different database names."""

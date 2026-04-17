@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from robosystems.operations.lbug.chunked_materialization import (
+from robosystems.operations.graph.engine.chunked_materialization import (
   CHUNK_TIMEOUT,
   materialize_table_chunked,
 )
@@ -53,7 +53,7 @@ class TestMaterializeTableChunked:
     ]
 
     with patch(
-      "robosystems.operations.lbug.chunked_materialization.GraphTierConfig"
+      "robosystems.operations.graph.engine.chunked_materialization.GraphTierConfig"
     ) as mock_config:
       mock_config.get_graph_limits.return_value = {"chunk_size_rows": 1_000_000}
 
@@ -108,7 +108,7 @@ class TestMaterializeTableChunked:
     ]
 
     with patch(
-      "robosystems.operations.lbug.chunked_materialization.GraphTierConfig"
+      "robosystems.operations.graph.engine.chunked_materialization.GraphTierConfig"
     ) as mock_config:
       mock_config.get_graph_limits.return_value = {"chunk_size_rows": 1_000_000}
 
@@ -137,7 +137,7 @@ class TestMaterializeTableChunked:
 
     with (
       patch(
-        "robosystems.operations.lbug.chunked_materialization.GraphTierConfig"
+        "robosystems.operations.graph.engine.chunked_materialization.GraphTierConfig"
       ) as mock_config,
       pytest.raises(Exception, match="OOM on batch 2"),
     ):
@@ -159,7 +159,7 @@ class TestMaterializeTableChunked:
     client.materialize_table.return_value = {"rows_ingested": 1_000_000}
 
     with patch(
-      "robosystems.operations.lbug.chunked_materialization.GraphTierConfig"
+      "robosystems.operations.graph.engine.chunked_materialization.GraphTierConfig"
     ) as mock_config:
       # Large tier: 2M chunk -> 2 batches
       mock_config.get_graph_limits.return_value = {"chunk_size_rows": 2_000_000}
@@ -178,7 +178,7 @@ class TestMaterializeTableChunked:
     client.materialize_table.return_value = {"rows_ingested": 600_000}
 
     with patch(
-      "robosystems.operations.lbug.chunked_materialization.GraphTierConfig"
+      "robosystems.operations.graph.engine.chunked_materialization.GraphTierConfig"
     ) as mock_config:
       # Standard tier: 1M chunk -> 3 batches
       mock_config.get_graph_limits.return_value = {"chunk_size_rows": 1_000_000}
@@ -201,7 +201,7 @@ class TestMaterializeTableChunked:
     client.materialize_table.return_value = {"rows_ingested": 750_000}
 
     with patch(
-      "robosystems.operations.lbug.chunked_materialization.GraphTierConfig"
+      "robosystems.operations.graph.engine.chunked_materialization.GraphTierConfig"
     ) as mock_config:
       mock_config.get_graph_limits.side_effect = Exception("Config unavailable")
 
@@ -241,7 +241,7 @@ class TestMaterializeTableChunked:
     client.materialize_table.return_value = {"rows_ingested": 1_000_000}
 
     with patch(
-      "robosystems.operations.lbug.chunked_materialization.GraphTierConfig"
+      "robosystems.operations.graph.engine.chunked_materialization.GraphTierConfig"
     ) as mock_config:
       mock_config.get_graph_limits.return_value = {"chunk_size_rows": 1_000_000}
 
