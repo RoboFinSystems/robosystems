@@ -12,12 +12,12 @@ from sqlalchemy.orm import Session
 
 from robosystems.models.api.extensions.schedules import (
   ClosingEntryResponse,
-  CreateClosingEntryRequest,
+  CreateClosingEntryOperation,
   CreateManualClosingEntryRequest,
   CreateScheduleRequest,
   DeleteScheduleRequest,
   ScheduleCreatedResponse,
-  TruncateScheduleRequest,
+  TruncateScheduleOperation,
   TruncateScheduleResponse,
   UpdateScheduleRequest,
 )
@@ -71,12 +71,12 @@ def create_schedule(
   session: Session,
   body: CreateScheduleRequest,
   created_by: str,
-  service: ScheduleService,
 ) -> ScheduleCreatedResponse:
   """Create a schedule with pre-generated facts for each period.
 
   Raises `ValueError` for validation failures — caller maps to 422.
   """
+  service = ScheduleService()
   et = EntryTemplate(
     debit_element_id=body.entry_template.debit_element_id,
     credit_element_id=body.entry_template.credit_element_id,
@@ -135,21 +135,20 @@ def create_schedule(
 
 def truncate_schedule(
   session: Session,
-  structure_id: str,
-  body: TruncateScheduleRequest,
-  updated_by: str,
-  service: ScheduleService,
+  body: TruncateScheduleOperation,
+  created_by: str,
 ) -> TruncateScheduleResponse:
   """End a schedule early, deleting forward facts + stale drafts.
 
   Raises `ValueError` for validation failures — caller maps to 422.
   """
+  service = ScheduleService()
   result = service.truncate_schedule(
     session,
-    structure_id=structure_id,
+    structure_id=body.structure_id,
     new_end_date=body.new_end_date,
     reason=body.reason,
-    updated_by=updated_by,
+    updated_by=created_by,
   )
   session.commit()
 
@@ -163,18 +162,17 @@ def truncate_schedule(
 
 def create_closing_entry(
   session: Session,
-  structure_id: str,
-  body: CreateClosingEntryRequest,
+  body: CreateClosingEntryOperation,
   created_by: str,
-  service: ScheduleService,
 ) -> ClosingEntryResponse:
   """Create a draft closing entry from a schedule's facts for a period.
 
   Raises `ValueError` for validation failures — caller maps to 422.
   """
+  service = ScheduleService()
   result = service.create_closing_entry(
     session,
-    structure_id=structure_id,
+    structure_id=body.structure_id,
     posting_date=body.posting_date,
     period_start=body.period_start,
     period_end=body.period_end,
@@ -189,7 +187,6 @@ def create_manual_closing_entry(
   session: Session,
   body: CreateManualClosingEntryRequest,
   created_by: str,
-  service: ScheduleService,
 ) -> ClosingEntryResponse:
   """Create a manual (non-schedule) draft closing entry.
 
@@ -197,6 +194,7 @@ def create_manual_closing_entry(
   reclassifications). Total debits must equal total credits.
   Raises `ValueError` for validation failures — caller maps to 422.
   """
+  service = ScheduleService()
   result = service.create_manual_closing_entry(
     session,
     posting_date=body.posting_date,

@@ -29,7 +29,7 @@ cosmetic cleanup, not a correctness requirement.
 import sys
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, ClassVar
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Path
 from pydantic import BaseModel
@@ -46,6 +46,7 @@ from robosystems.middleware.operations import (
 )
 from robosystems.middleware.otel.metrics import endpoint_metrics_decorator
 from robosystems.models.core import Graph
+from robosystems.operations.extensions.staleness import mark_graph_stale
 
 # ── Error-map types ──────────────────────────────────────────────────────
 
@@ -106,7 +107,15 @@ class OperationSpec:
     on_fresh_success: optional callback invoked on a non-replayed
       success from `execute_operation`. Common use is
       `lambda _env: mark_graph_stale(graph_id, "<reason>")`. Signature
-      takes the envelope.
+      takes the envelope. For the common "mark stale after success"
+      pattern, prefer the declarative `mark_stale_reason` field — it
+      avoids capturing `graph_id` from an outer closure (which a
+      module-level spec can't do) and the registrar wires it up against
+      the request's graph_id automatically.
+    mark_stale_reason: when set, the registrar invokes
+      `mark_graph_stale(graph_id, mark_stale_reason)` on fresh success.
+      Mutually exclusive with `on_fresh_success` (if both are set,
+      `on_fresh_success` wins).
   """
 
   name: str
@@ -120,6 +129,7 @@ class OperationSpec:
   requires_created_by: bool = True
   pre_validate: Callable[[BaseModel], None] | None = None
   on_fresh_success: Callable | None = None
+  mark_stale_reason: str | None = None
 
   @property
   def resolved_path(self) -> str:
@@ -261,6 +271,12 @@ class OperationRegistrar:
       ))
   """
 
+  # Class-level registry of every instantiated registrar. MCPRegistrar and
+  # future agent-tool generators walk this to find all declared OperationSpecs
+  # without having to know where each router module lives. Modules populate
+  # this at import time; consumers read it lazily at first request.
+  _all_instances: ClassVar[list["OperationRegistrar"]] = []
+
   def __init__(
     self,
     *,
@@ -293,6 +309,25 @@ class OperationRegistrar:
     self.full_path_template = f"/extensions/{domain}/{{graph_id}}/operations"
     # Track registered specs for future MCP/agent adapter enumeration.
     self._registered: list[OperationSpec] = []
+    OperationRegistrar._all_instances.append(self)
+
+  @classmethod
+  def specs_for_extension(
+    cls, extension: str
+  ) -> list[tuple["OperationRegistrar", OperationSpec]]:
+    """Every `(registrar, spec)` pair for the given extension.
+
+    MCPRegistrar and future adapters use this to enumerate declared
+    operations. The registrar is included alongside each spec so
+    consumers that need the session factory, context builder, or
+    schema-missing helper don't have to re-derive them.
+    """
+    return [
+      (reg, spec)
+      for reg in cls._all_instances
+      if reg.extension == extension
+      for spec in reg._registered
+    ]
 
   def register(self, spec: OperationSpec) -> Callable:
     """Mount a FastAPI POST handler for `spec`.
@@ -348,6 +383,7 @@ class OperationRegistrar:
     error_map = spec.error_map
     pre_validate = spec.pre_validate
     on_fresh_success = spec.on_fresh_success
+    mark_stale_reason = spec.mark_stale_reason
     requires_created_by = spec.requires_created_by
     op_name = spec.name
     ctx_builder = self.ctx_builder
@@ -406,7 +442,20 @@ class OperationRegistrar:
         except (ValueError, ProgrammingError):
           raise schema_missing_404()
 
-      return await dispatcher(ctx, _runner, cache, on_fresh_success=on_fresh_success)
+      # Bind graph_id into the stale-reason callback so module-level specs
+      # can declare the effect without capturing `graph_id` in a closure.
+      effective_on_fresh_success = on_fresh_success
+      if effective_on_fresh_success is None and mark_stale_reason is not None:
+        _reason = mark_stale_reason
+
+        def _mark_stale(_env, _g=graph_id, _r=_reason):
+          mark_graph_stale(_g, _r)
+
+        effective_on_fresh_success = _mark_stale
+
+      return await dispatcher(
+        ctx, _runner, cache, on_fresh_success=effective_on_fresh_success
+      )
 
     handler.__name__ = f"{op_name.replace('-', '_')}_op"
     handler.__qualname__ = handler.__name__

@@ -8,10 +8,17 @@ Tool availability is schema-driven:
 - Core tools (cypher, schema) are always available
 - Extension tools (financial statements, etc.) require matching schema_extensions
 - Infrastructure tools (workspace, memory) are gated by feature flags
+
+**Registrar-generated tools:** Extensions with an `OperationRegistrar`
+(roboledger, roboinvestor) contribute their `OperationSpec`s as
+auto-generated MCP tools via `registrar.build_tools_for_extension`. These
+are looked up in `_registrar_dispatch` at call time BEFORE the hand-written
+if/elif ladder. This lets the hand-written layer be pruned incrementally
+as tools migrate, without a big-bang refactor.
 """
 
 import json
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from robosystems.config import env
 from robosystems.logger import logger
@@ -33,6 +40,11 @@ from .workspace import (
   ListWorkspacesTool,
   SwitchWorkspaceTool,
 )
+
+if TYPE_CHECKING:
+  from robosystems.middleware.extensions import GraphExtensionContext
+
+  from .registrar import _RegistrarMCPTool
 
 
 def resolve_schema_extensions(graph_id: str) -> list[str]:
@@ -175,15 +187,12 @@ class GraphMCPTools:
       self.get_graph_sync_status_tool = GetGraphSyncStatusTool(graph_client)
       self.materialize_graph_tool = MaterializeGraphTool(graph_client)
 
-    # Layer 2: Schedule tools (gated by roboledger extension + ROBOLEDGER_ENABLED)
-    self.create_schedule_tool = None
+    # Layer 2: Schedule read tools (gated by roboledger extension +
+    # ROBOLEDGER_ENABLED). Writes are registrar-generated.
     self.list_schedule_structures_tool = None
     self.get_schedule_facts_tool = None
     self.get_period_close_status_tool = None
-    self.create_closing_entry_tool = None
     self.list_period_drafts_tool = None
-    self.truncate_schedule_tool = None
-    self.create_manual_closing_entry_tool = None
     # Fiscal calendar tools (same gate as schedule tools)
     self.get_fiscal_calendar_tool = None
     self.close_period_tool = None
@@ -195,36 +204,33 @@ class GraphMCPTools:
         ReopenPeriodTool,
       )
       from .schedule_tools import (
-        CreateClosingEntryTool,
-        CreateManualClosingEntryTool,
-        CreateScheduleTool,
         GetPeriodCloseStatusTool,
         GetScheduleFactsTool,
         ListPeriodDraftsTool,
         ListScheduleStructuresTool,
-        TruncateScheduleTool,
       )
 
-      self.create_schedule_tool = CreateScheduleTool(graph_client)
+      # Read-side schedule tools only — writes (create-schedule,
+      # create-closing-entry, create-manual-closing-entry, truncate-schedule,
+      # update-schedule, delete-schedule) are registrar-generated from the
+      # roboledger OperationSpec declarations.
       self.list_schedule_structures_tool = ListScheduleStructuresTool(graph_client)
       self.get_schedule_facts_tool = GetScheduleFactsTool(graph_client)
       self.get_period_close_status_tool = GetPeriodCloseStatusTool(graph_client)
-      self.create_closing_entry_tool = CreateClosingEntryTool(graph_client)
       self.list_period_drafts_tool = ListPeriodDraftsTool(graph_client)
-      self.truncate_schedule_tool = TruncateScheduleTool(graph_client)
-      self.create_manual_closing_entry_tool = CreateManualClosingEntryTool(graph_client)
       self.get_fiscal_calendar_tool = GetFiscalCalendarTool(graph_client)
       self.close_period_tool = ClosePeriodTool(graph_client)
       self.reopen_period_tool = ReopenPeriodTool(graph_client)
 
-    # Layer 2: Taxonomy mapping tools (gated by roboledger extension + ROBOLEDGER_ENABLED)
+    # Layer 2: Taxonomy mapping read tools (gated by roboledger extension +
+    # ROBOLEDGER_ENABLED). Writes — create-mapping-association,
+    # create-associations, update/delete-association — are
+    # registrar-generated.
     self.get_unmapped_elements_tool = None
     self.suggest_mapping_tool = None
-    self.create_mapping_association_tool = None
     self.get_mapping_summary_tool = None
     if self._has_extension("roboledger") and env.ROBOLEDGER_ENABLED and not read_only:
       from .taxonomy_tools import (
-        CreateMappingAssociationTool,
         GetMappingSummaryTool,
         GetUnmappedElementsTool,
         SuggestMappingTool,
@@ -232,7 +238,6 @@ class GraphMCPTools:
 
       self.get_unmapped_elements_tool = GetUnmappedElementsTool(graph_client)
       self.suggest_mapping_tool = SuggestMappingTool(graph_client)
-      self.create_mapping_association_tool = CreateMappingAssociationTool(graph_client)
       self.get_mapping_summary_tool = GetMappingSummaryTool(graph_client)
 
     # Layer 3: Text search tools (gated by SEMANTIC_SEARCH_ENABLED)
@@ -273,9 +278,60 @@ class GraphMCPTools:
     self._cache_hits = 0
     self._cache_misses = 0
 
+    # ── Registrar-generated tools ──────────────────────────────────────
+    # Auto-generate MCP tools from every OperationSpec declared for the
+    # graph's enabled extensions. Keyed by tool name — checked before the
+    # hand-written if/elif ladder in `call_tool` so migrations can drop
+    # hand-written classes without touching the dispatch code.
+    self._cached_meta: GraphExtensionContext | None = None
+    self._registrar_dispatch: dict[str, _RegistrarMCPTool] = {}
+    if not read_only:
+      # Skip registrar wiring for shared repos; they never accept writes.
+      from .registrar import build_tools_for_extension
+
+      for ext in self.schema_extensions:
+        self._registrar_dispatch.update(
+          build_tools_for_extension(
+            extension=ext,
+            client=self.client,
+            meta_getter=self._get_cached_meta,
+          )
+        )
+
     logger.info(
-      f"Initialized Graph MCP tools (extensions={list(self.schema_extensions)}, read_only={self.read_only})"
+      f"Initialized Graph MCP tools (extensions={list(self.schema_extensions)}, "
+      f"read_only={self.read_only}, registrar_tools={len(self._registrar_dispatch)})"
     )
+
+  def _get_cached_meta(self) -> "GraphExtensionContext | None":
+    """Lazy accessor for platform DB graph metadata.
+
+    First call opens a short-lived session, caches the result on the
+    handler instance. Subsequent registrar-tool calls within the same
+    handler lifetime hit the cache. On any load failure, returns None so
+    the tool's own gate path handles it.
+    """
+    if self._cached_meta is not None:
+      return self._cached_meta
+    try:
+      from robosystems.database import get_db_session
+      from robosystems.middleware.extensions import load_graph_metadata
+
+      db_gen = get_db_session()
+      session = next(db_gen)
+      try:
+        self._cached_meta = load_graph_metadata(self.client.graph_id, session)
+      finally:
+        try:
+          next(db_gen)
+        except StopIteration:
+          pass
+    except Exception:
+      logger.debug(
+        "Graph metadata preload failed for %s; registrar tools will fall back to per-call load",
+        getattr(self.client, "graph_id", "unknown"),
+      )
+    return self._cached_meta
 
   def _has_extension(self, extension: str) -> bool:
     """Check if the graph has a specific schema extension."""
@@ -384,24 +440,16 @@ class GraphMCPTools:
     return tools
 
   def _get_schedule_tool_definitions(self) -> list[dict[str, Any]]:
-    """Get schedule management tool definitions (close workflow)."""
+    """Get schedule read tool definitions + fiscal calendar tools."""
     tools = []
-    if self.create_schedule_tool is not None:
-      tools.append(self.create_schedule_tool.get_tool_definition())
     if self.list_schedule_structures_tool is not None:
       tools.append(self.list_schedule_structures_tool.get_tool_definition())
     if self.get_schedule_facts_tool is not None:
       tools.append(self.get_schedule_facts_tool.get_tool_definition())
     if self.get_period_close_status_tool is not None:
       tools.append(self.get_period_close_status_tool.get_tool_definition())
-    if self.create_closing_entry_tool is not None:
-      tools.append(self.create_closing_entry_tool.get_tool_definition())
     if self.list_period_drafts_tool is not None:
       tools.append(self.list_period_drafts_tool.get_tool_definition())
-    if self.truncate_schedule_tool is not None:
-      tools.append(self.truncate_schedule_tool.get_tool_definition())
-    if self.create_manual_closing_entry_tool is not None:
-      tools.append(self.create_manual_closing_entry_tool.get_tool_definition())
     if self.get_fiscal_calendar_tool is not None:
       tools.append(self.get_fiscal_calendar_tool.get_tool_definition())
     if self.close_period_tool is not None:
@@ -411,14 +459,12 @@ class GraphMCPTools:
     return tools
 
   def _get_taxonomy_tool_definitions(self) -> list[dict[str, Any]]:
-    """Get taxonomy mapping tool definitions (CoA → GAAP workflow)."""
+    """Get taxonomy read tool definitions (CoA → GAAP workflow)."""
     tools = []
     if self.get_unmapped_elements_tool is not None:
       tools.append(self.get_unmapped_elements_tool.get_tool_definition())
     if self.suggest_mapping_tool is not None:
       tools.append(self.suggest_mapping_tool.get_tool_definition())
-    if self.create_mapping_association_tool is not None:
-      tools.append(self.create_mapping_association_tool.get_tool_definition())
     if self.get_mapping_summary_tool is not None:
       tools.append(self.get_mapping_summary_tool.get_tool_definition())
     return tools
@@ -497,6 +543,13 @@ class GraphMCPTools:
     tools.extend(self._get_search_tool_definitions())
     tools.extend(self._get_document_tool_definitions())
 
+    # Layer 0: Registrar-generated tools (per enabled extension).
+    # Appended last so hand-written tools retain their historical
+    # ordering; clients rely on get_tool_definitions_as_dict to
+    # enumerate by name, not index.
+    for tool in self._registrar_dispatch.values():
+      tools.append(tool.get_tool_definition())
+
     return tools
 
   def _get_document_tool_definitions(self) -> list[dict[str, Any]]:
@@ -527,6 +580,14 @@ class GraphMCPTools:
         Tool execution result
     """
     try:
+      # Layer 0: Registrar-generated tools (auto-derived from OperationSpec)
+      # Checked first so hand-written if/elif branches can be pruned as
+      # tools migrate. These tools embed the extension gate internally.
+      registrar_tool = self._registrar_dispatch.get(name)
+      if registrar_tool is not None:
+        result = await registrar_tool.execute(arguments)
+        return result if return_raw else json.dumps(result, indent=2)
+
       # Layer 1: Core tools (always available)
       if name == "read-graph-cypher":
         result = await self.cypher_tool.execute(arguments)
@@ -671,16 +732,7 @@ class GraphMCPTools:
         result = await self.materialize_graph_tool.execute(arguments)
         return result if return_raw else json.dumps(result, indent=2)
 
-      # Schedule tools
-      elif name == "create-schedule":
-        if self.create_schedule_tool is None:
-          raise ValueError(
-            "create-schedule tool is not available. "
-            "Requires roboledger extension and ROBOLEDGER_ENABLED=true."
-          )
-        result = await self.create_schedule_tool.execute(arguments)
-        return result if return_raw else json.dumps(result, indent=2)
-
+      # Schedule read tools (writes are registrar-generated, handled at Layer 0)
       elif name == "list-schedule-structures":
         if self.list_schedule_structures_tool is None:
           raise ValueError(
@@ -708,15 +760,6 @@ class GraphMCPTools:
         result = await self.get_period_close_status_tool.execute(arguments)
         return result if return_raw else json.dumps(result, indent=2)
 
-      elif name == "create-closing-entry":
-        if self.create_closing_entry_tool is None:
-          raise ValueError(
-            "create-closing-entry tool is not available. "
-            "Requires roboledger extension and ROBOLEDGER_ENABLED=true."
-          )
-        result = await self.create_closing_entry_tool.execute(arguments)
-        return result if return_raw else json.dumps(result, indent=2)
-
       elif name == "list-period-drafts":
         if self.list_period_drafts_tool is None:
           raise ValueError(
@@ -724,24 +767,6 @@ class GraphMCPTools:
             "Requires roboledger extension and ROBOLEDGER_ENABLED=true."
           )
         result = await self.list_period_drafts_tool.execute(arguments)
-        return result if return_raw else json.dumps(result, indent=2)
-
-      elif name == "truncate-schedule":
-        if self.truncate_schedule_tool is None:
-          raise ValueError(
-            "truncate-schedule tool is not available. "
-            "Requires roboledger extension and ROBOLEDGER_ENABLED=true."
-          )
-        result = await self.truncate_schedule_tool.execute(arguments)
-        return result if return_raw else json.dumps(result, indent=2)
-
-      elif name == "create-manual-closing-entry":
-        if self.create_manual_closing_entry_tool is None:
-          raise ValueError(
-            "create-manual-closing-entry tool is not available. "
-            "Requires roboledger extension and ROBOLEDGER_ENABLED=true."
-          )
-        result = await self.create_manual_closing_entry_tool.execute(arguments)
         return result if return_raw else json.dumps(result, indent=2)
 
       # Fiscal calendar tools
@@ -789,15 +814,6 @@ class GraphMCPTools:
             "Requires roboledger extension and ROBOLEDGER_ENABLED=true."
           )
         result = await self.suggest_mapping_tool.execute(arguments)
-        return result if return_raw else json.dumps(result, indent=2)
-
-      elif name == "create-mapping-association":
-        if self.create_mapping_association_tool is None:
-          raise ValueError(
-            "create-mapping-association tool is not available. "
-            "Requires roboledger extension and ROBOLEDGER_ENABLED=true."
-          )
-        result = await self.create_mapping_association_tool.execute(arguments)
         return result if return_raw else json.dumps(result, indent=2)
 
       elif name == "get-mapping-summary":

@@ -377,7 +377,8 @@ class TestTaxonomyToolRegistration:
       )
 
   def test_taxonomy_tools_in_definitions(self, tools_with_taxonomy):
-    """All 4 taxonomy tools should appear in tool definitions."""
+    """All 3 taxonomy read tools + the registrar-generated
+    `create-mapping-association` should appear in tool definitions."""
     definitions = tools_with_taxonomy.get_tool_definitions_as_dict()
     tool_names = {d["name"] for d in definitions}
     assert "get-unmapped-elements" in tool_names
@@ -465,11 +466,20 @@ class TestTaxonomyToolRegistration:
       mock_env.MCP_SEMANTIC_MEMORY_ENABLED = False
       tools = GraphMCPTools(mock_client, schema_extensions=[])
 
+    # create-mapping-association is registrar-generated so, when
+    # roboledger isn't enabled for this graph, the registrar simply
+    # doesn't emit the tool. Dispatch returns "Unknown tool" — that's
+    # the expected MCP error for a missing registration and is
+    # behaviorally equivalent to "not available" from the agent's POV.
     for tool_name in [
       "get-unmapped-elements",
       "suggest-mapping",
-      "create-mapping-association",
       "get-mapping-summary",
     ]:
       result = await tools.call_tool(tool_name, {"element_id": "x", "mapping_id": "x"})
       assert "not available" in result
+
+    registrar_result = await tools.call_tool(
+      "create-mapping-association", {"mapping_id": "x"}
+    )
+    assert "Unknown tool" in registrar_result

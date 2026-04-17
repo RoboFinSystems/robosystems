@@ -19,7 +19,7 @@ from robosystems.models.api.extensions.taxonomies import (
   AssociationResponse,
   BulkCreateAssociationsRequest,
   BulkCreateAssociationsResponse,
-  CreateAssociationRequest,
+  CreateMappingAssociationOperation,
   CreateStructureRequest,
   CreateTaxonomyRequest,
   DeleteAssociationRequest,
@@ -147,8 +147,7 @@ def create_structure(
 
 def create_mapping_association(
   session: Session,
-  mapping_id: str,
-  body: CreateAssociationRequest,
+  body: CreateMappingAssociationOperation,
   created_by: str,
 ) -> AssociationResponse:
   """Add a mapping association (CoA element → reporting concept).
@@ -159,10 +158,10 @@ def create_mapping_association(
   status codes.
   """
   structure = session.execute(
-    select(Structure).where(Structure.id == mapping_id)
+    select(Structure).where(Structure.id == body.mapping_id)
   ).scalar_one_or_none()
   if structure is None:
-    raise MappingStructureNotFoundError(mapping_id)
+    raise MappingStructureNotFoundError(body.mapping_id)
 
   from_elem = session.execute(
     select(Element).where(Element.id == body.from_element_id)
@@ -178,7 +177,7 @@ def create_mapping_association(
 
   assoc = Association(
     id=generate_prefixed_ulid("assoc"),
-    structure_id=mapping_id,
+    structure_id=body.mapping_id,
     from_element_id=body.from_element_id,
     to_element_id=body.to_element_id,
     association_type=body.association_type,

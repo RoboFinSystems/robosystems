@@ -1,25 +1,21 @@
-"""Taxonomy mapping MCP tools for CoA → GAAP mapping workflows.
+"""Taxonomy mapping read tools for CoA → GAAP mapping workflows.
 
-Four tools for taxonomy management:
+Three read-side tools; writes (`create-mapping-association`,
+`delete-mapping-association`, `create-associations`, etc.) are
+registrar-generated from the roboledger OperationSpec declarations.
+
 1. get-unmapped-elements: List CoA elements not yet mapped to reporting taxonomy
 2. suggest-mapping: Query reporting taxonomy for matching concepts by classification
-3. create-mapping-association: Write a confirmed CoA → reporting concept mapping
-4. get-mapping-summary: Get mapping coverage stats
+3. get-mapping-summary: Get mapping coverage stats
 
-All four route through `operations/roboledger/{reads,commands}/taxonomies.py`
-so MCP, GraphQL, and the REST operation surface share one source of truth.
+All three route through `operations/roboledger/reads/taxonomies.py` so
+MCP, GraphQL, and the REST read surface share one source of truth.
 """
 
 from typing import Any
 
 from robosystems.db.extensions import extensions_session
 from robosystems.logger import logger
-from robosystems.models.api.extensions.taxonomies import CreateAssociationRequest
-from robosystems.operations.roboledger.commands.taxonomies import (
-  ElementNotFoundError,
-  MappingStructureNotFoundError,
-  create_mapping_association,
-)
 from robosystems.operations.roboledger.reads.taxonomies import (
   count_coa_elements,
   get_element,
@@ -172,92 +168,6 @@ class SuggestMappingTool:
         }
     except Exception as exc:
       logger.warning(f"suggest-mapping failed: {exc}")
-      return {"error": str(exc)}
-
-
-class CreateMappingAssociationTool:
-  """Write a confirmed CoA → reporting concept mapping."""
-
-  def __init__(self, graph_client):
-    self.client = graph_client
-
-  def get_tool_definition(self) -> dict[str, Any]:
-    return {
-      "name": "create-mapping-association",
-      "description": """Create a mapping association between a CoA element and a US GAAP reporting concept.
-
-**WHEN TO USE:**
-- After confirming which reporting concept a CoA account should map to
-- Writes the association to the mapping structure in the OLTP database
-
-**REQUIRES:**
-- mapping_id: The mapping structure ID (create one first via the API if needed)
-- from_element_id: The CoA element being mapped
-- to_element_id: The target US GAAP reporting concept
-
-**RETURNS:**
-- The created association with IDs and element names""",
-      "inputSchema": {
-        "type": "object",
-        "properties": {
-          "mapping_id": {
-            "type": "string",
-            "description": "The mapping structure ID to add the association to",
-          },
-          "from_element_id": {
-            "type": "string",
-            "description": "Source CoA element ID",
-          },
-          "to_element_id": {
-            "type": "string",
-            "description": "Target US GAAP reporting concept element ID",
-          },
-          "confidence": {
-            "type": "number",
-            "description": "Confidence score (0-1). Omit for manual mappings.",
-          },
-        },
-        "required": ["mapping_id", "from_element_id", "to_element_id"],
-      },
-    }
-
-  async def execute(self, arguments: dict[str, Any]) -> Any:
-    graph_id = self.client.graph_id
-    mapping_id = arguments["mapping_id"]
-
-    body = CreateAssociationRequest(
-      from_element_id=arguments["from_element_id"],
-      to_element_id=arguments["to_element_id"],
-      association_type="mapping",
-      confidence=arguments.get("confidence"),
-      suggested_by="ai",
-    )
-
-    try:
-      with extensions_session(graph_id) as session:
-        try:
-          assoc = create_mapping_association(
-            session, mapping_id, body, created_by="mcp"
-          )
-        except MappingStructureNotFoundError:
-          return {"error": f"Mapping structure {mapping_id} not found"}
-        except ElementNotFoundError as exc:
-          return {"error": f"{exc.side.capitalize()} element not found"}
-        # AssociationResponse doesn't carry the source element's `code`
-        # but the existing MCP wire shape includes it, so fetch it once.
-        from_elem = get_element(session, body.from_element_id)
-        session.commit()
-
-      return {
-        "created": True,
-        "association_id": assoc.id,
-        "from_element": assoc.from_element_name,
-        "from_code": from_elem.code if from_elem else None,
-        "to_element": assoc.to_element_name,
-        "to_qname": assoc.to_element_qname,
-      }
-    except Exception as exc:
-      logger.warning(f"create-mapping-association failed: {exc}")
       return {"error": str(exc)}
 
 
