@@ -397,7 +397,7 @@ Resources:
         - Name: worker
           Image: !Sub ${ECRRepositoryUrl}:${ECRImageTag}
           Essential: true
-          StopTimeout: 300
+          StopTimeout: 119 # Fargate max is <120s
           Command: ["/app/bin/entrypoint.sh"]
           LogConfiguration:
             LogDriver: awslogs
