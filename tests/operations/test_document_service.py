@@ -163,7 +163,8 @@ class TestListDocuments:
 
     service = DocumentService(session)
     service.list_documents("kg_test", source_type="memory")
-    mock_get.assert_called_once_with("kg_test", session, "memory")
+    # folder defaults to None when not supplied.
+    mock_get.assert_called_once_with("kg_test", session, "memory", None)
 
 
 @pytest.mark.unit
