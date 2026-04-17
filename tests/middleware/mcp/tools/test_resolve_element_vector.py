@@ -1,15 +1,18 @@
 """Tests for resolve-element MCP tool — vector search (lance) path.
 
-Tests the _resolve_via_lance code path which is gated by MCP_VECTOR_SEARCH_ENABLED.
-When enabled, the tool calls client.vector_search() before falling back to canonical
-or text search.
+Tests the vector-search code path (in ``adapters/sec/mcp/element_resolver``)
+which is gated by ``MCP_VECTOR_SEARCH_ENABLED``. When enabled, the tool
+calls ``client.vector_search()`` before falling back to canonical or
+text search.
 """
 
-from unittest.mock import AsyncMock, Mock
+from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 
 from robosystems.middleware.mcp.tools.resolve_element_tool import ResolveElementTool
+
+_RESOLVER = "robosystems.adapters.sec.mcp.element_resolver"
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -61,9 +64,26 @@ def mock_client():
 @pytest.fixture
 def tool(mock_client):
   t = ResolveElementTool(mock_client)
-  t._enricher = _make_mock_enricher()
   t._vector_search_enabled = True
   return t
+
+
+@pytest.fixture
+def patched_enricher():
+  """Mock the ops-layer enricher; tests can customize via
+  ``patched_enricher.match_canonical_from_query.return_value = <concept>``.
+  """
+  enricher = _make_mock_enricher()
+  with patch(f"{_RESOLVER}._get_enricher", return_value=enricher):
+    yield enricher
+
+
+@pytest.fixture(autouse=True)
+def _autouse_enricher(patched_enricher):
+  """Autouse so every test gets a fresh mocked enricher; tests that need
+  a specific canonical match can depend on ``patched_enricher`` directly.
+  """
+  yield
 
 
 # ---------------------------------------------------------------------------
@@ -241,7 +261,6 @@ class TestVectorSearchDisabled:
   async def test_falls_back_when_disabled(self, mock_client):
     """When vector search is disabled, falls through to canonical/text."""
     tool = ResolveElementTool(mock_client)
-    tool._enricher = _make_mock_enricher()
     tool._vector_search_enabled = False
 
     mock_client.execute_query = _query_router(
@@ -265,7 +284,9 @@ class TestVectorSearchDisabled:
     assert len(result["matches"]) >= 1
 
   @pytest.mark.asyncio
-  async def test_falls_back_when_lance_returns_empty(self, mock_client):
+  async def test_falls_back_when_lance_returns_empty(
+    self, mock_client, patched_enricher
+  ):
     """When vector search returns no results, falls through to canonical."""
     from robosystems.adapters.sec.taxonomy.concepts import CanonicalConcept
 
@@ -278,9 +299,8 @@ class TestVectorSearchDisabled:
     )
 
     tool = ResolveElementTool(mock_client)
-    tool._enricher = _make_mock_enricher()
-    tool._enricher.match_canonical_from_query.return_value = mock_concept
     tool._vector_search_enabled = True
+    patched_enricher.match_canonical_from_query.return_value = mock_concept
 
     mock_client.vector_search.return_value = []  # No lance results
 
@@ -302,7 +322,7 @@ class TestVectorSearchDisabled:
     assert result["matches"][0]["qname"] == "us-gaap:Revenues"
 
   @pytest.mark.asyncio
-  async def test_falls_back_when_lance_raises(self, mock_client):
+  async def test_falls_back_when_lance_raises(self, mock_client, patched_enricher):
     """When vector search raises an exception, falls through gracefully."""
     from robosystems.adapters.sec.taxonomy.concepts import CanonicalConcept
 
@@ -315,9 +335,8 @@ class TestVectorSearchDisabled:
     )
 
     tool = ResolveElementTool(mock_client)
-    tool._enricher = _make_mock_enricher()
-    tool._enricher.match_canonical_from_query.return_value = mock_concept
     tool._vector_search_enabled = True
+    patched_enricher.match_canonical_from_query.return_value = mock_concept
 
     mock_client.vector_search.side_effect = ConnectionError("Graph API unreachable")
 

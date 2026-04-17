@@ -137,17 +137,19 @@ class DocumentService:
     self,
     graph_id: str,
     source_type: str | None = None,
+    folder: str | None = None,
   ) -> Sequence[Document]:
-    """List documents for a graph."""
-    return Document.get_by_graph(graph_id, self.session, source_type)
+    """List documents for a graph, optionally filtered by source type and/or folder."""
+    return Document.get_by_graph(graph_id, self.session, source_type, folder)
 
   def count_documents(
     self,
     graph_id: str,
     source_type: str | None = None,
+    folder: str | None = None,
   ) -> int:
-    """Count documents for a graph."""
-    return Document.count_by_graph(graph_id, self.session, source_type)
+    """Count documents for a graph, optionally filtered by source type and/or folder."""
+    return Document.count_by_graph(graph_id, self.session, source_type, folder)
 
   def update_document(
     self,
