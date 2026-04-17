@@ -136,6 +136,38 @@ class TestExtensionGate:
     assert result.errors is None
     assert result.data == {"hello": "hello, probe@example.com"}
 
+  def test_repository_graph_with_extension_is_allowed(self) -> None:
+    """Lock in the intentional asymmetry with the REST gate.
+
+    Repository graphs (e.g. SEC) declare `schema_extensions=["roboledger"]`
+    in their manifest so ledger-shaped reads work against the shared
+    data. GraphQL queries on such a graph must NOT be blocked — if
+    this test starts failing, someone added a `graph_type ==
+    "repository"` check to `require_extension` and broke SEC access.
+    See the docstring on `graphql/resolvers/_common.py:require_extension`.
+    """
+    mock_response = LedgerEntityResponse(
+      id="ent_sec",
+      name="SEC EDGAR",
+      status="active",
+      is_parent=True,
+      source="native",
+    )
+    with (
+      _patch_session(),
+      patch(
+        "robosystems.operations.roboledger.reads.entity.get_parent_entity",
+        return_value=mock_response,
+      ),
+    ):
+      result = schema.execute_sync(
+        "query { entity { id name } }",
+        context_value=_ctx(graph_type="repository"),
+      )
+    assert result.errors is None
+    assert result.data is not None
+    assert result.data["entity"]["id"] == "ent_sec"
+
 
 class TestEntityResolver:
   def test_returns_entity_when_found(self) -> None:

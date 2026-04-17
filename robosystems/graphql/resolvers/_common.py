@@ -72,6 +72,17 @@ def require_extension(info: Info[GraphQLContext, None], extension: str) -> None:
   unauthenticated introspection traffic; combined with `require_user`
   running first, this branch only fires for authenticated calls on
   graphs where the extension genuinely isn't enabled.
+
+  **Deliberate asymmetry with the REST gate** (`require_graph_extension`
+  in `middleware/extensions.py`): the REST gate rejects
+  `graph_type == "repository"` outright because command writes must
+  never land in a shared tenant schema. This GraphQL gate does NOT
+  apply that check — repository graphs (e.g. SEC) declare
+  `schema_extensions=["roboledger"]` in their manifest precisely so
+  ledger-shaped reads work against the shared data. Removing that
+  asymmetry here would break SEC GraphQL queries for every
+  subscriber. If a future "fix" adds a `graph_type` check, SEC read
+  access dies with it.
   """
   if extension not in info.context["schema_extensions"]:
     raise strawberry.exceptions.StrawberryGraphQLError(

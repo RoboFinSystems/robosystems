@@ -95,7 +95,8 @@ class OperationSpec:
       docstring if empty).
     path: URL path override (defaults to `/{name}`).
     business_event_type: metrics event key (defaults to
-      `ledger_{snake_name}`).
+      `{domain}_{snake_name}`, where `domain` is supplied by the
+      `OperationRegistrar` at mount time).
     requires_created_by: pass `created_by=str(user.id)` to the command.
       True by default.
     pre_validate: optional sync validator called before the command.
@@ -124,12 +125,19 @@ class OperationSpec:
   def resolved_path(self) -> str:
     return self.path or f"/{self.name}"
 
-  @property
-  def resolved_business_event_type(self) -> str:
+  def resolve_business_event_type(self, domain: str) -> str:
+    """Metrics event key for this op.
+
+    If the spec set `business_event_type` explicitly, that wins.
+    Otherwise default to `{domain}_{snake_name}` — the registrar
+    provides the domain, so adding a new `OperationRegistrar` for a
+    different domain (e.g., roboinvestor) gets the right prefix
+    automatically instead of silently emitting `ledger_*` events.
+    """
     if self.business_event_type:
       return self.business_event_type
     snake = self.name.replace("-", "_")
-    return f"ledger_{snake}"
+    return f"{domain}_{snake}"
 
   @property
   def openapi_operation_id(self) -> str:
@@ -301,7 +309,7 @@ class OperationRegistrar:
     metrics_wrapped = endpoint_metrics_decorator(
       f"{self.full_path_template}{spec.resolved_path}",
       method="POST",
-      business_event_type=spec.resolved_business_event_type,
+      business_event_type=spec.resolve_business_event_type(self.domain),
     )(handler)
     self.router.post(
       spec.resolved_path,
