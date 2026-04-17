@@ -455,35 +455,45 @@ class TestGraphMCPTools:
   @pytest.mark.asyncio
   @pytest.mark.unit
   async def test_call_data_operation_tools(self, mock_graph_client, monkeypatch):
-    """Test routing calls to data operation tools."""
-    # Enable fact grid tool for this test
+    """Test routing calls to data operation tools.
+
+    build-fact-grid now delegates to the ops-layer ``query_fact_grid``
+    (see ``operations/roboledger/views/fact_query.py``) — patching there
+    keeps the test focused on the manager's dispatch contract.
+    """
     monkeypatch.setattr("robosystems.config.env.FACT_GRID_ENABLED", True)
 
     mock_graph_client.graph_id = "kg1234567890abcdef"
 
     tools = GraphMCPTools(mock_graph_client)
 
-    mock_graph_client.execute_query = AsyncMock(
-      return_value=[
+    import pandas as pd
+
+    fact_df = pd.DataFrame(
+      [
         {
           "element_id": "test:Element",
           "element_name": "Cash",
           "period_end": "2025-01-01",
           "value": 1000.0,
           "unit": "USD",
-          "dimension_member": None,
         }
       ]
     )
 
-    result = await tools.call_tool(
-      "build-fact-grid",
-      {
-        "elements": ["test:Element"],
-        "periods": ["2025-01-01"],
-      },
-      return_raw=True,
-    )
+    with patch(
+      "robosystems.middleware.mcp.tools.fact_grid_tool.query_fact_grid",
+      new_callable=AsyncMock,
+      return_value=fact_df,
+    ):
+      result = await tools.call_tool(
+        "build-fact-grid",
+        {
+          "elements": ["test:Element"],
+          "periods": ["2025-01-01"],
+        },
+        return_raw=True,
+      )
 
     assert result["success"] is True
     assert result["fact_count"] == 1
