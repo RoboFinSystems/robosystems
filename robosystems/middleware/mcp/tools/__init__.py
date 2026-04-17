@@ -7,8 +7,8 @@ together to create the full MCP tools interface.
 
 from .base_tool import BaseTool
 from .cypher_tool import CypherTool
-from .data_tools import BuildFactGridTool
 from .example_queries_tool import ExampleQueriesTool
+from .fact_grid_tool import BuildFactGridTool
 from .graph_tools import (
   CreateBackupTool,
   CreateSubgraphTool,
@@ -19,7 +19,7 @@ from .graph_tools import (
   SwitchWorkspaceTool,
 )
 from .manager import GraphMCPTools
-from .memory import AddNodeTableTool, AddRelationshipTableTool, WriteCypherTool
+from .memory_tools import AddNodeTableTool, AddRelationshipTableTool, WriteCypherTool
 from .resolve_element_tool import ResolveElementTool
 from .schema_tool import SchemaTool
 

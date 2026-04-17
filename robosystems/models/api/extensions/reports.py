@@ -129,3 +129,109 @@ class StatementResponse(BaseModel):
 
 class ReportListResponse(BaseModel):
   reports: list[ReportResponse]
+
+
+# ── Live financial statement (OLTP) ────────────────────────────────────────
+
+
+class LiveFinancialStatementRequest(BaseModel):
+  """Request for live-financial-statement (OLTP, entity graphs only)."""
+
+  statement_type: str = Field(
+    ..., description="income_statement | balance_sheet | equity_statement"
+  )
+  period_start: date | None = Field(
+    None, description="Explicit window start. Overrides period_type/fiscal_year."
+  )
+  period_end: date | None = Field(
+    None, description="Explicit window end. Overrides period_type/fiscal_year."
+  )
+  period_type: str | None = Field(
+    None, description="annual | quarterly | instant (ignored when dates supplied)"
+  )
+  fiscal_year: int | None = Field(
+    None, description="Fiscal year for annual window (anchored on FiscalCalendar)"
+  )
+  limit: int = Field(50, ge=1, le=1000, description="Max fact rows returned")
+
+
+class LiveStatementFactRow(BaseModel):
+  """A single row of an OLTP-backed ad-hoc statement."""
+
+  qname: str
+  name: str
+  classification: str
+  values: list[float | None]
+  depth: int = 0
+  is_subtotal: bool = False
+
+
+class LiveFinancialStatementResponse(BaseModel):
+  """Rendered OLTP-backed ad-hoc statement."""
+
+  graph_id: str
+  statement_type: str
+  periods: list[PeriodSpec]
+  facts: list[LiveStatementFactRow]
+  fact_count: int
+  unmapped_count: int
+  truncated: bool = False
+
+
+# ── Financial statement analysis (graph Cypher) ───────────────────────────
+
+
+class FinancialStatementAnalysisRequest(BaseModel):
+  """Request for financial-statement-analysis (graph-backed Cypher)."""
+
+  statement_type: str = Field(
+    ...,
+    description="income_statement | balance_sheet | cash_flow_statement | equity_statement",
+  )
+  ticker: str | None = Field(
+    None,
+    description="Company ticker (required on shared-repo graphs, ignored otherwise)",
+  )
+  report_id: str | None = Field(
+    None,
+    description="Specific report identifier. If omitted, auto-resolves latest by ticker + filters.",
+  )
+  fiscal_year: int | None = Field(
+    None, description="Filter by fiscal year focus when auto-resolving the report"
+  )
+  period_type: str | None = Field(None, description="annual | quarterly | instant")
+  limit: int = Field(50, ge=1, le=1000)
+
+
+class ResolvedReportInfo(BaseModel):
+  """Information about the auto-resolved report."""
+
+  report_id: str
+  form: str | None = None
+  filing_date: str | None = None
+  fiscal_year: int | None = None
+  fiscal_period: str | None = None
+
+
+class AnalyticalStatementFactRow(BaseModel):
+  """A single fact row from the graph-backed statement analysis."""
+
+  canonical_concept: str | None = None
+  qname: str
+  name: str
+  value: float | None = None
+  end_date: str | None = None
+  period_type: str | None = None
+  duration_type: str | None = None
+
+
+class FinancialStatementAnalysisResponse(BaseModel):
+  """Results of the financial-statement-analysis view op."""
+
+  graph_id: str
+  statement_type: str
+  ticker: str | None = None
+  report_id: str | None = None
+  resolved_report: ResolvedReportInfo | None = None
+  facts: list[AnalyticalStatementFactRow]
+  fact_count: int

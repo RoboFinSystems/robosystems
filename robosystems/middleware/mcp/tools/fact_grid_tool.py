@@ -58,8 +58,9 @@ class BuildFactGridTool:
 - When you need precise control over which elements, periods, and entities to include
 - For ad-hoc financial analysis that doesn't fit a standard statement format
 
-**HOW IT DIFFERS FROM get-financial-statement:**
-- get-financial-statement returns ALL line items for a standard statement (income statement, balance sheet, etc.)
+**HOW IT DIFFERS FROM financial-statement-analysis / live-financial-statement:**
+- financial-statement-analysis returns ALL line items for a standard statement from the graph-backed XBRL hypercube (SEC or materialized tenant)
+- live-financial-statement returns ALL line items for a standard statement from the tenant's live OLTP ledger
 - build-fact-grid returns SPECIFIC elements you choose, across any combination of periods and entities
 
 **INPUTS:**

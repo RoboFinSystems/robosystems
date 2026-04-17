@@ -41,7 +41,7 @@ from .graph_tools import (
   MaterializeTool,
   SwitchWorkspaceTool,
 )
-from .memory import AddNodeTableTool, AddRelationshipTableTool, WriteCypherTool
+from .memory_tools import AddNodeTableTool, AddRelationshipTableTool, WriteCypherTool
 from .schema_tool import SchemaTool
 
 if TYPE_CHECKING:
@@ -130,16 +130,28 @@ class GraphMCPTools:
 
     # Layer 2: Schema extension tools (gated by schema_extensions)
     self.example_queries_tool = None
-    self.financial_statement_tool = None
+    self.live_financial_statement_tool = None
+    self.financial_statement_analysis_tool = None
     self.resolve_element_tool = None
     self.resolve_structure_tool = None
 
     if self._has_extension("roboledger"):
       self.example_queries_tool = ExampleQueriesTool(graph_client)
 
-      from .financial_statement_tool import GetFinancialStatementTool
+      from .financial_statement_tools import (
+        FinancialStatementAnalysisTool,
+        LiveFinancialStatementTool,
+      )
 
-      self.financial_statement_tool = GetFinancialStatementTool(graph_client)
+      # Graph-backed analytical view — works on shared-repo + materialized
+      # tenant graphs alike. Always registered on roboledger graphs.
+      self.financial_statement_analysis_tool = FinancialStatementAnalysisTool(
+        graph_client
+      )
+      # OLTP-backed live statement — tenant entity graphs only. Skipped
+      # on shared repos (no OLTP tenant schema) and on read-only graphs.
+      if not self._is_shared_repository() and not read_only:
+        self.live_financial_statement_tool = LiveFinancialStatementTool(graph_client)
 
       # Semantic enrichment tools (roboledger + manifest flag)
       if self._should_include_semantic_tools():
@@ -184,7 +196,7 @@ class GraphMCPTools:
 
     self.build_fact_grid_tool = None
     if env.FACT_GRID_ENABLED:
-      from .data_tools import BuildFactGridTool
+      from .fact_grid_tool import BuildFactGridTool
 
       self.build_fact_grid_tool = BuildFactGridTool(graph_client)
 
@@ -437,12 +449,12 @@ class GraphMCPTools:
       self.add_relationship_table_tool.get_tool_definition(),
     ]
 
-  def _get_data_tool_definitions(self) -> list[dict[str, Any]]:
+  def _get_fact_grid_tool_definitions(self) -> list[dict[str, Any]]:
     """
-    Get data operation tool definitions from actual tool implementations.
+    Get fact-grid tool definitions.
 
     Returns:
-        List of data tool definitions (empty if FACT_GRID_ENABLED is false)
+        List of fact-grid tool definitions (empty if FACT_GRID_ENABLED is false)
     """
     tools = []
     if self.build_fact_grid_tool is not None:
@@ -503,12 +515,17 @@ class GraphMCPTools:
     return tools
 
   def _get_curated_tool_definitions(self) -> list[dict[str, Any]]:
-    """Get curated financial tool definitions (FactSet-powered)."""
-    if self.financial_statement_tool is None:
-      return []
-    return [
-      self.financial_statement_tool.get_tool_definition(),
-    ]
+    """Get curated financial statement tool definitions.
+
+    - ``financial-statement-analysis`` — graph-backed (SEC + materialized tenants)
+    - ``live-financial-statement`` — OLTP-backed (tenant entity graphs only)
+    """
+    tools: list[dict[str, Any]] = []
+    if self.financial_statement_analysis_tool is not None:
+      tools.append(self.financial_statement_analysis_tool.get_tool_definition())
+    if self.live_financial_statement_tool is not None:
+      tools.append(self.live_financial_statement_tool.get_tool_definition())
+    return tools
 
   def _tool_unavailable_reason(self, tool_name: str, feature_flag: str) -> str:
     """Return a context-aware error message for unavailable tools."""
@@ -545,7 +562,7 @@ class GraphMCPTools:
       tools.extend(self._get_curated_tool_definitions())
 
       # Fact grid tool (custom element/period/entity queries)
-      tools.extend(self._get_data_tool_definitions())
+      tools.extend(self._get_fact_grid_tool_definitions())
 
       # Materialization tools (sync status + trigger)
       tools.extend(self._get_materialization_tool_definitions())
@@ -653,13 +670,23 @@ class GraphMCPTools:
         result = await self.resolve_element_tool.execute(arguments)
         return result if return_raw else json.dumps(result, indent=2)
 
-      elif name == "get-financial-statement":
-        if self.financial_statement_tool is None:
+      elif name == "financial-statement-analysis":
+        if self.financial_statement_analysis_tool is None:
           raise ValueError(
-            "get-financial-statement tool is not available. "
+            "financial-statement-analysis tool is not available. "
             "This graph does not have the roboledger schema extension."
           )
-        result = await self.financial_statement_tool.execute(arguments)
+        result = await self.financial_statement_analysis_tool.execute(arguments)
+        return result if return_raw else json.dumps(result, indent=2)
+
+      elif name == "live-financial-statement":
+        if self.live_financial_statement_tool is None:
+          raise ValueError(
+            "live-financial-statement tool is not available. "
+            "This graph is either a shared repository, read-only, or missing "
+            "the roboledger schema extension."
+          )
+        result = await self.live_financial_statement_tool.execute(arguments)
         return result if return_raw else json.dumps(result, indent=2)
 
       # Layer 3: Graph lifecycle tools (MCP_WORKSPACE_ENABLED, read_only gates)

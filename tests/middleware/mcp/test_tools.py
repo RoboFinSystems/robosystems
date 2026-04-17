@@ -10,7 +10,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from robosystems.middleware.mcp.tools.data_tools import BuildFactGridTool
+from robosystems.middleware.mcp.tools.fact_grid_tool import BuildFactGridTool
 
 
 @pytest.fixture

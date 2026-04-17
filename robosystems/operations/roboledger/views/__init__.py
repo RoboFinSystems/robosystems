@@ -26,8 +26,14 @@ pandas DataFrames or `FactGrid` Pydantic models.
 
 from robosystems.operations.roboledger.views.fact_grid_builder import FactGridBuilder
 from robosystems.operations.roboledger.views.fact_query import query_fact_grid
+from robosystems.operations.roboledger.views.financial_statement_query import (
+  deduplicate_facts,
+  query_financial_statement,
+)
 
 __all__ = [
   "FactGridBuilder",
+  "deduplicate_facts",
   "query_fact_grid",
+  "query_financial_statement",
 ]

@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from robosystems.middleware.mcp.tools.memory import (
+from robosystems.middleware.mcp.tools.memory_tools import (
   AddNodeTableTool,
   AddRelationshipTableTool,
   WriteCypherTool,

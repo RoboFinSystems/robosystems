@@ -35,6 +35,7 @@ import uuid
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Path
 
+from robosystems.config.shared_repositories import is_shared_repository_or_subgraph
 from robosystems.middleware.auth.dependencies import get_current_user_with_graph
 from robosystems.middleware.graph.types import GRAPH_OR_SUBGRAPH_ID_PATTERN
 from robosystems.middleware.operations import (
@@ -47,6 +48,12 @@ from robosystems.middleware.operations import (
 from robosystems.middleware.otel.metrics import endpoint_metrics_decorator
 from robosystems.middleware.rate_limits import subscription_aware_rate_limit_dependency
 from robosystems.models.api.common import OPERATION_ERROR_RESPONSES
+from robosystems.models.api.extensions.reports import (
+  AnalyticalStatementFactRow,
+  FinancialStatementAnalysisRequest,
+  FinancialStatementAnalysisResponse,
+  ResolvedReportInfo,
+)
 from robosystems.models.api.views import (
   CreateViewRequest,
   ViewMetadata,
@@ -55,7 +62,9 @@ from robosystems.models.api.views import (
 from robosystems.models.core import User
 from robosystems.operations.roboledger.views import (
   FactGridBuilder,
+  deduplicate_facts,
   query_fact_grid,
+  query_financial_statement,
 )
 
 # Import _dispatch from the sibling operations module so error
@@ -161,7 +170,138 @@ async def build_fact_grid_op(
             "max": float(element_data["value"].max()),
           }
         presentations["summary"] = summary
-
     return ViewResponse(metadata=metadata, presentations=presentations)
+
+  return await _dispatch(ctx, _runner, cache)
+
+
+_VALID_ANALYSIS_STATEMENT_TYPES = (
+  "income_statement",
+  "balance_sheet",
+  "cash_flow_statement",
+  "equity_statement",
+)
+
+
+@router.post(
+  "/financial-statement-analysis",
+  response_model=OperationEnvelope,
+  operation_id="opFinancialStatementAnalysis",
+  summary="Financial Statement Analysis",
+  description=(
+    "Query a rendered financial statement from the graph-backed XBRL "
+    "hypercube (Structure → FactSet → Fact). Works on the SEC shared "
+    "repository today and on any RoboLedger tenant graph whose ledger "
+    "has been materialized to LadybugDB. For shared-repo graphs, "
+    "provide `ticker` to auto-resolve the latest filing; for tenant "
+    "graphs, provide `report_id` explicitly."
+  ),
+  tags=[_OP_TAG],
+  dependencies=[_RATE_LIMIT],
+  responses={**OPERATION_ERROR_RESPONSES},
+)
+@endpoint_metrics_decorator(
+  "/extensions/roboledger/{graph_id}/operations/financial-statement-analysis",
+  method="POST",
+  business_event_type="ledger_financial_statement_analysis",
+)
+async def financial_statement_analysis_op(
+  body: FinancialStatementAnalysisRequest,
+  graph_id: str = Path(..., pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN),
+  user: User = Depends(get_current_user_with_graph),
+  idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
+  cache: IdempotencyCache = Depends(get_idempotency_cache),
+) -> OperationEnvelope:
+  ctx = OperationContext(
+    domain="roboledger",
+    operation_name="financial-statement-analysis",
+    graph_id=graph_id,
+    user_id=str(user.id),
+    idempotency_key=idempotency_key,
+    body_fingerprint=fingerprint_body(body),
+  )
+
+  if body.statement_type not in _VALID_ANALYSIS_STATEMENT_TYPES:
+    raise HTTPException(
+      status_code=400,
+      detail=(
+        f"Unknown statement_type '{body.statement_type}'. "
+        f"Valid types: {', '.join(_VALID_ANALYSIS_STATEMENT_TYPES)}"
+      ),
+    )
+
+  is_shared = is_shared_repository_or_subgraph(graph_id)
+
+  if is_shared and not body.ticker and not body.report_id:
+    raise HTTPException(
+      status_code=400,
+      detail="ticker is required on shared-repository graphs (e.g. SEC).",
+    )
+
+  if not is_shared and not body.report_id:
+    raise HTTPException(
+      status_code=400,
+      detail="report_id is required for tenant graphs.",
+    )
+
+  async def _runner():
+    report_id = body.report_id
+    resolved: dict | None = None
+
+    if is_shared and not report_id and body.ticker:
+      from robosystems.adapters.sec.mcp import resolve_sec_report
+
+      resolved = await resolve_sec_report(
+        graph_id,
+        ticker=body.ticker,
+        period_type=body.period_type,
+        fiscal_year=body.fiscal_year,
+      )
+      report_id = resolved["identifier"] if resolved else None
+
+    rows: list[dict] = []
+    if report_id or body.ticker:
+      rows = await query_financial_statement(
+        graph_id,
+        statement_type=body.statement_type,
+        report_id=report_id,
+        ticker=body.ticker,
+        period_type=body.period_type,
+        limit=body.limit,
+      )
+
+    deduped = deduplicate_facts(rows)[: body.limit]
+    facts = [
+      AnalyticalStatementFactRow(
+        canonical_concept=row.get("canonical_concept"),
+        qname=row.get("qname", ""),
+        name=row.get("name", ""),
+        value=row.get("value"),
+        end_date=row.get("end_date"),
+        period_type=row.get("period_type"),
+        duration_type=row.get("duration_type"),
+      )
+      for row in deduped
+    ]
+
+    resolved_info: ResolvedReportInfo | None = None
+    if resolved:
+      resolved_info = ResolvedReportInfo(
+        report_id=resolved.get("identifier", ""),
+        form=resolved.get("form"),
+        filing_date=resolved.get("filing_date"),
+        fiscal_year=resolved.get("fiscal_year"),
+        fiscal_period=resolved.get("fiscal_period"),
+      )
+
+    return FinancialStatementAnalysisResponse(
+      graph_id=graph_id,
+      statement_type=body.statement_type,
+      ticker=body.ticker,
+      report_id=report_id,
+      resolved_report=resolved_info,
+      facts=facts,
+      fact_count=len(facts),
+    )
 
   return await _dispatch(ctx, _runner, cache)

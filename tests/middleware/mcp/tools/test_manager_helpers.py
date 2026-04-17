@@ -72,8 +72,8 @@ class TestGetToolDefinitionHelpers:
   def test_memory_tools_empty_when_disabled(self, tools):
     assert tools._get_memory_tool_definitions() == []
 
-  def test_data_tools_empty_when_disabled(self, tools):
-    assert tools._get_data_tool_definitions() == []
+  def test_fact_grid_tools_empty_when_disabled(self, tools):
+    assert tools._get_fact_grid_tool_definitions() == []
 
   def test_curated_tools_empty_without_roboledger(self, tools):
     assert tools._get_curated_tool_definitions() == []
@@ -83,7 +83,10 @@ class TestGetToolDefinitionHelpers:
 
   def test_curated_tools_present_with_roboledger(self, tools_with_roboledger):
     defs = tools_with_roboledger._get_curated_tool_definitions()
-    assert len(defs) == 1  # financial_statement only
+    names = {d["name"] for d in defs}
+    # Roboledger + non-shared, read-write graphs get both statement tools.
+    assert "financial-statement-analysis" in names
+    assert "live-financial-statement" in names
 
 
 class TestCallToolErrors:
@@ -118,8 +121,13 @@ class TestCallToolErrors:
     assert "not available" in result or "Error" in result
 
   @pytest.mark.asyncio
-  async def test_disabled_financial_statement_raises(self, tools):
-    result = await tools.call_tool("get-financial-statement", {})
+  async def test_disabled_financial_statement_analysis_raises(self, tools):
+    result = await tools.call_tool("financial-statement-analysis", {})
+    assert "not available" in result or "Error" in result
+
+  @pytest.mark.asyncio
+  async def test_disabled_live_financial_statement_raises(self, tools):
+    result = await tools.call_tool("live-financial-statement", {})
     assert "not available" in result or "Error" in result
 
   @pytest.mark.asyncio

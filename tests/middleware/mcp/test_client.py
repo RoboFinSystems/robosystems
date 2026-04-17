@@ -270,7 +270,8 @@ class TestGraphMCPTools:
 
     # roboledger extension tools should NOT be present
     assert "get-example-queries" not in tool_names
-    assert "get-financial-statement" not in tool_names
+    assert "financial-statement-analysis" not in tool_names
+    assert "live-financial-statement" not in tool_names
     assert "resolve-element" not in tool_names
     assert "resolve-structure" not in tool_names
 
@@ -302,7 +303,11 @@ class TestGraphMCPTools:
 
     # roboledger extension tools should be present
     assert "get-example-queries" in tool_names
-    assert "get-financial-statement" in tool_names
+    assert "financial-statement-analysis" in tool_names
+    # live-financial-statement is only registered on non-shared, read-write
+    # graphs — by default mock_graph_client isn't a shared repo so it's
+    # expected here.
+    assert "live-financial-statement" in tool_names
 
     # Removed tools should NOT be present
     assert "discover-properties" not in tool_names
@@ -565,7 +570,8 @@ class TestGraphMCPTools:
     tools = GraphMCPTools(mock_graph_client, schema_extensions=[])
 
     for tool_name in [
-      "get-financial-statement",
+      "financial-statement-analysis",
+      "live-financial-statement",
       "get-example-queries",
     ]:
       result = await tools.call_tool(tool_name, {}, return_raw=False)
