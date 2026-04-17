@@ -327,7 +327,8 @@ migrate-reset db="platform" env=_local_env:
 ## Demo Scripts ##
 
 # Run all demos
-demo-all:
+demo:
+    @just demo-close
     @just demo-custom-graph
     @just demo-sec
 

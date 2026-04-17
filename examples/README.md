@@ -9,9 +9,10 @@ Comprehensive examples demonstrating RoboSystems' graph database capabilities ac
 just start
 
 # Run all demos in sequence
-just demo-all
+just demo
 
 # Or run individual demos
+just demo-close
 just demo-custom-graph
 just demo-sec NVDA 2025
 ```
@@ -23,12 +24,14 @@ just demo-sec NVDA 2025
 Query real SEC XBRL financial data from public companies.
 
 **Features:**
+
 - Loads SEC 10-K/10-Q filings from EDGAR
 - Processes XBRL financial statements
 - Queries balance sheets, income statements, and cash flows
 - Demonstrates financial fact analysis
 
 **Usage:**
+
 ```bash
 # Load and query NVIDIA 2025 financials (includes queries)
 just demo-sec NVDA 2025
@@ -47,6 +50,7 @@ just demo-sec-query true
 Any publicly traded US company with SEC filings (e.g., AAPL, MSFT, GOOGL, TSLA, NVDA)
 
 **What It Does:**
+
 1. Fetches SEC filing from EDGAR API
 2. Processes XBRL data into graph format
 3. Loads entities, elements, facts, and relationships
@@ -61,12 +65,14 @@ Any publicly traded US company with SEC filings (e.g., AAPL, MSFT, GOOGL, TSLA, 
 Demonstrates custom schema creation with people, companies, and projects.
 
 **Features:**
+
 - Custom node types (Person, Company, Project)
 - Custom relationships (employment, collaboration, participation)
 - Flexible schema definition via JSON
 - Demonstrates generic graph capabilities
 
 **Usage:**
+
 ```bash
 # Run with new graph (default)
 just demo-custom-graph
@@ -79,6 +85,7 @@ just demo-custom-graph skip-queries
 ```
 
 **What It Creates:**
+
 - 50 Person nodes (name, age, email, interests)
 - 10 Company nodes (name, industry, location, size)
 - 15 Project nodes (name, description, status, budget)
@@ -87,6 +94,7 @@ just demo-custom-graph skip-queries
 - COMPANY_SPONSORS_PROJECT relationships (sponsorship)
 
 **What It Does:**
+
 1. Sets up user credentials (or reuses existing)
 2. Creates graph with custom schema from schema.json
 3. Generates synthetic graph data
@@ -104,6 +112,7 @@ just demo-custom-graph skip-queries
 All demos share a common credential system for authentication.
 
 **Setup Credentials:**
+
 ```bash
 # Create new user and API key
 just demo-user
@@ -124,11 +133,13 @@ just demo-user --force
 Most demos accept comma-separated flags to control behavior. Default behavior reuses existing credentials and graph.
 
 **Available Flags:**
+
 - `new-user` - Create a new user (implies `new-graph`)
 - `new-graph` - Create a new graph
 - `skip-queries` - Skip verification queries after ingestion
 
 **Examples:**
+
 ```bash
 # Default: reuse existing user and graph, regenerate data
 just demo-custom-graph
@@ -148,6 +159,7 @@ just demo-custom-graph skip-queries
 Each demo has a `main.py` that runs all steps automatically. For manual control, you can run individual numbered scripts:
 
 **Custom Graph Demo:**
+
 ```bash
 cd examples/custom_graph_demo
 uv run 01_setup_credentials.py
@@ -174,6 +186,7 @@ This pipeline demonstrates the production data loading workflow used by RoboSyst
 ## Understanding the Output
 
 **Successful Demo Output:**
+
 ```
 ✓ User authenticated
 ✓ Graph created: kg1a2b3c4d5e
@@ -190,6 +203,7 @@ Example Query Results:
 ```
 
 **Common Issues:**
+
 - "User already exists" - Default behavior reuses existing user, or use `new-user` flag
 - "Graph already exists" - Default behavior reuses existing graph, or use `new-graph` flag
 - "API connection failed" - Ensure RoboSystems is running (`just start`)
@@ -226,6 +240,7 @@ After running the demos:
 ## Support
 
 For issues or questions:
+
 - [GitHub Issues](https://github.com/RoboFinSystems/robosystems/issues)
 - [Discussions](https://github.com/RoboFinSystems/robosystems/discussions)
 - Check logs: `just logs api` or `just logs worker`
