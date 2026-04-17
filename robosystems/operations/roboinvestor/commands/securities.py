@@ -1,15 +1,21 @@
-"""Security write operations."""
+"""Security write operations.
+
+Registrar-compatible signatures `(session, body, created_by=...)`;
+update/delete declare `requires_created_by=False`. Missing rows raise
+`SecurityNotFoundError` for the registrar's error map to translate.
+"""
 
 from __future__ import annotations
-
-from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from robosystems.models.api.extensions.investor import (
   CreateSecurityRequest,
+  DeleteResult,
+  DeleteSecurityOperation,
   SecurityResponse,
+  UpdateSecurityOperation,
 )
 from robosystems.models.extensions import Entity
 from robosystems.models.extensions.roboinvestor import Security
@@ -21,6 +27,10 @@ from robosystems.operations.roboinvestor.reads.securities import (
 
 class EntityNotFoundError(LookupError):
   """Raised when `entity_id` is supplied but no matching entity exists."""
+
+
+class SecurityNotFoundError(LookupError):
+  """Raised when a referenced security does not exist."""
 
 
 def create_security(
@@ -66,16 +76,18 @@ def create_security(
 
 
 def update_security(
-  session: Session, security_id: str, updates: dict[str, Any]
-) -> SecurityResponse | None:
-  """Apply updates to a security. Returns None if the security does not exist."""
+  session: Session, body: UpdateSecurityOperation
+) -> SecurityResponse:
+  """Apply updates to a security. Raises `SecurityNotFoundError` if missing."""
   row = session.execute(
-    select(Security).where(Security.id == security_id)
+    select(Security).where(Security.id == body.security_id)
   ).scalar_one_or_none()
   if row is None:
-    return None
+    raise SecurityNotFoundError(body.security_id)
 
-  for field, value in updates.items():
+  for field, value in body.model_dump(
+    exclude_unset=True, exclude={"security_id"}
+  ).items():
     setattr(row, field, value)
 
   session.flush()
@@ -87,17 +99,20 @@ def update_security(
   return security_to_response(row, entity_name=entity.name if entity else None)
 
 
-def soft_delete_security(session: Session, security_id: str) -> bool:
+def soft_delete_security(
+  session: Session, body: DeleteSecurityOperation
+) -> DeleteResult:
   """Soft-delete a security by setting `is_active=False`.
 
-  Returns `True` if a row was flipped, `False` if the security did not
-  exist. Matches the existing REST endpoint's soft-delete semantics.
+  Raises `SecurityNotFoundError` if the row doesn't exist (registrar
+  translates to 404). Historical positions referencing the security
+  stay valid.
   """
   row = session.execute(
-    select(Security).where(Security.id == security_id)
+    select(Security).where(Security.id == body.security_id)
   ).scalar_one_or_none()
   if row is None:
-    return False
+    raise SecurityNotFoundError(body.security_id)
   row.is_active = False
   session.flush()
-  return True
+  return DeleteResult(deleted=True)

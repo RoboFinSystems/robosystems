@@ -72,8 +72,8 @@ class TestGetToolDefinitionHelpers:
   def test_memory_tools_empty_when_disabled(self, tools):
     assert tools._get_memory_tool_definitions() == []
 
-  def test_data_tools_empty_when_disabled(self, tools):
-    assert tools._get_data_tool_definitions() == []
+  def test_fact_grid_tools_empty_when_disabled(self, tools):
+    assert tools._get_fact_grid_tool_definitions() == []
 
   def test_curated_tools_empty_without_roboledger(self, tools):
     assert tools._get_curated_tool_definitions() == []
@@ -83,7 +83,47 @@ class TestGetToolDefinitionHelpers:
 
   def test_curated_tools_present_with_roboledger(self, tools_with_roboledger):
     defs = tools_with_roboledger._get_curated_tool_definitions()
-    assert len(defs) == 1  # financial_statement only
+    names = {d["name"] for d in defs}
+    # Roboledger + non-shared, read-write graphs get both statement tools.
+    assert "financial-statement-analysis" in names
+    assert "live-financial-statement" in names
+
+  def test_live_statement_tool_absent_on_shared_repo(self, mock_client):
+    """Shared-repo graphs (SEC) must NOT get the OLTP live-statement tool
+    because they have no OLTP tenant schema."""
+    mock_client.graph_id = "sec"
+    with (
+      patch.object(GraphMCPTools, "_should_include_semantic_tools", return_value=False),
+      patch.object(GraphMCPTools, "_is_shared_repository", return_value=True),
+      patch("robosystems.middleware.mcp.tools.manager.env") as mock_env,
+    ):
+      mock_env.MCP_WORKSPACE_ENABLED = False
+      mock_env.MCP_MEMORY_ENABLED = False
+      mock_env.FACT_GRID_ENABLED = False
+      tools = GraphMCPTools(mock_client, schema_extensions=["roboledger"])
+
+    assert tools.financial_statement_analysis_tool is not None
+    assert tools.live_financial_statement_tool is None
+    names = {d["name"] for d in tools._get_curated_tool_definitions()}
+    assert "financial-statement-analysis" in names
+    assert "live-financial-statement" not in names
+
+  def test_live_statement_tool_absent_on_read_only(self, mock_client):
+    """Read-only graphs must NOT get the OLTP live-statement tool."""
+    with (
+      patch.object(GraphMCPTools, "_should_include_semantic_tools", return_value=False),
+      patch("robosystems.middleware.mcp.tools.manager.env") as mock_env,
+    ):
+      mock_env.MCP_WORKSPACE_ENABLED = False
+      mock_env.MCP_MEMORY_ENABLED = False
+      mock_env.FACT_GRID_ENABLED = False
+      tools = GraphMCPTools(
+        mock_client, schema_extensions=["roboledger"], read_only=True
+      )
+
+    # Analysis tool stays (read-only is fine for graph-backed reads)
+    assert tools.financial_statement_analysis_tool is not None
+    assert tools.live_financial_statement_tool is None
 
 
 class TestCallToolErrors:
@@ -99,7 +139,7 @@ class TestCallToolErrors:
 
   @pytest.mark.asyncio
   async def test_disabled_workspace_raises(self, tools):
-    result = await tools.call_tool("create-workspace", {})
+    result = await tools.call_tool("create-subgraph", {})
     assert "not available" in result or "Error" in result
 
   @pytest.mark.asyncio
@@ -118,18 +158,23 @@ class TestCallToolErrors:
     assert "not available" in result or "Error" in result
 
   @pytest.mark.asyncio
-  async def test_disabled_financial_statement_raises(self, tools):
-    result = await tools.call_tool("get-financial-statement", {})
+  async def test_disabled_financial_statement_analysis_raises(self, tools):
+    result = await tools.call_tool("financial-statement-analysis", {})
+    assert "not available" in result or "Error" in result
+
+  @pytest.mark.asyncio
+  async def test_disabled_live_financial_statement_raises(self, tools):
+    result = await tools.call_tool("live-financial-statement", {})
     assert "not available" in result or "Error" in result
 
   @pytest.mark.asyncio
   async def test_disabled_delete_workspace_raises(self, tools):
-    result = await tools.call_tool("delete-workspace", {})
+    result = await tools.call_tool("delete-subgraph", {})
     assert "not available" in result or "Error" in result
 
   @pytest.mark.asyncio
   async def test_disabled_list_workspaces_raises(self, tools):
-    result = await tools.call_tool("list-workspaces", {})
+    result = await tools.call_tool("list-subgraphs", {})
     assert "not available" in result or "Error" in result
 
   @pytest.mark.asyncio
@@ -377,7 +422,8 @@ class TestTaxonomyToolRegistration:
       )
 
   def test_taxonomy_tools_in_definitions(self, tools_with_taxonomy):
-    """All 4 taxonomy tools should appear in tool definitions."""
+    """All 3 taxonomy read tools + the registrar-generated
+    `create-mapping-association` should appear in tool definitions."""
     definitions = tools_with_taxonomy.get_tool_definitions_as_dict()
     tool_names = {d["name"] for d in definitions}
     assert "get-unmapped-elements" in tool_names
@@ -465,11 +511,20 @@ class TestTaxonomyToolRegistration:
       mock_env.MCP_SEMANTIC_MEMORY_ENABLED = False
       tools = GraphMCPTools(mock_client, schema_extensions=[])
 
+    # create-mapping-association is registrar-generated so, when
+    # roboledger isn't enabled for this graph, the registrar simply
+    # doesn't emit the tool. Dispatch returns "Unknown tool" — that's
+    # the expected MCP error for a missing registration and is
+    # behaviorally equivalent to "not available" from the agent's POV.
     for tool_name in [
       "get-unmapped-elements",
       "suggest-mapping",
-      "create-mapping-association",
       "get-mapping-summary",
     ]:
       result = await tools.call_tool(tool_name, {"element_id": "x", "mapping_id": "x"})
       assert "not available" in result
+
+    registrar_result = await tools.call_tool(
+      "create-mapping-association", {"mapping_id": "x"}
+    )
+    assert "Unknown tool" in registrar_result

@@ -39,8 +39,8 @@ mcp/
     │ # Layer 2a: Schema-extension analytical tools (roboledger gated)
     ├── example_queries_tool.py     # get-example-queries
     ├── resolve_element_tool.py     # resolve-element (canonical matching, manifest-gated)
-    ├── financial_statement_tool.py # get-financial-statement (auto-resolve reports)
-    ├── data_tools.py               # build-fact-grid (cross-company comparisons)
+    ├── financial_statement_tools.py # financial-statement-analysis (graph) + live-financial-statement (OLTP)
+    ├── fact_grid_tool.py           # build-fact-grid (cross-company comparisons)
     │
     │ # Layer 2b: Roboledger OLTP tools (delegate to operations/roboledger/*)
     ├── fiscal_calendar_tools.py    # get-fiscal-calendar, close-period, reopen-period
@@ -57,7 +57,7 @@ mcp/
     │
     │ # Layer 4: Infrastructure (feature-flag gated)
     ├── workspace.py         # create/delete/list/switch-workspace (MCP_WORKSPACE_ENABLED)
-    └── memory.py            # write-graph-cypher, add-node-table, add-relationship-table (MCP_MEMORY_ENABLED)
+    └── memory_tools.py      # write-graph-cypher, add-node-table, add-relationship-table (MCP_MEMORY_ENABLED)
 ```
 
 ## Tool Layers
@@ -79,7 +79,8 @@ Require `roboledger` in `schema_extensions`. These tools query the LadybugDB gra
 |------|-------------|-------------------|
 | `get-example-queries` | Working query patterns tailored to the graph schema | — |
 | `resolve-element` | Map concepts ("revenue") to XBRL element qnames via canonical matching | Manifest flag `has_semantic_enrichment=True` |
-| `get-financial-statement` | Structured statement data with auto-resolve and dedup | — |
+| `financial-statement-analysis` | Graph-backed statement read (SEC + materialized tenants), auto-resolve + dedup | — |
+| `live-financial-statement` | OLTP-backed ad-hoc statement from tenant's live ledger via CoA→GAAP mapping | Tenant entity graphs only (not shared repos) |
 | `build-fact-grid` | Cross-company comparisons via canonical concepts | `FACT_GRID_ENABLED` |
 
 `search-documents` results on iXBRL disclosures include `xbrl_elements` — the XBRL fact tags in that section — enabling graph cross-reference via `resolve-element` or `read-graph-cypher`.
@@ -250,7 +251,7 @@ Graph-query tools (Layer 1, Layer 2a, Layer 4 memory) use `self.client.execute_q
 **Key patterns:**
 
 - **Operations-kernel delegation**: Every roboledger OLTP tool imports from `robosystems.operations.roboledger.{reads,commands}.*` and calls those functions with an open session. Tool files contain no business logic — they're transport shims that: (1) parse MCP arguments into the Pydantic request model, (2) open the session, (3) call the ops function, (4) translate domain exceptions (`PeriodNotFoundError`, `MappingStructureNotFoundError`, etc.) into structured MCP tool errors, (5) return the Pydantic response as an MCP result. The same functions back `/extensions/roboledger/{g}/operations/*` REST endpoints and the GraphQL resolvers — three transports, one domain kernel.
-- **Auto-resolve**: `get-financial-statement` automatically finds the latest relevant report when no `report_id` is provided
+- **Auto-resolve**: `financial-statement-analysis` automatically finds the latest relevant SEC filing when no `report_id` is provided (ticker + form-code resolution lives in `adapters/sec/mcp/report_resolver.py`)
 - **Canonical matching**: `resolve-element` uses in-memory embedding match to map concepts to XBRL elements
 - **Deduplication**: Financial tools deduplicate facts that appear in multiple filings (comparative periods)
 - **Parameterized queries**: All tools use `$param` syntax to prevent injection

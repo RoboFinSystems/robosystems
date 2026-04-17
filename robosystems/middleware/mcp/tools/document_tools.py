@@ -451,11 +451,7 @@ class ListDocumentsTool:
     session = _get_platform_session()
     try:
       service = DocumentService(session)
-      docs = service.list_documents(graph_id, source_type)
-
-      # Filter by folder in Python (DocumentService doesn't support folder filter)
-      if folder:
-        docs = [d for d in docs if d.folder == folder]
+      docs = service.list_documents(graph_id, source_type, folder)
 
       return {
         "total": len(docs),

@@ -567,7 +567,9 @@ async def update_file(
 
         if actual_file_size < small_file_threshold_bytes:
           # Fast path: Direct staging for small files
-          from robosystems.operations.lbug.direct_staging import stage_file_directly
+          from robosystems.operations.graph.engine.direct_staging import (
+            stage_file_directly,
+          )
 
           logger.info(
             f"Small file detected ({actual_file_size / (1024 * 1024):.2f} MB < {SMALL_FILE_STAGING_THRESHOLD_MB} MB). "

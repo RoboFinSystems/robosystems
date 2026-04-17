@@ -1,15 +1,23 @@
-"""Portfolio write operations."""
+"""Portfolio write operations.
+
+All four commands share the registrar-compatible signature
+`(session, body, created_by=...)` (update/delete drop `created_by` and
+are declared with `requires_created_by=False` in the router). Missing
+rows raise `PortfolioNotFoundError` so the registrar error map can
+surface a clean 404.
+"""
 
 from __future__ import annotations
-
-from typing import Any
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from robosystems.models.api.extensions.investor import (
   CreatePortfolioRequest,
+  DeletePortfolioOperation,
+  DeleteResult,
   PortfolioResponse,
+  UpdatePortfolioOperation,
 )
 from robosystems.models.extensions.roboinvestor import Portfolio, Position
 from robosystems.operations.roboinvestor.reads.portfolios import portfolio_to_response
@@ -49,44 +57,45 @@ def create_portfolio(
 
 
 def update_portfolio(
-  session: Session, portfolio_id: str, updates: dict[str, Any]
-) -> PortfolioResponse | None:
-  """Apply updates to a portfolio. Returns None if the portfolio does not exist."""
+  session: Session, body: UpdatePortfolioOperation
+) -> PortfolioResponse:
+  """Apply updates to a portfolio. Raises `PortfolioNotFoundError` if missing."""
   row = session.execute(
-    select(Portfolio).where(Portfolio.id == portfolio_id)
+    select(Portfolio).where(Portfolio.id == body.portfolio_id)
   ).scalar_one_or_none()
   if row is None:
-    return None
+    raise PortfolioNotFoundError(body.portfolio_id)
 
-  for field, value in updates.items():
+  for field, value in body.model_dump(
+    exclude_unset=True, exclude={"portfolio_id"}
+  ).items():
     setattr(row, field, value)
 
   session.flush()
   return portfolio_to_response(row)
 
 
-def delete_portfolio(session: Session, portfolio_id: str) -> bool:
+def delete_portfolio(session: Session, body: DeletePortfolioOperation) -> DeleteResult:
   """Delete a portfolio.
 
-  Returns `True` if the row was deleted, `False` if it did not exist.
-  Raises `PortfolioHasActivePositionsError` if the portfolio still has
-  active positions — the caller is expected to translate this into a
-  409 Conflict.
+  Raises `PortfolioNotFoundError` on missing rows (registrar → 404) and
+  `PortfolioHasActivePositionsError` when active positions remain
+  (registrar → 409). Returns `DeleteResult(deleted=True)` on success.
   """
   row = session.execute(
-    select(Portfolio).where(Portfolio.id == portfolio_id)
+    select(Portfolio).where(Portfolio.id == body.portfolio_id)
   ).scalar_one_or_none()
   if row is None:
-    return False
+    raise PortfolioNotFoundError(body.portfolio_id)
 
   active_count = session.execute(
     select(func.count())
     .select_from(Position)
-    .where(Position.portfolio_id == portfolio_id)
+    .where(Position.portfolio_id == body.portfolio_id)
     .where(Position.status == "active")
   ).scalar()
   if active_count:
     raise PortfolioHasActivePositionsError(int(active_count))
 
   session.delete(row)
-  return True
+  return DeleteResult(deleted=True)

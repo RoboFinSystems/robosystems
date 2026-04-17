@@ -270,7 +270,8 @@ class TestGraphMCPTools:
 
     # roboledger extension tools should NOT be present
     assert "get-example-queries" not in tool_names
-    assert "get-financial-statement" not in tool_names
+    assert "financial-statement-analysis" not in tool_names
+    assert "live-financial-statement" not in tool_names
     assert "resolve-element" not in tool_names
     assert "resolve-structure" not in tool_names
 
@@ -302,7 +303,11 @@ class TestGraphMCPTools:
 
     # roboledger extension tools should be present
     assert "get-example-queries" in tool_names
-    assert "get-financial-statement" in tool_names
+    assert "financial-statement-analysis" in tool_names
+    # live-financial-statement is only registered on non-shared, read-write
+    # graphs — by default mock_graph_client isn't a shared repo so it's
+    # expected here.
+    assert "live-financial-statement" in tool_names
 
     # Removed tools should NOT be present
     assert "discover-properties" not in tool_names
@@ -435,49 +440,60 @@ class TestGraphMCPTools:
       mock_filter.first.return_value = mock_graph
       mock_order_by.all.return_value = []
 
-      result = await tools.call_tool("list-workspaces", {}, return_raw=True)
+      result = await tools.call_tool("list-subgraphs", {}, return_raw=True)
 
     # Check that the tool was called and returned a result
     assert result is not None
     assert isinstance(result, dict)
-    # List workspaces returns workspaces array or error
-    assert "workspaces" in result or "error" in result
-    if "workspaces" in result:
-      assert result["total_workspaces"] == 1
-      assert len(result["workspaces"]) == 1
+    # list-subgraphs returns subgraphs array or error
+    assert "subgraphs" in result or "error" in result
+    if "subgraphs" in result:
+      # Primary graph + any subgraphs
+      assert result["total_subgraphs"] == 0
+      assert len(result["subgraphs"]) == 1  # primary entry only
 
   @pytest.mark.asyncio
   @pytest.mark.unit
   async def test_call_data_operation_tools(self, mock_graph_client, monkeypatch):
-    """Test routing calls to data operation tools."""
-    # Enable fact grid tool for this test
+    """Test routing calls to data operation tools.
+
+    build-fact-grid now delegates to the ops-layer ``query_fact_grid``
+    (see ``operations/roboledger/views/fact_query.py``) — patching there
+    keeps the test focused on the manager's dispatch contract.
+    """
     monkeypatch.setattr("robosystems.config.env.FACT_GRID_ENABLED", True)
 
     mock_graph_client.graph_id = "kg1234567890abcdef"
 
     tools = GraphMCPTools(mock_graph_client)
 
-    mock_graph_client.execute_query = AsyncMock(
-      return_value=[
+    import pandas as pd
+
+    fact_df = pd.DataFrame(
+      [
         {
           "element_id": "test:Element",
           "element_name": "Cash",
           "period_end": "2025-01-01",
           "value": 1000.0,
           "unit": "USD",
-          "dimension_member": None,
         }
       ]
     )
 
-    result = await tools.call_tool(
-      "build-fact-grid",
-      {
-        "elements": ["test:Element"],
-        "periods": ["2025-01-01"],
-      },
-      return_raw=True,
-    )
+    with patch(
+      "robosystems.middleware.mcp.tools.fact_grid_tool.query_fact_grid",
+      new_callable=AsyncMock,
+      return_value=fact_df,
+    ):
+      result = await tools.call_tool(
+        "build-fact-grid",
+        {
+          "elements": ["test:Element"],
+          "periods": ["2025-01-01"],
+        },
+        return_raw=True,
+      )
 
     assert result["success"] is True
     assert result["fact_count"] == 1
@@ -495,7 +511,7 @@ class TestGraphMCPTools:
     tools = GraphMCPTools(mock_graph_client)
 
     result = await tools.call_tool(
-      "create-workspace", {"name": "invalid-name"}, return_raw=True
+      "create-subgraph", {"name": "invalid-name"}, return_raw=True
     )
 
     assert result["error"] == "invalid_name"
@@ -527,9 +543,9 @@ class TestGraphMCPTools:
     mock_graph_client.graph_id = "kg1234567890abcdef"
     tools = GraphMCPTools(mock_graph_client)
 
-    # Calling workspace tool when disabled should return error message
+    # Calling a subgraph write tool when disabled returns an error envelope.
     result = await tools.call_tool(
-      "create-workspace", {"name": "test"}, return_raw=False
+      "create-subgraph", {"name": "test"}, return_raw=False
     )
 
     assert "not available" in result
@@ -564,7 +580,8 @@ class TestGraphMCPTools:
     tools = GraphMCPTools(mock_graph_client, schema_extensions=[])
 
     for tool_name in [
-      "get-financial-statement",
+      "financial-statement-analysis",
+      "live-financial-statement",
       "get-example-queries",
     ]:
       result = await tools.call_tool(tool_name, {}, return_raw=False)

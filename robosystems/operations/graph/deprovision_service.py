@@ -166,7 +166,7 @@ class GraphDeprovisionService:
   async def _create_final_backup(self, graph, result: DeprovisionResult) -> None:
     """Create a final backup before teardown."""
     try:
-      from ...operations.lbug.backup_manager import (
+      from .engine.backup_manager import (
         BackupFormat,
         BackupJob,
         BackupManager,

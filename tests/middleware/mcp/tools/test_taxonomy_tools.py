@@ -1,10 +1,9 @@
-"""Tests for taxonomy mapping MCP tools.
+"""Tests for taxonomy mapping MCP read tools.
 
-These tests mock at the **operations layer** (`reads/taxonomies.py` and
-`commands/taxonomies.py`), which is the contract the MCP tools now consume.
-That keeps the tests focused on MCP's wire shape and exception translation
-rather than SQLAlchemy internals — those have their own tests under
-`tests/operations/roboledger/`.
+The write tool (`create-mapping-association`) is registrar-generated
+from `OperationSpec` in `routers/extensions/roboledger/operations.py`
+and covered by `tests/middleware/mcp/test_registrar.py` plus the
+ops-layer tests under `tests/operations/roboledger/taxonomies/`.
 """
 
 from contextlib import contextmanager
@@ -13,20 +12,14 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from robosystems.middleware.mcp.tools.taxonomy_tools import (
-  CreateMappingAssociationTool,
   GetMappingSummaryTool,
   GetUnmappedElementsTool,
   SuggestMappingTool,
 )
 from robosystems.models.api.extensions.taxonomies import (
-  AssociationResponse,
   ElementResponse,
   MappingCoverageResponse,
   UnmappedElementResponse,
-)
-from robosystems.operations.roboledger.commands.taxonomies import (
-  ElementNotFoundError,
-  MappingStructureNotFoundError,
 )
 
 MODULE = "robosystems.middleware.mcp.tools.taxonomy_tools"
@@ -205,99 +198,6 @@ class TestSuggestMappingTool:
       result = await tool.execute({"element_id": "nonexistent"})
 
     assert "error" in result
-
-
-# ── CreateMappingAssociationTool ─────────────────────────────────────────
-
-
-class TestCreateMappingAssociationTool:
-  def test_tool_definition(self, mock_graph_client):
-    tool = CreateMappingAssociationTool(mock_graph_client)
-    defn = tool.get_tool_definition()
-    assert defn["name"] == "create-mapping-association"
-    assert "mapping_id" in defn["inputSchema"]["properties"]
-    assert "from_element_id" in defn["inputSchema"]["properties"]
-    assert "to_element_id" in defn["inputSchema"]["properties"]
-
-  @pytest.mark.asyncio
-  async def test_creates_association(self, mock_graph_client):
-    tool = CreateMappingAssociationTool(mock_graph_client)
-    assoc = AssociationResponse(
-      id="assoc_1",
-      structure_id="struct_map_1",
-      from_element_id="elem_1",
-      from_element_name="Cash",
-      from_element_qname=None,
-      to_element_id="gaap_1",
-      to_element_name="Revenue",
-      to_element_qname="us-gaap:Revenues",
-      association_type="mapping",
-      confidence=None,
-      suggested_by="ai",
-    )
-    from_elem = _element(id="elem_1", code="1000", name="Cash")
-
-    with (
-      _patch_session() as session,
-      patch(f"{MODULE}.create_mapping_association", return_value=assoc),
-      patch(f"{MODULE}.get_element", return_value=from_elem),
-    ):
-      result = await tool.execute(
-        {
-          "mapping_id": "struct_map_1",
-          "from_element_id": "elem_1",
-          "to_element_id": "gaap_1",
-        }
-      )
-
-    assert result["created"] is True
-    assert result["from_element"] == "Cash"
-    assert result["from_code"] == "1000"
-    assert result["to_element"] == "Revenue"
-    assert result["to_qname"] == "us-gaap:Revenues"
-    session.commit.assert_called_once()
-
-  @pytest.mark.asyncio
-  async def test_returns_error_for_missing_source_element(self, mock_graph_client):
-    tool = CreateMappingAssociationTool(mock_graph_client)
-    with (
-      _patch_session(),
-      patch(
-        f"{MODULE}.create_mapping_association",
-        side_effect=ElementNotFoundError("source", "nonexistent"),
-      ),
-    ):
-      result = await tool.execute(
-        {
-          "mapping_id": "struct_map_1",
-          "from_element_id": "nonexistent",
-          "to_element_id": "gaap_1",
-        }
-      )
-
-    assert "error" in result
-    assert "Source" in result["error"]
-
-  @pytest.mark.asyncio
-  async def test_returns_error_for_missing_mapping_structure(self, mock_graph_client):
-    tool = CreateMappingAssociationTool(mock_graph_client)
-    with (
-      _patch_session(),
-      patch(
-        f"{MODULE}.create_mapping_association",
-        side_effect=MappingStructureNotFoundError("struct_map_1"),
-      ),
-    ):
-      result = await tool.execute(
-        {
-          "mapping_id": "struct_map_1",
-          "from_element_id": "elem_1",
-          "to_element_id": "gaap_1",
-        }
-      )
-
-    assert "error" in result
-    assert "struct_map_1" in result["error"]
 
 
 # ── GetMappingSummaryTool ────────────────────────────────────────────────

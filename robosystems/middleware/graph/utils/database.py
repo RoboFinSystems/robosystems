@@ -126,7 +126,7 @@ def get_database_path_for_graph(graph_id: str) -> str:
   Returns:
       str: Database file path (.lbug extension)
   """
-  from robosystems.operations.lbug.path_utils import get_lbug_database_path
+  from robosystems.operations.graph.engine.path_utils import get_lbug_database_path
 
   db_path = get_lbug_database_path(graph_id)
   return str(db_path)

@@ -7,30 +7,36 @@ together to create the full MCP tools interface.
 
 from .base_tool import BaseTool
 from .cypher_tool import CypherTool
-from .data_tools import BuildFactGridTool
 from .example_queries_tool import ExampleQueriesTool
-from .manager import GraphMCPTools
-from .memory import AddNodeTableTool, AddRelationshipTableTool, WriteCypherTool
-from .resolve_element_tool import ResolveElementTool
-from .schema_tool import SchemaTool
-from .workspace import (
-  CreateWorkspaceTool,
-  DeleteWorkspaceTool,
-  ListWorkspacesTool,
+from .fact_grid_tool import BuildFactGridTool
+from .graph_tools import (
+  CreateBackupTool,
+  CreateSubgraphTool,
+  DeleteSubgraphTool,
+  GetGraphSyncStatusTool,
+  ListSubgraphsTool,
+  MaterializeTool,
   SwitchWorkspaceTool,
 )
+from .manager import GraphMCPTools
+from .memory_tools import AddNodeTableTool, AddRelationshipTableTool, WriteCypherTool
+from .resolve_element_tool import ResolveElementTool
+from .schema_tool import SchemaTool
 
 __all__ = [
   "AddNodeTableTool",
   "AddRelationshipTableTool",
   "BaseTool",
   "BuildFactGridTool",
-  "CreateWorkspaceTool",
+  "CreateBackupTool",
+  "CreateSubgraphTool",
   "CypherTool",
-  "DeleteWorkspaceTool",
+  "DeleteSubgraphTool",
   "ExampleQueriesTool",
+  "GetGraphSyncStatusTool",
   "GraphMCPTools",
-  "ListWorkspacesTool",
+  "ListSubgraphsTool",
+  "MaterializeTool",
   "ResolveElementTool",
   "SchemaTool",
   "SwitchWorkspaceTool",

@@ -192,7 +192,7 @@ class OnInstanceBackupService:
 
   def _resolve_db_path(self, graph_id: str) -> Path:
     """Get local .lbug path for a database."""
-    from robosystems.operations.lbug.path_utils import get_lbug_database_path
+    from robosystems.operations.graph.engine.path_utils import get_lbug_database_path
 
     return get_lbug_database_path(graph_id)
 

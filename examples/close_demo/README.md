@@ -85,10 +85,10 @@ After running the setup script, use Claude Desktop or any MCP client.
 
 ```
 "Show me the balance sheet"
-→ get-financial-statement returns cumulative BS with all accounts
+→ live-financial-statement returns cumulative BS with all accounts
 
 "Show me the income statement"
-→ get-financial-statement returns period IS with revenue and expenses
+→ live-financial-statement returns period IS with revenue and expenses
 ```
 
 ### 5. Verify in the UI

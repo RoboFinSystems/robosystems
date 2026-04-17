@@ -187,7 +187,7 @@ def create_backup(
   from robosystems.middleware.graph.utils import MultiTenantUtils
   from robosystems.models.core import GraphBackup
   from robosystems.operations.aws.s3 import S3BackupAdapter
-  from robosystems.operations.lbug.backup_manager import (
+  from robosystems.operations.graph.engine.backup_manager import (
     BackupFormat,
     BackupJob,
     BackupType,
@@ -289,6 +289,28 @@ def create_backup(
     f"ratio: {backup_info.compression_ratio:.2f}"
   )
 
+  context.log_event(
+    AssetMaterialization(
+      asset_key=AssetKey("user_graph_backup"),
+      description=f"Backed up graph {config.graph_id} to s3://{backup_info.s3_key}",
+      metadata={
+        "graph_id": MetadataValue.text(config.graph_id),
+        "backup_id": MetadataValue.text(backup_id),
+        "backup_type": MetadataValue.text(config.backup_type),
+        "backup_format": MetadataValue.text(config.backup_format),
+        "s3_key": MetadataValue.text(backup_info.s3_key),
+        "original_size_bytes": MetadataValue.int(backup_info.original_size),
+        "compressed_size_bytes": MetadataValue.int(backup_info.compressed_size),
+        "compression_ratio": MetadataValue.float(backup_info.compression_ratio),
+        "encrypted": MetadataValue.bool(config.encryption),
+        "node_count": MetadataValue.int(backup_info.node_count),
+        "relationship_count": MetadataValue.int(backup_info.relationship_count),
+        "duration_seconds": MetadataValue.float(backup_info.backup_duration_seconds),
+        "retention_days": MetadataValue.int(config.retention_days),
+      },
+    )
+  )
+
   return {
     "backup_id": backup_id,
     "graph_id": config.graph_id,
@@ -328,7 +350,7 @@ def restore_backup(
 
   from robosystems.graph_api.client.factory import GraphClientFactory
   from robosystems.models.core import GraphBackup
-  from robosystems.operations.lbug.backup_manager import (
+  from robosystems.operations.graph.engine.backup_manager import (
     BackupFormat,
     BackupJob,
     BackupType,
@@ -726,7 +748,7 @@ def _restage_stale_files_sync(
   import asyncio
 
   from robosystems.models.core import GraphFile
-  from robosystems.operations.lbug.direct_staging import stage_file_directly
+  from robosystems.operations.graph.engine.direct_staging import stage_file_directly
 
   loop = asyncio.new_event_loop()
   try:
@@ -778,7 +800,7 @@ def materialize_graph_tables(
   import time
 
   from robosystems.models.core import Graph, GraphFile, GraphSchema, GraphTable
-  from robosystems.operations.lbug.chunked_materialization import (
+  from robosystems.operations.graph.engine.chunked_materialization import (
     materialize_table_chunked,
   )
 

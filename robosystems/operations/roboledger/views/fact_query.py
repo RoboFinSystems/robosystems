@@ -1,8 +1,145 @@
+"""Fact grid Cypher query for the roboledger XBRL hypercube.
+
+Shared by the REST endpoint (`routers/extensions/roboledger/views.py`) and
+the MCP tool (`middleware/mcp/tools/fact_grid_tool.py`). Both surfaces get
+the same LadybugDB-specific optimizations:
+
+- **Inline node anchoring** for single-element / single-ticker filters
+  (e.g. ``(el:Element {qname: 'us-gaap:Assets'})``). This pins the
+  traversal to specific nodes and avoids full Fact scans on large graphs.
+  Parameterized node patterns are not supported by LadybugDB so string
+  interpolation is required — ``_safe_str`` / ``_is_ticker`` guard the
+  injection surface.
+- **Inline boolean filters silently return zero results** in LadybugDB,
+  so ``f.has_dimensions = false`` stays in WHERE.
+- **``DISTINCT`` + ``ORDER BY`` together returns empty results**, so
+  we run without either clause in Cypher and do dedup + sort in Python.
+"""
+
+from __future__ import annotations
+
+import re
 from typing import Any
 
 import pandas as pd
 
 from robosystems.middleware.graph import get_graph_repository
+
+# Pre-compiled patterns for inline Cypher node filter sanitization.
+_SAFE_STR_RE = re.compile(r"[\w:\-]+")
+_TICKER_RE = re.compile(r"[A-Za-z][A-Za-z0-9.\-]{0,9}")
+
+
+def _safe_str(value: str) -> str | None:
+  """Return ``value`` if it's safe to interpolate into an inline Cypher node
+  filter (only ``[a-zA-Z0-9_:-]`` characters), otherwise ``None`` so the
+  caller falls back to a parameterized WHERE clause.
+  """
+  return value if _SAFE_STR_RE.fullmatch(value) else None
+
+
+def _is_ticker(value: str) -> bool:
+  """Heuristic: does ``value`` look like a stock ticker (letter-led,
+  <=10 chars, alphanumeric with ``.`` or ``-``)?
+
+  Distinguishes tickers from CIKs (all-digit) and company names
+  (contain spaces). Only tickers get the inline ``{ticker: 'x'}``
+  optimization; CIKs and names fall back to the parameterized WHERE.
+  """
+  return bool(_TICKER_RE.fullmatch(value))
+
+
+def _build_element_match(
+  elements: list[str] | None,
+  canonical_concepts: list[str] | None,
+  parameters: dict[str, Any],
+) -> tuple[str, list[str]]:
+  """Return the ``(el:Element …)`` match pattern and any extra WHERE
+  clauses. Uses inline anchoring for single-value queries when safe.
+  """
+  if elements and len(elements) == 1 and not canonical_concepts:
+    safe = _safe_str(elements[0])
+    if safe:
+      return f"(el:Element {{qname: '{safe}'}})", []
+    parameters["elements"] = elements
+    return "(el:Element)", ["el.qname IN $elements"]
+
+  if not elements and len(canonical_concepts or []) == 1:
+    assert canonical_concepts is not None
+    safe = _safe_str(canonical_concepts[0])
+    if safe:
+      return f"(el:Element {{canonical_concept: '{safe}'}})", []
+    parameters["canonical_concepts"] = canonical_concepts
+    return "(el:Element)", ["el.canonical_concept IN $canonical_concepts"]
+
+  if elements and canonical_concepts:
+    parameters["elements"] = elements
+    parameters["canonical_concepts"] = canonical_concepts
+    return (
+      "(el:Element)",
+      ["(el.qname IN $elements OR el.canonical_concept IN $canonical_concepts)"],
+    )
+
+  if elements:
+    parameters["elements"] = elements
+    return "(el:Element)", ["el.qname IN $elements"]
+
+  if canonical_concepts:
+    parameters["canonical_concepts"] = canonical_concepts
+    return "(el:Element)", ["el.canonical_concept IN $canonical_concepts"]
+
+  return "(el:Element)", []
+
+
+def _build_entity_match(
+  entity_list: list[str] | None,
+  parameters: dict[str, Any],
+) -> tuple[str | None, list[str]]:
+  """Return the ``(ent:Entity …)`` match pattern (or ``None`` when no
+  entity filter) plus any extra WHERE clauses.
+
+  Single tickers get the inline anchor; CIKs, names, and multi-entity
+  queries fall back to a parameterized WHERE.
+  """
+  if not entity_list:
+    return None, []
+
+  if len(entity_list) == 1 and _is_ticker(entity_list[0]):
+    safe_ticker = _safe_str(entity_list[0].upper()) or entity_list[0].upper()
+    return f"(ent:Entity {{ticker: '{safe_ticker}'}})", []
+
+  parameters["entities"] = entity_list
+  return (
+    "(ent:Entity)",
+    ["(ent.ticker IN $entities OR ent.cik IN $entities OR ent.name IN $entities)"],
+  )
+
+
+def _deduplicate_fact_rows(
+  rows: list[dict[str, Any]], *, has_entity: bool
+) -> list[dict[str, Any]]:
+  """Dedup by ``(element, period, [entity])`` keeping the first occurrence,
+  then sort by ``period_end`` DESC.
+
+  DISTINCT + ORDER BY returns empty results in LadybugDB, so the query
+  omits both and we handle dedup + sort here.
+  """
+  seen: set[tuple] = set()
+  deduped: list[dict[str, Any]] = []
+  for row in rows:
+    if has_entity:
+      key = (
+        row.get("element_id", ""),
+        row.get("period_end", ""),
+        row.get("entity_ticker") or row.get("entity_name", ""),
+      )
+    else:
+      key = (row.get("element_id", ""), row.get("period_end", ""))
+    if key not in seen:
+      seen.add(key)
+      deduped.append(row)
+  deduped.sort(key=lambda r: r.get("period_end", "") or "", reverse=True)
+  return deduped
 
 
 async def query_fact_grid(
@@ -17,74 +154,60 @@ async def query_fact_grid(
   fiscal_period: str | None = None,
   period_type: str | None = None,
 ) -> pd.DataFrame:
-  """Query facts for a fact grid, aligned with the build-fact-grid MCP tool.
+  """Query deduplicated facts for the roboledger XBRL hypercube.
 
-  Builds a parameterized Cypher query with optional filters for elements
-  (by qname or canonical concept), periods, entities, report context,
-  and period type. Returns deduplicated consolidated facts.
+  Shared by REST (`build-fact-grid`) and MCP (`BuildFactGridTool`). See
+  module docstring for the LadybugDB-specific optimizations applied here.
 
   Args:
       graph_id: Graph containing facts.
-      elements: Element qnames (e.g., ['us-gaap:Assets']).
-      canonical_concepts: Canonical concept names (e.g., ['revenue']).
-      periods: Period end dates (YYYY-MM-DD).
+      elements: Element qnames (e.g., ``['us-gaap:Assets']``).
+      canonical_concepts: Canonical concept names (e.g., ``['revenue']``).
+      periods: Period end dates (``YYYY-MM-DD``).
       entity: Single entity ticker, CIK, or name.
       entities: Multiple entity tickers.
-      form: SEC filing form type (e.g., '10-K').
+      form: SEC filing form type (e.g., ``'10-K'``).
       fiscal_year: Fiscal year filter.
-      fiscal_period: Fiscal period filter (e.g., 'FY', 'Q1').
-      period_type: 'annual', 'quarterly', or 'instant'.
+      fiscal_period: Fiscal period filter (e.g., ``'FY'``, ``'Q1'``).
+      period_type: ``'annual'``, ``'quarterly'``, or ``'instant'``.
 
   Returns:
-      DataFrame with columns: element_id, element_name, period_end, value, unit,
-      and optionally entity_ticker, entity_name when entity filters are used.
+      DataFrame with columns: ``element_id``, ``element_name``, ``period_end``,
+      ``value``, ``unit``, and optionally ``entity_ticker``, ``entity_name``
+      when entity filters are used. Deduplicated and sorted by ``period_end``
+      descending.
   """
-  match_clauses = [
-    "MATCH (f:Fact)-[:FACT_HAS_ELEMENT]->(el:Element)",
-    "MATCH (f)-[:FACT_HAS_PERIOD]->(p:Period)",
-    "MATCH (f)-[:FACT_HAS_UNIT]->(u:Unit)",
-  ]
-  where_clauses = ["f.has_dimensions = false"]
   parameters: dict[str, Any] = {}
 
-  # Element filter: qnames, canonical concepts, or both
-  if elements and canonical_concepts:
-    where_clauses.append(
-      "(el.qname IN $elements OR el.canonical_concept IN $canonical_concepts)"
-    )
-    parameters["elements"] = elements
-    parameters["canonical_concepts"] = canonical_concepts
-  elif elements:
-    where_clauses.append("el.qname IN $elements")
-    parameters["elements"] = elements
-  elif canonical_concepts:
-    where_clauses.append("el.canonical_concept IN $canonical_concepts")
-    parameters["canonical_concepts"] = canonical_concepts
+  element_pattern, element_where = _build_element_match(
+    elements, canonical_concepts, parameters
+  )
+  entity_list = entities if entities else ([entity] if entity else None)
+  entity_pattern, entity_where = _build_entity_match(entity_list, parameters)
+
+  match_parts = [
+    f"(f:Fact)-[:FACT_HAS_ELEMENT]->{element_pattern}",
+    "(f)-[:FACT_HAS_PERIOD]->(p:Period)",
+    "(f)-[:FACT_HAS_UNIT]->(u:Unit)",
+  ]
+  if entity_pattern:
+    match_parts.append(f"(f)-[:FACT_HAS_ENTITY]->{entity_pattern}")
+
+  where_clauses = ["f.has_dimensions = false", *element_where, *entity_where]
 
   if periods:
     where_clauses.append("p.end_date IN $periods")
     parameters["periods"] = periods
 
-  if period_type:
-    if period_type == "instant":
-      where_clauses.append("p.period_type = 'instant'")
-    elif period_type == "annual":
-      where_clauses.append("p.duration_type = 'annual'")
-    elif period_type == "quarterly":
-      where_clauses.append("p.duration_type = 'quarterly'")
-
-  # Normalize entity filter: single 'entity' or multi 'entities'
-  entity_list = entities if entities else ([entity] if entity else None)
-
-  if entity_list:
-    match_clauses.append("MATCH (f)-[:FACT_HAS_ENTITY]->(ent:Entity)")
-    where_clauses.append(
-      "(ent.ticker IN $entities OR ent.cik IN $entities OR ent.name IN $entities)"
-    )
-    parameters["entities"] = entity_list
+  if period_type == "instant":
+    where_clauses.append("p.period_type = 'instant'")
+  elif period_type == "annual":
+    where_clauses.append("p.duration_type = 'annual'")
+  elif period_type == "quarterly":
+    where_clauses.append("p.duration_type = 'quarterly'")
 
   if form or fiscal_year is not None or fiscal_period:
-    match_clauses.append("MATCH (r:Report)-[:REPORT_HAS_FACT]->(f)")
+    match_parts.append("(r:Report)-[:REPORT_HAS_FACT]->(f)")
     if form:
       where_clauses.append("r.form = $form")
       parameters["form"] = form
@@ -95,28 +218,30 @@ async def query_fact_grid(
       where_clauses.append("r.fiscal_period_focus = $fiscal_period")
       parameters["fiscal_period"] = fiscal_period
 
-  if entity_list:
-    return_clause = """
-    RETURN DISTINCT
-      el.qname as element_id,
-      el.name as element_name,
-      p.end_date as period_end,
-      f.numeric_value as value,
-      u.value as unit,
-      ent.ticker as entity_ticker,
-      ent.name as entity_name
-    """
+  # Omit DISTINCT + ORDER BY — both broken together in LadybugDB; dedup
+  # and sort happen in Python below.
+  if entity_pattern:
+    return_clause = (
+      "\n      RETURN\n"
+      "        el.qname as element_id,\n"
+      "        el.name as element_name,\n"
+      "        p.end_date as period_end,\n"
+      "        f.numeric_value as value,\n"
+      "        u.value as unit,\n"
+      "        ent.ticker as entity_ticker,\n"
+      "        ent.name as entity_name\n      "
+    )
   else:
-    return_clause = """
-    RETURN DISTINCT
-      el.qname as element_id,
-      el.name as element_name,
-      p.end_date as period_end,
-      f.numeric_value as value,
-      u.value as unit
-    """
+    return_clause = (
+      "\n      RETURN\n"
+      "        el.qname as element_id,\n"
+      "        el.name as element_name,\n"
+      "        p.end_date as period_end,\n"
+      "        f.numeric_value as value,\n"
+      "        u.value as unit\n      "
+    )
 
-  query = "\n".join(match_clauses)
+  query = "MATCH " + ", ".join(match_parts)
   query += "\nWHERE " + "\n  AND ".join(where_clauses)
   query += return_clause
 
@@ -130,4 +255,5 @@ async def query_fact_grid(
   if not results:
     return pd.DataFrame(columns=base_columns)
 
-  return pd.DataFrame(results)
+  deduped = _deduplicate_fact_rows(results, has_entity=bool(entity_pattern))
+  return pd.DataFrame(deduped)

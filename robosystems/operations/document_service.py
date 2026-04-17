@@ -21,6 +21,50 @@ from robosystems.models.core.document import Document
 logger = logging.getLogger(__name__)
 
 
+def _apply_frontmatter(
+  content: str,
+  title: str | None,
+  tags: list[str] | None | object,
+  folder: str | None | object,
+) -> tuple[str, str | None, list[str] | None | object, str | None | object]:
+  """Strip YAML frontmatter from content and let it fill unset fields.
+
+  An "unset" field is either Ellipsis (used by update_document as a sentinel
+  for "not provided") or None (create path, where callers may not supply
+  metadata). Explicit non-None request values always win over frontmatter.
+  """
+  if content is None:
+    return content, title, tags, folder
+
+  from robosystems.operations.search.markdown_parser import parse_frontmatter
+
+  metadata, body = parse_frontmatter(content)
+  if not metadata:
+    return content, title, tags, folder
+
+  resolved_title = title if title else metadata.get("title") or title
+
+  resolved_tags = tags
+  if resolved_tags is ... or resolved_tags is None:
+    raw_tags = metadata.get("tags")
+    if isinstance(raw_tags, str):
+      parsed = [t.strip() for t in raw_tags.split(",") if t.strip()]
+      if parsed:
+        resolved_tags = parsed
+    elif isinstance(raw_tags, list):
+      parsed = [str(t).strip() for t in raw_tags if str(t).strip()]
+      if parsed:
+        resolved_tags = parsed
+
+  resolved_folder = folder
+  if resolved_folder is ... or resolved_folder is None:
+    fm_folder = metadata.get("folder")
+    if isinstance(fm_folder, str) and fm_folder.strip():
+      resolved_folder = fm_folder.strip()
+
+  return body, resolved_title, resolved_tags, resolved_folder
+
+
 class DocumentService:
   """Document management with PG persistence and OpenSearch sync."""
 
@@ -42,6 +86,10 @@ class DocumentService:
     Raises:
         ValueError: If tier limit exceeded or no indexable sections.
     """
+    content, title, tags, folder = _apply_frontmatter(
+      request.content, request.title, request.tags, request.folder
+    )
+
     # Upsert: if external_id exists, update instead (check before tier limit)
     if request.external_id:
       existing = Document.get_by_external_id(
@@ -51,10 +99,10 @@ class DocumentService:
         return self.update_document(
           graph_id=graph_id,
           document_id=existing.id,
-          title=request.title,
-          content=request.content,
-          tags=request.tags,
-          folder=request.folder,
+          title=title,
+          content=content,
+          tags=tags,
+          folder=folder,
         )
 
     # Check tier limits in PG (only for new documents, not upserts)
@@ -65,11 +113,11 @@ class DocumentService:
     doc = Document.create(
       graph_id=graph_id,
       user_id=user_id,
-      title=request.title,
-      content=request.content,
+      title=title,
+      content=content,
       session=self.session,
-      tags=request.tags,
-      folder=request.folder,
+      tags=tags,
+      folder=folder,
       external_id=request.external_id,
     )
 
@@ -89,17 +137,19 @@ class DocumentService:
     self,
     graph_id: str,
     source_type: str | None = None,
+    folder: str | None = None,
   ) -> Sequence[Document]:
-    """List documents for a graph."""
-    return Document.get_by_graph(graph_id, self.session, source_type)
+    """List documents for a graph, optionally filtered by source type and/or folder."""
+    return Document.get_by_graph(graph_id, self.session, source_type, folder)
 
   def count_documents(
     self,
     graph_id: str,
     source_type: str | None = None,
+    folder: str | None = None,
   ) -> int:
-    """Count documents for a graph."""
-    return Document.count_by_graph(graph_id, self.session, source_type)
+    """Count documents for a graph, optionally filtered by source type and/or folder."""
+    return Document.count_by_graph(graph_id, self.session, source_type, folder)
 
   def update_document(
     self,
@@ -121,6 +171,14 @@ class DocumentService:
     doc = Document.get_by_id_and_graph(document_id, graph_id, self.session)
     if doc is None:
       raise KeyError(f"Document {document_id} not found in graph {graph_id}")
+
+    if content is not None:
+      # _apply_frontmatter returns the Ellipsis sentinel through as `object`;
+      # the caller intentionally re-accepts it. Narrow types match the
+      # same `type: ignore` pattern on the function signature defaults.
+      content, title, tags, folder = _apply_frontmatter(  # type: ignore[assignment]
+        content, title, tags, folder
+      )
 
     doc.update(
       self.session,

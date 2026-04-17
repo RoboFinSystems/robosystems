@@ -146,7 +146,7 @@ class TestResolvePaths:
     expected = Path("/data/test.lbug")
 
     with patch(
-      "robosystems.operations.lbug.path_utils.get_lbug_database_path",
+      "robosystems.operations.graph.engine.path_utils.get_lbug_database_path",
       return_value=expected,
     ):
       service = OnInstanceBackupService(

@@ -183,7 +183,7 @@ class TestLogDatabaseOperation:
 class TestGetDatabasePathForGraph:
   """Tests for get_database_path_for_graph."""
 
-  @patch("robosystems.operations.lbug.path_utils.env")
+  @patch("robosystems.operations.graph.engine.path_utils.env")
   def test_returns_string_path(self, mock_env):
     """Test that a string path is returned."""
     mock_env.LBUG_DATABASE_PATH = "/tmp/lbug-dbs"
@@ -194,7 +194,7 @@ class TestGetDatabasePathForGraph:
     result = get_database_path_for_graph("test_graph")
     assert isinstance(result, str)
 
-  @patch("robosystems.operations.lbug.path_utils.env")
+  @patch("robosystems.operations.graph.engine.path_utils.env")
   def test_path_contains_graph_id(self, mock_env):
     """Test that the path contains the graph ID."""
     mock_env.LBUG_DATABASE_PATH = "/tmp/lbug-dbs"
@@ -205,7 +205,7 @@ class TestGetDatabasePathForGraph:
     result = get_database_path_for_graph("my_graph")
     assert "my_graph" in result
 
-  @patch("robosystems.operations.lbug.path_utils.env")
+  @patch("robosystems.operations.graph.engine.path_utils.env")
   def test_path_has_lbug_extension(self, mock_env):
     """Test that the path has .lbug extension."""
     mock_env.LBUG_DATABASE_PATH = "/tmp/lbug-dbs"
@@ -216,7 +216,7 @@ class TestGetDatabasePathForGraph:
     result = get_database_path_for_graph("test_graph")
     assert result.endswith(".lbug")
 
-  @patch("robosystems.operations.lbug.path_utils.env")
+  @patch("robosystems.operations.graph.engine.path_utils.env")
   def test_path_uses_configured_base(self, mock_env):
     """Test that the path uses the configured LBUG_DATABASE_PATH."""
     mock_env.LBUG_DATABASE_PATH = "/custom/path"

@@ -21,7 +21,11 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from robosystems.middleware.mcp.tools.fiscal_calendar_tools import ClosePeriodTool
+from robosystems.middleware.mcp.tools._gate import MCPExtensionGateError
+from robosystems.middleware.mcp.tools.fiscal_calendar_tools import (
+  ClosePeriodTool,
+  ReopenPeriodTool,
+)
 from robosystems.models.api.extensions.fiscal_calendar import (
   ClosePeriodResponse,
   FiscalCalendarResponse,
@@ -52,7 +56,12 @@ def _client(*, user_id: str | None = None):
 
 @contextmanager
 def _patch_sessions():
-  """Patch both extensions_session and _platform_session as no-op CMs."""
+  """Patch both extensions_session and _platform_session as no-op CMs.
+
+  Also stubs `require_graph_extension_mcp` so the tests don't need a real
+  platform-DB graph row. Each test class that wants to exercise the gate
+  path patches it directly.
+  """
   ext_session = MagicMock()
   ext_cm = MagicMock()
   ext_cm.__enter__ = MagicMock(return_value=ext_session)
@@ -67,6 +76,7 @@ def _patch_sessions():
     patch(f"{MODULE}.extensions_session", return_value=ext_cm),
     patch(f"{MODULE}._platform_session", return_value=plat_cm),
     patch(f"{MODULE}.qb_sync_state", return_value=(False, None)),
+    patch(f"{MODULE}.require_graph_extension_mcp", return_value=MagicMock()),
   ):
     yield
 
@@ -225,3 +235,49 @@ class TestClosePeriodToolRecloseRouting:
     ops.assert_called_once()
     assert "period" in result
     assert result["entries_posted"] == 0
+
+
+# ────────────────────────────────────────────────────────────────────────────
+# Extension gate — ClosePeriod / ReopenPeriod both reject pre-DB
+# ────────────────────────────────────────────────────────────────────────────
+
+
+class TestFiscalCalendarGate:
+  """Both write tools must surface the MCP extension-gate error code
+  before ever opening a session or calling the ops layer."""
+
+  @pytest.mark.asyncio
+  async def test_close_rejects_on_repo_graph(self):
+    tool = ClosePeriodTool(_client(user_id="usr_abc"))
+    with (
+      patch(
+        f"{MODULE}.require_graph_extension_mcp",
+        side_effect=MCPExtensionGateError(
+          "repository_write_forbidden",
+          "roboledger commands are not available on repository graphs",
+        ),
+      ),
+      patch(f"{MODULE}.ops_close_period") as ops,
+    ):
+      result = await tool.execute({"period": "2026-03"})
+
+    assert result["error"] == "repository_write_forbidden"
+    ops.assert_not_called()
+
+  @pytest.mark.asyncio
+  async def test_reopen_rejects_on_unprovisioned_graph(self):
+    tool = ReopenPeriodTool(_client(user_id="usr_abc"))
+    with (
+      patch(
+        f"{MODULE}.require_graph_extension_mcp",
+        side_effect=MCPExtensionGateError(
+          "extension_not_provisioned",
+          "roboledger is not provisioned for this graph",
+        ),
+      ),
+      patch(f"{MODULE}.ops_reopen_period") as ops,
+    ):
+      result = await tool.execute({"period": "2026-03", "reason": "fix"})
+
+    assert result["error"] == "extension_not_provisioned"
+    ops.assert_not_called()

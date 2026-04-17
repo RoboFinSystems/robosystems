@@ -233,7 +233,9 @@ class TestCreatePosition:
     ent_result = MagicMock()
     ent_result.scalar_one_or_none.return_value = _make_entity()
     session.execute.side_effect = [pf_result, sec_result, ent_result]
-    session.flush.side_effect = IntegrityError("stmt", {}, Exception("duplicate"))
+    orig = Exception("unique violation")
+    orig.pgcode = "23505"  # type: ignore[attr-defined]
+    session.flush.side_effect = IntegrityError("stmt", {}, orig)
 
     with (
       patch(
@@ -244,9 +246,33 @@ class TestCreatePosition:
     ):
       create_position(session, self._base_body(), created_by="usr_1")
 
+  def test_reraises_non_unique_integrity_error(self) -> None:
+    session = MagicMock()
+    pf_result = MagicMock()
+    pf_result.scalar_one_or_none.return_value = _make_portfolio()
+    sec_result = MagicMock()
+    sec_result.scalar_one_or_none.return_value = _make_security()
+    ent_result = MagicMock()
+    ent_result.scalar_one_or_none.return_value = _make_entity()
+    session.execute.side_effect = [pf_result, sec_result, ent_result]
+    orig = Exception("fk violation")
+    orig.pgcode = "23503"  # type: ignore[attr-defined]  # foreign_key_violation
+    session.flush.side_effect = IntegrityError("stmt", {}, orig)
+
+    with (
+      patch(
+        "robosystems.operations.roboinvestor.commands.positions.Position",
+        return_value=_make_position(),
+      ),
+      pytest.raises(IntegrityError),
+    ):
+      create_position(session, self._base_body(), created_by="usr_1")
+
 
 class TestUpdatePosition:
   def test_applies_updates_and_enriches(self) -> None:
+    from robosystems.models.api.extensions.investor import UpdatePositionOperation
+
     row = _make_position(notes="old")
     sec = _make_security()
     ent = _make_entity()
@@ -260,31 +286,52 @@ class TestUpdatePosition:
     ent_result.scalars.return_value.all.return_value = [ent]
     session.execute.side_effect = [pos_result, sec_result, ent_result]
 
-    result = update_position(session, "pos_01", {"notes": "new"})
+    result = update_position(
+      session, UpdatePositionOperation(position_id="pos_01", notes="new")
+    )
 
     assert row.notes == "new"
-    assert result is not None and result.notes == "new"
+    assert result.notes == "new"
 
-  def test_returns_none_when_missing(self) -> None:
+  def test_raises_when_missing(self) -> None:
+    from robosystems.models.api.extensions.investor import UpdatePositionOperation
+    from robosystems.operations.roboinvestor.commands.positions import (
+      PositionNotFoundError,
+    )
+
     session = MagicMock()
     miss = MagicMock()
     miss.scalar_one_or_none.return_value = None
     session.execute.side_effect = [miss]
 
-    assert update_position(session, "pos_missing", {"notes": "x"}) is None
+    with pytest.raises(PositionNotFoundError):
+      update_position(
+        session, UpdatePositionOperation(position_id="pos_missing", notes="x")
+      )
 
 
 class TestSoftDeletePosition:
   def test_sets_status_to_disposed(self) -> None:
+    from robosystems.models.api.extensions.investor import DeletePositionOperation
+
     row = _make_position(status="active")
     session = MagicMock()
     session.execute.return_value.scalar_one_or_none.return_value = row
 
-    assert soft_delete_position(session, "pos_01") is True
+    result = soft_delete_position(
+      session, DeletePositionOperation(position_id="pos_01")
+    )
+    assert result.deleted is True
     assert row.status == "disposed"
 
-  def test_returns_false_when_missing(self) -> None:
+  def test_raises_when_missing(self) -> None:
+    from robosystems.models.api.extensions.investor import DeletePositionOperation
+    from robosystems.operations.roboinvestor.commands.positions import (
+      PositionNotFoundError,
+    )
+
     session = MagicMock()
     session.execute.return_value.scalar_one_or_none.return_value = None
 
-    assert soft_delete_position(session, "pos_missing") is False
+    with pytest.raises(PositionNotFoundError):
+      soft_delete_position(session, DeletePositionOperation(position_id="pos_missing"))

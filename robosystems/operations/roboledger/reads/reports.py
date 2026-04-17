@@ -8,13 +8,15 @@ the GraphQL resolver can call them.
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 
 from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
 from robosystems.models.api.extensions.reports import (
   FactRowResponse,
+  LiveFinancialStatementResponse,
+  LiveStatementFactRow,
   PeriodSpec,
   ReportListResponse,
   ReportResponse,
@@ -24,6 +26,9 @@ from robosystems.models.api.extensions.reports import (
 )
 from robosystems.models.extensions import Report
 from robosystems.models.extensions.roboledger import Structure
+from robosystems.operations.roboledger.reads.fiscal_calendar import (
+  get_fiscal_year_start_month,
+)
 from robosystems.operations.roboledger.reports.fact_grid import (
   PeriodSpec as FactPeriodSpec,
 )
@@ -43,6 +48,24 @@ VALID_STRUCTURE_TYPES = {
   "equity_statement",
   "custom",
 }
+
+# Statement types accepted by the live (OLTP) path — cash_flow_statement is
+# not yet supported on OLTP (no generator). Shared across REST router and
+# MCP tool so they stay in sync.
+LIVE_STATEMENT_TYPES: tuple[str, ...] = (
+  "income_statement",
+  "balance_sheet",
+  "equity_statement",
+)
+
+# Statement types accepted by the graph-backed analysis path. The graph
+# hypercube carries cash-flow facts from XBRL filings, so it's valid here.
+ANALYSIS_STATEMENT_TYPES: tuple[str, ...] = (
+  "income_statement",
+  "balance_sheet",
+  "cash_flow_statement",
+  "equity_statement",
+)
 
 
 class StatementStructureNotFoundError(LookupError):
@@ -64,8 +87,8 @@ def generate_adhoc_private_statement(
 
   Unlike `get_statement`, which renders a previously-saved Report, this
   helper builds a one-shot statement from the current ledger using the
-  active CoA→GAAP mapping. Used by the MCP `get-financial-statement` tool
-  when called against a RoboLedger user graph (no saved Report needed).
+  active CoA→GAAP mapping. Used by the `live-financial-statement`
+  operation (both REST and MCP) — no saved Report needed.
 
   Returns the rendered structure grid plus an `unmapped_count` counter.
   Raises `CoaMappingNotFoundError` if the tenant hasn't completed the
@@ -350,4 +373,134 @@ def get_statement(
     rows=rows,
     validation=validation_resp,
     unmapped_count=grid.unmapped_count,
+  )
+
+
+# ── Live (ad-hoc OLTP) financial statement ────────────────────────────────
+
+
+def _last_day_of_month(year: int, month: int) -> date:
+  """Return the last calendar day of the given year/month."""
+  if month == 12:
+    return date(year, 12, 31)
+  return date(year, month + 1, 1) - timedelta(days=1)
+
+
+def resolve_reporting_window(
+  session: Session,
+  *,
+  period_start: date | None,
+  period_end: date | None,
+  period_type: str | None,
+  fiscal_year: int | None,
+) -> tuple[date, date]:
+  """Pick a reporting window from fuzzy inputs.
+
+  Explicit `period_start` / `period_end` always win. Otherwise the
+  window is derived from `period_type`:
+
+  - ``annual`` — fiscal year aligned on the graph's
+    ``fiscal_year_start_month`` (January when no calendar exists).
+    ``fiscal_year`` selects which year; defaults to the current year.
+  - ``quarterly`` — current calendar quarter (3 months).
+  - anything else (``instant`` or unset) — current calendar month.
+
+  Extracted from the old MCP financial-statement tool so the REST and
+  MCP surfaces share identical behavior.
+  """
+  today = date.today()
+
+  if period_end or period_start:
+    end = period_end or _last_day_of_month(today.year, today.month)
+    start = period_start or end.replace(day=1)
+    return start, end
+
+  if period_type == "annual":
+    fy_start_month = get_fiscal_year_start_month(session)
+    year = fiscal_year if fiscal_year is not None else today.year
+    start = date(year, fy_start_month, 1)
+    end_year = year if fy_start_month == 1 else year + 1
+    end_month = fy_start_month - 1 if fy_start_month > 1 else 12
+    end = _last_day_of_month(end_year, end_month)
+    return start, end
+
+  if period_type == "quarterly":
+    quarter = (today.month - 1) // 3
+    q_start_month = quarter * 3 + 1
+    start = date(today.year, q_start_month, 1)
+    end = _last_day_of_month(today.year, q_start_month + 2)
+    return start, end
+
+  # instant / None → current calendar month
+  end = _last_day_of_month(today.year, today.month)
+  start = end.replace(day=1)
+  return start, end
+
+
+def build_current_and_prior_periods(start: date, end: date) -> list[FactPeriodSpec]:
+  """Return [current, prior] period specs of matching duration."""
+  duration = (end - start).days + 1
+  prior_end = start - timedelta(days=1)
+  prior_start = prior_end - timedelta(days=duration - 1)
+  return [
+    FactPeriodSpec(start=start, end=end, label="Current"),
+    FactPeriodSpec(start=prior_start, end=prior_end, label="Prior"),
+  ]
+
+
+def get_live_financial_statement(
+  session: Session,
+  *,
+  graph_id: str,
+  statement_type: str,
+  period_start: date,
+  period_end: date,
+  limit: int = 50,
+) -> LiveFinancialStatementResponse:
+  """Generate an OLTP-backed ad-hoc statement and format the response.
+
+  Thin wrapper around ``generate_adhoc_private_statement`` that:
+  - builds current+prior periods of matching duration
+  - filters subtotal rows and all-zero rows
+  - caps at ``limit`` rows (marking ``truncated=True`` when capped)
+
+  Raises ``CoaMappingNotFoundError`` when no CoA→GAAP mapping exists;
+  the caller translates to a user-facing tip (400/422).
+  """
+  periods = build_current_and_prior_periods(period_start, period_end)
+  grid, unmapped_count = generate_adhoc_private_statement(
+    session,
+    statement_type=statement_type,
+    periods=periods,
+  )
+
+  facts: list[LiveStatementFactRow] = []
+  for row in grid.rows:
+    if row.is_subtotal:
+      continue
+    if not any(v != 0.0 for v in row.values):
+      continue
+    facts.append(
+      LiveStatementFactRow(
+        qname=row.element_qname,
+        name=row.element_name,
+        classification=row.classification,
+        values=row.values,
+        depth=row.depth,
+        is_subtotal=row.is_subtotal,
+      )
+    )
+
+  truncated = len(facts) > limit
+  if truncated:
+    facts = facts[:limit]
+
+  return LiveFinancialStatementResponse(
+    graph_id=graph_id,
+    statement_type=statement_type,
+    periods=[PeriodSpec(start=p.start, end=p.end, label=p.label) for p in periods],
+    facts=facts,
+    fact_count=len(facts),
+    unmapped_count=unmapped_count,
+    truncated=truncated,
   )

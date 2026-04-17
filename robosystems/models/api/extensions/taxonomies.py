@@ -110,6 +110,16 @@ class CreateAssociationRequest(BaseModel):
   suggested_by: str | None = None
 
 
+class CreateMappingAssociationOperation(CreateAssociationRequest):
+  """CQRS-shaped body for `POST /operations/create-mapping-association`.
+
+  Bundles the target mapping structure's `mapping_id` with the association
+  payload so REST + MCP share a single body type via the registrar.
+  """
+
+  mapping_id: str = Field(..., description="Target mapping structure ID.")
+
+
 # ── Mapping ───────────────────────────────────────────────────────────────
 
 

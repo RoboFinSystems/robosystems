@@ -111,6 +111,30 @@ class TruncateScheduleRequest(BaseModel):
   )
 
 
+class TruncateScheduleOperation(TruncateScheduleRequest):
+  """CQRS-shaped body for `POST /operations/truncate-schedule`.
+
+  Bundles the target schedule's `structure_id` with the update payload so
+  the single-body signature matches the registrar/MCP contract. The REST
+  handler, GraphQL resolver, and MCP tool all resolve to the same
+  `cmd_truncate_schedule(session, body, created_by=...)`.
+  """
+
+  structure_id: str = Field(..., description="Target schedule structure ID.")
+
+
+class CreateClosingEntryOperation(CreateClosingEntryRequest):
+  """CQRS-shaped body for `POST /operations/create-closing-entry`.
+
+  `structure_id` moves into the body so REST + MCP share a single body
+  type via the registrar.
+  """
+
+  structure_id: str = Field(
+    ..., description="Schedule structure the closing entry is derived from."
+  )
+
+
 class TruncateScheduleResponse(BaseModel):
   structure_id: str
   new_end_date: date

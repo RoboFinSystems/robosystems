@@ -305,6 +305,8 @@ class TestListDocumentsTool:
 
   @pytest.mark.asyncio
   async def test_filters_by_folder(self, mock_graph_client):
+    """Folder filter is threaded into DocumentService.list_documents so the
+    SQL query does the filtering — not Python post-processing."""
     doc1 = MagicMock()
     doc1.id = "doc_01"
     doc1.title = "Policy"
@@ -315,18 +317,8 @@ class TestListDocumentsTool:
     doc1.created_at = "2026-04-01"
     doc1.updated_at = "2026-04-01"
 
-    doc2 = MagicMock()
-    doc2.id = "doc_02"
-    doc2.title = "Note"
-    doc2.folder = "memory"
-    doc2.tags = []
-    doc2.source_type = "uploaded_doc"
-    doc2.sections_indexed = 1
-    doc2.created_at = "2026-04-01"
-    doc2.updated_at = "2026-04-01"
-
     mock_service = MagicMock()
-    mock_service.list_documents.return_value = [doc1, doc2]
+    mock_service.list_documents.return_value = [doc1]
 
     mock_session = MagicMock()
 
@@ -339,5 +331,12 @@ class TestListDocumentsTool:
     ):
       result = await tool.execute({"folder": "policies"})
 
+    # Contract: MCP tool forwards the folder arg to DocumentService.
+    mock_service.list_documents.assert_called_once()
+    call_args = mock_service.list_documents.call_args
+    # folder is the third positional arg (graph_id, source_type, folder).
+    assert (
+      call_args.args[2] == "policies" or call_args.kwargs.get("folder") == "policies"
+    )
     assert result["total"] == 1
     assert result["documents"][0]["title"] == "Policy"

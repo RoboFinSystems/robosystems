@@ -1,10 +1,17 @@
-"""Tests for resolve-element MCP tool."""
+"""Tests for resolve-element MCP tool.
 
-from unittest.mock import AsyncMock, Mock
+The resolution logic lives in `adapters/sec/mcp/element_resolver.py`.
+These tests exercise the tool through ``execute()`` and patch the
+ops-layer enricher via ``_get_enricher`` at the module level.
+"""
+
+from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 
 from robosystems.middleware.mcp.tools.resolve_element_tool import ResolveElementTool
+
+_RESOLVER = "robosystems.adapters.sec.mcp.element_resolver"
 
 
 @pytest.fixture
@@ -20,6 +27,11 @@ def _make_mock_enricher(canonical_concept=None):
   enricher.embed_batch.return_value = [[0.1] * 384]
   enricher.match_canonical_from_query.return_value = canonical_concept
   return enricher
+
+
+def _patch_enricher(enricher):
+  """Patch the ops-layer ``_get_enricher`` helper to return ``enricher``."""
+  return patch(f"{_RESOLVER}._get_enricher", return_value=enricher)
 
 
 def _query_router(**responses):
@@ -46,9 +58,7 @@ def _query_router(**responses):
 
 @pytest.fixture
 def tool(mock_client):
-  t = ResolveElementTool(mock_client)
-  t._enricher = _make_mock_enricher()
-  return t
+  return ResolveElementTool(mock_client)
 
 
 class TestResolveElementToolDefinition:
@@ -81,7 +91,6 @@ class TestResolveElementExecution:
     )
 
     tool = ResolveElementTool(mock_client)
-    tool._enricher = _make_mock_enricher(canonical_concept=mock_concept)
 
     mock_client.execute_query = _query_router(
       **{
@@ -96,7 +105,8 @@ class TestResolveElementExecution:
       }
     )
 
-    result = await tool.execute({"concept": "revenue"})
+    with _patch_enricher(_make_mock_enricher(canonical_concept=mock_concept)):
+      result = await tool.execute({"concept": "revenue"})
     assert result["canonical_id"] == "revenue"
     assert result["canonical_name"] == "Revenue"
     assert len(result["matches"]) >= 1
@@ -118,7 +128,6 @@ class TestResolveElementExecution:
     )
 
     tool = ResolveElementTool(mock_client)
-    tool._enricher = _make_mock_enricher(canonical_concept=mock_concept)
 
     mock_client.execute_query = _query_router(
       **{
@@ -133,7 +142,8 @@ class TestResolveElementExecution:
       }
     )
 
-    result = await tool.execute({"concept": "revenue", "ticker": "NVDA"})
+    with _patch_enricher(_make_mock_enricher(canonical_concept=mock_concept)):
+      result = await tool.execute({"concept": "revenue", "ticker": "NVDA"})
     assert result["ticker"] == "NVDA"
     assert "$ticker" in result["query_hint"]
     assert result["query_hint_params"]["ticker"] == "NVDA"
@@ -151,7 +161,6 @@ class TestResolveElementExecution:
     )
 
     tool = ResolveElementTool(mock_client)
-    tool._enricher = _make_mock_enricher(canonical_concept=mock_concept)
 
     mock_client.execute_query = _query_router(
       **{
@@ -166,9 +175,10 @@ class TestResolveElementExecution:
       }
     )
 
-    result = await tool.execute(
-      {"concept": "revenue", "report_id": "0001045810-25-000023"}
-    )
+    with _patch_enricher(_make_mock_enricher(canonical_concept=mock_concept)):
+      result = await tool.execute(
+        {"concept": "revenue", "report_id": "0001045810-25-000023"}
+      )
     assert result["report_id"] == "0001045810-25-000023"
     assert "$report_id" in result["query_hint"]
     assert result["query_hint_params"]["report_id"] == "0001045810-25-000023"
@@ -179,7 +189,6 @@ class TestResolveElementExecution:
   async def test_no_canonical_match_falls_back_to_text(self, mock_client):
     """When no canonical match, falls back to text search on labels."""
     tool = ResolveElementTool(mock_client)
-    tool._enricher = _make_mock_enricher()  # No canonical match
 
     mock_client.execute_query = _query_router(
       **{
@@ -195,7 +204,8 @@ class TestResolveElementExecution:
       }
     )
 
-    result = await tool.execute({"concept": "some obscure metric"})
+    with _patch_enricher(_make_mock_enricher()):  # No canonical match
+      result = await tool.execute({"concept": "some obscure metric"})
     assert result["canonical_id"] is None
     assert len(result["matches"]) >= 1
     assert result["matches"][0]["qname"] == "us-gaap:SomeObscureMetric"
@@ -203,11 +213,11 @@ class TestResolveElementExecution:
   @pytest.mark.asyncio
   async def test_no_matches_at_all(self, mock_client):
     tool = ResolveElementTool(mock_client)
-    tool._enricher = _make_mock_enricher()
 
     mock_client.execute_query = _query_router()
 
-    result = await tool.execute({"concept": "nonexistent metric"})
+    with _patch_enricher(_make_mock_enricher()):
+      result = await tool.execute({"concept": "nonexistent metric"})
     assert result["canonical_id"] is None
     assert len(result["matches"]) == 0
     assert result["query_hint"] is None
@@ -225,7 +235,6 @@ class TestResolveElementExecution:
     )
 
     tool = ResolveElementTool(mock_client)
-    tool._enricher = _make_mock_enricher(canonical_concept=mock_concept)
 
     mock_client.execute_query = _query_router(
       **{
@@ -236,7 +245,8 @@ class TestResolveElementExecution:
       }
     )
 
-    result = await tool.execute({"concept": "total assets"})
+    with _patch_enricher(_make_mock_enricher(canonical_concept=mock_concept)):
+      result = await tool.execute({"concept": "total assets"})
     assert result["query_hint"] is not None
     assert "$qname" in result["query_hint"]
     assert result["query_hint_params"]["qname"] == "us-gaap:Assets"
@@ -256,7 +266,6 @@ class TestResolveElementExecution:
     )
 
     tool = ResolveElementTool(mock_client)
-    tool._enricher = _make_mock_enricher(canonical_concept=mock_concept)
 
     mock_client.execute_query = _query_router(
       **{
@@ -267,7 +276,8 @@ class TestResolveElementExecution:
       }
     )
 
-    result = await tool.execute({"concept": "revenue"})
+    with _patch_enricher(_make_mock_enricher(canonical_concept=mock_concept)):
+      result = await tool.execute({"concept": "revenue"})
     assert result["canonical_id"] == "revenue"
     assert len(result["matches"]) >= 1
     assert result["matches"][0]["qname"] == "us-gaap:Revenues"

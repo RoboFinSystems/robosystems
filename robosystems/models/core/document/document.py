@@ -126,11 +126,15 @@ class Document(Model):
     graph_id: str,
     session: Session,
     source_type: str | None = None,
+    folder: str | None = None,
   ) -> Sequence["Document"]:
-    """Get all documents for a graph, optionally filtered by source type."""
+    """Get all documents for a graph, optionally filtered by source type
+    and/or folder."""
     query = session.query(cls).filter(cls.graph_id == graph_id)
     if source_type:
       query = query.filter(cls.source_type == source_type)
+    if folder:
+      query = query.filter(cls.folder == folder)
     return query.order_by(cls.updated_at.desc()).all()
 
   @classmethod
@@ -139,11 +143,15 @@ class Document(Model):
     graph_id: str,
     session: Session,
     source_type: str | None = None,
+    folder: str | None = None,
   ) -> int:
-    """Count documents for a graph, optionally filtered by source type."""
+    """Count documents for a graph, optionally filtered by source type
+    and/or folder."""
     query = session.query(cls).filter(cls.graph_id == graph_id)
     if source_type:
       query = query.filter(cls.source_type == source_type)
+    if folder:
+      query = query.filter(cls.folder == folder)
     return query.count()
 
   def update(

@@ -24,6 +24,10 @@ from typing import Any
 from robosystems.db.extensions import extensions_session
 from robosystems.db.platform import platform_session as _platform_session
 from robosystems.logger import logger
+from robosystems.middleware.mcp.tools._gate import (
+  MCPExtensionGateError,
+  require_graph_extension_mcp,
+)
 from robosystems.operations.roboledger.commands.fiscal_calendar import (
   PeriodNotClosedError,
   PeriodNotFoundInLedgerError,
@@ -213,6 +217,12 @@ class ClosePeriodTool:
 
   async def execute(self, arguments: dict[str, Any]) -> Any:
     graph_id = self.client.graph_id
+
+    try:
+      require_graph_extension_mcp("roboledger", graph_id)
+    except MCPExtensionGateError as exc:
+      return {"error": exc.code, "message": exc.message}
+
     period = arguments["period"]
     allow_stale_sync = bool(arguments.get("allow_stale_sync", False))
     note = arguments.get("note")
@@ -348,6 +358,12 @@ class ReopenPeriodTool:
 
   async def execute(self, arguments: dict[str, Any]) -> Any:
     graph_id = self.client.graph_id
+
+    try:
+      require_graph_extension_mcp("roboledger", graph_id)
+    except MCPExtensionGateError as exc:
+      return {"error": exc.code, "message": exc.message}
+
     period = arguments["period"]
     reason = arguments.get("reason", "").strip()
     note = arguments.get("note")

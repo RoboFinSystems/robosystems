@@ -24,7 +24,13 @@ import pandas as pd
 import pytest
 from fastapi import HTTPException
 
-from robosystems.routers.extensions.roboledger.views import build_fact_grid_op
+from robosystems.models.api.extensions.reports import (
+  FinancialStatementAnalysisRequest,
+)
+from robosystems.routers.extensions.roboledger.views import (
+  build_fact_grid_op,
+  financial_statement_analysis_op,
+)
 
 MODULE = "robosystems.routers.extensions.roboledger.views"
 GRAPH_ID = "kg01234567890abcdef"
@@ -262,6 +268,150 @@ class TestBuildFactGridOperation:
           idempotency_key=None,
           cache=_FakeCache(),
         )
+
+
+@pytest.mark.asyncio
+class TestFinancialStatementAnalysisOp:
+  """Wire-shape contract for financial-statement-analysis."""
+
+  @pytest.mark.unit
+  async def test_shared_repo_ticker_autoresolves_report(self):
+    """On SEC, missing report_id triggers resolve_sec_report; facts flow through."""
+    body = FinancialStatementAnalysisRequest(
+      statement_type="income_statement",
+      ticker="NVDA",
+      period_type="annual",
+    )
+    rows = [
+      {
+        "canonical_concept": "revenue",
+        "qname": "us-gaap:Revenues",
+        "name": "Revenues",
+        "value": 100.0,
+        "end_date": "2025-01-31",
+        "period_type": "duration",
+        "duration_type": "annual",
+      }
+    ]
+
+    with (
+      patch(f"{MODULE}.is_shared_repository_or_subgraph", return_value=True),
+      patch(
+        "robosystems.adapters.sec.mcp.resolve_sec_report",
+        new_callable=AsyncMock,
+        return_value={
+          "identifier": "rpt_latest",
+          "form": "10-K",
+          "filing_date": "2025-06-30",
+          "fiscal_year": 2025,
+          "fiscal_period": "FY",
+        },
+      ) as mock_resolve,
+      patch(
+        f"{MODULE}.query_financial_statement",
+        new_callable=AsyncMock,
+        return_value=rows,
+      ) as mock_query,
+    ):
+      envelope = await financial_statement_analysis_op(
+        body=body,
+        graph_id="sec",
+        user=_make_user(),
+        idempotency_key=None,
+        cache=_FakeCache(),
+      )
+
+    assert envelope.operation == "financial-statement-analysis"
+    assert envelope.status == "completed"
+    result = envelope.result
+    assert result is not None
+    assert result["report_id"] == "rpt_latest"
+    assert result["ticker"] == "NVDA"
+    assert result["fact_count"] == 1
+    assert result["resolved_report"]["form"] == "10-K"
+    mock_resolve.assert_awaited_once()
+    mock_query.assert_awaited_once()
+
+  @pytest.mark.unit
+  async def test_tenant_graph_with_report_id_skips_resolver(self):
+    """Tenant graphs must pass report_id; resolver must not be called."""
+    body = FinancialStatementAnalysisRequest(
+      statement_type="income_statement",
+      report_id="rpt_tenant",
+    )
+
+    with (
+      patch(f"{MODULE}.is_shared_repository_or_subgraph", return_value=False),
+      patch(
+        f"{MODULE}.query_financial_statement",
+        new_callable=AsyncMock,
+        return_value=[],
+      ) as mock_query,
+      patch(
+        "robosystems.adapters.sec.mcp.resolve_sec_report",
+        new_callable=AsyncMock,
+      ) as mock_resolve,
+    ):
+      envelope = await financial_statement_analysis_op(
+        body=body,
+        graph_id=GRAPH_ID,
+        user=_make_user(),
+        idempotency_key=None,
+        cache=_FakeCache(),
+      )
+
+    assert envelope.status == "completed"
+    assert envelope.result["report_id"] == "rpt_tenant"  # type: ignore[index]
+    mock_resolve.assert_not_called()
+    mock_query.assert_awaited_once()
+
+  @pytest.mark.unit
+  async def test_shared_repo_missing_ticker_and_report_id_raises_400(self):
+    body = FinancialStatementAnalysisRequest(statement_type="income_statement")
+    with patch(f"{MODULE}.is_shared_repository_or_subgraph", return_value=True):
+      with pytest.raises(HTTPException) as exc_info:
+        await financial_statement_analysis_op(
+          body=body,
+          graph_id="sec",
+          user=_make_user(),
+          idempotency_key=None,
+          cache=_FakeCache(),
+        )
+    assert exc_info.value.status_code == 400
+    assert "ticker" in exc_info.value.detail.lower()
+
+  @pytest.mark.unit
+  async def test_tenant_missing_report_id_raises_400(self):
+    body = FinancialStatementAnalysisRequest(
+      statement_type="income_statement", ticker="ABC"
+    )
+    with patch(f"{MODULE}.is_shared_repository_or_subgraph", return_value=False):
+      with pytest.raises(HTTPException) as exc_info:
+        await financial_statement_analysis_op(
+          body=body,
+          graph_id=GRAPH_ID,
+          user=_make_user(),
+          idempotency_key=None,
+          cache=_FakeCache(),
+        )
+    assert exc_info.value.status_code == 400
+    assert "report_id" in exc_info.value.detail.lower()
+
+  @pytest.mark.unit
+  async def test_invalid_statement_type_raises_400(self):
+    body = FinancialStatementAnalysisRequest(
+      statement_type="not_a_statement", report_id="rpt_x"
+    )
+    with patch(f"{MODULE}.is_shared_repository_or_subgraph", return_value=False):
+      with pytest.raises(HTTPException) as exc_info:
+        await financial_statement_analysis_op(
+          body=body,
+          graph_id=GRAPH_ID,
+          user=_make_user(),
+          idempotency_key=None,
+          cache=_FakeCache(),
+        )
+    assert exc_info.value.status_code == 400
 
 
 class TestFactGridFlagDecoupling:

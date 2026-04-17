@@ -1,9 +1,9 @@
 """Tests for the roboinvestor operation routes.
 
-Direct-call tests for all 9 operations. One happy path + one typed
-error path per resource (portfolio, security, position) covers the
-dispatch wiring for each command without over-testing the dispatcher
-itself (that's `tests/middleware/test_extensions.py`).
+All 9 RoboInvestor ops are registrar-generated from `OperationSpec`
+declarations. The registrar late-binds commands through `sys.modules`,
+so tests patch at the command's origin module path — not the router
+module. That mirrors the roboledger registrar tests.
 """
 
 from __future__ import annotations
@@ -19,25 +19,30 @@ from robosystems.models.api.extensions.investor import (
   CreatePortfolioRequest,
   CreatePositionRequest,
   CreateSecurityRequest,
+  DeletePortfolioOperation,
+  DeletePositionOperation,
+  DeleteResult,
+  DeleteSecurityOperation,
   PortfolioResponse,
   PositionResponse,
   SecurityResponse,
-)
-from robosystems.operations.roboinvestor.commands.portfolios import (
-  PortfolioHasActivePositionsError,
-)
-from robosystems.operations.roboinvestor.commands.positions import (
-  DuplicateActivePositionError,
-  PortfolioNotFoundError,
-  SecurityNotFoundError,
-)
-from robosystems.routers.extensions.roboinvestor.operations import (
-  DeletePortfolioOperation,
-  DeletePositionOperation,
-  DeleteSecurityOperation,
   UpdatePortfolioOperation,
   UpdatePositionOperation,
   UpdateSecurityOperation,
+)
+from robosystems.operations.roboinvestor.commands.portfolios import (
+  PortfolioHasActivePositionsError,
+  PortfolioNotFoundError,
+)
+from robosystems.operations.roboinvestor.commands.positions import (
+  DuplicateActivePositionError,
+  PositionNotFoundError,
+)
+from robosystems.operations.roboinvestor.commands.securities import (
+  EntityNotFoundError,
+  SecurityNotFoundError,
+)
+from robosystems.routers.extensions.roboinvestor.operations import (
   create_portfolio_op,
   create_position_op,
   create_security_op,
@@ -50,7 +55,27 @@ from robosystems.routers.extensions.roboinvestor.operations import (
 )
 
 GRAPH_ID = "kg01234567890abcdef"
-MODULE = "robosystems.routers.extensions.roboinvestor.operations"
+
+# Command-origin patch paths (registrar resolves commands via sys.modules).
+PORTFOLIOS = "robosystems.operations.roboinvestor.commands.portfolios"
+SECURITIES = "robosystems.operations.roboinvestor.commands.securities"
+POSITIONS = "robosystems.operations.roboinvestor.commands.positions"
+
+# Session factory patch path — the registrar resolves the session factory
+# through `sys.modules` too, so the patch must target the origin module.
+SESSION_FACTORY = "robosystems.db.extensions.extensions_session"
+
+
+def _entity_meta(schema_extensions=("roboinvestor",), graph_type="entity"):
+  """Stub `GraphExtensionContext` the extension gate returns for a normal
+  entity graph provisioned for roboinvestor."""
+  from robosystems.middleware.extensions import GraphExtensionContext
+
+  return GraphExtensionContext(
+    graph_type=graph_type,
+    schema_extensions=tuple(schema_extensions),
+    is_repository=False,
+  )
 
 
 def _make_user() -> MagicMock:
@@ -154,13 +179,14 @@ class TestCreatePortfolioOp:
     body = CreatePortfolioRequest(name="New Fund", base_currency="USD")
 
     with (
-      patch(f"{MODULE}.cmd_create_portfolio", return_value=_make_portfolio()),
-      patch(f"{MODULE}.extensions_session", return_value=_mock_session_ctx()[0]),
+      patch(f"{PORTFOLIOS}.create_portfolio", return_value=_make_portfolio()),
+      patch(SESSION_FACTORY, return_value=_mock_session_ctx()[0]),
     ):
       env = await create_portfolio_op(
         body=body,
         graph_id=GRAPH_ID,
         user=_make_user(),
+        _ext=_entity_meta(),
         idempotency_key=None,
         cache=_FakeCache(),
       )
@@ -175,7 +201,7 @@ class TestCreatePortfolioOp:
     from sqlalchemy.exc import ProgrammingError
 
     with patch(
-      f"{MODULE}.extensions_session",
+      SESSION_FACTORY,
       side_effect=ProgrammingError("stmt", {}, Exception("schema missing")),
     ):
       with pytest.raises(HTTPException) as exc:
@@ -183,6 +209,7 @@ class TestCreatePortfolioOp:
           body=CreatePortfolioRequest(name="X"),
           graph_id=GRAPH_ID,
           user=_make_user(),
+          _ext=_entity_meta(),
           idempotency_key=None,
           cache=_FakeCache(),
         )
@@ -192,25 +219,27 @@ class TestCreatePortfolioOp:
 
 class TestUpdatePortfolioOp:
   @pytest.mark.asyncio
-  async def test_happy_path_strips_portfolio_id_from_updates(self) -> None:
+  async def test_happy_path(self) -> None:
     body = UpdatePortfolioOperation(portfolio_id="pf_01", name="Renamed")
 
-    with patch(f"{MODULE}.cmd_update_portfolio", return_value=_make_portfolio()) as m:
-      with patch(f"{MODULE}.extensions_session", return_value=_mock_session_ctx()[0]):
-        env = await update_portfolio_op(
-          body=body,
-          graph_id=GRAPH_ID,
-          user=_make_user(),
-          idempotency_key=None,
-          cache=_FakeCache(),
-        )
+    with (
+      patch(f"{PORTFOLIOS}.update_portfolio", return_value=_make_portfolio()) as m,
+      patch(SESSION_FACTORY, return_value=_mock_session_ctx()[0]),
+    ):
+      env = await update_portfolio_op(
+        body=body,
+        graph_id=GRAPH_ID,
+        user=_make_user(),
+        _ext=_entity_meta(),
+        idempotency_key=None,
+        cache=_FakeCache(),
+      )
 
-    # portfolio_id is passed positionally, not in the updates dict
-    _args, _kwargs = m.call_args
-    _session, pf_id, updates = m.call_args[0]
-    assert pf_id == "pf_01"
-    assert "portfolio_id" not in updates
-    assert updates == {"name": "Renamed"}
+    # Registrar calls `update_portfolio(session, body)` — `body` carries
+    # portfolio_id, the command pulls it out.
+    _session, passed_body = m.call_args[0]
+    assert passed_body.portfolio_id == "pf_01"
+    assert passed_body.name == "Renamed"
     assert env.status == "completed"
 
   @pytest.mark.asyncio
@@ -218,14 +247,18 @@ class TestUpdatePortfolioOp:
     body = UpdatePortfolioOperation(portfolio_id="pf_missing", name="X")
 
     with (
-      patch(f"{MODULE}.cmd_update_portfolio", return_value=None),
-      patch(f"{MODULE}.extensions_session", return_value=_mock_session_ctx()[0]),
+      patch(
+        f"{PORTFOLIOS}.update_portfolio",
+        side_effect=PortfolioNotFoundError("pf_missing"),
+      ),
+      patch(SESSION_FACTORY, return_value=_mock_session_ctx()[0]),
     ):
       with pytest.raises(HTTPException) as exc:
         await update_portfolio_op(
           body=body,
           graph_id=GRAPH_ID,
           user=_make_user(),
+          _ext=_entity_meta(),
           idempotency_key=None,
           cache=_FakeCache(),
         )
@@ -238,13 +271,14 @@ class TestDeletePortfolioOp:
     body = DeletePortfolioOperation(portfolio_id="pf_01")
 
     with (
-      patch(f"{MODULE}.cmd_delete_portfolio", return_value=True),
-      patch(f"{MODULE}.extensions_session", return_value=_mock_session_ctx()[0]),
+      patch(f"{PORTFOLIOS}.delete_portfolio", return_value=DeleteResult(deleted=True)),
+      patch(SESSION_FACTORY, return_value=_mock_session_ctx()[0]),
     ):
       env = await delete_portfolio_op(
         body=body,
         graph_id=GRAPH_ID,
         user=_make_user(),
+        _ext=_entity_meta(),
         idempotency_key=None,
         cache=_FakeCache(),
       )
@@ -257,16 +291,17 @@ class TestDeletePortfolioOp:
 
     with (
       patch(
-        f"{MODULE}.cmd_delete_portfolio",
+        f"{PORTFOLIOS}.delete_portfolio",
         side_effect=PortfolioHasActivePositionsError(3),
       ),
-      patch(f"{MODULE}.extensions_session", return_value=_mock_session_ctx()[0]),
+      patch(SESSION_FACTORY, return_value=_mock_session_ctx()[0]),
     ):
       with pytest.raises(HTTPException) as exc:
         await delete_portfolio_op(
           body=body,
           graph_id=GRAPH_ID,
           user=_make_user(),
+          _ext=_entity_meta(),
           idempotency_key=None,
           cache=_FakeCache(),
         )
@@ -278,14 +313,18 @@ class TestDeletePortfolioOp:
     body = DeletePortfolioOperation(portfolio_id="pf_x")
 
     with (
-      patch(f"{MODULE}.cmd_delete_portfolio", return_value=False),
-      patch(f"{MODULE}.extensions_session", return_value=_mock_session_ctx()[0]),
+      patch(
+        f"{PORTFOLIOS}.delete_portfolio",
+        side_effect=PortfolioNotFoundError("pf_x"),
+      ),
+      patch(SESSION_FACTORY, return_value=_mock_session_ctx()[0]),
     ):
       with pytest.raises(HTTPException) as exc:
         await delete_portfolio_op(
           body=body,
           graph_id=GRAPH_ID,
           user=_make_user(),
+          _ext=_entity_meta(),
           idempotency_key=None,
           cache=_FakeCache(),
         )
@@ -308,13 +347,14 @@ class TestCreateSecurityOp:
     )
 
     with (
-      patch(f"{MODULE}.cmd_create_security", return_value=_make_security()),
-      patch(f"{MODULE}.extensions_session", return_value=_mock_session_ctx()[0]),
+      patch(f"{SECURITIES}.create_security", return_value=_make_security()),
+      patch(SESSION_FACTORY, return_value=_mock_session_ctx()[0]),
     ):
       env = await create_security_op(
         body=body,
         graph_id=GRAPH_ID,
         user=_make_user(),
+        _ext=_entity_meta(),
         idempotency_key=None,
         cache=_FakeCache(),
       )
@@ -324,10 +364,6 @@ class TestCreateSecurityOp:
 
   @pytest.mark.asyncio
   async def test_entity_not_found_returns_404(self) -> None:
-    from robosystems.operations.roboinvestor.commands.securities import (
-      EntityNotFoundError,
-    )
-
     body = CreateSecurityRequest(
       entity_id="ent_missing",
       name="Bad",
@@ -337,15 +373,17 @@ class TestCreateSecurityOp:
 
     with (
       patch(
-        f"{MODULE}.cmd_create_security", side_effect=EntityNotFoundError("ent_missing")
+        f"{SECURITIES}.create_security",
+        side_effect=EntityNotFoundError("ent_missing"),
       ),
-      patch(f"{MODULE}.extensions_session", return_value=_mock_session_ctx()[0]),
+      patch(SESSION_FACTORY, return_value=_mock_session_ctx()[0]),
     ):
       with pytest.raises(HTTPException) as exc:
         await create_security_op(
           body=body,
           graph_id=GRAPH_ID,
           user=_make_user(),
+          _ext=_entity_meta(),
           idempotency_key=None,
           cache=_FakeCache(),
         )
@@ -355,23 +393,46 @@ class TestCreateSecurityOp:
 
 class TestUpdateSecurityOp:
   @pytest.mark.asyncio
-  async def test_strips_security_id_from_updates(self) -> None:
+  async def test_happy_path(self) -> None:
     body = UpdateSecurityOperation(security_id="sec_01", name="Renamed")
 
-    with patch(f"{MODULE}.cmd_update_security", return_value=_make_security()) as m:
-      with patch(f"{MODULE}.extensions_session", return_value=_mock_session_ctx()[0]):
+    with (
+      patch(f"{SECURITIES}.update_security", return_value=_make_security()) as m,
+      patch(SESSION_FACTORY, return_value=_mock_session_ctx()[0]),
+    ):
+      await update_security_op(
+        body=body,
+        graph_id=GRAPH_ID,
+        user=_make_user(),
+        _ext=_entity_meta(),
+        idempotency_key=None,
+        cache=_FakeCache(),
+      )
+
+    _session, passed_body = m.call_args[0]
+    assert passed_body.security_id == "sec_01"
+    assert passed_body.name == "Renamed"
+
+  @pytest.mark.asyncio
+  async def test_not_found_returns_404(self) -> None:
+    body = UpdateSecurityOperation(security_id="sec_missing", name="X")
+    with (
+      patch(
+        f"{SECURITIES}.update_security",
+        side_effect=SecurityNotFoundError("sec_missing"),
+      ),
+      patch(SESSION_FACTORY, return_value=_mock_session_ctx()[0]),
+    ):
+      with pytest.raises(HTTPException) as exc:
         await update_security_op(
           body=body,
           graph_id=GRAPH_ID,
           user=_make_user(),
+          _ext=_entity_meta(),
           idempotency_key=None,
           cache=_FakeCache(),
         )
-
-    _session, sec_id, updates = m.call_args[0]
-    assert sec_id == "sec_01"
-    assert "security_id" not in updates
-    assert updates == {"name": "Renamed"}
+    assert exc.value.status_code == 404
 
 
 class TestDeleteSecurityOp:
@@ -380,13 +441,16 @@ class TestDeleteSecurityOp:
     body = DeleteSecurityOperation(security_id="sec_01")
 
     with (
-      patch(f"{MODULE}.cmd_soft_delete_security", return_value=True),
-      patch(f"{MODULE}.extensions_session", return_value=_mock_session_ctx()[0]),
+      patch(
+        f"{SECURITIES}.soft_delete_security", return_value=DeleteResult(deleted=True)
+      ),
+      patch(SESSION_FACTORY, return_value=_mock_session_ctx()[0]),
     ):
       env = await delete_security_op(
         body=body,
         graph_id=GRAPH_ID,
         user=_make_user(),
+        _ext=_entity_meta(),
         idempotency_key=None,
         cache=_FakeCache(),
       )
@@ -412,13 +476,14 @@ class TestCreatePositionOp:
     )
 
     with (
-      patch(f"{MODULE}.cmd_create_position", return_value=_make_position()),
-      patch(f"{MODULE}.extensions_session", return_value=_mock_session_ctx()[0]),
+      patch(f"{POSITIONS}.create_position", return_value=_make_position()),
+      patch(SESSION_FACTORY, return_value=_mock_session_ctx()[0]),
     ):
       env = await create_position_op(
         body=body,
         graph_id=GRAPH_ID,
         user=_make_user(),
+        _ext=_entity_meta(),
         idempotency_key=None,
         cache=_FakeCache(),
       )
@@ -440,16 +505,17 @@ class TestCreatePositionOp:
 
     with (
       patch(
-        f"{MODULE}.cmd_create_position",
+        f"{POSITIONS}.create_position",
         side_effect=PortfolioNotFoundError("pf_missing"),
       ),
-      patch(f"{MODULE}.extensions_session", return_value=_mock_session_ctx()[0]),
+      patch(SESSION_FACTORY, return_value=_mock_session_ctx()[0]),
     ):
       with pytest.raises(HTTPException) as exc:
         await create_position_op(
           body=body,
           graph_id=GRAPH_ID,
           user=_make_user(),
+          _ext=_entity_meta(),
           idempotency_key=None,
           cache=_FakeCache(),
         )
@@ -468,16 +534,17 @@ class TestCreatePositionOp:
 
     with (
       patch(
-        f"{MODULE}.cmd_create_position",
+        f"{POSITIONS}.create_position",
         side_effect=SecurityNotFoundError("sec_missing"),
       ),
-      patch(f"{MODULE}.extensions_session", return_value=_mock_session_ctx()[0]),
+      patch(SESSION_FACTORY, return_value=_mock_session_ctx()[0]),
     ):
       with pytest.raises(HTTPException) as exc:
         await create_position_op(
           body=body,
           graph_id=GRAPH_ID,
           user=_make_user(),
+          _ext=_entity_meta(),
           idempotency_key=None,
           cache=_FakeCache(),
         )
@@ -496,16 +563,17 @@ class TestCreatePositionOp:
 
     with (
       patch(
-        f"{MODULE}.cmd_create_position",
+        f"{POSITIONS}.create_position",
         side_effect=DuplicateActivePositionError("already exists"),
       ),
-      patch(f"{MODULE}.extensions_session", return_value=_mock_session_ctx()[0]),
+      patch(SESSION_FACTORY, return_value=_mock_session_ctx()[0]),
     ):
       with pytest.raises(HTTPException) as exc:
         await create_position_op(
           body=body,
           graph_id=GRAPH_ID,
           user=_make_user(),
+          _ext=_entity_meta(),
           idempotency_key=None,
           cache=_FakeCache(),
         )
@@ -514,23 +582,25 @@ class TestCreatePositionOp:
 
 class TestUpdatePositionOp:
   @pytest.mark.asyncio
-  async def test_strips_position_id_from_updates(self) -> None:
+  async def test_happy_path(self) -> None:
     body = UpdatePositionOperation(position_id="pos_01", notes="new note")
 
-    with patch(f"{MODULE}.cmd_update_position", return_value=_make_position()) as m:
-      with patch(f"{MODULE}.extensions_session", return_value=_mock_session_ctx()[0]):
-        await update_position_op(
-          body=body,
-          graph_id=GRAPH_ID,
-          user=_make_user(),
-          idempotency_key=None,
-          cache=_FakeCache(),
-        )
+    with (
+      patch(f"{POSITIONS}.update_position", return_value=_make_position()) as m,
+      patch(SESSION_FACTORY, return_value=_mock_session_ctx()[0]),
+    ):
+      await update_position_op(
+        body=body,
+        graph_id=GRAPH_ID,
+        user=_make_user(),
+        _ext=_entity_meta(),
+        idempotency_key=None,
+        cache=_FakeCache(),
+      )
 
-    _session, pos_id, updates = m.call_args[0]
-    assert pos_id == "pos_01"
-    assert "position_id" not in updates
-    assert updates == {"notes": "new note"}
+    _session, passed_body = m.call_args[0]
+    assert passed_body.position_id == "pos_01"
+    assert passed_body.notes == "new note"
 
 
 class TestDeletePositionOp:
@@ -539,13 +609,16 @@ class TestDeletePositionOp:
     body = DeletePositionOperation(position_id="pos_01")
 
     with (
-      patch(f"{MODULE}.cmd_soft_delete_position", return_value=True),
-      patch(f"{MODULE}.extensions_session", return_value=_mock_session_ctx()[0]),
+      patch(
+        f"{POSITIONS}.soft_delete_position", return_value=DeleteResult(deleted=True)
+      ),
+      patch(SESSION_FACTORY, return_value=_mock_session_ctx()[0]),
     ):
       env = await delete_position_op(
         body=body,
         graph_id=GRAPH_ID,
         user=_make_user(),
+        _ext=_entity_meta(),
         idempotency_key=None,
         cache=_FakeCache(),
       )
@@ -557,14 +630,18 @@ class TestDeletePositionOp:
     body = DeletePositionOperation(position_id="pos_missing")
 
     with (
-      patch(f"{MODULE}.cmd_soft_delete_position", return_value=False),
-      patch(f"{MODULE}.extensions_session", return_value=_mock_session_ctx()[0]),
+      patch(
+        f"{POSITIONS}.soft_delete_position",
+        side_effect=PositionNotFoundError("pos_missing"),
+      ),
+      patch(SESSION_FACTORY, return_value=_mock_session_ctx()[0]),
     ):
       with pytest.raises(HTTPException) as exc:
         await delete_position_op(
           body=body,
           graph_id=GRAPH_ID,
           user=_make_user(),
+          _ext=_entity_meta(),
           idempotency_key=None,
           cache=_FakeCache(),
         )

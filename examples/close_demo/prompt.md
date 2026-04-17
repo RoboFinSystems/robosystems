@@ -31,7 +31,7 @@ Perform the month-end close for the current target period. Follow the company's 
 
 6. **Review all drafts**: Call `list-period-drafts` for the target period. This returns every draft entry (schedule-derived AND manual) with full line-item detail. Summarize for the user: total debits, total credits, balanced? If anything doesn't look right, flag it.
 
-7. **Generate financial statements** (optional, before closing): Use `get-financial-statement` to produce:
+7. **Generate financial statements** (optional, before closing): Use `live-financial-statement` to produce:
    - Balance sheet (`statement_type: "balance_sheet"`)
    - Income statement (`statement_type: "income_statement"`)
 

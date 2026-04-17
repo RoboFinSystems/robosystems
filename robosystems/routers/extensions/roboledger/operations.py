@@ -104,17 +104,17 @@ from robosystems.models.api.extensions.reports import (
   ShareReportRequest,
 )
 from robosystems.models.api.extensions.schedules import (
-  CreateClosingEntryRequest,
+  CreateClosingEntryOperation,
   CreateManualClosingEntryRequest,
   CreateScheduleRequest,
   DeleteScheduleRequest,
-  TruncateScheduleRequest,
+  TruncateScheduleOperation,
   UpdateScheduleRequest,
 )
 from robosystems.models.api.extensions.taxonomies import (
   BulkCreateAssociationsRequest,
-  CreateAssociationRequest,
   CreateElementRequest,
+  CreateMappingAssociationOperation,
   CreateStructureRequest,
   CreateTaxonomyRequest,
   DeleteAssociationRequest,
@@ -315,7 +315,6 @@ from robosystems.operations.roboledger.fiscal_calendar.service import (
   CalendarAlreadyInitializedError,
   InvalidCloseTargetError,
 )
-from robosystems.operations.roboledger.schedules import ScheduleService
 
 router = APIRouter()
 
@@ -326,7 +325,6 @@ _RATE_LIMIT = Depends(subscription_aware_rate_limit_dependency)
 # as the old router-level `_svc = FiscalCalendarService()`).
 _fiscal_svc = FiscalCalendarService()
 _close_svc = PeriodCloseService(_fiscal_svc)
-_schedule_svc = ScheduleService()
 
 
 def _ctx(
@@ -420,18 +418,6 @@ class ClosePeriodOperation(ClosePeriodRequest):
 
 class ReopenPeriodOperation(ReopenPeriodRequest):
   period: str
-
-
-class TruncateScheduleOperation(TruncateScheduleRequest):
-  structure_id: str
-
-
-class CreateClosingEntryOperation(CreateClosingEntryRequest):
-  structure_id: str
-
-
-class CreateMappingAssociationOperation(CreateAssociationRequest):
-  mapping_id: str
 
 
 class DeleteMappingAssociationOperation(BaseModel):
@@ -800,226 +786,12 @@ async def reopen_period_op(
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Schedule operations
+#
+# Registered on the registrar (see `update_schedule_op`/`delete_schedule_op`
+# below). `create-schedule`, `truncate-schedule`, `create-closing-entry`,
+# and `create-manual-closing-entry` are all declared there. Keeping them
+# grouped with update/delete keeps schedule-surface specs together.
 # ═══════════════════════════════════════════════════════════════════════════
-
-
-@router.post(
-  "/create-schedule",
-  response_model=OperationEnvelope,
-  operation_id="opCreateSchedule",
-  summary="Create Schedule",
-  description="Creates a schedule and pre-generates monthly amortization facts spanning the period range.",
-  tags=[_OP_TAG],
-  dependencies=[_RATE_LIMIT],
-  responses={**OPERATION_ERROR_RESPONSES},
-)
-@endpoint_metrics_decorator(
-  "/extensions/roboledger/{graph_id}/operations/create-schedule",
-  method="POST",
-  business_event_type="ledger_create_schedule",
-)
-async def create_schedule_op(
-  body: CreateScheduleRequest,
-  graph_id: str = Path(..., pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN),
-  user: User = Depends(get_current_user_with_graph),
-  _ext: GraphExtensionContext = Depends(_require_roboledger),
-  idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
-  cache: IdempotencyCache = Depends(get_idempotency_cache),
-) -> OperationEnvelope:
-  ctx = _ctx(
-    graph_id=graph_id,
-    user_id=str(user.id),
-    op="create-schedule",
-    idempotency_key=idempotency_key,
-    body=body,
-  )
-
-  if body.period_end < body.period_start:
-    raise HTTPException(status_code=422, detail="period_end must be >= period_start")
-
-  def _runner():
-    try:
-      with extensions_session(graph_id) as session:
-        return cmd_create_schedule(
-          session, body, created_by=str(user.id), service=_schedule_svc
-        )
-    except ValueError as e:
-      raise HTTPException(status_code=422, detail=str(e))
-    except ProgrammingError as e:
-      if _is_schema_missing(e):
-        raise _ledger_404()
-      raise
-
-  return await _dispatch(
-    ctx,
-    _runner,
-    cache,
-    on_fresh_success=lambda _env: mark_graph_stale(graph_id, "schedule_created"),
-  )
-
-
-@router.post(
-  "/truncate-schedule",
-  response_model=OperationEnvelope,
-  operation_id="opTruncateSchedule",
-  summary="Truncate Schedule (End Early)",
-  description="Ends a schedule early by deleting forward facts and any stale draft closing entries past the cutoff.",
-  tags=[_OP_TAG],
-  dependencies=[_RATE_LIMIT],
-  responses={**OPERATION_ERROR_RESPONSES},
-)
-@endpoint_metrics_decorator(
-  "/extensions/roboledger/{graph_id}/operations/truncate-schedule",
-  method="POST",
-  business_event_type="ledger_truncate_schedule",
-)
-async def truncate_schedule_op(
-  body: TruncateScheduleOperation,
-  graph_id: str = Path(..., pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN),
-  user: User = Depends(get_current_user_with_graph),
-  _ext: GraphExtensionContext = Depends(_require_roboledger),
-  idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
-  cache: IdempotencyCache = Depends(get_idempotency_cache),
-) -> OperationEnvelope:
-  ctx = _ctx(
-    graph_id=graph_id,
-    user_id=str(user.id),
-    op="truncate-schedule",
-    idempotency_key=idempotency_key,
-    body=body,
-  )
-
-  def _runner():
-    try:
-      with extensions_session(graph_id) as session:
-        return cmd_truncate_schedule(
-          session,
-          body.structure_id,
-          body,
-          updated_by=str(user.id),
-          service=_schedule_svc,
-        )
-    except ValueError as e:
-      raise HTTPException(status_code=422, detail=str(e))
-    except ProgrammingError as e:
-      if _is_schema_missing(e):
-        raise _ledger_404()
-      raise
-
-  return await _dispatch(
-    ctx,
-    _runner,
-    cache,
-    on_fresh_success=lambda _env: mark_graph_stale(graph_id, "schedule_truncated"),
-  )
-
-
-@router.post(
-  "/create-closing-entry",
-  response_model=OperationEnvelope,
-  operation_id="opCreateClosingEntry",
-  summary="Create Closing Entry",
-  description="Creates a draft closing entry pre-populated from a schedule's facts for the given period.",
-  tags=[_OP_TAG],
-  dependencies=[_RATE_LIMIT],
-  responses={**OPERATION_ERROR_RESPONSES},
-)
-@endpoint_metrics_decorator(
-  "/extensions/roboledger/{graph_id}/operations/create-closing-entry",
-  method="POST",
-  business_event_type="ledger_create_closing_entry",
-)
-async def create_closing_entry_op(
-  body: CreateClosingEntryOperation,
-  graph_id: str = Path(..., pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN),
-  user: User = Depends(get_current_user_with_graph),
-  _ext: GraphExtensionContext = Depends(_require_roboledger),
-  idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
-  cache: IdempotencyCache = Depends(get_idempotency_cache),
-) -> OperationEnvelope:
-  ctx = _ctx(
-    graph_id=graph_id,
-    user_id=str(user.id),
-    op="create-closing-entry",
-    idempotency_key=idempotency_key,
-    body=body,
-  )
-
-  def _runner():
-    try:
-      with extensions_session(graph_id) as session:
-        return cmd_create_closing_entry(
-          session,
-          body.structure_id,
-          body,
-          created_by=str(user.id),
-          service=_schedule_svc,
-        )
-    except ValueError as e:
-      raise HTTPException(status_code=422, detail=str(e))
-    except ProgrammingError as e:
-      if _is_schema_missing(e):
-        raise _ledger_404()
-      raise
-
-  return await _dispatch(
-    ctx,
-    _runner,
-    cache,
-    on_fresh_success=lambda _env: mark_graph_stale(graph_id, "closing_entry_created"),
-  )
-
-
-@router.post(
-  "/create-manual-closing-entry",
-  response_model=OperationEnvelope,
-  operation_id="opCreateManualClosingEntry",
-  summary="Create Manual Closing Entry",
-  description="Creates a draft closing entry with manually specified amounts — not tied to a schedule.",
-  tags=[_OP_TAG],
-  dependencies=[_RATE_LIMIT],
-  responses={**OPERATION_ERROR_RESPONSES},
-)
-@endpoint_metrics_decorator(
-  "/extensions/roboledger/{graph_id}/operations/create-manual-closing-entry",
-  method="POST",
-  business_event_type="ledger_create_manual_closing_entry",
-)
-async def create_manual_closing_entry_op(
-  body: CreateManualClosingEntryRequest,
-  graph_id: str = Path(..., pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN),
-  user: User = Depends(get_current_user_with_graph),
-  _ext: GraphExtensionContext = Depends(_require_roboledger),
-  idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
-  cache: IdempotencyCache = Depends(get_idempotency_cache),
-) -> OperationEnvelope:
-  ctx = _ctx(
-    graph_id=graph_id,
-    user_id=str(user.id),
-    op="create-manual-closing-entry",
-    idempotency_key=idempotency_key,
-    body=body,
-  )
-
-  def _runner():
-    try:
-      with extensions_session(graph_id) as session:
-        return cmd_create_manual_closing_entry(
-          session, body, created_by=str(user.id), service=_schedule_svc
-        )
-    except ValueError as e:
-      raise HTTPException(status_code=422, detail=str(e))
-    except ProgrammingError as e:
-      if _is_schema_missing(e):
-        raise _ledger_404()
-      raise
-
-  return await _dispatch(
-    ctx,
-    _runner,
-    cache,
-    on_fresh_success=lambda _env: mark_graph_stale(graph_id, "manual_entry_created"),
-  )
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -1108,58 +880,8 @@ async def create_structure_op(
   return await _dispatch(ctx, _runner, cache)
 
 
-@router.post(
-  "/create-mapping-association",
-  response_model=OperationEnvelope,
-  operation_id="opCreateMappingAssociation",
-  summary="Create Mapping Association",
-  description="Links a chart-of-accounts element to a reporting concept (CoA element → US GAAP concept).",
-  tags=[_OP_TAG],
-  dependencies=[_RATE_LIMIT],
-  responses={**OPERATION_ERROR_RESPONSES},
-)
-@endpoint_metrics_decorator(
-  "/extensions/roboledger/{graph_id}/operations/create-mapping-association",
-  method="POST",
-  business_event_type="ledger_create_mapping_association",
-)
-async def create_mapping_association_op(
-  body: CreateMappingAssociationOperation,
-  graph_id: str = Path(..., pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN),
-  user: User = Depends(get_current_user_with_graph),
-  _ext: GraphExtensionContext = Depends(_require_roboledger),
-  idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
-  cache: IdempotencyCache = Depends(get_idempotency_cache),
-) -> OperationEnvelope:
-  ctx = _ctx(
-    graph_id=graph_id,
-    user_id=str(user.id),
-    op="create-mapping-association",
-    idempotency_key=idempotency_key,
-    body=body,
-  )
-
-  def _runner():
-    try:
-      with extensions_session(graph_id) as session:
-        try:
-          return cmd_create_mapping_association(
-            session,
-            body.mapping_id,
-            body,
-            created_by=str(user.id),
-          )
-        except MappingStructureNotFoundError:
-          raise HTTPException(status_code=404, detail="Mapping not found")
-        except ElementNotFoundError as e:
-          # Match the old router's 400 status for element-not-found
-          raise HTTPException(
-            status_code=400, detail=f"{e.side.capitalize()} element not found"
-          )
-    except (ValueError, ProgrammingError):
-      raise _ledger_404()
-
-  return await _dispatch(ctx, _runner, cache)
+# `create-mapping-association` is registered on the registrar — see the
+# "Taxonomy mapping write" block below.
 
 
 @router.post(
@@ -1515,7 +1237,82 @@ reverse_journal_entry_op = _registrar.register(
   )
 )
 
-# ── Schedule update + delete ─────────────────────────────────────────────
+# ── Schedule create / update / delete / truncate + closing entries ───────
+
+
+def _validate_schedule_period(body: CreateScheduleRequest) -> None:
+  """Pre-DB guard for `create-schedule`."""
+  if body.period_end < body.period_start:
+    raise HTTPException(status_code=422, detail="period_end must be >= period_start")
+
+
+create_schedule_op = _registrar.register(
+  OperationSpec(
+    name="create-schedule",
+    summary="Create Schedule",
+    description=(
+      "Create a schedule and pre-generate monthly amortization facts "
+      "spanning the period range. `entry_template` defines the debit/credit "
+      "elements used by `create-closing-entry` each period."
+    ),
+    command=cmd_create_schedule,
+    request_model=CreateScheduleRequest,
+    error_map={ValueError: 422},
+    pre_validate=_validate_schedule_period,
+    mark_stale_reason="schedule_created",
+  )
+)
+
+truncate_schedule_op = _registrar.register(
+  OperationSpec(
+    name="truncate-schedule",
+    summary="Truncate Schedule (End Early)",
+    description=(
+      "End a schedule early by deleting forward facts and any stale draft "
+      "closing entries past the cutoff. Historical facts and posted entries "
+      "are preserved. Use this when a business event (asset disposal, "
+      "contract cancellation) shortens the schedule's lifespan."
+    ),
+    command=cmd_truncate_schedule,
+    request_model=TruncateScheduleOperation,
+    error_map={ValueError: 422, ScheduleNotFoundError: 404},
+    mark_stale_reason="schedule_truncated",
+  )
+)
+
+create_closing_entry_op = _registrar.register(
+  OperationSpec(
+    name="create-closing-entry",
+    summary="Create Closing Entry",
+    description=(
+      "Create a draft closing entry pre-populated from a schedule's facts "
+      "for the given period. Idempotent — safe to call repeatedly; the "
+      "`outcome` field describes what happened "
+      "(`created`, `unchanged`, `regenerated`, `removed`, `skipped`)."
+    ),
+    command=cmd_create_closing_entry,
+    request_model=CreateClosingEntryOperation,
+    error_map={ValueError: 422},
+    mark_stale_reason="closing_entry_created",
+  )
+)
+
+create_manual_closing_entry_op = _registrar.register(
+  OperationSpec(
+    name="create-manual-closing-entry",
+    summary="Create Manual Closing Entry",
+    description=(
+      "Create a draft closing entry with manually specified line items — "
+      "not tied to a schedule. Use for one-off business events (asset "
+      "disposal, correcting entry, impairment). Total debits must equal "
+      "total credits."
+    ),
+    command=cmd_create_manual_closing_entry,
+    request_model=CreateManualClosingEntryRequest,
+    error_map={ValueError: 422},
+    mark_stale_reason="manual_entry_created",
+  )
+)
 
 update_schedule_op = _registrar.register(
   OperationSpec(
@@ -1546,6 +1343,29 @@ delete_schedule_op = _registrar.register(
     request_model=DeleteScheduleRequest,
     error_map={ScheduleNotFoundError: 404},
     requires_created_by=False,
+  )
+)
+
+# ── Taxonomy mapping write ────────────────────────────────────────────────
+
+create_mapping_association_op = _registrar.register(
+  OperationSpec(
+    name="create-mapping-association",
+    summary="Create Mapping Association",
+    description=(
+      "Link a chart-of-accounts element to a US GAAP reporting concept. "
+      "For bulk associations (presentation/calculation linkbases, 50+ "
+      "arcs at once) use `create-associations` instead."
+    ),
+    command=cmd_create_mapping_association,
+    request_model=CreateMappingAssociationOperation,
+    error_map={
+      MappingStructureNotFoundError: (404, lambda _e: "Mapping not found"),
+      ElementNotFoundError: (
+        400,
+        lambda e: f"{e.side.capitalize()} element not found",  # type: ignore[attr-defined]
+      ),
+    },
   )
 )
 
