@@ -1,0 +1,1391 @@
+{
+  "@context": {
+    "rdf": "http://www.w3.org/1999/02/22-rdf-syntax-ns#",
+    "rdfs": "http://www.w3.org/2000/01/rdf-schema#",
+    "xsd": "http://www.w3.org/2001/XMLSchema#",
+    "fac": "http://www.xbrlsite.com/fac#",
+    "rs": "https://robosystems.ai/vocab/",
+    "parent": {
+      "@id": "https://robosystems.ai/vocab/parent",
+      "@type": "@id"
+    },
+    "structureName": {
+      "@id": "https://robosystems.ai/vocab/structureName"
+    },
+    "structureType": {
+      "@id": "https://robosystems.ai/vocab/structureType"
+    },
+    "roleUri": {
+      "@id": "https://robosystems.ai/vocab/roleUri"
+    }
+  },
+  "standard": "fac-presentation",
+  "version": "v1",
+  "taxonomy_type": "mapping",
+  "namespace_uri": "http://www.xbrlsite.com/fac/presentation/",
+  "origin": "native",
+  "created_at": "2026-04-19",
+  "description": "RoboSystems-authored presentation hierarchies for FAC primitives \u2014 18 structures covering multi-variant income statements (multi-step, single-step, insurance, banking, securities), balance-sheet orderings, and cash-flow categorizations. ~174 parent-child arcs. RoboSystems-native artifact.",
+  "@graph": [
+    {
+      "@id": "_:fac-pres-bs-classified",
+      "roleUri": "http://www.xbrlsite.com/seattlemethod/conceptual-model/cm-roles/roles/fac-presentation/BS-classified",
+      "structureName": "FAC \u2014 Balance Sheet \u2014 Classified",
+      "structureType": "balance_sheet"
+    },
+    {
+      "@id": "_:fac-pres-bs-unclassified",
+      "roleUri": "http://www.xbrlsite.com/seattlemethod/conceptual-model/cm-roles/roles/fac-presentation/BS-unclassified",
+      "structureName": "FAC \u2014 Balance Sheet \u2014 Unclassified",
+      "structureType": "balance_sheet"
+    },
+    {
+      "@id": "_:fac-pres-is-multistep",
+      "roleUri": "http://www.xbrlsite.com/seattlemethod/conceptual-model/cm-roles/roles/fac-presentation/IS-multistep",
+      "structureName": "FAC \u2014 Income Statement \u2014 Multi-step",
+      "structureType": "income_statement"
+    },
+    {
+      "@id": "_:fac-pres-is-singlestep",
+      "roleUri": "http://www.xbrlsite.com/seattlemethod/conceptual-model/cm-roles/roles/fac-presentation/IS-singlestep",
+      "structureName": "FAC \u2014 Income Statement \u2014 Single-step",
+      "structureType": "income_statement"
+    },
+    {
+      "@id": "_:fac-pres-is-insurance",
+      "roleUri": "http://www.xbrlsite.com/seattlemethod/conceptual-model/cm-roles/roles/fac-presentation/IS-insurance",
+      "structureName": "FAC \u2014 Income Statement \u2014 Insurance-based",
+      "structureType": "income_statement"
+    },
+    {
+      "@id": "_:fac-pres-is-interest",
+      "roleUri": "http://www.xbrlsite.com/seattlemethod/conceptual-model/cm-roles/roles/fac-presentation/IS-interest",
+      "structureName": "FAC \u2014 Income Statement \u2014 Interest-based (Banking)",
+      "structureType": "income_statement"
+    },
+    {
+      "@id": "_:fac-pres-is-securities",
+      "roleUri": "http://www.xbrlsite.com/seattlemethod/conceptual-model/cm-roles/roles/fac-presentation/IS-securities",
+      "structureName": "FAC \u2014 Income Statement \u2014 Securities-based",
+      "structureType": "income_statement"
+    },
+    {
+      "@id": "_:fac-pres-comprehensiveincome",
+      "roleUri": "http://www.xbrlsite.com/seattlemethod/conceptual-model/cm-roles/roles/fac-presentation/ComprehensiveIncome",
+      "structureName": "FAC \u2014 Statement of Comprehensive Income",
+      "structureType": "equity_statement"
+    },
+    {
+      "@id": "_:fac-pres-cashflow",
+      "roleUri": "http://www.xbrlsite.com/seattlemethod/conceptual-model/cm-roles/roles/fac-presentation/CashFlow",
+      "structureName": "FAC \u2014 Cash Flow Statement",
+      "structureType": "cash_flow_statement"
+    },
+    {
+      "@id": "_:fac-pres-niac-breakdown",
+      "roleUri": "http://www.xbrlsite.com/seattlemethod/conceptual-model/cm-roles/roles/fac-presentation/NIAC-breakdown",
+      "structureName": "FAC \u2014 Net Income Available to Common Stockholders \u2014 Breakdown",
+      "structureType": "income_statement"
+    },
+    {
+      "@id": "_:fac-pres-netincome-breakdown",
+      "roleUri": "http://www.xbrlsite.com/seattlemethod/conceptual-model/cm-roles/roles/fac-presentation/NetIncome-breakdown",
+      "structureName": "FAC \u2014 Net Income \u2014 Parent/Noncontrolling Breakdown",
+      "structureType": "income_statement"
+    },
+    {
+      "@id": "_:fac-pres-comprehensiveincome-breakdown",
+      "roleUri": "http://www.xbrlsite.com/seattlemethod/conceptual-model/cm-roles/roles/fac-presentation/ComprehensiveIncome-breakdown",
+      "structureName": "FAC \u2014 Comprehensive Income \u2014 Parent/Noncontrolling Breakdown",
+      "structureType": "equity_statement"
+    },
+    {
+      "@id": "_:fac-pres-cashflow-breakdown",
+      "roleUri": "http://www.xbrlsite.com/seattlemethod/conceptual-model/cm-roles/roles/fac-presentation/CashFlow-breakdown",
+      "structureName": "FAC \u2014 Cash Flow \u2014 Continuing/Discontinued Breakdown",
+      "structureType": "cash_flow_statement"
+    },
+    {
+      "@id": "_:fac-pres-generalinformation",
+      "roleUri": "http://www.xbrlsite.com/seattlemethod/conceptual-model/cm-roles/roles/fac-presentation/GeneralInformation",
+      "structureName": "FAC \u2014 General Information Hierarchy",
+      "structureType": "custom"
+    },
+    {
+      "@id": "_:fac-pres-basicinformation",
+      "roleUri": "http://www.xbrlsite.com/seattlemethod/conceptual-model/cm-roles/roles/fac-presentation/BasicInformation",
+      "structureName": "FAC \u2014 Basic Information Hierarchy",
+      "structureType": "custom"
+    },
+    {
+      "@id": "_:fac-pres-keyratios",
+      "roleUri": "http://www.xbrlsite.com/seattlemethod/conceptual-model/cm-roles/roles/fac-presentation/KeyRatios",
+      "structureName": "FAC \u2014 Key Ratios Hierarchy",
+      "structureType": "custom"
+    },
+    {
+      "@id": "_:fac-pres-otherinformation",
+      "roleUri": "http://www.xbrlsite.com/seattlemethod/conceptual-model/cm-roles/roles/fac-presentation/OtherInformation",
+      "structureName": "FAC \u2014 Other Information Hierarchy",
+      "structureType": "custom"
+    },
+    {
+      "@id": "_:fac-pres-validationresults",
+      "roleUri": "http://www.xbrlsite.com/seattlemethod/conceptual-model/cm-roles/roles/fac-presentation/ValidationResults",
+      "structureName": "FAC \u2014 Validation Results Hierarchy",
+      "structureType": "custom"
+    },
+    {
+      "@id": "fac:Assets",
+      "parent": [
+        {
+          "@id": "fac:AssetsRollUp"
+        }
+      ]
+    },
+    {
+      "@id": "fac:AssetsRollUp",
+      "parent": [
+        {
+          "@id": "fac:BalanceSheetLineItems"
+        }
+      ]
+    },
+    {
+      "@id": "fac:BalanceSheetClassifiedTable",
+      "parent": [
+        {
+          "@id": "fac:BalanceSheetAbstract"
+        }
+      ]
+    },
+    {
+      "@id": "fac:BalanceSheetDate",
+      "parent": [
+        {
+          "@id": "fac:GeneralInformationLineItems"
+        }
+      ]
+    },
+    {
+      "@id": "fac:BalanceSheetFormat",
+      "parent": [
+        {
+          "@id": "fac:GeneralInformationLineItems"
+        }
+      ]
+    },
+    {
+      "@id": "fac:BalanceSheetLineItems",
+      "parent": [
+        {
+          "@id": "fac:BalanceSheetClassifiedTable"
+        },
+        {
+          "@id": "fac:BalanceSheetUnclassifiedTable"
+        }
+      ]
+    },
+    {
+      "@id": "fac:BalanceSheetUnclassifiedTable",
+      "parent": [
+        {
+          "@id": "fac:BalanceSheetAbstract"
+        }
+      ]
+    },
+    {
+      "@id": "fac:BasicInformationLineItems",
+      "parent": [
+        {
+          "@id": "fac:BasicInformationTable"
+        }
+      ]
+    },
+    {
+      "@id": "fac:BenefitsCostsExpenses",
+      "parent": [
+        {
+          "@id": "fac:CostsExpensesRollUp"
+        }
+      ]
+    },
+    {
+      "@id": "fac:Capitalization",
+      "parent": [
+        {
+          "@id": "fac:EquityRollUp"
+        }
+      ]
+    },
+    {
+      "@id": "fac:CashFlowStatementLineItems",
+      "parent": [
+        {
+          "@id": "fac:CashFlowStatementTable"
+        }
+      ]
+    },
+    {
+      "@id": "fac:CashFlowStatementTable",
+      "parent": [
+        {
+          "@id": "fac:CashFlowStatementAbstract"
+        }
+      ]
+    },
+    {
+      "@id": "fac:CommitmentsAndContingencies",
+      "parent": [
+        {
+          "@id": "fac:LiabilitiesEquityRollUp"
+        }
+      ]
+    },
+    {
+      "@id": "fac:ComprehensiveIncomeLoss",
+      "parent": [
+        {
+          "@id": "fac:ComprehensiveIncomeLossRollUp"
+        }
+      ]
+    },
+    {
+      "@id": "fac:ComprehensiveIncomeLossAttributableToNoncontrollingInterest",
+      "parent": [
+        {
+          "@id": "fac:ComprehensiveIncomeLoss"
+        },
+        {
+          "@id": "fac:ComprehensiveIncomeLossBreakdownLineItems"
+        }
+      ]
+    },
+    {
+      "@id": "fac:ComprehensiveIncomeLossAttributableToParent",
+      "parent": [
+        {
+          "@id": "fac:ComprehensiveIncomeLoss"
+        },
+        {
+          "@id": "fac:ComprehensiveIncomeLossBreakdownLineItems"
+        }
+      ]
+    },
+    {
+      "@id": "fac:ComprehensiveIncomeLossBreakdownLineItems",
+      "parent": [
+        {
+          "@id": "fac:ComprehensiveIncomeLossBreakdownTable"
+        }
+      ]
+    },
+    {
+      "@id": "fac:ComprehensiveIncomeLossRollUp",
+      "parent": [
+        {
+          "@id": "fac:StatementComprehensiveIncomeLossLineItems"
+        }
+      ]
+    },
+    {
+      "@id": "fac:CostOfRevenue",
+      "parent": [
+        {
+          "@id": "fac:CostRevenueRollUp"
+        },
+        {
+          "@id": "fac:GrossProfitRollUp"
+        },
+        {
+          "@id": "fac:CostsExpensesRollUp"
+        }
+      ]
+    },
+    {
+      "@id": "fac:CostOfRevenueGoods",
+      "parent": [
+        {
+          "@id": "fac:CostRevenueRollUp"
+        }
+      ]
+    },
+    {
+      "@id": "fac:CostOfRevenueServices",
+      "parent": [
+        {
+          "@id": "fac:CostRevenueRollUp"
+        }
+      ]
+    },
+    {
+      "@id": "fac:CostRevenueRollUp",
+      "parent": [
+        {
+          "@id": "fac:IncomeStatementLineItems"
+        }
+      ]
+    },
+    {
+      "@id": "fac:CostsAndExpenses",
+      "parent": [
+        {
+          "@id": "fac:CostsExpensesRollUp"
+        }
+      ]
+    },
+    {
+      "@id": "fac:CostsExpensesRollUp",
+      "parent": [
+        {
+          "@id": "fac:IncomeStatementLineItems"
+        }
+      ]
+    },
+    {
+      "@id": "fac:CurrentAssets",
+      "parent": [
+        {
+          "@id": "fac:AssetsRollUp"
+        }
+      ]
+    },
+    {
+      "@id": "fac:CurrentLiabilities",
+      "parent": [
+        {
+          "@id": "fac:LiabilitiesRollUp"
+        }
+      ]
+    },
+    {
+      "@id": "fac:DocumentType",
+      "parent": [
+        {
+          "@id": "fac:GeneralInformationLineItems"
+        }
+      ]
+    },
+    {
+      "@id": "fac:EntityCentralIndexKey",
+      "parent": [
+        {
+          "@id": "fac:GeneralInformationLineItems"
+        }
+      ]
+    },
+    {
+      "@id": "fac:EntityFilerCategory",
+      "parent": [
+        {
+          "@id": "fac:GeneralInformationLineItems"
+        }
+      ]
+    },
+    {
+      "@id": "fac:EntityRegistrantName",
+      "parent": [
+        {
+          "@id": "fac:GeneralInformationLineItems"
+        }
+      ]
+    },
+    {
+      "@id": "fac:Equity",
+      "parent": [
+        {
+          "@id": "fac:EquityRollUp"
+        }
+      ]
+    },
+    {
+      "@id": "fac:EquityAttributableToNoncontrollingInterest",
+      "parent": [
+        {
+          "@id": "fac:EquityRollUp"
+        }
+      ]
+    },
+    {
+      "@id": "fac:EquityAttributableToParent",
+      "parent": [
+        {
+          "@id": "fac:EquityRollUp"
+        }
+      ]
+    },
+    {
+      "@id": "fac:EquityRollUp",
+      "parent": [
+        {
+          "@id": "fac:LiabilitiesEquityRollUp"
+        }
+      ]
+    },
+    {
+      "@id": "fac:ExchangeGainsLosses",
+      "parent": [
+        {
+          "@id": "fac:NetCashFlowRollUp"
+        },
+        {
+          "@id": "fac:NetCashFlowBreakdownLineItems"
+        }
+      ]
+    },
+    {
+      "@id": "fac:FiscalPeriodFocus",
+      "parent": [
+        {
+          "@id": "fac:GeneralInformationLineItems"
+        }
+      ]
+    },
+    {
+      "@id": "fac:FiscalYearEnd",
+      "parent": [
+        {
+          "@id": "fac:GeneralInformationLineItems"
+        }
+      ]
+    },
+    {
+      "@id": "fac:FiscalYearFocus",
+      "parent": [
+        {
+          "@id": "fac:GeneralInformationLineItems"
+        }
+      ]
+    },
+    {
+      "@id": "fac:FixedAssets",
+      "parent": [
+        {
+          "@id": "fac:NoncurrentAssets"
+        }
+      ]
+    },
+    {
+      "@id": "fac:GeneralInformationLineItems",
+      "parent": [
+        {
+          "@id": "fac:GeneralInformationTable"
+        }
+      ]
+    },
+    {
+      "@id": "fac:GeneralInformationTable",
+      "parent": [
+        {
+          "@id": "fac:GeneralInformationHierarchy"
+        }
+      ]
+    },
+    {
+      "@id": "fac:GrossProfit",
+      "parent": [
+        {
+          "@id": "fac:GrossProfitRollUp"
+        },
+        {
+          "@id": "fac:OperatingIncomeLossRollUp"
+        }
+      ]
+    },
+    {
+      "@id": "fac:GrossProfitRollUp",
+      "parent": [
+        {
+          "@id": "fac:IncomeStatementLineItems"
+        }
+      ]
+    },
+    {
+      "@id": "fac:IncomeLossBeforeEquityMethodInvestments",
+      "parent": [
+        {
+          "@id": "fac:IncomeLossFromContinuingOperationsBeforeTaxRollUp"
+        }
+      ]
+    },
+    {
+      "@id": "fac:IncomeLossFromContinuingOperationsAfterTax",
+      "parent": [
+        {
+          "@id": "fac:IncomeLossFromContinuingOperationsAfterTaxRollUp"
+        },
+        {
+          "@id": "fac:NetIncomeLossRollUp"
+        }
+      ]
+    },
+    {
+      "@id": "fac:IncomeLossFromContinuingOperationsAfterTaxRollUp",
+      "parent": [
+        {
+          "@id": "fac:IncomeStatementLineItems"
+        }
+      ]
+    },
+    {
+      "@id": "fac:IncomeLossFromContinuingOperationsBeforeTax",
+      "parent": [
+        {
+          "@id": "fac:IncomeLossFromContinuingOperationsBeforeTaxRollUp"
+        },
+        {
+          "@id": "fac:IncomeLossFromContinuingOperationsAfterTaxRollUp"
+        }
+      ]
+    },
+    {
+      "@id": "fac:IncomeLossFromContinuingOperationsBeforeTaxRollUp",
+      "parent": [
+        {
+          "@id": "fac:IncomeStatementLineItems"
+        }
+      ]
+    },
+    {
+      "@id": "fac:IncomeLossFromDiscontinuedOperationsNetOfTax",
+      "parent": [
+        {
+          "@id": "fac:NetIncomeLossRollUp"
+        }
+      ]
+    },
+    {
+      "@id": "fac:IncomeLossFromDiscontinuedOperationsNetOfTaxAdjustmentToPriorYearGainLossOnDisposal",
+      "parent": [
+        {
+          "@id": "fac:IncomeLossFromDiscontinuedOperationsNetOfTax"
+        }
+      ]
+    },
+    {
+      "@id": "fac:IncomeLossFromDiscontinuedOperationsNetOfTaxDuringPhaseOut",
+      "parent": [
+        {
+          "@id": "fac:IncomeLossFromDiscontinuedOperationsNetOfTax"
+        }
+      ]
+    },
+    {
+      "@id": "fac:IncomeLossFromDiscontinuedOperationsNetOfTaxGainLossOnDisposal",
+      "parent": [
+        {
+          "@id": "fac:IncomeLossFromDiscontinuedOperationsNetOfTax"
+        }
+      ]
+    },
+    {
+      "@id": "fac:IncomeLossFromDiscontinuedOperationsNetOfTaxProvisionForGainLossOnDisposal",
+      "parent": [
+        {
+          "@id": "fac:IncomeLossFromDiscontinuedOperationsNetOfTax"
+        }
+      ]
+    },
+    {
+      "@id": "fac:IncomeLossFromEquityMethodInvestments",
+      "parent": [
+        {
+          "@id": "fac:IncomeLossFromContinuingOperationsBeforeTaxRollUp"
+        }
+      ]
+    },
+    {
+      "@id": "fac:IncomeStatementFormat",
+      "parent": [
+        {
+          "@id": "fac:GeneralInformationLineItems"
+        }
+      ]
+    },
+    {
+      "@id": "fac:IncomeStatementInsuranceBasedRevenuesTable",
+      "parent": [
+        {
+          "@id": "fac:IncomeStatementAbstract"
+        }
+      ]
+    },
+    {
+      "@id": "fac:IncomeStatementInterestBasedRevenuesTable",
+      "parent": [
+        {
+          "@id": "fac:IncomeStatementAbstract"
+        }
+      ]
+    },
+    {
+      "@id": "fac:IncomeStatementLineItems",
+      "parent": [
+        {
+          "@id": "fac:IncomeStatementMultiStepTable"
+        },
+        {
+          "@id": "fac:IncomeStatementSingleStepTable"
+        },
+        {
+          "@id": "fac:IncomeStatementInsuranceBasedRevenuesTable"
+        },
+        {
+          "@id": "fac:IncomeStatementInterestBasedRevenuesTable"
+        },
+        {
+          "@id": "fac:IncomeStatementSecuritiesBasedIncomeTable"
+        }
+      ]
+    },
+    {
+      "@id": "fac:IncomeStatementMultiStepTable",
+      "parent": [
+        {
+          "@id": "fac:IncomeStatementAbstract"
+        }
+      ]
+    },
+    {
+      "@id": "fac:IncomeStatementSecuritiesBasedIncomeTable",
+      "parent": [
+        {
+          "@id": "fac:IncomeStatementAbstract"
+        }
+      ]
+    },
+    {
+      "@id": "fac:IncomeStatementSingleStepTable",
+      "parent": [
+        {
+          "@id": "fac:IncomeStatementAbstract"
+        }
+      ]
+    },
+    {
+      "@id": "fac:IncomeStatementStartPeriodYearToDate",
+      "parent": [
+        {
+          "@id": "fac:GeneralInformationLineItems"
+        }
+      ]
+    },
+    {
+      "@id": "fac:IncomeTaxExpenseBenefit",
+      "parent": [
+        {
+          "@id": "fac:IncomeLossFromContinuingOperationsAfterTaxRollUp"
+        }
+      ]
+    },
+    {
+      "@id": "fac:IncomeTaxExpenseBenefitCurrent",
+      "parent": [
+        {
+          "@id": "fac:IncomeTaxExpenseBenefit"
+        }
+      ]
+    },
+    {
+      "@id": "fac:IncomeTaxExpenseBenefitDeferred",
+      "parent": [
+        {
+          "@id": "fac:IncomeTaxExpenseBenefit"
+        }
+      ]
+    },
+    {
+      "@id": "fac:InterestAndDebtExpense",
+      "parent": [
+        {
+          "@id": "fac:IncomeLossFromContinuingOperationsBeforeTaxRollUp"
+        }
+      ]
+    },
+    {
+      "@id": "fac:InterestAndDividendIncomeOperating",
+      "parent": [
+        {
+          "@id": "fac:InterestIncomeExpenseNetRollUp"
+        }
+      ]
+    },
+    {
+      "@id": "fac:InterestExpenseOperating",
+      "parent": [
+        {
+          "@id": "fac:InterestIncomeExpenseNetRollUp"
+        }
+      ]
+    },
+    {
+      "@id": "fac:InterestIncomeExpenseAfterProvisionForLosses",
+      "parent": [
+        {
+          "@id": "fac:InterestIncomeExpenseAfterProvisionForLossesRollUp"
+        },
+        {
+          "@id": "fac:RevenuesNetInterestExpenseRollUp"
+        }
+      ]
+    },
+    {
+      "@id": "fac:InterestIncomeExpenseOperatingNet",
+      "parent": [
+        {
+          "@id": "fac:InterestIncomeExpenseNetRollUp"
+        },
+        {
+          "@id": "fac:InterestIncomeExpenseAfterProvisionForLossesRollUp"
+        }
+      ]
+    },
+    {
+      "@id": "fac:KeyRatiosLineItems",
+      "parent": [
+        {
+          "@id": "fac:KeyRatiosTable"
+        }
+      ]
+    },
+    {
+      "@id": "fac:KeyRatiosTable",
+      "parent": [
+        {
+          "@id": "fac:KeyRatiosHierarchy"
+        }
+      ]
+    },
+    {
+      "@id": "fac:Liabilities",
+      "parent": [
+        {
+          "@id": "fac:LiabilitiesRollUp"
+        }
+      ]
+    },
+    {
+      "@id": "fac:LiabilitiesAndEquity",
+      "parent": [
+        {
+          "@id": "fac:LiabilitiesEquityRollUp"
+        }
+      ]
+    },
+    {
+      "@id": "fac:LiabilitiesEquityRollUp",
+      "parent": [
+        {
+          "@id": "fac:BalanceSheetLineItems"
+        }
+      ]
+    },
+    {
+      "@id": "fac:LiabilitiesRollUp",
+      "parent": [
+        {
+          "@id": "fac:LiabilitiesEquityRollUp"
+        }
+      ]
+    },
+    {
+      "@id": "fac:LongTermDebt",
+      "parent": [
+        {
+          "@id": "fac:NoncurrentLiabilities"
+        }
+      ]
+    },
+    {
+      "@id": "fac:NetCashFlow",
+      "parent": [
+        {
+          "@id": "fac:NetCashFlowRollUp"
+        }
+      ]
+    },
+    {
+      "@id": "fac:NetCashFlowBreakdownLineItems",
+      "parent": [
+        {
+          "@id": "fac:NetCashFlowBreakdownTable"
+        }
+      ]
+    },
+    {
+      "@id": "fac:NetCashFlowContinuing",
+      "parent": [
+        {
+          "@id": "fac:NetCashFlowContinuingRollUp"
+        }
+      ]
+    },
+    {
+      "@id": "fac:NetCashFlowContinuingRollUp",
+      "parent": [
+        {
+          "@id": "fac:NetCashFlowBreakdownLineItems"
+        }
+      ]
+    },
+    {
+      "@id": "fac:NetCashFlowDiscontinued",
+      "parent": [
+        {
+          "@id": "fac:NetCashFlowDiscontinuedRollUp"
+        }
+      ]
+    },
+    {
+      "@id": "fac:NetCashFlowDiscontinuedRollUp",
+      "parent": [
+        {
+          "@id": "fac:NetCashFlowBreakdownLineItems"
+        }
+      ]
+    },
+    {
+      "@id": "fac:NetCashFlowFromFinancingActivities",
+      "parent": [
+        {
+          "@id": "fac:NetCashFlowFromFinancingActivitiesRollUp"
+        }
+      ]
+    },
+    {
+      "@id": "fac:NetCashFlowFromFinancingActivitiesContinuing",
+      "parent": [
+        {
+          "@id": "fac:NetCashFlowFromFinancingActivitiesRollUp"
+        },
+        {
+          "@id": "fac:NetCashFlowContinuingRollUp"
+        }
+      ]
+    },
+    {
+      "@id": "fac:NetCashFlowFromFinancingActivitiesDiscontinued",
+      "parent": [
+        {
+          "@id": "fac:NetCashFlowFromFinancingActivitiesRollUp"
+        },
+        {
+          "@id": "fac:NetCashFlowDiscontinuedRollUp"
+        }
+      ]
+    },
+    {
+      "@id": "fac:NetCashFlowFromFinancingActivitiesRollUp",
+      "parent": [
+        {
+          "@id": "fac:NetCashFlowRollUp"
+        }
+      ]
+    },
+    {
+      "@id": "fac:NetCashFlowFromInvestingActivities",
+      "parent": [
+        {
+          "@id": "fac:NetCashFlowFromInvestingActivitiesRollUp"
+        }
+      ]
+    },
+    {
+      "@id": "fac:NetCashFlowFromInvestingActivitiesContinuing",
+      "parent": [
+        {
+          "@id": "fac:NetCashFlowFromInvestingActivitiesRollUp"
+        },
+        {
+          "@id": "fac:NetCashFlowContinuingRollUp"
+        }
+      ]
+    },
+    {
+      "@id": "fac:NetCashFlowFromInvestingActivitiesDiscontinued",
+      "parent": [
+        {
+          "@id": "fac:NetCashFlowFromInvestingActivitiesRollUp"
+        },
+        {
+          "@id": "fac:NetCashFlowDiscontinuedRollUp"
+        }
+      ]
+    },
+    {
+      "@id": "fac:NetCashFlowFromInvestingActivitiesRollUp",
+      "parent": [
+        {
+          "@id": "fac:NetCashFlowRollUp"
+        }
+      ]
+    },
+    {
+      "@id": "fac:NetCashFlowFromOperatingActivities",
+      "parent": [
+        {
+          "@id": "fac:NetCashFlowFromOperatingActivitiesRollUp"
+        }
+      ]
+    },
+    {
+      "@id": "fac:NetCashFlowFromOperatingActivitiesContinuing",
+      "parent": [
+        {
+          "@id": "fac:NetCashFlowFromOperatingActivitiesRollUp"
+        },
+        {
+          "@id": "fac:NetCashFlowContinuingRollUp"
+        }
+      ]
+    },
+    {
+      "@id": "fac:NetCashFlowFromOperatingActivitiesDiscontinued",
+      "parent": [
+        {
+          "@id": "fac:NetCashFlowFromOperatingActivitiesRollUp"
+        },
+        {
+          "@id": "fac:NetCashFlowDiscontinuedRollUp"
+        }
+      ]
+    },
+    {
+      "@id": "fac:NetCashFlowFromOperatingActivitiesRollUp",
+      "parent": [
+        {
+          "@id": "fac:NetCashFlowRollUp"
+        }
+      ]
+    },
+    {
+      "@id": "fac:NetCashFlowRollUp",
+      "parent": [
+        {
+          "@id": "fac:CashFlowStatementLineItems"
+        }
+      ]
+    },
+    {
+      "@id": "fac:NetIncomeLoss",
+      "parent": [
+        {
+          "@id": "fac:NetIncomeLossRollUp"
+        },
+        {
+          "@id": "fac:ComprehensiveIncomeLossRollUp"
+        }
+      ]
+    },
+    {
+      "@id": "fac:NetIncomeLossAttributableToNoncontrollingInterest",
+      "parent": [
+        {
+          "@id": "fac:NetIncomeLossBreakdownLineItems"
+        }
+      ]
+    },
+    {
+      "@id": "fac:NetIncomeLossAttributableToNoncontrollingInterestPlusPreferredStockDividendsAndOtherAdjustments",
+      "parent": [
+        {
+          "@id": "fac:NetIncomeLossBreakdownLineItems"
+        }
+      ]
+    },
+    {
+      "@id": "fac:NetIncomeLossAttributableToNonredeemableNoncontrollingInterest",
+      "parent": [
+        {
+          "@id": "fac:NetIncomeLossBreakdownLineItems"
+        }
+      ]
+    },
+    {
+      "@id": "fac:NetIncomeLossAttributableToParent",
+      "parent": [
+        {
+          "@id": "fac:NetIncomeLossAvailableToCommonStockholdersBasicRollUp"
+        },
+        {
+          "@id": "fac:NetIncomeLossBreakdownLineItems"
+        }
+      ]
+    },
+    {
+      "@id": "fac:NetIncomeLossAttributableToRedeemableNoncontrollingInterest",
+      "parent": [
+        {
+          "@id": "fac:NetIncomeLossBreakdownLineItems"
+        }
+      ]
+    },
+    {
+      "@id": "fac:NetIncomeLossAvailableToCommonBreakdownLineItems",
+      "parent": [
+        {
+          "@id": "fac:NetIncomeLossAvailableToCommonBreakdownTable"
+        }
+      ]
+    },
+    {
+      "@id": "fac:NetIncomeLossAvailableToCommonStockholdersBasic",
+      "parent": [
+        {
+          "@id": "fac:NetIncomeLossAvailableToCommonStockholdersBasicRollUp"
+        }
+      ]
+    },
+    {
+      "@id": "fac:NetIncomeLossAvailableToCommonStockholdersBasicRollUp",
+      "parent": [
+        {
+          "@id": "fac:NetIncomeLossAvailableToCommonBreakdownLineItems"
+        }
+      ]
+    },
+    {
+      "@id": "fac:NetIncomeLossBreakdownLineItems",
+      "parent": [
+        {
+          "@id": "fac:NetIncomeLossBreakdownTable"
+        }
+      ]
+    },
+    {
+      "@id": "fac:NetIncomeLossRollUp",
+      "parent": [
+        {
+          "@id": "fac:IncomeStatementLineItems"
+        }
+      ]
+    },
+    {
+      "@id": "fac:NoncurrentAssets",
+      "parent": [
+        {
+          "@id": "fac:AssetsRollUp"
+        }
+      ]
+    },
+    {
+      "@id": "fac:NoncurrentLiabilities",
+      "parent": [
+        {
+          "@id": "fac:LiabilitiesRollUp"
+        }
+      ]
+    },
+    {
+      "@id": "fac:NoninterestIncome",
+      "parent": [
+        {
+          "@id": "fac:RevenuesNetInterestExpenseRollUp"
+        }
+      ]
+    },
+    {
+      "@id": "fac:NonoperatingIncomeLoss",
+      "parent": [
+        {
+          "@id": "fac:IncomeLossFromContinuingOperationsBeforeTaxRollUp"
+        }
+      ]
+    },
+    {
+      "@id": "fac:OperatingExpenses",
+      "parent": [
+        {
+          "@id": "fac:OperatingIncomeLossRollUp"
+        },
+        {
+          "@id": "fac:CostsExpensesRollUp"
+        }
+      ]
+    },
+    {
+      "@id": "fac:OperatingIncomeLoss",
+      "parent": [
+        {
+          "@id": "fac:OperatingIncomeLossRollUp"
+        },
+        {
+          "@id": "fac:IncomeStatementLineItems"
+        }
+      ]
+    },
+    {
+      "@id": "fac:OperatingIncomeLossRollUp",
+      "parent": [
+        {
+          "@id": "fac:IncomeStatementLineItems"
+        }
+      ]
+    },
+    {
+      "@id": "fac:OtherComprehensiveIncomeLoss",
+      "parent": [
+        {
+          "@id": "fac:ComprehensiveIncomeLossRollUp"
+        }
+      ]
+    },
+    {
+      "@id": "fac:OtherComprehensiveIncomeLossAttributableToNoncontrollingInterest",
+      "parent": [
+        {
+          "@id": "fac:OtherComprehensiveIncomeLoss"
+        }
+      ]
+    },
+    {
+      "@id": "fac:OtherComprehensiveIncomeLossAttributableToParent",
+      "parent": [
+        {
+          "@id": "fac:OtherComprehensiveIncomeLoss"
+        }
+      ]
+    },
+    {
+      "@id": "fac:OtherInformationLineItems",
+      "parent": [
+        {
+          "@id": "fac:OtherInformationTable"
+        }
+      ]
+    },
+    {
+      "@id": "fac:OtherInformationTable",
+      "parent": [
+        {
+          "@id": "fac:OtherInformationHierarchy"
+        }
+      ]
+    },
+    {
+      "@id": "fac:OtherNoncurrentAssetsOfRegulatedEntity",
+      "parent": [
+        {
+          "@id": "fac:NoncurrentAssets"
+        }
+      ]
+    },
+    {
+      "@id": "fac:OtherNoncurrentLiabilitiesOfRegulatedEntity",
+      "parent": [
+        {
+          "@id": "fac:NoncurrentLiabilities"
+        }
+      ]
+    },
+    {
+      "@id": "fac:OtherOperatingIncomeExpenses",
+      "parent": [
+        {
+          "@id": "fac:OperatingIncomeLossRollUp"
+        },
+        {
+          "@id": "fac:IncomeStatementLineItems"
+        }
+      ]
+    },
+    {
+      "@id": "fac:OtherThanFixedNoncurrentAssets",
+      "parent": [
+        {
+          "@id": "fac:NoncurrentAssets"
+        }
+      ]
+    },
+    {
+      "@id": "fac:ParticipatingSecuritiesDistributedAndUndistributedEarningsLossBasic",
+      "parent": [
+        {
+          "@id": "fac:NetIncomeLossAvailableToCommonBreakdownLineItems"
+        }
+      ]
+    },
+    {
+      "@id": "fac:PreferredStockDividendsAndOtherAdjustments",
+      "parent": [
+        {
+          "@id": "fac:NetIncomeLossAvailableToCommonStockholdersBasicRollUp"
+        }
+      ]
+    },
+    {
+      "@id": "fac:ProvisionForLoanLeaseAndOtherLosses",
+      "parent": [
+        {
+          "@id": "fac:InterestIncomeExpenseAfterProvisionForLossesRollUp"
+        }
+      ]
+    },
+    {
+      "@id": "fac:PublicUtilitiesPropertyPlantAndEquipmentNet",
+      "parent": [
+        {
+          "@id": "fac:NoncurrentAssets"
+        }
+      ]
+    },
+    {
+      "@id": "fac:RedeemableNoncontrollingInterest",
+      "parent": [
+        {
+          "@id": "fac:LiabilitiesEquityRollUp"
+        }
+      ]
+    },
+    {
+      "@id": "fac:RedeemableNoncontrollingInterestCommon",
+      "parent": [
+        {
+          "@id": "fac:RedeemableNoncontrollingInterest"
+        }
+      ]
+    },
+    {
+      "@id": "fac:RedeemableNoncontrollingInterestOther",
+      "parent": [
+        {
+          "@id": "fac:RedeemableNoncontrollingInterest"
+        }
+      ]
+    },
+    {
+      "@id": "fac:RedeemableNoncontrollingInterestPreferred",
+      "parent": [
+        {
+          "@id": "fac:RedeemableNoncontrollingInterest"
+        }
+      ]
+    },
+    {
+      "@id": "fac:ReturnOnAssets",
+      "parent": [
+        {
+          "@id": "fac:KeyRatiosLineItems"
+        }
+      ]
+    },
+    {
+      "@id": "fac:ReturnOnEquity",
+      "parent": [
+        {
+          "@id": "fac:KeyRatiosLineItems"
+        }
+      ]
+    },
+    {
+      "@id": "fac:ReturnOnSales",
+      "parent": [
+        {
+          "@id": "fac:KeyRatiosLineItems"
+        }
+      ]
+    },
+    {
+      "@id": "fac:Revenues",
+      "parent": [
+        {
+          "@id": "fac:RevenuesRollUp"
+        },
+        {
+          "@id": "fac:GrossProfitRollUp"
+        },
+        {
+          "@id": "fac:IncomeStatementLineItems"
+        }
+      ]
+    },
+    {
+      "@id": "fac:RevenuesNetInterestExpense",
+      "parent": [
+        {
+          "@id": "fac:RevenuesNetInterestExpenseRollUp"
+        }
+      ]
+    },
+    {
+      "@id": "fac:RevenuesRollUp",
+      "parent": [
+        {
+          "@id": "fac:IncomeStatementLineItems"
+        }
+      ]
+    },
+    {
+      "@id": "fac:StatementComprehensiveIncomeLossLineItems",
+      "parent": [
+        {
+          "@id": "fac:StatementComprehensiveIncomeLossTable"
+        }
+      ]
+    },
+    {
+      "@id": "fac:StatementComprehensiveIncomeLossTable",
+      "parent": [
+        {
+          "@id": "fac:StatementComprehensiveIncomeAbstract"
+        }
+      ]
+    },
+    {
+      "@id": "fac:SustainableGrowthRate",
+      "parent": [
+        {
+          "@id": "fac:KeyRatiosLineItems"
+        }
+      ]
+    },
+    {
+      "@id": "fac:TemporaryEquity",
+      "parent": [
+        {
+          "@id": "fac:LiabilitiesEquityRollUp"
+        }
+      ]
+    },
+    {
+      "@id": "fac:TemporaryEquityAttributableToParent",
+      "parent": [
+        {
+          "@id": "fac:TemporaryEquity"
+        }
+      ]
+    },
+    {
+      "@id": "fac:TradingSymbol",
+      "parent": [
+        {
+          "@id": "fac:GeneralInformationLineItems"
+        }
+      ]
+    },
+    {
+      "@id": "fac:UndistributedEarningsLossAllocatedToParticipatingSecuritiesBasic",
+      "parent": [
+        {
+          "@id": "fac:NetIncomeLossAvailableToCommonBreakdownLineItems"
+        }
+      ]
+    },
+    {
+      "@id": "fac:ValidationResultsLineItems",
+      "parent": [
+        {
+          "@id": "fac:ValidationResultsTable"
+        }
+      ]
+    },
+    {
+      "@id": "fac:ValidationResultsTable",
+      "parent": [
+        {
+          "@id": "fac:ValidationResultsHierarchy"
+        }
+      ]
+    }
+  ]
+}

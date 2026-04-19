@@ -75,6 +75,7 @@ dependencies = [
     "numpy>=2.4.0,<3.0",
     "pandas>=2.3.0,<3.0",
     "pyarrow>=23.0.0",
+    "rdflib>=7.0.0,<8.0",
 
     # External API Integrations
     "intuit-oauth>=1.2.0,<2.0",

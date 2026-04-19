@@ -1,7 +1,8 @@
-RoboSystems is a knowledge graph platform for enterprise financial and operational data. The platform powers [RoboLedger](https://roboledger.ai) for accounting analytics and [RoboInvestor](https://roboinvestor.ai) for investment research, while the knowledge graphs are managed using the [RoboSystems](https://robosystems.ai) app. Build financial knowledge graphs, integrate accounting systems, analyze SEC filings, and leverage AI-powered insights with enterprise-grade security.
+RoboSystems is an open-source financial intelligence platform with a unified operational and analytical graph architecture. The platform powers [RoboLedger](https://roboledger.ai) for accounting analytics and [RoboInvestor](https://roboinvestor.ai) for investment research, while the knowledge graphs are managed using the [RoboSystems](https://robosystems.ai) app. Build financial knowledge graphs, integrate accounting systems, analyze SEC filings, and leverage AI-powered insights with enterprise-grade security.
 
 ## Core Features
 
+- **Unified Operational + Analytical Graph**: Operational state and analytical graph unified under a shared schema and Cypher query surface
 - **Graph Database**: Build knowledge graphs with LadybugDB for modeling financial relationships and multi-dimensional analytics
 - **Multi-Tenant Architecture**: Isolated database instances with tier-based resource allocation
 - **AI Agent Integration**: MCP (Model Context Protocol) support enables AI agents to query and analyze your knowledge graphs

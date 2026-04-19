@@ -109,20 +109,32 @@ def extensions_session(graph_id: str):
   in the graph_id schema and shared tables (fiscal_periods) resolve
   from public.
 
+  Special case: `graph_id="library"` routes to the taxonomy library
+  (read-only; library content currently lives in the `public` schema,
+  but the sentinel name is the stable API identity). No tenant schema
+  binding.
+
   Usage:
       with extensions_session("kg0123456789abcdef") as session:
           accounts = session.execute(select(Account)).scalars().all()
 
+      with extensions_session("library") as session:
+          taxonomies = session.execute(select(Taxonomy)).scalars().all()
+
   Args:
-      graph_id: The graph ID that maps to a PostgreSQL schema.
+      graph_id: The graph ID that maps to a PostgreSQL schema, or the
+          `"library"` sentinel for the taxonomy library.
 
   Yields:
-      A SQLAlchemy Session scoped to the tenant schema.
+      A SQLAlchemy Session scoped to the tenant schema (or library).
   """
-  schema = _sanitize_schema(graph_id)
   session: Session = _get_session_factory()()
   try:
-    session.execute(text(f"SET search_path TO {schema}, public"))
+    if graph_id == "library":
+      session.execute(text("SET search_path TO public"))
+    else:
+      schema = _sanitize_schema(graph_id)
+      session.execute(text(f"SET search_path TO {schema}, public"))
     yield session
     session.commit()
   except Exception:
@@ -166,7 +178,7 @@ def provision_tenant_schema(graph_id: str) -> None:
 
     # Seed the shared reporting taxonomy into the tenant schema so that
     # search_path queries see it (tenant tables shadow public tables).
-    from robosystems.config.taxonomy.seed import seed_tenant_reporting_taxonomy
+    from robosystems.taxonomy.seed import seed_tenant_reporting_taxonomy
 
     seed_tenant_reporting_taxonomy(conn, schema)
 

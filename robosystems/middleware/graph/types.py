@@ -330,11 +330,15 @@ def _build_graph_or_subgraph_id_pattern() -> str:
   - User subgraphs: kg[hex]{16,}_[alnum]{1,20}
   - Shared repos: sec, industry, etc.
   - Shared repo subgraphs: sec_historical, etc.
+  - Taxonomy library sentinel: `library` — routes to the shared taxonomy
+    library. Read-only, accessible to any authenticated user. Currently
+    backed by the extensions DB `public` schema; schema name is an
+    implementation detail, not part of the API identity.
   """
   repo_names = GraphTypeRegistry._get_shared_repo_ids()
   # Build pattern for shared repos with optional subgraph suffix
   repo_patterns = "|".join(rf"{name}(?:_[a-zA-Z0-9]{{1,20}})?" for name in repo_names)
-  return r"^(kg[a-f0-9]{16,}(?:_[a-zA-Z0-9]{1,20})?|" + repo_patterns + r")$"
+  return r"^(kg[a-f0-9]{16,}(?:_[a-zA-Z0-9]{1,20})?|" + repo_patterns + r"|library)$"
 
 
 # Lazy pattern cache — patterns are computed on first access to avoid circular

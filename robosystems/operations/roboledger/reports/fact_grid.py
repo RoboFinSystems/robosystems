@@ -373,7 +373,7 @@ def _close_to_retained_earnings(
 
   Mutates the facts list in place.
   """
-  # Deterministic ID from config/taxonomy/seed.py: _elem("retained_earnings", ...)
+  # Deterministic ID from robosystems/taxonomy/seed.py: _elem("retained_earnings", ...)
   RETAINED_EARNINGS_ID = "elem_gaap_retained_earnings"
 
   total_revenue = 0.0

@@ -111,7 +111,7 @@ def _ensure_reporting_taxonomy_seeded(graph_id: str) -> None:
       return
 
     # Re-seed from public schema
-    from robosystems.config.taxonomy.seed import seed_tenant_reporting_taxonomy
+    from robosystems.taxonomy.seed import seed_tenant_reporting_taxonomy
 
     # First ensure the reporting taxonomy row exists
     result = conn.execute(

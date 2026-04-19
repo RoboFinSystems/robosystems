@@ -1,15 +1,18 @@
 # RoboSystems
 
-RoboSystems is a financial intelligence platform that connects disparate data sources, builds domain ontologies as knowledge graphs, and provides AI-powered tools for accounting, financial reporting, investment management, and analysis. It powers [RoboLedger](https://roboledger.ai) and [RoboInvestor](https://roboinvestor.ai).
+RoboSystems is an open-source financial intelligence platform built on a unified operational and analytical graph architecture — a transactional Postgres backbone for ledger-grade correctness paired with an analytical LadybugDB graph for AI retrieval and reporting. Purpose-built for accounting, financial reporting, investment management, and analysis. Powers [RoboLedger](https://roboledger.ai) and [RoboInvestor](https://roboinvestor.ai).
 
+- **Unified Operational + Analytical Graph**: Graph workloads split the same way relational workloads do — transactional stores for writes, analytical stores for queries. Extension schemas drive both a Postgres operational backbone for ledger-grade correctness and a LadybugDB analytical graph for relationship traversal and AI retrieval, bound by a shared schema and Cypher query surface
 - **LadybugDB Graph Database**: Embedded columnar graph database with native DuckDB staging, LanceDB vector search, and tiered infrastructure
-- **Extensions**: Domain schemas that drive OLTP tables, API routes, data pipelines, and dedicated frontend apps. Extensions share a single database with schema-per-tenant isolation and materialize to the graph
+- **Extensions**: Domain schemas that drive OLTP tables, data pipelines, and dedicated frontend apps, all surfaced through the Extensions API. Schema-per-tenant isolation in a single Postgres database; materialized to the graph for analytics
 - **Document Search**: Full-text and semantic search across SEC filings, uploaded documents, and connected sources via OpenSearch
 - **AI-Native Architecture**: Context graphs with embeddings, semantic enrichment, and confidence scoring for LLM-powered analytics
 - **Model Context Protocol (MCP)**: Standardized server and [client](https://www.npmjs.com/package/@robosystems/mcp) for LLM integration with schema-aware tools
 - **Multi-Source Data Integration**: SEC XBRL filings, QuickBooks accounting data via dbt pipelines, and custom financial datasets
 - **Enterprise-Ready Infrastructure**: Multi-tenant architecture with tiered scaling and production-grade query management
-- **Developer-First API**: CQRS command surface — reads as REST GETs, writes as named `OperationEnvelope` operations with idempotency, audit logging, and SSE progress streaming
+- **Core REST API** (`/v1`): Auth, orgs, billing, graph lifecycle, Cypher, and MCP. Reads as REST GETs; graph lifecycle writes (subgraphs, backups, materialize, tier changes) as named `OperationEnvelope` operations
+- **Extensions API** (`/extensions/{graph_id}`): Strawberry GraphQL for typed reads over extensions OLTP, plus named REST operations for domain writes and analytical views over the materialized graph
+- **Unified Write Contract**: Every write across both surfaces is a named `OperationEnvelope` operation with `Idempotency-Key` support, audit logging, and SSE progress streaming via `/v1/operations/{id}/stream`
 
 ## Platform
 
@@ -30,12 +33,10 @@ Extensions are domain-specific subsystems that bring their own schema, OLTP tabl
 
 The extensions API surface is **graph-scoped at the URL level** — `graph_id` is always a path parameter, never a query argument — and splits reads from writes by transport:
 
-- **Typed reads** → `POST /extensions/{graph_id}/graphql` — Strawberry GraphQL endpoint with GraphiQL playground in dev. The schema is composed dynamically from enabled domains, so a ledger-only deployment exposes only ledger fields (no surprise runtime errors from disabled domains).
-- **Command writes** → `POST /extensions/{roboledger|roboinvestor}/{graph_id}/operations/{operation_name}` — named REST commands. Every command returns an `OperationEnvelope` with an `op_<ULID>` operation id, supports `Idempotency-Key` for safe retries, and is audit-logged. Long-running commands return `status: "pending"` and stream progress through `/v1/operations/{operation_id}/stream`.
+- **Reads** → `POST /extensions/{graph_id}/graphql` — Strawberry GraphQL, GraphiQL in dev, schema composed dynamically from enabled domains
+- **Writes** → `POST /extensions/{roboledger|roboinvestor}/{graph_id}/operations/{operation_name}` — named REST commands (see Unified Write Contract above)
 
-Behind the API is a CQRS-style operations kernel (`reads/` + `commands/` per domain) that's the single source of truth for business logic. GraphQL resolvers, REST operation routes, and MCP tools all delegate to the same functions, so wire shapes stay byte-identical across consumers. Per-domain feature flags (`ROBOLEDGER_ENABLED`, `ROBOINVESTOR_ENABLED`) gate both the routers and the GraphQL schema composition.
-
-The same `OperationEnvelope` / idempotency / audit infrastructure backs **graph lifecycle writes** at `POST /v1/graphs/{graph_id}/operations/{op_name}` — subgraph creation and deletion, backups, restore, tier upgrades, and materialization. Reads (list subgraphs, list backups, health) stay as REST GETs.
+Behind the API is a CQRS operations kernel (`reads/` + `commands/` per domain) that's the single source of truth for business logic — GraphQL resolvers, REST operation routes, and MCP tools all delegate to the same functions. Per-domain feature flags (`ROBOLEDGER_ENABLED`, `ROBOINVESTOR_ENABLED`) gate both the routers and the GraphQL schema composition.
 
 See [GraphQL Extensions](/robosystems/graphql/README.md) for the read-path implementation details, the Strawberry-Pydantic auto-derivation pattern, and the walkthrough for adding a new read field.
 

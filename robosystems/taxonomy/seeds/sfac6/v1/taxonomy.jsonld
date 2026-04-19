@@ -1,0 +1,2052 @@
+{
+  "@context": {
+    "rdf": "http://www.w3.org/1999/02/22-rdf-syntax-ns#",
+    "rdfs": "http://www.w3.org/2000/01/rdf-schema#",
+    "skos": "http://www.w3.org/2004/02/skos/core#",
+    "owl": "http://www.w3.org/2002/07/owl#",
+    "xsd": "http://www.w3.org/2001/XMLSchema#",
+    "dcterms": "http://purl.org/dc/terms/",
+    "xbrli": "http://www.xbrl.org/2003/instance#",
+    "xbrl": "http://www.xbrl.org/2003/linkbase#",
+    "xbrldt": "http://xbrl.org/2005/xbrldt#",
+    "sfac6": "http://xbrlsite.com/seattlemethod/sfac6#",
+    "fac": "http://www.xbrlsite.com/fac#",
+    "fac-luca": "http://luca.auditchain.finance/fac#",
+    "fac-seattlemethod": "http://xbrlsite.azurewebsites.net/seattlemethod/fac#",
+    "us-gaap-2017": "http://fasb.org/us-gaap/2017-01-31#",
+    "us-gaap-2020": "http://fasb.org/us-gaap/2020-01-31#",
+    "us-gaap-2022": "http://fasb.org/us-gaap/2022-01-31#",
+    "us-gaap-2024": "http://fasb.org/us-gaap/2024-01-31#",
+    "us-gaap": "http://fasb.org/us-gaap/",
+    "ifrs": "http://xbrl.ifrs.org/taxonomy/",
+    "dei": "http://xbrl.sec.gov/dei/",
+    "cm-roles": "http://www.xbrlsite.com/seattlemethod/conceptual-model/cm-roles/roles/",
+    "rs": "https://robosystems.ai/vocab/",
+    "classification": {
+      "@id": "https://robosystems.ai/vocab/classification"
+    },
+    "balance": {
+      "@id": "https://robosystems.ai/vocab/balance"
+    },
+    "periodType": {
+      "@id": "https://robosystems.ai/vocab/periodType"
+    },
+    "abstract": {
+      "@id": "https://robosystems.ai/vocab/abstract",
+      "@type": "xsd:boolean"
+    },
+    "monetary": {
+      "@id": "https://robosystems.ai/vocab/monetary",
+      "@type": "xsd:boolean"
+    },
+    "elementType": {
+      "@id": "https://robosystems.ai/vocab/elementType"
+    },
+    "substitutionGroup": {
+      "@id": "https://robosystems.ai/vocab/substitutionGroup",
+      "@type": "@id"
+    },
+    "source": {
+      "@id": "https://robosystems.ai/vocab/source"
+    },
+    "parent": {
+      "@id": "https://robosystems.ai/vocab/parent",
+      "@type": "@id"
+    },
+    "equivalent": {
+      "@id": "owl:equivalentClass",
+      "@type": "@id"
+    },
+    "generalOf": {
+      "@id": "https://robosystems.ai/vocab/generalOf",
+      "@type": "@id"
+    },
+    "summationOf": {
+      "@id": "https://robosystems.ai/vocab/summationOf",
+      "@type": "@id"
+    },
+    "dimensionOf": {
+      "@id": "https://robosystems.ai/vocab/dimensionOf",
+      "@type": "@id"
+    },
+    "hypercubeOf": {
+      "@id": "https://robosystems.ai/vocab/hypercubeOf",
+      "@type": "@id"
+    },
+    "arcrole": {
+      "@id": "https://robosystems.ai/vocab/arcrole"
+    },
+    "role": {
+      "@id": "https://robosystems.ai/vocab/role"
+    },
+    "order": {
+      "@id": "https://robosystems.ai/vocab/order",
+      "@type": "xsd:decimal"
+    },
+    "weight": {
+      "@id": "https://robosystems.ai/vocab/weight",
+      "@type": "xsd:decimal"
+    },
+    "label": "rdfs:label",
+    "altLabel": "skos:altLabel",
+    "prefLabel": "skos:prefLabel",
+    "documentation": "rdfs:comment",
+    "labelRole": {
+      "@id": "https://robosystems.ai/vocab/labelRole"
+    },
+    "labelLanguage": {
+      "@id": "https://robosystems.ai/vocab/labelLanguage"
+    },
+    "references": {
+      "@id": "dcterms:references"
+    },
+    "refType": {
+      "@id": "https://robosystems.ai/vocab/refType"
+    },
+    "citation": {
+      "@id": "https://robosystems.ai/vocab/citation"
+    },
+    "structureName": {
+      "@id": "https://robosystems.ai/vocab/structureName"
+    },
+    "structureType": {
+      "@id": "https://robosystems.ai/vocab/structureType"
+    },
+    "roleUri": {
+      "@id": "https://robosystems.ai/vocab/roleUri"
+    },
+    "statementContext": {
+      "@id": "https://robosystems.ai/vocab/statementContext"
+    },
+    "derivationRole": {
+      "@id": "https://robosystems.ai/vocab/derivationRole"
+    }
+  },
+  "standard": "sfac6",
+  "version": "v1",
+  "taxonomy_type": "reporting",
+  "namespace_uri": "http://xbrlsite.com/seattlemethod/sfac6/",
+  "forked_from": {
+    "author": "Charlie Hoffman (Seattle Method)",
+    "url": "http://xbrlsite.com/seattlemethod/golden/sfac6/sfac6-entryPoint.xsd",
+    "format": "XBRL taxonomy (entry point + linkbases)"
+  },
+  "forked_at": "2026-04-19",
+  "upstream_tracking": "frozen",
+  "description": "FASB Statement of Financial Accounting Concepts No. 6 \u2014 Elements of Financial Statements. RoboSystems canonical fork (frozen 2026-04-19). Originally derived from Charlie Hoffman's Seattle Method SFAC 6 entry point; edits happen in this JSON-LD, upstream XBRL is not tracked.",
+  "@graph": [
+    {
+      "@id": "_:N112f304e9da640d888756720d17f17c4",
+      "https://robosystems.ai/vocab/citation": [
+        {
+          "@value": "Publisher=FASB; Name=SFAC; Number=8; Paragraph=25; URI=https://fasb.org/page/PageContent?pageId=/standards/concepts-statements.html; URIDate=2022-06-12"
+        }
+      ],
+      "https://robosystems.ai/vocab/refType": [
+        {
+          "@value": "SFAC"
+        }
+      ]
+    },
+    {
+      "@id": "_:N246f5a658a724a59bc948049ee56d80c",
+      "https://robosystems.ai/vocab/citation": [
+        {
+          "@value": "Publisher=FASB; Name=SFAC; Number=8; Paragraph=81; URI=https://fasb.org/page/PageContent?pageId=/standards/concepts-statements.html; URIDate=2022-06-12"
+        }
+      ],
+      "https://robosystems.ai/vocab/refType": [
+        {
+          "@value": "SFAC"
+        }
+      ]
+    },
+    {
+      "@id": "_:N2dc1423192534fcea213b8eed9ec3e98",
+      "https://robosystems.ai/vocab/citation": [
+        {
+          "@value": "Publisher=FASB; Name=SFAC; Number=8; Paragraph=68; URI=https://fasb.org/page/PageContent?pageId=/standards/concepts-statements.html; URIDate=2022-06-12"
+        }
+      ],
+      "https://robosystems.ai/vocab/refType": [
+        {
+          "@value": "SFAC"
+        }
+      ]
+    },
+    {
+      "@id": "_:N507e62e42c05481e9b5033503daab19d",
+      "https://robosystems.ai/vocab/citation": [
+        {
+          "@value": "Publisher=FASB; Name=SFAC; Number=8; Paragraph=79; URI=https://fasb.org/page/PageContent?pageId=/standards/concepts-statements.html; URIDate=2022-06-12"
+        }
+      ],
+      "https://robosystems.ai/vocab/refType": [
+        {
+          "@value": "SFAC"
+        }
+      ]
+    },
+    {
+      "@id": "_:N7420c8fcf04d40208dfbff069d132f4a",
+      "https://robosystems.ai/vocab/citation": [
+        {
+          "@value": "Publisher=FASB; Name=SFAC; Number=8; Paragraph=84; URI=https://fasb.org/page/PageContent?pageId=/standards/concepts-statements.html; URIDate=2022-06-12"
+        }
+      ],
+      "https://robosystems.ai/vocab/refType": [
+        {
+          "@value": "SFAC"
+        }
+      ]
+    },
+    {
+      "@id": "_:N7aae6700bdef4be7bb7965685b3c7802",
+      "https://robosystems.ai/vocab/citation": [
+        {
+          "@value": "Publisher=FASB; Name=SFAC; Number=8; Paragraph=70; URI=https://fasb.org/page/PageContent?pageId=/standards/concepts-statements.html; URIDate=2022-06-12"
+        }
+      ],
+      "https://robosystems.ai/vocab/refType": [
+        {
+          "@value": "SFAC"
+        }
+      ]
+    },
+    {
+      "@id": "_:N8b7241c39de2458092d215b1d6901077",
+      "https://robosystems.ai/vocab/citation": [
+        {
+          "@value": "Publisher=FASB; Name=SFAC; Number=8; Paragraph=68; URI=https://fasb.org/page/PageContent?pageId=/standards/concepts-statements.html; URIDate=2022-06-12"
+        }
+      ],
+      "https://robosystems.ai/vocab/refType": [
+        {
+          "@value": "SFAC"
+        }
+      ]
+    },
+    {
+      "@id": "_:N93e599fd20f24219b8ced7e4905a963f",
+      "http://www.w3.org/2000/01/rdf-schema#label": [
+        {
+          "@value": "Equity, Ending Balance"
+        }
+      ],
+      "https://robosystems.ai/vocab/labelLanguage": [
+        {
+          "@value": "en"
+        }
+      ],
+      "https://robosystems.ai/vocab/role": [
+        {
+          "@value": "periodEnd"
+        }
+      ]
+    },
+    {
+      "@id": "_:N9b1212deb9c944908be2bd25ea3f0ef1",
+      "http://www.w3.org/2000/01/rdf-schema#label": [
+        {
+          "@value": "(Losses)"
+        }
+      ],
+      "https://robosystems.ai/vocab/labelLanguage": [
+        {
+          "@value": "en"
+        }
+      ],
+      "https://robosystems.ai/vocab/role": [
+        {
+          "@value": "other"
+        }
+      ]
+    },
+    {
+      "@id": "_:Na4be0275c3ae4a3a9f23e76e6fa225b7",
+      "http://www.w3.org/2000/01/rdf-schema#label": [
+        {
+          "@value": "(Liabilities)"
+        }
+      ],
+      "https://robosystems.ai/vocab/labelLanguage": [
+        {
+          "@value": "en"
+        }
+      ],
+      "https://robosystems.ai/vocab/role": [
+        {
+          "@value": "other"
+        }
+      ]
+    },
+    {
+      "@id": "_:Nb398a462b22646ea97ee710fc671e31b",
+      "https://robosystems.ai/vocab/citation": [
+        {
+          "@value": "Publisher=FASB; Name=SFAC; Number=8; Paragraph=84; URI=https://fasb.org/page/PageContent?pageId=/standards/concepts-statements.html; URIDate=2022-06-12"
+        }
+      ],
+      "https://robosystems.ai/vocab/refType": [
+        {
+          "@value": "SFAC"
+        }
+      ]
+    },
+    {
+      "@id": "_:Nbff8155a1d4249a8a8b49c8c852391f0",
+      "http://www.w3.org/2000/01/rdf-schema#label": [
+        {
+          "@value": "(Distributions to Owners)"
+        }
+      ],
+      "https://robosystems.ai/vocab/labelLanguage": [
+        {
+          "@value": "en"
+        }
+      ],
+      "https://robosystems.ai/vocab/role": [
+        {
+          "@value": "other"
+        }
+      ]
+    },
+    {
+      "@id": "_:Nd40a2cf9d2c040e3a31da4cb51cbffde",
+      "https://robosystems.ai/vocab/citation": [
+        {
+          "@value": "Publisher=FASB; Name=SFAC; Number=8; Paragraph=49; URI=https://fasb.org/page/PageContent?pageId=/standards/concepts-statements.html; URIDate=2022-06-12"
+        }
+      ],
+      "https://robosystems.ai/vocab/refType": [
+        {
+          "@value": "SFAC"
+        }
+      ]
+    },
+    {
+      "@id": "_:Ne3cf127e0cae446dbb416a6d30901166",
+      "https://robosystems.ai/vocab/citation": [
+        {
+          "@value": "Publisher=FASB; Name=SFAC; Number=8; Paragraph=35; URI=https://fasb.org/page/PageContent?pageId=/standards/concepts-statements.html; URIDate=2022-06-12"
+        }
+      ],
+      "https://robosystems.ai/vocab/refType": [
+        {
+          "@value": "SFAC"
+        }
+      ]
+    },
+    {
+      "@id": "_:Nf3a284b8187840beb92b8b7e3b86eb1e",
+      "http://www.w3.org/2000/01/rdf-schema#label": [
+        {
+          "@value": "(Expenses)"
+        }
+      ],
+      "https://robosystems.ai/vocab/labelLanguage": [
+        {
+          "@value": "en"
+        }
+      ],
+      "https://robosystems.ai/vocab/role": [
+        {
+          "@value": "other"
+        }
+      ]
+    },
+    {
+      "@id": "_:Nf44c05efd7024c94ad3103a129f602ea",
+      "http://www.w3.org/2000/01/rdf-schema#label": [
+        {
+          "@value": "Equity, Beginning Balance"
+        }
+      ],
+      "https://robosystems.ai/vocab/labelLanguage": [
+        {
+          "@value": "en"
+        }
+      ],
+      "https://robosystems.ai/vocab/role": [
+        {
+          "@value": "periodStart"
+        }
+      ]
+    },
+    {
+      "@id": "cm-roles:GeneralComment",
+      "https://robosystems.ai/vocab/roleUri": [
+        {
+          "@value": "http://www.xbrlsite.com/seattlemethod/conceptual-model/cm-roles/roles/GeneralComment"
+        }
+      ],
+      "https://robosystems.ai/vocab/structureName": [
+        {
+          "@value": "Individual general comment (resource role)"
+        }
+      ]
+    },
+    {
+      "@id": "cm-roles:GeneralComments",
+      "https://robosystems.ai/vocab/roleUri": [
+        {
+          "@value": "http://www.xbrlsite.com/seattlemethod/conceptual-model/cm-roles/roles/GeneralComments"
+        }
+      ],
+      "https://robosystems.ai/vocab/structureName": [
+        {
+          "@value": "Collection of General Comments within a Business Report (extended link role)"
+        }
+      ]
+    },
+    {
+      "@id": "cm-roles:ReasonNotReported",
+      "https://robosystems.ai/vocab/roleUri": [
+        {
+          "@value": "http://www.xbrlsite.com/seattlemethod/conceptual-model/cm-roles/roles/ReasonNotReported"
+        }
+      ],
+      "https://robosystems.ai/vocab/structureName": [
+        {
+          "@value": "Individual reason not reported (resource role)"
+        }
+      ]
+    },
+    {
+      "@id": "cm-roles:ReasonsNotReported",
+      "https://robosystems.ai/vocab/roleUri": [
+        {
+          "@value": "http://www.xbrlsite.com/seattlemethod/conceptual-model/cm-roles/roles/ReasonsNotReported"
+        }
+      ],
+      "https://robosystems.ai/vocab/structureName": [
+        {
+          "@value": "Collection of Reasons Not Reported within a Report"
+        }
+      ]
+    },
+    {
+      "@id": "cm-roles:Restatement",
+      "https://robosystems.ai/vocab/roleUri": [
+        {
+          "@value": "http://www.xbrlsite.com/seattlemethod/conceptual-model/cm-roles/roles/Restatement"
+        }
+      ],
+      "https://robosystems.ai/vocab/structureName": [
+        {
+          "@value": "Individual restatement (resource role)"
+        }
+      ]
+    },
+    {
+      "@id": "cm-roles:Restatements",
+      "https://robosystems.ai/vocab/roleUri": [
+        {
+          "@value": "http://www.xbrlsite.com/seattlemethod/conceptual-model/cm-roles/roles/Restatements"
+        }
+      ],
+      "https://robosystems.ai/vocab/structureName": [
+        {
+          "@value": "Collection of Restatements within a Financial Report (extended link role)"
+        }
+      ]
+    },
+    {
+      "@id": "cm-roles:originallyStatedLabel",
+      "https://robosystems.ai/vocab/roleUri": [
+        {
+          "@value": "http://www.xbrlsite.com/seattlemethod/conceptual-model/cm-roles/roles/originallyStatedLabel"
+        }
+      ],
+      "https://robosystems.ai/vocab/structureName": [
+        {
+          "@value": "The label for a concept when presenting values that have been restated from their value as originally reported. Used in an adjustment."
+        }
+      ]
+    },
+    {
+      "@id": "http://www.xbrl.org/2006/role/restatedLabel",
+      "https://robosystems.ai/vocab/roleUri": [
+        {
+          "@value": "http://www.xbrl.org/2006/role/restatedLabel"
+        }
+      ],
+      "https://robosystems.ai/vocab/structureName": [
+        {
+          "@value": "The label for a concept when presenting values that have been restated from their value as originally reported."
+        }
+      ]
+    },
+    {
+      "@id": "http://www.xbrl.org/2008/role/documentation",
+      "https://robosystems.ai/vocab/roleUri": [
+        {
+          "@value": "http://www.xbrl.org/2008/role/documentation"
+        }
+      ],
+      "https://robosystems.ai/vocab/structureName": [
+        {
+          "@value": "documentation"
+        }
+      ]
+    },
+    {
+      "@id": "http://www.xbrl.org/2008/role/label",
+      "https://robosystems.ai/vocab/roleUri": [
+        {
+          "@value": "http://www.xbrl.org/2008/role/label"
+        }
+      ],
+      "https://robosystems.ai/vocab/structureName": [
+        {
+          "@value": "label"
+        }
+      ]
+    },
+    {
+      "@id": "http://www.xbrl.org/2008/role/link",
+      "https://robosystems.ai/vocab/roleUri": [
+        {
+          "@value": "http://www.xbrl.org/2008/role/link"
+        }
+      ],
+      "https://robosystems.ai/vocab/structureName": [
+        {
+          "@value": "link"
+        }
+      ]
+    },
+    {
+      "@id": "http://www.xbrl.org/2008/role/terseLabel",
+      "https://robosystems.ai/vocab/roleUri": [
+        {
+          "@value": "http://www.xbrl.org/2008/role/terseLabel"
+        }
+      ],
+      "https://robosystems.ai/vocab/structureName": [
+        {
+          "@value": "terseLabel"
+        }
+      ]
+    },
+    {
+      "@id": "http://www.xbrl.org/2008/role/verboseLabel",
+      "https://robosystems.ai/vocab/roleUri": [
+        {
+          "@value": "http://www.xbrl.org/2008/role/verboseLabel"
+        }
+      ],
+      "https://robosystems.ai/vocab/structureName": [
+        {
+          "@value": "verboseLabel"
+        }
+      ]
+    },
+    {
+      "@id": "http://www.xbrl.org/2009/role/negatedLabel",
+      "https://robosystems.ai/vocab/roleUri": [
+        {
+          "@value": "http://www.xbrl.org/2009/role/negatedLabel"
+        }
+      ],
+      "https://robosystems.ai/vocab/structureName": [
+        {
+          "@value": "Negated standard label"
+        }
+      ]
+    },
+    {
+      "@id": "http://www.xbrl.org/2009/role/negatedNetLabel",
+      "https://robosystems.ai/vocab/roleUri": [
+        {
+          "@value": "http://www.xbrl.org/2009/role/negatedNetLabel"
+        }
+      ],
+      "https://robosystems.ai/vocab/structureName": [
+        {
+          "@value": "Negated net label"
+        }
+      ]
+    },
+    {
+      "@id": "http://www.xbrl.org/2009/role/negatedPeriodEndLabel",
+      "https://robosystems.ai/vocab/roleUri": [
+        {
+          "@value": "http://www.xbrl.org/2009/role/negatedPeriodEndLabel"
+        }
+      ],
+      "https://robosystems.ai/vocab/structureName": [
+        {
+          "@value": "Negated period end label"
+        }
+      ]
+    },
+    {
+      "@id": "http://www.xbrl.org/2009/role/negatedPeriodStartLabel",
+      "https://robosystems.ai/vocab/roleUri": [
+        {
+          "@value": "http://www.xbrl.org/2009/role/negatedPeriodStartLabel"
+        }
+      ],
+      "https://robosystems.ai/vocab/structureName": [
+        {
+          "@value": "Negated period start label"
+        }
+      ]
+    },
+    {
+      "@id": "http://www.xbrl.org/2009/role/negatedTerseLabel",
+      "https://robosystems.ai/vocab/roleUri": [
+        {
+          "@value": "http://www.xbrl.org/2009/role/negatedTerseLabel"
+        }
+      ],
+      "https://robosystems.ai/vocab/structureName": [
+        {
+          "@value": "Negated terse label"
+        }
+      ]
+    },
+    {
+      "@id": "http://www.xbrl.org/2009/role/negatedTotalLabel",
+      "https://robosystems.ai/vocab/roleUri": [
+        {
+          "@value": "http://www.xbrl.org/2009/role/negatedTotalLabel"
+        }
+      ],
+      "https://robosystems.ai/vocab/structureName": [
+        {
+          "@value": "Negated total label"
+        }
+      ]
+    },
+    {
+      "@id": "http://www.xbrl.org/2010/role/message",
+      "https://robosystems.ai/vocab/roleUri": [
+        {
+          "@value": "http://www.xbrl.org/2010/role/message"
+        }
+      ],
+      "https://robosystems.ai/vocab/structureName": [
+        {
+          "@value": "message"
+        }
+      ]
+    },
+    {
+      "@id": "http://www.xbrl.org/2010/role/terseMessage",
+      "https://robosystems.ai/vocab/roleUri": [
+        {
+          "@value": "http://www.xbrl.org/2010/role/terseMessage"
+        }
+      ],
+      "https://robosystems.ai/vocab/structureName": [
+        {
+          "@value": "terseMessage"
+        }
+      ]
+    },
+    {
+      "@id": "http://www.xbrl.org/2010/role/verboseMessage",
+      "https://robosystems.ai/vocab/roleUri": [
+        {
+          "@value": "http://www.xbrl.org/2010/role/verboseMessage"
+        }
+      ],
+      "https://robosystems.ai/vocab/structureName": [
+        {
+          "@value": "verboseMessage"
+        }
+      ]
+    },
+    {
+      "@id": "http://xbrlsite.com/seattlemethod/sfac6/role/BalanceSheet",
+      "https://robosystems.ai/vocab/roleUri": [
+        {
+          "@value": "http://xbrlsite.com/seattlemethod/sfac6/role/BalanceSheet"
+        }
+      ],
+      "https://robosystems.ai/vocab/structureName": [
+        {
+          "@value": "11-Statement of Financial Position"
+        }
+      ]
+    },
+    {
+      "@id": "http://xbrlsite.com/seattlemethod/sfac6/role/ChangesInEquity",
+      "https://robosystems.ai/vocab/roleUri": [
+        {
+          "@value": "http://xbrlsite.com/seattlemethod/sfac6/role/ChangesInEquity"
+        }
+      ],
+      "https://robosystems.ai/vocab/structureName": [
+        {
+          "@value": "31-Statement of Changes in Equity"
+        }
+      ]
+    },
+    {
+      "@id": "http://xbrlsite.com/seattlemethod/sfac6/role/ComprehensiveIncome",
+      "https://robosystems.ai/vocab/roleUri": [
+        {
+          "@value": "http://xbrlsite.com/seattlemethod/sfac6/role/ComprehensiveIncome"
+        }
+      ],
+      "https://robosystems.ai/vocab/structureName": [
+        {
+          "@value": "21-Statement of Comprehensive Income"
+        }
+      ]
+    },
+    {
+      "@id": "sfac6:Assets",
+      "http://purl.org/dc/terms/references": [
+        {
+          "@id": "_:N112f304e9da640d888756720d17f17c4"
+        }
+      ],
+      "http://www.w3.org/2000/01/rdf-schema#comment": [
+        {
+          "@language": "en",
+          "@value": "Assets are probable future economic beneits obtained or controlled by a particular entity as a result of past transactions or events."
+        }
+      ],
+      "http://www.w3.org/2000/01/rdf-schema#label": [
+        {
+          "@language": "en",
+          "@value": "Assets"
+        }
+      ],
+      "https://robosystems.ai/vocab/abstract": [
+        {
+          "@type": "xsd:boolean",
+          "@value": false
+        }
+      ],
+      "https://robosystems.ai/vocab/balance": [
+        {
+          "@value": "debit"
+        }
+      ],
+      "https://robosystems.ai/vocab/classification": [
+        {
+          "@value": "asset"
+        }
+      ],
+      "https://robosystems.ai/vocab/elementType": [
+        {
+          "@value": "concept"
+        }
+      ],
+      "https://robosystems.ai/vocab/monetary": [
+        {
+          "@type": "xsd:boolean",
+          "@value": true
+        }
+      ],
+      "https://robosystems.ai/vocab/periodType": [
+        {
+          "@value": "instant"
+        }
+      ],
+      "https://robosystems.ai/vocab/source": [
+        {
+          "@value": "sfac6"
+        }
+      ],
+      "https://robosystems.ai/vocab/substitutionGroup": [
+        {
+          "@id": "xbrli:item"
+        }
+      ],
+      "https://robosystems.ai/vocab/statementContext": [
+        {
+          "@value": "balance_sheet"
+        }
+      ],
+      "https://robosystems.ai/vocab/derivationRole": [
+        {
+          "@value": "primitive"
+        }
+      ]
+    },
+    {
+      "@id": "sfac6:BalanceSheetArithmetic",
+      "http://www.w3.org/2000/01/rdf-schema#label": [
+        {
+          "@language": "en",
+          "@value": "Balance Sheet [Arithmetic]"
+        }
+      ],
+      "https://robosystems.ai/vocab/abstract": [
+        {
+          "@type": "xsd:boolean",
+          "@value": true
+        }
+      ],
+      "https://robosystems.ai/vocab/elementType": [
+        {
+          "@value": "abstract"
+        }
+      ],
+      "https://robosystems.ai/vocab/monetary": [
+        {
+          "@type": "xsd:boolean",
+          "@value": false
+        }
+      ],
+      "https://robosystems.ai/vocab/parent": [
+        {
+          "@id": "sfac6:Assets"
+        },
+        {
+          "@id": "sfac6:Equity"
+        },
+        {
+          "@id": "sfac6:Liabilities"
+        }
+      ],
+      "https://robosystems.ai/vocab/periodType": [
+        {
+          "@value": "duration"
+        }
+      ],
+      "https://robosystems.ai/vocab/source": [
+        {
+          "@value": "sfac6"
+        }
+      ],
+      "https://robosystems.ai/vocab/substitutionGroup": [
+        {
+          "@id": "xbrli:item"
+        }
+      ],
+      "https://robosystems.ai/vocab/statementContext": [
+        {
+          "@value": "balance_sheet"
+        }
+      ],
+      "https://robosystems.ai/vocab/derivationRole": [
+        {
+          "@value": "structural"
+        }
+      ]
+    },
+    {
+      "@id": "sfac6:BalanceSheetHypercube",
+      "http://www.w3.org/2000/01/rdf-schema#label": [
+        {
+          "@language": "en",
+          "@value": "Balance Sheet [Hypercube]"
+        }
+      ],
+      "https://robosystems.ai/vocab/abstract": [
+        {
+          "@type": "xsd:boolean",
+          "@value": true
+        }
+      ],
+      "https://robosystems.ai/vocab/elementType": [
+        {
+          "@value": "hypercube"
+        }
+      ],
+      "https://robosystems.ai/vocab/monetary": [
+        {
+          "@type": "xsd:boolean",
+          "@value": false
+        }
+      ],
+      "https://robosystems.ai/vocab/parent": [
+        {
+          "@id": "sfac6:BalanceSheetLineItems"
+        }
+      ],
+      "https://robosystems.ai/vocab/periodType": [
+        {
+          "@value": "duration"
+        }
+      ],
+      "https://robosystems.ai/vocab/source": [
+        {
+          "@value": "sfac6"
+        }
+      ],
+      "https://robosystems.ai/vocab/substitutionGroup": [
+        {
+          "@id": "xbrldt:hypercubeItem"
+        }
+      ],
+      "https://robosystems.ai/vocab/statementContext": [
+        {
+          "@value": "balance_sheet"
+        }
+      ],
+      "https://robosystems.ai/vocab/derivationRole": [
+        {
+          "@value": "structural"
+        }
+      ]
+    },
+    {
+      "@id": "sfac6:BalanceSheetLineItems",
+      "http://www.w3.org/2000/01/rdf-schema#label": [
+        {
+          "@language": "en",
+          "@value": "Balance Sheet [Line Items]"
+        }
+      ],
+      "https://robosystems.ai/vocab/abstract": [
+        {
+          "@type": "xsd:boolean",
+          "@value": true
+        }
+      ],
+      "https://robosystems.ai/vocab/dimensionOf": [
+        {
+          "@id": "sfac6:Assets"
+        },
+        {
+          "@id": "sfac6:Equity"
+        },
+        {
+          "@id": "sfac6:Liabilities"
+        }
+      ],
+      "https://robosystems.ai/vocab/elementType": [
+        {
+          "@value": "abstract"
+        }
+      ],
+      "https://robosystems.ai/vocab/hypercubeOf": [
+        {
+          "@id": "sfac6:BalanceSheetHypercube"
+        }
+      ],
+      "https://robosystems.ai/vocab/monetary": [
+        {
+          "@type": "xsd:boolean",
+          "@value": false
+        }
+      ],
+      "https://robosystems.ai/vocab/parent": [
+        {
+          "@id": "sfac6:BalanceSheetArithmetic"
+        }
+      ],
+      "https://robosystems.ai/vocab/periodType": [
+        {
+          "@value": "duration"
+        }
+      ],
+      "https://robosystems.ai/vocab/source": [
+        {
+          "@value": "sfac6"
+        }
+      ],
+      "https://robosystems.ai/vocab/substitutionGroup": [
+        {
+          "@id": "xbrli:item"
+        }
+      ],
+      "https://robosystems.ai/vocab/statementContext": [
+        {
+          "@value": "balance_sheet"
+        }
+      ],
+      "https://robosystems.ai/vocab/derivationRole": [
+        {
+          "@value": "structural"
+        }
+      ]
+    },
+    {
+      "@id": "sfac6:ChangesInEquityHypercube",
+      "http://www.w3.org/2000/01/rdf-schema#label": [
+        {
+          "@language": "en",
+          "@value": "Changes in Equity [Hypercube]"
+        }
+      ],
+      "https://robosystems.ai/vocab/abstract": [
+        {
+          "@type": "xsd:boolean",
+          "@value": true
+        }
+      ],
+      "https://robosystems.ai/vocab/elementType": [
+        {
+          "@value": "hypercube"
+        }
+      ],
+      "https://robosystems.ai/vocab/monetary": [
+        {
+          "@type": "xsd:boolean",
+          "@value": false
+        }
+      ],
+      "https://robosystems.ai/vocab/parent": [
+        {
+          "@id": "sfac6:ChangesInEquityLineItems"
+        }
+      ],
+      "https://robosystems.ai/vocab/periodType": [
+        {
+          "@value": "duration"
+        }
+      ],
+      "https://robosystems.ai/vocab/source": [
+        {
+          "@value": "sfac6"
+        }
+      ],
+      "https://robosystems.ai/vocab/substitutionGroup": [
+        {
+          "@id": "xbrldt:hypercubeItem"
+        }
+      ],
+      "https://robosystems.ai/vocab/statementContext": [
+        {
+          "@value": "equity_changes"
+        }
+      ],
+      "https://robosystems.ai/vocab/derivationRole": [
+        {
+          "@value": "structural"
+        }
+      ]
+    },
+    {
+      "@id": "sfac6:ChangesInEquityLineItems",
+      "http://www.w3.org/2000/01/rdf-schema#label": [
+        {
+          "@language": "en",
+          "@value": "Changes in Equity [Line Items]"
+        }
+      ],
+      "https://robosystems.ai/vocab/abstract": [
+        {
+          "@type": "xsd:boolean",
+          "@value": true
+        }
+      ],
+      "https://robosystems.ai/vocab/dimensionOf": [
+        {
+          "@id": "sfac6:ComprehensiveIncome"
+        },
+        {
+          "@id": "sfac6:DistributionsToOwners"
+        },
+        {
+          "@id": "sfac6:Equity"
+        },
+        {
+          "@id": "sfac6:InvestmentsByOwners"
+        }
+      ],
+      "https://robosystems.ai/vocab/elementType": [
+        {
+          "@value": "abstract"
+        }
+      ],
+      "https://robosystems.ai/vocab/hypercubeOf": [
+        {
+          "@id": "sfac6:ChangesInEquityHypercube"
+        }
+      ],
+      "https://robosystems.ai/vocab/monetary": [
+        {
+          "@type": "xsd:boolean",
+          "@value": false
+        }
+      ],
+      "https://robosystems.ai/vocab/parent": [
+        {
+          "@id": "sfac6:ChangesInEquityRollForward"
+        }
+      ],
+      "https://robosystems.ai/vocab/periodType": [
+        {
+          "@value": "duration"
+        }
+      ],
+      "https://robosystems.ai/vocab/source": [
+        {
+          "@value": "sfac6"
+        }
+      ],
+      "https://robosystems.ai/vocab/substitutionGroup": [
+        {
+          "@id": "xbrli:item"
+        }
+      ],
+      "https://robosystems.ai/vocab/statementContext": [
+        {
+          "@value": "equity_changes"
+        }
+      ],
+      "https://robosystems.ai/vocab/derivationRole": [
+        {
+          "@value": "structural"
+        }
+      ]
+    },
+    {
+      "@id": "sfac6:ChangesInEquityRollForward",
+      "http://www.w3.org/2000/01/rdf-schema#label": [
+        {
+          "@language": "en",
+          "@value": "Changes in Equity [Roll Forward]"
+        }
+      ],
+      "https://robosystems.ai/vocab/abstract": [
+        {
+          "@type": "xsd:boolean",
+          "@value": true
+        }
+      ],
+      "https://robosystems.ai/vocab/elementType": [
+        {
+          "@value": "abstract"
+        }
+      ],
+      "https://robosystems.ai/vocab/monetary": [
+        {
+          "@type": "xsd:boolean",
+          "@value": false
+        }
+      ],
+      "https://robosystems.ai/vocab/parent": [
+        {
+          "@id": "sfac6:ComprehensiveIncome"
+        },
+        {
+          "@id": "sfac6:DistributionsToOwners"
+        },
+        {
+          "@id": "sfac6:Equity"
+        },
+        {
+          "@id": "sfac6:InvestmentsByOwners"
+        }
+      ],
+      "https://robosystems.ai/vocab/periodType": [
+        {
+          "@value": "duration"
+        }
+      ],
+      "https://robosystems.ai/vocab/source": [
+        {
+          "@value": "sfac6"
+        }
+      ],
+      "https://robosystems.ai/vocab/substitutionGroup": [
+        {
+          "@id": "xbrli:item"
+        }
+      ],
+      "https://robosystems.ai/vocab/statementContext": [
+        {
+          "@value": "equity_changes"
+        }
+      ],
+      "https://robosystems.ai/vocab/derivationRole": [
+        {
+          "@value": "structural"
+        }
+      ]
+    },
+    {
+      "@id": "sfac6:ComprehensiveIncome",
+      "http://purl.org/dc/terms/references": [
+        {
+          "@id": "_:N7aae6700bdef4be7bb7965685b3c7802"
+        }
+      ],
+      "http://www.w3.org/2000/01/rdf-schema#comment": [
+        {
+          "@language": "en",
+          "@value": "Comprehensive income is the change in equity of a business enterprise during a period from transactions and other events and circumstances from nonowner sources. It includes all changes in equity during a period except those resulting from investments by "
+        }
+      ],
+      "http://www.w3.org/2000/01/rdf-schema#label": [
+        {
+          "@language": "en",
+          "@value": "Comprehensive Income"
+        }
+      ],
+      "https://robosystems.ai/vocab/abstract": [
+        {
+          "@type": "xsd:boolean",
+          "@value": false
+        }
+      ],
+      "https://robosystems.ai/vocab/balance": [
+        {
+          "@value": "credit"
+        }
+      ],
+      "https://robosystems.ai/vocab/classification": [
+        {
+          "@value": "inflow"
+        }
+      ],
+      "https://robosystems.ai/vocab/elementType": [
+        {
+          "@value": "concept"
+        }
+      ],
+      "https://robosystems.ai/vocab/monetary": [
+        {
+          "@type": "xsd:boolean",
+          "@value": true
+        }
+      ],
+      "https://robosystems.ai/vocab/periodType": [
+        {
+          "@value": "duration"
+        }
+      ],
+      "https://robosystems.ai/vocab/source": [
+        {
+          "@value": "sfac6"
+        }
+      ],
+      "https://robosystems.ai/vocab/substitutionGroup": [
+        {
+          "@id": "xbrli:item"
+        }
+      ],
+      "https://robosystems.ai/vocab/summationOf": [
+        {
+          "@id": "sfac6:Expenses"
+        },
+        {
+          "@id": "sfac6:Gains"
+        },
+        {
+          "@id": "sfac6:Losses"
+        },
+        {
+          "@id": "sfac6:Revenues"
+        }
+      ],
+      "https://robosystems.ai/vocab/statementContext": [
+        {
+          "@value": "equity_changes"
+        }
+      ],
+      "https://robosystems.ai/vocab/derivationRole": [
+        {
+          "@value": "aggregate"
+        }
+      ]
+    },
+    {
+      "@id": "sfac6:ComprehensiveIncomeRollUp",
+      "http://www.w3.org/2000/01/rdf-schema#label": [
+        {
+          "@language": "en",
+          "@value": "Comprehensive Income [Roll Up]"
+        }
+      ],
+      "https://robosystems.ai/vocab/abstract": [
+        {
+          "@type": "xsd:boolean",
+          "@value": true
+        }
+      ],
+      "https://robosystems.ai/vocab/elementType": [
+        {
+          "@value": "abstract"
+        }
+      ],
+      "https://robosystems.ai/vocab/monetary": [
+        {
+          "@type": "xsd:boolean",
+          "@value": false
+        }
+      ],
+      "https://robosystems.ai/vocab/parent": [
+        {
+          "@id": "sfac6:ComprehensiveIncome"
+        },
+        {
+          "@id": "sfac6:Expenses"
+        },
+        {
+          "@id": "sfac6:Gains"
+        },
+        {
+          "@id": "sfac6:Losses"
+        },
+        {
+          "@id": "sfac6:Revenues"
+        }
+      ],
+      "https://robosystems.ai/vocab/periodType": [
+        {
+          "@value": "duration"
+        }
+      ],
+      "https://robosystems.ai/vocab/source": [
+        {
+          "@value": "sfac6"
+        }
+      ],
+      "https://robosystems.ai/vocab/substitutionGroup": [
+        {
+          "@id": "xbrli:item"
+        }
+      ],
+      "https://robosystems.ai/vocab/statementContext": [
+        {
+          "@value": "income_statement"
+        }
+      ],
+      "https://robosystems.ai/vocab/derivationRole": [
+        {
+          "@value": "structural"
+        }
+      ]
+    },
+    {
+      "@id": "sfac6:ComprehensiveIncomeStatementHypercube",
+      "http://www.w3.org/2000/01/rdf-schema#label": [
+        {
+          "@language": "en",
+          "@value": "Comprehensive Income Statement [Hypercube]"
+        }
+      ],
+      "https://robosystems.ai/vocab/abstract": [
+        {
+          "@type": "xsd:boolean",
+          "@value": true
+        }
+      ],
+      "https://robosystems.ai/vocab/elementType": [
+        {
+          "@value": "hypercube"
+        }
+      ],
+      "https://robosystems.ai/vocab/monetary": [
+        {
+          "@type": "xsd:boolean",
+          "@value": false
+        }
+      ],
+      "https://robosystems.ai/vocab/parent": [
+        {
+          "@id": "sfac6:ComprehensiveIncomeStatementLineItems"
+        }
+      ],
+      "https://robosystems.ai/vocab/periodType": [
+        {
+          "@value": "duration"
+        }
+      ],
+      "https://robosystems.ai/vocab/source": [
+        {
+          "@value": "sfac6"
+        }
+      ],
+      "https://robosystems.ai/vocab/substitutionGroup": [
+        {
+          "@id": "xbrldt:hypercubeItem"
+        }
+      ],
+      "https://robosystems.ai/vocab/statementContext": [
+        {
+          "@value": "income_statement"
+        }
+      ],
+      "https://robosystems.ai/vocab/derivationRole": [
+        {
+          "@value": "structural"
+        }
+      ]
+    },
+    {
+      "@id": "sfac6:ComprehensiveIncomeStatementLineItems",
+      "http://www.w3.org/2000/01/rdf-schema#label": [
+        {
+          "@language": "en",
+          "@value": "Comprehensive Income Statement [Line Items]"
+        }
+      ],
+      "https://robosystems.ai/vocab/abstract": [
+        {
+          "@type": "xsd:boolean",
+          "@value": true
+        }
+      ],
+      "https://robosystems.ai/vocab/dimensionOf": [
+        {
+          "@id": "sfac6:ComprehensiveIncome"
+        },
+        {
+          "@id": "sfac6:Expenses"
+        },
+        {
+          "@id": "sfac6:Gains"
+        },
+        {
+          "@id": "sfac6:Losses"
+        },
+        {
+          "@id": "sfac6:Revenues"
+        }
+      ],
+      "https://robosystems.ai/vocab/elementType": [
+        {
+          "@value": "abstract"
+        }
+      ],
+      "https://robosystems.ai/vocab/hypercubeOf": [
+        {
+          "@id": "sfac6:ComprehensiveIncomeStatementHypercube"
+        }
+      ],
+      "https://robosystems.ai/vocab/monetary": [
+        {
+          "@type": "xsd:boolean",
+          "@value": false
+        }
+      ],
+      "https://robosystems.ai/vocab/parent": [
+        {
+          "@id": "sfac6:ComprehensiveIncomeRollUp"
+        }
+      ],
+      "https://robosystems.ai/vocab/periodType": [
+        {
+          "@value": "duration"
+        }
+      ],
+      "https://robosystems.ai/vocab/source": [
+        {
+          "@value": "sfac6"
+        }
+      ],
+      "https://robosystems.ai/vocab/substitutionGroup": [
+        {
+          "@id": "xbrli:item"
+        }
+      ],
+      "https://robosystems.ai/vocab/statementContext": [
+        {
+          "@value": "income_statement"
+        }
+      ],
+      "https://robosystems.ai/vocab/derivationRole": [
+        {
+          "@value": "structural"
+        }
+      ]
+    },
+    {
+      "@id": "sfac6:DistributionsToOwners",
+      "http://purl.org/dc/terms/references": [
+        {
+          "@id": "_:N2dc1423192534fcea213b8eed9ec3e98"
+        }
+      ],
+      "http://www.w3.org/2000/01/rdf-schema#comment": [
+        {
+          "@language": "en",
+          "@value": "Distributions to owners are decreases in equity of a particular business enterprise resulting from transferring assets, rendering services, or incurring liabilities by the enterprise to owners. Distributions to owners decrease ownership interest (or equit"
+        }
+      ],
+      "http://www.w3.org/2000/01/rdf-schema#label": [
+        {
+          "@language": "en",
+          "@value": "Distributions to Owners"
+        }
+      ],
+      "https://robosystems.ai/vocab/abstract": [
+        {
+          "@type": "xsd:boolean",
+          "@value": false
+        }
+      ],
+      "https://robosystems.ai/vocab/balance": [
+        {
+          "@value": "debit"
+        }
+      ],
+      "https://robosystems.ai/vocab/classification": [
+        {
+          "@value": "outflow"
+        }
+      ],
+      "https://robosystems.ai/vocab/elementType": [
+        {
+          "@value": "concept"
+        }
+      ],
+      "https://robosystems.ai/vocab/labelRole": [
+        {
+          "@id": "_:Nbff8155a1d4249a8a8b49c8c852391f0"
+        }
+      ],
+      "https://robosystems.ai/vocab/monetary": [
+        {
+          "@type": "xsd:boolean",
+          "@value": true
+        }
+      ],
+      "https://robosystems.ai/vocab/periodType": [
+        {
+          "@value": "duration"
+        }
+      ],
+      "https://robosystems.ai/vocab/source": [
+        {
+          "@value": "sfac6"
+        }
+      ],
+      "https://robosystems.ai/vocab/substitutionGroup": [
+        {
+          "@id": "xbrli:item"
+        }
+      ],
+      "https://robosystems.ai/vocab/statementContext": [
+        {
+          "@value": "equity_changes"
+        }
+      ],
+      "https://robosystems.ai/vocab/derivationRole": [
+        {
+          "@value": "primitive"
+        }
+      ]
+    },
+    {
+      "@id": "sfac6:Equity",
+      "http://purl.org/dc/terms/references": [
+        {
+          "@id": "_:Nd40a2cf9d2c040e3a31da4cb51cbffde"
+        }
+      ],
+      "http://www.w3.org/2000/01/rdf-schema#comment": [
+        {
+          "@language": "en",
+          "@value": "Equity or net assets is the residual interest in the assets of an entity that remains after deducting its liabilities. In a business enterprise, the equity is the ownership interest."
+        }
+      ],
+      "http://www.w3.org/2000/01/rdf-schema#label": [
+        {
+          "@language": "en",
+          "@value": "Equity"
+        }
+      ],
+      "https://robosystems.ai/vocab/abstract": [
+        {
+          "@type": "xsd:boolean",
+          "@value": false
+        }
+      ],
+      "https://robosystems.ai/vocab/balance": [
+        {
+          "@value": "credit"
+        }
+      ],
+      "https://robosystems.ai/vocab/classification": [
+        {
+          "@value": "equity"
+        }
+      ],
+      "https://robosystems.ai/vocab/elementType": [
+        {
+          "@value": "concept"
+        }
+      ],
+      "https://robosystems.ai/vocab/labelRole": [
+        {
+          "@id": "_:N93e599fd20f24219b8ced7e4905a963f"
+        },
+        {
+          "@id": "_:Nf44c05efd7024c94ad3103a129f602ea"
+        }
+      ],
+      "https://robosystems.ai/vocab/monetary": [
+        {
+          "@type": "xsd:boolean",
+          "@value": true
+        }
+      ],
+      "https://robosystems.ai/vocab/periodType": [
+        {
+          "@value": "instant"
+        }
+      ],
+      "https://robosystems.ai/vocab/source": [
+        {
+          "@value": "sfac6"
+        }
+      ],
+      "https://robosystems.ai/vocab/substitutionGroup": [
+        {
+          "@id": "xbrli:item"
+        }
+      ],
+      "https://robosystems.ai/vocab/statementContext": [
+        {
+          "@value": "balance_sheet"
+        }
+      ],
+      "https://robosystems.ai/vocab/derivationRole": [
+        {
+          "@value": "primitive"
+        }
+      ]
+    },
+    {
+      "@id": "sfac6:Expenses",
+      "http://purl.org/dc/terms/references": [
+        {
+          "@id": "_:N246f5a658a724a59bc948049ee56d80c"
+        }
+      ],
+      "http://www.w3.org/2000/01/rdf-schema#comment": [
+        {
+          "@language": "en",
+          "@value": "Expenses are outflows or other using up of assets or incurrences of liabilities (or a combination of both) from delivering or producing goods, rendering services, or carrying out other activities that constitute the entity\"s ongoing major or central opera"
+        }
+      ],
+      "http://www.w3.org/2000/01/rdf-schema#label": [
+        {
+          "@language": "en",
+          "@value": "Expenses"
+        }
+      ],
+      "https://robosystems.ai/vocab/abstract": [
+        {
+          "@type": "xsd:boolean",
+          "@value": false
+        }
+      ],
+      "https://robosystems.ai/vocab/balance": [
+        {
+          "@value": "debit"
+        }
+      ],
+      "https://robosystems.ai/vocab/classification": [
+        {
+          "@value": "outflow"
+        }
+      ],
+      "https://robosystems.ai/vocab/elementType": [
+        {
+          "@value": "concept"
+        }
+      ],
+      "https://robosystems.ai/vocab/labelRole": [
+        {
+          "@id": "_:Nf3a284b8187840beb92b8b7e3b86eb1e"
+        }
+      ],
+      "https://robosystems.ai/vocab/monetary": [
+        {
+          "@type": "xsd:boolean",
+          "@value": true
+        }
+      ],
+      "https://robosystems.ai/vocab/periodType": [
+        {
+          "@value": "duration"
+        }
+      ],
+      "https://robosystems.ai/vocab/source": [
+        {
+          "@value": "sfac6"
+        }
+      ],
+      "https://robosystems.ai/vocab/substitutionGroup": [
+        {
+          "@id": "xbrli:item"
+        }
+      ],
+      "https://robosystems.ai/vocab/statementContext": [
+        {
+          "@value": "income_statement"
+        }
+      ],
+      "https://robosystems.ai/vocab/derivationRole": [
+        {
+          "@value": "primitive"
+        }
+      ]
+    },
+    {
+      "@id": "sfac6:Gains",
+      "http://purl.org/dc/terms/references": [
+        {
+          "@id": "_:Nb398a462b22646ea97ee710fc671e31b"
+        }
+      ],
+      "http://www.w3.org/2000/01/rdf-schema#comment": [
+        {
+          "@language": "en",
+          "@value": "Gains are increases in equity (net assets) from peripheral or incidental transactions of an entity and from all other transactions and other events and circumstances affecting the entity except those that result from revenues or investments by owners."
+        }
+      ],
+      "http://www.w3.org/2000/01/rdf-schema#label": [
+        {
+          "@language": "en",
+          "@value": "Gains"
+        }
+      ],
+      "https://robosystems.ai/vocab/abstract": [
+        {
+          "@type": "xsd:boolean",
+          "@value": false
+        }
+      ],
+      "https://robosystems.ai/vocab/balance": [
+        {
+          "@value": "credit"
+        }
+      ],
+      "https://robosystems.ai/vocab/classification": [
+        {
+          "@value": "inflow"
+        }
+      ],
+      "https://robosystems.ai/vocab/elementType": [
+        {
+          "@value": "concept"
+        }
+      ],
+      "https://robosystems.ai/vocab/monetary": [
+        {
+          "@type": "xsd:boolean",
+          "@value": true
+        }
+      ],
+      "https://robosystems.ai/vocab/periodType": [
+        {
+          "@value": "duration"
+        }
+      ],
+      "https://robosystems.ai/vocab/source": [
+        {
+          "@value": "sfac6"
+        }
+      ],
+      "https://robosystems.ai/vocab/substitutionGroup": [
+        {
+          "@id": "xbrli:item"
+        }
+      ],
+      "https://robosystems.ai/vocab/statementContext": [
+        {
+          "@value": "income_statement"
+        }
+      ],
+      "https://robosystems.ai/vocab/derivationRole": [
+        {
+          "@value": "primitive"
+        }
+      ]
+    },
+    {
+      "@id": "sfac6:InvestmentsByOwners",
+      "http://purl.org/dc/terms/references": [
+        {
+          "@id": "_:N8b7241c39de2458092d215b1d6901077"
+        }
+      ],
+      "http://www.w3.org/2000/01/rdf-schema#comment": [
+        {
+          "@language": "en",
+          "@value": "Investments by owners are increases in equity of a particular business enterprise resulting from transfers to it from other entities of something valuable to obtain or increase ownership interests (or equity) in it. Assets are most commonly received as in"
+        }
+      ],
+      "http://www.w3.org/2000/01/rdf-schema#label": [
+        {
+          "@language": "en",
+          "@value": "Investments by Owners"
+        }
+      ],
+      "https://robosystems.ai/vocab/abstract": [
+        {
+          "@type": "xsd:boolean",
+          "@value": false
+        }
+      ],
+      "https://robosystems.ai/vocab/balance": [
+        {
+          "@value": "credit"
+        }
+      ],
+      "https://robosystems.ai/vocab/classification": [
+        {
+          "@value": "inflow"
+        }
+      ],
+      "https://robosystems.ai/vocab/elementType": [
+        {
+          "@value": "concept"
+        }
+      ],
+      "https://robosystems.ai/vocab/monetary": [
+        {
+          "@type": "xsd:boolean",
+          "@value": true
+        }
+      ],
+      "https://robosystems.ai/vocab/periodType": [
+        {
+          "@value": "duration"
+        }
+      ],
+      "https://robosystems.ai/vocab/source": [
+        {
+          "@value": "sfac6"
+        }
+      ],
+      "https://robosystems.ai/vocab/substitutionGroup": [
+        {
+          "@id": "xbrli:item"
+        }
+      ],
+      "https://robosystems.ai/vocab/statementContext": [
+        {
+          "@value": "equity_changes"
+        }
+      ],
+      "https://robosystems.ai/vocab/derivationRole": [
+        {
+          "@value": "primitive"
+        }
+      ]
+    },
+    {
+      "@id": "sfac6:Liabilities",
+      "http://purl.org/dc/terms/references": [
+        {
+          "@id": "_:Ne3cf127e0cae446dbb416a6d30901166"
+        }
+      ],
+      "http://www.w3.org/2000/01/rdf-schema#comment": [
+        {
+          "@language": "en",
+          "@value": "Liabilities are probable future sacrifices of economic benefits arising from present obligations of a particular entity to transfer assets or provide services to other entities in the future as a result of past transactions or events."
+        }
+      ],
+      "http://www.w3.org/2000/01/rdf-schema#label": [
+        {
+          "@language": "en",
+          "@value": "Liabilities"
+        }
+      ],
+      "https://robosystems.ai/vocab/abstract": [
+        {
+          "@type": "xsd:boolean",
+          "@value": false
+        }
+      ],
+      "https://robosystems.ai/vocab/balance": [
+        {
+          "@value": "credit"
+        }
+      ],
+      "https://robosystems.ai/vocab/classification": [
+        {
+          "@value": "liability"
+        }
+      ],
+      "https://robosystems.ai/vocab/elementType": [
+        {
+          "@value": "concept"
+        }
+      ],
+      "https://robosystems.ai/vocab/labelRole": [
+        {
+          "@id": "_:Na4be0275c3ae4a3a9f23e76e6fa225b7"
+        }
+      ],
+      "https://robosystems.ai/vocab/monetary": [
+        {
+          "@type": "xsd:boolean",
+          "@value": true
+        }
+      ],
+      "https://robosystems.ai/vocab/periodType": [
+        {
+          "@value": "instant"
+        }
+      ],
+      "https://robosystems.ai/vocab/source": [
+        {
+          "@value": "sfac6"
+        }
+      ],
+      "https://robosystems.ai/vocab/substitutionGroup": [
+        {
+          "@id": "xbrli:item"
+        }
+      ],
+      "https://robosystems.ai/vocab/statementContext": [
+        {
+          "@value": "balance_sheet"
+        }
+      ],
+      "https://robosystems.ai/vocab/derivationRole": [
+        {
+          "@value": "primitive"
+        }
+      ]
+    },
+    {
+      "@id": "sfac6:Losses",
+      "http://purl.org/dc/terms/references": [
+        {
+          "@id": "_:N7420c8fcf04d40208dfbff069d132f4a"
+        }
+      ],
+      "http://www.w3.org/2000/01/rdf-schema#comment": [
+        {
+          "@language": "en",
+          "@value": "Losses are decreases in equity (net assets) from peripheral or incidental transactions of an entity and from all other transactions and other events and circumstances affecting the entity except those that result from expenses or distributions to owners."
+        }
+      ],
+      "http://www.w3.org/2000/01/rdf-schema#label": [
+        {
+          "@language": "en",
+          "@value": "Losses"
+        }
+      ],
+      "https://robosystems.ai/vocab/abstract": [
+        {
+          "@type": "xsd:boolean",
+          "@value": false
+        }
+      ],
+      "https://robosystems.ai/vocab/balance": [
+        {
+          "@value": "debit"
+        }
+      ],
+      "https://robosystems.ai/vocab/classification": [
+        {
+          "@value": "outflow"
+        }
+      ],
+      "https://robosystems.ai/vocab/elementType": [
+        {
+          "@value": "concept"
+        }
+      ],
+      "https://robosystems.ai/vocab/labelRole": [
+        {
+          "@id": "_:N9b1212deb9c944908be2bd25ea3f0ef1"
+        }
+      ],
+      "https://robosystems.ai/vocab/monetary": [
+        {
+          "@type": "xsd:boolean",
+          "@value": true
+        }
+      ],
+      "https://robosystems.ai/vocab/periodType": [
+        {
+          "@value": "duration"
+        }
+      ],
+      "https://robosystems.ai/vocab/source": [
+        {
+          "@value": "sfac6"
+        }
+      ],
+      "https://robosystems.ai/vocab/substitutionGroup": [
+        {
+          "@id": "xbrli:item"
+        }
+      ],
+      "https://robosystems.ai/vocab/statementContext": [
+        {
+          "@value": "income_statement"
+        }
+      ],
+      "https://robosystems.ai/vocab/derivationRole": [
+        {
+          "@value": "primitive"
+        }
+      ]
+    },
+    {
+      "@id": "sfac6:Revenues",
+      "http://purl.org/dc/terms/references": [
+        {
+          "@id": "_:N507e62e42c05481e9b5033503daab19d"
+        }
+      ],
+      "http://www.w3.org/2000/01/rdf-schema#comment": [
+        {
+          "@language": "en",
+          "@value": "Revenues are inflows or other enhancements of assets of an entity or settlements of its liabilities (or a combination of both) from delivering or producing goods, rendering services, or other activities that constitute the entity\"s ongoing major or centra"
+        }
+      ],
+      "http://www.w3.org/2000/01/rdf-schema#label": [
+        {
+          "@language": "en",
+          "@value": "Revenues"
+        }
+      ],
+      "https://robosystems.ai/vocab/abstract": [
+        {
+          "@type": "xsd:boolean",
+          "@value": false
+        }
+      ],
+      "https://robosystems.ai/vocab/balance": [
+        {
+          "@value": "credit"
+        }
+      ],
+      "https://robosystems.ai/vocab/classification": [
+        {
+          "@value": "inflow"
+        }
+      ],
+      "https://robosystems.ai/vocab/elementType": [
+        {
+          "@value": "concept"
+        }
+      ],
+      "https://robosystems.ai/vocab/monetary": [
+        {
+          "@type": "xsd:boolean",
+          "@value": true
+        }
+      ],
+      "https://robosystems.ai/vocab/periodType": [
+        {
+          "@value": "duration"
+        }
+      ],
+      "https://robosystems.ai/vocab/source": [
+        {
+          "@value": "sfac6"
+        }
+      ],
+      "https://robosystems.ai/vocab/substitutionGroup": [
+        {
+          "@id": "xbrli:item"
+        }
+      ],
+      "https://robosystems.ai/vocab/statementContext": [
+        {
+          "@value": "income_statement"
+        }
+      ],
+      "https://robosystems.ai/vocab/derivationRole": [
+        {
+          "@value": "primitive"
+        }
+      ]
+    }
+  ]
+}

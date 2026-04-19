@@ -15,9 +15,13 @@ split and the aspects-only-on-events rule.
 
 # Base ontology concepts
 from .association import Association
+from .classification import Classification
 from .classification_rule import ClassificationRule
 from .dimension import Dimension
 from .element import Account, Element
+from .element_classification import ElementClassification
+from .element_label import ElementLabel
+from .element_reference import ElementReference
 from .entity import Entity
 from .entity_taxonomy import EntityTaxonomy
 
@@ -55,9 +59,13 @@ __all__ = [
   # Base ontology
   "Account",
   "Association",
+  "Classification",
   "ClassificationRule",
   "Dimension",
   "Element",
+  "ElementClassification",
+  "ElementLabel",
+  "ElementReference",
   "Entity",
   "EntityTaxonomy",
   "Entry",

@@ -1,7 +1,7 @@
 """CoA to US GAAP mapping definitions for Cascade Advisory Group LLC.
 
 Maps each Chart of Accounts code to a deterministic GAAP element ID
-from the US GAAP reporting taxonomy seed (robosystems/config/taxonomy/seed.py).
+from the US GAAP reporting taxonomy seed (robosystems/taxonomy/seed.py).
 """
 
 # (coa_code, gaap_element_id)

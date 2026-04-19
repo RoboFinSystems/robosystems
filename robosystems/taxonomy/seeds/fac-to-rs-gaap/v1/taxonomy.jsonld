@@ -1,0 +1,1852 @@
+{
+  "@context": {
+    "rdf": "http://www.w3.org/1999/02/22-rdf-syntax-ns#",
+    "rdfs": "http://www.w3.org/2000/01/rdf-schema#",
+    "skos": "http://www.w3.org/2004/02/skos/core#",
+    "owl": "http://www.w3.org/2002/07/owl#",
+    "xsd": "http://www.w3.org/2001/XMLSchema#",
+    "dcterms": "http://purl.org/dc/terms/",
+    "xbrli": "http://www.xbrl.org/2003/instance#",
+    "xbrl": "http://www.xbrl.org/2003/linkbase#",
+    "xbrldt": "http://xbrl.org/2005/xbrldt#",
+    "sfac6": "http://xbrlsite.com/seattlemethod/sfac6#",
+    "fac": "http://www.xbrlsite.com/fac#",
+    "fac-luca": "http://luca.auditchain.finance/fac#",
+    "fac-seattlemethod": "http://xbrlsite.azurewebsites.net/seattlemethod/fac#",
+    "us-gaap-2017": "http://fasb.org/us-gaap/2017-01-31#",
+    "us-gaap-2020": "http://fasb.org/us-gaap/2020-01-31#",
+    "us-gaap-2022": "http://fasb.org/us-gaap/2022-01-31#",
+    "us-gaap-2024": "http://fasb.org/us-gaap/2024-01-31#",
+    "us-gaap": "http://fasb.org/us-gaap/",
+    "rs-gaap": "https://robosystems.ai/taxonomy/rs-gaap/v1/",
+    "ifrs": "http://xbrl.ifrs.org/taxonomy/",
+    "dei": "http://xbrl.sec.gov/dei/",
+    "cm-roles": "http://www.xbrlsite.com/seattlemethod/conceptual-model/cm-roles/roles/",
+    "rs": "https://robosystems.ai/vocab/",
+    "classification": {
+      "@id": "https://robosystems.ai/vocab/classification"
+    },
+    "balance": {
+      "@id": "https://robosystems.ai/vocab/balance"
+    },
+    "periodType": {
+      "@id": "https://robosystems.ai/vocab/periodType"
+    },
+    "abstract": {
+      "@id": "https://robosystems.ai/vocab/abstract",
+      "@type": "xsd:boolean"
+    },
+    "monetary": {
+      "@id": "https://robosystems.ai/vocab/monetary",
+      "@type": "xsd:boolean"
+    },
+    "elementType": {
+      "@id": "https://robosystems.ai/vocab/elementType"
+    },
+    "substitutionGroup": {
+      "@id": "https://robosystems.ai/vocab/substitutionGroup",
+      "@type": "@id"
+    },
+    "source": {
+      "@id": "https://robosystems.ai/vocab/source"
+    },
+    "parent": {
+      "@id": "https://robosystems.ai/vocab/parent",
+      "@type": "@id"
+    },
+    "equivalent": {
+      "@id": "owl:equivalentClass",
+      "@type": "@id"
+    },
+    "generalOf": {
+      "@id": "https://robosystems.ai/vocab/generalOf",
+      "@type": "@id"
+    },
+    "summationOf": {
+      "@id": "https://robosystems.ai/vocab/summationOf",
+      "@type": "@id"
+    },
+    "dimensionOf": {
+      "@id": "https://robosystems.ai/vocab/dimensionOf",
+      "@type": "@id"
+    },
+    "hypercubeOf": {
+      "@id": "https://robosystems.ai/vocab/hypercubeOf",
+      "@type": "@id"
+    },
+    "arcrole": {
+      "@id": "https://robosystems.ai/vocab/arcrole"
+    },
+    "role": {
+      "@id": "https://robosystems.ai/vocab/role"
+    },
+    "order": {
+      "@id": "https://robosystems.ai/vocab/order",
+      "@type": "xsd:decimal"
+    },
+    "weight": {
+      "@id": "https://robosystems.ai/vocab/weight",
+      "@type": "xsd:decimal"
+    },
+    "label": "rdfs:label",
+    "altLabel": "skos:altLabel",
+    "prefLabel": "skos:prefLabel",
+    "documentation": "rdfs:comment",
+    "labelRole": {
+      "@id": "https://robosystems.ai/vocab/labelRole"
+    },
+    "labelLanguage": {
+      "@id": "https://robosystems.ai/vocab/labelLanguage"
+    },
+    "references": {
+      "@id": "dcterms:references"
+    },
+    "refType": {
+      "@id": "https://robosystems.ai/vocab/refType"
+    },
+    "citation": {
+      "@id": "https://robosystems.ai/vocab/citation"
+    },
+    "structureName": {
+      "@id": "https://robosystems.ai/vocab/structureName"
+    },
+    "structureType": {
+      "@id": "https://robosystems.ai/vocab/structureType"
+    },
+    "roleUri": {
+      "@id": "https://robosystems.ai/vocab/roleUri"
+    }
+  },
+  "standard": "fac-to-rs-gaap",
+  "version": "v1",
+  "taxonomy_type": "mapping",
+  "namespace_uri": "https://robosystems.ai/taxonomy/fac-to-rs-gaap/v1/",
+  "origin": "native",
+  "created_at": "2026-04-19",
+  "description": "RoboSystems-authored equivalence arcs between FAC primitives and rs-gaap concepts (~221 class-equivalentClass arcs). Collapses the us-gaap combinatorial explosion into the compact FAC canonical layer. Curated from Charlie Hoffman's FAC ConceptMap; arcs are maintained here, not tracked upstream.",
+  "@graph": [
+    {
+      "@id": "fac:Assets",
+      "http://www.w3.org/2002/07/owl#equivalentClass": [
+        {
+          "@id": "rs-gaap:Assets"
+        },
+        {
+          "@id": "rs-gaap:AssetsCurrent"
+        }
+      ]
+    },
+    {
+      "@id": "fac:BenefitsCostsExpenses",
+      "http://www.w3.org/2002/07/owl#equivalentClass": [
+        {
+          "@id": "rs-gaap:BenefitsLossesAndExpenses"
+        }
+      ]
+    },
+    {
+      "@id": "fac:CommitmentsAndContingencies",
+      "http://www.w3.org/2002/07/owl#equivalentClass": [
+        {
+          "@id": "rs-gaap:CommitmentsAndContingencies"
+        }
+      ]
+    },
+    {
+      "@id": "fac:ComprehensiveIncomeLoss",
+      "http://www.w3.org/2002/07/owl#equivalentClass": [
+        {
+          "@id": "rs-gaap:ComprehensiveIncomeNetOfTaxIncludingPortionAttributableToNoncontrollingInterest"
+        }
+      ]
+    },
+    {
+      "@id": "fac:ComprehensiveIncomeLossAttributableToNoncontrollingInterest",
+      "http://www.w3.org/2002/07/owl#equivalentClass": [
+        {
+          "@id": "rs-gaap:ComprehensiveIncomeNetOfTaxAttributableToNoncontrollingInterest"
+        }
+      ]
+    },
+    {
+      "@id": "fac:ComprehensiveIncomeLossAttributableToParent",
+      "http://www.w3.org/2002/07/owl#equivalentClass": [
+        {
+          "@id": "rs-gaap:ComprehensiveIncomeNetOfTax"
+        }
+      ]
+    },
+    {
+      "@id": "fac:CostOfRevenue",
+      "http://www.w3.org/2002/07/owl#equivalentClass": [
+        {
+          "@id": "rs-gaap:ContractRevenueCost"
+        },
+        {
+          "@id": "rs-gaap:CostOfGoldProductsAndServices"
+        },
+        {
+          "@id": "rs-gaap:CostOfGoodsAndServicesSold"
+        },
+        {
+          "@id": "rs-gaap:CostOfGoodsSold"
+        },
+        {
+          "@id": "rs-gaap:CostOfGoodsSoldDirectMaterials"
+        },
+        {
+          "@id": "rs-gaap:CostOfGoodsSoldElectric"
+        },
+        {
+          "@id": "rs-gaap:CostOfGoodsSoldExcludingDepreciationDepletionAndAmortization"
+        },
+        {
+          "@id": "rs-gaap:CostOfGoodsSoldOilAndGas"
+        },
+        {
+          "@id": "rs-gaap:CostOfMerchandiseSalesBuyingAndOccupancyCosts"
+        },
+        {
+          "@id": "rs-gaap:CostOfNaturalGasPurchases"
+        },
+        {
+          "@id": "rs-gaap:CostOfRealEstateRevenue"
+        },
+        {
+          "@id": "rs-gaap:CostOfRealEstateSales"
+        },
+        {
+          "@id": "rs-gaap:CostOfRevenue"
+        },
+        {
+          "@id": "rs-gaap:CostOfServices"
+        },
+        {
+          "@id": "rs-gaap:CostOfServicesExcludingDepreciationDepletionAndAmortization"
+        },
+        {
+          "@id": "rs-gaap:CostOfServicesOilAndGas"
+        },
+        {
+          "@id": "rs-gaap:DirectCostsOfHotels"
+        },
+        {
+          "@id": "rs-gaap:DirectOperatingCosts"
+        },
+        {
+          "@id": "rs-gaap:ExplorationExpenseMining"
+        },
+        {
+          "@id": "rs-gaap:FinancialServicesCosts"
+        },
+        {
+          "@id": "rs-gaap:RefiningAndMarketingCosts"
+        },
+        {
+          "@id": "rs-gaap:TechnologyServicesCosts"
+        }
+      ]
+    },
+    {
+      "@id": "fac:CostOfRevenueGoods",
+      "http://www.w3.org/2002/07/owl#equivalentClass": [
+        {
+          "@id": "rs-gaap:CostOfGoodsSold"
+        }
+      ]
+    },
+    {
+      "@id": "fac:CostOfRevenueServices",
+      "http://www.w3.org/2002/07/owl#equivalentClass": [
+        {
+          "@id": "rs-gaap:CostOfServices"
+        }
+      ]
+    },
+    {
+      "@id": "fac:CostsAndExpenses",
+      "http://www.w3.org/2002/07/owl#equivalentClass": [
+        {
+          "@id": "rs-gaap:BenefitsLossesAndExpenses"
+        },
+        {
+          "@id": "rs-gaap:CostsAndExpenses"
+        }
+      ]
+    },
+    {
+      "@id": "fac:CurrentAssets",
+      "http://www.w3.org/2002/07/owl#equivalentClass": [
+        {
+          "@id": "rs-gaap:AssetsCurrent"
+        }
+      ]
+    },
+    {
+      "@id": "fac:CurrentLiabilities",
+      "http://www.w3.org/2002/07/owl#equivalentClass": [
+        {
+          "@id": "rs-gaap:LiabilitiesCurrent"
+        }
+      ]
+    },
+    {
+      "@id": "fac:Equity",
+      "http://www.w3.org/2002/07/owl#equivalentClass": [
+        {
+          "@id": "rs-gaap:LimitedLiabilityCompanyLlcMembersEquityIncludingPortionAttributableToNoncontrollingInterest"
+        },
+        {
+          "@id": "rs-gaap:PartnersCapitalIncludingPortionAttributableToNoncontrollingInterest"
+        },
+        {
+          "@id": "rs-gaap:StockholdersEquityIncludingPortionAttributableToNoncontrollingInterest"
+        }
+      ]
+    },
+    {
+      "@id": "fac:EquityAttributableToNoncontrollingInterest",
+      "http://www.w3.org/2002/07/owl#equivalentClass": [
+        {
+          "@id": "rs-gaap:MembersEquityAttributableToNoncontrollingInterest"
+        },
+        {
+          "@id": "rs-gaap:MinorityInterest"
+        },
+        {
+          "@id": "rs-gaap:PartnersCapitalAttributableToNoncontrollingInterest"
+        }
+      ]
+    },
+    {
+      "@id": "fac:EquityAttributableToParent",
+      "http://www.w3.org/2002/07/owl#equivalentClass": [
+        {
+          "@id": "rs-gaap:MembersEquity"
+        },
+        {
+          "@id": "rs-gaap:PartnersCapital"
+        },
+        {
+          "@id": "rs-gaap:StockholdersEquity"
+        }
+      ]
+    },
+    {
+      "@id": "fac:ExchangeGainsLosses",
+      "http://www.w3.org/2002/07/owl#equivalentClass": [
+        {
+          "@id": "rs-gaap:EffectOfExchangeRateOnCash"
+        },
+        {
+          "@id": "rs-gaap:EffectOfExchangeRateOnCashAndCashEquivalents"
+        },
+        {
+          "@id": "rs-gaap:EffectOfExchangeRateOnCashAndCashEquivalentsContinuingOperations"
+        },
+        {
+          "@id": "rs-gaap:EffectOfExchangeRateOnCashAndCashEquivalentsDiscontinuedOperations"
+        },
+        {
+          "@id": "rs-gaap:EffectOfExchangeRateOnCashContinuingOperations"
+        }
+      ]
+    },
+    {
+      "@id": "fac:ExciseAndSalesTaxes",
+      "http://www.w3.org/2002/07/owl#equivalentClass": [
+        {
+          "@id": "rs-gaap:ExciseAndSalesTaxes"
+        }
+      ]
+    },
+    {
+      "@id": "fac:FixedAssets",
+      "http://www.w3.org/2002/07/owl#equivalentClass": [
+        {
+          "@id": "rs-gaap:PropertyPlantAndEquipmentNet"
+        },
+        {
+          "@id": "rs-gaap:PublicUtilitiesPropertyPlantAndEquipmentNet"
+        }
+      ]
+    },
+    {
+      "@id": "fac:GainLossOnSalePropertiesNetTax",
+      "http://www.w3.org/2002/07/owl#equivalentClass": [
+        {
+          "@id": "rs-gaap:GainLossOnSaleOfPropertiesNetOfApplicableIncomeTaxes"
+        }
+      ]
+    },
+    {
+      "@id": "fac:GrossProfit",
+      "http://www.w3.org/2002/07/owl#equivalentClass": [
+        {
+          "@id": "rs-gaap:GrossProfit"
+        }
+      ]
+    },
+    {
+      "@id": "fac:IncomeLossBeforeEquityMethodInvestments",
+      "http://www.w3.org/2002/07/owl#equivalentClass": [
+        {
+          "@id": "rs-gaap:IncomeLossFromContinuingOperationsBeforeIncomeTaxesMinorityInterestAndIncomeLossFromEquityMethodInvestments"
+        }
+      ]
+    },
+    {
+      "@id": "fac:IncomeLossFromContinuingOperationsAfterTax",
+      "http://www.w3.org/2002/07/owl#equivalentClass": [
+        {
+          "@id": "rs-gaap:IncomeLossBeforeExtraordinaryItemsAndCumulativeEffectOfChangeInAccountingPrinciple"
+        },
+        {
+          "@id": "rs-gaap:IncomeLossFromContinuingOperations"
+        },
+        {
+          "@id": "rs-gaap:IncomeLossFromContinuingOperationsIncludingPortionAttributableToNoncontrollingInterest"
+        }
+      ]
+    },
+    {
+      "@id": "fac:IncomeLossFromContinuingOperationsBeforeTax",
+      "http://www.w3.org/2002/07/owl#equivalentClass": [
+        {
+          "@id": "rs-gaap:IncomeLossFromContinuingOperationsBeforeIncomeTaxesExtraordinaryItemsNoncontrollingInterest"
+        },
+        {
+          "@id": "rs-gaap:IncomeLossFromContinuingOperationsBeforeIncomeTaxesMinorityInterestAndIncomeLossFromEquityMethodInvestments"
+        }
+      ]
+    },
+    {
+      "@id": "fac:IncomeLossFromDiscontinuedOperationsNetOfTax",
+      "http://www.w3.org/2002/07/owl#equivalentClass": [
+        {
+          "@id": "rs-gaap:IncomeLossFromDiscontinuedOperationsNetOfTax"
+        },
+        {
+          "@id": "rs-gaap:IncomeLossFromDiscontinuedOperationsNetOfTaxAttributableToReportingEntity"
+        }
+      ]
+    },
+    {
+      "@id": "fac:IncomeLossFromDiscontinuedOperationsNetOfTaxAdjustmentToPriorYearGainLossOnDisposal",
+      "http://www.w3.org/2002/07/owl#equivalentClass": [
+        {
+          "@id": "rs-gaap:DiscontinuedOperationAmountOfAdjustmentToPriorPeriodGainLossOnDisposalNetOfTax"
+        }
+      ]
+    },
+    {
+      "@id": "fac:IncomeLossFromDiscontinuedOperationsNetOfTaxDuringPhaseOut",
+      "http://www.w3.org/2002/07/owl#equivalentClass": [
+        {
+          "@id": "rs-gaap:DiscontinuedOperationIncomeLossFromDiscontinuedOperationDuringPhaseOutPeriodNetOfTax"
+        }
+      ]
+    },
+    {
+      "@id": "fac:IncomeLossFromDiscontinuedOperationsNetOfTaxGainLossOnDisposal",
+      "http://www.w3.org/2002/07/owl#equivalentClass": [
+        {
+          "@id": "rs-gaap:DiscontinuedOperationGainLossOnDisposalOfDiscontinuedOperationNetOfTax"
+        }
+      ]
+    },
+    {
+      "@id": "fac:IncomeLossFromDiscontinuedOperationsNetOfTaxProvisionForGainLossOnDisposal",
+      "http://www.w3.org/2002/07/owl#equivalentClass": [
+        {
+          "@id": "rs-gaap:DiscontinuedOperationProvisionForLossGainOnDisposalNetOfTax"
+        }
+      ]
+    },
+    {
+      "@id": "fac:IncomeLossFromEquityMethodInvestments",
+      "http://www.w3.org/2002/07/owl#equivalentClass": [
+        {
+          "@id": "rs-gaap:EquityMethodInvestmentSummarizedFinancialInformationNetIncomeLoss"
+        },
+        {
+          "@id": "rs-gaap:IncomeLossFromEquityMethodInvestments"
+        },
+        {
+          "@id": "rs-gaap:IncomeLossFromEquityMethodInvestmentsNetOfDividendsOrDistributions"
+        }
+      ]
+    },
+    {
+      "@id": "fac:IncomeTaxExpenseBenefit",
+      "http://www.w3.org/2002/07/owl#equivalentClass": [
+        {
+          "@id": "rs-gaap:FederalHomeLoanBankAssessments"
+        },
+        {
+          "@id": "rs-gaap:FederalIncomeTaxExpenseBenefitContinuingOperations"
+        },
+        {
+          "@id": "rs-gaap:IncomeTaxExpenseBenefit"
+        },
+        {
+          "@id": "rs-gaap:StateAndLocalIncomeTaxExpenseBenefitContinuingOperations"
+        }
+      ]
+    },
+    {
+      "@id": "fac:IncomeTaxExpenseBenefitCurrent",
+      "http://www.w3.org/2002/07/owl#equivalentClass": [
+        {
+          "@id": "rs-gaap:CurrentIncomeTaxExpenseBenefit"
+        }
+      ]
+    },
+    {
+      "@id": "fac:IncomeTaxExpenseBenefitDeferred",
+      "http://www.w3.org/2002/07/owl#equivalentClass": [
+        {
+          "@id": "rs-gaap:DeferredIncomeTaxExpenseBenefit"
+        }
+      ]
+    },
+    {
+      "@id": "fac:InterestAndDebtExpense",
+      "http://www.w3.org/2002/07/owl#equivalentClass": [
+        {
+          "@id": "rs-gaap:InterestAndDebtExpense"
+        }
+      ]
+    },
+    {
+      "@id": "fac:InterestAndDividendIncomeOperating",
+      "http://www.w3.org/2002/07/owl#equivalentClass": [
+        {
+          "@id": "rs-gaap:InterestAndDividendIncomeOperating"
+        }
+      ]
+    },
+    {
+      "@id": "fac:InterestExpenseOperating",
+      "http://www.w3.org/2002/07/owl#equivalentClass": [
+        {
+          "@id": "rs-gaap:InterestExpense"
+        },
+        {
+          "@id": "rs-gaap:InterestExpenseBorrowings"
+        }
+      ]
+    },
+    {
+      "@id": "fac:InterestIncomeExpenseAfterProvisionForLosses",
+      "http://www.w3.org/2002/07/owl#equivalentClass": [
+        {
+          "@id": "rs-gaap:InterestIncomeExpenseAfterProvisionForLoanLoss"
+        }
+      ]
+    },
+    {
+      "@id": "fac:InterestIncomeExpenseOperatingNet",
+      "http://www.w3.org/2002/07/owl#equivalentClass": [
+        {
+          "@id": "rs-gaap:InterestIncomeExpenseNet"
+        }
+      ]
+    },
+    {
+      "@id": "fac:Liabilities",
+      "http://www.w3.org/2002/07/owl#equivalentClass": [
+        {
+          "@id": "rs-gaap:Liabilities"
+        }
+      ]
+    },
+    {
+      "@id": "fac:LiabilitiesAndEquity",
+      "http://www.w3.org/2002/07/owl#equivalentClass": [
+        {
+          "@id": "rs-gaap:LiabilitiesAndStockholdersEquity"
+        }
+      ]
+    },
+    {
+      "@id": "fac:NetCashFlow",
+      "http://www.w3.org/2002/07/owl#equivalentClass": [
+        {
+          "@id": "rs-gaap:CashAndCashEquivalentsPeriodIncreaseDecrease"
+        },
+        {
+          "@id": "rs-gaap:CashAndCashEquivalentsPeriodIncreaseDecreaseExcludingExchangeRateEffect"
+        },
+        {
+          "@id": "rs-gaap:CashPeriodIncreaseDecrease"
+        }
+      ]
+    },
+    {
+      "@id": "fac:NetCashFlowContinuing",
+      "http://www.w3.org/2002/07/owl#equivalentClass": [
+        {
+          "@id": "rs-gaap:NetCashProvidedByUsedInContinuingOperations"
+        }
+      ]
+    },
+    {
+      "@id": "fac:NetCashFlowDiscontinued",
+      "http://www.w3.org/2002/07/owl#equivalentClass": [
+        {
+          "@id": "rs-gaap:NetCashProvidedByUsedInDiscontinuedOperations"
+        }
+      ]
+    },
+    {
+      "@id": "fac:NetCashFlowFromFinancingActivities",
+      "http://www.w3.org/2002/07/owl#equivalentClass": [
+        {
+          "@id": "rs-gaap:NetCashProvidedByUsedInFinancingActivities"
+        }
+      ]
+    },
+    {
+      "@id": "fac:NetCashFlowFromFinancingActivitiesContinuing",
+      "http://www.w3.org/2002/07/owl#equivalentClass": [
+        {
+          "@id": "rs-gaap:NetCashProvidedByUsedInFinancingActivitiesContinuingOperations"
+        }
+      ]
+    },
+    {
+      "@id": "fac:NetCashFlowFromFinancingActivitiesDiscontinued",
+      "http://www.w3.org/2002/07/owl#equivalentClass": [
+        {
+          "@id": "rs-gaap:CashProvidedByUsedInFinancingActivitiesDiscontinuedOperations"
+        }
+      ]
+    },
+    {
+      "@id": "fac:NetCashFlowFromInvestingActivities",
+      "http://www.w3.org/2002/07/owl#equivalentClass": [
+        {
+          "@id": "rs-gaap:NetCashProvidedByUsedInInvestingActivities"
+        }
+      ]
+    },
+    {
+      "@id": "fac:NetCashFlowFromInvestingActivitiesContinuing",
+      "http://www.w3.org/2002/07/owl#equivalentClass": [
+        {
+          "@id": "rs-gaap:NetCashProvidedByUsedInInvestingActivitiesContinuingOperations"
+        }
+      ]
+    },
+    {
+      "@id": "fac:NetCashFlowFromInvestingActivitiesDiscontinued",
+      "http://www.w3.org/2002/07/owl#equivalentClass": [
+        {
+          "@id": "rs-gaap:CashProvidedByUsedInInvestingActivitiesDiscontinuedOperations"
+        }
+      ]
+    },
+    {
+      "@id": "fac:NetCashFlowFromOperatingActivities",
+      "http://www.w3.org/2002/07/owl#equivalentClass": [
+        {
+          "@id": "rs-gaap:NetCashProvidedByUsedInOperatingActivities"
+        }
+      ]
+    },
+    {
+      "@id": "fac:NetCashFlowFromOperatingActivitiesContinuing",
+      "http://www.w3.org/2002/07/owl#equivalentClass": [
+        {
+          "@id": "rs-gaap:NetCashProvidedByUsedInOperatingActivitiesContinuingOperations"
+        }
+      ]
+    },
+    {
+      "@id": "fac:NetCashFlowFromOperatingActivitiesDiscontinued",
+      "http://www.w3.org/2002/07/owl#equivalentClass": [
+        {
+          "@id": "rs-gaap:CashProvidedByUsedInOperatingActivitiesDiscontinuedOperations"
+        }
+      ]
+    },
+    {
+      "@id": "fac:NetIncomeLoss",
+      "http://www.w3.org/2002/07/owl#equivalentClass": [
+        {
+          "@id": "rs-gaap:IncomeLossIncludingPortionAttributableToNoncontrollingInterest"
+        },
+        {
+          "@id": "rs-gaap:ProfitLoss"
+        }
+      ]
+    },
+    {
+      "@id": "fac:NetIncomeLossAttributableToNoncontrollingInterest",
+      "http://www.w3.org/2002/07/owl#equivalentClass": [
+        {
+          "@id": "rs-gaap:IncomeLossAttributableToNoncontrollingInterest"
+        },
+        {
+          "@id": "rs-gaap:IncomeLossFromContinuingOperationsAttributableToNoncontrollingEntity"
+        },
+        {
+          "@id": "rs-gaap:NetIncomeLossAttributableToNoncontrollingInterest"
+        }
+      ]
+    },
+    {
+      "@id": "fac:NetIncomeLossAttributableToNonredeemableNoncontrollingInterest",
+      "http://www.w3.org/2002/07/owl#equivalentClass": [
+        {
+          "@id": "rs-gaap:NetIncomeLossAttributableToNonredeemableNoncontrollingInterest"
+        },
+        {
+          "@id": "rs-gaap:NoncontrollingInterestInNetIncomeLossPreferredUnitHoldersNonredeemable"
+        }
+      ]
+    },
+    {
+      "@id": "fac:NetIncomeLossAttributableToParent",
+      "http://www.w3.org/2002/07/owl#equivalentClass": [
+        {
+          "@id": "rs-gaap:IncomeLossAttributableToParent"
+        },
+        {
+          "@id": "rs-gaap:NetIncomeLoss"
+        }
+      ]
+    },
+    {
+      "@id": "fac:NetIncomeLossAttributableToRedeemableNoncontrollingInterest",
+      "http://www.w3.org/2002/07/owl#equivalentClass": [
+        {
+          "@id": "rs-gaap:NetIncomeLossAttributableToRedeemableNoncontrollingInterest"
+        },
+        {
+          "@id": "rs-gaap:NoncontrollingInterestInNetIncomeLossOperatingPartnershipsRedeemable"
+        }
+      ]
+    },
+    {
+      "@id": "fac:NetIncomeLossAvailableToCommonStockholdersBasic",
+      "http://www.w3.org/2002/07/owl#equivalentClass": [
+        {
+          "@id": "rs-gaap:NetIncomeLossAvailableToCommonStockholdersBasic"
+        }
+      ]
+    },
+    {
+      "@id": "fac:NoncurrentAssets",
+      "http://www.w3.org/2002/07/owl#equivalentClass": [
+        {
+          "@id": "rs-gaap:AssetsNoncurrent"
+        }
+      ]
+    },
+    {
+      "@id": "fac:NoncurrentLiabilities",
+      "http://www.w3.org/2002/07/owl#equivalentClass": [
+        {
+          "@id": "rs-gaap:LiabilitiesNoncurrent"
+        }
+      ]
+    },
+    {
+      "@id": "fac:NoninterestExpense",
+      "http://www.w3.org/2002/07/owl#equivalentClass": [
+        {
+          "@id": "rs-gaap:NoninterestExpense"
+        }
+      ]
+    },
+    {
+      "@id": "fac:NoninterestIncome",
+      "http://www.w3.org/2002/07/owl#equivalentClass": [
+        {
+          "@id": "rs-gaap:NoninterestIncome"
+        }
+      ]
+    },
+    {
+      "@id": "fac:NonoperatingIncomeLoss",
+      "http://www.w3.org/2002/07/owl#equivalentClass": [
+        {
+          "@id": "rs-gaap:NonoperatingIncomeExpense"
+        }
+      ]
+    },
+    {
+      "@id": "fac:OperatingExpenses",
+      "http://www.w3.org/2002/07/owl#equivalentClass": [
+        {
+          "@id": "rs-gaap:OperatingExpenses"
+        },
+        {
+          "@id": "rs-gaap:UtilitiesOperatingExpense"
+        }
+      ]
+    },
+    {
+      "@id": "fac:OperatingIncomeLoss",
+      "http://www.w3.org/2002/07/owl#equivalentClass": [
+        {
+          "@id": "rs-gaap:IncomeLossFromContinuingOperationsBeforeInterestExpenseInterestIncomeIncomeTaxesExtraordinaryItemsNoncontrollingInterestsNet"
+        },
+        {
+          "@id": "rs-gaap:OperatingIncomeLoss"
+        }
+      ]
+    },
+    {
+      "@id": "fac:OtherComprehensiveIncomeLoss",
+      "http://www.w3.org/2002/07/owl#equivalentClass": [
+        {
+          "@id": "rs-gaap:OtherComprehensiveIncomeLossNetOfTax"
+        }
+      ]
+    },
+    {
+      "@id": "fac:OtherComprehensiveIncomeLossAttributableToNoncontrollingInterest",
+      "http://www.w3.org/2002/07/owl#equivalentClass": [
+        {
+          "@id": "rs-gaap:OtherComprehensiveIncomeLossNetOfTaxPortionAttributableToNoncontrollingInterest"
+        }
+      ]
+    },
+    {
+      "@id": "fac:OtherComprehensiveIncomeLossAttributableToParent",
+      "http://www.w3.org/2002/07/owl#equivalentClass": [
+        {
+          "@id": "rs-gaap:OtherComprehensiveIncomeLossNetOfTaxPortionAttributableToParent"
+        }
+      ]
+    },
+    {
+      "@id": "fac:OtherOperatingIncomeExpenses",
+      "http://www.w3.org/2002/07/owl#equivalentClass": [
+        {
+          "@id": "rs-gaap:OtherOperatingIncome"
+        }
+      ]
+    },
+    {
+      "@id": "fac:OtherThanFixedNoncurrentAssets",
+      "http://www.w3.org/2002/07/owl#equivalentClass": [
+        {
+          "@id": "rs-gaap:AssetsNoncurrent"
+        },
+        {
+          "@id": "rs-gaap:AssetsNoncurrentOtherThanNoncurrentInvestmentsAndPropertyPlantAndEquipment"
+        }
+      ]
+    },
+    {
+      "@id": "fac:ParticipatingSecuritiesDistributedAndUndistributedEarningsLossBasic",
+      "http://www.w3.org/2002/07/owl#equivalentClass": [
+        {
+          "@id": "rs-gaap:ParticipatingSecuritiesDistributedAndUndistributedEarningsLossBasic"
+        }
+      ]
+    },
+    {
+      "@id": "fac:PreferredStockDividendsAndOtherAdjustments",
+      "http://www.w3.org/2002/07/owl#equivalentClass": [
+        {
+          "@id": "rs-gaap:PreferredStockDividendsAndOtherAdjustments"
+        }
+      ]
+    },
+    {
+      "@id": "fac:ProvisionForLoanLeaseAndOtherLosses",
+      "http://www.w3.org/2002/07/owl#equivalentClass": [
+        {
+          "@id": "rs-gaap:ProvisionForLoanAndLeaseLosses"
+        },
+        {
+          "@id": "rs-gaap:ProvisionForLoanLeaseAndOtherLosses"
+        },
+        {
+          "@id": "rs-gaap:ProvisionForLoanLossesExpensed"
+        }
+      ]
+    },
+    {
+      "@id": "fac:RedeemableNoncontrollingInterest",
+      "http://www.w3.org/2002/07/owl#equivalentClass": [
+        {
+          "@id": "rs-gaap:RedeemableNoncontrollingInterestEquityCarryingAmount"
+        },
+        {
+          "@id": "rs-gaap:RedeemableNoncontrollingInterestEquityFairValue"
+        },
+        {
+          "@id": "rs-gaap:RedeemableNoncontrollingInterestEquityOtherFairValue"
+        }
+      ]
+    },
+    {
+      "@id": "fac:RedeemableNoncontrollingInterestCommon",
+      "http://www.w3.org/2002/07/owl#equivalentClass": [
+        {
+          "@id": "rs-gaap:RedeemableNoncontrollingInterestEquityCommonCarryingAmount"
+        }
+      ]
+    },
+    {
+      "@id": "fac:RedeemableNoncontrollingInterestOther",
+      "http://www.w3.org/2002/07/owl#equivalentClass": [
+        {
+          "@id": "rs-gaap:RedeemableNoncontrollingInterestEquityOtherCarryingAmount"
+        }
+      ]
+    },
+    {
+      "@id": "fac:RedeemableNoncontrollingInterestPreferred",
+      "http://www.w3.org/2002/07/owl#equivalentClass": [
+        {
+          "@id": "rs-gaap:RedeemableNoncontrollingInterestEquityPreferredCarryingAmount"
+        }
+      ]
+    },
+    {
+      "@id": "fac:Revenues",
+      "http://www.w3.org/2002/07/owl#equivalentClass": [
+        {
+          "@id": "rs-gaap:AdmissionsRevenue"
+        },
+        {
+          "@id": "rs-gaap:AdvertisingRevenue"
+        },
+        {
+          "@id": "rs-gaap:AssetManagementFees1"
+        },
+        {
+          "@id": "rs-gaap:CargoAndFreightRevenue"
+        },
+        {
+          "@id": "rs-gaap:ClearingFeesRevenue"
+        },
+        {
+          "@id": "rs-gaap:CoalProductsAndServicesRevenue"
+        },
+        {
+          "@id": "rs-gaap:ConstructionMaterialsRevenue"
+        },
+        {
+          "@id": "rs-gaap:ContractsRevenue"
+        },
+        {
+          "@id": "rs-gaap:ElectricDomesticRegulatedRevenue"
+        },
+        {
+          "@id": "rs-gaap:ElectricUtilityRevenue"
+        },
+        {
+          "@id": "rs-gaap:ElectricalGenerationRevenue"
+        },
+        {
+          "@id": "rs-gaap:ElectricalTransmissionAndDistributionRevenue"
+        },
+        {
+          "@id": "rs-gaap:FeesAndCommissions"
+        },
+        {
+          "@id": "rs-gaap:FinancialServicesRevenue"
+        },
+        {
+          "@id": "rs-gaap:FoodAndBeverageRevenue"
+        },
+        {
+          "@id": "rs-gaap:FranchiseRevenue"
+        },
+        {
+          "@id": "rs-gaap:FranchisorRevenue"
+        },
+        {
+          "@id": "rs-gaap:GasDomesticRegulatedRevenue"
+        },
+        {
+          "@id": "rs-gaap:GasGatheringTransportationMarketingAndProcessingRevenue"
+        },
+        {
+          "@id": "rs-gaap:GoldProductsAndServicesRevenue"
+        },
+        {
+          "@id": "rs-gaap:HealthCareOrganizationPatientServiceRevenue"
+        },
+        {
+          "@id": "rs-gaap:HealthCareOrganizationPatientServiceRevenueLessProvisionForBadDebts"
+        },
+        {
+          "@id": "rs-gaap:HealthCareOrganizationRevenue"
+        },
+        {
+          "@id": "rs-gaap:HealthCareOrganizationRevenueNetOfPatientServiceRevenueProvisions"
+        },
+        {
+          "@id": "rs-gaap:HomeBuildingRevenue"
+        },
+        {
+          "@id": "rs-gaap:InterestAndDividendIncomeOperating"
+        },
+        {
+          "@id": "rs-gaap:InterestAndFeeIncomeLoansConsumerInstallmentAutomobilesMarineAndOtherVehicles"
+        },
+        {
+          "@id": "rs-gaap:InterestIncomeExpenseNet"
+        },
+        {
+          "@id": "rs-gaap:InvestmentAdvisoryManagementAndAdministrativeFees"
+        },
+        {
+          "@id": "rs-gaap:InvestmentBankingRevenue"
+        },
+        {
+          "@id": "rs-gaap:LandSales"
+        },
+        {
+          "@id": "rs-gaap:LicenseAndServicesRevenue"
+        },
+        {
+          "@id": "rs-gaap:LicensesRevenue"
+        },
+        {
+          "@id": "rs-gaap:MarketDataRevenue"
+        },
+        {
+          "@id": "rs-gaap:MembershipDuesRevenueOnGoing"
+        },
+        {
+          "@id": "rs-gaap:NaturalGasProductionRevenue"
+        },
+        {
+          "@id": "rs-gaap:NetInvestmentIncome"
+        },
+        {
+          "@id": "rs-gaap:OilAndGasRevenue"
+        },
+        {
+          "@id": "rs-gaap:OilAndGasSalesRevenue"
+        },
+        {
+          "@id": "rs-gaap:OperatingLeasesIncomeStatementLeaseRevenue"
+        },
+        {
+          "@id": "rs-gaap:OtherSalesRevenueNet"
+        },
+        {
+          "@id": "rs-gaap:PassengerRevenue"
+        },
+        {
+          "@id": "rs-gaap:PhaseInPlanAmountOfCapitalizedCostsRecovered"
+        },
+        {
+          "@id": "rs-gaap:RealEstateRevenueNet"
+        },
+        {
+          "@id": "rs-gaap:RecyclingRevenue"
+        },
+        {
+          "@id": "rs-gaap:RefiningAndMarketingRevenue"
+        },
+        {
+          "@id": "rs-gaap:RegulatedAndUnregulatedOperatingRevenue"
+        },
+        {
+          "@id": "rs-gaap:ReimbursementRevenue"
+        },
+        {
+          "@id": "rs-gaap:RetailRevenue"
+        },
+        {
+          "@id": "rs-gaap:RevenueFromEnrollmentAndRegistrationFeesExcludingHospitalityEnterprises"
+        },
+        {
+          "@id": "rs-gaap:RevenueFromGrants"
+        },
+        {
+          "@id": "rs-gaap:RevenueFromLeasedAndOwnedHotels"
+        },
+        {
+          "@id": "rs-gaap:RevenueFromPurchasedOilAndGas"
+        },
+        {
+          "@id": "rs-gaap:RevenueFromRelatedParties"
+        },
+        {
+          "@id": "rs-gaap:RevenueMineralSales"
+        },
+        {
+          "@id": "rs-gaap:RevenueOilAndGasServices"
+        },
+        {
+          "@id": "rs-gaap:RevenueOtherManufacturedProducts"
+        },
+        {
+          "@id": "rs-gaap:RevenueSteamProductsAndServices"
+        },
+        {
+          "@id": "rs-gaap:Revenues"
+        },
+        {
+          "@id": "rs-gaap:RevenuesExcludingInterestAndDividends"
+        },
+        {
+          "@id": "rs-gaap:RevenuesNetOfInterestExpense"
+        },
+        {
+          "@id": "rs-gaap:RoyaltyRevenue"
+        },
+        {
+          "@id": "rs-gaap:SaleOfTrustAssetsToPayExpenses"
+        },
+        {
+          "@id": "rs-gaap:SalesOfOilAndGasProspects"
+        },
+        {
+          "@id": "rs-gaap:SalesOfRealEstate"
+        },
+        {
+          "@id": "rs-gaap:SalesRevenueEnergyServices"
+        },
+        {
+          "@id": "rs-gaap:SalesRevenueFromEnergyCommoditiesAndServices"
+        },
+        {
+          "@id": "rs-gaap:SalesRevenueGoodsNet"
+        },
+        {
+          "@id": "rs-gaap:SalesRevenueNet"
+        },
+        {
+          "@id": "rs-gaap:SalesRevenueServicesNet"
+        },
+        {
+          "@id": "rs-gaap:SecondaryProcessingRevenue"
+        },
+        {
+          "@id": "rs-gaap:ShippingAndHandlingRevenue"
+        },
+        {
+          "@id": "rs-gaap:SubscriptionRevenue"
+        },
+        {
+          "@id": "rs-gaap:TechnologyServicesRevenue"
+        },
+        {
+          "@id": "rs-gaap:TimberRevenue"
+        },
+        {
+          "@id": "rs-gaap:UnderwritingIncomeLoss"
+        },
+        {
+          "@id": "rs-gaap:UtilityRevenue"
+        },
+        {
+          "@id": "rs-gaap:VehicleTollRevenue"
+        }
+      ]
+    },
+    {
+      "@id": "fac:RevenuesExcludingInterestDividends",
+      "http://www.w3.org/2002/07/owl#equivalentClass": [
+        {
+          "@id": "rs-gaap:BrokerageCommissionsRevenue"
+        },
+        {
+          "@id": "rs-gaap:InvestmentBankingRevenue"
+        },
+        {
+          "@id": "rs-gaap:RevenuesExcludingInterestAndDividends"
+        }
+      ]
+    },
+    {
+      "@id": "fac:RevenuesNetInterestExpense",
+      "http://www.w3.org/2002/07/owl#equivalentClass": [
+        {
+          "@id": "rs-gaap:RevenuesNetOfInterestExpense"
+        }
+      ]
+    },
+    {
+      "@id": "fac:TemporaryEquity",
+      "http://www.w3.org/2002/07/owl#equivalentClass": [
+        {
+          "@id": "rs-gaap:TemporaryEquityCarryingAmountIncludingPortionAttributableToNoncontrollingInterests"
+        },
+        {
+          "@id": "rs-gaap:TemporaryEquityValueExcludingAdditionalPaidInCapital"
+        }
+      ]
+    },
+    {
+      "@id": "fac:TemporaryEquityAttributableToParent",
+      "http://www.w3.org/2002/07/owl#equivalentClass": [
+        {
+          "@id": "rs-gaap:TemporaryEquityCarryingAmountAttributableToParent"
+        }
+      ]
+    },
+    {
+      "@id": "fac:UndistributedEarningsLossAllocatedToParticipatingSecuritiesBasic",
+      "http://www.w3.org/2002/07/owl#equivalentClass": [
+        {
+          "@id": "rs-gaap:UndistributedEarningsLossAllocatedToParticipatingSecuritiesBasic"
+        }
+      ]
+    },
+    {
+      "@id": "http://www.xbrlsite.com/fac/role/BalanceSheetCapitalization",
+      "https://robosystems.ai/vocab/roleUri": [
+        {
+          "@value": "http://www.xbrlsite.com/fac/role/BalanceSheetCapitalization"
+        }
+      ],
+      "https://robosystems.ai/vocab/structureName": [
+        {
+          "@value": "FAC - 105.0-BSR-Balance Sheet, Capitalization, Regulated Public Utility"
+        }
+      ]
+    },
+    {
+      "@id": "http://www.xbrlsite.com/fac/role/BalanceSheetClassified",
+      "https://robosystems.ai/vocab/roleUri": [
+        {
+          "@value": "http://www.xbrlsite.com/fac/role/BalanceSheetClassified"
+        }
+      ],
+      "https://robosystems.ai/vocab/structureName": [
+        {
+          "@value": "FAC - 101.0-BSC-Balance Sheet, Classified"
+        }
+      ]
+    },
+    {
+      "@id": "http://www.xbrlsite.com/fac/role/BalanceSheetClassified4",
+      "https://robosystems.ai/vocab/roleUri": [
+        {
+          "@value": "http://www.xbrlsite.com/fac/role/BalanceSheetClassified4"
+        }
+      ],
+      "https://robosystems.ai/vocab/structureName": [
+        {
+          "@value": "FAC - 104.0-BSN-Balance Sheet, Classified, Fixed and Other than Fixed Breakdown of Noncurrent Assets"
+        }
+      ]
+    },
+    {
+      "@id": "http://www.xbrlsite.com/fac/role/BalanceSheetUnclassified",
+      "https://robosystems.ai/vocab/roleUri": [
+        {
+          "@value": "http://www.xbrlsite.com/fac/role/BalanceSheetUnclassified"
+        }
+      ],
+      "https://robosystems.ai/vocab/structureName": [
+        {
+          "@value": "FAC - 102.0-BSU-Balance Sheet, Unclassified"
+        }
+      ]
+    },
+    {
+      "@id": "http://www.xbrlsite.com/fac/role/Basic",
+      "https://robosystems.ai/vocab/roleUri": [
+        {
+          "@value": "http://www.xbrlsite.com/fac/role/Basic"
+        }
+      ],
+      "https://robosystems.ai/vocab/structureName": [
+        {
+          "@value": "FAC - 106.1-BSX-Balance Sheet, Unrecognized (Basic)"
+        }
+      ]
+    },
+    {
+      "@id": "http://www.xbrlsite.com/fac/role/CashFlowStatement",
+      "https://robosystems.ai/vocab/roleUri": [
+        {
+          "@value": "http://www.xbrlsite.com/fac/role/CashFlowStatement"
+        }
+      ],
+      "https://robosystems.ai/vocab/structureName": [
+        {
+          "@value": "FAC - 401.0-CF1-Cash Flow Statement, Exchange Gains in Net Cash Flow"
+        }
+      ]
+    },
+    {
+      "@id": "http://www.xbrlsite.com/fac/role/CashFlowStatement2",
+      "https://robosystems.ai/vocab/roleUri": [
+        {
+          "@value": "http://www.xbrlsite.com/fac/role/CashFlowStatement2"
+        }
+      ],
+      "https://robosystems.ai/vocab/structureName": [
+        {
+          "@value": "FAC - 402.0-CF2-Cash Flow Statement, Exchange Gains in Roll Forward"
+        }
+      ]
+    },
+    {
+      "@id": "http://www.xbrlsite.com/fac/role/ComprehensiveIncomeBreakdown",
+      "https://robosystems.ai/vocab/roleUri": [
+        {
+          "@value": "http://www.xbrlsite.com/fac/role/ComprehensiveIncomeBreakdown"
+        }
+      ],
+      "https://robosystems.ai/vocab/structureName": [
+        {
+          "@value": "FAC - 311.0-SCIP-Comprehensive Income (Loss) Breakdown (SCI1 and SCI2 and SCI3)"
+        }
+      ]
+    },
+    {
+      "@id": "http://www.xbrlsite.com/fac/role/ContinuingDiscontuedBreakdown",
+      "https://robosystems.ai/vocab/roleUri": [
+        {
+          "@value": "http://www.xbrlsite.com/fac/role/ContinuingDiscontuedBreakdown"
+        }
+      ],
+      "https://robosystems.ai/vocab/structureName": [
+        {
+          "@value": "FAC - 420.1-CFX-Net Cash Flow Breakdown, Continuing and Discontinued (CF1 and CF2)"
+        }
+      ]
+    },
+    {
+      "@id": "http://www.xbrlsite.com/fac/role/GeneralInformation",
+      "https://robosystems.ai/vocab/roleUri": [
+        {
+          "@value": "http://www.xbrlsite.com/fac/role/GeneralInformation"
+        }
+      ],
+      "https://robosystems.ai/vocab/structureName": [
+        {
+          "@value": "FAC - 001.0-GEN-General Information"
+        }
+      ]
+    },
+    {
+      "@id": "http://www.xbrlsite.com/fac/role/IncomeStatement3Step",
+      "https://robosystems.ai/vocab/roleUri": [
+        {
+          "@value": "http://www.xbrlsite.com/fac/role/IncomeStatement3Step"
+        }
+      ],
+      "https://robosystems.ai/vocab/structureName": [
+        {
+          "@value": "FAC - 204.2-ISXX-Income Statement, Three Step (Revenues, Operating expenses, Nonoperating income/expenses)"
+        }
+      ]
+    },
+    {
+      "@id": "http://www.xbrlsite.com/fac/role/IncomeStatement3StepGP",
+      "https://robosystems.ai/vocab/roleUri": [
+        {
+          "@value": "http://www.xbrlsite.com/fac/role/IncomeStatement3StepGP"
+        }
+      ],
+      "https://robosystems.ai/vocab/structureName": [
+        {
+          "@value": "FAC - 203.1-IS78-Income Statement, Three Step (Gross Profit, Operating expenses, Nonoperating income/expenses)"
+        }
+      ]
+    },
+    {
+      "@id": "http://www.xbrlsite.com/fac/role/IncomeStatement3StepGP2",
+      "https://robosystems.ai/vocab/roleUri": [
+        {
+          "@value": "http://www.xbrlsite.com/fac/role/IncomeStatement3StepGP2"
+        }
+      ],
+      "https://robosystems.ai/vocab/structureName": [
+        {
+          "@value": "FAC - 203.2-IS75-Income Statement, Three Step (Gross Profit, Combined operating expenses and nonoperating income/expenses)"
+        }
+      ]
+    },
+    {
+      "@id": "http://www.xbrlsite.com/fac/role/IncomeStatement3Step_CostsAndExpenses",
+      "https://robosystems.ai/vocab/roleUri": [
+        {
+          "@value": "http://www.xbrlsite.com/fac/role/IncomeStatement3Step_CostsAndExpenses"
+        }
+      ],
+      "https://robosystems.ai/vocab/structureName": [
+        {
+          "@value": "FAC - 204.4-ISXX-Income Statement, Three Step (Revenues, Costs and expenses, Nonoperating income/expenses)"
+        }
+      ]
+    },
+    {
+      "@id": "http://www.xbrlsite.com/fac/role/IncomeStatement3Step_IEMI_Taxes",
+      "https://robosystems.ai/vocab/roleUri": [
+        {
+          "@value": "http://www.xbrlsite.com/fac/role/IncomeStatement3Step_IEMI_Taxes"
+        }
+      ],
+      "https://robosystems.ai/vocab/structureName": [
+        {
+          "@value": "FAC - 204.3-ISXX-Income Statement, Three Step (Revenues, Operating expenses, Nonoperating income/expenses), Income from equity method investments in taxes"
+        }
+      ]
+    },
+    {
+      "@id": "http://www.xbrlsite.com/fac/role/IncomeStatementInsuranceBasedRevenues",
+      "https://robosystems.ai/vocab/roleUri": [
+        {
+          "@value": "http://www.xbrlsite.com/fac/role/IncomeStatementInsuranceBasedRevenues"
+        }
+      ],
+      "https://robosystems.ai/vocab/structureName": [
+        {
+          "@value": "FAC - 205.2-IS61-Income Statement, Insurance Based Revenues"
+        }
+      ]
+    },
+    {
+      "@id": "http://www.xbrlsite.com/fac/role/IncomeStatementInsuranceBasedRevenues_IEMI_Taxes",
+      "https://robosystems.ai/vocab/roleUri": [
+        {
+          "@value": "http://www.xbrlsite.com/fac/role/IncomeStatementInsuranceBasedRevenues_IEMI_Taxes"
+        }
+      ],
+      "https://robosystems.ai/vocab/structureName": [
+        {
+          "@value": "FAC - 205.3-IS63-Income Statement, Insurance Based Revenues, equity income in taxes"
+        }
+      ]
+    },
+    {
+      "@id": "http://www.xbrlsite.com/fac/role/IncomeStatementInterestBasedRevenues",
+      "https://robosystems.ai/vocab/roleUri": [
+        {
+          "@value": "http://www.xbrlsite.com/fac/role/IncomeStatementInterestBasedRevenues"
+        }
+      ],
+      "https://robosystems.ai/vocab/structureName": [
+        {
+          "@value": "FAC - 205.1-IS51-Income Statement, Interest Based Revenues"
+        }
+      ]
+    },
+    {
+      "@id": "http://www.xbrlsite.com/fac/role/IncomeStatementMultiStep",
+      "https://robosystems.ai/vocab/roleUri": [
+        {
+          "@value": "http://www.xbrlsite.com/fac/role/IncomeStatementMultiStep"
+        }
+      ],
+      "https://robosystems.ai/vocab/structureName": [
+        {
+          "@value": "FAC - 204.0-ISXX-Income Statement, Multi Step (Report Operating Income)"
+        }
+      ]
+    },
+    {
+      "@id": "http://www.xbrlsite.com/fac/role/IncomeStatementMultiStepWithoutOperatingIncome",
+      "https://robosystems.ai/vocab/roleUri": [
+        {
+          "@value": "http://www.xbrlsite.com/fac/role/IncomeStatementMultiStepWithoutOperatingIncome"
+        }
+      ],
+      "https://robosystems.ai/vocab/structureName": [
+        {
+          "@value": "FAC - 208.1-ISXX-Income Statement, Multi Step (Gross Profit Reported, No Operating Income Reported)"
+        }
+      ]
+    },
+    {
+      "@id": "http://www.xbrlsite.com/fac/role/IncomeStatementMultiStep_IEMI_Taxes",
+      "https://robosystems.ai/vocab/roleUri": [
+        {
+          "@value": "http://www.xbrlsite.com/fac/role/IncomeStatementMultiStep_IEMI_Taxes"
+        }
+      ],
+      "https://robosystems.ai/vocab/structureName": [
+        {
+          "@value": "FAC - 204.1-ISXX-Income Statement, Multi Step, IEMI Taxes (Report Operating Income)"
+        }
+      ]
+    },
+    {
+      "@id": "http://www.xbrlsite.com/fac/role/IncomeStatementREITSingleStep",
+      "https://robosystems.ai/vocab/roleUri": [
+        {
+          "@value": "http://www.xbrlsite.com/fac/role/IncomeStatementREITSingleStep"
+        }
+      ],
+      "https://robosystems.ai/vocab/structureName": [
+        {
+          "@value": "FAC - 206.1-ISR1-Income Statement, Real Estate Investment Trust (REIT), Single Step"
+        }
+      ]
+    },
+    {
+      "@id": "http://www.xbrlsite.com/fac/role/IncomeStatementREITSingleStep_IEMI_Taxes",
+      "https://robosystems.ai/vocab/roleUri": [
+        {
+          "@value": "http://www.xbrlsite.com/fac/role/IncomeStatementREITSingleStep_IEMI_Taxes"
+        }
+      ],
+      "https://robosystems.ai/vocab/structureName": [
+        {
+          "@value": "FAC - 206.2-ISR2-Income Statement, Real Estate Investment Trust (REIT), Single Step, Equity income in taxes"
+        }
+      ]
+    },
+    {
+      "@id": "http://www.xbrlsite.com/fac/role/IncomeStatementSecuritiesBasedIncome3_CITI",
+      "https://robosystems.ai/vocab/roleUri": [
+        {
+          "@value": "http://www.xbrlsite.com/fac/role/IncomeStatementSecuritiesBasedIncome3_CITI"
+        }
+      ],
+      "https://robosystems.ai/vocab/structureName": [
+        {
+          "@value": "FAC - 205.4-IS91-Income Statement, Securities Based Income, CITI Group Specific"
+        }
+      ]
+    },
+    {
+      "@id": "http://www.xbrlsite.com/fac/role/IncomeStatementSingleStep",
+      "https://robosystems.ai/vocab/roleUri": [
+        {
+          "@value": "http://www.xbrlsite.com/fac/role/IncomeStatementSingleStep"
+        }
+      ],
+      "https://robosystems.ai/vocab/structureName": [
+        {
+          "@value": "FAC - 201.0-ISXX-Income Statement, Single Step, Reports Operating Income"
+        }
+      ]
+    },
+    {
+      "@id": "http://www.xbrlsite.com/fac/role/IncomeStatementSingleStepWithoutOperatingIncome",
+      "https://robosystems.ai/vocab/roleUri": [
+        {
+          "@value": "http://www.xbrlsite.com/fac/role/IncomeStatementSingleStepWithoutOperatingIncome"
+        }
+      ],
+      "https://robosystems.ai/vocab/structureName": [
+        {
+          "@value": "FAC - 208.0-ISXX-Income Statement, Single Step (No Gross Profit Reported, No Operating Income Reported)"
+        }
+      ]
+    },
+    {
+      "@id": "http://www.xbrlsite.com/fac/role/IncomeStatementSingleStepWithoutOperatingIncome_IEMI_Taxes",
+      "https://robosystems.ai/vocab/roleUri": [
+        {
+          "@value": "http://www.xbrlsite.com/fac/role/IncomeStatementSingleStepWithoutOperatingIncome_IEMI_Taxes"
+        }
+      ],
+      "https://robosystems.ai/vocab/structureName": [
+        {
+          "@value": "FAC - 208.3-ISXX-Income Statement, Single Step, IEMI Taxes (No Gross Profit Reported, No Operating Income Reported)"
+        }
+      ]
+    },
+    {
+      "@id": "http://www.xbrlsite.com/fac/role/IncomeStatementSingleStepWithoutOperatingIncome_NoExpenseTotal",
+      "https://robosystems.ai/vocab/roleUri": [
+        {
+          "@value": "http://www.xbrlsite.com/fac/role/IncomeStatementSingleStepWithoutOperatingIncome_NoExpenseTotal"
+        }
+      ],
+      "https://robosystems.ai/vocab/structureName": [
+        {
+          "@value": "FAC - 208.6-IS61-Income Statement, Single Step (No Gross Profit, No Operating Income Reported), No Expense Total"
+        }
+      ]
+    },
+    {
+      "@id": "http://www.xbrlsite.com/fac/role/IncomeStatementSingleStep_Special1",
+      "https://robosystems.ai/vocab/roleUri": [
+        {
+          "@value": "http://www.xbrlsite.com/fac/role/IncomeStatementSingleStep_Special1"
+        }
+      ],
+      "https://robosystems.ai/vocab/structureName": [
+        {
+          "@value": "FAC - 201.4-IS21-Income Statement, Single Step, With Operating Income, Special 1 (Operating Expense)"
+        }
+      ]
+    },
+    {
+      "@id": "http://www.xbrlsite.com/fac/role/IncomeStatementSingleStep_Special1A",
+      "https://robosystems.ai/vocab/roleUri": [
+        {
+          "@value": "http://www.xbrlsite.com/fac/role/IncomeStatementSingleStep_Special1A"
+        }
+      ],
+      "https://robosystems.ai/vocab/structureName": [
+        {
+          "@value": "FAC - 201.5-IS22-Income Statement, Single Step, With Operating Income, Special 1A (Operating Expense, with Other Operating Income (Loss))"
+        }
+      ]
+    },
+    {
+      "@id": "http://www.xbrlsite.com/fac/role/IncomeStatementSingleStep_Special1_IEMI_Taxes",
+      "https://robosystems.ai/vocab/roleUri": [
+        {
+          "@value": "http://www.xbrlsite.com/fac/role/IncomeStatementSingleStep_Special1_IEMI_Taxes"
+        }
+      ],
+      "https://robosystems.ai/vocab/structureName": [
+        {
+          "@value": "FAC - 202.4-IS23-Income Statement, Single Step, With Operating Income, Special 1 (Operating Expenses), Equity method income in tax"
+        }
+      ]
+    },
+    {
+      "@id": "http://www.xbrlsite.com/fac/role/IncomeStatementSingleStep_Special2",
+      "https://robosystems.ai/vocab/roleUri": [
+        {
+          "@value": "http://www.xbrlsite.com/fac/role/IncomeStatementSingleStep_Special2"
+        }
+      ],
+      "https://robosystems.ai/vocab/structureName": [
+        {
+          "@value": "FAC - 201.6-IS31-Income Statement, Single Step, With Operating Income, Special 2 (Costs and Expenses)"
+        }
+      ]
+    },
+    {
+      "@id": "http://www.xbrlsite.com/fac/role/IncomeStatementSingleStep_Special2A",
+      "https://robosystems.ai/vocab/roleUri": [
+        {
+          "@value": "http://www.xbrlsite.com/fac/role/IncomeStatementSingleStep_Special2A"
+        }
+      ],
+      "https://robosystems.ai/vocab/structureName": [
+        {
+          "@value": "FAC - 202.1-IS32-Income Statement, Single Step, With Operating Income, Special 2A (Costs and Expenses, with Other Operating Income (Loss))"
+        }
+      ]
+    },
+    {
+      "@id": "http://www.xbrlsite.com/fac/role/IncomeStatementSingleStep_Special2_IEMI_Taxes",
+      "https://robosystems.ai/vocab/roleUri": [
+        {
+          "@value": "http://www.xbrlsite.com/fac/role/IncomeStatementSingleStep_Special2_IEMI_Taxes"
+        }
+      ],
+      "https://robosystems.ai/vocab/structureName": [
+        {
+          "@value": "FAC - 202.3-IS33-Income Statement, Single Step, With Operating Income, Special 2 (Costs and Expenses), Equity method income in tax"
+        }
+      ]
+    },
+    {
+      "@id": "http://www.xbrlsite.com/fac/role/IncomeStatementSingleStep_Special4",
+      "https://robosystems.ai/vocab/roleUri": [
+        {
+          "@value": "http://www.xbrlsite.com/fac/role/IncomeStatementSingleStep_Special4"
+        }
+      ],
+      "https://robosystems.ai/vocab/structureName": [
+        {
+          "@value": "FAC - 202.2-IS71-Income Statement, Single Step, With Operating Income, Special 4 (Costs and Expenses plus Other Operating Income)"
+        }
+      ]
+    },
+    {
+      "@id": "http://www.xbrlsite.com/fac/role/IncomeStatementSingleStep_Special6",
+      "https://robosystems.ai/vocab/roleUri": [
+        {
+          "@value": "http://www.xbrlsite.com/fac/role/IncomeStatementSingleStep_Special6"
+        }
+      ],
+      "https://robosystems.ai/vocab/structureName": [
+        {
+          "@value": "FAC - 202.5-IS11-Income Statement, Multi Step, With Operating Income, Special 6"
+        }
+      ]
+    },
+    {
+      "@id": "http://www.xbrlsite.com/fac/role/IncomeStatementSingleStep_Special6_IEMI_Taxes",
+      "https://robosystems.ai/vocab/roleUri": [
+        {
+          "@value": "http://www.xbrlsite.com/fac/role/IncomeStatementSingleStep_Special6_IEMI_Taxes"
+        }
+      ],
+      "https://robosystems.ai/vocab/structureName": [
+        {
+          "@value": "FAC - 202.6-IS13-Income Statement, Multi Step, With Operating Income, Special 6, Equity method income in tax"
+        }
+      ]
+    },
+    {
+      "@id": "http://www.xbrlsite.com/fac/role/IncomeStatementSingleStep_Special6_IEMI_Taxes_Excise",
+      "https://robosystems.ai/vocab/roleUri": [
+        {
+          "@value": "http://www.xbrlsite.com/fac/role/IncomeStatementSingleStep_Special6_IEMI_Taxes_Excise"
+        }
+      ],
+      "https://robosystems.ai/vocab/structureName": [
+        {
+          "@value": "FAC - 202.7-IS13-Income Statement, Multi Step, With Operating Income, Special 6, Equity method income in tax, Excise tax in Gross Profit"
+        }
+      ]
+    },
+    {
+      "@id": "http://www.xbrlsite.com/fac/role/IncomeStatementSingleStep_Special8",
+      "https://robosystems.ai/vocab/roleUri": [
+        {
+          "@value": "http://www.xbrlsite.com/fac/role/IncomeStatementSingleStep_Special8"
+        }
+      ],
+      "https://robosystems.ai/vocab/structureName": [
+        {
+          "@value": "FAC - 201.8-IS86-Income Statement, Multi Step, With Operating Income, With Other Operating Income (Loss), Special 8"
+        }
+      ]
+    },
+    {
+      "@id": "http://www.xbrlsite.com/fac/role/IncomeStatementSingleStep_Special9",
+      "https://robosystems.ai/vocab/roleUri": [
+        {
+          "@value": "http://www.xbrlsite.com/fac/role/IncomeStatementSingleStep_Special9"
+        }
+      ],
+      "https://robosystems.ai/vocab/structureName": [
+        {
+          "@value": "FAC - 202.9-IS85-Income Statement, Starts with Operating Income (Loss) or Partial, Special 9"
+        }
+      ]
+    },
+    {
+      "@id": "http://www.xbrlsite.com/fac/role/KeyRatios",
+      "https://robosystems.ai/vocab/roleUri": [
+        {
+          "@value": "http://www.xbrlsite.com/fac/role/KeyRatios"
+        }
+      ],
+      "https://robosystems.ai/vocab/structureName": [
+        {
+          "@value": "FAC - 601.0-KRX-Key Ratios"
+        }
+      ]
+    },
+    {
+      "@id": "http://www.xbrlsite.com/fac/role/NetCashFlowBreakdown",
+      "https://robosystems.ai/vocab/roleUri": [
+        {
+          "@value": "http://www.xbrlsite.com/fac/role/NetCashFlowBreakdown"
+        }
+      ],
+      "https://robosystems.ai/vocab/structureName": [
+        {
+          "@value": "FAC - 411.1-CF1-Net Cash Flow Breakdown"
+        }
+      ]
+    },
+    {
+      "@id": "http://www.xbrlsite.com/fac/role/NetCashFlowBreakdown2",
+      "https://robosystems.ai/vocab/roleUri": [
+        {
+          "@value": "http://www.xbrlsite.com/fac/role/NetCashFlowBreakdown2"
+        }
+      ],
+      "https://robosystems.ai/vocab/structureName": [
+        {
+          "@value": "FAC - 411.2-CF2-Net Cash Flow Breakdown, Excludes exchange gains"
+        }
+      ]
+    },
+    {
+      "@id": "http://www.xbrlsite.com/fac/role/NetIncomeLossAvailableToCommonBreakdown",
+      "https://robosystems.ai/vocab/roleUri": [
+        {
+          "@value": "http://www.xbrlsite.com/fac/role/NetIncomeLossAvailableToCommonBreakdown"
+        }
+      ],
+      "https://robosystems.ai/vocab/structureName": [
+        {
+          "@value": "FAC - 212.0-ISP2-Net Income (Loss) Available to Common Breakdown (Same for all IS)"
+        }
+      ]
+    },
+    {
+      "@id": "http://www.xbrlsite.com/fac/role/NetIncomeLossBreakdown",
+      "https://robosystems.ai/vocab/roleUri": [
+        {
+          "@value": "http://www.xbrlsite.com/fac/role/NetIncomeLossBreakdown"
+        }
+      ],
+      "https://robosystems.ai/vocab/structureName": [
+        {
+          "@value": "FAC - 211.0-ISP1-Net Income (Loss) Breakdown (Same for all IS)"
+        }
+      ]
+    },
+    {
+      "@id": "http://www.xbrlsite.com/fac/role/OtherInformation",
+      "https://robosystems.ai/vocab/roleUri": [
+        {
+          "@value": "http://www.xbrlsite.com/fac/role/OtherInformation"
+        }
+      ],
+      "https://robosystems.ai/vocab/structureName": [
+        {
+          "@value": "FAC - 901.0-OTH-Other Information"
+        }
+      ]
+    },
+    {
+      "@id": "http://www.xbrlsite.com/fac/role/Park",
+      "https://robosystems.ai/vocab/roleUri": [
+        {
+          "@value": "http://www.xbrlsite.com/fac/role/Park"
+        }
+      ],
+      "https://robosystems.ai/vocab/structureName": [
+        {
+          "@value": "FAC - 209.1-ISXX-Income Statement, Unrecognized (Park, Limited income statement validation)"
+        }
+      ]
+    },
+    {
+      "@id": "http://www.xbrlsite.com/fac/role/StatementOfComprehensiveIncome",
+      "https://robosystems.ai/vocab/roleUri": [
+        {
+          "@value": "http://www.xbrlsite.com/fac/role/StatementOfComprehensiveIncome"
+        }
+      ],
+      "https://robosystems.ai/vocab/structureName": [
+        {
+          "@value": "FAC - 301.0-SCI1-Statement of Comprehensive Income, Starts with Net Income"
+        }
+      ]
+    },
+    {
+      "@id": "http://www.xbrlsite.com/fac/role/StatementOfComprehensiveIncome2",
+      "https://robosystems.ai/vocab/roleUri": [
+        {
+          "@value": "http://www.xbrlsite.com/fac/role/StatementOfComprehensiveIncome2"
+        }
+      ],
+      "https://robosystems.ai/vocab/structureName": [
+        {
+          "@value": "FAC - 302.0-SCI2-Statement of Comprehensive Income, Starts with Net Income (Loss) Attributable to Parent"
+        }
+      ]
+    },
+    {
+      "@id": "http://www.xbrlsite.com/fac/role/ValidationResults2",
+      "https://robosystems.ai/vocab/roleUri": [
+        {
+          "@value": "http://www.xbrlsite.com/fac/role/ValidationResults2"
+        }
+      ],
+      "https://robosystems.ai/vocab/structureName": [
+        {
+          "@value": "FAC - 701.0-VRX-Validation Results"
+        }
+      ]
+    }
+  ]
+}

@@ -985,7 +985,7 @@ def upgrade() -> None:
   # ──────────────────────────────────────────────────────────────────────
   # Seed reporting taxonomy
   # ──────────────────────────────────────────────────────────────────────
-  from robosystems.config.taxonomy.seed import seed_reporting_taxonomy
+  from robosystems.taxonomy.seed import seed_reporting_taxonomy
 
   conn = op.get_bind()
   seed_reporting_taxonomy(conn)

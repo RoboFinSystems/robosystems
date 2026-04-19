@@ -148,12 +148,18 @@ async def get_context(
   graph_type: str = ""
   if user is not None:
     check_graph_access(user, graph_id)
-    # Load once per request; resolvers read from context, never re-hit the DB.
-    # Same 403 semantics as check_graph_access: missing graph rows
-    # surface as "access denied" to avoid enumeration.
-    meta = load_graph_metadata(graph_id, db)
-    schema_extensions = meta.schema_extensions
-    graph_type = meta.graph_type
+    # Library sentinel — no graph row to load, no per-graph metadata.
+    # The `library` extension is always "enabled" for this sentinel.
+    if graph_id == "library":
+      schema_extensions = ("library",)
+      graph_type = "library"
+    else:
+      # Load once per request; resolvers read from context, never re-hit the DB.
+      # Same 403 semantics as check_graph_access: missing graph rows
+      # surface as "access denied" to avoid enumeration.
+      meta = load_graph_metadata(graph_id, db)
+      schema_extensions = meta.schema_extensions
+      graph_type = meta.graph_type
 
   return {
     "request": request,
