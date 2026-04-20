@@ -1,8 +1,11 @@
-"""MappingAgent — autonomous CoA → US GAAP mapping.
+"""MappingAgent — autonomous CoA → FAC mapping.
 
 Iterates through unmapped Chart of Accounts elements, calls Bedrock to
-classify and match each to a US GAAP reporting concept, and writes
-confirmed mappings via MCP tool classes (direct instantiation).
+match each to a FAC (Fundamental Accounting Concepts) concept, and writes
+confirmed mappings via MCP tool classes (direct instantiation). FAC is
+the primary semantic target; filing-specific rs-gaap / us-gaap variants
+are derived from the FAC match via deterministic equivalence-arc
+expansion downstream.
 
 Uses the same MCP tool classes as cowork (Claude Desktop) — instantiated
 in-process via DirectToolAccess.
@@ -44,11 +47,11 @@ BATCH_SIZE = 10
 
 @register_agent("mapping")
 class MappingAgent(Agent):
-  """Autonomous CoA → GAAP mapping via Bedrock AI and MCP tools."""
+  """Autonomous CoA → FAC mapping via Bedrock AI and MCP tools."""
 
   spec = AgentSpec(
     name="Mapping Agent",
-    description="Autonomous Chart of Accounts to US GAAP mapping",
+    description="Autonomous Chart of Accounts to FAC (Fundamental Accounting Concepts) mapping",
     capabilities=[AgentCapability.FINANCIAL_ANALYSIS],
     version="1.0.0",
     requires_credits=True,
@@ -102,10 +105,19 @@ class MappingAgent(Agent):
 
     await ctx.progress.report(f"Found {total} unmapped elements", percent=0)
 
-    # 2. Group by classification for efficient candidate lookup
+    mapped, flagged, skipped = 0, 0, 0
+    processed = 0
+
+    # 2. Group by classification for efficient candidate lookup. Elements
+    # without a classification can't be narrowed structurally — skip them
+    # rather than invent a default, since the old 'expense' fallback no
+    # longer matches any enum value (the vocab moved to inflow/outflow).
     by_classification: dict[str, list[dict]] = defaultdict(list)
     for elem in elements:
-      cls = elem.get("classification", "expense")
+      cls = elem.get("classification")
+      if cls is None:
+        skipped += 1
+        continue
       by_classification[cls].append(elem)
 
     # 3. Get candidates per classification via suggest-mapping tool
@@ -117,8 +129,6 @@ class MappingAgent(Agent):
       candidates_by_cls[cls] = suggest_result.get("candidates", [])
 
     # 4. Process elements in batches per classification
-    mapped, flagged, skipped = 0, 0, 0
-    processed = 0
 
     for cls, cls_elements in by_classification.items():
       candidates = candidates_by_cls.get(cls, [])
@@ -190,7 +200,7 @@ class MappingAgent(Agent):
       max_tokens=4000,
       temperature=0.3,
       agent_type="mapping",
-      operation_description="CoA to GAAP mapping",
+      operation_description="CoA to FAC mapping",
     )
 
     mappings = self._parse_response(response.content, elements)
