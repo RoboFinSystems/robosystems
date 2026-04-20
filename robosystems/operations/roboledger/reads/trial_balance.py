@@ -22,7 +22,8 @@ _TRIAL_BALANCE_SQL = text("""
   FROM elements a
   JOIN line_items li ON li.element_id = a.id
   JOIN entries e ON e.id = li.entry_id
-  LEFT JOIN element_classifications ec ON ec.element_id = a.id
+  LEFT JOIN element_classifications ec
+    ON ec.element_id = a.id AND ec.is_primary = TRUE
   LEFT JOIN classifications cls
     ON cls.id = ec.classification_id
     AND cls.category = 'elementsOfFinancialStatements'

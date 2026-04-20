@@ -409,7 +409,7 @@ def _staging_sql(graph_id: str, entity_id: str, connstr: str) -> dict[str, str]:
       NULL::FLOAT[384]                AS embedding
     FROM postgres_scan('{c}', '{s}', 'elements') e
     LEFT JOIN postgres_scan('{c}', '{s}', 'element_classifications') ec
-      ON ec.element_id = e.id
+      ON ec.element_id = e.id AND ec.is_primary = TRUE
     LEFT JOIN postgres_scan('{c}', '{s}', 'classifications') cls
       ON cls.id = ec.classification_id
       AND cls.category = 'elementsOfFinancialStatements'

@@ -302,7 +302,8 @@ def get_statement(
              cls.identifier AS classification, e.balance_type
       FROM facts rf
       JOIN elements e ON e.id = rf.element_id
-      LEFT JOIN element_classifications ec ON ec.element_id = e.id
+      LEFT JOIN element_classifications ec
+        ON ec.element_id = e.id AND ec.is_primary = TRUE
       LEFT JOIN classifications cls
         ON cls.id = ec.classification_id
         AND cls.category = 'elementsOfFinancialStatements'

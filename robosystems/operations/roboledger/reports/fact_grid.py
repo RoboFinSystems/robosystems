@@ -299,7 +299,8 @@ def _read_mapped_balances(
         AND mapping.association_type = 'mapping'
         AND mapping.structure_id = :mapping_id
       JOIN elements target ON target.id = mapping.to_element_id
-      LEFT JOIN element_classifications tec ON tec.element_id = target.id
+      LEFT JOIN element_classifications tec
+        ON tec.element_id = target.id AND tec.is_primary = TRUE
       LEFT JOIN classifications tcls
         ON tcls.id = tec.classification_id
         AND tcls.category = 'elementsOfFinancialStatements'
@@ -474,8 +475,9 @@ def _close_prior_periods_to_retained_earnings(
         AND mapping.association_type = 'mapping'
         AND mapping.structure_id = :mapping_id
       JOIN elements target ON target.id = mapping.to_element_id
-      JOIN element_classifications tec ON tec.element_id = target.id
-      JOIN classifications tcls
+      LEFT JOIN element_classifications tec
+        ON tec.element_id = target.id AND tec.is_primary = TRUE
+      LEFT JOIN classifications tcls
         ON tcls.id = tec.classification_id
         AND tcls.category = 'elementsOfFinancialStatements'
       WHERE e.status = 'posted'
@@ -592,7 +594,8 @@ def _load_reporting_structure(
         ea.order_value
       FROM associations ea
       JOIN elements e ON e.id = ea.to_element_id
-      LEFT JOIN element_classifications ec ON ec.element_id = e.id
+      LEFT JOIN element_classifications ec
+        ON ec.element_id = e.id AND ec.is_primary = TRUE
       LEFT JOIN classifications cls
         ON cls.id = ec.classification_id
         AND cls.category = 'elementsOfFinancialStatements'
@@ -637,7 +640,8 @@ def _load_reporting_structure(
         SELECT e.id, e.qname, e.name, cls.identifier AS classification,
                e.balance_type, e.is_abstract, e.depth
         FROM elements e
-        LEFT JOIN element_classifications ec ON ec.element_id = e.id
+        LEFT JOIN element_classifications ec
+          ON ec.element_id = e.id AND ec.is_primary = TRUE
         LEFT JOIN classifications cls
           ON cls.id = ec.classification_id
           AND cls.category = 'elementsOfFinancialStatements'

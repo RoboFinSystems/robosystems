@@ -102,6 +102,9 @@ def _efs_classification_by_element(
   result: dict[str, str] = {}
   if not element_ids:
     return result
+  # ORDER BY is_primary DESC ensures the primary EFS assignment wins
+  # when multiple rows exist for one element (the migration allows the
+  # junction to carry alternates alongside a single primary).
   rows = session.execute(
     select(ElementClassification.element_id, Classification.identifier)
     .join(Classification, Classification.id == ElementClassification.classification_id)
@@ -109,9 +112,9 @@ def _efs_classification_by_element(
       ElementClassification.element_id.in_(element_ids),
       Classification.category == "elementsOfFinancialStatements",
     )
+    .order_by(ElementClassification.is_primary.desc())
   ).all()
   for element_id, identifier in rows:
-    # Multiple assignments per element are possible; first-wins is fine.
     result.setdefault(element_id, identifier)
   return result
 
@@ -149,10 +152,22 @@ def _element_to_response(
   *,
   include_labels: bool = True,
   include_references: bool = True,
+  efs_map: dict[str, str] | None = None,
 ) -> LibraryElementResponse:
+  """Convert an Element row to its library response.
+
+  ``efs_map`` is a pre-loaded ``{element_id: classification}`` batch. When
+  omitted, a single-element query fires — convenient for standalone
+  callers but **N+1 when walking a tree or iterating a list**. Tree /
+  list walkers must build the map once via
+  :func:`_efs_classification_by_element` and pass it through.
+  """
   labels = _labels_for(session, element.id) if include_labels else []
   refs = _references_for(session, element.id) if include_references else []
-  efs = _efs_classification_by_element(session, [element.id]).get(element.id)
+  if efs_map is None:
+    efs = _efs_classification_by_element(session, [element.id]).get(element.id)
+  else:
+    efs = efs_map.get(element.id)
   return LibraryElementResponse(
     id=element.id,
     qname=element.qname or element.name,
@@ -338,49 +353,71 @@ def get_element_tree(
   if root is None:
     return None
 
-  def _walk(elem: Element, depth: int) -> LibraryElementTreeNode:
-    children_ids: list[str] = []
-    if depth < max_depth:
-      assoc_rows = (
-        session.execute(
-          select(Association.to_element_id)
-          .where(
-            Association.from_element_id == elem.id,
-            Association.association_type == "presentation",
-          )
-          .order_by(Association.order_value.asc().nulls_last())
+  # First pass: breadth-first enumerate every element id reachable from
+  # the root within `max_depth`, plus the association ordering for each
+  # parent. This lets us batch-load elements + EFS classifications in
+  # one shot instead of hitting the DB once per node.
+  root_id = str(root.id)
+  children_by_parent: dict[str, list[str]] = {}
+  visited: set[str] = {root_id}
+  frontier: list[tuple[str, int]] = [(root_id, 0)]
+  while frontier:
+    parent_id, depth = frontier.pop(0)
+    if depth >= max_depth:
+      continue
+    assoc_rows = (
+      session.execute(
+        select(Association.to_element_id)
+        .where(
+          Association.from_element_id == parent_id,
+          Association.association_type == "presentation",
         )
-        .scalars()
-        .all()
+        .order_by(Association.order_value.asc().nulls_last())
       )
-      children_ids = list(assoc_rows)
+      .scalars()
+      .all()
+    )
+    ordered_children = list(assoc_rows)
+    children_by_parent[parent_id] = ordered_children
+    for child_id in ordered_children:
+      if child_id not in visited:
+        visited.add(child_id)
+        frontier.append((child_id, depth + 1))
 
+  # Batch-load every element + its EFS classification.
+  all_ids = list(visited)
+  elements_by_id: dict[str, Element] = {
+    str(e.id): e
+    for e in session.execute(select(Element).where(Element.id.in_(all_ids)))
+    .scalars()
+    .all()
+  }
+  efs_map = _efs_classification_by_element(session, all_ids)
+
+  def _build(elem_id: str) -> LibraryElementTreeNode | None:
+    elem = elements_by_id.get(elem_id)
+    if elem is None:
+      return None
     child_nodes: list[LibraryElementTreeNode] = []
-    if children_ids:
-      children = (
-        session.execute(select(Element).where(Element.id.in_(children_ids)))
-        .scalars()
-        .all()
-      )
-      # Preserve ordering from association order_value
-      by_id = {c.id: c for c in children}
-      for cid in children_ids:
-        child = by_id.get(cid)
-        if child is not None:
-          child_nodes.append(_walk(child, depth + 1))
-
+    for cid in children_by_parent.get(elem_id, []):
+      child_node = _build(cid)
+      if child_node is not None:
+        child_nodes.append(child_node)
     # Tree navigation doesn't need the per-node label + reference payload;
-    # skipping them saves 2 queries per node (O(N) → O(1)-ish) for
-    # deep/wide trees. Callers that need full element detail use
-    # `get_element` on a specific id.
+    # skipping them saves 2 queries per node for deep/wide trees. Callers
+    # that need full element detail use `get_element` on a specific id.
     return LibraryElementTreeNode(
       element=_element_to_response(
-        session, elem, include_labels=False, include_references=False
+        session,
+        elem,
+        include_labels=False,
+        include_references=False,
+        efs_map=efs_map,
       ),
       children=child_nodes,
     )
 
-  return _walk(root, depth=0)
+  return _build(root_id)
 
 
 def get_element_equivalents(

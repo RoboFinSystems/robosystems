@@ -69,6 +69,22 @@ class ElementCycleError(ValueError):
   """Raised when an update would create a cycle in the element hierarchy."""
 
 
+# CreateElementRequest.classification hint → FASB EFS identifier.
+# SFAC 6's elementsOfFinancialStatements has no ``cashflow`` primitive —
+# cash-flow line items are balance-sheet movements, not income-statement
+# items, so they are intentionally excluded from this map. Unmapped
+# values (``cashflow`` or the rarely-used ``outflow``) skip the EFS
+# assignment entirely; the caller can add the correct trait explicitly
+# via element_classifications if needed.
+_EFS_FROM_LEGACY: dict[str, str] = {
+  "asset": "asset",
+  "liability": "liability",
+  "equity": "equity",
+  "inflow": "revenue",
+  "outflow": "expense",
+}
+
+
 def _element_to_response(
   row: Element, classification: str | None = None
 ) -> ElementResponse:
@@ -234,21 +250,6 @@ def create_element(
   _assign_efs_classification(session, element.id, body.classification)
 
   return _element_to_response(element, efs)
-
-
-# CreateElementRequest.classification literal → FASB EFS identifier.
-# The legacy enum had "inflow"/"outflow"/"cashflow"; FASB tags revenue
-# (inflow) and expense (outflow) directly and has no first-class
-# "cashflow" primitive, so cashflow and the rarely-used outflow alias
-# collapse onto their closest EFS counterparts.
-_EFS_FROM_LEGACY: dict[str, str] = {
-  "asset": "asset",
-  "liability": "liability",
-  "equity": "equity",
-  "inflow": "revenue",
-  "outflow": "expense",
-  "cashflow": "revenue",  # cash inflow; caller should override if needed
-}
 
 
 def _assign_efs_classification(

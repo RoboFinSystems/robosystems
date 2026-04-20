@@ -87,7 +87,12 @@ def get_reporting_taxonomy(session: Session) -> TaxonomyResponse | None:
 
 
 def _efs_by_element(session: Session, element_ids: list[str]) -> dict[str, str]:
-  """Batch-load FASB elementsOfFinancialStatements identifier per element."""
+  """Batch-load FASB elementsOfFinancialStatements identifier per element.
+
+  ``ORDER BY is_primary DESC`` ensures the primary EFS assignment wins
+  when multiple rows exist for one element (the junction supports a
+  single primary plus alternates).
+  """
   if not element_ids:
     return {}
   rows = session.execute(
@@ -97,6 +102,7 @@ def _efs_by_element(session: Session, element_ids: list[str]) -> dict[str, str]:
       ElementClassification.element_id.in_(element_ids),
       Classification.category == "elementsOfFinancialStatements",
     )
+    .order_by(ElementClassification.is_primary.desc())
   ).all()
   result: dict[str, str] = {}
   for element_id, identifier in rows:
@@ -633,7 +639,8 @@ _MAPPED_TRIAL_BALANCE_SQL = text("""
       AND mapping.association_type = 'mapping'
       AND mapping.structure_id = :mapping_id
   JOIN elements target ON target.id = mapping.to_element_id
-  LEFT JOIN element_classifications tec ON tec.element_id = target.id
+  LEFT JOIN element_classifications tec
+      ON tec.element_id = target.id AND tec.is_primary = TRUE
   LEFT JOIN classifications tcls
       ON tcls.id = tec.classification_id
       AND tcls.category = 'elementsOfFinancialStatements'

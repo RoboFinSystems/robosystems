@@ -35,7 +35,12 @@ def _parse_meta(raw: Any) -> dict[str, Any]:
 
 
 def _efs_by_element(session: Session, element_ids: list[str]) -> dict[str, str]:
-  """Batch-load FASB elementsOfFinancialStatements identifier per element."""
+  """Batch-load FASB elementsOfFinancialStatements identifier per element.
+
+  ``ORDER BY is_primary DESC`` ensures the primary EFS assignment wins
+  when multiple rows exist for one element (the junction supports a
+  single primary plus alternates).
+  """
   if not element_ids:
     return {}
   rows = session.execute(
@@ -45,6 +50,7 @@ def _efs_by_element(session: Session, element_ids: list[str]) -> dict[str, str]:
       ElementClassification.element_id.in_(element_ids),
       Classification.category == "elementsOfFinancialStatements",
     )
+    .order_by(ElementClassification.is_primary.desc())
   ).all()
   result: dict[str, str] = {}
   for element_id, identifier in rows:

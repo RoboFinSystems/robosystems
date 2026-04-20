@@ -56,7 +56,8 @@ _ROLLUP_SQL = text("""
   FROM associations mapping
   JOIN elements source ON source.id = mapping.from_element_id
   JOIN elements target ON target.id = mapping.to_element_id
-  LEFT JOIN element_classifications tec ON tec.element_id = target.id
+  LEFT JOIN element_classifications tec
+    ON tec.element_id = target.id AND tec.is_primary = TRUE
   LEFT JOIN classifications tcls
     ON tcls.id = tec.classification_id
     AND tcls.category = 'elementsOfFinancialStatements'
