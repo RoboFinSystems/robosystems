@@ -81,12 +81,11 @@ def _build_query_type() -> type:
   schema shape instead of trial-and-error against runtime errors.
 
   The library mixin (`LibraryQuery`) is always composed — it's the
-  read surface for the `graph_id="library"` sentinel and the public
-  schema lives regardless of which product domains are enabled. The
-  per-field `require_extension(info, "library")` gate still rejects
-  library reads against tenant graphs (where `schema_extensions`
-  doesn't include `"library"`), so library fields only resolve when
-  the request was actually routed through `/extensions/library/graphql`.
+  read surface for both the `graph_id="library"` sentinel (canonical
+  browse of the public schema) and any tenant graph_id (tenant schema
+  + public fallback via search_path). Library fields are not gated
+  by a per-graph extension flag; data visibility is driven by the
+  session's search_path, which is implicit in the URL's graph_id.
   """
   bases: tuple[type, ...] = (LibraryQuery, _BaseQuery)
   if env.ROBOLEDGER_ENABLED:

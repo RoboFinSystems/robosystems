@@ -1,22 +1,32 @@
 """Library (taxonomy library) GraphQL resolvers.
 
 The library is the shared reference material in the extensions DB
-public schema. Queries are routed here via the `graph_id="library"`
-sentinel:
+public schema. Two access modes are supported:
 
-    POST /extensions/library/graphql
+1. Canonical browse via the `graph_id="library"` sentinel:
+
+       POST /extensions/library/graphql
+
+   `search_path = public` → returns the canonical library only.
+
+2. Tenant-scope via an entity graph_id:
+
+       POST /extensions/kg…/graphql
+
+   `search_path = {schema}, public` → returns the tenant's library
+   copy plus any tenant extensions of library tables (CoA elements,
+   anchor associations, etc). This is how the roboledger-app `/library`
+   surface reads library + tenant data in a single unified view.
 
 Access contract — handled by `get_context`:
 
-1. Any authenticated user has read access (no per-graph ACL).
-2. `graph_id` on the context is the literal string `"library"`.
-3. `extensions_session("library")` sets `search_path = public` so
-   queries land on library content.
-4. `schema_extensions=("library",)` is stamped on the context so
-   `require_extension(info, "library")` short-circuits cleanly.
+- Any authenticated user with graph access may read. `check_graph_access`
+  already enforces per-graph ACLs before the resolver runs.
+- Library fields are NOT gated by a per-graph extension flag. Data
+  visibility is driven entirely by the session's search_path, which
+  is implicit in the graph_id.
 
-Each resolver opens `extensions_session("library")` via
-`open_extensions_session` and delegates to
+Each resolver opens `open_library_session(info)` and delegates to
 `operations/library/reads/*`. No business logic lives here.
 """
 
@@ -25,10 +35,9 @@ from __future__ import annotations
 import strawberry
 from strawberry.types import Info
 
-from robosystems.db.extensions import LIBRARY_GRAPH_ID as _LIBRARY_EXTENSION
 from robosystems.graphql.context import GraphQLContext
 from robosystems.graphql.resolvers._common import (
-  open_extensions_session as _open_session,
+  open_library_session as _open_session,
 )
 from robosystems.graphql.resolvers._common import (
   validate_pagination as _validate_pagination,
@@ -78,7 +87,7 @@ class LibraryQuery:
     include_element_count: bool = False,
   ) -> list[LibraryTaxonomy]:
     """List curated taxonomies (sfac6, fac, us-gaap, rs-gaap, …)."""
-    with _open_session(info, _LIBRARY_EXTENSION) as session:
+    with _open_session(info) as session:
       rows = list_taxonomies(
         session, standard=standard, include_element_count=include_element_count
       )
@@ -94,7 +103,7 @@ class LibraryQuery:
     include_element_count: bool = False,
   ) -> LibraryTaxonomy | None:
     """Get a taxonomy by id or (standard, version)."""
-    with _open_session(info, _LIBRARY_EXTENSION) as session:
+    with _open_session(info) as session:
       row = get_taxonomy(
         session,
         taxonomy_id=str(id) if id else None,
@@ -121,7 +130,7 @@ class LibraryQuery:
     qname + name so the UI can render the arc directly.
     """
     _validate_pagination(limit, offset)
-    with _open_session(info, _LIBRARY_EXTENSION) as session:
+    with _open_session(info) as session:
       rows = list_taxonomy_arcs(
         session,
         taxonomy_id=str(taxonomy_id),
@@ -138,7 +147,7 @@ class LibraryQuery:
     taxonomy_id: strawberry.ID,
   ) -> int:
     """Count of arcs contributed by a taxonomy."""
-    with _open_session(info, _LIBRARY_EXTENSION) as session:
+    with _open_session(info) as session:
       return count_taxonomy_arcs(session, str(taxonomy_id))
 
   # ── Elements ────────────────────────────────────────────────────────────
@@ -166,7 +175,7 @@ class LibraryQuery:
     grouping concepts; `false` → only concrete; omit for both.
     """
     _validate_pagination(limit, offset)
-    with _open_session(info, _LIBRARY_EXTENSION) as session:
+    with _open_session(info) as session:
       rows = list_elements(
         session,
         taxonomy_id=str(taxonomy_id) if taxonomy_id else None,
@@ -191,7 +200,7 @@ class LibraryQuery:
     qname: str | None = None,
   ) -> LibraryElement | None:
     """Get a single element by id or by qname ('sfac6:Assets', etc)."""
-    with _open_session(info, _LIBRARY_EXTENSION) as session:
+    with _open_session(info) as session:
       if id is not None:
         row = get_element(session, element_id=str(id))
       elif qname is not None:
@@ -210,7 +219,7 @@ class LibraryQuery:
   ) -> list[LibraryElement]:
     """Substring search across qname, name, and standard label text."""
     _validate_pagination(limit, 0)
-    with _open_session(info, _LIBRARY_EXTENSION) as session:
+    with _open_session(info) as session:
       rows = search_elements(session, query_text=query, limit=limit, source=source)
       return [LibraryElement.from_pydantic(r) for r in rows]
 
@@ -227,7 +236,7 @@ class LibraryQuery:
         message="max_depth must be between 1 and 10",
         extensions={"code": "INVALID_ARGUMENT"},
       )
-    with _open_session(info, _LIBRARY_EXTENSION) as session:
+    with _open_session(info) as session:
       node = get_element_tree(session, element_id=str(id), max_depth=max_depth)
       return LibraryElementTreeNode.from_pydantic(node) if node else None
 
@@ -238,7 +247,7 @@ class LibraryQuery:
     id: strawberry.ID,
   ) -> LibraryEquivalence | None:
     """Return the equivalence fan-out (FAC ↔ us-gaap collapse)."""
-    with _open_session(info, _LIBRARY_EXTENSION) as session:
+    with _open_session(info) as session:
       row = get_element_equivalents(session, element_id=str(id))
       return LibraryEquivalence.from_pydantic(row) if row else None
 
@@ -254,7 +263,7 @@ class LibraryQuery:
     general-special, type-subtype. Each row is oriented from the
     element's perspective (`direction` = outgoing | incoming).
     """
-    with _open_session(info, _LIBRARY_EXTENSION) as session:
+    with _open_session(info) as session:
       rows = get_element_arcs(session, element_id=str(id))
       return [LibraryElementArc.from_pydantic(r) for r in rows]
 
@@ -268,7 +277,7 @@ class LibraryQuery:
     structure_type: str | None = None,
   ) -> list[LibraryStructure]:
     """List structures (extended link roles) — BS, IS, custom, etc."""
-    with _open_session(info, _LIBRARY_EXTENSION) as session:
+    with _open_session(info) as session:
       rows = list_structures(
         session,
         taxonomy_id=str(taxonomy_id) if taxonomy_id else None,
@@ -282,7 +291,7 @@ class LibraryQuery:
     info: Info[GraphQLContext, None],
     id: strawberry.ID,
   ) -> LibraryStructure | None:
-    with _open_session(info, _LIBRARY_EXTENSION) as session:
+    with _open_session(info) as session:
       row = get_structure(session, structure_id=str(id))
       return LibraryStructure.from_pydantic(row) if row else None
 
