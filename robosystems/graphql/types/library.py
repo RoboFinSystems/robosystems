@@ -21,6 +21,9 @@ from robosystems.models.api.library import (
   LibraryElementArcResponse as PydanticLibraryElementArc,
 )
 from robosystems.models.api.library import (
+  LibraryElementClassificationResponse as PydanticLibraryElementClassification,
+)
+from robosystems.models.api.library import (
   LibraryElementResponse as PydanticLibraryElement,
 )
 from robosystems.models.api.library import (
@@ -66,6 +69,13 @@ class LibraryTaxonomy:
 @strawberry.experimental.pydantic.type(model=PydanticLibraryStructure, all_fields=True)
 class LibraryStructure:
   """A named structure within a library taxonomy (extended link role)."""
+
+
+@strawberry.experimental.pydantic.type(
+  model=PydanticLibraryElementClassification, all_fields=True
+)
+class LibraryElementClassification:
+  """A classification trait assigned to a library element."""
 
 
 @strawberry.experimental.pydantic.type(

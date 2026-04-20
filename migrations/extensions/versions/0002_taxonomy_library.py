@@ -345,10 +345,12 @@ SEEDS_DIR = (
 # Concept taxonomies first (referenced by qname from mapping + assignment
 # seeds); then the classification vocabulary; then assignments/mappings.
 SEED_FILES = [
+  # Classification vocabulary FIRST — FAC + rs-gaap seeds reference these
+  # via classifiedAs arcs; the DB lookup in write_taxonomy_package fails if
+  # the classification rows don't exist yet.
+  SEEDS_DIR / "us-gaap-metamodel" / "v1" / "taxonomy.jsonld",
   SEEDS_DIR / "fac" / "v1" / "taxonomy.jsonld",
   SEEDS_DIR / "rs-gaap" / "v1" / "taxonomy.jsonld",
-  # Classification vocabulary (FASB metamodel)
-  SEEDS_DIR / "us-gaap-metamodel" / "v1" / "taxonomy.jsonld",
   # Classification assignments + hierarchy (reference rs-gaap concepts)
   SEEDS_DIR / "rs-gaap-to-metamodel" / "v1" / "taxonomy.jsonld",
   SEEDS_DIR / "rs-gaap-hierarchy" / "v1" / "taxonomy.jsonld",

@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from robosystems.models.api.library import (
   LibraryElementArcResponse,
+  LibraryElementClassificationResponse,
   LibraryElementResponse,
   LibraryElementTreeNode,
   LibraryEquivalenceResponse,
@@ -192,8 +193,6 @@ def list_elements(
   taxonomy_id: str | None = None,
   source: str | None = None,
   classification: str | None = None,
-  statement_context: str | None = None,
-  derivation_role: str | None = None,
   element_type: str | None = None,
   is_abstract: bool | None = None,
   limit: int = DEFAULT_ELEMENT_LIMIT,
@@ -206,13 +205,9 @@ def list_elements(
   `include_labels` / `include_references` default False to keep list
   queries cheap; callers enable them for detail views.
 
-  The three classification axes (`classification` = economic_nature,
-  `statement_context`, `derivation_role`) AND together. Pass each
-  independently; omit to skip that filter.
-
-  `is_abstract=True` returns only abstract grouping concepts (hypercubes,
-  LineItems, RollUps). `is_abstract=False` returns only concrete concepts.
-  `None` returns both.
+  `classification` filters on the FASB elementsOfFinancialStatements axis.
+  `is_abstract=True` returns only abstract grouping concepts; `False`
+  returns only concrete. `None` returns both.
   """
   limit = max(1, min(limit, MAX_ELEMENT_LIMIT))
 
@@ -236,8 +231,6 @@ def list_elements(
         )
       )
     )
-  # statement_context and derivation_role were hand-rolled axes that have
-  # no FASB metamodel equivalent; accept and ignore for API compat.
   if element_type is not None:
     query = query.where(Element.element_type == element_type)
   if is_abstract is not None:
@@ -509,6 +502,7 @@ def get_element_arcs(
     .join(Taxonomy, Structure.taxonomy_id == Taxonomy.id)
     .where(
       (Taxonomy.taxonomy_type == "mapping")
+      | (Taxonomy.taxonomy_type == "classification-assignment")
       | (Structure.structure_type == "coa_mapping")
     )
   )
@@ -569,3 +563,32 @@ def get_element_arcs(
     )
   )
   return rows
+
+
+def get_element_classifications(
+  session: Session,
+  element_id: str,
+) -> list[LibraryElementClassificationResponse]:
+  """Return all classification traits assigned to this element.
+
+  Joins element_classifications → classifications, sorted by category
+  then identifier so the caller gets a stable, grouped ordering.
+  """
+  rows = session.execute(
+    select(Classification, ElementClassification.is_primary)
+    .join(
+      ElementClassification,
+      Classification.id == ElementClassification.classification_id,
+    )
+    .where(ElementClassification.element_id == element_id)
+    .order_by(Classification.category, Classification.identifier)
+  ).all()
+  return [
+    LibraryElementClassificationResponse(
+      category=cls.category,
+      identifier=cls.identifier,
+      name=cls.name,
+      is_primary=is_primary or False,
+    )
+    for cls, is_primary in rows
+  ]

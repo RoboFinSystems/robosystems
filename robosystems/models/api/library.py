@@ -39,24 +39,11 @@ class LibraryElementResponse(BaseModel):
   classification: str | None = Field(
     None,
     description=(
-      "Economic nature axis (7 SFAC 6 primitives): asset | liability | "
-      "equity | revenue | expense | gain | loss. Null for structural "
-      "rows, metadata rows, and computed ratios."
-    ),
-  )
-  statement_context: str | None = Field(
-    None,
-    description=(
-      "Which report the element belongs to — balance_sheet | "
-      "income_statement | cash_flow | equity_changes | disclosure | "
-      "metadata | analysis."
-    ),
-  )
-  derivation_role: str | None = Field(
-    None,
-    description=(
-      "Structural role — primitive | subtotal | total | reconciliation | "
-      "movement | ratio | identifier | structural."
+      "FASB elementsOfFinancialStatements axis: asset | contraAsset | "
+      "liability | contraLiability | equity | contraEquity | "
+      "temporaryEquity | revenue | expense | expenseReversal | gain | "
+      "loss | comprehensiveIncome | investmentByOwners | "
+      "distributionToOwners. Null for structural rows."
     ),
   )
   balance_type: str = Field(..., description="debit | credit")
@@ -181,3 +168,21 @@ class LibraryElementArcResponse(BaseModel):
   structure_id: str | None = None
   structure_name: str | None = None
   peer: LibraryElementResponse
+
+
+class LibraryElementClassificationResponse(BaseModel):
+  """One classification trait assigned to a library element.
+
+  A single element can carry multiple classifications across multiple
+  categories (e.g. elementsOfFinancialStatements=expense AND
+  operatingNonoperating=operating AND liquidity=current).
+  """
+
+  category: str = Field(
+    ..., description="Classification axis (e.g. elementsOfFinancialStatements)"
+  )
+  identifier: str = Field(..., description="Value within the axis (e.g. expense)")
+  name: str | None = Field(None, description="Human-readable name")
+  is_primary: bool = Field(
+    False, description="True for the element's primary EFS classification"
+  )

@@ -1989,7 +1989,7 @@
       ],
       "https://robosystems.ai/vocab/identifier": [
         {
-          "@value": "assets"
+          "@value": "asset"
         }
       ],
       "https://robosystems.ai/vocab/source": [
@@ -1999,7 +1999,7 @@
       ],
       "rdfs:label": [
         {
-          "@value": "assets",
+          "@value": "asset",
           "@language": "en"
         }
       ]

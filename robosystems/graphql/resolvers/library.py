@@ -47,6 +47,7 @@ from robosystems.graphql.types.library import (
   LibraryAssociation,
   LibraryElement,
   LibraryElementArc,
+  LibraryElementClassification,
   LibraryElementTreeNode,
   LibraryEquivalence,
   LibraryStructure,
@@ -57,6 +58,7 @@ from robosystems.operations.library.reads import (
   get_element,
   get_element_arcs,
   get_element_by_qname,
+  get_element_classifications,
   get_element_equivalents,
   get_element_tree,
   get_structure,
@@ -168,8 +170,6 @@ class LibraryQuery:
     taxonomy_id: strawberry.ID | None = None,
     source: str | None = None,
     classification: str | None = None,
-    statement_context: str | None = None,
-    derivation_role: str | None = None,
     element_type: str | None = None,
     is_abstract: bool | None = None,
     limit: int = 50,
@@ -179,9 +179,8 @@ class LibraryQuery:
   ) -> list[LibraryElement]:
     """List library elements with filters + pagination.
 
-    The three classification axes (`classification` / `statementContext`
-    / `derivationRole`) AND together. `isAbstract=true` → only abstract
-    grouping concepts; `false` → only concrete; omit for both.
+    `classification` filters on the FASB elementsOfFinancialStatements axis.
+    `isAbstract=true` → abstract only; `false` → concrete only; omit for both.
     """
     _validate_pagination(limit, offset)
     with _open_session(info) as session:
@@ -190,8 +189,6 @@ class LibraryQuery:
         taxonomy_id=str(taxonomy_id) if taxonomy_id else None,
         source=source,
         classification=classification,
-        statement_context=statement_context,
-        derivation_role=derivation_role,
         element_type=element_type,
         is_abstract=is_abstract,
         limit=limit,
@@ -276,6 +273,17 @@ class LibraryQuery:
       rows = get_element_arcs(session, element_id=str(id))
       return [LibraryElementArc.from_pydantic(r) for r in rows]
 
+  @strawberry.field
+  def library_element_classifications(
+    self,
+    info: Info[GraphQLContext, None],
+    id: strawberry.ID,
+  ) -> list[LibraryElementClassification]:
+    """All classification traits assigned to this element, grouped by category."""
+    with _open_session(info) as session:
+      rows = get_element_classifications(session, element_id=str(id))
+      return [LibraryElementClassification.from_pydantic(r) for r in rows]
+
   # ── Structures ─────────────────────────────────────────────────────────
 
   @strawberry.field
@@ -305,4 +313,9 @@ class LibraryQuery:
       return LibraryStructure.from_pydantic(row) if row else None
 
 
-__all__ = ["LibraryAssociation", "LibraryElementArc", "LibraryQuery"]
+__all__ = [
+  "LibraryAssociation",
+  "LibraryElementArc",
+  "LibraryElementClassification",
+  "LibraryQuery",
+]
