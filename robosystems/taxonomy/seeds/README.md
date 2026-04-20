@@ -106,7 +106,7 @@ against `main`, and decide element-by-element what to carry forward.
    (`standard`, `version`, `taxonomy_type`, `namespace_uri`,
    `description`, and either `forked_from`/`forked_at`/`upstream_tracking`
    or `origin`/`created_at`).
-2. The migration (`migrations/extensions/versions/0002_taxonomy_library_poc.py`)
+2. The migration (`migrations/extensions/versions/0002_taxonomy_library.py`)
    auto-discovers all `v*/taxonomy.jsonld` files under `seeds/` — no
    explicit list to update.
 3. If the new taxonomy introduces a new `source` value for elements or

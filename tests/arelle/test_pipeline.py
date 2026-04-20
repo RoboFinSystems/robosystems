@@ -31,6 +31,7 @@ SEEDS_DIR = Path(__file__).parent.parent.parent / "robosystems" / "taxonomy" / "
 
 SFAC6_SEED = SEEDS_DIR / "sfac6" / "v1" / "taxonomy.jsonld"
 FAC_SEED = SEEDS_DIR / "fac" / "v1" / "taxonomy.jsonld"
+FAC_TO_RS_GAAP_SEED = SEEDS_DIR / "fac-to-rs-gaap" / "v1" / "taxonomy.jsonld"
 
 
 @pytest.fixture(scope="module")
@@ -117,24 +118,30 @@ class TestSfac6RoundTrip:
 
 
 class TestFacMappingRoundTrip:
+  """Equivalence arcs live in the `fac-to-rs-gaap/v1` mapping seed, not in
+  the FAC concept seed — the architecture deliberately separates concept
+  definitions from cross-taxonomy bridges (see `taxonomy-library.md`).
+  """
+
   def test_has_equivalence_arcs(self) -> None:
-    if not FAC_SEED.exists():
-      pytest.skip(f"Seed not built: {FAC_SEED}")
-    pkg = load_taxonomy_package(FAC_SEED)
+    if not FAC_TO_RS_GAAP_SEED.exists():
+      pytest.skip(f"Seed not built: {FAC_TO_RS_GAAP_SEED}")
+    pkg = load_taxonomy_package(FAC_TO_RS_GAAP_SEED)
     equiv = [a for a in pkg.associations if a.association_type == "equivalence"]
-    # At least 200 unique equivalence arcs (FAC → us-gaap 2017)
+    # At least 200 unique equivalence arcs (FAC → rs-gaap); the seed
+    # description claims ~221 so 200 is a conservative floor.
     assert len(equiv) >= 200, f"Expected >= 200 equivalence arcs, got {len(equiv)}"
 
   def test_cost_of_revenue_collapses_rs_gaap_variants(self) -> None:
     """fac:CostOfRevenue should collapse several rs-gaap variants.
 
-    After the rs-gaap rename, fac's equivalence arcs point at our
-    namespace (not us-gaap-2017). The library is fully our own; external
-    us-gaap lives in optional interop seeds.
+    fac-to-rs-gaap's equivalence arcs point at our namespace (not
+    us-gaap-2017). The library is fully our own; external us-gaap lives
+    in optional interop seeds.
     """
-    if not FAC_SEED.exists():
-      pytest.skip(f"Seed not built: {FAC_SEED}")
-    pkg = load_taxonomy_package(FAC_SEED)
+    if not FAC_TO_RS_GAAP_SEED.exists():
+      pytest.skip(f"Seed not built: {FAC_TO_RS_GAAP_SEED}")
+    pkg = load_taxonomy_package(FAC_TO_RS_GAAP_SEED)
     cost_of_rev_targets = {
       a.to_qname
       for a in pkg.associations

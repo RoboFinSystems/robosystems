@@ -23,6 +23,15 @@ from robosystems.config import env
 _VALID_SCHEMA_PATTERN = re.compile(r"^kg[0-9a-f]{16,}$")
 
 
+# Sentinel used in place of a real graph_id when the caller is routing to
+# the taxonomy library. `extensions_session(LIBRARY_GRAPH_ID)` binds the
+# session's search_path to `public`; the GraphQL context stamps it as the
+# graph_type + schema_extension name; `check_graph_access` short-circuits
+# on it (any authenticated user can read the library). Defined here so
+# all sentinel call sites share one string and renames don't drift.
+LIBRARY_GRAPH_ID = "library"
+
+
 def get_extensions_database_url() -> str:
   """Get extensions database URL with SSL for staging/prod."""
   database_url = env.EXTENSIONS_DATABASE_URL
@@ -130,7 +139,7 @@ def extensions_session(graph_id: str):
   """
   session: Session = _get_session_factory()()
   try:
-    if graph_id == "library":
+    if graph_id == LIBRARY_GRAPH_ID:
       session.execute(text("SET search_path TO public"))
     else:
       schema = _sanitize_schema(graph_id)

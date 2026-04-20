@@ -25,6 +25,7 @@ from __future__ import annotations
 import strawberry
 from strawberry.types import Info
 
+from robosystems.db.extensions import LIBRARY_GRAPH_ID as _LIBRARY_EXTENSION
 from robosystems.graphql.context import GraphQLContext
 from robosystems.graphql.resolvers._common import (
   open_extensions_session as _open_session,
@@ -56,8 +57,6 @@ from robosystems.operations.library.reads import (
   list_taxonomy_arcs,
   search_elements,
 )
-
-_LIBRARY_EXTENSION = "library"
 
 
 @strawberry.type

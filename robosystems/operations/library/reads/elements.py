@@ -59,6 +59,62 @@ def _references_for(
   ]
 
 
+def _labels_by_element(
+  session: Session, element_ids: list[str]
+) -> dict[str, list[LibraryLabelResponse]]:
+  """Batch-load labels for every element in `element_ids`.
+
+  Single ``WHERE element_id IN (...)`` query avoids the N+1 pattern when
+  a caller (e.g., `list_elements(include_labels=True)`) would otherwise
+  issue one query per element. Returns a dict keyed by ``element_id``
+  with an empty list for elements that have no labels.
+  """
+  grouped: dict[str, list[LibraryLabelResponse]] = {eid: [] for eid in element_ids}
+  if not element_ids:
+    return grouped
+  rows = (
+    session.execute(
+      select(ElementLabel)
+      .where(ElementLabel.element_id.in_(element_ids))
+      .order_by(ElementLabel.element_id, ElementLabel.role, ElementLabel.language)
+    )
+    .scalars()
+    .all()
+  )
+  for r in rows:
+    grouped[r.element_id].append(
+      LibraryLabelResponse(role=r.role, language=r.language, text=r.text)
+    )
+  return grouped
+
+
+def _references_by_element(
+  session: Session, element_ids: list[str]
+) -> dict[str, list[LibraryReferenceResponse]]:
+  """Batch-load references for every element in `element_ids`."""
+  grouped: dict[str, list[LibraryReferenceResponse]] = {eid: [] for eid in element_ids}
+  if not element_ids:
+    return grouped
+  rows = (
+    session.execute(
+      select(ElementReference)
+      .where(ElementReference.element_id.in_(element_ids))
+      .order_by(
+        ElementReference.element_id,
+        ElementReference.ref_type,
+        ElementReference.citation,
+      )
+    )
+    .scalars()
+    .all()
+  )
+  for r in rows:
+    grouped[r.element_id].append(
+      LibraryReferenceResponse(ref_type=r.ref_type, citation=r.citation, uri=r.uri)
+    )
+  return grouped
+
+
 def _element_to_response(
   session: Session,
   element: Element,
@@ -136,9 +192,36 @@ def list_elements(
   query = query.order_by(Element.qname.asc()).limit(limit).offset(offset)
 
   elements = session.execute(query).scalars().all()
+  if not elements:
+    return []
+
+  # Batch-load labels + references in one query each (avoids N+1 when
+  # include_labels=True; both are no-ops when the flag is False).
+  element_ids = [e.id for e in elements]
+  labels_by_id = _labels_by_element(session, element_ids) if include_labels else {}
+  refs_by_id = (
+    _references_by_element(session, element_ids) if include_references else {}
+  )
+
   return [
-    _element_to_response(
-      session, e, include_labels=include_labels, include_references=include_references
+    LibraryElementResponse(
+      id=e.id,
+      qname=e.qname or e.name,
+      namespace=e.namespace,
+      name=e.name,
+      classification=e.classification,
+      statement_context=e.statement_context,
+      derivation_role=e.derivation_role,
+      balance_type=e.balance_type,
+      period_type=e.period_type,
+      is_abstract=e.is_abstract,
+      is_monetary=e.is_monetary,
+      element_type=e.element_type,
+      source=e.source,
+      taxonomy_id=e.taxonomy_id,
+      parent_id=e.parent_id,
+      labels=labels_by_id.get(e.id, []),
+      references=refs_by_id.get(e.id, []),
     )
     for e in elements
   ]
@@ -248,8 +331,15 @@ def get_element_tree(
         if child is not None:
           child_nodes.append(_walk(child, depth + 1))
 
+    # Tree navigation doesn't need the per-node label + reference payload;
+    # skipping them saves 2 queries per node (O(N) → O(1)-ish) for
+    # deep/wide trees. Callers that need full element detail use
+    # `get_element` on a specific id.
     return LibraryElementTreeNode(
-      element=_element_to_response(session, elem), children=child_nodes
+      element=_element_to_response(
+        session, elem, include_labels=False, include_references=False
+      ),
+      children=child_nodes,
     )
 
   return _walk(root, depth=0)

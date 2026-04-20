@@ -17,6 +17,7 @@ from __future__ import annotations
 
 from fastapi import HTTPException, status
 
+from robosystems.db.extensions import LIBRARY_GRAPH_ID
 from robosystems.models.core import User
 
 
@@ -34,7 +35,7 @@ def check_graph_access(user: User, graph_id: str) -> None:
   applies to library content.
   """
   # Library sentinel: accessible to any authenticated user. No ACL check.
-  if graph_id == "library":
+  if graph_id == LIBRARY_GRAPH_ID:
     return
 
   from robosystems.config.shared_repositories import (

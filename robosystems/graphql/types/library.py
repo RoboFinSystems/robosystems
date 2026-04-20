@@ -14,10 +14,6 @@ from __future__ import annotations
 
 import strawberry
 
-# PaginationInfo must be imported before any type that references it via
-# the Pydantic decorator (registry ordering); the ledger types do the
-# same dance. Unused-import noqa applies.
-from robosystems.graphql.types.common import PaginationInfo  # noqa: F401
 from robosystems.models.api.library import (
   LibraryAssociationResponse as PydanticLibraryAssociation,
 )

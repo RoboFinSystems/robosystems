@@ -545,12 +545,14 @@ def write_taxonomy_package(
     ).fetchone()
     return row[0] if row else None
 
+  unresolved: list[tuple[str, str, str]] = []
   for assoc in package.associations:
     from_id = _resolve_qname(assoc.from_qname)
     to_id = _resolve_qname(assoc.to_qname)
     if from_id is None or to_id is None:
       # Association target not loaded in any package yet — skip; will
       # be re-attemptable when the dependent package loads.
+      unresolved.append((assoc.from_qname, assoc.to_qname, assoc.association_type))
       continue
 
     structure_id = (
@@ -560,6 +562,20 @@ def write_taxonomy_package(
     )
     _write_association(conn, assoc, structure_id, from_id, to_id)
     counts["associations"] += 1
+
+  # For cross-taxonomy mapping seeds (sfac6-to-fac, fac-to-rs-gaap) the
+  # association arcs ARE the primary data. Dropping them silently would
+  # mean silent mapping holes — surface a count + representative sample
+  # so seed-curation drift is observable.
+  if unresolved:
+    sample = unresolved[:5]
+    logger.warning(
+      "[%s] %d association arc(s) skipped — from/to qname not in library. Sample: %s%s",
+      package.name,
+      len(unresolved),
+      ", ".join(f"{f} --{t_}--> {t}" for f, t, t_ in sample),
+      "" if len(unresolved) <= 5 else f" (+{len(unresolved) - 5} more)",
+    )
 
   logger.info(f"Wrote {package.name}: {counts}")
   return counts

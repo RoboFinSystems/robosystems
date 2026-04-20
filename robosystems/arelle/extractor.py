@@ -293,7 +293,10 @@ def _add_reference_triples(graph: Graph, model_xbrl: Any) -> int:
       continue
 
     # Reference linkbase resources have nested <Publisher>, <Name>, <Number>, etc.
-    # Build a citation string from those parts.
+    # Build a citation string from those parts. Upstream reference resources
+    # occasionally have malformed XML or unexpected child structures; we
+    # tolerate them non-fatally but log at debug so extraction drift during
+    # seed curation is observable rather than silent.
     parts: list[str] = []
     ref_type: str | None = None
     try:
@@ -312,7 +315,7 @@ def _add_reference_triples(graph: Graph, model_xbrl: Any) -> int:
             elif "IFRS" in text:
               ref_type = "IFRS"
     except Exception:
-      pass
+      logger.debug("Reference parse skipped for concept %s", concept_iri, exc_info=True)
 
     citation = "; ".join(parts) if parts else (ref_obj.textValue or "").strip()
     if not citation:

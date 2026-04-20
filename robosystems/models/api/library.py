@@ -165,7 +165,14 @@ class LibraryElementArcResponse(BaseModel):
   """
 
   id: str
-  direction: str = Field(..., description="'outgoing' | 'incoming'")
+  # Kept as `str` rather than `Literal["outgoing","incoming"]`: the
+  # Strawberry Pydantic auto-decorator in `graphql/types/library.py`
+  # can't map Python Literal to GraphQL scalars. Producers emit only
+  # 'outgoing' or 'incoming'; a caller-side validator would duplicate
+  # that invariant without GraphQL enforcement.
+  direction: str = Field(
+    ..., description="'outgoing' (this element is source) | 'incoming' (target)"
+  )
   association_type: str
   arcrole: str | None = None
   taxonomy_id: str | None = None

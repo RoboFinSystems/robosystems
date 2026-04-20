@@ -1,4 +1,4 @@
-"""Taxonomy library POC — JSON-LD seeds + multi-axis classification +
+"""Taxonomy library — JSON-LD seeds + multi-axis classification +
 provision-time library copy + immutability + CoA SFAC 6 anchor tagging.
 
 Replaces the Python-dict seed (`seed_reporting_taxonomy`) with JSON-LD
@@ -320,26 +320,6 @@ SEED_FILES = [
   SEEDS_DIR / "rs-gaap-presentation" / "v1" / "taxonomy.jsonld",
 ]
 
-# Map Charlie's 20 type-subtype networks to the 5 canonical classifications.
-# Cash flow + disclosure networks don't cleanly fit asset/liability/equity/
-# revenue/expense — they keep whatever classification the extractor heuristic
-# assigned (POC compromise; fixing the CHECK to add 'cashflow'/'disclosure'
-# is a Phase 1 cleanup).
-NETWORK_TO_CLASSIFICATION: dict[str, str] = {
-  "CurrentAssets": "asset",
-  "NoncurrentAssets": "asset",
-  "CurrentLiabilities": "liability",
-  "NoncurrentLiabilities": "liability",
-  "EquityAttributableToParent": "equity",
-  "EquityAttributableToNoncontrollingInterest": "equity",
-  "TemporaryEquity": "equity",
-  "Revenues": "revenue",
-  "OtherOperatingIncome": "revenue",
-  "CostOfRevenue": "expense",
-  "OperatingExpenses": "expense",
-  "NonoperatingIncomeExpenses": "expense",
-}
-
 
 def upgrade() -> None:
   # ──────────────────────────────────────────────────────────────────────
@@ -580,7 +560,7 @@ def upgrade() -> None:
 
   for seed_path in SEED_FILES:
     if not seed_path.exists():
-      # POC — seed files are committed. Missing file is an error in
+      # Seed files are committed to the repo. Missing file is an error in
       # production; allow a skip for partial-build scenarios during
       # development with a clear log.
       print(f"  [WARN] Seed file missing, skipping: {seed_path}")
@@ -607,11 +587,28 @@ def upgrade() -> None:
   #
   # This fixes ~220 rs-gaap concepts with high confidence. The remaining
   # ~16,900 keep their heuristic classification — flagging that as tech
-  # debt (Phase 1 work: derive classification from Charlie's type-subtype
-  # networks, which requires preserving XBRL role URIs through
-  # serialization — not in scope for the POC).
+  # debt (derive classification from Charlie's type-subtype networks,
+  # which requires preserving XBRL role URIs through serialization —
+  # not blocking library launch).
+  # Propagation uses a temp tracking table instead of an updated_at time
+  # window. The prior approach (``updated_at > now() - interval '5 minutes'``)
+  # broke silently whenever the migration exceeded the window on slow
+  # RDS instances — the hierarchy walk would stop seeing parents
+  # mid-loop and leave classification gaps with no error. Threading the
+  # touched-id set through RETURNING → INSERT gives a deterministic gate
+  # independent of wall-clock time.
+  conn.execute(
+    sa.text(
+      """
+      CREATE TEMP TABLE _reclassified_ids (
+        id VARCHAR PRIMARY KEY
+      ) ON COMMIT DROP
+      """
+    )
+  )
+
   print("  Propagating FAC classifications to rs-gaap via equivalence arcs…")
-  result = conn.execute(
+  seeded = conn.execute(
     sa.text(
       """
       UPDATE public.elements AS rs
@@ -628,10 +625,20 @@ def upgrade() -> None:
         AND (rs.classification IS DISTINCT FROM fac.classification
              OR rs.statement_context IS DISTINCT FROM fac.statement_context
              OR rs.derivation_role IS DISTINCT FROM fac.derivation_role)
+      RETURNING rs.id
       """
     )
-  )
-  print(f"    rs-gaap reclassified from FAC equivalence: {result.rowcount} elements")
+  ).fetchall()
+  seeded_ids = [row[0] for row in seeded]
+  print(f"    rs-gaap reclassified from FAC equivalence: {len(seeded_ids)} elements")
+  if seeded_ids:
+    conn.execute(
+      sa.text(
+        "INSERT INTO _reclassified_ids (id) SELECT unnest(CAST(:ids AS text[])) "
+        "ON CONFLICT (id) DO NOTHING"
+      ),
+      {"ids": seeded_ids},
+    )
 
   # Also propagate classification via general-special hierarchy from
   # already-classified rs-gaap concepts (fixed point iteration). When
@@ -641,7 +648,7 @@ def upgrade() -> None:
   print("  Propagating via general-special hierarchy…")
   total_propagated = 0
   for pass_num in range(1, 6):
-    hop_result = conn.execute(
+    hop_rows = conn.execute(
       sa.text(
         """
         UPDATE public.elements AS child
@@ -651,23 +658,29 @@ def upgrade() -> None:
             updated_at = now()
         FROM public.associations a
         JOIN public.elements parent ON parent.id = a.from_element_id
+        JOIN _reclassified_ids seed ON seed.id = parent.id
         WHERE a.to_element_id = child.id
           AND a.association_type = 'general-special'
           AND parent.source = 'rs-gaap'
           AND child.source = 'rs-gaap'
           AND parent.classification IS DISTINCT FROM child.classification
-          -- Only propagate from concepts that were previously reclassified
-          -- (either via FAC equivalence or a prior hierarchy hop). Detect
-          -- via updated_at being recent relative to the migration.
-          AND parent.updated_at > now() - interval '5 minutes'
+        RETURNING child.id
         """
       )
-    )
-    hopped = hop_result.rowcount
+    ).fetchall()
+    hopped_ids = [row[0] for row in hop_rows]
+    hopped = len(hopped_ids)
     total_propagated += hopped
     print(f"    Hop {pass_num}: {hopped} elements")
     if hopped == 0:
       break
+    conn.execute(
+      sa.text(
+        "INSERT INTO _reclassified_ids (id) SELECT unnest(CAST(:ids AS text[])) "
+        "ON CONFLICT (id) DO NOTHING"
+      ),
+      {"ids": hopped_ids},
+    )
   print(f"  Total propagated via hierarchy: {total_propagated}")
 
   # ──────────────────────────────────────────────────────────────────────
