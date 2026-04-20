@@ -15,7 +15,9 @@ from robosystems.models.api.library import (
 )
 from robosystems.models.extensions import (
   Association,
+  Classification,
   Element,
+  ElementClassification,
   ElementLabel,
   ElementReference,
   Structure,
@@ -88,6 +90,32 @@ def _labels_by_element(
   return grouped
 
 
+def _efs_classification_by_element(
+  session: Session, element_ids: list[str]
+) -> dict[str, str]:
+  """Batch-load FASB elementsOfFinancialStatements classification identifier.
+
+  Returns ``{element_id: identifier}`` — e.g., ``{"elem_xyz": "asset"}``.
+  Elements without an EFS classification assignment are absent from the
+  map (callers should default to ``None``).
+  """
+  result: dict[str, str] = {}
+  if not element_ids:
+    return result
+  rows = session.execute(
+    select(ElementClassification.element_id, Classification.identifier)
+    .join(Classification, Classification.id == ElementClassification.classification_id)
+    .where(
+      ElementClassification.element_id.in_(element_ids),
+      Classification.category == "elementsOfFinancialStatements",
+    )
+  ).all()
+  for element_id, identifier in rows:
+    # Multiple assignments per element are possible; first-wins is fine.
+    result.setdefault(element_id, identifier)
+  return result
+
+
 def _references_by_element(
   session: Session, element_ids: list[str]
 ) -> dict[str, list[LibraryReferenceResponse]]:
@@ -124,11 +152,13 @@ def _element_to_response(
 ) -> LibraryElementResponse:
   labels = _labels_for(session, element.id) if include_labels else []
   refs = _references_for(session, element.id) if include_references else []
+  efs = _efs_classification_by_element(session, [element.id]).get(element.id)
   return LibraryElementResponse(
     id=element.id,
     qname=element.qname or element.name,
     namespace=element.namespace,
     name=element.name,
+    classification=efs,
     balance_type=element.balance_type,
     period_type=element.period_type,
     is_abstract=element.is_abstract,
@@ -177,11 +207,22 @@ def list_elements(
   if source is not None:
     query = query.where(Element.source == source)
   if classification is not None:
-    pass  # classification filter removed; column no longer on Element
-  if statement_context is not None:
-    pass  # statement_context filter removed; column no longer on Element
-  if derivation_role is not None:
-    pass  # derivation_role filter removed; column no longer on Element
+    # FASB elementsOfFinancialStatements trait — EXISTS via junction.
+    query = query.where(
+      Element.id.in_(
+        select(ElementClassification.element_id)
+        .join(
+          Classification,
+          Classification.id == ElementClassification.classification_id,
+        )
+        .where(
+          Classification.category == "elementsOfFinancialStatements",
+          Classification.identifier == classification,
+        )
+      )
+    )
+  # statement_context and derivation_role were hand-rolled axes that have
+  # no FASB metamodel equivalent; accept and ignore for API compat.
   if element_type is not None:
     query = query.where(Element.element_type == element_type)
   if is_abstract is not None:
@@ -192,13 +233,15 @@ def list_elements(
   if not elements:
     return []
 
-  # Batch-load labels + references in one query each (avoids N+1 when
-  # include_labels=True; both are no-ops when the flag is False).
+  # Batch-load labels + references + EFS classifications in one query each
+  # (avoids N+1 when include_labels=True; label/ref loaders are no-ops
+  # when the flag is False).
   element_ids = [e.id for e in elements]
   labels_by_id = _labels_by_element(session, element_ids) if include_labels else {}
   refs_by_id = (
     _references_by_element(session, element_ids) if include_references else {}
   )
+  efs_by_id = _efs_classification_by_element(session, element_ids)
 
   return [
     LibraryElementResponse(
@@ -206,6 +249,7 @@ def list_elements(
       qname=e.qname or e.name,
       namespace=e.namespace,
       name=e.name,
+      classification=efs_by_id.get(e.id),
       balance_type=e.balance_type,
       period_type=e.period_type,
       is_abstract=e.is_abstract,

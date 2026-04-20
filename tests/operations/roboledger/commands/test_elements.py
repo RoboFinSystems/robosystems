@@ -213,6 +213,7 @@ class TestCreateElement:
     session.execute.side_effect = [
       _scalar_exec(taxonomy),
       _scalar_exec(parent),
+      _scalar_exec(None),  # EFS Classification lookup — None = no seed row
     ]
     result = create_element(session, self._body(parent_id="elem_parent"), "usr_1")
     assert result.depth == 1
@@ -232,7 +233,9 @@ class TestCreateElement:
     taxonomy = MagicMock()
     session.execute.return_value.scalar_one_or_none.return_value = taxonomy
     create_element(session, self._body(), "usr_1")
-    session.add.assert_called_once()
+    # Two adds: the Element itself and the ElementClassification junction
+    # row that anchors it to the FASB elementsOfFinancialStatements trait.
+    assert session.add.call_count == 2
     session.flush.assert_called()
 
 

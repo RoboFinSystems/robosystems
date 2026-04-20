@@ -46,7 +46,7 @@ _ROLLUP_SQL = text("""
     target.id AS reporting_element_id,
     target.name AS reporting_name,
     target.qname AS reporting_qname,
-    target.classification,
+    tcls.identifier AS classification,
     target.balance_type,
     source.id AS coa_element_id,
     source.name AS coa_name,
@@ -56,15 +56,19 @@ _ROLLUP_SQL = text("""
   FROM associations mapping
   JOIN elements source ON source.id = mapping.from_element_id
   JOIN elements target ON target.id = mapping.to_element_id
+  LEFT JOIN element_classifications tec ON tec.element_id = target.id
+  LEFT JOIN classifications tcls
+    ON tcls.id = tec.classification_id
+    AND tcls.category = 'elementsOfFinancialStatements'
   LEFT JOIN line_items li ON li.element_id = source.id
   LEFT JOIN entries e ON e.id = li.entry_id AND e.status = 'posted'
     AND (e.posting_date >= :start_date OR :start_date IS NULL)
     AND (e.posting_date <= :end_date OR :end_date IS NULL)
   WHERE mapping.structure_id = :mapping_id
     AND mapping.association_type = 'mapping'
-  GROUP BY target.id, target.name, target.qname, target.classification,
+  GROUP BY target.id, target.name, target.qname, tcls.identifier,
            target.balance_type, source.id, source.name, source.code
-  ORDER BY target.classification, target.name, source.code
+  ORDER BY tcls.identifier, target.name, source.code
 """)
 
 

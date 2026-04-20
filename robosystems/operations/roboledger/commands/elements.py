@@ -27,7 +27,12 @@ from robosystems.models.api.extensions.taxonomies import (
   ElementResponse,
   UpdateElementRequest,
 )
-from robosystems.models.extensions import Element, Taxonomy
+from robosystems.models.extensions import (
+  Classification,
+  Element,
+  ElementClassification,
+  Taxonomy,
+)
 from robosystems.operations.roboledger.commands._guards import (
   LibraryImmutableError,
   assert_not_library_origin,
@@ -64,7 +69,9 @@ class ElementCycleError(ValueError):
   """Raised when an update would create a cycle in the element hierarchy."""
 
 
-def _element_to_response(row: Element) -> ElementResponse:
+def _element_to_response(
+  row: Element, classification: str | None = None
+) -> ElementResponse:
   return ElementResponse(
     id=row.id,
     code=row.code,
@@ -72,6 +79,7 @@ def _element_to_response(row: Element) -> ElementResponse:
     description=row.description,
     qname=row.qname,
     namespace=row.namespace,
+    classification=classification,
     balance_type=row.balance_type,
     period_type=row.period_type,
     is_abstract=row.is_abstract,
@@ -217,7 +225,61 @@ def create_element(
   )
   session.add(element)
   session.flush()
-  return _element_to_response(element)
+
+  # Map the legacy CreateElementRequest.classification hint onto a FASB
+  # elementsOfFinancialStatements trait assignment so downstream report
+  # renderers (which JOIN through element_classifications) see the
+  # native account's economic nature.
+  efs = _EFS_FROM_LEGACY.get(body.classification or "")
+  _assign_efs_classification(session, element.id, body.classification)
+
+  return _element_to_response(element, efs)
+
+
+# CreateElementRequest.classification literal → FASB EFS identifier.
+# The legacy enum had "inflow"/"outflow"/"cashflow"; FASB tags revenue
+# (inflow) and expense (outflow) directly and has no first-class
+# "cashflow" primitive, so cashflow and the rarely-used outflow alias
+# collapse onto their closest EFS counterparts.
+_EFS_FROM_LEGACY: dict[str, str] = {
+  "asset": "asset",
+  "liability": "liability",
+  "equity": "equity",
+  "inflow": "revenue",
+  "outflow": "expense",
+  "cashflow": "revenue",  # cash inflow; caller should override if needed
+}
+
+
+def _assign_efs_classification(
+  session: Session, element_id: str, legacy_classification: str | None
+) -> None:
+  """Link a native element to the matching FASB EFS classification.
+
+  No-op if the legacy hint is unknown or the EFS Classification row is
+  missing (e.g., in tests that don't seed the library).
+  """
+  if not legacy_classification:
+    return
+  efs_identifier = _EFS_FROM_LEGACY.get(legacy_classification)
+  if efs_identifier is None:
+    return
+  classification_row = session.execute(
+    select(Classification).where(
+      Classification.category == "elementsOfFinancialStatements",
+      Classification.identifier == efs_identifier,
+    )
+  ).scalar_one_or_none()
+  if classification_row is None:
+    return
+  session.add(
+    ElementClassification(
+      element_id=element_id,
+      classification_id=classification_row.id,
+      is_primary=True,
+    )
+  )
+  session.flush()
 
 
 def update_element(session: Session, body: UpdateElementRequest) -> ElementResponse:

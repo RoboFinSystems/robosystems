@@ -77,7 +77,7 @@
     "format": "XBRL metamodel (traits + domains + members)"
   },
   "forked_at": "2026-04-20",
-  "description": "FASB us-gaap metamodel classification vocabulary — 24 orthogonal trait axes (elementsOfFinancialStatements, liquidity, activityType, operatingNonoperating, recordedValue, realizationStatus, hedging, leaseType, …) covering 95 classification members, plus the flowClassification axis (inflow/outflow/accrual/contra) derived from FASB's instant-* arcroles. Each member is a (category, identifier) pair modeled as a Classification node; element assignments live in rs-gaap-to-metamodel/v1/.",
+  "description": "FASB us-gaap metamodel classification vocabulary \u2014 24 orthogonal trait axes (elementsOfFinancialStatements, liquidity, activityType, operatingNonoperating, recordedValue, realizationStatus, hedging, leaseType, \u2026) covering 95 classification members, plus the flowClassification axis (inflow/outflow/accrual/contra) derived from FASB's instant-* arcroles. Each member is a (category, identifier) pair modeled as a Classification node; element assignments live in rs-gaap-to-metamodel/v1/.",
   "@graph": [
     {
       "@id": "metamodel:statisticalMeasurement/arithmeticAverage",
@@ -1980,7 +1980,7 @@
       ]
     },
     {
-      "@id": "metamodel:elementsOfFinancialStatements/assets",
+      "@id": "metamodel:elementsOfFinancialStatements/asset",
       "@type": "rs:Classification",
       "https://robosystems.ai/vocab/category": [
         {

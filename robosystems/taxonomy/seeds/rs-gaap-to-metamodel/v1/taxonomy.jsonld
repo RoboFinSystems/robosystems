@@ -82,7 +82,7 @@
           "@id": "metamodel:activityType/operatingActivity"
         },
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/current"
@@ -192,7 +192,7 @@
           "@id": "metamodel:activityType/operatingActivity"
         },
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/current"
@@ -206,7 +206,7 @@
           "@id": "metamodel:activityType/operatingActivity"
         },
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/current"
@@ -223,7 +223,7 @@
       "@id": "rs-gaap:AccountsReceivableGrossNoncurrent",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/noncurrent"
@@ -240,7 +240,7 @@
           "@id": "metamodel:activityType/operatingActivity"
         },
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/current"
@@ -251,7 +251,7 @@
       "@id": "rs-gaap:AccountsReceivableNetNoncurrent",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/noncurrent"
@@ -475,7 +475,7 @@
       "@id": "rs-gaap:AccruedInvestmentIncomeReceivable",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         }
       ]
     },
@@ -812,7 +812,7 @@
       "@id": "rs-gaap:AdvanceRoyaltiesCurrent",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/current"
@@ -823,7 +823,7 @@
       "@id": "rs-gaap:AdvanceRoyaltiesNoncurrent",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/noncurrent"
@@ -834,7 +834,7 @@
       "@id": "rs-gaap:AdvancesOnInventoryPurchases",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/current"
@@ -845,7 +845,7 @@
       "@id": "rs-gaap:AdvancesToAffiliate",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/noncurrent"
@@ -878,7 +878,7 @@
       "@id": "rs-gaap:AgriculturalRelatedInventory",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/current"
@@ -889,7 +889,7 @@
       "@id": "rs-gaap:AgriculturalRelatedInventoryFeedAndSupplies",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/current"
@@ -900,7 +900,7 @@
       "@id": "rs-gaap:AgriculturalRelatedInventoryGrowingCrops",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/current"
@@ -911,7 +911,7 @@
       "@id": "rs-gaap:AgriculturalRelatedInventoryPlantMaterial",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/current"
@@ -947,7 +947,7 @@
       "@id": "rs-gaap:AirlineRelatedInventory",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/current"
@@ -958,7 +958,7 @@
       "@id": "rs-gaap:AirlineRelatedInventoryAircraftFuel",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/current"
@@ -969,7 +969,7 @@
       "@id": "rs-gaap:AirlineRelatedInventoryAircraftParts",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/current"
@@ -1083,7 +1083,7 @@
       "@id": "rs-gaap:AmortizationMethodQualifiedAffordableHousingProjectInvestments",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/noncurrent"
@@ -1373,7 +1373,7 @@
       "@id": "rs-gaap:AssetBackedSecuritiesAtCarryingValue",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/current"
@@ -1401,7 +1401,7 @@
       "@id": "rs-gaap:AssetRecoveryDamagedPropertyCostsNoncurrent",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/noncurrent"
@@ -1454,7 +1454,7 @@
       "@id": "rs-gaap:Assets",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         }
       ]
     },
@@ -1462,7 +1462,7 @@
       "@id": "rs-gaap:AssetsCurrent",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/current"
@@ -1473,7 +1473,7 @@
       "@id": "rs-gaap:AssetsHeldForSaleNotPartOfDisposalGroupCurrent",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/current"
@@ -1484,7 +1484,7 @@
       "@id": "rs-gaap:AssetsHeldForSaleNotPartOfDisposalGroupCurrentOther",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/current"
@@ -1495,7 +1495,7 @@
       "@id": "rs-gaap:AssetsHeldInTrustCurrent",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/current"
@@ -1506,7 +1506,7 @@
       "@id": "rs-gaap:AssetsHeldInTrustNoncurrent",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/noncurrent"
@@ -1517,7 +1517,7 @@
       "@id": "rs-gaap:AssetsNoncurrent",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/noncurrent"
@@ -1528,7 +1528,7 @@
       "@id": "rs-gaap:AssetsOfDisposalGroupIncludingDiscontinuedOperationCurrent",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/current"
@@ -1545,7 +1545,7 @@
       "@id": "rs-gaap:AuctionRateSecuritiesNoncurrent",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/noncurrent"
@@ -1617,7 +1617,7 @@
       "@id": "rs-gaap:BuildingsAndImprovementsGross",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/noncurrent"
@@ -1666,7 +1666,7 @@
       "@id": "rs-gaap:BusinessCombinationContingentConsiderationAssetCurrent",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/current"
@@ -1677,7 +1677,7 @@
       "@id": "rs-gaap:BusinessCombinationContingentConsiderationAssetNoncurrent",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/noncurrent"
@@ -1746,7 +1746,7 @@
       "@id": "rs-gaap:CapitalizedComputerSoftwareGross",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:flowClassification/contra"
@@ -1777,7 +1777,7 @@
           "@id": "metamodel:activityType/operatingActivity"
         },
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/current"
@@ -1805,7 +1805,7 @@
       "@id": "rs-gaap:CashAndCashEquivalentsAtCarryingValue",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/current"
@@ -1816,7 +1816,7 @@
       "@id": "rs-gaap:CashAndDueFromBanks",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/current"
@@ -1827,7 +1827,7 @@
       "@id": "rs-gaap:CashCashEquivalentsAndShortTermInvestments",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/current"
@@ -1865,7 +1865,7 @@
       "@id": "rs-gaap:CashEquivalentsAtCarryingValue",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/current"
@@ -1879,7 +1879,7 @@
           "@id": "metamodel:activityType/operatingActivity"
         },
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/current"
@@ -1920,7 +1920,7 @@
           "@id": "metamodel:activityType/operatingActivity"
         },
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/current"
@@ -1934,7 +1934,7 @@
       "@id": "rs-gaap:CertificatesOfDepositAtCarryingValue",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/current"
@@ -1973,7 +1973,7 @@
       "@id": "rs-gaap:CommercialPaperAtCarryingValue",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/current"
@@ -2004,7 +2004,7 @@
           "@id": "metamodel:derivativeContract/commodityContract"
         },
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/current"
@@ -2018,7 +2018,7 @@
           "@id": "metamodel:derivativeContract/commodityContract"
         },
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/noncurrent"
@@ -2113,7 +2113,7 @@
       "@id": "rs-gaap:ConstructionInProgressGross",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/noncurrent"
@@ -2163,7 +2163,7 @@
       "@id": "rs-gaap:ContractReceivableDueAfterOneYear",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/noncurrent"
@@ -2174,7 +2174,7 @@
       "@id": "rs-gaap:ContractReceivableDueFiveYearsOrMore",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/noncurrent"
@@ -2185,7 +2185,7 @@
       "@id": "rs-gaap:ContractReceivableDueFourToFiveYears",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/noncurrent"
@@ -2196,7 +2196,7 @@
       "@id": "rs-gaap:ContractReceivableDueOneToTwoYears",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/noncurrent"
@@ -2210,7 +2210,7 @@
           "@id": "metamodel:activityType/operatingActivity"
         },
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/current"
@@ -2224,7 +2224,7 @@
       "@id": "rs-gaap:ContractReceivableDueThreeToFourYears",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/noncurrent"
@@ -2235,7 +2235,7 @@
       "@id": "rs-gaap:ContractReceivableDueTwoToThreeYears",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/noncurrent"
@@ -2246,7 +2246,7 @@
       "@id": "rs-gaap:ContractWithCustomerAssetNetCurrent",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/current"
@@ -2257,7 +2257,7 @@
       "@id": "rs-gaap:ContractWithCustomerAssetNetNoncurrent",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/noncurrent"
@@ -2548,7 +2548,7 @@
       "@id": "rs-gaap:CreditAndDebitCardReceivablesAtCarryingValue",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/current"
@@ -2559,7 +2559,7 @@
       "@id": "rs-gaap:CrudeOilAndNaturalGasLiquids",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/current"
@@ -2592,7 +2592,7 @@
       "@id": "rs-gaap:CustomerFunds",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/noncurrent"
@@ -2661,7 +2661,7 @@
       "@id": "rs-gaap:DecommissioningFundInvestments",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/noncurrent"
@@ -2749,7 +2749,7 @@
       "@id": "rs-gaap:DeferredCompensationPlanAssets",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/noncurrent"
@@ -2782,7 +2782,7 @@
       "@id": "rs-gaap:DeferredCosts",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/noncurrent"
@@ -2793,7 +2793,7 @@
       "@id": "rs-gaap:DeferredCostsCurrent",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/current"
@@ -2804,7 +2804,7 @@
       "@id": "rs-gaap:DeferredCostsLeasingNetCurrent",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/current"
@@ -2815,7 +2815,7 @@
       "@id": "rs-gaap:DeferredCostsLeasingNetNoncurrent",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/noncurrent"
@@ -2826,7 +2826,7 @@
       "@id": "rs-gaap:DeferredFuelCost",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/current"
@@ -2845,7 +2845,7 @@
       "@id": "rs-gaap:DeferredGasCost",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/current"
@@ -2867,7 +2867,7 @@
       "@id": "rs-gaap:DeferredIncomeTaxAssetsNet",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/noncurrent"
@@ -2908,7 +2908,7 @@
       "@id": "rs-gaap:DeferredOfferingCosts",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/current"
@@ -2944,7 +2944,7 @@
       "@id": "rs-gaap:DeferredRentAssetNetCurrent",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/current"
@@ -2977,7 +2977,7 @@
       "@id": "rs-gaap:DeferredRentReceivablesNetNoncurrent",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/noncurrent"
@@ -3024,7 +3024,7 @@
       "@id": "rs-gaap:DeferredStormAndPropertyReserveDeficiencyCurrent",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/current"
@@ -3035,7 +3035,7 @@
       "@id": "rs-gaap:DeferredStormAndPropertyReserveDeficiencyNoncurrent",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/noncurrent"
@@ -3123,7 +3123,7 @@
       "@id": "rs-gaap:DemandSideManagementProgramCostsNoncurrent",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/noncurrent"
@@ -3182,7 +3182,7 @@
       "@id": "rs-gaap:DepositsAssetsCurrent",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/current"
@@ -3193,7 +3193,7 @@
       "@id": "rs-gaap:DepositsAssetsNoncurrent",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/noncurrent"
@@ -3272,7 +3272,7 @@
       "@id": "rs-gaap:DerivativeAssets",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:recordedValue/reportedAtFairValue"
@@ -3283,7 +3283,7 @@
       "@id": "rs-gaap:DerivativeAssetsCurrent",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/current"
@@ -3294,7 +3294,7 @@
       "@id": "rs-gaap:DerivativeAssetsNoncurrent",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/noncurrent"
@@ -3305,7 +3305,7 @@
       "@id": "rs-gaap:DerivativeInstrumentsAndHedges",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/current"
@@ -3335,7 +3335,7 @@
       "@id": "rs-gaap:DerivativeInstrumentsAndHedgesNoncurrent",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/noncurrent"
@@ -3595,7 +3595,7 @@
       "@id": "rs-gaap:DisposalGroupIncludingDiscontinuedOperationAccountsNotesAndLoansReceivableNet",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/current"
@@ -3652,7 +3652,7 @@
       "@id": "rs-gaap:DisposalGroupIncludingDiscontinuedOperationAssetsNoncurrent",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/noncurrent"
@@ -3663,7 +3663,7 @@
       "@id": "rs-gaap:DisposalGroupIncludingDiscontinuedOperationCashAndCashEquivalents",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/current"
@@ -3696,7 +3696,7 @@
       "@id": "rs-gaap:DisposalGroupIncludingDiscontinuedOperationDeferredTaxAssets",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/noncurrent"
@@ -3718,7 +3718,7 @@
       "@id": "rs-gaap:DisposalGroupIncludingDiscontinuedOperationGoodwillCurrent",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/current"
@@ -3735,7 +3735,7 @@
       "@id": "rs-gaap:DisposalGroupIncludingDiscontinuedOperationGoodwillNoncurrent",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/noncurrent"
@@ -3746,7 +3746,7 @@
       "@id": "rs-gaap:DisposalGroupIncludingDiscontinuedOperationIntangibleAssetsCurrent",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/current"
@@ -3763,7 +3763,7 @@
       "@id": "rs-gaap:DisposalGroupIncludingDiscontinuedOperationIntangibleAssetsNoncurrent",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/noncurrent"
@@ -3774,7 +3774,7 @@
       "@id": "rs-gaap:DisposalGroupIncludingDiscontinuedOperationInventoryCurrent",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/current"
@@ -3791,7 +3791,7 @@
       "@id": "rs-gaap:DisposalGroupIncludingDiscontinuedOperationInventoryNoncurrent",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/noncurrent"
@@ -3802,7 +3802,7 @@
       "@id": "rs-gaap:DisposalGroupIncludingDiscontinuedOperationOtherCurrentAssets",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/current"
@@ -3827,7 +3827,7 @@
       "@id": "rs-gaap:DisposalGroupIncludingDiscontinuedOperationOtherNoncurrentAssets",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/noncurrent"
@@ -3878,7 +3878,7 @@
       "@id": "rs-gaap:DisposalGroupIncludingDiscontinuedOperationPropertyPlantAndEquipmentCurrent",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/current"
@@ -3895,7 +3895,7 @@
       "@id": "rs-gaap:DisposalGroupIncludingDiscontinuedOperationPropertyPlantAndEquipmentNoncurrent",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/noncurrent"
@@ -4034,7 +4034,7 @@
       "@id": "rs-gaap:DueFromBanks",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/current"
@@ -4153,7 +4153,7 @@
       "@id": "rs-gaap:EnergyMarketingContractsAssetsCurrent",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/current"
@@ -4164,7 +4164,7 @@
       "@id": "rs-gaap:EnergyMarketingContractsAssetsNoncurrent",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/noncurrent"
@@ -4175,7 +4175,7 @@
       "@id": "rs-gaap:EnergyRelatedInventory",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/current"
@@ -4186,7 +4186,7 @@
       "@id": "rs-gaap:EnergyRelatedInventoryChemicals",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/current"
@@ -4197,7 +4197,7 @@
       "@id": "rs-gaap:EnergyRelatedInventoryCoal",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/current"
@@ -4208,7 +4208,7 @@
       "@id": "rs-gaap:EnergyRelatedInventoryGasStoredUnderground",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/current"
@@ -4219,7 +4219,7 @@
       "@id": "rs-gaap:EnergyRelatedInventoryNaturalGasInStorage",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/current"
@@ -4230,7 +4230,7 @@
       "@id": "rs-gaap:EnergyRelatedInventoryNaturalGasLiquids",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/current"
@@ -4241,7 +4241,7 @@
       "@id": "rs-gaap:EnergyRelatedInventoryOtherFossilFuel",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/current"
@@ -4252,7 +4252,7 @@
       "@id": "rs-gaap:EnergyRelatedInventoryPetroleum",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/current"
@@ -4263,7 +4263,7 @@
       "@id": "rs-gaap:EnergyRelatedInventoryPropaneGas",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/current"
@@ -4329,7 +4329,7 @@
       "@id": "rs-gaap:EquityMethodInvestments",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/noncurrent"
@@ -4340,7 +4340,7 @@
       "@id": "rs-gaap:EstimatedInsuranceRecoveries",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/noncurrent"
@@ -4543,7 +4543,7 @@
       "@id": "rs-gaap:FinanceLeaseRightOfUseAsset",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:leaseType/financeLease"
@@ -4588,7 +4588,7 @@
       "@id": "rs-gaap:FiniteLivedContractualRightsGross",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/noncurrent"
@@ -4599,7 +4599,7 @@
       "@id": "rs-gaap:FiniteLivedCoreDepositsGross",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/noncurrent"
@@ -4610,7 +4610,7 @@
       "@id": "rs-gaap:FiniteLivedCustomerListsGross",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/noncurrent"
@@ -4621,7 +4621,7 @@
       "@id": "rs-gaap:FiniteLivedCustomerRelationshipsGross",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/noncurrent"
@@ -4632,7 +4632,7 @@
       "@id": "rs-gaap:FiniteLivedIntangibleAssetAcquiredInPlaceLeases",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/noncurrent"
@@ -4643,7 +4643,7 @@
       "@id": "rs-gaap:FiniteLivedIntangibleAssetOffMarketLeaseFavorableGross",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/noncurrent"
@@ -4665,7 +4665,7 @@
       "@id": "rs-gaap:FiniteLivedIntangibleAssetsGross",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/noncurrent"
@@ -4679,7 +4679,7 @@
       "@id": "rs-gaap:FiniteLivedIntangibleAssetsNet",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/noncurrent"
@@ -4693,7 +4693,7 @@
       "@id": "rs-gaap:FiniteLivedLicenseAgreementsGross",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/noncurrent"
@@ -4704,7 +4704,7 @@
       "@id": "rs-gaap:FiniteLivedNoncompeteAgreementsGross",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/noncurrent"
@@ -4715,7 +4715,7 @@
       "@id": "rs-gaap:FiniteLivedPatentsGross",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/noncurrent"
@@ -4726,7 +4726,7 @@
       "@id": "rs-gaap:FiniteLivedTradeNamesGross",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/noncurrent"
@@ -4737,7 +4737,7 @@
       "@id": "rs-gaap:FiniteLivedTrademarksGross",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/noncurrent"
@@ -4748,7 +4748,7 @@
       "@id": "rs-gaap:FixturesAndEquipmentGross",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/noncurrent"
@@ -4848,7 +4848,7 @@
       "@id": "rs-gaap:FundsHeldForClients",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/current"
@@ -4859,7 +4859,7 @@
       "@id": "rs-gaap:FurnitureAndFixturesGross",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/noncurrent"
@@ -5534,7 +5534,7 @@
       "@id": "rs-gaap:Goodwill",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/noncurrent"
@@ -5562,7 +5562,7 @@
       "@id": "rs-gaap:GoodwillGross",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/noncurrent"
@@ -5607,7 +5607,7 @@
           "@id": "metamodel:activityType/operatingActivity"
         },
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/current"
@@ -5618,7 +5618,7 @@
       "@id": "rs-gaap:GrantsReceivableNoncurrent",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/noncurrent"
@@ -5637,7 +5637,7 @@
       "@id": "rs-gaap:HedgingAssetsCurrent",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/current"
@@ -5648,7 +5648,7 @@
       "@id": "rs-gaap:HedgingAssetsNoncurrent",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/noncurrent"
@@ -5984,7 +5984,7 @@
       "@id": "rs-gaap:IncomeTaxReceivable",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         }
       ]
     },
@@ -5995,7 +5995,7 @@
           "@id": "metamodel:activityType/operatingActivity"
         },
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/current"
@@ -6006,7 +6006,7 @@
       "@id": "rs-gaap:IncomeTaxesReceivableNoncurrent",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/noncurrent"
@@ -7492,7 +7492,7 @@
       "@id": "rs-gaap:IndefiniteLivedContractualRights",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/noncurrent"
@@ -7503,7 +7503,7 @@
       "@id": "rs-gaap:IndefiniteLivedFranchiseRights",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/noncurrent"
@@ -7514,7 +7514,7 @@
       "@id": "rs-gaap:IndefiniteLivedIntangibleAssetsExcludingGoodwill",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/noncurrent"
@@ -7528,7 +7528,7 @@
       "@id": "rs-gaap:IndefiniteLivedLicenseAgreements",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/noncurrent"
@@ -7539,7 +7539,7 @@
       "@id": "rs-gaap:IndefiniteLivedTradeNames",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/noncurrent"
@@ -7550,7 +7550,7 @@
       "@id": "rs-gaap:IndefiniteLivedTrademarks",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/noncurrent"
@@ -7630,7 +7630,7 @@
           "@id": "metamodel:activityType/operatingActivity"
         },
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/current"
@@ -7641,7 +7641,7 @@
       "@id": "rs-gaap:InsuranceReceivableForMalpracticeNoncurrent",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/noncurrent"
@@ -7666,7 +7666,7 @@
           "@id": "metamodel:activityType/operatingActivity"
         },
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/current"
@@ -7677,7 +7677,7 @@
       "@id": "rs-gaap:InsuranceSettlementsReceivableNoncurrent",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/noncurrent"
@@ -7699,7 +7699,7 @@
       "@id": "rs-gaap:IntangibleAssetsCurrent",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/current"
@@ -7710,7 +7710,7 @@
       "@id": "rs-gaap:IntangibleAssetsNetExcludingGoodwill",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/noncurrent"
@@ -7721,7 +7721,7 @@
       "@id": "rs-gaap:IntangibleAssetsNetIncludingGoodwill",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/noncurrent"
@@ -8005,7 +8005,7 @@
       "@id": "rs-gaap:InterestBearingDepositsInBanks",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/current"
@@ -8680,7 +8680,7 @@
           "@id": "metamodel:activityType/operatingActivity"
         },
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/current"
@@ -8691,7 +8691,7 @@
       "@id": "rs-gaap:InterestReceivableNoncurrent",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/noncurrent"
@@ -8713,7 +8713,7 @@
       "@id": "rs-gaap:InventoryBuildingsAndImprovements",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/noncurrent"
@@ -8724,7 +8724,7 @@
       "@id": "rs-gaap:InventoryCrudeOilProductsAndMerchandise",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/current"
@@ -8735,7 +8735,7 @@
       "@id": "rs-gaap:InventoryDrillingNoncurrent",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/noncurrent"
@@ -8746,7 +8746,7 @@
       "@id": "rs-gaap:InventoryFinishedHomes",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/noncurrent"
@@ -8757,7 +8757,7 @@
       "@id": "rs-gaap:InventoryGasInStorageUndergroundNoncurrent",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/noncurrent"
@@ -8768,7 +8768,7 @@
       "@id": "rs-gaap:InventoryGross",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/current"
@@ -8782,7 +8782,7 @@
       "@id": "rs-gaap:InventoryHomesUnderConstruction",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/noncurrent"
@@ -8832,7 +8832,7 @@
       "@id": "rs-gaap:InventoryLandHeldForDevelopmentAndSale",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/noncurrent"
@@ -8843,7 +8843,7 @@
       "@id": "rs-gaap:InventoryLandHeldForSale",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/noncurrent"
@@ -8854,7 +8854,7 @@
       "@id": "rs-gaap:InventoryNet",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/current"
@@ -8868,7 +8868,7 @@
       "@id": "rs-gaap:InventoryNetOfAllowancesCustomerAdvancesAndProgressBillings",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/current"
@@ -8879,7 +8879,7 @@
       "@id": "rs-gaap:InventoryNoncurrent",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/noncurrent"
@@ -8890,7 +8890,7 @@
       "@id": "rs-gaap:InventoryOperativeBuilders",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/noncurrent"
@@ -8901,7 +8901,7 @@
       "@id": "rs-gaap:InventoryOperativeBuildersOther",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/noncurrent"
@@ -8912,7 +8912,7 @@
       "@id": "rs-gaap:InventoryRealEstate",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/noncurrent"
@@ -8923,7 +8923,7 @@
       "@id": "rs-gaap:InventoryRealEstateConstructionInProcess",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/noncurrent"
@@ -8934,7 +8934,7 @@
       "@id": "rs-gaap:InventoryRealEstateHeldForSale",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/noncurrent"
@@ -8945,7 +8945,7 @@
       "@id": "rs-gaap:InventoryRealEstateImprovements",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/noncurrent"
@@ -8956,7 +8956,7 @@
       "@id": "rs-gaap:InventoryRealEstateLandAndLandDevelopmentCosts",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/noncurrent"
@@ -8967,7 +8967,7 @@
       "@id": "rs-gaap:InventoryRealEstateMortgageLoansHeldInInventory",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/noncurrent"
@@ -8978,7 +8978,7 @@
       "@id": "rs-gaap:InventoryRealEstateOther",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/noncurrent"
@@ -8989,7 +8989,7 @@
       "@id": "rs-gaap:InventoryRealEstateTimeshareAvailableForSale",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/noncurrent"
@@ -9050,7 +9050,7 @@
       "@id": "rs-gaap:InvestmentInPhysicalCommodities",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/noncurrent"
@@ -9186,7 +9186,7 @@
       "@id": "rs-gaap:InvestmentsInAffiliatesSubsidiariesAssociatesAndJointVentures",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/noncurrent"
@@ -9197,7 +9197,7 @@
       "@id": "rs-gaap:InvestmentsInPowerAndDistributionProjects",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/noncurrent"
@@ -9275,7 +9275,7 @@
       "@id": "rs-gaap:Land",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/noncurrent"
@@ -9286,7 +9286,7 @@
       "@id": "rs-gaap:LandAndLandImprovements",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/noncurrent"
@@ -9297,7 +9297,7 @@
       "@id": "rs-gaap:LandImprovements",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/noncurrent"
@@ -9308,7 +9308,7 @@
       "@id": "rs-gaap:LandUnderPurchaseOptionsRecorded",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/noncurrent"
@@ -9349,7 +9349,7 @@
       "@id": "rs-gaap:LeaseholdImprovementsGross",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/noncurrent"
@@ -9371,7 +9371,7 @@
       "@id": "rs-gaap:LeveragedLeaseInvestment",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/noncurrent"
@@ -9432,7 +9432,7 @@
       "@id": "rs-gaap:LeveragedLeasesNetInvestmentInLeveragedLeasesDisclosureInvestmentInLeveragedLeasesNet",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/noncurrent"
@@ -9652,7 +9652,7 @@
       "@id": "rs-gaap:LongTermAccountsNotesAndLoansReceivableNetNoncurrent",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/noncurrent"
@@ -9743,7 +9743,7 @@
       "@id": "rs-gaap:LongTermInvestments",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/noncurrent"
@@ -9754,7 +9754,7 @@
       "@id": "rs-gaap:LongTermInvestmentsAndReceivablesNet",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/noncurrent"
@@ -9915,7 +9915,7 @@
       "@id": "rs-gaap:MachineryAndEquipmentGross",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/noncurrent"
@@ -10017,7 +10017,7 @@
           "@id": "metamodel:activityType/investingActivity"
         },
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/current"
@@ -10028,7 +10028,7 @@
       "@id": "rs-gaap:MarketableSecuritiesNoncurrent",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/noncurrent"
@@ -10191,7 +10191,7 @@
       "@id": "rs-gaap:MoneyMarketFundsAtCarryingValue",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/current"
@@ -10216,7 +10216,7 @@
       "@id": "rs-gaap:MunicipalDebtSecuritiesAtCarryingValue",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/current"
@@ -10343,7 +10343,7 @@
       "@id": "rs-gaap:NetInvestmentInLeaseNoncurrent",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/noncurrent"
@@ -10511,7 +10511,7 @@
           "@id": "metamodel:activityType/operatingActivity"
         },
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/current"
@@ -10522,7 +10522,7 @@
       "@id": "rs-gaap:NontradeReceivablesNoncurrent",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/noncurrent"
@@ -10550,7 +10550,7 @@
           "@id": "metamodel:activityType/operatingActivity"
         },
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/current"
@@ -10567,7 +10567,7 @@
       "@id": "rs-gaap:NotesAndLoansReceivableGrossNoncurrent",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/noncurrent"
@@ -10584,7 +10584,7 @@
           "@id": "metamodel:activityType/operatingActivity"
         },
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/current"
@@ -10595,7 +10595,7 @@
       "@id": "rs-gaap:NotesAndLoansReceivableNetNoncurrent",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/noncurrent"
@@ -10672,7 +10672,7 @@
           "@id": "metamodel:activityType/operatingActivity"
         },
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/current"
@@ -10683,7 +10683,7 @@
       "@id": "rs-gaap:OilAndGasJointInterestBillingReceivablesNoncurrent",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/noncurrent"
@@ -10705,7 +10705,7 @@
       "@id": "rs-gaap:OilAndGasPropertyFullCostMethodGross",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/noncurrent"
@@ -10719,7 +10719,7 @@
       "@id": "rs-gaap:OilAndGasPropertyFullCostMethodNet",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/noncurrent"
@@ -10763,7 +10763,7 @@
       "@id": "rs-gaap:OilAndGasPropertySuccessfulEffortMethodGross",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/noncurrent"
@@ -10777,7 +10777,7 @@
       "@id": "rs-gaap:OilAndGasPropertySuccessfulEffortMethodNet",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/noncurrent"
@@ -10950,7 +10950,7 @@
       "@id": "rs-gaap:OperatingLeaseRightOfUseAsset",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:leaseType/operatingLease"
@@ -11061,7 +11061,7 @@
       "@id": "rs-gaap:OtherAssets",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:flowClassification/outflow"
@@ -11072,7 +11072,7 @@
       "@id": "rs-gaap:OtherAssetsCurrent",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/current"
@@ -11083,7 +11083,7 @@
       "@id": "rs-gaap:OtherAssetsNoncurrent",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/noncurrent"
@@ -11094,7 +11094,7 @@
       "@id": "rs-gaap:OtherCashEquivalentsAtCarryingValue",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/current"
@@ -11198,7 +11198,7 @@
       "@id": "rs-gaap:OtherDeferredCostsGross",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/current"
@@ -11212,7 +11212,7 @@
       "@id": "rs-gaap:OtherDeferredCostsNet",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/current"
@@ -11268,7 +11268,7 @@
       "@id": "rs-gaap:OtherFiniteLivedIntangibleAssetsGross",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/noncurrent"
@@ -11320,7 +11320,7 @@
       "@id": "rs-gaap:OtherIndefiniteLivedIntangibleAssets",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/noncurrent"
@@ -11331,7 +11331,7 @@
       "@id": "rs-gaap:OtherIntangibleAssetsNet",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/noncurrent"
@@ -11353,7 +11353,7 @@
       "@id": "rs-gaap:OtherInventoryNoncurrent",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/noncurrent"
@@ -11458,7 +11458,7 @@
       "@id": "rs-gaap:OtherLongTermInvestments",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/noncurrent"
@@ -11663,7 +11663,7 @@
       "@id": "rs-gaap:OtherOilAndGasPropertySuccessfulEffortMethod",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/noncurrent"
@@ -11737,7 +11737,7 @@
       "@id": "rs-gaap:OtherPrepaidExpenseCurrent",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/current"
@@ -11748,7 +11748,7 @@
       "@id": "rs-gaap:OtherReceivablesGrossCurrent",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/current"
@@ -11765,7 +11765,7 @@
           "@id": "metamodel:activityType/operatingActivity"
         },
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/current"
@@ -11776,7 +11776,7 @@
       "@id": "rs-gaap:OtherRestrictedAssetsCurrent",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/current"
@@ -11790,7 +11790,7 @@
       "@id": "rs-gaap:OtherRestrictedAssetsNoncurrent",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/noncurrent"
@@ -11854,7 +11854,7 @@
           "@id": "metamodel:activityType/investingActivity"
         },
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/current"
@@ -13771,7 +13771,7 @@
       "@id": "rs-gaap:PhaseInPlanAmountOfCostsDeferredForRateMakingPurposes",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/noncurrent"
@@ -13903,7 +13903,7 @@
       "@id": "rs-gaap:PrepaidAdvertising",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/current"
@@ -13914,7 +13914,7 @@
       "@id": "rs-gaap:PrepaidExpenseAndOtherAssets",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         }
       ]
     },
@@ -13922,7 +13922,7 @@
       "@id": "rs-gaap:PrepaidExpenseAndOtherAssetsCurrent",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/current"
@@ -13933,7 +13933,7 @@
       "@id": "rs-gaap:PrepaidExpenseAndOtherAssetsNoncurrent",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/noncurrent"
@@ -13944,7 +13944,7 @@
       "@id": "rs-gaap:PrepaidExpenseCurrent",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/current"
@@ -13955,7 +13955,7 @@
       "@id": "rs-gaap:PrepaidExpenseNoncurrent",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/noncurrent"
@@ -13966,7 +13966,7 @@
       "@id": "rs-gaap:PrepaidExpenseOtherNoncurrent",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/noncurrent"
@@ -13977,7 +13977,7 @@
       "@id": "rs-gaap:PrepaidInsurance",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/current"
@@ -13988,7 +13988,7 @@
       "@id": "rs-gaap:PrepaidInterest",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/current"
@@ -13999,7 +13999,7 @@
       "@id": "rs-gaap:PrepaidMineralRoyaltiesNoncurrent",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/noncurrent"
@@ -14010,7 +14010,7 @@
       "@id": "rs-gaap:PrepaidRent",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/current"
@@ -14021,7 +14021,7 @@
       "@id": "rs-gaap:PrepaidRoyalties",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/current"
@@ -14032,7 +14032,7 @@
       "@id": "rs-gaap:PrepaidTaxes",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/current"
@@ -16401,7 +16401,7 @@
       "@id": "rs-gaap:PropertyPlantAndEquipmentGross",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/noncurrent"
@@ -16415,7 +16415,7 @@
       "@id": "rs-gaap:PropertyPlantAndEquipmentNet",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/noncurrent"
@@ -16426,7 +16426,7 @@
       "@id": "rs-gaap:PropertyPlantAndEquipmentOther",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/noncurrent"
@@ -16437,7 +16437,7 @@
       "@id": "rs-gaap:ProvedOilAndGasPropertySuccessfulEffortMethod",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/noncurrent"
@@ -16554,7 +16554,7 @@
       "@id": "rs-gaap:PublicUtilitiesInventory",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/current"
@@ -16565,7 +16565,7 @@
       "@id": "rs-gaap:PublicUtilitiesPropertyPlantAndEquipmentNet",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/noncurrent"
@@ -16609,7 +16609,7 @@
       "@id": "rs-gaap:RealEstateInventoryCapitalizedInterestCosts",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/noncurrent"
@@ -16623,7 +16623,7 @@
       "@id": "rs-gaap:RealEstateInventoryConstructionMaterials",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/noncurrent"
@@ -16737,7 +16737,7 @@
           "@id": "metamodel:activityType/operatingActivity"
         },
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/current"
@@ -16751,7 +16751,7 @@
           "@id": "metamodel:activityType/operatingActivity"
         },
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/current"
@@ -16860,7 +16860,7 @@
       "@id": "rs-gaap:RegulatedEntityOtherAssetsNoncurrent",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/noncurrent"
@@ -16871,7 +16871,7 @@
       "@id": "rs-gaap:RegulatoryAssetsCurrent",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/current"
@@ -16882,7 +16882,7 @@
       "@id": "rs-gaap:RegulatoryAssetsNoncurrent",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/noncurrent"
@@ -17378,7 +17378,7 @@
       "@id": "rs-gaap:RestrictedCashAndCashEquivalentsAtCarryingValue",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/current"
@@ -17392,7 +17392,7 @@
       "@id": "rs-gaap:RestrictedCashAndCashEquivalentsNoncurrent",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/noncurrent"
@@ -17406,7 +17406,7 @@
       "@id": "rs-gaap:RestrictedCashAndInvestmentsCurrent",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/current"
@@ -17420,7 +17420,7 @@
       "@id": "rs-gaap:RestrictedCashAndInvestmentsNoncurrent",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/noncurrent"
@@ -17431,7 +17431,7 @@
       "@id": "rs-gaap:RestrictedCashCurrent",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/current"
@@ -17445,7 +17445,7 @@
       "@id": "rs-gaap:RestrictedCashEquivalentsCurrent",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/current"
@@ -17459,7 +17459,7 @@
       "@id": "rs-gaap:RestrictedCashEquivalentsNoncurrent",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/noncurrent"
@@ -17470,7 +17470,7 @@
       "@id": "rs-gaap:RestrictedCashNoncurrent",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/noncurrent"
@@ -17481,7 +17481,7 @@
       "@id": "rs-gaap:RestrictedInvestmentsCurrent",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/current"
@@ -17495,7 +17495,7 @@
       "@id": "rs-gaap:RestrictedInvestmentsNoncurrent",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/noncurrent"
@@ -17600,7 +17600,7 @@
       "@id": "rs-gaap:RetailRelatedInventory",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/current"
@@ -17611,7 +17611,7 @@
       "@id": "rs-gaap:RetailRelatedInventoryMerchandise",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/current"
@@ -17622,7 +17622,7 @@
       "@id": "rs-gaap:RetailRelatedInventoryPackagingAndOtherSupplies",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/current"
@@ -17952,7 +17952,7 @@
       "@id": "rs-gaap:SecuritizedRegulatoryTransitionAssetsNoncurrent",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/noncurrent"
@@ -18158,7 +18158,7 @@
           "@id": "metamodel:activityType/investingActivity"
         },
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/current"
@@ -18349,7 +18349,7 @@
       "@id": "rs-gaap:Supplies",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/current"
@@ -18465,7 +18465,7 @@
       "@id": "rs-gaap:TimberAndTimberlands",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/noncurrent"
@@ -18476,7 +18476,7 @@
       "@id": "rs-gaap:TimeDepositsAtCarryingValue",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/current"
@@ -18487,7 +18487,7 @@
       "@id": "rs-gaap:TradeAndLoansReceivablesHeldForSaleNetNotPartOfDisposalGroup",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/current"
@@ -18585,7 +18585,7 @@
       "@id": "rs-gaap:USGovernmentAgenciesSecuritiesAtCarryingValue",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/current"
@@ -18596,7 +18596,7 @@
       "@id": "rs-gaap:USGovernmentSecuritiesAtCarryingValue",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/current"
@@ -18607,7 +18607,7 @@
       "@id": "rs-gaap:UnamortizedDebtIssuanceExpense",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/noncurrent"
@@ -18618,7 +18618,7 @@
       "@id": "rs-gaap:UnamortizedLossReacquiredDebtNoncurrent",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/noncurrent"
@@ -18632,7 +18632,7 @@
           "@id": "metamodel:activityType/operatingActivity"
         },
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/current"
@@ -18670,7 +18670,7 @@
       "@id": "rs-gaap:UnprovedOilAndGasPropertySuccessfulEffortMethod",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/noncurrent"
@@ -18848,7 +18848,7 @@
           "@id": "metamodel:activityType/operatingActivity"
         },
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/current"
@@ -18859,7 +18859,7 @@
       "@id": "rs-gaap:ValueAddedTaxReceivableNoncurrent",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
-          "@id": "metamodel:elementsOfFinancialStatements/assets"
+          "@id": "metamodel:elementsOfFinancialStatements/asset"
         },
         {
           "@id": "metamodel:liquidity/noncurrent"

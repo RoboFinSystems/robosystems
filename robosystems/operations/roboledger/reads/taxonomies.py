@@ -24,7 +24,9 @@ from robosystems.models.api.extensions.taxonomies import (
 )
 from robosystems.models.extensions import (
   Association,
+  Classification,
   Element,
+  ElementClassification,
   Structure,
   Taxonomy,
 )
@@ -84,8 +86,32 @@ def get_reporting_taxonomy(session: Session) -> TaxonomyResponse | None:
 # ── Elements ──────────────────────────────────────────────────────────────
 
 
-def element_to_response(row: Element) -> ElementResponse:
-  """Map an Element row to the wire-facing ElementResponse."""
+def _efs_by_element(session: Session, element_ids: list[str]) -> dict[str, str]:
+  """Batch-load FASB elementsOfFinancialStatements identifier per element."""
+  if not element_ids:
+    return {}
+  rows = session.execute(
+    select(ElementClassification.element_id, Classification.identifier)
+    .join(Classification, Classification.id == ElementClassification.classification_id)
+    .where(
+      ElementClassification.element_id.in_(element_ids),
+      Classification.category == "elementsOfFinancialStatements",
+    )
+  ).all()
+  result: dict[str, str] = {}
+  for element_id, identifier in rows:
+    result.setdefault(element_id, identifier)
+  return result
+
+
+def element_to_response(
+  row: Element, classification: str | None = None
+) -> ElementResponse:
+  """Map an Element row to the wire-facing ElementResponse.
+
+  Callers that batch-load should use :func:`_efs_by_element` once and
+  pass the lookup in to avoid N+1 on the EFS classification.
+  """
   return ElementResponse(
     id=row.id,
     code=row.code,
@@ -93,6 +119,7 @@ def element_to_response(row: Element) -> ElementResponse:
     description=row.description,
     qname=row.qname,
     namespace=row.namespace,
+    classification=classification,
     balance_type=row.balance_type,
     period_type=row.period_type,
     is_abstract=row.is_abstract,
@@ -117,7 +144,11 @@ def list_elements(
   limit: int = 100,
   offset: int = 0,
 ) -> ElementListResponse:
-  """List elements filtered by taxonomy / source / classification / abstract."""
+  """List elements filtered by taxonomy / source / classification / abstract.
+
+  ``classification`` filters on the FASB elementsOfFinancialStatements
+  trait via the element_classifications junction table.
+  """
   query = select(Element).where(Element.is_active.is_(True))
   count_query = (
     select(func.count()).select_from(Element).where(Element.is_active.is_(True))
@@ -130,7 +161,18 @@ def list_elements(
     query = query.where(Element.source == source)
     count_query = count_query.where(Element.source == source)
   if classification:
-    pass  # classification filter removed; column no longer on Element
+    subquery = (
+      select(ElementClassification.element_id)
+      .join(
+        Classification, Classification.id == ElementClassification.classification_id
+      )
+      .where(
+        Classification.category == "elementsOfFinancialStatements",
+        Classification.identifier == classification,
+      )
+    )
+    query = query.where(Element.id.in_(subquery))
+    count_query = count_query.where(Element.id.in_(subquery))
   if is_abstract is not None:
     query = query.where(Element.is_abstract == is_abstract)
     count_query = count_query.where(Element.is_abstract == is_abstract)
@@ -146,8 +188,9 @@ def list_elements(
     .all()
   )
 
+  efs_map = _efs_by_element(session, [r.id for r in rows])
   return ElementListResponse(
-    elements=[element_to_response(r) for r in rows],
+    elements=[element_to_response(r, efs_map.get(r.id)) for r in rows],
     pagination=create_pagination_info(total, limit, offset),
   )
 
@@ -175,7 +218,8 @@ def get_element(session: Session, element_id: str) -> ElementResponse | None:
   ).scalar_one_or_none()
   if row is None:
     return None
-  return element_to_response(row)
+  efs = _efs_by_element(session, [row.id]).get(row.id)
+  return element_to_response(row, efs)
 
 
 def suggest_mapping_candidates(
@@ -209,19 +253,32 @@ def suggest_mapping_candidates(
   if classification is None:
     return []
 
+  # Filter by the FASB elementsOfFinancialStatements trait via junction.
   rows = (
     session.execute(
       select(Element)
       .where(
         Element.source.in_(("fac", "sfac6")),
         Element.is_active.is_(True),
+        Element.id.in_(
+          select(ElementClassification.element_id)
+          .join(
+            Classification,
+            Classification.id == ElementClassification.classification_id,
+          )
+          .where(
+            Classification.category == "elementsOfFinancialStatements",
+            Classification.identifier == classification,
+          )
+        ),
       )
       .order_by(Element.depth, Element.name)
     )
     .scalars()
     .all()
   )
-  return [element_to_response(r) for r in rows]
+  efs_map = _efs_by_element(session, [r.id for r in rows])
+  return [element_to_response(r, efs_map.get(r.id)) for r in rows]
 
 
 def _anchor_narrowed_candidates(
@@ -263,7 +320,8 @@ def _anchor_narrowed_candidates(
     .scalars()
     .all()
   )
-  return [element_to_response(r) for r in rows]
+  efs_map = _efs_by_element(session, [r.id for r in rows])
+  return [element_to_response(r, efs_map.get(r.id)) for r in rows]
 
 
 def list_unmapped_elements(
@@ -291,12 +349,14 @@ def list_unmapped_elements(
   mapped_ids = set(session.execute(mapped_query).scalars().all())
 
   unmapped = [e for e in coa_elements if e.id not in mapped_ids]
+  efs_map = _efs_by_element(session, [e.id for e in unmapped])
 
   return [
     UnmappedElementResponse(
       id=e.id,
       code=e.code,
       name=e.name,
+      classification=efs_map.get(e.id),
       balance_type=e.balance_type,
       external_source=e.external_source,
     )
@@ -561,6 +621,7 @@ _MAPPED_TRIAL_BALANCE_SQL = text("""
       target.id AS reporting_element_id,
       target.qname,
       target.name AS reporting_name,
+      tcls.identifier AS classification,
       target.balance_type,
       COALESCE(SUM(li.debit_amount), 0) AS total_debits,
       COALESCE(SUM(li.credit_amount), 0) AS total_credits
@@ -572,10 +633,14 @@ _MAPPED_TRIAL_BALANCE_SQL = text("""
       AND mapping.association_type = 'mapping'
       AND mapping.structure_id = :mapping_id
   JOIN elements target ON target.id = mapping.to_element_id
+  LEFT JOIN element_classifications tec ON tec.element_id = target.id
+  LEFT JOIN classifications tcls
+      ON tcls.id = tec.classification_id
+      AND tcls.category = 'elementsOfFinancialStatements'
   WHERE e.status = 'posted'
       AND (e.posting_date >= :start_date OR :start_date IS NULL)
       AND (e.posting_date <= :end_date OR :end_date IS NULL)
-  GROUP BY target.id, target.qname, target.name, target.balance_type
+  GROUP BY target.id, target.qname, target.name, tcls.identifier, target.balance_type
   ORDER BY target.qname
 """)
 
@@ -610,6 +675,7 @@ def get_mapped_trial_balance(
         reporting_element_id=row.reporting_element_id,
         qname=row.qname,
         reporting_name=row.reporting_name,
+        classification=row.classification,
         balance_type=row.balance_type,
         total_debits=debits,
         total_credits=credits,
