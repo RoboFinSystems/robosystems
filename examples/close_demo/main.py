@@ -335,7 +335,11 @@ def create_journal_entries(
 
 
 def create_mappings(graph_id: str, element_lookup: dict[str, str]) -> int:
-  """Create mapping associations between CoA elements and GAAP reporting concepts.
+  """Create mapping associations between CoA elements and FAC reporting concepts.
+
+  Per Phase 3b, CoA → FAC (Fundamental Accounting Concepts) is the
+  primary mapping target. FAC → rs-gaap expansion is handled by
+  equivalence arcs on the FAC side.
 
   Uses `LedgerClient.create_associations()` — the bulk HTTP API — to
   exercise the same path the frontend UI and MCP tools use.
@@ -351,17 +355,27 @@ def create_mappings(graph_id: str, element_lookup: dict[str, str]) -> int:
     return 0
   mapping_id = structures[0]["id"]
 
+  # Resolve FAC qnames → element IDs via the library in the entity graph.
+  fac_elements = client.list_elements(graph_id, source="fac", limit=500)
+  fac_by_qname: dict[str, str] = {
+    e["qname"]: e["id"] for e in (fac_elements or {}).get("elements", []) if e.get("qname")
+  }
+
   # Build the associations list, skipping any CoA codes not in the element lookup
   associations = []
-  for coa_code, gaap_id in MAPPINGS:
+  for coa_code, fac_qname in MAPPINGS:
     coa_id = element_lookup.get(coa_code)
     if not coa_id:
       print(f"  WARNING: CoA code {coa_code} not in element_lookup")
       continue
+    fac_id = fac_by_qname.get(fac_qname)
+    if not fac_id:
+      print(f"  WARNING: FAC qname {fac_qname} not found in library")
+      continue
     associations.append(
       {
         "from_element_id": coa_id,
-        "to_element_id": gaap_id,
+        "to_element_id": fac_id,
         "association_type": "mapping",
         "order_value": 0.0,
       }

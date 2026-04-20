@@ -159,7 +159,7 @@ class ElementResponse(BaseModel):
   description: str | None = None
   qname: str | None = None
   namespace: str | None = None
-  classification: str
+  classification: str | None = None
   sub_classification: str | None = None
   balance_type: str
   period_type: str
@@ -301,7 +301,9 @@ class CreateElementRequest(BaseModel):
   code: str | None = None
   name: str
   description: str | None = None
-  classification: Literal["asset", "liability", "equity", "revenue", "expense"]
+  classification: Literal[
+    "asset", "liability", "equity", "inflow", "outflow", "cashflow"
+  ]
   sub_classification: str | None = None
   balance_type: Literal["debit", "credit"] = "debit"
   period_type: Literal["duration", "instant"] = "duration"
@@ -312,7 +314,16 @@ class CreateElementRequest(BaseModel):
   is_monetary: bool = True
   parent_id: str | None = None
   source: Literal[
-    "native", "sfac6", "us-gaap", "ifrs", "quickbooks", "xero", "plaid", "import"
+    "native",
+    "sfac6",
+    "fac",
+    "rs-gaap",
+    "us-gaap",
+    "ifrs",
+    "quickbooks",
+    "xero",
+    "plaid",
+    "import",
   ] = "native"
   currency: str = "USD"
   qname: str | None = None
@@ -332,7 +343,7 @@ class UpdateElementRequest(BaseModel):
   name: str | None = None
   description: str | None = None
   classification: (
-    Literal["asset", "liability", "equity", "revenue", "expense"] | None
+    Literal["asset", "liability", "equity", "inflow", "outflow", "cashflow"] | None
   ) = None
   sub_classification: str | None = None
   balance_type: Literal["debit", "credit"] | None = None
