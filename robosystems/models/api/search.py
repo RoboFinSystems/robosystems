@@ -126,23 +126,6 @@ class DocumentUploadResponse(BaseModel):
   section_ids: list[str]
 
 
-class BulkDocumentUploadRequest(BaseModel):
-  """Bulk upload multiple markdown documents."""
-
-  documents: list[DocumentUploadRequest] = Field(
-    ..., max_length=50, description="Documents to upload (max 50)"
-  )
-
-
-class BulkDocumentUploadResponse(BaseModel):
-  """Response from bulk document upload."""
-
-  total_documents: int
-  total_sections_indexed: int
-  results: list[DocumentUploadResponse]
-  errors: list[dict] | None = None
-
-
 class DocumentListItem(BaseModel):
   """A document in the document list."""
 
