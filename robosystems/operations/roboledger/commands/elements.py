@@ -72,8 +72,6 @@ def _element_to_response(row: Element) -> ElementResponse:
     description=row.description,
     qname=row.qname,
     namespace=row.namespace,
-    classification=row.classification,
-    sub_classification=row.sub_classification,
     balance_type=row.balance_type,
     period_type=row.period_type,
     is_abstract=row.is_abstract,
@@ -199,8 +197,6 @@ def create_element(
     code=body.code,
     name=body.name,
     description=body.description,
-    classification=body.classification,
-    sub_classification=body.sub_classification,
     balance_type=body.balance_type,
     period_type=resolved_period_type,
     element_type=body.element_type,
@@ -247,6 +243,8 @@ def update_element(session: Session, body: UpdateElementRequest) -> ElementRespo
 
   updates = body.model_dump(exclude_unset=True)
   updates.pop("element_id", None)
+  updates.pop("classification", None)
+  updates.pop("sub_classification", None)
 
   # Handle reparent separately so we can cascade path/depth changes.
   reparent = "parent_id" in updates

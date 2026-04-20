@@ -7,21 +7,39 @@ OLTP counterpart, extended with a `category` axis per the
 `information-modeling.md` spec.
 
 A Classification is a named tag in a specific category:
-`(category='economic_nature', identifier='asset')`,
+`(category='elementsOfFinancialStatements', identifier='asset')`,
+`(category='liquidity', identifier='current')`,
 `(category='concept_arrangement', identifier='RollUp')`, etc. Categories
-currently recognized:
+are the 24 FASB metamodel trait axes plus flowClassification and the
+existing concept / member / disclosure arrangements:
 
-- `economic_nature`     — SFAC 6 primitive types (asset, revenue, …)
-- `statement_context`   — which report an element belongs to (bs, is, cf, …)
-- `derivation_role`     — primitive / subtotal / total / reconciliation / …
+**FASB us-gaap metamodel trait axes** (attached to Elements via
+`element_classifications`):
+
+- `elementsOfFinancialStatements` — SFAC 6 primitives (asset, liability,
+  equity, revenue, expense, gain, loss, contraAsset, contraLiability,
+  contraEquity, temporaryEquity, comprehensiveIncome, investmentByOwners,
+  distributionToOwners, expenseReversal, metric)
+- `liquidity` — current / noncurrent
+- `activityType` — operatingActivity / investingActivity / financingActivity
+- `operatingNonoperating` — operating / nonoperating
+- `operatingIntent`, `realizationStatus`, `recordedValue`, `restriction`,
+  `hedging`, `leaseType`, `interestRateType`, `convertibility`,
+  `creditStructure`, `debtGuarantee`, `derivativeContract`,
+  `derivativeInstrument`, `accrualOrPayable`, `priority`,
+  `estimatedFutureActivity`, `statisticalMeasurement`, `taxComponents`,
+  `threshold`, `use`, `indirectCashFlowReconcilingItem`
+- `flowClassification` — inflow / outflow / accrual / contra (from FASB's
+  instant-* arcroles)
+
+**Association-level categories** (attached to Associations via
+`association_classifications`):
+
 - `concept_arrangement` — Charlie's patterns (RollUp, Adjustment, …)
 - `member_arrangement`  — Aggregation / Nonaggregation
 - `named_disclosure`    — SEC disclosure mechanics catalog
 
-The first three attach to Elements (via `element_classifications`); the
-last three attach to Associations (via `association_classifications`,
-coming per the spec). The single registry keeps one vocabulary for
-both surfaces.
+The single registry keeps one vocabulary for both surfaces.
 
 `id` is shared with the graph node so an OLTP row and its graph
 counterpart refer to the same classification.
@@ -57,7 +75,18 @@ class Classification(ExtensionsBase):
     Index("idx_classifications_type", "type"),
     CheckConstraint(
       "category IN ("
-      "'economic_nature', 'statement_context', 'derivation_role', "
+      # FASB us-gaap metamodel trait axes (24)
+      "'elementsOfFinancialStatements', 'liquidity', 'activityType', "
+      "'operatingNonoperating', 'operatingIntent', 'realizationStatus', "
+      "'recordedValue', 'restriction', 'hedging', 'leaseType', "
+      "'interestRateType', 'convertibility', 'creditStructure', "
+      "'debtGuarantee', 'derivativeContract', 'derivativeInstrument', "
+      "'accrualOrPayable', 'priority', 'estimatedFutureActivity', "
+      "'statisticalMeasurement', 'taxComponents', 'threshold', 'use', "
+      "'indirectCashFlowReconcilingItem', "
+      # Flow classification (FASB instant-* arcroles)
+      "'flowClassification', "
+      # Association-level categories
       "'concept_arrangement', 'member_arrangement', 'named_disclosure'"
       ")",
       name="check_classification_category",

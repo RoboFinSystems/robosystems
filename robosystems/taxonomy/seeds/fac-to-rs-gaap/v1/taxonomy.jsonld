@@ -122,8 +122,8 @@
   "taxonomy_type": "mapping",
   "namespace_uri": "https://robosystems.ai/taxonomy/fac-to-rs-gaap/v1/",
   "origin": "native",
-  "created_at": "2026-04-19",
-  "description": "RoboSystems-authored equivalence arcs between FAC primitives and rs-gaap concepts (~221 class-equivalentClass arcs). Collapses the us-gaap combinatorial explosion into the compact FAC canonical layer. Curated from Charlie Hoffman's FAC ConceptMap; arcs are maintained here, not tracked upstream.",
+  "created_at": "2026-04-20",
+  "description": "RoboSystems-authored equivalence arcs between FAC primitives and rs-gaap concepts (~330 class-equivalentClass arcs across 97 FAC concepts). Collapses the us-gaap combinatorial explosion into the compact FAC canonical layer. Curated from Charlie Hoffman's FAC ConceptMap and auditchain Rules_Mapping linkbases (70 reporting styles); arcs are maintained here, not tracked upstream.",
   "@graph": [
     {
       "@id": "fac:Assets",
@@ -145,6 +145,14 @@
       ]
     },
     {
+      "@id": "fac:Capitalization",
+      "http://www.w3.org/2002/07/owl#equivalentClass": [
+        {
+          "@id": "rs-gaap:CapitalizationLongtermDebtAndEquity"
+        }
+      ]
+    },
+    {
       "@id": "fac:CommitmentsAndContingencies",
       "http://www.w3.org/2002/07/owl#equivalentClass": [
         {
@@ -155,6 +163,9 @@
     {
       "@id": "fac:ComprehensiveIncomeLoss",
       "http://www.w3.org/2002/07/owl#equivalentClass": [
+        {
+          "@id": "rs-gaap:ComprehensiveIncomeNetOfTax"
+        },
         {
           "@id": "rs-gaap:ComprehensiveIncomeNetOfTaxIncludingPortionAttributableToNoncontrollingInterest"
         }
@@ -271,6 +282,12 @@
         },
         {
           "@id": "rs-gaap:CostsAndExpenses"
+        },
+        {
+          "@id": "rs-gaap:OperatingCostsAndExpenses"
+        },
+        {
+          "@id": "rs-gaap:OperatingExpenses"
         }
       ]
     },
@@ -314,6 +331,27 @@
           "@id": "rs-gaap:MinorityInterest"
         },
         {
+          "@id": "rs-gaap:MinorityInterestInJointVentures"
+        },
+        {
+          "@id": "rs-gaap:MinorityInterestInLimitedPartnerships"
+        },
+        {
+          "@id": "rs-gaap:MinorityInterestInOperatingPartnerships"
+        },
+        {
+          "@id": "rs-gaap:MinorityInterestInPreferredUnitHolders"
+        },
+        {
+          "@id": "rs-gaap:NoncontrollingInterestInVariableInterestEntity"
+        },
+        {
+          "@id": "rs-gaap:NonredeemableNoncontrollingInterest"
+        },
+        {
+          "@id": "rs-gaap:OtherMinorityInterests"
+        },
+        {
           "@id": "rs-gaap:PartnersCapitalAttributableToNoncontrollingInterest"
         }
       ]
@@ -321,6 +359,9 @@
     {
       "@id": "fac:EquityAttributableToParent",
       "http://www.w3.org/2002/07/owl#equivalentClass": [
+        {
+          "@id": "rs-gaap:GeneralPartnersCapitalAccount"
+        },
         {
           "@id": "rs-gaap:MembersEquity"
         },
@@ -348,6 +389,15 @@
           "@id": "rs-gaap:EffectOfExchangeRateOnCashAndCashEquivalentsDiscontinuedOperations"
         },
         {
+          "@id": "rs-gaap:EffectOfExchangeRateOnCashCashEquivalentsRestrictedCashAndRestrictedCashEquivalents"
+        },
+        {
+          "@id": "rs-gaap:EffectOfExchangeRateOnCashCashEquivalentsRestrictedCashAndRestrictedCashEquivalentsDisposalGroupIncludingDiscontinuedOperations"
+        },
+        {
+          "@id": "rs-gaap:EffectOfExchangeRateOnCashCashEquivalentsRestrictedCashAndRestrictedCashEquivalentsIncludingDisposalGroupAndDiscontinuedOperations"
+        },
+        {
           "@id": "rs-gaap:EffectOfExchangeRateOnCashContinuingOperations"
         }
       ]
@@ -364,10 +414,29 @@
       "@id": "fac:FixedAssets",
       "http://www.w3.org/2002/07/owl#equivalentClass": [
         {
+          "@id": "rs-gaap:AssetsNoncurrentOtherThanNoncurrentInvestmentsAndPropertyPlantAndEquipment"
+        },
+        {
           "@id": "rs-gaap:PropertyPlantAndEquipmentNet"
         },
         {
           "@id": "rs-gaap:PublicUtilitiesPropertyPlantAndEquipmentNet"
+        }
+      ]
+    },
+    {
+      "@id": "fac:GainLossOnDispositionStockInSubsidiaryOrEquityMethodInvestee",
+      "http://www.w3.org/2002/07/owl#equivalentClass": [
+        {
+          "@id": "rs-gaap:GainLossOnSaleOfStockInSubsidiaryOrEquityMethodInvestee"
+        }
+      ]
+    },
+    {
+      "@id": "fac:GainLossOnSalePreviouslyUnissuedStockBySubsidiaryOrEquityInvesteeNonoperatingIncome",
+      "http://www.w3.org/2002/07/owl#equivalentClass": [
+        {
+          "@id": "rs-gaap:GainLossOnSaleOfPreviouslyUnissuedStockBySubsidiaryOrEquityInvesteeNonoperatingIncome"
         }
       ]
     },
@@ -406,6 +475,9 @@
         },
         {
           "@id": "rs-gaap:IncomeLossFromContinuingOperationsIncludingPortionAttributableToNoncontrollingInterest"
+        },
+        {
+          "@id": "rs-gaap:IncomeLossIncludingPortionAttributableToNoncontrollingInterest"
         }
       ]
     },
@@ -423,6 +495,12 @@
     {
       "@id": "fac:IncomeLossFromDiscontinuedOperationsNetOfTax",
       "http://www.w3.org/2002/07/owl#equivalentClass": [
+        {
+          "@id": "rs-gaap:DiscontinuedOperationGainLossOnDisposalOfDiscontinuedOperationNetOfTax"
+        },
+        {
+          "@id": "rs-gaap:DiscontinuedOperationIncomeLossFromDiscontinuedOperationDuringPhaseOutPeriodNetOfTax"
+        },
         {
           "@id": "rs-gaap:IncomeLossFromDiscontinuedOperationsNetOfTax"
         },
@@ -490,6 +568,9 @@
           "@id": "rs-gaap:IncomeTaxExpenseBenefit"
         },
         {
+          "@id": "rs-gaap:IncomeTaxExpenseBenefitContinuingOperations"
+        },
+        {
           "@id": "rs-gaap:StateAndLocalIncomeTaxExpenseBenefitContinuingOperations"
         }
       ]
@@ -511,6 +592,20 @@
       ]
     },
     {
+      "@id": "fac:IndirectOperatingNonoperatingCostsExpenses",
+      "http://www.w3.org/2002/07/owl#equivalentClass": [
+        {
+          "@id": "rs-gaap:GeneralAndAdministrativeExpense"
+        },
+        {
+          "@id": "rs-gaap:OperatingCostsAndExpenses"
+        },
+        {
+          "@id": "rs-gaap:SellingGeneralAndAdministrativeExpense"
+        }
+      ]
+    },
+    {
       "@id": "fac:InterestAndDebtExpense",
       "http://www.w3.org/2002/07/owl#equivalentClass": [
         {
@@ -527,6 +622,14 @@
       ]
     },
     {
+      "@id": "fac:InterestExpense",
+      "http://www.w3.org/2002/07/owl#equivalentClass": [
+        {
+          "@id": "rs-gaap:InterestExpense"
+        }
+      ]
+    },
+    {
       "@id": "fac:InterestExpenseOperating",
       "http://www.w3.org/2002/07/owl#equivalentClass": [
         {
@@ -534,6 +637,12 @@
         },
         {
           "@id": "rs-gaap:InterestExpenseBorrowings"
+        },
+        {
+          "@id": "rs-gaap:InterestExpenseDeposits"
+        },
+        {
+          "@id": "rs-gaap:InterestExpenseShortTermBorrowings"
         }
       ]
     },
@@ -542,6 +651,9 @@
       "http://www.w3.org/2002/07/owl#equivalentClass": [
         {
           "@id": "rs-gaap:InterestIncomeExpenseAfterProvisionForLoanLoss"
+        },
+        {
+          "@id": "rs-gaap:NetInterestIncomeLossAfterProvisionForLoanLosses"
         }
       ]
     },
@@ -565,7 +677,27 @@
       "@id": "fac:LiabilitiesAndEquity",
       "http://www.w3.org/2002/07/owl#equivalentClass": [
         {
+          "@id": "rs-gaap:LiabilitiesAndPartnersCapital"
+        },
+        {
           "@id": "rs-gaap:LiabilitiesAndStockholdersEquity"
+        }
+      ]
+    },
+    {
+      "@id": "fac:LongTermDebt",
+      "http://www.w3.org/2002/07/owl#equivalentClass": [
+        {
+          "@id": "rs-gaap:LongTermDebt"
+        },
+        {
+          "@id": "rs-gaap:LongTermDebtAndCapitalLeaseObligations"
+        },
+        {
+          "@id": "rs-gaap:LongTermDebtCurrent"
+        },
+        {
+          "@id": "rs-gaap:LongTermDebtNoncurrent"
         }
       ]
     },
@@ -577,6 +709,12 @@
         },
         {
           "@id": "rs-gaap:CashAndCashEquivalentsPeriodIncreaseDecreaseExcludingExchangeRateEffect"
+        },
+        {
+          "@id": "rs-gaap:CashCashEquivalentsRestrictedCashAndRestrictedCashEquivalentsPeriodIncreaseDecreaseExcludingExchangeRateEffect"
+        },
+        {
+          "@id": "rs-gaap:CashCashEquivalentsRestrictedCashAndRestrictedCashEquivalentsPeriodIncreaseDecreaseIncludingExchangeRateEffect"
         },
         {
           "@id": "rs-gaap:CashPeriodIncreaseDecrease"
@@ -693,6 +831,23 @@
         },
         {
           "@id": "rs-gaap:NetIncomeLossAttributableToNoncontrollingInterest"
+        },
+        {
+          "@id": "rs-gaap:NetIncomeLossAttributableToNonredeemableNoncontrollingInterest"
+        },
+        {
+          "@id": "rs-gaap:NetIncomeLossAttributableToRedeemableNoncontrollingInterest"
+        }
+      ]
+    },
+    {
+      "@id": "fac:NetIncomeLossAttributableToNoncontrollingInterestPlusPreferredStockDividendsAndOtherAdjustments",
+      "http://www.w3.org/2002/07/owl#equivalentClass": [
+        {
+          "@id": "rs-gaap:NetIncomeLossAttributableToNoncontrollingInterest"
+        },
+        {
+          "@id": "rs-gaap:PreferredStockDividendsAndOtherAdjustments"
         }
       ]
     },
@@ -758,6 +913,9 @@
       "http://www.w3.org/2002/07/owl#equivalentClass": [
         {
           "@id": "rs-gaap:NoninterestExpense"
+        },
+        {
+          "@id": "rs-gaap:OperatingExpenses"
         }
       ]
     },
@@ -766,6 +924,17 @@
       "http://www.w3.org/2002/07/owl#equivalentClass": [
         {
           "@id": "rs-gaap:NoninterestIncome"
+        },
+        {
+          "@id": "rs-gaap:NoninterestIncomeOther"
+        }
+      ]
+    },
+    {
+      "@id": "fac:NonoperatingGainsLosses",
+      "http://www.w3.org/2002/07/owl#equivalentClass": [
+        {
+          "@id": "rs-gaap:NonoperatingGainsLosses"
         }
       ]
     },
@@ -778,8 +947,193 @@
       ]
     },
     {
+      "@id": "fac:NonoperatingIncomeLossPlusInterestAndDebtExpense",
+      "http://www.w3.org/2002/07/owl#equivalentClass": [
+        {
+          "@id": "rs-gaap:NonoperatingIncomeExpense"
+        }
+      ]
+    },
+    {
+      "@id": "fac:NonoperatingIncomePlusInterestAndDebtExpensePlusIncomeFromEquityMethodInvestments",
+      "http://www.w3.org/2002/07/owl#equivalentClass": [
+        {
+          "@id": "rs-gaap:NonoperatingIncomeExpense"
+        }
+      ]
+    },
+    {
+      "@id": "fac:OperatingAndNonoperatingCostsAndExpenses",
+      "http://www.w3.org/2002/07/owl#equivalentClass": [
+        {
+          "@id": "rs-gaap:CostsAndExpenses"
+        }
+      ]
+    },
+    {
+      "@id": "fac:OperatingAndNonoperatingRevenues",
+      "http://www.w3.org/2002/07/owl#equivalentClass": [
+        {
+          "@id": "rs-gaap:AdmissionsRevenue"
+        },
+        {
+          "@id": "rs-gaap:AdvertisingRevenue"
+        },
+        {
+          "@id": "rs-gaap:CargoAndFreightRevenue"
+        },
+        {
+          "@id": "rs-gaap:ClearingFeesRevenue"
+        },
+        {
+          "@id": "rs-gaap:ConstructionMaterialsRevenue"
+        },
+        {
+          "@id": "rs-gaap:ElectricUtilityRevenue"
+        },
+        {
+          "@id": "rs-gaap:FinancialServicesRevenue"
+        },
+        {
+          "@id": "rs-gaap:FranchisorRevenue"
+        },
+        {
+          "@id": "rs-gaap:HealthCareOrganizationRevenue"
+        },
+        {
+          "@id": "rs-gaap:HealthCareOrganizationRevenueNetOfPatientServiceRevenueProvisions"
+        },
+        {
+          "@id": "rs-gaap:InterestAndDividendIncomeOperating"
+        },
+        {
+          "@id": "rs-gaap:InterestIncomeExpenseNet"
+        },
+        {
+          "@id": "rs-gaap:InvestmentBankingRevenue"
+        },
+        {
+          "@id": "rs-gaap:LicensesRevenue"
+        },
+        {
+          "@id": "rs-gaap:MarketDataRevenue"
+        },
+        {
+          "@id": "rs-gaap:MembershipDuesRevenueOnGoing"
+        },
+        {
+          "@id": "rs-gaap:NetInvestmentIncome"
+        },
+        {
+          "@id": "rs-gaap:OilAndGasRevenue"
+        },
+        {
+          "@id": "rs-gaap:OilAndGasSalesRevenue"
+        },
+        {
+          "@id": "rs-gaap:OtherSalesRevenueNet"
+        },
+        {
+          "@id": "rs-gaap:PassengerRevenue"
+        },
+        {
+          "@id": "rs-gaap:PhaseInPlanAmountOfCapitalizedCostsRecovered"
+        },
+        {
+          "@id": "rs-gaap:RealEstateRevenueNet"
+        },
+        {
+          "@id": "rs-gaap:RecyclingRevenue"
+        },
+        {
+          "@id": "rs-gaap:RegulatedAndUnregulatedOperatingRevenue"
+        },
+        {
+          "@id": "rs-gaap:ReimbursementRevenue"
+        },
+        {
+          "@id": "rs-gaap:RevenueFromContractWithCustomerExcludingAssessedTax"
+        },
+        {
+          "@id": "rs-gaap:RevenueFromContractWithCustomerIncludingAssessedTax"
+        },
+        {
+          "@id": "rs-gaap:RevenueFromEnrollmentAndRegistrationFeesExcludingHospitalityEnterprises"
+        },
+        {
+          "@id": "rs-gaap:RevenueFromGrants"
+        },
+        {
+          "@id": "rs-gaap:RevenueFromLeasedAndOwnedHotels"
+        },
+        {
+          "@id": "rs-gaap:RevenueMineralSales"
+        },
+        {
+          "@id": "rs-gaap:RevenueOtherManufacturedProducts"
+        },
+        {
+          "@id": "rs-gaap:RevenueSteamProductsAndServices"
+        },
+        {
+          "@id": "rs-gaap:Revenues"
+        },
+        {
+          "@id": "rs-gaap:RevenuesExcludingInterestAndDividends"
+        },
+        {
+          "@id": "rs-gaap:RevenuesNetOfInterestExpense"
+        },
+        {
+          "@id": "rs-gaap:RoyaltyRevenue"
+        },
+        {
+          "@id": "rs-gaap:SaleOfTrustAssetsToPayExpenses"
+        },
+        {
+          "@id": "rs-gaap:SalesOfOilAndGasProspects"
+        },
+        {
+          "@id": "rs-gaap:SalesRevenueFromEnergyCommoditiesAndServices"
+        },
+        {
+          "@id": "rs-gaap:SalesRevenueGoodsNet"
+        },
+        {
+          "@id": "rs-gaap:SalesRevenueNet"
+        },
+        {
+          "@id": "rs-gaap:SalesRevenueServicesNet"
+        },
+        {
+          "@id": "rs-gaap:SecondaryProcessingRevenue"
+        },
+        {
+          "@id": "rs-gaap:ShippingAndHandlingRevenue"
+        },
+        {
+          "@id": "rs-gaap:SubscriptionRevenue"
+        },
+        {
+          "@id": "rs-gaap:TimberRevenue"
+        },
+        {
+          "@id": "rs-gaap:UnderwritingIncomeLoss"
+        },
+        {
+          "@id": "rs-gaap:UtilityRevenue"
+        },
+        {
+          "@id": "rs-gaap:VehicleTollRevenue"
+        }
+      ]
+    },
+    {
       "@id": "fac:OperatingExpenses",
       "http://www.w3.org/2002/07/owl#equivalentClass": [
+        {
+          "@id": "rs-gaap:OperatingCostsAndExpenses"
+        },
         {
           "@id": "rs-gaap:OperatingExpenses"
         },
@@ -791,6 +1145,9 @@
     {
       "@id": "fac:OperatingIncomeLoss",
       "http://www.w3.org/2002/07/owl#equivalentClass": [
+        {
+          "@id": "rs-gaap:IncomeLossFromContinuingOperations"
+        },
         {
           "@id": "rs-gaap:IncomeLossFromContinuingOperationsBeforeInterestExpenseInterestIncomeIncomeTaxesExtraordinaryItemsNoncontrollingInterestsNet"
         },
@@ -804,6 +1161,9 @@
       "http://www.w3.org/2002/07/owl#equivalentClass": [
         {
           "@id": "rs-gaap:OtherComprehensiveIncomeLossNetOfTax"
+        },
+        {
+          "@id": "rs-gaap:OtherComprehensiveIncomeLossNetOfTaxPortionAttributableToParent"
         }
       ]
     },
@@ -820,6 +1180,28 @@
       "http://www.w3.org/2002/07/owl#equivalentClass": [
         {
           "@id": "rs-gaap:OtherComprehensiveIncomeLossNetOfTaxPortionAttributableToParent"
+        }
+      ]
+    },
+    {
+      "@id": "fac:OtherNoncurrentAssetsOfRegulatedEntity",
+      "http://www.w3.org/2002/07/owl#equivalentClass": [
+        {
+          "@id": "rs-gaap:RegulatedEntityOtherAssetsNoncurrent"
+        },
+        {
+          "@id": "rs-gaap:RegulatoryAssetsNoncurrent"
+        }
+      ]
+    },
+    {
+      "@id": "fac:OtherNoncurrentLiabilitiesOfRegulatedEntity",
+      "http://www.w3.org/2002/07/owl#equivalentClass": [
+        {
+          "@id": "rs-gaap:RegulatoryLiabilityCurrent"
+        },
+        {
+          "@id": "rs-gaap:RegulatoryLiabilityNoncurrent"
         }
       ]
     },
@@ -869,6 +1251,14 @@
         },
         {
           "@id": "rs-gaap:ProvisionForLoanLossesExpensed"
+        }
+      ]
+    },
+    {
+      "@id": "fac:PublicUtilitiesPropertyPlantAndEquipmentNet",
+      "http://www.w3.org/2002/07/owl#equivalentClass": [
+        {
+          "@id": "rs-gaap:PublicUtilitiesPropertyPlantAndEquipmentNet"
         }
       ]
     },
@@ -1061,6 +1451,12 @@
           "@id": "rs-gaap:RetailRevenue"
         },
         {
+          "@id": "rs-gaap:RevenueFromContractWithCustomerExcludingAssessedTax"
+        },
+        {
+          "@id": "rs-gaap:RevenueFromContractWithCustomerIncludingAssessedTax"
+        },
+        {
           "@id": "rs-gaap:RevenueFromEnrollmentAndRegistrationFeesExcludingHospitalityEnterprises"
         },
         {
@@ -1159,6 +1555,9 @@
           "@id": "rs-gaap:InvestmentBankingRevenue"
         },
         {
+          "@id": "rs-gaap:Revenues"
+        },
+        {
           "@id": "rs-gaap:RevenuesExcludingInterestAndDividends"
         }
       ]
@@ -1166,6 +1565,9 @@
     {
       "@id": "fac:RevenuesNetInterestExpense",
       "http://www.w3.org/2002/07/owl#equivalentClass": [
+        {
+          "@id": "rs-gaap:Revenues"
+        },
         {
           "@id": "rs-gaap:RevenuesNetOfInterestExpense"
         }

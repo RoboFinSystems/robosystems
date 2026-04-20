@@ -1,67 +1,55 @@
-"""Taxonomy library — JSON-LD seeds + multi-axis classification +
-provision-time library copy + immutability + CoA SFAC 6 anchor tagging.
+"""Taxonomy library — XBRL-faithful model.
 
-Replaces the Python-dict seed (`seed_reporting_taxonomy`) with JSON-LD
-artifacts loaded from `robosystems/taxonomy/seeds/`. Seeds are RoboSystems
-canonical forks — originally bootstrapped from Charlie Hoffman's published
-XBRL, but now maintained directly as JSON-LD with no upstream tracking
-(see `robosystems/taxonomy/seeds/README.md` and the one-shot importer at
-`robosystems/scripts/import_upstream_seeds.py`).
+Replaces the Python-dict seed (``seed_reporting_taxonomy``) with JSON-LD
+artifacts loaded from ``robosystems/taxonomy/seeds/``, aligned with
+XBRL's association model: elements carry only XBRL-intrinsic attributes
+(balance, periodType, abstract, monetary, elementType,
+substitutionGroup), and all classifications are first-class
+``classifications`` rows attached via the ``element_classifications``
+junction — mirroring XBRL's traitConcept linkbase.
 
 Schema changes (public schema):
 
-- CREATE TABLE public.element_labels
-- CREATE TABLE public.element_references
+- CREATE TABLE public.element_labels (XBRL label linkbase)
+- CREATE TABLE public.element_references (XBRL reference linkbase)
 - CREATE TABLE public.classifications (OLTP mirror of graph
-  Classification node, with a `category` axis — see
-  `local/docs/specs/information-modeling.md`)
+  Classification node — 24 FASB metamodel trait axes + flowClassification
+  + association-level categories)
 - CREATE TABLE public.element_classifications (many-to-many junction)
-- Widen `source` CHECK on elements to include 'fac', 'rs-gaap'
-- Widen `association_type` CHECK on associations to include 'equivalence',
+- DROP elements.classification + sub_classification (concocted columns;
+  replaced by element_classifications junction rows in the
+  ``elementsOfFinancialStatements`` category)
+- ADD elements.substitution_group (XBRL intrinsic; previously missing)
+- Widen source CHECK to include 'fac', 'rs-gaap'
+- Widen association_type CHECK to include 'equivalence',
   'general-special', 'essence-alias'
-- Relax `classification` CHECK to allow NULL and the 7 final SFAC 6
-  primitives (asset | liability | equity | revenue | expense | gain |
-  loss). Contributions, distributions, and comprehensive income collapse
-  into `equity` — direction is captured by balance_type, and
-  equity_changes statement_context preserves the BS-vs-flow distinction.
-- ADD COLUMN elements.statement_context (balance_sheet | income_statement |
-  cash_flow | equity_changes | disclosure | metadata | analysis), nullable
-- ADD COLUMN elements.derivation_role (primitive | subtotal | total |
-  reconciliation | movement | ratio | identifier | structural), nullable
 
 Data changes (public schema):
 
-- DELETE existing library-origin rows seeded by 0001's seed_reporting_taxonomy
-  (coexistence would collide on qname uniqueness)
-- INSERT new rows from JSON-LD seeds (library_writer populates both the
-  denormalized columns AND the classifications junction)
-- Propagate classifications from FAC → rs-gaap via equivalence arcs +
-  general-special hierarchy + name patterns
+- DELETE 0001-seeded library rows
+- INSERT from JSON-LD seeds: sfac6, fac, rs-gaap (concept taxonomies);
+  us-gaap-metamodel (classification vocabulary, 99 classifications
+  across 25 categories); rs-gaap-to-metamodel (classification
+  assignments, ~3.5k arcs); rs-gaap-hierarchy (class-subclass);
+  sfac6-to-fac, fac-to-rs-gaap, fac-calculations, fac-presentation,
+  type-subtype (mapping seeds)
 
-Tenant-schema rollout (for every existing tenant schema `kg*`):
+Tenant-schema rollout (for every existing tenant schema ``kg*``):
 
-- Widen association_type / element source CHECKs to admit library
-  vocabulary (equivalence, general-special, essence-alias; fac, rs-gaap)
-- Copy pinned library rows from public.* into the tenant schema using
-  the idempotent `copy_library_into_tenant` helper (row ids preserved so
-  re-runs are no-ops). Respects each graph's `taxonomy_pin`; falls back
-  to DEFAULT_TAXONOMY_PIN for graphs without a pin.
-- Install `BEFORE UPDATE OR DELETE` triggers on the six library-backing
-  tables (taxonomies, elements, element_labels, element_references,
-  structures, associations) keyed on `created_by = 'library-seeder'` so
-  tenant-scope writes can't mutate library rows.
-- Tag every tenant-origin element with a non-null `classification` to its
-  SFAC 6 anchor (or `fac:NetCashFlowFromOperatingActivities` for
-  `classification='cashflow'`) via a `class-subClassOf` association.
-  Gives MappingAgent a structural narrowing signal — FAC descendants of
-  the anchor become the candidate set instead of the full rs-gaap space.
+- Widen association_type / element source CHECKs
+- Drop the old elements.classification + sub_classification columns
+- Add elements.substitution_group column
+- Copy pinned library rows from public.* (taxonomies, elements, labels,
+  references, structures, associations, classifications,
+  element_classifications) using ``copy_library_into_tenant``
+- Install immutability triggers on the library-backing tables
 
-The immutability function `public.raise_library_immutable()` is installed
-once (idempotent) and shared by every tenant trigger.
+The immutability function ``public.raise_library_immutable()`` is
+installed once (idempotent) and shared by every tenant trigger.
 
 Revision ID: 0002
 Revises: 0001
-Create Date: 2026-04-17
+Create Date: 2026-04-20
 """
 
 from __future__ import annotations
@@ -83,8 +71,6 @@ branch_labels = None
 depends_on = None
 
 
-# ── Consolidated from the former 0003 + 0004 migrations ─────────────────
-
 _IMMUTABLE_TABLES = (
   "taxonomies",
   "elements",
@@ -92,6 +78,8 @@ _IMMUTABLE_TABLES = (
   "element_references",
   "structures",
   "associations",
+  "classifications",
+  "element_classifications",
 )
 
 _WIDENED_ASSOCIATION_CHECK = (
@@ -116,65 +104,72 @@ _NARROW_ELEMENT_SOURCE_CHECK = (
   ")"
 )
 
-# classification → SFAC 6 (or cashflow) anchor qname. `inflow` collapses
-# Gains into Revenues; `outflow` collapses Losses into Expenses.
-_ANCHOR_QNAMES = {
-  "asset": "sfac6:Assets",
-  "liability": "sfac6:Liabilities",
-  "equity": "sfac6:Equity",
-  "inflow": "sfac6:Revenues",
-  "outflow": "sfac6:Expenses",
-  "cashflow": "fac:NetCashFlowFromOperatingActivities",
-}
-
-_COA_STRUCTURE_NAME = "CoA Classification Anchors"
-_COA_STRUCTURE_DESC = (
-  "Tenant CoA elements anchored to their SFAC 6 (or cashflow) classification "
-  "via class-subClassOf arcs. Used by MappingAgent to narrow reporting-concept "
-  "candidates by walking anchor descendants."
+# The 24 FASB metamodel trait axes + flowClassification + association-level
+# categories. Matches the CHECK constraint on public.classifications.category.
+_CLASSIFICATION_CATEGORY_CHECK = (
+  "category IN ("
+  "'elementsOfFinancialStatements', 'liquidity', 'activityType', "
+  "'operatingNonoperating', 'operatingIntent', 'realizationStatus', "
+  "'recordedValue', 'restriction', 'hedging', 'leaseType', "
+  "'interestRateType', 'convertibility', 'creditStructure', "
+  "'debtGuarantee', 'derivativeContract', 'derivativeInstrument', "
+  "'accrualOrPayable', 'priority', 'estimatedFutureActivity', "
+  "'statisticalMeasurement', 'taxComponents', 'threshold', 'use', "
+  "'indirectCashFlowReconcilingItem', "
+  "'flowClassification', "
+  "'concept_arrangement', 'member_arrangement', 'named_disclosure'"
+  ")"
 )
-_COA_ARCROLE = "class-subClassOf"
 
 
 def _install_raise_library_immutable_fn(conn) -> None:
   """Create the PL/pgSQL function that raises on library-origin mutations."""
   conn.execute(
-    text("""
+    text(
+      """
       CREATE OR REPLACE FUNCTION public.raise_library_immutable()
-      RETURNS TRIGGER AS $$
+      RETURNS trigger AS $$
       BEGIN
-        IF OLD.created_by = 'library-seeder' THEN
-          RAISE EXCEPTION 'library-seeded rows are immutable in tenant schemas (table=%, id=%)',
-            TG_TABLE_NAME, OLD.id
-            USING ERRCODE = 'P0001';
+        IF TG_OP = 'UPDATE' AND OLD.created_by = 'library-seeder' THEN
+          RAISE EXCEPTION
+            'Library-seeded row is immutable in tenant scope: %.% id=%',
+            TG_TABLE_SCHEMA, TG_TABLE_NAME, OLD.id;
         END IF;
-        IF TG_OP = 'DELETE' THEN
-          RETURN OLD;
+        IF TG_OP = 'DELETE' AND OLD.created_by = 'library-seeder' THEN
+          RAISE EXCEPTION
+            'Library-seeded row is immutable in tenant scope: %.% id=%',
+            TG_TABLE_SCHEMA, TG_TABLE_NAME, OLD.id;
         END IF;
-        RETURN NEW;
+        RETURN OLD;
       END;
       $$ LANGUAGE plpgsql;
-    """)
+      """
+    )
   )
 
 
 def _install_triggers_for_tenant(conn, schema: str) -> None:
   for table in _IMMUTABLE_TABLES:
-    trigger = f"{table}_library_immutable"
-    conn.execute(text(f'DROP TRIGGER IF EXISTS {trigger} ON "{schema}".{table}'))
+    trigger_name = f"raise_library_immutable_{table}"
+    conn.execute(text(f"DROP TRIGGER IF EXISTS {trigger_name} ON {schema}.{table}"))
     conn.execute(
       text(
-        f"CREATE TRIGGER {trigger} "
-        f'BEFORE UPDATE OR DELETE ON "{schema}".{table} '
-        f"FOR EACH ROW EXECUTE FUNCTION public.raise_library_immutable()"
+        f"""
+        CREATE TRIGGER {trigger_name}
+        BEFORE UPDATE OR DELETE ON {schema}.{table}
+        FOR EACH ROW EXECUTE FUNCTION public.raise_library_immutable()
+        """
       )
     )
 
 
 def _drop_triggers_for_tenant(conn, schema: str) -> None:
   for table in _IMMUTABLE_TABLES:
-    trigger = f"{table}_library_immutable"
-    conn.execute(text(f'DROP TRIGGER IF EXISTS {trigger} ON "{schema}".{table}'))
+    conn.execute(
+      text(
+        f"DROP TRIGGER IF EXISTS raise_library_immutable_{table} ON {schema}.{table}"
+      )
+    )
 
 
 def _widen_tenant_checks(conn, schema: str) -> None:
@@ -189,116 +184,151 @@ def _restore_narrow_tenant_checks(conn, schema: str) -> None:
   t.add_check("elements", "check_element_source", _NARROW_ELEMENT_SOURCE_CHECK)
 
 
-def _backfill_library_into_tenant(conn, schema: str) -> None:
-  """Widen CHECKs, copy pinned library rows, install immutability triggers.
+def _drop_old_element_columns(conn, schema: str) -> None:
+  """Drop the concocted classification columns from a tenant's elements table."""
+  for column, constraint, index in (
+    ("classification", "check_element_classification", "idx_elements_classification"),
+    ("sub_classification", None, None),
+  ):
+    if constraint:
+      conn.execute(
+        text(f"ALTER TABLE {schema}.elements DROP CONSTRAINT IF EXISTS {constraint}")
+      )
+    if index:
+      conn.execute(text(f"DROP INDEX IF EXISTS {schema}.{index}"))
+    conn.execute(text(f"ALTER TABLE {schema}.elements DROP COLUMN IF EXISTS {column}"))
 
-  Order is load-bearing: copy runs before trigger install so library
-  rows land freely; after the triggers are attached, subsequent
-  UPDATE/DELETE on those rows raises from tenant scope.
+
+def _add_substitution_group_column(conn, schema: str) -> None:
+  """Add substitution_group column + index to a tenant's elements table."""
+  conn.execute(
+    text(
+      f"ALTER TABLE {schema}.elements "
+      f"ADD COLUMN IF NOT EXISTS substitution_group VARCHAR"
+    )
+  )
+  conn.execute(
+    text(
+      f"CREATE INDEX IF NOT EXISTS idx_elements_substitution_group "
+      f"ON {schema}.elements (substitution_group) "
+      f"WHERE substitution_group IS NOT NULL"
+    )
+  )
+
+
+def _backfill_library_into_tenant(conn, schema: str) -> None:
+  """Widen CHECKs, drop old columns, add substitution_group, copy library rows.
+
+  Order is load-bearing: schema changes first, then copy, then triggers.
   """
   _widen_tenant_checks(conn, schema)
+  _drop_old_element_columns(conn, schema)
+  _add_substitution_group_column(conn, schema)
+  _create_tenant_library_tables(conn, schema)
   stats = copy_library_into_tenant(conn, schema)
   print(f"  [{schema}] library backfill: {stats.total:,} rows")
   _install_triggers_for_tenant(conn, schema)
 
 
-def _tag_coa_for_tenant(conn, schema: str) -> None:
-  """Tag tenant-origin elements with SFAC 6 anchor associations."""
-  # Resolve anchor element ids in this tenant schema by qname.
-  rows = conn.execute(
-    text(
-      f"SELECT qname, id FROM {schema}.elements "
-      f"WHERE qname = ANY(:qnames) AND created_by = 'library-seeder'"
-    ),
-    {"qnames": list(_ANCHOR_QNAMES.values())},
-  ).fetchall()
-  anchor_ids = {row.qname: row.id for row in rows}
-  if not anchor_ids:
-    print(f"  [{schema}] coa tagging skipped (no library anchors present)")
-    return
-
-  # Ensure the holder Structure exists. Deterministic id qualified by
-  # schema so re-runs are idempotent.
-  structure_id = f"struct_coa_cls_{schema.replace('-', '_')}"
-  existing = conn.execute(
-    text(f"SELECT id FROM {schema}.structures WHERE id = :id"),
-    {"id": structure_id},
-  ).fetchone()
-  if existing is None:
-    tax_row = conn.execute(
-      text(
-        f"SELECT id FROM {schema}.taxonomies "
-        f"WHERE created_by != 'library-seeder' "
-        f"ORDER BY created_at LIMIT 1"
-      )
-    ).fetchone()
-    taxonomy_id = tax_row.id if tax_row else None
-    conn.execute(
-      text(
-        f"INSERT INTO {schema}.structures "
-        f"(id, name, description, structure_type, taxonomy_id, is_active, "
-        f" metadata, created_at, updated_at, created_by) "
-        f"VALUES (:id, :name, :desc, 'coa_mapping', :tax, true, '{{}}'::jsonb, "
-        f" now(), now(), 'coa-classifier')"
-      ),
-      {
-        "id": structure_id,
-        "name": _COA_STRUCTURE_NAME,
-        "desc": _COA_STRUCTURE_DESC,
-        "tax": taxonomy_id,
-      },
-    )
-
-  inserted = 0
-  for classification, qname in _ANCHOR_QNAMES.items():
-    anchor_id = anchor_ids.get(qname)
-    if anchor_id is None:
-      continue
-    result = conn.execute(
-      text(f"""
-        INSERT INTO {schema}.associations (
-          id, structure_id, from_element_id, to_element_id,
-          association_type, arcrole,
-          order_value, weight, confidence, suggested_by, approved_by,
-          approved_at, metadata, created_at, updated_at, created_by
-        )
-        SELECT
-          'assoc_coa_' || substr(md5(e.id || ':' || :anchor_id), 1, 22),
-          :structure_id, e.id, :anchor_id,
-          'mapping', :arcrole,
-          NULL, NULL, NULL, 'coa-classifier', 'coa-classifier',
-          now(), '{{}}'::jsonb, now(), now(), 'coa-classifier'
-        FROM {schema}.elements e
-        WHERE e.classification = :classification
-          AND e.created_by != 'library-seeder'
-          AND NOT EXISTS (
-            SELECT 1 FROM {schema}.associations a
-            WHERE a.from_element_id = e.id
-              AND a.to_element_id = :anchor_id
-              AND a.arcrole = :arcrole
-          )
-      """),
-      {
-        "structure_id": structure_id,
-        "anchor_id": anchor_id,
-        "arcrole": _COA_ARCROLE,
-        "classification": classification,
-      },
-    )
-    inserted += result.rowcount or 0
-  print(f"  [{schema}] coa anchor arcs inserted: {inserted}")
-
-
-def _untag_coa_for_tenant(conn, schema: str) -> None:
+def _create_tenant_library_tables(conn, schema: str) -> None:
+  """Create element_labels/references/classifications/element_classifications in a tenant schema."""
   conn.execute(
-    text(
-      f"DELETE FROM {schema}.associations "
-      f"WHERE created_by = 'coa-classifier' AND arcrole = :arcrole"
-    ),
-    {"arcrole": _COA_ARCROLE},
+    text(f"""
+      CREATE TABLE IF NOT EXISTS {schema}.element_labels (
+        id VARCHAR PRIMARY KEY,
+        element_id VARCHAR NOT NULL REFERENCES {schema}.elements(id),
+        role VARCHAR NOT NULL DEFAULT 'standard',
+        language VARCHAR NOT NULL DEFAULT 'en',
+        text TEXT NOT NULL,
+        created_at TIMESTAMP NOT NULL DEFAULT now(),
+        created_by VARCHAR NOT NULL DEFAULT 'system',
+        CONSTRAINT uq_{schema}_element_labels_element_role_language
+          UNIQUE (element_id, role, language),
+        CONSTRAINT check_{schema}_element_label_role
+          CHECK (role IN ('standard', 'verbose', 'terse', 'documentation',
+                          'periodStart', 'periodEnd', 'negated', 'total',
+                          'commentaryGuidance', 'deprecatedLabel', 'other'))
+      )
+    """)
   )
   conn.execute(
-    text(f"DELETE FROM {schema}.structures WHERE created_by = 'coa-classifier'")
+    text(
+      f"CREATE INDEX IF NOT EXISTS idx_{schema}_element_labels_element "
+      f"ON {schema}.element_labels (element_id)"
+    )
+  )
+
+  conn.execute(
+    text(f"""
+      CREATE TABLE IF NOT EXISTS {schema}.element_references (
+        id VARCHAR PRIMARY KEY,
+        element_id VARCHAR NOT NULL REFERENCES {schema}.elements(id),
+        ref_type VARCHAR,
+        citation VARCHAR NOT NULL,
+        uri VARCHAR,
+        attributes VARCHAR,
+        created_at TIMESTAMP NOT NULL DEFAULT now(),
+        created_by VARCHAR NOT NULL DEFAULT 'system'
+      )
+    """)
+  )
+  conn.execute(
+    text(
+      f"CREATE INDEX IF NOT EXISTS idx_{schema}_element_references_element "
+      f"ON {schema}.element_references (element_id)"
+    )
+  )
+
+  conn.execute(
+    text(f"""
+      CREATE TABLE IF NOT EXISTS {schema}.classifications (
+        id VARCHAR PRIMARY KEY,
+        category VARCHAR NOT NULL,
+        identifier VARCHAR NOT NULL,
+        type VARCHAR NOT NULL,
+        name VARCHAR,
+        description VARCHAR,
+        confidence FLOAT,
+        source VARCHAR,
+        metadata JSONB NOT NULL DEFAULT '{{}}',
+        created_at TIMESTAMP NOT NULL DEFAULT now(),
+        updated_at TIMESTAMP NOT NULL DEFAULT now(),
+        created_by VARCHAR NOT NULL DEFAULT 'system',
+        CONSTRAINT uq_{schema}_classification_category_identifier_type
+          UNIQUE (category, identifier, type),
+        CONSTRAINT check_{schema}_classification_category
+          CHECK ({_CLASSIFICATION_CATEGORY_CHECK})
+      )
+    """)
+  )
+  conn.execute(
+    text(
+      f"CREATE INDEX IF NOT EXISTS idx_{schema}_classifications_category "
+      f"ON {schema}.classifications (category)"
+    )
+  )
+
+  conn.execute(
+    text(f"""
+      CREATE TABLE IF NOT EXISTS {schema}.element_classifications (
+        element_id VARCHAR NOT NULL REFERENCES {schema}.elements(id),
+        classification_id VARCHAR NOT NULL REFERENCES {schema}.classifications(id),
+        is_primary BOOLEAN NOT NULL DEFAULT true,
+        confidence FLOAT,
+        source VARCHAR,
+        created_at TIMESTAMP NOT NULL DEFAULT now(),
+        updated_at TIMESTAMP NOT NULL DEFAULT now(),
+        created_by VARCHAR NOT NULL DEFAULT 'system',
+        PRIMARY KEY (element_id, classification_id)
+      )
+    """)
+  )
+  conn.execute(
+    text(
+      f"CREATE INDEX IF NOT EXISTS idx_{schema}_element_classifications_primary "
+      f"ON {schema}.element_classifications (element_id, is_primary) "
+      f"WHERE is_primary = true"
+    )
   )
 
 
@@ -306,24 +336,66 @@ SEEDS_DIR = (
   Path(__file__).parent.parent.parent.parent / "robosystems" / "taxonomy" / "seeds"
 )
 
+# Concept taxonomies first (referenced by qname from mapping + assignment
+# seeds); then the classification vocabulary; then assignments/mappings.
 SEED_FILES = [
-  # Concept taxonomies first — mapping taxonomies reference them by qname.
   SEEDS_DIR / "sfac6" / "v1" / "taxonomy.jsonld",
   SEEDS_DIR / "fac" / "v1" / "taxonomy.jsonld",
   SEEDS_DIR / "rs-gaap" / "v1" / "taxonomy.jsonld",
-  # Mapping taxonomies: arc-only linkbases bridging concept taxonomies.
+  # Classification vocabulary (FASB metamodel)
+  SEEDS_DIR / "us-gaap-metamodel" / "v1" / "taxonomy.jsonld",
+  # Classification assignments + hierarchy (reference rs-gaap concepts)
+  SEEDS_DIR / "rs-gaap-to-metamodel" / "v1" / "taxonomy.jsonld",
+  SEEDS_DIR / "rs-gaap-hierarchy" / "v1" / "taxonomy.jsonld",
+  # Cross-taxonomy mapping + calculation + presentation arc packs
   SEEDS_DIR / "sfac6-to-fac" / "v1" / "taxonomy.jsonld",
   SEEDS_DIR / "fac-to-rs-gaap" / "v1" / "taxonomy.jsonld",
   SEEDS_DIR / "fac-calculations" / "v1" / "taxonomy.jsonld",
   SEEDS_DIR / "fac-presentation" / "v1" / "taxonomy.jsonld",
   SEEDS_DIR / "type-subtype" / "v1" / "taxonomy.jsonld",
-  SEEDS_DIR / "rs-gaap-presentation" / "v1" / "taxonomy.jsonld",
 ]
 
 
 def upgrade() -> None:
+  conn = op.get_bind()
+
   # ──────────────────────────────────────────────────────────────────────
-  # 1. New tables for XBRL label + reference linkbases
+  # 1. Drop concocted classification columns + their CHECK + index.
+  # ──────────────────────────────────────────────────────────────────────
+  # These columns live on the 0001 schema. Replaced by
+  # element_classifications junction rows in the
+  # 'elementsOfFinancialStatements' category (seeded from
+  # us-gaap-metamodel/v1).
+  op.drop_constraint("check_element_classification", "elements", type_="check")
+  op.drop_index("idx_elements_classification", table_name="elements")
+  op.drop_column("elements", "classification")
+  op.drop_column("elements", "sub_classification")
+
+  # ──────────────────────────────────────────────────────────────────────
+  # 2. Add substitution_group (XBRL intrinsic, previously missing).
+  # ──────────────────────────────────────────────────────────────────────
+  op.add_column("elements", sa.Column("substitution_group", sa.String(), nullable=True))
+  op.create_index(
+    "idx_elements_substitution_group",
+    "elements",
+    ["substitution_group"],
+    postgresql_where="substitution_group IS NOT NULL",
+  )
+
+  # ──────────────────────────────────────────────────────────────────────
+  # 3. Widen element source + association_type CHECKs.
+  # ──────────────────────────────────────────────────────────────────────
+  op.drop_constraint("check_element_source", "elements", type_="check")
+  op.create_check_constraint(
+    "check_element_source", "elements", _WIDENED_ELEMENT_SOURCE_CHECK
+  )
+  op.drop_constraint("check_association_type", "associations", type_="check")
+  op.create_check_constraint(
+    "check_association_type", "associations", _WIDENED_ASSOCIATION_CHECK
+  )
+
+  # ──────────────────────────────────────────────────────────────────────
+  # 4. Label + reference linkbase tables (XBRL).
   # ──────────────────────────────────────────────────────────────────────
   op.create_table(
     "element_labels",
@@ -333,10 +405,7 @@ def upgrade() -> None:
     sa.Column("language", sa.String(), nullable=False, server_default="en"),
     sa.Column("text", sa.Text(), nullable=False),
     sa.Column(
-      "created_at",
-      sa.DateTime(),
-      nullable=False,
-      server_default=sa.text("now()"),
+      "created_at", sa.DateTime(), nullable=False, server_default=sa.text("now()")
     ),
     sa.Column("created_by", sa.String(), nullable=False, server_default="system"),
     sa.ForeignKeyConstraint(["element_id"], ["elements.id"]),
@@ -348,11 +417,9 @@ def upgrade() -> None:
       name="uq_element_labels_element_role_language",
     ),
     sa.CheckConstraint(
-      "role IN ("
-      "'standard', 'verbose', 'terse', 'documentation', "
+      "role IN ('standard', 'verbose', 'terse', 'documentation', "
       "'periodStart', 'periodEnd', 'negated', 'total', "
-      "'commentaryGuidance', 'deprecatedLabel', 'other'"
-      ")",
+      "'commentaryGuidance', 'deprecatedLabel', 'other')",
       name="check_element_label_role",
     ),
   )
@@ -368,10 +435,7 @@ def upgrade() -> None:
     sa.Column("uri", sa.String(), nullable=True),
     sa.Column("attributes", sa.String(), nullable=True),
     sa.Column(
-      "created_at",
-      sa.DateTime(),
-      nullable=False,
-      server_default=sa.text("now()"),
+      "created_at", sa.DateTime(), nullable=False, server_default=sa.text("now()")
     ),
     sa.Column("created_by", sa.String(), nullable=False, server_default="system"),
     sa.ForeignKeyConstraint(["element_id"], ["elements.id"]),
@@ -383,8 +447,7 @@ def upgrade() -> None:
   op.create_index("idx_element_references_type", "element_references", ["ref_type"])
 
   # ──────────────────────────────────────────────────────────────────────
-  # 1b. Classification registry + junction (OLTP mirror of graph
-  #     Classification node, extended with a `category` axis).
+  # 5. Classification vocabulary + junction.
   # ──────────────────────────────────────────────────────────────────────
   op.create_table(
     "classifications",
@@ -401,11 +464,7 @@ def upgrade() -> None:
     sa.Column("updated_at", sa.DateTime(), nullable=False),
     sa.Column("created_by", sa.String(), nullable=False),
     sa.CheckConstraint(
-      "category IN ("
-      "'economic_nature', 'statement_context', 'derivation_role', "
-      "'concept_arrangement', 'member_arrangement', 'named_disclosure'"
-      ")",
-      name="check_classification_category",
+      _CLASSIFICATION_CATEGORY_CHECK, name="check_classification_category"
     ),
     sa.PrimaryKeyConstraint("id"),
     sa.UniqueConstraint(
@@ -445,67 +504,10 @@ def upgrade() -> None:
   )
 
   # ──────────────────────────────────────────────────────────────────────
-  # 1c. New axis columns on elements (statement_context + derivation_role)
+  # 6. Clear 0001-seeded library rows before loading JSON-LD seeds.
   # ──────────────────────────────────────────────────────────────────────
-  op.add_column("elements", sa.Column("statement_context", sa.String(), nullable=True))
-  op.add_column("elements", sa.Column("derivation_role", sa.String(), nullable=True))
-  op.create_index("idx_elements_statement_context", "elements", ["statement_context"])
-  op.create_index("idx_elements_derivation_role", "elements", ["derivation_role"])
-  op.create_check_constraint(
-    "check_element_statement_context",
-    "elements",
-    "statement_context IS NULL OR statement_context IN ("
-    "'balance_sheet', 'income_statement', 'cash_flow', "
-    "'equity_changes', 'disclosure', 'metadata', 'analysis'"
-    ")",
-  )
-  op.create_check_constraint(
-    "check_element_derivation_role",
-    "elements",
-    "derivation_role IS NULL OR derivation_role IN ("
-    "'primitive', 'aggregate', "
-    "'ratio', 'identifier', 'structural'"
-    ")",
-  )
-
-  # ──────────────────────────────────────────────────────────────────────
-  # 2. Widen CHECK constraints
-  # ──────────────────────────────────────────────────────────────────────
-  op.drop_constraint("check_element_source", "elements", type_="check")
-  op.create_check_constraint(
-    "check_element_source",
-    "elements",
-    "source IN ("
-    "'sfac6', 'fac', 'rs-gaap', 'us-gaap', 'ifrs', "
-    "'quickbooks', 'xero', 'plaid', 'native', 'import', 'system'"
-    ")",
-  )
-
-  op.drop_constraint("check_association_type", "associations", type_="check")
-  op.create_check_constraint(
-    "check_association_type",
-    "associations",
-    "association_type IN ("
-    "'presentation', 'calculation', 'mapping', "
-    "'equivalence', 'general-special', 'essence-alias'"
-    ")",
-  )
-
-  # Make classification nullable (flips for structural/metadata rows).
-  op.alter_column(
-    "elements", "classification", existing_type=sa.VARCHAR(), nullable=True
-  )
-
-  # ──────────────────────────────────────────────────────────────────────
-  # 3. Clear 0001's seeded library data BEFORE tightening the classification
-  #    CHECK — 0001 plants rows with legacy 'revenue'/'expense' values
-  #    that would violate the new 6-value vocabulary.
-  # ──────────────────────────────────────────────────────────────────────
-  conn = op.get_bind()
-
-  # Delete in FK-safe order: associations → structures → elements → taxonomies
   conn.execute(
-    sa.text(
+    text(
       """
       DELETE FROM public.associations
       WHERE structure_id IN (
@@ -518,657 +520,91 @@ def upgrade() -> None:
     )
   )
   conn.execute(
-    sa.text(
+    text(
       "DELETE FROM public.structures WHERE taxonomy_id IN "
       "(SELECT id FROM public.taxonomies WHERE is_shared = true)"
     )
   )
   conn.execute(
-    sa.text(
+    text(
       "DELETE FROM public.elements WHERE taxonomy_id IN "
       "(SELECT id FROM public.taxonomies WHERE is_shared = true)"
     )
   )
-  conn.execute(sa.text("DELETE FROM public.taxonomies WHERE is_shared = true"))
-
-  # Now that the legacy rows are gone, tighten the classification CHECK
-  # to the final 6-value vocabulary + NULL.
-  #   asset | liability | equity  (balance-sheet stocks)
-  #   inflow | outflow             (R+G collapse → inflow, E+L → outflow)
-  #   cashflow                     (CF-statement reconciliations + movements)
-  # Nullable for structural rows, metadata, and computed ratios.
-  op.drop_constraint("check_element_classification", "elements", type_="check")
-  op.create_check_constraint(
-    "check_element_classification",
-    "elements",
-    "classification IS NULL OR classification IN ("
-    "'asset', 'liability', 'equity', "
-    "'inflow', 'outflow', 'cashflow'"
-    ")",
-  )
+  conn.execute(text("DELETE FROM public.taxonomies WHERE is_shared = true"))
 
   # ──────────────────────────────────────────────────────────────────────
-  # 4. Load JSON-LD seed artifacts
+  # 7. Load JSON-LD seeds.
   # ──────────────────────────────────────────────────────────────────────
-  # Deferred imports so the migration module loads without taxonomy code
-  # available at collection time.
+  # Deferred import so Alembic collection doesn't pull in taxonomy code.
   from robosystems.taxonomy.loaders import load_taxonomy_package
-  from robosystems.taxonomy.writers import (
-    sync_element_classifications_bulk,
-    write_taxonomy_package,
-  )
+  from robosystems.taxonomy.writers import write_taxonomy_package
 
   for seed_path in SEED_FILES:
     if not seed_path.exists():
-      # Seed files are committed to the repo. Missing file is an error in
-      # production; allow a skip for partial-build scenarios during
-      # development with a clear log.
       print(f"  [WARN] Seed file missing, skipping: {seed_path}")
       continue
-
     print(f"  Loading seed: {seed_path.relative_to(SEEDS_DIR)}")
     package = load_taxonomy_package(seed_path)
     counts = write_taxonomy_package(conn, package)
     print(
-      f"    → {counts['elements']} elements, {counts['labels']} labels, "
-      f"{counts['references']} references, {counts['structures']} structures, "
-      f"{counts['associations']} associations"
+      f"    → elements={counts['elements']} labels={counts['labels']} "
+      f"references={counts['references']} structures={counts['structures']} "
+      f"associations={counts['associations']} "
+      f"classifications={counts['classifications']} "
+      f"classification_assignments={counts['classification_assignments']}"
     )
 
   # ──────────────────────────────────────────────────────────────────────
-  # 5. Propagate FAC classifications to rs-gaap via equivalence arcs
+  # 8. Tenant-schema rollout: schema alignment + library backfill + triggers.
   # ──────────────────────────────────────────────────────────────────────
-  # The extractor's balance+period heuristic misclassifies thousands of
-  # rs-gaap concepts (credit-balance duration adjustments all land in
-  # 'revenue'). FAC concepts are hand-classified correctly by Charlie,
-  # and fac:X ≡ rs-gaap:Y arcs (221 of them) tell us which rs-gaap
-  # concepts inherit which classification. We walk the equivalence arcs
-  # and propagate.
-  #
-  # This fixes ~220 rs-gaap concepts with high confidence. The remaining
-  # ~16,900 keep their heuristic classification — flagging that as tech
-  # debt (derive classification from Charlie's type-subtype networks,
-  # which requires preserving XBRL role URIs through serialization —
-  # not blocking library launch).
-  # Propagation uses a temp tracking table instead of an updated_at time
-  # window. The prior approach (``updated_at > now() - interval '5 minutes'``)
-  # broke silently whenever the migration exceeded the window on slow
-  # RDS instances — the hierarchy walk would stop seeing parents
-  # mid-loop and leave classification gaps with no error. Threading the
-  # touched-id set through RETURNING → INSERT gives a deterministic gate
-  # independent of wall-clock time.
-  conn.execute(
-    sa.text(
-      """
-      CREATE TEMP TABLE _reclassified_ids (
-        id VARCHAR PRIMARY KEY
-      ) ON COMMIT DROP
-      """
-    )
-  )
-
-  print("  Propagating FAC classifications to rs-gaap via equivalence arcs…")
-  seeded = conn.execute(
-    sa.text(
-      """
-      UPDATE public.elements AS rs
-      SET classification = fac.classification,
-          statement_context = fac.statement_context,
-          derivation_role = fac.derivation_role,
-          updated_at = now()
-      FROM public.associations a
-      JOIN public.elements fac ON fac.id = a.from_element_id
-      WHERE a.to_element_id = rs.id
-        AND a.association_type = 'equivalence'
-        AND fac.source = 'fac'
-        AND rs.source = 'rs-gaap'
-        AND (rs.classification IS DISTINCT FROM fac.classification
-             OR rs.statement_context IS DISTINCT FROM fac.statement_context
-             OR rs.derivation_role IS DISTINCT FROM fac.derivation_role)
-      RETURNING rs.id
-      """
-    )
-  ).fetchall()
-  seeded_ids = [row[0] for row in seeded]
-  print(f"    rs-gaap reclassified from FAC equivalence: {len(seeded_ids)} elements")
-  if seeded_ids:
-    conn.execute(
-      sa.text(
-        "INSERT INTO _reclassified_ids (id) SELECT unnest(CAST(:ids AS text[])) "
-        "ON CONFLICT (id) DO NOTHING"
-      ),
-      {"ids": seeded_ids},
-    )
-
-  # Also propagate classification via general-special hierarchy from
-  # already-classified rs-gaap concepts (fixed point iteration). When
-  # rs-gaap:CostOfGoodsSold has classification='expense' (from FAC
-  # equivalence), all its descendants via general-special arcs inherit
-  # 'expense' too. Run a few passes until no more updates happen.
-  print("  Propagating via general-special hierarchy…")
-  total_propagated = 0
-  for pass_num in range(1, 6):
-    hop_rows = conn.execute(
-      sa.text(
-        """
-        UPDATE public.elements AS child
-        SET classification = parent.classification,
-            statement_context = COALESCE(child.statement_context, parent.statement_context),
-            derivation_role = COALESCE(child.derivation_role, parent.derivation_role),
-            updated_at = now()
-        FROM public.associations a
-        JOIN public.elements parent ON parent.id = a.from_element_id
-        JOIN _reclassified_ids seed ON seed.id = parent.id
-        WHERE a.to_element_id = child.id
-          AND a.association_type = 'general-special'
-          AND parent.source = 'rs-gaap'
-          AND child.source = 'rs-gaap'
-          AND parent.classification IS DISTINCT FROM child.classification
-        RETURNING child.id
-        """
-      )
-    ).fetchall()
-    hopped_ids = [row[0] for row in hop_rows]
-    hopped = len(hopped_ids)
-    total_propagated += hopped
-    print(f"    Hop {pass_num}: {hopped} elements")
-    if hopped == 0:
-      break
-    conn.execute(
-      sa.text(
-        "INSERT INTO _reclassified_ids (id) SELECT unnest(CAST(:ids AS text[])) "
-        "ON CONFLICT (id) DO NOTHING"
-      ),
-      {"ids": hopped_ids},
-    )
-  print(f"  Total propagated via hierarchy: {total_propagated}")
-
-  # ──────────────────────────────────────────────────────────────────────
-  # 6. Name-pattern fallback for the remaining misclassified noise
-  # ──────────────────────────────────────────────────────────────────────
-  # Concepts that weren't touched by FAC equivalence or hierarchy
-  # propagation still carry the heuristic's wrong classification. The
-  # biggest noise categories in the Revenue / Asset buckets are
-  # adjustments, accruals, and accumulated contra-asset concepts. These
-  # regex-based reclassifications catch the obvious cases.
-  print("  Name-pattern cleanup of remaining misclassifications…")
-
-  cleanup_passes = [
-    # Accrual liabilities — "AccrualFor*" credit balance concepts
-    (
-      "Accrual liabilities → liability",
-      """
-      UPDATE public.elements
-      SET classification = 'liability', updated_at = now()
-      WHERE source = 'rs-gaap'
-        AND balance_type = 'credit'
-        AND (name LIKE 'Accrual%' OR name LIKE '%AccruedLiabilit%')
-        AND classification != 'liability'
-      """,
-    ),
-    # Accumulated depreciation / amortization — contra-assets
-    (
-      "AccumulatedDepreciation → asset (contra-asset)",
-      """
-      UPDATE public.elements
-      SET classification = 'asset', updated_at = now()
-      WHERE source = 'rs-gaap'
-        AND (name LIKE 'AccumulatedDepreciation%'
-             OR name LIKE 'AccumulatedAmortization%'
-             OR name LIKE 'AccumulatedDepletion%')
-        AND classification != 'asset'
-      """,
-    ),
-    # IncreaseDecrease* items are cash-flow movements — even when the
-    # name contains "Payable" or "Liability" they're movements of that
-    # account in the cash flow statement, not the balance-sheet position.
-    (
-      "IncreaseDecrease* → cashflow",
-      """
-      UPDATE public.elements
-      SET classification = 'cashflow', updated_at = now()
-      WHERE source = 'rs-gaap'
-        AND name LIKE 'IncreaseDecreaseIn%'
-        AND classification IS DISTINCT FROM 'cashflow'
-      """,
-    ),
-    # Adjustment concepts with credit balance — usually equity or liability
-    # adjustments, not inflow.
-    (
-      "AdjustmentFor* → equity (AOCI-style) or liability",
-      """
-      UPDATE public.elements
-      SET classification = CASE
-        WHEN name LIKE '%Stock%' OR name LIKE '%Equity%'
-             OR name LIKE '%RetainedEarnings%' THEN 'equity'
-        ELSE 'liability'
-      END, updated_at = now()
-      WHERE source = 'rs-gaap'
-        AND name LIKE 'AdjustmentFor%'
-        AND classification = 'inflow'
-      """,
-    ),
-  ]
-
-  for label, sql in cleanup_passes:
-    r = conn.execute(sa.text(sql))
-    print(f"    {label}: {r.rowcount} elements")
-
-  # Additional sweeps for specific conceptual categories that tend to
-  # leak through the balance+period heuristic into the wrong bucket.
-  additional_patterns = [
-    # Paid-in capital / APIC adjustments → equity
-    (
-      "AdjustmentsToAdditionalPaidInCapital → equity",
-      """
-      UPDATE public.elements SET classification = CASE
-        WHEN period_type = 'instant' THEN 'equity'
-        WHEN balance_type = 'credit' THEN 'inflow'
-        WHEN balance_type = 'debit' THEN 'outflow'
-        ELSE classification
-      END, updated_at=now()
-      WHERE source='rs-gaap'
-        AND (name LIKE 'AdjustmentsToAdditionalPaidInCapital%'
-             OR name LIKE 'AcceleratedShareRepurchase%'
-             OR name LIKE 'StockIssued%' OR name LIKE 'StockRepurchase%'
-             OR name LIKE 'CommonStock%' OR name LIKE 'PreferredStock%'
-             OR name LIKE 'PaidInCapital%' OR name LIKE 'TreasuryStock%')
-      """,
-    ),
-    # Long-duration insurance liabilities → liability
-    (
-      "Insurance liability concepts → liability",
-      """
-      UPDATE public.elements SET classification='liability', updated_at=now()
-      WHERE source='rs-gaap'
-        AND (name LIKE 'AdditionalLiability%' OR name LIKE 'LiabilityFor%'
-             OR name LIKE '%Liability%Due%' OR name LIKE 'InsurancePolicy%'
-             OR name LIKE 'DeferredTax%Liability%')
-        AND classification NOT IN ('liability', 'expense')
-      """,
-    ),
-    # Depreciation/Amortization/Impairment — duration debit flows.
-    (
-      "Depreciation/Amortization patterns → outflow",
-      """
-      UPDATE public.elements SET classification='outflow', updated_at=now()
-      WHERE source='rs-gaap'
-        AND period_type='duration'
-        AND (name LIKE '%Depreciation%' OR name LIKE '%Amortization%'
-             OR name LIKE '%Impairment%' OR name LIKE '%Writedown%'
-             OR name LIKE '%WriteOff%')
-        AND name NOT LIKE 'Accumulated%'
-        AND classification NOT IN ('outflow', 'asset')
-      """,
-    ),
-    # Core outflow (expense-like) patterns
-    (
-      "Expense-shaped patterns → outflow",
-      """
-      UPDATE public.elements SET classification='outflow', updated_at=now()
-      WHERE source='rs-gaap'
-        AND period_type='duration'
-        AND (name LIKE '%Expense' OR name LIKE '%Expenses'
-             OR name LIKE 'CostOf%' OR name LIKE '%Cost')
-        AND classification = 'inflow'
-      """,
-    ),
-    # Core inflow (revenue-like) patterns
-    (
-      "Revenue/Sales/Income patterns → inflow",
-      """
-      UPDATE public.elements SET classification='inflow', updated_at=now()
-      WHERE source='rs-gaap'
-        AND period_type='duration'
-        AND balance_type='credit'
-        AND (name LIKE '%Revenue%' OR name LIKE '%Sales'
-             OR name LIKE 'SalesRevenue%' OR name LIKE 'InterestIncome%'
-             OR name LIKE 'OperatingIncome%')
-        AND classification != 'inflow'
-      """,
-    ),
-    # Remaining duration+credit flows that don't match inflow patterns —
-    # usually equity adjustments or deferred liabilities.
-    (
-      "Remaining duration+credit non-inflow → equity/liability",
-      """
-      UPDATE public.elements SET classification = CASE
-        WHEN name LIKE '%Equity%' OR name LIKE '%RetainedEarnings%'
-             OR name LIKE '%Stock%' OR name LIKE '%Dividend%' THEN 'equity'
-        ELSE 'liability'
-      END, updated_at=now()
-      WHERE source='rs-gaap'
-        AND classification = 'inflow'
-        AND period_type='duration'
-        AND balance_type='credit'
-        AND name NOT LIKE '%Revenue%'
-        AND name NOT LIKE '%Sales%'
-        AND name NOT LIKE '%Income%'
-        AND name NOT LIKE '%Gain%'
-      """,
-    ),
-  ]
-  for label, sql in additional_patterns:
-    r = conn.execute(sa.text(sql))
-    print(f"    {label}: {r.rowcount} elements")
-
-  # ──────────────────────────────────────────────────────────────────────
-  # 7. Authoritative SFAC 6 classification overrides
-  # ──────────────────────────────────────────────────────────────────────
-  # SFAC 6's 10 concrete primitives collapse into the 6-value vocabulary:
-  #   Assets / Liabilities / Equity       → stock primitives (instant)
-  #   Revenues / Gains                    → inflow   (credit duration)
-  #   Expenses / Losses                   → outflow  (debit duration)
-  #   ComprehensiveIncome                 → inflow   (credit duration)
-  #   InvestmentsByOwners                 → cashflow (equity-statement financing inflow)
-  #   DistributionsToOwners               → cashflow (equity-statement financing outflow)
-  # InvestmentsByOwners and DistributionsToOwners sit in the equity-statement /
-  # financing-activity zone — not the income statement — so cashflow is the
-  # correct classification bucket.
-  sfac6_overrides = {
-    "sfac6:Assets": "asset",
-    "sfac6:Liabilities": "liability",
-    "sfac6:Equity": "equity",
-    "sfac6:InvestmentsByOwners": "cashflow",
-    "sfac6:DistributionsToOwners": "cashflow",
-    "sfac6:ComprehensiveIncome": "inflow",
-    "sfac6:Revenues": "inflow",
-    "sfac6:Expenses": "outflow",
-    "sfac6:Gains": "inflow",
-    "sfac6:Losses": "outflow",
-  }
-  print("  SFAC 6 authoritative classification overrides…")
-  for qname, canonical in sfac6_overrides.items():
-    r = conn.execute(
-      sa.text(
-        "UPDATE public.elements SET classification=:c, updated_at=now() "
-        "WHERE qname=:q AND classification IS DISTINCT FROM :c"
-      ),
-      {"c": canonical, "q": qname},
-    )
-    if r.rowcount:
-      print(f"    {qname} → {canonical}")
-
-  # Cash-flow-statement items — anything whose name indicates a cash
-  # movement, activity-category flow, or indirect-method reconciliation
-  # adjustment. Use qname prefix for precision; these match regardless
-  # of prior classification because CF semantics override.
-  cashflow_result = conn.execute(
-    sa.text(
-      """
-      UPDATE public.elements
-      SET classification='cashflow', statement_context='cash_flow', updated_at=now()
-      WHERE source='rs-gaap'
-        AND (qname LIKE 'rs-gaap:IncreaseDecreaseIn%'
-          OR qname LIKE 'rs-gaap:IncreaseDecreaseDue%'
-          OR qname LIKE 'rs-gaap:NetCashFlow%'
-          OR qname LIKE 'rs-gaap:NetCashProvided%'
-          OR qname LIKE 'rs-gaap:CashFlows%'
-          OR qname LIKE 'rs-gaap:CashAndCashEquivalents%'
-          OR qname LIKE 'rs-gaap:CashCashEquivalents%'
-          OR qname LIKE 'rs-gaap:EffectOfExchangeRate%'
-          OR qname LIKE 'rs-gaap:ProceedsFrom%'
-          OR qname LIKE 'rs-gaap:PaymentsFor%'
-          OR qname LIKE 'rs-gaap:PaymentsOf%'
-          OR qname LIKE 'rs-gaap:PaymentsTo%'
-          OR qname LIKE 'rs-gaap:RepaymentsOf%'
-          OR qname LIKE 'rs-gaap:AdjustmentsToReconcile%'
-          OR qname LIKE 'rs-gaap:AdjustmentsNoncash%')
-        AND classification IS DISTINCT FROM 'cashflow'
-      """
-    )
-  )
-  print(f"    CF-pattern names → cashflow: {cashflow_result.rowcount}")
-
-  # OCI flow items live on the Statement of Changes in Equity
-  # (a.k.a. Statement of Comprehensive Income) as equity-change flows,
-  # not income-statement primitives. AOCI accumulated balances stay
-  # balance_sheet (they're BS stocks). This runs after the main FAC
-  # propagation which may have tagged them income_statement.
-  oci_flow = conn.execute(
-    sa.text(
-      """
-      UPDATE public.elements
-      SET statement_context = 'equity_changes', updated_at = now()
-      WHERE source='rs-gaap'
-        AND period_type='duration'
-        AND (qname LIKE 'rs-gaap:OtherComprehensiveIncomeLoss%'
-          OR qname LIKE 'rs-gaap:OtherComprehensiveIncome%')
-        AND statement_context IS DISTINCT FROM 'equity_changes'
-      """
-    )
-  )
-  print(f"    OCI flow items → equity_changes: {oci_flow.rowcount}")
-
-  # Equity-flow patterns — contributions, distributions, comprehensive
-  # income items. These are duration flows that hit the equity statement,
-  # NOT balance-sheet equity stocks. Route them to inflow/outflow based
-  # on balance_type; `equity` on economic_nature is reserved for instants.
-  equity_result = conn.execute(
-    sa.text(
-      """
-      UPDATE public.elements SET classification = CASE
-        WHEN balance_type = 'credit' THEN 'inflow'
-        WHEN balance_type = 'debit' THEN 'outflow'
-        ELSE classification
-      END, updated_at=now()
-      WHERE source='rs-gaap'
-        AND period_type = 'duration'
-        AND (
-          -- Owner inflows: stock issuance, partner/member contributions
-          name LIKE 'StockIssued%'
-          OR name LIKE 'ProceedsFromIssuanceOfCommonStock%'
-          OR name LIKE 'ProceedsFromIssuanceOfPreferredStock%'
-          OR name LIKE 'ProceedsFromStockOptionsExercised%'
-          OR name LIKE 'ProceedsFromIssuanceOfSharesUnderIncentive%'
-          OR name LIKE '%Contribution'
-          OR name LIKE '%Contributions'
-          OR name LIKE 'PartnersCapitalAccount%Contribution%'
-          OR name LIKE '%MemberContribution%'
-          OR name LIKE '%PartnerContribution%'
-          OR name LIKE 'CapitalContributions%'
-          OR name LIKE 'ProceedsFromContributions%'
-          OR name LIKE 'ProceedsFromCapitalContribution%'
-          OR name LIKE 'LimitedPartnersCapitalAccount%Contribution%'
-          OR name LIKE 'GeneralPartnersCapitalAccount%Contribution%'
-          OR name LIKE 'LimitedLiabilityCompanyLLCMember%Contribution%'
-          -- Owner outflows: dividends, partner draws, treasury stock
-          OR name LIKE 'Dividends%'
-          OR name LIKE 'PaymentsOfDividends%'
-          OR name LIKE 'CommonStockDividends%'
-          OR name LIKE 'PreferredStockDividends%'
-          OR name LIKE 'Distribution'
-          OR name LIKE 'Distributions'
-          OR name LIKE 'Distributions%'
-          OR name LIKE 'DistributionMadeTo%'
-          OR name LIKE 'DistributionsMadeTo%'
-          OR name LIKE 'PaymentsOfDistributions%'
-          OR name LIKE 'PartnersCapitalAccount%Distribution%'
-          OR name LIKE '%MemberDistribution%'
-          OR name LIKE '%PartnerDistribution%'
-          OR name LIKE 'LimitedPartnersCapitalAccount%Distribution%'
-          OR name LIKE 'GeneralPartnersCapitalAccount%Distribution%'
-          OR name LIKE 'LimitedLiabilityCompanyLLCMember%Distribution%'
-          OR name LIKE 'TreasuryStockAcquired%'
-          OR name LIKE 'PaymentsForRepurchaseOfCommonStock%'
-          OR name LIKE 'PaymentsForRepurchaseOfPreferredStock%'
-          OR name LIKE 'StockRepurchased%'
-          OR name LIKE '%Withdrawal'
-          OR name LIKE '%Withdrawals'
-          -- Comprehensive income / OCI (AOCI excluded — it's a BS stock)
-          OR name LIKE 'ComprehensiveIncome%'
-          OR name LIKE 'OtherComprehensiveIncome%'
-        )
-        AND classification NOT IN ('inflow', 'outflow')
-      """
-    )
-  )
-  print(f"    Equity-flow patterns → inflow/outflow: {equity_result.rowcount}")
-
-  # Final balance+period sanity correction for rs-gaap — catches items
-  # that never reached the FAC cascade or got misclassified by the seed
-  # extractor's heuristic. Balance-sheet positions (instant) align to
-  # asset/liability/equity by balance_type; flows (duration) align to
-  # inflow/outflow.
-  print("  rs-gaap balance+period sanity correction…")
-  r = conn.execute(
-    sa.text(
-      """
-      UPDATE public.elements SET classification = CASE
-        WHEN qname ILIKE '%Equity%' OR qname ILIKE '%Stock%' OR qname ILIKE '%CapitalAccount%'
-          OR qname ILIKE '%RetainedEarnings%' OR qname ILIKE '%PaidInCapital%'
-          OR qname ILIKE '%TreasuryStock%' OR qname ILIKE '%AccumulatedOtherComp%'
-          THEN 'equity'
-        ELSE 'liability'
-      END, updated_at = now()
-      WHERE source='rs-gaap' AND classification='asset'
-        AND balance_type='credit' AND period_type='instant'
-      """
-    )
-  )
-  print(f"    credit+instant 'asset' → liability/equity: {r.rowcount}")
-  r = conn.execute(
-    sa.text(
-      "UPDATE public.elements SET classification='inflow', updated_at=now() "
-      "WHERE source='rs-gaap' AND classification='asset' "
-      "AND balance_type='credit' AND period_type='duration'"
-    )
-  )
-  print(f"    credit+duration 'asset' → inflow: {r.rowcount}")
-  r = conn.execute(
-    sa.text(
-      "UPDATE public.elements SET classification='outflow', updated_at=now() "
-      "WHERE source='rs-gaap' AND classification='asset' "
-      "AND balance_type='debit' AND period_type='duration'"
-    )
-  )
-  print(f"    debit+duration 'asset' → outflow: {r.rowcount}")
-
-  # rs-gaap baseline axes: derive statement_context + derivation_role
-  # from classification + element_type for anything still null after
-  # the FAC / hierarchy cascade, and resync context after the
-  # sanity correction above.
-  baseline_axes = conn.execute(
-    sa.text(
-      """
-      UPDATE public.elements
-      SET statement_context = CASE
-            WHEN classification IN ('asset','liability','equity') THEN 'balance_sheet'
-            WHEN classification IN ('inflow','outflow') THEN 'income_statement'
-            WHEN classification = 'cashflow' THEN 'cash_flow'
-            ELSE statement_context
-          END,
-          derivation_role = COALESCE(derivation_role, CASE
-            WHEN is_abstract OR element_type IN ('hypercube','axis','member') THEN 'structural'
-            WHEN classification IS NOT NULL THEN 'primitive'
-            ELSE NULL
-          END),
-          updated_at = now()
-      WHERE source = 'rs-gaap'
-      """
-    )
-  )
-  print(f"    rs-gaap axes finalized: {baseline_axes.rowcount}")
-
-  # AOCI / AccumulatedOtherComprehensiveIncome* are the balance-sheet
-  # stock (instant) representation — these stay in equity.
-  aoci_result = conn.execute(
-    sa.text(
-      """
-      UPDATE public.elements SET classification='equity', updated_at=now()
-      WHERE source='rs-gaap'
-        AND period_type='instant'
-        AND (name LIKE 'AOCI%'
-             OR name LIKE 'AccumulatedOtherComprehensiveIncome%')
-        AND classification IS DISTINCT FROM 'equity'
-      """
-    )
-  )
-  print(f"    AOCI instants → equity: {aoci_result.rowcount}")
-
-  # ──────────────────────────────────────────────────────────────────────
-  # 8. Bulk populate the classifications registry + junction
-  # ──────────────────────────────────────────────────────────────────────
-  # Once the denormalized columns on `elements` have settled, derive the
-  # registry + junction in a handful of SQL statements rather than per-
-  # element round-trips.
-  print("  Building classifications registry + junction (bulk)…")
-  bulk_counts = sync_element_classifications_bulk(conn)
-  print(
-    f"    classifications inserted: {bulk_counts['classifications']}, "
-    f"junction rows: {bulk_counts['junction']}"
-  )
-
-  # ──────────────────────────────────────────────────────────────────────
-  # 9. Tenant-schema rollout: immutability function + per-tenant backfill
-  # ──────────────────────────────────────────────────────────────────────
-  # Install the shared PL/pgSQL function once, then for every existing
-  # tenant schema: widen CHECKs → copy library rows from public → install
-  # triggers → tag CoA elements with SFAC 6 anchors. On a fresh deploy
-  # with no tenant schemas, the per-tenant loops are no-ops; on an
-  # existing deploy they backfill every tenant to parity with a freshly
-  # provisioned graph.
   print("  Installing raise_library_immutable() function…")
   _install_raise_library_immutable_fn(conn)
 
   print("  Backfilling library into existing tenant schemas…")
   for_each_tenant_schema(conn, _backfill_library_into_tenant)
 
-  print("  Tagging tenant CoA elements with SFAC 6 anchors…")
-  for_each_tenant_schema(conn, _tag_coa_for_tenant)
-
 
 def downgrade() -> None:
   conn = op.get_bind()
 
-  # Tenant-schema teardown: remove CoA anchor tags, drop immutability
-  # triggers, restore narrow tenant CHECKs. Library rows themselves stay
-  # in the tenant schemas — removing them would orphan any tenant
-  # mappings that reference library elements. Drop the shared function
-  # last, after every trigger is gone.
+  # Tenant teardown: drop triggers, restore narrow CHECKs, restore the
+  # old classification columns (best-effort — values can't be recovered
+  # losslessly once the junction has been used, so we leave them NULL).
   def _teardown_tenant(conn, schema: str) -> None:
-    _untag_coa_for_tenant(conn, schema)
     _drop_triggers_for_tenant(conn, schema)
     _restore_narrow_tenant_checks(conn, schema)
 
   for_each_tenant_schema(conn, _teardown_tenant)
   conn.execute(text("DROP FUNCTION IF EXISTS public.raise_library_immutable()"))
 
-  # Remove library-origin rows loaded from JSON-LD (order matters — FKs).
-  conn.execute(sa.text("DELETE FROM public.element_classifications"))
-  conn.execute(sa.text("DELETE FROM public.classifications"))
-  conn.execute(sa.text("DELETE FROM public.element_references"))
-  conn.execute(sa.text("DELETE FROM public.element_labels"))
+  # Delete library-origin data in FK-safe order.
+  conn.execute(text("DELETE FROM public.element_classifications"))
+  conn.execute(text("DELETE FROM public.classifications"))
+  conn.execute(text("DELETE FROM public.element_references"))
+  conn.execute(text("DELETE FROM public.element_labels"))
   conn.execute(
-    sa.text(
+    text(
       "DELETE FROM public.associations WHERE structure_id IN "
       "(SELECT id FROM public.structures WHERE taxonomy_id IN "
       "(SELECT id FROM public.taxonomies WHERE is_shared = true))"
     )
   )
   conn.execute(
-    sa.text(
+    text(
       "DELETE FROM public.structures WHERE taxonomy_id IN "
       "(SELECT id FROM public.taxonomies WHERE is_shared = true)"
     )
   )
   conn.execute(
-    sa.text(
+    text(
       "DELETE FROM public.elements WHERE taxonomy_id IN "
       "(SELECT id FROM public.taxonomies WHERE is_shared = true)"
     )
   )
-  conn.execute(sa.text("DELETE FROM public.taxonomies WHERE is_shared = true"))
+  conn.execute(text("DELETE FROM public.taxonomies WHERE is_shared = true"))
 
-  # Drop axis CHECK constraints + columns.
-  op.drop_constraint("check_element_derivation_role", "elements", type_="check")
-  op.drop_constraint("check_element_statement_context", "elements", type_="check")
-  op.drop_index("idx_elements_derivation_role", table_name="elements")
-  op.drop_index("idx_elements_statement_context", table_name="elements")
-  op.drop_column("elements", "derivation_role")
-  op.drop_column("elements", "statement_context")
-
-  # Drop classification registry + junction.
+  # Drop junction + vocabulary.
   op.drop_index(
     "idx_element_classifications_primary",
     table_name="element_classifications",
@@ -1179,49 +615,51 @@ def downgrade() -> None:
     table_name="element_classifications",
   )
   op.drop_table("element_classifications")
-
   op.drop_index("idx_classifications_type", table_name="classifications")
   op.drop_index("idx_classifications_category", table_name="classifications")
   op.drop_table("classifications")
 
-  # Drop label + reference tables.
+  # Drop labels + references.
   op.drop_index("idx_element_references_type", table_name="element_references")
   op.drop_index("idx_element_references_element", table_name="element_references")
   op.drop_table("element_references")
-
   op.drop_index("idx_element_labels_role", table_name="element_labels")
   op.drop_index("idx_element_labels_element", table_name="element_labels")
   op.drop_table("element_labels")
 
-  # Restore original CHECK constraints.
+  # Restore CHECK constraints.
   op.drop_constraint("check_association_type", "associations", type_="check")
   op.create_check_constraint(
-    "check_association_type",
-    "associations",
-    "association_type IN ('presentation', 'calculation', 'mapping')",
+    "check_association_type", "associations", _NARROW_ASSOCIATION_CHECK
   )
-
   op.drop_constraint("check_element_source", "elements", type_="check")
   op.create_check_constraint(
-    "check_element_source",
-    "elements",
-    "source IN ("
-    "'sfac6', 'us-gaap', 'ifrs', "
-    "'quickbooks', 'xero', 'plaid', 'native', 'import', 'system'"
-    ")",
+    "check_element_source", "elements", _NARROW_ELEMENT_SOURCE_CHECK
   )
 
-  op.drop_constraint("check_element_classification", "elements", type_="check")
+  # Drop substitution_group.
+  op.drop_index("idx_elements_substitution_group", table_name="elements")
+  op.drop_column("elements", "substitution_group")
+
+  # Re-add the old columns for 0001 compatibility. Values lost — 0001's
+  # seed_reporting_taxonomy rerun repopulates them.
+  op.add_column(
+    "elements",
+    sa.Column(
+      "classification",
+      sa.String(),
+      nullable=False,
+      server_default="asset",
+    ),
+  )
+  op.add_column("elements", sa.Column("sub_classification", sa.String(), nullable=True))
   op.create_check_constraint(
     "check_element_classification",
     "elements",
     "classification IN ('asset', 'liability', 'equity', 'revenue', 'expense')",
   )
-  op.alter_column(
-    "elements", "classification", existing_type=sa.VARCHAR(), nullable=False
-  )
+  op.create_index("idx_elements_classification", "elements", ["classification"])
 
-  # Re-run 0001's seeder so the library isn't empty after downgrade.
   from robosystems.taxonomy.seed import seed_reporting_taxonomy
 
   seed_reporting_taxonomy(conn)

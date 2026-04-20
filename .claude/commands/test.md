@@ -6,14 +6,22 @@ Always use `timeout: 600000` (10 minutes) on Bash calls for `just test-all` and 
 
 ## Strategy
 
-1. **Run full suite first**: `just test-all 2>&1 | tail -30` to see the summary without truncation
+1. **Run full suite first**: `just test-all 2>&1 | grep -E "passed|failed|error:|FAILED|^= " | tail -20` to see pytest summary + any failures
 2. **Fix by module**: When errors exist, use `just test <module>` (e.g., `just test routers`) to iterate faster on that module before re-running the full suite
 3. **Fix in order**: Linting/formatting → Type errors → Test failures
-4. **Stop when done**: Once `just test-all` passes completely, stop immediately
+4. **Stop when done**: Once `just test-all` passes completely, stop immediately. Do NOT run it again to "confirm".
 
 ## Output Handling
 
-**Always pipe through `| tail -30`** when running `just test-all` or `just test`. The full test output is thousands of lines and frequently gets truncated, hiding the actual results. The summary at the bottom is all you need to see pass/fail status.
+**CRITICAL: `just test-all` runs pytest FIRST, then lint, then typecheck.** With `| tail -N`, you only see the end (typecheck output) — the pytest summary scrolls away. Always use the grep pattern below:
+
+```
+just test-all 2>&1 | grep -E "passed|failed|error:|FAILED|warnings summary|^= " | tail -20
+```
+
+This captures: pytest result line ("X passed, Y failed"), any FAILED test names, and recipe error lines. The absence of "failed" or "FAILED" lines AND presence of "passed" means success — stop there.
+
+For `just test <module>`, the output is short enough that `| tail -20` still works.
 
 ## Key Commands
 

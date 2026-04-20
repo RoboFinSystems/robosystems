@@ -129,9 +129,6 @@ def _element_to_response(
     qname=element.qname or element.name,
     namespace=element.namespace,
     name=element.name,
-    classification=element.classification,
-    statement_context=element.statement_context,
-    derivation_role=element.derivation_role,
     balance_type=element.balance_type,
     period_type=element.period_type,
     is_abstract=element.is_abstract,
@@ -180,11 +177,11 @@ def list_elements(
   if source is not None:
     query = query.where(Element.source == source)
   if classification is not None:
-    query = query.where(Element.classification == classification)
+    pass  # classification filter removed; column no longer on Element
   if statement_context is not None:
-    query = query.where(Element.statement_context == statement_context)
+    pass  # statement_context filter removed; column no longer on Element
   if derivation_role is not None:
-    query = query.where(Element.derivation_role == derivation_role)
+    pass  # derivation_role filter removed; column no longer on Element
   if element_type is not None:
     query = query.where(Element.element_type == element_type)
   if is_abstract is not None:
@@ -209,9 +206,6 @@ def list_elements(
       qname=e.qname or e.name,
       namespace=e.namespace,
       name=e.name,
-      classification=e.classification,
-      statement_context=e.statement_context,
-      derivation_role=e.derivation_role,
       balance_type=e.balance_type,
       period_type=e.period_type,
       is_abstract=e.is_abstract,

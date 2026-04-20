@@ -194,7 +194,7 @@ class UnmappedElementResponse(BaseModel):
   id: str
   code: str | None = None
   name: str
-  classification: str
+  classification: str | None = None
   balance_type: str
   external_source: str | None = None
   suggested_targets: list[SuggestedTarget] = Field(default_factory=list)

@@ -21,6 +21,8 @@ from robosystems.arelle.context import CANONICAL_CONTEXT, RS_VOCAB
 from robosystems.logger import logger
 from robosystems.taxonomy.model import (
   AssociationSpec,
+  ClassificationAssignmentSpec,
+  ClassificationSpec,
   ElementSpec,
   LabelSpec,
   ReferenceSpec,
@@ -147,13 +149,18 @@ def _extract_references(graph: Graph, subject: URIRef) -> list[ReferenceSpec]:
 
 
 def _is_concept(graph: Graph, subject: URIRef) -> bool:
-  """Heuristic: a concept has at least a classification or balance or label."""
-  has_classification = bool(
-    list(graph.objects(subject, URIRef(f"{RS_NS}classification")))
-  )
+  """Heuristic: a concept has balance, periodType, or elementType."""
   has_balance = bool(list(graph.objects(subject, URIRef(f"{RS_NS}balance"))))
   has_element_type = bool(list(graph.objects(subject, URIRef(f"{RS_NS}elementType"))))
-  return has_classification or has_balance or has_element_type
+  has_period = bool(list(graph.objects(subject, URIRef(f"{RS_NS}periodType"))))
+  return has_balance or has_element_type or has_period
+
+
+def _is_classification(graph: Graph, subject: URIRef) -> bool:
+  """A classification node has both category and identifier predicates."""
+  has_cat = bool(list(graph.objects(subject, URIRef(f"{RS_NS}category"))))
+  has_id = bool(list(graph.objects(subject, URIRef(f"{RS_NS}identifier"))))
+  return has_cat and has_id
 
 
 def _extract_element(graph: Graph, subject: URIRef) -> ElementSpec | None:
@@ -178,12 +185,6 @@ def _extract_element(graph: Graph, subject: URIRef) -> ElementSpec | None:
       return bool(v.value) if v.value is not None else default
     return str(v).lower() in ("true", "1")
 
-  # Classification axes are all nullable — only SFAC 6 primitives fill
-  # every one. The JSON-LD seed either provides a value or omits the
-  # predicate entirely.
-  classification = _single(URIRef(f"{RS_NS}classification"), None)
-  statement_context = _single(URIRef(f"{RS_NS}statementContext"), None)
-  derivation_role = _single(URIRef(f"{RS_NS}derivationRole"), None)
   balance = _single(URIRef(f"{RS_NS}balance"), "debit") or "debit"
   period_type = _single(URIRef(f"{RS_NS}periodType"), "duration") or "duration"
   element_type = _single(URIRef(f"{RS_NS}elementType"), "concept") or "concept"
@@ -192,7 +193,7 @@ def _extract_element(graph: Graph, subject: URIRef) -> ElementSpec | None:
   is_abstract = _bool(URIRef(f"{RS_NS}abstract"), False)
   is_monetary = _bool(URIRef(f"{RS_NS}monetary"), True)
 
-  # Substitution group (optional)
+  # Substitution group (optional — XBRL intrinsic)
   sub_group: str | None = None
   sg_vals = list(graph.objects(subject, URIRef(f"{RS_NS}substitutionGroup")))
   if sg_vals and isinstance(sg_vals[0], URIRef):
@@ -219,9 +220,6 @@ def _extract_element(graph: Graph, subject: URIRef) -> ElementSpec | None:
     namespace=prefix,
     namespace_uri=ns_uri,
     name=name,
-    classification=classification,
-    statement_context=statement_context,
-    derivation_role=derivation_role,
     balance_type=balance,
     period_type=period_type,
     is_abstract=is_abstract,
@@ -233,6 +231,68 @@ def _extract_element(graph: Graph, subject: URIRef) -> ElementSpec | None:
     labels=labels,
     references=references,
   )
+
+
+def _extract_classification(graph: Graph, subject: URIRef) -> ClassificationSpec | None:
+  """Build a ClassificationSpec from a Classification node's triples."""
+
+  def _single(pred: URIRef, default: Any = None) -> Any:
+    vals = list(graph.objects(subject, pred))
+    return str(vals[0]) if vals else default
+
+  category = _single(URIRef(f"{RS_NS}category"))
+  identifier = _single(URIRef(f"{RS_NS}identifier"))
+  source = _single(URIRef(f"{RS_NS}source"), "us-gaap-metamodel")
+  if not category or not identifier:
+    return None
+  labels = _extract_labels(graph, subject)
+  name = identifier
+  description = None
+  for label in labels:
+    if label.role == "standard":
+      name = label.text
+    elif label.role == "documentation":
+      description = label.text
+  return ClassificationSpec(
+    category=category,
+    identifier=identifier,
+    source=source,
+    name=name,
+    description=description,
+  )
+
+
+def _extract_classification_assignments(
+  graph: Graph,
+) -> list[ClassificationAssignmentSpec]:
+  """Walk ``classifiedAs`` arcs and emit assignment specs.
+
+  Each arc connects an element (subject) to a Classification IRI of the
+  shape ``metamodel:{category}/{identifier}``. We decode the tail into
+  (category, identifier) and emit one assignment per arc.
+  """
+  assignments: list[ClassificationAssignmentSpec] = []
+  predicate = URIRef(f"{RS_NS}classifiedAs")
+  for subject, obj in graph.subject_objects(predicate):
+    if not isinstance(obj, URIRef):
+      continue
+    element_qname = _iri_to_qname(str(subject), CANONICAL_CONTEXT)
+    if not element_qname:
+      continue
+    # Classification IRIs look like "…/us-gaap-metamodel/v1/{category}/{identifier}"
+    iri = str(obj)
+    tail = iri.rsplit("/", 2)
+    if len(tail) < 2:
+      continue
+    category, identifier = tail[-2], tail[-1]
+    assignments.append(
+      ClassificationAssignmentSpec(
+        element_qname=element_qname,
+        category=category,
+        identifier=identifier,
+      )
+    )
+  return assignments
 
 
 def _extract_associations(graph: Graph) -> list[AssociationSpec]:
@@ -309,8 +369,11 @@ def load_taxonomy_package(path: Path | str) -> TaxonomyPackage:
   graph = Graph()
   graph.parse(data=raw, format="json-ld")
 
-  # Find concepts (subjects that look like elements)
+  # Find concepts + classification nodes. A subject is one or the other,
+  # not both (classifications have category+identifier, concepts have
+  # balance/period/elementType).
   elements: list[ElementSpec] = []
+  classifications: list[ClassificationSpec] = []
   seen_subjects: set[str] = set()
   for subject in graph.subjects():
     if not isinstance(subject, URIRef):
@@ -319,17 +382,24 @@ def load_taxonomy_package(path: Path | str) -> TaxonomyPackage:
     if subject_str in seen_subjects:
       continue
     seen_subjects.add(subject_str)
-    if _is_concept(graph, subject):
+    if _is_classification(graph, subject):
+      cls = _extract_classification(graph, subject)
+      if cls is not None:
+        classifications.append(cls)
+    elif _is_concept(graph, subject):
       element = _extract_element(graph, subject)
       if element is not None:
         elements.append(element)
 
   associations = _extract_associations(graph)
   structures = _extract_structures(graph)
+  assignments = _extract_classification_assignments(graph)
 
   logger.info(
     f"Loaded {name}: {len(elements)} elements, "
-    f"{len(associations)} associations, {len(structures)} structures"
+    f"{len(associations)} associations, {len(structures)} structures, "
+    f"{len(classifications)} classifications, "
+    f"{len(assignments)} classification assignments"
   )
 
   # Derive primary namespace_uri if not in metadata
@@ -350,6 +420,8 @@ def load_taxonomy_package(path: Path | str) -> TaxonomyPackage:
     elements=elements,
     associations=associations,
     structures=structures,
+    classifications=classifications,
+    classification_assignments=assignments,
     taxonomy_type=taxonomy_type,
     is_shared=True,
     description=description,

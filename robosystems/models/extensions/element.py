@@ -1,9 +1,17 @@
 """Element model — unified taxonomy element.
 
 Holds Chart of Accounts entries (from QuickBooks, Xero, native), US GAAP
-reporting concepts (SFAC 6, us-gaap), and any future taxonomy elements.
+reporting concepts (SFAC 6, rs-gaap), and any future taxonomy elements.
 All materialize to Element nodes in the graph via the postgres_scanner →
 DuckDB → LadybugDB pipeline.
+
+Only XBRL-intrinsic attributes live on this table (name, qname,
+namespace, balance_type, period_type, abstract, monetary, element_type,
+substitution_group). Classifications — including SFAC 6 primitive type
+(elementsOfFinancialStatements), liquidity, activityType,
+operatingNonoperating, flowClassification, and the other 20 FASB
+metamodel trait axes — live in ``classifications`` +
+``element_classifications``, mirroring XBRL's linkbase model.
 """
 
 from datetime import UTC, datetime
@@ -27,9 +35,6 @@ from robosystems.utils.ulid import generate_prefixed_ulid
 class Element(ExtensionsBase):
   __tablename__ = "elements"
   __table_args__ = (
-    Index("idx_elements_classification", "classification"),
-    Index("idx_elements_statement_context", "statement_context"),
-    Index("idx_elements_derivation_role", "derivation_role"),
     Index("idx_elements_parent", "parent_id"),
     Index("idx_elements_external", "external_id", "external_source"),
     Index(
@@ -50,54 +55,10 @@ class Element(ExtensionsBase):
       "namespace",
       postgresql_where="namespace IS NOT NULL",
     ),
-    # classification = "economic nature" axis — six values plus NULL:
-    #   asset | liability | equity           (balance-sheet stocks)
-    #   inflow | outflow                     (credit-flow + debit-flow primitives;
-    #                                         collapses SFAC 6's revenue/gain →
-    #                                         inflow and expense/loss → outflow)
-    #   cashflow                             (cash-statement reconciliation items
-    #                                         + movement primitives — not an
-    #                                         SFAC 6 concept, but IS the context
-    #                                         for the cash flow statement)
-    # Nullable because structural rows (hypercubes, RollUps), metadata,
-    # and ratios don't fit any bucket. FAC has no gain/loss concepts;
-    # SFAC 6's R/E/G/L split has moved to derivation_role refinements.
-    CheckConstraint(
-      "classification IS NULL OR classification IN ("
-      "'asset', 'liability', 'equity', "
-      "'inflow', 'outflow', 'cashflow'"
-      ")",
-      name="check_element_classification",
-    ),
-    # statement_context = which report this element belongs to. Independent
-    # of classification: a CF reconciliation item like NetCashFlowFromInvesting
-    # lives on the cash_flow statement but its underlying economic nature is
-    # an asset movement.
-    CheckConstraint(
-      "statement_context IS NULL OR statement_context IN ("
-      "'balance_sheet', 'income_statement', 'cash_flow', "
-      "'equity_changes', 'disclosure', 'metadata', 'analysis'"
-      ")",
-      name="check_element_statement_context",
-    ),
-    # derivation_role = structural role in a report. Five values:
-    #   primitive    — leaf: Revenue, AccountsReceivable, IncreaseDecreaseInInventory
-    #   aggregate    — RollUp head (subtotals, totals, NetCashFlow rollups):
-    #                  GrossProfit, NetIncome, NetCashFlowFromInvesting
-    #   ratio        — computed metric: ReturnOnAssets, CurrentRatio
-    #   identifier   — entity/document metadata: EntityCIK, FiscalYearEnd
-    #   structural   — abstracts/hypercubes/LineItems with no economic
-    #                  meaning, only grouping
-    # "Movement" (IncreaseDecrease* BS-account deltas) folds into primitive —
-    # `economic_nature=cashflow` + `statement_context=cash_flow` already
-    # carry the CF-specific semantics; the leaf/aggregate distinction
-    # is what derivation_role is for.
-    CheckConstraint(
-      "derivation_role IS NULL OR derivation_role IN ("
-      "'primitive', 'aggregate', "
-      "'ratio', 'identifier', 'structural'"
-      ")",
-      name="check_element_derivation_role",
+    Index(
+      "idx_elements_substitution_group",
+      "substitution_group",
+      postgresql_where="substitution_group IS NOT NULL",
     ),
     CheckConstraint(
       "balance_type IN ('debit', 'credit')",
@@ -127,29 +88,21 @@ class Element(ExtensionsBase):
   name = Column(String, nullable=False)
   description = Column(String, nullable=True)
 
-  # XBRL Alignment
+  # XBRL Alignment — intrinsic concept declaration attributes only.
   qname = Column(String, nullable=True)
   namespace = Column(String, nullable=True)
   uri = Column(String, nullable=True)
-
-  # Classification axes — three orthogonal facets. `classification` is the
-  # SFAC 6 economic-nature axis (asset, revenue, …); `statement_context` is
-  # which report an element lives on; `derivation_role` is its structural
-  # role (primitive, subtotal, reconciliation, …). All nullable: only
-  # genuine SFAC 6 primitives fill every axis.
-  classification = Column(String, nullable=True)
-  statement_context = Column(String, nullable=True)
-  derivation_role = Column(String, nullable=True)
-  sub_classification = Column(String, nullable=True)
   balance_type = Column(String, nullable=False, default="debit")
   period_type = Column(String, nullable=False, default="duration")
+  substitution_group = Column(String, nullable=True)
 
-  # Element Type
+  # Element Type (XBRL substitution-group derived)
   is_abstract = Column(Boolean, nullable=False, default=False)
   is_monetary = Column(Boolean, nullable=False, default=True)
   element_type = Column(String, nullable=False, default="concept")
 
-  # Hierarchy
+  # Hierarchy (parent element — separate from class-subclass classification
+  # hierarchy, which lives in associations)
   parent_id = Column(String, ForeignKey("elements.id"), nullable=True)
   depth = Column(Integer, nullable=False, default=0)
   path = Column(String, nullable=False, default="")

@@ -38,8 +38,6 @@ def account_to_response(row: Element) -> AccountResponse:
     code=row.code,
     name=row.name,
     description=row.description,
-    classification=row.classification,
-    sub_classification=row.sub_classification,
     balance_type=row.balance_type,
     parent_id=row.parent_id,
     depth=row.depth,
@@ -67,8 +65,7 @@ def list_accounts(
   )
 
   if classification is not None:
-    query = query.where(Element.classification == classification)
-    count_query = count_query.where(Element.classification == classification)
+    pass  # classification filter removed; column no longer on Element
   if is_active is not None:
     query = query.where(Element.is_active == is_active)
     count_query = count_query.where(Element.is_active == is_active)
@@ -105,7 +102,6 @@ def get_account_tree(session: Session) -> AccountTreeResponse:
       id=r.id,
       code=r.code,
       name=r.name,
-      classification=r.classification,
       account_type=meta.get("account_type"),
       balance_type=r.balance_type,
       depth=r.depth,

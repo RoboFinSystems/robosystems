@@ -14,6 +14,8 @@ from sqlalchemy.engine import Connection
 from robosystems.logger import logger
 from robosystems.taxonomy.model import (
   AssociationSpec,
+  ClassificationAssignmentSpec,
+  ClassificationSpec,
   ElementSpec,
   StructureSpec,
   TaxonomyPackage,
@@ -62,158 +64,84 @@ def _reference_id(element_id: str, citation: str) -> str:
 def _classification_id(category: str, identifier: str, type_: str = "system") -> str:
   """Deterministic ID for a (category, identifier, type) classification triple.
 
-  Keyed so the same SFAC 6 'asset' row is found regardless of how many
-  taxonomies reference it. Shared across all elements that carry this
-  classification.
+  Keyed so the same 'elementsOfFinancialStatements/asset' row is found
+  regardless of how many taxonomies reference it. Shared across all
+  elements that carry this classification.
   """
   return generate_deterministic_uuid(
     f"{category}:{identifier}:{type_}", namespace="classification"
   )
 
 
-def _upsert_classification(
-  conn: Connection, category: str, identifier: str, type_: str = "system"
-) -> str:
+def _element_classification_id(element_id: str, classification_id: str) -> str:
+  """Composite key for element_classifications junction rows."""
+  return f"{element_id}:{classification_id}"
+
+
+def _write_classification(conn: Connection, cls: ClassificationSpec) -> str:
   """Insert-or-get a classification row, returning its id."""
-  cls_id = _classification_id(category, identifier, type_)
+  type_ = cls.source
+  cls_id = _classification_id(cls.category, cls.identifier, type_)
   conn.execute(
     text(
       """
       INSERT INTO public.classifications (
-        id, category, identifier, type, metadata,
-        created_at, updated_at, created_by
+        id, category, identifier, type, name, description,
+        metadata, created_at, updated_at, created_by
       ) VALUES (
-        :id, :category, :identifier, :type, '{}'::jsonb,
-        now(), now(), 'library-seeder'
+        :id, :category, :identifier, :type, :name, :description,
+        '{}'::jsonb, now(), now(), 'library-seeder'
       )
-      ON CONFLICT (id) DO NOTHING
+      ON CONFLICT (id) DO UPDATE SET
+        name = COALESCE(EXCLUDED.name, public.classifications.name),
+        description = COALESCE(EXCLUDED.description, public.classifications.description),
+        updated_at = now()
       """
     ),
-    {"id": cls_id, "category": category, "identifier": identifier, "type": type_},
+    {
+      "id": cls_id,
+      "category": cls.category,
+      "identifier": cls.identifier,
+      "type": type_,
+      "name": cls.name,
+      "description": cls.description,
+    },
   )
   return cls_id
 
 
-def sync_element_classifications_bulk(conn: Connection) -> dict[str, int]:
-  """Rebuild the classifications registry + element_classifications
-  junction from the denormalized columns on `public.elements`.
-
-  One bulk SQL pass per axis — O(1) round-trips regardless of element
-  count. Called at the end of a full library load; do not call per-element.
-
-  Returns counts for visibility.
-  """
-  counts: dict[str, int] = {"classifications": 0, "junction": 0}
-
-  # One DISTINCT row per (category, identifier) seen on elements, then
-  # upsert into the registry.
-  for category, column in (
-    ("economic_nature", "classification"),
-    ("statement_context", "statement_context"),
-    ("derivation_role", "derivation_role"),
-  ):
-    result = conn.execute(
-      text(
-        f"""
-        INSERT INTO public.classifications (
-          id, category, identifier, type, metadata,
-          created_at, updated_at, created_by
-        )
-        SELECT
-          gen_random_uuid()::text,
-          :category,
-          {column},
-          'system',
-          '{{}}'::jsonb,
-          now(), now(), 'library-seeder'
-        FROM public.elements
-        WHERE {column} IS NOT NULL
-        GROUP BY {column}
-        ON CONFLICT (category, identifier, type) DO NOTHING
-        """
-      ),
-      {"category": category},
-    )
-    counts["classifications"] += result.rowcount or 0
-
-  # Wipe then rebuild the junction from denormalized columns.
-  conn.execute(text("TRUNCATE public.element_classifications"))
-
-  for category, column in (
-    ("economic_nature", "classification"),
-    ("statement_context", "statement_context"),
-    ("derivation_role", "derivation_role"),
-  ):
-    result = conn.execute(
-      text(
-        f"""
-        INSERT INTO public.element_classifications (
-          element_id, classification_id, is_primary,
-          created_at, updated_at, created_by
-        )
-        SELECT e.id, c.id, true, now(), now(), 'library-seeder'
-        FROM public.elements e
-        JOIN public.classifications c
-          ON c.category = :category
-         AND c.identifier = e.{column}
-         AND c.type = 'system'
-        WHERE e.{column} IS NOT NULL
-        """
-      ),
-      {"category": category},
-    )
-    counts["junction"] += result.rowcount or 0
-
-  return counts
-
-
-def _sync_element_classifications(
-  conn: Connection, *, element_id: str, axes: dict[str, str | None]
+def _write_classification_assignment(
+  conn: Connection,
+  *,
+  element_id: str,
+  classification_id: str,
+  is_primary: bool,
+  confidence: float | None,
 ) -> None:
-  """Rewrite the is_primary junction rows for this element to match axes.
-
-  `axes` maps category → identifier (or None to skip). Idempotent:
-  existing primary rows for categories present in `axes` are cleared,
-  then fresh rows are inserted. Non-primary rows (e.g. AI-suggested
-  alternates) are untouched.
-  """
-  # Clear existing primary rows for the categories we're about to set.
-  categories = [c for c, v in axes.items() if v is not None]
-  if categories:
-    conn.execute(
-      text(
-        """
-        DELETE FROM public.element_classifications ec
-        USING public.classifications c
-        WHERE ec.classification_id = c.id
-          AND ec.element_id = :element_id
-          AND ec.is_primary = true
-          AND c.category = ANY(:categories)
-        """
-      ),
-      {"element_id": element_id, "categories": categories},
-    )
-
-  for category, identifier in axes.items():
-    if identifier is None:
-      continue
-    cls_id = _upsert_classification(conn, category, identifier)
-    conn.execute(
-      text(
-        """
-        INSERT INTO public.element_classifications (
-          element_id, classification_id, is_primary,
-          created_at, updated_at, created_by
-        ) VALUES (
-          :element_id, :classification_id, true,
-          now(), now(), 'library-seeder'
-        )
-        ON CONFLICT (element_id, classification_id) DO UPDATE SET
-          is_primary = true
-        """
-      ),
-      {"element_id": element_id, "classification_id": cls_id},
-    )
+  """Insert an element_classifications junction row."""
+  conn.execute(
+    text(
+      """
+      INSERT INTO public.element_classifications (
+        element_id, classification_id, is_primary, confidence, source,
+        created_at, updated_at, created_by
+      ) VALUES (
+        :element_id, :classification_id, :is_primary, :confidence,
+        'us-gaap-metamodel', now(), now(), 'library-seeder'
+      )
+      ON CONFLICT (element_id, classification_id) DO UPDATE SET
+        is_primary = EXCLUDED.is_primary,
+        confidence = EXCLUDED.confidence,
+        updated_at = now()
+      """
+    ),
+    {
+      "element_id": element_id,
+      "classification_id": classification_id,
+      "is_primary": is_primary,
+      "confidence": confidence,
+    },
+  )
 
 
 def _structure_id(role_uri: str) -> str:
@@ -275,8 +203,7 @@ def _write_element(conn: Connection, element: ElementSpec, taxonomy_id: str) -> 
       """
       INSERT INTO public.elements (
         id, code, name, description, qname, namespace, uri,
-        classification, statement_context, derivation_role,
-        sub_classification, balance_type, period_type,
+        balance_type, period_type, substitution_group,
         is_abstract, is_monetary, element_type,
         parent_id, depth, path, taxonomy_id, source, currency,
         is_active, is_placeholder, metadata, version,
@@ -284,8 +211,7 @@ def _write_element(conn: Connection, element: ElementSpec, taxonomy_id: str) -> 
         created_at, updated_at, created_by
       ) VALUES (
         :id, :code, :name, :description, :qname, :namespace, :uri,
-        :classification, :statement_context, :derivation_role,
-        NULL, :balance_type, :period_type,
+        :balance_type, :period_type, :substitution_group,
         :is_abstract, :is_monetary, :element_type,
         NULL, 0, '', :taxonomy_id, :source, 'USD',
         true, false, '{}'::jsonb, 1,
@@ -293,9 +219,12 @@ def _write_element(conn: Connection, element: ElementSpec, taxonomy_id: str) -> 
         now(), now(), 'library-seeder'
       )
       ON CONFLICT (id) DO UPDATE SET
-        classification = EXCLUDED.classification,
-        statement_context = EXCLUDED.statement_context,
-        derivation_role = EXCLUDED.derivation_role
+        balance_type = EXCLUDED.balance_type,
+        period_type = EXCLUDED.period_type,
+        substitution_group = EXCLUDED.substitution_group,
+        is_abstract = EXCLUDED.is_abstract,
+        is_monetary = EXCLUDED.is_monetary,
+        element_type = EXCLUDED.element_type
       """
     ),
     {
@@ -306,11 +235,9 @@ def _write_element(conn: Connection, element: ElementSpec, taxonomy_id: str) -> 
       "qname": element.qname,
       "namespace": element.namespace,
       "uri": f"{element.namespace_uri}{element.qname.split(':')[-1]}",
-      "classification": element.classification,
-      "statement_context": element.statement_context,
-      "derivation_role": element.derivation_role,
       "balance_type": element.balance_type,
       "period_type": element.period_type,
+      "substitution_group": element.substitution_group,
       "is_abstract": element.is_abstract,
       "is_monetary": element.is_monetary,
       "element_type": element.element_type,
@@ -318,12 +245,6 @@ def _write_element(conn: Connection, element: ElementSpec, taxonomy_id: str) -> 
       "source": element.source,
     },
   )
-
-  # NOTE: We no longer sync the `element_classifications` junction here.
-  # Per-element sync balloons to ~200k round-trips for the full library load.
-  # The denormalized columns on `elements` are the source of truth; the
-  # junction is populated in one bulk SQL pass via
-  # `sync_element_classifications_bulk()` after all seeds are loaded.
 
   # Labels
   for label in element.labels:
@@ -499,6 +420,8 @@ def write_taxonomy_package(
     "references": 0,
     "structures": 0,
     "associations": 0,
+    "classifications": 0,
+    "classification_assignments": 0,
   }
 
   # 1. Taxonomy row
@@ -575,6 +498,62 @@ def write_taxonomy_package(
       len(unresolved),
       ", ".join(f"{f} --{t_}--> {t}" for f, t, t_ in sample),
       "" if len(unresolved) <= 5 else f" (+{len(unresolved) - 5} more)",
+    )
+
+  # 5. Classification vocabulary rows (from classification-vocabulary seeds
+  #    like us-gaap-metamodel/v1)
+  cls_key_to_id: dict[tuple[str, str, str], str] = {}
+  for cls in package.classifications:
+    cls_id = _write_classification(conn, cls)
+    cls_key_to_id[(cls.category, cls.identifier, cls.source)] = cls_id
+    counts["classifications"] += 1
+
+  # 6. Classification assignments (from classification-assignment seeds
+  #    like rs-gaap-to-metamodel/v1)
+  skipped_assignments: list[ClassificationAssignmentSpec] = []
+  for asn in package.classification_assignments:
+    elem_id = _resolve_qname(asn.element_qname)
+    if elem_id is None:
+      skipped_assignments.append(asn)
+      continue
+    # Resolve classification id; fall back to DB lookup for cross-package
+    # references (assignments seed loaded after vocabulary seed).
+    key = (asn.category, asn.identifier, "us-gaap-metamodel")
+    cls_id = cls_key_to_id.get(key)
+    if cls_id is None:
+      row = conn.execute(
+        text(
+          """
+          SELECT id FROM public.classifications
+          WHERE category = :category AND identifier = :identifier
+          LIMIT 1
+          """
+        ),
+        {"category": asn.category, "identifier": asn.identifier},
+      ).fetchone()
+      if row is None:
+        skipped_assignments.append(asn)
+        continue
+      cls_id = row[0]
+    _write_classification_assignment(
+      conn,
+      element_id=elem_id,
+      classification_id=cls_id,
+      is_primary=asn.is_primary,
+      confidence=asn.confidence,
+    )
+    counts["classification_assignments"] += 1
+
+  if skipped_assignments:
+    sample = skipped_assignments[:5]
+    logger.warning(
+      "[%s] %d classification assignment(s) skipped — element/classification not in library. Sample: %s%s",
+      package.name,
+      len(skipped_assignments),
+      ", ".join(f"{a.element_qname} --{a.category}--> {a.identifier}" for a in sample),
+      ""
+      if len(skipped_assignments) <= 5
+      else f" (+{len(skipped_assignments) - 5} more)",
     )
 
   logger.info(f"Wrote {package.name}: {counts}")

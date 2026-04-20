@@ -93,8 +93,6 @@ def element_to_response(row: Element) -> ElementResponse:
     description=row.description,
     qname=row.qname,
     namespace=row.namespace,
-    classification=row.classification,
-    sub_classification=row.sub_classification,
     balance_type=row.balance_type,
     period_type=row.period_type,
     is_abstract=row.is_abstract,
@@ -132,8 +130,7 @@ def list_elements(
     query = query.where(Element.source == source)
     count_query = count_query.where(Element.source == source)
   if classification:
-    query = query.where(Element.classification == classification)
-    count_query = count_query.where(Element.classification == classification)
+    pass  # classification filter removed; column no longer on Element
   if is_abstract is not None:
     query = query.where(Element.is_abstract == is_abstract)
     count_query = count_query.where(Element.is_abstract == is_abstract)
@@ -217,7 +214,6 @@ def suggest_mapping_candidates(
       select(Element)
       .where(
         Element.source.in_(("fac", "sfac6")),
-        Element.classification == classification,
         Element.is_active.is_(True),
       )
       .order_by(Element.depth, Element.name)
@@ -301,7 +297,6 @@ def list_unmapped_elements(
       id=e.id,
       code=e.code,
       name=e.name,
-      classification=e.classification,
       balance_type=e.balance_type,
       external_source=e.external_source,
     )
@@ -566,7 +561,6 @@ _MAPPED_TRIAL_BALANCE_SQL = text("""
       target.id AS reporting_element_id,
       target.qname,
       target.name AS reporting_name,
-      target.classification,
       target.balance_type,
       COALESCE(SUM(li.debit_amount), 0) AS total_debits,
       COALESCE(SUM(li.credit_amount), 0) AS total_credits
@@ -581,8 +575,7 @@ _MAPPED_TRIAL_BALANCE_SQL = text("""
   WHERE e.status = 'posted'
       AND (e.posting_date >= :start_date OR :start_date IS NULL)
       AND (e.posting_date <= :end_date OR :end_date IS NULL)
-  GROUP BY target.id, target.qname, target.name,
-           target.classification, target.balance_type
+  GROUP BY target.id, target.qname, target.name, target.balance_type
   ORDER BY target.qname
 """)
 
@@ -617,7 +610,6 @@ def get_mapped_trial_balance(
         reporting_element_id=row.reporting_element_id,
         qname=row.qname,
         reporting_name=row.reporting_name,
-        classification=row.classification,
         balance_type=row.balance_type,
         total_debits=debits,
         total_credits=credits,

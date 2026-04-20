@@ -188,10 +188,6 @@ class OLTPLoader:
               code=str(row["code"]),
               name=str(row["name"]),
               description=str(row["description"]) if row.get("description") else None,
-              classification=str(row["classification"]),
-              sub_classification=str(row["sub_classification"])
-              if row.get("sub_classification")
-              else None,
               balance_type=str(row["balance_type"]),
               parent_id=None,  # resolved in second pass
               depth=int(row.get("depth", 0)),

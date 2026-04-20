@@ -44,40 +44,18 @@ class ReferenceSpec(BaseModel):
 
 
 class ElementSpec(BaseModel):
-  """A single taxonomy element (XBRL concept)."""
+  """A single taxonomy element (XBRL concept).
+
+  Only XBRL-intrinsic attributes live here (balance_type, period_type,
+  is_abstract, is_monetary, element_type, substitution_group).
+  Classifications live in ClassificationSpec + ClassificationAssignmentSpec.
+  """
 
   qname: str = Field(..., description="Qualified name, e.g. 'sfac6:Assets'")
   namespace: str = Field(..., description="Namespace prefix, e.g. 'sfac6'")
   namespace_uri: str = Field(..., description="Full namespace URI")
   name: str = Field(..., description="Local name within the namespace")
 
-  # Classification — three orthogonal axes. All nullable; only SFAC 6
-  # primitives fill every one.
-  classification: str | None = Field(
-    None,
-    description=(
-      "Economic nature axis: asset | liability | equity | revenue | "
-      "expense | gain | loss. Null for structural, metadata, and "
-      "computed-ratio rows. Equity flows (contributions, distributions, "
-      "comprehensive income) collapse into `equity`; direction is "
-      "captured by balance_type and statement_context."
-    ),
-  )
-  statement_context: str | None = Field(
-    None,
-    description=(
-      "Which report the element belongs to: balance_sheet | "
-      "income_statement | cash_flow | equity_changes | disclosure | "
-      "metadata | analysis."
-    ),
-  )
-  derivation_role: str | None = Field(
-    None,
-    description=(
-      "Structural role in a report: primitive | subtotal | total | "
-      "reconciliation | movement | ratio | identifier | structural."
-    ),
-  )
   balance_type: str = Field("debit", description="debit | credit")
   period_type: str = Field("duration", description="instant | duration")
   is_abstract: bool = Field(False, description="True for abstract grouping concepts")
@@ -86,18 +64,63 @@ class ElementSpec(BaseModel):
     "concept", description="concept | abstract | axis | member | hypercube"
   )
   substitution_group: str | None = Field(
-    None, description="XBRL substitution group qname"
+    None, description="XBRL substitution group qname, e.g. 'xbrli:item'"
   )
 
   # Source / origin
   source: str = Field(..., description="sfac6 | fac | us-gaap | ifrs | …")
 
-  # Hierarchy (resolved at write time)
+  # Hierarchy (resolved at write time) — parent_id in OLTP. Independent
+  # of classification: this is the element-tree hierarchy, not the
+  # class-subclass classification hierarchy (which lives in associations).
   parent_qname: str | None = Field(None, description="Parent element qname if known")
 
   # Rich metadata
   labels: list[LabelSpec] = Field(default_factory=list)
   references: list[ReferenceSpec] = Field(default_factory=list)
+
+
+class ClassificationSpec(BaseModel):
+  """A classification vocabulary entry: (category, identifier) pair.
+
+  Each entry seeds one row in the ``classifications`` table. Categories
+  are the 24 FASB metamodel trait axes plus flowClassification and the
+  association-level categories.
+  """
+
+  category: str = Field(
+    ...,
+    description=(
+      "Classification axis, e.g. 'elementsOfFinancialStatements', "
+      "'liquidity', 'activityType'."
+    ),
+  )
+  identifier: str = Field(
+    ..., description="Member name within the category, e.g. 'asset', 'current'."
+  )
+  source: str = Field(
+    ..., description="Provenance, e.g. 'us-gaap-metamodel', 'sfac6', 'system'."
+  )
+  name: str | None = Field(None, description="Human-readable display name")
+  description: str | None = Field(None)
+
+
+class ClassificationAssignmentSpec(BaseModel):
+  """Element-to-classification assignment — seeds one element_classifications row."""
+
+  element_qname: str = Field(..., description="Element qname being classified")
+  category: str = Field(..., description="Classification category")
+  identifier: str = Field(..., description="Member identifier within the category")
+  is_primary: bool = Field(
+    True,
+    description=(
+      "Canonical row per (element, category). Most elements carry a "
+      "single primary assignment per category; multi-valued axes "
+      "(multiple trait members in one category) set is_primary=true "
+      "on the first and false on alternates."
+    ),
+  )
+  confidence: float | None = Field(None, description="For AI-suggested assignments")
 
 
 class AssociationSpec(BaseModel):
@@ -143,14 +166,21 @@ class TaxonomyPackage(BaseModel):
   elements: list[ElementSpec] = Field(default_factory=list)
   associations: list[AssociationSpec] = Field(default_factory=list)
   structures: list[StructureSpec] = Field(default_factory=list)
+  classifications: list[ClassificationSpec] = Field(default_factory=list)
+  classification_assignments: list[ClassificationAssignmentSpec] = Field(
+    default_factory=list
+  )
 
   taxonomy_type: str = Field(
     "reporting",
     description=(
-      "chart_of_accounts | reporting | mapping | schedule — shapes how the "
-      "library viewer renders this taxonomy. Concept taxonomies (sfac6, "
-      "rs-gaap) are 'reporting'; equivalence + classification arc packs "
-      "(fac, type-subtype) are 'mapping'."
+      "chart_of_accounts | reporting | mapping | schedule | "
+      "classification-vocabulary | classification-assignment — shapes "
+      "how the library viewer renders this taxonomy. Concept taxonomies "
+      "(sfac6, rs-gaap) are 'reporting'; equivalence + hierarchy arc "
+      "packs (fac, rs-gaap-hierarchy) are 'mapping'; the FASB metamodel "
+      "seed is 'classification-vocabulary'; rs-gaap-to-metamodel is "
+      "'classification-assignment'."
     ),
   )
   is_shared: bool = Field(True, description="Shared across tenants (library-origin)")

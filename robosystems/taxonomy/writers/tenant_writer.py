@@ -28,12 +28,11 @@ _TAXONOMY_COLS = (
 )
 
 _ELEMENT_COLS = (
-  "id, code, name, description, qname, namespace, uri, classification, "
-  "sub_classification, balance_type, period_type, is_abstract, is_monetary, "
+  "id, code, name, description, qname, namespace, uri, "
+  "balance_type, period_type, substitution_group, is_abstract, is_monetary, "
   "element_type, parent_id, depth, path, taxonomy_id, source, currency, "
   "is_active, is_placeholder, external_id, external_source, metadata, "
-  "version, created_at, updated_at, created_by, statement_context, "
-  "derivation_role"
+  "version, created_at, updated_at, created_by"
 )
 
 _ELEMENT_LABEL_COLS = "id, element_id, role, language, text, created_at, created_by"
@@ -53,6 +52,16 @@ _ASSOCIATION_COLS = (
   "approved_at, metadata, created_at, updated_at, created_by"
 )
 
+_CLASSIFICATION_COLS = (
+  "id, category, identifier, type, name, description, confidence, source, "
+  "metadata, created_at, updated_at, created_by"
+)
+
+_ELEMENT_CLASSIFICATION_COLS = (
+  "element_id, classification_id, is_primary, confidence, source, "
+  "created_at, updated_at, created_by"
+)
+
 
 @dataclass(frozen=True)
 class CopyStats:
@@ -64,6 +73,8 @@ class CopyStats:
   element_references: int
   structures: int
   associations: int
+  classifications: int
+  element_classifications: int
 
   @property
   def total(self) -> int:
@@ -74,6 +85,8 @@ class CopyStats:
       + self.element_references
       + self.structures
       + self.associations
+      + self.classifications
+      + self.element_classifications
     )
 
 
@@ -103,7 +116,7 @@ def copy_library_into_tenant(
   """
   resolved_pin = pin if pin is not None else DEFAULT_TAXONOMY_PIN
   if not resolved_pin:
-    return CopyStats(0, 0, 0, 0, 0, 0)
+    return CopyStats(0, 0, 0, 0, 0, 0, 0, 0)
 
   # Flatten the pin into a parameterized IN clause via VALUES.
   # E.g., ("sfac6", "v1"), ("fac", "v1"), …
@@ -204,6 +217,36 @@ def copy_library_into_tenant(
     pin_params,
   )
 
+  # Classifications — copy the full us-gaap-metamodel vocabulary (all
+  # rows with created_by='library-seeder'). Pin-independent: every
+  # tenant gets the same classification catalog.
+  cls_result = connection.execute(
+    text(f"""
+      INSERT INTO {schema}.classifications ({_CLASSIFICATION_COLS})
+      SELECT {_CLASSIFICATION_COLS} FROM public.classifications
+      WHERE created_by = 'library-seeder'
+      ON CONFLICT (id) DO NOTHING
+    """),
+  )
+
+  # Element classifications — junction rows linking elements copied
+  # above to the classification catalog.
+  ec_result = connection.execute(
+    text(f"""
+      INSERT INTO {schema}.element_classifications ({_ELEMENT_CLASSIFICATION_COLS})
+      SELECT {_ELEMENT_CLASSIFICATION_COLS} FROM public.element_classifications
+      WHERE element_id IN (
+        SELECT id FROM public.elements
+        WHERE taxonomy_id IN (
+          SELECT id FROM public.taxonomies
+          WHERE (standard, version) IN (VALUES {pin_values_sql})
+        )
+      )
+      ON CONFLICT (element_id, classification_id) DO NOTHING
+    """),
+    pin_params,
+  )
+
   return CopyStats(
     taxonomies=tax_result.rowcount or 0,
     elements=elem_result.rowcount or 0,
@@ -211,4 +254,6 @@ def copy_library_into_tenant(
     element_references=ref_result.rowcount or 0,
     structures=struct_result.rowcount or 0,
     associations=assoc_result.rowcount or 0,
+    classifications=cls_result.rowcount or 0,
+    element_classifications=ec_result.rowcount or 0,
   )
