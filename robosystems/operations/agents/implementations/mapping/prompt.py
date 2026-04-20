@@ -80,6 +80,80 @@ For each element, respond with a JSON array. Each item:
 Respond ONLY with the JSON array, no other text."""
 
 
+RS_GAAP_REFINEMENT_SYSTEM_PROMPT = """You are a financial taxonomy specialist. \
+A Chart of Accounts element has already been mapped to FAC (Fundamental Accounting Concepts). \
+Your task is to select the most specific rs-gaap filing tag from the type-subtype children \
+of the FAC element's rs-gaap equivalent.
+
+## Selection Rules
+
+1. **Semantic precision first** — pick the child whose economic content best matches the \
+CoA account (e.g. "Accounts Receivable" → `rs-gaap:ReceivablesNetCurrent`, \
+not the broad `rs-gaap:AssetsCurrent`)
+2. **Use the parent if no child is more specific** — if all children are irrelevant or \
+too narrow, return the rs-gaap parent
+3. **Prefer commonly filed tags** — when two children are equally valid, prefer the one \
+that appears in mainstream filers (shorter, less specialized name)
+4. **One-to-one** — one rs-gaap tag per CoA element
+
+## Response Format
+
+```json
+{
+  "coa_element_id": "the CoA element ID",
+  "rs_gaap_id": "the best rs-gaap element ID",
+  "rs_gaap_qname": "rs-gaap:ConceptName",
+  "confidence": 0.XX,
+  "reasoning": "brief explanation"
+}
+```
+
+Respond ONLY with the JSON object, no other text."""
+
+
+def build_rs_gaap_refinement_prompt(
+  coa_element: dict,
+  fac_qname: str,
+  rs_gaap_parent: dict | None,
+  candidates: list[dict],
+) -> str:
+  """Build the user message for the rs-gaap refinement pass.
+
+  When ``rs_gaap_parent`` is None (wide-equivalence case) the candidates are
+  the industry-specific equivalents themselves — no parent to fall back on.
+  """
+  candidates_text = "\n".join(
+    f"- id={c['id']}, qname={c['qname']}, name={c['name']}" for c in candidates
+  )
+
+  if rs_gaap_parent is not None:
+    parent_section = (
+      f"## rs-gaap Parent (fac-to-rs-gaap equivalence)\n"
+      f"id={rs_gaap_parent['id']}, qname={rs_gaap_parent['qname']}, "
+      f"name={rs_gaap_parent['name']}\n\n"
+      f"## Type-Subtype Children (more specific filing options)\n"
+      f"{candidates_text if candidates_text else '(none — use the parent)'}\n\n"
+      f"Pick the single best rs-gaap concept. Use the parent if no child is more appropriate."
+    )
+  else:
+    parent_section = (
+      f"## rs-gaap Candidates (industry-specific filing variants)\n"
+      f"{candidates_text}\n\n"
+      f"Pick the single best rs-gaap concept for this specific account."
+    )
+
+  return f"""Select the most specific rs-gaap filing tag for this account.
+
+## CoA Account
+id={coa_element["id"]}, name={coa_element["name"]}, \
+classification={coa_element.get("classification", "?")}
+
+## Already Mapped To (FAC)
+{fac_qname}
+
+{parent_section}"""
+
+
 def build_mapping_prompt(
   elements: list[dict],
   candidates: list[dict],

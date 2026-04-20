@@ -432,7 +432,10 @@ def get_element_arcs(
     )
     .join(Structure, Association.structure_id == Structure.id)
     .join(Taxonomy, Structure.taxonomy_id == Taxonomy.id)
-    .where(Taxonomy.taxonomy_type == "mapping")
+    .where(
+      (Taxonomy.taxonomy_type == "mapping")
+      | (Structure.structure_type == "coa_mapping")
+    )
   )
 
   outgoing = base_select.join(Element, Association.to_element_id == Element.id).where(

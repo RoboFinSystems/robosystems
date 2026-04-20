@@ -16,8 +16,15 @@ from typing import Any
 
 from robosystems.db.extensions import extensions_session
 from robosystems.logger import logger
+from robosystems.models.api.extensions.taxonomies import (
+  CreateMappingAssociationOperation,
+)
+from robosystems.operations.roboledger.commands.taxonomies import (
+  create_mapping_association,
+)
 from robosystems.operations.roboledger.reads.taxonomies import (
   count_coa_elements,
+  expand_to_rs_gaap_candidates,
   get_element,
   get_mapping_coverage,
   list_unmapped_elements,
@@ -233,4 +240,117 @@ class GetMappingSummaryTool:
         }
     except Exception as exc:
       logger.warning(f"get-mapping-summary failed: {exc}")
+      return {"error": str(exc)}
+
+
+class ExpandToRsGaapCandidatesTool:
+  """Follow FAC → rs-gaap equivalence + type-subtype to get specific filing candidates."""
+
+  def __init__(self, graph_client):
+    self.client = graph_client
+
+  def get_tool_definition(self) -> dict[str, Any]:
+    return {
+      "name": "expand-to-rs-gaap-candidates",
+      "description": """Follow a FAC element's fac-to-rs-gaap equivalence arc to its
+rs-gaap parent, then return type-subtype children as specific filing-level candidates.
+
+**WHEN TO USE:**
+- After confirming a CoA → FAC mapping (second pass)
+- To get the most specific rs-gaap tag for a CoA account
+
+**RETURNS:**
+- rs_gaap_parent: the direct rs-gaap equivalent of the FAC concept
+- candidates: type-subtype children (more specific filing variants)""",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "fac_element_id": {
+            "type": "string",
+            "description": "The FAC element ID from the first mapping pass",
+          },
+        },
+        "required": ["fac_element_id"],
+      },
+    }
+
+  async def execute(self, arguments: dict[str, Any]) -> Any:
+    graph_id = self.client.graph_id
+    fac_element_id = arguments["fac_element_id"]
+    try:
+      with extensions_session(graph_id) as session:
+        result = expand_to_rs_gaap_candidates(session, fac_element_id)
+        if result is None:
+          return {"error": f"No fac-to-rs-gaap equivalence found for {fac_element_id}"}
+        return result
+    except Exception as exc:
+      logger.warning(f"expand-to-rs-gaap-candidates failed: {exc}")
+      return {"error": str(exc)}
+
+
+class CreateMappingAssociationTool:
+  """Write a CoA → FAC mapping association."""
+
+  def __init__(self, graph_client):
+    self.client = graph_client
+
+  def get_tool_definition(self) -> dict[str, Any]:
+    return {
+      "name": "create-mapping-association",
+      "description": """Write a confirmed CoA → FAC mapping association.
+
+**WHEN TO USE:**
+- After choosing the best FAC candidate for a CoA element
+- Confidence ≥ 0.70 is required; skip below that threshold
+
+**INPUTS:**
+- mapping_id: The coa_mapping structure ID (from get-unmapped-elements)
+- from_element_id: CoA element ID (source)
+- to_element_id: FAC element ID (target)
+- confidence: Float 0.0–1.0 (AI confidence in the match)""",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "mapping_id": {
+            "type": "string",
+            "description": "The coa_mapping structure ID",
+          },
+          "from_element_id": {
+            "type": "string",
+            "description": "CoA element ID (source)",
+          },
+          "to_element_id": {
+            "type": "string",
+            "description": "FAC element ID (target)",
+          },
+          "confidence": {
+            "type": "number",
+            "description": "Confidence score 0.0–1.0",
+          },
+        },
+        "required": ["mapping_id", "from_element_id", "to_element_id", "confidence"],
+      },
+    }
+
+  async def execute(self, arguments: dict[str, Any]) -> Any:
+    graph_id = self.client.graph_id
+    try:
+      body = CreateMappingAssociationOperation(
+        mapping_id=arguments["mapping_id"],
+        from_element_id=arguments["from_element_id"],
+        to_element_id=arguments["to_element_id"],
+        confidence=float(arguments["confidence"]),
+        association_type="mapping",
+        suggested_by="mapping-agent",
+      )
+      with extensions_session(graph_id) as session:
+        result = create_mapping_association(session, body, created_by="mapping-agent")
+        return {
+          "association_id": result.id,
+          "from_element_id": result.from_element_id,
+          "to_element_id": result.to_element_id,
+          "confidence": result.confidence,
+        }
+    except Exception as exc:
+      logger.warning(f"create-mapping-association failed: {exc}")
       return {"error": str(exc)}

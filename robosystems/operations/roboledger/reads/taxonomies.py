@@ -309,6 +309,94 @@ def list_unmapped_elements(
   ]
 
 
+def expand_to_rs_gaap_candidates(
+  session: Session,
+  fac_element_id: str,
+) -> dict | None:
+  """Follow FAC → rs-gaap equivalence arcs, then surface specific filing candidates.
+
+  Two shapes exist in the fac-to-rs-gaap taxonomy:
+
+  **Narrow** (1-3 equivalents): the rs-gaap peer is a broad grouping concept
+  (e.g. ``fac:CurrentAssets`` → ``rs-gaap:AssetsCurrent``). In this case the
+  type-subtype children of that peer are the filing-specific candidates.
+
+  **Wide** (4+ equivalents): the rs-gaap peers are already the filing-specific
+  variants (e.g. ``fac:Revenues`` → 80 industry-specific revenue tags). Here the
+  equivalents themselves are the candidates; recursing into their type-subtype
+  children would produce an unmanageably large set.
+
+  Returns::
+
+      {
+        "rs_gaap_parent": {"id": ..., "qname": ..., "name": ...} | None,
+        "candidates": [{"id": ..., "qname": ..., "name": ...}, ...]
+      }
+
+  ``rs_gaap_parent`` is ``None`` in the wide-equivalence case (no single parent).
+  Returns ``None`` if no fac-to-rs-gaap equivalence exists for this FAC element.
+  """
+  # Also fetch the FAC element's own qname for prompt context.
+  fac_row = session.execute(
+    text("SELECT qname FROM elements WHERE id = :fac_id"),
+    {"fac_id": fac_element_id},
+  ).fetchone()
+  fac_qname = fac_row.qname if fac_row else fac_element_id
+
+  equiv_rows = session.execute(
+    text("""
+      SELECT e.id, e.qname, e.name
+      FROM associations a
+      JOIN structures s ON a.structure_id = s.id
+      JOIN taxonomies t ON s.taxonomy_id = t.id
+      JOIN elements e ON a.to_element_id = e.id
+      WHERE a.from_element_id = :fac_id
+        AND t.standard = 'fac-to-rs-gaap'
+        AND a.association_type = 'equivalence'
+      ORDER BY e.qname
+    """),
+    {"fac_id": fac_element_id},
+  ).fetchall()
+
+  if not equiv_rows:
+    return None
+
+  _NARROW_THRESHOLD = 3
+
+  if len(equiv_rows) > _NARROW_THRESHOLD:
+    # Wide case: equivalents are already the filing-specific candidates.
+    return {
+      "fac_qname": fac_qname,
+      "rs_gaap_parent": None,
+      "candidates": [
+        {"id": r.id, "qname": r.qname, "name": r.name} for r in equiv_rows
+      ],
+    }
+
+  # Narrow case: one rs-gaap parent + its type-subtype children as candidates.
+  parent = equiv_rows[0]
+  child_rows = session.execute(
+    text("""
+      SELECT e.id, e.qname, e.name
+      FROM associations a
+      JOIN structures s ON a.structure_id = s.id
+      JOIN taxonomies t ON s.taxonomy_id = t.id
+      JOIN elements e ON a.to_element_id = e.id
+      WHERE a.from_element_id = :rs_id
+        AND t.standard = 'type-subtype'
+        AND a.association_type = 'general-special'
+      ORDER BY e.qname
+    """),
+    {"rs_id": parent.id},
+  ).fetchall()
+
+  return {
+    "fac_qname": fac_qname,
+    "rs_gaap_parent": {"id": parent.id, "qname": parent.qname, "name": parent.name},
+    "candidates": [{"id": r.id, "qname": r.qname, "name": r.name} for r in child_rows],
+  }
+
+
 # ── Structures ────────────────────────────────────────────────────────────
 
 

@@ -35,7 +35,8 @@ from __future__ import annotations
 import strawberry
 from strawberry.types import Info
 
-from robosystems.graphql.context import GraphQLContext
+from robosystems.db.extensions import LIBRARY_GRAPH_ID
+from robosystems.graphql.context import GraphQLContext, require_graph_id
 from robosystems.graphql.resolvers._common import (
   open_library_session as _open_session,
 )
@@ -86,10 +87,18 @@ class LibraryQuery:
     standard: str | None = None,
     include_element_count: bool = False,
   ) -> list[LibraryTaxonomy]:
-    """List curated taxonomies (sfac6, fac, us-gaap, rs-gaap, …)."""
+    """List taxonomies visible to this graph.
+
+    On the library sentinel returns only shared/canonical taxonomies.
+    On a tenant graph_id also returns tenant-owned taxonomies (e.g. CoA).
+    """
+    is_sentinel = require_graph_id(info) == LIBRARY_GRAPH_ID
     with _open_session(info) as session:
       rows = list_taxonomies(
-        session, standard=standard, include_element_count=include_element_count
+        session,
+        standard=standard,
+        include_element_count=include_element_count,
+        shared_only=is_sentinel,
       )
       return [LibraryTaxonomy.from_pydantic(r) for r in rows]
 

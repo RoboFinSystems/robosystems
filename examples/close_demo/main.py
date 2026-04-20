@@ -21,9 +21,10 @@ path that the QuickBooks pipeline uses in production.
   access in `_reset.py` — this is intentionally NOT a product operation.
 
 Usage:
-    uv run python -m examples.close_demo.main              # Create new graph + load
-    uv run python -m examples.close_demo.main <graph_id>   # Load into existing graph
-    uv run python -m examples.close_demo.main --dry-run    # Validate data only
+    uv run python -m examples.close_demo.main                        # Create new graph + load
+    uv run python -m examples.close_demo.main <graph_id>             # Load into existing graph
+    uv run python -m examples.close_demo.main --dry-run              # Validate data only
+    uv run python -m examples.close_demo.main --with-ai-mapping      # Use MappingAgent instead of hardcoded mappings (requires Bedrock)
 
 Requires: Docker stack running (just start)
 """
@@ -330,7 +331,7 @@ def create_journal_entries(
 
 
 # ---------------------------------------------------------------------------
-# Step 3: Create CoA → GAAP mappings (via HTTP API)
+# Step 3a: Create CoA → GAAP mappings — hardcoded path (no Bedrock needed)
 # ---------------------------------------------------------------------------
 
 
@@ -386,6 +387,79 @@ def create_mappings(graph_id: str, element_lookup: dict[str, str]) -> int:
 
   result = client.create_associations(graph_id, mapping_id, associations)
   return result.get("created", 0)
+
+
+# ---------------------------------------------------------------------------
+# Step 3b: AI mapping path — requires Bedrock (optional)
+# ---------------------------------------------------------------------------
+
+
+def run_ai_mapping(graph_id: str) -> None:
+  """Trigger the MappingAgent via the auto-map-elements operation.
+
+  Requires Bedrock to be configured (BEDROCK_REGION + IAM role with
+  bedrock:InvokeModel). Skipped when --with-ai-mapping is not passed.
+
+  Finds the coa_mapping structure, dispatches the async agent operation,
+  and polls until it completes or times out.
+  """
+  import httpx
+
+  if not CREDENTIALS_FILE.exists():
+    print("  ERROR: No credentials file")
+    return
+
+  creds = json.loads(CREDENTIALS_FILE.read_text())
+  api_key = creds.get("api_key", "")
+  headers = {"X-API-Key": api_key, "Content-Type": "application/json"}
+
+  # Find the coa_mapping structure ID
+  client = _get_ledger_client()
+  structures = client.list_structures(graph_id, structure_type="coa_mapping")
+  if not structures:
+    print("  ERROR: No coa_mapping structure found — was the CoA taxonomy created?")
+    return
+  mapping_id = structures[0]["id"]
+  print(f"  Mapping structure: {mapping_id}")
+
+  # Dispatch the async agent operation
+  try:
+    resp = httpx.post(
+      f"{BASE_URL}/extensions/roboledger/{graph_id}/operations/auto-map-elements",
+      headers=headers,
+      json={"mapping_id": mapping_id},
+      timeout=30,
+    )
+  except Exception as e:
+    print(f"  ERROR: Failed to trigger auto-map-elements: {e}")
+    return
+
+  if resp.status_code not in (200, 201, 202):
+    print(f"  ERROR: auto-map-elements returned {resp.status_code}: {resp.text[:200]}")
+    return
+
+  data = resp.json()
+  op_id = data.get("operationId", data.get("operation_id", ""))
+  print(f"  Dispatched (operation: {op_id})")
+  print("  Polling… (mapping 27 accounts, may take 1–3 min)")
+
+  status, result = _poll_operation(api_key, op_id, timeout_seconds=300)
+  if status == "completed":
+    mapped = result.get("mapped", "?")
+    flagged = result.get("flagged", "?")
+    skipped = result.get("skipped", "?")
+    coverage = result.get("coverage_percent", "?")
+    print(f"  Done — mapped: {mapped}, flagged: {flagged}, skipped: {skipped}")
+    print(f"  Coverage: {coverage}%")
+  elif status == "failed":
+    error = result.get("error", "unknown")
+    print(f"  WARNING: AI mapping failed: {error}")
+    print("  Falling back to hardcoded mappings...")
+    # Not calling create_mappings here — caller decides fallback policy.
+  elif status == "timeout":
+    print("  WARNING: AI mapping timed out after 5 min (may still be running)")
+  else:
+    print(f"  WARNING: Polling error: {result.get('error', 'unknown')}")
 
 
 # ---------------------------------------------------------------------------
@@ -650,6 +724,7 @@ def materialize_graph(graph_id: str) -> None:
 
 def main() -> None:
   dry_run = "--dry-run" in sys.argv
+  with_ai_mapping = "--with-ai-mapping" in sys.argv
   args = [a for a in sys.argv[1:] if not a.startswith("--")]
 
   # Add project root to path
@@ -670,6 +745,9 @@ def main() -> None:
     print("\n  ERROR: Transaction validation failed (imbalanced entries)")
     sys.exit(1)
   print("  Validation:   All entries balance")
+
+  if with_ai_mapping:
+    print("  AI mapping:   enabled (requires Bedrock)")
 
   if dry_run:
     total_dr = sum(sum(dr for _, dr, _ in lines) for _, _, _, _, lines in txns)
@@ -700,10 +778,14 @@ def main() -> None:
   print(f"  Entries:      {entry_counts['entries']}")
   print(f"  Line Items:   {entry_counts['line_items']}")
 
-  # Create mappings (via HTTP API — exercises create-associations op)
-  print("\nCreating CoA → GAAP mappings...")
-  mapping_count = create_mappings(graph_id, element_lookup)
-  print(f"  Mappings:     {mapping_count}")
+  # Create CoA → GAAP mappings — hardcoded or AI-powered
+  if with_ai_mapping:
+    print("\nRunning AI mapping (MappingAgent)...")
+    run_ai_mapping(graph_id)
+  else:
+    print("\nCreating CoA → GAAP mappings...")
+    mapping_count = create_mappings(graph_id, element_lookup)
+    print(f"  Mappings:     {mapping_count}")
 
   # Initialize fiscal calendar (via HTTP API — exercises initialize op)
   print("\nInitializing fiscal calendar...")

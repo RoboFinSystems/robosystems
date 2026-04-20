@@ -39,15 +39,20 @@ def list_taxonomies(
   session: Session,
   standard: str | None = None,
   include_element_count: bool = False,
+  shared_only: bool = True,
 ) -> list[LibraryTaxonomyResponse]:
-  """List all library taxonomies.
+  """List library taxonomies visible to the current session.
 
   Args:
-      session: SQLAlchemy session bound to public schema.
+      session: SQLAlchemy session (public schema for sentinel; tenant schema for graph queries).
       standard: Optional filter by standard (sfac6, fac, us-gaap, …).
       include_element_count: If True, add a COUNT(*) per taxonomy.
+      shared_only: If True (default), return only shared/canonical taxonomies.
+          Pass False when the session is tenant-scoped to include tenant CoA taxonomies.
   """
-  query = select(Taxonomy).where(Taxonomy.is_shared.is_(True))
+  query = select(Taxonomy)
+  if shared_only:
+    query = query.where(Taxonomy.is_shared.is_(True))
   if standard is not None:
     query = query.where(Taxonomy.standard == standard)
   query = query.order_by(Taxonomy.standard.asc().nulls_last(), Taxonomy.version.asc())

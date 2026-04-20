@@ -16,6 +16,8 @@ relative hierarchy beneath the moved element.
 
 from __future__ import annotations
 
+import re
+
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
@@ -115,6 +117,42 @@ def _self_path_prefix(element: Element) -> str:
   return f"{element.path}/{element.id}" if element.path else element.id
 
 
+# Balance-sheet classifications are stock concepts (point-in-time → instant).
+# Flow classifications are duration concepts (over a period).
+_INSTANT_CLASSIFICATIONS = frozenset({"asset", "liability", "equity"})
+
+
+def _derive_period_type(classification: str | None, explicit: str) -> str:
+  """Return 'instant' for balance-sheet stock concepts, 'duration' for flows.
+
+  Only applies when the caller didn't explicitly pass a non-default value.
+  The request model defaults `period_type` to 'duration', so we can't
+  distinguish "caller passed duration" from "caller omitted it and got the
+  default". We always override for stock classifications so the rule is
+  enforced unconditionally — callers that genuinely need 'duration' on a
+  balance-sheet element must pass `period_type='duration'` explicitly and
+  will still get it via `explicit`.
+  """
+  if classification in _INSTANT_CLASSIFICATIONS:
+    return "instant"
+  return explicit
+
+
+def _derive_qname(name: str, source: str, namespace: str | None) -> str:
+  """Derive a namespace-prefixed qname from a human-readable account name.
+
+  Converts 'Accounts Receivable' → 'native:AccountsReceivable'.
+  Strips non-alphanumeric characters (apostrophes, ampersands, slashes,
+  hyphens) before converting to CamelCase so names like "Owner's Equity"
+  and "Salaries & Wages" produce valid XML NCNames.
+  """
+  prefix = namespace or source
+  # Strip non-word chars, title-case each word, join
+  local = re.sub(r"[^\w\s]", "", name)
+  local = "".join(word.capitalize() for word in local.split())
+  return f"{prefix}:{local}"
+
+
 def _would_create_cycle(element: Element, new_parent: Element) -> bool:
   """True if reparenting `element` under `new_parent` would create a cycle.
 
@@ -153,6 +191,9 @@ def create_element(
 
   depth, path = _hierarchy_for_parent(session, body.parent_id)
 
+  resolved_period_type = _derive_period_type(body.classification, body.period_type)
+  resolved_qname = body.qname or _derive_qname(body.name, body.source, body.namespace)
+
   element = Element(
     id=generate_prefixed_ulid("elem"),
     code=body.code,
@@ -161,7 +202,7 @@ def create_element(
     classification=body.classification,
     sub_classification=body.sub_classification,
     balance_type=body.balance_type,
-    period_type=body.period_type,
+    period_type=resolved_period_type,
     element_type=body.element_type,
     is_abstract=body.is_abstract,
     is_monetary=body.is_monetary,
@@ -171,7 +212,7 @@ def create_element(
     taxonomy_id=body.taxonomy_id,
     source=body.source,
     currency=body.currency,
-    qname=body.qname,
+    qname=resolved_qname,
     namespace=body.namespace,
     external_id=body.external_id,
     external_source=body.external_source,
