@@ -171,6 +171,12 @@ class Graph(Model):
   # Additional metadata that might be useful
   graph_metadata = Column(JSONB, nullable=True)  # Flexible field for future use
 
+  # Per-graph taxonomy library pinning: {standard: version, ...}.
+  # When NULL, the provisioner falls back to DEFAULT_TAXONOMY_PIN. Each
+  # listed (standard, version) pair is copied from public.* into the tenant
+  # schema at provision time. See robosystems/taxonomy/pins.py.
+  taxonomy_pin = Column(JSONB, nullable=True)
+
   # Lifecycle status
   status = Column(
     String, nullable=False, default=GraphStatus.ACTIVE.value

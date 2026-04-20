@@ -26,6 +26,10 @@ from robosystems.models.api.extensions.taxonomies import (
   UpdateElementRequest,
 )
 from robosystems.models.extensions import Element, Taxonomy
+from robosystems.operations.roboledger.commands._guards import (
+  LibraryImmutableError,
+  assert_not_library_origin,
+)
 from robosystems.operations.roboledger.commands.taxonomies import (
   TaxonomyNotFoundError,
 )
@@ -34,6 +38,7 @@ from robosystems.utils.ulid import generate_prefixed_ulid
 __all__ = [
   "ElementCycleError",
   "ElementNotFoundError",
+  "LibraryImmutableError",
   "TaxonomyNotFoundError",
   "create_element",
   "delete_element",
@@ -140,6 +145,11 @@ def create_element(
   ).scalar_one_or_none()
   if taxonomy is None:
     raise TaxonomyNotFoundError(body.taxonomy_id)
+  # Tenants can only author inside tenant-origin taxonomies. The taxonomy
+  # row is already in hand from the existence check above, so reuse it
+  # instead of issuing a second query (also keeps the unit tests' mock
+  # execute side_effect chain intact).
+  assert_not_library_origin(taxonomy)
 
   depth, path = _hierarchy_for_parent(session, body.parent_id)
 
@@ -192,6 +202,7 @@ def update_element(session: Session, body: UpdateElementRequest) -> ElementRespo
   ).scalar_one_or_none()
   if element is None:
     raise ElementNotFoundError(body.element_id)
+  assert_not_library_origin(element)
 
   updates = body.model_dump(exclude_unset=True)
   updates.pop("element_id", None)
@@ -267,6 +278,7 @@ def delete_element(session: Session, body: DeleteElementRequest) -> ElementRespo
   ).scalar_one_or_none()
   if element is None:
     raise ElementNotFoundError(body.element_id)
+  assert_not_library_origin(element)
 
   element.is_active = False
   session.flush()

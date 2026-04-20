@@ -182,19 +182,84 @@ def get_element(session: Session, element_id: str) -> ElementResponse | None:
 
 
 def suggest_mapping_candidates(
-  session: Session, classification: str
+  session: Session,
+  classification: str | None = None,
+  element_id: str | None = None,
 ) -> list[ElementResponse]:
-  """Return reporting-taxonomy elements (us-gaap / sfac6) matching a classification.
+  """Return reporting-taxonomy candidates for a CoA element.
 
-  Used by the MCP `suggest-mapping` tool to narrow CoA → reporting concept
-  candidates by the source element's classification.
+  Two resolution strategies, tried in order:
+
+  1. **Anchor-narrowed FAC candidates** (preferred). If ``element_id``
+     is provided and the element has been tagged (via migration 0004)
+     with a ``class-subClassOf`` association to an SFAC 6 anchor, walk
+     the ``sfac6-to-fac`` general-special arcs from that anchor and
+     return the reachable FAC concepts. This is the MappingAgent's
+     primary path — FAC's ~177 concepts give a clean, small semantic
+     target; deterministic equivalence-arc expansion (done separately)
+     fills in the us-gaap / rs-gaap variant at publication time.
+  2. **Classification fallback**. If no anchor is found (untagged
+     element, or caller didn't pass ``element_id``), return active
+     ``fac`` + ``sfac6`` elements matching ``classification``. Compat
+     path for pre-tagging elements and for callers that only have a
+     classification in hand.
   """
+  if element_id is not None:
+    fac_candidates = _anchor_narrowed_candidates(session, element_id)
+    if fac_candidates:
+      return fac_candidates
+
+  if classification is None:
+    return []
+
   rows = (
     session.execute(
       select(Element)
       .where(
-        Element.source.in_(("us-gaap", "sfac6")),
+        Element.source.in_(("fac", "sfac6")),
         Element.classification == classification,
+        Element.is_active.is_(True),
+      )
+      .order_by(Element.depth, Element.name)
+    )
+    .scalars()
+    .all()
+  )
+  return [element_to_response(r) for r in rows]
+
+
+def _anchor_narrowed_candidates(
+  session: Session, element_id: str
+) -> list[ElementResponse]:
+  """Resolve FAC candidates reachable from the element's SFAC 6 anchor.
+
+  Returns an empty list if the element has no ``class-subClassOf``
+  association (untagged) or if the anchor has no ``sfac6-to-fac``
+  general-special descendants (shouldn't happen for the 5 SFAC 6
+  anchors, but defensively handled).
+  """
+  anchor_id_row = session.execute(
+    text("""
+      SELECT to_element_id FROM associations
+      WHERE from_element_id = :eid
+        AND association_type = 'mapping'
+        AND arcrole = 'class-subClassOf'
+      LIMIT 1
+    """),
+    {"eid": element_id},
+  ).fetchone()
+  if anchor_id_row is None:
+    return []
+  anchor_id = anchor_id_row.to_element_id
+
+  # FAC concepts reachable from the anchor via sfac6-to-fac general-special.
+  rows = (
+    session.execute(
+      select(Element)
+      .join(Association, Association.to_element_id == Element.id)
+      .where(
+        Association.from_element_id == anchor_id,
+        Association.association_type == "general-special",
         Element.is_active.is_(True),
       )
       .order_by(Element.depth, Element.name)

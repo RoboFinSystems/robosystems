@@ -144,7 +144,9 @@ class SuggestMappingTool:
             "candidates": [],
           }
 
-        candidates = suggest_mapping_candidates(session, classification)
+        candidates = suggest_mapping_candidates(
+          session, classification=classification, element_id=element_id
+        )
 
         return {
           "source_element": {

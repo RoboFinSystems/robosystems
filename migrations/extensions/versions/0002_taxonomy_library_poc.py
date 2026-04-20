@@ -1,4 +1,5 @@
-"""Taxonomy library POC — JSON-LD seeds + multi-axis classification.
+"""Taxonomy library POC — JSON-LD seeds + multi-axis classification +
+provision-time library copy + immutability + CoA SFAC 6 anchor tagging.
 
 Replaces the Python-dict seed (`seed_reporting_taxonomy`) with JSON-LD
 artifacts loaded from `robosystems/taxonomy/seeds/`. Seeds are RoboSystems
@@ -7,7 +8,7 @@ XBRL, but now maintained directly as JSON-LD with no upstream tracking
 (see `robosystems/taxonomy/seeds/README.md` and the one-shot importer at
 `robosystems/scripts/import_upstream_seeds.py`).
 
-Schema changes:
+Schema changes (public schema):
 
 - CREATE TABLE public.element_labels
 - CREATE TABLE public.element_references
@@ -28,7 +29,7 @@ Schema changes:
 - ADD COLUMN elements.derivation_role (primitive | subtotal | total |
   reconciliation | movement | ratio | identifier | structural), nullable
 
-Data changes:
+Data changes (public schema):
 
 - DELETE existing library-origin rows seeded by 0001's seed_reporting_taxonomy
   (coexistence would collide on qname uniqueness)
@@ -36,6 +37,27 @@ Data changes:
   denormalized columns AND the classifications junction)
 - Propagate classifications from FAC → rs-gaap via equivalence arcs +
   general-special hierarchy + name patterns
+
+Tenant-schema rollout (for every existing tenant schema `kg*`):
+
+- Widen association_type / element source CHECKs to admit library
+  vocabulary (equivalence, general-special, essence-alias; fac, rs-gaap)
+- Copy pinned library rows from public.* into the tenant schema using
+  the idempotent `copy_library_into_tenant` helper (row ids preserved so
+  re-runs are no-ops). Respects each graph's `taxonomy_pin`; falls back
+  to DEFAULT_TAXONOMY_PIN for graphs without a pin.
+- Install `BEFORE UPDATE OR DELETE` triggers on the six library-backing
+  tables (taxonomies, elements, element_labels, element_references,
+  structures, associations) keyed on `created_by = 'library-seeder'` so
+  tenant-scope writes can't mutate library rows.
+- Tag every tenant-origin element with a non-null `classification` to its
+  SFAC 6 anchor (or `fac:NetCashFlowFromOperatingActivities` for
+  `classification='cashflow'`) via a `class-subClassOf` association.
+  Gives MappingAgent a structural narrowing signal — FAC descendants of
+  the anchor become the candidate set instead of the full rs-gaap space.
+
+The immutability function `public.raise_library_immutable()` is installed
+once (idempotent) and shared by every tenant trigger.
 
 Revision ID: 0002
 Revises: 0001
@@ -48,13 +70,236 @@ from pathlib import Path
 
 import sqlalchemy as sa
 from alembic import op
+from sqlalchemy import text
 from sqlalchemy.dialects import postgresql
+
+from migrations.extensions.helpers import TenantOps, for_each_tenant_schema
+from robosystems.taxonomy.writers.tenant_writer import copy_library_into_tenant
 
 # revision identifiers, used by Alembic.
 revision = "0002"
 down_revision = "0001"
 branch_labels = None
 depends_on = None
+
+
+# ── Consolidated from the former 0003 + 0004 migrations ─────────────────
+
+_IMMUTABLE_TABLES = (
+  "taxonomies",
+  "elements",
+  "element_labels",
+  "element_references",
+  "structures",
+  "associations",
+)
+
+_WIDENED_ASSOCIATION_CHECK = (
+  "association_type IN ("
+  "'presentation', 'calculation', 'mapping', "
+  "'equivalence', 'general-special', 'essence-alias'"
+  ")"
+)
+_WIDENED_ELEMENT_SOURCE_CHECK = (
+  "source IN ("
+  "'sfac6', 'fac', 'rs-gaap', 'us-gaap', 'ifrs', "
+  "'quickbooks', 'xero', 'plaid', 'native', 'import', 'system'"
+  ")"
+)
+_NARROW_ASSOCIATION_CHECK = (
+  "association_type IN ('presentation', 'calculation', 'mapping')"
+)
+_NARROW_ELEMENT_SOURCE_CHECK = (
+  "source IN ("
+  "'sfac6', 'us-gaap', 'ifrs', "
+  "'quickbooks', 'xero', 'plaid', 'native', 'import'"
+  ")"
+)
+
+# classification → SFAC 6 (or cashflow) anchor qname. `inflow` collapses
+# Gains into Revenues; `outflow` collapses Losses into Expenses.
+_ANCHOR_QNAMES = {
+  "asset": "sfac6:Assets",
+  "liability": "sfac6:Liabilities",
+  "equity": "sfac6:Equity",
+  "inflow": "sfac6:Revenues",
+  "outflow": "sfac6:Expenses",
+  "cashflow": "fac:NetCashFlowFromOperatingActivities",
+}
+
+_COA_STRUCTURE_NAME = "CoA Classification Anchors"
+_COA_STRUCTURE_DESC = (
+  "Tenant CoA elements anchored to their SFAC 6 (or cashflow) classification "
+  "via class-subClassOf arcs. Used by MappingAgent to narrow reporting-concept "
+  "candidates by walking anchor descendants."
+)
+_COA_ARCROLE = "class-subClassOf"
+
+
+def _install_raise_library_immutable_fn(conn) -> None:
+  """Create the PL/pgSQL function that raises on library-origin mutations."""
+  conn.execute(
+    text("""
+      CREATE OR REPLACE FUNCTION public.raise_library_immutable()
+      RETURNS TRIGGER AS $$
+      BEGIN
+        IF OLD.created_by = 'library-seeder' THEN
+          RAISE EXCEPTION 'library-seeded rows are immutable in tenant schemas (table=%, id=%)',
+            TG_TABLE_NAME, OLD.id
+            USING ERRCODE = 'P0001';
+        END IF;
+        IF TG_OP = 'DELETE' THEN
+          RETURN OLD;
+        END IF;
+        RETURN NEW;
+      END;
+      $$ LANGUAGE plpgsql;
+    """)
+  )
+
+
+def _install_triggers_for_tenant(conn, schema: str) -> None:
+  for table in _IMMUTABLE_TABLES:
+    trigger = f"{table}_library_immutable"
+    conn.execute(text(f'DROP TRIGGER IF EXISTS {trigger} ON "{schema}".{table}'))
+    conn.execute(
+      text(
+        f"CREATE TRIGGER {trigger} "
+        f'BEFORE UPDATE OR DELETE ON "{schema}".{table} '
+        f"FOR EACH ROW EXECUTE FUNCTION public.raise_library_immutable()"
+      )
+    )
+
+
+def _drop_triggers_for_tenant(conn, schema: str) -> None:
+  for table in _IMMUTABLE_TABLES:
+    trigger = f"{table}_library_immutable"
+    conn.execute(text(f'DROP TRIGGER IF EXISTS {trigger} ON "{schema}".{table}'))
+
+
+def _widen_tenant_checks(conn, schema: str) -> None:
+  t = TenantOps(conn, schema)
+  t.add_check("associations", "check_association_type", _WIDENED_ASSOCIATION_CHECK)
+  t.add_check("elements", "check_element_source", _WIDENED_ELEMENT_SOURCE_CHECK)
+
+
+def _restore_narrow_tenant_checks(conn, schema: str) -> None:
+  t = TenantOps(conn, schema)
+  t.add_check("associations", "check_association_type", _NARROW_ASSOCIATION_CHECK)
+  t.add_check("elements", "check_element_source", _NARROW_ELEMENT_SOURCE_CHECK)
+
+
+def _backfill_library_into_tenant(conn, schema: str) -> None:
+  """Widen CHECKs, copy pinned library rows, install immutability triggers.
+
+  Order is load-bearing: copy runs before trigger install so library
+  rows land freely; after the triggers are attached, subsequent
+  UPDATE/DELETE on those rows raises from tenant scope.
+  """
+  _widen_tenant_checks(conn, schema)
+  stats = copy_library_into_tenant(conn, schema)
+  print(f"  [{schema}] library backfill: {stats.total:,} rows")
+  _install_triggers_for_tenant(conn, schema)
+
+
+def _tag_coa_for_tenant(conn, schema: str) -> None:
+  """Tag tenant-origin elements with SFAC 6 anchor associations."""
+  # Resolve anchor element ids in this tenant schema by qname.
+  rows = conn.execute(
+    text(
+      f"SELECT qname, id FROM {schema}.elements "
+      f"WHERE qname = ANY(:qnames) AND created_by = 'library-seeder'"
+    ),
+    {"qnames": list(_ANCHOR_QNAMES.values())},
+  ).fetchall()
+  anchor_ids = {row.qname: row.id for row in rows}
+  if not anchor_ids:
+    print(f"  [{schema}] coa tagging skipped (no library anchors present)")
+    return
+
+  # Ensure the holder Structure exists. Deterministic id qualified by
+  # schema so re-runs are idempotent.
+  structure_id = f"struct_coa_cls_{schema.replace('-', '_')}"
+  existing = conn.execute(
+    text(f"SELECT id FROM {schema}.structures WHERE id = :id"),
+    {"id": structure_id},
+  ).fetchone()
+  if existing is None:
+    tax_row = conn.execute(
+      text(
+        f"SELECT id FROM {schema}.taxonomies "
+        f"WHERE created_by != 'library-seeder' "
+        f"ORDER BY created_at LIMIT 1"
+      )
+    ).fetchone()
+    taxonomy_id = tax_row.id if tax_row else None
+    conn.execute(
+      text(
+        f"INSERT INTO {schema}.structures "
+        f"(id, name, description, structure_type, taxonomy_id, is_active, "
+        f" metadata, created_at, updated_at, created_by) "
+        f"VALUES (:id, :name, :desc, 'coa_mapping', :tax, true, '{{}}'::jsonb, "
+        f" now(), now(), 'coa-classifier')"
+      ),
+      {
+        "id": structure_id,
+        "name": _COA_STRUCTURE_NAME,
+        "desc": _COA_STRUCTURE_DESC,
+        "tax": taxonomy_id,
+      },
+    )
+
+  inserted = 0
+  for classification, qname in _ANCHOR_QNAMES.items():
+    anchor_id = anchor_ids.get(qname)
+    if anchor_id is None:
+      continue
+    result = conn.execute(
+      text(f"""
+        INSERT INTO {schema}.associations (
+          id, structure_id, from_element_id, to_element_id,
+          association_type, arcrole,
+          order_value, weight, confidence, suggested_by, approved_by,
+          approved_at, metadata, created_at, updated_at, created_by
+        )
+        SELECT
+          'assoc_coa_' || substr(md5(e.id || ':' || :anchor_id), 1, 22),
+          :structure_id, e.id, :anchor_id,
+          'mapping', :arcrole,
+          NULL, NULL, NULL, 'coa-classifier', 'coa-classifier',
+          now(), '{{}}'::jsonb, now(), now(), 'coa-classifier'
+        FROM {schema}.elements e
+        WHERE e.classification = :classification
+          AND e.created_by != 'library-seeder'
+          AND NOT EXISTS (
+            SELECT 1 FROM {schema}.associations a
+            WHERE a.from_element_id = e.id
+              AND a.to_element_id = :anchor_id
+              AND a.arcrole = :arcrole
+          )
+      """),
+      {
+        "structure_id": structure_id,
+        "anchor_id": anchor_id,
+        "arcrole": _COA_ARCROLE,
+        "classification": classification,
+      },
+    )
+    inserted += result.rowcount or 0
+  print(f"  [{schema}] coa anchor arcs inserted: {inserted}")
+
+
+def _untag_coa_for_tenant(conn, schema: str) -> None:
+  conn.execute(
+    text(
+      f"DELETE FROM {schema}.associations "
+      f"WHERE created_by = 'coa-classifier' AND arcrole = :arcrole"
+    ),
+    {"arcrole": _COA_ARCROLE},
+  )
+  conn.execute(
+    text(f"DELETE FROM {schema}.structures WHERE created_by = 'coa-classifier'")
+  )
 
 
 SEEDS_DIR = (
@@ -841,9 +1086,40 @@ def upgrade() -> None:
     f"junction rows: {bulk_counts['junction']}"
   )
 
+  # ──────────────────────────────────────────────────────────────────────
+  # 9. Tenant-schema rollout: immutability function + per-tenant backfill
+  # ──────────────────────────────────────────────────────────────────────
+  # Install the shared PL/pgSQL function once, then for every existing
+  # tenant schema: widen CHECKs → copy library rows from public → install
+  # triggers → tag CoA elements with SFAC 6 anchors. On a fresh deploy
+  # with no tenant schemas, the per-tenant loops are no-ops; on an
+  # existing deploy they backfill every tenant to parity with a freshly
+  # provisioned graph.
+  print("  Installing raise_library_immutable() function…")
+  _install_raise_library_immutable_fn(conn)
+
+  print("  Backfilling library into existing tenant schemas…")
+  for_each_tenant_schema(conn, _backfill_library_into_tenant)
+
+  print("  Tagging tenant CoA elements with SFAC 6 anchors…")
+  for_each_tenant_schema(conn, _tag_coa_for_tenant)
+
 
 def downgrade() -> None:
   conn = op.get_bind()
+
+  # Tenant-schema teardown: remove CoA anchor tags, drop immutability
+  # triggers, restore narrow tenant CHECKs. Library rows themselves stay
+  # in the tenant schemas — removing them would orphan any tenant
+  # mappings that reference library elements. Drop the shared function
+  # last, after every trigger is gone.
+  def _teardown_tenant(conn, schema: str) -> None:
+    _untag_coa_for_tenant(conn, schema)
+    _drop_triggers_for_tenant(conn, schema)
+    _restore_narrow_tenant_checks(conn, schema)
+
+  for_each_tenant_schema(conn, _teardown_tenant)
+  conn.execute(text("DROP FUNCTION IF EXISTS public.raise_library_immutable()"))
 
   # Remove library-origin rows loaded from JSON-LD (order matters — FKs).
   conn.execute(sa.text("DELETE FROM public.element_classifications"))
