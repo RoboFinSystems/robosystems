@@ -855,22 +855,22 @@ def upgrade() -> None:
   # ──────────────────────────────────────────────────────────────────────
   # 7. Authoritative SFAC 6 classification overrides
   # ──────────────────────────────────────────────────────────────────────
-  # SFAC 6's 10 concrete primitives collapse into the 6-value vocabulary
-  # along period_type lines:
+  # SFAC 6's 10 concrete primitives collapse into the 6-value vocabulary:
   #   Assets / Liabilities / Equity       → stock primitives (instant)
   #   Revenues / Gains                    → inflow   (credit duration)
-  #   InvestmentsByOwners / Comprehensive → inflow   (credit duration,
-  #                                                   equity-change flows)
   #   Expenses / Losses                   → outflow  (debit duration)
-  #   DistributionsToOwners               → outflow  (debit duration)
-  # economic_nature=equity is reserved for balance-sheet stocks; duration
-  # flows hit the equity statement via statement_context=equity_changes.
+  #   ComprehensiveIncome                 → inflow   (credit duration)
+  #   InvestmentsByOwners                 → cashflow (equity-statement financing inflow)
+  #   DistributionsToOwners               → cashflow (equity-statement financing outflow)
+  # InvestmentsByOwners and DistributionsToOwners sit in the equity-statement /
+  # financing-activity zone — not the income statement — so cashflow is the
+  # correct classification bucket.
   sfac6_overrides = {
     "sfac6:Assets": "asset",
     "sfac6:Liabilities": "liability",
     "sfac6:Equity": "equity",
-    "sfac6:InvestmentsByOwners": "inflow",
-    "sfac6:DistributionsToOwners": "outflow",
+    "sfac6:InvestmentsByOwners": "cashflow",
+    "sfac6:DistributionsToOwners": "cashflow",
     "sfac6:ComprehensiveIncome": "inflow",
     "sfac6:Revenues": "inflow",
     "sfac6:Expenses": "outflow",
