@@ -69,22 +69,6 @@ class ElementCycleError(ValueError):
   """Raised when an update would create a cycle in the element hierarchy."""
 
 
-# CreateElementRequest.classification hint → FASB EFS identifier.
-# SFAC 6's elementsOfFinancialStatements has no ``cashflow`` primitive —
-# cash-flow line items are balance-sheet movements, not income-statement
-# items, so they are intentionally excluded from this map. Unmapped
-# values (``cashflow`` or the rarely-used ``outflow``) skip the EFS
-# assignment entirely; the caller can add the correct trait explicitly
-# via element_classifications if needed.
-_EFS_FROM_LEGACY: dict[str, str] = {
-  "asset": "asset",
-  "liability": "liability",
-  "equity": "equity",
-  "inflow": "revenue",
-  "outflow": "expense",
-}
-
-
 def _element_to_response(
   row: Element, classification: str | None = None
 ) -> ElementResponse:
@@ -140,8 +124,19 @@ def _self_path_prefix(element: Element) -> str:
 
 
 # Balance-sheet classifications are stock concepts (point-in-time → instant).
-# Flow classifications are duration concepts (over a period).
-_INSTANT_CLASSIFICATIONS = frozenset({"asset", "liability", "equity"})
+# Everything else (revenue, expense, gain, loss, investmentByOwners, etc.) is
+# a flow / duration concept.
+_INSTANT_CLASSIFICATIONS = frozenset(
+  {
+    "asset",
+    "contraAsset",
+    "liability",
+    "contraLiability",
+    "equity",
+    "contraEquity",
+    "temporaryEquity",
+  }
+)
 
 
 def _derive_period_type(classification: str | None, explicit: str) -> str:
@@ -242,29 +237,22 @@ def create_element(
   session.add(element)
   session.flush()
 
-  # Map the legacy CreateElementRequest.classification hint onto a FASB
-  # elementsOfFinancialStatements trait assignment so downstream report
-  # renderers (which JOIN through element_classifications) see the
-  # native account's economic nature.
-  efs = _EFS_FROM_LEGACY.get(body.classification or "")
+  # Assign the primary FASB elementsOfFinancialStatements trait so that
+  # downstream report renderers (which JOIN through element_classifications)
+  # see the native account's economic nature.
   _assign_efs_classification(session, element.id, body.classification)
 
-  return _element_to_response(element, efs)
+  return _element_to_response(element, body.classification)
 
 
 def _assign_efs_classification(
-  session: Session, element_id: str, legacy_classification: str | None
+  session: Session, element_id: str, efs_identifier: str
 ) -> None:
   """Link a native element to the matching FASB EFS classification.
 
-  No-op if the legacy hint is unknown or the EFS Classification row is
-  missing (e.g., in tests that don't seed the library).
+  No-op if the EFS Classification row is missing (e.g., in tests that
+  don't seed the library).
   """
-  if not legacy_classification:
-    return
-  efs_identifier = _EFS_FROM_LEGACY.get(legacy_classification)
-  if efs_identifier is None:
-    return
   classification_row = session.execute(
     select(Classification).where(
       Classification.category == "elementsOfFinancialStatements",
@@ -306,8 +294,6 @@ def update_element(session: Session, body: UpdateElementRequest) -> ElementRespo
 
   updates = body.model_dump(exclude_unset=True)
   updates.pop("element_id", None)
-  updates.pop("classification", None)
-  updates.pop("sub_classification", None)
 
   # Handle reparent separately so we can cascade path/depth changes.
   reparent = "parent_id" in updates

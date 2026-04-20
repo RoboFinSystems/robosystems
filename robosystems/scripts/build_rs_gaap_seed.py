@@ -1,5 +1,5 @@
-"""Mint the rs-gaap + fac-to-rs-gaap + sfac6-to-fac seeds from Charlie's
-FAC → us-gaap 2017 mapping.
+"""Mint the rs-gaap + fac-to-rs-gaap seeds from Charlie's FAC → us-gaap
+2017 mapping.
 
 rs-gaap is our year-independent canonical under our namespace. This
 script bootstraps it by:
@@ -12,13 +12,14 @@ script bootstraps it by:
 4. Splitting the remaining fac graph: concept predicates stay in
    fac/v1 (taxonomy_type=reporting, browseable), arc predicates +
    structure nodes move to fac-to-rs-gaap/v1 (taxonomy_type=mapping).
-5. Auto-deriving sfac6-to-fac/v1 from each fac concept's classification
-   property — anchors every fac concept to one of SFAC 6's 10 element
-   classes via rs:generalOf arcs.
 
 After this runs the library has:
   Concepts:  sfac6, fac, rs-gaap
-  Mappings:  sfac6-to-fac, fac-to-rs-gaap, type-subtype
+  Mappings:  fac-to-rs-gaap, type-subtype
+
+FAC concepts are classified on the FASB elementsOfFinancialStatements
+trait axis directly via rs:classifiedAs arcs inside fac/v1 — no separate
+sfac6-to-fac anchoring taxonomy is emitted.
 
 Future us-gaap versions (2020, 2024) become additional mapping
 taxonomies alongside fac-to-rs-gaap — our canonical (rs-gaap) stays
@@ -41,7 +42,6 @@ from robosystems.logger import logger
 SEEDS_DIR = Path(__file__).parent.parent / "taxonomy" / "seeds"
 FAC_PATH = SEEDS_DIR / "fac" / "v1" / "taxonomy.jsonld"
 FAC_TO_RS_GAAP_PATH = SEEDS_DIR / "fac-to-rs-gaap" / "v1" / "taxonomy.jsonld"
-SFAC6_TO_FAC_PATH = SEEDS_DIR / "sfac6-to-fac" / "v1" / "taxonomy.jsonld"
 TYPE_SUBTYPE_PATH = SEEDS_DIR / "type-subtype" / "v1" / "taxonomy.jsonld"
 RS_GAAP_PATH = SEEDS_DIR / "rs-gaap" / "v1" / "taxonomy.jsonld"
 
@@ -77,22 +77,6 @@ _CONCEPT_MARKER_PREDS = {
 _STRUCTURE_MARKER_PREDS = {
   "https://robosystems.ai/vocab/roleUri",
   "roleUri",
-}
-
-# Mapping from our 10-way classification to the corresponding SFAC 6
-# concept qname. Used to auto-derive sfac6-to-fac arcs from each fac
-# concept's classification property.
-_CLASSIFICATION_TO_SFAC6_QNAME = {
-  "asset": "sfac6:Assets",
-  "liability": "sfac6:Liabilities",
-  "equity": "sfac6:Equity",
-  "investments_by_owners": "sfac6:InvestmentsByOwners",
-  "distributions_to_owners": "sfac6:DistributionsToOwners",
-  "comprehensive_income": "sfac6:ComprehensiveIncome",
-  "revenue": "sfac6:Revenues",
-  "expense": "sfac6:Expenses",
-  "gain": "sfac6:Gains",
-  "loss": "sfac6:Losses",
 }
 
 TARGET_PREFIX = "rs-gaap:"
@@ -293,10 +277,7 @@ def build_rs_gaap_seed() -> int:
     f"{len(fac_arc_nodes)} arc/structure nodes)"
   )
 
-  # 3. Auto-derive sfac6-to-fac from each fac concept's classification.
-  _build_sfac6_to_fac_seed(fac_concept_nodes)
-
-  # 4. Same treatment for type-subtype seed — strip its us-gaap-2017
+  # 3. Same treatment for type-subtype seed — strip its us-gaap-2017
   # duplicate element entries (they live in rs-gaap now) and rewrite its
   # general-special arcs to target rs-gaap instead of us-gaap-2017.
   _rewrite_additional_seed(TYPE_SUBTYPE_PATH, "type-subtype")
@@ -356,86 +337,6 @@ def _is_structure_node(node: dict[str, Any]) -> bool:
 def _has_meaningful_keys(node: dict[str, Any]) -> bool:
   """True if node has more than just @id/@type/@context."""
   return any(k not in {"@id", "@type", "@context"} for k in node)
-
-
-def _build_sfac6_to_fac_seed(fac_concept_nodes: list[Any]) -> None:
-  """Emit seeds/sfac6-to-fac/v1/taxonomy.jsonld from fac classifications.
-
-  Every fac concept carries exactly one of the 10 SFAC 6 classification
-  values (asset, liability, …, gain, loss). We derive a general-special
-  arc anchoring that fac concept to the corresponding SFAC 6 element —
-  single source of truth, always consistent with the classification.
-  """
-  by_sfac6: dict[str, list[str]] = {}
-  for node in fac_concept_nodes:
-    if not isinstance(node, dict):
-      continue
-    node_id = node.get("@id")
-    if not isinstance(node_id, str) or not node_id.startswith("fac:"):
-      continue
-    classification = _extract_classification_value(node)
-    sfac6_qname = _CLASSIFICATION_TO_SFAC6_QNAME.get(classification or "")
-    if not sfac6_qname:
-      continue
-    by_sfac6.setdefault(sfac6_qname, []).append(node_id)
-
-  arc_nodes: list[Any] = []
-  for sfac6_qname in sorted(by_sfac6):
-    children = sorted(set(by_sfac6[sfac6_qname]))
-    arc_nodes.append(
-      {
-        "@id": sfac6_qname,
-        # Compact predicate — resolves to rs:generalOf (general-special
-        # arcrole) via CANONICAL_CONTEXT.
-        "generalOf": [{"@id": child} for child in children],
-      }
-    )
-
-  doc: dict[str, Any] = {
-    "@context": CANONICAL_CONTEXT,
-    "@graph": arc_nodes,
-    "standard": "sfac6-to-fac",
-    "version": "v1",
-    "taxonomy_type": "mapping",
-    "namespace_uri": "https://robosystems.ai/taxonomy/sfac6-to-fac/v1/",
-    "description": (
-      "sfac6 → fac mapping — anchors every fac concept to one of SFAC 6's "
-      "10 element classes via rs:generalOf (general-special arcrole). "
-      "Auto-derived from each fac concept's classification property so "
-      "there's one source of truth."
-    ),
-  }
-  SFAC6_TO_FAC_PATH.parent.mkdir(parents=True, exist_ok=True)
-  SFAC6_TO_FAC_PATH.write_text(
-    json.dumps(doc, indent=2, ensure_ascii=False),
-    encoding="utf-8",
-  )
-  total_arcs = sum(len(v) for v in by_sfac6.values())
-  logger.info(
-    f"Wrote {SFAC6_TO_FAC_PATH} "
-    f"({SFAC6_TO_FAC_PATH.stat().st_size / 1024:.1f} KB, "
-    f"{len(arc_nodes)} sfac6 anchors, {total_arcs} generalOf arcs)"
-  )
-
-
-def _extract_classification_value(node: dict[str, Any]) -> str | None:
-  """Read the node's classification value from compact or full-IRI form."""
-  for key in (
-    "classification",
-    "https://robosystems.ai/vocab/classification",
-  ):
-    val = node.get(key)
-    if val is None:
-      continue
-    if isinstance(val, str):
-      return val
-    if isinstance(val, list) and val:
-      val = val[0]
-    if isinstance(val, dict):
-      return val.get("@value") or val.get("@id")
-    if isinstance(val, str):
-      return val
-  return None
 
 
 def _rewrite_additional_seed(path: Path, standard_name: str) -> None:

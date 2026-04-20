@@ -9,7 +9,7 @@ Predicate design:
   skos:altLabel, owl:equivalentClass, etc).
 - RoboSystems-specific predicates use the `rs:` prefix
   (https://robosystems.ai/vocab/).
-- Taxonomy-specific prefixes (sfac6, fac, us-gaap, …) point at the
+- Taxonomy-specific prefixes (fac, rs-gaap, us-gaap, …) point at the
   authoritative namespaces used by Charlie Hoffman and FASB.
 """
 
@@ -33,10 +33,8 @@ CANONICAL_CONTEXT: dict = {
   "xbrldt": "http://xbrl.org/2005/xbrldt#",
   # Taxonomy namespaces (external authorities).
   # XBRL schemas use '#' fragment separator between the targetNamespace
-  # and the local element name, so concept IRIs like
-  # http://xbrlsite.com/seattlemethod/sfac6#Assets need the '#' in the
+  # and the local element name, so concept IRIs need the '#' in the
   # prefix mapping to compact correctly.
-  "sfac6": "http://xbrlsite.com/seattlemethod/sfac6#",
   # Charlie publishes FAC under multiple target namespaces across
   # iterations. `fac` is pinned to the 2021/kg mapping variant since
   # that's the ingest target for the POC; `fac-luca` and

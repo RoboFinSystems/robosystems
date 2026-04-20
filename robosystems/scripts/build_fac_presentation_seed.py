@@ -641,11 +641,10 @@ def build() -> dict:
       }
     )
 
-  # Merge parent→children across structures. The parent predicate on a
-  # child points UP to its parent, mirroring how `sfac6-to-fac` encodes
-  # `generalOf` as a downward list on the generalization. Since we're
-  # writing downward presentation (parent→children), we invert and put
-  # `parent` on each child pointing up.
+  # Merge parent→children across structures. We emit `parent` on each
+  # child pointing UP to its parent rather than a downward children list
+  # on the parent; rdflib's JSON-LD parsing treats both shapes equivalently
+  # but the inverted form keeps each node self-contained.
   child_to_parents: dict[str, list[str]] = {}
   for s in STRUCTURES:
     for parent, children in s.edges:

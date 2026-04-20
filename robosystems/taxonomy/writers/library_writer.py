@@ -486,7 +486,7 @@ def write_taxonomy_package(
     _write_association(conn, assoc, structure_id, from_id, to_id)
     counts["associations"] += 1
 
-  # For cross-taxonomy mapping seeds (sfac6-to-fac, fac-to-rs-gaap) the
+  # For cross-taxonomy mapping seeds (fac-to-rs-gaap) the
   # association arcs ARE the primary data. Dropping them silently would
   # mean silent mapping holes — surface a count + representative sample
   # so seed-curation drift is observable.

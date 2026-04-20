@@ -54,7 +54,6 @@ seeds/
 ├── fac/v1/                 forked — FAC fundamental concepts (~177 concepts)
 ├── rs-gaap/v1/             forked — RoboSystems canonical us-gaap (~2,000 concepts)
 ├── type-subtype/v1/        forked — rs-gaap classification linkbase
-├── sfac6-to-fac/v1/        native — SFAC 6 → FAC mapping arcs
 ├── fac-to-rs-gaap/v1/      native — FAC → rs-gaap equivalence arcs
 ├── fac-calculations/v1/    native — FAC BS/IS/CF accounting identities (summationOf arcs)
 ├── fac-presentation/v1/    native — FAC multi-variant presentation hierarchies

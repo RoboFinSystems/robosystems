@@ -51,7 +51,7 @@ def serialize_jsonld(
 
   Args:
       graph: rdflib.Graph from `extract_taxonomy()`.
-      standard: Taxonomy standard identifier (sfac6, fac, us-gaap, …).
+      standard: Taxonomy standard identifier (fac, rs-gaap, us-gaap, …).
       version: Version identifier (v1, 2020, …).
       namespace_uri: Primary namespace URI (for metadata).
       description: Optional human-readable description.

@@ -20,11 +20,9 @@ if TYPE_CHECKING:
 
 
 DEFAULT_TAXONOMY_PIN: dict[str, str] = {
-  "sfac6": "v1",
   "fac": "v1",
   "rs-gaap": "v1",
   "type-subtype": "v1",
-  "sfac6-to-fac": "v1",
   "fac-to-rs-gaap": "v1",
   "fac-calculations": "v1",
   "fac-presentation": "v1",

@@ -100,8 +100,9 @@ class Classification(ExtensionsBase):
   category = Column(String, nullable=False)
   identifier = Column(String, nullable=False)
 
-  # Where this classification comes from: 'sfac6' | 'fac' | 'rs-gaap' |
-  # 'sec' (SEC disclosure mechanics) | 'system' (built-in) | 'user'.
+  # Where this classification comes from: 'us-gaap-metamodel' | 'fac' |
+  # 'rs-gaap' | 'sec' (SEC disclosure mechanics) | 'system' (built-in) |
+  # 'user'.
   type = Column(String, nullable=False, default="system")
 
   # Display

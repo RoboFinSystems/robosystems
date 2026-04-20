@@ -12,7 +12,6 @@ Arelle model or a lightweight fixture package.
 from __future__ import annotations
 
 import json
-from collections import Counter
 from pathlib import Path
 
 import pytest
@@ -29,16 +28,15 @@ from robosystems.taxonomy.model import (
 
 SEEDS_DIR = Path(__file__).parent.parent.parent / "robosystems" / "taxonomy" / "seeds"
 
-SFAC6_SEED = SEEDS_DIR / "sfac6" / "v1" / "taxonomy.jsonld"
 FAC_SEED = SEEDS_DIR / "fac" / "v1" / "taxonomy.jsonld"
 FAC_TO_RS_GAAP_SEED = SEEDS_DIR / "fac-to-rs-gaap" / "v1" / "taxonomy.jsonld"
 
 
 @pytest.fixture(scope="module")
-def sfac6_package() -> TaxonomyPackage:
-  if not SFAC6_SEED.exists():
-    pytest.skip(f"Seed not built: {SFAC6_SEED}")
-  return load_taxonomy_package(SFAC6_SEED)
+def fac_package() -> TaxonomyPackage:
+  if not FAC_SEED.exists():
+    pytest.skip(f"Seed not built: {FAC_SEED}")
+  return load_taxonomy_package(FAC_SEED)
 
 
 class TestCanonicalContext:
@@ -48,14 +46,14 @@ class TestCanonicalContext:
     assert doc["@context"] is CANONICAL_CONTEXT
 
   def test_core_prefixes_present(self) -> None:
-    required = {"rdfs", "skos", "owl", "xbrli", "sfac6", "fac", "us-gaap", "rs"}
+    required = {"rdfs", "skos", "owl", "xbrli", "fac", "us-gaap", "rs"}
     missing = required - set(CANONICAL_CONTEXT.keys())
     assert not missing, f"Context missing required prefixes: {missing}"
 
   def test_xbrl_namespaces_use_hash_separator(self) -> None:
     # XBRL concept IRIs use # between namespace and local name.
     # Prefixes must reflect that so compaction works.
-    for prefix in ("sfac6", "fac", "us-gaap-2017"):
+    for prefix in ("fac", "us-gaap-2017"):
       val = CANONICAL_CONTEXT[prefix]
       assert isinstance(val, str), f"{prefix} should map to a string IRI"
       assert val.endswith(("#", "/")), f"{prefix} should end with # or /"
@@ -72,49 +70,32 @@ class TestSerializer:
     assert doc["version"] == "v1"
 
 
-class TestSfac6RoundTrip:
-  def test_loads_all_ten_sfac6_elements(self, sfac6_package: TaxonomyPackage) -> None:
-    """The 10 FASB SFAC 6 elements must all be present."""
-    required = {
-      "sfac6:Assets",
-      "sfac6:Liabilities",
-      "sfac6:Equity",
-      "sfac6:InvestmentsByOwners",
-      "sfac6:DistributionsToOwners",
-      "sfac6:ComprehensiveIncome",
-      "sfac6:Revenues",
-      "sfac6:Expenses",
-      "sfac6:Gains",
-      "sfac6:Losses",
-    }
-    present = {e.qname for e in sfac6_package.elements}
+class TestFacRoundTrip:
+  def test_loads_fac_concepts(self, fac_package: TaxonomyPackage) -> None:
+    """Core FAC concepts should all be present."""
+    required = {"fac:Assets", "fac:Liabilities", "fac:Equity", "fac:Revenues"}
+    present = {e.qname for e in fac_package.elements}
     missing = required - present
-    assert not missing, f"Missing SFAC 6 elements: {missing}"
+    assert not missing, f"Missing FAC elements: {missing}"
 
-  def test_assets_has_label_and_documentation(
-    self, sfac6_package: TaxonomyPackage
+  def test_has_efs_classification_assignments(
+    self, fac_package: TaxonomyPackage
   ) -> None:
-    assets = next(
-      (e for e in sfac6_package.elements if e.qname == "sfac6:Assets"), None
+    # FAC concepts carry rs:classifiedAs arcs pointing at
+    # elementsOfFinancialStatements identifiers.
+    efs_assignments = [
+      a
+      for a in fac_package.classification_assignments
+      if a.category == "elementsOfFinancialStatements"
+    ]
+    assert len(efs_assignments) >= 80, (
+      f"Expected >= 80 EFS assignments on FAC, got {len(efs_assignments)}"
     )
-    assert assets is not None
-    roles = {lab.role for lab in assets.labels}
-    assert "standard" in roles
-    assert "documentation" in roles
-    doc_label = next(lab for lab in assets.labels if lab.role == "documentation")
-    assert "probable future economic" in doc_label.text.lower()
 
-  def test_has_structural_associations(self, sfac6_package: TaxonomyPackage) -> None:
-    counts = Counter(a.association_type for a in sfac6_package.associations)
-    # SFAC 6 package includes parent-child presentation + general-special +
-    # calculation arcs for its BS/IS/Equity hypercubes.
-    assert counts["presentation"] > 0
-    assert counts["calculation"] > 0
-
-  def test_package_metadata(self, sfac6_package: TaxonomyPackage) -> None:
-    assert sfac6_package.standard == "sfac6"
-    assert sfac6_package.version == "v1"
-    assert sfac6_package.is_shared is True
+  def test_package_metadata(self, fac_package: TaxonomyPackage) -> None:
+    assert fac_package.standard == "fac"
+    assert fac_package.version == "v1"
+    assert fac_package.is_shared is True
 
 
 class TestFacMappingRoundTrip:
@@ -161,14 +142,14 @@ class TestFacMappingRoundTrip:
 class TestPackageShape:
   def test_element_spec_required_fields(self) -> None:
     el = ElementSpec(
-      qname="sfac6:Assets",
-      namespace="sfac6",
-      namespace_uri="http://xbrlsite.com/seattlemethod/sfac6#",
+      qname="fac:Assets",
+      namespace="fac",
+      namespace_uri="http://xbrlsite.com/fac#",
       name="Assets",
       classification="asset",
       balance_type="debit",
       period_type="instant",
-      source="sfac6",
+      source="fac",
     )
     assert el.is_abstract is False
     assert el.labels == []

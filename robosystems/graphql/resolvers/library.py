@@ -133,7 +133,7 @@ class LibraryQuery:
   ) -> list[LibraryAssociation]:
     """List every arc contributed by a taxonomy (via its structures).
 
-    For mapping taxonomies (fac-to-rs-gaap, sfac6-to-fac, type-subtype)
+    For mapping taxonomies (fac-to-rs-gaap, type-subtype)
     this is the primary browse view — the arcs ARE what the taxonomy
     contributes, not concepts. Each entry includes the from/to element
     qname + name so the UI can render the arc directly.

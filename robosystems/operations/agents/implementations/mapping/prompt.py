@@ -7,12 +7,10 @@ variants. Filing-specific rs-gaap / us-gaap variants are derived by
 deterministic equivalence-arc expansion downstream — the LLM does not
 pick them.
 
-When the caller passes an ``element_id`` (which the MappingAgent does),
-the backend narrows candidates further: it reads the element's SFAC 6
-anchor association (from the CoA classification tagging migration) and
-returns only the FAC concepts reachable from that anchor via
-``sfac6-to-fac`` arcs. Typical candidate set: 7 to 40 concepts, all already
-on the correct SFAC 6 branch.
+Candidates are narrowed by the element's FASB elementsOfFinancialStatements
+classification: the backend returns only FAC concepts sharing the CoA
+element's EFS identifier (asset/liability/equity/revenue/expense/gain/loss).
+Typical candidate set: 7 to 40 concepts.
 """
 
 MAPPING_SYSTEM_PROMPT = """You are a financial mapping specialist. Your task is to map \
@@ -26,17 +24,17 @@ You pick the semantic anchor; the system picks the variant.
 ## Classification axis
 
 Every CoA element and every FAC candidate carries a `classification` on the \
-economic-nature axis. Six values (plus NULL for structural rows):
+FASB elementsOfFinancialStatements axis. Primary values for CoA mapping:
 
 - **asset** — resources controlled by the entity (balance-sheet stock, debit balance)
 - **liability** — obligations (balance-sheet stock, credit balance)
 - **equity** — residual interest (balance-sheet stock, credit balance)
-- **inflow** — credit flows: revenues + gains (income-statement duration, credit balance)
-- **outflow** — debit flows: expenses + losses + COGS (income-statement duration, debit balance)
-- **cashflow** — cash-statement reconciliation items and movements (no SFAC 6 root)
+- **revenue** — inflows from primary operations (income-statement duration, credit balance)
+- **expense** — outflows from primary operations (income-statement duration, debit balance)
+- **gain** — non-operating credit flows (income-statement duration, credit balance)
+- **loss** — non-operating debit flows (income-statement duration, debit balance)
 
-Note: `inflow` collapses SFAC 6's Revenues + Gains; `outflow` collapses Expenses + \
-Losses. Candidates have already been filtered to match the CoA element's classification \
+Candidates have already been filtered to match the CoA element's classification \
 (typically to a specific SFAC 6 anchor subtree), so you don't need to re-filter — focus \
 on choosing the best semantic match within the candidates.
 
@@ -44,12 +42,12 @@ on choosing the best semantic match within the candidates.
 
 1. **Match by semantic meaning**, not just name similarity
    - "Checking Account" (asset) → `fac:CashAndCashEquivalents` (it's cash, not a receivable)
-   - "Advertising" (outflow) → `fac:SellingGeneralAndAdministrativeExpense` (it's SG&A)
+   - "Advertising" (expense) → `fac:SellingGeneralAndAdministrativeExpense` (it's SG&A)
 2. **Prefer broader FAC concepts** when the CoA element is non-specific, more specific \
 FAC concepts when the CoA element is clearly sub-categorized
-   - "Sales" (inflow) → `fac:Revenues` (broad — matches "all revenue")
-   - "Product Sales" (inflow) → `fac:Revenues` (still broad; FAC doesn't split product/service at this layer)
-   - "Interest Income" (inflow) → `fac:InterestIncomeOperating` or `fac:NonoperatingIncomeLoss` \
+   - "Sales" (revenue) → `fac:Revenues` (broad — matches "all revenue")
+   - "Product Sales" (revenue) → `fac:Revenues` (still broad; FAC doesn't split product/service at this layer)
+   - "Interest Income" (revenue) → `fac:InterestIncomeOperating` or `fac:NonoperatingIncomeLoss` \
 if the candidate set has one (specific enough)
 3. **Use external_source context** when available
    - QuickBooks account types (e.g., "Other Current Asset") provide strong classification signals

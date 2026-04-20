@@ -118,8 +118,7 @@ class MappingAgent(Agent):
 
     # 2. Group by classification for efficient candidate lookup. Elements
     # without a classification can't be narrowed structurally — skip them
-    # rather than invent a default, since the old 'expense' fallback no
-    # longer matches any enum value (the vocab moved to inflow/outflow).
+    # rather than invent a default.
     by_classification: dict[str, list[dict]] = defaultdict(list)
     for elem in elements:
       cls = elem.get("classification")

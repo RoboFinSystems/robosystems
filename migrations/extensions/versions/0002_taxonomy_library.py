@@ -27,12 +27,12 @@ Schema changes (public schema):
 Data changes (public schema):
 
 - DELETE 0001-seeded library rows
-- INSERT from JSON-LD seeds: sfac6, fac, rs-gaap (concept taxonomies);
+- INSERT from JSON-LD seeds: fac, rs-gaap (concept taxonomies);
   us-gaap-metamodel (classification vocabulary, 99 classifications
   across 25 categories); rs-gaap-to-metamodel (classification
   assignments, ~3.5k arcs); rs-gaap-hierarchy (class-subclass);
-  sfac6-to-fac, fac-to-rs-gaap, fac-calculations, fac-presentation,
-  type-subtype (mapping seeds)
+  fac-to-rs-gaap, fac-calculations, fac-presentation, type-subtype
+  (mapping seeds)
 
 Tenant-schema rollout (for every existing tenant schema ``kg*``):
 
@@ -90,7 +90,7 @@ _WIDENED_ASSOCIATION_CHECK = (
 )
 _WIDENED_ELEMENT_SOURCE_CHECK = (
   "source IN ("
-  "'sfac6', 'fac', 'rs-gaap', 'us-gaap', 'ifrs', "
+  "'fac', 'rs-gaap', 'us-gaap', 'ifrs', "
   "'quickbooks', 'xero', 'plaid', 'native', 'import', 'system'"
   ")"
 )
@@ -339,7 +339,6 @@ SEEDS_DIR = (
 # Concept taxonomies first (referenced by qname from mapping + assignment
 # seeds); then the classification vocabulary; then assignments/mappings.
 SEED_FILES = [
-  SEEDS_DIR / "sfac6" / "v1" / "taxonomy.jsonld",
   SEEDS_DIR / "fac" / "v1" / "taxonomy.jsonld",
   SEEDS_DIR / "rs-gaap" / "v1" / "taxonomy.jsonld",
   # Classification vocabulary (FASB metamodel)
@@ -348,7 +347,6 @@ SEED_FILES = [
   SEEDS_DIR / "rs-gaap-to-metamodel" / "v1" / "taxonomy.jsonld",
   SEEDS_DIR / "rs-gaap-hierarchy" / "v1" / "taxonomy.jsonld",
   # Cross-taxonomy mapping + calculation + presentation arc packs
-  SEEDS_DIR / "sfac6-to-fac" / "v1" / "taxonomy.jsonld",
   SEEDS_DIR / "fac-to-rs-gaap" / "v1" / "taxonomy.jsonld",
   SEEDS_DIR / "fac-calculations" / "v1" / "taxonomy.jsonld",
   SEEDS_DIR / "fac-presentation" / "v1" / "taxonomy.jsonld",

@@ -13,7 +13,7 @@ Use this script only to:
 Running this over existing seeds WILL overwrite curated edits. If you want
 that, delete the target seed file first so git diff shows the full churn.
 
-    uv run python -m robosystems.scripts.import_upstream_seeds --only sfac6
+    uv run python -m robosystems.scripts.import_upstream_seeds --only fac
     uv run python -m robosystems.scripts.import_upstream_seeds --url https://… --standard custom --version v1
 """
 
@@ -42,18 +42,6 @@ class SeedSpec:
 
 
 SEEDS: list[SeedSpec] = [
-  SeedSpec(
-    standard="sfac6",
-    version="v1",
-    url="http://xbrlsite.com/seattlemethod/golden/sfac6/sfac6-entryPoint.xsd",
-    namespace_uri="http://xbrlsite.com/seattlemethod/sfac6/",
-    taxonomy_type="reporting",
-    description=(
-      "FASB Statement of Financial Accounting Concepts No. 6 — "
-      "Elements of Financial Statements. Adapted from Charlie Hoffman's "
-      "Seattle Method SFAC 6 entry point."
-    ),
-  ),
   # Charlie's FAC ConceptMap is a MAPPING — 199 fac: concepts wired into
   # rs-gaap via class-equivalentClass arcs. The luca.auditchain variant
   # (fka fac-conceptual) was retired because it had concepts without
@@ -128,7 +116,7 @@ def main() -> int:
     "--only",
     type=str,
     default=None,
-    help="Build only this standard (e.g. 'sfac6', 'fac', 'type-subtype')",
+    help="Build only this standard (e.g. 'fac', 'type-subtype')",
   )
   parser.add_argument(
     "--url",

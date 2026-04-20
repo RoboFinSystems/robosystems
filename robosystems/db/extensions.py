@@ -200,7 +200,7 @@ def _widen_library_checks(conn, schema: str) -> None:
   )
   widened_source = (
     "source IN ("
-    "'sfac6', 'fac', 'rs-gaap', 'us-gaap', 'ifrs', "
+    "'fac', 'rs-gaap', 'us-gaap', 'ifrs', "
     "'quickbooks', 'xero', 'plaid', 'native', 'import', 'system'"
     ")"
   )

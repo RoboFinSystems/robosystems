@@ -302,9 +302,22 @@ class CreateElementRequest(BaseModel):
   name: str
   description: str | None = None
   classification: Literal[
-    "asset", "liability", "equity", "inflow", "outflow", "cashflow"
+    "asset",
+    "contraAsset",
+    "liability",
+    "contraLiability",
+    "equity",
+    "contraEquity",
+    "temporaryEquity",
+    "revenue",
+    "expense",
+    "expenseReversal",
+    "gain",
+    "loss",
+    "comprehensiveIncome",
+    "investmentByOwners",
+    "distributionToOwners",
   ]
-  sub_classification: str | None = None
   balance_type: Literal["debit", "credit"] = "debit"
   period_type: Literal["duration", "instant"] = "duration"
   element_type: Literal["concept", "abstract", "axis", "member", "hypercube"] = (
@@ -315,7 +328,6 @@ class CreateElementRequest(BaseModel):
   parent_id: str | None = None
   source: Literal[
     "native",
-    "sfac6",
     "fac",
     "rs-gaap",
     "us-gaap",
@@ -342,10 +354,6 @@ class UpdateElementRequest(BaseModel):
   code: str | None = None
   name: str | None = None
   description: str | None = None
-  classification: (
-    Literal["asset", "liability", "equity", "inflow", "outflow", "cashflow"] | None
-  ) = None
-  sub_classification: str | None = None
   balance_type: Literal["debit", "credit"] | None = None
   period_type: Literal["duration", "instant"] | None = None
   parent_id: str | None = None
