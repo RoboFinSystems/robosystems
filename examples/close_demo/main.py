@@ -24,7 +24,7 @@ Usage:
     uv run python -m examples.close_demo.main                        # Create new graph + load
     uv run python -m examples.close_demo.main <graph_id>             # Load into existing graph
     uv run python -m examples.close_demo.main --dry-run              # Validate data only
-    uv run python -m examples.close_demo.main --with-ai-mapping      # Use MappingAgent instead of hardcoded mappings (requires Bedrock)
+    uv run python -m examples.close_demo.main --ai                    # Use MappingAgent instead of hardcoded mappings (requires Bedrock)
 
 Requires: Docker stack running (just start)
 """
@@ -398,7 +398,7 @@ def run_ai_mapping(graph_id: str) -> None:
   """Trigger the MappingAgent via the auto-map-elements operation.
 
   Requires Bedrock to be configured (BEDROCK_REGION + IAM role with
-  bedrock:InvokeModel). Skipped when --with-ai-mapping is not passed.
+  bedrock:InvokeModel). Skipped when --ai is not passed.
 
   Finds the coa_mapping structure, dispatches the async agent operation,
   and polls until it completes or times out.
@@ -724,7 +724,7 @@ def materialize_graph(graph_id: str) -> None:
 
 def main() -> None:
   dry_run = "--dry-run" in sys.argv
-  with_ai_mapping = "--with-ai-mapping" in sys.argv
+  with_ai_mapping = "--ai" in sys.argv
   args = [a for a in sys.argv[1:] if not a.startswith("--")]
 
   # Add project root to path
@@ -747,7 +747,7 @@ def main() -> None:
   print("  Validation:   All entries balance")
 
   if with_ai_mapping:
-    print("  AI mapping:   enabled (requires Bedrock)")
+    print("  AI mapping:   enabled (--ai)")
 
   if dry_run:
     total_dr = sum(sum(dr for _, dr, _ in lines) for _, _, _, _, lines in txns)
