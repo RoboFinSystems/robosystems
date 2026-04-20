@@ -252,7 +252,7 @@ def create_chart_of_accounts(graph_id: str) -> tuple[dict[str, str], str, int]:
 
   # 4. Create elements (flat CoA — no parent hierarchy)
   element_lookup: dict[str, str] = {}
-  for code, name, classification, sub_class, balance_type, description in ACCOUNTS:
+  for code, name, classification, _sub_class, balance_type, description in ACCOUNTS:
     result = client.create_element(
       graph_id,
       {
@@ -260,7 +260,6 @@ def create_chart_of_accounts(graph_id: str) -> tuple[dict[str, str], str, int]:
         "code": code,
         "name": name,
         "classification": classification,
-        "sub_classification": sub_class,
         "balance_type": balance_type,
         "description": description,
         "source": SOURCE,

@@ -94,6 +94,12 @@ _WIDENED_ELEMENT_SOURCE_CHECK = (
   "'quickbooks', 'xero', 'plaid', 'native', 'import', 'system'"
   ")"
 )
+_WIDENED_TAXONOMY_TYPE_CHECK = (
+  "taxonomy_type IN ("
+  "'chart_of_accounts', 'reporting', 'mapping', 'schedule', "
+  "'classification-vocabulary', 'classification-assignment'"
+  ")"
+)
 _NARROW_ASSOCIATION_CHECK = (
   "association_type IN ('presentation', 'calculation', 'mapping')"
 )
@@ -381,7 +387,41 @@ def upgrade() -> None:
   )
 
   # ──────────────────────────────────────────────────────────────────────
-  # 3. Widen element source + association_type CHECKs.
+  # 3. Clear 0001-seeded library rows before tightening CHECKs.
+  # ──────────────────────────────────────────────────────────────────────
+  # 0001's Python seed inserts SFAC 6 roots with source='sfac6'. The
+  # tightened check_element_source below no longer allows 'sfac6', so
+  # existing rows must be removed first — PostgreSQL validates CHECK
+  # constraints against existing data at CREATE time.
+  conn.execute(
+    text(
+      """
+      DELETE FROM public.associations
+      WHERE structure_id IN (
+        SELECT id FROM public.structures
+        WHERE taxonomy_id IN (
+          SELECT id FROM public.taxonomies WHERE is_shared = true
+        )
+      )
+      """
+    )
+  )
+  conn.execute(
+    text(
+      "DELETE FROM public.structures WHERE taxonomy_id IN "
+      "(SELECT id FROM public.taxonomies WHERE is_shared = true)"
+    )
+  )
+  conn.execute(
+    text(
+      "DELETE FROM public.elements WHERE taxonomy_id IN "
+      "(SELECT id FROM public.taxonomies WHERE is_shared = true)"
+    )
+  )
+  conn.execute(text("DELETE FROM public.taxonomies WHERE is_shared = true"))
+
+  # ──────────────────────────────────────────────────────────────────────
+  # 4. Widen element source + association_type + taxonomy_type CHECKs.
   # ──────────────────────────────────────────────────────────────────────
   op.drop_constraint("check_element_source", "elements", type_="check")
   op.create_check_constraint(
@@ -391,9 +431,16 @@ def upgrade() -> None:
   op.create_check_constraint(
     "check_association_type", "associations", _WIDENED_ASSOCIATION_CHECK
   )
+  # us-gaap-metamodel uses 'classification-vocabulary',
+  # rs-gaap-to-metamodel uses 'classification-assignment' — neither in
+  # the 0001 CHECK. Widen before loading JSON-LD seeds in section 7.
+  op.drop_constraint("check_taxonomy_type", "taxonomies", type_="check")
+  op.create_check_constraint(
+    "check_taxonomy_type", "taxonomies", _WIDENED_TAXONOMY_TYPE_CHECK
+  )
 
   # ──────────────────────────────────────────────────────────────────────
-  # 4. Label + reference linkbase tables (XBRL).
+  # 5. Label + reference linkbase tables (XBRL).
   # ──────────────────────────────────────────────────────────────────────
   op.create_table(
     "element_labels",
@@ -445,7 +492,7 @@ def upgrade() -> None:
   op.create_index("idx_element_references_type", "element_references", ["ref_type"])
 
   # ──────────────────────────────────────────────────────────────────────
-  # 5. Classification vocabulary + junction.
+  # 6. Classification vocabulary + junction.
   # ──────────────────────────────────────────────────────────────────────
   op.create_table(
     "classifications",
@@ -500,36 +547,6 @@ def upgrade() -> None:
     ["element_id", "is_primary"],
     postgresql_where="is_primary = true",
   )
-
-  # ──────────────────────────────────────────────────────────────────────
-  # 6. Clear 0001-seeded library rows before loading JSON-LD seeds.
-  # ──────────────────────────────────────────────────────────────────────
-  conn.execute(
-    text(
-      """
-      DELETE FROM public.associations
-      WHERE structure_id IN (
-        SELECT id FROM public.structures
-        WHERE taxonomy_id IN (
-          SELECT id FROM public.taxonomies WHERE is_shared = true
-        )
-      )
-      """
-    )
-  )
-  conn.execute(
-    text(
-      "DELETE FROM public.structures WHERE taxonomy_id IN "
-      "(SELECT id FROM public.taxonomies WHERE is_shared = true)"
-    )
-  )
-  conn.execute(
-    text(
-      "DELETE FROM public.elements WHERE taxonomy_id IN "
-      "(SELECT id FROM public.taxonomies WHERE is_shared = true)"
-    )
-  )
-  conn.execute(text("DELETE FROM public.taxonomies WHERE is_shared = true"))
 
   # ──────────────────────────────────────────────────────────────────────
   # 7. Load JSON-LD seeds.

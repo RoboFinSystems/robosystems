@@ -64,7 +64,7 @@ def reset_demo_state(graph_id: str) -> None:
     # 5. Facts
     session.execute(text("DELETE FROM facts"))
 
-    # 6. Tenant-origin elements. Library elements (sfac6, fac, rs-gaap,
+    # 6. Tenant-origin elements. Library elements (fac, rs-gaap,
     # type-subtype, plus the native mapping/presentation overlays all
     # carrying 'library-seeder') stay put.
     session.execute(

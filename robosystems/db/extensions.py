@@ -204,6 +204,12 @@ def _widen_library_checks(conn, schema: str) -> None:
     "'quickbooks', 'xero', 'plaid', 'native', 'import', 'system'"
     ")"
   )
+  widened_taxonomy_type = (
+    "taxonomy_type IN ("
+    "'chart_of_accounts', 'reporting', 'mapping', 'schedule', "
+    "'classification-vocabulary', 'classification-assignment'"
+    ")"
+  )
   conn.execute(
     text(
       f'ALTER TABLE "{schema}".associations '
@@ -225,6 +231,17 @@ def _widen_library_checks(conn, schema: str) -> None:
     text(
       f'ALTER TABLE "{schema}".elements '
       f"ADD CONSTRAINT check_element_source CHECK ({widened_source})"
+    )
+  )
+  conn.execute(
+    text(
+      f'ALTER TABLE "{schema}".taxonomies DROP CONSTRAINT IF EXISTS check_taxonomy_type'
+    )
+  )
+  conn.execute(
+    text(
+      f'ALTER TABLE "{schema}".taxonomies '
+      f"ADD CONSTRAINT check_taxonomy_type CHECK ({widened_taxonomy_type})"
     )
   )
 
