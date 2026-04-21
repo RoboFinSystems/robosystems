@@ -136,6 +136,7 @@ from robosystems.operations.roboledger.commands._guards import (
 )
 from robosystems.operations.roboledger.commands.elements import (
   ElementCycleError,
+  ElementQNameConflictError,
 )
 from robosystems.operations.roboledger.commands.elements import (
   ElementNotFoundError as ElementMissingError,
@@ -1043,6 +1044,7 @@ create_element_op = _registrar.register(
     error_map={
       TaxonomyMissingError: 404,
       LibraryImmutableError: 403,
+      ElementQNameConflictError: 409,
       ElementMissingError: (
         400,
         lambda e: f"Parent element not found: {e.element_id}",  # type: ignore[attr-defined]

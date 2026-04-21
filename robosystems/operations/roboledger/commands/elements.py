@@ -19,6 +19,7 @@ from __future__ import annotations
 import re
 
 from sqlalchemy import or_, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from robosystems.models.api.extensions.taxonomies import (
@@ -46,6 +47,7 @@ from robosystems.utils.ulid import generate_prefixed_ulid
 __all__ = [
   "ElementCycleError",
   "ElementNotFoundError",
+  "ElementQNameConflictError",
   "LibraryImmutableError",
   "TaxonomyNotFoundError",
   "create_element",
@@ -68,6 +70,20 @@ class ElementNotFoundError(LookupError):
 
 class ElementCycleError(ValueError):
   """Raised when an update would create a cycle in the element hierarchy."""
+
+
+class ElementQNameConflictError(ValueError):
+  """Raised when a new element's qname collides with an existing element.
+
+  Happens when two human-readable names CamelCase-collapse to the same
+  qname (e.g., "Owner's Equity" and "Owners Equity" both derive
+  `native:OwnersEquity`). The caller should retry with an explicit
+  `qname` on the create request.
+  """
+
+  def __init__(self, qname: str) -> None:
+    super().__init__(f"Element qname already in use: {qname}")
+    self.qname = qname
 
 
 def _element_to_response(
@@ -141,15 +157,19 @@ _INSTANT_CLASSIFICATIONS = frozenset(
 
 
 def _derive_period_type(classification: str | None, explicit: str) -> str:
-  """Return 'instant' for balance-sheet stock concepts, 'duration' for flows.
+  """Return 'instant' for balance-sheet stock concepts, `explicit` otherwise.
 
-  Only applies when the caller didn't explicitly pass a non-default value.
-  The request model defaults `period_type` to 'duration', so we can't
-  distinguish "caller passed duration" from "caller omitted it and got the
-  default". We always override for stock classifications so the rule is
-  enforced unconditionally — callers that genuinely need 'duration' on a
-  balance-sheet element must pass `period_type='duration'` explicitly and
-  will still get it via `explicit`.
+  Stock classifications (asset/liability/equity and their contras, plus
+  temporaryEquity) are always forced to 'instant' — the caller-supplied
+  `explicit` value is ignored for these. Every other classification passes
+  `explicit` through unchanged. The request model defaults `explicit` to
+  'duration', so non-stock concepts get 'duration' when the caller omits
+  `period_type`.
+
+  There is no caller override for stock classifications; the accounting
+  rule is enforced unconditionally. If a balance-sheet element genuinely
+  needs `period_type='duration'`, it must be written directly rather than
+  through this helper.
   """
   if classification in _INSTANT_CLASSIFICATIONS:
     return "instant"
@@ -236,7 +256,16 @@ def create_element(
     created_by=created_by,
   )
   session.add(element)
-  session.flush()
+  try:
+    session.flush()
+  except IntegrityError as exc:
+    # Partial unique index `idx_elements_qname` fires when two CamelCased
+    # account names collapse to the same qname. Translate to a domain
+    # exception so the API layer can return 409 instead of 500.
+    session.rollback()
+    if "idx_elements_qname" in str(exc.orig):
+      raise ElementQNameConflictError(resolved_qname) from exc
+    raise
 
   # Assign the primary FASB elementsOfFinancialStatements trait so that
   # downstream report renderers (which JOIN through element_classifications)
