@@ -297,17 +297,19 @@ class CreateMappingAssociationTool:
   def get_tool_definition(self) -> dict[str, Any]:
     return {
       "name": "create-mapping-association",
-      "description": """Write a confirmed CoA → FAC mapping association.
+      "description": """Write a confirmed CoA → target mapping association.
 
 **WHEN TO USE:**
-- After choosing the best FAC candidate for a CoA element
+- After choosing the best FAC candidate for a CoA element (primary pass; `association_type='mapping'`)
+- Or after refining a FAC-classified account to a specific rs-gaap tag (`association_type='equivalence'`)
 - Confidence ≥ 0.70 is required; skip below that threshold
 
 **INPUTS:**
 - mapping_id: The coa_mapping structure ID (from get-unmapped-elements)
 - from_element_id: CoA element ID (source)
-- to_element_id: FAC element ID (target)
-- confidence: Float 0.0–1.0 (AI confidence in the match)""",
+- to_element_id: Target element ID (FAC for primary, rs-gaap for equivalence)
+- confidence: Float 0.0–1.0 (AI confidence in the match)
+- association_type: 'mapping' (primary FAC rollup) or 'equivalence' (rs-gaap refinement). Defaults to 'mapping'.""",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -321,11 +323,16 @@ class CreateMappingAssociationTool:
           },
           "to_element_id": {
             "type": "string",
-            "description": "FAC element ID (target)",
+            "description": "Target element ID (FAC for primary, rs-gaap for equivalence)",
           },
           "confidence": {
             "type": "number",
             "description": "Confidence score 0.0–1.0",
+          },
+          "association_type": {
+            "type": "string",
+            "enum": ["mapping", "equivalence"],
+            "description": "'mapping' for primary FAC rollup, 'equivalence' for rs-gaap refinement. Defaults to 'mapping'.",
           },
         },
         "required": ["mapping_id", "from_element_id", "to_element_id", "confidence"],
@@ -340,7 +347,7 @@ class CreateMappingAssociationTool:
         from_element_id=arguments["from_element_id"],
         to_element_id=arguments["to_element_id"],
         confidence=float(arguments["confidence"]),
-        association_type="mapping",
+        association_type=arguments.get("association_type", "mapping"),
         suggested_by="mapping-agent",
       )
       with extensions_session(graph_id) as session:

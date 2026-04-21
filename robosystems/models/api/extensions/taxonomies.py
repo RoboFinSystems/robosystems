@@ -103,7 +103,9 @@ class AssociationResponse(BaseModel):
 class CreateAssociationRequest(BaseModel):
   from_element_id: str
   to_element_id: str
-  association_type: Literal["presentation", "calculation", "mapping"] = "mapping"
+  association_type: Literal["presentation", "calculation", "mapping", "equivalence"] = (
+    "mapping"
+  )
   order_value: float | None = None
   weight: float | None = None
   confidence: float | None = None

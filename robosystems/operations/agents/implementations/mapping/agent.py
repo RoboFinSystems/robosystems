@@ -138,7 +138,13 @@ class MappingAgent(Agent):
       )
       candidates_by_cls[cls] = suggest_result.get("candidates", [])
 
-    # 4. Process elements in batches per classification
+    # 4. Process elements in batches per classification. Each confirmed /
+    # flagged FAC mapping is persisted to coa_mapping as
+    # association_type='mapping' — this is the primary rollup target that
+    # fact_grid, trial balance, and coverage readers all consume. The
+    # rs-gaap refinement pass in step 4b writes a second arc per element
+    # with association_type='equivalence' so the filing-specific tag is
+    # captured without double-counting line items in the 'mapping' rollup.
 
     for cls, cls_elements in by_classification.items():
       candidates = candidates_by_cls.get(cls, [])
@@ -157,14 +163,30 @@ class MappingAgent(Agent):
           mappings = await self._map_batch(ctx, batch, candidates)
 
           for m in mappings:
-            if m.get("target_id") and m["confidence"] >= CONFIDENCE_AUTO_APPROVE:
+            fac_target = m.get("target_id")
+            confidence = m["confidence"]
+            if fac_target and confidence >= CONFIDENCE_AUTO_APPROVE:
               mapped += 1
-              confirmed_fac.append((elem_by_id[m["element_id"]], m["target_id"]))
-            elif m.get("target_id") and m["confidence"] >= CONFIDENCE_MIN_MAP:
+            elif fac_target and confidence >= CONFIDENCE_MIN_MAP:
               flagged += 1
-              confirmed_fac.append((elem_by_id[m["element_id"]], m["target_id"]))
             else:
               skipped += 1
+              continue
+
+            # Persist the CoA → FAC arc as the primary mapping target.
+            try:
+              await create_tool.execute(
+                {
+                  "mapping_id": mapping_id,
+                  "from_element_id": m["element_id"],
+                  "to_element_id": fac_target,
+                  "confidence": confidence,
+                  "association_type": "mapping",
+                }
+              )
+              confirmed_fac.append((elem_by_id[m["element_id"]], fac_target))
+            except Exception as e:
+              logger.warning(f"FAC create failed for {m['element_id']}: {e}")
 
         except Exception as e:
           logger.warning(f"Batch mapping failed for {cls}: {e}")
@@ -209,13 +231,13 @@ class MappingAgent(Agent):
   ) -> list[dict]:
     """Classify a batch of CoA elements against FAC candidates.
 
-    FAC is the intermediate semantic anchor — we use it to reason about
-    the account's nature and to narrow rs-gaap candidates in the refine
-    pass. Only the rs-gaap arc is persisted as a reporting target; the
-    FAC decision flows through the returned ``mappings`` list to
-    ``_refine_to_rs_gaap`` via the orchestrator's ``confirmed_fac``
-    buffer. Writing both fac and rs-gaap arcs into the same coa_mapping
-    structure would double-count line items in every rollup reader.
+    FAC is the primary semantic anchor: the AI picks among ~7-40 clean
+    FAC concepts rather than ~2,000 rs-gaap variants. The orchestrator
+    persists each accepted result as a CoA → FAC arc with
+    ``association_type='mapping'`` (the primary rollup target), and the
+    second pass (``_refine_to_rs_gaap``) layers a CoA → rs-gaap arc with
+    ``association_type='equivalence'`` so filing-specific tags are
+    captured without inflating trial-balance rows.
     """
     prompt = build_mapping_prompt(elements, candidates)
 
@@ -238,7 +260,14 @@ class MappingAgent(Agent):
     expand_tool: Any,
     create_tool: Any,
   ) -> None:
-    """Second pass: write CoA → rs-gaap associations for each confirmed FAC mapping.
+    """Second pass: write CoA → rs-gaap arcs as `association_type='equivalence'`.
+
+    The FAC arc from pass 1 is the primary rollup target
+    (`association_type='mapping'`); this pass layers a second arc per CoA
+    element that names the specific rs-gaap filing tag. Readers that walk
+    `association_type='mapping'` see only the FAC level (no double-count);
+    readers that want filing granularity walk
+    `association_type='equivalence'`.
 
     Groups confirmed mappings by FAC element ID so one expand_tool call
     (and one AI call) serves all CoA accounts that share the same FAC parent.
@@ -305,6 +334,7 @@ class MappingAgent(Agent):
                 "from_element_id": coa_elem["id"],
                 "to_element_id": rs_gaap_id,
                 "confidence": rs_gaap_conf,
+                "association_type": "equivalence",
               }
             )
           except Exception as e:
