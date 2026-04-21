@@ -196,11 +196,27 @@ def _element_to_response(
   )
 
 
+def _classification_filter_subquery(category: str, identifier: str):
+  """Select element_ids whose classifications include (category, identifier)."""
+  return (
+    select(ElementClassification.element_id)
+    .join(
+      Classification,
+      Classification.id == ElementClassification.classification_id,
+    )
+    .where(
+      Classification.category == category,
+      Classification.identifier == identifier,
+    )
+  )
+
+
 def list_elements(
   session: Session,
   taxonomy_id: str | None = None,
   source: str | None = None,
   classification: str | None = None,
+  activity_type: str | None = None,
   element_type: str | None = None,
   is_abstract: bool | None = None,
   limit: int = DEFAULT_ELEMENT_LIMIT,
@@ -213,7 +229,13 @@ def list_elements(
   `include_labels` / `include_references` default False to keep list
   queries cheap; callers enable them for detail views.
 
-  `classification` filters on the FASB elementsOfFinancialStatements axis.
+  `classification` filters on the FASB elementsOfFinancialStatements axis
+  (asset / liability / equity / revenue / expense / ...). `activity_type`
+  filters on the cash-flow activity axis (operatingActivity /
+  investingActivity / financingActivity). Both filters apply independently
+  via separate EXISTS subqueries on the `element_classifications` junction
+  and can be combined (AND).
+
   `is_abstract=True` returns only abstract grouping concepts; `False`
   returns only concrete. `None` returns both.
   """
@@ -225,19 +247,14 @@ def list_elements(
   if source is not None:
     query = query.where(Element.source == source)
   if classification is not None:
-    # FASB elementsOfFinancialStatements trait — EXISTS via junction.
     query = query.where(
       Element.id.in_(
-        select(ElementClassification.element_id)
-        .join(
-          Classification,
-          Classification.id == ElementClassification.classification_id,
-        )
-        .where(
-          Classification.category == "elementsOfFinancialStatements",
-          Classification.identifier == classification,
-        )
+        _classification_filter_subquery("elementsOfFinancialStatements", classification)
       )
+    )
+  if activity_type is not None:
+    query = query.where(
+      Element.id.in_(_classification_filter_subquery("activityType", activity_type))
     )
   if element_type is not None:
     query = query.where(Element.element_type == element_type)

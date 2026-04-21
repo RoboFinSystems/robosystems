@@ -170,6 +170,7 @@ class LibraryQuery:
     taxonomy_id: strawberry.ID | None = None,
     source: str | None = None,
     classification: str | None = None,
+    activity_type: str | None = None,
     element_type: str | None = None,
     is_abstract: bool | None = None,
     limit: int = 50,
@@ -180,6 +181,9 @@ class LibraryQuery:
     """List library elements with filters + pagination.
 
     `classification` filters on the FASB elementsOfFinancialStatements axis.
+    `activityType` filters on the cash-flow activity axis (operatingActivity,
+    investingActivity, financingActivity). Both apply independently and can
+    be combined.
     `isAbstract=true` → abstract only; `false` → concrete only; omit for both.
     """
     _validate_pagination(limit, offset)
@@ -189,6 +193,7 @@ class LibraryQuery:
         taxonomy_id=str(taxonomy_id) if taxonomy_id else None,
         source=source,
         classification=classification,
+        activity_type=activity_type,
         element_type=element_type,
         is_abstract=is_abstract,
         limit=limit,

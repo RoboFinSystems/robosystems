@@ -10917,6 +10917,9 @@
       "@id": "rs-gaap:NetCashProvidedByUsedInOperatingActivities",
       "https://robosystems.ai/vocab/classifiedAs": [
         {
+          "@id": "metamodel:activityType/operatingActivity"
+        },
+        {
           "@id": "metamodel:operatingNonoperating/operating"
         }
       ]
@@ -10924,6 +10927,9 @@
     {
       "@id": "rs-gaap:NetCashProvidedByUsedInOperatingActivitiesContinuingOperations",
       "https://robosystems.ai/vocab/classifiedAs": [
+        {
+          "@id": "metamodel:activityType/operatingActivity"
+        },
         {
           "@id": "metamodel:operatingNonoperating/operating"
         }
@@ -12371,6 +12377,9 @@
     {
       "@id": "rs-gaap:OtherOperatingActivitiesCashFlowStatement",
       "https://robosystems.ai/vocab/classifiedAs": [
+        {
+          "@id": "metamodel:activityType/operatingActivity"
+        },
         {
           "@id": "metamodel:operatingNonoperating/operating"
         }
