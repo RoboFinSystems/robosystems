@@ -222,10 +222,11 @@ class TestDeleteInformationBlock:
     mock_build.assert_called_once_with(session, "struct_gone")
     mock_delete.assert_called_once()
 
-  def test_missing_pre_delete_envelope_still_returns_response(self) -> None:
+  def test_missing_pre_delete_envelope_surfaces_domain_not_found(self) -> None:
     """If build_envelope returns None pre-delete (e.g. the payload points
     at a stale id that delete_schedule will reject), the command still
-    calls dispatch_delete to surface the domain's not-found exception."""
+    calls dispatch_delete so the domain's not-found exception surfaces
+    to the caller instead of a silent no-op."""
     from robosystems.operations.roboledger.commands.schedules import (
       ScheduleNotFoundError,
     )

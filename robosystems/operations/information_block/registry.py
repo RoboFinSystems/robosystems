@@ -44,10 +44,6 @@ class _EmptyPayload(BaseModel):
   model_config = ConfigDict(extra="forbid")
 
 
-# Backward-compatible alias — Phase β used _EmptyCreateRequest.
-_EmptyCreateRequest = _EmptyPayload
-
-
 # ── Schedule ────────────────────────────────────────────────────────────────
 
 SCHEDULE_BLOCK = BlockTypeRegistryEntry(

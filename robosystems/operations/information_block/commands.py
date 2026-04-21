@@ -121,6 +121,11 @@ def delete_information_block(
     pre_delete_envelope = entry.dispatch_build_envelope(session, structure_id_attr)
 
   deleted_id = entry.dispatch_delete(session, typed_payload, deleted_by)
+  # name="" only reaches callers when dispatch_delete succeeds without a
+  # pre-delete envelope — today that can't happen (Schedule's delete
+  # raises ScheduleNotFoundError on missing rows; statement types raise
+  # NotImplementedError). A future block type with an idempotent delete
+  # would land here; revisit this default when that arrives.
   return DeleteInformationBlockResponse(
     deleted=True,
     structure_id=deleted_id,
