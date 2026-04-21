@@ -128,8 +128,14 @@ from robosystems.models.api.extensions.taxonomies import (
   UpdateTaxonomyRequest,
 )
 from robosystems.models.api.extensions.transactions import CreateTransactionRequest
+from robosystems.models.api.information_block import (
+  CreateInformationBlockRequest,
+)
 from robosystems.models.core import User
 from robosystems.operations.extensions.staleness import mark_graph_stale
+from robosystems.operations.information_block.commands import (
+  create_information_block as cmd_create_information_block,
+)
 from robosystems.operations.roboledger.commands._guards import (
   ClosedPeriodError,
   LibraryImmutableError,
@@ -1350,6 +1356,39 @@ delete_schedule_op = _registrar.register(
     request_model=DeleteScheduleRequest,
     error_map={ScheduleNotFoundError: 404},
     requires_created_by=False,
+  )
+)
+
+# ── Information Block (generic construction — see information-block.md) ───
+#
+# `create-information-block` is the generic write entry for any registered
+# block_type. Phase a dispatches only block_type="schedule" (other types
+# raise NotImplementedError → 501). The hand-written `create-schedule`
+# op above stays registered and keeps working unchanged — the two entry
+# points coexist, both calling the same underlying command.
+#
+# Side effect: registering this spec automatically exposes it as an MCP
+# write tool via `build_tools_for_extension`. No hand-written MCP tool
+# is needed for the write path.
+
+create_information_block_op = _registrar.register(
+  OperationSpec(
+    name="create-information-block",
+    summary="Create Information Block",
+    description=(
+      "Generic Information Block construction entry. `block_type` selects "
+      "the registered block type; `payload` is validated against that "
+      "type's creation schema at dispatch. Phase a supports "
+      "`block_type='schedule'` (delegates to create-schedule)."
+    ),
+    command=cmd_create_information_block,
+    request_model=CreateInformationBlockRequest,
+    error_map={
+      ValueError: 422,
+      NotImplementedError: 501,
+      ScheduleNotFoundError: 404,
+    },
+    mark_stale_reason="information_block_created",
   )
 )
 

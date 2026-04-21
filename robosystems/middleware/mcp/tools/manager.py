@@ -225,11 +225,20 @@ class GraphMCPTools:
     self.get_fiscal_calendar_tool = None
     self.close_period_tool = None
     self.reopen_period_tool = None
+    # Information Block read tools — the eventual unified replacement for
+    # list-schedule-structures + get-schedule-facts. Both ship in parallel
+    # until agent workflows migrate.
+    self.get_information_block_tool = None
+    self.list_information_blocks_tool = None
     if self._has_extension("roboledger") and env.ROBOLEDGER_ENABLED and not read_only:
       from .fiscal_calendar_tools import (
         ClosePeriodTool,
         GetFiscalCalendarTool,
         ReopenPeriodTool,
+      )
+      from .information_block_tools import (
+        GetInformationBlockTool,
+        ListInformationBlocksTool,
       )
       from .schedule_tools import (
         GetPeriodCloseStatusTool,
@@ -249,6 +258,8 @@ class GraphMCPTools:
       self.get_fiscal_calendar_tool = GetFiscalCalendarTool(graph_client)
       self.close_period_tool = ClosePeriodTool(graph_client)
       self.reopen_period_tool = ReopenPeriodTool(graph_client)
+      self.get_information_block_tool = GetInformationBlockTool(graph_client)
+      self.list_information_blocks_tool = ListInformationBlocksTool(graph_client)
 
     # Layer 2: Taxonomy mapping read tools (gated by roboledger extension +
     # ROBOLEDGER_ENABLED). Writes — create-mapping-association,
@@ -500,6 +511,15 @@ class GraphMCPTools:
       tools.append(self.get_mapping_summary_tool.get_tool_definition())
     return tools
 
+  def _get_information_block_tool_definitions(self) -> list[dict[str, Any]]:
+    """Get Information Block read tool definitions (cross-block-type reads)."""
+    tools = []
+    if self.get_information_block_tool is not None:
+      tools.append(self.get_information_block_tool.get_tool_definition())
+    if self.list_information_blocks_tool is not None:
+      tools.append(self.list_information_blocks_tool.get_tool_definition())
+    return tools
+
   def _get_search_tool_definitions(self) -> list[dict[str, Any]]:
     """
     Get text search tool definitions.
@@ -572,6 +592,9 @@ class GraphMCPTools:
 
       # Taxonomy mapping tools (CoA → GAAP workflow)
       tools.extend(self._get_taxonomy_tool_definitions())
+
+      # Information Block read tools (cross-block-type reads)
+      tools.extend(self._get_information_block_tool_definitions())
 
     # Layer 3: Infrastructure tools (feature-flag gated)
     tools.extend(self._get_workspace_tool_definitions())
@@ -821,6 +844,25 @@ class GraphMCPTools:
             "Requires roboledger extension and ROBOLEDGER_ENABLED=true."
           )
         result = await self.list_period_drafts_tool.execute(arguments)
+        return result if return_raw else json.dumps(result, indent=2)
+
+      # Information Block read tools (writes are registrar-generated, handled at Layer 0)
+      elif name == "get-information-block":
+        if self.get_information_block_tool is None:
+          raise ValueError(
+            "get-information-block tool is not available. "
+            "Requires roboledger extension and ROBOLEDGER_ENABLED=true."
+          )
+        result = await self.get_information_block_tool.execute(arguments)
+        return result if return_raw else json.dumps(result, indent=2)
+
+      elif name == "list-information-blocks":
+        if self.list_information_blocks_tool is None:
+          raise ValueError(
+            "list-information-blocks tool is not available. "
+            "Requires roboledger extension and ROBOLEDGER_ENABLED=true."
+          )
+        result = await self.list_information_blocks_tool.execute(arguments)
         return result if return_raw else json.dumps(result, indent=2)
 
       # Fiscal calendar tools
