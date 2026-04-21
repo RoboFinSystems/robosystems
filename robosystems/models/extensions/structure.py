@@ -29,7 +29,8 @@ class Structure(ExtensionsBase):
     CheckConstraint(
       "structure_type IN ("
       "'chart_of_accounts', 'income_statement', 'balance_sheet', "
-      "'cash_flow_statement', 'equity_statement', 'coa_mapping', 'custom', 'schedule'"
+      "'cash_flow_statement', 'equity_statement', 'coa_mapping', 'custom', "
+      "'schedule', 'rollforward', 'reconciliation', 'policy'"
       ")",
       name="check_structure_type",
     ),

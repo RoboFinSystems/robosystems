@@ -109,6 +109,25 @@ _NARROW_ELEMENT_SOURCE_CHECK = (
   "'quickbooks', 'xero', 'plaid', 'native', 'import'"
   ")"
 )
+# Structure.structure_type widens to admit the Phase g.1 block types
+# (rollforward, reconciliation, policy) required as admissible CHECK
+# values for Phase d (typed artifact_mechanics + rules) and Phase eta
+# (metric block type). Folded into 0002 rather than shipped as a
+# standalone migration since 0002 is still unreleased. See
+# ``local/docs/specs/information-block.md`` section 5.9, Phase g.1.
+_WIDENED_STRUCTURE_TYPE_CHECK = (
+  "structure_type IN ("
+  "'chart_of_accounts', 'income_statement', 'balance_sheet', "
+  "'cash_flow_statement', 'equity_statement', 'coa_mapping', 'custom', "
+  "'schedule', 'rollforward', 'reconciliation', 'policy'"
+  ")"
+)
+_NARROW_STRUCTURE_TYPE_CHECK = (
+  "structure_type IN ("
+  "'chart_of_accounts', 'income_statement', 'balance_sheet', "
+  "'cash_flow_statement', 'equity_statement', 'coa_mapping', 'custom', 'schedule'"
+  ")"
+)
 
 # The 24 FASB metamodel trait axes + flowClassification + association-level
 # categories. Matches the CHECK constraint on public.classifications.category.
@@ -244,12 +263,14 @@ def _widen_tenant_checks(conn, schema: str) -> None:
   t = TenantOps(conn, schema)
   t.add_check("associations", "check_association_type", _WIDENED_ASSOCIATION_CHECK)
   t.add_check("elements", "check_element_source", _WIDENED_ELEMENT_SOURCE_CHECK)
+  t.add_check("structures", "check_structure_type", _WIDENED_STRUCTURE_TYPE_CHECK)
 
 
 def _restore_narrow_tenant_checks(conn, schema: str) -> None:
   t = TenantOps(conn, schema)
   t.add_check("associations", "check_association_type", _NARROW_ASSOCIATION_CHECK)
   t.add_check("elements", "check_element_source", _NARROW_ELEMENT_SOURCE_CHECK)
+  t.add_check("structures", "check_structure_type", _NARROW_STRUCTURE_TYPE_CHECK)
 
 
 def _drop_old_element_columns(conn, schema: str) -> None:
@@ -503,6 +524,12 @@ def upgrade() -> None:
   op.create_check_constraint(
     "check_taxonomy_type", "taxonomies", _WIDENED_TAXONOMY_TYPE_CHECK
   )
+  # Phase g.1: widen structures.structure_type to admit rollforward,
+  # reconciliation, policy. Pure vocabulary expansion — no data change.
+  op.drop_constraint("check_structure_type", "structures", type_="check")
+  op.create_check_constraint(
+    "check_structure_type", "structures", _WIDENED_STRUCTURE_TYPE_CHECK
+  )
 
   # ──────────────────────────────────────────────────────────────────────
   # 5. Label + reference linkbase tables (XBRL).
@@ -733,6 +760,10 @@ def downgrade() -> None:
   op.drop_constraint("check_element_source", "elements", type_="check")
   op.create_check_constraint(
     "check_element_source", "elements", _NARROW_ELEMENT_SOURCE_CHECK
+  )
+  op.drop_constraint("check_structure_type", "structures", type_="check")
+  op.create_check_constraint(
+    "check_structure_type", "structures", _NARROW_STRUCTURE_TYPE_CHECK
   )
 
   # Drop substitution_group.
