@@ -43,7 +43,8 @@ class LibraryElementResponse(BaseModel):
       "liability | contraLiability | equity | contraEquity | "
       "temporaryEquity | revenue | expense | expenseReversal | gain | "
       "loss | comprehensiveIncome | investmentByOwners | "
-      "distributionToOwners. Null for structural rows."
+      "distributionToOwners | metric (derived subtotals, not SFAC 6 "
+      "primary elements). Null for structural rows."
     ),
   )
   balance_type: str = Field(..., description="debit | credit")

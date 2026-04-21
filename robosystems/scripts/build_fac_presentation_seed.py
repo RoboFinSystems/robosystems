@@ -2,9 +2,10 @@
 
 FAC's structural abstracts (*Abstract, *Table, *LineItems, *RollUp)
 form the presentation linkbase — the scaffold that organizes how a
-statement is rendered. This seed makes those relationships explicit
-as `parent-child` arcs, exactly mirroring how fac-calculations
-captured the identity rules as `summationOf` arcs.
+statement is rendered. This seed emits those relationships as reified
+``link:presentationArc`` equivalents — one arc node per (parent, child,
+structure, order) triple, matching the XBRL 2.1 presentation linkbase
+shape (Charlie Hoffmann's sfac6-pre.xml is the canonical reference).
 
 Structure:
 
@@ -18,12 +19,12 @@ Structure:
   └── BalanceSheetUnclassifiedTable
       └── BalanceSheetLineItems
 
-Each RollUp abstract then has parent-child arcs to its total and
-constituents — the presentation-side companion to the calc-side
-`summationOf` arcs.
-
-One structure per statement / hierarchy; arcs carry the presentation
-topology.
+The reified encoding (``rs:arcFrom`` / ``rs:arcTo`` / ``rs:arcRoleUri``
+/ ``rs:arcOrder``) lets the loader populate ``AssociationSpec.order``
+and bind each arc to its containing structure, so nodes that appear in
+multiple variants (e.g. BalanceSheetLineItems under both classified
+and unclassified BS) get one arc per variant rather than a single
+collapsed arc.
 """
 
 from __future__ import annotations
@@ -622,11 +623,19 @@ def _context() -> dict:
     "xsd": "http://www.w3.org/2001/XMLSchema#",
     "fac": "http://www.xbrlsite.com/fac#",
     "rs": RS_VOCAB,
-    "parent": {"@id": f"{RS_VOCAB}parent", "@type": "@id"},
+    "arcFrom": {"@id": f"{RS_VOCAB}arcFrom", "@type": "@id"},
+    "arcTo": {"@id": f"{RS_VOCAB}arcTo", "@type": "@id"},
+    "arcAssociationType": {"@id": f"{RS_VOCAB}arcAssociationType"},
+    "arcRoleUri": {"@id": f"{RS_VOCAB}arcRoleUri"},
+    "arcOrder": {"@id": f"{RS_VOCAB}arcOrder", "@type": "xsd:double"},
     "structureName": {"@id": f"{RS_VOCAB}structureName"},
     "structureType": {"@id": f"{RS_VOCAB}structureType"},
     "roleUri": {"@id": f"{RS_VOCAB}roleUri"},
   }
+
+
+def _structure_role_uri(code: str) -> str:
+  return f"{CM_ROLES}fac-presentation/{code}"
 
 
 def build() -> dict:
@@ -635,28 +644,29 @@ def build() -> dict:
     structure_nodes.append(
       {
         "@id": f"_:fac-pres-{s.code.lower()}",
-        "roleUri": f"{CM_ROLES}fac-presentation/{s.code}",
+        "roleUri": _structure_role_uri(s.code),
         "structureName": f"FAC — {s.name}",
         "structureType": s.structure_type,
       }
     )
 
-  # Merge parent→children across structures. We emit `parent` on each
-  # child pointing UP to its parent rather than a downward children list
-  # on the parent; rdflib's JSON-LD parsing treats both shapes equivalently
-  # but the inverted form keeps each node self-contained.
-  child_to_parents: dict[str, list[str]] = {}
+  arc_nodes: list[dict] = []
   for s in STRUCTURES:
+    role = _structure_role_uri(s.code)
+    order = 0
     for parent, children in s.edges:
       for child in children:
-        parents = child_to_parents.setdefault(child, [])
-        if parent not in parents:
-          parents.append(parent)
-
-  arc_nodes: list[dict] = [
-    {"@id": child, "parent": [{"@id": parent} for parent in parents]}
-    for child, parents in sorted(child_to_parents.items())
-  ]
+        order += 1
+        arc_nodes.append(
+          {
+            "@id": f"_:fac-pres-{s.code.lower()}-arc-{order}",
+            "arcFrom": {"@id": parent},
+            "arcTo": {"@id": child},
+            "arcAssociationType": "presentation",
+            "arcRoleUri": role,
+            "arcOrder": float(order),
+          }
+        )
 
   doc = {
     "@context": _context(),
@@ -665,12 +675,12 @@ def build() -> dict:
     "namespace_uri": "http://www.xbrlsite.com/fac/presentation/",
     "taxonomy_type": "mapping",
     "description": (
-      "FAC's presentation scaffold — the Abstract → Table → LineItems → "
-      "RollUp → primitives hierarchy that organizes how each statement "
-      "renders. Parent-child arcs for the 4 primary statements (BS, IS, "
-      "CF, Comprehensive Income), their industry variants (Insurance, "
-      "Interest, Securities), the dimensional breakdowns, and the "
-      "supplementary information hierarchies."
+      "FAC's presentation scaffold — Abstract → Table → LineItems → "
+      "RollUp → primitives — materialized as reified XBRL presentation "
+      "arcs. Each arc carries arcRoleUri (structure binding) + arcOrder "
+      "(display position) so arcs shared between variants (e.g. "
+      "BalanceSheetLineItems under both BS-classified and BS-unclassified) "
+      "stay distinct per structure."
     ),
     "@graph": structure_nodes + arc_nodes,
   }
@@ -681,7 +691,7 @@ def main() -> int:
   doc = build()
   SEED_PATH.parent.mkdir(parents=True, exist_ok=True)
   SEED_PATH.write_text(json.dumps(doc, indent=2))
-  n_arcs = sum(len(n["parent"]) for n in doc["@graph"] if "parent" in n)
+  n_arcs = sum(1 for n in doc["@graph"] if "arcFrom" in n)
   n_structs = sum(1 for n in doc["@graph"] if "roleUri" in n)
   print(f"Wrote {SEED_PATH}")
   print(f"  structures: {n_structs}  arcs: {n_arcs}")

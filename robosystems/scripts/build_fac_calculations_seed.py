@@ -5,15 +5,17 @@ strings on fac:BS1..BS5, fac:IS1..IS11, fac:CF1..CF6 concepts. These
 rules are semantically the same as XBRL calculation linkbase arcs:
 each rule says "aggregate = +child1 ± child2 ± …".
 
-This script generates a calc-arc seed by hand-mapping each rule's head
-and its weighted children to fac qnames. The output is a standard
-mapping-taxonomy JSON-LD file that the library loader consumes.
+This script hand-maps each rule's head + its signed children to fac
+qnames, then emits the seed as reified XBRL calculation arcs — one
+arc node per (from, to, role, weight, order) triple, matching the
+shape of ``link:calculationArc`` in an XBRL calculation linkbase.
 
-Weights aren't carried in the simple JSON-LD predicate format we use
-today (summationOf → [@id,…]) — we emit the arc topology only and
-track +1/-1 sign semantics in the structure `name` field for now.
-Upgrading to weighted arcs is a follow-up when we adopt a richer arc
-serialization.
+The reified encoding (``rs:arcFrom`` / ``rs:arcTo`` / ``rs:arcRoleUri``
+/ ``rs:arcWeight`` / ``rs:arcOrder``) lets the loader populate
+``AssociationSpec.weight`` and bind each arc to the structure (ELR)
+of the identity it belongs to — so BS2 (Assets=L+E) and BS3
+(Assets=Current+Noncurrent) are separable even though they share the
+head concept.
 """
 
 from __future__ import annotations
@@ -246,7 +248,13 @@ def _context() -> dict:
     "xsd": "http://www.w3.org/2001/XMLSchema#",
     "fac": "http://www.xbrlsite.com/fac#",
     "rs": RS_VOCAB,
-    "summationOf": {"@id": f"{RS_VOCAB}summationOf", "@type": "@id"},
+    "arcFrom": {"@id": f"{RS_VOCAB}arcFrom", "@type": "@id"},
+    "arcTo": {"@id": f"{RS_VOCAB}arcTo", "@type": "@id"},
+    "arcAssociationType": {"@id": f"{RS_VOCAB}arcAssociationType"},
+    "arcArcrole": {"@id": f"{RS_VOCAB}arcArcrole"},
+    "arcRoleUri": {"@id": f"{RS_VOCAB}arcRoleUri"},
+    "arcWeight": {"@id": f"{RS_VOCAB}arcWeight", "@type": "xsd:double"},
+    "arcOrder": {"@id": f"{RS_VOCAB}arcOrder", "@type": "xsd:double"},
     "structureName": {"@id": f"{RS_VOCAB}structureName"},
     "structureType": {"@id": f"{RS_VOCAB}structureType"},
     "roleUri": {"@id": f"{RS_VOCAB}roleUri"},
@@ -255,15 +263,17 @@ def _context() -> dict:
   }
 
 
+def _rule_role_uri(code: str) -> str:
+  return f"{CM_ROLES}fac-calculations/{code}"
+
+
 def build() -> dict:
-  # One structure per rule so users can see which identity an arc
-  # belongs to. Role URI + name are what the loader extracts.
   structures: list[dict] = []
   for rule in RULES:
     structures.append(
       {
         "@id": f"_:fac-calc-{rule.code.lower()}",
-        "roleUri": f"{CM_ROLES}fac-calculations/{rule.code}",
+        "roleUri": _rule_role_uri(rule.code),
         "structureName": f"FAC {rule.code} — {rule.doc}",
         "structureType": (
           "balance_sheet"
@@ -275,25 +285,21 @@ def build() -> dict:
       }
     )
 
-  # Collapse by head element — the current JSON-LD arc format puts
-  # summationOf as a predicate list on the head, so multiple rules
-  # sharing a head (Assets in BS2+BS3, OperatingIncomeLoss in IS2+IS11)
-  # merge their children. The rule→arc provenance lives in the
-  # per-rule Structure's name, not on the arc itself.
-  by_head: dict[str, list[str]] = {}
+  arc_nodes: list[dict] = []
   for rule in RULES:
-    bucket = by_head.setdefault(rule.head, [])
-    for child, _weight in rule.children:
-      if child not in bucket:
-        bucket.append(child)
-
-  arc_nodes: list[dict] = [
-    {
-      "@id": head,
-      "summationOf": [{"@id": child} for child in children],
-    }
-    for head, children in sorted(by_head.items())
-  ]
+    role = _rule_role_uri(rule.code)
+    for i, (child, weight) in enumerate(rule.children, start=1):
+      arc_nodes.append(
+        {
+          "@id": f"_:fac-calc-{rule.code.lower()}-arc-{i}",
+          "arcFrom": {"@id": rule.head},
+          "arcTo": {"@id": child},
+          "arcAssociationType": "calculation",
+          "arcRoleUri": role,
+          "arcWeight": float(weight),
+          "arcOrder": float(i),
+        }
+      )
 
   doc = {
     "@context": _context(),
@@ -302,10 +308,13 @@ def build() -> dict:
     "namespace_uri": "http://www.xbrlsite.com/fac/calculations/",
     "taxonomy_type": "mapping",
     "description": (
-      "FAC's BS/IS/CF accounting identity rules rendered as calculation "
-      "arcs. 22 identities × ~2.5 children each = ~55 summationOf arcs "
-      "from aggregate heads to their primitive constituents. Structures "
-      "carry the human-readable identity; arcs carry the topology."
+      "FAC's BS/IS/CF accounting identity rules rendered as XBRL "
+      "calculation arcs. 22 identities (BS1-5, IS1-11, CF1-6), each "
+      "materialized as a Structure + reified summation arcs from the "
+      "aggregate head to each signed constituent. arcWeight carries "
+      "+1/-1; arcRoleUri binds each arc to its identity's structure "
+      "so overlapping heads (Assets in BS2+BS3, OperatingIncomeLoss "
+      "in IS2+IS11) stay separable."
     ),
     "@graph": structures + arc_nodes,
   }
@@ -316,7 +325,7 @@ def main() -> int:
   doc = build()
   SEED_PATH.parent.mkdir(parents=True, exist_ok=True)
   SEED_PATH.write_text(json.dumps(doc, indent=2))
-  n_arcs = sum(len(n["summationOf"]) for n in doc["@graph"] if "summationOf" in n)
+  n_arcs = sum(1 for n in doc["@graph"] if "arcFrom" in n)
   n_structs = sum(1 for n in doc["@graph"] if "roleUri" in n)
   print(f"Wrote {SEED_PATH}")
   print(f"  structures: {n_structs}  arcs: {n_arcs}")

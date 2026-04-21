@@ -5,9 +5,30 @@
     "xsd": "http://www.w3.org/2001/XMLSchema#",
     "fac": "http://www.xbrlsite.com/fac#",
     "rs": "https://robosystems.ai/vocab/",
-    "summationOf": {
-      "@id": "https://robosystems.ai/vocab/summationOf",
+    "arcFrom": {
+      "@id": "https://robosystems.ai/vocab/arcFrom",
       "@type": "@id"
+    },
+    "arcTo": {
+      "@id": "https://robosystems.ai/vocab/arcTo",
+      "@type": "@id"
+    },
+    "arcAssociationType": {
+      "@id": "https://robosystems.ai/vocab/arcAssociationType"
+    },
+    "arcArcrole": {
+      "@id": "https://robosystems.ai/vocab/arcArcrole"
+    },
+    "arcRoleUri": {
+      "@id": "https://robosystems.ai/vocab/arcRoleUri"
+    },
+    "arcWeight": {
+      "@id": "https://robosystems.ai/vocab/arcWeight",
+      "@type": "xsd:double"
+    },
+    "arcOrder": {
+      "@id": "https://robosystems.ai/vocab/arcOrder",
+      "@type": "xsd:double"
     },
     "structureName": {
       "@id": "https://robosystems.ai/vocab/structureName"
@@ -23,11 +44,9 @@
   },
   "standard": "fac-calculations",
   "version": "v1",
-  "taxonomy_type": "mapping",
   "namespace_uri": "http://www.xbrlsite.com/fac/calculations/",
-  "origin": "native",
-  "created_at": "2026-04-19",
-  "description": "RoboSystems-authored calculation arcs encoding FAC's BS/IS/CF accounting identities (BS1-5, IS1-11, CF1-6). 22 rules rendered as ~51 summationOf arcs between fac primitives and aggregates. Each rule is materialized as a Structure so users see which identity an arc belongs to. RoboSystems-native artifact \u2014 the FAC identities themselves are derived from Charlie Hoffman's documentation, but the JSON-LD serialization is ours.",
+  "taxonomy_type": "mapping",
+  "description": "FAC's BS/IS/CF accounting identity rules rendered as XBRL calculation arcs. 22 identities (BS1-5, IS1-11, CF1-6), each materialized as a Structure + reified summation arcs from the aggregate head to each signed constituent. arcWeight carries +1/-1; arcRoleUri binds each arc to its identity's structure so overlapping heads (Assets in BS2+BS3, OperatingIncomeLoss in IS2+IS11) stay separable.",
   "@graph": [
     {
       "@id": "_:fac-calc-bs1",
@@ -162,247 +181,680 @@
       "structureType": "cash_flow_statement"
     },
     {
-      "@id": "fac:Assets",
-      "summationOf": [
-        {
-          "@id": "fac:LiabilitiesAndEquity"
-        },
-        {
-          "@id": "fac:CurrentAssets"
-        },
-        {
-          "@id": "fac:NoncurrentAssets"
-        }
-      ]
+      "@id": "_:fac-calc-bs1-arc-1",
+      "arcFrom": {
+        "@id": "fac:Equity"
+      },
+      "arcTo": {
+        "@id": "fac:EquityAttributableToParent"
+      },
+      "arcAssociationType": "calculation",
+      "arcRoleUri": "http://www.xbrlsite.com/seattlemethod/conceptual-model/cm-roles/roles/fac-calculations/BS1",
+      "arcWeight": 1.0,
+      "arcOrder": 1.0
     },
     {
-      "@id": "fac:ComprehensiveIncomeLoss",
-      "summationOf": [
-        {
-          "@id": "fac:ComprehensiveIncomeLossAttributableToParent"
-        },
-        {
-          "@id": "fac:ComprehensiveIncomeLossAttributableToNoncontrollingInterest"
-        },
-        {
-          "@id": "fac:NetIncomeLoss"
-        },
-        {
-          "@id": "fac:OtherComprehensiveIncomeLoss"
-        }
-      ]
+      "@id": "_:fac-calc-bs1-arc-2",
+      "arcFrom": {
+        "@id": "fac:Equity"
+      },
+      "arcTo": {
+        "@id": "fac:EquityAttributableToNoncontrollingInterest"
+      },
+      "arcAssociationType": "calculation",
+      "arcRoleUri": "http://www.xbrlsite.com/seattlemethod/conceptual-model/cm-roles/roles/fac-calculations/BS1",
+      "arcWeight": 1.0,
+      "arcOrder": 2.0
     },
     {
-      "@id": "fac:Equity",
-      "summationOf": [
-        {
-          "@id": "fac:EquityAttributableToParent"
-        },
-        {
-          "@id": "fac:EquityAttributableToNoncontrollingInterest"
-        }
-      ]
+      "@id": "_:fac-calc-bs2-arc-1",
+      "arcFrom": {
+        "@id": "fac:Assets"
+      },
+      "arcTo": {
+        "@id": "fac:LiabilitiesAndEquity"
+      },
+      "arcAssociationType": "calculation",
+      "arcRoleUri": "http://www.xbrlsite.com/seattlemethod/conceptual-model/cm-roles/roles/fac-calculations/BS2",
+      "arcWeight": 1.0,
+      "arcOrder": 1.0
     },
     {
-      "@id": "fac:GrossProfit",
-      "summationOf": [
-        {
-          "@id": "fac:Revenues"
-        },
-        {
-          "@id": "fac:CostOfRevenue"
-        }
-      ]
+      "@id": "_:fac-calc-bs3-arc-1",
+      "arcFrom": {
+        "@id": "fac:Assets"
+      },
+      "arcTo": {
+        "@id": "fac:CurrentAssets"
+      },
+      "arcAssociationType": "calculation",
+      "arcRoleUri": "http://www.xbrlsite.com/seattlemethod/conceptual-model/cm-roles/roles/fac-calculations/BS3",
+      "arcWeight": 1.0,
+      "arcOrder": 1.0
     },
     {
-      "@id": "fac:IncomeLossBeforeEquityMethodInvestments",
-      "summationOf": [
-        {
-          "@id": "fac:OperatingIncomeLoss"
-        },
-        {
-          "@id": "fac:NonoperatingIncomeLoss"
-        },
-        {
-          "@id": "fac:InterestAndDebtExpense"
-        }
-      ]
+      "@id": "_:fac-calc-bs3-arc-2",
+      "arcFrom": {
+        "@id": "fac:Assets"
+      },
+      "arcTo": {
+        "@id": "fac:NoncurrentAssets"
+      },
+      "arcAssociationType": "calculation",
+      "arcRoleUri": "http://www.xbrlsite.com/seattlemethod/conceptual-model/cm-roles/roles/fac-calculations/BS3",
+      "arcWeight": 1.0,
+      "arcOrder": 2.0
     },
     {
-      "@id": "fac:IncomeLossFromContinuingOperationsAfterTax",
-      "summationOf": [
-        {
-          "@id": "fac:IncomeLossFromContinuingOperationsBeforeTax"
-        },
-        {
-          "@id": "fac:IncomeTaxExpenseBenefit"
-        }
-      ]
+      "@id": "_:fac-calc-bs4-arc-1",
+      "arcFrom": {
+        "@id": "fac:Liabilities"
+      },
+      "arcTo": {
+        "@id": "fac:CurrentLiabilities"
+      },
+      "arcAssociationType": "calculation",
+      "arcRoleUri": "http://www.xbrlsite.com/seattlemethod/conceptual-model/cm-roles/roles/fac-calculations/BS4",
+      "arcWeight": 1.0,
+      "arcOrder": 1.0
     },
     {
-      "@id": "fac:IncomeLossFromContinuingOperationsBeforeTax",
-      "summationOf": [
-        {
-          "@id": "fac:IncomeLossBeforeEquityMethodInvestments"
-        },
-        {
-          "@id": "fac:IncomeLossFromEquityMethodInvestments"
-        }
-      ]
+      "@id": "_:fac-calc-bs4-arc-2",
+      "arcFrom": {
+        "@id": "fac:Liabilities"
+      },
+      "arcTo": {
+        "@id": "fac:NoncurrentLiabilities"
+      },
+      "arcAssociationType": "calculation",
+      "arcRoleUri": "http://www.xbrlsite.com/seattlemethod/conceptual-model/cm-roles/roles/fac-calculations/BS4",
+      "arcWeight": 1.0,
+      "arcOrder": 2.0
     },
     {
-      "@id": "fac:Liabilities",
-      "summationOf": [
-        {
-          "@id": "fac:CurrentLiabilities"
-        },
-        {
-          "@id": "fac:NoncurrentLiabilities"
-        }
-      ]
+      "@id": "_:fac-calc-bs5-arc-1",
+      "arcFrom": {
+        "@id": "fac:LiabilitiesAndEquity"
+      },
+      "arcTo": {
+        "@id": "fac:Liabilities"
+      },
+      "arcAssociationType": "calculation",
+      "arcRoleUri": "http://www.xbrlsite.com/seattlemethod/conceptual-model/cm-roles/roles/fac-calculations/BS5",
+      "arcWeight": 1.0,
+      "arcOrder": 1.0
     },
     {
-      "@id": "fac:LiabilitiesAndEquity",
-      "summationOf": [
-        {
-          "@id": "fac:Liabilities"
-        },
-        {
-          "@id": "fac:CommitmentsAndContingencies"
-        },
-        {
-          "@id": "fac:TemporaryEquity"
-        },
-        {
-          "@id": "fac:Equity"
-        }
-      ]
+      "@id": "_:fac-calc-bs5-arc-2",
+      "arcFrom": {
+        "@id": "fac:LiabilitiesAndEquity"
+      },
+      "arcTo": {
+        "@id": "fac:CommitmentsAndContingencies"
+      },
+      "arcAssociationType": "calculation",
+      "arcRoleUri": "http://www.xbrlsite.com/seattlemethod/conceptual-model/cm-roles/roles/fac-calculations/BS5",
+      "arcWeight": 1.0,
+      "arcOrder": 2.0
     },
     {
-      "@id": "fac:NetCashFlow",
-      "summationOf": [
-        {
-          "@id": "fac:NetCashFlowFromOperatingActivities"
-        },
-        {
-          "@id": "fac:NetCashFlowFromInvestingActivities"
-        },
-        {
-          "@id": "fac:NetCashFlowFromFinancingActivities"
-        },
-        {
-          "@id": "fac:ExchangeGainsLosses"
-        }
-      ]
+      "@id": "_:fac-calc-bs5-arc-3",
+      "arcFrom": {
+        "@id": "fac:LiabilitiesAndEquity"
+      },
+      "arcTo": {
+        "@id": "fac:TemporaryEquity"
+      },
+      "arcAssociationType": "calculation",
+      "arcRoleUri": "http://www.xbrlsite.com/seattlemethod/conceptual-model/cm-roles/roles/fac-calculations/BS5",
+      "arcWeight": 1.0,
+      "arcOrder": 3.0
     },
     {
-      "@id": "fac:NetCashFlowContinuing",
-      "summationOf": [
-        {
-          "@id": "fac:NetCashFlowFromOperatingActivitiesContinuing"
-        },
-        {
-          "@id": "fac:NetCashFlowFromInvestingActivitiesContinuing"
-        },
-        {
-          "@id": "fac:NetCashFlowFromFinancingActivitiesContinuing"
-        }
-      ]
+      "@id": "_:fac-calc-bs5-arc-4",
+      "arcFrom": {
+        "@id": "fac:LiabilitiesAndEquity"
+      },
+      "arcTo": {
+        "@id": "fac:Equity"
+      },
+      "arcAssociationType": "calculation",
+      "arcRoleUri": "http://www.xbrlsite.com/seattlemethod/conceptual-model/cm-roles/roles/fac-calculations/BS5",
+      "arcWeight": 1.0,
+      "arcOrder": 4.0
     },
     {
-      "@id": "fac:NetCashFlowDiscontinued",
-      "summationOf": [
-        {
-          "@id": "fac:NetCashFlowFromOperatingActivitiesDiscontinued"
-        },
-        {
-          "@id": "fac:NetCashFlowFromInvestingActivitiesDiscontinued"
-        },
-        {
-          "@id": "fac:NetCashFlowFromFinancingActivitiesDiscontinued"
-        }
-      ]
+      "@id": "_:fac-calc-is1-arc-1",
+      "arcFrom": {
+        "@id": "fac:GrossProfit"
+      },
+      "arcTo": {
+        "@id": "fac:Revenues"
+      },
+      "arcAssociationType": "calculation",
+      "arcRoleUri": "http://www.xbrlsite.com/seattlemethod/conceptual-model/cm-roles/roles/fac-calculations/IS1",
+      "arcWeight": 1.0,
+      "arcOrder": 1.0
     },
     {
-      "@id": "fac:NetCashFlowFromFinancingActivities",
-      "summationOf": [
-        {
-          "@id": "fac:NetCashFlowFromFinancingActivitiesContinuing"
-        },
-        {
-          "@id": "fac:NetCashFlowFromFinancingActivitiesDiscontinued"
-        }
-      ]
+      "@id": "_:fac-calc-is1-arc-2",
+      "arcFrom": {
+        "@id": "fac:GrossProfit"
+      },
+      "arcTo": {
+        "@id": "fac:CostOfRevenue"
+      },
+      "arcAssociationType": "calculation",
+      "arcRoleUri": "http://www.xbrlsite.com/seattlemethod/conceptual-model/cm-roles/roles/fac-calculations/IS1",
+      "arcWeight": -1.0,
+      "arcOrder": 2.0
     },
     {
-      "@id": "fac:NetCashFlowFromInvestingActivities",
-      "summationOf": [
-        {
-          "@id": "fac:NetCashFlowFromInvestingActivitiesContinuing"
-        },
-        {
-          "@id": "fac:NetCashFlowFromInvestingActivitiesDiscontinued"
-        }
-      ]
+      "@id": "_:fac-calc-is2-arc-1",
+      "arcFrom": {
+        "@id": "fac:OperatingIncomeLoss"
+      },
+      "arcTo": {
+        "@id": "fac:GrossProfit"
+      },
+      "arcAssociationType": "calculation",
+      "arcRoleUri": "http://www.xbrlsite.com/seattlemethod/conceptual-model/cm-roles/roles/fac-calculations/IS2",
+      "arcWeight": 1.0,
+      "arcOrder": 1.0
     },
     {
-      "@id": "fac:NetCashFlowFromOperatingActivities",
-      "summationOf": [
-        {
-          "@id": "fac:NetCashFlowFromOperatingActivitiesContinuing"
-        },
-        {
-          "@id": "fac:NetCashFlowFromOperatingActivitiesDiscontinued"
-        }
-      ]
+      "@id": "_:fac-calc-is2-arc-2",
+      "arcFrom": {
+        "@id": "fac:OperatingIncomeLoss"
+      },
+      "arcTo": {
+        "@id": "fac:OperatingExpenses"
+      },
+      "arcAssociationType": "calculation",
+      "arcRoleUri": "http://www.xbrlsite.com/seattlemethod/conceptual-model/cm-roles/roles/fac-calculations/IS2",
+      "arcWeight": -1.0,
+      "arcOrder": 2.0
     },
     {
-      "@id": "fac:NetIncomeLoss",
-      "summationOf": [
-        {
-          "@id": "fac:IncomeLossFromContinuingOperationsAfterTax"
-        },
-        {
-          "@id": "fac:IncomeLossFromDiscontinuedOperationsNetOfTax"
-        },
-        {
-          "@id": "fac:NetIncomeLossAttributableToParent"
-        },
-        {
-          "@id": "fac:NetIncomeLossAttributableToNoncontrollingInterest"
-        }
-      ]
+      "@id": "_:fac-calc-is2-arc-3",
+      "arcFrom": {
+        "@id": "fac:OperatingIncomeLoss"
+      },
+      "arcTo": {
+        "@id": "fac:OtherOperatingIncomeExpenses"
+      },
+      "arcAssociationType": "calculation",
+      "arcRoleUri": "http://www.xbrlsite.com/seattlemethod/conceptual-model/cm-roles/roles/fac-calculations/IS2",
+      "arcWeight": 1.0,
+      "arcOrder": 3.0
     },
     {
-      "@id": "fac:NetIncomeLossAvailableToCommonStockholdersBasic",
-      "summationOf": [
-        {
-          "@id": "fac:NetIncomeLossAttributableToParent"
-        },
-        {
-          "@id": "fac:PreferredStockDividendsAndOtherAdjustments"
-        }
-      ]
+      "@id": "_:fac-calc-is3-arc-1",
+      "arcFrom": {
+        "@id": "fac:IncomeLossBeforeEquityMethodInvestments"
+      },
+      "arcTo": {
+        "@id": "fac:OperatingIncomeLoss"
+      },
+      "arcAssociationType": "calculation",
+      "arcRoleUri": "http://www.xbrlsite.com/seattlemethod/conceptual-model/cm-roles/roles/fac-calculations/IS3",
+      "arcWeight": 1.0,
+      "arcOrder": 1.0
     },
     {
-      "@id": "fac:OperatingIncomeLoss",
-      "summationOf": [
-        {
-          "@id": "fac:GrossProfit"
-        },
-        {
-          "@id": "fac:OperatingExpenses"
-        },
-        {
-          "@id": "fac:OtherOperatingIncomeExpenses"
-        },
-        {
-          "@id": "fac:Revenues"
-        },
-        {
-          "@id": "fac:CostsAndExpenses"
-        }
-      ]
+      "@id": "_:fac-calc-is3-arc-2",
+      "arcFrom": {
+        "@id": "fac:IncomeLossBeforeEquityMethodInvestments"
+      },
+      "arcTo": {
+        "@id": "fac:NonoperatingIncomeLoss"
+      },
+      "arcAssociationType": "calculation",
+      "arcRoleUri": "http://www.xbrlsite.com/seattlemethod/conceptual-model/cm-roles/roles/fac-calculations/IS3",
+      "arcWeight": 1.0,
+      "arcOrder": 2.0
+    },
+    {
+      "@id": "_:fac-calc-is3-arc-3",
+      "arcFrom": {
+        "@id": "fac:IncomeLossBeforeEquityMethodInvestments"
+      },
+      "arcTo": {
+        "@id": "fac:InterestAndDebtExpense"
+      },
+      "arcAssociationType": "calculation",
+      "arcRoleUri": "http://www.xbrlsite.com/seattlemethod/conceptual-model/cm-roles/roles/fac-calculations/IS3",
+      "arcWeight": -1.0,
+      "arcOrder": 3.0
+    },
+    {
+      "@id": "_:fac-calc-is4-arc-1",
+      "arcFrom": {
+        "@id": "fac:IncomeLossFromContinuingOperationsBeforeTax"
+      },
+      "arcTo": {
+        "@id": "fac:IncomeLossBeforeEquityMethodInvestments"
+      },
+      "arcAssociationType": "calculation",
+      "arcRoleUri": "http://www.xbrlsite.com/seattlemethod/conceptual-model/cm-roles/roles/fac-calculations/IS4",
+      "arcWeight": 1.0,
+      "arcOrder": 1.0
+    },
+    {
+      "@id": "_:fac-calc-is4-arc-2",
+      "arcFrom": {
+        "@id": "fac:IncomeLossFromContinuingOperationsBeforeTax"
+      },
+      "arcTo": {
+        "@id": "fac:IncomeLossFromEquityMethodInvestments"
+      },
+      "arcAssociationType": "calculation",
+      "arcRoleUri": "http://www.xbrlsite.com/seattlemethod/conceptual-model/cm-roles/roles/fac-calculations/IS4",
+      "arcWeight": 1.0,
+      "arcOrder": 2.0
+    },
+    {
+      "@id": "_:fac-calc-is5-arc-1",
+      "arcFrom": {
+        "@id": "fac:IncomeLossFromContinuingOperationsAfterTax"
+      },
+      "arcTo": {
+        "@id": "fac:IncomeLossFromContinuingOperationsBeforeTax"
+      },
+      "arcAssociationType": "calculation",
+      "arcRoleUri": "http://www.xbrlsite.com/seattlemethod/conceptual-model/cm-roles/roles/fac-calculations/IS5",
+      "arcWeight": 1.0,
+      "arcOrder": 1.0
+    },
+    {
+      "@id": "_:fac-calc-is5-arc-2",
+      "arcFrom": {
+        "@id": "fac:IncomeLossFromContinuingOperationsAfterTax"
+      },
+      "arcTo": {
+        "@id": "fac:IncomeTaxExpenseBenefit"
+      },
+      "arcAssociationType": "calculation",
+      "arcRoleUri": "http://www.xbrlsite.com/seattlemethod/conceptual-model/cm-roles/roles/fac-calculations/IS5",
+      "arcWeight": -1.0,
+      "arcOrder": 2.0
+    },
+    {
+      "@id": "_:fac-calc-is6-arc-1",
+      "arcFrom": {
+        "@id": "fac:NetIncomeLoss"
+      },
+      "arcTo": {
+        "@id": "fac:IncomeLossFromContinuingOperationsAfterTax"
+      },
+      "arcAssociationType": "calculation",
+      "arcRoleUri": "http://www.xbrlsite.com/seattlemethod/conceptual-model/cm-roles/roles/fac-calculations/IS6",
+      "arcWeight": 1.0,
+      "arcOrder": 1.0
+    },
+    {
+      "@id": "_:fac-calc-is6-arc-2",
+      "arcFrom": {
+        "@id": "fac:NetIncomeLoss"
+      },
+      "arcTo": {
+        "@id": "fac:IncomeLossFromDiscontinuedOperationsNetOfTax"
+      },
+      "arcAssociationType": "calculation",
+      "arcRoleUri": "http://www.xbrlsite.com/seattlemethod/conceptual-model/cm-roles/roles/fac-calculations/IS6",
+      "arcWeight": 1.0,
+      "arcOrder": 2.0
+    },
+    {
+      "@id": "_:fac-calc-is7-arc-1",
+      "arcFrom": {
+        "@id": "fac:NetIncomeLoss"
+      },
+      "arcTo": {
+        "@id": "fac:NetIncomeLossAttributableToParent"
+      },
+      "arcAssociationType": "calculation",
+      "arcRoleUri": "http://www.xbrlsite.com/seattlemethod/conceptual-model/cm-roles/roles/fac-calculations/IS7",
+      "arcWeight": 1.0,
+      "arcOrder": 1.0
+    },
+    {
+      "@id": "_:fac-calc-is7-arc-2",
+      "arcFrom": {
+        "@id": "fac:NetIncomeLoss"
+      },
+      "arcTo": {
+        "@id": "fac:NetIncomeLossAttributableToNoncontrollingInterest"
+      },
+      "arcAssociationType": "calculation",
+      "arcRoleUri": "http://www.xbrlsite.com/seattlemethod/conceptual-model/cm-roles/roles/fac-calculations/IS7",
+      "arcWeight": 1.0,
+      "arcOrder": 2.0
+    },
+    {
+      "@id": "_:fac-calc-is8-arc-1",
+      "arcFrom": {
+        "@id": "fac:NetIncomeLossAvailableToCommonStockholdersBasic"
+      },
+      "arcTo": {
+        "@id": "fac:NetIncomeLossAttributableToParent"
+      },
+      "arcAssociationType": "calculation",
+      "arcRoleUri": "http://www.xbrlsite.com/seattlemethod/conceptual-model/cm-roles/roles/fac-calculations/IS8",
+      "arcWeight": 1.0,
+      "arcOrder": 1.0
+    },
+    {
+      "@id": "_:fac-calc-is8-arc-2",
+      "arcFrom": {
+        "@id": "fac:NetIncomeLossAvailableToCommonStockholdersBasic"
+      },
+      "arcTo": {
+        "@id": "fac:PreferredStockDividendsAndOtherAdjustments"
+      },
+      "arcAssociationType": "calculation",
+      "arcRoleUri": "http://www.xbrlsite.com/seattlemethod/conceptual-model/cm-roles/roles/fac-calculations/IS8",
+      "arcWeight": -1.0,
+      "arcOrder": 2.0
+    },
+    {
+      "@id": "_:fac-calc-is9-arc-1",
+      "arcFrom": {
+        "@id": "fac:ComprehensiveIncomeLoss"
+      },
+      "arcTo": {
+        "@id": "fac:ComprehensiveIncomeLossAttributableToParent"
+      },
+      "arcAssociationType": "calculation",
+      "arcRoleUri": "http://www.xbrlsite.com/seattlemethod/conceptual-model/cm-roles/roles/fac-calculations/IS9",
+      "arcWeight": 1.0,
+      "arcOrder": 1.0
+    },
+    {
+      "@id": "_:fac-calc-is9-arc-2",
+      "arcFrom": {
+        "@id": "fac:ComprehensiveIncomeLoss"
+      },
+      "arcTo": {
+        "@id": "fac:ComprehensiveIncomeLossAttributableToNoncontrollingInterest"
+      },
+      "arcAssociationType": "calculation",
+      "arcRoleUri": "http://www.xbrlsite.com/seattlemethod/conceptual-model/cm-roles/roles/fac-calculations/IS9",
+      "arcWeight": 1.0,
+      "arcOrder": 2.0
+    },
+    {
+      "@id": "_:fac-calc-is10-arc-1",
+      "arcFrom": {
+        "@id": "fac:ComprehensiveIncomeLoss"
+      },
+      "arcTo": {
+        "@id": "fac:NetIncomeLoss"
+      },
+      "arcAssociationType": "calculation",
+      "arcRoleUri": "http://www.xbrlsite.com/seattlemethod/conceptual-model/cm-roles/roles/fac-calculations/IS10",
+      "arcWeight": 1.0,
+      "arcOrder": 1.0
+    },
+    {
+      "@id": "_:fac-calc-is10-arc-2",
+      "arcFrom": {
+        "@id": "fac:ComprehensiveIncomeLoss"
+      },
+      "arcTo": {
+        "@id": "fac:OtherComprehensiveIncomeLoss"
+      },
+      "arcAssociationType": "calculation",
+      "arcRoleUri": "http://www.xbrlsite.com/seattlemethod/conceptual-model/cm-roles/roles/fac-calculations/IS10",
+      "arcWeight": 1.0,
+      "arcOrder": 2.0
+    },
+    {
+      "@id": "_:fac-calc-is11-arc-1",
+      "arcFrom": {
+        "@id": "fac:OperatingIncomeLoss"
+      },
+      "arcTo": {
+        "@id": "fac:Revenues"
+      },
+      "arcAssociationType": "calculation",
+      "arcRoleUri": "http://www.xbrlsite.com/seattlemethod/conceptual-model/cm-roles/roles/fac-calculations/IS11",
+      "arcWeight": 1.0,
+      "arcOrder": 1.0
+    },
+    {
+      "@id": "_:fac-calc-is11-arc-2",
+      "arcFrom": {
+        "@id": "fac:OperatingIncomeLoss"
+      },
+      "arcTo": {
+        "@id": "fac:CostsAndExpenses"
+      },
+      "arcAssociationType": "calculation",
+      "arcRoleUri": "http://www.xbrlsite.com/seattlemethod/conceptual-model/cm-roles/roles/fac-calculations/IS11",
+      "arcWeight": -1.0,
+      "arcOrder": 2.0
+    },
+    {
+      "@id": "_:fac-calc-is11-arc-3",
+      "arcFrom": {
+        "@id": "fac:OperatingIncomeLoss"
+      },
+      "arcTo": {
+        "@id": "fac:OtherOperatingIncomeExpenses"
+      },
+      "arcAssociationType": "calculation",
+      "arcRoleUri": "http://www.xbrlsite.com/seattlemethod/conceptual-model/cm-roles/roles/fac-calculations/IS11",
+      "arcWeight": 1.0,
+      "arcOrder": 3.0
+    },
+    {
+      "@id": "_:fac-calc-cf1-arc-1",
+      "arcFrom": {
+        "@id": "fac:NetCashFlow"
+      },
+      "arcTo": {
+        "@id": "fac:NetCashFlowFromOperatingActivities"
+      },
+      "arcAssociationType": "calculation",
+      "arcRoleUri": "http://www.xbrlsite.com/seattlemethod/conceptual-model/cm-roles/roles/fac-calculations/CF1",
+      "arcWeight": 1.0,
+      "arcOrder": 1.0
+    },
+    {
+      "@id": "_:fac-calc-cf1-arc-2",
+      "arcFrom": {
+        "@id": "fac:NetCashFlow"
+      },
+      "arcTo": {
+        "@id": "fac:NetCashFlowFromInvestingActivities"
+      },
+      "arcAssociationType": "calculation",
+      "arcRoleUri": "http://www.xbrlsite.com/seattlemethod/conceptual-model/cm-roles/roles/fac-calculations/CF1",
+      "arcWeight": 1.0,
+      "arcOrder": 2.0
+    },
+    {
+      "@id": "_:fac-calc-cf1-arc-3",
+      "arcFrom": {
+        "@id": "fac:NetCashFlow"
+      },
+      "arcTo": {
+        "@id": "fac:NetCashFlowFromFinancingActivities"
+      },
+      "arcAssociationType": "calculation",
+      "arcRoleUri": "http://www.xbrlsite.com/seattlemethod/conceptual-model/cm-roles/roles/fac-calculations/CF1",
+      "arcWeight": 1.0,
+      "arcOrder": 3.0
+    },
+    {
+      "@id": "_:fac-calc-cf1-arc-4",
+      "arcFrom": {
+        "@id": "fac:NetCashFlow"
+      },
+      "arcTo": {
+        "@id": "fac:ExchangeGainsLosses"
+      },
+      "arcAssociationType": "calculation",
+      "arcRoleUri": "http://www.xbrlsite.com/seattlemethod/conceptual-model/cm-roles/roles/fac-calculations/CF1",
+      "arcWeight": 1.0,
+      "arcOrder": 4.0
+    },
+    {
+      "@id": "_:fac-calc-cf2-arc-1",
+      "arcFrom": {
+        "@id": "fac:NetCashFlowContinuing"
+      },
+      "arcTo": {
+        "@id": "fac:NetCashFlowFromOperatingActivitiesContinuing"
+      },
+      "arcAssociationType": "calculation",
+      "arcRoleUri": "http://www.xbrlsite.com/seattlemethod/conceptual-model/cm-roles/roles/fac-calculations/CF2",
+      "arcWeight": 1.0,
+      "arcOrder": 1.0
+    },
+    {
+      "@id": "_:fac-calc-cf2-arc-2",
+      "arcFrom": {
+        "@id": "fac:NetCashFlowContinuing"
+      },
+      "arcTo": {
+        "@id": "fac:NetCashFlowFromInvestingActivitiesContinuing"
+      },
+      "arcAssociationType": "calculation",
+      "arcRoleUri": "http://www.xbrlsite.com/seattlemethod/conceptual-model/cm-roles/roles/fac-calculations/CF2",
+      "arcWeight": 1.0,
+      "arcOrder": 2.0
+    },
+    {
+      "@id": "_:fac-calc-cf2-arc-3",
+      "arcFrom": {
+        "@id": "fac:NetCashFlowContinuing"
+      },
+      "arcTo": {
+        "@id": "fac:NetCashFlowFromFinancingActivitiesContinuing"
+      },
+      "arcAssociationType": "calculation",
+      "arcRoleUri": "http://www.xbrlsite.com/seattlemethod/conceptual-model/cm-roles/roles/fac-calculations/CF2",
+      "arcWeight": 1.0,
+      "arcOrder": 3.0
+    },
+    {
+      "@id": "_:fac-calc-cf3-arc-1",
+      "arcFrom": {
+        "@id": "fac:NetCashFlowDiscontinued"
+      },
+      "arcTo": {
+        "@id": "fac:NetCashFlowFromOperatingActivitiesDiscontinued"
+      },
+      "arcAssociationType": "calculation",
+      "arcRoleUri": "http://www.xbrlsite.com/seattlemethod/conceptual-model/cm-roles/roles/fac-calculations/CF3",
+      "arcWeight": 1.0,
+      "arcOrder": 1.0
+    },
+    {
+      "@id": "_:fac-calc-cf3-arc-2",
+      "arcFrom": {
+        "@id": "fac:NetCashFlowDiscontinued"
+      },
+      "arcTo": {
+        "@id": "fac:NetCashFlowFromInvestingActivitiesDiscontinued"
+      },
+      "arcAssociationType": "calculation",
+      "arcRoleUri": "http://www.xbrlsite.com/seattlemethod/conceptual-model/cm-roles/roles/fac-calculations/CF3",
+      "arcWeight": 1.0,
+      "arcOrder": 2.0
+    },
+    {
+      "@id": "_:fac-calc-cf3-arc-3",
+      "arcFrom": {
+        "@id": "fac:NetCashFlowDiscontinued"
+      },
+      "arcTo": {
+        "@id": "fac:NetCashFlowFromFinancingActivitiesDiscontinued"
+      },
+      "arcAssociationType": "calculation",
+      "arcRoleUri": "http://www.xbrlsite.com/seattlemethod/conceptual-model/cm-roles/roles/fac-calculations/CF3",
+      "arcWeight": 1.0,
+      "arcOrder": 3.0
+    },
+    {
+      "@id": "_:fac-calc-cf4-arc-1",
+      "arcFrom": {
+        "@id": "fac:NetCashFlowFromOperatingActivities"
+      },
+      "arcTo": {
+        "@id": "fac:NetCashFlowFromOperatingActivitiesContinuing"
+      },
+      "arcAssociationType": "calculation",
+      "arcRoleUri": "http://www.xbrlsite.com/seattlemethod/conceptual-model/cm-roles/roles/fac-calculations/CF4",
+      "arcWeight": 1.0,
+      "arcOrder": 1.0
+    },
+    {
+      "@id": "_:fac-calc-cf4-arc-2",
+      "arcFrom": {
+        "@id": "fac:NetCashFlowFromOperatingActivities"
+      },
+      "arcTo": {
+        "@id": "fac:NetCashFlowFromOperatingActivitiesDiscontinued"
+      },
+      "arcAssociationType": "calculation",
+      "arcRoleUri": "http://www.xbrlsite.com/seattlemethod/conceptual-model/cm-roles/roles/fac-calculations/CF4",
+      "arcWeight": 1.0,
+      "arcOrder": 2.0
+    },
+    {
+      "@id": "_:fac-calc-cf5-arc-1",
+      "arcFrom": {
+        "@id": "fac:NetCashFlowFromInvestingActivities"
+      },
+      "arcTo": {
+        "@id": "fac:NetCashFlowFromInvestingActivitiesContinuing"
+      },
+      "arcAssociationType": "calculation",
+      "arcRoleUri": "http://www.xbrlsite.com/seattlemethod/conceptual-model/cm-roles/roles/fac-calculations/CF5",
+      "arcWeight": 1.0,
+      "arcOrder": 1.0
+    },
+    {
+      "@id": "_:fac-calc-cf5-arc-2",
+      "arcFrom": {
+        "@id": "fac:NetCashFlowFromInvestingActivities"
+      },
+      "arcTo": {
+        "@id": "fac:NetCashFlowFromInvestingActivitiesDiscontinued"
+      },
+      "arcAssociationType": "calculation",
+      "arcRoleUri": "http://www.xbrlsite.com/seattlemethod/conceptual-model/cm-roles/roles/fac-calculations/CF5",
+      "arcWeight": 1.0,
+      "arcOrder": 2.0
+    },
+    {
+      "@id": "_:fac-calc-cf6-arc-1",
+      "arcFrom": {
+        "@id": "fac:NetCashFlowFromFinancingActivities"
+      },
+      "arcTo": {
+        "@id": "fac:NetCashFlowFromFinancingActivitiesContinuing"
+      },
+      "arcAssociationType": "calculation",
+      "arcRoleUri": "http://www.xbrlsite.com/seattlemethod/conceptual-model/cm-roles/roles/fac-calculations/CF6",
+      "arcWeight": 1.0,
+      "arcOrder": 1.0
+    },
+    {
+      "@id": "_:fac-calc-cf6-arc-2",
+      "arcFrom": {
+        "@id": "fac:NetCashFlowFromFinancingActivities"
+      },
+      "arcTo": {
+        "@id": "fac:NetCashFlowFromFinancingActivitiesDiscontinued"
+      },
+      "arcAssociationType": "calculation",
+      "arcRoleUri": "http://www.xbrlsite.com/seattlemethod/conceptual-model/cm-roles/roles/fac-calculations/CF6",
+      "arcWeight": 1.0,
+      "arcOrder": 2.0
     }
   ]
 }

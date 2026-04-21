@@ -295,9 +295,35 @@ def _extract_classification_assignments(
   return assignments
 
 
+_DEFAULT_ARCROLE_BY_ASSOC_TYPE = {
+  "calculation": "http://www.xbrl.org/2003/arcrole/summation-item",
+  "presentation": "http://www.xbrl.org/2003/arcrole/parent-child",
+  "general-special": "http://www.xbrl.org/2003/arcrole/general-special",
+  "equivalence": (
+    "http://xbrlsite.azurewebsites.net/2016/conceptual-model/arcrole/class-equivalentClass"
+  ),
+}
+
+
 def _extract_associations(graph: Graph) -> list[AssociationSpec]:
-  """Walk all arc predicates and emit AssociationSpec entries."""
+  """Walk all arc predicates + reified arcs, emit AssociationSpec entries.
+
+  Two encodings are supported:
+
+  1. Flat arc predicates (``rs:generalOf``, ``rs:summationOf``, ``rs:parent``,
+     ``owl:equivalentClass``) — a single triple per arc; metadata like
+     weight / order / structure role is not carried.
+
+  2. Reified arcs — a subject that has ``rs:arcFrom`` + ``rs:arcTo`` is
+     treated as one arc node carrying the full XBRL linkbase shape:
+     ``rs:arcFrom`` / ``rs:arcTo`` / ``rs:arcAssociationType`` /
+     ``rs:arcRoleUri`` (structure binding) / ``rs:arcWeight`` (calc) /
+     ``rs:arcOrder`` (presentation). Mirrors ``link:calculationArc`` and
+     ``link:presentationArc`` in XBRL linkbases.
+  """
   associations: list[AssociationSpec] = []
+
+  # 1. Flat arc predicates
   for pred_iri, (assoc_type, arcrole) in ARC_PREDICATE_TO_ASSOC_TYPE.items():
     predicate = URIRef(pred_iri)
     for s, o in graph.subject_objects(predicate):
@@ -315,6 +341,58 @@ def _extract_associations(graph: Graph) -> list[AssociationSpec]:
           arcrole=arcrole,
         )
       )
+
+  # 2. Reified arcs (rs:arcFrom/arcTo + metadata)
+  arc_from_pred = URIRef(f"{RS_NS}arcFrom")
+  arc_to_pred = URIRef(f"{RS_NS}arcTo")
+  arc_type_pred = URIRef(f"{RS_NS}arcAssociationType")
+  arc_role_pred = URIRef(f"{RS_NS}arcRoleUri")
+  arc_arcrole_pred = URIRef(f"{RS_NS}arcArcrole")
+  arc_weight_pred = URIRef(f"{RS_NS}arcWeight")
+  arc_order_pred = URIRef(f"{RS_NS}arcOrder")
+
+  arc_subjects = {s for s, _ in graph.subject_objects(arc_from_pred)}
+  for subject in arc_subjects:
+    from_objs = list(graph.objects(subject, arc_from_pred))
+    to_objs = list(graph.objects(subject, arc_to_pred))
+    if not from_objs or not to_objs:
+      continue
+    from_qname = _iri_to_qname(str(from_objs[0]), CANONICAL_CONTEXT)
+    to_qname = _iri_to_qname(str(to_objs[0]), CANONICAL_CONTEXT)
+    if not from_qname or not to_qname:
+      continue
+
+    assoc_type_objs = list(graph.objects(subject, arc_type_pred))
+    assoc_type = str(assoc_type_objs[0]) if assoc_type_objs else "presentation"
+
+    arcrole_objs = list(graph.objects(subject, arc_arcrole_pred))
+    arcrole = (
+      str(arcrole_objs[0])
+      if arcrole_objs
+      else _DEFAULT_ARCROLE_BY_ASSOC_TYPE.get(assoc_type, "")
+    )
+
+    role_objs = list(graph.objects(subject, arc_role_pred))
+    role = str(role_objs[0]) if role_objs else None
+
+    weight_objs = list(graph.objects(subject, arc_weight_pred))
+    weight = float(weight_objs[0]) if weight_objs else None
+
+    order_objs = list(graph.objects(subject, arc_order_pred))
+    order = float(order_objs[0]) if order_objs else None
+
+    associations.append(
+      AssociationSpec(
+        from_qname=from_qname,
+        to_qname=to_qname,
+        association_type=assoc_type,
+        arcrole=arcrole,
+        role=role,
+        weight=weight,
+        order=order,
+      )
+    )
+
   return associations
 
 

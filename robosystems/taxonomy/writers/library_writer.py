@@ -367,6 +367,11 @@ def _write_association(
   )
 
 
+def _default_role_uri(package: TaxonomyPackage) -> str:
+  """Deterministic role URI for the package's catch-all default structure."""
+  return f"{package.namespace_uri}default"
+
+
 def _get_or_create_default_structure(
   conn: Connection, taxonomy_id: str, package: TaxonomyPackage
 ) -> str:
@@ -376,7 +381,7 @@ def _get_or_create_default_structure(
   without a role we bucket them under a package-level default
   structure so the `structure_id` FK is always populated.
   """
-  default_role = f"{package.namespace_uri}default"
+  default_role = _default_role_uri(package)
   struct_id = _structure_id(default_role)
   conn.execute(
     text(
@@ -401,17 +406,40 @@ def _get_or_create_default_structure(
   return struct_id
 
 
-def write_taxonomy_package(
+def _resolve_qname_db(conn: Connection, qname: str) -> str | None:
+  row = conn.execute(
+    text("SELECT id FROM public.elements WHERE qname = :qname LIMIT 1"),
+    {"qname": qname},
+  ).fetchone()
+  return row[0] if row else None
+
+
+def _resolve_classification_db(
+  conn: Connection, category: str, identifier: str
+) -> str | None:
+  row = conn.execute(
+    text(
+      """
+      SELECT id FROM public.classifications
+      WHERE category = :category AND identifier = :identifier
+      LIMIT 1
+      """
+    ),
+    {"category": category, "identifier": identifier},
+  ).fetchone()
+  return row[0] if row else None
+
+
+def write_taxonomy_elements(
   conn: Connection, package: TaxonomyPackage
 ) -> dict[str, int]:
-  """Persist a TaxonomyPackage to the public schema library.
+  """Phase 1 writer: taxonomy row, elements, labels, references, structures,
+  and classification vocabulary.
 
-  Args:
-      conn: SQLAlchemy Connection bound to extensions DB (public schema).
-      package: Loaded TaxonomyPackage.
-
-  Returns:
-      Dict with counts per row type (for logging / verification).
+  Must be called for every package before ``write_taxonomy_arcs`` runs for
+  any of them — phase 2 resolves cross-package qname/classification
+  references via DB lookups, which requires the full element + vocabulary
+  universe to already be persisted.
   """
   counts = {
     "taxonomies": 0,
@@ -419,77 +447,70 @@ def write_taxonomy_package(
     "labels": 0,
     "references": 0,
     "structures": 0,
-    "associations": 0,
     "classifications": 0,
-    "classification_assignments": 0,
   }
 
-  # 1. Taxonomy row
   taxonomy_id = _write_taxonomy_row(conn, package)
   counts["taxonomies"] = 1
 
-  # 2. Elements (with their labels + references)
-  qname_to_element_id: dict[str, str] = {}
   skipped_sources: dict[str, int] = {}
   for element in package.elements:
     if element.source not in _ALLOWED_SOURCES:
-      # Infrastructure concept from a namespace we don't track — skip.
-      # Tracked per-source for diagnostics only.
       skipped_sources[element.source] = skipped_sources.get(element.source, 0) + 1
       continue
-    elem_id = _write_element(conn, element, taxonomy_id)
-    qname_to_element_id[element.qname] = elem_id
+    _write_element(conn, element, taxonomy_id)
     counts["elements"] += 1
     counts["labels"] += len(element.labels)
     counts["references"] += len(element.references)
   if skipped_sources:
     logger.info(f"Skipped elements by source (non-reporting): {skipped_sources}")
 
-  # 3. Structures (extended link roles)
-  role_to_structure_id: dict[str, str] = {}
   for structure in package.structures:
-    struct_id = _write_structure(conn, structure, taxonomy_id)
-    role_to_structure_id[structure.role_uri] = struct_id
+    _write_structure(conn, structure, taxonomy_id)
     counts["structures"] += 1
 
-  # Default structure for arcs without a role
-  default_struct_id = _get_or_create_default_structure(conn, taxonomy_id, package)
+  # Reserve the default structure row up-front — arcs without a role in
+  # phase 2 look it up via _default_structure_id(package) deterministically.
+  _get_or_create_default_structure(conn, taxonomy_id, package)
 
-  # 4. Associations — resolve qnames within this package first, then fall
-  # back to a DB lookup so cross-package arcs work when the referenced
-  # package has already been loaded by an earlier migration step.
-  def _resolve_qname(qname: str) -> str | None:
-    local = qname_to_element_id.get(qname)
-    if local is not None:
-      return local
-    row = conn.execute(
-      text("SELECT id FROM public.elements WHERE qname = :qname LIMIT 1"),
-      {"qname": qname},
-    ).fetchone()
-    return row[0] if row else None
+  for cls in package.classifications:
+    _write_classification(conn, cls)
+    counts["classifications"] += 1
+
+  return counts
+
+
+def write_taxonomy_arcs(conn: Connection, package: TaxonomyPackage) -> dict[str, int]:
+  """Phase 2 writer: associations + classification assignments.
+
+  Assumes ``write_taxonomy_elements`` has already run for *every* package,
+  so any qname or classification referenced by this package's arcs is
+  resolvable via a DB lookup regardless of which seed defines it.
+  """
+  counts = {
+    "associations": 0,
+    "associations_skipped": 0,
+    "classification_assignments": 0,
+    "classification_assignments_skipped": 0,
+  }
+
+  # Structure id resolution — structures were written in phase 1 with
+  # deterministic ids keyed on role_uri, so we can reconstruct the lookup
+  # without carrying state between phases.
+  default_struct_id = _structure_id(_default_role_uri(package))
 
   unresolved: list[tuple[str, str, str]] = []
   for assoc in package.associations:
-    from_id = _resolve_qname(assoc.from_qname)
-    to_id = _resolve_qname(assoc.to_qname)
+    from_id = _resolve_qname_db(conn, assoc.from_qname)
+    to_id = _resolve_qname_db(conn, assoc.to_qname)
     if from_id is None or to_id is None:
-      # Association target not loaded in any package yet — skip; will
-      # be re-attemptable when the dependent package loads.
       unresolved.append((assoc.from_qname, assoc.to_qname, assoc.association_type))
       continue
-
-    structure_id = (
-      role_to_structure_id.get(assoc.role, default_struct_id)
-      if assoc.role
-      else default_struct_id
-    )
+    structure_id = _structure_id(assoc.role) if assoc.role else default_struct_id
     _write_association(conn, assoc, structure_id, from_id, to_id)
     counts["associations"] += 1
 
-  # For cross-taxonomy mapping seeds (fac-to-rs-gaap) the
-  # association arcs ARE the primary data. Dropping them silently would
-  # mean silent mapping holes — surface a count + representative sample
-  # so seed-curation drift is observable.
+  counts["associations_skipped"] = len(unresolved)
   if unresolved:
     sample = unresolved[:5]
     logger.warning(
@@ -500,41 +521,16 @@ def write_taxonomy_package(
       "" if len(unresolved) <= 5 else f" (+{len(unresolved) - 5} more)",
     )
 
-  # 5. Classification vocabulary rows (from classification-vocabulary seeds
-  #    like us-gaap-metamodel/v1)
-  cls_key_to_id: dict[tuple[str, str, str], str] = {}
-  for cls in package.classifications:
-    cls_id = _write_classification(conn, cls)
-    cls_key_to_id[(cls.category, cls.identifier, cls.source)] = cls_id
-    counts["classifications"] += 1
-
-  # 6. Classification assignments (from classification-assignment seeds
-  #    like rs-gaap-to-metamodel/v1)
   skipped_assignments: list[ClassificationAssignmentSpec] = []
   for asn in package.classification_assignments:
-    elem_id = _resolve_qname(asn.element_qname)
+    elem_id = _resolve_qname_db(conn, asn.element_qname)
     if elem_id is None:
       skipped_assignments.append(asn)
       continue
-    # Resolve classification id; fall back to DB lookup for cross-package
-    # references (assignments seed loaded after vocabulary seed).
-    key = (asn.category, asn.identifier, "us-gaap-metamodel")
-    cls_id = cls_key_to_id.get(key)
+    cls_id = _resolve_classification_db(conn, asn.category, asn.identifier)
     if cls_id is None:
-      row = conn.execute(
-        text(
-          """
-          SELECT id FROM public.classifications
-          WHERE category = :category AND identifier = :identifier
-          LIMIT 1
-          """
-        ),
-        {"category": asn.category, "identifier": asn.identifier},
-      ).fetchone()
-      if row is None:
-        skipped_assignments.append(asn)
-        continue
-      cls_id = row[0]
+      skipped_assignments.append(asn)
+      continue
     _write_classification_assignment(
       conn,
       element_id=elem_id,
@@ -544,6 +540,7 @@ def write_taxonomy_package(
     )
     counts["classification_assignments"] += 1
 
+  counts["classification_assignments_skipped"] = len(skipped_assignments)
   if skipped_assignments:
     sample = skipped_assignments[:5]
     logger.warning(
@@ -556,5 +553,21 @@ def write_taxonomy_package(
       else f" (+{len(skipped_assignments) - 5} more)",
     )
 
+  return counts
+
+
+def write_taxonomy_package(
+  conn: Connection, package: TaxonomyPackage
+) -> dict[str, int]:
+  """Single-package write — phase 1 + phase 2 in one call.
+
+  Safe only when every qname/classification this package references is
+  already in the DB (or defined in this package itself). For multi-seed
+  loads where arcs span packages, call ``write_taxonomy_elements`` for
+  every package first, then ``write_taxonomy_arcs`` for every package.
+  """
+  elem_counts = write_taxonomy_elements(conn, package)
+  arc_counts = write_taxonomy_arcs(conn, package)
+  counts = {**elem_counts, **arc_counts}
   logger.info(f"Wrote {package.name}: {counts}")
   return counts

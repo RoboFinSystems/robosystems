@@ -551,25 +551,43 @@ def upgrade() -> None:
   )
 
   # ──────────────────────────────────────────────────────────────────────
-  # 7. Load JSON-LD seeds.
+  # 7. Load JSON-LD seeds — two-pass to let arcs cross package boundaries.
   # ──────────────────────────────────────────────────────────────────────
-  # Deferred import so Alembic collection doesn't pull in taxonomy code.
+  # Phase 1 writes every package's elements + classification vocabulary;
+  # phase 2 writes every package's associations + classification
+  # assignments. Splitting the phases means an arc in one seed can
+  # reference an element defined in ANY other seed regardless of the
+  # SEED_FILES order — without the split, arcs targeting elements that
+  # only a later seed defines are silently dropped.
   from robosystems.taxonomy.loaders import load_taxonomy_package
-  from robosystems.taxonomy.writers import write_taxonomy_package
+  from robosystems.taxonomy.writers import (
+    write_taxonomy_arcs,
+    write_taxonomy_elements,
+  )
 
+  loaded_packages = []
   for seed_path in SEED_FILES:
     if not seed_path.exists():
       print(f"  [WARN] Seed file missing, skipping: {seed_path}")
       continue
     print(f"  Loading seed: {seed_path.relative_to(SEEDS_DIR)}")
     package = load_taxonomy_package(seed_path)
-    counts = write_taxonomy_package(conn, package)
+    loaded_packages.append(package)
+    counts = write_taxonomy_elements(conn, package)
     print(
-      f"    → elements={counts['elements']} labels={counts['labels']} "
+      f"    [phase 1] elements={counts['elements']} labels={counts['labels']} "
       f"references={counts['references']} structures={counts['structures']} "
+      f"classifications={counts['classifications']}"
+    )
+
+  for package in loaded_packages:
+    counts = write_taxonomy_arcs(conn, package)
+    print(
+      f"  [phase 2] {package.name}: "
       f"associations={counts['associations']} "
-      f"classifications={counts['classifications']} "
-      f"classification_assignments={counts['classification_assignments']}"
+      f"(skipped={counts['associations_skipped']}) "
+      f"classification_assignments={counts['classification_assignments']} "
+      f"(skipped={counts['classification_assignments_skipped']})"
     )
 
   # ──────────────────────────────────────────────────────────────────────
