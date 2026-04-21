@@ -115,10 +115,12 @@ class TestBuildEnvelope:
     structure.structure_type = "balance_sheet"
     structure.name = "Balance Sheet"
     structure.description = "Assets + Liabilities + Equity"
+    structure.taxonomy_id = "tax_usgaap"
     session.get.return_value = structure
-    # No associations → no elements → element_ids short-circuits the
-    # element + latest-report queries. Only associations runs.
+    # Query order: taxonomy name, associations. Element/report queries
+    # skip when element_ids is empty.
     session.execute.side_effect = [
+      _exec_result(scalar="US GAAP"),  # taxonomy name
       _exec_result(scalars_all=[]),  # associations
     ]
 
@@ -133,6 +135,8 @@ class TestBuildEnvelope:
     assert envelope.name == "Balance Sheet"
     assert envelope.display_name == "Balance Sheet"
     assert envelope.category == "Reporting"
+    assert envelope.taxonomy_id == "tax_usgaap"
+    assert envelope.taxonomy_name == "US GAAP"
     assert envelope.information_model.concept_arrangement == "roll_up"
     assert envelope.information_model.member_arrangement == "aggregation"
     assert envelope.artifact.topic == "Assets + Liabilities + Equity"
@@ -153,6 +157,7 @@ class TestBuildEnvelope:
     structure.structure_type = "income_statement"
     structure.name = "Income Statement"
     structure.description = None
+    structure.taxonomy_id = "tax_usgaap"
     session.get.return_value = structure
 
     association = MagicMock()
@@ -187,6 +192,7 @@ class TestBuildEnvelope:
     element_sales.period_type = "duration"
 
     session.execute.side_effect = [
+      _exec_result(scalar="US GAAP"),  # taxonomy name
       _exec_result(scalars_all=[association]),  # associations
       _exec_result(scalars_all=[element_revenue, element_sales]),  # elements
       _exec_result(scalar=None),  # no reports → facts=[]
@@ -212,6 +218,7 @@ class TestBuildEnvelope:
     structure.structure_type = "balance_sheet"
     structure.name = "Balance Sheet"
     structure.description = None
+    structure.taxonomy_id = "tax_usgaap"
     session.get.return_value = structure
 
     assoc = MagicMock()
@@ -246,6 +253,7 @@ class TestBuildEnvelope:
     fact.fact_set_id = None
 
     session.execute.side_effect = [
+      _exec_result(scalar="US GAAP"),  # taxonomy name
       _exec_result(scalars_all=[assoc]),  # associations
       _exec_result(scalars_all=[element]),  # elements
       _exec_result(scalar="rep_latest"),  # latest_report_id
@@ -275,9 +283,12 @@ class TestBuildEnvelope:
     structure.structure_type = block_type
     structure.name = statement_handlers.STATEMENT_DISPLAY[block_type][0]
     structure.description = None
+    structure.taxonomy_id = "tax_usgaap"
     session.get.return_value = structure
-    # No associations → no elements → no report lookup.
+    # Query order: taxonomy name, associations. Elements/report queries
+    # skip when there are no associations.
     session.execute.side_effect = [
+      _exec_result(scalar="US GAAP"),
       _exec_result(scalars_all=[]),
     ]
 

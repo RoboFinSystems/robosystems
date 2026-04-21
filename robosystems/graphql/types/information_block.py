@@ -116,6 +116,9 @@ class InformationBlock:
   display_name: str
   category: str
 
+  taxonomy_id: str | None
+  taxonomy_name: str | None
+
   information_model: InformationModel
   artifact: Artifact
 
@@ -138,6 +141,8 @@ class InformationBlock:
       name=envelope.name,
       display_name=envelope.display_name,
       category=envelope.category,
+      taxonomy_id=envelope.taxonomy_id,
+      taxonomy_name=envelope.taxonomy_name,
       information_model=InformationModel.from_pydantic(envelope.information_model),
       artifact=Artifact.from_pydantic(envelope.artifact),
       elements=[InformationBlockElement.from_pydantic(e) for e in envelope.elements],

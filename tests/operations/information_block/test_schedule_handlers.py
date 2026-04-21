@@ -8,6 +8,7 @@ with a mocked SQLAlchemy session.
 from __future__ import annotations
 
 from datetime import date
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 from robosystems.models.api.extensions.schedules import (
@@ -20,6 +21,17 @@ from robosystems.models.api.extensions.schedules import (
 from robosystems.operations.information_block import schedule as schedule_handlers
 
 MODULE = "robosystems.operations.information_block.schedule"
+
+
+def _exec_result(
+  *, scalars_all: list[Any] | None = None, scalar: Any = None
+) -> MagicMock:
+  """Shape a MagicMock like a SQLAlchemy Result."""
+  result = MagicMock()
+  if scalars_all is not None:
+    result.scalars.return_value.all.return_value = scalars_all
+  result.scalar.return_value = scalar
+  return result
 
 
 def _body() -> CreateScheduleRequest:
@@ -112,6 +124,7 @@ class TestBuildEnvelope:
     structure.structure_type = "schedule"
     structure.name = "Equipment Depreciation"
     structure.description = "Depreciation schedule — equipment"
+    structure.taxonomy_id = "tax_01"
     structure.metadata_ = {
       "entry_template": {
         "debit_element_id": "elem_dep",
@@ -129,9 +142,14 @@ class TestBuildEnvelope:
       },
     }
     session.get.return_value = structure
-    # No associations / elements / facts for this shape test —
-    # execute().scalars().all() returns empty lists.
-    session.execute.return_value.scalars.return_value.all.return_value = []
+    # Query order: entry count, taxonomy name, associations, facts.
+    # No elements query when element_ids set is empty.
+    session.execute.side_effect = [
+      _exec_result(scalar=5),  # periods_with_entries count
+      _exec_result(scalar="US GAAP"),  # taxonomy name
+      _exec_result(scalars_all=[]),  # associations
+      _exec_result(scalars_all=[]),  # facts
+    ]
 
     envelope = schedule_handlers.build_envelope(session, "struct_abc")
     assert envelope is not None
@@ -152,6 +170,10 @@ class TestBuildEnvelope:
     assert envelope.dimensions == []
     assert envelope.fact_set is None
     assert envelope.verification_results == []
+    # Runtime + lineage fields populated from the new queries.
+    assert envelope.taxonomy_id == "tax_01"
+    assert envelope.taxonomy_name == "US GAAP"
+    assert mechanics.periods_with_entries == 5
 
   def test_empty_metadata_defaults_to_empty_mechanics(self) -> None:
     session = MagicMock()
@@ -160,11 +182,18 @@ class TestBuildEnvelope:
     structure.structure_type = "schedule"
     structure.name = "Empty"
     structure.description = None
+    structure.taxonomy_id = "tax_01"
     structure.metadata_ = None
     session.get.return_value = structure
-    session.execute.return_value.scalars.return_value.all.return_value = []
+    session.execute.side_effect = [
+      _exec_result(scalar=0),  # periods_with_entries
+      _exec_result(scalar="US GAAP"),  # taxonomy name
+      _exec_result(scalars_all=[]),  # associations
+      _exec_result(scalars_all=[]),  # facts
+    ]
 
     envelope = schedule_handlers.build_envelope(session, "struct_empty")
     assert envelope is not None
     assert envelope.artifact.mechanics.entry_template == {}
     assert envelope.artifact.mechanics.schedule_metadata == {}
+    assert envelope.artifact.mechanics.periods_with_entries == 0

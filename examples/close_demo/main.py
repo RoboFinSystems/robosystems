@@ -551,10 +551,10 @@ def create_schedules(graph_id: str, element_lookup: dict[str, str]) -> int:
   if cascade_tax:
     taxonomy_id = cascade_tax["id"]
     # Clean up prior-run schedules for idempotency
-    existing_schedules = client.list_schedules(graph_id)
-    for sched in existing_schedules:
-      if sched.get("taxonomy_name") == "Cascade Schedules":
-        client.delete_schedule(graph_id, sched["structure_id"])
+    existing_blocks = client.list_information_blocks(graph_id, block_type="schedule")
+    for block in existing_blocks:
+      if block.get("taxonomy_name") == "Cascade Schedules":
+        client.delete_schedule(graph_id, block["id"])
   else:
     result = client.create_taxonomy(
       graph_id,

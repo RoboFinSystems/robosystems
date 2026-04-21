@@ -252,47 +252,6 @@ class TestCreateSchedule:
         assert round(obj.value, 2) == obj.value, f"Unrounded value: {obj.value}"
 
 
-class TestGetScheduleFacts:
-  def test_raises_for_nonexistent_schedule(self):
-    session = _mock_session()
-    session.get.return_value = None  # Structure not found
-    svc = ScheduleService()
-
-    with pytest.raises(ValueError, match="not found"):
-      svc.get_schedule_facts(session, "struct_nonexistent")
-
-  def test_raises_for_wrong_type(self):
-    session = _mock_session()
-    mock_struct = MagicMock()
-    mock_struct.structure_type = "income_statement"
-    session.get.return_value = mock_struct
-    svc = ScheduleService()
-
-    with pytest.raises(ValueError, match="not found"):
-      svc.get_schedule_facts(session, "struct_wrong_type")
-
-  def test_returns_facts_for_valid_schedule(self):
-    session = _mock_session()
-    mock_struct = MagicMock()
-    mock_struct.structure_type = "schedule"
-    session.get.return_value = mock_struct
-
-    mock_row = MagicMock()
-    mock_row.element_id = "elem_depr"
-    mock_row.element_name = "Depreciation Expense"
-    mock_row.value = 416.67
-    mock_row.period_start = date(2026, 1, 1)
-    mock_row.period_end = date(2026, 1, 31)
-    session.execute.return_value = [mock_row]
-
-    svc = ScheduleService()
-    facts = svc.get_schedule_facts(session, "struct_valid")
-
-    assert len(facts) == 1
-    assert facts[0].element_name == "Depreciation Expense"
-    assert facts[0].value == 416.67
-
-
 class TestCreateClosingEntry:
   def _mock_schedule_structure(self):
     struct = MagicMock()

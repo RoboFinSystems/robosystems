@@ -17,7 +17,7 @@ the reference **derivative** mode.
 
 from __future__ import annotations
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from robosystems.models.api.extensions.schedules import (
@@ -31,8 +31,8 @@ from robosystems.models.api.information_block import (
   InformationModelResponse,
   ScheduleMechanics,
 )
-from robosystems.models.extensions import Association, Element, Structure
-from robosystems.models.extensions.roboledger import Fact
+from robosystems.models.extensions import Association, Element, Structure, Taxonomy
+from robosystems.models.extensions.roboledger import Entry, Fact
 from robosystems.operations.information_block.envelope import (
   association_to_connection,
   element_to_lite,
@@ -120,12 +120,30 @@ def build_envelope(
   if structure is None or structure.structure_type != SCHEDULE_BLOCK_TYPE:
     return None
 
+  # Runtime state: how many closing entries (draft OR posted) trace back
+  # to this schedule. Phase ζ makes this derivable from typed FactSets
+  # and this counter gets removed.
+  periods_with_entries = (
+    session.execute(
+      select(func.count(Entry.id)).where(
+        Entry.source_structure_id == structure_id,
+        Entry.status.in_(("draft", "posted")),
+      )
+    ).scalar()
+    or 0
+  )
+
   meta = structure.metadata_ or {}
   mechanics = ScheduleMechanics(
     kind="closing_entry_generator",
     entry_template=meta.get("entry_template", {}) or {},
     schedule_metadata=meta.get("schedule_metadata", {}) or {},
+    periods_with_entries=periods_with_entries,
   )
+
+  taxonomy_name = session.execute(
+    select(Taxonomy.name).where(Taxonomy.id == structure.taxonomy_id)
+  ).scalar()
 
   associations = (
     session.execute(select(Association).where(Association.structure_id == structure_id))
@@ -165,6 +183,8 @@ def build_envelope(
     name=structure.name,
     display_name=SCHEDULE_DISPLAY_NAME,
     category=SCHEDULE_CATEGORY,
+    taxonomy_id=structure.taxonomy_id,
+    taxonomy_name=taxonomy_name,
     information_model=InformationModelResponse(
       concept_arrangement="roll_forward",
       member_arrangement=None,

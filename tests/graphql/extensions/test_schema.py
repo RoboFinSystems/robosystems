@@ -50,8 +50,6 @@ class TestSchemaComposition:
       "mapping",
       "mappingCoverage",
       "mappedTrialBalance",
-      "schedules",
-      "scheduleFacts",
       "periodCloseStatus",
       "fiscalCalendar",
       "periodDrafts",
@@ -116,16 +114,6 @@ class TestSchemaComposition:
     end = sdl.find("}", start)
     block = sdl[start:end]
     assert "terms: JSON!" in block
-
-  def test_schedule_summary_uses_json_scalars(self) -> None:
-    sdl = str(schema)
-    start = sdl.find("type ScheduleSummary {")
-    assert start >= 0
-    end = sdl.find("}", start)
-    block = sdl[start:end]
-    # both dict-typed fields map to optional JSON
-    assert "entryTemplate: JSON" in block
-    assert "scheduleMetadata: JSON" in block
 
   def test_hello_field_kept_for_auth_probe(self) -> None:
     sdl = str(schema)

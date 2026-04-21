@@ -32,7 +32,7 @@ from robosystems.models.api.information_block import (
   InformationModelResponse,
   StatementMechanics,
 )
-from robosystems.models.extensions import Association, Element, Structure
+from robosystems.models.extensions import Association, Element, Structure, Taxonomy
 from robosystems.models.extensions.roboledger import Fact, Report
 from robosystems.operations.information_block.envelope import (
   association_to_connection,
@@ -132,6 +132,10 @@ def _build_statement_envelope(
   if structure is None or structure.structure_type != block_type:
     return None
 
+  taxonomy_name = session.execute(
+    select(Taxonomy.name).where(Taxonomy.id == structure.taxonomy_id)
+  ).scalar()
+
   associations = (
     session.execute(select(Association).where(Association.structure_id == structure_id))
     .scalars()
@@ -176,6 +180,8 @@ def _build_statement_envelope(
     name=structure.name,
     display_name=display_name,
     category=STATEMENT_CATEGORY,
+    taxonomy_id=structure.taxonomy_id,
+    taxonomy_name=taxonomy_name,
     information_model=InformationModelResponse(
       concept_arrangement="roll_up",
       member_arrangement="aggregation",

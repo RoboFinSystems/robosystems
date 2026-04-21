@@ -114,6 +114,14 @@ class ScheduleMechanics(BaseModel):
       "asset_element_id for net-book-value cross-reference."
     ),
   )
+  periods_with_entries: int = Field(
+    default=0,
+    description=(
+      "Number of in-scope periods that have at least one closing entry "
+      "posted. Runtime state — Phase ζ migrates this to the typed FactSet "
+      "envelope where it becomes derivable from fact_sets."
+    ),
+  )
 
 
 class StatementMechanics(BaseModel):
@@ -198,6 +206,19 @@ class InformationBlockEnvelope(BaseModel):
   )
   category: str = Field(
     ..., description="Registry-sourced sidebar grouping ('Close', 'Reporting', …)."
+  )
+
+  taxonomy_id: str | None = Field(
+    None,
+    description=(
+      "Source taxonomy the Structure was seeded from. Always present for "
+      "currently-registered block types (the Structure → Taxonomy FK is "
+      "non-null); declared optional to keep the shape forward-compatible "
+      "with future synthetic blocks that don't originate from a taxonomy."
+    ),
+  )
+  taxonomy_name: str | None = Field(
+    None, description="Display name of the source taxonomy."
   )
 
   information_model: InformationModelResponse
